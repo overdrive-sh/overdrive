@@ -1,0 +1,33 @@
+SUBSTRATE uname_r=7.0.0-38-generic machine=x86_64 virt=none date=2026-11-04T11:08:09Z
+CH cloud-hypervisor v53.0.0
+WCENV {"kernel_release":"7.0.0-38-generic","ch":"/usr/local/bin/cloud-hypervisor","real_init":"/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/target/x86_64-unknown-linux-musl/release/overdrive-init","swapped_init":"/tmp/wc-target/objs/init-wc","swapped_init_plus":"/tmp/wc-target/objs/init-wcp","swapped_init_copy":"/tmp/wc-target/objs/init-wcc"}
+variant            n      p50      p90     mean      min      max | delta vs d_base: p50(unpaired) paired p50 paired p90 paired max   (ms, init start -> READY sent)
+d_base            40   130.85   131.35   130.94   130.09   132.75 |          0.00       0.00       0.00       0.00
+d_cgonly          40   130.90   131.61   131.02   129.09   135.15 |          0.05       0.01       1.16       3.89
+d_child           40   151.19   152.07   151.34   149.96   153.32 |         20.34      20.40      21.54      23.02
+d_childnobtf      40   150.93   151.79   151.07   150.09   152.27 |         20.09      20.03      20.70      22.15
+d_copybase        40   128.14   128.89   128.17   127.13   129.61 |         -2.71      -2.79      -1.94      -1.10
+d_outside         40   151.13   151.90   151.20   150.43   152.66 |         20.28      20.27      21.11      21.95
+d_sameobj         40   128.97   129.56   129.04   128.08   131.40 |         -1.88      -1.88      -1.24       0.61
+d_sameobjidle     40   128.09   128.68   128.17   127.37   130.02 |         -2.75      -2.79      -1.84      -0.95
+
+median stage durations (ms) from the in-guest marks:
+  d_base           start->cfg_begin 2.16; cfg_begin->programs_done 120.83; programs_done->wc_done 0.00; wc_done->ready_sent 7.88
+  d_cgonly         start->cfg_begin 2.14; cfg_begin->programs_done 120.86; programs_done->wc_cgroup_made 0.07; programs_done->wc_done 0.07; wc_done->ready_sent 7.84
+  d_child          start->cfg_begin 2.15; cfg_begin->programs_done 120.96; programs_done->wc_cgroup_made 0.07; wc_cgroup_made->wc_loaded 16.03; wc_loaded->wc_attached 0.56; wc_attached->wc_done 3.64; programs_done->wc_done 20.32; wc_done->ready_sent 7.79
+  d_childnobtf     start->cfg_begin 2.16; cfg_begin->programs_done 120.89; programs_done->wc_cgroup_made 0.07; wc_cgroup_made->wc_loaded 19.27; wc_loaded->wc_attached 0.58; wc_attached->wc_done 0.19; programs_done->wc_done 20.12; wc_done->ready_sent 7.89
+  d_copybase       start->cfg_begin 2.16; cfg_begin->programs_done 118.00; programs_done->wc_done 0.00; wc_done->ready_sent 7.91
+  d_outside        start->cfg_begin 2.15; cfg_begin->programs_done 120.88; programs_done->wc_cgroup_made 0.07; wc_cgroup_made->wc_loaded 16.01; wc_loaded->wc_attached 0.55; wc_attached->wc_done 3.64; programs_done->wc_done 20.28; wc_done->ready_sent 7.83
+  d_sameobj        start->cfg_begin 2.16; cfg_begin->programs_done 119.00; programs_done->wc_cgroup_made -0.74; wc_attached->wc_done 0.21; programs_done->wc_done 0.00; wc_done->ready_sent 7.76
+  d_sameobjidle    start->cfg_begin 2.16; cfg_begin->programs_done 118.15; programs_done->wc_done 0.00; wc_done->ready_sent 7.77
+
+paired per-round differences (ms, same round index = adjacent in the interleaved schedule):
+  d_sameobj - d_copybase: p50 0.88  p90 1.66  max 2.49  mean 0.88   [THE DESIGN (listen programs in the guest object, attached to the workload cgroup, workload placed) vs the identical guest object without them]
+  d_sameobjidle - d_copybase: p50 -0.01  p90 0.84  max 2.21  mean -0.00   [carrying the listen programs and their 2 maps in the guest object, nothing attached]
+  d_copybase - d_base: p50 -2.79  p90 -1.94  max -1.10  mean -2.78   [spike-built guest-object copy vs production-built guest object (object-build difference, not a cost of the design)]
+  d_sameobj - d_sameobjidle: p50 0.91  p90 1.94  max 3.46  mean 0.88   [same object: programs attached to the workload cgroup vs merged object idle]
+  d_child - d_cgonly: p50 20.49  p90 21.37  max 22.59  mean 20.31   [separate Ebpf::load + attach vs cgroup+placement only]
+  d_cgonly - d_base: p50 0.01  p90 1.16  max 3.89  mean 0.08   [workload cgroup mkdir + clone3 CLONE_INTO_CGROUP placement vs baseline]
+  d_child - d_outside: p50 0.12  p90 1.06  max 2.20  mean 0.13   [placement via clone3 vs not placed (both load+attach)]
+  d_childnobtf - d_child: p50 -0.32  p90 0.72  max 1.37  mean -0.26   [loader.btf(None) vs default loader]
+WCFAIL lines: 0

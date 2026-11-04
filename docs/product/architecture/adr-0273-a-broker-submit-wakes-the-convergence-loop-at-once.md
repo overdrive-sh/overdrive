@@ -2,18 +2,14 @@
 
 ## Status
 
-**Accepted, 2026-11-03.** The user ruled "add it" and then accepted the shape choices S1 to
-S6 in the feature delta (§ D17) as proposed, on 2026-11-03: S1 `Notify::notify_one`; S2 signal
-after the lock is released; S3 one submit path including the loop's own resync; S4 `BrokerDrain`
-without `submit`, `broker_mutex` removed; S5 `submit_evaluation` and `BrokerDrain` `pub`,
-`submitted` `pub(crate)`; S6 no Quint model (S-48 seeded sim invariant plus mutation). Not implemented. GH #318, GH #334. The exact contract (D17), the
-gate statement, the model decision and the DISTILL obligation (S-48) live in the
+**Accepted, 2026-11-03.** Not implemented. GH #318, GH #334. The exact contract (D17), the
+interface signatures, the model decision and the DISTILL obligation (S-48) live in the
 [feature delta](../../feature/service-allocation-readiness-and-ending/feature-delta.md).
 Related: [ADR-0084](adr-0084-reconciler-cadence-and-interest-declarations.md) (the wakeup
 model this decision keeps: resync routes through the broker and re-arms at most once
 per period), ADR-0035 and ADR-0036 (the reconciler runtime),
 [ADR-0270](adr-0270-a-probe-less-service-is-stable-when-the-guest-reports-every-declared-listener-open.md)
-(its cold-start claim depends on this wake).
+(its cold-start claim leans on this wake).
 
 ## Context
 
@@ -50,18 +46,17 @@ selects on a wake beside its cadence timer; the cadence tick stays as the backst
 
 - **Primitive: a `tokio::sync::Notify` owned by the reconciler runtime, signalled with
   `notify_one`.** `notify_one` stores one permit when no task is waiting, and the next
-  `notified().await` consumes it (tokio `sync/notify.rs:623-629`; "only a single permit
-  is stored", `:44-46`, tokio 1.54.1, the version in the local registry; the workspace
-  declares `tokio = "1"`). A submit that lands between the loop's drain and its park is
-  therefore not lost, and any number of submits before the loop next parks coalesce into
-  one wake. `notify_waiters` stores no permit (`:710-712`) and loses exactly that
-  submit; it is not used.
+  `notified().await` consumes it (tokio 1.52.1, the version `Cargo.lock` pins:
+  `sync/notify.rs:627-632`; "only a **single** permit is stored", `:48-49`). A submit that
+  lands between the loop's drain and its park is therefore not lost, and any number of
+  submits before the loop next parks coalesce into one wake. `notify_waiters` stores no
+  permit (`:714`) and loses exactly that submit; it is not used.
 - **Signal after the lock.** The submitter takes the broker lock, inserts, releases the
   lock, then signals. The loop never holds the broker lock across an `.await` (existing
   rule), so the wake cannot be observed before the evaluation is pending. A `notified()`
   future dropped by the `select!` after `notify_one` handed it the notification passes it on
-  or leaves the permit (`sync/notify.rs:1361-1371`), so a biased `select!` that completes on
-  another arm does not swallow a wake.
+  or leaves the permit (`drop_notified`, `sync/notify.rs:1365-1375` @ tokio 1.52.1), so a
+  biased `select!` that completes on another arm does not swallow a wake.
 - **One drainer, unchanged admission.** The loop remains the only caller of
   `drain_pending`. Oldest-first order (the broker's FIFO over a `BTreeMap`), the
   one-evaluation-per-target rule (`active_targets`), the capacity cap
@@ -86,23 +81,17 @@ selects on a wake beside its cadence timer; the cadence tick stays as the backst
   the drain finds the target already admitted or blocked); it adds no new
   self-perpetuating loop, because the loop never submits in response to a wake.
 
-## Named surface (new public and runtime surface)
+## Surface
 
-- `ReconcilerRuntime::submit_evaluation(&self, eval: Evaluation, now: Instant,
-  eligibility: EvaluationEligibility)`: submits, releases the lock, signals the wake.
-  This is the **only** production submit path.
-- `ReconcilerRuntime::submitted(&self)`: a `pub(crate)` async method that completes when a
-  wake is stored or delivered and consumes it. Only the convergence loop calls it.
-- `ReconcilerRuntime::broker()` returns `BrokerDrain<'_>`, a new `pub` guard newtype over
-  the mutex guard that exposes the drain-side operations
-  (`drain_pending`, `next_eligible_at`, `counters`) and **no `submit`**; `broker_mutex()`
-  is removed. The two functions that took the broker mutex to submit
-  (`execute_reclaim_allocation`, the `EnqueueEvaluation` dispatch) take the runtime, and
-  `InterestRouterBroker::from_runtime` submits through `submit_evaluation`. A submit
-  that forgets to wake is thereby not expressible. `EvaluationBroker` in
-  `overdrive-core` is unchanged and stays free of `tokio`.
-  `InterestRouterBroker::from_shared_broker` (a standalone broker with no loop, used by
-  router tests) is unchanged and does not wake.
+The reconciler runtime gains one public submit method, the only production submit path (it
+submits, releases the lock, then signals the wake); a crate-private wait method only the
+convergence loop calls; and a public drain-side guard type that exposes the drain operations
+and no submit. The broker accessor returns that guard and the raw mutex accessor is removed,
+so a submit that forgets to wake is not expressible. The two functions that took the mutex to
+submit take the runtime, and the interest router's runtime-backed handle submits through the
+new method. `EvaluationBroker` in `overdrive-core` is unchanged and stays free of `tokio`;
+the standalone-broker router handle used by router tests is unchanged and does not wake.
+The exact signatures are in the feature delta's interface table.
 
 ## Alternatives considered
 
@@ -134,5 +123,5 @@ selects on a wake beside its cadence timer; the cadence tick stays as the backst
 - Negative: `.claude/rules/development.md` § "Reconciler I/O" describes the steady-state
   tick as the drain period; at landing that sentence needs the wake added (not edited
   here).
-- Not measured here: the latency benefit. V40 measures exec-to-`Stable` with and
-  without the wake (a benchmark, not a gate).
+- The latency benefit follows from the mechanism (no timer wait on an edge-triggered hop)
+  and is not measured here.

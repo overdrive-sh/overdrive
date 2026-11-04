@@ -1,0 +1,25 @@
+[package]
+name = "wc-bpf"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+aya-ebpf = "0.1.1"
+
+[features]
+# `plus` builds the listen programs INTO a byte-faithful copy of the guest object (listen-hooks copies,
+# reused by path), i.e. the "same object" variant. Without it the object holds only the listen programs.
+plus = []
+
+[[bin]]
+name = "wc-bpf"
+path = "src/main.rs"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+debug = "line-tables-only"
+
+[workspace]

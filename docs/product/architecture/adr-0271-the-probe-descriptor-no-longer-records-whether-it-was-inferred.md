@@ -2,13 +2,11 @@
 
 ## Status
 
-**User-approved in direction, 2026-11-03 ("add it. and proceed with recommendations"):
-option R (remove `inferred` entirely, with the versioned-envelope procedure for each
-carrier). The spikes of the decisions it depends on (V34 to V39) have run (V39 partial);
-the corrected D13 contract shape was ACCEPTED by the user on 2026-11-03. Not yet Accepted as a
-decision: "user-approved, pending the V41 boot-cost measurement and the independent
-re-review"** (a material B-minus-A delta returns D13 to DESIGN). Not implemented. GH #318, GH #334. Depends on
-[ADR-0270](adr-0270-a-probe-less-service-is-stable-when-the-guest-reports-every-declared-listener-open.md)
+User-approved (option R), 2026-11-03; unaffected by V42 (held 2026-11-04, PR-2 accepted in
+contract shape, [findings](../../feature/service-allocation-readiness-and-ending/spike/findings-workload-cgroup.md));
+not yet Accepted (remaining gates: model check, design review round 4). Not implemented. GH #318, GH #334.
+Contract and status: [feature delta](../../feature/service-allocation-readiness-and-ending/feature-delta.md) (D16).
+Depends on [ADR-0270](adr-0270-a-probe-less-service-is-stable-when-the-guest-reports-every-declared-listener-open.md)
 (which removes the inferred probe). Independently reversible: option K (keep the field,
 set it for the new descriptor) remains the recorded alternative (feature delta § D16).
 

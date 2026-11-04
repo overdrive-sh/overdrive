@@ -146,11 +146,11 @@ Correlation behaviour is unchanged on the same scenario run against both objects
 ### Multi-attach: the premise is corrected
 
 The source-reading note predicted that a second `Single` sockops attach replaces the first (`kernel/bpf/cgroup.c:630-634`). That holds for the legacy `BPF_PROG_ATTACH` path only.
-aya 0.13.1 on this kernel attaches through `bpf_link_create`, and the kernel adds `BPF_F_ALLOW_MULTI` to every link attach (`kernel/bpf/cgroup.c:1502-1505 @ v7.0`). Measured:
+aya 0.13.1 on this kernel attaches through `bpf_link_create`, and the kernel adds `BPF_F_ALLOW_MULTI` to every link attach (`kernel/bpf/cgroup.c:1506-1507 @ v7.0`, re-read 2026-11-04). Measured:
 
 ```
 M1 Single then Single
-PREDICT: raw BPF_PROG_ATTACH would replace (cgroup.c:630-634); but aya attaches via bpf_link_create which forces BPF_F_ALLOW_MULTI (cgroup.c:1505) => both coexist
+PREDICT: raw BPF_PROG_ATTACH would replace (cgroup.c:630-634); but aya attaches via bpf_link_create which forces BPF_F_ALLOW_MULTI (cgroup.c:1506-1507; the original run cited :1505, corrected 2026-11-04) => both coexist
   first attach result: Ok(())
   second attach result: Ok(())
 ID       AttachType      AttachFlags     Name

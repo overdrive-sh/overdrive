@@ -2,15 +2,17 @@
 
 > DESIGN wave, PROPOSE mode, authored by Morgan (nw-solution-architect), 2026-11-02.
 > Source of truth for this feature's exact interface contract. D1 to D12 and **D17** are
-> **Accepted** by the user (§ Approval record; D17 on 2026-11-03, shape choices S1 to S6
-> as proposed). B1 (ADR-0265), B2 (ADR-0266) and B3
-> (ADR-0258) are accepted as proposed, B5 is rejected, B4 was decided as the Kubernetes
-> rule and is D12 (ADR-0267; it amends the operative ADR-0096). **D13 to D16
-> (guest-reported listener readiness) are user-approved (2026-11-03) and the corrected D13
-> contract shape is ACCEPTED; they remain "user-approved, pending the V41 boot-cost
-> measurement and the independent re-review"** (spikes V34 to V38 held, V39 partial; V41 is
-> running; a material B-minus-A delta returns D13 to DESIGN, § Spike table). Nothing here
-> authorises DISTILL or DELIVER until the independent DESIGN re-review approves the revision
+> **Accepted** (§ Approval record). B1 (ADR-0265), B2 (ADR-0266) and B3 (ADR-0258) are
+> accepted, B5 is rejected, B4 is D12 (ADR-0267; it amends the operative ADR-0096).
+> **D13 to D16 (guest-reported listener readiness) are user-approved and the D13 contract
+> shape is accepted; V41 (boot cost) and V42 (workload cgroup) are held.** Four items inside
+> D13 and D14 are ruled (2026-11-04): **PR-1** the driver-to-probe-task seam (D13 item 10),
+> **PR-3** the `Fail` cadence (D14 item 3) and **PR-4** one declared-listener field (D14
+> item 2) are accepted; **PR-2** the scope of the listen hooks (D13 items 1 and 7) is
+> accepted in contract shape (direction approved 2026-11-04 pending V42; V42 held
+> 2026-11-04, `spike/findings-workload-cgroup.md`).
+> Nothing here authorises DISTILL or DELIVER until the `quint-modeler` run and the
+> independent DESIGN re-review (round 4) approve the revision
 > (`.claude/rules/design.md` § "Surface material design decisions").
 > The research that supports D7 to D10 is
 > `docs/research/orchestration/probe-failure-restart-authority-and-give-up-reporting-research.md`
@@ -69,9 +71,9 @@ User rulings of 2026-11-02, recorded verbatim in outcome:
 | P-3, P-4, P-5 | **Not in scope, by user ruling 2026-11-02.** The deploy stream staying silent between the first crash and the give-up is accepted. No per-attempt wire event (P-3), no attempt count on the early-exit reason (P-4), no classification of a pre-startup clean exit (P-5). | § Proposals not included |
 | F-1, F-2 | Filed by the user's ruling as GH #335 (F-1) and GH #336 (F-2). | § Findings |
 | D7 | **Approved as written, 2026-11-02** ("proceed with recommendations"), including the restated K1 for a Service that boots but never passes its startup probe (the `StartupProbeFailed` terminal arrives at give-up), the new public variant `StoppedBy::StartupProbe`, the changed value meaning of `StartupProbeFailed.attempts` (restart budget consumed, as for `LivenessProbeFailed`), and D5's changed user-visible sentence. | ADR-0259 (Accepted) |
-| D8 | **Approved, 2026-11-02** (P-6 included, mirror of the liveness retry): a startup stop that does not land is retried once per new written startup probe row while the allocation is live. One additive CBOR `View` field with `#[serde(default)]`. | ADR-0260 (Accepted) |
+| D8 | **Approved, 2026-11-02** (mirror of the liveness retry): a startup stop that does not land is retried once per new written startup probe row while the allocation is live. One additive CBOR `View` field with `#[serde(default)]`. | ADR-0260 (Accepted) |
 | D8 item 3 | **Confirmed, 2026-11-02 ("yes to all", ruling 1):** a startup `Pass` after a stop that did not land ends the retry, removes the allocation from `terminal_announced` when `Stable` is announced (so liveness, which skips members, acts on it; the backend veto no longer exists, ruling R2-1). | ADR-0260 |
-| D9 | **Approved, 2026-11-02** (P-7 included): liveness supervision begins at `Stable`, so liveness acts only once the startup probe has passed or no startup probe is declared. Owner: the probe runner, started from the existing `on_alloc_stable` hook. | ADR-0261 (Accepted) |
+| D9 | **Approved, 2026-11-02**: liveness supervision begins at `Stable`, so liveness acts only once the startup probe has passed or no startup probe is declared. Owner: the probe runner, started from the existing `on_alloc_stable` hook. | ADR-0261 (Accepted) |
 | D9 extension | **Confirmed, 2026-11-02 (ruling 2):** D7 item 5's stream projection returns `None` for `Stopped { by: StartupProbe }` and for `Stopped { by: LivenessProbe }`. | ADR-0259, ADR-0261 |
 | D10 | **Approved in full, 2026-11-02 (ruling 3), every shape choice in § D10** (server-side stream handler owns it; `max(streaming_cap, startup_deadline + 30 s)`, derived, no spec key or flag; clock at stream open, not extended; optional `last_attempt: LastAttemptWire { alloc_id, reason, terminal, detail }` on `ServiceSubmitEvent::Failed`; `ServiceFailureReason` untouched; CLI request timeout = deadline + 30 s; the timeout wording; K1 as restated). | ADR-0262 (deadline) and ADR-0264 (`last_attempt` detail, split out of ADR-0262 on review; content unchanged) |
 | F-4 | Included 2026-11-02: add the missing ADR-0087 golden fixture for `StoppedBy::LivenessProbe` beside D7's `StartupProbe` fixture. Test support in an existing format; a DISTILL obligation (S-25), not a design decision. | § Obligations |
@@ -85,21 +87,24 @@ User rulings of 2026-11-02, recorded verbatim in outcome:
 | B5 | **Rejected, 2026-11-03.** `PROGRESS_DEADLINE_MARGIN` stays the literal 30 s as written in D10; DL-6, E-4 and V30 stand. No derived margin. | § Rulings of 2026-11-03 |
 | R2-1 | **Approved, 2026-11-03.** The redundant ADR-0096 per-allocation backend veto and the veto-before-stop ordering are removed. | ADR-0267, ADR-0096 (supersession note), § Rulings |
 | R2-2 | **Approved, 2026-11-03 ("remove it if no reader remains").** No reader remains after B1, so the `stable_announced` view field is removed. | ADR-0265, § Rulings |
-| D13, D14, D15 | **User-approved in direction, 2026-11-03 ("add it. and proceed with recommendations"); spikes V34 to V38 held, V39 partial.** Gate on every declared listener, TCP and UDP; the opt-out `startup = []` is kept; no minimum-healthy window; ADR-0058 is superseded on acceptance. Status after the rulings below: **user-approved, pending the V41 boot-cost measurement and the independent re-review** (not yet Accepted). | ADR-0268, 0269, 0270, 0272 |
-| D16 | **Option R approved in direction, 2026-11-03** (remove `inferred` with the envelope procedure); same status as D13 to D15. | ADR-0271 |
-| D17 | **User-approved in direction, 2026-11-03 ("add it"); shape choices S1 to S6 ACCEPTED as proposed, 2026-11-03 (ruling 4 below): Accepted.** An event-driven broker wake; the cadence tick stays as the backstop. | ADR-0273 (Accepted) |
-| D13 corrected contract | **ACCEPTED in contract shape, 2026-11-03 (ruling 1).** Sockops `TCP_LISTEN_CB` arm merged into the existing sockops program; `post_bind4` and `post_bind6` `CgroupSock` programs, both returning 1, both filtering protocol 17; loopback-only exclusion; one ordered beacon writer; drain `LISTEN` before `EXIT`; the host reader ends the guest-report wait only on `EXIT` or EOF. D13 to D16 and ADR-0268 to ADR-0272 stay "user-approved, pending the V41 boot-cost measurement and the independent re-review": cold start is the platform goal, so the pre-`READY` listen-program cost is measured before acceptance. | ADR-0268, 0272 |
-| V41 | **Added 2026-11-03 (ruling 1) as a contract-shaping budget item**: the boot-cost spike (findings: `spike/findings-boot-cost.md`) measures the pre-`READY` cost of the listen programs (variant B) against the existing programs alone (variant A). A material B-minus-A delta returns D13 to DESIGN. | § Spike table |
-| P-11 dropped, dual-stack | **2026-11-03 (ruling 2).** Overdrive does not support IPv6 yet. The rule "an `AF_INET6` wildcard report satisfies an IPv4-declared listener" and the `V6ONLY` exposure are recorded against GH #308 (comment: https://github.com/overdrive-sh/overdrive/issues/308#issuecomment-6614793072). P-11 is dropped as a proposal; D13 item 8 cites #308. | D13 item 8 |
-| P-10 rejected | **2026-11-03 (ruling 3).** No level map. The ring is sized generously by the crafter (the spike: 4 MiB took a 20,000-socket flood with no drops; a workload opens a handful of listeners); the drop counter stays visible; a lost report remains a stated, bounded exposure (the service is stopped at the startup deadline, not hung). Only TCP listen transitions and explicit UDP binds produce events. | D13 item 9 |
-| D17 shape S1 to S6 | **ACCEPTED as proposed, 2026-11-03 (ruling 4).** S1 `Notify::notify_one`; S2 signal after the lock is released; S3 one submit path including the loop's own resync; S4 `BrokerDrain` without `submit`, `broker_mutex` removed; S5 `submit_evaluation` and `BrokerDrain` `pub`, `submitted` `pub(crate)`; S6 no Quint model (S-48 seeded sim invariant plus mutation). | § D17, ADR-0273 |
+| D13, D14, D15 | **User-approved in direction, 2026-11-03 ("add it. and proceed with recommendations").** Gate on every declared listener, TCP and UDP; the opt-out `startup = []` is kept; no minimum-healthy window; ADR-0058 is superseded on acceptance of ADR-0270. | ADR-0268, 0269, 0270, 0272 |
+| D16 | **Option R approved in direction, 2026-11-03** (remove `inferred` with the envelope procedure). | ADR-0271 |
+| D17 | **Accepted, 2026-11-03** ("add it"; shape choices S1 to S6 accepted as proposed): S1 `Notify::notify_one`; S2 signal after the lock is released; S3 one submit path including the loop's own resync; S4 `BrokerDrain` without `submit`, `broker_mutex` removed; S5 `submit_evaluation` and `BrokerDrain` `pub`, `submitted` `pub(crate)`; S6 no Quint model. | ADR-0273 |
+| D13 contract shape | **Accepted, 2026-11-03.** Sockops `TCP_LISTEN_CB` arm merged into the existing sockops program; `post_bind4` and `post_bind6` `CgroupSock` programs, both returning 1, both filtering protocol 17; loopback exclusion; one ordered beacon writer; drain `LISTEN` before `EXIT`; the host reader ends the guest-report wait only on `EXIT` or EOF. The merged-arm part is replaced by PR-2 (below): the TCP listen arm is a separate small sockops program in the same object. | ADR-0268, 0272 |
+| V41 | **Held** (boot-cost spike, `spike/findings-boot-cost.md`): +0.36 ms at p50 on the pre-`READY` path (D13 item 6). | § Spike table |
+| Dual-stack | **2026-11-03.** Overdrive does not support IPv6 yet. The rule "an `AF_INET6` wildcard report satisfies an IPv4-declared listener" and the `V6ONLY` exposure are recorded against GH #308 (comment: https://github.com/overdrive-sh/overdrive/issues/308#issuecomment-6614793072). | D13 item 8 |
+| Dropped report | **2026-11-03.** No level map. The ring is sized generously by the crafter; the drop counter stays visible; a lost report is a stated, bounded exposure (the service is stopped at the startup deadline, not hung). Only TCP listen transitions and explicit UDP binds produce events. | D13 item 9 |
+| PR-1 | **Accepted, 2026-11-04 ("proceed with recommendations").** The `GuestListenerReports` core read-only port (`reported` / `changed`), the `GuestListenerBoard` worker adapter (`open` / `record` / `close`), the extra mandatory parameters on `ProbeRunner::new` and `VmDriver::new`, and `SimGuestListenerReports`. The `Driver` trait, `Action` and the reconcilers are unchanged. | D13 item 10 |
+| PR-2 | **Direction approved 2026-11-04 pending V42; V42 held 2026-11-04 (kernel `7.0.0-38-generic`, `spike/findings-workload-cgroup.md`, PROMOTE), so PR-2 is Accepted in contract shape.** Init creates a workload cgroup and attaches the three listen programs there, so init's own transport sockets are invisible by construction. The TCP listen arm is a separate small sockops program in the same object; this is the current D13 contract and replaces the merged-arm part of the 2026-11-03 shape. Pinned by V42: the programs ride in the object init already loads (never a second `Ebpf::load`), the root programs stay link attachments, the workload is created directly in the cgroup (D13 item 1). | D13 items 1 and 7 |
+| PR-3 | **Accepted, 2026-11-04.** `Pass` is written on the event. The first `Fail` is written at the derived startup deadline with `attempt = max_attempts`; then one `Fail` per interval until the stop lands. No `Fail` is written before the deadline. `describe` loses the pre-deadline progress (accepted). | D14 item 3 |
+| PR-4 | **Accepted, 2026-11-04.** `AllocationSpec.service_ports` is replaced by `declared_listeners`; `AllocationSpec::tcp_service_ports()` is the accessor the TPROXY consumers read. | D14 item 2 |
+| `guest_report` model | **Accepted, 2026-11-04.** The `guest_report` Quint module gets host-half conformance (`quint-connect` driver on the host reader, board and probe task) and Tier-3 real-boot coverage for the guest half. There is no writer seam in `overdrive-init`. The gap: the guest-side writer ordering (one ordered writer, `LISTEN` drained before `EXIT`) is not replayed against the model; it is covered by the Tier-3 boot scenarios (V36, V38 shapes) and by the host reader's treatment of any line order. | M-6, § Formal protocol model |
 
 ## Wave: DESIGN / [REF] Decisions
 
-D1 to D12 and D17 are accepted (D11, D12 and D17 on 2026-11-03). D13 to D16 are user-approved,
-with the corrected D13 contract shape accepted, and pending the V41 boot-cost measurement and
-the independent re-review (§ Proposed decisions D13 to D16, § Spike table). B1 to B3 are accepted rulings recorded in the approval record and as
-ADR-0265, ADR-0266 and the amended ADR-0258.
+D1 to D12 and D17 are accepted. D13 to D16 are user-approved; PR-1, PR-3 and PR-4 inside
+them and PR-2 are accepted in contract shape (V42 held; § Decisions D13 to D16). B1 to B3 are accepted rulings recorded in the approval
+record and as ADR-0265, ADR-0266 and ADR-0258.
 
 ### D1 — The exit observer fires `on_alloc_terminal` for every `ExitEvent` it consumes
 
@@ -773,7 +778,7 @@ Alternatives: ADR-0262, ADR-0264.
 **Persisted and wire format impact.** No archived, CBOR or intent change. One
 additive stream-wire field and one new wire struct (OpenAPI regenerated).
 
-### D11 — ACCEPTED: the Service deploy stream first reports the verdict the workload's current attempt already carries, then waits
+### D11 — the Service deploy stream first reports the verdict the workload's current attempt already carries, then waits
 
 Decision record: [ADR-0263](../../product/architecture/adr-0263-a-service-deploy-stream-first-reports-the-verdict-the-workload-already-has.md).
 Independently reversible (removing the snapshot step restores the wait-only stream
@@ -859,7 +864,7 @@ accessor.
 
 Gate G-8: § Lifecycle Gate Ownership. Obligations S-39 to S-42: § Executable obligations.
 
-### D12 — ACCEPTED: a startup-probed allocation is a backend only after its startup has passed
+### D12 — a startup-probed allocation is a backend only after its startup has passed
 
 Decision record: [ADR-0267](../../product/architecture/adr-0267-a-startup-probed-allocation-is-a-backend-only-after-its-startup-has-passed.md).
 It amends the operative
@@ -1113,7 +1118,7 @@ row write; (3) the existing `release_supervision` at the abandonment boundary, u
 reference must not be live across (2) (`exit_observer.rs:177-197`). Module docs at
 `exit_observer.rs:1-44` state that the observer also owns the hook for natural exits.
 
-### D6 interface changes (ACCEPTED)
+### D6 interface changes
 
 | Surface | Change |
 |---|---|
@@ -1126,7 +1131,7 @@ reference must not be live across (2) (`exit_observer.rs:177-197`). Module docs 
 | `restart_budget_from_rows` (`handlers.rs:1399`) | Treats `ServiceFailed { EarlyExit }` as exhausted, `used = RESTART_BACKOFF_CEILING` |
 | Archived, serde, `ToSchema`, OpenAPI, CBOR `View`, wire | **None** (views, `AllocStatusRow`, `TransitionReason`, `TerminalCondition`, `ServiceFailureReason` unchanged) |
 
-### D7 interface changes (ACCEPTED)
+### D7 interface changes
 
 | Surface | Change |
 |---|---|
@@ -1142,14 +1147,14 @@ reference must not be live across (2) (`exit_observer.rs:177-197`). Module docs 
 | rkyv | No envelope version. Two new golden fixtures in `crates/overdrive-core/tests/schema_evolution/alloc_status_row.rs` (`StartupProbe`, `LivenessProbe` per F-4, S-25) |
 | CBOR `View`, `ServiceFailureReason` shape, `Action`, shim | **None** in D7 (D8 adds one `View` field) |
 
-### D8 interface changes (ACCEPTED)
+### D8 interface changes
 
 | Surface | Change |
 |---|---|
 | `ServiceLifecycleView.startup_last_acted_run: BTreeMap<(AllocationId, ProbeIdx), ProbeRunSeq>` (`service_lifecycle.rs`, beside `:338`) | **New field**, `#[serde(default)]` (D8 item 1); no envelope |
 | `ServiceLifecycleReconciler::reconcile`, startup stop emission and top-of-loop dedup (`:488-490`) | A startup stop is emitted once per new written startup row while the fact is `Running`; `terminal_announced` no longer skips a `Running` fact; `Pass` after a stop ends the retry; `Stable` removes the allocation from `terminal_announced` (D8 item 3). No new `Action` |
 
-### D9 interface changes (ACCEPTED)
+### D9 interface changes
 
 | Surface | Change |
 |---|---|
@@ -1160,7 +1165,7 @@ reference must not be live across (2) (`exit_observer.rs:177-197`). Module docs 
 | `collect_liveness_actions` `stable_this_tick` skip (`service_lifecycle.rs:980-983`) | Unreachable after D9; removed |
 | Archived, wire, `View`, OpenAPI | **None** |
 
-### D10 interface changes (ACCEPTED)
+### D10 interface changes
 
 | Surface | Change |
 |---|---|
@@ -1175,7 +1180,7 @@ reference must not be live across (2) (`exit_observer.rs:177-197`). Module docs 
 | `ServiceFailureReason` (archived), `TerminalCondition`, `AllocStatusRow`, CBOR `View`, TOML spec, `AppState::streaming_cap` | **None** |
 | `api/openapi.yaml` | `ServiceSubmitEvent::Failed` gains `last_attempt`; `LastAttemptWire` added (regenerated) |
 
-### D11 interface changes (ACCEPTED)
+### D11 interface changes
 
 | Surface | Change |
 |---|---|
@@ -1185,7 +1190,7 @@ reference must not be live across (2) (`exit_observer.rs:177-197`). Module docs 
 
 Conformance accessors for D7 to D11: § "Formal protocol model"; no API added.
 
-### Interface changes from the rulings of 2026-11-03 (ACCEPTED)
+### Interface changes of B1, B2, B3, D12 and D17
 
 | Ruling | Surface | Change |
 |---|---|---|
@@ -1238,7 +1243,10 @@ Comments naming the early-exit branch's owner, and those D8 to D10 make false (t
 | `ReconcilerRuntime::submit_evaluation`, `submitted`, `BrokerDrain` (D17, Accepted) | CREATE NEW (one `pub` method, one `pub(crate)` method, one `pub` guard type; `broker_mutex` removed, `broker()` narrowed) | bounded-change | Mutation set: the broker's pending map and one permit. Assert: a submit while the loop is parked is admitted without advancing `SimClock`; a burst yields one drain; with no submits the tick still drains (S-48) |
 | `WorkloadLifecycle` pre-startup-crash predicate (B3) | EXTEND (one more accepted reason) | pure-function (return-only) | Assert the S-15 grid gains `Failed` + `VmOutOfMemory` (S-45) |
 | `compute_backend_healthy` startup hold (D12) | EXTEND (replace the `terminal_announced` hold and the veto with the committed-`Stable` test) | pure-function (return-only) | Universe: the returned `bool`. Assert: the two-step predicate over (startup declared x `stable_committed` x readiness); an unrelated allocation in `terminal_announced` changes nothing (S-46) |
-| New components, ports, variants, errors | D7: one variant (`StoppedBy::StartupProbe`). D8: one `View` field. D9: one `pub` method. D10: one const, two pure functions, one wire field and one wire struct. D11: none. D17: one `pub` runtime method, one `pub(crate)` method, one `pub` guard type (one accessor removed). D13 to D16 (pending): see § Interface changes (D13 to D16). No new component, crate, port, `Action` or error type | n/a | D6 adds one in-memory State field and no port; D7 adds one in-memory State field, one enum variant and no port. |
+| `GuestListenerReports` port and `GuestListenerBoard` (D13 item 10, PR-1) | CREATE NEW (one read-only core port, one worker adapter, one `Sim*`). No existing alternative: the `Driver` trait is not consumed for this by the shim, and the observation-store alternative is rejected in ADR-0269; the pattern is `GuestStreamDial` (mandatory `ProbeRunner::new` parameter, `Sim*` for DST) | read-only port; board bounded-change | Universe: one allocation's reported set, a subset of its declared listeners. Assert through `GuestListenerReports::reported`: the set only grows; a duplicate, undeclared or unknown-allocation `record` changes nothing; `changed` completes on an insertion and at once when the set already differs from `seen`; a closed allocation reads empty (proptest over insertion sequences; seeded sim for the wake) |
+| `ProbeRunner` guest-listener task (D14 item 3) | EXTEND (one task kind beside the dial task; writes only that allocation's startup `ProbeResultRow`s) | bounded-change | Mutation set: startup rows of the allocation. Assert: `Pass` on the insertion that completes the declared set, no row before the deadline, first `Fail` at the deadline with `attempt = max_attempts`, one `Fail` per interval after, nothing after `stop_alloc` (seeded sim with `SimGuestListenerReports` and `SimClock`) |
+| Beacon line reading in `VmDriver` (D13 item 3) | EXTEND (behaviour: classify by kind, never block the stop or command path) | bounded-change | Mutation set: the board and the exit report of one allocation. Assert: `Listen` never occupies the exit report; garbage and post-`Exit` lines change nothing (scripted lines through the reader's existing beacon seam) |
+| New components, ports, variants, errors | D7: one variant (`StoppedBy::StartupProbe`). D8: one `View` field. D9: one `pub` method. D10: one const, two pure functions, one wire field and one wire struct. D11: none. D17: one `pub` runtime method, one `pub(crate)` method, one `pub` guard type (one accessor removed). D13 to D16: see § Interface changes (D13 to D16) and the three rows above. D1 to D12 and D17 add no new component, crate, port, `Action` or error type | n/a | D6 adds one in-memory State field and no port; D7 adds one in-memory State field, one enum variant and no port. |
 
 Effect isolation: the hook is a pure-intent call through `Weak<dyn Driver>`; no new adapter or external dependency, so no `probe()` is specified.
 
@@ -1392,7 +1400,7 @@ Items 7 to 12 apply the same six cases to each later gate:
 11. **G-7 (D10):** S-34 (derivation), S-35 (composed stream: slow start inside 120 s ends `Stable`; never-ready ends `Timeout` with `last_attempt`; none gives `None`; in-deadline give-up unchanged; `biased` select takes event arriving with the deadline; Job byte-identical), S-36 (CLI envelope).
 12. **G-8 (D11):** S-39 (redeploy cases a to f), S-40 (ordering, `Lagged`, superseded attempt), S-41 (snapshot equals live line), S-42 (failed read).
 13. **G-9 (D12):** (1) committed `Stable` makes it eligible (S-46, S-47 a). (2) `Stable` uncommitted or write failed: `healthy: false` until B1 re-announces (S-43). (3) opt-out Service stays `healthy` at `Running`; `Stable`, startup stop, liveness, restart unchanged; unrelated `terminal_announced` changes nothing (S-46, S-47 e). (4) startup `Fail` after `Stable` does not unhealthy it (S-47 e); `Pass` after a stop that did not land makes it eligible only at its `Stable` commit (S-30). (5) restart re-derives eligibility from the row, no view marker (S-47 f). (6) opt-out path byte-identical (S-46).
-14. **G-10 (D13 to D15, pending):** see § Proposed decisions D13 to D16, Gate G-10.
+14. **G-10 (D13 to D15):** see § Decisions D13 to D16, Gate G-10.
 15. **D17:** no gate (the matrix says "gates no state"); the six cases do not apply. S-48 carries its ordering and fairness invariants.
 
 ## Wave: DESIGN / [REF] Formal protocol model
@@ -1499,10 +1507,9 @@ and read, restartable stop, superseded attempt, lag then relist).
 ## Wave: DESIGN / [REF] Validation items
 
 No item for D1 to D12 or D17 is contract-shaping and open; every row is discharged by source
-reading (D17: the tokio semantics it rests on are cited in § D17). The numbers V3, V4, V8, V11 and V26 are unused (their citations live in D1, D2, F-1, F-5
-and § Technology and constraints). D13 to D16 carry their own contract-shaping items, V34 to V39 and V41,
-in § Spike table (V40 is a post-DELIVER measurement and does not gate; V41 is the boot-cost
-budget item, open until its findings land).
+reading (D17: the tokio semantics it rests on are cited in § D17). Numbers not listed are
+unused. D13 to D16 carry their own contract-shaping items, V34 to V39, V41 and V42, in
+§ Spike table (V42 held, 2026-11-04).
 
 | # | Claim | Evidence | Status |
 |---|---|---|---|
@@ -1587,7 +1594,7 @@ release); see § Lifecycle Gate Ownership. No state meaning changes.
 
 Evidence tiers follow `.claude/rules/testing.md`. All run in the default or
 `integration-tests` lane; none spawns the `overdrive` binary; none needs a test seam
-beyond a test-local recording driver. S-5, S-11 to S-14, S-18, S-20, S-24, S-33, S-37 and S-44 are unused numbers.
+beyond a test-local recording driver. Scenario numbers not listed are unused.
 
 | ID | Scenario | Fault stimulus | Oracle | Tier |
 |---|---|---|---|---|
@@ -1605,9 +1612,7 @@ beyond a test-local recording driver. S-5, S-11 to S-14, S-18, S-20, S-24, S-33,
 | S-17 | **D6 and D7, hydration:** `WorkloadLifecycle::hydrate_actual` fills `current_startup_probe` from `list_probe_results_for_alloc` of the current attempt only, when its row is `Failed` or `Terminated`: a `Pass`, a `Fail { last_fail_reason }`, an absent row, a non-terminal current row (not read), a superseded attempt's rows (never read); a read error | `SimObservationStore` fixture with probe rows on two attempts; injected read fault | Field equals the current attempt's latest startup status; superseded rows do not affect it; the store is unchanged (a recording store counts one probe-row read per hydration); a read fault returns `HydrateError::ObservationRead`, never `None` | Tier 1 |
 | S-19 | **D6, render:** `format_service_failed_block` for `EarlyExit { Some(1) }` and `{ None }` | pure input | Exit-code line, Service guidance and stderr tail present; no `elapsed:` line; never `(took live)`; existing non-`EarlyExit` blocks byte-identical | Tier 1 pure (the live path is the stream render in `crates/overdrive-cli`, per its CLAUDE.md rule 2) |
 
-The unused numbers' scenarios were merged into S-21, S-22 and S-16 (S-11 to S-14), S-27
-(S-18), S-17 (S-24), S-26 and S-40 (S-33), S-25 (S-37), S-30 (S-44) and S-10 (S-5), or
-dropped (S-20). The existing tests the early rows named
+The existing tests the early rows named
 (`service_lifecycle_reconcile_branches.rs:598-642`, `service_lifecycle_stable.rs:313-354`,
 `service_kind_vm_terminal_invariant.rs:263-274`) keep their inputs and change only the
 expected action: the stop for a live allocation, not the finalisation (D7).
@@ -1816,125 +1821,53 @@ Growth beyond either budget needs the user's approval.
 **Validation budget.**
 
 - Model checks: the recorded run (`specs/quint/service-allocation-readiness-and-ending/evidence/summary.md`)
-  is the authority for counts and times. The modeler change list is net-subtractive:
-  nine checks and four runs dropped in round 1, up to seven by-construction invariant
-  checks dropped now, the stamp variable and its action removed. D12, D13 to D16, D17,
-  R2-1, R2-2 and B3 add none.
+  is the authority for counts and times. D12, D17, R2-1, R2-2 and B3 add none. The beacon
+  report protocol (D13 items 1 and 3) adds one module: one `step` relation, five named runs,
+  one hazard, a handful of invariants (§ Formal protocol model — D13 to D16); the model state
+  is a few small sets and sequences, so it is an evaluator-scale check, not a TLC-scale one.
 - Conformance: one `#[quint_test]` per kept named run and one `#[quint_run]` per
   module, in the owning crate's `integration-tests` lane on metal. No new lane, tool or
   xtask subcommand.
-- DISTILL: S-1 to S-48 less the unused numbers (S-5, S-11 to S-14, S-18, S-20, S-24,
-  S-33, S-37, S-44): 48 less 12, so 36 scenarios. D13 to D16 add obligations only if
-  accepted (§ Proposed decisions D13 to D16).
+- DISTILL: the S-numbers in § Executable obligations are the scenario set; D13 to D16 add the
+  obligations in G-10's boundary scenarios once accepted.
 
 ## Wave: DESIGN / [REF] Rulings of 2026-11-03
 
-The ruling table (B1 to B5, R2-1, R2-2, D13 to D17) is the § Approval record; the contracts it
-produced are in the decisions, the interface tables and the ADRs. The two removals follow.
+The ruling table is the § Approval record; the contracts are in the decisions, the interface
+tables and the ADRs.
 
-### R2-2 — `stable_announced` is removed: the reader inventory
+### R2-2 — `stable_announced` is removed
 
-The field is `ServiceLifecycleView.stable_announced` (`service_lifecycle.rs:284`). Every
-reference in `crates/` outside tests was read (`grep stable_announced crates/`; the only
-non-test file is `service_lifecycle.rs`):
-
-| Site (`@ 04052ad75`) | Kind | After B1 |
-|---|---|---|
-| `:474-479` top-of-loop dedup | read | Replaced by the `fact.stable_committed` skip (B1). Not a reader of the field |
-| `:531`, `:555` | write (inserts on emission) | Deleted |
-| `:347` `has_alloc_mid_startup_window` | read; its only caller is `next_evaluation_at` (`:689`); no other non-test caller in `crates/` | Deleted: `next_evaluation_at` already filters per fact (`:692-711`) and takes `actual` |
-| `:697` `next_evaluation_at` filter | read | Reads `fact.stable_committed` instead |
-| `reconciler_runtime.rs` (`has_work`, `next_evaluation_at` dispatch) | none | The runtime calls the trait hook; it never names the field |
-
-Verdict: **no reader remains; the field is removed.** Behaviour check: between the `Stable`
-emission and its commit the wake hook no longer returns "no boundary" for an opt-out
-allocation (the startup-probed case is already excluded by `latest_startup_probe == Pass`,
-`:701`): it returns the startup-window end while that is in the future, which keeps a lost
-opt-out `Stable` write retried; no emitted action changes. The CBOR `View` loses one key;
-serde ignores it in an older blob (S-38). Tests that read the field (`grep stable_announced
-crates/`) are rewritten by DISTILL, and the tests of the deleted `has_alloc_mid_startup_window`
-(Category E of `service_lifecycle_reconcile_branches.rs`) are deleted with it. The model change
-is M-2 below.
+`ServiceLifecycleView.stable_announced` (`service_lifecycle.rs:284`) has no remaining reader
+after B1: the top-of-loop dedup and `next_evaluation_at` key on `fact.stable_committed`, and
+`has_alloc_mid_startup_window` is deleted. The CBOR `View` loses one key; an older blob decodes
+(S-38).
 
 ### R2-1 — the per-allocation backend veto is removed
 
-Why it is redundant: an allocation is stop-eligible only while the latest startup row is not
-`Pass`; `Stable` is announced only when it is `Pass`; a committed `Stable` skips the allocation
-before any stop gate (B1). So a stop-eligible allocation never has a committed `Stable`, and D12
-step 1 already marks it not `healthy` at the deciding tick and after. Deleted:
-`startup_failed_this_tick` (`:471`, `:616`), the `terminal_startup_veto` computation
-(`:1058-1059`), the veto parameter and branch of `compute_backend_healthy` (`:1131-1135`) and the
-backend-row splice ahead of the startup action (`:631-649`). Kept: the `terminal_announced` writes
-and reads for the startup stop's bookkeeping (dedup `:488`, the liveness skip `:981`,
-`next_evaluation_at` `:698`). Edited by this ruling: D7 item 2 and its ordering sentence, D8
-item 3 ("lifts the veto" becomes "liveness acts on it"), D12 step list, G-9, S-21, S-29, S-46,
-S-47, the test tables, ADR-0096 (dated supersession of D1 step 1 and D2) and ADR-0267.
+A stop-eligible allocation never has a committed `Stable` (B1), so D12 step 1 already marks it
+not `healthy`; `startup_failed_this_tick`, the `terminal_startup_veto` computation, the veto
+branch of `compute_backend_healthy` and the backend-row splice ahead of the startup action are
+deleted. The `terminal_announced` bookkeeping stays.
 
 ## Wave: DESIGN / [REF] Modeler change list (consolidated)
 
 The architect does not edit the `.qnt` files, `checks.toml`, `README.md` or `evidence/`. The
-round-1 list (nine checks and four runs dropped; the three keep-runs; `pd_ok` and the
-`pd_bugFixedCap` instance narrowed to one slot; B1 and B2 added; the B3 and DL-6 README text) is
-**executed** and is removed from this document. The remaining work, run through
-`cargo xtask metal run --` (never Lima), is:
+`quint-modeler` runs through `cargo xtask metal run --` (never Lima). Outstanding:
 
-**M-1. Remove the by-construction invariants (verify by guard deletion).** `NoStableOverPendingStop`,
-`StartupStopAtMostOncePerRow`, `StartupStopStopsTheInstance`, `PreStartupCrashStaysObservable`,
-`EarlyExitIffPreStartupCrash` and `StartupStopIsRestartable` (`restart_authority`), and
-`SupervisorImpliesNotEnded` (`hook_ownership`) if the B2 split of the stop step makes it subsumed
-by `NoStrandedStop` and `EndedImpliesEventuallyUnsupervised`. Procedure, per invariant: in a
-scratch copy, delete the action guard that makes it hold and run the checks. If a kept invariant
-or hazard then fails, the invariant is redundant: delete it and its `checks.toml` entry. If no
-kept check fails, it is not by construction: keep it and report the guard to the architect. The
-real functions are covered by S-29 (the first two), S-22 (`StartupStopStopsTheInstance`), S-16 and
-S-10 (`PreStartupCrashStaysObservable`), S-15 (`EarlyExitIffPreStartupCrash`), S-23
-(`StartupStopIsRestartable`), S-1 and S-7 (`SupervisorImpliesNotEnded`).
+**M-3. D13 to D16 add no state to `restart_authority`.** The model's `StartupRow` requires a
+declared, `running`, supervised, not-yet-`Stable` allocation, a free row slot and a live VM for
+a `pass`; it requires no earlier row. It therefore admits (a) a startup `Pass` with no earlier
+`Fail` and (b) a first `Fail` row with no earlier row, the two shapes the guest-listener
+producer writes (D14 item 3). Confirm by run that one named run reaches (a)
+(`startup_stop_then_successor_passes_is_stable` or `pre_startup_crash_then_successor_passes`)
+and one reaches (b) (`startup_never_passes_loop_gives_up_startup_probe_failed`); if a named run
+is missing for either, add the run and no hazard.
 
-**M-2. Drop the `stable_announced` stamp (R2-2).** `liveness_gate.qnt`: remove `stbl` from `Lv`,
-from `init` and from the `StableCommit` update; remove the action `StampObserved`, its `ConfStep`
-variant and its entry in `step`; delete the `stbl` and `stable_announced` text in the header and in
-the conformance-projection paragraph (the projection is `committed` only). The B1 hazard is
-rebuilt without the stamp: under `OFF = Set("stampAtEmission")` the emission guard becomes
-`lv.rw and lv.swr == "none"` ("emit only if no `Stable` write has been attempted", the
-stamp-at-emission rule expressed on the existing write-outcome variable). After
-`StableCommit("failed")` `swr` is `failed`, emission is disabled for good, and
-`StableEventuallyCommitted` is violated exactly as before; `lg_bugStampAtEmission` and its
-`checks.toml` entry keep their names. The run `lost_stable_write_is_reannounced` loses its
-`StampObserved` step and its `lv.stbl` conjuncts. `restart_authority.qnt` and the README: the
-projection of `stable` is `ServiceAllocFact.stable_committed` and the presence of
-`FinalizeFailed { Stable }` in the returned actions, not the `stable_announced` set; the README
-hazard row for B1 reads "emission is guarded by a record that a `Stable` write was attempted, set
-at emission".
-
-**M-3. D13 to D16 add no model state.** The architect read `restart_authority.qnt`'s `StartupRow`
-(lines 208-218): it requires a declared, `running`, supervised, not-yet-`Stable` allocation, a free
-row slot, and a live VM for a `pass`; it requires no earlier row. So the model admits (a) a startup
-`Pass` with no earlier `Fail` (the guest-listener producer's happy path) and (b) `Fail` rows from
-the first interval with no earlier row (the producer's cadence while listeners are missing).
-Confirm by run that a named run reaches (a) and one reaches (b) (`startup_stop_then_successor_passes_is_stable`
-or `pre_startup_crash_then_successor_passes` for (a); `startup_never_passes_loop_gives_up_startup_probe_failed`
-for (b)); if a named run is missing for either, add the run and no hazard (there is no new
-decision to weaken).
-
-**M-4. D17 has no model** (decision and conditional outline in § Formal protocol model).
-
-**M-5. README and header text.** (i) Fold RA-6 into RA-2: RA-2 reads "the shim's `StopAllocation`
-dispatch is awaited inside the `ServiceLifecycle` tick, so a stop's outcome is known before the
-next evaluation, **and the arm's cleanup effects are idempotent when it runs again**" (discharged
-by V28, which now reads `mtls_lifecycle.stop_alloc` and the other effects); delete RA-6 and leave
-its number unused. (ii) HO-4 reads "a registered supervisor implies a held VM slot until the hook
-runs, except the state a failed stop row write creates (vacant slot, supervisor registered, row
-`Running`), which has no host residue and is retried by the next probe row" (discharged by V7).
-(iii) State that the run `stop_row_write_failure_is_retried` drives the liveness-stop retry in
-conformance by a new liveness probe row (the model re-enables the stop while the row is `Running`
-and `Stable`; the streak is `liveness_gate`'s, so the conformance driver supplies a new liveness
-row through the recording prober). (iv) Delete Findings 1 to 4 (R-1 to R-4 are the feature
-delta's § Pinned readings; leave one line pointing there) and keep Findings 5 and 6. (v) No check
-count in the prose. (vi) Re-record `evidence/` with `--record` and run `verify-evidence`.
-
-### D17 model changes
-
-None (decision S6 in § D17).
+**M-6. New module for the beacon report protocol (D13 items 1 and 3, 10).** The module, its
+variables, actions, invariants, named runs, hazard and pinned accessors are specified in
+§ Formal protocol model — D13 to D16. The modeler writes and checks it, registers every run in
+`checks.toml`, and records `evidence/` with `--record`.
 
 ## Wave: DESIGN / [REF] D17 — a broker submit wakes the convergence loop at once (Accepted 2026-11-03; shape choices S1 to S6 accepted as proposed)
 
@@ -1958,13 +1891,13 @@ costs up to one tick. D17 does not collapse to a clarification.
 
 **Primitive: `tokio::sync::Notify`, `notify_one` (S1).** A call with no waiter stores one permit
 that the next `notified().await` consumes at once; repeated calls store one
-(tokio 1.54.1 `sync/notify.rs:31-46`, `:623-629`; the workspace declares `tokio = "1"`).
+(tokio 1.52.1, the version `Cargo.lock` pins: `sync/notify.rs:32-49`, `:627-632`).
 A submit between the loop's drain and its park is therefore not lost, and a burst coalesces.
-`notify_waiters` stores no permit (`:710-712`) and is rejected. `select!` cancellation: if the
+`notify_waiters` stores no permit (`:714`) and is rejected. `select!` cancellation: if the
 `notified()` future has been woken by `notify_one` and the `select!` completes on another arm,
-the dropped future passes the notification to the next waiter or leaves the permit (`:1361-1371`),
-so a biased `select!` that picks the completion arm does not swallow a wake. Alternatives:
-ADR-0273.
+the dropped future passes the notification to the next waiter or leaves the permit
+(`drop_notified`, `:1365-1375`), so a biased `select!` that picks the completion arm does not
+swallow a wake. Alternatives: ADR-0273.
 
 **Contract (behaviour; the named surface is below and in the interface table).**
 
@@ -2023,28 +1956,25 @@ persisted or config change.
 **DISTILL obligation.** S-48 and the D17 mutation targets (§ Executable obligations); DISTILL
 reviews existing tests that assume nothing drains until `SimClock` advances
 (`runtime_convergence_loop.rs`, `interest_router.rs`, `cadence_resync.rs`, and every test calling
-`broker().submit`). V40 measures per-hop `queue_ms` and exec-to-`Stable` with and without the wake.
+`broker().submit`).
 
-## Wave: DESIGN / [REF] Decisions D13 to D16 — guest-reported listener readiness (user-approved; corrected D13 contract shape accepted 2026-11-03; pending the V41 boot-cost measurement and the independent re-review)
+## Wave: DESIGN / [REF] Decisions D13 to D16 — guest-reported listener readiness
 
 > Authored by Morgan (nw-solution-architect), 2026-11-03, PROPOSE mode, scope: all
 > priorities. Origin: the user's ruling of 2026-11-03, "Drop inference and take readiness
-> from the guest itself". **Status: user-approved in direction ("add it. and proceed with
-> recommendations"); spikes V34 to V38 held, V39 partial; contract corrected by the spikes
-> (D13 items 1 and 6 to 9). 2026-11-03: the corrected D13 contract shape is ACCEPTED by the
-> user. D13 to D16 and ADR-0268 to ADR-0272 remain "user-approved, pending the V41
-> boot-cost measurement and the independent re-review" (cold start is the platform goal; a
-> material B-minus-A delta returns to DESIGN).** None is yet **Accepted**, none
-> authorises DISTILL or DELIVER, and ADR-0058 stays operative until ADR-0270 is accepted.
-> Decision records:
+> from the guest itself". **Status: user-approved in direction; D13 contract shape accepted;
+> V41 and V42 held. PR-1, PR-3 and PR-4 (inside D13 and D14) are accepted (2026-11-04); PR-2
+> is accepted in contract shape (direction approved 2026-11-04 pending V42; V42 held
+> 2026-11-04).** None of D13 to D16 is yet
+> **Accepted**, none authorises DISTILL or DELIVER, and ADR-0058 stays operative until
+> ADR-0270 is accepted. Decision records:
 > [ADR-0272](../../product/architecture/adr-0272-the-guest-observes-workload-listeners-with-kernel-hooks-not-a-poll.md) (D13, observation),
 > [ADR-0268](../../product/architecture/adr-0268-the-guest-reports-each-workload-listener-it-opens-over-the-beacon-channel.md) (D13, report),
 > [ADR-0269](../../product/architecture/adr-0269-a-service-with-no-declared-startup-probe-waits-on-a-guest-listener-startup-probe.md) (D14),
 > [ADR-0270](../../product/architecture/adr-0270-a-probe-less-service-is-stable-when-the-guest-reports-every-declared-listener-open.md) (D15),
 > [ADR-0271](../../product/architecture/adr-0271-the-probe-descriptor-no-longer-records-whether-it-was-inferred.md) (D16).
-> Repo citations are as read on 2026-11-03 at the branch head. Kernel citations are
-> `path:line @ v7.0` read from a sibling workspace's `vendors/linux`; this worktree's
-> submodule is not initialised, so the reviewer re-verifies them in a v7.0 checkout.
+> Repo citations are as read on 2026-11-04 at the branch head. Kernel citations are
+> `path:line @ v7.0`.
 
 ### Premise: what the guest is in production (ground-the-premise)
 
@@ -2067,6 +1997,12 @@ reviews existing tests that assume nothing drains until `SimClock` advances
   `cgroup/sock_addr` connect4/sendmsg4/getpeername4/recvmsg4 and a `sock_release`
   `CgroupSock` program, attached `Single` at the cgroup2 root (`transport/kernel.rs:41-42,
   162-173, 300-346`). **Nothing in the guest observes `listen()` or `bind()` today.**
+  Init itself opens inet sockets before `READY`: `configure_guest_transport` binds the TCP
+  intake port (61000) and 1,024 UDP slot ports at `workload_addr`, a non-loopback address
+  (`transport/mod.rs:227-231`, `transport/kernel.rs:271-290`). They are in the same cgroup
+  (the root) as the workload, and the declared-listener validation rejects the reserved
+  range (`aggregate/mod.rs:500-511`), so they can never satisfy a declared listener, but
+  hooks that see them would emit about 1,025 reports before `EXEC` (D13 item 1, PR-2).
 - **Channels (virtio-vsock, NIC-less guest).** Beacon, guest dials host, default 1234, text
   lines `READY`/`EXEC`/`EXIT`/`SHUTDOWN` (`vm/beacon.rs:185-224`;
   `overdrive-host/src/beacon_io.rs:104-125`). Flow stream 1240 and control 1243, guest
@@ -2092,7 +2028,9 @@ reviews existing tests that assume nothing drains until `SimClock` advances
 - **#303 (in-guest kernel mTLS).** Open research; separate hooks, same init; no dependency
   either way.
 
-### D13 — the guest observes each workload listener with kernel hooks and reports it over the beacon channel (user-approved in direction; spikes V34 to V38 held, V39 partial; contract corrected by the spikes and accepted in shape 2026-11-03, pending V41 and re-review; ADR-0272 for the observation, ADR-0268 for the report; two independently reversible decisions)
+### D13 — the guest observes each workload listener with kernel hooks and reports it over the beacon channel
+
+Two independently reversible decisions: ADR-0272 (the observation) and ADR-0268 (the report).
 
 **The hook (in-guest kernel mechanism, evaluated first per design.md).**
 
@@ -2104,15 +2042,81 @@ Rejected alternatives (`fentry`, `sock_diag` polling, workload-signalled readine
 
 **Contract.**
 
-1. **Guest side (behaviour, not structure).** Before `READY`, init has attached both hooks
-   at the cgroup2 root. For every distinct `(protocol, port)` for which a socket enters
-   `TCP_LISTEN` or completes an explicit UDP bind, init sends exactly one beacon line.
-   Reports are not filtered by the declared set (the guest does not know it) and carry no
-   process identity. A socket bound only to a loopback address is not a report (the
-   workload is dialled at `workload_addr:port`, so a loopback-only bind does not serve the
-   declared listener); both hooks read the local address (V34, V35). Items 8 and 9 pin the
-   address and drop rules. Two guest-side ordering rules are pinned by the
-   `guest-signal` spike (V36, V38; `spike/findings-guest-signal.md`):
+1. **Guest side (behaviour, not structure).** Before `READY`, init has attached the listen
+   hooks (scope: **PR-2**, below). For every distinct `(protocol, port)` for which
+   a socket **of the workload** enters `TCP_LISTEN` or completes an explicit UDP bind, init
+   sends exactly one beacon line. Reports are not filtered by the declared set (the guest
+   does not know it) and carry no process identity. A socket bound only to a loopback
+   address is not a report (the workload is dialled at `workload_addr:port`, so a
+   loopback-only bind does not serve the declared listener); both hooks read the local
+   address (V34, V35). Items 8 and 9 pin the address and drop rules.
+
+   **PR-2 (accepted in contract shape; direction approved 2026-11-04, V42 held 2026-11-04): the listen hooks attach to the
+   workload's cgroup, not the cgroup2 root, so init's own sockets are structurally
+   invisible.** Evidence: init's pre-`READY`
+   transport binds 1 TCP intake and 1,024 UDP slots at `workload_addr` (premise above); with
+   the hooks at the root, each is an event, so init would send about 1,025 `LISTEN` lines
+   before `EXEC` and press the ring and the pre-`READY` reader for nothing the host uses.
+   The workload and init share the root cgroup today (`main.rs:738-740`, a process group
+   only). A socket belongs to the cgroup of the task that creates it (`cgroup_sk_alloc`,
+   `kernel/cgroup/cgroup.c:7408-7429 @ v7.0`), the sockops and `CgroupSock` programs run in
+   the socket's cgroup (`kernel/bpf/cgroup.c:1639-1646`, `:1721-1730 @ v7.0`), and a
+   program attached to a child cgroup runs for its sockets only. Behaviour: init creates one
+   workload cgroup before `READY`, attaches the three listen programs to it, and starts the
+   workload (and so every descendant) inside it with no window in which the workload runs
+   outside it. The existing seven programs stay at the root (`Single`, which aya links as
+   `BPF_F_ALLOW_MULTI`, `kernel/bpf/cgroup.c:1506-1507 @ v7.0`), and the effective program
+   array of the child includes the root's (`compute_effective_progs`, `kernel/bpf/cgroup.c:432-490
+   @ v7.0`; a parent's programs are included when flagged `BPF_F_ALLOW_MULTI` or when the
+   child has none of that attach type, `:443-447`, `:458-484`), so correlation and the
+   connect/sendmsg hooks keep seeing the workload's sockets.
+   Consequence for item 7: the TCP arm is not merged into the existing root-attached
+   sockops program (it would fire for init's intake listen); it is a separate small sockops
+   program, in the same object, attached to the workload cgroup. Alternatives: (a) filter the reserved port range
+   in the programs (keeps the merged arm, two constants compared; init's sockets stay
+   visible and correctness rests on the range constants, and a future init socket outside
+   the range would report); (b) attach the hooks after `configure_guest_transport` returns
+   and before `READY` (zero cost; invisible only by ordering, and any socket init binds
+   later would report; hooks at the root attached after the binds were also silent, 50 of
+   50, so the cgroup's value is order-independence); (c) filter by PID in-kernel (a
+   heuristic, rejected).
+
+   **V42 held (2026-11-04, guest kernel `7.0.0-38-generic`, real Cloud Hypervisor guests on
+   metal; `spike/findings-workload-cgroup.md`, PROMOTE):** 1000 of 1000 boots reported the
+   workload's listeners exactly (single, child-only and parent-and-child workloads) and 0
+   reports came from init; with the hooks at the root the same init produced `61000` plus
+   `61001-62024` from pid 1 in 50 of 50 boots, so the problem is real; the root correlation
+   programs stayed effective in the child (host-observed flow stream header byte-identical
+   to the root controls in 80 of 80 boots); a workload outside the cgroup produced 0 reports
+   in 150 of 150 boots (fails closed). Cost: see item 6.
+
+   **Contract pinned by V42 (binding on DELIVER):**
+   - **P-a. One object.** The three listen programs live in the guest eBPF object
+     `overdrive-init` already loads. A second `Ebpf::load` of a separate object is not
+     permitted: it costs +20.4 ms p50 on the pre-`READY` path (item 6).
+   - **P-b. Root programs remain link attachments.** The existing root programs stay
+     `BPF_F_ALLOW_MULTI` link attachments (aya `bpf_link_create`, `kernel/bpf/cgroup.c:1506-1507
+     @ v7.0`), so they stay effective in the workload cgroup. A legacy `BPF_PROG_ATTACH`
+     `Single` without `BPF_F_ALLOW_MULTI` would drop the root sockops program for a child that
+     has its own sockops program (`kernel/bpf/cgroup.c:459 @ v7.0`). Only sock_ops has this
+     interaction (post-bind are different attach types).
+   - **P-c. No placement window.** The workload is created directly in the workload cgroup
+     (`CLONE_INTO_CGROUP`, `include/uapi/linux/sched.h:38`, `kernel/fork.c:2840-2842`,
+     `kernel/cgroup/cgroup.c:6769-6838 @ v7.0`: the atomic form of writing the child pid to
+     `cgroup.procs`; without the flag a forked child takes its parent's css_set, `:6791-6794`).
+     No workload instruction runs outside the cgroup, and every descendant is inside it.
+   - **P-d. Scope and fail-closed.** Reports cover only sockets created by tasks in the
+     workload cgroup (`cgroup_sk_alloc`, `kernel/cgroup/cgroup.c:7408-7434 @ v7.0`; accepted
+     children inherit, `net/core/sock.c:2538`). A workload that moves itself out of the cgroup
+     is never reported, so its declared listeners are never satisfied and the service is
+     never `Stable` (it is stopped at the startup deadline, D14).
+   - **DELIVER note (crafter-level, not an interface contract).** `clone3` replaces
+     `Command::spawn` for the workload. An exec failure then shows only as exit status 127
+     where `InitError::Spawn` is returned today; a missing workload binary was not exercised
+     by V42, so the crafter pins the exit-127 versus `InitError::Spawn` mapping.
+
+   Two guest-side ordering rules are pinned by the `guest-signal` spike (V36, V38;
+   `spike/findings-guest-signal.md`):
    - **One ordered beacon writer.** Every beacon write (`READY`, `LISTEN`, `EXIT`) goes
      through one owner: `overdrive-init::send`'s exclusive `&mut File` stays the only
      write path, and no forwarder thread is a second writer. Two unsynchronised writers
@@ -2128,60 +2132,72 @@ Rejected alternatives (`fentry`, `sock_diag` polling, workload-signalled readine
    a known protocol, and returns the existing typed parse error otherwise (no panic).
    `Proto` is the existing `dataplane::backend_key::Proto`. No change to `READY`, `EXEC`,
    `EXIT`, `SHUTDOWN` or the cmdline token.
-3. **Host classification (behaviour pinned; structure is the crafter's).** The beacon
-   reader classifies each line by kind as it arrives and routes `Listen` to the allocation's
-   listener set and `Exit` to the exit report. Only `Exit` or EOF ends the guest-report
-   wait: the wait keeps reading past every other line (`drain_guest_report`,
-   `finish_guest_report_line`, `vm_driver.rs:~2165-2217`), and the line channel cannot stall
-   the `select!` of `run_beacon_writer` (today a blocking `send().await` on the capacity-1
-   channel from inside the read arm, `vm_driver.rs:~580`, `:~775`; a mid-life line would
-   block the stop and command arms and be taken as the exit report). A `Listen` line never
-   occupies the exit channel and cannot be read as the exit report. An unparseable line after `READY` is dropped with a structured warn event naming
-   the allocation; it does not fail the driver. Reports for undeclared `(protocol, port)`
-   are ignored and not stored (memory is O(declared)). Insertion into the set is the
-   check-and-act (`rust.md` § TOCTOU): the verdict "newly opened" is the insert's return.
+3. **Host classification (behaviour pinned; structure is the crafter's).** The host reads
+   the allocation's beacon lines as they arrive and routes each by kind: `Listen` to the
+   allocation's reported set (item 10), `Exit` to the exit report. Only `Exit` or EOF ends
+   the guest-report wait; the wait keeps reading past every other line. A mid-life line
+   never blocks the reader, the stop path or the command path (today the capacity-1 line
+   channel is drained only after exit, so a mid-life line would stall them and be taken as
+   the exit report). A `Listen` line never occupies the exit report and cannot be read as
+   it. An unparseable line, and a `Listen` line that arrives after the wait ended, is
+   dropped with a structured warn event naming the allocation; neither fails the driver nor
+   changes the exit report or the set. Reports for undeclared `(protocol, port)` are not
+   stored (memory is O(declared)).
 4. **Ordering.** The guest cannot report before the workload runs; the workload runs only
    after `EXEC`; `EXEC` is written by `release_for_exit_emission`, which D3 places after
    the `Running` row write and after `on_alloc_running` (supervisor registration). So a
-   report never precedes the `Running` row or the supervisor. The set is level-readable and
-   edge-notified, so a late subscriber still sees every report.
+   report never precedes the `Running` row or the supervisor. The reported set is created
+   when the VM starts, before the beacon reader runs, so no report precedes it (item 10).
 5. **Idempotence and lifetime.** Duplicate lines are no-ops. The set belongs to one VM
    incarnation. A guest reboot or crash ends the VMM (CLAUDE.md, "a guest reset ends the
    VMM"); init runs the workload once; a restart is a fresh allocation id and a fresh set
    (ADR-0105). There is no close report and no un-ready transition.
-6. **Cold-start cost.** The 50 to 80 ms is the **whole** listen sequence timed in the spike
-   guest (`attach_hooks`: `Ebpf::load` of an object with the three listen programs and the
-   ring map, then load and attach of the three; five boots, `7.0.0-38-generic`), in a guest
-   that loads nothing else. It is not decomposed into object load, verifier and attach, and
-   it is not the marginal cost over the seven existing programs (if the new programs join
-   the object init already loads, the object-load share is not paid twice; unmeasured). It
-   is spent before `READY` on every **first boot**, on the path from VM boot to workload
-   start. The repository has no snapshot-resume path (snapshot/restore is out of scope, GH
-   #96, #97, #100, #43), so no resume latency is affected today. It buys the ordering that no
-   listener is missed: attaching after the workload ran reported 0 of 50, so the attach
-   cannot move after `EXEC`. **V41 (contract-shaping, 2026-11-03 ruling 1)** measures and
-   decomposes pre-`READY` time in the real `overdrive-init` with and without the listen
-   programs (variant B versus variant A, `spike/findings-boot-cost.md`), because cold start is
-   the platform goal. D13 to D16 are not Accepted until V41's findings land and the independent
-   re-review approves; **a material B-minus-A delta returns D13 to DESIGN.**
-7. **Program shape (spike-corrected premise).** aya attaches through `bpf_link_create`,
-   which always sets `BPF_F_ALLOW_MULTI` (`kernel/bpf/cgroup.c:1502-1505 @ v7.0`), so a
-   second `Single` sockops attach does not replace the first: both coexist (V37, M1). The
-   TCP arm is **merged into the existing sockops program** (verified: +112 instructions,
-   750 of 1,000,000, correlation unchanged), chosen over a second program because it adds
-   no further load and attach to the pre-`READY` path and touches no attach semantics. UDP
-   needs **two** `CgroupSock` programs, post-bind4 and post-bind6: `src_ip4` and `src_ip6`
-   are readable per attach type only (`net/core/filter.c:8976-8989 @ v7.0`). Behaviour
-   pinned: both return 1 (a 0 fails the workload's `bind()`, `af_inet.c:549-557 @ v7.0`);
-   both ignore non-UDP binds (TCP `bind()` reaches them). Crafter notes, not contract:
-   `local_ip6` is copied element by element (the verifier rejects an array copy through a
-   modified ctx pointer); the ring size is not established (4 MiB: no drops at 20,000 UDP
-   binds and 40,000 TCP events undrained; 4096 bytes: drops, counted).
+6. **Cold-start cost (V41, held).** On a real Cloud Hypervisor guest (`7.0.0-38-generic`,
+   1 vCPU, 256 MiB, 40 interleaved boots per variant), attaching the listen programs before
+   `READY` adds **+0.36 ms at p50** to init-start-to-`READY` against a same-toolchain
+   baseline (paired p90 +1.29 ms, max +2.10 ms; the +20 ms falsification bar was missed by
+   about 50 times). The platform already spends about 117 ms (p50 116.8) of BPF work before
+   `READY`. The cost is spent on every first boot; the repository has no snapshot-resume
+   path (GH #96, #97, #100, #43), so no resume latency is affected. It buys the ordering that
+   no listener is missed: attaching after the workload ran reported 0 of 50, so the attach
+   cannot move after `EXEC`. Findings: `spike/findings-boot-cost.md`, verdict PARTIAL on one
+   point only (the guest PID 1 is an instrumented copy of the real init, equivalent to it by
+   a host-side control, A minus R -1.1 ms). **PR-2 shape cost (V42, held, 2026-11-04,
+   `findings-workload-cgroup.md`, 40 interleaved boots per variant, two runs within 0.2 ms):**
+   the design (programs in the existing object, attached to the workload cgroup) adds
+   **+0.88 ms at p50** over the same object without them (paired p90 +1.66 ms, max +2.49 ms).
+   Carrying the programs and their two maps without attaching: -0.01 ms; the workload cgroup
+   `mkdir` plus placement: +0.01 ms (0.07 ms absolute); attaching the three programs: 0.56 ms.
+   **Hazard, and the reason for P-a (item 1):** a second `Ebpf::load` of a separate object costs
+   **+20.4 ms at p50** (aya 0.13.1 `EbpfLoader::new()` parses kernel BTF eagerly,
+   `aya-0.13.1/src/bpf.rs:169-171`; `.btf(None)` does not help), which meets the +20 ms
+   falsification bar. The spike's same-object arms use a spike-built copy of the guest object
+   (the xtask-built object loads about 2.8 ms slower in this guest; not investigated).
+   **Not measured:** the ring was 1 MiB; the forwarder thread, the `LISTEN` write path and
+   the drain were not timed; one guest kernel, a warm host. Budget for what D13 adds to the
+   pre-`READY` path: about +0.9 ms p50 (+1.7 ms p90), against about 117 ms of existing BPF
+   work.
+7. **Program shape.** aya attaches through `bpf_link_create`, which always sets
+   `BPF_F_ALLOW_MULTI` (`kernel/bpf/cgroup.c:1506-1507 @ v7.0`), so a second sockops attach
+   does not replace the first: both coexist (V37, M1). **Shape (PR-2, item 1):** the TCP arm
+   is a separate small sockops program in the same object, attached to the workload cgroup;
+   the three listen programs ride in the object init already loads. UDP needs **two** `CgroupSock`
+   programs, post-bind4 and post-bind6: `src_ip4` and `src_ip6` are readable per attach type
+   only (`net/core/filter.c:8976-8989 @ v7.0`). Behaviour pinned: both return 1 (a 0 fails
+   the workload's `bind()`, `af_inet.c:549-557 @ v7.0`); both ignore non-UDP binds (TCP
+   `bind()` reaches them).
 8. **What a report means: the address rule and IPv6.** `IPV6_V6ONLY` is not observable on
    either hook (`bpf_getsockopt(SOL_IPV6)` returns -EINVAL in sockops,
    `net/core/filter.c:5562-5573 @ v7.0`; V34, V35: `V6ONLY=1` and dual-stack wildcards
    produce identical reports). The guest does not hold `workload_addr`, so the only address
-   exclusion is loopback (`127.0.0.0/8`, `::1`); a bind to any other address is a report.
+   exclusion is loopback: `127.0.0.0/8`, `::1` and the IPv4-mapped loopback
+   `::ffff:127.0.0.0/104`; a bind to any other address is a report. The v4-mapped range is
+   decidable from the same four words of the IPv6 local address both hooks already read
+   (`src_ip6` for post-bind6, `local_ip6` for sockops): words 0 and 1 zero, word 2
+   `0x0000ffff`, and the high byte of word 3 equal to 127. An `AF_INET6` socket bound to
+   `::ffff:127.0.0.1` is reachable only on loopback, so reporting it would satisfy a declared
+   listener the workload cannot serve. The spikes exercised `127.0.0.1` and `::1` only; the
+   v4-mapped case is a Tier-3 scenario in G-10.
    **A report `LISTEN <proto> <port>` therefore means "a socket of that protocol is bound
    to that port on a non-loopback address"; it makes no claim about IPv4 reachability.**
    **Dual-stack, recorded against GH #308 (user ruling 2026-11-03: Overdrive does not support
@@ -2194,63 +2210,154 @@ Rejected alternatives (`fentry`, `sock_diag` polling, workload-signalled readine
    sets `IPV6_V6ONLY=1` (or listens only on a specific IPv6 address) reaches `Stable` while
    IPv4 peers are refused; it is bounded to that explicit choice, the retired probe would have
    caught it, and a declared startup or readiness probe still decides for a Service that
-   declares one. The rule and the exposure are #308's to revisit when IPv6 is supported. ADR-0272's former "reachable at
-   `workload_addr:port`" wording and its "other than the wildcard or the workload address"
-   exclusion are removed (the guest cannot implement them). IPv4-mapped IPv6 binds were not
-   exercised.
+   declares one. The rule and the exposure are #308's to revisit when IPv6 is supported.
 9. **A dropped report.** The event ring drops and counts when full; the workload is not
    slowed (`seen == delivered + drops` in all 12 flood runs, V37). A dropped `LISTEN` for a
    declared listener leaves the service never `Stable`, so it is stopped at the startup
    deadline (60 s) and restarted, ending in `StartupProbeFailed` naming a listener the
-   workload did open. Decision (user ruling 2026-11-03; the level-map proposal P-10 is
-   **rejected**): **accepted as a stated, bounded exposure, not a fallback.** Only TCP listen
-   transitions and explicit UDP binds produce events (`accept()`, connect and autobind
-   produce none: V34 T11, V35 U5, U6), and a workload opens a handful of listeners. Reaching
-   the exposure takes more such events than the ring holds between two drains, with the
-   declared listener's among the dropped. The crafter sizes the ring generously (the spike:
-   4 MiB took a 20,000-socket flood with no drops); the drop counter stays visible, and V40
-   reports it on a healthy start (non-zero is a finding). A lost report stops the service at
-   the startup deadline; it does not hang it.
+   workload did open. Decision (user ruling 2026-11-03, no level map): **accepted as a
+   stated, bounded exposure, not a fallback.** Only TCP listen transitions and explicit UDP
+   binds produce events (`accept()`, connect and autobind produce none: V34 T11, V35 U5,
+   U6), and a workload opens a handful of listeners. Reaching the exposure takes more such
+   events than the ring holds between two drains, with the declared listener's among the
+   dropped. The crafter sizes the ring generously; the drop counter stays visible (a
+   guest-readable map; no wire or host surface is added). A lost report stops the service at
+   the startup deadline; it does not hang it. Under PR-2 init's own binds produce no events,
+   so the ring carries only workload events.
+10. **The reported set and its read seam (PR-1, accepted 2026-11-04).** The reported set is owned by a
+    host-side board in `overdrive-worker`; the probe task reads it through a read-only port.
+    The `Driver` trait is **unchanged**: the probe runner is owned by `VmDriver` (the shim
+    holds `dyn Driver` and never reads the set), and both the beacon reader (the writer) and
+    the probe runner (the reader) live in `overdrive-worker`.
+
+    Port (new, `overdrive-core::traits`, read-only; contract in core, impl in the adapter
+    crate, per `reconcilers.md` § "The hydration boundary"):
+
+    ```
+    trait GuestListenerReports: Send + Sync {
+        fn reported(&self, alloc: &AllocationId) -> ReportedListeners;
+        async fn changed(&self, alloc: &AllocationId, seen: &ReportedListeners)
+            -> ReportedListeners;
+    }
+    ```
+
+    `ReportedListeners` is a value type: an ordered set of `(Proto, NonZeroU16)` with
+    `contains`, `len` and equality. Behaviour (the trait docstring carries it):
+    - `reported` is a level read: it returns the allocation's current set, never blocks, and
+      returns the empty set for an unknown or closed allocation. During one incarnation the
+      set only grows, and holds only pairs the Service declares.
+    - `changed` completes with the current set as soon as it is not equal to `seen`. If it
+      already differs when called it completes at once, so no insertion between a `reported`
+      and a `changed` is lost. Otherwise it waits for an insertion; completion is on the
+      insertion itself, not on a timer, so a `Pass` is written one beacon delivery plus one
+      task wake after the guest's `listen()`. A duplicate, an undeclared pair or a report for
+      another allocation does not complete it. It is cancel-safe. For an unknown or closed
+      allocation it does not complete (the caller's supervisor token cancels it).
+    - An allocation that has ended: its supervisor is cancelled before the set is closed (see
+      below), so no `changed` outlives it; reads after close behave as unknown.
+
+    Writer (concrete, `overdrive-worker`, not on the port): `GuestListenerBoard` implements the
+    port and exposes `open(alloc, declared: &[Listener])`, `record(alloc, Proto, NonZeroU16) ->
+    Recorded` and `close(alloc)`. `open` is called by `VmDriver::start` before the beacon
+    reader runs, with `AllocationSpec.declared_listeners` (D14 item 2); opening an id already
+    open changes nothing. `record` is the check-and-act (`rust.md` § TOCTOU): it returns
+    `Recorded::{Inserted, Duplicate, Undeclared, UnknownAlloc}` from the one locked operation,
+    and wakes `changed` waiters only on `Inserted`. `close` is called by
+    `VmDriver::on_alloc_terminal` after `ProbeRunner::stop_alloc`, and on any failure of
+    `start`, so the set freezes (does not shrink) at beacon EOF or exit until the supervisor
+    is gone, and closing can never produce a `Pass`.
+
+    Composition: `ProbeRunner::new` gains a sixth mandatory parameter `Arc<dyn
+    GuestListenerReports>`; `VmDriver::new` gains the `Arc<GuestListenerBoard>`; the worker
+    composition root builds one board and passes it to both (a missing wiring does not
+    compile, `development.md` § "Port-trait dependencies"). The simulation adapter
+    `SimGuestListenerReports` (`overdrive-sim`) implements the port with scripted insertions
+    (its scripting API is DISTILL's); `SimDriver` is unchanged, because DST drives
+    `ProbeRunner` directly as it does with `SimGuestStreamDial`.
+
+    Alternatives: (a) a `Driver` trait method returning the set: the shim does not consume
+    it and the probe runner is inside `VmDriver`, so it would widen a trait for no caller;
+    (b) an argument on `ProbeRunner::start_alloc`: works, but optional by construction, so a
+    wiring that forgets it compiles and the sim seam differs from `GuestStreamDial`;
+    (c) an observation row per reported listener (ADR-0269): a new family, envelope and wake
+    for the same fact. Consequence: one new core trait, one `ProbeRunner::new` parameter,
+    one `VmDriver::new` parameter, no `Driver`, `Action` or reconciler change. The model
+    accessor for the reported set is `GuestListenerReports::reported` (§ Formal protocol model
+    — D13 to D16).
+
+**DELIVER notes (not contract).** `local_ip6` is copied element by element (the verifier
+rejects an array copy through a modified ctx pointer). The ring size is the crafter's; the
+spikes saw no drops at 4 MiB under a 20,000-socket flood and drops, counted, at 4,096 bytes;
+V41 used 1 MiB.
 
 
-### D14 — the reports feed the startup probe row; the startup gates carry over unchanged (user-approved; pending V41 and re-review; ADR-0269)
+### D14 — the reports feed the startup probe row; the startup gates carry over unchanged
+
+Decision record: ADR-0269.
 
 1. **New probe mechanic (new public surface, named).** `ProbeMechanic` gains a fieldless
    tail variant `GuestListeners` (the D7 `StoppedBy::StartupProbe` precedent). It is valid
    only as the sole startup descriptor of a Service (`from_submit` and the parser reject it
    elsewhere), cannot be written in TOML (only D15's default rule produces it), and carries
    no listener data (that would persist derived state).
-2. **Declared listeners reach the probe runner (new public field, named).**
+2. **Declared listeners reach the probe runner (PR-4, accepted 2026-11-04: one field, not two).**
    `AllocationSpec` gains `declared_listeners: Vec<Listener>` (the existing
-   `workload_spec::Listener { port, protocol }`), projected in `hydrate_desired` beside
-   `service_ports` from the same live intent. `service_ports` stays TCP-only (it feeds the
-   inbound TPROXY rule); the new field is the full set in declaration order. In-memory
-   only, no serde or rkyv.
-3. **Producer.** For a `GuestListeners` descriptor the allocation's probe-runner task
-   (registered by `start_alloc`, cancelled by `stop_alloc`, ADR-0054/0256) does not dial.
-   It writes **one `Pass` row** as soon as the allocation's reported set contains every
-   declared `(protocol, port)`, and **a `Fail` row every `interval_seconds`** while no
-   `Pass` has been written, with reason `guest listeners not open after <n>s: <missing, e.g.
-   tcp:8080 udp:5353>`. The `Fail` cadence is a local lookup, not a dial and not on the
-   `Pass` path; it feeds the attempt count the existing stop condition reads. The parser
-   fills the explicit-probe defaults (`interval_seconds` 2, `max_attempts` 30,
-   `workload_spec.rs:1139-1141`; `timeout_seconds` unused), so the derivation `interval x
-   max_attempts` (`service_lifecycle.rs:758-770`) and D10's `startup_deadline` are
-   unchanged code and give 60 s. The 30th `Fail` satisfies `attempts >= max_attempts &&
-   elapsed >= deadline && no Pass` (`:1199`); the supervisor is registered after the
-   `Running` row's `started_at`, so elapsed is at least 60 s by then. Every `Fail` is a new
-   row, which is what D8 needs to retry a stop that did not land. A failed `Pass` write is
-   retried until it lands.
-   **Persisted-default trade-off:** like ADR-0058, the parser materialises the default into
-   the stored spec, so a later change of the default does not reach stored Services. It is
-   kept because the opt-out must stay distinguishable from "omitted" (F-7).
+   `workload_spec::Listener { port: NonZeroU16, protocol: Proto }`), the full declared set in
+   declaration order, projected in `hydrate_desired` from the same live intent. In-memory
+   only, no serde or rkyv. Today `AllocationSpec.service_ports: Vec<NonZeroU16>` (also
+   `WorkloadLifecycleState.service_ports`) is a TCP-only projection of the same declaration
+   (`project_service_listen_ports` -> `Service::listen_ports()`), consumed by the inbound
+   TPROXY rule (`mtls_intercept_worker.rs:2723, 2747`) and the inbound-rule helper
+   (`action_shim/mod.rs:1522-1525`). **Decision: `declared_listeners` replaces
+   `service_ports`**, and `AllocationSpec` gets `AllocationSpec` one read accessor for the TCP view
+   (`tcp_service_ports()`), which those two consumers call, so the TCP set is a filter of the
+   full set by construction and the two cannot drift. Alternative: keep both fields, each
+   projected separately in three `WorkloadLifecycle` construction sites; rejected because
+   nothing then ties them together, and a Service edit that changes one projection and not
+   the other breaks TPROXY or the gate silently. Cost: a mechanical change at about 25
+   struct literals (almost all tests set `service_ports: Vec::new()`), two production
+   consumers, one accessor; an unfiltered future consumer would install a TPROXY rule for a
+   UDP port, which the accessor makes the only TPROXY-facing read.
+3. **Producer (PR-3, accepted 2026-11-04: no `Fail` row before the deadline).** For a `GuestListeners`
+   descriptor the allocation's probe-runner task (registered by `start_alloc`, cancelled by
+   `stop_alloc`, ADR-0054/0256) does not dial. It waits on the reported-set port (item 10 of
+   D13) and writes:
+   - **one `Pass` row at once** when the reported set contains every declared
+     `(protocol, port)` (event-driven; `attempt` is 0); a failed `Pass` write is retried
+     until it lands;
+   - **the first `Fail` row at the derived startup deadline** (the parser fills the
+     explicit-probe defaults, `interval_seconds` 2 and `max_attempts` 30,
+     `workload_spec.rs:1139-1141`, so `interval x max_attempts`, `service_lifecycle.rs:758-770`,
+     and D10's `startup_deadline` are unchanged code and give 60 s), carrying `attempt =
+     max_attempts` and the reason `guest listeners not open after <n>s: <missing, e.g.
+     tcp:8080 udp:5353>`; then **one further `Fail` row per `interval_seconds`** (the
+     `attempt` rising by one each) while the allocation is supervised and no `Pass` has been
+     written. Every `Fail` is a new row, which is what D8 needs to retry a stop that did not
+     land. No `Fail` is written before the deadline.
+   The first `Fail` satisfies `attempts >= max_attempts && elapsed >= deadline && no Pass`
+   (`service_lifecycle.rs:1199`); the supervisor is registered after the `Running` row's
+   `started_at`, so the deadline measured from the task's start is at least 60 s after it.
+   **Consequence, stated:** for the first 60 s of an attempt that has not yet opened every
+   declared listener there is no startup probe row, so `describe` shows no startup result
+   until `Pass` or the deadline, and the operator does not see progress such as "missing
+   tcp:8080" before 60 s. The first `Fail`'s `attempt` is synthetic (`max_attempts` by
+   definition, not a count of failed attempts). The alternative of writing a `Fail` every
+   interval from the start (30 rows) gives that progress but costs about 29 extra
+   observation writes, router wakes and `ServiceLifecycle` evaluations per never-ready
+   attempt, and it is the only reader of those rows; surfacing progress some other way
+   would need the reported set on the wire (a new surface nobody has asked for), so it is
+   not part of the design. **Persisted-default trade-off:** like ADR-0058, the parser materialises
+   the default into the stored spec, so a later change of the default does not reach stored
+   Services. It is kept because the opt-out must stay distinguishable from "omitted" (F-7).
 4. **Rest of the system.** The rows are ordinary startup `ProbeResultRow`s, so `Stable`
    (branch (a), B1), D7, D8, D9, D12, D6 (its precondition "a Startup descriptor exists"
    holds), D10 and D11 are **unchanged code**. `mechanic_summary` is `guest listeners
    tcp:8080 udp:5353` (declared order).
 5. Alternatives: see ADR-0269.
 
-### D15 — the default startup gate is the guest's report of every declared listener; ADR-0058 is superseded on acceptance (user-approved; pending V41 and re-review; ADR-0270)
+### D15 — the default startup gate is the guest's report of every declared listener
+
+Decision record: ADR-0270 (supersedes ADR-0058 on acceptance).
 
 1. **Rule.** Absent `[[health_check.startup]]` (Service): the parser materialises the
    single `GuestListeners` descriptor. The Service is `Stable` when `Running` and the
@@ -2288,65 +2395,79 @@ opens its listener and crashes within about 2 s, the same promise as Kubernetes
 user ruled on 2026-11-03 that no minimum-healthy window is added. Sustained health is the
 readiness probe's job, which D12 gates traffic on.
 
-### D16 — remove `ProbeDescriptor.inferred` and its carriers, single cut (option R, user-approved; pending V41 and re-review; ADR-0271)
+### D16 — remove `ProbeDescriptor.inferred` and its carriers, single cut
 
-With D14 the platform-supplied descriptor is identified by its mechanic, so the flag is
-derived state (`inferred == (mechanic == GuestListeners)`). Option R removes it. Option K
-(keep the field; no version bumps) is the recorded alternative. The archived and wire
-carriers (the crafter confirms exact envelope names and versions):
+Decision record: ADR-0271 (option R). With D14 the platform-supplied descriptor is identified
+by its mechanic, so the flag is derived state (`inferred == (mechanic == GuestListeners)`).
+Option K (keep the field; no version bumps) is the recorded alternative. The archived and
+wire carriers (the crafter confirms exact envelope names and versions):
 
 | Carrier | Where | Versioning |
 |---|---|---|
-| Service intent probes | `ProbeDescriptor` in `ServiceV1` inside `WorkloadIntentEnvelope` (`aggregate/mod.rs:317-367`) | new envelope version |
-| Service spec probes | `ServiceSpecV1` in `ServiceSpecEnvelope` (`service_spec.rs:37-63`) | new envelope version |
+| Service intent probes | `ProbeDescriptor` in `ServiceV1` inside `WorkloadIntentEnvelope` (`aggregate/mod.rs:317-367`) | new envelope version (`ServiceV2`); carries both the `inferred` removal and the new `ProbeMechanic::GuestListeners` variant |
+| Service spec probes | `ServiceSpecV1` in `ServiceSpecEnvelope` (`service_spec.rs:37-63`) | new envelope version (`ServiceSpecV2`); carries both the `inferred` removal and the new variant |
 | Probe result row | `ProbeResultRowV1` and `V2` `inferred` (`probe_result_row.rs:398,431`) | `ProbeResultRowV3` without the field; V1/V2 fixtures untouched |
 | `Stable` witness | `ProbeWitness.inferred` in `TerminalCondition::Stable` (`transition_reason.rs:804-806`), in the alloc-status row's envelope | new version of that envelope |
 | Wire | `ProbeDescriptor`, per-alloc probe row (`api.rs:1020-1056`), `ServiceSubmitEvent::Stable` witness, describe | additive removal; `api/openapi.yaml` regenerated (`inferred` is `required` at `:1403`) |
 
-Each new version ships its own `FIXTURE_V<N>`; the existing intent and spec fixtures carry
-empty probe lists (`schema_evolution/workload_intent.rs:49`, `service_spec.rs:34`), so each
-of those two envelopes also gains a historical V1 fixture holding one probe descriptor with
-`inferred` set; existing fixtures are never touched. One commit per envelope bump.
+The intent and spec envelopes each ship one new version that carries **both** changes (the
+`inferred` removal and the tail variant `ProbeMechanic::GuestListeners`; a fieldless tail
+variant on an archived enum is itself a layout-visible change), with its own `FIXTURE_V2`
+named for the new version. The existing intent and spec fixtures carry empty probe lists
+(`schema_evolution/workload_intent.rs:49`, `service_spec.rs:34`), so they pin neither
+change; each of those two envelopes also gains a historical V1 fixture holding one probe
+descriptor with `inferred` set, and the V2 fixture holds a `GuestListeners` descriptor.
+Existing fixtures are never touched. One commit per envelope bump.
 
-**Deletion list (single cut, no stub).** `parse_startup_probes` synthesis branch
-(`workload_spec.rs:1197-1211`; the `STARTUP_*_DEFAULT` constants stay for explicit probes);
-`ServiceAllocFact.inferred` and its hydration (`service_lifecycle.rs:131-134, :861,
-:907-908`); the witness field and the opt-out witness's `inferred: false` (`:525`);
-`ProbeDescriptor.inferred`, `ProbeResultRow.inferred`, `ProbeWitness.inferred`, the wire
-fields and OpenAPI entries; the CLI `(inferred)` suffix and witness text
-(`render.rs:1277-1280`, `:1430`). The tests, fixtures and goldens that pin `inferred` (the
-SHCP-INFER parse tests, `vsock_deploy_validation.rs` probe cap, `service_lifecycle_*`,
-render and describe tests, the `inferred` proptests, the hydration golden) are rewritten or
-deleted with the code; DISTILL confirms the set by running the suite. The
-`GuestListeners` descriptor consumes no guest dial and does not count against the probe cap
-(to be confirmed against the cap's rationale).
-`verification/expectations/E13-vm-service-inferred-tcp-startup/` is a point-in-time record,
-not edited. Operator docs `website/content/docs/how-to/deploy-a-workload.mdx:108-111` are
-rewritten at the finalize gate.
+**Deletion list (single cut, no stub), by behaviour.** The default-startup-probe
+synthesis in the TOML parser (the `STARTUP_*_DEFAULT` constants stay for explicit probes and
+for the materialised `GuestListeners` descriptor); `inferred` as a field of the Service alloc
+fact, its hydration, the `Stable` witness and the opt-out witness; `inferred` on the probe
+descriptor, the probe-result row and the witness, and on the wire and OpenAPI; the CLI
+`(inferred)` suffix and witness text. The tests, fixtures and goldens that pin `inferred`
+(the parse tests of the synthesised probe, the probe-count validation test, the
+`service_lifecycle` tests, render and describe tests, the `inferred` proptests, the
+hydration golden) are rewritten or deleted with the code; DISTILL confirms the set by
+running the suite. **Probe cap:** the `GuestListeners` descriptor holds no dial, so it does
+not count toward `GUEST_PROBE_SLOTS` (`guest_transport/mod.rs:554-560`: the cap bounds the
+node flow slots a workload's probe tasks hold outside its quota, one dial per task); the
+count is over the dial-bearing descriptors and the `ProbeCountExceeded` message no longer
+mentions an inferred probe. `verification/expectations/E13-vm-service-inferred-tcp-startup/`
+is a point-in-time record, not edited. Operator docs
+`website/content/docs/how-to/deploy-a-workload.mdx:108-111` are rewritten at the finalize
+gate.
 
-### Interface changes (D13 to D16; contract shape accepted 2026-11-03, pending V41 and re-review)
+### Interface changes (D13 to D16)
 
 | Surface | Change | Crate |
 |---|---|---|
 | `BeaconMessage` | New guest-to-host variant `Listen { protocol: Proto, port: NonZeroU16 }`, text form `LISTEN <tcp\|udp> <port>`, strict three-field parse | `overdrive-core` |
 | `ProbeMechanic` | New fieldless tail variant `GuestListeners` (Service, Startup, sole descriptor only) | `overdrive-core` |
-| `AllocationSpec` | New `declared_listeners: Vec<Listener>` (in-memory) | `overdrive-core` |
-| `ProbeDescriptor.inferred`, `ProbeResultRow.inferred`, `ProbeWitness.inferred` | Removed (D16 option R); versions per the table above | `overdrive-core` |
+| `AllocationSpec` | New `declared_listeners: Vec<Listener>` (in-memory); **PR-4 (accepted):** replaces `service_ports`, and `AllocationSpec::tcp_service_ports()` is the TCP view the TPROXY consumers read | `overdrive-core` |
+| `GuestListenerReports` (**PR-1**) | New read-only driven port: `reported(&AllocationId) -> ReportedListeners`, `async changed(&AllocationId, &ReportedListeners) -> ReportedListeners`; behaviour contract in D13 item 10. New value type `ReportedListeners` | `overdrive-core` |
+| `GuestListenerBoard`, `Recorded` (**PR-1**) | New concrete writer implementing the port: `open`, `record -> Recorded::{Inserted, Duplicate, Undeclared, UnknownAlloc}`, `close` | `overdrive-worker` |
+| `ProbeRunner::new`, `VmDriver::new` (**PR-1**) | Gain a mandatory `Arc<dyn GuestListenerReports>` and `Arc<GuestListenerBoard>` parameter respectively | `overdrive-worker` |
+| `SimGuestListenerReports` (**PR-1**) | New `Sim*` implementation of the port (scripting API is DISTILL's) | `overdrive-sim` |
+| `ProbeDescriptor.inferred`, `ProbeResultRow.inferred`, `ProbeWitness.inferred` | Removed (D16 option R); versions per the D16 table | `overdrive-core` |
 | Wire / OpenAPI / CLI | `inferred` removed; describe/render print the mechanic summary; new mechanic value in the probe schema | `overdrive-core`, `overdrive-control-plane`, `overdrive-cli` |
-| Probe runner | A task kind that waits on the allocation's reported set and writes `Pass`/`Fail` rows (D14) | `overdrive-worker` |
-| Guest | Sockops `TCP_LISTEN_CB` arm merged into the existing program; two `CgroupSock` programs, post-bind4 and post-bind6; forwarding of events as `Listen` lines (structure is the crafter's) | `overdrive-bpf`, `overdrive-init` |
-| `Driver` trait, `Action`, reconciler traits, read-ports, cmdline token | Unchanged | |
+| Probe runner | A task kind that waits on the reported-set port and writes `Pass`/`Fail` rows (D14 item 3) | `overdrive-worker` |
+| Guest | Listen programs: a separate small sockops `TCP_LISTEN_CB` program in the existing object and two `CgroupSock` programs (post-bind4, post-bind6), all three attached to a workload cgroup that init creates and starts the workload in (**PR-2**, V42 held; objects and attachments pinned in D13 item 1, P-a to P-d); forwarding of events as `Listen` lines (structure is the crafter's) | `overdrive-bpf`, `overdrive-init` |
+| `Driver` trait, `Action`, reconciler traits, other read-ports, cmdline token | Unchanged | |
 
-Contract shapes (design.md rule 12): the parse of `Listen` is **pure-function**; the
-driver's reported set is **bounded-change** (insert-only, universe = declared listeners of
-one allocation, assertion: the set only grows and is a subset of the declared set); the
-probe task is **bounded-change** (writes only startup `ProbeResultRow`s for its own
-allocation); no component here is unbounded-preservation.
+Contract shapes (design.md rule 12): the parse of `Listen` is **pure-function**;
+`GuestListenerReports` is a **read-only** port (no write method on it); the board is
+**bounded-change** (insert-only; universe = the declared listeners of one allocation;
+assertion: through `reported`, the set only grows and stays a subset of the declared set);
+the probe task is **bounded-change** (writes only startup `ProbeResultRow`s for its own
+allocation); no component here is unbounded-preservation. The board is an in-process
+adapter over memory, with no external dependency, so it carries no `probe()`; the guest
+hooks' real-environment proof is V34 to V39 and V42.
 
-### Lifecycle Gate Ownership — Gate G-10, the guest-listener startup gate (D13 to D15, pending V41 and re-review)
+### Lifecycle Gate Ownership — Gate G-10, the guest-listener startup gate (D13 to D15)
 
 - **Existing evidence:** ADR-0054, ADR-0055, ADR-0259, ADR-0265, ADR-0267; path: guest
-  `listen()`/`bind()` → [new] in-guest BPF → [new] `LISTEN` beacon line → [new] driver set →
+  `listen()`/`bind()` → [new] in-guest BPF → [new] `LISTEN` beacon line → [new] host board
+  (`GuestListenerBoard`, read through `GuestListenerReports`) →
   probe task → startup `ProbeResultRow` → `ServiceLifecycle::reconcile` branch (a)
   (`service_lifecycle.rs:535-558`) → `FinalizeFailed { Stable }`
   (`action_shim/mod.rs:2028-2040`) → `streaming.rs:835`.
@@ -2356,11 +2477,12 @@ allocation); no component here is unbounded-preservation.
   address, at least once by this incarnation's workload; no claim about staying up or about
   IPv4 reachability (D13 item 8).
 - **Affected state:** the allocation's startup probe row, and through existing gates `Stable`.
-- **Failure projection:** no report by the deadline → `Fail` rows listing the missing
-  listeners → D7 stop → give-up `StartupProbeFailed`; unparseable line → dropped and logged;
-  undeclared report → ignored; duplicate → no-op; beacon disconnected → the set freezes and
-  the VMM exit is handled by the exit watcher; late report after the terminal row → no row;
-  cancelled consumer → level-triggered from rows.
+- **Failure projection:** no report by the deadline → a `Fail` row at the deadline listing the
+  missing listeners, then one per interval → D7 stop → give-up `StartupProbeFailed`;
+  unparseable line → dropped and logged; undeclared report → not stored; duplicate → no-op;
+  beacon disconnected → the set freezes and the VMM exit is handled by the exit watcher;
+  late report after the terminal row → no row; cancelled consumer → level-triggered from
+  rows; a dropped report (full ring) → the same as no report.
 - **Explicitly unaffected:** `Running`; the driver `start`/`READY` outcome (init-ready, not
   workload-ready); restart budget, backoff and ceiling; liveness (D9); readiness probes;
   the opt-out path; Job and Schedule.
@@ -2369,17 +2491,30 @@ allocation); no component here is unbounded-preservation.
 - **Counterexample:** gating `Running` or driver `start` on the report deadlocks: the
   workload does not run until `EXEC`, which is released after `Running`.
 - **Evidence lane:** pure/proptest (wire parse; set-versus-declared predicate); seeded
-  `overdrive-sim` with a `Sim` guest-report source (happy path, deadline `Fail` cadence,
-  retry, exit-before-pass, ordering); real kernel (V34 to V39) on native metal.
+  `overdrive-sim` with `SimGuestListenerReports` (happy path, deadline `Fail` cadence,
+  retry, exit-before-pass, ordering); quint-connect conformance of the beacon report module;
+  real kernel (V34 to V39, V42) on native metal.
 
 **Required boundary scenarios (DISTILL obligations once accepted).** (1) all declared
-listeners reported → `Pass` → `Stable`; (2) one never reported → `Fail` rows from 60 s,
-stop, retry, give-up; (3) `Running` row and an opt-out Service unchanged; an undeclared port
+listeners reported → `Pass` → `Stable`; (2) one never reported → no row before the deadline,
+the first `Fail` at the deadline, stop, one `Fail` per interval while the stop has not landed,
+retry, give-up; (3) `Running` row and an opt-out Service unchanged; an undeclared port
 changes nothing; (4) late `Pass` after the terminal row or `stop_alloc` writes nothing; (5)
 beacon closed with the set partial → no `Pass`, deadline stop; guest reboot is a new
 allocation with an empty set; (6) opt-out and explicit-probe Services are behaviourally
-unchanged. Seeded invariants: `GuestListenerPassImpliesAllDeclared`, `NoPassAfterEnding`,
-`StableNeverForNonRunning`.
+unchanged; (7) **host reader** (Tier 1, scripted beacon lines): a garbage line after `READY`
+is dropped with a warn event and the following `Listen` and `Exit` still take effect; a
+`Listen` line after `Exit` changes neither the set nor the exit report; (8) **ring drop**
+(seeded sim): the declared listener's report never reaches the board while the workload is
+running → no `Pass`, `Fail` at the startup deadline, stop, restart, give-up
+`StartupProbeFailed` naming the missing listener (the stated bounded exposure, D13 item 9);
+(9) **the guest's own binds** (Tier 3, real guest): init's transport binds (TCP intake,
+1,024 UDP slots) produce zero `LISTEN` lines before `EXEC` (structural under PR-2; a
+regression if init's sockets ever become visible), and the workload's own listener, started
+after `EXEC`, produces exactly one; (10) **loopback** (Tier 3): binds to `127.0.0.1`, `::1`
+and `::ffff:127.0.0.1` produce no line, and `::ffff:<non-loopback>` produces one. Seeded
+invariants: `GuestListenerPassImpliesAllDeclared`, `NoPassAfterEnding`,
+`StableNeverForNonRunning`, `NoFailBeforeDeadline`.
 
 ### Interaction with the accepted decisions
 
@@ -2388,44 +2523,92 @@ never-listening guest is stopped at the first `Fail` (60 s) and re-stopped per n
 D6: the pre-startup crash precondition holds for the default; the opt-out has none and
 gives up `BackoffExhausted`. D11 and ADR-0095 unchanged. ADR-0080: one more task kind.
 
-### Formal protocol model — decision (D13 to D16)
+### Formal protocol model — D13 to D16
 
-**No new Quint specification and no new state in the existing one.** D13 to D15 add a
-producer for the existing startup `Pass`/`Fail` rows and no state, owner or ordering
-decision: the interleavings are those `specs/quint/service-allocation-readiness-and-ending/` checks with the
-startup producer abstract. The two orderings relied on are structural (the guest runs only
-after `EXEC`, D3) or already modelled (no `Pass` after the supervisor is cancelled, D1);
-the modeler confirmation is M-3.
+**D14 and D15 add no state to the existing modules** (a producer for the existing startup
+rows; the confirmation is M-3). **The beacon report channel (D13 items 1, 3 and 10) is an
+ordered, single-writer, crash-sensitive protocol and carries its own module**, `guest_report`,
+in `specs/quint/service-allocation-readiness-and-ending/` (specified here; the modeler writes
+and checks it, M-6). The guest-signal spike measured the hazard: 185 of 300 boots delivered a
+`LISTEN` after `EXIT` without the drain.
 
-### Spike table — contract-shaping validation items V34 to V39 and V41 (V40 is a post-DELIVER measurement)
+- **Variables.** `wl` (workload: not started, running, exited); `ring` (the kernel's listen
+  events not yet taken by the writer, a sequence over a small alphabet such as `tcp80`,
+  `udp53`, `other`); `wire` (what init has written to the beacon, in order: `ready`,
+  `listen(p)`, `exit`); `rd` (how much of `wire` the host reader has consumed); `set` (the
+  board's reported set); `wait` (the host's guest-report wait: waiting, ended); `exitrep`
+  (the exit report: unset, set); model-only ghosts `produced` (events the hook enqueued,
+  with a `dropped` marker for a full-ring event) and `eof` (the beacon closed).
+- **Actions.** `WorkloadListen(p)` (only while `wl` is running; enqueues to `ring` or marks
+  the event dropped); `WorkloadExit`; `WriterForward` (moves the head of `ring` to `wire`);
+  `WriterDrain` (forwards everything left in `ring`, enabled only after `WorkloadExit`);
+  `WriterExit` (appends `exit`; guard: `wl` exited and `ring` empty); `BeaconClose` (EOF:
+  guest or VMM gone); `HostRead` (consumes one `wire` entry: `listen(p)` inserts into `set`
+  only while `wait` is waiting and `p` is declared; `exit` sets `exitrep` and ends the wait;
+  EOF ends the wait); `HostGarbage` (an unparseable line: no effect on `set`, `wait` or
+  `exitrep`). There is one writer: every `wire` append is a writer action, never two.
+- **Invariants.** `OneWriter` (by construction of the action set; kept as a check on the
+  ghost); `ListenBeforeExit` (in `wire`, every `listen` precedes `exit`); `DeliveredBeforeExit`
+  (when `exit` is on `wire`, every produced, non-dropped event is on `wire` before it);
+  `NoLateAccept` (`set` does not change after `wait` is ended); `ExitNotMasked` (`exitrep` is
+  set iff an `exit` entry was read); `SetWithinProduced` (every pair in `set` was produced by
+  the workload). Progress: `ExitEventuallyReported` (a workload that exits with the beacon
+  open ends the wait).
+- **Named runs** (one per critical scenario; each listed in `checks.toml` with `backend =
+  "evaluator"`): `listen_then_exit_drains_first` (happy path and the 185-of-300 race: a
+  `LISTEN` produced just before exit is on `wire` before `exit`); `all_declared_reported`
+  (the `set` reaches the declared pair, the input to `Pass`); `garbage_line_is_dropped`
+  (`HostGarbage` mid-stream; later `listen` and `exit` still take effect); `ring_drop_leaves_set_partial`
+  (a dropped declared event: `set` stays partial, the wait still ends on `exit`);
+  `beacon_closes_with_partial_set` (EOF with `set` partial: the wait ends, `set` frozen).
+- **One hazard:** `hz_no_drain_before_exit` — `WriterExit` is enabled without the ring being
+  empty (the drain removed). The checker must find a violation of `DeliveredBeforeExit` and
+  `ListenBeforeExit`. No other hazard: the writer-ordering rule is the one decision, and
+  "two writers" is covered by the single-writer structure of the action set, not by a
+  second hazard (`.claude/rules/design.md`: one hazard per decision).
+- **Assumptions, each with a discharging item.** The kernel enqueues a listen event for every
+  `listen()` of the workload before the workload can observe the socket serving (V34, V35,
+  V36); the ring drops and counts on full (V37); vsock preserves the order of one stream (V38).
+- **Pinned accessors for the conformance driver.** `set` ↔ `GuestListenerReports::reported(alloc)`
+  (D13 item 10); `exitrep` ↔ the `ExitEvent` the driver's exit watcher emits on the
+  receiver returned by `take_exit_receiver`; `wait` ↔ the observable "the guest-report wait
+  has ended" is the exit report being available or the driver's reader task having returned,
+  the crafter exposes nothing new for it, so `wait` is checked through `set` not changing and
+  `exitrep` as above; the driving port for `HostRead` and `HostGarbage` is the scripted beacon
+  line source the driver's reader consumes (the same seam as `quint_flows_beacon.rs`).
+  `ring`, `wire`, `produced`, `dropped` and `eof` are **model-only** on the host side. **Design
+  gap, surfaced:** `overdrive-init`'s writer (`send(conn: &mut File, ..)`) has no seam that
+  records the lines it writes, so the guest half (`ListenBeforeExit`, `DeliveredBeforeExit`)
+  has no owner accessor in Tier 1. **User ruling 2026-11-04: accepted.** Conformance covers
+  the host half only (`HostRead`, `HostGarbage`, `set`, `exitrep`); the guest half
+  (`ListenBeforeExit`, `DeliveredBeforeExit`, the drain rule) is covered by Tier-3 real-boot
+  coverage: the V36 real-guest boots (1,000 boots, 0 `LISTEN` after `EXIT`) and DISTILL's
+  Tier-3 scenario G-10 (9). There is no writer seam in `overdrive-init`. The recorded gap:
+  the guest writer's ordering is not replayed against the model step by step.
+
+### Spike table — contract-shaping validation items V34 to V39, V41 and V42
 
 Per `.claude/rules/design.md` § "Run contract-shaping validation before the design is
-accepted", D13 to D16 are not Accepted until the findings land; a falsified item is a design
-defect, remediated with user approval. A parallel crafter runs the spikes under two names:
-`listen-hooks` and `guest-signal`. Spike code is throwaway under `spike-scratch/` with its
-own `Cargo.toml`, aya-rs Rust only, run in a real guest VM on the native metal host with
-`cargo xtask metal run --`, recording the **guest** `uname -r`, with a PROMOTE, DISCARD or
-PIVOT verdict (`.claude/rules/spike.md`).
-
-The items V34 to V39 were proposed as V32 to V38 and renumbered to avoid B2's and B3's V32 and V33;
-the findings files carry the older numbers (`findings-guest-signal.md`: V34 = V36, V36 = V38;
-`findings-listen-hooks.md` labels both, "V32/V34"). The spike dispatch ran as `listen-hooks`
-(V34, V35, V37, V39) and `guest-signal` (V36, V38); V40 is the post-DELIVER measurement.
-V41 (below) was added on 2026-11-03 as a third, contract-shaping budget item and is running.
+accepted", a falsified item is a design defect, remediated with user approval. The spikes ran
+as `listen-hooks` (V34, V35, V37, V39), `guest-signal` (V36, V38) and `boot-cost` (V41). Spike
+code is throwaway under `spike-scratch/`, aya-rs Rust only, run in a real guest VM on the
+native metal host with `cargo xtask metal run --`, recording the **guest** `uname -r`
+(`.claude/rules/spike.md`). The findings files carry earlier numbers for some items; the
+mapping is in `spike/wave-decisions.md`.
 
 | ID | Shapes | Claim | Status |
 |---|---|---|---|
 | V34 | D13 (ADR-0272) | A sockops `TCP_LISTEN_CB` arm at the cgroup2 root fires once per listen transition for an unmodified workload, port and address readable | **Discharged (held)**, 13 of 13 cases, `findings-listen-hooks.md`, `7.0.0-38-generic`. Precision limit: `V6ONLY` unreadable (D13 item 8). A backlog-only re-`listen()` emits none; `shutdown(SHUT_RD)` then `listen()` emits a second event on the same port (duplicates occur, D13 item 5) |
 | V35 | D13 (ADR-0272) | `CgroupSock` post-bind4/6 reports an explicit UDP bind and not autobind; aya can attach the types; loopback is distinguishable | **Discharged (held)**, 13 of 13, same findings and kernel. Two programs are required, both return 1, both filter protocol 17 (D13 item 7); `IP_BIND_ADDRESS_NO_PORT` and `sendto` autobind are never reported |
 | V36 | D13 (ADR-0268), D3 | A hook attached before `READY` misses no listener | **Discharged (held)**: 1000 of 1000 real guest boots reported the TCP listen and the UDP bind, none before `EXEC`; negative control (hooks attached after the workload) 0 of 50; `findings-guest-signal.md`, guest kernel `7.0.0-38-generic`. Pins the drain-before-`EXIT` rule |
-| V37 | D13 (ADR-0272, ADR-0268) | The listen op can be an arm in the existing sockops program within the verifier budget, correlation unchanged; ring overflow is fail-closed | **Discharged (held)**: merged arm 750 of 1,000,000 verified instructions (+112), correlation scenario identical against both objects, `seen == delivered + drops` in 12 of 12 flood runs, overflow costs the workload nothing. Premise corrected: a second sockops attach does not replace the first (aya links imply `BPF_F_ALLOW_MULTI`); merge chosen (D13 item 7). Ring size not established (D13 item 9) |
+| V37 | D13 (ADR-0272, ADR-0268) | The listen op can be an arm in the existing sockops program within the verifier budget, correlation unchanged; ring overflow is fail-closed | **Discharged (held)**: merged arm 750 of 1,000,000 verified instructions (+112), correlation scenario identical against both objects, `seen == delivered + drops` in 12 of 12 flood runs, overflow costs the workload nothing. A second sockops attach does not replace the first (aya links imply `BPF_F_ALLOW_MULTI`). Ring size not established (D13 item 9) |
 | V38 | D13 (ADR-0268) | `LISTEN` delivery over the beacon vsock is fast and lines stay intact beside a concurrent `EXIT` | **Discharged (held)**: round-trip p99 138.8 us over 100 000 iterations, 0 malformed with one ordered writer, corruption with two unsynchronised writers (single-writer rule), reader fix (D13 item 3); `findings-guest-signal.md` |
 | V39 | D13 premise | The guest kernel has the config the hooks need | **Partial**: held on the metal fixture kernel `7.0.0-38-generic` (`/boot/config-…`; the fixture guest kernel is byte-identical to it; all program types load and attach). **Residual:** the operator-example guest kernel config was not located and no `IKCONFIG` is embedded; the requirement list (`CONFIG_BPF_SYSCALL`, `CONFIG_CGROUP_BPF`, `CONFIG_INET`, `CONFIG_IPV6`, `CONFIG_DEBUG_INFO_BTF`) goes to the appliance image config assertion (ADR-0068 §7). Not contract-shaping |
 
-| ID | Shapes | Spike and findings file | Assumption | Probe | Prediction | Falsification |
-|---|---|---|---|---|---|---|
-| V40 | measurement; **not contract-shaping, does not gate acceptance** | benchmark after DELIVER; `.../spike/findings-exec-to-stable-latency.md` (a benchmark note, not an expectation) | The cold-start claim: exec to the `Stable` event with the guest-listener gate versus the inferred poll, and with versus without the D17 wake | after DELIVER, on metal, `overdrive deploy` of a service that listens immediately, 30 runs per arm (poll; guest gate without the wake; guest gate with the wake), raw samples and method recorded; per hop, the interval from the submit to `convergence.evaluation.admitted` (queue_ms), with and without the wake (D17); also the time from VM boot to `READY` in the real `overdrive-init`, decomposed into object load, verifier and attach, with and without the listen programs (the pre-acceptance version of this measurement is V41), and the listen ring's drop counter on a healthy start (D13 item 9) | The wake removes up to one `tick_period_ms` per non-event hop (queue_ms near zero instead of uniform on 0 to 100 ms); the remainder is guest-to-host delivery | n/a (reports the number; a remaining tick-sized cost would be a separate user decision) |
-| V41 | D13 (ADR-0268, ADR-0272); **contract-shaping budget item, gates acceptance of D13 to D16** (user ruling 2026-11-03: cold start is the platform goal) | boot-cost spike, running; `docs/feature/service-allocation-readiness-and-ending/spike/findings-boot-cost.md` | The listen programs add an acceptable cost to the pre-`READY` path of a first boot (the 50 to 80 ms in D13 item 6 is the whole listen sequence in a spike guest, undecomposed and not the marginal cost) | Real `overdrive-init` in a real guest on native metal: time from VM boot to `READY`, variant A (the existing seven programs alone) versus variant B (existing programs plus the merged sockops listen arm and the post-bind4/6 programs), decomposed into object load, verifier and attach; guest `uname -r` recorded; raw samples and method recorded | B minus A is small against the cold-start goal; the merged sockops arm adds no load or attach of its own (D13 item 7), so the delta is the two `CgroupSock` programs and the ring map | A material B-minus-A delta **returns D13 to DESIGN** (the user decides the remedy). Otherwise the finding is recorded and D13 to D16 proceed to the independent re-review |
+| ID | Shapes | Claim | Status |
+|---|---|---|---|
+| V41 | D13 (ADR-0268, ADR-0272); the cold-start budget | The listen programs add an acceptable cost to the pre-`READY` path of a first boot | **Discharged (held)**, `findings-boot-cost.md`, guest `7.0.0-38-generic`, 40 interleaved boots per variant: **+0.36 ms at p50** (paired p90 +1.29 ms, max +2.10 ms) against a same-toolchain baseline; the +20 ms bar was missed by about 50 times; today's pre-`READY` BPF work is 116.8 ms p50. PROMOTE. PARTIAL on one point: the guest PID 1 is an instrumented copy of the real init (equivalent by control, A minus R -1.1 ms; the copy was deleted). Unmeasured: the production merge and the PR-2 shape, the forwarder, drain and write path, a 4 MiB ring (the spike used 1 MiB) |
+| V42 | D13 PR-2 (ADR-0272); **contract-shaping; held, gates PR-2 (now Accepted in contract shape)** | With the listen programs attached to a workload cgroup that init creates and starts the workload in, on the real init: init's transport binds produce no report; the workload's listeners (and its forked children's) are all reported; there is no window in which the workload runs outside the cgroup; the existing correlation and connect programs still see the workload's sockets; the boot cost stays in the V41 range | **Discharged (held), 2026-11-04, PROMOTE PR-2**, `spike/findings-workload-cgroup.md`, guest kernel `7.0.0-38-generic`, Cloud Hypervisor v53.0.0 on native metal (`systemd-detect-virt: none`). Observed: 1000 of 1000 exact workload reports (400 single, 300 child-only, 300 parent-and-child), 0 from init, counters match events, 0 drops; negative controls hold (workload outside the cgroup 0 of 150; hooks at the root: 50 of 50 report init's `61000` and `61001-62024`); root programs effective in the child (flow stream header byte-identical, 80 of 80; absent 20 of 20 without the root sockops program); cost **+0.88 ms p50** (p90 +1.66, max +2.49) with the programs in the existing object, **+20.4 ms** for a second `Ebpf::load`. Pins P-a to P-d in D13 item 1. Not shown: the production reader and beacon `LISTEN` path (Tier-3 boot scenarios), the missing-workload-binary exit-127 mapping (DELIVER note). Probe as planned: a spike-local copy of `overdrive-init` under `spike-scratch/` (the V41 copy was deleted) with the cgroup, the separate sockops program and the two `CgroupSock` programs; 1,000 real guest boots on metal for the report counts (init binds: expect 0; workload TCP listen and UDP bind: expect 1 each; a forking workload; a negative control spawning outside the cgroup, which must report from the root), 40 interleaved boots for the cost against V41's variants; the correlation scenario of V37 against the new object; guest `uname -r` recorded. Prediction: 0 init reports, 1000 of 1000 workload reports, cost within about 1 ms of V41's B. Falsification: any init report, any missed workload report, or a cost above V41's B by more than a few ms returns D13 to the user with the port-range filter or ordering alternatives (D13 item 1) |
 
 ### Findings surfaced, not changed
 
@@ -2435,32 +2618,13 @@ V41 (below) was added on 2026-11-03 as a third, contract-shaping budget item and
   and a UDP listener cannot be probed (TCP-only `listen_ports`); a UDP-first Service never
   passes today. D15 removes the case.
 
-### User rulings on D13 to D16, and what remains
+### What remains before D13 to D16 are Accepted
 
-Ruled 2026-11-03 ("add it. and proceed with recommendations"): the direction of all four
-(in-guest mechanism and `LISTEN` report, `GuestListeners` and `declared_listeners`, all
-declared listeners with the opt-out kept and no minimum-healthy window, option R).
-
-Ruled 2026-11-03 (the four rulings of that date on the spike-corrected contract):
-
-1. **The corrected D13 is ACCEPTED in contract shape**: the `TCP_LISTEN_CB` arm merged into the
-   existing sockops program; `post_bind4` and `post_bind6` `CgroupSock` programs, both returning
-   1, both filtering protocol 17; loopback-only exclusion; one ordered beacon writer; drain
-   `LISTEN` before `EXIT`; the host reader ends the guest-report wait only on `EXIT` or EOF.
-   D13 to D16 and ADR-0268 to ADR-0272 remain "user-approved, pending the V41 boot-cost
-   measurement and the independent re-review", because cold start is the platform goal. V41
-   is a contract-shaping budget item; a material B-minus-A delta returns D13 to DESIGN.
-2. **Dual-stack** is recorded against GH #308: Overdrive does not support IPv6 yet; the
-   "`AF_INET6` wildcard report satisfies an IPv4-declared listener" rule and the `V6ONLY`
-   exposure are #308's (https://github.com/overdrive-sh/overdrive/issues/308#issuecomment-6614793072).
-   P-11 is dropped.
-3. **P-10 is REJECTED.** The ring is sized generously by the crafter, the drop counter stays
-   visible, and a lost report remains a stated, bounded exposure (the service is stopped at the
-   startup deadline, not hung). Only TCP listen transitions and explicit UDP binds produce events.
-4. **D17 shape choices S1 to S6 are ACCEPTED as proposed**, and D17 / ADR-0273 are Accepted.
-
-**Remaining:** V41's findings and the independent re-review; each of ADR-0268 to ADR-0272
-then moves to Accepted (ADR-0058 stays operative until ADR-0270 is accepted).
+The user's rulings (PR-1 to PR-4 and the `guest_report` coverage split, 2026-11-04) are in
+§ Approval record. V42 is read into the design (PR-2 Accepted in contract shape). Remaining:
+the `quint-modeler` run on the `guest_report` module (M-6, and M-3); the independent
+re-review (round 4). Each of ADR-0268 to ADR-0272 then moves to Accepted (ADR-0058
+stays operative until ADR-0270 is accepted).
 
 ## Wave: DESIGN / [REF] Proposals not included in the design (the user decides)
 
@@ -2487,26 +2651,29 @@ an unchanged spec resume an operator-stopped workload (D11 reports the stopped s
   (`action_shim/mod.rs:3287-3355`), which also governs operator and liveness stops, so it
   needs a per-disposition rule and seeded scenarios. Cheaper alternative: the stated
   exposure (one attempt's label, never a restart decision). Not recommended.
-- **P-10: rejected by the user, 2026-11-03** (a level map so a full ring cannot lose a report).
-  The ring is sized generously and the drop counter stays visible (D13 item 9).
-- **P-11: dropped, 2026-11-03.** Overdrive does not support IPv6 yet; the dual-stack rule and
-  the `V6ONLY` exposure are recorded against GH #308 (D13 item 8).
-- **P-6, P-7, P-8: no longer proposals.** Included by the user on 2026-11-02 as D8, D9, D10.
+- **P-12:** an exec-to-`Stable` latency benchmark (guest-listener gate versus the inferred
+  poll, with and without the D17 wake; per-hop queue time; the listen ring's drop counter on
+  a healthy start). It is a benchmark, not a gate or an expectation, and
+  `.claude/rules/testing.md` requires an approved methodology and baseline policy first.
+  Cost: 30 runs per arm, three arms, so about 90 real microVM boots on the metal host plus
+  the harness and a methodology note; no CI lane. No decision depends on it. Cheaper
+  alternative: none needed for correctness; the claim "no 2 s floor" follows from the
+  mechanism (the `Pass` is written on the insertion, D13 item 10).
 
 ## Wave: DESIGN / [REF] Open questions
 
-No contract-shaping item is open for D1 to D12 or D17. The one open contract-shaping item is **V41**
-(the pre-`READY` boot cost of the listen programs, gating D13 to D16; a material B-minus-A
-delta returns D13 to DESIGN). The D17 shape choices and the D13 corrections were ruled on
-2026-11-03 (§ User rulings on D13 to D16); P-10 is rejected and P-11 is dropped. Process items:
+No contract-shaping item is open. The last one, **V42** (the PR-2 hook scope), is held
+(2026-11-04). User decisions awaiting: none.
+Process items:
 
 1. **ADR map.** D3 is ADR-0256, D5 is ADR-0257, D6 is ADR-0258, D7 is ADR-0259, D8 is
    ADR-0260, D9 is ADR-0261, D10 is ADR-0262 (deadline) and ADR-0264 (`last_attempt`
    detail), D11 is ADR-0263; ADR-0255 keeps D1, D2 and D4 as one decision. B1 is ADR-0265,
    B2 is ADR-0266, D12 is ADR-0267 (amends the operative ADR-0096 with a dated note), D17 is
-   ADR-0273; B3 is text in ADR-0258. D13 to D16 are ADR-0268 to ADR-0272 (user-approved, pending V41 and re-review).
-2. **Next gates:** the V41 findings, the `quint-modeler` run on the § Modeler change list, and
-   the independent DESIGN re-review of this revision.
+   ADR-0273; B3 is text in ADR-0258. D13 to D16 are ADR-0268 to ADR-0272.
+2. **Next gates:** the `quint-modeler` run on the § Modeler change list (the `guest_report`
+   module, M-6, and M-3), then the independent DESIGN re-review of this revision (round 4).
+   V42 is held and read in.
 3. At landing, `.claude/rules/development.md` § "Reconciler I/O" ("Steady-state tick") and
    the `spawn_convergence_loop` doc comment gain the D17 wake; the user's rules docs are not
    edited by the architect.

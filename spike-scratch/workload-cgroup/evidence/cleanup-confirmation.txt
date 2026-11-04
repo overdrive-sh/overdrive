@@ -1,0 +1,52 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.10s
+     Running `target/debug/xtask metal run -- bash -c 'rm -rf /tmp/wc-target; rm -rf /home/ubuntu/overdrive-branches/*/spike-scratch/workload-cgroup/out; echo "CLEANUP uname_r=$(uname -r)"; echo "wc build dir: $(ls -d /tmp/wc-target 2>&1)"; echo "gen dir: $(ls -d spike-scratch/workload-cgroup/out 2>&1)"; echo "VMM/driver procs: $(pgrep -c -x cloud-hypervisor; pgrep -c -x wcdriver)"; echo "wc/guest bpf progs on host: $(bpftool prog show 2>/dev/null | grep -cE "wc_listen|wc_post_bind|tcp_correlation|sock_release")"; echo "host overdrive-owned veth/ovd links: $(ip -br link | grep -c ovd)"; echo "workload cgroup on host: $(ls -d /sys/fs/cgroup/workload 2>&1)"; echo "per-boot kit cgroups on host:"; ls /sys/fs/cgroup/overdrive.slice/workloads.slice/ | head -5; echo "run dirs (pre-existing, not ours, dated Oct 24 / Oct 28):"; ls -d /run/ovd-gk-*'`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+OVERDRIVE_METAL_RUN_ID=e9773055d9f353613d9f2169
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_RUN_REGISTERED run_id=e9773055d9f353613d9f2169
+OVERDRIVE_METAL_LEASE_ACQUIRED token=e9773055d9f353613d9f2169 pid=1410393
+
+########## [bootstrap] acquire metal tree lock (/run/lock/overdrive-metal-tree-overdrive-branches-marcus-sa-nw-bugfix-crash-restart-tasks.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=e9773055d9f353613d9f2169-tree pid=1411846
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/ouagadougou -> ubuntu@151.115.99.251:/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks
+
+sent 1,897,464 bytes  received 6,281 bytes  1,269,163.33 bytes/sec
+total size is 1,831,441,931  speedup is 962.02
+
+########## [bootstrap] materialising standalone .git (common dir 7.5G)
+
+sent 697,559 bytes  received 18,638 bytes  477,464.67 bytes/sec
+total size is 918,033,953  speedup is 1,281.82
+## marcus-sa/nw-bugfix-crash-restart-tasks...origin/marcus-sa/nw-bugfix-crash-restart-tasks [ahead 12, behind 1]
+ M docs/feature/service-allocation-readiness-and-ending/design/wave-decisions.md
+ M docs/feature/service-allocation-readiness-and-ending/feature-delta.md
+ M docs/feature/service-allocation-readiness-and-ending/spike/wave-decisions.md
+ M docs/product/architecture/adr-0265-servicelifecycle-announces-stable-from-the-committed-row.md
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+CLEANUP uname_r=7.0.0-38-generic
+wc build dir: ls: cannot access '/tmp/wc-target': No such file or directory
+gen dir: ls: cannot access 'spike-scratch/workload-cgroup/out': No such file or directory
+pgrep: pattern that searches for process name longer than 15 characters will result in zero matches
+Try `pgrep -f' option to match against the complete command line.
+VMM/driver procs: 0
+0
+wc/guest bpf progs on host: 0
+host overdrive-owned veth/ovd links: 0
+workload cgroup on host: ls: cannot access '/sys/fs/cgroup/workload': No such file or directory
+per-boot kit cgroups on host:
+cgroup.controllers
+cgroup.events
+cgroup.freeze
+cgroup.kill
+cgroup.max.depth
+run dirs (pre-existing, not ours, dated Oct 24 / Oct 28):
+/run/ovd-gk-1519761-1
+/run/ovd-gk-diagnostic-3903596

@@ -1,0 +1,9 @@
+SUBSTRATE uname_r=7.0.0-38-generic machine=x86_64 virt=none date=2026-11-04T10:37:48Z
+CH cloud-hypervisor v53.0.0
+WCENV {"kernel_release":"7.0.0-38-generic","ch":"/usr/local/bin/cloud-hypervisor","real_init":"/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/target/x86_64-unknown-linux-musl/release/overdrive-init","swapped_init":"/tmp/wc-target/objs/init-wc","swapped_init_plus":"/tmp/wc-target/objs/init-wcp"}
+a_childonly: 300/300 boots exactly as predicted
+a_parentchild: 300/300 boots exactly as predicted
+a_single: 400/400 boots exactly as predicted
+TOTAL 1000/1000; init-originated reports across all boots: 0
+workload report counts by (kind,port): {('tcp_listen', '18080'): 700, ('udp_bind', '18081'): 700, ('tcp_listen', '18082'): 600, ('udp_bind', '18083'): 600}
+WCFAIL lines: 0

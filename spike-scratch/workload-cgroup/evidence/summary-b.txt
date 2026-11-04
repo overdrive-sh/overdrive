@@ -1,0 +1,23 @@
+SUBSTRATE uname_r=7.0.0-38-generic machine=x86_64 virt=none date=2026-11-04T10:30:54Z
+CH cloud-hypervisor v53.0.0
+b_out_childonly: n=50 totals={'init_tcp': 0, 'init_udp': 0, 'init_other': 0, 'wl_tcp': 0, 'wl_udp': 0, 'wl_other': 0}
+   per-boot (init_tcp,init_udp,wl_tcp,wl_udp) shapes: {('0', '0', '0', '0'): 50}
+   workload cgroups: {'0::/': 50}  init udp port range(s): {'0-0': 50}
+   accounting tcp_seen/udp_seen/drops: Counter({('0', '0', '0', '0'): 50})
+b_out_parentchild: n=50 totals={'init_tcp': 0, 'init_udp': 0, 'init_other': 0, 'wl_tcp': 0, 'wl_udp': 0, 'wl_other': 0}
+   per-boot (init_tcp,init_udp,wl_tcp,wl_udp) shapes: {('0', '0', '0', '0'): 50}
+   workload cgroups: {'0::/': 100}  init udp port range(s): {'0-0': 50}
+   accounting tcp_seen/udp_seen/drops: Counter({('0', '0', '0', '0'): 50})
+b_out_single: n=50 totals={'init_tcp': 0, 'init_udp': 0, 'init_other': 0, 'wl_tcp': 0, 'wl_udp': 0, 'wl_other': 0}
+   per-boot (init_tcp,init_udp,wl_tcp,wl_udp) shapes: {('0', '0', '0', '0'): 50}
+   workload cgroups: {'0::/': 50}  init udp port range(s): {'0-0': 50}
+   accounting tcp_seen/udp_seen/drops: Counter({('0', '0', '0', '0'): 50})
+b_rootearly: n=50 totals={'init_tcp': 50, 'init_udp': 51200, 'init_other': 0, 'wl_tcp': 50, 'wl_udp': 50, 'wl_other': 0}
+   per-boot (init_tcp,init_udp,wl_tcp,wl_udp) shapes: {('1', '1024', '1', '1'): 50}
+   workload cgroups: {'0::/': 50}  init udp port range(s): {'61001-62024': 50}
+   accounting tcp_seen/udp_seen/drops: Counter({('2', '1025', '0', '0'): 50})
+b_rootlate: n=50 totals={'init_tcp': 0, 'init_udp': 0, 'init_other': 0, 'wl_tcp': 50, 'wl_udp': 50, 'wl_other': 0}
+   per-boot (init_tcp,init_udp,wl_tcp,wl_udp) shapes: {('0', '0', '1', '1'): 50}
+   workload cgroups: {'0::/': 50}  init udp port range(s): {'0-0': 50}
+   accounting tcp_seen/udp_seen/drops: Counter({('1', '1', '0', '0'): 50})
+WCFAIL lines: 0

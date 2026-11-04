@@ -1,0 +1,103 @@
+===== sample boot: variant=a_single ovdwc=child workload=single round=0 exit=0 stream_hex=[]
+  WC_T mode=child start=2834 cfg_begin=2143826 programs_done=125145235 wc_cgroup_made=125215260 wc_loaded=141246166 wc_attached=141794218 wc_done=145521108 ready_sent=153237332
+  WC_CG init=0::/
+  WL role=main pid=76 cg=0::/workload tcp=18080 udp=18081
+  WL_DONE
+  WC_EV kind=tcp_listen pid=76 port=18080 family=2 addr4=0.0.0.0 proto=6
+  WC_EV kind=udp_bind pid=76 port=18081 family=2 addr4=0.0.0.0 proto=17
+  WC_SUM mode=child init_tcp=0 init_udp=0 init_other=0 wl_tcp=1 wl_udp=1 wl_other=0 total=2 tcp_seen=1 tcp_drops=0 udp_seen=1 udp_drops=0 init_tcp_ports=[] init_udp_range=0-0
+  WC_END
+===== sample boot: variant=a_childonly ovdwc=child workload=childonly round=0 exit=0 stream_hex=[]
+  WC_T mode=child start=2835 cfg_begin=2180271 programs_done=123237914 wc_cgroup_made=123307499 wc_loaded=139325205 wc_attached=139868049 wc_done=143560928 ready_sent=151531093
+  WC_CG init=0::/
+  WL role=child pid=77 ppid=76 cg=0::/workload tcp=18082 udp=18083
+  WL_DONE
+  WC_EV kind=tcp_listen pid=77 port=18082 family=2 addr4=0.0.0.0 proto=6
+  WC_EV kind=udp_bind pid=77 port=18083 family=2 addr4=0.0.0.0 proto=17
+  WC_SUM mode=child init_tcp=0 init_udp=0 init_other=0 wl_tcp=1 wl_udp=1 wl_other=0 total=2 tcp_seen=1 tcp_drops=0 udp_seen=1 udp_drops=0 init_tcp_ports=[] init_udp_range=0-0
+  WC_END
+===== sample boot: variant=a_parentchild ovdwc=child workload=parentchild round=0 exit=0 stream_hex=[]
+  WC_T mode=child start=2884 cfg_begin=2139709 programs_done=123147948 wc_cgroup_made=123216691 wc_loaded=139290231 wc_attached=139823251 wc_done=143479004 ready_sent=151347687
+  WC_CG init=0::/
+  WL role=main pid=76 cg=0::/workload tcp=18080 udp=18081
+  WL role=child pid=77 ppid=76 cg=0::/workload tcp=18082 udp=18083
+  WL_DONE
+  WC_EV kind=tcp_listen pid=76 port=18080 family=2 addr4=0.0.0.0 proto=6
+  WC_EV kind=udp_bind pid=76 port=18081 family=2 addr4=0.0.0.0 proto=17
+  WC_EV kind=tcp_listen pid=77 port=18082 family=2 addr4=0.0.0.0 proto=6
+  WC_EV kind=udp_bind pid=77 port=18083 family=2 addr4=0.0.0.0 proto=17
+  WC_SUM mode=child init_tcp=0 init_udp=0 init_other=0 wl_tcp=2 wl_udp=2 wl_other=0 total=4 tcp_seen=2 tcp_drops=0 udp_seen=2 udp_drops=0 init_tcp_ports=[] init_udp_range=0-0
+  WC_END
+===== sample boot: variant=b_out_parentchild ovdwc=outside workload=parentchild round=0 exit=0 stream_hex=[]
+  WC_T mode=outside start=2874 cfg_begin=2190245 programs_done=123072495 wc_cgroup_made=123153387 wc_loaded=139150472 wc_attached=139720667 wc_done=143325094 ready_sent=151219665
+  WC_CG init=0::/
+  WL role=main pid=76 cg=0::/ tcp=18080 udp=18081
+  WL role=child pid=77 ppid=76 cg=0::/ tcp=18082 udp=18083
+  WL_DONE
+  WC_SUM mode=outside init_tcp=0 init_udp=0 init_other=0 wl_tcp=0 wl_udp=0 wl_other=0 total=0 tcp_seen=0 tcp_drops=0 udp_seen=0 udp_drops=0 init_tcp_ports=[] init_udp_range=0-0
+  WC_END
+===== sample boot: variant=b_rootearly ovdwc=rootearly workload=single round=0 exit=0 stream_hex=[]
+  WC_T mode=rootearly start=2845 cfg_begin=2159239 wc_loaded=19002574 wc_attached=19628252 programs_done=151062090 wc_done=151063121 ready_sent=159021549
+  WC_CG init=0::/
+  WL role=main pid=76 cg=0::/ tcp=18080 udp=18081
+  WL_DONE
+  WC_EV kind=tcp_listen pid=76 port=18080 family=2 addr4=0.0.0.0 proto=6
+  WC_EV kind=udp_bind pid=76 port=18081 family=2 addr4=0.0.0.0 proto=17
+  WC_SUM mode=rootearly init_tcp=1 init_udp=1024 init_other=0 wl_tcp=1 wl_udp=1 wl_other=0 total=1027 tcp_seen=2 tcp_drops=0 udp_seen=1025 udp_drops=0 init_tcp_ports=[61000] init_udp_range=61001-62024
+  WC_END
+===== sample boot: variant=b_rootlate ovdwc=rootlate workload=single round=0 exit=0 stream_hex=[]
+  WC_T mode=rootlate start=2764 cfg_begin=2131527 programs_done=123001359 wc_loaded=138968700 wc_attached=139526336 wc_done=143155530 ready_sent=151033607
+  WC_CG init=0::/
+  WL role=main pid=76 cg=0::/ tcp=18080 udp=18081
+  WL_DONE
+  WC_EV kind=tcp_listen pid=76 port=18080 family=2 addr4=0.0.0.0 proto=6
+  WC_EV kind=udp_bind pid=76 port=18081 family=2 addr4=0.0.0.0 proto=17
+  WC_SUM mode=rootlate init_tcp=0 init_udp=0 init_other=0 wl_tcp=1 wl_udp=1 wl_other=0 total=2 tcp_seen=1 tcp_drops=0 udp_seen=1 udp_drops=0 init_tcp_ports=[] init_udp_range=0-0
+  WC_END
+===== sample boot: variant=c_child ovdwc=child workload=corr round=0 exit=0 stream_hex=['4f460201000000010afa4d091f9000006c616e652d6c61756e63682d746f6b65']
+  WC_T mode=child start=2885 cfg_begin=2182304 programs_done=123279607 wc_cgroup_made=123348029 wc_loaded=139356161 wc_attached=139894388 wc_done=143508519 ready_sent=151764163
+  WC_CG init=0::/
+  WL role=main pid=76 cg=0::/workload tcp=18080 udp=18081
+  WL_CORR connect=ok cookie=0x1 dest=10.250.77.9:8080
+  WL_CHILD none-observed
+  WL_ORIGIN cookie=0x1 ip=10.250.77.9 port=8080
+  WL_DONE
+  WC_EV kind=tcp_listen pid=76 port=18080 family=2 addr4=0.0.0.0 proto=6
+  WC_EV kind=udp_bind pid=76 port=18081 family=2 addr4=0.0.0.0 proto=17
+  WC_SUM mode=child init_tcp=0 init_udp=0 init_other=0 wl_tcp=1 wl_udp=1 wl_other=0 total=2 tcp_seen=1 tcp_drops=0 udp_seen=1 udp_drops=0 init_tcp_ports=[] init_udp_range=0-0
+  WC_END
+===== sample boot: variant=c2_nocorr ovdwc=nocorr workload=corr round=0 exit=0 stream_hex=[]
+  WC_T mode=nocorr start=2834 cfg_begin=2149084 programs_done=123261229 wc_done=123261469 ready_sent=131111043
+  WC_CG init=0::/
+  WL role=main pid=75 cg=0::/ tcp=18080 udp=18081
+  WL_CORR connect=ok cookie=0x1 dest=10.250.77.9:8080
+  WL_CHILD none-observed
+  WL_ORIGIN cookie=0x1 ip=10.250.77.9 port=8080
+  WL_DONE
+  WC_SUM mode=nocorr init_tcp=0 init_udp=0 init_other=0 wl_tcp=0 wl_udp=0 wl_other=0 total=0 tcp_seen=0 tcp_drops=0 udp_seen=0 udp_drops=0 init_tcp_ports=[] init_udp_range=0-0
+  WC_END
+===== sample boot: variant=d_child ovdwc=child workload=single round=0 exit=0 stream_hex=[]
+  WC_T mode=child start=2874 cfg_begin=2144086 programs_done=124254008 wc_cgroup_made=124324033 wc_loaded=140471744 wc_attached=141034288 wc_done=144676331 ready_sent=152443641
+  WC_CG init=0::/
+  WL role=main pid=76 cg=0::/workload tcp=18080 udp=18081
+  WL_DONE
+  WC_EV kind=tcp_listen pid=76 port=18080 family=2 addr4=0.0.0.0 proto=6
+  WC_EV kind=udp_bind pid=76 port=18081 family=2 addr4=0.0.0.0 proto=17
+  WC_SUM mode=child init_tcp=0 init_udp=0 init_other=0 wl_tcp=1 wl_udp=1 wl_other=0 total=2 tcp_seen=1 tcp_drops=0 udp_seen=1 udp_drops=0 init_tcp_ports=[] init_udp_range=0-0
+  WC_END
+===== sample boot: variant=d_copybase ovdwc=base workload=single round=0 exit=0 stream_hex=[]
+  WC_T mode=base start=2835 cfg_begin=2112309 programs_done=119771815 wc_done=119772086 ready_sent=127565646
+  WC_CG init=0::/
+  WL role=main pid=75 cg=0::/ tcp=18080 udp=18081
+  WL_DONE
+  WC_SUM mode=base init_tcp=0 init_udp=0 init_other=0 wl_tcp=0 wl_udp=0 wl_other=0 total=0 tcp_seen=0 tcp_drops=0 udp_seen=0 udp_drops=0 init_tcp_ports=[] init_udp_range=0-0
+  WC_END
+===== sample boot: variant=d_sameobj ovdwc=sameobj workload=single round=0 exit=0 stream_hex=[]
+  WC_T mode=sameobj start=2864 cfg_begin=2151207 wc_cgroup_made=120458485 wc_attached=120989021 programs_done=121192977 wc_done=121193748 ready_sent=128971114
+  WC_CG init=0::/
+  WL role=main pid=76 cg=0::/workload tcp=18080 udp=18081
+  WL_DONE
+  WC_EV kind=tcp_listen pid=76 port=18080 family=2 addr4=0.0.0.0 proto=6
+  WC_EV kind=udp_bind pid=76 port=18081 family=2 addr4=0.0.0.0 proto=17
+  WC_SUM mode=sameobj init_tcp=0 init_udp=0 init_other=0 wl_tcp=1 wl_udp=1 wl_other=0 total=2 tcp_seen=1 tcp_drops=0 udp_seen=1 udp_drops=0 init_tcp_ports=[] init_udp_range=0-0
+  WC_END

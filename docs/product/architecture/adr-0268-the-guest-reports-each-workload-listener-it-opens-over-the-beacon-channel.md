@@ -2,16 +2,11 @@
 
 ## Status
 
-**User-approved, 2026-11-03 ("add it. and proceed with recommendations"); the corrected D13
-contract (feature delta, D13 items 1 and 7 to 9) was ACCEPTED in contract shape by the user on
-2026-11-03. Not yet Accepted as a decision: "user-approved, pending the V41 boot-cost
-measurement and the independent re-review"** (a material B-minus-A delta returns D13 to DESIGN;
-`.claude/rules/design.md` § "Surface material design decisions").
-Its spikes are discharged (held): V36 and V38 in
-`docs/feature/service-allocation-readiness-and-ending/spike/findings-guest-signal.md` (guest kernel
-`7.0.0-38-generic`); V34, V35 and V37 in `.../spike/findings-listen-hooks.md` (host run on
-`7.0.0-38-generic`); V39 is partial. Not implemented. GH #318, GH #334. The exact contract is the feature delta's
-D13 (spike table: § Spike table).
+User-approved, 2026-11-03; read seam (PR-1) accepted 2026-11-04, hook scope (PR-2)
+accepted in contract shape 2026-11-04 (V42 held, kernel `7.0.0-38-generic`,
+[findings](../../feature/service-allocation-readiness-and-ending/spike/findings-workload-cgroup.md));
+not yet Accepted (remaining gates: model check, design review round 4). Not implemented. GH #318, GH #334. Contract
+and status: [feature delta](../../feature/service-allocation-readiness-and-ending/feature-delta.md) (D13).
 Related: [ADR-0272](adr-0272-the-guest-observes-workload-listeners-with-kernel-hooks-not-a-poll.md)
 (what produces the report), [ADR-0269](adr-0269-a-service-with-no-declared-startup-probe-waits-on-a-guest-listener-startup-probe.md)
 (who consumes it), [ADR-0256](adr-0256-the-shim-registers-probe-supervision-before-it-releases-the-exit-event-gate.md)
@@ -37,9 +32,11 @@ incarnation.**
 
 - The line is guest-to-host, sent after `EXEC` and so after the `Running` row and the
   supervisor's registration (ADR-0256). It is idempotent: a duplicate is a no-op, and the
-  host ignores `(protocol, port)` pairs the Service does not declare.
+  host does not store `(protocol, port)` pairs the Service does not declare.
 - The host's beacon reader classifies lines: `LISTEN` goes to the set, `EXIT` to the exit
   report as today. A `LISTEN` can never occupy the exit slot.
+- The guest has one ordered beacon writer and drains pending `LISTEN` lines before it
+  sends `EXIT`.
 - There is no close report. The set belongs to one VM incarnation; a restart is a fresh
   allocation id with an empty set (ADR-0105), and a guest reset ends the VMM.
 - A failed send is a beacon failure, handled as a failed `EXIT` send is today (never
@@ -62,17 +59,9 @@ incarnation.**
 
 - The beacon grammar gains its first mid-life guest message; host and guest ship as one
   guest kit (ADR-0206), so no version skew is designed for.
-- The host reader's channel handling changes (classification), which is the one structural
-  change this decision forces on `vm_driver.rs`: only `EXIT` or EOF ends the guest-report
-  wait, and the line channel cannot stall the reader's `select!`.
-- The guest has one ordered beacon writer and drains pending `LISTEN` lines before it
-  sends `EXIT`; two unsynchronised writers corrupt the line stream (V38).
-- Delivery latency is a vsock hop: round-trip p99 138.8 us measured by V38.
-- Loading and attaching the listen programs took 50 to 80 ms per boot in the spike guest
-  (V36 findings), before `READY`; what that figure covers is stated in the feature delta's
-  D13 item 6.
-- A report the guest cannot enqueue is dropped and counted, never silent; the Service then
-  does not become `Stable` and the startup deadline stops it. The exposure and its bound are
-  the feature delta's D13 item 9 (the user rejected a level map, P-10, on 2026-11-03: the ring
-  is sized generously, the drop counter stays visible, and only TCP listen transitions and
-  explicit UDP binds produce events).
+- The host reader's line handling changes (classification): only `EXIT` or EOF ends the
+  guest-report wait, and a mid-life line cannot stall the stop or command path.
+- Two unsynchronised guest writers corrupt the line stream, and a `LISTEN` written after
+  `EXIT` is lost to the host; the single writer and the drain-before-`EXIT` rule are the
+  protocol's two ordering rules (modelled in the feature delta's `guest_report` module).
+- Delivery latency is a vsock hop: round-trip p99 138.8 us.

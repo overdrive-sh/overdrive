@@ -7,30 +7,30 @@
 
 ## Status
 
-- **Accepted by the user:** D1 to D12, BC-1, B1 to B3, D17. B4 was decided as D12; B5 rejected.
-  Rulings of 2026-11-03: the ADR-0096 per-allocation backend veto and the veto-before-stop ordering
-  are removed (R2-1); the `stable_announced` view field is removed because no reader remains after
-  B1 (R2-2); D17 added.
-- **Rulings of 2026-11-03 (recorded 2026-11-03):** (1) the corrected D13 is ACCEPTED in contract
-  shape (sockops `TCP_LISTEN_CB` arm merged into the existing program; `post_bind4` and
-  `post_bind6` `CgroupSock` programs, both return 1, filter protocol 17; loopback-only exclusion;
-  one ordered beacon writer; drain `LISTEN` before `EXIT`; host reader ends only on `EXIT`/EOF).
-  (2) Dual-stack: Overdrive has no IPv6 yet; the `AF_INET6` wildcard rule and the `V6ONLY`
-  exposure are recorded against GH #308 (comment 6614793072); P-11 is dropped. (3) P-10 (level
-  map) is REJECTED: the ring is sized generously by the crafter, the drop counter stays visible,
-  a lost report is a stated bounded exposure (stopped at the startup deadline, not hung); only
-  TCP listen transitions and explicit UDP binds produce events. (4) D17 shape choices S1 to S6
-  ACCEPTED as proposed; D17 / ADR-0273 Accepted.
-- **User-approved, pending V41 and the independent re-review (not yet Accepted):** D13, D14, D15
-  and D16 (option R). Cold start is the platform goal, so the pre-`READY` cost of the listen
-  programs is a contract-shaping budget item, **V41** (variant B versus variant A; findings at
-  `../spike/findings-boot-cost.md`, running); a material B-minus-A delta returns D13 to DESIGN
-  (`.claude/rules/design.md` § "Run contract-shaping validation before the design is accepted").
-  Spikes `listen-hooks` (V34, V35, V37, V39) and `guest-signal` (V36, V38) are discharged
-  (`../spike/findings-guest-signal.md`, guest kernel 7.0.0-38-generic). The findings added three
-  constraints to D13: one ordered guest beacon writer, drain pending `LISTEN` before `EXIT`, and a
-  host reader that ends the guest-report wait only on `EXIT` or EOF. ADR-0058 stays operative
-  until ADR-0270 is accepted.
+- **Accepted by the user:** D1 to D12, BC-1, B1 to B3, D17. B4 is D12; B5 is rejected. The
+  rulings are in the feature delta's § Approval record.
+- **User-approved, not yet Accepted:** D13 to D16. V34 to V38, V41 and V42 are held (V41:
+  +0.36 ms at p50 on the pre-`READY` path; V42: +0.88 ms p50 for the PR-2 shape), V39 is partial. User rulings of 2026-11-04
+  ("proceed with recommendations") on the four items inside them: **PR-1** accepted (the
+  read-only `GuestListenerReports` port, `GuestListenerBoard`, the extra mandatory parameters
+  on `ProbeRunner::new` and `VmDriver::new`, `SimGuestListenerReports`; `Driver`, `Action` and
+  the reconcilers unchanged; D13 item 10). **PR-2** accepted in contract shape (direction approved
+  2026-11-04 pending V42; V42 held 2026-11-04, kernel `7.0.0-38-generic`,
+  [findings](../spike/findings-workload-cgroup.md)): init creates a workload
+  cgroup and attaches the three listen programs there; the TCP arm is a separate small
+  sockops program in the same object (D13 items 1 and 7). V42 pins four constraints (D13
+  item 1, P-a to P-d): the programs live in the object init already loads, never a second
+  `Ebpf::load` (+20.4 ms); the root programs stay `BPF_F_ALLOW_MULTI` link attachments
+  (`kernel/bpf/cgroup.c:1506-1507`, `:459`); the workload is created directly in the cgroup
+  with no placement window; reports cover only sockets of tasks in the cgroup (a workload
+  that leaves it fails closed). **PR-3** accepted: `Pass` on the
+  event; first `Fail` at the derived deadline with `attempt = max_attempts`, then one per
+  interval until the stop lands; no pre-deadline `Fail`; `describe` loses pre-deadline
+  progress (D14 item 3). **PR-4** accepted: `declared_listeners` replaces `service_ports`,
+  with `tcp_service_ports()` for the TPROXY consumers (D14 item 2). `guest_report` model:
+  host-half conformance plus Tier-3 boot coverage for the guest half; no writer seam in
+  `overdrive-init`; the gap is recorded in the feature delta (§ Formal protocol model).
+  ADR-0058 stays operative until ADR-0270 is accepted.
 
 ## Decisions
 
@@ -52,12 +52,13 @@
 | B2 | The shim fires `on_alloc_terminal` after the stop's terminal row write succeeds | Accepted | ADR-0266 |
 | B3 | The pre-startup-crash predicate accepts `WorkloadCrashedImmediately` and `VmOutOfMemory` | Accepted | ADR-0258 |
 | D12 | A startup-probed allocation is a backend only after its own `Stable` is committed; the per-allocation veto and the veto-before-stop ordering are gone (R2-1); amends ADR-0096 | Accepted | ADR-0267 |
-| D13 | Kernel hooks observe each workload listener; a `LISTEN` beacon line reports it. Corrected contract shape accepted 2026-11-03 | User-approved, pending V41 and re-review | ADR-0272, ADR-0268 |
-| D14 | `ProbeMechanic::GuestListeners` and `AllocationSpec.declared_listeners` feed the startup probe row | User-approved, pending V41 and re-review | ADR-0269 |
-| D15 | A probe-less Service is `Stable` when `Running` and every declared listener is reported; opt-out kept; no minimum-healthy window; supersedes ADR-0058 | User-approved, pending V41 and re-review | ADR-0270 |
-| D16 | `inferred` is removed from the descriptor, probe row, witness, wire and CLI (option R) | User-approved, pending V41 and re-review | ADR-0271 |
+| D13 | Kernel hooks observe each workload listener; a `LISTEN` beacon line reports it; contract shape accepted 2026-11-03 | User-approved | ADR-0272, ADR-0268 |
+| D14 | `ProbeMechanic::GuestListeners` and `AllocationSpec.declared_listeners` feed the startup probe row | User-approved | ADR-0269 |
+| D15 | A probe-less Service is `Stable` when `Running` and every declared listener is reported; opt-out kept; no minimum-healthy window; supersedes ADR-0058 | User-approved | ADR-0270 |
+| D16 | `inferred` is removed from the descriptor, probe row, witness, wire and CLI (option R) | User-approved | ADR-0271 |
 | D17 | A broker submit wakes the convergence loop at once; the cadence tick stays as the backstop (no early wake exists today). Shape choices S1 to S6 accepted as proposed 2026-11-03 | Accepted 2026-11-03 | ADR-0273 |
-| V41 | Contract-shaping boot-cost budget item for D13 (pre-`READY` cost of the listen programs, B versus A); added 2026-11-03; a material delta returns D13 to DESIGN | Open (running) | feature delta § Spike table |
+| V41 | Boot cost of the listen programs on the pre-`READY` path: +0.36 ms at p50 (paired p90 +1.29, max +2.10) against a same-toolchain baseline | Held | feature delta § Spike table |
+| V42 | Hook scope on the real init (PR-2): init's binds invisible, workload's reports intact, cost in the V41 range | **Held (2026-11-04, `7.0.0-38-generic`, PROMOTE)**: 1000/1000 exact, 0 from init; +0.88 ms p50; `spike/findings-workload-cgroup.md` | feature delta § Spike table |
 | R-1 to R-5 | Clarifications of accepted decisions and current code (feature delta § Pinned readings) | Clarification | n/a |
 
 Not in scope by user ruling 2026-11-02 (no deferral, no issue): P-3, P-4, P-5. Findings: F-1 is
@@ -66,11 +67,11 @@ D11. P-1, P-2 and P-9 remain proposals.
 
 ## Architecture summary
 
-- Style: unchanged ports-and-adapters with dependency inversion. No new component, crate or port.
-  Public surface added: `StoppedBy::StartupProbe` (D7), `ProbeRunner::start_liveness` (D9), the D10
+- Style: unchanged ports-and-adapters with dependency inversion. No new crate. Public surface added: `StoppedBy::StartupProbe` (D7), `ProbeRunner::start_liveness` (D9), the D10
   items, `ReconcilerRuntime::submit_evaluation` and `submitted` (D17; `broker_mutex()` removed,
-  `broker()` narrowed). Pending: `BeaconMessage::Listen`, `ProbeMechanic::GuestListeners`,
-  `AllocationSpec.declared_listeners` (D13, D14). In-memory State fields: `current_startup_probe`
+  `broker()` narrowed). D13 to D16: `BeaconMessage::Listen`, `ProbeMechanic::GuestListeners`,
+  `AllocationSpec.declared_listeners`, and (PR-1) the `GuestListenerReports` port with the
+  `GuestListenerBoard` adapter and `SimGuestListenerReports`. In-memory State fields: `current_startup_probe`
   (D6, D7), `stable_committed` (B1). CBOR `View`: `startup_last_acted_run` added (D8),
   `stable_announced` removed (R2-2).
 - C4: a component diagram is in the feature delta; `c4-diagrams.md` is unchanged.
@@ -92,7 +93,7 @@ the D10 deadline items, `ServiceAllocFact.stable_committed`, and D17's `submit_e
 
 Overdrive appliance threat model: only Overdrive's own endings are in scope; no foreign-mutation or
 root-compromise defences were added. D1 to D12 and D17 make no kernel claim. D13 to D16 cite the
-Linux 7.0 source as `path:line @ v7.0` and are pending the spikes that settle the runtime facts.
+Linux 7.0 source as `path:line @ v7.0`; the runtime facts are settled by V34 to V39 and V41, and V42 settles PR-2.
 Quality attributes: reliability and maintainability first; latency for D13 to D17.
 
 ## Upstream changes
@@ -106,17 +107,17 @@ superseded (ADR-0267).
 
 ## Handoff to DISTILL (after the independent re-review of this revision)
 
-- Formal protocol model: `specs/quint/service-allocation-readiness-and-ending/` (D1, D3, D5 to D11). The named
-  runs, hazards and invariants are that directory's `README.md`; the work the rulings require is
-  the feature delta's § Modeler change list. D12, D13 to D16, D17, R2-1 and R2-2 add no model
-  state (D17 is justified without a model: § Formal protocol model).
-- Scenarios S-1 to S-48 less the unused numbers are in the feature delta with oracles and tiers.
-  D6 and D7 rewrite the early-exit and startup-failure tests listed in their sections. D13 to D16
-  obligations are written only if they are accepted.
-- No open contract-shaping validation items for D1 to D12 and D17. V34 to V38 are discharged
-  (held) and V39 is partial (not contract-shaping); the one open contract-shaping item for D13 to
-  D16 is **V41**, the boot-cost budget item (running). V40 is a post-DELIVER measurement and does
-  not gate.
+- Formal protocol model: `specs/quint/service-allocation-readiness-and-ending/` (D1, D3, D5 to D11).
+  The named runs, hazards and invariants are that directory's `README.md`. Outstanding for the
+  modeler: M-3 and the new `guest_report` module (M-6), both in the feature delta. D12, D17, R2-1
+  and R2-2 add no model state (D17 is justified without a model: § Formal protocol model).
+- Scenarios S-1 to S-48 are in the feature delta with oracles and tiers. D6 and D7 rewrite the
+  early-exit and startup-failure tests listed in their sections. D13 to D16 obligations are
+  G-10's boundary scenarios.
+- No open contract-shaping validation items for D1 to D12 and D17. V34 to V38 and V41 are held and
+  V39 is partial (not contract-shaping); V42, the last contract-shaping item (PR-2), is held.
+  Remaining gates before DISTILL: the `quint-modeler` run (`guest_report` module M-6, and M-3)
+  and the independent DESIGN review round 4.
 
 ## Surfaced to the user
 
@@ -130,5 +131,9 @@ superseded (ADR-0267).
    veto-before-stop ordering are removed. Three veto and ordering tests collapse into one (S-46).
 3. **Exposures stated, not mitigated:** a crash racing the stop overwrites the crash row (E-2); the
    progress deadline can fire before the give-up (E-3) and before a boot at its deadline (E-4).
-4. **A rules-doc touch at landing:** `.claude/rules/development.md` § "Reconciler I/O" describes the
+4. **PR-1 to PR-4 (ruled 2026-11-04; PR-2 direction pending V42, V42 held):** see Status above and the feature
+   delta's D13 items 1, 7 and 10 and D14 items 2 and 3. PR-3 (accepted) trades the pre-deadline `describe` progress
+   ("missing tcp:8080") for about 29 fewer observation writes per never-ready attempt; the first
+   `Fail`'s attempt count is synthetic.
+5. **A rules-doc touch at landing:** `.claude/rules/development.md` § "Reconciler I/O" describes the
    steady-state tick as the drain period; D17 adds the wake. Not edited by the architect.

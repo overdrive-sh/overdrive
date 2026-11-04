@@ -30,6 +30,7 @@ produced each state, for conformance: `quint test` emits no `mbt::actionTaken`, 
 | `liveness_gate.qnt` | D9 | one allocation: supervisor, retained liveness descriptors, liveness role absent/live, `committed` (the row carries Stable), the Stable write outcome (`landed`/`failed`: B1), `on_alloc_stable` hook, liveness streak and rows since Stable |
 | `progress_deadline.qnt` | D10 | the Service stream's timer racing the lifecycle terminals; time in 10 s ticks (FLOOR 9 = 90 s, MARGIN 3 = 30 s, startup deadline 1 or 12 ticks); stream slots: one in the checked instance, two in the conformance instance (a redeploy opens a new stream with a new clock) |
 | `stream_snapshot.qnt` | D11 | the stream's subscribe, recorded-verdict read, relist; the shim's commit and publish per attempt; `lag`, `read_fault`, fresh-id restart; `service_event_from_terminal` modelled by `proj` (restartable stops project to none) |
+| `guest_report.qnt` | D13 items 1, 3, 10 (PR-1) | the beacon report channel: workload `wl`, the kernel `ring` (capacity 1), the single writer's `wire` (pair names and `exit`), the host reader's `rd`, the board's reported set (`rset`), the guest-report `wait`, `exitrep`; ghosts `produced` (with a dropped marker), `eof`, `endset`, `junk`, `wapp`; alphabet `tcp80`, `udp53` (declared), `other` (undeclared) |
 
 D10 and D11 are two modules of one stream (the design lists them as one abstraction): D11's `armed` flag stands for D10's
 deadline being armed after the read, and D10's `Open` arms at stream open. A combined module was built first and checked;
@@ -67,6 +68,13 @@ in the step that emits it.
 | | `RestartableStopNeverEndsStream` | D7, D11 | no closure from a startup or liveness stop, on the live path or the read path |
 | | `FailedReadNeverWaits` | D11 | a failed read closes the stream as `error` |
 | | `StreamEndsOnceHonestly` | D11 | the stream yields at most one verdict line, never `stable` unless a Stable was committed |
+| guest_report | `OneWriter` | D13 item 1 | every wire entry was appended by a writer action (a check on the ghost `wapp`; the structure of the action set is the rule) |
+| | `ListenBeforeExit` | D13 item 1 | in the wire, every listen precedes `exit` |
+| | `DeliveredBeforeExit` | D13 item 1 | when `exit` is on the wire, every produced, non-dropped event is on the wire before it |
+| | `NoLateAccept` | D13 item 3 | the reported set does not change after the wait ended |
+| | `ExitNotMasked` | D13 item 3 | the exit report is set iff an `exit` entry was read |
+| | `SetWithinProduced` | D13 item 10 | every pair in the reported set was produced by the workload and reached the wire |
+| | `ExitEventuallyReported` (temporal, weak fairness) | D13 item 3 | a workload that exits with the beacon open ends the guest-report wait |
 
 Invariants that hold by construction were dropped from the checks, each after a guard-deletion trial (the action guard that
 makes it hold removed in a scratch copy; a kept invariant, hazard or named run then failed, so the dropped invariant was
@@ -119,6 +127,12 @@ Stable action) were deleted. Assumption SS-6 and the `Restart` guard that encode
 | D11 superseded attempt | stream_snapshot | `superseded_attempt_terminal_is_not_reported` |
 | D11 lag then relist | stream_snapshot | `lagged_relist_recovers_terminal` |
 | D11 failed read (G-8 failure projection) | stream_snapshot | `failed_read_ends_with_error` |
+| D13 happy path and the drain race: a listen produced just before exit is on the wire before `exit` | guest_report | `listen_then_exit_drains_first` |
+| D13 the set reaches the declared pair (the input to `Pass`) | guest_report | `all_declared_reported` |
+| D13 an unparseable line is dropped; later lines still take effect | guest_report | `garbage_line_is_dropped` |
+| D13 a dropped declared event leaves the set partial; the wait ends on `exit` | guest_report | `ring_drop_leaves_set_partial` |
+| D13 EOF with a partial set: the wait ends, the set is frozen | guest_report | `beacon_closes_with_partial_set` |
+| D14 item 3 (PR-3) first `Fail` at the deadline with no earlier row stops the instance; the successor's first row is a `Pass` | restart_authority | `first_fail_at_deadline_with_no_earlier_row_stops` |
 
 `failed_read_ends_with_error` is the G-8 unavailable boundary (`FailedReadNeverWaits`, S-42); `control_plane_restart_keeps_acted_run` is
 the G-5 replay boundary; `startup_stop_is_not_intentional_stop` is the G-5 unrelated-state boundary (a startup-stopped row is
@@ -141,6 +155,7 @@ together with the exhaustive `NoMissedTerminal`.
 | D9 | `lg_bugSpawnAtRunning` | `on_alloc_running` spawns the liveness tasks | `LivenessOnlyAfterStable` (and `NoLivenessStopBeforeStable`, `LivenessStreakStartsAtStable`) |
 | D10 | `pd_bugFixedCap` (one stream slot) | the fixed 90 s cap with a startup deadline above it | `HealthySlowStartNeverTimesOut` |
 | D11 | `ss_bugReadBeforeSubscribe` | read the recorded verdict, then subscribe | `NoMissedTerminal` |
+| D13 item 1 | `gr_bugNoDrainBeforeExit` | `WriterExit` is enabled without the ring being empty (the drain removed) | `DeliveredBeforeExit` and `ListenBeforeExit` (one check each on the one hazard instance) |
 
 No witnesses: every state of interest is reached by a named run. No Apalache checks: all instances are small and finite, TLC is
 exhaustive.
@@ -174,6 +189,10 @@ exhaustive.
 | SS-4 | the recorded terminal equals the event's terminal | S-41 |
 | SS-5 | the read and the relist are single atomic store scans | S-40 |
 | SS-6 | an attempt's event is published before its successor is minted | V29 |
+| GR-1 | the kernel enqueues a listen event for every `listen()` of the workload before the workload can observe the socket serving | V34, V35, V36 |
+| GR-2 | the ring drops and counts on full; a dropped event is never delivered | V37 |
+| GR-3 | vsock preserves the order of one stream; the host reader treats lines in the order read | V38 |
+| GR-4 | the model starts with the workload running and the hooks attached (the workload cgroup is created and the programs attached before `exec`, D13 item 1 P-a to P-d) | V36, V42 |
 
 ## Findings (underspecified points and exposures)
 
@@ -191,3 +210,26 @@ SS-6 ordering) are recorded in the feature delta's § Pinned readings.
 7. Liveness-stop retry in conformance: the run `stop_row_write_failure_is_retried` drives the liveness stop's retry by a new
    liveness probe row. The model re-enables the stop while the row is `Running` and `Stable`; the streak is `liveness_gate`'s,
    so the conformance driver supplies the new liveness row through the recording prober.
+
+## guest_report: coverage split and modelling notes
+
+User ruling 2026-11-04: `overdrive-init` has no writer seam, so the guest-half invariants (`ListenBeforeExit`,
+`DeliveredBeforeExit`, the drain rule, `OneWriter`) are covered by Tier-3 real boots only (V36, scenario G-10 (9)); the
+conformance driver covers the host half (`HostRead`, `HostGarbage`, `rset`, `exitrep`). Pinned accessors: `rset` is
+`GuestListenerReports::reported(alloc)`; `exitrep` is the `ExitEvent` on the receiver returned by `take_exit_receiver`; `wait`
+is checked through `rset` not changing and `exitrep`; `ring`, `wire`, `produced`, `eof`, `endset`, `junk`, `wapp` are model-only.
+
+8. The design's variable `set` is named `rset` in the spec (`set` is a Quint built-in name). `Idle` is the house stutter step.
+9. Not stated by the design, modelled minimally: `ready` is not on the wire (no action writes it and no host rule reads it);
+   the workload starts running (no start action); `HostGarbage` is a host-side delivery of an unparseable line from the scripted
+   line source, not a wire append (the single writer never writes garbage); the writer cannot append once the beacon is closed;
+   the reader consumes the entries written before EOF and then sees EOF; `WriterDrain` is one atomic move of the whole ring.
+
+## restart_authority and the guest-listener producer (M-3)
+
+The model admits both producer shapes of D14 item 3 without any new state. (a) A startup `Pass` with no earlier `Fail`:
+`pre_startup_crash_then_successor_passes` and the new run `first_fail_at_deadline_with_no_earlier_row_stops`. (b) A first `Fail`
+with no earlier row, written at the deadline: reached by the new run only. One change was needed: `StartupRow` counted the
+producer streak up by one per `Fail`, so a single `Fail` at the deadline never reached `max_attempts`; PR-3 says that `Fail` carries
+`attempt = max_attempts`, so a `Fail` written once the deadline has passed now carries the maximum. Pre-deadline `Fail` rows are
+still admitted (a superset of PR-3), and every existing run writes its `Fail` rows before `Deadline`, so none changed.

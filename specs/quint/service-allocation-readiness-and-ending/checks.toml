@@ -636,3 +636,139 @@ run = "stop_row_write_failure_is_retried"
 backend = "evaluator"
 expect = "holds"
 ci = true
+
+# guest_report (D13 items 1, 3, 10; M-6): evaluator-scale
+[[check]]
+name = "gr-one-writer"
+spec = "guest_report.qnt"
+main = "gr_ok"
+invariant = "OneWriter"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "gr-listen-before-exit"
+spec = "guest_report.qnt"
+main = "gr_ok"
+invariant = "ListenBeforeExit"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "gr-delivered-before-exit"
+spec = "guest_report.qnt"
+main = "gr_ok"
+invariant = "DeliveredBeforeExit"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "gr-no-late-accept"
+spec = "guest_report.qnt"
+main = "gr_ok"
+invariant = "NoLateAccept"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "gr-exit-not-masked"
+spec = "guest_report.qnt"
+main = "gr_ok"
+invariant = "ExitNotMasked"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "gr-set-within-produced"
+spec = "guest_report.qnt"
+main = "gr_ok"
+invariant = "SetWithinProduced"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "gr-exit-eventually-reported"
+spec = "guest_report.qnt"
+main = "gr_ok"
+temporal = "ExitEventuallyReported"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "gr-hazard-no-drain-before-exit"
+spec = "hazard/guest_report_hazards.qnt"
+main = "gr_bugNoDrainBeforeExit"
+invariant = "DeliveredBeforeExit"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "gr-hazard-no-drain-before-exit-listen-order"
+spec = "hazard/guest_report_hazards.qnt"
+main = "gr_bugNoDrainBeforeExit"
+invariant = "ListenBeforeExit"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "gr-run-listen-then-exit-drains-first"
+spec = "guest_report.qnt"
+main = "gr_conf"
+run = "listen_then_exit_drains_first"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "gr-run-all-declared-reported"
+spec = "guest_report.qnt"
+main = "gr_conf"
+run = "all_declared_reported"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "gr-run-garbage-line-is-dropped"
+spec = "guest_report.qnt"
+main = "gr_conf"
+run = "garbage_line_is_dropped"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "gr-run-ring-drop-leaves-set-partial"
+spec = "guest_report.qnt"
+main = "gr_conf"
+run = "ring_drop_leaves_set_partial"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "gr-run-beacon-closes-with-partial-set"
+spec = "guest_report.qnt"
+main = "gr_conf"
+run = "beacon_closes_with_partial_set"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "ra-run-first-fail-at-deadline-with-no-earlier-row-stops"
+spec = "restart_authority.qnt"
+main = "ra_conf"
+run = "first_fail_at_deadline_with_no_earlier_row_stops"
+backend = "evaluator"
+expect = "holds"
+ci = true

@@ -3,7 +3,7 @@
 ## Status
 
 Accepted, 2026-11-03 (approval: feature delta § Approval record, B1; accepted as
-proposed). Not implemented. GH #318, GH #334. The exact contract, the corrected
+proposed). Not implemented. GH #318, GH #334. The exact contract, the
 lifecycle gate (G-6) and the model changes live in the
 [feature delta](../../feature/service-allocation-readiness-and-ending/feature-delta.md).
 Consumed by [ADR-0267](adr-0267-a-startup-probed-allocation-is-a-backend-only-after-its-startup-has-passed.md)

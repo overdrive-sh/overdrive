@@ -11453,15 +11453,19 @@ proposed). ADR-0267 amends the operative ADR-0096. Not implemented:
   a broker submit wakes the convergence loop at once; the cadence tick stays as the
   backstop (Accepted 2026-11-03; shape choices S1 to S6 accepted as proposed).
 
-**User-approved 2026-11-03 ("add it. and proceed with recommendations"); spikes V34 to V38
-held, V39 partial. The spike-corrected D13 contract shape is ACCEPTED (2026-11-03: sockops
-listen arm merged into the existing program; `post_bind4` and `post_bind6` `CgroupSock`
-programs; loopback-only exclusion; one ordered beacon writer; drain `LISTEN` before `EXIT`;
-host reader ends only on `EXIT` or EOF). D13 to D16 remain user-approved, pending the V41
-boot-cost measurement (cold start is the platform goal; a material delta returns D13 to
-DESIGN) and the independent re-review. Dual-stack (an `AF_INET6` wildcard report satisfies an
-IPv4-declared listener, and the `V6ONLY` exposure) is recorded against GH #308; a level map for
-a full ring (P-10) is rejected.** A
+**D13 to D16 are user-approved (2026-11-03) and not yet Accepted.** The D13 contract shape is
+accepted; spikes V34 to V38, V41 (+0.36 ms at p50 on the pre-`READY` path) and V42 are held, V39 is
+partial. Four items inside D13 and D14 were ruled on 2026-11-04: the driver-to-probe-task read
+seam (read-only `GuestListenerReports` port, PR-1), the `Fail` cadence (no pre-deadline `Fail`,
+PR-3) and one `declared_listeners` field replacing `service_ports` (PR-4) are accepted; the
+listen hooks attach to a workload cgroup that init creates, with the TCP arm a separate small
+sockops program in the same object (PR-2), accepted in contract shape (direction approved
+2026-11-04; spike V42 held 2026-11-04 on kernel `7.0.0-38-generic`: +0.88 ms p50, programs in the
+object init already loads, root programs stay `BPF_F_ALLOW_MULTI` link attachments, workload
+created directly in the cgroup). Remaining gates: the `quint-modeler` run and design review round 4. The
+`guest_report` model is checked against production for the host half only; the guest half is
+covered by Tier-3 boots (no writer seam in `overdrive-init`). See the feature delta. Dual-stack (an `AF_INET6` wildcard report satisfies an IPv4-declared
+listener, and the `V6ONLY` exposure) is recorded against GH #308. A
 Service with no declared startup probe is `Stable` when the guest reports every declared
 listener open (no minimum-healthy window; the opt-out is kept), instead of when a 2 s TCP
 poll of `listeners[0]` passes. On acceptance it supersedes the operative
@@ -11485,7 +11489,9 @@ Contract: [feature delta](../../feature/service-allocation-readiness-and-ending/
 
 | Date | Change |
 |---|---|
-| 2026-11-03 | **service-allocation-readiness-and-ending: user rulings of 2026-11-03.** D13 to D16 (guest-reported listener readiness; ADR-0268 to ADR-0272; `inferred` removed, option R) are user-approved (spikes V34 to V38 held, V39 partial); the corrected D13 contract shape is accepted and they stay pending the V41 boot-cost measurement and the independent re-review, not yet Accepted; dual-stack is recorded against GH #308, and P-10 is rejected. D17 (ADR-0273): a broker submit wakes the convergence loop at once, the cadence tick stays as the backstop (Accepted 2026-11-03; shape choices S1 to S6 accepted as proposed). ADR-0096's per-allocation backend veto and veto-before-stop ordering are removed as redundant under ADR-0267. The `stable_announced` view marker is removed (ADR-0265). — Morgan. |
+| 2026-11-04 | **service-allocation-readiness-and-ending: spike V42 held; PR-2 accepted in contract shape.** Kernel `7.0.0-38-generic`: 1000/1000 exact workload reports, 0 from init, root programs effective in the child, +0.88 ms p50 (p90 +1.66), second `Ebpf::load` +20.4 ms. D13 pins: listen programs in the existing guest object, root programs stay `BPF_F_ALLOW_MULTI` link attachments, workload created directly in the cgroup, reports cover only the workload cgroup (fails closed). The `BPF_F_ALLOW_MULTI` link-attach citation is `kernel/bpf/cgroup.c:1506-1507 @ v7.0` (re-read; `:1502-1505` in two spike findings was wrong and is corrected). Remaining: `quint-modeler` run (M-6, M-3), review round 4. — Morgan. |
+| 2026-11-04 | **service-allocation-readiness-and-ending: user rulings of 2026-11-04.** PR-1, PR-3 and PR-4 accepted; PR-2 accepted in direction, pending spike V42 (the TCP listen arm becomes a separate small sockops program attached to an init-created workload cgroup); `guest_report` host-half conformance plus Tier-3 boot coverage for the guest half. — Morgan. |
+| 2026-11-03 | **service-allocation-readiness-and-ending: user rulings of 2026-11-03.** D13 to D16 (guest-reported listener readiness; ADR-0268 to ADR-0272; `inferred` removed, option R) are user-approved (spikes V34 to V38 and V41 held, V39 partial) and not yet Accepted; the D13 contract shape is accepted; four proposals (PR-1 to PR-4) await the user; dual-stack is recorded against GH #308. D17 (ADR-0273): a broker submit wakes the convergence loop at once, the cadence tick stays as the backstop (Accepted 2026-11-03; shape choices S1 to S6 accepted as proposed). ADR-0096's per-allocation backend veto and veto-before-stop ordering are removed as redundant under ADR-0267. The `stable_announced` view marker is removed (ADR-0265). — Morgan. |
 | 2026-11-03 | **public-ingress-gateway: user rulings R-20…R-44 recorded (ADR-0243–0254; feature delta).** The bundled ADRs are split at the ruling boundaries so one ADR records one decision: ADR-0248 (connector ledger order, from 0243), ADR-0249 (cipher set) and ADR-0250 (no KeyUpdate origination) from 0244, ADR-0251 (ambiguous-framing rejection), ADR-0252 (interim `1xx` and `Expect`) and ADR-0253 (close-delimited and HTTP/1.0-with-length) from 0245, ADR-0254 (lingering close) from 0247. Still Proposed pending independent review. — Morgan. |
 | 2026-11-02 | **public-ingress-gateway: user rulings R-1…R-19 recorded (ADR-0224, 0225, 0239, 0240, 0241–0247; feature delta).** ADR-0247 (full-duplex exchange and lingering close) is split from ADR-0239. The selection arm is a separate `cgroup/connect4` program and ignores `BACKEND_MAP.healthy` (readiness window is 502); the BackendId allocator is unchanged; gateway identity disable is a synchronous clear and `Action::DropGatewaySvid` is removed; the connector reserves its cleanup-ledger slot before `open_upstream`; each gateway test composition binds a distinct `127/8` address; both legs offer only AES-128-GCM/AES-256-GCM, strict framing rejection, full-duplex exchange, interim `100`/`Expect` forwarded, close-delimited responses supported, no gateway-originated KeyUpdate, lingering close with bounded discard, one request per upstream connection; no per-exchange pipe-release change; the ≥64 KiB pipe invariant stays until GH #339; the `relay_ktls` model is dropped. Still Proposed pending independent review. — Morgan. |
 | 2026-11-01 | **public-ingress-gateway: reconstructed on main 549d78fa6 (GH #54; ADR-0220–0243, Proposed).** Branch ADR-0114…0143 are renumbered into ADR-0220…0241, with merged and retired records folded into their surviving decisions (the branch demand-gated TEACH and frontend-demand decisions are retired by D1/D2, never implemented); ADR-0242 and ADR-0243 are new. The gateway reaches VM backends through ordinary Service-map programming and the existing leg-C/vsock path. Pending independent review and user confirmation of the new public surface. — Morgan. |

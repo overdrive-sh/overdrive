@@ -211,7 +211,9 @@ module restart_authority {
       decl, a.row == "running", a.sup, not(a.stable), a.sseq < SMAX,
       res == "fail" or a.vm,    // RA-4: a dead guest cannot produce a Pass
       at' = at.set(i, { ...a, sseq: a.sseq + 1, srow: res,
-                        sstreak: if (res == "fail") (if (a.sstreak < MAXA) a.sstreak + 1 else MAXA) else 0 }),
+                        // PR-3 (D14 item 3): the first Fail is written at the deadline carrying attempt = max_attempts, so a
+                        // Fail written once the deadline passed carries the maximum; before the deadline the streak counts up
+                        sstreak: if (res == "fail") (if (a.dl) MAXA else if (a.sstreak < MAXA) a.sstreak + 1 else MAXA) else 0 }),
       deployed' = deployed, decl' = decl, cur' = cur, used' = used, done' = done, g' = g,
       conf_step' = if (REC) variant("StartupRow", { i: i, res: res }) else conf_step,
     }
@@ -531,6 +533,20 @@ module restart_authority {
     .then(WLRestart).expect(cur == 1 and used == 1)
     .then(StartOk(1)).then(OperatorStop(1))
     .expect(at.get(1).row == "t_operator" and not(restartEnabled) and not(giveUpEnabled) and Safety)
+
+  // D14 item 3 (PR-3): the guest-listener producer writes no Fail before the deadline: the first Fail row is written at the
+  // deadline with no earlier row and carries the maximum attempt, so it alone enables the stop; the successor's Pass is the
+  // first row of its attempt (no earlier Fail)
+  run first_fail_at_deadline_with_no_earlier_row_stops = init
+    .then(Deploy(true)).then(StartOk(0)).then(Deadline(0))
+    .expect(at.get(0).srow == "absent" and at.get(0).sseq == 0 and not(startupStopEnabled(at.get(0))))
+    .then(StartupRow(0, "fail"))
+    .expect(at.get(0).sseq == 1 and at.get(0).sstreak == MAXA and startupStopEnabled(at.get(0)) and Safety)
+    .then(SLStartupStop(0, "landed")).then(WLRestart)
+    .then(StartOk(1)).then(StartupRow(1, "pass"))
+    .expect(at.get(1).sseq == 1 and at.get(1).srow == "pass" and Safety)
+    .then(SLStable(1))
+    .expect(at.get(1).stable and at.get(0).claim == "" and not(done) and Safety)
 
   // D8: the stop fails, a new startup row arrives, the second stop is emitted and lands
   run failed_startup_stop_is_retried_on_next_row = init

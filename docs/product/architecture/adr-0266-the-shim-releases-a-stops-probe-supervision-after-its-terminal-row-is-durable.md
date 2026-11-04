@@ -3,7 +3,7 @@
 ## Status
 
 Accepted, 2026-11-03 (approval: feature delta § Approval record, B2; accepted as
-proposed). Not implemented. GH #318, GH #334. The exact ordering, the corrected lifecycle
+proposed). Not implemented. GH #318, GH #334. The exact ordering, the lifecycle
 gate (G-5) and the model changes live in the
 [feature delta](../../feature/service-allocation-readiness-and-ending/feature-delta.md).
 

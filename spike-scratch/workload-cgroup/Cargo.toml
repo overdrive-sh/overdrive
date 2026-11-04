@@ -1,0 +1,7 @@
+# workload-cgroup spike (V42). Self-contained; NOT a member of the repo workspace.
+[workspace]
+members = ["driver", "wl"]
+resolver = "2"
+
+[profile.release]
+debug = 0

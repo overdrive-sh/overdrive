@@ -1,0 +1,32 @@
+# gr-hazard-no-drain-before-exit-listen-order: counterexample, 5 state(s) (from the TLC trace)
+
+State 1
+  exitrep = "unset"
+  junk = 0
+  ring = <<>>
+  wapp = 0
+  endset = {}
+  rd = 0
+  eof = FALSE
+  wire = <<>>
+  produced = <<>>
+  rset = {}
+  wait = "waiting"
+  conf_step = [init |-> [tag |-> "UNIT"]]
+  wl = "running"
+
+State 2 [WorkloadListen]
+  ring = <<"tcp80">>
+  produced = <<[p |-> "tcp80", dropped |-> FALSE]>>
+
+State 3 [WorkloadExit]
+  wl = "exited"
+
+State 4 [WriterExit]
+  wapp = 1
+  wire = <<"exit">>
+
+State 5 [WriterForward]
+  ring = <<>>
+  wapp = 2
+  wire = <<"exit", "tcp80">>

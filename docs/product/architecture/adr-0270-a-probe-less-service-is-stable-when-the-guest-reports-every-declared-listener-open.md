@@ -2,15 +2,13 @@
 
 ## Status
 
-**User-approved in direction, 2026-11-03 ("add it. and proceed with recommendations"),
-spikes V34 to V39 run (V34, V35, V36, V37, V38 held; V39 partial, see the feature delta
-§ Spike table); the corrected D13 contract shape was ACCEPTED by the user on 2026-11-03.
-Not yet Accepted as a decision: "user-approved, pending the V41 boot-cost measurement and the
-independent re-review"** (a material B-minus-A delta returns D13 to DESIGN). Not implemented.
-GH #318, GH #334. **Supersedes [ADR-0058](adr-0058-default-tcp-startup-probe-inference.md)
-on acceptance**; ADR-0058 is operative (implemented, with E13 evidence) and stays in force
-until then. The user's rulings: no minimum-healthy window; the opt-out
-`[[health_check.startup]] = []` is kept. Related:
+User-approved, 2026-11-03; the D13 hook scope it depends on (PR-2) is accepted in contract
+shape (V42 held 2026-11-04, [findings](../../feature/service-allocation-readiness-and-ending/spike/findings-workload-cgroup.md));
+not yet Accepted (remaining gates: model check, design review round 4). Not implemented. GH #318, GH #334. Contract
+and status: [feature delta](../../feature/service-allocation-readiness-and-ending/feature-delta.md) (D15).
+**Supersedes [ADR-0058](adr-0058-default-tcp-startup-probe-inference.md) on acceptance**;
+ADR-0058 is operative (implemented, with E13 evidence) and stays in force until then.
+Related:
 [ADR-0268](adr-0268-the-guest-reports-each-workload-listener-it-opens-over-the-beacon-channel.md),
 [ADR-0269](adr-0269-a-service-with-no-declared-startup-probe-waits-on-a-guest-listener-startup-probe.md),
 [ADR-0057](adr-0057-health-check-toml-spec.md) (the TOML spec), RCA
@@ -92,7 +90,6 @@ unchanged.**
   workload that opens a declared listener lazily must use the opt-out.
 - Cold start: the `Stable` and first-traffic time is no longer floored at 2 s; what remains
   is guest-to-host delivery plus the reconciler's wake (ADR-0273 makes a submit wake the
-  convergence loop at once; the tick remains the backstop). Measured by V40 (with and without the wake), not
-  assumed.
+  convergence loop at once; the tick remains the backstop).
 - The `(inferred)` marker disappears from the CLI and is replaced by the mechanic's own
   summary ("guest listeners tcp:8080 udp:5353"); ADR-0271 removes the flag.

@@ -1,0 +1,21 @@
+SUBSTRATE uname_r=7.0.0-38-generic machine=x86_64 virt=none date=2026-11-04T11:25:18Z
+CH cloud-hypervisor v53.0.0
+c2_child: n=20 workload cgroup={'0::/workload': 20}
+   guest-owner stream header seen by host: {('4f460201000000010afa4d091f9000006c616e652d6c61756e63682d746f6b65',): 20}
+   ORIGIN map entry for the workload socket: {('WL_ORIGIN cookie=0x1 ip=10.250.77.9 port=8080',): 20}
+   connect result: {'WL_CORR connect=ok cookie=* dest=10.250.77.9:8080': 20}
+   CHILD_CORRELATION entries seen by workload poll: {('WL_CHILD none-observed',): 20}
+   listen reports (wl_tcp,wl_udp,init_tcp,init_udp): {('1', '1', '0', '0'): 20}
+c2_nocorr: n=20 workload cgroup={'0::/': 20}
+   guest-owner stream header seen by host: {(): 20}
+   ORIGIN map entry for the workload socket: {('WL_ORIGIN cookie=0x1 ip=10.250.77.9 port=8080',): 20}
+   connect result: {'WL_CORR connect=ok cookie=* dest=10.250.77.9:8080': 20}
+   CHILD_CORRELATION entries seen by workload poll: {('WL_CHILD none-observed',): 20}
+   listen reports (wl_tcp,wl_udp,init_tcp,init_udp): {('0', '0', '0', '0'): 20}
+c2_root_base: n=20 workload cgroup={'0::/': 20}
+   guest-owner stream header seen by host: {('4f460201000000010afa4d091f9000006c616e652d6c61756e63682d746f6b65',): 20}
+   ORIGIN map entry for the workload socket: {('WL_ORIGIN cookie=0x1 ip=10.250.77.9 port=8080',): 20}
+   connect result: {'WL_CORR connect=ok cookie=* dest=10.250.77.9:8080': 20}
+   CHILD_CORRELATION entries seen by workload poll: {('WL_CHILD none-observed',): 20}
+   listen reports (wl_tcp,wl_udp,init_tcp,init_udp): {('0', '0', '0', '0'): 20}
+WCFAIL lines: 0

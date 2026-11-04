@@ -1,0 +1,28 @@
+SUBSTRATE uname_r=7.0.0-38-generic machine=x86_64 virt=none date=2026-11-04T10:20:27Z
+CH cloud-hypervisor v53.0.0
+WCENV {"kernel_release":"7.0.0-38-generic","ch":"/usr/local/bin/cloud-hypervisor","real_init":"/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/target/x86_64-unknown-linux-musl/release/overdrive-init","swapped_init":"/tmp/wc-target/objs/init-wc","swapped_init_plus":"/tmp/wc-target/objs/init-wcp"}
+variant            n      p50      p90     mean      min      max | delta vs d_base: p50(unpaired) paired p50 paired p90 paired max   (ms, init start -> READY sent)
+d_base            40   130.97   131.39   130.94   130.14   132.28 |          0.00       0.00       0.00       0.00
+d_cgonly          40   130.96   131.94   131.02   130.15   134.49 |         -0.00       0.07       1.02       2.55
+d_child           40   151.21   152.23   151.48   150.10   156.84 |         20.25      20.29      21.52      25.49
+d_childnobtf      40   150.89   151.50   150.93   149.78   152.67 |         19.92      19.95      20.82      21.83
+d_outside         40   151.30   152.99   151.67   150.41   156.72 |         20.33      20.35      22.05      25.76
+d_sameobj         40   128.62   129.16   128.72   127.72   130.04 |         -2.34      -2.18      -1.49      -0.93
+d_sameobjidle     40   128.05   128.78   128.17   127.31   130.47 |         -2.92      -2.77      -2.05      -0.22
+
+median stage durations (ms) from the in-guest marks:
+  d_base           start->cfg_begin 2.17; cfg_begin->programs_done 120.87; programs_done->wc_done 0.00; wc_done->ready_sent 7.89
+  d_cgonly         start->cfg_begin 2.15; cfg_begin->programs_done 120.85; programs_done->wc_cgroup_made 0.07; programs_done->wc_done 0.07; wc_done->ready_sent 7.85
+  d_child          start->cfg_begin 2.16; cfg_begin->programs_done 120.92; programs_done->wc_cgroup_made 0.07; wc_cgroup_made->wc_loaded 16.01; wc_loaded->wc_attached 0.56; wc_attached->wc_done 3.64; programs_done->wc_done 20.28; wc_done->ready_sent 7.78
+  d_childnobtf     start->cfg_begin 2.16; cfg_begin->programs_done 120.83; programs_done->wc_cgroup_made 0.07; wc_cgroup_made->wc_loaded 19.27; wc_loaded->wc_attached 0.57; wc_attached->wc_done 0.19; programs_done->wc_done 20.12; wc_done->ready_sent 7.75
+  d_outside        start->cfg_begin 2.16; cfg_begin->programs_done 120.89; programs_done->wc_cgroup_made 0.07; wc_cgroup_made->wc_loaded 16.05; wc_loaded->wc_attached 0.56; wc_attached->wc_done 3.63; programs_done->wc_done 20.30; wc_done->ready_sent 7.82
+  d_sameobj        start->cfg_begin 2.16; cfg_begin->programs_done 118.85; programs_done->wc_cgroup_made -0.73; wc_attached->wc_done 0.21; programs_done->wc_done 0.00; wc_done->ready_sent 7.71
+  d_sameobjidle    start->cfg_begin 2.17; cfg_begin->programs_done 118.18; programs_done->wc_done 0.00; wc_done->ready_sent 7.62
+
+paired per-round differences (ms, same round index = adjacent in the interleaved schedule):
+  d_sameobj - d_sameobjidle: p50 0.73  p90 1.39  max 2.36  mean 0.55   [same object: programs attached to the workload cgroup vs merged object idle]
+  d_child - d_cgonly: p50 20.38  p90 21.61  max 26.20  mean 20.46   [separate Ebpf::load + attach vs cgroup+placement only]
+  d_cgonly - d_base: p50 0.07  p90 1.02  max 2.55  mean 0.08   [workload cgroup mkdir + clone3 CLONE_INTO_CGROUP placement vs baseline]
+  d_child - d_outside: p50 0.06  p90 1.14  max 5.15  mean -0.19   [placement via clone3 vs not placed (both load+attach)]
+  d_childnobtf - d_child: p50 -0.35  p90 0.72  max 1.77  mean -0.55   [loader.btf(None) vs default loader]
+WCFAIL lines: 0
