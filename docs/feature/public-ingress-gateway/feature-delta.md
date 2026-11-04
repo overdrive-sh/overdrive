@@ -10,7 +10,11 @@
 > [User decisions](#wave-design--ref-reconstruction-user-decisions-and-proposals)): P-2, P-9, P-10, B-1, DG-11, DG-12,
 > QC-1..QC-3, P-12, P-13a-d, P-17, P-18, the upstream-leg and Q-1 rulings, the D5 confirmation list (items 1-13) and
 > `relay_ktls` removal are accepted contract text below; P-16 is not adopted. R-20..R-44 (2026-11-03) are accepted
-> contract text too. The optional proposals (P-1, P-3, P-4, P-6, P-8 simplification, P-32, P-33, P-34, P-35, P-36, P-37, P-38) remain PROPOSED and await the user.
+> contract text too. R-45..R-52 (SVID issuance failure occurrence for the gateway and workload SVIDs, 2026-11-04) are recorded
+> contract text with the provenance stated per row (R-45, R-46 user decisions; R-47..R-50 user decisions delegated as "prefer
+> correctness"; R-51 an application of the user's versioned-envelope instruction; R-52 an architect-derived correctness
+> consequence of the user's 2026-11-04 decision, adopted pending explicit user confirmation, not a separate user approval). ADR-0274 and ADR-0275 record the two occurrence decisions and are Proposed, pending
+> independent review. The optional proposals (P-1, P-3, P-4, P-6, P-8 simplification, P-32, P-33, P-34, P-35, P-36, P-37, P-38, P-40) remain PROPOSED and await the user.
 > Contract-shaping validation V-GW-1..5 and the G1 spike (a-e) have
 > run (see [Contract-shaping validation items](#wave-design--ref-contract-shaping-validation-items)
 > and [Formal protocol model](#wave-design--ref-formal-protocol-model)). This document reconstructs the previously
@@ -375,7 +379,7 @@ continues from `Selected` through exact-peer mTLS.
 | Eligible workload backend set and `Backend.alloc` | `ServiceBackendRow` | ServiceLifecycle, sole complete-row publisher | Gateway does not read, probe, author, filter or select this set |
 | Applied Service frontend backend set | `SERVICE_MAP` outer + Maglev inner table + `BACKEND_MAP` | ServiceMapHydrator → Dataplane/EbpfDataplane (ordinary path, D1) | The gateway reads it only through the hook's registered arm; handler never mutates maps |
 | Gateway Applied Generation | Active `GatewayApplicationOwner` Current `ArcSwapOption`, built from Route + exact Service Frontend + opaque certified-key snapshot | `GatewayApplicationOwner` | Atomic admission pointer retained per connection; excludes BPF generation/candidates and is not reconstructed from status |
-| Gateway Application status | `ObservationStore.gateway_application_status` / `GatewayApplicationStatusRowV1` keyed by `NodeId` | `GatewayApplicationOwner` sole LWW writer | Listener/staged/current/draining/unavailable/non-secret identity/connect-path facts only; no BackendId, receipt, peer, BPF generation or credential secret |
+| Gateway Application status | `ObservationStore.gateway_application_status` / `GatewayApplicationStatusRowV1` keyed by `NodeId` | `GatewayApplicationOwner` sole LWW writer | Listener/staged/current/draining/unavailable/non-secret identity/connect-path facts and the SVID issue-failure occurrence record (count, cause class, instant; R-45) only; no BackendId, receipt, peer, BPF generation, credential secret or CA/audit error text |
 | Upstream socket preparation and registered intent | Process-local `GATEWAY_CONNECT_INTENT_MAP` entry, keyed by the socket cookie | `EbpfDataplane` (`open_upstream`) | Never the gateway crate; never persisted; destroyed with the BPF object |
 | Operator gateway-status response | `GatewayStatusReads` plus exact ObservationStore point reads for application/custody and relevant Service hydration | Existing operator-mTLS `GET /v1/gateway/status` handler | `GatewayStatusResponse`; 200 for readable active/disabled state, 500 on observation read error; raw dataplane failure strings and secrets omitted |
 | Actual selected workload identity | transient socket-cookie→BackendId receipt joined to the immutable process-lifetime association for the exact applied `Backend.alloc` | Dataplane gateway-connect registry | Consumed before mTLS bytes; gateway receives the identity but does not choose it; association is not rebound or recycled |
@@ -907,6 +911,14 @@ The user ruled "proceed with the recommendations (prefer correctness)" on the pr
 | R-42, 2026-11-03 | Extra scope is dropped: the four listener-level tests of S-PIG-79..82 (the S-PIG-77 and S-PIG-78 listener arms stay), the pre-effect second test of S-PIG-20, the kernel-cite re-derivation of S-PIG-116 (the scenario itself is deleted, SUB4) and S-PIG-75; the Sim test-support surface that realises a pinned capability stays. | Authoring status by batch |
 | R-43, 2026-11-03 | The `dst-lint` struct-literal violations in `action_shim/replacement_acceptance.rs` (`AllocStatusRow { .. }` and `LogicalTimestamp { .. }` in `predecessor_row`) are cleared by a plain `#[cfg(test)]` on the fixture function: the scanner exempts only an item whose own attributes hold a top-level `cfg(test)` (it cannot see the `cfg(all(test, feature = "integration-tests"))` on the module declaration in `mod.rs`); no scanner change and no marker. | Technology choices ("Architecture enforcement") |
 | R-44, 2026-11-03 | No control-event field is added to the Sim leg transcript; S-PIG-90 keeps the octet check, because the port has no operation that carries a control record between legs. | Authoring status by batch |
+| R-45 (P-39), 2026-11-04, user decision | A gateway SVID issuance failure (`CaIssuanceError::Ca` or `::Audit`) is an operator-visible occurrence: `GatewayApplicationStatusRowV1` carries a monotone `issue_failures: u64` and a depth-1 `last_issue_failure: Option<SvidIssueFailure { cause: Ca \| Audit, at }>`, projected into `GatewayApplicationStatusBody` beside `gateway_identity`. A successful hold never clears them. Mechanism (corrected from P-39's text, which routed the facts through `GatewayIdentityView`): the executor records the failure through `GatewayIdentityActionTarget::record_issue_failure`; the owner reads it through the new `issue_record()` read method beside `current()` (woken by the existing `subscribe` watch), because the owner is the row's sole writer and the reconciler's hydration port does not need the facts. ADR-0274. | SVID issuance failure occurrence |
+| R-46, 2026-11-04, user decision | The same occurrence surface exists for WORKLOAD SVIDs, on its own row: `WorkloadSvidIssueStatusRowV1` keyed by `AllocationId`, written only by the `IssueSvid` executor through the atomic `ObservationStore::record_workload_svid_issue_failure`, read by `GET /v1/allocs` into `AllocStatusRowBody` and rendered by `render::workload_describe` (the live renderer; `render::alloc_status` is its pre-#220 name). The allocation row (`AllocStatusRow`) is NOT changed: its lifecycle writer rejects an update that does not dominate the stored `updated_at` (`observation_backend.rs:517-525`), so a second writer cannot share it. ADR-0275. | SVID issuance failure occurrence |
+| R-47 (a), 2026-11-04 (user decision, delegated: prefer correctness) | Gateway DISABLED: no `GatewayApplicationOwner` exists, so a disabled node never writes `GatewayApplicationStatusRowV1`, and `GET /v1/gateway/status` returns the fixed body `enabled=false`, `configured_address=None`, `listener_bound=false`, `application=None`, `certified_key=None` without any ObservationStore read. A row left by an earlier enabled boot of the same node is neither read nor projected while disabled. The occurrence fields live inside `application`, so a disabled response carries none; an enabled node with no row yet is `enabled=true`, `application=None`. | SVID issuance failure occurrence |
+| R-48 (b), 2026-11-04 (user decision, delegated: prefer correctness) | `GatewayIdentityStatus` is a pure projection of the slot's held facts and the owner's injected Clock at the projection instant: no held facts = `Absent`; held facts whose `not_after` is not after `now` = `Unusable` (the `IdentityExpired` case); otherwise `Current`. The owner projects at its existing wakes plus the failure wake (no timer is added), so `Unusable` is reached when a projection runs with expired held material; in the case that matters, rotation is failing, so failure wakes occur. Staleness bound: until the next projection the row may still read `Current` for material that has since expired. Lifecycle outcomes never write it. A boot identity wait that ends in `GatewayIdentityLifecycleError::Timeout` maps to NEITHER value: it sets `unavailable = Some(GatewayIdentityUnusable)` (the S-PIG-51 collapse, an application-level cause) and `gateway_identity` stays what the slot says (`Absent` when empty). A never-succeeded issuance reads `Absent` with `issue_failures > 0` and `last_issue_failure = Some`; a fresh start reads `Absent`, `0`, `None`; a recovered node reads `Current` with the count and last failure retained. | SVID issuance failure occurrence |
+| R-49 (c), 2026-11-04 (user decision, delegated: prefer correctness) | `GatewayIdentityLifecycleError::IssueFailed` is DELETED. `ensure_current` is the only waiting operation and it ends in `Current`, `Timeout`, `Closed` or `ReconcilerUnavailable`; an issuance failure does not end the wait because the reconciler retries on its backoff, and ending the wait on a recorded failure would be a guess that issuance will not succeed. The cause of a failure is on the status row (R-45). | SVID issuance failure occurrence |
+| R-50 (d), 2026-11-04 (user decision, delegated: prefer correctness) | The occurrence surfaces are written from the CONFIRMED failure: the executor's `Err` from `issue_and_audit`, observed after it returns, never at emit. The reconciler View `IssueRetry` / `GatewaySvidLifecycleView.retry` is stamped on emit by design (retry-policy memory, ADR-0067 D8): it stays as is, is not an operator surface and is not read by the new surfaces. Deriving retry attempts from the confirmed record instead is the PROPOSED P-40. | SVID issuance failure occurrence |
+| R-51, 2026-11-04, application of the user's instruction to follow the versioned-envelope procedure | Envelopes. The gateway row has no production writer and no persisted bytes (`archive_for_store` is a scaffold), so the two new fields are added to `GatewayApplicationStatusRowV1` IN PLACE (no `V2`); its `FIXTURE_V1` golden bytes are regenerated because that V1 was never persisted. The workload half changes no existing persisted envelope: it adds the new envelope `WorkloadSvidIssueStatusRowEnvelope::V1` with its own golden fixture. `AllocStatusRowEnvelope` is untouched. The `AllocStatusRowBody` JSON gains two additive `#[serde(default)]` fields (a wire change, not a persisted one). | SVID issuance failure occurrence |
+| R-52, 2026-11-04, **architect-derived correctness consequence of the user's 2026-11-04 decision, not a separate user approval; adopted as a consequence, pending explicit user confirmation (persistence/recovery behaviour)** (of the user's "monotone count": without it a crash-looping CA failure would reset the count on every restart) | Gateway count monotonicity across restarts: the slot's facts are process-local; the owner reads the prior row (`gateway_application_status_row`) at its first projection and projects `base + process facts`. A failed read is retried like any failed row write (the facts stay in the slot; no boot refusal, no new boot-error variant) and is never defaulted to zero. An undecodable prior row is logged and skipped (ADR-0048 observation policy: one `observation.row.skipped` warning) and the count then restarts at zero, which bounds the exposure to the count and `last`. | SVID issuance failure occurrence |
 
 Earlier approvals: D1-D5 (2026-11-01), G1-G4 (2026-11-02). GH #338 (raw TCP ingress) is out of scope; GH #339 is the kernel 7.3 upgrade.
 
@@ -921,7 +933,7 @@ Earlier approvals: D1-D5 (2026-11-01), G1-G4 (2026-11-02). GH #338 (raw TCP ingr
 
 ### PROPOSED — awaiting user
 
-No item below is part of the design until the user adds it. All are optional and non-blocking. R-1..R-44 above are ruled contract text, not proposals.
+No item below is part of the design until the user adds it. All are optional and non-blocking. R-1..R-51 above are ruled contract text (R-47..R-51 with the provenance stated per row), not proposals; R-52 is adopted as an architect-derived consequence of R-45 and awaits explicit user confirmation.
 
 | Id | Proposal | Reachable production failure it prevents | Cost | Cheaper alternative |
 |---|---|---|---|---|
@@ -937,8 +949,9 @@ No item below is part of the design until the user adds it. All are optional and
 | P-37 (new) | Project the model variable `issues` through a pinned owner accessor (for example a read-only list of the pending issue epochs on the reconciler's emission), so the QC-1 `submit_evaluation` handler's State comparison checks the model value literally instead of the weaker "no pending Issue beyond `desired()`'s epoch". **Not adopted; R-31 (model-only `issues`) stays meanwhile.** | (a) A reconciler that emits a duplicate or early same-epoch Issue which is later completed and so is distinguished from a necessary one only through `audited`; production producer: the host-backed `GatewaySvidLifecycle` re-emitting an Issue on each tick while the slot is empty. | (b) Runtime: none (read-only accessor, no hot path). Validation: one pinned accessor on the emission, a State field, no new model check. | Keep R-31: `issues` model-only, accept the residual exposure bounded by the `audited` comparison. |
 | P-38 (new) | Add route DELETE and gateway status methods to `ApiClient` (the typed operator client), so the operator-surface tests of S-PIG-35 and S-PIG-42 drive delete and status through the client instead of plain HTTPS. **Not adopted; S-PIG-35 and S-PIG-42 stay plain HTTPS meanwhile.** | (a) None found: the production handlers are reached over HTTPS today and no CLI verb needs the methods; no production path fails for their absence. The only effect is test fidelity, since plain HTTPS bypasses the client's trust handling and error typing for those two calls. | (b) Runtime: none. Validation: two client methods with their typed errors, and re-pointing two scenarios; a CLI status command, if wanted, is a further decision. | Plain HTTPS built from the trust triple in the CLI tests, as authored. |
 | P-36 (new) | Remove the `gateway.upstream.receipt.validated` tracing occurrence (its event spec) and AT-PIG-E2E-1's in-process tracing capture layer. The occurrence has no sanctioning ruling found and no production reader; it exists only as a test oracle. **Not adopted; the occurrence stays meanwhile.** | (a) None: no production failure depends on the occurrence; it is read only by AT-PIG-E2E-1. Removing it removes a production emitter, a stable event schema and a capture layer that exist for one test. | (b) Runtime: one emit per upstream request today (removal saves it). Validation: removal requires re-pointing AT-PIG-E2E-1's receipt oracle; no model or lane is added. | The cheaper oracles already pinned: the S-PIG-63 port read, `live_intent_count()` and `live_receipts()` post-state, and the exact-peer SVID plus a distinguishing backend response header (`X-Workload: api`) for the selected backend. |
+| P-40 (new) | Derive the `SvidLifecycle` retry attempts from the confirmed failure record (`WorkloadSvidIssueStatusRowV1.issue_failures`, read back into `actual`) instead of stamping `IssueRetry` on emit, and likewise for `GatewaySvidLifecycleView.retry`. **Not adopted; R-50 (View stamped on emit, unchanged) stays meanwhile.** | (a) A failed issue that never reached the executor (a dropped action, a crash between the View fsync and dispatch) is counted as an attempt and backs the next issue off; production producer: a control-plane crash after the runtime fsyncs the View and before the action dispatch (`development.md` § "Reconciler I/O" steps 7-9). The cost is one extra backoff window, not a lost issuance (the next tick re-emits). | (b) Runtime: one observation read per allocation per tick on the reconciler hydration path. Validation: a new `actual` field and read-port for `SvidLifecycle` and `GatewaySvidLifecycle`, `Sim*` impls and changed retry property tests; the View schema drops `attempts` (a CBOR additive change). | Keep the View stamped on emit (R-50): it is retry-policy memory, never an operator surface, and the cost above is bounded to one window. |
 
-Ruled proposals leave this table; the ruled contract is stated once, in the owning ADR and the sections that cite it (R-1..R-44 above).
+Ruled proposals leave this table; the ruled contract is stated once, in the owning ADR and the sections that cite it (R-1..R-51 above; R-52 is adopted-as-consequence pending user confirmation).
 
 Items the design deliberately does not carry: a userspace backend load balancer, a named Gateway resource, ACME, WireGuard, in-guest mTLS, DNS mutation, any new persistence subsystem.
 
@@ -2014,7 +2027,7 @@ pub gateway_identity: &'a dyn GatewayIdentityView,
 
 ## Wave: DESIGN / [REF] Formal protocol model
 
-Target subsystem directory: `specs/quint/public-ingress-gateway/` (permanent; `checks.toml`, `hazard/`, `evidence/`, `README.md`). Four stateful modules (`gateway_identity`, `gateway_application`, `selection_receipt` and `relay_exchange`, the last new with G1; the check counts are stated once in the `checks.toml` header); every conformance target declares a `step` relation and named runs. There is no kTLS-lock model: the transmit-lock exclusion of ADR-0244 is covered by assumption A-K5 and the Tier-3 check, and chunk framing by property tests only (R-19).
+Target subsystem directory: `specs/quint/public-ingress-gateway/` (permanent; `checks.toml`, `hazard/`, `evidence/`, `README.md`). Four stateful modules (`gateway_identity`, `gateway_application`, `selection_receipt` and `relay_exchange`, the last new with G1; the check counts are stated once in the `checks.toml` header); every conformance target declares a `step` relation and named runs. There is no kTLS-lock model: the transmit-lock exclusion of ADR-0244 is covered by assumption A-K5 and the Tier-3 check, and chunk framing by property tests only (R-19). The SVID issue-failure occurrence record (R-45, R-46) is not modelled and the spec is unchanged: no decision, guard or invariant of any module reads the count or the last failure (they are write-only for the protocol), and the audit failure that produces one of them is already the modelled action `audit_fail` (run `audit_failure_no_hold`) whose model effect, no hold, is unchanged; a CA signing failure has the same model effect and needs no separate action. The record adds no modelled variable, so no owner accessor is pinned for it here.
 
 ### Module `relay_exchange` (conformance target) — decisions ADR-0239, ADR-0247 (G1)
 
@@ -3066,7 +3079,7 @@ and DELETE return typed `ControlPlaneError::GatewayDisabled` as 409
 `ErrorBody { error: "gateway_disabled", message: "public ingress gateway is
 disabled", field: null }` before parse/owner/store, with an empty IntentStore
 delta; GET
-returns `enabled=false`, `listener_bound=false` and empty optional projections.
+returns `enabled=false`, `listener_bound=false` and empty optional projections (R-47: no ObservationStore read, and a stale row from an earlier enabled boot is not projected).
 `ApiClient` adds only `submit_route`, the production caller used by deploy.
 DELETE and gateway status are operator-mTLS HTTP/OpenAPI surfaces in this
 slice; no dormant CLI methods/commands are introduced. Live OpenAPI registers
@@ -3853,7 +3866,8 @@ silently choose numeric, byte-array or uppercase-compatible wire shape.
 | `PublicRouteSetEnvelope::V1` | `public-ingress/route-set`; typed rkyv codec | Empty/occupied Route, deterministic Route Generation | VIP, ServiceId, backend, AllocationId, SPIFFE ID, BPF state |
 | `PublicCertifiedKeyEnvelope::V1` | `public-ingress/certified-key/<PublicCertifiedKeyId>`; typed rkyv codec | ID/hostname/generation/leaf fingerprint/ordered chain DER/validity/producer provenance + AES-GCM protected key inputs | Plaintext key, file path, compiled rustls config, ACME/order state |
 | `PublicCertifiedKeyStatusRowEnvelope::V1` | table `public_certified_key_status`, key canonical certified-key ID bytes | Active usable metadata or retained-generation unusable cause, plus optional latest install failure | Paths, PEM/key bytes, raw parser/crypto error string |
-| `GatewayApplicationStatusRowEnvelope::V1` | table `gateway_application_status`, key canonical NodeId bytes | listener fact; staged/current/draining application generations; unavailable cause; non-secret gateway identity/connect-probe facts | Backend candidates, BackendId/receipt/peer, ServiceBackendRow/BPF generation, credential bytes |
+| `GatewayApplicationStatusRowEnvelope::V1` | table `gateway_application_status`, key canonical NodeId bytes | listener fact; staged/current/draining application generations; unavailable cause; non-secret gateway identity/connect-probe facts; the issue-failure occurrence record (`issue_failures`, `last_issue_failure`: cause class and instant only, R-45) | Backend candidates, BackendId/receipt/peer, ServiceBackendRow/BPF generation, credential bytes, CA or audit error text |
+| `WorkloadSvidIssueStatusRowEnvelope::V1` | table `workload_svid_issue_status`, key canonical AllocationId bytes (defined in "SVID issuance failure occurrence", R-46; listed for completeness, not owned by the gateway) | `issue_failures`, `last_issue_failure` (cause class and instant), `node_id`, LWW stamp | Certificate or key bytes, CA or audit error text |
 
 Each envelope implements existing `VersionedEnvelope` with `Latest = V1 payload`, and
 each payload owns the established typed codec surface:
@@ -3895,7 +3909,7 @@ Intent decode uses ADR-0048 fail-fast `health.startup.refused`; observation
 decode emits one `observation.row.skipped` warning and skips only that row.
 Writers construct envelopes only through `VersionedEnvelope::latest`; no raw
 rkyv invocation exists outside these payload methods. Golden bytes and
-round-trip/schema-evolution properties pin all four V1 formats.
+round-trip/schema-evolution properties pin all five V1 formats (the fifth is the workload SVID issue-status row of R-46).
 
 ### Exact Public Certified-Key Custody API and record
 
@@ -4975,6 +4989,12 @@ pub struct GatewayApplicationStatusRowV1 {
     pub draining: Vec<GatewayApplicationGenerationStatus>,
     pub unavailable: Option<GatewayApplicationUnavailableCause>,
     pub gateway_identity: GatewayIdentityStatus,
+    /// Occurrence record (R-45): monotone count of failed gateway SVID issuances; never cleared by a success.
+    /// `issue_failures == 0` exactly when `last_issue_failure` is `None`.
+    pub issue_failures: u64,
+    /// Depth-1 snapshot of the latest failed issuance (`SvidIssueFailure`, `overdrive-core::ca::issue_failure`, defined once in
+    /// "SVID issuance failure occurrence"). No source text.
+    pub last_issue_failure: Option<SvidIssueFailure>,
     pub connect_path: GatewayConnectPathStatus,
     pub updated_at: LogicalTimestamp,
 }
@@ -5020,6 +5040,9 @@ pub struct GatewayApplicationStatusBody {
     pub draining: Vec<GatewayApplicationGenerationStatusBody>,
     pub unavailable: Option<GatewayApplicationUnavailableCauseBody>,
     pub gateway_identity: GatewayIdentityStatusBody,
+    /// R-45; `0` and `None` on a node that never failed an issuance.
+    pub issue_failures: u64,
+    pub last_issue_failure: Option<SvidIssueFailureBody>,
     pub connect_path: GatewayConnectPathStatusBody,
 }
 #[derive(Serialize, Deserialize, ToSchema)]
@@ -5382,6 +5405,9 @@ pub trait GatewayIdentityLifecycleControl: Send + Sync {
     ) -> Result<GatewayIdentityFacts, GatewayIdentityLifecycleError>;
     fn current(&self) -> Option<GatewayIdentityFacts>;
     fn subscribe(&self) -> watch::Receiver<Option<GatewayIdentityFacts>>;
+    /// R-45: the process-local issue-failure record (`None` = no failure this process). Read beside `current()`; the
+    /// `subscribe` item type and `current()` are unchanged. A recorded failure wakes `subscribe` receivers (see "Reading and wake").
+    fn issue_record(&self) -> Option<GatewayIdentityIssueRecord>;
     /// Synchronous clear (R-4, R-30): bumps the epoch and empties the slot in the same call; it waits for nothing, so it
     /// takes no deadline, is not async and is infallible: the u64 epoch cannot be exhausted (the slot's private checked add
     /// overflowing is `unreachable!()`), so there is no failure to return.
@@ -5389,7 +5415,6 @@ pub trait GatewayIdentityLifecycleControl: Send + Sync {
 }
 pub enum GatewayIdentityLifecycleError {
     ReconcilerUnavailable,
-    IssueFailed,
     /// `ensure_current` did not reach Current by its deadline (the only operation that waits).
     Timeout,
     Closed,
@@ -5397,6 +5422,7 @@ pub enum GatewayIdentityLifecycleError {
 pub trait GatewayIdentityLifecycleTarget: Send + Sync {
     fn current(&self) -> Option<GatewayIdentityFacts>;
     fn subscribe(&self) -> watch::Receiver<Option<GatewayIdentityFacts>>;
+    fn issue_record(&self) -> Option<GatewayIdentityIssueRecord>; // R-45, as on the Control trait
     /// Infallible (R-30): the epoch is a u64; the slot's private checked add overflowing is `unreachable!()`.
     fn begin_disable(&self) -> GatewayIdentityEpoch;
 }
@@ -5650,6 +5676,7 @@ impl GatewayIdentitySlot {
     pub fn desired(&self) -> GatewayIdentityDesired;
     pub fn current(&self) -> Option<GatewayIdentityFacts>;
     pub fn subscribe(&self) -> watch::Receiver<Option<GatewayIdentityFacts>>;
+    pub fn issue_record(&self) -> Option<GatewayIdentityIssueRecord>; // R-45
     pub fn client_access(
         self: &Arc<Self>,
         clock: Arc<dyn Clock>,
@@ -5662,6 +5689,7 @@ impl GatewayIdentitySlot {
         epoch: GatewayIdentityEpoch,
         material: SvidMaterial,
     ) -> GatewayIdentityMutationOutcome;
+    pub(crate) fn record_issue_failure(&self, failure: SvidIssueFailure);
 }
 
 pub struct GatewayIdentityActionHandle { slot: Arc<GatewayIdentitySlot> }
@@ -5672,10 +5700,12 @@ impl GatewayIdentityActionTarget for GatewayIdentityActionHandle {
         epoch: GatewayIdentityEpoch,
         material: SvidMaterial,
     ) -> GatewayIdentityMutationOutcome;
+    fn record_issue_failure(&self, failure: SvidIssueFailure);
 }
 impl GatewayIdentityLifecycleTarget for GatewayIdentityLifecycleHandle {
     fn current(&self) -> Option<GatewayIdentityFacts>;
     fn subscribe(&self) -> watch::Receiver<Option<GatewayIdentityFacts>>;
+    fn issue_record(&self) -> Option<GatewayIdentityIssueRecord>;
     fn begin_disable(&self) -> GatewayIdentityEpoch;
 }
 
@@ -5773,8 +5803,8 @@ clock.now()))` until the same desired epoch becomes Current, the stream closes,
 or `Timeout` wins. `disable_after_drain()` calls
 `begin_disable`, which synchronously empties the slot; no evaluation is submitted
 and there is no race or wait, so the method takes no deadline, is not async and
-has no disable-timeout outcome and no failure (R-30: the u64 epoch cannot be exhausted, so the slot's private checked add overflowing is `unreachable!()`). `current`/`subscribe`
-delegate only non-secret facts. No detached task or second reconcile call path
+has no disable-timeout outcome and no failure (R-30: the u64 epoch cannot be exhausted, so the slot's private checked add overflowing is `unreachable!()`). `current`/`subscribe`/`issue_record`
+delegate only non-secret facts. `ensure_current` loops: a `subscribe` wake with an unchanged item (a recorded failure) re-checks Current and keeps waiting. No detached task or second reconcile call path
 exists.
 
 The action target is a narrow write-only port; neither production nor Sim
@@ -5789,6 +5819,9 @@ pub trait GatewayIdentityActionTarget: Send + Sync {
         epoch: GatewayIdentityEpoch,
         material: SvidMaterial,
     ) -> GatewayIdentityMutationOutcome;
+    /// R-45: record one confirmed failed issuance. Epoch-independent (a failure that completes after a disable is still an
+    /// occurrence), infallible and in-memory; it never touches the held identity.
+    fn record_issue_failure(&self, failure: SvidIssueFailure);
 }
 
 // overdrive-control-plane
@@ -5818,6 +5851,7 @@ impl SimGatewayIdentityActionTarget {
     pub fn new(desired: GatewayIdentityDesired) -> Self;
     pub fn current(&self) -> Option<GatewayIdentityFacts>;
     pub fn subscribe(&self) -> watch::Receiver<Option<GatewayIdentityFacts>>;
+    pub fn issue_record(&self) -> Option<GatewayIdentityIssueRecord>;
     pub fn begin_disable(&self) -> GatewayIdentityEpoch;
 }
 impl GatewayIdentityActionTarget for SimGatewayIdentityActionTarget {
@@ -5826,10 +5860,12 @@ impl GatewayIdentityActionTarget for SimGatewayIdentityActionTarget {
         epoch: GatewayIdentityEpoch,
         material: SvidMaterial,
     ) -> GatewayIdentityMutationOutcome;
+    fn record_issue_failure(&self, failure: SvidIssueFailure);
 }
 impl GatewayIdentityLifecycleTarget for SimGatewayIdentityActionTarget {
     fn current(&self) -> Option<GatewayIdentityFacts>;
     fn subscribe(&self) -> watch::Receiver<Option<GatewayIdentityFacts>>;
+    fn issue_record(&self) -> Option<GatewayIdentityIssueRecord>;
     fn begin_disable(&self) -> GatewayIdentityEpoch;
 }
 
@@ -5855,6 +5891,7 @@ impl GatewayIdentityLifecycleControl for SimGatewayIdentityLifecycleControl {
     ) -> Result<GatewayIdentityFacts, GatewayIdentityLifecycleError>;
     fn current(&self) -> Option<GatewayIdentityFacts>;
     fn subscribe(&self) -> watch::Receiver<Option<GatewayIdentityFacts>>;
+    fn issue_record(&self) -> Option<GatewayIdentityIssueRecord>;
     fn disable_after_drain(&self);
 }
 
@@ -5881,7 +5918,8 @@ The existing `dispatch`, `dispatch_with_network_provisioner`,
 and their shared `dispatch_single` each gain `&GatewayIdentityActionComposition`
 in the same position and every production wrapper passes `AppState`'s value.
 `IssueGatewaySvid` invokes `issue_and_audit` and then `hold_audited`; audit/
-issuance failure returns `ShimError::GatewaySvidIssue(source)`, while
+issuance failure first calls `record_issue_failure` (R-45, R-50; see "SVID issuance failure occurrence")
+and then returns `ShimError::GatewaySvidIssue(source)`, while
 `StaleEpoch` is a successful stale no-op. A disabled composition returns
 `ShimError::GatewayIdentityDisabled(source)`. No executor obtains
 private material from the slot and no dispatcher overload omits this mandatory
@@ -6032,6 +6070,248 @@ stale gate-result rejection, key/identity loss before unbind, typed
 NoBackend/unavailable outcome without wait (ADR-0242), receipt cleanup/isolation, gateway SVID issue/reissue/clear and
 unchanged allocation/Service/BPF meanings.
 
+## Wave: DESIGN / [REF] SVID issuance failure occurrence
+
+Rulings R-45..R-52 (2026-11-04; provenance per row in the rulings table of the reconstruction section); decision records
+[ADR-0274](../../product/architecture/adr-0274-gateway-svid-issuance-failure-is-a-recorded-occurrence-on-the-application-status-row.md)
+(gateway) and [ADR-0275](../../product/architecture/adr-0275-workload-svid-issuance-failure-is-a-recorded-occurrence-on-its-own-row.md) (workload),
+both Proposed pending independent review. Two ADRs because the owners, rows and reversibility differ; the shared value type below is the only
+common contract. R-47 (disabled status), R-48 (`Absent`/`Unusable`) and R-49 (`IssueFailed` deleted) are rulings of this delta only; they are
+not part of either ADR.
+Cost budget: cold path only. One extra row write per failed issuance attempt (gateway: one owner projection; workload: one atomic store
+operation). Reads: the gateway status request adds none (the `application_status` read already exists); the workload `GET /v1/allocs` adds one
+point read per allocation row. No hot-path cost.
+
+**Grounded premise (`development.md` § "Ground the premise").** Both failures are reachable through `overdrive serve` with the real
+composition and no `*_override`. Gateway: `serve` with gateway config registers `GatewaySvidLifecycle` on `node/<id>`
+(`gateway_identity_lifecycle::gateway_svid_lifecycle_registration`, called from `run_server`), which emits `IssueGatewaySvid`; the
+executor calls `ca_issuance::issue_and_audit`. Workload: `run_server` registers `svid_lifecycle()`, which emits `IssueSvid` for every
+Running allocation, including every `rotate-svid` near-expiry reissue; `action_shim::issue_svid::dispatch_issue` calls the same
+function, from two callers (the convergence arm and `ensure_intercept_identity` in `action_shim/mod.rs`). `issue_and_audit` returns `CaIssuanceError::Ca` when the CA cannot sign and `::Audit` when the `issued_certificates` write
+fails (a redb write error, a full disk). Today the error's only sink is the `convergence.evaluation.completed` tracing event; on the
+appliance OS there is no operator shell to read it, so a tracing-only failure is not an operator surface, and a gateway or workload
+whose SVID never issues reads exactly like one that has just started.
+
+### Shared value types (`overdrive-core::ca::issue_failure`, new module)
+
+```rust
+/// Failure class of a rejected issuance; the `CaIssuanceError` variant class only, never its source text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub enum SvidIssueFailureCause { Ca, Audit }
+// No `as_str`: no named consumer. The stable lowercase wire/CLI label ("ca" | "audit") comes from the serde `snake_case`
+// rename on `SvidIssueFailureCauseBody` below; a log site that needs one adds it then.
+/// Depth-1 snapshot of the latest failed issuance. Not nestable: it carries no failure of its own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub struct SvidIssueFailure {
+    pub cause: SvidIssueFailureCause,
+    pub at: UnixInstant, // the injected Clock's `unix_now()` when the executor observed the `Err`
+}
+
+// overdrive-control-plane::ca_issuance
+impl CaIssuanceError {
+    pub fn failure_cause(&self) -> SvidIssueFailureCause; // Ca => Ca, Audit => Audit
+}
+```
+
+Wire mirrors (`overdrive-control-plane::api`, `Serialize + Deserialize + ToSchema`, defined once, used by both halves):
+
+```rust
+#[derive(Serialize, Deserialize, ToSchema, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SvidIssueFailureCauseBody { Ca, Audit }
+#[derive(Serialize, Deserialize, ToSchema, Debug, Clone, PartialEq, Eq)]
+pub struct SvidIssueFailureBody {
+    pub cause: SvidIssueFailureCauseBody,
+    #[schema(value_type = String)]
+    pub at: UnixInstant,
+}
+```
+
+### Gateway half (R-45, R-47, R-48, R-49, R-52)
+
+```rust
+// overdrive-core::gateway_identity
+/// Process-local issue-failure record of the gateway identity slot. The slot holds `Option<GatewayIdentityIssueRecord>`: `None`
+/// is "no failure this process", so a nonzero count without a `last` (or the reverse) is unrepresentable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GatewayIdentityIssueRecord {
+    pub count: NonZeroU64,
+    pub last: SvidIssueFailure,
+}
+```
+
+- **Recording (R-45, R-50).** In `action_shim::gateway_svid::dispatch_issue`, when `issue_and_audit` returns `Err(e)`, the executor builds
+  `SvidIssueFailure { cause: e.failure_cause(), at }` from the injected `Clock` and calls `target.record_issue_failure(failure)`;
+  it then returns `ShimError::GatewaySvidIssue(e)` exactly as before. No row is written by the executor. The slot adds one to the count and
+  replaces `last` (creating the record on the first failure) and notifies the owner. The record is epoch-independent: a failed issuance that
+  completes after `disable_after_drain` really happened and is still an occurrence, so there is no `StaleEpoch` outcome here. The facts survive
+  `begin_disable` and `disable_after_drain` within a process (they clear only with the process). `hold_audited` success never touches them. The
+  held identity, `desired()` and `current()` are unchanged by recording (a recording is bounded-change over the facts alone).
+- **Reading and wake (pinned carrier).** One new read method, `issue_record() -> Option<GatewayIdentityIssueRecord>`, on
+  `GatewayIdentityLifecycleControl` and `GatewayIdentityLifecycleTarget` (port blocks above), implemented by the slot's lifecycle handle, the
+  control-plane adapter (delegating), `SimGatewayIdentityActionTarget` / `SimGatewayIdentityLifecycleControl`, and every other implementer
+  of `GatewayIdentityLifecycleControl` / `GatewayIdentityLifecycleTarget` (production, Sim, and test-support doubles, including those under
+  `crates/overdrive-gateway/src/application/held_probe_doubles.rs` and the authored tests) returns `None` or delegates. The inherent and
+  trait copies of `issue_record` on the slot and on the Sim target follow the existing `current`/`subscribe` pattern, and the crafter may
+  collapse them. The wake reuses the existing `subscribe()` watch: a recorded failure resolves `changed()` on every receiver although the
+  `Option<GatewayIdentityFacts>` item is unchanged, and the owner, woken, reads `current()` and `issue_record()`. The owner reads
+  `current()` and `issue_record()` as two reads whose pair is not atomic; every mutation notifies, so the next wake corrects any transient
+  mismatch. The `subscribe` item type, `current()`, `GatewayIdentityView` and every admission reader are
+  untouched. Rationale: `Option<GatewayIdentityFacts>` is `None` when nothing was ever held, so the record cannot ride in that item; a read
+  method plus the existing notification is the smallest change (no second watch, no changed item type). Other `subscribe` waiters
+  (`ensure_current`) tolerate an unchanged-item wake by re-checking. At most one wake per failed issuance (one per retry-backoff tick).
+- **Projection (the owner, the sole writer; R-52).** At its first projection the owner reads the prior row with
+  `ObservationStore::gateway_application_status_row(node_id)` and keeps `(base_failures, base_last)` privately (`(0, None)` when absent). A
+  read `Err` is retried like any failed row write: the facts stay in the slot, no row is written from a defaulted zero, and the next
+  projection reads again (no boot refusal, no new `GatewayBootError` variant). An undecodable prior row is logged and skipped (one
+  `observation.row.skipped` warning, ADR-0048) and the count then restarts at zero (R-52). Every row the owner writes carries
+  `issue_failures = base_failures.saturating_add(record.count)` and `last_issue_failure = record.last` (else the base values when the record
+  is `None`). A failed owner row write loses nothing the slot holds: the record stays in the slot and the next projection carries it. The
+  count is monotone across restarts through the base read; "sole writer" means the owner function alone writes this table by convention, not
+  by a type that forbids other writers.
+- **Identity classification (R-48).** `gateway_identity` is a pure function of `current()` and the owner's injected `Clock`: `None` => `Absent`;
+  `Some(f)` with `f.not_after` not after `clock.now_unix` => `Unusable`; else `Current { epoch, spiffe_id, serial, not_after }`. The owner
+  projects at its existing wakes plus the failure wake; no timer or expiry reaction is added. `Unusable` is therefore reached when a
+  projection runs with held material expired, and in the real case rotation is failing, so failure wakes occur. Staleness bound: until the
+  next projection the row may read `Current` for material that has since expired. Lifecycle errors (`Timeout`, `Closed`,
+  `ReconcilerUnavailable`) set only `unavailable = Some(GatewayIdentityUnusable)` (S-PIG-51) and never write `gateway_identity`. The
+  application-level cause `GatewayApplicationUnavailableCause::GatewayIdentityUnusable` and the identity value
+  `GatewayIdentityStatus::Unusable` are different fields: the former is set whenever the application cannot promote on identity (Absent,
+  Unusable, or an `ensure_current` error), the latter only for held-but-expired material.
+- **Disabled (R-47).** `GatewayAppStateComposition::disabled()` has `status() == None`; the handler returns the fixed disabled body before
+  any store call. The disabled composition's `DisabledGatewayIdentityRead` is unchanged. No record exists because no slot is enabled. (Within
+  a process, `begin_disable` keeps the record; a disabled boot has none.)
+- **`IssueFailed` (R-49).** Removed from `GatewayIdentityLifecycleError` (edited in place in the port block above). Nothing produced it.
+- **Body (R-45).** `GatewayApplicationStatusBody.issue_failures` and `.last_issue_failure` (defined in place above) are a pure projection of
+  the row: `last_issue_failure = row.last_issue_failure.map(SvidIssueFailureBody::from)`.
+- **Recordable and unrecordable failures.** The record is in-memory in the slot, so a gateway failure is always retained, including an `Audit`
+  failure caused by a store outage (the gateway half keeps its facts in the slot even when every store write fails; the row then carries them
+  once a write succeeds). The `Ca` cause is reachable only from a CA-backend error; no production path is observed to produce it today, and the
+  failure expected in practice is `Audit`.
+- **Row invariant (owner-side).** `issue_failures == 0` iff `last_issue_failure` is `None` holds because the owner's projection is the one
+  write path and builds both fields from one `(count, last)` pair (base plus record); no other constructor of the row's issue fields exists.
+- **Owner accessors.** The status row is read through the existing `GatewayStatusReads::application_status()`. No model variable is
+  projected (the Quint spec is unchanged), so no conformance accessor is pinned.
+
+### Workload half (R-46, R-50, R-51)
+
+```rust
+// overdrive-core::traits::observation_store (new row; alloc rows untouched)
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub struct WorkloadSvidIssueStatusRowV1 {
+    pub alloc_id: AllocationId,
+    pub node_id: NodeId,
+    /// Monotone count of failed issuances for this allocation (first issue and `rotate-svid` reissue alike); never cleared by a success.
+    pub issue_failures: u64,
+    /// Latest failed issuance. Not optional: a row exists only after at least one failure.
+    pub last_issue_failure: SvidIssueFailure,
+    pub updated_at: LogicalTimestamp,
+}
+pub type WorkloadSvidIssueStatusRow = WorkloadSvidIssueStatusRowV1;
+pub enum WorkloadSvidIssueStatusRowEnvelope { V1(WorkloadSvidIssueStatusRowV1) } // VersionedEnvelope, Latest = V1 payload
+impl WorkloadSvidIssueStatusRowV1 {
+    pub fn archive_for_store(&self) -> Result<AlignedVec, EnvelopeError>;
+    pub fn from_store_bytes(bytes: &[u8], key: Option<&str>) -> Result<Self, ObservationStoreError>;
+}
+// No ObservationWrite, ObservationRow or ObservationRowKind variant is added: nothing subscribes to this row (no reconciler declares an
+// interest in it); it is read by point read only, and the operation below is the only authoring route.
+
+// ObservationStore (two adapters implement: LocalObservationStore, SimObservationStore)
+/// Atomically read the prior row for `alloc_id`, install `issue_failures = prior + 1` (saturating; 1 when absent or undecodable, the
+/// undecodable case logging one `observation.row.skipped` warning as the point read does),
+/// `last_issue_failure = failure`, `updated_at = LogicalTimestamp { counter: prior.counter + 1 (1 when absent), writer: node_id }`.
+/// One mutation; the only authoring route for this table. Nothing reads a returned row.
+async fn record_workload_svid_issue_failure(
+    &self,
+    alloc_id: &AllocationId,
+    node_id: &NodeId,
+    failure: SvidIssueFailure,
+) -> Result<(), ObservationStoreError>;
+/// The stored row for `alloc_id`, or `None` when no failure was recorded. An undecodable stored row reads as `None` with one
+/// `observation.row.skipped` warning.
+async fn workload_svid_issue_status_row(
+    &self,
+    alloc_id: &AllocationId,
+) -> Result<Option<WorkloadSvidIssueStatusRowV1>, ObservationStoreError>;
+```
+
+- **The sole writer** is the function `action_shim::issue_svid::dispatch_issue` (by convention; nothing in the type system forbids another
+  caller of the store operation), through `record_workload_svid_issue_failure`, called with the action's `alloc_id` and `node_id` after
+  `issue_and_audit` returned `Err(e)` (R-50), with `SvidIssueFailure { cause: e.failure_cause(), at }`. Both callers of `dispatch_issue`
+  (the convergence arm and `ensure_intercept_identity` in `action_shim/mod.rs`) record, because the recording lives inside the function. The
+  operation is atomic so two failed issuances for one allocation can never lose a count, with no reliance on dispatch ordering
+  (`rust.md` § "Check-and-act must be atomic").
+- **Executor result.** A failed recording is not absorbed: the executor surfaces both the original issuance failure and the recording failure
+  in the error it returns to the shim (the crafter shapes the error; no variant name is pinned), logs the recording failure, and holds
+  nothing. An unrecorded failure changes no count; the next failed attempt records. What stays recordable: a transient per-write failure of the
+  `ObservationStore` (the `Audit` failure that caused the issuance failure need not fail the record write). The workload half cannot retain the
+  fact when every store write fails (the record shares the `ObservationStore` with the audit write), so an all-writes outage loses the count
+  while it lasts; the same outage fails the status read, which the handler does not hide. The `Ca` cause is reachable only from a CA-backend error;
+  no production path is observed to produce it today.
+- **Handler.** `GET /v1/allocs` reads `workload_svid_issue_status_row(alloc_id)` once per allocation row in the response (the same
+  per-allocation read pattern as probe results) and stamps the two body fields below, as it already stamps `network_cleanup_pending`. Cost: one
+  redb point read per allocation row per operator request; no new table-scan operation is added for it. A read `Err` is returned as the
+  handler's existing internal error, never defaulted to zero.
+- **Wire (`AllocStatusRowBody`, additive, `#[serde(default)]`).** `svid_issue_failures: u64` (0 when no row) and
+  `last_svid_issue_failure: Option<SvidIssueFailureBody>` (`skip_serializing_if = "Option::is_none"`). An old body without them deserializes
+  to `0` / `None`.
+- **Renderer (`render::workload_describe`).** A presence-guarded per-row detail helper beside `render_network_cleanup_pending_detail`
+  prints, only when `svid_issue_failures > 0`, the line `    svid issuance failures: <N> (last: <cause> at <at>)` (`<cause>` is
+  `SvidIssueFailureCauseBody`'s serde `snake_case` label, `ca` or `audit`; `<at>` is the `UnixInstant` `Display`), under both the Service and the Job arm; a row with no
+  failure renders byte-identically to before.
+- **Retention.** No deletion path; at most one fixed-size row per `AllocationId` that ever failed an issuance. `DropSvid` and a later success
+  do not touch it.
+- **Out of scope.** The trust-bundle refresh failure after a successful issuance (`issue_svid.rs` cites it) is not a failed issuance and is
+  not recorded here. It is GH #223, open and disjoint (a standing-state row); this change neither covers nor constrains it. DELIVER updates
+  the #223 comments in `issue_svid.rs:113-114,129` if the new recording changes what they describe.
+
+### Contract shapes (`Reuse Analysis` extension)
+
+| Component | Shape | Mutation set / universe | Assertion mechanism |
+|---|---|---|---|
+| `record_workload_svid_issue_failure` | bounded-change | exactly one row of `workload_svid_issue_status` at `alloc_id`; universe: every other table and row of the store (`alloc_status`, occurrences, `issued_certificates`, probe rows) unchanged | Sim store full-table before/after delta; Local/Sim equivalence run |
+| `GatewayIdentityActionTarget::record_issue_failure` | bounded-change | slot issue record (plus a `subscribe` notification with an unchanged item); universe: held identity, `desired()`, `current()` unchanged | `current()`/`desired()` equal before and after |
+| `dispatch_issue` (both executors), failure arm | bounded-change | the record (gateway) or the one row (workload); universe: `IdentityMgr` held map, slot identity, `issued_certificates` | Sim-store delta; held map and slot equal before and after |
+| Owner row projection (`base + record`) | pure-function | none | property test over (base, record, sequence) |
+
+### Lifecycle Gate Ownership — SVID issuance failure occurrence
+
+Not applicable: no gate is added, removed or moved. Evidence: the recording happens after `issue_and_audit` returned `Err`, inside the
+executors, and no gate input reads it: Gateway Identity Current (bind, admission, handshakes) reads `current()` only, `SvidLifecycle` and
+`GatewaySvidLifecycle` read held sets and audit rows, and `IssueRetry` is not read (R-50). The `gateway_identity` classification of R-48 gives
+`Unusable` the meaning the existing `IdentityExpired` outcome already has; it does not change what the existing gate does with it.
+
+### DISTILL obligations (the acceptance designer authors the rows; these are required coverage)
+
+Fault stimuli at driven ports only: a failing Sim `Ca` (`issue_svid` returns an error) for `Ca`; a Sim `ObservationStore` fault scoped to the
+`ObservationWrite::IssuedCertificate` write for `Audit` (scoped so the status and failure-record writes still succeed); a Sim
+`ObservationStore` fault that also fails the failure-record write for the unrecorded arm; a failing status-row write for the owner; the Sim
+clock for time. The fault seam itself is DISTILL's to shape (the existing one-shot `inject_write_failure` is the starting point) and is not
+pinned here. Causes are driven, never seeded: the test submits the Route or the workload and lets the production reconciler emit the
+issue action. Seeded `overdrive-sim` invariants for ordering: repeated-failure monotonicity under seeds and restart interleavings.
+The rows are seeds of distinct behaviours; DISTILL owns the full matrix.
+
+| Id | Obligation |
+|---|---|
+| O-SIF-G1 | Gateway, repeated failure: `n` failed issuances (a `Ca` failure then an `Audit` failure among them) give `issue_failures == n` and `last_issue_failure` with the latest cause and the Sim-clock instant; the count never decreases across failures, successes and restart (property over sequences); the status body carries no CA or audit error text |
+| O-SIF-G2 | Gateway, recovery: failures then a success give `Current` with the count and `last` retained; `Absent` with `n > 0` is distinguishable from the fresh `Absent` with `0` and `None` |
+| O-SIF-G3 | Gateway, restart: re-composing against the same durable store continues the count (`base + new`); an undecodable prior row restarts at 0 with one skipped-row warning (the same holds for the workload record operation, restarting at 1); a prior-row read error is retried and never defaulted to zero |
+| O-SIF-G4 | Gateway disabled (R-47): `GET /v1/gateway/status` returns the fixed body with zero ObservationStore reads (counting Sim store), including when the store holds a row from an earlier enabled boot; no row is written by a disabled boot |
+| O-SIF-G5 | Gateway `Unusable` versus `Absent` (R-48): empty slot => `Absent`; a projection that runs with held material past `not_after` (rotation failing) => `Unusable` with the count above zero; a boot `ensure_current` timeout => `unavailable == GatewayIdentityUnusable` and `gateway_identity` as the slot says |
+| O-SIF-G6 | Gateway: a failing owner status write does not lose the record; the next successful write carries the full count |
+| O-SIF-G7 | Gateway row: `FIXTURE_V1` regenerated for the new layout (R-51), with the round-trip property |
+| O-SIF-W1 | Workload: repeated failed issuances for one allocation (first issue and `rotate-svid` reissue) give a monotone count and the latest cause through the store operation and through `GET /v1/allocs`; a failing record write is surfaced and not counted, and the next failure records |
+| O-SIF-W2 | Store: `record_workload_svid_issue_failure` is atomic under concurrent calls on one allocation (count equals calls; property over interleavings); Local and Sim adapters are equivalent (trait-equivalence test); the operation writes no `alloc_status` row (full-table delta) |
+| O-SIF-W3 | CLI: `render::workload_describe` (the renderer the CLI calls; `render::alloc_status` is its pre-#220 name and no longer exists) over a snapshot with `svid_issue_failures > 0` prints the pinned line under a Service row and a Job row; with 0 the output is byte-identical to before |
+| O-SIF-W4 | Handler: an observation read error yields the handler's error, not a zero |
+| O-SIF-W5 | Schema evolution: golden fixture and round-trip for `WorkloadSvidIssueStatusRowEnvelope::V1` |
+
+Existing artifacts the acceptance designer must align (not edited here, they are test and code surfaces): the exhaustive match over
+`GatewayIdentityLifecycleError` in `crates/overdrive-gateway/tests/integration/public_ingress_gateway.rs` loses the `IssueFailed` arm and
+`crates/overdrive-gateway/src/ports.rs` loses the variant; `FIXTURE_V1` in
+`crates/overdrive-core/tests/schema_evolution/gateway_application_status_row.rs` is regenerated for the new V1 layout (R-51: that V1 never
+shipped, so this is not a touch of a historical fixture; DISTILL rewrites the file's "never touched" header text accordingly); the QC-1 `audit_fail` handler is unchanged (the count is not a model variable).
+
 ## Wave: DESIGN / [REF] Updated Reuse Analysis
 
 | Existing component | Overlap | Final application decision | Why |
@@ -6048,7 +6328,7 @@ unchanged allocation/Service/BPF meanings.
 | rustls | TLS handshake mechanics and `KernelConnection` | **REUSE LIBRARY; CREATE PUBLIC RUNTIME** | Operator CA/router are a different trust boundary; `hyper` is not on the public data path (G1) |
 | `Ca` / `ca_issuance` / IdentityMgr | SVID issue/audit/hold foundations | **REUSE ISSUE/AUDIT; CREATE DEDICATED SLOT** | Allocation holder stays unchanged; no fake AllocationId |
 | `SvidLifecycle` | allocation identity convergence policy | **REUSE POLICY; CREATE GATEWAY SIBLING** | One node slot has different desired/actual/actions |
-| ObservationStore | convergent non-secret status | **EXTEND TWO ROW FAMILIES** | Existing store/LWW mechanism; no new store/event sourcing |
+| ObservationStore | convergent non-secret status | **EXTEND THREE ROW FAMILIES** (the prior two plus the workload SVID issue status row, R-46) | Existing store/LWW mechanism; no new store/event sourcing |
 | `arc-swap`, `async-trait`, `rustix`, `zeroize`, `x509-parser` (`tokio-rustls` is no longer promoted: G1 removes it from the public path) | atomic pointer/object-safe async/safe SO_COOKIE/secret/X.509 mechanics | **PROMOTE LOCKED OSS DEPENDENCIES** | Narrow necessary mechanics; MIT/Apache/ISC-compatible, no proprietary dependency |
 
 Contract-shape extension of the Reuse Analysis (the declared universe is the
@@ -6057,7 +6337,7 @@ only mutation set; everything else is complement-equal):
 | Reuse rows | Contract shape / declared universe | Assertion mechanism |
 |---|---|---|
 | serve + workload deploy | **bounded-change**: mandatory Enabled/Disabled AppState identity composition, `BootAdapters.gateway`, optional gateway handle/control/task tree and shutdown stage 0 only | disabled-state delta (boot with `gateway == None` is byte-equal to pre-feature), existing workload regression, boot/shutdown integration |
-| IntentStore + ObservationStore | **bounded-change**: fixed Route/key and two status keys/tables only | codec goldens, store state-delta PBT, lag/relist DST |
+| IntentStore + ObservationStore | **bounded-change**: fixed Route/key and the three status keys/tables only (the third, `workload_svid_issue_status`, is R-46's) | codec goldens, store state-delta PBT, lag/relist DST |
 | ListenerFactStore | **unbounded-preservation**: no call/import/change | dependency lint + source-diff guard |
 | WorkloadIntent + ServiceVipView | **unbounded-preservation** read of exact reference inputs | adapter equivalence with whole-store/allocator complement |
 | ServiceLifecycle / ServiceBackendRow | **unbounded-preservation** indirect input; gateway cannot read/write | import lint + pre/post row equality |
@@ -6528,7 +6808,7 @@ The reconstructed DESIGN is the final ADR set 0220-0246 (system, Route, Domain
 and Application decisions, plus the G1 data-path decisions 0244-0246; numbering per [`adr-renumbering.md`](adr-renumbering.md)) plus this document. It is
 reconstructed against main 549d78fa6. The user confirmed the D5 "New public surface" list (items 1-13, item 12
 reconfirmed) and ruled on P-2, P-9, P-10, B-1, DG-11, DG-12, QC-1..QC-3, P-12, P-13a-d, P-16, P-17, P-18, the upstream-leg shape and Q-1 on
-2026-11-02 (R-1..R-19) and 2026-11-03 (R-20..R-44), User decisions. The optional P-1, P-3, P-4, P-6, the P-8 simplification and P-32, P-33, P-34, P-35, P-36, P-37 and P-38 may be ruled later; none blocks a scaffold. The
+2026-11-02 (R-1..R-19), 2026-11-03 (R-20..R-44) and 2026-11-04 (R-45..R-51, with R-52 adopted as a consequence pending confirmation), User decisions. The optional P-1, P-3, P-4, P-6, the P-8 simplification and P-32, P-33, P-34, P-35, P-36, P-37, P-38 and P-40 may be ruled later; none blocks a scaffold. The
 contract-shaping items V-GW-1..5 have run on native metal; the
 residuals are source-settled or DISTILL native obligations (see Contract-shaping validation items). The 2026-09-13 approval (preserved at git ref `backup/research-ingress-gateway-pre-reconstruct`) covers the decisions carried unchanged (class 1, including item 12 of the D5 list, reconfirmed on main). The cgroup-BPF selection program—not XDP—
 selects the host-originated gateway socket; XDP wire ingress remains unchanged.
@@ -7270,7 +7550,7 @@ Documented gaps and blockers (no silent waivers):
 2. **P-2 closed (R-3)** — the BackendId memo re-lease wedge is a recorded exposure (ADR-0241), not a scenario; `conflicting_alloc_rejected` (rebind rejected) is covered.
 3. **P-10 closed (R-1)** — the separate `cgroup/connect4` program is DELIVER's; its verifier-regression, `perf-baseline` and attach-mode gates are not authored here; S-PIG-41/63 are placement-neutral.
 4. **Item 12** — reconfirmed by the user on 2026-11-02 (R-18); the `IntentSubscriptionEvent` type, the `watch` signature port and its implementer fallout landed with batch B1; S-PIG-48/66 are complete reasoned-ignored bodies and the lag behaviour is DELIVER's.
-5. **Rulings of 2026-11-03 (R-20..R-44).** The former proposals P-20..P-31 and the scope items are ruled (DESIGN, "User rulings of 2026-11-03"); the follow-up authoring pass is listed in "Authoring status by batch" and in `distill/code-reconciliation-plan.md`. The optional P-1, P-3, P-4, P-6, P-8, P-32, P-33, P-34, P-35, P-36, P-37 and P-38 remain PROPOSED.
+5. **Rulings of 2026-11-03 (R-20..R-44).** The former proposals P-20..P-31 and the scope items are ruled (DESIGN, "User rulings of 2026-11-03"); the follow-up authoring pass is listed in "Authoring status by batch" and in `distill/code-reconciliation-plan.md`. The optional P-1, P-3, P-4, P-6, P-8, P-32, P-33, P-34, P-35, P-36, P-37, P-38 and P-40 remain PROPOSED. The rulings of 2026-11-04 (R-45..R-51, and R-52 adopted as a consequence pending user confirmation) are in "SVID issuance failure occurrence" (DESIGN).
 5a. **Accepted exposure (R-21)** — the pre-commit rollback real-owner Tier-3 check (S-PIG-75) is dropped: the only production-reachable pre-commit failure input is `BACKEND_MAP` capacity (`crates/overdrive-bpf/src/maps/backend_map.rs:46`, `MAX_ENTRIES = 65_536`), a fill the check could reach only by programming 65 536 backends. `RollbackPreservesPriorGeneration` has model, equivalence and unit coverage. No seam is added (P-32 is the optional alternative).
 6. **G1 proposals ruled as authored.** P-12, P-13a–d, P-17 and P-18 are ruled (R-8..R-14), P-16 is not adopted (R-16) and the key-update model is dropped (R-19); the scenario list carries no pending tag.
 7. **DESIGN gaps DG-1..DG-12 and blocker B-1: all closed or ruled.** DG-1..DG-10 and the QC-2/QC-3 part of DG-6 were closed by the architect in the DESIGN sections and are confirmed with item 13 (R-18); DISTILL scaffolds the pinned shapes (Scaffolds). DG-11 is ruled (R-5), DG-12 is ruled (R-6) and B-1 is ruled (R-4).

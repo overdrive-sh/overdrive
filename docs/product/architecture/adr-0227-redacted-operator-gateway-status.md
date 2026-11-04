@@ -36,7 +36,9 @@ be replaced without changing public TLS/HTTP request semantics.
 ## Consequences
 
 - Disabled gateway status remains readable without activating Route/custody or
-  the public listener.
+  the public listener, and without any observation read.
+- The identity field is a pure projection of the held facts and the clock; the
+  issuance-failure occurrence record is ADR-0274.
 - Observation read failure is explicit; status does not guess from absence.
 - Status writers remain their existing owners and no CQRS/event-history system
   is introduced.

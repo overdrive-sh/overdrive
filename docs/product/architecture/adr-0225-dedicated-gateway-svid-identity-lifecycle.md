@@ -50,9 +50,9 @@ lifecycle exist because existing holders/actions are AllocationId-keyed.
 ## Lifecycle Gate Ownership
 
 **Gateway Identity Current** is owned by the Gateway Identity Slot/Lifecycle.
-It gates initial public bind and new gateway-client handshakes; absence,
-expiry or terminal issue failure stops new admission/handshakes while reissue
-policy runs. Disable/shutdown stops admission and drains authorized users
+It gates initial public bind and new gateway-client handshakes; absence or
+expiry stops new admission/handshakes while reissue policy runs (an issue
+failure is retried, never terminal, and is recorded per ADR-0274). Disable/shutdown stops admission and drains authorized users
 before the slot is cleared. Allocation SVIDs, public-key usability, Service/Allocation states,
 Backend Eligibility and BPF Hydrated are unaffected.
 

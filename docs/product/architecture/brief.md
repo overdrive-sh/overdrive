@@ -11371,6 +11371,8 @@ feature delta § *Aggregate contracts*; the context map is in
 | [0252](adr-0252-gateway-forwards-interim-100-and-expect.md) | Interim `100` and `Expect` are forwarded; other interim `1xx` dropped |
 | [0253](adr-0253-gateway-supports-close-delimited-and-http10-length-responses.md) | Close-delimited and HTTP/1.0-with-length responses are supported |
 | [0254](adr-0254-gateway-ends-an-early-response-with-a-lingering-close.md) | An early or gateway-authored response ends with a lingering close |
+| [0274](adr-0274-gateway-svid-issuance-failure-is-a-recorded-occurrence-on-the-application-status-row.md) | A failed gateway SVID issuance is a recorded occurrence on the Gateway Application status row (Proposed) |
+| [0275](adr-0275-workload-svid-issuance-failure-is-a-recorded-occurrence-on-its-own-row.md) | A failed workload SVID issuance is a recorded occurrence on its own per-allocation row (Proposed) |
 
 Recurring acceptance is the Tier-3 `AT-PIG-E2E-1` on native metal through real
 `overdrive serve` and `overdrive deploy`; the point-in-time operator journey is
