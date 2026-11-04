@@ -49,4 +49,7 @@ mod acceptance {
     // netns-density-295 R5-PROBE-MERGE — the probe-result row merges on its
     // run sequence identically in LocalObservationStore and the sim store.
     mod probe_result_merge;
+
+    // SVID issuance failure occurrence (R-46): the workload failure record.
+    mod workload_svid_issue_status;
 }

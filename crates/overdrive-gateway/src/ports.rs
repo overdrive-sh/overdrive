@@ -13,8 +13,11 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
+use overdrive_core::ca::issue_failure::SvidIssueFailure;
 use overdrive_core::dataplane::{Proto, ServiceFrontend};
-use overdrive_core::gateway_identity::{GatewayIdentityEpoch, GatewayIdentityFacts};
+use overdrive_core::gateway_identity::{
+    GatewayIdentityEpoch, GatewayIdentityFacts, GatewayIdentityIssueRecord,
+};
 use overdrive_core::id::{BackendId, IdParseError, SpiffeId, WorkloadId};
 use overdrive_core::public_ingress::{
     PublicHostname, ServiceKey, ServiceListenerReference, SocketCookie,
@@ -192,6 +195,10 @@ pub trait GatewayIdentityLifecycleControl: Send + Sync {
         deadline: Instant,
     ) -> Result<GatewayIdentityFacts, GatewayIdentityLifecycleError>;
     fn current(&self) -> Option<GatewayIdentityFacts>;
+    /// The process-local issue-failure record, `None` while no issuance failed
+    /// in this process. A recorded failure resolves `changed()` on every
+    /// `subscribe` receiver although the item is unchanged.
+    fn issue_record(&self) -> Option<GatewayIdentityIssueRecord>;
     fn subscribe(&self) -> watch::Receiver<Option<GatewayIdentityFacts>>;
     /// Synchronous clear (R-4, R-30): bumps the epoch and empties the slot in
     /// the same call; it waits for nothing, so it takes no deadline, is not
@@ -204,8 +211,6 @@ pub trait GatewayIdentityLifecycleControl: Send + Sync {
 pub enum GatewayIdentityLifecycleError {
     #[error("gateway identity reconciler unavailable")]
     ReconcilerUnavailable,
-    #[error("gateway SVID issuance failed")]
-    IssueFailed,
     /// `ensure_current` did not reach Current by its deadline (the only
     /// operation that waits).
     #[error("gateway identity wait timed out")]
@@ -216,6 +221,8 @@ pub enum GatewayIdentityLifecycleError {
 
 pub trait GatewayIdentityLifecycleTarget: Send + Sync {
     fn current(&self) -> Option<GatewayIdentityFacts>;
+    /// The process-local issue-failure record (see the control port).
+    fn issue_record(&self) -> Option<GatewayIdentityIssueRecord>;
     fn subscribe(&self) -> watch::Receiver<Option<GatewayIdentityFacts>>;
     /// Infallible (R-30): the epoch is a u64; the slot's private checked add
     /// overflowing is `unreachable!()`.
@@ -234,6 +241,11 @@ pub trait GatewayIdentityActionTarget: Send + Sync {
         epoch: GatewayIdentityEpoch,
         material: SvidMaterial,
     ) -> GatewayIdentityMutationOutcome;
+
+    /// Record one confirmed failed issuance: adds one to the slot's count,
+    /// replaces `last` and notifies the owner. Epoch-independent and
+    /// infallible; held identity, `desired()` and `current()` are unchanged.
+    fn record_issue_failure(&self, failure: SvidIssueFailure);
 }
 
 // ---------------------------------------------------------------------------

@@ -11,6 +11,7 @@
 //! none of them live here.
 
 pub mod cert_spec;
+pub mod issue_failure;
 pub mod issued_certificate_row;
 pub mod kek;
 pub mod root_key_envelope;

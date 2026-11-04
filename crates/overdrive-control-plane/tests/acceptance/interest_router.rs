@@ -27,7 +27,9 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use overdrive_core::ca::issue_failure::SvidIssueFailure;
 use overdrive_core::observation::{ProbeRunSeq, SameStatusRuns};
+use overdrive_core::traits::observation_store::WorkloadSvidIssueStatusRowV1;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -136,6 +138,22 @@ impl ObservationStore for PointReadFailureStore {
         node_id: &NodeId,
     ) -> Result<Option<GatewayApplicationStatusRowV1>, ObservationStoreError> {
         self.inner.gateway_application_status_row(node_id).await
+    }
+
+    async fn record_workload_svid_issue_failure(
+        &self,
+        alloc_id: &AllocationId,
+        node_id: &NodeId,
+        failure: SvidIssueFailure,
+    ) -> Result<(), ObservationStoreError> {
+        self.inner.record_workload_svid_issue_failure(alloc_id, node_id, failure).await
+    }
+
+    async fn workload_svid_issue_status_row(
+        &self,
+        alloc_id: &AllocationId,
+    ) -> Result<Option<WorkloadSvidIssueStatusRowV1>, ObservationStoreError> {
+        self.inner.workload_svid_issue_status_row(alloc_id).await
     }
 
     async fn write(&self, row: ObservationWrite) -> Result<(), ObservationStoreError> {

@@ -35,7 +35,8 @@ use super::ShimError;
 /// # Errors
 ///
 /// [`ShimError::GatewaySvidIssue`] when issuance or its audit write fails; the
-/// target is not called.
+/// target is offered no material and is told of the confirmed failure through
+/// `record_issue_failure`.
 ///
 /// # Panics
 ///
@@ -61,6 +62,7 @@ mod acceptance {
 
     use std::sync::Arc;
 
+    use overdrive_core::ca::issue_failure::{SvidIssueFailure, SvidIssueFailureCause};
     use overdrive_core::gateway_identity::GatewayIdentityEpoch;
     use overdrive_core::id::{CorrelationKey, NodeId, SpiffeId};
     use overdrive_core::traits::ca::SvidMaterial;
@@ -79,11 +81,12 @@ mod acceptance {
     struct EpochCheckingTarget {
         desired: GatewayIdentityEpoch,
         held: Mutex<Vec<(GatewayIdentityEpoch, SvidMaterial)>>,
+        failures: Mutex<Vec<SvidIssueFailure>>,
     }
 
     impl EpochCheckingTarget {
         fn desiring(desired: GatewayIdentityEpoch) -> Self {
-            Self { desired, held: Mutex::new(Vec::new()) }
+            Self { desired, held: Mutex::new(Vec::new()), failures: Mutex::new(Vec::new()) }
         }
     }
 
@@ -99,6 +102,10 @@ mod acceptance {
             } else {
                 GatewayIdentityMutationOutcome::StaleEpoch
             }
+        }
+
+        fn record_issue_failure(&self, failure: SvidIssueFailure) {
+            self.failures.lock().push(failure);
         }
     }
 
@@ -217,6 +224,133 @@ mod acceptance {
             1,
             "audit precedes the hold, so the stale issue left its audit row",
         );
+    }
+
+    /// A CA whose leaf signing always fails; everything else delegates to a
+    /// real `SimCa`. A failing driven-port adapter, not production surface.
+    struct SigningFailsCa {
+        delegate: SimCa,
+    }
+
+    impl Ca for SigningFailsCa {
+        fn root(
+            &self,
+        ) -> overdrive_core::traits::ca::Result<overdrive_core::traits::ca::RootCaHandle> {
+            self.delegate.root()
+        }
+
+        fn issue_intermediate(
+            &self,
+            node: &NodeId,
+        ) -> overdrive_core::traits::ca::Result<overdrive_core::traits::ca::IntermediateHandle>
+        {
+            self.delegate.issue_intermediate(node)
+        }
+
+        fn issue_svid(
+            &self,
+            _req: &overdrive_core::traits::ca::SvidRequest,
+        ) -> overdrive_core::traits::ca::Result<SvidMaterial> {
+            Err(overdrive_core::traits::ca::CaError::signing_failed("injected signing failure"))
+        }
+
+        fn trust_bundle(
+            &self,
+        ) -> overdrive_core::traits::ca::Result<overdrive_core::traits::ca::TrustBundle> {
+            self.delegate.trust_bundle()
+        }
+    }
+
+    /// O-SIF-G1 (executor half, `Ca`): a CA that cannot sign refuses the
+    /// issuance with the unchanged typed error, the target is told of exactly
+    /// one confirmed `Ca` failure at the injected clock's instant, and nothing
+    /// is held and no audit row exists.
+    ///
+    /// CONTRACT_SHAPE: bounded-change.
+    #[tokio::test]
+    #[ignore = "pending DELIVER gateway-svid-issue-failure-recording"]
+    async fn a_ca_signing_failure_is_recorded_once_as_a_ca_cause_and_holds_nothing() {
+        let ca = SigningFailsCa { delegate: ca(0xCA) };
+        let observation = SimObservationStore::single_peer(node(), 0xCA);
+        let clock = SimClock::new();
+        clock.tick(std::time::Duration::from_secs(90));
+        let epoch = GatewayIdentityEpoch::first();
+        let target = EpochCheckingTarget::desiring(epoch);
+
+        let result = dispatch_issue(&action(epoch), &ca, &observation, &clock, &target).await;
+
+        assert!(
+            matches!(
+                &result,
+                Err(ShimError::GatewaySvidIssue(crate::ca_issuance::CaIssuanceError::Ca { .. }))
+            ),
+            "the issuance error is returned exactly as before, got {result:?}",
+        );
+        assert_eq!(
+            *target.failures.lock(),
+            vec![SvidIssueFailure {
+                cause: SvidIssueFailureCause::Ca,
+                at: overdrive_core::UnixInstant::from_clock(&clock),
+            }],
+            "one confirmed failure, classified Ca, stamped by the injected clock",
+        );
+        assert!(target.held.lock().is_empty(), "no material is offered or held");
+        assert!(observation.issued_certificate_rows().await.expect("rows").is_empty());
+    }
+
+    /// O-SIF-G1 (executor half, `Audit`): an audit-write failure is recorded
+    /// once as an `Audit` cause, and the executor still returns the typed
+    /// gateway issuance error.
+    ///
+    /// CONTRACT_SHAPE: bounded-change.
+    #[tokio::test]
+    #[ignore = "pending DELIVER gateway-svid-issue-failure-recording"]
+    async fn an_audit_write_failure_is_recorded_once_as_an_audit_cause() {
+        let ca = ca(0xA0D1);
+        let observation = SimObservationStore::single_peer(node(), 0xA0D1);
+        observation.inject_write_failure(ObservationStoreError::Io(std::io::Error::other(
+            "injected gateway audit failure",
+        )));
+        let clock = SimClock::new();
+        let epoch = GatewayIdentityEpoch::first();
+        let target = EpochCheckingTarget::desiring(epoch);
+
+        let result = dispatch_issue(&action(epoch), &ca, &observation, &clock, &target).await;
+
+        assert!(matches!(result, Err(ShimError::GatewaySvidIssue(_))), "got {result:?}");
+        assert_eq!(
+            *target.failures.lock(),
+            vec![SvidIssueFailure {
+                cause: SvidIssueFailureCause::Audit,
+                at: overdrive_core::UnixInstant::from_clock(&clock),
+            }],
+        );
+        assert!(target.held.lock().is_empty());
+    }
+
+    /// O-SIF-G1 (executor half, success): a successful issue, and a successful
+    /// issue whose epoch went stale, record nothing; the failure record is not
+    /// touched by a hold.
+    ///
+    /// CONTRACT_SHAPE: bounded-change.
+    #[tokio::test]
+    #[ignore = "pending DELIVER gateway-svid-issue-failure-recording"]
+    async fn a_successful_or_stale_issue_records_no_failure() {
+        let ca = ca(0x600D);
+        let observation = SimObservationStore::single_peer(node(), 0x600D);
+        let clock = SimClock::new();
+
+        let current = EpochCheckingTarget::desiring(GatewayIdentityEpoch::first());
+        dispatch_issue(&action(GatewayIdentityEpoch::first()), &ca, &observation, &clock, &current)
+            .await
+            .expect("a current-epoch issue succeeds");
+        assert!(current.failures.lock().is_empty(), "a success records no failure");
+
+        let stale = EpochCheckingTarget::desiring(second_epoch());
+        dispatch_issue(&action(GatewayIdentityEpoch::first()), &ca, &observation, &clock, &stale)
+            .await
+            .expect("a stale epoch is a success");
+        assert!(stale.failures.lock().is_empty(), "a stale success records no failure");
     }
 
     /// S-PIG-65 (shim half): the two gateway error variants carry fixed outer

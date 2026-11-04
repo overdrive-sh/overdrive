@@ -69,10 +69,12 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
+use overdrive_core::ca::issue_failure::SvidIssueFailure;
 use overdrive_core::dataplane::ServiceFrontend;
 use overdrive_core::eval_broker::{Evaluation, EvaluationBroker};
 use overdrive_core::gateway_identity::{
-    GatewayIdentityDesired, GatewayIdentityEpoch, GatewayIdentityFacts, GatewayIdentityView,
+    GatewayIdentityDesired, GatewayIdentityEpoch, GatewayIdentityFacts, GatewayIdentityIssueRecord,
+    GatewayIdentityView,
 };
 use overdrive_core::id::{BackendId, SpiffeId};
 use overdrive_core::public_ingress::{PublicHostname, ServiceKey, SocketCookie};
@@ -601,6 +603,10 @@ impl SimGatewayIdentityActionTarget {
         todo!("SCAFFOLD: SimGatewayIdentityActionTarget::current")
     }
 
+    pub fn issue_record(&self) -> Option<GatewayIdentityIssueRecord> {
+        todo!("SCAFFOLD: SimGatewayIdentityActionTarget::issue_record")
+    }
+
     pub fn subscribe(&self) -> watch::Receiver<Option<GatewayIdentityFacts>> {
         todo!("SCAFFOLD: SimGatewayIdentityActionTarget::subscribe")
     }
@@ -618,11 +624,19 @@ impl GatewayIdentityActionTarget for SimGatewayIdentityActionTarget {
     ) -> GatewayIdentityMutationOutcome {
         todo!("SCAFFOLD: SimGatewayIdentityActionTarget::hold_audited")
     }
+
+    fn record_issue_failure(&self, failure: SvidIssueFailure) {
+        todo!("SCAFFOLD: SimGatewayIdentityActionTarget::record_issue_failure")
+    }
 }
 
 impl GatewayIdentityLifecycleTarget for SimGatewayIdentityActionTarget {
     fn current(&self) -> Option<GatewayIdentityFacts> {
         todo!("SCAFFOLD: SimGatewayIdentityActionTarget::current (lifecycle)")
+    }
+
+    fn issue_record(&self) -> Option<GatewayIdentityIssueRecord> {
+        todo!("SCAFFOLD: SimGatewayIdentityActionTarget::issue_record (lifecycle)")
     }
 
     fn subscribe(&self) -> watch::Receiver<Option<GatewayIdentityFacts>> {
@@ -681,6 +695,10 @@ impl GatewayIdentityLifecycleControl for SimGatewayIdentityLifecycleControl {
 
     fn current(&self) -> Option<GatewayIdentityFacts> {
         todo!("SCAFFOLD: SimGatewayIdentityLifecycleControl::current")
+    }
+
+    fn issue_record(&self) -> Option<GatewayIdentityIssueRecord> {
+        todo!("SCAFFOLD: SimGatewayIdentityLifecycleControl::issue_record")
     }
 
     fn subscribe(&self) -> watch::Receiver<Option<GatewayIdentityFacts>> {

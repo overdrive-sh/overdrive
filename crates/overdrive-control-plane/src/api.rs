@@ -33,6 +33,7 @@ use overdrive_core::api::describe::{DescribeSpecOutput, ScheduleSpecOutput, Serv
 use overdrive_core::api::submit::{
     ListenerInput, ScheduleSpecInput, ServiceSpecInput, SubmitSpecInput,
 };
+use overdrive_core::ca::issue_failure::{SvidIssueFailure, SvidIssueFailureCause};
 use overdrive_core::id::{CertSerial, SpiffeId};
 use overdrive_core::traits::driver::DriverType;
 use overdrive_core::traits::observation_store::AllocState;
@@ -427,6 +428,13 @@ pub struct AllocStatusRowBody {
     /// Network cleanup for this allocation has not finished (D-295-R20).
     #[serde(default)]
     pub network_cleanup_pending: bool,
+    /// Monotone count of failed SVID issuances for this allocation (first
+    /// issue and `rotate-svid` reissue alike); `0` when none was recorded.
+    #[serde(default)]
+    pub svid_issue_failures: u64,
+    /// Latest failed SVID issuance for this allocation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_svid_issue_failure: Option<SvidIssueFailureBody>,
 }
 
 /// Verbatim wire projection of the durable `AllocStatusRow.last_terminated`
@@ -536,7 +544,39 @@ pub struct GatewayApplicationStatusBody {
     pub draining: Vec<GatewayApplicationGenerationStatusBody>,
     pub unavailable: Option<GatewayApplicationUnavailableCauseBody>,
     pub gateway_identity: GatewayIdentityStatusBody,
+    /// Monotone count of failed gateway SVID issuances; `0` when none.
+    pub issue_failures: u64,
+    /// Latest failed gateway SVID issuance, depth 1. Never carries CA or audit
+    /// error text.
+    pub last_issue_failure: Option<SvidIssueFailureBody>,
     pub connect_path: GatewayConnectPathStatusBody,
+}
+
+/// Failure class of a rejected SVID issuance on the wire (gateway and workload).
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SvidIssueFailureCauseBody {
+    Ca,
+    Audit,
+}
+
+/// The latest failed SVID issuance on the wire: the cause class and the instant
+/// the executor observed the failure.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+pub struct SvidIssueFailureBody {
+    pub cause: SvidIssueFailureCauseBody,
+    #[schema(value_type = String)]
+    pub at: UnixInstant,
+}
+
+impl From<SvidIssueFailure> for SvidIssueFailureBody {
+    fn from(failure: SvidIssueFailure) -> Self {
+        let cause = match failure.cause {
+            SvidIssueFailureCause::Ca => SvidIssueFailureCauseBody::Ca,
+            SvidIssueFailureCause::Audit => SvidIssueFailureCauseBody::Audit,
+        };
+        Self { cause, at: failure.at }
+    }
 }
 
 /// The public certified-key custody row as the operator sees it.
@@ -777,6 +817,8 @@ pub enum CertifiedKeyFailureBody {
         WithdrawRouteResponse,
         GatewayStatusResponse,
         GatewayApplicationStatusBody,
+        SvidIssueFailureBody,
+        SvidIssueFailureCauseBody,
         PublicCertifiedKeyStatusBody,
         GatewayApplicationGenerationStatusBody,
         GatewayListenerStatusBody,

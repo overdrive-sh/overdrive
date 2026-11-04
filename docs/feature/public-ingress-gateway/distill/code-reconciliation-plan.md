@@ -249,3 +249,13 @@ DESIGN gaps (second pass and DG-7..DG-12): **DG-1..DG-5 closed** by the architec
 **Unchanged (R-39, R-41, R-42, R-44):** S-PIG-123; S-PIG-90's octet check (no control-event field on the Sim transcript, because the port has no operation that carries a control record between legs); the Sim test-support surface that realises a pinned capability.
 
 **Dependency edges (R-40):** `overdrive-sim -> overdrive-host` (a `[dependencies]` edge of the adapter-sim crate on an adapter-host crate, not an `overdrive-host` dev-dependency) and `overdrive-dataplane -> overdrive-sim` (`[dev-dependencies]`) both conform to `development.md` § "Port-trait dependencies"; `xtask` depends on neither.
+
+## 9. SVID issuance failure occurrence (R-45..R-52; ADR-0274, ADR-0275)
+
+**Scaffolds and tests authored.** The pinned shapes are the "Scaffolds" table row "SVID issuance failure occurrence" in `feature-delta.md`, and the tests are the rows O-SIF-G1..W5 of its "SVID issuance failure occurrence scenarios" table; nothing beyond them. New test support: `crates/overdrive-control-plane/tests/common/issue_fault_store.rs` (`#[path]`-included by the control-plane acceptance, gateway integration and CLI integration binaries; it also carries the S-PIG-42 status-read fault and replaces the former `status_fault_store.rs`).
+
+**Tests changed.** `IssueFailed` arm and compile guard removed from the gateway integration file; the gateway row `FIXTURE_V1` regenerated (header text rewritten); every `AllocStatusRowBody` struct literal gains the two fields; the gateway integration `World` gains `start_over` (a restart over an existing observation store).
+
+**Tests deleted.** None.
+
+**Not authored (gap).** The gateway owner's undecodable-prior-row half through the gateway `World` (its Sim store has no byte layer; the store-local point-read case and the owner's absent-row base cover its two halves).

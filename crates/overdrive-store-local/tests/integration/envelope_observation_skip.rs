@@ -16,6 +16,7 @@ use std::time::Duration;
 use std::net::Ipv4Addr;
 
 use overdrive_core::aggregate::WorkloadKind;
+use overdrive_core::ca::issue_failure::{SvidIssueFailure, SvidIssueFailureCause};
 use overdrive_core::codec::VersionedEnvelope;
 use overdrive_core::dataplane::fingerprint::BackendSetFingerprint;
 use overdrive_core::id::{AllocationId, NodeId, Region, ServiceId, SpiffeId, WorkloadId};
@@ -35,8 +36,10 @@ use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::{Layer, Registry};
 
 use super::envelope_helpers::{
-    write_raw_bytes_to_alloc_status_table, write_raw_bytes_to_node_health_table,
-    write_raw_bytes_to_service_backends_table, write_raw_bytes_to_service_hydration_results_table,
+    write_raw_bytes_to_alloc_status_table, write_raw_bytes_to_gateway_application_status_table,
+    write_raw_bytes_to_node_health_table, write_raw_bytes_to_service_backends_table,
+    write_raw_bytes_to_service_hydration_results_table,
+    write_raw_bytes_to_workload_svid_issue_status_table,
 };
 
 #[derive(Clone, Default)]
@@ -542,4 +545,116 @@ async fn malformed_service_backend_row_is_logged_and_skipped_but_valid_row_surfa
         refused.is_empty(),
         "observation layer must NOT emit health.startup.refused; got {refused:?}"
     );
+}
+
+// ---------------------------------------------------------------------
+// SVID issuance failure occurrence (O-SIF-G3, O-SIF-W2): the two status rows
+// follow the observation log-and-skip policy. An undecodable stored value reads
+// as absent through the point read with exactly one `observation.row.skipped`
+// warning naming the redb table; the workload record operation then restarts
+// at one. The gateway owner's base-0 restart is the owner reading this `None`
+// (its composition has no byte layer; see gaps).
+// ---------------------------------------------------------------------
+
+fn skipped_warnings_naming(captured: &CapturedEvents, table: &str) -> usize {
+    captured
+        .entries()
+        .iter()
+        .filter(|entry| entry.contains("observation.row.skipped") && entry.contains(table))
+        .count()
+}
+
+/// O-SIF-G3 (stored-row half): garbage under the gateway status row's table and
+/// key reads as no row, with one skipped-row warning naming the table and no
+/// startup refusal.
+///
+/// CONTRACT_SHAPE: bounded-change.
+#[allow(clippy::doc_markdown, reason = "CONTRACT_SHAPE is required scenario metadata")]
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "pending DELIVER gateway-svid-issue-failure-occurrence"]
+async fn an_undecodable_gateway_status_row_reads_as_absent_with_one_skipped_warning() {
+    let captured = CapturedEvents::default();
+    let subscriber = Registry::default().with(captured.clone());
+    let tmp = TempDir::new().expect("tempdir");
+    let redb_path = tmp.path().join("observation.redb");
+    let node = NodeId::new("gateway-node").expect("valid node id");
+    {
+        // Create the file and its tables through the typed open.
+        let _store = LocalObservationStore::open(&redb_path).expect("open #1");
+    }
+    write_raw_bytes_to_gateway_application_status_table(&redb_path, &node, &[0xFF; 16]);
+
+    let _guard = set_default(subscriber);
+    let store = LocalObservationStore::open(&redb_path).expect("open #2");
+    let row = store.gateway_application_status_row(&node).await.expect("point read");
+
+    assert_eq!(row, None, "an undecodable stored row reads as absent");
+    assert_eq!(
+        skipped_warnings_naming(&captured, "observation_gateway_application_status"),
+        1,
+        "exactly one skipped-row warning naming the table; got {:?}",
+        captured.entries(),
+    );
+    let refused: Vec<String> = captured
+        .entries()
+        .into_iter()
+        .filter(|entry| entry.contains("health.startup.refused"))
+        .collect();
+    assert!(refused.is_empty(), "the observation layer never refuses to start: {refused:?}");
+}
+
+/// O-SIF-G3, O-SIF-W2 (stored-row half): garbage under the workload failure
+/// row's table and key reads as no row with one skipped-row warning; the record
+/// operation then treats it as absent (one more warning) and restarts at
+/// `issue_failures = 1`, logical counter 1.
+///
+/// CONTRACT_SHAPE: bounded-change.
+#[allow(clippy::doc_markdown, reason = "CONTRACT_SHAPE is required scenario metadata")]
+#[tokio::test(flavor = "current_thread")]
+#[ignore = "pending DELIVER workload-svid-issue-failure-record"]
+async fn an_undecodable_workload_issue_status_row_reads_as_absent_and_the_record_restarts_at_one() {
+    let captured = CapturedEvents::default();
+    let subscriber = Registry::default().with(captured.clone());
+    let tmp = TempDir::new().expect("tempdir");
+    let redb_path = tmp.path().join("observation.redb");
+    let node = NodeId::new("node-001").expect("valid node id");
+    let alloc = AllocationId::new("alloc-garbled-0").expect("valid alloc id");
+    {
+        let _store = LocalObservationStore::open(&redb_path).expect("open #1");
+    }
+    write_raw_bytes_to_workload_svid_issue_status_table(&redb_path, &alloc, &[0xFF; 16]);
+
+    let _guard = set_default(subscriber);
+    let store = LocalObservationStore::open(&redb_path).expect("open #2");
+    let table = "observation_workload_svid_issue_status";
+
+    assert_eq!(store.workload_svid_issue_status_row(&alloc).await.expect("point read"), None);
+    assert_eq!(
+        skipped_warnings_naming(&captured, table),
+        1,
+        "exactly one skipped-row warning naming the table; got {:?}",
+        captured.entries(),
+    );
+
+    let failure = SvidIssueFailure {
+        cause: SvidIssueFailureCause::Ca,
+        at: UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000)),
+    };
+    store
+        .record_workload_svid_issue_failure(&alloc, &node, failure)
+        .await
+        .expect("record over an undecodable prior row");
+    assert_eq!(
+        skipped_warnings_naming(&captured, table),
+        2,
+        "the record operation logs the same warning once for the undecodable prior row",
+    );
+    let row = store
+        .workload_svid_issue_status_row(&alloc)
+        .await
+        .expect("point read")
+        .expect("the record installed a row");
+    assert_eq!(row.issue_failures, 1, "the count restarts at one");
+    assert_eq!(row.updated_at.counter, 1, "the logical counter restarts at one");
+    assert_eq!(row.last_issue_failure, failure);
 }

@@ -42,6 +42,7 @@
 //! reconciler action, NOT a workflow); this module provides only the mechanism,
 //! not the trigger.
 
+use overdrive_core::ca::issue_failure::SvidIssueFailureCause;
 use overdrive_core::ca::issued_certificate_row::IssuedCertificateRow;
 use overdrive_core::ca::{SKEW_TOLERANCE, WORKLOAD_SVID_TTL};
 use overdrive_core::traits::ca::{Ca, CaError, SvidMaterial, SvidRequest};
@@ -107,6 +108,16 @@ pub enum CaIssuanceError {
 }
 
 impl CaIssuanceError {
+    /// The failure class of this issuance failure: `Ca` for a signing failure,
+    /// `Audit` for an audit-write failure. Never carries the source text.
+    #[must_use]
+    pub const fn failure_cause(&self) -> SvidIssueFailureCause {
+        match self {
+            Self::Ca { .. } => SvidIssueFailureCause::Ca,
+            Self::Audit { .. } => SvidIssueFailureCause::Audit,
+        }
+    }
+
     fn ca(source: CaError) -> Self {
         Self::Ca { source }
     }

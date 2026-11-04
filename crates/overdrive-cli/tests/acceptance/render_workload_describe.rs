@@ -449,6 +449,8 @@ fn row_with_state(
         last_terminated: None,
         terminal: None,
         network_cleanup_pending: false,
+        svid_issue_failures: 0,
+        last_svid_issue_failure: None,
         restart_count: 0,
     }
 }
@@ -1397,6 +1399,8 @@ fn a_cleanup_pending_allocation_renders_cleanup_pending_with_its_lifecycle_state
     ] {
         let row = AllocStatusRowBody {
             network_cleanup_pending: true,
+            svid_issue_failures: 0,
+            last_svid_issue_failure: None,
             ..nd295_row("batch", 0, state, None, exit_code)
         };
         let rows = vec![row];
@@ -1447,5 +1451,81 @@ fn non_pending_allocations_render_byte_identically() {
             "[{}]: a render with no cleanup-pending row must be byte-identical to today's output",
             arm.name,
         );
+    }
+}
+
+// -------------------------------------------------------------------
+// (l) SVID issuance failure occurrence (R-46, ADR-0275) — the failure count
+// and the latest cause on the LIVE path.
+//
+// `AllocStatusRowBody.svid_issue_failures` / `last_svid_issue_failure`
+// (additive, `#[serde(default)]`) are the server's projection of the
+// allocation's workload SVID issuance failure row. The live renderer prints one
+// presence-guarded detail line for a row whose count is above zero, under both
+// the Service per-allocation table and the Job per-attempt table; a row with
+// no failure renders byte-identically (the golden test in group (k) is that
+// guard).
+// -------------------------------------------------------------------
+
+/// O-SIF-W3 — For a Service and a Job, and for each cause, a row with failed
+/// issuances renders exactly one `svid issuance failures: <N> (last: <cause>
+/// at <at>)` line, and the whole rendered output equals the failure-free render
+/// plus exactly that line, placed under the failed row: no other row, section or Job verdict moves.
+///
+/// CONTRACT_SHAPE: pure-function.
+#[test]
+#[ignore = "pending DELIVER workload-svid-issue-failure-occurrence"]
+fn a_row_with_failed_issuances_renders_the_count_and_the_latest_cause() {
+    use overdrive_control_plane::api::{SvidIssueFailureBody, SvidIssueFailureCauseBody};
+
+    let at = UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000));
+    for arm in &ND295_ARMS {
+        let baseline = overdrive_cli::render::workload_describe(&(arm.describe)());
+        for (cause, label, count) in [
+            (SvidIssueFailureCauseBody::Ca, "ca", 1_u64),
+            (SvidIssueFailureCauseBody::Audit, "audit", 7_u64),
+        ] {
+            let case = format!("[{}, cause {label}, count {count}]", arm.name);
+            let mut out = (arm.describe)();
+            out.snapshot.rows[1].svid_issue_failures = count;
+            out.snapshot.rows[1].last_svid_issue_failure =
+                Some(SvidIssueFailureBody { cause: cause.clone(), at });
+
+            let rendered = overdrive_cli::render::workload_describe(&out);
+
+            let line = format!("    svid issuance failures: {count} (last: {label} at {at})\n");
+            assert_eq!(
+                rendered.matches(line.as_str()).count(),
+                1,
+                "{case}: the occurrence line must render once; got:\n{rendered}",
+            );
+            assert_eq!(
+                rendered.matches("svid issuance failures:").count(),
+                1,
+                "{case}: only the failed row carries the line; got:\n{rendered}",
+            );
+            assert_eq!(
+                rendered.replacen(line.as_str(), "", 1),
+                baseline,
+                "{case}: only the one occurrence line may differ from the failure-free render",
+            );
+
+            // Placement: the line belongs to the failed row, so it moves with
+            // that row (it sits lower when a later row is the failed one).
+            let line_index = |failed_row: usize| {
+                let mut moved = (arm.describe)();
+                moved.snapshot.rows[failed_row].svid_issue_failures = count;
+                moved.snapshot.rows[failed_row].last_svid_issue_failure =
+                    Some(SvidIssueFailureBody { cause: cause.clone(), at });
+                overdrive_cli::render::workload_describe(&moved)
+                    .lines()
+                    .position(|candidate| candidate.contains("svid issuance failures:"))
+                    .expect("the occurrence line renders")
+            };
+            assert!(
+                line_index(0) < line_index(1),
+                "{case}: the occurrence line must sit under its own failed row",
+            );
+        }
     }
 }

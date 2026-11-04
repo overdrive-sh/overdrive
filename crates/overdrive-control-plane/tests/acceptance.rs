@@ -73,6 +73,12 @@ mod acceptance {
         }
     }
 
+    // SVID issuance failure occurrence: a delegating observation store whose
+    // faults are scoped to one write or read and which counts reads.
+    #[path = "../common/issue_fault_store.rs"]
+    pub mod issue_fault_store;
+    mod svid_issue_failure_occurrence;
+
     // netns-density-295 — control-plane-owned scratch complement contract.
     mod netns_density_guest_network;
     // netns-density-295 S-ND295-65 — no optional switch gates protection, DNS,

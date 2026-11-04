@@ -2,11 +2,15 @@
 //! (public ingress). Pins the V1 archived layout of the redacted Gateway
 //! Application status row.
 //!
-//! **`FIXTURE_V1` is never touched.** Bumping the envelope to `V2` adds a new
-//! `FIXTURE_V2` constant and a new assertion in the same commit
-//! (`development.md` § "Version-bump procedure"). The payload is a frozen
-//! hand-pinned `GatewayApplicationStatusRowEnvelope::V1`, never built through
-//! an alias.
+//! **`FIXTURE_V1` is the one V1 layout, and it was regenerated once.** The
+//! issue-failure occurrence fields (`issue_failures`, `last_issue_failure`)
+//! were added to `GatewayApplicationStatusRowV1` in place (R-51): that row had
+//! no production writer and no persisted bytes, so no operative V1 existed to
+//! preserve. From here on the fixture is never touched: bumping the envelope
+//! to `V2` adds a new `FIXTURE_V2` constant and a new assertion in the same
+//! commit (`development.md` § "Version-bump procedure"). The payload is a
+//! frozen hand-pinned `GatewayApplicationStatusRowEnvelope::V1`, never built
+//! through an alias.
 
 #![allow(clippy::doc_markdown, reason = "CONTRACT_SHAPE is required metadata")]
 
@@ -14,6 +18,7 @@ use std::net::{Ipv4Addr, SocketAddrV4};
 use std::time::Duration;
 
 use overdrive_core::UnixInstant;
+use overdrive_core::ca::issue_failure::{SvidIssueFailure, SvidIssueFailureCause};
 use overdrive_core::dataplane::Proto;
 use overdrive_core::gateway_identity::GatewayIdentityEpoch;
 use overdrive_core::id::{CertSerial, ServiceVip};
@@ -31,9 +36,10 @@ use super::harness::decode_envelope_v_latest;
 /// `10.96.0.7:8080/tcp`), one draining generation (application `[5; 32]`, Route
 /// generation `[10; 32]`), unavailable cause `WatchGap`, a current gateway
 /// identity (epoch 1, `spiffe://overdrive.local/gateway/gateway-node`, serial
-/// `0a1b2c`, expiry 3 000 s), connect path `Ready` and the logical timestamp
+/// `0a1b2c`, expiry 3 000 s), three failed issuances whose latest is an `Audit`
+/// failure at 2 500 s, connect path `Ready` and the logical timestamp
 /// `(2, gateway-node)`.
-const FIXTURE_V1: &str = "676174657761792d6e6f64657075626c69632d6170697075626c69632d61706905050505050505050505050505050505050505050505050505050505050505058a000000d6ffffff0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a000a60000700000000000000000000000000901f000000007370696666653a2f2f6f76657264726976652e6c6f63616c2f676174657761792f676174657761792d6e6f6465676174657761792d6e6f64650000000000000000000000000000008c00000038ffffff01007f000002bb01000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000004040404040404040404040404040404040404040404040404040404040404048a000000acfeffff0909090909090909090909090909090909090909090909090909090909090909000a60000700000000000000000000000000901f0000000080feffff01000000010800000000000001000000000000000100000000000000ad000000c0feffff18000000306131623263ffff00000000b80b0000000000000000000000000000010000000000000002000000000000008c000000b5feffff";
+const FIXTURE_V1: &str = "676174657761792d6e6f64657075626c69632d6170697075626c69632d61706905050505050505050505050505050505050505050505050505050505050505058a000000d6ffffff0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a000a60000700000000000000000000000000901f000000007370696666653a2f2f6f76657264726976652e6c6f63616c2f676174657761792f676174657761792d6e6f6465676174657761792d6e6f64650000000000000000000000000000008c00000038ffffff01007f000002bb01000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000100000004040404040404040404040404040404040404040404040404040404040404048a000000acfeffff0909090909090909090909090909090909090909090909090909090909090909000a60000700000000000000000000000000901f0000000080feffff01000000010800000000000001000000000000000100000000000000ad000000c0feffff18000000306131623263ffff00000000b80b0000000000000000000000000000030000000000000001000000000000000100000000000000c4090000000000000000000000000000010000000000000002000000000000008c0000008dfeffff";
 
 /// CONTRACT_SHAPE: pure-function.
 #[test]
@@ -75,7 +81,61 @@ fn gateway_application_status_v1_decodes_through_current_envelope() {
         }
         other => panic!("expected the Current identity, got {other:?}"),
     }
+    assert_eq!(latest.issue_failures, 3);
+    assert_eq!(
+        latest.last_issue_failure,
+        Some(SvidIssueFailure {
+            cause: SvidIssueFailureCause::Audit,
+            at: UnixInstant::from_unix_duration(Duration::from_secs(2_500)),
+        }),
+    );
     assert_eq!(latest.connect_path, GatewayConnectPathStatus::Ready);
     assert_eq!(latest.updated_at.counter, 2);
     assert_eq!(latest.updated_at.writer.as_str(), "gateway-node");
+}
+
+mod round_trip {
+    use std::time::Duration;
+
+    use overdrive_core::UnixInstant;
+    use overdrive_core::ca::issue_failure::{SvidIssueFailure, SvidIssueFailureCause};
+    use overdrive_core::codec::{VersionedEnvelope, decode_envelope_bytes};
+    use overdrive_core::public_ingress::GatewayApplicationStatusRowEnvelope;
+    use proptest::prelude::*;
+
+    use super::{FIXTURE_V1, decode_envelope_v_latest};
+
+    fn cause() -> impl Strategy<Value = SvidIssueFailureCause> {
+        prop_oneof![Just(SvidIssueFailureCause::Ca), Just(SvidIssueFailureCause::Audit)]
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(256))]
+
+        /// O-SIF-G7: for every issue-failure occurrence (a count with its
+        /// latest failure, or the fresh `0` / `None`), the row round-trips
+        /// bit-equivalent through the envelope archive and its decoder.
+        ///
+        /// CONTRACT_SHAPE: pure-function.
+        #[test]
+        fn the_row_round_trips_every_occurrence_through_the_envelope(
+            count in 0_u64..=u64::MAX,
+            failure_cause in cause(),
+            at_secs in 0_u64..4_000_000_000,
+        ) {
+            let mut row = decode_envelope_v_latest::<GatewayApplicationStatusRowEnvelope>(FIXTURE_V1);
+            row.issue_failures = count;
+            row.last_issue_failure = (count > 0).then(|| SvidIssueFailure {
+                cause: failure_cause,
+                at: UnixInstant::from_unix_duration(Duration::from_secs(at_secs)),
+            });
+            let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(
+                &GatewayApplicationStatusRowEnvelope::latest(row.clone()),
+            )
+            .expect("archive the row");
+            let decoded = decode_envelope_bytes::<GatewayApplicationStatusRowEnvelope>(bytes.as_ref())
+                .expect("decode the archived row");
+            prop_assert_eq!(decoded, row);
+        }
+    }
 }

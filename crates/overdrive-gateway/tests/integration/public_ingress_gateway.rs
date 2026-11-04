@@ -18,7 +18,8 @@
 //! `127.T.hi.lo` (`hi = ordinal / 250`, `lo = ordinal % 250 + 1`) and
 //! `Slot::vip(ordinal)` is `127.T.(200 + hi).lo` (the Service frontend, with a
 //! listening socket on port 8080 so the connector's real `connect(2)` completes).
-//! This file owns second octets 41..=62; no other test file may reuse them.
+//! This file owns second octets 41..=62 and 180..=186; no other test file may reuse
+//! them.
 //!
 //! | `T` | test |
 //! |---|---|
@@ -44,6 +45,13 @@
 //! | 60 | identical Route re-apply (S-PIG-54) |
 //! | 61 | watch recovery after a lag (S-PIG-66) |
 //! | 62 | superseded probe (S-PIG-68) |
+//! | 180 | identity that never issues, then recovers (O-SIF-G1, G2) |
+//! | 181 | seeded failure / success / restart sequence (O-SIF-G1) |
+//! | 182 | restart continues the count (O-SIF-G3) |
+//! | 183 | prior-row read error is retried (O-SIF-G3) |
+//! | 184 | held identity past expiry (O-SIF-G5) |
+//! | 185 | boot identity timeout (O-SIF-G5) |
+//! | 186 | failing status write loses nothing (O-SIF-G6) |
 
 #![allow(
     clippy::doc_markdown,
@@ -75,16 +83,19 @@ use overdrive_core::aggregate::{
     DriverInput, IntentKey, ResourcesInput, ServiceV1, VmInput, WorkloadIntent, WorkloadKind,
 };
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
+use overdrive_core::ca::issue_failure::{SvidIssueFailure, SvidIssueFailureCause};
 use overdrive_core::ca::kek::KEK_LEN;
 use overdrive_core::ca::root_key_envelope::KekId;
-use overdrive_core::gateway_identity::{GatewayIdentityEpoch, GatewayIdentityFacts};
+use overdrive_core::gateway_identity::{
+    GatewayIdentityEpoch, GatewayIdentityFacts, GatewayIdentityIssueRecord,
+};
 use overdrive_core::id::{BackendId, CertSerial, ContentHash, NodeId, ServiceVip, SpiffeId};
 use overdrive_core::public_ingress::{
     CertifiedKeyFailure, CertifiedKeyUsabilityFailure, GatewayApplicationStatusRowV1,
-    GatewayApplicationUnavailableCause, GatewayConnectPathStatus, GatewayListenerStatus,
-    PublicCertifiedKeyId, PublicCertifiedKeyStatusRowV1, PublicCertifiedKeyStatusState,
-    PublicRouteInput, PublicRouteSetV1, Route, RouteApplyOutcome, RouteId, RouteWithdrawOutcome,
-    ServiceKey, ServiceListenerReferenceInput, SocketCookie,
+    GatewayApplicationUnavailableCause, GatewayConnectPathStatus, GatewayIdentityStatus,
+    GatewayListenerStatus, PublicCertifiedKeyId, PublicCertifiedKeyStatusRowV1,
+    PublicCertifiedKeyStatusState, PublicRouteInput, PublicRouteSetV1, Route, RouteApplyOutcome,
+    RouteId, RouteWithdrawOutcome, ServiceKey, ServiceListenerReferenceInput, SocketCookie,
 };
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::intent_store::{IntentStore, IntentSubscriptionEvent, TxnOp};
@@ -168,6 +179,13 @@ const CUSTODY_REPLAY: Slot = Slot(59);
 const ROUTE_REAPPLY: Slot = Slot(60);
 const WATCH_RECOVERY: Slot = Slot(61);
 const SUPERSEDED_PROBE: Slot = Slot(62);
+const ISSUE_ABSENT_THEN_RECOVERS: Slot = Slot(180);
+const ISSUE_SEQUENCE: Slot = Slot(181);
+const ISSUE_RESTART: Slot = Slot(182);
+const ISSUE_READ_RETRY: Slot = Slot(183);
+const ISSUE_EXPIRY: Slot = Slot(184);
+const ISSUE_BOOT_TIMEOUT: Slot = Slot(185);
+const ISSUE_WRITE_RETRY: Slot = Slot(186);
 
 // ---------------------------------------------------------------------------
 // Event log shared by the doubles
@@ -447,25 +465,51 @@ struct ScriptedIdentity {
     facts: GatewayIdentityFacts,
     sender: watch::Sender<Option<GatewayIdentityFacts>>,
     ensure_error: Option<GatewayIdentityLifecycleError>,
+    /// When set, `ensure_current` waits for the held facts instead of answering
+    /// at once, as the production control does while the reconciler issues.
+    wait_for_held: bool,
     state: Mutex<IdentityState>,
+    /// The process-local issue-failure record the slot would hold.
+    record: Mutex<Option<GatewayIdentityIssueRecord>>,
     events: Arc<EventLog>,
 }
 
 impl ScriptedIdentity {
-    fn new(
+    fn scripted(
         ensure_error: Option<GatewayIdentityLifecycleError>,
+        absent_until_held: bool,
         events: Arc<EventLog>,
     ) -> Arc<Self> {
         let facts = gateway_identity_facts();
-        let initial = ensure_error.is_none().then(|| facts.clone());
+        let initial = (ensure_error.is_none() && !absent_until_held).then(|| facts.clone());
         let (sender, _) = watch::channel(initial);
         Arc::new(Self {
             facts,
             sender,
             ensure_error,
+            wait_for_held: absent_until_held,
             state: Mutex::new(IdentityState::default()),
+            record: Mutex::new(None),
             events,
         })
+    }
+
+    /// One confirmed failed issuance, exactly as the slot's
+    /// `record_issue_failure` applies it: one more on the count, the latest
+    /// failure replaces `last`, the held identity is untouched, and every
+    /// `subscribe` receiver is woken with an unchanged item.
+    fn record_failure(&self, failure: SvidIssueFailure) {
+        {
+            let mut record = self.record.lock().expect("issue record");
+            let count = record.map_or(NonZeroU64::MIN, |prior| prior.count.saturating_add(1));
+            *record = Some(GatewayIdentityIssueRecord { count, last: failure });
+        }
+        self.sender.send_modify(|_| {});
+    }
+
+    /// A successful audited hold of `facts`; the issue record is untouched.
+    fn hold(&self, facts: GatewayIdentityFacts) {
+        self.sender.send_replace(Some(facts));
     }
 
     fn ensure_calls(&self) -> u32 {
@@ -483,17 +527,35 @@ impl GatewayIdentityLifecycleControl for ScriptedIdentity {
         &self,
         _deadline: Instant,
     ) -> Result<GatewayIdentityFacts, GatewayIdentityLifecycleError> {
-        let mut state = self.state.lock().expect("identity state");
-        state.ensure_calls += 1;
-        if let Some(error) = &self.ensure_error {
-            state.observed.push(error.clone());
-            return Err(error.clone());
+        {
+            let mut state = self.state.lock().expect("identity state");
+            state.ensure_calls += 1;
+            if let Some(error) = &self.ensure_error {
+                state.observed.push(error.clone());
+                return Err(error.clone());
+            }
+        }
+        if self.wait_for_held {
+            let mut receiver = self.sender.subscribe();
+            loop {
+                let held = receiver.borrow_and_update().clone();
+                if let Some(held) = held {
+                    return Ok(held);
+                }
+                if receiver.changed().await.is_err() {
+                    return Err(GatewayIdentityLifecycleError::Closed);
+                }
+            }
         }
         Ok(self.facts.clone())
     }
 
     fn current(&self) -> Option<GatewayIdentityFacts> {
         self.sender.borrow().clone()
+    }
+
+    fn issue_record(&self) -> Option<GatewayIdentityIssueRecord> {
+        *self.record.lock().expect("issue record")
     }
 
     fn subscribe(&self) -> watch::Receiver<Option<GatewayIdentityFacts>> {
@@ -704,6 +766,8 @@ struct FixtureSpec {
     programmed: bool,
     dataplane_fault: Option<(DataplaneOp, GatewayConnectDataplaneError)>,
     ensure_error: Option<GatewayIdentityLifecycleError>,
+    /// The identity is not held until the test holds it.
+    absent_until_held: bool,
     park_accept: bool,
     hold_authenticate_calls: u32,
 }
@@ -724,7 +788,11 @@ impl Fixtures {
                 if spec.programmed { Backends::Programmed } else { Backends::NoneProgrammed },
                 spec.dataplane_fault,
             ),
-            identity: ScriptedIdentity::new(spec.ensure_error, Arc::clone(&events)),
+            identity: ScriptedIdentity::scripted(
+                spec.ensure_error,
+                spec.absent_until_held,
+                Arc::clone(&events),
+            ),
             holds: HoldRegistry::new(spec.hold_authenticate_calls),
             relay: ScriptedRelay::new(Arc::clone(&events), spec.park_accept),
             events,
@@ -948,7 +1016,7 @@ async fn unbound(
     site: &Site,
     plan: Plan,
     intent: &Arc<LocalIntentStore>,
-    observations: &Arc<SimObservationStore>,
+    observations: &Arc<dyn ObservationStore>,
     clock: &Arc<SimClock>,
 ) -> Result<UnboundGatewayBuilder, GatewayBootError> {
     let vip_view = if plan.with_service {
@@ -957,7 +1025,7 @@ async fn unbound(
         Arc::new(SimServiceVipView::new(BTreeMap::new()))
     };
     let intent_port: Arc<dyn IntentStore> = intent.clone();
-    let observation_port: Arc<dyn ObservationStore> = observations.clone();
+    let observation_port: Arc<dyn ObservationStore> = Arc::clone(observations);
     let clock_port: Arc<dyn Clock> = clock.clone();
     UnboundGatewayBuilder::new(
         site.config(plan.slot.bind(plan.ordinal)),
@@ -996,9 +1064,22 @@ impl World {
         clock: Arc<SimClock>,
         fx: Fixtures,
     ) -> Result<Self, GatewayBootError> {
+        let observations: Arc<dyn ObservationStore> =
+            Arc::new(SimObservationStore::single_peer(node_id(), 54));
+        Self::start_over(site, plan, clock, fx, observations).await
+    }
+
+    /// Start over an existing observation store, so a restarted composition
+    /// reads the row its predecessor left (the durable-store half of a restart).
+    async fn start_over(
+        site: &Site,
+        plan: Plan,
+        clock: Arc<SimClock>,
+        fx: Fixtures,
+        observations: Arc<dyn ObservationStore>,
+    ) -> Result<Self, GatewayBootError> {
         let intent =
             Arc::new(LocalIntentStore::open(&site.intent_path).expect("real intent store"));
-        let observations = Arc::new(SimObservationStore::single_peer(node_id(), 54));
         let frontend_listener = plan.with_service.then(|| {
             let listener = std::net::TcpListener::bind((plan.slot.vip(plan.ordinal), SERVICE_PORT))
                 .expect("Service frontend listener");
@@ -1599,7 +1680,8 @@ async fn unreadable_and_malformed_manual_keys_refuse_boot_with_distinct_causes_a
         fault.apply(&site);
         let intent =
             Arc::new(LocalIntentStore::open(&site.intent_path).expect("real intent store"));
-        let observations = Arc::new(SimObservationStore::single_peer(node_id(), 55));
+        let observations: Arc<dyn ObservationStore> =
+            Arc::new(SimObservationStore::single_peer(node_id(), 55));
         let clock = Arc::new(SimClock::new());
         let custody_before = custody_records(&intent).await;
         let route_before = route_set(&intent, &site.intent_path).await;
@@ -2148,7 +2230,6 @@ async fn every_dataplane_error_collapses_to_the_redacted_connect_path_cause() {
 const fn originates_at_ensure_current(error: &GatewayIdentityLifecycleError) -> bool {
     match error {
         GatewayIdentityLifecycleError::ReconcilerUnavailable
-        | GatewayIdentityLifecycleError::IssueFailed
         | GatewayIdentityLifecycleError::Timeout
         | GatewayIdentityLifecycleError::Closed => true,
     }
@@ -2157,7 +2238,6 @@ const fn originates_at_ensure_current(error: &GatewayIdentityLifecycleError) -> 
 fn identity_errors() -> Vec<GatewayIdentityLifecycleError> {
     vec![
         GatewayIdentityLifecycleError::ReconcilerUnavailable,
-        GatewayIdentityLifecycleError::IssueFailed,
         GatewayIdentityLifecycleError::Timeout,
         GatewayIdentityLifecycleError::Closed,
     ]
@@ -2239,6 +2319,403 @@ async fn every_identity_lifecycle_error_collapses_to_gateway_identity_unusable()
         site.assert_no_secret_material(&rendered, "the identity status");
         world.stop().await;
     }
+}
+
+// ---------------------------------------------------------------------------
+// SVID issuance failure occurrence: the owner's projection (R-45, R-48, R-52)
+// ---------------------------------------------------------------------------
+
+/// The failure the executor would record at the Sim clock's current instant.
+fn issue_failure(cause: SvidIssueFailureCause, clock: &SimClock) -> SvidIssueFailure {
+    SvidIssueFailure { cause, at: overdrive_core::UnixInstant::from_clock(clock) }
+}
+
+/// Every status field except the occurrence fields and the LWW stamp, so a
+/// test can assert that recording a failure changed nothing else.
+fn outside_the_occurrence(row: &GatewayApplicationStatusRowV1) -> String {
+    format!(
+        "{:?}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}",
+        row.node_id,
+        row.listener,
+        row.staged,
+        row.current,
+        row.draining,
+        row.unavailable,
+        row.connect_path,
+    )
+}
+
+fn absent_identity() -> Fixtures {
+    Fixtures::new(FixtureSpec { absent_until_held: true, ..FixtureSpec::default() })
+}
+
+/// O-SIF-G1, O-SIF-G2: a gateway whose identity has never issued reads
+/// `Absent` with the failure count and the latest cause (distinguishable from
+/// the fresh `Absent`, `0`, `None`); a `Ca` failure then an `Audit` failure give
+/// `2` and the latest cause and Sim-clock instant; recording changes nothing
+/// else in the status; a later success reads `Current` with the count and last
+/// failure retained.
+///
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test]
+#[ignore = "pending DELIVER gateway-svid-issue-failure-occurrence"]
+async fn a_gateway_whose_identity_never_issues_reads_absent_with_the_failure_count_and_cause() {
+    let site = Site::new();
+    let world =
+        World::start(&site, Plan::with_service(ISSUE_ABSENT_THEN_RECOVERS), absent_identity())
+            .await
+            .expect("composition starts");
+    world.declare(route("public-api", "/")).await.expect("Route command");
+
+    let fresh = wait_status(&world.status, "the first projection", |_| true).await;
+    assert_eq!(fresh.gateway_identity, GatewayIdentityStatus::Absent);
+    assert_eq!(fresh.issue_failures, 0);
+    assert_eq!(fresh.last_issue_failure, None);
+
+    let first = issue_failure(SvidIssueFailureCause::Ca, &world.clock);
+    world.fx.identity.record_failure(first);
+    let after_first =
+        wait_status(&world.status, "the first failure", |row| row.issue_failures == 1).await;
+    assert_eq!(after_first.last_issue_failure, Some(first));
+    assert_eq!(
+        after_first.gateway_identity,
+        GatewayIdentityStatus::Absent,
+        "a never-succeeded issuance is Absent with a count, not a fresh Absent",
+    );
+    assert_eq!(outside_the_occurrence(&after_first), outside_the_occurrence(&fresh));
+
+    world.clock.tick(Duration::from_secs(30));
+    let second = issue_failure(SvidIssueFailureCause::Audit, &world.clock);
+    assert!(second.at > first.at, "the Sim clock advanced between the two failures");
+    world.fx.identity.record_failure(second);
+    let after_second =
+        wait_status(&world.status, "the second failure", |row| row.issue_failures == 2).await;
+    assert_eq!(after_second.last_issue_failure, Some(second));
+    assert_eq!(after_second.gateway_identity, GatewayIdentityStatus::Absent);
+    assert_eq!(outside_the_occurrence(&after_second), outside_the_occurrence(&fresh));
+
+    let held = gateway_identity_facts();
+    world.fx.identity.hold(held.clone());
+    let recovered = wait_status(&world.status, "the recovered identity", |row| {
+        matches!(row.gateway_identity, GatewayIdentityStatus::Current { .. })
+    })
+    .await;
+    assert_eq!(
+        recovered.gateway_identity,
+        GatewayIdentityStatus::Current {
+            epoch: held.epoch,
+            spiffe_id: held.spiffe_id,
+            serial: held.serial,
+            not_after: held.not_after,
+        },
+    );
+    assert_eq!(recovered.issue_failures, 2, "a success never clears the count");
+    assert_eq!(recovered.last_issue_failure, Some(second), "nor the latest failure");
+    world.stop().await;
+}
+
+/// O-SIF-G1 (property over sequences, seeded): across a seeded interleaving of
+/// failed issuances, successful holds and restarts over one durable
+/// observation store, the projected count equals the number of failures ever
+/// recorded, never decreases, and `last` is the latest failure.
+///
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test]
+#[ignore = "pending DELIVER gateway-svid-issue-failure-occurrence"]
+async fn the_failure_count_never_decreases_across_failures_successes_and_restarts() {
+    const SEED: u64 = 0x5A1F_0A11;
+    let mut rng = SplitMix64(SEED);
+    let site = Site::new();
+    let clock = Arc::new(SimClock::new());
+    let observations: Arc<dyn ObservationStore> =
+        Arc::new(SimObservationStore::single_peer(node_id(), 181));
+    let plan = Plan::with_service(ISSUE_SEQUENCE);
+
+    let mut world =
+        World::start_over(&site, plan, clock.clone(), absent_identity(), observations.clone())
+            .await
+            .expect("composition starts");
+    world.declare(route("public-api", "/")).await.expect("Route command");
+
+    let mut model_count: u64 = 0;
+    let mut model_last: Option<SvidIssueFailure> = None;
+    let mut previous_seen: u64 = 0;
+    for step in 0..24_u32 {
+        let draw = rng.next();
+        let operation = match draw % 4 {
+            0 | 1 => {
+                clock.tick(Duration::from_secs(1));
+                let cause = if draw & 0x10 == 0 {
+                    SvidIssueFailureCause::Ca
+                } else {
+                    SvidIssueFailureCause::Audit
+                };
+                let failure = issue_failure(cause, &clock);
+                world.fx.identity.record_failure(failure);
+                model_count += 1;
+                model_last = Some(failure);
+                "failure"
+            }
+            2 => {
+                world.fx.identity.hold(gateway_identity_facts());
+                "success"
+            }
+            _ => {
+                world.stop().await;
+                world = World::start_over(
+                    &site,
+                    plan,
+                    clock.clone(),
+                    absent_identity(),
+                    observations.clone(),
+                )
+                .await
+                .expect("restarted composition starts");
+                world.declare(route("public-api", "/")).await.expect("Route command");
+                "restart"
+            }
+        };
+        let row = wait_status(&world.status, "the modelled occurrence", |row| {
+            row.issue_failures == model_count && row.last_issue_failure == model_last
+        })
+        .await;
+        assert!(
+            row.issue_failures >= previous_seen,
+            "seed {SEED:#x}, step {step} ({operation}): the count fell from {previous_seen} to {}",
+            row.issue_failures,
+        );
+        previous_seen = row.issue_failures;
+    }
+    world.stop().await;
+}
+
+/// O-SIF-G3: re-composing over the same durable store continues the count
+/// (`base + new`): a restarted owner first projects the prior row's count and
+/// last failure, and one more failure makes it `base + 1` with the new `last`.
+///
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test]
+#[ignore = "pending DELIVER gateway-svid-issue-failure-occurrence"]
+async fn a_restarted_gateway_continues_the_failure_count_from_the_prior_row() {
+    let site = Site::new();
+    let clock = Arc::new(SimClock::new());
+    let observations: Arc<dyn ObservationStore> =
+        Arc::new(SimObservationStore::single_peer(node_id(), 182));
+    let plan = Plan::with_service(ISSUE_RESTART);
+
+    let first =
+        World::start_over(&site, plan, clock.clone(), absent_identity(), observations.clone())
+            .await
+            .expect("first composition starts");
+    first.declare(route("public-api", "/")).await.expect("Route command");
+    let mut last = None;
+    for cause in [SvidIssueFailureCause::Ca, SvidIssueFailureCause::Audit] {
+        clock.tick(Duration::from_secs(5));
+        let failure = issue_failure(cause, &clock);
+        first.fx.identity.record_failure(failure);
+        last = Some(failure);
+    }
+    wait_status(&first.status, "two recorded failures", |row| row.issue_failures == 2).await;
+    first.stop().await;
+
+    let second =
+        World::start_over(&site, plan, clock.clone(), absent_identity(), observations.clone())
+            .await
+            .expect("second composition starts");
+    second.declare(route("public-api", "/")).await.expect("Route command");
+    let carried =
+        wait_status(&second.status, "the carried base", |row| row.issue_failures == 2).await;
+    assert_eq!(carried.last_issue_failure, last, "the prior last failure is retained");
+
+    clock.tick(Duration::from_secs(5));
+    let third = issue_failure(SvidIssueFailureCause::Audit, &clock);
+    second.fx.identity.record_failure(third);
+    let continued =
+        wait_status(&second.status, "base plus the new failure", |row| row.issue_failures == 3)
+            .await;
+    assert_eq!(continued.last_issue_failure, Some(third));
+    second.stop().await;
+}
+
+/// O-SIF-G3: a prior-row read error is retried and never defaulted to zero: no
+/// status row is written while the read keeps failing, and once it succeeds
+/// the row carries `base + process` (the facts stayed in the slot).
+///
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test]
+#[ignore = "pending DELIVER gateway-svid-issue-failure-occurrence"]
+async fn a_prior_row_read_error_is_retried_and_never_defaulted_to_zero() {
+    let site = Site::new();
+    let clock = Arc::new(SimClock::new());
+    let inner: Arc<dyn ObservationStore> =
+        Arc::new(SimObservationStore::single_peer(node_id(), 183));
+    let plan = Plan::with_service(ISSUE_READ_RETRY);
+
+    let before = World::start_over(&site, plan, clock.clone(), absent_identity(), inner.clone())
+        .await
+        .expect("first composition starts");
+    before.declare(route("public-api", "/")).await.expect("Route command");
+    for _ in 0..5 {
+        clock.tick(Duration::from_secs(1));
+        before.fx.identity.record_failure(issue_failure(SvidIssueFailureCause::Audit, &clock));
+    }
+    wait_status(&before.status, "five recorded failures", |row| row.issue_failures == 5).await;
+    before.stop().await;
+
+    let faulty = super::issue_fault_store::IssueFaultStore::over(inner.clone());
+    faulty.fail_gateway_status_reads.store(true, Ordering::SeqCst);
+    let faulty_port: Arc<dyn ObservationStore> = faulty.clone();
+    let after = World::start_over(&site, plan, clock.clone(), absent_identity(), faulty_port)
+        .await
+        .expect("restarted composition starts");
+    after.declare(route("public-api", "/")).await.expect("Route command");
+    clock.tick(Duration::from_secs(1));
+    after.fx.identity.record_failure(issue_failure(SvidIssueFailureCause::Ca, &clock));
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(
+        faulty.offered_gateway_status_rows().is_empty(),
+        "no row may be written from a defaulted zero while the prior row cannot be read: {:?}",
+        faulty.offered_gateway_status_rows(),
+    );
+
+    faulty.fail_gateway_status_reads.store(false, Ordering::SeqCst);
+    clock.tick(Duration::from_secs(1));
+    let latest = issue_failure(SvidIssueFailureCause::Audit, &clock);
+    after.fx.identity.record_failure(latest);
+    let row = wait_status(&after.status, "base plus both process failures", |row| {
+        row.issue_failures == 7
+    })
+    .await;
+    assert_eq!(row.last_issue_failure, Some(latest));
+    assert!(
+        faulty.offered_gateway_status_rows().iter().all(|written| written.issue_failures >= 5),
+        "no written row ever carried a count below the prior base",
+    );
+    after.stop().await;
+}
+
+/// O-SIF-G5: held material whose `not_after` is not after the owner's clock
+/// projects as `Unusable` at the next projection (the failure wake of a failing
+/// rotation), with the count above zero; before that wake the row may still read
+/// `Current`.
+///
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test]
+#[ignore = "pending DELIVER gateway-svid-issue-failure-occurrence"]
+async fn held_identity_past_its_expiry_projects_unusable_at_the_failure_wake() {
+    // Both the expiry instant itself (`not_after == now`, not after the clock)
+    // and an instant well past it.
+    for advance in [100, 200] {
+        let site = Site::new();
+        let world = World::start(&site, Plan::with_service(ISSUE_EXPIRY), absent_identity())
+            .await
+            .expect("composition starts");
+        world.declare(route("public-api", "/")).await.expect("Route command");
+
+        let mut short_lived = gateway_identity_facts();
+        short_lived.not_after = overdrive_core::UnixInstant::from_unix_duration(
+            world.clock.unix_now() + Duration::from_secs(100),
+        );
+        world.fx.identity.hold(short_lived);
+        wait_status(&world.status, "the short-lived identity", |row| {
+            matches!(row.gateway_identity, GatewayIdentityStatus::Current { .. })
+        })
+        .await;
+
+        world.clock.tick(Duration::from_secs(advance));
+        world.fx.identity.record_failure(issue_failure(SvidIssueFailureCause::Audit, &world.clock));
+        let row =
+            wait_status(&world.status, "the expired identity", |row| row.issue_failures == 1).await;
+        assert_eq!(
+            row.gateway_identity,
+            GatewayIdentityStatus::Unusable,
+            "{advance} s after a 100 s identity was held",
+        );
+        world.stop().await;
+    }
+}
+
+/// O-SIF-G5: a boot `ensure_current` timeout maps to neither identity value: it
+/// sets the application cause `GatewayIdentityUnusable` and `gateway_identity`
+/// stays what the slot says (`Absent` when empty, `Current` once held), with no
+/// failure recorded.
+///
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test]
+#[ignore = "pending DELIVER gateway-svid-issue-failure-occurrence"]
+async fn a_boot_identity_timeout_sets_the_application_cause_and_leaves_the_identity_as_the_slot_says()
+ {
+    let site = Site::new();
+    let fx = Fixtures::new(FixtureSpec {
+        ensure_error: Some(GatewayIdentityLifecycleError::Timeout),
+        ..FixtureSpec::default()
+    });
+    let world = World::start(&site, Plan::with_service(ISSUE_BOOT_TIMEOUT), fx)
+        .await
+        .expect("composition starts");
+    world.declare(route("public-api", "/")).await.expect("Route command");
+
+    let timed_out =
+        wait_status(&world.status, "the timeout cause", |row| row.unavailable.is_some()).await;
+    assert_eq!(
+        timed_out.unavailable,
+        Some(GatewayApplicationUnavailableCause::GatewayIdentityUnusable),
+    );
+    assert_eq!(timed_out.gateway_identity, GatewayIdentityStatus::Absent, "the slot is empty");
+    assert_eq!(timed_out.issue_failures, 0);
+    assert_eq!(timed_out.last_issue_failure, None);
+
+    world.fx.identity.hold(gateway_identity_facts());
+    let held = wait_status(&world.status, "the slot's held identity", |row| {
+        matches!(row.gateway_identity, GatewayIdentityStatus::Current { .. })
+    })
+    .await;
+    assert_eq!(held.issue_failures, 0);
+    world.stop().await;
+}
+
+/// O-SIF-G6: a failing owner status write loses nothing: the record stays in
+/// the slot, and the next successful write carries the full count and the latest
+/// failure.
+///
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test]
+#[ignore = "pending DELIVER gateway-svid-issue-failure-occurrence"]
+async fn a_failing_status_write_loses_nothing_the_next_write_carries_the_full_count() {
+    let site = Site::new();
+    let clock = Arc::new(SimClock::new());
+    let inner: Arc<dyn ObservationStore> =
+        Arc::new(SimObservationStore::single_peer(node_id(), 186));
+    let faulty = super::issue_fault_store::IssueFaultStore::over(inner);
+    let port: Arc<dyn ObservationStore> = faulty.clone();
+    let world = World::start_over(
+        &site,
+        Plan::with_service(ISSUE_WRITE_RETRY),
+        clock.clone(),
+        absent_identity(),
+        port,
+    )
+    .await
+    .expect("composition starts");
+    world.declare(route("public-api", "/")).await.expect("Route command");
+    wait_status(&world.status, "the first projection", |_| true).await;
+
+    faulty.fail_gateway_status_writes.store(true, Ordering::SeqCst);
+    for cause in [SvidIssueFailureCause::Ca, SvidIssueFailureCause::Audit] {
+        clock.tick(Duration::from_secs(2));
+        world.fx.identity.record_failure(issue_failure(cause, &clock));
+    }
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let stalled = world.status.application_status().await.expect("status read").expect("a row");
+    assert_eq!(stalled.issue_failures, 0, "no failing write became visible");
+
+    faulty.fail_gateway_status_writes.store(false, Ordering::SeqCst);
+    clock.tick(Duration::from_secs(2));
+    let third = issue_failure(SvidIssueFailureCause::Audit, &clock);
+    world.fx.identity.record_failure(third);
+    let row = wait_status(&world.status, "the full count", |row| row.issue_failures == 3).await;
+    assert_eq!(row.last_issue_failure, Some(third));
+    world.stop().await;
 }
 
 // ---------------------------------------------------------------------------

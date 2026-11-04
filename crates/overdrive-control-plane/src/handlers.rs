@@ -178,6 +178,10 @@ impl From<overdrive_core::traits::observation_store::AllocStatusRow> for api::Al
             // The status handler derives this from the live guest-network
             // lease and row state at read time.
             network_cleanup_pending: false,
+            // The allocations handler stamps these from the workload SVID
+            // issue-failure row at read time.
+            svid_issue_failures: 0,
+            last_svid_issue_failure: None,
         }
     }
 }

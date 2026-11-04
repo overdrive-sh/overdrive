@@ -45,6 +45,7 @@ use overdrive_control_plane::veth_provisioner::{
 };
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::WorkloadKind;
+use overdrive_core::ca::issue_failure::SvidIssueFailure;
 use overdrive_core::ca::issued_certificate_row::IssuedCertificateRow;
 use overdrive_core::id::{
     AllocationId, CorrelationKey, IssuanceOrdinal, NodeId, ServiceId, SpiffeId, WorkloadId,
@@ -59,6 +60,7 @@ use overdrive_core::traits::driver::{
     DriverStartFailure, DriverType, Resources, VmPayload, VmStartFailure,
 };
 use overdrive_core::traits::intent_store::IntentStore;
+use overdrive_core::traits::observation_store::WorkloadSvidIssueStatusRowV1;
 use overdrive_core::traits::observation_store::{
     AllocLifecycleOccurrenceRow, AllocLifecyclePredecessor, AllocState, AllocStatusRow,
     LagAwareSubscription, LogicalTimestamp, NodeHealthRow, ObservationStore, ObservationStoreError,
@@ -759,6 +761,22 @@ impl ObservationStore for PendingTerminalObservationStore {
         node_id: &NodeId,
     ) -> Result<Option<GatewayApplicationStatusRowV1>, ObservationStoreError> {
         self.inner.gateway_application_status_row(node_id).await
+    }
+
+    async fn record_workload_svid_issue_failure(
+        &self,
+        alloc_id: &AllocationId,
+        node_id: &NodeId,
+        failure: SvidIssueFailure,
+    ) -> Result<(), ObservationStoreError> {
+        self.inner.record_workload_svid_issue_failure(alloc_id, node_id, failure).await
+    }
+
+    async fn workload_svid_issue_status_row(
+        &self,
+        alloc_id: &AllocationId,
+    ) -> Result<Option<WorkloadSvidIssueStatusRowV1>, ObservationStoreError> {
+        self.inner.workload_svid_issue_status_row(alloc_id).await
     }
 
     async fn write(&self, row: ObservationWrite) -> Result<(), ObservationStoreError> {

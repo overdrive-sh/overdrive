@@ -668,6 +668,11 @@ components:
           - 'null'
           format: int32
           description: Phase 2+ — exit code observation. `None` in Phase 1.
+        last_svid_issue_failure:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/SvidIssueFailureBody'
+            description: Latest failed SVID issuance for this allocation.
         last_terminated:
           oneOf:
           - type: 'null'
@@ -716,6 +721,13 @@ components:
             to a non-Pending state. `None` for never-started Pending rows.
         state:
           $ref: '#/components/schemas/AllocStateWire'
+        svid_issue_failures:
+          type: integer
+          format: int64
+          description: |-
+            Monotone count of failed SVID issuances for this allocation (first
+            issue and `rotate-svid` reissue alike); `0` when none was recorded.
+          minimum: 0
         terminal:
           oneOf:
           - type: 'null'
@@ -1029,6 +1041,7 @@ components:
       - listener
       - draining
       - gateway_identity
+      - issue_failures
       - connect_path
       properties:
         connect_path:
@@ -1043,6 +1056,18 @@ components:
             $ref: '#/components/schemas/GatewayApplicationGenerationStatusBody'
         gateway_identity:
           $ref: '#/components/schemas/GatewayIdentityStatusBody'
+        issue_failures:
+          type: integer
+          format: int64
+          description: Monotone count of failed gateway SVID issuances; `0` when none.
+          minimum: 0
+        last_issue_failure:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/SvidIssueFailureBody'
+            description: |-
+              Latest failed gateway SVID issuance, depth 1. Never carries CA or audit
+              error text.
         listener:
           $ref: '#/components/schemas/GatewayListenerStatusBody'
         staged:
@@ -2722,6 +2747,25 @@ components:
             feature's scope).
         workload_id:
           type: string
+    SvidIssueFailureBody:
+      type: object
+      description: |-
+        The latest failed SVID issuance on the wire: the cause class and the instant
+        the executor observed the failure.
+      required:
+      - cause
+      - at
+      properties:
+        at:
+          type: string
+        cause:
+          $ref: '#/components/schemas/SvidIssueFailureCauseBody'
+    SvidIssueFailureCauseBody:
+      type: string
+      description: Failure class of a rejected SVID issuance on the wire (gateway and workload).
+      enum:
+      - ca
+      - audit
     TerminalCondition:
       oneOf:
       - type: object

@@ -32,6 +32,7 @@ use utoipa::ToSchema;
 use std::net::Ipv4Addr;
 
 use crate::aggregate::{Listener, ServiceVip, WorkloadKind};
+use crate::ca::issue_failure::SvidIssueFailure;
 use crate::ca::issued_certificate_row::IssuedCertificateRow;
 use crate::codec::{EnvelopeError, VersionedEnvelope};
 use crate::dataplane::backend_key::Proto;
@@ -1315,6 +1316,65 @@ impl CrashFacts {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Workload SVID issuance failure occurrence row (R-46, R-51)
+// ---------------------------------------------------------------------------
+
+/// Versioned workload SVID issuance failure row, table
+/// `observation_workload_svid_issue_status`, keyed by canonical `AllocationId` bytes.
+///
+/// SCAFFOLD: true. The codec bodies are DELIVER's.
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub enum WorkloadSvidIssueStatusRowEnvelope {
+    V1(WorkloadSvidIssueStatusRowV1),
+}
+
+/// Failure occurrence of the SVID issuances of one allocation. The sole
+/// authoring route is [`ObservationStore::record_workload_svid_issue_failure`].
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub struct WorkloadSvidIssueStatusRowV1 {
+    pub alloc_id: AllocationId,
+    pub node_id: NodeId,
+    /// Monotone count of failed issuances for this allocation (first issue and
+    /// `rotate-svid` reissue alike); never cleared by a success.
+    pub issue_failures: u64,
+    /// Latest failed issuance. Not optional: a row exists only after at least
+    /// one failure.
+    pub last_issue_failure: SvidIssueFailure,
+    pub updated_at: LogicalTimestamp,
+}
+
+pub type WorkloadSvidIssueStatusRow = WorkloadSvidIssueStatusRowV1;
+
+impl VersionedEnvelope for WorkloadSvidIssueStatusRowEnvelope {
+    type Latest = WorkloadSvidIssueStatusRowV1;
+
+    fn latest(payload: Self::Latest) -> Self {
+        Self::V1(payload)
+    }
+
+    fn into_latest(self) -> Result<Self::Latest, EnvelopeError> {
+        match self {
+            Self::V1(v1) => Ok(v1),
+        }
+    }
+}
+
+impl WorkloadSvidIssueStatusRowV1 {
+    #[allow(clippy::todo, reason = "SVID issuance failure DISTILL scaffold: body is DELIVER's")]
+    pub fn archive_for_store(&self) -> Result<rkyv::util::AlignedVec, EnvelopeError> {
+        todo!("SCAFFOLD: WorkloadSvidIssueStatusRowV1::archive_for_store")
+    }
+
+    #[allow(clippy::todo, reason = "SVID issuance failure DISTILL scaffold: body is DELIVER's")]
+    pub fn from_store_bytes(
+        _bytes: &[u8],
+        _key: Option<&str>,
+    ) -> Result<Self, ObservationStoreError> {
+        todo!("SCAFFOLD: WorkloadSvidIssueStatusRowV1::from_store_bytes")
+    }
+}
+
 impl VersionedEnvelope for AllocStatusRowEnvelope {
     type Latest = AllocStatusRowV1;
 
@@ -1829,6 +1889,28 @@ pub trait ObservationStore: Send + Sync + 'static {
         &self,
         node_id: &NodeId,
     ) -> Result<Option<GatewayApplicationStatusRowV1>, ObservationStoreError>;
+
+    /// Atomically read the prior row for `alloc_id`, install
+    /// `issue_failures = prior + 1` (saturating; 1 when absent or undecodable,
+    /// the undecodable case logging one `observation.row.skipped` warning as
+    /// the point read does), `last_issue_failure = failure`,
+    /// `updated_at = LogicalTimestamp { counter: prior.counter + 1 (1 when
+    /// absent), writer: node_id }`. One mutation; the only authoring route for
+    /// the `observation_workload_svid_issue_status` table. Nothing reads a returned row.
+    async fn record_workload_svid_issue_failure(
+        &self,
+        alloc_id: &AllocationId,
+        node_id: &NodeId,
+        failure: SvidIssueFailure,
+    ) -> Result<(), ObservationStoreError>;
+
+    /// The stored row for `alloc_id`, or `None` when no failure was recorded.
+    /// An undecodable stored row reads as `None` with one
+    /// `observation.row.skipped` warning.
+    async fn workload_svid_issue_status_row(
+        &self,
+        alloc_id: &AllocationId,
+    ) -> Result<Option<WorkloadSvidIssueStatusRowV1>, ObservationStoreError>;
 
     /// Atomically accept one allocation-current LWW winner and append its
     /// immutable lifecycle occurrence.

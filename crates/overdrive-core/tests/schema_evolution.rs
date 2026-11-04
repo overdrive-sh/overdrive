@@ -34,6 +34,7 @@ mod schema_evolution {
     mod service_hydration_result_row;
     mod service_spec;
     mod workload_intent;
+    mod workload_svid_issue_status_row;
 
     // built-in-ca (GH #28) — DISTILL RED scaffolds for the two new rkyv
     // envelopes (ADR-0063 D2/D6, ADR-0048 golden-bytes obligation).

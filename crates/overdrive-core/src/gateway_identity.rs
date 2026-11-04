@@ -20,6 +20,7 @@ use std::str::FromStr;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::ca::issue_failure::SvidIssueFailure;
 use crate::id::{CertSerial, SpiffeId};
 use crate::wall_clock::UnixInstant;
 
@@ -122,6 +123,16 @@ pub struct GatewayIdentityFacts {
     pub spiffe_id: SpiffeId,
     pub serial: CertSerial,
     pub not_after: UnixInstant,
+}
+
+/// Process-local issue-failure record of the gateway identity slot. The slot
+/// holds `Option<GatewayIdentityIssueRecord>`: `None` is "no failure this
+/// process", so a nonzero count without a `last` (or the reverse) is
+/// unrepresentable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GatewayIdentityIssueRecord {
+    pub count: NonZeroU64,
+    pub last: SvidIssueFailure,
 }
 
 /// Desired gateway identity for one checked epoch.

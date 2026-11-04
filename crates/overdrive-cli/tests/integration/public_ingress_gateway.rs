@@ -32,13 +32,15 @@
 //! | 171 | S-PIG-34 (stream mode on) |
 //! | 172 | S-PIG-35 |
 //! | 173 | S-PIG-42 |
+//! | 174 | SVID issuance failure on the gateway status body (O-SIF-G1, G2) |
+//! | 175 | the enabled boot that leaves a status row (O-SIF-G4) |
 
 #![allow(clippy::doc_markdown, reason = "CONTRACT_SHAPE metadata tags")]
 
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
 use base64::Engine as _;
@@ -46,7 +48,10 @@ use base64::Engine as _;
 use overdrive_cli::commands::deploy::{DeployArgs, DeployResourceOutput, deploy_resource};
 use overdrive_cli::commands::serve::{self, run_with_adapters};
 use overdrive_cli::http_client::{ApiClient, CliError};
-use overdrive_control_plane::api::{GatewayStatusResponse, WithdrawRouteResponse};
+use overdrive_control_plane::api::{
+    GatewayIdentityStatusBody, GatewayStatusResponse, SvidIssueFailureCauseBody,
+    WithdrawRouteResponse,
+};
 use overdrive_control_plane::{GatewayAdapters, NodeAdapters};
 use overdrive_core::ca::kek::KEK_LEN;
 use overdrive_core::ca::root_key_envelope::KekId;
@@ -235,14 +240,14 @@ struct EnabledNode {
     tmp: TempDir,
     client: reqwest::Client,
     base: String,
-    status_fault: Arc<AtomicBool>,
+    faults: Arc<super::issue_fault_store::IssueFaultStore>,
 }
 
 /// Boot `serve` through the production `run_with_adapters` with the gateway
 /// enabled by the four `--gateway-*` arguments on `127.<octet>.0.1`. The
 /// dataplane composer and the gateway relay and client are the Sim pair; the
 /// custody codec resolves a hermetic KEK; the observation store is wrapped by
-/// the status-read fault store (disarmed until a test arms it).
+/// the scoped-fault store (every fault disarmed until a test arms it).
 #[expect(
     clippy::result_large_err,
     reason = "the bundle builder returns the boot's typed `ControlPlaneError` unboxed, as `run_server` does"
@@ -274,8 +279,8 @@ async fn spawn_gateway_enabled_server(octet: u8) -> EnabledNode {
     args.gateway_certificate_chain = Some(chain);
     args.gateway_private_key = Some(key);
 
-    let status_fault = Arc::new(AtomicBool::new(false));
-    let armed = Arc::clone(&status_fault);
+    let slot = Arc::new(std::sync::Mutex::new(None));
+    let slot_in = Arc::clone(&slot);
     let handle = run_with_adapters(args, Arc::new(RealCgroupFs::new()), move |config, fs| {
         let mut adapters = NodeAdapters::host(config, fs, Arc::new(SimKek::for_boot()))?;
         adapters.boot.dataplane =
@@ -291,17 +296,18 @@ async fn spawn_gateway_enabled_server(octet: u8) -> EnabledNode {
             client_mtls: sim.client_mtls(),
             relay: sim.relay(),
         };
-        adapters.boot.observation = Arc::new(super::status_fault_store::StatusReadFaultStore {
-            inner: Arc::clone(&adapters.boot.observation),
-            armed: Arc::clone(&armed),
-        });
+        let faults =
+            super::issue_fault_store::IssueFaultStore::over(Arc::clone(&adapters.boot.observation));
+        adapters.boot.observation = faults.clone();
+        *slot_in.lock().expect("fault store slot") = Some(faults);
         Ok(adapters)
     })
     .await
     .expect("serve with the gateway enabled");
     let client = trusting_client(&config_dir);
     let base = handle.endpoint().as_str().trim_end_matches('/').to_owned();
-    EnabledNode { handle, tmp, client, base, status_fault }
+    let faults = slot.lock().expect("fault store slot").take().expect("the composition ran");
+    EnabledNode { handle, tmp, client, base, faults }
 }
 
 /// An HTTPS client that trusts the CA the server wrote to the trust triple.
@@ -507,11 +513,12 @@ async fn a_status_point_read_failure_is_a_redacted_500_and_the_next_read_recover
     let (healthy, _) = status_of(&node).await;
     assert_eq!(healthy, 200, "the baseline read is healthy");
 
-    node.status_fault.store(true, Ordering::SeqCst);
+    node.faults.fail_gateway_status_reads.store(true, Ordering::SeqCst);
+    node.faults.fail_certified_key_status_reads.store(true, Ordering::SeqCst);
     let (code, body) = status_of(&node).await;
     assert_eq!(code, 500, "a failed point read is a server error");
     for forbidden in [
-        super::status_fault_store::FAULT_MARKER,
+        super::issue_fault_store::ISSUE_FAULT_MARKER,
         "api-origin-chain.pem",
         "api-origin-key.pem",
         "PRIVATE KEY",
@@ -527,10 +534,201 @@ async fn a_status_point_read_failure_is_a_redacted_500_and_the_next_read_recover
         "the 500 body is the typed error shape: {body}"
     );
 
-    node.status_fault.store(false, Ordering::SeqCst);
+    node.faults.fail_gateway_status_reads.store(false, Ordering::SeqCst);
+    node.faults.fail_certified_key_status_reads.store(false, Ordering::SeqCst);
     let (recovered, body) = status_of(&node).await;
     assert_eq!(recovered, 200, "the next healthy read recovers");
     let status: GatewayStatusResponse = serde_json::from_str(&body).expect("status body");
     assert!(status.enabled, "the normal projection is served again");
     node.handle.shutdown().await.expect("clean shutdown");
+}
+
+// ---------------------------------------------------------------------------
+// SVID issuance failure occurrence on the gateway status body (R-45, R-47)
+// ---------------------------------------------------------------------------
+
+/// A booted node and the pieces a test reads it through.
+struct Node {
+    handle: serve::ServeHandle,
+    client: reqwest::Client,
+    base: String,
+    faults: Arc<super::issue_fault_store::IssueFaultStore>,
+}
+
+/// Boot `serve` through the production `run_with_adapters` over the directories
+/// under `root` (so a second boot over the same `root` is a restart of the same
+/// node). With `gateway_octet` the gateway is enabled on `127.<octet>.0.1`;
+/// without it the node is gateway-disabled. The observation store is wrapped by
+/// the scoped fault store; `audit_fault` arms the `issued_certificates` audit
+/// write failure before the boot, so the first gateway SVID issuance fails.
+#[expect(
+    clippy::result_large_err,
+    reason = "the bundle builder returns the boot's typed `ControlPlaneError` unboxed, as `run_server` does"
+)]
+async fn spawn_node(root: &Path, gateway_octet: Option<u8>, audit_fault: bool) -> Node {
+    overdrive_testing::forwarder_module::expect_forwarder_module();
+    let data_dir = root.join("data");
+    let config_dir = root.join("conf");
+    std::fs::create_dir_all(&data_dir).expect("create data dir");
+    std::fs::create_dir_all(&config_dir).expect("create operator config dir");
+    let mut args = super::serve_fixture::serve_args(
+        "127.0.0.1:0".parse().expect("parse bind addr"),
+        data_dir,
+        config_dir.clone(),
+    );
+    if let Some(octet) = gateway_octet {
+        let chain = root.join("api-origin-chain.pem");
+        let key = root.join("api-origin-key.pem");
+        std::fs::write(&chain, PUBLIC_CHAIN_PEM).expect("write the certificate chain");
+        std::fs::write(&key, PUBLIC_KEY_PEM).expect("write the private key");
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            std::fs::set_permissions(&key, std::fs::Permissions::from_mode(0o600))
+                .expect("private-key mode");
+        }
+        args.gateway_address = Some(Ipv4Addr::new(127, octet, 0, 1));
+        args.gateway_certified_key_id =
+            Some(PublicCertifiedKeyId::new(CERTIFIED_KEY_ID).expect("certified key id"));
+        args.gateway_certificate_chain = Some(chain);
+        args.gateway_private_key = Some(key);
+    }
+
+    let slot = Arc::new(std::sync::Mutex::new(None));
+    let slot_in = Arc::clone(&slot);
+    let handle = run_with_adapters(args, Arc::new(RealCgroupFs::new()), move |config, fs| {
+        let mut adapters = NodeAdapters::host(config, fs, Arc::new(SimKek::for_boot()))?;
+        adapters.boot.dataplane =
+            Arc::new(SimDataplaneComposer::new(Arc::new(SimDataplane::new()), Ipv4Addr::LOCALHOST));
+        let sim = SimGatewayAdapters::new(Arc::clone(&adapters.boot.clock));
+        adapters.boot.gateway = GatewayAdapters {
+            certified_key_codec: Arc::new(PublicCertifiedKeyAeadCodec::new(Arc::new(
+                SimKek::new().with(
+                    &KekId::new("overdrive-public-certified-key").expect("custody KEK id"),
+                    [0x5a; KEK_LEN],
+                ),
+            ))),
+            client_mtls: sim.client_mtls(),
+            relay: sim.relay(),
+        };
+        let faults =
+            super::issue_fault_store::IssueFaultStore::over(Arc::clone(&adapters.boot.observation));
+        faults.fail_issued_certificate_writes.store(audit_fault, Ordering::SeqCst);
+        adapters.boot.observation = faults.clone();
+        *slot_in.lock().expect("fault store slot") = Some(faults);
+        Ok(adapters)
+    })
+    .await
+    .expect("serve");
+    let faults = slot.lock().expect("fault store slot").take().expect("the composition ran");
+    let client = trusting_client(&config_dir);
+    let base = handle.endpoint().as_str().trim_end_matches('/').to_owned();
+    Node { handle, client, base, faults }
+}
+
+impl Node {
+    async fn status(&self) -> (u16, String) {
+        let response = self
+            .client
+            .get(format!("{}/v1/gateway/status", self.base))
+            .send()
+            .await
+            .expect("GET /v1/gateway/status");
+        (response.status().as_u16(), response.text().await.expect("status body"))
+    }
+
+    /// Poll the status until `predicate` accepts the parsed response.
+    async fn status_until(
+        &self,
+        what: &str,
+        predicate: impl Fn(&GatewayStatusResponse) -> bool,
+    ) -> (GatewayStatusResponse, String) {
+        let deadline = Instant::now() + Duration::from_secs(60);
+        loop {
+            let (code, body) = self.status().await;
+            assert_eq!(code, 200, "the status read is healthy: {body}");
+            let parsed: GatewayStatusResponse = serde_json::from_str(&body).expect("status body");
+            if predicate(&parsed) {
+                return (parsed, body);
+            }
+            assert!(Instant::now() < deadline, "timed out waiting for {what}; last body {body}");
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }
+}
+
+/// O-SIF-G1, O-SIF-G2 — a gateway whose SVID issuance keeps failing (the audit
+/// write cannot be made durable) reports it on `GET /v1/gateway/status`: the
+/// identity reads `Absent`, `issue_failures` is above zero and
+/// `last_issue_failure` names the `Audit` cause with an instant; the body
+/// carries none of the injected error text or the audit table. Recovery and
+/// retention of the count are the gateway owner's tests; this row owns the wire
+/// projection through `serve`.
+///
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test]
+#[ignore = "pending DELIVER gateway-svid-issue-failure-occurrence"]
+async fn a_gateway_whose_issuance_keeps_failing_reports_the_count_and_cause_on_the_status_body() {
+    let root = TempDir::new().expect("tempdir");
+    let node = spawn_node(root.path(), Some(174), true).await;
+
+    let (failing, body) = node
+        .status_until("a recorded issuance failure", |status| {
+            status.application.as_ref().is_some_and(|application| application.issue_failures >= 1)
+        })
+        .await;
+    let application = failing.application.expect("an application projection");
+    assert!(matches!(application.gateway_identity, GatewayIdentityStatusBody::Absent));
+    let last = application.last_issue_failure.expect("the latest failure");
+    assert_eq!(last.cause, SvidIssueFailureCauseBody::Audit);
+    for forbidden in [
+        super::issue_fault_store::ISSUE_FAULT_MARKER,
+        "issued_certificates",
+        "audit row",
+        "CaIssuanceError",
+        "api-origin-key.pem",
+        "PRIVATE KEY",
+    ] {
+        assert!(!body.contains(forbidden), "the status body leaks {forbidden:?}: {body}");
+    }
+    node.handle.shutdown().await.expect("clean shutdown");
+}
+
+/// O-SIF-G4 (R-47) — a node whose earlier enabled boot left a gateway status
+/// row, rebooted over the same directories with the gateway disabled, answers
+/// `GET /v1/gateway/status` with the fixed disabled body without reading a status
+/// row (neither the gateway nor the certified-key status point read), projects nothing from the stale row, and writes no
+/// gateway status row of its own.
+///
+/// CONTRACT_SHAPE: unbounded-preservation.
+#[tokio::test]
+#[ignore = "pending DELIVER gateway-svid-issue-failure-occurrence"]
+async fn a_disabled_node_answers_the_fixed_body_without_reading_a_stale_row() {
+    let root = TempDir::new().expect("tempdir");
+
+    let enabled = spawn_node(root.path(), Some(175), false).await;
+    enabled
+        .status_until("the enabled boot's status row", |status| status.application.is_some())
+        .await;
+    enabled.handle.shutdown().await.expect("clean shutdown of the enabled boot");
+
+    let disabled = spawn_node(root.path(), None, false).await;
+    let reads_before = disabled.faults.status_point_read_count();
+    let (code, body) = disabled.status().await;
+    assert_eq!(code, 200, "{body}");
+    let parsed: serde_json::Value = serde_json::from_str(&body).expect("status body");
+    assert_eq!(parsed["enabled"], false);
+    assert_eq!(parsed["configured_address"], serde_json::Value::Null);
+    assert_eq!(parsed["listener_bound"], false);
+    assert_eq!(parsed["application"], serde_json::Value::Null, "the stale row is not projected");
+    assert_eq!(parsed["certified_key"], serde_json::Value::Null);
+    assert_eq!(
+        disabled.faults.status_point_read_count(),
+        reads_before,
+        "a disabled status request issues neither status point read",
+    );
+    assert!(
+        disabled.faults.offered_gateway_status_rows().is_empty(),
+        "a disabled boot writes no gateway status row",
+    );
+    disabled.handle.shutdown().await.expect("clean shutdown of the disabled boot");
 }

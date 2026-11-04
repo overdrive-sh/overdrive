@@ -29,8 +29,10 @@
 
 use std::sync::Arc;
 
+use overdrive_core::ca::issue_failure::SvidIssueFailure;
 use overdrive_core::gateway_identity::{
-    GatewayIdentityDesired, GatewayIdentityEpoch, GatewayIdentityFacts, GatewayIdentityView,
+    GatewayIdentityDesired, GatewayIdentityEpoch, GatewayIdentityFacts, GatewayIdentityIssueRecord,
+    GatewayIdentityView,
 };
 use overdrive_core::id::NodeId;
 use overdrive_core::traits::ca::{SvidMaterial, TrustBundle};
@@ -128,11 +130,19 @@ impl GatewayIdentityActionTarget for GatewayIdentityActionHandle {
     ) -> GatewayIdentityMutationOutcome {
         todo!("SCAFFOLD: GatewayIdentityActionHandle::hold_audited")
     }
+
+    fn record_issue_failure(&self, failure: SvidIssueFailure) {
+        todo!("SCAFFOLD: GatewayIdentityActionHandle::record_issue_failure")
+    }
 }
 
 impl GatewayIdentityLifecycleTarget for GatewayIdentityLifecycleHandle {
     fn current(&self) -> Option<GatewayIdentityFacts> {
         todo!("SCAFFOLD: GatewayIdentityLifecycleHandle::current")
+    }
+
+    fn issue_record(&self) -> Option<GatewayIdentityIssueRecord> {
+        todo!("SCAFFOLD: GatewayIdentityLifecycleHandle::issue_record")
     }
 
     fn subscribe(&self) -> watch::Receiver<Option<GatewayIdentityFacts>> {

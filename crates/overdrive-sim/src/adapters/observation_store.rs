@@ -56,6 +56,7 @@ use tokio::sync::broadcast;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 
+use overdrive_core::ca::issue_failure::SvidIssueFailure;
 use overdrive_core::ca::issued_certificate_row::IssuedCertificateRow;
 use overdrive_core::dataplane::backend_key::Proto;
 use overdrive_core::dataplane::fingerprint::BackendSetFingerprint;
@@ -71,6 +72,7 @@ use overdrive_core::traits::observation_store::{
     AllocStatusRow, LagAwareSubscription, LogicalTimestamp, NodeHealthRow, ObservationRow,
     ObservationStore, ObservationStoreError, ObservationWrite, ReconcileConflictRow,
     ServiceBackendRow, ServiceHydrationResultRow, SubscriptionEvent, TransitionSource,
+    WorkloadSvidIssueStatusRowV1,
 };
 use overdrive_core::workflow::{SignalKey, SignalValue, WorkflowStatus};
 use std::net::Ipv4Addr;
@@ -705,6 +707,24 @@ impl ObservationStore for SimObservationStore {
         _node_id: &NodeId,
     ) -> Result<Option<GatewayApplicationStatusRowV1>, ObservationStoreError> {
         todo!("SCAFFOLD: SimObservationStore::gateway_application_status_row")
+    }
+
+    #[allow(clippy::todo, reason = "SVID issuance failure DISTILL scaffold; body is DELIVER's")]
+    async fn record_workload_svid_issue_failure(
+        &self,
+        _alloc_id: &AllocationId,
+        _node_id: &NodeId,
+        _failure: SvidIssueFailure,
+    ) -> Result<(), ObservationStoreError> {
+        todo!("SCAFFOLD: SimObservationStore::record_workload_svid_issue_failure")
+    }
+
+    #[allow(clippy::todo, reason = "SVID issuance failure DISTILL scaffold; body is DELIVER's")]
+    async fn workload_svid_issue_status_row(
+        &self,
+        _alloc_id: &AllocationId,
+    ) -> Result<Option<WorkloadSvidIssueStatusRowV1>, ObservationStoreError> {
+        todo!("SCAFFOLD: SimObservationStore::workload_svid_issue_status_row")
     }
 
     async fn write(&self, write: ObservationWrite) -> Result<(), ObservationStoreError> {

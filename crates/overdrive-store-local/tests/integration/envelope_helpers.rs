@@ -34,6 +34,17 @@ const SERVICE_HYDRATION_TABLE: TableDefinition<&[u8], &[u8]> =
 const SERVICE_BACKENDS_TABLE: TableDefinition<&[u8], &[u8]> =
     TableDefinition::new("observation_service_backends");
 
+/// The redb table of the Gateway Application status row (key: `NodeId`
+/// string bytes), as pinned in the feature-delta § "Persisted format".
+const GATEWAY_APPLICATION_STATUS_TABLE: TableDefinition<&[u8], &[u8]> =
+    TableDefinition::new("observation_gateway_application_status");
+
+/// The redb table of the per-allocation SVID issuance failure row (key:
+/// `AllocationId` string bytes), as pinned in the feature-delta § "Persisted
+/// format".
+const WORKLOAD_SVID_ISSUE_STATUS_TABLE: TableDefinition<&[u8], &[u8]> =
+    TableDefinition::new("observation_workload_svid_issue_status");
+
 /// Mirror of the production constant in
 /// `crates/overdrive-store-local/src/redb_backend.rs`.
 const ENTRIES_TABLE: TableDefinition<&[u8], &[u8]> = TableDefinition::new("entries");
@@ -140,6 +151,36 @@ pub fn write_raw_bytes_to_service_backends_table(
 ) {
     let key = service_id.get().to_le_bytes();
     write_raw_bytes_to_table(redb_path, SERVICE_BACKENDS_TABLE, key.as_slice(), raw_bytes);
+}
+
+/// Write `raw_bytes` directly into the `observation_gateway_application_status`
+/// table at the key for `node_id` (garbage the typed write path cannot build).
+pub fn write_raw_bytes_to_gateway_application_status_table(
+    redb_path: &Path,
+    node_id: &NodeId,
+    raw_bytes: &[u8],
+) {
+    write_raw_bytes_to_table(
+        redb_path,
+        GATEWAY_APPLICATION_STATUS_TABLE,
+        node_id.as_str().as_bytes(),
+        raw_bytes,
+    );
+}
+
+/// Write `raw_bytes` directly into the `observation_workload_svid_issue_status`
+/// table at the key for `alloc_id` (garbage the typed write path cannot build).
+pub fn write_raw_bytes_to_workload_svid_issue_status_table(
+    redb_path: &Path,
+    alloc_id: &AllocationId,
+    raw_bytes: &[u8],
+) {
+    write_raw_bytes_to_table(
+        redb_path,
+        WORKLOAD_SVID_ISSUE_STATUS_TABLE,
+        alloc_id.as_str().as_bytes(),
+        raw_bytes,
+    );
 }
 
 /// Write `raw_bytes` directly into the `entries` table (the intent

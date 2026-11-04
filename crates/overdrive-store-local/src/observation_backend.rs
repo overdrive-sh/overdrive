@@ -75,6 +75,7 @@ use std::task::{Context, Poll};
 
 use async_trait::async_trait;
 use futures::Stream;
+use overdrive_core::ca::issue_failure::SvidIssueFailure;
 use overdrive_core::ca::issued_certificate_row::IssuedCertificateRow;
 use overdrive_core::codec::{VersionedEnvelope, decode_envelope_bytes};
 use overdrive_core::dataplane::fingerprint::BackendSetFingerprint;
@@ -90,7 +91,7 @@ use overdrive_core::traits::observation_store::{
     NodeHealthRowEnvelope, ObservationRow, ObservationStore, ObservationStoreError,
     ObservationWrite, ReconcileConflictRow, ReconcileConflictRowEnvelope, ServiceBackendRow,
     ServiceBackendRowEnvelope, ServiceHydrationResultRow, ServiceHydrationResultRowEnvelope,
-    SubscriptionEvent, TransitionSource,
+    SubscriptionEvent, TransitionSource, WorkloadSvidIssueStatusRowV1,
 };
 use redb::{Database, ReadableTable, Table, TableDefinition};
 use tokio::sync::broadcast;
@@ -636,6 +637,24 @@ impl ObservationStore for LocalObservationStore {
         _node_id: &NodeId,
     ) -> Result<Option<GatewayApplicationStatusRowV1>, ObservationStoreError> {
         todo!("SCAFFOLD: LocalObservationStore::gateway_application_status_row")
+    }
+
+    #[allow(clippy::todo, reason = "SVID issuance failure DISTILL scaffold; body is DELIVER's")]
+    async fn record_workload_svid_issue_failure(
+        &self,
+        _alloc_id: &AllocationId,
+        _node_id: &NodeId,
+        _failure: SvidIssueFailure,
+    ) -> Result<(), ObservationStoreError> {
+        todo!("SCAFFOLD: LocalObservationStore::record_workload_svid_issue_failure")
+    }
+
+    #[allow(clippy::todo, reason = "SVID issuance failure DISTILL scaffold; body is DELIVER's")]
+    async fn workload_svid_issue_status_row(
+        &self,
+        _alloc_id: &AllocationId,
+    ) -> Result<Option<WorkloadSvidIssueStatusRowV1>, ObservationStoreError> {
+        todo!("SCAFFOLD: LocalObservationStore::workload_svid_issue_status_row")
     }
 
     async fn write(&self, row: ObservationWrite) -> Result<(), ObservationStoreError> {

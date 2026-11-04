@@ -85,6 +85,8 @@ fn minimal_row(state: AllocStateWire, exit_code: Option<i32>) -> AllocStatusRowB
         last_terminated: None,
         terminal: None,
         network_cleanup_pending: false,
+        svid_issue_failures: 0,
+        last_svid_issue_failure: None,
         restart_count: 0,
     }
 }

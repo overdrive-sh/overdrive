@@ -1884,12 +1884,14 @@ mod tests {
 
     use futures::Stream;
     use futures::channel::mpsc;
+    use overdrive_core::ca::issue_failure::SvidIssueFailure;
     use overdrive_core::ca::issued_certificate_row::IssuedCertificateRow;
     use overdrive_core::id::{AllocationId, CorrelationKey, IssuanceOrdinal};
     use overdrive_core::observation::ProbeResultRow;
     use overdrive_core::public_ingress::{
         GatewayApplicationStatusRowV1, PublicCertifiedKeyId, PublicCertifiedKeyStatusRowV1,
     };
+    use overdrive_core::traits::observation_store::WorkloadSvidIssueStatusRowV1;
     use overdrive_core::traits::observation_store::{
         LagAwareSubscription, NodeHealthRow, ObservationStoreError, ReconcileConflictRow,
         ServiceHydrationResultRow, SubscriptionEvent,
@@ -2018,6 +2020,22 @@ mod tests {
             node_id: &NodeId,
         ) -> Result<Option<GatewayApplicationStatusRowV1>, ObservationStoreError> {
             self.inner.gateway_application_status_row(node_id).await
+        }
+
+        async fn record_workload_svid_issue_failure(
+            &self,
+            alloc_id: &AllocationId,
+            node_id: &NodeId,
+            failure: SvidIssueFailure,
+        ) -> Result<(), ObservationStoreError> {
+            self.inner.record_workload_svid_issue_failure(alloc_id, node_id, failure).await
+        }
+
+        async fn workload_svid_issue_status_row(
+            &self,
+            alloc_id: &AllocationId,
+        ) -> Result<Option<WorkloadSvidIssueStatusRowV1>, ObservationStoreError> {
+            self.inner.workload_svid_issue_status_row(alloc_id).await
         }
 
         async fn all_service_backends_rows(

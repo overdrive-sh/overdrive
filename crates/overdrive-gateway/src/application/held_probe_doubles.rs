@@ -71,7 +71,9 @@ use overdrive_core::aggregate::{
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
 use overdrive_core::ca::kek::KEK_LEN;
 use overdrive_core::ca::root_key_envelope::KekId;
-use overdrive_core::gateway_identity::{GatewayIdentityEpoch, GatewayIdentityFacts};
+use overdrive_core::gateway_identity::{
+    GatewayIdentityEpoch, GatewayIdentityFacts, GatewayIdentityIssueRecord,
+};
 use overdrive_core::id::{BackendId, CertSerial, ContentHash, NodeId, ServiceVip, SpiffeId};
 use overdrive_core::public_ingress::{
     GatewayApplicationStatusRowV1, PublicCertifiedKeyId, PublicRouteInput, Route, ServiceKey,
@@ -424,6 +426,10 @@ impl GatewayIdentityLifecycleControl for CurrentIdentity {
 
     fn current(&self) -> Option<GatewayIdentityFacts> {
         self.sender.borrow().clone()
+    }
+
+    fn issue_record(&self) -> Option<GatewayIdentityIssueRecord> {
+        None
     }
 
     fn subscribe(&self) -> watch::Receiver<Option<GatewayIdentityFacts>> {

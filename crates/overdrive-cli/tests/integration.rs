@@ -20,11 +20,11 @@ mod integration {
     // composition every in-process `serve` fixture boots through.
     mod serve_fixture;
 
-    // public-ingress-gateway (S-PIG-42): the delegating observation store whose
-    // gateway status point reads fail while armed, `#[path]`-included from the
-    // control-plane test tree.
-    #[path = "../../../overdrive-control-plane/tests/common/status_fault_store.rs"]
-    mod status_fault_store;
+    // public-ingress-gateway (S-PIG-42) and SVID issuance failure occurrence:
+    // the scoped-fault, status-read-counting observation store,
+    // `#[path]`-included from the control-plane test tree.
+    #[path = "../../../overdrive-control-plane/tests/common/issue_fault_store.rs"]
+    mod issue_fault_store;
 
     mod cluster_and_node_commands;
     mod cluster_init_removed;

@@ -76,10 +76,12 @@ use overdrive_control_plane::dns_responder::{
 };
 use overdrive_control_plane::error::ControlPlaneError;
 use overdrive_control_plane::run_server_with_obs_and_driver;
+use overdrive_core::ca::issue_failure::SvidIssueFailure;
 use overdrive_core::id::{AllocationId, MeshServiceName, NodeId, ServiceId, SpiffeId, WorkloadId};
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::dataplane::Backend;
 use overdrive_core::traits::driver::{Driver, DriverType};
+use overdrive_core::traits::observation_store::WorkloadSvidIssueStatusRowV1;
 use overdrive_core::traits::observation_store::{
     AllocLifecycleOccurrenceRow, AllocStatusRow, LogicalTimestamp, ObservationStore,
     ObservationWrite, ServiceBackendRow, TransitionSource,
@@ -762,6 +764,22 @@ impl ObservationStore for FailingListStore {
         node_id: &NodeId,
     ) -> Result<Option<GatewayApplicationStatusRowV1>, ObservationStoreError> {
         self.inner.gateway_application_status_row(node_id).await
+    }
+
+    async fn record_workload_svid_issue_failure(
+        &self,
+        alloc_id: &AllocationId,
+        node_id: &NodeId,
+        failure: SvidIssueFailure,
+    ) -> Result<(), ObservationStoreError> {
+        self.inner.record_workload_svid_issue_failure(alloc_id, node_id, failure).await
+    }
+
+    async fn workload_svid_issue_status_row(
+        &self,
+        alloc_id: &AllocationId,
+    ) -> Result<Option<WorkloadSvidIssueStatusRowV1>, ObservationStoreError> {
+        self.inner.workload_svid_issue_status_row(alloc_id).await
     }
 
     async fn write(&self, row: ObservationWrite) -> Result<(), ObservationStoreError> {

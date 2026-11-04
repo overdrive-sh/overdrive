@@ -22,7 +22,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use overdrive_core::eval_broker::{Evaluation, EvaluationBroker};
-use overdrive_core::gateway_identity::GatewayIdentityFacts;
+use overdrive_core::gateway_identity::{GatewayIdentityFacts, GatewayIdentityIssueRecord};
 use overdrive_core::id::NodeId;
 use overdrive_core::reconcilers::{Reconciler, TargetResource};
 use overdrive_core::traits::clock::Clock;
@@ -79,6 +79,10 @@ impl GatewayIdentityLifecycleControl for ControlPlaneGatewayIdentityLifecycle {
 
     fn current(&self) -> Option<GatewayIdentityFacts> {
         todo!("SCAFFOLD: ControlPlaneGatewayIdentityLifecycle::current")
+    }
+
+    fn issue_record(&self) -> Option<GatewayIdentityIssueRecord> {
+        todo!("SCAFFOLD: ControlPlaneGatewayIdentityLifecycle::issue_record")
     }
 
     fn subscribe(&self) -> tokio::sync::watch::Receiver<Option<GatewayIdentityFacts>> {

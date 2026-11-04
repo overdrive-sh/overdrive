@@ -25,6 +25,7 @@ use std::str::FromStr;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::ca::issue_failure::SvidIssueFailure;
 use crate::codec::{EnvelopeError, VersionedEnvelope};
 use crate::dataplane::{Proto, ServiceFrontend};
 use crate::gateway_identity::GatewayIdentityEpoch;
@@ -865,7 +866,7 @@ pub struct PublicCertifiedKeyStatusRowV1 {
     pub updated_at: LogicalTimestamp,
 }
 
-/// Versioned custody status row, table `public_certified_key_status`.
+/// Versioned custody status row, table `observation_public_certified_key_status`.
 #[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum PublicCertifiedKeyStatusRowEnvelope {
     V1(PublicCertifiedKeyStatusRowV1),
@@ -958,11 +959,16 @@ pub struct GatewayApplicationStatusRowV1 {
     pub draining: Vec<GatewayApplicationGenerationStatus>,
     pub unavailable: Option<GatewayApplicationUnavailableCause>,
     pub gateway_identity: GatewayIdentityStatus,
+    /// Monotone count of failed gateway SVID issuances (base plus process
+    /// record); `0` iff `last_issue_failure` is `None`.
+    pub issue_failures: u64,
+    /// Latest failed issuance, depth 1.
+    pub last_issue_failure: Option<SvidIssueFailure>,
     pub connect_path: GatewayConnectPathStatus,
     pub updated_at: LogicalTimestamp,
 }
 
-/// Versioned Gateway Application status row, table `gateway_application_status`.
+/// Versioned Gateway Application status row, table `observation_gateway_application_status`.
 #[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum GatewayApplicationStatusRowEnvelope {
     V1(GatewayApplicationStatusRowV1),
