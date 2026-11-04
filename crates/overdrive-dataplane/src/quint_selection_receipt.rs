@@ -82,8 +82,6 @@ use std::io::Write as _;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::num::NonZeroU16;
 use std::path::PathBuf;
-use std::process::Command;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use anyhow::{anyhow, bail};
@@ -116,52 +114,63 @@ const CONNECT_BOUND: Duration = Duration::from_secs(2);
 /// Port of every model Service frontend.
 const FRONTEND_PORT: u16 = 8080;
 
-/// One ordinal per owner built in the process, so veth names never collide.
-static NEXT_ORDINAL: AtomicU64 = AtomicU64::new(0);
+/// The test-owned veth fixture. A `#[cfg(test)]` module: the fixture shells
+/// `ip(8)` to build kernel state for a Tier-3 test and ships in no binary.
+#[cfg(test)]
+mod veth_fixture {
+    use std::io::Write as _;
+    use std::process::Command;
+    use std::sync::atomic::{AtomicU64, Ordering};
 
-/// An RAII veth pair the loader attaches its XDP programs to.
-struct Veth {
-    host: String,
-    peer: String,
-}
+    /// One ordinal per owner built in the process, so veth names never collide.
+    static NEXT_ORDINAL: AtomicU64 = AtomicU64::new(0);
 
-impl Veth {
-    fn create() -> Self {
-        let ordinal = NEXT_ORDINAL.fetch_add(1, Ordering::Relaxed);
-        let host = format!("qh{}x{ordinal}", std::process::id() % 100_000);
-        let peer = format!("qp{}x{ordinal}", std::process::id() % 100_000);
-        // A stale pair of the same name is removed first; "no such device" is the
-        // expected answer, so only a failure to run `ip(8)` at all is a precondition failure.
-        delete_link(&host).expect("spawn ip(8) to remove a stale veth pair");
-        for args in [
-            vec!["link", "add", host.as_str(), "type", "veth", "peer", "name", peer.as_str()],
-            vec!["link", "set", host.as_str(), "up"],
-            vec!["link", "set", peer.as_str(), "up"],
-        ] {
-            let status = Command::new("ip").args(&args).status().expect("spawn ip(8)"); // subprocess-ok: test-owned veth fixture, Tier-3 only
-            assert!(status.success(), "ip {args:?} failed: needs CAP_NET_ADMIN (run as root)");
+    /// An RAII veth pair the loader attaches its XDP programs to.
+    pub(super) struct Veth {
+        pub(super) host: String,
+        pub(super) peer: String,
+    }
+
+    impl Veth {
+        pub(super) fn create() -> Self {
+            let ordinal = NEXT_ORDINAL.fetch_add(1, Ordering::Relaxed);
+            let host = format!("qh{}x{ordinal}", std::process::id() % 100_000);
+            let peer = format!("qp{}x{ordinal}", std::process::id() % 100_000);
+            // A stale pair of the same name is removed first; "no such device" is the
+            // expected answer, so only a failure to run `ip(8)` at all is a precondition failure.
+            delete_link(&host).expect("spawn ip(8) to remove a stale veth pair");
+            for args in [
+                vec!["link", "add", host.as_str(), "type", "veth", "peer", "name", peer.as_str()],
+                vec!["link", "set", host.as_str(), "up"],
+                vec!["link", "set", peer.as_str(), "up"],
+            ] {
+                let status = Command::new("ip").args(&args).status().expect("spawn ip(8)");
+                assert!(status.success(), "ip {args:?} failed: needs CAP_NET_ADMIN (run as root)");
+            }
+            Self { host, peer }
         }
-        Self { host, peer }
+    }
+
+    /// Delete a link by name; "no such device" is a successful output, only a
+    /// failure to run `ip(8)` is an error.
+    fn delete_link(name: &str) -> std::io::Result<std::process::Output> {
+        Command::new("ip").args(["link", "del", name]).output()
+    }
+
+    impl Drop for Veth {
+        fn drop(&mut self) {
+            if let Err(error) = delete_link(&self.host) {
+                let _reported = writeln!(
+                    std::io::stderr(),
+                    "could not run ip(8) to remove veth {}: {error}",
+                    self.host
+                );
+            }
+        }
     }
 }
 
-/// Delete a link by name; "no such device" is a successful output, only a
-/// failure to run `ip(8)` is an error.
-fn delete_link(name: &str) -> std::io::Result<std::process::Output> {
-    Command::new("ip").args(["link", "del", name]).output() // subprocess-ok: test-owned veth fixture, Tier-3 only
-}
-
-impl Drop for Veth {
-    fn drop(&mut self) {
-        if let Err(error) = delete_link(&self.host) {
-            let _reported = writeln!(
-                std::io::stderr(),
-                "could not run ip(8) to remove veth {}: {error}",
-                self.host
-            );
-        }
-    }
-}
+use veth_fixture::Veth;
 
 /// The test-owned bpffs pin directory; removed on drop.
 struct PinDir(PathBuf);

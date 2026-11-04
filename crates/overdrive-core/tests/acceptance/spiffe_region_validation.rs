@@ -27,7 +27,7 @@
 
 use std::str::FromStr;
 
-use overdrive_core::id::{AllocationId, IdParseError, Region, SpiffeId, WorkloadId};
+use overdrive_core::id::{AllocationId, IdParseError, NodeId, Region, SpiffeId, WorkloadId};
 use proptest::prelude::*;
 
 // -----------------------------------------------------------------------------
@@ -340,4 +340,56 @@ fn for_allocation_matches_the_historical_helper_string_on_a_pinned_example() {
     // The exact string both private helpers built via
     // `format!("spiffe://overdrive.local/workload/{}/alloc/{}", ..)`.
     assert_eq!(id.to_string(), "spiffe://overdrive.local/workload/payments/alloc/a1b2c3");
+}
+
+// -----------------------------------------------------------------------------
+// S-PIG-128 — `SpiffeId::for_gateway` derives the dedicated non-allocation
+// gateway identity `spiffe://overdrive.local/gateway/<node-id>`.
+//
+// The body's `unreachable!` rests on every valid `NodeId` forming a valid SPIFFE
+// path, so the property ranges over generated valid node ids (the
+// `for_allocation` precedent above). `valid_label()` yields strings the
+// `NodeId` grammar accepts, lowercase, so the round trip is byte for byte.
+// -----------------------------------------------------------------------------
+
+proptest! {
+    /// For any valid `NodeId`, `SpiffeId::for_gateway` does not panic and yields
+    /// exactly the contracted canonical URI.
+    ///
+    /// CONTRACT_SHAPE: pure-function.
+    #[allow(
+        clippy::doc_markdown,
+        reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+    )]
+    #[test]
+    #[ignore = "pending DELIVER gateway-spiffe-subject"]
+    fn spiffe_for_gateway_derives_canonical_uri_for_any_valid_node_id(
+        node_raw in valid_label(),
+    ) {
+        let node = NodeId::new(&node_raw).expect("generator yields valid NodeId");
+
+        let id = SpiffeId::for_gateway(&node);
+
+        let expected = format!("spiffe://overdrive.local/gateway/{}", node.as_str());
+        prop_assert_eq!(id.as_str(), expected.as_str());
+    }
+}
+
+/// S-PIG-128 example: the pinned URI on a representative node.
+///
+/// CONTRACT_SHAPE: pure-function.
+#[allow(
+    clippy::doc_markdown,
+    reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+)]
+#[test]
+#[ignore = "pending DELIVER gateway-spiffe-subject"]
+fn for_gateway_matches_the_pinned_uri_on_a_representative_node() {
+    let node = NodeId::new("gateway-node").expect("valid NodeId");
+
+    let id = SpiffeId::for_gateway(&node);
+
+    assert_eq!(id.to_string(), "spiffe://overdrive.local/gateway/gateway-node");
+    assert_eq!(id.trust_domain(), "overdrive.local");
+    assert_eq!(id.path(), "/gateway/gateway-node");
 }

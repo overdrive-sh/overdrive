@@ -192,6 +192,44 @@ async fn route_deploy_on_a_gateway_disabled_node_is_rejected_before_the_spec_is_
     );
 }
 
+/// S-PIG-36 (second test) — with the gateway disabled by composition, the
+/// route DELETE through `ApiClient::withdraw_route` is rejected with the typed
+/// disabled error before the id is parsed: an id the server could not parse
+/// (`Not A Valid Route Id`) gets 409 `gateway_disabled` (a parse-first server
+/// would answer 400), and the intent store gains no Route or gateway key.
+///
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test]
+#[ignore = "pending DELIVER route-operator-surface"]
+async fn route_withdraw_on_a_gateway_disabled_node_is_rejected_before_the_id_is_parsed() {
+    let (handle, tmp) = spawn_gateway_disabled_server().await;
+    let client = ApiClient::from_config(&config_path(tmp.path())).expect("client from config");
+
+    let id = "Not A Valid Route Id";
+    match client.withdraw_route(id).await {
+        Err(CliError::HttpStatus { status, body: error }) => {
+            assert_eq!(status, 409, "status");
+            assert_eq!(error.error, "gateway_disabled", "error code");
+            assert_eq!(error.message, "public ingress gateway is disabled", "message");
+            assert_eq!(error.field, None, "no offending field is named");
+        }
+        other => {
+            panic!("expected the typed disabled-gateway rejection (HTTP 409), got {other:?}")
+        }
+    }
+
+    handle.shutdown().await.expect("clean shutdown");
+    let keys = intent_keys(&tmp.path().join("data")).await;
+    let route_keys: Vec<&String> = keys
+        .iter()
+        .filter(|key| key.to_ascii_lowercase().contains("route") || key.contains("gateway"))
+        .collect();
+    assert!(
+        route_keys.is_empty(),
+        "a gateway-disabled node must write no Route or gateway intent, found {route_keys:?}"
+    );
+}
+
 // ===========================================================================
 // The enabled composition behind the operator listener
 // ===========================================================================

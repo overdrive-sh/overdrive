@@ -633,7 +633,7 @@ mod acceptance {
     ///
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
-    #[ignore = "pending DELIVER upstream-socket-preparation"]
+    #[ignore = "pending DELIVER gateway-application-owner"]
     async fn failing_open_upstream_releases_its_reserved_ledger_slot() {
         let mut fx = fixture(ReceiptMode::Selected).await;
         let held: Vec<GatewayCleanupReservation> =

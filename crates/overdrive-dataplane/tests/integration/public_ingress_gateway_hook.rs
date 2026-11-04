@@ -1,6 +1,6 @@
 //! Gateway selection hook and connect-dataplane Tier-3 scenarios on a real
 //! kernel (public-ingress-gateway; S-PIG-41, 56 (T3 half), 57 (T3 half), 63,
-//! 71 (instance half), 72).
+//! 71 (instance half), 72, 124, 125).
 //!
 //! Native x86_64 metal only (`cargo xtask metal run --`): every test builds the
 //! production `EbpfDataplane` on a veth pair with the cgroup `connect4` attach at
@@ -38,7 +38,7 @@
 )]
 
 use std::io::{Read, Write};
-use std::net::{Ipv4Addr, TcpListener, TcpStream};
+use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::os::fd::{AsRawFd, RawFd};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::{Duration, Instant};
@@ -63,23 +63,31 @@ fn runtime() -> tokio::runtime::Runtime {
         .expect("current-thread runtime")
 }
 
-/// The `SO_MARK` of the socket behind `fd`.
-fn socket_mark(fd: RawFd) -> u32 {
-    let mut mark: u32 = 0;
-    let mut len = std::mem::size_of::<u32>() as libc::socklen_t;
+/// A scalar socket option of the socket behind `fd`, as the kernel reports it.
+fn socket_option<T: Default>(fd: RawFd, name: libc::c_int) -> T {
+    let mut value = T::default();
+    let mut len = std::mem::size_of::<T>() as libc::socklen_t;
     // SAFETY: `fd` is a live socket owned by the caller for the duration of the
-    // call; `mark` and `len` are valid for writes of the sizes passed.
+    // call; `value` and `len` are valid for writes of the sizes passed.
     let rc = unsafe {
         libc::getsockopt(
             fd,
             libc::SOL_SOCKET,
-            libc::SO_MARK,
-            std::ptr::addr_of_mut!(mark).cast(),
+            name,
+            std::ptr::addr_of_mut!(value).cast(),
             std::ptr::addr_of_mut!(len),
         )
     };
-    assert_eq!(rc, 0, "getsockopt(SO_MARK): {}", std::io::Error::last_os_error());
-    mark
+    assert_eq!(rc, 0, "getsockopt({name}): {}", std::io::Error::last_os_error());
+    value
+}
+
+/// `(live intents, live receipts)` of the rig's dataplane.
+fn live_counts(rig: &HostRig) -> (u32, usize) {
+    (
+        rig.dataplane.live_intent_count().expect("live intent count"),
+        rig.dataplane.live_receipts().expect("live receipts").len(),
+    )
 }
 
 /// S-PIG-41. A socket that was never registered keeps today's behaviour under
@@ -169,12 +177,6 @@ fn registered_socket_is_selected_and_its_dial_reaches_the_backend_from_the_loopb
     let rig = HostRig::new("h63");
     let rt = runtime();
     let routing_before = routing_snapshot();
-    let counts = |rig: &HostRig| {
-        (
-            rig.dataplane.live_intent_count().expect("live intent count"),
-            rig.dataplane.live_receipts().expect("live receipt count").len(),
-        )
-    };
 
     let listener = TcpListener::bind(backend_target(63)).expect("bind the backend address");
     let accept = std::thread::spawn(move || listener.accept().map(|(_, peer)| peer));
@@ -183,13 +185,17 @@ fn registered_socket_is_selected_and_its_dial_reaches_the_backend_from_the_loopb
 
     let prepared = rig.dataplane.open_upstream(service_key(1)).expect("open_upstream");
     let (socket, intent) = prepared.into_parts();
-    assert_eq!(socket_mark(socket.as_raw_fd()), MTLS_TPROXY_MARK, "the socket carries the mark");
+    assert_eq!(
+        socket_option::<u32>(socket.as_raw_fd(), libc::SO_MARK),
+        MTLS_TPROXY_MARK,
+        "the socket carries the mark"
+    );
     assert_eq!(
         socket.local_addr().expect("bound local address").ip(),
         Ipv4Addr::LOCALHOST,
         "the socket is bound to the loopback source",
     );
-    assert_eq!(counts(&rig), (1, 0), "one registered intent, no receipt before the dial");
+    assert_eq!(live_counts(&rig), (1, 0), "one registered intent, no receipt before the dial");
 
     let stream = rt
         .block_on(dial(socket, frontend_target(1), Duration::from_secs(5)))
@@ -212,7 +218,7 @@ fn registered_socket_is_selected_and_its_dial_reaches_the_backend_from_the_loopb
     );
 
     rig.dataplane.cleanup(&intent).expect("cleanup");
-    assert_eq!(counts(&rig), (0, 0), "no intent and no receipt remain");
+    assert_eq!(live_counts(&rig), (0, 0), "no intent and no receipt remain");
     assert_eq!(routing_snapshot(), routing_before, "the test installed no rule, route or table");
 }
 
@@ -244,13 +250,7 @@ fn a_stale_service_entry_with_a_dead_backend_selects_it_and_the_dial_fails() {
         "the arm ignores `healthy`, so the stale entry is still Selected, got {receipt:?}",
     );
     rig.dataplane.cleanup(&intent).expect("cleanup");
-    assert_eq!(
-        (
-            rig.dataplane.live_intent_count().expect("intents"),
-            rig.dataplane.live_receipts().expect("receipts").len(),
-        ),
-        (0, 0),
-    );
+    assert_eq!(live_counts(&rig), (0, 0));
     assert_eq!(routing_snapshot(), routing_before, "the test installed no rule, route or table");
 }
 
@@ -266,12 +266,6 @@ fn the_sentinel_probe_passes_on_the_real_hook_and_an_elapsed_deadline_times_out(
     let rig = HostRig::new("h57");
     let rt = runtime();
     let clock = WallClock;
-    let counts = |rig: &HostRig| {
-        (
-            rig.dataplane.live_intent_count().expect("intents"),
-            rig.dataplane.live_receipts().expect("receipts").len(),
-        )
-    };
 
     rt.block_on(GatewayConnectDataplane::probe(
         &rig.dataplane,
@@ -279,13 +273,13 @@ fn the_sentinel_probe_passes_on_the_real_hook_and_an_elapsed_deadline_times_out(
         &clock,
     ))
     .expect("the sentinel connect is denied and its NoBackend receipt consumed");
-    assert_eq!(counts(&rig), (0, 0), "a passing probe leaves no residue");
+    assert_eq!(live_counts(&rig), (0, 0), "a passing probe leaves no residue");
 
     let elapsed = Instant::now();
     std::thread::sleep(Duration::from_millis(20));
     let outcome = rt.block_on(GatewayConnectDataplane::probe(&rig.dataplane, elapsed, &clock));
     assert_eq!(outcome, Err(GatewayConnectDataplaneError::ProbeTimeout));
-    assert_eq!(counts(&rig), (0, 0), "a timed-out probe leaves no residue");
+    assert_eq!(live_counts(&rig), (0, 0), "a timed-out probe leaves no residue");
 }
 
 /// S-PIG-71 (instance half). After the dataplane instance is re-created on the
@@ -460,4 +454,139 @@ fn updates_racing_identity_reads_never_return_a_missing_identity_for_a_selected_
     runtime().block_on(rig.dataplane.update_service(frontend(1), Vec::new())).expect("emptied");
     assert_eq!(rig.dataplane.live_intent_count(), Ok(0));
     assert_eq!(rig.dataplane.live_receipts().map(|receipts| receipts.len()), Ok(0));
+}
+
+/// S-PIG-124. The hook's rewrite as the kernel shows it. A registered socket's
+/// `connect(2)` to the Service frontend `198.18.250.1:8080` (port bytes
+/// `0x1F90`) completes with `getpeername` equal to the programmed backend
+/// `127.1.x.y:9000` (`0x2328`): the port is written low-16 network order (a
+/// host-order or high-half write lands elsewhere and the connect is refused).
+/// The intent is registered for the kernel's own `SO_COOKIE` of the socket.
+/// Receipt, residue and routing oracles are S-PIG-63's. This test reads the
+/// destination the kernel reports after the rewrite; it does not read
+/// `user_ip4`/`user_port` inside the program.
+///
+/// CONTRACT_SHAPE: bounded-change.
+#[test]
+#[ignore = "pending DELIVER gateway-selection-hook-rewrite"]
+fn a_registered_connect_lands_on_the_programmed_backend_with_the_port_in_network_order() {
+    let rig = HostRig::new("h124");
+    let rt = runtime();
+
+    let target = backend_target(124);
+    let _backend_listener = TcpListener::bind(target).expect("bind the backend address");
+    rt.block_on(rig.dataplane.update_service(frontend(1), vec![backend(124, 1, true)]))
+        .expect("the Service is programmed through the production update path");
+
+    let (socket, intent) =
+        rig.dataplane.open_upstream(service_key(1)).expect("open_upstream").into_parts();
+    assert_eq!(
+        intent.socket_cookie.get().get(),
+        socket_option::<u64>(socket.as_raw_fd(), libc::SO_COOKIE),
+        "the intent is registered for the kernel's cookie of this socket",
+    );
+
+    let stream = rt
+        .block_on(dial(socket, frontend_target(1), Duration::from_secs(5)))
+        .expect("the rewritten dial completes");
+    assert_eq!(
+        stream.peer_addr().expect("getpeername"),
+        SocketAddr::V4(target),
+        "the kernel shows the programmed backend, port 9000 in network order",
+    );
+    drop(stream);
+
+    rig.dataplane.cleanup(&intent).expect("cleanup");
+    assert_eq!(live_counts(&rig), (0, 0), "no intent and no receipt remain");
+}
+
+/// S-PIG-125 (b). A socket whose intent was removed by `cleanup` is a
+/// non-registered cookie and is not selected. Positive control: a second
+/// registered socket to the same programmed Service lands on the backend. The
+/// unregistered dial does not connect, is not denied by the hook (not
+/// `PermissionDenied`), and creates no receipt.
+///
+/// CONTRACT_SHAPE: unbounded-preservation.
+#[test]
+#[ignore = "pending DELIVER gateway-selection-hook-unselected-sockets"]
+fn a_socket_whose_intent_was_cleaned_up_is_not_selected_and_leaves_no_receipt() {
+    let rig = HostRig::new("h125b");
+    let rt = runtime();
+
+    let _backend_listener = TcpListener::bind(backend_target(125)).expect("bind the backend");
+    rt.block_on(rig.dataplane.update_service(frontend(1), vec![backend(125, 1, true)]))
+        .expect("the Service is programmed");
+
+    // Positive control: a registered socket lands on the programmed backend.
+    let (control, control_intent) =
+        rig.dataplane.open_upstream(service_key(1)).expect("open_upstream").into_parts();
+    let stream = rt
+        .block_on(dial(control, frontend_target(1), Duration::from_secs(5)))
+        .expect("a registered socket to the programmed Service reaches the backend");
+    assert_eq!(stream.peer_addr().expect("peer"), SocketAddr::V4(backend_target(125)));
+    drop(stream);
+    rig.dataplane.take_receipt(&control_intent).expect("the control's receipt");
+    rig.dataplane.cleanup(&control_intent).expect("cleanup");
+
+    // The unregistered cookie.
+    let (socket, intent) =
+        rig.dataplane.open_upstream(service_key(1)).expect("open_upstream").into_parts();
+    rig.dataplane.cleanup(&intent).expect("cleanup before the dial");
+    assert_eq!(live_counts(&rig), (0, 0), "the intent is gone before the dial");
+
+    let outcome = rt.block_on(async {
+        tokio::time::timeout(
+            Duration::from_millis(500),
+            socket.connect(SocketAddr::V4(frontend_target(1))),
+        )
+        .await
+    });
+    match outcome {
+        Ok(Ok(_)) => panic!("a non-registered cookie is not rewritten, the dial must not connect"),
+        Ok(Err(error)) => assert_ne!(
+            error.kind(),
+            std::io::ErrorKind::PermissionDenied,
+            "the kernel's own failure, not a hook denial: {error}",
+        ),
+        Err(_elapsed) => {}
+    }
+    assert_eq!(live_counts(&rig), (0, 0), "no receipt was created");
+    assert!(rig.dataplane.take_receipt(&intent).is_err(), "there is no receipt to take");
+}
+
+/// S-PIG-125 (c). While a registered intent is outstanding, a plain unregistered
+/// socket dialing the programmed frontend is not rewritten (it does not connect)
+/// and creates no receipt: the outstanding intent is untouched.
+///
+/// CONTRACT_SHAPE: unbounded-preservation.
+#[test]
+#[ignore = "pending DELIVER gateway-selection-hook-unselected-sockets"]
+fn a_plain_socket_dialing_the_frontend_is_not_rewritten_while_an_intent_is_outstanding() {
+    let rig = HostRig::new("h125c");
+    let rt = runtime();
+
+    let _backend_listener = TcpListener::bind(backend_target(1250)).expect("bind the backend");
+    rt.block_on(rig.dataplane.update_service(frontend(1), vec![backend(1250, 1, true)]))
+        .expect("the Service is programmed");
+
+    let (_registered, intent) =
+        rig.dataplane.open_upstream(service_key(1)).expect("open_upstream").into_parts();
+    assert_eq!(live_counts(&rig), (1, 0), "one registered intent is outstanding");
+
+    let plain = tokio::net::TcpSocket::new_v4().expect("a plain socket");
+    let outcome = rt.block_on(async {
+        tokio::time::timeout(
+            Duration::from_millis(500),
+            plain.connect(SocketAddr::V4(frontend_target(1))),
+        )
+        .await
+    });
+    assert!(
+        !matches!(outcome, Ok(Ok(_))),
+        "an unregistered socket is not rewritten to the backend, it must not connect",
+    );
+    assert_eq!(live_counts(&rig), (1, 0), "the plain socket created no receipt");
+
+    rig.dataplane.cleanup(&intent).expect("cleanup");
+    assert_eq!(live_counts(&rig), (0, 0));
 }

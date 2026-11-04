@@ -21,9 +21,9 @@ use std::path::Path;
 use std::time::Duration;
 
 use overdrive_control_plane::api::{
-    AllocStatusResponse, ClusterStatus, ErrorBody, NodeList, RestartWorkloadResponse,
-    StopWorkloadResponse, SubmitRouteResponse, SubmitWorkloadRequest, SubmitWorkloadResponse,
-    WorkloadDescription,
+    AllocStatusResponse, ClusterStatus, ErrorBody, GatewayStatusResponse, NodeList,
+    RestartWorkloadResponse, StopWorkloadResponse, SubmitRouteResponse, SubmitWorkloadRequest,
+    SubmitWorkloadResponse, WithdrawRouteResponse, WorkloadDescription,
 };
 use overdrive_control_plane::tls_bootstrap::{TrustTriple, load_trust_triple};
 use overdrive_core::guest_network::ServeShutdownRequest;
@@ -221,6 +221,42 @@ impl ApiClient {
     ) -> Result<SubmitRouteResponse, CliError> {
         let _ = (&self.inner, &self.base, &input);
         todo!("SCAFFOLD: ApiClient::submit_route")
+    }
+
+    /// `DELETE /v1/routes/{id}` — withdraw the Route named `id`. `id` is one
+    /// percent-encoded path segment and is deliberately not validated here, so a
+    /// gateway-disabled control plane's disabled check stays observable before
+    /// the id is parsed (R-53).
+    ///
+    /// # Errors
+    ///
+    /// See [`CliError`] variants; a gateway-disabled control plane answers
+    /// [`CliError::HttpStatus`] 409 with `error = "gateway_disabled"`.
+    #[allow(
+        clippy::todo,
+        clippy::unused_async,
+        clippy::unused_self,
+        reason = "public-ingress DISTILL scaffold: the Route DELETE call is DELIVER's"
+    )]
+    pub async fn withdraw_route(&self, id: &str) -> Result<WithdrawRouteResponse, CliError> {
+        let _ = (&self.inner, &self.base, id);
+        todo!("SCAFFOLD: ApiClient::withdraw_route")
+    }
+
+    /// `GET /v1/gateway/status` — the redacted gateway status projection (R-53).
+    ///
+    /// # Errors
+    ///
+    /// See [`CliError`] variants.
+    #[allow(
+        clippy::todo,
+        clippy::unused_async,
+        clippy::unused_self,
+        reason = "public-ingress DISTILL scaffold: the gateway status GET is DELIVER's"
+    )]
+    pub async fn gateway_status(&self) -> Result<GatewayStatusResponse, CliError> {
+        let _ = (&self.inner, &self.base);
+        todo!("SCAFFOLD: ApiClient::gateway_status")
     }
 
     /// `POST /v1/workloads` with `Accept: application/json` — submit a

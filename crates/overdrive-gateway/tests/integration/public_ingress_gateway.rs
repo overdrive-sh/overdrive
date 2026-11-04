@@ -18,7 +18,7 @@
 //! `127.T.hi.lo` (`hi = ordinal / 250`, `lo = ordinal % 250 + 1`) and
 //! `Slot::vip(ordinal)` is `127.T.(200 + hi).lo` (the Service frontend, with a
 //! listening socket on port 8080 so the connector's real `connect(2)` completes).
-//! This file owns second octets 41..=62 and 180..=186; no other test file may reuse
+//! This file owns second octets 41..=62 and 180..=187; no other test file may reuse
 //! them.
 //!
 //! | `T` | test |
@@ -122,7 +122,7 @@ use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::kek::SimKek;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_sim::adapters::read_ports::SimServiceVipView;
-use overdrive_store_local::LocalIntentStore;
+use overdrive_store_local::{LocalIntentStore, LocalObservationStore};
 use tempfile::TempDir;
 use tokio::sync::{Barrier, Notify, watch};
 
@@ -186,6 +186,7 @@ const ISSUE_READ_RETRY: Slot = Slot(183);
 const ISSUE_EXPIRY: Slot = Slot(184);
 const ISSUE_BOOT_TIMEOUT: Slot = Slot(185);
 const ISSUE_WRITE_RETRY: Slot = Slot(186);
+const ISSUE_UNDECODABLE_PRIOR: Slot = Slot(187);
 
 // ---------------------------------------------------------------------------
 // Event log shared by the doubles
@@ -2249,7 +2250,7 @@ fn identity_errors() -> Vec<GatewayIdentityLifecycleError> {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER gateway-svid-lifecycle"]
+#[ignore = "pending DELIVER gateway-identity-error-collapse"]
 async fn every_identity_lifecycle_error_reaches_the_owner_cause_distinct() {
     for (index, error) in identity_errors().into_iter().enumerate() {
         assert!(originates_at_ensure_current(&error));
@@ -2284,7 +2285,7 @@ async fn every_identity_lifecycle_error_reaches_the_owner_cause_distinct() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER gateway-svid-lifecycle"]
+#[ignore = "pending DELIVER gateway-identity-error-collapse"]
 async fn every_identity_lifecycle_error_collapses_to_gateway_identity_unusable() {
     for (index, error) in identity_errors().into_iter().enumerate() {
         let site = Site::new();
@@ -2592,6 +2593,62 @@ async fn a_prior_row_read_error_is_retried_and_never_defaulted_to_zero() {
         "no written row ever carried a count below the prior base",
     );
     after.stop().await;
+}
+
+/// S-PIG-129 (gap 9a, O-SIF-G3 residual): a gateway owner restarted over an
+/// undecodable prior status row counts from zero. Garbage bytes under the pinned
+/// status table at the node-id key are written through the store-local raw
+/// back-door before the production `LocalObservationStore` holds the file; the
+/// gateway composition boots over it (no boot refusal), one recorded failure
+/// projects `issue_failures == 1` with that failure as the latest (so the prior
+/// base was zero), and a restart over the same store carries 1 (the garbage row
+/// was replaced by a decodable one). The single skipped-row warning is asserted
+/// at the store by the store-local test, not here.
+///
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test]
+#[ignore = "pending DELIVER gateway-svid-issue-failure-occurrence"]
+async fn a_restarted_gateway_over_an_undecodable_prior_status_row_counts_from_zero() {
+    let site = Site::new();
+    let clock = Arc::new(SimClock::new());
+    let plan = Plan::with_service(ISSUE_UNDECODABLE_PRIOR);
+    let observation_path = site.dir.path().join("observation.redb");
+
+    // The raw write runs first: it opens its own `Database`, which must not
+    // overlap the store that will hold the file.
+    super::envelope_helpers::write_raw_bytes_to_gateway_application_status_table(
+        &observation_path,
+        &node_id(),
+        b"not an archived gateway status row",
+    );
+    let observations: Arc<dyn ObservationStore> = Arc::new(
+        LocalObservationStore::open(&observation_path).expect("production observation store"),
+    );
+
+    let first =
+        World::start_over(&site, plan, clock.clone(), absent_identity(), observations.clone())
+            .await
+            .expect("the owner boots over an undecodable prior row");
+    first.declare(route("public-api", "/")).await.expect("Route command");
+
+    clock.tick(Duration::from_secs(5));
+    let one = issue_failure(SvidIssueFailureCause::Ca, &clock);
+    first.fx.identity.record_failure(one);
+    let row =
+        wait_status(&first.status, "one failure from a zero base", |row| row.issue_failures == 1)
+            .await;
+    assert_eq!(row.last_issue_failure, Some(one));
+    first.stop().await;
+
+    let second =
+        World::start_over(&site, plan, clock.clone(), absent_identity(), observations.clone())
+            .await
+            .expect("the second composition starts");
+    second.declare(route("public-api", "/")).await.expect("Route command");
+    let carried =
+        wait_status(&second.status, "the carried base", |row| row.issue_failures == 1).await;
+    assert_eq!(carried.last_issue_failure, Some(one), "the replaced row decodes and is carried");
+    second.stop().await;
 }
 
 /// O-SIF-G5: held material whose `not_after` is not after the owner's clock
