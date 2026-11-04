@@ -1,6 +1,6 @@
 # Quint specification: terminal-hook ownership (feature service-allocation-readiness-and-ending)
 
-Model-checked specification of the protocols pinned by decisions D1, D3, D5, D6, D7, D8, D9, D10 and D11, and the B1 (ADR-0265) and B2 (ADR-0266) rulings of 2026-11-03, of
+Model-checked specification of the protocols pinned by decisions D1, D3, D5, D6, D7, D8, D9, D10, D11, D13 and D14 (D15 and D16 consume the same model), and the B1 (ADR-0265) and B2 (ADR-0266) rulings of 2026-11-03, of
 `docs/feature/service-allocation-readiness-and-ending/feature-delta.md` (ADR-0255 to ADR-0267), per
 `.claude/rules/design.md` § "Concurrent protocols carry a model-checked Quint specification". It is the oracle for DISTILL
 `quint-connect` drivers (`.claude/rules/testing.md` § "Quint conformance"; scenario S-9). D2 (the hook contract is
@@ -9,7 +9,9 @@ non-change decisions: they are covered by named runs and by assumption HO-3, wit
 text only: `failed_crash` abstracts the two Failed reasons the exit observer writes for a guest that ended on its own,
 `WorkloadCrashedImmediately` and `VmOutOfMemory`; the shim's fail-closed supersessions of a `Running` row
 (`MtlsInterceptInstallFailed`, `WorkloadNetnsProvisionFailed`, `DriverInternalError`) are not guest crashes and are outside this
-class (they are `failed_other`). D12 (backend eligibility) has no model: it is a pure predicate over one hydrated fact, covered
+class (they are `failed_other`). The specification is seven modules in six spec files (`hook_ownership`, `restart_authority`,
+`liveness_gate`, `progress_deadline`, `stream_snapshot`, `guest_report`, `guest_report_host`); `guest_report` is the model check and
+`guest_report_host` the conformance target. D12 (backend eligibility) has no model: it is a pure predicate over one hydrated fact, covered
 by proptest S-46 and the composed S-47; `restart_authority` and `liveness_gate` carry no eligibility.
 
 Run (the user's directive: metal, never Lima): `cargo xtask metal run -- cargo xtask quint typecheck`, then
@@ -31,7 +33,7 @@ produced each state, for conformance: `quint test` emits no `mbt::actionTaken`, 
 | `progress_deadline.qnt` | D10 | the Service stream's timer racing the lifecycle terminals; time in 10 s ticks (FLOOR 9 = 90 s, MARGIN 3 = 30 s, startup deadline 1 or 12 ticks); stream slots: one in the checked instance, two in the conformance instance (a redeploy opens a new stream with a new clock) |
 | `stream_snapshot.qnt` | D11 | the stream's subscribe, recorded-verdict read, relist; the shim's commit and publish per attempt; `lag`, `read_fault`, fresh-id restart; `service_event_from_terminal` modelled by `proj` (restartable stops project to none) |
 | `guest_report.qnt` | D13 items 1, 3, 10 (PR-1) | the beacon report channel: workload `wl`, the kernel `ring` (capacity 1), the single writer's `wire` (pair names and `exit`), the host reader's `rd`, the board's reported set (`rset`), the guest-report `wait`, `exitrep`; ghosts `produced` (with a dropped marker), `eof`, `junk`; alphabet `tcp80`, `udp53` (declared), `other` (undeclared) |
-| `guest_report.qnt` (module `guest_report_host`) | D13 items 3, 10 (A3) | the conformance projection of the host reader's half, the only conformance target of the report protocol: `rset`, `exitrep`; model-only `wait`, `lines` (scripted input: `listen(p)`, `exit`, `junk`), `eof`; the pair of a valid line ranges over the declared pairs and one undeclared pair; actions `HostRead`, `AppendListen(p)`, `AppendExit`, `HostGarbage`, `BeaconClose`; no hazard, no invariant of its own |
+| `guest_report.qnt` (module `guest_report_host`) | D13 items 3, 10 (A3) | the conformance projection of the host reader's half, the only conformance target of the report protocol: `rset`, `exitrep`; model-only `wait`, `lines` (scripted input: `listen(p)`, `exit`, `junk`), `eof`; the pair of a valid line ranges over the declared pairs and one undeclared pair; `exitrep` is three-valued (`none` / `guest-reported` / `no-report`) and moves off `none` only by `VmmExit`, with a model-only guest status `gstat` set when the reader reads `exit`; actions `HostRead`, `AppendListen(p)`, `AppendExit`, `HostGarbage`, `BeaconClose`, `VmmExit`; no hazard, no invariant of its own |
 
 D10 and D11 are two modules of one stream (the design lists them as one abstraction): D11's `armed` flag stands for D10's
 deadline being armed after the read, and D10's `Open` arms at stream open. A combined module was built first and checked;
@@ -69,7 +71,7 @@ in the step that emits it.
 | | `RestartableStopNeverEndsStream` | D7, D11 | no closure from a startup or liveness stop, on the live path or the read path |
 | | `FailedReadNeverWaits` | D11 | a failed read closes the stream as `error` |
 | | `StreamEndsOnceHonestly` | D11 | the stream yields at most one verdict line, never `stable` unless a Stable was committed |
-| | `ListenBeforeExit` | D13 item 1 | in the wire, every listen precedes `exit` |
+| guest_report | `ListenBeforeExit` | D13 item 1 | in the wire, every listen precedes `exit` |
 | | `DeliveredBeforeExit` | D13 item 1 | when `exit` is on the wire, every produced, non-dropped event is on the wire before it |
 | | `ExitEventuallyReported` (temporal, weak fairness) | D13 item 3 | a workload that exits with the beacon open ends the guest-report wait |
 
@@ -125,10 +127,11 @@ Stable action) were deleted. Assumption SS-6 and the `Restart` guard that encode
 | D11 lag then relist | stream_snapshot | `lagged_relist_recovers_terminal` |
 | D11 failed read (G-8 failure projection) | stream_snapshot | `failed_read_ends_with_error` |
 | D13 happy path and the drain race: a listen produced just before exit is on the wire before `exit` | guest_report | `listen_then_exit_drains_first` |
-| D13 the set reaches the declared pair (the input to `Pass`) | guest_report | `all_declared_reported` |
-| D13 an unparseable line is dropped; later lines still take effect | guest_report | `garbage_line_is_dropped` |
 | D13 a dropped declared event leaves the set partial; the wait ends on `exit` | guest_report | `ring_drop_leaves_set_partial` |
-| D13 EOF with a partial set: the wait ends, the set is frozen | guest_report | `beacon_closes_with_partial_set` |
+| D13 the set reaches the declared pair (the input to `Pass`) while the wait stays open; `exitrep` stays `none` | guest_report_host | `host_all_declared_reported` |
+| D13 an unparseable line is dropped; later lines still take effect; `VmmExit` after the guest status gives `guest-reported` | guest_report_host | `host_garbage_line_is_dropped` |
+| D13 EOF with a partial set: the wait ends, the set is frozen; `VmmExit` with no guest status gives `no-report` | guest_report_host | `host_beacon_closes_with_partial_set` |
+| D13 a listen read after `exit` does not change the set; `exitrep` stays `none` until `VmmExit`, then `guest-reported` | guest_report_host | `host_listen_after_exit_is_ignored` |
 | D14 item 3 (PR-3) first `Fail` at the deadline with no earlier row stops the instance; the successor's first row is a `Pass` | restart_authority | `first_fail_at_deadline_with_no_earlier_row_stops` |
 
 `failed_read_ends_with_error` is the G-8 unavailable boundary (`FailedReadNeverWaits`, S-42); `control_plane_restart_keeps_acted_run` is
@@ -152,7 +155,7 @@ together with the exhaustive `NoMissedTerminal`.
 | D9 | `lg_bugSpawnAtRunning` | `on_alloc_running` spawns the liveness tasks | `LivenessOnlyAfterStable` (and `NoLivenessStopBeforeStable`, `LivenessStreakStartsAtStable`) |
 | D10 | `pd_bugFixedCap` (one stream slot) | the fixed 90 s cap with a startup deadline above it | `HealthySlowStartNeverTimesOut` |
 | D11 | `ss_bugReadBeforeSubscribe` | read the recorded verdict, then subscribe | `NoMissedTerminal` |
-| D13 item 1 | `gr_bugNoDrainBeforeExit` | `WriterExit` is enabled without the ring being empty (the drain removed) | `DeliveredBeforeExit` and `ListenBeforeExit` (one check each on the one hazard instance) |
+| D13 item 1 | `gr_bugNoDrainBeforeExit` | `WriterExit` is enabled without the ring being empty (the drain removed) | `DeliveredBeforeExit` (the single check `gr-hazard-no-drain-before-exit`, which expects a violation of `DeliveredBeforeExit`) |
 
 No witnesses: every state of interest is reached by a named run. No Apalache checks: all instances are small and finite, TLC is
 exhaustive.
@@ -196,15 +199,15 @@ exhaustive.
 The architect's resolutions R-1 to R-4 (the reclaimed row, the latest startup row in the three gates, the E-2 exposure, the
 SS-6 ordering) are recorded in the feature delta's § Pinned readings.
 
-5. B2 modelling choices: `Crash` and `CleanExit` need a live VM slot (a guest whose VM was stopped by a failed-row-write stop
+1. B2 modelling choices: `Crash` and `CleanExit` need a live VM slot (a guest whose VM was stopped by a failed-row-write stop
    cannot crash), and a startup `Pass` needs a live VM (RA-4). The liveness stop's retry is modelled as re-enabling the stop
    while the row is `Running` and Stable (the liveness row streak is `liveness_gate`'s). Neither is stated verbatim by the design;
    both follow V18 and ADR-0266's "probe rows against a dead guest are harmless".
-6. Not modelled, stated by the design: a disconnected bus (`Closed` gives `StreamInterrupted`, G-8), backend membership and
+2. Not modelled, stated by the design: a disconnected bus (`Closed` gives `StreamInterrupted`, G-8), backend membership and
    readiness, the Job kind, and the reconciler backoff (a restart is enabled any time after its terminal row). A clean exit
    (`Terminated`, `Stopped { Process }`) is modelled as restartable and budget-consuming because D6.b says it gives up as
    `BackoffExhausted` in production; D6 and D7 do not otherwise state its restart treatment.
-7. Liveness-stop retry in conformance: the run `stop_row_write_failure_is_retried` drives the liveness stop's retry by a new
+3. Liveness-stop retry in conformance: the run `stop_row_write_failure_is_retried` drives the liveness stop's retry by a new
    liveness probe row. The model re-enables the stop while the row is `Running` and `Stable`; the streak is `liveness_gate`'s,
    so the conformance driver supplies the new liveness row through the recording prober.
 
@@ -212,7 +215,7 @@ SS-6 ordering) are recorded in the feature delta's § Pinned readings.
 
 User ruling 2026-11-04: `overdrive-init` has no writer seam, so the guest-half invariants (`ListenBeforeExit`,
 `DeliveredBeforeExit`, the drain rule) are covered by Tier-3 real boots only (V36, scenario G-10 (9)). The full `guest_report`
-module is not a conformance target; its five runs, the two invariants, `ExitEventuallyReported` and the one hazard are the
+module is not a conformance target; its two runs, the two invariants, `ExitEventuallyReported` and the one hazard are the
 design's model check. The conformance target is `guest_report_host` (A3).
 
 `guest_report_host` actions to driving port (every handler calls the owner through the `BeaconIo` seam, `SimBeaconIo`):
@@ -224,20 +227,23 @@ design's model check. The conformance target is `guest_report_host` (A3).
 | `AppendExit` | `SimBeaconIo::guest_write` of an `EXIT` line |
 | `HostGarbage` | `SimBeaconIo::guest_write` of an unparseable line |
 | `BeaconClose` | `SimBeaconIo::guest_close` |
+| `VmmExit` | `SimVmm::exit_process` plus the exit-gate release (`Driver::release_for_exit_emission`); see finding 6 |
 
 Pinned accessors: `rset` is `GuestListenerReports::reported(alloc)` (read while the entry is open: it is removed only by
 `close`, a lifecycle call that is not an action of the projection, D13 item 10); `exitrep` is the `ExitEvent` on the receiver
-returned by `take_exit_receiver`. `wait`, `lines` and `eof` are model-only and never projected. Named runs:
+returned by `take_exit_receiver`, three-valued: `none` (no `ExitEvent`), `guest-reported` / `no-report` (the `ExitEvent` kind and `exit_code` the exit watcher emits once the guest-report wait has ended and the VMM has exited; `guest-reported` when the reader holds a guest status, `no-report` otherwise). Only `VmmExit` moves it off `none`; a read of `exit` no longer sets it. `gstat`, `wait`, `lines` and `eof` are model-only and never projected. Named runs:
 `host_all_declared_reported`, `host_garbage_line_is_dropped`, `host_beacon_closes_with_partial_set`,
-`host_listen_after_exit_is_ignored` (the reader's rule: a `listen` read after the wait ended does not change `rset`).
+`host_listen_after_exit_is_ignored` (the reader's rule: a `listen` read after the wait ended does not change `rset`). The three full-module runs `garbage_line_is_dropped`, `all_declared_reported` and `beacon_closes_with_partial_set` are dropped (R2): their host-half behaviour lives in the `guest_report_host` runs; the full module keeps `listen_then_exit_drains_first` and `ring_drop_leaves_set_partial`.
 
-8. The design's variable `set` is named `rset` in the spec (`set` is a Quint built-in name). `Idle` is the house stutter step.
-9. Not stated by the design, modelled minimally: `ready` is not on the wire (no action writes it and no host rule reads it);
+4. The design's variable `set` is named `rset` in the spec (`set` is a Quint built-in name). `Idle` is the house stutter step.
+5. Not stated by the design, modelled minimally: `ready` is not on the wire (no action writes it and no host rule reads it);
    the workload starts running (no start action); `HostGarbage` is a host-side delivery of an unparseable line from the scripted
    line source, not a wire append (the single writer never writes garbage); the writer cannot append once the beacon is closed;
    the reader consumes the entries written before EOF and then sees EOF; `WriterDrain` is one atomic move of the whole ring.
 
-## restart_authority and the guest-listener producer (M-3)
+6. `VmmExit` maps to `SimVmm::exit_process` and the exit-gate release. The existing `VmStop` handler of `quint_flows_beacon.rs` (`vm_stop`) calls `SimVmm::exit_process(pid, Some(0), None)`, wakes the beacon sim (`observe_vm_exits`) and releases the unread reads of that VM; it does not call `Driver::release_for_exit_emission`, so it does not release the exit watcher's pre-emit gate, and it does not take the exit receiver or read an `ExitEvent`. A `guest_report_host` driver therefore has to fire the release itself and read `exitrep` from the receiver; the design pins this mapping (D15, D16).
+
+## restart_authority and the guest-listener producer
 
 The workload-level flag `gl` (set at `Deploy` beside `decl`, only with `decl`) marks a Service whose startup descriptor is
 `GuestListeners` (D14 item 3). It carries exactly two rules: a `Fail` row is written only once the deadline has passed (the
@@ -247,8 +253,7 @@ on a `Pass`, so an explicit `[[health_check.startup]]` dial probe (`gl` unset) k
 is unchanged. Runs: `first_fail_at_deadline_with_no_earlier_row_stops` (`gl` set; the first `Fail` at the deadline carries
 `sstreak == 1` and enables the stop; the successor's `Pass` is the first row of its attempt),
 `explicit_probe_fail_after_deadline_keeps_counted_streak` (`gl` unset; the first `Fail` after the deadline does not enable the
-stop, the second does), `guest_listener_fail_fail_reemits_stop_per_row` (`gl` set; `Fail`, `Fail` after the deadline: D8
-re-emits the stop per row, `sstreak` 1 then 2, `sseq` 1 then 2). A startup `Pass` with no earlier `Fail` is reached by
+stop, the second does). The D8 re-emission for `gl` is folded into the first run (the first stop fails before the hook; a second `Fail` re-emits it, `sstreak` 1 then 2, `sseq` 1 then 2). `gl` is pinned false in `ra_ok` and in every hazard instance (module parameter `GLFREE = false`) and free only in `ra_conf`. A startup `Pass` with no earlier `Fail` is reached by
 `pre_startup_crash_then_successor_passes` and `startup_stop_then_successor_passes_is_stable`.
 
 No hazard for the gate threshold: under "the gate uses `MAXA` for `gl`" every restart_authority invariant and temporal property

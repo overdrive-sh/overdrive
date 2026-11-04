@@ -1,8 +1,8 @@
 # Checks the `cargo xtask quint` runner executes for specs/quint/service-allocation-readiness-and-ending/ (feature service-allocation-readiness-and-ending,
-# decisions D1, D3, D5, D6, D7, D8, D9, D10, D11, with the B1 and B2 rulings of 2026-11-03; D2 and D4 are contract / non-change decisions covered by named runs).
+# decisions D1, D3, D5, D6, D7, D8, D9, D10, D11, D13, D14 (D15 and D16 consume the same model), with the B1 and B2 rulings of 2026-11-03; D2 and D4 are contract / non-change decisions covered by named runs).
 #
-# Modules: hook_ownership (D1, D3; D2, D4 runs), restart_authority (D5, D6, D7, D8), liveness_gate (D9), progress_deadline
-# (D10), stream_snapshot (D11). Each `main` is an instance: `*_ok` (the design, checked), `*_conf` (records conf_step; only
+# Modules (seven modules in six spec files): hook_ownership (D1, D3; D2, D4 runs), restart_authority (D5, D6, D7, D8, D14), liveness_gate (D9),
+# progress_deadline (D10), stream_snapshot (D11), guest_report (D13, the model check) and guest_report_host (D13 to D16, the conformance target). Each `main` is an instance: `*_ok` (the design, checked), `*_conf` (records conf_step; only
 # its named runs are checked), `*_bug*` in hazard/ (one design decision's rule switched off, expect = "violation").
 # One hazard per decision; no witness (every reachable state is reached by a named run); no bounded copy of an exhaustive check.
 # ci: every check finishes in under two minutes in the recorded run.
@@ -637,7 +637,8 @@ backend = "evaluator"
 expect = "holds"
 ci = true
 
-# guest_report (D13 items 1, 3, 10; M-6): evaluator-scale
+# guest_report (D13 items 1, 3, 10; D15, D16 consume the same model): the model-check module guest_report (TLC invariants and temporal
+# property, plus its two runs) and the conformance target guest_report_host (its runs, main gr_host_conf).
 [[check]]
 name = "gr-listen-before-exit"
 spec = "guest_report.qnt"
@@ -684,37 +685,10 @@ expect = "holds"
 ci = true
 
 [[check]]
-name = "gr-run-all-declared-reported"
-spec = "guest_report.qnt"
-main = "gr_conf"
-run = "all_declared_reported"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "gr-run-garbage-line-is-dropped"
-spec = "guest_report.qnt"
-main = "gr_conf"
-run = "garbage_line_is_dropped"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
 name = "gr-run-ring-drop-leaves-set-partial"
 spec = "guest_report.qnt"
 main = "gr_conf"
 run = "ring_drop_leaves_set_partial"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "gr-run-beacon-closes-with-partial-set"
-spec = "guest_report.qnt"
-main = "gr_conf"
-run = "beacon_closes_with_partial_set"
 backend = "evaluator"
 expect = "holds"
 ci = true
@@ -769,15 +743,6 @@ name = "ra-run-explicit-probe-fail-after-deadline-keeps-counted-streak"
 spec = "restart_authority.qnt"
 main = "ra_conf"
 run = "explicit_probe_fail_after_deadline_keeps_counted_streak"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "ra-run-guest-listener-fail-fail-reemits-stop-per-row"
-spec = "restart_authority.qnt"
-main = "ra_conf"
-run = "guest_listener_fail_fail_reemits_stop_per_row"
 backend = "evaluator"
 expect = "holds"
 ci = true

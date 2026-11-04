@@ -105,6 +105,7 @@ module restart_authority {
   const CEIL: int
   const OFF: Set[str]
   const REC: bool
+  const GLFREE: bool    // true: the guest-listener flag gl is free at Deploy (ra_conf only); false: gl is pinned false
 
   val MAXA: int = 2     // startup max_attempts
   val SMAX: int = 3     // bound on startup rows written per attempt
@@ -159,7 +160,7 @@ module restart_authority {
 
   // ---------------------------------------------------------------- environment
   action Deploy(d: bool, gd: bool): bool = all {
-    not(deployed), gd implies d,
+    not(deployed), gd implies d, GLFREE or not(gd),
     deployed' = true, decl' = d, gl' = gd,
     at' = at.set(0, { ...at.get(0), row: "pending" }),
     cur' = cur, used' = used, done' = done, g' = g,
@@ -543,7 +544,8 @@ module restart_authority {
 
   // D14 item 3 (PR-3): the guest-listener producer (gl) writes no Fail before the deadline: its first Fail row is written at
   // the deadline with no earlier row, is the first row of the attempt (sstreak 1), and alone enables the stop (the gate
-  // threshold is 1 for gl); the successor's Pass is the first row of its attempt (no earlier Fail)
+  // threshold is 1 for gl). D8 for gl: that stop fails before the hook; a second Fail (sstreak 2, sseq 2) is a newer row and
+  // re-emits the stop, which lands (sseq 1 then 2). The successor's Pass is the first row of its attempt (no earlier Fail)
   run first_fail_at_deadline_with_no_earlier_row_stops = init
     .then(Deploy(true, true)).then(StartOk(0))
     .expect(not(startupRowEnabled(0, "fail")))
@@ -551,7 +553,13 @@ module restart_authority {
     .expect(at.get(0).srow == "absent" and at.get(0).sseq == 0 and not(startupStopEnabled(at.get(0))) and startupRowEnabled(0, "fail"))
     .then(StartupRow(0, "fail"))
     .expect(at.get(0).sseq == 1 and at.get(0).sstreak == 1 and startupStopEnabled(at.get(0)) and Safety)
-    .then(SLStartupStop(0, "landed")).then(WLRestart)
+    .then(SLStartupStop(0, "pre_hook"))
+    .expect(at.get(0).row == "running" and at.get(0).acted == 1 and not(startupStopEnabled(at.get(0))))
+    .then(StartupRow(0, "fail"))
+    .expect(at.get(0).sseq == 2 and at.get(0).sstreak == 2 and startupStopEnabled(at.get(0)) and retryDue(0))
+    .then(SLStartupStop(0, "landed"))
+    .expect(at.get(0).row == "t_startup" and at.get(0).acted == 2 and g.emitCount == 2 and Safety)
+    .then(WLRestart)
     .then(StartOk(1)).then(StartupRow(1, "pass"))
     .expect(at.get(1).sseq == 1 and at.get(1).srow == "pass" and Safety)
     .then(SLStable(1))
@@ -566,19 +574,6 @@ module restart_authority {
     .expect(at.get(0).sseq == 1 and at.get(0).sstreak == 1 and not(startupStopEnabled(at.get(0))) and Safety)
     .then(StartupRow(0, "fail"))
     .expect(at.get(0).sseq == 2 and at.get(0).sstreak == MAXA and startupStopEnabled(at.get(0)) and Safety)
-
-  // D8 for gl: Fail, Fail after the deadline. The first Fail enables the stop; the stop fails before the hook; the second Fail
-  // (sstreak 2, sseq 2) is a newer row and re-emits the stop, which lands
-  run guest_listener_fail_fail_reemits_stop_per_row = init
-    .then(Deploy(true, true)).then(StartOk(0)).then(Deadline(0))
-    .then(StartupRow(0, "fail"))
-    .expect(at.get(0).sseq == 1 and at.get(0).sstreak == 1 and startupStopEnabled(at.get(0)))
-    .then(SLStartupStop(0, "pre_hook"))
-    .expect(at.get(0).row == "running" and at.get(0).acted == 1 and not(startupStopEnabled(at.get(0))))
-    .then(StartupRow(0, "fail"))
-    .expect(at.get(0).sseq == 2 and at.get(0).sstreak == 2 and startupStopEnabled(at.get(0)) and retryDue(0))
-    .then(SLStartupStop(0, "landed"))
-    .expect(at.get(0).row == "t_startup" and at.get(0).acted == 2 and g.emitCount == 2 and Safety)
 
   // D8: the stop fails, a new startup row arrives, the second stop is emitted and lands
   run failed_startup_stop_is_retried_on_next_row = init
@@ -635,7 +630,7 @@ module restart_authority {
 }
 
 // Main instance for the checks: two attempts (CEIL = 1): the restart, the give-up and a successor are all reached.
-module ra_ok { import restart_authority(CEIL = 1, OFF = Set(), REC = false).* from "./restart_authority" }
+module ra_ok { import restart_authority(CEIL = 1, OFF = Set(), REC = false, GLFREE = false).* from "./restart_authority" }
 // Conformance main: the production-shaped ceiling is larger; three attempts (CEIL = 2) let the named runs show last-cause-
 // wins with a restart between two different causes. Records conf_step; only the named runs are checked on it.
-module ra_conf { import restart_authority(CEIL = 2, OFF = Set(), REC = true).* from "./restart_authority" }
+module ra_conf { import restart_authority(CEIL = 2, OFF = Set(), REC = true, GLFREE = true).* from "./restart_authority" }

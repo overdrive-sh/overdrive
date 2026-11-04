@@ -9,8 +9,8 @@
 
 - **Accepted by the user:** D1 to D12, BC-1, B1 to B3, D17. B4 is D12; B5 is rejected. The
   rulings are in the feature delta's § Approval record.
-- **User-approved, not yet Accepted:** D13 to D16. V34 to V38, V41 and V42 are held (V41:
-  +0.36 ms at p50 on the pre-`READY` path; V42: +0.88 ms p50 for the PR-2 shape), V39 is partial. User rulings of 2026-11-04
+- **User-approved, not yet Accepted:** D13 to D16. V34 to V38, V41 and V42 are held (the cost figures are in the feature
+  delta's § Spike table, V41 and V42 rows), V39 is partial. User rulings of 2026-11-04
   ("proceed with recommendations") on the four items inside them: **PR-1** accepted (the
   read-only `GuestListenerReports` port, `GuestListenerBoard`, the extra mandatory parameters
   on `ProbeRunner::new` and `VmDriver::new`, `SimGuestListenerReports`; `Driver`, `Action` and
@@ -20,7 +20,7 @@
   cgroup and attaches the three listen programs there; the TCP arm is a separate small
   sockops program in the same object (D13 items 1 and 7). V42 pins four constraints (D13
   item 1, P-a to P-d): the programs live in the object init already loads, never a second
-  `Ebpf::load` (+20.4 ms); the root programs stay `BPF_F_ALLOW_MULTI` link attachments
+  `Ebpf::load`; the root programs stay `BPF_F_ALLOW_MULTI` link attachments
   (`kernel/bpf/cgroup.c:1506-1507`, `:459`); the workload is created directly in the cgroup
   with no placement window; reports cover only sockets of tasks in the cgroup (a workload
   that leaves it fails closed). **PR-3** accepted: `Pass` on the
@@ -37,7 +37,16 @@
   **A1** accepted 2026-11-04: the board entry is removed at `close`, so `reported` on an id
   with no entry is empty; "frozen at the end of the wait" is the host reader's rule; ids are
   never reused (ADR-0105). **A3** accepted 2026-11-04: a host-input projection module of
-  `guest_report` is the conformance target (modeler item M-6). ADR-0058 stays operative until ADR-0270 is accepted.
+  `guest_report` (`guest_report_host`) is the conformance target. **R1** accepted 2026-11-04:
+  the projection gains a `VmmExit` action (`SimVmm::exit_process` plus the driver's exit-gate
+  release, as the `quint_flows_beacon` driver's `vm_stop` does) and `exitrep` becomes
+  three-valued (`none`, `guest-reported`, `no-report`), projected from the `ExitEvent` on the
+  `take_exit_receiver` receiver. **R2** accepted 2026-11-04: three full-module `guest_report`
+  runs are dropped (their host behaviour lives in the `guest_report_host` runs), `gl` is pinned
+  `false` in the exhaustive `ra_ok` instance and its hazard instances, and
+  `guest_listener_fail_fail_reemits_stop_per_row` is folded into
+  `first_fail_at_deadline_with_no_earlier_row_stops`; `ListenBeforeExit` is kept. ADR-0058 stays
+  operative until ADR-0270 is accepted. No ADR text changes: R1 and R2 are model-level.
 
 ## Decisions
 
@@ -65,7 +74,7 @@
 | D16 | `inferred` is removed from the descriptor, probe row, witness, wire and CLI (option R) | User-approved | ADR-0271 |
 | D17 | A broker submit wakes the convergence loop at once; the cadence tick stays as the backstop (no early wake exists today). Shape choices S1 to S6 accepted as proposed 2026-11-03 | Accepted 2026-11-03 | ADR-0273 |
 | V41 | Boot cost of the listen programs on the pre-`READY` path: +0.36 ms at p50 (paired p90 +1.29, max +2.10) against a same-toolchain baseline | Held | feature delta § Spike table |
-| V42 | Hook scope on the real init (PR-2): init's binds invisible, workload's reports intact, cost in the V41 range | **Held (2026-11-04, `7.0.0-38-generic`, PROMOTE)**: 1000/1000 exact, 0 from init; +0.88 ms p50; `spike/findings-workload-cgroup.md` | feature delta § Spike table |
+| V42 | Hook scope on the real init (PR-2): init's binds invisible, workload's reports intact, cost in the V41 range | **Held (2026-11-04, `7.0.0-38-generic`, PROMOTE)**: 1000/1000 exact, 0 from init; cost in the V41 range; `spike/findings-workload-cgroup.md` | feature delta § Spike table |
 | R-1 to R-5 | Clarifications of accepted decisions and current code (feature delta § Pinned readings) | Clarification | n/a |
 
 Not in scope by user ruling 2026-11-02 (no deferral, no issue): P-3, P-4, P-5. Findings: F-1 is
@@ -114,17 +123,16 @@ superseded (ADR-0267).
 
 ## Handoff to DISTILL (after the independent re-review of this revision)
 
-- Formal protocol model: `specs/quint/service-allocation-readiness-and-ending/` (D1, D3, D5 to D11).
+- Formal protocol model: `specs/quint/service-allocation-readiness-and-ending/` (D1, D3, D5 to D11, D13, D14).
   The named runs, hazards and invariants are that directory's `README.md`. Outstanding for the
-  modeler: M-3 and the new `guest_report` module with its host-input projection (M-6), both in the feature delta. D12, D17, R2-1
+  modeler: R1, R2 and the README and `checks.toml` header fixes (feature delta § Modeler change list). D12, D17, R2-1
   and R2-2 add no model state (D17 is justified without a model: § Formal protocol model).
 - Scenarios S-1 to S-48 are in the feature delta with oracles and tiers. D6 and D7 rewrite the
   early-exit and startup-failure tests listed in their sections. D13 to D16 obligations are
   G-10's boundary scenarios.
 - No open contract-shaping validation items for D1 to D12 and D17. V34 to V38 and V41 are held and
   V39 is partial (not contract-shaping); V42, the last contract-shaping item (PR-2), is held.
-  Remaining gates before DISTILL: the `quint-modeler` run (`guest_report` module M-6, and M-3)
-  and the independent DESIGN review round 4.
+  Gates before DISTILL: the modeler change list and the independent DESIGN review.
 
 ## Surfaced to the user
 
@@ -140,10 +148,11 @@ superseded (ADR-0267).
    progress deadline can fire before the give-up (E-3) and before a boot at its deadline (E-4).
 4. **PR-1 to PR-4 (ruled 2026-11-04; PR-2 direction pending V42, V42 held):** see Status above and the feature
    delta's D13 items 1, 7 and 10 and D14 items 2 and 3. PR-3 (accepted) trades the pre-deadline `describe` progress
-   ("missing tcp:8080") for about 29 fewer observation writes per never-ready attempt. Round 4
-   (P1, accepted 2026-11-04): that trade-off is kept, and the first `Fail`'s counter is honest (1)
-   because the gate's threshold for this mechanic comes from the descriptor. A1 (accepted
-   2026-11-04): the board's entry lives from `open` to `close` (no frozen read after close). A3
-   (accepted 2026-11-04): the conformance target is a host-input projection of `guest_report`.
+   ("missing tcp:8080") for about 29 fewer observation writes per never-ready attempt. P1
+   (accepted 2026-11-04): the first `Fail`'s counter is honest (1) because the gate's threshold
+   for this mechanic comes from the descriptor. A1 (accepted 2026-11-04): the board's entry
+   lives from `open` to `close` (no frozen read after close). A3, R1 and R2 (accepted
+   2026-11-04): the conformance target is the host-input projection of `guest_report`, with a
+   `VmmExit` action and a three-valued `exitrep`, and the model trims in the Status section.
 5. **A rules-doc touch at landing:** `.claude/rules/development.md` § "Reconciler I/O" describes the
    steady-state tick as the drain period; D17 adds the wake. Not edited by the architect.

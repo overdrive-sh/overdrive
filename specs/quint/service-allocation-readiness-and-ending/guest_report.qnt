@@ -197,24 +197,6 @@ module guest_report {
     .then(HostRead).then(HostRead)
     .expect(rset == Set("tcp80") and exitrep == "rset" and wait == "ended" and Safety)
 
-  // the set reaches the declared pair (the input to Pass) while the wait is still open; exit then ends the wait
-  run all_declared_reported = init
-    .then(WorkloadListen("tcp80")).then(WriterForward).then(WorkloadListen("udp53")).then(WriterForward)
-    .then(HostRead).then(HostRead)
-    .expect(rset == DECL and wait == "waiting" and exitrep == "unset" and Safety)
-    .then(WorkloadExit).then(WriterExit).then(HostRead)
-    .expect(rset == DECL and wait == "ended" and exitrep == "rset" and Safety)
-
-  // an unparseable line mid-stream is dropped; later listen and exit lines still take effect
-  run garbage_line_is_dropped = init
-    .then(WorkloadListen("tcp80")).then(WriterForward).then(HostRead)
-    .then(HostGarbage)
-    .expect(rset == Set("tcp80") and wait == "waiting" and exitrep == "unset" and Safety)
-    .then(WorkloadListen("udp53")).then(WriterForward).then(HostGarbage).then(HostRead)
-    .expect(rset == DECL and wait == "waiting" and Safety)
-    .then(WorkloadExit).then(WriterExit).then(HostRead)
-    .expect(wait == "ended" and exitrep == "rset" and rset == DECL and Safety)
-
   // a declared event dropped on a full ring: the set stays partial, the wait still ends on exit
   run ring_drop_leaves_set_partial = init
     .then(WorkloadListen("tcp80")).then(WriterForward)
@@ -223,16 +205,6 @@ module guest_report {
     .then(WorkloadExit).then(WriterDrain).then(WriterExit)
     .then(HostRead).then(HostRead).then(HostRead)
     .expect(rset == Set("tcp80") and wait == "ended" and exitrep == "rset" and Safety)
-
-  // EOF with the set partial: the wait ends, the set is frozen, no exit report
-  run beacon_closes_with_partial_set = init
-    .then(WorkloadListen("tcp80")).then(WriterForward).then(HostRead)
-    .then(WorkloadListen("udp53")).then(BeaconClose)
-    .expect(wait == "waiting" and rset == Set("tcp80"))
-    .then(HostRead)
-    .expect(wait == "ended" and rset == Set("tcp80") and exitrep == "unset" and Safety)
-    .then(Idle)
-    .expect(rset == Set("tcp80") and wait == "ended" and Safety)
 }
 
 module gr_ok { import guest_report(OFF = Set(), REC = false).* from "./guest_report" }
@@ -240,16 +212,18 @@ module gr_conf { import guest_report(OFF = Set(), REC = true).* from "./guest_re
 
 /**
  * guest_report_host: the conformance projection of the beacon report protocol (D13 items 3 and 10; feature delta § Formal
- * protocol model, D13 to D16, M-6). The host reader's half only: the input is the scripted line stream, the guest's drain rule is
+ * protocol model, D13 to D16). The host reader's half only: the input is the scripted line stream, the guest's drain rule is
  * not a host concern, so appends are unordered with respect to each other and `listen` can follow `exit` (the reader's own rule
  * drops it). It is the only conformance target of the report protocol; the full guest_report module is not one.
  *
- * State: rset (GuestListenerReports::reported(alloc)), exitrep (the ExitEvent on the receiver from take_exit_receiver).
- * Model-only, never projected: wait (the guest-report wait), lines (the scripted input not yet consumed: listen(p), exit, junk),
+ * State: rset (GuestListenerReports::reported(alloc)), exitrep (the ExitEvent on the receiver from take_exit_receiver): none |
+ * guest-reported | no-report, moved off none only by VmmExit; the ExitEvent kind and exit_code give the value.
+ * Model-only, never projected: gstat (the reader holds a guest status, set when it reads `exit`), wait (the guest-report wait), lines (the scripted input not yet consumed: listen(p), exit, junk),
  * eof. The declared set DECL is a constant; a valid line's pair ranges over DECL and one undeclared pair.
  *
  * Actions to driving port (the BeaconIo seam, SimBeaconIo): HostRead = release_read; AppendListen(p), AppendExit, HostGarbage =
- * guest_write of a valid LISTEN line, an EXIT line, an unparseable line; BeaconClose = guest_close.
+ * guest_write of a valid LISTEN line, an EXIT line, an unparseable line; BeaconClose = guest_close;
+ * VmmExit = SimVmm::exit_process plus the exit-gate release.
  * No hazard and no invariant of its own: the HostRead guards keep rset within DECL and growing only; the decision's hazard is
  * gr-hazard-no-drain-before-exit in the full module.
  */
@@ -261,6 +235,7 @@ module guest_report_host_conf {
     | AppendExit
     | HostGarbage
     | BeaconClose
+    | VmmExit
     | Idle
 }
 
@@ -274,13 +249,14 @@ module guest_report_host {
 
   var rset: Set[str]
   var exitrep: str
+  var gstat: bool       // model-only: the reader holds a guest status (it has read `exit`)
   var wait: str         // model-only
   var lines: List[{ k: str, p: str }]  // model-only: k is "listen" (with pair p), "exit" or "junk"
   var eof: bool         // model-only
   var conf_step: HostConfStep
 
   action init = all {
-    rset' = Set(), exitrep' = "unset", wait' = "waiting", lines' = List(), eof' = false,
+    rset' = Set(), exitrep' = "none", gstat' = false, wait' = "waiting", lines' = List(), eof' = false,
     conf_step' = variant("init", ()),
   }
 
@@ -290,7 +266,8 @@ module guest_report_host {
       lines != List(),
       lines' = lines.tail(),
       rset' = if (lines.head().k == "listen" and wait == "waiting" and DECL.contains(lines.head().p)) rset.union(Set(lines.head().p)) else rset,
-      exitrep' = if (lines.head().k == "exit") "set" else exitrep,
+      gstat' = if (lines.head().k == "exit") true else gstat,
+      exitrep' = exitrep,
       wait' = if (lines.head().k == "exit") "ended" else wait,
       eof' = eof,
       conf_step' = if (REC) variant("HostRead", ()) else conf_step,
@@ -298,7 +275,7 @@ module guest_report_host {
     all {
       lines == List(), eof, wait == "waiting",
       wait' = "ended",
-      rset' = rset, exitrep' = exitrep, lines' = lines, eof' = eof,
+      rset' = rset, exitrep' = exitrep, gstat' = gstat, lines' = lines, eof' = eof,
       conf_step' = if (REC) variant("HostRead", ()) else conf_step,
     },
   }
@@ -307,14 +284,14 @@ module guest_report_host {
   action AppendListen(p: str): bool = all {
     not(eof), lines.length() < LMAX, ALPHA.contains(p),
     lines' = lines.append({ k: "listen", p: p }),
-    rset' = rset, exitrep' = exitrep, wait' = wait, eof' = eof,
+    rset' = rset, exitrep' = exitrep, gstat' = gstat, wait' = wait, eof' = eof,
     conf_step' = if (REC) variant("AppendListen", { p: p }) else conf_step,
   }
 
   action AppendExit = all {
     not(eof), lines.length() < LMAX,
     lines' = lines.append({ k: "exit", p: "" }),
-    rset' = rset, exitrep' = exitrep, wait' = wait, eof' = eof,
+    rset' = rset, exitrep' = exitrep, gstat' = gstat, wait' = wait, eof' = eof,
     conf_step' = if (REC) variant("AppendExit", ()) else conf_step,
   }
 
@@ -322,7 +299,7 @@ module guest_report_host {
   action HostGarbage = all {
     not(eof), lines.length() < LMAX,
     lines' = lines.append({ k: "junk", p: "" }),
-    rset' = rset, exitrep' = exitrep, wait' = wait, eof' = eof,
+    rset' = rset, exitrep' = exitrep, gstat' = gstat, wait' = wait, eof' = eof,
     conf_step' = if (REC) variant("HostGarbage", ()) else conf_step,
   }
 
@@ -330,50 +307,66 @@ module guest_report_host {
   action BeaconClose = all {
     not(eof),
     eof' = true,
-    rset' = rset, exitrep' = exitrep, wait' = wait, lines' = lines,
+    rset' = rset, exitrep' = exitrep, gstat' = gstat, wait' = wait, lines' = lines,
     conf_step' = if (REC) variant("BeaconClose", ()) else conf_step,
   }
 
+  // the VMM process exits (the exit gate releases): enabled once the guest-report wait has ended; the only action that moves
+  // exitrep off none; guest-reported when the reader holds a guest status, no-report otherwise
+  action VmmExit = all {
+    wait == "ended", exitrep == "none",
+    exitrep' = if (gstat) "guest-reported" else "no-report",
+    rset' = rset, gstat' = gstat, wait' = wait, lines' = lines, eof' = eof,
+    conf_step' = if (REC) variant("VmmExit", ()) else conf_step,
+  }
+
   action Idle = all {
-    rset' = rset, exitrep' = exitrep, wait' = wait, lines' = lines, eof' = eof,
+    rset' = rset, exitrep' = exitrep, gstat' = gstat, wait' = wait, lines' = lines, eof' = eof,
     conf_step' = if (REC) variant("Idle", ()) else conf_step,
   }
 
   action step = {
     nondet p = ALPHA.oneOf()
-    any { HostRead, AppendListen(p), AppendExit, HostGarbage, BeaconClose, Idle }
+    any { HostRead, AppendListen(p), AppendExit, HostGarbage, BeaconClose, VmmExit, Idle }
   }
 
   // all declared pairs appended and read: rset reaches the declared set while the wait stays open
   run host_all_declared_reported = init
     .then(AppendListen("tcp80")).then(AppendListen("udp53"))
     .then(HostRead).then(HostRead)
-    .expect(rset == DECL and wait == "waiting" and exitrep == "unset")
+    .expect(rset == DECL and wait == "waiting" and exitrep == "none")
 
   // an unparseable line mid-stream is dropped; the following listen and exit still take effect
   run host_garbage_line_is_dropped = init
     .then(AppendListen("tcp80")).then(HostGarbage).then(AppendListen("udp53")).then(AppendExit)
     .then(HostRead).then(HostRead)
-    .expect(rset == Set("tcp80") and wait == "waiting" and exitrep == "unset")
+    .expect(rset == Set("tcp80") and wait == "waiting" and exitrep == "none")
     .then(HostRead).then(HostRead)
-    .expect(rset == DECL and wait == "ended" and exitrep == "set")
+    .expect(rset == DECL and wait == "ended" and exitrep == "none")
+    .then(VmmExit)
+    .expect(rset == DECL and wait == "ended" and exitrep == "guest-reported")
 
   // EOF with rset partial: the wait ends, rset is as it was, no exit report
   run host_beacon_closes_with_partial_set = init
     .then(AppendListen("tcp80")).then(HostRead).then(BeaconClose)
     .expect(wait == "waiting" and rset == Set("tcp80"))
     .then(HostRead)
-    .expect(wait == "ended" and rset == Set("tcp80") and exitrep == "unset")
+    .expect(wait == "ended" and rset == Set("tcp80") and exitrep == "none")
+    .then(VmmExit)
+    .expect(rset == Set("tcp80") and wait == "ended" and exitrep == "no-report")
     .then(Idle)
-    .expect(rset == Set("tcp80") and wait == "ended" and exitrep == "unset")
+    .expect(rset == Set("tcp80") and wait == "ended" and exitrep == "no-report")
 
-  // an exit line then a listen line: exitrep set, rset unchanged by the later line (the reader's rule)
+  // an exit line then a listen line: the wait ends and rset is unchanged by the later line (the reader's rule); exitrep stays
+  // none until the VMM exits, then guest-reported
   run host_listen_after_exit_is_ignored = init
     .then(AppendListen("tcp80")).then(AppendExit).then(AppendListen("udp53"))
     .then(HostRead).then(HostRead)
-    .expect(rset == Set("tcp80") and exitrep == "set" and wait == "ended")
+    .expect(rset == Set("tcp80") and exitrep == "none" and wait == "ended")
     .then(HostRead)
-    .expect(rset == Set("tcp80") and exitrep == "set" and wait == "ended")
+    .expect(rset == Set("tcp80") and exitrep == "none" and wait == "ended")
+    .then(VmmExit)
+    .expect(rset == Set("tcp80") and exitrep == "guest-reported" and wait == "ended")
 }
 
 module gr_host_conf { import guest_report_host(REC = true).* from "./guest_report" }

@@ -13,9 +13,10 @@
 > 2026-11-04, `spike/findings-workload-cgroup.md`). Three round-4 items are accepted
 > (2026-11-04, "proceed with recommendations"): **P1** the startup stop gate's attempts
 > threshold comes from the startup descriptor, **A1** the board entry's lifetime, **A3** the
-> host-input conformance projection of the report model.
-> Nothing here authorises DISTILL or DELIVER until the `quint-modeler` run and the
-> independent DESIGN re-review (round 4) approve the revision
+> host-input conformance projection of the report model; **R1** (`VmmExit` and the
+> three-valued `exitrep`) and **R2** (model trims) are also accepted.
+> Nothing here authorises DISTILL or DELIVER until the § Modeler change list is done and the
+> independent DESIGN re-review approves the revision
 > (`.claude/rules/design.md` § "Surface material design decisions").
 > The research that supports D7 to D10 is
 > `docs/research/orchestration/probe-failure-restart-authority-and-give-up-reporting-research.md`
@@ -93,18 +94,20 @@ User rulings of 2026-11-02, recorded verbatim in outcome:
 | D13, D14, D15 | **User-approved in direction, 2026-11-03 ("add it. and proceed with recommendations").** Gate on every declared listener, TCP and UDP; the opt-out `startup = []` is kept; no minimum-healthy window; ADR-0058 is superseded on acceptance of ADR-0270. | ADR-0268, 0269, 0270, 0272 |
 | D16 | **Option R approved in direction, 2026-11-03** (remove `inferred` with the envelope procedure). | ADR-0271 |
 | D17 | **Accepted, 2026-11-03** ("add it"; shape choices S1 to S6 accepted as proposed): S1 `Notify::notify_one`; S2 signal after the lock is released; S3 one submit path including the loop's own resync; S4 `BrokerDrain` without `submit`, `broker_mutex` removed; S5 `submit_evaluation` and `BrokerDrain` `pub`, `submitted` `pub(crate)`; S6 no Quint model. | ADR-0273 |
-| D13 contract shape | **Accepted, 2026-11-03.** Sockops `TCP_LISTEN_CB` arm merged into the existing sockops program; `post_bind4` and `post_bind6` `CgroupSock` programs, both returning 1, both filtering protocol 17; loopback exclusion; one ordered beacon writer; drain `LISTEN` before `EXIT`; the host reader ends the guest-report wait only on `EXIT` or EOF. The merged-arm part is replaced by PR-2 (below): the TCP listen arm is a separate small sockops program in the same object. | ADR-0268, 0272 |
+| D13 contract shape | **Accepted, 2026-11-03.** Sockops `TCP_LISTEN_CB` arm as a separate small program in the same object (PR-2); `post_bind4` and `post_bind6` `CgroupSock` programs, both returning 1, both filtering protocol 17; loopback exclusion; one ordered beacon writer; drain `LISTEN` before `EXIT`; the host reader ends the guest-report wait only on `EXIT` or EOF. | ADR-0268, 0272 |
 | V41 | **Held** (boot-cost spike, `spike/findings-boot-cost.md`): +0.36 ms at p50 on the pre-`READY` path (D13 item 6). | § Spike table |
 | Dual-stack | **2026-11-03.** Overdrive does not support IPv6 yet. The rule "an `AF_INET6` wildcard report satisfies an IPv4-declared listener" and the `V6ONLY` exposure are recorded against GH #308 (comment: https://github.com/overdrive-sh/overdrive/issues/308#issuecomment-6614793072). | D13 item 8 |
 | Dropped report | **2026-11-03.** No level map. The ring is sized generously by the crafter; the drop counter stays visible; a lost report is a stated, bounded exposure (the service is stopped at the startup deadline, not hung). Only TCP listen transitions and explicit UDP binds produce events. | D13 item 9 |
 | PR-1 | **Accepted, 2026-11-04 ("proceed with recommendations").** The `GuestListenerReports` core read-only port (`reported` / `changed`), the `GuestListenerBoard` worker adapter (`open` / `record` / `close`), the extra mandatory parameters on `ProbeRunner::new` and `VmDriver::new`, and `SimGuestListenerReports`. The `Driver` trait, `Action` and the reconcilers are unchanged. | D13 item 10 |
-| PR-2 | **Direction approved 2026-11-04 pending V42; V42 held 2026-11-04 (kernel `7.0.0-38-generic`, `spike/findings-workload-cgroup.md`, PROMOTE), so PR-2 is Accepted in contract shape.** Init creates a workload cgroup and attaches the three listen programs there, so init's own transport sockets are invisible by construction. The TCP listen arm is a separate small sockops program in the same object; this is the current D13 contract and replaces the merged-arm part of the 2026-11-03 shape. Pinned by V42: the programs ride in the object init already loads (never a second `Ebpf::load`), the root programs stay link attachments, the workload is created directly in the cgroup (D13 item 1). | D13 items 1 and 7 |
-| PR-3 | **Accepted, 2026-11-04.** `Pass` is written on the event. The first `Fail` is written at the derived startup deadline; then one `Fail` per interval until the stop lands. No `Fail` is written before the deadline. `describe` loses the pre-deadline progress (accepted). (The accepted text said the first `Fail` carries `attempt = max_attempts`; round 4 found that counter is not writable, see P1.) | D14 item 3 |
-| P1 | **Accepted, 2026-11-04 (option (a); "proceed with recommendations").** The guest-listener task writes honest rows through the shared run state (`Pass` and the first `Fail` have `same_status_runs` 1; later `Fail`s 2, 3, …). `ServiceLifecycle`'s startup stop gate takes its attempts threshold from the Service's startup descriptor: `max_attempts` for `Tcp`/`Http` (unchanged), 1 for `GuestListeners`. `ServiceAllocFact.max_attempts` becomes `startup_attempts_required`. Explicit probes are unchanged. Replaces the `attempt = max_attempts` and `attempt 0` wording in PR-3, D14 item 3 and ADR-0269. | D14 item 3, ADR-0269 |
+| PR-2 | **Direction approved 2026-11-04 pending V42; V42 held 2026-11-04 (kernel `7.0.0-38-generic`, `spike/findings-workload-cgroup.md`, PROMOTE), so PR-2 is Accepted in contract shape.** Init creates a workload cgroup and attaches the three listen programs there, so init's own transport sockets are invisible by construction. The TCP listen arm is a separate small sockops program in the same object. Pinned by V42: the programs ride in the object init already loads (never a second `Ebpf::load`), the root programs stay link attachments, the workload is created directly in the cgroup (D13 item 1). | D13 items 1 and 7 |
+| PR-3 | **Accepted, 2026-11-04.** `Pass` is written on the event. The first `Fail` is written at the derived startup deadline; then one `Fail` per interval until the stop lands. No `Fail` is written before the deadline. `describe` loses the pre-deadline progress (accepted). The row counter is P1's. | D14 item 3 |
+| P1 | **Accepted, 2026-11-04 (option (a); "proceed with recommendations").** The guest-listener task writes honest rows through the shared run state (`Pass` and the first `Fail` have `same_status_runs` 1; later `Fail`s 2, 3, …). `ServiceLifecycle`'s startup stop gate takes its attempts threshold from the Service's startup descriptor: `max_attempts` for `Tcp`/`Http` (unchanged), 1 for `GuestListeners`. `ServiceAllocFact.max_attempts` becomes `startup_attempts_required`. Explicit probes are unchanged. | D14 item 3, ADR-0269 |
 | A1 | **Accepted, 2026-11-04, as the architect chose.** The board entry is removed at `close`: an allocation id has an entry from `open` to `close` and none before or after, and `reported` on an id with no entry is the empty set. "Frozen at the end of the guest-report wait" is the host reader's rule (it records nothing once `Exit` or EOF ended the wait), not the board's. Ids are never reused (ADR-0105). | D13 item 10, ADR-0268 |
-| A3 | **Accepted, 2026-11-04.** The `guest_report` conformance target is a host-input projection module (same file, its own `step` and named runs); the host reader is driven through the existing `BeaconIo` / `SimBeaconIo` seam. The guest-side actions stay in the non-conformance module. Modeler item M-6 carries the action-to-driving-port mapping, the State projection and the named runs. | § Formal protocol model, M-6, ADR-0268 |
+| A3 | **Accepted, 2026-11-04.** The `guest_report` conformance target is a host-input projection module (same file, its own `step` and named runs); the host reader is driven through the existing `BeaconIo` / `SimBeaconIo` seam. The guest-side actions stay in the non-conformance module. The action-to-driving-port mapping, the State projection and the named runs are in § Formal protocol model — D13 to D16. | § Formal protocol model, ADR-0268 |
 | PR-4 | **Accepted, 2026-11-04.** `AllocationSpec.service_ports` is replaced by `declared_listeners`; `AllocationSpec::tcp_service_ports()` is the accessor the TPROXY consumers read. | D14 item 2 |
-| `guest_report` model | **Accepted, 2026-11-04.** The `guest_report` Quint module gets host-half conformance (`quint-connect` driver on the host reader, board and probe task) and Tier-3 real-boot coverage for the guest half. There is no writer seam in `overdrive-init`. The gap: the guest-side writer ordering (one ordered writer, `LISTEN` drained before `EXIT`) is not replayed against the model; it is covered by the Tier-3 boot scenarios (V36, V38 shapes) and by the host reader's treatment of any line order. | M-6, § Formal protocol model |
+| `guest_report` model | **Accepted, 2026-11-04.** The `guest_report` Quint module gets host-half conformance (`quint-connect` driver on the host reader, board and probe task) and Tier-3 real-boot coverage for the guest half. There is no writer seam in `overdrive-init`. The gap: the guest-side writer ordering (one ordered writer, `LISTEN` drained before `EXIT`) is not replayed against the model; it is covered by the Tier-3 boot scenarios (V36, V38 shapes) and by the host reader's treatment of any line order. | § Formal protocol model |
+| R1 | **Accepted, 2026-11-04 ("proceed with recommendations").** The conformance projection `guest_report_host` gains a `VmmExit` action, mapped to `SimVmm::exit_process` plus the driver's exit-gate release (precedent: the `quint_flows_beacon` driver's `vm_stop`, `crates/overdrive-worker/src/vm_driver/quint_flows_beacon.rs:446-465`). `exitrep` becomes three-valued: `none` (no `ExitEvent` yet), `guest-reported` (an `ExitEvent` of kind `CleanExit` or `Crashed { exit_code: Some(_) }`), `no-report` (`Crashed { exit_code: None }`, e.g. EOF without `EXIT`), projected from the receiver returned by `take_exit_receiver` (`run_exit_watcher`, `vm_driver.rs:2237-2330`). | § Formal protocol model — D13 to D16, ADR-0268 |
+| R2 | **Accepted, 2026-11-04.** Model trims: the full-module runs `garbage_line_is_dropped`, `all_declared_reported` and `beacon_closes_with_partial_set` are dropped (the host-half behaviour lives in the `guest_report_host` runs; `ring_drop_leaves_set_partial`, `listen_then_exit_drains_first` and `ListenBeforeExit` are kept); `gl = false` is pinned in the exhaustive `ra_ok` instance and its hazard instances (free only in `ra_conf`); `guest_listener_fail_fail_reemits_stop_per_row` is folded into `first_fail_at_deadline_with_no_earlier_row_stops`. | § Modeler change list |
 
 ## Wave: DESIGN / [REF] Decisions
 
@@ -1416,11 +1419,14 @@ Items 7 to 12 apply the same six cases to each later gate:
 **Required: yes.** The probe supervisor set is shared state with three owners and an ordering
 edge (register before gate); two reconcilers can author one allocation's ending; row writes are
 crash-sensitive; a stream timer races the lifecycle terminals; the stream's subscribe, read, commit
-and publish steps are order-sensitive. The specification is in
-`specs/quint/service-allocation-readiness-and-ending/`, written and model-checked by the `quint-modeler` agent for
-D1, D3 and D5 to D11 (D2 and D4 are contract and non-change decisions covered by named runs and
-assumption HO-3). Its `README.md`, `checks.toml` and `evidence/summary.md` are the authoritative
-record of modules, invariants, named runs, hazards, assumptions and results.
+and publish steps are order-sensitive; the guest's beacon writer is a single ordered writer whose
+`LISTEN`-before-`EXIT` order the host reader depends on. The specification is in
+`specs/quint/service-allocation-readiness-and-ending/`, written and model-checked by the
+`quint-modeler` agent for D1, D3, D5 to D11, D13 and D14 (D2 and D4 are contract and non-change
+decisions covered by named runs and assumption HO-3; D15 and D16 reuse the D14 model and add
+none). Its `README.md`, `checks.toml` and `evidence/summary.md` are the authoritative record of
+modules, invariants, named runs, hazards, assumptions, counts and results; this section does not
+restate them.
 
 **D17 needs no Quint model (decision S6, § D17).** The one ordering hazard is a lost wake; the
 primitive excludes it by documented semantics, a lost wake costs only the unchanged tick latency,
@@ -1439,11 +1445,15 @@ enumerates its truth table. The one protocol-shaped premise, that a committed `S
 never dropped while the allocation is `Running`, is B1's `committed` flag in `liveness_gate.qnt`,
 discharged by V31 and S-43.
 
-**Layout.** Five modules, one per protocol: `hook_ownership` (D1, D3; D2 and D4 by runs),
-`restart_authority` (D5 to D8), `liveness_gate` (D9), `progress_deadline` (D10),
-`stream_snapshot` (D11). Each declares `step` and named runs; each instance is `*_ok`
-(checked), `*_conf` (conformance, named runs only) or a hazard under `hazard/`. One hazard per
-decision.
+**Layout.** One module per protocol: `hook_ownership` (D1, D3; D2 and D4 by runs),
+`restart_authority` (D5 to D8, and D14's producer rule through the workload flag `gl`),
+`liveness_gate` (D9), `progress_deadline` (D10), `stream_snapshot` (D11), `guest_report` (D13
+items 1, 3 and 10: the model check of the beacon report channel) and `guest_report_host`
+(the host-input projection of the same file, the conformance target for the report protocol;
+detail in § Formal protocol model — D13 to D16). Each declares `step` and named runs; each
+instance is `*_ok` (checked), `*_conf` (conformance, named runs only) or a hazard under
+`hazard/`. One hazard per decision. Counts of modules, checks and runs are the README's and
+`checks.toml`'s.
 
 **Scenario to named run.** `specs/quint/service-allocation-readiness-and-ending/README.md` § "Named runs" maps each
 critical scenario to the run DISTILL's `#[quint_test]` pins; that table is the authority. The
@@ -1456,7 +1466,12 @@ passes, post-pass crash loop, opt-out, non-crash failed row, liveness-kill prece
 the stop), D8 (failed stop retried, late pass reaches Stable), D9 (liveness failing during startup,
 starts at Stable, Stable after the end, opt-out), D10 (slow start, never ready, give-up inside the
 deadline, redeploy opens a new clock), D11 (redeploy of a Stable service, commit between subscribe
-and read, restartable stop, superseded attempt, lag then relist).
+and read, restartable stop, superseded attempt, lag then relist), D13 (a listen produced before
+exit is on the wire before `exit`; a dropped declared event leaves the set partial; and, on the
+host-input projection, all declared reported, a garbage line dropped, EOF with a partial set, a
+`listen` after `exit` ignored, with the `ExitEvent` observed after `VmmExit`), D14 (the first
+`Fail` at the deadline stops the instance and a second re-emits the stop; an explicit probe's
+`Fail` after the deadline keeps its counted streak).
 
 - **Pinned conformance projection** (for DISTILL; no new API):
 
@@ -1489,6 +1504,7 @@ and read, restartable stop, superseded attempt, lag then relist).
   | `claim` and `author` | `claim`: the `terminal` of the `FinalizeFailed` in a returned `Vec<Action>`. `author`: which reconciler's `reconcile` returned it (the driver calls the two separately), not a driver record |
   | `deployed`, ghost record `g`, `conf_step` (`restart_authority`) | model-only: `deployed` is "the intent exists" (an input written through the intent store), `g` states invariants only, `conf_step` is the conformance recorder; none is projected |
   | liveness role live, streak (`liveness_gate` `lv`) | role live: `ProbeRunner::is_role_live`. The retained-descriptors flag is model-only; the streak is an input (`same_status_runs` of the probe rows the recording prober writes), its effect read as the liveness `StopAllocation` |
+  | `rset`, `exitrep` (`guest_report_host`, D13) | `GuestListenerReports::reported(alloc)`; the `ExitEvent` `kind` and `exit_code` taken from `VmDriver::take_exit_receiver`, three-valued. Exact pins, the action mapping including `VmmExit`, and the runs: § Formal protocol model — D13 to D16 |
 
   Actions map to: `Driver::on_alloc_running`, `Driver::on_alloc_terminal`,
   `Driver::release_for_exit_emission` through the shim `dispatch` driving port;
@@ -1678,7 +1694,7 @@ accepted until the user accepts D13 to D16.
 
 | ID | Contract / invariant | Production owner path | Fault stimulus | Oracle | Tier |
 |---|---|---|---|---|---|
-| S-50 | **PR-1, the board's set.** Entry lifetime; the set only grows and stays within the declared set | `GuestListenerBoard` through `GuestListenerReports::reported` after `VmDriver::start` / `on_alloc_terminal` | proptest over sequences of record (declared, undeclared, duplicate, another allocation's), a second open of an open id, close, record after close | `reported` is empty before open and after close; during the entry's life the set only grows and `⊆ declared`; a second open changes neither set nor declared; the record that inserted reports so (the one check-and-act) and a duplicate reports not | Tier 1 proptest; mutation target |
+| S-50 | **PR-1, the board's set.** Entry lifetime; the set only grows and stays within the declared set | `GuestListenerBoard` driven only through the beacon reader (scripted `SimBeaconIo` lines) and `VmDriver::start` / `on_alloc_terminal`, observed through `GuestListenerReports::reported` | proptest over sequences of scripted lines (declared, undeclared, duplicate, another allocation's), then `on_alloc_terminal`, then lines after close | `reported` is empty before `start` and after `on_alloc_terminal`; during the entry's life the set only grows and `⊆ declared`; a duplicate changes nothing (insertion is observed as a change of `reported`) | Tier 1 proptest; mutation target |
 | S-51 | **PR-1, no completion on a no-op; host reader.** `changed` completes on none of: duplicate, undeclared pair, another allocation's report, no-entry id, record after close; a waiter pending at close is not woken. Reader: a garbage line after `READY` is dropped with a warn event naming the allocation; a `Listen` line after `Exit` changes neither the set nor the exit report; a `Listen` never occupies the exit report | `GuestListenerBoard` and the real beacon reader driven by `SimBeaconIo` (`guest_write`, `guest_close`, `release_read`) | scripted lines in each order; close with a pending `changed` | each `changed` future stays pending (polled under a seeded executor) for the no-op cases; the pending one at close is not completed; reader outcomes as stated. `SimGuestListenerReports` is driven through the same clauses and a `guest_listener_reports_equivalence` test runs the board and the sim through one call sequence and compares `reported` and completions (design rule: a trait's contract is enforced by an equivalence test) | Tier 1 |
 | S-52 | **PR-1, `changed`.** `GuestListenerChangedNeverMissesAnInsertion`: if the set differs from `seen` when `changed` is called it completes at once; an insertion between a `reported` and a `changed` is not lost; cancel-safe (a dropped `changed` future then an insertion: the next `changed(seen)` completes at once) | board + `SimClock` under seeded schedules of `reported` / `changed` / record / cancel | schedule variation on the order of the four | the invariant holds in every schedule; completion is on the insertion, with no clock advance; seed printed | Tier 1 seeded sim invariant |
 | S-53 | **D14 item 3, the guest-listener task rows.** `NoFailBeforeDeadline`, `NoPassAfterEnding`; rows use the shared run state (PROBE-RUN-COUNT unchanged) | real `ProbeRunner::start_alloc(&AllocationSpec)` with `declared_listeners`, `SimGuestListenerReports`, `SimObservationStore`, `SimClock` | the declared set completes before / after the deadline; a failing observation write on the `Pass` (retried until it lands) and on a `Fail`; `stop_alloc` mid-wait and between the insertion and the write | `Pass` is the first row with `same_status_runs` 1 and `run_seq` 1; no row before the deadline; the first `Fail` at the deadline has `same_status_runs` 1, then 2, 3, … one per interval; a failed write advances neither number; no row write is started after cancellation; the existing run-numbering property (`run_numbering_tests.rs`) is run with the new task as a producer | Tier 1 composed, seeded; mutation target |
@@ -1844,9 +1860,9 @@ Growth beyond either budget needs the user's approval.
 
 - Model checks: the recorded run (`specs/quint/service-allocation-readiness-and-ending/evidence/summary.md`)
   is the authority for counts and times. D12, D17, R2-1, R2-2 and B3 add none. The beacon
-  report protocol (D13 items 1 and 3) adds one module: one `step` relation, five named runs,
-  one hazard, a handful of invariants (§ Formal protocol model — D13 to D16); the model state
-  is a few small sets and sequences, so it is an evaluator-scale check, not a TLC-scale one.
+  report protocol (D13 items 1, 3 and 10) adds two small modules, `guest_report` and the
+  conformance projection `guest_report_host` (§ Formal protocol model — D13 to D16); counts
+  and times are the recorded run's, not restated here.
 - Conformance: one `#[quint_test]` per kept named run and one `#[quint_run]` per
   module, in the owning crate's `integration-tests` lane on metal. No new lane, tool or
   xtask subcommand.
@@ -1875,100 +1891,67 @@ deleted. The `terminal_announced` bookkeeping stays.
 ## Wave: DESIGN / [REF] Modeler change list (consolidated)
 
 The architect does not edit the `.qnt` files, `checks.toml`, `README.md` or `evidence/`. The
-`quint-modeler` runs through `cargo xtask metal run --` (never Lima). Outstanding:
+`quint-modeler` runs through `cargo xtask metal run --` (never Lima). The earlier work orders
+(`gl` flag and counter for P1; the `guest_report` and `guest_report_host` modules) are done and
+recorded in the spec directory; only the changes below are outstanding. User rulings R1 and R2
+(2026-11-04, "proceed with recommendations") are in § Approval record.
 
-**M-3. `restart_authority` gains one workload-level flag for P1 (P1 accepted by the user,
-2026-11-04, option (a)).** Replace the current PR-3 edit of `StartupRow`
-(`restart_authority.qnt` ~214-216, "a Fail written once the deadline passed carries MAXA"),
-which changed the counter of **every** startup row and so altered the stop rule of explicit
-`[[health_check.startup]]` dial probes, which D15 and G-10 (6) say are unchanged. Instead:
-1. **Counter, both kinds honest.** `sstreak` on a `fail` row is `if a.sstreak < MAXA then
-   a.sstreak + 1 else MAXA` whatever the deadline state (the original rule; the cap is the
-   model's bound), and 0 on a `pass`. No `a.dl` term.
-2. **A workload-level flag `gl`** (the Service's startup descriptor is `GuestListeners`; set at
-   `Deploy` beside `decl`, only possible with `decl`). It carries two rules and nothing else:
-   (i) the producer rule, `StartupRow(i, "fail")` is enabled for a `gl` workload only once
-   `a.dl` (no `Fail` before the deadline, PR-3); a `pass` is unconstrained; (ii) the gate
-   threshold, `startupGates` uses `a.sstreak >= (if gl then 1 else MAXA)`.
-3. **Named runs** (each in `checks.toml`, `backend = "evaluator"`): keep
-   `first_fail_at_deadline_with_no_earlier_row_stops` with `gl` set, and change its expectation
-   from `sstreak == MAXA` to `sstreak == 1 and startupStopEnabled(...)`; add
-   `explicit_probe_fail_after_deadline_keeps_counted_streak` with `gl` unset: the deadline
-   passes with no earlier row, the first `Fail` carries `sstreak == 1`, `startupStopEnabled` is
-   false, the second `Fail` carries `sstreak == MAXA` and enables the stop. Add a second
-   `gl` run if none shows `Fail, Fail` after the deadline with D8 re-emitting per row
-   (`sstreak` 1 then 2, `sseq` 1 then 2) — an existing D8 run may be extended instead.
-4. **No new hazard unless one exists to violate.** The decision is the gate threshold; add the
-   variant "the gate uses `MAXA` for `gl`" only if an existing progress or safety property
-   fails under it (a `gl` workload whose first `Fail` at the deadline is not stopped until
-   `MAXA - 1` more rows). If none does, report that and add no check (the new run is the
-   evidence). Do not add a witness.
-5. Confirm by run that a startup `Pass` with no earlier `Fail` is reached
-   (`startup_stop_then_successor_passes_is_stable` or `pre_startup_crash_then_successor_passes`).
+**R1. `guest_report_host` gains `VmmExit` and a three-valued `exitrep`.** Pins are in
+§ Formal protocol model — D13 to D16 (pinned accessors, action mapping, named runs):
+1. `exitrep` takes `none`, `guest-reported`, `no-report`. The module also holds a model-only
+   guest status once the reader has read `exit`.
+2. New action `VmmExit`, enabled once the guest-report wait has ended; the only action that
+   moves `exitrep` off `none`; it yields `guest-reported` when the reader holds a guest status
+   and `no-report` otherwise. Every other action leaves `exitrep` as it is (the old `HostRead`
+   on `exit` no longer sets it).
+3. Runs: `host_listen_after_exit_is_ignored` expects `exitrep == none` until `VmmExit`, then
+   `guest-reported`, with `rset` unchanged by the later `listen`;
+   `host_beacon_closes_with_partial_set` expects `no-report` after `VmmExit`;
+   `host_garbage_line_is_dropped` ends with `VmmExit` and `guest-reported`;
+   `host_all_declared_reported` keeps `exitrep == none`. Each stays in `checks.toml`.
 
-**M-6. New module for the beacon report protocol (D13 items 1 and 3, 10), narrowed in
-round 4.** The module, its variables, actions, named runs and pinned accessors are specified in
-§ Formal protocol model — D13 to D16. In `guest_report.qnt`, `hazard/guest_report_hazards.qnt`,
-`checks.toml`, `README.md` and `evidence/`:
-- **Keep** the invariants `ListenBeforeExit` and `DeliveredBeforeExit`, the temporal
-  `ExitEventuallyReported`, the five named runs, and the one hazard check
-  `gr-hazard-no-drain-before-exit` (on `DeliveredBeforeExit`).
-- **Drop** the second hazard check `gr-hazard-no-drain-before-exit-listen-order` and its
-  traces; the invariants `OneWriter`, `NoLateAccept`, `ExitNotMasked` and `SetWithinProduced`
-  with their `checks.toml` entries (`gr-one-writer`, `gr-no-late-accept`, `gr-exit-not-masked`,
-  `gr-set-within-produced`), their evidence, the README rows and the ghosts `wapp` and `endset`.
-  The `HostRead` guards stay (they are the design's reader rule); no invariant restates them.
-- **Conformance projection (A3, accepted by the user 2026-11-04; § Formal protocol model).**
-  Add a host-input projection module `guest_report_host` in `guest_report.qnt` (or a sibling
-  file it imports from; the modeler's choice), the only conformance target of the report
-  protocol. It declares its own `step` relation and the named runs below, each registered in
-  `checks.toml` with `backend = "evaluator"`. The full `guest_report` module keeps all
-  guest-side actions and its five runs, and is not a conformance target.
-  - **State.** `rset` (the reported set of declared pairs), `exitrep` (unset or set), `wait`
-    (waiting or ended, **model-only**, never projected), `lines` (the scripted input not yet
-    consumed, a sequence over `listen(p)`, `exit`, `junk`; **model-only**), `eof`
-    (**model-only**). The declared set is a constant of the module; the pair picked for a
-    valid line ranges over the declared pairs and one undeclared pair (a nondet pick).
-  - **Actions to driving-port mapping** (every handler calls the owner through the existing
-    `BeaconIo` seam: `SimBeaconIo` stepped and scripted, `overdrive-core/src/vm/beacon.rs:431-450`,
-    `overdrive-sim/src/adapters/beacon_io.rs`; no new surface):
+**R2. Trims.**
+1. Delete from `guest_report.qnt`, `checks.toml`, the `evidence/` traces and the README the three
+   full-module runs `garbage_line_is_dropped`, `all_declared_reported` and
+   `beacon_closes_with_partial_set`. Keep `ring_drop_leaves_set_partial` and
+   `listen_then_exit_drains_first`.
+2. In `restart_authority.qnt` pin `gl = false` in the exhaustive instance `ra_ok` and in every
+   hazard instance that imports `restart_authority`; `gl` stays free only in `ra_conf`.
+3. Delete the named run `guest_listener_fail_fail_reemits_stop_per_row` (its `checks.toml`
+   entry and README row). Fold its D8 re-emission expectation into
+   `first_fail_at_deadline_with_no_earlier_row_stops` (a `Fail` at the deadline stops the
+   instance; a second `Fail` with the first stop not landed re-emits the stop, `sstreak` 1 then
+   2, `sseq` 1 then 2), so one `gl` run carries it.
+4. Keep the invariant `ListenBeforeExit` (it is not folded into `DeliveredBeforeExit`).
 
-    | Action | Driving-port call |
-    |---|---|
-    | `HostRead` | `SimBeaconIo::release_read`: the real reader consumes the next scripted line and routes it (D13 item 3) |
-    | `AppendListen(p)` (a valid `LISTEN <proto> <port>` line, `p` a nondet pick) | `SimBeaconIo::guest_write` of that line |
-    | `AppendExit` (an `EXIT` line) | `SimBeaconIo::guest_write` of that line |
-    | `HostGarbage` (an unparseable line) | `SimBeaconIo::guest_write` of an unparseable line |
-    | `BeaconClose` (EOF) | `SimBeaconIo::guest_close` |
-
-    Appends are unordered with respect to each other (the guest's drain rule is not a host
-    concern), so the projection reaches `listen` after `exit`, which is the host reader's
-    own rule.
-  - **State projection.** `rset` ↔ `GuestListenerReports::reported(alloc)` (D13 item 10; the
-    entry is open for the whole run, since `close` is lifecycle and is not an action of the
-    projection); `exitrep` ↔ the `ExitEvent` on the receiver returned by `take_exit_receiver`.
-    `wait`, `lines` and `eof` are model-only; the driver reads no `Sim*` internals and no
-    bookkeeping of its own.
-  - **Named runs** (host-visible subsets of the full-module runs, plus the reader's rule):
-    `host_all_declared_reported` (valid declared lines then `HostRead`s: `rset` reaches the
-    declared set); `host_garbage_line_is_dropped` (`HostGarbage` mid-stream; the following
-    `listen` and `exit` still take effect); `host_beacon_closes_with_partial_set` (EOF with
-    `rset` partial: the wait ends, `rset` stays as it was, `exitrep` unset);
-    `host_listen_after_exit_is_ignored` (an `exit` line then a `listen` line: `exitrep` set,
-    `rset` unchanged by the later line). Each has a `#[quint_test]` in the driver; the driver
-    also carries `#[quint_run]`.
-  - **Hazard: none.** The decision's hazard is `gr-hazard-no-drain-before-exit` in the full
-    module (one hazard per decision); the reader's rule is a guard of `HostRead` and the run
-    `host_listen_after_exit_is_ignored` is its evidence. Do not add a witness.
-  - **Invariants: none of its own.** The `HostRead` guards keep `rset` within the declared set
-    and growing only; conformance compares `rset` and `exitrep` with the model after every
-    step.
-  - The README's rows for the `reported` accessor read the set while the entry is open (the
-    entry is removed only by `close`, D13 item 10; A1).
-- **Pointers (A7).** README GR-4 and the model header cite the V42 row of the feature delta
-  for the `CLONE_INTO_CGROUP` claim; do not restate it.
-The modeler writes and checks it, registers every run in `checks.toml`, and records
-`evidence/` with `--record`.
+**README and `checks.toml` header fixes.**
+1. `checks.toml` header comment and README opening paragraph: the decisions list includes D13
+   and D14 (with D15 and D16 as consumers of the same model); the module count is seven
+   modules in six spec files (`hook_ownership`, `restart_authority`, `liveness_gate`,
+   `progress_deadline`, `stream_snapshot`, `guest_report`, `guest_report_host`); say that `guest_report` is the model check and `guest_report_host` the
+   conformance target.
+2. The `checks.toml` comment at the `guest_report` block ("evaluator-scale", "M-6") is
+   replaced by a one-line description naming both modules; `guest_report` is not described as
+   evaluator-scale (its invariants and temporal property are TLC checks; only its runs are
+   evaluator runs). Remove the "M-3" and "M-6" tags everywhere in the spec directory.
+3. README § Hazards, row D13 item 1: replace "(one check each on the one hazard instance)" with
+   "the single check `gr-hazard-no-drain-before-exit`, which expects a violation of
+   `DeliveredBeforeExit`".
+4. README § Invariants: the `guest_report` rows (`ListenBeforeExit`, `DeliveredBeforeExit`,
+   `ExitEventuallyReported`) appear under the `stream_snapshot` module cell. Give them their own
+   module cell, `guest_report`.
+5. README § Findings: renumber the list from 1 (it starts at 5 today, after the pointer to the
+   feature delta's R-1 to R-4, and continues as items 8 and 9 under the `guest_report` heading).
+   Use one continuous numbering across the section.
+6. README § `restart_authority` and the guest-listener producer: drop the "(M-3)" tag and the
+   run `guest_listener_fail_fail_reemits_stop_per_row` (R2).
+7. README § Modules (`guest_report_host` row), § "guest_report: coverage split" action table and
+   pinned-accessors paragraph, and the file header comment of `guest_report.qnt`: add `VmmExit`
+   (`SimVmm::exit_process` plus the exit-gate release) and the three-valued `exitrep`
+   (`none` / `guest-reported` / `no-report`, projected from the `ExitEvent` kind and
+   `exit_code` on the `take_exit_receiver` receiver); drop the three removed full-module runs
+   from the Named runs table.
+8. Record with `--record` after the changes; `verify-evidence` must pass.
 
 ## Wave: DESIGN / [REF] D17 — a broker submit wakes the convergence loop at once (Accepted 2026-11-03; shape choices S1 to S6 accepted as proposed)
 
@@ -2064,10 +2047,10 @@ reviews existing tests that assume nothing drains until `SimClock` advances
 > Authored by Morgan (nw-solution-architect), 2026-11-03, PROPOSE mode, scope: all
 > priorities. Origin: the user's ruling of 2026-11-03, "Drop inference and take readiness
 > from the guest itself". **Status: user-approved in direction; V41 and V42 held. The rulings
-> PR-1 to PR-4 are recorded in § Approval record, the one home for their text. Round-4
-> revisions, accepted 2026-11-04 (§ Approval record): P1 (the row counter and the stop gate's
-> attempts threshold, D14 item 3), A1 (the board's entry lifetime, D13 item 10), and A3 (the
-> host-input conformance projection, § Formal protocol model).** None of D13 to D16 is yet
+> PR-1 to PR-4 are recorded in § Approval record, the one home for their text, with P1 (the
+> row counter and the stop gate's attempts threshold, D14 item 3), A1 (the board's entry
+> lifetime, D13 item 10), A3 (the host-input conformance projection), R1 and R2 (§ Formal
+> protocol model).** None of D13 to D16 is yet
 > **Accepted**, none authorises DISTILL or DELIVER, and ADR-0058 stays operative until
 > ADR-0270 is accepted. Decision records:
 > [ADR-0272](../../product/architecture/adr-0272-the-guest-observes-workload-listeners-with-kernel-hooks-not-a-poll.md) (D13, observation),
@@ -2186,7 +2169,7 @@ Rejected alternatives (`fentry`, `sock_diag` polling, workload-signalled readine
    item 6):**
    - **P-a. One object.** The three listen programs live in the guest eBPF object
      `overdrive-init` already loads. A second `Ebpf::load` of a separate object is not
-     permitted: it costs +20.4 ms p50 on the pre-`READY` path (item 6).
+     permitted: it costs about 20 ms on the pre-`READY` path (V42 row).
    - **P-b. Root programs remain link attachments.** The existing root programs stay
      `BPF_F_ALLOW_MULTI` link attachments (aya `bpf_link_create`, `kernel/bpf/cgroup.c:1506-1507
      @ v7.0`), so they stay effective in the workload cgroup. A legacy `BPF_PROG_ATTACH`
@@ -2253,20 +2236,11 @@ Rejected alternatives (`fentry`, `sock_diag` polling, workload-signalled readine
    no listener is missed: attaching after the workload ran reported 0 of 50, so the attach
    cannot move after `EXEC`. Findings: `spike/findings-boot-cost.md`, verdict PARTIAL on one
    point only (the guest PID 1 is an instrumented copy of the real init, equivalent to it by
-   a host-side control, A minus R -1.1 ms). **PR-2 shape cost (V42, held, 2026-11-04,
-   `findings-workload-cgroup.md`, 40 interleaved boots per variant, two runs within 0.2 ms):**
-   the design (programs in the existing object, attached to the workload cgroup) adds
-   **+0.88 ms at p50** over the same object without them (paired p90 +1.66 ms, max +2.49 ms).
-   Carrying the programs and their two maps without attaching: -0.01 ms; the workload cgroup
-   `mkdir` plus placement: +0.01 ms (0.07 ms absolute); attaching the three programs: 0.56 ms.
-   **Hazard, and the reason for P-a (item 1):** a second `Ebpf::load` of a separate object costs
-   **+20.4 ms at p50** (aya 0.13.1 `EbpfLoader::new()` parses kernel BTF eagerly,
-   `aya-0.13.1/src/bpf.rs:169-171`; `.btf(None)` does not help), which meets the +20 ms
-   falsification bar. The spike's same-object arms use a spike-built copy of the guest object
-   (the xtask-built object loads about 2.8 ms slower in this guest; not investigated).
-   **Not measured:** the ring was 1 MiB; the forwarder thread, the `LISTEN` write path and
-   the drain were not timed; one guest kernel, a warm host. Budget for what D13 adds to the
-   pre-`READY` path: about +0.9 ms p50 (+1.7 ms p90), against about 117 ms of existing BPF
+   a host-side control, A minus R -1.1 ms). **PR-2 shape cost:** the design (programs in the
+   existing object, attached to the workload cgroup) adds **+0.88 ms at p50** over the same
+   object without them (paired p90 +1.66 ms, max +2.49 ms); the breakdown, the hazard behind P-a
+   and what was not measured are in the V42 row of § Spike table. Budget for what D13 adds to
+   the pre-`READY` path: about +0.9 ms p50 (+1.7 ms p90), against about 117 ms of existing BPF
    work.
 7. **Program shape.** aya attaches through `bpf_link_create`, which always sets
    `BPF_F_ALLOW_MULTI` (`kernel/bpf/cgroup.c:1506-1507 @ v7.0`), so a second sockops attach
@@ -2287,8 +2261,10 @@ Rejected alternatives (`fentry`, `sock_diag` polling, workload-signalled readine
    (`src_ip6` for post-bind6, `local_ip6` for sockops): words 0 and 1 zero, word 2
    `htonl(0x0000ffff)` (the constant as the `__be32` word the hooks read, bytes `00 00 ff ff`;
    the host-order value `0x0000ffff` compared against a `__be32` word is the byte-order trap
-   of `.claude/rules/bpf.md` Rule 3), and the high byte of word 3 (the first address octet)
-   equal to 127. An `AF_INET6` socket bound to
+   of `.claude/rules/bpf.md` Rule 3), and the first byte of word 3 in memory order (the first address octet)
+   equal to 127. Word 3 is a `__be32` read on a little-endian guest, so that byte is the low
+   byte of the loaded `u32`: the test is the explicit mask `word3 & 0xff == 127`, not a
+   host-order shift or compare. An `AF_INET6` socket bound to
    `::ffff:127.0.0.1` is reachable only on loopback, so reporting it would satisfy a declared
    listener the workload cannot serve. The spikes exercised `127.0.0.1` and `::1` only; the
    v4-mapped case is a Tier-3 scenario in G-10.
@@ -2370,9 +2346,8 @@ Rejected alternatives (`fentry`, `sock_diag` polling, workload-signalled readine
     Writer (concrete, `overdrive-worker`, not on the port; **internal structure, the
     crafter's**): the board implements the port and is fed by the beacon reader. Pinned
     behaviour only: the entry is created by `VmDriver::start` before the beacon reader runs,
-    from `AllocationSpec.declared_listeners` (D14 item 2), and opening an id that already has
-    an entry changes nothing (an id is never reused, ADR-0105, so reopening a closed id is
-    unreachable); recording is the check-and-act (`rust.md` § TOCTOU): one locked operation
+    from `AllocationSpec.declared_listeners` (D14 item 2); an id is opened once (ids are never
+    reused, ADR-0105); recording is the check-and-act (`rust.md` § TOCTOU): one locked operation
     reports whether it inserted, and `changed` waiters wake only on an insertion; a duplicate,
     an undeclared pair, an id with no entry, and a record after close are no-ops and complete
     nothing; the entry is removed by `VmDriver::on_alloc_terminal` after `ProbeRunner::stop_alloc`,
@@ -2440,8 +2415,11 @@ Decision record: ADR-0269.
    full set by construction and the two cannot drift. Alternative: keep both fields, each
    projected separately in three `WorkloadLifecycle` construction sites; rejected because
    nothing then ties them together, and a Service edit that changes one projection and not
-   the other breaks TPROXY or the gate silently. Cost: a mechanical change at about 25
-   struct literals (almost all tests set `service_ports: Vec::new()`), two production
+   the other breaks TPROXY or the gate silently. Cost: a mechanical change at `service_ports`'s
+   213 matching lines across 72 files under `crates/` (grep at 2026-11-04; almost all are tests
+   that set `service_ports: Vec::new()`, and they include the hydration golden fixture
+   `hydration_golden/workload_lifecycle.txt` and the sim trajectory fixture
+   `workload_lifecycle_trajectory.txt`, which are regenerated, not edited by hand), two production
    consumers, one accessor; an unfiltered future consumer would install a TPROXY rule for a
    UDP port, which the accessor makes the only TPROXY-facing read.
 3. **Producer (PR-3: no `Fail` row before the deadline; P1, accepted 2026-11-04: the row's
@@ -2665,21 +2643,21 @@ hooks' real-environment proof is V34 to V39 and V42.
 **Required boundary scenarios (DISTILL obligations once accepted).** The beacon-channel
 sequences below are specified once, by the named `guest_report` runs (§ Formal protocol
 model); a scenario cites its run and does not restate it. (1) all declared listeners reported
-→ `Pass` → `Stable` (run `all_declared_reported`); (2) one never reported → no row before the
+→ `Pass` → `Stable` (run `host_all_declared_reported`); (2) one never reported → no row before the
 deadline, the first `Fail` at the deadline (run `first_fail_at_deadline_with_no_earlier_row_stops`),
 stop, one `Fail` per interval while the stop has not landed, retry, give-up; (3) `Running` row
 and an opt-out Service unchanged; an undeclared port changes nothing; (4) late `Pass`: no
 `Pass` write is started after the task observed cancellation (`stop_alloc`), and a `Pass` that
 lands after the exit event is inert (D13 item 10); (5) beacon closed with the set partial →
-no `Pass`, deadline stop (run `beacon_closes_with_partial_set`); guest reboot is a new
+no `Pass`, deadline stop (run `host_beacon_closes_with_partial_set`); guest reboot is a new
 allocation with an empty set; (6) opt-out and explicit-probe Services are behaviourally
 unchanged, including an explicit probe's `Fail` written after the deadline keeping its counted
 streak (run `explicit_probe_fail_after_deadline_keeps_counted_streak`, P1); (7) **host reader**
 (Tier 1, scripted beacon lines through the reader's `BeaconIo` seam): a garbage line after
 `READY` is dropped with a warn event and the following `Listen` and `Exit` still take effect
-(run `garbage_line_is_dropped`); a `Listen` line after `Exit` changes neither the set nor the
-exit report (run `host_listen_after_exit_is_ignored` of the host-input projection, A3; the
-full module's drain rule keeps such a line off the wire, so only the projection reaches it); (8) **ring drop** (seeded sim): the declared listener's report
+(run `host_garbage_line_is_dropped`); a `Listen` line after `Exit` changes neither the set nor
+the exit report (run `host_listen_after_exit_is_ignored`; the full module's drain rule keeps
+such a line off the wire, so only the host-input projection reaches it); (8) **ring drop** (seeded sim): the declared listener's report
 never reaches the board while the workload is running → no `Pass`, `Fail` at the startup
 deadline, stop, restart, give-up `StartupProbeFailed` naming the missing listener (the stated
 bounded exposure, D13 item 9; run `ring_drop_leaves_set_partial`);
@@ -2701,11 +2679,14 @@ gives up `BackoffExhausted`. D11 and ADR-0095 unchanged. ADR-0080: one more task
 
 ### Formal protocol model — D13 to D16
 
-**D14 and D15 add no state to the existing modules** (a producer for the existing startup
-rows; the confirmation is M-3). **The beacon report channel (D13 items 1, 3 and 10) is an
-ordered, single-writer, crash-sensitive protocol and carries its own module**, `guest_report`,
-in `specs/quint/service-allocation-readiness-and-ending/` (specified here; the modeler writes
-and checks it, M-6). The guest-signal spike measured the hazard: 185 of 300 boots delivered a
+**D14 and D15 add no state to the existing modules.** Their producer is the existing startup
+row; the workload-level flag `gl` in `restart_authority` carries the one rule that differs
+(no `Fail` before the deadline; stop-gate threshold 1, P1) and is free only in the conformance
+instance `ra_conf`, pinned to `false` in the exhaustive `ra_ok` instance and its hazard
+instances. **The beacon report channel (D13 items 1, 3 and 10) is an ordered, single-writer,
+crash-sensitive protocol and carries two modules** in `specs/quint/service-allocation-readiness-and-ending/guest_report.qnt`:
+`guest_report` (the model check, not a conformance target) and `guest_report_host` (the
+conformance target). The guest-signal spike measured the hazard: 185 of 300 boots delivered a
 `LISTEN` after `EXIT` without the drain.
 
 - **Variables.** `wl` (workload: not started, running, exited); `ring` (the kernel's listen
@@ -2732,14 +2713,13 @@ and checks it, M-6). The guest-signal spike measured the hazard: 185 of 300 boot
   read, and `set` within the produced pairs (true by the `HostRead` action's own definition,
   no hazard removes them); `set` not changing after the wait ended (the reader's rule of
   item 3 is a guard in `HostRead`; the late-`Listen` clause is exercised by the host-input
-  projection's run `host_listen_after_exit_is_ignored`, S-51). The ghosts that served only those checks (`endset`, `wapp`) are dropped.
-- **Named runs** (one per critical scenario; each listed in `checks.toml` with `backend =
-  "evaluator"`): `listen_then_exit_drains_first` (happy path and the 185-of-300 race: a
-  `LISTEN` produced just before exit is on `wire` before `exit`); `all_declared_reported`
-  (the `set` reaches the declared pair, the input to `Pass`); `garbage_line_is_dropped`
-  (`HostGarbage` mid-stream; later `listen` and `exit` still take effect); `ring_drop_leaves_set_partial`
-  (a dropped declared event: `set` stays partial, the wait still ends on `exit`);
-  `beacon_closes_with_partial_set` (EOF with `set` partial: the wait ends, `set` frozen).
+  projection's run `host_listen_after_exit_is_ignored`, S-51).
+- **Named runs of the full module** (the guest-side scenarios only; each listed in `checks.toml`
+  with `backend = "evaluator"`): `listen_then_exit_drains_first` (happy path and the
+  185-of-300 race: a `LISTEN` produced just before exit is on `wire` before `exit`) and
+  `ring_drop_leaves_set_partial` (a dropped declared event: `set` stays partial, the wait still
+  ends on `exit`). The host-visible scenarios (all declared reported, a garbage line, EOF with a
+  partial set, a `listen` after `exit`) are runs of `guest_report_host`, below.
 - **One hazard, one check:** `hz_no_drain_before_exit` — `WriterExit` is enabled without the
   ring being empty (the drain removed). The one check expects a violation of
   `DeliveredBeforeExit`. No second check on `ListenBeforeExit` (the same decision), and no
@@ -2749,12 +2729,23 @@ and checks it, M-6). The guest-signal spike measured the hazard: 185 of 300 boot
 - **Assumptions, each with a discharging item.** The kernel enqueues a listen event for every
   `listen()` of the workload before the workload can observe the socket serving (V34, V35,
   V36); the ring drops and counts on full (V37); vsock preserves the order of one stream (V38).
-- **Pinned accessors for the conformance driver.** `set` (`rset` in the spec) ↔
-  `GuestListenerReports::reported(alloc)` (D13 item 10; **the only conformance read of the
-  board**); `exitrep` ↔ the `ExitEvent` the driver's exit watcher emits on the receiver
-  returned by `take_exit_receiver`. `wait` is **model-only**: it has no accessor and is not
-  projected; its observable effects are covered by `set` and `exitrep`. `ring`, `wire`, `wl`,
-  `produced`, `eof` and `junk` are model-only.
+- **Pinned accessors for the conformance driver (module `guest_report_host`).** `set`
+  (`rset` in the spec) ↔ `GuestListenerReports::reported(alloc)` (D13 item 10; **the only
+  conformance read of the board**, read while the entry is open: `close` is lifecycle and not an
+  action of the projection). `exitrep` is **three-valued** and projects the `ExitEvent` taken
+  from the receiver returned by `VmDriver::take_exit_receiver` (`vm_driver.rs:1953`):
+  `none` = no `ExitEvent` is queued; `guest-reported` = an `ExitEvent` whose `kind` is
+  `CleanExit` or `Crashed { exit_code: Some(_), .. }` (the guest's `EXIT <status>` was read:
+  `classify_vm_exit` arms `Some(0)` and `Some(status)`, `vm_driver.rs:2150-2156`);
+  `no-report` = an `ExitEvent` whose `kind` is `Crashed { exit_code: None, .. }` (the guest
+  never sent `EXIT`, e.g. EOF first; `classify_vm_exit` arm `None`). An `ExitEvent` is emitted
+  only after the VMM has exited and the exit gate is released (`run_exit_watcher`,
+  `vm_driver.rs:2237-2330`: `drain_guest_report`, then the gate wait at `:2295`, then the
+  send at `:2329`), which is why `exitrep` stays `none` until the projection's `VmmExit`
+  action. `wait`, `lines`, `eof` and the status the reader holds for the pending event are
+  **model-only**: no accessor, never projected; their observable effects are covered by `set`
+  and `exitrep`. In the full module `ring`, `wire`, `wl`, `produced`, `eof` and `junk` are
+  model-only.
 - **Action to driving-port mapping (host-half conformance).** The driving seam is the
   existing scripted beacon source of the real host reader, not a new one: the reader consumes
   lines through the `BeaconIo` port (`overdrive-core/src/vm/beacon.rs:431-450`), and
@@ -2769,17 +2760,36 @@ and checks it, M-6). The guest-signal spike measured the hazard: 185 of 300 boot
   | `HostGarbage` | `SimBeaconIo::guest_write` of an unparseable line |
   | the line-appending writer actions (`WriterForward`, `WriterDrain`, `WriterExit`) | `SimBeaconIo::guest_write` of the `LISTEN`/`EXIT` line they append: the guest's effect on the host is only the line (**not** a writer seam: nothing in `overdrive-init` is observed) |
   | `BeaconClose` | `SimBeaconIo::guest_close`: EOF to the real reader |
+  | `VmmExit` (**R1**) | `SimVmm::exit_process` (the VMM process exits) followed by the driver's exit-gate release (`Driver::release_for_exit_emission`), so `run_exit_watcher` classifies the guest report (or its absence) and sends the `ExitEvent` (`vm_driver.rs:2237-2330`). The precedent is the `quint_flows_beacon` driver's `VmStop`, `vm_stop` (`crates/overdrive-worker/src/vm_driver/quint_flows_beacon.rs:446-465`): `self.vmm.exit_process(pid, Some(0), None)`, then `observe_vm_exits`, then the beacon seam's read release |
   | `WorkloadListen`, `WorkloadExit`, `Idle`, and the `ring`, `wl`, `produced` state | **model-only**: guest and kernel internals with no host-visible effect |
 
   **Constraint on the spec (A3, accepted by the user 2026-11-04):** testing.md forbids
-  an empty or unmapped handler in a conformance driver, so the three model-only actions
-  cannot sit in the `step` relation of the module a driver targets. The conformance target is
-  therefore a host-input projection of `guest_report` (module `guest_report_host`, its own
-  `step` and named runs: a valid line appended with the pair as a nondet pick, an exit line,
-  EOF, a garbage line, `HostRead`), and the five full-module runs keep their model-check role
-  and are not a conformance target. The projection's actions, State projection and named runs
-  are pinned in M-6. Cost: one small module and four small evaluator runs; no hazard, no
-  invariant, no witness of its own.
+  an empty or unmapped handler in a conformance driver, so the model-only actions cannot sit
+  in the `step` relation of the module a driver targets. The conformance target is therefore
+  the host-input projection `guest_report_host`, with its own `step` and no hazard, invariant
+  or witness of its own (the decision's hazard is `gr-hazard-no-drain-before-exit` in the full
+  module; the reader's rule is a guard of `HostRead`):
+  - **State.** `rset` (the reported set of declared pairs); `exitrep` (`none`,
+    `guest-reported`, `no-report`, as pinned above); model-only `wait` (waiting or ended),
+    `lines` (the scripted input not yet consumed: `listen(p)`, `exit`, `junk`), `eof`, and the
+    guest status the reader holds once it has read `exit`. The declared set is a module
+    constant; the pair of a valid line ranges over the declared pairs and one undeclared pair.
+  - **Actions:** `HostRead`, `AppendListen(p)`, `AppendExit`, `HostGarbage`, `BeaconClose`,
+    `VmmExit`. Appends are unordered with respect to each other (the guest's drain rule is not
+    a host concern), so the projection reaches `listen` after `exit`, which is the host
+    reader's own rule. `VmmExit` is enabled once the guest-report wait has ended (`exit` read,
+    or EOF reached); it sets `exitrep` to `guest-reported` if the reader holds a guest status,
+    else to `no-report`, and is the only action that changes `exitrep` from `none`.
+  - **Named runs** (each in `checks.toml`, `backend = "evaluator"`, each a `#[quint_test]` in
+    the driver, which also carries `#[quint_run]`):
+    `host_all_declared_reported` (valid declared lines then `HostRead`s: `rset` reaches the
+    declared set; `exitrep` `none`); `host_garbage_line_is_dropped` (`HostGarbage` mid-stream;
+    the following `listen` and `exit` still take effect, and after `VmmExit` `exitrep` is
+    `guest-reported`); `host_beacon_closes_with_partial_set` (EOF with `rset` partial: the wait
+    ends, `rset` stays as it was, `exitrep` stays `none` until `VmmExit`, then `no-report`);
+    `host_listen_after_exit_is_ignored` (an `exit` line then a `listen` line: `rset` unchanged
+    by the later line; `exitrep` `none` until `VmmExit`, then `guest-reported`).
+
   **Design gap, surfaced:** `overdrive-init`'s writer (`send(conn: &mut File, ..)`) has no seam that
   records the lines it writes, so the guest half (`ListenBeforeExit`, `DeliveredBeforeExit`)
   has no owner accessor in Tier 1. **User ruling 2026-11-04: accepted.** Conformance covers
@@ -2811,7 +2821,7 @@ mapping is in `spike/wave-decisions.md`.
 | ID | Shapes | Claim | Status |
 |---|---|---|---|
 | V41 | D13 (ADR-0268, ADR-0272); the cold-start budget | The listen programs add an acceptable cost to the pre-`READY` path of a first boot | **Discharged (held)**, `findings-boot-cost.md`, guest `7.0.0-38-generic`, 40 interleaved boots per variant: **+0.36 ms at p50** (paired p90 +1.29 ms, max +2.10 ms) against a same-toolchain baseline; the +20 ms bar was missed by about 50 times; today's pre-`READY` BPF work is 116.8 ms p50. PROMOTE. PARTIAL on one point: the guest PID 1 is an instrumented copy of the real init (equivalent by control, A minus R -1.1 ms; the copy was deleted). Unmeasured: the production merge and the PR-2 shape, the forwarder, drain and write path, a 4 MiB ring (the spike used 1 MiB) |
-| V42 | D13 PR-2 (ADR-0272); **contract-shaping; held, gates PR-2 (now Accepted in contract shape)** | With the listen programs attached to a workload cgroup that init creates and starts the workload in, on the real init: init's transport binds produce no report; the workload's listeners (and its forked children's) are all reported; there is no window in which the workload runs outside the cgroup; the existing correlation and connect programs still see the workload's sockets; the boot cost stays in the V41 range | **Discharged (held), 2026-11-04, PROMOTE PR-2**, `spike/findings-workload-cgroup.md`, guest kernel `7.0.0-38-generic`, Cloud Hypervisor v53.0.0 on native metal (`systemd-detect-virt: none`). Observed: 1000 of 1000 exact workload reports (400 single, 300 child-only, 300 parent-and-child), 0 from init, counters match events, 0 drops; negative controls hold (workload outside the cgroup 0 of 150; hooks at the root: 50 of 50 report init's `61000` and `61001-62024`); root programs effective in the child (flow stream header byte-identical, 80 of 80; absent 20 of 20 without the root sockops program); cost **+0.88 ms p50** (p90 +1.66, max +2.49) with the programs in the existing object, **+20.4 ms** for a second `Ebpf::load`. Pins P-a to P-d in D13 item 1. **The `CLONE_INTO_CGROUP` claim (single home; P-c and the model README GR-4 point here):** the workload is created directly in the cgroup, the atomic form of writing the child pid to `cgroup.procs` (`include/uapi/linux/sched.h:38`, `kernel/fork.c:2840-2842`, `kernel/cgroup/cgroup.c:6769-6838 @ v7.0`; without the flag a forked child takes its parent's css_set, `:6791-6794`). **Reproducing the spike** depends on `gen_init.py`, which regenerates the real init at build time from `crates/overdrive-init/src` with eight anchored patches, so a later `overdrive-init` change can break an anchor; the committed evidence (`raw-*.log`, `summary-*.txt`) is the record. Not shown: the production reader and beacon `LISTEN` path (Tier-3 boot scenarios), the missing-workload-binary exit-127 mapping (DELIVER note). Probe as planned: a spike-local copy of `overdrive-init` under `spike-scratch/` (the V41 copy was deleted) with the cgroup, the separate sockops program and the two `CgroupSock` programs; 1,000 real guest boots on metal for the report counts (init binds: expect 0; workload TCP listen and UDP bind: expect 1 each; a forking workload; a negative control spawning outside the cgroup, which must report from the root), 40 interleaved boots for the cost against V41's variants; the correlation scenario of V37 against the new object; guest `uname -r` recorded. Prediction: 0 init reports, 1000 of 1000 workload reports, cost within about 1 ms of V41's B. Falsification: any init report, any missed workload report, or a cost above V41's B by more than a few ms returns D13 to the user with the port-range filter or ordering alternatives (D13 item 1) |
+| V42 | D13 PR-2 (ADR-0272); **contract-shaping; held, gates PR-2 (now Accepted in contract shape)** | With the listen programs attached to a workload cgroup that init creates and starts the workload in, on the real init: init's transport binds produce no report; the workload's listeners (and its forked children's) are all reported; there is no window in which the workload runs outside the cgroup; the existing correlation and connect programs still see the workload's sockets; the boot cost stays in the V41 range | **Discharged (held), 2026-11-04, PROMOTE PR-2**, `spike/findings-workload-cgroup.md`, guest kernel `7.0.0-38-generic`, Cloud Hypervisor v53.0.0 on native metal (`systemd-detect-virt: none`). Observed: 1000 of 1000 exact workload reports (400 single, 300 child-only, 300 parent-and-child), 0 from init, counters match events, 0 drops; negative controls hold (workload outside the cgroup 0 of 150; hooks at the root: 50 of 50 report init's `61000` and `61001-62024`); root programs effective in the child (flow stream header byte-identical, 80 of 80; absent 20 of 20 without the root sockops program); cost **+0.88 ms p50** (p90 +1.66, max +2.49) with the programs in the existing object, **+20.4 ms** for a second `Ebpf::load`. Pins P-a to P-d in D13 item 1. **The `CLONE_INTO_CGROUP` claim (single home; P-c and the model README GR-4 point here):** the workload is created directly in the cgroup, the atomic form of writing the child pid to `cgroup.procs` (`include/uapi/linux/sched.h:38`, `kernel/fork.c:2840-2842`, `kernel/cgroup/cgroup.c:6769-6838 @ v7.0`; without the flag a forked child takes its parent's css_set, `:6791-6794`). **Reproducing the spike** depends on `gen_init.py`, which regenerates the real init at build time from `crates/overdrive-init/src` with eight anchored patches, so a later `overdrive-init` change can break an anchor; the committed evidence (`raw-*.log`, `summary-*.txt`) is the record. Not shown: the production reader and beacon `LISTEN` path (Tier-3 boot scenarios), the missing-workload-binary exit-127 mapping (DELIVER note). **Cost breakdown (the one home for the V42 figures; D13 item 6 cites this row):** 40 interleaved boots per variant, two runs within 0.2 ms; carrying the programs and their two maps without attaching -0.01 ms; the workload cgroup `mkdir` plus placement +0.01 ms (0.07 ms absolute); attaching the three programs 0.56 ms. A second `Ebpf::load` of a separate object costs +20.4 ms p50 because aya 0.13.1 `EbpfLoader::new()` parses kernel BTF eagerly (`aya-0.13.1/src/bpf.rs:169-171`; `.btf(None)` does not help), which meets the +20 ms falsification bar; this is the reason for P-a. The same-object arms use a spike-built copy of the guest object (the xtask-built object loads about 2.8 ms slower in this guest; not investigated). Not measured: the ring was 1 MiB; the forwarder thread, the `LISTEN` write path and the drain were not timed; one guest kernel, a warm host |
 
 ### Findings surfaced, not changed
 
@@ -2820,15 +2830,6 @@ mapping is in `spike/wave-decisions.md`.
 - **F-8.** ADR-0058's inferred probe targets `listeners[0]` over TCP whatever the protocol,
   and a UDP listener cannot be probed (TCP-only `listen_ports`); a UDP-first Service never
   passes today. D15 removes the case.
-
-### What remains before D13 to D16 are Accepted
-
-The user's rulings (PR-1 to PR-4 and the `guest_report` coverage split, 2026-11-04) are in
-§ Approval record. V42 is read into the design (PR-2 Accepted in contract shape). Remaining:
-the `quint-modeler` run (M-3 as revised, M-6 narrowed, with the A3 host-input projection);
-the independent re-review. The round-4 proposals (P1; A1, the board's entry lifetime, D13
-item 10; A3, the host-input conformance projection) were accepted on 2026-11-04. Each of ADR-0268 to ADR-0272 then
-moves to Accepted (ADR-0058 stays operative until ADR-0270 is accepted).
 
 ## Wave: DESIGN / [REF] Proposals not included in the design (the user decides)
 
@@ -2867,8 +2868,8 @@ an unchanged spec resume an operator-stopped workload (D11 reports the stopped s
 ## Wave: DESIGN / [REF] Open questions
 
 No contract-shaping item is open. The last one, **V42** (the PR-2 hook scope), is held
-(2026-11-04). No user decision is awaiting: the round-4 proposals P1, A1 and A3 were
-accepted on 2026-11-04 (§ Approval record).
+(2026-11-04). No user decision is awaiting; P1, A1, A3, R1 and R2 are accepted
+(§ Approval record).
 Process items:
 
 1. **ADR map.** D3 is ADR-0256, D5 is ADR-0257, D6 is ADR-0258, D7 is ADR-0259, D8 is
@@ -2876,9 +2877,9 @@ Process items:
    detail), D11 is ADR-0263; ADR-0255 keeps D1, D2 and D4 as one decision. B1 is ADR-0265,
    B2 is ADR-0266, D12 is ADR-0267 (amends the operative ADR-0096 with a dated note), D17 is
    ADR-0273; B3 is text in ADR-0258. D13 to D16 are ADR-0268 to ADR-0272.
-2. **Next gates:** the `quint-modeler` run on the § Modeler change list (the `guest_report`
-   module with its host-input projection, M-6, and M-3), then the independent DESIGN re-review of this revision (round 4).
-   V42 is held and read in.
+2. **Gate:** the independent DESIGN re-review. The `quint-modeler` change list (R1, R2 and the
+   header fixes) is § Modeler change list. On approval each of ADR-0268 to ADR-0272 moves to
+   Accepted (ADR-0058 stays operative until ADR-0270 is accepted).
 3. At landing, `.claude/rules/development.md` § "Reconciler I/O" ("Steady-state tick") and
    the `spawn_convergence_loop` doc comment gain the D17 wake; the user's rules docs are not
    edited by the architect.
