@@ -35,9 +35,10 @@ State 1: <Initial predicate>
 /\ ra_bugGuardAcceptsFailed_restart_authority_done = FALSE
 /\ ra_bugGuardAcceptsFailed_restart_authority_decl = FALSE
 /\ ra_bugGuardAcceptsFailed_restart_authority_cur = 0
+/\ ra_bugGuardAcceptsFailed_restart_authority_gl = FALSE
 /\ ra_bugGuardAcceptsFailed_restart_authority_conf_step = [init |-> [tag |-> "UNIT"]]
 
-State 2: <ra_bugGuardAcceptsFailed_restart_authority_Deploy line 142, col 3 to line 167, col 64 of module ra_bugGuardAcceptsFailed>
+State 2: <ra_bugGuardAcceptsFailed_restart_authority_Deploy line 149, col 3 to line 179, col 64 of module ra_bugGuardAcceptsFailed>
 /\ ra_bugGuardAcceptsFailed_restart_authority_used = 0
 /\ ra_bugGuardAcceptsFailed_restart_authority_deployed = TRUE
 /\ ra_bugGuardAcceptsFailed_restart_authority_at = ( 0 :>
@@ -74,9 +75,10 @@ State 2: <ra_bugGuardAcceptsFailed_restart_authority_Deploy line 142, col 3 to l
 /\ ra_bugGuardAcceptsFailed_restart_authority_done = FALSE
 /\ ra_bugGuardAcceptsFailed_restart_authority_decl = TRUE
 /\ ra_bugGuardAcceptsFailed_restart_authority_cur = 0
+/\ ra_bugGuardAcceptsFailed_restart_authority_gl = TRUE
 /\ ra_bugGuardAcceptsFailed_restart_authority_conf_step = [init |-> [tag |-> "UNIT"]]
 
-State 3: <ra_bugGuardAcceptsFailed_restart_authority_StartOk line 173, col 3 to line 212, col 64 of module ra_bugGuardAcceptsFailed>
+State 3: <ra_bugGuardAcceptsFailed_restart_authority_StartOk line 185, col 3 to line 226, col 64 of module ra_bugGuardAcceptsFailed>
 /\ ra_bugGuardAcceptsFailed_restart_authority_used = 0
 /\ ra_bugGuardAcceptsFailed_restart_authority_deployed = TRUE
 /\ ra_bugGuardAcceptsFailed_restart_authority_at = ( 0 :>
@@ -113,9 +115,10 @@ State 3: <ra_bugGuardAcceptsFailed_restart_authority_StartOk line 173, col 3 to 
 /\ ra_bugGuardAcceptsFailed_restart_authority_done = FALSE
 /\ ra_bugGuardAcceptsFailed_restart_authority_decl = TRUE
 /\ ra_bugGuardAcceptsFailed_restart_authority_cur = 0
+/\ ra_bugGuardAcceptsFailed_restart_authority_gl = TRUE
 /\ ra_bugGuardAcceptsFailed_restart_authority_conf_step = [init |-> [tag |-> "UNIT"]]
 
-State 4: <ra_bugGuardAcceptsFailed_restart_authority_Deadline line 480, col 3 to line 508, col 64 of module ra_bugGuardAcceptsFailed>
+State 4: <ra_bugGuardAcceptsFailed_restart_authority_Deadline line 461, col 3 to line 491, col 64 of module ra_bugGuardAcceptsFailed>
 /\ ra_bugGuardAcceptsFailed_restart_authority_used = 0
 /\ ra_bugGuardAcceptsFailed_restart_authority_deployed = TRUE
 /\ ra_bugGuardAcceptsFailed_restart_authority_at = ( 0 :>
@@ -152,9 +155,10 @@ State 4: <ra_bugGuardAcceptsFailed_restart_authority_Deadline line 480, col 3 to
 /\ ra_bugGuardAcceptsFailed_restart_authority_done = FALSE
 /\ ra_bugGuardAcceptsFailed_restart_authority_decl = TRUE
 /\ ra_bugGuardAcceptsFailed_restart_authority_cur = 0
+/\ ra_bugGuardAcceptsFailed_restart_authority_gl = TRUE
 /\ ra_bugGuardAcceptsFailed_restart_authority_conf_step = [init |-> [tag |-> "UNIT"]]
 
-State 5: <ra_bugGuardAcceptsFailed_restart_authority_StartupRow line 414, col 3 to line 466, col 64 of module ra_bugGuardAcceptsFailed>
+State 5: <ra_bugGuardAcceptsFailed_restart_authority_StartupRow line 704, col 3 to line 750, col 64 of module ra_bugGuardAcceptsFailed>
 /\ ra_bugGuardAcceptsFailed_restart_authority_used = 0
 /\ ra_bugGuardAcceptsFailed_restart_authority_deployed = TRUE
 /\ ra_bugGuardAcceptsFailed_restart_authority_at = ( 0 :>
@@ -162,7 +166,7 @@ State 5: <ra_bugGuardAcceptsFailed_restart_authority_StartupRow line 414, col 3 
         sup |-> TRUE,
         srow |-> "fail",
         sseq |-> 1,
-        sstreak |-> 2,
+        sstreak |-> 1,
         dl |-> TRUE,
         stable |-> FALSE,
         ann |-> FALSE,
@@ -191,9 +195,10 @@ State 5: <ra_bugGuardAcceptsFailed_restart_authority_StartupRow line 414, col 3 
 /\ ra_bugGuardAcceptsFailed_restart_authority_done = FALSE
 /\ ra_bugGuardAcceptsFailed_restart_authority_decl = TRUE
 /\ ra_bugGuardAcceptsFailed_restart_authority_cur = 0
+/\ ra_bugGuardAcceptsFailed_restart_authority_gl = TRUE
 /\ ra_bugGuardAcceptsFailed_restart_authority_conf_step = [init |-> [tag |-> "UNIT"]]
 
-State 6: <ra_bugGuardAcceptsFailed_restart_authority_Crash line 257, col 3 to line 304, col 64 of module ra_bugGuardAcceptsFailed>
+State 6: <ra_bugGuardAcceptsFailed_restart_authority_Crash line 273, col 3 to line 322, col 64 of module ra_bugGuardAcceptsFailed>
 /\ ra_bugGuardAcceptsFailed_restart_authority_used = 0
 /\ ra_bugGuardAcceptsFailed_restart_authority_deployed = TRUE
 /\ ra_bugGuardAcceptsFailed_restart_authority_at = ( 0 :>
@@ -201,7 +206,7 @@ State 6: <ra_bugGuardAcceptsFailed_restart_authority_Crash line 257, col 3 to li
         sup |-> FALSE,
         srow |-> "fail",
         sseq |-> 1,
-        sstreak |-> 2,
+        sstreak |-> 1,
         dl |-> TRUE,
         stable |-> FALSE,
         ann |-> FALSE,
@@ -230,9 +235,10 @@ State 6: <ra_bugGuardAcceptsFailed_restart_authority_Crash line 257, col 3 to li
 /\ ra_bugGuardAcceptsFailed_restart_authority_done = FALSE
 /\ ra_bugGuardAcceptsFailed_restart_authority_decl = TRUE
 /\ ra_bugGuardAcceptsFailed_restart_authority_cur = 0
+/\ ra_bugGuardAcceptsFailed_restart_authority_gl = TRUE
 /\ ra_bugGuardAcceptsFailed_restart_authority_conf_step = [init |-> [tag |-> "UNIT"]]
 
-State 7: <ra_bugGuardAcceptsFailed_restart_authority_SLStartupStop line 961, col 3 to line 1011, col 64 of module ra_bugGuardAcceptsFailed>
+State 7: <ra_bugGuardAcceptsFailed_restart_authority_SLStartupStop line 1022, col 3 to line 1074, col 64 of module ra_bugGuardAcceptsFailed>
 /\ ra_bugGuardAcceptsFailed_restart_authority_used = 0
 /\ ra_bugGuardAcceptsFailed_restart_authority_deployed = TRUE
 /\ ra_bugGuardAcceptsFailed_restart_authority_at = ( 0 :>
@@ -240,7 +246,7 @@ State 7: <ra_bugGuardAcceptsFailed_restart_authority_SLStartupStop line 961, col
         sup |-> FALSE,
         srow |-> "fail",
         sseq |-> 1,
-        sstreak |-> 2,
+        sstreak |-> 1,
         dl |-> TRUE,
         stable |-> FALSE,
         ann |-> TRUE,
@@ -269,4 +275,5 @@ State 7: <ra_bugGuardAcceptsFailed_restart_authority_SLStartupStop line 961, col
 /\ ra_bugGuardAcceptsFailed_restart_authority_done = FALSE
 /\ ra_bugGuardAcceptsFailed_restart_authority_decl = TRUE
 /\ ra_bugGuardAcceptsFailed_restart_authority_cur = 0
+/\ ra_bugGuardAcceptsFailed_restart_authority_gl = TRUE
 /\ ra_bugGuardAcceptsFailed_restart_authority_conf_step = [init |-> [tag |-> "UNIT"]]

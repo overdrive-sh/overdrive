@@ -1,6 +1,7 @@
 State 1: <Initial predicate>
 /\ ra_bugSlFinalisesCrash_restart_authority_g = [startupOverTerm |-> FALSE, emitCount |-> 0, stableOverAnn |-> FALSE]
 /\ ra_bugSlFinalisesCrash_restart_authority_cur = 0
+/\ ra_bugSlFinalisesCrash_restart_authority_gl = FALSE
 /\ ra_bugSlFinalisesCrash_restart_authority_used = 0
 /\ ra_bugSlFinalisesCrash_restart_authority_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ ra_bugSlFinalisesCrash_restart_authority_done = FALSE
@@ -37,9 +38,10 @@ State 1: <Initial predicate>
         author |-> "",
         crashed |-> FALSE ] )
 
-State 2: <ra_bugSlFinalisesCrash_restart_authority_Deploy line 141, col 3 to line 166, col 62 of module ra_bugSlFinalisesCrash>
+State 2: <ra_bugSlFinalisesCrash_restart_authority_Deploy line 148, col 3 to line 178, col 62 of module ra_bugSlFinalisesCrash>
 /\ ra_bugSlFinalisesCrash_restart_authority_g = [startupOverTerm |-> FALSE, emitCount |-> 0, stableOverAnn |-> FALSE]
 /\ ra_bugSlFinalisesCrash_restart_authority_cur = 0
+/\ ra_bugSlFinalisesCrash_restart_authority_gl = FALSE
 /\ ra_bugSlFinalisesCrash_restart_authority_used = 0
 /\ ra_bugSlFinalisesCrash_restart_authority_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ ra_bugSlFinalisesCrash_restart_authority_done = FALSE
@@ -76,9 +78,10 @@ State 2: <ra_bugSlFinalisesCrash_restart_authority_Deploy line 141, col 3 to lin
         author |-> "",
         crashed |-> FALSE ] )
 
-State 3: <ra_bugSlFinalisesCrash_restart_authority_StartOk line 172, col 3 to line 211, col 62 of module ra_bugSlFinalisesCrash>
+State 3: <ra_bugSlFinalisesCrash_restart_authority_StartOk line 184, col 3 to line 225, col 62 of module ra_bugSlFinalisesCrash>
 /\ ra_bugSlFinalisesCrash_restart_authority_g = [startupOverTerm |-> FALSE, emitCount |-> 0, stableOverAnn |-> FALSE]
 /\ ra_bugSlFinalisesCrash_restart_authority_cur = 0
+/\ ra_bugSlFinalisesCrash_restart_authority_gl = FALSE
 /\ ra_bugSlFinalisesCrash_restart_authority_used = 0
 /\ ra_bugSlFinalisesCrash_restart_authority_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ ra_bugSlFinalisesCrash_restart_authority_done = FALSE
@@ -115,9 +118,10 @@ State 3: <ra_bugSlFinalisesCrash_restart_authority_StartOk line 172, col 3 to li
         author |-> "",
         crashed |-> FALSE ] )
 
-State 4: <ra_bugSlFinalisesCrash_restart_authority_Crash line 256, col 3 to line 303, col 62 of module ra_bugSlFinalisesCrash>
+State 4: <ra_bugSlFinalisesCrash_restart_authority_Crash line 272, col 3 to line 321, col 62 of module ra_bugSlFinalisesCrash>
 /\ ra_bugSlFinalisesCrash_restart_authority_g = [startupOverTerm |-> FALSE, emitCount |-> 0, stableOverAnn |-> FALSE]
 /\ ra_bugSlFinalisesCrash_restart_authority_cur = 0
+/\ ra_bugSlFinalisesCrash_restart_authority_gl = FALSE
 /\ ra_bugSlFinalisesCrash_restart_authority_used = 0
 /\ ra_bugSlFinalisesCrash_restart_authority_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ ra_bugSlFinalisesCrash_restart_authority_done = FALSE
@@ -154,9 +158,10 @@ State 4: <ra_bugSlFinalisesCrash_restart_authority_Crash line 256, col 3 to line
         author |-> "",
         crashed |-> FALSE ] )
 
-State 5: <ra_bugSlFinalisesCrash_restart_authority_SLFinalizeCrash line 755, col 3 to line 789, col 62 of module ra_bugSlFinalisesCrash>
+State 5: <ra_bugSlFinalisesCrash_restart_authority_SLFinalizeCrash line 807, col 3 to line 843, col 62 of module ra_bugSlFinalisesCrash>
 /\ ra_bugSlFinalisesCrash_restart_authority_g = [startupOverTerm |-> FALSE, emitCount |-> 0, stableOverAnn |-> FALSE]
 /\ ra_bugSlFinalisesCrash_restart_authority_cur = 0
+/\ ra_bugSlFinalisesCrash_restart_authority_gl = FALSE
 /\ ra_bugSlFinalisesCrash_restart_authority_used = 0
 /\ ra_bugSlFinalisesCrash_restart_authority_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ ra_bugSlFinalisesCrash_restart_authority_done = FALSE

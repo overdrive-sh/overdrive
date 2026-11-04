@@ -47,7 +47,7 @@ State 3: <ss_bugReadBeforeSubscribe_stream_snapshot_Commit line 165, col 3 to li
   readFail |-> FALSE,
   lags |-> 0 ]
 /\ ss_bugReadBeforeSubscribe_stream_snapshot_w = [ cur |-> 0,
-  com |-> (0 :> "startup_stop" @@ 1 :> "none"),
+  com |-> (0 :> "operator_stop" @@ 1 :> "none"),
   pub |-> (0 :> -1 @@ 1 :> -1) ]
 /\ ss_bugReadBeforeSubscribe_stream_snapshot_conf_step = [init |-> [tag |-> "UNIT"]]
 
@@ -66,7 +66,7 @@ State 4: <ss_bugReadBeforeSubscribe_stream_snapshot_Publish line 194, col 3 to l
   readFail |-> FALSE,
   lags |-> 0 ]
 /\ ss_bugReadBeforeSubscribe_stream_snapshot_w = [ cur |-> 0,
-  com |-> (0 :> "startup_stop" @@ 1 :> "none"),
+  com |-> (0 :> "operator_stop" @@ 1 :> "none"),
   pub |-> (0 :> 0 @@ 1 :> -1) ]
 /\ ss_bugReadBeforeSubscribe_stream_snapshot_conf_step = [init |-> [tag |-> "UNIT"]]
 
@@ -85,7 +85,7 @@ State 5: <ss_bugReadBeforeSubscribe_stream_snapshot_Restart line 319, col 3 to l
   readFail |-> FALSE,
   lags |-> 0 ]
 /\ ss_bugReadBeforeSubscribe_stream_snapshot_w = [ cur |-> 1,
-  com |-> (0 :> "startup_stop" @@ 1 :> "none"),
+  com |-> (0 :> "operator_stop" @@ 1 :> "none"),
   pub |-> (0 :> 0 @@ 1 :> -1) ]
 /\ ss_bugReadBeforeSubscribe_stream_snapshot_conf_step = [init |-> [tag |-> "UNIT"]]
 
@@ -104,7 +104,7 @@ State 6: <ss_bugReadBeforeSubscribe_stream_snapshot_Commit line 165, col 3 to li
   readFail |-> FALSE,
   lags |-> 0 ]
 /\ ss_bugReadBeforeSubscribe_stream_snapshot_w = [ cur |-> 1,
-  com |-> (0 :> "startup_stop" @@ 1 :> "stable"),
+  com |-> (0 :> "operator_stop" @@ 1 :> "operator_stop"),
   pub |-> (0 :> 0 @@ 1 :> -1) ]
 /\ ss_bugReadBeforeSubscribe_stream_snapshot_conf_step = [init |-> [tag |-> "UNIT"]]
 
@@ -123,7 +123,7 @@ State 7: <ss_bugReadBeforeSubscribe_stream_snapshot_Publish line 194, col 3 to l
   readFail |-> FALSE,
   lags |-> 0 ]
 /\ ss_bugReadBeforeSubscribe_stream_snapshot_w = [ cur |-> 1,
-  com |-> (0 :> "startup_stop" @@ 1 :> "stable"),
+  com |-> (0 :> "operator_stop" @@ 1 :> "operator_stop"),
   pub |-> (0 :> 0 @@ 1 :> 1) ]
 /\ ss_bugReadBeforeSubscribe_stream_snapshot_conf_step = [init |-> [tag |-> "UNIT"]]
 
@@ -142,7 +142,7 @@ State 8: <ss_bugReadBeforeSubscribe_stream_snapshot_Subscribe line 366, col 3 to
   readFail |-> FALSE,
   lags |-> 0 ]
 /\ ss_bugReadBeforeSubscribe_stream_snapshot_w = [ cur |-> 1,
-  com |-> (0 :> "startup_stop" @@ 1 :> "stable"),
+  com |-> (0 :> "operator_stop" @@ 1 :> "operator_stop"),
   pub |-> (0 :> 0 @@ 1 :> 1) ]
 /\ ss_bugReadBeforeSubscribe_stream_snapshot_conf_step = [init |-> [tag |-> "UNIT"]]
 

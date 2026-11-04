@@ -2,8 +2,6 @@ State 1: <Initial predicate>
 /\ gr_bugNoDrainBeforeExit_guest_report_exitrep = "unset"
 /\ gr_bugNoDrainBeforeExit_guest_report_junk = 0
 /\ gr_bugNoDrainBeforeExit_guest_report_ring = <<>>
-/\ gr_bugNoDrainBeforeExit_guest_report_wapp = 0
-/\ gr_bugNoDrainBeforeExit_guest_report_endset = {}
 /\ gr_bugNoDrainBeforeExit_guest_report_rd = 0
 /\ gr_bugNoDrainBeforeExit_guest_report_eof = FALSE
 /\ gr_bugNoDrainBeforeExit_guest_report_wire = <<>>
@@ -13,12 +11,10 @@ State 1: <Initial predicate>
 /\ gr_bugNoDrainBeforeExit_guest_report_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ gr_bugNoDrainBeforeExit_guest_report_wl = "running"
 
-State 2: <gr_bugNoDrainBeforeExit_guest_report_WorkloadListen line 141, col 3 to line 181, col 58 of module gr_bugNoDrainBeforeExit>
+State 2: <gr_bugNoDrainBeforeExit_guest_report_WorkloadListen line 127, col 3 to line 163, col 58 of module gr_bugNoDrainBeforeExit>
 /\ gr_bugNoDrainBeforeExit_guest_report_exitrep = "unset"
 /\ gr_bugNoDrainBeforeExit_guest_report_junk = 0
 /\ gr_bugNoDrainBeforeExit_guest_report_ring = <<"tcp80">>
-/\ gr_bugNoDrainBeforeExit_guest_report_wapp = 0
-/\ gr_bugNoDrainBeforeExit_guest_report_endset = {}
 /\ gr_bugNoDrainBeforeExit_guest_report_rd = 0
 /\ gr_bugNoDrainBeforeExit_guest_report_eof = FALSE
 /\ gr_bugNoDrainBeforeExit_guest_report_wire = <<>>
@@ -28,12 +24,10 @@ State 2: <gr_bugNoDrainBeforeExit_guest_report_WorkloadListen line 141, col 3 to
 /\ gr_bugNoDrainBeforeExit_guest_report_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ gr_bugNoDrainBeforeExit_guest_report_wl = "running"
 
-State 3: <gr_bugNoDrainBeforeExit_guest_report_WorkloadExit line 187, col 3 to line 214, col 58 of module gr_bugNoDrainBeforeExit>
+State 3: <gr_bugNoDrainBeforeExit_guest_report_WorkloadExit line 169, col 3 to line 192, col 58 of module gr_bugNoDrainBeforeExit>
 /\ gr_bugNoDrainBeforeExit_guest_report_exitrep = "unset"
 /\ gr_bugNoDrainBeforeExit_guest_report_junk = 0
 /\ gr_bugNoDrainBeforeExit_guest_report_ring = <<"tcp80">>
-/\ gr_bugNoDrainBeforeExit_guest_report_wapp = 0
-/\ gr_bugNoDrainBeforeExit_guest_report_endset = {}
 /\ gr_bugNoDrainBeforeExit_guest_report_rd = 0
 /\ gr_bugNoDrainBeforeExit_guest_report_eof = FALSE
 /\ gr_bugNoDrainBeforeExit_guest_report_wire = <<>>
@@ -43,12 +37,10 @@ State 3: <gr_bugNoDrainBeforeExit_guest_report_WorkloadExit line 187, col 3 to l
 /\ gr_bugNoDrainBeforeExit_guest_report_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ gr_bugNoDrainBeforeExit_guest_report_wl = "exited"
 
-State 4: <gr_bugNoDrainBeforeExit_guest_report_WriterExit line 543, col 3 to line 575, col 58 of module gr_bugNoDrainBeforeExit>
+State 4: <gr_bugNoDrainBeforeExit_guest_report_WriterExit line 486, col 3 to line 514, col 58 of module gr_bugNoDrainBeforeExit>
 /\ gr_bugNoDrainBeforeExit_guest_report_exitrep = "unset"
 /\ gr_bugNoDrainBeforeExit_guest_report_junk = 0
 /\ gr_bugNoDrainBeforeExit_guest_report_ring = <<"tcp80">>
-/\ gr_bugNoDrainBeforeExit_guest_report_wapp = 1
-/\ gr_bugNoDrainBeforeExit_guest_report_endset = {}
 /\ gr_bugNoDrainBeforeExit_guest_report_rd = 0
 /\ gr_bugNoDrainBeforeExit_guest_report_eof = FALSE
 /\ gr_bugNoDrainBeforeExit_guest_report_wire = <<"exit">>

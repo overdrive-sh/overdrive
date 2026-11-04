@@ -36,8 +36,9 @@ State 1: <Initial predicate>
 /\ ra_bugSlFinalisesStartup_restart_authority_deployed = FALSE
 /\ ra_bugSlFinalisesStartup_restart_authority_used = 0
 /\ ra_bugSlFinalisesStartup_restart_authority_g = [startupOverTerm |-> FALSE, emitCount |-> 0, stableOverAnn |-> FALSE]
+/\ ra_bugSlFinalisesStartup_restart_authority_gl = FALSE
 
-State 2: <ra_bugSlFinalisesStartup_restart_authority_Deploy line 142, col 3 to line 167, col 64 of module ra_bugSlFinalisesStartup>
+State 2: <ra_bugSlFinalisesStartup_restart_authority_Deploy line 149, col 3 to line 179, col 64 of module ra_bugSlFinalisesStartup>
 /\ ra_bugSlFinalisesStartup_restart_authority_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ ra_bugSlFinalisesStartup_restart_authority_cur = 0
 /\ ra_bugSlFinalisesStartup_restart_authority_done = FALSE
@@ -75,8 +76,9 @@ State 2: <ra_bugSlFinalisesStartup_restart_authority_Deploy line 142, col 3 to l
 /\ ra_bugSlFinalisesStartup_restart_authority_deployed = TRUE
 /\ ra_bugSlFinalisesStartup_restart_authority_used = 0
 /\ ra_bugSlFinalisesStartup_restart_authority_g = [startupOverTerm |-> FALSE, emitCount |-> 0, stableOverAnn |-> FALSE]
+/\ ra_bugSlFinalisesStartup_restart_authority_gl = TRUE
 
-State 3: <ra_bugSlFinalisesStartup_restart_authority_StartOk line 173, col 3 to line 212, col 64 of module ra_bugSlFinalisesStartup>
+State 3: <ra_bugSlFinalisesStartup_restart_authority_StartOk line 185, col 3 to line 226, col 64 of module ra_bugSlFinalisesStartup>
 /\ ra_bugSlFinalisesStartup_restart_authority_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ ra_bugSlFinalisesStartup_restart_authority_cur = 0
 /\ ra_bugSlFinalisesStartup_restart_authority_done = FALSE
@@ -114,8 +116,9 @@ State 3: <ra_bugSlFinalisesStartup_restart_authority_StartOk line 173, col 3 to 
 /\ ra_bugSlFinalisesStartup_restart_authority_deployed = TRUE
 /\ ra_bugSlFinalisesStartup_restart_authority_used = 0
 /\ ra_bugSlFinalisesStartup_restart_authority_g = [startupOverTerm |-> FALSE, emitCount |-> 0, stableOverAnn |-> FALSE]
+/\ ra_bugSlFinalisesStartup_restart_authority_gl = TRUE
 
-State 4: <ra_bugSlFinalisesStartup_restart_authority_Deadline line 480, col 3 to line 508, col 64 of module ra_bugSlFinalisesStartup>
+State 4: <ra_bugSlFinalisesStartup_restart_authority_Deadline line 461, col 3 to line 491, col 64 of module ra_bugSlFinalisesStartup>
 /\ ra_bugSlFinalisesStartup_restart_authority_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ ra_bugSlFinalisesStartup_restart_authority_cur = 0
 /\ ra_bugSlFinalisesStartup_restart_authority_done = FALSE
@@ -153,8 +156,9 @@ State 4: <ra_bugSlFinalisesStartup_restart_authority_Deadline line 480, col 3 to
 /\ ra_bugSlFinalisesStartup_restart_authority_deployed = TRUE
 /\ ra_bugSlFinalisesStartup_restart_authority_used = 0
 /\ ra_bugSlFinalisesStartup_restart_authority_g = [startupOverTerm |-> FALSE, emitCount |-> 0, stableOverAnn |-> FALSE]
+/\ ra_bugSlFinalisesStartup_restart_authority_gl = TRUE
 
-State 5: <ra_bugSlFinalisesStartup_restart_authority_StartupRow line 414, col 3 to line 466, col 64 of module ra_bugSlFinalisesStartup>
+State 5: <ra_bugSlFinalisesStartup_restart_authority_StartupRow line 698, col 3 to line 744, col 64 of module ra_bugSlFinalisesStartup>
 /\ ra_bugSlFinalisesStartup_restart_authority_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ ra_bugSlFinalisesStartup_restart_authority_cur = 0
 /\ ra_bugSlFinalisesStartup_restart_authority_done = FALSE
@@ -164,7 +168,7 @@ State 5: <ra_bugSlFinalisesStartup_restart_authority_StartupRow line 414, col 3 
         sup |-> TRUE,
         srow |-> "fail",
         sseq |-> 1,
-        sstreak |-> 2,
+        sstreak |-> 1,
         dl |-> TRUE,
         stable |-> FALSE,
         ann |-> FALSE,
@@ -192,8 +196,9 @@ State 5: <ra_bugSlFinalisesStartup_restart_authority_StartupRow line 414, col 3 
 /\ ra_bugSlFinalisesStartup_restart_authority_deployed = TRUE
 /\ ra_bugSlFinalisesStartup_restart_authority_used = 0
 /\ ra_bugSlFinalisesStartup_restart_authority_g = [startupOverTerm |-> FALSE, emitCount |-> 0, stableOverAnn |-> FALSE]
+/\ ra_bugSlFinalisesStartup_restart_authority_gl = TRUE
 
-State 6: <ra_bugSlFinalisesStartup_restart_authority_SLFinalizeStartup line 806, col 3 to line 847, col 64 of module ra_bugSlFinalisesStartup>
+State 6: <ra_bugSlFinalisesStartup_restart_authority_SLFinalizeStartup line 861, col 3 to line 904, col 64 of module ra_bugSlFinalisesStartup>
 /\ ra_bugSlFinalisesStartup_restart_authority_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ ra_bugSlFinalisesStartup_restart_authority_cur = 0
 /\ ra_bugSlFinalisesStartup_restart_authority_done = FALSE
@@ -203,7 +208,7 @@ State 6: <ra_bugSlFinalisesStartup_restart_authority_SLFinalizeStartup line 806,
         sup |-> FALSE,
         srow |-> "fail",
         sseq |-> 1,
-        sstreak |-> 2,
+        sstreak |-> 1,
         dl |-> TRUE,
         stable |-> FALSE,
         ann |-> TRUE,
@@ -231,3 +236,4 @@ State 6: <ra_bugSlFinalisesStartup_restart_authority_SLFinalizeStartup line 806,
 /\ ra_bugSlFinalisesStartup_restart_authority_deployed = TRUE
 /\ ra_bugSlFinalisesStartup_restart_authority_used = 0
 /\ ra_bugSlFinalisesStartup_restart_authority_g = [startupOverTerm |-> FALSE, emitCount |-> 0, stableOverAnn |-> FALSE]
+/\ ra_bugSlFinalisesStartup_restart_authority_gl = TRUE

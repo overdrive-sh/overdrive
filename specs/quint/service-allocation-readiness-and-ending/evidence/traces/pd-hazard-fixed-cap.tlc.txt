@@ -15,27 +15,10 @@ State 1: <Initial predicate>
      closes |-> 0,
      verdict |-> FALSE ] >>
 
-State 2: <pd_bugFixedCap_progress_deadline_Advance line 109, col 3 to line 123, col 54 of module pd_bugFixedCap>
-/\ pd_bugFixedCap_progress_deadline_conf_step = [init |-> [tag |-> "UNIT"]]
-/\ pd_bugFixedCap_progress_deadline_w = [ sd |-> 0,
-  now |-> 1,
-  stableAt |-> -1,
-  gaveUp |-> FALSE,
-  opStopped |-> FALSE,
-  authors |-> {},
-  deployed |-> FALSE ]
-/\ pd_bugFixedCap_progress_deadline_sm = << [ st |-> "unopened",
-     kind |-> "",
-     armed |-> 0,
-     dl |-> 0,
-     last |-> "none",
-     closes |-> 0,
-     verdict |-> FALSE ] >>
-
-State 3: <pd_bugFixedCap_progress_deadline_Deploy line 83, col 3 to line 97, col 54 of module pd_bugFixedCap>
+State 2: <pd_bugFixedCap_progress_deadline_Deploy line 83, col 3 to line 97, col 54 of module pd_bugFixedCap>
 /\ pd_bugFixedCap_progress_deadline_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ pd_bugFixedCap_progress_deadline_w = [ sd |-> 12,
-  now |-> 1,
+  now |-> 0,
   stableAt |-> -1,
   gaveUp |-> FALSE,
   opStopped |-> FALSE,
@@ -49,10 +32,10 @@ State 3: <pd_bugFixedCap_progress_deadline_Deploy line 83, col 3 to line 97, col
      closes |-> 0,
      verdict |-> FALSE ] >>
 
-State 4: <pd_bugFixedCap_progress_deadline_Open line 311, col 3 to line 345, col 54 of module pd_bugFixedCap>
+State 3: <pd_bugFixedCap_progress_deadline_Open line 311, col 3 to line 345, col 54 of module pd_bugFixedCap>
 /\ pd_bugFixedCap_progress_deadline_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ pd_bugFixedCap_progress_deadline_w = [ sd |-> 12,
-  now |-> 1,
+  now |-> 0,
   stableAt |-> -1,
   gaveUp |-> FALSE,
   opStopped |-> FALSE,
@@ -60,16 +43,16 @@ State 4: <pd_bugFixedCap_progress_deadline_Open line 311, col 3 to line 345, col
   deployed |-> TRUE ]
 /\ pd_bugFixedCap_progress_deadline_sm = << [ st |-> "open",
      kind |-> "",
-     armed |-> 1,
+     armed |-> 0,
      dl |-> 9,
      last |-> "none",
      closes |-> 0,
      verdict |-> FALSE ] >>
 
-State 5: <pd_bugFixedCap_progress_deadline_Advance line 109, col 3 to line 123, col 54 of module pd_bugFixedCap>
+State 4: <pd_bugFixedCap_progress_deadline_Advance line 109, col 3 to line 123, col 54 of module pd_bugFixedCap>
 /\ pd_bugFixedCap_progress_deadline_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ pd_bugFixedCap_progress_deadline_w = [ sd |-> 12,
-  now |-> 10,
+  now |-> 9,
   stableAt |-> -1,
   gaveUp |-> FALSE,
   opStopped |-> FALSE,
@@ -77,16 +60,16 @@ State 5: <pd_bugFixedCap_progress_deadline_Advance line 109, col 3 to line 123, 
   deployed |-> TRUE ]
 /\ pd_bugFixedCap_progress_deadline_sm = << [ st |-> "open",
      kind |-> "",
-     armed |-> 1,
+     armed |-> 0,
      dl |-> 9,
      last |-> "none",
      closes |-> 0,
      verdict |-> FALSE ] >>
 
-State 6: <pd_bugFixedCap_progress_deadline_Fire line 256, col 3 to line 287, col 54 of module pd_bugFixedCap>
+State 5: <pd_bugFixedCap_progress_deadline_Fire line 256, col 3 to line 287, col 54 of module pd_bugFixedCap>
 /\ pd_bugFixedCap_progress_deadline_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ pd_bugFixedCap_progress_deadline_w = [ sd |-> 12,
-  now |-> 10,
+  now |-> 9,
   stableAt |-> -1,
   gaveUp |-> FALSE,
   opStopped |-> FALSE,
@@ -94,24 +77,24 @@ State 6: <pd_bugFixedCap_progress_deadline_Fire line 256, col 3 to line 287, col
   deployed |-> TRUE ]
 /\ pd_bugFixedCap_progress_deadline_sm = << [ st |-> "closed",
      kind |-> "timeout",
-     armed |-> 1,
+     armed |-> 0,
      dl |-> 9,
      last |-> "none",
      closes |-> 1,
      verdict |-> FALSE ] >>
 
-State 7: <pd_bugFixedCap_progress_deadline_StableHappens line 351, col 3 to line 364, col 54 of module pd_bugFixedCap>
+State 6: <pd_bugFixedCap_progress_deadline_StableHappens line 351, col 3 to line 364, col 54 of module pd_bugFixedCap>
 /\ pd_bugFixedCap_progress_deadline_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ pd_bugFixedCap_progress_deadline_w = [ sd |-> 12,
-  now |-> 10,
-  stableAt |-> 10,
+  now |-> 9,
+  stableAt |-> 9,
   gaveUp |-> FALSE,
   opStopped |-> FALSE,
   authors |-> {},
   deployed |-> TRUE ]
 /\ pd_bugFixedCap_progress_deadline_sm = << [ st |-> "closed",
      kind |-> "timeout",
-     armed |-> 1,
+     armed |-> 0,
      dl |-> 9,
      last |-> "none",
      closes |-> 1,

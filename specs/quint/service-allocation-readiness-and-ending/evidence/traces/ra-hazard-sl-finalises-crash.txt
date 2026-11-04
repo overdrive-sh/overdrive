@@ -3,6 +3,7 @@
 State 1
   g = [startupOverTerm |-> FALSE, emitCount |-> 0, stableOverAnn |-> FALSE]
   cur = 0
+  gl = FALSE
   used = 0
   conf_step = [init |-> [tag |-> "UNIT"]]
   done = FALSE

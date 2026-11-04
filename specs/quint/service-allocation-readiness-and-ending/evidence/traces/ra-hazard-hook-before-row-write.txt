@@ -8,6 +8,7 @@ State 1
   g = [startupOverTerm |-> FALSE, emitCount |-> 0, stableOverAnn |-> FALSE]
   decl = FALSE
   conf_step = [init |-> [tag |-> "UNIT"]]
+  gl = FALSE
   used = 0
 
 State 2 [Deploy]

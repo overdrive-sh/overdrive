@@ -4,8 +4,6 @@ State 1
   exitrep = "unset"
   junk = 0
   ring = <<>>
-  wapp = 0
-  endset = {}
   rd = 0
   eof = FALSE
   wire = <<>>
@@ -23,5 +21,4 @@ State 3 [WorkloadExit]
   wl = "exited"
 
 State 4 [WriterExit]
-  wapp = 1
   wire = <<"exit">>

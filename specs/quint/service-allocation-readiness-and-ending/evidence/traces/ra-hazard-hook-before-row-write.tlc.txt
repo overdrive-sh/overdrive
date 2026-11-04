@@ -35,9 +35,10 @@ State 1: <Initial predicate>
 /\ ra_bugHookBeforeRowWrite_restart_authority_g = [startupOverTerm |-> FALSE, emitCount |-> 0, stableOverAnn |-> FALSE]
 /\ ra_bugHookBeforeRowWrite_restart_authority_decl = FALSE
 /\ ra_bugHookBeforeRowWrite_restart_authority_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ ra_bugHookBeforeRowWrite_restart_authority_gl = FALSE
 /\ ra_bugHookBeforeRowWrite_restart_authority_used = 0
 
-State 2: <ra_bugHookBeforeRowWrite_restart_authority_Deploy line 142, col 3 to line 167, col 64 of module ra_bugHookBeforeRowWrite>
+State 2: <ra_bugHookBeforeRowWrite_restart_authority_Deploy line 149, col 3 to line 179, col 64 of module ra_bugHookBeforeRowWrite>
 /\ ra_bugHookBeforeRowWrite_restart_authority_at = ( 0 :>
       [ row |-> "pending",
         sup |-> FALSE,
@@ -74,9 +75,10 @@ State 2: <ra_bugHookBeforeRowWrite_restart_authority_Deploy line 142, col 3 to l
 /\ ra_bugHookBeforeRowWrite_restart_authority_g = [startupOverTerm |-> FALSE, emitCount |-> 0, stableOverAnn |-> FALSE]
 /\ ra_bugHookBeforeRowWrite_restart_authority_decl = FALSE
 /\ ra_bugHookBeforeRowWrite_restart_authority_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ ra_bugHookBeforeRowWrite_restart_authority_gl = FALSE
 /\ ra_bugHookBeforeRowWrite_restart_authority_used = 0
 
-State 3: <ra_bugHookBeforeRowWrite_restart_authority_StartOk line 173, col 3 to line 212, col 64 of module ra_bugHookBeforeRowWrite>
+State 3: <ra_bugHookBeforeRowWrite_restart_authority_StartOk line 185, col 3 to line 226, col 64 of module ra_bugHookBeforeRowWrite>
 /\ ra_bugHookBeforeRowWrite_restart_authority_at = ( 0 :>
       [ row |-> "running",
         sup |-> TRUE,
@@ -113,9 +115,10 @@ State 3: <ra_bugHookBeforeRowWrite_restart_authority_StartOk line 173, col 3 to 
 /\ ra_bugHookBeforeRowWrite_restart_authority_g = [startupOverTerm |-> FALSE, emitCount |-> 0, stableOverAnn |-> FALSE]
 /\ ra_bugHookBeforeRowWrite_restart_authority_decl = FALSE
 /\ ra_bugHookBeforeRowWrite_restart_authority_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ ra_bugHookBeforeRowWrite_restart_authority_gl = FALSE
 /\ ra_bugHookBeforeRowWrite_restart_authority_used = 0
 
-State 4: <ra_bugHookBeforeRowWrite_restart_authority_SLStable line 522, col 3 to line 564, col 64 of module ra_bugHookBeforeRowWrite>
+State 4: <ra_bugHookBeforeRowWrite_restart_authority_SLStable line 505, col 3 to line 549, col 64 of module ra_bugHookBeforeRowWrite>
 /\ ra_bugHookBeforeRowWrite_restart_authority_at = ( 0 :>
       [ row |-> "running",
         sup |-> TRUE,
@@ -152,9 +155,10 @@ State 4: <ra_bugHookBeforeRowWrite_restart_authority_SLStable line 522, col 3 to
 /\ ra_bugHookBeforeRowWrite_restart_authority_g = [startupOverTerm |-> FALSE, emitCount |-> 0, stableOverAnn |-> FALSE]
 /\ ra_bugHookBeforeRowWrite_restart_authority_decl = FALSE
 /\ ra_bugHookBeforeRowWrite_restart_authority_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ ra_bugHookBeforeRowWrite_restart_authority_gl = FALSE
 /\ ra_bugHookBeforeRowWrite_restart_authority_used = 0
 
-State 5: <ra_bugHookBeforeRowWrite_restart_authority_SLLivenessStop line 717, col 3 to line 744, col 64 of module ra_bugHookBeforeRowWrite>
+State 5: <ra_bugHookBeforeRowWrite_restart_authority_SLLivenessStop line 768, col 3 to line 797, col 64 of module ra_bugHookBeforeRowWrite>
 /\ ra_bugHookBeforeRowWrite_restart_authority_at = ( 0 :>
       [ row |-> "running",
         sup |-> FALSE,
@@ -191,4 +195,5 @@ State 5: <ra_bugHookBeforeRowWrite_restart_authority_SLLivenessStop line 717, co
 /\ ra_bugHookBeforeRowWrite_restart_authority_g = [startupOverTerm |-> FALSE, emitCount |-> 0, stableOverAnn |-> FALSE]
 /\ ra_bugHookBeforeRowWrite_restart_authority_decl = FALSE
 /\ ra_bugHookBeforeRowWrite_restart_authority_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ ra_bugHookBeforeRowWrite_restart_authority_gl = FALSE
 /\ ra_bugHookBeforeRowWrite_restart_authority_used = 0
