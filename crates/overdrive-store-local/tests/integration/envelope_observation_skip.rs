@@ -551,22 +551,43 @@ async fn malformed_service_backend_row_is_logged_and_skipped_but_valid_row_surfa
 // SVID issuance failure occurrence (O-SIF-G3, O-SIF-W2): the two status rows
 // follow the observation log-and-skip policy. An undecodable stored value reads
 // as absent through the point read with exactly one `observation.row.skipped`
-// warning naming the redb table; the workload record operation then restarts
+// warning whose separate `table` and `key` fields carry the redb table name and the row id; the workload record operation then restarts
 // at one. The gateway owner's base-0 restart is the owner reading this `None`
 // (its composition has no byte layer; see gaps).
 // ---------------------------------------------------------------------
 
-fn skipped_warnings_naming(captured: &CapturedEvents, table: &str) -> usize {
+/// Value of the structured field `name` in a captured event line, with the
+/// surrounding quotes a `Debug`-rendered string carries removed. Fields render
+/// as ` name=value` tokens after the event name and target (see `V`), and table
+/// names and row ids contain no whitespace, so a whole-token match is exact.
+fn field_value(entry: &str, name: &str) -> Option<String> {
+    let prefix = format!("{name}=");
+    entry
+        .split_whitespace()
+        .find_map(|token| token.strip_prefix(prefix.as_str()))
+        .map(|value| value.trim_matches('"').to_owned())
+}
+
+/// Count of `observation.row.skipped` events whose SEPARATE `table` field is
+/// exactly `table` and whose SEPARATE `key` field is exactly `key` (R-56: the
+/// shape of the `observation.envelope.decode_failed` event, not a substring of
+/// a message).
+fn skipped_warnings_naming(captured: &CapturedEvents, table: &str, key: &str) -> usize {
     captured
         .entries()
         .iter()
-        .filter(|entry| entry.contains("observation.row.skipped") && entry.contains(table))
+        .filter(|entry| {
+            entry.starts_with("observation.row.skipped | ")
+                && field_value(entry, "table").as_deref() == Some(table)
+                && field_value(entry, "key").as_deref() == Some(key)
+        })
         .count()
 }
 
 /// O-SIF-G3 (stored-row half): garbage under the gateway status row's table and
-/// key reads as no row, with one skipped-row warning naming the table and no
-/// startup refusal.
+/// key reads as no row, with one skipped-row warning carrying the exact table name
+/// in its `table` field and the row id in its `key` field, and no startup
+/// refusal.
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[allow(clippy::doc_markdown, reason = "CONTRACT_SHAPE is required scenario metadata")]
@@ -590,9 +611,13 @@ async fn an_undecodable_gateway_status_row_reads_as_absent_with_one_skipped_warn
 
     assert_eq!(row, None, "an undecodable stored row reads as absent");
     assert_eq!(
-        skipped_warnings_naming(&captured, "observation_gateway_application_status"),
+        skipped_warnings_naming(
+            &captured,
+            "observation_gateway_application_status",
+            &node.to_string()
+        ),
         1,
-        "exactly one skipped-row warning naming the table; got {:?}",
+        "exactly one skipped-row warning with table and key fields; got {:?}",
         captured.entries(),
     );
     let refused: Vec<String> = captured
@@ -629,9 +654,9 @@ async fn an_undecodable_workload_issue_status_row_reads_as_absent_and_the_record
 
     assert_eq!(store.workload_svid_issue_status_row(&alloc).await.expect("point read"), None);
     assert_eq!(
-        skipped_warnings_naming(&captured, table),
+        skipped_warnings_naming(&captured, table, &alloc.to_string()),
         1,
-        "exactly one skipped-row warning naming the table; got {:?}",
+        "exactly one skipped-row warning with table and key fields; got {:?}",
         captured.entries(),
     );
 
@@ -644,7 +669,7 @@ async fn an_undecodable_workload_issue_status_row_reads_as_absent_and_the_record
         .await
         .expect("record over an undecodable prior row");
     assert_eq!(
-        skipped_warnings_naming(&captured, table),
+        skipped_warnings_naming(&captured, table, &alloc.to_string()),
         2,
         "the record operation logs the same warning once for the undecodable prior row",
     );
