@@ -23,6 +23,7 @@
     reason = "public-ingress DISTILL scaffold: the client-access source and the issue-failure record are later steps' bodies"
 )]
 
+use std::num::NonZeroU64;
 use std::sync::Arc;
 
 use overdrive_core::ca::issue_failure::SvidIssueFailure;
@@ -46,6 +47,7 @@ use tokio::sync::watch;
 struct SlotState {
     epoch: GatewayIdentityEpoch,
     held: Option<SvidMaterial>,
+    issue: Option<GatewayIdentityIssueRecord>,
 }
 
 /// The single gateway SVID holder.
@@ -63,7 +65,11 @@ impl GatewayIdentitySlot {
         Self {
             node_id,
             trust_bundle,
-            state: Mutex::new(SlotState { epoch: GatewayIdentityEpoch::first(), held: None }),
+            state: Mutex::new(SlotState {
+                epoch: GatewayIdentityEpoch::first(),
+                held: None,
+                issue: None,
+            }),
             facts,
         }
     }
@@ -108,6 +114,22 @@ impl GatewayIdentitySlot {
     /// `unreachable!()`.
     pub(crate) fn begin_disable(&self) -> GatewayIdentityEpoch {
         todo!("SCAFFOLD: GatewayIdentitySlot::begin_disable")
+    }
+
+    /// Count one confirmed issue failure and keep the latest cause. The held
+    /// identity, `desired()` and `current()` are untouched; subscribers are
+    /// notified.
+    pub(crate) fn record_issue_failure(&self, failure: SvidIssueFailure) {
+        let mut state = self.state.lock();
+        let count = state.issue.map_or(NonZeroU64::MIN, |record| record.count.saturating_add(1));
+        state.issue = Some(GatewayIdentityIssueRecord { count, last: failure });
+        self.facts.send_modify(|_| {});
+        drop(state);
+    }
+
+    /// The process-local issue-failure record, `None` before any failure.
+    pub(crate) fn issue_record(&self) -> Option<GatewayIdentityIssueRecord> {
+        self.state.lock().issue
     }
 
     /// Hold `material` for `epoch` after the audit row is durable; a stale
@@ -164,7 +186,7 @@ impl GatewayIdentityActionTarget for GatewayIdentityActionHandle {
     }
 
     fn record_issue_failure(&self, failure: SvidIssueFailure) {
-        todo!("SCAFFOLD: GatewayIdentityActionHandle::record_issue_failure")
+        self.slot.record_issue_failure(failure);
     }
 }
 

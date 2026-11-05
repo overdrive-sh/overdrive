@@ -8,18 +8,22 @@
 //! is no gateway drop action (R-4): disabling the gateway clears the volatile
 //! slot synchronously in the process.
 
+use overdrive_core::ca::issue_failure::SvidIssueFailure;
 use overdrive_core::reconcilers::Action;
 use overdrive_core::traits::ca::Ca;
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::observation_store::ObservationStore;
+use overdrive_core::wall_clock::UnixInstant;
 use overdrive_gateway::ports::{GatewayIdentityActionTarget, GatewayIdentityMutationOutcome};
 
 use super::ShimError;
 use crate::ca_issuance::issue_and_audit;
 
 /// Dispatch one `Action::IssueGatewaySvid`: `issue_and_audit`, then the
-/// epoch-checked hold. Both `Applied` and `StaleEpoch` are success; the caller
-/// (`dispatch_single`) maps both to `Ok(())`.
+/// epoch-checked hold. A confirmed issuance failure is told to the target
+/// through `record_issue_failure` (the executor writes no row). Both `Applied`
+/// and `StaleEpoch` are success; the caller (`dispatch_single`) maps both to
+/// `Ok(())`.
 ///
 /// # Errors
 ///
@@ -41,10 +45,16 @@ pub(crate) async fn dispatch_issue(
     let Action::IssueGatewaySvid { epoch, spiffe_id, node_id, .. } = action else {
         unreachable!("dispatch_issue is called only from the IssueGatewaySvid arm")
     };
-    let material = issue_and_audit(ca, observation, clock, node_id, spiffe_id)
-        .await
-        .map_err(ShimError::GatewaySvidIssue)?;
-    Ok(target.hold_audited(*epoch, material))
+    match issue_and_audit(ca, observation, clock, node_id, spiffe_id).await {
+        Ok(material) => Ok(target.hold_audited(*epoch, material)),
+        Err(error) => {
+            target.record_issue_failure(SvidIssueFailure {
+                cause: error.failure_cause(),
+                at: UnixInstant::from_clock(clock),
+            });
+            Err(ShimError::GatewaySvidIssue(error))
+        }
+    }
 }
 
 #[cfg(test)]
@@ -260,7 +270,6 @@ mod acceptance {
     ///
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
-    #[ignore = "pending DELIVER gateway-svid-issue-failure-recording"]
     async fn a_ca_signing_failure_is_recorded_once_as_a_ca_cause_and_holds_nothing() {
         let ca = SigningFailsCa { delegate: ca(0xCA) };
         let observation = SimObservationStore::single_peer(node(), 0xCA);
@@ -296,7 +305,6 @@ mod acceptance {
     ///
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
-    #[ignore = "pending DELIVER gateway-svid-issue-failure-recording"]
     async fn an_audit_write_failure_is_recorded_once_as_an_audit_cause() {
         let ca = ca(0xA0D1);
         let observation = SimObservationStore::single_peer(node(), 0xA0D1);
@@ -326,7 +334,6 @@ mod acceptance {
     ///
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
-    #[ignore = "pending DELIVER gateway-svid-issue-failure-recording"]
     async fn a_successful_or_stale_issue_records_no_failure() {
         let ca = ca(0x600D);
         let observation = SimObservationStore::single_peer(node(), 0x600D);
