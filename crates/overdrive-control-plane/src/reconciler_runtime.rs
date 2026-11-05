@@ -1904,7 +1904,7 @@ pub enum ConvergenceError {
     Hydrate(#[from] overdrive_core::reconcilers::HydrateError),
     /// Action shim returned an error.
     #[error("shim failure: {0}")]
-    Shim(crate::action_shim::ShimError),
+    Shim(#[source] crate::action_shim::ShimError),
     /// `ViewStore::write_through` failed (fsync error, decode error,
     /// underlying I/O error). Per ADR-0035 §5 step 7→8 the in-memory
     /// map is unchanged when this fires.

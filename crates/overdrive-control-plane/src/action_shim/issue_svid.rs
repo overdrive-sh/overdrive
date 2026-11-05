@@ -27,10 +27,12 @@
 //! action's [`SpiffeId`](overdrive_core::id::SpiffeId) (ADR-0067 rev 3 PINNED
 //! SURFACE SPEC item 5 / option b) — there is no throwaway window anywhere.
 
+use overdrive_core::UnixInstant;
+use overdrive_core::ca::issue_failure::SvidIssueFailure;
 use overdrive_core::reconcilers::Action;
 use overdrive_core::traits::ca::Ca;
 use overdrive_core::traits::clock::Clock;
-use overdrive_core::traits::observation_store::ObservationStore;
+use overdrive_core::traits::observation_store::{ObservationStore, ObservationStoreError};
 use thiserror::Error;
 
 use crate::ca_issuance::{self, CaIssuanceError};
@@ -52,6 +54,20 @@ pub enum IssueSvidDispatchError {
         #[from]
         source: CaIssuanceError,
     },
+    /// Issuance failed AND the failure occurrence could not be recorded
+    /// (ADR-0275). The count is not advanced; the next failed attempt records.
+    /// Nothing is held.
+    #[error(
+        "issue_svid executor: CA issuance failed: {issuance}; \
+         recording the failure also failed"
+    )]
+    IssuanceUnrecorded {
+        /// The issuance failure that was being recorded.
+        issuance: CaIssuanceError,
+        /// The failure of the occurrence record write.
+        #[source]
+        record: ObservationStoreError,
+    },
 }
 
 /// Dispatch one `Action::IssueSvid`. Calls [`ca_issuance::issue_and_audit`]
@@ -70,8 +86,10 @@ pub enum IssueSvidDispatchError {
 /// # Errors
 ///
 /// Returns [`IssueSvidDispatchError::Issuance`] when `issue_and_audit` fails —
-/// either a [`Ca`] signing failure or an audit-write failure. On either, the
-/// held map is left untouched.
+/// either a [`Ca`] signing failure or an audit-write failure — after recording
+/// the failure occurrence, or [`IssueSvidDispatchError::IssuanceUnrecorded`]
+/// when that record write also fails. On either, the held map is left
+/// untouched.
 ///
 /// # Panics
 ///
@@ -98,7 +116,37 @@ pub async fn dispatch_issue(
     // returns `CaIssuanceError::Audit` and NO SvidMaterial — so the hold below
     // never runs (K4 fail-closed). The `?` converts the typed `CaIssuanceError`
     // into `IssueSvidDispatchError::Issuance` via the `#[from]` embedding.
-    let svid = ca_issuance::issue_and_audit(ca, observation, clock, node_id, spiffe_id).await?;
+    // The occurrence is recorded from the CONFIRMED `Err`, after it returns,
+    // never at emit (R-50). The record is atomic in the store; a failed record
+    // is surfaced alongside the issuance failure and not counted.
+    let svid = match ca_issuance::issue_and_audit(ca, observation, clock, node_id, spiffe_id).await
+    {
+        Ok(svid) => svid,
+        Err(issuance) => {
+            let failure = SvidIssueFailure {
+                cause: issuance.failure_cause(),
+                at: UnixInstant::from_clock(clock),
+            };
+            return match observation
+                .record_workload_svid_issue_failure(alloc_id, node_id, failure)
+                .await
+            {
+                Ok(()) => Err(IssueSvidDispatchError::Issuance { source: issuance }),
+                Err(record) => {
+                    tracing::warn!(
+                        name: "issue_svid.failure_record_failed",
+                        alloc_id = %alloc_id,
+                        node_id = %node_id,
+                        correlation = %correlation,
+                        error = %record,
+                        "the SVID issuance failure could not be recorded; the count \
+                         is not advanced and the next failed attempt records"
+                    );
+                    Err(IssueSvidDispatchError::IssuanceUnrecorded { issuance, record })
+                }
+            };
+        }
+    };
 
     // Hold the minted material (re-issue overwrites; ADR-0067 D2). The leaf key
     // stays inside IdentityMgr (K2).

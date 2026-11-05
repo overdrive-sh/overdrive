@@ -1474,7 +1474,6 @@ fn non_pending_allocations_render_byte_identically() {
 ///
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER workload-svid-issue-failure-occurrence"]
 fn a_row_with_failed_issuances_renders_the_count_and_the_latest_cause() {
     use overdrive_control_plane::api::{SvidIssueFailureBody, SvidIssueFailureCauseBody};
 

@@ -371,7 +371,6 @@ const BEYOND_ANY_BACKOFF: Duration = Duration::from_secs(600);
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER workload-svid-issue-failure-occurrence"]
 async fn repeated_failed_issuances_give_a_monotone_count_and_the_latest_cause_on_the_allocations_surface()
  {
     let mut world = World::running_job().await;
@@ -458,7 +457,6 @@ async fn repeated_failed_issuances_give_a_monotone_count_and_the_latest_cause_on
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER workload-svid-issue-failure-occurrence"]
 async fn a_failing_record_write_is_surfaced_and_not_counted_and_the_next_failure_records() {
     let mut world = World::running_job().await;
     world.signing_fails.store(true, Ordering::SeqCst);
@@ -498,7 +496,6 @@ async fn a_failing_record_write_is_surfaced_and_not_counted_and_the_next_failure
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER workload-svid-issue-failure-occurrence"]
 async fn a_failure_row_read_error_is_the_handlers_error_and_never_a_zero() {
     let mut world = World::running_job().await;
     world.signing_fails.store(true, Ordering::SeqCst);

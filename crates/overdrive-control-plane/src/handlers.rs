@@ -13,6 +13,8 @@
 //! Step 03-01 lands the `submit_workload` body; the other four remain RED
 //! scaffolds owned by subsequent deliver steps.
 
+use std::collections::BTreeMap;
+
 use axum::Json;
 use axum::body::Body;
 use axum::extract::{Path, Query, State};
@@ -1234,15 +1236,29 @@ pub async fn alloc_status(
         probe_results_for_rows(state.obs.as_ref(), &workload_rows).await?
     };
 
+    // ADR-0275: one point read of the workload SVID issuance failure row per
+    // allocation row. A read error is the handler's error, never a zero.
+    let mut svid_issue_failures = BTreeMap::new();
+    for row in &workload_rows {
+        if let Some(status) = state.obs.workload_svid_issue_status_row(&row.alloc_id).await? {
+            svid_issue_failures.insert(row.alloc_id.clone(), status);
+        }
+    }
+
     let rows: Vec<api::AllocStatusRowBody> = workload_rows
         .into_iter()
         .map(|row| {
+            let issue_status = svid_issue_failures.remove(&row.alloc_id);
             let network_cleanup_pending = observed_leases
                 .get(&row.alloc_id)
                 .is_some_and(|lease| lease.cleanup_pending(row.state));
             let mut body = api::AllocStatusRowBody::from(row);
             body.resources = resources_body;
             body.network_cleanup_pending = network_cleanup_pending;
+            if let Some(status) = issue_status {
+                body.svid_issue_failures = status.issue_failures;
+                body.last_svid_issue_failure = Some(status.last_issue_failure.into());
+            }
             body
         })
         .collect();

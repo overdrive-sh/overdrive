@@ -532,6 +532,32 @@ fn render_network_cleanup_pending_detail(
     }
 }
 
+/// Append the workload SVID issuance failure occurrence beneath an allocation
+/// row. Presence-guarded: a row with no recorded failure renders unchanged.
+fn render_svid_issue_failure_detail(
+    out: &mut String,
+    row: &overdrive_control_plane::api::AllocStatusRowBody,
+) {
+    use std::fmt::Write as _;
+
+    use overdrive_control_plane::api::SvidIssueFailureCauseBody;
+    let Some(last) = row.last_svid_issue_failure.as_ref() else {
+        return;
+    };
+    if row.svid_issue_failures == 0 {
+        return;
+    }
+    let cause = match last.cause {
+        SvidIssueFailureCauseBody::Ca => "ca",
+        SvidIssueFailureCauseBody::Audit => "audit",
+    };
+    let _ = writeln!(
+        out,
+        "    svid issuance failures: {} (last: {cause} at {})",
+        row.svid_issue_failures, last.at,
+    );
+}
+
 /// Append the operator-facing `Memory:` line to `out` IFF the workload's
 /// first allocation row carries a non-zero declared `memory_bytes` — the
 /// `[resources] memory_bytes` single source of truth.
@@ -1070,6 +1096,7 @@ pub fn format_job_alloc_status_attempts_table(
             duration,
         );
         render_network_cleanup_pending_detail(&mut s, row);
+        render_svid_issue_failure_detail(&mut s, row);
         // ADR-0078 § D5: the per-attempt column set
         // (`Attempt / State / Exit / Started / Duration`) is UNCHANGED — it
         // is pinned by the KPI-K3 byte-equality assertions. The restart
@@ -1143,6 +1170,7 @@ fn render_kind_aware_body(out: &mut String, response: &AllocStatusResponse) {
                     since,
                 );
                 render_network_cleanup_pending_detail(out, row);
+                render_svid_issue_failure_detail(out, row);
                 if matches!(
                     row.terminal.as_ref(),
                     Some(overdrive_core::transition_reason::TerminalCondition::Stable { .. })
