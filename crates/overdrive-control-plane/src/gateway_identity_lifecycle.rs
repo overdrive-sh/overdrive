@@ -5,27 +5,23 @@
 //! name and target; `boot_server` (step G0) registers it and the lifecycle
 //! control reuses the same evaluation for ensure, reissue and disable wakes.
 //!
-//! SCAFFOLD: true. The registration factory is the DESIGN-pinned body; the
-//! lifecycle-control behaviour is DELIVER's and fails with SCAFFOLD text.
-
 #![allow(
-    clippy::todo,
-    clippy::unused_async,
     clippy::needless_pass_by_value,
     clippy::missing_const_for_fn,
     clippy::redundant_pub_crate,
     dead_code,
-    reason = "public-ingress DISTILL scaffold: the control behaviour is DELIVER's and has no production caller until the enabled boot composition lands"
+    reason = "the control has no production caller until the enabled boot composition lands"
 )]
 
 use std::sync::Arc;
 use std::time::Instant;
 
-use overdrive_core::eval_broker::{Evaluation, EvaluationBroker};
+use overdrive_core::eval_broker::{Evaluation, EvaluationBroker, EvaluationEligibility};
 use overdrive_core::gateway_identity::{GatewayIdentityFacts, GatewayIdentityIssueRecord};
 use overdrive_core::id::NodeId;
 use overdrive_core::reconcilers::{Reconciler, TargetResource};
 use overdrive_core::traits::clock::Clock;
+use overdrive_core::wall_clock::UnixInstant;
 use overdrive_gateway::ports::{
     GatewayIdentityLifecycleControl, GatewayIdentityLifecycleError, GatewayIdentityLifecycleTarget,
 };
@@ -68,28 +64,61 @@ impl ControlPlaneGatewayIdentityLifecycle {
     }
 }
 
+impl ControlPlaneGatewayIdentityLifecycle {
+    /// The held facts when they are still time-usable at the injected clock.
+    fn usable_current(&self) -> Option<GatewayIdentityFacts> {
+        let now = UnixInstant::from_clock(self.clock.as_ref());
+        self.target.current().filter(|facts| facts.not_after > now)
+    }
+}
+
 #[async_trait::async_trait]
 impl GatewayIdentityLifecycleControl for ControlPlaneGatewayIdentityLifecycle {
     async fn ensure_current(
         &self,
-        _deadline: Instant,
+        deadline: Instant,
     ) -> Result<GatewayIdentityFacts, GatewayIdentityLifecycleError> {
-        todo!("SCAFFOLD: ControlPlaneGatewayIdentityLifecycle::ensure_current")
+        let mut receiver = self.target.subscribe();
+        // The retained evaluation is submitted on the first poll even when a
+        // time-usable identity is already held: the broker coalesces the wake
+        // and the reconciler owns whether a near-expiry reissue is due.
+        self.broker.lock().submit(
+            self.evaluation.clone(),
+            self.clock.now(),
+            EvaluationEligibility::Immediate,
+        );
+        if let Some(facts) = self.usable_current() {
+            return Ok(facts);
+        }
+        let remaining = deadline.saturating_duration_since(self.clock.now());
+        let timeout = self.clock.sleep(remaining);
+        tokio::pin!(timeout);
+        loop {
+            tokio::select! {
+                changed = receiver.changed() => {
+                    changed.map_err(|_| GatewayIdentityLifecycleError::Closed)?;
+                    if let Some(facts) = self.usable_current() {
+                        return Ok(facts);
+                    }
+                }
+                () = &mut timeout => return Err(GatewayIdentityLifecycleError::Timeout),
+            }
+        }
     }
 
     fn current(&self) -> Option<GatewayIdentityFacts> {
-        todo!("SCAFFOLD: ControlPlaneGatewayIdentityLifecycle::current")
+        self.target.current()
     }
 
     fn issue_record(&self) -> Option<GatewayIdentityIssueRecord> {
-        todo!("SCAFFOLD: ControlPlaneGatewayIdentityLifecycle::issue_record")
+        self.target.issue_record()
     }
 
     fn subscribe(&self) -> tokio::sync::watch::Receiver<Option<GatewayIdentityFacts>> {
-        todo!("SCAFFOLD: ControlPlaneGatewayIdentityLifecycle::subscribe")
+        self.target.subscribe()
     }
 
     fn disable_after_drain(&self) {
-        todo!("SCAFFOLD: ControlPlaneGatewayIdentityLifecycle::disable_after_drain")
+        let _disabled_epoch = self.target.begin_disable();
     }
 }

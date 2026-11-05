@@ -552,7 +552,6 @@ impl<'de> Deserialize<'de> for IdentityState {
     test = "issue_hold",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER quint-conformance-gateway_identity"]
 fn gateway_identity_issue_hold() -> impl Driver {
     IdentityConfDriver::new()
 }
@@ -565,7 +564,6 @@ fn gateway_identity_issue_hold() -> impl Driver {
     test = "reissue_near_expiry",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER quint-conformance-gateway_identity"]
 fn gateway_identity_reissue_near_expiry() -> impl Driver {
     IdentityConfDriver::new()
 }
@@ -579,7 +577,6 @@ fn gateway_identity_reissue_near_expiry() -> impl Driver {
     test = "disable_races_inflight_issue",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER quint-conformance-gateway_identity"]
 fn gateway_identity_disable_races_inflight_issue() -> impl Driver {
     IdentityConfDriver::new()
 }
@@ -592,7 +589,6 @@ fn gateway_identity_disable_races_inflight_issue() -> impl Driver {
     test = "audit_failure_no_hold",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER quint-conformance-gateway_identity"]
 fn gateway_identity_audit_failure_no_hold() -> impl Driver {
     IdentityConfDriver::new()
 }
@@ -606,7 +602,6 @@ fn gateway_identity_audit_failure_no_hold() -> impl Driver {
     test = "restart_reissue",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER quint-conformance-gateway_identity"]
 fn gateway_identity_restart_reissue() -> impl Driver {
     IdentityConfDriver::new()
 }
@@ -617,7 +612,6 @@ fn gateway_identity_restart_reissue() -> impl Driver {
     spec = "../../specs/quint/public-ingress-gateway/gateway_identity.qnt",
     main = "identity_conf"
 )]
-#[ignore = "pending DELIVER quint-conformance-gateway_identity"]
 fn gateway_identity_identity_conf_randomized_traces() -> impl Driver {
     IdentityConfDriver::new()
 }

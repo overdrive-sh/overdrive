@@ -96,6 +96,10 @@ struct World {
     held_svids: SimHeldSvidView,
     guest_attachments: SimGuestAttachmentView,
     node_id: NodeId,
+    /// One CA for the whole world, so successive issuances draw successive
+    /// serials from its entropy stream as production does; the audit index is
+    /// keyed on the serial.
+    ca: SimCa,
 }
 
 impl World {
@@ -119,6 +123,7 @@ impl World {
                 BTreeMap::new(),
             ),
             node_id: node(),
+            ca: SimCa::new(Arc::new(SimEntropy::new(0x61))),
         }
     }
 
@@ -143,8 +148,7 @@ impl World {
     /// Write one issued-certificate audit row for `subject` through the
     /// production issuance path.
     async fn audit_issuance(&self, subject: &SpiffeId) {
-        let ca = SimCa::new(Arc::new(SimEntropy::new(0x61)));
-        issue_and_audit(&ca, &self.observation, &SimClock::new(), &self.node_id, subject)
+        issue_and_audit(&self.ca, &self.observation, &SimClock::new(), &self.node_id, subject)
             .await
             .expect("issue_and_audit writes the audit row");
     }
@@ -191,7 +195,6 @@ fn disabled_composition_supplies_the_canonical_empty_identity_read() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER gateway-svid-lifecycle-hydration"]
 async fn hydration_projects_the_desired_epoch_and_the_held_facts_of_the_identity_view() {
     let world = World::new();
     let epoch = GatewayIdentityEpoch::first();
@@ -220,7 +223,6 @@ async fn hydration_projects_the_desired_epoch_and_the_held_facts_of_the_identity
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER gateway-svid-lifecycle-hydration"]
 async fn hydration_of_an_empty_slot_projects_no_held_facts() {
     let world = World::new();
     let view = FixedIdentityView {
@@ -247,7 +249,6 @@ async fn hydration_of_an_empty_slot_projects_no_held_facts() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER gateway-svid-lifecycle-hydration"]
 async fn ever_issued_is_derived_only_from_audit_rows_of_the_gateway_subject() {
     let world = World::new();
     let gateway = SpiffeId::for_gateway(&node());
@@ -284,7 +285,6 @@ async fn ever_issued_is_derived_only_from_audit_rows_of_the_gateway_subject() {
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test]
-#[ignore = "pending DELIVER gateway-svid-lifecycle-hydration"]
 async fn a_target_other_than_the_configured_node_is_refused_by_both_hydration_entries() {
     let world = World::new();
     let view = FixedIdentityView {
@@ -314,7 +314,6 @@ async fn a_target_other_than_the_configured_node_is_refused_by_both_hydration_en
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER gateway-svid-lifecycle-hydration"]
 async fn a_disabled_desired_identity_hydrates_the_epoch_with_no_subject() {
     let world = World::new();
     let epoch = GatewayIdentityEpoch::new(2).expect("epoch two is nonzero");

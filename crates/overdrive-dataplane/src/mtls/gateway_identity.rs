@@ -20,7 +20,7 @@
     clippy::unused_self,
     dead_code,
     unused_variables,
-    reason = "public-ingress DISTILL scaffold: `client_access`, `lifecycle_target`, `begin_disable`, `with_current` and the lifecycle-handle bodies are later steps' scaffolds"
+    reason = "public-ingress DISTILL scaffold: `client_access` and `SlotIdentitySource::with_current` are a later step's scaffolds"
 )]
 
 use std::num::NonZeroU64;
@@ -106,14 +106,26 @@ impl GatewayIdentitySlot {
 
     /// The lifecycle capability the control-plane adapter calls to disable.
     pub fn lifecycle_target(self: &Arc<Self>) -> GatewayIdentityLifecycleHandle {
-        todo!("SCAFFOLD: GatewayIdentitySlot::lifecycle_target")
+        GatewayIdentityLifecycleHandle { slot: Arc::clone(self) }
     }
 
     /// Bump the epoch and empty the slot in the same call. Infallible (R-30):
     /// the epoch is a u64; the private checked add overflowing is
     /// `unreachable!()`.
     pub(crate) fn begin_disable(&self) -> GatewayIdentityEpoch {
-        todo!("SCAFFOLD: GatewayIdentitySlot::begin_disable")
+        let mut state = self.state.lock();
+        let next = state
+            .epoch
+            .get()
+            .checked_add(1)
+            .unwrap_or_else(|| unreachable!("a u64 epoch cannot be exhausted by disables"));
+        state.epoch = GatewayIdentityEpoch::new(next.get())
+            .unwrap_or_else(|_| unreachable!("a checked add of a nonzero epoch is nonzero"));
+        state.held = None;
+        self.facts.send_replace(None);
+        let epoch = state.epoch;
+        drop(state);
+        epoch
     }
 
     /// Count one confirmed issue failure and keep the latest cause. The held
@@ -192,19 +204,19 @@ impl GatewayIdentityActionTarget for GatewayIdentityActionHandle {
 
 impl GatewayIdentityLifecycleTarget for GatewayIdentityLifecycleHandle {
     fn current(&self) -> Option<GatewayIdentityFacts> {
-        todo!("SCAFFOLD: GatewayIdentityLifecycleHandle::current")
+        self.slot.current()
     }
 
     fn issue_record(&self) -> Option<GatewayIdentityIssueRecord> {
-        todo!("SCAFFOLD: GatewayIdentityLifecycleHandle::issue_record")
+        self.slot.issue_record()
     }
 
     fn subscribe(&self) -> watch::Receiver<Option<GatewayIdentityFacts>> {
-        todo!("SCAFFOLD: GatewayIdentityLifecycleHandle::subscribe")
+        self.slot.subscribe()
     }
 
     fn begin_disable(&self) -> GatewayIdentityEpoch {
-        todo!("SCAFFOLD: GatewayIdentityLifecycleHandle::begin_disable")
+        self.slot.begin_disable()
     }
 }
 

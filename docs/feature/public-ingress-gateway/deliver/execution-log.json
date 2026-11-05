@@ -309,6 +309,41 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-11-05T16:37:07Z"
+    },
+    {
+      "sid": "02-04",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-05T16:40:50Z"
+    },
+    {
+      "sid": "02-04",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-11-05T17:11:00Z"
+    },
+    {
+      "sid": "02-04",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: acceptance test ever_issued_is_derived_only_from_audit_rows_of_the_gateway_subject has a fixture defect (shared SimCa seed gives duplicate serial, append-only store drops the gateway row); needs acceptance-designer re-author",
+      "t": "2026-11-05T17:11:00Z"
+    },
+    {
+      "sid": "02-04",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-05T17:41:32Z"
+    },
+    {
+      "sid": "02-04",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-05T17:41:32Z"
     }
   ]
 }
