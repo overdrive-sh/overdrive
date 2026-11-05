@@ -70,3 +70,13 @@ The unpinned case was a started allocation that then `Failed`. Verified at HEAD:
 - S-53: the retry cadence of a failed `Pass` write and whether `<n>` in a `Fail` reason stays at the deadline value are unpinned; the tests tick up to eight intervals.
 - Pre-existing tests that assume liveness is live right after `on_alloc_running`, or that `broker().submit` is drained only by the clock (`runtime_convergence_loop.rs`, `interest_router.rs`, `cadence_resync.rs`, `probe_count_fixture`), are DELIVER's to revisit with D9 and D17.
 - The CLI integration test `cli_submit_streaming_service_routes_to_service_submit_event_consumer` times out at HEAD `e5c233ba7` with and without these changes; verify before DELIVER whether the default startup gate (D13 to D15) is the cause.
+
+## Open — found while authoring the Tier-3 tests (not yet ruled)
+
+### DG-13 — G-10 item (9), first clause, cannot be observed through a deployable Service
+
+DG-8 rules that (9) "declares a port that init itself binds (the TCP intake port, and a UDP slot port)" and observes the startup `Fail` row naming it. The Service validator rejects every port in `guest_reserved_ports()` (61000 to 62024) with `ListenerPortReserved` (`overdrive-core/src/aggregate/mod.rs:500-511`), so that Service is refused at submit and never boots. An undeclared report is never stored (D13 item 3), so init's binds have no effect a host-visible row can show. DISTILL did not author the test and did not touch the validator. Options for DESIGN: (a) record (9) first clause as an in-guest property only, covered by V42 (init's binds: 0 reports from init in 1,000 boots) and structural under PR-2; (b) pin a host-visible observable for undeclared reports (new surface, not proposed); (c) let the fixture bypass the validator (a test-only seam, rejected by the testing rules). Recommendation: (a). The second clause of (9) and the loopback matrix of (10) are authored; the `::ffff:<non-loopback>` Pass case of (10) is not, because no pinned seam gives the guest application its leased `workload_addr`.
+
+### Observable limit — the tight drain race
+
+`ListenBeforeExit` and `DeliveredBeforeExit` order guest-side writes. The host consequence (every declared report is on the board before the exit report) is observable through rows only when the `Pass` write lands before the exit event cancels the task (D1, D13 item 10). A workload that binds and exits at once races that write, so the authored real-boot test holds the listeners for 8 s. The tight race stays V36's evidence (1,000 real boots). No change is proposed.

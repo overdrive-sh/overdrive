@@ -97,7 +97,7 @@ mod linux {
 
         use overdrive_testing::guest_app::{
             Direction, FLOOD_REPORT_PERIOD_MS, FLOOD_WRITTEN_PREFIX, FLOWING_LINE,
-            HOLD_FLOWING_BYTES, LISTENING_PREFIX, ListenConnEnd, STREAM_CHUNK, StreamCheck,
+            BOUND_PREFIX, HOLD_FLOWING_BYTES, LISTENING_PREFIX, ListenConnEnd, STREAM_CHUNK, StreamCheck,
             StreamGen, TERMINAL_LINE_PREFIX, TerminalEvent, UDP_REPLY_TIMEOUT_MS, V6_APP_PORT,
             V6_CLIENT_ADMISSION_PORT, V6_HTTP_PROBE_PORT, V6_NAME_REQUEST, V6_NAME_RESPONSE,
             V6_POPULATION_BASE_PORT, V6_POPULATION_MAX, V6_REMOTE_REQUEST, V6_REMOTE_RESPONSE,
@@ -154,6 +154,16 @@ mod linux {
                     }
                 }
                 [cmd] if *cmd == subcommand::IDLE => idle(),
+                [cmd, hold_seconds, exit_code, specs @ ..]
+                    if *cmd == subcommand::BIND && !specs.is_empty() =>
+                {
+                    match (hold_seconds.parse::<u64>(), exit_code.parse::<i32>()) {
+                        (Ok(hold_seconds), Ok(exit_code)) => {
+                            bind_and_hold(hold_seconds, exit_code, specs)
+                        }
+                        _ => usage("bind <hold-seconds> <exit-code> <tcp|udp>:<socket-addr>..."),
+                    }
+                }
                 [cmd, port, tag] if *cmd == subcommand::LISTEN => {
                     match (port.parse::<u16>(), tag_is_valid(tag)) {
                         (Ok(port), true) if port != 0 => listen(port),
@@ -190,8 +200,45 @@ mod linux {
                     }
                 }
                 [cmd, rest @ ..] if *cmd == subcommand::RUN_WITH_MODULES => run_with_modules(rest),
-                _ => usage("<round-trip|hold|flood|udp-churn|idle|listen|run-with-modules> …"),
+                _ => usage("<round-trip|hold|flood|udp-churn|idle|bind|listen|run-with-modules> …"),
             }
+        }
+
+        /// `bind`: binds every `<tcp|udp>:<socket-addr>` spec, prints one line
+        /// per spec, holds, then exits with `exit_code`.
+        fn bind_and_hold(hold_seconds: u64, exit_code: i32, specs: &[&str]) -> i32 {
+            let mut held: Vec<(Option<TcpListener>, Option<UdpSocket>)> = Vec::new();
+            for spec in specs {
+                let Some((proto, addr)) = spec.split_once(':') else {
+                    return usage("bind spec: <tcp|udp>:<socket-addr>");
+                };
+                let Ok(addr) = addr.parse::<std::net::SocketAddr>() else {
+                    return usage("bind spec: <tcp|udp>:<socket-addr>");
+                };
+                let bound = match proto {
+                    "tcp" => TcpListener::bind(addr).map(|l| (Some(l), None)),
+                    "udp" => UdpSocket::bind(addr).map(|s| (None, Some(s))),
+                    _ => return usage("bind spec: <tcp|udp>:<socket-addr>"),
+                };
+                match bound {
+                    Ok(pair) => {
+                        println!("{BOUND_PREFIX}{spec}");
+                        held.push(pair);
+                    }
+                    Err(e) => {
+                        eprintln!("bind: {spec}: {e}");
+                        return exit::TCP_CONNECT;
+                    }
+                }
+            }
+            if hold_seconds == 0 {
+                loop {
+                    thread::sleep(Duration::from_secs(3600));
+                }
+            }
+            thread::sleep(Duration::from_secs(hold_seconds));
+            drop(held);
+            exit_code
         }
 
         fn idle() -> ! {

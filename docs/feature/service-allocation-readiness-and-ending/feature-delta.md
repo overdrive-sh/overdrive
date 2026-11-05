@@ -3104,6 +3104,10 @@ Path prefixes: `CP` = `crates/overdrive-control-plane`, `CORE` = `crates/overdri
 | D14 item 4 (DG-11) | mechanic summary names the declared listeners | `CLI/T/a/probes_section_render.rs::guest_listeners_summary_names_the_declared_listeners_in_declaration_order` (`probes_section` and the CLI formatter take `&[Listener]`); `REC/src/service_lifecycle.rs::guest_listeners_summary_names_the_declared_listeners_in_declaration_order` (reconciler formatter takes `&[Listener]`) | T1 pure, default / `--lib` | ign(D14) x2 |
 | S-55 | PR-4 | `CORE/T/a/declared_listeners_tcp_view.rs::the_tcp_view_is_the_tcp_filter_of_the_declared_listeners_in_declaration_order`, `::a_udp_only_declaration_has_no_tcp_ports_and_a_mixed_one_keeps_tcp_order`; `WRK/tests/integration/inbound_rules_only_for_tcp_declared_listeners.rs::a_udp_declared_listener_gets_no_inbound_capture_and_a_tcp_one_does` | T1 proptest; integration (nft, metal) | ign(PR-4) x3 |
 | S-56 | D6, DG-12 | `CORE/T/a/service_lifecycle_reconcile_branches.rs::terminal_allocation_of_any_start_history_closes_its_mid_startup_window` (oracle: the returned `View.terminal_announced` contains the allocation, `has_alloc_mid_startup_window()` is false, `next_evaluation_at` is `None`, no action) | T1 pure, enumerated grid (state x `started_at`), default | ign(D6) |
+| G-10 (10) | D13 item 8, D14 item 3, Tier 3 | `CP/tests/integration/guest_listener_real_boot.rs::a_loopback_only_bind_never_satisfies_a_declared_listener` (real guest, `run_server`, `POST /v1/workloads`; observes the startup row in `GET /v1/allocs`) | T3 real boot, `integration-tests,kvm-tests`, native metal | ign(D13 guest side); RED on the probe-runner scaffold, no deadline `Fail` row |
+| G-10 (9) second clause, `guest_report` guest half | D13 items 1 and 10, Tier 3 | `guest_listener_real_boot.rs::every_declared_listener_a_real_workload_binds_is_reported_before_it_exits` (TCP and UDP listener held, then exit; `Pass` seen while `Running`, before the terminal row) | T3 real boot | ign(D13 guest side); RED on the same scaffold, no `Pass` row |
+| DG-6, F-5 | D13 host shared board | `CP/tests/integration/guest_listener_board_wiring.rs::a_listen_line_on_the_drivers_beacon_completes_the_probe_tasks_declared_set` (`run_server` over `SimVmm`, `SimBeaconIo`, `SimMtlsIntercept`; undeclared and partial reports change nothing, the completing report writes one `Pass`) | T1 production composition, `integration-tests` (metal) | ign(D13 host shared board); RED on the `LISTEN` parse scaffold |
+| G-10 (9) first clause | none | not authored: DG-13 (the reserved range cannot be declared) | n/a | open gap |
 | D13 item 2 | LISTEN wire form (G-10 "wire parse") | `CORE/T/a/beacon_listen_wire_form.rs::listen_round_trips_for_every_protocol_and_port`, `::listen_with_an_out_of_range_port_is_a_typed_error`, `::malformed_listen_lines_are_rejected_with_a_typed_error` (asserts `BeaconParseError::MalformedListen { raw, detail }` carrying the full line, DG-M) | T1 pure proptest, default | ign(D13) x3 |
 
 Error and boundary tests are above 40 % in every area (ended ids, lost and failed writes, restarts, races, deferrals, same-key bursts, failed reads, undeclared reports).
@@ -3125,7 +3129,7 @@ Error and boundary tests are above 40 % in every area (ended ids, lost and faile
 | 11 G-7 | D10 | S-34, S-35, S-36 |
 | 12 G-8 | D11 | S-39, S-40, S-41, S-42 |
 | 13 G-9 | D12 | S-46, S-47, S-43, S-30 |
-| 14 G-10 | D13 to D15 | S-50 to S-53 (host half), the `guest_report_host` driver, the LISTEN wire form; item (8) ring-drop composed run is authored (`crates/overdrive-control-plane/src/reconciler_runtime/guest_listener_gate_composed.rs::a_service_whose_listener_report_never_arrives_is_stopped_at_the_deadline_restarted_and_given_up`, ignored `pending DELIVER: D13/D14`); items (9) init's own binds and (10) loopback and v4-mapped binds are not authored; DG-8 (ruled 2026-11-05) pins (8) as a seeded composed run with the omitted `LISTEN` line on `SimBeaconIo`, and (9) and (10) as Tier-3 DELIVER obligations |
+| 14 G-10 | D13 to D15 | S-50 to S-53 (host half), the `guest_report_host` driver, the LISTEN wire form; item (8) ring-drop composed run is authored (`crates/overdrive-control-plane/src/reconciler_runtime/guest_listener_gate_composed.rs::a_service_whose_listener_report_never_arrives_is_stopped_at_the_deadline_restarted_and_given_up`, ignored `pending DELIVER: D13/D14`); item (10) loopback and v4-mapped binds and the second clause of (9) are authored as Tier-3 real-boot tests (`guest_listener_real_boot.rs`); the first clause of (9) is not authored (DG-13); DG-8 (ruled 2026-11-05) pins (8) as a seeded composed run with the omitted `LISTEN` line on `SimBeaconIo` |
 | 15 D17 | none | S-48 |
 
 ## Wave: DISTILL / [REF] Conformance drivers
@@ -3179,7 +3183,7 @@ Not scaffolded: `ServiceAllocFact.startup_attempts_required` (S-54 drives hydrat
 | `integration-tests` | `CP/tests/acceptance/service_stream_*.rs` (use the convergence-tick entry), `CP/src/**` composed modules (`liveness_gate_composed.rs`, `convergence_loop_wake.rs`) | composed streams, liveness, wake |
 | Conformance (`integration-tests`) | `CP/src/worker/quint_*.rs`, `CP/src/reconciler_runtime/quint_*.rs`, `CP/src/quint_stream_conformance/` | six `quint-connect` drivers; they need crate-private constructors and ITF helpers, so they sit beside their owners (precedent `guest_network/quint_cid_lease.rs`) |
 | Integration, real infrastructure | `WRK/tests/integration/inbound_rules_only_for_tcp_declared_listeners.rs` (nft); `CLI/tests/integration/deploy_stream_request_timeout.rs` (real TLS socket, paused clock) | host effects Sim cannot observe |
-| Tier 3 real boot | not authored by DISTILL; DELIVER obligation of D13 and D14 (DG-8, ruled 2026-11-05) | G-10 items 9 and 10 and the guest half of `guest_report`; V34 to V36 and V42 spikes remain the evidence until then |
+| Tier 3 real boot | `CP/tests/integration/guest_listener_real_boot.rs` (`integration-tests,kvm-tests`, native metal, after `cargo xtask guest-kit-prepare`); the guest application's new `bind` subcommand is test support (`overdrive-testing`) | G-10 item 10, the second clause of item 9 and the guest half of `guest_report`; the first clause of item 9 is DG-13; V34 to V36 and V42 stay the evidence for the tight drain race |
 
 Every cargo, nextest, quint and lint command ran through `cargo xtask metal run --`. No test spawns the `overdrive` binary.
 
@@ -3191,7 +3195,7 @@ Every cargo, nextest, quint and lint command ran through `cargo xtask metal run 
 | `ObservationStore` | `SimObservationStore` with `inject_write_failure` and a delegating read-fault store (`issue_fault_store.rs`) | redb not exercised by this feature |
 | `Driver` | `SimDriver` behind `HookedDriver`; real `VmDriver` over `SimVmm` and `SimBeaconIo` (S-31, S-32, conformance) | microVM boot is Tier 3, not authored |
 | TCP prober, guest stream dial | `SimTcpProber`, `SimGuestStreamDial` | none |
-| `GuestListenerReports` | real `GuestListenerBoard` (via the reader) and `SimGuestListenerReports`, held equal by `guest_listener_reports_equivalence` | real guest reports: Tier 3, not authored (DG-8) |
+| `GuestListenerReports` | real `GuestListenerBoard` (via the reader) and `SimGuestListenerReports`, held equal by `guest_listener_reports_equivalence` | real guest reports: Tier 3, `guest_listener_real_boot.rs` (DG-8); the shared board: `guest_listener_board_wiring.rs` (DG-6) |
 | Network provisioner | `NoopNetworkProvisioner` | inbound capture install: nft integration test (PR-4) |
 | Intent store, view store | `LocalStore`, the runtime's view store (restart tests reload it) | none |
 | Operator HTTP stream | production handler and `ApiClient` | CLI request timeout over a real TLS socket |
@@ -3212,7 +3216,7 @@ Every cargo, nextest, quint and lint command ran through `cargo xtask metal run 
 
 ## Wave: DISTILL / [REF] Design gaps routed to DESIGN
 
-**All twelve gaps (DG-1 to DG-12) and the minor items were ruled on 2026-11-05** ("proceed with recommendations"); the approval is recorded in § Approval record. Each gap was a shape or model fact the design did not pin; DISTILL did not improvise (CLAUDE.md "Implement to the design"). DISTILL applied the rulings: S-56 and the composed restart and give-up leg of S-32 are authored, and the specs, drivers and scaffolds follow the pins below. **No design gap remains open. DISTILL is complete, pending the independent review.** Detail and file references: `distill/upstream-issues.md`.
+**All twelve gaps (DG-1 to DG-12) and the minor items were ruled on 2026-11-05** ("proceed with recommendations"); the approval is recorded in § Approval record. Each gap was a shape or model fact the design did not pin; DISTILL did not improvise (CLAUDE.md "Implement to the design"). DISTILL applied the rulings: S-56 and the composed restart and give-up leg of S-32 are authored, and the specs, drivers and scaffolds follow the pins below. **DG-1 to DG-12 are closed. One gap found afterwards is open: DG-13 (G-10 (9) first clause, below). DISTILL is complete, pending the independent review and that ruling.** Detail and file references: `distill/upstream-issues.md`.
 
 | ID | Ruling (2026-11-05) | Recorded in |
 |---|---|---|
@@ -3228,6 +3232,7 @@ Every cargo, nextest, quint and lint command ran through `cargo xtask metal run 
 | DG-10 | `tokio` `test-util` approved; S-36 behind `integration-tests` with a litmus proof | S-36 |
 | DG-11 | Both formatters take `&[Listener]`; no wire field | D14 item 4 |
 | DG-12 | Every `Failed` or `Terminated` fact joins `terminal_announced`; new obligation S-56 | D6 item 1, S-56 |
+| DG-13 (open) | G-10 (9) first clause: the ruled fixture declares a port in init's reserved range, which the Service validator rejects (`ListenerPortReserved`); no host-visible effect of init's binds exists on a deployable Service. Recommendation: record it as an in-guest property covered by V42 | `distill/upstream-issues.md` |
 | Minor | `BeaconParseError::MalformedListen { raw, detail }`; `Idle` is a read-only `reported(alloc)` call; D16 historical fixtures land with the version bump (DELIVER); the per-consumer board is fixed by DG-6 | § Interface changes (D13 to D16) |
 
 The gaps as DISTILL routed them:

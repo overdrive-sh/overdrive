@@ -81,6 +81,14 @@ pub mod subcommand {
     /// [`super::LISTEN_CONN_TERMINAL_PREFIX`] line naming its read side's
     /// first terminal event. It never exits.
     pub const LISTEN: &str = "listen";
+    /// `bind <hold-seconds> <exit-code> <spec>...`: binds each `<spec>`, which is
+    /// `tcp:<socket-addr>` (a listening socket) or `udp:<socket-addr>` (an
+    /// explicit bind), prints one [`super::BOUND_PREFIX`] line per bound spec,
+    /// then sleeps `hold-seconds` (0 sleeps forever) and exits with
+    /// `exit-code`. The guest workload of the guest-listener real-boot
+    /// scenarios: it binds exactly the addresses the scenario names (loopback,
+    /// IPv6, IPv4-mapped, wildcard) and does nothing else.
+    pub const BIND: &str = "bind";
     /// `v6-peer <population>`: the peer VM Service of the cumulative V-6
     /// walking skeleton. It serves the fixed TCP/UDP application, probe,
     /// state-control and population ports below until killed.
@@ -141,6 +149,8 @@ pub const TERMINAL_LINE_PREFIX: &str = "observer guest-app: terminal=";
 pub const FLOOD_WRITTEN_PREFIX: &str = "flood: written=";
 /// Printed by `listen` once its listener is bound, followed by the port.
 pub const LISTENING_PREFIX: &str = "listen: listening port=";
+/// The console line `bind` prints for each spec it bound, followed by the spec.
+pub const BOUND_PREFIX: &str = "bind: bound ";
 /// Prefix of the line `listen` prints when one connection's read side ends:
 /// `listen: conn=<n> hello=<yes|no> terminal=<event>`, `n` counting accepts
 /// from 1, the event rendered by [`TerminalEvent`]'s `Display`.
