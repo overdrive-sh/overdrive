@@ -35,7 +35,32 @@ pub struct GatewayLimits {
 impl GatewayLimits {
     /// Construct the one fixed first-slice policy.
     pub fn first_slice() -> Self {
-        todo!("SCAFFOLD: GatewayLimits::first_slice")
+        const CONNECTIONS: NonZeroU32 = NonZeroU32::new(128).unwrap();
+        const HEAD_BYTES: NonZeroUsize = NonZeroUsize::new(32 * 1024).unwrap();
+        const HEADERS: NonZeroUsize = NonZeroUsize::new(100).unwrap();
+        const REQUESTS_PER_CONNECTION: NonZeroU32 = NonZeroU32::new(100).unwrap();
+        const BODY_BYTES: NonZeroU64 = NonZeroU64::new(16 * 1024 * 1024).unwrap();
+        Self {
+            max_public_connections: CONNECTIONS,
+            max_inflight_connects: CONNECTIONS,
+            max_inflight_requests: CONNECTIONS,
+            max_cleanup_ledger_entries: CONNECTIONS,
+            max_request_head_bytes: HEAD_BYTES,
+            max_request_headers: HEADERS,
+            max_response_head_bytes: HEAD_BYTES,
+            max_response_headers: HEADERS,
+            max_requests_per_connection: REQUESTS_PER_CONNECTION,
+            max_request_body_bytes: BODY_BYTES,
+            max_response_body_bytes: BODY_BYTES,
+            application_gate_deadline: Duration::from_secs(30),
+            tls_handshake_deadline: Duration::from_secs(5),
+            request_head_deadline: Duration::from_secs(5),
+            upstream_connect_deadline: Duration::from_secs(5),
+            response_head_deadline: Duration::from_secs(5),
+            body_no_progress_deadline: Duration::from_secs(30),
+            keep_alive_idle_deadline: Duration::from_secs(30),
+            whole_request_deadline: Duration::from_secs(120),
+        }
     }
     pub const fn max_public_connections(&self) -> NonZeroU32 {
         self.max_public_connections

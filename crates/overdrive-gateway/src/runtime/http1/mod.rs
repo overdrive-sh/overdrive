@@ -2,8 +2,7 @@
 //!
 //! Data path of ADR-0245, ADR-0239, ADR-0247 and ADR-0254.
 //!
-//! SCAFFOLD: true. Only the shapes the DESIGN pins are present: the
-//! [`exchange`] module (`ExchangeMachine` and its closed vocabulary, the
+//! The [`exchange`] module (`ExchangeMachine` and its closed vocabulary, the
 //! Quint conformance target of `specs/quint/public-ingress-gateway/
 //! relay_exchange.qnt`) and its conformance driver, the pure [`head`]
 //! functions (head validator, request/response parsers, framing decision,

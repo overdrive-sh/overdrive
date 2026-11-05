@@ -1,10 +1,6 @@
 //! The exchange state machine of one public connection (ADR-0222, ADR-0238,
 //! ADR-0240, ADR-0242, ADR-0247, ADR-0254).
 //!
-//! SCAFFOLD: true. The DESIGN-pinned vocabulary (`ExchangePhase`,
-//! `ResponseState`, `Remaining`, `Disposition`, `Side`, `BodyFraming`,
-//! `FramingViolation`) and the `ExchangeMachine` methods and accessors
-//! compile today; every body is DELIVER's and fails with SCAFFOLD text.
 //! Source-local properties implement S-PIG-84; the Quint conformance driver
 //! (`quint_exchange`, QC-4) replays `specs/quint/public-ingress-gateway/
 //! relay_exchange.qnt` against this owner.
@@ -91,14 +87,28 @@ pub(crate) enum FramingViolation {
 
 /// The pure exchange state machine (the only owner of the Exchange table).
 pub(crate) struct ExchangeMachine {
-    _private: (),
+    phase: ExchangePhase,
+    request_remaining: Remaining,
+    response_state: ResponseState,
+    response_remaining: Remaining,
+    head_request: bool,
+    draining: bool,
+    public_half_closed: bool,
 }
 
 impl ExchangeMachine {
     /// Fresh machine: `Idle`, `ResponseState::Pending`, both remainings
     /// `Remaining::None`, not draining, public peer not half-closed.
-    pub(crate) fn new() -> Self {
-        todo!("SCAFFOLD: ExchangeMachine::new")
+    pub(crate) const fn new() -> Self {
+        Self {
+            phase: ExchangePhase::Idle,
+            request_remaining: Remaining::None,
+            response_state: ResponseState::Pending,
+            response_remaining: Remaining::None,
+            head_request: false,
+            draining: false,
+            public_half_closed: false,
+        }
     }
 
     /// Idle -> Relay (the upstream leg is connected by the exchange driver
@@ -108,77 +118,207 @@ impl ExchangeMachine {
         method_is_head: bool,
         framing: BodyFraming,
     ) -> Result<(), FramingViolation> {
-        todo!("SCAFFOLD: ExchangeMachine::begin_request")
+        if self.phase != ExchangePhase::Idle {
+            return Err(FramingViolation::WrongPhase { phase: self.phase });
+        }
+        if framing == BodyFraming::UntilClose {
+            return Err(FramingViolation::UntilCloseRequest);
+        }
+        self.phase = ExchangePhase::Relay;
+        self.head_request = method_is_head;
+        self.request_remaining = Remaining::from_framing(framing);
+        self.response_state = ResponseState::Pending;
+        self.response_remaining = Remaining::None;
+        Ok(())
     }
 
     pub(crate) fn request_octets_moved(&mut self, n: u64) -> Result<(), FramingViolation> {
-        todo!("SCAFFOLD: ExchangeMachine::request_octets_moved")
+        self.require_relay()?;
+        self.request_remaining = self.request_remaining.after_moving(n, Side::Public)?;
+        Ok(())
     }
 
     pub(crate) fn response_head(&mut self, framing: BodyFraming) -> Result<(), FramingViolation> {
-        todo!("SCAFFOLD: ExchangeMachine::response_head")
+        self.require_relay()?;
+        if self.response_state != ResponseState::Pending {
+            return Err(FramingViolation::ResponseHeadRepeated);
+        }
+        self.response_remaining =
+            if self.head_request { Remaining::None } else { Remaining::from_framing(framing) };
+        self.response_state = self.state_for_remaining();
+        Ok(())
     }
 
     pub(crate) fn response_octets_moved(&mut self, n: u64) -> Result<(), FramingViolation> {
-        todo!("SCAFFOLD: ExchangeMachine::response_octets_moved")
+        self.require_relay()?;
+        self.response_remaining = self.response_remaining.after_moving(n, Side::Upstream)?;
+        if self.response_state == ResponseState::Body {
+            self.response_state = self.state_for_remaining();
+        }
+        Ok(())
     }
 
     /// Ends a `ChunkedOpen` request body (last chunk and trailers consumed).
     pub(crate) fn request_chunked_end(&mut self) -> Result<(), FramingViolation> {
-        todo!("SCAFFOLD: ExchangeMachine::request_chunked_end")
+        self.require_relay()?;
+        if self.request_remaining != Remaining::ChunkedOpen {
+            return Err(FramingViolation::ChunkedEndNotOpen { side: Side::Public });
+        }
+        self.request_remaining = Remaining::None;
+        Ok(())
     }
 
     /// Ends a `ChunkedOpen` response body.
     pub(crate) fn response_chunked_end(&mut self) -> Result<(), FramingViolation> {
-        todo!("SCAFFOLD: ExchangeMachine::response_chunked_end")
+        self.require_relay()?;
+        if self.response_remaining != Remaining::ChunkedOpen {
+            return Err(FramingViolation::ChunkedEndNotOpen { side: Side::Upstream });
+        }
+        self.response_remaining = Remaining::None;
+        self.response_state = ResponseState::Complete;
+        Ok(())
     }
 
     pub(crate) fn peer_closed(&mut self, side: Side, clean: bool) {
-        todo!("SCAFFOLD: ExchangeMachine::peer_closed")
+        match (self.phase, side) {
+            (ExchangePhase::Closed, _) => {}
+            (_, Side::Upstream) => self.upstream_closed(clean),
+            (_, Side::Public) => self.public_closed(clean),
+        }
     }
 
     pub(crate) fn drain_begin(&mut self) {
-        todo!("SCAFFOLD: ExchangeMachine::drain_begin")
+        if self.phase == ExchangePhase::Closed || self.draining {
+            return;
+        }
+        self.draining = true;
+        if self.phase == ExchangePhase::Idle {
+            self.close();
+        }
     }
 
     pub(crate) fn force_abort(&mut self) {
-        todo!("SCAFFOLD: ExchangeMachine::force_abort")
+        self.close();
     }
 
     /// Fails `FramingViolation` unless `response_state() == Complete`.
     /// Relay -> Idle and `Reuse` when `reusable()`, else Relay -> Closed and
     /// `Close`.
     pub(crate) fn finish(&mut self) -> Result<Disposition, FramingViolation> {
-        todo!("SCAFFOLD: ExchangeMachine::finish")
+        self.require_relay()?;
+        if self.response_state != ResponseState::Complete {
+            return Err(FramingViolation::ResponseNotComplete);
+        }
+        if !self.reusable() {
+            self.close();
+            return Ok(Disposition::Close);
+        }
+        self.phase = ExchangePhase::Idle;
+        self.response_state = ResponseState::Pending;
+        Ok(Disposition::Reuse)
     }
 
-    pub(crate) fn phase(&self) -> ExchangePhase {
-        todo!("SCAFFOLD: ExchangeMachine::phase")
+    pub(crate) const fn phase(&self) -> ExchangePhase {
+        self.phase
     }
 
-    pub(crate) fn request_remaining(&self) -> Remaining {
-        todo!("SCAFFOLD: ExchangeMachine::request_remaining")
+    pub(crate) const fn request_remaining(&self) -> Remaining {
+        self.request_remaining
     }
 
-    pub(crate) fn response_state(&self) -> ResponseState {
-        todo!("SCAFFOLD: ExchangeMachine::response_state")
+    pub(crate) const fn response_state(&self) -> ResponseState {
+        self.response_state
     }
 
-    pub(crate) fn response_remaining(&self) -> Remaining {
-        todo!("SCAFFOLD: ExchangeMachine::response_remaining")
+    pub(crate) const fn response_remaining(&self) -> Remaining {
+        self.response_remaining
     }
 
-    pub(crate) fn public_half_closed(&self) -> bool {
-        todo!("SCAFFOLD: ExchangeMachine::public_half_closed")
+    pub(crate) const fn public_half_closed(&self) -> bool {
+        self.public_half_closed
     }
 
-    pub(crate) fn is_draining(&self) -> bool {
-        todo!("SCAFFOLD: ExchangeMachine::is_draining")
+    pub(crate) const fn is_draining(&self) -> bool {
+        self.draining
     }
 
     /// Derived: `finish()` returns `Reuse` exactly when this holds.
     pub(crate) fn reusable(&self) -> bool {
-        todo!("SCAFFOLD: ExchangeMachine::reusable")
+        self.request_remaining == Remaining::None
+            && self.response_remaining == Remaining::None
+            && self.response_state == ResponseState::Complete
+            && !self.draining
+            && !self.public_half_closed
+    }
+
+    fn require_relay(&self) -> Result<(), FramingViolation> {
+        match self.phase {
+            ExchangePhase::Relay => Ok(()),
+            phase => Err(FramingViolation::WrongPhase { phase }),
+        }
+    }
+
+    fn state_for_remaining(&self) -> ResponseState {
+        match self.response_remaining {
+            Remaining::None => ResponseState::Complete,
+            _ => ResponseState::Body,
+        }
+    }
+
+    /// Closed is absorbing and owes nothing; `draining` and the public
+    /// half-close stay observable.
+    fn close(&mut self) {
+        self.phase = ExchangePhase::Closed;
+        self.request_remaining = Remaining::None;
+        self.response_state = ResponseState::Pending;
+        self.response_remaining = Remaining::None;
+    }
+
+    fn upstream_closed(&mut self, clean: bool) {
+        let ends_close_delimited_body = clean
+            && self.response_state == ResponseState::Body
+            && self.response_remaining == Remaining::UntilClose;
+        if ends_close_delimited_body {
+            self.response_state = ResponseState::Complete;
+            return;
+        }
+        if self.response_state != ResponseState::Complete {
+            self.close();
+        }
+    }
+
+    fn public_closed(&mut self, clean: bool) {
+        let request_unfinished = self.request_remaining != Remaining::None;
+        let aborts = !clean || self.phase == ExchangePhase::Idle || request_unfinished;
+        if aborts {
+            self.close();
+        } else {
+            self.public_half_closed = true;
+        }
+    }
+}
+
+impl Remaining {
+    /// The framing-to-remaining mapping (the machine's one rule).
+    const fn from_framing(framing: BodyFraming) -> Self {
+        match framing {
+            BodyFraming::NoBody | BodyFraming::Length(0) => Self::None,
+            BodyFraming::Length(n) => Self::Exactly(n),
+            BodyFraming::Chunked => Self::ChunkedOpen,
+            BodyFraming::UntilClose => Self::UntilClose,
+        }
+    }
+
+    /// What is owed after `n` octets moved on `side`.
+    const fn after_moving(self, n: u64, side: Side) -> Result<Self, FramingViolation> {
+        match self {
+            Self::Exactly(k) if n <= k => {
+                Ok(if n == k { Self::None } else { Self::Exactly(k - n) })
+            }
+            Self::ChunkedOpen | Self::UntilClose => Ok(self),
+            _ if n == 0 => Ok(self),
+            _ => Err(FramingViolation::OctetsBeyondFraming { side, n }),
+        }
     }
 }
 
@@ -340,7 +480,6 @@ mod laws {
         ///
         /// CONTRACT_SHAPE: pure-function.
         #[test]
-        #[ignore = "pending DELIVER exchange-state-machine"]
         fn reuse_happens_only_at_a_clean_boundary(
             head_request in any::<bool>(),
             request in arb_request(),
@@ -419,7 +558,6 @@ mod laws {
         ///
         /// CONTRACT_SHAPE: pure-function.
         #[test]
-        #[ignore = "pending DELIVER exchange-state-machine"]
         fn an_early_response_never_reuses_the_connection(
             declared in 1u64..=4,
             already_moved in 0u64..4,
@@ -456,7 +594,6 @@ mod laws {
         ///
         /// CONTRACT_SHAPE: pure-function.
         #[test]
-        #[ignore = "pending DELIVER exchange-state-machine"]
         fn an_upstream_close_aborts_unless_the_body_is_close_delimited(
             stage in 0u8..4,
             declared in 2u64..=4,
@@ -499,7 +636,6 @@ mod laws {
         ///
         /// CONTRACT_SHAPE: pure-function.
         #[test]
-        #[ignore = "pending DELIVER exchange-state-machine"]
         fn a_public_close_aborts_only_before_the_request_is_fully_read(
             request in arb_request(),
             fully_read in any::<bool>(),
@@ -534,7 +670,6 @@ mod laws {
         ///
         /// CONTRACT_SHAPE: pure-function.
         #[test]
-        #[ignore = "pending DELIVER exchange-state-machine"]
         fn framing_maps_to_remaining_and_moves_reduce_it(
             head_request in any::<bool>(),
             request in arb_request(),
@@ -583,7 +718,6 @@ mod laws {
         ///
         /// CONTRACT_SHAPE: pure-function.
         #[test]
-        #[ignore = "pending DELIVER exchange-state-machine"]
         fn octets_beyond_the_declared_remainder_are_refused(
             declared in 1u64..=4,
             excess in 1u64..=1000,
@@ -644,7 +778,6 @@ mod laws {
     ///
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER exchange-state-machine"]
     fn a_fresh_machine_is_idle_and_refuses_calls_outside_their_phase() {
         let mut machine = ExchangeMachine::new();
         assert_eq!(machine.phase(), ExchangePhase::Idle);
@@ -683,7 +816,6 @@ mod laws {
     ///
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER exchange-state-machine"]
     fn every_call_that_contradicts_the_state_is_a_distinct_violation() {
         let mut machine = ExchangeMachine::new();
         machine.begin_request(false, BodyFraming::Length(2)).expect("begin");
@@ -727,7 +859,6 @@ mod laws {
     ///
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER exchange-state-machine"]
     fn every_event_after_closed_is_refused_or_ignored() {
         let mut machine = ExchangeMachine::new();
         machine.begin_request(false, BodyFraming::Length(2)).expect("begin");
@@ -763,7 +894,6 @@ mod laws {
     ///
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER exchange-state-machine"]
     fn drain_closes_an_idle_connection_and_force_abort_ends_an_inflight_one() {
         let mut idle = ExchangeMachine::new();
         idle.drain_begin();

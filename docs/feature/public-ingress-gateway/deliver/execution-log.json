@@ -64,6 +64,41 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-11-05T10:42:35Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-05T10:50:40Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: GatewayLimits::first_slice is a todo! scaffold owned by step gateway-application-owner, outside this step's files; 17/17 pass only with a temporary patch, reverted",
+      "t": "2026-11-05T10:50:40Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: awaiting first_slice decision; work left uncommitted",
+      "t": "2026-11-05T10:50:40Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-05T10:54:31Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-05T10:54:31Z"
     }
   ]
 }

@@ -1,18 +1,10 @@
 //! Pure deadline composition of the kernel relay (S-PIG-85; R-32, R-37).
 //!
-//! SCAFFOLD: true. Only the signatures the DESIGN pins are present; every body
-//! is DELIVER's and fails with SCAFFOLD text. No function reads a clock: `now`
-//! is an input.
+//! No function reads a clock: `now` is an input.
 
 #![allow(
-    clippy::todo,
-    clippy::doc_markdown,
-    clippy::needless_pass_by_value,
-    clippy::missing_const_for_fn,
     clippy::redundant_pub_crate,
-    dead_code,
-    unused_variables,
-    reason = "public-ingress DISTILL scaffold: bodies are DELIVER's"
+    reason = "the DESIGN pins these items `pub(crate)`: crate-private, reached by the exchange driver"
 )]
 
 use std::time::Instant;
@@ -23,7 +15,7 @@ use crate::runtime::GatewayLimits;
 /// The whole-request ceiling of a request whose first octet arrived at
 /// `first_octet_at`.
 pub(crate) fn request_deadline(first_octet_at: Instant, limits: &GatewayLimits) -> Instant {
-    todo!("SCAFFOLD: http1::request_deadline")
+    first_octet_at + limits.whole_request_deadline()
 }
 
 /// The `ReadDeadlines` the driver passes to `read_through` for each phase,
@@ -34,7 +26,32 @@ pub(crate) fn compose_read_deadlines(
     request_deadline: Instant,
     limits: &GatewayLimits,
 ) -> ReadDeadlines {
-    todo!("SCAFFOLD: http1::compose_read_deadlines")
+    match phase {
+        ReadPhase::FirstRequestHead => {
+            let by = request_deadline.min(now + limits.request_head_deadline());
+            ReadDeadlines { first_octet: by, complete_within: None, complete_by: Some(by) }
+        }
+        ReadPhase::LaterRequestHead => ReadDeadlines {
+            first_octet: now + limits.keep_alive_idle_deadline(),
+            complete_within: Some(limits.request_head_deadline()),
+            complete_by: None,
+        },
+        ReadPhase::FramingLine => ReadDeadlines {
+            first_octet: now + limits.body_no_progress_deadline(),
+            complete_within: Some(limits.body_no_progress_deadline()),
+            complete_by: Some(request_deadline),
+        },
+        ReadPhase::ResponseHead { request_complete_at } => {
+            let by = request_complete_at.map_or(request_deadline, |t0| {
+                request_deadline.min(t0 + limits.response_head_deadline())
+            });
+            ReadDeadlines {
+                first_octet: by,
+                complete_within: Some(limits.response_head_deadline()),
+                complete_by: Some(by),
+            }
+        }
+    }
 }
 
 /// The read the deadlines are composed for.
@@ -81,7 +98,6 @@ mod laws {
         ///
         /// CONTRACT_SHAPE: pure-function.
         #[test]
-        #[ignore = "pending DELIVER exchange-state-machine"]
         fn a_request_ends_a_whole_request_deadline_after_its_first_octet(
             first_octet_ms in 0u64..=10_000_000,
         ) {
@@ -101,7 +117,6 @@ mod laws {
         ///
         /// CONTRACT_SHAPE: pure-function.
         #[test]
-        #[ignore = "pending DELIVER exchange-state-machine"]
         fn the_first_request_head_has_one_budget_reduced_by_the_request_deadline(
             now_ms in 0u64..=10_000_000,
             request_left_ms in 0u64..=240_000,
@@ -123,7 +138,6 @@ mod laws {
         ///
         /// CONTRACT_SHAPE: pure-function.
         #[test]
-        #[ignore = "pending DELIVER exchange-state-machine"]
         fn a_later_request_head_waits_idle_then_gets_the_head_budget_from_its_first_octet(
             now_ms in 0u64..=10_000_000,
         ) {
@@ -142,7 +156,6 @@ mod laws {
         ///
         /// CONTRACT_SHAPE: pure-function.
         #[test]
-        #[ignore = "pending DELIVER exchange-state-machine"]
         fn framing_lines_get_the_no_progress_budget_and_never_outlive_the_request(
             now_ms in 0u64..=10_000_000,
             request_left_ms in 0u64..=240_000,
@@ -168,7 +181,6 @@ mod laws {
         ///
         /// CONTRACT_SHAPE: pure-function.
         #[test]
-        #[ignore = "pending DELIVER exchange-state-machine"]
         fn a_response_head_read_before_the_request_is_written_follows_the_request_deadline(
             now_ms in 0u64..=10_000_000,
             request_left_ms in 0u64..=240_000,
@@ -196,7 +208,6 @@ mod laws {
         ///
         /// CONTRACT_SHAPE: pure-function.
         #[test]
-        #[ignore = "pending DELIVER exchange-state-machine"]
         fn a_response_head_read_from_t0_has_one_budget_reduced_by_the_request_deadline(
             t0_ms in 0u64..=10_000_000,
             since_t0_ms in 0u64..=10_000,
@@ -227,7 +238,6 @@ mod laws {
     ///
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER exchange-state-machine"]
     fn the_response_head_budget_is_the_smaller_of_its_own_and_the_remaining_request_time() {
         let limits = limits();
         let started = origin();
