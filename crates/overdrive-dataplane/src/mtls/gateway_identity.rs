@@ -20,7 +20,7 @@
     clippy::unused_self,
     dead_code,
     unused_variables,
-    reason = "public-ingress DISTILL scaffold: the client-access source and the issue-failure record are later steps' bodies"
+    reason = "public-ingress DISTILL scaffold: `client_access`, `lifecycle_target`, `begin_disable`, `with_current` and the lifecycle-handle bodies are later steps' scaffolds"
 )]
 
 use std::num::NonZeroU64;
@@ -128,7 +128,7 @@ impl GatewayIdentitySlot {
     }
 
     /// The process-local issue-failure record, `None` before any failure.
-    pub(crate) fn issue_record(&self) -> Option<GatewayIdentityIssueRecord> {
+    pub fn issue_record(&self) -> Option<GatewayIdentityIssueRecord> {
         self.state.lock().issue
     }
 
