@@ -1,6 +1,5 @@
 //! Pure request/response proxy-header rewriting.
 //!
-//! SCAFFOLD: true. Both production functions are DELIVER's.
 //! Source-local properties implement S-PIG-14 through S-PIG-16.
 
 #![allow(clippy::doc_markdown, reason = "CONTRACT_SHAPE is required metadata")]
@@ -8,20 +7,83 @@
 use std::net::Ipv4Addr;
 
 use http::HeaderMap;
+use http::header::{
+    CONNECTION, FORWARDED, HOST, HeaderName, HeaderValue, PROXY_AUTHENTICATE, PROXY_AUTHORIZATION,
+    TE, TRAILER, TRANSFER_ENCODING, UPGRADE, VIA,
+};
 use overdrive_core::public_ingress::PublicHostname;
 
+/// Headers that are hop-by-hop on every HTTP/1.1 message, `Connection` included.
+const FIXED_HOP_BY_HOP: [HeaderName; 8] = [
+    CONNECTION,
+    HeaderName::from_static("keep-alive"),
+    PROXY_AUTHENTICATE,
+    PROXY_AUTHORIZATION,
+    TE,
+    TRAILER,
+    TRANSFER_ENCODING,
+    UPGRADE,
+];
+
+/// Prefix of every removed `X-Forwarded-*` spelling (lowercase header names).
+const X_FORWARDED_PREFIX: &str = "x-forwarded-";
+
+/// The value this gateway appends to `Via`.
+const VIA_VALUE: HeaderValue = HeaderValue::from_static("1.1 overdrive");
+
+/// Rewrite the received request headers for the upstream: hop-by-hop and
+/// `Connection`-nominated headers are removed, `Host` is the validated
+/// authority, every received forwarding state is replaced by one approved
+/// `Forwarded` value, and `Via` ends with this gateway.
 #[must_use]
 pub(crate) fn rewrite_request_headers(
-    _headers: HeaderMap,
-    _accepted_client: Ipv4Addr,
-    _authority: &PublicHostname,
+    mut headers: HeaderMap,
+    accepted_client: Ipv4Addr,
+    authority: &PublicHostname,
 ) -> HeaderMap {
-    todo!("SCAFFOLD: rewrite_request_headers")
+    strip_hop_by_hop(&mut headers);
+    let forwarding: Vec<HeaderName> = headers
+        .keys()
+        .filter(|name| name.as_str().starts_with(X_FORWARDED_PREFIX))
+        .cloned()
+        .collect();
+    for name in forwarding {
+        headers.remove(name);
+    }
+    headers.remove(FORWARDED);
+    if let Ok(host) = HeaderValue::from_str(authority.as_str()) {
+        headers.insert(HOST, host);
+    }
+    let approved = format!("for={accepted_client};proto=https;host=\"{authority}\"");
+    if let Ok(forwarded) = HeaderValue::from_str(&approved) {
+        headers.insert(FORWARDED, forwarded);
+    }
+    headers.append(VIA, VIA_VALUE);
+    headers
 }
 
+/// Rewrite the upstream response headers: hop-by-hop and
+/// `Connection`-nominated headers are removed and `Via` ends with this gateway.
 #[must_use]
-pub(crate) fn rewrite_response_headers(_headers: HeaderMap) -> HeaderMap {
-    todo!("SCAFFOLD: rewrite_response_headers")
+pub(crate) fn rewrite_response_headers(mut headers: HeaderMap) -> HeaderMap {
+    strip_hop_by_hop(&mut headers);
+    headers.append(VIA, VIA_VALUE);
+    headers
+}
+
+/// Remove every header `Connection` nominates (tokens that are not valid header
+/// names nominate nothing), then the fixed hop-by-hop set.
+fn strip_hop_by_hop(headers: &mut HeaderMap) {
+    let nominated: Vec<HeaderName> = headers
+        .get_all(CONNECTION)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .flat_map(|list| list.split(','))
+        .filter_map(|token| HeaderName::from_bytes(token.trim().as_bytes()).ok())
+        .collect();
+    for name in nominated.iter().chain(FIXED_HOP_BY_HOP.iter()) {
+        headers.remove(name);
+    }
 }
 
 #[cfg(test)]
@@ -87,7 +149,6 @@ mod properties {
         ///
         /// CONTRACT_SHAPE: pure-function.
         #[test]
-        #[ignore = "pending DELIVER gateway-application-owner"]
         fn request_rewrite_preserves_all_unnominated_end_to_end_values(
             preserved in proptest::collection::vec(arb_end_to_end_header(), 0..12),
         ) {
@@ -129,7 +190,6 @@ mod properties {
         ///
         /// CONTRACT_SHAPE: pure-function.
         #[test]
-        #[ignore = "pending DELIVER gateway-application-owner"]
         fn response_rewrite_removes_connection_nominated_headers_and_appends_via(
             nominated in "[a-z](?:[a-z0-9-]{0,10}[a-z0-9])?",
             value in "[a-zA-Z0-9._ -]{1,24}",
@@ -169,7 +229,6 @@ mod properties {
     ///
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER gateway-application-owner"]
     fn request_rewrite_replaces_host_and_forwarding_state_and_honours_connection_via() {
         let mut headers = HeaderMap::new();
         for (name, value) in [
@@ -216,7 +275,6 @@ mod properties {
     ///
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER gateway-application-owner"]
     fn request_rewrite_forwarded_value_follows_the_accepted_client_and_authority() {
         let other = PublicHostname::new("www.example.org").expect("hostname");
         let rewritten =
@@ -236,7 +294,6 @@ mod properties {
     ///
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER gateway-application-owner"]
     fn response_rewrite_via_ordering_and_malformed_connection_tokens() {
         let mut keeps_via = HeaderMap::new();
         keeps_via.append(VIA, "1.0 first".parse().expect("Via"));
@@ -274,7 +331,6 @@ mod properties {
     ///
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER gateway-application-owner"]
     fn fixed_hop_by_hop_headers_are_removed_on_both_directions() {
         for name in FIXED_HOP_BY_HOP {
             let (header_name, value) = header(name, "x");

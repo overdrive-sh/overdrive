@@ -1,9 +1,6 @@
 //! `PublicCertifiedKeyAeadCodec` — HKDF-SHA256 → AES-256-GCM seal/open for the
 //! public-ingress origin private key.
 //!
-//! SCAFFOLD: true. Seal and open are DELIVER's and fail with SCAFFOLD text. The
-//! source-local acceptance tests below specify S-PIG-47.
-//!
 //! The byte-exact contract (DESIGN, "Persistence, custody and redaction"): the
 //! record's `kek_id` is `"overdrive-public-certified-key"`; HKDF-SHA256 uses the
 //! record's 32 random salt and info
@@ -12,33 +9,74 @@
 //! by the certified-key ID and hostname as `u32::to_be_bytes(len) || bytes` and
 //! the 32 generation bytes; the plaintext is exactly the canonical PKCS#8 DER.
 
-#![allow(
-    clippy::todo,
-    clippy::needless_pass_by_value,
-    clippy::missing_const_for_fn,
-    clippy::doc_markdown,
-    reason = "public-ingress DISTILL scaffold: bodies are DELIVER's"
-)]
-
 use std::sync::Arc;
 
 use overdrive_core::ca::kek::Kek;
+use overdrive_core::ca::root_key_envelope::KekId;
 use overdrive_core::public_ingress::{
     ProtectedOriginKeyV1, PublicCertifiedKeyAeadError, PublicCertifiedKeyProtectionContext,
 };
+use ring::aead::{AES_256_GCM, Aad, LessSafeKey, NONCE_LEN, Nonce, UnboundKey};
+use ring::hkdf::{HKDF_SHA256, KeyType, Salt};
+use ring::rand::{SecureRandom, SystemRandom};
 use zeroize::Zeroizing;
+
+/// The KEK domain that protects public-origin private keys.
+const KEK_ID: &str = "overdrive-public-certified-key";
+/// HKDF salt length (bytes), drawn fresh per seal.
+const SALT_LEN: usize = 32;
+/// Derived AES-256-GCM key length (bytes).
+const SUBKEY_LEN: usize = 32;
+/// AES-GCM authentication tag length (bytes).
+const TAG_LEN: usize = 16;
+/// HKDF domain-separation label.
+const HKDF_INFO: &[u8] = b"overdrive/public-certified-key/aes-256-gcm/v1";
+/// AAD context prefix.
+const AAD_CONTEXT: &[u8] = b"overdrive/public-certified-key/record/v1\0";
+
+#[cfg(any(test, feature = "integration-tests"))]
+type RandomFill = Arc<dyn Fn(&mut [u8]) -> Result<(), PublicCertifiedKeyAeadError> + Send + Sync>;
+
+/// Fixed-length HKDF output type.
+struct SubkeyLen;
+
+impl KeyType for SubkeyLen {
+    fn len(&self) -> usize {
+        SUBKEY_LEN
+    }
+}
+
+/// Source of salt and nonce bytes.
+enum RandomSource {
+    System(SystemRandom),
+    #[cfg(any(test, feature = "integration-tests"))]
+    Filled(RandomFill),
+}
+
+impl RandomSource {
+    fn fill(&self, bytes: &mut [u8]) -> Result<(), PublicCertifiedKeyAeadError> {
+        match self {
+            Self::System(rng) => {
+                rng.fill(bytes).map_err(|_| PublicCertifiedKeyAeadError::SealFailed)
+            }
+            #[cfg(any(test, feature = "integration-tests"))]
+            Self::Filled(fill) => fill(bytes),
+        }
+    }
+}
 
 /// Host adapter protecting public-origin private keys under their distinct KEK
 /// domain.
 pub struct PublicCertifiedKeyAeadCodec {
-    _kek: Arc<dyn Kek>,
+    kek: Arc<dyn Kek>,
+    random: RandomSource,
 }
 
 impl PublicCertifiedKeyAeadCodec {
     /// Bind the mandatory KEK provider; salt and nonce come from the
     /// crypto-backend CSPRNG.
     pub fn new(kek: Arc<dyn Kek>) -> Self {
-        Self { _kek: kek }
+        Self { kek, random: RandomSource::System(SystemRandom::new()) }
     }
 
     /// Bind the KEK provider and a deterministic random-fill closure so salt
@@ -48,29 +86,102 @@ impl PublicCertifiedKeyAeadCodec {
     #[cfg(any(test, feature = "integration-tests"))]
     #[allow(clippy::type_complexity, reason = "exact DESIGN-pinned random-fill test constructor")]
     pub fn with_random_fill_for_test(
-        _kek: Arc<dyn Kek>,
-        _fill: Arc<dyn Fn(&mut [u8]) -> Result<(), PublicCertifiedKeyAeadError> + Send + Sync>,
+        kek: Arc<dyn Kek>,
+        fill: Arc<dyn Fn(&mut [u8]) -> Result<(), PublicCertifiedKeyAeadError> + Send + Sync>,
     ) -> Self {
-        todo!("SCAFFOLD: PublicCertifiedKeyAeadCodec::with_random_fill_for_test")
+        Self { kek, random: RandomSource::Filled(fill) }
     }
 
     /// Seal the canonical PKCS#8 DER under the context-bound AAD.
+    ///
+    /// # Errors
+    /// `KekUnavailable` when the KEK cannot be resolved; `SealFailed` on a
+    /// failed random draw or AES-GCM seal.
     pub fn seal(
         &self,
-        _context: &PublicCertifiedKeyProtectionContext,
-        _key_pkcs8: &Zeroizing<Vec<u8>>,
+        context: &PublicCertifiedKeyProtectionContext,
+        key_pkcs8: &Zeroizing<Vec<u8>>,
     ) -> Result<ProtectedOriginKeyV1, PublicCertifiedKeyAeadError> {
-        todo!("SCAFFOLD: PublicCertifiedKeyAeadCodec::seal")
+        let mut salt = [0u8; SALT_LEN];
+        self.random.fill(&mut salt)?;
+        let mut nonce_bytes = [0u8; NONCE_LEN];
+        self.random.fill(&mut nonce_bytes)?;
+        let key = self.derive_key(&salt)?;
+        let mut in_out = key_pkcs8.to_vec();
+        let tag = key
+            .seal_in_place_separate_tag(
+                Nonce::assume_unique_for_key(nonce_bytes),
+                Aad::from(aad_bytes(context)),
+                &mut in_out,
+            )
+            .map_err(|_| PublicCertifiedKeyAeadError::SealFailed)?;
+        in_out.extend_from_slice(tag.as_ref());
+        Ok(ProtectedOriginKeyV1 {
+            kek_id: KEK_ID.to_owned(),
+            salt,
+            nonce: nonce_bytes,
+            ciphertext_and_tag: in_out,
+        })
     }
 
     /// Authenticate and open a protected record into a zeroizing buffer.
+    ///
+    /// # Errors
+    /// `OpenFailed` for a different KEK ID or a record too short to carry a
+    /// tag; `AuthenticationFailed` when the tag, nonce, salt or AAD context
+    /// does not authenticate; `KekUnavailable` when the KEK cannot be resolved.
     pub fn open(
         &self,
-        _context: &PublicCertifiedKeyProtectionContext,
-        _protected: &ProtectedOriginKeyV1,
+        context: &PublicCertifiedKeyProtectionContext,
+        protected: &ProtectedOriginKeyV1,
     ) -> Result<Zeroizing<Vec<u8>>, PublicCertifiedKeyAeadError> {
-        todo!("SCAFFOLD: PublicCertifiedKeyAeadCodec::open")
+        if protected.kek_id != KEK_ID || protected.ciphertext_and_tag.len() < TAG_LEN {
+            return Err(PublicCertifiedKeyAeadError::OpenFailed);
+        }
+        let key = self.derive_key(&protected.salt)?;
+        let mut in_out = Zeroizing::new(protected.ciphertext_and_tag.clone());
+        let plaintext_len = key
+            .open_in_place(
+                Nonce::assume_unique_for_key(protected.nonce),
+                Aad::from(aad_bytes(context)),
+                &mut in_out,
+            )
+            .map_err(|_| PublicCertifiedKeyAeadError::AuthenticationFailed)?
+            .len();
+        in_out.truncate(plaintext_len);
+        Ok(in_out)
     }
+
+    fn derive_key(&self, salt: &[u8]) -> Result<LessSafeKey, PublicCertifiedKeyAeadError> {
+        let kek_id = KekId::new(KEK_ID).map_err(|_| PublicCertifiedKeyAeadError::KekUnavailable)?;
+        let material =
+            self.kek.resolve(&kek_id).map_err(|_| PublicCertifiedKeyAeadError::KekUnavailable)?;
+        let prk = Salt::new(HKDF_SHA256, salt).extract(material.expose_secret());
+        let info = [HKDF_INFO];
+        let okm = prk
+            .expand(&info, SubkeyLen)
+            .map_err(|_| PublicCertifiedKeyAeadError::KekUnavailable)?;
+        let mut subkey = Zeroizing::new([0u8; SUBKEY_LEN]);
+        okm.fill(subkey.as_mut_slice()).map_err(|_| PublicCertifiedKeyAeadError::KekUnavailable)?;
+        let unbound = UnboundKey::new(&AES_256_GCM, subkey.as_slice())
+            .map_err(|_| PublicCertifiedKeyAeadError::KekUnavailable)?;
+        Ok(LessSafeKey::new(unbound))
+    }
+}
+
+/// AAD: context label, then the key ID and hostname length-prefixed
+/// (big-endian `u32`), then the 32 generation bytes.
+fn aad_bytes(context: &PublicCertifiedKeyProtectionContext) -> Vec<u8> {
+    let id = context.certified_key_id.as_str().as_bytes();
+    let hostname = context.public_hostname.as_str().as_bytes();
+    let mut aad = Vec::with_capacity(AAD_CONTEXT.len() + 8 + id.len() + hostname.len() + 32);
+    aad.extend_from_slice(AAD_CONTEXT);
+    for part in [id, hostname] {
+        aad.extend_from_slice(&u32::try_from(part.len()).unwrap_or(u32::MAX).to_be_bytes());
+        aad.extend_from_slice(part);
+    }
+    aad.extend_from_slice(context.generation.as_bytes());
+    aad
 }
 
 #[cfg(test)]
@@ -127,7 +238,6 @@ mod acceptance {
     ///
     /// CONTRACT_SHAPE: bounded-change.
     #[test]
-    #[ignore = "pending DELIVER certified-key-custody"]
     fn tamper_and_aad_mismatch_fail_authentication_without_plaintext() {
         let codec = deterministic_codec();
         let ctx = context("api-origin", "api.example.com", "01");
@@ -183,7 +293,6 @@ mod acceptance {
     ///
     /// CONTRACT_SHAPE: bounded-change.
     #[test]
-    #[ignore = "pending DELIVER certified-key-custody"]
     fn csprng_draw_failure_has_no_protected_record() {
         let codec = PublicCertifiedKeyAeadCodec::with_random_fill_for_test(
             Arc::new(FixedKek),

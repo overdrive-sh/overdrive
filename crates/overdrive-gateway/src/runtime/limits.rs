@@ -131,7 +131,6 @@ mod properties {
     ///
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER gateway-application-owner"]
     fn first_slice_limits_are_exact_finite_and_ordered() {
         let limits = GatewayLimits::first_slice();
         assert_eq!(limits.max_public_connections().get(), 128);

@@ -1,11 +1,11 @@
 //! Pure public-authority normalization.
 //!
-//! SCAFFOLD: true. The production function is DELIVER's.
 //! Source-local properties implement S-PIG-12 and S-PIG-13.
 
 #![allow(clippy::doc_markdown, reason = "CONTRACT_SHAPE is required metadata")]
 
 use http::HeaderMap;
+use http::header::HOST;
 use overdrive_core::public_ingress::{PublicHostname, PublicHostnameError};
 use thiserror::Error;
 
@@ -28,11 +28,41 @@ pub(crate) enum RouteAuthorityError {
     SniMismatch,
 }
 
+/// The one public port the gateway serves.
+const PUBLIC_PORT: u16 = 443;
+
+/// Normalize the request's single `Host` authority and require it to equal the
+/// TLS SNI. An explicit port other than 443 is rejected before any name
+/// comparison.
 pub(crate) fn normalize_route_authority(
-    _headers: &HeaderMap,
-    _sni: &PublicHostname,
+    headers: &HeaderMap,
+    sni: &PublicHostname,
 ) -> Result<PublicHostname, RouteAuthorityError> {
-    todo!("SCAFFOLD: normalize_route_authority")
+    let mut values = headers.get_all(HOST).iter();
+    let value = values.next().ok_or(RouteAuthorityError::MissingHost)?;
+    if values.next().is_some() {
+        return Err(RouteAuthorityError::DuplicateHost);
+    }
+    let authority = value.to_str().map_err(|_| RouteAuthorityError::NonAsciiHost)?;
+    let name = split_authority(authority)?;
+    let hostname = PublicHostname::new(name).map_err(RouteAuthorityError::InvalidHostname)?;
+    if &hostname == sni { Ok(hostname) } else { Err(RouteAuthorityError::SniMismatch) }
+}
+
+/// The host name of `authority` after the port check; userinfo, bracketed and
+/// multi-colon authorities are malformed.
+fn split_authority(authority: &str) -> Result<&str, RouteAuthorityError> {
+    if authority.contains(['@', '[', ']']) {
+        return Err(RouteAuthorityError::InvalidAuthority);
+    }
+    let Some((name, port)) = authority.split_once(':') else {
+        return Ok(authority);
+    };
+    if name.is_empty() || port.contains(':') || port.is_empty() {
+        return Err(RouteAuthorityError::InvalidAuthority);
+    }
+    let got: u16 = port.parse().map_err(|_| RouteAuthorityError::InvalidAuthority)?;
+    if got == PUBLIC_PORT { Ok(name) } else { Err(RouteAuthorityError::UnsupportedPort { got }) }
 }
 
 #[cfg(test)]
@@ -65,7 +95,6 @@ mod properties {
         ///
         /// CONTRACT_SHAPE: pure-function.
         #[test]
-        #[ignore = "pending DELIVER gateway-application-owner"]
         fn canonical_authority_accepts_ascii_case_and_optional_443(
             canonical in arb_hostname(),
             explicit_port in any::<bool>(),
@@ -83,7 +112,6 @@ mod properties {
         ///
         /// CONTRACT_SHAPE: pure-function.
         #[test]
-        #[ignore = "pending DELIVER gateway-application-owner"]
         fn every_explicit_port_other_than_443_is_unsupported(
             port in any::<u16>().prop_filter("443 is the only accepted port", |port| *port != 443),
         ) {
@@ -99,7 +127,6 @@ mod properties {
         ///
         /// CONTRACT_SHAPE: pure-function.
         #[test]
-        #[ignore = "pending DELIVER gateway-application-owner"]
         fn a_different_valid_hostname_is_exactly_an_sni_mismatch(
             other in arb_hostname(),
             explicit_port in any::<bool>(),
@@ -119,7 +146,6 @@ mod properties {
     ///
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER gateway-application-owner"]
     fn malformed_duplicate_wrong_port_and_sni_mismatch_are_distinct() {
         let sni = sni();
 
