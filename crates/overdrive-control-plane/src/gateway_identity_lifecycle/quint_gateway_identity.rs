@@ -53,10 +53,19 @@
 //! &["identity_conf::gateway_identity::conf_step"]`; the state projection
 //! matches `identity_conf::gateway_identity::<var>`.
 //!
+//! The model's `Gen.na` (expiry, in model time units) is compared with the
+//! slot's `not_after`. The issuer sets `not_after = issued_at - SKEW_TOLERANCE +
+//! WORKLOAD_SVID_TTL` (`issue_and_audit`), the model's `TTL` is four time units
+//! of `WORKLOAD_SVID_TTL / 4`, and the `SimClock` advances only through
+//! `advance_time`, so `na = (not_after + SKEW_TOLERANCE - clock_epoch) /
+//! MODEL_TIME_UNIT`, where `clock_epoch` is the `SimClock`'s wall clock at
+//! construction (model `now = 0`). A `not_after` that is not a whole number of
+//! model units from that epoch fails the step rather than being rounded.
+//!
 //! Every named run bound to this main is pinned with
 //! `#[quint_test(max_samples = 1)]`; `#[quint_run]` replays randomized traces
-//! (seed printed on failure). The tests are ignored until the identity owners
-//! land.
+//! (seed printed on failure). The tests run against the landed identity
+//! owners.
 
 #![allow(
     clippy::expect_used,
@@ -74,7 +83,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail};
 use itf::Value;
-use overdrive_core::ca::WORKLOAD_SVID_TTL;
+use overdrive_core::ca::{SKEW_TOLERANCE, WORKLOAD_SVID_TTL};
 use overdrive_core::eval_broker::{Evaluation, EvaluationBroker};
 use overdrive_core::id::{CertSerial, NodeId, SpiffeId};
 use overdrive_core::reconcilers::{Action, HydrationContext, TickContext};
@@ -152,6 +161,8 @@ struct IdentityConfDriver {
     _intent_dir: TempDir,
     /// Whether the next issuance's audit write was made to fail.
     audit_armed: bool,
+    /// The `SimClock`'s wall clock at construction: the model's `now = 0`.
+    clock_epoch: Duration,
     runtime: Runtime,
 }
 
@@ -169,6 +180,7 @@ impl IdentityConfDriver {
         let intent_path = intent_dir.path().join("intent.redb");
         let intent = LocalIntentStore::open(&intent_path).expect("LocalIntentStore::open");
         let owners = Self::build_owners(&ca, &clock);
+        let clock_epoch = clock.unix_now();
         Self {
             owners,
             queued: BTreeMap::new(),
@@ -180,6 +192,7 @@ impl IdentityConfDriver {
             intent_path,
             _intent_dir: intent_dir,
             audit_armed: false,
+            clock_epoch,
             runtime,
         }
     }
@@ -391,6 +404,21 @@ impl IdentityConfDriver {
         Ok(rows.into_iter().filter(|row| row.spiffe_id == gateway).map(|row| row.serial).collect())
     }
 
+    /// The model's `na` of a held generation: its `not_after` in model time
+    /// units since the clock epoch (see the header for the derivation).
+    fn model_expiry(&self, not_after: UnixInstant) -> Result<i64> {
+        let from_epoch = (not_after.as_unix_duration() + SKEW_TOLERANCE)
+            .checked_sub(self.clock_epoch)
+            .ok_or_else(|| anyhow!("not_after {not_after:?} precedes the clock epoch"))?;
+        let unit = MODEL_TIME_UNIT.as_nanos();
+        if from_epoch.as_nanos() % unit != 0 {
+            bail!(
+                "not_after {not_after:?} is not a whole number of model time units from the epoch"
+            );
+        }
+        Ok(i64::try_from(from_epoch.as_nanos() / unit)?)
+    }
+
     /// The model's attempt ordinal of an audited serial, from its audit row.
     fn ordinal_of(&self, serial: &CertSerial) -> Result<i64> {
         let gateway = SpiffeId::for_gateway(&node());
@@ -427,12 +455,12 @@ impl Driver for IdentityConfDriver {
 }
 
 /// The compared variables: the model's `desired_epoch`, `desired_enabled`,
-/// `held` (epoch, serial ordinal) and `audited` (serial ordinals).
+/// `held` (epoch, serial ordinal, expiry in model units) and `audited` (serial ordinals).
 #[derive(Debug, PartialEq, Eq)]
 struct IdentityState {
     desired_epoch: i64,
     desired_enabled: bool,
-    held: BTreeSet<(i64, i64)>,
+    held: BTreeSet<(i64, i64, i64)>,
     audited: BTreeSet<i64>,
 }
 
@@ -447,6 +475,7 @@ impl State<IdentityConfDriver> for IdentityState {
             Some(facts) => BTreeSet::from([(
                 i64::try_from(facts.epoch.get().get())?,
                 driver.ordinal_of(&facts.serial)?,
+                driver.model_expiry(facts.not_after)?,
             )]),
             None => BTreeSet::new(),
         };
@@ -520,7 +549,7 @@ impl IdentityState {
                 let field = |name: &str| {
                     generation.get(name).ok_or_else(|| ItfError::MissingField(name.to_owned()))
                 };
-                Ok((int(field("epoch")?)?, int(field("serial")?)?))
+                Ok((int(field("epoch")?)?, int(field("serial")?)?, int(field("na")?)?))
             })
             .collect::<std::result::Result<BTreeSet<_>, ItfError>>()?;
         let audited = set_items(var("audited")?)?

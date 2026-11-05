@@ -7,17 +7,6 @@
 //! [`Action::IssueGatewaySvid`] only; there is no gateway drop action (R-4):
 //! disabling the gateway clears the volatile slot synchronously in the process.
 //!
-//! SCAFFOLD: true. `next_evaluation_at` and both hydration bodies are DELIVER's
-//! and fail with SCAFFOLD text; `reconcile` is the pure transition function.
-
-#![allow(
-    clippy::todo,
-    clippy::unused_async,
-    clippy::unused_self,
-    clippy::missing_const_for_fn,
-    reason = "public-ingress DISTILL scaffold: reconcile, scheduling and hydration bodies are DELIVER's"
-)]
-
 use std::time::Duration;
 
 use overdrive_core::gateway_identity::{GatewayIdentityDesired, GatewayIdentityFacts};
@@ -68,6 +57,17 @@ fn issue_correlation(node: &NodeId, subject: &SpiffeId) -> CorrelationKey {
     let target = format!("gateway-svid-lifecycle/{node}");
     let spec_hash = ContentHash::of(subject.as_str().as_bytes());
     CorrelationKey::derive(&target, &spec_hash, "issue-gateway-svid")
+}
+
+/// The hydration target must be the configured `node/<node-id>`.
+fn require_configured_node(
+    ctx: &HydrationContext<'_>,
+    target: &TargetResource,
+) -> Result<(), HydrateError> {
+    if target.as_str() == format!("node/{}", ctx.node_id) {
+        return Ok(());
+    }
+    Err(HydrateError::TargetShape(target.as_str().to_string()))
 }
 
 /// Level-triggered backstop cadence of the host-backed gateway reconciler.
@@ -181,30 +181,78 @@ impl Reconciler for GatewaySvidLifecycle {
         (vec![issue], next_view)
     }
 
+    /// The strictly-future instant of the next no-action wake: the expiry-driven
+    /// reissue of a usable identity (the moment it enters the near-expiry
+    /// window), or the retry boundary recomputed from the persisted inputs,
+    /// clamped to the held identity's expiry wall exactly as `reconcile` clamps
+    /// it. Disabled has nothing to schedule.
+    ///
+    /// A held identity inside the panic zone has an expiry wall `<= now`, so no wake
+    /// is scheduled here by design; the `GATEWAY_SVID_RESYNC_PERIOD` backstop applies.
     fn next_evaluation_at(
         &self,
-        _desired: &Self::State,
-        _actual: &Self::State,
-        _next_view: &Self::View,
-        _tick: &TickContext,
+        desired: &Self::State,
+        actual: &Self::State,
+        next_view: &Self::View,
+        tick: &TickContext,
     ) -> Option<UnixInstant> {
-        todo!("SCAFFOLD: GatewaySvidLifecycle::next_evaluation_at")
+        let subject = desired.desired.spiffe_id.as_ref()?;
+        let now = tick.now_unix;
+        let retry_deadline = next_view
+            .retry
+            .as_ref()
+            .map(|retry| retry.last_failure_seen_at + backoff_for_attempt(retry.attempts));
+        let deadline = match actual.actual.as_ref() {
+            Some(held) if is_usable(held, desired.desired.epoch, subject, now) => {
+                Some(UnixInstant::from_unix_duration(
+                    held.not_after
+                        .as_unix_duration()
+                        .saturating_sub(Duration::from_secs(NEAR_EXPIRY_THRESHOLD_SECS)),
+                ))
+            }
+            Some(held) => retry_deadline.map(|deadline| {
+                let expiry_wall = UnixInstant::from_unix_duration(
+                    held.not_after.as_unix_duration().saturating_sub(ROTATION_DEADLINE_MARGIN),
+                );
+                deadline.min(expiry_wall)
+            }),
+            None => retry_deadline,
+        };
+        deadline.filter(|deadline| *deadline > now)
     }
 
     async fn hydrate_desired(
         &self,
-        _ctx: &HydrationContext<'_>,
-        _target: &TargetResource,
+        ctx: &HydrationContext<'_>,
+        target: &TargetResource,
     ) -> Result<Self::State, HydrateError> {
-        todo!("SCAFFOLD: GatewaySvidLifecycle::hydrate_desired")
+        require_configured_node(ctx, target)?;
+        Ok(GatewaySvidLifecycleState {
+            desired: ctx.gateway_identity.desired(),
+            actual: None,
+            ever_issued: false,
+        })
     }
 
     async fn hydrate_actual(
         &self,
-        _ctx: &HydrationContext<'_>,
-        _target: &TargetResource,
+        ctx: &HydrationContext<'_>,
+        target: &TargetResource,
     ) -> Result<Self::State, HydrateError> {
-        todo!("SCAFFOLD: GatewaySvidLifecycle::hydrate_actual")
+        require_configured_node(ctx, target)?;
+        let gateway = SpiffeId::for_gateway(ctx.node_id);
+        let ever_issued = ctx
+            .observation_store
+            .issued_certificate_rows()
+            .await
+            .map_err(|e| HydrateError::ObservationRead(e.to_string()))?
+            .iter()
+            .any(|row| row.spiffe_id == gateway);
+        Ok(GatewaySvidLifecycleState {
+            desired: ctx.gateway_identity.desired(),
+            actual: ctx.gateway_identity.current(),
+            ever_issued,
+        })
     }
 
     /// Host-backed: `actual` is the in-process slot, not an observation row,

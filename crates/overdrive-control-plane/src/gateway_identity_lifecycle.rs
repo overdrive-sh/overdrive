@@ -10,7 +10,7 @@
     clippy::missing_const_for_fn,
     clippy::redundant_pub_crate,
     dead_code,
-    reason = "the control has no production caller until the enabled boot composition lands"
+    reason = "the control has no production caller until the `boot_server` G0 enabled boot composition lands (feature-delta.md:2970)"
 )]
 
 use std::sync::Arc;

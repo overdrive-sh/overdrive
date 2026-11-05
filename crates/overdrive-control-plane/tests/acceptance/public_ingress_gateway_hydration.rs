@@ -15,8 +15,8 @@
 //! rows production authored.
 //!
 //! The reconciler's `hydrate_*` bodies are DELIVER's; the bodies below are
-//! complete and ignored until they land. The disabled-composition body runs
-//! against the existing total composition.
+//! complete and run against the landed hydration. The disabled-composition
+//! body runs against the existing total composition.
 
 #![allow(
     clippy::doc_markdown,
