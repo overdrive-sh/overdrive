@@ -116,11 +116,11 @@ User rulings of 2026-11-02, recorded verbatim in outcome:
 | DG-5 | **Approved, 2026-11-05.** In `stream_snapshot`, the channel is an ordered list; `Deliver` takes the oldest event and is disabled while `lagged`. The `Lag` abstraction is stated. In `progress_deadline`, `StableHappens` is disabled after `OperatorStop`. | § Formal protocol model, "Conformance abstractions" |
 | DG-6 | **Approved, 2026-11-05 (pin).** `ReportedListeners` construction is `Default`, `FromIterator<Listener>` and `is_empty`; `GuestListenerBoard::new() -> Self`. D13 names the DELIVER obligation that production composition shares one board. | D13 item 10, § Interface changes (D13 to D16) |
 | DG-7 | **Approved, 2026-11-05 (pin).** `progress_deadline: Duration` is the last parameter of `build_service_stream`; the server deadline is the second parameter of `ApiClient::submit_workload_streaming`; `LastAttemptWire` lives in `overdrive_control_plane::streaming`. | § D10 interface changes |
-| DG-8 | **Approved, 2026-11-05.** G-10 boundary (9) and (10) are Tier-3 real-boot DELIVER obligations of D13 and D14. (8) is a seeded composed run whose fault is the omitted `LISTEN` line on `SimBeaconIo`. | Gate G-10, D13 item 9 |
+| DG-8 | **Approved, 2026-11-05.** G-10 boundary (9b) and (10) are Tier-3 real-boot DELIVER obligations of D13 and D14. (8) is a seeded composed run whose fault is the omitted `LISTEN` line on `SimBeaconIo`. | Gate G-10, D13 item 9 |
 | DG-9 | **Approved, 2026-11-05.** S-32's composed restart and give-up leg is required. S-48 (b) is waived and carried by the mutation gate. S-48 (e) is waived. | § Executable obligations, S-32 and S-48 |
 | DG-10 | **Approved, 2026-11-05.** `tokio` with `test-util` as a dev-dependency of `overdrive-cli`, for S-36. The S-36 test sits behind `integration-tests` and carries a litmus proof that it fails when the `deadline + 30 s` envelope is removed. | S-36 |
 | DG-11 | **Approved, 2026-11-05 (pin).** The declared listeners reach both mechanic-summary formatters as a parameter. No wire field and no field on `ProbeMechanic::GuestListeners`. | D14 item 4 |
-| DG-13 | **Approved, 2026-11-05.** The first clause of G-10 boundary (9), init's own binds produce no `LISTEN` line, is an in-guest property covered by spike V42, not a deploy-driven test: the Service validator rejects declared ports in init's reserved guest range 61000..=62024 (`ListenerPortReserved`), so no Service can declare such a port. The second clause is covered by `guest_listener_real_boot.rs::every_declared_listener_a_real_workload_binds_is_reported_before_it_exits`. | Gate G-10 (9) |
+| DG-13 | **Approved, 2026-11-05.** Clause (9a) of G-10 boundary (9), init's own binds produce no `LISTEN` line, carries no test obligation. The failure it would defend, false readiness from Overdrive's own in-guest binds, is unreachable, and a report of init's binds has no production effect. Every TCP and UDP socket init binds or listens on comes from fixed constants inside `guest_reserved_ports()` (61000..=62024); init's other sockets are connect-only flow sockets on ephemeral ports and an AF_VSOCK listener. The Service validator rejects any declared port in that range through the same function (`ListenerPortReserved`), so no declared listener can match init's binds. The board ignores a report for an undeclared listener (D13 item 10; `guest_listener_board.rs::a_pending_changed_completes_on_an_insertion_and_on_no_no_op`, the undeclared-pair case). PR-2 additionally keeps init outside the hooked workload cgroup, so init's binds produce no events; a regression there would add only ignored beacon lines. Clause (9b) is covered by `guest_listener_real_boot.rs::every_declared_listener_a_real_workload_binds_is_reported_before_it_exits`. | Gate G-10 (9) |
 | DG-12 | **Approved, 2026-11-05 (changes D6, behaviour).** Every allocation `ServiceLifecycle` observes in `Failed` or `Terminated` joins `ServiceLifecycleView.terminal_announced`, whatever its `started_at`. | D6 item 1, S-56 |
 | DG-M | **Approved, 2026-11-05 (pin).** `BeaconParseError::MalformedListen { raw: String, detail: String }` for a rejected `LISTEN` line. `guest_report_host`'s `Idle` maps to a read-only `GuestListenerReports::reported(alloc)` call compared with the previous projected value. D16's historical V1 fixtures that hold `inferred` land with the version bump in DELIVER. | § Interface changes (D13 to D16), § Formal protocol model — D13 to D16 |
 
@@ -2668,17 +2668,17 @@ never reaches the board while the workload is running → no `Pass`, `Fail` at t
 deadline, stop, restart, give-up `StartupProbeFailed` naming the missing listener (the stated
 bounded exposure, D13 item 9; run `ring_drop_leaves_set_partial`);
 (9) **the guest's own binds**: init's transport binds (TCP intake,
-1,024 UDP slots) produce zero `LISTEN` lines before `EXEC` (structural under PR-2; a
-regression if init's sockets ever become visible). This clause is an in-guest property
-covered by spike V42 (`spike/findings-workload-cgroup.md`), not a deploy-driven test: the
-Service validator rejects declared ports in init's reserved guest range 61000..=62024
-(`ListenerPortReserved`), so no Service can declare one (ruling DG-13). The workload's own
-listener, started after `EXEC`, produces exactly one (Tier 3, real guest); (10) **loopback** (Tier 3): binds to `127.0.0.1`, `::1`
+1,024 UDP slots) produce zero `LISTEN` lines before `EXEC` under PR-2. Clause (9a) carries no
+test obligation (ruling DG-13): every socket init binds comes from `guest_reserved_ports()`
+(61000..=62024), the Service validator rejects any declared port in that range
+(`ListenerPortReserved`), and the board ignores a report for an undeclared listener (S-51,
+undeclared pair), so a report of init's binds has no production effect. Clause (9b): the
+workload's own listener, started after `EXEC`, produces exactly one (Tier 3, real guest); (10) **loopback** (Tier 3): binds to `127.0.0.1`, `::1`
 and `::ffff:127.0.0.1` produce no line, and `::ffff:<non-loopback>` produces one.
-**Ruling DG-8 (2026-11-05): how (8) to (10) are driven.** (9) and (10) are Tier-3 real-boot
+**Ruling DG-8 (2026-11-05): how (8) to (10) are driven.** (9b) and (10) are Tier-3 real-boot
 DELIVER obligations of D13 and D14 (native metal, `cargo xtask metal run --`), observed
 through production-written state, with no writer seam in `overdrive-init`. For (9), the
-first clause is an in-guest property (ruling DG-13); the second clause is the real-boot test
+first clause (9a) carries no test obligation (ruling DG-13); the second clause (9b) is the real-boot test
 that holds a declared TCP and UDP listener and observes `Pass` while `Running`. For
 (10), the fixture declares a listener and the workload binds it only to `127.0.0.1`, `::1`
 or `::ffff:127.0.0.1`; the startup probe row is `Fail` naming the port as unreported. A
@@ -3110,7 +3110,7 @@ Path prefixes: `CP` = `crates/overdrive-control-plane`, `CORE` = `crates/overdri
 | G-10 (10) | D13 item 8, D14 item 3, Tier 3 | `CP/tests/integration/guest_listener_real_boot.rs::a_loopback_only_bind_never_satisfies_a_declared_listener` (real guest, `run_server`, `POST /v1/workloads`; observes the startup row in `GET /v1/allocs`) | T3 real boot, `integration-tests,kvm-tests`, native metal | ign(D13 guest side); RED on the probe-runner scaffold, no deadline `Fail` row |
 | G-10 (9) second clause, `guest_report` guest half | D13 items 1 and 10, Tier 3 | `guest_listener_real_boot.rs::every_declared_listener_a_real_workload_binds_is_reported_before_it_exits` (TCP and UDP listener held, then exit; `Pass` seen while `Running`, before the terminal row) | T3 real boot | ign(D13 guest side); RED on the same scaffold, no `Pass` row |
 | DG-6, F-5 | D13 host shared board | `CP/tests/integration/guest_listener_board_wiring.rs::a_listen_line_on_the_drivers_beacon_completes_the_probe_tasks_declared_set` (`run_server` over `SimVmm`, `SimBeaconIo`, `SimMtlsIntercept`; undeclared and partial reports change nothing, the completing report writes one `Pass`) | T1 production composition, `integration-tests` (metal) | ign(D13 host shared board); RED on the `LISTEN` parse scaffold |
-| G-10 (9) first clause | none | no deploy-driven test (DG-13: the reserved range cannot be declared); in-guest property covered by spike V42 | n/a | resolved, DG-13 |
+| G-10 (9a) | none | no test obligation (DG-13: init's binds come from the reserved range, which no Service can declare, and the board ignores an undeclared report) | n/a | resolved, DG-13 |
 | D13 item 2 | LISTEN wire form (G-10 "wire parse") | `CORE/T/a/beacon_listen_wire_form.rs::listen_round_trips_for_every_protocol_and_port`, `::listen_with_an_out_of_range_port_is_a_typed_error`, `::malformed_listen_lines_are_rejected_with_a_typed_error` (asserts `BeaconParseError::MalformedListen { raw, detail }` carrying the full line, DG-M) | T1 pure proptest, default | ign(D13) x3 |
 
 Error and boundary tests are above 40 % in every area (ended ids, lost and failed writes, restarts, races, deferrals, same-key bursts, failed reads, undeclared reports).
@@ -3132,7 +3132,7 @@ Error and boundary tests are above 40 % in every area (ended ids, lost and faile
 | 11 G-7 | D10 | S-34, S-35, S-36 |
 | 12 G-8 | D11 | S-39, S-40, S-41, S-42 |
 | 13 G-9 | D12 | S-46, S-47, S-43, S-30 |
-| 14 G-10 | D13 to D15 | S-50 to S-53 (host half), the `guest_report_host` driver, the LISTEN wire form; item (8) ring-drop composed run is authored (`crates/overdrive-control-plane/src/reconciler_runtime/guest_listener_gate_composed.rs::a_service_whose_listener_report_never_arrives_is_stopped_at_the_deadline_restarted_and_given_up`, ignored `pending DELIVER: D13/D14`); item (10) loopback and v4-mapped binds and the second clause of (9) are authored as Tier-3 real-boot tests (`guest_listener_real_boot.rs`); the first clause of (9) is an in-guest property covered by V42 (DG-13, ruled 2026-11-05); DG-8 (ruled 2026-11-05) pins (8) as a seeded composed run with the omitted `LISTEN` line on `SimBeaconIo` |
+| 14 G-10 | D13 to D15 | S-50 to S-53 (host half), the `guest_report_host` driver, the LISTEN wire form; item (8) ring-drop composed run is authored (`crates/overdrive-control-plane/src/reconciler_runtime/guest_listener_gate_composed.rs::a_service_whose_listener_report_never_arrives_is_stopped_at_the_deadline_restarted_and_given_up`, ignored `pending DELIVER: D13/D14`); item (10) loopback and v4-mapped binds and the second clause of (9) are authored as Tier-3 real-boot tests (`guest_listener_real_boot.rs`); clause (9a) carries no test obligation (DG-13, ruled 2026-11-05); DG-8 (ruled 2026-11-05) pins (8) as a seeded composed run with the omitted `LISTEN` line on `SimBeaconIo` |
 | 15 D17 | none | S-48 |
 
 ## Wave: DISTILL / [REF] Conformance drivers
@@ -3186,7 +3186,7 @@ Not scaffolded: `ServiceAllocFact.startup_attempts_required` (S-54 drives hydrat
 | `integration-tests` | `CP/tests/acceptance/service_stream_*.rs` (use the convergence-tick entry), `CP/src/**` composed modules (`liveness_gate_composed.rs`, `convergence_loop_wake.rs`) | composed streams, liveness, wake |
 | Conformance (`integration-tests`) | `CP/src/worker/quint_*.rs`, `CP/src/reconciler_runtime/quint_*.rs`, `CP/src/quint_stream_conformance/` | six `quint-connect` drivers; they need crate-private constructors and ITF helpers, so they sit beside their owners (precedent `guest_network/quint_cid_lease.rs`) |
 | Integration, real infrastructure | `WRK/tests/integration/inbound_rules_only_for_tcp_declared_listeners.rs` (nft); `CLI/tests/integration/deploy_stream_request_timeout.rs` (real TLS socket, paused clock) | host effects Sim cannot observe |
-| Tier 3 real boot | `CP/tests/integration/guest_listener_real_boot.rs` (`integration-tests,kvm-tests`, native metal, after `cargo xtask guest-kit-prepare`); the guest application's new `bind` subcommand is test support (`overdrive-testing`) | G-10 item 10, the second clause of item 9 and the guest half of `guest_report`; the first clause of item 9 is an in-guest property covered by V42 (DG-13); V34 to V36 and V42 stay the evidence for the tight drain race |
+| Tier 3 real boot | `CP/tests/integration/guest_listener_real_boot.rs` (`integration-tests,kvm-tests`, native metal, after `cargo xtask guest-kit-prepare`); the guest application's new `bind` subcommand is test support (`overdrive-testing`) | G-10 item 10, the second clause of item 9 and the guest half of `guest_report`; clause (9a) of item 9 carries no test obligation (DG-13); V34 to V36 and V42 stay the evidence for the tight drain race |
 
 Every cargo, nextest, quint and lint command ran through `cargo xtask metal run --`. No test spawns the `overdrive` binary.
 
@@ -3230,12 +3230,12 @@ Every cargo, nextest, quint and lint command ran through `cargo xtask metal run 
 | DG-5 | Ordered channel; `Deliver` oldest-first and disabled while `lagged`; `Lag` abstraction stated; `StableHappens` disabled after `OperatorStop` | § Formal protocol model, "Conformance abstractions" |
 | DG-6 | `ReportedListeners`: `Default`, `FromIterator<Listener>`, `is_empty`; `GuestListenerBoard::new() -> Self`; DELIVER shares one board | D13 item 10, § Interface changes (D13 to D16) |
 | DG-7 | `progress_deadline` last in `build_service_stream`; server deadline second in `submit_workload_streaming`; `LastAttemptWire` in `overdrive_control_plane::streaming` | § D10 interface changes |
-| DG-8 | (9) and (10) Tier-3 DELIVER obligations observed through the startup probe row; (8) seeded composed run with the omitted `LISTEN` line on `SimBeaconIo` | Gate G-10 |
+| DG-8 | (9b) and (10) Tier-3 DELIVER obligations observed through the startup probe row; (8) seeded composed run with the omitted `LISTEN` line on `SimBeaconIo` | Gate G-10 |
 | DG-9 | S-32 composed leg required (`quint_cid_lease` composition); S-48 (b) waived, carried by the mutation gate; S-48 (e) waived | S-32, S-48 |
 | DG-10 | `tokio` `test-util` approved; S-36 behind `integration-tests` with a litmus proof | S-36 |
 | DG-11 | Both formatters take `&[Listener]`; no wire field | D14 item 4 |
 | DG-12 | Every `Failed` or `Terminated` fact joins `terminal_announced`; new obligation S-56 | D6 item 1, S-56 |
-| DG-13 | G-10 (9) first clause is an in-guest property covered by V42, not a deploy-driven test: the Service validator rejects declared ports in init's reserved range 61000..=62024 (`ListenerPortReserved`). The second clause stays covered by `guest_listener_real_boot.rs` | `distill/upstream-issues.md` |
+| DG-13 | G-10 (9a) carries no test obligation: the failure is unreachable (init's binds come from `guest_reserved_ports()`, the Service validator rejects those ports with `ListenerPortReserved`, the board ignores an undeclared report, PR-2 keeps init outside the hooked cgroup). Clause (9b) stays covered by `guest_listener_real_boot.rs` | `distill/upstream-issues.md` |
 | Minor | `BeaconParseError::MalformedListen { raw, detail }`; `Idle` is a read-only `reported(alloc)` call; D16 historical fixtures land with the version bump (DELIVER); the per-consumer board is fixed by DG-6 | § Interface changes (D13 to D16) |
 
 The gaps as DISTILL routed them:
