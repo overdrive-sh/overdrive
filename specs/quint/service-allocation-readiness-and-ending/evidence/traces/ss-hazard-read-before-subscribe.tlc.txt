@@ -1,7 +1,7 @@
 State 1: <Initial predicate>
 /\ ss_bugReadBeforeSubscribe_stream_snapshot_s = [ st |-> "open",
   phase |-> "unsub",
-  chan |-> {},
+  chan |-> <<>>,
   lagged |-> FALSE,
   armed |-> FALSE,
   kind |-> "",
@@ -15,10 +15,10 @@ State 1: <Initial predicate>
 /\ ss_bugReadBeforeSubscribe_stream_snapshot_w = [cur |-> 0, com |-> (0 :> "none" @@ 1 :> "none"), pub |-> (0 :> -1 @@ 1 :> -1)]
 /\ ss_bugReadBeforeSubscribe_stream_snapshot_conf_step = [init |-> [tag |-> "UNIT"]]
 
-State 2: <ss_bugReadBeforeSubscribe_stream_snapshot_Read line 390, col 3 to line 410, col 63 of module ss_bugReadBeforeSubscribe>
+State 2: <ss_bugReadBeforeSubscribe_stream_snapshot_Read line 391, col 3 to line 411, col 63 of module ss_bugReadBeforeSubscribe>
 /\ ss_bugReadBeforeSubscribe_stream_snapshot_s = [ st |-> "open",
   phase |-> "readfirst",
-  chan |-> {},
+  chan |-> <<>>,
   lagged |-> FALSE,
   armed |-> TRUE,
   kind |-> "",
@@ -35,7 +35,7 @@ State 2: <ss_bugReadBeforeSubscribe_stream_snapshot_Read line 390, col 3 to line
 State 3: <ss_bugReadBeforeSubscribe_stream_snapshot_Commit line 165, col 3 to line 188, col 63 of module ss_bugReadBeforeSubscribe>
 /\ ss_bugReadBeforeSubscribe_stream_snapshot_s = [ st |-> "open",
   phase |-> "readfirst",
-  chan |-> {},
+  chan |-> <<>>,
   lagged |-> FALSE,
   armed |-> TRUE,
   kind |-> "",
@@ -51,10 +51,10 @@ State 3: <ss_bugReadBeforeSubscribe_stream_snapshot_Commit line 165, col 3 to li
   pub |-> (0 :> -1 @@ 1 :> -1) ]
 /\ ss_bugReadBeforeSubscribe_stream_snapshot_conf_step = [init |-> [tag |-> "UNIT"]]
 
-State 4: <ss_bugReadBeforeSubscribe_stream_snapshot_Publish line 194, col 3 to line 227, col 63 of module ss_bugReadBeforeSubscribe>
+State 4: <ss_bugReadBeforeSubscribe_stream_snapshot_Publish line 194, col 3 to line 226, col 63 of module ss_bugReadBeforeSubscribe>
 /\ ss_bugReadBeforeSubscribe_stream_snapshot_s = [ st |-> "open",
   phase |-> "readfirst",
-  chan |-> {},
+  chan |-> <<>>,
   lagged |-> FALSE,
   armed |-> TRUE,
   kind |-> "",
@@ -68,10 +68,10 @@ State 4: <ss_bugReadBeforeSubscribe_stream_snapshot_Publish line 194, col 3 to l
 /\ ss_bugReadBeforeSubscribe_stream_snapshot_w = [cur |-> 0, com |-> (0 :> "stable" @@ 1 :> "none"), pub |-> (0 :> 0 @@ 1 :> -1)]
 /\ ss_bugReadBeforeSubscribe_stream_snapshot_conf_step = [init |-> [tag |-> "UNIT"]]
 
-State 5: <ss_bugReadBeforeSubscribe_stream_snapshot_Restart line 319, col 3 to line 329, col 63 of module ss_bugReadBeforeSubscribe>
+State 5: <ss_bugReadBeforeSubscribe_stream_snapshot_Restart line 320, col 3 to line 330, col 63 of module ss_bugReadBeforeSubscribe>
 /\ ss_bugReadBeforeSubscribe_stream_snapshot_s = [ st |-> "open",
   phase |-> "readfirst",
-  chan |-> {},
+  chan |-> <<>>,
   lagged |-> FALSE,
   armed |-> TRUE,
   kind |-> "",
@@ -88,7 +88,7 @@ State 5: <ss_bugReadBeforeSubscribe_stream_snapshot_Restart line 319, col 3 to l
 State 6: <ss_bugReadBeforeSubscribe_stream_snapshot_Commit line 165, col 3 to line 188, col 63 of module ss_bugReadBeforeSubscribe>
 /\ ss_bugReadBeforeSubscribe_stream_snapshot_s = [ st |-> "open",
   phase |-> "readfirst",
-  chan |-> {},
+  chan |-> <<>>,
   lagged |-> FALSE,
   armed |-> TRUE,
   kind |-> "",
@@ -100,14 +100,14 @@ State 6: <ss_bugReadBeforeSubscribe_stream_snapshot_Commit line 165, col 3 to li
   readFail |-> FALSE,
   lags |-> 0 ]
 /\ ss_bugReadBeforeSubscribe_stream_snapshot_w = [ cur |-> 1,
-  com |-> (0 :> "stable" @@ 1 :> "giveup"),
+  com |-> (0 :> "stable" @@ 1 :> "operator_stop"),
   pub |-> (0 :> 0 @@ 1 :> -1) ]
 /\ ss_bugReadBeforeSubscribe_stream_snapshot_conf_step = [init |-> [tag |-> "UNIT"]]
 
-State 7: <ss_bugReadBeforeSubscribe_stream_snapshot_Publish line 194, col 3 to line 227, col 63 of module ss_bugReadBeforeSubscribe>
+State 7: <ss_bugReadBeforeSubscribe_stream_snapshot_Publish line 194, col 3 to line 226, col 63 of module ss_bugReadBeforeSubscribe>
 /\ ss_bugReadBeforeSubscribe_stream_snapshot_s = [ st |-> "open",
   phase |-> "readfirst",
-  chan |-> {},
+  chan |-> <<>>,
   lagged |-> FALSE,
   armed |-> TRUE,
   kind |-> "",
@@ -119,14 +119,14 @@ State 7: <ss_bugReadBeforeSubscribe_stream_snapshot_Publish line 194, col 3 to l
   readFail |-> FALSE,
   lags |-> 0 ]
 /\ ss_bugReadBeforeSubscribe_stream_snapshot_w = [ cur |-> 1,
-  com |-> (0 :> "stable" @@ 1 :> "giveup"),
+  com |-> (0 :> "stable" @@ 1 :> "operator_stop"),
   pub |-> (0 :> 0 @@ 1 :> 1) ]
 /\ ss_bugReadBeforeSubscribe_stream_snapshot_conf_step = [init |-> [tag |-> "UNIT"]]
 
-State 8: <ss_bugReadBeforeSubscribe_stream_snapshot_Subscribe line 366, col 3 to line 384, col 63 of module ss_bugReadBeforeSubscribe>
+State 8: <ss_bugReadBeforeSubscribe_stream_snapshot_Subscribe line 367, col 3 to line 385, col 63 of module ss_bugReadBeforeSubscribe>
 /\ ss_bugReadBeforeSubscribe_stream_snapshot_s = [ st |-> "open",
   phase |-> "rd",
-  chan |-> {},
+  chan |-> <<>>,
   lagged |-> FALSE,
   armed |-> TRUE,
   kind |-> "",
@@ -138,7 +138,7 @@ State 8: <ss_bugReadBeforeSubscribe_stream_snapshot_Subscribe line 366, col 3 to
   readFail |-> FALSE,
   lags |-> 0 ]
 /\ ss_bugReadBeforeSubscribe_stream_snapshot_w = [ cur |-> 1,
-  com |-> (0 :> "stable" @@ 1 :> "giveup"),
+  com |-> (0 :> "stable" @@ 1 :> "operator_stop"),
   pub |-> (0 :> 0 @@ 1 :> 1) ]
 /\ ss_bugReadBeforeSubscribe_stream_snapshot_conf_step = [init |-> [tag |-> "UNIT"]]
 

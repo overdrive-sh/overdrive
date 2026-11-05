@@ -85,7 +85,11 @@ branch and acts on no terminal row.**
 - A Service that declares no startup probe (the explicit opt-out) is never
   classified as an early exit, because its first `Running` is its `Stable`.
 - `ServiceLifecycle` loses the early-exit branch. A terminal row ends its
-  startup-window watch without any action.
+  startup-window watch without any action: every allocation it observes in
+  `Failed` or `Terminated` joins `terminal_announced`, whatever its start time
+  (approved 2026-11-05, feature delta § Approval record, DG-12). Without that,
+  an allocation that started and then crashed would stay in the mid-startup
+  window of the view for good, and the runtime would keep re-enqueueing it.
 
 ## Alternatives considered
 

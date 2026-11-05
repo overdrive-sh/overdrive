@@ -109,6 +109,19 @@ User rulings of 2026-11-02, recorded verbatim in outcome:
 | R1 | **Accepted, 2026-11-04 ("proceed with recommendations").** The conformance projection `guest_report_host` gains a `VmmExit` action, mapped to `SimVmm::exit_process` plus the driver's exit-gate release (precedent: the `quint_flows_beacon` driver's `vm_stop`, `crates/overdrive-worker/src/vm_driver/quint_flows_beacon.rs:446-465`). `exitrep` becomes three-valued: `none` (no terminal exit row yet), `guest-reported` (the guest's `EXIT <status>` was read), `no-report` (no `EXIT`, e.g. EOF first); its source is R1-a. | § Formal protocol model — D13 to D16, ADR-0268 |
 | R1-a | **Ruled by the user, 2026-11-04, option (a).** The `guest_report_host` conformance projection reads `exitrep` from the exit observer's resulting `AllocStatusRow` through `ObservationStore::alloc_status_row` (re-readable owner observation), not from the `ExitEvent` the consuming `take_exit_receiver` hands out. The row distinguishes the three values (`Terminated` with `Stopped { by: Process }`, or `Failed` with `WorkloadCrashedImmediately { exit_code: Some(_) }`, is guest-reported; `Failed` with `exit_code: None` or `VmOutOfMemory` is no-report; no terminal row is `none`); the `VmmExit` handler composes the production exit observer on the driver's `VmDriver` and `SimObservationStore` and awaits the row. | § Formal protocol model — D13 to D16 |
 | R2 | **Accepted, 2026-11-04.** Model trims: the full-module runs `garbage_line_is_dropped`, `all_declared_reported` and `beacon_closes_with_partial_set` are dropped (the host-half behaviour lives in the `guest_report_host` runs; `ring_drop_leaves_set_partial`, `listen_then_exit_drains_first` and `ListenBeforeExit` are kept); `gl = false` is pinned in the exhaustive `ra_ok` instance and its hazard instances (free only in `ra_conf`); `guest_listener_fail_fail_reemits_stop_per_row` is folded into `first_fail_at_deadline_with_no_earlier_row_stops`. | § Formal protocol model — D13 to D16 |
+| DG-1 | **Approved, 2026-11-05 ("proceed with recommendations").** `ra_conf` is instantiated at `CEIL = 5`, the value of production `RESTART_BACKOFF_CEILING` (`workload_lifecycle.rs:34`). The give-up runs are rewritten to five restarts. The driver asserts that the spec's `CEIL` equals the const (test-only). `ra_ok` is unchanged. No production change. | § Formal protocol model, "Conformance abstractions" |
+| DG-2 | **Approved, 2026-11-05.** `restart_authority` drops its separate `pending` row and its `StartOk` and `StartRejected` actions. The start outcome (`ok` or `rejected`) is a nondeterministic parameter of the start-producing actions (`Deploy`, `WLRestart`), as in the shim, which writes `Running` on success and `Failed` on `DriverError::StartRejected` within the awaited tick (`action_shim/mod.rs:~2433-2459`). A rejected-start named run is kept. The driver scripts the rejection through a runtime-settable `SimDriver` start-failure flag (test support, DISTILL's). | § Formal protocol model, "Conformance abstractions" |
+| DG-3 | **Approved, 2026-11-05.** In the `liveness_gate` projection, `committed` is compared only while the row is `Running`. After `Crash` it is model-only. | § Pinned conformance projection |
+| DG-4 | **Approved, 2026-11-05.** In `stream_snapshot`, the compared state is the closing `AllocStatusRow` read through the existing `ObservationStore::alloc_status_row`. The line `build_service_stream` yields is an input and an oracle, not a projected variable. | § Pinned conformance projection |
+| DG-5 | **Approved, 2026-11-05.** In `stream_snapshot`, the channel is an ordered list; `Deliver` takes the oldest event and is disabled while `lagged`. The `Lag` abstraction is stated. In `progress_deadline`, `StableHappens` is disabled after `OperatorStop`. | § Formal protocol model, "Conformance abstractions" |
+| DG-6 | **Approved, 2026-11-05 (pin).** `ReportedListeners` construction is `Default`, `FromIterator<Listener>` and `is_empty`; `GuestListenerBoard::new() -> Self`. D13 names the DELIVER obligation that production composition shares one board. | D13 item 10, § Interface changes (D13 to D16) |
+| DG-7 | **Approved, 2026-11-05 (pin).** `progress_deadline: Duration` is the last parameter of `build_service_stream`; the server deadline is the second parameter of `ApiClient::submit_workload_streaming`; `LastAttemptWire` lives in `overdrive_control_plane::streaming`. | § D10 interface changes |
+| DG-8 | **Approved, 2026-11-05.** G-10 boundary (9) and (10) are Tier-3 real-boot DELIVER obligations of D13 and D14. (8) is a seeded composed run whose fault is the omitted `LISTEN` line on `SimBeaconIo`. | Gate G-10, D13 item 9 |
+| DG-9 | **Approved, 2026-11-05.** S-32's composed restart and give-up leg is required. S-48 (b) is waived and carried by the mutation gate. S-48 (e) is waived. | § Executable obligations, S-32 and S-48 |
+| DG-10 | **Approved, 2026-11-05.** `tokio` with `test-util` as a dev-dependency of `overdrive-cli`, for S-36. The S-36 test sits behind `integration-tests` and carries a litmus proof that it fails when the `deadline + 30 s` envelope is removed. | S-36 |
+| DG-11 | **Approved, 2026-11-05 (pin).** The declared listeners reach both mechanic-summary formatters as a parameter. No wire field and no field on `ProbeMechanic::GuestListeners`. | D14 item 4 |
+| DG-12 | **Approved, 2026-11-05 (changes D6, behaviour).** Every allocation `ServiceLifecycle` observes in `Failed` or `Terminated` joins `ServiceLifecycleView.terminal_announced`, whatever its `started_at`. | D6 item 1, S-56 |
+| DG-M | **Approved, 2026-11-05 (pin).** `BeaconParseError::MalformedListen { raw: String, detail: String }` for a rejected `LISTEN` line. `guest_report_host`'s `Idle` maps to a read-only `GuestListenerReports::reported(alloc)` call compared with the previous projected value. D16's historical V1 fixtures that hold `inferred` land with the version bump in DELIVER. | § Interface changes (D13 to D16), § Formal protocol model — D13 to D16 |
 
 ## Wave: DESIGN / [REF] Decisions
 
@@ -188,7 +201,8 @@ the guard below is then the only thing that stops the verdict for a `Failed` row
 `Terminated | Failed`), so the function returns `None` for a terminal row before
 reading any gate. No signature, type, variant, error, wire or persisted shape
 changes. The comment at `:1174-1191` is rewritten accordingly. `reconcile` is
-unchanged: a `Failed` row yielding `None` records nothing new in `terminal_announced`.
+unchanged: a `Failed` row yields `None` and no action. Its membership of
+`terminal_announced` is D6 item 1's rule (DG-12), not this function's.
 
 **Other branches.** No other `ServiceLifecycle` branch acts on a terminal row:
 Stable (`:516`, `:538`), liveness terminate (`:1011`) and the backend row
@@ -236,10 +250,21 @@ stream closes on the first terminal event (`streaming.rs:1025-1036`).
 1. **`ServiceLifecycle` loses the early-exit branch.** For a row in state `Failed`
    or `Terminated` it emits no `Action`. Deleted: the branch (`:560-601`) and
    `ServiceAllocFact.exit_code` (`:111`, hydrated `:891-894`, `:899`), whose only
-   reader is the branch (`:592`). Retained: the bookkeeping that records a
-   `Failed` row that never reached `Running` in `terminal_announced` so the
-   runtime stops re-enqueueing it (`:570-581`). The early-exit insertion at `:598`
-   is deleted; the insertions at `:619` and `:580` remain.
+   reader is the branch (`:592`). **Membership (DG-12, 2026-11-05).** Every
+   allocation `ServiceLifecycle` observes in state `Failed` or `Terminated` joins
+   `ServiceLifecycleView.terminal_announced`, whatever its `started_at`, at the
+   head of the per-allocation step, so no later branch decides it. The insertion
+   is no longer confined to a `Failed` row that never reached `Running`
+   (`service_lifecycle.rs:581-594`), and the early-exit insertion (`:610`) is
+   deleted with the branch. The startup-stop insertion (`:631`, a live allocation)
+   remains. Reason: `observed` is never pruned (`:514`) and nothing else inserts a
+   started, crashed allocation, so without this rule it stays in
+   `has_alloc_mid_startup_window` (`:357-361`) for good. That predicate gates
+   `next_evaluation_at` (`:701`), and the runtime would keep re-enqueueing a dead
+   allocation (the busy loop the comment at `:583-591` warns of). Membership
+   triggers no action. `terminal_announced` for a `Failed` or `Terminated` fact
+   records "this reconciler has finished watching the allocation", the same
+   meaning as for the startup stop (D7).
 2. **`ServiceFailureReason::EarlyExit { exit_code: Option<i32> }` is kept
    unchanged in shape** (no rkyv, serde, `ToSchema` or API-spec change). Its
    author is now `WorkloadLifecycle`; the doc comment at
@@ -1133,7 +1158,7 @@ reference must not be live across (2) (`exit_observer.rs:177-197`). Module docs 
 | Surface | Change |
 |---|---|
 | `ServiceAllocFact.exit_code` (`service_lifecycle.rs:111`) | **Deleted**, with its hydration (`:891-894`, `:899`) |
-| `ServiceLifecycleReconciler::reconcile` | Emits no `Action` for a row in state `Failed` or `Terminated`; branch `:560-601` deleted |
+| `ServiceLifecycleReconciler::reconcile` | Emits no `Action` for a row in state `Failed` or `Terminated`; branch `:560-601` deleted. **DG-12:** inserts every `Failed` or `Terminated` fact into the returned `View`'s `terminal_announced` (pub field), whatever its `started_at`. No type, field or signature change |
 | `WorkloadLifecycleState.current_startup_probe: Option<ProbeStatus>` (`overdrive-reconcilers`) | **New field** (D6 item 4), populated by `hydrate_actual` only |
 | `WorkloadLifecycle::reconcile`, ceiling branch | Terminal selection gains `ServiceFailed { EarlyExit { exit_code } }` between the liveness case and `BackoffExhausted` (D6 item 4); the idempotency guard also matches it |
 | `ServiceFailureReason::EarlyExit { exit_code }` | Shape unchanged; doc rewritten |
@@ -1181,11 +1206,11 @@ reference must not be live across (2) (`exit_observer.rs:177-197`). Module docs 
 |---|---|
 | `overdrive_reconcilers::service_lifecycle::startup_deadline(&[ProbeDescriptor]) -> Duration` | **New `pub` pure fn**: the existing derivation (`interval x max_attempts` of startup probe index 0; `DEFAULT_STARTUP_DEADLINE` for an empty list or on overflow), extracted from `spec_facts_for_service` |
 | `overdrive_control_plane::streaming::PROGRESS_DEADLINE_MARGIN: Duration` (30 s) and `progress_deadline(startup_probes: &[ProbeDescriptor], floor: Duration) -> Duration` (`max(floor, startup_deadline + margin)`) | **New `pub` const and pure fn** |
-| `build_service_stream` (`streaming.rs:988`) | **Signature gains `progress_deadline: Duration`**; the cap timer arms from it |
+| `build_service_stream` (`streaming.rs:988`) | **Signature gains `progress_deadline: Duration` as its last parameter (DG-7)**; the cap timer arms from it |
 | `ServiceSubmitEvent::Failed` (`streaming.rs:776`) | **New optional field `last_attempt: Option<LastAttemptWire>`**, `#[serde(default, skip_serializing_if = "Option::is_none")]`; set only by the synthesised timeout |
-| `LastAttemptWire { alloc_id: String, reason: TransitionReason, terminal: Option<TerminalCondition>, detail: Option<String> }` | **New wire struct**, serde + `ToSchema`, composed of existing types |
+| `LastAttemptWire { alloc_id: String, reason: TransitionReason, terminal: Option<TerminalCondition>, detail: Option<String> }` | **New wire struct**, serde + `ToSchema`, composed of existing types; defined in `overdrive_control_plane::streaming` (DG-7) |
 | `service_stream_synth_cap_timeout` (`streaming.rs:906`) | Takes the latest attempt-ending observation and fills `last_attempt` |
-| `ApiClient::submit_workload_streaming` (`http_client.rs:270`) | **Signature gains the server deadline**; total request timeout = deadline + 30 s; the Job lane passes `DEFAULT_STREAMING_CAP` |
+| `ApiClient::submit_workload_streaming` (`http_client.rs:270`) | **Signature gains the server deadline as its second parameter (DG-7)**; total request timeout = deadline + 30 s; the Job lane passes `DEFAULT_STREAMING_CAP` |
 | `format_service_failed_block` (`render.rs`) | `early_exit_timing` replaced by `last_attempt: Option<&LastAttemptWire>`; renders the `Timeout` text and `last attempt` block |
 | `ServiceFailureReason` (archived), `TerminalCondition`, `AllocStatusRow`, CBOR `View`, TOML spec, `AppState::streaming_cap` | **None** |
 | `api/openapi.yaml` | `ServiceSubmitEvent::Failed` gains `last_attempt`; `LastAttemptWire` added (regenerated) |
@@ -1329,7 +1354,7 @@ Effect isolation: the hook is a pure-intent call through `Weak<dyn Driver>`; no 
 - **Promise:** when the budget is spent on a crash loop, the terminal names an early exit exactly when the final attempt reached `Running`, crashed, and never passed a declared startup probe.
 - **Affected state:** which of `EarlyExit`, `LivenessProbeFailed`, `BackoffExhausted` the give-up terminal carries.
 - **Failure projection:** unreadable startup rows -> `HydrateError::ObservationRead`, tick skipped, no terminal on a guess; other reason, `Terminated`, Job, opt-out, recorded `Pass` -> existing `BackoffExhausted` (or `LivenessProbeFailed`); duplicate -> idempotency guard (`:1143-1151`); cancelled/disconnected -> re-derived next tick.
-- **Explicitly unaffected:** whether a restart is emitted, backoff, ceiling, budget count, reclamation and generation-replacement exemptions; `Stable`; readiness and membership; liveness termination; the live `StartupProbeFailed` verdict; the exit observer's row.
+- **Explicitly unaffected:** whether a restart is emitted, backoff, ceiling, budget count, reclamation and generation-replacement exemptions; `Stable`; readiness and membership; liveness termination; the live `StartupProbeFailed` verdict; the exit observer's row; `ServiceLifecycle`'s `terminal_announced` bookkeeping for a `Failed` or `Terminated` fact (DG-12), which closes the allocation's mid-startup window and decides no action or terminal.
 - **Ordering:** after the ceiling check, before `FinalizeFailed`; no timeout; one terminal write per allocation.
 - **Counterexample:** classifying at the first crash makes the classification decide the restart (two-authors defect).
 - **Evidence lane:** pure/unit and property tests on `reconcile`; seeded `overdrive-sim` crash loop through terminal and stream event.
@@ -1498,7 +1523,9 @@ host-input projection, all declared reported, a garbage line dropped, EOF with a
   | recorded verdict read, subscribe/read/commit/publish order (D11) | first terminal line yielded by `build_service_stream` under `SimClock`, with `AllocStatusRow`s written through `SimObservationStore` and `LifecycleEvent`s sent on the bus at scripted points relative to the stream's first poll (the `Accepted` line marks the subscribe point); the current attempt is the one `current_alloc` selects. Commit-before-publish is the shim's own order, proven by S-41 |
   | per-id supervisor presence, gate, queued event (`hook_ownership`) | model-only ghosts. Supervisor presence is observed through `active_alloc_count()` and `is_role_live`; gate and queued event only as the recorded call order of `on_alloc_running` and `release_for_exit_emission` (S-4) |
   | `stable` and `ann` (`restart_authority`, D8) | `stable`: `Action::FinalizeFailed { terminal: Some(Stable { .. }) }` in the `Vec<Action>` returned by `ServiceLifecycleReconciler::reconcile`, and the committed claim on the row (`ServiceAllocFact.stable_committed`, an input written through `SimObservationStore`). `ann`: the pub `terminal_announced` set of the returned `ServiceLifecycleView` (`service_lifecycle.rs:330`) |
-  | `committed` (`liveness_gate`, B1) | the committed `Stable` claim read through `ObservationStore::alloc_status_row(alloc)` (`terminal` is `Stable`); `swr` (the `Stable` write outcome) is an input scripted on `SimObservationStore` |
+  | `committed` (`liveness_gate`, B1) | the committed `Stable` claim read through `ObservationStore::alloc_status_row(alloc)` (`terminal` is `Stable`); `swr` (the `Stable` write outcome) is an input scripted on `SimObservationStore`. **DG-3:** compared only while the row is `Running` (the spec's `rw`). After `Crash` the exit observer's `Failed` row replaces the row and `committed` is model-only |
+| closing state (`stream_snapshot`, D11) | **DG-4:** the closing `AllocStatusRow` read through the existing `ObservationStore::alloc_status_row(alloc)` (its `state` and `terminal`). The line `build_service_stream` yields is an input and an oracle for the step (S-39 to S-42), not a projected variable |
+| `terminal_announced` membership of a `Failed` or `Terminated` fact (D6, DG-12) | the pub `terminal_announced` set of the `ServiceLifecycleView` returned by `ServiceLifecycleReconciler::reconcile`, and `ServiceLifecycleView::has_alloc_mid_startup_window()` on that view (false once the allocation is a member) |
   | `used` (restart budget consumed) | pub `WorkloadLifecycleView.restart_counts` entry for the current attempt in the `View` returned by `WorkloadLifecycle::reconcile` (`workload_lifecycle.rs:2066`) |
   | `cur` (current attempt) | `overdrive_reconcilers::current_alloc` over the observation rows (`workload_lifecycle.rs:1422`, pub) |
   | `done` (give-up decided) | `Action::FinalizeFailed` carrying a give-up terminal in the `Vec<Action>` returned by `WorkloadLifecycle::reconcile` |
@@ -1525,6 +1552,32 @@ host-input projection, all declared reported, a garbage line dropped, EOF with a
   real `ProbeRunner` with a `SimClock` and recording probers. D10 actions map to
   `build_service_stream` driven by `LifecycleEvent`s on the bus and `SimClock`
   advance. A `Sim*` adapter is not an arbiter of any projected fact here.
+- **Conformance abstractions (rulings DG-1, DG-2, DG-5, 2026-11-05).** Test-side facts; no production change.
+  - **Restart ceiling (DG-1).** The conformance instance `ra_conf` sets `CEIL = 5`, the value
+    of `RESTART_BACKOFF_CEILING` (`workload_lifecycle.rs:34`), so the model gives up where
+    `WorkloadLifecycle` gives up. The give-up named runs are written for five restarts. The
+    driver asserts that the spec's `CEIL` equals the const; that assertion is test code, not a
+    seam. The exhaustive instance `ra_ok` is unchanged.
+  - **Start outcome (DG-2).** `restart_authority` has no separate `pending` row and no `StartOk`
+    or `StartRejected` action. A start-producing action (`Deploy`, `WLRestart`) takes the start
+    outcome, `ok` or `rejected`, as a nondeterministic parameter. This is the shim's behaviour:
+    it awaits `Driver::start` and writes `Running` on success and `Failed` on
+    `DriverError::StartRejected` in the same tick (`action_shim/mod.rs:~2433-2459`), so no
+    production step exists between request and outcome. The named run for a rejected start
+    (`non_crash_failed_row_gives_up_backoff_exhausted`) is kept. The driver makes `Driver::start`
+    reject through a runtime-settable start-failure flag on `SimDriver`; that flag is test
+    support and DISTILL's to shape.
+  - **`ann` (DG-12).** The model's `ann` is the `terminal_announced` set and includes every
+    allocation observed `Failed` or `Terminated`, as D6 item 1 states; the conformance read is
+    the `terminal_announced` row of the table above.
+  - **Channel and lag (DG-5).** In `stream_snapshot` the channel is an ordered list. `Deliver`
+    takes the oldest event, and is disabled while `lagged` is set (the stream relists before it
+    polls the bus again). The model's `Lag` drops every unseen event and sets `lagged`; tokio's
+    broadcast channel instead reports `Lagged` and resumes at the oldest retained event. The
+    difference is harmless: the relist reads the store, and commit precedes publish (S-41), so
+    the relist sees every row whose event was lost, and an event retained after the relist
+    describes a row the relist has already read (one terminal line, S-40). In
+    `progress_deadline`, `StableHappens` is disabled after `OperatorStop`.
 - **Commands:** `cargo xtask metal run -- cargo xtask quint typecheck` and
   `cargo xtask metal run -- cargo xtask quint check --subsystem specs/quint/service-allocation-readiness-and-ending`
   (the modeler runs them; never Lima).
@@ -1661,10 +1714,10 @@ system behavior under deliberate failure"). The D11 rows (S-39 to S-42) follow.
 | S-29 | **D8 emission rule.** `StartupStopAtMostOncePerRow`, `NoStableOverPendingStop`, `LatePassUnstrandsTheInstance` | `ServiceLifecycleReconciler::reconcile` over successive hydrated facts (state x gates x latest startup `run_seq` x recorded `startup_last_acted_run` x latest startup status) | pure input | Emit iff guard and gates hold and `run_seq` exceeds the recorded value; the same `run_seq` never emits twice; a `Running` fact already in `terminal_announced` re-emits on a newer row; a `Pass` row ends the re-emission and the fact reaches the Stable branch; a non-`Running` fact in `terminal_announced` is skipped; `next_view` differs from the input only in `startup_last_acted_run`, `terminal_announced` and `observed`; the backend row marks the allocation not `healthy` while the stop is pending (no committed `Stable`, D12) | Tier 1 pure proptest; mutation target |
 | S-30 | **D8 composed retry; B2 stop row write.** `FailedStartupStopIsRetried`, `NoStrandedStop` | production observer, both reconcilers, shim `StopAllocation`, real `ProbeRunner`, Service stream | `SimDriver::stop` scripted to fail the first N calls, then succeed; `SimClock` advanced across probe intervals; a variant where the startup probe passes after the first failed stop; **a variant (B2) where `SimObservationStore::write_alloc_lifecycle` fails once for the stop's `Terminated` row (startup stop, then a liveness stop)** | Stop re-emitted exactly once per new startup row (recording shim trace); row becomes `Terminated` / `Stopped { StartupProbe }` after the first success; the successor starts only after the stop landed; in the `Pass` variant no further stop is emitted and the allocation reaches `Stable` and is eligible only at that `Stable` commit; in the row-write variant the supervisor is still registered after the failed write (`active_alloc_count()` unchanged), the next probe row re-emits the stop, the retry finds the guest stopped (not-found tolerated), writes the row, and only then does `active_alloc_count()` fall. Seed printed | Tier 1 composed, seeded |
 | S-31 | **D9 runner contract.** `LivenessOnlyAfterStable`, `NoLivenessForEndedId` | `ProbeRunner::start_alloc`, `start_liveness`, `stop_alloc` through `VmDriver::on_alloc_running` / `on_alloc_stable` / `on_alloc_terminal` | `SimClock` and recording probers; `on_alloc_terminal` before `on_alloc_stable`; `on_alloc_stable` twice; concurrent `stop_alloc` and `start_liveness` over seeds | `is_role_live(alloc, Liveness)` false after `on_alloc_running`, true after `on_alloc_stable`, false after terminal; startup and readiness roles unchanged; a second `on_alloc_stable` spawns nothing; after terminal, `on_alloc_stable` leaves `active_alloc_count()` unchanged and spawns nothing; no liveness row exists before the `Stable` call under any seed; after a control-plane restart between `Stable` and the first liveness row, boot reclamation makes the unsupervised VM terminal (`PlatformReclaimed`), the successor's supervisor registers fresh, and `on_alloc_stable` for the old id is a no-op | Tier 1 composed (real runner), seeded |
-| S-32 | **D9 composed.** `NoLivenessStopBeforeStable`, `LivenessStreakStartsAtStable` | production observer, both reconcilers, shim, real runner with a prober whose liveness fails for the whole startup | a Service whose liveness probe fails from t=10 s and whose startup probe passes at t=30 s; then a liveness probe that keeps failing after `Stable` | No `Stopped { LivenessProbe }` before `Stable` or on the first tick after; the first liveness row is one interval after `Stable` with streak 1; after `failure_threshold` post-`Stable` failures the instance is stopped and restarted under the shared budget, and the give-up is `LivenessProbeFailed`; an opt-out Service starts liveness at its first `Running`'s `Stable`. Seed printed | Tier 1 composed, seeded |
+| S-32 | **D9 composed.** `NoLivenessStopBeforeStable`, `LivenessStreakStartsAtStable` | production observer, both reconcilers, shim, real runner with a prober whose liveness fails for the whole startup. **DG-9 (2026-11-05):** the restart and give-up leg is composed, not waived: the production `VmDriver` over `SimVmm` and a stepped `SimBeaconIo` (the `quint_cid_lease` composition, `guest_network/quint_cid_lease.rs`), so a restart runs `VmDriver::start` | a Service whose liveness probe fails from t=10 s and whose startup probe passes at t=30 s; then a liveness probe that keeps failing after `Stable` | No `Stopped { LivenessProbe }` before `Stable` or on the first tick after; the first liveness row is one interval after `Stable` with streak 1; after `failure_threshold` post-`Stable` failures the instance is stopped and restarted under the shared budget, and the give-up is `LivenessProbeFailed`; an opt-out Service starts liveness at its first `Running`'s `Stable`. Seed printed | Tier 1 composed, seeded |
 | S-34 | **D10 derivation.** The deadline exceeds the startup deadline by construction (tested on the real function) | `startup_deadline`, `progress_deadline` (pure) | proptest over descriptor lists (empty, one, many, overflowing `interval x max_attempts`) and floors | `progress_deadline > startup_deadline` and `>= floor` for every input; the default spec yields 90 s; `startup_deadline` equals the value `spec_facts_for_service` produced before the extraction (golden cases) | Tier 1 pure proptest; mutation target |
 | S-35 | **D10 composed stream.** `HealthySlowStartNeverTimesOut` (under DL-6), the timeout carries no verdict (the stream writes no row), `StreamEndsOnceHonestly` | `build_service_stream` through the submit handler with real shim events, `SimClock`, both `Inserted` and `Unchanged` paths | (a) startup deadline 120 s, `Stable` at 100 s; (b) a never-ready Service with the default deadline; (c) a short startup deadline whose give-up lands first; (d) an `Unchanged` redeploy of a stuck Service with no recorded verdict (a settled one is S-39); (e) a Job; (f) exposure E-4: a guest that boots at `VM_BOOT_DEADLINE` (30 s) and passes its startup probe on the last attempt | (a) `Stable`, no `Timeout`; (b) `Failed { Timeout { 90 } }` with `last_attempt` = the latest `Failed` or `Terminated` event seen (the startup stop), `alloc_id: None`, no row written by the stream; (c) the give-up terminal, unchanged; (d) a new clock, `last_attempt` from events after open only; (e) the Job stream keeps `streaming_cap` and its output byte-identical; (f) `Failed { Timeout }` with `last_attempt: None` while the allocation then reaches `Stable`: an honest timeout, the stated exposure, never a success claim | Tier 1 composed, seeded |
-| S-36 | **D10 CLI.** wire and render | `ApiClient::submit_workload_streaming`, `format_service_failed_block`, `consume_stream` | wire fixtures; a request timeout probe | Request timeout is `deadline + 30 s` for the Service lane and `DEFAULT_STREAMING_CAP + 30 s` (120 s) for the Job lane; the `Timeout` block shows the new wording and the labelled `last attempt (alloc ...)` block when present, nothing extra when absent; exit code 1; `ServiceSubmitEvent::Failed` without `last_attempt` still decodes (additive); OpenAPI regenerated and `openapi-check` clean | Tier 1 pure (render and wire per `overdrive-cli/CLAUDE.md`) |
+| S-36 | **D10 CLI.** wire and render | `ApiClient::submit_workload_streaming`, `format_service_failed_block`, `consume_stream` | wire fixtures; a request timeout probe. **DG-10 (2026-11-05):** the probe pauses the clock over a real TLS socket, so `overdrive-cli` takes `tokio` with the `test-util` feature as a dev-dependency (approved). The test sits behind `integration-tests` and carries a litmus proof that it fails when the `deadline + 30 s` envelope is removed (the request timeout falls back to the fixed 120 s) | Request timeout is `deadline + 30 s` for the Service lane and `DEFAULT_STREAMING_CAP + 30 s` (120 s) for the Job lane; the `Timeout` block shows the new wording and the labelled `last attempt (alloc ...)` block when present, nothing extra when absent; exit code 1; `ServiceSubmitEvent::Failed` without `last_attempt` still decodes (additive); OpenAPI regenerated and `openapi-check` clean | Tier 1 pure (render and wire per `overdrive-cli/CLAUDE.md`) |
 | S-38 | **D8 CBOR evolution.** ADR-0035 additive field | `ServiceLifecycleView` decode through the `ViewStore` codec | a CBOR blob written without `startup_last_acted_run`; a blob that still carries the removed `stable_announced` key | Decodes with an empty map, other fields unchanged; the removed key is ignored; a blob with the field round-trips | Tier 1 default lane |
 
 D11 obligations (accepted 2026-11-03). The recorded verdict is read through the
@@ -1687,7 +1740,12 @@ obligation; B2's obligation is the row-write variant of S-30.
 | S-45 | **B3, an out-of-memory crash loop gives up as `EarlyExit`.** | The S-16 composed loop with the guest killed by the cgroup OOM killer on every start | `SimDriver` exit with OOM facts | The give-up is `ServiceFailed { EarlyExit { exit_code: None } }`; the S-15 grid gains `Failed` + `VmOutOfMemory` (pre-startup: `EarlyExit`; startup passed: `BackoffExhausted`) | Tier 1 composed and pure |
 | S-46 | **D12, the eligibility predicate.** `compute_backend_healthy` (through `ServiceLifecycleReconciler::reconcile`'s backend row) over startup probe declared (yes, opt-out) x `stable_committed` (yes, no) x own `terminal_announced` membership (yes, no) x readiness (none; declared with Pass at, below and above threshold; declared with Fail; no row) x an unrelated allocation in `terminal_announced` (yes, no) x latest startup row (`None`, `Pass`, `Fail`) | pure input | `healthy` iff (opt-out or `stable_committed`) and the readiness rule holds. No per-allocation backend veto exists: the latest startup row, the allocation's own and any unrelated `terminal_announced` membership never change the result, and a stop-eligible allocation has no committed `Stable`, so it is not `healthy`. Opt-out rows are byte-identical to the pre-feature predicate; `next_view` is unchanged by the call | Tier 1 pure proptest; mutation target |
 | S-47 | **D12, composed.** `EligibleOnlyAfterOwnStable`, no flap after `Stable` (G-9) | production `WorkloadLifecycle`, `ServiceLifecycle`, shim, `SimObservationStore` and the resolver's `BackendIndex` read of the written `ServiceBackendRow`; real `ProbeRunner` with a recording prober; `SimClock` | (a) a Service with a startup probe and no readiness probe: first allocation `Running`, startup probe unbound then passing; (b) the same, first attempt startup-stopped (D7/D8), successor `Running`; (c), (d) are covered by S-30 (a late startup `Pass` after a stop that did not land) and S-43 (the `Stable` row write fails once); (e) after `Stable`, an extra startup `Fail` row lands (role not yet retired), no further startup rows; (f) a control-plane restart (`View` reloaded) between `Stable` and the next evaluation; (g) a crash successor (D6); (h) an opt-out Service; (i) a readiness-probed Service whose readiness streak met the threshold before `Stable` | (a) the backend row is `healthy: false` from `Running` until the `Stable` row is committed, then `true`; the resolver returns the existing fail-closed result before and the backend after; (b), (g) the successor is `false` until its own `Stable` is committed, then `true`; (c), (d) as in S-30 and S-43 (eligible exactly at the `Stable` commit, never `true` in between); (e) stays `true`; (f) unchanged; (h) `true` at `Running`, as today; (i) `true` at the `Stable` commit. A dropped row write is repaired by the next evaluation. Seed printed | Tier 1 composed, seeded |
-| S-48 | **D17, the wake (ADR-0273, once confirmed).** `NoLostWake` (a submit is admitted without waiting for the cadence tick), `CadenceNeverStarved`, `DrainOrderDeterministicAcrossSeeds`. No Quint model: this scenario is the evidence (§ D17, S6) | `ReconcilerRuntime::submit_evaluation` (a producer, including the interest router's `from_runtime` handle and the submit handler) and the production `spawn_convergence_loop` with `SimClock` and a recording action shim; `EvaluationBroker::counters()` as the observation | seeded schedules: (a) a submit while the loop is parked, `SimClock` not advanced; (b) a submit made from a task the sim schedules while the loop is admitting or awaiting an in-flight evaluation (the drain-to-park window has no await point on a single-threaded sim, so it rests on tokio's documented permit, § D17; the mutation targets carry the signal position); (c) a burst of N submits for N distinct targets and for one target; (d) no submits, `SimClock` advanced one cadence period; (e) a submit for a target whose evaluation is in flight; (f) a deferred (`NotBefore`) evaluation | (a) admitted with no clock advance, once; (b) admitted without waiting for the tick; (c) one drain admits up to the capacity in FIFO order, a same-key burst collapses to one dispatch (`counters().dispatched` and `.cancelled`); (d) the cadence arm still drains and the due resync fires at most once per period; (e) admitted when that evaluation completes, never concurrently; (f) admitted at its eligibility, not earlier because of an unrelated wake; the admission order is identical across two runs of the same seed. Seed printed | Tier 1 seeded sim invariant |
+| S-48 | **D17, the wake (ADR-0273, once confirmed).** `NoLostWake` (a submit is admitted without waiting for the cadence tick), `CadenceNeverStarved`, `DrainOrderDeterministicAcrossSeeds`. No Quint model: this scenario is the evidence (§ D17, S6) | `ReconcilerRuntime::submit_evaluation` (a producer, including the interest router's `from_runtime` handle and the submit handler) and the production `spawn_convergence_loop` with `SimClock` and a recording action shim; `EvaluationBroker::counters()` as the observation | seeded schedules: (a) a submit while the loop is parked, `SimClock` not advanced; (b) a submit made from a task the sim schedules while the loop is admitting or awaiting an in-flight evaluation (the drain-to-park window has no await point on a single-threaded sim, so it rests on tokio's documented permit, § D17; the mutation targets carry the signal position); (c) a burst of N submits for N distinct targets and for one target; (d) no submits, `SimClock` advanced one cadence period; (e) a submit for a target whose evaluation is in flight; (f) a deferred (`NotBefore`) evaluation | (a) admitted with no clock advance, once; (b) admitted without waiting for the tick; (c) one drain admits up to the capacity in FIFO order, a same-key burst collapses to one dispatch (`counters().dispatched` and `.cancelled`); (d) the cadence arm still drains and the due resync fires at most once per period; (e) admitted when that evaluation completes, never concurrently; (f) admitted at its eligibility, not earlier because of an unrelated wake; the admission order is identical across two runs of the same seed. Seed printed. **DG-9 (2026-11-05):** (b) is waived: a single-threaded sim has no await point between the insert and the wake, and the scenario is carried by the mutation gate, whose targets for the signal position (moved before the insert, dropped, or a stored permit; D17 mutation targets) the gate must kill. That dependency is the whole of (b)'s evidence. (e) is waived: it needs a reconciler whose tick blocks in flight, which no production reconciler is, so authoring one is a test seam | Tier 1 seeded sim invariant |
+
+| ID | Contract / invariant | Production owner path | Fault stimulus | Oracle | Tier |
+|---|---|---|---|---|---|
+| S-56 | **D6, DG-12: a crashed started allocation closes its mid-startup window.** `CrashedAllocationDoesNotKeepTheLoopAlive` | `ServiceLifecycleReconciler::reconcile` over a hydrated fact for each (state: `Failed`, `Terminated`) x (`started_at`: set, unset) x (latest startup probe: none, `Fail`, `Pass`) x (startup probes: declared, opt-out), starting from a view whose `observed` already holds the allocation (as after its `Running` evaluation) | pure input | In every case the returned `View.terminal_announced` contains the allocation, `has_alloc_mid_startup_window()` on the returned view is false, and `next_evaluation_at` returns `None`. The returned `Vec<Action>` is empty. The `started_at` set cases are the ones the pre-DG-12 code leaves open. A second evaluation of the same fact changes neither the view nor the actions. A `Running` fact with no gate met is the control: it is not in `terminal_announced` and its mid-startup window stays open | Tier 1 pure proptest; mutation target (the insertion on a started `Failed` row, and on a `Terminated` row) |
+
 
 Obligations of D13 to D16 for PR-1, PR-4 and P1 (the guest-listener gate boundary scenarios
 are G-10 above; the beacon-channel sequences are the `guest_report` runs). Nothing here is
@@ -1706,7 +1764,7 @@ Mutation targets by decision:
 
 - **D13 to D16 (PR-1, PR-4, P1).** The insertion-reporting check-and-act, the declared filter and the wake-only-on-insertion rule in the board (S-50, S-51); the `seen` comparison in `changed` (S-52); the deadline arm and the `Fail` cadence of the guest-listener task, and the token re-check before a write (S-53); the `GuestListeners` arm of `startup_attempts_required` and its `1` (S-54); the TCP filter of `tcp_service_ports()` (S-55).
 - **Hook ownership (D1 to D5).** The observer's new call (S-1); the order swap in both shim sites (S-4); `cleanup_restart_predecessor`'s non-change (S-2); D5's guard, replacing the terminal-state test with `== Terminated` or deleting it (S-10, S-21).
-- **D6.** The terminal selection in the ceiling branch, each condition of the pre-startup-crash predicate removed or negated in turn, and always choosing `BackoffExhausted` (S-15, S-16); the idempotency guard extension, removing `EarlyExit` from it (S-15); the `current_startup_probe` population, always-`None` or always-`Some(Pass)` (S-15, S-17); the `restart_budget_from_rows` arm (S-27). The `workload_lifecycle.rs` and `service_lifecycle.rs` `reconcile` bodies are mandatory mutation targets (`.claude/rules/testing.md`).
+- **D6.** The terminal selection in the ceiling branch, each condition of the pre-startup-crash predicate removed or negated in turn, and always choosing `BackoffExhausted` (S-15, S-16); the idempotency guard extension, removing `EarlyExit` from it (S-15); the `current_startup_probe` population, always-`None` or always-`Some(Pass)` (S-15, S-17); the `restart_budget_from_rows` arm (S-27); the `terminal_announced` insertion for a `Failed` or `Terminated` fact, removed or restricted to `started_at == None` or to `Failed` (S-56, DG-12). The `workload_lifecycle.rs` and `service_lifecycle.rs` `reconcile` bodies are mandatory mutation targets (`.claude/rules/testing.md`).
 - **D7.** The action swap in `startup_probe_failed_action`, restoring a `FinalizeFailed` (S-21, S-22); the stream projection arm (S-22, S-26); the exclusion of the new disposition from the intentional-stop test (S-23); each case and the order of the ceiling selection (S-23); the `current_startup_probe` population for the startup stop (S-23, S-17); the `restart_budget_from_rows` arm (S-27).
 - **D8 to D10.** The `run_seq > recorded` comparison and the `Pass` exemption (S-29, S-30); the top-of-loop dedup change for `Running` facts (S-29); the removal of the liveness spawn from `start_alloc` and of the `start_liveness` call from `on_alloc_stable` (S-31, S-32); the lock hold in `start_liveness` (S-31); the `startup_deadline + margin` term and the `max` with the floor (S-34); the timer armed from the passed deadline and the `last_attempt` projection (S-35); the request-timeout derivation (S-36).
 - **D11.** Moving the read before the subscription (S-40); selecting any row instead of `current_alloc` (S-39 f); dropping the `None` projection of the two restartable stops from the read (S-39 d); absorbing a read error (S-42); the relist on `Lagged` (S-40).
@@ -2237,7 +2295,9 @@ Rejected alternatives (`fentry`, `sock_diag` polling, workload-signalled readine
     ```
 
     `ReportedListeners` is a value type: an ordered set of `(Proto, NonZeroU16)` with
-    `contains`, `len` and equality. Behaviour (the trait docstring carries it; DISTILL
+    `contains`, `len`, `is_empty` and equality, and constructed through `Default` and
+    `FromIterator<Listener>` (DG-6; every composition and oracle builds values this way).
+    `GuestListenerBoard::new() -> Self` is the board's constructor. Behaviour (the trait docstring carries it; DISTILL
     scenarios S-50 to S-52 pin each clause):
     - **Entry lifetime (one contract; A1, accepted 2026-11-04).** An allocation id has an entry from `open` to `close`
       and none before or after. `reported` on an id with no entry returns the empty set; there
@@ -2282,7 +2342,10 @@ Rejected alternatives (`fentry`, `sock_diag` polling, workload-signalled readine
     Composition: `ProbeRunner::new` gains a sixth mandatory parameter `Arc<dyn
     GuestListenerReports>`; `VmDriver::new` gains the `Arc<GuestListenerBoard>`; the worker
     composition root builds one board and passes it to both (a missing wiring does not
-    compile, `development.md` § "Port-trait dependencies"). The simulation adapter
+    compile, `development.md` § "Port-trait dependencies"). **DELIVER obligation (DG-6):**
+    production composition shares ONE board between the probe runner and `VmDriver`. The
+    DISTILL scaffolds create one board per consumer, which compiles and is inert, so the type
+    system does not catch it, and the DELIVER reviewer checks the composition root for it. The simulation adapter
     `SimGuestListenerReports` (`overdrive-sim`) implements the port with scripted insertions
     (its scripting API is DISTILL's); `SimDriver` is unchanged, because DST drives
     `ProbeRunner` directly as it does with `SimGuestStreamDial`.
@@ -2419,6 +2482,21 @@ Decision record: ADR-0269.
    holds), D10 and D11 are **unchanged code** except the one gate input named in item 3
    (P1, `startup_attempts_required`). `mechanic_summary` is `guest listeners
    tcp:8080 udp:5353` (declared order).
+
+   **Where the declared listeners reach the summary (DG-11, ruled 2026-11-05).** Two
+   formatters render a `ProbeMechanic`, and each takes the declared listeners as a second
+   parameter, `&[Listener]` (`overdrive_core::aggregate::Listener`); `ProbeMechanic::GuestListeners`
+   stays fieldless and no wire field is added. For `Tcp` and `Http` the parameter is unused.
+   (a) The reconciler's `format_mechanic_summary` (`service_lifecycle.rs:760`), which fills
+   `ProbeWitness.mechanic_summary`, is called from `spec_facts_for_service(svc: &Service)`,
+   which already holds `svc.listeners` (`aggregate/mod.rs:363`, declaration order). This is
+   the string the deploy stream prints: `format_service_stable_summary` writes
+   `witness.mechanic_summary` verbatim (`render.rs:1283`), so the deploy path needs neither the
+   parsed spec nor a new field. (b) The CLI's `format_probe_mechanic_summary` (`render.rs:1351`),
+   used by the describe `Probes:` section, receives the snapshot's listeners
+   (`out.snapshot.listeners`, `render.rs:274`; `AllocStatusResponse.listeners`, `api.rs:312`),
+   which the snapshot already carries. Each formatter renders the listeners as `tcp:<port>`
+   or `udp:<port>` joined by single spaces in declaration order.
 5. Alternatives: see ADR-0269.
 
 ### D15 — the default startup gate is the guest's report of every declared listener
@@ -2509,7 +2587,10 @@ gate.
 | Surface | Change | Crate |
 |---|---|---|
 | `BeaconMessage` | New guest-to-host variant `Listen { protocol: Proto, port: NonZeroU16 }`, text form `LISTEN <tcp\|udp> <port>`, strict three-field parse | `overdrive-core` |
+| `BeaconParseError` (**DG-M**) | New variant `MalformedListen { raw: String, detail: String }`, `#[error("LISTEN message is malformed ({detail}) in line {raw:?}")]`, in the shape of `MalformedArgv` (`beacon.rs:155`): `raw` is the full line, `detail` is the `Display` text of the underlying failure (no `#[source]`, so the enum keeps its `Clone` and `PartialEq` derives). Every rejected `LISTEN` line returns this one variant: wrong field count, unknown protocol, a port that is not a number, out of range or zero. `FieldCount` and `InvalidInt` are not used for `LISTEN` | `overdrive-core` |
 | `ProbeMechanic` | New fieldless tail variant `GuestListeners` (Service, Startup, sole descriptor only) | `overdrive-core` |
+| `format_mechanic_summary` (reconciler, private) and `format_probe_mechanic_summary` (`overdrive-cli`, `pub`) (**DG-11**) | Each gains a second parameter `&[Listener]`, the declared listeners; used only by the `GuestListeners` arm (D14 item 4). No wire, archived or `ProbeMechanic` change | `overdrive-reconcilers`, `overdrive-cli` |
+| `ReportedListeners`, `GuestListenerBoard` (**DG-6**) | `ReportedListeners`: `Default`, `FromIterator<Listener>`, `is_empty`, beside the pinned `contains`, `len`, equality. `GuestListenerBoard::new() -> Self` | `overdrive-core`, `overdrive-worker` |
 | `AllocationSpec`, `WorkloadLifecycleState` | New `declared_listeners: Vec<Listener>` (in-memory); **PR-4:** replaces `service_ports` in both types, and `AllocationSpec::tcp_service_ports()` is the TCP view the TPROXY consumers read (D14 item 2) | `overdrive-core`, `overdrive-reconcilers` |
 | `GuestListenerReports` (**PR-1**) | New read-only driven port, `#[async_trait]`, held as `Arc<dyn GuestListenerReports>`: `reported(&AllocationId) -> ReportedListeners`, `async changed(&AllocationId, &ReportedListeners) -> ReportedListeners`; behaviour contract in D13 item 10. New value type `ReportedListeners` | `overdrive-core` |
 | `GuestListenerBoard` (**PR-1**) | New concrete implementation of the port in `overdrive-worker`; its methods and any outcome type are internal (the crafter's). Pinned behaviour only, in D13 item 10: entry created before the beacon reader, removed after `stop_alloc` and on a failed `start`, an insertion-reporting check-and-act, three no-op cases | `overdrive-worker` |
@@ -2589,7 +2670,27 @@ bounded exposure, D13 item 9; run `ring_drop_leaves_set_partial`);
 1,024 UDP slots) produce zero `LISTEN` lines before `EXEC` (structural under PR-2; a
 regression if init's sockets ever become visible), and the workload's own listener, started
 after `EXEC`, produces exactly one; (10) **loopback** (Tier 3): binds to `127.0.0.1`, `::1`
-and `::ffff:127.0.0.1` produce no line, and `::ffff:<non-loopback>` produces one. Seeded
+and `::ffff:127.0.0.1` produce no line, and `::ffff:<non-loopback>` produces one.
+**Ruling DG-8 (2026-11-05): how (8) to (10) are driven.** (9) and (10) are Tier-3 real-boot
+DELIVER obligations of D13 and D14 (native metal, `cargo xtask metal run --`), observed
+through production-written state, with no writer seam in `overdrive-init`. For (9), the
+fixture declares a port that init itself binds (the TCP intake port, and a UDP slot port);
+init's bind produces no `LISTEN` line, so the declared listener is never reported and the
+startup probe row is `Fail` at the deadline, its reason naming that port as unreported. For
+(10), the fixture declares a listener and the workload binds it only to `127.0.0.1`, `::1`
+or `::ffff:127.0.0.1`; the startup probe row is `Fail` naming the port as unreported. A
+workload bind to `::ffff:<non-loopback>` on a declared port gives `Pass`. (8) is a seeded
+Tier-1 composed run: the production `VmDriver` over `SimVmm` and a stepped `SimBeaconIo`,
+the production exit observer and the real reader (the `quint_cid_lease` composition), where
+the fault is the omitted `LISTEN` line, i.e. the script does not write the declared
+listener's line while the guest stays running. The driven port that injects it is the
+existing `SimBeaconIo` (`guest_write` is simply not called for that line). This is the
+right injection point because the ring drop is in-guest, and its only host-visible effect is
+that the line never arrives; nothing on the host distinguishes a dropped line from a
+`listen()` that never happened. The run then asserts `SimClock` advance to the deadline,
+the first `Fail` row, the D7 stop, the restart and the give-up `StartupProbeFailed` naming
+the missing listener. The kernel's drop-and-count behaviour itself stays V37's evidence and
+the `ring_drop_leaves_set_partial` model run. Seeded
 invariants: `GuestListenerPassImpliesAllDeclared`, `NoPassAfterEnding` (no `Pass` write
 is started after the task observed cancellation), `StableNeverForNonRunning`,
 `NoFailBeforeDeadline`, `GuestListenerChangedNeverMissesAnInsertion` (S-52).
@@ -2698,7 +2799,8 @@ conformance target). The guest-signal spike measured the hazard: 185 of 300 boot
   | the line-appending writer actions (`WriterForward`, `WriterDrain`, `WriterExit`) | `SimBeaconIo::guest_write` of the `LISTEN`/`EXIT` line they append: the guest's effect on the host is only the line (**not** a writer seam: nothing in `overdrive-init` is observed) |
   | `BeaconClose` | `SimBeaconIo::guest_close`: EOF to the real reader |
   | `VmmExit` (**R1**, **R1-a**) | `SimVmm::exit_process` (the VMM process exits) and `Driver::release_for_exit_emission` (the exit-gate release), so `run_exit_watcher` classifies the guest report (or its absence) and sends the `ExitEvent` (`vm_driver.rs:2237-2330`) to the **production exit observer**, which writes the row; the handler then awaits that row (composition and preconditions below). Precedent for the VMM-side step: the `quint_flows_beacon` driver's `vm_stop` (`crates/overdrive-worker/src/vm_driver/quint_flows_beacon.rs:446-465`): `self.vmm.exit_process(pid, Some(0), None)`, then `observe_vm_exits`; that driver does not compose the exit observer, so the composition below is new to this driver |
-  | `WorkloadListen`, `WorkloadExit`, `Idle`, and the `ring`, `wl`, `produced` state | **model-only**: guest and kernel internals with no host-visible effect |
+  | `WorkloadListen`, `WorkloadExit`, and the `ring`, `wl`, `produced` state | **model-only**: guest and kernel internals with no host-visible effect |
+  | `Idle` (DG-M) | a read-only call to `GuestListenerReports::reported(alloc)`; the handler compares the result with the previously projected `rset` and fails the step if it changed. It writes nothing and releases no read |
 
   **Driver home (decided here).** The `guest_report_host` driver lives in
   `overdrive-control-plane`, as `crates/overdrive-control-plane/src/worker/quint_guest_report_host.rs`,
@@ -2798,7 +2900,7 @@ conformance target). The guest-signal spike measured the hazard: 185 of 300 boot
     guest status the reader holds once it has read `exit`. The declared set is a module
     constant; the pair of a valid line ranges over the declared pairs and one undeclared pair.
   - **Actions:** `HostRead`, `AppendListen(p)`, `AppendExit`, `HostGarbage`, `BeaconClose`,
-    `VmmExit`. Appends are unordered with respect to each other (the guest's drain rule is not
+    `VmmExit`, and the stutter `Idle` (mapped as in the table above, DG-M). Appends are unordered with respect to each other (the guest's drain rule is not
     a host concern), so the projection reaches `listen` after `exit`, which is the host
     reader's own rule. `VmmExit` is enabled once the guest-report wait has ended (`exit` read,
     or EOF reached); it sets `exitrep` to `guest-reported` if the reader holds a guest status,
@@ -2981,7 +3083,7 @@ Path prefixes: `CP` = `crates/overdrive-control-plane`, `CORE` = `crates/overdri
 | S-26 | D7, D9 stream projection | `CP/T/a/service_stream_restartable_stop_projection.rs::a_restartable_probe_stop_projects_to_no_stream_line` (ign); `::every_other_stop_projects_to_a_stopped_line_naming_its_initiator`, `::the_verdict_terminals_still_project_to_a_stream_line` (pass) | T1 pure, default | ign(D7 D9); pass x2 |
 | S-27 | D6, D7 wire and render | `CP/T/a/alloc_status_restart_budget_terminals.rs::an_early_exit_give_up_is_an_exhausted_budget_at_the_ceiling`, `::a_startup_probe_failed_give_up_is_an_exhausted_budget_at_the_ceiling` (ign); `::a_backoff_exhausted_terminal_is_an_exhausted_budget_with_its_attempts`, `::a_liveness_give_up_no_terminal_and_a_probe_stop_leave_the_budget_untouched` (pass); `CLI/T/a/workload_describe_startup_stop.rs::describe_names_a_startup_stopped_predecessor_and_shows_the_running_successor` (ign), `::describe_keeps_the_stable_terminal_line_and_adds_no_stopped_line_for_other_rows`, `::describe_renders_no_startup_line_for_an_operator_or_liveness_stop` (pass) | T1 pure, default | ign(D6), ign(D7) x2; pass x4 |
 | S-31 | D9, G-6 | `CP/T/a/liveness_begins_at_stable.rs::liveness_supervision_begins_when_the_allocation_becomes_stable`, `::first_liveness_row_lands_one_interval_after_stable_with_streak_one`, `::a_second_stable_hook_spawns_no_second_liveness_task`, `::a_restarted_process_starts_liveness_only_for_the_successor_at_its_own_stable` (ign D9); `::concurrent_stop_and_start_liveness_never_leave_liveness_for_an_ended_id` (64 seeds, ign D9); `::stable_hook_after_the_end_starts_no_liveness`, `::startup_and_readiness_supervision_are_unchanged_by_the_liveness_gate`, `::an_allocation_without_a_liveness_descriptor_never_has_a_liveness_role` (pass) | T1 composed, default | ign(D9) x5; pass x3 |
-| S-32 | D9, G-6 | `CP/src/reconciler_runtime/liveness_gate_composed.rs::slow_starting_service_with_failing_liveness_is_stopped_only_after_stable` (8 seeds), `::opt_out_service_starts_liveness_at_its_first_stable` | T1 composed, `--lib` (`integration-tests`) | ign(D9) x2 (restart/give-up leg waived, DG-9) |
+| S-32 | D9, G-6 | `CP/src/reconciler_runtime/liveness_gate_composed.rs::slow_starting_service_with_failing_liveness_is_stopped_only_after_stable` (8 seeds), `::opt_out_service_starts_liveness_at_its_first_stable` | T1 composed, `--lib` (`integration-tests`) | ign(D9) x2; the restart/give-up leg is required and not yet authored (DG-9 ruled 2026-11-05) |
 | S-43 | B1, R2-2 | `liveness_gate_composed.rs::a_lost_stable_write_is_announced_again_until_it_commits`, `::a_lost_stable_write_is_announced_again_after_a_control_plane_restart` | T1 composed, `--lib` | ign(B1 R2-2) x2 |
 | S-34 | D10 derivation, G-7 | `CP/T/a/progress_deadline_derivation.rs::the_progress_deadline_exceeds_the_startup_deadline_and_keeps_the_floor` (proptest), `::the_default_spec_yields_ninety_seconds`, `::a_long_startup_deadline_lifts_the_progress_deadline_and_a_short_one_keeps_the_floor`; `REC/T/a/startup_deadline.rs::the_startup_deadline_matches_the_values_the_derivation_produced_before_extraction`, `::the_startup_deadline_equals_the_original_derivation_for_every_descriptor_list` | T1 pure, default | ign(D10) x5 |
 | S-35 | D10, G-7 | `CP/T/a/service_stream_progress_deadline.rs::a_service_that_becomes_stable_after_ninety_seconds_ends_stable_not_timeout`, `::a_never_ready_service_times_out_at_the_progress_deadline_naming_the_last_attempt`, `::a_give_up_inside_the_progress_deadline_ends_the_stream_with_the_give_up`, `::an_unchanged_redeploy_of_a_stuck_service_opens_a_new_clock_and_reports_only_new_attempts` (ign); `::a_job_stream_keeps_the_streaming_cap_and_its_timeout_line`, `::a_guest_that_boots_at_its_deadline_and_passes_on_its_last_attempt_ends_in_an_honest_timeout` (pass) | T1 composed, `integration-tests` | ign(D10 / D7) x4; pass x2 |
@@ -3000,6 +3102,7 @@ Path prefixes: `CP` = `crates/overdrive-control-plane`, `CORE` = `crates/overdri
 | S-53 | D14 item 3 | `WRK/T/a/guest_listener_probe_rows.rs`: `completing_the_declared_set_writes_one_pass_row_with_no_earlier_row`, `an_incomplete_set_writes_no_row_before_the_deadline_then_one_fail_per_interval`, `the_deadline_fail_reason_names_only_the_missing_listeners`, `a_failed_pass_write_is_retried_until_it_lands_without_advancing_the_counters`, `a_failed_fail_write_advances_neither_number`, `no_row_is_written_after_stop_alloc`, `an_undeclared_or_duplicate_report_never_completes_the_set`, `guest_listener_rows_keep_the_run_numbering_over_random_schedules` | T1 composed, `SimClock`, default | ign(D14) x8 |
 | S-54 | P1 | `CP/T/a/service_lifecycle_startup_stop_gate.rs::the_startup_stop_gate_takes_its_attempts_threshold_from_the_mechanic` (proptest), `::guest_listeners_stop_at_streak_one_once_the_deadline_elapsed` (ign); `::dial_mechanics_stop_only_at_max_attempts` (pass) | T1 pure / hydrated, default | ign(D14 P1) x2; pass |
 | S-55 | PR-4 | `CORE/T/a/declared_listeners_tcp_view.rs::the_tcp_view_is_the_tcp_filter_of_the_declared_listeners_in_declaration_order`, `::a_udp_only_declaration_has_no_tcp_ports_and_a_mixed_one_keeps_tcp_order`; `WRK/tests/integration/inbound_rules_only_for_tcp_declared_listeners.rs::a_udp_declared_listener_gets_no_inbound_capture_and_a_tcp_one_does` | T1 proptest; integration (nft, metal) | ign(PR-4) x3 |
+| S-56 | D6, DG-12 | not yet authored (added by the DG-12 ruling, 2026-11-05) | T1 pure proptest, default | to author |
 | D13 item 2 | LISTEN wire form (G-10 "wire parse") | `CORE/T/a/beacon_listen_wire_form.rs::listen_round_trips_for_every_protocol_and_port`, `::listen_with_an_out_of_range_port_is_a_typed_error`, `::malformed_listen_lines_are_rejected_with_a_typed_error` | T1 pure proptest, default | ign(D13) x3 |
 
 Error and boundary tests are above 40 % in every area (ended ids, lost and failed writes, restarts, races, deferrals, same-key bursts, failed reads, undeclared reports).
@@ -3021,7 +3124,7 @@ Error and boundary tests are above 40 % in every area (ended ids, lost and faile
 | 11 G-7 | D10 | S-34, S-35, S-36 |
 | 12 G-8 | D11 | S-39, S-40, S-41, S-42 |
 | 13 G-9 | D12 | S-46, S-47, S-43, S-30 |
-| 14 G-10 | D13 to D15 | S-50 to S-53 (host half), the `guest_report_host` driver, the LISTEN wire form; items (8) ring-drop composed run, (9) init's own binds, (10) loopback and v4-mapped binds are not authored (DG-8) |
+| 14 G-10 | D13 to D15 | S-50 to S-53 (host half), the `guest_report_host` driver, the LISTEN wire form; items (8) ring-drop composed run, (9) init's own binds, (10) loopback and v4-mapped binds are not yet authored; DG-8 (ruled 2026-11-05) pins (8) as a seeded composed run with the omitted `LISTEN` line on `SimBeaconIo`, and (9) and (10) as Tier-3 DELIVER obligations |
 | 15 D17 | none | S-48 |
 
 ## Wave: DISTILL / [REF] Conformance drivers
@@ -3071,7 +3174,7 @@ Not scaffolded: `ServiceAllocFact.startup_attempts_required` (S-54 drives hydrat
 | `integration-tests` | `CP/tests/acceptance/service_stream_*.rs` (use the convergence-tick entry), `CP/src/**` composed modules (`liveness_gate_composed.rs`, `convergence_loop_wake.rs`) | composed streams, liveness, wake |
 | Conformance (`integration-tests`) | `CP/src/worker/quint_*.rs`, `CP/src/reconciler_runtime/quint_*.rs`, `CP/src/quint_stream_conformance/` | six `quint-connect` drivers; they need crate-private constructors and ITF helpers, so they sit beside their owners (precedent `guest_network/quint_cid_lease.rs`) |
 | Integration, real infrastructure | `WRK/tests/integration/inbound_rules_only_for_tcp_declared_listeners.rs` (nft); `CLI/tests/integration/deploy_stream_request_timeout.rs` (real TLS socket, paused clock) | host effects Sim cannot observe |
-| Tier 3 real boot | not authored | G-10 items 9 and 10 and the guest half of `guest_report` (DG-8); V34 to V36 and V42 spikes remain the evidence |
+| Tier 3 real boot | not authored by DISTILL; DELIVER obligation of D13 and D14 (DG-8, ruled 2026-11-05) | G-10 items 9 and 10 and the guest half of `guest_report`; V34 to V36 and V42 spikes remain the evidence until then |
 
 Every cargo, nextest, quint and lint command ran through `cargo xtask metal run --`. No test spawns the `overdrive` binary.
 
@@ -3103,7 +3206,25 @@ Every cargo, nextest, quint and lint command ran through `cargo xtask metal run 
 
 ## Wave: DISTILL / [REF] Design gaps routed to DESIGN
 
-**DISTILL is NOT complete until DG-1 to DG-12 are ruled on.** Each is a shape or model fact the design does not pin; DISTILL did not improvise (CLAUDE.md "Implement to the design"). Detail and file references: `distill/upstream-issues.md`.
+**All twelve gaps (DG-1 to DG-12) and the minor items were ruled on 2026-11-05** ("proceed with recommendations"); the approval is recorded in § Approval record. Each gap was a shape or model fact the design did not pin; DISTILL did not improvise (CLAUDE.md "Implement to the design"). DISTILL now applies the rulings: it authors S-56, the composed leg of S-32 and the G-10 (8) run, and aligns the specs, drivers and scaffolds with the pins below. Detail and file references: `distill/upstream-issues.md`.
+
+| ID | Ruling (2026-11-05) | Recorded in |
+|---|---|---|
+| DG-1 | `ra_conf` at `CEIL = 5`; give-up runs for five restarts; the driver asserts spec `CEIL` equals `RESTART_BACKOFF_CEILING`; no seam | § Formal protocol model, "Conformance abstractions" |
+| DG-2 | The start outcome is a nondeterministic parameter of `Deploy` and `WLRestart`; no `pending` row, no `StartOk` or `StartRejected`; rejected-start run kept; `SimDriver` start-failure flag is test support | same |
+| DG-3 | `committed` compared only while `Running`; model-only after `Crash` | § Pinned conformance projection |
+| DG-4 | The compared state is the closing `AllocStatusRow` via `alloc_status_row`; the yielded line is an input and oracle | same |
+| DG-5 | Ordered channel; `Deliver` oldest-first and disabled while `lagged`; `Lag` abstraction stated; `StableHappens` disabled after `OperatorStop` | § Formal protocol model, "Conformance abstractions" |
+| DG-6 | `ReportedListeners`: `Default`, `FromIterator<Listener>`, `is_empty`; `GuestListenerBoard::new() -> Self`; DELIVER shares one board | D13 item 10, § Interface changes (D13 to D16) |
+| DG-7 | `progress_deadline` last in `build_service_stream`; server deadline second in `submit_workload_streaming`; `LastAttemptWire` in `overdrive_control_plane::streaming` | § D10 interface changes |
+| DG-8 | (9) and (10) Tier-3 DELIVER obligations observed through the startup probe row; (8) seeded composed run with the omitted `LISTEN` line on `SimBeaconIo` | Gate G-10 |
+| DG-9 | S-32 composed leg required (`quint_cid_lease` composition); S-48 (b) waived, carried by the mutation gate; S-48 (e) waived | S-32, S-48 |
+| DG-10 | `tokio` `test-util` approved; S-36 behind `integration-tests` with a litmus proof | S-36 |
+| DG-11 | Both formatters take `&[Listener]`; no wire field | D14 item 4 |
+| DG-12 | Every `Failed` or `Terminated` fact joins `terminal_announced`; new obligation S-56 | D6 item 1, S-56 |
+| Minor | `BeaconParseError::MalformedListen { raw, detail }`; `Idle` is a read-only `reported(alloc)` call; D16 historical fixtures land with the version bump (DELIVER); the per-consumer board is fixed by DG-6 | § Interface changes (D13 to D16) |
+
+The gaps as DISTILL routed them:
 
 | ID | Gap | Options |
 |---|---|---|

@@ -83,7 +83,7 @@ State 5: <pd_bugFixedCap_progress_deadline_Fire line 256, col 3 to line 287, col
      closes |-> 1,
      verdict |-> FALSE ] >>
 
-State 6: <pd_bugFixedCap_progress_deadline_StableHappens line 351, col 3 to line 364, col 54 of module pd_bugFixedCap>
+State 6: <pd_bugFixedCap_progress_deadline_StableHappens line 351, col 3 to line 365, col 54 of module pd_bugFixedCap>
 /\ pd_bugFixedCap_progress_deadline_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ pd_bugFixedCap_progress_deadline_w = [ sd |-> 12,
   now |-> 9,

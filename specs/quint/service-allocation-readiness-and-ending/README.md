@@ -42,8 +42,13 @@ design names, because the one interplay (the deadline arms only when the read fo
 by the D11 runs.
 
 `restart_authority`: the ceiling is the module parameter `CEIL`. The checks run on `ra_ok` (CEIL = 1, two attempts: the
-restart, the give-up and the successor are all reached); the named runs run on `ra_conf` (CEIL = 2, three attempts, so a
-restart sits between two different causes). The startup max_attempts is 2, the bound on startup rows per attempt is 3. The
+restart, the give-up and the successor are all reached); the named runs run on `ra_conf` (CEIL = 5 = production
+`RESTART_BACKOFF_CEILING`: restart iff `used < CEIL`, so 5 restarts and 6 attempts, ids 0..5; DG-1). The start outcome
+(DG-2) is a nondeterministic parameter `ok` of the start-producing actions `Deploy(decl, gl, ok)` and `WLRestart(ok)`, applied
+atomically (`ok`: `running` row, supervisor, VM; rejected: `failed_other`, never Running; there is no `pending` row state and no
+`StartOk` / `StartRejected` action). `SLAnnounceTerminal(i)` (DG-12): every allocation `ServiceLifecycle` observes in `Failed`
+or `Terminated` joins `terminal_announced` (`ann`), whatever its `started_at`; `NoStableOverPendingStop`'s disjointness clause
+is therefore stated for `running` rows (a Stable allocation that later ended is both Stable and announced). The startup max_attempts is 2, the bound on startup rows per attempt is 3. The
 dispatch of a stop is awaited inside the reconcile tick (RA-2, as probe-count PC-4), so its landed/failed outcome is decided
 in the step that emits it.
 
@@ -125,6 +130,8 @@ Stable action) were deleted. Assumption SS-6 and the `Restart` guard that encode
 | D11 restartable stop is not a verdict | stream_snapshot | `restartable_stop_recorded_is_not_a_verdict` |
 | D11 superseded attempt | stream_snapshot | `superseded_attempt_terminal_is_not_reported` |
 | D11 lag then relist | stream_snapshot | `lagged_relist_recovers_terminal` |
+| D11 publish after a relist reaches the channel (FIFO) | stream_snapshot | `publish_after_relist_reaches_channel` |
+| DG-12 crashed and start-rejected allocations join `terminal_announced` | restart_authority | `crashed_and_rejected_allocs_join_terminal_announced` |
 | D11 failed read (G-8 failure projection) | stream_snapshot | `failed_read_ends_with_error` |
 | D13 happy path and the drain race: a listen produced just before exit is on the wire before `exit` | guest_report | `listen_then_exit_drains_first` |
 | D13 a dropped declared event leaves the set partial; the wait ends on `exit` | guest_report | `ring_drop_leaves_set_partial` |
@@ -185,6 +192,7 @@ exhaustive.
 | DL-5 | a CLI disconnect persists nothing; a redeploy opens a new stream with a new clock | S-35 (d) |
 | SS-1 | the shim commits a row before it publishes the event for it | V23, S-41 |
 | SS-2 | the stream receives every event published after it subscribed, except those a lagged receiver drops | V21, S-40 |
+| SS-7 | the bus channel is FIFO per receiver (tokio broadcast); `Lag` drops all unseen events whereas tokio resumes at the oldest retained one after `Lagged`: harmless because the relist reads the store and commit precedes publish (SS-1); `Deliver` takes the oldest event only and is disabled while lagged; `Publish` still appends while lagged | V21, S-40 |
 | SS-3 | `current_alloc` selects the current attempt | V25 |
 | SS-4 | the recorded terminal equals the event's terminal | S-41 |
 | SS-5 | the read and the relist are single atomic store scans | S-40 |

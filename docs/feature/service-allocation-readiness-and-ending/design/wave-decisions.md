@@ -49,6 +49,14 @@
   `first_fail_at_deadline_with_no_earlier_row_stops`; `ListenBeforeExit` is kept. ADR-0058 stays
   operative until ADR-0270 is accepted. No ADR text changes: R1 and R2 change the conformance
   projection and the model's runs, not an ADR decision.
+- **DISTILL design gaps ruled 2026-11-05 ("proceed with recommendations"):** DG-1 to DG-12 and
+  DG-M, recorded in the feature delta's § Approval record. One changes a decision: **DG-12**
+  amends D6 (every `Failed` or `Terminated` allocation joins `terminal_announced`; new
+  obligation S-56; ADR-0258 text updated). DG-1, DG-2, DG-3, DG-4 and DG-5 are conformance
+  abstractions of the models and drivers; DG-6, DG-7, DG-11 and DG-M pin shapes
+  (`ReportedListeners` construction, parameter positions, the `&[Listener]` parameter of both
+  mechanic-summary formatters, `BeaconParseError::MalformedListen`); DG-8, DG-9 and DG-10 set
+  evidence lanes and waivers. No other ADR text changes.
 
 ## Decisions
 

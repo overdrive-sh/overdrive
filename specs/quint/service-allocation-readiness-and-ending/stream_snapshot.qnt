@@ -17,7 +17,7 @@
  * kind (stable | giveup | operator_stop | error), src (live | read | err), closeTerm / closeAtt / readCur (the terminal and
  * the attempt that closed it, and the attempt current at the read); closes: verdict lines yielded; readFail.
  * Steps of the stream (D11 item 1): Subscribe, Read (each once, in that order), then wait: Deliver (a channel event), Relist
- * (after Lag). Environment: Commit, Publish, Lag, Restart.
+ * (after Lag; Deliver is disabled while lagged and takes only the oldest event). Environment: Commit, Publish, Lag, Restart.
  *
  * OFF names the rules switched off (hazards): readBeforeSubscribe (D11: the stream reads the recorded verdict and then
  * subscribes).
@@ -31,6 +31,7 @@
  *   SS-4  The recorded verdict's terminal is the terminal the row's event carries (ADR-0037 section 4, S-41's byte-equality
  *         check). Discharged by: S-41.
  *   SS-5  The read and the relist are single atomic store scans (one `alloc_status_rows` call). Discharged by: S-40.
+ *   SS-7  The bus channel is FIFO per receiver and Lag is abstracted as drop-all-unseen (see Lag). Discharged by: V21, S-40.
  *   SS-6  The event for an attempt's terminal is published before the attempt's successor is minted (a fresh-id restart),
  *         so the live path never sees a superseded attempt's publication. Discharged by: V29 (feature-delta R-4).
  *
@@ -61,7 +62,7 @@ module stream_snapshot {
   val BUG_READFIRST: bool = OFF.contains("readBeforeSubscribe")
 
   type Strm = {
-    st: str, phase: str, chan: Set[int], lagged: bool, armed: bool, kind: str, src: str,
+    st: str, phase: str, chan: List[int], lagged: bool, armed: bool, kind: str, src: str,
     closeTerm: str, closeAtt: int, readCur: int, closes: int, readFail: bool, lags: int,
   }
   type World = { cur: int, com: int -> str, pub: int -> int }  // pub: -1 unpublished, else the attempt current (w.cur) when the event was published
@@ -76,7 +77,7 @@ module stream_snapshot {
 
   action init = all {
     w' = { cur: 0, com: ATTS.mapBy(a => "none"), pub: ATTS.mapBy(a => -1) },
-    s' = { st: "open", phase: "unsub", chan: Set(), lagged: false, armed: false, kind: "", src: "",
+    s' = { st: "open", phase: "unsub", chan: List(), lagged: false, armed: false, kind: "", src: "",
            closeTerm: "", closeAtt: -1, readCur: -1, closes: 0, readFail: false, lags: 0 },
     conf_step' = variant("init", ()),
   }
@@ -118,28 +119,33 @@ module stream_snapshot {
   action Publish(a: int): bool = all {
     w.com.get(a) != "none", w.pub.get(a) < 0,
     w' = { ...w, pub: w.pub.set(a, w.cur) },
-    s' = if (s.st == "open" and (s.phase == "sub" or s.phase == "rd")) { ...s, chan: s.chan.union(Set(a)) } else s,
+    s' = if (s.st == "open" and (s.phase == "sub" or s.phase == "rd")) { ...s, chan: s.chan.append(a) } else s,
     conf_step' = if (REC) variant("Publish", { a: a }) else conf_step,
   }
 
-  // the stream consumes a channel event (after its read): a projecting terminal closes it, a restartable stop closes nothing
+  // the stream consumes the OLDEST channel event (after its read; the broadcast channel is FIFO per receiver; disabled while
+  // lagged: the relist comes first): a projecting terminal closes it, a restartable stop closes nothing
   action Deliver(a: int): bool = {
     val t = w.com.get(a)
     val v = proj(t)
     all {
-      s.st == "open", s.phase == "rd", s.chan.contains(a),
-      s' = if (v != "") { ...s, chan: s.chan.exclude(Set(a)), st: "closed", kind: v, src: "live", closeTerm: t,
+      s.st == "open", s.phase == "rd", not(s.lagged), s.chan.length() > 0, s.chan[0] == a,
+      s' = if (v != "") { ...s, chan: s.chan.tail(), st: "closed", kind: v, src: "live", closeTerm: t,
                           closeAtt: a, closes: s.closes + 1 }
-           else { ...s, chan: s.chan.exclude(Set(a)) },
+           else { ...s, chan: s.chan.tail() },
       w' = w,
       conf_step' = if (REC) variant("Deliver", { a: a }) else conf_step,
     }
   }
 
-  // the receiver lags: unseen events are dropped, a relist is due (bounded: two lags)
+  // the receiver lags: the model drops ALL unseen events and a relist is due (bounded: two lags). Abstraction (SS-7): tokio's
+  // broadcast receiver, after RecvError::Lagged, resumes at the oldest event still retained; the model drops every unseen
+  // one. The difference is harmless: the relist reads the store, commit precedes publish (SS-1), so any retained
+  // event's terminal is already in the relisted verdict, and a retained event delivered later only re-reads a terminal that
+  // the store already showed. Publish keeps appending while lagged.
   action Lag = all {
-    s.st == "open", s.phase == "rd", s.chan != Set(), s.lags < 2,
-    s' = { ...s, chan: Set(), lagged: true, lags: s.lags + 1 },
+    s.st == "open", s.phase == "rd", s.chan.length() > 0, s.lags < 2,
+    s' = { ...s, chan: List(), lagged: true, lags: s.lags + 1 },
     w' = w,
     conf_step' = if (REC) variant("Lag", ()) else conf_step,
   }
@@ -201,7 +207,7 @@ module stream_snapshot {
   // stream closes as stable at once, with no deadline armed
   run redeploy_unchanged_of_stable_ends_stable = init
     .then(Commit(0, "stable")).then(Publish(0)).then(Subscribe)
-    .expect(s.chan == Set())
+    .expect(s.chan == List())
     .then(Read(true))
     .expect(s.kind == "stable" and s.src == "read" and not(s.armed) and s.closes == 1 and Safety)
 
@@ -209,7 +215,7 @@ module stream_snapshot {
   // in the channel and is not delivered to a closed stream; the stream closed exactly once
   run terminal_between_subscribe_and_read_is_not_lost = init
     .then(Subscribe).then(Commit(0, "giveup")).then(Publish(0))
-    .expect(s.chan == Set(0))
+    .expect(s.chan == List(0))
     .then(Read(true))
     .expect(s.kind == "giveup" and s.src == "read" and s.closes == 1 and Safety)
     .then(Idle).expect(s.closes == 1 and not(s.armed) and Safety)
@@ -230,9 +236,21 @@ module stream_snapshot {
   run lagged_relist_recovers_terminal = init
     .then(Subscribe).then(Read(true))
     .then(Commit(0, "stable")).then(Publish(0)).then(Lag)
-    .expect(s.lagged and s.chan == Set() and s.st == "open")
+    .expect(s.lagged and s.chan == List() and s.st == "open")
     .then(Relist(true))
     .expect(s.kind == "stable" and s.src == "read" and s.closes == 1 and Safety)
+
+  // an event published after a relist that found no verdict reaches the channel and is delivered (FIFO)
+  run publish_after_relist_reaches_channel = init
+    .then(Subscribe).then(Read(true))
+    .then(Commit(0, "startup_stop")).then(Publish(0)).then(Lag)
+    .expect(s.lagged and s.chan == List())
+    .then(Restart).then(Commit(1, "liveness_stop")).then(Publish(1))
+    .expect(s.chan == List(1) and s.lagged)
+    .then(Relist(true))
+    .expect(s.st == "open" and not(s.lagged) and s.chan == List(1))
+    .then(Deliver(1))
+    .expect(s.st == "open" and s.chan == List() and s.closes == 0 and Safety)
 
   // a failed read ends the stream with an error, neither waiting nor timing out
   run failed_read_ends_with_error = init

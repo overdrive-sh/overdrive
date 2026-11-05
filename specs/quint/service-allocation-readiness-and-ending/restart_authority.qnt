@@ -9,10 +9,11 @@
  * One workload of kind Service; attempts 0..CEIL, each a fresh allocation id whose row persists (ADR-0105). The restart
  * ceiling is the module parameter CEIL (restarts allowed before the give-up). `decl` is set by the first action, Deploy:
  * the Service declares a startup probe (decl) or opts out (no startup probe; its first Running is its Stable, ADR-0058).
+ * DG-2: Deploy and WLRestart take the start outcome `ok` and apply it atomically (no pending row, no separate start action).
  * The backoff between a terminal row and its restart is abstracted away (any time later).
  *
  * Per attempt (record Att):
- *   row      none | pending | running | failed_crash (Failed, WorkloadCrashedImmediately | VmOutOfMemory: the two reasons the exit
+ *   row      none | running | failed_crash (Failed, WorkloadCrashedImmediately | VmOutOfMemory: the two reasons the exit
  *            observer writes for a guest that ended on its own, B3 / ADR-0258) | failed_other (Failed, any other reason: a
  *            start rejection, a fail-closed supersession of a Running row such as MtlsInterceptInstallFailed,
  *            WorkloadNetnsProvisionFailed or DriverInternalError; these are not guest crashes and are outside the crash class) | t_startup (Terminated, Stopped StartupProbe)
@@ -36,8 +37,8 @@
  * rules: no Fail row before the deadline (the producer), and the stop gate threshold sstreak >= 1 instead of MAXA.
  * Workload: cur (current attempt), used (restart budget consumed), done (given up).
  *
- * Actors. Environment: Deploy, StartOk, StartRejected, Crash, CleanExit, OperatorStop, StartupRow, Deadline.
- * ServiceLifecycle: SLStable, SLStartupStop (the dispatch of the stop is awaited inside the reconcile tick, so its
+ * Actors. Environment: Deploy, Crash, CleanExit, OperatorStop, StartupRow, Deadline.
+ * ServiceLifecycle: SLAnnounceTerminal (DG-12: any Failed / Terminated row joins ann), SLStable, SLStartupStop (the dispatch of the stop is awaited inside the reconcile tick, so its
  * stage (landed | pre_hook | row_write) is decided in the same step, as in probe-count PC-4), SLLivenessStop. WorkloadLifecycle: WLRestart,
  * WLGiveUp (the only author of a failure claim).
  *
@@ -82,9 +83,7 @@
 module restart_authority_conf {
   type ConfStep =
     | init
-    | Deploy({ decl: bool, gl: bool })
-    | StartOk({ i: int })
-    | StartRejected({ i: int })
+    | Deploy({ decl: bool, gl: bool, ok: bool })
     | Crash({ i: int })
     | CleanExit({ i: int })
     | OperatorStop({ i: int })
@@ -95,7 +94,8 @@ module restart_authority_conf {
     | SLLivenessStop({ i: int, stage: str })
     | SLFinalizeCrash({ i: int })
     | SLFinalizeStartup({ i: int })
-    | WLRestart
+    | SLAnnounceTerminal({ i: int })
+    | WLRestart({ ok: bool })
     | WLGiveUp
     | Idle
 }
@@ -159,29 +159,19 @@ module restart_authority {
     else "backoff_exhausted"
 
   // ---------------------------------------------------------------- environment
-  action Deploy(d: bool, gd: bool): bool = all {
+  action Deploy(d: bool, gd: bool, ok: bool): bool = all {
     not(deployed), gd implies d, GLFREE or not(gd),
     deployed' = true, decl' = d, gl' = gd,
-    at' = at.set(0, { ...at.get(0), row: "pending" }),
+    at' = at.set(0, started(at.get(0), ok)),
     cur' = cur, used' = used, done' = done, g' = g,
-    conf_step' = if (REC) variant("Deploy", { decl: d, gl: gd }) else conf_step,
+    conf_step' = if (REC) variant("Deploy", { decl: d, gl: gd, ok: ok }) else conf_step,
   }
 
-  // the shim started the allocation: Running row, supervisor registered, VM live
-  action StartOk(i: int): bool = all {
-    at.get(i).row == "pending",
-    at' = at.set(i, { ...at.get(i), row: "running", sup: true, vm: true }),
-    decl' = decl, gl' = gl, cur' = cur, used' = used, done' = done, deployed' = deployed, g' = g,
-    conf_step' = if (REC) variant("StartOk", { i: i }) else conf_step,
-  }
-
-  // the shim could not start it (start rejection, fail-closed supersession): a Failed row that never reached Running
-  action StartRejected(i: int): bool = all {
-    at.get(i).row == "pending",
-    at' = at.set(i, { ...at.get(i), row: "failed_other" }),
-    decl' = decl, gl' = gl, cur' = cur, used' = used, done' = done, deployed' = deployed, g' = g,
-    conf_step' = if (REC) variant("StartRejected", { i: i }) else conf_step,
-  }
+  // DG-2: the start outcome is applied atomically by the start-producing action (the shim's start is awaited inside the
+  // tick): ok writes the Running row with the supervisor registered and the VM live; rejected (DriverError::StartRejected, a
+  // fail-closed supersession) writes a Failed row with a non-crash reason that never reached Running (started_at: None)
+  pure def started(a: Att, ok: bool): Att =
+    if (ok) { ...a, row: "running", sup: true, vm: true } else { ...a, row: "failed_other" }
 
   // the guest crashes (the exit observer writes the Failed row; the D1 hook has stopped the probes)
   action Crash(i: int): bool = all {
@@ -298,6 +288,18 @@ module restart_authority {
     }
   }
 
+  // DG-12: every allocation ServiceLifecycle observes in Failed or Terminated joins terminal_announced, whatever its
+  // started_at (a started-then-crashed allocation as well as a pre-Running failure)
+  action SLAnnounceTerminal(i: int): bool = {
+    val a = at.get(i)
+    all {
+      a.row != "none", a.row != "running", not(a.ann),
+      at' = at.set(i, { ...a, ann: true }),
+      deployed' = deployed, decl' = decl, gl' = gl, cur' = cur, used' = used, done' = done, g' = g,
+      conf_step' = if (REC) variant("SLAnnounceTerminal", { i: i }) else conf_step,
+    }
+  }
+
   // HAZARD D6: the removed early-exit branch
   action SLFinalizeCrash(i: int): bool = {
     val a = at.get(i)
@@ -329,12 +331,12 @@ module restart_authority {
 
   // restart every terminal row except the intentional-stop set, below the ceiling, consuming budget; the successor is a
   // fresh id and its predecessor's row is untouched
-  action WLRestart = all {
+  action WLRestart(ok: bool): bool = all {
     restartEnabled,
     cur' = cur + 1, used' = used + 1,
-    at' = at.set(cur + 1, { ...at.get(cur + 1), row: "pending" }),
+    at' = at.set(cur + 1, started(at.get(cur + 1), ok)),
     done' = done, deployed' = deployed, decl' = decl, gl' = gl, g' = g,
-    conf_step' = if (REC) variant("WLRestart", ()) else conf_step,
+    conf_step' = if (REC) variant("WLRestart", { ok: ok }) else conf_step,
   }
 
   // the give-up at the ceiling: the only author of a failure claim
@@ -355,12 +357,13 @@ module restart_authority {
     nondet i = IDS.oneOf()
     nondet d = Set(true, false).oneOf()
     nondet gd = Set(true, false).oneOf()
+    nondet ok = Set(true, false).oneOf()
     nondet res = Set("fail", "pass").oneOf()
     nondet stage = Set("landed", "pre_hook", "row_write").oneOf()
     any {
-      Deploy(d, gd), StartOk(i), StartRejected(i), Crash(i), CleanExit(i), OperatorStop(i), StartupRow(i, res), Deadline(i),
-      SLStable(i), SLStartupStop(i, stage), SLLivenessStop(i, stage), SLFinalizeCrash(i), SLFinalizeStartup(i),
-      WLRestart, WLGiveUp, Idle,
+      Deploy(d, gd, ok), Crash(i), CleanExit(i), OperatorStop(i), StartupRow(i, res), Deadline(i),
+      SLStable(i), SLStartupStop(i, stage), SLLivenessStop(i, stage), SLFinalizeCrash(i), SLFinalizeStartup(i), SLAnnounceTerminal(i),
+      WLRestart(ok), WLGiveUp, Idle,
     }
   }
 
@@ -379,7 +382,7 @@ module restart_authority {
   // Pass, and the two sets stay disjoint
   val NoStableOverPendingStop: bool = and {
     not(g.stableOverAnn),
-    IDS.forall(i => not(at.get(i).ann and at.get(i).stable)),
+    IDS.forall(i => (at.get(i).row == "running") implies not(at.get(i).ann and at.get(i).stable)),
   }
 
   // B2 NoStrandedStop (ADR-0266): a Running row whose VM slot is not live has a supervisor present, so its next probe row
@@ -391,7 +394,7 @@ module restart_authority {
   }
 
   // ------------------------------------------------------------------ progress (TLC, under fairness)
-  temporal fairWL = and { weakFair(WLRestart, (at, cur, used, done)), weakFair(WLGiveUp, (at, cur, used, done)) }
+  temporal fairWL = and { weakFair(WLRestart(true), (at, cur, used, done)), weakFair(WLGiveUp, (at, cur, used, done)) }
   action stopAny(i: int): bool = any { SLStartupStop(i, "landed"), SLStartupStop(i, "pre_hook"), SLStartupStop(i, "row_write") }
 
   // D5 CrashedAllocEventuallyDecidedByRestartAuthority: a failed allocation is eventually restarted or given up on by
@@ -423,17 +426,17 @@ module restart_authority {
   // D5: the streak reached the maximum, the allocation crashed, then the deadline passed: no startup verdict;
   // WorkloadLifecycle restarts
   run crash_after_attempts_exhausted_then_deadline_passes = init
-    .then(Deploy(true, false)).then(StartOk(0))
+    .then(Deploy(true, false, true))
     .then(StartupRow(0, "fail")).then(StartupRow(0, "fail"))
     .expect(at.get(0).sstreak == MAXA and at.get(0).sup)
     .then(Crash(0)).then(Deadline(0))
     .expect(at.get(0).sstreak == MAXA and at.get(0).dl and at.get(0).row == "failed_crash"
             and not(startupStopEnabled(at.get(0))) and Safety)
-    .then(WLRestart).expect(cur == 1 and used == 1 and at.get(0).row == "failed_crash" and at.get(0).claim == "" and Safety)
+    .then(WLRestart(true)).expect(cur == 1 and used == 1 and at.get(0).row == "failed_crash" and at.get(0).claim == "" and Safety)
 
   // D5: the live path still produces the startup verdict (now the stop, D7)
   run running_alloc_with_exhausted_probes_past_deadline_is_stopped = init
-    .then(Deploy(true, false)).then(StartOk(0))
+    .then(Deploy(true, false, true))
     .then(StartupRow(0, "fail")).then(StartupRow(0, "fail")).then(Deadline(0))
     .expect(startupStopEnabled(at.get(0)))
     .then(SLStartupStop(0, "landed"))
@@ -442,69 +445,75 @@ module restart_authority {
   // D6: a declared probe, no pass, every attempt crashes: restarts to the ceiling, then give-up early_exit; no
   // ServiceLifecycle claim on any Failed row
   run pre_startup_crash_loop_gives_up_early_exit = init
-    .then(Deploy(true, false)).then(StartOk(0)).then(Crash(0)).then(WLRestart)
-    .then(StartOk(1)).then(Crash(1)).then(WLRestart)
-    .then(StartOk(2)).then(Crash(2))
-    .expect(cur == 2 and used == 2 and not(done) and giveUpEnabled and not(restartEnabled) and Safety)
+    .then(Deploy(true, false, true))
+    .then(Crash(0)).then(WLRestart(true)).then(Crash(1)).then(WLRestart(true)).then(Crash(2)).then(WLRestart(true)).then(Crash(3)).then(WLRestart(true)).then(Crash(4)).then(WLRestart(true))
+    .then(Crash(5))
+    .expect(cur == 5 and used == 5 and not(done) and giveUpEnabled and not(restartEnabled) and Safety)
     .then(WLGiveUp)
-    .expect(at.get(2).claim == "early_exit" and at.get(2).author == "workload_lifecycle" and done
-            and at.get(0).claim == "" and at.get(1).claim == "" and at.get(0).row == "failed_crash" and Safety)
+    .expect(at.get(5).claim == "early_exit" and at.get(5).author == "workload_lifecycle" and done
+            and at.get(0).claim == "" and at.get(4).claim == "" and at.get(0).row == "failed_crash" and Safety)
 
   // D6: the first attempt crashes before a pass, the successor passes and is Stable; the predecessor row stays Failed with
   // its crash and no terminal is written
   run pre_startup_crash_then_successor_passes = init
-    .then(Deploy(true, false)).then(StartOk(0)).then(Crash(0)).then(WLRestart)
-    .then(StartOk(1)).then(StartupRow(1, "pass")).then(SLStable(1))
+    .then(Deploy(true, false, true)).then(Crash(0)).then(WLRestart(true))
+    .then(StartupRow(1, "pass")).then(SLStable(1))
     .expect(at.get(1).stable and at.get(0).row == "failed_crash" and at.get(0).crashed and at.get(0).claim == ""
             and at.get(1).claim == "" and not(done) and Safety)
 
   // D6: a crash after a startup pass gives up backoff_exhausted
   run crash_after_startup_pass_gives_up_backoff_exhausted = init
-    .then(Deploy(true, false)).then(StartOk(0)).then(StartupRow(0, "pass")).then(Crash(0)).then(WLRestart)
-    .then(StartOk(1)).then(StartupRow(1, "pass")).then(Crash(1)).then(WLRestart)
-    .then(StartOk(2)).then(StartupRow(2, "pass")).then(Crash(2)).then(WLGiveUp)
-    .expect(at.get(2).claim == "backoff_exhausted" and Safety)
+    .then(Deploy(true, false, true))
+    .then(StartupRow(0, "pass")).then(Crash(0)).then(WLRestart(true)).then(StartupRow(1, "pass")).then(Crash(1)).then(WLRestart(true)).then(StartupRow(2, "pass")).then(Crash(2)).then(WLRestart(true)).then(StartupRow(3, "pass")).then(Crash(3)).then(WLRestart(true)).then(StartupRow(4, "pass")).then(Crash(4)).then(WLRestart(true))
+    .then(StartupRow(5, "pass")).then(Crash(5)).then(WLGiveUp)
+    .expect(at.get(5).claim == "backoff_exhausted" and used == 5 and Safety)
 
   // D6: an opt-out Service (no startup probe) crash loop gives up backoff_exhausted
   run opt_out_service_crash_loop_gives_up_backoff_exhausted = init
-    .then(Deploy(false, false)).then(StartOk(0)).then(SLStable(0)).then(Crash(0)).then(WLRestart)
-    .then(StartOk(1)).then(Crash(1)).then(WLRestart)
-    .then(StartOk(2)).then(Crash(2)).then(WLGiveUp)
-    .expect(at.get(2).claim == "backoff_exhausted" and at.get(0).stable and Safety)
+    .then(Deploy(false, false, true)).then(SLStable(0))
+    .then(Crash(0)).then(WLRestart(true)).then(Crash(1)).then(WLRestart(true)).then(Crash(2)).then(WLRestart(true)).then(Crash(3)).then(WLRestart(true)).then(Crash(4)).then(WLRestart(true))
+    .then(Crash(5)).then(WLGiveUp)
+    .expect(at.get(5).claim == "backoff_exhausted" and at.get(0).stable and Safety)
 
   // D6: a Failed row from a start rejection or fail-closed supersession is never classified
   run non_crash_failed_row_gives_up_backoff_exhausted = init
-    .then(Deploy(true, false)).then(StartOk(0)).then(Crash(0)).then(WLRestart)
-    .then(StartOk(1)).then(Crash(1)).then(WLRestart)
-    .then(StartRejected(2)).then(WLGiveUp)
-    .expect(at.get(2).row == "failed_other" and at.get(2).claim == "backoff_exhausted" and Safety)
+    .then(Deploy(true, false, true))
+    .then(Crash(0)).then(WLRestart(true)).then(Crash(1)).then(WLRestart(true)).then(Crash(2)).then(WLRestart(true)).then(Crash(3)).then(WLRestart(true))
+    .then(Crash(4)).then(WLRestart(false))
+    .expect(cur == 5 and used == 5 and at.get(5).row == "failed_other" and not(at.get(5).vm) and not(at.get(5).sup) and giveUpEnabled)
+    .then(WLGiveUp)
+    .expect(at.get(5).row == "failed_other" and at.get(5).claim == "backoff_exhausted" and Safety)
 
   // D6: a liveness-kill loop gives up liveness_probe_failed (precedence unchanged)
   run liveness_kill_loop_gives_up_liveness_probe_failed = init
-    .then(Deploy(true, false)).then(StartOk(0)).then(StartupRow(0, "pass")).then(SLStable(0)).then(SLLivenessStop(0, "landed")).then(WLRestart)
-    .then(StartOk(1)).then(StartupRow(1, "pass")).then(SLStable(1)).then(SLLivenessStop(1, "landed")).then(WLRestart)
-    .then(StartOk(2)).then(StartupRow(2, "pass")).then(SLStable(2)).then(SLLivenessStop(2, "landed")).then(WLGiveUp)
-    .expect(at.get(2).claim == "liveness_probe_failed" and Safety)
+    .then(Deploy(true, false, true))
+    .then(StartupRow(0, "pass")).then(SLStable(0)).then(SLLivenessStop(0, "landed")).then(WLRestart(true)).then(StartupRow(1, "pass")).then(SLStable(1)).then(SLLivenessStop(1, "landed")).then(WLRestart(true)).then(StartupRow(2, "pass")).then(SLStable(2)).then(SLLivenessStop(2, "landed")).then(WLRestart(true)).then(StartupRow(3, "pass")).then(SLStable(3)).then(SLLivenessStop(3, "landed")).then(WLRestart(true)).then(StartupRow(4, "pass")).then(SLStable(4)).then(SLLivenessStop(4, "landed")).then(WLRestart(true))
+    .then(StartupRow(5, "pass")).then(SLStable(5)).then(SLLivenessStop(5, "landed")).then(WLGiveUp)
+    .expect(at.get(5).claim == "liveness_probe_failed" and Safety)
 
   // D7: the instance stays alive and never passes: a startup stop on every attempt, restarts to the ceiling, then give-up
   // startup_probe_failed; no failure claim on any row before it
   run startup_never_passes_loop_gives_up_startup_probe_failed = init
-    .then(Deploy(true, false)).then(StartOk(0))
+    .then(Deploy(true, false, true))
     .then(StartupRow(0, "fail")).then(StartupRow(0, "fail")).then(Deadline(0)).then(SLStartupStop(0, "landed"))
     .expect(at.get(0).claim == "" and at.get(0).row == "t_startup" and Safety)
-    .then(WLRestart).then(StartOk(1))
-    .then(StartupRow(1, "fail")).then(StartupRow(1, "fail")).then(Deadline(1)).then(SLStartupStop(1, "landed"))
+    .then(WLRestart(true)).then(StartupRow(1, "fail")).then(StartupRow(1, "fail")).then(Deadline(1)).then(SLStartupStop(1, "landed"))
     .expect(at.get(1).claim == "" and not(done) and Safety)
-    .then(WLRestart).then(StartOk(2))
-    .then(StartupRow(2, "fail")).then(StartupRow(2, "fail")).then(Deadline(2)).then(SLStartupStop(2, "landed"))
-    .expect(at.get(2).claim == "" and not(done) and giveUpEnabled and Safety)
+    .then(WLRestart(true)).then(StartupRow(2, "fail")).then(StartupRow(2, "fail")).then(Deadline(2)).then(SLStartupStop(2, "landed"))
+    .expect(at.get(2).claim == "" and not(done) and Safety)
+    .then(WLRestart(true)).then(StartupRow(3, "fail")).then(StartupRow(3, "fail")).then(Deadline(3)).then(SLStartupStop(3, "landed"))
+    .expect(at.get(3).claim == "" and not(done) and Safety)
+    .then(WLRestart(true)).then(StartupRow(4, "fail")).then(StartupRow(4, "fail")).then(Deadline(4)).then(SLStartupStop(4, "landed"))
+    .expect(at.get(4).claim == "" and not(done) and Safety)
+    .then(WLRestart(true)).then(StartupRow(5, "fail")).then(StartupRow(5, "fail")).then(Deadline(5)).then(SLStartupStop(5, "landed"))
+    .expect(at.get(5).claim == "" and not(done) and giveUpEnabled and Safety)
     .then(WLGiveUp)
-    .expect(at.get(2).claim == "startup_probe_failed" and at.get(0).claim == "" and at.get(1).claim == "" and done and Safety)
+    .expect(at.get(5).claim == "startup_probe_failed" and at.get(0).claim == "" and at.get(4).claim == "" and done and Safety)
 
   // R-2: the gate reads the LATEST startup row: pass, fail, fail, then the deadline enables the stop although a Pass was
   // recorded earlier
   run pass_then_fails_before_stable_is_stopped = init
-    .then(Deploy(true, false)).then(StartOk(0))
+    .then(Deploy(true, false, true))
     .then(StartupRow(0, "pass")).then(StartupRow(0, "fail")).then(StartupRow(0, "fail")).then(Deadline(0))
     .then(SLStartupStop(0, "landed"))
     .expect(at.get(0).row == "t_startup" and not(at.get(0).stable) and Safety)
@@ -512,34 +521,43 @@ module restart_authority {
   // D7: the first attempt is startup-stopped, the successor passes and is Stable; no startup_probe_failed claim is ever
   // written
   run startup_stop_then_successor_passes_is_stable = init
-    .then(Deploy(true, false)).then(StartOk(0))
-    .then(StartupRow(0, "fail")).then(StartupRow(0, "fail")).then(Deadline(0)).then(SLStartupStop(0, "landed")).then(WLRestart)
-    .then(StartOk(1)).then(StartupRow(1, "pass")).then(SLStable(1))
+    .then(Deploy(true, false, true))
+    .then(StartupRow(0, "fail")).then(StartupRow(0, "fail")).then(Deadline(0)).then(SLStartupStop(0, "landed")).then(WLRestart(true))
+    .then(StartupRow(1, "pass")).then(SLStable(1))
     .expect(at.get(1).stable and at.get(0).row == "t_startup" and at.get(0).claim == "" and at.get(1).claim == ""
             and not(done) and Safety)
 
   // D7: last cause wins at the ceiling: attempt one startup-stopped then a final pre-startup crash gives early_exit; the
   // reverse order gives startup_probe_failed
   run startup_stop_then_crash_names_last_cause = init
-    .then(Deploy(true, false)).then(StartOk(0))
-    .then(StartupRow(0, "fail")).then(StartupRow(0, "fail")).then(Deadline(0)).then(SLStartupStop(0, "landed")).then(WLRestart)
-    .then(StartOk(1)).then(Crash(1)).then(WLRestart)
-    .then(StartOk(2)).then(Crash(2)).then(WLGiveUp)
-    .expect(at.get(2).claim == "early_exit" and Safety)
+    .then(Deploy(true, false, true))
+    .then(StartupRow(0, "fail")).then(StartupRow(0, "fail")).then(Deadline(0)).then(SLStartupStop(0, "landed")).then(WLRestart(true))
+    .then(Crash(1)).then(WLRestart(true)).then(Crash(2)).then(WLRestart(true)).then(Crash(3)).then(WLRestart(true)).then(Crash(4)).then(WLRestart(true))
+    .then(Crash(5)).then(WLGiveUp)
+    .expect(at.get(5).claim == "early_exit" and Safety)
   run crash_then_startup_stop_names_last_cause = init
-    .then(Deploy(true, false)).then(StartOk(0)).then(Crash(0)).then(WLRestart)
-    .then(StartOk(1)).then(Crash(1)).then(WLRestart)
-    .then(StartOk(2))
-    .then(StartupRow(2, "fail")).then(StartupRow(2, "fail")).then(Deadline(2)).then(SLStartupStop(2, "landed")).then(WLGiveUp)
-    .expect(at.get(2).claim == "startup_probe_failed" and Safety)
+    .then(Deploy(true, false, true))
+    .then(Crash(0)).then(WLRestart(true)).then(Crash(1)).then(WLRestart(true)).then(Crash(2)).then(WLRestart(true)).then(Crash(3)).then(WLRestart(true)).then(Crash(4)).then(WLRestart(true))
+    .then(StartupRow(5, "fail")).then(StartupRow(5, "fail")).then(Deadline(5)).then(SLStartupStop(5, "landed")).then(WLGiveUp)
+    .expect(at.get(5).claim == "startup_probe_failed" and Safety)
+
+  // DG-12: every allocation ServiceLifecycle observes in Failed or Terminated joins terminal_announced, whatever its
+  // started_at: a started-then-crashed allocation (it was Stable) and a start-rejected one (never Running)
+  run crashed_and_rejected_allocs_join_terminal_announced = init
+    .then(Deploy(true, false, true)).then(StartupRow(0, "pass")).then(SLStable(0))
+    .expect(not(at.get(0).ann))
+    .then(Crash(0)).then(SLAnnounceTerminal(0))
+    .expect(at.get(0).ann and at.get(0).crashed and at.get(0).stable and NoStableOverPendingStop and Safety)
+    .then(WLRestart(false)).then(SLAnnounceTerminal(1))
+    .expect(at.get(1).row == "failed_other" and at.get(1).ann and not(at.get(1).stable) and NoStableOverPendingStop and Safety)
 
   // D7: a startup-stopped row is restarted; an operator-stopped row beside it is not
   run startup_stop_is_not_intentional_stop = init
-    .then(Deploy(true, false)).then(StartOk(0))
+    .then(Deploy(true, false, true))
     .then(StartupRow(0, "fail")).then(StartupRow(0, "fail")).then(Deadline(0)).then(SLStartupStop(0, "landed"))
     .expect(restartEnabled and Safety)
-    .then(WLRestart).expect(cur == 1 and used == 1)
-    .then(StartOk(1)).then(OperatorStop(1))
+    .then(WLRestart(true)).expect(cur == 1 and used == 1)
+    .then(OperatorStop(1))
     .expect(at.get(1).row == "t_operator" and not(restartEnabled) and not(giveUpEnabled) and Safety)
 
   // D14 item 3 (PR-3): the guest-listener producer (gl) writes no Fail before the deadline: its first Fail row is written at
@@ -547,7 +565,7 @@ module restart_authority {
   // threshold is 1 for gl). D8 for gl: that stop fails before the hook; a second Fail (sstreak 2, sseq 2) is a newer row and
   // re-emits the stop, which lands (sseq 1 then 2). The successor's Pass is the first row of its attempt (no earlier Fail)
   run first_fail_at_deadline_with_no_earlier_row_stops = init
-    .then(Deploy(true, true)).then(StartOk(0))
+    .then(Deploy(true, true, true))
     .expect(not(startupRowEnabled(0, "fail")))
     .then(Deadline(0))
     .expect(at.get(0).srow == "absent" and at.get(0).sseq == 0 and not(startupStopEnabled(at.get(0))) and startupRowEnabled(0, "fail"))
@@ -559,8 +577,8 @@ module restart_authority {
     .expect(at.get(0).sseq == 2 and at.get(0).sstreak == 2 and startupStopEnabled(at.get(0)) and retryDue(0))
     .then(SLStartupStop(0, "landed"))
     .expect(at.get(0).row == "t_startup" and at.get(0).acted == 2 and g.emitCount == 2 and Safety)
-    .then(WLRestart)
-    .then(StartOk(1)).then(StartupRow(1, "pass"))
+    .then(WLRestart(true))
+    .then(StartupRow(1, "pass"))
     .expect(at.get(1).sseq == 1 and at.get(1).srow == "pass" and Safety)
     .then(SLStable(1))
     .expect(at.get(1).stable and at.get(0).claim == "" and not(done) and Safety)
@@ -569,7 +587,7 @@ module restart_authority {
   // deadline passes with no earlier row, the first Fail carries sstreak 1 and does not enable the stop, the second carries
   // MAXA and does
   run explicit_probe_fail_after_deadline_keeps_counted_streak = init
-    .then(Deploy(true, false)).then(StartOk(0)).then(Deadline(0))
+    .then(Deploy(true, false, true)).then(Deadline(0))
     .then(StartupRow(0, "fail"))
     .expect(at.get(0).sseq == 1 and at.get(0).sstreak == 1 and not(startupStopEnabled(at.get(0))) and Safety)
     .then(StartupRow(0, "fail"))
@@ -577,7 +595,7 @@ module restart_authority {
 
   // D8: the stop fails, a new startup row arrives, the second stop is emitted and lands
   run failed_startup_stop_is_retried_on_next_row = init
-    .then(Deploy(true, false)).then(StartOk(0))
+    .then(Deploy(true, false, true))
     .then(StartupRow(0, "fail")).then(StartupRow(0, "fail")).then(Deadline(0))
     .then(SLStartupStop(0, "pre_hook"))
     .expect(at.get(0).row == "running" and at.get(0).acted == 2 and at.get(0).stopped == "failed" and at.get(0).ann
@@ -589,7 +607,7 @@ module restart_authority {
 
   // D8: the stop fails, a Pass row arrives: no further stop; the id reaches Stable and leaves terminal_announced
   run late_pass_after_failed_stop_reaches_stable = init
-    .then(Deploy(true, false)).then(StartOk(0))
+    .then(Deploy(true, false, true))
     .then(StartupRow(0, "fail")).then(StartupRow(0, "fail")).then(Deadline(0))
     .then(SLStartupStop(0, "pre_hook"))
     .then(StartupRow(0, "pass"))
@@ -601,7 +619,7 @@ module restart_authority {
   // stays registered (the hook has not run), the next startup row re-emits the stop and the retry lands. The same for a
   // liveness stop.
   run stop_row_write_failure_is_retried = init
-    .then(Deploy(true, false)).then(StartOk(0))
+    .then(Deploy(true, false, true))
     .then(StartupRow(0, "fail")).then(StartupRow(0, "fail")).then(Deadline(0))
     .then(SLStartupStop(0, "row_write"))
     .expect(at.get(0).row == "running" and not(at.get(0).vm) and at.get(0).sup and at.get(0).stopped == "failed"
@@ -610,7 +628,7 @@ module restart_authority {
     .expect(startupStopEnabled(at.get(0)) and retryDue(0))
     .then(SLStartupStop(0, "landed"))
     .expect(at.get(0).row == "t_startup" and not(at.get(0).vm) and not(at.get(0).sup) and g.emitCount == 2 and Safety)
-    .then(WLRestart).then(StartOk(1)).then(StartupRow(1, "pass")).then(SLStable(1))
+    .then(WLRestart(true)).then(StartupRow(1, "pass")).then(SLStable(1))
     .then(SLLivenessStop(1, "row_write"))
     .expect(at.get(1).row == "running" and not(at.get(1).vm) and at.get(1).sup and at.get(1).stable and NoStrandedStop and Safety)
     .then(SLLivenessStop(1, "landed"))
@@ -620,7 +638,7 @@ module restart_authority {
   // same row is not re-stopped. The model's `acted` is the View field and is not reset by Idle (a reload is a no-op on
   // persisted state); the run pins that nothing but a newer row re-enables the stop.
   run control_plane_restart_keeps_acted_run = init
-    .then(Deploy(true, false)).then(StartOk(0))
+    .then(Deploy(true, false, true))
     .then(StartupRow(0, "fail")).then(StartupRow(0, "fail")).then(Deadline(0))
     .then(SLStartupStop(0, "pre_hook"))
     .then(Idle)
@@ -631,6 +649,6 @@ module restart_authority {
 
 // Main instance for the checks: two attempts (CEIL = 1): the restart, the give-up and a successor are all reached.
 module ra_ok { import restart_authority(CEIL = 1, OFF = Set(), REC = false, GLFREE = false).* from "./restart_authority" }
-// Conformance main: the production-shaped ceiling is larger; three attempts (CEIL = 2) let the named runs show last-cause-
-// wins with a restart between two different causes. Records conf_step; only the named runs are checked on it.
-module ra_conf { import restart_authority(CEIL = 2, OFF = Set(), REC = true, GLFREE = true).* from "./restart_authority" }
+// Conformance main: the production ceiling (RESTART_BACKOFF_CEILING = 5: restart iff attempts < 5, so 5 restarts and six
+// attempts, ids 0..5). Records conf_step; only the named runs are checked on it.
+module ra_conf { import restart_authority(CEIL = 5, OFF = Set(), REC = true, GLFREE = true).* from "./restart_authority" }

@@ -1,81 +1,72 @@
 # Upstream issues — DISTILL to DESIGN
 
-Feature `service-allocation-readiness-and-ending`. These are shapes or model facts the accepted design does not pin. DISTILL did not improvise any of them (CLAUDE.md "Implement to the design"; `.claude/rules/design.md`). **DISTILL is not complete until DG-1 to DG-12 are ruled on.** Delta references are to `../feature-delta.md`; spec files are under `specs/quint/service-allocation-readiness-and-ending/`. Summary table: delta § "Design gaps routed to DESIGN".
+Feature `service-allocation-readiness-and-ending`. These are shapes or model facts the accepted design did not pin. DISTILL did not improvise any of them (CLAUDE.md "Implement to the design"; `.claude/rules/design.md`).
 
-## Gaps that block activation of a conformance run or a composed test
+**All of DG-1 to DG-12 and the minor items were ruled on 2026-11-05** (user: "proceed with recommendations"). The approval is recorded in the feature delta's § Approval record (rows DG-1 to DG-12 and DG-M). Delta references are to `../feature-delta.md`; spec files are under `specs/quint/service-allocation-readiness-and-ending/`. Summary table: delta § "Design gaps routed to DESIGN".
 
-### DG-1 — restart ceiling in the model is not the production ceiling
-`restart_authority.qnt` instance `ra_conf` sets `CEIL = 2`; production `RESTART_BACKOFF_CEILING` is a const of 5 with no pinned seam. Seven give-up runs and the randomized run cannot activate: `WorkloadLifecycle` restarts again at the model's ceiling (`cur: 3`).
-- Concerns: delta § Formal protocol model (`restart_authority`, "Actions map to"); `restart_authority.qnt`, `checks.toml`; driver `crates/overdrive-control-plane/src/reconciler_runtime/quint_restart_authority.rs`.
-- Options: (a) instantiate `ra_conf` at `CEIL = 5` (spec only; larger state space, re-run `cargo xtask quint check`); (b) pin a ceiling seam (new API, needs an ADR-level decision).
+## Gaps that blocked activation of a conformance run or a composed test
 
-### DG-2 — the model's pending row has no production step
-The shim writes `Running` atomically with the awaited start. The model's `pending` row and `StartRejected` therefore have no production counterpart, and `restart_authority_non_crash_failed_row_gives_up_backoff_exhausted` cannot activate.
-- Concerns: `restart_authority.qnt` (`Deploy`, `StartOk`, `StartRejected`); same driver.
-- Options: (a) remove the pending split from the model; (b) pin a start-rejection step on a driving port.
+### DG-1 — restart ceiling in the model is not the production ceiling — RESOLVED
+`ra_conf` set `CEIL = 2`; production `RESTART_BACKOFF_CEILING` is 5 (`workload_lifecycle.rs:34`).
+- **Ruling:** option (a). `ra_conf` is instantiated at `CEIL = 5`; the give-up runs are rewritten to five restarts; the driver asserts that the spec's `CEIL` equals the const (test-only); `ra_ok` is unchanged. No production change and no ceiling seam.
+- **Action for DISTILL:** re-run `cargo xtask quint check` for `restart_authority` after the modeler's edit and re-record evidence.
 
-### DG-8 — three G-10 boundary scenarios are not authored
-Delta § Decisions D13 to D16, Gate G-10: (8) a ring drop leaves the reported set partial (composed run), (9) the guest init's own binds produce zero LISTEN lines, (10) loopback and v4-mapped binds. (8) needs the D7 stop, restart and give-up chain together with the host reader; (9) and (10) need a real-boot fixture workload binding specified addresses and a `GuestListenerBoard` read in the real composition. None is pinned, and no writer seam exists in `overdrive-init` (user ruling).
-- Concerns: `guest_report.qnt` (full module, model check only); V34, V35, V36, V42 spike findings.
-- Options: (a) pin the Tier-3 fixture and the board read in the real composition; (b) record (8) to (10) as spike-evidence obligations with no executable test.
+### DG-2 — the model's pending row has no production step — RESOLVED
+The shim writes `Running` atomically with the awaited start.
+- **Ruling:** option (a). `restart_authority` drops its `pending` row and its `StartOk` and `StartRejected` actions. The start outcome (`ok` or `rejected`) is a nondeterministic parameter of `Deploy` and `WLRestart`, matching the shim (`Running` on success, `Failed` on `DriverError::StartRejected` within the awaited tick, `action_shim/mod.rs:~2433-2459`). The rejected-start named run is kept. The driver scripts the rejection through a runtime-settable `SimDriver` start-failure flag (test support, DISTILL's).
 
-### DG-9 — waivers
-- S-32 restart and give-up leg (`LivenessProbeFailed` after restarts under the shared budget) is not composed: a restart needs `VmDriver::start` over `SimVmm` plus the beacon (the `quint_cid_lease` composition). The pure two-reconciler trajectory test covers the leg; D9 changes only the first row's timing, which `liveness_gate_composed.rs` pins.
-- S-48 (b): there is no await point on a single-threaded sim between the insert and the wake; the design rests it on tokio's permit and mutation targets.
-- S-48 (e): needs a reconciler whose tick blocks in flight; no production reconciler does, so adding one is a test seam.
-- Options: accept the waivers, or pin the composition (S-32) and a seam (S-48 e).
+### DG-8 — three G-10 boundary scenarios were not authored — RESOLVED
+- **Ruling:** (9) init's own binds and (10) loopback and v4-mapped binds are Tier-3 real-boot DELIVER obligations of D13 and D14, observed through production-written state: the fixture declares a port that init itself binds (resp. a workload that binds only a loopback or v4-mapped loopback address), and the startup probe row is `Fail` at the deadline naming that port as unreported. (8) the composed ring drop is a seeded Tier-1 composed run (`VmDriver` over `SimVmm` and a stepped `SimBeaconIo`, the production exit observer and the real reader): the fault is the omitted `LISTEN` line on the existing `SimBeaconIo`, because a ring drop is in-guest and its only host-visible effect is that the line never arrives. The kernel's drop-and-count behaviour stays V37's evidence and the `ring_drop_leaves_set_partial` model run. No writer seam in `overdrive-init`.
+- **Action for DISTILL:** author (8) with the S-32 composition.
+
+### DG-9 — waivers — RESOLVED
+- **Ruling:** the S-32 restart and give-up leg is required and is composed with the `quint_cid_lease` composition (`VmDriver` over `SimVmm` plus the stepped beacon). S-48 (b) is waived and carried by the mutation gate: its evidence is the gate killing the D17 signal-position mutants (moved before the insert, dropped, stored permit). If the gate cannot generate or kill one of them, (b) has no evidence. S-48 (e) is waived: it needs a reconciler whose tick blocks in flight, which would be a test seam.
 
 ## Gaps in model fidelity or projection
 
-### DG-3 — `committed` in `liveness_gate`
-The model keeps `committed` monotone across `Crash`; the pinned accessor reads the current `AllocStatusRow`, which the exit observer's `Failed` row replaces. The driver compares `committed` only while the row is `Running` (the spec's `rw`).
-- Concerns: delta § Formal protocol model "Pinned conformance projection"; `liveness_gate.qnt`; driver `quint_liveness_gate.rs`.
-- Options: state the restriction in the projection table, or change the model to forget `committed` on `Crash`.
+### DG-3 — `committed` in `liveness_gate` — RESOLVED
+- **Ruling:** the projection table states that `committed` is compared only while the row is `Running`; after `Crash` it is model-only. The model is unchanged.
 
-### DG-4 — `stream_snapshot` projection has no owner object
-The pinned projection is the yield of the free function `build_service_stream`. `cargo xtask conformance-lint` reports `projection-without-owner-accessor` at `crates/overdrive-control-plane/src/quint_stream_conformance/stream_snapshot.rs:384` (the one open lint violation).
-- Concerns: delta § Formal protocol model, `stream_snapshot` rows; `.claude/rules/testing.md` "Per-driver checklist" items 4 and 5; `.claude/rules/design.md` "Pin the observable projection".
-- Options: (a) rule the lint exemption shape for stream-yield projections; (b) pin an owner accessor (for example an `alloc_status_row` cross-check of the closing row).
+### DG-4 — `stream_snapshot` projection has no owner object — RESOLVED
+`conformance-lint` reported `projection-without-owner-accessor` at `stream_snapshot.rs:384`.
+- **Ruling:** option (b). The compared state is the closing `AllocStatusRow` read through the existing `ObservationStore::alloc_status_row`. The line `build_service_stream` yields is an input and an oracle, not a projected variable. No lint exemption.
 
-### DG-5 — model guards in `stream_snapshot` and `progress_deadline`
-`stream_snapshot.qnt`: `Deliver(a)` may take any channel member while the bus is FIFO (the driver fails with a typed `ModelAbstraction` error), and `Deliver` is enabled while `lagged` (the implementation relists first on the next poll). `progress_deadline.qnt`: `StableHappens` is enabled after `OperatorStop` (harmless in the driver). Both can fail `#[quint_run]` once D11 lands.
-- Concerns: the two specs and `checks.toml`; drivers `stream_snapshot.rs`, `progress_deadline.rs`.
-- Options: modeler guard fix (`Deliver` oldest-first and `not(lagged)`; guard `StableHappens` on no `OperatorStop`); re-run the checks and re-record evidence.
+### DG-5 — model guards in `stream_snapshot` and `progress_deadline` — RESOLVED
+- **Ruling:** the channel is an ordered list; `Deliver` takes the oldest event and is disabled while `lagged`. The `Lag` abstraction (the model drops every unseen event; tokio reports `Lagged` and resumes at the oldest retained event) is stated and harmless: the relist reads the store and commit precedes publish. `StableHappens` is disabled after `OperatorStop`.
+- **Action for DISTILL:** re-run both modules' checks and re-record evidence.
 
-### DG-12 — `terminal_announced` membership after D6
-Whether an allocation that started and then `Failed` stays in `ServiceLifecycleView.terminal_announced` after D6 is not pinned (only a pre-`Running` `Failed` is). The assertions on it in `crates/overdrive-sim/tests/acceptance/service_kind_vm_terminal_invariant.rs` were removed.
-- Concerns: delta § D6, § D12 (eligibility keys on the committed `Stable`, not on membership).
-- Options: pin the membership rule in the D6 interface changes, or state that membership is unobservable by contract.
+### DG-12 — `terminal_announced` membership after D6 — RESOLVED (changes D6)
+The unpinned case was a started allocation that then `Failed`. Verified at HEAD: `observed` is never pruned (`service_lifecycle.rs:514`), the only `terminal_announced` insertion for a crash was the early-exit one that D6 deletes, and the pre-`Running` insertion (`:592`) does not cover a started row. So the allocation would stay in `has_alloc_mid_startup_window` (`:357-361`), which gates `next_evaluation_at` (`:701`).
+- **Ruling:** every allocation `ServiceLifecycle` observes in `Failed` or `Terminated` joins `terminal_announced`, whatever its `started_at`. D6 item 1, the D6 interface-changes row, Gate G-4 (unaffected list) and ADR-0258 carry it. The `restart_authority` model's `ann` reflects it (the modeler's edit).
+- **New obligation:** S-56 (pure proptest, mutation target). Oracle: the returned `View.terminal_announced` contains the allocation, `has_alloc_mid_startup_window()` is false, `next_evaluation_at` is `None`, no action.
+- **Action for DISTILL:** author S-56.
 
 ## Gaps in pinned shape
 
-### DG-6 — `ReportedListeners` construction and `GuestListenerBoard::new`
-D13 item 10 pins `contains`, `len` and equality of `ReportedListeners` and the `GuestListenerReports` trait; it leaves the board's methods and outcome types internal. The Sim adapter and the oracles need to build values (`Default`, `FromIterator`, `is_empty` were added to the scaffold), and every composition needs a board constructor (`new() -> Self`). Production wiring currently gives each consumer a fresh board (inert); DELIVER shares one.
-- Concerns: `crates/overdrive-core/src/traits/guest_listener_reports.rs`, `crates/overdrive-worker/src/guest_listener_board.rs`, `crates/overdrive-sim/src/adapters/guest_listener_reports.rs`.
-- Options: pin the construction surface and constructor, or rule them the crafter's internal structure and keep the scaffold as written.
+### DG-6 — `ReportedListeners` construction and `GuestListenerBoard::new` — RESOLVED
+- **Ruling:** pinned. `ReportedListeners`: `Default`, `FromIterator<Listener>`, `is_empty`, beside `contains`, `len` and equality. `GuestListenerBoard::new() -> Self`. D13 names the DELIVER obligation that production composition shares ONE board between the probe runner and `VmDriver` (the scaffolds create one per consumer).
 
-### DG-7 — positions and module path in the stream and CLI surface
-The delta pins that `build_service_stream` gains a `progress_deadline` parameter and `submit_workload_streaming` a server deadline, but not their positions; `LastAttemptWire` has no pinned module. Scaffolded as: `progress_deadline` last in `build_service_stream`, `server_deadline` second in `submit_workload_streaming`, `LastAttemptWire` in `crates/overdrive-control-plane/src/streaming.rs`.
-- Options: pin the three, or confirm the scaffold.
+### DG-7 — positions and module path in the stream and CLI surface — RESOLVED
+- **Ruling:** the scaffold is confirmed and pinned. `progress_deadline: Duration` is the last parameter of `build_service_stream`; the server deadline is the second parameter of `ApiClient::submit_workload_streaming`; `LastAttemptWire` lives in `overdrive_control_plane::streaming`.
 
-### DG-11 — where the listener set reaches the mechanic summary
-D14 item 4 pins the text `guest listeners tcp:8080 udp:5353`, but `format_mechanic_summary` sees only the fieldless `ProbeMechanic::GuestListeners`. The scaffold arm prints the placeholder `guest listeners`.
-- Concerns: `crates/overdrive-reconcilers/src/service_lifecycle.rs`, `crates/overdrive-cli/src/render.rs`.
-- Options: pin the carrier (a parameter of the formatter, or the descriptor-plus-spec pair).
+### DG-11 — where the listener set reaches the mechanic summary — RESOLVED
+- **Verified at HEAD:** no wire field is needed. The deploy stream prints `ProbeWitness.mechanic_summary` verbatim (`render.rs:1283`); the reconciler fills it in `spec_facts_for_service(svc: &Service)`, which holds `svc.listeners`. The describe path renders `format_probe_mechanic_summary` and already carries `out.snapshot.listeners` (`render.rs:274`).
+- **Ruling:** both formatters (the reconciler's `format_mechanic_summary`, the CLI's `format_probe_mechanic_summary`) gain a second parameter `&[Listener]`, used by the `GuestListeners` arm. `ProbeMechanic::GuestListeners` stays fieldless. Text: `guest listeners tcp:8080 udp:5353`, declaration order.
 
 ## Proposal for the user
 
-### DG-10 — `tokio` `test-util` in `overdrive-cli`
-The S-36 request-timeout probe pauses the clock over a real TLS socket and needs `tokio`'s `test-util` feature as a dev-dependency of `overdrive-cli` (the `Cargo.toml` edit is already in the tree). Failure it prevents: the Service lane's `deadline + 30 s` envelope regresses to the fixed 120 s with no test noticing. Cost: one dev-dependency feature, no runtime cost. Cheaper alternative: assert the computed timeout value only (does not exercise the client).
-- Decision: approve or reject; on rejection the test is deleted.
+### DG-10 — `tokio` `test-util` in `overdrive-cli` — APPROVED
+- **Ruling:** approved. The S-36 test sits behind `integration-tests` and carries a litmus proof that it fails when the `deadline + 30 s` envelope is removed.
 
-## Minor, unpinned
+## Minor, unpinned — RESOLVED
 
-- `BeaconParseError` variant for a rejected LISTEN line: `beacon_listen_wire_form.rs` asserts `Err` only.
-- `Idle` in `guest_report_host`: in the `step` relation but model-only in the delta; the driver maps it to "the reader holds no outstanding grant".
+- `BeaconParseError` for a rejected `LISTEN` line: `MalformedListen { raw: String, detail: String }`, in the shape of `MalformedArgv`. Every rejected `LISTEN` line returns it (DG-M).
+- `Idle` in `guest_report_host`: a read-only `GuestListenerReports::reported(alloc)` call compared with the previous projected value (DG-M).
+- D16 historical fixtures: V1 fixtures holding a probe descriptor with `inferred` set land with the version bump in DELIVER (DG-M). The fixtures that construct `ProbeDescriptor` and `ProbeWitness` with `inferred` lose the field when D16 lands.
+
+## Not part of the DG rulings (unchanged)
+
 - `service_stream_synth_cap_timeout`: the type of its "latest attempt-ending observation" parameter is unpinned; not scaffolded, no test calls it.
 - S-53: the retry cadence of a failed `Pass` write and whether `<n>` in a `Fail` reason stays at the deadline value are unpinned; the tests tick up to eight intervals.
-- D16 historical fixtures: V1 fixtures holding a probe descriptor with `inferred` set must be committed with the version bump (`.claude/rules/development.md` "Version-bump procedure"); DELIVER.
-- Fixtures that construct `ProbeDescriptor` and `ProbeWitness` with `inferred` (stream, CLI and reconciler acceptance files, both stream drivers) lose the field when D16 lands.
 - Pre-existing tests that assume liveness is live right after `on_alloc_running`, or that `broker().submit` is drained only by the clock (`runtime_convergence_loop.rs`, `interest_router.rs`, `cadence_resync.rs`, `probe_count_fixture`), are DELIVER's to revisit with D9 and D17.
 - The CLI integration test `cli_submit_streaming_service_routes_to_service_submit_event_consumer` times out at HEAD `e5c233ba7` with and without these changes; verify before DELIVER whether the default startup gate (D13 to D15) is the cause.

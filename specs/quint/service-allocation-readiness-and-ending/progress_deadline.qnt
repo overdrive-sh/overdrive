@@ -127,7 +127,7 @@ module progress_deadline {
   // ServiceLifecycle commits Stable, the shim publishes it: every open stream closes as stable. Stable can happen at any
   // tick, whether or not a stream is still open.
   action StableHappens = all {
-    w.deployed, w.stableAt < 0, not(w.gaveUp),
+    w.deployed, w.stableAt < 0, not(w.gaveUp), not(w.opStopped),
     w' = { ...w, stableAt: w.now },
     sm' = closeOpen("stable", false),
     conf_step' = if (REC) variant("StableHappens", ()) else conf_step,

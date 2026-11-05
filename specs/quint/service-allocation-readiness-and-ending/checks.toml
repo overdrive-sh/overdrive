@@ -746,3 +746,21 @@ run = "explicit_probe_fail_after_deadline_keeps_counted_streak"
 backend = "evaluator"
 expect = "holds"
 ci = true
+
+[[check]]
+name = "ra-run-crashed-and-rejected-allocs-join-terminal-announced"
+spec = "restart_authority.qnt"
+main = "ra_conf"
+run = "crashed_and_rejected_allocs_join_terminal_announced"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "ss-run-publish-after-relist-reaches-channel"
+spec = "stream_snapshot.qnt"
+main = "ss_conf"
+run = "publish_after_relist_reaches_channel"
+backend = "evaluator"
+expect = "holds"
+ci = true
