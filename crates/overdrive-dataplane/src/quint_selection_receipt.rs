@@ -114,13 +114,16 @@ const CONNECT_BOUND: Duration = Duration::from_secs(2);
 /// Port of every model Service frontend.
 const FRONTEND_PORT: u16 = 8080;
 
-/// The test-owned veth fixture. A `#[cfg(test)]` module: the fixture shells
-/// `ip(8)` to build kernel state for a Tier-3 test and ships in no binary.
+/// The test-owned veth fixture. A `#[cfg(test)]` module: the fixture builds
+/// kernel state for a Tier-3 test over netlink (`overdrive-netlink`, no
+/// subprocess) and ships in no binary.
 #[cfg(test)]
 mod veth_fixture {
+    use std::future::Future;
     use std::io::Write as _;
-    use std::process::Command;
     use std::sync::atomic::{AtomicU64, Ordering};
+
+    use overdrive_netlink::{Client, NetlinkError, block_on_host_netlink};
 
     /// One ordinal per owner built in the process, so veth names never collide.
     static NEXT_ORDINAL: AtomicU64 = AtomicU64::new(0);
@@ -131,38 +134,51 @@ mod veth_fixture {
         pub(super) peer: String,
     }
 
+    /// Run one netlink operation to completion through the crate's sync bridge
+    /// (a dedicated host-netns thread with its own runtime): the fixture is
+    /// synchronous and must not nest in the driver's own runtime.
+    fn netlink<T, F, Fut>(operation: F) -> Result<T, NetlinkError>
+    where
+        F: FnOnce(Client) -> Fut + Send,
+        Fut: Future<Output = Result<T, NetlinkError>>,
+        T: Send,
+    {
+        block_on_host_netlink(|| async move { operation(Client::new()?).await })
+    }
+
     impl Veth {
         pub(super) fn create() -> Self {
             let ordinal = NEXT_ORDINAL.fetch_add(1, Ordering::Relaxed);
             let host = format!("qh{}x{ordinal}", std::process::id() % 100_000);
             let peer = format!("qp{}x{ordinal}", std::process::id() % 100_000);
-            // A stale pair of the same name is removed first; "no such device" is the
-            // expected answer, so only a failure to run `ip(8)` at all is a precondition failure.
-            delete_link(&host).expect("spawn ip(8) to remove a stale veth pair");
-            for args in [
-                vec!["link", "add", host.as_str(), "type", "veth", "peer", "name", peer.as_str()],
-                vec!["link", "set", host.as_str(), "up"],
-                vec!["link", "set", peer.as_str(), "up"],
-            ] {
-                let status = Command::new("ip").args(&args).status().expect("spawn ip(8)");
-                assert!(status.success(), "ip {args:?} failed: needs CAP_NET_ADMIN (run as root)");
-            }
+            // A stale pair of the same name is removed first; an absent link is a
+            // successful no-op, so any error here is a precondition failure.
+            netlink(|client| {
+                let host = host.clone();
+                async move { client.del_link(&host).await }
+            })
+            .expect("remove a stale veth pair over netlink");
+            netlink(|client| {
+                let (host, peer) = (host.clone(), peer.clone());
+                async move {
+                    client.add_veth_pair(&host, &peer).await?;
+                    client.set_link_up(&host).await?;
+                    client.set_link_up(&peer).await
+                }
+            })
+            .expect("create the veth pair over netlink: needs CAP_NET_ADMIN (run as root)");
             Self { host, peer }
         }
     }
 
-    /// Delete a link by name; "no such device" is a successful output, only a
-    /// failure to run `ip(8)` is an error.
-    fn delete_link(name: &str) -> std::io::Result<std::process::Output> {
-        Command::new("ip").args(["link", "del", name]).output()
-    }
-
     impl Drop for Veth {
         fn drop(&mut self) {
-            if let Err(error) = delete_link(&self.host) {
+            // Deleting one end of a veth pair reaps both; an absent link is a no-op.
+            let host = self.host.clone();
+            if let Err(error) = netlink(|client| async move { client.del_link(&host).await }) {
                 let _reported = writeln!(
                     std::io::stderr(),
-                    "could not run ip(8) to remove veth {}: {error}",
+                    "could not remove veth {} over netlink: {error}",
                     self.host
                 );
             }

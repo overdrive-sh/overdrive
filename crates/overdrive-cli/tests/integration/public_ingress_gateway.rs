@@ -18,9 +18,10 @@
 //!
 //! The enabled bodies enter through the same production `run_with_adapters`
 //! and call `deploy_resource` and `ApiClient::submit_route`. The operator
-//! client has no `DELETE /v1/routes/{id}` or `GET /v1/gateway/status` method
-//! (the route methods are proposed, not adopted), so those two requests are issued with a plain
-//! HTTPS client built from the trust triple the server wrote.
+//! client carries the route withdraw and gateway status methods
+//! (`ApiClient::withdraw_route` and `ApiClient::gateway_status`), so the
+//! bodies drive them through the client's trust handling and `CliError`
+//! typing.
 //!
 //! # Bind-address table (R-6)
 //!
@@ -276,8 +277,6 @@ protocol = "tcp"
 struct EnabledNode {
     handle: serve::ServeHandle,
     tmp: TempDir,
-    client: reqwest::Client,
-    base: String,
     faults: Arc<super::issue_fault_store::IssueFaultStore>,
 }
 
@@ -342,10 +341,8 @@ async fn spawn_gateway_enabled_server(octet: u8) -> EnabledNode {
     })
     .await
     .expect("serve with the gateway enabled");
-    let client = trusting_client(&config_dir);
-    let base = handle.endpoint().as_str().trim_end_matches('/').to_owned();
     let faults = slot.lock().expect("fault store slot").take().expect("the composition ran");
-    EnabledNode { handle, tmp, client, base, faults }
+    EnabledNode { handle, tmp, faults }
 }
 
 /// An HTTPS client that trusts the CA the server wrote to the trust triple.
@@ -382,16 +379,6 @@ fn route_input(id: &str, path: &str) -> PublicRouteInput {
             protocol: "tcp".to_owned(),
         },
     }
-}
-
-async fn status_of(node: &EnabledNode) -> (u16, String) {
-    let response = node
-        .client
-        .get(format!("{}/v1/gateway/status", node.base))
-        .send()
-        .await
-        .expect("GET /v1/gateway/status");
-    (response.status().as_u16(), response.text().await.expect("status body"))
 }
 
 /// S-PIG-34 — `overdrive deploy <ROUTE_SPEC>` is a one-shot POST with no
@@ -476,8 +463,7 @@ async fn route_deploy_is_one_shot_with_the_same_outcome_in_both_stream_modes() {
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 #[ignore = "pending DELIVER route-operator-surface"]
-async fn the_operator_client_declares_conflicts_and_rejects_and_plain_https_withdraws_and_reads_status()
- {
+async fn the_operator_client_declares_conflicts_and_rejects_withdraws_and_reads_status() {
     let node = spawn_gateway_enabled_server(172).await;
     let api = ApiClient::from_config(&config_path(node.tmp.path())).expect("operator client");
 
@@ -500,32 +486,15 @@ async fn the_operator_client_declares_conflicts_and_rejects_and_plain_https_with
         other => panic!("expected the typed 400 validation error, got {other:?}"),
     }
 
-    let withdrawn: WithdrawRouteResponse = {
-        let response = node
-            .client
-            .delete(format!("{}/v1/routes/public-api", node.base))
-            .send()
-            .await
-            .expect("DELETE /v1/routes/public-api");
-        assert_eq!(response.status().as_u16(), 200);
-        response.json().await.expect("WithdrawRouteResponse body")
-    };
+    let withdrawn: WithdrawRouteResponse =
+        api.withdraw_route("public-api").await.expect("withdraw the live Route");
     assert_eq!(withdrawn.route_id, "public-api");
     assert_eq!(withdrawn.outcome, RouteWithdrawOutcome::Withdrawn);
-    let repeated: WithdrawRouteResponse = node
-        .client
-        .delete(format!("{}/v1/routes/public-api", node.base))
-        .send()
-        .await
-        .expect("repeat DELETE")
-        .json()
-        .await
-        .expect("WithdrawRouteResponse body");
+    let repeated: WithdrawRouteResponse =
+        api.withdraw_route("public-api").await.expect("repeat the withdrawal");
     assert_eq!(repeated.outcome, RouteWithdrawOutcome::Unchanged, "the set is already empty");
 
-    let (code, body) = status_of(&node).await;
-    assert_eq!(code, 200, "the status read is a plain 200");
-    let status: GatewayStatusResponse = serde_json::from_str(&body).expect("status body");
+    let status: GatewayStatusResponse = api.gateway_status().await.expect("the status read");
     assert!(status.enabled, "the gateway is enabled");
     assert_eq!(
         status.configured_address.map(|address| address.to_string()),
@@ -541,20 +510,25 @@ async fn the_operator_client_declares_conflicts_and_rejects_and_plain_https_with
 /// the normal 200 projection.
 ///
 /// The fault is a delegating observation store at the existing driven port;
-/// the operator client has no status method, so the read is a plain request.
+/// the status is read through the operator client, so the 500 surfaces as the
+/// typed `CliError::HttpStatus` carrying the server's `ErrorBody`.
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test]
 #[ignore = "pending DELIVER route-operator-surface"]
 async fn a_status_point_read_failure_is_a_redacted_500_and_the_next_read_recovers() {
     let node = spawn_gateway_enabled_server(173).await;
-    let (healthy, _) = status_of(&node).await;
-    assert_eq!(healthy, 200, "the baseline read is healthy");
+    let api = ApiClient::from_config(&config_path(node.tmp.path())).expect("operator client");
+    let healthy = api.gateway_status().await.expect("the baseline read is healthy");
+    assert!(healthy.enabled, "the baseline projection is served");
 
     node.faults.fail_gateway_status_reads.store(true, Ordering::SeqCst);
     node.faults.fail_certified_key_status_reads.store(true, Ordering::SeqCst);
-    let (code, body) = status_of(&node).await;
+    let Err(CliError::HttpStatus { status: code, body }) = api.gateway_status().await else {
+        panic!("a failed point read is a typed server error");
+    };
     assert_eq!(code, 500, "a failed point read is a server error");
+    let rendered = serde_json::to_string(&body).expect("the error body serialises");
     for forbidden in [
         super::issue_fault_store::ISSUE_FAULT_MARKER,
         "api-origin-chain.pem",
@@ -564,20 +538,14 @@ async fn a_status_point_read_failure_is_a_redacted_500_and_the_next_read_recover
         "ciphertext",
         "intent.redb",
     ] {
-        assert!(!body.contains(forbidden), "the 500 body leaks {forbidden:?}: {body}");
+        assert!(!rendered.contains(forbidden), "the 500 body leaks {forbidden:?}: {rendered}");
     }
-    let parsed: serde_json::Value = serde_json::from_str(&body).expect("the 500 body is JSON");
-    assert!(
-        parsed.get("error").and_then(serde_json::Value::as_str).is_some(),
-        "the 500 body is the typed error shape: {body}"
-    );
+    assert!(!body.error.is_empty(), "the 500 body is the typed error shape: {rendered}");
 
     node.faults.fail_gateway_status_reads.store(false, Ordering::SeqCst);
     node.faults.fail_certified_key_status_reads.store(false, Ordering::SeqCst);
-    let (recovered, body) = status_of(&node).await;
-    assert_eq!(recovered, 200, "the next healthy read recovers");
-    let status: GatewayStatusResponse = serde_json::from_str(&body).expect("status body");
-    assert!(status.enabled, "the normal projection is served again");
+    let recovered = api.gateway_status().await.expect("the next healthy read recovers");
+    assert!(recovered.enabled, "the normal projection is served again");
     node.handle.shutdown().await.expect("clean shutdown");
 }
 

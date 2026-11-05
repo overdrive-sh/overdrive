@@ -152,6 +152,13 @@ serde_json.workspace = true
 # the same shape `overdrive-core` and `overdrive-host` already carry.
 overdrive-sim.path = "../overdrive-sim"
 
+# The selection-receipt conformance driver's veth fixture
+# (`src/quint_selection_receipt.rs`) builds its pair over netlink instead of
+# shelling `ip(8)`. Dev-only; `overdrive-netlink` (`adapter-host`) depends only
+# on `overdrive-core`, so no cycle. Path form like every other consumer (the
+# workspace table carries no entry for it).
+overdrive-netlink.path = "../overdrive-netlink"
+
 # Acceptance tests for `PersistentServiceVipAllocator` (step 01-03)
 # drive a real `LocalIntentStore` over a `tempfile::TempDir` — the
 # canonical Phase 1 byte-level IntentStore impl per ADR-0020.
