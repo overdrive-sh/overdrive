@@ -7,11 +7,8 @@
 //! [`Action::IssueGatewaySvid`] only; there is no gateway drop action (R-4):
 //! disabling the gateway clears the volatile slot synchronously in the process.
 //!
-//! SCAFFOLD: true. The canonical constructor, the declared wakeup model and the
-//! `State` / `View` shapes are the DESIGN-pinned contract. `reconcile`,
-//! `next_evaluation_at` and both hydration bodies are DELIVER's and fail with
-//! SCAFFOLD text. The source-local bodies below are the S-PIG-65 specification
-//! of the pure half.
+//! SCAFFOLD: true. `next_evaluation_at` and both hydration bodies are DELIVER's
+//! and fail with SCAFFOLD text; `reconcile` is the pure transition function.
 
 #![allow(
     clippy::todo,
@@ -24,6 +21,7 @@
 use std::time::Duration;
 
 use overdrive_core::gateway_identity::{GatewayIdentityDesired, GatewayIdentityFacts};
+use overdrive_core::id::{ContentHash, CorrelationKey, NodeId, SpiffeId};
 use overdrive_core::reconcilers::{
     Action, HydrateError, HydrationContext, Reconciler, ReconcilerName, ResyncSchedule,
     ResyncScope, TargetResource, TickContext,
@@ -32,7 +30,45 @@ use overdrive_core::traits::observation_store::ObservationRowKind;
 use overdrive_core::wall_clock::UnixInstant;
 use serde::{Deserialize, Serialize};
 
-use crate::svid_lifecycle::IssueRetry;
+use crate::backoff_for_attempt;
+use crate::svid_lifecycle::{IssueRetry, NEAR_EXPIRY_THRESHOLD_SECS};
+
+/// Path prefix of the gateway SPIFFE identity, `SpiffeId::for_gateway(node)`.
+const GATEWAY_PATH_PREFIX: &str = "/gateway/";
+
+/// Is the held identity usable for the desired epoch and subject: same epoch,
+/// same subject, and `not_after` strictly beyond the near-expiry window
+/// (inclusive boundary: an identity expiring exactly at the window edge is
+/// reissued)?
+fn is_usable(
+    held: &GatewayIdentityFacts,
+    desired_epoch: overdrive_core::gateway_identity::GatewayIdentityEpoch,
+    subject: &SpiffeId,
+    now: UnixInstant,
+) -> bool {
+    held.epoch == desired_epoch
+        && held.spiffe_id == *subject
+        && held.not_after > now + Duration::from_secs(NEAR_EXPIRY_THRESHOLD_SECS)
+}
+
+/// The node a gateway subject was derived for (`SpiffeId::for_gateway`).
+fn gateway_node(subject: &SpiffeId) -> NodeId {
+    subject
+        .path()
+        .strip_prefix(GATEWAY_PATH_PREFIX)
+        .and_then(|node| NodeId::new(node).ok())
+        .unwrap_or_else(|| {
+            unreachable!("the desired gateway subject is always SpiffeId::for_gateway(node)")
+        })
+}
+
+/// Deterministic issue correlation: a content key over the gateway subject,
+/// stable on every tick for the same desired identity (never a per-attempt id).
+fn issue_correlation(node: &NodeId, subject: &SpiffeId) -> CorrelationKey {
+    let target = format!("gateway-svid-lifecycle/{node}");
+    let spec_hash = ContentHash::of(subject.as_str().as_bytes());
+    CorrelationKey::derive(&target, &spec_hash, "issue-gateway-svid")
+}
 
 /// Level-triggered backstop cadence of the host-backed gateway reconciler.
 ///
@@ -88,14 +124,50 @@ impl Reconciler for GatewaySvidLifecycle {
         &self.name
     }
 
+    /// Pure transition. Disabled emits nothing (disable is the synchronous slot
+    /// clear). A usable identity of the desired epoch clears the retry entry.
+    /// Otherwise: restart recovery (empty slot, audited subject) reissues
+    /// immediately and clears the entry; every other case is gated by the
+    /// backoff deadline recomputed from the persisted retry inputs, and an
+    /// emission bumps those inputs.
     fn reconcile(
         &self,
-        _desired: &Self::State,
-        _actual: &Self::State,
-        _view: &Self::View,
-        _tick: &TickContext,
+        desired: &Self::State,
+        actual: &Self::State,
+        view: &Self::View,
+        tick: &TickContext,
     ) -> (Vec<Action>, Self::View) {
-        todo!("SCAFFOLD: GatewaySvidLifecycle::reconcile")
+        let mut next_view = view.clone();
+        let Some(subject) = desired.desired.spiffe_id.as_ref() else {
+            return (vec![Action::Noop], next_view);
+        };
+        let epoch = desired.desired.epoch;
+        let now = tick.now_unix;
+
+        if actual.actual.as_ref().is_some_and(|held| is_usable(held, epoch, subject, now)) {
+            next_view.retry = None;
+            return (vec![Action::Noop], next_view);
+        }
+
+        if actual.actual.is_none() && actual.ever_issued {
+            next_view.retry = None;
+        } else if let Some(retry) = &view.retry {
+            if now < retry.last_failure_seen_at + backoff_for_attempt(retry.attempts) {
+                return (vec![Action::Noop], next_view);
+            }
+            next_view.retry = Some(IssueRetry {
+                attempts: retry.attempts.saturating_add(1),
+                last_failure_seen_at: now,
+            });
+        } else {
+            next_view.retry = Some(IssueRetry { attempts: 1, last_failure_seen_at: now });
+        }
+
+        let node_id = gateway_node(subject);
+        let correlation = issue_correlation(&node_id, subject);
+        let issue =
+            Action::IssueGatewaySvid { epoch, spiffe_id: subject.clone(), node_id, correlation };
+        (vec![issue], next_view)
     }
 
     fn next_evaluation_at(
@@ -233,7 +305,6 @@ mod acceptance {
     ///
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER gateway-svid-lifecycle-transitions"]
     fn absent_current_expiring_stale_and_disabled_cover_every_identity_transition() {
         let reconciler = GatewaySvidLifecycle::canonical();
         let now = at(1_000);
@@ -296,7 +367,6 @@ mod acceptance {
     ///
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER gateway-svid-lifecycle-transitions"]
     fn restart_with_audited_subject_reissues_immediately_and_clears_the_retry_entry() {
         let reconciler = GatewaySvidLifecycle::canonical();
         let now = at(2_000);
@@ -315,7 +385,6 @@ mod acceptance {
     ///
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER gateway-svid-lifecycle-transitions"]
     fn retry_memory_suppresses_an_early_issue_and_reemits_at_the_exact_deadline() {
         let reconciler = GatewaySvidLifecycle::canonical();
         let last_failure = at(1_000);
@@ -344,7 +413,6 @@ mod acceptance {
     ///
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER gateway-svid-lifecycle-transitions"]
     fn issue_correlation_is_stable_for_the_same_desired_identity() {
         let reconciler = GatewaySvidLifecycle::canonical();
         let first = GatewayIdentityEpoch::first();
@@ -370,7 +438,6 @@ mod acceptance {
         ///
         /// CONTRACT_SHAPE: pure-function.
         #[test]
-        #[ignore = "pending DELIVER gateway-svid-lifecycle-transitions"]
         fn issue_is_emitted_iff_no_usable_identity_of_the_desired_epoch_is_held(
             enabled in any::<bool>(),
             desired_epoch in 1u64..4,
