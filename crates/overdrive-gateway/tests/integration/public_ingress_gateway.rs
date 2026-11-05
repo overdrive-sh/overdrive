@@ -18,7 +18,7 @@
 //! `127.T.hi.lo` (`hi = ordinal / 250`, `lo = ordinal % 250 + 1`) and
 //! `Slot::vip(ordinal)` is `127.T.(200 + hi).lo` (the Service frontend, with a
 //! listening socket on port 8080 so the connector's real `connect(2)` completes).
-//! This file owns second octets 41..=62 and 180..=187; no other test file may reuse
+//! This file owns second octets 41..=62 and 180..=190; no other test file may reuse
 //! them.
 //!
 //! | `T` | test |
@@ -52,6 +52,10 @@
 //! | 184 | held identity past expiry (O-SIF-G5) |
 //! | 185 | boot identity timeout (O-SIF-G5) |
 //! | 186 | failing status write loses nothing (O-SIF-G6) |
+//! | 187 | restart over an undecodable prior status row (S-PIG-129) |
+//! | 188 | no status row before a Route exists (S-PIG-130) |
+//! | 189 | first status row after a Route carries what was held (S-PIG-130) |
+//! | 190 | prior status row carried with no Route (S-PIG-130) |
 
 #![allow(
     clippy::doc_markdown,
@@ -187,6 +191,9 @@ const ISSUE_EXPIRY: Slot = Slot(184);
 const ISSUE_BOOT_TIMEOUT: Slot = Slot(185);
 const ISSUE_WRITE_RETRY: Slot = Slot(186);
 const ISSUE_UNDECODABLE_PRIOR: Slot = Slot(187);
+const NO_ROW_BEFORE_ROUTE: Slot = Slot(188);
+const FIRST_ROW_AFTER_ROUTE: Slot = Slot(189);
+const PRIOR_ROW_WITHOUT_ROUTE: Slot = Slot(190);
 
 // ---------------------------------------------------------------------------
 // Event log shared by the doubles
@@ -2636,6 +2643,130 @@ async fn a_restarted_gateway_over_an_undecodable_prior_status_row_counts_from_ze
         wait_status(&second.status, "the carried base", |row| row.issue_failures == 1).await;
     assert_eq!(carried.last_issue_failure, Some(one), "the replaced row decodes and is carried");
     second.stop().await;
+}
+
+/// How long a "nothing is written" claim is watched: the owner handles each
+/// wake in well under this, so a row that would be written has appeared by then.
+const NO_ROW_WATCH: Duration = Duration::from_millis(400);
+
+/// Fail when the gateway status row appears within `NO_ROW_WATCH`.
+async fn assert_no_gateway_status_row(world: &World, context: &str) {
+    let deadline = Instant::now() + NO_ROW_WATCH;
+    while Instant::now() < deadline {
+        let row = world.status.application_status().await.expect("application status read");
+        assert_eq!(row, None, "{context}: the gateway status row must be absent");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
+/// An identity wake (the identity is held) and two recorded issue failures on a
+/// gateway that has no Route; returns the latest failure.
+fn identity_and_failures_before_any_route(world: &World) -> SvidIssueFailure {
+    world.fx.identity.hold(gateway_identity_facts());
+    world.clock.tick(Duration::from_secs(5));
+    world.fx.identity.record_failure(issue_failure(SvidIssueFailureCause::Ca, &world.clock));
+    world.clock.tick(Duration::from_secs(5));
+    let latest = issue_failure(SvidIssueFailureCause::Audit, &world.clock);
+    world.fx.identity.record_failure(latest);
+    latest
+}
+
+/// S-PIG-130 (R-58): a gateway with no Route and no row from an earlier boot
+/// writes no status row, however many identity wakes and recorded issue failures
+/// arrive. The status of an unconfigured gateway is the absence of a row.
+///
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test]
+async fn no_gateway_status_row_is_written_before_a_route_exists() {
+    let site = Site::new();
+    let world = World::start(&site, Plan::with_service(NO_ROW_BEFORE_ROUTE), absent_identity())
+        .await
+        .expect("composition starts");
+    assert_no_gateway_status_row(&world, "after boot").await;
+
+    identity_and_failures_before_any_route(&world);
+    assert_no_gateway_status_row(&world, "after an identity wake and two issue failures").await;
+    world.stop().await;
+}
+
+/// S-PIG-130 (R-58): the identity facts and the failure count held while no
+/// Route existed reach the first row, which is written when a Route is declared.
+///
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test]
+async fn the_first_gateway_status_row_after_a_route_carries_what_was_held_before_it() {
+    let site = Site::new();
+    let world = World::start(&site, Plan::with_service(FIRST_ROW_AFTER_ROUTE), absent_identity())
+        .await
+        .expect("composition starts");
+    // The owner has subscribed to the identity by the time the boot watch ends,
+    // so the wakes below reach it.
+    assert_no_gateway_status_row(&world, "after boot").await;
+    let latest = identity_and_failures_before_any_route(&world);
+    assert_no_gateway_status_row(&world, "before the Route is declared").await;
+
+    world.declare(route("public-api", "/")).await.expect("Route command");
+    let held = gateway_identity_facts();
+    let first = wait_status(&world.status, "the first row after the Route", |_| true).await;
+    assert_eq!(first.issue_failures, 2);
+    assert_eq!(first.last_issue_failure, Some(latest));
+    assert_eq!(
+        first.gateway_identity,
+        GatewayIdentityStatus::Current {
+            epoch: held.epoch,
+            spiffe_id: held.spiffe_id,
+            serial: held.serial,
+            not_after: held.not_after,
+        },
+    );
+    world.stop().await;
+}
+
+/// S-PIG-130 (R-58, R-52): a row left by an earlier boot is still carried when
+/// the new boot has no Route: the owner writes, over the prior base, with the
+/// cause `RouteAbsent`.
+///
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test]
+async fn a_status_row_from_an_earlier_boot_is_still_carried_when_no_route_exists() {
+    let clock = Arc::new(SimClock::new());
+    let observations: Arc<dyn ObservationStore> =
+        Arc::new(SimObservationStore::single_peer(node_id(), 190));
+    let plan = Plan::with_service(PRIOR_ROW_WITHOUT_ROUTE);
+
+    let earlier_site = Site::new();
+    let earlier = World::start_over(
+        &earlier_site,
+        plan,
+        clock.clone(),
+        absent_identity(),
+        observations.clone(),
+    )
+    .await
+    .expect("earlier composition starts");
+    earlier.declare(route("public-api", "/")).await.expect("Route command");
+    let latest = identity_and_failures_before_any_route(&earlier);
+    wait_status(&earlier.status, "the earlier boot's row", |row| row.issue_failures == 2).await;
+    earlier.stop().await;
+    let prior = observations
+        .gateway_application_status_row(&node_id())
+        .await
+        .expect("prior row read")
+        .expect("the earlier boot left a row");
+
+    // A new boot over a fresh intent store: no Route is declared.
+    let site = Site::new();
+    let world = World::start_over(&site, plan, clock, absent_identity(), observations.clone())
+        .await
+        .expect("new composition starts");
+    let row = wait_status(&world.status, "a row over the prior base without a Route", |row| {
+        row.unavailable == Some(GatewayApplicationUnavailableCause::RouteAbsent)
+            && row.updated_at != prior.updated_at
+    })
+    .await;
+    assert_eq!(row.issue_failures, 2, "the prior base is carried");
+    assert_eq!(row.last_issue_failure, Some(latest));
+    world.stop().await;
 }
 
 /// O-SIF-G5: held material whose `not_after` is not after the owner's clock
