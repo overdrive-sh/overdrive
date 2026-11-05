@@ -1,7 +1,7 @@
 //! Public Certified-Key Custody command/error surface.
 //!
-//! SCAFFOLD: true. Custody behaviour is DELIVER's; the DESIGN-pinned shapes
-//! compile today.
+//! Candidate validation is live; the custody owner and snapshot bodies stay
+//! scaffolded until the Gateway Application owner step lands them.
 
 use std::sync::Arc;
 
@@ -47,17 +47,98 @@ pub enum PublicCertifiedKeyFailureRecordOutcome {
 
 /// Validated in-memory chain/key candidate with fixed-redaction Debug.
 pub struct CertifiedKeyCandidate {
-    _private: (),
+    chain_der: Vec<Vec<u8>>,
+    private_key_pkcs8: Zeroizing<Vec<u8>>,
+    public_hostname: PublicHostname,
+    generation: CertifiedKeyGeneration,
+    fingerprint: CertificateFingerprint,
+    not_before: UnixInstant,
+    not_after: UnixInstant,
 }
 
+/// Accepted certificate-chain length: one leaf plus at most seven issuers.
+const CHAIN_LENGTH: std::ops::RangeInclusive<usize> = 1..=8;
+
 impl CertifiedKeyCandidate {
+    /// Validate a leaf-first chain and its PKCS#8 key at `now`: chain length,
+    /// the single dNSName leaf, key match, and `not_before <= now < not_after`.
+    ///
+    /// # Errors
+    /// `Source(CertificateProfile)` for a chain, leaf profile or validity
+    /// interval that fails; `Source(KeyMismatch)` for a key that is not the
+    /// leaf's.
     pub fn from_pkcs8(
-        _chain_der: Vec<Vec<u8>>,
-        _private_key_pkcs8: Zeroizing<Vec<u8>>,
-        _now: UnixInstant,
+        chain_der: Vec<Vec<u8>>,
+        private_key_pkcs8: Zeroizing<Vec<u8>>,
+        now: UnixInstant,
     ) -> Result<Self, PublicCertifiedKeyError> {
-        todo!("SCAFFOLD: CertifiedKeyCandidate::from_pkcs8")
+        let profile = PublicCertifiedKeyError::Source(CertifiedKeyFailure::CertificateProfile);
+        let leaf_der = chain_der
+            .first()
+            .filter(|_| CHAIN_LENGTH.contains(&chain_der.len()))
+            .ok_or_else(profile_error)?;
+        let (_, leaf) =
+            x509_parser::parse_x509_certificate(leaf_der).map_err(|_| profile_error())?;
+        let public_hostname = Self::single_dns_name(&leaf)?;
+        let not_before = Self::instant(leaf.validity().not_before.timestamp())?;
+        let not_after = Self::instant(leaf.validity().not_after.timestamp())?;
+        if now < not_before || now >= not_after {
+            return Err(profile);
+        }
+        Self::require_key_match(&leaf, &private_key_pkcs8)?;
+        Ok(Self {
+            generation: CertifiedKeyGeneration::from_ordered_chain_der(&chain_der),
+            fingerprint: CertificateFingerprint::from_leaf_der(leaf_der),
+            chain_der,
+            private_key_pkcs8,
+            public_hostname,
+            not_before,
+            not_after,
+        })
     }
+
+    /// The leaf's one dNSName SAN as the canonical public hostname.
+    fn single_dns_name(
+        leaf: &x509_parser::certificate::X509Certificate<'_>,
+    ) -> Result<PublicHostname, PublicCertifiedKeyError> {
+        let names = leaf
+            .subject_alternative_name()
+            .ok()
+            .flatten()
+            .map(|extension| &extension.value.general_names)
+            .ok_or_else(profile_error)?;
+        match names.as_slice() {
+            [x509_parser::extensions::GeneralName::DNSName(name)] => {
+                PublicHostname::new(name).map_err(|_| profile_error())
+            }
+            _ => Err(profile_error()),
+        }
+    }
+
+    fn instant(seconds: i64) -> Result<UnixInstant, PublicCertifiedKeyError> {
+        let seconds = u64::try_from(seconds).map_err(|_| profile_error())?;
+        Ok(UnixInstant::from_unix_duration(std::time::Duration::from_secs(seconds)))
+    }
+
+    /// Fail closed unless the signing key's public half is the leaf's.
+    fn require_key_match(
+        leaf: &x509_parser::certificate::X509Certificate<'_>,
+        private_key_pkcs8: &Zeroizing<Vec<u8>>,
+    ) -> Result<(), PublicCertifiedKeyError> {
+        let mismatch = PublicCertifiedKeyError::Source(CertifiedKeyFailure::KeyMismatch);
+        let der = rustls::pki_types::PrivateKeyDer::try_from(private_key_pkcs8.as_slice())
+            .map_err(|_| PublicCertifiedKeyError::Source(CertifiedKeyFailure::KeyMismatch))?;
+        let signing = rustls::crypto::ring::sign::any_supported_type(&der)
+            .map_err(|_| PublicCertifiedKeyError::Source(CertifiedKeyFailure::KeyMismatch))?;
+        match signing.public_key() {
+            Some(public) if public.as_ref() == leaf.public_key().raw => Ok(()),
+            _ => Err(mismatch),
+        }
+    }
+}
+
+fn profile_error() -> PublicCertifiedKeyError {
+    PublicCertifiedKeyError::Source(CertifiedKeyFailure::CertificateProfile)
 }
 
 impl std::fmt::Debug for CertifiedKeyCandidate {
@@ -225,7 +306,6 @@ mod acceptance {
     /// interval have distinct outcomes (the accepted chain length is 1..=8).
     /// CONTRACT_SHAPE: bounded-change.
     #[test]
-    #[ignore = "pending DELIVER certified-key-custody"]
     fn certificate_chain_zero_one_many_and_over_limit_have_distinct_outcomes() {
         assert!(matches!(
             candidate(0),

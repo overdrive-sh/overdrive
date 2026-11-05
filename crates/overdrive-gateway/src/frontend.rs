@@ -1,11 +1,12 @@
 //! Intent/VIP-backed Service Frontend resolver.
 //!
-//! SCAFFOLD: true. The crate-private constructor and the public driven port
-//! compile; the reads and validation are DELIVER's.
+//! Reads only the Service intent and the VIP view; nothing is written.
 
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use overdrive_core::aggregate::{IntentKey, WorkloadIntent, WorkloadIntentEnvelope};
+use overdrive_core::codec::decode_envelope_bytes;
 use overdrive_core::dataplane::ServiceFrontend;
 use overdrive_core::public_ingress::ServiceListenerReference;
 use overdrive_core::traits::{IntentStore, ServiceVipView};
@@ -13,26 +14,57 @@ use overdrive_core::traits::{IntentStore, ServiceVipView};
 use crate::ports::{ServiceFrontendResolve, ServiceFrontendResolveError};
 
 pub(crate) struct IntentServiceFrontendResolver {
-    _intent: Arc<dyn IntentStore>,
-    _vip_view: Arc<dyn ServiceVipView>,
+    intent: Arc<dyn IntentStore>,
+    vip_view: Arc<dyn ServiceVipView>,
 }
 
 impl IntentServiceFrontendResolver {
     pub(crate) fn new(intent: Arc<dyn IntentStore>, vip_view: Arc<dyn ServiceVipView>) -> Self {
-        Self { _intent: intent, _vip_view: vip_view }
+        Self { intent, vip_view }
     }
 }
 
 #[async_trait]
 impl ServiceFrontendResolve for IntentServiceFrontendResolver {
     async fn probe(&self) -> Result<(), ServiceFrontendResolveError> {
-        todo!("SCAFFOLD: IntentServiceFrontendResolver::probe")
+        self.intent
+            .scan_prefix(IntentKey::workload_prefix())
+            .await
+            .map(|_| ())
+            .map_err(ServiceFrontendResolveError::ServiceIntent)
     }
+
     async fn resolve(
         &self,
-        _reference: &ServiceListenerReference,
+        reference: &ServiceListenerReference,
     ) -> Result<ServiceFrontend, ServiceFrontendResolveError> {
-        todo!("SCAFFOLD: IntentServiceFrontendResolver::resolve")
+        let service = reference.service();
+        let bytes = self
+            .intent
+            .get(IntentKey::for_workload(service).as_bytes())
+            .await
+            .map_err(ServiceFrontendResolveError::ServiceIntent)?
+            .ok_or_else(|| ServiceFrontendResolveError::ServiceAbsent {
+                service: service.clone(),
+            })?;
+        let intent = decode_envelope_bytes::<WorkloadIntentEnvelope>(&bytes)
+            .map_err(|_| ServiceFrontendResolveError::ServiceIntentDecode)?;
+        let WorkloadIntent::Service(declared) = &intent else {
+            return Err(ServiceFrontendResolveError::TargetNotService { service: service.clone() });
+        };
+        let (port, protocol) = (reference.port(), reference.protocol());
+        if !declared.listeners.iter().any(|l| l.port == port && l.protocol == protocol) {
+            return Err(ServiceFrontendResolveError::ListenerAbsent { port, protocol });
+        }
+        let digest =
+            intent.spec_digest().map_err(|_| ServiceFrontendResolveError::ServiceIntentDecode)?;
+        let vip = self
+            .vip_view
+            .assigned_vip(&digest)
+            .await
+            .ok_or(ServiceFrontendResolveError::ServiceVipUnavailable)?;
+        ServiceFrontend::new(vip, port, protocol)
+            .map_err(ServiceFrontendResolveError::InvalidServiceFrontend)
     }
 }
 
@@ -179,7 +211,6 @@ mod acceptance {
     ///
     /// CONTRACT_SHAPE: unbounded-preservation.
     #[tokio::test]
-    #[ignore = "pending DELIVER gateway-application-owner"]
     async fn frontend_resolution_errors_are_cause_distinct() {
         let service_id = WorkloadId::new("api").expect("Service ID");
         let listener_reference = reference(&service_id);
@@ -216,7 +247,6 @@ mod acceptance {
     ///
     /// CONTRACT_SHAPE: unbounded-preservation.
     #[tokio::test]
-    #[ignore = "pending DELIVER gateway-application-owner"]
     async fn production_resolver_rejects_every_failure_cause_distinctly_without_mutation() {
         let root = tempfile::tempdir().expect("isolated resolver store");
         let store = Arc::new(

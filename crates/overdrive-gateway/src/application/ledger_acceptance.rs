@@ -134,7 +134,6 @@ fn refused_capacity(ledger: &Arc<GatewayCleanupLedger>) -> NonZeroU32 {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER gateway-application-owner"]
 fn ledger_accepts_zero_one_and_128_reservations_and_refuses_the_129th() {
     let dataplane = RecordingDataplane::new();
     for held in [0_u32, 1, 128] {
@@ -162,7 +161,6 @@ fn ledger_accepts_zero_one_and_128_reservations_and_refuses_the_129th() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER gateway-application-owner"]
 fn released_slot_is_reusable_at_capacity() {
     let ledger = GatewayCleanupLedger::new(capacity(128));
     let mut held: Vec<_> = (0..128).map(|_| reserve_one(&ledger)).collect();
@@ -181,7 +179,6 @@ fn released_slot_is_reusable_at_capacity() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER gateway-application-owner"]
 fn bound_reservation_holds_its_slot_until_complete_removes_the_record() {
     let ledger = GatewayCleanupLedger::new(capacity(128));
     let dataplane = RecordingDataplane::new();
@@ -200,7 +197,6 @@ fn bound_reservation_holds_its_slot_until_complete_removes_the_record() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER gateway-application-owner"]
 fn saturation_stays_reported_after_the_ledger_drains() {
     let ledger = GatewayCleanupLedger::new(capacity(128));
     let dataplane = RecordingDataplane::new();

@@ -15,6 +15,7 @@
     clippy::unused_self,
     clippy::struct_field_names,
     clippy::needless_pass_by_ref_mut,
+    clippy::unnecessary_wraps,
     dead_code,
     unused_variables,
     reason = "public-ingress DISTILL scaffold: bodies are DELIVER's and several pinned items have no live caller until then"

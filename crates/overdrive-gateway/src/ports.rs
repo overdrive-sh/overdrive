@@ -264,7 +264,12 @@ pub struct GatewayUpstream {
 
 impl GatewayUpstreamSeal {
     pub fn seal_authenticated(&self, leg: KtlsLeg) -> GatewayUpstream {
-        todo!("SCAFFOLD: GatewayUpstreamSeal::seal_authenticated")
+        GatewayUpstream { leg }
+    }
+
+    /// The builder's one seal; no public constructor exists.
+    pub(crate) const fn new() -> Self {
+        Self { _private: () }
     }
 }
 
@@ -378,7 +383,7 @@ pub struct KtlsLeg {
 impl KtlsLeg {
     /// The one constructor. The caller guarantees TLS 1.3 TX and RX are armed.
     pub fn from_armed(read: Box<dyn Any + Send>, write: Box<dyn Any + Send>) -> Self {
-        todo!("SCAFFOLD: KtlsLeg::from_armed")
+        Self { read, write }
     }
     pub fn into_halves(self) -> (KtlsReadHalf, KtlsWriteHalf) {
         todo!("SCAFFOLD: KtlsLeg::into_halves")

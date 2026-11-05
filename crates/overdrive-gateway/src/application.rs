@@ -6,9 +6,12 @@
 //! DELIVER's. Source-local acceptance bodies implement S-PIG-37 and S-PIG-73;
 //! the QC-2 conformance driver is the child module below.
 
+use std::collections::BTreeMap;
 use std::num::NonZeroU32;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64};
+use std::sync::Mutex;
+use std::sync::PoisonError;
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use arc_swap::ArcSwapOption;
@@ -395,7 +398,12 @@ pub(crate) struct GatewayAdmissionBudget {
 
 impl GatewayAdmissionBudget {
     pub(crate) fn new(limits: Arc<GatewayLimits>) -> Arc<Self> {
-        todo!("SCAFFOLD: GatewayAdmissionBudget::new")
+        Arc::new(Self {
+            limits,
+            public_connections: AtomicU32::new(0),
+            inflight_connects: AtomicU32::new(0),
+            inflight_requests: AtomicU32::new(0),
+        })
     }
     pub(crate) fn try_public_connection(
         self: &Arc<Self>,
@@ -405,7 +413,17 @@ impl GatewayAdmissionBudget {
     pub(crate) fn try_connect(
         self: &Arc<Self>,
     ) -> Result<GatewayConnectPermit, GatewayAdmissionError> {
-        todo!("SCAFFOLD: GatewayAdmissionBudget::try_connect")
+        let ceiling = self.limits.max_inflight_connects().get();
+        let taken =
+            self.inflight_connects.fetch_update(Ordering::AcqRel, Ordering::Acquire, |held| {
+                (held < ceiling).then_some(held + 1)
+            });
+        match taken {
+            Ok(_) => Ok(GatewayConnectPermit { budget: Arc::clone(self) }),
+            Err(_) => todo!(
+                "SCAFFOLD: GatewayAdmissionBudget::try_connect refusal arm (admission refusal)"
+            ),
+        }
     }
     pub(crate) fn try_request(
         self: &Arc<Self>,
@@ -420,6 +438,12 @@ pub(crate) struct GatewayPublicConnectionPermit {
 
 pub(crate) struct GatewayConnectPermit {
     budget: Arc<GatewayAdmissionBudget>,
+}
+
+impl Drop for GatewayConnectPermit {
+    fn drop(&mut self) {
+        self.budget.inflight_connects.fetch_sub(1, Ordering::AcqRel);
+    }
 }
 
 pub(crate) struct GatewayGlobalRequestPermit {
@@ -515,9 +539,37 @@ pub(crate) enum GatewayApplicationError {
 // Bounded cleanup ledger (R-5, DG-11: reserve before `open_upstream`, bind after)
 // ---------------------------------------------------------------------------
 
+/// One slot of the ledger: reserved and not yet bound, or the record of a
+/// registered intent.
+enum LedgerSlot {
+    Reserved,
+    Bound(GatewayCleanupRecord),
+}
+
 pub(crate) struct GatewayCleanupLedger {
     capacity: NonZeroU32,
     saturation_count: AtomicU64,
+    slots: Mutex<LedgerSlots>,
+}
+
+#[derive(Default)]
+struct LedgerSlots {
+    next_slot: u64,
+    by_slot: BTreeMap<u64, LedgerSlot>,
+}
+
+impl LedgerSlots {
+    /// Takes one slot while fewer than `capacity` are held.
+    fn reserve_below(&mut self, capacity: NonZeroU32) -> Option<u64> {
+        let held = u32::try_from(self.by_slot.len()).unwrap_or(u32::MAX);
+        if held >= capacity.get() {
+            return None;
+        }
+        let slot = self.next_slot;
+        self.next_slot = self.next_slot.saturating_add(1);
+        self.by_slot.insert(slot, LedgerSlot::Reserved);
+        Some(slot)
+    }
 }
 
 pub(crate) struct GatewayCleanupRecord {
@@ -528,6 +580,8 @@ pub(crate) struct GatewayCleanupRecord {
 
 pub(crate) struct GatewayCleanupReservation {
     ledger: Arc<GatewayCleanupLedger>,
+    slot: u64,
+    bound: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -537,30 +591,104 @@ pub(crate) struct GatewayCleanupLedgerFull {
 
 impl GatewayCleanupLedger {
     pub(crate) fn new(capacity: NonZeroU32) -> Arc<Self> {
-        todo!("SCAFFOLD: GatewayCleanupLedger::new")
+        Arc::new(Self {
+            capacity,
+            saturation_count: AtomicU64::new(0),
+            slots: Mutex::new(LedgerSlots::default()),
+        })
     }
+
+    fn slots(&self) -> std::sync::MutexGuard<'_, LedgerSlots> {
+        self.slots.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
     /// Takes one slot before `open_upstream`; the slot is bound to the intent
     /// afterwards. Dropping a reservation that was never bound releases it.
+    /// A full ledger counts one saturation and refuses.
     pub(crate) fn reserve(
         self: &Arc<Self>,
     ) -> Result<GatewayCleanupReservation, GatewayCleanupLedgerFull> {
-        todo!("SCAFFOLD: GatewayCleanupLedger::reserve")
+        let Some(slot) = self.slots().reserve_below(self.capacity) else {
+            self.saturation_count
+                .fetch_update(Ordering::AcqRel, Ordering::Acquire, |count| {
+                    Some(count.saturating_add(1))
+                })
+                .unwrap_or_else(|_| unreachable!("the update closure always returns Some"));
+            return Err(GatewayCleanupLedgerFull { capacity: self.capacity });
+        };
+        Ok(GatewayCleanupReservation { ledger: Arc::clone(self), slot, bound: false })
     }
+
+    /// Cleans the exact intent of every retained record. The mutex guard is
+    /// dropped before any cleanup call; only successfully cleaned records are
+    /// removed.
     pub(crate) fn retry_all(
         &self,
         cleanup: &dyn GatewayConnectCleanup,
     ) -> Vec<GatewayCleanupFailure> {
-        todo!("SCAFFOLD: GatewayCleanupLedger::retry_all")
+        let snapshot: Vec<(u64, GatewayConnectIntent, bool, bool)> = self
+            .slots()
+            .by_slot
+            .iter()
+            .filter_map(|(slot, entry)| match entry {
+                LedgerSlot::Bound(record) => Some((
+                    *slot,
+                    record.intent.clone(),
+                    record.connect_intent_failed,
+                    record.receipt_failed,
+                )),
+                LedgerSlot::Reserved => None,
+            })
+            .collect();
+        let (mut intent_failures, mut receipt_failures) = (0_u32, 0_u32);
+        let mut cleaned = Vec::with_capacity(snapshot.len());
+        for (slot, intent, intent_failed, receipt_failed) in snapshot {
+            if cleanup.cleanup(&intent).is_ok() {
+                cleaned.push(slot);
+            } else {
+                intent_failures += u32::from(intent_failed || !receipt_failed);
+                receipt_failures += u32::from(receipt_failed);
+            }
+        }
+        let mut slots = self.slots();
+        for slot in cleaned {
+            slots.by_slot.remove(&slot);
+        }
+        drop(slots);
+        let mut failures = Vec::with_capacity(3);
+        if intent_failures > 0 {
+            failures.push(GatewayCleanupFailure::ConnectIntent { count: intent_failures });
+        }
+        if receipt_failures > 0 {
+            failures.push(GatewayCleanupFailure::Receipt { count: receipt_failures });
+        }
+        let attempts = self.saturation_count.load(Ordering::Acquire);
+        if attempts > 0 {
+            failures.push(GatewayCleanupFailure::LedgerSaturated {
+                attempts,
+                capacity: self.capacity.get(),
+            });
+        }
+        failures
     }
+
     pub(crate) fn len(&self) -> u32 {
-        todo!("SCAFFOLD: GatewayCleanupLedger::len")
+        u32::try_from(self.slots().by_slot.len()).unwrap_or(u32::MAX)
     }
 }
 
 impl GatewayCleanupReservation {
     /// Binds the reserved slot to the intent `open_upstream` registered.
     pub(crate) fn bind(&mut self, intent: GatewayConnectIntent) {
-        todo!("SCAFFOLD: GatewayCleanupReservation::bind")
+        self.ledger.slots().by_slot.insert(
+            self.slot,
+            LedgerSlot::Bound(GatewayCleanupRecord {
+                intent,
+                connect_intent_failed: false,
+                receipt_failed: false,
+            }),
+        );
+        self.bound = true;
     }
     pub(crate) fn record_intent_failure(&self) {
         todo!("SCAFFOLD: GatewayCleanupReservation::record_intent_failure")
@@ -568,7 +696,17 @@ impl GatewayCleanupReservation {
     pub(crate) fn record_receipt_failure(&self) {
         todo!("SCAFFOLD: GatewayCleanupReservation::record_receipt_failure")
     }
-    pub(crate) fn complete(self) {
-        todo!("SCAFFOLD: GatewayCleanupReservation::complete")
+    /// Removes the record: both keys are known clean.
+    pub(crate) fn complete(mut self) {
+        self.ledger.slots().by_slot.remove(&self.slot);
+        self.bound = true;
+    }
+}
+
+impl Drop for GatewayCleanupReservation {
+    fn drop(&mut self) {
+        if !self.bound {
+            self.ledger.slots().by_slot.remove(&self.slot);
+        }
     }
 }

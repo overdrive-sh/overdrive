@@ -1,26 +1,36 @@
 //! Registered gateway upstream connector.
 //!
-//! SCAFFOLD: true. The DESIGN-pinned entry points (`probe`, `connect`), the
-//! closed outcome and error enums compile; the bodies are DELIVER's. The
-//! source-local acceptance bodies implement S-PIG-28 through S-PIG-30 and
-//! S-PIG-53.
+//! The successful `connect` path and the `open_upstream` failure arm are live;
+//! the receipt, identity, mTLS and cleanup-retention failure arms stay
+//! scaffolded for their later steps. The source-local acceptance bodies
+//! implement S-PIG-28 through S-PIG-30 and S-PIG-53.
 
+use std::net::{SocketAddr, SocketAddrV4};
 use std::num::NonZeroU32;
+use std::os::fd::OwnedFd;
 use std::sync::Arc;
 use std::time::Instant;
 
 use overdrive_core::dataplane::ServiceFrontend;
+use overdrive_core::public_ingress::ServiceKey;
 use overdrive_core::traits::clock::Clock;
 
-use crate::application::{GatewayAdmissionBudget, GatewayAdmissionError, GatewayCleanupLedger};
+use crate::application::{
+    GatewayAdmissionBudget, GatewayAdmissionError, GatewayCleanupLedger, GatewayCleanupReservation,
+};
 use crate::ports::{
     GatewayClientMtls, GatewayClientMtlsError, GatewayConnectDataplane,
-    GatewayConnectDataplaneError, GatewayUpstream,
+    GatewayConnectDataplaneError, GatewayConnectIntent, GatewaySelectionReceipt, GatewayUpstream,
 };
 use crate::runtime::GatewayLimits;
 
 pub(crate) struct GatewayUpstreamConnector {
-    _private: (),
+    dataplane: Arc<dyn GatewayConnectDataplane>,
+    client_mtls: Arc<dyn GatewayClientMtls>,
+    limits: GatewayLimits,
+    clock: Arc<dyn Clock>,
+    budget: Arc<GatewayAdmissionBudget>,
+    cleanup_ledger: Arc<GatewayCleanupLedger>,
 }
 
 impl GatewayUpstreamConnector {
@@ -32,15 +42,23 @@ impl GatewayUpstreamConnector {
         budget: Arc<GatewayAdmissionBudget>,
         cleanup_ledger: Arc<GatewayCleanupLedger>,
     ) -> Self {
-        todo!("SCAFFOLD: GatewayUpstreamConnector::new")
+        Self { dataplane, client_mtls, limits, clock, budget, cleanup_ledger }
     }
 
+    /// One actual-frontend probe: a `NoBackend` receipt is bind-valid
+    /// (ADR-0242), a selected and authenticated peer is `SelectedPeerAuthenticated`.
     pub(crate) async fn probe(
         &self,
         frontend: ServiceFrontend,
         deadline: Instant,
     ) -> Result<GatewayConnectProbeOutcome, GatewayUpstreamConnectError> {
-        todo!("SCAFFOLD: GatewayUpstreamConnector::probe")
+        match self.connect(frontend, deadline).await {
+            Ok(_upstream) => Ok(GatewayConnectProbeOutcome::SelectedPeerAuthenticated),
+            Err(GatewayUpstreamConnectError::NoBackend) => {
+                Ok(GatewayConnectProbeOutcome::ReadyNoBackend)
+            }
+            Err(error) => Err(error),
+        }
     }
 
     pub(crate) async fn connect(
@@ -48,7 +66,65 @@ impl GatewayUpstreamConnector {
         frontend: ServiceFrontend,
         deadline: Instant,
     ) -> Result<GatewayUpstream, GatewayUpstreamConnectError> {
-        todo!("SCAFFOLD: GatewayUpstreamConnector::connect")
+        let _permit = self.budget.try_connect().map_err(GatewayUpstreamConnectError::Capacity)?;
+        let Ok(mut reservation) = self.cleanup_ledger.reserve() else {
+            todo!(
+                "SCAFFOLD: CleanupLedgerFull refusal before open_upstream (upstream-socket-preparation)"
+            )
+        };
+        let prepared = self
+            .dataplane
+            .open_upstream(ServiceKey::from_frontend(frontend))
+            .map_err(GatewayUpstreamConnectError::Prepare)?;
+        let (socket, intent) = prepared.into_parts();
+        reservation.bind(intent.clone());
+        let address = SocketAddr::V4(SocketAddrV4::new(frontend.vip_v4(), frontend.port().get()));
+        let stream =
+            socket.connect(address).await.map_err(|_| GatewayUpstreamConnectError::Connect)?;
+        let Ok(receipt) = self.dataplane.take_receipt(&intent) else {
+            todo!(
+                "SCAFFOLD: selection-receipt failure arm (selection-receipt-and-applied-identity)"
+            )
+        };
+        let backend_id = match receipt {
+            GatewaySelectionReceipt::Selected { socket_cookie, service_key, backend_id }
+                if socket_cookie == intent.socket_cookie && service_key == intent.service_key =>
+            {
+                backend_id
+            }
+            GatewaySelectionReceipt::NoBackend { .. } => {
+                self.release_intent(&intent, reservation)?;
+                return Err(GatewayUpstreamConnectError::NoBackend);
+            }
+            GatewaySelectionReceipt::Selected { .. } => {
+                todo!("SCAFFOLD: receipt mismatch arm (selection-receipt-and-applied-identity)")
+            }
+        };
+        let Ok(peer) = self.dataplane.selected_backend_identity(backend_id) else {
+            todo!("SCAFFOLD: applied-identity failure arm (selection-receipt-and-applied-identity)")
+        };
+        let connected: OwnedFd =
+            stream.into_std().map_err(|_| GatewayUpstreamConnectError::Connect)?.into();
+        let Ok(upstream) = self.client_mtls.authenticate(connected, peer, deadline).await else {
+            todo!(
+                "SCAFFOLD: gateway-client mTLS failure arm (selection-receipt-and-applied-identity)"
+            )
+        };
+        self.release_intent(&intent, reservation)?;
+        Ok(upstream)
+    }
+
+    /// Cleans the exact registered intent, then completes its ledger record.
+    fn release_intent(
+        &self,
+        intent: &GatewayConnectIntent,
+        reservation: GatewayCleanupReservation,
+    ) -> Result<(), GatewayUpstreamConnectError> {
+        let Ok(()) = self.dataplane.cleanup(intent) else {
+            todo!("SCAFFOLD: cleanup failure retention (upstream-socket-preparation)")
+        };
+        reservation.complete();
+        Ok(())
     }
 }
 
@@ -633,7 +709,6 @@ mod acceptance {
     ///
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
-    #[ignore = "pending DELIVER gateway-application-owner"]
     async fn failing_open_upstream_releases_its_reserved_ledger_slot() {
         let mut fx = fixture(ReceiptMode::Selected).await;
         let held: Vec<GatewayCleanupReservation> =
