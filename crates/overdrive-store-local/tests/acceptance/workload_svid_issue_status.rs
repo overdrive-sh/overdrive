@@ -10,8 +10,6 @@
 //! executor and handler tests use) and assert the point read after every call,
 //! that no other observation family changes, and that concurrent calls on one
 //! allocation never lose a count.
-//!
-//! The bodies are complete and ignored until the operation lands.
 
 #![allow(clippy::doc_markdown, reason = "CONTRACT_SHAPE is required scenario metadata")]
 
@@ -86,7 +84,6 @@ impl Pair {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER workload-svid-issue-failure-record"]
 async fn the_failure_record_is_the_same_operation_in_the_local_and_sim_stores() {
     let pair = Pair::new();
     let mut subscriptions = Vec::new();
@@ -157,7 +154,6 @@ async fn the_failure_record_is_the_same_operation_in_the_local_and_sim_stores() 
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER workload-svid-issue-failure-record"]
 async fn concurrent_recordings_on_one_allocation_never_lose_a_count() {
     const CALLS: u64 = 32;
 

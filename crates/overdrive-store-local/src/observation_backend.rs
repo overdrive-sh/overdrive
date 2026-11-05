@@ -82,7 +82,8 @@ use overdrive_core::dataplane::fingerprint::BackendSetFingerprint;
 use overdrive_core::id::{AllocationId, IssuanceOrdinal, NodeId, ServiceId};
 use overdrive_core::observation::{ProbeIdx, ProbeResultRow, ProbeResultRowEnvelope, ProbeRole};
 use overdrive_core::public_ingress::{
-    GatewayApplicationStatusRowV1, PublicCertifiedKeyId, PublicCertifiedKeyStatusRowV1,
+    GatewayApplicationStatusRowEnvelope, GatewayApplicationStatusRowV1, PublicCertifiedKeyId,
+    PublicCertifiedKeyStatusRowEnvelope, PublicCertifiedKeyStatusRowV1,
 };
 use overdrive_core::traits::observation_store::{
     ALLOC_LIFECYCLE_OCCURRENCES_PER_ALLOC, AllocLifecycleOccurrenceRow,
@@ -91,7 +92,8 @@ use overdrive_core::traits::observation_store::{
     NodeHealthRowEnvelope, ObservationRow, ObservationStore, ObservationStoreError,
     ObservationWrite, ReconcileConflictRow, ReconcileConflictRowEnvelope, ServiceBackendRow,
     ServiceBackendRowEnvelope, ServiceHydrationResultRow, ServiceHydrationResultRowEnvelope,
-    SubscriptionEvent, TransitionSource, WorkloadSvidIssueStatusRowV1,
+    SubscriptionEvent, TransitionSource, WorkloadSvidIssueStatusRowEnvelope,
+    WorkloadSvidIssueStatusRowV1,
 };
 use redb::{Database, ReadableTable, Table, TableDefinition};
 use tokio::sync::broadcast;
@@ -202,6 +204,23 @@ const ISSUANCE_ORDINAL_COUNTER_TABLE: TableDefinition<&[u8], u64> =
 /// stores the next-to-allocate ordinal. The table is single-row by
 /// construction; the empty slice is the canonical one-entry key.
 const ISSUANCE_ORDINAL_KEY: &[u8] = b"next";
+
+const PUBLIC_CERTIFIED_KEY_STATUS_TABLE_NAME: &str = "observation_public_certified_key_status";
+const GATEWAY_APPLICATION_STATUS_TABLE_NAME: &str = "observation_gateway_application_status";
+const WORKLOAD_SVID_ISSUE_STATUS_TABLE_NAME: &str = "observation_workload_svid_issue_status";
+
+/// Redacted custody status rows, keyed by `PublicCertifiedKeyId` bytes.
+const PUBLIC_CERTIFIED_KEY_STATUS_TABLE: TableDefinition<&[u8], &[u8]> =
+    TableDefinition::new(PUBLIC_CERTIFIED_KEY_STATUS_TABLE_NAME);
+
+/// Gateway Application status rows, keyed by `NodeId` bytes.
+const GATEWAY_APPLICATION_STATUS_TABLE: TableDefinition<&[u8], &[u8]> =
+    TableDefinition::new(GATEWAY_APPLICATION_STATUS_TABLE_NAME);
+
+/// Workload SVID issuance failure rows, keyed by `AllocationId` bytes.
+/// Authored only by `record_workload_svid_issue_failure`.
+const WORKLOAD_SVID_ISSUE_STATUS_TABLE: TableDefinition<&[u8], &[u8]> =
+    TableDefinition::new(WORKLOAD_SVID_ISSUE_STATUS_TABLE_NAME);
 
 /// Encode the composite `(alloc_id, role, probe_idx)` key as a byte
 /// sequence, per ADR-0080 § D2. Sort order on the underlying redb
@@ -475,6 +494,9 @@ impl LocalObservationStore {
                 // materialization is the wire-then-probe gate for the
                 // counter surface (architecture § 7.1 Earned Trust note).
                 let _ = write.open_table(ISSUANCE_ORDINAL_COUNTER_TABLE).map_err(map_to_io)?;
+                let _ = write.open_table(PUBLIC_CERTIFIED_KEY_STATUS_TABLE).map_err(map_to_io)?;
+                let _ = write.open_table(GATEWAY_APPLICATION_STATUS_TABLE).map_err(map_to_io)?;
+                let _ = write.open_table(WORKLOAD_SVID_ISSUE_STATUS_TABLE).map_err(map_to_io)?;
             }
             write.commit().map_err(map_to_io)?;
         }
@@ -489,6 +511,24 @@ impl LocalObservationStore {
                 workflow_signals: std::sync::Mutex::new(std::collections::BTreeMap::new()),
             }),
         })
+    }
+
+    /// Raw stored bytes at `key` in a status table; decoded on the caller's
+    /// thread so the skipped-row warning reaches thread-local subscribers.
+    async fn read_status_bytes(
+        &self,
+        definition: TableDefinition<'static, &'static [u8], &'static [u8]>,
+        key: Vec<u8>,
+    ) -> Result<Option<Vec<u8>>, ObservationStoreError> {
+        let inner = Arc::clone(&self.inner);
+        tokio::task::spawn_blocking(move || {
+            let read = inner.db.begin_read().map_err(map_to_io)?;
+            let table = read.open_table(definition).map_err(map_to_io)?;
+            let stored = table.get(key.as_slice()).map_err(map_to_io)?;
+            Ok::<_, ObservationStoreError>(stored.map(|value| value.value().to_vec()))
+        })
+        .await
+        .map_err(map_to_io)?
     }
 
     fn emit(&self, row: ObservationRow) {
@@ -621,40 +661,80 @@ fn write_alloc_lifecycle_transaction(
 
 #[async_trait]
 impl ObservationStore for LocalObservationStore {
-    // SCAFFOLD: true — the redb tables, LWW merge and point reads for the two
-    // public-ingress status rows are DELIVER's.
-    #[allow(clippy::todo, reason = "public-ingress DISTILL scaffold; body is DELIVER's")]
     async fn public_certified_key_status_row(
         &self,
-        _id: &PublicCertifiedKeyId,
+        id: &PublicCertifiedKeyId,
     ) -> Result<Option<PublicCertifiedKeyStatusRowV1>, ObservationStoreError> {
-        todo!("SCAFFOLD: LocalObservationStore::public_certified_key_status_row")
+        let bytes = self
+            .read_status_bytes(PUBLIC_CERTIFIED_KEY_STATUS_TABLE, id.as_str().as_bytes().to_vec())
+            .await?;
+        let key = status_row_label(PUBLIC_CERTIFIED_KEY_STATUS_TABLE_NAME, id.as_str());
+        Ok(bytes.and_then(|bytes| {
+            PublicCertifiedKeyStatusRowV1::from_store_bytes(&bytes, Some(&key)).ok()
+        }))
     }
 
-    #[allow(clippy::todo, reason = "public-ingress DISTILL scaffold; body is DELIVER's")]
     async fn gateway_application_status_row(
         &self,
-        _node_id: &NodeId,
+        node_id: &NodeId,
     ) -> Result<Option<GatewayApplicationStatusRowV1>, ObservationStoreError> {
-        todo!("SCAFFOLD: LocalObservationStore::gateway_application_status_row")
+        let bytes = self
+            .read_status_bytes(
+                GATEWAY_APPLICATION_STATUS_TABLE,
+                node_id.as_str().as_bytes().to_vec(),
+            )
+            .await?;
+        let key = status_row_label(GATEWAY_APPLICATION_STATUS_TABLE_NAME, node_id.as_str());
+        Ok(bytes.and_then(|bytes| {
+            GatewayApplicationStatusRowV1::from_store_bytes(&bytes, Some(&key)).ok()
+        }))
     }
 
-    #[allow(clippy::todo, reason = "SVID issuance failure DISTILL scaffold; body is DELIVER's")]
     async fn record_workload_svid_issue_failure(
         &self,
-        _alloc_id: &AllocationId,
-        _node_id: &NodeId,
-        _failure: SvidIssueFailure,
+        alloc_id: &AllocationId,
+        node_id: &NodeId,
+        failure: SvidIssueFailure,
     ) -> Result<(), ObservationStoreError> {
-        todo!("SCAFFOLD: LocalObservationStore::record_workload_svid_issue_failure")
+        let inner = Arc::clone(&self.inner);
+        let alloc_id = alloc_id.clone();
+        let node_id = node_id.clone();
+        // One redb write transaction reads the prior row and installs the
+        // next one; redb serialises writers, so concurrent recordings never
+        // lose a count. An undecodable prior row is reported back so the
+        // skipped-row warning fires on the calling thread.
+        let undecodable_prior = tokio::task::spawn_blocking(move || {
+            let write = inner.db.begin_write().map_err(map_to_io)?;
+            let undecodable_prior = {
+                let mut table =
+                    write.open_table(WORKLOAD_SVID_ISSUE_STATUS_TABLE).map_err(map_to_io)?;
+                record_failure_in_table(&mut table, &alloc_id, node_id, failure)?
+            };
+            write.commit().map_err(map_to_io)?;
+            Ok::<_, ObservationStoreError>(undecodable_prior)
+        })
+        .await
+        .map_err(map_to_io)??;
+        if let Some((bytes, key)) = undecodable_prior {
+            drop(WorkloadSvidIssueStatusRowV1::from_store_bytes(&bytes, Some(&key)));
+        }
+        Ok(())
     }
 
-    #[allow(clippy::todo, reason = "SVID issuance failure DISTILL scaffold; body is DELIVER's")]
     async fn workload_svid_issue_status_row(
         &self,
-        _alloc_id: &AllocationId,
+        alloc_id: &AllocationId,
     ) -> Result<Option<WorkloadSvidIssueStatusRowV1>, ObservationStoreError> {
-        todo!("SCAFFOLD: LocalObservationStore::workload_svid_issue_status_row")
+        let bytes = self
+            .read_status_bytes(
+                WORKLOAD_SVID_ISSUE_STATUS_TABLE,
+                alloc_id.as_str().as_bytes().to_vec(),
+            )
+            .await?;
+        let key = status_row_label(WORKLOAD_SVID_ISSUE_STATUS_TABLE_NAME, alloc_id.as_str());
+        Ok(bytes.and_then(|bytes| {
+            WorkloadSvidIssueStatusRowV1::from_store_bytes(&bytes, Some(&key)).ok()
+        }))
     }
 
     async fn write(&self, row: ObservationWrite) -> Result<(), ObservationStoreError> {
@@ -721,13 +801,15 @@ impl ObservationStore for LocalObservationStore {
                 ObservationRow::ProbeResult(_) => {
                     unreachable!("probe-result rows use write_probe_result")
                 }
-                #[allow(
-                    clippy::todo,
-                    reason = "public-ingress DISTILL scaffold; body is DELIVER's"
-                )]
-                ObservationRow::PublicCertifiedKeyStatus(_)
-                | ObservationRow::GatewayApplicationStatus(_) => {
-                    todo!("SCAFFOLD: persist the public-ingress LWW status rows")
+                ObservationRow::PublicCertifiedKeyStatus(incoming) => {
+                    let mut table =
+                        write.open_table(PUBLIC_CERTIFIED_KEY_STATUS_TABLE).map_err(map_to_io)?;
+                    apply_public_certified_key_status_lww(&mut table, incoming)?
+                }
+                ObservationRow::GatewayApplicationStatus(incoming) => {
+                    let mut table =
+                        write.open_table(GATEWAY_APPLICATION_STATUS_TABLE).map_err(map_to_io)?;
+                    apply_gateway_application_status_lww(&mut table, incoming)?
                 }
             };
             // Commit unconditionally — a rejected write performed only
@@ -1375,6 +1457,108 @@ fn log_lww_reject(
 // post-commit emit on the returned bool — losers must never be emitted
 // on subscriptions.
 // -----------------------------------------------------------------------------
+
+/// `<table>/<key>`: the label the skipped-row warning carries, so it names
+/// both the table and the row.
+fn status_row_label(table: &str, key: &str) -> String {
+    format!("{table}/{key}")
+}
+
+/// Read-modify-write of the per-allocation failure row inside the caller's
+/// open write transaction. Returns the undecodable prior bytes and their
+/// label when the prior row could not be decoded (treated as absent).
+fn record_failure_in_table(
+    table: &mut Table<'_, &[u8], &[u8]>,
+    alloc_id: &AllocationId,
+    node_id: NodeId,
+    failure: SvidIssueFailure,
+) -> Result<Option<(Vec<u8>, String)>, ObservationStoreError> {
+    let key = alloc_id.as_str().as_bytes();
+    let stored = table.get(key).map_err(map_to_io)?.map(|value| value.value().to_vec());
+    let decoded = stored.map(|bytes| {
+        decode_envelope::<WorkloadSvidIssueStatusRowEnvelope>(&bytes).map_err(|_| bytes)
+    });
+    let (prior, undecodable) = match decoded {
+        None => (None, None),
+        Some(Ok(row)) => (Some(row), None),
+        Some(Err(bytes)) => {
+            let label = status_row_label(WORKLOAD_SVID_ISSUE_STATUS_TABLE_NAME, alloc_id.as_str());
+            (None, Some((bytes, label)))
+        }
+    };
+    let row = WorkloadSvidIssueStatusRowV1 {
+        alloc_id: alloc_id.clone(),
+        node_id: node_id.clone(),
+        issue_failures: prior.as_ref().map_or(1, |p| p.issue_failures.saturating_add(1)),
+        last_issue_failure: failure,
+        updated_at: LogicalTimestamp::dominating(0, node_id, prior.as_ref().map(|p| &p.updated_at)),
+    };
+    let bytes = row.archive_for_store()?;
+    table.insert(key, bytes.as_ref()).map_err(map_to_io)?;
+    Ok(undecodable)
+}
+
+/// LWW-guarded insert for `PublicCertifiedKeyStatusRowV1`, keyed by
+/// `certified_key_id`. An undecodable prior row is superseded.
+fn apply_public_certified_key_status_lww(
+    table: &mut Table<'_, &[u8], &[u8]>,
+    incoming: &PublicCertifiedKeyStatusRowV1,
+) -> Result<bool, ObservationStoreError> {
+    let key = incoming.certified_key_id.as_str().as_bytes();
+    let dominates = table.get(key).map_err(map_to_io)?.is_none_or(|prior| {
+        match decode_envelope::<PublicCertifiedKeyStatusRowEnvelope>(prior.value()) {
+            Ok(prior_row) => {
+                let accepted = incoming.updated_at.dominates(&prior_row.updated_at);
+                if !accepted {
+                    log_lww_reject(
+                        "public_certified_key_status",
+                        incoming.certified_key_id.as_str(),
+                        &incoming.updated_at,
+                        &prior_row.updated_at,
+                    );
+                }
+                accepted
+            }
+            Err(_) => true,
+        }
+    });
+    if dominates {
+        let bytes = incoming.archive_for_store()?;
+        table.insert(key, bytes.as_ref()).map_err(map_to_io)?;
+    }
+    Ok(dominates)
+}
+
+/// LWW-guarded insert for `GatewayApplicationStatusRowV1`, keyed by `node_id`.
+/// An undecodable prior row is superseded.
+fn apply_gateway_application_status_lww(
+    table: &mut Table<'_, &[u8], &[u8]>,
+    incoming: &GatewayApplicationStatusRowV1,
+) -> Result<bool, ObservationStoreError> {
+    let key = incoming.node_id.as_str().as_bytes();
+    let dominates = table.get(key).map_err(map_to_io)?.is_none_or(|prior| {
+        match decode_envelope::<GatewayApplicationStatusRowEnvelope>(prior.value()) {
+            Ok(prior_row) => {
+                let accepted = incoming.updated_at.dominates(&prior_row.updated_at);
+                if !accepted {
+                    log_lww_reject(
+                        "gateway_application_status",
+                        incoming.node_id.as_str(),
+                        &incoming.updated_at,
+                        &prior_row.updated_at,
+                    );
+                }
+                accepted
+            }
+            Err(_) => true,
+        }
+    });
+    if dominates {
+        let bytes = incoming.archive_for_store()?;
+        table.insert(key, bytes.as_ref()).map_err(map_to_io)?;
+    }
+    Ok(dominates)
+}
 
 /// LWW-guarded insert for `NodeHealthRow`, keyed by `incoming.node_id`, compares
 /// `incoming.last_heartbeat` via `LogicalTimestamp::dominates`. On

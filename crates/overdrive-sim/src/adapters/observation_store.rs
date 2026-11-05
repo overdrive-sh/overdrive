@@ -157,6 +157,14 @@ struct PeerState {
     /// `BTreeMap` for deterministic iteration per
     /// `.claude/rules/development.md` § "Ordered-collection choice".
     by_signal: Mutex<BTreeMap<SignalKey, SignalValue>>,
+    /// Redacted custody status LWW index, keyed on `PublicCertifiedKeyId`.
+    by_public_certified_key_status:
+        Mutex<BTreeMap<PublicCertifiedKeyId, PublicCertifiedKeyStatusRowV1>>,
+    /// Gateway Application status LWW index, keyed on the owning `NodeId`.
+    by_gateway_application_status: Mutex<BTreeMap<NodeId, GatewayApplicationStatusRowV1>>,
+    /// Workload SVID issuance failure rows, keyed on `AllocationId`. Authored
+    /// only by `record_workload_svid_issue_failure`; never fanned out.
+    by_workload_svid_issue_status: Mutex<BTreeMap<AllocationId, WorkloadSvidIssueStatusRowV1>>,
     /// In-memory durable counter backing
     /// [`ObservationStore::next_issuance_ordinal`] (ADR-0063 D6 rev 8).
     /// Holds the NEXT value to allocate; allocation reads it, returns it
@@ -260,6 +268,9 @@ impl PeerState {
             by_probe_results: Mutex::new(BTreeMap::new()),
             by_issued_certificate: Mutex::new(BTreeMap::new()),
             by_signal: Mutex::new(BTreeMap::new()),
+            by_public_certified_key_status: Mutex::new(BTreeMap::new()),
+            by_gateway_application_status: Mutex::new(BTreeMap::new()),
+            by_workload_svid_issue_status: Mutex::new(BTreeMap::new()),
             // Fresh store: the first allocation returns 0.
             next_issuance_ordinal: Mutex::new(0),
             fan_out,
@@ -303,10 +314,11 @@ impl PeerState {
             ObservationRow::ProbeResult(_) => {
                 unreachable!("probe-result rows use write_probe_result")
             }
-            #[allow(clippy::todo, reason = "public-ingress DISTILL scaffold; body is DELIVER's")]
-            ObservationRow::PublicCertifiedKeyStatus(_)
-            | ObservationRow::GatewayApplicationStatus(_) => {
-                todo!("SCAFFOLD: SimObservationStore public-ingress LWW status rows")
+            ObservationRow::PublicCertifiedKeyStatus(incoming) => {
+                self.apply_public_certified_key_status(incoming)
+            }
+            ObservationRow::GatewayApplicationStatus(incoming) => {
+                self.apply_gateway_application_status(incoming)
             }
         };
 
@@ -376,6 +388,46 @@ impl PeerState {
             }
             ObservationDelivery::AllocLifecycle { current, source } => {
                 self.apply_alloc_lifecycle(*current, source);
+            }
+        }
+    }
+
+    /// LWW merge for the custody status row, keyed on `certified_key_id`.
+    fn apply_public_certified_key_status(&self, incoming: &PublicCertifiedKeyStatusRowV1) -> bool {
+        let mut index = self.by_public_certified_key_status.lock();
+        match index.get(&incoming.certified_key_id) {
+            Some(existing) if !incoming.updated_at.dominates(&existing.updated_at) => {
+                log_lww_reject(
+                    "public_certified_key_status",
+                    incoming.certified_key_id.as_str(),
+                    &incoming.updated_at,
+                    &existing.updated_at,
+                );
+                false
+            }
+            _ => {
+                index.insert(incoming.certified_key_id.clone(), incoming.clone());
+                true
+            }
+        }
+    }
+
+    /// LWW merge for the Gateway Application status row, keyed on `node_id`.
+    fn apply_gateway_application_status(&self, incoming: &GatewayApplicationStatusRowV1) -> bool {
+        let mut index = self.by_gateway_application_status.lock();
+        match index.get(&incoming.node_id) {
+            Some(existing) if !incoming.updated_at.dominates(&existing.updated_at) => {
+                log_lww_reject(
+                    "gateway_application_status",
+                    incoming.node_id.as_str(),
+                    &incoming.updated_at,
+                    &existing.updated_at,
+                );
+                false
+            }
+            _ => {
+                index.insert(incoming.node_id.clone(), incoming.clone());
+                true
             }
         }
     }
@@ -691,40 +743,51 @@ impl SimObservationStore {
 
 #[async_trait]
 impl ObservationStore for SimObservationStore {
-    // SCAFFOLD: true — the in-memory LWW merge and point reads for the two
-    // public-ingress status rows are DELIVER's.
-    #[allow(clippy::todo, reason = "public-ingress DISTILL scaffold; body is DELIVER's")]
     async fn public_certified_key_status_row(
         &self,
-        _id: &PublicCertifiedKeyId,
+        id: &PublicCertifiedKeyId,
     ) -> Result<Option<PublicCertifiedKeyStatusRowV1>, ObservationStoreError> {
-        todo!("SCAFFOLD: SimObservationStore::public_certified_key_status_row")
+        Ok(self.inner.by_public_certified_key_status.lock().get(id).cloned())
     }
 
-    #[allow(clippy::todo, reason = "public-ingress DISTILL scaffold; body is DELIVER's")]
     async fn gateway_application_status_row(
         &self,
-        _node_id: &NodeId,
+        node_id: &NodeId,
     ) -> Result<Option<GatewayApplicationStatusRowV1>, ObservationStoreError> {
-        todo!("SCAFFOLD: SimObservationStore::gateway_application_status_row")
+        Ok(self.inner.by_gateway_application_status.lock().get(node_id).cloned())
     }
 
-    #[allow(clippy::todo, reason = "SVID issuance failure DISTILL scaffold; body is DELIVER's")]
     async fn record_workload_svid_issue_failure(
         &self,
-        _alloc_id: &AllocationId,
-        _node_id: &NodeId,
-        _failure: SvidIssueFailure,
+        alloc_id: &AllocationId,
+        node_id: &NodeId,
+        failure: SvidIssueFailure,
     ) -> Result<(), ObservationStoreError> {
-        todo!("SCAFFOLD: SimObservationStore::record_workload_svid_issue_failure")
+        // Read-and-install under one lock acquisition: concurrent recordings
+        // on one allocation never lose a count.
+        let mut index = self.inner.by_workload_svid_issue_status.lock();
+        let prior = index.get(alloc_id);
+        let row = WorkloadSvidIssueStatusRowV1 {
+            alloc_id: alloc_id.clone(),
+            node_id: node_id.clone(),
+            issue_failures: prior.map_or(1, |p| p.issue_failures.saturating_add(1)),
+            last_issue_failure: failure,
+            updated_at: LogicalTimestamp::dominating(
+                0,
+                node_id.clone(),
+                prior.map(|p| &p.updated_at),
+            ),
+        };
+        index.insert(alloc_id.clone(), row);
+        drop(index);
+        Ok(())
     }
 
-    #[allow(clippy::todo, reason = "SVID issuance failure DISTILL scaffold; body is DELIVER's")]
     async fn workload_svid_issue_status_row(
         &self,
-        _alloc_id: &AllocationId,
+        alloc_id: &AllocationId,
     ) -> Result<Option<WorkloadSvidIssueStatusRowV1>, ObservationStoreError> {
-        todo!("SCAFFOLD: SimObservationStore::workload_svid_issue_status_row")
+        Ok(self.inner.by_workload_svid_issue_status.lock().get(alloc_id).cloned())
     }
 
     async fn write(&self, write: ObservationWrite) -> Result<(), ObservationStoreError> {

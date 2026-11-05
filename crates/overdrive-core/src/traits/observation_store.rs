@@ -1322,8 +1322,6 @@ impl CrashFacts {
 
 /// Versioned workload SVID issuance failure row, table
 /// `observation_workload_svid_issue_status`, keyed by canonical `AllocationId` bytes.
-///
-/// SCAFFOLD: true. The codec bodies are DELIVER's.
 #[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum WorkloadSvidIssueStatusRowEnvelope {
     V1(WorkloadSvidIssueStatusRowV1),
@@ -1361,17 +1359,41 @@ impl VersionedEnvelope for WorkloadSvidIssueStatusRowEnvelope {
 }
 
 impl WorkloadSvidIssueStatusRowV1 {
-    #[allow(clippy::todo, reason = "SVID issuance failure DISTILL scaffold: body is DELIVER's")]
+    /// Archive the row inside its versioned envelope.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EnvelopeError::Malformed`] when the rkyv serialiser fails
+    /// (unreachable for valid payloads).
     pub fn archive_for_store(&self) -> Result<rkyv::util::AlignedVec, EnvelopeError> {
-        todo!("SCAFFOLD: WorkloadSvidIssueStatusRowV1::archive_for_store")
+        rkyv::to_bytes::<rkyv::rancor::Error>(&WorkloadSvidIssueStatusRowEnvelope::latest(
+            self.clone(),
+        ))
+        .map_err(|source| EnvelopeError::Malformed { source })
     }
 
-    #[allow(clippy::todo, reason = "SVID issuance failure DISTILL scaffold: body is DELIVER's")]
+    /// Decode persisted bytes: the observation read path (log-and-skip).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ObservationStoreError::Envelope`] for empty, truncated, corrupt
+    /// or future-version bytes, after emitting exactly one
+    /// `observation.row.skipped` warning that carries `key`.
     pub fn from_store_bytes(
-        _bytes: &[u8],
-        _key: Option<&str>,
+        bytes: &[u8],
+        key: Option<&str>,
     ) -> Result<Self, ObservationStoreError> {
-        todo!("SCAFFOLD: WorkloadSvidIssueStatusRowV1::from_store_bytes")
+        crate::codec::decode_envelope_bytes::<WorkloadSvidIssueStatusRowEnvelope>(bytes).map_err(
+            |envelope_error| {
+                tracing::warn!(
+                    name: "observation.row.skipped",
+                    key = key.unwrap_or("<unknown>"),
+                    envelope_error = ?envelope_error,
+                    "workload SVID issue status row envelope decode failed; skipping row",
+                );
+                ObservationStoreError::Envelope { source: envelope_error }
+            },
+        )
     }
 }
 

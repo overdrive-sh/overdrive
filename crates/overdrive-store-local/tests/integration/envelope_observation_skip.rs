@@ -611,7 +611,6 @@ async fn an_undecodable_gateway_status_row_reads_as_absent_with_one_skipped_warn
 /// CONTRACT_SHAPE: bounded-change.
 #[allow(clippy::doc_markdown, reason = "CONTRACT_SHAPE is required scenario metadata")]
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending DELIVER workload-svid-issue-failure-record"]
 async fn an_undecodable_workload_issue_status_row_reads_as_absent_and_the_record_restarts_at_one() {
     let captured = CapturedEvents::default();
     let subscriber = Registry::default().with(captured.clone());
