@@ -1,32 +1,29 @@
 //! Public-ingress Route, certified-key, generation and status contracts.
 //!
-//! SCAFFOLD: true. The data shapes, derives, trivial accessors and envelope
-//! wiring below are the DESIGN-pinned contract; every validating constructor,
-//! parser, digest derivation, matcher and store codec body is DELIVER's and
-//! fails with SCAFFOLD text. The source-local properties at the foot of the
+//! The data shapes, derives, accessors and envelope wiring are the
+//! DESIGN-pinned contract. The source-local properties at the foot of the
 //! file specify S-PIG-03 through S-PIG-10, S-PIG-44 and S-PIG-55.
 
 #![allow(
-    clippy::todo,
     clippy::doc_markdown,
     clippy::needless_pass_by_value,
     clippy::missing_const_for_fn,
-    clippy::unused_self,
     clippy::struct_field_names,
-    reason = "public-ingress DISTILL scaffold: bodies are DELIVER's; Route field names are pinned verbatim by the accepted DESIGN contract"
+    reason = "Route field names are pinned verbatim by the accepted DESIGN contract; signatures are the pinned public API"
 )]
 
 use std::fmt::{self, Display, Formatter};
-use std::net::SocketAddrV4;
+use std::net::{IpAddr, SocketAddrV4};
 use std::num::{NonZeroU16, NonZeroU64};
 use std::path::Path;
 use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 use crate::ca::issue_failure::SvidIssueFailure;
-use crate::codec::{EnvelopeError, VersionedEnvelope};
+use crate::codec::{EnvelopeError, VersionedEnvelope, decode_envelope_bytes};
 use crate::dataplane::{Proto, ServiceFrontend};
 use crate::gateway_identity::GatewayIdentityEpoch;
 use crate::id::{
@@ -61,8 +58,34 @@ pub struct PublicHostname(String);
 
 impl PublicHostname {
     /// Validate and ASCII-case-fold a public hostname.
-    pub fn new(_raw: &str) -> Result<Self, PublicHostnameError> {
-        todo!("SCAFFOLD: PublicHostname::new")
+    ///
+    /// # Errors
+    ///
+    /// Returns the closed [`PublicHostnameError`] partition the input falls in.
+    pub fn new(raw: &str) -> Result<Self, PublicHostnameError> {
+        if raw.is_empty() {
+            return Err(PublicHostnameError::Empty);
+        }
+        if raw.len() > HOSTNAME_MAX {
+            return Err(PublicHostnameError::TooLong);
+        }
+        if !raw.is_ascii() {
+            return Err(PublicHostnameError::NonAscii);
+        }
+        if raw.contains('*') {
+            return Err(PublicHostnameError::Wildcard);
+        }
+        if raw.parse::<IpAddr>().is_ok() {
+            return Err(PublicHostnameError::IpLiteral);
+        }
+        if raw.ends_with('.') {
+            return Err(PublicHostnameError::TerminalDot);
+        }
+        let folded = raw.to_ascii_lowercase();
+        for label in folded.split('.') {
+            validate_hostname_label(label)?;
+        }
+        Ok(Self(folded))
     }
 
     /// Borrow the canonical lowercase hostname.
@@ -95,6 +118,26 @@ impl From<PublicHostname> for String {
     fn from(value: PublicHostname) -> Self {
         value.0
     }
+}
+
+/// Maximum DNS name length in octets.
+const HOSTNAME_MAX: usize = 253;
+
+/// Maximum DNS label length in octets.
+const HOSTNAME_LABEL_MAX: usize = 63;
+
+fn validate_hostname_label(label: &str) -> Result<(), PublicHostnameError> {
+    if label.is_empty() {
+        return Err(PublicHostnameError::EmptyLabel);
+    }
+    if label.len() > HOSTNAME_LABEL_MAX {
+        return Err(PublicHostnameError::LabelTooLong);
+    }
+    let allowed = label.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
+    if !allowed || label.starts_with('-') || label.ends_with('-') {
+        return Err(PublicHostnameError::InvalidLabel);
+    }
+    Ok(())
 }
 
 /// Closed public-hostname validation failures.
@@ -140,8 +183,34 @@ pub struct PublicPath(String);
 
 impl PublicPath {
     /// Validate a raw absolute request path.
-    pub fn new(_raw: &str) -> Result<Self, PublicPathError> {
-        todo!("SCAFFOLD: PublicPath::new")
+    ///
+    /// # Errors
+    ///
+    /// Returns the closed [`PublicPathError`] partition the input falls in.
+    pub fn new(raw: &str) -> Result<Self, PublicPathError> {
+        if raw.is_empty() {
+            return Err(PublicPathError::Empty);
+        }
+        if !raw.starts_with('/') {
+            return Err(PublicPathError::NotAbsolute);
+        }
+        let bytes = raw.as_bytes();
+        for (index, byte) in bytes.iter().enumerate() {
+            match byte {
+                0x00..=0x1f | 0x7f => return Err(PublicPathError::ContainsControl),
+                b' ' => return Err(PublicPathError::ContainsSpace),
+                b'?' => return Err(PublicPathError::ContainsQuery),
+                b'#' => return Err(PublicPathError::ContainsFragment),
+                b'%' => {
+                    let escape = bytes.get(index + 1..index + 3);
+                    if !escape.is_some_and(|pair| pair.iter().all(u8::is_ascii_hexdigit)) {
+                        return Err(PublicPathError::MalformedPercentEncoding);
+                    }
+                }
+                _ => {}
+            }
+        }
+        Ok(Self(raw.to_owned()))
     }
 
     /// Borrow the original raw path.
@@ -205,8 +274,16 @@ pub enum PathMatch {
 impl PathMatch {
     /// Match the raw URI path without decoding or normalization.
     #[must_use]
-    pub fn matches_raw_path(&self, _raw_request_path: &str) -> bool {
-        todo!("SCAFFOLD: PathMatch::matches_raw_path")
+    pub fn matches_raw_path(&self, raw_request_path: &str) -> bool {
+        match self {
+            Self::Exact(path) => raw_request_path == path.as_str(),
+            Self::SegmentPrefix(path) => {
+                let base = path.as_str().trim_end_matches('/');
+                raw_request_path
+                    .strip_prefix(base)
+                    .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
+            }
+        }
     }
 }
 
@@ -224,12 +301,19 @@ pub struct ServiceListenerReference {
 
 impl ServiceListenerReference {
     /// Construct a TCP-only Service-listener reference.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RouteValidationError::ProtocolNotTcp`] for any non-TCP protocol.
     pub fn new(
-        _service: WorkloadId,
-        _port: NonZeroU16,
-        _protocol: Proto,
+        service: WorkloadId,
+        port: NonZeroU16,
+        protocol: Proto,
     ) -> Result<Self, RouteValidationError> {
-        todo!("SCAFFOLD: ServiceListenerReference::new")
+        match protocol {
+            Proto::Tcp => Ok(Self { service, port, protocol }),
+            Proto::Udp => Err(RouteValidationError::ProtocolNotTcp),
+        }
     }
 
     /// Referenced Service's logical workload identity.
@@ -293,8 +377,47 @@ pub struct Route {
 
 impl Route {
     /// Validate a Route submitted at the operator HTTP boundary.
-    pub fn from_submit(_input: PublicRouteInput) -> Result<Self, RouteValidationError> {
-        todo!("SCAFFOLD: Route::from_submit")
+    ///
+    /// # Errors
+    ///
+    /// Returns the closed [`RouteValidationError`] variant of the first
+    /// malformed input channel.
+    pub fn from_submit(input: PublicRouteInput) -> Result<Self, RouteValidationError> {
+        let route_id = RouteId::new(&input.id).map_err(RouteValidationError::RouteId)?;
+        let public_hostname =
+            PublicHostname::new(&input.hostname).map_err(RouteValidationError::Hostname)?;
+        let path = PublicPath::new(&input.path).map_err(RouteValidationError::Path)?;
+        let path_match = match input.path_match.as_str() {
+            "exact" => PathMatch::Exact(path),
+            "segment_prefix" => PathMatch::SegmentPrefix(path),
+            _ => return Err(RouteValidationError::UnknownPathMatch),
+        };
+        let public_certified_key_id = PublicCertifiedKeyId::new(&input.certified_key)
+            .map_err(RouteValidationError::CertifiedKeyId)?;
+        let service =
+            WorkloadId::new(&input.target.service).map_err(RouteValidationError::Service)?;
+        let port = NonZeroU16::new(input.target.port).ok_or(RouteValidationError::PortZero)?;
+        let protocol = match input.target.protocol.as_str() {
+            "tcp" => Proto::Tcp,
+            "udp" => Proto::Udp,
+            _ => return Err(RouteValidationError::UnknownProtocol),
+        };
+        let service_listener = ServiceListenerReference::new(service, port, protocol)?;
+        let route_generation = RouteGeneration::from_route_fields(
+            &route_id,
+            &public_hostname,
+            &path_match,
+            &service_listener,
+            &public_certified_key_id,
+        );
+        Ok(Self {
+            route_id,
+            route_generation,
+            public_hostname,
+            path_match,
+            service_listener,
+            public_certified_key_id,
+        })
     }
 
     pub fn route_id(&self) -> &RouteId {
@@ -469,61 +592,144 @@ digest_newtype!(
     GatewayApplicationGenerationId
 );
 
+/// Parse exactly 64 lowercase hexadecimal characters into digest bytes.
+fn parse_digest_hex(raw: &str) -> Result<[u8; 32], DigestHexParseError> {
+    if raw.is_empty() {
+        return Err(DigestHexParseError::Empty);
+    }
+    if raw.len() != 64 {
+        return Err(DigestHexParseError::InvalidLength { got: raw.len() });
+    }
+    if !raw.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err(DigestHexParseError::NonHex);
+    }
+    if raw.bytes().any(|b| b.is_ascii_uppercase()) {
+        return Err(DigestHexParseError::Uppercase);
+    }
+    let mut bytes = [0u8; 32];
+    hex::decode_to_slice(raw, &mut bytes).map_err(|_| DigestHexParseError::NonHex)?;
+    Ok(bytes)
+}
+
+/// Finish a SHA-256 hasher into a 32-byte digest.
+fn finish_digest(hasher: Sha256) -> [u8; 32] {
+    hasher.finalize().into()
+}
+
+/// Feed `u32` big-endian length framing followed by the bytes.
+fn update_framed(hasher: &mut Sha256, bytes: &[u8]) {
+    let length = u32::try_from(bytes.len())
+        .unwrap_or_else(|_| unreachable!("validated Route fields are far below u32::MAX octets"));
+    hasher.update(length.to_be_bytes());
+    hasher.update(bytes);
+}
+
+const ROUTE_GENERATION_DOMAIN: &[u8] = b"overdrive/gateway/route-generation/v1\0";
+const CERTIFIED_KEY_GENERATION_DOMAIN: &[u8] = b"overdrive/gateway/certified-key-generation/v1\0";
+const CERTIFICATE_FINGERPRINT_DOMAIN: &[u8] = b"overdrive/gateway/certificate-fingerprint/v1\0";
+const APPLICATION_GENERATION_DOMAIN: &[u8] = b"overdrive/gateway/application-generation/v1\0";
+
 impl RouteGeneration {
     /// Parse exactly 64 lowercase hexadecimal characters.
-    pub fn new(_raw: &str) -> Result<Self, DigestHexParseError> {
-        todo!("SCAFFOLD: RouteGeneration::new")
+    ///
+    /// # Errors
+    ///
+    /// Returns the closed [`DigestHexParseError`] partition of the input.
+    pub fn new(raw: &str) -> Result<Self, DigestHexParseError> {
+        parse_digest_hex(raw).map(Self)
     }
 
     /// Hash every Route field in the DESIGN-pinned order.
     pub fn from_route_fields(
-        _route_id: &RouteId,
-        _hostname: &PublicHostname,
-        _path_match: &PathMatch,
-        _listener: &ServiceListenerReference,
-        _certified_key_id: &PublicCertifiedKeyId,
+        route_id: &RouteId,
+        hostname: &PublicHostname,
+        path_match: &PathMatch,
+        listener: &ServiceListenerReference,
+        certified_key_id: &PublicCertifiedKeyId,
     ) -> Self {
-        todo!("SCAFFOLD: RouteGeneration::from_route_fields")
+        let (tag, path) = match path_match {
+            PathMatch::Exact(path) => (0u8, path),
+            PathMatch::SegmentPrefix(path) => (1u8, path),
+        };
+        let mut hasher = Sha256::new();
+        hasher.update(ROUTE_GENERATION_DOMAIN);
+        update_framed(&mut hasher, route_id.as_str().as_bytes());
+        update_framed(&mut hasher, hostname.as_str().as_bytes());
+        hasher.update([tag]);
+        update_framed(&mut hasher, path.as_str().as_bytes());
+        update_framed(&mut hasher, listener.service().as_str().as_bytes());
+        hasher.update(listener.port().get().to_be_bytes());
+        hasher.update([listener.protocol().as_u8()]);
+        update_framed(&mut hasher, certified_key_id.as_str().as_bytes());
+        Self(finish_digest(hasher))
     }
 }
 
 impl CertifiedKeyGeneration {
     /// Parse exactly 64 lowercase hexadecimal characters.
-    pub fn new(_raw: &str) -> Result<Self, DigestHexParseError> {
-        todo!("SCAFFOLD: CertifiedKeyGeneration::new")
+    ///
+    /// # Errors
+    ///
+    /// Returns the closed [`DigestHexParseError`] partition of the input.
+    pub fn new(raw: &str) -> Result<Self, DigestHexParseError> {
+        parse_digest_hex(raw).map(Self)
     }
 
     /// Hash the ordered certificate chain DER.
-    pub fn from_ordered_chain_der(_chain: &[Vec<u8>]) -> Self {
-        todo!("SCAFFOLD: CertifiedKeyGeneration::from_ordered_chain_der")
+    pub fn from_ordered_chain_der(chain: &[Vec<u8>]) -> Self {
+        let mut hasher = Sha256::new();
+        hasher.update(CERTIFIED_KEY_GENERATION_DOMAIN);
+        for certificate in chain {
+            hasher.update((certificate.len() as u64).to_be_bytes());
+            hasher.update(certificate);
+        }
+        Self(finish_digest(hasher))
     }
 }
 
 impl CertificateFingerprint {
     /// Parse exactly 64 lowercase hexadecimal characters.
-    pub fn new(_raw: &str) -> Result<Self, DigestHexParseError> {
-        todo!("SCAFFOLD: CertificateFingerprint::new")
+    ///
+    /// # Errors
+    ///
+    /// Returns the closed [`DigestHexParseError`] partition of the input.
+    pub fn new(raw: &str) -> Result<Self, DigestHexParseError> {
+        parse_digest_hex(raw).map(Self)
     }
 
     /// Hash the leaf certificate DER.
-    pub fn from_leaf_der(_leaf: &[u8]) -> Self {
-        todo!("SCAFFOLD: CertificateFingerprint::from_leaf_der")
+    pub fn from_leaf_der(leaf: &[u8]) -> Self {
+        let mut hasher = Sha256::new();
+        hasher.update(CERTIFICATE_FINGERPRINT_DOMAIN);
+        hasher.update(leaf);
+        Self(finish_digest(hasher))
     }
 }
 
 impl GatewayApplicationGenerationId {
     /// Parse exactly 64 lowercase hexadecimal characters.
-    pub fn new(_raw: &str) -> Result<Self, DigestHexParseError> {
-        todo!("SCAFFOLD: GatewayApplicationGenerationId::new")
+    ///
+    /// # Errors
+    ///
+    /// Returns the closed [`DigestHexParseError`] partition of the input.
+    pub fn new(raw: &str) -> Result<Self, DigestHexParseError> {
+        parse_digest_hex(raw).map(Self)
     }
 
     /// Hash the three resolved inputs of a Gateway Application generation.
     pub fn from_inputs(
-        _route_generation: RouteGeneration,
-        _frontend: ServiceFrontend,
-        _certified_key_generation: CertifiedKeyGeneration,
+        route_generation: RouteGeneration,
+        frontend: ServiceFrontend,
+        certified_key_generation: CertifiedKeyGeneration,
     ) -> Self {
-        todo!("SCAFFOLD: GatewayApplicationGenerationId::from_inputs")
+        let mut hasher = Sha256::new();
+        hasher.update(APPLICATION_GENERATION_DOMAIN);
+        hasher.update(route_generation.as_bytes());
+        hasher.update(frontend.vip_v4().octets());
+        hasher.update(frontend.port().get().to_be_bytes());
+        hasher.update([frontend.proto().as_u8()]);
+        hasher.update(certified_key_generation.as_bytes());
+        Self(finish_digest(hasher))
     }
 }
 
@@ -533,8 +739,12 @@ pub struct SocketCookie(NonZeroU64);
 
 impl SocketCookie {
     /// Validate a raw cookie.
-    pub fn new(_raw: u64) -> Result<Self, SocketCookieParseError> {
-        todo!("SCAFFOLD: SocketCookie::new")
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SocketCookieParseError::Zero`] for `0`.
+    pub fn new(raw: u64) -> Result<Self, SocketCookieParseError> {
+        NonZeroU64::new(raw).map(Self).ok_or(SocketCookieParseError::Zero)
     }
 
     /// The nonzero value.
@@ -562,8 +772,17 @@ impl Display for SocketCookie {
 
 impl FromStr for SocketCookie {
     type Err = SocketCookieParseError;
-    fn from_str(_raw: &str) -> Result<Self, Self::Err> {
-        todo!("SCAFFOLD: SocketCookie FromStr")
+    fn from_str(raw: &str) -> Result<Self, Self::Err> {
+        if raw.is_empty() {
+            return Err(SocketCookieParseError::Empty);
+        }
+        let canonical =
+            raw.bytes().all(|b| b.is_ascii_digit()) && (raw.len() == 1 || !raw.starts_with('0'));
+        if !canonical {
+            return Err(SocketCookieParseError::InvalidDecimal);
+        }
+        let value = raw.parse::<u64>().map_err(|_| SocketCookieParseError::InvalidDecimal)?;
+        Self::new(value)
     }
 }
 
@@ -622,8 +841,8 @@ pub struct ServiceKey {
 
 impl ServiceKey {
     /// Project a resolved Service frontend to its lookup key.
-    pub fn from_frontend(_frontend: ServiceFrontend) -> Self {
-        todo!("SCAFFOLD: ServiceKey::from_frontend")
+    pub fn from_frontend(frontend: ServiceFrontend) -> Self {
+        Self { vip: frontend.vip(), port: frontend.port(), protocol: frontend.proto() }
     }
 
     pub const fn vip(&self) -> ServiceVip {
@@ -642,6 +861,65 @@ impl ServiceKey {
 // ---------------------------------------------------------------------------
 // Route set (singleton) persistence
 // ---------------------------------------------------------------------------
+
+/// Archive an envelope to canonical rkyv bytes.
+fn archive_envelope<E>(envelope: &E) -> Result<rkyv::util::AlignedVec, EnvelopeError>
+where
+    E: for<'a> rkyv::Serialize<
+            rkyv::api::high::HighSerializer<
+                rkyv::util::AlignedVec,
+                rkyv::ser::allocator::ArenaHandle<'a>,
+                rkyv::rancor::Error,
+            >,
+        >,
+{
+    rkyv::to_bytes::<rkyv::rancor::Error>(envelope)
+        .map_err(|source| EnvelopeError::Malformed { source })
+}
+
+/// Decode intent-layer bytes, refusing to start (ADR-0048 section 3) on failure.
+fn decode_intent_envelope<E>(
+    bytes: &[u8],
+    redb_path: &Path,
+    key: Option<&str>,
+) -> Result<E::Latest, IntentStoreError>
+where
+    E: VersionedEnvelope + rkyv::Archive,
+    E::Archived: for<'a> rkyv::bytecheck::CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>
+        + rkyv::Deserialize<E, rkyv::rancor::Strategy<rkyv::de::Pool, rkyv::rancor::Error>>,
+{
+    decode_envelope_bytes::<E>(bytes).map_err(|envelope_error| {
+        tracing::error!(
+            name: "health.startup.refused",
+            redb_path = %redb_path.display(),
+            key = key.unwrap_or("<unknown>"),
+            envelope_error = ?envelope_error,
+            "intent envelope decode failed; control-plane refusing to start",
+        );
+        IntentStoreError::Envelope { redb_path: redb_path.to_path_buf(), source: envelope_error }
+    })
+}
+
+/// Decode observation-layer bytes, logging and skipping the row on failure.
+fn decode_observation_envelope<E>(
+    bytes: &[u8],
+    key: Option<&str>,
+) -> Result<E::Latest, ObservationStoreError>
+where
+    E: VersionedEnvelope + rkyv::Archive,
+    E::Archived: for<'a> rkyv::bytecheck::CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>
+        + rkyv::Deserialize<E, rkyv::rancor::Strategy<rkyv::de::Pool, rkyv::rancor::Error>>,
+{
+    decode_envelope_bytes::<E>(bytes).map_err(|envelope_error| {
+        tracing::warn!(
+            name: "observation.row.skipped",
+            key = key.unwrap_or("<unknown>"),
+            envelope_error = ?envelope_error,
+            "observation row envelope decode failed; skipping row, convergence proceeds for surviving rows",
+        );
+        ObservationStoreError::Envelope { source: envelope_error }
+    })
+}
 
 /// Typed persisted Route-set decode failures.
 #[derive(Debug, Error)]
@@ -679,16 +957,28 @@ impl VersionedEnvelope for PublicRouteSetEnvelope {
 }
 
 impl PublicRouteSetV1 {
+    /// Archive the singleton Route set inside its versioned envelope.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EnvelopeError::Malformed`] when the rkyv serialiser fails
+    /// (unreachable for valid payloads).
     pub fn archive_for_store(&self) -> Result<rkyv::util::AlignedVec, EnvelopeError> {
-        todo!("SCAFFOLD: PublicRouteSetV1::archive_for_store")
+        archive_envelope(&PublicRouteSetEnvelope::latest(self.clone()))
     }
 
+    /// Decode persisted intent bytes; emits `health.startup.refused` on failure.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`IntentStoreError::Envelope`] for empty, truncated, corrupt or
+    /// future-version bytes.
     pub fn from_store_bytes(
-        _bytes: &[u8],
-        _redb_path: &Path,
-        _key: Option<&str>,
+        bytes: &[u8],
+        redb_path: &Path,
+        key: Option<&str>,
     ) -> Result<Self, IntentStoreError> {
-        todo!("SCAFFOLD: PublicRouteSetV1::from_store_bytes")
+        decode_intent_envelope::<PublicRouteSetEnvelope>(bytes, redb_path, key)
     }
 }
 
@@ -822,16 +1112,28 @@ impl VersionedEnvelope for PublicCertifiedKeyEnvelope {
 }
 
 impl PublicCertifiedKeyV1 {
+    /// Archive the protected certified-key record inside its versioned envelope.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EnvelopeError::Malformed`] when the rkyv serialiser fails
+    /// (unreachable for valid payloads).
     pub fn archive_for_store(&self) -> Result<rkyv::util::AlignedVec, EnvelopeError> {
-        todo!("SCAFFOLD: PublicCertifiedKeyV1::archive_for_store")
+        archive_envelope(&PublicCertifiedKeyEnvelope::latest(self.clone()))
     }
 
+    /// Decode persisted intent bytes; emits `health.startup.refused` on failure.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`IntentStoreError::Envelope`] for empty, truncated, corrupt or
+    /// future-version bytes.
     pub fn from_store_bytes(
-        _bytes: &[u8],
-        _redb_path: &Path,
-        _key: Option<&str>,
+        bytes: &[u8],
+        redb_path: &Path,
+        key: Option<&str>,
     ) -> Result<Self, IntentStoreError> {
-        todo!("SCAFFOLD: PublicCertifiedKeyV1::from_store_bytes")
+        decode_intent_envelope::<PublicCertifiedKeyEnvelope>(bytes, redb_path, key)
     }
 }
 
@@ -887,15 +1189,27 @@ impl VersionedEnvelope for PublicCertifiedKeyStatusRowEnvelope {
 }
 
 impl PublicCertifiedKeyStatusRowV1 {
+    /// Archive the status row inside its versioned envelope.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EnvelopeError::Malformed`] when the rkyv serialiser fails
+    /// (unreachable for valid payloads).
     pub fn archive_for_store(&self) -> Result<rkyv::util::AlignedVec, EnvelopeError> {
-        todo!("SCAFFOLD: PublicCertifiedKeyStatusRowV1::archive_for_store")
+        archive_envelope(&PublicCertifiedKeyStatusRowEnvelope::latest(self.clone()))
     }
 
+    /// Decode persisted observation bytes; emits `observation.row.skipped` on failure.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ObservationStoreError::Envelope`] for empty, truncated,
+    /// corrupt or future-version bytes.
     pub fn from_store_bytes(
-        _bytes: &[u8],
-        _key: Option<&str>,
+        bytes: &[u8],
+        key: Option<&str>,
     ) -> Result<Self, ObservationStoreError> {
-        todo!("SCAFFOLD: PublicCertifiedKeyStatusRowV1::from_store_bytes")
+        decode_observation_envelope::<PublicCertifiedKeyStatusRowEnvelope>(bytes, key)
     }
 }
 
@@ -989,15 +1303,27 @@ impl VersionedEnvelope for GatewayApplicationStatusRowEnvelope {
 }
 
 impl GatewayApplicationStatusRowV1 {
+    /// Archive the status row inside its versioned envelope.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EnvelopeError::Malformed`] when the rkyv serialiser fails
+    /// (unreachable for valid payloads).
     pub fn archive_for_store(&self) -> Result<rkyv::util::AlignedVec, EnvelopeError> {
-        todo!("SCAFFOLD: GatewayApplicationStatusRowV1::archive_for_store")
+        archive_envelope(&GatewayApplicationStatusRowEnvelope::latest(self.clone()))
     }
 
+    /// Decode persisted observation bytes; emits `observation.row.skipped` on failure.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ObservationStoreError::Envelope`] for empty, truncated,
+    /// corrupt or future-version bytes.
     pub fn from_store_bytes(
-        _bytes: &[u8],
-        _key: Option<&str>,
+        bytes: &[u8],
+        key: Option<&str>,
     ) -> Result<Self, ObservationStoreError> {
-        todo!("SCAFFOLD: GatewayApplicationStatusRowV1::from_store_bytes")
+        decode_observation_envelope::<GatewayApplicationStatusRowEnvelope>(bytes, key)
     }
 }
 
@@ -1055,7 +1381,6 @@ mod properties {
         ///
         /// CONTRACT_SHAPE: pure-function.
         #[test]
-        #[ignore = "pending DELIVER route-value-types"]
         fn exact_path_matches_only_byte_equal_paths(path in arb_valid_path(), suffix in "[a-z]{1,8}") {
             let approved = PublicPath::new(&path).expect("generated path is valid");
             let matcher = PathMatch::Exact(approved);
@@ -1069,7 +1394,6 @@ mod properties {
         ///
         /// CONTRACT_SHAPE: pure-function.
         #[test]
-        #[ignore = "pending DELIVER route-value-types"]
         fn segment_prefix_never_crosses_a_segment_boundary(segment in "[a-z]{1,16}", tail in "[a-z]{1,16}") {
             let raw = format!("/{segment}");
             let matcher = PathMatch::SegmentPrefix(
@@ -1087,7 +1411,6 @@ mod properties {
         ///
         /// CONTRACT_SHAPE: pure-function.
         #[test]
-        #[ignore = "pending DELIVER route-value-types"]
         fn route_generation_is_deterministic_and_field_sensitive(
             route_id in valid_label(),
             service in valid_label(),
@@ -1140,7 +1463,6 @@ mod properties {
         ///
         /// CONTRACT_SHAPE: pure-function.
         #[test]
-        #[ignore = "pending DELIVER route-value-types"]
         fn certified_key_generation_preserves_chain_order(
             leaf in prop::collection::vec(any::<u8>(), 1..64),
             issuer in prop::collection::vec(any::<u8>(), 1..64),
@@ -1159,7 +1481,6 @@ mod properties {
         ///
         /// CONTRACT_SHAPE: pure-function.
         #[test]
-        #[ignore = "pending DELIVER route-value-types"]
         fn application_generation_changes_with_each_of_its_three_inputs(port in 1u16..u16::MAX) {
             let route = RouteGeneration::new(&"01".repeat(32)).expect("valid generation");
             let other_route = RouteGeneration::new(&"03".repeat(32)).expect("valid generation");
@@ -1184,7 +1505,6 @@ mod properties {
         ///
         /// CONTRACT_SHAPE: pure-function.
         #[test]
-        #[ignore = "pending DELIVER route-value-types"]
         fn public_ingress_newtypes_roundtrip_their_canonical_strings(
             numeric in 1u64..u64::MAX,
             digest in "[0-9a-f]{64}",
@@ -1229,7 +1549,6 @@ mod properties {
     ///
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER route-value-types"]
     fn hostname_and_path_validation_cover_closed_error_partitions() {
         let invalid_hosts = [
             ("", PublicHostnameError::Empty),
@@ -1266,7 +1585,6 @@ mod properties {
     ///
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER route-value-types"]
     fn hostname_label_boundaries_cover_sixty_two_sixty_three_and_sixty_four_octets() {
         let label_62 = "a".repeat(62);
         let label_63 = "a".repeat(63);
@@ -1284,7 +1602,6 @@ mod properties {
     ///
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER route-value-types"]
     fn every_route_input_channel_has_a_cause_distinct_malformed_example() {
         let mut cases: Vec<RouteErrorCase> = Vec::new();
         let mut bad = canonical_input();
@@ -1354,7 +1671,6 @@ mod properties {
     ///
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER route-value-types"]
     fn public_ingress_newtypes_reject_every_noncanonical_partition_exactly() {
         assert_eq!("".parse::<SocketCookie>(), Err(SocketCookieParseError::Empty));
         for raw in ["+1", "-1", "01", " 1", "1 ", "18446744073709551616"] {
@@ -1388,7 +1704,6 @@ mod properties {
     ///
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER route-value-types"]
     fn route_target_accepts_only_service_and_rejects_the_old_workload_member() {
         let current_json = r#"{
             "id":"public-api","hostname":"api.example.com","path":"/",
