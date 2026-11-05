@@ -676,6 +676,13 @@ impl Node {
 async fn a_gateway_whose_issuance_keeps_failing_reports_the_count_and_cause_on_the_status_body() {
     let root = TempDir::new().expect("tempdir");
     let node = spawn_node(root.path(), Some(174), true).await;
+    // R-58: the owner writes no status row until a Route exists, so the
+    // operator declares one before the failure can be read back.
+    ApiClient::from_config(&config_path(root.path()))
+        .expect("operator client")
+        .submit_route(route_input("public-api", "/"))
+        .await
+        .expect("declare the Route");
 
     let (failing, body) = node
         .status_until("a recorded issuance failure", |status| {
@@ -712,6 +719,13 @@ async fn a_disabled_node_answers_the_fixed_body_without_reading_a_stale_row() {
     let root = TempDir::new().expect("tempdir");
 
     let enabled = spawn_node(root.path(), Some(175), false).await;
+    // R-58: no status row exists until a Route does, so the enabled boot
+    // declares one to leave a row behind.
+    ApiClient::from_config(&config_path(root.path()))
+        .expect("operator client")
+        .submit_route(route_input("public-api", "/"))
+        .await
+        .expect("declare the Route");
     enabled
         .status_until("the enabled boot's status row", |status| status.application.is_some())
         .await;

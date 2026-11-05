@@ -3320,7 +3320,7 @@ async fn ambiguous_origin_framing_is_a_502_before_the_public_head() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER certified-key-custody"]
+#[ignore = "pending DELIVER kernel-relay-sim-adapter"]
 async fn the_public_server_configuration_lists_exactly_the_two_aes_gcm_suites() {
     let capture = std::cell::RefCell::new(None);
     let world = World::start_with(SERVER_CONFIGURATION, Spec::default(), |relay| {
