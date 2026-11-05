@@ -369,6 +369,56 @@ reconciler owns readiness → backend membership and emits **no** restart.
 
 ---
 
+## Superseded in-flight work runs to its bound; it is not interrupted
+
+**Do not interrupt in-flight work. When work that is already performing an
+effect is superseded or no longer wanted, let it finish or time out, then
+reconcile and clean up from what actually happened.** The cases are any
+effect already under way: a probe mid-connect or mid-handshake, an executor
+mid-call to the CA, an action the runtime has already dispatched.
+
+- **Do not cancel it mid-effect.** Let it reach its own bounded end:
+  completion, or its own deadline. Let it run its normal cleanup path.
+- **Discard a superseded result.** If a newer decision has replaced the one
+  the work was started for, its result is never delivered and never acted on.
+- **The next reconciliation converges.** It observes the actual state and
+  diffs from there. Level-triggered convergence never trusts that an action
+  landed and never needs to interrupt one.
+
+**Why.** Cancelling mid-effect is cleanup-hostile. Dropping a future part-way
+through a connect, handshake or write must still run every cleanup step, and
+one missed path leaves orphan state (a kernel map entry, a registered
+intent). On the appliance OS no operator can repair it. Letting the work
+finish keeps exactly one cleanup path: the normal teardown.
+
+**The cost, and its condition.** Resources are held until the work's bound
+expires. Every such piece of work therefore MUST have a bound (a deadline),
+and its result MUST be discarded once superseded.
+
+**Where cancellation IS right.**
+- *Before an effect starts.* A superseded task that has not begun its next
+  step stops at the step boundary, through a cooperative token. The boundary
+  check is still required.
+- *Shutdown.* The cooperative-cancellation rules in `rust.md` § "Concurrency
+  & async" apply. This rule does not replace them.
+
+### Symptoms during review
+
+- A superseded task's future dropped mid-I/O.
+- A `select!` that cancels an in-flight effect on a "newer generation" signal.
+- An `abort()` on supersession.
+- A late result applied after supersession.
+- In-flight work with no deadline.
+
+**Precedent:** the public-ingress-gateway generation gate. A Route replace
+supersedes a staged generation; the gate's token stops the gate at its next
+step boundary. A connect probe already in flight runs to its connect
+deadline, cleans up its dataplane intent and receipt, and its result is
+never delivered. `a_late_probe_result_after_supersession_is_never_delivered`
+(`crates/overdrive-gateway`) pins it.
+
+---
+
 ## Codebase precedent
 
 - **Converge-on-boot (Bar 1):** `veth_provisioner::provision`

@@ -735,7 +735,9 @@ path structurally impossible.
   type is not `Send + Sync`, justify it in a comment.
 - **Cancellation safety.** Async tasks must tolerate being cancelled at
   any `.await` point. A task holding a partially-applied mutation
-  across an `.await` is a bug.
+  across an `.await` is a bug. How to stop a task is below; *when not to*
+  stop one mid-effect (superseded work runs to its bound) is
+  `reconcilers.md` § "Superseded in-flight work runs to its bound".
 - **Async effects require async APIs — never hide I/O behind runtime lookup
   and a detached spawn to preserve a stale synchronous signature.** If an
   operation must acquire an async lock, write a socket, wait for a process, or
