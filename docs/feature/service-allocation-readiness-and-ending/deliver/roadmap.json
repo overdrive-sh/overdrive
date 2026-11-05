@@ -1,0 +1,405 @@
+{
+  "roadmap": {
+    "project_id": "service-allocation-readiness-and-ending",
+    "created_at": "2026-11-05T18:36:07Z",
+    "total_steps": 15
+  },
+  "phases": [
+    {
+      "id": "01",
+      "name": "Terminal-hook ownership",
+      "description": "One owner (the exit observer) ends probe supervision on every exit (D1, D2), registered before the exit-event gate releases (D3, D4, B2). KNOWN PRE-EXISTING FAILURES, do not chase: the 12 quint_cid_lease_* runs; a_vmm_exit_ends_the_launch_and_releases_its_claim_for_the_next_launch and quint_flows_beacon_vm_exit_ends_launch_and_releases_claim (VM-exit tests); service_projection_equals_declared_listener_set (see 05-01); flaky: flows_conf_randomized_traces and action_shim::replacement_acceptance::successor_outcome_precedes_blocked_predecessor_cleanup_for_every_driver; CLI cli_submit_streaming_service_routes_to_service_submit_event_consumer times out at HEAD. Out of scope: V39, P-12, GH #335/#336/#340, GH #308.",
+      "steps": [
+        {
+          "id": "01-01",
+          "name": "Exit observer fires on_alloc_terminal for every exit",
+          "criteria": [
+            "The 6 D1 tests in terminal_hook_ownership.rs and crash_with_a_partial_streak_is_not_probed_after_the_crash are GREEN with only the ignore marker removed",
+            "A crashed Service allocation is no longer probed once the exit observer consumed its ExitEvent, whether or not the row write succeeds or a prior row exists",
+            "on_alloc_terminal is idempotent and a no-op for unknown ids; the controls (operator stop, finalize, no probe runner) stay GREEN",
+            "Mutation kill rate >= 80% on exit_observer.rs and the touched driver files"
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/acceptance/terminal_hook_ownership.rs",
+          "scenario_name": "a_crashed_allocation_stops_probing_as_soon_as_the_observer_consumes_the_exit",
+          "deps": [],
+          "agent": "nw-software-crafter",
+          "estimated_hours": 5,
+          "files_to_modify": [
+            "crates/overdrive-control-plane/src/worker/exit_observer.rs",
+            "crates/overdrive-core/src/traits/driver.rs",
+            "crates/overdrive-worker/src/vm_driver.rs",
+            "crates/overdrive-sim/src/adapters/driver.rs"
+          ],
+          "implementation_notes": "Decisions: D1 (exit observer calls Driver::on_alloc_terminal for every ExitEvent it consumes, outcome-independent of the row write), D2 (replacement on_alloc_terminal docstring in core driver.rs, row-independent and idempotent). ACTIVATES (pending DELIVER: D1 exit observer ends probe supervision): terminal_hook_ownership.rs::{a_crashed_allocation_stops_probing_as_soon_as_the_observer_consumes_the_exit, a_restart_leaves_only_the_successor_supervised_without_a_second_hook_call, a_crash_ends_probe_supervision_even_when_every_row_write_attempt_fails, a_crash_with_no_prior_row_still_ends_probe_supervision, a_crash_then_a_finalize_fire_the_hook_twice_with_one_effect, a_crash_ends_only_the_crashed_allocations_supervision}; crash_ending_authority.rs::crash_with_a_partial_streak_is_not_probed_after_the_crash. The quint_hook_ownership runs need D3 as well and activate in 01-02. VERTICAL SLICE: observer, VmDriver and ProbeRunner run in the production composition (spawn_with_runtime); no test-only hook wiring. Scaffold removal: none owned. Implement only the pinned docstring and call-order contract (feature-delta Interface contract changes, D1/D2); no new public API. TEST PARADIGM (mandatory): acceptance tests are pre-authored by DISTILL; the crafter removes only the #[ignore] marker, records a semantic RED, then implements; it never writes, weakens or replaces an acceptance body (.claude/rules/testing.md RED acceptance scaffolds and activation). New unit tests are proptest properties over the step's pure functions with state-delta assertions over a declared universe; single-example unit tests are fallback with a `// bypass:` reason. Integration/Tier-3 tests stay single-example. All cargo/test/quint/mutants commands run via `cargo xtask metal run -- ...`. MUTATION GATE: `cargo xtask mutants --diff origin/main --package overdrive-control-plane --file <files touched>` >= 80%. KNOWN PRE-EXISTING FAILURES: see phase 01 description."
+        },
+        {
+          "id": "01-02",
+          "name": "Shim registers supervision before gate release",
+          "criteria": [
+            "The 2 D3 tests in terminal_hook_ownership.rs and all 7 quint_hook_ownership_* runs (6 named plus randomized) are GREEN",
+            "on_alloc_running is recorded before release_for_exit_emission, and an exit available at release leaves no supervisor",
+            "A stop's supervision is released only after its terminal row is durable (B2); cleanup_restart_predecessor gains no hook call (D4)",
+            "Mutation kill rate >= 80% on action_shim/mod.rs"
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/acceptance/terminal_hook_ownership.rs",
+          "scenario_name": "a_start_registers_probe_supervision_before_it_releases_the_exit_gate",
+          "deps": ["01-01"],
+          "agent": "nw-software-crafter",
+          "estimated_hours": 5,
+          "files_to_modify": [
+            "crates/overdrive-control-plane/src/action_shim/mod.rs",
+            "crates/overdrive-core/src/traits/driver.rs",
+            "crates/overdrive-worker/src/vm_driver.rs"
+          ],
+          "implementation_notes": "Decisions: D3 (register probe supervision via on_alloc_running before release_for_exit_emission), D4 (the two existing shim hook calls stay; cleanup_restart_predecessor gains none), B2 (the stop's terminal row write succeeds before the terminal hook fires; a failed row write keeps the supervisor). ACTIVATES: terminal_hook_ownership.rs::{a_start_registers_probe_supervision_before_it_releases_the_exit_gate, an_exit_available_the_instant_the_gate_releases_leaves_no_supervisor} (pending DELIVER: D3). CONFORMANCE (control-plane src, quint_hook_ownership.rs; pending DELIVER: D1/D3/B2): quint_hook_ownership_{crash_without_restart, crash_then_fresh_id_restart, write_exhaustion_still_stops_probes, operator_or_liveness_stop_emits_no_exit_event, finalize_on_live_vm_stops_probes, double_fire_is_idempotent, randomized_traces}. The B2-dependent startup-stop and liveness-stop tests (startup_stop_authority::failed_stop_row_write_keeps_the_supervisor_and_the_next_probe_row_retries; liveness_gate_composed::failed_liveness_stop_row_write_keeps_the_supervisor_until_the_retry_lands) need D7/D9 and activate in 02-03 and 03-01. Add the one-sentence ordering note to on_alloc_running's docstring (pinned in Interface contract changes). VERTICAL SLICE: real shim + exit observer + ProbeRunner in the run_server composition. Scaffold removal: none owned. TEST PARADIGM (mandatory): acceptance tests are pre-authored by DISTILL; the crafter removes only the #[ignore] marker, records a semantic RED, then implements; it never writes, weakens or replaces an acceptance body (.claude/rules/testing.md RED acceptance scaffolds and activation). New unit tests are proptest properties over the step's pure functions with state-delta assertions over a declared universe; single-example unit tests are fallback with a `// bypass:` reason. Integration/Tier-3 tests stay single-example. All cargo/test/quint/mutants commands run via `cargo xtask metal run -- ...`. MUTATION GATE: `cargo xtask mutants --diff origin/main --package overdrive-control-plane --file <files touched>` >= 80%."
+        }
+      ]
+    },
+    {
+      "id": "02",
+      "name": "Restart authority names and ends the failure",
+      "description": "WorkloadLifecycle alone ends and names a Service allocation's failure: crash classification (D6, B3, DG-12), startup stop (D5, D7), per-row stop retry (D8), committed Stable and backend eligibility (B1, R2-1, R2-2, D12).",
+      "steps": [
+        {
+          "id": "02-01",
+          "name": "Restart authority names pre-startup crash loops",
+          "criteria": [
+            "All pre-authored D6, B3 and DG-12 tests listed in implementation_notes are GREEN: crash_ending_authority D6/B3, ceiling_classification, hydration, restart_budget_terminals EarlyExit, S-56",
+            "A pre-startup crash loop (including VmOutOfMemory) gives up EarlyExit at the ceiling via WorkloadLifecycle alone; ServiceLifecycle no longer finalises a crashed allocation",
+            "Every Failed or Terminated allocation joins terminal_announced; a pre-startup crash then passing successor ends the stream Stable",
+            "Mutation kill rate >= 80% on workload_lifecycle.rs and service_lifecycle.rs reconcile bodies"
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/acceptance/crash_ending_authority.rs",
+          "scenario_name": "pre_startup_crash_loop_ends_the_stream_with_early_exit_at_give_up",
+          "deps": ["01-02"],
+          "agent": "nw-software-crafter",
+          "estimated_hours": 8,
+          "files_to_modify": [
+            "crates/overdrive-reconcilers/src/workload_lifecycle.rs",
+            "crates/overdrive-reconcilers/src/service_lifecycle.rs",
+            "crates/overdrive-core/src/transition_reason.rs",
+            "crates/overdrive-control-plane/src/handlers.rs"
+          ],
+          "implementation_notes": "Decisions: D6 (WorkloadLifecycle alone authors a crashed Service allocation's ending and names a pre-startup crash loop EarlyExit at give-up; ServiceLifecycle loses the early-exit branch), B3 (pre-startup crash predicate accepts VmOutOfMemory), DG-12 (every Failed or Terminated fact joins terminal_announced). ACTIVATES: crash_ending_authority.rs::{pre_startup_crash_loop_ends_the_stream_with_early_exit_at_give_up, pre_startup_crash_then_a_passing_successor_ends_the_stream_stable, control_plane_restart_before_the_ceiling_decision_rederives_early_exit, out_of_memory_crash_loop_gives_up_as_early_exit_without_an_exit_code}; workload_lifecycle_ceiling_classification.rs::{ceiling_terminal_names_the_final_attempts_cause, an_already_finalised_row_is_not_finalised_again}; workload_lifecycle_startup_probe_hydration.rs::{current_attempts_startup_status_is_hydrated_for_a_terminal_row, a_superseded_attempts_startup_rows_are_never_read, a_failed_startup_row_read_is_an_observation_read_error}; alloc_status_restart_budget_terminals.rs::an_early_exit_give_up_is_an_exhausted_budget_at_the_ceiling; service_lifecycle_reconcile_branches.rs::{terminal_allocation_of_any_start_history_closes_its_mid_startup_window (S-56, DG-12), the D6 test at line 938}. CONFORMANCE (quint_restart_authority.rs): restart_authority_{pre_startup_crash_loop_gives_up_early_exit, pre_startup_crash_then_successor_passes, crashed_and_rejected_allocs_join_terminal_announced}. SCAFFOLD removal: WorkloadLifecycleState.current_startup_probe is an always-None scaffold (// SCAFFOLD: true); hydrate_actual now reads the current attempt's startup row only (read failure = HydrateError::ObservationRead). The startup-stop cells of ceiling_classification (D7) need StoppedBy::StartupProbe, already real; if a cell needs the stop emission it is finished in 02-02, but the test activates here. VERTICAL SLICE: drive through the run_server composition and the action shim; no test-only wiring. TEST PARADIGM (mandatory): acceptance tests are pre-authored by DISTILL; the crafter removes only the #[ignore] marker, records a semantic RED, then implements; it never writes, weakens or replaces an acceptance body (.claude/rules/testing.md RED acceptance scaffolds and activation). New unit tests are proptest properties over the step's pure functions with state-delta assertions over a declared universe; single-example unit tests are fallback with a `// bypass:` reason. Integration/Tier-3 tests stay single-example. All cargo/test/quint/mutants commands run via `cargo xtask metal run -- ...`. MUTATION GATE: `cargo xtask mutants --diff origin/main --package overdrive-reconcilers --file <files touched>` >= 80% (reconcile bodies are mandatory targets)."
+        },
+        {
+          "id": "02-02",
+          "name": "Startup-probe failure stops the allocation",
+          "criteria": [
+            "All pre-authored D5 and D7 tests listed in implementation_notes are GREEN, including the 7 restart_authority D7 runs",
+            "ServiceLifecycle announces a startup-probe failure only for a non-terminal allocation, as StopAllocation { Stopped { StartupProbe } }; a crash after the deadline is restarted, not finalised",
+            "A StartupProbeFailed give-up is named by WorkloadLifecycle and counts as an exhausted restart budget; a restartable probe stop projects to no stream line",
+            "Mutation kill rate >= 80% on service_lifecycle.rs and workload_lifecycle.rs reconcile bodies"
+          ],
+          "test_file": "crates/overdrive-core/tests/acceptance/service_lifecycle_startup_stop.rs",
+          "scenario_name": "startup_probe_failure_stops_only_a_live_allocation",
+          "deps": ["02-01"],
+          "agent": "nw-software-crafter",
+          "estimated_hours": 8,
+          "files_to_modify": [
+            "crates/overdrive-reconcilers/src/service_lifecycle.rs",
+            "crates/overdrive-reconcilers/src/workload_lifecycle.rs",
+            "crates/overdrive-control-plane/src/handlers.rs",
+            "crates/overdrive-control-plane/src/streaming.rs",
+            "crates/overdrive-control-plane/src/lib.rs",
+            "crates/overdrive-cli/src/render.rs"
+          ],
+          "implementation_notes": "Decisions: D5 (startup verdict announced only for a non-terminal allocation), D7 (startup-probe failure emits StopAllocation { Stopped { StartupProbe } }; WorkloadLifecycle alone restarts it and names StartupProbeFailed at give-up; the stop is not an intentional stop). ACTIVATES: crash_ending_authority.rs::{crashed_allocation_with_exhausted_startup_probes_is_restarted_not_finalised, crash_after_the_deadline_before_the_first_look_is_restarted_not_finalised} (D5); service_lifecycle_startup_stop.rs::startup_probe_failure_stops_only_a_live_allocation; service_lifecycle_reconcile_branches.rs::{startup_probe_failure_stops_the_allocation_when_all_three_gates_are_met, reconcile_startup_stop_clears_mid_window_and_dedups, startup_probe_failure_suppresses_liveness_stop_same_tick}; service_lifecycle_stable.rs::given_startup_probe_exhausts_attempts_when_reconcile_then_emits_startup_stop; startup_stop_authority.rs::{never_ready_guest_is_stopped_and_restarted_until_give_up_names_the_startup_failure, successor_that_binds_after_a_startup_stop_ends_the_stream_stable, crash_racing_the_startup_stop_leaves_the_stop_row_and_the_give_up_names_startup}; alloc_status_restart_budget_terminals.rs::a_startup_probe_failed_give_up_is_an_exhausted_budget_at_the_ceiling; service_stream_restartable_stop_projection.rs::a_restartable_probe_stop_projects_to_no_stream_line; workload_describe_startup_stop.rs (overdrive-cli)::describe_names_a_startup_stopped_predecessor_and_shows_the_running_successor. CONFORMANCE (quint_restart_authority.rs, D7): restart_authority_{running_alloc_with_exhausted_probes_past_deadline_is_stopped, startup_never_passes_loop_gives_up_startup_probe_failed, pass_then_fails_before_stable_is_stopped, startup_stop_then_successor_passes_is_stable, startup_stop_then_crash_names_last_cause, crash_then_startup_stop_names_last_cause, startup_stop_is_not_intentional_stop}. Test line numbers drift; match by name. The never_ready_guest_with_the_default_startup_window test needs D10 and activates in 04-01. Scaffolds owned: none (StoppedBy::StartupProbe is already real). VERTICAL SLICE through run_server + action shim; no test-only wiring. TEST PARADIGM (mandatory): acceptance tests are pre-authored by DISTILL; the crafter removes only the #[ignore] marker, records a semantic RED, then implements; it never writes, weakens or replaces an acceptance body (.claude/rules/testing.md RED acceptance scaffolds and activation). New unit tests are proptest properties over the step's pure functions with state-delta assertions over a declared universe; single-example unit tests are fallback with a `// bypass:` reason. Integration/Tier-3 tests stay single-example. All cargo/test/quint/mutants commands run via `cargo xtask metal run -- ...`. MUTATION GATE: `cargo xtask mutants --diff origin/main --package overdrive-reconcilers --file <files touched>` >= 80%."
+        },
+        {
+          "id": "02-03",
+          "name": "Failed startup stop retried once per probe row",
+          "criteria": [
+            "All pre-authored D8 and B2 (startup stop) tests listed in implementation_notes are GREEN, incl. the 4 D8 restart_authority runs",
+            "A startup stop that does not land is re-emitted once per new written startup probe row, tracked by startup_last_acted_run; a later Pass ends the retry and reaches Stable",
+            "A failed stop row write keeps the supervisor and the next probe row retries; a control plane restart keeps the acted run",
+            "Mutation kill rate >= 80% on service_lifecycle.rs"
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/acceptance/startup_stop_authority.rs",
+          "scenario_name": "failed_startup_stop_is_retried_once_per_new_startup_row",
+          "deps": ["02-02"],
+          "agent": "nw-software-crafter",
+          "estimated_hours": 5,
+          "files_to_modify": [
+            "crates/overdrive-reconcilers/src/service_lifecycle.rs",
+            "crates/overdrive-control-plane/src/action_shim/mod.rs"
+          ],
+          "implementation_notes": "Decision: D8 (startup stop retried per new written startup row; ServiceLifecycleView.startup_last_acted_run, #[serde(default)] CBOR-additive); B2 for the startup stop. ACTIVATES: service_lifecycle_startup_stop.rs::startup_stop_is_emitted_once_per_new_startup_row; startup_stop_authority.rs::{failed_startup_stop_is_retried_once_per_new_startup_row, late_startup_pass_after_a_failed_stop_ends_the_retry_and_reaches_stable, failed_stop_row_write_keeps_the_supervisor_and_the_next_probe_row_retries}. CONFORMANCE (quint_restart_authority.rs): restart_authority_{failed_startup_stop_is_retried_on_next_row, late_pass_after_failed_stop_reaches_stable, stop_row_write_failure_is_retried, control_plane_restart_keeps_acted_run}. SCAFFOLD removal: ServiceLifecycleView.startup_last_acted_run is a field-only scaffold; it gets its behaviour here. The existing startup_last_acted_run_evolution CBOR tests (already passing) must stay green. TEST PARADIGM (mandatory): acceptance tests are pre-authored by DISTILL; the crafter removes only the #[ignore] marker, records a semantic RED, then implements; it never writes, weakens or replaces an acceptance body (.claude/rules/testing.md RED acceptance scaffolds and activation). New unit tests are proptest properties over the step's pure functions with state-delta assertions over a declared universe; single-example unit tests are fallback with a `// bypass:` reason. Integration/Tier-3 tests stay single-example. All cargo/test/quint/mutants commands run via `cargo xtask metal run -- ...`. MUTATION GATE: `cargo xtask mutants --diff origin/main --package overdrive-reconcilers --file <files touched>` >= 80% (reconcile bodies mandatory)."
+        },
+        {
+          "id": "02-04",
+          "name": "Committed Stable gates backend eligibility",
+          "criteria": [
+            "All pre-authored B1, R2-1, R2-2 and D12 tests listed in implementation_notes are GREEN",
+            "A startup-probed allocation is a backend only after its own Stable is committed; the readiness rule only narrows a committed Stable",
+            "A lost Stable write is re-announced until it commits, including after a control plane restart; the stable_announced view field is deleted",
+            "Mutation kill rate >= 80% on service_lifecycle.rs"
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/acceptance/startup_gated_backend_eligibility.rs",
+          "scenario_name": "startup_probed_allocation_is_a_backend_only_after_its_stable_is_committed",
+          "deps": ["02-02"],
+          "agent": "nw-software-crafter",
+          "estimated_hours": 6,
+          "files_to_modify": [
+            "crates/overdrive-reconcilers/src/service_lifecycle.rs",
+            "crates/overdrive-control-plane/src/action_shim/mod.rs"
+          ],
+          "implementation_notes": "Decisions: B1 (Stable announced until committed, no view marker), R2-1/R2-2 (stable_announced View field deleted; CBOR blobs carrying the key still decode), D12 (backend eligibility keys on ServiceAllocFact.stable_committed). ACTIVATES: service_lifecycle_startup_stop.rs::startup_probed_allocation_is_a_backend_only_after_its_stable_is_committed; startup_gated_backend_eligibility.rs::{startup_probed_allocation_is_a_backend_only_after_its_stable_is_committed, readiness_met_before_stable_makes_the_backend_eligible_at_the_stable_commit}; startup_last_acted_run_evolution.rs::blob_carrying_the_removed_stable_announced_key_is_ignored (overdrive-reconcilers); liveness_gate_composed.rs (control-plane src)::{a_lost_stable_write_is_announced_again_until_it_commits, a_lost_stable_write_is_announced_again_after_a_control_plane_restart} (B1/R2-2); overdrive-sim service_kind_vm_terminal_invariant.rs::terminal_state_wins_and_dead_vm_backend_never_returns_to_eligibility (D5 D6 D12; the D5/D6 halves landed in 02-01/02-02). The quint liveness_gate lost_stable_write run activates in 03-01. SCAFFOLD removal: ServiceAllocFact.stable_committed is a field-only scaffold (false in fixtures); hydrate it from the committed Stable row. Pre-existing tests that assume the view marker are rewritten or deleted with the field (deletion discipline). TEST PARADIGM (mandatory): acceptance tests are pre-authored by DISTILL; the crafter removes only the #[ignore] marker, records a semantic RED, then implements; it never writes, weakens or replaces an acceptance body (.claude/rules/testing.md RED acceptance scaffolds and activation). New unit tests are proptest properties over the step's pure functions with state-delta assertions over a declared universe; single-example unit tests are fallback with a `// bypass:` reason. Integration/Tier-3 tests stay single-example. All cargo/test/quint/mutants commands run via `cargo xtask metal run -- ...`. MUTATION GATE: `cargo xtask mutants --diff origin/main --package overdrive-reconcilers --file <files touched>` >= 80%."
+        }
+      ]
+    },
+    {
+      "id": "03",
+      "name": "Liveness at Stable and loop wake",
+      "description": "Liveness supervision begins at Stable through ProbeRunner::start_liveness (D9); a broker submit wakes the convergence loop at once (D17).",
+      "steps": [
+        {
+          "id": "03-01",
+          "name": "Liveness supervision begins at Stable",
+          "criteria": [
+            "All pre-authored D9 tests listed in implementation_notes are GREEN, incl. the 6 quint_liveness_gate runs and the S-32 restart and give-up leg",
+            "No liveness role or row exists before Stable; the first liveness row lands one interval after Stable; a second Stable hook spawns no second task",
+            "start_liveness is atomic with stop_alloc: no liveness for an ended id; a failing liveness restarts under the shared budget and gives up LivenessProbeFailed",
+            "Mutation kill rate >= 80% on probe_runner/mod.rs"
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/acceptance/liveness_begins_at_stable.rs",
+          "scenario_name": "liveness_supervision_begins_when_the_allocation_becomes_stable",
+          "deps": ["02-04"],
+          "agent": "nw-software-crafter",
+          "estimated_hours": 7,
+          "files_to_modify": [
+            "crates/overdrive-worker/src/probe_runner/mod.rs",
+            "crates/overdrive-control-plane/src/action_shim/mod.rs",
+            "crates/overdrive-worker/src/vm_driver.rs"
+          ],
+          "implementation_notes": "Decision: D9 (liveness supervision begins at Stable; the probe runner owns the gate via ProbeRunner::start_liveness(&self, &AllocationId), called by the shim when Stable commits). ACTIVATES: liveness_begins_at_stable.rs::{liveness_supervision_begins_when_the_allocation_becomes_stable, first_liveness_row_lands_one_interval_after_stable_with_streak_one, a_second_stable_hook_spawns_no_second_liveness_task, a_restarted_process_starts_liveness_only_for_the_successor_at_its_own_stable, concurrent_stop_and_start_liveness_never_leave_liveness_for_an_ended_id}; liveness_gate_composed.rs (control-plane src, --lib with integration-tests)::{slow_starting_service_with_failing_liveness_is_stopped_only_after_stable, opt_out_service_starts_liveness_at_its_first_stable, a_service_whose_liveness_keeps_failing_is_restarted_under_the_shared_budget_and_given_up_at_the_ceiling, failed_liveness_stop_row_write_keeps_the_supervisor_until_the_retry_lands (B2 liveness leg)}. CONFORMANCE: quint_liveness_gate.rs liveness_gate_{failing_during_startup_is_not_stopped, starts_at_stable_and_stops_on_failure, stable_after_end_starts_no_liveness, lost_stable_write_is_reannounced, opt_out_service_starts_liveness_at_first_running_stable, conformance_lg_conf}; quint_restart_authority.rs restart_authority_liveness_kill_loop_gives_up_liveness_probe_failed (liveness give-up depends on D9). SCAFFOLD removal: ProbeRunner::start_liveness panics (RED scaffold); remove it. Pre-existing tests that assume liveness starts at Running are revisited by name (the DISTILL tail list). VERTICAL SLICE through run_server + shim + real ProbeRunner. TEST PARADIGM (mandatory): acceptance tests are pre-authored by DISTILL; the crafter removes only the #[ignore] marker, records a semantic RED, then implements; it never writes, weakens or replaces an acceptance body (.claude/rules/testing.md RED acceptance scaffolds and activation). New unit tests are proptest properties over the step's pure functions with state-delta assertions over a declared universe; single-example unit tests are fallback with a `// bypass:` reason. Integration/Tier-3 tests stay single-example. All cargo/test/quint/mutants commands run via `cargo xtask metal run -- ...`. MUTATION GATE: `cargo xtask mutants --diff origin/main --package overdrive-worker --file <files touched>` >= 80%."
+        },
+        {
+          "id": "03-02",
+          "name": "Broker submit wakes the convergence loop",
+          "criteria": [
+            "The 4 ignored D17 tests in convergence_loop_wake.rs are GREEN; the cadence-tick control stays GREEN",
+            "A submit while the loop is parked is admitted without waiting for the tick; a same-target burst coalesces and drains in full",
+            "A deferred evaluation is not admitted early by an unrelated wake; admission order of a burst is identical across runs of one seed",
+            "Mutation kill rate >= 80% on reconciler_runtime.rs and the convergence loop"
+          ],
+          "test_file": "crates/overdrive-control-plane/src/convergence_loop_wake.rs",
+          "scenario_name": "a_submit_while_the_loop_is_parked_is_admitted_without_waiting_for_the_tick",
+          "deps": ["03-01"],
+          "agent": "nw-software-crafter",
+          "estimated_hours": 6,
+          "files_to_modify": [
+            "crates/overdrive-control-plane/src/reconciler_runtime.rs",
+            "crates/overdrive-control-plane/src/lib.rs"
+          ],
+          "implementation_notes": "Decision: D17 (ReconcilerRuntime::submit_evaluation(Evaluation, Instant, EvaluationEligibility), BrokerDrain, submitted/broker() as pinned in the D17 section and Interface changes of B1, B2, B3, D12 and D17; a broker submit wakes the convergence loop at once). ACTIVATES (pending DELIVER: D17), in convergence_loop_wake.rs: a_submit_while_the_loop_is_parked_is_admitted_without_waiting_for_the_tick, a_burst_of_submits_coalesces_per_target_and_drains_in_full, a_deferred_evaluation_is_not_admitted_early_by_an_unrelated_wake, the_admission_order_of_a_burst_is_identical_across_runs_of_one_seed. The S-48 (b) and (e) cases are waived (DG-9), carried by the mutation gate. SCAFFOLD removal: submit_evaluation panics (RED scaffold). Existing tests that assume broker().submit is drained only by the clock are revisited by name. VERTICAL SLICE: the wake runs in run_server's convergence loop; callers (shim, observer) submit through the pinned entry. No new public API beyond the pinned D17 shape. TEST PARADIGM (mandatory): acceptance tests are pre-authored by DISTILL; the crafter removes only the #[ignore] marker, records a semantic RED, then implements; it never writes, weakens or replaces an acceptance body (.claude/rules/testing.md RED acceptance scaffolds and activation). New unit tests are proptest properties over the step's pure functions with state-delta assertions over a declared universe; single-example unit tests are fallback with a `// bypass:` reason. Integration/Tier-3 tests stay single-example. All cargo/test/quint/mutants commands run via `cargo xtask metal run -- ...`. MUTATION GATE: `cargo xtask mutants --diff origin/main --package overdrive-control-plane --file <files touched>` >= 80%. Async scheduling logic is excluded from mutation per testing.md; the gate applies to the pure admission and eligibility logic."
+        }
+      ]
+    },
+    {
+      "id": "04",
+      "name": "Deploy stream reports the recorded verdict",
+      "description": "overdrive deploy waits on a derived progress deadline and reports the last attempt (D10); the stream reads the recorded verdict first, relists and fails honestly (D11, F-5).",
+      "steps": [
+        {
+          "id": "04-01",
+          "name": "Progress deadline derived from startup deadline",
+          "criteria": [
+            "All pre-authored D10 tests listed in implementation_notes are GREEN, incl. the 5 quint_progress_deadline_* runs and the CLI request-timeout integration test",
+            "progress_deadline = max(90 s floor, startup deadline + margin); the default spec yields 90 s; startup_deadline equals the pre-extraction derivation for every descriptor list",
+            "A Timeout names Stable and the platform restarting it and carries the labelled last attempt (LastAttemptWire); the Service lane waits server deadline plus 30 s",
+            "Mutation kill rate >= 80% on streaming.rs, handlers.rs, render.rs"
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/acceptance/service_stream_progress_deadline.rs",
+          "scenario_name": "a_service_that_becomes_stable_after_ninety_seconds_ends_stable_not_timeout",
+          "deps": ["02-03"],
+          "agent": "nw-software-crafter",
+          "estimated_hours": 8,
+          "files_to_modify": [
+            "crates/overdrive-reconcilers/src/service_lifecycle.rs",
+            "crates/overdrive-control-plane/src/streaming.rs",
+            "crates/overdrive-control-plane/src/handlers.rs",
+            "crates/overdrive-cli/src/render.rs",
+            "crates/overdrive-cli/src/commands/deploy.rs",
+            "crates/overdrive-cli/src/http_client.rs"
+          ],
+          "implementation_notes": "Decision: D10 (progress deadline distinct from the restart budget; LastAttemptWire in overdrive_control_plane::streaming, ServiceSubmitEvent::Failed.last_attempt, PROGRESS_DEADLINE_MARGIN, progress_deadline(&[ProbeDescriptor], Duration) last-position parameter on build_service_stream, submit_workload_streaming(req, server_deadline), format_service_failed_block(.., last_attempt) as pinned in DG-7 / D10 interface changes). ACTIVATES: progress_deadline_derivation.rs::{the_progress_deadline_exceeds_the_startup_deadline_and_keeps_the_floor, the_default_spec_yields_ninety_seconds, a_long_startup_deadline_lifts_the_progress_deadline_and_a_short_one_keeps_the_floor}; overdrive-reconcilers startup_deadline.rs::{the_startup_deadline_matches_the_values_the_derivation_produced_before_extraction, the_startup_deadline_equals_the_original_derivation_for_every_descriptor_list}; service_stream_progress_deadline.rs::{a_service_that_becomes_stable_after_ninety_seconds_ends_stable_not_timeout, a_never_ready_service_times_out_at_the_progress_deadline_naming_the_last_attempt, a_give_up_inside_the_progress_deadline_ends_the_stream_with_the_give_up, an_unchanged_redeploy_of_a_stuck_service_opens_a_new_clock_and_reports_only_new_attempts}; startup_stop_authority.rs::never_ready_guest_with_the_default_startup_window_times_out_naming_the_first_stop; overdrive-cli service_early_exit_render.rs::{timeout_block_says_the_workload_did_not_become_stable_and_may_still_be_restarting, timeout_block_with_a_last_attempt_renders_the_labelled_last_attempt_block}; overdrive-cli tests/integration/deploy_stream_request_timeout.rs::the_service_lane_waits_the_server_deadline_plus_thirty_seconds (integration-tests; tokio test-util approved, DG-10). CONFORMANCE: quint_progress_deadline_{slow_start_reaches_stable_not_timeout, never_ready_times_out_with_last_attempt_cause, giveup_inside_deadline_wins_over_timeout, redeploy_unchanged_opens_new_clock, randomized}. SCAFFOLD removal: startup_deadline panics, progress_deadline panics, build_service_stream ignores its progress_deadline parameter, submit_workload_streaming ignores the server deadline, the Timeout block keeps the old wording; all implemented here. VERTICAL SLICE: overdrive deploy against run_server through the NDJSON stream. TEST PARADIGM (mandatory): acceptance tests are pre-authored by DISTILL; the crafter removes only the #[ignore] marker, records a semantic RED, then implements; it never writes, weakens or replaces an acceptance body (.claude/rules/testing.md RED acceptance scaffolds and activation). New unit tests are proptest properties over the step's pure functions with state-delta assertions over a declared universe; single-example unit tests are fallback with a `// bypass:` reason. Integration/Tier-3 tests stay single-example. All cargo/test/quint/mutants commands run via `cargo xtask metal run -- ...`. MUTATION GATE: `cargo xtask mutants --diff origin/main --package overdrive-control-plane --file <files touched>` and the same for overdrive-cli and overdrive-reconcilers >= 80%."
+        },
+        {
+          "id": "04-02",
+          "name": "Stream reports recorded verdict before waiting",
+          "criteria": [
+            "All pre-authored D11 tests listed in implementation_notes are GREEN, incl. the 6 ignored quint_stream_snapshot_* runs",
+            "A redeploy of a Stable, given-up or operator-stopped service reports the recorded verdict at once; a superseded attempt's give-up is never reported",
+            "A terminal committed before the read is reported once; a Lagged stream relists; a failed read or failed relist ends the stream with an error",
+            "Mutation kill rate >= 80% on streaming.rs and handlers.rs"
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/acceptance/service_stream_recorded_verdict.rs",
+          "scenario_name": "a_redeploy_of_a_stable_service_ends_stable_at_once",
+          "deps": ["04-01"],
+          "agent": "nw-software-crafter",
+          "estimated_hours": 6,
+          "files_to_modify": [
+            "crates/overdrive-control-plane/src/streaming.rs",
+            "crates/overdrive-control-plane/src/handlers.rs"
+          ],
+          "implementation_notes": "Decision: D11 and F-5 (the Service deploy stream first reports the verdict the workload's current attempt already carries, then waits; relist on Lagged; a failed read ends the stream with an error; the stream is List-then-Watch over the observation store, line built from a committed row equals the line built from its event, ADR-0037 section 4). ACTIVATES: service_stream_recorded_verdict.rs::{a_terminal_committed_and_published_before_the_stream_reads_is_reported_once, a_lagged_stream_recovers_the_terminal_it_missed_by_relisting, a_failed_read_at_open_ends_the_stream_with_an_error_and_never_waits, a_failed_relist_after_lagged_ends_the_stream_with_an_error, a_redeploy_of_a_stable_service_ends_stable_at_once, a_redeploy_of_a_given_up_service_reports_the_recorded_give_up_at_once, a_redeploy_of_an_operator_stopped_service_reports_the_operator_stop_at_once}. CONFORMANCE (quint_stream_conformance/stream_snapshot.rs): quint_stream_snapshot_{redeploy_unchanged_of_stable_ends_stable, terminal_between_subscribe_and_read_is_not_lost, restartable_stop_recorded_is_not_a_verdict, lagged_relist_recovers_terminal, failed_read_ends_with_error, randomized} (publish_after_relist_reaches_channel and superseded_attempt_terminal_is_not_reported already pass and must stay green). Scaffolds owned: none. VERTICAL SLICE: deploy stream through run_server. TEST PARADIGM (mandatory): acceptance tests are pre-authored by DISTILL; the crafter removes only the #[ignore] marker, records a semantic RED, then implements; it never writes, weakens or replaces an acceptance body (.claude/rules/testing.md RED acceptance scaffolds and activation). New unit tests are proptest properties over the step's pure functions with state-delta assertions over a declared universe; single-example unit tests are fallback with a `// bypass:` reason. Integration/Tier-3 tests stay single-example. All cargo/test/quint/mutants commands run via `cargo xtask metal run -- ...`. MUTATION GATE: `cargo xtask mutants --diff origin/main --package overdrive-control-plane --file <files touched>` >= 80%."
+        }
+      ]
+    },
+    {
+      "id": "05",
+      "name": "Guest-reported listener readiness",
+      "description": "Startup readiness defaults to guest-reported listeners: declared_listeners and tcp_service_ports (PR-4), host-side beacon LISTEN reader and board (D13), guest-listener probe task (D14), default gate and inferred removal (D15, D16), guest hooks with Tier-3 real-boot proof (D13 guest side).",
+      "steps": [
+        {
+          "id": "05-01",
+          "name": "Declared listeners and TCP service-port view",
+          "criteria": [
+            "The 2 declared_listeners_tcp_view tests and the nft integration test inbound_rules_only_for_tcp_declared_listeners are GREEN",
+            "tcp_service_ports is the TCP filter of declared_listeners in declaration order; a UDP-only declaration has none",
+            "Inbound capture is installed only for TCP declared listeners; service_ports is removed single-cut from AllocationSpec and WorkloadLifecycleState",
+            "Mutation kill rate >= 80% on driver.rs and workload_lifecycle.rs"
+          ],
+          "test_file": "crates/overdrive-core/tests/acceptance/declared_listeners_tcp_view.rs",
+          "scenario_name": "the_tcp_view_is_the_tcp_filter_of_the_declared_listeners_in_declaration_order",
+          "deps": ["02-04"],
+          "agent": "nw-software-crafter",
+          "estimated_hours": 5,
+          "files_to_modify": [
+            "crates/overdrive-core/src/traits/driver.rs",
+            "crates/overdrive-reconcilers/src/workload_lifecycle.rs",
+            "crates/overdrive-worker/src/vm_driver.rs"
+          ],
+          "implementation_notes": "Decision: PR-4 (AllocationSpec.declared_listeners: Vec<Listener> replaces service_ports in AllocationSpec and WorkloadLifecycleState; AllocationSpec::tcp_service_ports() is the TCP view the TPROXY consumers read). ACTIVATES: overdrive-core declared_listeners_tcp_view.rs::{the_tcp_view_is_the_tcp_filter_of_the_declared_listeners_in_declaration_order, a_udp_only_declaration_has_no_tcp_ports_and_a_mixed_one_keeps_tcp_order}; overdrive-worker tests/integration/inbound_rules_only_for_tcp_declared_listeners.rs::a_udp_declared_listener_gets_no_inbound_capture_and_a_tcp_one_does (nft, native metal). SCAFFOLD removal: tcp_service_ports panics (RED scaffold) and declared_listeners sits beside service_ports; delete service_ports and its consumers in this commit (deletion discipline, no stub). KNOWN PRE-EXISTING FAILURE: overdrive-reconcilers workload_lifecycle.rs::service_projection_equals_declared_listener_set fails at HEAD on an unrelated cause and is NOT activated by PR-4. It exercises project_service_listen_ports, which reads service_ports; if PR-4 deletes or rewrites that projection the test goes with it (delete the production code and its tests together); if it still fails after PR-4, leave it, do not chase it. Do not add steps for it. VERTICAL SLICE: the inbound install in start_alloc reads the TCP view in the real composition. TEST PARADIGM (mandatory): acceptance tests are pre-authored by DISTILL; the crafter removes only the #[ignore] marker, records a semantic RED, then implements; it never writes, weakens or replaces an acceptance body (.claude/rules/testing.md RED acceptance scaffolds and activation). New unit tests are proptest properties over the step's pure functions with state-delta assertions over a declared universe; single-example unit tests are fallback with a `// bypass:` reason. Integration/Tier-3 tests stay single-example. All cargo/test/quint/mutants commands run via `cargo xtask metal run -- ...`. MUTATION GATE: `cargo xtask mutants --diff origin/main --package overdrive-core --file <files touched>` >= 80%."
+        },
+        {
+          "id": "05-02",
+          "name": "Host reads guest listener reports into a board",
+          "criteria": [
+            "3 beacon_listen_wire_form tests, 6 guest_listener_board tests and 5 quint_guest_report_host_* runs are GREEN",
+            "LISTEN <tcp|udp> <port> round-trips; every rejected line returns BeaconParseError::MalformedListen carrying the full line, with no panic",
+            "The board never stores undeclared reports, only grows, drops garbage and post-Exit lines with a warn; production wires ONE shared board into VmDriver and ProbeRunner",
+            "Mutation kill rate >= 80% on beacon.rs and guest_listener_board.rs"
+          ],
+          "test_file": "crates/overdrive-worker/tests/acceptance/guest_listener_board.rs",
+          "scenario_name": "the_reported_set_only_grows_within_the_declared_set_and_ends_with_the_entry",
+          "deps": ["05-01"],
+          "agent": "nw-software-crafter",
+          "estimated_hours": 8,
+          "files_to_modify": [
+            "crates/overdrive-core/src/vm/beacon.rs",
+            "crates/overdrive-core/src/traits/guest_listener_reports.rs",
+            "crates/overdrive-worker/src/guest_listener_board.rs",
+            "crates/overdrive-worker/src/vm_driver.rs",
+            "crates/overdrive-worker/src/probe_runner/mod.rs",
+            "crates/overdrive-control-plane/src/lib.rs"
+          ],
+          "implementation_notes": "Decisions: D13 host side (BeaconMessage::Listen { protocol: Proto, port: NonZeroU16 }, BeaconParseError::MalformedListen { raw, detail } per DG-M; the reader routes Listen to the board and Exit to the exit report, mid-life lines never block; GuestListenerBoard implements the GuestListenerReports port; PR-1 entry lifetime; DG-6: ReportedListeners Default/FromIterator/is_empty, GuestListenerBoard::new() -> Self, and production shares ONE board between VmDriver::new and ProbeRunner::new). ACTIVATES: overdrive-core beacon_listen_wire_form.rs::{listen_round_trips_for_every_protocol_and_port, listen_with_an_out_of_range_port_is_a_typed_error, malformed_listen_lines_are_rejected_with_a_typed_error}; overdrive-worker guest_listener_board.rs::{the_reported_set_only_grows_within_the_declared_set_and_ends_with_the_entry, a_pending_changed_completes_on_an_insertion_and_on_no_no_op, a_garbage_line_is_dropped_with_a_warning_and_later_lines_take_effect, a_listen_after_exit_changes_neither_the_set_nor_the_exit_report, guest_listener_reports_equivalence, changed_never_misses_an_insertion_under_seeded_schedules}. CONFORMANCE (control-plane src quint_guest_report_host.rs): quint_guest_report_host_{all_declared_reported, garbage_line_is_dropped, beacon_closes_with_partial_set, listen_after_exit_is_ignored, randomized_traces}. SCAFFOLD removal: the Listen Display/FromStr arms and GuestListenerBoard's port impl panic with RED scaffold; call sites that pass a fresh board (the per-consumer board is inert) are replaced by one shared board built in the run_server composition. VERTICAL SLICE: the shared board is in the production composition, not hand-installed by a test. The guest never reports until 05-05, so reports are exercised through SimBeaconIo here. TEST PARADIGM (mandatory): acceptance tests are pre-authored by DISTILL; the crafter removes only the #[ignore] marker, records a semantic RED, then implements; it never writes, weakens or replaces an acceptance body (.claude/rules/testing.md RED acceptance scaffolds and activation). New unit tests are proptest properties over the step's pure functions with state-delta assertions over a declared universe; single-example unit tests are fallback with a `// bypass:` reason. Integration/Tier-3 tests stay single-example. All cargo/test/quint/mutants commands run via `cargo xtask metal run -- ...`. MUTATION GATE: `cargo xtask mutants --diff origin/main --package overdrive-worker --file <files touched>` and for overdrive-core >= 80%."
+        },
+        {
+          "id": "05-03",
+          "name": "Guest-listener startup probe task writes rows",
+          "criteria": [
+            "8 guest_listener_probe_rows tests, 2 service_lifecycle_startup_stop_gate tests and the D14 summary tests (CLI and reconciler) are GREEN",
+            "The task writes one Pass when the full declared set is reported, else no row before the deadline then one Fail per interval naming only the missing listeners",
+            "Failed writes are retried or leave both counters unchanged; no row after stop_alloc; the startup stop gate for GuestListeners threshold is 1 (startup_attempts_required)",
+            "Mutation kill rate >= 80% on probe_runner/mod.rs and service_lifecycle.rs"
+          ],
+          "test_file": "crates/overdrive-worker/tests/acceptance/guest_listener_probe_rows.rs",
+          "scenario_name": "completing_the_declared_set_writes_one_pass_row_with_no_earlier_row",
+          "deps": ["05-02", "02-03"],
+          "agent": "nw-software-crafter",
+          "estimated_hours": 8,
+          "files_to_modify": [
+            "crates/overdrive-worker/src/probe_runner/mod.rs",
+            "crates/overdrive-reconcilers/src/service_lifecycle.rs",
+            "crates/overdrive-cli/src/render.rs",
+            "crates/overdrive-core/src/aggregate/probe_descriptor.rs"
+          ],
+          "implementation_notes": "Decisions: D14 (guest-listener task waits on the reported-set port, takes the declared set from start_alloc's &AllocationSpec, writes startup ProbeResultRows through the dial task's run state, is a run-numbering producer), P1 (ServiceAllocFact.max_attempts replaced by startup_attempts_required: Tcp/Http its max_attempts, GuestListeners 1), DG-11 (format_mechanic_summary and format_probe_mechanic_summary/probes_section take &[Listener] and print `guest listeners tcp:8080 udp:5353`; no wire field). ACTIVATES: overdrive-worker guest_listener_probe_rows.rs::{completing_the_declared_set_writes_one_pass_row_with_no_earlier_row, an_incomplete_set_writes_no_row_before_the_deadline_then_one_fail_per_interval, the_deadline_fail_reason_names_only_the_missing_listeners, a_failed_pass_write_is_retried_until_it_lands_without_advancing_the_counters, a_failed_fail_write_advances_neither_number, no_row_is_written_after_stop_alloc, an_undeclared_or_duplicate_report_never_completes_the_set, guest_listener_rows_keep_the_run_numbering_over_random_schedules}; control-plane service_lifecycle_startup_stop_gate.rs::{the_startup_stop_gate_takes_its_attempts_threshold_from_the_mechanic, guest_listeners_stop_at_streak_one_once_the_deadline_elapsed}; overdrive-cli probes_section_render.rs::guest_listeners_summary_names_the_declared_listeners_in_declaration_order; overdrive-reconcilers src service_lifecycle.rs::guest_listeners_summary_names_the_declared_listeners_in_declaration_order. CONFORMANCE: quint_restart_authority_first_fail_at_deadline_with_no_earlier_row_stops and restart_authority_conformance_ra_conf (random run; reaches D5-D8, D14, DG-12). SCAFFOLD removal: the guest-listener task panics (probe_runner/mod.rs, RED scaffold) and the compile-unblock GuestListeners arms in the worker, CLI render and reconciler summary. ProbeMechanic::GuestListeners already exists (fieldless tail variant, validate arm Ok); the parser does not materialise it until 05-04. VERTICAL SLICE: through the real ProbeRunner over the shared board from 05-02; the first full serve+deploy proof is 05-04/05-05. TEST PARADIGM (mandatory): acceptance tests are pre-authored by DISTILL; the crafter removes only the #[ignore] marker, records a semantic RED, then implements; it never writes, weakens or replaces an acceptance body (.claude/rules/testing.md RED acceptance scaffolds and activation). New unit tests are proptest properties over the step's pure functions with state-delta assertions over a declared universe; single-example unit tests are fallback with a `// bypass:` reason. Integration/Tier-3 tests stay single-example. All cargo/test/quint/mutants commands run via `cargo xtask metal run -- ...`. MUTATION GATE: `cargo xtask mutants --diff origin/main --package overdrive-worker --file <files touched>` and overdrive-reconcilers >= 80% (reconcile bodies mandatory)."
+        },
+        {
+          "id": "05-04",
+          "name": "Default startup gate and inferred removal",
+          "criteria": [
+            "The guest_listener_gate_composed test a_service_whose_listener_report_never_arrives_is_stopped_at_the_deadline_restarted_and_given_up is GREEN",
+            "Absent [[health_check.startup]] a Service materialises one GuestListeners descriptor and is Stable at Running plus Pass; the empty list stays the opt-out",
+            "ProbeDescriptor.inferred and every carrier are removed single-cut with new envelope versions, V1/V2 fixtures untouched and new fixtures added; openapi.yaml regenerated",
+            "Mutation kill rate >= 80% on the touched core and reconciler files"
+          ],
+          "test_file": "crates/overdrive-control-plane/src/reconciler_runtime/guest_listener_gate_composed.rs",
+          "scenario_name": "a_service_whose_listener_report_never_arrives_is_stopped_at_the_deadline_restarted_and_given_up",
+          "deps": ["05-03", "04-01"],
+          "agent": "nw-software-crafter",
+          "estimated_hours": 10,
+          "files_to_modify": [
+            "crates/overdrive-core/src/aggregate/workload_spec.rs",
+            "crates/overdrive-core/src/aggregate/probe_descriptor.rs",
+            "crates/overdrive-core/src/aggregate/mod.rs",
+            "crates/overdrive-core/src/aggregate/service_spec.rs",
+            "crates/overdrive-core/src/probe_result_row.rs",
+            "crates/overdrive-core/src/transition_reason.rs",
+            "crates/overdrive-core/src/api.rs",
+            "crates/overdrive-reconcilers/src/service_lifecycle.rs",
+            "crates/overdrive-cli/src/render.rs",
+            "api/openapi.yaml"
+          ],
+          "implementation_notes": "Decisions: D15 (default startup gate = the guest's report of every declared listener, TCP and UDP; 60 s deadline; [[health_check.startup]] = [] stays the opt-out; ADR-0270) and D16 (remove ProbeDescriptor.inferred, ProbeResultRow.inferred, ProbeWitness.inferred and the wire/OpenAPI/CLI carriers, option R; ADR-0271). Version bumps per the D16 table, ONE commit per envelope bump, each carrying the inferred removal and the GuestListeners tail variant: ServiceV2 in WorkloadIntentEnvelope, ServiceSpecV2 in ServiceSpecEnvelope, ProbeResultRowV3, a new version of the alloc-status row envelope for the Stable witness; the crafter confirms exact names and versions. Per .claude/rules/development.md rkyv schema evolution: add the new variant and re-alias, add FIXTURE_V<N> golden bytes (intent and spec also gain a historical V1 fixture with one `inferred` probe; V2 holds a GuestListeners descriptor), never touch existing FIXTURE_V* literals; the larger-variant discriminant-offset trap applies. GuestListeners holds no dial so it does not count toward GUEST_PROBE_SLOTS; ProbeCountExceeded no longer mentions an inferred probe. Deletion list is by behaviour (default-startup-probe synthesis in the TOML parser, inferred in the alloc fact, hydration, witnesses, CLI `(inferred)` suffix); the tests, fixtures and goldens that pin it are rewritten or deleted in the same commits; confirm the set by running the suite. ACTIVATES: guest_listener_gate_composed.rs::a_service_whose_listener_report_never_arrives_is_stopped_at_the_deadline_restarted_and_given_up (G-10 item 8, DG-8; omitted LISTEN line on SimBeaconIo; pending DELIVER: D13/D14). No other pre-authored ignored test; the RED bodies still using inferred on ProbeDescriptor and ProbeWitness drop it here. Do NOT edit verification/expectations/E13-vm-service-inferred-tcp-startup/ (point-in-time record) or website docs (finalize gate). VERTICAL SLICE: serve + deploy of a Service with no startup stanza gets the GuestListeners gate in the real composition. TEST PARADIGM (mandatory): acceptance tests are pre-authored by DISTILL; the crafter removes only the #[ignore] marker, records a semantic RED, then implements; it never writes, weakens or replaces an acceptance body (.claude/rules/testing.md RED acceptance scaffolds and activation). New unit tests are proptest properties over the step's pure functions with state-delta assertions over a declared universe; single-example unit tests are fallback with a `// bypass:` reason. Integration/Tier-3 tests stay single-example. All cargo/test/quint/mutants commands run via `cargo xtask metal run -- ...`. MUTATION GATE: `cargo xtask mutants --diff origin/main --package overdrive-core --file <files touched>` and overdrive-reconcilers >= 80%."
+        },
+        {
+          "id": "05-05",
+          "name": "Guest listen hooks with real-boot proof",
+          "criteria": [
+            "Real-boot Tier-3 tests on native metal (kvm-tests) show a TCP and a UDP declared listener reach a Pass startup probe row through the guest's LISTEN lines",
+            "G-10 item 9: init's own pre-READY binds produce zero LISTEN lines; item 10: loopback-only and v4-mapped binds are handled as pinned, both observed via the startup probe row",
+            "Drain before EXIT, one ordered beacon writer, workload created atomically in the workload cgroup; root programs stay ALLOW_MULTI link attachments",
+            "overdrive serve plus overdrive deploy of a never-listening Service stops, restarts and gives up StartupProbeFailed on metal"
+          ],
+          "test_file": "crates/overdrive-cli/tests/integration (Tier-3 real-boot tests not yet authored; acceptance-designer authors them before this step starts)",
+          "scenario_name": "G-10 items 9 and 10 real-boot obligations (DG-8)",
+          "deps": ["05-04"],
+          "agent": "nw-software-crafter",
+          "estimated_hours": 16,
+          "files_to_modify": [
+            "crates/overdrive-bpf/src/guest_main.rs",
+            "crates/overdrive-bpf/src/programs/mod.rs",
+            "crates/overdrive-init/src/main.rs"
+          ],
+          "implementation_notes": "Decision: D13 guest side (PR-2, V34-V36, V38, V41, V42, ADR-0272/0268). Behaviour pinned in feature-delta D13 item 1: init creates ONE workload cgroup before READY, attaches a separate small sockops TCP_LISTEN_CB program (same object, P-a: no second Ebpf::load) and two CgroupSock post-bind4/post-bind6 programs to it, and starts the workload directly in it (P-c: CLONE_INTO_CGROUP; clone3 replaces Command::spawn, crafter pins exit-127 versus InitError::Spawn); existing root programs stay BPF_F_ALLOW_MULTI link attachments (P-b); loopback-only binds are not reported; every distinct (protocol, port) is sent as exactly one LISTEN line; one ordered beacon writer (overdrive-init::send &mut File, no forwarder thread) and drain the listen ring before EXIT. eBPF is aya-rs Rust, never C (spike.md). New program files and the forwarding structure are the crafter's (internal). TIER-3 OBLIGATION (DG-8, ruled 2026-11-05): no pre-authored test exists for G-10 items (9) and (10) or the guest half of guest_report. Test authoring belongs to the acceptance designer: the orchestrator MUST route authoring of these real-boot tests (ignored with `pending DELIVER: D13 guest side`) to nw-acceptance-designer BEFORE dispatching this step, and the crafter does not author them. They run on native x86_64 metal with the `kvm-tests` feature via `cargo xtask metal run -- cargo nextest run -p <crate> --features integration-tests,kvm-tests`, never Lima, and observe through the startup probe row. Spike evidence stays V34 to V36, V42 (spike/ findings). Scaffolds owned: none. VERTICAL SLICE: `overdrive serve` + `overdrive deploy` end to end on metal, no test-only wiring; this closes GH #318 and #334. Do not add steps for V39, P-12, GH #335/#336/#340 or GH #308. TEST PARADIGM (mandatory): acceptance tests are pre-authored by DISTILL; the crafter removes only the #[ignore] marker, records a semantic RED, then implements; it never writes, weakens or replaces an acceptance body (.claude/rules/testing.md RED acceptance scaffolds and activation). New unit tests are proptest properties over the step's pure functions with state-delta assertions over a declared universe; single-example unit tests are fallback with a `// bypass:` reason. Integration/Tier-3 tests stay single-example. All cargo/test/quint/mutants commands run via `cargo xtask metal run -- ...`. MUTATION GATE: `cargo xtask mutants --diff origin/main --package overdrive-init --file <files touched>` >= 80% on the userspace init code only; aya-rs eBPF programs and unsafe blocks are excluded per testing.md."
+        }
+      ]
+    }
+  ],
+  "implementation_scope": {
+    "source_directories": [
+      "crates/overdrive-core/src/",
+      "crates/overdrive-reconcilers/src/",
+      "crates/overdrive-control-plane/src/",
+      "crates/overdrive-worker/src/",
+      "crates/overdrive-cli/src/",
+      "crates/overdrive-sim/src/",
+      "crates/overdrive-bpf/src/",
+      "crates/overdrive-init/src/"
+    ],
+    "test_directories": [
+      "crates/overdrive-core/tests/",
+      "crates/overdrive-reconcilers/tests/",
+      "crates/overdrive-control-plane/tests/",
+      "crates/overdrive-worker/tests/",
+      "crates/overdrive-cli/tests/",
+      "crates/overdrive-sim/tests/"
+    ],
+    "excluded_patterns": [
+      "target/**",
+      "vendors/**",
+      "spike-scratch/**",
+      "verification/expectations/**"
+    ]
+  },
+  "validation": {
+    "status": "pending",
+    "reviewer": "pending independent roadmap review",
+    "approved_at": "not yet approved"
+  }
+}
