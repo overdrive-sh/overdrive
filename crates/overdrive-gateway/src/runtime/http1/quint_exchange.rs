@@ -50,7 +50,7 @@
 //! Every named run of the module is pinned with
 //! `#[quint_test(max_samples = 1)]` (a named run is deterministic: one sample
 //! replays it); `#[quint_run]` replays randomized traces (seed printed on
-//! failure). The drivers are ignored until `ExchangeMachine` leaves scaffold.
+//! failure). The drivers run against the production `ExchangeMachine`.
 
 #![allow(
     clippy::expect_used,
@@ -316,7 +316,6 @@ enum ItfError {
     test = "exchange_cl_keepalive",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER quint-conformance-relay_exchange"]
 fn relay_exchange_exchange_cl_keepalive() -> impl Driver {
     RelayConfDriver::default()
 }
@@ -329,7 +328,6 @@ fn relay_exchange_exchange_cl_keepalive() -> impl Driver {
     test = "early_response_closes",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER quint-conformance-relay_exchange"]
 fn relay_exchange_early_response_closes() -> impl Driver {
     RelayConfDriver::default()
 }
@@ -343,7 +341,6 @@ fn relay_exchange_early_response_closes() -> impl Driver {
     test = "drain_with_inflight_body",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER quint-conformance-relay_exchange"]
 fn relay_exchange_drain_with_inflight_body() -> impl Driver {
     RelayConfDriver::default()
 }
@@ -357,7 +354,6 @@ fn relay_exchange_drain_with_inflight_body() -> impl Driver {
     test = "half_close_after_request_read",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER quint-conformance-relay_exchange"]
 fn relay_exchange_half_close_after_request_read() -> impl Driver {
     RelayConfDriver::default()
 }
@@ -371,7 +367,6 @@ fn relay_exchange_half_close_after_request_read() -> impl Driver {
     test = "upstream_close_mid_body_aborts",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER quint-conformance-relay_exchange"]
 fn relay_exchange_upstream_close_mid_body_aborts() -> impl Driver {
     RelayConfDriver::default()
 }
@@ -385,7 +380,6 @@ fn relay_exchange_upstream_close_mid_body_aborts() -> impl Driver {
     test = "close_delimited_clean_end",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER quint-conformance-relay_exchange"]
 fn relay_exchange_close_delimited_clean_end() -> impl Driver {
     RelayConfDriver::default()
 }
@@ -399,7 +393,6 @@ fn relay_exchange_close_delimited_clean_end() -> impl Driver {
     test = "public_close_mid_request_aborts",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER quint-conformance-relay_exchange"]
 fn relay_exchange_public_close_mid_request_aborts() -> impl Driver {
     RelayConfDriver::default()
 }
@@ -410,7 +403,6 @@ fn relay_exchange_public_close_mid_request_aborts() -> impl Driver {
     spec = "../../specs/quint/public-ingress-gateway/relay_exchange.qnt",
     main = "relay_conf"
 )]
-#[ignore = "pending DELIVER quint-conformance-relay_exchange"]
 fn relay_exchange_relay_conf_randomized_traces() -> impl Driver {
     RelayConfDriver::default()
 }

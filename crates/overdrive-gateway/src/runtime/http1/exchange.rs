@@ -203,7 +203,9 @@ impl ExchangeMachine {
 
     /// Fails `FramingViolation` unless `response_state() == Complete`.
     /// Relay -> Idle and `Reuse` when `reusable()`, else Relay -> Closed and
-    /// `Close`.
+    /// `Close`. A reused `Idle` keeps the completed message's state
+    /// (`response_state() == Complete`, both remainings `None`) until the next
+    /// `begin_request`.
     pub(crate) fn finish(&mut self) -> Result<Disposition, FramingViolation> {
         self.require_relay()?;
         if self.response_state != ResponseState::Complete {
@@ -214,7 +216,6 @@ impl ExchangeMachine {
             return Ok(Disposition::Close);
         }
         self.phase = ExchangePhase::Idle;
-        self.response_state = ResponseState::Pending;
         Ok(Disposition::Reuse)
     }
 
