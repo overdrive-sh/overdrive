@@ -86,8 +86,43 @@ The verdict rests on a real exercise on the real kernel, not "it compiled":
 - After a failed dispatch, do NOT blindly re-fire — confirm the corrected setup
   first.
 
+## Spike evidence is not test coverage
+
+A spike is **evidence**: it shows what a mechanism did at one commit, on one
+kernel, under one setup. Cite it as evidence wherever a design claim rests on
+it ("V42 shows init's binds produce no events with the hooks on the workload
+cgroup"). That use is correct and needs no qualification.
+
+A spike is **never coverage**. It does not keep checking anything; it is
+throwaway and is deleted when the implementation lands. A property that needs
+to keep holding gets a test (or a reasoned ruling that it needs none). The
+spike can motivate that test; it cannot stand in for it.
+
+Keep the two questions apart:
+
+- **"Is this claim supported?"** — evidence: a spike, a source reading, a
+  measurement. Citing a spike here is right.
+- **"What catches a regression?"** — coverage: a test in a lane that runs, or
+  a reasoned no-obligation ruling (the failure is unreachable, or it has no
+  production effect). A spike is never the answer here.
+
+When a test obligation cannot be met (no observable, no deployable fixture),
+do not answer it with a spike. Decide whether the failure it guards is
+reachable: if it is not, record a no-obligation ruling with that reason; if it
+is, surface the missing observable or fixture as a design gap.
+
+The opposite error is just as wrong: do not "correct" a citation that uses a
+spike as evidence merely because the property also has, or lacks, a test.
+Whether a property needs a test is a separate question from whether the
+evidence citation is accurate.
+
 ## Symptoms during review
 
+- An obligation, gate or test-coverage row discharged with "covered by spike
+  V-N" / "proven by the spike" — a spike used as coverage. Replace with a test
+  or a reasoned no-obligation ruling.
+- A reviewer or agent flagging every "V-N evidence" citation as a defect —
+  evidence conflated with coverage; the citation is fine.
 - A `.bpf.c` / `driver.c` / `vmlinux.h` / `clang` invocation in a probe → wrong
   language; eBPF is aya-rs Rust.
 - A probe file under `crates/`, or a `mod.rs` / `Cargo.toml [[bin]]` edit wiring a
