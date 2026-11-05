@@ -4,14 +4,6 @@
 //! The source-local properties at the foot of the file specify the epoch half
 //! of S-PIG-44.
 
-#![allow(
-    clippy::todo,
-    clippy::doc_markdown,
-    clippy::needless_pass_by_value,
-    clippy::missing_const_for_fn,
-    reason = "public-ingress DISTILL scaffold: bodies are DELIVER's"
-)]
-
 use std::fmt::{self, Display, Formatter};
 use std::num::NonZeroU64;
 use std::str::FromStr;
@@ -194,7 +186,7 @@ mod properties {
         ///
         /// CONTRACT_SHAPE: pure-function.
         #[test]
-            fn epoch_roundtrips_canonical_decimal(raw in 1u64..u64::MAX) {
+        fn epoch_roundtrips_canonical_decimal(raw in 1u64..u64::MAX) {
             let epoch = GatewayIdentityEpoch::new(raw).expect("nonzero epoch");
             prop_assert_eq!(epoch.to_string(), raw.to_string());
             prop_assert_eq!(raw.to_string().parse::<GatewayIdentityEpoch>(), Ok(epoch));
