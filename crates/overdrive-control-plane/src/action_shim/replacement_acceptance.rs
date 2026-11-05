@@ -546,22 +546,37 @@ async fn successor_outcome_precedes_blocked_predecessor_cleanup_for_every_driver
         );
         tokio::pin!(dispatch);
 
+        let mut stop_entered_seen = false;
         tokio::select! {
             () = &mut start_entered => {}
-            () = &mut stop_entered => panic!(
-                "MISSING_CORRECTED_BEHAVIOR seed={SEED}: predecessor cleanup began before \
-                 successor start for {driver_type}"
-            ),
+            () = &mut stop_entered => stop_entered_seen = true,
             result = &mut dispatch => panic!(
                 "replacement returned before either owned effect was observed: {result:?}"
             ),
         }
-        tokio::select! {
-            () = &mut stop_entered => {}
-            result = &mut dispatch => panic!(
-                "replacement returned without the required post-successor old cleanup: {result:?}"
-            ),
+        if !stop_entered_seen {
+            tokio::select! {
+                () = &mut stop_entered => {}
+                result = &mut dispatch => panic!(
+                    "replacement returned without the required post-successor old cleanup: \
+                     {result:?}"
+                ),
+            }
         }
+        // The ordering oracle is the driver's recorded call order, not which
+        // notification the select polled first.
+        let entered_trace = driver.trace.lock().clone();
+        let entered_start = entered_trace
+            .iter()
+            .position(|event| event == &TraceEvent::Start(successor.clone()));
+        let entered_stop = entered_trace
+            .iter()
+            .position(|event| event == &TraceEvent::Stop(predecessor.clone()));
+        assert!(
+            matches!((entered_start, entered_stop), (Some(start), Some(stop)) if start < stop),
+            "MISSING_CORRECTED_BEHAVIOR seed={SEED}: predecessor cleanup began before \
+             successor start for {driver_type}: {entered_trace:?}"
+        );
 
         let fresh = obs
             .alloc_status_row(&successor)
