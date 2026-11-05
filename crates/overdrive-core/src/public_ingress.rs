@@ -278,10 +278,13 @@ impl PathMatch {
         match self {
             Self::Exact(path) => raw_request_path == path.as_str(),
             Self::SegmentPrefix(path) => {
-                let base = path.as_str().trim_end_matches('/');
-                raw_request_path
-                    .strip_prefix(base)
-                    .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
+                let prefix = path.as_str();
+                raw_request_path == prefix
+                    || (prefix == "/" && raw_request_path.starts_with('/'))
+                    || (prefix.ends_with('/') && raw_request_path.starts_with(prefix))
+                    || raw_request_path
+                        .strip_prefix(prefix)
+                        .is_some_and(|rest| rest.starts_with('/'))
             }
         }
     }
