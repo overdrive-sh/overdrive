@@ -1355,6 +1355,15 @@ mod properties {
         prop::collection::vec(atom, 0..24).prop_map(|atoms| format!("/{}", atoms.concat()))
     }
 
+    /// The literal segment-prefix contract, with no slash normalisation of
+    /// either operand.
+    fn segment_prefix_contract(prefix: &str, raw: &str) -> bool {
+        raw == prefix
+            || (prefix == "/" && raw.starts_with('/'))
+            || (prefix.ends_with('/') && raw.starts_with(prefix))
+            || raw.strip_prefix(prefix).is_some_and(|rest| rest.starts_with('/'))
+    }
+
     fn valid_label() -> impl Strategy<Value = String> {
         "[a-z](?:[a-z0-9-]{0,10}[a-z0-9])?"
     }
@@ -1391,19 +1400,53 @@ mod properties {
 
         /// S-PIG-04: a segment prefix matches the path itself and its child
         /// segments, never an adjacent sibling that merely shares the bytes.
+        /// The approved prefix may carry trailing slashes; none of them is
+        /// normalised away, so every candidate agrees with the literal
+        /// contract expression.
         ///
         /// CONTRACT_SHAPE: pure-function.
         #[test]
-        fn segment_prefix_never_crosses_a_segment_boundary(segment in "[a-z]{1,16}", tail in "[a-z]{1,16}") {
+        fn segment_prefix_never_crosses_a_segment_boundary(
+            segment in "[a-z]{1,16}",
+            tail in "[a-z]{1,16}",
+            slashes in 0usize..4,
+        ) {
             let raw = format!("/{segment}");
+            let approved = format!("{raw}{}", "/".repeat(slashes));
             let matcher = PathMatch::SegmentPrefix(
-                PublicPath::new(&raw).expect("generated path is valid"),
+                PublicPath::new(&approved).expect("generated path is valid"),
             );
             let child = format!("{raw}/{tail}");
             let adjacent = format!("{raw}{tail}");
-            prop_assert!(matcher.matches_raw_path(&raw));
-            prop_assert!(matcher.matches_raw_path(&child));
-            prop_assert!(!matcher.matches_raw_path(&adjacent));
+            let under_prefix = format!("{approved}{tail}");
+            if slashes == 0 {
+                prop_assert!(matcher.matches_raw_path(&raw));
+                prop_assert!(matcher.matches_raw_path(&child));
+                prop_assert!(!matcher.matches_raw_path(&adjacent));
+            } else {
+                // A prefix ending in a slash never matches the path without it.
+                prop_assert!(!matcher.matches_raw_path(&raw));
+                prop_assert!(!matcher.matches_raw_path(&adjacent));
+                prop_assert!(matcher.matches_raw_path(&approved));
+                prop_assert!(matcher.matches_raw_path(&under_prefix));
+            }
+            let candidates = [
+                raw.clone(),
+                child,
+                adjacent,
+                approved.clone(),
+                under_prefix,
+                format!("{approved}/{tail}"),
+                format!("{raw}//{tail}"),
+                "/".to_owned(),
+            ];
+            for candidate in candidates {
+                prop_assert_eq!(
+                    matcher.matches_raw_path(&candidate),
+                    segment_prefix_contract(&approved, &candidate),
+                    "prefix {:?} candidate {:?}", approved, candidate,
+                );
+            }
         }
 
         /// S-PIG-08: the Route generation is deterministic and changes with
@@ -1542,6 +1585,44 @@ mod properties {
             assert_digest_roundtrip!(CertificateFingerprint);
             assert_digest_roundtrip!(GatewayApplicationGenerationId);
         }
+    }
+
+    /// A segment prefix that ends in a slash matches only paths that carry
+    /// that slash; the slash is never trimmed from the approved prefix.
+    ///
+    /// CONTRACT_SHAPE: pure-function.
+    #[test]
+    fn trailing_slash_prefix_matches_only_paths_carrying_the_slash() {
+        let matcher = PathMatch::SegmentPrefix(PublicPath::new("/api/").expect("valid path"));
+        assert!(matcher.matches_raw_path("/api/"));
+        assert!(matcher.matches_raw_path("/api/x"));
+        assert!(matcher.matches_raw_path("/api/x/y"));
+        assert!(!matcher.matches_raw_path("/api"));
+        assert!(!matcher.matches_raw_path("/apix"));
+        assert!(!matcher.matches_raw_path("/apix/"));
+    }
+
+    /// The approved prefix `/api/` does not match the request path `/api`.
+    ///
+    /// CONTRACT_SHAPE: pure-function.
+    #[test]
+    fn trailing_slash_prefix_does_not_match_path_without_the_slash() {
+        let matcher = PathMatch::SegmentPrefix(PublicPath::new("/api/").expect("valid path"));
+        assert!(!matcher.matches_raw_path("/api"));
+    }
+
+    /// A doubled trailing slash is preserved: `/api//` matches only paths
+    /// that begin with both slashes.
+    ///
+    /// CONTRACT_SHAPE: pure-function.
+    #[test]
+    fn doubled_slash_prefix_matches_only_paths_carrying_both_slashes() {
+        let matcher = PathMatch::SegmentPrefix(PublicPath::new("/api//").expect("valid path"));
+        assert!(matcher.matches_raw_path("/api//"));
+        assert!(matcher.matches_raw_path("/api//x"));
+        assert!(!matcher.matches_raw_path("/api/x"));
+        assert!(!matcher.matches_raw_path("/api/"));
+        assert!(!matcher.matches_raw_path("/api"));
     }
 
     /// S-PIG-05: hostname and path validation cover every closed error
