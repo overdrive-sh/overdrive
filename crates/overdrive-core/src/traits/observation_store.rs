@@ -1377,23 +1377,14 @@ impl WorkloadSvidIssueStatusRowV1 {
     /// # Errors
     ///
     /// Returns [`ObservationStoreError::Envelope`] for empty, truncated, corrupt
-    /// or future-version bytes, after emitting exactly one
-    /// `observation.row.skipped` warning that carries `key`.
+    /// or future-version bytes. The observation store emits the
+    /// `observation.row.skipped` warning (R-56); the codec does not log.
     pub fn from_store_bytes(
         bytes: &[u8],
-        key: Option<&str>,
+        _key: Option<&str>,
     ) -> Result<Self, ObservationStoreError> {
-        crate::codec::decode_envelope_bytes::<WorkloadSvidIssueStatusRowEnvelope>(bytes).map_err(
-            |envelope_error| {
-                tracing::warn!(
-                    name: "observation.row.skipped",
-                    key = key.unwrap_or("<unknown>"),
-                    envelope_error = ?envelope_error,
-                    "workload SVID issue status row envelope decode failed; skipping row",
-                );
-                ObservationStoreError::Envelope { source: envelope_error }
-            },
-        )
+        crate::codec::decode_envelope_bytes::<WorkloadSvidIssueStatusRowEnvelope>(bytes)
+            .map_err(|source| ObservationStoreError::Envelope { source })
     }
 }
 

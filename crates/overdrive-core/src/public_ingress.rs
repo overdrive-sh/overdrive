@@ -903,25 +903,16 @@ where
     })
 }
 
-/// Decode observation-layer bytes, logging and skipping the row on failure.
-fn decode_observation_envelope<E>(
-    bytes: &[u8],
-    key: Option<&str>,
-) -> Result<E::Latest, ObservationStoreError>
+/// Decode observation-layer bytes. The observation store, not the codec,
+/// emits the `observation.row.skipped` warning (R-56).
+fn decode_observation_envelope<E>(bytes: &[u8]) -> Result<E::Latest, ObservationStoreError>
 where
     E: VersionedEnvelope + rkyv::Archive,
     E::Archived: for<'a> rkyv::bytecheck::CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>
         + rkyv::Deserialize<E, rkyv::rancor::Strategy<rkyv::de::Pool, rkyv::rancor::Error>>,
 {
-    decode_envelope_bytes::<E>(bytes).map_err(|envelope_error| {
-        tracing::warn!(
-            name: "observation.row.skipped",
-            key = key.unwrap_or("<unknown>"),
-            envelope_error = ?envelope_error,
-            "observation row envelope decode failed; skipping row, convergence proceeds for surviving rows",
-        );
-        ObservationStoreError::Envelope { source: envelope_error }
-    })
+    decode_envelope_bytes::<E>(bytes)
+        .map_err(|envelope_error| ObservationStoreError::Envelope { source: envelope_error })
 }
 
 /// Typed persisted Route-set decode failures.
@@ -1202,7 +1193,7 @@ impl PublicCertifiedKeyStatusRowV1 {
         archive_envelope(&PublicCertifiedKeyStatusRowEnvelope::latest(self.clone()))
     }
 
-    /// Decode persisted observation bytes; emits `observation.row.skipped` on failure.
+    /// Decode persisted observation bytes; the observation store emits the skipped-row warning.
     ///
     /// # Errors
     ///
@@ -1210,9 +1201,9 @@ impl PublicCertifiedKeyStatusRowV1 {
     /// corrupt or future-version bytes.
     pub fn from_store_bytes(
         bytes: &[u8],
-        key: Option<&str>,
+        _key: Option<&str>,
     ) -> Result<Self, ObservationStoreError> {
-        decode_observation_envelope::<PublicCertifiedKeyStatusRowEnvelope>(bytes, key)
+        decode_observation_envelope::<PublicCertifiedKeyStatusRowEnvelope>(bytes)
     }
 }
 
@@ -1316,7 +1307,7 @@ impl GatewayApplicationStatusRowV1 {
         archive_envelope(&GatewayApplicationStatusRowEnvelope::latest(self.clone()))
     }
 
-    /// Decode persisted observation bytes; emits `observation.row.skipped` on failure.
+    /// Decode persisted observation bytes; the observation store emits the skipped-row warning.
     ///
     /// # Errors
     ///
@@ -1324,9 +1315,9 @@ impl GatewayApplicationStatusRowV1 {
     /// corrupt or future-version bytes.
     pub fn from_store_bytes(
         bytes: &[u8],
-        key: Option<&str>,
+        _key: Option<&str>,
     ) -> Result<Self, ObservationStoreError> {
-        decode_observation_envelope::<GatewayApplicationStatusRowEnvelope>(bytes, key)
+        decode_observation_envelope::<GatewayApplicationStatusRowEnvelope>(bytes)
     }
 }
 

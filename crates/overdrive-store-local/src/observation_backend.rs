@@ -668,9 +668,12 @@ impl ObservationStore for LocalObservationStore {
         let bytes = self
             .read_status_bytes(PUBLIC_CERTIFIED_KEY_STATUS_TABLE, id.as_str().as_bytes().to_vec())
             .await?;
-        let key = status_row_label(PUBLIC_CERTIFIED_KEY_STATUS_TABLE_NAME, id.as_str());
         Ok(bytes.and_then(|bytes| {
-            PublicCertifiedKeyStatusRowV1::from_store_bytes(&bytes, Some(&key)).ok()
+            skip_undecodable(
+                PUBLIC_CERTIFIED_KEY_STATUS_TABLE_NAME,
+                id.as_str(),
+                PublicCertifiedKeyStatusRowV1::from_store_bytes(&bytes, None),
+            )
         }))
     }
 
@@ -684,9 +687,12 @@ impl ObservationStore for LocalObservationStore {
                 node_id.as_str().as_bytes().to_vec(),
             )
             .await?;
-        let key = status_row_label(GATEWAY_APPLICATION_STATUS_TABLE_NAME, node_id.as_str());
         Ok(bytes.and_then(|bytes| {
-            GatewayApplicationStatusRowV1::from_store_bytes(&bytes, Some(&key)).ok()
+            skip_undecodable(
+                GATEWAY_APPLICATION_STATUS_TABLE_NAME,
+                node_id.as_str(),
+                GatewayApplicationStatusRowV1::from_store_bytes(&bytes, None),
+            )
         }))
     }
 
@@ -697,7 +703,7 @@ impl ObservationStore for LocalObservationStore {
         failure: SvidIssueFailure,
     ) -> Result<(), ObservationStoreError> {
         let inner = Arc::clone(&self.inner);
-        let alloc_id = alloc_id.clone();
+        let alloc_id_for_write = alloc_id.clone();
         let node_id = node_id.clone();
         // One redb write transaction reads the prior row and installs the
         // next one; redb serialises writers, so concurrent recordings never
@@ -708,15 +714,15 @@ impl ObservationStore for LocalObservationStore {
             let undecodable_prior = {
                 let mut table =
                     write.open_table(WORKLOAD_SVID_ISSUE_STATUS_TABLE).map_err(map_to_io)?;
-                record_failure_in_table(&mut table, &alloc_id, node_id, failure)?
+                record_failure_in_table(&mut table, &alloc_id_for_write, node_id, failure)?
             };
             write.commit().map_err(map_to_io)?;
             Ok::<_, ObservationStoreError>(undecodable_prior)
         })
         .await
         .map_err(map_to_io)??;
-        if let Some((bytes, key)) = undecodable_prior {
-            drop(WorkloadSvidIssueStatusRowV1::from_store_bytes(&bytes, Some(&key)));
+        if let Some(error) = undecodable_prior {
+            log_row_skipped(WORKLOAD_SVID_ISSUE_STATUS_TABLE_NAME, alloc_id.as_str(), &error);
         }
         Ok(())
     }
@@ -731,9 +737,12 @@ impl ObservationStore for LocalObservationStore {
                 alloc_id.as_str().as_bytes().to_vec(),
             )
             .await?;
-        let key = status_row_label(WORKLOAD_SVID_ISSUE_STATUS_TABLE_NAME, alloc_id.as_str());
         Ok(bytes.and_then(|bytes| {
-            WorkloadSvidIssueStatusRowV1::from_store_bytes(&bytes, Some(&key)).ok()
+            skip_undecodable(
+                WORKLOAD_SVID_ISSUE_STATUS_TABLE_NAME,
+                alloc_id.as_str(),
+                WorkloadSvidIssueStatusRowV1::from_store_bytes(&bytes, None),
+            )
         }))
     }
 
@@ -1458,34 +1467,46 @@ fn log_lww_reject(
 // on subscriptions.
 // -----------------------------------------------------------------------------
 
-/// `<table>/<key>`: the label the skipped-row warning carries, so it names
-/// both the table and the row.
-fn status_row_label(table: &str, key: &str) -> String {
-    format!("{table}/{key}")
+/// Emit the structured `observation.row.skipped` event for a stored status
+/// row that failed envelope decode (R-56): separate `table` and `key` fields,
+/// the shape of `observation.envelope.decode_failed`. The warning fires on the
+/// calling async thread so thread-local subscribers observe it.
+fn log_row_skipped(table: &'static str, key: &str, error: &ObservationStoreError) {
+    tracing::warn!(
+        name: "observation.row.skipped",
+        table = table,
+        key = key,
+        source = ?error,
+        "observation row envelope decode failed; skipping row",
+    );
+}
+
+/// An undecodable stored row reads as absent, after one skipped-row warning.
+fn skip_undecodable<T>(
+    table: &'static str,
+    key: &str,
+    decoded: Result<T, ObservationStoreError>,
+) -> Option<T> {
+    decoded.map_err(|error| log_row_skipped(table, key, &error)).ok()
 }
 
 /// Read-modify-write of the per-allocation failure row inside the caller's
-/// open write transaction. Returns the undecodable prior bytes and their
-/// label when the prior row could not be decoded (treated as absent).
+/// open write transaction. Returns the decode error when the prior row could
+/// not be decoded (treated as absent).
 fn record_failure_in_table(
     table: &mut Table<'_, &[u8], &[u8]>,
     alloc_id: &AllocationId,
     node_id: NodeId,
     failure: SvidIssueFailure,
-) -> Result<Option<(Vec<u8>, String)>, ObservationStoreError> {
+) -> Result<Option<ObservationStoreError>, ObservationStoreError> {
     let key = alloc_id.as_str().as_bytes();
     let stored = table.get(key).map_err(map_to_io)?.map(|value| value.value().to_vec());
-    let decoded = stored.map(|bytes| {
-        decode_envelope::<WorkloadSvidIssueStatusRowEnvelope>(&bytes).map_err(|_| bytes)
-    });
-    let (prior, undecodable) = match decoded {
-        None => (None, None),
-        Some(Ok(row)) => (Some(row), None),
-        Some(Err(bytes)) => {
-            let label = status_row_label(WORKLOAD_SVID_ISSUE_STATUS_TABLE_NAME, alloc_id.as_str());
-            (None, Some((bytes, label)))
-        }
-    };
+    let (prior, undecodable) =
+        match stored.map(|bytes| decode_envelope::<WorkloadSvidIssueStatusRowEnvelope>(&bytes)) {
+            None => (None, None),
+            Some(Ok(row)) => (Some(row), None),
+            Some(Err(error)) => (None, Some(error)),
+        };
     let row = WorkloadSvidIssueStatusRowV1 {
         alloc_id: alloc_id.clone(),
         node_id: node_id.clone(),
