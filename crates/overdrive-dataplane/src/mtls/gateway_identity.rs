@@ -10,21 +10,17 @@
 //! action carrying a stale epoch, so an in-flight issue cannot re-hold after a
 //! disable.
 //!
-//! SCAFFOLD: true. Only the shapes the DESIGN pins ("Exact identity,
-//! connector and authenticated-stream ports") are present.
 //! `GatewayClientIdentityAccess` and its source trait are defined in
 //! `overdrive-gateway::ports` (R-20); this module owns the private source the
 //! slot and the injected clock form behind `client_access`.
 
 #![allow(
     clippy::todo,
-    clippy::doc_markdown,
     clippy::needless_pass_by_value,
-    clippy::missing_const_for_fn,
     clippy::unused_self,
     dead_code,
     unused_variables,
-    reason = "public-ingress DISTILL scaffold: bodies are DELIVER's"
+    reason = "public-ingress DISTILL scaffold: the client-access source and the issue-failure record are later steps' bodies"
 )]
 
 use std::sync::Arc;
@@ -34,39 +30,62 @@ use overdrive_core::gateway_identity::{
     GatewayIdentityDesired, GatewayIdentityEpoch, GatewayIdentityFacts, GatewayIdentityIssueRecord,
     GatewayIdentityView,
 };
-use overdrive_core::id::NodeId;
+use overdrive_core::id::{NodeId, SpiffeId};
 use overdrive_core::traits::ca::{SvidMaterial, TrustBundle};
 use overdrive_core::traits::clock::Clock;
 use overdrive_gateway::ports::{
     GatewayClientIdentityAccess, GatewayClientIdentitySource, GatewayClientMtlsError,
     GatewayIdentityActionTarget, GatewayIdentityLifecycleTarget, GatewayIdentityMutationOutcome,
 };
+use parking_lot::Mutex;
 use tokio::sync::watch;
+
+/// The mutable state behind the slot's one lock: the desired epoch and the held
+/// generation. Enabled is `epoch == first`; `begin_disable` is the only
+/// transition away from it.
+struct SlotState {
+    epoch: GatewayIdentityEpoch,
+    held: Option<SvidMaterial>,
+}
 
 /// The single gateway SVID holder.
 pub struct GatewayIdentitySlot {
-    _private: (),
+    node_id: NodeId,
+    trust_bundle: TrustBundle,
+    state: Mutex<SlotState>,
+    facts: watch::Sender<Option<GatewayIdentityFacts>>,
 }
 
 impl GatewayIdentitySlot {
     /// Epoch one, enabled, empty.
     pub fn new(node_id: NodeId, trust_bundle: TrustBundle) -> Self {
-        todo!("SCAFFOLD: GatewayIdentitySlot::new")
+        let (facts, _initial_receiver) = watch::channel(None);
+        Self {
+            node_id,
+            trust_bundle,
+            state: Mutex::new(SlotState { epoch: GatewayIdentityEpoch::first(), held: None }),
+            facts,
+        }
     }
 
     /// The checked desired epoch and subject.
     pub fn desired(&self) -> GatewayIdentityDesired {
-        todo!("SCAFFOLD: GatewayIdentitySlot::desired")
+        let epoch = self.state.lock().epoch;
+        let enabled = epoch == GatewayIdentityEpoch::first();
+        GatewayIdentityDesired {
+            epoch,
+            spiffe_id: enabled.then(|| SpiffeId::for_gateway(&self.node_id)),
+        }
     }
 
     /// Non-secret facts of the held SVID, `None` while empty.
     pub fn current(&self) -> Option<GatewayIdentityFacts> {
-        todo!("SCAFFOLD: GatewayIdentitySlot::current")
+        self.facts.borrow().clone()
     }
 
     /// Currentness stream of the non-secret facts.
     pub fn subscribe(&self) -> watch::Receiver<Option<GatewayIdentityFacts>> {
-        todo!("SCAFFOLD: GatewayIdentitySlot::subscribe")
+        self.facts.subscribe()
     }
 
     /// The capability the exact-peer client borrows held material through.
@@ -76,19 +95,34 @@ impl GatewayIdentitySlot {
 
     /// The write-only action capability installed in the application state.
     pub fn action_target(self: &Arc<Self>) -> GatewayIdentityActionHandle {
-        todo!("SCAFFOLD: GatewayIdentitySlot::action_target")
+        GatewayIdentityActionHandle { slot: Arc::clone(self) }
     }
 
     /// The lifecycle capability the control-plane adapter calls to disable.
     pub fn lifecycle_target(self: &Arc<Self>) -> GatewayIdentityLifecycleHandle {
-        todo!("SCAFFOLD: GatewayIdentitySlot::lifecycle_target")
+        GatewayIdentityLifecycleHandle { slot: Arc::clone(self) }
     }
 
     /// Bump the epoch and empty the slot in the same call. Infallible (R-30):
     /// the epoch is a u64; the private checked add overflowing is
     /// `unreachable!()`.
     pub(crate) fn begin_disable(&self) -> GatewayIdentityEpoch {
-        todo!("SCAFFOLD: GatewayIdentitySlot::begin_disable")
+        let mut state = self.state.lock();
+        let next = state
+            .epoch
+            .get()
+            .checked_add(1)
+            .and_then(|raw| GatewayIdentityEpoch::new(raw.get()).ok())
+            .unwrap_or_else(|| {
+                unreachable!("a u64 epoch cannot be exhausted by process-local disables")
+            });
+        state.epoch = next;
+        state.held = None;
+        // Published while the lock is held so concurrent holds and disables
+        // reach subscribers in the order they took effect.
+        self.facts.send_replace(None);
+        drop(state);
+        next
     }
 
     /// Hold `material` for `epoch` after the audit row is durable; a stale
@@ -98,17 +132,30 @@ impl GatewayIdentitySlot {
         epoch: GatewayIdentityEpoch,
         material: SvidMaterial,
     ) -> GatewayIdentityMutationOutcome {
-        todo!("SCAFFOLD: GatewayIdentitySlot::hold_audited")
+        let mut state = self.state.lock();
+        if epoch != state.epoch {
+            return GatewayIdentityMutationOutcome::StaleEpoch;
+        }
+        let facts = GatewayIdentityFacts {
+            epoch,
+            spiffe_id: material.spiffe_id().clone(),
+            serial: material.serial().clone(),
+            not_after: material.not_after(),
+        };
+        state.held = Some(material);
+        self.facts.send_replace(Some(facts));
+        drop(state);
+        GatewayIdentityMutationOutcome::Applied
     }
 }
 
 impl GatewayIdentityView for GatewayIdentitySlot {
     fn desired(&self) -> GatewayIdentityDesired {
-        todo!("SCAFFOLD: GatewayIdentityView::desired")
+        Self::desired(self)
     }
 
     fn current(&self) -> Option<GatewayIdentityFacts> {
-        todo!("SCAFFOLD: GatewayIdentityView::current")
+        Self::current(self)
     }
 }
 
@@ -128,7 +175,7 @@ impl GatewayIdentityActionTarget for GatewayIdentityActionHandle {
         epoch: GatewayIdentityEpoch,
         material: SvidMaterial,
     ) -> GatewayIdentityMutationOutcome {
-        todo!("SCAFFOLD: GatewayIdentityActionHandle::hold_audited")
+        self.slot.hold_audited(epoch, material)
     }
 
     fn record_issue_failure(&self, failure: SvidIssueFailure) {
@@ -138,7 +185,7 @@ impl GatewayIdentityActionTarget for GatewayIdentityActionHandle {
 
 impl GatewayIdentityLifecycleTarget for GatewayIdentityLifecycleHandle {
     fn current(&self) -> Option<GatewayIdentityFacts> {
-        todo!("SCAFFOLD: GatewayIdentityLifecycleHandle::current")
+        self.slot.current()
     }
 
     fn issue_record(&self) -> Option<GatewayIdentityIssueRecord> {
@@ -146,11 +193,11 @@ impl GatewayIdentityLifecycleTarget for GatewayIdentityLifecycleHandle {
     }
 
     fn subscribe(&self) -> watch::Receiver<Option<GatewayIdentityFacts>> {
-        todo!("SCAFFOLD: GatewayIdentityLifecycleHandle::subscribe")
+        self.slot.subscribe()
     }
 
     fn begin_disable(&self) -> GatewayIdentityEpoch {
-        todo!("SCAFFOLD: GatewayIdentityLifecycleHandle::begin_disable")
+        self.slot.begin_disable()
     }
 }
 

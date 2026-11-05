@@ -7,18 +7,6 @@
 //! epoch is still the desired epoch; a stale epoch is a successful no-op. There
 //! is no gateway drop action (R-4): disabling the gateway clears the volatile
 //! slot synchronously in the process.
-//!
-//! SCAFFOLD: true. The signature is the DESIGN-pinned contract; the body is
-//! DELIVER's and fails with SCAFFOLD text. The source-local bodies below are the
-//! S-PIG-65 specification of the executor half.
-
-#![allow(
-    clippy::todo,
-    clippy::unused_async,
-    clippy::unnecessary_wraps,
-    clippy::redundant_pub_crate,
-    reason = "public-ingress DISTILL scaffold: the executor body is DELIVER's; the typed Result is the pinned signature"
-)]
 
 use overdrive_core::reconcilers::Action;
 use overdrive_core::traits::ca::Ca;
@@ -27,6 +15,7 @@ use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_gateway::ports::{GatewayIdentityActionTarget, GatewayIdentityMutationOutcome};
 
 use super::ShimError;
+use crate::ca_issuance::issue_and_audit;
 
 /// Dispatch one `Action::IssueGatewaySvid`: `issue_and_audit`, then the
 /// epoch-checked hold. Both `Applied` and `StaleEpoch` are success; the caller
@@ -35,21 +24,26 @@ use super::ShimError;
 /// # Errors
 ///
 /// [`ShimError::GatewaySvidIssue`] when issuance or its audit write fails; the
-/// target is offered no material and is told of the confirmed failure through
-/// `record_issue_failure`.
+/// target is offered no material.
 ///
 /// # Panics
 ///
 /// Panics if `action` is not [`Action::IssueGatewaySvid`]; the shim's match arm
 /// is the sole caller.
-pub(crate) async fn dispatch_issue(
-    _action: &Action,
-    _ca: &dyn Ca,
-    _observation: &dyn ObservationStore,
-    _clock: &dyn Clock,
-    _target: &dyn GatewayIdentityActionTarget,
+pub async fn dispatch_issue(
+    action: &Action,
+    ca: &dyn Ca,
+    observation: &dyn ObservationStore,
+    clock: &dyn Clock,
+    target: &dyn GatewayIdentityActionTarget,
 ) -> Result<GatewayIdentityMutationOutcome, ShimError> {
-    todo!("SCAFFOLD: gateway_svid::dispatch_issue")
+    let Action::IssueGatewaySvid { epoch, spiffe_id, node_id, .. } = action else {
+        unreachable!("dispatch_issue is called only from the IssueGatewaySvid arm")
+    };
+    let material = issue_and_audit(ca, observation, clock, node_id, spiffe_id)
+        .await
+        .map_err(ShimError::GatewaySvidIssue)?;
+    Ok(target.hold_audited(*epoch, material))
 }
 
 #[cfg(test)]
@@ -138,7 +132,6 @@ mod acceptance {
     ///
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
-    #[ignore = "pending DELIVER gateway-svid-issue-and-audit-executor"]
     async fn successful_issue_audits_the_material_the_slot_then_holds() {
         let ca = ca(0x51D);
         let observation = SimObservationStore::single_peer(node(), 0x51D);
@@ -171,7 +164,6 @@ mod acceptance {
     ///
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
-    #[ignore = "pending DELIVER gateway-svid-issue-and-audit-executor"]
     async fn audit_failure_refuses_the_hold_and_leaves_no_audit_row() {
         let ca = ca(0xBAD);
         let observation = SimObservationStore::single_peer(node(), 0xBAD);
@@ -201,7 +193,6 @@ mod acceptance {
     ///
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
-    #[ignore = "pending DELIVER gateway-svid-issue-and-audit-executor"]
     async fn stale_epoch_issue_is_audited_and_never_held() {
         let ca = ca(0x57A1E);
         let observation = SimObservationStore::single_peer(node(), 0x57A1E);
