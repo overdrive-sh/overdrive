@@ -100,29 +100,14 @@ impl GatewayIdentitySlot {
 
     /// The lifecycle capability the control-plane adapter calls to disable.
     pub fn lifecycle_target(self: &Arc<Self>) -> GatewayIdentityLifecycleHandle {
-        GatewayIdentityLifecycleHandle { slot: Arc::clone(self) }
+        todo!("SCAFFOLD: GatewayIdentitySlot::lifecycle_target")
     }
 
     /// Bump the epoch and empty the slot in the same call. Infallible (R-30):
     /// the epoch is a u64; the private checked add overflowing is
     /// `unreachable!()`.
     pub(crate) fn begin_disable(&self) -> GatewayIdentityEpoch {
-        let mut state = self.state.lock();
-        let next = state
-            .epoch
-            .get()
-            .checked_add(1)
-            .and_then(|raw| GatewayIdentityEpoch::new(raw.get()).ok())
-            .unwrap_or_else(|| {
-                unreachable!("a u64 epoch cannot be exhausted by process-local disables")
-            });
-        state.epoch = next;
-        state.held = None;
-        // Published while the lock is held so concurrent holds and disables
-        // reach subscribers in the order they took effect.
-        self.facts.send_replace(None);
-        drop(state);
-        next
+        todo!("SCAFFOLD: GatewayIdentitySlot::begin_disable")
     }
 
     /// Hold `material` for `epoch` after the audit row is durable; a stale
@@ -185,7 +170,7 @@ impl GatewayIdentityActionTarget for GatewayIdentityActionHandle {
 
 impl GatewayIdentityLifecycleTarget for GatewayIdentityLifecycleHandle {
     fn current(&self) -> Option<GatewayIdentityFacts> {
-        self.slot.current()
+        todo!("SCAFFOLD: GatewayIdentityLifecycleHandle::current")
     }
 
     fn issue_record(&self) -> Option<GatewayIdentityIssueRecord> {
@@ -193,11 +178,11 @@ impl GatewayIdentityLifecycleTarget for GatewayIdentityLifecycleHandle {
     }
 
     fn subscribe(&self) -> watch::Receiver<Option<GatewayIdentityFacts>> {
-        self.slot.subscribe()
+        todo!("SCAFFOLD: GatewayIdentityLifecycleHandle::subscribe")
     }
 
     fn begin_disable(&self) -> GatewayIdentityEpoch {
-        self.slot.begin_disable()
+        todo!("SCAFFOLD: GatewayIdentityLifecycleHandle::begin_disable")
     }
 }
 

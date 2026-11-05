@@ -253,6 +253,27 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-11-05T14:18:53Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "RED",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: scope correction, bodies returned to the owning step; no behaviour test",
+      "t": "2026-11-05T14:20:25Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-05T14:48:13Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-05T14:48:13Z"
     }
   ]
 }

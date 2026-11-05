@@ -30,7 +30,8 @@ use crate::ca_issuance::issue_and_audit;
 ///
 /// Panics if `action` is not [`Action::IssueGatewaySvid`]; the shim's match arm
 /// is the sole caller.
-pub async fn dispatch_issue(
+#[allow(clippy::redundant_pub_crate, reason = "visibility pinned by the feature-delta")]
+pub(crate) async fn dispatch_issue(
     action: &Action,
     ca: &dyn Ca,
     observation: &dyn ObservationStore,
