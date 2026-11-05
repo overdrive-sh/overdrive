@@ -312,6 +312,7 @@ mod acceptance {
             "injected gateway audit failure",
         )));
         let clock = SimClock::new();
+        clock.tick(std::time::Duration::from_secs(45));
         let epoch = GatewayIdentityEpoch::first();
         let target = EpochCheckingTarget::desiring(epoch);
 
