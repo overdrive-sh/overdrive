@@ -346,11 +346,19 @@ impl SpiffeId {
     /// Derive the dedicated non-allocation public-ingress gateway identity:
     /// `spiffe://overdrive.local/gateway/<node-id>`.
     ///
-    /// SCAFFOLD: true — the body is DELIVER's.
+    /// Infallible by construction: [`NodeId`] is an already-validated label
+    /// newtype, so the fixed `spiffe://overdrive.local/gateway/...` shape
+    /// always has a valid scheme, trust domain and non-empty path.
     #[must_use]
-    #[allow(clippy::todo, reason = "public-ingress DISTILL scaffold; body is DELIVER's")]
-    pub fn for_gateway(_node: &NodeId) -> Self {
-        todo!("SCAFFOLD: SpiffeId::for_gateway")
+    pub fn for_gateway(node: &NodeId) -> Self {
+        let raw = format!("spiffe://overdrive.local/gateway/{}", node.as_str());
+        Self::new(&raw).unwrap_or_else(|_| {
+            unreachable!(
+                "for_gateway interpolates an already-validated NodeId into the fixed \
+                 spiffe://overdrive.local/gateway/... shape; SpiffeId::new cannot \
+                 reject a valid scheme + non-empty trust domain + non-empty path"
+            )
+        })
     }
 }
 

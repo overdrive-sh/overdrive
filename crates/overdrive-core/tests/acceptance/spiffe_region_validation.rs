@@ -362,7 +362,6 @@ proptest! {
         reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
     )]
     #[test]
-    #[ignore = "pending DELIVER gateway-spiffe-subject"]
     fn spiffe_for_gateway_derives_canonical_uri_for_any_valid_node_id(
         node_raw in valid_label(),
     ) {
@@ -383,7 +382,6 @@ proptest! {
     reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
 )]
 #[test]
-#[ignore = "pending DELIVER gateway-spiffe-subject"]
 fn for_gateway_matches_the_pinned_uri_on_a_representative_node() {
     let node = NodeId::new("gateway-node").expect("valid NodeId");
 

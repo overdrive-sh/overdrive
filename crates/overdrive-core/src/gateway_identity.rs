@@ -1,9 +1,8 @@
 //! Dedicated non-allocation gateway identity values and the one hydration
 //! read-port.
 //!
-//! SCAFFOLD: true. The epoch constructors and parser bodies are DELIVER's and
-//! fail with SCAFFOLD text. The source-local properties at the foot of the file
-//! specify the epoch half of S-PIG-44.
+//! The source-local properties at the foot of the file specify the epoch half
+//! of S-PIG-44.
 
 #![allow(
     clippy::todo,
@@ -44,8 +43,8 @@ pub struct GatewayIdentityEpoch(NonZeroU64);
 
 impl GatewayIdentityEpoch {
     /// Construct a nonzero epoch.
-    pub fn new(_raw: u64) -> Result<Self, GatewayIdentityEpochError> {
-        todo!("SCAFFOLD: GatewayIdentityEpoch::new")
+    pub fn new(raw: u64) -> Result<Self, GatewayIdentityEpochError> {
+        NonZeroU64::new(raw).map(Self).ok_or(GatewayIdentityEpochError::Zero)
     }
 
     /// The initial enabled epoch, exactly 1.
@@ -67,8 +66,17 @@ impl Display for GatewayIdentityEpoch {
 
 impl FromStr for GatewayIdentityEpoch {
     type Err = GatewayIdentityEpochError;
-    fn from_str(_raw: &str) -> Result<Self, Self::Err> {
-        todo!("SCAFFOLD: GatewayIdentityEpoch FromStr")
+    fn from_str(raw: &str) -> Result<Self, Self::Err> {
+        if raw.is_empty() {
+            return Err(GatewayIdentityEpochError::Empty);
+        }
+        let all_digits = raw.bytes().all(|b| b.is_ascii_digit());
+        let leading_zero = raw.len() > 1 && raw.starts_with('0');
+        if !all_digits || leading_zero {
+            return Err(GatewayIdentityEpochError::InvalidDecimal);
+        }
+        let value: u64 = raw.parse().map_err(|_| GatewayIdentityEpochError::InvalidDecimal)?;
+        Self::new(value)
     }
 }
 
@@ -168,7 +176,6 @@ mod properties {
     ///
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER gateway-identity-epoch"]
     fn epoch_is_nonzero_and_starts_at_one() {
         assert_eq!(GatewayIdentityEpoch::first().get().get(), 1);
         assert_eq!(GatewayIdentityEpoch::new(2).expect("two is valid").get().get(), 2);
@@ -187,8 +194,7 @@ mod properties {
         ///
         /// CONTRACT_SHAPE: pure-function.
         #[test]
-        #[ignore = "pending DELIVER gateway-identity-epoch"]
-        fn epoch_roundtrips_canonical_decimal(raw in 1u64..u64::MAX) {
+            fn epoch_roundtrips_canonical_decimal(raw in 1u64..u64::MAX) {
             let epoch = GatewayIdentityEpoch::new(raw).expect("nonzero epoch");
             prop_assert_eq!(epoch.to_string(), raw.to_string());
             prop_assert_eq!(raw.to_string().parse::<GatewayIdentityEpoch>(), Ok(epoch));
@@ -212,7 +218,6 @@ mod properties {
     ///
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER gateway-identity-epoch"]
     fn epoch_rejects_each_noncanonical_partition_exactly() {
         assert_eq!("".parse::<GatewayIdentityEpoch>(), Err(GatewayIdentityEpochError::Empty));
         for raw in ["+1", "-1", "01", " 1", "1 ", "18446744073709551616"] {
