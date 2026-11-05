@@ -198,9 +198,9 @@ pub const NEAR_EXPIRY_THRESHOLD_SECS: u64 = WORKLOAD_SVID_TTL.as_secs() / 2;
 /// The rotation re-emit deadline is `min(last_failure_seen_at +
 /// backoff_for_attempt(attempts), held.not_after − ROTATION_DEADLINE_MARGIN)`, so
 /// a growing backoff knob can never push the next rotation attempt at or past the
-/// held cert's `not_after` (the rotation-backoff-clamp invariant). Module-private
-/// — NOT public API per ADR-0067 rev 7.
-const ROTATION_DEADLINE_MARGIN: Duration = Duration::from_secs(60);
+/// held cert's `not_after` (the rotation-backoff-clamp invariant). Crate-private
+/// (shared with the gateway identity reconciler) — NOT public API per ADR-0067 rev 7.
+pub(crate) const ROTATION_DEADLINE_MARGIN: Duration = Duration::from_secs(60);
 
 // ADR-0067 rev 7 invariant guard: the margin must live INSIDE the near-expiry
 // window, else the clamp could be pushed past the window it sits in. 60s ≪ 1800s

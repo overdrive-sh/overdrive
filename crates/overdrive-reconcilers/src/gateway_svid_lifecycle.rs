@@ -31,7 +31,7 @@ use overdrive_core::wall_clock::UnixInstant;
 use serde::{Deserialize, Serialize};
 
 use crate::backoff_for_attempt;
-use crate::svid_lifecycle::{IssueRetry, NEAR_EXPIRY_THRESHOLD_SECS};
+use crate::svid_lifecycle::{IssueRetry, NEAR_EXPIRY_THRESHOLD_SECS, ROTATION_DEADLINE_MARGIN};
 
 /// Path prefix of the gateway SPIFFE identity, `SpiffeId::for_gateway(node)`.
 const GATEWAY_PATH_PREFIX: &str = "/gateway/";
@@ -152,7 +152,18 @@ impl Reconciler for GatewaySvidLifecycle {
         if actual.actual.is_none() && actual.ever_issued {
             next_view.retry = None;
         } else if let Some(retry) = &view.retry {
-            if now < retry.last_failure_seen_at + backoff_for_attempt(retry.attempts) {
+            // The re-emit deadline is clamped to the held identity's expiry
+            // wall: suppress only inside the backoff window AND outside the
+            // panic zone (`now + MARGIN < not_after`, addition form because
+            // `UnixInstant` has no `Sub<Duration>`). With no identity held there
+            // is no wall, so the backoff alone gates.
+            let inside_backoff_window =
+                now < retry.last_failure_seen_at + backoff_for_attempt(retry.attempts);
+            let outside_panic_zone = actual
+                .actual
+                .as_ref()
+                .is_none_or(|held| now + ROTATION_DEADLINE_MARGIN < held.not_after);
+            if inside_backoff_window && outside_panic_zone {
                 return (vec![Action::Noop], next_view);
             }
             next_view.retry = Some(IssueRetry {
