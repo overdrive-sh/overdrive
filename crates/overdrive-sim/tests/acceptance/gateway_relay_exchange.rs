@@ -191,6 +191,7 @@ impl Rig {
         let observation_port: Arc<dyn ObservationStore> = observations;
         let clock_port: Arc<dyn Clock> = clock.clone();
         let (builder, seal) = UnboundGatewayBuilder::new(
+            node.clone(),
             config,
             intent_port,
             observation_port,

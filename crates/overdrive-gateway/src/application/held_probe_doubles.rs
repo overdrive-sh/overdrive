@@ -679,15 +679,14 @@ impl Composition {
         let vip_view = persist_api_service(&intent, frontend_ip).await;
         let frontend = TcpListener::bind((frontend_ip, SERVICE_PORT)).expect("frontend listener");
         frontend.set_nonblocking(true).expect("nonblocking frontend listener");
-        let observations = Arc::new(SimObservationStore::single_peer(
-            NodeId::new("gateway-node").expect("node ID"),
-            54,
-        ));
+        let node = NodeId::new("gateway-node").expect("node ID");
+        let observations = Arc::new(SimObservationStore::single_peer(node.clone(), 54));
         let clock = Arc::new(SimClock::new());
         let intent_port: Arc<dyn IntentStore> = intent.clone();
         let observation_port: Arc<dyn ObservationStore> = observations;
         let clock_port: Arc<dyn Clock> = clock.clone();
         let unbound = UnboundGatewayBuilder::new(
+            node,
             site.config(bind_address(octet, ordinal)),
             intent_port,
             observation_port,

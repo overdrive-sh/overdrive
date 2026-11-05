@@ -1,41 +1,55 @@
 //! Gateway Application owner, composition surface and admission state.
 //!
-//! SCAFFOLD: true. The DESIGN-pinned public surface (builder, handle,
-//! route-command and status-read ports, shutdown report) and the crate-private admission / ledger shapes
-//! the acceptance bodies reach compile today; every owner behaviour body is
-//! DELIVER's. Source-local acceptance bodies implement S-PIG-37 and S-PIG-73;
-//! the QC-2 conformance driver is the child module below.
+//! The owner (`GatewayApplicationOwner`) is the only mutator of the staged /
+//! current / draining generations, the listener and the Application status
+//! row. The admission refusal arms, the per-connection and per-request leases
+//! and the accept loop belong to later steps and stay scaffolded.
 
 use std::collections::BTreeMap;
+use std::net::SocketAddrV4;
 use std::num::NonZeroU32;
-use std::sync::Arc;
-use std::sync::Mutex;
-use std::sync::PoisonError;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use arc_swap::ArcSwapOption;
 use overdrive_core::dataplane::ServiceFrontend;
+use overdrive_core::id::NodeId;
 use overdrive_core::public_ingress::{
-    GatewayApplicationGenerationId, GatewayApplicationStatusRowV1, PublicCertifiedKeyStatusRowV1,
-    Route,
+    CertifiedKeyProvenance, GatewayApplicationGenerationId, GatewayApplicationGenerationStatus,
+    GatewayApplicationStatusRowV1, GatewayApplicationUnavailableCause, GatewayConnectPathStatus,
+    GatewayIdentityStatus, GatewayListenerStatus, PublicCertifiedKeyStatusRowV1, Route, ServiceKey,
 };
 use overdrive_core::traits::clock::Clock;
-use overdrive_core::traits::observation_store::ObservationStoreError;
+use overdrive_core::traits::intent_store::IntentSubscriptionEvent;
+use overdrive_core::traits::observation_store::{
+    LogicalTimestamp, ObservationStoreError, ObservationWrite,
+};
 use overdrive_core::traits::{IntentStore, ObservationStore, ServiceVipView};
 use overdrive_core::wall_clock::UnixInstant;
 use overdrive_host::ca::PublicCertifiedKeyAeadCodec;
 use thiserror::Error;
-use tokio::sync::Notify;
+use tokio::net::TcpListener;
+use tokio::sync::{Notify, mpsc, oneshot};
+use tokio::task::{AbortHandle, JoinHandle, JoinSet};
+use tokio_util::sync::CancellationToken;
 
-use crate::certified_key::{PublicCertifiedKeyError, PublicCertifiedKeySnapshot};
-use crate::connector::GatewayUpstreamConnectError;
+use crate::certified_key::{
+    InstallPublicCertifiedKey, ManualCertifiedKeySource, PublicCertifiedKeyAvailability,
+    PublicCertifiedKeyCustody, PublicCertifiedKeyCustodyHandle, PublicCertifiedKeyError,
+    PublicCertifiedKeySnapshot,
+};
+use crate::connector::{GatewayUpstreamConnectError, GatewayUpstreamConnector};
+use crate::frontend::IntentServiceFrontendResolver;
 use crate::ports::{
     GatewayClientMtls, GatewayConnectCleanup, GatewayConnectDataplane,
     GatewayConnectDataplaneError, GatewayConnectIntent, GatewayIdentityLifecycleControl,
-    GatewayIdentityLifecycleError, GatewayRelay, GatewayUpstreamSeal, ServiceFrontendResolveError,
+    GatewayIdentityLifecycleError, GatewayRelay, GatewayUpstreamSeal, ServiceFrontendResolve,
+    ServiceFrontendResolveError,
 };
-use crate::route_set::{PublicRouteSetError, PublicRouteSetHandle};
+use crate::route_set::{
+    PublicRouteSetError, PublicRouteSetHandle, PublicRouteSetOwner, ROUTE_SET_KEY,
+};
 use crate::runtime::GatewayLimits;
 use crate::{GatewayConfig, GatewayConfigError};
 
@@ -47,6 +61,14 @@ mod ledger_acceptance;
 mod probe_completion_acceptance;
 #[cfg(all(test, feature = "integration-tests"))]
 mod quint_gateway_application;
+
+/// Depth of the owner's gate-result channel.
+const GATE_REPORT_CAPACITY: usize = 8;
+/// Depth of the Application command channel: exactly one shutdown close plus
+/// one retire command.
+const APPLICATION_COMMAND_CAPACITY: usize = 2;
+/// Retry period of a failed status write.
+const STATUS_RETRY: Duration = Duration::from_secs(1);
 
 // ---------------------------------------------------------------------------
 // Applied generation
@@ -75,11 +97,30 @@ impl GatewayAppliedGeneration {
 // ---------------------------------------------------------------------------
 
 pub struct UnboundGatewayBuilder {
-    _private: (),
+    node_id: NodeId,
+    config: GatewayConfig,
+    intent: Arc<dyn IntentStore>,
+    observations: Arc<dyn ObservationStore>,
+    frontend: Arc<dyn ServiceFrontendResolve>,
+    clock: Arc<dyn Clock>,
+    route_owner: PublicRouteSetOwner,
+    route_handle: PublicRouteSetHandle,
+    custody: PublicCertifiedKeyCustody,
+    custody_handle: PublicCertifiedKeyCustodyHandle,
+    manual: ManualCertifiedKeySource,
 }
 
 impl UnboundGatewayBuilder {
+    /// Reads and validates the manual key first (a refusal mutates nothing),
+    /// opens custody and the Route set over the IntentStore, and installs the
+    /// initial key. Spawns no task.
+    ///
+    /// # Errors
+    /// `ManualCertifiedKey` for an unreadable or invalid manual key,
+    /// `CertifiedKey` for a custody failure and `RouteStore` for a Route-set
+    /// store failure.
     pub async fn new(
+        node_id: NodeId,
         config: GatewayConfig,
         intent: Arc<dyn IntentStore>,
         observations: Arc<dyn ObservationStore>,
@@ -87,16 +128,65 @@ impl UnboundGatewayBuilder {
         key_codec: Arc<PublicCertifiedKeyAeadCodec>,
         clock: Arc<dyn Clock>,
     ) -> Result<Self, GatewayBootError> {
-        todo!("SCAFFOLD: UnboundGatewayBuilder::new")
+        let key_config = config.manual_certified_key();
+        let manual = ManualCertifiedKeySource::new(
+            key_config.certificate_chain_path().to_path_buf(),
+            key_config.private_key_path().to_path_buf(),
+        );
+        let candidate = manual
+            .candidate(UnixInstant::from_clock(clock.as_ref()))
+            .await
+            .map_err(GatewayBootError::ManualCertifiedKey)?;
+        let (mut custody, custody_handle) = PublicCertifiedKeyCustody::open(
+            key_config.id().clone(),
+            node_id.clone(),
+            Arc::clone(&intent),
+            Arc::clone(&observations),
+            key_codec,
+            Arc::clone(&clock),
+        )
+        .await
+        .map_err(GatewayBootError::CertifiedKey)?;
+        let (route_owner, route_handle) = PublicRouteSetOwner::open(Arc::clone(&intent))
+            .await
+            .map_err(GatewayBootError::RouteStore)?;
+        let initial = InstallPublicCertifiedKey {
+            expected_generation: custody.current_generation(),
+            candidate,
+            provenance: CertifiedKeyProvenance::Manual,
+        };
+        custody.install(initial).await.map_err(|error| match error {
+            PublicCertifiedKeyError::Source(_) => GatewayBootError::ManualCertifiedKey(error),
+            other => GatewayBootError::CertifiedKey(other),
+        })?;
+        let frontend: Arc<dyn ServiceFrontendResolve> =
+            Arc::new(IntentServiceFrontendResolver::new(Arc::clone(&intent), service_vip_view));
+        Ok(Self {
+            node_id,
+            config,
+            intent,
+            observations,
+            frontend,
+            clock,
+            route_owner,
+            route_handle,
+            custody,
+            custody_handle,
+            manual,
+        })
     }
 
     pub fn into_builder(self) -> (GatewayBuilder, GatewayUpstreamSeal) {
-        todo!("SCAFFOLD: UnboundGatewayBuilder::into_builder")
+        (GatewayBuilder { unbound: self }, GatewayUpstreamSeal::new())
     }
 }
 
 pub struct GatewayRuntimeDependencies {
-    _private: (),
+    limits: GatewayLimits,
+    dataplane: Arc<dyn GatewayConnectDataplane>,
+    client_mtls: Arc<dyn GatewayClientMtls>,
+    identity_lifecycle: Arc<dyn GatewayIdentityLifecycleControl>,
+    relay: Arc<dyn GatewayRelay>,
 }
 
 impl GatewayRuntimeDependencies {
@@ -107,19 +197,21 @@ impl GatewayRuntimeDependencies {
         identity_lifecycle: Arc<dyn GatewayIdentityLifecycleControl>,
         relay: Arc<dyn GatewayRelay>,
     ) -> Self {
-        todo!("SCAFFOLD: GatewayRuntimeDependencies::new")
+        Self { limits, dataplane, client_mtls, identity_lifecycle, relay }
     }
 }
 
 pub struct GatewayBuilder {
-    _private: (),
+    unbound: UnboundGatewayBuilder,
 }
 
 impl GatewayBuilder {
     /// Exactly: build the one budget from `dependencies`' limits,
     /// `GatewayAdmission::new(budget)`, `start_with`.
     pub async fn start(self, dependencies: GatewayRuntimeDependencies) -> StartedGateway {
-        todo!("SCAFFOLD: GatewayBuilder::start")
+        let budget = GatewayAdmissionBudget::new(Arc::new(dependencies.limits.clone()));
+        let admission = GatewayAdmission::new(budget);
+        self.start_with(dependencies, admission).await
     }
 
     /// Crate-private (DG-10): `start` with an injected admission. The
@@ -129,17 +221,157 @@ impl GatewayBuilder {
         dependencies: GatewayRuntimeDependencies,
         admission: Arc<GatewayAdmission>,
     ) -> StartedGateway {
-        todo!("SCAFFOLD: GatewayBuilder::start_with")
+        let UnboundGatewayBuilder {
+            node_id,
+            config,
+            intent,
+            observations,
+            frontend,
+            clock,
+            route_owner,
+            route_handle,
+            custody,
+            custody_handle,
+            manual,
+        } = self.unbound;
+        let GatewayRuntimeDependencies {
+            limits,
+            dataplane,
+            client_mtls,
+            identity_lifecycle,
+            relay: _relay,
+        } = dependencies;
+        let ledger = GatewayCleanupLedger::new(limits.max_cleanup_ledger_entries());
+        let connector = Arc::new(GatewayUpstreamConnector::new(
+            Arc::clone(&dataplane),
+            client_mtls,
+            limits.clone(),
+            Arc::clone(&clock),
+            Arc::clone(admission.budget()),
+            Arc::clone(&ledger),
+        ));
+        let cleanup: Arc<dyn GatewayConnectCleanup> = dataplane;
+
+        let owners = OwnerShutdowns::new();
+        let (listener, listener_task) = GatewayListenerControl::spawn(owners.listener.clone());
+        let (command_sender, commands) = mpsc::channel(APPLICATION_COMMAND_CAPACITY);
+        let owner = GatewayApplicationOwner {
+            node_id: node_id.clone(),
+            intent,
+            certified_key: custody_handle.clone(),
+            frontend,
+            identity: Arc::clone(&identity_lifecycle),
+            connector,
+            admission,
+            listener,
+            observations: Arc::clone(&observations),
+            clock: Arc::clone(&clock),
+            limits: Arc::new(limits),
+            bind: config.bind(),
+            commands,
+            shutdown: owners.application.clone(),
+            owner_wake: Arc::new(Notify::new()),
+            staged: None,
+            current: None,
+            draining: BTreeMap::new(),
+            failed: None,
+            unavailable: None,
+            connect_ready: false,
+            next_token: 0,
+            gates: JoinSet::new(),
+            status: StatusWriter::default(),
+        };
+        let application = tokio::spawn(owner.run());
+        let (manual_source, custody_task, route_set) = Self::spawn_supporting_owners(
+            SupportingOwners { manual, custody, route_owner },
+            &custody_handle,
+            &clock,
+            &owners,
+        );
+
+        let handle = GatewayHandle {
+            tasks: GatewayTaskTree {
+                listener: Some(listener_task),
+                application,
+                manual_source,
+                custody: custody_task,
+                route_set,
+            },
+            shutdown: GatewayShutdownCapabilities {
+                application: GatewayApplicationHandle {
+                    commands: command_sender,
+                    clock: Arc::clone(&clock),
+                },
+                cleanup,
+                cleanup_ledger: ledger,
+                identity: identity_lifecycle,
+                clock,
+                owners,
+            },
+        };
+        StartedGateway {
+            handle,
+            routes: GatewayRouteCommands { routes: route_handle },
+            status: GatewayStatusReads {
+                observations,
+                node_id,
+                certified_key_id: custody_handle.id().clone(),
+            },
+        }
+    }
+
+    /// The manual-source, custody and Route Set owner tasks.
+    fn spawn_supporting_owners(
+        owners: SupportingOwners,
+        custody_handle: &PublicCertifiedKeyCustodyHandle,
+        clock: &Arc<dyn Clock>,
+        shutdowns: &OwnerShutdowns,
+    ) -> (OwnerTask, OwnerTask, OwnerTask) {
+        let manual_source = tokio::spawn(manual_source_task(
+            owners.manual,
+            custody_handle.clone(),
+            Arc::clone(clock),
+            shutdowns.manual_source.clone(),
+        ));
+        let custody = tokio::spawn(task_result(owners.custody.run(shutdowns.custody.clone())));
+        let route_set =
+            tokio::spawn(task_result(owners.route_owner.run(shutdowns.route_set.clone())));
+        (manual_source, custody, route_set)
     }
 }
 
+struct SupportingOwners {
+    manual: ManualCertifiedKeySource,
+    custody: PublicCertifiedKeyCustody,
+    route_owner: PublicRouteSetOwner,
+}
+
+async fn task_result(
+    task: impl std::future::Future<Output = ()>,
+) -> Result<(), GatewayOwnerTaskError> {
+    task.await;
+    Ok(())
+}
+
+async fn manual_source_task(
+    source: ManualCertifiedKeySource,
+    custody: PublicCertifiedKeyCustodyHandle,
+    clock: Arc<dyn Clock>,
+    shutdown: CancellationToken,
+) -> Result<(), GatewayOwnerTaskError> {
+    source.run(custody, clock, shutdown).await;
+    Ok(())
+}
+
 pub struct StartedGateway {
-    _private: (),
+    handle: GatewayHandle,
+    routes: GatewayRouteCommands,
+    status: GatewayStatusReads,
 }
 
 impl StartedGateway {
     pub fn into_parts(self) -> (GatewayHandle, GatewayRouteCommands, GatewayStatusReads) {
-        todo!("SCAFFOLD: StartedGateway::into_parts")
+        (self.handle, self.routes, self.status)
     }
 }
 
@@ -147,12 +379,12 @@ impl StartedGateway {
 /// exposes no status read.
 #[derive(Clone)]
 pub struct GatewayRouteCommands {
-    _private: (),
+    routes: PublicRouteSetHandle,
 }
 
 impl GatewayRouteCommands {
     pub fn routes(&self) -> &PublicRouteSetHandle {
-        todo!("SCAFFOLD: GatewayRouteCommands::routes")
+        &self.routes
     }
 }
 
@@ -160,19 +392,27 @@ impl GatewayRouteCommands {
 /// Route write capability is reachable from it.
 #[derive(Clone)]
 pub struct GatewayStatusReads {
-    _private: (),
+    observations: Arc<dyn ObservationStore>,
+    node_id: NodeId,
+    certified_key_id: overdrive_core::public_ingress::PublicCertifiedKeyId,
 }
 
 impl GatewayStatusReads {
     pub async fn application_status(
         &self,
     ) -> Result<Option<GatewayApplicationStatusRowV1>, GatewayStatusReadError> {
-        todo!("SCAFFOLD: GatewayStatusReads::application_status")
+        self.observations
+            .gateway_application_status_row(&self.node_id)
+            .await
+            .map_err(GatewayStatusReadError::Application)
     }
     pub async fn certified_key_status(
         &self,
     ) -> Result<Option<PublicCertifiedKeyStatusRowV1>, GatewayStatusReadError> {
-        todo!("SCAFFOLD: GatewayStatusReads::certified_key_status")
+        self.observations
+            .public_certified_key_status_row(&self.certified_key_id)
+            .await
+            .map_err(GatewayStatusReadError::CertifiedKey)
     }
 }
 
@@ -184,13 +424,203 @@ pub enum GatewayStatusReadError {
     CertifiedKey(ObservationStoreError),
 }
 
+type OwnerTask = JoinHandle<Result<(), GatewayOwnerTaskError>>;
+
+pub(crate) enum GatewayOwnerTaskError {
+    Failed,
+    ChannelClosed,
+}
+
+/// The owner tasks of one started gateway. The connections task joins this
+/// tree with the accept loop.
+pub(crate) struct GatewayTaskTree {
+    listener: Option<OwnerTask>,
+    application: OwnerTask,
+    manual_source: OwnerTask,
+    custody: OwnerTask,
+    route_set: OwnerTask,
+}
+
+impl GatewayTaskTree {
+    /// Joins one task exactly once against the remaining deadline; at expiry
+    /// the task is aborted and awaited.
+    async fn join_one(
+        mut handle: OwnerTask,
+        task: GatewayTaskName,
+        deadline: Instant,
+        clock: &dyn Clock,
+    ) -> Option<GatewayTaskFailure> {
+        let remaining = deadline.saturating_duration_since(clock.now());
+        let joined = tokio::select! {
+            joined = &mut handle => joined,
+            () = clock.sleep(remaining) => {
+                handle.abort();
+                let _ = (&mut handle).await;
+                return Some(GatewayTaskFailure { task, cause: GatewayTaskFailureCause::Timeout });
+            }
+        };
+        let cause = match joined {
+            Ok(Ok(())) => return None,
+            Ok(Err(GatewayOwnerTaskError::Failed)) => GatewayTaskFailureCause::OwnerFailed,
+            Ok(Err(GatewayOwnerTaskError::ChannelClosed)) => GatewayTaskFailureCause::ChannelClosed,
+            Err(error) if error.is_panic() => GatewayTaskFailureCause::Panicked,
+            Err(_) => GatewayTaskFailureCause::Cancelled,
+        };
+        Some(GatewayTaskFailure { task, cause })
+    }
+
+    pub(crate) async fn join_remaining(
+        self,
+        deadline: Instant,
+        clock: &dyn Clock,
+    ) -> Vec<GatewayTaskFailure> {
+        let mut failures = Vec::new();
+        let ordered = [
+            (Some(self.application), GatewayTaskName::Application),
+            (self.listener, GatewayTaskName::Listener),
+            (Some(self.manual_source), GatewayTaskName::ManualCertifiedKeySource),
+            (Some(self.custody), GatewayTaskName::PublicCertifiedKeyCustody),
+            (Some(self.route_set), GatewayTaskName::PublicRouteSet),
+        ];
+        for (handle, task) in ordered {
+            if let Some(handle) = handle {
+                failures.extend(Self::join_one(handle, task, deadline, clock).await);
+            }
+        }
+        failures
+    }
+}
+
+pub(crate) struct GatewayShutdownCapabilities {
+    application: GatewayApplicationHandle,
+    /// Cleanup sweep and live counts only (R-29): shutdown holds no handle
+    /// that can prepare an upstream socket.
+    cleanup: Arc<dyn GatewayConnectCleanup>,
+    cleanup_ledger: Arc<GatewayCleanupLedger>,
+    identity: Arc<dyn GatewayIdentityLifecycleControl>,
+    clock: Arc<dyn Clock>,
+    owners: OwnerShutdowns,
+}
+
+/// One cancellation token per owner task.
+struct OwnerShutdowns {
+    application: CancellationToken,
+    manual_source: CancellationToken,
+    custody: CancellationToken,
+    route_set: CancellationToken,
+    listener: CancellationToken,
+}
+
+impl OwnerShutdowns {
+    fn new() -> Self {
+        Self {
+            application: CancellationToken::new(),
+            manual_source: CancellationToken::new(),
+            custody: CancellationToken::new(),
+            route_set: CancellationToken::new(),
+            listener: CancellationToken::new(),
+        }
+    }
+
+    /// The listener goes first: the application owner's exit closes the
+    /// listener command channel, which the listener must not read as a
+    /// failure.
+    fn cancel_all(&self) {
+        self.listener.cancel();
+        self.application.cancel();
+        self.manual_source.cancel();
+        self.custody.cancel();
+        self.route_set.cancel();
+    }
+}
+
 pub struct GatewayHandle {
-    _private: (),
+    tasks: GatewayTaskTree,
+    shutdown: GatewayShutdownCapabilities,
 }
 
 impl GatewayHandle {
+    /// Stop accepts, close the application, join admitted users, sweep
+    /// intents and receipts, retire the closed application, cancel the owners
+    /// and only then clear the volatile gateway identity.
     pub async fn shutdown(self, grace: Duration) -> GatewayShutdownReport {
-        todo!("SCAFFOLD: GatewayHandle::shutdown")
+        let Self { tasks, shutdown: capabilities } = self;
+        let clock = Arc::clone(&capabilities.clock);
+        let started = clock.now();
+        let deadline = started + grace;
+        let mut report = GatewayShutdownReport {
+            elapsed: Duration::ZERO,
+            forced_connections: 0,
+            task_failures: Vec::new(),
+            cleanup_failures: Vec::new(),
+            application_errors: Vec::new(),
+            identity_empty: false,
+            residual_connect: None,
+        };
+
+        match capabilities.application.close_for_shutdown(deadline).await {
+            Ok(closed) => {
+                for retention in closed.retentions {
+                    if let Err(timeout) = retention.wait_zero(deadline, clock.as_ref()).await {
+                        report.forced_connections =
+                            report.forced_connections.saturating_add(timeout.connections);
+                    }
+                }
+            }
+            Err(error) => report.application_errors.push(error),
+        }
+
+        report.cleanup_failures =
+            capabilities.cleanup_ledger.retry_all(capabilities.cleanup.as_ref());
+        report.residual_connect =
+            Self::sweep(capabilities.cleanup.as_ref(), &capabilities.cleanup_ledger);
+
+        if let Err(error) = capabilities.application.retire_closed(deadline).await {
+            report.application_errors.push(error);
+        }
+
+        capabilities.owners.cancel_all();
+        report.task_failures = tasks.join_remaining(deadline, clock.as_ref()).await;
+
+        capabilities.identity.disable_after_drain();
+        report.identity_empty = capabilities.identity.current().is_none();
+        report.elapsed = clock.now().saturating_duration_since(started);
+        report
+    }
+
+    /// The final sweep: every Gateway intent is cleaned, then the residual
+    /// live counts are read. `None` when the connect path is empty.
+    fn sweep(
+        cleanup: &dyn GatewayConnectCleanup,
+        ledger: &GatewayCleanupLedger,
+    ) -> Option<GatewayResidualConnectState> {
+        let mut sweep_failures = Vec::new();
+        if let Err(error) = cleanup.cleanup_all_gateway_intents() {
+            sweep_failures.push(GatewayConnectSweepFailure::CleanupAll(error));
+        }
+        let live_intents = match cleanup.live_intent_count() {
+            Ok(count) => Some(count),
+            Err(error) => {
+                sweep_failures.push(GatewayConnectSweepFailure::IntentCount(error));
+                None
+            }
+        };
+        // A failed snapshot read is the unreadable `None`, not a zero.
+        let live_receipts = cleanup
+            .live_receipts()
+            .ok()
+            .map(|receipts| u32::try_from(receipts.len()).unwrap_or(u32::MAX));
+        let ledger_entries = ledger.len();
+        let empty = sweep_failures.is_empty()
+            && live_intents == Some(0)
+            && live_receipts == Some(0)
+            && ledger_entries == 0;
+        (!empty).then_some(GatewayResidualConnectState {
+            live_intents,
+            live_receipts,
+            sweep_failures,
+            ledger_entries,
+        })
     }
 }
 
@@ -293,6 +723,783 @@ pub enum GatewayBootError {
 }
 
 // ---------------------------------------------------------------------------
+// Listener control
+// ---------------------------------------------------------------------------
+
+enum ListenerCommand {
+    Bind { address: SocketAddrV4, reply: oneshot::Sender<Result<(), std::io::Error>> },
+    Unbind { reply: oneshot::Sender<Result<(), std::io::Error>> },
+}
+
+/// One listener command owner: the listener task owns the bound socket.
+pub(crate) struct GatewayListenerControl {
+    commands: mpsc::Sender<ListenerCommand>,
+    bound: Arc<AtomicBool>,
+}
+
+impl GatewayListenerControl {
+    fn spawn(shutdown: CancellationToken) -> (Self, OwnerTask) {
+        let (commands, receiver) = mpsc::channel(APPLICATION_COMMAND_CAPACITY);
+        let bound = Arc::new(AtomicBool::new(false));
+        let task = tokio::spawn(Self::run(receiver, Arc::clone(&bound), shutdown));
+        (Self { commands, bound }, task)
+    }
+
+    async fn run(
+        mut receiver: mpsc::Receiver<ListenerCommand>,
+        bound: Arc<AtomicBool>,
+        shutdown: CancellationToken,
+    ) -> Result<(), GatewayOwnerTaskError> {
+        let mut held: Option<TcpListener> = None;
+        loop {
+            let command = tokio::select! {
+                biased;
+                () = shutdown.cancelled() => return Ok(()),
+                command = receiver.recv() => command,
+            };
+            match command {
+                None => return Err(GatewayOwnerTaskError::ChannelClosed),
+                Some(ListenerCommand::Bind { address, reply }) => {
+                    let bound_now = TcpListener::bind(address).await.map(|listener| {
+                        drop(held.replace(listener));
+                        bound.store(true, Ordering::Release);
+                    });
+                    let _ = reply.send(bound_now);
+                }
+                Some(ListenerCommand::Unbind { reply }) => {
+                    drop(held.take());
+                    bound.store(false, Ordering::Release);
+                    let _ = reply.send(Ok(()));
+                }
+            }
+        }
+    }
+
+    pub(crate) async fn bind(
+        &self,
+        address: SocketAddrV4,
+        _admission: Arc<GatewayAdmission>,
+    ) -> Result<(), std::io::Error> {
+        self.request(|reply| ListenerCommand::Bind { address, reply }).await
+    }
+
+    pub(crate) async fn unbind(&self) -> Result<(), std::io::Error> {
+        self.request(|reply| ListenerCommand::Unbind { reply }).await
+    }
+
+    pub(crate) fn is_bound(&self) -> bool {
+        self.bound.load(Ordering::Acquire)
+    }
+
+    async fn request(
+        &self,
+        command: impl FnOnce(oneshot::Sender<Result<(), std::io::Error>>) -> ListenerCommand,
+    ) -> Result<(), std::io::Error> {
+        let (reply, answer) = oneshot::channel();
+        self.commands.send(command(reply)).await.map_err(|_| std::io::ErrorKind::BrokenPipe)?;
+        answer.await.map_err(|_| std::io::ErrorKind::BrokenPipe)?
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Application commands and handle
+// ---------------------------------------------------------------------------
+
+pub(crate) enum GatewayApplicationCommand {
+    CloseForShutdown {
+        deadline: Instant,
+        reply:
+            oneshot::Sender<Result<GatewayApplicationCloseResult, GatewayApplicationCommandError>>,
+    },
+    RetireClosed {
+        deadline: Instant,
+        reply: oneshot::Sender<Result<(), GatewayApplicationCommandError>>,
+    },
+}
+
+pub(crate) struct GatewayApplicationCloseResult {
+    pub(crate) retentions: Vec<Arc<GatewayGenerationRetention>>,
+}
+
+pub(crate) struct GatewayApplicationHandle {
+    commands: mpsc::Sender<GatewayApplicationCommand>,
+    clock: Arc<dyn Clock>,
+}
+
+impl GatewayApplicationHandle {
+    pub(crate) async fn close_for_shutdown(
+        &self,
+        deadline: Instant,
+    ) -> Result<GatewayApplicationCloseResult, GatewayApplicationCommandError> {
+        let (reply, answer) = oneshot::channel();
+        self.exchange(
+            GatewayApplicationCommand::CloseForShutdown { deadline, reply },
+            answer,
+            deadline,
+            GatewayApplicationCommandPhase::Close,
+        )
+        .await?
+    }
+
+    pub(crate) async fn retire_closed(
+        &self,
+        deadline: Instant,
+    ) -> Result<(), GatewayApplicationCommandError> {
+        let (reply, answer) = oneshot::channel();
+        self.exchange(
+            GatewayApplicationCommand::RetireClosed { deadline, reply },
+            answer,
+            deadline,
+            GatewayApplicationCommandPhase::Retire,
+        )
+        .await?
+    }
+
+    /// Send then await the reply, both raced against the absolute deadline on
+    /// the injected clock. Closure of either channel is `OwnerUnavailable`.
+    async fn exchange<T>(
+        &self,
+        command: GatewayApplicationCommand,
+        answer: oneshot::Receiver<T>,
+        deadline: Instant,
+        phase: GatewayApplicationCommandPhase,
+    ) -> Result<T, GatewayApplicationCommandError> {
+        let remaining = deadline.saturating_duration_since(self.clock.now());
+        let exchange = async {
+            self.commands
+                .send(command)
+                .await
+                .map_err(|_| GatewayApplicationCommandError::OwnerUnavailable)?;
+            answer.await.map_err(|_| GatewayApplicationCommandError::OwnerUnavailable)
+        };
+        tokio::select! {
+            result = exchange => result,
+            () = self.clock.sleep(remaining) => {
+                Err(GatewayApplicationCommandError::Timeout { phase })
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The Gateway Application owner
+// ---------------------------------------------------------------------------
+
+/// Why a gate attempt ended without promoting.
+#[derive(Debug, Clone, Copy)]
+enum GateFailure {
+    Identity,
+    ConnectPath,
+    Timeout,
+}
+
+struct GateReport {
+    token: u64,
+    result: Result<(), GateFailure>,
+}
+
+const PHASE_IDENTITY: u8 = 0;
+const PHASE_CONNECT: u8 = 1;
+
+/// The staged candidate with its gate attempt.
+struct StagedGate {
+    candidate: GatewayApplicationCandidate,
+    token: u64,
+    phase: Arc<AtomicU8>,
+    steps: AbortHandle,
+    timer: JoinHandle<()>,
+}
+
+/// The newest status the owner wrote, and the issue-failure base read from
+/// the prior row (R-52).
+#[derive(Default)]
+struct StatusWriter {
+    last_written: Option<GatewayApplicationStatusRowV1>,
+    stamp: Option<LogicalTimestamp>,
+    base: Option<(u64, Option<overdrive_core::ca::issue_failure::SvidIssueFailure>)>,
+    dirty: bool,
+}
+
+pub(crate) struct GatewayApplicationOwner {
+    node_id: NodeId,
+    intent: Arc<dyn IntentStore>,
+    certified_key: PublicCertifiedKeyCustodyHandle,
+    frontend: Arc<dyn ServiceFrontendResolve>,
+    identity: Arc<dyn GatewayIdentityLifecycleControl>,
+    connector: Arc<GatewayUpstreamConnector>,
+    admission: Arc<GatewayAdmission>,
+    listener: GatewayListenerControl,
+    observations: Arc<dyn ObservationStore>,
+    clock: Arc<dyn Clock>,
+    limits: Arc<GatewayLimits>,
+    bind: SocketAddrV4,
+    commands: mpsc::Receiver<GatewayApplicationCommand>,
+    shutdown: CancellationToken,
+    owner_wake: Arc<Notify>,
+    staged: Option<StagedGate>,
+    current: Option<Arc<GatewayApplicationSnapshot>>,
+    draining: BTreeMap<GatewayApplicationGenerationId, Arc<GatewayApplicationSnapshot>>,
+    /// The generation whose gate failed; retried only when an input changes.
+    failed: Option<GatewayApplicationGenerationId>,
+    unavailable: Option<GatewayApplicationUnavailableCause>,
+    connect_ready: bool,
+    next_token: u64,
+    gates: JoinSet<()>,
+    status: StatusWriter,
+}
+
+impl GatewayApplicationOwner {
+    /// Subscribe-before-list, then serve inputs until shutdown.
+    pub(crate) async fn run(mut self) -> Result<(), GatewayOwnerTaskError> {
+        let mut route_events = self
+            .intent
+            .watch(ROUTE_SET_KEY.as_bytes())
+            .await
+            .map_err(|_| GatewayOwnerTaskError::Failed)?;
+        let mut key_events = self.certified_key.subscribe();
+        let mut identity_events = self.identity.subscribe();
+        let mut last_identity = identity_events.borrow_and_update().clone();
+        let (report_sender, mut reports) = mpsc::channel::<GateReport>(GATE_REPORT_CAPACITY);
+        let shutdown = self.shutdown.clone();
+        let wake = Arc::clone(&self.owner_wake);
+        let clock = Arc::clone(&self.clock);
+
+        self.evaluate(&report_sender).await;
+        loop {
+            let retry = self.status.dirty;
+            tokio::select! {
+                biased;
+                () = shutdown.cancelled() => return Ok(()),
+                command = self.commands.recv() => match command {
+                    None => return Err(GatewayOwnerTaskError::ChannelClosed),
+                    Some(command) => self.command(command).await,
+                },
+                report = reports.recv() => {
+                    if let Some(report) = report {
+                        self.gate_report(report, &report_sender).await;
+                    }
+                }
+                event = std::future::poll_fn(|cx| std::pin::Pin::new(&mut *route_events).poll_next(cx)) => match event {
+                    None => return Err(GatewayOwnerTaskError::ChannelClosed),
+                    Some(IntentSubscriptionEvent::Changed { .. }) => {
+                        self.failed = None;
+                        self.evaluate(&report_sender).await;
+                    }
+                    Some(IntentSubscriptionEvent::Lagged { .. }) => {
+                        self.close_application(GatewayApplicationUnavailableCause::WatchGap).await;
+                        self.failed = None;
+                        self.evaluate(&report_sender).await;
+                    }
+                },
+                changed = key_events.changed() => {
+                    if changed.is_err() {
+                        return Err(GatewayOwnerTaskError::ChannelClosed);
+                    }
+                    key_events.borrow_and_update();
+                    self.failed = None;
+                    self.evaluate(&report_sender).await;
+                }
+                changed = identity_events.changed() => {
+                    if changed.is_err() {
+                        return Err(GatewayOwnerTaskError::ChannelClosed);
+                    }
+                    let held = identity_events.borrow_and_update().clone();
+                    if held != last_identity {
+                        self.failed = None;
+                        last_identity = held;
+                        self.evaluate(&report_sender).await;
+                    }
+                    self.publish().await;
+                }
+                () = wake.notified() => {
+                    self.retire_drained();
+                    self.publish().await;
+                }
+                () = async {
+                    if retry {
+                        clock.sleep(STATUS_RETRY).await;
+                    } else {
+                        std::future::pending::<()>().await;
+                    }
+                } => self.publish().await,
+            }
+        }
+    }
+
+    async fn command(&mut self, command: GatewayApplicationCommand) {
+        match command {
+            GatewayApplicationCommand::CloseForShutdown { deadline, reply } => {
+                let result = if self.clock.now() > deadline {
+                    Err(GatewayApplicationCommandError::Timeout {
+                        phase: GatewayApplicationCommandPhase::Close,
+                    })
+                } else {
+                    Ok(self.close_for_shutdown().await)
+                };
+                let _ = reply.send(result);
+            }
+            GatewayApplicationCommand::RetireClosed { deadline, reply } => {
+                let result = if self.clock.now() > deadline {
+                    Err(GatewayApplicationCommandError::Timeout {
+                        phase: GatewayApplicationCommandPhase::Retire,
+                    })
+                } else {
+                    self.draining.clear();
+                    self.publish().await;
+                    Ok(())
+                };
+                let _ = reply.send(result);
+            }
+        }
+    }
+
+    /// Discard `staged`, drop the in-flight gates, unbind, close every
+    /// retention and clear admission. Returns all retentions.
+    async fn close_for_shutdown(&mut self) -> GatewayApplicationCloseResult {
+        self.drop_staged();
+        self.gates.abort_all();
+        self.unbind().await;
+        self.admission.current.store(None);
+        if let Some(current) = self.current.take() {
+            self.draining.insert(current.applied().application_generation(), current);
+        }
+        let retentions = self
+            .draining
+            .values()
+            .map(|snapshot| {
+                snapshot.retention.close();
+                Arc::clone(&snapshot.retention)
+            })
+            .collect();
+        self.publish().await;
+        GatewayApplicationCloseResult { retentions }
+    }
+
+    fn drop_staged(&mut self) {
+        if let Some(staged) = self.staged.take() {
+            staged.timer.abort();
+        }
+    }
+
+    async fn unbind(&mut self) {
+        if self.listener.is_bound() {
+            let _ = self.listener.unbind().await;
+        }
+    }
+
+    /// Stop accepts and unbind before clearing Current, which drains.
+    async fn close_application(&mut self, cause: GatewayApplicationUnavailableCause) {
+        self.drop_staged();
+        self.unbind().await;
+        if let Some(current) = self.current.take() {
+            current.retention.close();
+            self.admission.current.store(None);
+            self.draining.insert(current.applied().application_generation(), current);
+        }
+        self.retire_drained();
+        self.unavailable = Some(cause);
+        self.publish().await;
+    }
+
+    /// Whether a status row from an earlier process is still stored, so a
+    /// stale row is replaced instead of left standing.
+    async fn prior_row_exists(&self) -> bool {
+        // An unreadable store is reported by the next projection's retry, so
+        // the safe answer here is that a row may exist.
+        self.observations
+            .gateway_application_status_row(&self.node_id)
+            .await
+            .map_or(true, |row| row.is_some())
+    }
+
+    /// Retire every draining generation whose retained connections and
+    /// requests have all ended.
+    fn retire_drained(&mut self) {
+        self.draining.retain(|_, snapshot| !snapshot.retention.is_drained());
+    }
+
+    /// Resolve the three inputs and stage a candidate when they changed.
+    async fn evaluate(&mut self, reports: &mpsc::Sender<GateReport>) {
+        let route = match PublicRouteSetOwner::read(self.intent.as_ref()).await {
+            Ok(Some(route)) => Arc::new(route),
+            Ok(None) => {
+                if self.status.last_written.is_none() && !self.prior_row_exists().await {
+                    // Nothing was ever projected and no Route exists: there
+                    // is no Application fact to report yet.
+                    return;
+                }
+                return self
+                    .close_application(GatewayApplicationUnavailableCause::RouteAbsent)
+                    .await;
+            }
+            Err(_) => {
+                return self
+                    .close_application(GatewayApplicationUnavailableCause::RouteUnreadable)
+                    .await;
+            }
+        };
+        let certified_key = match self.certified_key.snapshot() {
+            PublicCertifiedKeyAvailability::Usable(snapshot) => Arc::new(snapshot),
+            PublicCertifiedKeyAvailability::Absent => {
+                return self
+                    .close_application(GatewayApplicationUnavailableCause::CertifiedKeyAbsent)
+                    .await;
+            }
+            PublicCertifiedKeyAvailability::Unusable { .. } => {
+                return self
+                    .close_application(GatewayApplicationUnavailableCause::CertifiedKeyUnusable)
+                    .await;
+            }
+        };
+        let Ok(frontend) = self.frontend.resolve(route.service_listener()).await else {
+            return self
+                .close_application(GatewayApplicationUnavailableCause::FrontendUnresolved)
+                .await;
+        };
+        let candidate = match GatewayApplicationCandidate::new(route, frontend, certified_key) {
+            Ok(candidate) => candidate,
+            Err(GatewayApplicationError::CertifiedKeyHostnameMismatch) => {
+                return self
+                    .close_application(GatewayApplicationUnavailableCause::CertifiedKeyUnusable)
+                    .await;
+            }
+            Err(_) => {
+                return self
+                    .close_application(GatewayApplicationUnavailableCause::CertifiedKeyAbsent)
+                    .await;
+            }
+        };
+        let generation = candidate.generation;
+        let current = self.current.as_ref().map(|c| c.applied().application_generation());
+        if current == Some(generation) {
+            self.drop_staged();
+            self.unavailable = None;
+            return self.publish().await;
+        }
+        let staged = self.staged.as_ref().map(|staged| staged.candidate.generation);
+        if staged == Some(generation) || self.failed == Some(generation) {
+            return;
+        }
+        self.stage(candidate, reports).await;
+    }
+
+    /// Publish the exact frontend as Staged and start one gate attempt against
+    /// one absolute deadline.
+    async fn stage(
+        &mut self,
+        candidate: GatewayApplicationCandidate,
+        reports: &mpsc::Sender<GateReport>,
+    ) {
+        self.drop_staged();
+        self.next_token += 1;
+        let token = self.next_token;
+        let deadline = self.clock.now() + self.limits.application_gate_deadline();
+        let phase = Arc::new(AtomicU8::new(PHASE_IDENTITY));
+        let gate = Gate {
+            connector: Arc::clone(&self.connector),
+            identity: Arc::clone(&self.identity),
+            clock: Arc::clone(&self.clock),
+            frontend: candidate.frontend,
+            deadline,
+            phase: Arc::clone(&phase),
+            token,
+            reports: reports.clone(),
+        };
+        let steps = self.gates.spawn(gate.run());
+        let timer = tokio::spawn(Self::gate_timer(
+            Arc::clone(&self.clock),
+            deadline,
+            token,
+            reports.clone(),
+        ));
+        self.unavailable = None;
+        self.staged = Some(StagedGate { candidate, token, phase, steps, timer });
+        self.publish().await;
+    }
+
+    async fn gate_timer(
+        clock: Arc<dyn Clock>,
+        deadline: Instant,
+        token: u64,
+        reports: mpsc::Sender<GateReport>,
+    ) {
+        clock.sleep(deadline.saturating_duration_since(clock.now())).await;
+        let _ = reports.send(GateReport { token, result: Err(GateFailure::Timeout) }).await;
+    }
+
+    /// A report for any token but the staged one is a late result of a
+    /// superseded or already-completed attempt: ignored, never delivered.
+    async fn gate_report(&mut self, report: GateReport, reports: &mpsc::Sender<GateReport>) {
+        if self.staged.as_ref().map(|staged| staged.token) != Some(report.token) {
+            return;
+        }
+        let Some(staged) = self.staged.take() else { return };
+        staged.timer.abort();
+        match report.result {
+            Ok(()) => self.promote(staged.candidate, reports).await,
+            Err(failure) => {
+                if matches!(failure, GateFailure::Timeout) {
+                    staged.steps.abort();
+                }
+                let cause = match failure {
+                    GateFailure::Identity => {
+                        GatewayApplicationUnavailableCause::GatewayIdentityUnusable
+                    }
+                    GateFailure::ConnectPath => {
+                        GatewayApplicationUnavailableCause::ConnectPathUnavailable
+                    }
+                    GateFailure::Timeout => {
+                        if staged.phase.load(Ordering::Acquire) == PHASE_IDENTITY {
+                            GatewayApplicationUnavailableCause::GatewayIdentityUnusable
+                        } else {
+                            GatewayApplicationUnavailableCause::ConnectPathUnavailable
+                        }
+                    }
+                };
+                self.reject(staged.candidate.generation, cause).await;
+            }
+        }
+    }
+
+    /// A failed gate removes only the staged candidate.
+    async fn reject(
+        &mut self,
+        generation: GatewayApplicationGenerationId,
+        cause: GatewayApplicationUnavailableCause,
+    ) {
+        self.failed = Some(generation);
+        if cause == GatewayApplicationUnavailableCause::ConnectPathUnavailable {
+            self.connect_ready = false;
+        }
+        if self.current.is_none() {
+            self.unavailable = Some(cause);
+        }
+        self.publish().await;
+    }
+
+    /// Promote after the gate: recheck identity and key, swap Current, move
+    /// the prior Current to Draining, then bind if needed.
+    async fn promote(
+        &mut self,
+        candidate: GatewayApplicationCandidate,
+        reports: &mpsc::Sender<GateReport>,
+    ) {
+        let generation = candidate.generation;
+        let identity_usable = self
+            .identity
+            .current()
+            .is_some_and(|facts| facts.not_after > UnixInstant::from_clock(self.clock.as_ref()));
+        if !identity_usable {
+            return self
+                .reject(generation, GatewayApplicationUnavailableCause::GatewayIdentityUnusable)
+                .await;
+        }
+        let key_current = matches!(
+            self.certified_key.snapshot(),
+            PublicCertifiedKeyAvailability::Usable(ref snapshot)
+                if snapshot.generation() == candidate.certified_key.generation()
+        );
+        if !key_current {
+            return self.evaluate(reports).await;
+        }
+        let snapshot = Arc::new(GatewayApplicationSnapshot {
+            applied: GatewayAppliedGeneration::from_promotion(generation),
+            route: candidate.route,
+            frontend: candidate.frontend,
+            certified_key: candidate.certified_key,
+            retention: GatewayGenerationRetention::new(generation, Arc::clone(&self.owner_wake)),
+            budget: Arc::clone(self.admission.budget()),
+        });
+        let prior = self.current.take();
+        if let Some(prior) = &prior {
+            prior.retention.close();
+        }
+        self.admission.current.store(Some(Arc::clone(&snapshot)));
+        self.current = Some(snapshot);
+        if let Some(prior) = prior {
+            self.draining.insert(prior.applied().application_generation(), prior);
+        }
+        self.connect_ready = true;
+        self.unavailable = None;
+        self.failed = None;
+        if !self.listener.is_bound()
+            && let Err(error) = self.listener.bind(self.bind, Arc::clone(&self.admission)).await
+        {
+            tracing::warn!(
+                name: "gateway.listener.bind_failed",
+                kind = ?error.kind(),
+                "public listener bind failed; the promoted generation is removed",
+            );
+            self.close_application(GatewayApplicationUnavailableCause::ListenerBindFailed).await;
+            self.failed = Some(generation);
+            return;
+        }
+        self.retire_drained();
+        self.publish().await;
+    }
+
+    // -- status projection --------------------------------------------------
+
+    fn classify_identity(&self) -> GatewayIdentityStatus {
+        let Some(facts) = self.identity.current() else {
+            return GatewayIdentityStatus::Absent;
+        };
+        if facts.not_after <= UnixInstant::from_clock(self.clock.as_ref()) {
+            return GatewayIdentityStatus::Unusable;
+        }
+        GatewayIdentityStatus::Current {
+            epoch: facts.epoch,
+            spiffe_id: facts.spiffe_id,
+            serial: facts.serial,
+            not_after: facts.not_after,
+        }
+    }
+
+    fn generation_status(
+        generation: GatewayApplicationGenerationId,
+        route: &Route,
+        frontend: ServiceFrontend,
+    ) -> GatewayApplicationGenerationStatus {
+        GatewayApplicationGenerationStatus {
+            application_generation: generation,
+            route_id: route.route_id().clone(),
+            route_generation: route.route_generation(),
+            service_key: ServiceKey::from_frontend(frontend),
+        }
+    }
+
+    fn snapshot_status(
+        snapshot: &GatewayApplicationSnapshot,
+    ) -> GatewayApplicationGenerationStatus {
+        Self::generation_status(
+            snapshot.applied().application_generation(),
+            snapshot.route(),
+            snapshot.frontend(),
+        )
+    }
+
+    /// The newest row value: application facts plus identity and the
+    /// issue-failure occurrence (base from the prior row plus this process's
+    /// record), with the previous stamp as a placeholder.
+    fn project(
+        &self,
+        base: &(u64, Option<overdrive_core::ca::issue_failure::SvidIssueFailure>),
+        updated_at: LogicalTimestamp,
+    ) -> GatewayApplicationStatusRowV1 {
+        let record = self.identity.issue_record();
+        let (issue_failures, last_issue_failure) = record.map_or((base.0, base.1), |record| {
+            (base.0.saturating_add(record.count.get()), Some(record.last))
+        });
+        GatewayApplicationStatusRowV1 {
+            node_id: self.node_id.clone(),
+            listener: if self.listener.is_bound() {
+                GatewayListenerStatus::Bound { address: self.bind }
+            } else {
+                GatewayListenerStatus::Unbound
+            },
+            staged: self.staged.as_ref().map(|staged| {
+                Self::generation_status(
+                    staged.candidate.generation,
+                    &staged.candidate.route,
+                    staged.candidate.frontend,
+                )
+            }),
+            current: self.current.as_deref().map(Self::snapshot_status),
+            draining: self
+                .draining
+                .values()
+                .map(|snapshot| Self::snapshot_status(snapshot))
+                .collect(),
+            unavailable: self.unavailable,
+            gateway_identity: self.classify_identity(),
+            issue_failures,
+            last_issue_failure,
+            connect_path: if self.connect_ready {
+                GatewayConnectPathStatus::Ready
+            } else {
+                GatewayConnectPathStatus::Unavailable
+            },
+            updated_at,
+        }
+    }
+
+    /// Write the newest projection when it differs from the last written one.
+    /// A failed read or write keeps the owner dirty; the next wake or retry
+    /// carries everything the owner holds.
+    async fn publish(&mut self) {
+        if self.status.base.is_none() {
+            let Ok(prior) = self.observations.gateway_application_status_row(&self.node_id).await
+            else {
+                self.status.dirty = true;
+                return;
+            };
+            self.status.base = Some(
+                prior
+                    .as_ref()
+                    .map_or((0, None), |row| (row.issue_failures, row.last_issue_failure)),
+            );
+            self.status.stamp = prior.map(|row| row.updated_at);
+        }
+        let Some(base) = self.status.base else { return };
+        let stamp =
+            LogicalTimestamp::dominating(0, self.node_id.clone(), self.status.stamp.as_ref());
+        let row = self.project(&base, stamp.clone());
+        if let Some(last) = &self.status.last_written {
+            let mut comparable = row.clone();
+            comparable.updated_at = last.updated_at.clone();
+            if comparable == *last {
+                self.status.dirty = false;
+                return;
+            }
+        }
+        match self.observations.write(ObservationWrite::GatewayApplicationStatus(row.clone())).await
+        {
+            Ok(()) => {
+                self.status.stamp = Some(stamp);
+                self.status.last_written = Some(row);
+                self.status.dirty = false;
+            }
+            Err(_) => self.status.dirty = true,
+        }
+    }
+}
+
+/// One gate attempt: identity current, the sentinel connect probe and the
+/// actual-frontend probe, reported by token. It runs detached from the owner
+/// loop so a superseded attempt completes (and cleans up) on its own.
+struct Gate {
+    connector: Arc<GatewayUpstreamConnector>,
+    identity: Arc<dyn GatewayIdentityLifecycleControl>,
+    clock: Arc<dyn Clock>,
+    frontend: ServiceFrontend,
+    deadline: Instant,
+    phase: Arc<AtomicU8>,
+    token: u64,
+    reports: mpsc::Sender<GateReport>,
+}
+
+impl Gate {
+    async fn run(self) {
+        let result = self.steps().await;
+        let _ = self.reports.send(GateReport { token: self.token, result }).await;
+    }
+
+    async fn steps(&self) -> Result<(), GateFailure> {
+        self.identity.ensure_current(self.deadline).await.map_err(|_| GateFailure::Identity)?;
+        self.phase.store(PHASE_CONNECT, Ordering::Release);
+        self.connector
+            .sentinel(self.deadline, self.clock.as_ref())
+            .await
+            .map_err(|_| GateFailure::ConnectPath)?;
+        self.connector
+            .probe(self.frontend, self.deadline)
+            .await
+            .map(|_| ())
+            .map_err(|_| GateFailure::ConnectPath)
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Crate-private candidate, snapshot and retention
 // ---------------------------------------------------------------------------
 
@@ -309,7 +1516,18 @@ impl GatewayApplicationCandidate {
         frontend: ServiceFrontend,
         certified_key: Arc<PublicCertifiedKeySnapshot>,
     ) -> Result<Self, GatewayApplicationError> {
-        todo!("SCAFFOLD: GatewayApplicationCandidate::new")
+        if route.public_certified_key_id() != certified_key.certified_key_id() {
+            return Err(GatewayApplicationError::CertifiedKeyReferenceMismatch);
+        }
+        if route.public_hostname() != certified_key.public_hostname() {
+            return Err(GatewayApplicationError::CertifiedKeyHostnameMismatch);
+        }
+        let generation = GatewayApplicationGenerationId::from_inputs(
+            route.route_generation(),
+            frontend,
+            certified_key.generation(),
+        );
+        Ok(Self { generation, route, frontend, certified_key })
     }
 }
 
@@ -350,7 +1568,13 @@ impl GatewayGenerationRetention {
         generation: GatewayApplicationGenerationId,
         owner_wake: Arc<Notify>,
     ) -> Arc<Self> {
-        todo!("SCAFFOLD: GatewayGenerationRetention::new")
+        Arc::new(Self {
+            generation,
+            closed: AtomicBool::new(false),
+            connections: AtomicU32::new(0),
+            requests: AtomicU32::new(0),
+            owner_wake,
+        })
     }
     pub(crate) fn try_connection(
         self: &Arc<Self>,
@@ -362,18 +1586,47 @@ impl GatewayGenerationRetention {
     ) -> Result<GatewayGenerationRequestPermit, GatewayAdmissionError> {
         todo!("SCAFFOLD: GatewayGenerationRetention::try_request")
     }
+    /// Refuse every later connection and request of this generation.
     pub(crate) fn close(&self) {
-        todo!("SCAFFOLD: GatewayGenerationRetention::close")
+        self.closed.store(true, Ordering::Release);
     }
+    /// Wait until no connection or request is retained, or the absolute
+    /// `deadline` on `clock` passes (the exact remaining counts).
     pub(crate) async fn wait_zero(
         &self,
         deadline: Instant,
         clock: &dyn Clock,
     ) -> Result<(), GatewayDrainTimeout> {
-        todo!("SCAFFOLD: GatewayGenerationRetention::wait_zero")
+        loop {
+            let released = self.owner_wake.notified();
+            let (connections, requests) = self.retained();
+            if connections == 0 && requests == 0 {
+                return Ok(());
+            }
+            let remaining = deadline.saturating_duration_since(clock.now());
+            tokio::select! {
+                () = released => {}
+                () = clock.sleep(remaining) => {
+                    let (connections, requests) = self.retained();
+                    return Err(GatewayDrainTimeout {
+                        generation: self.generation,
+                        connections,
+                        requests,
+                    });
+                }
+            }
+        }
     }
     pub(crate) fn counts(&self) -> (u32, u32) {
         todo!("SCAFFOLD: GatewayGenerationRetention::counts")
+    }
+
+    fn retained(&self) -> (u32, u32) {
+        (self.connections.load(Ordering::Acquire), self.requests.load(Ordering::Acquire))
+    }
+
+    fn is_drained(&self) -> bool {
+        self.retained() == (0, 0)
     }
 }
 
@@ -458,7 +1711,7 @@ pub(crate) struct GatewayAdmission {
 impl GatewayAdmission {
     /// `current` empty. The one constructor (DG-10).
     pub(crate) fn new(budget: Arc<GatewayAdmissionBudget>) -> Arc<Self> {
-        todo!("SCAFFOLD: GatewayAdmission::new")
+        Arc::new(Self { current: Arc::new(ArcSwapOption::empty()), budget })
     }
     /// The budget shared with the connector and every generation snapshot.
     pub(crate) fn budget(&self) -> &Arc<GatewayAdmissionBudget> {

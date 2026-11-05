@@ -45,6 +45,16 @@ impl GatewayUpstreamConnector {
         Self { dataplane, client_mtls, limits, clock, budget, cleanup_ledger }
     }
 
+    /// The sentinel connect probe that proves the dataplane adapter can honour
+    /// its contract before the first actual-frontend probe.
+    pub(crate) async fn sentinel(
+        &self,
+        deadline: Instant,
+        clock: &dyn Clock,
+    ) -> Result<(), GatewayUpstreamConnectError> {
+        self.dataplane.probe(deadline, clock).await.map_err(GatewayUpstreamConnectError::Prepare)
+    }
+
     /// One actual-frontend probe: a `NoBackend` receipt is bind-valid
     /// (ADR-0242), a selected and authenticated peer is `SelectedPeerAuthenticated`.
     pub(crate) async fn probe(

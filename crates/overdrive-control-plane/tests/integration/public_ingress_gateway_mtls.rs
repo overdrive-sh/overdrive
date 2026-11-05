@@ -214,12 +214,12 @@ async fn production_client(
 ) -> (Arc<dyn GatewayClientMtls>, Arc<HostGatewayRelay>) {
     let intent: Arc<dyn IntentStore> =
         Arc::new(LocalIntentStore::open(&site.intent_path).expect("real intent store"));
-    let observations: Arc<dyn ObservationStore> = Arc::new(SimObservationStore::single_peer(
-        NodeId::new("gateway-node").expect("node ID"),
-        64,
-    ));
+    let node = NodeId::new("gateway-node").expect("node ID");
+    let observations: Arc<dyn ObservationStore> =
+        Arc::new(SimObservationStore::single_peer(node.clone(), 64));
     let clock: Arc<dyn Clock> = Arc::new(WallClock);
     let builder = UnboundGatewayBuilder::new(
+        node,
         site.config.clone(),
         intent,
         observations,

@@ -386,6 +386,34 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-11-05T18:36:58Z"
+    },
+    {
+      "sid": "02-06",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: gateway NodeId source is unpinned; 17 owner/custody/identity tests cannot be implemented without a design decision. 21 of 38 tests are GREEN in intermediate commits ef99ffcb4 and 1feaaa0d6",
+      "t": "2026-11-05T19:23:47Z"
+    },
+    {
+      "sid": "02-06",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: gateway NodeId source is unpinned; 17 owner/custody/identity tests cannot be implemented without a design decision. 21 of 38 tests are GREEN in intermediate commits ef99ffcb4 and 1feaaa0d6",
+      "t": "2026-11-05T19:23:47Z"
+    },
+    {
+      "sid": "02-06",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-05T21:17:40Z"
+    },
+    {
+      "sid": "02-06",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-05T21:17:40Z"
     }
   ]
 }

@@ -570,7 +570,9 @@ async fn compose(
     let intent_port: Arc<dyn IntentStore> = ports.intent.clone();
     let observation_port: Arc<dyn ObservationStore> = ports.observations.clone();
     let clock_port: Arc<dyn Clock> = ports.clock.clone();
+    let node = node_id()?;
     let builder = UnboundGatewayBuilder::new(
+        node.clone(),
         config,
         intent_port,
         observation_port,
@@ -584,7 +586,6 @@ async fn compose(
     let client = SimGatewayClientMtls::new(seal, ports.relay.clone(), clock_port.clone())
         .with_hold(ports.hold.clone());
     client.set_peer(ports.backend_identity.clone());
-    let node = node_id()?;
     let evaluation = Evaluation {
         reconciler: ReconcilerName::new("gateway-svid-lifecycle")
             .map_err(|error| format!("reconciler name: {error}"))?,

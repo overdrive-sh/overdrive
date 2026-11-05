@@ -24,7 +24,6 @@ const PROBE_COMPLETION_OCTET: u8 = 64;
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(start_paused = true)]
-#[ignore = "pending DELIVER gateway-application-owner"]
 async fn a_probe_result_completed_twice_is_ignored_the_second_time() {
     let world = Composition::start(PROBE_COMPLETION_OCTET, 0).await;
     world.routes.routes().apply(route("/")).await.expect("declare the Route");

@@ -1029,6 +1029,7 @@ async fn unbound(
     let observation_port: Arc<dyn ObservationStore> = Arc::clone(observations);
     let clock_port: Arc<dyn Clock> = clock.clone();
     UnboundGatewayBuilder::new(
+        node_id(),
         site.config(plan.slot.bind(plan.ordinal)),
         intent_port,
         observation_port,
@@ -1260,7 +1261,6 @@ fn is_usable(row: &PublicCertifiedKeyStatusRowV1) -> bool {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER gateway-application-owner"]
 async fn route_declare_replay_replace_and_withdraw_return_exact_outcomes_over_real_redb() {
     let site = Site::new();
     let world = World::start(&site, Plan::route_only(ROUTE_LIFECYCLE), Fixtures::healthy())
@@ -1329,7 +1329,6 @@ async fn route_declare_replay_replace_and_withdraw_return_exact_outcomes_over_re
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER gateway-application-owner"]
 async fn a_different_route_id_is_rejected_with_the_typed_conflict_and_an_unchanged_universe() {
     let site = Site::new();
     let world = World::start(&site, Plan::route_only(COMPETING_ROUTE), Fixtures::healthy())
@@ -1373,7 +1372,6 @@ async fn a_different_route_id_is_rejected_with_the_typed_conflict_and_an_unchang
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER gateway-application-owner"]
 async fn withdrawal_by_a_different_route_id_has_an_empty_delta() {
     let site = Site::new();
     let world = World::start(&site, Plan::route_only(WRONG_ID_WITHDRAW), Fixtures::healthy())
@@ -1500,7 +1498,6 @@ async fn claim_round(round: u16, seed: u64, rng: &mut SplitMix64) {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER gateway-application-owner"]
 async fn two_simultaneous_route_claims_have_exactly_one_winner_in_every_round() {
     let seed = std::env::var("PIG_S24_SEED")
         .ok()
@@ -1525,7 +1522,6 @@ async fn two_simultaneous_route_claims_have_exactly_one_winner_in_every_round() 
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test]
-#[ignore = "pending DELIVER gateway-application-owner"]
 async fn operator_status_carries_no_manual_path_or_credential_material() {
     let site = Site::new();
     let world = World::start(&site, Plan::with_service(STATUS_REDACTION), Fixtures::healthy())
@@ -1665,7 +1661,6 @@ impl KeyFault {
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test]
-#[ignore = "pending DELIVER certified-key-custody"]
 async fn unreadable_and_malformed_manual_keys_refuse_boot_with_distinct_causes_and_no_mutation() {
     let mut causes = BTreeSet::new();
     for (index, fault) in [
@@ -1742,7 +1737,6 @@ async fn unreadable_and_malformed_manual_keys_refuse_boot_with_distinct_causes_a
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER gateway-application-owner"]
 async fn withdraw_from_empty_is_unchanged_and_the_empty_set_survives_reopen() {
     let site = Site::new();
     let world = World::start(&site, Plan::route_only(WITHDRAW_FROM_EMPTY), Fixtures::healthy())
@@ -1779,7 +1773,6 @@ async fn withdraw_from_empty_is_unchanged_and_the_empty_set_survives_reopen() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER gateway-application-owner"]
 async fn route_set_cardinality_zero_one_and_many_is_closed_at_one() {
     let site = Site::new();
     let world = World::start(&site, Plan::route_only(CARDINALITY), Fixtures::healthy())
@@ -1823,7 +1816,6 @@ async fn route_set_cardinality_zero_one_and_many_is_closed_at_one() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER certified-key-custody"]
 async fn certified_key_install_replay_and_valid_replacement_move_the_generation_exactly() {
     let site = Site::new();
     let plan = Plan::route_only(KEY_INSTALL_REPLAY_REPLACE);
@@ -1880,7 +1872,6 @@ async fn certified_key_install_replay_and_valid_replacement_move_the_generation_
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER certified-key-custody"]
 async fn a_mismatched_replacement_key_preserves_the_current_generation_and_records_its_cause() {
     let site = Site::new();
     let world = World::start(&site, Plan::route_only(KEY_MISMATCH), Fixtures::healthy())
@@ -1910,7 +1901,6 @@ async fn a_mismatched_replacement_key_preserves_the_current_generation_and_recor
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER certified-key-custody"]
 async fn an_expired_replacement_preserves_the_current_generation_and_records_a_distinct_cause() {
     let site = Site::new();
     let world = World::start(&site, Plan::route_only(KEY_EXPIRED_REPLACEMENT), Fixtures::healthy())
@@ -1947,7 +1937,6 @@ async fn an_expired_replacement_preserves_the_current_generation_and_records_a_d
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER certified-key-custody"]
 async fn expiry_publishes_unusable_retains_the_record_and_survives_reopen() {
     let site = Site::new();
     let plan = Plan::route_only(KEY_EXPIRY_REOPEN);
@@ -2250,7 +2239,6 @@ fn identity_errors() -> Vec<GatewayIdentityLifecycleError> {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER gateway-identity-error-collapse"]
 async fn every_identity_lifecycle_error_reaches_the_owner_cause_distinct() {
     for (index, error) in identity_errors().into_iter().enumerate() {
         assert!(originates_at_ensure_current(&error));
@@ -2285,7 +2273,6 @@ async fn every_identity_lifecycle_error_reaches_the_owner_cause_distinct() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER gateway-identity-error-collapse"]
 async fn every_identity_lifecycle_error_collapses_to_gateway_identity_unusable() {
     for (index, error) in identity_errors().into_iter().enumerate() {
         let site = Site::new();
@@ -3001,7 +2988,6 @@ async fn a_watch_lag_is_reported_and_the_gateway_relists_instead_of_reading_an_e
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER gateway-application-owner"]
 async fn a_late_probe_result_after_supersession_is_never_delivered() {
     let site = Site::new();
     let fx = Fixtures::new(FixtureSpec {
