@@ -406,6 +406,89 @@ mod acceptance {
         assert_eq!(next_retry.last_failure_seen_at, deadline);
     }
 
+    /// Executor-latency budget before a held identity's `not_after`, inside
+    /// which a reissue is never held back by the backoff spacing. Mirrors the
+    /// workload-SVID precedent (`svid_lifecycle`, 60 s); the literal is used
+    /// because that constant is module-private.
+    const EXPIRY_PANIC_MARGIN_SECS: u64 = 60;
+
+    // The panic margin lies strictly inside the near-expiry window, so the two
+    // zones are distinguishable by the choice of times below.
+    const _: () = assert!(EXPIRY_PANIC_MARGIN_SECS < NEAR_EXPIRY_THRESHOLD_SECS);
+
+    /// A held, expiring identity of the desired epoch and subject that is NOT
+    /// usable (inside the near-expiry window), with a retry entry whose
+    /// backoff window has just opened at `now`.
+    fn expiring_with_open_backoff_window(
+        now: u64,
+        seconds_to_expiry: u64,
+    ) -> (GatewaySvidLifecycleState, GatewaySvidLifecycleView) {
+        let first = GatewayIdentityEpoch::first();
+        assert!(
+            seconds_to_expiry <= NEAR_EXPIRY_THRESHOLD_SECS,
+            "the held identity must be inside the near-expiry window (not usable)",
+        );
+        let attempts = 50;
+        assert!(
+            !crate::backoff_for_attempt(attempts).is_zero(),
+            "the backoff window must be open for a retry recorded at `now`",
+        );
+        let held = facts(first, GATEWAY, now + seconds_to_expiry);
+        let input = state(desired(first, true), Some(held), true);
+        let view = GatewaySvidLifecycleView {
+            retry: Some(IssueRetry { attempts, last_failure_seen_at: at(now) }),
+        };
+        (input, view)
+    }
+
+    /// The backoff spacing never delays a reissue past the held identity's
+    /// expiry: inside the expiry panic zone the reissue is emitted although
+    /// the backoff window has not elapsed, and the retry entry is bumped as
+    /// for any emission.
+    ///
+    /// CONTRACT_SHAPE: pure-function.
+    #[test]
+    fn expiring_identity_in_the_panic_zone_is_reissued_inside_the_backoff_window() {
+        let reconciler = GatewaySvidLifecycle::canonical();
+        let now = 10_000;
+        // Last second before the wall, and the exact margin boundary: both are
+        // inside the panic zone (`now + margin < not_after` is false).
+        for seconds_to_expiry in [1, EXPIRY_PANIC_MARGIN_SECS] {
+            let (input, view) = expiring_with_open_backoff_window(now, seconds_to_expiry);
+            let (actions, next_view) = reconciler.reconcile(&input, &input, &view, &tick(at(now)));
+            assert_eq!(
+                gateway_issues(&actions).len(),
+                1,
+                "{seconds_to_expiry}s before expiry the reissue is not held back by the backoff",
+            );
+            assert_eq!(
+                next_view.retry,
+                Some(IssueRetry { attempts: 51, last_failure_seen_at: at(now) }),
+                "the panic-zone emission bumps the retry entry",
+            );
+        }
+    }
+
+    /// Outside the expiry panic zone the backoff spacing still holds the
+    /// reissue back and leaves the retry entry unchanged.
+    ///
+    /// CONTRACT_SHAPE: pure-function.
+    #[test]
+    fn expiring_identity_outside_the_panic_zone_waits_out_the_backoff_window() {
+        let reconciler = GatewaySvidLifecycle::canonical();
+        let now = 10_000;
+        // One second beyond the margin boundary, and mid near-expiry window.
+        for seconds_to_expiry in [EXPIRY_PANIC_MARGIN_SECS + 1, NEAR_EXPIRY_THRESHOLD_SECS / 2] {
+            let (input, view) = expiring_with_open_backoff_window(now, seconds_to_expiry);
+            let (actions, next_view) = reconciler.reconcile(&input, &input, &view, &tick(at(now)));
+            assert!(
+                gateway_issues(&actions).is_empty(),
+                "{seconds_to_expiry}s before expiry the backoff window still holds the reissue",
+            );
+            assert_eq!(next_view, view, "a suppressed tick leaves the retry entry unchanged");
+        }
+    }
+
     /// S-PIG-65: the emitted action carries the desired epoch and subject and
     /// the node of the issuing target, and the correlation is the same for
     /// the same desired identity on every tick (a content key, never a
