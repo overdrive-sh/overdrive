@@ -45,16 +45,6 @@ impl GatewayUpstreamConnector {
         Self { dataplane, client_mtls, limits, clock, budget, cleanup_ledger }
     }
 
-    /// The sentinel connect probe that proves the dataplane adapter can honour
-    /// its contract before the first actual-frontend probe.
-    pub(crate) async fn sentinel(
-        &self,
-        deadline: Instant,
-        clock: &dyn Clock,
-    ) -> Result<(), GatewayUpstreamConnectError> {
-        self.dataplane.probe(deadline, clock).await.map_err(GatewayUpstreamConnectError::Prepare)
-    }
-
     /// One actual-frontend probe: a `NoBackend` receipt is bind-valid
     /// (ADR-0242), a selected and authenticated peer is `SelectedPeerAuthenticated`.
     pub(crate) async fn probe(
@@ -89,8 +79,17 @@ impl GatewayUpstreamConnector {
         let (socket, intent) = prepared.into_parts();
         reservation.bind(intent.clone());
         let address = SocketAddr::V4(SocketAddrV4::new(frontend.vip_v4(), frontend.port().get()));
-        let stream =
-            socket.connect(address).await.map_err(|_| GatewayUpstreamConnectError::Connect)?;
+        let connect_deadline =
+            deadline.min(self.clock.now() + self.limits.upstream_connect_deadline());
+        let stream = tokio::select! {
+            connected = socket.connect(address) => {
+                connected.map_err(|_| GatewayUpstreamConnectError::Connect)?
+            }
+            () = self.clock.sleep(connect_deadline.saturating_duration_since(self.clock.now())) => {
+                self.release_intent(&intent, reservation)?;
+                return Err(GatewayUpstreamConnectError::ConnectTimeout);
+            }
+        };
         let Ok(receipt) = self.dataplane.take_receipt(&intent) else {
             todo!(
                 "SCAFFOLD: selection-receipt failure arm (selection-receipt-and-applied-identity)"

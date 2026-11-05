@@ -2502,6 +2502,7 @@ dependencies = [
  "redb",
  "ring",
  "rkyv",
+ "rustix 1.1.4",
  "rustls",
  "serde",
  "tempfile",

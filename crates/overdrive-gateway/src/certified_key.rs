@@ -763,7 +763,7 @@ impl ManualCertifiedKeySource {
         if !link.file_type().is_file() {
             return Err(metadata_failure());
         }
-        let effective_uid = std::fs::metadata("/proc/self").map_err(|_| metadata_failure())?.uid();
+        let effective_uid = rustix::process::geteuid().as_raw();
         if link.uid() != effective_uid {
             return Err(source_error(CertifiedKeyFailure::SourceOwnership));
         }

@@ -203,7 +203,7 @@ ethtool         = "0.2"
 # `rustix::net` for the safe nonblocking AF_VSOCK socket/accept/readiness
 # operations of the node beacon adapter. `default-features = false` keeps the
 # dependency limited to those consumed syscall families.
-rustix          = { version = "1", default-features = false, features = ["std", "fs", "net"] }
+rustix          = { version = "1", default-features = false, features = ["std", "fs", "net", "process"] }
 # `ipnet` — IPv4/IPv6 CIDR types used by the VIP-pool allocator (ADR-0049).
 # `serde` feature gates `Deserialize` / `Serialize` impls for `Ipv4Net`,
 # used by the `[dataplane.vip_allocator]` TOML parser in

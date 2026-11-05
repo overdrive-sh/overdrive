@@ -31,7 +31,7 @@ use overdrive_host::ca::PublicCertifiedKeyAeadCodec;
 use thiserror::Error;
 use tokio::net::TcpListener;
 use tokio::sync::{Notify, mpsc, oneshot};
-use tokio::task::{AbortHandle, JoinHandle, JoinSet};
+use tokio::task::{JoinHandle, JoinSet};
 use tokio_util::sync::CancellationToken;
 
 use crate::certified_key::{
@@ -279,6 +279,7 @@ impl GatewayBuilder {
             connect_ready: false,
             next_token: 0,
             gates: JoinSet::new(),
+            route_seen: false,
             status: StatusWriter::default(),
         };
         let application = tokio::spawn(owner.run());
@@ -886,10 +887,10 @@ impl GatewayApplicationHandle {
 // ---------------------------------------------------------------------------
 
 /// Why a gate attempt ended without promoting.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 enum GateFailure {
-    Identity,
-    ConnectPath,
+    Identity(GatewayIdentityLifecycleError),
+    ConnectPath(GatewayUpstreamConnectError),
     Timeout,
 }
 
@@ -906,8 +907,8 @@ struct StagedGate {
     candidate: GatewayApplicationCandidate,
     token: u64,
     phase: Arc<AtomicU8>,
-    steps: AbortHandle,
-    timer: JoinHandle<()>,
+    /// Cooperative cancel for the gate attempt and its deadline timer.
+    cancel: CancellationToken,
 }
 
 /// The newest status the owner wrote, and the issue-failure base read from
@@ -946,6 +947,9 @@ pub(crate) struct GatewayApplicationOwner {
     next_token: u64,
     gates: JoinSet<()>,
     status: StatusWriter,
+    /// Whether a Route has ever been observed by this process. Until one is,
+    /// and no prior row exists, the owner writes no status row (R-58).
+    route_seen: bool,
 }
 
 impl GatewayApplicationOwner {
@@ -1057,7 +1061,6 @@ impl GatewayApplicationOwner {
     /// retention and clear admission. Returns all retentions.
     async fn close_for_shutdown(&mut self) -> GatewayApplicationCloseResult {
         self.drop_staged();
-        self.gates.abort_all();
         self.unbind().await;
         self.admission.current.store(None);
         if let Some(current) = self.current.take() {
@@ -1077,7 +1080,7 @@ impl GatewayApplicationOwner {
 
     fn drop_staged(&mut self) {
         if let Some(staged) = self.staged.take() {
-            staged.timer.abort();
+            staged.cancel.cancel();
         }
     }
 
@@ -1121,7 +1124,10 @@ impl GatewayApplicationOwner {
     /// Resolve the three inputs and stage a candidate when they changed.
     async fn evaluate(&mut self, reports: &mpsc::Sender<GateReport>) {
         let route = match PublicRouteSetOwner::read(self.intent.as_ref()).await {
-            Ok(Some(route)) => Arc::new(route),
+            Ok(Some(route)) => {
+                self.route_seen = true;
+                Arc::new(route)
+            }
             Ok(None) => {
                 if self.status.last_written.is_none() && !self.prior_row_exists().await {
                     // Nothing was ever projected and no Route exists: there
@@ -1133,6 +1139,7 @@ impl GatewayApplicationOwner {
                     .await;
             }
             Err(_) => {
+                self.route_seen = true;
                 return self
                     .close_application(GatewayApplicationUnavailableCause::RouteUnreadable)
                     .await;
@@ -1195,6 +1202,7 @@ impl GatewayApplicationOwner {
         let token = self.next_token;
         let deadline = self.clock.now() + self.limits.application_gate_deadline();
         let phase = Arc::new(AtomicU8::new(PHASE_IDENTITY));
+        let cancel = CancellationToken::new();
         let gate = Gate {
             connector: Arc::clone(&self.connector),
             identity: Arc::clone(&self.identity),
@@ -1204,16 +1212,18 @@ impl GatewayApplicationOwner {
             phase: Arc::clone(&phase),
             token,
             reports: reports.clone(),
+            cancel: cancel.clone(),
         };
-        let steps = self.gates.spawn(gate.run());
-        let timer = tokio::spawn(Self::gate_timer(
+        self.gates.spawn(gate.run());
+        tokio::spawn(Self::gate_timer(
             Arc::clone(&self.clock),
             deadline,
             token,
             reports.clone(),
+            cancel.clone(),
         ));
         self.unavailable = None;
-        self.staged = Some(StagedGate { candidate, token, phase, steps, timer });
+        self.staged = Some(StagedGate { candidate, token, phase, cancel });
         self.publish().await;
     }
 
@@ -1222,9 +1232,15 @@ impl GatewayApplicationOwner {
         deadline: Instant,
         token: u64,
         reports: mpsc::Sender<GateReport>,
+        cancel: CancellationToken,
     ) {
-        clock.sleep(deadline.saturating_duration_since(clock.now())).await;
-        let _ = reports.send(GateReport { token, result: Err(GateFailure::Timeout) }).await;
+        tokio::select! {
+            biased;
+            () = cancel.cancelled() => {}
+            () = clock.sleep(deadline.saturating_duration_since(clock.now())) => {
+                let _ = reports.send(GateReport { token, result: Err(GateFailure::Timeout) }).await;
+            }
+        }
     }
 
     /// A report for any token but the staged one is a late result of a
@@ -1234,18 +1250,28 @@ impl GatewayApplicationOwner {
             return;
         }
         let Some(staged) = self.staged.take() else { return };
-        staged.timer.abort();
+        staged.cancel.cancel();
         match report.result {
             Ok(()) => self.promote(staged.candidate, reports).await,
             Err(failure) => {
                 if matches!(failure, GateFailure::Timeout) {
-                    staged.steps.abort();
+                    staged.cancel.cancel();
                 }
                 let cause = match failure {
-                    GateFailure::Identity => {
+                    GateFailure::Identity(error) => {
+                        tracing::warn!(
+                            name: "gateway.application.gate_identity_failed",
+                            error = %error,
+                            "gateway application gate failed on gateway identity",
+                        );
                         GatewayApplicationUnavailableCause::GatewayIdentityUnusable
                     }
-                    GateFailure::ConnectPath => {
+                    GateFailure::ConnectPath(error) => {
+                        tracing::warn!(
+                            name: "gateway.application.gate_connect_path_failed",
+                            error = %error,
+                            "gateway application gate failed on the upstream connect path",
+                        );
                         GatewayApplicationUnavailableCause::ConnectPathUnavailable
                     }
                     GateFailure::Timeout => {
@@ -1433,6 +1459,13 @@ impl GatewayApplicationOwner {
                 self.status.dirty = true;
                 return;
             };
+            if prior.is_none() && !self.route_seen {
+                // R-58: no Route has been configured and no row exists from an
+                // earlier boot, so the gateway's status is the absence of a
+                // row. The identity and failure facts stay held for the first
+                // row written after a Route is observed.
+                return;
+            }
             self.status.base = Some(
                 prior
                     .as_ref()
@@ -1464,8 +1497,7 @@ impl GatewayApplicationOwner {
     }
 }
 
-/// One gate attempt: identity current, the sentinel connect probe and the
-/// actual-frontend probe, reported by token. It runs detached from the owner
+/// One gate attempt: identity current, then the actual-frontend probe, reported by token. It runs detached from the owner
 /// loop so a superseded attempt completes (and cleans up) on its own.
 struct Gate {
     connector: Arc<GatewayUpstreamConnector>,
@@ -1476,26 +1508,38 @@ struct Gate {
     phase: Arc<AtomicU8>,
     token: u64,
     reports: mpsc::Sender<GateReport>,
+    cancel: CancellationToken,
 }
 
 impl Gate {
+    /// Runs the attempt. A superseded attempt stops cooperatively before its
+    /// next step; a probe already in flight runs to its own deadline so its
+    /// intent and receipt are cleaned up, and its late result is never
+    /// reported.
     async fn run(self) {
         let result = self.steps().await;
+        if self.cancel.is_cancelled() {
+            return;
+        }
         let _ = self.reports.send(GateReport { token: self.token, result }).await;
     }
 
     async fn steps(&self) -> Result<(), GateFailure> {
-        self.identity.ensure_current(self.deadline).await.map_err(|_| GateFailure::Identity)?;
+        let identity = tokio::select! {
+            biased;
+            () = self.cancel.cancelled() => return Ok(()),
+            identity = self.identity.ensure_current(self.deadline) => identity,
+        };
+        identity.map_err(GateFailure::Identity)?;
+        if self.cancel.is_cancelled() {
+            return Ok(());
+        }
         self.phase.store(PHASE_CONNECT, Ordering::Release);
-        self.connector
-            .sentinel(self.deadline, self.clock.as_ref())
-            .await
-            .map_err(|_| GateFailure::ConnectPath)?;
         self.connector
             .probe(self.frontend, self.deadline)
             .await
             .map(|_| ())
-            .map_err(|_| GateFailure::ConnectPath)
+            .map_err(GateFailure::ConnectPath)
     }
 }
 

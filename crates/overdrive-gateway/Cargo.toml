@@ -41,6 +41,7 @@ arc-swap.workspace       = true
 x509-parser.workspace    = true
 ring.workspace           = true
 rkyv.workspace           = true
+rustix.workspace         = true
 redb.workspace           = true
 
 [dev-dependencies]
