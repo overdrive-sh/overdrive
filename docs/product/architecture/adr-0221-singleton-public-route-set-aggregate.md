@@ -4,6 +4,10 @@
 
 Proposed — reconstructed on main 549d78fa6, pending independent review (2026-11-01).
 Original decision ratified by the user 2026-09-13.
+Wording correction approved by the user 2026-11-06: the cardinality and
+conflict mechanism is the single owner task serializing get, decide, put, not
+one conditional aggregate write (`IntentStore` has no value compare-and-set).
+The decision itself is unchanged.
 
 ## Context
 
@@ -16,8 +20,10 @@ stable Service Listener rather than persist a derived frontend or backend.
 
 Model one state-based **Public Route Set** aggregate with a fixed gateway-wide
 identity and an optional top-level Route entity. `RouteId` identifies that
-entity. One aggregate write owns empty/occupied cardinality, same-ID
-replacement, different-ID conflict and withdrawal.
+entity. The single Gateway Application owner task, the sole Route writer,
+owns empty/occupied cardinality, same-ID replacement, different-ID conflict
+and withdrawal by serializing get, decide, put on that aggregate;
+`IntentStore` has no value compare-and-set.
 
 A Route contains one canonical Public Hostname, raw exact-or-segment-prefix
 Path Match, exact `(WorkloadId, port, tcp)` Service Listener Reference and one
@@ -44,7 +50,9 @@ feature delta's Domain event and lifecycle section.
 
 ## Consequences
 
-- One conditional aggregate write enforces first-slice cardinality and conflict.
+- The single owner task, the sole Route writer, enforces first-slice
+  cardinality and conflict by serializing get, decide, put; `IntentStore` has
+  no value compare-and-set.
 - Public exposure can be replaced/withdrawn without mutating Service intent.
 - Multi-Route cardinality requires a later explicit decision rather than dormant
   global-index machinery now.

@@ -2480,7 +2480,7 @@ and no absent story, KPI or capacity claim is inferred.
 | **D-DOM-1** | Create **Public Ingress** and **Public Certified-Key Custody** bounded contexts; extend existing **Service Dataplane** and **Workload Identity** contexts. Public Route Set, Public Certified Key and Gateway Identity Slot are the only new aggregates. |
 | **D-DOM-2** | A Route has one exact Public Hostname, one exact-or-segment-prefix Path Match, one exact TCP Service Listener Reference and one Public Certified-Key Reference. |
 | **D-DOM-3** | Route intent references the stable Service listener as `(WorkloadId, port, tcp)`. Resolution yields the exact existing Service Frontend `(ServiceVip, port, tcp)`; the Route never stores derived `ServiceId`, VIP, backend address, Allocation ID or SPIFFE ID. |
-| **D-DOM-4** | [ADR-0221](../../product/architecture/adr-0221-singleton-public-route-set-aggregate.md): the singleton Public Route Set makes first-slice one-Route cardinality/ownership atomic on one aggregate key. A different Route ID cannot claim an occupied slot; it is rejected rather than last-write-wins. |
+| **D-DOM-4** | [ADR-0221](../../product/architecture/adr-0221-singleton-public-route-set-aggregate.md): the singleton Public Route Set makes first-slice one-Route cardinality/ownership live on one aggregate key, serialized by the single owner task (sole Route writer: get, decide, put; no value compare-and-set on `IntentStore`). A different Route ID cannot claim an occupied slot; it is rejected rather than last-write-wins. |
 | **D-DOM-5** | [ADR-0223](../../product/architecture/adr-0223-producer-neutral-public-certified-key-custody.md): create the distinct **Public Certified-Key Custody** context and **Public Certified Key** aggregate so Route, operator HTTPS, internal SPIFFE and allocation `IdentityMgr` remain non-owners. Protection/replacement/currentness mechanics belong to their decision-specific System/Application records and exact feature contract. |
 | **D-DOM-6** | Manual operator input is the sole first-slice Certified Key producer. ACME account/order/challenge/renewal and TCP/80 are absent; GH #57 may later invoke the same custody command without changing runtime consumption. |
 | **D-DOM-7** | [ADR-0225](../../product/architecture/adr-0225-dedicated-gateway-svid-identity-lifecycle.md): Workload Identity owns a dedicated single-slot **Gateway Identity Slot** and **Gateway Identity Lifecycle** for `spiffe://overdrive.local/gateway/<node-id>`. It reuses issue/audit/profile policy, renews/restarts/clears explicitly, permits only gateway-client mTLS use and never fabricates `AllocationId`. |
@@ -2574,8 +2574,9 @@ independent aggregate key. Full observable state is:
 path_match, service_listener_reference, public_certified_key_id }) }` plus
 ordered command facts.
 
-**Invariants.** One store key owns the empty/occupied slot, so competing Route
-IDs cannot both succeed. An occupied Route has exactly one hostname, Path Match,
+**Invariants.** One store key holds the empty/occupied slot, and the single
+owner task (the sole Route writer: get, decide, put; `IntentStore` has no value
+compare-and-set) serializes claims, so competing Route IDs cannot both succeed. An occupied Route has exactly one hostname, Path Match,
 Service Listener Reference and certified-key reference. Its target protocol is
 TCP. Reference resolution proves current intent is Service kind, contains exact
 `(port, tcp)`, has a platform-issued Service VIP, and yields exact Service
