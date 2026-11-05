@@ -26,17 +26,21 @@
 //! | `Restart` | the shim's commit of the fresh-id successor attempt `Running` (the predecessor's event was published first, SS-6) |
 //! | `Idle` | the model's stutter: the stream has yielded at most one closing outcome |
 //!
-//! # Projection (`State::from_driver`)
+//! # Projection (`State::from_driver`) — DG-4
 //!
-//! `st` (`closed` once a terminal line or a stream error was yielded), `kind` (the
-//! closing line: `Stable` → `stable`, `Failed` → `giveup`, `Stopped { Operator }` →
-//! `operator_stop`, a stream error → `error`), `closeAtt` (the attempt named by the
-//! closing line's allocation id, `-1` when none) and `closes` (verdict lines plus
-//! stream errors) — all from what the production stream yielded. Model-only: the
-//! world (`w`, the environment's own record), the channel and lag flags (the
-//! subscription's internals), `armed` (only observable as D10's later timeout),
-//! `src` and `closeTerm` (a snapshot line equals the live line byte for byte, S-41,
-//! and the closing kind carries the terminal class), `readCur`, `lags`, `readFail`
+//! The compared state is the closing `AllocStatusRow`, read through the existing
+//! `ObservationStore::alloc_status_row` on the composed node's store (a production-typed,
+//! non-`Option` driver field). `kind` and `closeAtt` come from that row: `Running` +
+//! `Stable` → `stable`, `Failed` + `BackoffExhausted` → `giveup`, `Terminated` +
+//! `Stopped { Operator }` → `operator_stop`; `closeAtt` is the attempt in the row's
+//! allocation id. The line `build_service_stream` yields is an input and an oracle, not a
+//! projected variable: it names which allocation's row closed the stream, and `from_driver`
+//! fails when the yielded kind disagrees with the row's. A stream error closes without a
+//! row (`kind == error`, `closeAtt == -1`). `closes` is `1` once a closing outcome is
+//! known; a second closing outcome is rejected at the poll (the stream must end after its
+//! one verdict). Model-only: the world (`w`), the channel and lag flags (the subscription's
+//! internals), `armed` (only observable as D10's later timeout), `src` and `closeTerm` (a
+//! snapshot line equals the live line byte for byte, S-41), `readCur`, `lags`, `readFail`
 //! (carried by `kind == error`), and `conf_step`.
 
 use std::pin::Pin;
@@ -75,7 +79,9 @@ enum Polled {
 
 struct StreamSnapshotDriver {
     rt: Runtime,
-    node: Option<Composition>,
+    /// The composed node, held directly: the projection reads the closing row through
+    /// the node's observation store (DG-4).
+    node: Composition,
     stream: Option<Lines>,
     /// Every closing outcome the stream yielded, in order.
     yielded: Vec<Polled>,
@@ -84,6 +90,8 @@ struct StreamSnapshotDriver {
     undelivered: std::collections::VecDeque<u32>,
     /// Whether the stream has subscribed (its second poll, the `Read` step).
     subscribed: bool,
+    /// The model's `lagged` flag: set by `Lag`, cleared by the `Relist` poll.
+    lagged: bool,
     /// Events published between the model's `Subscribe` (the `Accepted` line) and the
     /// stream's real subscription: the model's channel holds them, the bus does not.
     window: Vec<u32>,
@@ -93,16 +101,19 @@ struct StreamSnapshotDriver {
 
 impl StreamSnapshotDriver {
     fn new() -> Self {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("current-thread runtime");
+        let node = rt.block_on(compose(2911));
         Self {
-            rt: tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .expect("current-thread runtime"),
-            node: None,
+            rt,
+            node,
             stream: None,
             yielded: Vec::new(),
             undelivered: std::collections::VecDeque::new(),
             subscribed: false,
+            lagged: false,
             window: Vec::new(),
             cur: 0,
             counter: 0,
@@ -110,28 +121,28 @@ impl StreamSnapshotDriver {
     }
 
     fn node(&self) -> &Composition {
-        self.node.as_ref().expect("init composed the node")
+        &self.node
     }
 
     fn init(&mut self) {
         eprintln!("quint-conformance stream_snapshot seed=2911");
-        let node = self.rt.block_on(compose(2911));
+        self.node = self.rt.block_on(compose(2911));
         let accepted = build_service_accepted(
             "0".repeat(64),
             format!("workloads/{WORKLOAD}"),
             IdempotencyOutcome::Unchanged,
         );
         let stream: Lines = Box::pin(build_service_stream(
-            node.state.clone(),
+            self.node.state.clone(),
             WorkloadId::new(WORKLOAD).expect("workload id"),
             accepted,
             std::time::Duration::from_secs(3600),
         ));
-        self.node = Some(node);
         self.stream = Some(stream);
         self.yielded.clear();
         self.undelivered.clear();
         self.subscribed = false;
+        self.lagged = false;
         self.window.clear();
         self.cur = 0;
         self.counter = 0;
@@ -158,6 +169,10 @@ impl StreamSnapshotDriver {
             }
         })?;
         if let Some(outcome) = produced {
+            anyhow::ensure!(
+                self.yielded.is_empty(),
+                "the stream yielded a second closing outcome after its verdict",
+            );
             self.yielded.push(outcome);
         }
         Ok(())
@@ -250,6 +265,7 @@ impl StreamSnapshotDriver {
             .ok_or_else(|| anyhow::anyhow!("an event is published only for a committed row"))?;
         publish(self.node(), &row);
         if self.subscribed {
+            // Retained behind the lag when lagged, as the model's `Publish` appends.
             self.undelivered.push_back(attempt);
         } else {
             self.window.push(attempt);
@@ -265,7 +281,9 @@ impl StreamSnapshotDriver {
             self.window.remove(at);
             return self.poll();
         }
-        // The bus delivers in publication order; the model's channel is a set.
+        // The model's channel is an ordered list; `Deliver` is disabled while lagged and
+        // takes the oldest event (DG-5). The bus delivers in publication order.
+        anyhow::ensure!(!self.lagged, "ModelAbstraction: Deliver is disabled while lagged");
         anyhow::ensure!(
             self.undelivered.front() == Some(&attempt),
             "ModelAbstraction: the model delivers attempt {attempt} but the bus's oldest \
@@ -285,12 +303,14 @@ impl StreamSnapshotDriver {
         }
         self.undelivered.clear();
         self.window.clear();
+        self.lagged = true;
     }
 
     fn relist(&mut self, ok: bool) -> Result {
         if !ok {
             self.fail_next_read();
         }
+        self.lagged = false;
         self.poll()
     }
 
@@ -314,6 +334,18 @@ impl StreamSnapshotDriver {
             "the stream yielded more than one closing outcome without being driven",
         );
         Ok(())
+    }
+
+    /// The closing `AllocStatusRow` the stream's verdict is about: the owner-side
+    /// observation the projection compares (DG-4).
+    fn closing_row(
+        &self,
+        alloc_id: &str,
+    ) -> Result<overdrive_core::traits::observation_store::AllocStatusRow> {
+        let alloc = overdrive_core::id::AllocationId::new(alloc_id)?;
+        self.rt
+            .block_on(self.node.state.obs.alloc_status_row(&alloc))?
+            .ok_or_else(|| anyhow::anyhow!("the stream closed on `{alloc_id}`, which has no row"))
     }
 
     fn step_on(&mut self, step: &Step) -> Result {
@@ -390,27 +422,53 @@ impl State<StreamSnapshotDriver> for StreamSnapshotState {
                 closes: 0,
             });
         };
-        let (kind, close_att) = match outcome {
-            Polled::Line(ServiceSubmitEvent::Stable { alloc_id, .. }) => {
-                ("stable", attempt_of(alloc_id)?)
-            }
+        // The yielded line is the oracle: it names the allocation whose row closed the
+        // stream and the kind the stream claims.
+        let (claimed, alloc_id) = match outcome {
+            Polled::Line(ServiceSubmitEvent::Stable { alloc_id, .. }) => ("stable", alloc_id),
             Polled::Line(ServiceSubmitEvent::Failed { alloc_id: Some(alloc_id), .. }) => {
-                ("giveup", attempt_of(alloc_id)?)
+                ("giveup", alloc_id)
             }
             Polled::Line(ServiceSubmitEvent::Stopped { alloc_id, by: StoppedBy::Operator }) => {
-                ("operator_stop", attempt_of(alloc_id)?)
+                ("operator_stop", alloc_id)
             }
-            Polled::Error => ("error", -1),
+            // A failed read closes the stream without a row.
+            Polled::Error => {
+                return Ok(Self {
+                    st: "closed".to_owned(),
+                    kind: "error".to_owned(),
+                    close_att: -1,
+                    closes: 1,
+                });
+            }
             Polled::Line(other) => {
                 anyhow::bail!("a closing line the model does not have: {other:?}")
             }
             Polled::Pending | Polled::Ended => anyhow::bail!("not a closing outcome"),
         };
+        // The compared state: the closing row's `state` and `terminal`.
+        let row = driver.closing_row(alloc_id)?;
+        let kind = match (row.state, row.terminal.as_ref()) {
+            (AllocState::Running, Some(TerminalCondition::Stable { .. })) => "stable",
+            (AllocState::Failed, Some(TerminalCondition::BackoffExhausted { .. })) => "giveup",
+            (
+                AllocState::Terminated,
+                Some(TerminalCondition::Stopped { by: StoppedBy::Operator }),
+            ) => "operator_stop",
+            (state, terminal) => anyhow::bail!(
+                "the closing row `{alloc_id}` is {state:?} with terminal {terminal:?}, which \
+                 closes no stream"
+            ),
+        };
+        anyhow::ensure!(
+            kind == claimed,
+            "the stream yielded `{claimed}` but the closing row says `{kind}`"
+        );
         Ok(Self {
             st: "closed".to_owned(),
             kind: kind.to_owned(),
-            close_att,
-            closes: i64::try_from(driver.yielded.len())?,
+            close_att: attempt_of(row.alloc_id.as_str())?,
+            closes: 1,
         })
     }
 }
@@ -470,6 +528,9 @@ fn quint_stream_snapshot_restartable_stop_recorded_is_not_a_verdict() -> impl Dr
 }
 
 /// Named run `superseded_attempt_terminal_is_not_reported` (D11).
+/// Regression witness at HEAD: every compared state is `open`, so it proves only that the
+/// driver replays the run. It does NOT prove a superseded attempt's terminal is withheld;
+/// `lagged_relist_recovers_terminal` and the stream acceptance tests do.
 /// CONTRACT_SHAPE: bounded-change.
 #[quint_test(
     spec = "../../specs/quint/service-allocation-readiness-and-ending/stream_snapshot.qnt",
@@ -491,6 +552,23 @@ fn quint_stream_snapshot_superseded_attempt_terminal_is_not_reported() -> impl D
 )]
 #[ignore = "pending DELIVER: D11 relist on Lagged"]
 fn quint_stream_snapshot_lagged_relist_recovers_terminal() -> impl Driver {
+    StreamSnapshotDriver::new()
+}
+
+/// Named run `publish_after_relist_reaches_channel` (D11): an event published after a
+/// relist that found no verdict reaches the channel and is delivered, oldest first.
+/// Every compared state in the run is `open`, so it already holds at HEAD (not ignored,
+/// like `superseded_attempt_terminal_is_not_reported`). Regression witness only: it does
+/// NOT prove the relist delivers a later event in order; `lagged_relist_recovers_terminal`
+/// exercises the relist.
+/// CONTRACT_SHAPE: bounded-change.
+#[quint_test(
+    spec = "../../specs/quint/service-allocation-readiness-and-ending/stream_snapshot.qnt",
+    main = "ss_conf",
+    test = "publish_after_relist_reaches_channel",
+    max_samples = 1
+)]
+fn quint_stream_snapshot_publish_after_relist_reaches_channel() -> impl Driver {
     StreamSnapshotDriver::new()
 }
 

@@ -34,10 +34,10 @@ pub mod guest_attachment_view;
 // impls live UP (`ListenerFactStore` / `WorkflowEngine` / `IdentityMgr` in
 // control-plane, `PersistentServiceVipAllocator` in dataplane); `Sim*` impls
 // (step 02-05) make the hydration boundary DST-injectable.
+pub mod guest_listener_reports;
 pub mod held_svid_view;
 pub mod identity_read;
 pub mod intent_store;
-pub mod guest_listener_reports;
 pub mod listener_facts;
 pub mod llm;
 pub mod service_vip_view;

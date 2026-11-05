@@ -925,7 +925,8 @@ pub(crate) mod sim_vm_host {
                 NodeId::new("cid-lease").expect("valid node ID"),
                 0,
             )) as Arc<dyn ObservationStore>,
-            Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()), Arc::new(overdrive_worker::GuestListenerBoard::new()),
+            Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
+            Arc::new(overdrive_worker::GuestListenerBoard::new()),
         ));
         let driver = VmDriver::new(
             Arc::new(RecordingVmm { inner: vmm.clone(), host: Arc::clone(host) }),
@@ -945,7 +946,8 @@ pub(crate) mod sim_vm_host {
                     1024,
                 ),
             },
-            intake, Arc::new(overdrive_worker::GuestListenerBoard::new()),
+            intake,
+            Arc::new(overdrive_worker::GuestListenerBoard::new()),
         );
         let pool =
             Arc::new(GuestAddressPool::new(prefix, GATEWAY, Arc::new(SimEntropy::new(seed))));
@@ -983,7 +985,8 @@ pub(crate) mod sim_vm_host {
     /// The VM spec of one lease: the plan's transport (leased CID and launch
     /// token) over the artifacts staged under the composition's `root`.
     pub(crate) fn vm_spec(root: &Path, plan: &GuestNetworkPlan) -> AllocationSpec {
-        AllocationSpec { declared_listeners: Vec::new(),
+        AllocationSpec {
+            declared_listeners: Vec::new(),
             alloc: plan.alloc().clone(),
             identity: SpiffeId::new("spiffe://overdrive.local/workload/cid-lease/alloc/x")
                 .expect("valid spiffe id"),

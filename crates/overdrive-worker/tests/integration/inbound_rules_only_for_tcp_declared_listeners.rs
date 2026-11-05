@@ -38,7 +38,9 @@ const UDP_PORT: u16 = 18778;
 #[ignore = "pending DELIVER: PR-4 inbound install reads tcp_service_ports of declared_listeners"]
 async fn a_udp_declared_listener_gets_no_inbound_capture_and_a_tcp_one_does() {
     if !is_root() {
-        eprintln!("SKIP a_udp_declared_listener_gets_no_inbound_capture_and_a_tcp_one_does: not root");
+        eprintln!(
+            "SKIP a_udp_declared_listener_gets_no_inbound_capture_and_a_tcp_one_does: not root"
+        );
         return;
     }
     record_uname("pr4-tcp-view");

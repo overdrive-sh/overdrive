@@ -74,7 +74,9 @@ impl Mechanic {
     fn descriptor(self) -> ProbeDescriptor {
         let mechanic = match self {
             Self::Tcp => ProbeMechanic::Tcp { host: "0.0.0.0".to_owned(), port: 8080 },
-            Self::Http => ProbeMechanic::Http { path: "/healthz".to_owned(), port: 8080, host: None },
+            Self::Http => {
+                ProbeMechanic::Http { path: "/healthz".to_owned(), port: 8080, host: None }
+            }
             Self::GuestListeners => ProbeMechanic::GuestListeners,
         };
         ProbeDescriptor {
@@ -169,14 +171,18 @@ fn service_with(wid: &WorkloadId, descriptor: ProbeDescriptor) -> Service {
 /// service's mechanic, the latest startup row and the elapsed time since start.
 async fn stop_emitted(mechanic: Mechanic, latest: Latest, elapsed_secs: u64) -> bool {
     let tmp = TempDir::new().expect("tmpdir");
-    let obs = Arc::new(SimObservationStore::single_peer(node("local"), 0))
-        as Arc<dyn ObservationStore>;
+    let obs =
+        Arc::new(SimObservationStore::single_peer(node("local"), 0)) as Arc<dyn ObservationStore>;
     let state = build_app_state(&tmp, Arc::clone(&obs)).await;
 
     let wid = WorkloadId::new("startup-gate").expect("workload id");
     let svc = service_with(&wid, mechanic.descriptor());
     let archived = WorkloadIntent::Service(svc).archive_for_store().expect("rkyv archive");
-    state.store.put(IntentKey::for_workload(&wid).as_bytes(), archived.as_ref()).await.expect("put");
+    state
+        .store
+        .put(IntentKey::for_workload(&wid).as_bytes(), archived.as_ref())
+        .await
+        .expect("put");
     state
         .store
         .put(
@@ -215,7 +221,9 @@ async fn stop_emitted(mechanic: Mechanic, latest: Latest, elapsed_secs: u64) -> 
 
     let (status, streak) = match latest {
         Latest::Pass => (ProbeStatus::Pass, 1),
-        Latest::Fail(streak) => (ProbeStatus::Fail { last_fail_reason: "not ready".to_owned() }, streak),
+        Latest::Fail(streak) => {
+            (ProbeStatus::Fail { last_fail_reason: "not ready".to_owned() }, streak)
+        }
     };
     obs.write_probe_result(ProbeResultRow {
         alloc_id: aid,
@@ -311,8 +319,14 @@ proptest! {
 #[tokio::test]
 async fn dial_mechanics_stop_only_at_max_attempts() {
     for mechanic in [Mechanic::Tcp, Mechanic::Http] {
-        assert!(!stop_emitted(mechanic, Latest::Fail(1), DEADLINE_SECS).await, "{mechanic:?} streak 1");
-        assert!(!stop_emitted(mechanic, Latest::Fail(2), DEADLINE_SECS).await, "{mechanic:?} streak 2");
+        assert!(
+            !stop_emitted(mechanic, Latest::Fail(1), DEADLINE_SECS).await,
+            "{mechanic:?} streak 1"
+        );
+        assert!(
+            !stop_emitted(mechanic, Latest::Fail(2), DEADLINE_SECS).await,
+            "{mechanic:?} streak 2"
+        );
         assert!(
             !stop_emitted(mechanic, Latest::Fail(MAX_ATTEMPTS), DEADLINE_SECS - 1).await,
             "{mechanic:?} before the deadline"

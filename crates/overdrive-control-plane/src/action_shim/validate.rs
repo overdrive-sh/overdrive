@@ -669,7 +669,8 @@ mod tests {
 
     fn allocation_spec(name: &str) -> overdrive_core::traits::driver::AllocationSpec {
         use overdrive_core::traits::driver::{DriverPayload, Resources, VmPayload};
-        overdrive_core::traits::driver::AllocationSpec { declared_listeners: Vec::new(),
+        overdrive_core::traits::driver::AllocationSpec {
+            declared_listeners: Vec::new(),
             alloc: alloc(name),
             identity: overdrive_core::SpiffeId::new(&format!(
                 "spiffe://overdrive.local/workload/nd295/alloc/{name}"

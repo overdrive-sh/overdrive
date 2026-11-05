@@ -91,15 +91,14 @@ use overdrive_core::guest_network::GuestNetworkExecWiring;
 use overdrive_core::guest_transport::VsockListenPort;
 use overdrive_core::id::{AllocationId, NodeId, SpiffeId, WorkloadId};
 use overdrive_core::reconcilers::{Action, TickContext};
-use overdrive_core::traits::GuestListenerReports;
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{
-    AllocationHandle, AllocationSpec, Driver as WorkloadDriver, DriverPayload, Resources,
-    VmPayload,
+    AllocationHandle, AllocationSpec, Driver as WorkloadDriver, DriverPayload, Resources, VmPayload,
 };
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{AllocState, ObservationStore};
 use overdrive_core::traits::vm_host_state::VmHostState;
+use overdrive_core::traits::{GuestListenerReports, ReportedListeners};
 use overdrive_core::transition_reason::{StoppedBy, TransitionReason};
 use overdrive_core::vm::beacon::{BeaconConnKey, BeaconIo};
 use overdrive_core::vm::config::{
@@ -126,8 +125,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::AppState;
 use crate::action_shim::{ShimError, dispatch_with_guest_network_provisioner_for_test};
-use crate::guest_network::{GuestAddressPool, SharedGuestNetworkOwner as _};
 use crate::guest_network::quint_itf::{self, ItfError, Qualified};
+use crate::guest_network::{GuestAddressPool, SharedGuestNetworkOwner as _};
 use crate::reconciler_runtime::ReconcilerRuntime;
 use crate::shared_network_test_ports::{mtls_worker, shared_guest_network_owner};
 use crate::vm_reclamation_boot::sim_vm_host::{GATEWAY, RecordingVmm, SimVmmHost};
@@ -274,7 +273,12 @@ impl World {
     }
 
     /// The alloc's row as the observation store holds it.
-    fn row(&self) -> std::result::Result<Option<overdrive_core::traits::observation_store::AllocStatusRow>, DriverError> {
+    fn row(
+        &self,
+    ) -> std::result::Result<
+        Option<overdrive_core::traits::observation_store::AllocStatusRow>,
+        DriverError,
+    > {
         self.rt
             .block_on(self.obs.alloc_status_row(&self.alloc))
             .map_err(|error| DriverError::Production(format!("alloc_status_row: {error}")))
@@ -305,99 +309,96 @@ fn build_world() -> std::result::Result<World, DriverError> {
     let board = Arc::new(GuestListenerBoard::new());
     let alloc = AllocationId::new("gr-host-alloc").expect("valid allocation ID");
 
-    let (state, pool, owner, wiring, vm_driver, beacon_port, exit_observer) =
-        rt.block_on(async {
-            let wiring = GuestNetworkExecWiring::new(Arc::clone(&clock) as Arc<dyn Clock>);
-            assert!(wiring.supervisor().open_after_boot(), "the composition's EXEC gate opens");
-            let intake = BeaconIntake::bind(
-                Arc::clone(&beacon) as Arc<dyn BeaconIo>,
-                VsockListenPort::KernelAssigned,
-            )
-            .await
-            .expect("the sim beacon listener binds");
-            let beacon_port = intake.bound_port();
-            let probe_runner = Arc::new(ProbeRunner::new(
-                Arc::new(SimTcpProber::new()),
-                Arc::new(SimHttpProber::new()),
-                Arc::clone(&clock) as Arc<dyn Clock>,
-                Arc::clone(&obs) as Arc<dyn ObservationStore>,
-                Arc::new(SimGuestStreamDial::new()),
-                Arc::clone(&board) as Arc<dyn GuestListenerReports>,
-            ));
-            let vm_driver = VmDriver::new(
-                Arc::new(RecordingVmm { inner: vmm.clone(), host: Arc::clone(&host) }),
-                Arc::clone(&clock) as Arc<dyn Clock>,
-                Arc::new(SimCgroupFs::new()),
-                Arc::new(SimCgroupAccounting::new()),
-                probe_runner,
-                wiring.gate(),
-                VmHostLayout {
-                    cgroup_root: root.join("cgroup"),
-                    run_dir_root: root.join("run"),
-                    clone_index_dir: root.join("clone-index"),
-                    clone_staging_dir: root.join("clone-staging"),
-                    arch: HostArch::X86_64,
-                    confinement: VmConfinement::confined(
-                        VmmIdentity { uid: 1000, gid: Gid::new(994), supplementary: vec![] },
-                        1024,
-                    ),
-                },
-                intake,
-                Arc::clone(&board),
-            );
-            let mut runtime = ReconcilerRuntime::new_with_redb_view_store_for_test(&root)
-                .expect("the reconciler runtime over the node's view store");
-            runtime.register(crate::noop_heartbeat()).await.expect("register a reconciler");
-            let pool = Arc::new(GuestAddressPool::new(
-                PREFIX.parse().expect("pool prefix"),
-                GATEWAY,
-                Arc::new(SimEntropy::new(0x0d13)),
-            ));
-            let store_path = root.join("intent.redb");
-            let store =
-                Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
-            // Boot step 9 on the guest-network owner port: its first `Ok`
-            // `converge_shared` makes `flow_ports()` `Some`, which every lease
-            // the action shim takes carries. `TestSharedOwner` provisions and
-            // activates unscripted.
-            let owner = shared_guest_network_owner();
-            owner.converge_shared().await.expect("the test owner's converge_shared passes");
-            let mtls = mtls_worker();
-            mtls.start_shared_owner().await.expect("the test mTLS owner's start passes");
-            let allocator =
-                crate::test_default_allocator(Arc::clone(&store) as Arc<dyn IntentStore>);
-            let mut state = AppState::new(
-                store,
-                store_path,
-                Arc::clone(&obs) as Arc<dyn ObservationStore>,
-                Arc::new(runtime),
-                Arc::new(vm_driver.clone()) as Arc<dyn WorkloadDriver>,
-                Arc::clone(&clock) as Arc<dyn Clock>,
-                Arc::new(SimDataplane::new()),
-                Arc::new(SimCa::new(Arc::new(SimEntropy::new(0)))),
-                Arc::new(crate::identity_mgr::IdentityMgr::new(None)),
-                NodeId::new("local").expect("valid NodeId"),
-                allocator,
-                crate::test_empty_listener_facts(),
-                Ipv4Addr::LOCALHOST,
-                mtls,
-                Arc::clone(&owner) as Arc<dyn crate::guest_network::SharedGuestNetworkOwner>,
-                wiring.gate(),
-                Arc::clone(&pool),
-            );
-            state.vm_host_state = Arc::clone(&host) as Arc<dyn VmHostState>;
-            // The production exit observer takes the exit receiver itself and
-            // writes each VMM's terminal row; the driver reads no ExitEvent.
-            let exit_observer = crate::worker::exit_observer::spawn_with_runtime(
-                Arc::clone(&obs) as Arc<dyn ObservationStore>,
-                Arc::new(vm_driver.clone()) as Arc<dyn WorkloadDriver>,
-                Arc::clone(&state.lifecycle_events),
-                Arc::clone(&clock) as Arc<dyn Clock>,
-                None,
-                CancellationToken::new(),
-            );
-            (state, pool, owner, wiring, vm_driver, beacon_port, exit_observer)
-        });
+    let (state, pool, owner, wiring, vm_driver, beacon_port, exit_observer) = rt.block_on(async {
+        let wiring = GuestNetworkExecWiring::new(Arc::clone(&clock) as Arc<dyn Clock>);
+        assert!(wiring.supervisor().open_after_boot(), "the composition's EXEC gate opens");
+        let intake = BeaconIntake::bind(
+            Arc::clone(&beacon) as Arc<dyn BeaconIo>,
+            VsockListenPort::KernelAssigned,
+        )
+        .await
+        .expect("the sim beacon listener binds");
+        let beacon_port = intake.bound_port();
+        let probe_runner = Arc::new(ProbeRunner::new(
+            Arc::new(SimTcpProber::new()),
+            Arc::new(SimHttpProber::new()),
+            Arc::clone(&clock) as Arc<dyn Clock>,
+            Arc::clone(&obs) as Arc<dyn ObservationStore>,
+            Arc::new(SimGuestStreamDial::new()),
+            Arc::clone(&board) as Arc<dyn GuestListenerReports>,
+        ));
+        let vm_driver = VmDriver::new(
+            Arc::new(RecordingVmm { inner: vmm.clone(), host: Arc::clone(&host) }),
+            Arc::clone(&clock) as Arc<dyn Clock>,
+            Arc::new(SimCgroupFs::new()),
+            Arc::new(SimCgroupAccounting::new()),
+            probe_runner,
+            wiring.gate(),
+            VmHostLayout {
+                cgroup_root: root.join("cgroup"),
+                run_dir_root: root.join("run"),
+                clone_index_dir: root.join("clone-index"),
+                clone_staging_dir: root.join("clone-staging"),
+                arch: HostArch::X86_64,
+                confinement: VmConfinement::confined(
+                    VmmIdentity { uid: 1000, gid: Gid::new(994), supplementary: vec![] },
+                    1024,
+                ),
+            },
+            intake,
+            Arc::clone(&board),
+        );
+        let mut runtime = ReconcilerRuntime::new_with_redb_view_store_for_test(&root)
+            .expect("the reconciler runtime over the node's view store");
+        runtime.register(crate::noop_heartbeat()).await.expect("register a reconciler");
+        let pool = Arc::new(GuestAddressPool::new(
+            PREFIX.parse().expect("pool prefix"),
+            GATEWAY,
+            Arc::new(SimEntropy::new(0x0d13)),
+        ));
+        let store_path = root.join("intent.redb");
+        let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
+        // Boot step 9 on the guest-network owner port: its first `Ok`
+        // `converge_shared` makes `flow_ports()` `Some`, which every lease
+        // the action shim takes carries. `TestSharedOwner` provisions and
+        // activates unscripted.
+        let owner = shared_guest_network_owner();
+        owner.converge_shared().await.expect("the test owner's converge_shared passes");
+        let mtls = mtls_worker();
+        mtls.start_shared_owner().await.expect("the test mTLS owner's start passes");
+        let allocator = crate::test_default_allocator(Arc::clone(&store) as Arc<dyn IntentStore>);
+        let mut state = AppState::new(
+            store,
+            store_path,
+            Arc::clone(&obs) as Arc<dyn ObservationStore>,
+            Arc::new(runtime),
+            Arc::new(vm_driver.clone()) as Arc<dyn WorkloadDriver>,
+            Arc::clone(&clock) as Arc<dyn Clock>,
+            Arc::new(SimDataplane::new()),
+            Arc::new(SimCa::new(Arc::new(SimEntropy::new(0)))),
+            Arc::new(crate::identity_mgr::IdentityMgr::new(None)),
+            NodeId::new("local").expect("valid NodeId"),
+            allocator,
+            crate::test_empty_listener_facts(),
+            Ipv4Addr::LOCALHOST,
+            mtls,
+            Arc::clone(&owner) as Arc<dyn crate::guest_network::SharedGuestNetworkOwner>,
+            wiring.gate(),
+            Arc::clone(&pool),
+        );
+        state.vm_host_state = Arc::clone(&host) as Arc<dyn VmHostState>;
+        // The production exit observer takes the exit receiver itself and
+        // writes each VMM's terminal row; the driver reads no ExitEvent.
+        let exit_observer = crate::worker::exit_observer::spawn_with_runtime(
+            Arc::clone(&obs) as Arc<dyn ObservationStore>,
+            Arc::new(vm_driver.clone()) as Arc<dyn WorkloadDriver>,
+            Arc::clone(&state.lifecycle_events),
+            Arc::clone(&clock) as Arc<dyn Clock>,
+            None,
+            CancellationToken::new(),
+        );
+        (state, pool, owner, wiring, vm_driver, beacon_port, exit_observer)
+    });
 
     // The production action shim starts the VM: lease, `Driver::start`, mTLS
     // intercept, then the `Running` row and the exit-gate release.
@@ -496,11 +497,16 @@ struct GuestReportHostDriver {
     /// The node under test, held directly so the projection reads the production owners
     /// (the board, the observation port) through it.
     world: World,
+    /// The board's reported set as of the end of the previous step (the previously
+    /// projected `rset`); `Idle` compares a fresh read against it.
+    last_reported: ReportedListeners,
 }
 
 impl GuestReportHostDriver {
     fn new() -> Self {
-        Self { world: build_world().expect("the initial node builds") }
+        let world = build_world().expect("the initial node builds");
+        let last_reported = world.board.reported(&world.alloc);
+        Self { world, last_reported }
     }
 
     // ----- actions ----------------------------------------------------------------
@@ -508,6 +514,7 @@ impl GuestReportHostDriver {
     fn init(&mut self) -> std::result::Result<(), DriverError> {
         // A fresh node per trace: the runner reuses one driver for every trace.
         self.world = build_world()?;
+        self.last_reported = self.world.board.reported(&self.world.alloc);
         Ok(())
     }
 
@@ -520,7 +527,11 @@ impl GuestReportHostDriver {
         world.reader_quiescent("the reader consumes the granted line")
     }
 
-    fn guest_writes(&self, action: &'static str, line: &str) -> std::result::Result<(), DriverError> {
+    fn guest_writes(
+        &self,
+        action: &'static str,
+        line: &str,
+    ) -> std::result::Result<(), DriverError> {
         let world = &self.world;
         if !world.beacon.guest_write(world.key, line) {
             return Err(not_enabled(action, "the beacon connection is not open"));
@@ -563,9 +574,19 @@ impl GuestReportHostDriver {
         world.settle("the exit observer writes the terminal row", World::row_is_terminal)
     }
 
-    /// A stutter: the reader holds no outstanding grant.
+    /// A stutter: the reader holds no outstanding grant, and a read-only call to
+    /// `GuestListenerReports::reported(alloc)` returns the set the previous step
+    /// projected (DG-M). It writes nothing and releases no read.
     fn idle(&self) -> std::result::Result<(), DriverError> {
-        self.world.reader_quiescent("the reader stays parked")
+        self.world.reader_quiescent("the reader stays parked")?;
+        let now = self.world.board.reported(&self.world.alloc);
+        if now != self.last_reported {
+            return Err(DriverError::Production(format!(
+                "the reported set changed across a stutter: {:?} before, {:?} after",
+                self.last_reported, now
+            )));
+        }
+        Ok(())
     }
 
     // ----- projection -------------------------------------------------------------
@@ -593,10 +614,15 @@ impl GuestReportHostDriver {
             None => "none",
             Some(row) if !row.state.is_terminal() => "none",
             Some(row) => match (row.state, row.reason) {
-                (AllocState::Terminated, Some(TransitionReason::Stopped { by: StoppedBy::Process }))
+                (
+                    AllocState::Terminated,
+                    Some(TransitionReason::Stopped { by: StoppedBy::Process }),
+                )
                 | (
                     AllocState::Failed,
-                    Some(TransitionReason::WorkloadCrashedImmediately { exit_code: Some(_), .. }),
+                    Some(TransitionReason::WorkloadCrashedImmediately {
+                        exit_code: Some(_), ..
+                    }),
                 ) => "guest-reported",
                 (
                     AllocState::Failed,
@@ -624,16 +650,21 @@ impl Driver for GuestReportHostDriver {
     }
 
     fn step(&mut self, step: &Step) -> Result {
-        switch!(step {
-            init => self.init()?,
-            HostRead => self.host_read()?,
-            AppendListen(p: String) => self.append_listen(&p)?,
-            AppendExit => self.append_exit()?,
-            HostGarbage => self.host_garbage()?,
-            BeaconClose => self.beacon_close()?,
-            VmmExit => self.vmm_exit()?,
-            Idle => self.idle()?,
-        })
+        let applied: Result = (|| {
+            switch!(step {
+                init => self.init()?,
+                HostRead => self.host_read()?,
+                AppendListen(p: String) => self.append_listen(&p)?,
+                AppendExit => self.append_exit()?,
+                HostGarbage => self.host_garbage()?,
+                BeaconClose => self.beacon_close()?,
+                VmmExit => self.vmm_exit()?,
+                Idle => self.idle()?,
+            })
+        })();
+        applied?;
+        self.last_reported = self.world.board.reported(&self.world.alloc);
+        Ok(())
     }
 }
 
@@ -681,28 +712,48 @@ impl State<GuestReportHostDriver> for HostReportState {
 // ----- named runs (one `#[quint_test]` per run of `gr_host_conf`) and randomized traces ---
 
 /// Named run `host_all_declared_reported`. CONTRACT_SHAPE: bounded-change.
-#[quint_test(spec = "../../specs/quint/service-allocation-readiness-and-ending/guest_report.qnt", main = "gr_host_conf", max_samples = 1, test = "host_all_declared_reported")]
+#[quint_test(
+    spec = "../../specs/quint/service-allocation-readiness-and-ending/guest_report.qnt",
+    main = "gr_host_conf",
+    max_samples = 1,
+    test = "host_all_declared_reported"
+)]
 #[ignore = "pending DELIVER: D13 guest report host reader and board"]
 fn quint_guest_report_host_all_declared_reported() -> impl Driver {
     GuestReportHostDriver::new()
 }
 
 /// Named run `host_garbage_line_is_dropped`. CONTRACT_SHAPE: bounded-change.
-#[quint_test(spec = "../../specs/quint/service-allocation-readiness-and-ending/guest_report.qnt", main = "gr_host_conf", max_samples = 1, test = "host_garbage_line_is_dropped")]
+#[quint_test(
+    spec = "../../specs/quint/service-allocation-readiness-and-ending/guest_report.qnt",
+    main = "gr_host_conf",
+    max_samples = 1,
+    test = "host_garbage_line_is_dropped"
+)]
 #[ignore = "pending DELIVER: D13 guest report host reader and board"]
 fn quint_guest_report_host_garbage_line_is_dropped() -> impl Driver {
     GuestReportHostDriver::new()
 }
 
 /// Named run `host_beacon_closes_with_partial_set`. CONTRACT_SHAPE: bounded-change.
-#[quint_test(spec = "../../specs/quint/service-allocation-readiness-and-ending/guest_report.qnt", main = "gr_host_conf", max_samples = 1, test = "host_beacon_closes_with_partial_set")]
+#[quint_test(
+    spec = "../../specs/quint/service-allocation-readiness-and-ending/guest_report.qnt",
+    main = "gr_host_conf",
+    max_samples = 1,
+    test = "host_beacon_closes_with_partial_set"
+)]
 #[ignore = "pending DELIVER: D13 guest report host reader and board"]
 fn quint_guest_report_host_beacon_closes_with_partial_set() -> impl Driver {
     GuestReportHostDriver::new()
 }
 
 /// Named run `host_listen_after_exit_is_ignored`. CONTRACT_SHAPE: bounded-change.
-#[quint_test(spec = "../../specs/quint/service-allocation-readiness-and-ending/guest_report.qnt", main = "gr_host_conf", max_samples = 1, test = "host_listen_after_exit_is_ignored")]
+#[quint_test(
+    spec = "../../specs/quint/service-allocation-readiness-and-ending/guest_report.qnt",
+    main = "gr_host_conf",
+    max_samples = 1,
+    test = "host_listen_after_exit_is_ignored"
+)]
 #[ignore = "pending DELIVER: D13 guest report host reader and board"]
 fn quint_guest_report_host_listen_after_exit_is_ignored() -> impl Driver {
     GuestReportHostDriver::new()
@@ -710,7 +761,10 @@ fn quint_guest_report_host_listen_after_exit_is_ignored() -> impl Driver {
 
 /// Randomized traces of the recording main; the seed is printed on failure.
 /// CONTRACT_SHAPE: bounded-change.
-#[quint_run(spec = "../../specs/quint/service-allocation-readiness-and-ending/guest_report.qnt", main = "gr_host_conf")]
+#[quint_run(
+    spec = "../../specs/quint/service-allocation-readiness-and-ending/guest_report.qnt",
+    main = "gr_host_conf"
+)]
 #[ignore = "pending DELIVER: D13 guest report host reader and board"]
 fn quint_guest_report_host_randomized_traces() -> impl Driver {
     GuestReportHostDriver::new()

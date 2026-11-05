@@ -1148,7 +1148,8 @@ fn allocation_spec_at(name: &str, address: Ipv4Addr) -> AllocationSpec {
     let cid = GuestCid::new(GUEST_CID_BASE + u32::from(u16::from_be_bytes([high, low])))
         .expect("an in-range guest CID");
     let launch = LaunchToken::from_bytes([0x5a; 16]).expect("a non-zero launch token");
-    AllocationSpec { declared_listeners: Vec::new(),
+    AllocationSpec {
+        declared_listeners: Vec::new(),
         alloc: AllocationId::new(name).expect("allocation id"),
         identity: SpiffeId::new(&format!(
             "spiffe://overdrive.local/workload/shared-owner/alloc/{name}"

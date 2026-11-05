@@ -924,6 +924,119 @@ fn pre_running_failed_alloc_is_terminal_and_not_mid_startup_window() {
     );
 }
 
+/// D6, DG-12 (S-56) `CrashedAllocationDoesNotKeepTheLoopAlive`: every allocation
+/// `ServiceLifecycle` observes in `Failed` or `Terminated` joins
+/// `terminal_announced`, whatever its `started_at`, latest startup probe, or
+/// whether startup probes are declared. The returned view then holds no open
+/// mid-startup window, `next_evaluation_at` is `None`, no action is emitted, and a
+/// second evaluation of the same fact changes neither view nor actions. A
+/// `Running` fact with no gate met is the control: it stays out of
+/// `terminal_announced` and its window stays open.
+///
+/// CONTRACT_SHAPE: bounded-change.
+#[test]
+#[ignore = "pending DELIVER: D6 a started Failed allocation joins terminal_announced (DG-12)"]
+fn terminal_allocation_of_any_start_history_closes_its_mid_startup_window() {
+    let r = ServiceLifecycleReconciler::new();
+    let alloc = aid("alloc-svc-crashed");
+    // Inside the startup deadline: no startup verdict can fire, so the only
+    // observable outcome is the terminal-set membership.
+    let tick = tick_at_ms(2_000);
+    let probes = [
+        None,
+        Some(ProbeStatus::Fail { last_fail_reason: "tcp_refused".to_string() }),
+        Some(ProbeStatus::Pass),
+    ];
+    for state in [AllocState::Failed, AllocState::Terminated] {
+        for started in [true, false] {
+            for probe in &probes {
+                for declared in [true, false] {
+                    let case = format!(
+                        "state {state:?}, started {started}, probe {probe:?}, declared {declared}"
+                    );
+                    let mut f = fact(
+                        "alloc-svc-crashed",
+                        state,
+                        1_000,
+                        Some(1),
+                        None,
+                        30,
+                        Duration::from_secs(60),
+                    );
+                    f.stable_committed = false;
+                    f.startup_probes_empty = !declared;
+                    if !started {
+                        f.started_at = None;
+                    }
+                    let mut actual = one_alloc_state(f);
+                    if let Some(status) = probe {
+                        put_probe_row(
+                            &mut actual,
+                            &alloc,
+                            ProbeRole::Startup,
+                            status.clone(),
+                            1,
+                            1,
+                        );
+                    }
+                    // As after its `Running` evaluation: the view already observed it.
+                    let view = ServiceLifecycleView {
+                        observed: BTreeSet::from([alloc.clone()]),
+                        ..ServiceLifecycleView::default()
+                    };
+
+                    let (actions, next_view) =
+                        r.reconcile(&ServiceLifecycleState::default(), &actual, &view, &tick);
+
+                    assert!(actions.is_empty(), "{case}: no action; got {actions:?}");
+                    assert!(
+                        next_view.terminal_announced.contains(&alloc),
+                        "{case}: joins terminal_announced"
+                    );
+                    assert!(
+                        !next_view.has_alloc_mid_startup_window(),
+                        "{case}: the mid-startup window is closed"
+                    );
+                    assert_eq!(
+                        r.next_evaluation_at(
+                            &ServiceLifecycleState::default(),
+                            &actual,
+                            &next_view,
+                            &tick,
+                        ),
+                        None,
+                        "{case}: no further evaluation is requested"
+                    );
+                    let (again_actions, again_view) =
+                        r.reconcile(&ServiceLifecycleState::default(), &actual, &next_view, &tick);
+                    assert!(again_actions.is_empty(), "{case}: second evaluation emits nothing");
+                    assert_eq!(again_view, next_view, "{case}: second evaluation changes no view");
+                }
+            }
+        }
+    }
+
+    // Control: a `Running` fact with no gate met is not terminal and keeps its window open.
+    let running = one_alloc_state(fact(
+        "alloc-svc-crashed",
+        AllocState::Running,
+        1_000,
+        None,
+        None,
+        30,
+        Duration::from_secs(60),
+    ));
+    let view = ServiceLifecycleView {
+        observed: BTreeSet::from([alloc.clone()]),
+        ..ServiceLifecycleView::default()
+    };
+    let (actions, next_view) =
+        r.reconcile(&ServiceLifecycleState::default(), &running, &view, &tick);
+    assert!(actions.is_empty(), "control: no gate met, no action; got {actions:?}");
+    assert!(!next_view.terminal_announced.contains(&alloc), "control: Running is not terminal");
+    assert!(next_view.has_alloc_mid_startup_window(), "control: the window stays open");
+}
+
 proptest! {
     /// Property: settled_in_ms (observable via Stable's TerminalCondition)
     /// equals now_ms.saturating_sub(started_at_ms). Kills mutants that

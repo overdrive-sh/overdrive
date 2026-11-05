@@ -20,7 +20,8 @@ async fn default_lane_does_not_spawn_real_processes() {
     // Driving port — `Driver` trait, wired to `SimDriver`.
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Vm));
 
-    let spec = AllocationSpec { declared_listeners: Vec::new(),
+    let spec = AllocationSpec {
+        declared_listeners: Vec::new(),
         alloc: AllocationId::new("alloc-default-lane").expect("valid alloc id"),
         identity: SpiffeId::new("spiffe://overdrive.local/workload/payments/alloc/a1")
             .expect("valid spiffe id"),

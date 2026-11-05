@@ -21,23 +21,21 @@
 //! | Action | Driver |
 //! |---|---|
 //! | `init` | no world yet (the model starts undeployed) |
-//! | `Deploy(decl, gl)` | persist the Service intent (declared startup probe or the opt-out), then one `workload-lifecycle` tick (`StartAllocation`). `gl = true` declares the sole startup descriptor `ProbeMechanic::GuestListeners` (D14 item 1; the producer rule and gate threshold are DELIVER behaviour) |
-//! | `StartOk(i)` | a `workload-lifecycle` re-evaluation tick of the running attempt (the shim writes `Running` atomically with the awaited start, so the model's `pending` is not observable; see the projection note) |
-//! | `StartRejected(i)` | same re-evaluation tick; the start-rejection row cannot be produced after the atomic start (design gap, recorded in the fragment) |
+//! | `Deploy(decl, gl, ok)` | persist the Service intent (declared startup probe or the opt-out), script the start outcome (`ok = false`: `SimDriver::script_next_start_rejection`, a one-shot `DriverError::StartRejected`), then one `workload-lifecycle` tick (`StartAllocation`, awaited). `gl = true` declares the sole startup descriptor `ProbeMechanic::GuestListeners` (D14 item 1; the producer rule and gate threshold are DELIVER behaviour) |
+//! | `SLAnnounceTerminal(i)` | a `service-lifecycle` tick (the owner's `reconcile`: DG-12 admits every `Failed` / `Terminated` fact to `terminal_announced`) |
 //! | `Crash(i)` / `CleanExit(i)` | `SimDriver::inject_exit_after(Crashed / CleanExit)`; the production exit observer writes the row |
 //! | `OperatorStop(i)` | the operator stop intent key (`put_if_absent`, as `stop_workload`), then a `workload-lifecycle` tick |
 //! | `StartupRow(i, res)` | a startup `ProbeResultRow` (probe 0, next `run_seq`, the producer-counted streak) written through `SimObservationStore`: an input |
 //! | `Deadline(i)` | `SimClock::tick` past the startup deadline |
 //! | `SLStable(i)` / `SLStartupStop(i, stage)` / `SLLivenessStop(i, stage)` | a `service-lifecycle` tick; stage `pre_hook` scripts `SimDriver::stop` to fail, `row_write` injects one terminal-row write failure |
-//! | `WLRestart` / `WLGiveUp` | a `workload-lifecycle` tick after the restart backoff |
+//! | `WLRestart(ok)` / `WLGiveUp` | the start outcome scripted as for `Deploy` (`WLRestart` only), then a `workload-lifecycle` tick after the restart backoff |
 //! | `SLFinalizeCrash` / `SLFinalizeStartup` | hazard-only actions: the driver bails with the action name |
 //! | `Idle` | the runtime is driven to quiescence; the comparison checks nothing changed |
 //!
 //! Projection (`State::from_driver`), per the pinned table, per attempt `i`
 //! (attempt = the allocation ids of the workload in creation order):
 //! `row` <- `ObservationStore::alloc_status_row` (`state`, `reason`, `terminal`),
-//! model `pending` and `running` both read `running` (the shim writes `Running`
-//! atomically with the awaited start); `acted` <-
+//! the model has no `pending` row (DG-2: the start outcome is applied atomically); `acted` <-
 //! `ServiceLifecycleView.startup_last_acted_run[(alloc, 0)]` and `ann` <-
 //! `ServiceLifecycleView.terminal_announced` through
 //! `ReconcilerRuntime::loaded_service_lifecycle_views_for_test`; `stable` <- the
@@ -71,6 +69,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use itf::Value;
+use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
 use overdrive_core::aggregate::{
     DriverInput, IntentKey, ResourcesInput, Service, VmInput, WorkloadIntent, WorkloadKind,
@@ -80,9 +79,7 @@ use overdrive_core::id::{AllocationId, NodeId, ServiceVip, WorkloadId};
 use overdrive_core::observation::{
     ProbeIdx, ProbeResultRow, ProbeRole, ProbeRunSeq, ProbeStatus, SameStatusRuns,
 };
-use overdrive_core::UnixInstant;
 use overdrive_core::reconcilers::{Action, ReconcilerName, TargetResource, TickContext};
-use overdrive_reconcilers::AnyReconcilerView;
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{Driver as DriverPort, DriverType, ExitKind};
 use overdrive_core::traits::intent_store::IntentStore;
@@ -92,7 +89,9 @@ use overdrive_core::traits::observation_store::{
 use overdrive_core::transition_reason::{
     ServiceFailureReason, StoppedBy, TerminalCondition, TransitionReason,
 };
+use overdrive_reconcilers::AnyReconcilerView;
 use overdrive_reconcilers::current_alloc;
+use overdrive_reconcilers::workload_lifecycle::RESTART_BACKOFF_CEILING;
 use overdrive_sim::adapters::ca::SimCa;
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::dataplane::SimDataplane;
@@ -107,13 +106,15 @@ use tokio::runtime::Runtime;
 use tokio_util::sync::CancellationToken;
 
 use super::{ReconcilerRuntime, build_hydration_context};
-use crate::action_shim::dispatch_with_workflow_intent;
 use crate::AppState;
+use crate::action_shim::dispatch_with_workflow_intent;
 use crate::guest_network::quint_itf::{self, ItfError, Qualified};
+use crate::view_store::ViewStore;
 
 const MAIN: &str = "ra_conf";
 const MODULE: &str = "restart_authority";
-const SPEC: &str = "../../specs/quint/service-allocation-readiness-and-ending/restart_authority.qnt";
+const SPEC: &str =
+    "../../specs/quint/service-allocation-readiness-and-ending/restart_authority.qnt";
 
 /// The model's startup `max_attempts`.
 const MAXA: u32 = 2;
@@ -126,7 +127,23 @@ const PAST_DEADLINE: Duration = Duration::from_secs(121);
 const PAST_BACKOFF: Duration = Duration::from_secs(2);
 const WORKLOAD: &str = "svc";
 const LISTENER_PORT: u16 = 8080;
-const MODEL_ATTEMPTS: i64 = 3;
+/// Attempts 0..=CEIL of the conformance instance (ids 0..5).
+const MODEL_ATTEMPTS: i64 = 6;
+
+/// The `CEIL` the spec's `ra_conf` instance is imported with, read from the spec text.
+fn spec_ceiling() -> u32 {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(SPEC);
+    let text = std::fs::read_to_string(&path).expect("read the restart_authority spec");
+    let line = text
+        .lines()
+        .find(|l| l.trim_start().starts_with("module ra_conf"))
+        .expect("the spec declares module ra_conf");
+    let tail = line.split("CEIL = ").nth(1).expect("ra_conf sets CEIL");
+    tail.split(|c: char| !c.is_ascii_digit())
+        .next()
+        .and_then(|n| n.parse().ok())
+        .expect("CEIL is an integer")
+}
 
 #[derive(Debug, thiserror::Error)]
 enum DriverError {
@@ -165,7 +182,11 @@ struct RaWorld {
     /// `done` project from these returned actions, not from a row diff.
     returned_finalize: Vec<(&'static str, AllocationId, Option<TerminalCondition>)>,
     observer_stop: CancellationToken,
-    _tmp: TempDir,
+    /// The redb-backed view store the runtime persists through; a control-plane
+    /// restart rebuilds the runtime over it (the redb file stays open, as one
+    /// process holds one handle to it).
+    view_store: Arc<dyn ViewStore>,
+    tmp: TempDir,
 }
 
 fn tcp(role: ProbeRole, port: u16, interval: u32, max_attempts: u32) -> ProbeDescriptor {
@@ -221,8 +242,16 @@ async fn settle() {
 
 impl RaWorld {
     async fn compose() -> Self {
+        assert_eq!(
+            spec_ceiling(),
+            RESTART_BACKOFF_CEILING,
+            "the spec's ra_conf CEIL must equal the production restart ceiling"
+        );
         let tmp = TempDir::new().expect("tempdir");
-        let mut runtime = ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path())
+        let view_store: Arc<dyn ViewStore> = Arc::new(
+            crate::view_store::redb::RedbViewStore::open(tmp.path()).expect("open the view store"),
+        );
+        let mut runtime = ReconcilerRuntime::new(tmp.path(), Arc::clone(&view_store))
             .expect("reconciler runtime");
         runtime.register(crate::service_lifecycle()).await.expect("register service-lifecycle");
         runtime.register(crate::workload_lifecycle()).await.expect("register workload-lifecycle");
@@ -242,7 +271,7 @@ impl RaWorld {
             .await
             .expect("shared owner reports its bound flow ports");
         let wiring = overdrive_core::guest_network::GuestNetworkExecWiring::new(
-            Arc::clone(&clock) as Arc<dyn Clock>,
+            Arc::clone(&clock) as Arc<dyn Clock>
         );
         assert!(wiring.supervisor().open_after_boot(), "EXEC opens after both owners converge");
         let state = AppState::new(
@@ -290,7 +319,8 @@ impl RaWorld {
             live_seq: BTreeMap::new(),
             returned_finalize: Vec::new(),
             observer_stop,
-            _tmp: tmp,
+            view_store,
+            tmp,
         }
     }
 
@@ -316,6 +346,27 @@ impl RaWorld {
         let digest = intent.spec_digest().expect("spec digest");
         let mut guard = self.state.allocator.lock().await;
         let _vip: ServiceVip = guard.allocate(*digest.as_bytes()).await.expect("allocate vip");
+    }
+
+    /// A control-plane restart: a fresh `ReconcilerRuntime` is built and registers both
+    /// reconcilers, which is the production boot path (`register` probes the store and
+    /// `bulk_load`s every persisted view). The in-memory views are rebuilt from the redb
+    /// ViewStore alone, then replace the runtime the projection reads. The exit observer
+    /// does not use the runtime, so it keeps running.
+    async fn restart_control_plane(&mut self) -> std::result::Result<(), DriverError> {
+        settle().await;
+        let mut rebuilt = ReconcilerRuntime::new(self.tmp.path(), Arc::clone(&self.view_store))
+            .map_err(|error| DriverError::Tick(error.to_string()))?;
+        rebuilt
+            .register(crate::service_lifecycle())
+            .await
+            .map_err(|error| DriverError::Tick(error.to_string()))?;
+        rebuilt
+            .register(crate::workload_lifecycle())
+            .await
+            .map_err(|error| DriverError::Tick(error.to_string()))?;
+        self.state.runtime = Arc::new(rebuilt);
+        Ok(())
     }
 
     /// The workload's allocations in creation order (the trailing `-<n>` of the id).
@@ -388,11 +439,8 @@ impl RaWorld {
                     .map_err(|error| DriverError::Tick(error.to_string()))?;
                 (desired, actual)
             };
-            let view = self
-                .state
-                .runtime
-                .get_view(name, &self.target)
-                .unwrap_or(AnyReconcilerView::Unit);
+            let view =
+                self.state.runtime.get_view(name, &self.target).unwrap_or(AnyReconcilerView::Unit);
             let (actions, next_view) = reconciler.reconcile(&desired, &actual, &view, &tick);
             self.state
                 .runtime
@@ -428,16 +476,23 @@ impl RaWorld {
                 self.driver.script_stop_failure(Some("scripted Driver::stop failure"));
             }
             Some("row_write") => {
-                self.write_faults.inject_write_failure(ObservationStoreError::Io(std::io::Error::other(
-                    "injected terminal row write failure",
-                )));
+                self.write_faults.inject_write_failure(ObservationStoreError::Io(
+                    std::io::Error::other("injected terminal row write failure"),
+                ));
             }
             _ => {}
         }
         let name = self.service_lifecycle.clone();
         let result = self.tick(&name, "service_lifecycle", Duration::ZERO, stage.is_some()).await;
         self.driver.script_stop_failure(None);
+        // an armed one-shot write fault must not leak into a later write
+        self.write_faults.clear_write_failures();
         result
+    }
+
+    /// The model's start outcome: `ok = false` scripts the driver to reject the next start.
+    fn script_start_outcome(&self, ok: bool) {
+        self.driver.script_next_start_rejection((!ok).then_some("scripted start rejection"));
     }
 
     async fn write_startup_row(
@@ -472,13 +527,13 @@ impl RaWorld {
             same_status_runs: SameStatusRuns::new(if pass { passes } else { fails }.max(1))
                 .expect("non-zero streak"),
         };
-        self.obs
-            .write_probe_result(row)
-            .await
-            .map_err(|error| DriverError::Tick(error.to_string()))
+        self.obs.write_probe_result(row).await.map_err(|error| DriverError::Tick(error.to_string()))
     }
 
-    async fn write_liveness_fail(&mut self, alloc: &AllocationId) -> std::result::Result<(), DriverError> {
+    async fn write_liveness_fail(
+        &mut self,
+        alloc: &AllocationId,
+    ) -> std::result::Result<(), DriverError> {
         let seq = self.live_seq.entry(alloc.clone()).or_insert(0);
         *seq += 1;
         let row = ProbeResultRow {
@@ -492,10 +547,7 @@ impl RaWorld {
             run_seq: ProbeRunSeq::new(*seq).expect("non-zero run_seq"),
             same_status_runs: SameStatusRuns::new(1).expect("non-zero streak"),
         };
-        self.obs
-            .write_probe_result(row)
-            .await
-            .map_err(|error| DriverError::Tick(error.to_string()))
+        self.obs.write_probe_result(row).await.map_err(|error| DriverError::Tick(error.to_string()))
     }
 
     /// The guest ends on its own; the production exit observer writes the row.
@@ -557,14 +609,10 @@ impl RestartAuthorityDriver {
         self.runtime.block_on(settle());
     }
 
-    fn deploy(&mut self, decl: bool, gl: bool) -> Result {
+    fn deploy(&mut self, decl: bool, gl: bool, ok: bool) -> Result {
         self.runtime.block_on(self.world.deploy(decl, gl));
+        self.world.script_start_outcome(ok);
         self.runtime.block_on(self.world.wl_tick(Duration::ZERO))?;
-        Ok(())
-    }
-
-    fn reevaluate(&mut self, _i: i64) -> Result {
-        on_world!(self, w => w.wl_tick(Duration::ZERO).await);
         Ok(())
     }
 
@@ -628,7 +676,10 @@ impl RestartAuthorityDriver {
         Ok(())
     }
 
-    fn wl_after_backoff(&mut self) -> Result {
+    fn wl_after_backoff(&mut self, ok: Option<bool>) -> Result {
+        if let Some(ok) = ok {
+            self.world.script_start_outcome(ok);
+        }
         on_world!(self, w => w.wl_tick(PAST_BACKOFF).await);
         Ok(())
     }
@@ -637,8 +688,10 @@ impl RestartAuthorityDriver {
         Err(DriverError::HazardOnly(action).into())
     }
 
-    fn idle(&self) -> Result {
-        self.runtime.block_on(settle());
+    /// `Idle`: the control plane restarts (the model's reload is a no-op on its state),
+    /// so the views the next comparison reads are the ones `bulk_load` rebuilt.
+    fn idle(&mut self) -> Result {
+        self.runtime.block_on(self.world.restart_control_plane())?;
         Ok(())
     }
 }
@@ -653,9 +706,7 @@ impl Driver for RestartAuthorityDriver {
     fn step(&mut self, step: &Step) -> Result {
         switch!(step {
             init => self.init(),
-            Deploy(decl: bool, gl: bool) => self.deploy(decl, gl)?,
-            StartOk(i: i64) => self.reevaluate(i)?,
-            StartRejected(i: i64) => self.reevaluate(i)?,
+            Deploy(decl: bool, gl: bool, ok: bool) => self.deploy(decl, gl, ok)?,
             Crash(i: i64) => self.crash(i)?,
             CleanExit(i: i64) => self.clean_exit(i)?,
             OperatorStop(i: i64) => self.operator_stop(i)?,
@@ -666,8 +717,9 @@ impl Driver for RestartAuthorityDriver {
             SLLivenessStop(i: i64, stage: String) => self.sl_liveness_stop(i, stage)?,
             SLFinalizeCrash(i: i64) => self.hazard("SLFinalizeCrash", i)?,
             SLFinalizeStartup(i: i64) => self.hazard("SLFinalizeStartup", i)?,
-            WLRestart => self.wl_after_backoff()?,
-            WLGiveUp => self.wl_after_backoff()?,
+            SLAnnounceTerminal(i: i64) => self.sl_tick(i, None)?,
+            WLRestart(ok: bool) => self.wl_after_backoff(Some(ok))?,
+            WLGiveUp => self.wl_after_backoff(None)?,
             Idle => self.idle()?,
         })
     }
@@ -724,9 +776,10 @@ fn row_class(row: Option<&AllocStatusRow>) -> &'static str {
         AllocState::Terminated => match (&row.terminal, &row.reason) {
             (Some(TerminalCondition::Stopped { by: StoppedBy::StartupProbe }), _) => "t_startup",
             (Some(TerminalCondition::Stopped { by: StoppedBy::LivenessProbe }), _) => "t_liveness",
-            (Some(TerminalCondition::Stopped { by: StoppedBy::Operator | StoppedBy::SystemGc }), _) => {
-                "t_operator"
-            }
+            (
+                Some(TerminalCondition::Stopped { by: StoppedBy::Operator | StoppedBy::SystemGc }),
+                _,
+            ) => "t_operator",
             (Some(TerminalCondition::Stopped { by: StoppedBy::Process }), _) => "t_clean",
             _ if claim == "startup_probe_failed" => "t_startup",
             _ if claim == "liveness_probe_failed" => "t_liveness",
@@ -742,9 +795,9 @@ impl RaState {
         let vars = Qualified::of(state, MAIN, MODULE)?;
         let at = quint_itf::int_map(vars.var("at")?, |entry| {
             let row = quint_itf::string(quint_itf::field(entry, "row")?)?;
-            let live = matches!(row.as_str(), "pending" | "running");
+            let live = row == "running";
             Ok(AttView {
-                row: if live { "running".to_owned() } else { row },
+                row,
                 acted: quint_itf::int(quint_itf::field(entry, "acted")?)?,
                 ann: quint_itf::boolean(quint_itf::field(entry, "ann")?)?,
                 stable: live && quint_itf::boolean(quint_itf::field(entry, "stable")?)?,
@@ -826,7 +879,8 @@ impl State<RestartAuthorityDriver> for RaState {
                 .map_or(0, |seq| i64::try_from(seq.get()).expect("run_seq fits i64"));
             let ann = alloc.as_ref().is_some_and(|a| sl_views.terminal_announced.contains(a));
             let stable = class == "running"
-                && row.is_some_and(|r| matches!(r.terminal, Some(TerminalCondition::Stable { .. })));
+                && row
+                    .is_some_and(|r| matches!(r.terminal, Some(TerminalCondition::Stable { .. })));
             at.insert(
                 i,
                 AttView {
@@ -844,132 +898,253 @@ impl State<RestartAuthorityDriver> for RaState {
 }
 
 // ---------------------------------------------------------------- named runs
-// One `#[quint_test]` per named run of `restart_authority` on `ra_conf`
-// (checks.toml `ra-run-*`), then randomized traces. CONTRACT_SHAPE: bounded-change.
+// One `#[quint_test]` per named run of `restart_authority` on `ra_conf` (README
+// "Named runs"; checks.toml), then randomized traces. CONTRACT_SHAPE: bounded-change.
 
-#[quint_test(spec = "../../specs/quint/service-allocation-readiness-and-ending/restart_authority.qnt", main = "ra_conf", test = "crash_after_attempts_exhausted_then_deadline_passes", max_samples = 1)]
+#[quint_test(
+    spec = "../../specs/quint/service-allocation-readiness-and-ending/restart_authority.qnt",
+    main = "ra_conf",
+    test = "crashed_and_rejected_allocs_join_terminal_announced",
+    max_samples = 1
+)]
+#[ignore = "pending DELIVER: D6 DG-12 every Failed or Terminated allocation joins terminal_announced"]
+fn restart_authority_crashed_and_rejected_allocs_join_terminal_announced() -> impl Driver {
+    RestartAuthorityDriver::new()
+}
+
+/// Regression witness at HEAD, green because no owner changed behaviour: the run never
+/// takes a `ServiceLifecycle` tick after the crash and the deadline, so D5's guard (no
+/// startup verdict for a non-running allocation) is NOT exercised here. The runs that
+/// tick `ServiceLifecycle` past the deadline
+/// (`running_alloc_with_exhausted_probes_past_deadline_is_stopped`,
+/// `startup_never_passes_loop_gives_up_startup_probe_failed`) prove D5.
+#[quint_test(
+    spec = "../../specs/quint/service-allocation-readiness-and-ending/restart_authority.qnt",
+    main = "ra_conf",
+    test = "crash_after_attempts_exhausted_then_deadline_passes",
+    max_samples = 1
+)]
 fn restart_authority_crash_after_attempts_exhausted_then_deadline_passes() -> impl Driver {
     RestartAuthorityDriver::new()
 }
 
-#[quint_test(spec = "../../specs/quint/service-allocation-readiness-and-ending/restart_authority.qnt", main = "ra_conf", test = "running_alloc_with_exhausted_probes_past_deadline_is_stopped", max_samples = 1)]
+#[quint_test(
+    spec = "../../specs/quint/service-allocation-readiness-and-ending/restart_authority.qnt",
+    main = "ra_conf",
+    test = "running_alloc_with_exhausted_probes_past_deadline_is_stopped",
+    max_samples = 1
+)]
 #[ignore = "pending DELIVER: D7 startup stop (StopAllocation { Stopped { StartupProbe } }), D5 guard, D8 startup_last_acted_run"]
 fn restart_authority_running_alloc_with_exhausted_probes_past_deadline_is_stopped() -> impl Driver {
     RestartAuthorityDriver::new()
 }
 
-#[quint_test(spec = "../../specs/quint/service-allocation-readiness-and-ending/restart_authority.qnt", main = "ra_conf", test = "pre_startup_crash_loop_gives_up_early_exit", max_samples = 1)]
-#[ignore = "pending DELIVER: D6/D7 give-up classification; BLOCKED until the ceiling is reachable: ra_conf CEIL = 2 but production RESTART_BACKOFF_CEILING = 5 (a const, no pinned seam), see design gap G-R1"]
+#[quint_test(
+    spec = "../../specs/quint/service-allocation-readiness-and-ending/restart_authority.qnt",
+    main = "ra_conf",
+    test = "pre_startup_crash_loop_gives_up_early_exit",
+    max_samples = 1
+)]
+#[ignore = "pending DELIVER: D6/D7 give-up classification (WorkloadLifecycle alone authors the ending)"]
 fn restart_authority_pre_startup_crash_loop_gives_up_early_exit() -> impl Driver {
     RestartAuthorityDriver::new()
 }
 
-#[quint_test(spec = "../../specs/quint/service-allocation-readiness-and-ending/restart_authority.qnt", main = "ra_conf", test = "pre_startup_crash_then_successor_passes", max_samples = 1)]
+#[quint_test(
+    spec = "../../specs/quint/service-allocation-readiness-and-ending/restart_authority.qnt",
+    main = "ra_conf",
+    test = "pre_startup_crash_then_successor_passes",
+    max_samples = 1
+)]
 #[ignore = "pending DELIVER: D6 ServiceLifecycle loses the early-exit branch (WorkloadLifecycle alone authors the ending)"]
 fn restart_authority_pre_startup_crash_then_successor_passes() -> impl Driver {
     RestartAuthorityDriver::new()
 }
 
-#[quint_test(spec = "../../specs/quint/service-allocation-readiness-and-ending/restart_authority.qnt", main = "ra_conf", test = "crash_after_startup_pass_gives_up_backoff_exhausted", max_samples = 1)]
-#[ignore = "pending DELIVER: D6/D7 give-up classification; BLOCKED until the ceiling is reachable: ra_conf CEIL = 2 but production RESTART_BACKOFF_CEILING = 5 (a const, no pinned seam), see design gap G-R1"]
+#[quint_test(
+    spec = "../../specs/quint/service-allocation-readiness-and-ending/restart_authority.qnt",
+    main = "ra_conf",
+    test = "crash_after_startup_pass_gives_up_backoff_exhausted",
+    max_samples = 1
+)]
 fn restart_authority_crash_after_startup_pass_gives_up_backoff_exhausted() -> impl Driver {
     RestartAuthorityDriver::new()
 }
 
-#[quint_test(spec = "../../specs/quint/service-allocation-readiness-and-ending/restart_authority.qnt", main = "ra_conf", test = "opt_out_service_crash_loop_gives_up_backoff_exhausted", max_samples = 1)]
-#[ignore = "pending DELIVER: D6/D7 give-up classification; BLOCKED until the ceiling is reachable: ra_conf CEIL = 2 but production RESTART_BACKOFF_CEILING = 5 (a const, no pinned seam), see design gap G-R1"]
+#[quint_test(
+    spec = "../../specs/quint/service-allocation-readiness-and-ending/restart_authority.qnt",
+    main = "ra_conf",
+    test = "opt_out_service_crash_loop_gives_up_backoff_exhausted",
+    max_samples = 1
+)]
 fn restart_authority_opt_out_service_crash_loop_gives_up_backoff_exhausted() -> impl Driver {
     RestartAuthorityDriver::new()
 }
 
-#[quint_test(spec = "../../specs/quint/service-allocation-readiness-and-ending/restart_authority.qnt", main = "ra_conf", test = "non_crash_failed_row_gives_up_backoff_exhausted", max_samples = 1)]
-#[ignore = "blocked: the shim writes Running atomically with the awaited start, so the model's pending -> StartRejected step cannot be produced by a production owner call (design gap G-R2)"]
+#[quint_test(
+    spec = "../../specs/quint/service-allocation-readiness-and-ending/restart_authority.qnt",
+    main = "ra_conf",
+    test = "non_crash_failed_row_gives_up_backoff_exhausted",
+    max_samples = 1
+)]
 fn restart_authority_non_crash_failed_row_gives_up_backoff_exhausted() -> impl Driver {
     RestartAuthorityDriver::new()
 }
 
-#[quint_test(spec = "../../specs/quint/service-allocation-readiness-and-ending/restart_authority.qnt", main = "ra_conf", test = "liveness_kill_loop_gives_up_liveness_probe_failed", max_samples = 1)]
-#[ignore = "pending DELIVER: D6/D7 give-up classification; BLOCKED until the ceiling is reachable: ra_conf CEIL = 2 but production RESTART_BACKOFF_CEILING = 5 (a const, no pinned seam), see design gap G-R1"]
+#[quint_test(
+    spec = "../../specs/quint/service-allocation-readiness-and-ending/restart_authority.qnt",
+    main = "ra_conf",
+    test = "liveness_kill_loop_gives_up_liveness_probe_failed",
+    max_samples = 1
+)]
+#[ignore = "pending DELIVER: D6/D7 give-up classification (WorkloadLifecycle alone authors the ending)"]
 fn restart_authority_liveness_kill_loop_gives_up_liveness_probe_failed() -> impl Driver {
     RestartAuthorityDriver::new()
 }
 
-#[quint_test(spec = "../../specs/quint/service-allocation-readiness-and-ending/restart_authority.qnt", main = "ra_conf", test = "startup_never_passes_loop_gives_up_startup_probe_failed", max_samples = 1)]
-#[ignore = "pending DELIVER: D6/D7 give-up classification; BLOCKED until the ceiling is reachable: ra_conf CEIL = 2 but production RESTART_BACKOFF_CEILING = 5 (a const, no pinned seam), see design gap G-R1"]
+#[quint_test(
+    spec = "../../specs/quint/service-allocation-readiness-and-ending/restart_authority.qnt",
+    main = "ra_conf",
+    test = "startup_never_passes_loop_gives_up_startup_probe_failed",
+    max_samples = 1
+)]
+#[ignore = "pending DELIVER: D7 startup stop (StopAllocation { Stopped { StartupProbe } }), D5 guard, D8 startup_last_acted_run"]
 fn restart_authority_startup_never_passes_loop_gives_up_startup_probe_failed() -> impl Driver {
     RestartAuthorityDriver::new()
 }
 
-#[quint_test(spec = "../../specs/quint/service-allocation-readiness-and-ending/restart_authority.qnt", main = "ra_conf", test = "startup_stop_then_successor_passes_is_stable", max_samples = 1)]
-#[ignore = "pending DELIVER: D7 startup stop (StopAllocation { Stopped { StartupProbe } }), D5 guard, D8 startup_last_acted_run"]
-fn restart_authority_startup_stop_then_successor_passes_is_stable() -> impl Driver {
-    RestartAuthorityDriver::new()
-}
-
-#[quint_test(spec = "../../specs/quint/service-allocation-readiness-and-ending/restart_authority.qnt", main = "ra_conf", test = "startup_stop_then_crash_names_last_cause", max_samples = 1)]
-#[ignore = "pending DELIVER: D6/D7 give-up classification; BLOCKED until the ceiling is reachable: ra_conf CEIL = 2 but production RESTART_BACKOFF_CEILING = 5 (a const, no pinned seam), see design gap G-R1"]
-fn restart_authority_startup_stop_then_crash_names_last_cause() -> impl Driver {
-    RestartAuthorityDriver::new()
-}
-
-#[quint_test(spec = "../../specs/quint/service-allocation-readiness-and-ending/restart_authority.qnt", main = "ra_conf", test = "crash_then_startup_stop_names_last_cause", max_samples = 1)]
-#[ignore = "pending DELIVER: D6/D7 give-up classification; BLOCKED until the ceiling is reachable: ra_conf CEIL = 2 but production RESTART_BACKOFF_CEILING = 5 (a const, no pinned seam), see design gap G-R1"]
-fn restart_authority_crash_then_startup_stop_names_last_cause() -> impl Driver {
-    RestartAuthorityDriver::new()
-}
-
-#[quint_test(spec = "../../specs/quint/service-allocation-readiness-and-ending/restart_authority.qnt", main = "ra_conf", test = "startup_stop_is_not_intentional_stop", max_samples = 1)]
-#[ignore = "pending DELIVER: D7 startup stop (StopAllocation { Stopped { StartupProbe } }), D5 guard, D8 startup_last_acted_run"]
-fn restart_authority_startup_stop_is_not_intentional_stop() -> impl Driver {
-    RestartAuthorityDriver::new()
-}
-
-#[quint_test(spec = "../../specs/quint/service-allocation-readiness-and-ending/restart_authority.qnt", main = "ra_conf", test = "failed_startup_stop_is_retried_on_next_row", max_samples = 1)]
-#[ignore = "pending DELIVER: D7 startup stop (StopAllocation { Stopped { StartupProbe } }), D5 guard, D8 startup_last_acted_run"]
-fn restart_authority_failed_startup_stop_is_retried_on_next_row() -> impl Driver {
-    RestartAuthorityDriver::new()
-}
-
-#[quint_test(spec = "../../specs/quint/service-allocation-readiness-and-ending/restart_authority.qnt", main = "ra_conf", test = "late_pass_after_failed_stop_reaches_stable", max_samples = 1)]
-#[ignore = "pending DELIVER: D7 startup stop (StopAllocation { Stopped { StartupProbe } }), D5 guard, D8 startup_last_acted_run"]
-fn restart_authority_late_pass_after_failed_stop_reaches_stable() -> impl Driver {
-    RestartAuthorityDriver::new()
-}
-
-#[quint_test(spec = "../../specs/quint/service-allocation-readiness-and-ending/restart_authority.qnt", main = "ra_conf", test = "control_plane_restart_keeps_acted_run", max_samples = 1)]
-#[ignore = "pending DELIVER: D7 startup stop (StopAllocation { Stopped { StartupProbe } }), D5 guard, D8 startup_last_acted_run"]
-fn restart_authority_control_plane_restart_keeps_acted_run() -> impl Driver {
-    RestartAuthorityDriver::new()
-}
-
-#[quint_test(spec = "../../specs/quint/service-allocation-readiness-and-ending/restart_authority.qnt", main = "ra_conf", test = "pass_then_fails_before_stable_is_stopped", max_samples = 1)]
+#[quint_test(
+    spec = "../../specs/quint/service-allocation-readiness-and-ending/restart_authority.qnt",
+    main = "ra_conf",
+    test = "pass_then_fails_before_stable_is_stopped",
+    max_samples = 1
+)]
 #[ignore = "pending DELIVER: D7 startup stop (StopAllocation { Stopped { StartupProbe } }), D5 guard, D8 startup_last_acted_run"]
 fn restart_authority_pass_then_fails_before_stable_is_stopped() -> impl Driver {
     RestartAuthorityDriver::new()
 }
 
-#[quint_test(spec = "../../specs/quint/service-allocation-readiness-and-ending/restart_authority.qnt", main = "ra_conf", test = "stop_row_write_failure_is_retried", max_samples = 1)]
+#[quint_test(
+    spec = "../../specs/quint/service-allocation-readiness-and-ending/restart_authority.qnt",
+    main = "ra_conf",
+    test = "startup_stop_then_successor_passes_is_stable",
+    max_samples = 1
+)]
 #[ignore = "pending DELIVER: D7 startup stop (StopAllocation { Stopped { StartupProbe } }), D5 guard, D8 startup_last_acted_run"]
-fn restart_authority_stop_row_write_failure_is_retried() -> impl Driver {
+fn restart_authority_startup_stop_then_successor_passes_is_stable() -> impl Driver {
     RestartAuthorityDriver::new()
 }
 
-#[quint_test(spec = "../../specs/quint/service-allocation-readiness-and-ending/restart_authority.qnt", main = "ra_conf", test = "first_fail_at_deadline_with_no_earlier_row_stops", max_samples = 1)]
+#[quint_test(
+    spec = "../../specs/quint/service-allocation-readiness-and-ending/restart_authority.qnt",
+    main = "ra_conf",
+    test = "startup_stop_then_crash_names_last_cause",
+    max_samples = 1
+)]
+#[ignore = "pending DELIVER: D7 startup stop (StopAllocation { Stopped { StartupProbe } }), D5 guard, D8 startup_last_acted_run"]
+fn restart_authority_startup_stop_then_crash_names_last_cause() -> impl Driver {
+    RestartAuthorityDriver::new()
+}
+
+#[quint_test(
+    spec = "../../specs/quint/service-allocation-readiness-and-ending/restart_authority.qnt",
+    main = "ra_conf",
+    test = "crash_then_startup_stop_names_last_cause",
+    max_samples = 1
+)]
+#[ignore = "pending DELIVER: D7 startup stop (StopAllocation { Stopped { StartupProbe } }), D5 guard, D8 startup_last_acted_run"]
+fn restart_authority_crash_then_startup_stop_names_last_cause() -> impl Driver {
+    RestartAuthorityDriver::new()
+}
+
+#[quint_test(
+    spec = "../../specs/quint/service-allocation-readiness-and-ending/restart_authority.qnt",
+    main = "ra_conf",
+    test = "startup_stop_is_not_intentional_stop",
+    max_samples = 1
+)]
+#[ignore = "pending DELIVER: D7 startup stop (StopAllocation { Stopped { StartupProbe } }), D5 guard, D8 startup_last_acted_run"]
+fn restart_authority_startup_stop_is_not_intentional_stop() -> impl Driver {
+    RestartAuthorityDriver::new()
+}
+
+#[quint_test(
+    spec = "../../specs/quint/service-allocation-readiness-and-ending/restart_authority.qnt",
+    main = "ra_conf",
+    test = "first_fail_at_deadline_with_no_earlier_row_stops",
+    max_samples = 1
+)]
 #[ignore = "pending DELIVER: D14 item 3 startup gate threshold 1 for a GuestListeners descriptor; D7 startup stop"]
 fn restart_authority_first_fail_at_deadline_with_no_earlier_row_stops() -> impl Driver {
     RestartAuthorityDriver::new()
 }
 
-#[quint_test(spec = "../../specs/quint/service-allocation-readiness-and-ending/restart_authority.qnt", main = "ra_conf", test = "explicit_probe_fail_after_deadline_keeps_counted_streak", max_samples = 1)]
+/// Regression witness at HEAD: `streak`, `startupStopEnabled` and the gate state are
+/// model-only inputs here (startup rows are written through the observation port) and no
+/// owner observes the gate, so this proves only that the driver replays the run. It does
+/// NOT prove that an explicit probe keeps the counted streak; the D14 item 3 run
+/// `first_fail_at_deadline_with_no_earlier_row_stops` and the S-53 rows tests
+/// (`guest_listener_probe_rows.rs`) do.
+#[quint_test(
+    spec = "../../specs/quint/service-allocation-readiness-and-ending/restart_authority.qnt",
+    main = "ra_conf",
+    test = "explicit_probe_fail_after_deadline_keeps_counted_streak",
+    max_samples = 1
+)]
 fn restart_authority_explicit_probe_fail_after_deadline_keeps_counted_streak() -> impl Driver {
     RestartAuthorityDriver::new()
 }
 
-/// Randomized `ra_conf` traces against the production owners (seed printed on
-/// failure). `ra_conf` leaves `gl` free, so traces that `Deploy(gl = true)` need
-/// the D14 surface.
-#[quint_run(spec = "../../specs/quint/service-allocation-readiness-and-ending/restart_authority.qnt", main = "ra_conf")]
-#[ignore = "pending DELIVER: D5-D8 restart authority; G-R1 ceiling and G-R2 start-rejection gaps (the random traces reach both)"]
+#[quint_test(
+    spec = "../../specs/quint/service-allocation-readiness-and-ending/restart_authority.qnt",
+    main = "ra_conf",
+    test = "failed_startup_stop_is_retried_on_next_row",
+    max_samples = 1
+)]
+#[ignore = "pending DELIVER: D7 startup stop (StopAllocation { Stopped { StartupProbe } }), D5 guard, D8 startup_last_acted_run"]
+fn restart_authority_failed_startup_stop_is_retried_on_next_row() -> impl Driver {
+    RestartAuthorityDriver::new()
+}
+
+#[quint_test(
+    spec = "../../specs/quint/service-allocation-readiness-and-ending/restart_authority.qnt",
+    main = "ra_conf",
+    test = "late_pass_after_failed_stop_reaches_stable",
+    max_samples = 1
+)]
+#[ignore = "pending DELIVER: D7 startup stop (StopAllocation { Stopped { StartupProbe } }), D5 guard, D8 startup_last_acted_run"]
+fn restart_authority_late_pass_after_failed_stop_reaches_stable() -> impl Driver {
+    RestartAuthorityDriver::new()
+}
+
+#[quint_test(
+    spec = "../../specs/quint/service-allocation-readiness-and-ending/restart_authority.qnt",
+    main = "ra_conf",
+    test = "stop_row_write_failure_is_retried",
+    max_samples = 1
+)]
+#[ignore = "pending DELIVER: D7 startup stop (StopAllocation { Stopped { StartupProbe } }), D5 guard, D8 startup_last_acted_run"]
+fn restart_authority_stop_row_write_failure_is_retried() -> impl Driver {
+    RestartAuthorityDriver::new()
+}
+
+#[quint_test(
+    spec = "../../specs/quint/service-allocation-readiness-and-ending/restart_authority.qnt",
+    main = "ra_conf",
+    test = "control_plane_restart_keeps_acted_run",
+    max_samples = 1
+)]
+#[ignore = "pending DELIVER: D7 startup stop (StopAllocation { Stopped { StartupProbe } }), D5 guard, D8 startup_last_acted_run"]
+fn restart_authority_control_plane_restart_keeps_acted_run() -> impl Driver {
+    RestartAuthorityDriver::new()
+}
+
+/// Randomized `ra_conf` traces against the production owners (seed printed on failure).
+#[quint_run(
+    spec = "../../specs/quint/service-allocation-readiness-and-ending/restart_authority.qnt",
+    main = "ra_conf"
+)]
+#[ignore = "pending DELIVER: D5-D8, D14, DG-12 restart authority (the random traces reach the unimplemented D6/D7 endings and the DG-12 announcement)"]
 fn restart_authority_conformance_ra_conf() -> impl Driver {
     RestartAuthorityDriver::new()
 }

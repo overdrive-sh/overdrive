@@ -96,7 +96,8 @@ fn probe_runner() -> Arc<ProbeRunner> {
             NodeId::new("vm-artifact-disposal").expect("valid node ID"),
             0,
         )),
-        Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()), Arc::new(overdrive_worker::GuestListenerBoard::new()),
+        Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
+        Arc::new(overdrive_worker::GuestListenerBoard::new()),
     ))
 }
 
@@ -140,7 +141,8 @@ fn spec(
     kernel: PathBuf,
     rootfs: PathBuf,
 ) -> AllocationSpec {
-    AllocationSpec { declared_listeners: Vec::new(),
+    AllocationSpec {
+        declared_listeners: Vec::new(),
         alloc: alloc.clone(),
         identity: SpiffeId::new(&format!(
             "spiffe://overdrive.local/workload/{workload}/alloc/{alloc}"
@@ -300,7 +302,8 @@ async fn failed_vm_cleanup_hands_only_stranded_vm_artifacts_to_disposal() {
             overdrive_core::guest_transport::VsockListenPort::KernelAssigned,
         )
         .await
-        .expect("the node beacon intake binds over the sim"), Arc::new(overdrive_worker::GuestListenerBoard::new()),
+        .expect("the node beacon intake binds over the sim"),
+        Arc::new(overdrive_worker::GuestListenerBoard::new()),
     ));
     let mut drivers = DriverRegistry::new();
     drivers.insert(Arc::clone(&driver) as Arc<dyn Driver>);

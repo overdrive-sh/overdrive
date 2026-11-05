@@ -55,7 +55,8 @@ fn node_id_for_obs_store() -> NodeId {
 }
 
 fn vm_spec(alloc: &AllocationId, probe_descriptors: Vec<ProbeDescriptor>) -> AllocationSpec {
-    AllocationSpec { declared_listeners: Vec::new(),
+    AllocationSpec {
+        declared_listeners: Vec::new(),
         alloc: alloc.clone(),
         identity: SpiffeId::new("spiffe://overdrive.local/workload/probe-runner/alloc/test")
             .expect("valid SPIFFE ID"),
@@ -157,7 +158,8 @@ async fn given_start_alloc_with_one_tcp_descriptor_when_clock_ticks_interval_the
         http,
         Arc::clone(&clock) as Arc<dyn Clock>,
         Arc::clone(&obs) as Arc<dyn ObservationStore>,
-        Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()), Arc::new(overdrive_worker::GuestListenerBoard::new()),
+        Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
+        Arc::new(overdrive_worker::GuestListenerBoard::new()),
     );
 
     let alloc = alloc_id("alloc-supervised-tick-1");
@@ -245,7 +247,8 @@ async fn given_started_alloc_when_stop_alloc_then_no_further_probe_result_rows()
         http,
         Arc::clone(&clock) as Arc<dyn Clock>,
         Arc::clone(&obs) as Arc<dyn ObservationStore>,
-        Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()), Arc::new(overdrive_worker::GuestListenerBoard::new()),
+        Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
+        Arc::new(overdrive_worker::GuestListenerBoard::new()),
     );
 
     let alloc = alloc_id("alloc-supervised-tick-2");
@@ -327,7 +330,8 @@ async fn given_start_alloc_called_twice_then_no_duplicate_probe_tasks() {
         http,
         Arc::clone(&clock) as Arc<dyn Clock>,
         Arc::clone(&obs) as Arc<dyn ObservationStore>,
-        Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()), Arc::new(overdrive_worker::GuestListenerBoard::new()),
+        Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
+        Arc::new(overdrive_worker::GuestListenerBoard::new()),
     );
 
     let alloc = alloc_id("alloc-no-dup");
@@ -416,7 +420,8 @@ async fn start_alloc_writes_each_probe_at_its_per_role_index_not_its_flat_positi
         Arc::new(SimHttpProber::new()),
         Arc::clone(&clock) as Arc<dyn Clock>,
         Arc::clone(&obs) as Arc<dyn ObservationStore>,
-        Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()), Arc::new(overdrive_worker::GuestListenerBoard::new()),
+        Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
+        Arc::new(overdrive_worker::GuestListenerBoard::new()),
     );
 
     let alloc = alloc_id("alloc-per-role-idx");
@@ -475,7 +480,8 @@ async fn start_alloc_preserves_per_role_indices_across_a_multi_probe_role() {
         Arc::new(SimHttpProber::new()),
         Arc::clone(&clock) as Arc<dyn Clock>,
         Arc::clone(&obs) as Arc<dyn ObservationStore>,
-        Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()), Arc::new(overdrive_worker::GuestListenerBoard::new()),
+        Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
+        Arc::new(overdrive_worker::GuestListenerBoard::new()),
     );
 
     let alloc = alloc_id("alloc-multi-role-idx");

@@ -90,7 +90,8 @@ fn descriptor_tcp_1s(host: &str, port: u16) -> ProbeDescriptor {
 }
 
 fn vm_spec(alloc: &AllocationId, probe_descriptors: Vec<ProbeDescriptor>) -> AllocationSpec {
-    AllocationSpec { declared_listeners: Vec::new(),
+    AllocationSpec {
+        declared_listeners: Vec::new(),
         alloc: alloc.clone(),
         identity: SpiffeId::new("spiffe://overdrive.local/workload/probe-to-stable/alloc/test")
             .expect("valid SPIFFE ID"),
@@ -220,7 +221,8 @@ async fn given_probe_runner_writes_pass_row_when_service_lifecycle_reconciles_th
         http,
         Arc::clone(&clock) as Arc<dyn Clock>,
         Arc::clone(&obs) as Arc<dyn ObservationStore>,
-        Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()), Arc::new(overdrive_worker::GuestListenerBoard::new()),
+        Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
+        Arc::new(overdrive_worker::GuestListenerBoard::new()),
     );
 
     let alloc = alloc_id("alloc-probe-to-stable");

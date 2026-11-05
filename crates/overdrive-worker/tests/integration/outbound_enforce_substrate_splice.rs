@@ -375,7 +375,8 @@ fn held_identities_for(pki: &TestPki, allocations: &[AllocationId]) -> HeldIdent
 /// provision seam sets in production — drives the egress nft-TPROXY install matching
 /// `iifname VETH_H`).
 fn build_client_spec(pki: &TestPki, _host_veth: Option<String>) -> AllocationSpec {
-    AllocationSpec { declared_listeners: Vec::new(),
+    AllocationSpec {
+        declared_listeners: Vec::new(),
         alloc: pki.client_alloc.clone(),
         identity: pki.client_leaf.spiffe.clone(),
         driver: overdrive_core::traits::driver::DriverPayload::Vm(

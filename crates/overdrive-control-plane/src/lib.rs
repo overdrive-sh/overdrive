@@ -3667,7 +3667,8 @@ async fn compose_vm_driver(
             probe_runner,
             guest_network_exec,
             layout,
-            beacon, Arc::new(overdrive_worker::GuestListenerBoard::new()),
+            beacon,
+            Arc::new(overdrive_worker::GuestListenerBoard::new()),
         ),
         bound,
     ))
@@ -5643,7 +5644,8 @@ mod tests {
                     overdrive_core::id::NodeId::new("vm-compose-errors").expect("valid node ID"),
                     0,
                 )),
-                Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()), Arc::new(overdrive_worker::GuestListenerBoard::new()),
+                Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
+                Arc::new(overdrive_worker::GuestListenerBoard::new()),
             ))
         }
 

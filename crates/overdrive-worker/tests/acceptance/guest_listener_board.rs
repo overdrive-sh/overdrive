@@ -137,10 +137,12 @@ impl Harness {
         std::fs::write(root.join("vmlinuz"), &header).expect("stage the synthetic kernel image");
         let vmm = SimVmm::new();
         let io = Arc::new(SimBeaconIo::stepped(vmm.clone()));
-        let intake =
-            BeaconIntake::bind(Arc::clone(&io) as Arc<dyn BeaconIo>, VsockListenPort::KernelAssigned)
-                .await
-                .expect("the sim beacon listener binds");
+        let intake = BeaconIntake::bind(
+            Arc::clone(&io) as Arc<dyn BeaconIo>,
+            VsockListenPort::KernelAssigned,
+        )
+        .await
+        .expect("the sim beacon listener binds");
         let clock = SimClock::new();
         let wiring =
             overdrive_core::guest_network::GuestNetworkExecWiring::new(Arc::new(clock.clone()));
@@ -246,10 +248,8 @@ impl Harness {
         })
         .await
         .expect("the VMM opens its device within 10s");
-        let key = BeaconConnKey {
-            peer_cid: cid,
-            peer_port: VsockPort::new(GUEST_SOURCE_PORT + index),
-        };
+        let key =
+            BeaconConnKey { peer_cid: cid, peer_port: VsockPort::new(GUEST_SOURCE_PORT + index) };
         let ready = format!("READY pid=1 port=1234 launch={token}");
         self.io.queue_connection(key, pid, &[ready.as_str()]).expect("queued");
         self.settle().await;
@@ -362,7 +362,10 @@ fn the_reported_set_only_grows_within_the_declared_set_and_ends_with_the_entry()
     });
     runner
         .run(
-            &(prop::collection::vec(step_strategy(), 0..10), prop::collection::vec(step_strategy(), 0..4)),
+            &(
+                prop::collection::vec(step_strategy(), 0..10),
+                prop::collection::vec(step_strategy(), 0..4),
+            ),
             |(steps, after_close)| {
                 let rt = tokio::runtime::Builder::new_current_thread()
                     .enable_all()
@@ -399,9 +402,14 @@ fn the_reported_set_only_grows_within_the_declared_set_and_ends_with_the_entry()
                             }
                         }
                         let now = harness.reported(&first);
-                        prop_assert_eq!(pairs_of(&now), expected.clone(), "the set is the declared pairs reported so far");
+                        prop_assert_eq!(
+                            pairs_of(&now),
+                            expected.clone(),
+                            "the set is the declared pairs reported so far"
+                        );
                         prop_assert!(
-                            pairs_of(&now).is_subset(&declared_set()) && now.len() == expected.len(),
+                            pairs_of(&now).is_subset(&declared_set())
+                                && now.len() == expected.len(),
                             "the set holds only declared pairs"
                         );
                         prop_assert!(
@@ -420,7 +428,10 @@ fn the_reported_set_only_grows_within_the_declared_set_and_ends_with_the_entry()
                     }
 
                     harness.terminal(&first);
-                    prop_assert!(harness.reported(&first).is_empty(), "the entry ends at the terminal hook");
+                    prop_assert!(
+                        harness.reported(&first).is_empty(),
+                        "the entry ends at the terminal hook"
+                    );
                     for step in &after_close {
                         let pair = match step {
                             Step::Declared(i) | Step::Duplicate(i) | Step::OtherAllocation(i) => {
@@ -551,7 +562,11 @@ async fn a_garbage_line_is_dropped_with_a_warning_and_later_lines_take_effect() 
     );
     harness.send(&launched, "EXIT 0").await;
     let event = harness.exit_report(&launched).await;
-    assert_eq!(event.kind, ExitKind::CleanExit, "the Exit after the garbage line still took effect");
+    assert_eq!(
+        event.kind,
+        ExitKind::CleanExit,
+        "the Exit after the garbage line still took effect"
+    );
 }
 
 /// S-51 (reader): a `Listen` line after `Exit` changes neither the set nor the
@@ -705,7 +720,8 @@ async fn changed_never_misses_an_insertion_under_seeded_schedules() {
             match op {
                 Op::Reported => last_seen = reports.reported(&launched.alloc),
                 Op::Changed => {
-                    waiters.push((last_seen.clone(), waiter(&reports, &launched.alloc, &last_seen)));
+                    waiters
+                        .push((last_seen.clone(), waiter(&reports, &launched.alloc, &last_seen)));
                 }
                 Op::Record(i) => {
                     let pair = [tcp_8080(), udp_5353(), tcp_9999()][i];
@@ -733,9 +749,7 @@ async fn changed_never_misses_an_insertion_under_seeded_schedules() {
         let seen = reports.reported(&launched.alloc);
         let dropped = waiter(&reports, &launched.alloc, &seen);
         dropped.abort();
-        let missing = [tcp_8080(), udp_5353()]
-            .into_iter()
-            .find(|(p, n)| !seen.contains(*p, *n));
+        let missing = [tcp_8080(), udp_5353()].into_iter().find(|(p, n)| !seen.contains(*p, *n));
         if let Some(pair) = missing {
             harness.send(&launched, &listen_line(pair)).await;
             let next = tokio::time::timeout(
@@ -743,12 +757,21 @@ async fn changed_never_misses_an_insertion_under_seeded_schedules() {
                 reports.changed(&launched.alloc, &seen),
             )
             .await
-            .unwrap_or_else(|_| panic!("seed={seed}: `changed(seen)` after a cancelled waiter must complete at once"));
-            assert!(next.contains(pair.0, pair.1), "seed={seed}: the insertion is in the completion");
+            .unwrap_or_else(|_| {
+                panic!(
+                    "seed={seed}: `changed(seen)` after a cancelled waiter must complete at once"
+                )
+            });
+            assert!(
+                next.contains(pair.0, pair.1),
+                "seed={seed}: the insertion is in the completion"
+            );
         }
         let empty = ReportedListeners::default();
         let immediate =
-            tokio::time::timeout(Duration::ZERO, reports.changed(&launched.alloc, &empty)).await.ok();
+            tokio::time::timeout(Duration::ZERO, reports.changed(&launched.alloc, &empty))
+                .await
+                .ok();
         assert_eq!(
             immediate.is_some(),
             !reports.reported(&launched.alloc).is_empty(),

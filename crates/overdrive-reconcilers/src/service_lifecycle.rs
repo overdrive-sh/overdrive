@@ -384,7 +384,7 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::num::NonZeroU16;
 
 use overdrive_core::aggregate::probe_descriptor::ProbeMechanic;
-use overdrive_core::aggregate::{IntentKey, Service, WorkloadIntent};
+use overdrive_core::aggregate::{IntentKey, Listener, Service, WorkloadIntent};
 use overdrive_core::dataplane::backend_key::Proto;
 use overdrive_core::id::{ContentHash, CorrelationKey, NodeId, WorkloadId};
 use overdrive_core::observation::{ProbeResultRow, ProbeRole};
@@ -757,18 +757,22 @@ async fn service_spec_from_intent(
 }
 
 /// Format a `ProbeMechanic` into the operator-facing `mechanic_summary` string.
-fn format_mechanic_summary(mechanic: &ProbeMechanic) -> String {
+///
+/// `listeners` is the Service's declared listener set in declaration order (D14
+/// item 4, DG-11); only the `GuestListeners` arm uses it.
+fn format_mechanic_summary(mechanic: &ProbeMechanic, listeners: &[Listener]) -> String {
     match mechanic {
         ProbeMechanic::Tcp { host, port } => format!("tcp {host}:{port}"),
         ProbeMechanic::Http { path, port, host } => host
             .as_ref()
             .map_or_else(|| format!("http {path}"), |h| format!("http {h}:{port}{path}")),
-        // SCAFFOLD: true — placeholder. The delta (D14 item 4) pins the text
-        // `guest listeners tcp:8080 udp:5353` (declared order), which needs the declared
-        // listener set; the fieldless `GuestListeners` mechanic carries none, so this
-        // signature cannot produce it. Where the listeners reach this formatter is not
-        // pinned by the design; DELIVER pins it with the S-54 hydration.
-        ProbeMechanic::GuestListeners => "guest listeners".to_owned(),
+        // SCAFFOLD: true — placeholder. D14 item 4 pins the text
+        // `guest listeners tcp:8080 udp:5353` (declared order) from `listeners`; DELIVER
+        // implements it.
+        ProbeMechanic::GuestListeners => {
+            let _ = listeners;
+            "guest listeners".to_owned()
+        }
     }
 }
 
@@ -783,7 +787,7 @@ fn spec_facts_for_service(svc: &Service) -> (u32, Duration, String, bool, bool) 
     let interval = Duration::from_secs(u64::from(probe.interval_seconds));
     let startup_deadline =
         interval.checked_mul(probe.max_attempts).unwrap_or(DEFAULT_STARTUP_DEADLINE);
-    let mechanic_summary = format_mechanic_summary(&probe.mechanic);
+    let mechanic_summary = format_mechanic_summary(&probe.mechanic, &svc.listeners);
     (max_attempts, startup_deadline, mechanic_summary, probe.inferred, false)
 }
 
@@ -1276,7 +1280,24 @@ mod tests {
     use super::*;
     use overdrive_core::observation::SameStatusRuns;
     use proptest::prelude::*;
+    use std::num::NonZeroU16;
     use std::time::Instant;
+
+    /// D14 item 4 (DG-11): the `GuestListeners` summary names the declared listeners in
+    /// declaration order, `tcp:<port>` or `udp:<port>` joined by single spaces.
+    /// CONTRACT_SHAPE: pure-function.
+    #[test]
+    #[ignore = "pending DELIVER: D14 guest listeners mechanic summary names the declared listeners"]
+    fn guest_listeners_summary_names_the_declared_listeners_in_declaration_order() {
+        let declared = [
+            Listener { port: NonZeroU16::new(8080).expect("non-zero"), protocol: Proto::Tcp },
+            Listener { port: NonZeroU16::new(5353).expect("non-zero"), protocol: Proto::Udp },
+        ];
+        assert_eq!(
+            format_mechanic_summary(&ProbeMechanic::GuestListeners, &declared),
+            "guest listeners tcp:8080 udp:5353"
+        );
+    }
 
     proptest! {
         #![proptest_config(ProptestConfig {

@@ -25,7 +25,11 @@ pub struct GuestListenerBoard {
 impl GuestListenerBoard {
     /// An empty board with no entries.
     #[must_use]
-    pub const fn new() -> Self {
+    #[allow(
+        clippy::missing_const_for_fn,
+        reason = "the pinned shape is `new() -> Self`; the real board's constructor is not const"
+    )]
+    pub fn new() -> Self {
         Self { _scaffold: () }
     }
 }

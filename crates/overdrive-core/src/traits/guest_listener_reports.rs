@@ -3,16 +3,16 @@
 //!
 //! SCAFFOLD: true — RED scaffold created by DISTILL for the exact shape the
 //! design pins in `feature-delta.md` § "D13 item 10" and § "Interface changes
-//! (D13 to D16)". The trait and the value type are pinned; the value type's
-//! construction surface (`Default`, `FromIterator`) is NOT pinned by the design
-//! and is added here only so a `Sim*` adapter and a test oracle can build a
-//! value; DELIVER may reshape it (see the DISTILL fragment, design gaps).
+//! (D13 to D16)". The trait and the value type are pinned, including the value
+//! type's construction surface (`Default`, `FromIterator<Listener>`, `is_empty`;
+//! DG-6).
 
 use std::collections::BTreeSet;
 use std::num::NonZeroU16;
 
 use async_trait::async_trait;
 
+use crate::aggregate::Listener;
 use crate::dataplane::backend_key::Proto;
 use crate::id::AllocationId;
 
@@ -43,9 +43,9 @@ impl ReportedListeners {
     }
 }
 
-impl FromIterator<(Proto, NonZeroU16)> for ReportedListeners {
-    fn from_iter<I: IntoIterator<Item = (Proto, NonZeroU16)>>(iter: I) -> Self {
-        Self { pairs: iter.into_iter().collect() }
+impl FromIterator<Listener> for ReportedListeners {
+    fn from_iter<I: IntoIterator<Item = Listener>>(iter: I) -> Self {
+        Self { pairs: iter.into_iter().map(|l| (l.protocol, l.port)).collect() }
     }
 }
 

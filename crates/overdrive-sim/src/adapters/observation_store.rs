@@ -717,6 +717,12 @@ impl SimObservationStore {
         self.inner.pending_write_failures.lock().push_back(error);
     }
 
+    /// Test-only helper: discard any queued write failures that no write consumed, so an
+    /// armed fault cannot leak into a later write.
+    pub fn clear_write_failures(&self) {
+        self.inner.pending_write_failures.lock().clear();
+    }
+
     /// Test-only helper: queue a read failure for the next call to
     /// [`ObservationStore::alloc_status_rows`] — the read-side mirror of
     /// [`inject_write_failure`](Self::inject_write_failure).

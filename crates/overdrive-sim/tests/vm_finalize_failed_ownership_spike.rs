@@ -238,7 +238,8 @@ async fn drive(seed: u64, finalize: bool) {
         http_prober,
         clock.clone(),
         obs.clone(),
-        guest_dial, Arc::new(overdrive_worker::GuestListenerBoard::new()),
+        guest_dial,
+        Arc::new(overdrive_worker::GuestListenerBoard::new()),
     ));
     let wiring = overdrive_core::guest_network::GuestNetworkExecWiring::new(clock.clone());
     let beacon_io = Arc::new(SimBeaconIo::new(vmm.inner.clone()));
@@ -256,7 +257,8 @@ async fn drive(seed: u64, finalize: bool) {
         probes,
         wiring.gate(),
         layout.clone(),
-        intake, Arc::new(overdrive_worker::GuestListenerBoard::new()),
+        intake,
+        Arc::new(overdrive_worker::GuestListenerBoard::new()),
     ));
     let pool = Arc::new(GuestAddressPool::new(
         "100.95.0.0/16".parse().expect("static guest prefix"),

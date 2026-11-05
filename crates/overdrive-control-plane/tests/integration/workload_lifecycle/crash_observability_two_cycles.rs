@@ -74,7 +74,8 @@ impl WorkloadNetworkProvisioner for NoopNetworkProvisioner {
 /// always finds a prior row (the shape production guarantees via the
 /// gate).
 fn crashing_spec(alloc: &AllocationId) -> AllocationSpec {
-    AllocationSpec { declared_listeners: Vec::new(),
+    AllocationSpec {
+        declared_listeners: Vec::new(),
         alloc: alloc.clone(),
         identity: SpiffeId::for_allocation(
             &WorkloadId::new("crashobs2").expect("valid workload id"),

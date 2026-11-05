@@ -105,6 +105,10 @@ pub struct SimDriver {
     /// [`DriverError::Io`] carrying this text and leaves the allocation
     /// table untouched — a stop failure other than `NotFound`.
     stop_failure: Mutex<Option<String>>,
+    /// Scripted one-shot [`Driver::start`] rejection: the next `start`
+    /// call takes this reason and fails with
+    /// [`DriverError::StartRejected`]; later starts behave normally.
+    next_start_rejection: Mutex<Option<String>>,
     /// Every [`Driver::stop`] call, in call order (the stop-call oracle).
     stop_calls: Mutex<Vec<AllocationId>>,
 }
@@ -153,6 +157,7 @@ impl SimDriver {
             exit_rx: Mutex::new(Some(exit_rx)),
             clock,
             stop_failure: Mutex::new(None),
+            next_start_rejection: Mutex::new(None),
             stop_calls: Mutex::new(Vec::new()),
         }
     }
@@ -163,6 +168,16 @@ impl SimDriver {
     /// changes no driver state, so the allocation stays supervised.
     pub fn script_stop_failure(&self, reason: Option<&str>) {
         *self.stop_failure.lock() = reason.map(str::to_owned);
+    }
+
+    /// Script the NEXT [`Driver::start`] call to be rejected with `reason`
+    /// (`Some`), or clear a pending rejection (`None`). One-shot: the
+    /// rejected start consumes it and every later start behaves normally,
+    /// unlike the sticky [`SimDriver::fail_on_start_with`]. The rejection
+    /// is a [`DriverError::StartRejected`] and leaves the allocation table
+    /// untouched.
+    pub fn script_next_start_rejection(&self, reason: Option<&str>) {
+        *self.next_start_rejection.lock() = reason.map(str::to_owned);
     }
 
     /// Every [`Driver::stop`] call so far (failed ones included), in call
@@ -395,7 +410,10 @@ impl Driver for SimDriver {
     }
 
     async fn start(&self, spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
-        let failure = self.failure_mode.lock().clone();
+        let one_shot = self.next_start_rejection.lock().take();
+        let failure = one_shot
+            .map(|reason| FailureMode::StartRejected { reason })
+            .or_else(|| self.failure_mode.lock().clone());
         if let Some(FailureMode::StartRejected { reason }) = failure {
             // A scripted rejection carries no driver-specific structured
             // cause, so it takes the ONE unknown fallback and preserves the
@@ -622,7 +640,8 @@ mod release_for_exit_emission_tests {
     use std::str::FromStr;
 
     fn sample_spec(name: &str) -> AllocationSpec {
-        AllocationSpec { declared_listeners: Vec::new(),
+        AllocationSpec {
+            declared_listeners: Vec::new(),
             alloc: AllocationId::from_str(name).expect("valid AllocationId"),
             identity: SpiffeId::from_str("spiffe://overdrive.local/test/wl")
                 .expect("valid SpiffeId"),

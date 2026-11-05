@@ -63,8 +63,8 @@ use overdrive_core::observation::ProbeRole;
 use overdrive_core::traits::driver::Driver as _;
 use overdrive_core::traits::observation_store::{AllocState, ObservationStore};
 use overdrive_core::transition_reason::{StoppedBy, TerminalCondition};
-use quint_connect::{Config, Driver, Result, State, Step, quint_run, quint_test, switch};
 use overdrive_worker::probe_runner::ProbeRunner;
+use quint_connect::{Config, Driver, Result, State, Step, quint_run, quint_test, switch};
 use serde::Deserialize;
 use tokio::runtime::Runtime;
 
@@ -125,8 +125,9 @@ impl LivenessGateDriver {
     fn init(&mut self) {
         self.runner.stop_alloc(&self.alloc);
         self.runtime.block_on(settle());
-        let world =
-            self.runtime.block_on(LivenessWorld::compose_unstarted(ProbeSet::ReadinessAndLiveness, LT));
+        let world = self
+            .runtime
+            .block_on(LivenessWorld::compose_unstarted(ProbeSet::ReadinessAndLiveness, LT));
         self.runner = Arc::clone(&world.runner);
         self.obs = Arc::clone(&world.state.obs);
         self.alloc = world.alloc.clone();
@@ -270,6 +271,7 @@ impl State<LivenessGateDriver> for LivenessGateState {
         let role_live = driver.runner.is_role_live(&driver.alloc, ProbeRole::Liveness);
         let supervised = driver.runner.active_alloc_count() == 1;
         let row = driver.runtime.block_on(driver.obs.alloc_status_row(&driver.alloc))?;
+        // DG-3 (feature-delta § Pinned conformance projection, `committed` row): `committed` is compared only while the row is `Running`; after `Crash` it is model-only.
         let committed_while_running = row
             .filter(|row| row.state == AllocState::Running)
             .map(|row| matches!(row.terminal, Some(TerminalCondition::Stable { .. })));
@@ -280,7 +282,10 @@ impl State<LivenessGateDriver> for LivenessGateState {
 impl LivenessGateState {
     fn from_value(state: &Value) -> std::result::Result<Self, DriverError> {
         let Value::Record(record) = state else {
-            return Err(DriverError::Shape { expected: "a record of variables", found: state.clone() });
+            return Err(DriverError::Shape {
+                expected: "a record of variables",
+                found: state.clone(),
+            });
         };
         let qualified = format!("{MAIN}::{MODULE}::lv");
         let lv = record.get(&qualified).ok_or(DriverError::MissingVar(qualified))?;
@@ -302,7 +307,11 @@ impl LivenessGateState {
         };
         let rw = boolean("rw")?;
         let committed = boolean("committed")?;
-        Ok(Self { role_live, supervised: boolean("sup")?, committed_while_running: rw.then_some(committed) })
+        Ok(Self {
+            role_live,
+            supervised: boolean("sup")?,
+            committed_while_running: rw.then_some(committed),
+        })
     }
 }
 

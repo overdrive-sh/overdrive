@@ -52,7 +52,8 @@ fn allocation_spec(
     driver: DriverPayload,
     probes: Vec<ProbeDescriptor>,
 ) -> AllocationSpec {
-    AllocationSpec { declared_listeners: Vec::new(),
+    AllocationSpec {
+        declared_listeners: Vec::new(),
         alloc: AllocationId::new(alloc).expect("valid allocation ID"),
         identity: SpiffeId::new("spiffe://overdrive.local/workload/vm-service/alloc/composition")
             .expect("valid SPIFFE ID"),
@@ -122,7 +123,8 @@ async fn one_server_boot_shares_exactly_one_trusted_probe_runner_with_vm_driver(
                 1024,
             ),
         },
-        beacon, Arc::new(overdrive_worker::GuestListenerBoard::new()),
+        beacon,
+        Arc::new(overdrive_worker::GuestListenerBoard::new()),
     );
     let vm = allocation_spec(
         "svm-22-vm",

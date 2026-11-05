@@ -224,7 +224,8 @@ impl World {
                 clock.clone(),
                 obs.clone(),
                 Arc::clone(&guest_dial)
-                    as Arc<dyn overdrive_core::guest_transport::dial::GuestStreamDial>, Arc::new(overdrive_worker::GuestListenerBoard::new()),
+                    as Arc<dyn overdrive_core::guest_transport::dial::GuestStreamDial>,
+                Arc::new(overdrive_worker::GuestListenerBoard::new()),
             ),
         });
         let views = Arc::new(RedbViewStore::open(directory.path()).unwrap());

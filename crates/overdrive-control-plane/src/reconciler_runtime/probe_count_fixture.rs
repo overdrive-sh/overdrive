@@ -243,7 +243,8 @@ pub(super) fn vm_spec(
     alloc: &AllocationId,
     intent: &WorkloadIntent,
 ) -> AllocationSpec {
-    AllocationSpec { declared_listeners: Vec::new(),
+    AllocationSpec {
+        declared_listeners: Vec::new(),
         alloc: alloc.clone(),
         identity: SpiffeId::for_allocation(workload, alloc),
         driver: DriverPayload::Vm(VmPayload {
@@ -374,7 +375,8 @@ impl ProbeWorld {
             Arc::new(SimHttpProber::new()),
             Arc::clone(&clock) as Arc<dyn Clock>,
             Arc::clone(&obs) as Arc<dyn ObservationStore>,
-            Arc::clone(&dial) as Arc<dyn overdrive_core::guest_transport::dial::GuestStreamDial>, Arc::new(overdrive_worker::GuestListenerBoard::new()),
+            Arc::clone(&dial) as Arc<dyn overdrive_core::guest_transport::dial::GuestStreamDial>,
+            Arc::new(overdrive_worker::GuestListenerBoard::new()),
         );
 
         let alloc = AllocationId::new(&format!("{WORKLOAD}-0")).expect("alloc id");
@@ -641,7 +643,11 @@ impl ProbeWorld {
     }
 }
 
-pub(super) async fn persist_intent(store: &LocalIntentStore, workload: &WorkloadId, intent: &WorkloadIntent) {
+pub(super) async fn persist_intent(
+    store: &LocalIntentStore,
+    workload: &WorkloadId,
+    intent: &WorkloadIntent,
+) {
     let archived = intent.archive_for_store().expect("rkyv archive");
     store
         .put(IntentKey::for_workload(workload).as_bytes(), archived.as_ref())

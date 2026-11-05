@@ -22,17 +22,20 @@
     reason = "a test composition asserts its own preconditions; protocol names are prose; two consumers use subsets"
 )]
 
-use std::net::Ipv4Addr;
+use std::net::{Ipv4Addr, SocketAddrV4};
 use std::num::NonZeroU16;
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use overdrive_core::aggregate::{WorkloadIntent, WorkloadKind};
+use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
+use overdrive_core::aggregate::{
+    DriverInput, ResourcesInput, Service, VmInput, WorkloadIntent, WorkloadKind,
+};
+use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
 use overdrive_core::dataplane::backend_key::Proto;
 use overdrive_core::guest_transport::dial::GuestStreamDial;
 use overdrive_core::id::{AllocationId, NodeId, ServiceId, ServiceVip, WorkloadId};
-use overdrive_core::observation::{ProbeResultRow, ProbeRole};
+use overdrive_core::observation::{ProbeIdx, ProbeResultRow, ProbeRole};
 use overdrive_core::reconcilers::{ReconcilerName, TargetResource};
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{Driver, DriverType};
@@ -41,8 +44,14 @@ use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRow, LogicalTimestamp, ObservationStore, ObservationStoreError,
     TransitionSource,
 };
-use overdrive_core::vm::config::{Gid, HostArch, VmConfinement, VmmIdentity};
+use overdrive_core::transition_reason::TerminalCondition;
+use overdrive_core::vm::beacon::BeaconConnKey;
+use overdrive_core::vm::config::{
+    Gid, HostArch, KERNEL_MAGIC_WINDOW, VmConfinement, VmmIdentity, VsockPort,
+};
 use overdrive_core::wall_clock::UnixInstant;
+use overdrive_sim::SimVmm;
+use overdrive_sim::adapters::beacon_io::SimBeaconIo;
 use overdrive_sim::adapters::ca::SimCa;
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::dataplane::SimDataplane;
@@ -65,17 +74,17 @@ use crate::action_shim::build_alloc_status_row;
 /// The liveness failure threshold of the shared fixture's Service.
 const LIVENESS_FAILURE_THRESHOLD: u32 = super::probe_count_fixture::LIVENESS_FAILURE_THRESHOLD;
 
-/// The fixture's Service with the liveness probe's `failure_threshold` set.
-fn intent_with_threshold(probes: ProbeSet, threshold: u32) -> WorkloadIntent {
-    use overdrive_core::aggregate::{DriverInput, ResourcesInput, Service, VmInput};
-    use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
+/// The fixture's one Service builder: the caller sets the startup descriptors, the
+/// declared listeners and the liveness probe's `failure_threshold`; the readiness
+/// probe and the rest are shared.
+fn service_intent(
+    startup: Vec<ProbeDescriptor>,
+    listeners: Vec<ListenerInput>,
+    threshold: u32,
+    kernel: &str,
+    rootfs: &str,
+) -> WorkloadIntent {
     let tcp = super::probe_count_fixture::tcp;
-    let startup = match probes {
-        ProbeSet::ReadinessAndLiveness => vec![],
-        ProbeSet::AllTcp | ProbeSet::HttpLiveness { .. } => {
-            vec![tcp(ProbeRole::Startup, super::probe_count_fixture::STARTUP_PORT)]
-        }
-    };
     let mut liveness = tcp(ProbeRole::Liveness, super::probe_count_fixture::LIVENESS_PORT);
     liveness.failure_threshold = Some(threshold);
     let svc = Service::from_submit(ServiceSpecInput {
@@ -85,13 +94,10 @@ fn intent_with_threshold(probes: ProbeSet, threshold: u32) -> WorkloadIntent {
         driver: DriverInput::Vm(VmInput {
             command: "/bin/serve".to_owned(),
             args: vec![],
-            kernel: "/kernel".to_owned(),
-            rootfs: "/rootfs".to_owned(),
+            kernel: kernel.to_owned(),
+            rootfs: rootfs.to_owned(),
         }),
-        listeners: vec![ListenerInput {
-            port: super::probe_count_fixture::LISTENER_PORT,
-            protocol: "tcp".to_owned(),
-        }],
+        listeners,
         startup_probes: startup,
         readiness_probes: vec![tcp(
             ProbeRole::Readiness,
@@ -101,6 +107,76 @@ fn intent_with_threshold(probes: ProbeSet, threshold: u32) -> WorkloadIntent {
     })
     .expect("valid probed service spec");
     WorkloadIntent::Service(svc)
+}
+
+fn tcp_listener(port: u16) -> ListenerInput {
+    ListenerInput { port, protocol: "tcp".to_owned() }
+}
+
+/// The second port the guest-listener Service declares beside the fixture's
+/// `LISTENER_PORT` (8080): the Service declares two TCP listeners.
+pub(super) const SECOND_LISTENER_PORT: u16 = 9090;
+
+/// The Service of a probed world: the startup probe the `ProbeSet` declares, one listener.
+fn probed_intent(probes: ProbeSet, threshold: u32, kernel: &str, rootfs: &str) -> WorkloadIntent {
+    let startup = match probes {
+        ProbeSet::ReadinessAndLiveness => vec![],
+        ProbeSet::AllTcp | ProbeSet::HttpLiveness { .. } => {
+            vec![super::probe_count_fixture::tcp(
+                ProbeRole::Startup,
+                super::probe_count_fixture::STARTUP_PORT,
+            )]
+        }
+    };
+    let listeners = vec![tcp_listener(super::probe_count_fixture::LISTENER_PORT)];
+    service_intent(startup, listeners, threshold, kernel, rootfs)
+}
+
+/// A Service with no explicit startup probe, as D15's default rule leaves it:
+/// the sole startup descriptor is the platform's guest-listener gate
+/// (interval 2 s, 30 attempts: the 60 s startup deadline), over two declared
+/// TCP listeners.
+fn guest_listener_intent(kernel: &str, rootfs: &str) -> WorkloadIntent {
+    let gate = ProbeDescriptor {
+        idx: ProbeIdx::new(0),
+        role: ProbeRole::Startup,
+        mechanic: ProbeMechanic::GuestListeners,
+        timeout_seconds: 5,
+        interval_seconds: 2,
+        max_attempts: 30,
+        failure_threshold: None,
+        success_threshold: None,
+        inferred: true,
+    };
+    let listeners = vec![
+        tcp_listener(super::probe_count_fixture::LISTENER_PORT),
+        tcp_listener(SECOND_LISTENER_PORT),
+    ];
+    service_intent(vec![gate], listeners, LIVENESS_FAILURE_THRESHOLD, kernel, rootfs)
+}
+
+/// What a world composes: the probed Service (started at once, or unstarted), the
+/// restartable one beside `workload-lifecycle`, or the restartable Service whose
+/// startup gate is the guest-listener gate.
+#[derive(Debug, Clone, Copy)]
+enum WorldShape {
+    Probed(ProbeSet),
+    Restartable(ProbeSet),
+    RestartableGuestListeners,
+}
+
+impl WorldShape {
+    /// The probe set the dial helpers read (unused by the guest-listener world).
+    const fn probes(self) -> ProbeSet {
+        match self {
+            Self::Probed(p) | Self::Restartable(p) => p,
+            Self::RestartableGuestListeners => ProbeSet::ReadinessAndLiveness,
+        }
+    }
+
+    const fn restartable(self) -> bool {
+        !matches!(self, Self::Probed(_))
+    }
 }
 
 /// The composed production owners and the driven-port sims.
@@ -117,7 +193,21 @@ pub(super) struct LivenessWorld {
     pub(super) target: TargetResource,
     pub(super) intent: WorkloadIntent,
     pub(super) service_id: ServiceId,
+    /// The simulated machine the real `VmDriver` boots VMMs on.
+    pub(super) vmm: SimVmm,
+    /// The node beacon the guests' READY lines arrive on.
+    pub(super) beacon: Arc<SimBeaconIo>,
+    /// The workload address of the current allocation (the probes' dial target).
+    pub(super) addr: Ipv4Addr,
     service_lifecycle: ReconcilerName,
+    workload_lifecycle: ReconcilerName,
+    beacon_port: VsockPort,
+    next_beacon_port: u32,
+    /// The beacon connection of the most recently placed instance's guest.
+    beacon_key: Option<BeaconConnKey>,
+    /// Every allocation the node has placed, in placement order.
+    placed: Vec<AllocationId>,
+    _exit_observer: Option<tokio::task::JoinHandle<()>>,
     tick_n: u64,
     row_counter: u64,
     tmp: TempDir,
@@ -137,60 +227,114 @@ impl LivenessWorld {
     /// composed; no row exists and no supervisor is registered. `liveness_threshold`
     /// is the liveness probe's `failure_threshold`.
     pub(super) async fn compose_unstarted(probes: ProbeSet, liveness_threshold: u32) -> Self {
+        Self::build(WorldShape::Probed(probes), liveness_threshold).await
+    }
+
+    /// The node's production composition with `workload-lifecycle` registered
+    /// beside `service-lifecycle` (the single restart authority, ADR-0087) and
+    /// the production exit observer running. Nothing is started: the
+    /// allocation is placed, and later restarted, by
+    /// [`Self::place_instance`], which runs the real `VmDriver::start` over
+    /// `SimVmm` and a `SimBeaconIo` (the `quint_cid_lease` composition).
+    pub(super) async fn compose_restartable(probes: ProbeSet) -> Self {
+        Self::build(WorldShape::Restartable(probes), LIVENESS_FAILURE_THRESHOLD).await
+    }
+
+    /// [`Self::compose_restartable`] for a Service with no explicit startup
+    /// probe: its startup gate is the platform's guest-listener gate over two
+    /// declared TCP listeners (8080 and [`SECOND_LISTENER_PORT`]). The
+    /// `ProbeSet` fields the dial helpers read are unused by this world.
+    pub(super) async fn compose_restartable_guest_listeners() -> Self {
+        Self::build(WorldShape::RestartableGuestListeners, LIVENESS_FAILURE_THRESHOLD).await
+    }
+
+    async fn build(shape: WorldShape, liveness_threshold: u32) -> Self {
+        let (probes, restartable) = (shape.probes(), shape.restartable());
         let tmp = TempDir::new().expect("tempdir");
+        let kernel = tmp.path().join("vmlinuz");
+        let rootfs = tmp.path().join("master.img");
+        // The staged boot artifacts the real `VmDriver::start` reads (as
+        // `quint_cid_lease` stages them).
+        tokio::fs::write(&rootfs, b"deterministic-fixture-rootfs-bytes")
+            .await
+            .expect("stage rootfs");
+        let mut header = vec![0_u8; KERNEL_MAGIC_WINDOW];
+        header[..4].copy_from_slice(b"\x7fELF");
+        tokio::fs::write(&kernel, &header).await.expect("stage the synthetic kernel image");
+
         let mut runtime = ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path())
             .expect("reconciler runtime");
         runtime.register(crate::service_lifecycle()).await.expect("register service-lifecycle");
+        if restartable {
+            runtime
+                .register(crate::workload_lifecycle())
+                .await
+                .expect("register workload-lifecycle");
+        }
 
-        let node = NodeId::new("probe-node").expect("node id");
+        let node = NodeId::new(if restartable { "local" } else { "probe-node" }).expect("node id");
         let store_path = tmp.path().join("intent.redb");
         let store = Arc::new(LocalIntentStore::open(&store_path).expect("open intent store"));
         let workload = WorkloadId::new(WORKLOAD).expect("workload id");
-        let intent = intent_with_threshold(probes, liveness_threshold);
+        let (kernel_path, rootfs_path) =
+            (kernel.display().to_string(), rootfs.display().to_string());
+        let intent = match shape {
+            WorldShape::RestartableGuestListeners => {
+                guest_listener_intent(&kernel_path, &rootfs_path)
+            }
+            WorldShape::Probed(_) | WorldShape::Restartable(_) => {
+                probed_intent(probes, liveness_threshold, &kernel_path, &rootfs_path)
+            }
+        };
         persist_intent(&store, &workload, &intent).await;
 
         let obs = Arc::new(SimObservationStore::single_peer(node.clone(), 0));
         let clock = Arc::new(SimClock::new());
         let dial = Arc::new(SimGuestStreamDial::new());
+        // One board for the node (DG-6): the driver's beacon reader writes it
+        // and the probe runner reads it.
+        let board = Arc::new(overdrive_worker::GuestListenerBoard::new());
         let runner = Arc::new(ProbeRunner::new(
             Arc::new(SimTcpProber::new()),
             Arc::new(SimHttpProber::new()),
             Arc::clone(&clock) as Arc<dyn Clock>,
             Arc::clone(&obs) as Arc<dyn ObservationStore>,
             Arc::clone(&dial) as Arc<dyn GuestStreamDial>,
-            Arc::new(overdrive_worker::GuestListenerBoard::new()),
+            Arc::clone(&board) as Arc<dyn overdrive_core::traits::GuestListenerReports>,
         ));
         let wiring = overdrive_core::guest_network::GuestNetworkExecWiring::new(
-            Arc::clone(&clock) as Arc<dyn Clock>,
+            Arc::clone(&clock) as Arc<dyn Clock>
         );
         assert!(wiring.supervisor().open_after_boot());
-        let vmm = overdrive_sim::SimVmm::new();
-        let beacon = BeaconIntake::bind(
-            Arc::new(overdrive_sim::adapters::beacon_io::SimBeaconIo::new(vmm.clone())),
+        let vmm = SimVmm::new();
+        let beacon = Arc::new(SimBeaconIo::new(vmm.clone()));
+        let beacon_intake = BeaconIntake::bind(
+            Arc::clone(&beacon) as Arc<dyn overdrive_core::vm::beacon::BeaconIo>,
             overdrive_core::guest_transport::VsockListenPort::KernelAssigned,
         )
         .await
         .expect("bind the node beacon intake");
+        let beacon_port = beacon_intake.bound_port();
         let driver = Arc::new(VmDriver::new(
-            Arc::new(vmm),
+            Arc::new(vmm.clone()),
             Arc::clone(&clock) as Arc<dyn Clock>,
             Arc::new(overdrive_sim::SimCgroupFs::new()),
             Arc::new(overdrive_sim::SimCgroupAccounting::new()),
             Arc::clone(&runner),
             wiring.gate(),
             VmHostLayout {
-                cgroup_root: PathBuf::from("/tmp/liveness-world-cgroup"),
-                run_dir_root: PathBuf::from("/tmp/liveness-world-run"),
-                clone_index_dir: PathBuf::from("/tmp/liveness-world-index"),
-                clone_staging_dir: PathBuf::from("/tmp/liveness-world-staging"),
+                cgroup_root: tmp.path().join("cgroup"),
+                run_dir_root: tmp.path().join("run"),
+                clone_index_dir: tmp.path().join("clone-index"),
+                clone_staging_dir: tmp.path().join("clone-staging"),
                 arch: HostArch::X86_64,
                 confinement: VmConfinement::confined(
                     VmmIdentity { uid: 1000, gid: Gid::new(994), supplementary: Vec::new() },
                     1024,
                 ),
             },
-            beacon,
-            Arc::new(overdrive_worker::GuestListenerBoard::new()),
+            beacon_intake,
+            Arc::clone(&board),
         ));
 
         let allocator = crate::test_default_allocator(Arc::clone(&store) as Arc<dyn IntentStore>);
@@ -210,7 +354,7 @@ impl LivenessWorld {
             Arc::new(SimDataplane::new()),
             Arc::new(SimCa::new(Arc::new(SimEntropy::new(0)))),
             Arc::new(crate::identity_mgr::IdentityMgr::new(None)),
-            node,
+            node.clone(),
             allocator,
             crate::test_empty_listener_facts(),
             Ipv4Addr::LOCALHOST,
@@ -232,6 +376,14 @@ impl LivenessWorld {
             )
         };
 
+        let exit_observer = restartable.then(|| {
+            crate::worker::exit_observer::spawn(
+                Arc::clone(&obs) as Arc<dyn ObservationStore>,
+                Arc::clone(&driver) as Arc<dyn Driver>,
+                Arc::clone(&state.lifecycle_events),
+                Arc::clone(&clock) as Arc<dyn Clock>,
+            )
+        });
         let alloc = AllocationId::new(&format!("{WORKLOAD}-0")).expect("alloc id");
         Self {
             state,
@@ -246,7 +398,16 @@ impl LivenessWorld {
             target: TargetResource::new(&format!("workload/{WORKLOAD}")).expect("target"),
             intent,
             service_id,
+            vmm,
+            beacon,
+            addr: WORKLOAD_ADDR,
             service_lifecycle: ReconcilerName::new("service-lifecycle").expect("name"),
+            workload_lifecycle: ReconcilerName::new("workload-lifecycle").expect("name"),
+            beacon_port,
+            next_beacon_port: 50_000,
+            beacon_key: None,
+            placed: Vec::new(),
+            _exit_observer: exit_observer,
             tick_n: 0,
             row_counter: 0,
             tmp,
@@ -321,10 +482,12 @@ impl LivenessWorld {
     pub(super) async fn period(&self, outcome: &RunOutcome, per_role: &[(ProbeRole, RunOutcome)]) {
         for role in [ProbeRole::Startup, ProbeRole::Readiness, ProbeRole::Liveness] {
             let o = per_role.iter().find(|(r, _)| *r == role).map_or(outcome, |(_, o)| o);
-            self.dial.script(
-                super::probe_count_fixture::ProbeWorld::target_of(role),
-                o.script(role, self.probes),
-            );
+            let port = match role {
+                ProbeRole::Startup => super::probe_count_fixture::STARTUP_PORT,
+                ProbeRole::Readiness => super::probe_count_fixture::READINESS_PORT,
+                ProbeRole::Liveness => super::probe_count_fixture::LIVENESS_PORT,
+            };
+            self.dial.script(SocketAddrV4::new(self.addr, port), o.script(role, self.probes));
         }
         self.clock.tick(PROBE_INTERVAL);
         settle().await;
@@ -346,6 +509,106 @@ impl LivenessWorld {
         .await;
         settle().await;
         result
+    }
+
+    /// The `SimClock` step before each restart-authority tick: past every
+    /// restart backoff, so the backoff never defers a placement the scenario
+    /// takes in that step (as `quint_cid_lease` steps it).
+    const PAST_BACKOFF: Duration = Duration::from_secs(3_600);
+
+    /// One `workload-lifecycle` convergence tick (the single restart
+    /// authority), after the clock has passed the restart backoff. The
+    /// dispatch is awaited; a start waits for the guest's READY, so a tick
+    /// that places an allocation is driven by [`Self::place_instance`].
+    pub(super) async fn restart_authority_look(&mut self) -> Result<(), ConvergenceError> {
+        self.clock.tick(Self::PAST_BACKOFF);
+        self.tick_n += 1;
+        let now: Instant = self.clock.now();
+        let result = run_convergence_tick(
+            &self.state,
+            &self.workload_lifecycle,
+            &self.target,
+            now,
+            self.tick_n,
+            now + Duration::from_secs(1),
+        )
+        .await;
+        settle().await;
+        result
+    }
+
+    /// The restart authority places the workload's next allocation: a
+    /// `workload-lifecycle` tick whose dispatch leases a guest address and
+    /// CID and runs the production `VmDriver::start` over `SimVmm`; the
+    /// guest's READY (the launch token the lease carries, on the beacon the
+    /// intake bound) is delivered as stimulus once the VMM holds its CID's
+    /// device. Returns the new allocation, which becomes the world's current
+    /// one; the driver's `on_alloc_running` was called by the shim.
+    pub(super) async fn place_instance(&mut self) -> AllocationId {
+        const SETTLE_BOUND: Duration = Duration::from_secs(10);
+        self.clock.tick(Self::PAST_BACKOFF);
+        self.tick_n += 1;
+        let tick_n = self.tick_n;
+        let state = self.state.clone();
+        let name = self.workload_lifecycle.clone();
+        let target = self.target.clone();
+        let now: Instant = self.clock.now();
+        let tick = tokio::spawn(async move {
+            run_convergence_tick(&state, &name, &target, now, tick_n, now + Duration::from_secs(1))
+                .await
+        });
+
+        let deadline = std::time::Instant::now() + SETTLE_BOUND;
+        let (alloc, cid, launch, pid) = loop {
+            let leases = self.state.guest_pool.lease_observation().leases;
+            let fresh = leases.iter().find(|(alloc, _)| !self.placed.contains(alloc));
+            if let Some((alloc, lease)) = fresh
+                && let Some(pid) = self.vmm.vsock_device_holders().get(&lease.cid).copied()
+            {
+                break (alloc.clone(), lease.cid, lease.launch, pid);
+            }
+            assert!(
+                !tick.is_finished(),
+                "the restart authority's tick ended without placing an allocation: {:?}",
+                tick.await
+            );
+            assert!(std::time::Instant::now() < deadline, "no VMM opened a fresh lease's device");
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        };
+
+        self.next_beacon_port += 1;
+        let key = BeaconConnKey { peer_cid: cid, peer_port: VsockPort::new(self.next_beacon_port) };
+        let ready = format!("READY pid=1 port={} launch={launch}", self.beacon_port);
+        self.beacon.queue_connection(key, pid, &[ready.as_str()]).expect("the guest's beacon");
+        self.beacon_key = Some(key);
+        tokio::time::timeout(SETTLE_BOUND, tick)
+            .await
+            .expect("the placement tick returns once the guest is ready")
+            .expect("the placement tick does not panic")
+            .expect("the placement tick succeeds");
+        settle().await;
+
+        self.placed.push(alloc.clone());
+        self.alloc = alloc.clone();
+        self.addr = self
+            .alloc_row()
+            .await
+            .and_then(|row| row.workload_addr)
+            .expect("the placed allocation's row carries its workload address");
+        alloc
+    }
+
+    /// The current instance's guest writes one line on its beacon connection
+    /// (a `LISTEN` report). A report the guest never writes is the omitted
+    /// call: the host sees nothing. `false` when the connection is gone.
+    pub(super) fn guest_writes(&self, line: &str) -> bool {
+        let key = self.beacon_key.expect("an instance is placed before its guest writes");
+        self.beacon.guest_write(key, line)
+    }
+
+    /// Every allocation the node has placed, oldest first.
+    pub(super) fn placed(&self) -> &[AllocationId] {
+        &self.placed
     }
 
     /// Script the next observation write to fail once.
@@ -379,17 +642,48 @@ impl LivenessWorld {
             .find(|row| row.alloc_id == self.alloc)
     }
 
-    pub(super) async fn liveness_rows(&self) -> Vec<ProbeResultRow> {
+    /// The stored probe rows of the current allocation for `role`.
+    pub(super) async fn rows_for(&self, role: ProbeRole) -> Vec<ProbeResultRow> {
         self.obs
             .list_probe_results_for_alloc(&self.alloc)
             .await
             .expect("list probe rows")
             .into_iter()
-            .filter(|r| r.role == ProbeRole::Liveness)
+            .filter(|r| r.role == role)
             .collect()
     }
 
     pub(super) fn liveness_live(&self) -> bool {
         self.runner.is_role_live(&self.alloc, ProbeRole::Liveness)
     }
+}
+
+/// Whether a row's terminal is the committed `Stable`.
+pub(super) fn is_stable(terminal: Option<&TerminalCondition>) -> bool {
+    matches!(terminal, Some(TerminalCondition::Stable { .. }))
+}
+
+/// The budget is spent: the restart authority gives the Service up. Takes the give-up
+/// tick, hands the row's terminal to `expect` (the cause-specific oracle), takes a later
+/// tick and asserts the give-up stays final (`is_cause`), that no allocation was placed
+/// after the `total` already placed, and that nothing is supervised.
+pub(super) async fn run_to_give_up(
+    w: &mut LivenessWorld,
+    tag: &str,
+    total: u64,
+    expect: impl Fn(Option<&TerminalCondition>),
+    is_cause: impl Fn(Option<&TerminalCondition>) -> bool,
+) {
+    w.restart_authority_look().await.expect("the give-up tick");
+    let row = w.alloc_row().await.expect("row");
+    expect(row.terminal.as_ref());
+    w.restart_authority_look().await.expect("a later tick");
+    let row = w.alloc_row().await.expect("row");
+    assert!(
+        is_cause(row.terminal.as_ref()),
+        "{tag}: the give-up stays final, got {:?}",
+        row.terminal
+    );
+    assert_eq!(w.placed().len() as u64, total, "{tag}: no allocation after the give-up");
+    assert_eq!(w.runner.active_alloc_count(), 0, "{tag}: nothing is supervised after the give-up");
 }

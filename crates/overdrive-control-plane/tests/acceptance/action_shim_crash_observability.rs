@@ -365,7 +365,8 @@ fn node_id() -> NodeId {
 }
 
 fn spec() -> AllocationSpec {
-    AllocationSpec { declared_listeners: Vec::new(),
+    AllocationSpec {
+        declared_listeners: Vec::new(),
         alloc: alloc_id(),
         identity: SpiffeId::new("spiffe://overdrive.local/workload/crashobs/alloc/0")
             .expect("valid spiffe id"),

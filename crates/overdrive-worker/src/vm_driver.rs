@@ -2376,7 +2376,8 @@ mod tests {
                 NodeId::new("vm-driver-unit").expect("valid node ID"),
                 0,
             )) as Arc<dyn ObservationStore>,
-            Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()), Arc::new(crate::GuestListenerBoard::new()),
+            Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
+            Arc::new(crate::GuestListenerBoard::new()),
         ))
     }
 
@@ -2654,7 +2655,8 @@ mod tests {
             &layout.clone_index_dir,
         );
         let run_dir = VmRunDir::for_alloc(&layout.run_dir_root, &alloc);
-        let spec = AllocationSpec { declared_listeners: Vec::new(),
+        let spec = AllocationSpec {
+            declared_listeners: Vec::new(),
             alloc,
             identity: SpiffeId::new(
                 "spiffe://overdrive.local/workload/diagnostic-totality/alloc/x",
@@ -2688,7 +2690,8 @@ mod tests {
             test_probe_runner(),
             wiring.gate(),
             layout,
-            test_beacon_intake().await, Arc::new(crate::GuestListenerBoard::new()),
+            test_beacon_intake().await,
+            Arc::new(crate::GuestListenerBoard::new()),
         )
         .with_guest_console_reader(reader.clone());
         (driver, spec, reader, terminate_calls, rootfs, run_dir)
@@ -2774,7 +2777,8 @@ mod tests {
             test_probe_runner(),
             wiring.gate(),
             layout.clone(),
-            test_beacon_intake().await, Arc::new(crate::GuestListenerBoard::new()),
+            test_beacon_intake().await,
+            Arc::new(crate::GuestListenerBoard::new()),
         );
         let alloc = AllocationId::new("alloc-cleanup-partitions").expect("valid allocation");
         driver.live.lock().insert(alloc.clone(), VmSupervision::Starting);

@@ -314,7 +314,8 @@ async fn vm_driver(
                 1024,
             ),
         },
-        intake, Arc::new(crate::GuestListenerBoard::new()),
+        intake,
+        Arc::new(crate::GuestListenerBoard::new()),
     );
     (driver, beacon_port)
 }
@@ -398,7 +399,8 @@ impl FlowsBeaconDriver {
             action: "VmStart",
             why: "no assignment is provisioned".to_owned(),
         })?;
-        let spec = AllocationSpec { declared_listeners: Vec::new(),
+        let spec = AllocationSpec {
+            declared_listeners: Vec::new(),
             alloc: lease.alloc.clone(),
             identity: SpiffeId::new("spiffe://overdrive.local/workload/flows-beacon/alloc/x")
                 .expect("valid spiffe id"),

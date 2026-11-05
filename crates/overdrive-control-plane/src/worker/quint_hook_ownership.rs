@@ -96,7 +96,9 @@ use overdrive_core::traits::driver::{
     DriverPayload, DriverRegistry, DriverType, ExitEvent, ExitKind, Resources, VmPayload,
 };
 use overdrive_core::traits::intent_store::IntentStore;
-use overdrive_core::traits::observation_store::{AllocState, ObservationStore, ObservationStoreError};
+use overdrive_core::traits::observation_store::{
+    AllocState, ObservationStore, ObservationStoreError,
+};
 use overdrive_core::transition_reason::{StoppedBy, TerminalCondition};
 use overdrive_dataplane::allocators::{PersistentServiceVipAllocator, VipRange};
 use overdrive_sim::adapters::ca::SimCa;
@@ -293,7 +295,10 @@ impl DriverPort for PacedDriver {
         DriverType::Vm
     }
 
-    async fn start(&self, spec: &AllocationSpec) -> std::result::Result<AllocationHandle, DriverError> {
+    async fn start(
+        &self,
+        spec: &AllocationSpec,
+    ) -> std::result::Result<AllocationHandle, DriverError> {
         let handle = self.sim.start(spec).await;
         pause(Point::StartDone);
         handle
@@ -311,7 +316,10 @@ impl DriverPort for PacedDriver {
         outcome
     }
 
-    async fn status(&self, handle: &AllocationHandle) -> std::result::Result<AllocationState, DriverError> {
+    async fn status(
+        &self,
+        handle: &AllocationHandle,
+    ) -> std::result::Result<AllocationState, DriverError> {
         self.sim.status(handle).await
     }
 
@@ -361,11 +369,17 @@ impl DriverPort for PacedDriver {
 struct SimNetworkProvisioner;
 
 impl WorkloadNetworkProvisioner for SimNetworkProvisioner {
-    fn provision(&self, _workload: &WorkloadNetnsPlan) -> std::result::Result<(), VethProvisionError> {
+    fn provision(
+        &self,
+        _workload: &WorkloadNetnsPlan,
+    ) -> std::result::Result<(), VethProvisionError> {
         Ok(())
     }
 
-    fn teardown(&self, _workload: &WorkloadNetnsPlan) -> std::result::Result<(), VethProvisionError> {
+    fn teardown(
+        &self,
+        _workload: &WorkloadNetnsPlan,
+    ) -> std::result::Result<(), VethProvisionError> {
         Ok(())
     }
 }
@@ -493,10 +507,8 @@ impl HookOwnershipDriver {
     fn new() -> Self {
         let tmp = TempDir::new().expect("tempdir");
         let rt = Builder::new_current_thread().enable_all().build().expect("observer runtime");
-        let obs = Arc::new(SimObservationStore::single_peer(
-            NodeId::new("local").expect("node id"),
-            0,
-        ));
+        let obs =
+            Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("node id"), 0));
         let clock = Arc::new(SimClock::new());
         let runner = Arc::new(ProbeRunner::new(
             Arc::new(SimTcpProber::new()),
@@ -508,7 +520,10 @@ impl HookOwnershipDriver {
         ));
         let (exit_tx, exit_rx) = mpsc::channel(16);
         let driver = Arc::new(PacedDriver {
-            sim: Arc::new(SimDriver::with_clock(DriverType::Vm, Arc::clone(&clock) as Arc<dyn Clock>)),
+            sim: Arc::new(SimDriver::with_clock(
+                DriverType::Vm,
+                Arc::clone(&clock) as Arc<dyn Clock>,
+            )),
             runner: Arc::clone(&runner),
             observer_rt: rt.handle().clone(),
             exit_tx,
@@ -560,7 +575,11 @@ impl HookOwnershipDriver {
     }
 
     fn spawn(&self, action: Action, points: Vec<Point>) -> Dispatch {
-        let script = Arc::new(Script { points, state: Mutex::new(PauseState::default()), cv: Condvar::new() });
+        let script = Arc::new(Script {
+            points,
+            state: Mutex::new(PauseState::default()),
+            cv: Condvar::new(),
+        });
         let comp = Arc::clone(&self.comp);
         let thread_script = Arc::clone(&script);
         let thread = std::thread::spawn(move || {
@@ -572,7 +591,11 @@ impl HookOwnershipDriver {
     }
 
     /// Runs the observer runtime until `cond` holds.
-    fn settle(&self, what: &str, mut cond: impl FnMut(&Self) -> bool) -> std::result::Result<(), DriverError2> {
+    fn settle(
+        &self,
+        what: &str,
+        mut cond: impl FnMut(&Self) -> bool,
+    ) -> std::result::Result<(), DriverError2> {
         let deadline = Instant::now() + SETTLE_BOUND;
         while !cond(self) {
             if Instant::now() > deadline {
@@ -585,10 +608,7 @@ impl HookOwnershipDriver {
 
     fn row_is_terminal(&self, a: i64) -> bool {
         let id = alloc_of(a);
-        let row = self
-            .rt
-            .block_on(self.comp.obs.alloc_status_row(&id))
-            .expect("read alloc row");
+        let row = self.rt.block_on(self.comp.obs.alloc_status_row(&id)).expect("read alloc row");
         row.is_some_and(|r| matches!(r.state, AllocState::Failed | AllocState::Terminated))
     }
 
@@ -640,7 +660,8 @@ impl HookOwnershipDriver {
     }
 
     fn register(&mut self, a: i64) -> std::result::Result<(), DriverError2> {
-        let dispatch = self.start.get(&a).ok_or_else(|| not_enabled("Register", "no start parked"))?;
+        let dispatch =
+            self.start.get(&a).ok_or_else(|| not_enabled("Register", "no start parked"))?;
         dispatch.grant(Point::StartDone);
         dispatch.wait_parked_or_done("the dispatch reached the gate release")?;
         if dispatch.finished() {
@@ -652,7 +673,9 @@ impl HookOwnershipDriver {
         }
         if !self.comp.driver.has(&Call::Running(alloc_of(a))) {
             if dispatch.parked() != Some(Point::ReleaseCall) {
-                return Err(DriverError2::Unsettled("the dispatch parked at an unexpected point".to_owned()));
+                return Err(DriverError2::Unsettled(
+                    "the dispatch parked at an unexpected point".to_owned(),
+                ));
             }
             return Err(DriverError2::Unsettled(format!(
                 "the dispatch reached release_for_exit_emission before on_alloc_running for \
@@ -665,9 +688,13 @@ impl HookOwnershipDriver {
     }
 
     fn release(&mut self, a: i64) -> std::result::Result<(), DriverError2> {
-        let mut dispatch = self.start.remove(&a).ok_or_else(|| not_enabled("Release", "no start parked"))?;
+        let mut dispatch =
+            self.start.remove(&a).ok_or_else(|| not_enabled("Release", "no start parked"))?;
         if dispatch.parked() != Some(Point::ReleaseCall) {
-            return Err(not_enabled("Release", "the dispatch is not parked before the gate release"));
+            return Err(not_enabled(
+                "Release",
+                "the dispatch is not parked before the gate release",
+            ));
         }
         dispatch.grant(Point::ReleaseCall);
         dispatch
@@ -704,9 +731,9 @@ impl HookOwnershipDriver {
         // other input the model's `wrote = false` stands for, and a queued failure would leak into
         // the next dispatch's write.
         if !wrote && !self.row_is_terminal(a) {
-            self.comp.write_faults.inject_write_failure(ObservationStoreError::Io(io::Error::from(
-                io::ErrorKind::PermissionDenied,
-            )));
+            self.comp.write_faults.inject_write_failure(ObservationStoreError::Io(
+                io::Error::from(io::ErrorKind::PermissionDenied),
+            ));
         }
         // The observer's last step for one event is `release_supervision`, after every outcome.
         self.settle("the observer handled the ExitEvent", |s| {
@@ -725,7 +752,10 @@ impl HookOwnershipDriver {
         );
         dispatch.wait_parked_or_done("the dispatch reached the end of Driver::stop")?;
         if dispatch.parked() != Some(Point::StopDone) {
-            return Err(not_enabled("StopEffects", "the dispatch ended before Driver::stop returned"));
+            return Err(not_enabled(
+                "StopEffects",
+                "the dispatch ended before Driver::stop returned",
+            ));
         }
         self.stop.insert(a, dispatch);
         Ok(())
@@ -740,9 +770,9 @@ impl HookOwnershipDriver {
         // Scripted only where the stop arm will attempt the write (a `Terminated` row with the
         // same terminal ends the arm without one).
         if !wrote && !row_is_terminated {
-            self.comp.write_faults.inject_write_failure(ObservationStoreError::Io(io::Error::from(
-                io::ErrorKind::PermissionDenied,
-            )));
+            self.comp.write_faults.inject_write_failure(ObservationStoreError::Io(
+                io::Error::from(io::ErrorKind::PermissionDenied),
+            ));
         }
         if let Some(dispatch) = self.stop.get(&a) {
             dispatch.grant(Point::StopDone);
@@ -767,10 +797,12 @@ impl HookOwnershipDriver {
             let mut dispatch = self.stop.remove(&a).expect("present");
             let outcome = dispatch.join()?;
             if wrote {
-                outcome.map_err(|e| DriverError2::Production(format!("the stop retry failed: {e}")))?;
+                outcome
+                    .map_err(|e| DriverError2::Production(format!("the stop retry failed: {e}")))?;
                 if !self.comp.driver.has(&Call::Terminal(alloc_of(a))) {
                     return Err(DriverError2::Unsettled(
-                        "the stop dispatch landed its row without ever calling on_alloc_terminal".to_owned(),
+                        "the stop dispatch landed its row without ever calling on_alloc_terminal"
+                            .to_owned(),
                     ));
                 }
                 self.hook_already_fired.push(a);
@@ -784,7 +816,8 @@ impl HookOwnershipDriver {
             self.hook_already_fired.remove(at);
             return Ok(());
         }
-        let mut dispatch = self.stop.remove(&a).ok_or_else(|| not_enabled("StopHook", "no stop parked"))?;
+        let mut dispatch =
+            self.stop.remove(&a).ok_or_else(|| not_enabled("StopHook", "no stop parked"))?;
         if dispatch.parked() != Some(Point::HookTerminal) {
             return Err(not_enabled("StopHook", "the stop dispatch is not parked before the hook"));
         }
@@ -892,7 +925,9 @@ impl HookState {
 }
 
 impl<'de> Deserialize<'de> for HookState {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<Self, D::Error> {
         let value = Value::deserialize(deserializer)?;
         Self::from_value(&value).map_err(serde::de::Error::custom)
     }
@@ -911,42 +946,72 @@ impl State<HookOwnershipDriver> for HookState {
 // ----- named runs (one `#[quint_test]` per run of `hooks_conf`) and randomized traces ---------
 
 /// Named run `crash_without_restart` (#334). CONTRACT_SHAPE: bounded-change.
-#[quint_test(spec = "../../specs/quint/service-allocation-readiness-and-ending/hook_ownership.qnt", main = "hooks_conf", max_samples = 1, test = "crash_without_restart")]
+#[quint_test(
+    spec = "../../specs/quint/service-allocation-readiness-and-ending/hook_ownership.qnt",
+    main = "hooks_conf",
+    max_samples = 1,
+    test = "crash_without_restart"
+)]
 #[ignore = "pending DELIVER: D1 exit observer ends probe supervision; D3 shim registers supervision before the gate release"]
 fn quint_hook_ownership_crash_without_restart() -> impl Driver {
     HookOwnershipDriver::new()
 }
 
 /// Named run `crash_then_fresh_id_restart` (#318). CONTRACT_SHAPE: bounded-change.
-#[quint_test(spec = "../../specs/quint/service-allocation-readiness-and-ending/hook_ownership.qnt", main = "hooks_conf", max_samples = 1, test = "crash_then_fresh_id_restart")]
+#[quint_test(
+    spec = "../../specs/quint/service-allocation-readiness-and-ending/hook_ownership.qnt",
+    main = "hooks_conf",
+    max_samples = 1,
+    test = "crash_then_fresh_id_restart"
+)]
 #[ignore = "pending DELIVER: D1 exit observer ends probe supervision; D3 shim registers supervision before the gate release"]
 fn quint_hook_ownership_crash_then_fresh_id_restart() -> impl Driver {
     HookOwnershipDriver::new()
 }
 
 /// Named run `write_exhaustion_still_stops_probes` (D1 outcome independence). CONTRACT_SHAPE: bounded-change.
-#[quint_test(spec = "../../specs/quint/service-allocation-readiness-and-ending/hook_ownership.qnt", main = "hooks_conf", max_samples = 1, test = "write_exhaustion_still_stops_probes")]
+#[quint_test(
+    spec = "../../specs/quint/service-allocation-readiness-and-ending/hook_ownership.qnt",
+    main = "hooks_conf",
+    max_samples = 1,
+    test = "write_exhaustion_still_stops_probes"
+)]
 #[ignore = "pending DELIVER: D1 exit observer ends probe supervision; D3 shim registers supervision before the gate release"]
 fn quint_hook_ownership_write_exhaustion_still_stops_probes() -> impl Driver {
     HookOwnershipDriver::new()
 }
 
 /// Named run `operator_or_liveness_stop_emits_no_exit_event` (D4, B2). CONTRACT_SHAPE: bounded-change.
-#[quint_test(spec = "../../specs/quint/service-allocation-readiness-and-ending/hook_ownership.qnt", main = "hooks_conf", max_samples = 1, test = "operator_or_liveness_stop_emits_no_exit_event")]
+#[quint_test(
+    spec = "../../specs/quint/service-allocation-readiness-and-ending/hook_ownership.qnt",
+    main = "hooks_conf",
+    max_samples = 1,
+    test = "operator_or_liveness_stop_emits_no_exit_event"
+)]
 #[ignore = "pending DELIVER: D3 shim registers supervision before the gate release; B2 shim releases a stop's supervision after its terminal row is durable"]
 fn quint_hook_ownership_operator_or_liveness_stop_emits_no_exit_event() -> impl Driver {
     HookOwnershipDriver::new()
 }
 
 /// Named run `finalize_on_live_vm_stops_probes` (D4). CONTRACT_SHAPE: bounded-change.
-#[quint_test(spec = "../../specs/quint/service-allocation-readiness-and-ending/hook_ownership.qnt", main = "hooks_conf", max_samples = 1, test = "finalize_on_live_vm_stops_probes")]
+#[quint_test(
+    spec = "../../specs/quint/service-allocation-readiness-and-ending/hook_ownership.qnt",
+    main = "hooks_conf",
+    max_samples = 1,
+    test = "finalize_on_live_vm_stops_probes"
+)]
 #[ignore = "pending DELIVER: D3 shim registers supervision before the gate release"]
 fn quint_hook_ownership_finalize_on_live_vm_stops_probes() -> impl Driver {
     HookOwnershipDriver::new()
 }
 
 /// Named run `double_fire_is_idempotent` (D2). CONTRACT_SHAPE: bounded-change.
-#[quint_test(spec = "../../specs/quint/service-allocation-readiness-and-ending/hook_ownership.qnt", main = "hooks_conf", max_samples = 1, test = "double_fire_is_idempotent")]
+#[quint_test(
+    spec = "../../specs/quint/service-allocation-readiness-and-ending/hook_ownership.qnt",
+    main = "hooks_conf",
+    max_samples = 1,
+    test = "double_fire_is_idempotent"
+)]
 #[ignore = "pending DELIVER: D1 exit observer ends probe supervision; D3 shim registers supervision before the gate release"]
 fn quint_hook_ownership_double_fire_is_idempotent() -> impl Driver {
     HookOwnershipDriver::new()
@@ -954,9 +1019,11 @@ fn quint_hook_ownership_double_fire_is_idempotent() -> impl Driver {
 
 /// Randomized traces of the recording main; the seed is printed on failure.
 /// CONTRACT_SHAPE: bounded-change.
-#[quint_run(spec = "../../specs/quint/service-allocation-readiness-and-ending/hook_ownership.qnt", main = "hooks_conf")]
+#[quint_run(
+    spec = "../../specs/quint/service-allocation-readiness-and-ending/hook_ownership.qnt",
+    main = "hooks_conf"
+)]
 #[ignore = "pending DELIVER: D1 exit observer ends probe supervision; D3 shim registers supervision before the gate release; B2 shim releases a stop's supervision after its terminal row is durable"]
 fn quint_hook_ownership_randomized_traces() -> impl Driver {
     HookOwnershipDriver::new()
 }
-

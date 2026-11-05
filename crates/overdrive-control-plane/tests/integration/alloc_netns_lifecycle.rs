@@ -131,7 +131,8 @@ fn tick_now() -> TickContext {
 }
 
 fn build_vm_spec(alloc: &AllocationId) -> AllocationSpec {
-    AllocationSpec { declared_listeners: Vec::new(),
+    AllocationSpec {
+        declared_listeners: Vec::new(),
         alloc: alloc.clone(),
         identity: overdrive_core::SpiffeId::new(
             "spiffe://overdrive.local/workload/anl-vm/alloc/01",

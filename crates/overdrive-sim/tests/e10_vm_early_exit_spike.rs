@@ -349,7 +349,8 @@ async fn drive(seed: u64, restart: bool) {
         http,
         clock.clone(),
         obs.clone(),
-        Arc::clone(&guest_dial) as Arc<dyn overdrive_core::guest_transport::dial::GuestStreamDial>, Arc::new(overdrive_worker::GuestListenerBoard::new()),
+        Arc::clone(&guest_dial) as Arc<dyn overdrive_core::guest_transport::dial::GuestStreamDial>,
+        Arc::new(overdrive_worker::GuestListenerBoard::new()),
     ));
     let wiring = overdrive_core::guest_network::GuestNetworkExecWiring::new(clock.clone());
     let beacon_io = Arc::new(SimBeaconIo::new(vmm.inner.clone()));
@@ -377,7 +378,8 @@ async fn drive(seed: u64, restart: bool) {
         Arc::clone(&probes),
         wiring.gate(),
         layout.clone(),
-        intake, Arc::new(overdrive_worker::GuestListenerBoard::new()),
+        intake,
+        Arc::new(overdrive_worker::GuestListenerBoard::new()),
     ));
     let mut runtime = ReconcilerRuntime::new_with_redb_view_store_for_test(temp.path()).unwrap();
     runtime.register(workload_lifecycle()).await.unwrap();

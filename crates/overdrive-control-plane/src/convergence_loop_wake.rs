@@ -85,7 +85,7 @@ async fn parked_loop() -> Loop {
         .await
         .expect("shared owner reports its bound flow ports");
     let wiring = overdrive_core::guest_network::GuestNetworkExecWiring::new(
-        Arc::clone(&clock) as Arc<dyn Clock>,
+        Arc::clone(&clock) as Arc<dyn Clock>
     );
     assert!(wiring.supervisor().open_after_boot());
     let state = AppState::new(
@@ -108,8 +108,12 @@ async fn parked_loop() -> Loop {
         crate::shared_network_test_ports::guest_pool(),
     );
     let shutdown = CancellationToken::new();
-    let _task =
-        spawn_convergence_loop(state.clone(), Arc::clone(&clock) as Arc<dyn Clock>, CADENCE, shutdown.clone());
+    let _task = spawn_convergence_loop(
+        state.clone(),
+        Arc::clone(&clock) as Arc<dyn Clock>,
+        CADENCE,
+        shutdown.clone(),
+    );
     settle().await;
     Loop { state, clock, shutdown, _tmp: tmp }
 }
@@ -227,8 +231,7 @@ async fn the_cadence_tick_with_no_submits_drains_nothing_and_keeps_the_loop_aliv
 #[ignore = "pending DELIVER: D17 a broker submit wakes the convergence loop at once"]
 async fn a_deferred_evaluation_is_not_admitted_early_by_an_unrelated_wake() {
     let l = parked_loop().await;
-    let not_before =
-        UnixInstant::from_clock(&*l.clock) + Duration::from_secs(5);
+    let not_before = UnixInstant::from_clock(&*l.clock) + Duration::from_secs(5);
     l.submit("node/deferred", EvaluationEligibility::NotBefore(not_before));
     l.submit("node/unrelated", EvaluationEligibility::Immediate);
     settle().await;
@@ -249,13 +252,16 @@ async fn a_deferred_evaluation_is_not_admitted_early_by_an_unrelated_wake() {
 async fn the_admission_order_of_a_burst_is_identical_across_runs_of_one_seed() {
     async fn run(seed: u64) -> Vec<String> {
         let order = AdmissionOrder::default();
-        let _guard = tracing::subscriber::set_default(tracing_subscriber::registry().with(order.clone()));
+        let _guard =
+            tracing::subscriber::set_default(tracing_subscriber::registry().with(order.clone()));
         let l = parked_loop().await;
         let mut targets: Vec<u64> = (0..6).collect();
         // a seeded permutation of the submit order
         let mut state = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
         for i in (1..targets.len()).rev() {
-            state = state.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
             let j = usize::try_from(state >> 33).expect("fits") % (i + 1);
             targets.swap(i, j);
         }

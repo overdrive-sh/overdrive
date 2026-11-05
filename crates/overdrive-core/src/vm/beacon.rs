@@ -158,6 +158,18 @@ pub enum BeaconParseError {
         /// The underlying JSON-parse failure's `Display` text.
         detail: String,
     },
+    /// A `LISTEN` line was rejected: wrong field count, unknown protocol, or a port
+    /// that is not a number, is out of range or is zero (D13 item 2, DG-M). `detail`
+    /// is the `Display` text of the underlying failure (no `#[source]`, so the enum
+    /// keeps its `Clone` and `PartialEq` derives).
+    // SCAFFOLD: true — pinned shape; the `LISTEN` parse that returns it is DELIVER's.
+    #[error("LISTEN message is malformed ({detail}) in line {raw:?}")]
+    MalformedListen {
+        /// The full line that failed to parse.
+        raw: String,
+        /// The underlying failure's `Display` text.
+        detail: String,
+    },
     /// READY's `launch=<v>` field carried a value that is not a valid
     /// [`crate::guest_transport::LaunchToken`] (DG-7, ATTR-TOKEN): `v` failed
     /// `LaunchToken::from_str`.

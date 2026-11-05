@@ -289,6 +289,7 @@ pub fn workload_describe(out: &WorkloadDescribeOutput) -> String {
     s.push_str(&probes_section(
         out.snapshot.kind.unwrap_or(overdrive_core::aggregate::WorkloadKind::Service),
         &probe_render_rows(&out.snapshot),
+        &out.snapshot.listeners,
         // Phase 1 describe output is plain text end to end — every
         // section above emits zero ANSI sequences. `true` is the
         // truthful argument for what this renderer actually produces,
@@ -1378,6 +1379,7 @@ pub struct ProbeRenderRow {
 #[must_use]
 pub fn format_probe_mechanic_summary(
     mechanic: &overdrive_core::aggregate::probe_descriptor::ProbeMechanic,
+    listeners: &[overdrive_core::aggregate::Listener],
 ) -> String {
     use overdrive_core::aggregate::probe_descriptor::ProbeMechanic;
     match mechanic {
@@ -1386,8 +1388,12 @@ pub fn format_probe_mechanic_summary(
             let host = host.as_deref().unwrap_or("0.0.0.0");
             format!("http GET http://{host}:{port}{path}")
         }
-        // SCAFFOLD: true — compile unblock; the operator-facing text is pinned by D14 item 4.
-        ProbeMechanic::GuestListeners => "guest listeners".to_owned(),
+        // SCAFFOLD: true — D14 item 4 pins the text `guest listeners tcp:8080 udp:5353`
+        // (declared order) from `listeners`; DELIVER implements it.
+        ProbeMechanic::GuestListeners => {
+            let _ = listeners;
+            "guest listeners".to_owned()
+        }
     }
 }
 
@@ -1433,6 +1439,7 @@ fn format_probe_last_status(
 pub fn probes_section(
     kind: overdrive_core::aggregate::WorkloadKind,
     probes: &[ProbeRenderRow],
+    listeners: &[overdrive_core::aggregate::Listener],
     no_color: bool,
 ) -> String {
     use overdrive_core::aggregate::WorkloadKind;
@@ -1451,7 +1458,7 @@ pub fn probes_section(
     let _ = writeln!(s, "Probes:");
     for probe in probes {
         let role = probe.role.as_str();
-        let mechanic = format_probe_mechanic_summary(&probe.mechanic);
+        let mechanic = format_probe_mechanic_summary(&probe.mechanic, listeners);
         let last = format_probe_last_status(probe.status.as_ref());
         let observed = probe.last_observed_at_unix_ms.map_or_else(
             || "last_observed_at=\u{2014}".to_string(),

@@ -28,7 +28,8 @@ use crate::acceptance::restart_authority_world::{
 };
 
 fn startup_stopped(row: &overdrive_core::traits::observation_store::AllocStatusRow) -> bool {
-    format!("{:?}", row.state) == "Terminated" && format!("{:?}", row.terminal).contains("StartupProbe")
+    format!("{:?}", row.state) == "Terminated"
+        && format!("{:?}", row.terminal).contains("StartupProbe")
 }
 
 /// S-22 (short startup deadline): a Service whose guest stays alive and never
@@ -48,7 +49,10 @@ async fn never_ready_guest_is_stopped_and_restarted_until_give_up_names_the_star
     for attempt in 0..=RESTART_BACKOFF_CEILING {
         world.never_ready_until_the_look(2).await.expect("service-lifecycle stops the attempt");
         let row = world.row(&alloc).await.expect("attempt row");
-        assert!(startup_stopped(&row), "attempt {attempt}: Terminated / Stopped {{ StartupProbe }}, got {row:?}");
+        assert!(
+            startup_stopped(&row),
+            "attempt {attempt}: Terminated / Stopped {{ StartupProbe }}, got {row:?}"
+        );
         assert!(!stream.closed(), "attempt {attempt}: the stream stays open across the stop");
         assert_eq!(
             world.observe().await.get("supervised_allocations").map(String::as_str),
@@ -76,15 +80,21 @@ async fn never_ready_guest_is_stopped_and_restarted_until_give_up_names_the_star
     }
     match stream.first_terminal() {
         Some(ServiceSubmitEvent::Failed {
-            reason: ServiceFailureReason::StartupProbeFailed { probe_idx: 0, attempts: 5, last_fail },
+            reason:
+                ServiceFailureReason::StartupProbeFailed { probe_idx: 0, attempts: 5, last_fail },
             ..
-        }) => assert!(!last_fail.is_empty(), "last_fail is the final attempt's probe failure reason"),
+        }) => {
+            assert!(!last_fail.is_empty(), "last_fail is the final attempt's probe failure reason");
+        }
         other => panic!("expected Failed {{ StartupProbeFailed {{ 0, _, 5 }} }}, got {other:?}"),
     }
     let last = world.row(&alloc).await.expect("final row");
     assert!(format!("{:?}", last.terminal).contains("StartupProbeFailed"));
     for id in &attempts[..attempts.len() - 1] {
-        assert!(startup_stopped(&world.row(id).await.expect("row")), "predecessor {id} keeps its stop");
+        assert!(
+            startup_stopped(&world.row(id).await.expect("row")),
+            "predecessor {id} keeps its stop"
+        );
     }
 }
 
@@ -117,7 +127,11 @@ async fn never_ready_guest_with_the_default_startup_window_times_out_naming_the_
             last_attempt: Some(last),
             ..
         }) => {
-            assert_eq!(last.alloc_id, first.to_string(), "the detail names the first stopped attempt");
+            assert_eq!(
+                last.alloc_id,
+                first.to_string(),
+                "the detail names the first stopped attempt"
+            );
             assert!(format!("{:?}", last.terminal).contains("StartupProbe"));
         }
         other => panic!("expected Failed {{ Timeout {{ 90 }} }} with last_attempt, got {other:?}"),
@@ -139,7 +153,9 @@ async fn successor_that_binds_after_a_startup_stop_ends_the_stream_stable() {
     settle().await;
 
     match stream.first_terminal() {
-        Some(ServiceSubmitEvent::Stable { alloc_id, .. }) => assert_eq!(alloc_id, successor.to_string()),
+        Some(ServiceSubmitEvent::Stable { alloc_id, .. }) => {
+            assert_eq!(alloc_id, successor.to_string());
+        }
         other => panic!("expected Stable, got {other:?}"),
     }
     let rows = world.rows().await;
@@ -160,7 +176,11 @@ async fn opt_out_service_never_receives_the_startup_stop() {
     }
     let row = world.row(&alloc).await.expect("row");
     assert!(!format!("{:?}", row.terminal).contains("StartupProbe"));
-    assert_eq!(world.driver.stop_calls_for(&alloc), 0, "an opt-out Service is never stopped for a startup failure");
+    assert_eq!(
+        world.driver.stop_calls_for(&alloc),
+        0,
+        "an opt-out Service is never stopped for a startup failure"
+    );
 }
 
 /// S-28 (E-2): the guest crashes while the stop is dispatched, after the
@@ -249,7 +269,11 @@ async fn late_startup_pass_after_a_failed_stop_ends_the_retry_and_reaches_stable
     assert_eq!(world.driver.stop_calls_for(&first), 1, "no further stop after a Pass");
     let row = world.row(&first).await.expect("row");
     assert_eq!(format!("{:?}", row.state), "Running");
-    assert!(format!("{:?}", row.terminal).contains("Stable"), "the instance reaches Stable: {:?}", row.terminal);
+    assert!(
+        format!("{:?}", row.terminal).contains("Stable"),
+        "the instance reaches Stable: {:?}",
+        row.terminal
+    );
 }
 
 /// S-30 (B2): the stop's terminal row write fails once. The supervisor is still
@@ -266,7 +290,10 @@ async fn failed_stop_row_write_keeps_the_supervisor_and_the_next_probe_row_retri
     assert_eq!(world.observe().await.get("supervised_allocations").map(String::as_str), Some("1"));
 
     world.fail_next_observation_write();
-    assert!(world.service_tick().await.is_err(), "the failed row write surfaces as the tick's error");
+    assert!(
+        world.service_tick().await.is_err(),
+        "the failed row write surfaces as the tick's error"
+    );
     assert_eq!(format!("{:?}", world.row(&first).await.expect("row").state), "Running");
     assert_eq!(
         world.observe().await.get("supervised_allocations").map(String::as_str),

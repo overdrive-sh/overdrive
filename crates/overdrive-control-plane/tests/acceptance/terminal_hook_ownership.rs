@@ -142,11 +142,14 @@ fn tcp_descriptor(role: ProbeRole, idx: u32) -> ProbeDescriptor {
 
 /// A Service allocation declaring a startup, a readiness and a liveness probe.
 fn probed_spec(alloc: &AllocationId) -> AllocationSpec {
-    spec(alloc, vec![
-        tcp_descriptor(ProbeRole::Startup, 0),
-        tcp_descriptor(ProbeRole::Readiness, 0),
-        tcp_descriptor(ProbeRole::Liveness, 0),
-    ])
+    spec(
+        alloc,
+        vec![
+            tcp_descriptor(ProbeRole::Startup, 0),
+            tcp_descriptor(ProbeRole::Readiness, 0),
+            tcp_descriptor(ProbeRole::Liveness, 0),
+        ],
+    )
 }
 
 fn spec(alloc: &AllocationId, probe_descriptors: Vec<ProbeDescriptor>) -> AllocationSpec {
@@ -172,10 +175,8 @@ impl Fixture {
     /// The production observer, the production shim and a real runner over `Sim*` ports.
     fn new() -> Self {
         let tmp = TempDir::new().expect("tempdir");
-        let obs = Arc::new(SimObservationStore::single_peer(
-            NodeId::new("local").expect("node id"),
-            0,
-        ));
+        let obs =
+            Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("node id"), 0));
         let clock = Arc::new(SimClock::new());
         let runner = Arc::new(ProbeRunner::new(
             Arc::new(SimTcpProber::new()),
@@ -185,7 +186,8 @@ impl Fixture {
             Arc::new(SimGuestStreamDial::new()),
             Arc::new(overdrive_worker::GuestListenerBoard::new()),
         ));
-        let sim = Arc::new(SimDriver::with_clock(DriverType::Vm, Arc::clone(&clock) as Arc<dyn Clock>));
+        let sim =
+            Arc::new(SimDriver::with_clock(DriverType::Vm, Arc::clone(&clock) as Arc<dyn Clock>));
         let driver = Arc::new(HookedDriver::new(sim, Arc::clone(&runner), Arc::clone(&clock)));
         let drivers = {
             let mut registry = DriverRegistry::new();
@@ -224,7 +226,10 @@ impl Fixture {
     }
 
     /// One action through the production `action_shim::dispatch*` driving port.
-    async fn dispatch(&self, action: Action) -> Result<(), overdrive_control_plane::action_shim::ShimError> {
+    async fn dispatch(
+        &self,
+        action: Action,
+    ) -> Result<(), overdrive_control_plane::action_shim::ShimError> {
         let tick_no = {
             let mut ticks = self.ticks.lock();
             *ticks += 1;
@@ -311,7 +316,10 @@ impl Fixture {
         self.settle("the exit observer wrote the terminal row", || {
             let id = id.clone();
             async move {
-                matches!(self.row_state(&id).await, Some(AllocState::Failed | AllocState::Terminated))
+                matches!(
+                    self.row_state(&id).await,
+                    Some(AllocState::Failed | AllocState::Terminated)
+                )
             }
         })
         .await;
@@ -332,7 +340,12 @@ impl Fixture {
             supervised: self.runner.active_alloc_count(),
             roles_live,
             rows,
-            backend_rows: self.obs.all_service_backends_rows().await.expect("read backend rows").len(),
+            backend_rows: self
+                .obs
+                .all_service_backends_rows()
+                .await
+                .expect("read backend rows")
+                .len(),
         }
     }
 }
@@ -400,7 +413,10 @@ async fn a_crashed_allocation_stops_probing_as_soon_as_the_observer_consumes_the
         }
         let before = f.observe(&[&a]).await;
         assert_eq!(before.supervised, 1, "seed {seed}: the shim registered the supervisor");
-        assert!(before.roles_live[&(a.to_string(), "liveness")], "seed {seed}: liveness supervised");
+        assert!(
+            before.roles_live[&(a.to_string(), "liveness")],
+            "seed {seed}: liveness supervised"
+        );
 
         f.crash(&a).await;
         f.wait_for_terminal_row(&a).await;
@@ -412,7 +428,11 @@ async fn a_crashed_allocation_stops_probing_as_soon_as_the_observer_consumes_the
             "seed {seed}: the supervisor ends within the observer's handling of the exit, and \
              the row is Failed, before any restart backoff (the clock was never advanced)",
         );
-        assert_eq!(f.driver.terminal_calls(), vec![a.clone()], "seed {seed}: one hook call, from the observer");
+        assert_eq!(
+            f.driver.terminal_calls(),
+            vec![a.clone()],
+            "seed {seed}: one hook call, from the observer"
+        );
     }
 }
 
@@ -433,7 +453,11 @@ async fn a_restart_leaves_only_the_successor_supervised_without_a_second_hook_ca
         f.start(&pred).await;
         f.crash(&pred).await;
         f.wait_for_terminal_row(&pred).await;
-        assert_eq!(f.driver.terminal_calls(), vec![pred.clone()], "seed {seed}: the observer fired the hook");
+        assert_eq!(
+            f.driver.terminal_calls(),
+            vec![pred.clone()],
+            "seed {seed}: the observer fired the hook"
+        );
         for _ in 0..yields_of(seed) {
             tokio::task::yield_now().await;
         }
@@ -450,11 +474,18 @@ async fn a_restart_leaves_only_the_successor_supervised_without_a_second_hook_ca
         let after = f.observe(&[&pred, &succ]).await;
         assert_eq!(after.supervised, 1, "seed {seed}: the successor only is supervised");
         for (_, name) in ROLES {
-            assert!(!after.roles_live[&(pred.to_string(), name)], "seed {seed}: predecessor {name} not live");
+            assert!(
+                !after.roles_live[&(pred.to_string(), name)],
+                "seed {seed}: predecessor {name} not live"
+            );
         }
-        assert!(after.roles_live[&(succ.to_string(), "liveness")], "seed {seed}: successor liveness live");
+        assert!(
+            after.roles_live[&(succ.to_string(), "liveness")],
+            "seed {seed}: successor liveness live"
+        );
         assert_eq!(
-            after.rows[&pred.to_string()], before.rows[&pred.to_string()],
+            after.rows[&pred.to_string()],
+            before.rows[&pred.to_string()],
             "seed {seed}: the predecessor's attempt row stays observable and unchanged",
         );
         assert_eq!(
@@ -558,9 +589,13 @@ async fn a_start_registers_probe_supervision_before_it_releases_the_exit_gate() 
     let successor = alloc("alloc-order-1");
 
     f.start(&first).await;
-    let running = f.driver.index_of(&Call::Running(first.clone())).expect("on_alloc_running called");
+    let running =
+        f.driver.index_of(&Call::Running(first.clone())).expect("on_alloc_running called");
     let release = f.driver.index_of(&Call::Release(first.clone())).expect("the gate was released");
-    assert!(running < release, "StartAllocation: on_alloc_running ({running}) precedes the gate release ({release})");
+    assert!(
+        running < release,
+        "StartAllocation: on_alloc_running ({running}) precedes the gate release ({release})"
+    );
 
     f.crash(&first).await;
     f.wait_for_terminal_row(&first).await;
@@ -571,8 +606,10 @@ async fn a_start_registers_probe_supervision_before_it_releases_the_exit_gate() 
     })
     .await
     .expect("RestartAllocation dispatches");
-    let running = f.driver.index_of(&Call::Running(successor.clone())).expect("successor registered");
-    let release = f.driver.index_of(&Call::Release(successor.clone())).expect("successor gate released");
+    let running =
+        f.driver.index_of(&Call::Running(successor.clone())).expect("successor registered");
+    let release =
+        f.driver.index_of(&Call::Release(successor.clone())).expect("successor gate released");
     assert!(
         running < release,
         "RestartAllocation successor: on_alloc_running ({running}) precedes the gate release ({release})",
@@ -598,7 +635,8 @@ async fn an_exit_available_the_instant_the_gate_releases_leaves_no_supervisor() 
 
         let after = f.observe(&[&a]).await;
         assert_eq!(
-            after.supervised, 0,
+            after.supervised,
+            0,
             "seed {seed}: no supervisor remains for an id whose exit was consumed (NoRegisterAfterEnd); \
              calls: {:?}",
             f.driver.calls(),
@@ -606,7 +644,11 @@ async fn an_exit_available_the_instant_the_gate_releases_leaves_no_supervisor() 
         for (_, name) in ROLES {
             assert!(!after.roles_live[&(a.to_string(), name)], "seed {seed}: {name} not live");
         }
-        assert_eq!(after.rows[&a.to_string()].as_ref().map(|r| r.0), Some(AllocState::Failed), "seed {seed}");
+        assert_eq!(
+            after.rows[&a.to_string()].as_ref().map(|r| r.0),
+            Some(AllocState::Failed),
+            "seed {seed}"
+        );
     }
 }
 
@@ -678,11 +720,19 @@ async fn the_terminal_hook_is_idempotent_and_a_no_op_for_unknown_ids() {
     assert_eq!(before.supervised, 2);
 
     f.driver.on_alloc_terminal(&unknown);
-    assert_eq!(f.observe(&[&sibling, &ended, &unknown]).await, before, "an unknown id changes nothing");
+    assert_eq!(
+        f.observe(&[&sibling, &ended, &unknown]).await,
+        before,
+        "an unknown id changes nothing"
+    );
 
     f.driver.on_alloc_terminal(&ended);
     let after_first = f.observe(&[&sibling, &ended, &unknown]).await;
-    assert_eq!(after_first, before.clone().without_supervision_of(&ended), "the first call ends one supervisor");
+    assert_eq!(
+        after_first,
+        before.clone().without_supervision_of(&ended),
+        "the first call ends one supervisor"
+    );
 
     f.driver.on_alloc_terminal(&ended);
     f.driver.on_alloc_terminal(&ended);
@@ -721,7 +771,11 @@ async fn a_crash_then_a_finalize_fire_the_hook_twice_with_one_effect() {
 
     let mut expected = after_observer;
     expected.rows.insert(a.to_string(), Some((AllocState::Failed, give_up)));
-    assert_eq!(f.observe(&[&a, &sibling]).await, expected, "the second fire changed only the row's terminal");
+    assert_eq!(
+        f.observe(&[&a, &sibling]).await,
+        expected,
+        "the second fire changed only the row's terminal"
+    );
     assert_eq!(f.driver.terminal_calls(), vec![a.clone(), a], "two fires, one effect");
 }
 
@@ -782,7 +836,8 @@ async fn a_crash_leaves_the_siblings_supervision_and_row_untouched() {
 async fn a_driver_with_no_probe_runner_takes_the_default_path() {
     let obs = Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("node id"), 0));
     let clock = Arc::new(SimClock::new());
-    let plain = Arc::new(SimDriver::with_clock(DriverType::Vm, Arc::clone(&clock) as Arc<dyn Clock>));
+    let plain =
+        Arc::new(SimDriver::with_clock(DriverType::Vm, Arc::clone(&clock) as Arc<dyn Clock>));
     let events = Arc::new(broadcast::channel(16).0);
     let _handle = exit_observer::spawn_with_runtime(
         Arc::clone(&obs) as Arc<dyn ObservationStore>,
@@ -822,7 +877,11 @@ async fn a_driver_with_no_probe_runner_takes_the_default_path() {
     .await
     .expect("seed Running row");
 
-    plain.inject_exit_after(&a, Duration::ZERO, ExitKind::Crashed { exit_code: Some(1), signal: None });
+    plain.inject_exit_after(
+        &a,
+        Duration::ZERO,
+        ExitKind::Crashed { exit_code: Some(1), signal: None },
+    );
 
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {

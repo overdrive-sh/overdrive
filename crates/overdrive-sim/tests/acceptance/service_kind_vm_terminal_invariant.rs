@@ -545,7 +545,8 @@ async fn seeded_probe_result_wake_converges_vm_readiness_without_restart() {
         Arc::new(SimHttpProber::new()),
         clock.clone(),
         obs.clone(),
-        Arc::clone(&guest_dial) as Arc<dyn overdrive_core::guest_transport::dial::GuestStreamDial>, Arc::new(overdrive_worker::GuestListenerBoard::new()),
+        Arc::clone(&guest_dial) as Arc<dyn overdrive_core::guest_transport::dial::GuestStreamDial>,
+        Arc::new(overdrive_worker::GuestListenerBoard::new()),
     ));
     let driver: Arc<dyn Driver> = Arc::new(ProbedVmDriver {
         inner: SimDriver::with_clock(DriverType::Vm, clock.clone()),

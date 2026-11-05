@@ -172,7 +172,8 @@ async fn drive(overlap: bool) {
             Arc::new(SimHttpProber::new()),
             clock.clone(),
             obs.clone(),
-            guest_dial, Arc::new(overdrive_worker::GuestListenerBoard::new()),
+            guest_dial,
+            Arc::new(overdrive_worker::GuestListenerBoard::new()),
         ),
     });
     let mut runtime = ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).unwrap();

@@ -93,7 +93,8 @@ fn probe_runner() -> Arc<ProbeRunner> {
             NodeId::new("vm-clone-index").expect("valid node ID"),
             0,
         )) as Arc<dyn ObservationStore>,
-        Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()), Arc::new(overdrive_worker::GuestListenerBoard::new()),
+        Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
+        Arc::new(overdrive_worker::GuestListenerBoard::new()),
     ))
 }
 
@@ -136,7 +137,8 @@ fn build_layout(tmp: &TempDir) -> VmHostLayout {
 }
 
 fn build_spec(alloc: &AllocationId, tmp: &TempDir, cid_offset: u32) -> AllocationSpec {
-    AllocationSpec { declared_listeners: Vec::new(),
+    AllocationSpec {
+        declared_listeners: Vec::new(),
         alloc: alloc.clone(),
         identity: SpiffeId::new("spiffe://overdrive.local/workload/clone-index-test/alloc/x")
             .expect("valid spiffe id"),
@@ -180,7 +182,8 @@ async fn build_driver(
         probe_runner(),
         wiring.gate(),
         layout,
-        beacon.intake().await, Arc::new(overdrive_worker::GuestListenerBoard::new()),
+        beacon.intake().await,
+        Arc::new(overdrive_worker::GuestListenerBoard::new()),
     );
     (driver, clock, beacon)
 }

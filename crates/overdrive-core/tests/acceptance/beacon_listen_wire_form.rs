@@ -44,12 +44,16 @@ proptest! {
         let proto = if protocol == Proto::Tcp { "tcp" } else { "udp" };
         let parsed: Result<BeaconMessage, BeaconParseError> =
             format!("LISTEN {proto} {port}").parse();
-        prop_assert!(parsed.is_err());
+        let line = format!("LISTEN {proto} {port}");
+        prop_assert!(
+            matches!(&parsed, Err(BeaconParseError::MalformedListen { raw, .. }) if *raw == line),
+            "{line:?} must be MalformedListen, got {parsed:?}"
+        );
     }
 }
 
 /// Wrong field count, port 0, unknown protocol and a non-numeric port are each
-/// a typed `BeaconParseError`.
+/// `BeaconParseError::MalformedListen` carrying the full line (DG-M).
 #[test]
 #[ignore = "pending DELIVER: D13 LISTEN beacon line wire form"]
 fn malformed_listen_lines_are_rejected_with_a_typed_error() {
@@ -65,6 +69,9 @@ fn malformed_listen_lines_are_rejected_with_a_typed_error() {
         "LISTEN tcp ",
     ] {
         let parsed: Result<BeaconMessage, BeaconParseError> = line.parse();
-        assert!(parsed.is_err(), "{line:?} must be rejected, got {parsed:?}");
+        assert!(
+            matches!(&parsed, Err(BeaconParseError::MalformedListen { raw, .. }) if raw == line),
+            "{line:?} must be rejected as MalformedListen, got {parsed:?}"
+        );
     }
 }

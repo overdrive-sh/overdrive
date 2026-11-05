@@ -97,7 +97,8 @@ fn tcp_descriptor(role: ProbeRole, idx: u32, port: u16) -> ProbeDescriptor {
 }
 
 fn spec_with(alloc: &AllocationId, probe_descriptors: Vec<ProbeDescriptor>) -> AllocationSpec {
-    AllocationSpec { declared_listeners: Vec::new(),
+    AllocationSpec {
+        declared_listeners: Vec::new(),
         alloc: alloc.clone(),
         identity: SpiffeId::from_str("spiffe://overdrive.local/test/svc").expect("valid SpiffeId"),
         driver: DriverPayload::Vm(VmPayload {
@@ -214,7 +215,8 @@ async fn harness() -> Harness {
                 1024,
             ),
         },
-        beacon, Arc::new(overdrive_worker::GuestListenerBoard::new()),
+        beacon,
+        Arc::new(overdrive_worker::GuestListenerBoard::new()),
     ));
     let drivers: Arc<overdrive_core::traits::driver::DriverRegistry> = {
         let mut r = overdrive_core::traits::driver::DriverRegistry::new();

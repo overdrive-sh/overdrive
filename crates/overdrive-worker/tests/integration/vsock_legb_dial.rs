@@ -442,7 +442,8 @@ pub(super) mod node {
         let cid = GuestCid::new(GUEST_CID_BASE + u32::from(u16::from_be_bytes([high, low])))
             .expect("an in-range guest CID");
         let launch = LaunchToken::from_bytes([0x6b; 16]).expect("a non-zero launch token");
-        AllocationSpec { declared_listeners: Vec::new(),
+        AllocationSpec {
+            declared_listeners: Vec::new(),
             alloc: alloc.clone(),
             identity: SERVER_SPIFFE.parse().expect("valid spiffe id"),
             driver: DriverPayload::Vm(VmPayload {

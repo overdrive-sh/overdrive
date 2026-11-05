@@ -194,7 +194,9 @@ impl RestartWorld {
     /// Compose the world: the Service intent persisted, its VIP allocated, the
     /// exit observer running over the node's driver. No allocation exists yet.
     pub async fn compose(shape: Shape) -> Self {
-        eprintln!("restart-authority world: seed={SEED} shape={shape:?} (SimClock, SimObservationStore, scripted SimGuestStreamDial)");
+        eprintln!(
+            "restart-authority world: seed={SEED} shape={shape:?} (SimClock, SimObservationStore, scripted SimGuestStreamDial)"
+        );
         let tmp = TempDir::new().expect("tempdir");
         let mut runtime =
             ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime");
@@ -236,7 +238,7 @@ impl RestartWorld {
                 .with_default_transport(transport()),
         );
         let allocator = overdrive_control_plane::test_default_allocator(
-            Arc::clone(&store) as Arc<dyn IntentStore>,
+            Arc::clone(&store) as Arc<dyn IntentStore>
         );
         let state = AppState::new(
             store,
@@ -349,9 +351,9 @@ impl RestartWorld {
         let target = SocketAddrV4::new(WORKLOAD_ADDR, STARTUP_PORT);
         let script = match dial {
             Dial::Binds => SimDialScript::accept(),
-            Dial::Refuses => SimDialScript::Refuse(GuestDialError::Refused {
-                errno: KernelErrno::ECONNREFUSED,
-            }),
+            Dial::Refuses => {
+                SimDialScript::Refuse(GuestDialError::Refused { errno: KernelErrno::ECONNREFUSED })
+            }
         };
         self.dial.script(target, script);
         self.advance(every).await;
@@ -458,7 +460,8 @@ impl RestartWorld {
             index.apply_row(row.service_id, &row.backends);
         }
         let spiffe = SpiffeId::for_allocation(&self.workload, alloc);
-        let backend = rows.iter().flat_map(|row| row.backends.iter()).find(|b| b.alloc == spiffe)?;
+        let backend =
+            rows.iter().flat_map(|row| row.backends.iter()).find(|b| b.alloc == spiffe)?;
         let std::net::SocketAddr::V4(addr) = backend.addr else { return None };
         Some(matches!(index.classify(addr, Proto::Tcp), MtlsResolution::Mesh(_)))
     }
@@ -497,7 +500,6 @@ impl RestartWorld {
         self.workload_tick().await.expect("workload-lifecycle places the first attempt");
         self.current().await
     }
-
 }
 
 /// The lines a Service stream has yielded so far.
@@ -545,7 +547,10 @@ impl RestartWorld {
             let run = self.startup_row(&alloc).await.map(|r| r.run_seq.get());
             out.insert(format!("alloc/{alloc}/startup_run_seq"), format!("{run:?}"));
         }
-        out.insert("supervised_allocations".to_owned(), self.runner.active_alloc_count().to_string());
+        out.insert(
+            "supervised_allocations".to_owned(),
+            self.runner.active_alloc_count().to_string(),
+        );
         let calls = self.driver.calls();
         out.insert(
             "driver/stop_calls".to_owned(),

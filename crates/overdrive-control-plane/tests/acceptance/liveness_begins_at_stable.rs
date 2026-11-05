@@ -135,7 +135,10 @@ impl Process {
         settle().await;
     }
 
-    async fn liveness_rows(&self, alloc: &AllocationId) -> Vec<overdrive_core::observation::ProbeResultRow> {
+    async fn liveness_rows(
+        &self,
+        alloc: &AllocationId,
+    ) -> Vec<overdrive_core::observation::ProbeResultRow> {
         self.obs
             .list_probe_results_for_alloc(alloc)
             .await
@@ -308,7 +311,11 @@ async fn concurrent_stop_and_start_liveness_never_leave_liveness_for_an_ended_id
             start.join().expect("start thread");
         });
         // seed printed on failure through the message.
-        assert_eq!(p.runner.active_alloc_count(), 0, "seed {seed}: the stop always wins in the end");
+        assert_eq!(
+            p.runner.active_alloc_count(),
+            0,
+            "seed {seed}: the stop always wins in the end"
+        );
         assert!(
             !p.runner.is_role_live(&alloc, ProbeRole::Liveness),
             "seed {seed}: liveness must not outlive a removed supervisor"

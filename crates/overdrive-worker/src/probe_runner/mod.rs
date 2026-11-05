@@ -641,7 +641,9 @@ async fn probe_tick(
             }
             // SCAFFOLD: true — the guest-listener task (D14 item 3) holds no dial.
             ProbeMechanic::GuestListeners => {
-                panic!("RED scaffold: D14 guest-listener task replaces probe_tick for GuestListeners")
+                panic!(
+                    "RED scaffold: D14 guest-listener task replaces probe_tick for GuestListeners"
+                )
             }
         };
         Ok(Some(outcome))

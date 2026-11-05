@@ -11,11 +11,16 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::num::NonZeroU16;
 
 use async_trait::async_trait;
+use overdrive_core::aggregate::Listener;
 use overdrive_core::dataplane::backend_key::Proto;
 use overdrive_core::id::AllocationId;
 use overdrive_core::traits::{GuestListenerReports, ReportedListeners};
 use parking_lot::Mutex;
 use tokio::sync::Notify;
+
+fn as_reported(set: &BTreeSet<(Proto, NonZeroU16)>) -> ReportedListeners {
+    set.iter().map(|&(protocol, port)| Listener { port, protocol }).collect()
+}
 
 /// A scripted reported-set board for DST and acceptance tests.
 #[derive(Debug, Default)]
@@ -57,7 +62,7 @@ impl SimGuestListenerReports {
 #[async_trait]
 impl GuestListenerReports for SimGuestListenerReports {
     fn reported(&self, alloc: &AllocationId) -> ReportedListeners {
-        self.entries.lock().get(alloc).map(|set| set.iter().copied().collect()).unwrap_or_default()
+        self.entries.lock().get(alloc).map(as_reported).unwrap_or_default()
     }
 
     async fn changed(&self, alloc: &AllocationId, seen: &ReportedListeners) -> ReportedListeners {
@@ -68,7 +73,7 @@ impl GuestListenerReports for SimGuestListenerReports {
             {
                 let entries = self.entries.lock();
                 if let Some(set) = entries.get(alloc) {
-                    let current: ReportedListeners = set.iter().copied().collect();
+                    let current = as_reported(set);
                     if &current != seen {
                         return current;
                     }

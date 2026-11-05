@@ -315,7 +315,8 @@ async fn sim_dataplane_drain_flow_events_returns_seeded_events() {
 // ---------------------------------------------------------------------------
 
 fn sample_spec() -> AllocationSpec {
-    AllocationSpec { declared_listeners: Vec::new(),
+    AllocationSpec {
+        declared_listeners: Vec::new(),
         alloc: alloc("alloc-a1b2c3"),
         identity: spiffe("workload/payments/alloc/a1b2c3"),
         driver: DriverPayload::Vm(VmPayload {

@@ -165,7 +165,8 @@ async fn action_shim_restart_passes_spec_from_action_to_driver_start_unchanged()
         successor_id.as_str(),
     ))
     .expect("spiffe id");
-    let restart_spec = AllocationSpec { declared_listeners: Vec::new(),
+    let restart_spec = AllocationSpec {
+        declared_listeners: Vec::new(),
         alloc: successor_id,
         identity,
         driver: overdrive_core::traits::driver::DriverPayload::Vm(VmPayload {

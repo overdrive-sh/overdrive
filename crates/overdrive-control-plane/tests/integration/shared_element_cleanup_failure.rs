@@ -720,7 +720,8 @@ fn service_ports() -> Vec<NonZeroU16> {
 }
 
 fn spec(name: &str, transport: Option<GuestTransportAssignment>) -> AllocationSpec {
-    AllocationSpec { declared_listeners: Vec::new(),
+    AllocationSpec {
+        declared_listeners: Vec::new(),
         alloc: AllocationId::new(name).expect("allocation id"),
         identity: SpiffeId::new(&format!(
             "spiffe://overdrive.local/workload/svc-element-cleanup/alloc/{name}"

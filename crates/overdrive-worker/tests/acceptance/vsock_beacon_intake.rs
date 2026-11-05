@@ -120,7 +120,8 @@ async fn driver_over_vmm(
             NodeId::new("vsock-beacon-intake").expect("valid node ID"),
             0,
         )) as Arc<dyn ObservationStore>,
-        Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()), Arc::new(overdrive_worker::GuestListenerBoard::new()),
+        Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
+        Arc::new(overdrive_worker::GuestListenerBoard::new()),
     ));
     let driver = VmDriver::new(
         vmm,
@@ -130,7 +131,8 @@ async fn driver_over_vmm(
         probe_runner,
         wiring.gate(),
         layout(root),
-        beacon, Arc::new(overdrive_worker::GuestListenerBoard::new()),
+        beacon,
+        Arc::new(overdrive_worker::GuestListenerBoard::new()),
     );
     (driver, beacon_port)
 }
@@ -229,7 +231,8 @@ impl Node {
     }
 
     fn spec(&self, alloc: &str, launch: LaunchToken) -> AllocationSpec {
-        AllocationSpec { declared_listeners: Vec::new(),
+        AllocationSpec {
+            declared_listeners: Vec::new(),
             alloc: AllocationId::new(alloc).expect("valid alloc id"),
             identity: SpiffeId::new("spiffe://overdrive.local/workload/beacon/alloc/x")
                 .expect("valid spiffe id"),

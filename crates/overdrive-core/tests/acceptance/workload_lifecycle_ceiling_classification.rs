@@ -299,11 +299,7 @@ fn probe_last_fail(probe: Option<&ProbeStatus>) -> String {
     }
 }
 
-fn expected(
-    declared: bool,
-    row: FinalRow,
-    probe: Option<&ProbeStatus>,
-) -> Expect {
+fn expected(declared: bool, row: FinalRow, probe: Option<&ProbeStatus>) -> Expect {
     let attempts = RESTART_BACKOFF_CEILING;
     let passed = matches!(probe, Some(ProbeStatus::Pass));
     let early = |exit_code: Option<i32>| {

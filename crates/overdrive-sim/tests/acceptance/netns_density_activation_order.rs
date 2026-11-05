@@ -688,7 +688,8 @@ impl Fixture {
     }
 
     fn start_action(workload: &str, alloc: &AllocationId) -> Action {
-        let spec = AllocationSpec { declared_listeners: Vec::new(),
+        let spec = AllocationSpec {
+            declared_listeners: Vec::new(),
             alloc: alloc.clone(),
             identity: SpiffeId::new(&format!(
                 "spiffe://overdrive.local/workload/{workload}/alloc/{alloc}"

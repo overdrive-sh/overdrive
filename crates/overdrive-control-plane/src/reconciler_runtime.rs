@@ -1937,9 +1937,13 @@ mod quint_restart_authority;
 // the action shim), its composed scenarios, and the `liveness_gate`
 // quint-connect conformance driver.
 #[cfg(all(test, feature = "integration-tests"))]
-mod liveness_gate_fixture;
-#[cfg(all(test, feature = "integration-tests"))]
 mod liveness_gate_composed;
+#[cfg(all(test, feature = "integration-tests"))]
+mod liveness_gate_fixture;
+// G-10 boundary (8): the guest-listener startup gate over a dropped report,
+// composed through the same production owners.
+#[cfg(all(test, feature = "integration-tests"))]
+mod guest_listener_gate_composed;
 #[cfg(all(test, feature = "integration-tests"))]
 mod quint_liveness_gate;
 

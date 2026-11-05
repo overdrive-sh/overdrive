@@ -67,7 +67,8 @@ async fn given_sim_tcp_prober_with_pass_outcome_when_probe_then_returns_pass() {
         http,
         Arc::clone(&clock) as Arc<dyn Clock>,
         Arc::clone(&obs) as Arc<dyn ObservationStore>,
-        Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()), Arc::new(overdrive_worker::GuestListenerBoard::new()),
+        Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
+        Arc::new(overdrive_worker::GuestListenerBoard::new()),
     );
 
     let alloc = alloc_id("alloc-pass-1");
@@ -112,7 +113,8 @@ async fn given_sim_tcp_prober_with_fail_outcome_when_probe_then_returns_fail_wit
         http,
         Arc::clone(&clock) as Arc<dyn Clock>,
         Arc::clone(&obs) as Arc<dyn ObservationStore>,
-        Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()), Arc::new(overdrive_worker::GuestListenerBoard::new()),
+        Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
+        Arc::new(overdrive_worker::GuestListenerBoard::new()),
     );
 
     let alloc = alloc_id("alloc-fail-1");
@@ -161,7 +163,8 @@ async fn given_sim_tcp_prober_when_used_as_dyn_tcp_prober_then_compiles_and_call
         Arc::new(SimClock::default()) as Arc<dyn Clock>,
         Arc::new(SimObservationStore::single_peer(node_id_for_obs_store(), 0))
             as Arc<dyn ObservationStore>,
-        Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()), Arc::new(overdrive_worker::GuestListenerBoard::new()),
+        Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
+        Arc::new(overdrive_worker::GuestListenerBoard::new()),
     );
 }
 
@@ -180,7 +183,8 @@ async fn given_sim_tcp_prober_pass_when_earned_trust_then_returns_ok() {
         Arc::new(SimClock::default()) as Arc<dyn Clock>,
         Arc::new(SimObservationStore::single_peer(node_id_for_obs_store(), 0))
             as Arc<dyn ObservationStore>,
-        Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()), Arc::new(overdrive_worker::GuestListenerBoard::new()),
+        Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
+        Arc::new(overdrive_worker::GuestListenerBoard::new()),
     );
     runner.probe().await.expect("Earned Trust gate passes against a Pass-shaped Sim adapter");
 }
@@ -200,7 +204,8 @@ async fn given_sim_tcp_prober_fail_when_earned_trust_then_returns_typed_error() 
         Arc::new(SimClock::default()) as Arc<dyn Clock>,
         Arc::new(SimObservationStore::single_peer(node_id_for_obs_store(), 0))
             as Arc<dyn ObservationStore>,
-        Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()), Arc::new(overdrive_worker::GuestListenerBoard::new()),
+        Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
+        Arc::new(overdrive_worker::GuestListenerBoard::new()),
     );
     let err = runner
         .probe()
@@ -233,7 +238,8 @@ async fn tcp_probe_translates_wildcard_host_to_loopback() {
         Arc::new(SimHttpProber::new()),
         Arc::clone(&clock) as Arc<dyn Clock>,
         Arc::clone(&obs) as Arc<dyn ObservationStore>,
-        Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()), Arc::new(overdrive_worker::GuestListenerBoard::new()),
+        Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
+        Arc::new(overdrive_worker::GuestListenerBoard::new()),
     );
 
     let alloc = alloc_id("alloc-wildcard-host");
@@ -274,7 +280,8 @@ async fn register_and_stop_alloc_lifecycle_drives_active_count_and_cancels_child
         Arc::new(SimClock::default()) as Arc<dyn Clock>,
         Arc::new(SimObservationStore::single_peer(node_id_for_obs_store(), 0))
             as Arc<dyn ObservationStore>,
-        Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()), Arc::new(overdrive_worker::GuestListenerBoard::new()),
+        Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
+        Arc::new(overdrive_worker::GuestListenerBoard::new()),
     );
 
     // Universe slot: active_alloc_count starts at 0.
@@ -378,7 +385,8 @@ async fn observed_at_unix_ms_pins_to_injected_clock_value() {
         Arc::new(SimHttpProber::new()),
         Arc::clone(&clock) as Arc<dyn Clock>,
         Arc::clone(&obs) as Arc<dyn ObservationStore>,
-        Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()), Arc::new(overdrive_worker::GuestListenerBoard::new()),
+        Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
+        Arc::new(overdrive_worker::GuestListenerBoard::new()),
     );
     let alloc = alloc_id("alloc-clock-pin");
     let descriptor = descriptor_tcp("127.0.0.1", 8080);

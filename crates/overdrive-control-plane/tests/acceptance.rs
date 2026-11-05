@@ -85,12 +85,12 @@ mod acceptance {
     mod netns_density_guest_network;
     // netns-density-295 S-ND295-65 — no optional switch gates protection, DNS,
     // or supervisor composition (source scan).
-    mod required_serve_ports_source_scan;
-    pub mod hooked_driver;
-    pub mod restart_authority_world;
     mod crash_ending_authority;
-    mod startup_stop_authority;
+    pub mod hooked_driver;
+    mod required_serve_ports_source_scan;
+    pub mod restart_authority_world;
     mod startup_gated_backend_eligibility;
+    mod startup_stop_authority;
     // single-node-dataplane-wiring step 01-03 (ADR-0061 § 1) — shared
     // `lo`-named `DataplaneConfig` helper for SimDataplane-override
     // fixtures (the `job_stop_*` acceptance tests boot `run_server`).
@@ -465,10 +465,10 @@ mod acceptance {
 
     // service-allocation-readiness-and-ending D7 / D9 / D10 — pure-function obligations
     // of the Service deploy stream (S-26 projection, S-34 derivation).
-    mod service_stream_restartable_stop_projection;
-    mod progress_deadline_derivation;
     mod alloc_status_restart_budget_terminals;
+    mod progress_deadline_derivation;
     mod service_stream_last_attempt_wire;
+    mod service_stream_restartable_stop_projection;
 
     // service-allocation-readiness-and-ending D10 / D11 — the Service deploy stream's
     // progress deadline and recorded-verdict snapshot, over one shared composition of
@@ -476,11 +476,11 @@ mod acceptance {
     // ports). Composed on the reconciler convergence tick, so the `integration-tests`
     // feature gates them like their siblings above.
     #[cfg(feature = "integration-tests")]
-    mod service_stream_support;
-    #[cfg(feature = "integration-tests")]
     mod service_stream_progress_deadline;
     #[cfg(feature = "integration-tests")]
     mod service_stream_recorded_verdict;
+    #[cfg(feature = "integration-tests")]
+    mod service_stream_support;
 
     // udp-service-support US-01 / S-01-F (ADR-0060 D1a) — RED scaffold.
     // IPv6 VIP rejected at the action-shim as an operator-visible Failed

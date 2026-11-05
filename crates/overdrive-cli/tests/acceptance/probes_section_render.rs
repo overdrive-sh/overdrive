@@ -28,7 +28,7 @@
     reason = "acceptance test module — doc backticks and const-fn promotion are not load-bearing for test fixtures"
 )]
 
-use overdrive_cli::render::{ProbeRenderRow, probes_section};
+use overdrive_cli::render::{ProbeRenderRow, format_probe_mechanic_summary, probes_section};
 use overdrive_core::aggregate::WorkloadKind;
 use overdrive_core::aggregate::probe_descriptor::ProbeMechanic;
 use overdrive_core::observation::probe_result_row::{ProbeIdx, ProbeRole, ProbeStatus};
@@ -79,7 +79,7 @@ fn given_stable_service_with_three_probes_pass_when_render_then_probes_section_o
         ),
     ];
 
-    let rendered = probes_section(WorkloadKind::Service, &probes, /*no_color=*/ true);
+    let rendered = probes_section(WorkloadKind::Service, &probes, &[], /*no_color=*/ true);
 
     assert!(rendered.contains("Probes:"), "expected Probes header; got:\n{rendered}");
     // One row per role.
@@ -113,7 +113,7 @@ fn given_job_kind_alloc_when_render_then_no_probes_section() {
         ProbeMechanic::Tcp { host: "127.0.0.1".to_string(), port: 8080 },
         1000,
     )];
-    let rendered = probes_section(WorkloadKind::Job, &probes, /*no_color=*/ true);
+    let rendered = probes_section(WorkloadKind::Job, &probes, &[], /*no_color=*/ true);
     assert!(
         !rendered.contains("Probes:"),
         "S-SHCP-CLI-02: Job-kind render must NOT contain Probes section; got:\n{rendered}",
@@ -130,7 +130,7 @@ fn given_schedule_kind_alloc_when_render_then_no_probes_section() {
         ProbeMechanic::Tcp { host: "127.0.0.1".to_string(), port: 8080 },
         1000,
     )];
-    let rendered = probes_section(WorkloadKind::Schedule, &probes, /*no_color=*/ true);
+    let rendered = probes_section(WorkloadKind::Schedule, &probes, &[], /*no_color=*/ true);
     assert!(
         !rendered.contains("Probes:"),
         "S-SHCP-CLI-03: Schedule-kind render must NOT contain Probes section; got:\n{rendered}",
@@ -157,7 +157,7 @@ fn given_probe_fail_row_when_render_then_last_fail_reason_in_output() {
         consecutive_failures: 2,
         failure_threshold: Some(3),
     }];
-    let rendered = probes_section(WorkloadKind::Service, &probes, /*no_color=*/ true);
+    let rendered = probes_section(WorkloadKind::Service, &probes, &[], /*no_color=*/ true);
     assert!(rendered.contains("HTTP 503"), "expected last_fail_reason text; got:\n{rendered}");
     assert!(
         rendered.contains("(2/3)"),
@@ -180,7 +180,7 @@ fn given_just_started_service_with_no_probe_result_yet_when_render_then_last_equ
         consecutive_failures: 0,
         failure_threshold: None,
     }];
-    let rendered = probes_section(WorkloadKind::Service, &probes, /*no_color=*/ true);
+    let rendered = probes_section(WorkloadKind::Service, &probes, &[], /*no_color=*/ true);
     assert!(rendered.contains("last=pending"), "expected last=pending; got:\n{rendered}");
 }
 
@@ -199,7 +199,7 @@ fn given_stable_service_with_inferred_default_probe_when_render_then_marked_infe
         consecutive_failures: 0,
         failure_threshold: None,
     }];
-    let rendered = probes_section(WorkloadKind::Service, &probes, /*no_color=*/ true);
+    let rendered = probes_section(WorkloadKind::Service, &probes, &[], /*no_color=*/ true);
     assert!(rendered.contains("(inferred)"), "expected (inferred) suffix; got:\n{rendered}");
 }
 
@@ -221,7 +221,7 @@ fn given_no_color_when_render_then_zero_ansi_escapes() {
         consecutive_failures: 2,
         failure_threshold: Some(3),
     }];
-    let rendered = probes_section(WorkloadKind::Service, &probes, /*no_color=*/ true);
+    let rendered = probes_section(WorkloadKind::Service, &probes, &[], /*no_color=*/ true);
     assert!(
         !rendered.contains('\u{1b}'),
         "NO_COLOR: render must contain zero ANSI escape (0x1b); got:\n{rendered:?}",
@@ -336,7 +336,7 @@ proptest! {
             Vec::new()
         };
 
-        let rendered = probes_section(kind, &probes, /*no_color=*/ true);
+        let rendered = probes_section(kind, &probes, &[], /*no_color=*/ true);
 
         let should_render = matches!(kind, WorkloadKind::Service) && present;
         let has_section = rendered.contains("Probes:");
@@ -373,11 +373,31 @@ proptest! {
             consecutive_failures: if failing { 2 } else { 0 },
             failure_threshold: Some(3),
         }];
-        let rendered = probes_section(kind, &probes, /*no_color=*/ true);
+        let rendered = probes_section(kind, &probes, &[], /*no_color=*/ true);
         prop_assert!(
             !rendered.contains('\u{1b}'),
             "NO_COLOR: render must contain zero ANSI escape (0x1b); got: {:?}",
             rendered,
         );
     }
+}
+
+/// D14 item 4 (DG-11): the describe path's `GuestListeners` summary names the declared
+/// listeners in declaration order.
+/// CONTRACT_SHAPE: pure-function.
+#[test]
+#[ignore = "pending DELIVER: D14 guest listeners mechanic summary names the declared listeners"]
+fn guest_listeners_summary_names_the_declared_listeners_in_declaration_order() {
+    use overdrive_core::aggregate::Listener;
+    use overdrive_core::dataplane::backend_key::Proto;
+    use std::num::NonZeroU16;
+
+    let declared = [
+        Listener { port: NonZeroU16::new(8080).expect("non-zero"), protocol: Proto::Tcp },
+        Listener { port: NonZeroU16::new(5353).expect("non-zero"), protocol: Proto::Udp },
+    ];
+    assert_eq!(
+        format_probe_mechanic_summary(&ProbeMechanic::GuestListeners, &declared),
+        "guest listeners tcp:8080 udp:5353"
+    );
 }

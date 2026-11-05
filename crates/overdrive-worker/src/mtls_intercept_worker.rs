@@ -4056,7 +4056,8 @@ mod tests {
     }
 
     fn minimal_spec(alloc: AllocationId) -> AllocationSpec {
-        AllocationSpec { declared_listeners: Vec::new(),
+        AllocationSpec {
+            declared_listeners: Vec::new(),
             identity: SpiffeId::for_allocation(
                 &overdrive_core::WorkloadId::new("worker-owner-test").expect("valid workload id"),
                 &alloc,

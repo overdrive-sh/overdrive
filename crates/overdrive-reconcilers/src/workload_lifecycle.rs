@@ -1310,7 +1310,8 @@ impl WorkloadLifecycle {
                             alloc_id: alloc_id.clone(),
                             workload_id: job.id.clone(),
                             node_id,
-                            spec: AllocationSpec { declared_listeners: Vec::new(),
+                            spec: AllocationSpec {
+                                declared_listeners: Vec::new(),
                                 alloc: alloc_id.clone(),
                                 identity,
                                 driver,
@@ -1605,7 +1606,8 @@ fn restart_allocation_action(
     };
     Action::RestartAllocation {
         alloc_id: predecessor.alloc_id.clone(),
-        spec: AllocationSpec { declared_listeners: Vec::new(),
+        spec: AllocationSpec {
+            declared_listeners: Vec::new(),
             alloc: successor_alloc_id,
             identity,
             driver,
@@ -2052,7 +2054,8 @@ pub fn allocation_spec_for_live_intent(
             rootfs: PathBuf::from(rootfs),
         }),
     };
-    Some(AllocationSpec { declared_listeners: Vec::new(),
+    Some(AllocationSpec {
+        declared_listeners: Vec::new(),
         alloc: alloc.clone(),
         identity: SpiffeId::for_allocation(workload_id, alloc),
         driver,
