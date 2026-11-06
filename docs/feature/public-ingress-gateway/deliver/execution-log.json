@@ -666,6 +666,27 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-11-06T20:48:38Z"
+    },
+    {
+      "sid": "03-04",
+      "p": "RED",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: review-fix round, no pre-authored acceptance test for the refused-dial path",
+      "t": "2026-11-06T21:18:58Z"
+    },
+    {
+      "sid": "03-04",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-06T21:18:58Z"
+    },
+    {
+      "sid": "03-04",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-06T21:18:58Z"
     }
   ]
 }
