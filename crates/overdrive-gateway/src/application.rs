@@ -968,6 +968,14 @@ impl GatewayApplicationOwner {
         let wake = Arc::clone(&self.owner_wake);
         let clock = Arc::clone(&self.clock);
 
+        // Shutdown cancels this owner's token before any dependency's
+        // (custody included), so a closed input observed after cancellation is
+        // the requested shutdown, not a failure. Without cancellation it is a
+        // genuine unrequested dependency loss.
+        let input_closed = || {
+            if shutdown.is_cancelled() { Ok(()) } else { Err(GatewayOwnerTaskError::ChannelClosed) }
+        };
+
         self.evaluate(&report_sender).await;
         loop {
             let retry = self.status.dirty;
@@ -975,7 +983,7 @@ impl GatewayApplicationOwner {
                 biased;
                 () = shutdown.cancelled() => return Ok(()),
                 command = self.commands.recv() => match command {
-                    None => return Err(GatewayOwnerTaskError::ChannelClosed),
+                    None => return input_closed(),
                     Some(command) => self.command(command).await,
                 },
                 report = reports.recv() => {
@@ -984,7 +992,7 @@ impl GatewayApplicationOwner {
                     }
                 }
                 event = std::future::poll_fn(|cx| std::pin::Pin::new(&mut *route_events).poll_next(cx)) => match event {
-                    None => return Err(GatewayOwnerTaskError::ChannelClosed),
+                    None => return input_closed(),
                     Some(IntentSubscriptionEvent::Changed { .. }) => {
                         self.failed = None;
                         self.evaluate(&report_sender).await;
@@ -997,7 +1005,7 @@ impl GatewayApplicationOwner {
                 },
                 changed = key_events.changed() => {
                     if changed.is_err() {
-                        return Err(GatewayOwnerTaskError::ChannelClosed);
+                        return input_closed();
                     }
                     key_events.borrow_and_update();
                     self.failed = None;
@@ -1005,7 +1013,7 @@ impl GatewayApplicationOwner {
                 }
                 changed = identity_events.changed() => {
                     if changed.is_err() {
-                        return Err(GatewayOwnerTaskError::ChannelClosed);
+                        return input_closed();
                     }
                     let held = identity_events.borrow_and_update().clone();
                     if held != last_identity {
