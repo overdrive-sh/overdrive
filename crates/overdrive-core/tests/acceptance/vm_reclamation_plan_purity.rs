@@ -54,7 +54,7 @@ use overdrive_core::traits::vm_host_state::ScopeFacts;
 use overdrive_core::transition_reason::{
     ServiceFailureReason, StoppedBy, TerminalCondition, TransitionReason, is_platform_reclaimed,
 };
-use overdrive_core::{AllocationId, SpiffeId, UnixInstant};
+use overdrive_core::{AllocationId, UnixInstant};
 use overdrive_reconcilers::service_lifecycle::{
     ServiceAllocFact, ServiceLifecycleReconciler, ServiceLifecycleState, ServiceLifecycleView,
 };
@@ -482,11 +482,6 @@ fn fresh_tick(now_unix: UnixInstant) -> TickContext {
     TickContext { now, now_unix, tick: 0, deadline: now + Duration::from_secs(1) }
 }
 
-fn svc_spiffe() -> SpiffeId {
-    SpiffeId::new("spiffe://overdrive.local/workload/svc-reclaim/alloc/x")
-        .unwrap_or_else(|_| unreachable!("fixture SPIFFE id is valid"))
-}
-
 proptest! {
     #![proptest_config(ProptestConfig {
         failure_persistence: Some(Box::new(FileFailurePersistence::Direct(concat!(
@@ -664,7 +659,7 @@ proptest! {
         let mut fact = ServiceAllocFact {
             stable_committed: false,
             alloc_id: alloc.clone(),
-            state: AllocState::Terminated,
+            phase: overdrive_reconcilers::service_lifecycle::ServiceAllocPhase::NotRunning(overdrive_reconcilers::service_lifecycle::NotRunningState::new(AllocState::Terminated).expect("not Running")),
             started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1))),
             exit_code: None,
             latest_startup_probe: latest_startup_probe.clone(),
@@ -679,13 +674,10 @@ proptest! {
             latest_readiness_probe: None,
             has_readiness_probe: false,
             readiness_success_threshold: 1,
-            backend_spiffe: svc_spiffe(),
-            backend_ip: std::net::Ipv4Addr::LOCALHOST,
             latest_liveness_probe: None,
             has_liveness_probe: false,
             liveness_failure_threshold: 3,
-            probe_rows: BTreeMap::new(),
-        };
+            probe_rows: BTreeMap::new(),};
         if let Some(status) = latest_startup_probe {
             let probe_idx = ProbeIdx::new(0);
             fact.probe_rows.insert(

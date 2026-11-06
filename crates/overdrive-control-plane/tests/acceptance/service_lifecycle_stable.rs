@@ -57,7 +57,15 @@ fn fact_running_with_pass(alloc_id: AllocationId, started_at_unix_ms: u64) -> Se
     ServiceAllocFact {
         stable_committed: false,
         alloc_id,
-        state: AllocState::Running,
+        phase: overdrive_reconcilers::service_lifecycle::ServiceAllocPhase::Running(
+            overdrive_reconcilers::service_lifecycle::ServiceBackendIdentity {
+                spiffe: overdrive_core::SpiffeId::new(
+                    "spiffe://overdrive.local/workload/svc/alloc/x",
+                )
+                .expect("valid spiffe"),
+                ip: std::net::Ipv4Addr::LOCALHOST,
+            },
+        ),
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_millis(
             started_at_unix_ms,
         ))),
@@ -74,11 +82,6 @@ fn fact_running_with_pass(alloc_id: AllocationId, started_at_unix_ms: u64) -> Se
         latest_readiness_probe: None,
         has_readiness_probe: false,
         readiness_success_threshold: 1,
-        backend_spiffe: overdrive_core::SpiffeId::new(
-            "spiffe://overdrive.local/workload/svc/alloc/x",
-        )
-        .expect("valid spiffe"),
-        backend_ip: std::net::Ipv4Addr::LOCALHOST,
         latest_liveness_probe: None,
         has_liveness_probe: false,
         liveness_failure_threshold: 3,
@@ -94,7 +97,10 @@ fn fact_failed_within_deadline(
     ServiceAllocFact {
         stable_committed: false,
         alloc_id,
-        state: AllocState::Failed,
+        phase: overdrive_reconcilers::service_lifecycle::ServiceAllocPhase::NotRunning(
+            overdrive_reconcilers::service_lifecycle::NotRunningState::new(AllocState::Failed)
+                .expect("not Running"),
+        ),
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_millis(
             started_at_unix_ms,
         ))),
@@ -109,11 +115,6 @@ fn fact_failed_within_deadline(
         latest_readiness_probe: None,
         has_readiness_probe: false,
         readiness_success_threshold: 1,
-        backend_spiffe: overdrive_core::SpiffeId::new(
-            "spiffe://overdrive.local/workload/svc/alloc/x",
-        )
-        .expect("valid spiffe"),
-        backend_ip: std::net::Ipv4Addr::LOCALHOST,
         latest_liveness_probe: None,
         has_liveness_probe: false,
         liveness_failure_threshold: 3,

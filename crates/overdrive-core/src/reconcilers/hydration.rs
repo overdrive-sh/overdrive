@@ -18,11 +18,10 @@
 //! S-ROH-B-09 structural test enumerates the field set against the ADR-0086 D5
 //! read-surface list.
 
-use std::net::Ipv4Addr;
 use std::path::Path;
 
 use crate::gateway_identity::GatewayIdentityView;
-use crate::id::NodeId;
+use crate::id::{AllocationId, NodeId};
 use crate::traits::driver::DriverRegistry;
 use crate::traits::intent_store::IntentStore;
 use crate::traits::observation_store::ObservationStore;
@@ -47,7 +46,7 @@ use crate::traits::{
 ///   the previously-concrete hydration surfaces DST-injectable.
 /// * [`GuestAttachmentView`] — the fifth read-port (D-295-R8, ADR-0134): node
 ///   guest-attachment occupancy and per-allocation leases.
-/// * `node_id` / `host_ipv4` / `intent_redb_path` — plain data threaded in (not
+/// * `node_id` / `intent_redb_path` — plain data threaded in (not
 ///   traits).
 ///
 /// It is a **borrow bundle**: no owned allocation, no clone of the underlying
@@ -82,8 +81,6 @@ pub struct HydrationContext<'a> {
     pub gateway_identity: &'a dyn GatewayIdentityView,
     /// The local node id (plain data).
     pub node_id: &'a NodeId,
-    /// The local host IPv4 (plain data).
-    pub host_ipv4: Ipv4Addr,
     /// Path to the intent redb file (plain data — some hydrate bodies need the
     /// on-disk path, not just the store handle).
     pub intent_redb_path: &'a Path,
@@ -127,4 +124,17 @@ pub enum HydrateError {
     /// variant (per `.claude/rules/development.md` § "Errors").
     #[error("invalid target resource: {0}")]
     TargetShape(String),
+    /// An observation row violates the Running => workload address contract:
+    /// a Running Service allocation carries no workload address, so no backend
+    /// address can be derived for it (ADR-0276). The tick for that Service
+    /// target fails with this error and no `ServiceBackendRow` is written until
+    /// the row is corrected.
+    #[error(
+        "Running Service allocation {alloc_id} carries no workload address; \
+         a Running Service allocation must carry its workload address"
+    )]
+    RunningAllocationWithoutWorkloadAddr {
+        /// The Running allocation whose row carries no workload address.
+        alloc_id: AllocationId,
+    },
 }

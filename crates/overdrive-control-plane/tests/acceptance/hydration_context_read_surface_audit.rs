@@ -24,7 +24,6 @@
 //! | `state.engine.live_instances()` | `workflow_live_set` |
 //! | `state.identity.held_snapshot()` | `held_svid_view` |
 //! | plain `node_id` | `node_id` |
-//! | plain `host_ipv4` | `host_ipv4` |
 //! | plain `intent_redb_path` | `intent_redb_path` |
 //!
 //! Two structural audit functions below ARE the assertion. They never run;
@@ -57,7 +56,6 @@
     clippy::needless_pass_by_value
 )]
 
-use std::net::Ipv4Addr;
 use std::path::Path;
 
 use overdrive_core::gateway_identity::GatewayIdentityView;
@@ -83,7 +81,6 @@ fn audit_every_read_surface_is_represented(ctx: &HydrationContext<'_>) {
     let _held: &dyn HeldSvidView = ctx.held_svid_view;
     let _gateway: &dyn GatewayIdentityView = ctx.gateway_identity;
     let _node: &NodeId = ctx.node_id;
-    let _host_ipv4: Ipv4Addr = ctx.host_ipv4;
     let _redb: &Path = ctx.intent_redb_path;
 }
 
@@ -104,7 +101,6 @@ fn audit_field_set_is_exactly_the_read_surfaces(ctx: HydrationContext<'_>) {
         guest_attachments: _,
         gateway_identity: _,
         node_id: _,
-        host_ipv4: _,
         intent_redb_path: _,
     } = ctx;
 }
@@ -127,7 +123,7 @@ fn hydration_context_covers_every_hydrate_read_surface_and_carries_no_restart_bu
     // machine-checked twin. `restart_budget` is deliberately ABSENT —
     // ADR-0087 (single restart authority) removed the cross-reconciler
     // restart-budget read at its root, so no `RestartBudgetView` port exists.
-    let audited_surfaces: [&str; 11] = [
+    let audited_surfaces: [&str; 10] = [
         "intent_store",
         "observation_store",
         "drivers",
@@ -137,7 +133,6 @@ fn hydration_context_covers_every_hydrate_read_surface_and_carries_no_restart_bu
         "workflow_live_set",
         "held_svid_view",
         "node_id",
-        "host_ipv4",
         "intent_redb_path",
     ];
 
@@ -148,8 +143,8 @@ fn hydration_context_covers_every_hydrate_read_surface_and_carries_no_restart_bu
     );
     assert_eq!(
         audited_surfaces.len(),
-        11,
-        "ADR-0086 D5 pins exactly 11 read surfaces (8 injected handles + \
-         node_id + host_ipv4 + intent_redb_path)"
+        10,
+        "ADR-0086 D5 pins exactly 10 read surfaces (8 injected handles + \
+         node_id + intent_redb_path)"
     );
 }

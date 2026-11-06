@@ -56,7 +56,13 @@ fn running_fact(
     ServiceAllocFact {
         stable_committed: false,
         alloc_id,
-        state: AllocState::Running,
+        phase: overdrive_reconcilers::service_lifecycle::ServiceAllocPhase::Running(
+            overdrive_reconcilers::service_lifecycle::ServiceBackendIdentity {
+                spiffe: SpiffeId::new("spiffe://overdrive.local/workload/service-vm-e08/alloc/0")
+                    .expect("static backend SPIFFE ID is valid"),
+                ip: Ipv4Addr::LOCALHOST,
+            },
+        ),
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(10))),
         exit_code: None,
         latest_startup_probe: Some(startup),
@@ -71,9 +77,6 @@ fn running_fact(
         latest_readiness_probe: None,
         has_readiness_probe: false,
         readiness_success_threshold: 1,
-        backend_spiffe: SpiffeId::new("spiffe://overdrive.local/workload/service-vm-e08/alloc/0")
-            .expect("static backend SPIFFE ID is valid"),
-        backend_ip: Ipv4Addr::LOCALHOST,
         latest_liveness_probe: None,
         has_liveness_probe: false,
         liveness_failure_threshold: 3,
@@ -166,7 +169,7 @@ fn vm_startup_failure_leaves_running_owned_by_beacon_and_fails_only_startup() {
         &tick(11),
     );
 
-    assert_eq!(actual.allocs[&alloc_id].state, AllocState::Running);
+    assert_eq!(actual.allocs[&alloc_id].state(), AllocState::Running);
     assert_eq!(actions.len(), 1, "startup failure must emit only its existing terminal action");
     assert!(matches!(
         &actions[0],
@@ -230,11 +233,12 @@ fn startup_probe_failure_vetoes_backend_eligibility_before_terminal_publication(
         ] if reconciler.as_str() == "service-map-hydrator"
             && target.as_str() == "service/42"
             && row.backends.len() == 1
-            && row.backends[0].alloc == actual.allocs[&alloc_id].backend_spiffe
+            && Some(&row.backends[0].alloc)
+                == actual.allocs[&alloc_id].backend().map(|backend| &backend.spiffe)
             && !row.backends[0].healthy
             && action_alloc_id == &alloc_id
     ));
-    assert_eq!(actual.allocs[&alloc_id].state, AllocState::Running);
+    assert_eq!(actual.allocs[&alloc_id].state(), AllocState::Running);
     assert!(next_view.terminal_announced.contains(&alloc_id));
     assert!(actions.iter().all(|action| !matches!(action, Action::RestartAllocation { .. })));
 
@@ -298,7 +302,7 @@ fn vm_startup_pass_changes_only_service_stable() {
         &tick(15),
     );
 
-    assert_eq!(actual.allocs[&alloc_id].state, AllocState::Running);
+    assert_eq!(actual.allocs[&alloc_id].state(), AllocState::Running);
     assert_eq!(actions.len(), 1, "startup pass must emit only Stable");
     assert!(matches!(
         &actions[0],
@@ -346,7 +350,7 @@ fn vm_readiness_flaps_only_backend_eligibility_and_recovers() {
 
     let initial_row = service_backend_row(&initial_actions);
     assert!(initial_row.backends[0].healthy, "a readiness Pass makes the Running backend eligible");
-    assert_eq!(actual.allocs[&alloc_id].state, AllocState::Running);
+    assert_eq!(actual.allocs[&alloc_id].state(), AllocState::Running);
     assert!(stable_view.stable_announced.contains(&alloc_id));
     assert!(!has_restart(&initial_actions));
     assert_eq!(initial_row.backends.len(), 1);
@@ -368,7 +372,7 @@ fn vm_readiness_flaps_only_backend_eligibility_and_recovers() {
     let withdrawn_row = service_backend_row(&withdraw_actions);
     assert!(!withdrawn_row.backends[0].healthy, "readiness Fail withdraws eligibility");
     assert_eq!(withdrawn_row.backends[0].alloc, initial_row.backends[0].alloc);
-    assert_eq!(actual.allocs[&alloc_id].state, AllocState::Running);
+    assert_eq!(actual.allocs[&alloc_id].state(), AllocState::Running);
     assert!(unready_view.stable_announced.contains(&alloc_id));
     assert!(unready_view.liveness_last_acted_run.is_empty());
     assert!(!has_restart(&withdraw_actions));
@@ -385,7 +389,7 @@ fn vm_readiness_flaps_only_backend_eligibility_and_recovers() {
     let restored_row = service_backend_row(&restore_actions);
     assert!(restored_row.backends[0].healthy, "readiness Pass restores eligibility");
     assert_eq!(restored_row.backends[0].alloc, initial_row.backends[0].alloc);
-    assert_eq!(actual.allocs[&alloc_id].state, AllocState::Running);
+    assert_eq!(actual.allocs[&alloc_id].state(), AllocState::Running);
     assert!(ready_view.stable_announced.contains(&alloc_id));
     assert!(ready_view.liveness_last_acted_run.is_empty());
     assert!(!has_restart(&restore_actions));
@@ -585,7 +589,7 @@ fn vm_liveness_threshold_emits_only_the_existing_liveness_stop() {
         threshold_view.liveness_last_acted_run.get(&(alloc_id.clone(), ProbeIdx::new(0))),
         Some(&ProbeRunSeq::new(6).expect("run sequence is non-zero")),
     );
-    assert_eq!(observed.allocs[&alloc_id].state, AllocState::Running);
+    assert_eq!(observed.allocs[&alloc_id].state(), AllocState::Running);
     assert!(!has_restart(&threshold_actions));
     assert!(
         !threshold_actions.iter().any(|action| matches!(action, Action::FinalizeFailed { .. }))

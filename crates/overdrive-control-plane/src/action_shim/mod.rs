@@ -390,7 +390,8 @@ pub(crate) fn build_alloc_status_row(
     // than a defaulted `None` field kills the forgot-to-forward-carry bug
     // class — a successor / terminal writer can no longer silently drop the
     // prior row's address (the dial-by-name walking-skeleton backend-drop;
-    // the residual host_ipv4-fallback masking is tracked in #248).
+    // a Running row without its address is refused at Service hydration,
+    // ADR-0276).
     workload_addr: Option<std::net::Ipv4Addr>,
     // ADR-0078 § D2. REQUIRED: the row this write supersedes at this alloc's
     // LWW key (`None` ONLY when genuinely no row exists). The builder derives
@@ -454,8 +455,8 @@ pub(crate) fn build_alloc_status_row(
         // pass `spec.workload_addr` on the Running write; FinalizeFailed's
         // Stable (still-Running) arm forward-carries `prior_row.workload_addr`;
         // genuine-terminal / Failed / Terminated rows pass `None` (a
-        // non-Running alloc is not a live backend). See #248 for the
-        // residual host_ipv4-fallback masking.
+        // non-Running alloc is not a live backend). A Running row that
+        // carries `None` is refused at Service hydration (ADR-0276).
         workload_addr,
         // ADR-0078 § D1 / § D2: both derived by `CrashFacts::advance` above
         // from the `prior` row and THIS row's `state`. Destructured onto the
@@ -2002,11 +2003,11 @@ async fn dispatch_single(
             // MUST keep its per-instance backend address too — dropping it to
             // `None` here is the walking-skeleton backend-drop the GAP-9 guard
             // only HALF-closed (it preserved the Running *state* but not the
-            // address, so the authoritative backend projection silently reverted to its
-            // host_ipv4 fallback and the dial-by-name egress translation
+            // address, so the Service backend projection lost the allocation's
+            // address and the dial-by-name egress translation
             // targeted an unreachable addr). A genuine terminal (`Failed`)
-            // passes `None` below — a dead alloc is not a live backend. The
-            // residual host_ipv4-fallback masking is tracked in #248.
+            // passes `None` below — a dead alloc is not a live backend. A Running
+            // row without its address is refused at Service hydration (ADR-0276).
             let prior_workload_addr = prior_row.workload_addr;
             // GAP-9 — a `Stable` terminal is a SUCCESS claim, not a
             // failure: the Service alloc has passed its startup probes

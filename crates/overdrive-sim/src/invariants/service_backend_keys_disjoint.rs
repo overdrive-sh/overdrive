@@ -37,8 +37,10 @@ const BACKENDS_PER_SERVICE: u8 = 3;
 const LISTENER_PORT: u16 = 8080;
 
 /// Install `SERVICES` Services over disjoint workload-address ranges, then
-/// attempt to install a Service whose backend set takes an endpoint another
-/// Service holds. After every step the backend key sets of the registered
+/// attempt a colliding install.
+///
+/// The colliding Service's backend set takes an endpoint another Service
+/// holds. After every step the backend key sets of the registered
 /// Services' entries must be pairwise disjoint; the colliding install must be
 /// refused and leave every entry as it was.
 pub async fn evaluate_service_backend_keys_are_disjoint() -> InvariantResult {
@@ -47,7 +49,7 @@ pub async fn evaluate_service_backend_keys_are_disjoint() -> InvariantResult {
 
     for service in 0..SERVICES {
         let frontend = frontend(service);
-        if let Err(e) = dataplane.update_service(frontend.clone(), backends(service)).await {
+        if let Err(e) = dataplane.update_service(frontend, backends(service)).await {
             return fail(format!("install of service {service} failed: {e}"));
         }
         frontends.push(frontend);
@@ -61,7 +63,7 @@ pub async fn evaluate_service_backend_keys_are_disjoint() -> InvariantResult {
     let mut stolen = backends(SERVICES);
     stolen.push(backends(0).remove(0));
     let before: Vec<Option<Vec<Backend>>> = entries(&dataplane, &frontends);
-    match dataplane.update_service(intruder.clone(), stolen).await {
+    match dataplane.update_service(intruder, stolen).await {
         Err(DataplaneError::ReverseNatConflict { .. }) => {}
         Err(other) => {
             return fail(format!("a shared endpoint must be a reverse-NAT conflict, got {other}"));
@@ -104,7 +106,10 @@ fn shared_key(dataplane: &SimDataplane, frontends: &[ServiceFrontend]) -> Option
             if let Some(other) = holder.insert(key, f.vip_v4())
                 && other != f.vip_v4()
             {
-                return Some(format!("backend key {key} is in the entries of {other} and {}", f.vip_v4()));
+                return Some(format!(
+                    "backend key {key} is in the entries of {other} and {}",
+                    f.vip_v4()
+                ));
             }
         }
     }

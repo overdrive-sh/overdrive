@@ -39,11 +39,98 @@ use serde::{Deserialize, Serialize};
 use overdrive_core::dataplane::fingerprint::fingerprint;
 use overdrive_core::id::{AllocationId, ServiceId, ServiceVip, SpiffeId};
 use overdrive_core::observation::{ProbeIdx, ProbeRunSeq, ProbeStatus};
-use overdrive_core::traits::observation_store::{AllocState, ObservationRowKind};
+use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, ObservationRowKind};
 
 // Re-exports — see file-header docstring for the cycle-breaking
 // rationale.
 pub use overdrive_core::transition_reason::{ProbeWitness, ServiceFailureReason};
+
+/// A Service backend's identity: its SPIFFE id and the address it serves on.
+/// The listener port stays with the enclosing dataplane identity when the
+/// complete backend row is composed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServiceBackendIdentity {
+    /// SPIFFE identity of the allocation as a dataplane backend.
+    pub spiffe: SpiffeId,
+    /// IPv4 workload address the allocation serves on.
+    pub ip: std::net::Ipv4Addr,
+}
+
+/// An [`AllocState`] other than `Running`. The private field makes a
+/// `Running` value unrepresentable: construct through [`NotRunningState::new`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NotRunningState(AllocState);
+
+impl NotRunningState {
+    /// `None` iff `state` is `Running`.
+    #[must_use]
+    pub const fn new(state: AllocState) -> Option<Self> {
+        match state {
+            AllocState::Running => None,
+            other => Some(Self(other)),
+        }
+    }
+
+    /// The wrapped non-`Running` state.
+    #[must_use]
+    pub const fn get(self) -> AllocState {
+        self.0
+    }
+}
+
+/// A Running allocation's observation row carries no workload address, so no
+/// backend address can be derived for it (ADR-0276).
+#[derive(Debug, thiserror::Error)]
+#[error(
+    "Running Service allocation {alloc_id} carries no workload address; \
+     a Running Service allocation must carry its workload address"
+)]
+pub struct RunningAllocationWithoutWorkloadAddr {
+    /// The Running allocation whose row carries no workload address.
+    pub alloc_id: AllocationId,
+}
+
+/// What a Service allocation is as a backend candidate: a `Running` allocation
+/// always carries its [`ServiceBackendIdentity`]; any other state carries none.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ServiceAllocPhase {
+    /// Running, with the identity the dataplane backend is built from.
+    Running(ServiceBackendIdentity),
+    /// Any state other than Running.
+    NotRunning(NotRunningState),
+}
+
+impl ServiceAllocPhase {
+    /// Project an observation row. Total over `AllocState x Option<Ipv4Addr>`:
+    /// `Running` with an address is `Running(identity)`; `Running` without one
+    /// is refused; every other state is `NotRunning` whatever the address.
+    ///
+    /// # Errors
+    ///
+    /// [`RunningAllocationWithoutWorkloadAddr`] when the row is `Running` and
+    /// carries no `workload_addr`.
+    pub fn from_row(
+        row: &AllocStatusRow,
+        spiffe: SpiffeId,
+    ) -> Result<Self, RunningAllocationWithoutWorkloadAddr> {
+        match (NotRunningState::new(row.state), row.workload_addr) {
+            (Some(not_running), _) => Ok(Self::NotRunning(not_running)),
+            (None, Some(ip)) => Ok(Self::Running(ServiceBackendIdentity { spiffe, ip })),
+            (None, None) => {
+                Err(RunningAllocationWithoutWorkloadAddr { alloc_id: row.alloc_id.clone() })
+            }
+        }
+    }
+
+    /// The lifecycle state this phase projects.
+    #[must_use]
+    pub const fn state(&self) -> AllocState {
+        match self {
+            Self::Running(_) => AllocState::Running,
+            Self::NotRunning(not_running) => not_running.get(),
+        }
+    }
+}
 
 /// Per-alloc fact bundle the reconciler consults when deciding
 /// `Stable` / `Failed` / no-op for a single Service-kind allocation.
@@ -70,8 +157,9 @@ pub use overdrive_core::transition_reason::{ProbeWitness, ServiceFailureReason};
 pub struct ServiceAllocFact {
     /// Allocation identifier.
     pub alloc_id: AllocationId,
-    /// Lifecycle state observed on the alloc-status row.
-    pub state: AllocState,
+    /// Lifecycle phase observed on the alloc-status row; `Running` carries the
+    /// backend identity (ADR-0276).
+    pub phase: ServiceAllocPhase,
     /// Wall-clock at which the alloc transitioned Pending → Running,
     /// as observed by the owning node via the injected
     /// [`overdrive_core::traits::clock::Clock`] port. Sourced verbatim from
@@ -164,14 +252,6 @@ pub struct ServiceAllocFact {
     /// from the live `ServiceSpec` — re-evaluated every tick, never
     /// persisted.
     pub readiness_success_threshold: u32,
-    /// SPIFFE identity of this alloc as a dataplane backend. Used to
-    /// construct the [`overdrive_core::traits::dataplane::Backend`] this alloc
-    /// contributes to the service's backend set.
-    pub backend_spiffe: SpiffeId,
-    /// IPv4 address this alloc serves on as a dataplane backend. The
-    /// listener-specific port is supplied by the enclosing dataplane
-    /// identity when the complete backend row is composed.
-    pub backend_ip: std::net::Ipv4Addr,
 
     // ---- Step 03-02 / Slice 05 — liveness facts ----
     /// Latest-observed liveness probe outcome at index 0. `None` when
@@ -214,6 +294,23 @@ pub struct ServiceAllocFact {
     // being `Stable`; in-memory State field only.
     /// The allocation's status row carries a committed `Stable` claim.
     pub stable_committed: bool,
+}
+
+impl ServiceAllocFact {
+    /// Lifecycle state of the allocation (delegates to the phase).
+    #[must_use]
+    pub const fn state(&self) -> AllocState {
+        self.phase.state()
+    }
+
+    /// The backend identity; `Some` iff the allocation is Running.
+    #[must_use]
+    pub const fn backend(&self) -> Option<&ServiceBackendIdentity> {
+        match &self.phase {
+            ServiceAllocPhase::Running(identity) => Some(identity),
+            ServiceAllocPhase::NotRunning(_) => None,
+        }
+    }
 }
 
 /// `ServiceLifecycleState` — typed projection of intent +
@@ -525,7 +622,7 @@ impl Reconciler for ServiceLifecycleReconciler {
             // `Some(ts)` from the row). The `unreachable!()` is the
             // structural defense per `.claude/rules/development.md`
             // § "Logically unreachable None / Err — use `unreachable!()`".
-            if fact.startup_probes_empty && fact.state == AllocState::Running {
+            if fact.startup_probes_empty && fact.state() == AllocState::Running {
                 let started = fact.started_at.unwrap_or_else(|| {
                     unreachable!("hydrate invariant: AllocStatusRow with state==Running carries Some(started_at)")
                 });
@@ -547,7 +644,7 @@ impl Reconciler for ServiceLifecycleReconciler {
             // Branch (a): Stable — Running + any startup probe Pass.
             // Same hydrate invariant as branch (a'): a Running alloc
             // carries `Some(started_at)`.
-            if fact.state == AllocState::Running
+            if fact.state() == AllocState::Running
                 && matches!(fact.latest_startup_probe, Some(ProbeStatus::Pass))
             {
                 let started = fact.started_at.unwrap_or_else(|| {
@@ -578,7 +675,7 @@ impl Reconciler for ServiceLifecycleReconciler {
             // branch; the row's typed `terminal` flows through other
             // projections (Custom → Other) per the audit's branch
             // semantics table.
-            if fact.state == AllocState::Failed {
+            if fact.state() == AllocState::Failed {
                 let Some(started) = fact.started_at else {
                     // Pre-Running Failed: the alloc reached a terminal state but
                     // never started, so the elapsed-vs-deadline EarlyExit
@@ -709,7 +806,7 @@ impl Reconciler for ServiceLifecycleReconciler {
                     || next_view.stable_announced.contains(&fact.alloc_id)
                     || next_view.terminal_announced.contains(&fact.alloc_id)
                     || fact.started_at.is_none()
-                    || fact.state == AllocState::Terminated
+                    || fact.state() == AllocState::Terminated
                     || matches!(fact.latest_startup_probe, Some(ProbeStatus::Pass))
                 {
                     return None;
@@ -919,8 +1016,11 @@ async fn hydrate_service_alloc_facts(
         let latest_liveness_probe =
             latest_probe_row(&probe_rows, ProbeRole::Liveness, ProbeIdx::new(0));
 
-        let backend_spiffe = SpiffeId::for_allocation(workload_id, &row.alloc_id);
-        let backend_ip = row.workload_addr.unwrap_or(ctx.host_ipv4);
+        let phase =
+            ServiceAllocPhase::from_row(&row, SpiffeId::for_allocation(workload_id, &row.alloc_id))
+                .map_err(|refused| HydrateError::RunningAllocationWithoutWorkloadAddr {
+                    alloc_id: refused.alloc_id,
+                })?;
 
         let exit_code = match row.reason {
             Some(TransitionReason::WorkloadCrashedImmediately { exit_code, .. }) => exit_code,
@@ -929,7 +1029,7 @@ async fn hydrate_service_alloc_facts(
         let fact = ServiceAllocFact {
             stable_committed: false,
             alloc_id: row.alloc_id.clone(),
-            state: row.state,
+            phase,
             started_at: row.started_at,
             exit_code,
             latest_startup_probe: latest_startup_probe.map(|row| row.status.clone()),
@@ -944,8 +1044,6 @@ async fn hydrate_service_alloc_facts(
             latest_readiness_probe: latest_readiness_probe.map(|row| row.status.clone()),
             has_readiness_probe,
             readiness_success_threshold,
-            backend_spiffe,
-            backend_ip,
             latest_liveness_probe: latest_liveness_probe.map(|row| row.status.clone()),
             has_liveness_probe,
             liveness_failure_threshold,
@@ -1043,7 +1141,7 @@ fn liveness_terminate_action(
     let key = (alloc_id.clone(), ProbeIdx::new(0));
     let newer_than_last_action =
         next_view.liveness_last_acted_run.get(&key).is_none_or(|last| row.run_seq > *last);
-    if fact.state != AllocState::Running || !crossed || !newer_than_last_action {
+    if fact.state() != AllocState::Running || !crossed || !newer_than_last_action {
         return None;
     }
 
@@ -1087,7 +1185,7 @@ fn service_backend_row_actions(
     // listeners never multiplies the producer-row read.
     let mut healthy_by_alloc: BTreeMap<AllocationId, bool> = BTreeMap::new();
     for (alloc_id, fact) in &actual.allocs {
-        if fact.state != AllocState::Running {
+        if fact.state() != AllocState::Running {
             continue;
         }
         let terminal_startup_veto = startup_failed_this_tick.contains(alloc_id)
@@ -1101,12 +1199,13 @@ fn service_backend_row_actions(
         let backends: Vec<Backend> = actual
             .allocs
             .iter()
-            .filter(|(_, fact)| fact.state == AllocState::Running)
-            .map(|(alloc_id, fact)| Backend {
-                alloc: fact.backend_spiffe.clone(),
-                addr: SocketAddr::new(IpAddr::V4(fact.backend_ip), identity.port.get()),
-                weight: 1,
-                healthy: healthy_by_alloc.get(alloc_id).copied().unwrap_or(false),
+            .filter_map(|(alloc_id, fact)| {
+                fact.backend().map(|backend| Backend {
+                    alloc: backend.spiffe.clone(),
+                    addr: SocketAddr::new(IpAddr::V4(backend.ip), identity.port.get()),
+                    weight: 1,
+                    healthy: healthy_by_alloc.get(alloc_id).copied().unwrap_or(false),
+                })
             })
             .collect();
 
@@ -1224,7 +1323,7 @@ fn startup_probe_failed_action(
     // state this branch is never entitled to act on: every reachable
     // `Terminated` row already carries a different ending authored by
     // another path (reclamation, an operator/reconciler stop, …).
-    if fact.state == AllocState::Terminated {
+    if fact.state() == AllocState::Terminated {
         return None;
     }
     let started = fact.started_at?;
@@ -1325,7 +1424,11 @@ mod tests {
                     for status in [None, Some(ProbeStatus::Pass), Some(ProbeStatus::Fail { last_fail_reason: "refused".into() })] {
                         let mut fact = ServiceAllocFact {
                             stable_committed: false,
-                            alloc_id: alloc.clone(), state: AllocState::Running,
+                            alloc_id: alloc.clone(),
+                            phase: ServiceAllocPhase::Running(ServiceBackendIdentity {
+                                spiffe: SpiffeId::new("spiffe://overdrive.local/workload/policy/alloc/0").unwrap(),
+                                ip: "192.0.2.10".parse().unwrap(),
+                            }),
                             started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1))),
                             exit_code: None, latest_startup_probe: None,
                             latest_startup_probe_observed_at: None, max_attempts: 3,
@@ -1333,8 +1436,6 @@ mod tests {
                             inferred: false, startup_probes_empty: false,
                             latest_readiness_probe: status.clone(), has_readiness_probe: enabled,
                             readiness_success_threshold: threshold,
-                            backend_spiffe: SpiffeId::new("spiffe://overdrive.local/workload/policy/alloc/0").unwrap(),
-                            backend_ip: "192.0.2.10".parse().unwrap(),
                             latest_liveness_probe: None, has_liveness_probe: false, liveness_failure_threshold: 3,
                             probe_rows: BTreeMap::new(),
                         };
@@ -1383,7 +1484,13 @@ mod tests {
         let fact = ServiceAllocFact {
             stable_committed: false,
             alloc_id: alloc_id.clone(),
-            state: AllocState::Running,
+            phase: ServiceAllocPhase::Running(ServiceBackendIdentity {
+                spiffe: SpiffeId::new(
+                    "spiffe://overdrive.local/workload/startup-hook/alloc/startup-window-hook",
+                )
+                .expect("valid spiffe id"),
+                ip: "192.0.2.10".parse().expect("valid IPv4"),
+            }),
             started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(100))),
             exit_code: None,
             latest_startup_probe: None,
@@ -1396,11 +1503,6 @@ mod tests {
             latest_readiness_probe: None,
             has_readiness_probe: false,
             readiness_success_threshold: 1,
-            backend_spiffe: SpiffeId::new(
-                "spiffe://overdrive.local/workload/startup-hook/alloc/startup-window-hook",
-            )
-            .expect("valid spiffe id"),
-            backend_ip: "192.0.2.10".parse().expect("valid IPv4"),
             latest_liveness_probe: None,
             has_liveness_probe: false,
             liveness_failure_threshold: 3,

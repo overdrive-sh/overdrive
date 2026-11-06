@@ -125,7 +125,6 @@ async fn vm_reclamation_hydrate_actual_projects_host_observation_and_supervision
         ),
         gateway_identity: gateway.identity_view(),
         node_id: &node,
-        host_ipv4: std::net::Ipv4Addr::LOCALHOST,
         intent_redb_path: &intent_path,
     };
 

@@ -16,8 +16,8 @@
 
 use std::net::Ipv4Addr;
 
-use overdrive_core::id::{AllocationId, NodeId, SpiffeId, WorkloadId};
 use overdrive_core::aggregate::WorkloadKind;
+use overdrive_core::id::{AllocationId, NodeId, SpiffeId, WorkloadId};
 use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, LogicalTimestamp};
 use overdrive_reconcilers::service_lifecycle::{
     NotRunningState, ServiceAllocPhase, ServiceBackendIdentity,
@@ -80,15 +80,15 @@ proptest! {
         match (state, addr) {
             (AllocState::Running, Some(ip)) => {
                 let phase = phase.expect("Running with an address is a backend");
+                prop_assert_eq!(phase.state(), AllocState::Running);
                 prop_assert_eq!(
-                    phase.clone(),
+                    phase,
                     ServiceAllocPhase::Running(ServiceBackendIdentity { spiffe: spiffe(), ip })
                 );
-                prop_assert_eq!(phase.state(), AllocState::Running);
             }
             (AllocState::Running, None) => {
                 let refused = phase.expect_err("Running without an address is refused");
-                prop_assert_eq!(refused.alloc_id, row.alloc_id.clone());
+                prop_assert_eq!(refused.alloc_id, row.alloc_id);
             }
             (other, _) => {
                 let phase = phase.expect("a non-Running state hydrates with or without an address");

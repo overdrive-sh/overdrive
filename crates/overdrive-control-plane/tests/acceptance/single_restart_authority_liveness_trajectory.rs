@@ -84,7 +84,12 @@ fn liveness_running_fact(alloc_id: &AllocationId) -> ServiceAllocFact {
     ServiceAllocFact {
         stable_committed: false,
         alloc_id: alloc_id.clone(),
-        state: AllocState::Running,
+        phase: overdrive_reconcilers::service_lifecycle::ServiceAllocPhase::Running(
+            overdrive_reconcilers::service_lifecycle::ServiceBackendIdentity {
+                spiffe: overdrive_core::SpiffeId::for_allocation(&jid(WORKLOAD), alloc_id),
+                ip: std::net::Ipv4Addr::LOCALHOST,
+            },
+        ),
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1))),
         exit_code: None,
         latest_startup_probe: None,
@@ -97,8 +102,6 @@ fn liveness_running_fact(alloc_id: &AllocationId) -> ServiceAllocFact {
         latest_readiness_probe: None,
         has_readiness_probe: false,
         readiness_success_threshold: 1,
-        backend_spiffe: overdrive_core::SpiffeId::for_allocation(&jid(WORKLOAD), alloc_id),
-        backend_ip: std::net::Ipv4Addr::LOCALHOST,
         latest_liveness_probe: Some(status.clone()),
         has_liveness_probe: true,
         // threshold 1 → a single Fail this tick trips the terminate.

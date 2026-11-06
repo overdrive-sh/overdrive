@@ -23,7 +23,6 @@ use overdrive_core::id::{AllocationId, NodeId, ServiceId, ServiceVip, WorkloadId
 use overdrive_core::reconcilers::Action;
 use overdrive_core::reconcilers::{Reconciler, TickContext};
 use overdrive_core::traits::driver::Resources;
-use overdrive_core::traits::observation_store::AllocState;
 use overdrive_core::wall_clock::UnixInstant;
 use overdrive_reconcilers::service_lifecycle::{
     ServiceAllocFact, ServiceDataplaneIdentity, ServiceLifecycleReconciler, ServiceLifecycleState,
@@ -104,7 +103,12 @@ fn advertise_port_set(svc: &Service) -> BTreeSet<NonZeroU16> {
         ServiceAllocFact {
             stable_committed: false,
             alloc_id: alloc.clone(),
-            state: AllocState::Running,
+            phase: overdrive_reconcilers::service_lifecycle::ServiceAllocPhase::Running(
+                overdrive_reconcilers::service_lifecycle::ServiceBackendIdentity {
+                    spiffe: overdrive_core::SpiffeId::for_allocation(&svc.id, &alloc),
+                    ip: MESH_WORKLOAD_ADDR,
+                },
+            ),
             started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(0))),
             exit_code: None,
             latest_startup_probe: None,
@@ -117,8 +121,6 @@ fn advertise_port_set(svc: &Service) -> BTreeSet<NonZeroU16> {
             latest_readiness_probe: None,
             has_readiness_probe: false,
             readiness_success_threshold: 1,
-            backend_spiffe: overdrive_core::SpiffeId::for_allocation(&svc.id, &alloc),
-            backend_ip: MESH_WORKLOAD_ADDR,
             latest_liveness_probe: None,
             has_liveness_probe: false,
             liveness_failure_threshold: 3,

@@ -11,12 +11,11 @@
 )]
 
 use async_trait::async_trait;
-use overdrive_control_plane::action_shim::WorkloadNetworkProvisioner;
+use overdrive_control_plane::guest_network::SharedGuestNetworkOwner as _;
 use overdrive_control_plane::identity_mgr::IdentityMgr;
 use overdrive_control_plane::reconciler_runtime::{
-    ReconcilerRuntime, run_convergence_tick_with_network_provisioner_for_test,
+    ReconcilerRuntime, run_convergence_tick_with_guest_network_provisioner_for_test,
 };
-use overdrive_control_plane::veth_provisioner::{VethProvisionError, WorkloadNetnsPlan};
 use overdrive_control_plane::worker::exit_observer;
 use overdrive_control_plane::{AppState, service_lifecycle, workload_lifecycle};
 use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
@@ -43,19 +42,6 @@ use std::sync::{
     atomic::{AtomicBool, AtomicUsize, Ordering},
 };
 use std::time::Duration;
-
-#[derive(Debug, Default)]
-struct NoopNetworkProvisioner;
-
-impl WorkloadNetworkProvisioner for NoopNetworkProvisioner {
-    fn provision(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
-        Ok(())
-    }
-
-    fn teardown(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
-        Ok(())
-    }
-}
 
 /// Existing driven-port decorator: model the old process watcher/observer
 /// completing while ExecDriver::stop awaits its watcher. SimDriver emits the
@@ -159,6 +145,31 @@ async fn drive(seed: u64, contend: bool) {
         delay: Duration::from_millis(1 + seed % 7),
         running_hooks: AtomicUsize::new(0),
     });
+    // The production composition: a converged shared guest-network owner, so
+    // every Running write copies the pool-assigned workload address.
+    let owner =
+        Arc::new(overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner::default());
+    owner.converge_shared().await.expect("the sim owner converges");
+    let mtls_worker = Arc::new(overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker::new(
+        Arc::new(overdrive_sim::adapters::mtls_enforcement::SimMtlsEnforcement::new(
+            Arc::new(overdrive_sim::adapters::SimIdentityRead::new(
+                std::collections::BTreeMap::new(),
+                None,
+            )),
+            overdrive_core::traits::mtls_enforcement::MtlsLimits::default(),
+            Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
+        )),
+        Arc::new(overdrive_sim::adapters::SimMtlsResolve::new(
+            std::collections::BTreeMap::new(),
+            overdrive_core::traits::mtls_resolve::MtlsResolution::NonMesh,
+        )),
+        Arc::new(overdrive_sim::adapters::clock::SimClock::new()),
+        Arc::new(overdrive_sim::adapters::SimMtlsIntercept::new()),
+    ));
+    mtls_worker.start_shared_owner().await.expect("the shared intercept owner starts");
+    let exec_wiring = overdrive_core::guest_network::GuestNetworkExecWiring::new(Arc::new(
+        overdrive_sim::adapters::clock::SimClock::new(),
+    ));
     let allocator =
         overdrive_control_plane::test_default_allocator(store.clone() as Arc<dyn IntentStore>);
     let state = AppState::new(
@@ -175,33 +186,16 @@ async fn drive(seed: u64, contend: bool) {
         allocator,
         overdrive_control_plane::test_empty_listener_facts(),
         std::net::Ipv4Addr::LOCALHOST,
-        Arc::new(overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker::new(
-            Arc::new(overdrive_sim::adapters::mtls_enforcement::SimMtlsEnforcement::new(
-                Arc::new(overdrive_sim::adapters::SimIdentityRead::new(
-                    std::collections::BTreeMap::new(),
-                    None,
-                )),
-                overdrive_core::traits::mtls_enforcement::MtlsLimits::default(),
-                Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
-            )),
-            Arc::new(overdrive_sim::adapters::SimMtlsResolve::new(
-                std::collections::BTreeMap::new(),
-                overdrive_core::traits::mtls_resolve::MtlsResolution::NonMesh,
-            )),
-            Arc::new(overdrive_sim::adapters::clock::SimClock::new()),
-            Arc::new(overdrive_sim::adapters::SimMtlsIntercept::new()),
-        )),
-        Arc::new(overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner::default()),
-        overdrive_core::guest_network::GuestNetworkExecWiring::new(Arc::new(
-            overdrive_sim::adapters::clock::SimClock::new(),
-        ))
-        .gate(),
+        mtls_worker,
+        Arc::clone(&owner) as _,
+        exec_wiring.gate(),
         Arc::new(overdrive_control_plane::guest_network::GuestAddressPool::new(
             "100.95.0.0/16".parse().expect("static guest prefix"),
             std::net::Ipv4Addr::new(100, 95, 0, 1),
             std::sync::Arc::new(overdrive_sim::adapters::entropy::SimEntropy::new(0x295)),
         )),
     );
+    assert!(exec_wiring.supervisor().open_after_boot(), "the EXEC gate opens after the owner");
     exit_observer::spawn(
         state.obs.clone(),
         driver.clone(),
@@ -243,14 +237,14 @@ async fn drive(seed: u64, contend: bool) {
     let workload = ReconcilerName::new("workload-lifecycle").unwrap();
     let service = ReconcilerName::new("service-lifecycle").unwrap();
     let deadline = clock.now() + Duration::from_secs(30);
-    run_convergence_tick_with_network_provisioner_for_test(
+    run_convergence_tick_with_guest_network_provisioner_for_test(
         &state,
         &workload,
         &target,
         clock.now(),
         33,
         deadline,
-        &NoopNetworkProvisioner,
+        owner.as_ref(),
     )
     .await
     .unwrap();
@@ -273,14 +267,14 @@ async fn drive(seed: u64, contend: bool) {
     })
     .await
     .unwrap();
-    run_convergence_tick_with_network_provisioner_for_test(
+    run_convergence_tick_with_guest_network_provisioner_for_test(
         &state,
         &service,
         &target,
         clock.now(),
         33,
         deadline,
-        &NoopNetworkProvisioner,
+        owner.as_ref(),
     )
     .await
     .unwrap();
@@ -288,14 +282,14 @@ async fn drive(seed: u64, contend: bool) {
     assert_eq!(finalized[0].state, AllocState::Failed, "seed={seed}; rows={finalized:?}");
     assert!(finalized[0].terminal.is_some(), "seed={seed}");
     driver.armed.store(contend, Ordering::SeqCst);
-    let result = run_convergence_tick_with_network_provisioner_for_test(
+    let result = run_convergence_tick_with_guest_network_provisioner_for_test(
         &state,
         &workload,
         &target,
         clock.now(),
         33,
         deadline,
-        &NoopNetworkProvisioner,
+        owner.as_ref(),
     )
     .await;
     let current = obs.alloc_status_rows().await.unwrap();

@@ -52,7 +52,15 @@ fn liveness_fact(
     ServiceAllocFact {
         stable_committed: false,
         alloc_id: aid(alloc_id),
-        state: AllocState::Running,
+        phase: overdrive_reconcilers::service_lifecycle::ServiceAllocPhase::Running(
+            overdrive_reconcilers::service_lifecycle::ServiceBackendIdentity {
+                spiffe: overdrive_core::SpiffeId::new(
+                    "spiffe://overdrive.local/workload/svc/alloc/x",
+                )
+                .expect("valid spiffe"),
+                ip: std::net::Ipv4Addr::LOCALHOST,
+            },
+        ),
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1))),
         exit_code: None,
         latest_startup_probe: None,
@@ -65,11 +73,6 @@ fn liveness_fact(
         latest_readiness_probe: None,
         has_readiness_probe: false,
         readiness_success_threshold: 1,
-        backend_spiffe: overdrive_core::SpiffeId::new(
-            "spiffe://overdrive.local/workload/svc/alloc/x",
-        )
-        .expect("valid spiffe"),
-        backend_ip: std::net::Ipv4Addr::LOCALHOST,
         latest_liveness_probe,
         has_liveness_probe: true,
         liveness_failure_threshold: failure_threshold,
@@ -334,7 +337,10 @@ fn liveness_predicate_false_once_row_leaves_running() {
         Some(ProbeStatus::Fail { last_fail_reason: "post-stop fail".to_string() }),
         threshold,
     );
-    fact.state = AllocState::Terminated;
+    fact.phase = overdrive_reconcilers::service_lifecycle::ServiceAllocPhase::NotRunning(
+        overdrive_reconcilers::service_lifecycle::NotRunningState::new(AllocState::Terminated)
+            .expect("not Running"),
+    );
     let alloc_id = fact.alloc_id.clone();
     let mut actual = one_alloc_state(fact);
     put_liveness_row(

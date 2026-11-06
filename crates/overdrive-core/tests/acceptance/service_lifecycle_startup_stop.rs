@@ -63,7 +63,20 @@ fn tick_at_ms(now_unix_ms: u64) -> TickContext {
 fn fact(state: AllocState, started: bool, startup_probes_empty: bool) -> ServiceAllocFact {
     ServiceAllocFact {
         alloc_id: aid(ALLOC),
-        state,
+        phase: overdrive_reconcilers::service_lifecycle::NotRunningState::new(state).map_or_else(
+            || {
+                overdrive_reconcilers::service_lifecycle::ServiceAllocPhase::Running(
+                    overdrive_reconcilers::service_lifecycle::ServiceBackendIdentity {
+                        spiffe: overdrive_core::SpiffeId::new(
+                            "spiffe://overdrive.local/workload/svc/alloc/svc-0",
+                        )
+                        .expect("valid spiffe"),
+                        ip: Ipv4Addr::new(192, 168, 1, 10),
+                    },
+                )
+            },
+            overdrive_reconcilers::service_lifecycle::ServiceAllocPhase::NotRunning,
+        ),
         started_at: started
             .then(|| UnixInstant::from_unix_duration(Duration::from_millis(STARTED_AT_MS))),
         exit_code: None,
@@ -77,11 +90,6 @@ fn fact(state: AllocState, started: bool, startup_probes_empty: bool) -> Service
         latest_readiness_probe: None,
         has_readiness_probe: false,
         readiness_success_threshold: 1,
-        backend_spiffe: overdrive_core::SpiffeId::new(
-            "spiffe://overdrive.local/workload/svc/alloc/svc-0",
-        )
-        .expect("valid spiffe"),
-        backend_ip: Ipv4Addr::new(192, 168, 1, 10),
         latest_liveness_probe: None,
         has_liveness_probe: false,
         liveness_failure_threshold: 3,

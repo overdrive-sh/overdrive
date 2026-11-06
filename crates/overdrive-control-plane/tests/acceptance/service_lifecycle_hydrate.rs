@@ -378,7 +378,7 @@ async fn gap_1_at_02_hydrate_actual_projects_row_state_and_started_at_verbatim()
     let actual = extract_lifecycle(hydrated);
     assert_eq!(actual.allocs.len(), 1, "exactly one alloc in actual");
     let fact = actual.allocs.get(&aid).expect("fact for alloc");
-    assert_eq!(fact.state, AllocState::Running);
+    assert_eq!(fact.state(), AllocState::Running);
     assert_eq!(
         fact.started_at,
         Some(started),
@@ -575,7 +575,10 @@ fn gap_1_at_07_reconciler_skips_when_started_at_none_on_failed_alloc() {
     let fact = ServiceAllocFact {
         stable_committed: false,
         alloc_id: aid.clone(),
-        state: AllocState::Failed,
+        phase: overdrive_reconcilers::service_lifecycle::ServiceAllocPhase::NotRunning(
+            overdrive_reconcilers::service_lifecycle::NotRunningState::new(AllocState::Failed)
+                .expect("not Running"),
+        ),
         started_at: None, // load-bearing: triggers skip on both branches
         exit_code: Some(99),
         latest_startup_probe: None,
@@ -588,11 +591,6 @@ fn gap_1_at_07_reconciler_skips_when_started_at_none_on_failed_alloc() {
         latest_readiness_probe: None,
         has_readiness_probe: false,
         readiness_success_threshold: 1,
-        backend_spiffe: overdrive_core::SpiffeId::new(
-            "spiffe://overdrive.local/workload/svc/alloc/x",
-        )
-        .expect("valid spiffe"),
-        backend_ip: std::net::Ipv4Addr::LOCALHOST,
         latest_liveness_probe: None,
         has_liveness_probe: false,
         liveness_failure_threshold: 3,
@@ -668,8 +666,16 @@ fn gap_1_at_08_reconciler_unreachable_when_running_alloc_has_no_started_at() {
     let fact = ServiceAllocFact {
         stable_committed: false,
         alloc_id: aid.clone(),
-        state: AllocState::Running, // load-bearing: triggers the unreachable
-        started_at: None,           // invalid combination
+        phase: overdrive_reconcilers::service_lifecycle::ServiceAllocPhase::Running(
+            overdrive_reconcilers::service_lifecycle::ServiceBackendIdentity {
+                spiffe: overdrive_core::SpiffeId::new(
+                    "spiffe://overdrive.local/workload/svc/alloc/x",
+                )
+                .expect("valid spiffe"),
+                ip: std::net::Ipv4Addr::LOCALHOST,
+            },
+        ), // load-bearing: triggers the unreachable
+        started_at: None, // invalid combination
         exit_code: None,
         latest_startup_probe: Some(ProbeStatus::Pass),
         latest_startup_probe_observed_at: Some(UnixInstant::from_unix_duration(
@@ -683,11 +689,6 @@ fn gap_1_at_08_reconciler_unreachable_when_running_alloc_has_no_started_at() {
         latest_readiness_probe: None,
         has_readiness_probe: false,
         readiness_success_threshold: 1,
-        backend_spiffe: overdrive_core::SpiffeId::new(
-            "spiffe://overdrive.local/workload/svc/alloc/x",
-        )
-        .expect("valid spiffe"),
-        backend_ip: std::net::Ipv4Addr::LOCALHOST,
         latest_liveness_probe: None,
         has_liveness_probe: false,
         liveness_failure_threshold: 3,
@@ -1007,8 +1008,11 @@ mod backend_address {
         let alpha = [guest_addr(2), guest_addr(3)];
         let beta = [guest_addr(4), guest_addr(5)];
         for (index, addr) in alpha.iter().enumerate() {
-            write_alloc_status(&state, running_row(&wid_a, &format!("svc-alpha-{index}"), *addr, 1))
-                .await;
+            write_alloc_status(
+                &state,
+                running_row(&wid_a, &format!("svc-alpha-{index}"), *addr, 1),
+            )
+            .await;
         }
         for (index, addr) in beta.iter().enumerate() {
             write_alloc_status(&state, running_row(&wid_b, &format!("svc-beta-{index}"), *addr, 1))
@@ -1053,20 +1057,19 @@ mod backend_address {
             let (wid, _) = deploy_service(&state, "svc-idle").await;
             let started = (alloc_state != AllocState::Pending)
                 .then(|| UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000)));
-            let idle = make_alloc_status_row(&wid, &alloc_id("svc-idle-0"), alloc_state, started, 1);
+            let idle =
+                make_alloc_status_row(&wid, &alloc_id("svc-idle-0"), alloc_state, started, 1);
             assert_eq!(idle.workload_addr, None, "{alloc_state:?} fixture carries no address");
             write_alloc_status(&state, idle).await;
             let live = guest_addr(7);
             write_alloc_status(&state, running_row(&wid, "svc-idle-1", live, 2)).await;
 
             let actual = extract_lifecycle(
-                hydrate_actual_for_test(
-                    &service_lifecycle_reconciler(),
-                    &target_for(&wid),
-                    &state,
-                )
-                .await
-                .unwrap_or_else(|e| panic!("{alloc_state:?} without an address must hydrate: {e}")),
+                hydrate_actual_for_test(&service_lifecycle_reconciler(), &target_for(&wid), &state)
+                    .await
+                    .unwrap_or_else(|e| {
+                        panic!("{alloc_state:?} without an address must hydrate: {e}")
+                    }),
             );
             assert!(
                 actual.allocs.contains_key(&alloc_id("svc-idle-0")),
@@ -1089,7 +1092,6 @@ mod backend_address {
     /// valid Running allocation of the same Service does not rescue the tick.
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
-    #[ignore = "pending DELIVER no-host-ip-backend-fallback"]
     async fn a_running_allocation_without_a_workload_address_is_refused_not_defaulted() {
         let tmp = TempDir::new().expect("tmpdir");
         let obs = Arc::new(SimObservationStore::single_peer(node_id("local"), 0))
@@ -1103,13 +1105,10 @@ mod backend_address {
         };
         write_alloc_status(&state, bad).await;
 
-        let refused = hydrate_actual_for_test(
-            &service_lifecycle_reconciler(),
-            &target_for(&wid),
-            &state,
-        )
-        .await
-        .expect_err("a Running allocation without an address is refused");
+        let refused =
+            hydrate_actual_for_test(&service_lifecycle_reconciler(), &target_for(&wid), &state)
+                .await
+                .expect_err("a Running allocation without an address is refused");
 
         let ConvergenceError::Hydrate(cause) = &refused else {
             panic!("the refusal is a typed hydration failure, got {refused:?}");

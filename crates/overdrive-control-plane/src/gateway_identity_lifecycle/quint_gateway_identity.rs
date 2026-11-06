@@ -284,7 +284,6 @@ impl IdentityConfDriver {
             guest_attachments: &guest_attachments,
             gateway_identity: self.owners.slot.as_ref(),
             node_id: &node_id,
-            host_ipv4: std::net::Ipv4Addr::LOCALHOST,
             intent_redb_path: &self.intent_path,
         };
         let (desired, actual) = self.runtime.block_on(async {

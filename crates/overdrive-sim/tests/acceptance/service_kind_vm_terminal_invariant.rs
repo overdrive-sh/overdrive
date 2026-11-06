@@ -161,7 +161,17 @@ fn fact_for(
     ServiceAllocFact {
         stable_committed: false,
         alloc_id: alloc_id.clone(),
-        state,
+        phase: overdrive_reconcilers::service_lifecycle::NotRunningState::new(state).map_or_else(
+            || {
+                overdrive_reconcilers::service_lifecycle::ServiceAllocPhase::Running(
+                    overdrive_reconcilers::service_lifecycle::ServiceBackendIdentity {
+                        spiffe: SpiffeId::for_allocation(&workload, alloc_id),
+                        ip: Ipv4Addr::new(192, 0, 2, 17),
+                    },
+                )
+            },
+            overdrive_reconcilers::service_lifecycle::ServiceAllocPhase::NotRunning,
+        ),
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1))),
         exit_code: Some(1).filter(|_| state == AllocState::Failed),
         latest_startup_probe: Some(startup),
@@ -176,8 +186,6 @@ fn fact_for(
         latest_readiness_probe: Some(readiness),
         has_readiness_probe: true,
         readiness_success_threshold: 1,
-        backend_spiffe: SpiffeId::for_allocation(&workload, alloc_id),
-        backend_ip: Ipv4Addr::new(192, 0, 2, 17),
         latest_liveness_probe: None,
         has_liveness_probe: false,
         liveness_failure_threshold: 3,
@@ -264,7 +272,11 @@ async fn terminal_state_wins_and_dead_vm_backend_never_returns_to_eligibility() 
     // The owner now observes the same allocation as terminal after the
     // startup deadline. The deciding tick withdraws its backend before the
     // existing terminal publication reaches the observation boundary.
-    in_flight.allocs.get_mut(&alloc_id).expect("allocation fact").state = AllocState::Failed;
+    in_flight.allocs.get_mut(&alloc_id).expect("allocation fact").phase =
+        overdrive_reconcilers::service_lifecycle::ServiceAllocPhase::NotRunning(
+            overdrive_reconcilers::service_lifecycle::NotRunningState::new(AllocState::Failed)
+                .expect("not Running"),
+        );
     let (terminal_actions, terminal_view) =
         reconciler.reconcile(&in_flight, &in_flight, &in_flight_view, &tick(2, 3));
     // D5 + D6: a `Failed` row yields no `ServiceLifecycle` action; the crash

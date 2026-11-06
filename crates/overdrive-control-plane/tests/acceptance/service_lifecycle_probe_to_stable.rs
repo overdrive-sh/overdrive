@@ -59,7 +59,7 @@ use overdrive_core::observation::{ProbeIdx, ProbeRole, ProbeStatus};
 use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{AllocationSpec, DriverPayload, Resources, VmPayload};
-use overdrive_core::traits::observation_store::{AllocState, ObservationStore};
+use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_core::traits::prober::ProbeOutcome;
 use overdrive_core::transition_reason::TerminalCondition;
 use overdrive_core::wall_clock::UnixInstant;
@@ -146,7 +146,15 @@ fn fact_from_row_and_intent(
     ServiceAllocFact {
         stable_committed: false,
         alloc_id: row.alloc_id.clone(),
-        state: AllocState::Running,
+        phase: overdrive_reconcilers::service_lifecycle::ServiceAllocPhase::Running(
+            overdrive_reconcilers::service_lifecycle::ServiceBackendIdentity {
+                spiffe: overdrive_core::SpiffeId::new(
+                    "spiffe://overdrive.local/workload/svc/alloc/x",
+                )
+                .expect("valid spiffe"),
+                ip: std::net::Ipv4Addr::LOCALHOST,
+            },
+        ),
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_millis(
             started_at_unix_ms,
         ))),
@@ -165,11 +173,6 @@ fn fact_from_row_and_intent(
         latest_readiness_probe: None,
         has_readiness_probe: false,
         readiness_success_threshold: 1,
-        backend_spiffe: overdrive_core::SpiffeId::new(
-            "spiffe://overdrive.local/workload/svc/alloc/x",
-        )
-        .expect("valid spiffe"),
-        backend_ip: std::net::Ipv4Addr::LOCALHOST,
         latest_liveness_probe: None,
         has_liveness_probe: false,
         liveness_failure_threshold: 3,

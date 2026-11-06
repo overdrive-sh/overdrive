@@ -1097,7 +1097,9 @@ pub struct AllocStatusRowV1 {
     /// it rather than treating it as zero.
     pub started_at: Option<UnixInstant>,
     /// Canonical per-allocation workload address observed at provision time.
-    /// `None` means that no workload address was observed for this row.
+    /// `Some` is required on every `Running` row a Service backend can be
+    /// derived from (ADR-0276); `None` means that no workload address was
+    /// observed for this row (Pending, failed or terminal).
     pub workload_addr: Option<Ipv4Addr>,
     /// The most recent terminal observation this allocation survived. This
     /// depth-one snapshot is populated by [`CrashFacts::advance`] when a

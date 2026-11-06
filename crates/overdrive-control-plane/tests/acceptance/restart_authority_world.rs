@@ -30,8 +30,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use futures::StreamExt as _;
+use overdrive_control_plane::guest_network::SharedGuestNetworkOwner as _;
 use overdrive_control_plane::reconciler_runtime::{
-    ReconcilerRuntime, run_convergence_tick_with_network_provisioner_for_test,
+    ReconcilerRuntime, run_convergence_tick_with_guest_network_provisioner_for_test,
 };
 use overdrive_control_plane::streaming::{ServiceSubmitEvent, build_service_accepted};
 use overdrive_control_plane::{AppState, service_lifecycle, workload_lifecycle};
@@ -58,6 +59,7 @@ use overdrive_core::traits::observation_store::{
 use overdrive_core::vm::config::VsockPort;
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::driver::SimDriver;
+use overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner;
 use overdrive_sim::adapters::guest_stream_dial::{SimDialScript, SimGuestStreamDial};
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_sim::adapters::probers::{SimHttpProber, SimTcpProber};
@@ -149,7 +151,7 @@ pub fn intent_of(shape: Shape) -> WorkloadIntent {
 }
 
 pub use crate::acceptance::hooked_driver::Call as DriverCall;
-use crate::acceptance::hooked_driver::{HookedDriver, NoopNetworkProvisioner};
+use crate::acceptance::hooked_driver::HookedDriver;
 
 fn transport() -> GuestTransportAssignment {
     GuestTransportAssignment::new(
@@ -179,6 +181,7 @@ pub struct RestartWorld {
     pub dial: Arc<SimGuestStreamDial>,
     pub sim: Arc<SimDriver>,
     pub driver: Arc<HookedDriver>,
+    owner: Arc<SimSharedGuestNetworkOwner>,
     pub runner: Arc<ProbeRunner>,
     pub workload: WorkloadId,
     pub target: TargetResource,
@@ -237,6 +240,14 @@ impl RestartWorld {
             HookedDriver::new(Arc::clone(&sim), Arc::clone(&runner), Arc::clone(&clock))
                 .with_default_transport(transport()),
         );
+        // The production composition: a converged shared guest-network owner,
+        // so every Running write copies the pool-assigned workload address.
+        let mtls_worker = crate::acceptance::serve_ports::worker();
+        mtls_worker.start_shared_owner().await.expect("the shared intercept owner starts");
+        let owner = crate::acceptance::serve_ports::owner();
+        owner.converge_shared().await.expect("the sim owner converges");
+        let exec_wiring =
+            overdrive_core::guest_network::GuestNetworkExecWiring::new(Arc::new(SimClock::new()));
         let allocator = overdrive_control_plane::test_default_allocator(
             Arc::clone(&store) as Arc<dyn IntentStore>
         );
@@ -256,11 +267,12 @@ impl RestartWorld {
             allocator,
             overdrive_control_plane::test_empty_listener_facts(),
             Ipv4Addr::LOCALHOST,
-            crate::acceptance::serve_ports::worker(),
-            crate::acceptance::serve_ports::owner(),
-            crate::acceptance::serve_ports::exec_gate(),
+            mtls_worker,
+            Arc::clone(&owner) as _,
+            exec_wiring.gate(),
             crate::acceptance::serve_ports::pool(),
         );
+        assert!(exec_wiring.supervisor().open_after_boot(), "the EXEC gate opens after the owner");
 
         let service_id = {
             let digest = intent.spec_digest().expect("spec digest");
@@ -291,6 +303,7 @@ impl RestartWorld {
             dial,
             sim,
             driver,
+            owner,
             runner,
             target: TargetResource::new(&format!("workload/{WORKLOAD}")).expect("target"),
             workload,
@@ -306,14 +319,14 @@ impl RestartWorld {
     async fn tick(&mut self, name: &ReconcilerName) -> Result<(), String> {
         self.tick_n += 1;
         let now: Instant = self.clock.now();
-        let result = run_convergence_tick_with_network_provisioner_for_test(
+        let result = run_convergence_tick_with_guest_network_provisioner_for_test(
             &self.state,
             name,
             &self.target,
             now,
             self.tick_n,
             now + Duration::from_secs(1),
-            &NoopNetworkProvisioner,
+            self.owner.as_ref(),
         )
         .await
         .map_err(|e| e.to_string());
@@ -348,7 +361,7 @@ impl RestartWorld {
 
     /// As [`Self::startup_period`] for a probe whose interval is `every`.
     pub async fn startup_period_for(&self, dial: Dial, every: Duration) {
-        let target = SocketAddrV4::new(WORKLOAD_ADDR, STARTUP_PORT);
+        let target = SocketAddrV4::new(self.current_workload_addr().await, STARTUP_PORT);
         let script = match dial {
             Dial::Binds => SimDialScript::accept(),
             Dial::Refuses => {
@@ -361,7 +374,8 @@ impl RestartWorld {
 
     /// One readiness-probe period passing.
     pub async fn readiness_passes(&self) {
-        self.dial.script(SocketAddrV4::new(WORKLOAD_ADDR, READINESS_PORT), SimDialScript::accept());
+        let target = SocketAddrV4::new(self.current_workload_addr().await, READINESS_PORT);
+        self.dial.script(target, SimDialScript::accept());
         self.advance(PROBE_INTERVAL).await;
     }
 
@@ -412,6 +426,17 @@ impl RestartWorld {
     /// The allocation ids in placement order (the shim mints them in order).
     pub async fn attempts(&self) -> Vec<AllocationId> {
         self.rows().await.into_keys().collect()
+    }
+
+    /// The workload address the shim wrote on the most recently placed
+    /// allocation that carries one: the address its probes dial.
+    async fn current_workload_addr(&self) -> Ipv4Addr {
+        self.rows()
+            .await
+            .into_values()
+            .rev()
+            .find_map(|row| row.workload_addr)
+            .expect("a placed allocation carries the workload address the shim assigned")
     }
 
     /// The most recently placed allocation (the highest-ordered id).

@@ -140,7 +140,6 @@ impl World {
             guest_attachments: &self.guest_attachments,
             gateway_identity: identity,
             node_id: &self.node_id,
-            host_ipv4: std::net::Ipv4Addr::LOCALHOST,
             intent_redb_path: &self.intent_path,
         }
     }

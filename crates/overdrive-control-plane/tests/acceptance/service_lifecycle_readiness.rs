@@ -42,7 +42,6 @@ use overdrive_core::observation::{
     ProbeIdx, ProbeResultRow, ProbeRole, ProbeRunSeq, ProbeStatus, SameStatusRuns,
 };
 use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
-use overdrive_core::traits::observation_store::AllocState;
 use overdrive_core::wall_clock::UnixInstant;
 use overdrive_reconcilers::service_lifecycle::{
     ServiceAllocFact, ServiceDataplaneIdentity, ServiceLifecycleReconciler, ServiceLifecycleState,
@@ -88,7 +87,12 @@ fn fact_with_readiness(
     ServiceAllocFact {
         stable_committed: false,
         alloc_id: alloc(&format!("svc-{index}")),
-        state: AllocState::Running,
+        phase: overdrive_reconcilers::service_lifecycle::ServiceAllocPhase::Running(
+            overdrive_reconcilers::service_lifecycle::ServiceBackendIdentity {
+                spiffe: spiffe(index),
+                ip: Ipv4Addr::new(192, 168, 1, u8::try_from(10 + index).unwrap_or(u8::MAX)),
+            },
+        ),
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1))),
         exit_code: None,
         // Startup already passed — these allocs are Stable backends.
@@ -104,8 +108,6 @@ fn fact_with_readiness(
         latest_readiness_probe: latest_readiness,
         has_readiness_probe: true,
         readiness_success_threshold: success_threshold,
-        backend_spiffe: spiffe(index),
-        backend_ip: Ipv4Addr::new(192, 168, 1, u8::try_from(10 + index).unwrap_or(u8::MAX)),
         latest_liveness_probe: None,
         has_liveness_probe: false,
         liveness_failure_threshold: 3,
@@ -119,7 +121,12 @@ fn fact_without_readiness(index: usize) -> ServiceAllocFact {
     ServiceAllocFact {
         stable_committed: false,
         alloc_id: alloc(&format!("svc-{index}")),
-        state: AllocState::Running,
+        phase: overdrive_reconcilers::service_lifecycle::ServiceAllocPhase::Running(
+            overdrive_reconcilers::service_lifecycle::ServiceBackendIdentity {
+                spiffe: spiffe(index),
+                ip: Ipv4Addr::new(192, 168, 1, u8::try_from(10 + index).unwrap_or(u8::MAX)),
+            },
+        ),
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1))),
         exit_code: None,
         latest_startup_probe: Some(ProbeStatus::Pass),
@@ -134,8 +141,6 @@ fn fact_without_readiness(index: usize) -> ServiceAllocFact {
         latest_readiness_probe: None,
         has_readiness_probe: false,
         readiness_success_threshold: 1,
-        backend_spiffe: spiffe(index),
-        backend_ip: Ipv4Addr::new(192, 168, 1, u8::try_from(10 + index).unwrap_or(u8::MAX)),
         latest_liveness_probe: None,
         has_liveness_probe: false,
         liveness_failure_threshold: 3,

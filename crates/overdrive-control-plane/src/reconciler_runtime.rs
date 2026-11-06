@@ -1829,7 +1829,6 @@ pub(crate) fn build_hydration_context<'a>(
         guest_attachments: &state.guest_attachment_view,
         gateway_identity: state.gateway.identity_view(),
         node_id: &state.node_id,
-        host_ipv4: state.host_ipv4,
         intent_redb_path: &state.intent_redb_path,
     }
 }
@@ -2647,22 +2646,14 @@ mod tests {
                 other => panic!("expected AnyState::ServiceLifecycle variant, got {other:?}"),
             };
             let desired = hydrated(
-                crate::reconciler_runtime::hydrate_desired_for_test(
-                    &reconciler,
-                    &target(),
-                    &state,
-                )
-                .await
-                .expect("hydrate_desired ok"),
+                crate::reconciler_runtime::hydrate_desired_for_test(&reconciler, &target(), &state)
+                    .await
+                    .expect("hydrate_desired ok"),
             );
             let actual = hydrated(
-                crate::reconciler_runtime::hydrate_actual_for_test(
-                    &reconciler,
-                    &target(),
-                    &state,
-                )
-                .await
-                .expect("hydrate_actual ok"),
+                crate::reconciler_runtime::hydrate_actual_for_test(&reconciler, &target(), &state)
+                    .await
+                    .expect("hydrate_actual ok"),
             );
             let now = std::time::Instant::now();
             let tick = TickContext {

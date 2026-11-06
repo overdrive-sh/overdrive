@@ -36,4 +36,8 @@ mod acceptance {
     // service-allocation-readiness-and-ending D10 item 5 (S-34) — the startup deadline
     // derivation extracted from `spec_facts_for_service`.
     mod startup_deadline;
+
+    // ADR-0276 O4 — `ServiceAllocPhase::from_row` totality over
+    // `AllocState x Option<Ipv4Addr>`; `NotRunningState` excludes Running.
+    mod service_alloc_phase_totality;
 }

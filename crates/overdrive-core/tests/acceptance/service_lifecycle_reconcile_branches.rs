@@ -60,7 +60,20 @@ fn fact(
     ServiceAllocFact {
         stable_committed: false,
         alloc_id: aid(alloc_id),
-        state,
+        phase: overdrive_reconcilers::service_lifecycle::NotRunningState::new(state).map_or_else(
+            || {
+                overdrive_reconcilers::service_lifecycle::ServiceAllocPhase::Running(
+                    overdrive_reconcilers::service_lifecycle::ServiceBackendIdentity {
+                        spiffe: overdrive_core::SpiffeId::new(
+                            "spiffe://overdrive.local/workload/svc/alloc/x",
+                        )
+                        .expect("valid spiffe"),
+                        ip: std::net::Ipv4Addr::LOCALHOST,
+                    },
+                )
+            },
+            overdrive_reconcilers::service_lifecycle::ServiceAllocPhase::NotRunning,
+        ),
         // Per GAP-1: every fact in this branch-coverage suite represents
         // an alloc that HAS reached Running (or Failed-after-Running) —
         // the inputs assume a concrete `started_at` value. Wrap in
@@ -83,11 +96,6 @@ fn fact(
         latest_readiness_probe: None,
         has_readiness_probe: false,
         readiness_success_threshold: 1,
-        backend_spiffe: overdrive_core::SpiffeId::new(
-            "spiffe://overdrive.local/workload/svc/alloc/x",
-        )
-        .expect("valid spiffe"),
-        backend_ip: std::net::Ipv4Addr::LOCALHOST,
         latest_liveness_probe: None,
         has_liveness_probe: false,
         liveness_failure_threshold: 3,
@@ -1101,7 +1109,20 @@ fn readiness_fact(
         // models an allocation whose Stable is already committed.
         stable_committed: true,
         alloc_id: aid(&format!("svc-{index}")),
-        state: AllocState::Running,
+        phase: overdrive_reconcilers::service_lifecycle::ServiceAllocPhase::Running(
+            overdrive_reconcilers::service_lifecycle::ServiceBackendIdentity {
+                spiffe: overdrive_core::SpiffeId::new(&format!(
+                    "spiffe://overdrive.local/workload/svc/alloc/a{index}"
+                ))
+                .expect("valid spiffe"),
+                ip: std::net::Ipv4Addr::new(
+                    192,
+                    168,
+                    1,
+                    u8::try_from(10 + index).unwrap_or(u8::MAX),
+                ),
+            },
+        ),
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1))),
         exit_code: None,
         latest_startup_probe: Some(ProbeStatus::Pass),
@@ -1116,16 +1137,6 @@ fn readiness_fact(
         latest_readiness_probe: latest_readiness,
         has_readiness_probe,
         readiness_success_threshold: success_threshold,
-        backend_spiffe: overdrive_core::SpiffeId::new(&format!(
-            "spiffe://overdrive.local/workload/svc/alloc/a{index}"
-        ))
-        .expect("valid spiffe"),
-        backend_ip: std::net::Ipv4Addr::new(
-            192,
-            168,
-            1,
-            u8::try_from(10 + index).unwrap_or(u8::MAX),
-        ),
         latest_liveness_probe: None,
         has_liveness_probe: false,
         liveness_failure_threshold: 3,
@@ -1341,7 +1352,20 @@ fn liveness_fact(
     ServiceAllocFact {
         stable_committed: false,
         alloc_id: aid(alloc_id),
-        state,
+        phase: overdrive_reconcilers::service_lifecycle::NotRunningState::new(state).map_or_else(
+            || {
+                overdrive_reconcilers::service_lifecycle::ServiceAllocPhase::Running(
+                    overdrive_reconcilers::service_lifecycle::ServiceBackendIdentity {
+                        spiffe: overdrive_core::SpiffeId::new(
+                            "spiffe://overdrive.local/workload/svc/alloc/x",
+                        )
+                        .expect("valid spiffe"),
+                        ip: std::net::Ipv4Addr::LOCALHOST,
+                    },
+                )
+            },
+            overdrive_reconcilers::service_lifecycle::ServiceAllocPhase::NotRunning,
+        ),
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1))),
         exit_code: None,
         // No startup-probe observation — keeps the Stable / EarlyExit /
@@ -1358,11 +1382,6 @@ fn liveness_fact(
         latest_readiness_probe: None,
         has_readiness_probe: false,
         readiness_success_threshold: 1,
-        backend_spiffe: overdrive_core::SpiffeId::new(
-            "spiffe://overdrive.local/workload/svc/alloc/x",
-        )
-        .expect("valid spiffe"),
-        backend_ip: std::net::Ipv4Addr::LOCALHOST,
         latest_liveness_probe,
         has_liveness_probe: true,
         liveness_failure_threshold: failure_threshold,
@@ -1543,7 +1562,10 @@ fn failed_alloc_excluded_from_backend_row() {
     // Failed alloc, no readiness probe → before the guard,
     // compute_backend_healthy returns true (backward-compat default).
     let mut f = readiness_fact(0, None, false, 1);
-    f.state = AllocState::Failed;
+    f.phase = overdrive_reconcilers::service_lifecycle::ServiceAllocPhase::NotRunning(
+        overdrive_reconcilers::service_lifecycle::NotRunningState::new(AllocState::Failed)
+            .expect("not Running"),
+    );
     f.exit_code = Some(1);
     f.started_at = Some(UnixInstant::from_unix_duration(Duration::from_secs(1)));
     f.latest_startup_probe = None;
@@ -1579,7 +1601,10 @@ fn failed_alloc_excluded_from_backend_row() {
 fn pending_alloc_excluded_from_backend_row() {
     let reconciler = ServiceLifecycleReconciler::new();
     let mut f = readiness_fact(0, None, false, 1);
-    f.state = AllocState::Pending;
+    f.phase = overdrive_reconcilers::service_lifecycle::ServiceAllocPhase::NotRunning(
+        overdrive_reconcilers::service_lifecycle::NotRunningState::new(AllocState::Pending)
+            .expect("not Running"),
+    );
     f.started_at = None;
     f.latest_startup_probe = None;
     let state = readiness_state(vec![f]);
