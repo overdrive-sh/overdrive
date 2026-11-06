@@ -201,8 +201,9 @@ ethtool         = "0.2"
 # `rustix::fs::ioctl_ficlone` for the per-launch rootfs clone (ADR-0082
 # §D5's self-application rule: the FICLONE ioctl directly, never `cp`) and
 # `rustix::net` for the safe nonblocking AF_VSOCK socket/accept/readiness
-# operations of the node beacon adapter. `default-features = false` keeps the
-# dependency limited to those consumed syscall families.
+# operations of the node beacon adapter, and `rustix::process` for `geteuid`
+# and `getrlimit(Nofile)`. `default-features = false` keeps the dependency
+# limited to those consumed syscall families.
 rustix          = { version = "1", default-features = false, features = ["std", "fs", "net", "process"] }
 # `ipnet` — IPv4/IPv6 CIDR types used by the VIP-pool allocator (ADR-0049).
 # `serde` feature gates `Deserialize` / `Serialize` impls for `Ipv4Net`,

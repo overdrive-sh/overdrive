@@ -1139,7 +1139,6 @@ impl GatewayApplicationOwner {
                     .await;
             }
             Err(_) => {
-                self.route_seen = true;
                 return self
                     .close_application(GatewayApplicationUnavailableCause::RouteUnreadable)
                     .await;
@@ -1254,9 +1253,6 @@ impl GatewayApplicationOwner {
         match report.result {
             Ok(()) => self.promote(staged.candidate, reports).await,
             Err(failure) => {
-                if matches!(failure, GateFailure::Timeout) {
-                    staged.cancel.cancel();
-                }
                 let cause = match failure {
                     GateFailure::Identity(error) => {
                         tracing::warn!(
