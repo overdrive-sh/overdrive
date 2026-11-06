@@ -16,6 +16,7 @@
 //! | `init` | rebuild the owner on a fresh instance (nothing survives) |
 //! | `update_apply(key, sidx)` | `Dataplane::update_service(frontend(key), backends(sidx))`, which must be accepted |
 //! | `update_rejected(key, sidx)` | `Dataplane::update_service` of a backend set that re-leases a live `BackendId`'s address to another allocation; it must return `DataplaneError::BackendIdentityConflict` |
+//! | `update_rejected_rnat(key, sidx)` | `Dataplane::update_service` of a backend set naming an endpoint whose reverse-NAT key already maps to another Service's VIP (R-59), with no identity conflict; it must return `DataplaneError::ReverseNatConflict`, and the State comparison that follows verifies nothing moved |
 //! | `open(key)` | `GatewayConnectDataplane::open_upstream(ServiceKey)` |
 //! | `kernel_connect_det(c)` | `connect(2)` on the socket from `PreparedUpstream::into_parts` toward the Service frontend, with a bounded wait (the connect result is not asserted: the hook has already written the receipt) |
 //! | `take(c, c)` | `GatewayConnectDataplane::take_receipt(&intent)` |
@@ -340,6 +341,18 @@ impl ReceiptConfDriver {
         }
     }
 
+    fn update_rejected_rnat(&self, key: i64, sidx: i64) -> Result {
+        match self.runtime.block_on(self.dataplane.update_service(frontend(key), backends(sidx)?)) {
+            Ok(()) => bail!(
+                "update_service of an endpoint held by another Service must be rejected, it succeeded"
+            ),
+            Err(DataplaneError::ReverseNatConflict { .. }) => Ok(()),
+            Err(other) => bail!(
+                "update_service of an endpoint held by another Service must fail with ReverseNatConflict, got {other}"
+            ),
+        }
+    }
+
     fn open(&mut self, key: i64) -> Result {
         let _guard = self.runtime.enter();
         let prepared = self
@@ -460,6 +473,7 @@ impl Driver for ReceiptConfDriver {
             init => self.init(),
             update_apply(key: i64, sidx: i64) => self.update_apply(key, sidx)?,
             update_rejected(key: i64, sidx: i64) => self.update_rejected(key, sidx)?,
+        update_rejected_rnat(key: i64, sidx: i64) => self.update_rejected_rnat(key, sidx)?,
             open(key: i64) => self.open(key)?,
             kernel_connect_det(c: i64) => self.kernel_connect_det(c)?,
             take(c: i64, r: i64) => {
@@ -634,6 +648,33 @@ fn selection_receipt_commit_then_select() -> impl Driver {
 )]
 #[ignore = "pending DELIVER quint-conformance-selection_receipt"]
 fn selection_receipt_conflicting_alloc_rejected() -> impl Driver {
+    ReceiptConfDriver::new()
+}
+
+/// An endpoint already held by another Service is rejected before any
+/// mutation; both Services keep their own backend.
+/// CONTRACT_SHAPE: bounded-change.
+#[quint_test(
+    spec = "../../specs/quint/public-ingress-gateway/selection_receipt.qnt",
+    main = "receipt_conf",
+    test = "reverse_nat_conflict_rejected",
+    max_samples = 1
+)]
+#[ignore = "pending DELIVER quint-conformance-selection_receipt"]
+fn selection_receipt_reverse_nat_conflict_rejected() -> impl Driver {
+    ReceiptConfDriver::new()
+}
+
+/// An input violating both rules reports the identity conflict, not R-59.
+/// CONTRACT_SHAPE: bounded-change.
+#[quint_test(
+    spec = "../../specs/quint/public-ingress-gateway/selection_receipt.qnt",
+    main = "receipt_conf",
+    test = "identity_conflict_precedes_reverse_nat",
+    max_samples = 1
+)]
+#[ignore = "pending DELIVER step 03-03"]
+fn selection_receipt_identity_conflict_precedes_reverse_nat() -> impl Driver {
     ReceiptConfDriver::new()
 }
 
