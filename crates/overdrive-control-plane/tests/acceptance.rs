@@ -292,6 +292,10 @@ mod acceptance {
     // through to `hydrate_desired` for `ServiceMapHydrator`.
     mod service_backends_hydrate_desired;
 
+    // ADR-0276 — a Service publishes each attempt's pool-assigned address
+    // across a restart (composed shim -> hydrate -> backend row).
+    mod service_backend_address_across_restart;
+
     // service-vip-allocator step 02-02 — TOML `[dataplane.vip_allocator]`
     // parser surface. S-VIP-15/16/17/18: section presence + delegation to
     // `VipRange::new` for the three type-level invariants + structured
