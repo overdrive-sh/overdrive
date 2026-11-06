@@ -334,6 +334,11 @@ pub trait IntentStore: Send + Sync + 'static {
     /// `Changed { key, value }` (`value: None` is a delete) or
     /// `Lagged { skipped }` when the subscriber missed events.
     ///
+    /// `Lagged.skipped` is the adapter-reported count of missed events. It
+    /// is always nonzero and a gap is never treated as nothing. The store
+    /// has one change channel for every prefix, so the count may include
+    /// events that would not have matched this subscriber's prefix.
+    ///
     /// A `Changed` `value` is the **caller-provided bytes** as passed to [`put`],
     /// [`put_if_absent`], or [`TxnOp::Put`]. Subscribers that
     /// subsequently call [`get`] on the same key receive the same

@@ -477,6 +477,27 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-11-06T01:04:23Z"
+    },
+    {
+      "sid": "02-07",
+      "p": "RED",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: review rework; doc wording and an unreachable zero-count arm, no test can drive Lagged(0)",
+      "t": "2026-11-06T01:06:53Z"
+    },
+    {
+      "sid": "02-07",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-06T01:11:48Z"
+    },
+    {
+      "sid": "02-07",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-06T01:11:48Z"
     }
   ]
 }

@@ -33,8 +33,9 @@
 //!
 //! * Subscribers that lag past the broadcast capacity miss events. The
 //!   stream reports the gap as `IntentSubscriptionEvent::Lagged` with the
-//!   exact missed count, then resumes with the next committed change; the
-//!   stream does not close. The Raft-driven replacement will recover via
+//!   nonzero count the channel reported (channel-wide: it may include
+//!   events outside the subscriber's prefix), then resumes with the next
+//!   committed change; the stream does not close. The Raft-driven replacement will recover via
 //!   log catch-up.
 //! * Events fire only after successful redb commit, so a subscriber
 //!   never sees a phantom write that failed to persist.
@@ -70,7 +71,8 @@ const ENTRIES_TABLE: TableDefinition<&[u8], &[u8]> = TableDefinition::new("entri
 /// Big enough to absorb a short-lived reader stall without dropping
 /// events on a single-node workload; small enough that an infinite lag
 /// in a subscriber doesn't balloon memory. Subscribers that lag past
-/// this are told the missed count via `Lagged` and keep receiving
+/// this are told the channel-reported missed count via `Lagged` (it may
+/// include events outside the subscriber's prefix) and keep receiving
 /// subsequent events — the stream does not close on lag (see module docs).
 const WATCH_CHANNEL_CAPACITY: usize = 1024;
 
@@ -406,9 +408,12 @@ impl IntentStore for LocalIntentStore {
 
         // Every broadcast event is a committed change, reported as
         // `Changed`. A receiver that fell behind the channel capacity is told
-        // the exact number of events the channel dropped for it, then resumes
-        // with the next committed change. The count is channel-wide: the one
-        // change channel carries every prefix.
+        // the number of events the channel reported dropped for it, then
+        // resumes with the next committed change. The count is channel-wide:
+        // the one change channel carries every prefix, so it may include
+        // events that would not have matched this prefix. A gap is never
+        // treated as nothing, so a zero count is reported as the minimum
+        // nonzero count.
         let stream = BroadcastStream::new(rx).filter_map(move |evt| match evt {
             Ok(event) => {
                 if event.key.starts_with(&prefix) {
@@ -418,7 +423,9 @@ impl IntentStore for LocalIntentStore {
                 }
             }
             Err(BroadcastStreamRecvError::Lagged(skipped)) => {
-                NonZeroU64::new(skipped).map(|skipped| IntentSubscriptionEvent::Lagged { skipped })
+                Some(IntentSubscriptionEvent::Lagged {
+                    skipped: NonZeroU64::new(skipped).unwrap_or(NonZeroU64::MIN),
+                })
             }
         });
 
