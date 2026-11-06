@@ -883,6 +883,63 @@ mod acceptance {
         );
     }
 
+    /// S-PIG-134: a connect future dropped while it is parked inside the
+    /// gateway-client mTLS handshake still cleans its registered intent and
+    /// completes its ledger record (R-63), so repeated cancellations never
+    /// fill the ledger.
+    ///
+    /// CONTRACT_SHAPE: bounded-change.
+    #[tokio::test]
+    #[ignore = "pending DELIVER upstream-socket-preparation"]
+    async fn a_connect_dropped_mid_handshake_releases_its_ledger_slot_and_intent() {
+        let fx = fixture_with(ReceiptMode::Selected, Some(GatewayClientMtlsError::Handshake), true)
+            .await;
+        {
+            let connect = fx.connector.connect(fx.frontend, deadline(&fx));
+            tokio::pin!(connect);
+            let parked = tokio::time::timeout(Duration::from_secs(5), fx.mtls.parked.notified());
+            tokio::select! {
+                _ = &mut connect => panic!("the held handshake cannot complete before release"),
+                reached = parked => reached.expect("the connect reached the held authenticate"),
+            }
+            assert_eq!(fx.ledger.len(), 1, "the in-flight connect holds its reservation");
+            assert_eq!(
+                fx.dataplane.live_intent_count().expect("intent count"),
+                1,
+                "the in-flight connect holds its registered intent",
+            );
+            // The pinned future is dropped here, still suspended in `authenticate`.
+        }
+
+        assert_eq!(
+            count(&fx.mtls.attempts),
+            1,
+            "the handshake was started once and never finished"
+        );
+        assert_eq!(fx.ledger.len(), 0, "the dropped connect released its ledger slot");
+        assert_eq!(
+            fx.dataplane.live_intent_count().expect("intent count"),
+            0,
+            "the dropped connect cleaned its registered intent",
+        );
+        assert_eq!(fx.dataplane.live_receipts().expect("receipt count").len(), 0);
+        assert_eq!(count(&fx.dataplane.opens), 1, "exactly one upstream was prepared");
+        assert_eq!(
+            fx.dataplane.cleanup_intents.lock().expect("cleanup log").len(),
+            1,
+            "the registered intent is cleaned up exactly once",
+        );
+        assert!(
+            fx.ledger.retry_all(fx.dataplane.as_ref()).is_empty(),
+            "no saturation and no retained cleanup",
+        );
+        let received = tokio::time::timeout(Duration::from_secs(5), fx.accept)
+            .await
+            .expect("the dropped connect closed its upstream connection")
+            .expect("accept task");
+        assert_eq!(received, 0, "no byte sent upstream");
+    }
+
     /// S-PIG-53: a failed cleanup is retained in the ledger under the record
     /// created at the pre-reservation and bound after `open_upstream`; the
     /// retry cleans the same intent without re-registering, reconnecting or
