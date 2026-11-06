@@ -175,7 +175,6 @@ async fn open_creates_missing_parent_directory() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER lag-aware-intent-subscription"]
 async fn lagged_subscription_reports_the_exact_missed_count_and_resumes_with_the_next_change() {
     // Far more matching writes than any in-process notification buffer holds.
     const WRITES: usize = 4_096;

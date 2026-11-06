@@ -2994,7 +2994,6 @@ async fn applying_the_identical_route_twice_has_an_empty_second_delta() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER lag-aware-intent-subscription"]
 async fn a_watch_lag_is_reported_and_the_gateway_relists_instead_of_reading_an_empty_store() {
     const BURST: usize = 3_000;
     let site = Site::new();

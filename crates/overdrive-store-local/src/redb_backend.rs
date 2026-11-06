@@ -31,15 +31,15 @@
 //!
 //! Trade-offs of the Phase 1 substitute:
 //!
-//! * Subscribers that lag past the broadcast capacity drop events
-//!   (`RecvError::Lagged`). The current stream-wrapper layer silently
-//!   drops the lagged notification and continues delivering subsequent
-//!   events — the stream does not close, so a caller relying on
-//!   end-of-stream as a catch-up trigger will miss the lost events. The
-//!   Raft-driven replacement will recover via log catch-up.
+//! * Subscribers that lag past the broadcast capacity miss events. The
+//!   stream reports the gap as `IntentSubscriptionEvent::Lagged` with the
+//!   exact missed count, then resumes with the next committed change; the
+//!   stream does not close. The Raft-driven replacement will recover via
+//!   log catch-up.
 //! * Events fire only after successful redb commit, so a subscriber
 //!   never sees a phantom write that failed to persist.
 
+use std::num::NonZeroU64;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::Arc;
@@ -57,6 +57,7 @@ use redb::{Database, ReadableTable, TableDefinition};
 use tokio::sync::broadcast;
 use tokio_stream::StreamExt as _;
 use tokio_stream::wrappers::BroadcastStream;
+use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 
 use crate::snapshot_frame;
 
@@ -69,8 +70,8 @@ const ENTRIES_TABLE: TableDefinition<&[u8], &[u8]> = TableDefinition::new("entri
 /// Big enough to absorb a short-lived reader stall without dropping
 /// events on a single-node workload; small enough that an infinite lag
 /// in a subscriber doesn't balloon memory. Subscribers that lag past
-/// this silently lose the dropped events and keep receiving subsequent
-/// ones — the stream does not close on lag (see module docs).
+/// this are told the missed count via `Lagged` and keep receiving
+/// subsequent events — the stream does not close on lag (see module docs).
 const WATCH_CHANNEL_CAPACITY: usize = 1024;
 
 #[derive(Debug, Clone)]
@@ -404,9 +405,10 @@ impl IntentStore for LocalIntentStore {
         let rx = self.inner.watch_tx.subscribe();
 
         // Every broadcast event is a committed change, reported as
-        // `Changed`. Lag detection is not implemented here: a lagged
-        // receiver's notification is still filtered out, so the stream stays
-        // alive and subsequent events still arrive.
+        // `Changed`. A receiver that fell behind the channel capacity is told
+        // the exact number of events the channel dropped for it, then resumes
+        // with the next committed change. The count is channel-wide: the one
+        // change channel carries every prefix.
         let stream = BroadcastStream::new(rx).filter_map(move |evt| match evt {
             Ok(event) => {
                 if event.key.starts_with(&prefix) {
@@ -415,7 +417,9 @@ impl IntentStore for LocalIntentStore {
                     None
                 }
             }
-            Err(_lag) => None,
+            Err(BroadcastStreamRecvError::Lagged(skipped)) => {
+                NonZeroU64::new(skipped).map(|skipped| IntentSubscriptionEvent::Lagged { skipped })
+            }
         });
 
         Ok(Box::new(Box::pin(PrefixWatchStream { inner: Box::pin(stream) })))
