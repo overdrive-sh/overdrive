@@ -12,7 +12,7 @@
 //!
 //! `open_upstream`, `take_receipt`, `selected_backend_identity` and the cleanup
 //! capability are implemented. `probe` is the boot sentinel step's and is still
-//! the scaffold. The commit-guard internals (`BackendIdState`,
+//! the scaffold. The commit-guard internals (`BackendIdentityState`,
 //! `ServiceApplyUndo`, `ServiceCleanupDebt`, the `service_apply_commit` guard) are
 //! private structure and are the crafter's.
 

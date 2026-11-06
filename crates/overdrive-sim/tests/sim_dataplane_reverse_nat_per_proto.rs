@@ -9,7 +9,6 @@
 //! - S-03-C: NEGATIVE — an extra (phantom) key fails the lockstep (orphan check)
 //! - S-03-D: the #163 shape (tcp-only for a udp service) is caught
 //! - S-02-A: empty backends purge only frontend.proto's keys (property)
-//! - S-02-B: cross-service shared key survives a per-proto purge
 //! - S-02-C: idempotent re-apply (property)
 //! - S-02-D: non-IPv4 backend contributes no key (boundary)
 //!
@@ -189,34 +188,6 @@ async fn issue_163_tcp_only_for_udp_service_is_caught() {
         "S-03-D: the tcp-only-for-udp #163 shape must not be the post-state"
     );
     assert_eq!(actual, udp_expected, "S-03-D: a udp service installs exactly the udp keys");
-}
-
-/// S-02-B (criterion 12) — a `REVERSE_NAT` key shared with another live
-/// service survives a per-proto empty-backends purge.
-#[tokio::test]
-async fn cross_service_shared_key_survives_per_proto_purge() {
-    let dp = SimDataplane::new();
-    let shared = ipv4_backend(0, Ipv4Addr::new(10, 1, 0, 5), 9000);
-
-    let fe_a = frontend(1, 5353, Proto::Udp);
-    let fe_b = frontend(2, 5353, Proto::Udp);
-    dp.update_service(fe_a, vec![shared.clone()]).await.unwrap();
-    dp.update_service(fe_b, vec![shared.clone()]).await.unwrap();
-
-    let shared_key = BackendKey::new(Ipv4Addr::new(10, 1, 0, 5), 9000, Proto::Udp);
-    assert_eq!(
-        dp.reverse_nat_lookup(shared_key),
-        Some(fe_b.vip_v4()),
-        "precondition: shared udp key maps to the last writer"
-    );
-
-    // Service A scales to zero.
-    dp.update_service(fe_a, vec![]).await.unwrap();
-
-    assert!(
-        dp.reverse_nat_lookup(shared_key).is_some(),
-        "S-02-B: shared (ip,port,udp) key must survive when only service A scales to zero"
-    );
 }
 
 /// S-02-D (criterion 14) — boundary: a backend set with one IPv4 and one

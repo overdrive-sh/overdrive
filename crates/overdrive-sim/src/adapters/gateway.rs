@@ -61,11 +61,6 @@
     unused_variables,
     reason = "public-ingress DISTILL scaffold: the Sim port bodies are DELIVER's"
 )]
-#![allow(
-    clippy::significant_drop_tightening,
-    reason = "the Sim connect dataplane's critical sections are short in-memory operations"
-)]
-
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::num::{NonZeroU64, NonZeroUsize};
 use std::os::fd::OwnedFd;
@@ -536,6 +531,7 @@ impl GatewayConnectCleanup for SimGatewayConnectDataplane {
         state.fault(ConnectOperation::Cleanup)?;
         state.intents.remove(&intent.socket_cookie);
         state.receipts.remove(&intent.socket_cookie);
+        drop(state);
         Ok(())
     }
 
@@ -548,6 +544,7 @@ impl GatewayConnectCleanup for SimGatewayConnectDataplane {
             .map_err(|_| GatewayConnectDataplaneError::Cleanup)?;
         let removed_receipts = u32::try_from(std::mem::take(&mut state.receipts).len())
             .map_err(|_| GatewayConnectDataplaneError::Cleanup)?;
+        drop(state);
         Ok(GatewayConnectCleanupSweep { removed_intents, removed_receipts })
     }
 
@@ -557,6 +554,10 @@ impl GatewayConnectCleanup for SimGatewayConnectDataplane {
         u32::try_from(state.intents.len()).map_err(|_| GatewayConnectDataplaneError::Kernel)
     }
 
+    #[allow(
+        clippy::significant_drop_tightening,
+        reason = "the state guard is held across the snapshot so receipts and intents agree"
+    )]
     fn live_receipts(
         &self,
     ) -> Result<BTreeMap<SocketCookie, GatewaySelectionReceipt>, GatewayConnectDataplaneError> {
@@ -608,6 +609,7 @@ impl GatewayConnectDataplane for SimGatewayConnectDataplane {
         })?;
         state.intents.insert(socket_cookie, key);
         state.receipts.insert(socket_cookie);
+        drop(state);
         Ok(PreparedUpstream::new(socket, GatewayConnectIntent { socket_cookie, service_key: key }))
     }
 

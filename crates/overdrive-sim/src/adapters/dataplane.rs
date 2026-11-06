@@ -446,6 +446,12 @@ const fn reverse_nat_key_for(backend: &Backend, proto: Proto) -> Option<BackendK
     }
 }
 
+/// A `ServiceVip` from a stored IPv4 address.
+fn frontend_vip(addr: Ipv4Addr) -> Result<overdrive_core::id::ServiceVip, DataplaneError> {
+    overdrive_core::id::ServiceVip::new(std::net::IpAddr::V4(addr))
+        .map_err(|e| DataplaneError::LoadFailed(format!("service vip {addr}: {e}")))
+}
+
 #[async_trait]
 impl Dataplane for SimDataplane {
     async fn update_policy(&self, key: PolicyKey, verdict: Verdict) -> Result<(), DataplaneError> {
@@ -499,6 +505,20 @@ impl Dataplane for SimDataplane {
                 });
             }
         }
+        // R-59: a reverse-NAT key another Service's VIP already owns is
+        // rejected before anything is minted or written.
+        for backend in &backends {
+            let Some(key) = reverse_nat_key_for(backend, proto) else {
+                continue;
+            };
+            if let Some(owner) = state.reverse_nat.get(&key).filter(|owner| **owner != vip) {
+                return Err(DataplaneError::ReverseNatConflict {
+                    key,
+                    current_vip: frontend_vip(*owner)?,
+                    attempted_vip: frontend.vip(),
+                });
+            }
+        }
         for backend in &backends {
             if state.backend_memo.contains_key(&(backend.addr, proto)) {
                 continue;
@@ -547,25 +567,10 @@ impl Dataplane for SimDataplane {
             state.services.insert((vip, port, proto), backends);
         }
 
-        // Compute the union of ALL active services' reverse-NAT keys
-        // (after the forward-path update above), each under its own
-        // stored proto. Only purge entries that left THIS service AND
-        // are absent from the global set. Without this cross-service
-        // check, removing a backend from one service would delete the
-        // reverse-NAT entry even when another service still routes
-        // through the same backend.
-        let live_keys: std::collections::BTreeSet<BackendKey> = state
-            .services
-            .iter()
-            .flat_map(|((_v, _port, p), bs)| {
-                bs.iter().filter_map(move |b| reverse_nat_key_for(b, *p))
-            })
-            .collect();
-
+        // A reverse-NAT key has exactly one owning Service (R-59), so the keys
+        // that left THIS `(vip, port, proto)` are exactly the ones to purge.
         for key in prior_keys.difference(&new_keys) {
-            if !live_keys.contains(key) {
-                state.reverse_nat.remove(key);
-            }
+            state.reverse_nat.remove(key);
         }
 
         // Orphan release (mirrors the host's post-commit sweep): an endpoint no

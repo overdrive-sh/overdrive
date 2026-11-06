@@ -244,11 +244,10 @@ pub struct EbpfDataplane {
     ///
     /// Without this tracker, removed backends would leave stale
     /// REVERSE_NAT_MAP entries (architecture.md § 11 + S-2.2-18
-    /// purge invariant). Tracking per-service enables the
-    /// cross-service union check: on purge, only entries absent
-    /// from the union of ALL active services' key sets are
-    /// deleted — preventing accidental cross-service deletion
-    /// when two services share a backend address.
+    /// purge invariant). A key has exactly one owning Service
+    /// (R-59 rejects an update naming a key another VIP owns), so
+    /// the keys that left this Service's set are exactly the keys
+    /// to purge.
     service_reverse_nat_keys: parking_lot::Mutex<
         std::collections::BTreeMap<
             crate::maps::ServiceKey,
@@ -1887,25 +1886,35 @@ fn hash_of_maps_error(
     }
 }
 
+/// A `ServiceVip` from a stored host-order IPv4 address.
+fn service_vip(ip_host: u32) -> Result<overdrive_core::id::ServiceVip, DataplaneError> {
+    overdrive_core::id::ServiceVip::new(std::net::IpAddr::V4(Ipv4Addr::from(ip_host)))
+        .map_err(|e| DataplaneError::LoadFailed(format!("service vip {ip_host}: {e}")))
+}
+
 /// The commit-guarded Service-map and applied-identity transaction
 /// (ADR-0228, ADR-0232, ADR-0233, ADR-0241). Every method here runs under the
 /// `service_apply_commit` write guard `update_service` holds.
-#[allow(
-    clippy::significant_drop_tightening,
-    reason = "each map/allocator lock is held for exactly the section whose \
-              all-or-nothing outcome it protects, under the commit guard"
-)]
 impl EbpfDataplane {
     /// Validate the input, reject an identity conflict before any mutation, then
     /// mint ids for the endpoints the allocator has not seen and reserve their
     /// identities (not yet readable).
+    #[allow(
+        clippy::significant_drop_tightening,
+        reason = "the guards are scoped to the section whose all-or-nothing outcome they protect"
+    )]
     fn plan_service_apply(
         &self,
+        service_key: crate::maps::wire::ServiceKey,
+        svc_proto: overdrive_core::dataplane::Proto,
         backends: &[Backend],
-        proto: u8,
     ) -> Result<Vec<PlannedBackend>, DataplaneError> {
         use crate::gateway_connect::BackendIdentityState;
-        use crate::maps::BackendEntryPod;
+        use overdrive_core::dataplane::backend_key::BackendKey;
+
+        use crate::maps::{BackendEntryPod, BackendKeyPod};
+
+        let proto = svc_proto.as_u8();
 
         let mut by_endpoint: std::collections::BTreeMap<
             (u32, u16),
@@ -1923,6 +1932,31 @@ impl EbpfDataplane {
                 )));
             }
             by_endpoint.insert(endpoint, (pod, &backend.alloc));
+        }
+
+        // R-59: a reverse-NAT key another Service's VIP already owns is
+        // rejected before anything is reserved or written.
+        {
+            let reverse_nat_map = self.reverse_nat_map.lock();
+            for (ip_host, port_host) in by_endpoint.keys() {
+                let key =
+                    BackendKeyPod { ip_host: *ip_host, port_host: *port_host, proto, _pad: 0 };
+                match reverse_nat_map.get(&key, 0) {
+                    Ok(owner) if owner.ip_host != service_key.vip_host => {
+                        return Err(DataplaneError::ReverseNatConflict {
+                            key: BackendKey::new(Ipv4Addr::from(*ip_host), *port_host, svc_proto),
+                            current_vip: service_vip(owner.ip_host)?,
+                            attempted_vip: service_vip(service_key.vip_host)?,
+                        });
+                    }
+                    Ok(_) | Err(aya::maps::MapError::KeyNotFound) => {}
+                    Err(e) => {
+                        return Err(DataplaneError::LoadFailed(format!(
+                            "REVERSE_NAT_MAP get: {e}"
+                        )));
+                    }
+                }
+            }
         }
 
         let mut allocator = self.backend_id_alloc.lock();
@@ -1958,6 +1992,10 @@ impl EbpfDataplane {
 
     /// Everything up to and including the one atomic outer `SERVICE_MAP` swap.
     /// A failure names the stage it happened at; `undo` records what to restore.
+    #[allow(
+        clippy::significant_drop_tightening,
+        reason = "the guards are scoped to the section whose all-or-nothing outcome they protect"
+    )]
     fn precommit_service_apply(
         &self,
         planned: &[PlannedBackend],
@@ -2089,7 +2127,12 @@ impl EbpfDataplane {
     /// in-place updates, remove this update's reserved identities and release its
     /// fresh allocator memos (their numeric ids are never recycled). The prior
     /// outer pointer was never touched. Returns the original error, or
-    /// `ServiceApplyRollback` when a restore delete also failed.
+    /// `ServiceApplyRollback` when a restore (an in-place `BACKEND_MAP` restore
+    /// or a delete) also failed (R-60).
+    #[allow(
+        clippy::significant_drop_tightening,
+        reason = "the guards are scoped to the section whose all-or-nothing outcome they protect"
+    )]
     fn rollback_service_apply(
         &self,
         stage: overdrive_core::traits::dataplane::ServiceApplyStage,
@@ -2104,13 +2147,8 @@ impl EbpfDataplane {
         {
             let mut backend_map = self.backend_map.lock();
             for (id, prior) in undo.updated_backend_pods.iter().rev() {
-                if let Err(e) = backend_map.insert(id.get(), *prior, 0) {
-                    tracing::warn!(
-                        name: "dataplane.service_apply.restore_failed",
-                        backend_id = id.get(),
-                        error = %e,
-                        "BACKEND_MAP in-place update could not be restored"
-                    );
+                if backend_map.insert(id.get(), *prior, 0).is_err() {
+                    failures.push(Failure::BackendRestore(*id));
                 }
             }
             for id in undo.inserted_backend_ids.iter().rev() {
@@ -2158,6 +2196,10 @@ impl EbpfDataplane {
 
     /// Non-empty update: plan, pre-commit, commit, then publish every identity
     /// `Applied` before the guard releases.
+    #[allow(
+        clippy::significant_drop_tightening,
+        reason = "the guards are scoped to the section whose all-or-nothing outcome they protect"
+    )]
     fn apply_service(
         &self,
         service_key: crate::maps::wire::ServiceKey,
@@ -2168,7 +2210,7 @@ impl EbpfDataplane {
         use crate::maps::BackendKeyPod;
 
         let proto = svc_proto.as_u8();
-        let planned = self.plan_service_apply(backends, proto)?;
+        let planned = self.plan_service_apply(service_key, svc_proto, backends)?;
         let new_keys: std::collections::BTreeSet<BackendKeyPod> = planned
             .iter()
             .map(|backend| BackendKeyPod {
@@ -2248,6 +2290,10 @@ impl EbpfDataplane {
     /// swept again by the next update's full scan, and a reverse-NAT key that
     /// cannot be removed stays in `service_cleanup_debt` until a later update
     /// removes it. Applied identities are never removed.
+    #[allow(
+        clippy::significant_drop_tightening,
+        reason = "the guards are scoped to the section whose all-or-nothing outcome they protect"
+    )]
     fn settle_cleanup(
         &self,
         stale_reverse: std::collections::BTreeSet<crate::maps::BackendKeyPod>,
@@ -2294,10 +2340,12 @@ impl EbpfDataplane {
             .values()
             .flat_map(|keys| keys.iter().copied())
             .collect();
+        let mut reverse_nat_map = self.reverse_nat_map.lock();
         let mut debt = self.service_cleanup_debt.lock();
         debt.extend(stale_reverse);
-        let mut reverse_nat_map = self.reverse_nat_map.lock();
         debt.retain(|key| {
+            // A debt key its owner has since re-claimed is live again: drop the
+            // debt without deleting the entry.
             if live_nat.contains(key) {
                 return false;
             }
@@ -2329,32 +2377,41 @@ impl Dataplane for EbpfDataplane {
         Ok(())
     }
 
-    /// 5-step atomic backend-set swap per ADR-0040 § 2.
+    /// Commit-guarded Service-map update (ADR-0040 § 2, ADR-0233, R-59, R-60).
     ///
-    /// `significant_drop_tightening` is allowed at the fn level
-    /// because the BACKEND_MAP lock is intentionally scoped to a
-    /// `{ ... }` block — the lint wants an explicit `drop()` but
-    /// the scope braces serve the same purpose more idiomatically.
-    #[allow(clippy::significant_drop_tightening)]
+    /// Everything below runs under the `service_apply_commit` write guard, so
+    /// `selected_backend_identity` readers wait for it. A non-empty update:
     ///
-    /// 1. Upsert each `Backend` into BACKEND_MAP under a `BackendId`
-    ///    derived from the backend's `(IPv4, port)`.
-    /// 2. Allocate a fresh inner ARRAY (size 256) populated with the
-    ///    new backend slot table. On kernel rejection
-    ///    (`EINVAL`/`EPERM`/`ENOMEM`) return
-    ///    [`DataplaneError::MapAllocFailed`] without touching the
-    ///    outer map (S-2.2-11 preservation invariant).
-    /// 3. Single `bpf_map_update_elem` against SERVICE_MAP outer:
-    ///    `set(&service_key, new_inner.as_fd())`. Kernel ref-counts
-    ///    inner maps; concurrent XDP readers see either the old or
-    ///    the new inner-map pointer atomically.
-    /// 4. Orphan GC — sweep BACKEND_MAP for entries no longer in
-    ///    the new set. Phase 2.2 step 03-02 ships a minimal sweep
-    ///    bounded by the just-inserted set; the broader cross-
-    ///    service GC (S-2.2-10) is a separate slice landing.
-    /// 5. The old inner map's FD goes out of scope inside aya's
-    ///    own ref-counting machinery — the kernel reaps the map
-    ///    once no XDP program references it (refcount = 0).
+    /// 1. Plan (`plan_service_apply`), before any mutation: validate and
+    ///    deduplicate the backends, reject one endpoint carrying two
+    ///    allocations, reject a reverse-NAT key another Service's VIP already
+    ///    owns ([`DataplaneError::ReverseNatConflict`], R-59) and an identity
+    ///    conflict ([`DataplaneError::BackendIdentityConflict`]); then mint ids
+    ///    for endpoints the allocator has not seen and reserve their identities
+    ///    (not yet readable).
+    /// 2. Populate `BACKEND_MAP` (an identical entry is reused, a differing
+    ///    `weight`/`healthy` is updated in place with the prior value saved),
+    ///    build the fresh private inner map holding the Maglev permutation, and
+    ///    insert the reverse-NAT entries. The outer pointer is untouched, so no
+    ///    new id is selectable yet. A kernel rejection while allocating the
+    ///    inner map is [`DataplaneError::MapAllocFailed`] (S-2.2-11).
+    /// 3. Commit with the single atomic `SERVICE_MAP` outer
+    ///    `set(&service_key, new_inner.as_fd())`; the kernel ref-counts the old
+    ///    and new inner maps, so concurrent XDP readers see one or the other.
+    /// 4. Publish every reserved identity as `Applied`, update the trackers and
+    ///    release the guard.
+    /// 5. Post-commit orphan cleanup: sweep `BACKEND_MAP` and the stale
+    ///    reverse-NAT keys. A key that cannot be removed becomes cleanup debt
+    ///    retried by the next update; it never turns the committed update into
+    ///    a failure.
+    ///
+    /// A failure before step 3 replays the undo log: it deletes only keys that
+    /// were absent before the update, restores each in-place `BACKEND_MAP`
+    /// update from its saved prior value, removes the reserved identities and
+    /// releases the fresh allocator memos. The original stage error is
+    /// returned, or [`DataplaneError::ServiceApplyRollback`] when a restore (a
+    /// delete or an in-place restore, R-60) also failed. An empty update
+    /// deletes the outer slot (the commit) and then cleans up.
     ///
     /// VIP port note: the VIP port for the SERVICE_MAP `ServiceKey`
     /// and the reverse-NAT `VipPod` value is sourced from

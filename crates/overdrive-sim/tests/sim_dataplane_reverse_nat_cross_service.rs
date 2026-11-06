@@ -1,11 +1,10 @@
-//! Regression test: `REVERSE_NAT_MAP` purge must not delete entries
-//! still referenced by another active service.
+//! Regression test: `REVERSE_NAT_MAP` purge of a service's backend
+//! removes that backend's entry, and leaves another service's entry
+//! untouched.
 //!
-//! When two services share a backend address and one service removes
-//! it, the reverse-NAT entry must survive for the other service.
-//! Without the cross-service union check, the purge loop deletes the
-//! entry solely because it left *this* service's backend set —
-//! breaking the surviving service's egress path.
+//! Two services never share a backend endpoint (a reverse-NAT key
+//! belongs to exactly one service), so there is no cross-service
+//! survival case to pin here.
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
@@ -41,58 +40,6 @@ fn backend(ip: &str, port: u16) -> Backend {
         weight: 100,
         healthy: true,
     }
-}
-
-#[tokio::test]
-async fn shared_backend_reverse_nat_survives_single_service_removal() {
-    let dp = SimDataplane::new();
-    let shared = backend("10.1.0.5", 9000);
-
-    let vip_a = Ipv4Addr::new(10, 0, 0, 1);
-    let vip_b = Ipv4Addr::new(10, 0, 0, 2);
-
-    // Both services register with the same backend.
-    dp.update_service(tcp_frontend(vip_a), vec![shared.clone()]).await.unwrap();
-    dp.update_service(tcp_frontend(vip_b), vec![shared.clone()]).await.unwrap();
-
-    let key_tcp = BackendKey::new("10.1.0.5".parse().unwrap(), 9000, Proto::Tcp);
-    assert!(dp.reverse_nat_lookup(key_tcp).is_some(), "precondition: entry exists");
-
-    // Service A removes the backend (empty update).
-    dp.update_service(tcp_frontend(vip_a), vec![]).await.unwrap();
-
-    // Service B still routes through this backend — entry MUST survive.
-    assert_eq!(
-        dp.reverse_nat_lookup(key_tcp),
-        Some(vip_b),
-        "reverse-NAT entry for shared backend was deleted when only one service removed it",
-    );
-}
-
-#[tokio::test]
-async fn shared_backend_reverse_nat_survives_backend_set_change() {
-    let dp = SimDataplane::new();
-    let shared = backend("10.1.0.5", 9000);
-    let replacement = backend("10.2.0.1", 8080);
-
-    let vip_a = Ipv4Addr::new(10, 0, 0, 1);
-    let vip_b = Ipv4Addr::new(10, 0, 0, 2);
-
-    dp.update_service(tcp_frontend(vip_a), vec![shared.clone()]).await.unwrap();
-    dp.update_service(tcp_frontend(vip_b), vec![shared.clone()]).await.unwrap();
-
-    let key_tcp = BackendKey::new("10.1.0.5".parse().unwrap(), 9000, Proto::Tcp);
-
-    // Service A swaps to a different backend (non-empty update that
-    // drops the shared backend from its set).
-    dp.update_service(tcp_frontend(vip_a), vec![replacement]).await.unwrap();
-
-    // Service B still routes through the shared backend.
-    assert_eq!(
-        dp.reverse_nat_lookup(key_tcp),
-        Some(vip_b),
-        "reverse-NAT entry for shared backend was deleted during non-empty update",
-    );
 }
 
 #[tokio::test]

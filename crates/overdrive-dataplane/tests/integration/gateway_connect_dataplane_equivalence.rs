@@ -22,6 +22,8 @@
 //! receipt kind and identity, never when the receipt was decided relative to a
 //! connect, an outer swap or a concurrent update; that ordering is proven only
 //! at Tier 3 (S-PIG-72) and by the selection-receipt conformance driver.
+//! The call script consequently never interleaves an `update_service` between a
+//! dial and the `take_receipt` that reads its receipt.
 //!
 //! Native metal only (the Host side loads the BPF object).
 
@@ -406,7 +408,6 @@ fn conflict_script<O: Owner + Observe>(owner: &O, rt: &tokio::runtime::Runtime) 
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER selection-receipt-and-applied-identity"]
 fn host_and_sim_reject_an_update_whose_reverse_nat_key_belongs_to_another_service() {
     let host = Host::new_tagged("h131");
     let sim = Sim::new();

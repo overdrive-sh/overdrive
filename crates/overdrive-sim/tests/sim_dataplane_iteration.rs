@@ -23,7 +23,7 @@
 #![allow(clippy::redundant_clone)]
 #![allow(clippy::cast_possible_truncation)]
 
-use std::net::{IpAddr, Ipv4Addr};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 use overdrive_core::SpiffeId;
 use overdrive_core::dataplane::ServiceFrontend;
@@ -55,10 +55,12 @@ fn spiffe(path: &str) -> SpiffeId {
     SpiffeId::new(&format!("spiffe://overdrive.local{path}")).expect("valid SPIFFE URI")
 }
 
-fn dummy_backend() -> Backend {
+/// A backend whose endpoint is distinct per VIP — two services never
+/// share a backend endpoint, so each VIP gets its own.
+fn backend_for(vip: Ipv4Addr) -> Backend {
     Backend {
         alloc: spiffe("/workload/payments/alloc/a1b2c3"),
-        addr: "127.0.0.1:8080".parse().expect("valid socket"),
+        addr: SocketAddr::new(IpAddr::V4(vip), 8080),
         weight: 100,
         healthy: true,
     }
@@ -111,7 +113,6 @@ proptest! {
 
         let dataplane_a = SimDataplane::new();
         let dataplane_b = SimDataplane::new();
-        let backend = dummy_backend();
 
         // Use a tokio runtime for the async `update_service` calls.
         let rt = tokio::runtime::Builder::new_current_thread()
@@ -119,11 +120,11 @@ proptest! {
             .expect("tokio runtime");
 
         for v in &order_a {
-            rt.block_on(dataplane_a.update_service(tcp_frontend(*v), vec![backend.clone()]))
+            rt.block_on(dataplane_a.update_service(tcp_frontend(*v), vec![backend_for(*v)]))
                 .expect("update_service succeeds");
         }
         for v in &order_b {
-            rt.block_on(dataplane_b.update_service(tcp_frontend(*v), vec![backend.clone()]))
+            rt.block_on(dataplane_b.update_service(tcp_frontend(*v), vec![backend_for(*v)]))
                 .expect("update_service succeeds");
         }
 
@@ -150,7 +151,6 @@ proptest! {
 #[test]
 fn service_iteration_matches_btreemap_order_for_three_vips() {
     let dp = SimDataplane::new();
-    let b = dummy_backend();
     let v1 = Ipv4Addr::new(10, 0, 0, 3);
     let v2 = Ipv4Addr::new(10, 0, 0, 1);
     let v3 = Ipv4Addr::new(10, 0, 0, 2);
@@ -158,9 +158,9 @@ fn service_iteration_matches_btreemap_order_for_three_vips() {
     let rt = tokio::runtime::Builder::new_current_thread().build().expect("tokio runtime");
 
     // Insert in non-sorted order.
-    rt.block_on(dp.update_service(tcp_frontend(v1), vec![b.clone()])).expect("update");
-    rt.block_on(dp.update_service(tcp_frontend(v2), vec![b.clone()])).expect("update");
-    rt.block_on(dp.update_service(tcp_frontend(v3), vec![b])).expect("update");
+    rt.block_on(dp.update_service(tcp_frontend(v1), vec![backend_for(v1)])).expect("update");
+    rt.block_on(dp.update_service(tcp_frontend(v2), vec![backend_for(v2)])).expect("update");
+    rt.block_on(dp.update_service(tcp_frontend(v3), vec![backend_for(v3)])).expect("update");
 
     let keys = dp.service_vip_keys();
     assert_eq!(keys, vec![v2, v3, v1], "BTreeMap order = ascending Ipv4Addr");
