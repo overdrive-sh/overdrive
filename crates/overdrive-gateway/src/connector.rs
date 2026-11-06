@@ -88,29 +88,21 @@ impl GatewayUpstreamConnector {
             .map_err(GatewayUpstreamConnectError::Prepare)?;
         let (socket, intent) = prepared.into_parts();
         reservation.bind(intent.clone());
+        let mut cleanup = IntentCleanupGuard::new(&*self.dataplane, intent.clone(), reservation);
         let address = SocketAddr::V4(SocketAddrV4::new(frontend.vip_v4(), frontend.port().get()));
         let connect_deadline =
             deadline.min(self.clock.now() + self.limits.upstream_connect_deadline());
         let stream = tokio::select! {
             connected = socket.connect(address) => {
-                let Ok(stream) = connected else {
-                    self.release_intent(&intent, reservation, ReceiptState::Unconsumed);
-                    return Err(GatewayUpstreamConnectError::Connect);
-                };
-                stream
+                connected.map_err(|_| GatewayUpstreamConnectError::Connect)?
             }
             () = self.clock.sleep(connect_deadline.saturating_duration_since(self.clock.now())) => {
-                self.release_intent(&intent, reservation, ReceiptState::Unconsumed);
                 return Err(GatewayUpstreamConnectError::ConnectTimeout);
             }
         };
-        let receipt = match self.dataplane.take_receipt(&intent) {
-            Ok(receipt) => receipt,
-            Err(error) => {
-                self.release_intent(&intent, reservation, ReceiptState::Unconsumed);
-                return Err(GatewayUpstreamConnectError::Receipt(error));
-            }
-        };
+        let receipt =
+            self.dataplane.take_receipt(&intent).map_err(GatewayUpstreamConnectError::Receipt)?;
+        cleanup.receipt_taken();
         let backend_id = match receipt {
             GatewaySelectionReceipt::Selected { socket_cookie, service_key, backend_id }
                 if socket_cookie == intent.socket_cookie && service_key == intent.service_key =>
@@ -121,53 +113,70 @@ impl GatewayUpstreamConnector {
                 if socket_cookie == intent.socket_cookie && service_key == intent.service_key =>
             {
                 emit_no_backend_receipt(operation, &intent);
-                self.release_intent(&intent, reservation, ReceiptState::Consumed);
                 return Err(GatewayUpstreamConnectError::NoBackend);
             }
             GatewaySelectionReceipt::Selected { .. }
             | GatewaySelectionReceipt::NoBackend { .. } => {
-                self.release_intent(&intent, reservation, ReceiptState::Consumed);
                 return Err(GatewayUpstreamConnectError::ReceiptMismatch);
             }
         };
-        let peer = match self.dataplane.selected_backend_identity(backend_id) {
-            Ok(peer) => peer,
-            Err(error) => {
-                self.release_intent(&intent, reservation, ReceiptState::Consumed);
-                return Err(GatewayUpstreamConnectError::SelectedIdentity(error));
-            }
-        };
+        let peer = self
+            .dataplane
+            .selected_backend_identity(backend_id)
+            .map_err(GatewayUpstreamConnectError::SelectedIdentity)?;
         emit_selected_receipt(operation, &intent, backend_id, &peer);
-        let Ok(std_stream) = stream.into_std() else {
-            self.release_intent(&intent, reservation, ReceiptState::Consumed);
-            return Err(GatewayUpstreamConnectError::Connect);
-        };
+        let std_stream = stream.into_std().map_err(|_| GatewayUpstreamConnectError::Connect)?;
         let connected: OwnedFd = std_stream.into();
-        let upstream = match self.client_mtls.authenticate(connected, peer, deadline).await {
-            Ok(upstream) => upstream,
-            Err(error) => {
-                self.release_intent(&intent, reservation, ReceiptState::Consumed);
-                return Err(GatewayUpstreamConnectError::Mtls(error));
-            }
-        };
-        self.release_intent(&intent, reservation, ReceiptState::Consumed);
-        Ok(upstream)
+        self.client_mtls
+            .authenticate(connected, peer, deadline)
+            .await
+            .map_err(GatewayUpstreamConnectError::Mtls)
+    }
+}
+
+/// The connector's one cleanup guard. It owns the bound ledger reservation
+/// and cleans the exact registered intent when it drops, so every result,
+/// including a connect future dropped at an await, cleans up. Success
+/// completes the ledger record; a failed cleanup marks the failing key on the
+/// record and leaves it retained for the ledger's next sweep.
+struct IntentCleanupGuard<'a> {
+    dataplane: &'a dyn GatewayConnectDataplane,
+    intent: GatewayConnectIntent,
+    reservation: Option<GatewayCleanupReservation>,
+    receipt: ReceiptState,
+}
+
+impl<'a> IntentCleanupGuard<'a> {
+    fn new(
+        dataplane: &'a dyn GatewayConnectDataplane,
+        intent: GatewayConnectIntent,
+        reservation: GatewayCleanupReservation,
+    ) -> Self {
+        Self {
+            dataplane,
+            intent,
+            reservation: Some(reservation),
+            receipt: ReceiptState::Unconsumed,
+        }
     }
 
-    /// Cleans the exact registered intent. Success completes its ledger
-    /// record; a failed cleanup marks the failing key on the record and
-    /// leaves the record retained for the ledger's next sweep.
-    fn release_intent(
-        &self,
-        intent: &GatewayConnectIntent,
-        reservation: GatewayCleanupReservation,
-        receipt: ReceiptState,
-    ) {
-        if self.dataplane.cleanup(intent).is_ok() {
+    /// The selection receipt has been taken; a later cleanup failure is an
+    /// intent failure.
+    fn receipt_taken(&mut self) {
+        self.receipt = ReceiptState::Consumed;
+    }
+}
+
+impl Drop for IntentCleanupGuard<'_> {
+    fn drop(&mut self) {
+        let Some(reservation) = self.reservation.take() else {
+            return;
+        };
+        if self.dataplane.cleanup(&self.intent).is_ok() {
             reservation.complete();
             return;
         }
-        match receipt {
+        match self.receipt {
             ReceiptState::Unconsumed => reservation.record_receipt_failure(),
             ReceiptState::Consumed => reservation.record_intent_failure(),
         }
@@ -890,7 +899,6 @@ mod acceptance {
     ///
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
-    #[ignore = "pending DELIVER upstream-socket-preparation"]
     async fn a_connect_dropped_mid_handshake_releases_its_ledger_slot_and_intent() {
         let fx = fixture_with(ReceiptMode::Selected, Some(GatewayClientMtlsError::Handshake), true)
             .await;
