@@ -18,12 +18,30 @@ State 1: <Initial predicate>
 
 State 2: <receipt_bugTakeAny_selection_receipt_step line 1913, col 3 to line 1955, col 58 of module receipt_bugTakeAny>
 /\ receipt_bugTakeAny_selection_receipt_resv = << >>
-/\ receipt_bugTakeAny_selection_receipt_ckey = <<1>>
-/\ receipt_bugTakeAny_selection_receipt_upd = 0
-/\ receipt_bugTakeAny_selection_receipt_infl = [on |-> FALSE, key |-> 0, ents |-> << >>, assoc |-> << >>, fresh_addrs |-> {}, prior |-> << >>, identBefore |-> << >>, committed |-> FALSE]
+/\ receipt_bugTakeAny_selection_receipt_ckey = << >>
+/\ receipt_bugTakeAny_selection_receipt_upd = 1
+/\ receipt_bugTakeAny_selection_receipt_infl = [on |-> TRUE, key |-> 1, ents |-> << >>, assoc |-> << >>, fresh_addrs |-> {}, prior |-> << >>, identBefore |-> << >>, committed |-> FALSE]
 /\ receipt_bugTakeAny_selection_receipt_outer = << >>
 /\ receipt_bugTakeAny_selection_receipt_memo = << >>
-/\ receipt_bugTakeAny_selection_receipt_guard = FALSE
+/\ receipt_bugTakeAny_selection_receipt_guard = TRUE
+/\ receipt_bugTakeAny_selection_receipt_ident = << >>
+/\ receipt_bugTakeAny_selection_receipt_g = [committed |-> {}, bound |-> << >>, rbBad |-> FALSE, badSel |-> FALSE]
+/\ receipt_bugTakeAny_selection_receipt_intents = << >>
+/\ receipt_bugTakeAny_selection_receipt_taken = << >>
+/\ receipt_bugTakeAny_selection_receipt_receipts = << >>
+/\ receipt_bugTakeAny_selection_receipt_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ receipt_bugTakeAny_selection_receipt_next_bid = 1
+/\ receipt_bugTakeAny_selection_receipt_conn = << >>
+/\ receipt_bugTakeAny_selection_receipt_next_cookie = 1
+
+State 3: <receipt_bugTakeAny_selection_receipt_step line 1913, col 3 to line 1955, col 58 of module receipt_bugTakeAny>
+/\ receipt_bugTakeAny_selection_receipt_resv = << >>
+/\ receipt_bugTakeAny_selection_receipt_ckey = <<1>>
+/\ receipt_bugTakeAny_selection_receipt_upd = 1
+/\ receipt_bugTakeAny_selection_receipt_infl = [on |-> TRUE, key |-> 1, ents |-> << >>, assoc |-> << >>, fresh_addrs |-> {}, prior |-> << >>, identBefore |-> << >>, committed |-> FALSE]
+/\ receipt_bugTakeAny_selection_receipt_outer = << >>
+/\ receipt_bugTakeAny_selection_receipt_memo = << >>
+/\ receipt_bugTakeAny_selection_receipt_guard = TRUE
 /\ receipt_bugTakeAny_selection_receipt_ident = << >>
 /\ receipt_bugTakeAny_selection_receipt_g = [committed |-> {}, bound |-> << >>, rbBad |-> FALSE, badSel |-> FALSE]
 /\ receipt_bugTakeAny_selection_receipt_intents = <<1>>
@@ -34,14 +52,14 @@ State 2: <receipt_bugTakeAny_selection_receipt_step line 1913, col 3 to line 195
 /\ receipt_bugTakeAny_selection_receipt_conn = <<"opened">>
 /\ receipt_bugTakeAny_selection_receipt_next_cookie = 2
 
-State 3: <receipt_bugTakeAny_selection_receipt_step line 1913, col 3 to line 1955, col 58 of module receipt_bugTakeAny>
+State 4: <receipt_bugTakeAny_selection_receipt_step line 1913, col 3 to line 1955, col 58 of module receipt_bugTakeAny>
 /\ receipt_bugTakeAny_selection_receipt_resv = << >>
 /\ receipt_bugTakeAny_selection_receipt_ckey = <<1, 1>>
-/\ receipt_bugTakeAny_selection_receipt_upd = 0
-/\ receipt_bugTakeAny_selection_receipt_infl = [on |-> FALSE, key |-> 0, ents |-> << >>, assoc |-> << >>, fresh_addrs |-> {}, prior |-> << >>, identBefore |-> << >>, committed |-> FALSE]
+/\ receipt_bugTakeAny_selection_receipt_upd = 1
+/\ receipt_bugTakeAny_selection_receipt_infl = [on |-> TRUE, key |-> 1, ents |-> << >>, assoc |-> << >>, fresh_addrs |-> {}, prior |-> << >>, identBefore |-> << >>, committed |-> FALSE]
 /\ receipt_bugTakeAny_selection_receipt_outer = << >>
 /\ receipt_bugTakeAny_selection_receipt_memo = << >>
-/\ receipt_bugTakeAny_selection_receipt_guard = FALSE
+/\ receipt_bugTakeAny_selection_receipt_guard = TRUE
 /\ receipt_bugTakeAny_selection_receipt_ident = << >>
 /\ receipt_bugTakeAny_selection_receipt_g = [committed |-> {}, bound |-> << >>, rbBad |-> FALSE, badSel |-> FALSE]
 /\ receipt_bugTakeAny_selection_receipt_intents = <<1, 1>>
@@ -52,14 +70,14 @@ State 3: <receipt_bugTakeAny_selection_receipt_step line 1913, col 3 to line 195
 /\ receipt_bugTakeAny_selection_receipt_conn = <<"opened", "opened">>
 /\ receipt_bugTakeAny_selection_receipt_next_cookie = 3
 
-State 4: <receipt_bugTakeAny_selection_receipt_step line 1913, col 3 to line 1955, col 58 of module receipt_bugTakeAny>
+State 5: <receipt_bugTakeAny_selection_receipt_step line 1913, col 3 to line 1955, col 58 of module receipt_bugTakeAny>
 /\ receipt_bugTakeAny_selection_receipt_resv = << >>
 /\ receipt_bugTakeAny_selection_receipt_ckey = <<1, 1>>
-/\ receipt_bugTakeAny_selection_receipt_upd = 0
-/\ receipt_bugTakeAny_selection_receipt_infl = [on |-> FALSE, key |-> 0, ents |-> << >>, assoc |-> << >>, fresh_addrs |-> {}, prior |-> << >>, identBefore |-> << >>, committed |-> FALSE]
+/\ receipt_bugTakeAny_selection_receipt_upd = 1
+/\ receipt_bugTakeAny_selection_receipt_infl = [on |-> TRUE, key |-> 1, ents |-> << >>, assoc |-> << >>, fresh_addrs |-> {}, prior |-> << >>, identBefore |-> << >>, committed |-> FALSE]
 /\ receipt_bugTakeAny_selection_receipt_outer = << >>
 /\ receipt_bugTakeAny_selection_receipt_memo = << >>
-/\ receipt_bugTakeAny_selection_receipt_guard = FALSE
+/\ receipt_bugTakeAny_selection_receipt_guard = TRUE
 /\ receipt_bugTakeAny_selection_receipt_ident = << >>
 /\ receipt_bugTakeAny_selection_receipt_g = [committed |-> {}, bound |-> << >>, rbBad |-> FALSE, badSel |-> FALSE]
 /\ receipt_bugTakeAny_selection_receipt_intents = <<1, 1>>
@@ -70,14 +88,14 @@ State 4: <receipt_bugTakeAny_selection_receipt_step line 1913, col 3 to line 195
 /\ receipt_bugTakeAny_selection_receipt_conn = <<"connected", "opened">>
 /\ receipt_bugTakeAny_selection_receipt_next_cookie = 3
 
-State 5: <receipt_bugTakeAny_selection_receipt_step line 1913, col 3 to line 1955, col 58 of module receipt_bugTakeAny>
+State 6: <receipt_bugTakeAny_selection_receipt_step line 1913, col 3 to line 1955, col 58 of module receipt_bugTakeAny>
 /\ receipt_bugTakeAny_selection_receipt_resv = << >>
 /\ receipt_bugTakeAny_selection_receipt_ckey = <<1, 1>>
-/\ receipt_bugTakeAny_selection_receipt_upd = 0
-/\ receipt_bugTakeAny_selection_receipt_infl = [on |-> FALSE, key |-> 0, ents |-> << >>, assoc |-> << >>, fresh_addrs |-> {}, prior |-> << >>, identBefore |-> << >>, committed |-> FALSE]
+/\ receipt_bugTakeAny_selection_receipt_upd = 1
+/\ receipt_bugTakeAny_selection_receipt_infl = [on |-> TRUE, key |-> 1, ents |-> << >>, assoc |-> << >>, fresh_addrs |-> {}, prior |-> << >>, identBefore |-> << >>, committed |-> FALSE]
 /\ receipt_bugTakeAny_selection_receipt_outer = << >>
 /\ receipt_bugTakeAny_selection_receipt_memo = << >>
-/\ receipt_bugTakeAny_selection_receipt_guard = FALSE
+/\ receipt_bugTakeAny_selection_receipt_guard = TRUE
 /\ receipt_bugTakeAny_selection_receipt_ident = << >>
 /\ receipt_bugTakeAny_selection_receipt_g = [committed |-> {}, bound |-> << >>, rbBad |-> FALSE, badSel |-> FALSE]
 /\ receipt_bugTakeAny_selection_receipt_intents = <<1, 1>>
@@ -88,14 +106,14 @@ State 5: <receipt_bugTakeAny_selection_receipt_step line 1913, col 3 to line 195
 /\ receipt_bugTakeAny_selection_receipt_conn = <<"connected", "connected">>
 /\ receipt_bugTakeAny_selection_receipt_next_cookie = 3
 
-State 6: <receipt_bugTakeAny_selection_receipt_step line 1913, col 3 to line 1955, col 58 of module receipt_bugTakeAny>
+State 7: <receipt_bugTakeAny_selection_receipt_step line 1913, col 3 to line 1955, col 58 of module receipt_bugTakeAny>
 /\ receipt_bugTakeAny_selection_receipt_resv = << >>
 /\ receipt_bugTakeAny_selection_receipt_ckey = <<1, 1>>
-/\ receipt_bugTakeAny_selection_receipt_upd = 0
-/\ receipt_bugTakeAny_selection_receipt_infl = [on |-> FALSE, key |-> 0, ents |-> << >>, assoc |-> << >>, fresh_addrs |-> {}, prior |-> << >>, identBefore |-> << >>, committed |-> FALSE]
+/\ receipt_bugTakeAny_selection_receipt_upd = 1
+/\ receipt_bugTakeAny_selection_receipt_infl = [on |-> TRUE, key |-> 1, ents |-> << >>, assoc |-> << >>, fresh_addrs |-> {}, prior |-> << >>, identBefore |-> << >>, committed |-> FALSE]
 /\ receipt_bugTakeAny_selection_receipt_outer = << >>
 /\ receipt_bugTakeAny_selection_receipt_memo = << >>
-/\ receipt_bugTakeAny_selection_receipt_guard = FALSE
+/\ receipt_bugTakeAny_selection_receipt_guard = TRUE
 /\ receipt_bugTakeAny_selection_receipt_ident = << >>
 /\ receipt_bugTakeAny_selection_receipt_g = [committed |-> {}, bound |-> << >>, rbBad |-> FALSE, badSel |-> FALSE]
 /\ receipt_bugTakeAny_selection_receipt_intents = <<1, 1>>

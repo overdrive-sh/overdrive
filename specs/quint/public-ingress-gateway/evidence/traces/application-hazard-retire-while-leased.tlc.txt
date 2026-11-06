@@ -6,22 +6,26 @@ State 2: <app_bugRetireWhileLeased_gateway_application_route_declare line 119, c
 /\ app_bugRetireWhileLeased_gateway_application_st = [route_on |-> TRUE, route_gen |-> 1, staged |-> {}, current |-> {}, draining |-> {}, inflight |-> {}, next_gid |-> 1, leases |-> <<0, 0, 0, 0>>]
 /\ app_bugRetireWhileLeased_gateway_application_conf_step = [init |-> [tag |-> "UNIT"]]
 
-State 3: <app_bugRetireWhileLeased_gateway_application_stage line 155, col 3 to line 182, col 42 of module app_bugRetireWhileLeased>
-/\ app_bugRetireWhileLeased_gateway_application_st = [route_on |-> TRUE, route_gen |-> 1, staged |-> {[gid |-> 1, rg |-> 1]}, current |-> {}, draining |-> {}, inflight |-> {1}, next_gid |-> 2, leases |-> <<0, 0, 0, 0>>]
+State 3: <app_bugRetireWhileLeased_gateway_application_route_declare line 119, col 3 to line 128, col 50 of module app_bugRetireWhileLeased>
+/\ app_bugRetireWhileLeased_gateway_application_st = [route_on |-> TRUE, route_gen |-> 2, staged |-> {}, current |-> {}, draining |-> {}, inflight |-> {}, next_gid |-> 1, leases |-> <<0, 0, 0, 0>>]
 /\ app_bugRetireWhileLeased_gateway_application_conf_step = [init |-> [tag |-> "UNIT"]]
 
-State 4: <app_bugRetireWhileLeased_gateway_application_probe_result line 221, col 3 to line 254, col 67 of module app_bugRetireWhileLeased>
-/\ app_bugRetireWhileLeased_gateway_application_st = [route_on |-> TRUE, route_gen |-> 1, staged |-> {}, current |-> {[gid |-> 1, rg |-> 1]}, draining |-> {}, inflight |-> {}, next_gid |-> 2, leases |-> <<0, 0, 0, 0>>]
+State 4: <app_bugRetireWhileLeased_gateway_application_stage line 155, col 3 to line 182, col 42 of module app_bugRetireWhileLeased>
+/\ app_bugRetireWhileLeased_gateway_application_st = [route_on |-> TRUE, route_gen |-> 2, staged |-> {[gid |-> 1, rg |-> 2]}, current |-> {}, draining |-> {}, inflight |-> {1}, next_gid |-> 2, leases |-> <<0, 0, 0, 0>>]
 /\ app_bugRetireWhileLeased_gateway_application_conf_step = [init |-> [tag |-> "UNIT"]]
 
-State 5: <app_bugRetireWhileLeased_gateway_application_open_connection line 286, col 3 to line 310, col 52 of module app_bugRetireWhileLeased>
-/\ app_bugRetireWhileLeased_gateway_application_st = [route_on |-> TRUE, route_gen |-> 1, staged |-> {}, current |-> {[gid |-> 1, rg |-> 1]}, draining |-> {}, inflight |-> {}, next_gid |-> 2, leases |-> <<1, 0, 0, 0>>]
+State 5: <app_bugRetireWhileLeased_gateway_application_probe_result line 221, col 3 to line 254, col 67 of module app_bugRetireWhileLeased>
+/\ app_bugRetireWhileLeased_gateway_application_st = [route_on |-> TRUE, route_gen |-> 2, staged |-> {}, current |-> {[gid |-> 1, rg |-> 2]}, draining |-> {}, inflight |-> {}, next_gid |-> 2, leases |-> <<0, 0, 0, 0>>]
 /\ app_bugRetireWhileLeased_gateway_application_conf_step = [init |-> [tag |-> "UNIT"]]
 
-State 6: <app_bugRetireWhileLeased_gateway_application_route_withdraw line 134, col 3 to line 149, col 51 of module app_bugRetireWhileLeased>
-/\ app_bugRetireWhileLeased_gateway_application_st = [route_on |-> FALSE, route_gen |-> 1, staged |-> {}, current |-> {}, draining |-> {[gid |-> 1, rg |-> 1]}, inflight |-> {}, next_gid |-> 2, leases |-> <<1, 0, 0, 0>>]
+State 6: <app_bugRetireWhileLeased_gateway_application_open_connection line 286, col 3 to line 310, col 52 of module app_bugRetireWhileLeased>
+/\ app_bugRetireWhileLeased_gateway_application_st = [route_on |-> TRUE, route_gen |-> 2, staged |-> {}, current |-> {[gid |-> 1, rg |-> 2]}, draining |-> {}, inflight |-> {}, next_gid |-> 2, leases |-> <<1, 0, 0, 0>>]
 /\ app_bugRetireWhileLeased_gateway_application_conf_step = [init |-> [tag |-> "UNIT"]]
 
-State 7: <app_bugRetireWhileLeased_gateway_application_retire line 260, col 3 to line 280, col 63 of module app_bugRetireWhileLeased>
-/\ app_bugRetireWhileLeased_gateway_application_st = [route_on |-> FALSE, route_gen |-> 1, staged |-> {}, current |-> {}, draining |-> {}, inflight |-> {}, next_gid |-> 2, leases |-> <<1, 0, 0, 0>>]
+State 7: <app_bugRetireWhileLeased_gateway_application_route_withdraw line 134, col 3 to line 149, col 51 of module app_bugRetireWhileLeased>
+/\ app_bugRetireWhileLeased_gateway_application_st = [route_on |-> FALSE, route_gen |-> 2, staged |-> {}, current |-> {}, draining |-> {[gid |-> 1, rg |-> 2]}, inflight |-> {}, next_gid |-> 2, leases |-> <<1, 0, 0, 0>>]
+/\ app_bugRetireWhileLeased_gateway_application_conf_step = [init |-> [tag |-> "UNIT"]]
+
+State 8: <app_bugRetireWhileLeased_gateway_application_retire line 260, col 3 to line 280, col 63 of module app_bugRetireWhileLeased>
+/\ app_bugRetireWhileLeased_gateway_application_st = [route_on |-> FALSE, route_gen |-> 2, staged |-> {}, current |-> {}, draining |-> {}, inflight |-> {}, next_gid |-> 2, leases |-> <<1, 0, 0, 0>>]
 /\ app_bugRetireWhileLeased_gateway_application_conf_step = [init |-> [tag |-> "UNIT"]]

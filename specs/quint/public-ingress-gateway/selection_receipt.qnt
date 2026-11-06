@@ -477,13 +477,14 @@ module selection_receipt {
     .expect(conn.get(1) == "identified" and ident.get(taken.get(1).sel) == 2 and Safety)
 
   // both violated (endpoint held by another Service AND re-leased to another allocation): the identity conflict is
-  // the reported outcome; the R-59 rejection is not enabled for that input
+  // the reported outcome (update_rejected). The run ends on that successful step so it is conformance-replayable;
+  // that the R-59 rejection is not taken for this input is the `not(conflict)` guard of update_rejected_rnat, which
+  // no replayable run can assert as a failing step (a terminal .fail() leaves no decodable final state).
   run identity_conflict_precedes_reverse_nat = init
     .then(update_apply(1, 1))
     .then(update_rejected(2, 4))
     .expect(outer == Map(1 -> Map(1 -> 1)) and ident == Map(1 -> 1) and memo == Map(1 -> 1) and next_bid == 2
             and upd == 1 and Safety)
-    .then(update_rejected_rnat(2, 4).fail())
 
   // restart: the intent and receipt maps are not pinned; the new instance holds nothing
   run restart_destroys_receipts = init

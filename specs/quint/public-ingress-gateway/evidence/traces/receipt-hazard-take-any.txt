@@ -1,4 +1,4 @@
-# receipt-hazard-take-any: counterexample, 6 state(s) (from the TLC trace)
+# receipt-hazard-take-any: counterexample, 7 state(s) (from the TLC trace)
 
 State 1
   resv = << >>
@@ -19,26 +19,31 @@ State 1
   next_cookie = 1
 
 State 2 [step]
+  upd = 1
+  infl = [on |-> TRUE, key |-> 1, ents |-> << >>, assoc |-> << >>, fresh_addrs |-> {}, prior |-> << >>, identBefore |-> << >>, committed |-> FALSE]
+  guard = TRUE
+
+State 3 [step]
   ckey = <<1>>
   intents = <<1>>
   conn = <<"opened">>
   next_cookie = 2
 
-State 3 [step]
+State 4 [step]
   ckey = <<1, 1>>
   intents = <<1, 1>>
   conn = <<"opened", "opened">>
   next_cookie = 3
 
-State 4 [step]
+State 5 [step]
   receipts = <<[key |-> 1, sel |-> 0]>>
   conn = <<"connected", "opened">>
 
-State 5 [step]
+State 6 [step]
   receipts = <<[key |-> 1, sel |-> 0], [key |-> 1, sel |-> 0]>>
   conn = <<"connected", "connected">>
 
-State 6 [step]
+State 7 [step]
   taken = <<[key |-> 1, sel |-> 0, rc |-> 2]>>
   receipts = <<[key |-> 1, sel |-> 0]>>
   conn = <<"taken", "connected">>
