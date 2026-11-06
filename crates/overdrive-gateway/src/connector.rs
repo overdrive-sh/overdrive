@@ -93,7 +93,11 @@ impl GatewayUpstreamConnector {
             deadline.min(self.clock.now() + self.limits.upstream_connect_deadline());
         let stream = tokio::select! {
             connected = socket.connect(address) => {
-                connected.map_err(|_| GatewayUpstreamConnectError::Connect)?
+                let Ok(stream) = connected else {
+                    self.release_intent(&intent, reservation, ReceiptState::Unconsumed);
+                    return Err(GatewayUpstreamConnectError::Connect);
+                };
+                stream
             }
             () = self.clock.sleep(connect_deadline.saturating_duration_since(self.clock.now())) => {
                 self.release_intent(&intent, reservation, ReceiptState::Unconsumed);
@@ -134,8 +138,11 @@ impl GatewayUpstreamConnector {
             }
         };
         emit_selected_receipt(operation, &intent, backend_id, &peer);
-        let connected: OwnedFd =
-            stream.into_std().map_err(|_| GatewayUpstreamConnectError::Connect)?.into();
+        let Ok(std_stream) = stream.into_std() else {
+            self.release_intent(&intent, reservation, ReceiptState::Consumed);
+            return Err(GatewayUpstreamConnectError::Connect);
+        };
+        let connected: OwnedFd = std_stream.into();
         let upstream = match self.client_mtls.authenticate(connected, peer, deadline).await {
             Ok(upstream) => upstream,
             Err(error) => {
