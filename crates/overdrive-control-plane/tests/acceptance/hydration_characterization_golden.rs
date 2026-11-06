@@ -248,7 +248,13 @@ async fn write_running_alloc(state: &AppState, wid: &WorkloadId, aid: &str, kind
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(
             FIXED_STARTED_AT_SECS,
         ))),
-        workload_addr: None,
+        // A Running Service row carries its workload address, as the production
+        // Running write does (ADR-0276); the Job row carries none here.
+        workload_addr: (kind == WorkloadKind::Service).then(|| {
+            std::net::Ipv4Addr::from(
+                u32::from(overdrive_core::guest_transport::GUEST_NODE_PREFIX.network()) + 2,
+            )
+        }),
         last_terminated: None,
         restart_count: 0,
     };

@@ -114,6 +114,8 @@ pub mod evaluators;
 // never a torn state. Mirrors the production `EbpfDataplane`'s
 // atomic HASH_OF_MAPS outer-map swap.
 pub mod backend_set_swap_atomic;
+// no-host-ip-backend-fallback (ADR-0276): no BackendKey is shared by two Services.
+pub mod service_backend_keys_disjoint;
 // phase-2-xdp-service-map Slice 04 (US-04; S-2.2-13 sibling).
 // The `MaglevDistributionEven` invariant pins the steady-state
 // distribution property of `maglev::generate` — under equal
@@ -696,6 +698,13 @@ pub enum Invariant {
     /// lives in `crate::invariants::vm_reclamation`. Closes S-VM-89.
     EndingInFlightIsNeverReclaimed,
 
+    /// no-host-ip-backend-fallback (ADR-0276) — always invariant. No
+    /// `BackendKey` (backend ip, port, proto) appears in the backend sets of
+    /// two different Services' service-map entries: a colliding install is
+    /// refused and every accepted state has pairwise-disjoint key sets. The
+    /// evaluator body lives in `crate::invariants::service_backend_keys_disjoint`.
+    ServiceBackendKeysAreDisjoint,
+
     /// public-ingress-gateway (ADR-0222) — always invariant (safety). Staged
     /// precedes promotion, the displaced Current drains while a retained
     /// connection is open, a stale connect-probe completion never promotes or
@@ -860,6 +869,9 @@ impl Invariant {
         Self::VmReclamationIdempotentSteadyState,
         Self::VmReclamationConverges,
         Self::EndingInFlightIsNeverReclaimed,
+        // no-host-ip-backend-fallback (ADR-0276). The evaluator body lives in
+        // `crate::invariants::service_backend_keys_disjoint`.
+        Self::ServiceBackendKeysAreDisjoint,
     ];
 
     /// The canonical kebab-case spelling of this invariant, as a static
@@ -927,6 +939,7 @@ impl Invariant {
             Self::VmReclamationIdempotentSteadyState => "vm-reclamation-idempotent-steady-state",
             Self::VmReclamationConverges => "vm-reclamation-converges",
             Self::EndingInFlightIsNeverReclaimed => "ending-in-flight-is-never-reclaimed",
+            Self::ServiceBackendKeysAreDisjoint => "service-backend-keys-are-disjoint",
             // public-ingress-gateway (ADR-0222); pending, outside `ALL`.
             Self::GatewayApplicationGenerationLifecycleIsSafe => {
                 "gateway-application-generation-lifecycle-is-safe"

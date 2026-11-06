@@ -153,8 +153,10 @@ async fn write_running_alloc(state: &AppState, w: &WorkloadId, a: &AllocationId)
         kind: WorkloadKind::Service,
         listeners: Vec::new(),
         started_at: Some(UnixInstant::from_clock(&*state.clock)),
-        // Host-netns fixture — no canonical workload address (AllocStatusRowV2 additive field, GH #241).
-        workload_addr: None,
+        // A Running Service row carries its workload address (ADR-0276).
+        workload_addr: Some(std::net::Ipv4Addr::from(
+            u32::from(overdrive_core::guest_transport::GUEST_NODE_PREFIX.network()) + 2,
+        )),
         last_terminated: None,
         restart_count: 0,
     };

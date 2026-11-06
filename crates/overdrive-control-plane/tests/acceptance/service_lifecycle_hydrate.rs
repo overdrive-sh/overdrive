@@ -185,6 +185,17 @@ async fn persist_service_intent(state: &AppState, svc: &Service) {
         .expect("put workload kind");
 }
 
+/// The fixture workload address of a Running row, inside the guest prefix the
+/// guest-network pool leases from (never the node address).
+const WORKLOAD_ADDR_OFFSET: u32 = 2;
+
+/// The `offset`-th address of the guest node prefix.
+fn guest_addr(offset: u32) -> std::net::Ipv4Addr {
+    std::net::Ipv4Addr::from(
+        u32::from(overdrive_core::guest_transport::GUEST_NODE_PREFIX.network()) + offset,
+    )
+}
+
 fn make_alloc_status_row(
     wid: &WorkloadId,
     aid: &AllocationId,
@@ -205,8 +216,9 @@ fn make_alloc_status_row(
         kind: WorkloadKind::Service,
         listeners: Vec::new(),
         started_at,
-        // Host-netns fixture — no canonical workload address (AllocStatusRowV2 additive field, GH #241).
-        workload_addr: None,
+        // A Running row carries its workload address, as the production Running
+        // write does (ADR-0276); a non-Running row legitimately carries none.
+        workload_addr: (state == AllocState::Running).then(|| guest_addr(WORKLOAD_ADDR_OFFSET)),
         last_terminated: None,
         restart_count: 0,
     }
@@ -838,4 +850,286 @@ async fn gap_1_smoke_inferred_probe_carries_inferred_flag_through_actual() {
     let fact = actual.allocs.get(&aid).expect("fact present");
     assert!(fact.inferred, "inferred=true probe must surface inferred=true on fact");
     assert_eq!(fact.mechanic_summary, "tcp 0.0.0.0:8080");
+}
+
+// ===========================================================================
+// ADR-0276 — a Service backend is the Running allocation's workload address,
+// never the node address.
+//
+// Driven through the production hydration (`hydrate_actual_for_test` over the
+// ObservationStore port and the VIP allocator memo) and the production
+// reconcile; the oracle is the published `ServiceBackendRow`.
+// ===========================================================================
+
+mod backend_address {
+    use super::*;
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+
+    use overdrive_control_plane::reconciler_runtime::ConvergenceError;
+    use overdrive_core::dataplane::backend_key::{BackendKey, Proto};
+    use overdrive_core::id::ServiceId;
+    use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
+    use overdrive_core::traits::observation_store::ServiceBackendRow;
+    use overdrive_reconcilers::service_lifecycle::ServiceLifecycleView;
+
+    const LISTENER_PORT: u16 = 8080;
+
+    /// Allocate the Service's VIP through the production allocator path and
+    /// return the `ServiceId` of its single TCP listener.
+    async fn allocate_service_id(state: &AppState, svc: &Service) -> ServiceId {
+        let intent = WorkloadIntent::Service(svc.clone());
+        let digest = intent.spec_digest().expect("spec_digest");
+        let bytes: [u8; 32] = *digest.as_bytes();
+        let vip = {
+            let mut guard = state.allocator.lock().await;
+            guard.allocate(bytes).await.expect("allocate vip")
+        };
+        let port = std::num::NonZeroU16::new(LISTENER_PORT).expect("listener port");
+        ServiceId::derive(&vip, port, Proto::Tcp, "service-map")
+    }
+
+    /// A Service with persisted intent and an allocated VIP.
+    async fn deploy_service(state: &AppState, name: &str) -> (WorkloadId, ServiceId) {
+        let wid = workload_id(name);
+        let svc = build_service_spec(&wid, vec![]);
+        persist_service_intent(state, &svc).await;
+        let service_id = allocate_service_id(state, &svc).await;
+        (wid, service_id)
+    }
+
+    /// A Running row of `wid` whose observed workload address is `addr`.
+    fn running_row(wid: &WorkloadId, alloc: &str, addr: Ipv4Addr, counter: u64) -> AllocStatusRow {
+        let started = UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000));
+        AllocStatusRow {
+            workload_addr: Some(addr),
+            ..make_alloc_status_row(
+                wid,
+                &alloc_id(alloc),
+                AllocState::Running,
+                Some(started),
+                counter,
+            )
+        }
+    }
+
+    fn tick() -> TickContext {
+        let now = Instant::now();
+        TickContext {
+            now,
+            now_unix: UnixInstant::from_unix_duration(Duration::from_secs(1_700_999_999)),
+            tick: 0,
+            deadline: now + Duration::from_secs(1),
+        }
+    }
+
+    /// Hydrate desired and actual for `wid` and reconcile once; return every
+    /// `ServiceBackendRow` the reconcile publishes.
+    async fn publish_backend_rows(state: &AppState, wid: &WorkloadId) -> Vec<ServiceBackendRow> {
+        let reconciler = service_lifecycle_reconciler();
+        let target = target_for(wid);
+        let desired = extract_lifecycle(
+            hydrate_desired_for_test(&reconciler, &target, state).await.expect("hydrate_desired"),
+        );
+        let actual = extract_lifecycle(
+            hydrate_actual_for_test(&reconciler, &target, state).await.expect("hydrate_actual"),
+        );
+        let (actions, _) = ServiceLifecycleReconciler::new().reconcile(
+            &desired,
+            &actual,
+            &ServiceLifecycleView::default(),
+            &tick(),
+        );
+        actions
+            .into_iter()
+            .filter_map(|action| match action {
+                Action::WriteServiceBackendRow { row, .. } => Some(row),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn keys(row: &ServiceBackendRow) -> std::collections::BTreeSet<BackendKey> {
+        row.backends
+            .iter()
+            .map(|backend| match backend.addr {
+                SocketAddr::V4(addr) => BackendKey::new(*addr.ip(), addr.port(), Proto::Tcp),
+                SocketAddr::V6(addr) => panic!("a Service backend is IPv4, got {addr}"),
+            })
+            .collect()
+    }
+
+    async fn new_state(tmp: &TempDir) -> AppState {
+        let obs = Arc::new(SimObservationStore::single_peer(node_id("local"), 0))
+            as Arc<dyn ObservationStore>;
+        build_app_state(tmp, obs).await
+    }
+
+    /// O1 — a Running allocation with its workload address is published as
+    /// the backend `address:listener_port`; the node address (the sim
+    /// composer's 127.0.0.1) never appears.
+    /// CONTRACT_SHAPE: bounded-change.
+    #[tokio::test]
+    async fn a_running_allocation_is_published_as_a_backend_at_its_workload_address() {
+        let tmp = TempDir::new().expect("tmpdir");
+        let state = new_state(&tmp).await;
+        let (wid, service_id) = deploy_service(&state, "svc-addr").await;
+        let addr = guest_addr(6);
+        write_alloc_status(&state, running_row(&wid, "svc-addr-0", addr, 1)).await;
+
+        let rows = publish_backend_rows(&state, &wid).await;
+
+        assert_eq!(rows.len(), 1, "one ServiceBackendRow for the one listener, got {rows:?}");
+        let row = &rows[0];
+        assert_eq!(row.service_id, service_id);
+        assert_eq!(
+            row.backends.iter().map(|b| b.addr).collect::<Vec<_>>(),
+            vec![SocketAddr::new(IpAddr::V4(addr), LISTENER_PORT)],
+            "the backend is the allocation's own workload address and the listener port",
+        );
+        assert!(
+            row.backends.iter().all(|b| b.addr.ip() != IpAddr::V4(Ipv4Addr::LOCALHOST)),
+            "no backend carries the node address",
+        );
+    }
+
+    /// T2 — two Services never share a backend endpoint: each Service's
+    /// backend row holds only its own allocations' endpoints and the two rows'
+    /// `BackendKey` sets are disjoint.
+    /// CONTRACT_SHAPE: bounded-change.
+    #[tokio::test]
+    async fn two_services_publish_only_their_own_allocations_and_disjoint_backend_keys() {
+        let tmp = TempDir::new().expect("tmpdir");
+        let state = new_state(&tmp).await;
+        let (wid_a, service_a) = deploy_service(&state, "svc-alpha").await;
+        let (wid_b, service_b) = deploy_service(&state, "svc-beta").await;
+        assert_ne!(service_a, service_b, "two Services have two ServiceIds");
+
+        let alpha = [guest_addr(2), guest_addr(3)];
+        let beta = [guest_addr(4), guest_addr(5)];
+        for (index, addr) in alpha.iter().enumerate() {
+            write_alloc_status(&state, running_row(&wid_a, &format!("svc-alpha-{index}"), *addr, 1))
+                .await;
+        }
+        for (index, addr) in beta.iter().enumerate() {
+            write_alloc_status(&state, running_row(&wid_b, &format!("svc-beta-{index}"), *addr, 1))
+                .await;
+        }
+
+        let row_a = publish_backend_rows(&state, &wid_a).await.pop().expect("alpha row");
+        let row_b = publish_backend_rows(&state, &wid_b).await.pop().expect("beta row");
+
+        let expected = |addrs: &[Ipv4Addr]| {
+            addrs
+                .iter()
+                .map(|addr| BackendKey::new(*addr, LISTENER_PORT, Proto::Tcp))
+                .collect::<std::collections::BTreeSet<_>>()
+        };
+        assert_eq!(row_a.service_id, service_a);
+        assert_eq!(row_b.service_id, service_b);
+        assert_eq!(keys(&row_a), expected(&alpha), "alpha publishes only its own allocations");
+        assert_eq!(keys(&row_b), expected(&beta), "beta publishes only its own allocations");
+        assert!(
+            keys(&row_a).is_disjoint(&keys(&row_b)),
+            "no BackendKey is in the backend sets of two Services",
+        );
+    }
+
+    /// O3 — a non-Running allocation hydrates whether or not it carries an
+    /// address, and is never published as a backend; a Running allocation
+    /// beside it still is.
+    /// CONTRACT_SHAPE: bounded-change.
+    #[tokio::test]
+    async fn non_running_allocations_without_an_address_hydrate_and_are_not_published() {
+        let states = [
+            AllocState::Pending,
+            AllocState::Draining,
+            AllocState::Suspended,
+            AllocState::Terminated,
+            AllocState::Failed,
+        ];
+        for (index, alloc_state) in states.into_iter().enumerate() {
+            let tmp = TempDir::new().expect("tmpdir");
+            let state = new_state(&tmp).await;
+            let (wid, _) = deploy_service(&state, "svc-idle").await;
+            let started = (alloc_state != AllocState::Pending)
+                .then(|| UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000)));
+            let idle = make_alloc_status_row(&wid, &alloc_id("svc-idle-0"), alloc_state, started, 1);
+            assert_eq!(idle.workload_addr, None, "{alloc_state:?} fixture carries no address");
+            write_alloc_status(&state, idle).await;
+            let live = guest_addr(7);
+            write_alloc_status(&state, running_row(&wid, "svc-idle-1", live, 2)).await;
+
+            let actual = extract_lifecycle(
+                hydrate_actual_for_test(
+                    &service_lifecycle_reconciler(),
+                    &target_for(&wid),
+                    &state,
+                )
+                .await
+                .unwrap_or_else(|e| panic!("{alloc_state:?} without an address must hydrate: {e}")),
+            );
+            assert!(
+                actual.allocs.contains_key(&alloc_id("svc-idle-0")),
+                "{alloc_state:?} allocation hydrates (case {index})",
+            );
+
+            let rows = publish_backend_rows(&state, &wid).await;
+            let row = rows.last().expect("a backend row is published");
+            assert_eq!(
+                row.backends.iter().map(|b| b.addr).collect::<Vec<_>>(),
+                vec![SocketAddr::new(IpAddr::V4(live), LISTENER_PORT)],
+                "{alloc_state:?} allocation is not a backend; the Running one is",
+            );
+        }
+    }
+
+    /// O2 — a Running allocation without a workload address is refused with a
+    /// typed hydration failure naming it; it is neither defaulted to the node
+    /// address nor skipped, and no backend row is written for the Service. The
+    /// valid Running allocation of the same Service does not rescue the tick.
+    /// CONTRACT_SHAPE: bounded-change.
+    #[tokio::test]
+    #[ignore = "pending DELIVER no-host-ip-backend-fallback"]
+    async fn a_running_allocation_without_a_workload_address_is_refused_not_defaulted() {
+        let tmp = TempDir::new().expect("tmpdir");
+        let obs = Arc::new(SimObservationStore::single_peer(node_id("local"), 0))
+            as Arc<dyn ObservationStore>;
+        let state = build_app_state(&tmp, Arc::clone(&obs)).await;
+        let (wid, service_id) = deploy_service(&state, "svc-refuse").await;
+        write_alloc_status(&state, running_row(&wid, "svc-refuse-good", guest_addr(2), 1)).await;
+        let bad = AllocStatusRow {
+            workload_addr: None,
+            ..running_row(&wid, "svc-refuse-bad", guest_addr(3), 2)
+        };
+        write_alloc_status(&state, bad).await;
+
+        let refused = hydrate_actual_for_test(
+            &service_lifecycle_reconciler(),
+            &target_for(&wid),
+            &state,
+        )
+        .await
+        .expect_err("a Running allocation without an address is refused");
+
+        let ConvergenceError::Hydrate(cause) = &refused else {
+            panic!("the refusal is a typed hydration failure, got {refused:?}");
+        };
+        let message = cause.to_string();
+        assert!(
+            message.contains("svc-refuse-bad"),
+            "the refusal names the offending allocation: {message}",
+        );
+        assert!(
+            message.contains("workload address"),
+            "the refusal states the Running => workload address contract: {message}",
+        );
+        assert!(
+            !message.contains("svc-refuse-good"),
+            "the refusal names only the offending allocation: {message}",
+        );
+        assert!(
+            obs.service_backends_rows(&service_id).await.expect("read rows").is_empty(),
+            "no ServiceBackendRow is written for the Service",
+        );
+    }
 }

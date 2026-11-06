@@ -171,6 +171,8 @@ const EXPECTED_INVARIANTS: &[&str] = &[
     "vm-reclamation-idempotent-steady-state",
     "vm-reclamation-converges",
     "ending-in-flight-is-never-reclaimed",
+    // no-host-ip-backend-fallback (ADR-0276) — no BackendKey is shared by two Services.
+    "service-backend-keys-are-disjoint",
 ];
 
 // -----------------------------------------------------------------------------

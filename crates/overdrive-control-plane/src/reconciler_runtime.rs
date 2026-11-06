@@ -2088,6 +2088,15 @@ mod tests {
     // projection owner.
     // -----------------------------------------------------------------
 
+    /// The observed workload address a seeded Running Service row carries: an
+    /// address inside the guest prefix the guest-network pool leases from,
+    /// never the node address (ADR-0276).
+    fn running_fixture_addr(offset: u32) -> std::net::Ipv4Addr {
+        std::net::Ipv4Addr::from(
+            u32::from(overdrive_core::guest_transport::GUEST_NODE_PREFIX.network()) + offset,
+        )
+    }
+
     mod service_backend_hydrate {
         use super::*;
         use std::num::NonZeroU16;
@@ -2240,12 +2249,19 @@ mod tests {
             alloc_state: AllocState,
             counter: u64,
         ) {
-            write_alloc_status_with_addr(state, alloc, alloc_state, counter, None).await;
+            write_alloc_status_with_addr(
+                state,
+                alloc,
+                alloc_state,
+                counter,
+                Some(super::running_fixture_addr(2)),
+            )
+            .await;
         }
 
-        /// Existing hydration-boundary fixture for canonical mesh addresses
-        /// and the host-address fallback; backend eligibility is covered by
-        /// the production-owner composition in the BE acceptance suite.
+        /// Hydration-boundary fixture for a row's observed workload address;
+        /// backend eligibility is covered by the production-owner composition
+        /// in the BE acceptance suite.
         async fn write_alloc_status_with_addr(
             state: &AppState,
             alloc: &str,
@@ -2590,17 +2606,24 @@ mod tests {
             );
         }
 
-        /// The authoritative owner's allocation hydration retains canonical
-        /// workload IP selection and the host-IP fallback (ADR-0101 D1).
+        /// A Service's published backend is the Running allocation's own
+        /// observed workload address (ADR-0101 D1, ADR-0276): two Running
+        /// allocations hydrate and reconcile into one backend row holding
+        /// exactly their two addresses at the listener port, and the node
+        /// address (`LOCALHOST`, the sim composer's) is not in it.
         /// CONTRACT_SHAPE: bounded-change.
         #[tokio::test]
-        async fn service_lifecycle_advertises_workload_addr_not_host_ipv4() {
+        async fn service_lifecycle_publishes_each_running_allocations_workload_address() {
+            use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
+            use overdrive_reconcilers::service_lifecycle::ServiceLifecycleView;
+
             let tmp = TempDir::new().expect("tmpdir");
             let intent = service_intent(&[8080]);
-            let state = build_state(&tmp, Some(intent)).await;
+            let state = build_state(&tmp, Some(intent.clone())).await;
+            let vip = allocate_vip(&state, &intent).await;
 
             let mesh_addr = std::net::Ipv4Addr::new(10, 99, 0, 6);
-            // Mesh (Path-A) alloc — carries the canonical workload_addr.
+            let guest_addr = super::running_fixture_addr(3);
             write_alloc_status_with_addr(
                 &state,
                 "payments-mesh",
@@ -2609,39 +2632,71 @@ mod tests {
                 Some(mesh_addr),
             )
             .await;
-            // Host-netns alloc — no canonical workload address.
-            write_alloc_status_with_addr(&state, "payments-host", AllocState::Running, 2, None)
-                .await;
-
-            let result = crate::reconciler_runtime::hydrate_actual_for_test(
-                &service_lifecycle_reconciler(),
-                &target(),
+            write_alloc_status_with_addr(
                 &state,
+                "payments-guest",
+                AllocState::Running,
+                2,
+                Some(guest_addr),
             )
-            .await
-            .expect("hydrate_actual ok");
+            .await;
 
-            let AnyState::ServiceLifecycle(s) = result else {
-                panic!("expected AnyState::ServiceLifecycle variant");
+            let reconciler = service_lifecycle_reconciler();
+            let hydrated = |hydrated: AnyState| match hydrated {
+                AnyState::ServiceLifecycle(s) => s,
+                other => panic!("expected AnyState::ServiceLifecycle variant, got {other:?}"),
             };
-
-            let mesh = s
-                .allocs
-                .get(&AllocationId::new("payments-mesh").expect("alloc id"))
-                .expect("payments-mesh fact present");
-            assert_eq!(
-                mesh.backend_ip, mesh_addr,
-                "a mesh allocation must retain its canonical workload IP, not the host IP",
+            let desired = hydrated(
+                crate::reconciler_runtime::hydrate_desired_for_test(
+                    &reconciler,
+                    &target(),
+                    &state,
+                )
+                .await
+                .expect("hydrate_desired ok"),
+            );
+            let actual = hydrated(
+                crate::reconciler_runtime::hydrate_actual_for_test(
+                    &reconciler,
+                    &target(),
+                    &state,
+                )
+                .await
+                .expect("hydrate_actual ok"),
+            );
+            let now = std::time::Instant::now();
+            let tick = TickContext {
+                now,
+                now_unix: UnixInstant::from_unix_duration(Duration::from_secs(1_700_999_999)),
+                tick: 0,
+                deadline: now + Duration::from_secs(1),
+            };
+            let (actions, _) = ServiceLifecycleReconciler::new().reconcile(
+                &desired,
+                &actual,
+                &ServiceLifecycleView::default(),
+                &tick,
             );
 
-            let host = s
-                .allocs
-                .get(&AllocationId::new("payments-host").expect("alloc id"))
-                .expect("payments-host fact present");
+            let rows: Vec<_> = actions
+                .into_iter()
+                .filter_map(|action| match action {
+                    Action::WriteServiceBackendRow { row, .. } => Some(row),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(rows.len(), 1, "one backend row for the one listener, got {rows:?}");
+            assert_eq!(rows[0].vip, vip.try_as_ipv4().expect("ipv4 vip"));
+            let published: std::collections::BTreeSet<_> =
+                rows[0].backends.iter().map(|backend| backend.addr).collect();
+            let expected: std::collections::BTreeSet<_> = [mesh_addr, guest_addr]
+                .into_iter()
+                .map(|addr| std::net::SocketAddr::new(std::net::IpAddr::V4(addr), 8080))
+                .collect();
             assert_eq!(
-                host.backend_ip,
-                std::net::Ipv4Addr::LOCALHOST,
-                "a host-netns allocation without a workload address must retain the host-IP fallback",
+                published, expected,
+                "each Running allocation is published at its own workload address, \
+                 never the node address",
             );
         }
     }
@@ -2869,7 +2924,7 @@ mod tests {
                 started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(
                     1_700_000_000,
                 ))),
-                workload_addr: None,
+                workload_addr: Some(super::running_fixture_addr(2)),
                 last_terminated: None,
                 restart_count: 0,
             };

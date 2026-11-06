@@ -130,7 +130,12 @@ fn row(
         kind: WorkloadKind::Service,
         listeners: Vec::new(),
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
-        workload_addr: None,
+        // A Running Service row carries its workload address (ADR-0276); other states none.
+        workload_addr: (state == AllocState::Running).then(|| {
+            std::net::Ipv4Addr::from(
+                u32::from(overdrive_core::guest_transport::GUEST_NODE_PREFIX.network()) + 2,
+            )
+        }),
         last_terminated: None,
         restart_count: 0,
     }

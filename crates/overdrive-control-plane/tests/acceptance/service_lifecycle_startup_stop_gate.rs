@@ -210,7 +210,10 @@ async fn stop_emitted(mechanic: Mechanic, latest: Latest, elapsed_secs: u64) -> 
                 kind: WorkloadKind::Service,
                 listeners: Vec::new(),
                 started_at: Some(started),
-                workload_addr: None,
+                // A Running Service row carries its workload address (ADR-0276).
+                workload_addr: Some(std::net::Ipv4Addr::from(
+                    u32::from(overdrive_core::guest_transport::GUEST_NODE_PREFIX.network()) + 2,
+                )),
                 last_terminated: None,
                 restart_count: 0,
             },

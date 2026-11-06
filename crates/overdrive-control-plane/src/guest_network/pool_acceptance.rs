@@ -595,3 +595,76 @@ fn a_pool_built_after_a_serve_restart_reports_no_lease_of_the_previous_process()
         restarted.assign(alloc(9), &[], test_owner_flow_ports()).expect("assign after restart");
     assert_eq!(offset_of(prefix, plan.assignment().workload_addr()), usable_offsets(prefix)[0]);
 }
+
+/// Whether two prefixes share any address.
+fn prefixes_overlap(a: Ipv4Net, b: Ipv4Net) -> bool {
+    a.contains(&b.network()) || b.contains(&a.network())
+}
+
+proptest! {
+    /// ADR-0276 — over any sequence of assignments and releases, no two
+    /// allocations hold the same workload address at once, every leased
+    /// address lies inside the node guest prefix, is never the gateway, and
+    /// never falls inside the mesh workload range (`WORKLOAD_SUBNET_BASE`).
+    /// The small prefix makes the next-fit cursor wrap, so released addresses
+    /// are reused and the "while held" qualifier is exercised.
+    /// CONTRACT_SHAPE: bounded-change.
+    #[test]
+    fn no_workload_address_is_leased_twice_while_held_and_none_is_a_mesh_address(
+        small_prefix in any::<bool>(),
+        operations in prop::collection::vec(lease_op(), 0..200),
+    ) {
+        let prefix_text = if small_prefix { "100.95.0.0/27" } else { "100.95.0.0/16" };
+        let prefix: Ipv4Net = prefix_text.parse().expect("node prefix");
+        let pool = pool_over(prefix_text, 0x295);
+        let mut held: BTreeMap<AllocationId, Ipv4Addr> = BTreeMap::new();
+        for op in operations {
+            match op {
+                LeaseOp::Assign(key) => {
+                    let alloc = alloc(key);
+                    if let Ok(plan) = pool.assign(alloc.clone(), &[], test_owner_flow_ports()) {
+                        let addr = plan.assignment().workload_addr();
+                        prop_assert!(prefix.contains(&addr), "{addr} is inside {prefix}");
+                        prop_assert_ne!(addr, GATEWAY, "the gateway is never leased");
+                        prop_assert!(
+                            !crate::veth_provisioner::WORKLOAD_SUBNET_BASE.contains(&addr),
+                            "{addr} is a mesh workload address"
+                        );
+                        match held.get(&alloc) {
+                            Some(first) => prop_assert_eq!(*first, addr, "a replay keeps its address"),
+                            None => {
+                                prop_assert!(
+                                    !held.values().any(|other| *other == addr),
+                                    "{addr} is already held by another allocation"
+                                );
+                                held.insert(alloc, addr);
+                            }
+                        }
+                    }
+                }
+                LeaseOp::Retire(key) => {
+                    pool.retire(&alloc(key));
+                }
+                LeaseOp::Release(key) => {
+                    pool.release(&alloc(key));
+                    held.remove(&alloc(key));
+                }
+            }
+            let distinct = held.values().collect::<BTreeSet<_>>();
+            prop_assert_eq!(distinct.len(), held.len(), "held addresses are pairwise distinct");
+        }
+    }
+}
+
+/// ADR-0276 — the guest prefix the pool leases from and the mesh workload range
+/// are disjoint, so no allocation address can be both a guest and a mesh
+/// address.
+/// CONTRACT_SHAPE: pure-function.
+#[test]
+fn the_guest_prefix_and_the_mesh_workload_range_are_disjoint() {
+    let guest: Ipv4Net = "100.95.0.0/16".parse().expect("guest prefix");
+    assert_eq!(overdrive_core::guest_transport::GUEST_NODE_PREFIX, guest);
+    let mesh = crate::veth_provisioner::WORKLOAD_SUBNET_BASE;
+    assert_eq!(mesh, "10.99.0.0/16".parse::<Ipv4Net>().expect("mesh range"));
+    assert!(!prefixes_overlap(guest, mesh), "{guest} and {mesh} overlap");
+}

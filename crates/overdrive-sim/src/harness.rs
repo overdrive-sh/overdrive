@@ -736,6 +736,11 @@ impl Harness {
             Invariant::EndingInFlightIsNeverReclaimed => {
                 crate::invariants::vm_reclamation::evaluate_ending_in_flight_is_never_reclaimed()
             }
+            // no-host-ip-backend-fallback (ADR-0276).
+            Invariant::ServiceBackendKeysAreDisjoint => {
+                crate::invariants::service_backend_keys_disjoint::evaluate_service_backend_keys_are_disjoint()
+                    .await
+            }
             // public-ingress-gateway (ADR-0222): reachable only through
             // `Harness::only(..)`; neither variant is in `Invariant::ALL` until the
             // pending activation key `gateway-application-invariants`.
