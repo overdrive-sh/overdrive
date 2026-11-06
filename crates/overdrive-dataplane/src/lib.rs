@@ -186,12 +186,15 @@ pub struct EbpfDataplane {
         u32, // BackendId raw u32 — the inner ARRAY's value type
     >,
 
-    /// Userspace handle to BACKEND_MAP (regular HASH; aya supports
-    /// it natively). Owns the read/write surface for resolved
-    /// backend records.
+    /// Userspace handle to BACKEND_MAP (regular HASH). Owns the
+    /// read/write surface for resolved backend records.
     ///
-    /// Wrapped in `parking_lot::Mutex` because aya's
-    /// `HashMap::insert` / `remove` take `&mut self`, but
+    /// Every access goes through the crate-private `BackendMapOps`
+    /// seam; the production implementation is the aya hash map.
+    ///
+    /// Wrapped in `parking_lot::Mutex` because the seam's mutating
+    /// operations (insert / remove, mirroring aya's `&mut self`
+    /// `HashMap` methods) need exclusive access, but
     /// `Dataplane::update_service` is `&self` (the trait surface is
     /// the canonical interior-mutability boundary for BPF map
     /// updates). The lock is held only for the duration of the BPF

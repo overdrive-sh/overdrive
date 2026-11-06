@@ -21,11 +21,7 @@
 
 #![allow(
     clippy::expect_used,
-    clippy::panic,
-    clippy::doc_markdown,
-    clippy::too_many_lines,
-    clippy::missing_const_for_fn,
-    reason = "a Tier-3 scenario asserts its own preconditions; protocol names are prose"
+    reason = "a Tier-3 scenario asserts its own preconditions with named expect messages"
 )]
 
 use std::collections::{BTreeMap, BTreeSet};
