@@ -1,5 +1,7 @@
 # Overdrive
 
+[![CodSpeed](https://img.shields.io/endpoint?url=https://codspeed.io/badge.json)](https://app.codspeed.io/overdrive-sh/overdrive?utm_source=badge)
+
 **Everything you run, on one platform.**
 
 Overdrive is a workload orchestration platform written in Rust. It is designed

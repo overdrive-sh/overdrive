@@ -1,0 +1,68 @@
+# CodSpeed — continuous performance tracking for the pure hot paths
+# benchmarked in `crates/overdrive-bench/benches/` (Maglev permutation,
+# backend-set fingerprint, workload spec parsing, id parsing, guest
+# datagram framing).
+#
+# Runs under CodSpeed's CPU simulation instrument: deterministic,
+# hardware-agnostic measurements on a standard GitHub runner. Results and
+# PR reports: https://app.codspeed.io/overdrive-sh/overdrive
+#
+# `overdrive-bench` depends only on `overdrive-core`, so this job does not
+# need the BPF object artifact from the `bpf-build` CI job.
+
+name: CodSpeed
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  # Lets CodSpeed trigger backtest runs to seed historical data.
+  workflow_dispatch:
+
+concurrency:
+  group: codspeed-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  id-token: write # OIDC authentication with CodSpeed
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  benchmarks:
+    name: Run benchmarks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        # Pinned via rust-toolchain.toml.
+        uses: dtolnay/rust-toolchain@stable
+
+      # mold is the linker per .cargo/config.toml; ubuntu-latest does
+      # not ship it.
+      - name: Install mold linker
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends mold
+
+      - name: Cache cargo target
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "codspeed"
+
+      - name: Install cargo-codspeed
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-codspeed
+
+      - name: Build the benchmark target(s)
+        run: cargo codspeed build -m simulation -p overdrive-bench
+
+      - name: Run the benchmarks
+        uses: CodSpeedHQ/action@v5
+        with:
+          mode: simulation
+          run: cargo codspeed run -p overdrive-bench
