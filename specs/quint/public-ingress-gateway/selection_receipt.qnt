@@ -60,6 +60,7 @@ module selection_receipt_conf {
     | init
     | update_apply({ key: int, sidx: int })
     | update_rejected({ key: int, sidx: int })
+    | update_rejected_rnat({ key: int, sidx: int })
     | open({ key: int })
     | kernel_connect_det({ c: int })
     | take({ c: int, r: int })
@@ -78,6 +79,7 @@ module selection_receipt {
   val BUG_EARLY: bool = OFF.contains("publishEarly")
   val BUG_REBIND: bool = OFF.contains("rebind")
   val BUG_TAKEANY: bool = OFF.contains("takeAny")
+  val BUG_RNAT: bool = OFF.contains("rnatShare")
 
   type Be = { addr: int, alloc: int, h: int }
   type Infl = { on: bool, key: int, ents: int -> int, assoc: int -> int, fresh_addrs: Set[int], prior: int -> int,
@@ -117,6 +119,11 @@ module selection_receipt {
     val live = o.keys().fold(Set(), (acc, k) => acc.union(o.get(k).keys()))
     m.keys().filter(a => live.contains(m.get(a))).mapBy(a => m.get(a))
   }
+  // R-59: a backend endpoint (its memoised BackendId, i.e. its reverse-NAT key) already in the committed generation
+  // of ANOTHER Service key. A Service's own generation does not count (replacing its own set is not sharing).
+  pure def rnatHeld(o: int -> (int -> int), m: int -> int, key: int, bs: Set[Be]): bool =
+    bs.exists(b => m.keys().contains(b.addr) and
+                   o.keys().exists(k => k != key and o.get(k).keys().contains(m.get(b.addr))))
   pure def rm(m: int -> a, k: int): int -> a = m.keys().exclude(Set(k)).mapBy(x => m.get(x))
   pure def entsOf(o: int -> (int -> int), s: int): int -> int = if (o.keys().contains(s)) o.get(s) else Map()
 
@@ -137,6 +144,7 @@ module selection_receipt {
     val hit = bs.filter(b => memo.keys().contains(b.addr))
     def allocOf(id) = if (ident.keys().contains(id)) ident.get(id) else resv.get(id)
     val conflict = hit.exists(b => allocOf(memo.get(b.addr)) != b.alloc)
+    val rnat = rnatHeld(outer, memo, key, bs)
     val freshB = bs.filter(b => not(memo.keys().contains(b.addr)))
     def idOf(b) = if (memo.keys().contains(b.addr)) memo.get(b.addr)
                           else next_bid + freshB.filter(x => x.addr < b.addr).size()
@@ -153,6 +161,9 @@ module selection_receipt {
       // ADR-0241: a live id never denotes another alloc: a conflicting input is rejected before any mutation
       // (see update_rejected); the hazard lets it through
       or { not(conflict), BUG_REBIND },
+      // R-59 (after the identity check): an endpoint whose reverse-NAT key maps to another Service is rejected
+      // before any mutation (see update_rejected_rnat); the hazard lets it through
+      or { not(rnat), BUG_RNAT },
       guard' = true,
       infl' = { on: true, key: key, ents: ents, assoc: assoc, fresh_addrs: freshB.map(b => b.addr),
                 prior: entsOf(outer, key), identBefore: ident, committed: false },
@@ -183,12 +194,30 @@ module selection_receipt {
     }
   }
 
+  // R-59: Dataplane::update_service on a backend set naming an endpoint whose reverse-NAT key already maps to a
+  // different VIP (ServiceKey), and with no identity conflict (the identity check runs first, so update_rejected
+  // reports it when both are violated): the call returns Err(ReverseNatConflict) before any mutation; both Services'
+  // state, the memo and the counter are unchanged. Outcome = the conf_step variant; no state variable changes.
+  action update_rejected_rnat(key: int, sidx: int): bool = {
+    val bs = CATALOG.get(sidx)
+    def allocOf(id) = if (ident.keys().contains(id)) ident.get(id) else resv.get(id)
+    val conflict = bs.filter(b => memo.keys().contains(b.addr)).exists(b => allocOf(memo.get(b.addr)) != b.alloc)
+    all {
+      not(guard), not(infl.on), not(conflict), rnatHeld(outer, memo, key, bs),
+      outer' = outer, ident' = ident, resv' = resv, memo' = memo, next_bid' = next_bid, guard' = guard, infl' = infl,
+      upd' = upd, intents' = intents, receipts' = receipts, conn' = conn, ckey' = ckey, taken' = taken,
+      next_cookie' = next_cookie, g' = g,
+      conf_step' = if (REC) variant("update_rejected_rnat", { key: key, sidx: sidx }) else conf_step,
+    }
+  }
+
   // Conformance-observable form of Dataplane::update_service (D-PASS7-2): update_begin; commit; publish fused,
   // because the real EbpfDataplane cannot be paused between the phases without a test seam. Approved rules only.
   action update_apply(key: int, sidx: int): bool = {
     val bs = CATALOG.get(sidx)
     def allocOf(id) = if (ident.keys().contains(id)) ident.get(id) else resv.get(id)
     val conflict = bs.filter(b => memo.keys().contains(b.addr)).exists(b => allocOf(memo.get(b.addr)) != b.alloc)
+    val rnat = rnatHeld(outer, memo, key, bs)
     val freshB = bs.filter(b => not(memo.keys().contains(b.addr)))
     def idOf(b) = if (memo.keys().contains(b.addr)) memo.get(b.addr)
                           else next_bid + freshB.filter(x => x.addr < b.addr).size()
@@ -199,7 +228,7 @@ module selection_receipt {
       m.put(id, (if (m.keys().contains(id)) m.get(id) else Set()).union(Set(assoc.get(id)))))
     val newOuter = if (ents.keys().size() == 0) rm(outer, key) else outer.put(key, ents)
     all {
-      not(guard), not(infl.on), upd < MAXUPD, not(conflict),
+      not(guard), not(infl.on), upd < MAXUPD, not(conflict), not(rnat),
       outer' = newOuter,
       ident' = assoc.keys().fold(ident, (m, id) => m.put(id, assoc.get(id))),
       memo' = gcMemo(newMemo, newOuter),
@@ -357,7 +386,7 @@ module selection_receipt {
       nondet cs = Set(0, 1, 4, 5).oneOf()
       nondet c = 1.to(MAXC).oneOf()
       any {
-        update_apply(k, cs), update_rejected(k, cs), open(k), kernel_connect_det(c), take(c, c), read_identity(c),
+        update_apply(k, cs), update_rejected(k, cs), update_rejected_rnat(k, cs), open(k), kernel_connect_det(c), take(c, c), read_identity(c),
         cleanup(c), restart,
       }
     } else {
@@ -367,7 +396,7 @@ module selection_receipt {
       nondet r = 1.to(MAXC).oneOf()
       nondet pick = 0.to(4).oneOf()
       any {
-        update_begin(k, s), update_rejected(k, s), commit, publish, rollback, open(k), kernel_connect(c, pick), take(c, r),
+        update_begin(k, s), update_rejected(k, s), update_rejected_rnat(k, s), commit, publish, rollback, open(k), kernel_connect(c, pick), take(c, r),
         read_identity(c), cleanup(c), restart, idle,
       }
     }
@@ -395,8 +424,11 @@ module selection_receipt {
   }
   // ADR-0242: no outer entry or an empty generation is NoBackend, never Selected
   val EmptyIsNoBackend: bool = not(g.badSel)
+  // R-59: no reverse-NAT key (endpoint, i.e. its BackendId) maps to two VIPs (ServiceKeys) in the committed generations
+  val ReverseNatKeyOneVip: bool = outer.keys().forall(k1 => outer.keys().forall(k2 =>
+    (k1 != k2) implies outer.get(k1).keys().intersect(outer.get(k2).keys()).size() == 0))
   val Safety: bool = and {
-    IdentityReadableOnlyAfterCommit, IdentityImmutablePerBackendId, ReceiptMatchesIntent, NoResidueAfterCleanup,
+    IdentityReadableOnlyAfterCommit, IdentityImmutablePerBackendId, ReverseNatKeyOneVip, ReceiptMatchesIntent, NoResidueAfterCleanup,
     RollbackPreservesPriorGeneration, EmptyIsNoBackend,
   }
 
@@ -429,6 +461,29 @@ module selection_receipt {
     .then(update_apply(1, 5))
     .expect(outer.get(1) == Map(2 -> 1) and ident == Map(1 -> 1, 2 -> 2) and memo == Map(2 -> 2) and next_bid == 3
             and Safety)
+
+  // R-59: an endpoint already held by another Service is rejected before any mutation (ReverseNatConflict); both
+  // Services' state, the memo and the counter are unchanged and each still selects its own backend
+  run reverse_nat_conflict_rejected = init
+    .then(update_apply(1, 1))
+    .then(update_apply(2, 5))
+    .expect(outer == Map(1 -> Map(1 -> 1), 2 -> Map(2 -> 1)) and memo == Map(1 -> 1, 2 -> 2) and next_bid == 3
+            and upd == 2 and Safety)
+    .then(update_rejected_rnat(2, 1))
+    .expect(not(guard) and outer == Map(1 -> Map(1 -> 1), 2 -> Map(2 -> 1)) and ident == Map(1 -> 1, 2 -> 2)
+            and memo == Map(1 -> 1, 2 -> 2) and next_bid == 3 and upd == 2 and resv.keys().size() == 0 and Safety)
+    .then(open(2)).then(kernel_connect_det(1)).expect(receipts == Map(1 -> { key: 2, sel: 2 }))
+    .then(take(1, 1)).then(read_identity(1))
+    .expect(conn.get(1) == "identified" and ident.get(taken.get(1).sel) == 2 and Safety)
+
+  // both violated (endpoint held by another Service AND re-leased to another allocation): the identity conflict is
+  // the reported outcome; the R-59 rejection is not enabled for that input
+  run identity_conflict_precedes_reverse_nat = init
+    .then(update_apply(1, 1))
+    .then(update_rejected(2, 4))
+    .expect(outer == Map(1 -> Map(1 -> 1)) and ident == Map(1 -> 1) and memo == Map(1 -> 1) and next_bid == 2
+            and upd == 1 and Safety)
+    .then(update_rejected_rnat(2, 4).fail())
 
   // restart: the intent and receipt maps are not pinned; the new instance holds nothing
   run restart_destroys_receipts = init

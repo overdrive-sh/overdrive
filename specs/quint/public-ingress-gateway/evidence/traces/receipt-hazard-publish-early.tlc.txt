@@ -16,7 +16,7 @@ State 1: <Initial predicate>
 /\ receipt_bugPublishEarly_selection_receipt_outer = << >>
 /\ receipt_bugPublishEarly_selection_receipt_receipts = << >>
 
-State 2: <receipt_bugPublishEarly_selection_receipt_step line 1812, col 3 to line 1850, col 63 of module receipt_bugPublishEarly>
+State 2: <receipt_bugPublishEarly_selection_receipt_step line 1940, col 3 to line 1982, col 63 of module receipt_bugPublishEarly>
 /\ receipt_bugPublishEarly_selection_receipt_intents = << >>
 /\ receipt_bugPublishEarly_selection_receipt_guard = TRUE
 /\ receipt_bugPublishEarly_selection_receipt_ident = <<1>>

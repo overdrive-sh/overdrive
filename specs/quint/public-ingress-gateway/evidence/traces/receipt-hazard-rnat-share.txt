@@ -1,0 +1,48 @@
+# receipt-hazard-rnat-share: counterexample, 6 state(s) (from the TLC trace)
+
+State 1
+  resv = << >>
+  g = [committed |-> {}, bound |-> << >>, rbBad |-> FALSE, badSel |-> FALSE]
+  conf_step = [init |-> [tag |-> "UNIT"]]
+  upd = 0
+  ckey = << >>
+  next_cookie = 1
+  receipts = << >>
+  outer = << >>
+  next_bid = 1
+  infl = [on |-> FALSE, key |-> 0, ents |-> << >>, assoc |-> << >>, fresh_addrs |-> {}, prior |-> << >>, identBefore |-> << >>, committed |-> FALSE]
+  guard = FALSE
+  ident = << >>
+  taken = << >>
+  memo = << >>
+  intents = << >>
+  conn = << >>
+
+State 2 [step]
+  resv = <<1>>
+  g = [committed |-> {}, bound |-> <<{1}>>, rbBad |-> FALSE, badSel |-> FALSE]
+  upd = 1
+  next_bid = 2
+  infl = [on |-> TRUE, key |-> 1, ents |-> <<1>>, assoc |-> <<1>>, fresh_addrs |-> {1}, prior |-> << >>, identBefore |-> << >>, committed |-> FALSE]
+  guard = TRUE
+  memo = <<1>>
+
+State 3 [step]
+  g = [committed |-> {1}, bound |-> <<{1}>>, rbBad |-> FALSE, badSel |-> FALSE]
+  outer = <<<<1>>>>
+  infl = [on |-> TRUE, key |-> 1, ents |-> <<1>>, assoc |-> <<1>>, fresh_addrs |-> {1}, prior |-> << >>, identBefore |-> << >>, committed |-> TRUE]
+
+State 4 [step]
+  resv = << >>
+  infl = [on |-> FALSE, key |-> 0, ents |-> << >>, assoc |-> << >>, fresh_addrs |-> {}, prior |-> << >>, identBefore |-> << >>, committed |-> FALSE]
+  guard = FALSE
+  ident = <<1>>
+
+State 5 [step]
+  upd = 2
+  infl = [on |-> TRUE, key |-> 2, ents |-> <<1>>, assoc |-> << >>, fresh_addrs |-> {}, prior |-> << >>, identBefore |-> <<1>>, committed |-> FALSE]
+  guard = TRUE
+
+State 6 [step]
+  outer = <<<<1>>, <<1>>>>
+  infl = [on |-> TRUE, key |-> 2, ents |-> <<1>>, assoc |-> << >>, fresh_addrs |-> {}, prior |-> << >>, identBefore |-> <<1>>, committed |-> TRUE]
