@@ -6,8 +6,9 @@
 //! registers `(cookie, ServiceKey)` in `GATEWAY_CONNECT_INTENT_MAP`; the
 //! separate gateway selection `cgroup/connect4` program writes the receipt into
 //! `GATEWAY_SELECTION_RECEIPT_MAP`; `take_receipt` consumes it. The applied
-//! identity of each backend is recorded by `update_service` before the outer
-//! `SERVICE_MAP` swap, so a `Selected` receipt can always resolve its identity.
+//! identity of each backend is published by `update_service` after the outer
+//! `SERVICE_MAP` swap under the commit guard, so a `Selected` receipt can always
+//! resolve its identity and never an uncommitted one.
 //!
 //! `open_upstream`, `take_receipt`, `selected_backend_identity` and the cleanup
 //! capability are implemented. `probe` is the boot sentinel step's and is still
@@ -34,6 +35,25 @@ use overdrive_gateway::ports::{
 use overdrive_host::socket_cookie::{SocketCookieReadError, SocketCookieReader};
 
 use crate::EbpfDataplane;
+
+/// The applied-identity state of one `BackendId` (ADR-0233, ADR-0241).
+///
+/// `Reserved` is inserted before any map work of an `update_service` and is not
+/// readable; `Applied` replaces it after the outer swap. An `Applied` identity is
+/// never changed or removed for the process lifetime.
+pub(crate) enum BackendIdentityState {
+    Reserved { spiffe_id: SpiffeId },
+    Applied { spiffe_id: SpiffeId },
+}
+
+impl BackendIdentityState {
+    /// The allocation this id denotes, in either state.
+    pub(crate) const fn spiffe_id(&self) -> &SpiffeId {
+        match self {
+            Self::Reserved { spiffe_id } | Self::Applied { spiffe_id } => spiffe_id,
+        }
+    }
+}
 
 /// Receipt outcome: no usable backend.
 pub(crate) const GATEWAY_RECEIPT_NO_BACKEND: u32 = 1;
@@ -81,7 +101,7 @@ fn is_map_full(error: &aya::maps::MapError) -> bool {
 
 /// A delete of an absent key. aya reports a missing key on `remove` as the
 /// `ENOENT` syscall error and on `get` as `KeyNotFound`.
-fn is_key_absent(error: &aya::maps::MapError) -> bool {
+pub(crate) fn is_key_absent(error: &aya::maps::MapError) -> bool {
     match error {
         aya::maps::MapError::KeyNotFound => true,
         aya::maps::MapError::SyscallError(syscall) => {
@@ -371,10 +391,14 @@ impl GatewayConnectDataplane for EbpfDataplane {
         &self,
         backend_id: BackendId,
     ) -> Result<SpiffeId, GatewayConnectDataplaneError> {
-        self.backend_identities
-            .lock()
-            .get(&backend_id.get())
-            .cloned()
-            .ok_or(GatewayConnectDataplaneError::BackendIdentityMissing { backend_id })
+        // The read waits for any `update_service` between its outer swap and its
+        // `Applied` publication, so an id a receipt names always resolves.
+        let _published = self.service_apply_commit.read();
+        match self.backend_identities.lock().get(&backend_id.get()) {
+            Some(BackendIdentityState::Applied { spiffe_id }) => Ok(spiffe_id.clone()),
+            Some(BackendIdentityState::Reserved { .. }) | None => {
+                Err(GatewayConnectDataplaneError::BackendIdentityMissing { backend_id })
+            }
+        }
     }
 }

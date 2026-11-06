@@ -72,7 +72,6 @@ impl BackendIdAllocator {
     /// Read-only memo lookup (identity-conflict preflight, ADR-0241): the
     /// `BackendId` already assigned to this endpoint, if any. Allocation and
     /// release semantics are unchanged (R-3, R-24).
-    #[allow(dead_code)]
     pub(crate) fn existing_id(&self, ip_host: u32, port_host: u16, proto: u8) -> Option<BackendId> {
         self.by_endpoint.get(&(ip_host, port_host, proto)).copied()
     }

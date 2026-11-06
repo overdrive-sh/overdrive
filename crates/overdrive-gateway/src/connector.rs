@@ -1,9 +1,9 @@
 //! Registered gateway upstream connector.
 //!
-//! The successful `connect` path and the `open_upstream` failure arm are live;
-//! the receipt, identity, mTLS and cleanup-retention failure arms stay
-//! scaffolded for their later steps. The source-local acceptance bodies
-//! implement S-PIG-28 through S-PIG-30 and S-PIG-53.
+//! The successful `connect` path, the `open_upstream` failure arm and the
+//! receipt, identity and mTLS failure arms are live; the cleanup-retention
+//! failure arm stays scaffolded for its later step. The source-local
+//! acceptance bodies implement S-PIG-28 through S-PIG-30 and S-PIG-53.
 
 use std::net::{SocketAddr, SocketAddrV4};
 use std::num::NonZeroU32;
@@ -90,10 +90,12 @@ impl GatewayUpstreamConnector {
                 return Err(GatewayUpstreamConnectError::ConnectTimeout);
             }
         };
-        let Ok(receipt) = self.dataplane.take_receipt(&intent) else {
-            todo!(
-                "SCAFFOLD: selection-receipt failure arm (selection-receipt-and-applied-identity)"
-            )
+        let receipt = match self.dataplane.take_receipt(&intent) {
+            Ok(receipt) => receipt,
+            Err(error) => {
+                self.release_intent(&intent, reservation)?;
+                return Err(GatewayUpstreamConnectError::Receipt(error));
+            }
         };
         let backend_id = match receipt {
             GatewaySelectionReceipt::Selected { socket_cookie, service_key, backend_id }
@@ -106,18 +108,25 @@ impl GatewayUpstreamConnector {
                 return Err(GatewayUpstreamConnectError::NoBackend);
             }
             GatewaySelectionReceipt::Selected { .. } => {
-                todo!("SCAFFOLD: receipt mismatch arm (selection-receipt-and-applied-identity)")
+                self.release_intent(&intent, reservation)?;
+                return Err(GatewayUpstreamConnectError::ReceiptMismatch);
             }
         };
-        let Ok(peer) = self.dataplane.selected_backend_identity(backend_id) else {
-            todo!("SCAFFOLD: applied-identity failure arm (selection-receipt-and-applied-identity)")
+        let peer = match self.dataplane.selected_backend_identity(backend_id) {
+            Ok(peer) => peer,
+            Err(error) => {
+                self.release_intent(&intent, reservation)?;
+                return Err(GatewayUpstreamConnectError::SelectedIdentity(error));
+            }
         };
         let connected: OwnedFd =
             stream.into_std().map_err(|_| GatewayUpstreamConnectError::Connect)?.into();
-        let Ok(upstream) = self.client_mtls.authenticate(connected, peer, deadline).await else {
-            todo!(
-                "SCAFFOLD: gateway-client mTLS failure arm (selection-receipt-and-applied-identity)"
-            )
+        let upstream = match self.client_mtls.authenticate(connected, peer, deadline).await {
+            Ok(upstream) => upstream,
+            Err(error) => {
+                self.release_intent(&intent, reservation)?;
+                return Err(GatewayUpstreamConnectError::Mtls(error));
+            }
         };
         self.release_intent(&intent, reservation)?;
         Ok(upstream)
@@ -546,7 +555,6 @@ mod acceptance {
     ///
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
-    #[ignore = "pending DELIVER selection-receipt-and-applied-identity"]
     async fn missing_selection_receipt_fails_closed_before_identity_and_mtls() {
         let fx = fixture(ReceiptMode::Missing).await;
         let error = connect_error(&fx).await;
@@ -565,7 +573,6 @@ mod acceptance {
     ///
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
-    #[ignore = "pending DELIVER selection-receipt-and-applied-identity"]
     async fn receipt_for_another_service_key_fails_closed_before_identity_and_mtls() {
         let fx = fixture(ReceiptMode::OtherServiceKey).await;
         let error = connect_error(&fx).await;
@@ -582,7 +589,6 @@ mod acceptance {
     ///
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
-    #[ignore = "pending DELIVER selection-receipt-and-applied-identity"]
     async fn wrong_valid_selected_peer_fails_closed_without_an_alternate_backend() {
         let fx = fixture(ReceiptMode::Selected).await;
         let error = connect_error(&fx).await;
@@ -611,7 +617,6 @@ mod acceptance {
     ///
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
-    #[ignore = "pending DELIVER selection-receipt-and-applied-identity"]
     async fn every_gateway_client_mtls_fault_is_mapped_and_cleans_intent_state() {
         let faults = [
             GatewayClientMtlsError::IdentityAbsent,
@@ -644,7 +649,6 @@ mod acceptance {
     ///
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
-    #[ignore = "pending DELIVER selection-receipt-and-applied-identity"]
     async fn no_backend_receipt_does_not_resolve_identity_start_mtls_or_retry() {
         let fx = fixture(ReceiptMode::NoBackend).await;
         let error = connect_error(&fx).await;
@@ -661,7 +665,6 @@ mod acceptance {
     ///
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
-    #[ignore = "pending DELIVER selection-receipt-and-applied-identity"]
     async fn missing_applied_identity_fails_before_mtls_and_cleans_the_exact_intent() {
         let fx = fixture(ReceiptMode::Selected).await;
         fx.dataplane.identity_missing.store(true, Ordering::SeqCst);

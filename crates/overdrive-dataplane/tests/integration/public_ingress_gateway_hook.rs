@@ -289,7 +289,6 @@ fn the_sentinel_probe_passes_on_the_real_hook_and_an_elapsed_deadline_times_out(
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER selection-receipt-and-applied-identity"]
 fn after_an_instance_restart_old_identities_and_receipts_are_gone_until_reprogrammed() {
     let rig = HostRig::new("h71");
     let rt = runtime();
@@ -373,7 +372,6 @@ fn after_an_instance_restart_old_identities_and_receipts_are_gone_until_reprogra
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER selection-receipt-and-applied-identity"]
 fn updates_racing_identity_reads_never_return_a_missing_identity_for_a_selected_id() {
     const ROUNDS: u16 = 2_000;
     const SEED: u64 = 0x9e37_79b9_7f4a_7c15;

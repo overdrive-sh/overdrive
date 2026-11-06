@@ -61,8 +61,12 @@
     unused_variables,
     reason = "public-ingress DISTILL scaffold: the Sim port bodies are DELIVER's"
 )]
+#![allow(
+    clippy::significant_drop_tightening,
+    reason = "the Sim connect dataplane's critical sections are short in-memory operations"
+)]
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::num::{NonZeroU64, NonZeroUsize};
 use std::os::fd::OwnedFd;
 use std::sync::Arc;
@@ -91,6 +95,7 @@ use overdrive_gateway::ports::{
     PreparedUpstream, PublicHandshakeError, ReadDeadlines, RelayDeadlines, RelayError,
     RelayPipeError, RelayProbeError, ThroughBytes,
 };
+use parking_lot::Mutex;
 use tokio::sync::watch;
 
 use super::dataplane::SimDataplane;
@@ -461,47 +466,110 @@ impl SimConnectHold {
 /// `NoBackend`; otherwise `Selected` with the lowest `BackendId` of the key's
 /// current generation. Cookies are deterministic nonzero values. The Sim does
 /// not evaluate `Backend.healthy`.
+///
+/// The Sim sees no `connect(2)`, so a registered intent's receipt is decided
+/// from the shared Service state when it is read (`take_receipt`,
+/// `live_receipts`) and is live from registration until taken or cleaned up.
 pub struct SimGatewayConnectDataplane {
     dataplane: Arc<SimDataplane>,
+    hold: SimConnectHold,
+    state: Mutex<ConnectState>,
+}
+
+#[derive(Default)]
+struct ConnectState {
+    last_cookie: u64,
+    /// Registered intents by cookie.
+    intents: BTreeMap<SocketCookie, ServiceKey>,
+    /// Cookies whose receipt is live (registered, not yet taken).
+    receipts: BTreeSet<SocketCookie>,
+    /// Armed one-shot faults, FIFO per operation.
+    faults: BTreeMap<ConnectOperation, VecDeque<GatewayConnectDataplaneError>>,
+}
+
+impl ConnectState {
+    fn fault(&mut self, operation: ConnectOperation) -> Result<(), GatewayConnectDataplaneError> {
+        self.faults.get_mut(&operation).and_then(VecDeque::pop_front).map_or(Ok(()), Err)
+    }
 }
 
 impl SimGatewayConnectDataplane {
     /// Share `dataplane`'s Service state.
     pub fn new(dataplane: Arc<SimDataplane>) -> Self {
-        Self { dataplane }
+        Self {
+            dataplane,
+            hold: SimConnectHold::default(),
+            state: Mutex::new(ConnectState::default()),
+        }
     }
 
     /// The next call of `operation` returns `error` (FIFO; typed-fault
     /// configuration at the existing port operations).
     pub fn fail_next(&self, operation: ConnectOperation, error: GatewayConnectDataplaneError) {
-        todo!("SCAFFOLD: SimGatewayConnectDataplane::fail_next")
+        self.state.lock().faults.entry(operation).or_default().push_back(error);
     }
 
     /// The probe hold this adapter shares with a [`SimGatewayClientMtls`].
     pub fn connect_hold(&self) -> SimConnectHold {
-        todo!("SCAFFOLD: SimGatewayConnectDataplane::connect_hold")
+        self.hold.clone()
+    }
+
+    /// The receipt the Sim records for `cookie` registered for `key`.
+    fn receipt_for(&self, cookie: SocketCookie, key: ServiceKey) -> GatewaySelectionReceipt {
+        let selected = key.vip().try_as_ipv4().and_then(|vip| {
+            self.dataplane.selected_backend_for(vip, key.port().get(), key.protocol())
+        });
+        selected.map_or(
+            GatewaySelectionReceipt::NoBackend { socket_cookie: cookie, service_key: key },
+            |backend_id| GatewaySelectionReceipt::Selected {
+                socket_cookie: cookie,
+                service_key: key,
+                backend_id,
+            },
+        )
     }
 }
 
 impl GatewayConnectCleanup for SimGatewayConnectDataplane {
     fn cleanup(&self, intent: &GatewayConnectIntent) -> Result<(), GatewayConnectDataplaneError> {
-        todo!("SCAFFOLD: SimGatewayConnectDataplane::cleanup")
+        let mut state = self.state.lock();
+        state.fault(ConnectOperation::Cleanup)?;
+        state.intents.remove(&intent.socket_cookie);
+        state.receipts.remove(&intent.socket_cookie);
+        Ok(())
     }
 
     fn cleanup_all_gateway_intents(
         &self,
     ) -> Result<GatewayConnectCleanupSweep, GatewayConnectDataplaneError> {
-        todo!("SCAFFOLD: SimGatewayConnectDataplane::cleanup_all_gateway_intents")
+        let mut state = self.state.lock();
+        state.fault(ConnectOperation::CleanupAllGatewayIntents)?;
+        let removed_intents = u32::try_from(std::mem::take(&mut state.intents).len())
+            .map_err(|_| GatewayConnectDataplaneError::Cleanup)?;
+        let removed_receipts = u32::try_from(std::mem::take(&mut state.receipts).len())
+            .map_err(|_| GatewayConnectDataplaneError::Cleanup)?;
+        Ok(GatewayConnectCleanupSweep { removed_intents, removed_receipts })
     }
 
     fn live_intent_count(&self) -> Result<u32, GatewayConnectDataplaneError> {
-        todo!("SCAFFOLD: SimGatewayConnectDataplane::live_intent_count")
+        let mut state = self.state.lock();
+        state.fault(ConnectOperation::LiveIntentCount)?;
+        u32::try_from(state.intents.len()).map_err(|_| GatewayConnectDataplaneError::Kernel)
     }
 
     fn live_receipts(
         &self,
     ) -> Result<BTreeMap<SocketCookie, GatewaySelectionReceipt>, GatewayConnectDataplaneError> {
-        todo!("SCAFFOLD: SimGatewayConnectDataplane::live_receipts")
+        let mut state = self.state.lock();
+        state.fault(ConnectOperation::LiveReceipts)?;
+        Ok(state
+            .receipts
+            .iter()
+            .filter_map(|cookie| {
+                let key = *state.intents.get(cookie)?;
+                Some((*cookie, self.receipt_for(*cookie, key)))
+            })
+            .collect())
     }
 }
 
@@ -512,28 +580,63 @@ impl GatewayConnectDataplane for SimGatewayConnectDataplane {
         deadline: Instant,
         clock: &dyn Clock,
     ) -> Result<(), GatewayConnectDataplaneError> {
-        todo!("SCAFFOLD: SimGatewayConnectDataplane::probe")
+        {
+            let mut state = self.state.lock();
+            state.fault(ConnectOperation::Probe)?;
+            // The probe first sweeps residue, then runs a sentinel connect that
+            // is denied and consumed: it leaves nothing registered.
+            state.intents.clear();
+            state.receipts.clear();
+        }
+        if clock.now() >= deadline {
+            return Err(GatewayConnectDataplaneError::ProbeTimeout);
+        }
+        Ok(())
     }
 
     fn open_upstream(
         &self,
         key: ServiceKey,
     ) -> Result<PreparedUpstream, GatewayConnectDataplaneError> {
-        todo!("SCAFFOLD: SimGatewayConnectDataplane::open_upstream")
+        let mut state = self.state.lock();
+        state.fault(ConnectOperation::OpenUpstream)?;
+        let socket = tokio::net::TcpSocket::new_v4()
+            .map_err(|error| GatewayConnectDataplaneError::SocketCreate(error.kind()))?;
+        state.last_cookie = state.last_cookie.saturating_add(1);
+        let socket_cookie = SocketCookie::new(state.last_cookie).map_err(|_| {
+            GatewayConnectDataplaneError::CookieRead(std::io::ErrorKind::InvalidData)
+        })?;
+        state.intents.insert(socket_cookie, key);
+        state.receipts.insert(socket_cookie);
+        Ok(PreparedUpstream::new(socket, GatewayConnectIntent { socket_cookie, service_key: key }))
     }
 
     fn take_receipt(
         &self,
         intent: &GatewayConnectIntent,
     ) -> Result<GatewaySelectionReceipt, GatewayConnectDataplaneError> {
-        todo!("SCAFFOLD: SimGatewayConnectDataplane::take_receipt")
+        let mut state = self.state.lock();
+        state.fault(ConnectOperation::TakeReceipt)?;
+        let cookie = intent.socket_cookie;
+        if !state.receipts.contains(&cookie) {
+            return Err(GatewayConnectDataplaneError::ReceiptMissing);
+        }
+        if state.intents.get(&cookie) != Some(&intent.service_key) {
+            return Err(GatewayConnectDataplaneError::ReceiptMismatch);
+        }
+        state.receipts.remove(&cookie);
+        drop(state);
+        Ok(self.receipt_for(cookie, intent.service_key))
     }
 
     fn selected_backend_identity(
         &self,
         backend_id: BackendId,
     ) -> Result<SpiffeId, GatewayConnectDataplaneError> {
-        todo!("SCAFFOLD: SimGatewayConnectDataplane::selected_backend_identity")
+        self.state.lock().fault(ConnectOperation::SelectedBackendIdentity)?;
+        self.dataplane
+            .applied_identity(backend_id)
+            .ok_or(GatewayConnectDataplaneError::BackendIdentityMissing { backend_id })
     }
 }
 

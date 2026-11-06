@@ -36,7 +36,7 @@
 //! `ReverseNatLockstep` invariant pins this at PR time.
 
 use std::collections::{BTreeMap, HashMap};
-use std::net::{Ipv4Addr, SocketAddrV4};
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 
 use async_trait::async_trait;
 use parking_lot::Mutex;
@@ -44,6 +44,7 @@ use parking_lot::Mutex;
 use overdrive_core::dataplane::DropClass;
 use overdrive_core::dataplane::ServiceFrontend;
 use overdrive_core::dataplane::backend_key::{BackendKey, Proto};
+use overdrive_core::id::{BackendId, SpiffeId};
 use overdrive_core::traits::dataplane::{
     Backend, Dataplane, DataplaneError, FlowEvent, PolicyKey, Verdict,
 };
@@ -73,11 +74,28 @@ struct ServiceState {
     /// source 5-tuple of a backend response packet back to the VIP
     /// the client connected to.
     reverse_nat: BTreeMap<BackendKey, Ipv4Addr>,
+    /// Allocator memo: `(backend address, proto) -> BackendId` for every
+    /// endpoint a live service still names. Mirrors the host
+    /// `BackendIdAllocator` memo: released when no service names the endpoint
+    /// (orphan GC), and the counter never recycles an id.
+    backend_memo: BTreeMap<(SocketAddr, Proto), BackendId>,
+    /// The next `BackendId` the monotonic counter hands out (starts at 1).
+    next_backend_id: u32,
+    /// Applied identity of every `BackendId` ever minted: immutable per id and
+    /// retained after the id leaves its service, so an old receipt still
+    /// resolves (mirrors the host's process-lifetime `Applied` associations).
+    identities: BTreeMap<BackendId, SpiffeId>,
 }
 
 impl ServiceState {
     const fn new() -> Self {
-        Self { services: BTreeMap::new(), reverse_nat: BTreeMap::new() }
+        Self {
+            services: BTreeMap::new(),
+            reverse_nat: BTreeMap::new(),
+            backend_memo: BTreeMap::new(),
+            next_backend_id: 1,
+            identities: BTreeMap::new(),
+        }
     }
 }
 
@@ -341,6 +359,32 @@ impl SimDataplane {
         self.state.lock().services.get(&(vip, port, proto)).cloned()
     }
 
+    /// The `BackendId` the Sim selects for `(vip, port, proto)`: the lowest id
+    /// of the key's current generation, or `None` when the key has no outer
+    /// entry (the Sim twin of the connect hook's selection; the real Maglev
+    /// choice is proven only at Tier 3). Test-support surface for
+    /// `SimGatewayConnectDataplane`; not part of the `Dataplane` trait.
+    pub(crate) fn selected_backend_for(
+        &self,
+        vip: Ipv4Addr,
+        port: u16,
+        proto: Proto,
+    ) -> Option<BackendId> {
+        let state = self.state.lock();
+        state
+            .services
+            .get(&(vip, port, proto))?
+            .iter()
+            .filter_map(|backend| state.backend_memo.get(&(backend.addr, proto)).copied())
+            .min()
+    }
+
+    /// The applied identity of `backend_id`, if it was ever minted by this
+    /// instance. Test-support surface for `SimGatewayConnectDataplane`.
+    pub(crate) fn applied_identity(&self, backend_id: BackendId) -> Option<SpiffeId> {
+        self.state.lock().identities.get(&backend_id).cloned()
+    }
+
     /// Enumerate every VIP currently registered, in `Ord` order on
     /// [`Ipv4Addr`]. Iteration order is a function of the keys (the
     /// `BTreeMap` invariant), never of insertion history — this is
@@ -429,6 +473,46 @@ impl Dataplane for SimDataplane {
         // critical section.
         let mut state = self.state.lock();
 
+        // Identity preflight, before any mutation (mirrors the host's commit
+        // guard): an endpoint that still holds a live allocator association
+        // may not be re-leased to a different `Backend.alloc`, and one
+        // endpoint may not carry two allocations in one update.
+        let mut named: BTreeMap<SocketAddr, &SpiffeId> = BTreeMap::new();
+        for backend in &backends {
+            if let Some(held) = named.insert(backend.addr, &backend.alloc)
+                && *held != backend.alloc
+            {
+                return Err(DataplaneError::LoadFailed(format!(
+                    "backend endpoint {} carries two allocations: {held} and {}",
+                    backend.addr, backend.alloc
+                )));
+            }
+            let Some(backend_id) = state.backend_memo.get(&(backend.addr, proto)) else {
+                continue;
+            };
+            let current = state.identities.get(backend_id);
+            if let Some(current) = current.filter(|current| **current != backend.alloc) {
+                return Err(DataplaneError::BackendIdentityConflict {
+                    backend_id: *backend_id,
+                    current: current.clone(),
+                    attempted: backend.alloc.clone(),
+                });
+            }
+        }
+        for backend in &backends {
+            if state.backend_memo.contains_key(&(backend.addr, proto)) {
+                continue;
+            }
+            let backend_id = BackendId::new(state.next_backend_id).map_err(|error| {
+                DataplaneError::LoadFailed(format!("backend id counter: {error}"))
+            })?;
+            state.next_backend_id = state.next_backend_id.checked_add(1).ok_or_else(|| {
+                DataplaneError::LoadFailed("backend id counter exhausted".to_owned())
+            })?;
+            state.backend_memo.insert((backend.addr, proto), backend_id);
+            state.identities.insert(backend_id, backend.alloc.clone());
+        }
+
         // Snapshot prior reverse-NAT keys for this `(vip, proto)`
         // before any mutation — the diff drives the purge below. Keyed
         // per-proto so a co-resident other-proto frontend on the same
@@ -483,6 +567,17 @@ impl Dataplane for SimDataplane {
                 state.reverse_nat.remove(key);
             }
         }
+
+        // Orphan release (mirrors the host's post-commit sweep): an endpoint no
+        // service names any longer leaves the allocator memo, so a later update
+        // may bind it to another allocation under a fresh id. Applied identities
+        // are retained.
+        let live_endpoints: std::collections::BTreeSet<(SocketAddr, Proto)> = state
+            .services
+            .iter()
+            .flat_map(|((_v, _port, p), bs)| bs.iter().map(move |b| (b.addr, *p)))
+            .collect();
+        state.backend_memo.retain(|endpoint, _| live_endpoints.contains(endpoint));
 
         // Drop the guard before returning so the mutex is released
         // before any caller `.await` resumes — minimises contention

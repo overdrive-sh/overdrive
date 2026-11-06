@@ -260,7 +260,6 @@ fn script(owner: &mut dyn Owner, rt: &tokio::runtime::Runtime) -> Vec<String> {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER selection-receipt-and-applied-identity"]
 fn host_and_sim_agree_on_selection_identity_rejection_residue_and_restart() {
     let mut host = Host::new();
     let mut sim = Sim::new();

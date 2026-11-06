@@ -388,8 +388,20 @@ pub struct EbpfDataplane {
 
     /// Applied backend identity of every `BackendId` the Service maps name.
     /// Read by `GatewayConnectDataplane::selected_backend_identity`.
-    backend_identities:
-        parking_lot::Mutex<std::collections::BTreeMap<u32, overdrive_core::id::SpiffeId>>,
+    backend_identities: parking_lot::Mutex<
+        std::collections::BTreeMap<u32, crate::gateway_connect::BackendIdentityState>,
+    >,
+
+    /// The commit guard of `update_service` (ADR-0233): writers serialise on it
+    /// and `selected_backend_identity` readers wait for it, so an identity is
+    /// readable only after the outer `SERVICE_MAP` swap and its `Applied`
+    /// publication.
+    service_apply_commit: parking_lot::RwLock<()>,
+
+    /// Reverse-NAT keys a post-commit cleanup or a partial rollback could not
+    /// delete; retried by the next `update_service`.
+    service_cleanup_debt:
+        parking_lot::Mutex<std::collections::BTreeSet<crate::maps::BackendKeyPod>>,
 
     /// Owns the `cgroup_connect4_gateway` attachment (R-1): the separate gateway
     /// selection program beside `cgroup_connect4_service`. Same RAII
@@ -896,6 +908,8 @@ impl EbpfDataplane {
             gateway_intent_map: parking_lot::Mutex::new(gateway_intent_map),
             gateway_receipt_map: parking_lot::Mutex::new(gateway_receipt_map),
             backend_identities: parking_lot::Mutex::new(std::collections::BTreeMap::new()),
+            service_apply_commit: parking_lot::RwLock::new(()),
+            service_cleanup_debt: parking_lot::Mutex::new(std::collections::BTreeSet::new()),
             _cgroup_connect4_gateway_link: cgroup_connect4_gateway_link_id,
             reverse_local_miss_counter,
             cgroup_attach_path: cgroup_attach_path.to_path_buf(),
@@ -1837,6 +1851,472 @@ fn cgroup_load_error(hook: &'static str, error: &aya::programs::ProgramError) ->
     DataplaneError::LoadFailed(format!("{hook}.load: {error}"))
 }
 
+/// One backend of a planned `update_service` generation: the id it will carry,
+/// its `BACKEND_MAP` value and the allocation whose identity the id denotes.
+struct PlannedBackend {
+    id: overdrive_core::id::BackendId,
+    pod: crate::maps::BackendEntryPod,
+    alloc: overdrive_core::id::SpiffeId,
+    /// The id was minted by this update (no allocator memo entry before it).
+    fresh: bool,
+}
+
+/// What a pre-commit failure must restore (ADR-0233): only keys proven absent
+/// before this update are deleted, and an in-place `BACKEND_MAP` update restores
+/// the value it replaced.
+#[derive(Default)]
+struct ServiceApplyUndo {
+    inserted_backend_ids: Vec<overdrive_core::id::BackendId>,
+    updated_backend_pods: Vec<(overdrive_core::id::BackendId, crate::maps::BackendEntryPod)>,
+    inserted_reverse_keys: Vec<crate::maps::BackendKeyPod>,
+}
+
+/// Convert a `HashOfMaps` failure into the dataplane error; `context` names the
+/// operation in the `LoadFailed` text.
+fn hash_of_maps_error(
+    context: &str,
+    error: crate::maps::hash_of_maps::HashOfMapsError,
+) -> DataplaneError {
+    match error {
+        crate::maps::hash_of_maps::HashOfMapsError::MapAllocFailed { source } => {
+            DataplaneError::MapAllocFailed { source }
+        }
+        crate::maps::hash_of_maps::HashOfMapsError::Syscall(source) => {
+            DataplaneError::LoadFailed(format!("{context}: {source}"))
+        }
+    }
+}
+
+/// The commit-guarded Service-map and applied-identity transaction
+/// (ADR-0228, ADR-0232, ADR-0233, ADR-0241). Every method here runs under the
+/// `service_apply_commit` write guard `update_service` holds.
+#[allow(
+    clippy::significant_drop_tightening,
+    reason = "each map/allocator lock is held for exactly the section whose \
+              all-or-nothing outcome it protects, under the commit guard"
+)]
+impl EbpfDataplane {
+    /// Validate the input, reject an identity conflict before any mutation, then
+    /// mint ids for the endpoints the allocator has not seen and reserve their
+    /// identities (not yet readable).
+    fn plan_service_apply(
+        &self,
+        backends: &[Backend],
+        proto: u8,
+    ) -> Result<Vec<PlannedBackend>, DataplaneError> {
+        use crate::gateway_connect::BackendIdentityState;
+        use crate::maps::BackendEntryPod;
+
+        let mut by_endpoint: std::collections::BTreeMap<
+            (u32, u16),
+            (BackendEntryPod, &overdrive_core::id::SpiffeId),
+        > = std::collections::BTreeMap::new();
+        for backend in backends {
+            let pod = BackendEntryPod::from_backend(backend)?;
+            let endpoint = (pod.ipv4_host, pod.port_host);
+            if let Some((_, held)) = by_endpoint.get(&endpoint)
+                && **held != backend.alloc
+            {
+                return Err(DataplaneError::LoadFailed(format!(
+                    "backend endpoint {} carries two allocations: {held} and {}",
+                    backend.addr, backend.alloc
+                )));
+            }
+            by_endpoint.insert(endpoint, (pod, &backend.alloc));
+        }
+
+        let mut allocator = self.backend_id_alloc.lock();
+        let mut identities = self.backend_identities.lock();
+        for ((ip_host, port_host), (_, attempted)) in &by_endpoint {
+            let Some(backend_id) = allocator.existing_id(*ip_host, *port_host, proto) else {
+                continue;
+            };
+            let Some(state) = identities.get(&backend_id.get()) else {
+                continue;
+            };
+            if state.spiffe_id() != *attempted {
+                return Err(DataplaneError::BackendIdentityConflict {
+                    backend_id,
+                    current: state.spiffe_id().clone(),
+                    attempted: (*attempted).clone(),
+                });
+            }
+        }
+
+        let mut planned = Vec::with_capacity(by_endpoint.len());
+        for ((ip_host, port_host), (pod, alloc)) in by_endpoint {
+            let fresh = allocator.existing_id(ip_host, port_host, proto).is_none();
+            let id = allocator.allocate(ip_host, port_host, proto);
+            if fresh {
+                identities
+                    .insert(id.get(), BackendIdentityState::Reserved { spiffe_id: alloc.clone() });
+            }
+            planned.push(PlannedBackend { id, pod, alloc: alloc.clone(), fresh });
+        }
+        Ok(planned)
+    }
+
+    /// Everything up to and including the one atomic outer `SERVICE_MAP` swap.
+    /// A failure names the stage it happened at; `undo` records what to restore.
+    fn precommit_service_apply(
+        &self,
+        planned: &[PlannedBackend],
+        service_key: crate::maps::wire::ServiceKey,
+        new_keys: &std::collections::BTreeSet<crate::maps::BackendKeyPod>,
+        undo: &mut ServiceApplyUndo,
+    ) -> Result<(), (overdrive_core::traits::dataplane::ServiceApplyStage, DataplaneError)> {
+        use std::os::fd::AsFd;
+
+        use overdrive_core::traits::dataplane::ServiceApplyStage as Stage;
+
+        // Stage BackendMap — an identical entry is reused untouched, a differing
+        // `weight`/`healthy` is the ordinary in-place update (prior value saved),
+        // an absent key is inserted.
+        {
+            let mut backend_map = self.backend_map.lock();
+            for backend in planned {
+                let key = backend.id.get();
+                let prior = match backend_map.get(&key, 0) {
+                    Ok(prior) if prior == backend.pod => continue,
+                    Ok(prior) => Some(prior),
+                    Err(aya::maps::MapError::KeyNotFound) => None,
+                    Err(e) => {
+                        return Err((
+                            Stage::BackendMap,
+                            DataplaneError::LoadFailed(format!("BACKEND_MAP get: {e}")),
+                        ));
+                    }
+                };
+                backend_map.insert(key, backend.pod, 0).map_err(|e| {
+                    (
+                        Stage::BackendMap,
+                        DataplaneError::LoadFailed(format!("BACKEND_MAP insert: {e}")),
+                    )
+                })?;
+                match prior {
+                    Some(prior) => undo.updated_backend_pods.push((backend.id, prior)),
+                    None => undo.inserted_backend_ids.push(backend.id),
+                }
+            }
+        }
+
+        // Stage InnerMap — a fresh private inner ARRAY populated with the Maglev
+        // permutation (a deterministic function of the weighted backend set,
+        // S-2.2-12). The current outer pointer is untouched, so no new id is
+        // selectable yet.
+        let new_inner = self
+            .service_map
+            .create_inner(None)
+            .map_err(|e| (Stage::InnerMap, hash_of_maps_error("inner-map alloc", e)))?;
+        let weighted: std::collections::BTreeMap<overdrive_core::id::BackendId, u16> =
+            planned.iter().map(|backend| (backend.id, backend.pod.weight.max(1))).collect();
+        let permutation = overdrive_core::maglev::permutation::generate(
+            &weighted,
+            overdrive_core::dataplane::MaglevTableSize::DEFAULT,
+        );
+        if permutation.len() != SERVICE_MAP_INNER_CAPACITY as usize {
+            return Err((
+                Stage::InnerMap,
+                DataplaneError::LoadFailed(format!(
+                    "maglev::generate returned {} slots; expected {}",
+                    permutation.len(),
+                    SERVICE_MAP_INNER_CAPACITY
+                )),
+            ));
+        }
+        for (slot, bid) in permutation.iter().enumerate() {
+            // Slot is bounded by the permutation length check above
+            // (SERVICE_MAP_INNER_CAPACITY = 16_381, well within u32).
+            #[allow(clippy::cast_possible_truncation)]
+            let key_bytes = (slot as u32).to_ne_bytes();
+            crate::sys::bpf::bpf_map_update_elem(
+                new_inner.as_fd(),
+                &key_bytes,
+                &bid.get().to_ne_bytes(),
+                crate::sys::bpf::BPF_ANY,
+            )
+            .map_err(|e| {
+                (
+                    Stage::InnerMap,
+                    DataplaneError::LoadFailed(format!("inner-map slot {slot} populate: {e}")),
+                )
+            })?;
+        }
+
+        // Stage ReverseNat — MUST land before the outer swap so a response from a
+        // newly-added backend never misses the reverse map and escapes with the
+        // backend IP as source. Only absent keys are recorded for rollback.
+        let vip_value = crate::maps::VipPod {
+            ip_host: service_key.vip_host,
+            port_host: service_key.port_host,
+            _pad: 0,
+        };
+        {
+            let mut reverse_nat_map = self.reverse_nat_map.lock();
+            for key in new_keys {
+                let present = match reverse_nat_map.get(key, 0) {
+                    Ok(_) => true,
+                    Err(aya::maps::MapError::KeyNotFound) => false,
+                    Err(e) => {
+                        return Err((
+                            Stage::ReverseNat,
+                            DataplaneError::LoadFailed(format!("REVERSE_NAT_MAP get: {e}")),
+                        ));
+                    }
+                };
+                reverse_nat_map.insert(key, vip_value, 0).map_err(|e| {
+                    (
+                        Stage::ReverseNat,
+                        DataplaneError::LoadFailed(format!("REVERSE_NAT_MAP insert: {e}")),
+                    )
+                })?;
+                if !present {
+                    undo.inserted_reverse_keys.push(*key);
+                }
+            }
+        }
+
+        // Stage OuterCommit — the single atomic outer-pointer update. The kernel
+        // ref-counts the new and old inner maps; concurrent XDP readers see one or
+        // the other. THIS IS THE LOAD-BEARING STEP and the commit point.
+        self.service_map
+            .set(&service_key, new_inner.as_fd())
+            .map_err(|e| (Stage::OuterCommit, hash_of_maps_error("SERVICE_MAP outer set", e)))
+    }
+
+    /// Replay `undo` after a pre-commit failure: delete only keys proven absent
+    /// before this update (every one is attempted even after a failure), restore
+    /// in-place updates, remove this update's reserved identities and release its
+    /// fresh allocator memos (their numeric ids are never recycled). The prior
+    /// outer pointer was never touched. Returns the original error, or
+    /// `ServiceApplyRollback` when a restore delete also failed.
+    fn rollback_service_apply(
+        &self,
+        stage: overdrive_core::traits::dataplane::ServiceApplyStage,
+        error: DataplaneError,
+        undo: &ServiceApplyUndo,
+        planned: &[PlannedBackend],
+        proto: overdrive_core::dataplane::Proto,
+    ) -> DataplaneError {
+        use overdrive_core::traits::dataplane::ServiceApplyRollbackFailure as Failure;
+
+        let mut failures = Vec::new();
+        {
+            let mut backend_map = self.backend_map.lock();
+            for (id, prior) in undo.updated_backend_pods.iter().rev() {
+                if let Err(e) = backend_map.insert(id.get(), *prior, 0) {
+                    tracing::warn!(
+                        name: "dataplane.service_apply.restore_failed",
+                        backend_id = id.get(),
+                        error = %e,
+                        "BACKEND_MAP in-place update could not be restored"
+                    );
+                }
+            }
+            for id in undo.inserted_backend_ids.iter().rev() {
+                match backend_map.remove(&id.get()) {
+                    Ok(()) => {}
+                    Err(e) if crate::gateway_connect::is_key_absent(&e) => {}
+                    Err(_) => failures.push(Failure::BackendDelete(*id)),
+                }
+            }
+        }
+        {
+            let mut reverse_nat_map = self.reverse_nat_map.lock();
+            let mut debt = self.service_cleanup_debt.lock();
+            for key in undo.inserted_reverse_keys.iter().rev() {
+                match reverse_nat_map.remove(key) {
+                    Ok(()) => {}
+                    Err(e) if crate::gateway_connect::is_key_absent(&e) => {}
+                    Err(_) => {
+                        debt.insert(*key);
+                        failures.push(Failure::ReverseNatDelete {
+                            backend: std::net::SocketAddrV4::new(
+                                Ipv4Addr::from(key.ip_host),
+                                key.port_host,
+                            ),
+                            proto,
+                        });
+                    }
+                }
+            }
+        }
+        {
+            let mut allocator = self.backend_id_alloc.lock();
+            let mut identities = self.backend_identities.lock();
+            for backend in planned.iter().filter(|backend| backend.fresh) {
+                identities.remove(&backend.id.get());
+                allocator.release(backend.id);
+            }
+        }
+        if failures.is_empty() {
+            error
+        } else {
+            DataplaneError::ServiceApplyRollback { stage, rollback: failures }
+        }
+    }
+
+    /// Non-empty update: plan, pre-commit, commit, then publish every identity
+    /// `Applied` before the guard releases.
+    fn apply_service(
+        &self,
+        service_key: crate::maps::wire::ServiceKey,
+        svc_proto: overdrive_core::dataplane::Proto,
+        backends: &[Backend],
+    ) -> Result<(), DataplaneError> {
+        use crate::gateway_connect::BackendIdentityState;
+        use crate::maps::BackendKeyPod;
+
+        let proto = svc_proto.as_u8();
+        let planned = self.plan_service_apply(backends, proto)?;
+        let new_keys: std::collections::BTreeSet<BackendKeyPod> = planned
+            .iter()
+            .map(|backend| BackendKeyPod {
+                ip_host: backend.pod.ipv4_host,
+                port_host: backend.pod.port_host,
+                proto,
+                _pad: 0,
+            })
+            .collect();
+
+        let mut undo = ServiceApplyUndo::default();
+        if let Err((stage, error)) =
+            self.precommit_service_apply(&planned, service_key, &new_keys, &mut undo)
+        {
+            return Err(self.rollback_service_apply(stage, error, &undo, &planned, svc_proto));
+        }
+
+        // Committed. Publishing is infallible in-memory mutation: a receipt that
+        // names one of these ids can resolve its identity only after this point,
+        // because its read waits for the commit guard.
+        {
+            let mut identities = self.backend_identities.lock();
+            for backend in &planned {
+                identities.insert(
+                    backend.id.get(),
+                    BackendIdentityState::Applied { spiffe_id: backend.alloc.clone() },
+                );
+            }
+        }
+        self.service_backends
+            .lock()
+            .insert(service_key, planned.iter().map(|backend| backend.id.get()).collect());
+        let stale_reverse: std::collections::BTreeSet<BackendKeyPod> = {
+            let mut tracker = self.service_reverse_nat_keys.lock();
+            let prior = tracker.get(&service_key).cloned().unwrap_or_default();
+            tracker.insert(service_key, new_keys.clone());
+            prior.difference(&new_keys).copied().collect()
+        };
+        self.settle_cleanup(stale_reverse);
+        Ok(())
+    }
+
+    /// Empty update: the outer-slot delete is the commit; historical Applied
+    /// identities stay readable for old receipts; the idempotent cleanup follows.
+    fn withdraw_service(
+        &self,
+        frontend_key: crate::maps::wire::ServiceKey,
+    ) -> Result<(), DataplaneError> {
+        let matching_keys: Vec<crate::maps::wire::ServiceKey> = {
+            let tracker = self.service_backends.lock();
+            empty_backend_purge_keys(tracker.keys(), frontend_key)
+        };
+        if matching_keys.is_empty() {
+            return Ok(());
+        }
+        for service_key in &matching_keys {
+            self.service_map
+                .delete(service_key)
+                .map_err(|e| hash_of_maps_error("SERVICE_MAP outer delete", e))?;
+        }
+        {
+            let mut tracker = self.service_backends.lock();
+            for service_key in &matching_keys {
+                tracker.remove(service_key);
+            }
+        }
+        let stale_reverse = {
+            let mut tracker = self.service_reverse_nat_keys.lock();
+            matching_keys.iter().flat_map(|key| tracker.remove(key).unwrap_or_default()).collect()
+        };
+        self.settle_cleanup(stale_reverse);
+        Ok(())
+    }
+
+    /// Post-commit orphan cleanup (ADR-0233 step 6). Never turns a committed
+    /// update into a failure: a `BACKEND_MAP` orphan that cannot be removed is
+    /// swept again by the next update's full scan, and a reverse-NAT key that
+    /// cannot be removed stays in `service_cleanup_debt` until a later update
+    /// removes it. Applied identities are never removed.
+    fn settle_cleanup(
+        &self,
+        stale_reverse: std::collections::BTreeSet<crate::maps::BackendKeyPod>,
+    ) {
+        let live_ids: std::collections::BTreeSet<u32> =
+            self.service_backends.lock().values().flat_map(|ids| ids.iter().copied()).collect();
+        {
+            let mut backend_map = self.backend_map.lock();
+            let released = match crate::gc::sweep_orphan_backends(&mut backend_map, &live_ids) {
+                Ok(removed) => removed,
+                Err(crate::gc::GcError::Remove {
+                    offending_id,
+                    removed_before_failure,
+                    source,
+                }) => {
+                    tracing::warn!(
+                        name: "dataplane.service_cleanup.deferred",
+                        backend_id = offending_id,
+                        error = %source,
+                        "BACKEND_MAP orphan removal deferred to the next update"
+                    );
+                    removed_before_failure
+                }
+                Err(crate::gc::GcError::KeysIteration { source }) => {
+                    tracing::warn!(
+                        name: "dataplane.service_cleanup.deferred",
+                        error = %source,
+                        "BACKEND_MAP orphan sweep deferred to the next update"
+                    );
+                    Vec::new()
+                }
+            };
+            let mut allocator = self.backend_id_alloc.lock();
+            for removed_id in released {
+                if let Ok(bid) = overdrive_core::id::BackendId::new(removed_id) {
+                    allocator.release(bid);
+                }
+            }
+        }
+
+        let live_nat: std::collections::BTreeSet<crate::maps::BackendKeyPod> = self
+            .service_reverse_nat_keys
+            .lock()
+            .values()
+            .flat_map(|keys| keys.iter().copied())
+            .collect();
+        let mut debt = self.service_cleanup_debt.lock();
+        debt.extend(stale_reverse);
+        let mut reverse_nat_map = self.reverse_nat_map.lock();
+        debt.retain(|key| {
+            if live_nat.contains(key) {
+                return false;
+            }
+            match reverse_nat_map.remove(key) {
+                Ok(()) => false,
+                Err(e) if crate::gateway_connect::is_key_absent(&e) => false,
+                Err(e) => {
+                    tracing::warn!(
+                        name: "dataplane.service_cleanup.deferred",
+                        error = %e,
+                        "REVERSE_NAT_MAP key removal deferred to the next update"
+                    );
+                    true
+                }
+            }
+        });
+    }
+}
+
 #[async_trait]
 #[allow(clippy::too_many_lines)]
 impl Dataplane for EbpfDataplane {
@@ -1889,382 +2369,35 @@ impl Dataplane for EbpfDataplane {
         frontend: overdrive_core::dataplane::ServiceFrontend,
         backends: Vec<Backend>,
     ) -> Result<(), DataplaneError> {
-        use std::os::fd::AsFd;
-
-        use crate::maps::wire::{BackendEntryPod, ServiceKey};
-        use crate::maps::{BackendKeyPod, VipPod};
+        use crate::maps::wire::ServiceKey;
 
         // `frontend.vip` is IPv4-by-construction (ADR-0060 D1a) — narrow
         // infallibly. `frontend.proto()` is the single declared L4
         // protocol; the REVERSE_NAT fan-out is per-proto (D4).
         let vip = frontend.vip_v4();
         let svc_proto = frontend.proto();
-
-        // Empty backend set — remove THIS frontend's slot from all maps
-        // so XDP returns XDP_PASS for it. The purge is scoped to the
-        // single `(vip, port, proto)` identity (per-proto purge,
-        // ADR-0060 D4): the same VIP may carry several listeners
-        // installed by separate `update_service` calls (CoreDNS
-        // `tcp/53` + `udp/53`), and an empty-backend update for one MUST
-        // leave the others' outer-map slots intact. `frontend.port()`
-        // is the listener port — `backends` is empty here, so the
-        // non-empty path's `backends[0].addr.port()` is unavailable.
-        if backends.is_empty() {
-            let frontend_key = crate::maps::wire::ServiceKey {
-                vip_host: u32::from(vip),
-                port_host: frontend.port().get(),
-                proto: svc_proto.as_u8(),
-                _pad: 0,
-            };
-
-            let matching_keys: Vec<crate::maps::wire::ServiceKey> = {
-                let tracker = self.service_backends.lock();
-                empty_backend_purge_keys(tracker.keys(), frontend_key)
-            };
-
-            if matching_keys.is_empty() {
-                return Ok(());
-            }
-
-            for service_key in &matching_keys {
-                self.service_map.delete(service_key).map_err(|e| match e {
-                    crate::maps::hash_of_maps::HashOfMapsError::MapAllocFailed { source } => {
-                        DataplaneError::MapAllocFailed { source }
-                    }
-                    crate::maps::hash_of_maps::HashOfMapsError::Syscall(source) => {
-                        DataplaneError::LoadFailed(format!("SERVICE_MAP outer delete: {source}"))
-                    }
-                })?;
-            }
-
-            let live_ids: std::collections::BTreeSet<u32> = {
-                let mut tracker = self.service_backends.lock();
-                for service_key in &matching_keys {
-                    tracker.remove(service_key);
-                }
-                tracker
-                    .values()
-                    .flat_map(|s| s.iter().copied())
-                    .collect::<std::collections::BTreeSet<u32>>()
-            };
-            {
-                let mut backend_map = self.backend_map.lock();
-                let removed = crate::gc::sweep_orphan_backends(&mut backend_map, &live_ids)
-                    .map_err(|e| {
-                        DataplaneError::LoadFailed(format!("BACKEND_MAP orphan-GC sweep: {e}"))
-                    })?;
-                if !removed.is_empty() {
-                    let mut alloc = self.backend_id_alloc.lock();
-                    let mut identities = self.backend_identities.lock();
-                    for removed_id in &removed {
-                        identities.remove(removed_id);
-                        if let Ok(bid) = overdrive_core::id::BackendId::new(*removed_id) {
-                            alloc.release(bid);
-                        }
-                    }
-                }
-            }
-
-            let stale_keys: std::collections::BTreeSet<crate::maps::BackendKeyPod> = {
-                let mut tracker = self.service_reverse_nat_keys.lock();
-                let prior_keys: std::collections::BTreeSet<crate::maps::BackendKeyPod> =
-                    matching_keys
-                        .iter()
-                        .flat_map(|sk| tracker.remove(sk).unwrap_or_default())
-                        .collect();
-                let live: std::collections::BTreeSet<crate::maps::BackendKeyPod> =
-                    tracker.values().flat_map(|s| s.iter().copied()).collect();
-                prior_keys.difference(&live).copied().collect()
-            };
-            {
-                let mut reverse_nat_map = self.reverse_nat_map.lock();
-                for stale in &stale_keys {
-                    match reverse_nat_map.remove(stale) {
-                        Ok(()) | Err(aya::maps::MapError::KeyNotFound) => {}
-                        Err(e) => {
-                            return Err(DataplaneError::LoadFailed(format!(
-                                "REVERSE_NAT_MAP purge: {e}"
-                            )));
-                        }
-                    }
-                }
-            }
-
-            return Ok(());
-        }
-
-        let vip_port = frontend.port().get();
-        // Step 02-01: proto sourced from the `ServiceFrontend` (ADR-0060
-        // site #7) — NO `Proto::Tcp` literal on the action→handle→key
-        // path, so a UDP service keys a distinct outer-map slot (C3
-        // guard).
+        // The outer slot is keyed on the declared frontend `(vip, port,
+        // proto)` (ADR-0060 site #7): a UDP service keys a distinct slot
+        // (C3 guard), and `frontend.port()` — not a backend's listener port —
+        // is the VIP port the XDP program matches on.
         let service_key = ServiceKey {
             vip_host: u32::from(vip),
-            port_host: vip_port,
+            port_host: frontend.port().get(),
             proto: svc_proto.as_u8(),
             _pad: 0,
         };
 
-        // Step 1 — Upsert each backend into BACKEND_MAP. BackendId
-        // is assigned by the monotonic-counter allocator per ADR-0046.
-        // Same (ip, port, proto) yields the same BackendId across
-        // updates (memo-table hit); orphan GC removes IDs not in the
-        // new set.
-        //
-        // Proto threaded from the `ServiceFrontend` (ADR-0060, GH #163)
-        // — the per-service L4 protocol, no longer hardcoded TCP.
-        let proto = svc_proto.as_u8();
-        let mut backend_ids: Vec<u32> = Vec::with_capacity(backends.len());
-        {
-            // Locks held only for the BACKEND_MAP populate loop;
-            // dropped at end of this block before any further work.
-            let mut backend_map = self.backend_map.lock();
-            let mut alloc = self.backend_id_alloc.lock();
-            for backend in &backends {
-                let pod = BackendEntryPod::from_backend(backend)?;
-                let backend_id: u32 = alloc.allocate(pod.ipv4_host, pod.port_host, proto).get();
-                backend_map
-                    .insert(backend_id, pod, 0)
-                    .map_err(|e| DataplaneError::LoadFailed(format!("BACKEND_MAP insert: {e}")))?;
-                backend_ids.push(backend_id);
-            }
-            // Lock dropped here, before any further work that could
-            // .await (per `.claude/rules/development.md` § Concurrency:
-            // never hold a lock across `.await`).
+        // Commit guard (ADR-0233, ADR-0241): update writers serialise and
+        // `selected_backend_identity` readers wait for it. From here to the end
+        // of the function the body is synchronous aya map syscalls and
+        // in-memory mutation with no `.await`, so cancellation cannot expose a
+        // half-published state.
+        let _commit = self.service_apply_commit.write();
+
+        if backends.is_empty() {
+            return self.withdraw_service(service_key);
         }
-
-        // Step 2 — Allocate a fresh inner ARRAY (size 256) and
-        // populate slots with round-robin BackendIds. On alloc
-        // rejection convert HashOfMapsError::MapAllocFailed →
-        // DataplaneError::MapAllocFailed (the typed S-2.2-11 path).
-        let new_inner = self.service_map.create_inner(None).map_err(|e| match e {
-            crate::maps::hash_of_maps::HashOfMapsError::MapAllocFailed { source } => {
-                DataplaneError::MapAllocFailed { source }
-            }
-            crate::maps::hash_of_maps::HashOfMapsError::Syscall(source) => {
-                DataplaneError::LoadFailed(format!("inner-map alloc: {source}"))
-            }
-        })?;
-
-        // Populate inner ARRAY slots via the Maglev permutation
-        // (Slice 04 — replaces Slice 03's round-robin populate). The
-        // permutation is a deterministic function of the weighted
-        // backend set, ordered canonically by `BTreeMap<BackendId,
-        // Weight>` per `.claude/rules/development.md` § Ordered-
-        // collection choice; the same backend set produces the same
-        // permutation byte-for-byte across runs and across nodes
-        // (DST invariant `MaglevDeterministic`; S-2.2-12).
-        //
-        // Two structural properties matter at this seam:
-        //
-        // 1. **Distribution evenness** — each backend appears in
-        //    ≈ M / N_backends slots; under uniformly hashed traffic
-        //    each backend receives ≈ 1/N of the load (S-2.2-15
-        //    bound: ±5 %).
-        // 2. **Disruption bound** — adding or removing one backend
-        //    shifts ≤ 1 / N_backends ≈ 1 % of slots (ASR-2.2-02).
-        //    This is the consistent-hashing guarantee that makes
-        //    backend-set churn cheap; without Maglev a flat hash
-        //    would re-shuffle ~all slots on any change.
-        //
-        // The XDP fast path indexes this populated ARRAY by
-        // FNV-1a(5-tuple) mod M — see
-        // `crates/overdrive-bpf/src/programs/xdp_service_map.rs`.
-        let weighted: std::collections::BTreeMap<overdrive_core::id::BackendId, u16> = backends
-            .iter()
-            .map(|backend| {
-                let pod = BackendEntryPod::from_backend(backend)?;
-                let bid =
-                    self.backend_id_alloc.lock().allocate(pod.ipv4_host, pod.port_host, proto);
-                Ok((bid, backend.weight.max(1)))
-            })
-            .collect::<Result<_, DataplaneError>>()?;
-        let permutation = overdrive_core::maglev::permutation::generate(
-            &weighted,
-            overdrive_core::dataplane::MaglevTableSize::DEFAULT,
-        );
-        // Defensive: if `generate` returns a table with the wrong size
-        // (only possible on empty inputs, which we short-circuited at
-        // the top of this fn), fall back to LoadFailed rather than
-        // silently mispopulating.
-        if permutation.len() != SERVICE_MAP_INNER_CAPACITY as usize {
-            return Err(DataplaneError::LoadFailed(format!(
-                "maglev::generate returned {} slots; expected {}",
-                permutation.len(),
-                SERVICE_MAP_INNER_CAPACITY
-            )));
-        }
-        for (slot, bid) in permutation.iter().enumerate() {
-            // Slot is bounded by the permutation length check above
-            // (SERVICE_MAP_INNER_CAPACITY = 16_381, well within u32);
-            // the cast is provably lossless.
-            #[allow(clippy::cast_possible_truncation)]
-            let key_bytes = (slot as u32).to_ne_bytes();
-            let value_bytes = bid.get().to_ne_bytes();
-            crate::sys::bpf::bpf_map_update_elem(
-                new_inner.as_fd(),
-                &key_bytes,
-                &value_bytes,
-                crate::sys::bpf::BPF_ANY,
-            )
-            .map_err(|e| {
-                DataplaneError::LoadFailed(format!("inner-map slot {slot} populate: {e}"))
-            })?;
-        }
-
-        // Step 2b — Pre-populate REVERSE_NAT_MAP for new backends.
-        //
-        // MUST land BEFORE the SERVICE_MAP swap (step 3) so the
-        // reverse path is ready before any packet can be forwarded
-        // to a new backend. Without this ordering, a response from
-        // a newly-added backend arrives at xdp_reverse_nat_lookup,
-        // misses the REVERSE_NAT_MAP, and escapes with the backend
-        // IP as source — breaking the VIP abstraction.
-        //
-        // Inserting with BPF_ANY is idempotent: re-adding an
-        // existing backend is a no-op update. Stale entries for
-        // removed backends are purged in step 5 (after the swap),
-        // which is safe because removed backends no longer receive
-        // forward-path traffic.
-        let new_keys: std::collections::BTreeSet<BackendKeyPod> = backends
-            .iter()
-            .filter_map(|backend| match backend.addr.ip() {
-                std::net::IpAddr::V4(v4) => Some(BackendKeyPod {
-                    ip_host: u32::from(v4),
-                    port_host: backend.addr.port(),
-                    proto: svc_proto.as_u8(),
-                    _pad: 0,
-                }),
-                std::net::IpAddr::V6(_) => None,
-            })
-            .collect();
-        let vip_value = VipPod { ip_host: u32::from(vip), port_host: vip_port, _pad: 0 };
-        {
-            let mut reverse_nat_map = self.reverse_nat_map.lock();
-            for key in &new_keys {
-                reverse_nat_map.insert(key, vip_value, 0).map_err(|e| {
-                    DataplaneError::LoadFailed(format!("REVERSE_NAT_MAP insert: {e}"))
-                })?;
-            }
-        }
-
-        // The applied identity of every backend this update names is published
-        // before the outer swap, so a `Selected` receipt that names one of these
-        // ids can always resolve its identity.
-        //
-        // Interim minimal read: the commit-guarded applied-identity step replaces
-        // this plain map with a transaction (identity readable only after the
-        // swap, immutable per id, rolled back on failure). Until then a failed
-        // swap, or a reused `(ip, port, proto)` id, can expose an uncommitted
-        // identity.
-        {
-            let mut identities = self.backend_identities.lock();
-            for (backend_id, backend) in backend_ids.iter().zip(&backends) {
-                identities.insert(*backend_id, backend.alloc.clone());
-            }
-        }
-
-        // Step 3 — Atomic outer-pointer update. Single
-        // bpf_map_update_elem syscall; kernel ref-counts the new
-        // inner map and the old; concurrent XDP readers see one or
-        // the other atomically. THIS IS THE LOAD-BEARING STEP.
-        self.service_map.set(&service_key, new_inner.as_fd()).map_err(|e| match e {
-            crate::maps::hash_of_maps::HashOfMapsError::MapAllocFailed { source } => {
-                DataplaneError::MapAllocFailed { source }
-            }
-            crate::maps::hash_of_maps::HashOfMapsError::Syscall(source) => {
-                DataplaneError::LoadFailed(format!("SERVICE_MAP outer set: {source}"))
-            }
-        })?;
-
-        // Step 4 — Orphan GC (S-2.2-10).
-        //
-        // Update the per-service tracker with this update's BackendId
-        // set, compute the live-set union across every active service,
-        // and sweep BACKEND_MAP for entries no longer referenced.
-        // Without this, BACKEND_MAP fills monotonically as services
-        // shrink — see `crate::gc` module docs for the full rationale.
-        //
-        // Two locks held briefly back-to-back: `service_backends` for
-        // the tracker update + union, `backend_map` for the sweep.
-        // Both critical sections are pure-syscall — no `.await`
-        // between acquire and release.
-        let live_ids: std::collections::BTreeSet<u32> = {
-            let mut tracker = self.service_backends.lock();
-            tracker.insert(service_key, backend_ids.iter().copied().collect());
-            tracker
-                .values()
-                .flat_map(|s| s.iter().copied())
-                .collect::<std::collections::BTreeSet<u32>>()
-        };
-        {
-            let mut backend_map = self.backend_map.lock();
-            let removed =
-                crate::gc::sweep_orphan_backends(&mut backend_map, &live_ids).map_err(|e| {
-                    DataplaneError::LoadFailed(format!("BACKEND_MAP orphan-GC sweep: {e}"))
-                })?;
-            // Release removed ids from the allocator memo table
-            // (ADR-0046). Lock acquired after backend_map is done —
-            // same brief-hold discipline.
-            if !removed.is_empty() {
-                let mut alloc = self.backend_id_alloc.lock();
-                let mut identities = self.backend_identities.lock();
-                for removed_id in &removed {
-                    identities.remove(removed_id);
-                    if let Ok(bid) = overdrive_core::id::BackendId::new(*removed_id) {
-                        alloc.release(bid);
-                    }
-                }
-            }
-        }
-
-        // Step 5 — REVERSE_NAT_MAP stale-entry purge (S-2.2-18).
-        //
-        // New entries already landed in step 2b (before the
-        // SERVICE_MAP swap). This step purges entries for backends
-        // that left this service and are not referenced by any
-        // other active service. Runs after the swap because stale
-        // reverse-NAT entries are harmless (removed backends no
-        // longer receive forward-path traffic) while the pre-swap
-        // insert ordering is safety-critical.
-        //
-        // The proto is `frontend.proto()` (ADR-0060 D4) — the
-        // per-service L4 protocol threaded through `new_keys` above.
-        let (prior_keys, live_nat_keys): (
-            std::collections::BTreeSet<BackendKeyPod>,
-            std::collections::BTreeSet<BackendKeyPod>,
-        ) = {
-            let mut tracker = self.service_reverse_nat_keys.lock();
-            let prior = tracker.get(&service_key).cloned().unwrap_or_default();
-            tracker.insert(service_key, new_keys.clone());
-            let live = tracker.values().flat_map(|s| s.iter().copied()).collect();
-            (prior, live)
-        };
-        {
-            let mut reverse_nat_map = self.reverse_nat_map.lock();
-            for stale in prior_keys.difference(&new_keys) {
-                if live_nat_keys.contains(stale) {
-                    continue;
-                }
-                match reverse_nat_map.remove(stale) {
-                    Ok(()) | Err(aya::maps::MapError::KeyNotFound) => {}
-                    Err(e) => {
-                        return Err(DataplaneError::LoadFailed(format!(
-                            "REVERSE_NAT_MAP purge: {e}"
-                        )));
-                    }
-                }
-            }
-        }
-
-        // Step 6 — Old inner map released by aya's ref-counting once
-        // it goes out of scope in the kernel-side program tail. The
-        // userspace `OwnedFd` we used to populate the new inner map
-        // (`new_inner`) drops here, decrementing the userspace-side
-        // refcount. The kernel keeps the inner map alive while
-        // SERVICE_MAP outer references it.
-
-        Ok(())
+        self.apply_service(service_key, svc_proto, &backends)
     }
 
     /// see #27 (telemetry `ringbuf`)
