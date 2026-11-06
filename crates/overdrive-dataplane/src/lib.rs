@@ -32,6 +32,9 @@ pub mod allocators;
 // 5-step swap orchestration).
 pub mod gc;
 
+// Crate-private seam over `BACKEND_MAP` (production: the real aya map).
+mod backend_map;
+
 // Direct `bpf(2)` syscall surface used where aya 0.13.x ships no
 // typed wrappers (HASH_OF_MAPS construction + `BPF_PROG_TEST_RUN`).
 pub mod sys;
@@ -65,6 +68,11 @@ pub mod gateway_connect;
 // `receipt_conf`) against the real `EbpfDataplane`.
 #[cfg(all(test, feature = "integration-tests"))]
 mod quint_selection_receipt;
+
+// S-PIG-132: the fault decorator over the `BACKEND_MAP` seam and the
+// rollback-restore scenario that uses it.
+#[cfg(all(test, feature = "integration-tests"))]
+mod service_apply_rollback_faults;
 
 use std::net::Ipv4Addr;
 
@@ -188,9 +196,7 @@ pub struct EbpfDataplane {
     /// the canonical interior-mutability boundary for BPF map
     /// updates). The lock is held only for the duration of the BPF
     /// syscalls — never across `.await`.
-    backend_map: parking_lot::Mutex<
-        aya::maps::HashMap<aya::maps::MapData, u32, crate::maps::BackendEntryPod>,
-    >,
+    backend_map: parking_lot::Mutex<Box<dyn crate::backend_map::BackendMapOps + Send>>,
 
     /// Userspace handle to REVERSE_NAT_MAP (regular HASH; aya
     /// supports it natively). Keys = `BackendKeyPod { backend_ip,
@@ -891,7 +897,7 @@ impl EbpfDataplane {
         Ok(Self {
             bpf,
             service_map,
-            backend_map: parking_lot::Mutex::new(backend_map),
+            backend_map: parking_lot::Mutex::new(Box::new(backend_map)),
             reverse_nat_map: parking_lot::Mutex::new(reverse_nat_map),
             backend_id_alloc: parking_lot::Mutex::new(crate::allocators::BackendIdAllocator::new()),
             service_backends: parking_lot::Mutex::new(std::collections::BTreeMap::new()),
@@ -1132,7 +1138,7 @@ impl EbpfDataplane {
         let mut entries = Vec::with_capacity(keys.len());
         for key in keys {
             let entry = backend_map
-                .get(&key, 0)
+                .get(key)
                 .map_err(|e| DataplaneError::LoadFailed(format!("BACKEND_MAP get({key}): {e}")))?;
             entries.push((key, entry));
         }
@@ -1247,7 +1253,7 @@ impl EbpfDataplane {
         // Step 1 — write.
         self.backend_map
             .lock()
-            .insert(SENTINEL_BACKEND_ID, sentinel, 0)
+            .insert(SENTINEL_BACKEND_ID, sentinel)
             .map_err(|e| DataplaneError::LoadFailed(format!("probe: BACKEND_MAP insert: {e}")))?;
 
         // Step 2 — read-back. Bind the lookup `Result` to a local so
@@ -1255,7 +1261,7 @@ impl EbpfDataplane {
         // arm runs — keeps clippy's
         // `significant_drop_in_scrutinee` lint satisfied without
         // holding the lock across the error-formatting path.
-        let read_back = self.backend_map.lock().get(&SENTINEL_BACKEND_ID, 0);
+        let read_back = self.backend_map.lock().get(SENTINEL_BACKEND_ID);
         let got: Option<BackendEntryPod> = match read_back {
             Ok(v) => Some(v),
             Err(aya::maps::MapError::KeyNotFound) => None,
@@ -1272,7 +1278,7 @@ impl EbpfDataplane {
             // in a clean state if we can. Errors here are swallowed:
             // the round-trip mismatch is the real story and a delete
             // failure on an already-broken map would only mask it.
-            let _ = self.backend_map.lock().remove(&SENTINEL_BACKEND_ID);
+            let _ = self.backend_map.lock().remove(SENTINEL_BACKEND_ID);
             return Err(DataplaneError::LoadFailed(format!(
                 "probe: round-trip mismatch (got {got:?}, want {sentinel:?})"
             )));
@@ -1282,7 +1288,7 @@ impl EbpfDataplane {
         // byte-equal to its pre-probe state.
         self.backend_map
             .lock()
-            .remove(&SENTINEL_BACKEND_ID)
+            .remove(SENTINEL_BACKEND_ID)
             .map_err(|e| DataplaneError::LoadFailed(format!("probe: BACKEND_MAP delete: {e}")))?;
 
         // ADR-0053 § 6 — Earned-Trust probe extension. Sentinel
@@ -2014,7 +2020,7 @@ impl EbpfDataplane {
             let mut backend_map = self.backend_map.lock();
             for backend in planned {
                 let key = backend.id.get();
-                let prior = match backend_map.get(&key, 0) {
+                let prior = match backend_map.get(key) {
                     Ok(prior) if prior == backend.pod => continue,
                     Ok(prior) => Some(prior),
                     Err(aya::maps::MapError::KeyNotFound) => None,
@@ -2025,7 +2031,7 @@ impl EbpfDataplane {
                         ));
                     }
                 };
-                backend_map.insert(key, backend.pod, 0).map_err(|e| {
+                backend_map.insert(key, backend.pod).map_err(|e| {
                     (
                         Stage::BackendMap,
                         DataplaneError::LoadFailed(format!("BACKEND_MAP insert: {e}")),
@@ -2147,12 +2153,12 @@ impl EbpfDataplane {
         {
             let mut backend_map = self.backend_map.lock();
             for (id, prior) in undo.updated_backend_pods.iter().rev() {
-                if backend_map.insert(id.get(), *prior, 0).is_err() {
+                if backend_map.insert(id.get(), *prior).is_err() {
                     failures.push(Failure::BackendRestore(*id));
                 }
             }
             for id in undo.inserted_backend_ids.iter().rev() {
-                match backend_map.remove(&id.get()) {
+                match backend_map.remove(id.get()) {
                     Ok(()) => {}
                     Err(e) if crate::gateway_connect::is_key_absent(&e) => {}
                     Err(_) => failures.push(Failure::BackendDelete(*id)),
@@ -2302,7 +2308,8 @@ impl EbpfDataplane {
             self.service_backends.lock().values().flat_map(|ids| ids.iter().copied()).collect();
         {
             let mut backend_map = self.backend_map.lock();
-            let released = match crate::gc::sweep_orphan_backends(&mut backend_map, &live_ids) {
+            let released = match crate::gc::sweep_orphan_backends_in(&mut **backend_map, &live_ids)
+            {
                 Ok(removed) => removed,
                 Err(crate::gc::GcError::Remove {
                     offending_id,

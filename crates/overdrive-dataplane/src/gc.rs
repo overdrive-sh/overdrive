@@ -96,6 +96,18 @@ pub fn sweep_orphan_backends<T>(
 where
     T: std::borrow::BorrowMut<aya::maps::MapData>,
 {
+    sweep_orphan_backends_in(backend_map, live_ids)
+}
+
+/// [`sweep_orphan_backends`] over the crate-private `BACKEND_MAP` seam, the
+/// form `EbpfDataplane` calls.
+pub(crate) fn sweep_orphan_backends_in<M>(
+    backend_map: &mut M,
+    live_ids: &BTreeSet<u32>,
+) -> Result<Vec<u32>, GcError>
+where
+    M: crate::backend_map::BackendMapOps + ?Sized,
+{
     // Phase 1 — collect orphan candidates. We MUST snapshot keys
     // before mutating the map: removing during iteration on a BPF
     // hash map produces undefined kernel behavior (the cursor's
@@ -112,7 +124,7 @@ where
     // partial failure the caller learns which IDs are already gone.
     let mut removed: Vec<u32> = Vec::with_capacity(orphans.len());
     for orphan in orphans {
-        backend_map.remove(&orphan).map_err(|source| GcError::Remove {
+        backend_map.remove(orphan).map_err(|source| GcError::Remove {
             offending_id: orphan,
             removed_before_failure: removed.clone(),
             source,
