@@ -13,7 +13,7 @@
 #     --run, --shell and bootstrap (provisioning) take it, because they mutate
 #     node-global kernel state (nft tables, routes, cgroups, netns, KVM).
 #   * TREE lock (/run/lock/overdrive-metal-tree-<tree>.lock): one holder per
-#     branch tree. --sync-only takes ONLY this lock, since it writes only into
+#     branch tree. --sync-only and --pull take ONLY this lock, since they touch only
 #     the branch's private tree, so it never waits behind another workspace's
 #     run. --run also takes it (after the global lease) around its own rsync,
 #     and the durable run command re-takes it for the whole command, so a
@@ -26,6 +26,7 @@
 #   infra/metal/bootstrap.sh root@1.2.3.4 --sync-only
 #   infra/metal/bootstrap.sh root@1.2.3.4 --run -- cargo nextest run
 #   infra/metal/bootstrap.sh root@1.2.3.4 --collect <RUN_ID>
+#   infra/metal/bootstrap.sh root@1.2.3.4 --pull -- specs/quint/<subsystem>/evidence
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -56,12 +57,13 @@ esac
 }
 SSH_OPTS=(-o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30)
 
-[ $# -ge 1 ] || { echo "usage: $0 <user@host> [--data-disk DEV] [--sync-only]" >&2; exit 1; }
+[ $# -ge 1 ] || { echo "usage: $0 <user@host> [--data-disk DEV] [--sync-only | --pull -- PATH... | --run -- CMD... | --shell | --collect ID]" >&2; exit 1; }
 TARGET="$1"; shift
 
 DATA_DISK=""
 BREAK_RAID_DISK=""
 SYNC_ONLY=0
+PULL_MODE=0
 RUN_MODE=0
 SHELL_MODE=0
 COLLECT_MODE=0
@@ -74,6 +76,7 @@ while [ $# -gt 0 ]; do
     --data-disk) DATA_DISK="$2"; shift 2 ;;
     --break-raid-disk) BREAK_RAID_DISK="$2"; shift 2 ;;
     --sync-only) SYNC_ONLY=1; shift ;;
+    --pull) PULL_MODE=1; shift ;;
     --run) RUN_MODE=1; shift ;;
     --shell) SHELL_MODE=1; shift ;;
     --collect)
@@ -86,14 +89,36 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-[ $((SYNC_ONLY + RUN_MODE + SHELL_MODE + COLLECT_MODE)) -le 1 ] || {
-  echo "FATAL: choose only one of --sync-only, --run, --shell, or --collect" >&2
+[ $((SYNC_ONLY + PULL_MODE + RUN_MODE + SHELL_MODE + COLLECT_MODE)) -le 1 ] || {
+  echo "FATAL: choose only one of --sync-only, --pull, --run, --shell, or --collect" >&2
   exit 1
 }
 [ "${RUN_MODE}" -eq 0 ] || [ "${#RUN_ARGS[@]}" -gt 0 ] || {
   echo "FATAL: --run requires a command after --" >&2
   exit 1
 }
+[ "${PULL_MODE}" -eq 0 ] || [ "${#RUN_ARGS[@]}" -gt 0 ] || {
+  echo "FATAL: --pull requires one or more repo-relative paths after --" >&2
+  exit 1
+}
+# Pulled paths are validated here as well as by `cargo xtask metal pull`, so a
+# direct caller gets the same refusal: repo-relative, no `.`/`..`/`.git`/empty
+# component, and a charset that needs no shell quoting on either side.
+if [ "${PULL_MODE}" -eq 1 ]; then
+  for _path in "${RUN_ARGS[@]}"; do
+    _norm="${_path%/}"
+    [[ "${_norm}" =~ ^[A-Za-z0-9._/-]+$ ]] \
+      && [[ "${_norm}" != /* ]] \
+      && [[ "/${_norm}/" != *//* ]] \
+      && [[ "/${_norm}/" != */./* ]] \
+      && [[ "/${_norm}/" != */../* ]] \
+      && [[ "/${_norm}/" != */.git/* ]] \
+      && [[ "${_norm}/" != target/* ]] || {
+      echo "FATAL: --pull path '${_path}' must be repo-relative, with no '.', '..', '.git' or empty component, not under target/, and only [A-Za-z0-9._/-]" >&2
+      exit 64
+    }
+  done
+fi
 
 if [ "${COLLECT_MODE}" -eq 1 ] && ! [[ "${COLLECT_RUN_ID}" =~ ^[0-9a-f]{24}$ ]]; then
   echo "OVERDRIVE_METAL_RUNNER_ERROR error=invalid_run_id" >&2
@@ -250,7 +275,7 @@ fi
 # --sync-only writes only into this branch's private tree, so it takes the
 # per-tree lock INSTEAD of the global lease; every other action takes the
 # global lease (run additionally takes the tree lock, below).
-if [ "${SYNC_ONLY}" -eq 1 ]; then
+if [ "${SYNC_ONLY}" -eq 1 ] || [ "${PULL_MODE}" -eq 1 ]; then
   HOLDER_LOCK_PATH="${METAL_TREE_LOCK_PATH}"
   HOLDER_OWNER_PATH="${METAL_TREE_OWNER_PATH}"
   HOLDER_UMASK="umask 022; "
@@ -264,6 +289,7 @@ fi
 # ---------------------------------------------------------------------------
 ACTION="bootstrap"
 [ "${SYNC_ONLY}" -eq 1 ] && ACTION="sync"
+[ "${PULL_MODE}" -eq 1 ] && ACTION="pull"
 [ "${RUN_MODE}" -eq 1 ] && ACTION="run"
 [ "${SHELL_MODE}" -eq 1 ] && ACTION="shell"
 SCENARIO="${OVERDRIVE_METAL_SCENARIO:-unspecified}"
@@ -450,6 +476,43 @@ else
     exit 75
   fi
   cat "${LEASE_TMP}/status"
+fi
+
+# ---------------------------------------------------------------------------
+# --pull: the reverse of the sync below, under the same per-tree lock. Copies
+# only the named paths from the remote tree into this checkout. No --delete
+# (files removed remotely stay locally), `target/` is never transferred, and
+# nothing is written to the remote tree.
+if [ "${PULL_MODE}" -eq 1 ]; then
+  ssh "${SSH_OPTS[@]}" "${TARGET}" 'command -v rsync >/dev/null' || {
+    echo "FATAL: rsync is not installed on ${TARGET}; run \`cargo xtask metal sync\` once to install it" >&2
+    exit 1
+  }
+  for _path in "${RUN_ARGS[@]}"; do
+    _path="${_path%/}"
+    # shellcheck disable=SC2029
+    _kind="$(ssh "${SSH_OPTS[@]}" "${TARGET}" \
+      "if [ -d ${REMOTE_DIR}/${_path} ]; then echo dir; elif [ -e ${REMOTE_DIR}/${_path} ]; then echo file; else echo missing; fi")"
+    case "${_kind}" in
+      dir) _src="${REMOTE_DIR}/${_path}/"; _dst="${REPO}/${_path}/"; mkdir -p "${_dst}" ;;
+      file) _src="${REMOTE_DIR}/${_path}"; _dst="${REPO}/${_path}"; mkdir -p "$(dirname "${_dst}")" ;;
+      *) echo "FATAL: ${_path} does not exist in ${TARGET}:${REMOTE_DIR}" >&2; exit 1 ;;
+    esac
+    log "pull ${TARGET}:${REMOTE_DIR}/${_path} -> ${_path}"
+    set +e
+    "${RSYNC_BIN}" -az --itemize-changes \
+      --exclude='target/' \
+      -e "ssh ${SSH_OPTS[*]}" \
+      "${TARGET}:${_src}" "${_dst}"
+    _rc=$?
+    set -e
+    if [ "${_rc}" -ne 0 ]; then
+      echo "FATAL: rsync failed pulling ${_path} (exit ${_rc})" >&2
+      exit "${_rc}"
+    fi
+  done
+  log "pull complete (${#RUN_ARGS[@]} path(s); nothing deleted locally)"
+  exit 0
 fi
 
 if [ "${NO_SYNC}" -eq 0 ]; then

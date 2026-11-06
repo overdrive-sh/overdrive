@@ -72,7 +72,26 @@ The transient unit is intentionally not installed or reboot-persistent. A
 reboot or an unrecordable supervisor/storage loss can leave a run without a
 terminal record; collection reports supervisor loss and never invents a
 command result. Generated files in the remote checkout still require an
-explicit manual retrieval before a later one-way sync.
+explicit retrieval before a later one-way sync, which `cargo xtask metal pull`
+performs.
+
+## Pulling outputs back
+
+```bash
+cargo xtask metal pull specs/quint/<subsystem>/evidence
+cargo xtask metal pull <path> [<path> ...]
+```
+
+Each named repo-relative path is rsynced from the box's tree for the current
+branch (`~/overdrive-branches/<branch>`) to the same path in the local
+checkout (`bootstrap.sh --pull -- <path>...`). It takes the branch tree's
+lock, so it cannot race a sync or a run of that tree, and it prints one
+itemized line per transferred entry. It transfers only what is named, never
+`target/`, and never deletes local files (no `--delete`), so files removed on
+the box stay locally until you remove them. Absolute paths and paths with `..`,
+`.`, empty or `.git` components are rejected, as is anything under `target/`.
+A missing remote path or a nonzero rsync exit fails the command with that
+status.
 
 ## Running the guest-kit `kvm-tests` lanes
 

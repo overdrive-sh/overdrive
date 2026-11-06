@@ -503,7 +503,9 @@ Evidence is written only by the command: a full run with `--record` replaces
 `evidence/` with the summary (tool versions, spec hashes, every verdict) and
 the counterexample traces of that run, and `cargo xtask quint
 verify-evidence` fails when the recorded evidence no longer matches the specs.
-Git history keeps earlier runs. The subsystem directory holds only specs,
+Git history keeps earlier runs. When the run was on the metal box, bring the
+recorded evidence back with `cargo xtask metal pull
+specs/quint/<subsystem>/evidence`. The subsystem directory holds only specs,
 `hazard/` specs, `checks.toml`, `README.md` and the recorded `evidence/` —
 never runner scripts, copies of earlier specs, or per-round directories.
 

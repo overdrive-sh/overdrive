@@ -443,6 +443,20 @@ enum MetalAction {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 0..)]
         args: Vec<String>,
     },
+    /// rsync the named repo-relative paths from the box's synced tree back
+    /// into this checkout (bootstrap.sh --pull).
+    ///
+    /// Brings back outputs a metal run produced, such as
+    /// `specs/quint/<subsystem>/evidence` after `metal run -- cargo xtask
+    /// quint check --record`. Pulls only what is named, never `target/`, and
+    /// never deletes local files (no `--delete`). Rejects absolute paths and
+    /// `..`, `.` or `.git` components. Takes the branch tree's lock, so it
+    /// cannot race a sync or run, and prints each transferred entry.
+    Pull {
+        /// Repo-relative files or directories to copy from the box.
+        #[arg(required = true, num_args = 1..)]
+        paths: Vec<String>,
+    },
     /// Collect a previously registered Metal run by its durable run id.
     Collect {
         /// Exactly 24 lowercase hexadecimal characters printed by `metal run`.
@@ -989,6 +1003,15 @@ fn metal(action: MetalAction) -> Result<u8> {
                     }
                     command.arg("--").args(args);
                     sh_status("metal run (one bootstrap lease session)", &mut command)
+                }
+                MetalAction::Pull { paths } => {
+                    let paths = paths
+                        .iter()
+                        .map(|path| xtask::metal_pull::validate_pull_path(path))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    let mut command = Command::new("bash");
+                    command.args([METAL_BOOTSTRAP, &target, "--pull", "--"]).args(paths);
+                    sh_status("metal pull (tree-locked rsync from the box)", &mut command)
                 }
                 MetalAction::Collect { .. } => unreachable!("collect handled above"),
             }

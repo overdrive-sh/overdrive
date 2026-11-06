@@ -1836,6 +1836,12 @@ login user. The sync is folded into `run` on purpose: it removes the
 "tested stale code" hazard of a separate sync-then-ssh dance. `cargo xtask
 metal sync` and `cargo xtask metal shell` cover the standalone cases.
 
+Outputs a metal run writes into the remote tree (recorded evidence, generated
+files) do not come back on their own. `cargo xtask metal pull <path>...`
+rsyncs the named repo-relative paths from the box's tree into the same paths
+in this checkout, under the tree lock. It never deletes local files, never
+transfers `target/`, and rejects absolute, `..`, `.` and `.git` paths.
+
 Provisioning the box itself (partitions, KVM, toolchain) is a one-time
 `infra/metal/bootstrap.sh <user@host>` (without `--sync-only`); see
 `infra/metal/README.md`.
