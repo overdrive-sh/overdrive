@@ -16,6 +16,13 @@
 //! adapters that were wrong in the same way cannot pass: the comparison guards
 //! drift, the literals are the oracle.
 //!
+//! Known limitation of the Sim pairing (receipt timing): the Sim decides a
+//! selection receipt at `take_receipt` or read time, not at connect time as the
+//! real cgroup hook does. A comparison here therefore proves the observable
+//! receipt kind and identity, never when the receipt was decided relative to a
+//! connect, an outer swap or a concurrent update; that ordering is proven only
+//! at Tier 3 (S-PIG-72) and by the selection-receipt conformance driver.
+//!
 //! Native metal only (the Host side loads the BPF object).
 
 #![cfg(target_os = "linux")]
@@ -267,6 +274,146 @@ fn host_and_sim_agree_on_selection_identity_rejection_residue_and_restart() {
 
     let host_trace = script(&mut host, &rt);
     let sim_trace = script(&mut sim, &rt);
+
+    assert_eq!(host_trace, sim_trace, "Host and Sim observe the same trace");
+}
+
+// ---------------------------------------------------------------------------
+// S-PIG-131 (R-59): a reverse-NAT key owned by another Service's VIP.
+// ---------------------------------------------------------------------------
+
+use overdrive_core::dataplane::{BackendKey, Proto};
+
+use super::helpers::gateway_connect_rig::backend_target;
+
+/// The map state both adapters expose through their own inspection accessors,
+/// backend-neutrally: whether each Service is programmed, how many reverse-NAT
+/// entries exist, and whether the contested key is present.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct MapState {
+    service_one_programmed: bool,
+    service_two_programmed: bool,
+    reverse_nat_entries: usize,
+    contested_key_present: bool,
+}
+
+/// An owner whose map state can be observed through its own accessors.
+trait Observe {
+    fn map_state(&self, contested: BackendKey) -> MapState;
+}
+
+impl Host {
+    /// A rig with its own tag (names the veth pair and the pin directory).
+    fn new_tagged(tag: &str) -> Self {
+        Self {
+            rig: Some(HostRig::new(tag)),
+            rt: tokio::runtime::Builder::new_current_thread().enable_all().build().expect("rt"),
+        }
+    }
+}
+
+impl Observe for Host {
+    fn map_state(&self, contested: BackendKey) -> MapState {
+        let dp = &self.rig().dataplane;
+        let programmed = |n: u8| {
+            dp.service_map_contains(frontend(n).vip_v4(), frontend(n).port().get(), Proto::Tcp)
+                .expect("SERVICE_MAP read")
+        };
+        MapState {
+            service_one_programmed: programmed(1),
+            service_two_programmed: programmed(2),
+            reverse_nat_entries: dp.reverse_nat_map_size().expect("REVERSE_NAT_MAP size"),
+            contested_key_present: dp
+                .reverse_nat_map_has_backend_proto(contested.ip, contested.port, contested.proto)
+                .expect("REVERSE_NAT_MAP read"),
+        }
+    }
+}
+
+impl Observe for Sim {
+    fn map_state(&self, contested: BackendKey) -> MapState {
+        let programmed = |n: u8| {
+            self.dataplane
+                .service_backends_for(frontend(n).vip_v4(), frontend(n).port().get(), Proto::Tcp)
+                .is_some()
+        };
+        MapState {
+            service_one_programmed: programmed(1),
+            service_two_programmed: programmed(2),
+            reverse_nat_entries: self.dataplane.reverse_nat_entries().len(),
+            contested_key_present: self.dataplane.reverse_nat_lookup(contested).is_some(),
+        }
+    }
+}
+
+/// One scripted R-59 sequence over an owner; returns the backend-neutral trace.
+fn conflict_script<O: Owner + Observe>(owner: &O, rt: &tokio::runtime::Runtime) -> Vec<String> {
+    let mut trace = Vec::new();
+
+    // Service one owns backend address 1 (reverse-NAT key -> VIP one); service
+    // two owns backend address 2. The contested key is address 1's.
+    owner.update(frontend(1), vec![backend(1, 1, true)]).expect("service one programmed");
+    owner.update(frontend(2), vec![backend(2, 2, true)]).expect("service two programmed");
+    let contested = BackendKey::new(*backend_target(1).ip(), backend_target(1).port(), Proto::Tcp);
+
+    let (one_before, one_id) = select_once(rt, owner, 1);
+    let (two_before, two_id) = select_once(rt, owner, 2);
+    assert_eq!(one_before, Observed::Selected(alloc(1)), "service one selects its backend");
+    assert_eq!(two_before, Observed::Selected(alloc(2)), "service two selects its backend");
+    let before = owner.map_state(contested);
+    assert_eq!(
+        before,
+        MapState {
+            service_one_programmed: true,
+            service_two_programmed: true,
+            reverse_nat_entries: 2,
+            contested_key_present: true,
+        },
+        "the baseline holds exactly the two Services' entries",
+    );
+
+    // Service two now names service one's backend address: the contested
+    // reverse-NAT key already maps to VIP one, so planning rejects it.
+    let rejected = owner.update(frontend(2), vec![backend(2, 2, true), backend(1, 1, true)]);
+    match rejected {
+        Err(DataplaneError::ReverseNatConflict { key, current_vip, attempted_vip }) => {
+            assert_eq!(key, contested, "the conflict names the contested reverse-NAT key");
+            assert_eq!(current_vip, frontend(1).vip(), "the key is owned by VIP one");
+            assert_eq!(attempted_vip, frontend(2).vip(), "VIP two attempted to take it");
+        }
+        other => panic!("expected ReverseNatConflict, got {other:?}"),
+    }
+
+    // Nothing was mutated: both Services' map state and both selections are as
+    // before, and no new BackendId was minted by the rejected update.
+    let after = owner.map_state(contested);
+    assert_eq!(after, before, "a rejected update leaves both Services' map state unchanged");
+    let (one_after, one_id_after) = select_once(rt, owner, 1);
+    let (two_after, two_id_after) = select_once(rt, owner, 2);
+    assert_eq!(one_after, one_before, "service one still selects its backend");
+    assert_eq!(two_after, two_before, "service two keeps its prior generation");
+    assert_eq!(one_id_after, one_id, "service one's id is unchanged");
+    assert_eq!(two_id_after, two_id, "service two's id is unchanged");
+    trace.push(format!("rejected: {after:?} one={one_after:?} two={two_after:?}"));
+
+    assert_eq!(counts(owner), (0, 0), "no intent and no receipt remain");
+    trace
+}
+
+/// S-PIG-131 (R-59). An update whose reverse-NAT key already maps to another
+/// Service's VIP is rejected in planning with `ReverseNatConflict`, and both
+/// Services' map state is unchanged; Host and Sim agree.
+///
+/// CONTRACT_SHAPE: bounded-change.
+#[test]
+#[ignore = "pending DELIVER selection-receipt-and-applied-identity"]
+fn host_and_sim_reject_an_update_whose_reverse_nat_key_belongs_to_another_service() {
+    let host = Host::new_tagged("h131");
+    let sim = Sim::new();
+    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().expect("rt");
+
+    let host_trace = conflict_script(&host, &rt);
+    let sim_trace = conflict_script(&sim, &rt);
 
     assert_eq!(host_trace, sim_trace, "Host and Sim observe the same trace");
 }
