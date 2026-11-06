@@ -523,6 +523,7 @@
             "State is projected through the pinned GatewayStatusReads accessors only; the driver-local doubles are not read in from_driver",
             "`cargo xtask conformance-lint` stays clean for quint_gateway_application.rs (testing.md per-driver checklist items 1, 3, 5, 6, 7)",
             "Admission and retention bodies not already made real by an earlier step (02-06, 04-01) are real here, where the QC-2 driver first reaches `acquire_connection` and the retention counts: `GatewayAdmission::acquire_connection`, `GatewayGenerationRetention::{try_connection, try_request, counts}` (02-06 implements only the bodies its start/probe/shutdown path calls)",
+            "User ruling R-62 (2026-11-06) assigns these otherwise unowned admission scaffolds in crates/overdrive-gateway/src/application.rs to this step, real by the time the QC-2 driver and the limit-refusal arms reach them: `GatewayAdmissionBudget::{try_public_connection, try_request}`, the `try_connect` refusal arm (`Err(_) => todo!`, the admission refusal returning `GatewayAdmissionError`) and `GatewayConnectionLease::try_request`. Ownership only: the signatures already in the scaffold and the feature-delta are the contract; no API is added",
             "No `pending DELIVER quint-conformance-gateway_application` marker remains"
           ],
           "test_file": "crates/overdrive-gateway/src/application/quint_gateway_application.rs",
