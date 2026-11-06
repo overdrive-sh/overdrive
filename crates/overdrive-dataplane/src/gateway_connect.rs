@@ -15,18 +15,6 @@
 //! `ServiceApplyUndo`, `ServiceCleanupDebt`, the `service_apply_commit` guard) are
 //! private structure and are the crafter's.
 
-#![allow(
-    clippy::todo,
-    clippy::doc_markdown,
-    clippy::needless_pass_by_value,
-    clippy::unused_async,
-    clippy::unused_self,
-    clippy::pub_underscore_fields,
-    dead_code,
-    unused_variables,
-    reason = "`probe` is the boot sentinel step's (public-ingress-gateway)"
-)]
-
 use std::collections::BTreeMap;
 use std::net::{IpAddr, Ipv4Addr};
 use std::num::NonZeroU16;
@@ -47,8 +35,6 @@ use overdrive_host::socket_cookie::{SocketCookieReadError, SocketCookieReader};
 
 use crate::EbpfDataplane;
 
-/// Capacity of `GATEWAY_CONNECT_INTENT_MAP` and `GATEWAY_SELECTION_RECEIPT_MAP`.
-pub(crate) const GATEWAY_CONNECT_MAP_CAPACITY: u32 = 128;
 /// Receipt outcome: no usable backend.
 pub(crate) const GATEWAY_RECEIPT_NO_BACKEND: u32 = 1;
 /// Receipt outcome: a nonzero `BackendId` was selected.
@@ -217,17 +203,28 @@ fn prepared_socket() -> Result<tokio::net::TcpSocket, GatewayConnectDataplaneErr
 impl GatewayConnectCleanup for EbpfDataplane {
     fn cleanup(&self, intent: &GatewayConnectIntent) -> Result<(), GatewayConnectDataplaneError> {
         let cookie = intent.socket_cookie.get().get();
-        // Both removals run; an absent key is already clean.
-        let intent_removed = remove_key(&mut self.gateway_intent_map.lock(), cookie);
-        let receipt_removed = remove_key(&mut self.gateway_receipt_map.lock(), cookie);
+        // Both removals run under both locks (intent, then receipt: the order
+        // `live_receipts` takes), so a snapshot never sees a receipt whose intent
+        // is already gone. An absent key is already clean.
+        let mut intents = self.gateway_intent_map.lock();
+        let mut receipts = self.gateway_receipt_map.lock();
+        let intent_removed = remove_key(&mut intents, cookie);
+        let receipt_removed = remove_key(&mut receipts, cookie);
+        drop(receipts);
+        drop(intents);
         intent_removed.and(receipt_removed)
     }
 
     fn cleanup_all_gateway_intents(
         &self,
     ) -> Result<GatewayConnectCleanupSweep, GatewayConnectDataplaneError> {
-        let removed_intents = remove_all(&mut self.gateway_intent_map.lock())?;
-        let removed_receipts = remove_all(&mut self.gateway_receipt_map.lock())?;
+        // Both locks are held across the sweep, in the intent-then-receipt order.
+        let mut intents = self.gateway_intent_map.lock();
+        let mut receipts = self.gateway_receipt_map.lock();
+        let removed_intents = remove_all(&mut intents)?;
+        let removed_receipts = remove_all(&mut receipts)?;
+        drop(receipts);
+        drop(intents);
         Ok(GatewayConnectCleanupSweep { removed_intents, removed_receipts })
     }
 
@@ -293,6 +290,13 @@ fn remove_all<V: aya::Pod>(
 
 #[async_trait]
 impl GatewayConnectDataplane for EbpfDataplane {
+    #[allow(
+        clippy::todo,
+        clippy::unused_async,
+        clippy::unused_self,
+        unused_variables,
+        reason = "`probe` is the boot sentinel step's (public-ingress-gateway)"
+    )]
     async fn probe(
         &self,
         deadline: Instant,

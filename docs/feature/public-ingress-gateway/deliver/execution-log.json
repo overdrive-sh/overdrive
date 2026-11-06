@@ -519,6 +519,27 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-11-06T02:26:43Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "RED",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: review rework; lock-order consistency and comments, no test drives the concurrent snapshot race",
+      "t": "2026-11-06T02:31:48Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-06T02:37:34Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-06T02:37:34Z"
     }
   ]
 }

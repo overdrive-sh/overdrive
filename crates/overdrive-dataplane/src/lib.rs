@@ -865,8 +865,10 @@ impl EbpfDataplane {
         // Attach mode: aya's `CgroupAttachMode::Single` names the link flags it
         // passes (none); the kernel lists a link-based attach as `multi`, so the
         // gateway program runs beside `cgroup_connect4_service` over the same
-        // context. Any deny from either yields `-EPERM`
-        // (`kernel/bpf/cgroup.c:79-89 @ v7.0`).
+        // context. A link attach is always multi: `cgroup_bpf_link_attach` passes
+        // `BPF_F_ALLOW_MULTI | attr->link_create.flags`
+        // (`kernel/bpf/cgroup.c:1506-1507 @ v7.0`). Any deny from either yields
+        // `-EPERM` (`kernel/bpf/cgroup.c:79-89 @ v7.0`).
         let cgroup_connect4_gateway_link_id =
             gateway_prog.attach(&cgroup_file, CgroupAttachMode::Single).map_err(|e| {
                 DataplaneError::LoadFailed(format!(
@@ -2149,6 +2151,12 @@ impl Dataplane for EbpfDataplane {
         // The applied identity of every backend this update names is published
         // before the outer swap, so a `Selected` receipt that names one of these
         // ids can always resolve its identity.
+        //
+        // Interim minimal read: the commit-guarded applied-identity step replaces
+        // this plain map with a transaction (identity readable only after the
+        // swap, immutable per id, rolled back on failure). Until then a failed
+        // swap, or a reused `(ip, port, proto)` id, can expose an uncommitted
+        // identity.
         {
             let mut identities = self.backend_identities.lock();
             for (backend_id, backend) in backend_ids.iter().zip(&backends) {

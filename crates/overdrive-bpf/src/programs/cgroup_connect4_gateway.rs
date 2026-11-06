@@ -103,6 +103,9 @@ pub fn cgroup_connect4_gateway(ctx: SockAddrContext) -> i32 {
 /// Record `NoBackend` for `cookie` and deny the connect.
 #[inline(always)]
 fn no_backend(cookie: u64) -> i32 {
+    // The connect is denied whether or not the receipt lands: a failed write
+    // leaves no receipt, which userspace reads as a missing receipt (a failed
+    // dial), never as a selection.
     let _ = write_receipt(cookie, GATEWAY_RECEIPT_NO_BACKEND, 0);
     DENY
 }

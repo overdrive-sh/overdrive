@@ -16,7 +16,7 @@ accepts for every unregistered workload connect)?
 | Item | Value |
 |---|---|
 | Kernel (`uname -r`) | `7.0.0-38-generic` (the pinned appliance kernel, native x86_64 metal host, 16 CPUs) |
-| Source | base `d113a20a8aea04e74dac52d63fb93eb709df932a` plus the step's working tree (the commit that adds this file). The object measured is the final program (125 verified instructions) |
+| Source | commit `bb0b52244`, which adds the program; the measured program is the one in that commit. The object measured is the final program (125 verified instructions) |
 | Probe | `spike-scratch/pig-connect-cost/` (throwaway, own `Cargo.toml`/workspace; links the production `overdrive-dataplane` by path only to load and attach the real object) |
 | `kernel.bpf_stats_enabled` | `1` for the run (prior value `0`, restored; verified `0` after) |
 | Cgroup | a dedicated `/sys/fs/cgroup/pig-connect-cost-<pid>` that the probe process joins and passes as the dataplane's `cgroup_attach_path`; removed afterwards |
