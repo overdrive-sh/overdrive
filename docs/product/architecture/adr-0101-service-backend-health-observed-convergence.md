@@ -95,6 +95,9 @@ retained as a dormant or secondary publisher.
 - ADR-0079 D4's exclusion of ServiceLifecycle observed-row convergence and
   D9's unresolved shared-row ownership are superseded for this path: the
   competing publisher is removed before full-row convergence is used.
+- D1's “otherwise the configured host IPv4” address fallback (inherited from
+  ADR-0079 D8, operative since this ADR) is removed by ADR-0276: the fallback
+  never fires on the production path and masked test configurations.
 - ADR-0096 D2's earlier “resolver sees ... before” wording is corrected to
   successful row publication before terminal dispatch, with asynchronous
   consumer observation. The user explicitly selected this boundary.
@@ -111,7 +114,7 @@ ObservationStore; no direct store access moves into pure reconciliation.
 | --- | --- |
 | Current listeners and VIP | Validated Service intent plus the existing allocator assignment for its spec digest. Retain every listener and `ServiceId::derive(vip, port, protocol, "service-map")`. |
 | Membership | Current `AllocStatusRow` facts for this workload, filtered to `AllocState::Running`. Membership does not imply eligibility. |
-| Backend identity and address | Existing `SpiffeId::for_allocation`; materialized `workload_addr` when present, otherwise the configured host IPv4; port from the particular listener. Weight remains 1. |
+| Backend identity and address | Existing `SpiffeId::for_allocation`; the Running allocation's materialized `workload_addr`, which a Running row must carry (a Running row without it is refused at hydration; there is no host-IPv4 fallback — changed by [ADR-0276](adr-0276-a-service-backend-address-is-the-running-allocations-workload-address-never-the-node-address.md), 2026-11-06); port from the particular listener. Weight remains 1. |
 | Eligibility | Existing ServiceLifecycle terminal veto first, then existing readiness observations, counters and threshold. No readiness means true for a non-vetoed Running allocation; Stable is not a prerequisite. |
 | Publication safety | From a deciding tick that establishes the existing veto, every backend row this owner subsequently publishes has false for that allocation whenever it is a member. Same-ID disappearance/reappearance cannot grant true. |
 | Stored-state convergence | Under successful subsequent reads/writes and owner execution, the stored row converges to that complete projection and unchanged input/output produces no further row write. |
