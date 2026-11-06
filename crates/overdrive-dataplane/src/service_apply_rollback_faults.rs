@@ -398,7 +398,6 @@ fn memo_id(observed: &Observed, octet: u8) -> Option<u32> {
 /// CONTRACT_SHAPE: bounded-change (declared mutation set = the `BACKEND_MAP`
 /// entry of A).
 #[test]
-#[ignore = "pending DELIVER selection-receipt-and-applied-identity"]
 fn a_failed_in_place_backend_restore_during_rollback_is_returned_as_service_apply_rollback() {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
