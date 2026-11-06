@@ -3812,6 +3812,89 @@ The empty-backend path takes the same write guard, commits by deleting the
 outer ServiceKey first, retains historical Applied identities for old receipts,
 then performs idempotent post-commit GC.
 
+#### Test seam for the rollback restore (user-approved 2026-11-06; scenario S-PIG-132)
+
+**Decision.** `EbpfDataplane` reaches `BACKEND_MAP` through a crate-private
+abstraction instead of holding the concrete aya map. The production
+implementation is the real aya map, unchanged in behaviour; a decorator that
+delegates to it and can fail chosen writes exists only in a
+`#[cfg(all(test, feature = "integration-tests"))]` module inside
+`overdrive-dataplane/src/`. **No new public API; R-62 is not needed.** No
+cross-crate type, trait, constructor, feature or re-export is added, and
+`DataplaneError`, `ServiceApplyRollbackFailure` and `Dataplane` are unchanged.
+
+**What is pinned (interface contract), and what is not.** Pinned:
+
+1. *Scope.* Every `BACKEND_MAP` operation `EbpfDataplane` performs (the read,
+   write and remove used by `update_service`, rollback, the probe and the
+   inspectors) goes through the one seam, so a test-time substitution cannot be
+   bypassed by a second path. `REVERSE_NAT_MAP`, `SERVICE_MAP` and the local
+   maps are not behind it: the scenario needs no fault there (see S-PIG-132).
+2. *Production cost.* The seam is dynamic dispatch on the `BACKEND_MAP` handle
+   only. Every call it carries is a `bpf(2)` map syscall made by the
+   control-plane `update_service`, the probe or an inspector; the XDP and
+   `cgroup_sock_addr` programs read the kernel map directly and never pass
+   through the userspace handle, so the per-packet and per-connect paths
+   are unchanged. One indirect call per map syscall is below the syscall's own
+   cost, and `update_service` holds the commit guard for far longer than that.
+   `EbpfDataplane` stays a non-generic public type.
+3. *What test support must be able to do.* Wrap the dataplane's real `BACKEND_MAP`
+   handle in a decorator that delegates every operation to it, and fail a
+   chosen write: "fail the Nth `insert` after arming" for any set of N, with an
+   `io::Error`-shaped failure the production code already maps. Arming and
+   the fail-set are test-side state; nothing in production reads them.
+4. *Where it lives and how a test builds it.* The decorator and the S-PIG-132
+   test live in one module in `overdrive-dataplane/src/`, declared in `lib.rs`
+   beside `quint_selection_receipt` (the existing in-crate driver module,
+   `testing.md` § "Placement and lane": the test needs a crate-private seam).
+   The test builds the real `EbpfDataplane` through the production
+   constructor `EbpfDataplane::new_with_pin_dir` (the shape
+   `deregister_retry_safety.rs` uses: a veth pair, a per-test bpffs pin dir,
+   cgroup attach path `/sys/fs/cgroup`), then, as a descendant module of the
+   crate root that owns the struct, replaces the private `backend_map` field with
+   the decorator around the handle it took out. No setter, no builder and no extra
+   constructor exists for this. Gated by `integration-tests` and run on the
+   native metal host (the kernel the real maps need). It runs in the
+   `overdrive-dataplane` library test binary, which `.config/nextest.toml`
+   already assigns wholesale to `host-kernel-shared` (`package(overdrive-dataplane)
+   & kind(lib)`); no nextest change is needed.
+5. *Not pinned (the crafter's call, `CLAUDE.md` § "Implement to the design").*
+   The trait's name, method set and signatures, whether the field is a boxed trait
+   object or another crate-private indirection, the decorator's internals, and
+   the helper that builds the fault set.
+
+**Rejected alternatives.**
+
+- *A test in `tests/integration/` with a fault impl in test support.* An external
+  test crate can name only public items, so the trait, the constructor taking
+  it and the field would all have to be public: a new cross-crate API that
+  production code never calls (R-62 territory), for one scenario.
+- *A generic parameter on `EbpfDataplane`* (`EbpfDataplane<B = AyaBackendMap>`).
+  A public type-parameter ripples into every `Arc<EbpfDataplane>` in
+  `overdrive-control-plane`, the action shim and the composition root, to
+  save an indirect call on a syscall path.
+- *A `cfg(any(test, feature = "integration-tests"))` fault field, the shape of
+  `probe_fault`/`set_probe_fault`.* It forks the body of
+  `rollback_service_apply` between the tested build and the shipped build (the
+  code under test is not the code that ships), needs a public setter for a
+  cross-crate test, and adds a test-only branch to the function being
+  proven. `probe_fault` is not extended and not removed by this ruling.
+- *A real-kernel fault with no seam* (filling or freezing the map). A map-level
+  fault applies to the forward in-place write and to its restore alike (the same
+  operation on the same key), so it cannot fail only the restore; and the
+  test holds no handle to the map file descriptor. Only a call-ordinal
+  stimulus separates the two writes.
+- *`SimDataplane` modelling rollback.* The Sim adapter has no map layer;
+  teaching it rollback would add production-visible Sim behaviour to test an
+  aya-map write, and would test the model, not `rollback_service_apply`.
+
+**Lifecycle Gate Ownership.** Not applicable: the seam adds, removes and moves
+no gate and changes no state meaning (it substitutes a map handle; the commit
+guard, `Reserved`/`Applied` publication and the outer swap are unchanged).
+**Formal protocol model.** Not applicable: no protocol or ordering is added or
+changed; rollback order and the R-60 failure are the ruled behaviour of the
+existing `selection_receipt` model, and a test-only decorator is not a protocol.
+
 `Dataplane::update_service` returns `Ok` only after outer commit plus Applied
 publication. The action shim writes the Completed hydration row only after
 that point; a pre-commit or rollback error writes the existing Failed
@@ -7328,7 +7411,7 @@ Counts against the 55 pre-reconstruction scenarios: **22 KEEP, 32 ADAPT, 1 DROP*
 | S-PIG-129 | Gateway owner restart over an undecodable prior status row (gap 9a, O-SIF-G3 residual): garbage bytes under `observation_gateway_application_status` at the node-id key are written through the existing raw back-door, then the gateway `World` is started over the production `LocalObservationStore` on that file: the owner boots (no boot refusal, no new boot error), its first projection reads the row as absent (base zero), one recorded failure then projects `issue_failures == 1` with that failure as `last_issue_failure`, and the status row subsequently written decodes (the garbage is replaced). The one-warning count is asserted at the store by the store-local test and not here | NEW | I | @error @degraded-resource @contract-shape:bounded-change | `overdrive-gateway/tests/integration/public_ingress_gateway.rs`, test `a_restarted_gateway_over_an_undecodable_prior_status_row_counts_from_zero`, second octet 187 (confirm free by grep) | gateway-svid-issue-failure-occurrence |
 | S-PIG-130 | No gateway status row before a Route exists (R-58, R-52). Contract: the Gateway Application owner writes no `GatewayApplicationStatusRowV1` until a Route exists, and identity or failure wakes write none before a Route exists either; an earlier boot's row is still carried. Owner path: the production `UnboundGatewayBuilder` composition over the real `LocalIntentStore`, the Sim observation store and the scripted identity control; the oracle is `gateway_application_status_row(node)` read through the observation port. Fault stimulus: an identity wake (the identity is held) and two recorded issue failures (`Ca`, `Audit`) with no Route. (a) With no Route and no prior row the row stays absent for the watch window after boot and after the wakes. (b) Declaring the Route then writes the first row, carrying the held identity as `Current` and `issue_failures == 2` with the latest failure as `last_issue_failure`. (c) A row left by an earlier boot (two failures) and no Route in the new boot: the owner still writes, with `unavailable == RouteAbsent`, over the carried base of 2 and the same latest failure. Evidence tier: I (in-process, `integration-tests`) | NEW | I | @error @edge @degraded-resource @contract-shape:bounded-change | `overdrive-gateway/tests/integration/public_ingress_gateway.rs`, tests `no_gateway_status_row_is_written_before_a_route_exists`, `the_first_gateway_status_row_after_a_route_carries_what_was_held_before_it`, `a_status_row_from_an_earlier_boot_is_still_carried_when_no_route_exists`, second octets 188, 189, 190 | none (active) |
 | S-PIG-131 | Reverse-NAT key owned by another Service (R-59). Contract: `update_service` rejects in planning (`plan_service_apply`), before any mutation, an update whose reverse-NAT key already maps to a different VIP, with `DataplaneError::ReverseNatConflict { key, current_vip, attempted_vip }`; nothing is overwritten and rollback never restores another Service's entry. Owner path: `Dataplane::update_service` on the production `EbpfDataplane` and on `SimDataplane`, driven through the same sequence. Fault stimulus: two programmed Services (VIP one on backend address 1, VIP two on backend address 2), then VIP two is updated to also name backend address 1, whose key already maps to VIP one. Oracle: the error names the contested key, VIP one as current and VIP two as attempted; both Services' map state (SERVICE_MAP programmed, reverse-NAT entry count, contested key present) is equal before and after through each adapter's own accessors; each Service still selects its own allocation with the same `BackendId`; Host and Sim traces are equal. Evidence tier: I (Sim half) + T3 (Host half, native metal) | NEW | I+T3 | @error @contract-shape:bounded-change | `overdrive-dataplane` `tests/integration/gateway_connect_dataplane_equivalence.rs`, test `host_and_sim_reject_an_update_whose_reverse_nat_key_belongs_to_another_service`; authored and ignored `pending DELIVER selection-receipt-and-applied-identity`. Scaffold: the `DataplaneError::ReverseNatConflict` variant (R-59) exists in `overdrive-core` with no behaviour | selection-receipt-and-applied-identity |
-| S-PIG-132 | Failed in-place `BACKEND_MAP` restore during rollback (R-60). Contract: a pre-commit failure after an in-place `BACKEND_MAP` update whose restore also fails returns `ServiceApplyRollback { stage, rollback: [BackendRestore(id)] }`, never only a log line. Owner path: `EbpfDataplane::update_service` rollback. Fault stimulus required: a failing `BACKEND_MAP` restore write after a failing pre-commit stage. **NOT AUTHORED: testability gap.** No existing seam can make that write fail: `EbpfDataplane` holds `backend_map` as a real aya map (`lib.rs` `rollback_service_apply`), the dataplane crate has no fault-injecting map adapter, and `SimDataplane` does not model rollback. Producing the fault needs a new driven-port or test seam on the dataplane, which is a design decision for the user, not an acceptance-designer addition (`.claude/rules/design.md` § "No unrequested scope"). Until it is ruled, `BackendRestore` is covered only by the variant's existence (scaffolded in `overdrive-core`) and review | NEW | I | @error @contract-shape:bounded-change | none (gap) | selection-receipt-and-applied-identity |
+| S-PIG-132 | Failed in-place `BACKEND_MAP` restore during rollback (R-60). Contract: a pre-commit failure after an in-place `BACKEND_MAP` update whose restore also fails returns `ServiceApplyRollback { stage, rollback: [BackendRestore(id)] }`, never only a log line. Owner path: `Dataplane::update_service` on the production `EbpfDataplane` (real aya maps, native metal), reaching `rollback_service_apply`. Seam: the crate-private `BACKEND_MAP` seam and in-crate decorator of "Test seam for the rollback restore" (user-approved 2026-11-06; no new public API, no R-62). **Setup.** Generation 1 of one Service is programmed through a successful `update_service` with backends A (`healthy = false`) and X; endpoints are chosen so the planned order (ascending `(ip, port)`) is A, B, C. **Fault stimulus** (armed immediately before the generation-2 update): generation 2 names A (`healthy = true`, an in-place update), X (identical, never rewritten), B and C (fresh). `BACKEND_MAP` writes then occur as: #1 A in-place update (passes), #2 B insert (passes), #3 C insert, **failed by the decorator** (stage `BackendMap`), and in rollback #4 the restore of A's prior value, **failed by the decorator**. Fail-set = the 3rd and 4th `insert` after arming; removes and every other operation delegate to the real map. **Oracle, as the current rollback code produces it (`rollback_service_apply`, read, not inferred):** (1) the result is `Err(DataplaneError::ServiceApplyRollback { stage: ServiceApplyStage::BackendMap, rollback })` with `rollback == [ServiceApplyRollbackFailure::BackendRestore(id_of_A)]` exactly: B's delete succeeded (restores run first, then the inserted-id deletes, and every one is attempted after a failure), so no `BackendDelete` and no `ReverseNatDelete` appears; (2) `BACKEND_MAP`: A holds the generation-2 value (the restore failed, so the in-place update stands; that residual is exactly what the typed failure reports), X is byte-equal to generation 1, B is absent (removed by rollback), C is absent (its insert failed and was never recorded); (3) `REVERSE_NAT_MAP`: equal to generation 1 (the `ReverseNat` stage was never reached): the keys for A and X are present, none exists for B or C, and `service_cleanup_debt` is empty (debt is recorded only for a failed reverse-NAT delete); (4) `SERVICE_MAP`: the slot is still programmed with generation 1's inner map, because neither `InnerMap` nor `OuterCommit` was reached, and the service-backends tracker still names generation 1's ids; (5) identities: B and C hold no `Applied` identity and their allocator memos are released (`existing_id` is `None` for both endpoints), A and X keep their generation-1 `Applied` identities; (6) recovery: after disarming, repeating the generation-2 update returns `Ok`, A reads `healthy = true`, and B and C hold fresh `BackendId`s that are not the abandoned numeric ids (ids are never recycled). Reads (2)-(6) go through the existing inspectors (`backend_map_entries`, `reverse_nat_map_has_backend_proto`, `service_map_contains`) and, because the test is in-crate, the crate-private trackers and identity map. **Bound and cleanup:** one `update_service` call per arm, no wall-clock wait; the decorator is disarmed after the assertion and the dataplane, bpffs pin dir and veth pair are released by their guards. **Evidence tier:** T3 (real aya maps; there is no Tier-1 backstop because `SimDataplane` does not model rollback). **Contract shape:** bounded-change; declared mutation set = the `BACKEND_MAP` entry of A; universe = `BACKEND_MAP`, `REVERSE_NAT_MAP`, the `SERVICE_MAP` slot and the dataplane trackers; assertion = the before/after equality in (2)-(5) | NEW | T3 | @error @degraded-resource @contract-shape:bounded-change | `overdrive-dataplane/src/service_apply_rollback_faults.rs` (in-crate, `#[cfg(all(test, feature = "integration-tests"))]`, declared in `lib.rs`), test `a_failed_in_place_backend_restore_during_rollback_is_returned_as_service_apply_rollback`; authored by the acceptance designer with the marker `#[ignore = "pending DELIVER selection-receipt-and-applied-identity"]`. Owner step 03-02. Split: the acceptance designer authors the decorator (test support) and the body, which must compile while ignored; so the behaviour-neutral crate-private `BACKEND_MAP` seam (the indirection and its real aya implementation, no new behaviour) lands as a DISTILL scaffold in that same change, and its internal shape is the author's call. The typed `BackendRestore` return already exists in `rollback_service_apply`; the test pins it, and 03-02 activates the test when it removes the pending marker | selection-receipt-and-applied-identity |
 
 **SVID issuance failure occurrence scenarios (R-45..R-52; the ids are the DESIGN obligations').** Each failure is driven through the production reconciler or executor; faults enter only at driven ports: a CA whose signing fails (`SigningFailsCa` / `ToggleCa`, test-local `Ca` doubles), and `IssueFaultStore` (a test-local delegating `ObservationStore`, `crates/overdrive-control-plane/tests/common/issue_fault_store.rs`) whose faults are scoped to the `issued_certificates` audit write (`Audit`), the workload failure-record operation (the unrecorded arm), the failure-row read, the gateway status row write and read, and the certified-key status read, and which counts the two status point reads the status handler can issue. The existing one-shot `inject_write_failure` consumes the next write of any family, so it cannot scope the fault; the decorator replaces it for these rows. The Sim clock supplies every instant.
 
