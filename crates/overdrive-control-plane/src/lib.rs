@@ -89,8 +89,7 @@ pub(crate) use guest_network_composition::{GuestNetworkCompositionPorts, compose
 pub mod identity_mgr;
 // IPv4 resolution via `getifaddrs(3)` for the operator-supplied
 // `[dataplane] client_iface`. Production boot threads the resolved
-// `Ipv4Addr` through `AppState.host_ipv4` to ServiceLifecycle's
-// backend-row projection.
+// `Ipv4Addr` through `AppState.host_ipv4` to the service-map hydrator.
 pub mod iface;
 // workflow-primitive step 01-03 — `JournalStore` port + `LoadedEntry`
 // CBOR boundary sum (over `JournalCommand` / `JournalNotification`) +

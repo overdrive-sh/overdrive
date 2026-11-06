@@ -5,12 +5,6 @@
 //! Layer 1 (pure, in-process): property-based over the whole input space.
 //! Driving port: the pure constructors the hydration uses.
 //!
-//! NOT YET WIRED: this file references `ServiceAllocPhase`,
-//! `ServiceBackendIdentity`, `NotRunningState` and
-//! `RunningAllocationWithoutWorkloadAddr`, which the DELIVER change introduces
-//! (feature-delta § Interface contracts). The DELIVER change adds
-//! `mod service_alloc_phase_totality;` to `tests/acceptance.rs` with the
-//! production types; no other edit to this file is needed.
 
 #![allow(clippy::expect_used)]
 

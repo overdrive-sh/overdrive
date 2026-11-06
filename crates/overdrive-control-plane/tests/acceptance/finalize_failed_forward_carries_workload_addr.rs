@@ -11,7 +11,7 @@
 //! This is the load-bearing fix of step 02-02 — a `Stable` (still-Running)
 //! terminal MUST keep the alloc's per-instance backend address so the
 //! `BackendDiscoveryBridge` advertises a reachable addr instead of silently
-//! reverting to its `host_ipv4` fallback (the dial-by-name walking-skeleton
+//! losing the per-instance address (the dial-by-name walking-skeleton
 //! backend-drop; GH #248). A genuine terminal (`Failed` / `Completed` /
 //! `BackoffExhausted`) is a dead alloc, not a live backend, so it drops to
 //! `None`.
