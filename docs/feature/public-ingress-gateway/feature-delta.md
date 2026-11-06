@@ -13,7 +13,7 @@
 > contract text too. R-45..R-52 (SVID issuance failure occurrence for the gateway and workload SVIDs, 2026-11-04) are recorded
 > contract text with the provenance stated per row (R-45, R-46 user decisions; R-47..R-50 user decisions delegated as "prefer
 > correctness"; R-51 an application of the user's versioned-envelope instruction; R-52 user-confirmed 2026-11-04). ADR-0274 and ADR-0275 record the two occurrence decisions and are Proposed, pending
-> independent review. The optional proposals (P-1, P-3, P-4, P-6, P-8 simplification, P-32, P-33, P-34, P-35, P-36, P-40) remain PROPOSED and await the user. P-37 was rejected by the user on 2026-11-04. P-38 (`ApiClient` route DELETE and gateway status methods) was ADOPTED by the user on 2026-11-04 (R-53); the hook tests and small gaps ruled the same day are R-54. The user rulings of 2026-11-05 are R-55 (P-41, the per-connect measurement) and the confirmations recorded in its row, and R-56 (the store-emitted skipped-row warning); the ruled contract text is R-1..R-56.
+> independent review. The optional proposals (P-1, P-3, P-4, P-6, P-8 simplification, P-32, P-33, P-34, P-35, P-36, P-40) remain PROPOSED and await the user. P-37 was rejected by the user on 2026-11-04. P-38 (`ApiClient` route DELETE and gateway status methods) was ADOPTED by the user on 2026-11-04 (R-53); the hook tests and small gaps ruled the same day are R-54. The user rulings of 2026-11-05 are R-55 (P-41, the per-connect measurement) and the confirmations recorded in its row, and R-56 (the store-emitted skipped-row warning); R-57 and R-58 are user rulings of 2026-11-05 and R-59, R-60 and R-61 (the Service-map reverse-NAT conflict, the rollback restore failure and the cleanup-debt retry) are user rulings of 2026-11-06; the ruled contract text is R-1..R-61.
 > Contract-shaping validation V-GW-1..5 and the G1 spike (a-e) have
 > run (see [Contract-shaping validation items](#wave-design--ref-contract-shaping-validation-items)
 > and [Formal protocol model](#wave-design--ref-formal-protocol-model)). This document reconstructs the previously
@@ -926,6 +926,9 @@ The user ruled "proceed with the recommendations (prefer correctness)" on the pr
 | R-56, 2026-11-05, user ruling ("go with recommendations") | The observation store emits the skipped-row warning itself, as the structured tracing event `observation.row.skipped` with SEPARATE fields `table` (the redb table name) and `key` (the row's id), the shape of the existing `observation.envelope.decode_failed` event in `crates/overdrive-store-local/src/observation_backend.rs` (`table = table_name`, `key`, `source`). The codec signature `from_store_bytes(bytes, key)` is unchanged and the codec does not log. An undecodable stored row (envelope or layout failure) reads as absent. This holds for the point reads `public_certified_key_status_row`, `gateway_application_status_row` and `workload_svid_issue_status_row`, and for the prior-row read inside `record_workload_svid_issue_failure`, in both `LocalObservationStore` and `SimObservationStore`. | SVID issuance failure occurrence; Persisted format |
 | R-57, 2026-11-05, user ruling (option 1) | `UnboundGatewayBuilder::new` gains `node_id: NodeId` as its first parameter, before `config`. The Gateway Application owner writes `GatewayApplicationStatusRowV1` keyed by `NodeId` and, at its first projection, reads its own prior row through `ObservationStore::gateway_application_status_row(node_id)` (R-52); no other pinned input gave the owner its node. `boot_server` G2 passes the node it already holds, the same `NodeId` it passes to `GatewayIdentitySlot::new(node_id, ..)`. `GatewayConfig` stays operator configuration only (bind address and manual key). Rejected: a `node_id` field on `GatewayConfig` (mixes operator configuration with node identity the platform already owns); a new `ObservationStore` "my node" accessor (new port surface for a value `run_server` already holds). | Re-pinned composition signatures; Gateway Application status projection |
 | R-58, 2026-11-05, user ruling (option 2) | The Gateway Application owner writes no `GatewayApplicationStatusRowV1` until a Route exists, and identity or failure wakes write none before a Route exists either. User's reason: writing `RouteAbsent` when no Route has been configured makes no sense; the status of an unconfigured gateway is the absence of a row (`enabled=true`, `application=None`, R-47), not a failure cause. When a prior row exists from an earlier boot, the owner carries its base as R-52 states. Rejected: writing `RouteAbsent` before any Route exists (it reports a failure for a configuration the operator never made). | Gateway Application status projection; SVID issuance failure occurrence |
+| R-59, 2026-11-06, user ruling | `update_service` rejects, before any mutation, an update whose reverse-NAT key already maps to a different VIP, with the typed `DataplaneError::ReverseNatConflict { key, current_vip, attempted_vip }` in `overdrive-core` beside the R-35 variants. The check is part of planning (`plan_service_apply`), so nothing is overwritten and rollback never restores another Service's reverse-NAT entry. Field types are pinned once, in the DataplaneError taxonomy under Commit-guarded Service-map transaction. | Commit-guarded Service-map and applied-identity transaction |
+| R-60, 2026-11-06, user ruling | `ServiceApplyRollbackFailure::BackendRestore(BackendId)` exists. A failed in-place BACKEND_MAP restore during rollback is returned as `ServiceApplyRollback` carrying that failure; it is not only logged. Rollback saves the prior value of each in-place update and restores it; a failed restore is typed. | Commit-guarded Service-map and applied-identity transaction |
+| R-61, 2026-11-06, user ruling | The Dataplane `service_cleanup_debt` set is retried at three points: the next `update_service`, the Dataplane probe and the shutdown sweep. The probe and shutdown retries are delivered in roadmap step 05-01, which owns `EbpfDataplane::probe` and the shutdown stage. | Commit-guarded Service-map and applied-identity transaction |
 
 Earlier approvals: D1-D5 (2026-11-01), G1-G4 (2026-11-02). GH #338 (raw TCP ingress) is out of scope; GH #339 is the kernel 7.3 upgrade.
 
@@ -951,7 +954,7 @@ An observation is recorded for DESIGN; it rules no change and adds no scope.
 
 ### PROPOSED — awaiting user
 
-No item below is part of the design until the user adds it. All are optional and non-blocking (P-38 is shown as adopted for the record). R-1..R-58 above are ruled contract text (R-47..R-51 with the provenance stated per row; R-52 user-confirmed 2026-11-04; R-53 and R-54 user rulings of 2026-11-04; R-55, R-56, R-57 and R-58 user rulings of 2026-11-05), not proposals.
+No item below is part of the design until the user adds it. All are optional and non-blocking (P-38 is shown as adopted for the record). R-1..R-61 above are ruled contract text (R-47..R-51 with the provenance stated per row; R-52 user-confirmed 2026-11-04; R-53 and R-54 user rulings of 2026-11-04; R-55, R-56, R-57 and R-58 user rulings of 2026-11-05; R-59, R-60 and R-61 user rulings of 2026-11-06), not proposals.
 
 | Id | Proposal | Reachable production failure it prevents | Cost | Cheaper alternative |
 |---|---|---|---|---|
@@ -969,7 +972,7 @@ No item below is part of the design until the user adds it. All are optional and
 | P-36 (new) | Remove the `gateway.upstream.receipt.validated` tracing occurrence (its event spec) and AT-PIG-E2E-1's in-process tracing capture layer. The occurrence has no sanctioning ruling found and no production reader; it exists only as a test oracle. **Not adopted; the occurrence stays meanwhile.** | (a) None: no production failure depends on the occurrence; it is read only by AT-PIG-E2E-1. Removing it removes a production emitter, a stable event schema and a capture layer that exist for one test. | (b) Runtime: one emit per upstream request today (removal saves it). Validation: removal requires re-pointing AT-PIG-E2E-1's receipt oracle; no model or lane is added. | The cheaper oracles already pinned: the S-PIG-63 port read, `live_intent_count()` and `live_receipts()` post-state, and the exact-peer SVID plus a distinguishing backend response header (`X-Workload: api`) for the selected backend. |
 | P-40 (new) | Derive the `SvidLifecycle` retry attempts from the confirmed failure record (`WorkloadSvidIssueStatusRowV1.issue_failures`, read back into `actual`) instead of stamping `IssueRetry` on emit, and likewise for `GatewaySvidLifecycleView.retry`. **Not adopted; R-50 (View stamped on emit, unchanged) stays meanwhile.** | (a) A failed issue that never reached the executor (a dropped action, a crash between the View fsync and dispatch) is counted as an attempt and backs the next issue off; production producer: a control-plane crash after the runtime fsyncs the View and before the action dispatch (`development.md` § "Reconciler I/O" steps 7-9). The cost is one extra backoff window, not a lost issuance (the next tick re-emits). | (b) Runtime: one observation read per allocation per tick on the reconciler hydration path. Validation: a new `actual` field and read-port for `SvidLifecycle` and `GatewaySvidLifecycle`, `Sim*` impls and changed retry property tests; the View schema drops `attempts` (a CBOR additive change). | Keep the View stamped on emit (R-50): it is retry-policy memory, never an operator surface, and the cost above is bounded to one window. |
 
-Ruled proposals leave this table; the ruled contract is stated once, in the owning ADR and the sections that cite it (R-1..R-58 above; R-52 user-confirmed 2026-11-04; P-41 is ruled as R-55, 2026-11-05). P-37 was rejected by the user on 2026-11-04 and is recorded in the table.
+Ruled proposals leave this table; the ruled contract is stated once, in the owning ADR and the sections that cite it (R-1..R-61 above; R-52 user-confirmed 2026-11-04; P-41 is ruled as R-55, 2026-11-05). P-37 was rejected by the user on 2026-11-04 and is recorded in the table.
 
 Items the design deliberately does not carry: a userspace backend load balancer, a named Gateway resource, ACME, WireGuard, in-guest mTLS, DNS mutation, any new persistence subsystem.
 
@@ -3716,6 +3719,14 @@ pub enum DataplaneError {
         current: SpiffeId,
         attempted: SpiffeId,
     },
+    /// R-59: the reverse-NAT key already maps to a different VIP. Both VIPs are the frontend VIP newtype
+    /// `overdrive_core::id::ServiceVip`; the key is the existing core `overdrive_core::dataplane::BackendKey`
+    /// (the type the `REVERSE_NAT_MAP` key is built from, converted at the adapter from `BackendKeyPod`).
+    ReverseNatConflict {
+        key: BackendKey,
+        current_vip: ServiceVip,
+        attempted_vip: ServiceVip,
+    },
     ServiceApplyRollback {
         stage: ServiceApplyStage,
         rollback: Vec<ServiceApplyRollbackFailure>,
@@ -3723,6 +3734,8 @@ pub enum DataplaneError {
 }
 pub enum ServiceApplyRollbackFailure {
     BackendDelete(BackendId),
+    /// R-60: the in-place BACKEND_MAP restore of this id's prior value failed.
+    BackendRestore(BackendId),
     /// The reverse-NAT key that could not be deleted, as the backend endpoint it keys
     /// (`overdrive_core::dataplane::Proto`); the dataplane-private `BackendKeyPod` is converted at the adapter.
     ReverseNatDelete { backend: SocketAddrV4, proto: Proto },
@@ -3751,8 +3764,10 @@ For a non-empty update, exact ordering under the write guard is:
 1. Purely validate/deduplicate Backend pods and reject one endpoint carrying
    two `Backend.alloc` identities.
 2. Resolve existing allocator memo hits (through `BackendIdAllocator::existing_id`, R-24) and reject any Applied/Reserved
-   identity conflict (the same id for a different `Backend.alloc`, R-3) or
-   differing reverse-NAT VIP before mutation. A `BACKEND_MAP` entry whose
+   identity conflict (the same id for a different `Backend.alloc`, R-3) before mutation. Reject, in the same planning pass
+   (`plan_service_apply`) and before any mutation, an update whose reverse-NAT key already maps to a different VIP with
+   `DataplaneError::ReverseNatConflict` (R-59), so nothing is overwritten and rollback never restores another Service's
+   reverse-NAT entry. A `BACKEND_MAP` entry whose
    address/port/proto equal the memo hit and whose `weight`/`healthy` differ is
    the ordinary in-place update `update_service` already performs on `main`
    (the `healthy` byte flips 0 → 1 at readiness, D4) and is not a conflict; its
@@ -3775,22 +3790,24 @@ For a non-empty update, exact ordering under the write guard is:
 6. Run orphan BACKEND/reverse-NAT cleanup after commit. Failure inserts the
    exact key into private `service_cleanup_debt: BTreeSet<ServiceCleanupDebt>`,
    emits a closed `dataplane.service_cleanup.deferred` warning, and is retried
-   at the next `update_service`, Dataplane probe and shutdown sweep; it never
+   at the next `update_service`, the Dataplane probe and the shutdown sweep (R-61; the probe and shutdown retries are delivered in roadmap step 05-01, which owns `EbpfDataplane::probe` and the shutdown stage); it never
    changes a committed update into a Failed hydration result.
 
 Any error before the outer swap replays `ServiceApplyUndo` in reverse order,
 deleting only keys proven absent before this turn, removes every Reserved
 identity, releases fresh allocator memos without recycling their numeric IDs,
 drops the private inner map and leaves the prior outer pointer. Existing equal
-entries were never rewritten, so rollback never has to reconstruct a prior
-value. Rollback attempts every inserted key even after one failure. A partial
+entries were never rewritten and need no restore; each in-place BACKEND_MAP
+update is restored from the prior value saved in `ServiceApplyUndo`. Rollback
+attempts every inserted key and every restore even after one failure. A failed
+restore is the typed `ServiceApplyRollbackFailure::BackendRestore(BackendId)` (R-60), never only logged. A partial
 rollback returns `ServiceApplyRollback`, retains the still-inserted safe-delete
 keys as closed cleanup debt, and still exposes no Applied identity for the
 abandoned IDs; future appearance receives fresh IDs, so abandoned reservations
 cannot poison reuse.
 When rollback fully succeeds, `update_service` returns the original existing
 stage error; `ServiceApplyRollback` replaces it only when one or more restore
-delete operations also failed, with `stage` retaining the original failure location.
+or delete operations also failed, with `stage` retaining the original failure location.
 The empty-backend path takes the same write guard, commits by deleting the
 outer ServiceKey first, retains historical Applied identities for old receipts,
 then performs idempotent post-commit GC.
@@ -6934,7 +6951,7 @@ The reconstructed DESIGN is the final ADR set 0220-0246 (system, Route, Domain
 and Application decisions, plus the G1 data-path decisions 0244-0246; numbering per [`adr-renumbering.md`](adr-renumbering.md)) plus this document. It is
 reconstructed against main 549d78fa6. The user confirmed the D5 "New public surface" list (items 1-13, item 12
 reconfirmed) and ruled on P-2, P-9, P-10, B-1, DG-11, DG-12, QC-1..QC-3, P-12, P-13a-d, P-16, P-17, P-18, the upstream-leg shape and Q-1 on
-2026-11-02 (R-1..R-19), 2026-11-03 (R-20..R-44) and 2026-11-04 (R-45..R-54, R-52 user-confirmed, R-53 and R-54 user rulings) and 2026-11-05 (R-55, R-56, R-57 and R-58, user rulings), User decisions. The optional P-1, P-3, P-4, P-6, the P-8 simplification and P-32, P-33, P-34, P-35, P-36 and P-40 may be ruled later (P-37 was rejected and P-38 adopted on 2026-11-04; P-41 was ruled as R-55 on 2026-11-05); none blocks a scaffold. The
+2026-11-02 (R-1..R-19), 2026-11-03 (R-20..R-44) and 2026-11-04 (R-45..R-54, R-52 user-confirmed, R-53 and R-54 user rulings) and 2026-11-05 (R-55, R-56, R-57 and R-58, user rulings) and 2026-11-06 (R-59, R-60 and R-61, user rulings), User decisions. The optional P-1, P-3, P-4, P-6, the P-8 simplification and P-32, P-33, P-34, P-35, P-36 and P-40 may be ruled later (P-37 was rejected and P-38 adopted on 2026-11-04; P-41 was ruled as R-55 on 2026-11-05); none blocks a scaffold. The
 contract-shaping items V-GW-1..5 have run on native metal; the
 residuals are source-settled or DISTILL native obligations (see Contract-shaping validation items). The 2026-09-13 approval (preserved at git ref `backup/research-ingress-gateway-pre-reconstruct`) covers the decisions carried unchanged (class 1, including item 12 of the D5 list, reconfirmed on main). The cgroup-BPF selection program—not XDP—
 selects the host-originated gateway socket; XDP wire ingress remains unchanged.
