@@ -1,14 +1,16 @@
 //! Safe `SO_COOKIE` reader for gateway-owned upstream sockets.
 //!
-//! SCAFFOLD: true. The syscall path is DELIVER's and fails with SCAFFOLD text.
 //! Dataplane-internal helper: it is not re-exported to `overdrive-gateway` and
-//! is not a boot-adapter field.
+//! is not a boot-adapter field. `read` goes through rustix's safe
+//! `sockopt::socket_cookie` wrapper (`getsockopt(SOL_SOCKET, SO_COOKIE)`,
+//! `net/core/sock.c:2109-2113 @ v7.0`), so the crate's `deny(unsafe_code)`
+//! stays intact.
 
 #![allow(
     clippy::todo,
     clippy::unused_self,
     clippy::missing_const_for_fn,
-    reason = "public-ingress DISTILL scaffold: bodies are DELIVER's"
+    reason = "`probe` is the boot sentinel step's (public-ingress-gateway)"
 )]
 
 use std::os::fd::BorrowedFd;
@@ -32,8 +34,21 @@ impl SocketCookieReader {
     }
 
     /// Read the stable kernel cookie for one borrowed socket.
-    pub fn read(&self, _socket: BorrowedFd<'_>) -> Result<SocketCookie, SocketCookieReadError> {
-        todo!("SCAFFOLD: SocketCookieReader::read")
+    ///
+    /// # Errors
+    ///
+    /// [`SocketCookieReadError::Unsupported`] when the kernel has no
+    /// `SO_COOKIE` (`ENOPROTOOPT`), [`SocketCookieReadError::Syscall`] for any
+    /// other failure, [`SocketCookieReadError::Zero`] when the kernel reports 0.
+    pub fn read(&self, socket: BorrowedFd<'_>) -> Result<SocketCookie, SocketCookieReadError> {
+        let raw = rustix::net::sockopt::socket_cookie(socket).map_err(|errno| {
+            if errno == rustix::io::Errno::NOPROTOOPT {
+                SocketCookieReadError::Unsupported
+            } else {
+                SocketCookieReadError::Syscall { source: errno.into() }
+            }
+        })?;
+        SocketCookie::new(raw).map_err(|_| SocketCookieReadError::Zero)
     }
 }
 

@@ -362,6 +362,41 @@ pub struct EbpfDataplane {
     #[allow(dead_code)]
     cgroup_attach_path: std::path::PathBuf,
 
+    /// Userspace handle to `GATEWAY_CONNECT_INTENT_MAP` (public-ingress-gateway,
+    /// ADR-0232 / ADR-0243): one registered intent per prepared gateway upstream
+    /// socket, keyed by the socket cookie. Unpinned: it lives with the loaded BPF
+    /// object. `parking_lot::Mutex` because aya's `HashMap` writes take `&mut
+    /// self`; never held across `.await`.
+    gateway_intent_map: parking_lot::Mutex<
+        aya::maps::HashMap<
+            aya::maps::MapData,
+            u64,
+            crate::gateway_connect::GatewayConnectIntentPod,
+        >,
+    >,
+
+    /// Userspace handle to `GATEWAY_SELECTION_RECEIPT_MAP`: the receipt the
+    /// gateway selection arm writes before it allows or denies a registered
+    /// connect, keyed by the same cookie.
+    gateway_receipt_map: parking_lot::Mutex<
+        aya::maps::HashMap<
+            aya::maps::MapData,
+            u64,
+            crate::gateway_connect::GatewaySelectionReceiptPod,
+        >,
+    >,
+
+    /// Applied backend identity of every `BackendId` the Service maps name.
+    /// Read by `GatewayConnectDataplane::selected_backend_identity`.
+    backend_identities:
+        parking_lot::Mutex<std::collections::BTreeMap<u32, overdrive_core::id::SpiffeId>>,
+
+    /// Owns the `cgroup_connect4_gateway` attachment (R-1): the separate gateway
+    /// selection program beside `cgroup_connect4_service`. Same RAII
+    /// detach-on-drop shape as `_cgroup_connect4_link`.
+    #[allow(dead_code)]
+    _cgroup_connect4_gateway_link: aya::programs::cgroup_sock_addr::CgroupSockAddrLinkId,
+
     /// Test-only failure-injection seam for [`Self::probe`]. When
     /// `Some(fault)`, `probe()` short-circuits to `Err(fault.clone())`
     /// BEFORE touching `BACKEND_MAP`. The seam is gated behind
@@ -783,6 +818,63 @@ impl EbpfDataplane {
             .attach(&cgroup_file, CgroupAttachMode::Single)
             .map_err(|e| cgroup_attach_error("cgroup_recvmsg4_service", &e))?;
 
+        // public-ingress-gateway (ADR-0232 / ADR-0243) — recover the two
+        // unpinned gateway maps (aya creates them at load) and load + attach the
+        // separate gateway selection program beside the existing connect4 hook.
+        let gateway_intent_map = aya::maps::HashMap::<
+            _,
+            u64,
+            crate::gateway_connect::GatewayConnectIntentPod,
+        >::try_from(
+            bpf.take_map("GATEWAY_CONNECT_INTENT_MAP").ok_or_else(|| {
+                DataplaneError::LoadFailed(
+                    "GATEWAY_CONNECT_INTENT_MAP not found in BPF object".into(),
+                )
+            })?,
+        )
+        .map_err(|e| {
+            DataplaneError::LoadFailed(format!("GATEWAY_CONNECT_INTENT_MAP try_from: {e}"))
+        })?;
+        let gateway_receipt_map = aya::maps::HashMap::<
+            _,
+            u64,
+            crate::gateway_connect::GatewaySelectionReceiptPod,
+        >::try_from(
+            bpf.take_map("GATEWAY_SELECTION_RECEIPT_MAP").ok_or_else(|| {
+                DataplaneError::LoadFailed(
+                    "GATEWAY_SELECTION_RECEIPT_MAP not found in BPF object".into(),
+                )
+            })?,
+        )
+        .map_err(|e| {
+            DataplaneError::LoadFailed(format!("GATEWAY_SELECTION_RECEIPT_MAP try_from: {e}"))
+        })?;
+
+        let gateway_prog: &mut CgroupSockAddr = bpf
+            .program_mut("cgroup_connect4_gateway")
+            .ok_or_else(|| {
+                DataplaneError::LoadFailed(
+                    "cgroup_connect4_gateway program not found in BPF object".into(),
+                )
+            })?
+            .try_into()
+            .map_err(|e| {
+                DataplaneError::LoadFailed(format!("cgroup_connect4_gateway program type: {e}"))
+            })?;
+        gateway_prog.load().map_err(|e| cgroup_load_error("cgroup_connect4_gateway", &e))?;
+        // Attach mode: aya's `CgroupAttachMode::Single` names the link flags it
+        // passes (none); the kernel lists a link-based attach as `multi`, so the
+        // gateway program runs beside `cgroup_connect4_service` over the same
+        // context. Any deny from either yields `-EPERM`
+        // (`kernel/bpf/cgroup.c:79-89 @ v7.0`).
+        let cgroup_connect4_gateway_link_id =
+            gateway_prog.attach(&cgroup_file, CgroupAttachMode::Single).map_err(|e| {
+                DataplaneError::LoadFailed(format!(
+                    "cgroup_connect4_gateway.attach({}): {e}",
+                    cgroup_attach_path.display()
+                ))
+            })?;
+
         Ok(Self {
             bpf,
             service_map,
@@ -799,6 +891,10 @@ impl EbpfDataplane {
             _cgroup_connect4_link: cgroup_link_id,
             _cgroup_sendmsg4_link: cgroup_sendmsg4_link_id,
             _cgroup_recvmsg4_link: cgroup_recvmsg4_link_id,
+            gateway_intent_map: parking_lot::Mutex::new(gateway_intent_map),
+            gateway_receipt_map: parking_lot::Mutex::new(gateway_receipt_map),
+            backend_identities: parking_lot::Mutex::new(std::collections::BTreeMap::new()),
+            _cgroup_connect4_gateway_link: cgroup_connect4_gateway_link_id,
             reverse_local_miss_counter,
             cgroup_attach_path: cgroup_attach_path.to_path_buf(),
             #[cfg(any(test, feature = "integration-tests"))]
@@ -1857,7 +1953,9 @@ impl Dataplane for EbpfDataplane {
                     })?;
                 if !removed.is_empty() {
                     let mut alloc = self.backend_id_alloc.lock();
+                    let mut identities = self.backend_identities.lock();
                     for removed_id in &removed {
+                        identities.remove(removed_id);
                         if let Ok(bid) = overdrive_core::id::BackendId::new(*removed_id) {
                             alloc.release(bid);
                         }
@@ -2048,6 +2146,16 @@ impl Dataplane for EbpfDataplane {
             }
         }
 
+        // The applied identity of every backend this update names is published
+        // before the outer swap, so a `Selected` receipt that names one of these
+        // ids can always resolve its identity.
+        {
+            let mut identities = self.backend_identities.lock();
+            for (backend_id, backend) in backend_ids.iter().zip(&backends) {
+                identities.insert(*backend_id, backend.alloc.clone());
+            }
+        }
+
         // Step 3 — Atomic outer-pointer update. Single
         // bpf_map_update_elem syscall; kernel ref-counts the new
         // inner map and the old; concurrent XDP readers see one or
@@ -2092,7 +2200,9 @@ impl Dataplane for EbpfDataplane {
             // same brief-hold discipline.
             if !removed.is_empty() {
                 let mut alloc = self.backend_id_alloc.lock();
+                let mut identities = self.backend_identities.lock();
                 for removed_id in &removed {
+                    identities.remove(removed_id);
                     if let Ok(bid) = overdrive_core::id::BackendId::new(*removed_id) {
                         alloc.release(bid);
                     }

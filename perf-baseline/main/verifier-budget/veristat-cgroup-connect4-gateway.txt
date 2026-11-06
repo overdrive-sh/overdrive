@@ -1,0 +1,26 @@
+# Verifier-budget baseline — cgroup_connect4_gateway
+#
+# public-ingress-gateway (ADR-0224 / ADR-0243, R-1) — FIRST baseline for the
+# separate gateway selection BPF_PROG_TYPE_CGROUP_SOCK_ADDR connect4 program,
+# attached beside `cgroup_connect4_service` at the same cgroup ancestor.
+#
+# Budget gates per the existing `verifier-regress` envelope:
+#   verified_insns ≤ 500,000    ← 50% of CAP_BPF ceiling
+#   verified_insns ≤ 1,000,000  ← absolute CAP_BPF ceiling
+#
+# The program does one cookie-keyed intent lookup (a miss allows immediately),
+# and for a registered socket an outer SERVICE_MAP lookup, one chained inner
+# Maglev lookup, one BACKEND_MAP lookup, a receipt write and the destination
+# rewrite.
+#
+# Recorded value: 125 instructions, measured on the pinned appliance kernel
+# 7.0.0-38-generic (native metal host, `cargo verifier-regress`'s binary,
+# source d113a20a8 + the step's working tree). The design's expectation was
+# 246 (V-GW-4's spike program on the same kernel); the delivered program is
+# smaller and the figure above is the authoritative baseline (`bpf.md`: the
+# pinned kernel is authoritative).
+#
+# Format (one line per program, space-separated key=value pairs;
+# the parser keys off `prog=` and `verified_insns=`).
+
+file=target/bpf/overdrive_bpf.o prog=cgroup_connect4_gateway verdict=success verified_insns=125

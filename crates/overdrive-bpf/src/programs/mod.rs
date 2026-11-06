@@ -10,6 +10,7 @@
 //! See `docs/feature/phase-2-xdp-service-map/design/architecture.md`
 //! § 9 module layout.
 
+pub mod cgroup_connect4_gateway;
 pub mod cgroup_connect4_service;
 // unconnected-udp-sendmsg4 (GH #200, ADR-0053 rev 2026-06-05) — the two
 // new cgroup_sock_addr hooks for the unconnected same-host UDP path.

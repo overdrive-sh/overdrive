@@ -14,7 +14,8 @@
 //! `overdrive-dataplane::gateway_connect`.
 //!
 //! This file declares the maps only. The separate gateway selection
-//! `cgroup/connect4` program that reads and writes them is DELIVER's.
+//! `cgroup/connect4` program that reads and writes them is
+//! `programs/cgroup_connect4_gateway.rs`.
 
 #![allow(dead_code)]
 

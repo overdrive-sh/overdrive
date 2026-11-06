@@ -1,0 +1,15 @@
+# Throwaway R-55 probe (public-ingress-gateway; GH #287). Not a test, not a gate,
+# not a harness: one point-in-time per-connect cost receipt. Self-contained
+# workspace; links the production dataplane by path only to load the real object.
+[package]
+name = "pig-connect-cost"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+overdrive-dataplane = { path = "../../crates/overdrive-dataplane" }
+aya = "0.13"
+libc = "0.2"
+
+[workspace]

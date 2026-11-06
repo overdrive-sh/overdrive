@@ -5,41 +5,45 @@
 //! `MTLS_TPROXY_MARK`, loopback-binds it, reads its socket cookie) and
 //! registers `(cookie, ServiceKey)` in `GATEWAY_CONNECT_INTENT_MAP`; the
 //! separate gateway selection `cgroup/connect4` program writes the receipt into
-//! `GATEWAY_SELECTION_RECEIPT_MAP`; `take_receipt` consumes it. Applied backend
-//! identities are published only after the outer `SERVICE_MAP` swap commits
-//! (the commit-guarded `update_service` transaction).
+//! `GATEWAY_SELECTION_RECEIPT_MAP`; `take_receipt` consumes it. The applied
+//! identity of each backend is recorded by `update_service` before the outer
+//! `SERVICE_MAP` swap, so a `Selected` receipt can always resolve its identity.
 //!
-//! SCAFFOLD: true. Only the exact shapes the DESIGN pins are present: the
-//! private POD ABI of the two maps (mirrored by `overdrive-bpf`) and the port
-//! implementation. Every port body fails with SCAFFOLD text until DELIVER. The
-//! commit-guard internals (`BackendIdState`, `ServiceApplyUndo`,
-//! `ServiceCleanupDebt`, the `service_apply_commit` guard) are private
-//! structure and are the crafter's.
+//! `open_upstream`, `take_receipt`, `selected_backend_identity` and the cleanup
+//! capability are implemented. `probe` is the boot sentinel step's and is still
+//! the scaffold. The commit-guard internals (`BackendIdState`,
+//! `ServiceApplyUndo`, `ServiceCleanupDebt`, the `service_apply_commit` guard) are
+//! private structure and are the crafter's.
 
 #![allow(
     clippy::todo,
     clippy::doc_markdown,
     clippy::needless_pass_by_value,
-    clippy::missing_const_for_fn,
     clippy::unused_async,
     clippy::unused_self,
     clippy::pub_underscore_fields,
     dead_code,
     unused_variables,
-    reason = "public-ingress DISTILL scaffold: bodies are DELIVER's"
+    reason = "`probe` is the boot sentinel step's (public-ingress-gateway)"
 )]
 
 use std::collections::BTreeMap;
+use std::net::{IpAddr, Ipv4Addr};
+use std::num::NonZeroU16;
+use std::os::fd::{AsFd, AsRawFd, FromRawFd, OwnedFd};
 use std::time::Instant;
 
 use async_trait::async_trait;
-use overdrive_core::id::{BackendId, SpiffeId};
+use overdrive_core::dataplane::{MTLS_TPROXY_MARK, Proto, ServiceFrontend};
+use overdrive_core::id::{BackendId, ServiceVip, SpiffeId};
 use overdrive_core::public_ingress::{ServiceKey, SocketCookie};
 use overdrive_core::traits::clock::Clock;
 use overdrive_gateway::ports::{
     GatewayConnectCleanup, GatewayConnectCleanupSweep, GatewayConnectDataplane,
     GatewayConnectDataplaneError, GatewayConnectIntent, GatewaySelectionReceipt, PreparedUpstream,
 };
+
+use overdrive_host::socket_cookie::{SocketCookieReadError, SocketCookieReader};
 
 use crate::EbpfDataplane;
 
@@ -81,26 +85,210 @@ const _: () = assert!(core::mem::align_of::<GatewayConnectIntentPod>() == 4);
 const _: () = assert!(core::mem::size_of::<GatewaySelectionReceiptPod>() == 8);
 const _: () = assert!(core::mem::align_of::<GatewaySelectionReceiptPod>() == 4);
 
+/// `errno` of a full hash map (`E2BIG`).
+fn is_map_full(error: &aya::maps::MapError) -> bool {
+    matches!(
+        error,
+        aya::maps::MapError::SyscallError(syscall) if syscall.io_error.raw_os_error() == Some(libc::E2BIG)
+    )
+}
+
+/// A delete of an absent key. aya reports a missing key on `remove` as the
+/// `ENOENT` syscall error and on `get` as `KeyNotFound`.
+fn is_key_absent(error: &aya::maps::MapError) -> bool {
+    match error {
+        aya::maps::MapError::KeyNotFound => true,
+        aya::maps::MapError::SyscallError(syscall) => {
+            syscall.io_error.raw_os_error() == Some(libc::ENOENT)
+        }
+        _ => false,
+    }
+}
+
+/// The Service-map key as the intent value, host-order. IPv4 only: a
+/// `ServiceKey` projects from a `ServiceFrontend`, which is IPv4 by
+/// construction.
+fn intent_pod(key: &ServiceKey) -> Result<GatewayConnectIntentPod, GatewayConnectDataplaneError> {
+    let Some(vip) = key.vip().try_as_ipv4() else {
+        return Err(GatewayConnectDataplaneError::Unavailable);
+    };
+    Ok(GatewayConnectIntentPod {
+        vip_host: u32::from(vip),
+        port_host: key.port().get(),
+        proto: key.protocol().as_u8(),
+        _pad: 0,
+    })
+}
+
+/// The `ServiceKey` an intent value denotes.
+fn service_key_of(
+    pod: GatewayConnectIntentPod,
+) -> Result<ServiceKey, GatewayConnectDataplaneError> {
+    let vip = ServiceVip::new(IpAddr::V4(Ipv4Addr::from(pod.vip_host)))
+        .map_err(|_| GatewayConnectDataplaneError::Kernel)?;
+    let port = NonZeroU16::new(pod.port_host).ok_or(GatewayConnectDataplaneError::Kernel)?;
+    let proto = Proto::try_from(pod.proto).map_err(|_| GatewayConnectDataplaneError::Kernel)?;
+    let frontend =
+        ServiceFrontend::new(vip, port, proto).map_err(|_| GatewayConnectDataplaneError::Kernel)?;
+    Ok(ServiceKey::from_frontend(frontend))
+}
+
+/// Decode the two canonical receipt value shapes; anything else is a mismatch.
+fn decode_receipt(
+    receipt: GatewaySelectionReceiptPod,
+    socket_cookie: SocketCookie,
+    service_key: ServiceKey,
+) -> Result<GatewaySelectionReceipt, GatewayConnectDataplaneError> {
+    match (receipt.outcome, receipt.backend_id) {
+        (GATEWAY_RECEIPT_SELECTED, raw) if raw != 0 => {
+            let backend_id =
+                BackendId::new(raw).map_err(|_| GatewayConnectDataplaneError::ReceiptMismatch)?;
+            Ok(GatewaySelectionReceipt::Selected { socket_cookie, service_key, backend_id })
+        }
+        (GATEWAY_RECEIPT_NO_BACKEND, 0) => {
+            Ok(GatewaySelectionReceipt::NoBackend { socket_cookie, service_key })
+        }
+        _ => Err(GatewayConnectDataplaneError::ReceiptMismatch),
+    }
+}
+
+/// An unconnected `AF_INET` stream socket with `SO_MARK = MTLS_TPROXY_MARK`,
+/// `IP_BIND_ADDRESS_NO_PORT` and a bind to `127.0.0.1:0`, all set before
+/// `connect(2)` (ADR-0190: mark alone fails `ENETUNREACH`, bind alone `EINVAL`;
+/// both route the dial through table 100 with a loopback source).
+fn prepared_socket() -> Result<tokio::net::TcpSocket, GatewayConnectDataplaneError> {
+    fn set_int(
+        fd: std::os::fd::RawFd,
+        level: libc::c_int,
+        name: libc::c_int,
+        value: libc::c_int,
+    ) -> Result<(), std::io::ErrorKind> {
+        let len = libc::socklen_t::try_from(std::mem::size_of::<libc::c_int>())
+            .map_err(|_| std::io::ErrorKind::InvalidInput)?;
+        // SAFETY: `fd` is a live socket owned by the caller; `value` is valid for
+        // reads of `size_of::<c_int>()` bytes for the duration of the call.
+        let rc =
+            unsafe { libc::setsockopt(fd, level, name, std::ptr::from_ref(&value).cast(), len) };
+        if rc == 0 { Ok(()) } else { Err(std::io::Error::last_os_error().kind()) }
+    }
+
+    // SAFETY: plain `socket(2)`; the result is checked before use.
+    let raw = unsafe {
+        libc::socket(libc::AF_INET, libc::SOCK_STREAM | libc::SOCK_CLOEXEC | libc::SOCK_NONBLOCK, 0)
+    };
+    if raw < 0 {
+        return Err(GatewayConnectDataplaneError::SocketCreate(
+            std::io::Error::last_os_error().kind(),
+        ));
+    }
+    // SAFETY: `raw` is a freshly created descriptor with no other owner; the
+    // `OwnedFd` closes it on every error path below.
+    let fd = unsafe { OwnedFd::from_raw_fd(raw) };
+
+    #[allow(clippy::cast_possible_wrap)]
+    let mark = MTLS_TPROXY_MARK as libc::c_int;
+    set_int(fd.as_raw_fd(), libc::SOL_SOCKET, libc::SO_MARK, mark)
+        .map_err(GatewayConnectDataplaneError::SocketOption)?;
+    set_int(fd.as_raw_fd(), libc::SOL_IP, libc::IP_BIND_ADDRESS_NO_PORT, 1)
+        .map_err(GatewayConnectDataplaneError::SocketOption)?;
+
+    // SAFETY: an all-zero `sockaddr_in` is a valid value; the fields set below
+    // make it the IPv4 loopback address with an unspecified port.
+    let mut local: libc::sockaddr_in = unsafe { std::mem::zeroed() };
+    local.sin_family = libc::sa_family_t::try_from(libc::AF_INET)
+        .map_err(|_| GatewayConnectDataplaneError::SocketBind(std::io::ErrorKind::InvalidInput))?;
+    local.sin_addr.s_addr = u32::from_ne_bytes(Ipv4Addr::LOCALHOST.octets());
+    let local_len = libc::socklen_t::try_from(std::mem::size_of_val(&local))
+        .map_err(|_| GatewayConnectDataplaneError::SocketBind(std::io::ErrorKind::InvalidInput))?;
+    // SAFETY: `local` is valid for reads of the length passed.
+    let bind_rc =
+        unsafe { libc::bind(fd.as_raw_fd(), std::ptr::from_ref(&local).cast(), local_len) };
+    if bind_rc != 0 {
+        return Err(GatewayConnectDataplaneError::SocketBind(
+            std::io::Error::last_os_error().kind(),
+        ));
+    }
+
+    // SAFETY: the descriptor is an unconnected, nonblocking `AF_INET` stream
+    // socket; ownership moves into the `TcpSocket`.
+    Ok(unsafe { tokio::net::TcpSocket::from_raw_fd(std::os::fd::IntoRawFd::into_raw_fd(fd)) })
+}
+
 impl GatewayConnectCleanup for EbpfDataplane {
     fn cleanup(&self, intent: &GatewayConnectIntent) -> Result<(), GatewayConnectDataplaneError> {
-        todo!("SCAFFOLD: EbpfDataplane::cleanup")
+        let cookie = intent.socket_cookie.get().get();
+        // Both removals run; an absent key is already clean.
+        let intent_removed = remove_key(&mut self.gateway_intent_map.lock(), cookie);
+        let receipt_removed = remove_key(&mut self.gateway_receipt_map.lock(), cookie);
+        intent_removed.and(receipt_removed)
     }
 
     fn cleanup_all_gateway_intents(
         &self,
     ) -> Result<GatewayConnectCleanupSweep, GatewayConnectDataplaneError> {
-        todo!("SCAFFOLD: EbpfDataplane::cleanup_all_gateway_intents")
+        let removed_intents = remove_all(&mut self.gateway_intent_map.lock())?;
+        let removed_receipts = remove_all(&mut self.gateway_receipt_map.lock())?;
+        Ok(GatewayConnectCleanupSweep { removed_intents, removed_receipts })
     }
 
     fn live_intent_count(&self) -> Result<u32, GatewayConnectDataplaneError> {
-        todo!("SCAFFOLD: EbpfDataplane::live_intent_count")
+        self.gateway_intent_map
+            .lock()
+            .keys()
+            .try_fold(0_u32, |count, key| key.map(|_| count.saturating_add(1)))
+            .map_err(|_| GatewayConnectDataplaneError::Kernel)
     }
 
     fn live_receipts(
         &self,
     ) -> Result<BTreeMap<SocketCookie, GatewaySelectionReceipt>, GatewayConnectDataplaneError> {
-        todo!("SCAFFOLD: EbpfDataplane::live_receipts")
+        let intents = self.gateway_intent_map.lock();
+        let receipts = self.gateway_receipt_map.lock();
+        let mut snapshot = BTreeMap::new();
+        for entry in receipts.iter() {
+            let (raw_cookie, receipt) = entry.map_err(|_| GatewayConnectDataplaneError::Kernel)?;
+            let cookie = SocketCookie::new(raw_cookie)
+                .map_err(|_| GatewayConnectDataplaneError::ReceiptMismatch)?;
+            let bound = intents
+                .get(&raw_cookie, 0)
+                .map_err(|_| GatewayConnectDataplaneError::ReceiptMismatch)?;
+            snapshot.insert(cookie, decode_receipt(receipt, cookie, service_key_of(bound)?)?);
+        }
+        drop(receipts);
+        drop(intents);
+        Ok(snapshot)
     }
+}
+
+/// Remove `cookie`; an absent key is success, any other failure is `Cleanup`.
+fn remove_key<V: aya::Pod>(
+    map: &mut aya::maps::HashMap<aya::maps::MapData, u64, V>,
+    cookie: u64,
+) -> Result<(), GatewayConnectDataplaneError> {
+    match map.remove(&cookie) {
+        Ok(()) => Ok(()),
+        Err(error) if is_key_absent(&error) => Ok(()),
+        Err(_) => Err(GatewayConnectDataplaneError::Cleanup),
+    }
+}
+
+/// Remove every key and return the exact removed count.
+fn remove_all<V: aya::Pod>(
+    map: &mut aya::maps::HashMap<aya::maps::MapData, u64, V>,
+) -> Result<u32, GatewayConnectDataplaneError> {
+    let keys = map
+        .keys()
+        .collect::<Result<Vec<u64>, _>>()
+        .map_err(|_| GatewayConnectDataplaneError::Cleanup)?;
+    let mut removed: u32 = 0;
+    for key in keys {
+        match map.remove(&key) {
+            Ok(()) => removed = removed.saturating_add(1),
+            Err(error) if is_key_absent(&error) => {}
+            Err(_) => return Err(GatewayConnectDataplaneError::Cleanup),
+        }
+    }
+    Ok(removed)
 }
 
 #[async_trait]
@@ -117,20 +305,72 @@ impl GatewayConnectDataplane for EbpfDataplane {
         &self,
         key: ServiceKey,
     ) -> Result<PreparedUpstream, GatewayConnectDataplaneError> {
-        todo!("SCAFFOLD: EbpfDataplane::open_upstream")
+        let intent_value = intent_pod(&key)?;
+        let socket = prepared_socket()?;
+        let socket_cookie =
+            SocketCookieReader::new().read(socket.as_fd()).map_err(|error| match error {
+                SocketCookieReadError::Unsupported => {
+                    GatewayConnectDataplaneError::CookieRead(std::io::ErrorKind::Unsupported)
+                }
+                SocketCookieReadError::Syscall { source } => {
+                    GatewayConnectDataplaneError::CookieRead(source.kind())
+                }
+                SocketCookieReadError::Zero => {
+                    GatewayConnectDataplaneError::CookieRead(std::io::ErrorKind::InvalidData)
+                }
+            })?;
+        let raw_cookie = socket_cookie.get().get();
+
+        // Registration rejects a live cookie, drops a stale receipt for it, then
+        // inserts the intent.
+        let mut intents = self.gateway_intent_map.lock();
+        match intents.get(&raw_cookie, 0) {
+            Ok(_) => return Err(GatewayConnectDataplaneError::IntentAlreadyRegistered),
+            Err(aya::maps::MapError::KeyNotFound) => {}
+            Err(_) => return Err(GatewayConnectDataplaneError::Kernel),
+        }
+        remove_key(&mut self.gateway_receipt_map.lock(), raw_cookie)?;
+        intents.insert(raw_cookie, intent_value, 0).map_err(|error| {
+            if is_map_full(&error) {
+                GatewayConnectDataplaneError::IntentRegistryFull
+            } else {
+                GatewayConnectDataplaneError::Kernel
+            }
+        })?;
+        drop(intents);
+
+        Ok(PreparedUpstream::new(socket, GatewayConnectIntent { socket_cookie, service_key: key }))
     }
 
     fn take_receipt(
         &self,
         intent: &GatewayConnectIntent,
     ) -> Result<GatewaySelectionReceipt, GatewayConnectDataplaneError> {
-        todo!("SCAFFOLD: EbpfDataplane::take_receipt")
+        let cookie = intent.socket_cookie.get().get();
+        let mut receipts = self.gateway_receipt_map.lock();
+        let value = match receipts.get(&cookie, 0) {
+            Ok(value) => value,
+            Err(aya::maps::MapError::KeyNotFound) => {
+                return Err(GatewayConnectDataplaneError::ReceiptMissing);
+            }
+            Err(_) => return Err(GatewayConnectDataplaneError::Kernel),
+        };
+        let receipt = decode_receipt(value, intent.socket_cookie, intent.service_key)?;
+        match receipts.remove(&cookie) {
+            Ok(()) => Ok(receipt),
+            Err(error) if is_key_absent(&error) => Ok(receipt),
+            Err(_) => Err(GatewayConnectDataplaneError::Kernel),
+        }
     }
 
     fn selected_backend_identity(
         &self,
         backend_id: BackendId,
     ) -> Result<SpiffeId, GatewayConnectDataplaneError> {
-        todo!("SCAFFOLD: EbpfDataplane::selected_backend_identity")
+        self.backend_identities
+            .lock()
+            .get(&backend_id.get())
+            .cloned()
+            .ok_or(GatewayConnectDataplaneError::BackendIdentityMissing { backend_id })
     }
 }

@@ -172,7 +172,6 @@ fn unregistered_cgroup_socket_keeps_non_service_behaviour() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER gateway-selection-hook"]
 fn registered_socket_is_selected_and_its_dial_reaches_the_backend_from_the_loopback_source() {
     let rig = HostRig::new("h63");
     let rt = runtime();
@@ -468,7 +467,6 @@ fn updates_racing_identity_reads_never_return_a_missing_identity_for_a_selected_
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER gateway-selection-hook-rewrite"]
 fn a_registered_connect_lands_on_the_programmed_backend_with_the_port_in_network_order() {
     let rig = HostRig::new("h124");
     let rt = runtime();
@@ -508,7 +506,6 @@ fn a_registered_connect_lands_on_the_programmed_backend_with_the_port_in_network
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[test]
-#[ignore = "pending DELIVER gateway-selection-hook-unselected-sockets"]
 fn a_socket_whose_intent_was_cleaned_up_is_not_selected_and_leaves_no_receipt() {
     let rig = HostRig::new("h125b");
     let rt = runtime();
@@ -560,7 +557,6 @@ fn a_socket_whose_intent_was_cleaned_up_is_not_selected_and_leaves_no_receipt() 
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[test]
-#[ignore = "pending DELIVER gateway-selection-hook-unselected-sockets"]
 fn a_plain_socket_dialing_the_frontend_is_not_rewritten_while_an_intent_is_outstanding() {
     let rig = HostRig::new("h125c");
     let rt = runtime();

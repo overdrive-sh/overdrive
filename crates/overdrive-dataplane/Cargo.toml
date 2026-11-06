@@ -54,6 +54,11 @@ overdrive-core.workspace = true
 # driven port defined by `overdrive-gateway::ports`. `overdrive-gateway` depends
 # only on `overdrive-core` and `overdrive-host`, so this edge adds no cycle.
 overdrive-gateway.path   = "../overdrive-gateway"
+# public-ingress-gateway (ADR-0243): `EbpfDataplane::open_upstream` reads the
+# upstream socket's cookie through `overdrive_host::socket_cookie::SocketCookieReader`,
+# a dataplane-internal helper. `overdrive-gateway` already depends on
+# `overdrive-host`, so this edge adds no cycle.
+overdrive-host.path      = "../overdrive-host"
 async-trait.workspace    = true
 thiserror.workspace      = true
 tokio                    = { workspace = true, features = ["macros", "rt"] }
