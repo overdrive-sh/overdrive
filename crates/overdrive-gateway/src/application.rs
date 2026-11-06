@@ -250,7 +250,7 @@ impl GatewayBuilder {
             Arc::clone(admission.budget()),
             Arc::clone(&ledger),
         ));
-        let cleanup: Arc<dyn GatewayConnectCleanup> = dataplane;
+        let cleanup: Arc<dyn GatewayConnectCleanup> = dataplane.clone();
 
         let owners = OwnerShutdowns::new();
         let (listener, listener_task) = GatewayListenerControl::spawn(owners.listener.clone());
@@ -262,6 +262,8 @@ impl GatewayBuilder {
             frontend,
             identity: Arc::clone(&identity_lifecycle),
             connector,
+            dataplane,
+            connect_proven: Arc::new(AtomicBool::new(false)),
             admission,
             listener,
             observations: Arc::clone(&observations),
@@ -891,6 +893,7 @@ impl GatewayApplicationHandle {
 enum GateFailure {
     Identity(GatewayIdentityLifecycleError),
     ConnectPath(GatewayUpstreamConnectError),
+    ConnectProbe(GatewayConnectDataplaneError),
     Timeout,
 }
 
@@ -928,6 +931,9 @@ pub(crate) struct GatewayApplicationOwner {
     frontend: Arc<dyn ServiceFrontendResolve>,
     identity: Arc<dyn GatewayIdentityLifecycleControl>,
     connector: Arc<GatewayUpstreamConnector>,
+    /// Driven once per boot by the first gate that reaches it.
+    dataplane: Arc<dyn GatewayConnectDataplane>,
+    connect_proven: Arc<AtomicBool>,
     admission: Arc<GatewayAdmission>,
     listener: GatewayListenerControl,
     observations: Arc<dyn ObservationStore>,
@@ -1212,6 +1218,8 @@ impl GatewayApplicationOwner {
         let cancel = CancellationToken::new();
         let gate = Gate {
             connector: Arc::clone(&self.connector),
+            dataplane: Arc::clone(&self.dataplane),
+            connect_proven: Arc::clone(&self.connect_proven),
             identity: Arc::clone(&self.identity),
             clock: Arc::clone(&self.clock),
             frontend: candidate.frontend,
@@ -1275,6 +1283,14 @@ impl GatewayApplicationOwner {
                             name: "gateway.application.gate_connect_path_failed",
                             error = %error,
                             "gateway application gate failed on the upstream connect path",
+                        );
+                        GatewayApplicationUnavailableCause::ConnectPathUnavailable
+                    }
+                    GateFailure::ConnectProbe(error) => {
+                        tracing::warn!(
+                            name: "gateway.application.gate_connect_probe_failed",
+                            error = %error,
+                            "gateway application gate failed on the connect dataplane probe",
                         );
                         GatewayApplicationUnavailableCause::ConnectPathUnavailable
                     }
@@ -1505,6 +1521,8 @@ impl GatewayApplicationOwner {
 /// loop so a superseded attempt completes (and cleans up) on its own.
 struct Gate {
     connector: Arc<GatewayUpstreamConnector>,
+    dataplane: Arc<dyn GatewayConnectDataplane>,
+    connect_proven: Arc<AtomicBool>,
     identity: Arc<dyn GatewayIdentityLifecycleControl>,
     clock: Arc<dyn Clock>,
     frontend: ServiceFrontend,
@@ -1528,7 +1546,27 @@ impl Gate {
         let _ = self.reports.send(GateReport { token: self.token, result }).await;
     }
 
+    /// The dataplane's own probe (residue sweep, sentinel connect) runs once
+    /// per boot, before the first candidate's identity step.
+    async fn prove_connect_dataplane(&self) -> Result<(), GateFailure> {
+        if self.connect_proven.load(Ordering::Acquire) {
+            return Ok(());
+        }
+        self.phase.store(PHASE_CONNECT, Ordering::Release);
+        self.dataplane
+            .probe(self.deadline, self.clock.as_ref())
+            .await
+            .map_err(GateFailure::ConnectProbe)?;
+        self.connect_proven.store(true, Ordering::Release);
+        self.phase.store(PHASE_IDENTITY, Ordering::Release);
+        Ok(())
+    }
+
     async fn steps(&self) -> Result<(), GateFailure> {
+        if self.cancel.is_cancelled() {
+            return Ok(());
+        }
+        self.prove_connect_dataplane().await?;
         let identity = tokio::select! {
             biased;
             () = self.cancel.cancelled() => return Ok(()),
@@ -1991,11 +2029,18 @@ impl GatewayCleanupReservation {
         );
         self.bound = true;
     }
+    /// Marks the bound record's connect-intent key as failed to clean.
     pub(crate) fn record_intent_failure(&self) {
-        todo!("SCAFFOLD: GatewayCleanupReservation::record_intent_failure")
+        self.mark_bound(|record| record.connect_intent_failed = true);
     }
+    /// Marks the bound record's receipt key as failed to clean.
     pub(crate) fn record_receipt_failure(&self) {
-        todo!("SCAFFOLD: GatewayCleanupReservation::record_receipt_failure")
+        self.mark_bound(|record| record.receipt_failed = true);
+    }
+    fn mark_bound(&self, mark: impl FnOnce(&mut GatewayCleanupRecord)) {
+        if let Some(LedgerSlot::Bound(record)) = self.ledger.slots().by_slot.get_mut(&self.slot) {
+            mark(record);
+        }
     }
     /// Removes the record: both keys are known clean.
     pub(crate) fn complete(mut self) {

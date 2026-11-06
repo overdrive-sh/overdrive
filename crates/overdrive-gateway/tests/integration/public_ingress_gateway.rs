@@ -2094,7 +2094,6 @@ async fn settle_gate(world: &World, op: DataplaneOp) {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER upstream-socket-preparation"]
 async fn every_dataplane_error_crosses_its_real_owner_operation() {
     for (index, (op, error)) in dataplane_cases().into_iter().enumerate() {
         let (_site, world) = start_dataplane_fault(DATAPLANE_CROSSES, index, op, &error).await;
@@ -2155,7 +2154,6 @@ async fn every_dataplane_error_crosses_its_real_owner_operation() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER upstream-socket-preparation"]
 async fn every_dataplane_error_collapses_to_the_redacted_connect_path_cause() {
     for (index, (op, error)) in dataplane_cases().into_iter().enumerate() {
         let (site, world) = start_dataplane_fault(DATAPLANE_COLLAPSES, index, op, &error).await;

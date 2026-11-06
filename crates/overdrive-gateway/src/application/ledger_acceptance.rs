@@ -218,7 +218,6 @@ fn saturation_stays_reported_after_the_ledger_drains() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER upstream-socket-preparation"]
 fn retry_all_cleans_exact_intents_and_keeps_records_whose_cleanup_fails() {
     let ledger = GatewayCleanupLedger::new(capacity(128));
     let dataplane = RecordingDataplane::new();

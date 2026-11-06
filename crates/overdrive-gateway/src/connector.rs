@@ -1,9 +1,9 @@
 //! Registered gateway upstream connector.
 //!
-//! The successful `connect` path, the `open_upstream` failure arm and the
-//! receipt, identity and mTLS failure arms are live; the cleanup-retention
-//! failure arm stays scaffolded for its later step. The source-local
-//! acceptance bodies implement S-PIG-28 through S-PIG-30 and S-PIG-53.
+//! The prepare-then-dial sequence: ledger reservation, `open_upstream`, dial,
+//! receipt validation, identity resolution, mTLS and cleanup with failure
+//! retention. The source-local acceptance bodies implement S-PIG-28 through
+//! S-PIG-30, S-PIG-37 and S-PIG-53.
 
 use std::net::{SocketAddr, SocketAddrV4};
 use std::num::NonZeroU32;
@@ -12,6 +12,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use overdrive_core::dataplane::ServiceFrontend;
+use overdrive_core::id::{BackendId, SpiffeId};
 use overdrive_core::public_ingress::ServiceKey;
 use overdrive_core::traits::clock::Clock;
 
@@ -52,7 +53,7 @@ impl GatewayUpstreamConnector {
         frontend: ServiceFrontend,
         deadline: Instant,
     ) -> Result<GatewayConnectProbeOutcome, GatewayUpstreamConnectError> {
-        match self.connect(frontend, deadline).await {
+        match self.connect_for(PROBE_OPERATION, frontend, deadline).await {
             Ok(_upstream) => Ok(GatewayConnectProbeOutcome::SelectedPeerAuthenticated),
             Err(GatewayUpstreamConnectError::NoBackend) => {
                 Ok(GatewayConnectProbeOutcome::ReadyNoBackend)
@@ -66,12 +67,21 @@ impl GatewayUpstreamConnector {
         frontend: ServiceFrontend,
         deadline: Instant,
     ) -> Result<GatewayUpstream, GatewayUpstreamConnectError> {
+        self.connect_for(REQUEST_OPERATION, frontend, deadline).await
+    }
+
+    /// The prepare-then-dial sequence; `operation` labels the receipt
+    /// occurrence as a `probe` or a `request`.
+    async fn connect_for(
+        &self,
+        operation: &'static str,
+        frontend: ServiceFrontend,
+        deadline: Instant,
+    ) -> Result<GatewayUpstream, GatewayUpstreamConnectError> {
         let _permit = self.budget.try_connect().map_err(GatewayUpstreamConnectError::Capacity)?;
-        let Ok(mut reservation) = self.cleanup_ledger.reserve() else {
-            todo!(
-                "SCAFFOLD: CleanupLedgerFull refusal before open_upstream (upstream-socket-preparation)"
-            )
-        };
+        let mut reservation = self.cleanup_ledger.reserve().map_err(|full| {
+            GatewayUpstreamConnectError::CleanupLedgerFull { capacity: full.capacity }
+        })?;
         let prepared = self
             .dataplane
             .open_upstream(ServiceKey::from_frontend(frontend))
@@ -86,14 +96,14 @@ impl GatewayUpstreamConnector {
                 connected.map_err(|_| GatewayUpstreamConnectError::Connect)?
             }
             () = self.clock.sleep(connect_deadline.saturating_duration_since(self.clock.now())) => {
-                self.release_intent(&intent, reservation)?;
+                self.release_intent(&intent, reservation, ReceiptState::Unconsumed);
                 return Err(GatewayUpstreamConnectError::ConnectTimeout);
             }
         };
         let receipt = match self.dataplane.take_receipt(&intent) {
             Ok(receipt) => receipt,
             Err(error) => {
-                self.release_intent(&intent, reservation)?;
+                self.release_intent(&intent, reservation, ReceiptState::Unconsumed);
                 return Err(GatewayUpstreamConnectError::Receipt(error));
             }
         };
@@ -103,47 +113,108 @@ impl GatewayUpstreamConnector {
             {
                 backend_id
             }
-            GatewaySelectionReceipt::NoBackend { .. } => {
-                self.release_intent(&intent, reservation)?;
+            GatewaySelectionReceipt::NoBackend { socket_cookie, service_key }
+                if socket_cookie == intent.socket_cookie && service_key == intent.service_key =>
+            {
+                emit_no_backend_receipt(operation, &intent);
+                self.release_intent(&intent, reservation, ReceiptState::Consumed);
                 return Err(GatewayUpstreamConnectError::NoBackend);
             }
-            GatewaySelectionReceipt::Selected { .. } => {
-                self.release_intent(&intent, reservation)?;
+            GatewaySelectionReceipt::Selected { .. }
+            | GatewaySelectionReceipt::NoBackend { .. } => {
+                self.release_intent(&intent, reservation, ReceiptState::Consumed);
                 return Err(GatewayUpstreamConnectError::ReceiptMismatch);
             }
         };
         let peer = match self.dataplane.selected_backend_identity(backend_id) {
             Ok(peer) => peer,
             Err(error) => {
-                self.release_intent(&intent, reservation)?;
+                self.release_intent(&intent, reservation, ReceiptState::Consumed);
                 return Err(GatewayUpstreamConnectError::SelectedIdentity(error));
             }
         };
+        emit_selected_receipt(operation, &intent, backend_id, &peer);
         let connected: OwnedFd =
             stream.into_std().map_err(|_| GatewayUpstreamConnectError::Connect)?.into();
         let upstream = match self.client_mtls.authenticate(connected, peer, deadline).await {
             Ok(upstream) => upstream,
             Err(error) => {
-                self.release_intent(&intent, reservation)?;
+                self.release_intent(&intent, reservation, ReceiptState::Consumed);
                 return Err(GatewayUpstreamConnectError::Mtls(error));
             }
         };
-        self.release_intent(&intent, reservation)?;
+        self.release_intent(&intent, reservation, ReceiptState::Consumed);
         Ok(upstream)
     }
 
-    /// Cleans the exact registered intent, then completes its ledger record.
+    /// Cleans the exact registered intent. Success completes its ledger
+    /// record; a failed cleanup marks the failing key on the record and
+    /// leaves the record retained for the ledger's next sweep.
     fn release_intent(
         &self,
         intent: &GatewayConnectIntent,
         reservation: GatewayCleanupReservation,
-    ) -> Result<(), GatewayUpstreamConnectError> {
-        let Ok(()) = self.dataplane.cleanup(intent) else {
-            todo!("SCAFFOLD: cleanup failure retention (upstream-socket-preparation)")
-        };
-        reservation.complete();
-        Ok(())
+        receipt: ReceiptState,
+    ) {
+        if self.dataplane.cleanup(intent).is_ok() {
+            reservation.complete();
+            return;
+        }
+        match receipt {
+            ReceiptState::Unconsumed => reservation.record_receipt_failure(),
+            ReceiptState::Consumed => reservation.record_intent_failure(),
+        }
     }
+}
+
+const PROBE_OPERATION: &str = "probe";
+const REQUEST_OPERATION: &str = "request";
+
+/// Whether the connector took the selection receipt before cleanup ran.
+#[derive(Clone, Copy)]
+enum ReceiptState {
+    Unconsumed,
+    Consumed,
+}
+
+/// The `Selected` receipt occurrence: after exact receipt validation and
+/// selected-identity resolution, before the mTLS handshake.
+fn emit_selected_receipt(
+    operation: &'static str,
+    intent: &GatewayConnectIntent,
+    backend_id: BackendId,
+    expected_peer: &SpiffeId,
+) {
+    tracing::debug!(
+        name: "gateway.upstream.receipt.validated",
+        target: "overdrive::gateway_connector",
+        event = "gateway.upstream.receipt.validated",
+        operation = operation,
+        socket_cookie = intent.socket_cookie.get().get(),
+        service_key_vip = %intent.service_key.vip(),
+        service_key_port = intent.service_key.port().get(),
+        service_key_protocol = intent.service_key.protocol().as_str(),
+        receipt_outcome = "selected",
+        backend_id = backend_id.get(),
+        expected_peer_spiffe_id = %expected_peer,
+        "validated gateway upstream BPF selection receipt",
+    );
+}
+
+/// The `NoBackend` receipt occurrence: after exact receipt validation.
+fn emit_no_backend_receipt(operation: &'static str, intent: &GatewayConnectIntent) {
+    tracing::debug!(
+        name: "gateway.upstream.receipt.validated",
+        target: "overdrive::gateway_connector",
+        event = "gateway.upstream.receipt.validated",
+        operation = operation,
+        socket_cookie = intent.socket_cookie.get().get(),
+        service_key_vip = %intent.service_key.vip(),
+        service_key_port = intent.service_key.port().get(),
+        service_key_protocol = intent.service_key.protocol().as_str(),
+        receipt_outcome = "no_backend",
+        "validated gateway upstream BPF selection receipt",
+    );
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -687,7 +758,6 @@ mod acceptance {
     ///
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
-    #[ignore = "pending DELIVER upstream-socket-preparation"]
     async fn full_cleanup_ledger_refuses_before_any_socket_is_prepared() {
         let mut fx = fixture(ReceiptMode::Selected).await;
         let held: Vec<GatewayCleanupReservation> =
@@ -762,7 +832,6 @@ mod acceptance {
     ///
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
-    #[ignore = "pending DELIVER upstream-socket-preparation"]
     async fn failed_cleanup_is_retained_and_retried_without_reconnecting_or_reauthenticating() {
         let fx = fixture(ReceiptMode::Selected).await;
         fx.dataplane.cleanup_failing.store(true, Ordering::SeqCst);
