@@ -832,6 +832,57 @@ mod acceptance {
         assert_eq!(fx.ledger.len(), 0);
     }
 
+    /// S-PIG-133: every refused upstream dial releases its ledger slot and its
+    /// registered intent, so more refused dials than the ledger holds never
+    /// make a later request fail with `CleanupLedgerFull`.
+    ///
+    /// The frontend is a real loopback port that was bound and then closed, so
+    /// the kernel refuses each `connect(2)`. The conversion-to-std failure arm
+    /// of the connector is not reachable through a real socket and is covered
+    /// by inspection.
+    ///
+    /// CONTRACT_SHAPE: bounded-change.
+    #[tokio::test]
+    async fn refused_upstream_dials_release_their_ledger_slot_and_intent() {
+        /// More attempts than the 128-slot ledger holds.
+        const ATTEMPTS: u32 = 130;
+        let mut fx = fixture(ReceiptMode::Selected).await;
+        // Dropping the listener (it lives in the accept task) closes the port.
+        fx.accept.abort();
+        assert!(
+            (&mut fx.accept).await.expect_err("the accept task never completed").is_cancelled(),
+            "the listener is closed, so the frontend port refuses every dial",
+        );
+
+        for attempt in 1..=ATTEMPTS {
+            let error = connect_error(&fx).await;
+            assert!(
+                matches!(error, GatewayUpstreamConnectError::Connect),
+                "attempt {attempt}: a refused dial surfaces as Connect, got {error:?}",
+            );
+            assert_eq!(fx.ledger.len(), 0, "attempt {attempt}: the refused dial released its slot");
+            assert_eq!(
+                fx.dataplane.live_intent_count().expect("intent count"),
+                0,
+                "attempt {attempt}: the refused dial cleaned its registered intent",
+            );
+        }
+
+        assert_eq!(count(&fx.dataplane.opens), ATTEMPTS, "every attempt prepared one upstream");
+        assert_eq!(
+            fx.dataplane.cleanup_intents.lock().expect("cleanup log").len(),
+            ATTEMPTS as usize,
+            "each registered intent is cleaned up exactly once",
+        );
+        assert_eq!(fx.dataplane.live_receipts().expect("receipt count").len(), 0);
+        assert_eq!(count(&fx.dataplane.receipts_taken), 0, "no receipt is taken before a dial");
+        assert_eq!(count(&fx.mtls.attempts), 0, "no handshake follows a refused dial");
+        assert!(
+            fx.ledger.retry_all(fx.dataplane.as_ref()).is_empty(),
+            "no saturation and no retained cleanup",
+        );
+    }
+
     /// S-PIG-53: a failed cleanup is retained in the ledger under the record
     /// created at the pre-reservation and bound after `open_upstream`; the
     /// retry cleans the same intent without re-registering, reconnecting or
