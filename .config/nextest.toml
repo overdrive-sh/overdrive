@@ -81,6 +81,15 @@ test-group = 'host-kernel-shared'
 filter = 'package(overdrive-control-plane) & test(quint_flow_quota_randomized_traces)'
 slow-timeout = { period = "60s", terminate-after = 4 }
 
+# The selection-receipt conformance driver's randomized run replays its
+# generated traces against the real dataplane, bpffs pins and root cgroup
+# attach, and takes about 150 seconds. The user approved only this test's
+# finite 240-second wall-clock exception; its samples and assertions remain
+# unchanged.
+[[profile.default.overrides]]
+filter = 'package(overdrive-dataplane) & test(selection_receipt_receipt_conf_randomized_traces)'
+slow-timeout = { period = "60s", terminate-after = 4 }
+
 # trybuild compiles every compile_fail / compile_pass fixture from
 # scratch on each run. Under cargo-mutants the tree is reproduced in
 # /tmp with a cold target dir and the per-fixture compile time stacks

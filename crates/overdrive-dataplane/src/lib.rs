@@ -1943,6 +1943,27 @@ impl EbpfDataplane {
             by_endpoint.insert(endpoint, (pod, &backend.alloc));
         }
 
+        // Planning order: the identity conflict is reported first, then R-59.
+        {
+            let allocator = self.backend_id_alloc.lock();
+            let identities = self.backend_identities.lock();
+            for ((ip_host, port_host), (_, attempted)) in &by_endpoint {
+                let Some(backend_id) = allocator.existing_id(*ip_host, *port_host, proto) else {
+                    continue;
+                };
+                let Some(state) = identities.get(&backend_id.get()) else {
+                    continue;
+                };
+                if state.spiffe_id() != *attempted {
+                    return Err(DataplaneError::BackendIdentityConflict {
+                        backend_id,
+                        current: state.spiffe_id().clone(),
+                        attempted: (*attempted).clone(),
+                    });
+                }
+            }
+        }
+
         // R-59: a reverse-NAT key another Service's VIP already owns is
         // rejected before anything is reserved or written.
         {
@@ -1970,21 +1991,6 @@ impl EbpfDataplane {
 
         let mut allocator = self.backend_id_alloc.lock();
         let mut identities = self.backend_identities.lock();
-        for ((ip_host, port_host), (_, attempted)) in &by_endpoint {
-            let Some(backend_id) = allocator.existing_id(*ip_host, *port_host, proto) else {
-                continue;
-            };
-            let Some(state) = identities.get(&backend_id.get()) else {
-                continue;
-            };
-            if state.spiffe_id() != *attempted {
-                return Err(DataplaneError::BackendIdentityConflict {
-                    backend_id,
-                    current: state.spiffe_id().clone(),
-                    attempted: (*attempted).clone(),
-                });
-            }
-        }
 
         let mut planned = Vec::with_capacity(by_endpoint.len());
         for ((ip_host, port_host), (pod, alloc)) in by_endpoint {

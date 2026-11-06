@@ -15,7 +15,7 @@
 //! |---|---|
 //! | `init` | rebuild the owner on a fresh instance (nothing survives) |
 //! | `update_apply(key, sidx)` | `Dataplane::update_service(frontend(key), backends(sidx))`, which must be accepted |
-//! | `update_rejected(key, sidx)` | `Dataplane::update_service` of a backend set that re-leases a live `BackendId`'s address to another allocation; it must return `DataplaneError::BackendIdentityConflict` |
+//! | `update_rejected(key, sidx)` | `Dataplane::update_service` of a backend set that re-leases a live `BackendId`'s address to another allocation; it must return `DataplaneError::BackendIdentityConflict`; for an input that also violates R-59 the replay asserts this same outcome, and the precedence rests on the `not(conflict)` guard of `update_rejected_rnat` in the model |
 //! | `update_rejected_rnat(key, sidx)` | `Dataplane::update_service` of a backend set naming an endpoint whose reverse-NAT key already maps to another Service's VIP (R-59), with no identity conflict; it must return `DataplaneError::ReverseNatConflict`, and the State comparison that follows verifies nothing moved |
 //! | `open(key)` | `GatewayConnectDataplane::open_upstream(ServiceKey)` |
 //! | `kernel_connect_det(c)` | `connect(2)` on the socket from `PreparedUpstream::into_parts` toward the Service frontend, with a bounded wait (the connect result is not asserted: the hook has already written the receipt) |
@@ -63,8 +63,7 @@
 //!
 //! Every named run bound to this main is pinned with
 //! `#[quint_test(max_samples = 1)]`; `#[quint_run]` replays randomized traces
-//! (seed printed on failure). The tests are ignored until the gateway selection
-//! program and the owner land. The lane runs as root through
+//! (seed printed on failure). The tests are active. The lane runs as root through
 //! `cargo xtask metal run --` (bpffs, cgroup v2, a veth pair for the loader's
 //! XDP attach).
 
@@ -473,7 +472,7 @@ impl Driver for ReceiptConfDriver {
             init => self.init(),
             update_apply(key: i64, sidx: i64) => self.update_apply(key, sidx)?,
             update_rejected(key: i64, sidx: i64) => self.update_rejected(key, sidx)?,
-        update_rejected_rnat(key: i64, sidx: i64) => self.update_rejected_rnat(key, sidx)?,
+            update_rejected_rnat(key: i64, sidx: i64) => self.update_rejected_rnat(key, sidx)?,
             open(key: i64) => self.open(key)?,
             kernel_connect_det(c: i64) => self.kernel_connect_det(c)?,
             take(c: i64, r: i64) => {
@@ -632,7 +631,6 @@ impl<'de> Deserialize<'de> for ReceiptState {
     test = "commit_then_select",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER quint-conformance-selection_receipt"]
 fn selection_receipt_commit_then_select() -> impl Driver {
     ReceiptConfDriver::new()
 }
@@ -646,7 +644,6 @@ fn selection_receipt_commit_then_select() -> impl Driver {
     test = "conflicting_alloc_rejected",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER quint-conformance-selection_receipt"]
 fn selection_receipt_conflicting_alloc_rejected() -> impl Driver {
     ReceiptConfDriver::new()
 }
@@ -660,12 +657,14 @@ fn selection_receipt_conflicting_alloc_rejected() -> impl Driver {
     test = "reverse_nat_conflict_rejected",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER quint-conformance-selection_receipt"]
 fn selection_receipt_reverse_nat_conflict_rejected() -> impl Driver {
     ReceiptConfDriver::new()
 }
 
-/// An input violating both rules reports the identity conflict, not R-59.
+/// An input violating both rules: the replay asserts `update_rejected` is taken and the
+/// owner returns `BackendIdentityConflict`. The precedence over R-59 rests on the
+/// `not(conflict)` guard of `update_rejected_rnat` in the model and on the owner's typed
+/// error check in the replay; the run does not assert that the R-59 rejection is disabled.
 /// CONTRACT_SHAPE: bounded-change.
 #[quint_test(
     spec = "../../specs/quint/public-ingress-gateway/selection_receipt.qnt",
@@ -673,7 +672,6 @@ fn selection_receipt_reverse_nat_conflict_rejected() -> impl Driver {
     test = "identity_conflict_precedes_reverse_nat",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER step 03-03"]
 fn selection_receipt_identity_conflict_precedes_reverse_nat() -> impl Driver {
     ReceiptConfDriver::new()
 }
@@ -687,7 +685,6 @@ fn selection_receipt_identity_conflict_precedes_reverse_nat() -> impl Driver {
     test = "restart_destroys_receipts",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER quint-conformance-selection_receipt"]
 fn selection_receipt_restart_destroys_receipts() -> impl Driver {
     ReceiptConfDriver::new()
 }
@@ -698,7 +695,6 @@ fn selection_receipt_restart_destroys_receipts() -> impl Driver {
     spec = "../../specs/quint/public-ingress-gateway/selection_receipt.qnt",
     main = "receipt_conf"
 )]
-#[ignore = "pending DELIVER quint-conformance-selection_receipt"]
 fn selection_receipt_receipt_conf_randomized_traces() -> impl Driver {
     ReceiptConfDriver::new()
 }
