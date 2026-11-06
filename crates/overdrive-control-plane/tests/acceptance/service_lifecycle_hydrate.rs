@@ -93,8 +93,9 @@ fn target_for(wid: &WorkloadId) -> TargetResource {
 }
 
 async fn build_app_state(tmp: &TempDir, obs: Arc<dyn ObservationStore>) -> AppState {
-    let runtime =
+    let mut runtime =
         ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime::new");
+    runtime.register(service_lifecycle_reconciler()).await.expect("register service-lifecycle");
     let store_path = tmp.path().join("intent.redb");
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Vm));
@@ -866,10 +867,12 @@ mod backend_address {
     use super::*;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
-    use overdrive_control_plane::reconciler_runtime::ConvergenceError;
+    use overdrive_control_plane::reconciler_runtime::{ConvergenceError, run_convergence_tick};
     use overdrive_core::dataplane::backend_key::{BackendKey, Proto};
     use overdrive_core::id::ServiceId;
-    use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
+    use overdrive_core::reconcilers::{
+        Action, HydrateError, Reconciler, ReconcilerName, TickContext,
+    };
     use overdrive_core::traits::observation_store::ServiceBackendRow;
     use overdrive_reconcilers::service_lifecycle::ServiceLifecycleView;
 
@@ -1086,10 +1089,23 @@ mod backend_address {
         }
     }
 
+    /// Drive one production convergence tick of `service-lifecycle` for `wid`:
+    /// hydrate through the runtime, reconcile, and dispatch the actions, so a
+    /// `ServiceBackendRow` lands in the ObservationStore only if the tick
+    /// completes.
+    async fn converge_service(state: &AppState, wid: &WorkloadId) -> Result<(), ConvergenceError> {
+        let name = ReconcilerName::new("service-lifecycle").expect("reconciler name");
+        let now = Instant::now();
+        run_convergence_tick(state, &name, &target_for(wid), now, 0, now + Duration::from_secs(1))
+            .await
+    }
+
     /// O2 — a Running allocation without a workload address is refused with a
     /// typed hydration failure naming it; it is neither defaulted to the node
     /// address nor skipped, and no backend row is written for the Service. The
     /// valid Running allocation of the same Service does not rescue the tick.
+    /// Once the offending row carries its address the same tick publishes the
+    /// Service's backend row, so the absence of a row is caused by the refusal.
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
     async fn a_running_allocation_without_a_workload_address_is_refused_not_defaulted() {
@@ -1105,30 +1121,39 @@ mod backend_address {
         };
         write_alloc_status(&state, bad).await;
 
-        let refused =
-            hydrate_actual_for_test(&service_lifecycle_reconciler(), &target_for(&wid), &state)
-                .await
-                .expect_err("a Running allocation without an address is refused");
+        let refused = converge_service(&state, &wid)
+            .await
+            .expect_err("a Running allocation without an address fails the tick");
 
-        let ConvergenceError::Hydrate(cause) = &refused else {
-            panic!("the refusal is a typed hydration failure, got {refused:?}");
+        let ConvergenceError::Hydrate(HydrateError::RunningAllocationWithoutWorkloadAddr {
+            alloc_id: refused_alloc,
+        }) = refused
+        else {
+            panic!("the refusal is RunningAllocationWithoutWorkloadAddr, got {refused:?}");
         };
-        let message = cause.to_string();
-        assert!(
-            message.contains("svc-refuse-bad"),
-            "the refusal names the offending allocation: {message}",
-        );
-        assert!(
-            message.contains("workload address"),
-            "the refusal states the Running => workload address contract: {message}",
-        );
-        assert!(
-            !message.contains("svc-refuse-good"),
-            "the refusal names only the offending allocation: {message}",
+        assert_eq!(
+            refused_alloc,
+            alloc_id("svc-refuse-bad"),
+            "the refusal names exactly the offending allocation, not its valid sibling",
         );
         assert!(
             obs.service_backends_rows(&service_id).await.expect("read rows").is_empty(),
-            "no ServiceBackendRow is written for the Service",
+            "no ServiceBackendRow is written for the Service while the refusal stands",
+        );
+
+        // Control: the offending allocation's row is corrected to carry its
+        // address; the same tick now completes and publishes the backends.
+        write_alloc_status(&state, running_row(&wid, "svc-refuse-bad", guest_addr(3), 3)).await;
+        converge_service(&state, &wid).await.expect("the corrected Service converges");
+        let rows = obs.service_backends_rows(&service_id).await.expect("read rows");
+        assert_eq!(rows.len(), 1, "the corrected Service publishes its backend row: {rows:?}");
+        assert_eq!(
+            rows[0].backends.iter().map(|b| b.addr).collect::<std::collections::BTreeSet<_>>(),
+            [guest_addr(2), guest_addr(3)]
+                .into_iter()
+                .map(|a| SocketAddr::new(IpAddr::V4(a), LISTENER_PORT))
+                .collect(),
+            "both Running allocations are backends at their own workload addresses",
         );
     }
 }
