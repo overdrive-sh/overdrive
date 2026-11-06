@@ -317,7 +317,14 @@ if [ "${RUN_MODE}" -eq 1 ]; then
     printf -v METAL_RUN_ENV \
       'OVERDRIVE_METAL_KERNEL=%q OVERDRIVE_METAL_ROOTFS=%q' \
       "${OVERDRIVE_METAL_KERNEL:-}" "${OVERDRIVE_METAL_ROOTFS:-}"
-    INNER="${TREE_GUARD}cd ${REMOTE_DIR} && sudo -n env \"HOME=\$HOME\" \"PATH=\$PATH\" ${METAL_RUN_ENV} ${JOINED}; rc=\$?; exit \"\$rc\""
+    # The command runs as root inside the rsynced tree, so anything it creates
+    # or rewrites (recorded evidence, root-only dirs) would be root-owned and
+    # make the login user's next --sync-only rsync fail with "Permission
+    # denied". Hand every non-login-owned entry back after the command,
+    # whatever its status; /target is excluded by rsync and is huge, so it is
+    # pruned. The chown is best effort and silent: it never changes the
+    # command's exit status or output.
+    INNER="${TREE_GUARD}cd ${REMOTE_DIR} && sudo -n env \"HOME=\$HOME\" \"PATH=\$PATH\" ${METAL_RUN_ENV} ${JOINED}; rc=\$?; sudo -n find ${REMOTE_DIR} -path ${REMOTE_DIR}/target -prune -o ! -user \"\$(id -un)\" -exec chown -h \"\$(id -u):\$(id -g)\" {} + >/dev/null 2>&1 || true; exit \"\$rc\""
     EXECUTION_MODE="privileged"
   fi
   # Decode the helper into bash -c's argument. Every durable argument is
