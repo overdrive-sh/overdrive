@@ -259,7 +259,6 @@ async fn exchange(rig: &mut Rig, request: Vec<u8>, response: Vec<u8>) {
 /// Peer-side receive sizes are logged; every descriptor is released afterwards.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER kernel-relay-host-adapter"]
 async fn body_octets_are_exact_at_both_peers_across_keep_alive_exchanges_around_the_pipe_capacity()
 {
     let lengths = [
@@ -285,6 +284,8 @@ async fn body_octets_are_exact_at_both_peers_across_keep_alive_exchanges_around_
             both_requests.extend_from_slice(&request_2);
             let mut both_responses = response_1.clone();
             both_responses.extend_from_slice(&response_2);
+            let client_received_total = both_responses.len();
+            let origin_received_total = request_2.len();
             let sender =
                 send_in_background(&rig.public.peer, both_requests, STRADDLING_RECORDS.to_vec());
             let receiver = expect_exact(&rig.public.peer, both_responses);
@@ -296,16 +297,26 @@ async fn body_octets_are_exact_at_both_peers_across_keep_alive_exchanges_around_
             joined(receiver, "the client received both responses octet-exact").await;
 
             // Tier-3 obligation 16(j): the relay passes no SPLICE_F_MORE, a
-            // configuration the spike did not run, so the record sizes the real
-            // peers received are recorded (and bounded by the TLS record limit).
-            for (peer_name, peer) in [("client", &rig.public.peer), ("origin", &rig.upstream.peer)]
-            {
+            // configuration the spike did not run, so the receive sizes the real
+            // peers saw are recorded. A kTLS `recvmsg` merges consecutive queued
+            // records into one read (`tls_sw_recvmsg`, net/tls/tls_sw.c:2099 @ v7.0:
+            // the loop continues while `tls_strp_msg_ready`), so a read size is not
+            // a record size and no per-read bound is asserted. The kernel itself
+            // refuses a record over 2^14 octets of plaintext on receive
+            // (`tls_rx_msg_size`, tls_sw.c:2484 @ v7.0, `EMSGSIZE`), which would have
+            // failed the exact reads above. What is asserted is conservation: each
+            // peer received exactly the octets sent to it, no more and no fewer.
+            for (peer_name, peer, expected_total) in [
+                ("client", &rig.public.peer, client_received_total),
+                ("origin", &rig.upstream.peer, origin_received_total),
+            ] {
                 let sizes = peer.recv_sizes();
                 assert!(!sizes.is_empty(), "the {peer_name} received application records");
-                assert!(
-                    sizes.iter().all(|size| (1..=16_384).contains(size)),
-                    "{peer_name}: every application record holds 1..=16384 octets, got {:?}",
-                    sizes.iter().filter(|size| !(1..=16_384).contains(*size)).collect::<Vec<_>>(),
+                assert!(sizes.iter().all(|size| *size >= 1), "{peer_name}: no empty read");
+                assert_eq!(
+                    sizes.iter().sum::<usize>(),
+                    expected_total,
+                    "{peer_name}: the octets received equal the octets sent to it, got {sizes:?}",
                 );
                 eprintln!(
                     "S-PIG-105 suite {offer:?} len {len}: {peer_name} received {} records, \
@@ -413,7 +424,6 @@ fn key_update_script(position: Position, requested: bool) -> (Vec<Segment>, Vec<
 /// relay's after answering).
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER kernel-relay-host-adapter"]
 async fn peer_key_update_leaves_octets_exact_and_is_never_forwarded_or_originated() {
     let positions =
         [Position::InHead, Position::InChunkSizeLine, Position::AtBoundary, Position::InBody];
@@ -538,7 +548,6 @@ async fn wait_until(mut condition: impl FnMut() -> bool, secs: u64) {
 /// in-flight write step, never inside it (the transmit lock, assumption A-K5).
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER kernel-relay-host-adapter"]
 async fn key_update_request_during_a_large_splice_out_never_tears_the_record_stream() {
     const TOTAL: usize = 64 * 1024 * 1024;
     let mut rig = Rig::new(Offer::Aes256).await;
@@ -631,7 +640,6 @@ async fn key_update_request_during_a_large_splice_out_never_tears_the_record_str
 /// NewSessionTicket arm needs a client-role leg (see the module documentation).
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER kernel-relay-host-adapter"]
 async fn close_notify_is_typed_by_where_it_falls_in_the_message() {
     // Mid-head.
     let mut rig = Rig::new(Offer::Aes128).await;
@@ -714,7 +722,6 @@ async fn close_notify_is_typed_by_where_it_falls_in_the_message() {
 /// from leg-C asserted equal to 0, assumption A-K7) is the conformance arm.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER kernel-relay-host-adapter"]
 async fn upstream_half_answers_injected_key_updates_and_originates_none() {
     const BODY: usize = 2 * 1024 * 1024;
     let mut rig = Rig::new(Offer::Aes128).await;
@@ -779,7 +786,6 @@ async fn upstream_half_answers_injected_key_updates_and_originates_none() {
 /// held until close).
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER kernel-relay-host-adapter"]
 async fn a_connection_waiting_for_its_next_request_holds_no_pipe_descriptor() {
     for chunked in [false, true] {
         let mut rig = Rig::new(Offer::Aes128).await;
@@ -843,7 +849,6 @@ async fn a_connection_waiting_for_its_next_request_holds_no_pipe_descriptor() {
 /// reader resumes the whole 256 MiB stream arrives octet-exact.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER kernel-relay-host-adapter"]
 async fn a_stalled_reader_freezes_the_sender_within_the_socket_buffers_and_memory_stays_flat() {
     const TOTAL: usize = 256 * 1024 * 1024;
     let mut rig = Rig::new(Offer::Aes256).await;
@@ -898,7 +903,6 @@ async fn a_stalled_reader_freezes_the_sender_within_the_socket_buffers_and_memor
 /// before the next is sent.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER kernel-relay-host-adapter"]
 async fn a_trickled_response_reaches_the_client_piece_by_piece() {
     const PIECES: usize = 20;
     let mut rig = Rig::new(Offer::Aes128).await;
@@ -962,7 +966,6 @@ async fn a_trickled_response_reaches_the_client_piece_by_piece() {
 /// observes (A-K6).
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER kernel-relay-host-adapter"]
 async fn mixed_record_sizes_straddling_heads_and_chunk_lines_arrive_octet_exact() {
     const SEED: u64 = 0x5eed_0112;
     eprintln!("S-PIG-112 seed {SEED:#x}");
@@ -1212,7 +1215,6 @@ async fn the_discard_ends_at_max_octets_at_the_deadline_and_at_the_no_progress_w
 /// never ends cleanly (R-12).
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER kernel-relay-host-adapter"]
 async fn a_close_delimited_response_ends_cleanly_on_close_notify_and_is_bounded() {
     const BODY: usize = 1024 * 1024;
     let mut rig = Rig::new(Offer::Aes128).await;
@@ -1270,7 +1272,6 @@ async fn a_close_delimited_response_ends_cleanly_on_close_notify_and_is_bounded(
 /// `overdrive-gateway`.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER kernel-relay-host-adapter"]
 async fn both_aes_suites_relay_exact_and_a_chacha_only_client_is_refused_before_arming() {
     for offer in ALL_AES {
         let mut rig = Rig::new(offer).await;
@@ -1335,7 +1336,6 @@ fn plain_client_handshake(
 /// is that exact variant, never "any error".
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER kernel-relay-host-adapter"]
 async fn public_handshake_refusals_are_typed_and_leave_nothing_armed() {
     let relay = host_relay();
     let fds_start = open_fds();

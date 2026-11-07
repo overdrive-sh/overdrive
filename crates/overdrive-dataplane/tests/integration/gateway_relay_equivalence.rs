@@ -619,7 +619,6 @@ macro_rules! equivalence_cases {
             /// S-PIG-104: Host and Sim `GatewayRelay` agree on this script.
             /// CONTRACT_SHAPE: bounded-change.
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            #[ignore = "pending DELIVER kernel-relay-host-adapter"]
             async fn $test() {
                 assert_equivalent($case).await;
             }
