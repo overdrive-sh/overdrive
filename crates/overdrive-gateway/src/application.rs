@@ -72,6 +72,10 @@ const APPLICATION_COMMAND_CAPACITY: usize = 2;
 /// Retry period of a failed status write.
 const STATUS_RETRY: Duration = Duration::from_secs(1);
 
+/// The wait on the injected clock after a failed `accept(2)`, so descriptor
+/// exhaustion does not spin the listener task.
+const ACCEPT_FAILURE_BACKOFF: Duration = Duration::from_millis(100);
+
 // ---------------------------------------------------------------------------
 // Applied generation
 // ---------------------------------------------------------------------------
@@ -535,8 +539,6 @@ impl GatewayTaskTree {
         let mut failures = Vec::new();
         let ordered = [
             (Some(self.application), GatewayTaskName::Application),
-            (self.listener, GatewayTaskName::Listener),
-            (self.connections, GatewayTaskName::Connections),
             (Some(self.manual_source), GatewayTaskName::ManualCertifiedKeySource),
             (Some(self.custody), GatewayTaskName::PublicCertifiedKeyCustody),
             (Some(self.route_set), GatewayTaskName::PublicRouteSet),
@@ -654,7 +656,7 @@ impl GatewayHandle {
         }
 
         capabilities.owners.cancel_all();
-        report.task_failures = tasks.join_remaining(deadline, clock.as_ref()).await;
+        report.task_failures.extend(tasks.join_remaining(deadline, clock.as_ref()).await);
 
         capabilities.identity.disable_after_drain();
         report.identity_empty = capabilities.identity.current().is_none();
@@ -860,8 +862,8 @@ impl GatewayListenerControl {
                     bound.store(false, Ordering::Release);
                     return Ok(());
                 }
-                accepted = Self::accept_next(held.as_ref()) => {
-                    if let (Some(listener), Ok((stream, peer))) = (held.as_ref(), accepted) {
+                (stream, peer) = Self::accept_next(held.as_ref(), accept.clock.as_ref()) => {
+                    if let Some(listener) = held.as_ref() {
                         Self::admit(listener, stream, peer, &accept).await;
                     }
                     continue;
@@ -886,13 +888,30 @@ impl GatewayListenerControl {
         }
     }
 
-    /// The next accepted socket; never ready while nothing is bound.
+    /// The next accepted socket; never ready while nothing is bound. An
+    /// `accept(2)` failure (descriptor exhaustion, an aborted connection) is
+    /// logged and followed by a bounded wait on the injected clock before the
+    /// next attempt. The wait is inside this future, so the shutdown and
+    /// command arms of the caller's `select!` still win during it.
     async fn accept_next(
         listener: Option<&BoundListener>,
-    ) -> std::io::Result<(tokio::net::TcpStream, SocketAddr)> {
-        match listener {
-            Some(listener) => listener.socket.accept().await,
-            None => std::future::pending().await,
+        clock: &dyn Clock,
+    ) -> (tokio::net::TcpStream, SocketAddr) {
+        let Some(listener) = listener else {
+            return std::future::pending().await;
+        };
+        loop {
+            match listener.socket.accept().await {
+                Ok(accepted) => return accepted,
+                Err(error) => {
+                    tracing::warn!(
+                        name: "gateway.listener.accept_failed",
+                        error = %error,
+                        "accept failed; retrying after the backoff",
+                    );
+                    clock.sleep(ACCEPT_FAILURE_BACKOFF).await;
+                }
+            }
         }
     }
 
@@ -905,19 +924,49 @@ impl GatewayListenerControl {
         accept: &AcceptPath,
     ) {
         let SocketAddr::V4(peer) = peer else {
+            tracing::debug!(
+                name: "gateway.listener.non_ipv4_peer_closed",
+                peer = %peer,
+                "an accepted connection from a non-IPv4 peer is closed",
+            );
             return;
         };
         let now = UnixInstant::from_clock(accept.clock.as_ref());
-        let Ok(lease) = listener.admission.acquire_connection(now) else {
-            return;
+        let lease = match listener.admission.acquire_connection(now) {
+            Ok(lease) => lease,
+            Err(refusal) => {
+                tracing::debug!(
+                    name: "gateway.listener.admission_refused",
+                    peer = %peer,
+                    refusal = ?refusal,
+                    "admission refused the connection; it is closed",
+                );
+                return;
+            }
         };
-        let Ok(std_stream) = stream.into_std() else {
-            return;
+        let std_stream = match stream.into_std() {
+            Ok(std_stream) => std_stream,
+            Err(error) => {
+                tracing::debug!(
+                    name: "gateway.listener.into_std_failed",
+                    peer = %peer,
+                    error = %error,
+                    "an accepted socket could not leave the reactor; it is closed",
+                );
+                return;
+            }
         };
-        let _ = accept
+        let handed_over = accept
             .connections
             .send(AcceptedConnection { socket: OwnedFd::from(std_stream), peer: *peer.ip(), lease })
             .await;
+        if handed_over.is_err() {
+            tracing::debug!(
+                name: "gateway.listener.connections_owner_gone",
+                peer = %peer,
+                "the connections owner is gone; the accepted connection is closed",
+            );
+        }
     }
 
     pub(crate) async fn bind(
@@ -1061,7 +1110,17 @@ async fn run_connections(
                 }
                 None => intake = false,
             },
-            Some(_) = connections.join_next(), if !connections.is_empty() => {}
+            Some(joined) = connections.join_next(), if !connections.is_empty() => {
+                if let Err(error) = joined
+                    && error.is_panic()
+                {
+                    tracing::error!(
+                        name: "gateway.connection.task_panicked",
+                        error = %error,
+                        "a connection task panicked",
+                    );
+                }
+            }
         }
     }
 }

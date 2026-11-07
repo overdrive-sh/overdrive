@@ -21,7 +21,7 @@ use std::num::{NonZeroU64, NonZeroUsize};
 use std::os::fd::OwnedFd;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use http::header::{CONNECTION, CONTENT_LENGTH, HeaderValue, TRANSFER_ENCODING};
 use http::{HeaderMap, Method, StatusCode};
@@ -85,9 +85,6 @@ impl DrainSignal {
         }
     }
 }
-
-/// How far an unbounded wait is pushed: the owner's force-abort ends it.
-const UNBOUNDED: Duration = Duration::from_secs(10 * 365 * 24 * 60 * 60);
 
 /// Serve one accepted public connection until it closes.
 ///
@@ -318,13 +315,13 @@ impl Connection {
         let request_unfinished = self.lock_machine().request_remaining() != Remaining::None;
         let disposition = self.lock_machine().finish();
         match disposition {
+            Ok(Disposition::Close) if request_unfinished => {
+                Step::End(End::Linger { until: deadline })
+            }
             Ok(_) if close_after_response => Step::End(End::Close),
             Ok(Disposition::Reuse) => {
                 let _ = self.services.relay.close_write(upstream_write, deadline).await;
                 Step::Next
-            }
-            Ok(Disposition::Close) if request_unfinished => {
-                Step::End(End::Linger { until: deadline })
             }
             Ok(Disposition::Close) => Step::End(End::Close),
             Err(violation) => violation_step(violation, final_head_written, deadline),
@@ -335,8 +332,8 @@ impl Connection {
 
     /// Read the next request head. A later request waits idle: the drain
     /// closes it at once. The first request is already in flight: the drain
-    /// leaves it to its deadlines, and a deadline at or after the drain
-    /// deadline is the owner's to enforce, not the connection's.
+    /// leaves it to its deadlines and to the owner's force-abort at the one
+    /// drain deadline.
     async fn read_head(&mut self, first: bool, handshake_at: Instant) -> Result<ThroughBytes, End> {
         let services = Arc::clone(&self.services);
         let limits = &services.limits;
@@ -351,24 +348,19 @@ impl Connection {
             request_deadline(handshake_at, limits),
             limits,
         );
-        let result = loop {
-            let draining = self.drain.deadline();
-            let effective =
-                draining.map_or(deadlines, |limit| bounded_by_drain(deadlines, limit, waited_from));
-            let read = services.relay.read_through(
-                &mut self.read,
-                HeadTerminator::HeaderBlockEnd,
-                limits.max_request_head_bytes(),
-                effective,
-            );
+        let read = services.relay.read_through(
+            &mut self.read,
+            HeadTerminator::HeaderBlockEnd,
+            limits.max_request_head_bytes(),
+            deadlines,
+        );
+        let result = if first {
+            read.await
+        } else {
             tokio::select! {
                 biased;
-                _ = self.drain.begun(), if draining.is_none() => {
-                    if !first {
-                        return Err(End::Close);
-                    }
-                }
-                result = read => break result,
+                _ = self.drain.begun() => return Err(End::Close),
+                result = read => result,
             }
         };
         result.map_err(|error| self.head_read_end(&error, first, waited_from))
@@ -442,18 +434,6 @@ impl Connection {
                 RelayDeadlines { absolute: until, no_progress },
             )
             .await;
-    }
-}
-
-/// A deadline at or after the drain deadline is not the connection's to
-/// enforce: the owner force-aborts at that instant, so the wait is unbounded.
-fn bounded_by_drain(deadlines: ReadDeadlines, limit: Instant, from: Instant) -> ReadDeadlines {
-    let unbounded = from + UNBOUNDED;
-    let bound = |at: Instant| if at >= limit { unbounded } else { at };
-    ReadDeadlines {
-        first_octet: bound(deadlines.first_octet),
-        complete_within: deadlines.complete_within,
-        complete_by: deadlines.complete_by.map(bound),
     }
 }
 
