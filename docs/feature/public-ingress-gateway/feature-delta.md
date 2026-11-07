@@ -339,7 +339,7 @@ acquisition-neutral custody boundary.
   must complete exact-peer mTLS before Gateway Application is atomically
   promoted and TCP/443 binds.
   Shutdown runs the gateway stage first in `ServerHandle::shutdown`: stop
-  accepts, drain admitted requests within the one `drain_deadline`, join
+  accepts, drain admitted requests until the gateway drain deadline (the shutdown deadline minus the join reserve, R-64), join
   connector/listener tasks, clear per-socket receipts, retire the closed
   application and clear the volatile Gateway SVID slot, and only then run the
   existing stages (the gateway stage runs before the leg-C worker stage because
@@ -637,12 +637,15 @@ path or userspace backend selector.
 - **Affected state:** gateway runtime state and the Gateway Identity slot only.
 - **Failure projection:** a non-clean `GatewayShutdownReport` is appended to
   `ServerShutdownError` after every owner has been attempted; a gateway timeout
-  consumes only the shared `drain_deadline`; an outer fail-stop bound abandons
+  consumes only the one grace budget (`ServerHandle`'s `drain_deadline` argument; the gateway splits it into its drain deadline and the join reserve, R-64); an outer fail-stop bound abandons
   the stage and the process-local state dies with the process.
 - **Explicitly unaffected:** operator HTTPS draining, workload and allocation
   state, the relative order of the existing stages, fail-stop exit status.
 - **Ordering:** gateway stage → existing stages, unchanged. Leg-C and the
-  guest-flow owner outlive every gateway upstream connection.
+  guest-flow owner outlive every gateway upstream connection. Inside the stage
+  (R-64): drain until `drain_deadline = shutdown_deadline - reserve`, then the
+  force-abort, sweep, retirement and final owner joins until `shutdown_deadline`,
+  one budget, never extended; the join reserve is not a second timeout.
 - **Counterexample:** running the gateway stage after the leg-C worker stage
   would cut admitted connections mid-request instead of draining them.
 - **Evidence lane:** integration over the production `ServerHandle` asserting
@@ -931,6 +934,7 @@ The user ruled "proceed with the recommendations (prefer correctness)" on the pr
 | R-61, 2026-11-06, user ruling | The Dataplane `service_cleanup_debt` set is retried at three points: the next `update_service`, the Dataplane probe and the shutdown sweep. The probe and shutdown retries are delivered in roadmap step 05-01, which owns `EbpfDataplane::probe` and the shutdown stage. | Commit-guarded Service-map and applied-identity transaction |
 | R-62, 2026-11-06, user ruling | The admission scaffolds no step owned are assigned to roadmap step 04-07, which already owns `GatewayAdmission::acquire_connection` and `GatewayGenerationRetention::{try_connection, try_request, counts}`: `GatewayAdmissionBudget::{try_public_connection, try_request}`, the `try_connect` refusal arm (`Err(_) => todo!`, the admission refusal) and `GatewayConnectionLease::try_request`. Ownership only; the existing signatures are the contract and no API is added. | Gateway admission and retention; DELIVER roadmap |
 | R-63, 2026-11-06, user ruling | The connector's manual per-arm `release_intent` is replaced by the one private RAII cleanup guard the connector paragraph already pins ("One private RAII guard calls `cleanup` on every result and owns the exact pre-registered cleanup reservation until cleanup succeeds"), so a `connect_for` future dropped mid-`authenticate(..).await` or at the connect `select!` still cleans the registered intent and records any failure on the reservation. One default-lane cancellation test, in the connector's acceptance tests, drops a held connect future at `authenticate` and asserts the ledger length and `live_intent_count()` return to 0 (or the failure is retained on the record for `retry_all`). Ownership of the work: roadmap step 03-04 (the connector sequence it completes). No public API is added; the guard is private and the reservation methods are the already pinned `bind`, `record_intent_failure`, `record_receipt_failure` and `complete`. | Gateway upstream path (connector paragraph); Gate G-1 cleanup ledger |
+| R-64, 2026-11-07, user ruling ("Reserve time for the joins inside the one grace period") | Gateway shutdown keeps ONE operator-visible grace budget. `shutdown_deadline = start + grace`; `drain_deadline = shutdown_deadline - GATEWAY_SHUTDOWN_JOIN_RESERVE`. Drain (in-flight exchanges and lingering discards) ends at `drain_deadline`; every step after drain, including the final owner joins, runs until `shutdown_deadline`, so the whole stage still completes within `grace`. `GATEWAY_SHUTDOWN_JOIN_RESERVE` is a crate-private `const` of `overdrive-gateway` equal to `Duration::from_millis(500)`; it is not operator-configurable (a config field would be new surface and is not proposed here). A `grace` no larger than the reserve has an empty drain window by definition (`drain_deadline = start`, computed with `checked_sub`, never a wrapped or clamped deadline that lengthens drain): no exchange is drained, every connection still open is force-aborted at once and counted in the existing `GatewayShutdownReport.forced_connections`, and the final owner joins still run to `shutdown_deadline = start + grace`, never beyond it. Production cannot reach this case: the only production caller passes the fixed 5 s `DEFAULT_DRAIN_DEADLINE`. No new report field, error variant or config surface is added by this ruling. Roadmap owners: step 04-03 (`application.rs` shutdown change) and step 05-01 (the `gateway` shutdown stage). | Gateway shutdown ordering; Lifecycle Gate Ownership (shutdown); scenarios S-PIG-60, 101, 115 |
 
 Earlier approvals: D1-D5 (2026-11-01), G1-G4 (2026-11-02). GH #338 (raw TCP ingress) is out of scope; GH #339 is the kernel 7.3 upgrade.
 
@@ -956,7 +960,7 @@ An observation is recorded for DESIGN; it rules no change and adds no scope.
 
 ### PROPOSED — awaiting user
 
-No item below is part of the design until the user adds it. All are optional and non-blocking (P-38 is shown as adopted for the record). R-1..R-63 above are ruled contract text (R-47..R-51 with the provenance stated per row; R-52 user-confirmed 2026-11-04; R-53 and R-54 user rulings of 2026-11-04; R-55, R-56, R-57 and R-58 user rulings of 2026-11-05; R-59 through R-63 user rulings of 2026-11-06), not proposals.
+No item below is part of the design until the user adds it. All are optional and non-blocking (P-38 is shown as adopted for the record). R-1..R-64 above are ruled contract text (R-47..R-51 with the provenance stated per row; R-52 user-confirmed 2026-11-04; R-53 and R-54 user rulings of 2026-11-04; R-55, R-56, R-57 and R-58 user rulings of 2026-11-05; R-59 through R-63 user rulings of 2026-11-06; R-64 user ruling of 2026-11-07), not proposals.
 
 | Id | Proposal | Reachable production failure it prevents | Cost | Cheaper alternative |
 |---|---|---|---|---|
@@ -1593,7 +1597,8 @@ gateway has delivered a complete final response to the public leg while request 
   request body being read. Not 408 (the peer stalled; nothing is in flight to destroy) and not a leg that already reported
   EOF, alert or reset.
 - **Bounds (no new limit).** `max` is `max_request_body_bytes`; `no_progress` is `body_no_progress_deadline`; `absolute` is the
-  earlier of `whole_request_deadline` from the request's first octet and, once drain has begun, the one drain deadline. The
+  earlier of `whole_request_deadline` from the request's first octet and, once drain has begun, the drain deadline (R-64: the
+  shutdown deadline minus `GATEWAY_SHUTDOWN_JOIN_RESERVE`, so the final owner joins keep their reserve). The
   discard ends earlier at the peer's close_notify, which a well-behaved client sends after reading the response.
 - **Drain.** A discard in progress or begun after drain starts is not extended: it ends at the drain deadline at the latest and
   the socket is then closed. It is part of the in-flight exchange for the drain accounting, not an idle connection.
@@ -2017,7 +2022,7 @@ The convergence loop (`:4399`), interest router (`:4447`), emit-drain (`:4474`) 
 
 `ServerHandle::shutdown(self, drain_deadline)` (`M:crates/overdrive-control-plane/src/lib.rs:2890-2993`) runs the gateway first, then the existing stages unchanged:
 
-0. `gateway` (new stage `serve.shutdown.stage_begin`/`stage_complete`, `stage = "gateway"`): `GatewayHandle::shutdown(drain_deadline)` — stop accepts; close the application; join admitted users; sweep intents and receipts; retire the closed application; cancel the owners; then clear the volatile `GatewayIdentitySlot` synchronously (`identity.disable_after_drain`, whose `begin_disable` empties the slot and bumps its epoch in-process; no reconciler round-trip at shutdown, because the issuance audit row is already durable and a late Issue completion is a stale-epoch no-op).
+0. `gateway` (new stage `serve.shutdown.stage_begin`/`stage_complete`, `stage = "gateway"`): `GatewayHandle::shutdown(drain_deadline)` (the argument is the one grace budget; the gateway drains until that budget minus its 500 ms join reserve and runs the final owner joins until the budget ends, R-64) — stop accepts; close the application; join admitted users; sweep intents and receipts; retire the closed application; cancel the owners; then clear the volatile `GatewayIdentitySlot` synchronously (`identity.disable_after_drain`, whose `begin_disable` empties the slot and bumps its epoch in-process; no reconciler round-trip at shutdown, because the issuance audit row is already durable and a late Issue completion is a stale-epoch no-op).
 1. `convergence` → `emit_drain` → `interest_router` → `axum_graceful` → `server_task` → `exit_observer` → `shared_network_supervisor` → `mtls_worker_owner` → `guest_flow_owner` → `mtls_resolve_owner`, unchanged.
 
 The one ordering requirement is that the gateway stage runs first, before the existing stages and in particular before `mtls_worker_owner` (stage 6): admitted gateway connections ride leg-C, so they must end before the worker that terminates leg-C is shut down (Gate G-6). This is the whole decision; it is not a separate ADR, and no identity-retire-before-convergence-stop ordering exists (the slot is volatile and cleared in-process).
@@ -2285,6 +2290,8 @@ Reduced-scope critical scenarios and their named runs:
 | ADR-0241 | `rebind` | `IdentityImmutablePerBackendId` |
 | ADR-0232 | `takeAny` | `ReceiptMatchesIntent` |
 | ADR-0239 | `relayPastBoundary` (`relay_exchange`) | `NoBytePastMessageBoundary` |
+
+R-64 (shutdown drain deadline and join reserve) is not a Quint protocol and changes no spec: the specs model the Application drain/supersession (`gateway_application.qnt`, whose header states shutdown ordering is outside its scope) and the exchange `drain_begin`/`force_abort` actions (`relay_exchange.qnt`), and none has a clock, deadline or task-join variable; the deadline split is sequential arithmetic in one shutdown task, covered by S-PIG-60, 101 and 115.
 
 Decisions with no hazard, and why: ADR-0228 (ownership; no interleaving of its own), ADR-0248 (single-task sequential ledger order; seeded invariants S-PIG-37 and S-PIG-53), ADR-0247 (kernel-buffer property the model abstracts), ADR-0254 (post-`Closed` I/O; Tier-3 S-PIG-115), ADR-0240, ADR-0244, ADR-0249, ADR-0250, ADR-0245, ADR-0251, ADR-0252, ADR-0253 and ADR-0246 (typestate, kernel-contract and pure-function properties, above).
 
@@ -4517,8 +4524,10 @@ impl GatewayHandle {
     ) -> GatewayShutdownReport;
 }
 pub struct GatewayShutdownReport {
-    /// Time the stage consumed on the injected clock; `ServerHandle` subtracts it
-    /// from the shared drain deadline before axum's graceful shutdown (D5-c).
+    /// Time the stage consumed on the injected clock, at most `grace` (R-64: drain
+    /// ends at `grace - GATEWAY_SHUTDOWN_JOIN_RESERVE`, the final owner joins end
+    /// at `grace`); `ServerHandle` subtracts it from the shared drain deadline
+    /// before axum's graceful shutdown (D5-c).
     pub elapsed: Duration,
     pub forced_connections: u32,
     pub task_failures: Vec<GatewayTaskFailure>,
@@ -6171,20 +6180,29 @@ first calls `GatewayHandle::shutdown` when present, as new stage 0
 (D5 section (c)), before every existing stage, because admitted connections
 ride leg-C; the remaining
 `serve_lifetime` fail-stop bound is unchanged (D5-c above). The gateway handle computes one
-absolute `deadline = clock.now() + grace` and always executes this sequence:
+absolute `shutdown_deadline = clock.now() + grace` (the one operator-visible
+grace budget) and derives `drain_deadline = shutdown_deadline -
+GATEWAY_SHUTDOWN_JOIN_RESERVE` (R-64; the reserve is a crate-private 500 ms
+constant; when `grace` is no larger than the reserve the drain window is empty,
+`drain_deadline = start`). Drain, which covers in-flight exchanges and
+lingering discards, ends at `drain_deadline`; the exchange driver's drain bound
+(the lingering-close bound included) is `drain_deadline`. Everything after
+drain, including the final owner joins, runs until `shutdown_deadline`, so
+the whole stage completes within `grace`. The handle always executes this
+sequence:
 
 1. Call `connections.stop_accepting()`, await the listener task, and prove no
    further accept can acquire a connection lease through
-   `tasks.join_listener(deadline, clock)`. Then call
-   `application.close_for_shutdown(deadline)`, which closes every Current/
+   `tasks.join_listener(shutdown_deadline, clock)`. Then call
+   `application.close_for_shutdown(shutdown_deadline)`, which closes every Current/
    Draining retention, atomically clears admission, and discards any staged
    candidate. Append command unavailable/timeout failure
    and continue if it cannot complete.
-2. Await each retention `wait_zero(deadline, clock)` and the connection owner;
-   at the same deadline abort every remaining connection task, then await every
-   aborted JoinHandle so Drop accounting and cleanup guards have run, and take
-   the connections owner JoinHandle through
-   `tasks.join_connections(deadline, clock)`.
+2. Await each retention `wait_zero` and the connection owner until
+   `drain_deadline`; at `drain_deadline` abort every remaining connection
+   task, then await every aborted JoinHandle so Drop accounting and cleanup
+   guards have run, and take the connections owner JoinHandle through
+   `tasks.join_connections(shutdown_deadline, clock)`.
 3. Retry the bounded cleanup ledger, call
    `cleanup_all_gateway_intents`, and independently read
    `live_intent_count` plus `live_receipts()` (the residual receipt count is its length). The cleanup method removes and
@@ -6193,13 +6211,17 @@ absolute `deadline = clock.now() + grace` and always executes this sequence:
    count, remaining intent, remaining receipt or ledger entry produces
    `GatewayResidualConnectState` with the exact typed failure/count/category.
    Never discard it.
-4. Call `application.retire_closed(deadline)` only after the joined lease
+4. Call `application.retire_closed(shutdown_deadline)` only after the joined lease
    counts are zero. Then
    cancel Application, Manual Source, Custody and
    Route Set in that order. `join_listener` ran in step 1,
    `join_connections` runs after the force-join in step 2, and
-   `join_remaining(deadline, clock)` joins every owner task or aborts+awaits it
-   at the same absolute deadline. Command, inner-task, channel, timeout,
+   `join_remaining(shutdown_deadline, clock)` joins every owner task or aborts+awaits it
+   at `shutdown_deadline`. The owners exit cooperatively on cancellation and
+   do no I/O, so the reserve is spent only here and on the post-drain steps
+   (the force-join, the sweep, `retire_closed`); a drain that ran to
+   `drain_deadline` therefore leaves every owner task joined, not reported as
+   `Timeout`. Command, inner-task, channel, timeout,
    cancellation and panic failures are appended and never skip a later task.
 5. Call `identity.disable_after_drain()`. `begin_disable` clears the
    volatile `GatewayIdentitySlot` and bumps its epoch synchronously, so Current
@@ -7342,7 +7364,7 @@ Counts against the 55 pre-reconstruction scenarios: **22 KEEP, 32 ADAPT, 1 DROP*
 | S-PIG-57 | Sentinel probe failure keeps TCP/443 unbound; serve and workloads unaffected; status cause and `health.startup.refused` reason `gateway.connect_probe` (obl 4, G-1; the relay probe's own refusal is S-PIG-100); **the I arm is authored, ignored `pending DELIVER gateway-boot-and-shutdown` (it also carries the `Unavailable`-at-probe cause); the T3 arm is the passing probe and the elapsed deadline** | NEW | I+T3 | @error @degraded-resource @contract-shape:bounded-change | control-plane integration boot/shutdown file + hook file | gateway-boot-and-shutdown |
 | S-PIG-58 | Actual-frontend `NoBackend` is bind-valid; the listener binds and serves 503 (G-1); **authored, ignored `pending DELIVER gateway-boot-and-shutdown`; the no-backend premise is asserted before the request** | NEW | I | @edge @contract-shape:bounded-change | boot/shutdown file | gateway-boot-and-shutdown |
 | S-PIG-59 | Gateway disabled (`ServerConfig.gateway == None`): boot unchanged, no socket prepared, no sentinel, unregistered hook behaviour unchanged (boundary 6); **expected-GREEN preservation row; un-ignored from authoring, no `#[ignore]`; it presupposes the disabled composition constructs no gateway scaffold, as the DESIGN's Disabled composition creates none; the relay-probe-count assertion for the disabled case is S-PIG-100's** | NEW | I | @config-disabled @contract-shape:unbounded-preservation | boot/shutdown file | gateway-boot-and-shutdown |
-| S-PIG-60 | Enabled boot orders G0–G4 (the relay probe, then the connect probe, run inside the gate task); shutdown stage `gateway` runs before `mtls_worker_owner`, inside one 5 s drain, one budget; in-flight pipes end with the exchange (G-6); **the I arm is authored, ignored `pending DELIVER gateway-boot-and-shutdown`; the N graceful run is authored (native metal)** | NEW | I (+N graceful run) | @lifecycle @contract-shape:bounded-change | boot/shutdown file | gateway-boot-and-shutdown |
+| S-PIG-60 | Enabled boot orders G0–G4 (the relay probe, then the connect probe, run inside the gate task); shutdown stage `gateway` runs before `mtls_worker_owner`, inside one 5 s grace, one budget (drain ends at 4.5 s, the final owner joins end by 5 s, R-64); in-flight pipes end with the exchange (G-6); **the I arm is authored, ignored `pending DELIVER gateway-boot-and-shutdown`; the N graceful run is authored (native metal)** | NEW | I (+N graceful run) | @lifecycle @contract-shape:bounded-change | boot/shutdown file | gateway-boot-and-shutdown |
 | S-PIG-61 | A gated gateway (relay probe refused) never requests serve shutdown while the node keeps ticking, and a requested shutdown completes inside the unchanged 10 s fail-stop bound (the gateway stage inside the 5 s drain is asserted by S-PIG-60); no driven-port fault fails the gateway task itself, so a task-failure stimulus is not authored; **authored, ignored `pending DELIVER gateway-boot-and-shutdown`** | NEW | I | @interruption @error @contract-shape:bounded-change | boot/shutdown file | gateway-boot-and-shutdown |
 | S-PIG-62 | Allocation `Running`, Service `Stable`, hydration and the operator listener advance identically with the gateway enabled, disabled or gated (boundary 3); **authored, ignored `pending DELIVER gateway-boot-and-shutdown` (disabled, enabled and gated compositions are compared)** | NEW | I | @orthogonality @contract-shape:unbounded-preservation | boot/shutdown file | gateway-boot-and-shutdown |
 | S-PIG-63 | A registered socket is selected by the hook; the rewritten dial enters leg-C via table 100 and TPROXY with `SO_MARK` and `127.0.0.1` source (obl 6) | NEW | T3 | @real-kernel @contract-shape:bounded-change | hook file | gateway-selection-hook |
@@ -7383,7 +7405,7 @@ Counts against the 55 pre-reconstruction scenarios: **22 KEEP, 32 ADAPT, 1 DROP*
 | S-PIG-98 | Arming refused after the exact-peer equality held, for each kind (`KtlsArmError::UlpInstall`, `CryptoInfo`, `CipherNotSupported`, `KernelConnection`): the result is `Arm(kind)` carried unchanged, no octet reaches the peer, cleanup runs once and the public request is a 502; the same four kinds refused at the public `accept_public` arm close the public socket without reading any HTTP octet and open no upstream leg; the carry-through of `Arm(kind)` is a connector-level fact, and the listener-level oracle is the 502, no octet at the peer, cleanup once and no residue | NEW | I | @error @security @contract-shape:bounded-change | same (`SimGatewayClientMtls` with a Sim arm refusal) | exact-peer-client-mtls |
 | S-PIG-99 | Relay probe gold test: the honest Sim substrate passes; each substrate lie (`tls` ULP absent, cipher refused, splice losing octets, pipe clamped below 64 KiB) is refused with its typed `RelayProbeError` variant, and a probe timeout and an I/O error likewise; no lie is accepted | NEW | I | @error @adapter-contract @contract-shape:bounded-change | `overdrive-gateway/tests/integration/public_ingress_gateway_relay.rs` | relay-earned-trust-probe |
 | S-PIG-100 | Relay gate (boundary 7): a refused probe keeps TCP/443 unbound with `health.startup.refused` reason `gateway.relay_probe` and status `ConnectPathUnavailable`; the probe runs once per boot, after custody and before the connect probe, never again for a later staged generation; allocation `Running`, Service `Stable`, hydration and the operator listener advance identically; with the gateway disabled no relay probe runs | NEW | I | @error @orthogonality @lifecycle @contract-shape:bounded-change | `overdrive-control-plane/tests/integration/public_ingress_gateway_boot_shutdown.rs` | gateway-boot-and-shutdown |
-| S-PIG-101 | Drain: an idle keep-alive connection closes at once; an in-flight exchange runs to completion within the one drain deadline and is then force-aborted; no later request is parsed and the hundredth-response path is the same `Connection: close` path; a discard in progress ends at the drain deadline (R-14) | NEW | I | @lifecycle @interruption @contract-shape:bounded-change | `public_ingress_gateway_relay.rs` | kernel-relay-exchange-driver |
+| S-PIG-101 | Drain: an idle keep-alive connection closes at once; an in-flight exchange runs to completion until the drain deadline (`grace - 500 ms` join reserve, R-64) and is then force-aborted; no later request is parsed and the hundredth-response path is the same `Connection: close` path; a discard in progress ends at the drain deadline (R-14, R-64); the final owner joins then complete inside the reserve, so `report.task_failures` is empty and `report.elapsed <= grace` (plus at most one test clock step) | NEW | I | @lifecycle @interruption @contract-shape:bounded-change | `public_ingress_gateway_relay.rs` | kernel-relay-exchange-driver |
 | S-PIG-102 | Seeded exchange invariant: under scripted peer events (KeyUpdate, NewSessionTicket, close_notify, alert, reset), upstream close before the response head and partial deliveries, no octet moves past a message boundary, no connection is reused after drain begins, and zero residue (leases, pipes, legs) remains after every outcome; the seed is printed | NEW | S | @property @seeded-sim @contract-shape:bounded-change | `overdrive-sim/tests/acceptance/gateway_relay_exchange.rs` | kernel-relay-exchange-driver |
 | S-PIG-103 | Seeded drain and force-abort ordering: drain beginning at a seeded point of an exchange (head, request body, response body, discard) completes the exchange or force-aborts it at the drain deadline, never reuses, never leaves residue; twin runs at one seed produce the same ordered trace | NEW | S | @property @seeded-sim @interruption @contract-shape:bounded-change | same | kernel-relay-exchange-driver |
 | S-PIG-104 | Host and Sim `GatewayRelay` agree: the same byte scripts and the same producible faults (peer KeyUpdate/NewSessionTicket/close_notify/alert, deadlines, short counts, backpressure, discard (R-14), `relay_to_end` (R-12)) give the same returned octets, error variants and close behaviour; substrate lies are not part of the comparison | NEW | T3 | @adapter-contract @contract-shape:bounded-change | `overdrive-dataplane/tests/integration/gateway_relay_equivalence.rs` | kernel-relay-host-adapter |
@@ -7491,7 +7513,7 @@ Per `.claude/rules/testing.md` ("DISTILL — prove composed system behavior unde
 | 57 | Boot G0-G4 -> sentinel probe | Boot with enabled gateway | I: sentinel probe fault through the Sim composer (authored, ignored; `Unavailable` at probe is the stimulus); T3: the real hook cannot be made to fail without a seam, so the T3 case is the passing sentinel probe (residue 0) and a probe whose deadline has already elapsed (`ProbeTimeout`) | TCP/443 unbound; serve and workloads unaffected; status cause; `health.startup.refused` reason `gateway.connect_probe` (the relay probe refusal is row 100) | I+T3 |
 | 58 | Boot -> actual-frontend probe | Boot with Service present, no backend (asserted before the request) | none | listener binds; public request returns 503 | I |
 | 59 | `run_server` with `ServerConfig.gateway == None` | Boot | none | bound sockets, reconcilers, intent/receipt counts and stage events equal the pre-feature set; unregistered hook behaviour unchanged (expected GREEN) | I |
-| 60 | `ServerHandle` boot and shutdown | Enabled boot, graceful shutdown | none | order G0-G4 with the relay probe before the connect probe inside the gate task; stage `gateway` before `mtls_worker_owner`; one 5 s drain; one budget; in-flight pipes closed with their exchange | I (+N) |
+| 60 | `ServerHandle` boot and shutdown | Enabled boot, graceful shutdown | none | order G0-G4 with the relay probe before the connect probe inside the gate task; stage `gateway` before `mtls_worker_owner`; one 5 s grace; one budget (drain ends at 4.5 s, the final owner joins end by 5 s, R-64); in-flight pipes closed with their exchange | I (+N) |
 | 61 | Gated gateway -> serve lifetime | Gate the gateway (relay probe refused through the Sim relay substrate lie); request shutdown | gated gateway; no gateway-task-failure stimulus (no driven-port fault fails the task itself) | serve shutdown not requested while the node ticks; shutdown completes inside the unchanged 10 s fail-stop bound | I |
 | 62 | Allocation, Service, hydration and operator listener | Boot enabled, disabled, gated | gated gateway | Running, Stable, hydration and operator listener advance identically in all three | I |
 | 63 | Real hook (T3: `overdrive-dataplane` hook file); N adds table 100 -> TPROXY -> leg-C | Dial from a registered prepared socket | none | receipt `Selected` bound to the cookie and `ServiceKey`, applied identity of the backend; the prepared socket carries `SO_MARK` = `MTLS_TPROXY_MARK` and a `127.0.0.1` bind; the rewritten dial reaches the registered backend address from `127.0.0.1`; the dial entering leg-C through the node-shared nft/table-100 rules is observed on the N arm | T3 (+N) |
@@ -7525,7 +7547,7 @@ Per `.claude/rules/testing.md` ("DISTILL — prove composed system behavior unde
 | 98 | arming only after equality; failed equality arms nothing | connector -> `GatewayClientMtls::authenticate`; public side: `accept_public` | selected peer A; a public client handshake | Sim arm failure of each `KtlsArmError` kind (`UlpInstall`, `CryptoInfo`, `CipherNotSupported`, `KernelConnection`) after a matching peer, and at `accept_public`; separate mismatch case | `Arm(kind)` surfaces unchanged at the connector (the listener-level oracle is the 502, no octet at the peer, cleanup once, no residue); no octet at the peer; cleanup once; public 502; at `accept_public` the public socket closes without any HTTP octet read and no upstream leg opens | I |
 | 99 | Earned Trust of the relay (ADR-0244/0246) | boot gate task -> `GatewayRelay::probe` | boot with `SimGatewayRelay` presenting each substrate lie | `ulp_absent`, `cipher_refused`, `splice_inexact`, `pipe_clamped`, `probe_timeout`, `probe_io` | `probe` returns the matching `RelayProbeError`; the honest substrate returns `Ok`; no variant maps to two lies | I |
 | 100 | G-1 relay input; boundary 7 | `boot_server` G3/G4 -> gate task | boot enabled with an honest and with a lying Sim relay; replace the Route after boot | substrate lie | TCP/443 unbound; `health.startup.refused` reason `gateway.relay_probe`; status `ConnectPathUnavailable`; probe call count 1 across the replacement; operator listener, allocation, Service and hydration advance identically; disabled gateway: zero relay-probe calls | I |
-| 101 | G-6 drain; relay_exchange `drain_with_inflight_body` | `ServerHandle` -> `GatewayHandle::shutdown` -> exchange driver | drain with idle connections and one in-flight exchange at each phase | drain deadline on `SimClock` | idle closed at once; in-flight completes or is force-aborted at the one deadline; no request parsed after drain; zero residue; discard (R-14) ends at the drain deadline | I |
+| 101 | G-6 drain; relay_exchange `drain_with_inflight_body` | `ServerHandle` -> `GatewayHandle::shutdown` -> exchange driver | drain with idle connections and one in-flight exchange at each phase | drain deadline on `SimClock` | idle closed at once; in-flight completes or is force-aborted at the drain deadline (`grace - 500 ms`, R-64); no request parsed after drain; zero residue; discard (R-14) ends at the drain deadline; owner joins finish inside the reserve with no `Timeout` task failure. Oracle for the discard-during-drain test: `report.elapsed` in `[GRACE - 500 ms, GRACE + one clock step]` (was `[GRACE, GRACE + 1 s]`), `forced_connections == 0`, `task_failures` empty | I |
 | 102 | seeded exchange invariant | exchange driver over `SimGatewayRelay` | seeded schedules of scripted events | KeyUpdate, NewSessionTicket, close_notify, alert, reset, upstream close before head | no octet past a boundary; no reuse after drain; zero leases, pipes and legs after every outcome; seed printed | S |
 | 103 | seeded drain/force-abort | same | drain at a seeded point | deadline expiry | exchange completes or aborts, never reused, no residue; twin runs equal | S |
 | 104 | host/Sim equivalence of `GatewayRelay` | `HostGatewayRelay` vs `SimGatewayRelay` through the port | the same byte and event scripts | producible faults only (peer events, deadlines, short counts, backpressure, discard (R-14), `relay_to_end` (R-12)) | identical returned octets, error variants and close behaviour; substrate lies excluded | T3 |
@@ -7539,7 +7561,7 @@ Per `.claude/rules/testing.md` ("DISTILL — prove composed system behavior unde
 | 112 | A-K6 record boundary | `relay_exact` | records of 1 to 16 384 octets, heads and chunk-size lines straddling records | mixed sizes | octet-exact; splice-in only into an empty pipe (the private pipe is not observable from outside; emptiness at every splice-in is asserted through exactness over repeated bodies) | T3 |
 | 113 | descriptor/memory budget (Budgets) | production composition (`run_server`) | 128 concurrent streaming requests | process `RLIMIT_NOFILE` (reported, not raised) | peak `/proc/self/fd` count <= baseline + 768; resident-set growth plus the capacity (`F_GETPIPE_SZ`) of the process's pipe descriptors <= 24 MiB (128 x 192 KiB, the DESIGN accounting: 2 x 32 KiB head accumulators and 2 x 64 KiB pipes per exchange; no allowance for connection state, a larger figure falsifies the budget and is returned to DESIGN); the 129th concurrent connection is closed before any TLS octet is read or written (`max_public_connections` = 128); after drain the count returns to baseline | N |
 | 114 | Earned Trust of the real kernel (R-23) | `HostGatewayRelay::probe` | probe on the honest kernel; no substrate lie is produced on the real kernel (each lie is refused at Tier 1 by S-PIG-99) | none | `Ok`; the loopback pair and pipe are released (descriptor count) | T3 |
-| 115 | lingering close (R-14) | `close_write`, `discard_remaining` on a real leg; N: full path | client sends a body after a 413 and after an early 401; the pre-exchange rejection list | peer keeps sending; peer never closes | client reads the whole response then close_notify, no reset (`ECONNRESET` absent); discard ends at close_notify, at max, at the deadline | T3 (+N) |
+| 115 | lingering close (R-14) | `close_write`, `discard_remaining` on a real leg; N: full path | client sends a body after a 413 and after an early 401; the pre-exchange rejection list | peer keeps sending; peer never closes | client reads the whole response then close_notify, no reset (`ECONNRESET` absent); discard ends at close_notify, at max, at the deadline; during shutdown the deadline is the drain deadline `grace - 500 ms` (R-64) | T3 (+N) |
 | 117 | close-delimited over real TLS (R-12) | `relay_to_end` | response without length | origin close_notify | octets exact, clean end only on close_notify, bounded | T3 |
 | 118 | cipher set (R-8) | `accept_public`, upstream arm, snapshot config | clients offering AES-128-GCM, AES-256-GCM, ChaCha20-Poly1305 only | n/a | both AES suites relay exact; ChaCha-only is refused before arming (`PublicHandshakeError::Tls`); snapshot lists exactly the two suites | U+T3 |
 | 119 | response limits (ADR-0238, Message-framing contract response rules); status mapping with pre-/post-head projection | listener -> exchange driver -> `read_through` on the upstream half | origin script sends: a declared `Content-Length` of 16 777 217 then 16 777 216; a head of 32 769 then 32 768 octets; 101 then 100 header fields; interim heads whose cumulative size crosses the head limit; after the public head, a body that outgrows its ceiling | scripted origin | over-limit before the public head: exactly one 502, no public octet, upstream closed, one cookie registration; at the limit: relayed octet-exact; post-head overflow: both legs closed, no further response | I |
