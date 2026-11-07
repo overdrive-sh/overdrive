@@ -1,9 +1,4 @@
 //! Gateway-owned driven-port contracts.
-//!
-//! SCAFFOLD: true. Every shape is DESIGN-pinned (Gateway upstream path,
-//! Kernel relay data path (G1), Gateway identity ports). Adapters live in
-//! `overdrive-dataplane` (host) and `overdrive-sim` (Sim); behaviour bodies
-//! that this crate owns fail with SCAFFOLD text until DELIVER.
 
 use std::any::Any;
 use std::collections::BTreeMap;

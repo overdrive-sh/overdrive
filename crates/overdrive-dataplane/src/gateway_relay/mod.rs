@@ -56,7 +56,7 @@ use rustls::client::UnbufferedClientConnection;
 use rustls::kernel::KernelConnection;
 use rustls::pki_types::{CertificateDer, ServerName};
 use rustls::server::{Acceptor, UnbufferedServerConnection};
-use rustls::unbuffered::{ConnectionState, EncodeError};
+use rustls::unbuffered::{ConnectionState, EncodeError, UnbufferedStatus};
 use rustls::{ConnectionTrafficSecrets, Error as TlsError, ExtractedSecrets};
 use tokio::io::unix::AsyncFd;
 
@@ -631,6 +631,136 @@ enum Next {
     Traffic,
 }
 
+/// Why a handshake drive loop stopped before arming.
+enum DriveFault {
+    Tls(TlsError),
+    Io(io::Error),
+    /// A connection state the handshake never reaches, or an octet beyond the
+    /// handshake left unconsumed or unsent at its end.
+    Unexpected,
+}
+
+/// What the shared drive loop needs of a rustls unbuffered connection, whichever
+/// side of the handshake the gateway plays.
+trait HandshakeConn {
+    /// Processes the buffered records, encoding any flight into `outgoing[*used..]`,
+    /// and returns the octets to discard from `incoming` with the next action.
+    fn step(
+        &mut self,
+        incoming: &mut [u8],
+        outgoing: &mut Vec<u8>,
+        used: &mut usize,
+    ) -> (usize, Result<Next, DriveFault>);
+
+    /// `true` while the connection may send application data but still awaits the
+    /// peer's Finished, so one more record must be read before arming.
+    fn awaiting_peer_finished(&self) -> bool;
+}
+
+fn classify<Data>(
+    status: UnbufferedStatus<'_, '_, Data>,
+    outgoing: &mut Vec<u8>,
+    used: &mut usize,
+) -> (usize, Result<Next, DriveFault>) {
+    let next = match status.state {
+        Err(err) => return (status.discard, Err(DriveFault::Tls(err))),
+        Ok(ConnectionState::BlockedHandshake) => Next::Read,
+        Ok(ConnectionState::EncodeTlsData(mut state)) => {
+            loop {
+                match state.encode(&mut outgoing[*used..]) {
+                    Ok(n) => {
+                        *used += n;
+                        break;
+                    }
+                    Err(EncodeError::InsufficientSize(e)) => {
+                        outgoing.resize(*used + e.required_size, 0);
+                    }
+                    Err(EncodeError::AlreadyEncoded) => break,
+                }
+            }
+            Next::Continue
+        }
+        Ok(ConnectionState::TransmitTlsData(state)) => {
+            state.done();
+            Next::Transmit
+        }
+        Ok(ConnectionState::WriteTraffic(_)) => Next::Traffic,
+        Ok(_) => return (status.discard, Err(DriveFault::Unexpected)),
+    };
+    (status.discard, Ok(next))
+}
+
+impl HandshakeConn for UnbufferedServerConnection {
+    fn step(
+        &mut self,
+        incoming: &mut [u8],
+        outgoing: &mut Vec<u8>,
+        used: &mut usize,
+    ) -> (usize, Result<Next, DriveFault>) {
+        classify(self.process_tls_records(incoming), outgoing, used)
+    }
+
+    /// The server reports `WriteTraffic` after sending its Finished while the
+    /// client's Finished is still unread: `start_outgoing_traffic` sets
+    /// `may_send_application_data` alone (rustls 0.23.39 `server/tls13.rs:438`,
+    /// `common_state.rs:404-412`), so `is_handshaking` holds until `start_traffic`.
+    fn awaiting_peer_finished(&self) -> bool {
+        self.is_handshaking()
+    }
+}
+
+impl HandshakeConn for UnbufferedClientConnection {
+    fn step(
+        &mut self,
+        incoming: &mut [u8],
+        outgoing: &mut Vec<u8>,
+        used: &mut usize,
+    ) -> (usize, Result<Next, DriveFault>) {
+        classify(self.process_tls_records(incoming), outgoing, used)
+    }
+
+    /// Never: the client's only route to `WriteTraffic` is `start_traffic`, which
+    /// sets send and receive readiness together (rustls 0.23.39
+    /// `client/tls13.rs:1429`, `client/tls12.rs:1274`, `common_state.rs:418-421`),
+    /// so `is_handshaking` is already false when the client reports it.
+    fn awaiting_peer_finished(&self) -> bool {
+        false
+    }
+}
+
+/// Drives a handshake one record at a time until the connection reports traffic,
+/// then proves no octet beyond the handshake was read or left unsent, so none is
+/// consumed before arming.
+async fn drive_handshake(
+    fd: &AsyncFd<OwnedFd>,
+    conn: &mut impl HandshakeConn,
+    incoming: &mut Vec<u8>,
+) -> Result<(), DriveFault> {
+    let mut outgoing = vec![0u8; 4096];
+    let mut used = 0usize;
+    loop {
+        let (discard, next) = conn.step(incoming, &mut outgoing, &mut used);
+        let next = next?;
+        incoming.drain(..discard);
+        match next {
+            Next::Read => read_record(fd, incoming).await.map_err(DriveFault::Io)?,
+            Next::Continue => {}
+            Next::Transmit => {
+                write_all_plain(fd, &outgoing[..used]).await.map_err(DriveFault::Io)?;
+                used = 0;
+            }
+            Next::Traffic if conn.awaiting_peer_finished() => {
+                read_record(fd, incoming).await.map_err(DriveFault::Io)?;
+            }
+            Next::Traffic => break,
+        }
+    }
+    if !incoming.is_empty() || used > 0 {
+        return Err(DriveFault::Unexpected);
+    }
+    Ok(())
+}
+
 /// The public TLS 1.3 server handshake, one record at a time so no application
 /// octet is consumed before arming.
 async fn server_handshake(
@@ -660,58 +790,11 @@ async fn server_handshake(
     drop(accepted);
 
     let mut conn = UnbufferedServerConnection::new(tls).map_err(|err| handshake_tls(&err))?;
-    let mut outgoing = vec![0u8; 4096];
-    let mut used = 0usize;
-    loop {
-        let discard;
-        let next;
-        {
-            let status = conn.process_tls_records(&mut incoming);
-            discard = status.discard;
-            next = match status.state.map_err(|err| handshake_tls(&err))? {
-                ConnectionState::BlockedHandshake => Next::Read,
-                ConnectionState::EncodeTlsData(mut state) => {
-                    loop {
-                        match state.encode(&mut outgoing[used..]) {
-                            Ok(n) => {
-                                used += n;
-                                break;
-                            }
-                            Err(EncodeError::InsufficientSize(e)) => {
-                                outgoing.resize(used + e.required_size, 0);
-                            }
-                            Err(EncodeError::AlreadyEncoded) => break,
-                        }
-                    }
-                    Next::Continue
-                }
-                ConnectionState::TransmitTlsData(state) => {
-                    state.done();
-                    Next::Transmit
-                }
-                ConnectionState::WriteTraffic(_) => Next::Traffic,
-                _ => return Err(PublicHandshakeError::Tls { alert: None }),
-            };
-        }
-        incoming.drain(..discard);
-        match next {
-            Next::Read => {
-                read_record(fd, &mut incoming).await.map_err(|err| handshake_io(&err))?;
-            }
-            Next::Continue => {}
-            Next::Transmit => {
-                write_all_plain(fd, &outgoing[..used]).await.map_err(|err| handshake_io(&err))?;
-                used = 0;
-            }
-            Next::Traffic if conn.is_handshaking() => {
-                read_record(fd, &mut incoming).await.map_err(|err| handshake_io(&err))?;
-            }
-            Next::Traffic => break,
-        }
-    }
-    if !incoming.is_empty() || used > 0 {
-        return Err(PublicHandshakeError::Tls { alert: None });
-    }
+    drive_handshake(fd, &mut conn, &mut incoming).await.map_err(|fault| match fault {
+        DriveFault::Tls(err) => handshake_tls(&err),
+        DriveFault::Io(err) => handshake_io(&err),
+        DriveFault::Unexpected => PublicHandshakeError::Tls { alert: None },
+    })?;
     let (secrets, kernel) =
         conn.dangerous_into_kernel_connection().map_err(|err| handshake_tls(&err))?;
     let rekey: Box<dyn Rekey> = Box::new(kernel);
@@ -732,64 +815,15 @@ async fn client_handshake(
     tls: Arc<rustls::ClientConfig>,
     peer: IpAddr,
 ) -> Result<ClientHandshaken, GatewayClientMtlsError> {
-    let failed = |_: &dyn std::fmt::Debug| GatewayClientMtlsError::Handshake;
     let mut conn = UnbufferedClientConnection::new(tls, ServerName::IpAddress(peer.into()))
-        .map_err(|err| failed(&err))?;
+        .map_err(|_| GatewayClientMtlsError::Handshake)?;
     let mut incoming: Vec<u8> = Vec::new();
-    let mut outgoing = vec![0u8; 4096];
-    let mut used = 0usize;
-    loop {
-        let discard;
-        let next;
-        {
-            let status = conn.process_tls_records(&mut incoming);
-            discard = status.discard;
-            next = match status.state.map_err(|err| failed(&err))? {
-                ConnectionState::BlockedHandshake => Next::Read,
-                ConnectionState::EncodeTlsData(mut state) => {
-                    loop {
-                        match state.encode(&mut outgoing[used..]) {
-                            Ok(n) => {
-                                used += n;
-                                break;
-                            }
-                            Err(EncodeError::InsufficientSize(e)) => {
-                                outgoing.resize(used + e.required_size, 0);
-                            }
-                            Err(EncodeError::AlreadyEncoded) => break,
-                        }
-                    }
-                    Next::Continue
-                }
-                ConnectionState::TransmitTlsData(state) => {
-                    state.done();
-                    Next::Transmit
-                }
-                ConnectionState::WriteTraffic(_) => Next::Traffic,
-                _ => return Err(GatewayClientMtlsError::Handshake),
-            };
-        }
-        incoming.drain(..discard);
-        match next {
-            Next::Read => {
-                read_record(fd, &mut incoming).await.map_err(|err| failed(&err))?;
-            }
-            Next::Continue => {}
-            Next::Transmit => {
-                write_all_plain(fd, &outgoing[..used]).await.map_err(|err| failed(&err))?;
-                used = 0;
-            }
-            Next::Traffic if conn.is_handshaking() => {
-                read_record(fd, &mut incoming).await.map_err(|err| failed(&err))?;
-            }
-            Next::Traffic => break,
-        }
-    }
-    if !incoming.is_empty() || used > 0 {
-        return Err(GatewayClientMtlsError::Handshake);
-    }
+    drive_handshake(fd, &mut conn, &mut incoming)
+        .await
+        .map_err(|_| GatewayClientMtlsError::Handshake)?;
     let peer_certificates = conn.peer_certificates().map(<[_]>::to_vec);
-    let (secrets, kernel) = conn.dangerous_into_kernel_connection().map_err(|err| failed(&err))?;
+    let (secrets, kernel) =
+        conn.dangerous_into_kernel_connection().map_err(|_| GatewayClientMtlsError::Handshake)?;
     Ok(ClientHandshaken { peer_certificates, secrets, rekey: Box::new(kernel) })
 }
 
@@ -1183,9 +1217,7 @@ impl HostGatewayRelay {
     pub fn new(clock: Arc<dyn Clock>) -> Self {
         Self { clock }
     }
-}
 
-impl HostGatewayRelay {
     /// Completes the rustls TLS 1.3 client handshake on the dialed upstream socket
     /// one record at a time (no application octet is consumed or written), hands
     /// the peer's presented chain to `verify_peer`, and arms kernel TLS only when
