@@ -630,6 +630,170 @@ async fn key_update_request_during_a_large_splice_out_never_tears_the_record_str
 }
 
 // ---------------------------------------------------------------------------
+// S-PIG-136, S-PIG-137: answering a KeyUpdate is cancel-safe
+// ---------------------------------------------------------------------------
+
+/// What keeps the answer to a peer's requesting KeyUpdate from being sent while
+/// the exchange driver drops the `read_through` that owes it.
+#[derive(Debug, Clone, Copy)]
+enum Blocked {
+    /// A large `write_all` to the same leg holds the transmit lock, stalled on a
+    /// peer that is not reading.
+    TransmitLockHeld,
+    /// The transmit lock is free but the leg's send buffer is full, because an
+    /// earlier large write to a non-reading peer was abandoned part way.
+    SendBufferFull,
+}
+
+/// A payload larger than every buffer between the relay and a peer that does not
+/// read: the sender's `tcp_wmem` ceiling, the receiver's `tcp_rmem` ceiling and a
+/// margin, doubled. A write of it cannot complete until the peer reads.
+fn stalling_payload() -> Vec<u8> {
+    let buffers = tcp_buffer_ceiling("tcp_wmem") + tcp_buffer_ceiling("tcp_rmem");
+    vec![0xA5; usize::try_from(2 * buffers).expect("buffer ceilings fit") + 1024 * 1024]
+}
+
+/// The client sends a KeyUpdate (asking for an answer when `requested`) and then
+/// its next request head. The relay's read half owes the answer as soon as it
+/// consumes the record. Under `blocked` the read is dropped, three times, while
+/// the answer cannot be sent; the peer is then drained, a fresh call completes,
+/// and the leg is checked at the peer.
+async fn key_update_answer_survives_cancelled_reads(blocked: Blocked) {
+    for offer in ALL_AES {
+        for requested in [true, false] {
+            let what = format!("{blocked:?} {offer:?} requested={requested}");
+            let mut rig = Rig::new(offer).await;
+            let before = TlsStat::read();
+            let next_head = head_cl("GET /after-key-update", 0);
+            let marker = b"application data under the new key".to_vec();
+            let fill = stalling_payload();
+            let Rig { relay, public, .. } = &mut rig;
+            let peer = public.peer.clone();
+            let (read_half, write_half) = (&mut public.read, &mut public.write);
+
+            if matches!(blocked, Blocked::SendBufferFull) {
+                // The peer is not reading, so this write cannot finish; abandoning
+                // it releases the transmit lock and leaves the send buffer full.
+                let stalled = tokio::time::timeout(
+                    Duration::from_millis(500),
+                    relay.write_all(write_half, &fill, in_secs(120)),
+                )
+                .await;
+                assert!(stalled.is_err(), "{what}: the filling write stays blocked on the peer");
+            }
+
+            let client = peer.clone();
+            let head = next_head.clone();
+            let sender = std::thread::spawn(move || -> io::Result<()> {
+                client.send_key_update(requested)?;
+                client.send(&head)
+            });
+            joined(sender, "client sent the KeyUpdate and the next request head").await;
+
+            let write_done = std::sync::atomic::AtomicBool::new(false);
+            let hold = async {
+                if matches!(blocked, Blocked::TransmitLockHeld) {
+                    relay
+                        .write_all(write_half, &fill, in_secs(120))
+                        .await
+                        .expect("the stalled write completes once the peer reads");
+                }
+                write_done.store(true, Ordering::SeqCst);
+            };
+            let drive = async {
+                let mut head = None;
+                if requested {
+                    // The answer is owed but cannot be sent: every read parks, and is
+                    // dropped, behind the blocked answer.
+                    for attempt in 1..=3 {
+                        let parked = tokio::time::timeout(
+                            Duration::from_millis(200),
+                            relay.read_through(
+                                read_half,
+                                HeadTerminator::HeaderBlockEnd,
+                                nzu(HEAD_LIMIT),
+                                read_within(120),
+                            ),
+                        )
+                        .await;
+                        match parked {
+                            Err(_) => {}
+                            Ok(done) => {
+                                head = Some(done.expect("a complete head"));
+                                eprintln!("{what}: read {attempt} returned before the answer");
+                                break;
+                            }
+                        }
+                    }
+                }
+                assert!(
+                    matches!(blocked, Blocked::SendBufferFull)
+                        || !write_done.load(Ordering::SeqCst),
+                    "{what}: the blocking write is still in flight while reads were dropped"
+                );
+                // Release the blockage: the peer reads everything the relay sent.
+                let reader = Drain::start(&peer, true);
+                let head = match head {
+                    Some(head) => head,
+                    None => relay
+                        .read_through(
+                            read_half,
+                            HeadTerminator::HeaderBlockEnd,
+                            nzu(HEAD_LIMIT),
+                            read_within(60),
+                        )
+                        .await
+                        .expect("a fresh read completes the head"),
+                };
+                assert_eq!(head.as_slice(), next_head.as_slice(), "{what}: the head is exact");
+                reader
+            };
+            let ((), reader) = tokio::join!(hold, drive);
+            relay
+                .write_all(write_half, &marker, in_secs(60))
+                .await
+                .expect("the next DATA record is written");
+
+            wait_until(|| reader.octets().ends_with(&marker), 20).await;
+            assert!(
+                reader.octets().ends_with(&marker),
+                "{what}: the next DATA record decrypts at the peer"
+            );
+            let after = TlsStat::read();
+            assert_eq!(after.delta(&before, "TlsDecryptError"), 0, "{what}: no torn record");
+            assert_eq!(
+                peer.key_updates_received(),
+                u32::from(requested),
+                "{what}: exactly one answer when one was requested, none otherwise"
+            );
+            drop(reader);
+        }
+    }
+}
+
+/// S-PIG-136: a peer's requesting KeyUpdate is answered exactly once even when
+/// the `read_through` that consumed it is dropped while the transmit lock is
+/// held by a stalled `write_all` to the same leg. Each dropped read leaves the
+/// answer owed, not lost; once the peer reads, a fresh call sends it, the next
+/// DATA record decrypts at the peer, `TlsDecryptError` is unchanged, and a
+/// KeyUpdate that did not ask for one is never answered. Both AES suites.
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_key_update_answer_survives_a_read_dropped_while_the_transmit_lock_is_held() {
+    key_update_answer_survives_cancelled_reads(Blocked::TransmitLockHeld).await;
+}
+
+/// S-PIG-137: the same contract when the transmit lock is free and the leg's
+/// send buffer is full, so the answer's record send itself cannot complete; the
+/// read is dropped repeatedly (three times) before the peer reads. Both AES
+/// suites.
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_key_update_answer_survives_reads_dropped_while_the_send_buffer_is_full() {
+    key_update_answer_survives_cancelled_reads(Blocked::SendBufferFull).await;
+}
+
+// ---------------------------------------------------------------------------
 // S-PIG-108
 // ---------------------------------------------------------------------------
 
