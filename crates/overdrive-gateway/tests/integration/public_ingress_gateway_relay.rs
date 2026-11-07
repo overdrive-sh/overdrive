@@ -1995,6 +1995,67 @@ async fn an_early_or_gateway_authored_response_ends_with_a_half_close_and_a_boun
     assert!(legs.public().close_notify_sent, "the 408 is followed by a close_notify");
 }
 
+/// S-PIG-135: the early answer to the last request a keep-alive connection may
+/// carry still ends with the lingering close. The hundredth request on the
+/// connection (the connection cap closes after its response) is a `POST` whose
+/// origin answers 401 or 413 before the request body is read, and the client keeps
+/// sending: the complete response is delivered, then close_notify, then the
+/// bounded discard of the unread request octets, then the socket closes; it is
+/// never a plain close that destroys the response with a reset (R-14).
+///
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test]
+async fn an_early_answer_to_the_last_permitted_request_still_ends_with_the_lingering_close() {
+    // One composition per early status: each is its own gateway at its own address.
+    for (name, early, ordinal) in [("401", 401_u16, 2_u16), ("413", 413_u16, 3_u16)] {
+        let world =
+            World::start(LINGERING, Spec { route_path: "/api", ordinal, ..Spec::default() }).await;
+        let allowed = usize::try_from(world.limits().max_requests_per_connection().get())
+            .expect("request cap");
+        // `allowed - 1` ordinary requests, then the last permitted one.
+        let mut public = LegScript::new();
+        let mut origins = Vec::new();
+        for index in 0..allowed - 1 {
+            public = public.octets(get(&format!("/api/n{index}")));
+            origins.push(origin_answers(&ok_response(format!("r{index}").as_bytes())));
+        }
+        let last = request_head("POST", "/api/last", &[("Content-Length", "100000")]);
+        let public = public.octets(last).octets(vec![b'x'; 70_000]).close_notify();
+        origins.push(origin_answers(&response(early, b"early")));
+
+        let legs = world.run(public, origins).await;
+
+        let statuses = legs.public_statuses();
+        assert_eq!(statuses.len(), allowed, "{name}: one response per permitted request");
+        assert_eq!(statuses[allowed - 1], early, "{name}: the last response is the early answer");
+        assert!(
+            statuses[..allowed - 1].iter().all(|status| *status == 200),
+            "{name}: the earlier requests were ordinary"
+        );
+        let responses = legs.public_messages();
+        assert_eq!(
+            responses[allowed - 1].header("connection"),
+            Some("close"),
+            "{name}: the connection cap closes after this response"
+        );
+        assert_eq!(responses[allowed - 1].body, b"early", "{name}: the whole body was delivered");
+        assert_lingering_close(&legs, name);
+        let public_leg = legs.public();
+        assert_eq!(
+            calls_of(public_leg, RelayCall::DiscardRemaining),
+            1,
+            "{name}: exactly one bounded discard"
+        );
+        let last_write = public_leg.calls.iter().rposition(|call| *call == RelayCall::WriteAll);
+        let close = call_index(public_leg, RelayCall::CloseWrite);
+        assert!(
+            matches!((last_write, close), (Some(w), Some(c)) if w < c),
+            "{name}: the final response is written before the half-close: {:?}",
+            public_leg.calls.iter().rev().take(6).collect::<Vec<_>>()
+        );
+    }
+}
+
 // ---------------------------------------------------------------------------
 // S-PIG-94: body ceilings
 // ---------------------------------------------------------------------------
@@ -2625,9 +2686,15 @@ async fn drain_closes_idle_connections_at_once_and_ends_inflight_work_at_the_one
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER relay-lingering-close"]
 async fn a_lingering_discard_during_drain_ends_at_the_drain_deadline_without_being_forced() {
-    let second = Duration::from_secs(1);
+    // R-64: drain, force-abort and the lingering-close bound end at
+    // `shutdown_deadline - GATEWAY_SHUTDOWN_JOIN_RESERVE`; the final owner joins
+    // run to the shutdown deadline. The reserve is crate-private, so it is a
+    // literal here (S-PIG-101 / 115).
+    const JOIN_RESERVE: Duration = Duration::from_millis(500);
+    // A step finer than the reserve, so the drain deadline and the shutdown
+    // deadline are different observable instants on the injected clock.
+    let step = Duration::from_millis(100);
     let early_401 = || {
         LegScript::new()
             .octets(request_head("POST", "/a", &[("Content-Length", "100000")]))
@@ -2661,14 +2728,20 @@ async fn a_lingering_discard_during_drain_ends_at_the_drain_deadline_without_bei
         } else {
             world.accepted(&running).await;
         }
-        let report = world.shutdown_with_clock(second).await;
+        let report = world.shutdown_with_clock(step).await;
         let legs = world.finish(&running).await;
 
         assert_eq!(report.forced_connections, 0, "{name}: ending the discard is not a force-abort");
         assert!(report.task_failures.is_empty(), "{name}: {:?}", report.task_failures);
         assert!(
-            report.elapsed >= GRACE && report.elapsed <= GRACE + second,
-            "{name}: the discard ends at the drain deadline: {:?}",
+            report.elapsed >= GRACE - JOIN_RESERVE && report.elapsed <= GRACE + step,
+            "{name}: the stage ends inside the one grace, from the drain deadline: {:?}",
+            report.elapsed
+        );
+        assert!(
+            report.elapsed < GRACE,
+            "{name}: the discard ended at the drain deadline (grace - 500 ms), not at the \
+             shutdown deadline: {:?}",
             report.elapsed
         );
         assert_eq!(legs.public_statuses(), vec![401], "{name}: one complete response");

@@ -76,6 +76,10 @@ const STATUS_RETRY: Duration = Duration::from_secs(1);
 /// exhaustion does not spin the listener task.
 const ACCEPT_FAILURE_BACKOFF: Duration = Duration::from_millis(100);
 
+/// The tail of the one shutdown grace reserved for the final owner joins
+/// (R-64). The drain deadline is the shutdown deadline minus this reserve.
+const GATEWAY_SHUTDOWN_JOIN_RESERVE: Duration = Duration::from_millis(500);
+
 // ---------------------------------------------------------------------------
 // Applied generation
 // ---------------------------------------------------------------------------
@@ -612,7 +616,12 @@ impl GatewayHandle {
         let Self { mut tasks, shutdown: capabilities } = self;
         let clock = Arc::clone(&capabilities.clock);
         let started = clock.now();
-        let deadline = started + grace;
+        let shutdown_deadline = started + grace;
+        // A grace no longer than the reserve leaves no drain: it ends at
+        // `started`, so open connections are aborted at once while the final
+        // joins still run to `shutdown_deadline`.
+        let drain_deadline =
+            started + grace.checked_sub(GATEWAY_SHUTDOWN_JOIN_RESERVE).unwrap_or(Duration::ZERO);
         let mut report = GatewayShutdownReport {
             elapsed: Duration::ZERO,
             forced_connections: 0,
@@ -624,20 +633,23 @@ impl GatewayHandle {
         };
 
         capabilities.connections.stop_accepting();
-        report.task_failures.extend(tasks.join_listener(deadline, clock.as_ref()).await);
-        let closed = capabilities.application.close_for_shutdown(deadline).await;
-        match capabilities.connections.drain_then_force_join(deadline, clock.as_ref()).await {
+        report.task_failures.extend(tasks.join_listener(shutdown_deadline, clock.as_ref()).await);
+        let closed = capabilities.application.close_for_shutdown(shutdown_deadline).await;
+        match capabilities.connections.drain_then_force_join(drain_deadline, clock.as_ref()).await {
             Ok(aborted) => {
                 report.forced_connections = report.forced_connections.saturating_add(aborted);
             }
             Err(failure) => report.task_failures.push(failure),
         }
         capabilities.owners.connections.cancel();
-        report.task_failures.extend(tasks.join_connections(deadline, clock.as_ref()).await);
+        report
+            .task_failures
+            .extend(tasks.join_connections(shutdown_deadline, clock.as_ref()).await);
         match closed {
             Ok(closed) => {
                 for retention in closed.retentions {
-                    if let Err(timeout) = retention.wait_zero(deadline, clock.as_ref()).await {
+                    if let Err(timeout) = retention.wait_zero(drain_deadline, clock.as_ref()).await
+                    {
                         report.forced_connections =
                             report.forced_connections.saturating_add(timeout.connections);
                     }
@@ -651,12 +663,12 @@ impl GatewayHandle {
         report.residual_connect =
             Self::sweep(capabilities.cleanup.as_ref(), &capabilities.cleanup_ledger);
 
-        if let Err(error) = capabilities.application.retire_closed(deadline).await {
+        if let Err(error) = capabilities.application.retire_closed(shutdown_deadline).await {
             report.application_errors.push(error);
         }
 
         capabilities.owners.cancel_all();
-        report.task_failures.extend(tasks.join_remaining(deadline, clock.as_ref()).await);
+        report.task_failures.extend(tasks.join_remaining(shutdown_deadline, clock.as_ref()).await);
 
         capabilities.identity.disable_after_drain();
         report.identity_empty = capabilities.identity.current().is_none();

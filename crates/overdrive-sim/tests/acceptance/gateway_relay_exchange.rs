@@ -789,10 +789,23 @@ async fn drain_case(seed: u64) -> Vec<String> {
         upstream_legs <= 1,
         "seed={seed}: a connection was reused or a later request was parsed after the drain began"
     );
+    let discarding = legs
+        .iter()
+        .any(|leg| leg.role == LegRole::Public && leg.calls.contains(&RelayCall::DiscardRemaining));
     if finishes {
         assert_eq!(
             report.forced_connections, 0,
             "seed={seed}: the exchange completed in the drain"
+        );
+    } else if discarding {
+        // Lingering close (R-14, R-64): a discard in progress ends at the drain
+        // deadline as an ordinary bounded end, not a force-abort; the socket is
+        // then closed (the every-leg-closed and no-residue checks below). The
+        // request-body phase reaches this state too, because its scripted origin
+        // answers before the body completes.
+        assert_eq!(
+            report.forced_connections, 0,
+            "seed={seed}: a stalled discard ends at the drain deadline unforced"
         );
     } else {
         assert_eq!(
@@ -829,7 +842,7 @@ async fn drain_case(seed: u64) -> Vec<String> {
 
 /// S-PIG-103: drain beginning at a seeded point of an exchange (request head,
 /// request body, response body, discard) completes the exchange or force-aborts
-/// it at the one drain deadline, never reuses a connection or parses a later
+/// it at the one drain deadline (a stalled discard instead ends there unforced), never reuses a connection or parses a later
 /// request, and leaves no residue; twin runs at one seed produce the same
 /// ordered trace. The seed of every case is printed before it runs.
 ///

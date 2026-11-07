@@ -70,6 +70,14 @@ impl DrainSignal {
         *self.0.borrow()
     }
 
+    /// Resolves at the drain deadline, once the drain has begun; never
+    /// resolves if the owner is gone without draining. The bound a lingering
+    /// discard ends at, as an ordinary end, rather than being force-aborted.
+    async fn deadline_reached(&self, clock: &dyn Clock) {
+        let deadline = self.begun().await;
+        clock.sleep(deadline.saturating_duration_since(clock.now())).await;
+    }
+
     /// Resolves with the drain deadline when the drain begins; never resolves
     /// if the owner is gone without draining.
     async fn begun(&self) -> Instant {
@@ -426,14 +434,20 @@ impl Connection {
         if now >= until {
             return;
         }
-        let _ = services
-            .relay
-            .discard_remaining(
-                &mut self.read,
-                services.limits.max_request_body_bytes(),
-                RelayDeadlines { absolute: until, no_progress },
-            )
-            .await;
+        let discard = services.relay.discard_remaining(
+            &mut self.read,
+            services.limits.max_request_body_bytes(),
+            RelayDeadlines { absolute: until, no_progress },
+        );
+        // The discard's bound is the earlier of `until` and the drain
+        // deadline: dropping it there is the relay's own bounded end (its
+        // reads are already abandoned at their deadlines), and the socket
+        // closes whatever it returned.
+        tokio::select! {
+            biased;
+            _ = discard => {}
+            () = self.drain.deadline_reached(services.clock.as_ref()) => {}
+        }
     }
 }
 
