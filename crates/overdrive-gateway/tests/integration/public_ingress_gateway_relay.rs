@@ -1282,7 +1282,6 @@ fn chunked_response(data: &[u8]) -> Vec<u8> {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER kernel-relay-exchange-driver"]
 async fn keep_alive_exchanges_deliver_every_body_octet_exactly_and_leave_the_next_head_untouched() {
     let world = World::start(TWO_KEEP_ALIVE, Spec::default()).await;
     let mut expected_opens = 0;
@@ -1360,7 +1359,6 @@ async fn keep_alive_exchanges_deliver_every_body_octet_exactly_and_leave_the_nex
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER kernel-relay-exchange-driver"]
 async fn chunked_bodies_relay_chunk_by_chunk_without_extensions_or_trailers() {
     let world = World::start(CHUNKED, Spec::default()).await;
     let head = request_head("POST", "/chunks", &[("Transfer-Encoding", "chunked")]);
@@ -1426,7 +1424,6 @@ async fn chunked_bodies_relay_chunk_by_chunk_without_extensions_or_trailers() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER kernel-relay-exchange-driver"]
 async fn bodyless_responses_relay_no_body_and_leave_the_connection_reusable() {
     let world = World::start(BODYLESS, Spec::default()).await;
     let early_hints = response_head(103, "Early Hints", &[("Link", "</s.css>; rel=preload")]);
@@ -1492,7 +1489,6 @@ fn answer_status(answer: &[u8]) -> u16 {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER kernel-relay-exchange-driver"]
 async fn interim_heads_are_forwarded_or_dropped_and_expect_reaches_the_origin_unchanged() {
     let world = World::start(INTERIM, Spec::default()).await;
 
@@ -1550,7 +1546,6 @@ async fn interim_heads_are_forwarded_or_dropped_and_expect_reaches_the_origin_un
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER kernel-relay-sim-adapter"]
 async fn control_records_met_anywhere_in_a_message_leave_the_relayed_octets_exact() {
     let world = World::start(HARMLESS_CONTROL, Spec::default()).await;
 
@@ -1625,7 +1620,6 @@ async fn control_records_met_anywhere_in_a_message_leave_the_relayed_octets_exac
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER kernel-relay-sim-adapter"]
 async fn an_alert_or_an_unexpected_record_closes_both_legs() {
     let world = World::start(FATAL_CONTROL, Spec::default()).await;
     let head = request_head("POST", "/v1/e", &[("Content-Length", "10")]);
@@ -1676,7 +1670,6 @@ async fn an_alert_or_an_unexpected_record_closes_both_legs() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER kernel-relay-sim-adapter"]
 async fn a_key_update_whose_answer_fails_closes_both_legs_and_relays_nothing_past_it() {
     let world = World::start(FAILED_ANSWER, Spec::default()).await;
     let failures = [
@@ -1740,7 +1733,6 @@ async fn a_key_update_whose_answer_fails_closes_both_legs_and_relays_nothing_pas
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER kernel-relay-exchange-driver"]
 async fn a_close_delimited_response_ends_cleanly_on_close_notify_and_is_never_reused() {
     let world = World::start(CLOSE_DELIMITED, Spec::default()).await;
     let body = pattern(5000);
@@ -1781,7 +1773,6 @@ async fn a_close_delimited_response_ends_cleanly_on_close_notify_and_is_never_re
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER kernel-relay-exchange-driver"]
 async fn an_upstream_failure_is_one_502_before_the_head_and_an_unclean_close_after_it() {
     let world = World::start(UPSTREAM_FAILURE, Spec::default()).await;
 
@@ -2007,7 +1998,6 @@ async fn an_early_or_gateway_authored_response_ends_with_a_half_close_and_a_boun
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER kernel-relay-exchange-driver"]
 async fn request_and_response_bodies_are_bounded_by_their_ceilings() {
     let world = World::start(CEILINGS, Spec::default()).await;
     let request_ceiling =
@@ -2084,7 +2074,7 @@ async fn request_and_response_bodies_are_bounded_by_their_ceilings() {
     assert!(legs.upstream[0].closed && legs.public().closed);
 
     // A chunked response one under its ceiling passes.
-    let body = vec![b'y'; response_ceiling - 1];
+    let body = vec![b'x'; response_ceiling - 1];
     let origin = LegScript::new()
         .octets(response_head(200, "OK", &[("Transfer-Encoding", "chunked")]))
         .octets(chunk(response_ceiling - 1))
@@ -2118,7 +2108,6 @@ async fn request_and_response_bodies_are_bounded_by_their_ceilings() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER kernel-relay-sim-adapter"]
 async fn a_relay_pipe_failure_is_a_502_before_the_head_and_a_close_after_it() {
     let world = World::start(PIPE_FAILURE, Spec::default()).await;
     let failures = [
@@ -2163,7 +2152,6 @@ async fn a_relay_pipe_failure_is_a_502_before_the_head_and_a_close_after_it() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER kernel-relay-exchange-driver"]
 async fn idle_and_head_deadlines_follow_the_injected_clock_and_the_hundredth_response_closes() {
     let world = World::start(DEADLINES, Spec::default()).await;
     let limits = world.limits();
@@ -2260,7 +2248,6 @@ async fn idle_and_head_deadlines_follow_the_injected_clock_and_the_hundredth_res
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER kernel-relay-exchange-driver"]
 async fn every_failure_is_a_single_attempt_without_retry_or_second_backend() {
     let world = World::start(SINGLE_ATTEMPT, Spec::default()).await;
 
@@ -2534,7 +2521,6 @@ async fn the_relay_probe_refuses_every_substrate_lie_with_its_own_typed_error() 
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER kernel-relay-exchange-driver"]
 async fn drain_closes_idle_connections_at_once_and_ends_inflight_work_at_the_one_deadline() {
     let second = Duration::from_secs(1);
 
@@ -2661,7 +2647,6 @@ fn head_with_fields(count: usize) -> Vec<u8> {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER kernel-relay-exchange-driver"]
 async fn response_limits_are_a_single_502_one_octet_over_and_a_relay_at_the_limit() {
     let world = World::start(RESPONSE_LIMITS, Spec::default()).await;
     let limits = world.limits();
@@ -2756,7 +2741,6 @@ async fn exchange_at_t0(world: &World, origin: LegScript) -> Running {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER kernel-relay-exchange-driver"]
 async fn the_response_head_has_one_budget_from_t0_and_interim_heads_never_restart_it() {
     let world = World::start(RESPONSE_HEAD_DEADLINE, Spec::default()).await;
     let budget = world.limits().response_head_deadline();
@@ -2906,7 +2890,6 @@ fn upstream_ends_with(legs: &Legs, needle: &[u8]) -> bool {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER kernel-relay-exchange-driver"]
 async fn a_response_head_after_a_slow_upload_waits_only_the_remaining_request_time() {
     let world = World::start(UPLOAD_COMPLETES_LATE, Spec::default()).await;
     let limits = world.limits();
@@ -2975,7 +2958,6 @@ fn head_reached_the_origin(legs: &Legs) -> bool {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER kernel-relay-exchange-driver"]
 async fn a_request_body_that_stops_moving_gets_one_408_at_the_no_progress_window() {
     let mut world = World::start(STALLED_REQUEST_BODY, Spec::default()).await;
     let no_progress = world.limits().body_no_progress_deadline();
@@ -3057,7 +3039,6 @@ async fn a_request_body_that_stops_moving_gets_one_408_at_the_no_progress_window
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER kernel-relay-exchange-driver"]
 async fn a_trickled_request_body_is_cut_only_at_the_whole_request_deadline_with_a_502() {
     let world = World::start(TRICKLED_REQUEST_BODY, Spec::default()).await;
     let limits = world.limits();
@@ -3112,7 +3093,6 @@ async fn a_trickled_request_body_is_cut_only_at_the_whole_request_deadline_with_
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER kernel-relay-exchange-driver"]
 async fn a_public_half_close_delivers_the_response_only_after_the_request_was_fully_read() {
     let world = World::start(HALF_CLOSE, Spec::default()).await;
     let second = Duration::from_secs(1);
@@ -3208,7 +3188,6 @@ async fn assert_refused_before_upstream(world: &World, request: Vec<u8>, status:
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER http1-head-validation-and-framing"]
 async fn ambiguous_request_framing_is_refused_before_any_upstream_octet() {
     let world = World::start(AMBIGUOUS_REQUEST, Spec::default()).await;
     let with = |headers: &[(&str, &str)]| request_head("POST", "/a", headers);
@@ -3255,7 +3234,6 @@ async fn ambiguous_request_framing_is_refused_before_any_upstream_octet() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER http1-head-validation-and-framing"]
 async fn ambiguous_origin_framing_is_a_502_before_the_public_head() {
     let world = World::start(AMBIGUOUS_RESPONSE, Spec::default()).await;
     let with = |headers: &[(&str, &str)]| response_head(200, "OK", headers);
@@ -3320,7 +3298,6 @@ async fn ambiguous_origin_framing_is_a_502_before_the_public_head() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER kernel-relay-sim-adapter"]
 async fn the_public_server_configuration_lists_exactly_the_two_aes_gcm_suites() {
     let capture = std::cell::RefCell::new(None);
     let world = World::start_with(SERVER_CONFIGURATION, Spec::default(), |relay| {

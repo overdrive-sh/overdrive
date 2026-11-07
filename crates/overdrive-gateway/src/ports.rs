@@ -386,7 +386,7 @@ impl KtlsLeg {
         Self { read, write }
     }
     pub fn into_halves(self) -> (KtlsReadHalf, KtlsWriteHalf) {
-        todo!("SCAFFOLD: KtlsLeg::into_halves")
+        (KtlsReadHalf { backend: self.read }, KtlsWriteHalf { backend: self.write })
     }
 }
 
@@ -403,14 +403,18 @@ pub struct KtlsWriteHalf {
 impl KtlsReadHalf {
     /// `unreachable!()` on a `T` the backend did not store.
     pub fn backend_mut<T: Any>(&mut self) -> &mut T {
-        todo!("SCAFFOLD: KtlsReadHalf::backend_mut")
+        self.backend.downcast_mut::<T>().unwrap_or_else(|| {
+            unreachable!("a read half is only used by the backend that built it")
+        })
     }
 }
 
 impl KtlsWriteHalf {
     /// `unreachable!()` on a `T` the backend did not store.
     pub fn backend_mut<T: Any>(&mut self) -> &mut T {
-        todo!("SCAFFOLD: KtlsWriteHalf::backend_mut")
+        self.backend.downcast_mut::<T>().unwrap_or_else(|| {
+            unreachable!("a write half is only used by the backend that built it")
+        })
     }
 }
 
@@ -430,7 +434,7 @@ pub struct ThroughBytes(Vec<u8>);
 
 impl ThroughBytes {
     pub fn new(bytes: Vec<u8>) -> Self {
-        todo!("SCAFFOLD: ThroughBytes::new")
+        Self(bytes)
     }
     pub fn as_slice(&self) -> &[u8] {
         &self.0

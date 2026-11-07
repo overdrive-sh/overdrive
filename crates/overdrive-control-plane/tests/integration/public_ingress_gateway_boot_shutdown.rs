@@ -342,7 +342,6 @@ async fn a_disabled_gateway_boots_and_shuts_down_exactly_as_before() {
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER kernel-relay-sim-adapter"]
 async fn a_disabled_gateway_never_probes_the_relay() {
     let node = Node::new();
     let config = node.config();

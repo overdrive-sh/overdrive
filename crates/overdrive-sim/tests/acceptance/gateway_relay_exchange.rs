@@ -33,6 +33,7 @@ use std::collections::BTreeMap;
 use std::future::Future;
 use std::net::{Ipv4Addr, SocketAddrV4, TcpStream};
 use std::num::NonZeroU16;
+use std::os::unix::fs::PermissionsExt as _;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -125,6 +126,8 @@ impl Rig {
         let key_path = dir.path().join("api-origin-key.pem");
         std::fs::write(&chain_path, cert.pem()).expect("chain");
         std::fs::write(&key_path, key.serialize_pem()).expect("key");
+        std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o600))
+            .expect("private-key mode");
 
         let clock = Arc::new(SimClock::new());
         let intent =
@@ -508,7 +511,6 @@ fn pick_ending(rng: &mut StdRng) -> Ending {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER kernel-relay-exchange-driver"]
 async fn seeded_peer_events_never_move_an_octet_past_a_message_boundary_and_leave_no_residue() {
     for seed in 0..CASES {
         let mut rng = StdRng::seed_from_u64(seed);
@@ -833,7 +835,6 @@ async fn drain_case(seed: u64) -> Vec<String> {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER kernel-relay-exchange-driver"]
 async fn drain_at_a_seeded_point_completes_or_force_aborts_and_twin_runs_agree() {
     for seed in 0..CASES {
         // Twin runs: the same seeded case composed twice in sequence (the first

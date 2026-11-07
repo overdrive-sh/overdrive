@@ -29,6 +29,9 @@
 //!   of S-PIG-120), for a public leg from `accept_public`. A read that has no
 //!   deliverable event waits on the clock and ends in `Deadline` / `NoProgress`
 //!   when the passed deadline elapses (no sleeping: the test advances the clock).
+//!   A script whose last event is a `Quiet` ends with it: once the span has
+//!   passed, the peer closes cleanly. Any other script that has played out stays
+//!   silent.
 //! * [`PublicLegScript`] — one scripted public connection, consumed by the next
 //!   `accept_public`. The accepted socket is kept inside the leg, so closing the
 //!   leg closes the test client's real socket.
@@ -70,7 +73,7 @@ use std::time::{Duration, Instant};
 use async_trait::async_trait;
 use overdrive_core::ca::issue_failure::SvidIssueFailure;
 use overdrive_core::dataplane::ServiceFrontend;
-use overdrive_core::eval_broker::{Evaluation, EvaluationBroker};
+use overdrive_core::eval_broker::{Evaluation, EvaluationBroker, EvaluationEligibility};
 use overdrive_core::gateway_identity::{
     GatewayIdentityDesired, GatewayIdentityEpoch, GatewayIdentityFacts, GatewayIdentityIssueRecord,
     GatewayIdentityView,
@@ -79,6 +82,7 @@ use overdrive_core::id::{BackendId, SpiffeId};
 use overdrive_core::public_ingress::{PublicHostname, ServiceKey, SocketCookie};
 use overdrive_core::traits::ca::SvidMaterial;
 use overdrive_core::traits::clock::Clock;
+use overdrive_core::wall_clock::UnixInstant;
 use overdrive_gateway::ports::{
     AcceptedPublicLeg, GatewayClientMtls, GatewayClientMtlsDeps, GatewayClientMtlsError,
     GatewayClientMtlsFactory, GatewayConnectCleanup, GatewayConnectCleanupSweep,
@@ -91,7 +95,7 @@ use overdrive_gateway::ports::{
     RelayPipeError, RelayProbeError, ThroughBytes,
 };
 use parking_lot::Mutex;
-use tokio::sync::watch;
+use tokio::sync::{Notify, watch};
 
 use super::dataplane::SimDataplane;
 
@@ -270,39 +274,501 @@ pub struct LegTranscript {
 // SimGatewayRelay
 // ---------------------------------------------------------------------------
 
+/// Octets one relay step moves: the relay pipe's capacity floor. A step that
+/// fills the pipe is a scheduling point, as the host's splice steps are, so the
+/// other half of an exchange runs while a large body moves; smaller moves are
+/// not.
+const PIPE_STEP: usize = 65_536;
+
+/// How a leg's inbound side ended.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum LegEnd {
+    CleanEof,
+    Reset,
+    Alert(u8),
+    Unexpected(u8),
+    KeyUpdate(KeyUpdateError),
+}
+
+impl LegEnd {
+    /// The read error of a read that meets this end with `partial` octets of
+    /// the item already received.
+    fn read_error(&self, partial: bool) -> LegReadError {
+        match self {
+            Self::CleanEof if partial => LegReadError::Truncated,
+            Self::CleanEof => LegReadError::CleanEof,
+            Self::Reset => LegReadError::Io { kind: std::io::ErrorKind::ConnectionReset },
+            Self::Alert(description) => LegReadError::Alert { description: *description },
+            Self::Unexpected(content_type) => {
+                LegReadError::UnexpectedRecord { content_type: *content_type }
+            }
+            Self::KeyUpdate(error) => LegReadError::KeyUpdate(*error),
+        }
+    }
+}
+
+/// What one attempt to take inbound octets found.
+enum Pulled {
+    /// Octets were appended to the leg's inbound buffer.
+    Octets,
+    /// The inbound side ended.
+    Ended(LegEnd),
+    /// No event is deliverable now; the next one is due at the instant, or only
+    /// an anchoring write can unblock it.
+    Blocked(Option<Instant>),
+}
+
+/// Whether the leg ever created its splice pipe, and whether it is still open.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PipeLife {
+    Never,
+    Live,
+    Released,
+}
+
+impl PipeLife {
+    const fn released(self) -> Self {
+        match self {
+            Self::Live => Self::Released,
+            other => other,
+        }
+    }
+}
+
+struct LegState {
+    events: VecDeque<LegEvent>,
+    /// The virtual instant of the last consumed `Quiet` span; `None` until an
+    /// upstream leg's first write completes.
+    cursor: Option<Instant>,
+    /// Inbound octets received and not yet consumed.
+    buffer: Vec<u8>,
+    /// When the first octet of the buffered item arrived.
+    started_at: Option<Instant>,
+    ended: Option<LegEnd>,
+    /// The script ends in a `Quiet`: once its span passed the peer is gone.
+    trailing_quiet: bool,
+    send_window: Option<usize>,
+    sent: usize,
+    pipe_failure: Option<RelayPipeError>,
+    pipe: PipeLife,
+    written: Vec<u8>,
+    calls: Vec<RelayCall>,
+    close_notify_sent: bool,
+    halves_alive: u8,
+    closed: bool,
+    /// The accepted or connected socket the leg owns; dropped when the leg
+    /// closes, so closing the leg closes the test client's real socket.
+    socket: Option<OwnedFd>,
+}
+
+impl LegState {
+    fn pull(&mut self, now: Instant) -> Pulled {
+        loop {
+            if let Some(end) = &self.ended {
+                return Pulled::Ended(end.clone());
+            }
+            match self.events.front() {
+                None if self.trailing_quiet => match self.cursor {
+                    Some(due) if now >= due => self.ended = Some(LegEnd::CleanEof),
+                    Some(due) => return Pulled::Blocked(Some(due)),
+                    None => return Pulled::Blocked(None),
+                },
+                None => return Pulled::Blocked(None),
+                Some(LegEvent::Quiet(span)) => {
+                    let span = *span;
+                    let Some(cursor) = self.cursor else {
+                        return Pulled::Blocked(None);
+                    };
+                    self.cursor = Some(cursor + span);
+                    self.events.pop_front();
+                    self.trailing_quiet = self.events.is_empty();
+                }
+                Some(_) => {
+                    if let Some(cursor) = self.cursor
+                        && now < cursor
+                    {
+                        return Pulled::Blocked(Some(cursor));
+                    }
+                    let delivered_at = self.cursor.unwrap_or(now);
+                    let Some(event) = self.events.pop_front() else {
+                        return Pulled::Blocked(None);
+                    };
+                    match event {
+                        LegEvent::Octets(octets) => {
+                            if self.buffer.is_empty() {
+                                self.started_at = Some(delivered_at);
+                            }
+                            self.buffer.extend_from_slice(&octets);
+                            return Pulled::Octets;
+                        }
+                        LegEvent::KeyUpdate { answer_fails: Some(error), .. } => {
+                            self.ended = Some(LegEnd::KeyUpdate(error));
+                        }
+                        LegEvent::KeyUpdate { answer_fails: None, .. }
+                        | LegEvent::NewSessionTicket
+                        | LegEvent::Quiet(_) => {}
+                        LegEvent::CloseNotify => self.ended = Some(LegEnd::CleanEof),
+                        LegEvent::Alert { description } => {
+                            self.ended = Some(LegEnd::Alert(description));
+                        }
+                        LegEvent::UnexpectedRecord { content_type } => {
+                            self.ended = Some(LegEnd::Unexpected(content_type));
+                        }
+                        LegEvent::Reset => self.ended = Some(LegEnd::Reset),
+                    }
+                }
+            }
+        }
+    }
+
+    fn release_pipe(&mut self) {
+        self.pipe = self.pipe.released();
+    }
+}
+
+struct LegShared {
+    id: SimLegId,
+    role: LegRole,
+    clock: Arc<dyn Clock>,
+    wake: Notify,
+    state: Mutex<LegState>,
+}
+
+/// Aborts the helper task when the waiting future is dropped.
+struct AbortOnDrop(tokio::task::AbortHandle);
+
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+/// What an attempt to take octets from a leg produced.
+enum Taken {
+    Octets(Vec<u8>),
+    Ended(LegEnd),
+    Blocked(Option<Instant>),
+}
+
+impl LegShared {
+    fn new(
+        id: SimLegId,
+        role: LegRole,
+        clock: Arc<dyn Clock>,
+        script: LegScript,
+        cursor: Option<Instant>,
+        socket: Option<OwnedFd>,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            id,
+            role,
+            clock,
+            wake: Notify::new(),
+            state: Mutex::new(LegState {
+                events: script.events.into(),
+                cursor,
+                buffer: Vec::new(),
+                started_at: None,
+                ended: None,
+                trailing_quiet: false,
+                send_window: script.send_window,
+                sent: 0,
+                pipe_failure: script.pipe_failure,
+                pipe: PipeLife::Never,
+                written: Vec::new(),
+                calls: Vec::new(),
+                close_notify_sent: false,
+                halves_alive: 2,
+                closed: false,
+                socket,
+            }),
+        })
+    }
+
+    fn transcript(&self) -> LegTranscript {
+        let state = self.state.lock();
+        LegTranscript {
+            id: self.id,
+            role: self.role,
+            written: state.written.clone(),
+            calls: state.calls.clone(),
+            close_notify_sent: state.close_notify_sent,
+            closed: state.closed,
+            pipe_created: state.pipe != PipeLife::Never,
+        }
+    }
+
+    fn record(&self, call: RelayCall) {
+        self.state.lock().calls.push(call);
+    }
+
+    /// One half was dropped; the leg closes with its second half.
+    fn half_dropped(&self, releases_pipe: bool) {
+        let mut state = self.state.lock();
+        if releases_pipe {
+            state.release_pipe();
+        }
+        state.halves_alive = state.halves_alive.saturating_sub(1);
+        if state.halves_alive == 0 {
+            state.closed = true;
+            state.pipe = state.pipe.released();
+            drop(state.socket.take());
+        }
+    }
+
+    /// Park until `until` on the injected clock or until the leg is woken. The
+    /// clock wait runs in its own task so concurrent waits of one task never
+    /// share a clock waker.
+    async fn park(&self, until: Instant) {
+        if until.saturating_duration_since(self.clock.now()).is_zero() {
+            return;
+        }
+        let clock = Arc::clone(&self.clock);
+        let mut sleeper = tokio::spawn(async move {
+            let remaining = until.saturating_duration_since(clock.now());
+            clock.sleep(remaining).await;
+        });
+        let _abort = AbortOnDrop(sleeper.abort_handle());
+        tokio::select! {
+            () = self.wake.notified() => {}
+            _ = &mut sleeper => {}
+        }
+    }
+
+    /// Wait on the injected clock alone until `until`.
+    async fn sleep_until(&self, until: Instant) {
+        let clock = Arc::clone(&self.clock);
+        let remaining = until.saturating_duration_since(clock.now());
+        let _ = tokio::spawn(async move { clock.sleep(remaining).await }).await;
+    }
+
+    /// Take up to `max` inbound octets, buffered ones first.
+    fn take(&self, max: usize) -> Taken {
+        let now = self.clock.now();
+        let mut state = self.state.lock();
+        loop {
+            if !state.buffer.is_empty() {
+                let count = max.min(state.buffer.len());
+                let octets: Vec<u8> = state.buffer.drain(..count).collect();
+                state.started_at = (!state.buffer.is_empty()).then_some(now);
+                return Taken::Octets(octets);
+            }
+            match state.pull(now) {
+                Pulled::Octets => {}
+                Pulled::Ended(end) => return Taken::Ended(end),
+                Pulled::Blocked(at) => return Taken::Blocked(at),
+            }
+        }
+    }
+
+    /// Put octets back at the front of the inbound buffer.
+    fn unread(&self, octets: &[u8]) {
+        let mut state = self.state.lock();
+        if state.buffer.is_empty() {
+            state.started_at = Some(state.cursor.unwrap_or_else(|| self.clock.now()));
+        }
+        state.buffer.splice(0..0, octets.iter().copied());
+    }
+
+    /// Append what the send window admits; returns the admitted count.
+    fn write_some(&self, bytes: &[u8]) -> Result<usize, LegWriteError> {
+        let mut state = self.state.lock();
+        match &state.ended {
+            Some(LegEnd::Reset) => return Err(LegWriteError::PeerClosed),
+            Some(LegEnd::Alert(description)) => {
+                return Err(LegWriteError::Alert { description: *description });
+            }
+            _ => {}
+        }
+        let room = state.send_window.map_or(usize::MAX, |window| window.saturating_sub(state.sent));
+        let admitted = bytes.len().min(room);
+        state.written.extend_from_slice(&bytes[..admitted]);
+        state.sent = state.sent.saturating_add(admitted);
+        drop(state);
+        Ok(admitted)
+    }
+
+    /// The first completed write anchors an upstream leg's script clock.
+    fn anchor(&self) {
+        let mut state = self.state.lock();
+        if state.cursor.is_none() {
+            state.cursor = Some(self.clock.now());
+            drop(state);
+            self.wake.notify_one();
+        }
+    }
+
+    fn create_pipe(&self) -> Result<(), RelayPipeError> {
+        let mut state = self.state.lock();
+        if let Some(error) = state.pipe_failure.clone() {
+            return Err(error);
+        }
+        state.pipe = PipeLife::Live;
+        drop(state);
+        Ok(())
+    }
+
+    async fn read_through(
+        &self,
+        terminator: HeadTerminator,
+        limit: NonZeroUsize,
+        deadlines: ReadDeadlines,
+    ) -> Result<ThroughBytes, LegReadError> {
+        let marker: &[u8] = match terminator {
+            HeadTerminator::HeaderBlockEnd => b"\r\n\r\n",
+            HeadTerminator::LineEnd => b"\r\n",
+        };
+        loop {
+            let now = self.clock.now();
+            let wake_at = {
+                let mut state = self.state.lock();
+                loop {
+                    let window = limit.get().min(state.buffer.len());
+                    if let Some(at) =
+                        state.buffer[..window].windows(marker.len()).position(|w| w == marker)
+                    {
+                        let end = at + marker.len();
+                        let taken: Vec<u8> = state.buffer.drain(..end).collect();
+                        state.started_at = (!state.buffer.is_empty()).then_some(now);
+                        return Ok(ThroughBytes::new(taken));
+                    }
+                    if state.buffer.len() >= limit.get() {
+                        return Err(LegReadError::LimitExceeded { limit: limit.get() });
+                    }
+                    match state.pull(now) {
+                        Pulled::Octets => {}
+                        Pulled::Ended(end) => {
+                            return Err(end.read_error(!state.buffer.is_empty()));
+                        }
+                        Pulled::Blocked(at) => break at,
+                    }
+                }
+            };
+            let deadline = {
+                let state = self.state.lock();
+                let by_item = match (state.started_at, deadlines.complete_within) {
+                    (Some(started), Some(within)) => Some(started + within),
+                    (Some(_), None) => None,
+                    (None, _) => Some(deadlines.first_octet),
+                };
+                drop(state);
+                [by_item, deadlines.complete_by].into_iter().flatten().min()
+            };
+            if let Some(deadline) = deadline
+                && now >= deadline
+            {
+                return Err(LegReadError::Deadline);
+            }
+            let until = [wake_at, deadline].into_iter().flatten().min();
+            match until {
+                Some(until) => self.park(until).await,
+                None => self.wake.notified().await,
+            }
+        }
+    }
+
+    async fn write_all(&self, bytes: &[u8], deadline: Instant) -> Result<(), LegWriteError> {
+        let mut rest = bytes;
+        loop {
+            let admitted = self.write_some(rest)?;
+            rest = &rest[admitted..];
+            if rest.is_empty() {
+                self.anchor();
+                return Ok(());
+            }
+            if self.clock.now() >= deadline {
+                return Err(LegWriteError::Deadline);
+            }
+            self.sleep_until(deadline).await;
+        }
+    }
+
+    /// The deadline check of a relay or discard loop: `Err(true)` when the
+    /// absolute deadline elapsed, `Err(false)` when the no-progress window did.
+    fn relay_expiry(
+        &self,
+        deadlines: &RelayDeadlines,
+        last_progress: Instant,
+    ) -> Result<Instant, bool> {
+        let now = self.clock.now();
+        if now >= deadlines.absolute {
+            return Err(true);
+        }
+        let idle_until = last_progress + deadlines.no_progress;
+        if now >= idle_until {
+            return Err(false);
+        }
+        Ok(deadlines.absolute.min(idle_until))
+    }
+}
+
+/// The receive half of a Sim leg.
+struct SimReadHalf {
+    leg: Arc<LegShared>,
+}
+
+impl Drop for SimReadHalf {
+    fn drop(&mut self) {
+        self.leg.half_dropped(true);
+    }
+}
+
+/// The transmit half of a Sim leg.
+struct SimWriteHalf {
+    leg: Arc<LegShared>,
+}
+
+impl Drop for SimWriteHalf {
+    fn drop(&mut self) {
+        self.leg.half_dropped(false);
+    }
+}
+
+#[derive(Default)]
+struct RelayState {
+    lie: Option<SubstrateLie>,
+    probe_calls: u32,
+    public_queue: VecDeque<PublicLegScript>,
+    upstream_queue: VecDeque<LegScript>,
+    public_arm_failure: Option<KtlsArmError>,
+    upstream_arm_failure: Option<KtlsArmError>,
+    legs: Vec<Arc<LegShared>>,
+}
+
 /// The Sim `GatewayRelay`: in-memory leg state on the injected clock.
 pub struct SimGatewayRelay {
     clock: Arc<dyn Clock>,
+    state: Mutex<RelayState>,
 }
 
 impl SimGatewayRelay {
     pub fn new(clock: Arc<dyn Clock>) -> Self {
-        todo!("SCAFFOLD: SimGatewayRelay::new")
+        Self { clock, state: Mutex::new(RelayState::default()) }
     }
 
     /// Show `lie` to the next probes; `None` is the honest substrate.
     pub fn present_substrate(&self, lie: Option<SubstrateLie>) {
-        todo!("SCAFFOLD: SimGatewayRelay::present_substrate")
+        self.state.lock().lie = lie;
     }
 
     /// Queue one public connection for the next `accept_public` (FIFO).
     pub fn script_public_connection(&self, script: PublicLegScript) {
-        todo!("SCAFFOLD: SimGatewayRelay::script_public_connection")
+        self.state.lock().public_queue.push_back(script);
     }
 
     /// Queue the script the next minted upstream leg plays (FIFO).
     pub fn script_upstream_leg(&self, script: LegScript) {
-        todo!("SCAFFOLD: SimGatewayRelay::script_upstream_leg")
+        self.state.lock().upstream_queue.push_back(script);
     }
 
     /// The next `accept_public` arms nothing and fails `Arm(kind)`.
     pub fn fail_next_public_arm(&self, kind: KtlsArmError) {
-        todo!("SCAFFOLD: SimGatewayRelay::fail_next_public_arm")
+        self.state.lock().public_arm_failure = Some(kind);
     }
 
     /// The next upstream arm (after the exact-peer equality) fails with `kind`.
     pub fn fail_next_upstream_arm(&self, kind: KtlsArmError) {
-        todo!("SCAFFOLD: SimGatewayRelay::fail_next_upstream_arm")
+        self.state.lock().upstream_arm_failure = Some(kind);
     }
 
     /// The same-backend arm of an authenticated upstream socket: what
@@ -314,34 +780,95 @@ impl SimGatewayRelay {
         connected: OwnedFd,
         expected_peer: &SpiffeId,
     ) -> Result<KtlsLeg, KtlsArmError> {
-        todo!("SCAFFOLD: SimGatewayRelay::arm_upstream_leg")
+        let mut state = self.state.lock();
+        if let Some(kind) = state.upstream_arm_failure.take() {
+            return Err(kind);
+        }
+        // An unscripted origin ends the connection at once.
+        let script =
+            state.upstream_queue.pop_front().unwrap_or_else(|| LegScript::new().close_notify());
+        let leg = LegShared::new(
+            SimLegId(state.legs.len() as u64),
+            LegRole::Upstream,
+            Arc::clone(&self.clock),
+            script,
+            None,
+            Some(connected),
+        );
+        state.legs.push(Arc::clone(&leg));
+        drop(state);
+        Ok(Self::armed(&leg))
+    }
+
+    fn armed(leg: &Arc<LegShared>) -> KtlsLeg {
+        KtlsLeg::from_armed(
+            Box::new(SimReadHalf { leg: Arc::clone(leg) }),
+            Box::new(SimWriteHalf { leg: Arc::clone(leg) }),
+        )
     }
 
     /// Number of `probe` calls received.
     pub fn probe_calls(&self) -> u32 {
-        todo!("SCAFFOLD: SimGatewayRelay::probe_calls")
+        self.state.lock().probe_calls
     }
 
     /// Transcript of every leg handed out, in creation order.
     pub fn leg_transcripts(&self) -> Vec<LegTranscript> {
-        todo!("SCAFFOLD: SimGatewayRelay::leg_transcripts")
+        let legs: Vec<Arc<LegShared>> = self.state.lock().legs.clone();
+        legs.iter().map(|leg| leg.transcript()).collect()
     }
 
     /// Legs not yet closed (residue check).
     pub fn live_leg_count(&self) -> usize {
-        todo!("SCAFFOLD: SimGatewayRelay::live_leg_count")
+        let legs: Vec<Arc<LegShared>> = self.state.lock().legs.clone();
+        legs.iter().filter(|leg| !leg.state.lock().closed).count()
     }
 
     /// Pipes created and not yet released (residue check).
     pub fn live_pipe_count(&self) -> usize {
-        todo!("SCAFFOLD: SimGatewayRelay::live_pipe_count")
+        let legs: Vec<Arc<LegShared>> = self.state.lock().legs.clone();
+        legs.iter().filter(|leg| leg.state.lock().pipe == PipeLife::Live).count()
+    }
+}
+
+fn leg_of_read(half: &mut KtlsReadHalf) -> Arc<LegShared> {
+    Arc::clone(&half.backend_mut::<SimReadHalf>().leg)
+}
+
+fn leg_of_write(half: &mut KtlsWriteHalf) -> Arc<LegShared> {
+    Arc::clone(&half.backend_mut::<SimWriteHalf>().leg)
+}
+
+/// The relay error of a source that ended while `owed` octets were still due.
+fn source_ended(end: &LegEnd, owed: u64) -> RelayError {
+    match end {
+        LegEnd::CleanEof => RelayError::SourceEndedMidBody { remaining: owed },
+        other => RelayError::Read(other.read_error(false)),
     }
 }
 
 #[async_trait]
 impl GatewayRelay for SimGatewayRelay {
     async fn probe(&self, deadline: Instant) -> Result<(), RelayProbeError> {
-        todo!("SCAFFOLD: SimGatewayRelay::probe")
+        let mut state = self.state.lock();
+        state.probe_calls += 1;
+        match state.lie.clone() {
+            None => Ok(()),
+            Some(SubstrateLie::UlpAbsent) => {
+                Err(RelayProbeError::Arm(KtlsArmError::UlpInstall { errno: libc::ENOENT }))
+            }
+            Some(SubstrateLie::CipherRefused) => {
+                Err(RelayProbeError::Arm(KtlsArmError::CipherNotSupported))
+            }
+            Some(SubstrateLie::SpliceInexact { moved, expected }) => {
+                Err(RelayProbeError::SpliceExactness { moved, expected })
+            }
+            Some(SubstrateLie::PipeClamped { got }) => {
+                Err(RelayProbeError::Pipe(RelayPipeError::CapacityBelowFloor { got }))
+            }
+            Some(SubstrateLie::ProbeTimeout) => Err(RelayProbeError::Timeout),
+            Some(SubstrateLie::ProbeIo { kind }) => Err(RelayProbeError::Io { kind }),
+        }
     }
 
     async fn accept_public(
@@ -350,7 +877,24 @@ impl GatewayRelay for SimGatewayRelay {
         tls: Arc<rustls::ServerConfig>,
         deadline: Instant,
     ) -> Result<AcceptedPublicLeg, PublicHandshakeError> {
-        todo!("SCAFFOLD: SimGatewayRelay::accept_public")
+        let mut state = self.state.lock();
+        if let Some(kind) = state.public_arm_failure.take() {
+            return Err(PublicHandshakeError::Arm(kind));
+        }
+        let Some(script) = state.public_queue.pop_front() else {
+            return Err(PublicHandshakeError::Tls { alert: None });
+        };
+        let leg = LegShared::new(
+            SimLegId(state.legs.len() as u64),
+            LegRole::Public,
+            Arc::clone(&self.clock),
+            script.inbound,
+            Some(self.clock.now()),
+            Some(accepted),
+        );
+        state.legs.push(Arc::clone(&leg));
+        drop(state);
+        Ok(AcceptedPublicLeg { leg: Self::armed(&leg), sni: script.sni })
     }
 
     async fn read_through(
@@ -360,7 +904,12 @@ impl GatewayRelay for SimGatewayRelay {
         limit: NonZeroUsize,
         deadlines: ReadDeadlines,
     ) -> Result<ThroughBytes, LegReadError> {
-        todo!("SCAFFOLD: SimGatewayRelay::read_through")
+        let leg = leg_of_read(from);
+        leg.record(RelayCall::ReadThrough);
+        if terminator == HeadTerminator::HeaderBlockEnd {
+            leg.state.lock().release_pipe();
+        }
+        leg.read_through(terminator, limit, deadlines).await
     }
 
     async fn write_all(
@@ -369,7 +918,9 @@ impl GatewayRelay for SimGatewayRelay {
         bytes: &[u8],
         deadline: Instant,
     ) -> Result<(), LegWriteError> {
-        todo!("SCAFFOLD: SimGatewayRelay::write_all")
+        let leg = leg_of_write(to);
+        leg.record(RelayCall::WriteAll);
+        leg.write_all(bytes, deadline).await
     }
 
     async fn relay_exact(
@@ -379,7 +930,41 @@ impl GatewayRelay for SimGatewayRelay {
         len: NonZeroU64,
         deadlines: RelayDeadlines,
     ) -> Result<(), RelayError> {
-        todo!("SCAFFOLD: SimGatewayRelay::relay_exact")
+        let source = leg_of_read(from);
+        let sink = leg_of_write(to);
+        source.record(RelayCall::RelayExact);
+        source.create_pipe().map_err(RelayError::Pipe)?;
+        let mut owed = len.get();
+        let mut last_progress = self.clock.now();
+        loop {
+            let max = usize::try_from(owed).unwrap_or(usize::MAX).min(PIPE_STEP);
+            let wake_at = match source.take(max) {
+                Taken::Octets(octets) => {
+                    let admitted = sink.write_some(&octets).map_err(RelayError::Write)?;
+                    if admitted < octets.len() {
+                        source.unread(&octets[admitted..]);
+                    }
+                    if admitted > 0 {
+                        owed -= admitted as u64;
+                        last_progress = self.clock.now();
+                        if owed == 0 {
+                            return Ok(());
+                        }
+                        if admitted == PIPE_STEP {
+                            tokio::task::yield_now().await;
+                        }
+                        continue;
+                    }
+                    None
+                }
+                Taken::Ended(end) => return Err(source_ended(&end, owed)),
+                Taken::Blocked(at) => at,
+            };
+            let limit = source.relay_expiry(&deadlines, last_progress).map_err(|absolute| {
+                if absolute { RelayError::Deadline } else { RelayError::NoProgress }
+            })?;
+            source.park(wake_at.map_or(limit, |at| at.min(limit))).await;
+        }
     }
 
     async fn relay_to_end(
@@ -389,7 +974,43 @@ impl GatewayRelay for SimGatewayRelay {
         max: NonZeroU64,
         deadlines: RelayDeadlines,
     ) -> Result<u64, RelayError> {
-        todo!("SCAFFOLD: SimGatewayRelay::relay_to_end")
+        let source = leg_of_read(from);
+        let sink = leg_of_write(to);
+        source.record(RelayCall::RelayToEnd);
+        source.create_pipe().map_err(RelayError::Pipe)?;
+        let mut moved: u64 = 0;
+        let mut last_progress = self.clock.now();
+        loop {
+            let room = max.get() - moved;
+            let step = usize::try_from(room.max(1)).unwrap_or(usize::MAX).min(PIPE_STEP);
+            let wake_at = match source.take(step) {
+                Taken::Octets(octets) => {
+                    if room == 0 {
+                        return Err(RelayError::LimitExceeded { max: max.get() });
+                    }
+                    let admitted = sink.write_some(&octets).map_err(RelayError::Write)?;
+                    if admitted < octets.len() {
+                        source.unread(&octets[admitted..]);
+                    }
+                    if admitted > 0 {
+                        moved += admitted as u64;
+                        last_progress = self.clock.now();
+                        if admitted == PIPE_STEP {
+                            tokio::task::yield_now().await;
+                        }
+                        continue;
+                    }
+                    None
+                }
+                Taken::Ended(LegEnd::CleanEof) => return Ok(moved),
+                Taken::Ended(end) => return Err(RelayError::Read(end.read_error(false))),
+                Taken::Blocked(at) => at,
+            };
+            let limit = source.relay_expiry(&deadlines, last_progress).map_err(|absolute| {
+                if absolute { RelayError::Deadline } else { RelayError::NoProgress }
+            })?;
+            source.park(wake_at.map_or(limit, |at| at.min(limit))).await;
+        }
     }
 
     async fn close_write(
@@ -397,7 +1018,10 @@ impl GatewayRelay for SimGatewayRelay {
         to: &mut KtlsWriteHalf,
         deadline: Instant,
     ) -> Result<(), LegWriteError> {
-        todo!("SCAFFOLD: SimGatewayRelay::close_write")
+        let leg = leg_of_write(to);
+        leg.record(RelayCall::CloseWrite);
+        leg.state.lock().close_notify_sent = true;
+        Ok(())
     }
 
     async fn discard_remaining(
@@ -406,7 +1030,28 @@ impl GatewayRelay for SimGatewayRelay {
         max: NonZeroU64,
         deadlines: RelayDeadlines,
     ) -> Result<(), LegReadError> {
-        todo!("SCAFFOLD: SimGatewayRelay::discard_remaining")
+        let leg = leg_of_read(from);
+        leg.record(RelayCall::DiscardRemaining);
+        let mut discarded: u64 = 0;
+        let mut last_progress = self.clock.now();
+        loop {
+            let wake_at = match leg.take(usize::MAX) {
+                Taken::Octets(octets) => {
+                    discarded += octets.len() as u64;
+                    last_progress = self.clock.now();
+                    if discarded >= max.get() {
+                        return Ok(());
+                    }
+                    continue;
+                }
+                Taken::Ended(LegEnd::CleanEof) => return Ok(()),
+                Taken::Ended(end) => return Err(end.read_error(false)),
+                Taken::Blocked(at) => at,
+            };
+            let limit =
+                leg.relay_expiry(&deadlines, last_progress).map_err(|_| LegReadError::Deadline)?;
+            leg.park(wake_at.map_or(limit, |at| at.min(limit))).await;
+        }
     }
 }
 
@@ -651,7 +1296,11 @@ impl GatewayConnectDataplane for SimGatewayConnectDataplane {
 /// `authenticate` returns a `GatewayUpstream` only after the scripted peer
 /// equals `expected_peer`; otherwise the exact mismatch error.
 pub struct SimGatewayClientMtls {
+    seal: GatewayUpstreamSeal,
     relay: Arc<SimGatewayRelay>,
+    clock: Arc<dyn Clock>,
+    peer: Mutex<Option<SpiffeId>>,
+    hold: Option<SimConnectHold>,
 }
 
 impl SimGatewayClientMtls {
@@ -660,19 +1309,20 @@ impl SimGatewayClientMtls {
         relay: Arc<SimGatewayRelay>,
         clock: Arc<dyn Clock>,
     ) -> Self {
-        todo!("SCAFFOLD: SimGatewayClientMtls::new")
+        Self { seal, relay, clock, peer: Mutex::new(None), hold: None }
     }
 
     /// The identity the scripted peer presents.
     pub fn set_peer(&self, peer: SpiffeId) {
-        todo!("SCAFFOLD: SimGatewayClientMtls::set_peer")
+        *self.peer.lock() = Some(peer);
     }
 
     /// Share the connect-probe hold with a [`SimGatewayConnectDataplane`]
     /// (test support, DG-9).
     #[must_use]
-    pub fn with_hold(self, hold: SimConnectHold) -> Self {
-        todo!("SCAFFOLD: SimGatewayClientMtls::with_hold")
+    pub fn with_hold(mut self, hold: SimConnectHold) -> Self {
+        self.hold = Some(hold);
+        self
     }
 }
 
@@ -684,7 +1334,21 @@ impl GatewayClientMtls for SimGatewayClientMtls {
         expected_peer: SpiffeId,
         deadline: Instant,
     ) -> Result<GatewayUpstream, GatewayClientMtlsError> {
-        todo!("SCAFFOLD: SimGatewayClientMtls::authenticate")
+        let presented = self.peer.lock().clone();
+        let Some(actual) = presented else {
+            return Err(GatewayClientMtlsError::PeerCertificateMissing);
+        };
+        if actual != expected_peer {
+            return Err(GatewayClientMtlsError::PeerSpiffeMismatch {
+                expected: expected_peer,
+                actual,
+            });
+        }
+        let leg = self
+            .relay
+            .arm_upstream_leg(connected, &expected_peer)
+            .map_err(GatewayClientMtlsError::Arm)?;
+        Ok(self.seal.seal_authenticated(leg))
     }
 }
 
@@ -692,32 +1356,53 @@ impl GatewayClientMtls for SimGatewayClientMtls {
 // Gateway identity doubles
 // ---------------------------------------------------------------------------
 
+struct IdentityState {
+    desired: GatewayIdentityDesired,
+    held: Option<SvidMaterial>,
+    issue: Option<GatewayIdentityIssueRecord>,
+}
+
 /// The Sim gateway identity target: epoch and current facts only, under one
 /// mutex-held deterministic state. Its current projection never contains key
 /// material.
 pub struct SimGatewayIdentityActionTarget {
-    _private: (),
+    state: Mutex<IdentityState>,
+    facts: watch::Sender<Option<GatewayIdentityFacts>>,
 }
 
 impl SimGatewayIdentityActionTarget {
     pub fn new(desired: GatewayIdentityDesired) -> Self {
-        todo!("SCAFFOLD: SimGatewayIdentityActionTarget::new")
+        let (facts, _initial) = watch::channel(None);
+        Self { state: Mutex::new(IdentityState { desired, held: None, issue: None }), facts }
     }
 
     pub fn current(&self) -> Option<GatewayIdentityFacts> {
-        todo!("SCAFFOLD: SimGatewayIdentityActionTarget::current")
+        self.facts.borrow().clone()
     }
 
     pub fn issue_record(&self) -> Option<GatewayIdentityIssueRecord> {
-        todo!("SCAFFOLD: SimGatewayIdentityActionTarget::issue_record")
+        self.state.lock().issue
     }
 
     pub fn subscribe(&self) -> watch::Receiver<Option<GatewayIdentityFacts>> {
-        todo!("SCAFFOLD: SimGatewayIdentityActionTarget::subscribe")
+        self.facts.subscribe()
     }
 
     pub fn begin_disable(&self) -> GatewayIdentityEpoch {
-        todo!("SCAFFOLD: SimGatewayIdentityActionTarget::begin_disable")
+        let mut state = self.state.lock();
+        let next = state
+            .desired
+            .epoch
+            .get()
+            .checked_add(1)
+            .unwrap_or_else(|| unreachable!("a u64 epoch cannot be exhausted by disables"));
+        let epoch = GatewayIdentityEpoch::new(next.get())
+            .unwrap_or_else(|_| unreachable!("a checked add of a nonzero epoch is nonzero"));
+        state.desired = GatewayIdentityDesired { epoch, spiffe_id: None };
+        state.held = None;
+        self.facts.send_replace(None);
+        drop(state);
+        epoch
     }
 }
 
@@ -727,39 +1412,56 @@ impl GatewayIdentityActionTarget for SimGatewayIdentityActionTarget {
         epoch: GatewayIdentityEpoch,
         material: SvidMaterial,
     ) -> GatewayIdentityMutationOutcome {
-        todo!("SCAFFOLD: SimGatewayIdentityActionTarget::hold_audited")
+        let mut state = self.state.lock();
+        if epoch != state.desired.epoch {
+            return GatewayIdentityMutationOutcome::StaleEpoch;
+        }
+        let facts = GatewayIdentityFacts {
+            epoch,
+            spiffe_id: material.spiffe_id().clone(),
+            serial: material.serial().clone(),
+            not_after: material.not_after(),
+        };
+        state.held = Some(material);
+        self.facts.send_replace(Some(facts));
+        drop(state);
+        GatewayIdentityMutationOutcome::Applied
     }
 
     fn record_issue_failure(&self, failure: SvidIssueFailure) {
-        todo!("SCAFFOLD: SimGatewayIdentityActionTarget::record_issue_failure")
+        let mut state = self.state.lock();
+        let count = state.issue.map_or(NonZeroU64::MIN, |record| record.count.saturating_add(1));
+        state.issue = Some(GatewayIdentityIssueRecord { count, last: failure });
+        self.facts.send_modify(|_| {});
+        drop(state);
     }
 }
 
 impl GatewayIdentityLifecycleTarget for SimGatewayIdentityActionTarget {
     fn current(&self) -> Option<GatewayIdentityFacts> {
-        todo!("SCAFFOLD: SimGatewayIdentityActionTarget::current (lifecycle)")
+        Self::current(self)
     }
 
     fn issue_record(&self) -> Option<GatewayIdentityIssueRecord> {
-        todo!("SCAFFOLD: SimGatewayIdentityActionTarget::issue_record (lifecycle)")
+        Self::issue_record(self)
     }
 
     fn subscribe(&self) -> watch::Receiver<Option<GatewayIdentityFacts>> {
-        todo!("SCAFFOLD: SimGatewayIdentityActionTarget::subscribe (lifecycle)")
+        Self::subscribe(self)
     }
 
     fn begin_disable(&self) -> GatewayIdentityEpoch {
-        todo!("SCAFFOLD: SimGatewayIdentityActionTarget::begin_disable (lifecycle)")
+        Self::begin_disable(self)
     }
 }
 
 impl GatewayIdentityView for SimGatewayIdentityActionTarget {
     fn desired(&self) -> GatewayIdentityDesired {
-        todo!("SCAFFOLD: SimGatewayIdentityActionTarget::desired")
+        self.state.lock().desired.clone()
     }
 
     fn current(&self) -> Option<GatewayIdentityFacts> {
-        todo!("SCAFFOLD: SimGatewayIdentityActionTarget::current (view)")
+        Self::current(self)
     }
 }
 
@@ -785,7 +1487,13 @@ impl SimGatewayIdentityLifecycleControl {
         evaluation: Evaluation,
         clock: Arc<dyn Clock>,
     ) -> Self {
-        todo!("SCAFFOLD: SimGatewayIdentityLifecycleControl::new")
+        Self { target, broker, evaluation, clock }
+    }
+
+    /// The held facts when they are still time-usable at the injected clock.
+    fn usable_current(&self) -> Option<GatewayIdentityFacts> {
+        let now = UnixInstant::from_clock(self.clock.as_ref());
+        self.target.current().filter(|facts| facts.not_after > now)
     }
 }
 
@@ -795,23 +1503,45 @@ impl GatewayIdentityLifecycleControl for SimGatewayIdentityLifecycleControl {
         &self,
         deadline: Instant,
     ) -> Result<GatewayIdentityFacts, GatewayIdentityLifecycleError> {
-        todo!("SCAFFOLD: SimGatewayIdentityLifecycleControl::ensure_current")
+        let mut receiver = self.target.subscribe();
+        self.broker.lock().submit(
+            self.evaluation.clone(),
+            self.clock.now(),
+            EvaluationEligibility::Immediate,
+        );
+        if let Some(facts) = self.usable_current() {
+            return Ok(facts);
+        }
+        let remaining = deadline.saturating_duration_since(self.clock.now());
+        let timeout = self.clock.sleep(remaining);
+        tokio::pin!(timeout);
+        loop {
+            tokio::select! {
+                changed = receiver.changed() => {
+                    changed.map_err(|_| GatewayIdentityLifecycleError::Closed)?;
+                    if let Some(facts) = self.usable_current() {
+                        return Ok(facts);
+                    }
+                }
+                () = &mut timeout => return Err(GatewayIdentityLifecycleError::Timeout),
+            }
+        }
     }
 
     fn current(&self) -> Option<GatewayIdentityFacts> {
-        todo!("SCAFFOLD: SimGatewayIdentityLifecycleControl::current")
+        self.target.current()
     }
 
     fn issue_record(&self) -> Option<GatewayIdentityIssueRecord> {
-        todo!("SCAFFOLD: SimGatewayIdentityLifecycleControl::issue_record")
+        self.target.issue_record()
     }
 
     fn subscribe(&self) -> watch::Receiver<Option<GatewayIdentityFacts>> {
-        todo!("SCAFFOLD: SimGatewayIdentityLifecycleControl::subscribe")
+        self.target.subscribe()
     }
 
     fn disable_after_drain(&self) {
-        todo!("SCAFFOLD: SimGatewayIdentityLifecycleControl::disable_after_drain")
+        let _disabled_epoch = self.target.begin_disable();
     }
 }
 

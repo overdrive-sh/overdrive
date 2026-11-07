@@ -6,8 +6,9 @@
 //! and the accept loop belong to later steps and stay scaffolded.
 
 use std::collections::BTreeMap;
-use std::net::SocketAddrV4;
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::num::NonZeroU32;
+use std::os::fd::OwnedFd;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
@@ -30,7 +31,7 @@ use overdrive_core::wall_clock::UnixInstant;
 use overdrive_host::ca::PublicCertifiedKeyAeadCodec;
 use thiserror::Error;
 use tokio::net::TcpListener;
-use tokio::sync::{Notify, mpsc, oneshot};
+use tokio::sync::{Notify, mpsc, oneshot, watch};
 use tokio::task::{JoinHandle, JoinSet};
 use tokio_util::sync::CancellationToken;
 
@@ -51,6 +52,7 @@ use crate::route_set::{
     PublicRouteSetError, PublicRouteSetHandle, PublicRouteSetOwner, ROUTE_SET_KEY,
 };
 use crate::runtime::GatewayLimits;
+use crate::runtime::exchange::{ConnectionServices, DrainSignal, serve_connection};
 use crate::{GatewayConfig, GatewayConfigError};
 
 #[cfg(all(test, feature = "integration-tests"))]
@@ -239,23 +241,30 @@ impl GatewayBuilder {
             dataplane,
             client_mtls,
             identity_lifecycle,
-            relay: _relay,
+            relay,
         } = dependencies;
+        let limits = Arc::new(limits);
         let ledger = GatewayCleanupLedger::new(limits.max_cleanup_ledger_entries());
         let connector = Arc::new(GatewayUpstreamConnector::new(
             Arc::clone(&dataplane),
             client_mtls,
-            limits.clone(),
+            (*limits).clone(),
             Arc::clone(&clock),
             Arc::clone(admission.budget()),
             Arc::clone(&ledger),
         ));
         let cleanup: Arc<dyn GatewayConnectCleanup> = dataplane.clone();
-
         let owners = OwnerShutdowns::new();
-        let (listener, listener_task) = GatewayListenerControl::spawn(owners.listener.clone());
+        let services = ConnectionServices {
+            relay,
+            connector: Arc::clone(&connector),
+            clock: Arc::clone(&clock),
+            limits: Arc::clone(&limits),
+        };
+        let (connections, connections_task, listener, listener_task) =
+            Self::spawn_connection_owner(services, &owners);
         let (command_sender, commands) = mpsc::channel(APPLICATION_COMMAND_CAPACITY);
-        let owner = GatewayApplicationOwner {
+        let owner = GatewayApplicationOwner::fresh(OwnerWiring {
             node_id: node_id.clone(),
             intent,
             certified_key: custody_handle.clone(),
@@ -263,27 +272,15 @@ impl GatewayBuilder {
             identity: Arc::clone(&identity_lifecycle),
             connector,
             dataplane,
-            connect_proven: Arc::new(AtomicBool::new(false)),
             admission,
             listener,
             observations: Arc::clone(&observations),
             clock: Arc::clone(&clock),
-            limits: Arc::new(limits),
+            limits,
             bind: config.bind(),
             commands,
             shutdown: owners.application.clone(),
-            owner_wake: Arc::new(Notify::new()),
-            staged: None,
-            current: None,
-            draining: BTreeMap::new(),
-            failed: None,
-            unavailable: None,
-            connect_ready: false,
-            next_token: 0,
-            gates: JoinSet::new(),
-            route_seen: false,
-            status: StatusWriter::default(),
-        };
+        });
         let application = tokio::spawn(owner.run());
         let (manual_source, custody_task, route_set) = Self::spawn_supporting_owners(
             SupportingOwners { manual, custody, route_owner },
@@ -295,6 +292,7 @@ impl GatewayBuilder {
         let handle = GatewayHandle {
             tasks: GatewayTaskTree {
                 listener: Some(listener_task),
+                connections: Some(connections_task),
                 application,
                 manual_source,
                 custody: custody_task,
@@ -305,6 +303,7 @@ impl GatewayBuilder {
                     commands: command_sender,
                     clock: Arc::clone(&clock),
                 },
+                connections,
                 cleanup,
                 cleanup_ledger: ledger,
                 identity: identity_lifecycle,
@@ -321,6 +320,40 @@ impl GatewayBuilder {
                 certified_key_id: custody_handle.id().clone(),
             },
         }
+    }
+
+    /// The connections owner task with its shutdown capabilities, and the
+    /// listener owner task that hands it accepted connections.
+    fn spawn_connection_owner(
+        services: ConnectionServices,
+        owners: &OwnerShutdowns,
+    ) -> (GatewayConnectionOwnerHandle, OwnerTask, GatewayListenerControl, OwnerTask) {
+        let backlog = usize::try_from(services.limits.max_public_connections().get())
+            .unwrap_or(CONNECTION_BACKLOG_CEILING)
+            .min(CONNECTION_BACKLOG_CEILING);
+        let (connection_sender, connection_messages) = mpsc::channel(backlog);
+        let (drain, drain_watch) = watch::channel(None);
+        let connections = GatewayConnectionOwnerHandle {
+            stop_accepting: owners.listener.clone(),
+            drain,
+            force: CancellationToken::new(),
+            drained: CancellationToken::new(),
+            aborted: Arc::new(AtomicU32::new(0)),
+        };
+        let tokens = ConnectionTokens {
+            shutdown: owners.connections.clone(),
+            drain: drain_watch,
+            force: connections.force.clone(),
+            drained: connections.drained.clone(),
+            aborted: Arc::clone(&connections.aborted),
+        };
+        let clock = Arc::clone(&services.clock);
+        let task = tokio::spawn(run_connections(Arc::new(services), connection_messages, tokens));
+        let (listener, listener_task) = GatewayListenerControl::spawn(
+            owners.listener.clone(),
+            AcceptPath { connections: connection_sender, clock },
+        );
+        (connections, task, listener, listener_task)
     }
 
     /// The manual-source, custody and Route Set owner tasks.
@@ -438,6 +471,7 @@ pub(crate) enum GatewayOwnerTaskError {
 /// tree with the accept loop.
 pub(crate) struct GatewayTaskTree {
     listener: Option<OwnerTask>,
+    connections: Option<OwnerTask>,
     application: OwnerTask,
     manual_source: OwnerTask,
     custody: OwnerTask,
@@ -472,6 +506,27 @@ impl GatewayTaskTree {
         Some(GatewayTaskFailure { task, cause })
     }
 
+    /// Joins the listener task: once it returned no further accept can take a
+    /// connection lease.
+    pub(crate) async fn join_listener(
+        &mut self,
+        deadline: Instant,
+        clock: &dyn Clock,
+    ) -> Option<GatewayTaskFailure> {
+        let handle = self.listener.take()?;
+        Self::join_one(handle, GatewayTaskName::Listener, deadline, clock).await
+    }
+
+    /// Joins the connections owner task.
+    pub(crate) async fn join_connections(
+        &mut self,
+        deadline: Instant,
+        clock: &dyn Clock,
+    ) -> Option<GatewayTaskFailure> {
+        let handle = self.connections.take()?;
+        Self::join_one(handle, GatewayTaskName::Connections, deadline, clock).await
+    }
+
     pub(crate) async fn join_remaining(
         self,
         deadline: Instant,
@@ -481,6 +536,7 @@ impl GatewayTaskTree {
         let ordered = [
             (Some(self.application), GatewayTaskName::Application),
             (self.listener, GatewayTaskName::Listener),
+            (self.connections, GatewayTaskName::Connections),
             (Some(self.manual_source), GatewayTaskName::ManualCertifiedKeySource),
             (Some(self.custody), GatewayTaskName::PublicCertifiedKeyCustody),
             (Some(self.route_set), GatewayTaskName::PublicRouteSet),
@@ -496,6 +552,7 @@ impl GatewayTaskTree {
 
 pub(crate) struct GatewayShutdownCapabilities {
     application: GatewayApplicationHandle,
+    connections: GatewayConnectionOwnerHandle,
     /// Cleanup sweep and live counts only (R-29): shutdown holds no handle
     /// that can prepare an upstream socket.
     cleanup: Arc<dyn GatewayConnectCleanup>,
@@ -507,6 +564,7 @@ pub(crate) struct GatewayShutdownCapabilities {
 
 /// One cancellation token per owner task.
 struct OwnerShutdowns {
+    connections: CancellationToken,
     application: CancellationToken,
     manual_source: CancellationToken,
     custody: CancellationToken,
@@ -517,6 +575,7 @@ struct OwnerShutdowns {
 impl OwnerShutdowns {
     fn new() -> Self {
         Self {
+            connections: CancellationToken::new(),
             application: CancellationToken::new(),
             manual_source: CancellationToken::new(),
             custody: CancellationToken::new(),
@@ -530,6 +589,7 @@ impl OwnerShutdowns {
     /// failure.
     fn cancel_all(&self) {
         self.listener.cancel();
+        self.connections.cancel();
         self.application.cancel();
         self.manual_source.cancel();
         self.custody.cancel();
@@ -547,7 +607,7 @@ impl GatewayHandle {
     /// intents and receipts, retire the closed application, cancel the owners
     /// and only then clear the volatile gateway identity.
     pub async fn shutdown(self, grace: Duration) -> GatewayShutdownReport {
-        let Self { tasks, shutdown: capabilities } = self;
+        let Self { mut tasks, shutdown: capabilities } = self;
         let clock = Arc::clone(&capabilities.clock);
         let started = clock.now();
         let deadline = started + grace;
@@ -561,7 +621,18 @@ impl GatewayHandle {
             residual_connect: None,
         };
 
-        match capabilities.application.close_for_shutdown(deadline).await {
+        capabilities.connections.stop_accepting();
+        report.task_failures.extend(tasks.join_listener(deadline, clock.as_ref()).await);
+        let closed = capabilities.application.close_for_shutdown(deadline).await;
+        match capabilities.connections.drain_then_force_join(deadline, clock.as_ref()).await {
+            Ok(aborted) => {
+                report.forced_connections = report.forced_connections.saturating_add(aborted);
+            }
+            Err(failure) => report.task_failures.push(failure),
+        }
+        capabilities.owners.connections.cancel();
+        report.task_failures.extend(tasks.join_connections(deadline, clock.as_ref()).await);
+        match closed {
             Ok(closed) => {
                 for retention in closed.retentions {
                     if let Err(timeout) = retention.wait_zero(deadline, clock.as_ref()).await {
@@ -730,21 +801,47 @@ pub enum GatewayBootError {
 // ---------------------------------------------------------------------------
 
 enum ListenerCommand {
-    Bind { address: SocketAddrV4, reply: oneshot::Sender<Result<(), std::io::Error>> },
-    Unbind { reply: oneshot::Sender<Result<(), std::io::Error>> },
+    Bind {
+        address: SocketAddrV4,
+        admission: Arc<GatewayAdmission>,
+        reply: oneshot::Sender<Result<(), std::io::Error>>,
+    },
+    Unbind {
+        reply: oneshot::Sender<Result<(), std::io::Error>>,
+    },
 }
 
-/// One listener command owner: the listener task owns the bound socket.
+/// What the listener task needs to hand an accepted connection on.
+struct AcceptPath {
+    connections: mpsc::Sender<AcceptedConnection>,
+    clock: Arc<dyn Clock>,
+}
+
+/// One admitted public connection on its way to the connections owner.
+struct AcceptedConnection {
+    socket: OwnedFd,
+    peer: Ipv4Addr,
+    lease: GatewayConnectionLease,
+}
+
+/// The bound socket and the admission it hands connections to.
+struct BoundListener {
+    socket: TcpListener,
+    admission: Arc<GatewayAdmission>,
+}
+
+/// One listener command owner: the listener task owns the bound socket and its
+/// accept loop.
 pub(crate) struct GatewayListenerControl {
     commands: mpsc::Sender<ListenerCommand>,
     bound: Arc<AtomicBool>,
 }
 
 impl GatewayListenerControl {
-    fn spawn(shutdown: CancellationToken) -> (Self, OwnerTask) {
+    fn spawn(shutdown: CancellationToken, accept: AcceptPath) -> (Self, OwnerTask) {
         let (commands, receiver) = mpsc::channel(APPLICATION_COMMAND_CAPACITY);
         let bound = Arc::new(AtomicBool::new(false));
-        let task = tokio::spawn(Self::run(receiver, Arc::clone(&bound), shutdown));
+        let task = tokio::spawn(Self::run(receiver, Arc::clone(&bound), shutdown, accept));
         (Self { commands, bound }, task)
     }
 
@@ -752,19 +849,30 @@ impl GatewayListenerControl {
         mut receiver: mpsc::Receiver<ListenerCommand>,
         bound: Arc<AtomicBool>,
         shutdown: CancellationToken,
+        accept: AcceptPath,
     ) -> Result<(), GatewayOwnerTaskError> {
-        let mut held: Option<TcpListener> = None;
+        let mut held: Option<BoundListener> = None;
         loop {
             let command = tokio::select! {
                 biased;
-                () = shutdown.cancelled() => return Ok(()),
+                () = shutdown.cancelled() => {
+                    drop(held.take());
+                    bound.store(false, Ordering::Release);
+                    return Ok(());
+                }
+                accepted = Self::accept_next(held.as_ref()) => {
+                    if let (Some(listener), Ok((stream, peer))) = (held.as_ref(), accepted) {
+                        Self::admit(listener, stream, peer, &accept).await;
+                    }
+                    continue;
+                }
                 command = receiver.recv() => command,
             };
             match command {
                 None => return Err(GatewayOwnerTaskError::ChannelClosed),
-                Some(ListenerCommand::Bind { address, reply }) => {
-                    let bound_now = TcpListener::bind(address).await.map(|listener| {
-                        drop(held.replace(listener));
+                Some(ListenerCommand::Bind { address, admission, reply }) => {
+                    let bound_now = TcpListener::bind(address).await.map(|socket| {
+                        drop(held.replace(BoundListener { socket, admission }));
                         bound.store(true, Ordering::Release);
                     });
                     let _ = reply.send(bound_now);
@@ -778,12 +886,46 @@ impl GatewayListenerControl {
         }
     }
 
+    /// The next accepted socket; never ready while nothing is bound.
+    async fn accept_next(
+        listener: Option<&BoundListener>,
+    ) -> std::io::Result<(tokio::net::TcpStream, SocketAddr)> {
+        match listener {
+            Some(listener) => listener.socket.accept().await,
+            None => std::future::pending().await,
+        }
+    }
+
+    /// Admit one accepted socket against the Current generation and pass it to
+    /// the connections owner. A socket the admission refuses is closed.
+    async fn admit(
+        listener: &BoundListener,
+        stream: tokio::net::TcpStream,
+        peer: SocketAddr,
+        accept: &AcceptPath,
+    ) {
+        let SocketAddr::V4(peer) = peer else {
+            return;
+        };
+        let now = UnixInstant::from_clock(accept.clock.as_ref());
+        let Ok(lease) = listener.admission.acquire_connection(now) else {
+            return;
+        };
+        let Ok(std_stream) = stream.into_std() else {
+            return;
+        };
+        let _ = accept
+            .connections
+            .send(AcceptedConnection { socket: OwnedFd::from(std_stream), peer: *peer.ip(), lease })
+            .await;
+    }
+
     pub(crate) async fn bind(
         &self,
         address: SocketAddrV4,
-        _admission: Arc<GatewayAdmission>,
+        admission: Arc<GatewayAdmission>,
     ) -> Result<(), std::io::Error> {
-        self.request(|reply| ListenerCommand::Bind { address, reply }).await
+        self.request(|reply| ListenerCommand::Bind { address, admission, reply }).await
     }
 
     pub(crate) async fn unbind(&self) -> Result<(), std::io::Error> {
@@ -801,6 +943,126 @@ impl GatewayListenerControl {
         let (reply, answer) = oneshot::channel();
         self.commands.send(command(reply)).await.map_err(|_| std::io::ErrorKind::BrokenPipe)?;
         answer.await.map_err(|_| std::io::ErrorKind::BrokenPipe)?
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Connections owner
+// ---------------------------------------------------------------------------
+
+/// Bound on the accept-to-owner hand-off queue.
+const CONNECTION_BACKLOG_CEILING: usize = 1024;
+
+/// The narrow handle shutdown holds on the connections owner.
+pub(crate) struct GatewayConnectionOwnerHandle {
+    /// Cancelled when accepting stops: the listener task ends.
+    stop_accepting: CancellationToken,
+    drain: watch::Sender<Option<Instant>>,
+    force: CancellationToken,
+    drained: CancellationToken,
+    aborted: Arc<AtomicU32>,
+}
+
+impl GatewayConnectionOwnerHandle {
+    /// No further connection is accepted: the listener task ends.
+    pub(crate) fn stop_accepting(&self) {
+        self.stop_accepting.cancel();
+    }
+
+    /// Begin the drain with `deadline` as its one deadline: idle connections
+    /// close at once and in-flight exchanges run on. At `deadline` on `clock`
+    /// every connection task still running is aborted and awaited, so its
+    /// leases, legs and cleanup guards have run. Returns the number of
+    /// connection tasks aborted.
+    pub(crate) async fn drain_then_force_join(
+        &self,
+        deadline: Instant,
+        clock: &dyn Clock,
+    ) -> Result<u32, GatewayTaskFailure> {
+        self.drain.send_replace(Some(deadline));
+        let remaining = deadline.saturating_duration_since(clock.now());
+        tokio::select! {
+            biased;
+            () = self.drained.cancelled() => {}
+            () = clock.sleep(remaining) => {
+                self.force.cancel();
+                self.drained.cancelled().await;
+            }
+        }
+        Ok(self.aborted.load(Ordering::Acquire))
+    }
+}
+
+/// Cancels `drained` however the owner task ends.
+struct DrainedOnDrop(CancellationToken);
+
+impl Drop for DrainedOnDrop {
+    fn drop(&mut self) {
+        self.0.cancel();
+    }
+}
+
+/// What the connections owner task observes.
+struct ConnectionTokens {
+    shutdown: CancellationToken,
+    drain: watch::Receiver<Option<Instant>>,
+    force: CancellationToken,
+    drained: CancellationToken,
+    aborted: Arc<AtomicU32>,
+}
+
+/// The connections owner: spawns one task per admitted connection into its
+/// `JoinSet`, reaps them, and once the drain began takes no new ones. It ends
+/// when the drain emptied it, at the force-abort, or at shutdown.
+async fn run_connections(
+    services: Arc<ConnectionServices>,
+    mut messages: mpsc::Receiver<AcceptedConnection>,
+    mut tokens: ConnectionTokens,
+) -> Result<(), GatewayOwnerTaskError> {
+    let _drained = DrainedOnDrop(tokens.drained.clone());
+    let mut connections: JoinSet<()> = JoinSet::new();
+    let mut intake = true;
+    loop {
+        if !intake && connections.is_empty() {
+            return Ok(());
+        }
+        tokio::select! {
+            biased;
+            () = tokens.force.cancelled() => {
+                connections.abort_all();
+                while let Some(joined) = connections.join_next().await {
+                    if joined.is_err_and(|error| error.is_cancelled()) {
+                        tokens.aborted.fetch_add(1, Ordering::AcqRel);
+                    }
+                }
+                return Ok(());
+            }
+            () = tokens.shutdown.cancelled() => {
+                connections.abort_all();
+                while connections.join_next().await.is_some() {}
+                return Ok(());
+            }
+            changed = tokens.drain.changed(), if intake => {
+                intake = false;
+                if changed.is_ok() {
+                    messages.close();
+                    while messages.try_recv().is_ok() {}
+                }
+            }
+            accepted = messages.recv(), if intake => match accepted {
+                Some(AcceptedConnection { socket, peer, lease }) => {
+                    connections.spawn(serve_connection(
+                        Arc::clone(&services),
+                        socket,
+                        peer,
+                        lease,
+                        DrainSignal::new(tokens.drain.clone()),
+                    ));
+                }
+                None => intake = false,
+            },
+            Some(_) = connections.join_next(), if !connections.is_empty() => {}
+        }
     }
 }
 
@@ -958,7 +1220,59 @@ pub(crate) struct GatewayApplicationOwner {
     route_seen: bool,
 }
 
+/// What the application owner is wired to; everything else starts empty.
+struct OwnerWiring {
+    node_id: NodeId,
+    intent: Arc<dyn IntentStore>,
+    certified_key: PublicCertifiedKeyCustodyHandle,
+    frontend: Arc<dyn ServiceFrontendResolve>,
+    identity: Arc<dyn GatewayIdentityLifecycleControl>,
+    connector: Arc<GatewayUpstreamConnector>,
+    dataplane: Arc<dyn GatewayConnectDataplane>,
+    admission: Arc<GatewayAdmission>,
+    listener: GatewayListenerControl,
+    observations: Arc<dyn ObservationStore>,
+    clock: Arc<dyn Clock>,
+    limits: Arc<GatewayLimits>,
+    bind: SocketAddrV4,
+    commands: mpsc::Receiver<GatewayApplicationCommand>,
+    shutdown: CancellationToken,
+}
+
 impl GatewayApplicationOwner {
+    /// An owner at boot: no generation staged or current, no Route seen.
+    fn fresh(wiring: OwnerWiring) -> Self {
+        Self {
+            node_id: wiring.node_id,
+            intent: wiring.intent,
+            certified_key: wiring.certified_key,
+            frontend: wiring.frontend,
+            identity: wiring.identity,
+            connector: wiring.connector,
+            dataplane: wiring.dataplane,
+            connect_proven: Arc::new(AtomicBool::new(false)),
+            admission: wiring.admission,
+            listener: wiring.listener,
+            observations: wiring.observations,
+            clock: wiring.clock,
+            limits: wiring.limits,
+            bind: wiring.bind,
+            commands: wiring.commands,
+            shutdown: wiring.shutdown,
+            owner_wake: Arc::new(Notify::new()),
+            staged: None,
+            current: None,
+            draining: BTreeMap::new(),
+            failed: None,
+            unavailable: None,
+            connect_ready: false,
+            next_token: 0,
+            gates: JoinSet::new(),
+            route_seen: false,
+            status: StatusWriter::default(),
+        }
+    }
+
     /// Subscribe-before-list, then serve inputs until shutdown.
     pub(crate) async fn run(mut self) -> Result<(), GatewayOwnerTaskError> {
         let mut route_events = self
@@ -1665,12 +1979,35 @@ impl GatewayGenerationRetention {
     pub(crate) fn try_connection(
         self: &Arc<Self>,
     ) -> Result<GatewayGenerationConnectionPermit, GatewayAdmissionError> {
-        todo!("SCAFFOLD: GatewayGenerationRetention::try_connection")
+        self.take_count(&self.connections)?;
+        Ok(GatewayGenerationConnectionPermit { retention: Arc::clone(self) })
     }
     pub(crate) fn try_request(
         self: &Arc<Self>,
     ) -> Result<GatewayGenerationRequestPermit, GatewayAdmissionError> {
-        todo!("SCAFFOLD: GatewayGenerationRetention::try_request")
+        self.take_count(&self.requests)?;
+        Ok(GatewayGenerationRequestPermit { retention: Arc::clone(self) })
+    }
+
+    /// Count one more retained user, refused once the generation is closed.
+    /// `closed` is tested after the increment as well, so a close that raced
+    /// the increment rolls it back.
+    fn take_count(&self, count: &AtomicU32) -> Result<(), GatewayAdmissionError> {
+        if self.closed.load(Ordering::Acquire) {
+            return Err(GatewayAdmissionError::Unavailable);
+        }
+        count.fetch_add(1, Ordering::AcqRel);
+        if self.closed.load(Ordering::Acquire) {
+            count.fetch_sub(1, Ordering::AcqRel);
+            self.owner_wake.notify_one();
+            return Err(GatewayAdmissionError::Unavailable);
+        }
+        Ok(())
+    }
+
+    fn release(&self, count: &AtomicU32) {
+        count.fetch_sub(1, Ordering::AcqRel);
+        self.owner_wake.notify_one();
     }
     /// Refuse every later connection and request of this generation.
     pub(crate) fn close(&self) {
@@ -1720,8 +2057,20 @@ pub(crate) struct GatewayGenerationConnectionPermit {
     retention: Arc<GatewayGenerationRetention>,
 }
 
+impl Drop for GatewayGenerationConnectionPermit {
+    fn drop(&mut self) {
+        self.retention.release(&self.retention.connections);
+    }
+}
+
 pub(crate) struct GatewayGenerationRequestPermit {
     retention: Arc<GatewayGenerationRetention>,
+}
+
+impl Drop for GatewayGenerationRequestPermit {
+    fn drop(&mut self) {
+        self.retention.release(&self.retention.requests);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1747,7 +2096,17 @@ impl GatewayAdmissionBudget {
     pub(crate) fn try_public_connection(
         self: &Arc<Self>,
     ) -> Result<GatewayPublicConnectionPermit, GatewayAdmissionError> {
-        todo!("SCAFFOLD: GatewayAdmissionBudget::try_public_connection")
+        let ceiling = self.limits.max_public_connections().get();
+        let taken =
+            self.public_connections.fetch_update(Ordering::AcqRel, Ordering::Acquire, |held| {
+                (held < ceiling).then_some(held + 1)
+            });
+        match taken {
+            Ok(_) => Ok(GatewayPublicConnectionPermit { budget: Arc::clone(self) }),
+            Err(_) => todo!(
+                "SCAFFOLD: GatewayAdmissionBudget::try_public_connection refusal arm (connection limit)"
+            ),
+        }
     }
     pub(crate) fn try_connect(
         self: &Arc<Self>,
@@ -1767,12 +2126,28 @@ impl GatewayAdmissionBudget {
     pub(crate) fn try_request(
         self: &Arc<Self>,
     ) -> Result<GatewayGlobalRequestPermit, GatewayAdmissionError> {
-        todo!("SCAFFOLD: GatewayAdmissionBudget::try_request")
+        let ceiling = self.limits.max_inflight_requests().get();
+        let taken =
+            self.inflight_requests.fetch_update(Ordering::AcqRel, Ordering::Acquire, |held| {
+                (held < ceiling).then_some(held + 1)
+            });
+        match taken {
+            Ok(_) => Ok(GatewayGlobalRequestPermit { budget: Arc::clone(self) }),
+            Err(_) => {
+                todo!("SCAFFOLD: GatewayAdmissionBudget::try_request refusal arm (request limit)")
+            }
+        }
     }
 }
 
 pub(crate) struct GatewayPublicConnectionPermit {
     budget: Arc<GatewayAdmissionBudget>,
+}
+
+impl Drop for GatewayPublicConnectionPermit {
+    fn drop(&mut self) {
+        self.budget.public_connections.fetch_sub(1, Ordering::AcqRel);
+    }
 }
 
 pub(crate) struct GatewayConnectPermit {
@@ -1787,6 +2162,12 @@ impl Drop for GatewayConnectPermit {
 
 pub(crate) struct GatewayGlobalRequestPermit {
     budget: Arc<GatewayAdmissionBudget>,
+}
+
+impl Drop for GatewayGlobalRequestPermit {
+    fn drop(&mut self) {
+        self.budget.inflight_requests.fetch_sub(1, Ordering::AcqRel);
+    }
 }
 
 pub(crate) struct GatewayAdmission {
@@ -1807,7 +2188,19 @@ impl GatewayAdmission {
         &self,
         now: UnixInstant,
     ) -> Result<GatewayConnectionLease, GatewayAdmissionError> {
-        todo!("SCAFFOLD: GatewayAdmission::acquire_connection")
+        let snapshot = self.current.load_full().ok_or(GatewayAdmissionError::Unavailable)?;
+        if !snapshot.certified_key.is_usable_at(now) {
+            return Err(GatewayAdmissionError::CertifiedKeyUnusable);
+        }
+        let public_connection = self.budget.try_public_connection()?;
+        let generation = snapshot.retention.try_connection()?;
+        Ok(GatewayConnectionLease {
+            snapshot,
+            generation,
+            public_connection,
+            requests_started: AtomicU32::new(0),
+            request_active: Arc::new(AtomicBool::new(false)),
+        })
     }
 }
 
@@ -1826,7 +2219,48 @@ impl GatewayConnectionLease {
         &self.snapshot
     }
     pub(crate) fn try_request(&self) -> Result<GatewayRequestLease, GatewayAdmissionError> {
-        todo!("SCAFFOLD: GatewayConnectionLease::try_request")
+        if self
+            .request_active
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            todo!("SCAFFOLD: GatewayConnectionLease::try_request refusal arm (request in flight)");
+        }
+        let ceiling = self.snapshot.budget.limits.max_requests_per_connection().get();
+        let started =
+            self.requests_started.fetch_update(Ordering::AcqRel, Ordering::Acquire, |started| {
+                (started < ceiling).then_some(started + 1)
+            });
+        let Ok(previous) = started else {
+            self.request_active.store(false, Ordering::Release);
+            todo!("SCAFFOLD: GatewayConnectionLease::try_request refusal arm (request limit)");
+        };
+        let release = || {
+            self.requests_started.fetch_sub(1, Ordering::AcqRel);
+            self.request_active.store(false, Ordering::Release);
+        };
+        let global = match self.snapshot.budget.try_request() {
+            Ok(global) => global,
+            Err(error) => {
+                release();
+                return Err(error);
+            }
+        };
+        let generation = match self.snapshot.retention.try_request() {
+            Ok(generation) => generation,
+            Err(error) => {
+                drop(global);
+                release();
+                return Err(error);
+            }
+        };
+        Ok(GatewayRequestLease {
+            snapshot: Arc::clone(&self.snapshot),
+            generation,
+            global,
+            request_active: Arc::clone(&self.request_active),
+            close_after_response: previous + 1 == ceiling,
+        })
     }
 }
 
@@ -1836,6 +2270,14 @@ pub(crate) struct GatewayRequestLease {
     global: GatewayGlobalRequestPermit,
     request_active: Arc<AtomicBool>,
     close_after_response: bool,
+}
+
+impl Drop for GatewayRequestLease {
+    /// Reset the in-flight flag first; the permits then release in field order,
+    /// each notifying the retention owner after the reset.
+    fn drop(&mut self) {
+        self.request_active.store(false, Ordering::Release);
+    }
 }
 
 impl GatewayRequestLease {

@@ -1,33 +1,52 @@
 //! The pure head, framing and chunk-line functions of the kernel relay
 //! (ADR-0245; R-32).
 //!
-//! SCAFFOLD: true. Only the signatures and closed vocabularies the DESIGN pins
-//! ("Pure `http1` and relay-pipe functions") are present; every body is
-//! DELIVER's and fails with SCAFFOLD text. No function reads a clock, a socket
-//! or a global.
+//! No function reads a clock, a socket or a global.
 
-#![allow(
-    clippy::todo,
-    clippy::doc_markdown,
-    clippy::needless_pass_by_value,
-    clippy::missing_const_for_fn,
-    clippy::unused_self,
-    clippy::redundant_pub_crate,
-    dead_code,
-    unused_variables,
-    reason = "public-ingress DISTILL scaffold: bodies are DELIVER's"
-)]
-
+use http::header::{CONTENT_LENGTH, HOST, HeaderName, HeaderValue, TRANSFER_ENCODING};
+use http::{HeaderMap, Method, StatusCode};
 use overdrive_core::public_ingress::PublicHostname;
 
 use super::exchange::BodyFraming;
 use crate::runtime::GatewayLimits;
 
+const CRLF: &[u8] = b"\r\n";
+const HEADER_BLOCK_END: &[u8] = b"\r\n\r\n";
+const HTTP_11: &[u8] = b"HTTP/1.1";
+const HTTP_10: &[u8] = b"HTTP/1.0";
+const PUBLIC_PORT: &str = "443";
+
 /// Byte-level validator applied to every line the gateway reads: a request or
 /// response head (the whole header block), a chunk-size line, a chunk
 /// terminator, a trailer line. Runs before any parser.
 pub(crate) fn validate_lines(bytes: &[u8]) -> Result<(), LineViolation> {
-    todo!("SCAFFOLD: http1::validate_lines")
+    let mut line_start = true;
+    let mut first_line = true;
+    let mut index = 0;
+    while let Some(&octet) = bytes.get(index) {
+        match octet {
+            b'\r' => {
+                if bytes.get(index + 1) != Some(&b'\n') {
+                    return Err(LineViolation::BareCr);
+                }
+                index += 2;
+                line_start = true;
+                first_line = false;
+                continue;
+            }
+            b'\n' => return Err(LineViolation::BareLf),
+            0 => return Err(LineViolation::Nul),
+            b'\t' | b' ' if line_start && !first_line => {
+                return Err(LineViolation::ObsoleteLineFold);
+            }
+            b'\t' | b' ' => {}
+            0x01..=0x1f | 0x7f => return Err(LineViolation::OctetOutsideFieldValueRange),
+            _ => {}
+        }
+        line_start = false;
+        index += 1;
+    }
+    Ok(())
 }
 
 /// Why a line failed the byte-level validator.
@@ -47,21 +66,63 @@ pub(crate) fn parse_request_head(
     sni: &PublicHostname,
     limits: &GatewayLimits,
 ) -> Result<ParsedRequestHead, RequestHeadError> {
-    todo!("SCAFFOLD: http1::parse_request_head")
+    validate_lines(bytes).map_err(RequestHeadError::Line)?;
+    if bytes.len() > limits.max_request_head_bytes().get() {
+        return Err(RequestHeadError::HeadTooLarge);
+    }
+    let lines = head_lines(bytes);
+    let (start_line, field_lines) =
+        lines.split_first().ok_or(RequestHeadError::NonOriginFormTarget)?;
+    let (method, target) = parse_request_line(start_line)?;
+    let headers = parse_fields(field_lines, limits.max_request_headers().get()).map_err(
+        |error| match error {
+            FieldsError::TooMany => RequestHeadError::TooManyHeaders,
+            FieldsError::Malformed => {
+                RequestHeadError::Line(LineViolation::OctetOutsideFieldValueRange)
+            }
+        },
+    )?;
+    let authority = check_host(&headers, sni)?;
+    let framing =
+        derive_framing(&headers, FramingRole::Request).map_err(RequestHeadError::Framing)?;
+    if let BodyFraming::Length(declared) = framing
+        && declared > limits.max_request_body_bytes().get()
+    {
+        return Err(RequestHeadError::DeclaredLengthAboveCeiling);
+    }
+    Ok(ParsedRequestHead { method, target, headers, authority, framing })
 }
 
 /// A validated request head: method, origin-form target, original header map,
 /// Host authority and framing.
 pub(crate) struct ParsedRequestHead {
-    _private: (),
+    method: Method,
+    target: String,
+    headers: HeaderMap,
+    authority: PublicHostname,
+    framing: BodyFraming,
 }
 
 impl ParsedRequestHead {
-    pub(crate) fn framing(&self) -> BodyFraming {
-        todo!("SCAFFOLD: ParsedRequestHead::framing")
+    pub(crate) const fn framing(&self) -> BodyFraming {
+        self.framing
     }
     pub(crate) fn method_is_head(&self) -> bool {
-        todo!("SCAFFOLD: ParsedRequestHead::method_is_head")
+        self.method == Method::HEAD
+    }
+    pub(crate) const fn method(&self) -> &Method {
+        &self.method
+    }
+    pub(crate) fn target(&self) -> &str {
+        &self.target
+    }
+    /// The validated Host authority (equal to the handshake's server name).
+    pub(crate) const fn authority(&self) -> &PublicHostname {
+        &self.authority
+    }
+    /// The ORIGINAL header map, nothing removed.
+    pub(crate) fn into_headers(self) -> HeaderMap {
+        self.headers
     }
 }
 
@@ -88,8 +149,77 @@ pub(crate) enum RequestHeadError {
 impl RequestHeadError {
     /// 400, 413, 421, 431 or 505 per the Request rules table.
     pub(crate) fn status(&self) -> http::StatusCode {
-        todo!("SCAFFOLD: RequestHeadError::status")
+        match self {
+            Self::Line(_)
+            | Self::Connect
+            | Self::NonOriginFormTarget
+            | Self::HostMissing
+            | Self::HostDuplicate
+            | Self::HostInvalid
+            | Self::HostUserinfo
+            | Self::HostPortNot443
+            | Self::Framing(_) => StatusCode::BAD_REQUEST,
+            Self::HostSniMismatch => StatusCode::MISDIRECTED_REQUEST,
+            Self::DeclaredLengthAboveCeiling => StatusCode::PAYLOAD_TOO_LARGE,
+            Self::HeadTooLarge | Self::TooManyHeaders => {
+                StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE
+            }
+            Self::VersionNotHttp11 | Self::Http10 => StatusCode::HTTP_VERSION_NOT_SUPPORTED,
+        }
     }
+}
+
+fn parse_request_line(line: &[u8]) -> Result<(Method, String), RequestHeadError> {
+    let mut parts = line.split(|octet| *octet == b' ');
+    let (Some(method), Some(target), Some(version), None) =
+        (parts.next(), parts.next(), parts.next(), parts.next())
+    else {
+        return Err(RequestHeadError::NonOriginFormTarget);
+    };
+    if version == HTTP_10 {
+        return Err(RequestHeadError::Http10);
+    }
+    if version != HTTP_11 {
+        return Err(RequestHeadError::VersionNotHttp11);
+    }
+    let method = Method::from_bytes(method).map_err(|_| RequestHeadError::NonOriginFormTarget)?;
+    if method == Method::CONNECT {
+        return Err(RequestHeadError::Connect);
+    }
+    if target.first() != Some(&b'/') {
+        return Err(RequestHeadError::NonOriginFormTarget);
+    }
+    let target =
+        String::from_utf8(target.to_vec()).map_err(|_| RequestHeadError::NonOriginFormTarget)?;
+    Ok((method, target))
+}
+
+fn check_host(
+    headers: &HeaderMap,
+    sni: &PublicHostname,
+) -> Result<PublicHostname, RequestHeadError> {
+    let mut hosts = headers.get_all(HOST).iter();
+    let host = hosts.next().ok_or(RequestHeadError::HostMissing)?;
+    if hosts.next().is_some() {
+        return Err(RequestHeadError::HostDuplicate);
+    }
+    let host = host.to_str().map_err(|_| RequestHeadError::HostInvalid)?;
+    if host.contains('@') {
+        return Err(RequestHeadError::HostUserinfo);
+    }
+    let name = match host.rsplit_once(':') {
+        Some((name, port)) if port == PUBLIC_PORT => name,
+        Some((_, port)) if !port.is_empty() && port.bytes().all(|octet| octet.is_ascii_digit()) => {
+            return Err(RequestHeadError::HostPortNot443);
+        }
+        Some(_) => return Err(RequestHeadError::HostInvalid),
+        None => host,
+    };
+    let authority = PublicHostname::new(name).map_err(|_| RequestHeadError::HostInvalid)?;
+    if authority.as_str() != sni.as_str() {
+        return Err(RequestHeadError::HostSniMismatch);
+    }
+    Ok(authority)
 }
 
 /// Response head -> typed value. `request_was_head` selects the no-body rule of
@@ -99,7 +229,41 @@ pub(crate) fn parse_response_head(
     request_was_head: bool,
     limits: &GatewayLimits,
 ) -> Result<ParsedResponseHead, ResponseHeadError> {
-    todo!("SCAFFOLD: http1::parse_response_head")
+    validate_lines(bytes).map_err(ResponseHeadError::Line)?;
+    if bytes.len() > limits.max_response_head_bytes().get() {
+        return Err(ResponseHeadError::HeadTooLarge);
+    }
+    let lines = head_lines(bytes);
+    let (status_line, field_lines) =
+        lines.split_first().ok_or(ResponseHeadError::VersionNotAccepted)?;
+    let (version, status) = parse_status_line(status_line)?;
+    if status == StatusCode::SWITCHING_PROTOCOLS {
+        return Err(ResponseHeadError::Switching101);
+    }
+    let headers = parse_fields(field_lines, limits.max_response_headers().get()).map_err(
+        |error| match error {
+            FieldsError::TooMany => ResponseHeadError::TooManyHeaders,
+            FieldsError::Malformed => {
+                ResponseHeadError::Line(LineViolation::OctetOutsideFieldValueRange)
+            }
+        },
+    )?;
+    if status.is_informational() {
+        return Ok(ParsedResponseHead::Interim { status, forward: status == StatusCode::CONTINUE });
+    }
+    let framing = derive_framing(&headers, FramingRole::FinalResponse { request_was_head, status })
+        .map_err(ResponseHeadError::Framing)?;
+    let explicit_length_needed = version == ResponseVersion::Http10
+        && matches!(framing, BodyFraming::UntilClose | BodyFraming::Chunked);
+    if explicit_length_needed {
+        return Err(ResponseHeadError::VersionNotAccepted);
+    }
+    if let BodyFraming::Length(declared) = framing
+        && declared > limits.max_response_body_bytes().get()
+    {
+        return Err(ResponseHeadError::DeclaredLengthAboveCeiling);
+    }
+    Ok(ParsedResponseHead::Final(ParsedFinalResponseHead { status, headers, framing }))
 }
 
 /// A validated response head.
@@ -113,12 +277,21 @@ pub(crate) enum ParsedResponseHead {
 
 /// A validated final response head.
 pub(crate) struct ParsedFinalResponseHead {
-    _private: (),
+    status: StatusCode,
+    headers: HeaderMap,
+    framing: BodyFraming,
 }
 
 impl ParsedFinalResponseHead {
-    pub(crate) fn framing(&self) -> BodyFraming {
-        todo!("SCAFFOLD: ParsedFinalResponseHead::framing")
+    pub(crate) const fn framing(&self) -> BodyFraming {
+        self.framing
+    }
+    pub(crate) const fn status(&self) -> StatusCode {
+        self.status
+    }
+    /// The ORIGINAL header map, nothing removed.
+    pub(crate) fn into_headers(self) -> HeaderMap {
+        self.headers
     }
 }
 
@@ -135,6 +308,29 @@ pub(crate) enum ResponseHeadError {
     TooManyHeaders,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ResponseVersion {
+    Http10,
+    Http11,
+}
+
+fn parse_status_line(line: &[u8]) -> Result<(ResponseVersion, StatusCode), ResponseHeadError> {
+    let mut parts = line.splitn(3, |octet| *octet == b' ');
+    let (Some(version), Some(code)) = (parts.next(), parts.next()) else {
+        return Err(ResponseHeadError::VersionNotAccepted);
+    };
+    let version = match version {
+        v if v == HTTP_11 => ResponseVersion::Http11,
+        v if v == HTTP_10 => ResponseVersion::Http10,
+        _ => return Err(ResponseHeadError::VersionNotAccepted),
+    };
+    let status = StatusCode::from_bytes(code).map_err(|_| ResponseHeadError::VersionNotAccepted)?;
+    if code.len() != 3 {
+        return Err(ResponseHeadError::VersionNotAccepted);
+    }
+    Ok((version, status))
+}
+
 /// The one framing decision (RFC 9112 section 6.3), over the ORIGINAL headers:
 /// nothing a `Connection` field nominates has been removed yet (S-PIG-81).
 /// `role` selects the request rules (no framing = no body) or the response
@@ -143,7 +339,64 @@ pub(crate) fn derive_framing(
     headers: &http::HeaderMap,
     role: FramingRole,
 ) -> Result<BodyFraming, FramingFault> {
-    todo!("SCAFFOLD: http1::derive_framing")
+    if let FramingRole::FinalResponse { request_was_head, status } = role
+        && (request_was_head
+            || status.is_informational()
+            || matches!(status.as_u16(), 204 | 205 | 304))
+    {
+        return Ok(BodyFraming::NoBody);
+    }
+    let lengths = headers.get_all(CONTENT_LENGTH);
+    let codings = headers.get_all(TRANSFER_ENCODING);
+    let has_length = lengths.iter().next().is_some();
+    let has_coding = codings.iter().next().is_some();
+    if has_length && has_coding {
+        return Err(FramingFault::BothLengthAndCoding);
+    }
+    if has_length {
+        return declared_length(headers);
+    }
+    if has_coding {
+        return declared_coding(headers);
+    }
+    Ok(match role {
+        FramingRole::Request => BodyFraming::NoBody,
+        FramingRole::FinalResponse { .. } => BodyFraming::UntilClose,
+    })
+}
+
+fn declared_length(headers: &HeaderMap) -> Result<BodyFraming, FramingFault> {
+    let mut lines = headers.get_all(CONTENT_LENGTH).iter();
+    let (Some(line), None) = (lines.next(), lines.next()) else {
+        return Err(FramingFault::RepeatedContentLength);
+    };
+    let digits = line.as_bytes();
+    if digits.is_empty() || !digits.iter().all(u8::is_ascii_digit) {
+        return Err(FramingFault::ContentLengthNotDecimal);
+    }
+    let text = std::str::from_utf8(digits).map_err(|_| FramingFault::ContentLengthNotDecimal)?;
+    text.parse::<u64>().map(BodyFraming::Length).map_err(|_| FramingFault::ContentLengthOverflow)
+}
+
+fn declared_coding(headers: &HeaderMap) -> Result<BodyFraming, FramingFault> {
+    let mut lines = headers.get_all(TRANSFER_ENCODING).iter();
+    let (Some(line), None) = (lines.next(), lines.next()) else {
+        return Err(FramingFault::RepeatedTransferEncoding);
+    };
+    let text = line.to_str().map_err(|_| FramingFault::FinalCodingNotChunked)?;
+    let codings: Vec<String> =
+        text.split(',').map(|coding| coding.trim().to_ascii_lowercase()).collect();
+    let chunked = codings.iter().filter(|coding| *coding == "chunked").count();
+    if chunked > 1 {
+        return Err(FramingFault::RepeatedChunked);
+    }
+    if codings.last().map(String::as_str) != Some("chunked") {
+        return Err(FramingFault::FinalCodingNotChunked);
+    }
+    if codings.len() > 1 {
+        return Err(FramingFault::UnsupportedCoding);
+    }
+    Ok(BodyFraming::Chunked)
 }
 
 /// Which side of the exchange the framing decision is made for.
@@ -169,18 +422,34 @@ pub(crate) enum FramingFault {
 /// Hex chunk size of one chunk-size line as returned by `read_through`
 /// (terminator included); extensions are discarded.
 pub(crate) fn parse_chunk_size_line(line: &[u8]) -> Result<u64, ChunkLineError> {
-    todo!("SCAFFOLD: http1::parse_chunk_size_line")
+    validate_lines(line).map_err(ChunkLineError::Line)?;
+    let body = line.strip_suffix(CRLF).ok_or(ChunkLineError::SizeLineMalformed)?;
+    let size = body.split(|octet| *octet == b';').next().unwrap_or_default();
+    let size = size.trim_ascii_end();
+    if size.is_empty() {
+        return Err(ChunkLineError::SizeLineMalformed);
+    }
+    if !size.iter().all(u8::is_ascii_hexdigit) {
+        return Err(ChunkLineError::SizeNotHex);
+    }
+    let text = std::str::from_utf8(size).map_err(|_| ChunkLineError::SizeNotHex)?;
+    u64::from_str_radix(text, 16).map_err(|_| ChunkLineError::SizeOverflow)
 }
 
 /// The chunk terminator is exactly CRLF.
 pub(crate) fn check_chunk_terminator(line: &[u8]) -> Result<(), ChunkLineError> {
-    todo!("SCAFFOLD: http1::check_chunk_terminator")
+    validate_lines(line).map_err(ChunkLineError::Line)?;
+    if line == CRLF { Ok(()) } else { Err(ChunkLineError::TerminatorNotCrlf) }
 }
 
 /// `true` for the empty line that ends the trailer; other lines are validated
 /// and dropped.
 pub(crate) fn is_trailer_end(line: &[u8]) -> Result<bool, ChunkLineError> {
-    todo!("SCAFFOLD: http1::is_trailer_end")
+    validate_lines(line).map_err(ChunkLineError::Line)?;
+    if line == CRLF {
+        return Ok(true);
+    }
+    line.strip_suffix(CRLF).map(|_| false).ok_or(ChunkLineError::TerminatorNotCrlf)
 }
 
 /// Why a chunk framing line was refused.
@@ -191,6 +460,46 @@ pub(crate) enum ChunkLineError {
     SizeOverflow,
     SizeLineMalformed,
     TerminatorNotCrlf,
+}
+
+// ---------------------------------------------------------------------------
+// Shared line and field helpers
+// ---------------------------------------------------------------------------
+
+/// The lines of a validated header block, the terminating empty line removed.
+fn head_lines(bytes: &[u8]) -> Vec<&[u8]> {
+    let block = bytes.strip_suffix(HEADER_BLOCK_END).or_else(|| bytes.strip_suffix(CRLF));
+    let block = block.unwrap_or(bytes);
+    let mut lines = Vec::new();
+    let mut rest = block;
+    while let Some(at) = rest.windows(CRLF.len()).position(|window| window == CRLF) {
+        lines.push(&rest[..at]);
+        rest = &rest[at + CRLF.len()..];
+    }
+    lines.push(rest);
+    lines
+}
+
+enum FieldsError {
+    TooMany,
+    Malformed,
+}
+
+/// Parse field lines into the original map; more than `max` fields is refused
+/// before any of them is interpreted.
+fn parse_fields(lines: &[&[u8]], max: usize) -> Result<HeaderMap, FieldsError> {
+    if lines.len() > max {
+        return Err(FieldsError::TooMany);
+    }
+    let mut headers = HeaderMap::with_capacity(lines.len());
+    for line in lines {
+        let colon = line.iter().position(|octet| *octet == b':').ok_or(FieldsError::Malformed)?;
+        let name = HeaderName::from_bytes(&line[..colon]).map_err(|_| FieldsError::Malformed)?;
+        let value = line[colon + 1..].trim_ascii();
+        let value = HeaderValue::from_bytes(value).map_err(|_| FieldsError::Malformed)?;
+        headers.append(name, value);
+    }
+    Ok(headers)
 }
 
 #[cfg(test)]
@@ -319,7 +628,6 @@ mod laws {
         ///
         /// CONTRACT_SHAPE: pure-function.
         #[test]
-        #[ignore = "pending DELIVER http1-head-validation-and-framing"]
         fn a_request_body_is_delimited_by_its_length_or_chunking_or_is_absent(
             n in 1u64..=u64::MAX,
             coding in prop_oneof![Just("chunked"), Just("Chunked"), Just("CHUNKED")],
@@ -342,7 +650,6 @@ mod laws {
         ///
         /// CONTRACT_SHAPE: pure-function.
         #[test]
-        #[ignore = "pending DELIVER http1-head-validation-and-framing"]
         fn no_request_header_combination_is_close_delimited(
             lengths in proptest::collection::vec("[0-9a-z+-]{1,8}", 0..3),
             codings in proptest::collection::vec(
@@ -368,7 +675,6 @@ mod laws {
         ///
         /// CONTRACT_SHAPE: pure-function.
         #[test]
-        #[ignore = "pending DELIVER http1-head-validation-and-framing"]
         fn a_response_body_follows_the_status_the_request_method_and_the_declared_framing(
             body_status in (200u16..=599).prop_filter("statuses that may carry a body", |s| {
                 !matches!(*s, 204 | 205 | 304)
@@ -415,7 +721,6 @@ mod laws {
     ///
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER http1-head-validation-and-framing"]
     fn a_request_without_length_or_coding_has_no_body_and_a_zero_length_is_empty() {
         let none = derive_framing(&HeaderMap::new(), FramingRole::Request).expect("no framing");
         assert_eq!(none, BodyFraming::NoBody, "no length and no coding: no body");
@@ -540,7 +845,6 @@ mod laws {
     ///
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER http1-head-validation-and-framing"]
     fn ambiguous_request_framing_is_a_400_and_an_http10_request_is_a_505() {
         for case in AMBIGUITIES {
             let Some(error) = request_error(&post_with(case.fields)) else {
@@ -575,7 +879,6 @@ mod laws {
         ///
         /// CONTRACT_SHAPE: pure-function.
         #[test]
-        #[ignore = "pending DELIVER http1-head-validation-and-framing"]
         fn content_length_values_are_classified_by_what_they_are(
             overflowing in "[1-9][0-9]{20,30}",
             not_decimal in "[0-9]{0,3}[a-zA-Z+-][0-9a-z]{0,3}",
@@ -607,7 +910,6 @@ mod laws {
     ///
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER http1-head-validation-and-framing"]
     fn ambiguous_origin_framing_is_refused_and_http10_needs_an_explicit_length() {
         for case in AMBIGUITIES {
             let bytes = response_with("HTTP/1.1 200 OK", case.fields);
@@ -690,7 +992,6 @@ mod laws {
         ///
         /// CONTRACT_SHAPE: pure-function.
         #[test]
-        #[ignore = "pending DELIVER http1-head-validation-and-framing"]
         fn bare_control_octets_in_a_head_are_refused_before_the_parser_runs(
             value in proptest::collection::vec(
                 prop_oneof![0x21u8..=0x7e, 0x80u8..=0xff],
@@ -743,7 +1044,6 @@ mod laws {
     ///
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER http1-head-validation-and-framing"]
     fn single_lines_and_the_obsolete_fold_are_validated_by_the_same_rules() {
         assert_eq!(validate_lines(b"1a\r\n"), Ok(()));
         assert_eq!(validate_lines(b"1a\n"), Err(LineViolation::BareLf));
@@ -780,7 +1080,6 @@ mod laws {
         ///
         /// CONTRACT_SHAPE: pure-function.
         #[test]
-        #[ignore = "pending DELIVER http1-head-validation-and-framing"]
         fn chunk_size_lines_parse_every_u64_and_refuse_overflow_and_non_hex(
             size in any::<u64>(),
             extension in prop_oneof![
@@ -810,7 +1109,6 @@ mod laws {
     ///
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER http1-head-validation-and-framing"]
     fn malformed_chunk_lines_the_terminator_and_the_trailer_end_follow_their_rules() {
         assert_eq!(parse_chunk_size_line(b"ffffffffffffffff\r\n"), Ok(u64::MAX));
         assert_eq!(parse_chunk_size_line(b"0\r\n"), Ok(0));
@@ -852,7 +1150,6 @@ mod laws {
     ///
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER http1-head-validation-and-framing"]
     fn a_connection_nomination_removes_nothing_before_the_framing_decision() {
         let cases: [(&str, [(&str, &str); 2], BodyFraming); 4] = [
             (
@@ -914,7 +1211,6 @@ mod laws {
     ///
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER http1-head-validation-and-framing"]
     fn every_request_head_error_maps_to_its_status() {
         let table: [(RequestHeadError, u16); 18] = [
             (RequestHeadError::Line(LineViolation::Nul), 400),
@@ -948,7 +1244,6 @@ mod laws {
     ///
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER http1-head-validation-and-framing"]
     fn target_and_host_rules_hold_at_their_boundaries() {
         let host = |value: &str| block("GET /a HTTP/1.1", &[format!("Host: {value}")]);
 
@@ -1005,7 +1300,6 @@ mod laws {
     ///
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER http1-head-validation-and-framing"]
     fn request_ceilings_are_exact_and_expect_and_upgrade_are_handled_as_pinned() {
         let limits = limits();
 
@@ -1078,7 +1372,6 @@ mod laws {
     ///
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER http1-head-validation-and-framing"]
     fn interim_heads_are_forwarded_only_for_100_and_never_for_101() {
         let interim = |status: u16, reason: &str| {
             response_with(&format!("HTTP/1.1 {status} {reason}"), &[("Link", "</s.css>")])
