@@ -52,7 +52,7 @@
 //! | 82 | upstream arming refused (S-PIG-98) |
 //! | 83 | public arming refused (S-PIG-98) |
 //! | 84 | relay probe refused at the gateway gate (S-PIG-99); six sequential compositions, ordinal 0 |
-//! | 85 | drain (S-PIG-101); four compositions, ordinals 0..=3 |
+//! | 85 | drain (S-PIG-101); four compositions, ordinals 0..=3; the discard-during-drain bound (S-PIG-115), ordinals 4..=5 |
 //! | 86 | response-side limits (S-PIG-119) |
 //! | 87 | response-head deadline (S-PIG-120) |
 //! | 88 | early answer is not a 408 (S-PIG-121) |
@@ -1957,7 +1957,16 @@ async fn an_early_or_gateway_authored_response_ends_with_a_half_close_and_a_boun
         if let Some(kind) = case.arm_refusal {
             world.relay.fail_next_upstream_arm(kind);
         }
+        let route_miss = case.name == "route miss";
+        let opens_before = world.opens();
         let legs = world.run(case.public, case.upstreams).await;
+        if route_miss {
+            assert_eq!(world.opens() - opens_before, 0, "route miss: no upstream dial");
+            assert!(
+                legs.upstream.is_empty(),
+                "route miss: no upstream leg exists, so no request octet was parsed or forwarded"
+            );
+        }
         let statuses = legs.public_statuses();
         assert_eq!(statuses.first(), Some(&case.status), "{}: status", case.name);
         assert_eq!(statuses.len(), 1, "{}: exactly one final response", case.name);
@@ -1983,6 +1992,7 @@ async fn an_early_or_gateway_authored_response_ends_with_a_half_close_and_a_boun
     let legs = world.finish(&running).await;
     assert_eq!(legs.public_statuses(), vec![408]);
     assert_eq!(calls_of(legs.public(), RelayCall::DiscardRemaining), 0, "a 408 is not lingered");
+    assert!(legs.public().close_notify_sent, "the 408 is followed by a close_notify");
 }
 
 // ---------------------------------------------------------------------------
@@ -2605,6 +2615,67 @@ async fn drain_closes_idle_connections_at_once_and_ends_inflight_work_at_the_one
     let legs = world.finish(&running).await;
     assert_eq!(legs.public_statuses(), vec![401]);
     assert!(legs.public().closed, "the discard ended at the drain deadline and the socket closed");
+}
+
+/// S-PIG-115 (drain-during-discard clause): a lingering discard that is in
+/// progress when drain begins, and one that begins after drain has begun, both
+/// end at the one drain deadline as an ordinary bounded end: the client has
+/// read the complete response and the close_notify, the socket is closed, and
+/// the connection is not counted as forced.
+///
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test]
+#[ignore = "pending DELIVER relay-lingering-close"]
+async fn a_lingering_discard_during_drain_ends_at_the_drain_deadline_without_being_forced() {
+    let second = Duration::from_secs(1);
+    let early_401 = || {
+        LegScript::new()
+            .octets(request_head("POST", "/a", &[("Content-Length", "100000")]))
+            .octets(vec![b'x'; 1000])
+            .quiet(Duration::from_secs(3600))
+    };
+
+    // Arm 1: the discard is already in progress when drain begins.
+    // Arm 2: the origin answers only after drain has begun, so the discard
+    // begins during the drain.
+    let arms = [
+        ("discard in progress when drain begins", 4_u16, origin_answers(&response(401, b"no"))),
+        (
+            "discard begins after drain has begun",
+            5_u16,
+            LegScript::new().quiet(Duration::from_secs(2)).octets(response(401, b"no")),
+        ),
+    ];
+    for (name, ordinal, origin) in arms {
+        let mut world = World::start(DRAIN, Spec { ordinal, ..Spec::default() }).await;
+        let running = world.start_exchange(early_401(), vec![origin]);
+        if ordinal == 4 {
+            wait_for("the lingering discard to begin", || {
+                let legs = world.legs(&running);
+                legs.public
+                    .as_ref()
+                    .is_some_and(|leg| calls_of(leg, RelayCall::DiscardRemaining) > 0)
+                    .then_some(())
+            })
+            .await;
+        } else {
+            world.accepted(&running).await;
+        }
+        let report = world.shutdown_with_clock(second).await;
+        let legs = world.finish(&running).await;
+
+        assert_eq!(report.forced_connections, 0, "{name}: ending the discard is not a force-abort");
+        assert!(report.task_failures.is_empty(), "{name}: {:?}", report.task_failures);
+        assert!(
+            report.elapsed >= GRACE && report.elapsed <= GRACE + second,
+            "{name}: the discard ends at the drain deadline: {:?}",
+            report.elapsed
+        );
+        assert_eq!(legs.public_statuses(), vec![401], "{name}: one complete response");
+        assert_eq!(legs.public_messages()[0].body, b"no", "{name}: the client read the whole body");
+        assert_lingering_close(&legs, name);
+        assert_eq!(world.relay.live_leg_count(), 0, "{name}: no residue");
+    }
 }
 
 // ---------------------------------------------------------------------------
