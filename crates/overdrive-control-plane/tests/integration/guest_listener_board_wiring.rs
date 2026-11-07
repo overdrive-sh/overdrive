@@ -219,7 +219,12 @@ impl Node {
                  observation: {:#?}; vsock holders: {:?}; rows: {:?}",
                 self.handle.guest_flow_observation().await.map(|o| o.cids),
                 self.vmm.vsock_device_holders(),
-                self.snapshot(id).await.rows.iter().map(|r| (r.state, r.reason.clone())).collect::<Vec<_>>()
+                self.snapshot(id)
+                    .await
+                    .rows
+                    .iter()
+                    .map(|r| (r.state, r.reason.clone()))
+                    .collect::<Vec<_>>()
             );
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
@@ -260,7 +265,11 @@ async fn a_listen_line_on_the_drivers_beacon_completes_the_probe_tasks_declared_
     let beacon_port = node.handle.vsock_ports().beacon.expect("a Vm driver composed a beacon port");
     let key = BeaconConnKey { peer_cid: cid, peer_port: VsockPort::new(50_000) };
     node.beacon
-        .queue_connection(key, pid, &[format!("READY pid=1 port={beacon_port} launch={launch}").as_str()])
+        .queue_connection(
+            key,
+            pid,
+            &[format!("READY pid=1 port={beacon_port} launch={launch}").as_str()],
+        )
         .expect("the guest's beacon connection queues");
 
     let deadline = tokio::time::Instant::now() + RUNNING_BOUND;

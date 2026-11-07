@@ -566,12 +566,10 @@ async fn successor_outcome_precedes_blocked_predecessor_cleanup_for_every_driver
         // The ordering oracle is the driver's recorded call order, not which
         // notification the select polled first.
         let entered_trace = driver.trace.lock().clone();
-        let entered_start = entered_trace
-            .iter()
-            .position(|event| event == &TraceEvent::Start(successor.clone()));
-        let entered_stop = entered_trace
-            .iter()
-            .position(|event| event == &TraceEvent::Stop(predecessor.clone()));
+        let entered_start =
+            entered_trace.iter().position(|event| event == &TraceEvent::Start(successor.clone()));
+        let entered_stop =
+            entered_trace.iter().position(|event| event == &TraceEvent::Stop(predecessor.clone()));
         assert!(
             matches!((entered_start, entered_stop), (Some(start), Some(stop)) if start < stop),
             "MISSING_CORRECTED_BEHAVIOR seed={SEED}: predecessor cleanup began before \

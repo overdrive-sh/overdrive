@@ -186,7 +186,8 @@ impl Node {
         exit_code: i32,
         specs: &[String],
     ) -> String {
-        let mut args = vec![subcommand::BIND.to_owned(), hold_seconds.to_string(), exit_code.to_string()];
+        let mut args =
+            vec![subcommand::BIND.to_owned(), hold_seconds.to_string(), exit_code.to_string()];
         args.extend(specs.iter().cloned());
         let spec = ServiceSpecInput {
             id: id.to_owned(),
