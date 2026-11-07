@@ -718,9 +718,60 @@ struct World {
     baseline_cleanups: u64,
     _site: Site,
     _intent: Arc<LocalIntentStore>,
-    /// Keeps the Service frontend's TCP listener alive so the connector's real
-    /// `connect(2)` completes.
-    _frontend_listener: std::net::TcpListener,
+    /// Serves the Service frontend's TCP listener so every connector `connect(2)`
+    /// completes, however many a world makes.
+    _frontend: FrontendDrain,
+}
+
+/// Accepts every connection made to the Service frontend, so the listener's
+/// accept queue never fills and a connector's real `connect(2)` completes for
+/// the whole life of a world. The Sim relay never reads the accepted streams, so
+/// they are held open (the peer sees an established, silent connection, as it did
+/// while the connection waited in the queue) until the drain stops.
+struct FrontendDrain {
+    stop: Arc<AtomicBool>,
+    join: Option<std::thread::JoinHandle<Vec<std::net::TcpStream>>>,
+}
+
+impl FrontendDrain {
+    /// How long the drain sleeps between accept polls when nothing is waiting.
+    const POLL: Duration = Duration::from_millis(1);
+
+    fn start(listener: std::net::TcpListener) -> Self {
+        listener.set_nonblocking(true).expect("nonblocking frontend listener");
+        let stop = Arc::new(AtomicBool::new(false));
+        let observed = Arc::clone(&stop);
+        let join = std::thread::Builder::new()
+            .name("frontend-drain".to_owned())
+            .spawn(move || {
+                let mut held = Vec::new();
+                while !observed.load(Ordering::Acquire) {
+                    match listener.accept() {
+                        Ok((stream, _)) => held.push(stream),
+                        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                            std::thread::sleep(Self::POLL);
+                        }
+                        Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+                        Err(error) => panic!("Service frontend accept failed: {error}"),
+                    }
+                }
+                held
+            })
+            .expect("spawn the frontend drain");
+        Self { stop, join: Some(join) }
+    }
+}
+
+impl Drop for FrontendDrain {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Release);
+        if let Some(join) = self.join.take()
+            && let Err(panic) = join.join()
+            && !std::thread::panicking()
+        {
+            std::panic::resume_unwind(panic);
+        }
+    }
 }
 
 impl World {
@@ -741,9 +792,10 @@ impl World {
             Arc::new(LocalIntentStore::open(&site.intent_path).expect("real intent store"));
         let node = NodeId::new("gateway-node").expect("node ID");
         let observations = Arc::new(SimObservationStore::single_peer(node.clone(), 54));
-        let frontend_listener = std::net::TcpListener::bind((slot.vip(spec.ordinal), SERVICE_PORT))
-            .expect("Service frontend listener");
-        frontend_listener.set_nonblocking(true).expect("nonblocking frontend listener");
+        let frontend = FrontendDrain::start(
+            std::net::TcpListener::bind((slot.vip(spec.ordinal), SERVICE_PORT))
+                .expect("Service frontend listener"),
+        );
         let vip_view = persist_api_service(&intent, slot.vip(spec.ordinal)).await;
         let intent_port: Arc<dyn IntentStore> = intent.clone();
         let observation_port: Arc<dyn ObservationStore> = observations;
@@ -788,7 +840,7 @@ impl World {
             bind: SocketAddrV4::new(slot.bind(spec.ordinal), 443),
             _site: site,
             _intent: intent,
-            _frontend_listener: frontend_listener,
+            _frontend: frontend,
         }
     }
 
