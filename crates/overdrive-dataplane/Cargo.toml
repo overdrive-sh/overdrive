@@ -110,7 +110,8 @@ rustls-pemfile.workspace = true
 # at this adapter boundary.
 x509-parser.workspace    = true
 
-# `rcgen` — PRODUCTION dep for `MtlsEnforcement::probe`'s substrate self-test ONLY
+# `rcgen` — PRODUCTION dep for the substrate self-tests: `MtlsEnforcement::probe`
+# and the gateway relay probe (`gateway_relay::probe_tls`) — and nothing else
 # (SD-5 / D-MTLS-12, user-approved 2026-06-12). `probe()` mints an EPHEMERAL
 # THROWAWAY self-signed sentinel cert+key in-process and uses it for the loopback
 # kTLS-arm round-trip sentinel (`probe` postcondition (1)). The sentinel is signed
@@ -185,7 +186,8 @@ hex.workspace                   = true
 # proxy's ciphertext and prove byte-exact plaintext. `ktls` is DEV-ONLY (the test
 # peer's RX decrypt) — the production kTLS arm is the raw `setsockopt` hand-roll in
 # `mtls::ktls`, not the `ktls` crate. `rcgen` is now a PRODUCTION dep (above) for
-# `probe`'s throwaway self-test sentinel (SD-5 / D-MTLS-12); the test PKI consumes
+# the throwaway self-test certificates of `MtlsEnforcement::probe` (SD-5 / D-MTLS-12)
+# and the gateway relay probe; the test PKI consumes
 # the same production `rcgen` dep — no separate dev-dep entry needed.
 ktls = { workspace = true, default-features = false, features = ["ring"] }
 

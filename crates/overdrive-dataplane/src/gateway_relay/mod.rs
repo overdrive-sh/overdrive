@@ -749,6 +749,23 @@ const PROBE_SERVER_NAME: &str = "relay-probe.overdrive.invalid";
 /// must cross a full pipe and a one-octet remainder.
 const PROBE_RELAY_LEN: usize = PIPE_FLOOR + 1;
 
+/// Octets the client sends right after the relayed span; the server leg must read
+/// them first and intact (`relay_exact` "reads nothing beyond `len`",
+/// feature-delta `GatewayRelay::relay_exact`). One line, so `read_through(LineEnd)`
+/// returns exactly it.
+const PROBE_TRAILER: &[u8] = b"relay-probe-trailer\r\n";
+
+/// Octets the client sends after the trailer; the server relays them through the
+/// pipe `relay_exact` left behind, so a stale octet in that pipe corrupts the echo.
+const PROBE_TAIL: &[u8] = b"relay-probe-tail";
+
+/// What the client expects echoed: the relayed span, then the tail.
+fn probe_echo() -> Vec<u8> {
+    let mut echo = probe_pattern();
+    echo.extend_from_slice(PROBE_TAIL);
+    echo
+}
+
 fn probe_io(kind: io::ErrorKind) -> RelayProbeError {
     RelayProbeError::Io { kind }
 }
@@ -803,36 +820,93 @@ fn loopback_pair() -> io::Result<(std::net::TcpStream, std::net::TcpStream)> {
     Ok((client, server))
 }
 
-/// The probe's userspace TLS client: handshakes, writes the pattern, reads the
-/// echo and returns how many leading octets of it matched the pattern.
+/// What the probe's client saw echoed: how many octets arrived, and how many
+/// leading ones matched the expected echo.
+struct Echoed {
+    received: usize,
+    matched: usize,
+}
+
+/// A TCP stream whose every operation is bounded by one absolute `end`.
+struct DeadlineStream {
+    stream: std::net::TcpStream,
+    end: Instant,
+}
+
+impl DeadlineStream {
+    fn remaining(&self) -> io::Result<Duration> {
+        let left = self.end.saturating_duration_since(Instant::now());
+        if left.is_zero() { Err(io::ErrorKind::TimedOut.into()) } else { Ok(left) }
+    }
+}
+
+impl io::Read for DeadlineStream {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        self.stream.set_read_timeout(Some(self.remaining()?))?;
+        self.stream.read(buf)
+    }
+}
+
+impl io::Write for DeadlineStream {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.stream.set_write_timeout(Some(self.remaining()?))?;
+        self.stream.write(buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.stream.flush()
+    }
+}
+
+/// Shuts the client's socket down on drop, so a client still blocked in the
+/// blocking pool when the probe returns or is dropped fails at once and releases
+/// its descriptor.
+struct ShutdownOnDrop(std::net::TcpStream);
+
+impl Drop for ShutdownOnDrop {
+    fn drop(&mut self) {
+        // The peer may already be gone; shutdown only has to wake a blocked client.
+        drop(self.0.shutdown(std::net::Shutdown::Both));
+    }
+}
+
+/// The probe's userspace TLS client: handshakes, writes pattern, trailer and
+/// tail, then reads the echo to the server's close_notify. Every socket
+/// operation is bounded by `limit` from the call.
 fn probe_client(
-    mut stream: std::net::TcpStream,
+    stream: std::net::TcpStream,
     config: Arc<rustls::ClientConfig>,
     pattern: Vec<u8>,
     limit: Duration,
-) -> io::Result<usize> {
+) -> io::Result<Echoed> {
     use std::io::{Read, Write};
-    let limit = limit.max(Duration::from_millis(1));
-    stream.set_read_timeout(Some(limit))?;
-    stream.set_write_timeout(Some(limit))?;
+    let mut stream = DeadlineStream { stream, end: Instant::now() + limit };
     let name = rustls::pki_types::ServerName::try_from(PROBE_SERVER_NAME)
         .map_err(|_| io::Error::from(io::ErrorKind::InvalidInput))?;
     let mut conn = rustls::ClientConnection::new(config, name)
         .map_err(|_| io::Error::from(io::ErrorKind::InvalidData))?;
     let mut tls = rustls::Stream::new(&mut conn, &mut stream);
     tls.write_all(&pattern)?;
+    tls.write_all(PROBE_TRAILER)?;
+    tls.write_all(PROBE_TAIL)?;
+    // End of the client's data: a server that consumed the trailer early sees
+    // the close_notify instead of waiting out the deadline.
+    tls.conn.send_close_notify();
     tls.flush()?;
-    let mut echoed = vec![0u8; pattern.len()];
-    let mut got = 0;
-    while got < echoed.len() {
-        match tls.read(&mut echoed[got..]) {
+    let expected = probe_echo();
+    // One octet of headroom: an octet past the expected echo is an extra.
+    let mut echoed = vec![0u8; expected.len() + 1];
+    let mut received = 0;
+    while received < echoed.len() {
+        match tls.read(&mut echoed[received..]) {
             Ok(0) => break,
-            Ok(n) => got += n,
+            Ok(n) => received += n,
             Err(err) if err.kind() == io::ErrorKind::UnexpectedEof => break,
             Err(err) => return Err(err),
         }
     }
-    Ok(echoed[..got].iter().zip(&pattern).take_while(|(a, b)| a == b).count())
+    let matched = echoed[..received].iter().zip(&expected).take_while(|(a, b)| a == b).count();
+    Ok(Echoed { received, matched })
 }
 
 fn probe_handshake_error(err: PublicHandshakeError) -> RelayProbeError {
@@ -846,38 +920,62 @@ fn probe_handshake_error(err: PublicHandshakeError) -> RelayProbeError {
     }
 }
 
-fn probe_relay_error(err: RelayError) -> RelayProbeError {
-    let expected = PROBE_RELAY_LEN as u64;
+fn probe_read_error(err: LegReadError) -> RelayProbeError {
+    match err {
+        LegReadError::Deadline => RelayProbeError::Timeout,
+        LegReadError::Io { kind } => probe_io(kind),
+        _ => probe_io(io::ErrorKind::InvalidData),
+    }
+}
+
+fn probe_write_error(err: LegWriteError) -> RelayProbeError {
+    match err {
+        LegWriteError::Deadline => RelayProbeError::Timeout,
+        LegWriteError::Io { kind } => probe_io(kind),
+        _ => probe_io(io::ErrorKind::InvalidData),
+    }
+}
+
+/// `before` octets of the echo precede the `span` this `relay_exact` call moves.
+fn probe_relay_error(err: RelayError, before: usize, span: usize) -> RelayProbeError {
     match err {
         RelayError::Pipe(err) => RelayProbeError::Pipe(err),
         RelayError::Deadline | RelayError::NoProgress => RelayProbeError::Timeout,
-        RelayError::SourceEndedMidBody { remaining } => {
-            RelayProbeError::SpliceExactness { moved: expected.saturating_sub(remaining), expected }
-        }
-        RelayError::Read(LegReadError::Io { kind })
-        | RelayError::Write(LegWriteError::Io { kind }) => probe_io(kind),
-        RelayError::Read(_) | RelayError::Write(_) | RelayError::LimitExceeded { .. } => {
-            probe_io(io::ErrorKind::InvalidData)
-        }
+        RelayError::SourceEndedMidBody { remaining } => RelayProbeError::SpliceExactness {
+            moved: (before + span).saturating_sub(usize::try_from(remaining).unwrap_or(usize::MAX))
+                as u64,
+            expected: probe_echo().len() as u64,
+        },
+        RelayError::Read(err) => probe_read_error(err),
+        RelayError::Write(err) => probe_write_error(err),
+        RelayError::LimitExceeded { .. } => probe_io(io::ErrorKind::InvalidData),
     }
 }
 
 fn probe_join<T>(
     joined: Result<io::Result<T>, tokio::task::JoinError>,
 ) -> Result<T, RelayProbeError> {
-    joined.map_err(|_| probe_io(io::ErrorKind::Other))?.map_err(|err| probe_io(err.kind()))
+    joined.map_err(|_| probe_io(io::ErrorKind::Other))?.map_err(|err| match err.kind() {
+        io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock => RelayProbeError::Timeout,
+        kind => probe_io(kind),
+    })
 }
 
 impl HostGatewayRelay {
-    /// What the relay contract needs of the node, proven on the node: a private
-    /// pipe that reads back at the floor, a rustls handshake over a loopback pair
-    /// that arms kernel TLS TX and RX, and `PIPE_FLOOR + 1` octets spliced through
-    /// that pipe and returned pattern-exactly. Every descriptor it opens is closed
-    /// before it returns.
+    /// What the relay contract needs of the node, proven on the node: a rustls
+    /// handshake over a loopback pair that arms kernel TLS TX and RX, and
+    /// `PIPE_FLOOR + 1` octets spliced through the relay's own pipe (whose floor
+    /// `relay_exact` proves on creation) and returned pattern-exactly, with
+    /// nothing read beyond them and the pipe left empty. The server leg is closed
+    /// before this returns. The client socket is shut down on every path (return
+    /// or drop), which wakes a client still blocked in the blocking pool; that
+    /// client then fails at once and closes its own descriptor, so on a timeout
+    /// the client's descriptor is released just after this returns, never later
+    /// than the deadline.
     async fn run_probe(&self, deadline: Instant) -> Result<(), RelayProbeError> {
-        RelayPipe::create().map_err(RelayProbeError::Pipe)?;
         let (server_tls, client_tls) = probe_tls()?;
         let (client, server) = probe_join(tokio::task::spawn_blocking(loopback_pair).await)?;
+        let _wake_client = ShutdownOnDrop(client.try_clone().map_err(|e| probe_io(e.kind()))?);
         let pattern = probe_pattern();
         let limit = deadline.saturating_duration_since(self.clock.now());
         let client_task = tokio::task::spawn_blocking({
@@ -885,20 +983,21 @@ impl HostGatewayRelay {
             move || probe_client(client, client_tls, pattern, limit)
         });
         let outcome = self.relay_probe_leg(OwnedFd::from(server), server_tls, deadline).await;
-        let client_result = probe_join(client_task.await);
+        // A failed leg is closed, so the client is failing or finished: do not wait on it.
         outcome?;
-        let matched = client_result?;
-        if matched == PROBE_RELAY_LEN {
+        let echoed = probe_join(client_task.await)?;
+        let expected = probe_echo().len();
+        if echoed.received == expected && echoed.matched == expected {
             return Ok(());
         }
-        Err(RelayProbeError::SpliceExactness {
-            moved: matched as u64,
-            expected: PROBE_RELAY_LEN as u64,
-        })
+        // Short or corrupt: the octets that were right; extra: everything received.
+        let moved = if echoed.matched < expected { echoed.matched } else { echoed.received };
+        Err(RelayProbeError::SpliceExactness { moved: moved as u64, expected: expected as u64 })
     }
 
-    /// Accepts the probe's server leg and echoes `PROBE_RELAY_LEN` octets through
-    /// the relay pipe; the leg is closed on return.
+    /// Accepts the probe's server leg and echoes the relayed span and the tail
+    /// through the relay pipe, reading the trailer between them with
+    /// `read_through`; the leg is closed on return.
     async fn relay_probe_leg(
         &self,
         server: OwnedFd,
@@ -908,17 +1007,50 @@ impl HostGatewayRelay {
         let accepted =
             self.accept_public(server, tls, deadline).await.map_err(probe_handshake_error)?;
         let (mut read, mut write) = accepted.leg.into_halves();
-        let len = NonZeroU64::new(PROBE_RELAY_LEN as u64)
-            .unwrap_or_else(|| unreachable!("the probe length is a nonzero constant"));
-        let remaining = deadline.saturating_duration_since(self.clock.now());
-        self.relay_exact(
-            &mut read,
-            &mut write,
-            len,
-            RelayDeadlines { absolute: deadline, no_progress: remaining },
-        )
-        .await
-        .map_err(probe_relay_error)
+        let deadlines = || RelayDeadlines {
+            absolute: deadline,
+            no_progress: deadline.saturating_duration_since(self.clock.now()),
+        };
+        let nonzero = |len: usize| {
+            NonZeroU64::new(len as u64)
+                .unwrap_or_else(|| unreachable!("the probe lengths are nonzero constants"))
+        };
+        self.relay_exact(&mut read, &mut write, nonzero(PROBE_RELAY_LEN), deadlines())
+            .await
+            .map_err(|err| probe_relay_error(err, 0, PROBE_RELAY_LEN))?;
+        self.expect_trailer(&mut read, deadline).await?;
+        self.relay_exact(&mut read, &mut write, nonzero(PROBE_TAIL.len()), deadlines())
+            .await
+            .map_err(|err| probe_relay_error(err, PROBE_RELAY_LEN, PROBE_TAIL.len()))?;
+        self.close_write(&mut write, deadline).await.map_err(probe_write_error)
+    }
+
+    /// `relay_exact` "reads nothing beyond `len`": the next octets on the leg are
+    /// the client's trailer, first and intact. A trailer that never arrives, or
+    /// arrives short or altered, means `relay_exact` moved octets past `len`.
+    async fn expect_trailer(
+        &self,
+        read: &mut KtlsReadHalf,
+        deadline: Instant,
+    ) -> Result<(), RelayProbeError> {
+        let violation = |got: usize| RelayProbeError::SpliceExactness {
+            moved: (PROBE_RELAY_LEN + got) as u64,
+            expected: (PROBE_RELAY_LEN + PROBE_TRAILER.len()) as u64,
+        };
+        // Room for the trailer and then some: an extra octet read is a violation too.
+        let limit = NonZeroUsize::new(4 * PROBE_TRAILER.len())
+            .unwrap_or_else(|| unreachable!("the probe trailer is a nonempty constant"));
+        let deadlines = ReadDeadlines {
+            first_octet: deadline,
+            complete_within: None,
+            complete_by: Some(deadline),
+        };
+        match self.read_through(read, HeadTerminator::LineEnd, limit, deadlines).await {
+            Ok(bytes) if bytes.as_slice() == PROBE_TRAILER => Ok(()),
+            Ok(bytes) => Err(violation(bytes.as_slice().len())),
+            Err(LegReadError::CleanEof | LegReadError::Truncated) => Err(violation(0)),
+            Err(err) => Err(probe_read_error(err)),
+        }
     }
 }
 
