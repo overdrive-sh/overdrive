@@ -14,15 +14,6 @@
 //! `overdrive-gateway::ports` (R-20); this module owns the private source the
 //! slot and the injected clock form behind `client_access`.
 
-#![allow(
-    clippy::todo,
-    clippy::needless_pass_by_value,
-    clippy::unused_self,
-    dead_code,
-    unused_variables,
-    reason = "public-ingress DISTILL scaffold: `client_access` and `SlotIdentitySource::with_current` are a later step's scaffolds"
-)]
-
 use std::num::NonZeroU64;
 use std::sync::Arc;
 
@@ -34,6 +25,7 @@ use overdrive_core::gateway_identity::{
 use overdrive_core::id::{NodeId, SpiffeId};
 use overdrive_core::traits::ca::{SvidMaterial, TrustBundle};
 use overdrive_core::traits::clock::Clock;
+use overdrive_core::wall_clock::UnixInstant;
 use overdrive_gateway::ports::{
     GatewayClientIdentityAccess, GatewayClientIdentitySource, GatewayClientMtlsError,
     GatewayIdentityActionTarget, GatewayIdentityLifecycleTarget, GatewayIdentityMutationOutcome,
@@ -96,7 +88,10 @@ impl GatewayIdentitySlot {
 
     /// The capability the exact-peer client borrows held material through.
     pub fn client_access(self: &Arc<Self>, clock: Arc<dyn Clock>) -> GatewayClientIdentityAccess {
-        todo!("SCAFFOLD: GatewayIdentitySlot::client_access")
+        GatewayClientIdentityAccess::new(Arc::new(SlotIdentitySource {
+            slot: Arc::clone(self),
+            clock,
+        }))
     }
 
     /// The write-only action capability installed in the application state.
@@ -239,6 +234,13 @@ impl GatewayClientIdentitySource for SlotIdentitySource {
             &TrustBundle,
         ) -> Result<(), GatewayClientMtlsError>,
     ) -> Result<(), GatewayClientMtlsError> {
-        todo!("SCAFFOLD: SlotIdentitySource::with_current")
+        let state = self.slot.state.lock();
+        let material = state.held.as_ref().ok_or(GatewayClientMtlsError::IdentityAbsent)?;
+        if material.not_after() <= UnixInstant::from_clock(self.clock.as_ref()) {
+            return Err(GatewayClientMtlsError::IdentityExpired);
+        }
+        let outcome = use_material(material, &self.slot.trust_bundle);
+        drop(state);
+        outcome
     }
 }

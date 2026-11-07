@@ -36,6 +36,7 @@ mod sys;
 
 use std::future::Future;
 use std::io;
+use std::net::IpAddr;
 use std::num::{NonZeroU64, NonZeroUsize};
 use std::os::fd::{AsRawFd, OwnedFd, RawFd};
 use std::sync::Arc;
@@ -45,12 +46,15 @@ use async_trait::async_trait;
 use overdrive_core::public_ingress::PublicHostname;
 use overdrive_core::traits::clock::Clock;
 use overdrive_gateway::ports::{
-    AcceptedPublicLeg, GatewayRelay, HeadTerminator, KeyUpdateError, KtlsArmError, KtlsLeg,
-    KtlsReadHalf, KtlsWriteHalf, LegReadError, LegWriteError, PublicHandshakeError, ReadDeadlines,
-    RelayDeadlines, RelayError, RelayPipeError, RelayProbeError, ThroughBytes,
+    AcceptedPublicLeg, GatewayClientMtlsError, GatewayRelay, HeadTerminator, KeyUpdateError,
+    KtlsArmError, KtlsLeg, KtlsReadHalf, KtlsWriteHalf, LegReadError, LegWriteError,
+    PublicHandshakeError, ReadDeadlines, RelayDeadlines, RelayError, RelayPipeError,
+    RelayProbeError, ThroughBytes,
 };
 use parking_lot::Mutex;
+use rustls::client::UnbufferedClientConnection;
 use rustls::kernel::KernelConnection;
+use rustls::pki_types::{CertificateDer, ServerName};
 use rustls::server::{Acceptor, UnbufferedServerConnection};
 use rustls::unbuffered::{ConnectionState, EncodeError};
 use rustls::{ConnectionTrafficSecrets, Error as TlsError, ExtractedSecrets};
@@ -714,6 +718,81 @@ async fn server_handshake(
     Ok(Handshaken { sni, secrets, rekey })
 }
 
+struct ClientHandshaken {
+    peer_certificates: Option<Vec<CertificateDer<'static>>>,
+    secrets: ExtractedSecrets,
+    rekey: Box<dyn Rekey>,
+}
+
+/// The upstream TLS 1.3 client handshake, one record at a time so no octet beyond
+/// the handshake is consumed before arming. The peer's tickets (sent after our
+/// Finished) stay unread in the socket.
+async fn client_handshake(
+    fd: &AsyncFd<OwnedFd>,
+    tls: Arc<rustls::ClientConfig>,
+    peer: IpAddr,
+) -> Result<ClientHandshaken, GatewayClientMtlsError> {
+    let failed = |_: &dyn std::fmt::Debug| GatewayClientMtlsError::Handshake;
+    let mut conn = UnbufferedClientConnection::new(tls, ServerName::IpAddress(peer.into()))
+        .map_err(|err| failed(&err))?;
+    let mut incoming: Vec<u8> = Vec::new();
+    let mut outgoing = vec![0u8; 4096];
+    let mut used = 0usize;
+    loop {
+        let discard;
+        let next;
+        {
+            let status = conn.process_tls_records(&mut incoming);
+            discard = status.discard;
+            next = match status.state.map_err(|err| failed(&err))? {
+                ConnectionState::BlockedHandshake => Next::Read,
+                ConnectionState::EncodeTlsData(mut state) => {
+                    loop {
+                        match state.encode(&mut outgoing[used..]) {
+                            Ok(n) => {
+                                used += n;
+                                break;
+                            }
+                            Err(EncodeError::InsufficientSize(e)) => {
+                                outgoing.resize(used + e.required_size, 0);
+                            }
+                            Err(EncodeError::AlreadyEncoded) => break,
+                        }
+                    }
+                    Next::Continue
+                }
+                ConnectionState::TransmitTlsData(state) => {
+                    state.done();
+                    Next::Transmit
+                }
+                ConnectionState::WriteTraffic(_) => Next::Traffic,
+                _ => return Err(GatewayClientMtlsError::Handshake),
+            };
+        }
+        incoming.drain(..discard);
+        match next {
+            Next::Read => {
+                read_record(fd, &mut incoming).await.map_err(|err| failed(&err))?;
+            }
+            Next::Continue => {}
+            Next::Transmit => {
+                write_all_plain(fd, &outgoing[..used]).await.map_err(|err| failed(&err))?;
+                used = 0;
+            }
+            Next::Traffic if conn.is_handshaking() => {
+                read_record(fd, &mut incoming).await.map_err(|err| failed(&err))?;
+            }
+            Next::Traffic => break,
+        }
+    }
+    if !incoming.is_empty() || used > 0 {
+        return Err(GatewayClientMtlsError::Handshake);
+    }
+    let peer_certificates = conn.peer_certificates().map(<[_]>::to_vec);
+    let (secrets, kernel) = conn.dangerous_into_kernel_connection().map_err(|err| failed(&err))?;
+    Ok(ClientHandshaken { peer_certificates, secrets, rekey: Box::new(kernel) })
+}
+
 /// Installs the TLS ULP and arms TX and RX from the handshake's secrets.
 fn arm(fd: RawFd, secrets: &ExtractedSecrets) -> Result<(), KtlsArmError> {
     let gcm = |t: &ConnectionTrafficSecrets| {
@@ -736,6 +815,27 @@ fn arm(fd: RawFd, secrets: &ExtractedSecrets) -> Result<(), KtlsArmError> {
         )?;
     }
     Ok(())
+}
+
+/// Arms `fd` from a finished handshake's secrets and wraps it as a leg, whichever
+/// side of the handshake the gateway played. On a refusal the descriptor closes
+/// and nothing is returned.
+fn armed_leg(
+    fd: AsyncFd<OwnedFd>,
+    secrets: &ExtractedSecrets,
+    rekey: Box<dyn Rekey>,
+) -> Result<KtlsLeg, KtlsArmError> {
+    arm(fd.get_ref().as_raw_fd(), secrets)?;
+    let core = Arc::new(LegCore {
+        fd,
+        rekey: Mutex::new(rekey),
+        tx: tokio::sync::Mutex::new(()),
+        answers_owed: Mutex::new(0),
+    });
+    Ok(KtlsLeg::from_armed(
+        Box::new(ReadHalf::new(Arc::clone(&core))),
+        Box::new(WriteHalf { leg: core }),
+    ))
 }
 
 // ---------------------------------------------------------------------------
@@ -1085,6 +1185,33 @@ impl HostGatewayRelay {
     }
 }
 
+impl HostGatewayRelay {
+    /// Completes the rustls TLS 1.3 client handshake on the dialed upstream socket
+    /// one record at a time (no application octet is consumed or written), hands
+    /// the peer's presented chain to `verify_peer`, and arms kernel TLS only when
+    /// that returns `Ok`. Any earlier failure arms nothing and writes no
+    /// application octet; the descriptor is closed when it is dropped.
+    pub(crate) async fn arm_after_peer_check(
+        &self,
+        connected: OwnedFd,
+        tls: Arc<rustls::ClientConfig>,
+        peer: IpAddr,
+        deadline: Instant,
+        verify_peer: impl FnOnce(
+            Option<&[CertificateDer<'static>]>,
+        ) -> Result<(), GatewayClientMtlsError>,
+    ) -> Result<KtlsLeg, GatewayClientMtlsError> {
+        sys::set_nonblocking(connected.as_raw_fd())
+            .map_err(|_| GatewayClientMtlsError::Handshake)?;
+        let fd = AsyncFd::new(connected).map_err(|_| GatewayClientMtlsError::Handshake)?;
+        let shaken = bounded_opt(&*self.clock, Some(deadline), client_handshake(&fd, tls, peer))
+            .await
+            .map_err(|()| GatewayClientMtlsError::HandshakeTimeout)??;
+        verify_peer(shaken.peer_certificates.as_deref())?;
+        armed_leg(fd, &shaken.secrets, shaken.rekey).map_err(GatewayClientMtlsError::Arm)
+    }
+}
+
 #[async_trait]
 impl GatewayRelay for HostGatewayRelay {
     async fn probe(&self, deadline: Instant) -> Result<(), RelayProbeError> {
@@ -1100,22 +1227,12 @@ impl GatewayRelay for HostGatewayRelay {
         deadline: Instant,
     ) -> Result<AcceptedPublicLeg, PublicHandshakeError> {
         sys::set_nonblocking(accepted.as_raw_fd()).map_err(|err| handshake_io(&err))?;
-        let raw = accepted.as_raw_fd();
         let fd = AsyncFd::new(accepted).map_err(|err| handshake_io(&err))?;
         let shaken = bounded_opt(&*self.clock, Some(deadline), server_handshake(&fd, tls))
             .await
             .map_err(|()| PublicHandshakeError::Timeout)??;
-        arm(raw, &shaken.secrets).map_err(PublicHandshakeError::Arm)?;
-        let core = Arc::new(LegCore {
-            fd,
-            rekey: Mutex::new(shaken.rekey),
-            tx: tokio::sync::Mutex::new(()),
-            answers_owed: Mutex::new(0),
-        });
-        let leg = KtlsLeg::from_armed(
-            Box::new(ReadHalf::new(Arc::clone(&core))),
-            Box::new(WriteHalf { leg: core }),
-        );
+        let leg =
+            armed_leg(fd, &shaken.secrets, shaken.rekey).map_err(PublicHandshakeError::Arm)?;
         Ok(AcceptedPublicLeg { leg, sni: shaken.sni })
     }
 

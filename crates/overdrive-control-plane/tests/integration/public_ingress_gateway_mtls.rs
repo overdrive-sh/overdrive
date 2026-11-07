@@ -283,9 +283,19 @@ impl Peer {
             for cert in rustls_pemfile::certs(&mut spec.client_roots_pem.as_bytes()) {
                 roots.add(cert.expect("client root PEM")).expect("client root");
             }
+            // The peer names its crypto provider explicitly (the same `ring` provider the
+            // gateway client builds its own config from) rather than reading the
+            // process-default one, which this binary never installs: both
+            // `ServerConfig::builder*` and `WebPkiClientVerifier::builder` would panic
+            // on the peer thread before the client under test is exercised.
+            let provider = Arc::new(rustls::crypto::ring::default_provider());
             let verifier =
-                WebPkiClientVerifier::builder(Arc::new(roots)).build().expect("client verifier");
-            let config = ServerConfig::builder_with_protocol_versions(&[&rustls::version::TLS13])
+                WebPkiClientVerifier::builder_with_provider(Arc::new(roots), Arc::clone(&provider))
+                    .build()
+                    .expect("client verifier");
+            let config = ServerConfig::builder_with_provider(provider)
+                .with_protocol_versions(&[&rustls::version::TLS13])
+                .expect("peer protocol versions")
                 .with_client_cert_verifier(verifier)
                 .with_single_cert(spec.chain, spec.key)
                 .expect("peer server config");
@@ -492,7 +502,6 @@ fn assert_nothing_reached_the_peer(seen: &PeerObservation, context: &str) {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "pending DELIVER exact-peer-client-mtls"]
 async fn a_valid_peer_that_is_not_the_selected_peer_is_rejected_before_any_body_and_nothing_is_armed()
  {
     let pki = Arc::new(TestPki::mint());
@@ -536,7 +545,6 @@ async fn a_valid_peer_that_is_not_the_selected_peer_is_rejected_before_any_body_
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "pending DELIVER exact-peer-client-mtls"]
 async fn an_unusable_gateway_identity_fails_the_dial_before_any_body() {
     enum Held {
         Absent,
@@ -597,7 +605,6 @@ async fn an_unusable_gateway_identity_fails_the_dial_before_any_body() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "pending DELIVER exact-peer-client-mtls"]
 async fn a_descriptor_that_is_not_a_connected_socket_has_no_peer_address() {
     let pki = Arc::new(TestPki::mint());
     let site = Site::new();
@@ -626,7 +633,6 @@ async fn a_descriptor_that_is_not_a_connected_socket_has_no_peer_address() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "pending DELIVER exact-peer-client-mtls"]
 async fn a_peer_that_never_answers_the_handshake_times_out_before_the_deadline_passes() {
     const BUDGET: Duration = Duration::from_millis(400);
     let pki = Arc::new(TestPki::mint());
@@ -750,7 +756,6 @@ impl GatewayPki {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "pending DELIVER exact-peer-client-mtls"]
 async fn a_peer_certificate_without_a_spiffe_uri_san_is_rejected_by_shape() {
     let shape = Arc::new(GatewayPki::mint("https://peer.example.test/not-a-spiffe-id"));
     let site = Site::new();
@@ -797,7 +802,6 @@ async fn a_peer_certificate_without_a_spiffe_uri_san_is_rejected_by_shape() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "pending DELIVER exact-peer-client-mtls"]
 async fn the_matching_peer_is_dialed_over_tls_13_records_with_no_cleartext_and_the_leg_is_armed() {
     let pki = Arc::new(GatewayPki::mint(SELECTED_PEER_SPIFFE));
     let site = Site::new();

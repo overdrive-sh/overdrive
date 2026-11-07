@@ -8,22 +8,8 @@
 //! resolved from the receipt's `BackendId`. Only then is the kernel armed
 //! through the same `HostGatewayRelay` and the leg sealed as a
 //! `GatewayUpstream`; any earlier failure arms nothing and writes no body byte.
-//!
-//! SCAFFOLD: true. `HostGatewayClientMtls::new`, the port implementation and
-//! `HostGatewayClientMtlsFactory` (R-20) are the pinned shapes.
 
-#![allow(
-    clippy::todo,
-    clippy::doc_markdown,
-    clippy::needless_pass_by_value,
-    clippy::missing_const_for_fn,
-    clippy::unused_async,
-    clippy::unused_self,
-    dead_code,
-    unused_variables,
-    reason = "public-ingress DISTILL scaffold: bodies are DELIVER's"
-)]
-
+use std::net::TcpStream;
 use std::os::fd::OwnedFd;
 use std::sync::Arc;
 use std::time::Instant;
@@ -35,24 +21,48 @@ use overdrive_gateway::ports::{
     GatewayClientMtlsFactory, GatewayUpstream, GatewayUpstreamSeal,
 };
 use overdrive_gateway::runtime::limits::GatewayLimits;
+use rustls::pki_types::CertificateDer;
 
+use super::tls_config;
 use crate::gateway_relay::HostGatewayRelay;
 
 /// The Host exact-peer client. Called once by `serve` composition; supplied
 /// only as `Arc<dyn GatewayClientMtls>`.
 pub struct HostGatewayClientMtls {
-    _private: (),
+    identity: GatewayClientIdentityAccess,
+    seal: GatewayUpstreamSeal,
+    relay: Arc<HostGatewayRelay>,
 }
 
 impl HostGatewayClientMtls {
-    pub fn new(
+    /// `_limits` is part of the pinned shape; the handshake is bounded by the
+    /// `deadline` each [`authenticate`](GatewayClientMtls::authenticate) call
+    /// carries, so no limit is read here.
+    pub const fn new(
         identity: GatewayClientIdentityAccess,
         seal: GatewayUpstreamSeal,
-        limits: GatewayLimits,
+        _limits: GatewayLimits,
         relay: Arc<HostGatewayRelay>,
     ) -> Self {
-        todo!("SCAFFOLD: HostGatewayClientMtls::new")
+        Self { identity, seal, relay }
     }
+}
+
+/// The peer-identity check run on the verified chain once the handshake has
+/// completed and before the kernel is armed: the certificate must carry a sole
+/// SPIFFE URI SAN (shape), and it must equal the selected peer (equality).
+fn check_selected_peer(
+    expected: &SpiffeId,
+    presented: Option<&[CertificateDer<'static>]>,
+) -> Result<(), GatewayClientMtlsError> {
+    let leaf =
+        presented.and_then(<[_]>::first).ok_or(GatewayClientMtlsError::PeerCertificateMissing)?;
+    let actual =
+        tls_config::sole_spiffe_uri(leaf).ok_or(GatewayClientMtlsError::PeerSpiffeShape)?;
+    if &actual == expected {
+        return Ok(());
+    }
+    Err(GatewayClientMtlsError::PeerSpiffeMismatch { expected: expected.clone(), actual })
 }
 
 #[async_trait]
@@ -63,7 +73,20 @@ impl GatewayClientMtls for HostGatewayClientMtls {
         expected_peer: SpiffeId,
         deadline: Instant,
     ) -> Result<GatewayUpstream, GatewayClientMtlsError> {
-        todo!("SCAFFOLD: HostGatewayClientMtls::authenticate")
+        let config = self.identity.with_current(|svid, bundle| {
+            tls_config::gateway_client_config(svid, bundle)
+                .map_err(|_| GatewayClientMtlsError::Handshake)
+        })?;
+        // A descriptor that is not a connected IP socket has no selected peer address.
+        let stream = TcpStream::from(connected);
+        let peer = stream.peer_addr().map_err(|_| GatewayClientMtlsError::PeerAddress)?;
+        let leg = self
+            .relay
+            .arm_after_peer_check(OwnedFd::from(stream), config, peer.ip(), deadline, |presented| {
+                check_selected_peer(&expected_peer, presented)
+            })
+            .await?;
+        Ok(self.seal.seal_authenticated(leg))
     }
 }
 
@@ -74,13 +97,18 @@ pub struct HostGatewayClientMtlsFactory {
 }
 
 impl HostGatewayClientMtlsFactory {
-    pub fn new(relay: Arc<HostGatewayRelay>) -> Self {
+    pub const fn new(relay: Arc<HostGatewayRelay>) -> Self {
         Self { relay }
     }
 }
 
 impl GatewayClientMtlsFactory for HostGatewayClientMtlsFactory {
     fn client_mtls(&self, deps: GatewayClientMtlsDeps) -> Arc<dyn GatewayClientMtls> {
-        todo!("SCAFFOLD: HostGatewayClientMtlsFactory::client_mtls")
+        Arc::new(HostGatewayClientMtls::new(
+            deps.identity,
+            deps.seal,
+            deps.limits,
+            Arc::clone(&self.relay),
+        ))
     }
 }

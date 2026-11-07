@@ -131,11 +131,27 @@ fn present_chain(
 struct SpiffeServerVerifier {
     roots: RootCertStore,
     provider: Arc<CryptoProvider>,
+    uri: UriCheck,
+}
+
+/// Whether the verifier itself enforces the single-SPIFFE-URI shape.
+#[derive(Debug, Clone, Copy)]
+enum UriCheck {
+    /// The workload client: any bundle-chained single-SPIFFE-URI peer.
+    Enforced,
+    /// The gateway client: the shape and the equality with the selected peer are
+    /// checked by the caller on the verified chain after the handshake, so each
+    /// failure keeps its own typed error. The chain is still fully verified here.
+    CallerChecks,
 }
 
 impl SpiffeServerVerifier {
     fn new(roots: RootCertStore) -> Self {
-        Self { roots, provider: Arc::new(rustls::crypto::ring::default_provider()) }
+        Self::with_uri_check(roots, UriCheck::Enforced)
+    }
+
+    fn with_uri_check(roots: RootCertStore, uri: UriCheck) -> Self {
+        Self { roots, provider: Arc::new(rustls::crypto::ring::default_provider()), uri }
     }
 }
 
@@ -156,7 +172,9 @@ impl ServerCertVerifier for SpiffeServerVerifier {
             now,
             self.provider.signature_verification_algorithms.all,
         )?;
-        validate_single_spiffe_uri(end_entity)?;
+        if matches!(self.uri, UriCheck::Enforced) {
+            validate_single_spiffe_uri(end_entity)?;
+        }
         Ok(ServerCertVerified::assertion())
     }
 
@@ -193,15 +211,25 @@ impl ServerCertVerifier for SpiffeServerVerifier {
     }
 }
 
-fn validate_single_spiffe_uri(
-    end_entity: &CertificateDer<'_>,
-) -> std::result::Result<SpiffeId, RustlsError> {
+/// Why a certificate carries no usable SPIFFE identity.
+enum SpiffeUriFault {
+    BadEncoding,
+    Shape,
+}
+
+/// The certificate's sole SPIFFE URI SAN: exactly one URI SAN, and a valid
+/// SPIFFE ID. `None` for every other shape.
+pub(super) fn sole_spiffe_uri(end_entity: &CertificateDer<'_>) -> Option<SpiffeId> {
+    spiffe_uri(end_entity).ok()
+}
+
+fn spiffe_uri(end_entity: &CertificateDer<'_>) -> std::result::Result<SpiffeId, SpiffeUriFault> {
     let (_, cert) = x509_parser::certificate::X509Certificate::from_der(end_entity.as_ref())
-        .map_err(|_| RustlsError::InvalidCertificate(CertificateError::BadEncoding))?;
+        .map_err(|_| SpiffeUriFault::BadEncoding)?;
     let san = cert
         .subject_alternative_name()
-        .map_err(|_| RustlsError::InvalidCertificate(CertificateError::BadEncoding))?
-        .ok_or(RustlsError::InvalidCertificate(CertificateError::ApplicationVerificationFailure))?;
+        .map_err(|_| SpiffeUriFault::BadEncoding)?
+        .ok_or(SpiffeUriFault::Shape)?;
     let uris = san
         .value
         .general_names
@@ -212,12 +240,21 @@ fn validate_single_spiffe_uri(
         })
         .collect::<Vec<_>>();
     let [uri] = uris.as_slice() else {
-        return Err(RustlsError::InvalidCertificate(
-            CertificateError::ApplicationVerificationFailure,
-        ));
+        return Err(SpiffeUriFault::Shape);
     };
-    SpiffeId::new(uri).map_err(|_| {
-        RustlsError::InvalidCertificate(CertificateError::ApplicationVerificationFailure)
+    SpiffeId::new(uri).map_err(|_| SpiffeUriFault::Shape)
+}
+
+fn validate_single_spiffe_uri(
+    end_entity: &CertificateDer<'_>,
+) -> std::result::Result<SpiffeId, RustlsError> {
+    spiffe_uri(end_entity).map_err(|fault| match fault {
+        SpiffeUriFault::BadEncoding => {
+            RustlsError::InvalidCertificate(CertificateError::BadEncoding)
+        }
+        SpiffeUriFault::Shape => {
+            RustlsError::InvalidCertificate(CertificateError::ApplicationVerificationFailure)
+        }
     })
 }
 
@@ -238,6 +275,39 @@ pub(super) fn client_config(
         .with_client_auth_cert(certs, key)
         .map_err(|e| MtlsEnforcementError::HandshakeFailed {
             reason: format!("client config with SVID: {e}"),
+        })?;
+    cfg.enable_secret_extraction = true;
+    Ok(Arc::new(cfg))
+}
+
+/// GATEWAY CLIENT config (ADR-0234): TLS 1.3 only, AES-GCM suites only (the
+/// kernel-TLS arming set), presenting the gateway SVID chain `[leaf,
+/// intermediate]` and verifying that the peer chains to the trust-bundle root.
+/// The peer's SPIFFE URI shape and its equality with the selected peer are
+/// checked by the caller on the verified chain (see [`UriCheck::CallerChecks`]).
+/// Secret extraction enabled (kTLS-arm seam).
+pub(super) fn gateway_client_config(
+    svid: &SvidMaterial,
+    bundle: &TrustBundle,
+) -> Result<Arc<ClientConfig>> {
+    let verifier =
+        Arc::new(SpiffeServerVerifier::with_uri_check(root_store(bundle)?, UriCheck::CallerChecks));
+    let (certs, key) = present_chain(svid, bundle)?;
+    let mut provider = rustls::crypto::ring::default_provider();
+    provider.cipher_suites = vec![
+        rustls::crypto::ring::cipher_suite::TLS13_AES_256_GCM_SHA384,
+        rustls::crypto::ring::cipher_suite::TLS13_AES_128_GCM_SHA256,
+    ];
+    let mut cfg = ClientConfig::builder_with_provider(Arc::new(provider))
+        .with_protocol_versions(&[&rustls::version::TLS13])
+        .map_err(|e| MtlsEnforcementError::HandshakeFailed {
+            reason: format!("gateway client protocol versions: {e}"),
+        })?
+        .dangerous()
+        .with_custom_certificate_verifier(verifier)
+        .with_client_auth_cert(certs, key)
+        .map_err(|e| MtlsEnforcementError::HandshakeFailed {
+            reason: format!("gateway client config with SVID: {e}"),
         })?;
     cfg.enable_secret_extraction = true;
     Ok(Arc::new(cfg))

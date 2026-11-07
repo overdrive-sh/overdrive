@@ -1564,7 +1564,11 @@ impl SimGatewayClientMtlsFactory {
 
 impl GatewayClientMtlsFactory for SimGatewayClientMtlsFactory {
     fn client_mtls(&self, deps: GatewayClientMtlsDeps) -> Arc<dyn GatewayClientMtls> {
-        todo!("SCAFFOLD: SimGatewayClientMtlsFactory::client_mtls")
+        Arc::new(SimGatewayClientMtls::new(
+            deps.seal,
+            Arc::clone(&self.relay),
+            Arc::clone(&self.clock),
+        ))
     }
 }
 
@@ -1580,15 +1584,17 @@ pub struct SimGatewayAdapters {
 
 impl SimGatewayAdapters {
     pub fn new(clock: Arc<dyn Clock>) -> Self {
-        todo!("SCAFFOLD: SimGatewayAdapters::new")
+        let relay = Arc::new(SimGatewayRelay::new(Arc::clone(&clock)));
+        let client_mtls = Arc::new(SimGatewayClientMtlsFactory::new(Arc::clone(&relay), clock));
+        Self { relay, client_mtls }
     }
 
     pub fn relay(&self) -> Arc<dyn GatewayRelay> {
-        todo!("SCAFFOLD: SimGatewayAdapters::relay")
+        Arc::clone(&self.relay) as Arc<dyn GatewayRelay>
     }
 
     pub fn client_mtls(&self) -> Arc<dyn GatewayClientMtlsFactory> {
-        todo!("SCAFFOLD: SimGatewayAdapters::client_mtls")
+        Arc::clone(&self.client_mtls) as Arc<dyn GatewayClientMtlsFactory>
     }
 
     /// The concrete Sim relay, for the test-support surface (scripting,

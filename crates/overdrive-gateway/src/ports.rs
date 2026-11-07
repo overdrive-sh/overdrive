@@ -311,13 +311,24 @@ impl GatewayClientIdentityAccess {
     }
 
     /// `IdentityAbsent` / `IdentityExpired` when no time-usable material is
-    /// held. Its only production caller is `overdrive-dataplane`'s
-    /// `mtls::gateway_client` (a review and grep rule).
+    /// held. A source that returns `Ok` without running the closure holds no
+    /// usable material, so that too is `IdentityAbsent`. Its only production
+    /// caller is `overdrive-dataplane`'s `mtls::gateway_client` (a review and
+    /// grep rule).
     pub fn with_current<R>(
         &self,
         use_material: impl FnOnce(&SvidMaterial, &TrustBundle) -> Result<R, GatewayClientMtlsError>,
     ) -> Result<R, GatewayClientMtlsError> {
-        todo!("SCAFFOLD: GatewayClientIdentityAccess::with_current")
+        let mut pending = Some(use_material);
+        let mut produced = None;
+        self.source.with_current(&mut |material, bundle| {
+            let Some(use_material) = pending.take() else {
+                unreachable!("a source runs the closure at most once")
+            };
+            produced = Some(use_material(material, bundle)?);
+            Ok(())
+        })?;
+        produced.ok_or(GatewayClientMtlsError::IdentityAbsent)
     }
 }
 

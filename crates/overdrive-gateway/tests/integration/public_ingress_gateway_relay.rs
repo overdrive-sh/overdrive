@@ -2466,7 +2466,6 @@ async fn every_failure_is_a_single_attempt_without_retry_or_second_backend() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER exact-peer-client-mtls"]
 async fn an_upstream_arm_refusal_or_unequal_peer_sends_nothing_and_is_a_502() {
     let world = World::start(UPSTREAM_ARM, Spec::default()).await;
     let kinds = [
@@ -2504,7 +2503,6 @@ async fn an_upstream_arm_refusal_or_unequal_peer_sends_nothing_and_is_a_502() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER exact-peer-client-mtls"]
 async fn a_public_arm_refusal_closes_the_socket_without_reading_any_http_octet() {
     let world = World::start(PUBLIC_ARM, Spec::default()).await;
     let kinds = [
