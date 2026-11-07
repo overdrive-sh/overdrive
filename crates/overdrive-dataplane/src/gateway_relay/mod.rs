@@ -739,6 +739,190 @@ fn arm(fd: RawFd, secrets: &ExtractedSecrets) -> Result<(), KtlsArmError> {
 }
 
 // ---------------------------------------------------------------------------
+// Earned-Trust probe
+// ---------------------------------------------------------------------------
+
+/// Server name of the probe's throwaway certificate (never on a real wire).
+const PROBE_SERVER_NAME: &str = "relay-probe.overdrive.invalid";
+
+/// The probe's relayed length: one octet past the pipe floor, so the splice
+/// must cross a full pipe and a one-octet remainder.
+const PROBE_RELAY_LEN: usize = PIPE_FLOOR + 1;
+
+fn probe_io(kind: io::ErrorKind) -> RelayProbeError {
+    RelayProbeError::Io { kind }
+}
+
+fn probe_pattern() -> Vec<u8> {
+    (0..PROBE_RELAY_LEN).map(|i| (i % 251) as u8).collect()
+}
+
+/// An ephemeral self-signed certificate: server and client configs trusting it,
+/// both TLS 1.3 with AES-128-GCM only, secret extraction on the server.
+fn probe_tls() -> Result<(Arc<rustls::ServerConfig>, Arc<rustls::ClientConfig>), RelayProbeError> {
+    let invalid = |_: &dyn std::fmt::Display| probe_io(io::ErrorKind::InvalidData);
+    let params = rcgen::CertificateParams::new(vec![PROBE_SERVER_NAME.to_string()])
+        .map_err(|e| invalid(&e))?;
+    let key =
+        rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).map_err(|e| invalid(&e))?;
+    let cert = params.self_signed(&key).map_err(|e| invalid(&e))?;
+    let cert_der = rustls::pki_types::CertificateDer::from(cert.der().to_vec());
+    let key_der =
+        rustls::pki_types::PrivateKeyDer::try_from(key.serialize_der()).map_err(|e| invalid(&e))?;
+
+    let mut provider = rustls::crypto::ring::default_provider();
+    provider.cipher_suites = vec![rustls::crypto::ring::cipher_suite::TLS13_AES_128_GCM_SHA256];
+    let provider = Arc::new(provider);
+
+    let mut server = rustls::ServerConfig::builder_with_provider(Arc::clone(&provider))
+        .with_protocol_versions(&[&rustls::version::TLS13])
+        .map_err(|e| invalid(&e))?
+        .with_no_client_auth()
+        .with_single_cert(vec![cert_der.clone()], key_der)
+        .map_err(|e| invalid(&e))?;
+    server.enable_secret_extraction = true;
+    server.send_tls13_tickets = 0;
+    server.alpn_protocols = vec![b"http/1.1".to_vec()];
+
+    let mut roots = rustls::RootCertStore::empty();
+    roots.add(cert_der).map_err(|e| invalid(&e))?;
+    let mut client = rustls::ClientConfig::builder_with_provider(provider)
+        .with_protocol_versions(&[&rustls::version::TLS13])
+        .map_err(|e| invalid(&e))?
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+    client.alpn_protocols = vec![b"http/1.1".to_vec()];
+    Ok((Arc::new(server), Arc::new(client)))
+}
+
+/// A connected loopback pair `(client, server)`; the listener is closed on return.
+fn loopback_pair() -> io::Result<(std::net::TcpStream, std::net::TcpStream)> {
+    let listener = std::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))?;
+    let client = std::net::TcpStream::connect(listener.local_addr()?)?;
+    let (server, _) = listener.accept()?;
+    Ok((client, server))
+}
+
+/// The probe's userspace TLS client: handshakes, writes the pattern, reads the
+/// echo and returns how many leading octets of it matched the pattern.
+fn probe_client(
+    mut stream: std::net::TcpStream,
+    config: Arc<rustls::ClientConfig>,
+    pattern: Vec<u8>,
+    limit: Duration,
+) -> io::Result<usize> {
+    use std::io::{Read, Write};
+    let limit = limit.max(Duration::from_millis(1));
+    stream.set_read_timeout(Some(limit))?;
+    stream.set_write_timeout(Some(limit))?;
+    let name = rustls::pki_types::ServerName::try_from(PROBE_SERVER_NAME)
+        .map_err(|_| io::Error::from(io::ErrorKind::InvalidInput))?;
+    let mut conn = rustls::ClientConnection::new(config, name)
+        .map_err(|_| io::Error::from(io::ErrorKind::InvalidData))?;
+    let mut tls = rustls::Stream::new(&mut conn, &mut stream);
+    tls.write_all(&pattern)?;
+    tls.flush()?;
+    let mut echoed = vec![0u8; pattern.len()];
+    let mut got = 0;
+    while got < echoed.len() {
+        match tls.read(&mut echoed[got..]) {
+            Ok(0) => break,
+            Ok(n) => got += n,
+            Err(err) if err.kind() == io::ErrorKind::UnexpectedEof => break,
+            Err(err) => return Err(err),
+        }
+    }
+    Ok(echoed[..got].iter().zip(&pattern).take_while(|(a, b)| a == b).count())
+}
+
+fn probe_handshake_error(err: PublicHandshakeError) -> RelayProbeError {
+    match err {
+        PublicHandshakeError::Arm(kind) => RelayProbeError::Arm(kind),
+        PublicHandshakeError::Timeout => RelayProbeError::Timeout,
+        PublicHandshakeError::Io { kind } => probe_io(kind),
+        PublicHandshakeError::Tls { .. }
+        | PublicHandshakeError::AlpnMismatch
+        | PublicHandshakeError::ServerNameMissing => probe_io(io::ErrorKind::InvalidData),
+    }
+}
+
+fn probe_relay_error(err: RelayError) -> RelayProbeError {
+    let expected = PROBE_RELAY_LEN as u64;
+    match err {
+        RelayError::Pipe(err) => RelayProbeError::Pipe(err),
+        RelayError::Deadline | RelayError::NoProgress => RelayProbeError::Timeout,
+        RelayError::SourceEndedMidBody { remaining } => {
+            RelayProbeError::SpliceExactness { moved: expected.saturating_sub(remaining), expected }
+        }
+        RelayError::Read(LegReadError::Io { kind })
+        | RelayError::Write(LegWriteError::Io { kind }) => probe_io(kind),
+        RelayError::Read(_) | RelayError::Write(_) | RelayError::LimitExceeded { .. } => {
+            probe_io(io::ErrorKind::InvalidData)
+        }
+    }
+}
+
+fn probe_join<T>(
+    joined: Result<io::Result<T>, tokio::task::JoinError>,
+) -> Result<T, RelayProbeError> {
+    joined.map_err(|_| probe_io(io::ErrorKind::Other))?.map_err(|err| probe_io(err.kind()))
+}
+
+impl HostGatewayRelay {
+    /// What the relay contract needs of the node, proven on the node: a private
+    /// pipe that reads back at the floor, a rustls handshake over a loopback pair
+    /// that arms kernel TLS TX and RX, and `PIPE_FLOOR + 1` octets spliced through
+    /// that pipe and returned pattern-exactly. Every descriptor it opens is closed
+    /// before it returns.
+    async fn run_probe(&self, deadline: Instant) -> Result<(), RelayProbeError> {
+        RelayPipe::create().map_err(RelayProbeError::Pipe)?;
+        let (server_tls, client_tls) = probe_tls()?;
+        let (client, server) = probe_join(tokio::task::spawn_blocking(loopback_pair).await)?;
+        let pattern = probe_pattern();
+        let limit = deadline.saturating_duration_since(self.clock.now());
+        let client_task = tokio::task::spawn_blocking({
+            let pattern = pattern.clone();
+            move || probe_client(client, client_tls, pattern, limit)
+        });
+        let outcome = self.relay_probe_leg(OwnedFd::from(server), server_tls, deadline).await;
+        let client_result = probe_join(client_task.await);
+        outcome?;
+        let matched = client_result?;
+        if matched == PROBE_RELAY_LEN {
+            return Ok(());
+        }
+        Err(RelayProbeError::SpliceExactness {
+            moved: matched as u64,
+            expected: PROBE_RELAY_LEN as u64,
+        })
+    }
+
+    /// Accepts the probe's server leg and echoes `PROBE_RELAY_LEN` octets through
+    /// the relay pipe; the leg is closed on return.
+    async fn relay_probe_leg(
+        &self,
+        server: OwnedFd,
+        tls: Arc<rustls::ServerConfig>,
+        deadline: Instant,
+    ) -> Result<(), RelayProbeError> {
+        let accepted =
+            self.accept_public(server, tls, deadline).await.map_err(probe_handshake_error)?;
+        let (mut read, mut write) = accepted.leg.into_halves();
+        let len = NonZeroU64::new(PROBE_RELAY_LEN as u64)
+            .unwrap_or_else(|| unreachable!("the probe length is a nonzero constant"));
+        let remaining = deadline.saturating_duration_since(self.clock.now());
+        self.relay_exact(
+            &mut read,
+            &mut write,
+            len,
+            RelayDeadlines { absolute: deadline, no_progress: remaining },
+        )
+        .await
+        .map_err(probe_relay_error)
+    }
+}
+
+// ---------------------------------------------------------------------------
 // The port
 // ---------------------------------------------------------------------------
 
@@ -761,9 +945,10 @@ impl HostGatewayRelay {
 
 #[async_trait]
 impl GatewayRelay for HostGatewayRelay {
-    #[allow(clippy::todo, reason = "the Earned-Trust probe is a later roadmap step")]
-    async fn probe(&self, _deadline: Instant) -> Result<(), RelayProbeError> {
-        todo!("SCAFFOLD: HostGatewayRelay::probe")
+    async fn probe(&self, deadline: Instant) -> Result<(), RelayProbeError> {
+        bounded_opt(&*self.clock, Some(deadline), self.run_probe(deadline))
+            .await
+            .map_err(|()| RelayProbeError::Timeout)?
     }
 
     async fn accept_public(

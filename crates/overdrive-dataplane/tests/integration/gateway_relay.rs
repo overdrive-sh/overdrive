@@ -1173,7 +1173,6 @@ async fn mixed_record_sizes_straddling_heads_and_chunk_lines_arrive_octet_exact(
 /// substrate lies (S-PIG-99) and the arm-failure typing by S-PIG-98.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[ignore = "pending DELIVER relay-earned-trust-probe"]
 async fn honest_kernel_probe_passes_and_releases_its_descriptors() {
     let relay = host_relay();
     let fds_before_probe = open_fds_after_settle().await;

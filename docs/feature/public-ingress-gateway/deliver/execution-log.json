@@ -813,6 +813,41 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-11-07T17:26:49Z"
+    },
+    {
+      "sid": "04-04",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-07T18:00:12Z"
+    },
+    {
+      "sid": "04-04",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: gold test the_relay_probe_refuses_every_substrate_lie_with_its_own_typed_error asserts distinct RelayProbeError discriminants but UlpAbsent and CipherRefused both map to Arm(..); needs acceptance-designer fix or architect-pinned variant",
+      "t": "2026-11-07T18:01:08Z"
+    },
+    {
+      "sid": "04-04",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: gold test the_relay_probe_refuses_every_substrate_lie_with_its_own_typed_error asserts distinct RelayProbeError discriminants but UlpAbsent and CipherRefused both map to Arm(..); needs acceptance-designer fix or architect-pinned variant",
+      "t": "2026-11-07T18:01:08Z"
+    },
+    {
+      "sid": "04-04",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-07T18:40:45Z"
+    },
+    {
+      "sid": "04-04",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-07T18:40:45Z"
     }
   ]
 }

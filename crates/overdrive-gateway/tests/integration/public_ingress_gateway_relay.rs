@@ -988,22 +988,32 @@ async fn drive_clock<T>(clock: &SimClock, step: Duration, future: impl Future<Ou
 /// substrate) to the gate's probe. Behind a lie nothing is ever promoted: the
 /// caller waits for the refusal; behind the honest substrate it waits for the
 /// promotion.
+///
+/// The gate's frontend probe connects to the Service frontend, so each call
+/// serves its own listener on `slot.vip(ordinal)` for as long as the returned
+/// `FrontendDrain` lives; distinct `ordinal`s keep one case's listener from
+/// colliding with another's.
 async fn start_behind_substrate(
     lie: Option<SubstrateLie>,
-) -> (Arc<SimClock>, GatewayStatusReads, GatewayHandle, SocketAddrV4, Site) {
+    ordinal: u16,
+) -> (Arc<SimClock>, GatewayStatusReads, GatewayHandle, SocketAddrV4, Site, FrontendDrain) {
     let slot = RELAY_PROBE;
     let site = Site::new();
     let clock = Arc::new(SimClock::new());
     let intent = Arc::new(LocalIntentStore::open(&site.intent_path).expect("real intent store"));
     let node = NodeId::new("gateway-node").expect("node ID");
     let observations = Arc::new(SimObservationStore::single_peer(node.clone(), 54));
-    let vip_view = persist_api_service(&intent, slot.vip(0)).await;
+    let frontend = FrontendDrain::start(
+        std::net::TcpListener::bind((slot.vip(ordinal), SERVICE_PORT))
+            .expect("Service frontend listener"),
+    );
+    let vip_view = persist_api_service(&intent, slot.vip(ordinal)).await;
     let intent_port: Arc<dyn IntentStore> = intent;
     let observation_port: Arc<dyn ObservationStore> = observations;
     let clock_port: Arc<dyn Clock> = clock.clone();
     let builder = UnboundGatewayBuilder::new(
         node,
-        site.config(slot.bind(0)),
+        site.config(slot.bind(ordinal)),
         intent_port,
         observation_port,
         vip_view,
@@ -1024,7 +1034,7 @@ async fn start_behind_substrate(
     );
     let (handle, routes, status) = builder.start(dependencies).await.into_parts();
     routes.routes().apply(route("/")).await.expect("declare the Route");
-    (clock, status, handle, SocketAddrV4::new(slot.bind(0), 443), site)
+    (clock, status, handle, SocketAddrV4::new(slot.bind(ordinal), 443), site, frontend)
 }
 
 async fn wait_refused(status: &GatewayStatusReads) -> GatewayApplicationStatusRowV1 {
@@ -2552,7 +2562,6 @@ async fn a_public_arm_refusal_closes_the_socket_without_reading_any_http_octet()
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER relay-earned-trust-probe"]
 async fn the_relay_probe_refuses_every_substrate_lie_with_its_own_typed_error() {
     let clock = Arc::new(SimClock::new());
     let relay = SimGatewayRelay::new(clock);
@@ -2582,12 +2591,14 @@ async fn the_relay_probe_refuses_every_substrate_lie_with_its_own_typed_error() 
     for (lie, is_matching) in lies {
         relay.present_substrate(Some(lie.clone()));
         let error = relay.probe(deadline()).await.expect_err("a lying substrate is refused");
-        assert!(is_matching(&error), "{lie:?} is refused with its own variant, got {error:?}");
-        refused.push(std::mem::discriminant(&error));
+        assert!(is_matching(&error), "{lie:?} is refused with its own typed error, got {error:?}");
+        refused.push(error);
     }
-    for (index, variant) in refused.iter().enumerate() {
+    // Compared as full values: `ulp_absent` and `cipher_refused` are both
+    // `Arm(..)` by design and are told apart by the inner `KtlsArmError`.
+    for (index, error) in refused.iter().enumerate() {
         for other in &refused[index + 1..] {
-            assert_ne!(variant, other, "no probe variant stands for two lies");
+            assert_ne!(error, other, "no probe error stands for two lies");
         }
     }
 
@@ -2606,7 +2617,7 @@ async fn the_relay_probe_refuses_every_substrate_lie_with_its_own_typed_error() 
     ];
 
     // Positive control: behind the honest substrate the same gate promotes.
-    let (clock, status, handle, _bind, _site) = start_behind_substrate(None).await;
+    let (clock, status, handle, _bind, _site, _frontend) = start_behind_substrate(None, 0).await;
     let promoted = wait_promoted(&status).await;
     assert!(promoted.current.is_some(), "honest substrate: a Current generation is promoted");
     assert!(
@@ -2616,8 +2627,9 @@ async fn the_relay_probe_refuses_every_substrate_lie_with_its_own_typed_error() 
     assert!(promoted.unavailable.is_none(), "honest substrate: nothing is unavailable");
     let _report = drive_clock(&clock, Duration::from_millis(50), handle.shutdown(GRACE)).await;
 
-    for lie in gate_lies {
-        let (clock, status, handle, bind, _site) = start_behind_substrate(Some(lie.clone())).await;
+    for (ordinal, lie) in (1_u16..).zip(gate_lies) {
+        let (clock, status, handle, bind, _site, _frontend) =
+            start_behind_substrate(Some(lie.clone()), ordinal).await;
         let refused = wait_refused(&status).await;
         assert_eq!(
             refused.unavailable,

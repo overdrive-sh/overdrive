@@ -45,8 +45,8 @@ use crate::frontend::IntentServiceFrontendResolver;
 use crate::ports::{
     GatewayClientMtls, GatewayConnectCleanup, GatewayConnectDataplane,
     GatewayConnectDataplaneError, GatewayConnectIntent, GatewayIdentityLifecycleControl,
-    GatewayIdentityLifecycleError, GatewayRelay, GatewayUpstreamSeal, ServiceFrontendResolve,
-    ServiceFrontendResolveError,
+    GatewayIdentityLifecycleError, GatewayRelay, GatewayUpstreamSeal, RelayProbeError,
+    ServiceFrontendResolve, ServiceFrontendResolveError,
 };
 use crate::route_set::{
     PublicRouteSetError, PublicRouteSetHandle, PublicRouteSetOwner, ROUTE_SET_KEY,
@@ -264,7 +264,7 @@ impl GatewayBuilder {
         let cleanup: Arc<dyn GatewayConnectCleanup> = dataplane.clone();
         let owners = OwnerShutdowns::new();
         let services = ConnectionServices {
-            relay,
+            relay: Arc::clone(&relay),
             connector: Arc::clone(&connector),
             clock: Arc::clone(&clock),
             limits: Arc::clone(&limits),
@@ -280,6 +280,7 @@ impl GatewayBuilder {
             identity: Arc::clone(&identity_lifecycle),
             connector,
             dataplane,
+            relay,
             admission,
             listener,
             observations: Arc::clone(&observations),
@@ -1227,6 +1228,7 @@ enum GateFailure {
     Identity(GatewayIdentityLifecycleError),
     ConnectPath(GatewayUpstreamConnectError),
     ConnectProbe(GatewayConnectDataplaneError),
+    RelayProbe(RelayProbeError),
     Timeout,
 }
 
@@ -1267,6 +1269,9 @@ pub(crate) struct GatewayApplicationOwner {
     /// Driven once per boot by the first gate that reaches it.
     dataplane: Arc<dyn GatewayConnectDataplane>,
     connect_proven: Arc<AtomicBool>,
+    /// Driven once per boot, before the connect dataplane probe (Gate G-1).
+    relay: Arc<dyn GatewayRelay>,
+    relay_proven: Arc<AtomicBool>,
     admission: Arc<GatewayAdmission>,
     listener: GatewayListenerControl,
     observations: Arc<dyn ObservationStore>,
@@ -1300,6 +1305,7 @@ struct OwnerWiring {
     identity: Arc<dyn GatewayIdentityLifecycleControl>,
     connector: Arc<GatewayUpstreamConnector>,
     dataplane: Arc<dyn GatewayConnectDataplane>,
+    relay: Arc<dyn GatewayRelay>,
     admission: Arc<GatewayAdmission>,
     listener: GatewayListenerControl,
     observations: Arc<dyn ObservationStore>,
@@ -1322,6 +1328,8 @@ impl GatewayApplicationOwner {
             connector: wiring.connector,
             dataplane: wiring.dataplane,
             connect_proven: Arc::new(AtomicBool::new(false)),
+            relay: wiring.relay,
+            relay_proven: Arc::new(AtomicBool::new(false)),
             admission: wiring.admission,
             listener: wiring.listener,
             observations: wiring.observations,
@@ -1605,6 +1613,8 @@ impl GatewayApplicationOwner {
             connector: Arc::clone(&self.connector),
             dataplane: Arc::clone(&self.dataplane),
             connect_proven: Arc::clone(&self.connect_proven),
+            relay: Arc::clone(&self.relay),
+            relay_proven: Arc::clone(&self.relay_proven),
             identity: Arc::clone(&self.identity),
             clock: Arc::clone(&self.clock),
             frontend: candidate.frontend,
@@ -1676,6 +1686,15 @@ impl GatewayApplicationOwner {
                             name: "gateway.application.gate_connect_probe_failed",
                             error = %error,
                             "gateway application gate failed on the connect dataplane probe",
+                        );
+                        GatewayApplicationUnavailableCause::ConnectPathUnavailable
+                    }
+                    GateFailure::RelayProbe(error) => {
+                        tracing::error!(
+                            name: "health.startup.refused",
+                            reason = "gateway.relay_probe",
+                            error = %error,
+                            "gateway application gate refused: the kernel relay probe failed",
                         );
                         GatewayApplicationUnavailableCause::ConnectPathUnavailable
                     }
@@ -1908,6 +1927,8 @@ struct Gate {
     connector: Arc<GatewayUpstreamConnector>,
     dataplane: Arc<dyn GatewayConnectDataplane>,
     connect_proven: Arc<AtomicBool>,
+    relay: Arc<dyn GatewayRelay>,
+    relay_proven: Arc<AtomicBool>,
     identity: Arc<dyn GatewayIdentityLifecycleControl>,
     clock: Arc<dyn Clock>,
     frontend: ServiceFrontend,
@@ -1931,6 +1952,20 @@ impl Gate {
         let _ = self.reports.send(GateReport { token: self.token, result }).await;
     }
 
+    /// The relay's Earned-Trust probe (kTLS arm, pipe floor, exact splice)
+    /// runs once per boot, before the connect dataplane probe and before any
+    /// identity step: it needs no SVID and no peer.
+    async fn prove_relay(&self) -> Result<(), GateFailure> {
+        if self.relay_proven.load(Ordering::Acquire) {
+            return Ok(());
+        }
+        self.phase.store(PHASE_CONNECT, Ordering::Release);
+        self.relay.probe(self.deadline).await.map_err(GateFailure::RelayProbe)?;
+        self.relay_proven.store(true, Ordering::Release);
+        self.phase.store(PHASE_IDENTITY, Ordering::Release);
+        Ok(())
+    }
+
     /// The dataplane's own probe (residue sweep, sentinel connect) runs once
     /// per boot, before the first candidate's identity step.
     async fn prove_connect_dataplane(&self) -> Result<(), GateFailure> {
@@ -1951,6 +1986,7 @@ impl Gate {
         if self.cancel.is_cancelled() {
             return Ok(());
         }
+        self.prove_relay().await?;
         self.prove_connect_dataplane().await?;
         let identity = tokio::select! {
             biased;
