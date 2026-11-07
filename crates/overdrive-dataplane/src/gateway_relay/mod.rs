@@ -174,6 +174,12 @@ struct LegCore {
     rekey: Mutex<Box<dyn Rekey>>,
     /// The leg's transmit lock (Contract of the legs, item 5).
     tx: tokio::sync::Mutex<()>,
+    /// Peer-requested KeyUpdates whose answers have not been sent yet. Incremented
+    /// in the same synchronous segment that consumes the peer's record and re-arms
+    /// RX, and decremented in the same poll that sends one answer and re-arms TX,
+    /// so a dropped `read_through` can never leave the leg half re-keyed. Every
+    /// entry point that reads or writes the leg drives it to zero first.
+    answers_owed: Mutex<u32>,
 }
 
 fn errno_of(fault: CryptoInfoFault) -> i32 {
@@ -206,26 +212,56 @@ impl LegCore {
         }
     }
 
-    /// Answers a peer KeyUpdate: re-arms RX, and when the peer asked, sends our
-    /// own update record under the old key and re-arms TX. The gateway never
-    /// originates one (ADR-0250).
-    async fn answer_key_update(&self, requested: bool) -> Result<(), KeyUpdateError> {
+    /// The receive side of a peer KeyUpdate: re-arms RX from the next secret. It has
+    /// no await point, so the caller runs it in one poll with the record's
+    /// consumption (RX reads fail `-EKEYEXPIRED` until this has run).
+    fn rearm_rx(&self) -> Result<(), KeyUpdateError> {
         let rx = self.rekey.lock().next_rx();
         let (sequence, secrets) = rx.map_err(|_| KeyUpdateError::RustlsRefused)?;
         sys::set_gcm_crypto_info(self.raw(), sys::TLS_RX, sequence, &secrets)
-            .map_err(|fault| KeyUpdateError::RearmRx { errno: errno_of(fault) })?;
-        if !requested {
+            .map_err(|fault| KeyUpdateError::RearmRx { errno: errno_of(fault) })
+    }
+
+    /// Records that the peer asked for an update, so our own update record is owed.
+    /// The gateway never originates one (ADR-0250).
+    fn owe_answer(&self) {
+        *self.answers_owed.lock() += 1;
+    }
+
+    /// Sends the owed answer under the old key, then re-arms TX, with the transmit
+    /// lock already held (`_held`). The record's send is the only await; the TX
+    /// re-arm runs in the same poll as its completion, so cancelling at any await
+    /// leaves the answer owed and the TX key unchanged, and no writer can send
+    /// under the old key after the peer has switched. Re-entry is idempotent.
+    async fn answer_owed_locked(
+        &self,
+        _held: &tokio::sync::MutexGuard<'_, ()>,
+    ) -> Result<(), KeyUpdateError> {
+        let update = [24u8, 0, 0, 1, 0];
+        while *self.answers_owed.lock() > 0 {
+            let sent = self
+                .write_io(|fd| sys::send_record(fd, sys::RECORD_HANDSHAKE, &update))
+                .await
+                .map_err(|err| KeyUpdateError::Io { kind: err.kind() })?;
+            if sent != update.len() {
+                return Err(KeyUpdateError::Io { kind: io::ErrorKind::WriteZero });
+            }
+            *self.answers_owed.lock() -= 1;
+            let tx = self.rekey.lock().next_tx();
+            let (sequence, secrets) = tx.map_err(|_| KeyUpdateError::RustlsRefused)?;
+            sys::set_gcm_crypto_info(self.raw(), sys::TLS_TX, sequence, &secrets)
+                .map_err(|fault| KeyUpdateError::RearmTx { errno: errno_of(fault) })?;
+        }
+        Ok(())
+    }
+
+    /// Drives an owed answer to completion (a no-op, with no await, when none is owed).
+    async fn settle(&self) -> Result<(), KeyUpdateError> {
+        if *self.answers_owed.lock() == 0 {
             return Ok(());
         }
-        let _transmit = self.tx.lock().await;
-        let update = [24u8, 0, 0, 1, 0];
-        self.write_io(|fd| sys::send_record(fd, sys::RECORD_HANDSHAKE, &update))
-            .await
-            .map_err(|err| KeyUpdateError::Io { kind: err.kind() })?;
-        let tx = self.rekey.lock().next_tx();
-        let (sequence, secrets) = tx.map_err(|_| KeyUpdateError::RustlsRefused)?;
-        sys::set_gcm_crypto_info(self.raw(), sys::TLS_TX, sequence, &secrets)
-            .map_err(|fault| KeyUpdateError::RearmTx { errno: errno_of(fault) })
+        let held = self.tx.lock().await;
+        self.answer_owed_locked(&held).await
     }
 }
 
@@ -303,25 +339,44 @@ impl ReadHalf {
         }
     }
 
-    /// Consumes the pending control record and returns its type and payload.
-    async fn consume_control(&self) -> Result<(u8, Vec<u8>), LegReadError> {
-        let mut buf = vec![0u8; sys::CONTROL_RECORD_BUFFER];
-        let received = self
-            .leg
-            .read_io(|fd| sys::recv_record(fd, &mut buf, false))
-            .await
-            .map_err(|err| read_io_err(&err))?;
-        match received {
-            Received::Control { record, len } => {
-                buf.truncate(len);
-                Ok((record, buf))
-            }
-            Received::Data(_) => Err(LegReadError::Io { kind: io::ErrorKind::InvalidData }),
+    /// Consumes the control record that a prior peek showed is next, into `buf`.
+    /// No await: the record is present, so the receive cannot wait.
+    fn take_record(&self, buf: &mut [u8]) -> Result<(), LegReadError> {
+        match sys::recv_record(self.leg.raw(), buf, false) {
+            Ok(Received::Control { .. }) => Ok(()),
+            Ok(Received::Data(_)) => Err(LegReadError::Io { kind: io::ErrorKind::InvalidData }),
+            Err(err) => Err(read_io_err(&err)),
         }
     }
 
-    /// Handles one control record (Contract of the legs, item 4).
-    async fn control(&mut self, record: u8, payload: &[u8]) -> Result<Control, LegReadError> {
+    /// A control record is next in the socket: handle it (Contract of the legs,
+    /// item 4). The only await is the peek; everything after it, including a
+    /// KeyUpdate's owed-answer record, consumption and RX re-arm, runs in one poll,
+    /// so a dropped call either changed nothing or finished the receive side.
+    async fn next_control(&mut self) -> Result<Control, LegReadError> {
+        let mut buf = vec![0u8; sys::CONTROL_RECORD_BUFFER];
+        let peeked = self
+            .leg
+            .read_io(|fd| sys::recv_record(fd, &mut buf, true))
+            .await
+            .map_err(|err| read_io_err(&err))?;
+        let Received::Control { record, len } = peeked else {
+            return Err(LegReadError::Io { kind: io::ErrorKind::InvalidData });
+        };
+        if let (sys::RECORD_HANDSHAKE, [24, 0, 0, 1, flag @ 0..=1]) = (record, &buf[..len]) {
+            if *flag == 1 {
+                self.leg.owe_answer();
+            }
+            self.take_record(&mut buf)?;
+            self.leg.rearm_rx().map_err(LegReadError::KeyUpdate)?;
+            return Ok(Control::Handled);
+        }
+        self.take_record(&mut buf)?;
+        self.handle_control(record, &buf[..len])
+    }
+
+    /// Handles one consumed non-KeyUpdate control record.
+    fn handle_control(&mut self, record: u8, payload: &[u8]) -> Result<Control, LegReadError> {
         match (record, payload) {
             (sys::RECORD_ALERT, [1, 0, ..]) => {
                 self.ended = true;
@@ -329,10 +384,6 @@ impl ReadHalf {
             }
             (sys::RECORD_ALERT, [_, description, ..]) => {
                 Err(LegReadError::Alert { description: *description })
-            }
-            (sys::RECORD_HANDSHAKE, [24, 0, 0, 1, flag]) if *flag <= 1 => {
-                self.leg.answer_key_update(*flag == 1).await.map_err(LegReadError::KeyUpdate)?;
-                Ok(Control::Handled)
             }
             (sys::RECORD_HANDSHAKE, [4, ..]) => Ok(Control::Handled),
             (content_type, _) => Err(LegReadError::UnexpectedRecord { content_type }),
@@ -347,6 +398,10 @@ impl ReadHalf {
         pace: &Pace<'_>,
     ) -> Result<Spliced, SpliceFail> {
         loop {
+            pace.bounded(self.leg.settle())
+                .await
+                .map_err(SpliceFail::Stall)?
+                .map_err(|err| SpliceFail::Read(LegReadError::KeyUpdate(err)))?;
             let spliced = pace
                 .bounded(
                     self.leg.read_io(|fd| sys::splice(fd, pipe_write, len, sys::SPLICE_F_NONBLOCK)),
@@ -357,7 +412,7 @@ impl ReadHalf {
                 Ok(0) => return Ok(Spliced::Eof),
                 Ok(moved) => return Ok(Spliced::Moved(moved)),
                 Err(err) if err.raw_os_error() == Some(libc::EINVAL) => {
-                    match self.control_pending().await.map_err(SpliceFail::Read)? {
+                    match self.next_control().await.map_err(SpliceFail::Read)? {
                         Control::Handled => {}
                         Control::CloseNotify => return Ok(Spliced::CloseNotify),
                     }
@@ -365,20 +420,6 @@ impl ReadHalf {
                 Err(err) => return Err(SpliceFail::Read(read_io_err(&err))),
             }
         }
-    }
-
-    /// A control record is next in the socket: consume and handle it.
-    async fn control_pending(&mut self) -> Result<Control, LegReadError> {
-        let mut one = [0u8; 1];
-        match sys::recv_record(self.leg.raw(), &mut one, true) {
-            Ok(Received::Control { .. }) => {}
-            Ok(Received::Data(_)) => {
-                return Err(LegReadError::Io { kind: io::ErrorKind::InvalidInput });
-            }
-            Err(err) => return Err(read_io_err(&err)),
-        }
-        let (record, payload) = self.consume_control().await?;
-        self.control(record, &payload).await
     }
 
     /// Consumes exactly `count` octets that a peek already showed are present.
@@ -427,6 +468,11 @@ impl ReadHalf {
                     }
                 }
             };
+            match bounded_opt(clock, limit_at, self.leg.settle()).await {
+                Err(()) => return Err(LegReadError::Deadline),
+                Ok(Err(err)) => return Err(LegReadError::KeyUpdate(err)),
+                Ok(Ok(())) => {}
+            }
             let want = limit.saturating_sub(self.head.len()).clamp(1, 65_536);
             let mut peeked = vec![0u8; want];
             let received = match bounded_opt(
@@ -460,8 +506,7 @@ impl ReadHalf {
                     }
                 }
                 Received::Control { .. } => {
-                    let (record, payload) = self.consume_control().await?;
-                    self.control(record, &payload).await?;
+                    self.next_control().await?;
                 }
             }
         }
@@ -488,7 +533,11 @@ async fn drain_pipe(
     mut count: usize,
     pace: &mut Pace<'_>,
 ) -> Result<(), RelayError> {
-    let _transmit = pace.bounded(dst.leg.tx.lock()).await.map_err(relay_stall)?;
+    let transmit = pace.bounded(dst.leg.tx.lock()).await.map_err(relay_stall)?;
+    pace.bounded(dst.leg.answer_owed_locked(&transmit))
+        .await
+        .map_err(relay_stall)?
+        .map_err(|err| RelayError::Write(LegWriteError::KeyUpdate(err)))?;
     while count > 0 {
         let moved = pace
             .bounded(dst.leg.write_io(|fd| sys::splice(pipe_read, fd, count, 0)))
@@ -734,6 +783,7 @@ impl GatewayRelay for HostGatewayRelay {
             fd,
             rekey: Mutex::new(shaken.rekey),
             tx: tokio::sync::Mutex::new(()),
+            answers_owed: Mutex::new(0),
         });
         let leg = KtlsLeg::from_armed(
             Box::new(ReadHalf::new(Arc::clone(&core))),
@@ -764,7 +814,8 @@ impl GatewayRelay for HostGatewayRelay {
     ) -> Result<(), LegWriteError> {
         let leg = &to.backend_mut::<WriteHalf>().leg;
         let write = async {
-            let _transmit = leg.tx.lock().await;
+            let transmit = leg.tx.lock().await;
+            leg.answer_owed_locked(&transmit).await.map_err(LegWriteError::KeyUpdate)?;
             let mut sent = 0;
             while sent < bytes.len() {
                 sent += leg
@@ -824,6 +875,10 @@ impl GatewayRelay for HostGatewayRelay {
         let pipe = src.take_or_create_pipe().map_err(RelayError::Pipe)?;
         let mut moved_total = 0u64;
         loop {
+            pace.bounded(src.leg.settle())
+                .await
+                .map_err(relay_stall)?
+                .map_err(|err| RelayError::Read(LegReadError::KeyUpdate(err)))?;
             let Some(owed) = NonZeroU64::new(max.get() - moved_total) else {
                 // At the ceiling: one more octet is a breach, a close_notify the end.
                 let mut one = [0u8; 1];
@@ -836,7 +891,7 @@ impl GatewayRelay for HostGatewayRelay {
                     Received::Data(0) => return Err(RelayError::Read(LegReadError::Truncated)),
                     Received::Data(_) => return Err(RelayError::LimitExceeded { max: max.get() }),
                     Received::Control { .. } => {
-                        match src.control_pending().await.map_err(RelayError::Read)? {
+                        match src.next_control().await.map_err(RelayError::Read)? {
                             Control::Handled => continue,
                             Control::CloseNotify => {
                                 src.pipe = Some(pipe);
@@ -871,7 +926,8 @@ impl GatewayRelay for HostGatewayRelay {
     ) -> Result<(), LegWriteError> {
         let leg = &to.backend_mut::<WriteHalf>().leg;
         let close = async {
-            let _transmit = leg.tx.lock().await;
+            let transmit = leg.tx.lock().await;
+            leg.answer_owed_locked(&transmit).await.map_err(LegWriteError::KeyUpdate)?;
             let close_notify = [1u8, 0];
             leg.write_io(|fd| sys::send_record(fd, sys::RECORD_ALERT, &close_notify))
                 .await
@@ -895,21 +951,27 @@ impl GatewayRelay for HostGatewayRelay {
         let mut dropped = 0u64;
         let mut buf = vec![0u8; 64 * 1024];
         while !src.ended && dropped < max.get() {
+            pace.bounded(src.leg.settle())
+                .await
+                .map_err(|_| LegReadError::Deadline)?
+                .map_err(LegReadError::KeyUpdate)?;
+            // `max` bounds DATA octets only: peek at most `room` of them; a control
+            // record is then taken whole by `next_control`, never truncated.
             let room = usize::try_from(max.get() - dropped).unwrap_or(usize::MAX).min(buf.len());
-            let received = pace
-                .bounded(src.leg.read_io(|fd| sys::recv_record(fd, &mut buf[..room], false)))
+            let peeked = pace
+                .bounded(src.leg.read_io(|fd| sys::recv_record(fd, &mut buf[..room], true)))
                 .await
                 .map_err(|_| LegReadError::Deadline)?
                 .map_err(|err| read_io_err(&err))?;
-            match received {
+            match peeked {
                 Received::Data(0) => return Ok(()),
                 Received::Data(n) => {
+                    src.consume(n)?;
                     dropped += u64::try_from(n).unwrap_or(u64::MAX);
                     pace.note();
                 }
-                Received::Control { record, len } => {
-                    let payload = buf[..len].to_vec();
-                    src.control(record, &payload).await?;
+                Received::Control { .. } => {
+                    src.next_control().await?;
                 }
             }
         }

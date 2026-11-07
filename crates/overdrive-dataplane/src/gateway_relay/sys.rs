@@ -27,6 +27,13 @@ pub(super) const RECORD_DATA: u8 = 23;
 /// Largest plaintext of one TLS record, with room for the control buffer's record.
 pub(super) const CONTROL_RECORD_BUFFER: usize = 16_384 + 256;
 
+/// A control buffer for `recvmsg`/`sendmsg`. `CMSG_FIRSTHDR` hands back a pointer into
+/// it that is dereferenced as a `cmsghdr`, so the buffer must be aligned for
+/// `cmsghdr` (`cmsg(3)`: the buffer is `cmsghdr`-aligned, `CMSG_ALIGN` pads to
+/// `size_t`); 8 covers `size_t` and the `cmsghdr` fields on every supported target.
+#[repr(C, align(8))]
+struct ControlBuf([u8; 64]);
+
 /// What one `recvmsg` produced.
 pub(super) enum Received {
     /// `n` application octets (`0` is a TCP end of stream without close_notify).
@@ -68,18 +75,19 @@ pub(super) fn set_nonblocking(fd: RawFd) -> io::Result<()> {
 /// `peek` leaves the octets in the socket.
 pub(super) fn recv_record(fd: RawFd, buf: &mut [u8], peek: bool) -> io::Result<Received> {
     let mut iov = libc::iovec { iov_base: buf.as_mut_ptr().cast(), iov_len: buf.len() };
-    let mut control = [0u8; 64];
+    let mut control = ControlBuf([0u8; 64]);
     // SAFETY: an all-zero msghdr is a valid empty message header.
     let mut msg: libc::msghdr = unsafe { std::mem::zeroed() };
     msg.msg_iov = &raw mut iov;
     msg.msg_iovlen = 1;
-    msg.msg_control = control.as_mut_ptr().cast();
-    msg.msg_controllen = control.len() as _;
+    msg.msg_control = (&raw mut control).cast();
+    msg.msg_controllen = control.0.len() as _;
     let flags = libc::MSG_DONTWAIT | if peek { libc::MSG_PEEK } else { 0 };
     // SAFETY: `msg` points at live iov/control buffers of the stated lengths.
     let n = retry(|| unsafe { libc::recvmsg(fd, &raw mut msg, flags) }, to_usize)?;
     let mut record = RECORD_DATA;
-    // SAFETY: CMSG_* walk the control buffer the kernel just filled.
+    // SAFETY: CMSG_* walk the control buffer the kernel just filled; `ControlBuf` is
+    // 8-aligned, satisfying the `cmsghdr` alignment `CMSG_FIRSTHDR` relies on.
     unsafe {
         let header = libc::CMSG_FIRSTHDR(&raw const msg);
         if !header.is_null()
@@ -111,15 +119,16 @@ pub(super) fn send_data(fd: RawFd, data: &[u8]) -> io::Result<usize> {
 /// `sendmsg` of one record of type `record`.
 pub(super) fn send_record(fd: RawFd, record: u8, data: &[u8]) -> io::Result<usize> {
     let mut iov = libc::iovec { iov_base: data.as_ptr().cast_mut().cast(), iov_len: data.len() };
-    let mut control = [0u8; 64];
+    let mut control = ControlBuf([0u8; 64]);
     // SAFETY: an all-zero msghdr is a valid empty message header.
     let mut msg: libc::msghdr = unsafe { std::mem::zeroed() };
     msg.msg_iov = &raw mut iov;
     msg.msg_iovlen = 1;
-    msg.msg_control = control.as_mut_ptr().cast();
+    msg.msg_control = (&raw mut control).cast();
     // SAFETY: CMSG_SPACE is a pure size computation.
     msg.msg_controllen = unsafe { libc::CMSG_SPACE(1) } as _;
-    // SAFETY: the control buffer holds room for one one-octet cmsg.
+    // SAFETY: the 8-aligned control buffer holds room for one one-octet cmsg
+    // (`CMSG_SPACE(1)` <= 64), so `CMSG_FIRSTHDR` is a valid, aligned `cmsghdr`.
     unsafe {
         let header = libc::CMSG_FIRSTHDR(&raw const msg);
         (*header).cmsg_level = libc::SOL_TLS;
