@@ -1050,7 +1050,6 @@ fn rejection(status: &str) -> Vec<u8> {
 /// request body is read; the discard ends at the peer's close_notify.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER relay-lingering-close"]
 async fn lingering_close_lets_the_client_read_the_response_then_close_notify_not_a_reset() {
     for (status, why) in REJECTIONS {
         let mut rig = Rig::new(Offer::Aes128).await;
@@ -1110,7 +1109,6 @@ async fn lingering_close_lets_the_client_read_the_response_then_close_notify_not
 /// the socket).
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "pending DELIVER relay-lingering-close"]
 async fn the_discard_ends_at_max_octets_at_the_deadline_and_at_the_no_progress_window() {
     const PIECE: usize = 64 * 1024;
     const MAX: u64 = 1024 * 1024;

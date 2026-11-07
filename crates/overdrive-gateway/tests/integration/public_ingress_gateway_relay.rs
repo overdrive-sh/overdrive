@@ -1860,7 +1860,6 @@ fn assert_lingering_close(legs: &Legs, name: &str) {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER relay-lingering-close"]
 async fn an_early_or_gateway_authored_response_ends_with_a_half_close_and_a_bounded_discard() {
     let world = World::start(LINGERING, Spec { route_path: "/api", ..Spec::default() }).await;
     let limits = world.limits();
@@ -2849,7 +2848,6 @@ async fn the_response_head_has_one_budget_from_t0_and_interim_heads_never_restar
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER relay-lingering-close"]
 async fn a_stalled_client_after_an_early_answer_gets_no_408_only_the_lingering_close() {
     let world = World::start(EARLY_ANSWER, Spec::default()).await;
     let no_progress = world.limits().body_no_progress_deadline();
