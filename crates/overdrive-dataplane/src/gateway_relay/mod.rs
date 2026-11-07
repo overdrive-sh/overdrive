@@ -886,8 +886,12 @@ fn probe_client(
     let mut conn = rustls::ClientConnection::new(config, name)
         .map_err(|_| io::Error::from(io::ErrorKind::InvalidData))?;
     let mut tls = rustls::Stream::new(&mut conn, &mut stream);
-    tls.write_all(&pattern)?;
-    tls.write_all(PROBE_TRAILER)?;
+    // One buffer, so the last pattern octet and the trailer share a TLS record: the
+    // kernel splices at most one record per call, so a `relay_exact` that asks for
+    // more than it owes takes that record whole and the trailer arrives short.
+    let mut span = pattern;
+    span.extend_from_slice(PROBE_TRAILER);
+    tls.write_all(&span)?;
     tls.write_all(PROBE_TAIL)?;
     // End of the client's data: a server that consumed the trailer early sees
     // the close_notify instead of waiting out the deadline.
@@ -936,6 +940,7 @@ fn probe_write_error(err: LegWriteError) -> RelayProbeError {
     }
 }
 
+/// `SpliceExactness` units: octets of the echo stream (see `expect_trailer`).
 /// `before` octets of the echo precede the `span` this `relay_exact` call moves.
 fn probe_relay_error(err: RelayError, before: usize, span: usize) -> RelayProbeError {
     match err {
@@ -1033,9 +1038,12 @@ impl HostGatewayRelay {
         read: &mut KtlsReadHalf,
         deadline: Instant,
     ) -> Result<(), RelayProbeError> {
+        // `SpliceExactness` counts octets of the echo stream (span, then tail) in
+        // every probe error: `expected` is the whole echo; `moved` is the span plus
+        // the `got` octets the server leg read past it, where none were owed.
         let violation = |got: usize| RelayProbeError::SpliceExactness {
             moved: (PROBE_RELAY_LEN + got) as u64,
-            expected: (PROBE_RELAY_LEN + PROBE_TRAILER.len()) as u64,
+            expected: probe_echo().len() as u64,
         };
         // Room for the trailer and then some: an extra octet read is a violation too.
         let limit = NonZeroUsize::new(4 * PROBE_TRAILER.len())
@@ -1049,6 +1057,8 @@ impl HostGatewayRelay {
             Ok(bytes) if bytes.as_slice() == PROBE_TRAILER => Ok(()),
             Ok(bytes) => Err(violation(bytes.as_slice().len())),
             Err(LegReadError::CleanEof | LegReadError::Truncated) => Err(violation(0)),
+            // Leftover span octets ahead of the trailer: `relay_exact` under-moved.
+            Err(LegReadError::LimitExceeded { limit }) => Err(violation(limit)),
             Err(err) => Err(probe_read_error(err)),
         }
     }
