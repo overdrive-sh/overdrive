@@ -70,7 +70,7 @@ use overdrive_core::guest_transport::{
     GUEST_CID_BASE, GUEST_INBOUND_PORT, GUEST_NODE_GATEWAY, LaunchToken,
 };
 use overdrive_core::net::ListenPort;
-use overdrive_core::vm::beacon::{BEACON_VSOCK_PORT, BeaconMessage};
+use overdrive_core::vm::beacon::BeaconMessage;
 
 use crate::guest_app::{GUEST_PEER_GUEST_PATH, subcommand};
 use crate::guest_kit::{
@@ -247,11 +247,6 @@ fn lane_error(detail: String) -> GuestKitError {
     GuestKitError::Staging { detail, source: io::Error::other("in-guest lane") }
 }
 
-fn bind_pre_cut_beacon() -> Result<VsockListener, GuestKitError> {
-    VsockListener::bind(VMADDR_CID_ANY, BEACON_VSOCK_PORT.as_u32())
-        .map_err(|source| GuestKitError::ControlBind { port: BEACON_VSOCK_PORT.as_u32(), source })
-}
-
 /// The workload address a lane guest at `cid` is given: inside the guest
 /// prefix, never the gateway.
 #[must_use]
@@ -291,10 +286,9 @@ pub fn run_in_guest_cell(
             }],
         },
     )?;
-    let beacon = bind_pre_cut_beacon()?;
     let listeners = HostListeners::bind()?;
     let token = listeners.transport_token(cid);
-    let HostListeners { beacon: _advertised_beacon, stream: _stream, control } = listeners;
+    let HostListeners { beacon, stream: _stream, control } = listeners;
     let _holder = Holder::start(control, cid);
     let run_dir = work.join(format!("{name}-run"));
     let vm = kit.boot(&GuestBoot {
@@ -405,10 +399,9 @@ pub fn boot_to_ready(
     work: &Path,
 ) -> Result<BootOutcome, GuestKitError> {
     let image = kit.image(work, "boot-to-ready", spec)?;
-    let beacon = bind_pre_cut_beacon()?;
     let listeners = HostListeners::bind()?;
     let token = listeners.transport_token(cid);
-    let HostListeners { beacon: _advertised_beacon, stream: _stream, control } = listeners;
+    let HostListeners { beacon, stream: _stream, control } = listeners;
     let _holder = Holder::start(control, cid);
     let run_dir = work.join("boot-to-ready-run");
     let vm = kit.boot(&GuestBoot {

@@ -68,11 +68,15 @@ install packages on the Metal box.
 
 ## Durable runs and collection
 
-`cargo xtask metal run -- COMMAND [ARG ...]` now registers a run record before
-sync and native preflight, then starts the command under a root transient
-systemd service. The service owns the shared Metal lease through sync,
-preflight, command execution, combined stdout/stderr log finalization, and
-terminal publication. The runner prints an opaque 24-character run id:
+`cargo xtask metal run -- COMMAND [ARG ...]` registers a run record before
+source transfer and native preflight, then starts the command under a root
+transient systemd service. Ordinary runs take the shared physical-maintenance
+barrier and the exclusive lock for their bound checkout. Independent worktrees
+can run ordinary verification at the same time; sync, pull, and a run for the
+same checkout still exclude one another. The service holds admission through
+command completion and owned guest cleanup. It retains combined stdout/stderr,
+the exact command result, and a completion receipt. The runner prints an
+opaque 24-character run id:
 
 ```text
 OVERDRIVE_METAL_RUN_ID=<run-id>
@@ -93,6 +97,31 @@ diagnostics for not-found, supervisor loss, malformed records, or a run that
 never reached command start. Records live under
 `/var/lib/overdrive-metal/runs/<run-id>/` on the box and are retained without
 automatic pruning.
+
+Ordinary commands use a closed existing-command grammar: Cargo
+build/check/clippy/fmt, doctests, approved xtask build/setup/lint/model
+commands, nextest, the prepared guest-suite executable, and the declared pure
+Sim programs. Other commands refuse before execution. `cargo nextest run`
+always uses the checked-in placement wrapper: host-pure tests keep the original
+exec chain, native-launcher tests get a private local-vsock namespace, and
+guest tests run the selected Cargo-built test binary in a fresh instance of
+its declared guest group. The wrapper preserves the selected binary, libtest
+arguments, Nextest helper executables, test environment, retry number, and
+actual attempt status. `guest-kit-prepare` prepares the dispatcher; the
+wrapper does not build it on demand. The explicit guest-suite command keeps
+its existing batched group behavior.
+
+Use `--exclusive` for provisioning, physical-host maintenance, or another
+existing command that needs arbitrary privileged authority. It takes exclusive
+physical-maintenance ownership and waits for admitted ordinary runs to finish.
+For example, the host module-load step is an explicit administrative command:
+
+```bash
+cargo xtask metal run -- env OVERDRIVE_BPF_NATIVE=1 cargo xtask bpf-build
+cargo xtask metal run -- cargo xtask guest-kit-prepare
+cargo xtask metal run --exclusive -- cargo xtask kmod-load
+cargo xtask metal run -- cargo nextest run -p overdrive-cli --features integration-tests,kvm-tests
+```
 
 The transient unit is intentionally not installed or reboot-persistent. A
 reboot or an unrecordable supervisor/storage loss can leave a run without a
@@ -122,26 +151,24 @@ status.
 ## Running the guest-kit `kvm-tests` lanes
 
 The guest-kit lanes (the vsock walking skeleton, fault matrix and density
-cells, the forwarder's VM-boundary cells, the in-guest lane) do not build
-anything inside a test. Run the lane setup first, in the same
-`cargo xtask metal run` session or an earlier one against the same tree:
-
-```bash
-cargo xtask metal run -- bash -c 'OVERDRIVE_BPF_NATIVE=1 cargo xtask bpf-build \
-  && cargo xtask guest-kit-prepare \
-  && cargo xtask kmod-load \
-  && cargo nextest run -p overdrive-cli --features integration-tests,kvm-tests …'
-```
+cells, the forwarder's VM-boundary cells, and the in-guest lane) do not build
+anything inside a test. Run the setup commands above first against the same
+checkout. The ordinary nextest command routes selected kernel tests through
+their declared group, and retries start a fresh guest attempt. Do not run
+`kmod-load` as part of an ordinary test command.
 
 `guest-kit-prepare` builds `ovd_fwd.ko` for the running kernel, the static
-scripted guest peer and the in-guest test binaries, and stages each at the
-path the fixture reads (`xtask/src/guest_kit_prepare.rs`). A missing
+scripted guest peer, the in-guest test binaries, and the host-side guest-suite
+dispatcher, and stages each at the path its existing fixture reads
+(`xtask/src/guest_kit_prepare.rs`). A missing
 artefact makes the fixture refuse with `LaneNotPrepared`, naming the path.
 It also requires the running kernel's build tree and `sparse`, installed by
 `infra/metal/provision.sh`; sparse is built from the pinned upstream commit
 that passes the kernel's `checker-valid.sh`, and `musl-tools` builds the
-static guest peer. The separate `kmod-load` step loads this workspace's module
-on the host; the guest kit loads its own copy in its microVM.
+static guest peer. The explicit exclusive `kmod-load` step loads this
+workspace's module on the physical host for existing native prerequisites;
+guest-group test bodies load their own module copy in their disposable
+microVM.
 
 ## Things that cost time on 2026-08-10 — read before debugging
 

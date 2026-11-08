@@ -1132,7 +1132,6 @@ impl State<RunnerDriver> for Projection {
     test = "independent_worktrees",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER: metal-run-isolation real-owner protocol conformance"]
 fn protocol_independent_worktrees() -> impl Driver {
     RunnerDriver::fresh()
 }
@@ -1144,7 +1143,6 @@ fn protocol_independent_worktrees() -> impl Driver {
     test = "same_checkout_excludes_sync",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER: metal-run-isolation real-owner protocol conformance"]
 fn protocol_same_checkout_excludes_sync() -> impl Driver {
     RunnerDriver::fresh()
 }
@@ -1156,7 +1154,6 @@ fn protocol_same_checkout_excludes_sync() -> impl Driver {
     test = "controller_eof_before_start",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER: metal-run-isolation real-owner protocol conformance"]
 fn protocol_controller_eof_before_start() -> impl Driver {
     RunnerDriver::fresh()
 }
@@ -1168,7 +1165,6 @@ fn protocol_controller_eof_before_start() -> impl Driver {
     test = "controller_loss_after_start",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER: metal-run-isolation real-owner protocol conformance"]
 fn protocol_controller_loss_after_start() -> impl Driver {
     RunnerDriver::fresh()
 }
@@ -1180,7 +1176,6 @@ fn protocol_controller_loss_after_start() -> impl Driver {
     test = "supervisor_loss_is_not_a_result",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER: metal-run-isolation real-owner protocol conformance"]
 fn protocol_supervisor_loss_is_not_a_result() -> impl Driver {
     RunnerDriver::fresh()
 }
@@ -1192,7 +1187,6 @@ fn protocol_supervisor_loss_is_not_a_result() -> impl Driver {
     test = "cleanup_failure_keeps_command",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER: metal-run-isolation real-owner protocol conformance"]
 fn protocol_cleanup_failure_keeps_command() -> impl Driver {
     RunnerDriver::fresh()
 }
@@ -1204,7 +1198,6 @@ fn protocol_cleanup_failure_keeps_command() -> impl Driver {
     test = "missing_completion_refuses",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER: metal-run-isolation real-owner protocol conformance"]
 fn protocol_missing_completion_refuses() -> impl Driver {
     RunnerDriver::fresh()
 }
@@ -1216,7 +1209,6 @@ fn protocol_missing_completion_refuses() -> impl Driver {
     test = "maintenance_waits_for_stop",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER: metal-run-isolation real-owner protocol conformance"]
 fn protocol_maintenance_waits_for_stop() -> impl Driver {
     RunnerDriver::fresh()
 }
@@ -1228,7 +1220,6 @@ fn protocol_maintenance_waits_for_stop() -> impl Driver {
     test = "no_sync_mismatch_refuses",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER: metal-run-isolation real-owner protocol conformance"]
 fn protocol_no_sync_mismatch_refuses() -> impl Driver {
     RunnerDriver::fresh()
 }
@@ -1240,7 +1231,6 @@ fn protocol_no_sync_mismatch_refuses() -> impl Driver {
     test = "admission_timeout",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER: metal-run-isolation real-owner protocol conformance"]
 fn protocol_admission_timeout() -> impl Driver {
     RunnerDriver::fresh()
 }
@@ -1252,7 +1242,6 @@ fn protocol_admission_timeout() -> impl Driver {
     test = "preflight_aborts_before_start",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER: metal-run-isolation real-owner protocol conformance"]
 fn protocol_preflight_aborts_before_start() -> impl Driver {
     RunnerDriver::fresh()
 }
@@ -1264,7 +1253,6 @@ fn protocol_preflight_aborts_before_start() -> impl Driver {
     test = "missing_rsync_aborts_before_start",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER: metal-run-isolation real-owner protocol conformance"]
 fn protocol_missing_rsync_aborts_before_start() -> impl Driver {
     RunnerDriver::fresh()
 }
@@ -1276,7 +1264,6 @@ fn protocol_missing_rsync_aborts_before_start() -> impl Driver {
     test = "repeat_collection_agrees",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER: metal-run-isolation real-owner protocol conformance"]
 fn protocol_repeat_collection_agrees() -> impl Driver {
     RunnerDriver::fresh()
 }
@@ -1288,14 +1275,12 @@ fn protocol_repeat_collection_agrees() -> impl Driver {
     max_samples = 4,
     max_steps = 24
 )]
-#[ignore = "pending DELIVER: metal-run-isolation seeded real-owner protocol conformance"]
 fn protocol_randomized_owner_traces() -> impl Driver {
     RunnerDriver::fresh()
 }
 
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER: metal-run-isolation controls across actual owner states"]
 fn protocol_illegal_controls_preserve_each_actual_owner_state_boundary() -> Result {
     // No addressable unit exists before registration; retrieval is the actual
     // public operation and must preserve absence with its exact typed refusal.

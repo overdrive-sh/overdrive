@@ -21,9 +21,9 @@ assert_lefthook_installed: true
 # `cargo clean` to take longer. Bypass with `git commit --no-verify`.
 # ────────────────────────────────────────────────────────────────────────────
 pre-commit:
-  # Sequential: on metal the clippy, doctest and nextest-affected steps each
-  # take the host's global lease (infra/hooks/linux-run.sh), which a second
-  # concurrent run would wait on until its lease timeout.
+  # Sequential: these commands share this checkout's target and source tree.
+  # Other worktrees may run ordinary verification concurrently on Metal;
+  # their checkout locks and guest groups remain invocation-owned.
   parallel: false
   skip:
     - merge

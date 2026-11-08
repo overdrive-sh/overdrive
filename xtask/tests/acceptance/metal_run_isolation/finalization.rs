@@ -34,7 +34,6 @@ fn finalize(fixture: &Fixture, id: &str) -> std::process::Output {
 /// CONTRACT_SHAPE: bounded-change (exact invocation-owned staging/runtime/tmp
 /// roots and completion receipt; source/target/terminal/foreign-run complement preserved).
 #[test]
-#[ignore = "pending DELIVER: metal-run-isolation scoped finalization"]
 fn finalization_removes_exact_owned_roots_and_repeating_it_preserves_the_complement() {
     let fixture = Fixture::new();
     let id = unique_id();
@@ -113,7 +112,6 @@ impl Drop for ImmutableFile {
 /// CONTRACT_SHAPE: bounded-change (actual immutable file in exactly one owned
 /// root induces the finalizer's declared cause; terminal and foreign roots persist).
 #[test]
-#[ignore = "pending DELIVER: metal-run-isolation cleanup failure producers"]
 fn sad_each_owned_root_removal_failure_is_produced_and_collected_with_its_exact_root() {
     for (blocked_index, expected_root) in
         [(0, "guest_staging"), (1, "vmm_runtime"), (2, "command_tmp")]

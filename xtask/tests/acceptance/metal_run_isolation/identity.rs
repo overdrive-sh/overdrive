@@ -276,7 +276,6 @@ fn sad_missing_rsync_is_typed_without_installing_packages() {
 /// CONTRACT_SHAPE: bounded-change (invalid mode changes parse output only;
 /// neither public nor bootstrap entrypoint registers or transfers any source).
 #[test]
-#[ignore = "pending DELIVER: metal-run-isolation explicit maintenance mode"]
 fn sad_exclusive_is_only_a_run_mode_at_both_existing_entrypoints() {
     let fixture = Fixture::new();
     let output = fixture

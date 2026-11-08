@@ -6,7 +6,6 @@ use std::fs;
 /// CONTRACT_SHAPE: bounded-change (actual controller/service/finalizer records;
 /// local dirty source is retained and mismatched remote source/body stay untouched).
 #[test]
-#[ignore = "pending DELIVER: metal-run-isolation composed no-sync refusal"]
 fn sad_actual_no_sync_mismatch_aborts_the_registered_owner_before_start() {
     let controller = NativeController::new();
     success(&controller.fixture.sync(&controller.fixture.source));
@@ -30,7 +29,6 @@ fn sad_actual_no_sync_mismatch_aborts_the_registered_owner_before_start() {
 /// CONTRACT_SHAPE: bounded-change (registered preparation failure retains exact
 /// typed status, never START/installation; no-sync avoids an unused prerequisite).
 #[test]
-#[ignore = "pending DELIVER: metal-run-isolation composed transfer prerequisite"]
 fn sad_registered_missing_rsync_keeps_its_preparation_error_and_no_sync_needs_no_rsync() {
     let controller = NativeController::new();
     success(&controller.fixture.sync(&controller.fixture.source));
