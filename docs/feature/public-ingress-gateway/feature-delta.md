@@ -1857,6 +1857,19 @@ kernel build (7.0.0-38) and by the source reading above, not proven.
 | Hook, map or receipt inconsistency | missing or malformed | `Receipt` | 502 |
 | Exact-peer mTLS failure | `Selected` | `Mtls(..)` | 502 |
 
+- **Refusal classification: the receipt is the verdict.** The hook records its verdict for the intent's cookie before `connect(2)` returns, and a `NoBackend` verdict denies the connect, so the caller's `connect(2)` fails with `EPERM` (`net/ipv4/af_inet.c:679-682`, `net/ipv4/tcp_ipv4.c:206-218`, `kernel/bpf/cgroup.c:79-89 @ v7.0`). A refused `connect(2)` therefore carries no information about the cause; the connector never branches on `errno` or on `io::ErrorKind`. After `connect(2)` completes, whether `Ok` or `Err` (a connect that hit its deadline is `ConnectTimeout` and consumes no receipt), the connector takes the receipt exactly once and classifies by the pair (receipt, connect result):
+
+| Receipt for the intent | `connect(2)` result | Connector result | Public status |
+|---|---|---|---|
+| `NoBackend` (cookie and `ServiceKey` match) | `Err` (the hook's deny) or `Ok` | `NoBackend`; no identity lookup, no mTLS | 503 |
+| `Selected` (cookie and `ServiceKey` match) | `Err` (reset, refusal, unreachable) | `Connect` | 502 |
+| `Selected` (cookie and `ServiceKey` match) | `Ok` | proceed: identity, then mTLS | n/a |
+| absent (`ReceiptMissing`) | `Err` (a kernel or network refusal with no hook verdict, including a hook that failed to write the `NoBackend` receipt) | `Connect` | 502 |
+| absent (`ReceiptMissing`) | `Ok` | `Receipt(ReceiptMissing)` | 502 |
+| cookie or `ServiceKey` mismatch, or any other `take_receipt` error | either | `ReceiptMismatch` / `Receipt(..)` | 502 |
+
+The receipt is the authoritative, atomic record of the hook's verdict for this intent (ADR-0228): `take_receipt` returns it once and removes it. Absence after a refused connect is the typed fact "no hook verdict", and it classifies the failure as a dial failure. A refused dial may therefore take the receipt. The cleanup guard still runs on every path, so each refused dial releases its ledger slot and cleans its registered intent.
+
 - **Sim arm contract (D-PASS7-4).** `SimGatewayConnectDataplane` implements the same observable contract as the real hook, over the `SimDataplane` state it shares, and decides nothing the table above leaves open: for a prepared socket's `ServiceKey`, **no outer entry for the key, or an empty/absent slot in the chained lookup → receipt `NoBackend`**; otherwise → `Selected` carrying the actual `BackendId` the shared `SimDataplane` state holds for the key's slot (deterministic choice, the lowest `BackendId` of the key's current generation; the real Maglev choice is proven only at Tier 3). **Oracle strength:** because the real hook selects by Maglev over the cookie hash (item 3 above), Tier-1 / Sim-backed oracles assert only *membership* in the committed generation when it has N>1 backends; exact-`BackendId` assertions are limited to singleton generations. **Tier-3-only row:** the real outcome table also yields `NoBackend` for a missing `BACKEND_MAP` entry (outer and slot present, backend id absent); the Sim cannot produce that from the `update_service` input, so that row is observed only at Tier 3, and `selected_backend_identity` resolves it only for ids whose `update_service` has completed (Applied), mirroring the commit-guarded read. The Sim does not evaluate `Backend.healthy` (it is present in the `update_service` input but, as in the real arm, nothing decides on it; R-2): the Sim returns `Selected` for any backend of the generation and the healthy window is neither modelled nor tested at Tier 1 (it is a Tier-3/Native observation, obligation 2). Cookies are deterministic nonzero values; `open_upstream` registers like the real adapter; `cleanup`/`take_receipt` follow the port contract (a receipt exists exactly between the Sim connect and `take_receipt`/`cleanup`). A scenario obtains `NoBackend` by never calling `update_service` for the key (or calling it with an empty set) and `Selected` by calling it with a non-empty set; no scripted receipt exists. **Fault surface the tests may use (existing ports only):** typed `GatewayConnectDataplaneError` results returned from the existing port operations (`probe`, `open_upstream`, `take_receipt`, `cleanup`, `selected_backend_identity`, `live_*`) via the Sim's existing typed-fault configuration at those operations, and the pinned `HoldConnectProbe`/`ReleaseConnectProbe` (see Application verification). Nothing else is scripted; a probe failure at boot is the typed `probe` error.
 - **Boot.** No Service condition is a gate input (gate G-1, R-65); backend absence, an unreachable Service address, and a selected backend's health, identity or mTLS failure never block TCP/443.
 - **Late readiness.** The first request after the readiness `pass` reaches the hydrator-written `healthy = 1` and is `Selected`. The window before it is a dial to a not-yet-ready guest that fails (502, R-2); clients retry. The design adds no wake to shorten it. The core: no outer entry or no usable backend → `NoBackend` → 503; a selected backend whose dial fails → 502; never a wrong-peer success.
@@ -5752,7 +5765,10 @@ adapter similarly races its handshake against
 `min(deadline, clock.now() + limits.tls_handshake_deadline())`. The caller's
 absolute deadline is never extended by moving between phases. The
 ancestor-attached cgroup program
-alone selects and rewrites. The connector then takes the matching receipt,
+alone selects and rewrites. When `connect(2)` completes, `Ok` or `Err`, the connector takes the receipt once and
+classifies by (receipt, connect result), never by `errno` (see the refusal classification in § Backend
+unavailability: `NoBackend` is 503 even though the hook's deny fails the connect; `Selected` with a refused connect
+is `Connect`; an absent receipt after a refused connect is `Connect`, after a successful connect `Receipt`). It
 maps `NoBackend` without opening TLS, resolves `Selected.backend_id` through
 `selected_backend_identity`, and transfers the connected fd plus only that
 `SpiffeId` into `GatewayClientMtls::authenticate`. One private RAII guard calls
