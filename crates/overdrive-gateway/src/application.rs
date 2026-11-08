@@ -2,8 +2,7 @@
 //!
 //! The owner (`GatewayApplicationOwner`) is the only mutator of the staged /
 //! current / draining generations, the listener and the Application status
-//! row. The admission refusal arms, the per-connection and per-request leases
-//! and the accept loop belong to later steps and stay scaffolded.
+//! row, and the accept loop that serves admitted connections.
 
 use std::collections::BTreeMap;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
@@ -124,7 +123,7 @@ pub struct UnboundGatewayBuilder {
 
 impl UnboundGatewayBuilder {
     /// Reads and validates the manual key first (a refusal mutates nothing),
-    /// opens custody and the Route set over the IntentStore, and installs the
+    /// opens custody and the Route set over the `IntentStore`, and installs the
     /// initial key. Spawns no task.
     ///
     /// # Errors
@@ -195,7 +194,7 @@ impl UnboundGatewayBuilder {
         GatewayRouteCommands { routes: self.route_handle.clone() }
     }
 
-    /// R-66. Exposes the redacted ObservationStore point reads; they hold no
+    /// R-66. Exposes the redacted `ObservationStore` point reads; they hold no
     /// task and no Route write capability.
     pub fn status_reads(&self) -> GatewayStatusReads {
         GatewayStatusReads {
@@ -205,7 +204,7 @@ impl UnboundGatewayBuilder {
         }
     }
 
-    pub fn into_builder(self) -> (GatewayBuilder, GatewayUpstreamSeal) {
+    pub const fn into_builder(self) -> (GatewayBuilder, GatewayUpstreamSeal) {
         (GatewayBuilder { unbound: self }, GatewayUpstreamSeal::new())
     }
 }
@@ -245,6 +244,10 @@ impl GatewayBuilder {
 
     /// Crate-private (DG-10): `start` with an injected admission. The
     /// admission's budget was built from the same limits as `dependencies`.
+    #[allow(
+        clippy::unused_async,
+        reason = "`start` is the pinned async entry point and awaits this; the held-probe doubles await it too"
+    )]
     pub(crate) async fn start_with(
         self,
         dependencies: GatewayRuntimeDependencies,
@@ -438,12 +441,12 @@ pub struct GatewayRouteCommands {
 }
 
 impl GatewayRouteCommands {
-    pub fn routes(&self) -> &PublicRouteSetHandle {
+    pub const fn routes(&self) -> &PublicRouteSetHandle {
         &self.routes
     }
 }
 
-/// Read-only status port (R-25): redacted ObservationStore point reads; no
+/// Read-only status port (R-25): redacted `ObservationStore` point reads; no
 /// Route write capability is reachable from it.
 #[derive(Clone)]
 pub struct GatewayStatusReads {
@@ -661,6 +664,13 @@ impl GatewayHandle {
                 for retention in closed.retentions {
                     if let Err(timeout) = retention.wait_zero(drain_deadline, clock.as_ref()).await
                     {
+                        tracing::warn!(
+                            name: "gateway.shutdown.generation_drain_timeout",
+                            generation = ?timeout.generation,
+                            connections = timeout.connections,
+                            requests = timeout.requests,
+                            "a draining generation still retained connections or requests at the drain deadline",
+                        );
                         report.forced_connections =
                             report.forced_connections.saturating_add(timeout.connections);
                     }
@@ -736,7 +746,7 @@ pub struct GatewayShutdownReport {
 }
 
 impl GatewayShutdownReport {
-    pub fn is_clean(&self) -> bool {
+    pub const fn is_clean(&self) -> bool {
         self.forced_connections == 0
             && self.task_failures.is_empty()
             && self.cleanup_failures.is_empty()
@@ -1492,7 +1502,7 @@ impl GatewayApplicationOwner {
         }
     }
 
-    async fn unbind(&mut self) {
+    async fn unbind(&self) {
         if self.listener.is_bound() {
             let _ = self.listener.unbind().await;
         }
@@ -1673,11 +1683,6 @@ impl GatewayApplicationOwner {
                         GatewayApplicationUnavailableCause::GatewayIdentityUnusable
                     }
                     GateFailure::ConnectProbe(error) => {
-                        tracing::warn!(
-                            name: "gateway.application.gate_connect_probe_failed",
-                            error = %error,
-                            "gateway application gate failed on the connect dataplane probe",
-                        );
                         tracing::error!(
                             name: "health.startup.refused",
                             reason = "gateway.connect_probe",
@@ -1699,6 +1704,12 @@ impl GatewayApplicationOwner {
                         if staged.phase.load(Ordering::Acquire) == PHASE_IDENTITY {
                             GatewayApplicationUnavailableCause::GatewayIdentityUnusable
                         } else {
+                            tracing::error!(
+                                name: "health.startup.refused",
+                                reason = "gateway.connect_probe",
+                                "gateway application gate refused: the connect path did not prove \
+                                 itself before the gate deadline",
+                            );
                             GatewayApplicationUnavailableCause::ConnectPathUnavailable
                         }
                     }
@@ -2125,10 +2136,6 @@ impl GatewayGenerationRetention {
             }
         }
     }
-    /// The exact retained `(connections, requests)` counts.
-    pub(crate) fn counts(&self) -> (u32, u32) {
-        self.retained()
-    }
 
     fn retained(&self) -> (u32, u32) {
         (self.connections.load(Ordering::Acquire), self.requests.load(Ordering::Acquire))
@@ -2261,7 +2268,7 @@ impl GatewayAdmission {
         Arc::new(Self { current: Arc::new(ArcSwapOption::empty()), budget })
     }
     /// The budget shared with the connector and every generation snapshot.
-    pub(crate) fn budget(&self) -> &Arc<GatewayAdmissionBudget> {
+    pub(crate) const fn budget(&self) -> &Arc<GatewayAdmissionBudget> {
         &self.budget
     }
     pub(crate) fn acquire_connection(
@@ -2276,8 +2283,8 @@ impl GatewayAdmission {
         let generation = snapshot.retention.try_connection()?;
         Ok(GatewayConnectionLease {
             snapshot,
-            generation,
-            public_connection,
+            _generation: generation,
+            _public_connection: public_connection,
             requests_started: AtomicU32::new(0),
             request_active: Arc::new(AtomicBool::new(false)),
         })
@@ -2288,8 +2295,8 @@ impl GatewayAdmission {
 /// Neither lease implements `Clone` or `Default`.
 pub(crate) struct GatewayConnectionLease {
     snapshot: Arc<GatewayApplicationSnapshot>,
-    generation: GatewayGenerationConnectionPermit,
-    public_connection: GatewayPublicConnectionPermit,
+    _generation: GatewayGenerationConnectionPermit,
+    _public_connection: GatewayPublicConnectionPermit,
     requests_started: AtomicU32,
     request_active: Arc<AtomicBool>,
 }
@@ -2335,9 +2342,9 @@ impl GatewayConnectionLease {
             }
         };
         Ok(GatewayRequestLease {
-            snapshot: Arc::clone(&self.snapshot),
-            generation,
-            global,
+            _snapshot: Arc::clone(&self.snapshot),
+            _generation: generation,
+            _global: global,
             request_active: Arc::clone(&self.request_active),
             close_after_response: previous + 1 == ceiling,
         })
@@ -2345,9 +2352,9 @@ impl GatewayConnectionLease {
 }
 
 pub(crate) struct GatewayRequestLease {
-    snapshot: Arc<GatewayApplicationSnapshot>,
-    generation: GatewayGenerationRequestPermit,
-    global: GatewayGlobalRequestPermit,
+    _snapshot: Arc<GatewayApplicationSnapshot>,
+    _generation: GatewayGenerationRequestPermit,
+    _global: GatewayGlobalRequestPermit,
     request_active: Arc<AtomicBool>,
     close_after_response: bool,
 }
@@ -2361,9 +2368,6 @@ impl Drop for GatewayRequestLease {
 }
 
 impl GatewayRequestLease {
-    pub(crate) fn snapshot(&self) -> &GatewayApplicationSnapshot {
-        &self.snapshot
-    }
     pub(crate) const fn close_after_response(&self) -> bool {
         self.close_after_response
     }
@@ -2385,6 +2389,10 @@ pub(crate) struct GatewayDrainTimeout {
 }
 
 #[derive(Debug)]
+#[expect(
+    dead_code,
+    reason = "the design pins this closed error taxonomy; these variants have no producer yet"
+)]
 pub(crate) enum GatewayApplicationError {
     CertifiedKeyReferenceMismatch,
     CertifiedKeyHostnameMismatch,

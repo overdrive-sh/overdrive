@@ -1,7 +1,6 @@
 //! Public Certified-Key Custody command/error surface.
 //!
-//! Candidate validation is live; the custody owner and snapshot bodies stay
-//! scaffolded until the Gateway Application owner step lands them.
+//! Candidate validation, the custody owner and the snapshot bodies.
 
 use std::io::Read as _;
 use std::os::unix::fs::MetadataExt as _;
@@ -154,7 +153,7 @@ impl CertifiedKeyCandidate {
     }
 }
 
-fn profile_error() -> PublicCertifiedKeyError {
+const fn profile_error() -> PublicCertifiedKeyError {
     PublicCertifiedKeyError::Source(CertifiedKeyFailure::CertificateProfile)
 }
 
@@ -234,10 +233,10 @@ impl PublicCertifiedKeySnapshot {
         Ok(Arc::new(config))
     }
 
-    pub fn certified_key_id(&self) -> &PublicCertifiedKeyId {
+    pub const fn certified_key_id(&self) -> &PublicCertifiedKeyId {
         &self.certified_key_id
     }
-    pub fn public_hostname(&self) -> &PublicHostname {
+    pub const fn public_hostname(&self) -> &PublicHostname {
         &self.public_hostname
     }
     pub const fn generation(&self) -> CertifiedKeyGeneration {
@@ -288,7 +287,7 @@ pub enum PublicCertifiedKeyAvailability {
 }
 
 impl PublicCertifiedKeyAvailability {
-    fn generation(&self) -> Option<CertifiedKeyGeneration> {
+    const fn generation(&self) -> Option<CertifiedKeyGeneration> {
         match self {
             Self::Absent => None,
             Self::Usable(snapshot) => Some(snapshot.generation()),
@@ -334,7 +333,7 @@ pub struct PublicCertifiedKeyCustodyHandle {
 }
 
 impl PublicCertifiedKeyCustodyHandle {
-    pub fn id(&self) -> &PublicCertifiedKeyId {
+    pub const fn id(&self) -> &PublicCertifiedKeyId {
         &self.id
     }
     pub async fn install(
@@ -706,7 +705,7 @@ pub(crate) struct ManualCertifiedKeySource {
 }
 
 impl ManualCertifiedKeySource {
-    pub(crate) fn new(chain_path: PathBuf, key_path: PathBuf) -> Self {
+    pub(crate) const fn new(chain_path: PathBuf, key_path: PathBuf) -> Self {
         Self { chain_path, key_path }
     }
 
@@ -832,13 +831,13 @@ impl ManualCertifiedKeySource {
     }
 }
 
-fn source_error(failure: CertifiedKeyFailure) -> PublicCertifiedKeyError {
+const fn source_error(failure: CertifiedKeyFailure) -> PublicCertifiedKeyError {
     PublicCertifiedKeyError::Source(failure)
 }
 
 impl PublicCertifiedKeyError {
     /// The redacted category this error is recorded under in status.
-    fn failure_category(&self) -> CertifiedKeyFailure {
+    const fn failure_category(&self) -> CertifiedKeyFailure {
         match self {
             Self::Source(failure) => *failure,
             Self::Protection(_) => CertifiedKeyFailure::Protection,

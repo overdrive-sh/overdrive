@@ -241,24 +241,7 @@ impl EbpfDataplane {
         // Serialised with `update_service`, which holds this guard for its whole
         // map work.
         let _serialised = self.service_apply_commit.write();
-        let live_nat: std::collections::BTreeSet<crate::maps::BackendKeyPod> = self
-            .service_reverse_nat_keys
-            .lock()
-            .values()
-            .flat_map(|keys| keys.iter().copied())
-            .collect();
-        let mut reverse_nat_map = self.reverse_nat_map.lock();
-        let mut debt = self.service_cleanup_debt.lock();
-        debt.retain(|key| {
-            if live_nat.contains(key) {
-                return false;
-            }
-            match reverse_nat_map.remove(key) {
-                Ok(()) => false,
-                Err(error) if is_key_absent(&error) => false,
-                Err(_) => true,
-            }
-        });
+        self.settle_reverse_nat_debt(std::collections::BTreeSet::new());
     }
 }
 

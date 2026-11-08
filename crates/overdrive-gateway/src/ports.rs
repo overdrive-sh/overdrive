@@ -134,10 +134,10 @@ pub struct PreparedUpstream {
 
 impl PreparedUpstream {
     /// Backends only. Registers nothing and validates nothing.
-    pub fn new(socket: tokio::net::TcpSocket, intent: GatewayConnectIntent) -> Self {
+    pub const fn new(socket: tokio::net::TcpSocket, intent: GatewayConnectIntent) -> Self {
         Self { socket, intent }
     }
-    pub fn intent(&self) -> &GatewayConnectIntent {
+    pub const fn intent(&self) -> &GatewayConnectIntent {
         &self.intent
     }
     /// Hands the socket to the caller for `connect(2)`; the intent stays
@@ -260,7 +260,11 @@ pub struct GatewayUpstream {
 }
 
 impl GatewayUpstreamSeal {
-    pub fn seal_authenticated(&self, leg: KtlsLeg) -> GatewayUpstream {
+    #[allow(
+        clippy::unused_self,
+        reason = "the seal is the capability token: only a holder of the builder's seal can mint a GatewayUpstream"
+    )]
+    pub const fn seal_authenticated(&self, leg: KtlsLeg) -> GatewayUpstream {
         GatewayUpstream { leg }
     }
 
@@ -441,7 +445,7 @@ pub enum HeadTerminator {
 pub struct ThroughBytes(Vec<u8>);
 
 impl ThroughBytes {
-    pub fn new(bytes: Vec<u8>) -> Self {
+    pub const fn new(bytes: Vec<u8>) -> Self {
         Self(bytes)
     }
     pub fn as_slice(&self) -> &[u8] {
@@ -501,7 +505,7 @@ pub trait GatewayRelay: Send + Sync {
         len: NonZeroU64,
         deadlines: RelayDeadlines,
     ) -> Result<(), RelayError>;
-    /// Moves octets until the source's close_notify, failing `LimitExceeded`
+    /// Moves octets until the source's `close_notify`, failing `LimitExceeded`
     /// after more than `max`. Returns the count (R-12).
     async fn relay_to_end(
         &self,
@@ -510,13 +514,13 @@ pub trait GatewayRelay: Send + Sync {
         max: NonZeroU64,
         deadlines: RelayDeadlines,
     ) -> Result<u64, RelayError>;
-    /// Sends close_notify, then shuts down the transmit direction.
+    /// Sends `close_notify`, then shuts down the transmit direction.
     async fn close_write(
         &self,
         to: &mut KtlsWriteHalf,
         deadline: Instant,
     ) -> Result<(), LegWriteError>;
-    /// Reads and drops application octets until the peer's close_notify,
+    /// Reads and drops application octets until the peer's `close_notify`,
     /// `max` octets or `deadlines` (R-14, R-22). Returns no count.
     async fn discard_remaining(
         &self,
@@ -564,7 +568,7 @@ pub enum KtlsArmError {
     KernelConnection,
 }
 
-/// A peer-initiated KeyUpdate that the relay failed to answer.
+/// A peer-initiated `KeyUpdate` that the relay failed to answer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeyUpdateError {
     RustlsRefused,

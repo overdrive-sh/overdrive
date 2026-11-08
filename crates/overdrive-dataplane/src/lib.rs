@@ -2350,6 +2350,22 @@ impl EbpfDataplane {
             }
         }
 
+        self.settle_reverse_nat_debt(stale_reverse);
+    }
+
+    /// Delete the reverse-NAT keys in `newly_stale` and every key earlier
+    /// cleanups could not delete. A key that still fails stays in
+    /// `service_cleanup_debt` as closed debt; a key its owner has since
+    /// re-claimed is dropped from the debt untouched. The caller holds
+    /// `service_apply_commit`.
+    #[allow(
+        clippy::significant_drop_tightening,
+        reason = "the guards are scoped to the section whose all-or-nothing outcome they protect"
+    )]
+    pub(crate) fn settle_reverse_nat_debt(
+        &self,
+        newly_stale: std::collections::BTreeSet<crate::maps::BackendKeyPod>,
+    ) {
         let live_nat: std::collections::BTreeSet<crate::maps::BackendKeyPod> = self
             .service_reverse_nat_keys
             .lock()
@@ -2358,7 +2374,7 @@ impl EbpfDataplane {
             .collect();
         let mut reverse_nat_map = self.reverse_nat_map.lock();
         let mut debt = self.service_cleanup_debt.lock();
-        debt.extend(stale_reverse);
+        debt.extend(newly_stale);
         debt.retain(|key| {
             // A debt key its owner has since re-claimed is live again: drop the
             // debt without deleting the entry.

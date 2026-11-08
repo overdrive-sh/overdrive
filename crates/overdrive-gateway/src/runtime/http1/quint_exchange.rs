@@ -93,7 +93,7 @@ fn unit_count(value: i64, what: &str) -> Result<u64> {
 }
 
 impl RelayConfDriver {
-    fn init(&mut self) {
+    const fn init(&mut self) {
         self.machine = ExchangeMachine::new();
     }
 
@@ -144,7 +144,7 @@ impl RelayConfDriver {
         self.machine.drain_begin();
     }
 
-    fn force_abort(&mut self) {
+    const fn force_abort(&mut self) {
         self.machine.force_abort();
     }
 }

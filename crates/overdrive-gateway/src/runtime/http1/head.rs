@@ -148,7 +148,7 @@ pub(crate) enum RequestHeadError {
 
 impl RequestHeadError {
     /// 400, 413, 421, 431 or 505 per the Request rules table.
-    pub(crate) fn status(&self) -> http::StatusCode {
+    pub(crate) const fn status(&self) -> http::StatusCode {
         match self {
             Self::Line(_)
             | Self::Connect

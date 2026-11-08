@@ -104,7 +104,7 @@ impl GatewayUpstreamConnector {
         }
         match (receipt, connected) {
             (Ok(receipt), connected) => {
-                Self::classify_receipt(receipt, &intent, connected, cleanup, permit)
+                Self::classify_receipt(&receipt, intent, connected, cleanup, permit)
             }
             (Err(GatewayConnectDataplaneError::ReceiptMissing), Err(_)) => {
                 Err(GatewayUpstreamConnectError::Connect)
@@ -115,29 +115,23 @@ impl GatewayUpstreamConnector {
 
     /// Classify a taken receipt against the connect result.
     fn classify_receipt<'a>(
-        receipt: GatewaySelectionReceipt,
-        intent: &GatewayConnectIntent,
+        receipt: &GatewaySelectionReceipt,
+        intent: GatewayConnectIntent,
         connected: std::io::Result<tokio::net::TcpStream>,
         cleanup: IntentCleanupGuard<'a>,
         permit: GatewayConnectPermit,
     ) -> Result<SelectedDial<'a>, GatewayUpstreamConnectError> {
-        match receipt {
+        match *receipt {
             GatewaySelectionReceipt::Selected { socket_cookie, service_key, backend_id }
                 if socket_cookie == intent.socket_cookie && service_key == intent.service_key =>
             {
                 let stream = connected.map_err(|_| GatewayUpstreamConnectError::Connect)?;
-                Ok(SelectedDial {
-                    stream,
-                    _cleanup: cleanup,
-                    _permit: permit,
-                    intent: intent.clone(),
-                    backend_id,
-                })
+                Ok(SelectedDial { stream, _cleanup: cleanup, _permit: permit, intent, backend_id })
             }
             GatewaySelectionReceipt::NoBackend { socket_cookie, service_key }
                 if socket_cookie == intent.socket_cookie && service_key == intent.service_key =>
             {
-                emit_no_backend_receipt(intent);
+                emit_no_backend_receipt(&intent);
                 Err(GatewayUpstreamConnectError::NoBackend)
             }
             GatewaySelectionReceipt::Selected { .. }
@@ -187,7 +181,7 @@ impl<'a> IntentCleanupGuard<'a> {
 
     /// The selection receipt has been taken; a later cleanup failure is an
     /// intent failure.
-    fn receipt_taken(&mut self) {
+    const fn receipt_taken(&mut self) {
         self.receipt = ReceiptState::Consumed;
     }
 }

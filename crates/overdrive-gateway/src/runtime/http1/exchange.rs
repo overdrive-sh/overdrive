@@ -197,7 +197,7 @@ impl ExchangeMachine {
         }
     }
 
-    pub(crate) fn force_abort(&mut self) {
+    pub(crate) const fn force_abort(&mut self) {
         self.close();
     }
 
@@ -219,6 +219,7 @@ impl ExchangeMachine {
         Ok(Disposition::Reuse)
     }
 
+    #[cfg(test)]
     pub(crate) const fn phase(&self) -> ExchangePhase {
         self.phase
     }
@@ -227,14 +228,17 @@ impl ExchangeMachine {
         self.request_remaining
     }
 
+    #[cfg(test)]
     pub(crate) const fn response_state(&self) -> ResponseState {
         self.response_state
     }
 
+    #[cfg(test)]
     pub(crate) const fn response_remaining(&self) -> Remaining {
         self.response_remaining
     }
 
+    #[cfg(test)]
     pub(crate) const fn public_half_closed(&self) -> bool {
         self.public_half_closed
     }
@@ -252,14 +256,14 @@ impl ExchangeMachine {
             && !self.public_half_closed
     }
 
-    fn require_relay(&self) -> Result<(), FramingViolation> {
+    const fn require_relay(&self) -> Result<(), FramingViolation> {
         match self.phase {
             ExchangePhase::Relay => Ok(()),
             phase => Err(FramingViolation::WrongPhase { phase }),
         }
     }
 
-    fn state_for_remaining(&self) -> ResponseState {
+    const fn state_for_remaining(&self) -> ResponseState {
         match self.response_remaining {
             Remaining::None => ResponseState::Complete,
             _ => ResponseState::Body,
@@ -268,7 +272,7 @@ impl ExchangeMachine {
 
     /// Closed is absorbing and owes nothing; `draining` and the public
     /// half-close stay observable.
-    fn close(&mut self) {
+    const fn close(&mut self) {
         self.phase = ExchangePhase::Closed;
         self.request_remaining = Remaining::None;
         self.response_state = ResponseState::Pending;

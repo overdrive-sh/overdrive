@@ -1,25 +1,10 @@
 //! Embedded public-ingress gateway.
 //!
-//! SCAFFOLD: true. The data shapes, closed error enums and trivial accessors
-//! below are the DESIGN-pinned contract; every behaviour body is DELIVER's and
-//! fails with SCAFFOLD text. Acceptance bodies live in the source-local test
-//! modules and in `tests/integration/public_ingress_gateway.rs`.
+//! The data shapes and closed error enums are the DESIGN-pinned contract.
+//! Acceptance bodies live in the source-local test modules and in
+//! `tests/integration/public_ingress_gateway.rs`.
 
 #![forbid(unsafe_code)]
-#![allow(
-    clippy::todo,
-    clippy::doc_markdown,
-    clippy::needless_pass_by_value,
-    clippy::missing_const_for_fn,
-    clippy::unused_async,
-    clippy::unused_self,
-    clippy::struct_field_names,
-    clippy::needless_pass_by_ref_mut,
-    clippy::unnecessary_wraps,
-    dead_code,
-    unused_variables,
-    reason = "public-ingress DISTILL scaffold: bodies are DELIVER's and several pinned items have no live caller until then"
-)]
 #![cfg_attr(
     test,
     allow(
@@ -70,11 +55,11 @@ pub struct ManualCertifiedKeyConfig {
 
 impl ManualCertifiedKeyConfig {
     /// Construct the all-present manual input.
-    pub fn new(id: PublicCertifiedKeyId, chain: PathBuf, key: PathBuf) -> Self {
+    pub const fn new(id: PublicCertifiedKeyId, chain: PathBuf, key: PathBuf) -> Self {
         Self { id, certificate_chain_path: chain, private_key_path: key }
     }
     /// Configured certified-key identity.
-    pub fn id(&self) -> &PublicCertifiedKeyId {
+    pub const fn id(&self) -> &PublicCertifiedKeyId {
         &self.id
     }
     /// Absolute leaf-first certificate-chain file.
@@ -107,7 +92,7 @@ pub struct GatewayConfig {
 
 impl GatewayConfig {
     /// Bind the supplied IPv4 address on the fixed public port 443.
-    pub fn new(bind_address: Ipv4Addr, key: ManualCertifiedKeyConfig) -> Self {
+    pub const fn new(bind_address: Ipv4Addr, key: ManualCertifiedKeyConfig) -> Self {
         Self { bind: SocketAddrV4::new(bind_address, 443), manual_certified_key: key }
     }
     /// Public listener address; the port is always 443.
@@ -115,7 +100,7 @@ impl GatewayConfig {
         self.bind
     }
     /// Manual certified-key inputs owned by the source boundary.
-    pub fn manual_certified_key(&self) -> &ManualCertifiedKeyConfig {
+    pub const fn manual_certified_key(&self) -> &ManualCertifiedKeyConfig {
         &self.manual_certified_key
     }
 }

@@ -423,7 +423,7 @@ impl AppConfDriver {
 
     /// Owner-autonomous: no driving-port call. Yield until the owner has
     /// retired `gid`.
-    fn retire(&mut self, gid: i64) -> Result {
+    fn retire(&self, gid: i64) -> Result {
         let retiring = self.ids.generation(gid)?;
         let probes = &self.world()?.probes;
         self.runtime

@@ -3,6 +3,13 @@
 //! Source-local properties implement S-PIG-12 and S-PIG-13.
 
 #![allow(clippy::doc_markdown, reason = "CONTRACT_SHAPE is required metadata")]
+#![cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "authority normalization has no production caller yet; the source-local properties pin it"
+    )
+)]
 
 use http::HeaderMap;
 use http::header::HOST;

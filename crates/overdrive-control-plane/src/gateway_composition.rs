@@ -10,8 +10,7 @@
 //! receives it; only the boot composition constructs the enabled form.
 //!
 //! The shapes here are the DESIGN-pinned total composition surface (D5 items 6
-//! and 10, "Re-pinned composition signatures"). The enabled constructor has no
-//! production caller until the boot composition (steps G1-G4) lands.
+//! and 10, "Re-pinned composition signatures").
 
 use std::net::SocketAddrV4;
 use std::sync::Arc;
@@ -74,9 +73,15 @@ pub struct GatewayIdentityDisabled;
 pub struct GatewayAppStateComposition {
     identity_view: Arc<dyn GatewayIdentityView>,
     identity_actions: GatewayIdentityActionComposition,
-    routes: Option<GatewayRouteCommands>,
-    status: Option<GatewayStatusReads>,
-    configured_address: Option<SocketAddrV4>,
+    enabled: Option<EnabledGatewayHandles>,
+}
+
+/// The handles that exist only when the gateway is enabled.
+#[derive(Clone)]
+struct EnabledGatewayHandles {
+    routes: GatewayRouteCommands,
+    status: GatewayStatusReads,
+    configured_address: SocketAddrV4,
 }
 
 impl GatewayAppStateComposition {
@@ -87,9 +92,7 @@ impl GatewayAppStateComposition {
         Self {
             identity_view: DisabledGatewayIdentityRead::canonical(),
             identity_actions: GatewayIdentityActionComposition::disabled(),
-            routes: None,
-            status: None,
-            configured_address: None,
+            enabled: None,
         }
     }
 
@@ -104,15 +107,16 @@ impl GatewayAppStateComposition {
         Self {
             identity_view,
             identity_actions,
-            routes: Some(routes),
-            status: Some(status),
-            configured_address: Some(configured_address),
+            enabled: Some(EnabledGatewayHandles { routes, status, configured_address }),
         }
     }
 
     /// The configured public bind address; `None` when the gateway is disabled.
     pub(crate) const fn configured_address(&self) -> Option<SocketAddrV4> {
-        self.configured_address
+        match &self.enabled {
+            Some(enabled) => Some(enabled.configured_address),
+            None => None,
+        }
     }
 
     /// The gateway-identity read port the hydration boundary lends out.
@@ -130,13 +134,19 @@ impl GatewayAppStateComposition {
     /// The Route command port; `None` when the gateway is disabled.
     #[must_use]
     pub const fn routes(&self) -> Option<&GatewayRouteCommands> {
-        self.routes.as_ref()
+        match &self.enabled {
+            Some(enabled) => Some(&enabled.routes),
+            None => None,
+        }
     }
 
     /// The redacted status read port; `None` when the gateway is disabled.
     #[must_use]
     pub const fn status(&self) -> Option<&GatewayStatusReads> {
-        self.status.as_ref()
+        match &self.enabled {
+            Some(enabled) => Some(&enabled.status),
+            None => None,
+        }
     }
 }
 

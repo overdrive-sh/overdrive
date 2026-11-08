@@ -328,11 +328,6 @@ impl HeldConnectDouble {
     pub(super) fn new(probes: Arc<HeldProbes>) -> Arc<Self> {
         Arc::new(Self { probes, state: Mutex::new(ConnectState::default()) })
     }
-
-    /// Number of upstream sockets opened so far.
-    pub(super) fn opened_count(&self) -> u64 {
-        self.state.lock().expect("connect state").next_cookie
-    }
 }
 
 impl GatewayConnectCleanup for HeldConnectDouble {
@@ -740,7 +735,6 @@ pub(super) struct Composition {
     pub(super) handle: GatewayHandle,
     pub(super) admission: Arc<GatewayAdmission>,
     pub(super) probes: Arc<HeldProbes>,
-    pub(super) connect: Arc<HeldConnectDouble>,
     pub(super) clock: Arc<SimClock>,
     _intent: Arc<LocalIntentStore>,
     _site: Site,
@@ -796,7 +790,6 @@ impl Composition {
             handle,
             admission,
             probes,
-            connect,
             clock,
             _intent: intent,
             _site: site,

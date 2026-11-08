@@ -3937,13 +3937,14 @@ async fn boot_server(
     runtime.register(service_lifecycle()).await?;
     // Public-ingress gateway, boot step G0: the dedicated gateway-SVID
     // reconciler is registered only when the gateway is enabled.
-    let gateway_evaluation: Option<Evaluation> = if config.gateway.is_some() {
-        let (gateway_reconciler, evaluation) =
-            gateway_identity_lifecycle::gateway_svid_lifecycle_registration(&node_id);
-        runtime.register(gateway_reconciler).await?;
-        Some(evaluation)
-    } else {
-        None
+    let enabled_gateway = match &config.gateway {
+        None => None,
+        Some(gateway_config) => {
+            let (gateway_reconciler, evaluation) =
+                gateway_identity_lifecycle::gateway_svid_lifecycle_registration(&node_id);
+            runtime.register(gateway_reconciler).await?;
+            Some((gateway_config.clone(), evaluation))
+        }
     };
     let runtime = Arc::new(runtime);
 
@@ -4061,10 +4062,12 @@ async fn boot_server(
     let mut gateway_pending: Option<(
         Arc<overdrive_dataplane::mtls::gateway_identity::GatewayIdentitySlot>,
         overdrive_gateway::application::UnboundGatewayBuilder,
+        Evaluation,
     )> = None;
-    let gateway_composition = match &config.gateway {
+    let gateway_composition = match enabled_gateway {
         None => GatewayAppStateComposition::disabled(),
-        Some(gateway_config) => {
+        Some((gateway_config, evaluation)) => {
+            let bind_address = gateway_config.bind();
             let slot =
                 Arc::new(overdrive_dataplane::mtls::gateway_identity::GatewayIdentitySlot::new(
                     node_id.clone(),
@@ -4074,7 +4077,7 @@ async fn boot_server(
                 Arc::new(gateway_composition::AllocatorServiceVipView::new(Arc::clone(&allocator)));
             let unbound = match overdrive_gateway::application::UnboundGatewayBuilder::new(
                 node_id.clone(),
-                gateway_config.clone(),
+                gateway_config,
                 Arc::clone(&intent_store),
                 Arc::clone(&obs),
                 vip_view,
@@ -4085,7 +4088,7 @@ async fn boot_server(
             {
                 Ok(unbound) => unbound,
                 Err(source) => {
-                    tracing::warn!(
+                    tracing::error!(
                         name: "health.startup.refused",
                         reason = "gateway.boot",
                         error = %source,
@@ -4099,9 +4102,9 @@ async fn boot_server(
                 GatewayIdentityActionComposition::enabled(Arc::new(slot.action_target())),
                 unbound.route_commands(),
                 unbound.status_reads(),
-                gateway_config.bind(),
+                bind_address,
             );
-            gateway_pending = Some((slot, unbound));
+            gateway_pending = Some((slot, unbound, evaluation));
             composition
         }
     };
@@ -4548,7 +4551,7 @@ async fn boot_server(
     // start builder and the client-mTLS factory builds the exact-peer client
     // over the identity access and the upstream seal. Both are infallible, and
     // a builder dropped by any later refusal owns no task.
-    let gateway_start = gateway_pending.map(|(slot, unbound)| {
+    let gateway_start = gateway_pending.map(|(slot, unbound, evaluation)| {
         let (builder, seal) = unbound.into_builder();
         let limits = overdrive_gateway::runtime::GatewayLimits::first_slice();
         let client_mtls = gateway_adapters.client_mtls.client_mtls(
@@ -4558,7 +4561,7 @@ async fn boot_server(
                 limits: limits.clone(),
             },
         );
-        (builder, slot, limits, client_mtls)
+        (builder, slot, limits, client_mtls, evaluation)
     });
 
     // Spawn the exit-observer subsystem BEFORE the convergence loop so
@@ -4833,14 +4836,11 @@ async fn boot_server(
 
     // Public-ingress gateway, boot step G4: start the Route, custody,
     // application, connection and gate tasks. The gate runs the relay and
-    // connect probes, the identity ensure and the actual-frontend probe before
+    // connect probes and the identity ensure before
     // TCP/443 binds; a failing gate keeps 443 unbound and is not fatal here.
     let gateway = match gateway_start {
         None => None,
-        Some((builder, slot, limits, client_mtls)) => {
-            let evaluation = gateway_evaluation.unwrap_or_else(|| {
-                unreachable!("G0 registers the gateway reconciler whenever the gateway is enabled")
-            });
+        Some((builder, slot, limits, client_mtls, evaluation)) => {
             let lifecycle = Arc::new(
                 gateway_identity_lifecycle::ControlPlaneGatewayIdentityLifecycle::over_runtime(
                     Arc::new(slot.lifecycle_target()),

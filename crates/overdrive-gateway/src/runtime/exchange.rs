@@ -151,7 +151,7 @@ struct Connection {
 
 /// How a connection ends.
 enum End {
-    /// Nothing more to say: close_notify, then close.
+    /// Nothing more to say: `close_notify`, then close.
     Close,
     /// A final response was delivered while request octets may remain unread:
     /// half-close, then discard what the peer still sends until `until`.
@@ -169,6 +169,7 @@ enum Step {
 }
 
 /// Why one half of an exchange failed.
+#[derive(Clone, Copy)]
 enum Fault {
     /// Answer with `status` if no final response octet is out, then close.
     Reject { status: StatusCode, linger: bool },
@@ -313,6 +314,10 @@ impl Connection {
 
     /// The exchange ran both halves to their ends: decide whether the
     /// connection is reused, closed or lingers for the unread request octets.
+    #[allow(
+        clippy::needless_pass_by_ref_mut,
+        reason = "`&mut self` keeps this future `Send`: `Connection` holds a `Send`-only value and is not `Sync`"
+    )]
     async fn conclude(
         &mut self,
         upstream_write: &mut KtlsWriteHalf,
@@ -604,11 +609,11 @@ async fn relay_request_exact(
         .relay()
         .relay_exact(public_read, upstream_write, owed, shared.body_deadlines())
         .await
-        .map_err(request_relay_fault)?;
+        .map_err(|error| request_relay_fault(&error))?;
     shared.with_machine(|machine| machine.request_octets_moved(length))
 }
 
-fn request_relay_fault(error: RelayError) -> Fault {
+const fn request_relay_fault(error: &RelayError) -> Fault {
     match error {
         RelayError::NoProgress => {
             Fault::Reject { status: StatusCode::REQUEST_TIMEOUT, linger: false }
@@ -644,7 +649,7 @@ async fn relay_request_chunks(
             .relay()
             .relay_exact(public_read, upstream_write, owed, shared.body_deadlines())
             .await
-            .map_err(request_relay_fault)?;
+            .map_err(|error| request_relay_fault(&error))?;
         shared.with_machine(|machine| machine.request_octets_moved(size))?;
         let terminator = read_request_line(shared, public_read, line_limit).await?;
         check_chunk_terminator(terminator.as_slice())

@@ -4,20 +4,11 @@
 //! `gateway_svid_lifecycle_registration` is the one factory of the reconciler's
 //! name and target; `boot_server` (step G0) registers it and the lifecycle
 //! control reuses the same evaluation for ensure, reissue and disable wakes.
-//!
-#![allow(
-    clippy::needless_pass_by_value,
-    clippy::missing_const_for_fn,
-    clippy::redundant_pub_crate,
-    reason = "crate-private composition types"
-)]
 
 use std::sync::Arc;
 use std::time::Instant;
 
-#[cfg(all(test, feature = "integration-tests"))]
-use overdrive_core::eval_broker::EvaluationBroker;
-use overdrive_core::eval_broker::{Evaluation, EvaluationEligibility};
+use overdrive_core::eval_broker::{Evaluation, EvaluationBroker, EvaluationEligibility};
 use overdrive_core::gateway_identity::{GatewayIdentityFacts, GatewayIdentityIssueRecord};
 use overdrive_core::id::NodeId;
 use overdrive_core::reconcilers::{Reconciler, TargetResource};
@@ -28,9 +19,9 @@ use overdrive_gateway::ports::{
 };
 use overdrive_reconcilers::{AnyReconciler, GatewaySvidLifecycle};
 
-use crate::reconciler_runtime::ReconcilerRuntime;
-#[cfg(all(test, feature = "integration-tests"))]
 use parking_lot::Mutex;
+
+use crate::reconciler_runtime::ReconcilerRuntime;
 
 #[cfg(all(test, feature = "integration-tests"))]
 mod quint_gateway_identity;
@@ -38,7 +29,7 @@ mod quint_gateway_identity;
 /// The canonical registration: the reconciler and the one `node/<node-id>`
 /// evaluation every wake of it submits.
 #[must_use]
-pub(crate) fn gateway_svid_lifecycle_registration(node_id: &NodeId) -> (AnyReconciler, Evaluation) {
+pub fn gateway_svid_lifecycle_registration(node_id: &NodeId) -> (AnyReconciler, Evaluation) {
     let reconciler = GatewaySvidLifecycle::canonical();
     let target = TargetResource::new(&format!("node/{node_id}")).unwrap_or_else(|_| {
         unreachable!("NodeId is non-empty and node/ is a canonical target prefix")
@@ -50,33 +41,29 @@ pub(crate) fn gateway_svid_lifecycle_registration(node_id: &NodeId) -> (AnyRecon
 /// The production `GatewayIdentityLifecycleControl`: submits the retained
 /// evaluation through the real broker and races the slot's watch against the
 /// injected clock.
-pub(crate) struct ControlPlaneGatewayIdentityLifecycle {
+pub struct ControlPlaneGatewayIdentityLifecycle {
     target: Arc<dyn GatewayIdentityLifecycleTarget>,
-    broker: WakeBroker,
+    broker: Arc<dyn WakeSubmit>,
     evaluation: Evaluation,
     clock: Arc<dyn Clock>,
 }
 
-/// The broker the retained evaluation is submitted to: a standalone shared
-/// broker, or the reconciler runtime's own broker (the one the convergence
-/// loop drains).
-enum WakeBroker {
-    #[cfg(all(test, feature = "integration-tests"))]
-    Shared(Arc<Mutex<EvaluationBroker>>),
-    Runtime(Arc<ReconcilerRuntime>),
+/// Where the retained evaluation is submitted: the reconciler runtime's own
+/// broker (the one the convergence loop drains) in production, a standalone
+/// broker where a harness drains it itself.
+trait WakeSubmit: Send + Sync {
+    fn submit(&self, evaluation: Evaluation, now: Instant);
 }
 
-impl WakeBroker {
+impl WakeSubmit for ReconcilerRuntime {
     fn submit(&self, evaluation: Evaluation, now: Instant) {
-        match self {
-            #[cfg(all(test, feature = "integration-tests"))]
-            Self::Shared(broker) => {
-                broker.lock().submit(evaluation, now, EvaluationEligibility::Immediate);
-            }
-            Self::Runtime(runtime) => {
-                runtime.broker().submit(evaluation, now, EvaluationEligibility::Immediate);
-            }
-        }
+        self.broker().submit(evaluation, now, EvaluationEligibility::Immediate);
+    }
+}
+
+impl WakeSubmit for Mutex<EvaluationBroker> {
+    fn submit(&self, evaluation: Evaluation, now: Instant) {
+        self.lock().submit(evaluation, now, EvaluationEligibility::Immediate);
     }
 }
 
@@ -88,7 +75,7 @@ impl ControlPlaneGatewayIdentityLifecycle {
         evaluation: Evaluation,
         clock: Arc<dyn Clock>,
     ) -> Self {
-        Self { target, broker: WakeBroker::Shared(broker), evaluation, clock }
+        Self { target, broker, evaluation, clock }
     }
 
     /// The production control: wakes submit into the runtime's own broker.
@@ -98,7 +85,7 @@ impl ControlPlaneGatewayIdentityLifecycle {
         evaluation: Evaluation,
         clock: Arc<dyn Clock>,
     ) -> Self {
-        Self { target, broker: WakeBroker::Runtime(runtime), evaluation, clock }
+        Self { target, broker: runtime, evaluation, clock }
     }
 }
 

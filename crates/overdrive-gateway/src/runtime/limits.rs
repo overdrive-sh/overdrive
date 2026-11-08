@@ -1,6 +1,5 @@
 //! Fixed first-slice gateway resource limits.
 //!
-//! SCAFFOLD: true. The constructor is DELIVER's.
 //! The source-local property implements S-PIG-17.
 
 #![allow(clippy::doc_markdown, reason = "CONTRACT_SHAPE is required metadata")]
@@ -34,7 +33,7 @@ pub struct GatewayLimits {
 
 impl GatewayLimits {
     /// Construct the one fixed first-slice policy.
-    pub fn first_slice() -> Self {
+    pub const fn first_slice() -> Self {
         const CONNECTIONS: NonZeroU32 = NonZeroU32::new(128).unwrap();
         const HEAD_BYTES: NonZeroUsize = NonZeroUsize::new(32 * 1024).unwrap();
         const HEADERS: NonZeroUsize = NonZeroUsize::new(100).unwrap();
