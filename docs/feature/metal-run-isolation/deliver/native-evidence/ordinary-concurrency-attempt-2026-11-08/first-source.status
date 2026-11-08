@@ -1,0 +1,31 @@
+ M .claude/rules/testing.md
+ M .config/nextest.toml
+ M AGENTS.md
+ M crates/overdrive-control-plane/src/worker/exit_observer.rs
+ M crates/overdrive-control-plane/tests/acceptance/crash_ending_authority.rs
+ M crates/overdrive-control-plane/tests/acceptance/terminal_hook_ownership.rs
+ M crates/overdrive-core/src/traits/driver.rs
+ M crates/overdrive-testing/bin/fwd_guest_suite.rs
+ M crates/overdrive-testing/src/guest_kit.rs
+ M crates/overdrive-testing/src/guest_lane.rs
+ M crates/overdrive-testing/src/vm_fixture.rs
+ M docs/feature/metal-run-isolation/deliver/execution-log.json
+ M docs/feature/service-allocation-readiness-and-ending/deliver/roadmap.json
+ M infra/metal/README.md
+ M infra/metal/bootstrap.sh
+ M infra/metal/lease-holder.sh
+ M infra/metal/native-preflight.sh
+ M lefthook.yml
+ M xtask/src/guest_kit_prepare.rs
+ M xtask/src/main.rs
+ M xtask/src/metal_run_isolation_conformance.rs
+ M xtask/tests/acceptance/metal_run_isolation/admission.rs
+ M xtask/tests/acceptance/metal_run_isolation/collection.rs
+ M xtask/tests/acceptance/metal_run_isolation/controller.rs
+ M xtask/tests/acceptance/metal_run_isolation/finalization.rs
+ M xtask/tests/acceptance/metal_run_isolation/identity.rs
+ M xtask/tests/acceptance/metal_run_isolation/placement.rs
+ M xtask/tests/acceptance/metal_run_isolation/qualification.rs
+?? docs/feature/service-allocation-readiness-and-ending/deliver/execution-log.json
+?? infra/metal/test-placement.json
+?? infra/metal/test-wrapper.sh

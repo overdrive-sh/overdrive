@@ -1,0 +1,24 @@
+ M .claude/rules/testing.md
+ M .config/nextest.toml
+ M crates/overdrive-testing/bin/fwd_guest_suite.rs
+ M crates/overdrive-testing/src/guest_kit.rs
+ M crates/overdrive-testing/src/guest_lane.rs
+ M crates/overdrive-testing/src/vm_fixture.rs
+ M docs/feature/metal-run-isolation/deliver/execution-log.json
+ M infra/metal/README.md
+ M infra/metal/bootstrap.sh
+ M infra/metal/lease-holder.sh
+ M infra/metal/native-preflight.sh
+ M lefthook.yml
+ M xtask/src/guest_kit_prepare.rs
+ M xtask/src/main.rs
+ M xtask/src/metal_run_isolation_conformance.rs
+ M xtask/tests/acceptance/metal_run_isolation/admission.rs
+ M xtask/tests/acceptance/metal_run_isolation/collection.rs
+ M xtask/tests/acceptance/metal_run_isolation/controller.rs
+ M xtask/tests/acceptance/metal_run_isolation/finalization.rs
+ M xtask/tests/acceptance/metal_run_isolation/identity.rs
+ M xtask/tests/acceptance/metal_run_isolation/placement.rs
+ M xtask/tests/acceptance/metal_run_isolation/qualification.rs
+?? infra/metal/test-placement.json
+?? infra/metal/test-wrapper.sh
