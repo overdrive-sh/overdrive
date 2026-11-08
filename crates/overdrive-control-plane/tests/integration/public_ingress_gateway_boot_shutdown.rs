@@ -21,7 +21,9 @@
 //! | `a_disabled_gateway_never_probes_the_relay` | S-PIG-100, disabled arm | ignored until `SimGatewayRelay` lands |
 //! | `a_service_with_no_backend_is_answered_503_twice_with_an_empty_second_delta` | S-PIG-02 (I), 54 | ignored |
 //! | `a_failing_sentinel_probe_keeps_the_public_port_unbound_and_serve_unaffected` | S-PIG-57 (I) | ignored |
-//! | `a_frontend_with_no_backend_is_bind_valid_and_the_listener_serves_503` | S-PIG-58 | ignored |
+//! | `a_frontend_with_no_backend_is_bind_valid_and_the_listener_serves_503` | S-PIG-58 (a) | ignored |
+//! | `a_selected_backend_that_refuses_mtls_is_bind_valid_and_its_first_request_is_one_502` | S-PIG-58 (b), R-65 | ignored |
+//! | `a_route_replacement_behind_a_backend_that_refuses_mtls_is_promoted_and_drains_the_prior_generation` | S-PIG-58 (c), R-65 | ignored |
 //! | `enabled_boot_probes_the_relay_before_the_connect_path_and_the_gateway_stage_runs_first` | S-PIG-60 (I) | ignored |
 //! | `a_gated_gateway_never_requests_serve_shutdown` | S-PIG-61 | ignored |
 //! | `the_workload_surface_advances_identically_disabled_enabled_and_gated` | S-PIG-62 | ignored |
@@ -34,9 +36,9 @@
 //! # Bind-address table (R-6)
 //!
 //! A composition that reaches promotion binds its own `127.0.0.0/8` address on
-//! TCP/443. This file owns second octets 97 and 152..=166; the gateway
+//! TCP/443. This file owns second octets 97 and 152..=168; the gateway
 //! integration files own 41..=62, 68..=96 and 130..=132, the in-crate drivers
-//! 63..=67, the sim acceptance file 120 and 121, the conformance binary
+//! 63..=67 and 98, the sim acceptance file 120 and 121, the conformance binary
 //! 100..=119.
 //!
 //! | `T` | test |
@@ -44,7 +46,9 @@
 //! | 97 | disabled boot: the configured-but-unused address stays unbound (S-PIG-59) |
 //! | 152 | S-PIG-02 / 54 |
 //! | 153 | S-PIG-57 |
-//! | 154 | S-PIG-58 |
+//! | 154 | S-PIG-58 (a) |
+//! | 167 | S-PIG-58 (b) |
+//! | 168 | S-PIG-58 (c) |
 //! | 155 | S-PIG-60 |
 //! | 156 | S-PIG-61 (gated) |
 //! | 158, 159, 160 | S-PIG-62 (disabled, enabled, gated) |
@@ -61,6 +65,8 @@
 
 use std::collections::BTreeMap;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpStream};
+use std::os::fd::OwnedFd;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -93,9 +99,10 @@ use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{Driver, DriverType};
 use overdrive_core::traits::entropy::Entropy;
 use overdrive_gateway::ports::{
+    GatewayClientMtls, GatewayClientMtlsDeps, GatewayClientMtlsError, GatewayClientMtlsFactory,
     GatewayConnectCleanup, GatewayConnectCleanupSweep, GatewayConnectDataplane,
     GatewayConnectDataplaneError, GatewayConnectIntent, GatewayRelay, GatewaySelectionReceipt,
-    PreparedUpstream,
+    GatewayUpstream, PreparedUpstream,
 };
 use overdrive_gateway::{GatewayConfig, ManualCertifiedKeyConfig};
 use overdrive_host::ca::PublicCertifiedKeyAeadCodec;
@@ -412,11 +419,14 @@ impl DataplaneComposer for FixtureComposer {
 }
 
 /// Delegates to the Sim connect dataplane and records, at the start of every
-/// connect probe, how many relay probes had already run (the G3 order).
+/// connect probe, how many relay probes had already run (the G3 order), and how
+/// many upstream sockets were opened.
 struct ProbeOrderSpy {
     inner: Arc<SimGatewayConnectDataplane>,
     relay: Arc<SimGatewayRelay>,
     relay_probes_seen_by_connect_probe: Arc<Mutex<Vec<u32>>>,
+    /// `open_upstream` calls, whichever operation made them.
+    opens: Arc<AtomicU32>,
 }
 
 impl GatewayConnectCleanup for ProbeOrderSpy {
@@ -459,6 +469,7 @@ impl GatewayConnectDataplane for ProbeOrderSpy {
         &self,
         key: ServiceKey,
     ) -> Result<PreparedUpstream, GatewayConnectDataplaneError> {
+        self.opens.fetch_add(1, Ordering::SeqCst);
         self.inner.open_upstream(key)
     }
 
@@ -511,6 +522,41 @@ impl CaFactory for RefusingSvidCaFactory {
     }
 }
 
+/// Delegates to the Sim exact-peer client and counts every `authenticate`. The
+/// unscripted Sim client presents no peer, so it refuses every selected
+/// backend (`PeerCertificateMissing`): the backend whose mTLS fails.
+struct CountingMtlsFactory {
+    inner: Arc<dyn GatewayClientMtlsFactory>,
+    calls: Arc<AtomicU32>,
+}
+
+impl GatewayClientMtlsFactory for CountingMtlsFactory {
+    fn client_mtls(&self, deps: GatewayClientMtlsDeps) -> Arc<dyn GatewayClientMtls> {
+        Arc::new(CountingMtls {
+            inner: self.inner.client_mtls(deps),
+            calls: Arc::clone(&self.calls),
+        })
+    }
+}
+
+struct CountingMtls {
+    inner: Arc<dyn GatewayClientMtls>,
+    calls: Arc<AtomicU32>,
+}
+
+#[async_trait]
+impl GatewayClientMtls for CountingMtls {
+    async fn authenticate(
+        &self,
+        connected: OwnedFd,
+        expected_peer: SpiffeId,
+        deadline: Instant,
+    ) -> Result<GatewayUpstream, GatewayClientMtlsError> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        self.inner.authenticate(connected, expected_peer, deadline).await
+    }
+}
+
 /// What a world is built with. Every field is a choice at an existing driven
 /// port or in `ServerConfig`; the defaults are the healthy enabled node.
 #[expect(
@@ -553,6 +599,10 @@ struct World {
     connect: Arc<SimGatewayConnectDataplane>,
     sim: SimGatewayAdapters,
     relay_probes_seen_by_connect_probe: Arc<Mutex<Vec<u32>>>,
+    /// `open_upstream` calls, counted when the spy is installed.
+    opens: Arc<AtomicU32>,
+    /// `GatewayClientMtls::authenticate` calls.
+    authenticate_calls: Arc<AtomicU32>,
     handle: Option<ServerHandle>,
     client: reqwest::Client,
     base: String,
@@ -594,11 +644,14 @@ impl World {
             connect.fail_next(ConnectOperation::Probe, fault);
         }
         let probe_log = Arc::new(Mutex::new(Vec::new()));
+        let opens = Arc::new(AtomicU32::new(0));
+        let authenticate_calls = Arc::new(AtomicU32::new(0));
         let capability: Arc<dyn GatewayConnectDataplane> = if spec.spy {
             Arc::new(ProbeOrderSpy {
                 inner: Arc::clone(&connect),
                 relay: Arc::clone(sim.sim_relay()),
                 relay_probes_seen_by_connect_probe: Arc::clone(&probe_log),
+                opens: Arc::clone(&opens),
             })
         } else {
             Arc::clone(&connect) as _
@@ -615,7 +668,10 @@ impl World {
                     [0x5a; KEK_LEN],
                 ),
             ))),
-            client_mtls: sim.client_mtls(),
+            client_mtls: Arc::new(CountingMtlsFactory {
+                inner: sim.client_mtls(),
+                calls: Arc::clone(&authenticate_calls),
+            }),
             relay: sim.relay(),
         };
         if spec.refuse_svid {
@@ -646,6 +702,8 @@ impl World {
             connect,
             sim,
             relay_probes_seen_by_connect_probe: probe_log,
+            opens,
+            authenticate_calls,
             handle: Some(handle),
             client,
             base: format!("https://localhost:{}", bound.port()),
@@ -832,6 +890,31 @@ impl World {
         );
     }
 
+    /// Advance until the Service is Running and its backend is programmed into
+    /// the dataplane, observed through the allocation listing and the Sim
+    /// dataplane.
+    async fn wait_for_programmed_backend(&self) -> Progress {
+        let deadline = Instant::now() + WAIT;
+        loop {
+            let observed = self.progress().await;
+            if observed.allocation_running && observed.backends_hydrated > 0 {
+                return observed;
+            }
+            assert!(Instant::now() < deadline, "timed out waiting for a programmed backend");
+            self.settle(TICK).await;
+        }
+    }
+
+    /// `open_upstream` calls so far (the spy must be installed).
+    fn opens(&self) -> u32 {
+        self.opens.load(Ordering::SeqCst)
+    }
+
+    /// `GatewayClientMtls::authenticate` calls so far.
+    fn authenticate_calls(&self) -> u32 {
+        self.authenticate_calls.load(Ordering::SeqCst)
+    }
+
     /// Graceful shutdown on the injected clock.
     async fn shutdown(&mut self) {
         let handle = self.handle.take().expect("the server handle");
@@ -1011,7 +1094,7 @@ async fn a_failing_sentinel_probe_keeps_the_public_port_unbound_and_serve_unaffe
 // S-PIG-58
 // ---------------------------------------------------------------------------
 
-/// S-PIG-58 — an actual frontend with no backend (the Sim driver refuses to
+/// S-PIG-58 (a) — an actual frontend with no backend (the Sim driver refuses to
 /// start the allocation, observed before the request) is bind-valid: the gate
 /// waits for no backend, the listener binds, the connect path is Ready, no
 /// unavailable cause is reported, and the bound listener serves 503.
@@ -1041,6 +1124,128 @@ async fn a_frontend_with_no_backend_is_bind_valid_and_the_listener_serves_503() 
         world.public_response().await.starts_with(b"HTTP/1.1 503"),
         "the listener serves the NoBackend 503"
     );
+    world.shutdown().await;
+}
+
+/// S-PIG-58 (b) — route activation does not depend on backend authentication
+/// (R-65). The Service is Running and its backend is programmed, but the Sim
+/// exact-peer client presents no peer, so the selected backend's mTLS fails.
+/// The actual-frontend probe validates the `Selected` receipt, resolves no
+/// identity and authenticates nothing: the listener binds, TCP/443 is bound,
+/// the status shows no gateway failure cause, `health.startup.refused` is not
+/// emitted and no `authenticate` call occurs before the first public request.
+/// That request returns exactly one 502, with one `open_upstream`, one
+/// `authenticate` and no retry, and leaves no intent or receipt.
+///
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[serial(cgroup)]
+#[ignore = "pending DELIVER gateway-boot-and-shutdown"]
+async fn a_selected_backend_that_refuses_mtls_is_bind_valid_and_its_first_request_is_one_502() {
+    let mut world = World::boot(Spec { spy: true, ..Spec::enabled(167) }).await;
+    world.deploy_service().await;
+    world.wait_for_programmed_backend().await;
+    world.declare_route("/").await;
+
+    let status = world
+        .wait_status("the listener to bind", TICK, |status| {
+            status.listener_bound
+                && status.application.as_ref().is_some_and(|row| {
+                    matches!(row.listener, GatewayListenerStatusBody::Bound { .. })
+                })
+        })
+        .await;
+
+    let row = status.application.as_ref().expect("an application row");
+    assert!(row.unavailable.is_none(), "no gateway failure cause: {status:?}");
+    assert!(
+        matches!(row.connect_path, GatewayConnectPathStatusBody::Ready),
+        "the connect path is Ready: {status:?}"
+    );
+    assert!(world.listening(), "TCP/443 is bound on the configured address");
+    assert!(
+        events().refusal_reasons().is_empty(),
+        "no health.startup.refused: {:?}",
+        events().refusal_reasons()
+    );
+    assert_eq!(world.authenticate_calls(), 0, "the gate authenticated no backend");
+
+    let opens_before = world.opens();
+    let response = world.public_response().await;
+    assert!(
+        response.starts_with(b"HTTP/1.1 502"),
+        "the first request is a 502, got {:?}",
+        String::from_utf8_lossy(&response[..response.len().min(40)])
+    );
+    assert_eq!(
+        response.windows(9).filter(|window| *window == b"HTTP/1.1 ").count(),
+        1,
+        "exactly one response"
+    );
+    assert_eq!(world.opens() - opens_before, 1, "one open_upstream, no retry");
+    assert_eq!(world.authenticate_calls(), 1, "one authenticate, no second attempt");
+    assert_eq!(
+        (
+            world.connect.live_intent_count().ok(),
+            world.connect.live_receipts().ok().map(|r| r.len())
+        ),
+        (Some(0), Some(0)),
+        "no intent or receipt outlives the request"
+    );
+    world.shutdown().await;
+}
+
+/// S-PIG-58 (c) — behind the same refusing backend a Route replacement is
+/// promoted, and the prior generation drains and retires exactly as it does
+/// without a backend: the listener stays bound, nothing is staged or draining,
+/// no failure cause is reported, and allocation, Service and hydration advance
+/// as on an unrefused node.
+///
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[serial(cgroup)]
+#[ignore = "pending DELIVER gateway-boot-and-shutdown"]
+async fn a_route_replacement_behind_a_backend_that_refuses_mtls_is_promoted_and_drains_the_prior_generation()
+ {
+    let mut world = World::boot(Spec::enabled(168)).await;
+    world.deploy_service().await;
+    let before = world.wait_for_programmed_backend().await;
+    world.declare_route("/").await;
+    let first = world
+        .wait_status("the first generation to be current", TICK, |status| {
+            status.application.as_ref().is_some_and(|row| row.current.is_some())
+        })
+        .await;
+    let first_generation = first
+        .application
+        .and_then(|row| row.current)
+        .map(|current| current.application_generation)
+        .expect("a current generation");
+
+    let replaced = world.declare_route("/v2").await;
+    assert_eq!(
+        replaced.outcome,
+        overdrive_core::public_ingress::RouteApplyOutcome::Replaced,
+        "the same Route ID with new fields is a replacement"
+    );
+    let next = world
+        .wait_status("the replacement to be current", TICK, |status| {
+            status
+                .application
+                .as_ref()
+                .and_then(|row| row.current.as_ref())
+                .is_some_and(|current| current.application_generation != first_generation)
+        })
+        .await;
+
+    let row = next.application.as_ref().expect("an application row");
+    assert!(next.listener_bound, "the listener stays bound across the replacement");
+    assert!(row.unavailable.is_none(), "no failure cause: {next:?}");
+    assert!(row.staged.is_none(), "nothing is staged: {next:?}");
+    assert!(row.draining.is_empty(), "the prior generation retired: {next:?}");
+    let after = world.progress().await;
+    assert!(after.allocation_running && after.backends_hydrated >= before.backends_hydrated);
+    assert!(after.operator_listener_answers, "the operator listener advances regardless");
     world.shutdown().await;
 }
 
@@ -1254,10 +1459,11 @@ async fn a_gateway_identity_that_never_becomes_current_keeps_the_public_port_unb
 /// S-PIG-74 (d) — the probe does not complete before its deadline
 /// (`ProbeTimeout` at the probe operation).
 ///
-/// `GAP-C4-2`: the DESIGN names `HoldConnectProbe` plus a clock advance, but a
-/// hold parks only `Selected` probes at `authenticate` and the sentinel probe
-/// is `NoBackend`; the typed `ProbeTimeout` result at the probe operation is
-/// the existing-port stimulus that reaches the same gate outcome.
+/// The stimulus is the typed `ProbeTimeout` result at the existing `probe`
+/// operation. A held gate (Sim `HoldConnectProbe`, which parks at an awaited
+/// operation the gate owns, DG-9, R-65) is Sim test support and is not this
+/// stimulus: the once-per-boot sentinel probe is the connect dataplane's own
+/// `probe`, whose typed result already reaches the gate outcome.
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

@@ -8,7 +8,9 @@
 //! through a real loopback connection to the bound public listener served by
 //! `SimGatewayRelay`, and shutdown through `GatewayHandle::shutdown`. The only
 //! fault is the Sim connect-probe hold/release (a driven-port fault carrying the
-//! real `ServiceFrontend`, parked in `SimGatewayClientMtls::authenticate`). The
+//! real `ServiceFrontend`, parked at the gate's identity wait, an awaited
+//! operation the gate owns; route activation does not depend on backend
+//! authentication, so the gate never reaches `authenticate`, R-65). The
 //! oracles read only the redacted `GatewayApplicationStatusRowV1`, the
 //! non-secret shutdown projections and the dataplane's live intent/receipt
 //! counts; there is no parallel owner model and no handcrafted pass.
@@ -151,9 +153,10 @@ pub(crate) enum GatewayApplicationSimInput {
 
 /// One driven-port fault of a case.
 pub(crate) enum GatewayApplicationSimFault {
-    /// Holds the connect probe's completion for one frontend, parked in
-    /// `GatewayClientMtls::authenticate` (a driven-port fault on the Sim client,
-    /// fed by `SimGatewayConnectDataplane`'s `Selected` receipt).
+    /// Holds the staged gate's completion for one frontend, parked at the
+    /// identity wait the gate owns (`GatewayIdentityLifecycleControl::
+    /// ensure_current`, DG-9, R-65): a driven-port fault on the Sim identity
+    /// control, needing no backend and no `Selected` receipt.
     HoldConnectProbe(ServiceFrontend),
     ReleaseConnectProbe(ServiceFrontend),
 }
@@ -488,22 +491,20 @@ impl Rig {
         Err(format!("the connect path never went idle; counts {:?}", self.live_counts()))
     }
 
-    /// Wait until exactly `probes` connect probes are parked at
-    /// `GatewayClientMtls::authenticate`. A parked probe has run `open_upstream`
-    /// (one live intent), `connect` and `take_receipt` (the receipt consumed) and
-    /// not yet reached its cleanup, so the quiescent connect path holds `probes`
-    /// intents and no receipt. Both reads are of settled state: each parked
-    /// probe's task is blocked on the hold until released, so nothing further
-    /// moves until the next action.
-    async fn wait_probes_parked(&self, probes: u32) -> Result<(), String> {
+    /// Wait until exactly `gates` staged gates are parked at the identity wait
+    /// and the connect path holds no intent and no receipt: a parked gate has
+    /// not reached the connector probe, so it has opened nothing. Both reads
+    /// are of settled state: each parked gate's task is blocked on the hold
+    /// until released, so nothing further moves until the next action.
+    async fn wait_gates_parked(&self, gates: u32) -> Result<(), String> {
         let hold = &self.ports.hold;
-        let settled = (Some(probes), Some(0));
-        let parked = usize::try_from(probes).unwrap_or(usize::MAX);
+        let settled = (Some(0), Some(0));
+        let parked = usize::try_from(gates).unwrap_or(usize::MAX);
         if poll_until(|| hold.held_entries() == parked && self.live_counts() == settled).await {
             return Ok(());
         }
         Err(format!(
-            "the connect probe hold did not settle: expected {probes} parked with counts \
+            "the gate hold did not settle: expected {gates} parked with counts \
              {settled:?}, found {} parked with counts {:?}",
             hold.held_entries(),
             self.live_counts()
@@ -659,8 +660,7 @@ async fn compose(
     .await
     .map_err(|error| format!("gateway builder: {error}"))?;
     let (builder, seal) = builder.into_builder();
-    let client = SimGatewayClientMtls::new(seal, ports.relay.clone(), clock_port.clone())
-        .with_hold(ports.hold.clone());
+    let client = SimGatewayClientMtls::new(seal, ports.relay.clone(), clock_port.clone());
     client.set_peer(ports.backend_identity.clone());
     let evaluation = Evaluation {
         reconciler: ReconcilerName::new("gateway-svid-lifecycle")
@@ -673,7 +673,8 @@ async fn compose(
         Arc::new(parking_lot::Mutex::new(EvaluationBroker::new())),
         evaluation,
         clock_port,
-    );
+    )
+    .with_hold(ports.hold.clone());
     let connect: Arc<dyn GatewayConnectDataplane> = ports.connect.clone();
     let dependencies = GatewayRuntimeDependencies::new(
         GatewayLimits::first_slice(),
@@ -818,9 +819,10 @@ struct Observer {
     shutdown_in_progress: bool,
     /// The connect probe hold is armed for the frontend.
     probe_held: bool,
-    /// Probes parked at `authenticate` since the hold was armed; each is proven
-    /// parked (quiescent live counts) before the next action.
-    held_probes: u32,
+    /// Gates parked at the identity wait since the hold was armed, proven parked
+    /// (quiescent live counts) before the next action. The owner cancels a
+    /// superseded gate's wait, so at most the live staged gate stays parked.
+    held_gates: u32,
 }
 
 impl Observer {
@@ -830,7 +832,7 @@ impl Observer {
             generations: Generations { first: None, second: None, third: None },
             shutdown_in_progress: false,
             probe_held: false,
-            held_probes: 0,
+            held_gates: 0,
         }
     }
 
@@ -917,25 +919,25 @@ async fn run_case(
         for fault in due_faults(&case, index, &mut delivered) {
             match fault {
                 GatewayApplicationSimFault::HoldConnectProbe(frontend) => {
-                    // No probe may be in flight when the hold is armed.
-                    rig.wait_probes_parked(0).await?;
+                    // No gate may be in flight when the hold is armed.
+                    rig.wait_gates_parked(0).await?;
                     rig.ports.hold.hold(*frontend);
                     observer.probe_held = true;
                     observer.trace.push("fault: connect probe held".to_owned());
                 }
                 GatewayApplicationSimFault::ReleaseConnectProbe(frontend) => {
-                    // The hold provably fired: every held probe is parked before the
+                    // The hold provably fired: the held gate is parked before the
                     // release is delivered. Once shutdown is running it owns the held
-                    // probe's teardown (the sweep removes its intent), so the proof is
-                    // the one recorded when the probe parked.
+                    // gate's teardown (it cancels the wait), so the proof is the one
+                    // recorded when the gate parked.
                     if !observer.shutdown_in_progress {
-                        rig.wait_probes_parked(observer.held_probes).await?;
+                        rig.wait_gates_parked(observer.held_gates).await?;
                     }
                     rig.ports.hold.release(*frontend);
                     observer.trace.push("fault: connect probe released".to_owned());
                     rig.wait_connect_idle().await?;
                     observer.probe_held = false;
-                    observer.held_probes = 0;
+                    observer.held_gates = 0;
                     if check_lifecycle {
                         // The stale completion is delivered; the successor must
                         // become Current and the stale generation never does.
@@ -1013,10 +1015,11 @@ async fn run_case(
                     }
                 }
                 if observer.probe_held {
-                    // This generation's probe reaches `authenticate` and parks; the
-                    // observation below is taken only once it has.
-                    observer.held_probes += 1;
-                    rig.wait_probes_parked(observer.held_probes).await?;
+                    // This generation's gate reaches the identity wait and parks (the
+                    // superseded generation's wait is cancelled, so exactly one gate is
+                    // parked); the observation below is taken only once it has.
+                    observer.held_gates = 1;
+                    rig.wait_gates_parked(observer.held_gates).await?;
                 }
                 observer.observe(&rig, &format!("route {applies} applied")).await?;
             }

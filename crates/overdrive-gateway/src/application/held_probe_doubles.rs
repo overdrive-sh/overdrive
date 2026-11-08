@@ -11,25 +11,36 @@
 //! from `overdrive-sim`. The module is crate-private and compiles only under
 //! `integration-tests`.
 //!
-//! # Held-probe capability (DG-9)
+//! # Held-gate capability (DG-9, R-65)
 //!
-//! The per-candidate probe the owner awaits is
-//! `GatewayUpstreamConnector::probe`: `open_upstream`, a real `connect(2)` to
-//! the Service frontend, `take_receipt`, `selected_backend_identity`, then
-//! `GatewayClientMtls::authenticate`. The park point is `authenticate`:
+//! Route activation does not depend on backend health or backend
+//! authentication (R-65): the per-candidate gate the owner awaits ends at the
+//! connector's actual-frontend probe, which runs `open_upstream`, a real
+//! `connect(2)` to the Service frontend and `take_receipt`, and performs no
+//! `selected_backend_identity` and no `GatewayClientMtls::authenticate`. The
+//! gate therefore parks at an awaited operation it owns, never at
+//! `authenticate`. The two once-per-boot proofs
+//! (`GatewayRelay::probe`, `GatewayConnectDataplane::probe`) cannot hold a
+//! later candidate, so the park point is the one await every staged gate
+//! performs: `GatewayIdentityLifecycleControl::ensure_current`.
 //!
-//! 1. each probe attempt parks as its own entry ([`HeldProbes::park`]);
-//! 2. one entry is released by the identity the connect double minted for it
-//!    ([`HeldProbes::release`]), never by arrival position;
+//! 1. each staged gate parks as its own entry ([`HeldProbes::park`]);
+//! 2. one entry is released by the [`HeldGate`] it was given when it parked,
+//!    never by arrival position ([`HeldProbes::release`]);
 //! 3. a release carries a typed outcome: [`ProbeOutcome::Usable`] returns
-//!    `Ok(GatewayUpstream)` sealed through the real `GatewayUpstreamSeal`
-//!    over an inert in-memory leg, [`ProbeOutcome::Unusable`] returns
-//!    `Err(GatewayClientMtlsError::Handshake)`; no half of the leg is used;
+//!    `Ok(GatewayIdentityFacts)`, [`ProbeOutcome::Unusable`] returns the typed
+//!    `Err(GatewayIdentityLifecycleError::ReconcilerUnavailable)`, which the
+//!    gate reports as `Identity(..)` (status `GatewayIdentityUnusable`);
 //! 4. the number of entries held is observable ([`HeldProbes::held_count`]).
 //!
-//! An entry is removed when it is released and when its waiter is dropped, so
-//! releasing an entry whose waiter is gone (a probe the owner discarded) or
-//! one already released returns [`ReleaseOutcome::Absent`], a no-op.
+//! An entry is removed when it is released and when its waiter is dropped (the
+//! owner cancels a superseded gate's identity wait), so releasing an entry
+//! whose waiter is gone or one already released returns
+//! [`ReleaseOutcome::Absent`], a no-op.
+//!
+//! The client double answers `authenticate` at once with a usable upstream: the
+//! gate does not reach it under R-65, and a gate that still does (the
+//! pre-R-65 owner) is not held there.
 //!
 //! # Bind-address table (R-6)
 //!
@@ -47,6 +58,7 @@
 //! | 65 | QC-2 `route_withdraw_drain` |
 //! | 66 | QC-2 `late_probe_after_supersession` |
 //! | 67 | QC-2 randomized traces |
+//! | 98 | QC-2 `failed_candidate_not_restaged` |
 #![allow(
     clippy::doc_markdown,
     clippy::too_many_lines,
@@ -115,12 +127,14 @@ pub(super) const GRACE: Duration = Duration::from_secs(5);
 // Held probes: the registry shared by the client double and its driver
 // ---------------------------------------------------------------------------
 
-/// The typed outcome a release delivers to a parked `authenticate`.
+/// The typed outcome a release delivers to a parked gate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ProbeOutcome {
-    /// `Ok(GatewayUpstream)`: the connector reports `SelectedPeerAuthenticated`.
+    /// `ensure_current` returns the current facts: the gate goes on to the
+    /// connector probe.
     Usable,
-    /// `Err(GatewayClientMtlsError::Handshake)`: the connector reports `Mtls(..)`.
+    /// `ensure_current` returns the typed `ReconcilerUnavailable`: the gate
+    /// reports `Identity(..)`, a gateway-local failure.
     Unusable,
 }
 
@@ -133,19 +147,19 @@ pub(super) enum ReleaseOutcome {
     Absent,
 }
 
-struct HeldEntry {
-    sequence: u64,
-    outcome: oneshot::Sender<ProbeOutcome>,
-}
+/// The identity of one parked gate, assigned when it parks. A held gate is
+/// addressed by this value, never by its position among the parked entries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(super) struct HeldGate(u64);
 
 #[derive(Default)]
 struct HeldState {
-    next_sequence: u64,
-    entries: BTreeMap<SpiffeId, HeldEntry>,
+    next_gate: u64,
+    entries: BTreeMap<HeldGate, oneshot::Sender<ProbeOutcome>>,
 }
 
-/// Entries parked at `GatewayClientMtls::authenticate`, addressed by the
-/// peer identity the connect double minted for each.
+/// Gates parked at `GatewayIdentityLifecycleControl::ensure_current`, each
+/// addressed by the [`HeldGate`] it was given.
 #[derive(Default)]
 pub(super) struct HeldProbes {
     state: Mutex<HeldState>,
@@ -154,16 +168,12 @@ pub(super) struct HeldProbes {
 /// Removes its entry when the parked waiter is dropped.
 struct ParkGuard {
     probes: Arc<HeldProbes>,
-    peer: SpiffeId,
-    sequence: u64,
+    gate: HeldGate,
 }
 
 impl Drop for ParkGuard {
     fn drop(&mut self) {
-        let mut state = self.probes.state.lock().expect("held probes");
-        if state.entries.get(&self.peer).is_some_and(|entry| entry.sequence == self.sequence) {
-            state.entries.remove(&self.peer);
-        }
+        self.probes.state.lock().expect("held probes").entries.remove(&self.gate);
     }
 }
 
@@ -172,14 +182,14 @@ impl HeldProbes {
         Arc::new(Self::default())
     }
 
-    fn park(self: &Arc<Self>, peer: SpiffeId) -> (ParkGuard, oneshot::Receiver<ProbeOutcome>) {
+    fn park(self: &Arc<Self>) -> (ParkGuard, oneshot::Receiver<ProbeOutcome>) {
         let (sender, receiver) = oneshot::channel();
         let mut state = self.state.lock().expect("held probes");
-        state.next_sequence += 1;
-        let sequence = state.next_sequence;
-        state.entries.insert(peer.clone(), HeldEntry { sequence, outcome: sender });
+        state.next_gate += 1;
+        let gate = HeldGate(state.next_gate);
+        state.entries.insert(gate, sender);
         drop(state);
-        (ParkGuard { probes: Arc::clone(self), peer, sequence }, receiver)
+        (ParkGuard { probes: Arc::clone(self), gate }, receiver)
     }
 
     /// Number of entries currently parked.
@@ -187,21 +197,15 @@ impl HeldProbes {
         self.state.lock().expect("held probes").entries.len()
     }
 
-    /// Parked peers in the order they parked (oldest first).
-    pub(super) fn held_peers(&self) -> Vec<SpiffeId> {
-        let state = self.state.lock().expect("held probes");
-        let mut ordered: Vec<(u64, SpiffeId)> =
-            state.entries.iter().map(|(peer, entry)| (entry.sequence, peer.clone())).collect();
-        drop(state);
-        ordered.sort();
-        ordered.into_iter().map(|(_, peer)| peer).collect()
+    /// Parked gates in the order they parked (oldest first).
+    pub(super) fn held_gates(&self) -> Vec<HeldGate> {
+        self.state.lock().expect("held probes").entries.keys().copied().collect()
     }
 
-    /// Complete the entry minted for `peer` with `outcome`.
-    pub(super) fn release(&self, peer: &SpiffeId, outcome: ProbeOutcome) -> ReleaseOutcome {
-        let removed = self.state.lock().expect("held probes").entries.remove(peer);
-        let entry = removed;
-        match entry.map(|entry| entry.outcome.send(outcome)) {
+    /// Complete the entry of `gate` with `outcome`.
+    pub(super) fn release(&self, gate: HeldGate, outcome: ProbeOutcome) -> ReleaseOutcome {
+        let removed = self.state.lock().expect("held probes").entries.remove(&gate);
+        match removed.map(|sender| sender.send(outcome)) {
             Some(Ok(())) => ReleaseOutcome::Released,
             Some(Err(_)) | None => ReleaseOutcome::Absent,
         }
@@ -212,34 +216,28 @@ impl HeldProbes {
 // GatewayClientMtls double
 // ---------------------------------------------------------------------------
 
-/// Parks every `authenticate` as its own entry keyed by `expected_peer`.
-pub(super) struct HeldClientMtls {
+/// Answers every `authenticate` at once with a usable upstream. Under R-65 the
+/// gate never calls it; the request path is not driven on the QC-2 path.
+pub(super) struct UsableClientMtls {
     seal: GatewayUpstreamSeal,
-    probes: Arc<HeldProbes>,
 }
 
-impl HeldClientMtls {
-    pub(super) fn new(seal: GatewayUpstreamSeal, probes: Arc<HeldProbes>) -> Self {
-        Self { seal, probes }
+impl UsableClientMtls {
+    pub(super) fn new(seal: GatewayUpstreamSeal) -> Self {
+        Self { seal }
     }
 }
 
 #[async_trait]
-impl GatewayClientMtls for HeldClientMtls {
+impl GatewayClientMtls for UsableClientMtls {
     async fn authenticate(
         &self,
         connected: OwnedFd,
-        expected_peer: SpiffeId,
+        _expected_peer: SpiffeId,
         _deadline: Instant,
     ) -> Result<GatewayUpstream, GatewayClientMtlsError> {
         drop(connected);
-        let (_parked, outcome) = self.probes.park(expected_peer);
-        match outcome.await {
-            Ok(ProbeOutcome::Usable) => {
-                Ok(self.seal.seal_authenticated(KtlsLeg::from_armed(Box::new(()), Box::new(()))))
-            }
-            Ok(ProbeOutcome::Unusable) | Err(_) => Err(GatewayClientMtlsError::Handshake),
-        }
+        Ok(self.seal.seal_authenticated(KtlsLeg::from_armed(Box::new(()), Box::new(()))))
     }
 }
 
@@ -263,8 +261,8 @@ struct ConnectState {
 
 /// Answers every `open_upstream` with a fresh unconnected socket, a freshly
 /// minted nonzero cookie and a distinct minted `BackendId`; `take_receipt`
-/// answers `Selected` carrying that backend (a held probe cannot be a
-/// `NoBackend` probe).
+/// answers `Selected` carrying that backend: the gate's probe accepts it
+/// without resolving an identity or authenticating the peer (R-65).
 #[derive(Default)]
 pub(super) struct HeldConnectDouble {
     state: Mutex<ConnectState>,
@@ -400,28 +398,38 @@ fn gateway_identity_facts() -> GatewayIdentityFacts {
     }
 }
 
-/// Answers `ensure_current`, `current` and `subscribe` immediately with
-/// current facts; `disable_after_drain` is a synchronous clear (R-4).
-pub(super) struct CurrentIdentity {
+/// Parks every `ensure_current` as its own entry (the gate's identity wait,
+/// DG-9) and answers it with the current facts or the typed
+/// `ReconcilerUnavailable` when released; `current` and `subscribe` answer
+/// immediately with current facts; `disable_after_drain` is a synchronous clear
+/// (R-4).
+pub(super) struct HeldIdentity {
     facts: GatewayIdentityFacts,
     sender: watch::Sender<Option<GatewayIdentityFacts>>,
+    probes: Arc<HeldProbes>,
 }
 
-impl CurrentIdentity {
-    pub(super) fn new() -> Arc<Self> {
+impl HeldIdentity {
+    pub(super) fn new(probes: Arc<HeldProbes>) -> Arc<Self> {
         let facts = gateway_identity_facts();
         let (sender, _) = watch::channel(Some(facts.clone()));
-        Arc::new(Self { facts, sender })
+        Arc::new(Self { facts, sender, probes })
     }
 }
 
 #[async_trait]
-impl GatewayIdentityLifecycleControl for CurrentIdentity {
+impl GatewayIdentityLifecycleControl for HeldIdentity {
     async fn ensure_current(
         &self,
         _deadline: Instant,
     ) -> Result<GatewayIdentityFacts, GatewayIdentityLifecycleError> {
-        Ok(self.facts.clone())
+        let (_parked, outcome) = self.probes.park();
+        match outcome.await {
+            Ok(ProbeOutcome::Usable) => Ok(self.facts.clone()),
+            Ok(ProbeOutcome::Unusable) | Err(_) => {
+                Err(GatewayIdentityLifecycleError::ReconcilerUnavailable)
+            }
+        }
     }
 
     fn current(&self) -> Option<GatewayIdentityFacts> {
@@ -706,8 +714,8 @@ impl Composition {
         let dependencies = GatewayRuntimeDependencies::new(
             limits,
             connect.clone(),
-            Arc::new(HeldClientMtls::new(seal, Arc::clone(&probes))),
-            CurrentIdentity::new(),
+            Arc::new(UsableClientMtls::new(seal)),
+            HeldIdentity::new(Arc::clone(&probes)),
             Arc::new(UnavailableRelay),
         );
         let (handle, routes, status) =

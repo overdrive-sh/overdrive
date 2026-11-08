@@ -205,8 +205,7 @@ impl Rig {
         .await
         .expect("gateway builder")
         .into_builder();
-        let client = SimGatewayClientMtls::new(seal, relay.clone(), clock_port.clone())
-            .with_hold(connect.connect_hold());
+        let client = SimGatewayClientMtls::new(seal, relay.clone(), clock_port.clone());
         client.set_peer(backend_identity);
         let lifecycle = SimGatewayIdentityLifecycleControl::new(
             identity,

@@ -30,7 +30,7 @@
 //! `127.T.(200 + hi).lo` (the Service frontend, with a listening socket on
 //! port 8080 so the connector's real `connect(2)` completes). This file owns
 //! second octets 68..=96; the sibling integration file owns 41..=62 and the
-//! in-crate drivers 63..=67; no other test may reuse them. The request-budget
+//! in-crate drivers 63..=67 and 98; no other test may reuse them. The request-budget
 //! scenarios of R-37 own 130..=132 (rows below).
 //!
 //! | `T` | test |

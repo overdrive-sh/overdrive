@@ -5,8 +5,8 @@
 //! queues on the injected clock — and its test-support surface; and the
 //! dataplane-side share: [`SimGatewayConnectDataplane`] (over the shared
 //! `SimDataplane` state), [`SimGatewayClientMtls`] (the scripted exact-peer
-//! client, arming through the Sim relay), [`SimConnectHold`] (the probe hold
-//! they share), and the gateway identity doubles
+//! client, arming through the Sim relay), [`SimConnectHold`] (the gate hold
+//! the connect dataplane exposes and the identity control parks on), and the gateway identity doubles
 //! ([`SimGatewayIdentityActionTarget`], [`SimGatewayIdentityLifecycleControl`]).
 //! [`SimGatewayClientMtlsFactory`] and
 //! [`SimGatewayAdapters`] (R-20) assemble the Sim relay and the Sim exact-peer
@@ -1068,11 +1068,19 @@ pub enum ConnectOperation {
     LiveReceipts,
 }
 
-/// The connect-probe hold shared by the Sim connect dataplane and client.
+/// The gate hold shared by the Sim connect dataplane and the Sim identity
+/// control.
 ///
-/// A probe whose receipt is `Selected` parks at
-/// `GatewayClientMtls::authenticate` until released (DG-9). Cloning shares the
-/// state.
+/// Route activation does not depend on backend health or authentication
+/// (R-65): the gate never reaches `GatewayClientMtls::authenticate`. A held gate
+/// parks at an awaited operation the gate owns (DG-9). The once-per-boot proofs
+/// (`GatewayRelay::probe`, `GatewayConnectDataplane::probe`) cannot hold a later
+/// generation, so the park point is the identity wait every staged gate
+/// performs, [`SimGatewayIdentityLifecycleControl::ensure_current`]. That port
+/// operation carries no frontend, so a hold armed for a frontend parks every
+/// gate that reaches it until that frontend is released; the rigs that use it
+/// compose one Service frontend. A superseded gate's wait is cancelled by the
+/// owner, so only the live staged gate stays parked. Cloning shares the state.
 #[derive(Clone)]
 pub struct SimConnectHold {
     shared: Arc<HoldShared>,
@@ -1080,18 +1088,14 @@ pub struct SimConnectHold {
 
 struct HoldShared {
     state: Mutex<HoldState>,
-    /// Bumped on every `release`; parked probes re-check their frontend.
+    /// Bumped on every `release`; parked gates re-check their frontends.
     changed: watch::Sender<u64>,
 }
 
 #[derive(Default)]
 struct HoldState {
-    /// Frontends whose `Selected` probes park.
+    /// Frontends whose gates park.
     held: Vec<ServiceFrontend>,
-    /// Frontends a `Selected` receipt was taken for while held, by the backend
-    /// identity the receipt selected, oldest first; `authenticate` finds its
-    /// entry by `expected_peer`, never by arrival order.
-    pending: BTreeMap<SpiffeId, VecDeque<ServiceFrontend>>,
     parked: usize,
 }
 
@@ -1102,7 +1106,7 @@ impl Default for SimConnectHold {
     }
 }
 
-/// Counts a parked probe for as long as its waiter exists, so a waiter that is
+/// Counts a parked gate for as long as its waiter exists, so a waiter that is
 /// dropped stops counting.
 struct ParkedEntry(Arc<HoldShared>);
 
@@ -1114,7 +1118,7 @@ impl Drop for ParkedEntry {
 }
 
 impl SimConnectHold {
-    /// Park the next probe(s) for `frontend` at `authenticate`.
+    /// Park the next gate(s) at the identity wait while `frontend` is held.
     pub fn hold(&self, frontend: ServiceFrontend) {
         let mut state = self.shared.state.lock();
         if !state.held.contains(&frontend) {
@@ -1122,66 +1126,34 @@ impl SimConnectHold {
         }
     }
 
-    /// Release every probe held for `frontend`: usable = `Ok(GatewayUpstream)`.
-    /// A noted entry whose probe has not parked is dropped, so a later probe
-    /// never parks on a hold that was released before it arrived.
+    /// Release every gate held for `frontend`. A later gate never parks on a
+    /// hold that was released before it arrived.
     pub fn release(&self, frontend: ServiceFrontend) {
-        {
-            let mut state = self.shared.state.lock();
-            state.held.retain(|held| *held != frontend);
-            state.pending.values_mut().for_each(|entries| entries.retain(|f| *f != frontend));
-            state.pending.retain(|_, entries| !entries.is_empty());
-        }
+        self.shared.state.lock().held.retain(|held| *held != frontend);
         self.shared.changed.send_modify(|epoch| *epoch += 1);
     }
 
-    /// Number of probes currently parked.
+    /// Number of gates currently parked.
     pub fn held_entries(&self) -> usize {
         self.shared.state.lock().parked
     }
 
-    /// A `Selected` receipt for `frontend` selected `identity`: if the frontend
-    /// is held, the probe that follows parks at `authenticate`.
-    fn note_selected(&self, frontend: ServiceFrontend, identity: SpiffeId) {
-        let mut state = self.shared.state.lock();
-        if state.held.contains(&frontend) {
-            state.pending.entry(identity).or_default().push_back(frontend);
-        }
-    }
-
-    /// The probe noted for `peer` ends before it can park (the peer identity
-    /// check refused it): its entry is dropped.
-    fn discard(&self, peer: &SpiffeId) {
-        let mut state = self.shared.state.lock();
-        if let Some(entries) = state.pending.get_mut(peer) {
-            entries.pop_front();
-            if entries.is_empty() {
-                state.pending.remove(peer);
-            }
-        }
-    }
-
-    /// Park the caller while its entry's frontend is held; returns at once when
-    /// no entry was noted for `peer`.
-    async fn park_if_held(&self, peer: &SpiffeId) {
-        let (frontend, mut changed) = {
+    /// Park the caller while any frontend that was held when it arrived is
+    /// still held; returns at once when no frontend is held.
+    async fn park_if_held(&self) {
+        let (frontends, mut changed) = {
             let mut state = self.shared.state.lock();
-            let Some(frontends) = state.pending.get_mut(peer) else {
+            if state.held.is_empty() {
                 return;
-            };
-            let Some(frontend) = frontends.pop_front() else {
-                return;
-            };
-            if frontends.is_empty() {
-                state.pending.remove(peer);
             }
+            let frontends = state.held.clone();
             state.parked += 1;
             let changed = self.shared.changed.subscribe();
             drop(state);
-            (frontend, changed)
+            (frontends, changed)
         };
         let _entry = ParkedEntry(Arc::clone(&self.shared));
-        while self.shared.state.lock().held.contains(&frontend) {
+        while self.shared.state.lock().held.iter().any(|held| frontends.contains(held)) {
             if changed.changed().await.is_err() {
                 return;
             }
@@ -1239,7 +1211,8 @@ impl SimGatewayConnectDataplane {
         self.state.lock().faults.entry(operation).or_default().push_back(error);
     }
 
-    /// The probe hold this adapter shares with a [`SimGatewayClientMtls`].
+    /// The gate hold this adapter exposes; arm it on a
+    /// [`SimGatewayIdentityLifecycleControl`] with `with_hold`.
     pub fn connect_hold(&self) -> SimConnectHold {
         self.hold.clone()
     }
@@ -1363,17 +1336,7 @@ impl GatewayConnectDataplane for SimGatewayConnectDataplane {
         }
         state.receipts.remove(&cookie);
         drop(state);
-        let receipt = self.receipt_for(cookie, intent.service_key);
-        if let GatewaySelectionReceipt::Selected { backend_id, service_key, .. } = &receipt {
-            let frontend =
-                ServiceFrontend::new(service_key.vip(), service_key.port(), service_key.protocol());
-            if let (Ok(frontend), Some(identity)) =
-                (frontend, self.dataplane.applied_identity(*backend_id))
-            {
-                self.hold.note_selected(frontend, identity);
-            }
-        }
-        Ok(receipt)
+        Ok(self.receipt_for(cookie, intent.service_key))
     }
 
     fn selected_backend_identity(
@@ -1400,7 +1363,6 @@ pub struct SimGatewayClientMtls {
     relay: Arc<SimGatewayRelay>,
     clock: Arc<dyn Clock>,
     peer: Mutex<Option<SpiffeId>>,
-    hold: Option<SimConnectHold>,
 }
 
 impl SimGatewayClientMtls {
@@ -1409,27 +1371,12 @@ impl SimGatewayClientMtls {
         relay: Arc<SimGatewayRelay>,
         clock: Arc<dyn Clock>,
     ) -> Self {
-        Self { seal, relay, clock, peer: Mutex::new(None), hold: None }
-    }
-
-    /// A probe refused before it can park leaves no held entry behind.
-    fn discard_held_entry(&self, peer: &SpiffeId) {
-        if let Some(hold) = &self.hold {
-            hold.discard(peer);
-        }
+        Self { seal, relay, clock, peer: Mutex::new(None) }
     }
 
     /// The identity the scripted peer presents.
     pub fn set_peer(&self, peer: SpiffeId) {
         *self.peer.lock() = Some(peer);
-    }
-
-    /// Share the connect-probe hold with a [`SimGatewayConnectDataplane`]
-    /// (test support, DG-9).
-    #[must_use]
-    pub fn with_hold(mut self, hold: SimConnectHold) -> Self {
-        self.hold = Some(hold);
-        self
     }
 }
 
@@ -1443,18 +1390,13 @@ impl GatewayClientMtls for SimGatewayClientMtls {
     ) -> Result<GatewayUpstream, GatewayClientMtlsError> {
         let presented = self.peer.lock().clone();
         let Some(actual) = presented else {
-            self.discard_held_entry(&expected_peer);
             return Err(GatewayClientMtlsError::PeerCertificateMissing);
         };
         if actual != expected_peer {
-            self.discard_held_entry(&expected_peer);
             return Err(GatewayClientMtlsError::PeerSpiffeMismatch {
                 expected: expected_peer,
                 actual,
             });
-        }
-        if let Some(hold) = &self.hold {
-            hold.park_if_held(&expected_peer).await;
         }
         let leg = self
             .relay
@@ -1590,6 +1532,7 @@ pub struct SimGatewayIdentityLifecycleControl {
     broker: Arc<parking_lot::Mutex<EvaluationBroker>>,
     evaluation: Evaluation,
     clock: Arc<dyn Clock>,
+    hold: Option<SimConnectHold>,
 }
 
 impl SimGatewayIdentityLifecycleControl {
@@ -1599,7 +1542,16 @@ impl SimGatewayIdentityLifecycleControl {
         evaluation: Evaluation,
         clock: Arc<dyn Clock>,
     ) -> Self {
-        Self { target, broker, evaluation, clock }
+        Self { target, broker, evaluation, clock, hold: None }
+    }
+
+    /// Park `ensure_current` while the gate hold is armed (test support, DG-9,
+    /// R-65): the staged gate's identity wait is the awaited operation a held
+    /// gate parks at.
+    #[must_use]
+    pub fn with_hold(mut self, hold: SimConnectHold) -> Self {
+        self.hold = Some(hold);
+        self
     }
 
     /// The held facts when they are still time-usable at the injected clock.
@@ -1615,6 +1567,9 @@ impl GatewayIdentityLifecycleControl for SimGatewayIdentityLifecycleControl {
         &self,
         deadline: Instant,
     ) -> Result<GatewayIdentityFacts, GatewayIdentityLifecycleError> {
+        if let Some(hold) = &self.hold {
+            hold.park_if_held().await;
+        }
         let mut receiver = self.target.subscribe();
         self.broker.lock().submit(
             self.evaluation.clone(),

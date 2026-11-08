@@ -1,7 +1,7 @@
 //! S-PIG-73: a connector probe result completed twice for one staged token is
 //! ignored the second time (assumption GA-1).
 //!
-//! The real Application owner is composed over the held-probe doubles of
+//! The real Application owner is composed over the held-gate doubles of
 //! [`super::held_probe_doubles`]; the oracle is `GatewayStatusReads::application_status()`
 //! alone. The runtime is paused and single-threaded, and the owner reads time
 //! from the injected `SimClock`, so no wall-clock sleep takes part. The
@@ -15,8 +15,8 @@ use super::held_probe_doubles::{
 /// Second octet reserved for this scenario in the bind-address table.
 const PROBE_COMPLETION_OCTET: u8 = 64;
 
-/// S-PIG-73 (GA-1): a staged candidate's probe is released usable, the
-/// generation is promoted, and the same entry identity is then completed again
+/// S-PIG-73 (GA-1): a staged candidate's gate is released usable, the
+/// generation is promoted, and the same held gate is then completed again
 /// with a usable result and with an unusable one. Each second completion finds
 /// no entry; the status row is byte-equal before and after, the Applied
 /// generation is the one the first completion promoted, and nothing is staged
@@ -36,12 +36,12 @@ async fn a_probe_result_completed_twice_is_ignored_the_second_time() {
     .expect("candidate staged with one held probe")
     .expect("status row");
     assert!(staged.current.is_none(), "a parked probe promotes nothing");
-    let held = world.probes.held_peers();
+    let held = world.probes.held_gates();
     assert_eq!(held.len(), 1, "exactly one entry is held");
-    let peer = held[0].clone();
+    let gate = held[0];
 
     // First completion: usable. The generation is promoted.
-    assert_eq!(world.probes.release(&peer, ProbeOutcome::Usable), ReleaseOutcome::Released);
+    assert_eq!(world.probes.release(gate, ProbeOutcome::Usable), ReleaseOutcome::Released);
     let promoted = wait_until(&world.status, &world.probes, "the candidate promoted", {
         |status, _| status.is_some_and(|row| row.current.is_some() && row.staged.is_none())
     })
@@ -61,12 +61,12 @@ async fn a_probe_result_completed_twice_is_ignored_the_second_time() {
 
     // Second completion for the same identity, usable and unusable: a no-op.
     assert_eq!(
-        world.probes.release(&peer, ProbeOutcome::Usable),
+        world.probes.release(gate, ProbeOutcome::Usable),
         ReleaseOutcome::Absent,
         "a second usable completion finds no entry",
     );
     assert_eq!(
-        world.probes.release(&peer, ProbeOutcome::Unusable),
+        world.probes.release(gate, ProbeOutcome::Unusable),
         ReleaseOutcome::Absent,
         "a second unusable completion finds no entry",
     );

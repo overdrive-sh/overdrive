@@ -5,8 +5,10 @@
 //! `GatewayBuilder` -> `StartedGateway` path. The driven ports are test-local
 //! doubles pinned to the DESIGN shapes: `GatewayConnectDataplane`
 //! (`open_upstream` mints the cookie, registers the intent and returns a real
-//! unconnected `TcpSocket`), `GatewayClientMtls` (parks by minted peer identity,
-//! DG-9), `GatewayIdentityLifecycleControl` (disable is a synchronous clear, R-4)
+//! unconnected `TcpSocket`; its `probe` can hold one call, DG-9, R-65),
+//! `GatewayClientMtls` (answers at once: the gate never authenticates a
+//! backend, R-65), `GatewayIdentityLifecycleControl` (disable is a synchronous
+//! clear, R-4)
 //! and `GatewayRelay` (the probe succeeds; every other method is a typed
 //! unavailable error, because no public client socket is driven in this file).
 //!
@@ -262,6 +264,7 @@ struct DataplaneState {
 struct ScriptedDataplane {
     backends: Backends,
     fault: Option<(DataplaneOp, GatewayConnectDataplaneError)>,
+    probe_holds: Arc<HoldRegistry>,
     state: Mutex<DataplaneState>,
 }
 
@@ -274,8 +277,14 @@ impl ScriptedDataplane {
     fn new(
         backends: Backends,
         fault: Option<(DataplaneOp, GatewayConnectDataplaneError)>,
+        probe_holds: Arc<HoldRegistry>,
     ) -> Arc<Self> {
-        Arc::new(Self { backends, fault, state: Mutex::new(DataplaneState::default()) })
+        Arc::new(Self {
+            backends,
+            fault,
+            probe_holds,
+            state: Mutex::new(DataplaneState::default()),
+        })
     }
 
     fn fault_at(
@@ -382,8 +391,15 @@ impl GatewayConnectDataplane for ScriptedDataplane {
         _deadline: Instant,
         _clock: &dyn Clock,
     ) -> Result<(), GatewayConnectDataplaneError> {
-        let mut state = self.state.lock().expect("dataplane state");
-        self.fault_at(&mut state, DataplaneOp::Probe).map_or(Ok(()), Err)
+        let fault = {
+            let mut state = self.state.lock().expect("dataplane state");
+            self.fault_at(&mut state, DataplaneOp::Probe)
+        };
+        if let Some(error) = fault {
+            return Err(error);
+        }
+        self.probe_holds.park_if_held().await;
+        Ok(())
     }
 
     fn open_upstream(
@@ -577,19 +593,23 @@ impl GatewayIdentityLifecycleControl for ScriptedIdentity {
 }
 
 // ---------------------------------------------------------------------------
-// GatewayClientMtls double: parks by minted peer identity (DG-9)
+// Held connect-dataplane probe (DG-9, R-65) and the GatewayClientMtls double
 // ---------------------------------------------------------------------------
 
 #[derive(Default)]
 struct HoldState {
-    /// Peers whose `authenticate` is currently parked, with their release latch.
-    parked: BTreeMap<SpiffeId, Arc<Notify>>,
-    /// Every `expected_peer` `authenticate` was called with, in call order.
-    calls: Vec<SpiffeId>,
-    /// Peers whose `authenticate` returned, with their outcome.
-    returned: Vec<(SpiffeId, bool)>,
+    /// Entries whose `GatewayConnectDataplane::probe` is currently parked, with
+    /// their release latch, by entry ordinal (arrival order).
+    parked: BTreeMap<u32, Arc<Notify>>,
+    /// Every `probe` call, in call order.
+    calls: u32,
+    /// `probe` calls that returned after having been parked.
+    returned: u32,
 }
 
+/// Parks the first `hold_first_calls` calls of the connect dataplane's own
+/// `probe`: an awaited operation the staged gate owns. Route activation does
+/// not depend on a backend (R-65), so a held gate needs no programmed backend.
 struct HoldRegistry {
     hold_next: AtomicU32,
     state: Mutex<HoldState>,
@@ -603,61 +623,67 @@ impl HoldRegistry {
         })
     }
 
-    fn parked_peers(&self) -> Vec<SpiffeId> {
-        self.state.lock().expect("hold state").parked.keys().cloned().collect()
+    fn parked_entries(&self) -> Vec<u32> {
+        self.state.lock().expect("hold state").parked.keys().copied().collect()
     }
 
-    fn call_count(&self) -> usize {
-        self.state.lock().expect("hold state").calls.len()
+    fn call_count(&self) -> u32 {
+        self.state.lock().expect("hold state").calls
     }
 
-    fn returned_count(&self) -> usize {
-        self.state.lock().expect("hold state").returned.len()
+    fn returned_count(&self) -> u32 {
+        self.state.lock().expect("hold state").returned
     }
 
-    /// Release the parked entry identified by `peer`; no-op for an entry whose
-    /// waiter is already gone.
-    fn release(&self, peer: &SpiffeId) {
-        let latch = self.state.lock().expect("hold state").parked.get(peer).cloned();
+    /// Release the parked entry `entry`; no-op for an entry whose waiter is
+    /// already gone.
+    fn release(&self, entry: u32) {
+        let latch = self.state.lock().expect("hold state").parked.get(&entry).cloned();
         if let Some(latch) = latch {
             latch.notify_one();
         }
     }
-}
 
-struct ParkingMtls {
-    seal: GatewayUpstreamSeal,
-    registry: Arc<HoldRegistry>,
-}
-
-#[async_trait]
-impl GatewayClientMtls for ParkingMtls {
-    async fn authenticate(
-        &self,
-        connected: OwnedFd,
-        expected_peer: SpiffeId,
-        _deadline: Instant,
-    ) -> Result<GatewayUpstream, GatewayClientMtlsError> {
-        drop(connected);
-        let latch = {
-            let mut state = self.registry.state.lock().expect("hold state");
-            state.calls.push(expected_peer.clone());
+    /// Count the call and park it when a hold is armed.
+    async fn park_if_held(&self) {
+        let parked = {
+            let mut state = self.state.lock().expect("hold state");
+            state.calls += 1;
+            let entry = state.calls;
             let must_park = self
-                .registry
                 .hold_next
                 .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |left| left.checked_sub(1))
                 .is_ok();
             must_park.then(|| {
                 let latch = Arc::new(Notify::new());
-                state.parked.insert(expected_peer.clone(), Arc::clone(&latch));
-                latch
+                state.parked.insert(entry, Arc::clone(&latch));
+                (entry, latch)
             })
         };
-        if let Some(latch) = latch {
+        if let Some((entry, latch)) = parked {
             latch.notified().await;
-            self.registry.state.lock().expect("hold state").parked.remove(&expected_peer);
+            let mut state = self.state.lock().expect("hold state");
+            state.parked.remove(&entry);
+            state.returned += 1;
         }
-        self.registry.state.lock().expect("hold state").returned.push((expected_peer, true));
+    }
+}
+
+/// Answers every `authenticate` at once. The gate does not reach it (R-65): a
+/// selected backend's mTLS is a per-request matter, not a bind condition.
+struct UsableMtls {
+    seal: GatewayUpstreamSeal,
+}
+
+#[async_trait]
+impl GatewayClientMtls for UsableMtls {
+    async fn authenticate(
+        &self,
+        connected: OwnedFd,
+        _expected_peer: SpiffeId,
+        _deadline: Instant,
+    ) -> Result<GatewayUpstream, GatewayClientMtlsError> {
+        drop(connected);
         Ok(self.seal.seal_authenticated(KtlsLeg::from_armed(Box::new(()), Box::new(()))))
     }
 }
@@ -777,7 +803,8 @@ struct FixtureSpec {
     /// The identity is not held until the test holds it.
     absent_until_held: bool,
     park_accept: bool,
-    hold_authenticate_calls: u32,
+    /// The first calls of the connect dataplane's `probe` that park.
+    hold_probe_calls: u32,
 }
 
 struct Fixtures {
@@ -791,17 +818,19 @@ struct Fixtures {
 impl Fixtures {
     fn new(spec: FixtureSpec) -> Self {
         let events = Arc::new(EventLog::default());
+        let holds = HoldRegistry::new(spec.hold_probe_calls);
         Self {
             dataplane: ScriptedDataplane::new(
                 if spec.programmed { Backends::Programmed } else { Backends::NoneProgrammed },
                 spec.dataplane_fault,
+                Arc::clone(&holds),
             ),
             identity: ScriptedIdentity::scripted(
                 spec.ensure_error,
                 spec.absent_until_held,
                 Arc::clone(&events),
             ),
-            holds: HoldRegistry::new(spec.hold_authenticate_calls),
+            holds,
             relay: ScriptedRelay::new(Arc::clone(&events), spec.park_accept),
             events,
         }
@@ -1100,7 +1129,7 @@ impl World {
         let dependencies = GatewayRuntimeDependencies::new(
             GatewayLimits::first_slice(),
             fx.dataplane.clone(),
-            Arc::new(ParkingMtls { seal, registry: Arc::clone(&fx.holds) }),
+            Arc::new(UsableMtls { seal }),
             fx.identity.clone(),
             fx.relay.clone(),
         );
@@ -2041,15 +2070,20 @@ fn dataplane_cases() -> Vec<(DataplaneOp, GatewayConnectDataplaneError)> {
     cases
 }
 
-/// Operations the actual-frontend gate drives: they fail the gate.
+/// Operations the actual-frontend gate drives: they fail the gate. The gate
+/// resolves no backend identity (R-65), so `selected_backend_identity` is not
+/// one of them: it belongs to the request path, and its absence is not a bind
+/// condition.
 const fn is_gate_operation(op: DataplaneOp) -> bool {
-    matches!(
-        op,
-        DataplaneOp::Probe
-            | DataplaneOp::OpenUpstream
-            | DataplaneOp::TakeReceipt
-            | DataplaneOp::SelectedBackendIdentity
-    )
+    matches!(op, DataplaneOp::Probe | DataplaneOp::OpenUpstream | DataplaneOp::TakeReceipt)
+}
+
+/// The cases whose faulting operation the gate or the shutdown sweep drives.
+fn gate_driven_cases() -> Vec<(DataplaneOp, GatewayConnectDataplaneError)> {
+    dataplane_cases()
+        .into_iter()
+        .filter(|(op, _)| *op != DataplaneOp::SelectedBackendIdentity)
+        .collect()
 }
 
 async fn start_dataplane_fault(
@@ -2086,16 +2120,17 @@ async fn settle_gate(world: &World, op: DataplaneOp) {
 }
 
 /// S-PIG-50: each `GatewayConnectDataplaneError` variant is injected at its real
-/// owner operation (probe, open_upstream, take_receipt,
-/// selected_backend_identity, cleanup, cleanup_all_gateway_intents, live counts)
-/// and the owner receives that exact typed error. Gate operations leave no
+/// owner operation (probe, open_upstream, take_receipt, cleanup,
+/// cleanup_all_gateway_intents, live counts) and the owner receives that exact
+/// typed error. The gate drives no `selected_backend_identity` (R-65); the
+/// variant raised there is covered by its own test below. Gate operations leave no
 /// residue and a clean shutdown; sweep operations surface typed in the shutdown
 /// report.
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 async fn every_dataplane_error_crosses_its_real_owner_operation() {
-    for (index, (op, error)) in dataplane_cases().into_iter().enumerate() {
+    for (index, (op, error)) in gate_driven_cases().into_iter().enumerate() {
         let (_site, world) = start_dataplane_fault(DATAPLANE_CROSSES, index, op, &error).await;
         settle_gate(&world, op).await;
         let dataplane = Arc::clone(&world.fx.dataplane);
@@ -2155,7 +2190,7 @@ async fn every_dataplane_error_crosses_its_real_owner_operation() {
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 async fn every_dataplane_error_collapses_to_the_redacted_connect_path_cause() {
-    for (index, (op, error)) in dataplane_cases().into_iter().enumerate() {
+    for (index, (op, error)) in gate_driven_cases().into_iter().enumerate() {
         let (site, world) = start_dataplane_fault(DATAPLANE_COLLAPSES, index, op, &error).await;
         settle_gate(&world, op).await;
         let status = world.status.clone();
@@ -2212,6 +2247,50 @@ async fn every_dataplane_error_collapses_to_the_redacted_connect_path_cause() {
         }
         site.assert_no_secret_material(&rendered, "the connect-path status");
     }
+}
+
+/// S-PIG-50 / R-65: a selected backend whose applied identity is missing
+/// (`BackendIdentityMissing` at `selected_backend_identity`) does not stop the
+/// gate. Route activation does not depend on backend health or authentication:
+/// the actual-frontend probe validates the `Selected` receipt, resolves no
+/// identity and performs no mTLS, so the Route is promoted, the listener is
+/// bound, no unavailable cause is reported and the identity lookup is never
+/// driven by the gate.
+///
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test]
+#[ignore = "pending DELIVER quint-conformance-gateway_application"]
+async fn a_selected_backend_with_no_applied_identity_does_not_stop_the_gate() {
+    let error = GatewayConnectDataplaneError::BackendIdentityMissing {
+        backend_id: BackendId::new(LEAK_PROBE_BACKEND).expect("BackendId"),
+    };
+    let (_site, world) = start_dataplane_fault(
+        DATAPLANE_CROSSES,
+        dataplane_cases().len(),
+        DataplaneOp::SelectedBackendIdentity,
+        &error,
+    )
+    .await;
+    settle_gate(&world, DataplaneOp::SelectedBackendIdentity).await;
+    let row = world
+        .status
+        .application_status()
+        .await
+        .expect("status read")
+        .expect("status row for the Route");
+    assert!(row.current.is_some(), "the Route is promoted: {row:?}");
+    assert!(row.unavailable.is_none(), "no unavailable cause: {row:?}");
+    assert!(matches!(row.listener, GatewayListenerStatus::Bound { .. }), "{row:?}");
+    let dataplane = Arc::clone(&world.fx.dataplane);
+    assert!(
+        !dataplane.calls().contains(&DataplaneOp::SelectedBackendIdentity),
+        "the gate resolved a backend identity: {:?}",
+        dataplane.calls(),
+    );
+    assert!(dataplane.injected().is_empty(), "the gate received no identity error");
+    let report = world.stop().await;
+    assert!(report.is_clean(), "{report:?}");
+    assert_eq!(dataplane.residue(), (0, 0), "the probe leaves no intent or receipt");
 }
 
 // ---------------------------------------------------------------------------
@@ -3106,23 +3185,19 @@ async fn a_watch_lag_is_reported_and_the_gateway_relists_instead_of_reading_an_e
 // S-PIG-68: a late probe result after supersession
 // ---------------------------------------------------------------------------
 
-/// S-PIG-68: a backend is programmed (the double answers `Selected` with a
-/// minted `BackendId`), so the first generation's actual-frontend probe parks
-/// inside `GatewayClientMtls::authenticate`, identified by the peer identity it
-/// was given. Replacing the Route (same ID, new generation) promotes the second
-/// generation. Releasing the held probe afterwards is never delivered: the
-/// status row is byte-equal before and after, the superseded generation appears
-/// nowhere in it, and the held probe's intent and receipt are cleaned up.
+/// S-PIG-68: no backend is programmed, and the first generation's gate parks
+/// at an awaited operation it owns, the connect dataplane's own `probe` (DG-9,
+/// R-65). Replacing the Route (same ID, new generation) stages a second gate,
+/// which runs its own `probe` and promotes the second generation. Releasing
+/// the first gate afterwards is a late result that is never delivered: the
+/// status row is byte-equal before and after, the superseded generation
+/// appears nowhere in it, and the connect path holds no intent or receipt.
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 async fn a_late_probe_result_after_supersession_is_never_delivered() {
     let site = Site::new();
-    let fx = Fixtures::new(FixtureSpec {
-        programmed: true,
-        hold_authenticate_calls: 1,
-        ..FixtureSpec::default()
-    });
+    let fx = Fixtures::new(FixtureSpec { hold_probe_calls: 1, ..FixtureSpec::default() });
     let world = World::start(&site, Plan::with_service(SUPERSEDED_PROBE), fx)
         .await
         .expect("gateway starts");
@@ -3130,15 +3205,15 @@ async fn a_late_probe_result_after_supersession_is_never_delivered() {
     world.declare(first.clone()).await.expect("declare the first generation");
 
     let holds = Arc::clone(&world.fx.holds);
-    let parked = wait_for("the first probe to park in authenticate", || {
-        let peers = holds.parked_peers();
-        (peers.len() == 1).then(|| peers[0].clone())
+    let parked = wait_for("the first gate to park in the connect probe", || {
+        let entries = holds.parked_entries();
+        (entries.len() == 1).then(|| entries[0])
     })
     .await;
     let staged =
         wait_status(&world.status, "the first generation staged", |row| row.staged.is_some()).await;
     let superseded = staged.staged.as_ref().expect("staged generation").application_generation;
-    assert!(staged.current.is_none(), "a parked probe promotes nothing");
+    assert!(staged.current.is_none(), "a parked gate promotes nothing");
     assert_eq!(staged.listener, GatewayListenerStatus::Unbound);
 
     let second = route("public-api", "/v2");
@@ -3156,14 +3231,14 @@ async fn a_late_probe_result_after_supersession_is_never_delivered() {
     let current = promoted.current.as_ref().expect("current generation").application_generation;
     assert_ne!(current, superseded, "the replacement is a new Application generation");
     assert!(matches!(promoted.listener, GatewayListenerStatus::Bound { .. }));
-    assert_eq!(holds.parked_peers(), vec![parked.clone()], "the first probe is still held");
-    assert!(holds.call_count() >= 2, "the second generation authenticated its own probe");
+    assert_eq!(holds.parked_entries(), vec![parked], "the first gate is still held");
+    assert!(holds.call_count() >= 2, "the second generation ran its own connect probe");
 
     let now = world.clock.now();
     let before = world.status.application_status().await.expect("status read");
     let returned_before = holds.returned_count();
-    holds.release(&parked);
-    wait_for("the held probe to return", || {
+    holds.release(parked);
+    wait_for("the held connect probe to return", || {
         (holds.returned_count() > returned_before).then_some(())
     })
     .await;
@@ -3184,7 +3259,7 @@ async fn a_late_probe_result_after_supersession_is_never_delivered() {
         );
     }
     let dataplane = Arc::clone(&world.fx.dataplane);
-    wait_for("the held probe's intent and receipt to be cleaned up", || {
+    wait_for("the connect path to hold no intent or receipt", || {
         (dataplane.residue() == (0, 0)).then_some(())
     })
     .await;

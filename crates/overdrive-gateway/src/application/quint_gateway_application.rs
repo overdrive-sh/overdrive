@@ -25,14 +25,21 @@
 //! | `init` | compose a fresh world (the previous one is shut down) on its own `127.<octet>.x.y:443` |
 //! | `route_declare` | `GatewayRouteCommands::routes()` -> `PublicRouteSetHandle::apply` of a Route of a new generation; the owner has not yet run to idle |
 //! | `route_withdraw` | `PublicRouteSetHandle::withdraw`, then yield until the owner is idle; its postcondition: nothing staged, nothing Current |
-//! | `stage` | owner-autonomous, no driving-port call: yield until the owner has staged the live Route generation and its probe is held; assert that through `application_status().staged` and learn the minted identity of the held probe |
-//! | `probe_result(tok, ok)` | release the entry held at `GatewayClientMtls::authenticate` for candidate `tok` by its minted identity (`ok`: usable `Ok(GatewayUpstream)`; otherwise `Err(Handshake)`), then yield until idle; releasing a discarded candidate's entry is a no-op |
+//! | `stage` | owner-autonomous, no driving-port call: yield until the owner is idle, then assert through `application_status().staged` that it staged a new generation of the live Route and that exactly one new gate is held; the assertion never adopts a gate or token the model did not name (R-65 pins (b), (c)) |
+//! | `probe_result(tok, ok)` | first let the owner consume any Route event that supersedes `tok` (pin (d)), then release the gate held at the identity wait for candidate `tok` by its `HeldGate` (`ok`: `Ok(facts)`; otherwise the typed `ReconcilerUnavailable`), then yield until idle; releasing a discarded candidate's gate is a no-op. A failed live candidate must leave nothing staged (pin (e)) |
 //! | `retire(gid)` | owner-autonomous, no driving-port call: yield until `application_status().draining` no longer lists `gid` |
 //! | `open_connection` | `GatewayAdmission::acquire_connection(now)` on the injected admission; the lease is kept |
 //! | `close_connection(gid)` | drop the kept `GatewayConnectionLease` retaining generation `gid`; the owner has not yet run |
 //!
 //! The model has no stutter step in `app_conf` (R-7: `idle` is guarded
 //! `not(REC)`), so no handler is a no-op.
+//!
+//! R-65: route activation does not depend on backend health or backend
+//! authentication, so `probe_result(tok, ok)` is the gateway-local gate verdict
+//! only. The doubles hold a staged gate at an awaited operation the gate owns
+//! (`held_probe_doubles`, "Held-gate capability"), never at
+//! `GatewayClientMtls::authenticate`, and a failed candidate is not staged
+//! again until the Route changes (`failed_candidate_not_restaged`).
 //!
 //! Projection (`State::from_driver`), per the pinned table:
 //! `current_generation` / `draining_generations` <-
@@ -48,10 +55,18 @@
 //! the protocol: the model numbers its candidates `1, 2, ...` in the order
 //! `stage` stages them, and the owner names a generation by a 64-hex
 //! `GatewayApplicationGenerationId`. At each `stage` the driver records the id
-//! the owner reports as `staged` under the model's number (and the identity
-//! of the probe held for it), and `from_driver` and the `close_connection` /
-//! `retire` handlers translate through that record. Every compared value
-//! (which generation is Current, which are Draining) is the owner's.
+//! the owner reports as `staged` under the model's number (and the gate held
+//! for it and its Route generation), and `from_driver` and the
+//! `close_connection` / `retire` handlers translate through that record. The
+//! record is one-to-one in both directions (pin (a)): two model numbers never
+//! name one owner id, and an owner id seen under a second number fails the
+//! comparison. Every compared value (which generation is Current, which are
+//! Draining) is the owner's.
+//!
+//! The one piece of input state beyond the Route itself is the Route generation
+//! the driver made fail (`failed_route`): cleared by `route_declare` and
+//! `route_withdraw` like the model's `failed_rg`, it lets the driver assert the
+//! owner's own status against the pinned rule after every step (pin (e)).
 //!
 //! Step decoding (D-UP-1): `Config::nondet =
 //! &["app_conf::gateway_application::conf_step"]` (the qualified ITF name);
@@ -76,15 +91,16 @@ use std::sync::atomic::AtomicU64;
 
 use anyhow::{anyhow, bail};
 use itf::Value;
-use overdrive_core::id::SpiffeId;
-use overdrive_core::public_ingress::{GatewayApplicationGenerationId, Route, RouteId};
+use overdrive_core::public_ingress::{
+    GatewayApplicationGenerationId, GatewayApplicationStatusRowV1, Route, RouteGeneration, RouteId,
+};
 use overdrive_core::wall_clock::UnixInstant;
 use quint_connect::{Config, Driver, Result, State, Step, quint_run, quint_test, switch};
 use serde::Deserialize;
 use tokio::runtime::Runtime;
 
 use super::held_probe_doubles::{
-    Composition, ProbeOutcome, ROUTE_ID, next_ordinal, route, settle, wait_until,
+    Composition, HeldGate, ProbeOutcome, ROUTE_ID, next_ordinal, route, settle, wait_until,
 };
 use super::{GatewayAdmission, GatewayConnectionLease, GatewayRouteCommands, GatewayStatusReads};
 
@@ -98,36 +114,68 @@ const REPLACE_VALID_OCTET: u8 = 63;
 const ROUTE_WITHDRAW_DRAIN_OCTET: u8 = 65;
 const LATE_PROBE_OCTET: u8 = 66;
 const RANDOMIZED_TRACES_OCTET: u8 = 67;
+const FAILED_CANDIDATE_OCTET: u8 = 98;
 /// One ordinal per composition of the process, so no two share an address.
 static NEXT_ORDINAL: AtomicU64 = AtomicU64::new(0);
 
-/// The model-number <-> owner-generation translation recorded at each `stage`.
+/// What `stage` recorded for one model candidate.
+struct StagedRecord {
+    generation: GatewayApplicationGenerationId,
+    route_generation: RouteGeneration,
+    gate: HeldGate,
+}
+
+/// The model-number <-> owner-generation translation recorded at each `stage`
+/// (pin (a): one-to-one in both directions).
 #[derive(Default)]
 struct GenerationNames {
-    generation_of: BTreeMap<i64, GatewayApplicationGenerationId>,
-    probe_of: BTreeMap<i64, SpiffeId>,
+    staged: BTreeMap<i64, StagedRecord>,
 }
 
 impl GenerationNames {
+    /// Record the candidate the owner staged for model number `model`.
+    fn record(&mut self, model: i64, record: StagedRecord) -> Result {
+        if self.staged.contains_key(&model) {
+            bail!("model candidate {model} was staged twice");
+        }
+        if let Some((other, _)) =
+            self.staged.iter().find(|(_, held)| held.generation == record.generation)
+        {
+            bail!(
+                "the owner generation {} is already model candidate {other}, not {model}",
+                record.generation
+            );
+        }
+        self.staged.insert(model, record);
+        Ok(())
+    }
+
+    fn knows(&self, generation: &GatewayApplicationGenerationId) -> bool {
+        self.staged.values().any(|held| held.generation == *generation)
+    }
+
     fn model_of(&self, generation: &GatewayApplicationGenerationId) -> Result<i64> {
-        self.generation_of
-            .iter()
-            .find_map(|(model, owner)| (owner == generation).then_some(*model))
-            .ok_or_else(|| anyhow!("the owner reports generation {generation} no `stage` named"))
+        let mut named =
+            self.staged.iter().filter(|(_, held)| held.generation == *generation).map(|(m, _)| *m);
+        match (named.next(), named.next()) {
+            (Some(model), None) => Ok(model),
+            (None, _) => Err(anyhow!("the owner reports generation {generation} no `stage` named")),
+            (Some(first), Some(second)) => Err(anyhow!(
+                "the owner generation {generation} is named by model candidates {first} and {second}"
+            )),
+        }
+    }
+
+    fn record_of(&self, model: i64) -> Result<&StagedRecord> {
+        self.staged.get(&model).ok_or_else(|| anyhow!("model candidate {model} was never staged"))
     }
 
     fn generation(&self, model: i64) -> Result<GatewayApplicationGenerationId> {
-        self.generation_of
-            .get(&model)
-            .copied()
-            .ok_or_else(|| anyhow!("model candidate {model} was never staged"))
+        Ok(self.record_of(model)?.generation)
     }
 
-    fn probe(&self, model: i64) -> Result<SpiffeId> {
-        self.probe_of
-            .get(&model)
-            .cloned()
-            .ok_or_else(|| anyhow!("model candidate {model} has no held probe on record"))
+    fn claimed_gates(&self) -> BTreeSet<HeldGate> {
+        self.staged.values().map(|held| held.gate).collect()
     }
 }
 
@@ -153,8 +201,9 @@ struct AppConfDriver {
     declared: u32,
     /// The Route most recently declared and not withdrawn.
     live_route: Option<Route>,
-    /// Probes already attributed to a model candidate.
-    claimed: BTreeSet<SpiffeId>,
+    /// The Route generation whose live candidate this driver made fail, until
+    /// the Route is declared again or withdrawn (pin (e)).
+    failed_route: Option<RouteGeneration>,
     runtime: Runtime,
 }
 
@@ -177,7 +226,7 @@ impl AppConfDriver {
             stages: 0,
             declared: 0,
             live_route: None,
-            claimed: BTreeSet::new(),
+            failed_route: None,
             runtime,
         }
     }
@@ -203,7 +252,7 @@ impl AppConfDriver {
         self.stages = 0;
         self.declared = 0;
         self.live_route = None;
-        self.claimed.clear();
+        self.failed_route = None;
     }
 
     fn route_declare(&mut self) -> Result {
@@ -213,6 +262,7 @@ impl AppConfDriver {
             .block_on(self.routes.routes().apply(route.clone()))
             .map_err(|error| anyhow!("Route apply refused: {error}"))?;
         self.live_route = Some(route);
+        self.failed_route = None;
         Ok(())
     }
 
@@ -222,6 +272,7 @@ impl AppConfDriver {
             .block_on(self.routes.routes().withdraw(route_id))
             .map_err(|error| anyhow!("Route withdraw refused: {error}"))?;
         self.live_route = None;
+        self.failed_route = None;
         let status = self.runtime.block_on(settle(&self.status)).map_err(|error| anyhow!(error))?;
         if let Some(row) = status.filter(|row| row.staged.is_some() || row.current.is_some()) {
             bail!("withdrawal left staged or Current in place: {row:?}");
@@ -229,52 +280,111 @@ impl AppConfDriver {
         Ok(())
     }
 
-    /// Owner-autonomous: no driving-port call. Yield until the owner has
-    /// staged the live Route generation and its probe is held; assert that
-    /// through `application_status().staged`.
+    /// The owner's status once it is idle.
+    fn idle_status(&self) -> Result<Option<GatewayApplicationStatusRowV1>> {
+        self.runtime.block_on(settle(&self.status)).map_err(|error| anyhow!(error))
+    }
+
+    /// Owner-autonomous: no driving-port call, and never an adoption (pins
+    /// (b), (c)). Yield until the owner is idle, then assert that it staged a
+    /// new generation of the live Route and that exactly one new gate is held
+    /// for it; only then record the model's number for what the owner reports.
     fn stage(&mut self) -> Result {
         let live = self
             .live_route
             .as_ref()
             .ok_or_else(|| anyhow!("`stage` with no declared Route"))?
             .route_generation();
-        let claimed = &self.claimed;
-        let probes = &self.world()?.probes;
-        let status = self
-            .runtime
-            .block_on(wait_until(
-                &self.status,
-                probes,
-                "the live Route generation staged with its probe held",
-                |status, held| {
-                    status.is_some_and(|row| {
-                        row.staged.as_ref().is_some_and(|staged| staged.route_generation == live)
-                    }) && held.held_peers().iter().any(|peer| !claimed.contains(peer))
-                },
-            ))
-            .map_err(|error| anyhow!(error))?;
-        let staged = status
-            .and_then(|row| row.staged)
-            .ok_or_else(|| anyhow!("the status row lost its staged candidate"))?;
-        let peer = probes
-            .held_peers()
+        if self.failed_route == Some(live) {
+            bail!("`stage` is not enabled: this Route generation's candidate failed (pin (e))");
+        }
+        let status = self.idle_status()?;
+        let row = status.ok_or_else(|| anyhow!("`stage`: the owner published no status row"))?;
+        let staged = row.staged.as_ref().ok_or_else(|| {
+            anyhow!("`stage`: the owner staged nothing for the live Route: {row:?}")
+        })?;
+        if staged.route_generation != live {
+            bail!("`stage`: the owner staged a generation of another Route: {row:?}");
+        }
+        let held_elsewhere = row
+            .current
+            .iter()
+            .chain(row.draining.iter())
+            .any(|other| other.application_generation == staged.application_generation);
+        if held_elsewhere || self.ids.knows(&staged.application_generation) {
+            bail!("`stage`: the staged generation is not new (pin (c)): {row:?}");
+        }
+        let claimed = self.ids.claimed_gates();
+        let unclaimed: Vec<HeldGate> = self
+            .world()?
+            .probes
+            .held_gates()
             .into_iter()
-            .rev()
-            .find(|peer| !claimed.contains(peer))
-            .ok_or_else(|| anyhow!("no unclaimed held probe"))?;
+            .filter(|gate| !claimed.contains(gate))
+            .collect();
+        let [gate] = unclaimed.as_slice() else {
+            bail!(
+                "`stage`: expected exactly one new held gate for the staged candidate, found {}",
+                unclaimed.len()
+            );
+        };
         self.stages += 1;
-        self.ids.generation_of.insert(self.stages, staged.application_generation);
-        self.ids.probe_of.insert(self.stages, peer.clone());
-        self.claimed.insert(peer);
-        Ok(())
+        self.ids.record(
+            self.stages,
+            StagedRecord {
+                generation: staged.application_generation,
+                route_generation: staged.route_generation,
+                gate: *gate,
+            },
+        )
     }
 
     fn probe_result(&mut self, tok: i64, ok: bool) -> Result {
-        let peer = self.ids.probe(tok)?;
+        let (generation, route_generation, gate) = {
+            let record = self.ids.record_of(tok)?;
+            (record.generation, record.route_generation, record.gate)
+        };
+        let live = self.live_route.as_ref().map(Route::route_generation);
+        let superseded = live != Some(route_generation);
+        // Pin (d): the owner consumes whatever Route event supersedes `tok`
+        // before the held gate is released; settle first, then require that
+        // the owner no longer holds `tok` as its staged candidate.
+        let before = self.idle_status()?;
+        let staged_is_tok = before
+            .as_ref()
+            .and_then(|row| row.staged.as_ref())
+            .is_some_and(|staged| staged.application_generation == generation);
+        if superseded && staged_is_tok {
+            bail!("the owner still stages superseded candidate {tok} after it went idle");
+        }
         let outcome = if ok { ProbeOutcome::Usable } else { ProbeOutcome::Unusable };
-        // A discarded candidate's entry may be gone: releasing it is a no-op.
-        self.world()?.probes.release(&peer, outcome);
-        self.runtime.block_on(settle(&self.status)).map_err(|error| anyhow!(error))?;
+        // A discarded candidate's gate may be gone: releasing it is a no-op.
+        self.world()?.probes.release(gate, outcome);
+        if !ok && !superseded && staged_is_tok {
+            self.failed_route = Some(route_generation);
+        }
+        self.idle_status()?;
+        Ok(())
+    }
+
+    /// Pin (e), checked after every step against the owner's own status: while
+    /// a Route generation is recorded failed, the owner stages and serves
+    /// nothing of that generation.
+    fn assert_failed_candidate_not_restaged(&self) -> Result {
+        let Some(failed) = self.failed_route else { return Ok(()) };
+        let status = self
+            .runtime
+            .block_on(self.status.application_status())
+            .map_err(|error| anyhow!("application_status failed: {error}"))?;
+        if let Some(row) = status
+            && row
+                .staged
+                .iter()
+                .chain(row.current.iter())
+                .any(|generation| generation.route_generation == failed)
+        {
+            bail!("a failed candidate's Route generation is staged or Current again: {row:?}");
+        }
         Ok(())
     }
 
@@ -340,6 +450,14 @@ impl Driver for AppConfDriver {
     }
 
     fn step(&mut self, step: &Step) -> Result {
+        self.dispatch(step)?;
+        self.assert_failed_candidate_not_restaged()
+    }
+}
+
+impl AppConfDriver {
+    /// One action of the model, mapped to its owner call.
+    fn dispatch(&mut self, step: &Step) -> Result {
         switch!(step {
             init => self.init(),
             route_declare => self.route_declare()?,
@@ -495,6 +613,20 @@ fn gateway_application_replace_valid() -> impl Driver {
 #[ignore = "pending DELIVER quint-conformance-gateway_application"]
 fn gateway_application_route_withdraw_drain() -> impl Driver {
     AppConfDriver::new(ROUTE_WITHDRAW_DRAIN_OCTET)
+}
+
+/// R-65: a candidate that fails the gateway-local gate is recorded by its
+/// Route generation and is not staged again until the Route changes.
+/// CONTRACT_SHAPE: bounded-change.
+#[quint_test(
+    spec = "../../specs/quint/public-ingress-gateway/gateway_application.qnt",
+    main = "app_conf",
+    test = "failed_candidate_not_restaged",
+    max_samples = 1
+)]
+#[ignore = "pending DELIVER quint-conformance-gateway_application"]
+fn gateway_application_failed_candidate_not_restaged() -> impl Driver {
+    AppConfDriver::new(FAILED_CANDIDATE_OCTET)
 }
 
 /// A probe result for a superseded staged candidate is discarded: the newer
