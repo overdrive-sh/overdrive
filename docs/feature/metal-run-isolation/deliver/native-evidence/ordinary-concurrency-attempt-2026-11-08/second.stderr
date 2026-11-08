@@ -1,0 +1,21 @@
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.13s
+     Running `target/debug/xtask metal run -- env OVERDRIVE_FWD_GUEST_GROUP=core cargo run -p overdrive-testing --bin overdrive-fwd-guest-suite --features integration-tests`
+xtask: running metal run (one bootstrap lease session)
+OVERDRIVE_METAL_RUN_ID=d12aee8a2ce2bf57507197d7
+OVERDRIVE_METAL_RUN_REGISTERED run_id=d12aee8a2ce2bf57507197d7
+FATAL: timed out after 5s acquiring /run/lock/overdrive-metal-shared.lock
+current lease owner:
+  pid=1680367
+  started_at=2026-11-08T20:42:33Z
+  action=run
+  scenario=unspecified
+  workspace=/Users/marcus/conductor/workspaces/helios/bangalore-v1
+  commit=036032935f101fc29e6d79d69d2796e9345a2b23
+  token=2d050629d625a324fc113fd7
+  run_id=2d050629d625a324fc113fd7
+  unit=overdrive-metal-run-2d050629d625a324fc113fd7.service
+  source_digest=19e8a3fb8636bb72b2e7a3508d11c764a320767a5f9f382f98755d5143b5073c
+OVERDRIVE_METAL_RUNNER_ERROR error=maintenance_timeout
