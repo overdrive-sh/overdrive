@@ -24,7 +24,7 @@ public-ingress-gateway` fails when it no longer matches the specs).
 | Module | Decision | Safety invariants (`Safety`, TLC exhaustive on `*_ok`) | Named runs (main `*_conf`) |
 |---|---|---|---|
 | `gateway_identity.qnt` | ADR-0225 | `HoldImpliesAudit`, `StaleEpochNeverHolds`, `DisabledSlotIsEmpty` | `issue_hold` (happy path), `reissue_near_expiry`, `disable_races_inflight_issue`, `audit_failure_no_hold`, `restart_reissue` |
-| `gateway_application.qnt` (drain and supersession only) | ADR-0222 | `DrainRetainsUntilLeasesZero`, `SupersededResultNeverRestores` | `replace_valid` (supersede, drain, retire), `route_withdraw_drain`, `late_probe_after_supersession` (a superseded staged probe result is discarded) |
+| `gateway_application.qnt` (drain, supersession, failed candidate) | ADR-0222; R-65 / Gate G-1 failed-candidate rule | `DrainRetainsUntilLeasesZero`, `SupersededResultNeverRestores`, `FailedCandidateNotRestaged` | `replace_valid` (supersede, drain, retire), `route_withdraw_drain`, `late_probe_after_supersession` (a superseded staged probe result is discarded), `failed_candidate_not_restaged` (a failed Route generation is not re-staged until the Route changes) |
 | `selection_receipt.qnt` | ADR-0232, ADR-0233, ADR-0241 (context ADR-0228, ADR-0242, ADR-0248; see below) | `IdentityReadableOnlyAfterCommit`, `IdentityImmutablePerBackendId`, `ReceiptMatchesIntent`, `NoResidueAfterCleanup`, `RollbackPreservesPriorGeneration`, `EmptyIsNoBackend`, `ReverseNatKeyOneVip` (R-59) | `commit_then_select`, `conflicting_alloc_rejected`, `reverse_nat_conflict_rejected`, `identity_conflict_precedes_reverse_nat`, `restart_destroys_receipts` (conformance-bound, `receipt_conf`); `abandoned_reservation_rolled_back`, `receipt_waits_for_publish_guard` (evaluator-only on `receipt_ok`, not replayed) |
 | `relay_exchange.qnt` (conformance target) | ADR-0239 (context ADR-0245, ADR-0246, ADR-0247, ADR-0253, ADR-0254) | `NoBytePastMessageBoundary` | `exchange_cl_keepalive`, `early_response_closes`, `drain_with_inflight_body`, `half_close_after_request_read`, `upstream_close_mid_body_aborts`, `close_delimited_clean_end`, `public_close_mid_request_aborts` (main `relay_conf`) |
 
@@ -38,6 +38,7 @@ table is context for the receipt module, not a separate decision with a hazard.
 |---|---|---|
 | ADR-0225 | `noEpochCheck` -> `identity_bugNoEpochCheck` | `StaleEpochNeverHolds` |
 | ADR-0222 | `retireWhileLeased` -> `app_bugRetireWhileLeased` | `DrainRetainsUntilLeasesZero` |
+| R-65 (G-1) | `restageFailed` -> `app_bugRestageFailed` | `FailedCandidateNotRestaged` |
 | ADR-0233 | `publishEarly` -> `receipt_bugPublishEarly` | `IdentityReadableOnlyAfterCommit` |
 | ADR-0241 | `rebind` -> `receipt_bugRebind` | `IdentityImmutablePerBackendId` |
 | ADR-0232 | `takeAny` -> `receipt_bugTakeAny` | `ReceiptMatchesIntent` |
@@ -54,13 +55,19 @@ See the header of `checks.toml` (single home).
   `begin_disable`, no waiting disable, no Drop Action), audit row written before the hold, volatile slot, durable audit rows. Environment actions: `audit_fail`, `advance_time`, `restart`.
 - `gateway_application`: an admission object is `{gid, rg}` (generation id, Route generation); connector probe result per
   staged token; leases are per-generation connection counts. A result for a superseded or discarded token changes
-  nothing.
+  nothing. Route activation does not depend on backend health or backend authentication: `probe_result` is the
+  gateway-local gate verdict only (gateway identity usable, connect-path and relay probe, gate deadline, listener bind),
+  and the model has no backend variable. `route_declare` is the owner's observation of a Route change; the owner
+  records a failed candidate by its Route generation (`failed_rg`) and does not re-stage it until `route_declare`
+  (or `route_withdraw`, which ends the Route) clears it. A result for a candidate whose Route the owner has not yet
+  observed superseded may promote it (equivalent to the Route committing just after promotion); once observed, the
+  result is discarded.
 - `selection_receipt`: two Service keys, two guest addresses, two allocations, <= 2 gateway sockets, backend sets drawn
   from a six-entry catalogue. `receipt_ok` (exhaustive) bounds accepted `update_service` calls at 2 (`MAXUPD`), which also hosts the
   two evaluator-only runs (`abandoned_reservation_rolled_back` needs two accepted updates); `receipt_conf` bounds them at
   3 (`conflicting_alloc_rejected` needs three: the apply, the empty update, the fresh apply); a rejected update changes
   nothing and is not counted. Post-commit orphan-cleanup debt and its retry are not modelled: no invariant depends on it.- Model-only variables (the driver does not project them): see each file's header (`staged`, `inflight`, `leases`;
-  identity `now`, ghosts; application `next_gid`, `route_on`, `route_gen`; receipt `outer`, `resv`, `infl`, `guard`, `ckey`, `memo`, `next_bid`, `taken`, `g`; `conf_step`).
+  identity `now`, ghosts; application `next_gid`, `route_on`, `route_gen`, `failed_rg`; receipt `outer`, `resv`, `infl`, `guard`, `ckey`, `memo`, `next_bid`, `taken`, `g`; `conf_step`).
   The single classification of every variable (projected accessor, port-return check, or model-only, with the value
   mappings) is in feature-delta "Formal protocol model", modules `gateway_application` and `selection_receipt`.
 - `NoAllocationIdentity` and `AtMostOneHeld` are not modelled: both are type-level facts (the slot is keyed by node and is an `Option`, ADR-0225).

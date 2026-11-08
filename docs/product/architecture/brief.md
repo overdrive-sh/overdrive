@@ -11311,7 +11311,10 @@ probe on the real kernel gates the listener bind.
 **Lifecycle.** Boot refuses on invalid gateway configuration; the listener
 gates (custody, relay probe, held Gateway SVID, sentinel connect probe, actual-frontend
 probe, application promotion) are not boot-fatal and never touch workload or
-Service state (ADR-0230). Shutdown runs a gateway stage first, before the
+Service state (ADR-0230). Route activation depends on neither backend health nor
+backend authentication: the actual-frontend probe validates the receipt and
+performs no mTLS, and a selected backend's exact-peer mTLS failure is a
+per-request 502. Shutdown runs a gateway stage first, before the
 leg-C worker stage, clearing the volatile Gateway SVID slot in-process, within
 the existing single drain bound (feature delta, D5 section (c)). Gateway Application and BPF hydration generations stay
 independent (ADR-0229).

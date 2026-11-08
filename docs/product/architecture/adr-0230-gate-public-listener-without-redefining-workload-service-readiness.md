@@ -20,9 +20,13 @@ Let the `overdrive serve` gateway gate task bind and admit on public TCP/443
 only after, in order: a usable current certified key, a held current Gateway
 SVID, a passing registered-connect probe (the sentinel connect proves the
 dataplane adapter, hook and receipt path honour their contract in the real
-kernel), an actual-frontend probe whose `NoBackend` result is bind-valid and
-whose `Selected` result completes exact-peer mTLS, and promotion of a complete
-current Route/certified-key generation. Loss or withdrawal of a required
+kernel), an actual-frontend probe that proves the frontend resolves through the
+registered connect path (its `NoBackend` and `Selected` results are both
+bind-valid; it resolves no backend identity and performs no mTLS), and promotion
+of a complete current Route/certified-key generation. Route activation depends
+on neither backend health nor backend authentication: a selected backend whose
+exact-peer mTLS fails is a per-request upstream failure, not a bind condition
+(user ruling R-65, 2026-11-08). Loss or withdrawal of a required
 identity or key closes new public admission before retiring retained
 generations. A failed gate never refuses the node's boot and never requests
 serve shutdown: TCP/443 stays unbound and the cause is reported through the
@@ -42,6 +46,7 @@ scenarios are in the feature delta; status shapes are ADR-0227.
 | Gate Allocation `Running` or Service `Stable` on gateway readiness | Transfers a node-ingress concern into unrelated workload/Service state owners. |
 | Keep accepting after a required identity/key generation is lost | Admits work that cannot complete safely and encourages fallback behaviour. |
 | Require a healthy backend before binding | Couples node ingress to workload readiness; backend absence is a per-request 503. |
+| Require a selected backend's exact-peer mTLS to succeed before binding or promoting a Route | Couples node ingress to the readiness and authentication of one arbitrary backend, while gateway-local prerequisites already prove the gateway's own credentials; Envoy, Istio, Gateway API, AWS ALB, Cloudflare and Linkerd gate activation on configuration validity and the proxy's own credentials only. A failed peer is a per-request 502 with no fallback. |
 
 ## Consequences
 

@@ -5,6 +5,16 @@
  * retires a Draining generation by itself when its admitted connections reach zero (eager), and never restores a superseded
  * generation).
  *
+ * Route activation (R-65, Gate G-1 "Failed-candidate rule") does not depend on backend health or backend
+ * authentication. `probe_result(tok, ok)` is the GATEWAY-LOCAL gate verdict only: gateway identity usable, connect-path
+ * and relay probe accepted, gate deadline, listener bind. The selected backend's exact-peer mTLS is not part of the
+ * gate, and the model has no backend variable. `route_declare` models the owner's OBSERVATION of a Route change: a
+ * Route committed in intent but not yet observed by the owner is unobservable, so promoting the candidate the owner
+ * holds is equivalent to the Route committing just after the promotion; the discard of a result applies once
+ * `route_declare` has happened. The owner records a failed candidate by its Route generation (`failed_rg`, 0 = none) and
+ * does not re-stage that generation until the owner observes a Route change (`route_declare`) or the Route ends
+ * (`route_withdraw`).
+ *
  * Reduced scope: route/frontend/key whole-object coherence, bind gating (ADR-0230), last-usable key preservation
  * (ADR-0231), identity loss, cold-boot order and shutdown ordering are sequential rules of one task and are DISTILL
  * seeded-sim or unit obligations, not modelled here.
@@ -17,10 +27,11 @@
  * Draining generation only at zero leases.
  *
  * OFF names the rules switched off (hazards in hazard/):
+ *   restageFailed      `stage` ignores `failed_rg` (R-65)
  *   retireWhileLeased  a Draining generation is retired while its lease count is non-zero (ADR-0222)
  *
  * Model-only (the driver does not project them): `staged`, `inflight`, `leases`, `next_gid`, `route_on`, `route_gen`,
- * `conf_step`. Conformance projection:
+ * `failed_rg`, `conf_step`. Conformance projection:
  * current_generation, draining_generations <- GatewayStatusReads::application_status().
  *
  * ASSUMPTION GA-1: the connector probe result is delivered at most once per staged token (discharged by the probe
@@ -47,10 +58,11 @@ module gateway_application {
   val MAXG: int = 4     // application generation ids
   val MAXC: int = 2     // simultaneous admitted connections
   val BUG_RETIRE: bool = OFF.contains("retireWhileLeased")
+  val BUG_RESTAGE: bool = OFF.contains("restageFailed")
 
   type Obj = { gid: int, rg: int }
   type S = {
-    route_on: bool, route_gen: int,
+    route_on: bool, route_gen: int, failed_rg: int,
     staged: Set[Obj], current: Set[Obj], draining: Set[Obj],
     inflight: Set[int],
     next_gid: int,
@@ -64,7 +76,7 @@ module gateway_application {
   pure def totalLeases(m: int -> int): int = m.keys().fold(0, (a, k) => a + m.get(k))
 
   val s0: S = {
-    route_on: false, route_gen: 0, staged: Set(), current: Set(), draining: Set(), inflight: Set(),
+    route_on: false, route_gen: 0, failed_rg: 0, staged: Set(), current: Set(), draining: Set(), inflight: Set(),
     next_gid: 1, leases: zeroLeases,
   }
 
@@ -84,21 +96,26 @@ module gateway_application {
   // PublicRouteSetHandle::apply (declare, or replace of the same Route): a new Route generation
   action route_declare: bool = all {
     noPendingRetire, st.route_gen < MAXR,
-    go({ ...st, route_on: true, route_gen: st.route_gen + 1 }, variant("route_declare", ())),
+    go({ ...st, route_on: true, route_gen: st.route_gen + 1, failed_rg: 0 }, variant("route_declare", ())),
   }
 
   // withdrawal: the pending candidate is discarded (its token stays in flight), Current moves to Draining
   action route_withdraw: bool = all {
     noPendingRetire, st.route_on,
-    go({ ...st, route_on: false, staged: Set(), current: Set(),
+    go({ ...st, route_on: false, failed_rg: 0, staged: Set(), current: Set(),
          draining: st.draining.union(demote(st.current, st.leases)) },
        variant("route_withdraw", ())),
   }
 
   // the owner stages a candidate from the live Route (supersedes a pending one; its probe result may still arrive)
-  action stage: bool = all {
+  val stageGuard: bool = and {
     noPendingRetire, st.route_on, st.next_gid <= MAXG,
     st.staged.union(st.current).forall(o => o.rg != st.route_gen),
+    // R-65: a Route generation whose candidate failed the gateway-local gate is not staged again
+    BUG_RESTAGE or st.failed_rg != st.route_gen,
+  }
+  action stage: bool = all {
+    stageGuard,
     go({ ...st,
          staged: Set({ gid: st.next_gid, rg: st.route_gen }),
          inflight: st.inflight.union(Set(st.next_gid)),
@@ -125,6 +142,9 @@ module gateway_application {
           inflight: st.inflight.exclude(Set(tok)),
           // a failed result removes only the staged candidate; a superseded token changes nothing
           staged: if (matches) Set() else st.staged,
+          // R-65: a gate failure of the candidate for the live Route generation is recorded by that generation
+          failed_rg: if (matches and not(ok) and st.route_on and cand.forall(o => o.rg == st.route_gen)) st.route_gen
+                     else st.failed_rg,
         },
         variant("probe_result", { tok: tok, ok: ok })),
     }
@@ -174,7 +194,13 @@ module gateway_application {
     st.current.forall(c => st.draining.forall(d => d.gid != c.gid)),
     st.current.forall(c => st.staged.forall(g => g.gid > c.gid)),
   }
-  val Safety: bool = and { DrainRetainsUntilLeasesZero, SupersededResultNeverRestores }
+  // R-65: while a Route generation is recorded failed, it is the live generation and neither staged nor Current
+  val FailedCandidateNotRestaged: bool =
+    st.failed_rg != 0 implies and {
+      st.failed_rg == st.route_gen,
+      st.staged.union(st.current).forall(o => o.rg != st.failed_rg),
+    }
+  val Safety: bool = and { DrainRetainsUntilLeasesZero, SupersededResultNeverRestores, FailedCandidateNotRestaged }
 
   // ------------------------------------------------------------------ named runs
   // supersede, drain, retire: the displaced generation serves its connection until it closes, then retires
@@ -200,6 +226,16 @@ module gateway_application {
     .expect(st.current.size() == 0 and st.staged.size() == 0 and Safety)
     .then(close_connection(1)).then(retire(1))
     .expect(st.draining.size() == 0 and st.current.size() == 0 and Safety)
+
+  // R-65: a gate failure records the Route generation; the owner does not re-stage it until the Route changes
+  run failed_candidate_not_restaged = init
+    .then(route_declare).then(stage).then(probe_result(1, false))
+    .expect(st.failed_rg == 1 and st.staged.size() == 0 and st.current.size() == 0 and Safety)
+    .expect(not(stageGuard))
+    .then(route_declare)
+    .expect(st.failed_rg == 0 and stageGuard)
+    .then(stage)
+    .expect(st.staged.forall(o => o.gid == 2 and o.rg == 2) and Safety)
 
   // a probe result for a superseded staged token is discarded: the newer candidate stays staged, nothing is promoted
   run late_probe_after_supersession = init

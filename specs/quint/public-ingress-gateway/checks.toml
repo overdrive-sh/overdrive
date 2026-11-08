@@ -4,7 +4,7 @@
 # -0241; context -0228, -0242; the connector ledger order is ADR-0248, not modelled) and relay_exchange (ADR-0239; context ADR-0245,
 # -0246, -0247, -0253, -0254). The kTLS rekey exclusion (ADR-0244, -0249, -0250) is not modelled (ruling 19): the gateway
 # never originates a KeyUpdate (ADR-0250), chunk framing is covered by property tests.
-# VALIDATION BUDGET (single home): 33 checks = 4 TLC safety + 7 TLC hazards + 22 named runs. The relay module
+# VALIDATION BUDGET (single home): 35 checks = 4 TLC safety + 8 TLC hazards + 23 named runs. The relay module
 # contributes 9. Only receipt-safety-tlc is slow (about 900 s, non-CI); every other check is under two minutes and
 # `ci = true`. receipt-safety-tlc is the MANUAL pre-merge gate (not run in CI; run it by hand before merging a
 # change to selection_receipt.qnt). Growth beyond these counts needs user approval.
@@ -113,12 +113,31 @@ backend = "evaluator"
 expect = "holds"
 ci = true
 
+[[check]]
+name = "application-run-failed-candidate-not-restaged"
+spec = "gateway_application.qnt"
+main = "app_conf"
+run = "failed_candidate_not_restaged"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
 # ADR-0222: the one hazard of the decision
 [[check]]
 name = "application-hazard-retire-while-leased"
 spec = "hazard/gateway_application_hazards.qnt"
 main = "app_bugRetireWhileLeased"
 invariant = "DrainRetainsUntilLeasesZero"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+# R-65 (Gate G-1 failed-candidate rule): the one hazard of the decision
+[[check]]
+name = "application-hazard-restage-failed"
+spec = "hazard/gateway_application_hazards.qnt"
+main = "app_bugRestageFailed"
+invariant = "FailedCandidateNotRestaged"
 backend = "tlc"
 expect = "violation"
 ci = true

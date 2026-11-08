@@ -1,0 +1,17 @@
+# application-hazard-restage-failed: counterexample, 5 state(s) (from the TLC trace)
+
+State 1
+  st = [route_on |-> FALSE, route_gen |-> 0, failed_rg |-> 0, staged |-> {}, current |-> {}, draining |-> {}, inflight |-> {}, next_gid |-> 1, leases |-> <<0, 0, 0, 0>>]
+  conf_step = [init |-> [tag |-> "UNIT"]]
+
+State 2 [route_declare]
+  st = [route_on |-> TRUE, route_gen |-> 1, failed_rg |-> 0, staged |-> {}, current |-> {}, draining |-> {}, inflight |-> {}, next_gid |-> 1, leases |-> <<0, 0, 0, 0>>]
+
+State 3 [stage]
+  st = [route_on |-> TRUE, route_gen |-> 1, failed_rg |-> 0, staged |-> {[gid |-> 1, rg |-> 1]}, current |-> {}, draining |-> {}, inflight |-> {1}, next_gid |-> 2, leases |-> <<0, 0, 0, 0>>]
+
+State 4 [probe_result]
+  st = [route_on |-> TRUE, route_gen |-> 1, failed_rg |-> 1, staged |-> {}, current |-> {}, draining |-> {}, inflight |-> {}, next_gid |-> 2, leases |-> <<0, 0, 0, 0>>]
+
+State 5 [stage]
+  st = [route_on |-> TRUE, route_gen |-> 1, failed_rg |-> 1, staged |-> {[gid |-> 2, rg |-> 1]}, current |-> {}, draining |-> {}, inflight |-> {2}, next_gid |-> 3, leases |-> <<0, 0, 0, 0>>]
