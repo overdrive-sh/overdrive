@@ -1,0 +1,9 @@
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.30s
+     Running `target/debug/xtask metal run -- env OVERDRIVE_FWD_GUEST_GROUP=core cargo run -p overdrive-testing --bin overdrive-fwd-guest-suite --features integration-tests`
+xtask: running metal run (one bootstrap lease session)
+OVERDRIVE_METAL_RUN_ID=367d69952aa7bf99dc8e13b6
+OVERDRIVE_METAL_RUN_STARTED run_id=367d69952aa7bf99dc8e13b6
+OVERDRIVE_METAL_RUN_COMPLETE run_id=367d69952aa7bf99dc8e13b6 exit_code=0 cause=command_returned
