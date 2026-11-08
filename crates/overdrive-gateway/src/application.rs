@@ -1261,6 +1261,8 @@ struct StatusWriter {
     dirty: bool,
 }
 
+/// A candidate whose gate failed is not re-staged until an owner input changes, because only
+/// an input change (Route, watch gap, certified key, identity) triggers a re-evaluation.
 pub(crate) struct GatewayApplicationOwner {
     node_id: NodeId,
     intent: Arc<dyn IntentStore>,
@@ -1286,8 +1288,6 @@ pub(crate) struct GatewayApplicationOwner {
     staged: Option<StagedGate>,
     current: Option<Arc<GatewayApplicationSnapshot>>,
     draining: BTreeMap<GatewayApplicationGenerationId, Arc<GatewayApplicationSnapshot>>,
-    /// The generation whose gate failed; retried only when an input changes.
-    failed: Option<GatewayApplicationGenerationId>,
     unavailable: Option<GatewayApplicationUnavailableCause>,
     connect_ready: bool,
     next_token: u64,
@@ -1344,7 +1344,6 @@ impl GatewayApplicationOwner {
             staged: None,
             current: None,
             draining: BTreeMap::new(),
-            failed: None,
             unavailable: None,
             connect_ready: false,
             next_token: 0,
@@ -1395,12 +1394,10 @@ impl GatewayApplicationOwner {
                 event = std::future::poll_fn(|cx| std::pin::Pin::new(&mut *route_events).poll_next(cx)) => match event {
                     None => return input_closed(),
                     Some(IntentSubscriptionEvent::Changed { .. }) => {
-                        self.failed = None;
                         self.evaluate(&report_sender).await;
                     }
                     Some(IntentSubscriptionEvent::Lagged { .. }) => {
                         self.close_application(GatewayApplicationUnavailableCause::WatchGap).await;
-                        self.failed = None;
                         self.evaluate(&report_sender).await;
                     }
                 },
@@ -1409,7 +1406,6 @@ impl GatewayApplicationOwner {
                         return input_closed();
                     }
                     key_events.borrow_and_update();
-                    self.failed = None;
                     self.evaluate(&report_sender).await;
                 }
                 changed = identity_events.changed() => {
@@ -1418,7 +1414,6 @@ impl GatewayApplicationOwner {
                     }
                     let held = identity_events.borrow_and_update().clone();
                     if held != last_identity {
-                        self.failed = None;
                         last_identity = held;
                         self.evaluate(&report_sender).await;
                     }
@@ -1592,7 +1587,7 @@ impl GatewayApplicationOwner {
             return self.publish().await;
         }
         let staged = self.staged.as_ref().map(|staged| staged.candidate.generation);
-        if staged == Some(generation) || self.failed == Some(generation) {
+        if staged == Some(generation) {
             return;
         }
         self.stage(candidate, reports).await;
@@ -1708,18 +1703,13 @@ impl GatewayApplicationOwner {
                         }
                     }
                 };
-                self.reject(staged.candidate.generation, cause).await;
+                self.reject(cause).await;
             }
         }
     }
 
     /// A failed gate removes only the staged candidate.
-    async fn reject(
-        &mut self,
-        generation: GatewayApplicationGenerationId,
-        cause: GatewayApplicationUnavailableCause,
-    ) {
-        self.failed = Some(generation);
+    async fn reject(&mut self, cause: GatewayApplicationUnavailableCause) {
         if cause == GatewayApplicationUnavailableCause::ConnectPathUnavailable {
             self.connect_ready = false;
         }
@@ -1742,9 +1732,7 @@ impl GatewayApplicationOwner {
             .current()
             .is_some_and(|facts| facts.not_after > UnixInstant::from_clock(self.clock.as_ref()));
         if !identity_usable {
-            return self
-                .reject(generation, GatewayApplicationUnavailableCause::GatewayIdentityUnusable)
-                .await;
+            return self.reject(GatewayApplicationUnavailableCause::GatewayIdentityUnusable).await;
         }
         let key_current = matches!(
             self.certified_key.snapshot(),
@@ -1773,7 +1761,6 @@ impl GatewayApplicationOwner {
         }
         self.connect_ready = true;
         self.unavailable = None;
-        self.failed = None;
         if !self.listener.is_bound()
             && let Err(error) = self.listener.bind(self.bind, Arc::clone(&self.admission)).await
         {
@@ -1783,7 +1770,6 @@ impl GatewayApplicationOwner {
                 "public listener bind failed; the promoted generation is removed",
             );
             self.close_application(GatewayApplicationUnavailableCause::ListenerBindFailed).await;
-            self.failed = Some(generation);
             return;
         }
         self.retire_drained();

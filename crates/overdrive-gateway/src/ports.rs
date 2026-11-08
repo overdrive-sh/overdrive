@@ -185,6 +185,8 @@ pub enum GatewayConnectDataplaneError {
 
 #[async_trait]
 pub trait GatewayIdentityLifecycleControl: Send + Sync {
+    /// Cancel-safe: dropping the future before completion leaves no partial state. The
+    /// evaluation is submitted on first poll and is not retracted.
     async fn ensure_current(
         &self,
         deadline: Instant,
