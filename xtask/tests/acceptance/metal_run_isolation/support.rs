@@ -134,22 +134,23 @@ impl Fixture {
         // A nested user namespace cannot use init-user-namespace DAC override
         // to traverse a login user's private home. Keep its owned test inputs
         // below the already-prepared uid-0 runtime root when Metal supplies one.
-        let base = if let Some(id) = std::env::var_os("OVERDRIVE_METAL_RUN_ID") {
-            let id = id.to_string_lossy();
-            assert!(
-                id.len() == 24
-                    && id.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
-                "valid enclosing service context"
-            );
-            let root = PathBuf::from("/run/ovd-gk").join(id.as_ref());
-            assert!(
-                root.is_dir(),
-                "prepare the enclosing P3 runtime context before activating namespace fixtures"
-            );
-            root
-        } else {
-            PathBuf::from("/tmp")
-        };
+        let base = std::env::var_os("OVERDRIVE_METAL_RUN_ID").map_or_else(
+            || PathBuf::from("/tmp"),
+            |id| {
+                let id = id.to_string_lossy();
+                assert!(
+                    id.len() == 24
+                        && id.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
+                    "valid enclosing service context"
+                );
+                let root = PathBuf::from("/run/ovd-gk").join(id.as_ref());
+                assert!(
+                    root.is_dir(),
+                    "prepare the enclosing P3 runtime context before activating namespace fixtures"
+                );
+                root
+            },
+        );
         Self::with_temp(TempDir::new_in(base).expect("owned traversable namespace fixture"))
     }
     #[expect(
