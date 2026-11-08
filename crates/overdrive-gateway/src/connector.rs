@@ -18,6 +18,7 @@ use overdrive_core::traits::clock::Clock;
 
 use crate::application::{
     GatewayAdmissionBudget, GatewayAdmissionError, GatewayCleanupLedger, GatewayCleanupReservation,
+    GatewayConnectPermit,
 };
 use crate::ports::{
     GatewayClientMtls, GatewayClientMtlsError, GatewayConnectDataplane,
@@ -46,15 +47,21 @@ impl GatewayUpstreamConnector {
         Self { dataplane, client_mtls, limits, clock, budget, cleanup_ledger }
     }
 
-    /// One actual-frontend probe: a `NoBackend` receipt is bind-valid
-    /// (ADR-0242), a selected and authenticated peer is `SelectedPeerAuthenticated`.
+    /// One actual-frontend probe: a `NoBackend` receipt is `ReadyNoBackend`
+    /// and a validated `Selected` receipt is `ReadySelected`; both are
+    /// bind-valid (ADR-0242, R-65). The probe resolves no backend identity and
+    /// performs no mTLS, so the selected backend's health and authentication
+    /// never gate bind.
     pub(crate) async fn probe(
         &self,
         frontend: ServiceFrontend,
         deadline: Instant,
     ) -> Result<GatewayConnectProbeOutcome, GatewayUpstreamConnectError> {
-        match self.connect_for(PROBE_OPERATION, frontend, deadline).await {
-            Ok(_upstream) => Ok(GatewayConnectProbeOutcome::SelectedPeerAuthenticated),
+        match self.dial(PROBE_OPERATION, frontend, deadline).await {
+            Ok(selected) => {
+                emit_probe_selected_receipt(&selected.intent, selected.backend_id);
+                Ok(GatewayConnectProbeOutcome::ReadySelected)
+            }
             Err(GatewayUpstreamConnectError::NoBackend) => {
                 Ok(GatewayConnectProbeOutcome::ReadyNoBackend)
             }
@@ -67,18 +74,32 @@ impl GatewayUpstreamConnector {
         frontend: ServiceFrontend,
         deadline: Instant,
     ) -> Result<GatewayUpstream, GatewayUpstreamConnectError> {
-        self.connect_for(REQUEST_OPERATION, frontend, deadline).await
+        let selected = self.dial(REQUEST_OPERATION, frontend, deadline).await?;
+        let peer = self
+            .dataplane
+            .selected_backend_identity(selected.backend_id)
+            .map_err(GatewayUpstreamConnectError::SelectedIdentity)?;
+        emit_selected_receipt(REQUEST_OPERATION, &selected.intent, selected.backend_id, &peer);
+        let std_stream =
+            selected.stream.into_std().map_err(|_| GatewayUpstreamConnectError::Connect)?;
+        let connected: OwnedFd = std_stream.into();
+        self.client_mtls
+            .authenticate(connected, peer, deadline)
+            .await
+            .map_err(GatewayUpstreamConnectError::Mtls)
     }
 
-    /// The prepare-then-dial sequence; `operation` labels the receipt
-    /// occurrence as a `probe` or a `request`.
-    async fn connect_for(
+    /// The prepare-then-dial sequence shared by probe and request, up to a
+    /// validated `Selected` receipt; `operation` labels the receipt occurrence
+    /// as a `probe` or a `request`. The returned value keeps the connect permit
+    /// and the intent cleanup guard alive until the caller finishes with it.
+    async fn dial(
         &self,
         operation: &'static str,
         frontend: ServiceFrontend,
         deadline: Instant,
-    ) -> Result<GatewayUpstream, GatewayUpstreamConnectError> {
-        let _permit = self.budget.try_connect().map_err(GatewayUpstreamConnectError::Capacity)?;
+    ) -> Result<SelectedDial<'_>, GatewayUpstreamConnectError> {
+        let permit = self.budget.try_connect().map_err(GatewayUpstreamConnectError::Capacity)?;
         let mut reservation = self.cleanup_ledger.reserve().map_err(|full| {
             GatewayUpstreamConnectError::CleanupLedgerFull { capacity: full.capacity }
         })?;
@@ -103,35 +124,35 @@ impl GatewayUpstreamConnector {
         let receipt =
             self.dataplane.take_receipt(&intent).map_err(GatewayUpstreamConnectError::Receipt)?;
         cleanup.receipt_taken();
-        let backend_id = match receipt {
+        match receipt {
             GatewaySelectionReceipt::Selected { socket_cookie, service_key, backend_id }
                 if socket_cookie == intent.socket_cookie && service_key == intent.service_key =>
             {
-                backend_id
+                Ok(SelectedDial { stream, _cleanup: cleanup, _permit: permit, intent, backend_id })
             }
             GatewaySelectionReceipt::NoBackend { socket_cookie, service_key }
                 if socket_cookie == intent.socket_cookie && service_key == intent.service_key =>
             {
                 emit_no_backend_receipt(operation, &intent);
-                return Err(GatewayUpstreamConnectError::NoBackend);
+                Err(GatewayUpstreamConnectError::NoBackend)
             }
             GatewaySelectionReceipt::Selected { .. }
             | GatewaySelectionReceipt::NoBackend { .. } => {
-                return Err(GatewayUpstreamConnectError::ReceiptMismatch);
+                Err(GatewayUpstreamConnectError::ReceiptMismatch)
             }
-        };
-        let peer = self
-            .dataplane
-            .selected_backend_identity(backend_id)
-            .map_err(GatewayUpstreamConnectError::SelectedIdentity)?;
-        emit_selected_receipt(operation, &intent, backend_id, &peer);
-        let std_stream = stream.into_std().map_err(|_| GatewayUpstreamConnectError::Connect)?;
-        let connected: OwnedFd = std_stream.into();
-        self.client_mtls
-            .authenticate(connected, peer, deadline)
-            .await
-            .map_err(GatewayUpstreamConnectError::Mtls)
+        }
     }
+}
+
+/// A dialed upstream whose `Selected` receipt validated. Field order is drop
+/// order: the socket closes, then the registered intent is cleaned, then the
+/// connect permit is released.
+struct SelectedDial<'a> {
+    stream: tokio::net::TcpStream,
+    _cleanup: IntentCleanupGuard<'a>,
+    _permit: GatewayConnectPermit,
+    intent: GatewayConnectIntent,
+    backend_id: BackendId,
 }
 
 /// The connector's one cleanup guard. It owns the bound ledger reservation
@@ -217,6 +238,25 @@ fn emit_selected_receipt(
     );
 }
 
+/// The probe's `Selected` receipt occurrence: emitted immediately after exact
+/// receipt validation. The probe resolves no backend identity (R-65), so it
+/// carries no expected peer.
+fn emit_probe_selected_receipt(intent: &GatewayConnectIntent, backend_id: BackendId) {
+    tracing::debug!(
+        name: "gateway.upstream.receipt.validated",
+        target: "overdrive::gateway_connector",
+        event = "gateway.upstream.receipt.validated",
+        operation = PROBE_OPERATION,
+        socket_cookie = intent.socket_cookie.get().get(),
+        service_key_vip = %intent.service_key.vip(),
+        service_key_port = intent.service_key.port().get(),
+        service_key_protocol = intent.service_key.protocol().as_str(),
+        receipt_outcome = "selected",
+        backend_id = backend_id.get(),
+        "validated gateway upstream BPF selection receipt",
+    );
+}
+
 /// The `NoBackend` receipt occurrence: after exact receipt validation.
 fn emit_no_backend_receipt(operation: &'static str, intent: &GatewayConnectIntent) {
     tracing::debug!(
@@ -236,7 +276,7 @@ fn emit_no_backend_receipt(operation: &'static str, intent: &GatewayConnectInten
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum GatewayConnectProbeOutcome {
     ReadyNoBackend,
-    SelectedPeerAuthenticated,
+    ReadySelected,
 }
 
 #[derive(Debug, thiserror::Error)]

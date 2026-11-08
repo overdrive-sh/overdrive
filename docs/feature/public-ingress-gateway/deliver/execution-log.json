@@ -890,6 +890,48 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-11-08T03:00:07Z"
+    },
+    {
+      "sid": "04-07",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-11-08T03:55:24Z"
+    },
+    {
+      "sid": "04-07",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: randomized trace seed 0xbf6ba568 diverges (spec keeps zero-lease Draining until retire; owner retires eagerly); spec/driver change belongs to acceptance designer",
+      "t": "2026-11-08T03:55:24Z"
+    },
+    {
+      "sid": "04-07",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: GREEN not reachable without editing spec or driver; nothing to commit",
+      "t": "2026-11-08T03:55:24Z"
+    },
+    {
+      "sid": "04-07",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-08T11:27:41Z"
+    },
+    {
+      "sid": "04-07",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-08T11:50:20Z"
+    },
+    {
+      "sid": "04-07",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-08T11:50:21Z"
     }
   ]
 }

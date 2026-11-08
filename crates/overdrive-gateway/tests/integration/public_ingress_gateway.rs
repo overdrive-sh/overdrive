@@ -2259,7 +2259,6 @@ async fn every_dataplane_error_collapses_to_the_redacted_connect_path_cause() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER quint-conformance-gateway_application"]
 async fn a_selected_backend_with_no_applied_identity_does_not_stop_the_gate() {
     let error = GatewayConnectDataplaneError::BackendIdentityMissing {
         backend_id: BackendId::new(LEAK_PROBE_BACKEND).expect("BackendId"),

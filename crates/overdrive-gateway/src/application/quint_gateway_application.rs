@@ -596,7 +596,6 @@ enum ItfError {
     test = "replace_valid",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER quint-conformance-gateway_application"]
 fn gateway_application_replace_valid() -> impl Driver {
     AppConfDriver::new(REPLACE_VALID_OCTET)
 }
@@ -610,7 +609,6 @@ fn gateway_application_replace_valid() -> impl Driver {
     test = "route_withdraw_drain",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER quint-conformance-gateway_application"]
 fn gateway_application_route_withdraw_drain() -> impl Driver {
     AppConfDriver::new(ROUTE_WITHDRAW_DRAIN_OCTET)
 }
@@ -624,7 +622,6 @@ fn gateway_application_route_withdraw_drain() -> impl Driver {
     test = "failed_candidate_not_restaged",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER quint-conformance-gateway_application"]
 fn gateway_application_failed_candidate_not_restaged() -> impl Driver {
     AppConfDriver::new(FAILED_CANDIDATE_OCTET)
 }
@@ -638,7 +635,6 @@ fn gateway_application_failed_candidate_not_restaged() -> impl Driver {
     test = "late_probe_after_supersession",
     max_samples = 1
 )]
-#[ignore = "pending DELIVER quint-conformance-gateway_application"]
 fn gateway_application_late_probe_after_supersession() -> impl Driver {
     AppConfDriver::new(LATE_PROBE_OCTET)
 }
@@ -649,7 +645,6 @@ fn gateway_application_late_probe_after_supersession() -> impl Driver {
     spec = "../../specs/quint/public-ingress-gateway/gateway_application.qnt",
     main = "app_conf"
 )]
-#[ignore = "pending DELIVER quint-conformance-gateway_application"]
 fn gateway_application_app_conf_randomized_traces() -> impl Driver {
     AppConfDriver::new(RANDOMIZED_TRACES_OCTET)
 }

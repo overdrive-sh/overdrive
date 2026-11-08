@@ -2147,8 +2147,9 @@ impl GatewayGenerationRetention {
             }
         }
     }
+    /// The exact retained `(connections, requests)` counts.
     pub(crate) fn counts(&self) -> (u32, u32) {
-        todo!("SCAFFOLD: GatewayGenerationRetention::counts")
+        self.retained()
     }
 
     fn retained(&self) -> (u32, u32) {
@@ -2210,9 +2211,7 @@ impl GatewayAdmissionBudget {
             });
         match taken {
             Ok(_) => Ok(GatewayPublicConnectionPermit { budget: Arc::clone(self) }),
-            Err(_) => todo!(
-                "SCAFFOLD: GatewayAdmissionBudget::try_public_connection refusal arm (connection limit)"
-            ),
+            Err(_) => Err(GatewayAdmissionError::ConnectionLimit),
         }
     }
     pub(crate) fn try_connect(
@@ -2225,9 +2224,7 @@ impl GatewayAdmissionBudget {
             });
         match taken {
             Ok(_) => Ok(GatewayConnectPermit { budget: Arc::clone(self) }),
-            Err(_) => todo!(
-                "SCAFFOLD: GatewayAdmissionBudget::try_connect refusal arm (admission refusal)"
-            ),
+            Err(_) => Err(GatewayAdmissionError::ConnectLimit),
         }
     }
     pub(crate) fn try_request(
@@ -2240,9 +2237,7 @@ impl GatewayAdmissionBudget {
             });
         match taken {
             Ok(_) => Ok(GatewayGlobalRequestPermit { budget: Arc::clone(self) }),
-            Err(_) => {
-                todo!("SCAFFOLD: GatewayAdmissionBudget::try_request refusal arm (request limit)")
-            }
+            Err(_) => Err(GatewayAdmissionError::RequestLimit),
         }
     }
 }
@@ -2331,7 +2326,7 @@ impl GatewayConnectionLease {
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .is_err()
         {
-            todo!("SCAFFOLD: GatewayConnectionLease::try_request refusal arm (request in flight)");
+            return Err(GatewayAdmissionError::RequestLimit);
         }
         let ceiling = self.snapshot.budget.limits.max_requests_per_connection().get();
         let started =
@@ -2340,7 +2335,7 @@ impl GatewayConnectionLease {
             });
         let Ok(previous) = started else {
             self.request_active.store(false, Ordering::Release);
-            todo!("SCAFFOLD: GatewayConnectionLease::try_request refusal arm (request limit)");
+            return Err(GatewayAdmissionError::RequestLimit);
         };
         let release = || {
             self.requests_started.fetch_sub(1, Ordering::AcqRel);
