@@ -193,7 +193,7 @@ impl Rig {
         let intent_port: Arc<dyn IntentStore> = intent;
         let observation_port: Arc<dyn ObservationStore> = observations;
         let clock_port: Arc<dyn Clock> = clock.clone();
-        let (builder, seal) = UnboundGatewayBuilder::new(
+        let unbound = UnboundGatewayBuilder::new(
             node.clone(),
             config,
             intent_port,
@@ -203,8 +203,10 @@ impl Rig {
             clock_port.clone(),
         )
         .await
-        .expect("gateway builder")
-        .into_builder();
+        .expect("gateway builder");
+        let routes = unbound.route_commands();
+        let status = unbound.status_reads();
+        let (builder, seal) = unbound.into_builder();
         let client = SimGatewayClientMtls::new(seal, relay.clone(), clock_port.clone());
         client.set_peer(backend_identity);
         let lifecycle = SimGatewayIdentityLifecycleControl::new(
@@ -224,7 +226,7 @@ impl Rig {
             Arc::new(lifecycle),
             relay.clone(),
         );
-        let (handle, routes, status) = builder.start(dependencies).await.into_parts();
+        let handle = builder.start(dependencies).await.into_parts();
         routes.routes().apply(route()).await.expect("declare the Route");
         loop {
             let row = status.application_status().await.expect("status read");

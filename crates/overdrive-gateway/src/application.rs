@@ -188,6 +188,23 @@ impl UnboundGatewayBuilder {
         })
     }
 
+    /// R-66. Exposes the Route command handle without starting any task. The
+    /// handle reaches the same Route owner on every call; a command sent
+    /// before `GatewayBuilder::start` waits on the owner's bounded channel.
+    pub fn route_commands(&self) -> GatewayRouteCommands {
+        GatewayRouteCommands { routes: self.route_handle.clone() }
+    }
+
+    /// R-66. Exposes the redacted ObservationStore point reads; they hold no
+    /// task and no Route write capability.
+    pub fn status_reads(&self) -> GatewayStatusReads {
+        GatewayStatusReads {
+            observations: Arc::clone(&self.observations),
+            node_id: self.node_id.clone(),
+            certified_key_id: self.custody_handle.id().clone(),
+        }
+    }
+
     pub fn into_builder(self) -> (GatewayBuilder, GatewayUpstreamSeal) {
         (GatewayBuilder { unbound: self }, GatewayUpstreamSeal::new())
     }
@@ -241,7 +258,7 @@ impl GatewayBuilder {
             frontend,
             clock,
             route_owner,
-            route_handle,
+            route_handle: _,
             custody,
             custody_handle,
             manual,
@@ -275,12 +292,11 @@ impl GatewayBuilder {
             Self::spawn_connection_owner(services, &owners);
         let (command_sender, commands) = mpsc::channel(APPLICATION_COMMAND_CAPACITY);
         let owner = GatewayApplicationOwner::fresh(OwnerWiring {
-            node_id: node_id.clone(),
+            node_id,
             intent,
             certified_key: custody_handle.clone(),
             frontend,
             identity: Arc::clone(&identity_lifecycle),
-            connector,
             dataplane,
             relay,
             admission,
@@ -322,15 +338,7 @@ impl GatewayBuilder {
                 owners,
             },
         };
-        StartedGateway {
-            handle,
-            routes: GatewayRouteCommands { routes: route_handle },
-            status: GatewayStatusReads {
-                observations,
-                node_id,
-                certified_key_id: custody_handle.id().clone(),
-            },
-        }
+        StartedGateway { handle }
     }
 
     /// The connections owner task with its shutdown capabilities, and the
@@ -412,13 +420,13 @@ async fn manual_source_task(
 
 pub struct StartedGateway {
     handle: GatewayHandle,
-    routes: GatewayRouteCommands,
-    status: GatewayStatusReads,
 }
 
 impl StartedGateway {
-    pub fn into_parts(self) -> (GatewayHandle, GatewayRouteCommands, GatewayStatusReads) {
-        (self.handle, self.routes, self.status)
+    /// R-66. The task tree and shutdown capabilities are the only product of
+    /// `start`; the Route and status handles come from the builder.
+    pub fn into_parts(self) -> GatewayHandle {
+        self.handle
     }
 }
 
@@ -1228,7 +1236,6 @@ impl GatewayApplicationHandle {
 #[derive(Debug)]
 enum GateFailure {
     Identity(GatewayIdentityLifecycleError),
-    ConnectPath(GatewayUpstreamConnectError),
     ConnectProbe(GatewayConnectDataplaneError),
     RelayProbe(RelayProbeError),
     Timeout,
@@ -1269,7 +1276,6 @@ pub(crate) struct GatewayApplicationOwner {
     certified_key: PublicCertifiedKeyCustodyHandle,
     frontend: Arc<dyn ServiceFrontendResolve>,
     identity: Arc<dyn GatewayIdentityLifecycleControl>,
-    connector: Arc<GatewayUpstreamConnector>,
     /// Driven once per boot by the first gate that reaches it.
     dataplane: Arc<dyn GatewayConnectDataplane>,
     connect_proven: Arc<AtomicBool>,
@@ -1305,7 +1311,6 @@ struct OwnerWiring {
     certified_key: PublicCertifiedKeyCustodyHandle,
     frontend: Arc<dyn ServiceFrontendResolve>,
     identity: Arc<dyn GatewayIdentityLifecycleControl>,
-    connector: Arc<GatewayUpstreamConnector>,
     dataplane: Arc<dyn GatewayConnectDataplane>,
     relay: Arc<dyn GatewayRelay>,
     admission: Arc<GatewayAdmission>,
@@ -1327,7 +1332,6 @@ impl GatewayApplicationOwner {
             certified_key: wiring.certified_key,
             frontend: wiring.frontend,
             identity: wiring.identity,
-            connector: wiring.connector,
             dataplane: wiring.dataplane,
             connect_proven: Arc::new(AtomicBool::new(false)),
             relay: wiring.relay,
@@ -1607,14 +1611,12 @@ impl GatewayApplicationOwner {
         let phase = Arc::new(AtomicU8::new(PHASE_IDENTITY));
         let cancel = CancellationToken::new();
         let gate = Gate {
-            connector: Arc::clone(&self.connector),
             dataplane: Arc::clone(&self.dataplane),
             connect_proven: Arc::clone(&self.connect_proven),
             relay: Arc::clone(&self.relay),
             relay_proven: Arc::clone(&self.relay_proven),
             identity: Arc::clone(&self.identity),
             clock: Arc::clone(&self.clock),
-            frontend: candidate.frontend,
             deadline,
             phase: Arc::clone(&phase),
             token,
@@ -1670,19 +1672,17 @@ impl GatewayApplicationOwner {
                         );
                         GatewayApplicationUnavailableCause::GatewayIdentityUnusable
                     }
-                    GateFailure::ConnectPath(error) => {
-                        tracing::warn!(
-                            name: "gateway.application.gate_connect_path_failed",
-                            error = %error,
-                            "gateway application gate failed on the upstream connect path",
-                        );
-                        GatewayApplicationUnavailableCause::ConnectPathUnavailable
-                    }
                     GateFailure::ConnectProbe(error) => {
                         tracing::warn!(
                             name: "gateway.application.gate_connect_probe_failed",
                             error = %error,
                             "gateway application gate failed on the connect dataplane probe",
+                        );
+                        tracing::error!(
+                            name: "health.startup.refused",
+                            reason = "gateway.connect_probe",
+                            error = %error,
+                            "gateway application gate refused: the connect dataplane probe failed",
                         );
                         GatewayApplicationUnavailableCause::ConnectPathUnavailable
                     }
@@ -1909,17 +1909,16 @@ impl GatewayApplicationOwner {
     }
 }
 
-/// One gate attempt: identity current, then the actual-frontend probe, reported by token. It runs detached from the owner
+/// One gate attempt: the gateway-local checks (relay probe, connect dataplane probe, Gateway
+/// Identity current), reported by token. It runs detached from the owner
 /// loop so a superseded attempt completes (and cleans up) on its own.
 struct Gate {
-    connector: Arc<GatewayUpstreamConnector>,
     dataplane: Arc<dyn GatewayConnectDataplane>,
     connect_proven: Arc<AtomicBool>,
     relay: Arc<dyn GatewayRelay>,
     relay_proven: Arc<AtomicBool>,
     identity: Arc<dyn GatewayIdentityLifecycleControl>,
     clock: Arc<dyn Clock>,
-    frontend: ServiceFrontend,
     deadline: Instant,
     phase: Arc<AtomicU8>,
     token: u64,
@@ -1981,16 +1980,7 @@ impl Gate {
             () = self.cancel.cancelled() => return Ok(()),
             identity = self.identity.ensure_current(self.deadline) => identity,
         };
-        identity.map_err(GateFailure::Identity)?;
-        if self.cancel.is_cancelled() {
-            return Ok(());
-        }
-        self.phase.store(PHASE_CONNECT, Ordering::Release);
-        self.connector
-            .probe(self.frontend, self.deadline)
-            .await
-            .map(|_| ())
-            .map_err(GateFailure::ConnectPath)
+        identity.map(|_| ()).map_err(GateFailure::Identity)
     }
 }
 

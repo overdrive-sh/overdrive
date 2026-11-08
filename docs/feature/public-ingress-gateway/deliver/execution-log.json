@@ -932,6 +932,48 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-11-08T11:50:21Z"
+    },
+    {
+      "sid": "05-01",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-08T13:37:17Z"
+    },
+    {
+      "sid": "05-01",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: route/status handlers (step 05-02, handlers.rs todo!) are required by every enabled-boot test, and RouteCommands/StatusReads only exist after GatewayBuilder::start while AppState (G1) precedes it; design gap awaiting ruling",
+      "t": "2026-11-08T13:37:17Z"
+    },
+    {
+      "sid": "05-01",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: GREEN not reachable in this step; only EbpfDataplane::probe and R-61 debt retry are implemented, uncommitted",
+      "t": "2026-11-08T13:37:17Z"
+    },
+    {
+      "sid": "05-01",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-08T17:54:01Z"
+    },
+    {
+      "sid": "05-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-08T18:42:52Z"
+    },
+    {
+      "sid": "05-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-08T18:42:52Z"
     }
   ]
 }

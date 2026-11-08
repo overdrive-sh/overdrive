@@ -1,13 +1,16 @@
 //! Public-ingress gateway — boot and shutdown through the ordinary production
 //! composition: S-PIG-59 and the disabled arm of S-PIG-100 (over the host
 //! bundle, `run_server`), and the enabled-boot arms of S-PIG-02 (I), 54, 57
-//! (I), 58, 60 (I), 61, 62, 74 (a), (c), (d) and 100 (over the supplied-owner
+//! (I), 58, 60 (I), 61, 62, 74 (b), (c) and 100 (over the supplied-owner
 //! `run_server_with_obs_and_driver`, gateway enabled through
 //! `ServerConfig.gateway`).
 //!
 //! Every body enters through the production entry point and observes the real
 //! operator HTTPS surface, the tracing stage events and the Sim relay and
-//! connect-dataplane transcripts. Faults enter only through existing driven
+//! connect-dataplane transcripts. The activation gate is gateway-local (R-65):
+//! the S-PIG-58 bodies count the connect-dataplane `open_upstream` and
+//! `take_receipt` calls and the client `authenticate` calls and require zero
+//! of each before the first public request. Faults enter only through existing driven
 //! ports: the Sim relay's substrate lie, the Sim connect dataplane's typed
 //! `fail_next`, a refusing Sim driver, and a delegating CA that
 //! refuses SVID issuance. Nothing is installed that production does not
@@ -20,16 +23,15 @@
 //! | `a_disabled_gateway_boots_and_shuts_down_exactly_as_before` | S-PIG-59 (boundary 6) | expected GREEN, no `#[ignore]` |
 //! | `a_disabled_gateway_never_probes_the_relay` | S-PIG-100, disabled arm | ignored until `SimGatewayRelay` lands |
 //! | `a_service_with_no_backend_is_answered_503_twice_with_an_empty_second_delta` | S-PIG-02 (I), 54 | ignored |
-//! | `a_failing_sentinel_probe_keeps_the_public_port_unbound_and_serve_unaffected` | S-PIG-57 (I) | ignored |
+//! | `a_failing_sentinel_probe_keeps_the_public_port_unbound_and_serve_unaffected` | S-PIG-57 (I), S-PIG-74 (a) | ignored |
 //! | `a_frontend_with_no_backend_is_bind_valid_and_the_listener_serves_503` | S-PIG-58 (a) | ignored |
 //! | `a_selected_backend_that_refuses_mtls_is_bind_valid_and_its_first_request_is_one_502` | S-PIG-58 (b), R-65 | ignored |
 //! | `a_route_replacement_behind_a_backend_that_refuses_mtls_is_promoted_and_drains_the_prior_generation` | S-PIG-58 (c), R-65 | ignored |
 //! | `enabled_boot_probes_the_relay_before_the_connect_path_and_the_gateway_stage_runs_first` | S-PIG-60 (I) | ignored |
 //! | `a_gated_gateway_never_requests_serve_shutdown` | S-PIG-61 | ignored |
 //! | `the_workload_surface_advances_identically_disabled_enabled_and_gated` | S-PIG-62 | ignored |
-//! | `an_absent_sentinel_receipt_keeps_the_public_port_unbound` | S-PIG-74 (a) | ignored |
-//! | `a_gateway_identity_that_never_becomes_current_keeps_the_public_port_unbound` | S-PIG-74 (c) | ignored |
-//! | `a_probe_that_times_out_keeps_the_public_port_unbound` | S-PIG-74 (d) | ignored |
+//! | `a_gateway_identity_that_never_becomes_current_keeps_the_public_port_unbound` | S-PIG-74 (b) | ignored |
+//! | `a_probe_that_times_out_keeps_the_public_port_unbound` | S-PIG-74 (c) | ignored |
 //! | `a_refused_relay_probe_keeps_the_public_port_unbound_and_the_connect_probe_unrun` | S-PIG-100 | ignored |
 //! | `the_relay_probe_runs_once_per_boot_across_a_route_replacement` | S-PIG-100 | ignored |
 //!
@@ -52,7 +54,7 @@
 //! | 155 | S-PIG-60 |
 //! | 156 | S-PIG-61 (gated) |
 //! | 158, 159, 160 | S-PIG-62 (disabled, enabled, gated) |
-//! | 161, 163, 164 | S-PIG-74 (a), (c), (d); (b), a hook that does not fire, is the S-PIG-57 (I) stimulus |
+//! | 163, 164 | S-PIG-74 (b), (c); (a), a hook that does not fire (`GatewayConnectDataplane::probe` returns `Unavailable`, sentinel receipt absent), is the S-PIG-57 (I) stimulus. 161 is unused |
 //! | 165, 166 | S-PIG-100 (refused relay probe; once per boot) |
 
 #![allow(
@@ -63,10 +65,10 @@
     reason = "CONTRACT_SHAPE metadata; fixture preconditions are asserted"
 )]
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpStream};
 use std::os::fd::OwnedFd;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -98,6 +100,7 @@ use overdrive_core::traits::ca::{
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{Driver, DriverType};
 use overdrive_core::traits::entropy::Entropy;
+use overdrive_dataplane::allocators::VipRange;
 use overdrive_gateway::ports::{
     GatewayClientMtls, GatewayClientMtlsDeps, GatewayClientMtlsError, GatewayClientMtlsFactory,
     GatewayConnectCleanup, GatewayConnectCleanupSweep, GatewayConnectDataplane,
@@ -420,13 +423,17 @@ impl DataplaneComposer for FixtureComposer {
 
 /// Delegates to the Sim connect dataplane and records, at the start of every
 /// connect probe, how many relay probes had already run (the G3 order), and how
-/// many upstream sockets were opened.
+/// many upstream sockets were opened and receipts taken through the port. The
+/// Sim's own `probe` reaches its state directly, so these two counters see only
+/// request-path calls: the gate makes none (R-65).
 struct ProbeOrderSpy {
     inner: Arc<SimGatewayConnectDataplane>,
     relay: Arc<SimGatewayRelay>,
     relay_probes_seen_by_connect_probe: Arc<Mutex<Vec<u32>>>,
-    /// `open_upstream` calls, whichever operation made them.
+    /// `open_upstream` calls through the port.
     opens: Arc<AtomicU32>,
+    /// `take_receipt` calls through the port.
+    receipt_takes: Arc<AtomicU32>,
 }
 
 impl GatewayConnectCleanup for ProbeOrderSpy {
@@ -477,6 +484,7 @@ impl GatewayConnectDataplane for ProbeOrderSpy {
         &self,
         intent: &GatewayConnectIntent,
     ) -> Result<GatewaySelectionReceipt, GatewayConnectDataplaneError> {
+        self.receipt_takes.fetch_add(1, Ordering::SeqCst);
         self.inner.take_receipt(intent)
     }
 
@@ -574,9 +582,29 @@ struct Spec {
     /// reaches Running and no backend is ever programmed, however far the
     /// injected clock advances.
     driver_refuses_start: bool,
+    /// The Service VIP range is `127.<octet>.2.0/24`, so the Service frontend
+    /// is a loopback address the connector's real `connect(2)` reaches
+    /// directly. The Sim dataplane does not rewrite the destination, so a
+    /// default `10.96.x.y` VIP would leave the dial hanging or failing by
+    /// whatever route the host has. With nothing listening on the frontend the
+    /// kernel refuses at once; a test that wants the dial to succeed binds the
+    /// frontend itself ([`FrontendDrain`]).
+    frontend_on_loopback: bool,
 }
 
 impl Spec {
+    /// The Service VIP range this composition allocates from.
+    fn vip_range(&self) -> VipRange {
+        if !self.frontend_on_loopback {
+            return VipRange::default();
+        }
+        VipRange::new(
+            vec![format!("127.{}.2.0/24", self.octet).parse().expect("loopback VIP range")],
+            BTreeSet::new(),
+        )
+        .expect("a loopback VIP range with no reserved address")
+    }
+
     fn enabled(octet: u8) -> Self {
         Self {
             octet,
@@ -586,6 +614,7 @@ impl Spec {
             refuse_svid: false,
             spy: false,
             driver_refuses_start: false,
+            frontend_on_loopback: false,
         }
     }
 }
@@ -601,6 +630,8 @@ struct World {
     relay_probes_seen_by_connect_probe: Arc<Mutex<Vec<u32>>>,
     /// `open_upstream` calls, counted when the spy is installed.
     opens: Arc<AtomicU32>,
+    /// `take_receipt` calls, counted when the spy is installed.
+    receipt_takes: Arc<AtomicU32>,
     /// `GatewayClientMtls::authenticate` calls.
     authenticate_calls: Arc<AtomicU32>,
     handle: Option<ServerHandle>,
@@ -609,6 +640,10 @@ struct World {
 }
 
 impl World {
+    #[allow(
+        clippy::too_many_lines,
+        reason = "one production boot over every double the cases share"
+    )]
     async fn boot(spec: Spec) -> Self {
         // Install the process-wide collector before the boot emits its first event.
         events();
@@ -631,6 +666,7 @@ impl World {
         let config = overdrive_control_plane::ServerConfig {
             tick_cadence: TICK,
             gateway,
+            vip_range: spec.vip_range(),
             ..super::node_adapters::test_config(data_dir, operator_config_dir.clone())
         };
 
@@ -645,6 +681,7 @@ impl World {
         }
         let probe_log = Arc::new(Mutex::new(Vec::new()));
         let opens = Arc::new(AtomicU32::new(0));
+        let receipt_takes = Arc::new(AtomicU32::new(0));
         let authenticate_calls = Arc::new(AtomicU32::new(0));
         let capability: Arc<dyn GatewayConnectDataplane> = if spec.spy {
             Arc::new(ProbeOrderSpy {
@@ -652,6 +689,7 @@ impl World {
                 relay: Arc::clone(sim.sim_relay()),
                 relay_probes_seen_by_connect_probe: Arc::clone(&probe_log),
                 opens: Arc::clone(&opens),
+                receipt_takes: Arc::clone(&receipt_takes),
             })
         } else {
             Arc::clone(&connect) as _
@@ -703,6 +741,7 @@ impl World {
             sim,
             relay_probes_seen_by_connect_probe: probe_log,
             opens,
+            receipt_takes,
             authenticate_calls,
             handle: Some(handle),
             client,
@@ -910,9 +949,25 @@ impl World {
         self.opens.load(Ordering::SeqCst)
     }
 
+    /// `take_receipt` calls so far (the spy must be installed).
+    fn receipt_takes(&self) -> u32 {
+        self.receipt_takes.load(Ordering::SeqCst)
+    }
+
     /// `GatewayClientMtls::authenticate` calls so far.
     fn authenticate_calls(&self) -> u32 {
         self.authenticate_calls.load(Ordering::SeqCst)
+    }
+
+    /// The activation gate is gateway-local (R-65): before any public request
+    /// it has made no `open_upstream`, no `take_receipt` and no `authenticate`
+    /// call (the spy must be installed).
+    fn assert_gate_made_no_service_connection(&self) {
+        assert_eq!(
+            (self.opens(), self.receipt_takes(), self.authenticate_calls()),
+            (0, 0, 0),
+            "the gate made (open_upstream, take_receipt, authenticate) calls"
+        );
     }
 
     /// Graceful shutdown on the injected clock.
@@ -929,6 +984,55 @@ impl World {
                 }
                 () = tokio::time::sleep(Duration::from_millis(5)) => clock.tick(TICK),
             }
+        }
+    }
+}
+
+/// Accepts every connection made to a Service frontend, so the connector's
+/// real `connect(2)` completes and the connection stays open and silent until
+/// the drain drops (as in the gateway relay integration file).
+struct FrontendDrain {
+    stop: Arc<AtomicBool>,
+    join: Option<std::thread::JoinHandle<Vec<TcpStream>>>,
+}
+
+impl FrontendDrain {
+    /// Binds `address` (a loopback address of this composition's octet) and
+    /// serves it until dropped.
+    fn start(address: SocketAddr) -> Self {
+        let listener = std::net::TcpListener::bind(address).expect("bind the Service frontend");
+        listener.set_nonblocking(true).expect("nonblocking frontend listener");
+        let stop = Arc::new(AtomicBool::new(false));
+        let observed = Arc::clone(&stop);
+        let join = std::thread::Builder::new()
+            .name("frontend-drain".to_owned())
+            .spawn(move || {
+                let mut held = Vec::new();
+                while !observed.load(Ordering::Acquire) {
+                    match listener.accept() {
+                        Ok((stream, _)) => held.push(stream),
+                        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                            std::thread::sleep(Duration::from_millis(1));
+                        }
+                        Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+                        Err(error) => panic!("Service frontend accept failed: {error}"),
+                    }
+                }
+                held
+            })
+            .expect("spawn the frontend drain");
+        Self { stop, join: Some(join) }
+    }
+}
+
+impl Drop for FrontendDrain {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Release);
+        if let Some(join) = self.join.take()
+            && let Err(panic) = join.join()
+            && !std::thread::panicking()
+        {
+            std::panic::resume_unwind(panic);
         }
     }
 }
@@ -1003,13 +1107,23 @@ async fn assert_unbound_and_serve_unaffected(world: &World) {
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER consuming-port-unavailable-outcome"]
 async fn a_service_with_no_backend_is_answered_503_twice_with_an_empty_second_delta() {
-    let mut world = World::boot(Spec { driver_refuses_start: true, ..Spec::enabled(152) }).await;
+    let mut world = World::boot(Spec {
+        driver_refuses_start: true,
+        frontend_on_loopback: true,
+        ..Spec::enabled(152)
+    })
+    .await;
     world.promoted().await;
     world.assert_no_backend_programmed().await;
 
+    let clock_at_first_request = world.clock.now();
     let first = world.public_response().await;
+    assert_eq!(
+        world.clock.now(),
+        clock_at_first_request,
+        "the first request resolves on the refused loopback frontend and never waits"
+    );
     assert!(
         first.starts_with(b"HTTP/1.1 503"),
         "a Service with no selectable backend is a 503, got {:?}",
@@ -1052,17 +1166,18 @@ async fn a_service_with_no_backend_is_answered_503_twice_with_an_empty_second_de
 // S-PIG-57 (I arm)
 // ---------------------------------------------------------------------------
 
-/// S-PIG-57 (I arm) — a sentinel probe that fails keeps TCP/443 unbound,
-/// status names the redacted cause, the startup-refused event carries reason
-/// `gateway.connect_probe`, and serve and workloads are unaffected.
+/// S-PIG-57 (I arm), S-PIG-74 (a) — a sentinel probe that fails keeps TCP/443
+/// unbound, status names the redacted cause, the startup-refused event carries
+/// reason `gateway.connect_probe`, and serve and workloads are unaffected.
 ///
 /// The fault is the Sim connect dataplane's typed `fail_next` at the probe
-/// operation, the existing driven-port result.
+/// operation, the existing driven-port result: `GatewayConnectDataplane::probe`
+/// returns `Unavailable` because the sentinel receipt is absent (the hook does
+/// not fire). This is the S-PIG-74 (a) stimulus.
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER gateway-boot-and-shutdown"]
 async fn a_failing_sentinel_probe_keeps_the_public_port_unbound_and_serve_unaffected() {
     let mut spec = Spec::enabled(153);
     spec.probe_fault = Some(GatewayConnectDataplaneError::Unavailable);
@@ -1094,20 +1209,27 @@ async fn a_failing_sentinel_probe_keeps_the_public_port_unbound_and_serve_unaffe
 // S-PIG-58
 // ---------------------------------------------------------------------------
 
-/// S-PIG-58 (a) — an actual frontend with no backend (the Sim driver refuses to
-/// start the allocation, observed before the request) is bind-valid: the gate
-/// waits for no backend, the listener binds, the connect path is Ready, no
+/// S-PIG-58 (a) — a Route whose Service has no backend (the Sim driver refuses
+/// to start the allocation, observed before the request) is bind-valid: the
+/// gate waits for no backend and makes no `open_upstream`, `take_receipt` or
+/// `authenticate` call, the listener binds, the connect path is Ready, no
 /// unavailable cause is reported, and the bound listener serves 503.
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER gateway-boot-and-shutdown"]
 async fn a_frontend_with_no_backend_is_bind_valid_and_the_listener_serves_503() {
-    let mut world = World::boot(Spec { driver_refuses_start: true, ..Spec::enabled(154) }).await;
+    let mut world = World::boot(Spec {
+        driver_refuses_start: true,
+        spy: true,
+        frontend_on_loopback: true,
+        ..Spec::enabled(154)
+    })
+    .await;
 
     let status = world.promoted().await;
     world.assert_no_backend_programmed().await;
+    world.assert_gate_made_no_service_connection();
 
     let row = status.application.as_ref().expect("an application row");
     assert!(row.unavailable.is_none(), "no unavailable cause once promoted: {status:?}");
@@ -1120,9 +1242,15 @@ async fn a_frontend_with_no_backend_is_bind_valid_and_the_listener_serves_503() 
         "the Gateway Identity is Current: {status:?}"
     );
     assert!(world.listening(), "TCP/443 is bound on the configured address");
+    let clock_before = world.clock.now();
     assert!(
         world.public_response().await.starts_with(b"HTTP/1.1 503"),
         "the listener serves the NoBackend 503"
+    );
+    assert_eq!(
+        world.clock.now(),
+        clock_before,
+        "the request resolves on the refused loopback frontend and never waits"
     );
     world.shutdown().await;
 }
@@ -1130,21 +1258,28 @@ async fn a_frontend_with_no_backend_is_bind_valid_and_the_listener_serves_503() 
 /// S-PIG-58 (b) — route activation does not depend on backend authentication
 /// (R-65). The Service is Running and its backend is programmed, but the Sim
 /// exact-peer client presents no peer, so the selected backend's mTLS fails.
-/// The actual-frontend probe validates the `Selected` receipt, resolves no
-/// identity and authenticates nothing: the listener binds, TCP/443 is bound,
-/// the status shows no gateway failure cause, `health.startup.refused` is not
-/// emitted and no `authenticate` call occurs before the first public request.
+/// The gate makes no connection to the Route's Service: it makes no
+/// `open_upstream`, `take_receipt` or `authenticate` call, so the listener
+/// binds, TCP/443 is bound, the status shows no gateway failure cause and
+/// `health.startup.refused` is not emitted before the first public request.
 /// That request returns exactly one 502, with one `open_upstream`, one
-/// `authenticate` and no retry, and leaves no intent or receipt.
+/// `take_receipt`, one `authenticate` and no retry, and leaves no intent or
+/// receipt.
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER gateway-boot-and-shutdown"]
 async fn a_selected_backend_that_refuses_mtls_is_bind_valid_and_its_first_request_is_one_502() {
-    let mut world = World::boot(Spec { spy: true, ..Spec::enabled(167) }).await;
+    let mut world =
+        World::boot(Spec { spy: true, frontend_on_loopback: true, ..Spec::enabled(167) }).await;
     world.deploy_service().await;
     world.wait_for_programmed_backend().await;
+    // The Sim does not rewrite the destination, so the dial goes to the
+    // Service's own loopback VIP: serve it, so the connect succeeds and the
+    // refusal under test is the exact-peer mTLS one.
+    let vips = world.dataplane.service_vip_keys();
+    assert_eq!(vips.len(), 1, "one Service frontend is programmed: {vips:?}");
+    let _frontend = FrontendDrain::start(SocketAddr::V4(SocketAddrV4::new(vips[0], SERVICE_PORT)));
     world.declare_route("/").await;
 
     let status = world
@@ -1168,9 +1303,8 @@ async fn a_selected_backend_that_refuses_mtls_is_bind_valid_and_its_first_reques
         "no health.startup.refused: {:?}",
         events().refusal_reasons()
     );
-    assert_eq!(world.authenticate_calls(), 0, "the gate authenticated no backend");
+    world.assert_gate_made_no_service_connection();
 
-    let opens_before = world.opens();
     let response = world.public_response().await;
     assert!(
         response.starts_with(b"HTTP/1.1 502"),
@@ -1182,7 +1316,8 @@ async fn a_selected_backend_that_refuses_mtls_is_bind_valid_and_its_first_reques
         1,
         "exactly one response"
     );
-    assert_eq!(world.opens() - opens_before, 1, "one open_upstream, no retry");
+    assert_eq!(world.opens(), 1, "one open_upstream, no retry");
+    assert_eq!(world.receipt_takes(), 1, "one take_receipt, no second attempt");
     assert_eq!(world.authenticate_calls(), 1, "one authenticate, no second attempt");
     assert_eq!(
         (
@@ -1198,16 +1333,16 @@ async fn a_selected_backend_that_refuses_mtls_is_bind_valid_and_its_first_reques
 /// S-PIG-58 (c) — behind the same refusing backend a Route replacement is
 /// promoted, and the prior generation drains and retires exactly as it does
 /// without a backend: the listener stays bound, nothing is staged or draining,
-/// no failure cause is reported, and allocation, Service and hydration advance
-/// as on an unrefused node.
+/// no failure cause is reported, neither gate made an `open_upstream`,
+/// `take_receipt` or `authenticate` call, and allocation, Service and
+/// hydration advance as on an unrefused node.
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER gateway-boot-and-shutdown"]
 async fn a_route_replacement_behind_a_backend_that_refuses_mtls_is_promoted_and_drains_the_prior_generation()
  {
-    let mut world = World::boot(Spec::enabled(168)).await;
+    let mut world = World::boot(Spec { spy: true, ..Spec::enabled(168) }).await;
     world.deploy_service().await;
     let before = world.wait_for_programmed_backend().await;
     world.declare_route("/").await;
@@ -1246,6 +1381,7 @@ async fn a_route_replacement_behind_a_backend_that_refuses_mtls_is_promoted_and_
     let after = world.progress().await;
     assert!(after.allocation_running && after.backends_hydrated >= before.backends_hydrated);
     assert!(after.operator_listener_answers, "the operator listener advances regardless");
+    world.assert_gate_made_no_service_connection();
     world.shutdown().await;
 }
 
@@ -1261,7 +1397,6 @@ async fn a_route_replacement_behind_a_backend_that_refuses_mtls_is_promoted_and_
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER gateway-boot-and-shutdown"]
 async fn enabled_boot_probes_the_relay_before_the_connect_path_and_the_gateway_stage_runs_first() {
     let mut spec = Spec::enabled(155);
     spec.spy = true;
@@ -1307,7 +1442,6 @@ async fn enabled_boot_probes_the_relay_before_the_connect_path_and_the_gateway_s
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER gateway-boot-and-shutdown"]
 async fn a_gated_gateway_never_requests_serve_shutdown() {
     let mut spec = Spec::enabled(156);
     spec.relay_lie = Some(SubstrateLie::UlpAbsent);
@@ -1350,7 +1484,6 @@ async fn a_gated_gateway_never_requests_serve_shutdown() {
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER gateway-boot-and-shutdown"]
 async fn the_workload_surface_advances_identically_disabled_enabled_and_gated() {
     let mut progress = Vec::new();
     for (label, spec) in [
@@ -1384,7 +1517,7 @@ async fn the_workload_surface_advances_identically_disabled_enabled_and_gated() 
 }
 
 // ---------------------------------------------------------------------------
-// S-PIG-74 (a), (c), (d)
+// S-PIG-74 (b), (c); (a) is the S-PIG-57 (I) arm
 // ---------------------------------------------------------------------------
 
 /// The shared body of a boundary-2 case: the node boots, the Route is
@@ -1403,26 +1536,7 @@ async fn assert_gate_unavailable(
     world.shutdown().await;
 }
 
-/// S-PIG-74 (a) — the sentinel connect completes but no receipt is found:
-/// `ReceiptMissing` at the probe operation.
-///
-/// CONTRACT_SHAPE: bounded-change.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[serial(cgroup)]
-#[ignore = "pending DELIVER gateway-boot-and-shutdown"]
-async fn an_absent_sentinel_receipt_keeps_the_public_port_unbound() {
-    let mut spec = Spec::enabled(161);
-    spec.probe_fault = Some(GatewayConnectDataplaneError::ReceiptMissing);
-    let world = World::boot(spec).await;
-    assert_gate_unavailable(world, connect_path_unavailable, TICK).await;
-    assert!(
-        events().refusal_reasons().iter().any(|reason| reason == "gateway.connect_probe"),
-        "health.startup.refused names gateway.connect_probe: {:?}",
-        events().refusal_reasons()
-    );
-}
-
-/// S-PIG-74 (c) — the Gateway Identity never becomes Current (the CA refuses
+/// S-PIG-74 (b) — the Gateway Identity never becomes Current (the CA refuses
 /// the gateway's SVID): TCP/443 stays unbound with the identity cause, and the
 /// connect-path reasons are not emitted.
 ///
@@ -1432,7 +1546,6 @@ async fn an_absent_sentinel_receipt_keeps_the_public_port_unbound() {
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER gateway-boot-and-shutdown"]
 async fn a_gateway_identity_that_never_becomes_current_keeps_the_public_port_unbound() {
     let mut spec = Spec::enabled(163);
     spec.refuse_svid = true;
@@ -1456,7 +1569,7 @@ async fn a_gateway_identity_that_never_becomes_current_keeps_the_public_port_unb
     );
 }
 
-/// S-PIG-74 (d) — the probe does not complete before its deadline
+/// S-PIG-74 (c) — the probe does not complete before its deadline
 /// (`ProbeTimeout` at the probe operation).
 ///
 /// The stimulus is the typed `ProbeTimeout` result at the existing `probe`
@@ -1468,7 +1581,6 @@ async fn a_gateway_identity_that_never_becomes_current_keeps_the_public_port_unb
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER gateway-boot-and-shutdown"]
 async fn a_probe_that_times_out_keeps_the_public_port_unbound() {
     let mut spec = Spec::enabled(164);
     spec.probe_fault = Some(GatewayConnectDataplaneError::ProbeTimeout);
@@ -1493,7 +1605,6 @@ async fn a_probe_that_times_out_keeps_the_public_port_unbound() {
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER gateway-boot-and-shutdown"]
 async fn a_refused_relay_probe_keeps_the_public_port_unbound_and_the_connect_probe_unrun() {
     let mut spec = Spec::enabled(165);
     spec.relay_lie = Some(SubstrateLie::UlpAbsent);
@@ -1534,7 +1645,6 @@ async fn a_refused_relay_probe_keeps_the_public_port_unbound_and_the_connect_pro
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER gateway-boot-and-shutdown"]
 async fn the_relay_probe_runs_once_per_boot_across_a_route_replacement() {
     let mut spec = Spec::enabled(166);
     spec.spy = true;

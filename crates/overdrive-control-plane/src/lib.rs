@@ -3772,7 +3772,7 @@ async fn boot_server(
         dataplane: dataplane_composer,
         mtls: mtls_adapters,
         guest_dns,
-        gateway: _gateway_adapters,
+        gateway: gateway_adapters,
     } = boot;
     // Boot step 1 for a supplied owner (D-8, "Entry points and the supplied
     // owner"). A composed owner's step 1 is phase 1, which its caller ran over
@@ -3901,15 +3901,14 @@ async fn boot_server(
     let cgroup_attach_path = config.dataplane_cgroup_attach_path.clone().unwrap_or_else(|| {
         std::path::PathBuf::from(overdrive_dataplane::DEFAULT_CGROUP_ATTACH_PATH)
     });
-    let ComposedDataplane { dataplane, host_ipv4, gateway_connect: _gateway_connect } =
-        dataplane_composer
-            .compose(DataplanePlan {
-                config: dataplane_cfg,
-                vip_range: &config.vip_range,
-                pin_dir: &pin_dir,
-                cgroup_attach_path: &cgroup_attach_path,
-            })
-            .await?;
+    let ComposedDataplane { dataplane, host_ipv4, gateway_connect } = dataplane_composer
+        .compose(DataplanePlan {
+            config: dataplane_cfg,
+            vip_range: &config.vip_range,
+            pin_dir: &pin_dir,
+            cgroup_attach_path: &cgroup_attach_path,
+        })
+        .await?;
     // Phase 2.2: production single-mode uses a placeholder node id;
     // Phase 2 introduces real node-bootstrap identity that will replace
     // this. The shim writes this into `LogicalTimestamp.writer` on
@@ -3938,11 +3937,14 @@ async fn boot_server(
     runtime.register(service_lifecycle()).await?;
     // Public-ingress gateway, boot step G0: the dedicated gateway-SVID
     // reconciler is registered only when the gateway is enabled.
-    if config.gateway.is_some() {
-        let (gateway_reconciler, _gateway_evaluation) =
+    let gateway_evaluation: Option<Evaluation> = if config.gateway.is_some() {
+        let (gateway_reconciler, evaluation) =
             gateway_identity_lifecycle::gateway_svid_lifecycle_registration(&node_id);
         runtime.register(gateway_reconciler).await?;
-    }
+        Some(evaluation)
+    } else {
+        None
+    };
     let runtime = Arc::new(runtime);
 
     let allocator = bulk_load_service_vip_allocator(&config.vip_range, &store).await?;
@@ -4051,16 +4053,57 @@ async fn boot_server(
     let identity: Arc<IdentityMgr> = Arc::new(IdentityMgr::new(Some(bundle)));
 
     // Public-ingress gateway, boot step G1: Disabled when `config.gateway` is
-    // `None`; otherwise the one `GatewayIdentitySlot`, its action and lifecycle
-    // handles, `GatewayRouteCommands` and `GatewayStatusReads`. The enabled
-    // composition (steps G1-G4) is DELIVER's.
-    #[allow(
-        clippy::todo,
-        reason = "public-ingress DISTILL scaffold: the enabled gateway composition is DELIVER's"
-    )]
+    // `None`; otherwise the one `GatewayIdentitySlot`, its action handle, the
+    // unbound builder (validates the configuration, opens Route and custody over
+    // the IntentStore, installs the initial manual key, spawns no task) and the
+    // Route-command and status handles taken from it (R-66). The builder stays
+    // in `gateway_pending` until G2; a refusal here owns no task.
+    let mut gateway_pending: Option<(
+        Arc<overdrive_dataplane::mtls::gateway_identity::GatewayIdentitySlot>,
+        overdrive_gateway::application::UnboundGatewayBuilder,
+    )> = None;
     let gateway_composition = match &config.gateway {
         None => GatewayAppStateComposition::disabled(),
-        Some(_) => todo!("SCAFFOLD: enabled gateway composition (boot steps G1-G4)"),
+        Some(gateway_config) => {
+            let slot =
+                Arc::new(overdrive_dataplane::mtls::gateway_identity::GatewayIdentitySlot::new(
+                    node_id.clone(),
+                    ca.trust_bundle()?,
+                ));
+            let vip_view: Arc<dyn overdrive_core::traits::ServiceVipView> =
+                Arc::new(gateway_composition::AllocatorServiceVipView::new(Arc::clone(&allocator)));
+            let unbound = match overdrive_gateway::application::UnboundGatewayBuilder::new(
+                node_id.clone(),
+                gateway_config.clone(),
+                Arc::clone(&intent_store),
+                Arc::clone(&obs),
+                vip_view,
+                Arc::clone(&gateway_adapters.certified_key_codec),
+                Arc::clone(&clock),
+            )
+            .await
+            {
+                Ok(unbound) => unbound,
+                Err(source) => {
+                    tracing::warn!(
+                        name: "health.startup.refused",
+                        reason = "gateway.boot",
+                        error = %source,
+                        "public ingress gateway boot refused before any gateway task started"
+                    );
+                    return Err(error::ControlPlaneError::GatewayBoot(source));
+                }
+            };
+            let composition = GatewayAppStateComposition::enabled(
+                Arc::clone(&slot) as Arc<dyn overdrive_core::gateway_identity::GatewayIdentityView>,
+                GatewayIdentityActionComposition::enabled(Arc::new(slot.action_target())),
+                unbound.route_commands(),
+                unbound.status_reads(),
+                gateway_config.bind(),
+            );
+            gateway_pending = Some((slot, unbound));
+            composition
+        }
     };
 
     // R16 composes the required mTLS worker on every serve boot, after
@@ -4501,6 +4544,23 @@ async fn boot_server(
         (dns_responder_owner, dns_factory, dns_responder_deps)
     };
 
+    // Public-ingress gateway, boot step G2: the builder G1 held becomes the
+    // start builder and the client-mTLS factory builds the exact-peer client
+    // over the identity access and the upstream seal. Both are infallible, and
+    // a builder dropped by any later refusal owns no task.
+    let gateway_start = gateway_pending.map(|(slot, unbound)| {
+        let (builder, seal) = unbound.into_builder();
+        let limits = overdrive_gateway::runtime::GatewayLimits::first_slice();
+        let client_mtls = gateway_adapters.client_mtls.client_mtls(
+            overdrive_gateway::ports::GatewayClientMtlsDeps {
+                identity: slot.client_access(Arc::clone(&clock)),
+                seal,
+                limits: limits.clone(),
+            },
+        );
+        (builder, slot, limits, client_mtls)
+    });
+
     // Spawn the exit-observer subsystem BEFORE the convergence loop so
     // the observer is already draining the driver's `ExitEvent`
     // channel when the first action-shim write happens. The observer
@@ -4712,6 +4772,7 @@ async fn boot_server(
     // `node_list` observation-read handlers; step 03-05 aligned the
     // `cluster_status` handler signature; step 05-03 wires it onto the
     // real route (previously a `stub` placeholder).
+    let gateway_runtime = Arc::clone(&state.runtime);
     let router = Router::new()
         .route("/v1/workloads", post(handlers::submit_workload))
         .route("/v1/workloads/:id", get(handlers::describe_workload))
@@ -4770,6 +4831,35 @@ async fn boot_server(
 
     let server_task = tokio::spawn(async move { server.serve(router.into_make_service()).await });
 
+    // Public-ingress gateway, boot step G4: start the Route, custody,
+    // application, connection and gate tasks. The gate runs the relay and
+    // connect probes, the identity ensure and the actual-frontend probe before
+    // TCP/443 binds; a failing gate keeps 443 unbound and is not fatal here.
+    let gateway = match gateway_start {
+        None => None,
+        Some((builder, slot, limits, client_mtls)) => {
+            let evaluation = gateway_evaluation.unwrap_or_else(|| {
+                unreachable!("G0 registers the gateway reconciler whenever the gateway is enabled")
+            });
+            let lifecycle = Arc::new(
+                gateway_identity_lifecycle::ControlPlaneGatewayIdentityLifecycle::over_runtime(
+                    Arc::new(slot.lifecycle_target()),
+                    gateway_runtime,
+                    evaluation,
+                    Arc::clone(&clock),
+                ),
+            );
+            let dependencies = overdrive_gateway::application::GatewayRuntimeDependencies::new(
+                limits,
+                gateway_connect,
+                client_mtls,
+                lifecycle,
+                Arc::clone(&gateway_adapters.relay),
+            );
+            Some(builder.start(dependencies).await.into_parts())
+        }
+    };
+
     Ok(ServerHandle {
         inner: axum_handle,
         server_task,
@@ -4787,7 +4877,7 @@ async fn boot_server(
         flow_ports: Some(flow_ports),
         beacon_port: None,
         guest_flow_owner,
-        gateway: None,
+        gateway,
     })
 }
 

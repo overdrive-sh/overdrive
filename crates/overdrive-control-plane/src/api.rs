@@ -699,6 +699,162 @@ pub enum CertifiedKeyFailureBody {
     RustlsConfiguration,
 }
 
+impl From<overdrive_core::public_ingress::GatewayApplicationGenerationStatus>
+    for GatewayApplicationGenerationStatusBody
+{
+    fn from(
+        generation: overdrive_core::public_ingress::GatewayApplicationGenerationStatus,
+    ) -> Self {
+        use overdrive_core::dataplane::Proto;
+
+        let key = generation.service_key;
+        let service_protocol = match key.protocol() {
+            Proto::Tcp => "tcp",
+            Proto::Udp => "udp",
+        };
+        Self {
+            application_generation: generation.application_generation.to_string(),
+            route_id: generation.route_id.to_string(),
+            route_generation: generation.route_generation.to_string(),
+            service_vip: key.vip().to_string(),
+            service_port: key.port().get(),
+            service_protocol: service_protocol.to_owned(),
+        }
+    }
+}
+
+impl From<overdrive_core::public_ingress::GatewayApplicationStatusRowV1>
+    for GatewayApplicationStatusBody
+{
+    fn from(row: overdrive_core::public_ingress::GatewayApplicationStatusRowV1) -> Self {
+        use overdrive_core::public_ingress::{
+            GatewayApplicationUnavailableCause as Cause, GatewayConnectPathStatus,
+            GatewayIdentityStatus, GatewayListenerStatus,
+        };
+
+        Self {
+            listener: match row.listener {
+                GatewayListenerStatus::Unbound => GatewayListenerStatusBody::Unbound,
+                GatewayListenerStatus::Bound { address } => {
+                    GatewayListenerStatusBody::Bound { address: address.to_string() }
+                }
+            },
+            staged: row.staged.map(GatewayApplicationGenerationStatusBody::from),
+            current: row.current.map(GatewayApplicationGenerationStatusBody::from),
+            draining: row
+                .draining
+                .into_iter()
+                .map(GatewayApplicationGenerationStatusBody::from)
+                .collect(),
+            unavailable: row.unavailable.map(|cause| match cause {
+                Cause::RouteAbsent => GatewayApplicationUnavailableCauseBody::RouteAbsent,
+                Cause::RouteUnreadable => GatewayApplicationUnavailableCauseBody::RouteUnreadable,
+                Cause::CertifiedKeyAbsent => {
+                    GatewayApplicationUnavailableCauseBody::CertifiedKeyAbsent
+                }
+                Cause::CertifiedKeyUnusable => {
+                    GatewayApplicationUnavailableCauseBody::CertifiedKeyUnusable
+                }
+                Cause::FrontendUnresolved => {
+                    GatewayApplicationUnavailableCauseBody::FrontendUnresolved
+                }
+                Cause::GatewayIdentityUnusable => {
+                    GatewayApplicationUnavailableCauseBody::GatewayIdentityUnusable
+                }
+                Cause::ConnectPathUnavailable => {
+                    GatewayApplicationUnavailableCauseBody::ConnectPathUnavailable
+                }
+                Cause::ListenerBindFailed => {
+                    GatewayApplicationUnavailableCauseBody::ListenerBindFailed
+                }
+                Cause::WatchGap => GatewayApplicationUnavailableCauseBody::WatchGap,
+            }),
+            gateway_identity: match row.gateway_identity {
+                GatewayIdentityStatus::Absent => GatewayIdentityStatusBody::Absent,
+                GatewayIdentityStatus::Unusable => GatewayIdentityStatusBody::Unusable,
+                GatewayIdentityStatus::Current { epoch, spiffe_id, serial, not_after } => {
+                    GatewayIdentityStatusBody::Current {
+                        epoch: epoch.get().get(),
+                        spiffe_id: spiffe_id.to_string(),
+                        serial: serial.to_string(),
+                        not_after,
+                    }
+                }
+            },
+            issue_failures: row.issue_failures,
+            last_issue_failure: row.last_issue_failure.map(SvidIssueFailureBody::from),
+            connect_path: match row.connect_path {
+                GatewayConnectPathStatus::Unavailable => GatewayConnectPathStatusBody::Unavailable,
+                GatewayConnectPathStatus::Ready => GatewayConnectPathStatusBody::Ready,
+            },
+        }
+    }
+}
+
+impl From<overdrive_core::public_ingress::PublicCertifiedKeyStatusRowV1>
+    for PublicCertifiedKeyStatusBody
+{
+    fn from(row: overdrive_core::public_ingress::PublicCertifiedKeyStatusRowV1) -> Self {
+        use overdrive_core::public_ingress::{
+            CertifiedKeyFailure as Failure, CertifiedKeyProvenance,
+            CertifiedKeyUsabilityFailure as Usability, PublicCertifiedKeyStatusState,
+        };
+
+        let state = match row.state {
+            PublicCertifiedKeyStatusState::Absent => PublicCertifiedKeyStateBody::Absent,
+            PublicCertifiedKeyStatusState::Usable {
+                generation,
+                certificate_fingerprint,
+                public_hostname,
+                not_before,
+                not_after,
+                provenance,
+            } => PublicCertifiedKeyStateBody::Usable {
+                generation: generation.to_string(),
+                certificate_fingerprint: certificate_fingerprint.to_string(),
+                hostname: public_hostname.to_string(),
+                not_before,
+                not_after,
+                provenance: match provenance {
+                    CertifiedKeyProvenance::Manual => CertifiedKeyProvenanceBody::Manual,
+                    CertifiedKeyProvenance::Workflow { correlation } => {
+                        CertifiedKeyProvenanceBody::Workflow {
+                            correlation: correlation.to_string(),
+                        }
+                    }
+                },
+            },
+            PublicCertifiedKeyStatusState::Unusable { generation, cause } => {
+                PublicCertifiedKeyStateBody::Unusable {
+                    generation: generation.to_string(),
+                    cause: match cause {
+                        Usability::NotYetValid => CertifiedKeyUsabilityFailureBody::NotYetValid,
+                        Usability::Expired => CertifiedKeyUsabilityFailureBody::Expired,
+                    },
+                }
+            }
+        };
+        Self {
+            id: row.certified_key_id.to_string(),
+            state,
+            last_install_failure: row.last_install_failure.map(|failure| match failure {
+                Failure::SourceOpen => CertifiedKeyFailureBody::SourceOpen,
+                Failure::SourceMetadata => CertifiedKeyFailureBody::SourceMetadata,
+                Failure::SourceOwnership => CertifiedKeyFailureBody::SourceOwnership,
+                Failure::SourcePermissions => CertifiedKeyFailureBody::SourcePermissions,
+                Failure::SourceBounds => CertifiedKeyFailureBody::SourceBounds,
+                Failure::PemShape => CertifiedKeyFailureBody::PemShape,
+                Failure::CertificateProfile => CertifiedKeyFailureBody::CertificateProfile,
+                Failure::HostnameMismatch => CertifiedKeyFailureBody::HostnameMismatch,
+                Failure::KeyMismatch => CertifiedKeyFailureBody::KeyMismatch,
+                Failure::Protection => CertifiedKeyFailureBody::Protection,
+                Failure::Persistence => CertifiedKeyFailureBody::Persistence,
+                Failure::RustlsConfiguration => CertifiedKeyFailureBody::RustlsConfiguration,
+            }),
+        }
+    }
+}
+
 /// Root `OpenAPI` document per ADR-0009.
 ///
 /// Every ADR-0008 handler path is listed in `paths(...)` and every

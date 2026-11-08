@@ -39,7 +39,7 @@
 //! | 52 | mismatched replacement (S-PIG-46) |
 //! | 53 | expired replacement (S-PIG-46) |
 //! | 54 | expiry and reopen (S-PIG-46) |
-//! | 55 | dataplane error crosses its owner operation (S-PIG-50) |
+//! | 55 | dataplane error crosses its owner operation (S-PIG-50); ordinals from 100: request-path errors are not gate inputs |
 //! | 56 | dataplane error collapses in status (S-PIG-50) |
 //! | 57 | identity error crosses at the owner (S-PIG-51) |
 //! | 58 | identity error collapses in status (S-PIG-51) |
@@ -107,9 +107,8 @@ use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::intent_store::{IntentStore, IntentSubscriptionEvent, TxnOp};
 use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_gateway::application::{
-    GatewayBootError, GatewayCleanupFailure, GatewayConnectSweepFailure, GatewayHandle,
-    GatewayRouteCommands, GatewayRuntimeDependencies, GatewayShutdownReport, GatewayStatusReads,
-    UnboundGatewayBuilder,
+    GatewayBootError, GatewayConnectSweepFailure, GatewayHandle, GatewayRouteCommands,
+    GatewayRuntimeDependencies, GatewayShutdownReport, GatewayStatusReads, UnboundGatewayBuilder,
 };
 use overdrive_gateway::certified_key::PublicCertifiedKeyError;
 use overdrive_gateway::ports::{
@@ -1125,6 +1124,8 @@ impl World {
             listener
         });
         let builder = unbound(site, plan, &intent, &observations, &clock).await?;
+        let routes = builder.route_commands();
+        let status = builder.status_reads();
         let (builder, _seal) = builder.into_builder();
         let dependencies = GatewayRuntimeDependencies::new(
             GatewayLimits::first_slice(),
@@ -1133,7 +1134,7 @@ impl World {
             fx.identity.clone(),
             fx.relay.clone(),
         );
-        let (handle, routes, status) = builder.start(dependencies).await.into_parts();
+        let handle = builder.start(dependencies).await.into_parts();
         Ok(Self {
             intent,
             clock,
@@ -1601,7 +1602,6 @@ async fn operator_status_carries_no_manual_path_or_credential_material() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER gateway-boot-and-shutdown"]
 async fn identity_slot_clears_only_after_the_admitted_connection_user_joined() {
     let site = Site::new();
     let fx = Fixtures::new(FixtureSpec { park_accept: true, ..FixtureSpec::default() });
@@ -2070,20 +2070,32 @@ fn dataplane_cases() -> Vec<(DataplaneOp, GatewayConnectDataplaneError)> {
     cases
 }
 
-/// Operations the actual-frontend gate drives: they fail the gate. The gate
-/// resolves no backend identity (R-65), so `selected_backend_identity` is not
-/// one of them: it belongs to the request path, and its absence is not a bind
-/// condition.
+/// The one operation the activation gate drives on the connect dataplane: the
+/// sentinel `probe`. Its errors fail the gate. The gate connects to nothing of
+/// the Route's Service (R-65): `open_upstream`, `take_receipt`,
+/// `selected_backend_identity` and the per-intent `cleanup` belong to the
+/// request path, and an error there fails that request, never the bind.
 const fn is_gate_operation(op: DataplaneOp) -> bool {
-    matches!(op, DataplaneOp::Probe | DataplaneOp::OpenUpstream | DataplaneOp::TakeReceipt)
+    matches!(op, DataplaneOp::Probe)
+}
+
+/// The operations the gate or the shutdown sweep drives with no request in
+/// flight: the sentinel `probe`, then the three sweep and count operations.
+const fn is_gate_or_shutdown_operation(op: DataplaneOp) -> bool {
+    matches!(
+        op,
+        DataplaneOp::Probe
+            | DataplaneOp::CleanupAll
+            | DataplaneOp::LiveIntentCount
+            | DataplaneOp::LiveReceipts
+    )
 }
 
 /// The cases whose faulting operation the gate or the shutdown sweep drives.
+/// The request-path operations are covered at the connector (S-PIG-28..30, 37,
+/// 53) and by `request_path_dataplane_errors_are_not_gate_inputs` below.
 fn gate_driven_cases() -> Vec<(DataplaneOp, GatewayConnectDataplaneError)> {
-    dataplane_cases()
-        .into_iter()
-        .filter(|(op, _)| *op != DataplaneOp::SelectedBackendIdentity)
-        .collect()
+    dataplane_cases().into_iter().filter(|(op, _)| is_gate_or_shutdown_operation(*op)).collect()
 }
 
 async fn start_dataplane_fault(
@@ -2104,35 +2116,31 @@ async fn start_dataplane_fault(
     (site, world)
 }
 
-/// Wait until the gate settled: promoted, failed with a cause, or (for the
-/// post-gate operations) the faulting operation has been driven.
-async fn settle_gate(world: &World, op: DataplaneOp) {
-    if op == DataplaneOp::Cleanup {
-        let dataplane = Arc::clone(&world.fx.dataplane);
-        wait_for("the owner to drive cleanup", || dataplane.calls().contains(&op).then_some(()))
-            .await;
-    } else {
-        wait_status(&world.status, "the gate to settle", |row| {
-            row.current.is_some() || row.unavailable.is_some()
-        })
-        .await;
-    }
+/// Wait until the gate settled: promoted, or failed with a cause.
+async fn settle_gate(world: &World) {
+    wait_status(&world.status, "the gate to settle", |row| {
+        row.current.is_some() || row.unavailable.is_some()
+    })
+    .await;
 }
 
-/// S-PIG-50: each `GatewayConnectDataplaneError` variant is injected at its real
-/// owner operation (probe, open_upstream, take_receipt, cleanup,
-/// cleanup_all_gateway_intents, live counts) and the owner receives that exact
-/// typed error. The gate drives no `selected_backend_identity` (R-65); the
-/// variant raised there is covered by its own test below. Gate operations leave no
-/// residue and a clean shutdown; sweep operations surface typed in the shutdown
-/// report.
+/// S-PIG-50: each `GatewayConnectDataplaneError` variant the gate or the
+/// shutdown sweep can meet is injected at its real owner operation (the
+/// sentinel `probe`, `cleanup_all_gateway_intents`, the live counts) and the
+/// owner receives that exact typed error. The gate drives no `open_upstream`,
+/// `take_receipt`, `selected_backend_identity` or per-intent `cleanup` (R-65):
+/// the variants owned by those request-path operations cross at the connector
+/// (S-PIG-28..30, 37, 53) and are shown not to be gate inputs by
+/// `request_path_dataplane_errors_are_not_gate_inputs` below. A gate probe error
+/// leaves no residue and a clean shutdown; sweep operations surface typed in
+/// the shutdown report.
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 async fn every_dataplane_error_crosses_its_real_owner_operation() {
     for (index, (op, error)) in gate_driven_cases().into_iter().enumerate() {
         let (_site, world) = start_dataplane_fault(DATAPLANE_CROSSES, index, op, &error).await;
-        settle_gate(&world, op).await;
+        settle_gate(&world).await;
         let dataplane = Arc::clone(&world.fx.dataplane);
         let report = world.stop().await;
 
@@ -2166,14 +2174,6 @@ async fn every_dataplane_error_crosses_its_real_owner_operation() {
                 assert!(residual.sweep_failures.is_empty(), "{error:?}: {report:?}");
                 assert!(!report.is_clean(), "{error:?}: an unreadable snapshot is not clean");
             }
-            DataplaneOp::Cleanup => {
-                assert!(
-                    report.cleanup_failures.iter().any(
-                        |failure| matches!(failure, GatewayCleanupFailure::ConnectIntent { count } if *count >= 1)
-                    ),
-                    "{error:?}: a failed cleanup stays retained and typed: {report:?}",
-                );
-            }
             _ => {
                 assert!(report.is_clean(), "{error:?} at {op:?} left residue: {report:?}");
                 assert_eq!(dataplane.residue(), (0, 0), "{error:?}: live counts return to 0");
@@ -2182,7 +2182,7 @@ async fn every_dataplane_error_crosses_its_real_owner_operation() {
     }
 }
 
-/// S-PIG-50: the owner collapses each gate-time variant to the closed redacted
+/// S-PIG-50: the owner collapses each gate-time (probe) variant to the closed redacted
 /// `ConnectPathUnavailable` (connect path Unavailable, nothing Current, listener
 /// unbound), and no variant text, `BackendId`, socket cookie or SPIFFE ID leaks
 /// into the status; the post-gate sweep variants leave the status redacted too.
@@ -2192,7 +2192,7 @@ async fn every_dataplane_error_crosses_its_real_owner_operation() {
 async fn every_dataplane_error_collapses_to_the_redacted_connect_path_cause() {
     for (index, (op, error)) in gate_driven_cases().into_iter().enumerate() {
         let (site, world) = start_dataplane_fault(DATAPLANE_COLLAPSES, index, op, &error).await;
-        settle_gate(&world, op).await;
+        settle_gate(&world).await;
         let status = world.status.clone();
         let dataplane = Arc::clone(&world.fx.dataplane);
 
@@ -2252,10 +2252,9 @@ async fn every_dataplane_error_collapses_to_the_redacted_connect_path_cause() {
 /// S-PIG-50 / R-65: a selected backend whose applied identity is missing
 /// (`BackendIdentityMissing` at `selected_backend_identity`) does not stop the
 /// gate. Route activation does not depend on backend health or authentication:
-/// the actual-frontend probe validates the `Selected` receipt, resolves no
-/// identity and performs no mTLS, so the Route is promoted, the listener is
-/// bound, no unavailable cause is reported and the identity lookup is never
-/// driven by the gate.
+/// the gate resolves no identity and performs no mTLS, so the Route is
+/// promoted, the listener is bound, no unavailable cause is reported and the
+/// identity lookup is never driven by the gate.
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
@@ -2270,7 +2269,7 @@ async fn a_selected_backend_with_no_applied_identity_does_not_stop_the_gate() {
         &error,
     )
     .await;
-    settle_gate(&world, DataplaneOp::SelectedBackendIdentity).await;
+    settle_gate(&world).await;
     let row = world
         .status
         .application_status()
@@ -2290,6 +2289,52 @@ async fn a_selected_backend_with_no_applied_identity_does_not_stop_the_gate() {
     let report = world.stop().await;
     assert!(report.is_clean(), "{report:?}");
     assert_eq!(dataplane.residue(), (0, 0), "the probe leaves no intent or receipt");
+}
+
+/// S-PIG-50 / R-65: an error at `open_upstream` or `take_receipt` is a
+/// request-path failure, never a gate input. The activation gate makes no
+/// connection to the Route's Service: with the fault armed at either operation
+/// the Route is still promoted, the listener is bound, no unavailable cause is
+/// reported, the gate drove neither operation, no intent was opened and the
+/// armed error was never delivered to the owner.
+///
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test]
+async fn request_path_dataplane_errors_are_not_gate_inputs() {
+    let request_path = [DataplaneOp::OpenUpstream, DataplaneOp::TakeReceipt];
+    let cases: Vec<_> =
+        dataplane_cases().into_iter().filter(|(op, _)| request_path.contains(op)).collect();
+    assert!(!cases.is_empty(), "the request-path error set is not empty");
+    for (index, (op, error)) in cases.into_iter().enumerate() {
+        // Ordinals from 100 keep this test's addresses disjoint from the
+        // crossing test's, which runs in a parallel process on the same octet.
+        let (_site, world) =
+            start_dataplane_fault(DATAPLANE_CROSSES, 100 + index, op, &error).await;
+        settle_gate(&world).await;
+        let row = world
+            .status
+            .application_status()
+            .await
+            .expect("status read")
+            .expect("status row for the Route");
+        assert!(row.current.is_some(), "{error:?} at {op:?}: the Route is promoted: {row:?}");
+        assert!(row.unavailable.is_none(), "{error:?} at {op:?}: no unavailable cause: {row:?}");
+        assert!(
+            matches!(row.listener, GatewayListenerStatus::Bound { .. }),
+            "{error:?} at {op:?}: {row:?}",
+        );
+        let dataplane = Arc::clone(&world.fx.dataplane);
+        assert!(
+            !dataplane.calls().iter().any(|call| request_path.contains(call)),
+            "{error:?}: the gate drove a request-path operation: {:?}",
+            dataplane.calls(),
+        );
+        assert!(dataplane.opened().is_empty(), "{error:?}: the gate opened an upstream");
+        assert!(dataplane.injected().is_empty(), "{error:?}: the gate received the armed error");
+        let report = world.stop().await;
+        assert!(report.is_clean(), "{error:?}: {report:?}");
+        assert_eq!(dataplane.residue(), (0, 0), "{error:?}: no intent or receipt");
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2983,7 +3028,6 @@ async fn a_failing_status_write_loses_nothing_the_next_write_carries_the_full_co
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER consuming-port-unavailable-outcome"]
 async fn custody_replay_across_a_restart_keeps_the_generation_and_the_application_identity() {
     let site = Site::new();
     let plan = Plan::with_service(CUSTODY_REPLAY);
@@ -3024,7 +3068,6 @@ async fn custody_replay_across_a_restart_keeps_the_generation_and_the_applicatio
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER consuming-port-unavailable-outcome"]
 async fn applying_the_identical_route_twice_has_an_empty_second_delta() {
     let site = Site::new();
     let world = World::start(&site, Plan::with_service(ROUTE_REAPPLY), Fixtures::healthy())

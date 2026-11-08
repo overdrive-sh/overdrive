@@ -14,12 +14,14 @@
 //! # Held-gate capability (DG-9, R-65)
 //!
 //! Route activation does not depend on backend health or backend
-//! authentication (R-65): the per-candidate gate the owner awaits ends at the
-//! connector's actual-frontend probe, which runs `open_upstream`, a real
-//! `connect(2)` to the Service frontend and `take_receipt`, and performs no
-//! `selected_backend_identity` and no `GatewayClientMtls::authenticate`. The
-//! gate therefore parks at an awaited operation it owns, never at
-//! `authenticate`. A gate parks at exactly one point ([`ParkPoint`]):
+//! authentication (R-65): the per-candidate gate the owner awaits checks only
+//! gateway-local facts (custody, candidate validity, the relay probe, the
+//! connect dataplane's sentinel `probe` and the Gateway Identity). It makes no
+//! connection to the Route's Service and calls no `open_upstream`,
+//! `take_receipt`, `selected_backend_identity` or
+//! `GatewayClientMtls::authenticate`. The gate therefore parks at an awaited
+//! operation it owns, never at `authenticate`. A gate parks at exactly one
+//! point ([`ParkPoint`]):
 //!
 //! - the first gate of a boot parks inside `GatewayConnectDataplane::probe`,
 //!   the once-per-boot proof the owner latches. That wait is not cancellable:
@@ -29,7 +31,7 @@
 //!   the one await every staged gate performs. The owner cancels that wait
 //!   when it supersedes the gate, so only a live staged gate stays parked.
 //!
-//! A gate released usable at the connect probe passes its own identity wait at
+//! A gate released usable at the sentinel probe passes its own identity wait at
 //! once (the double recognises the gate's task), so one gate is one entry and
 //! one verdict:
 //!
@@ -37,7 +39,7 @@
 //! 2. one entry is released by the [`HeldGate`] it was given when it parked,
 //!    never by arrival position ([`HeldProbes::release`]);
 //! 3. a release carries a typed outcome: [`ProbeOutcome::Usable`] lets the gate
-//!    go on to the connector probe, [`ProbeOutcome::Unusable`] returns the
+//!    go on to its next gateway-local check, [`ProbeOutcome::Unusable`] returns the
 //!    port's typed unavailable error (`GatewayConnectDataplaneError::Unavailable`
 //!    at the connect probe, `GatewayIdentityLifecycleError::ReconcilerUnavailable`
 //!    at the identity wait), which the gate reports as a gateway-local failure;
@@ -51,15 +53,16 @@
 //! [`ReleaseOutcome::Absent`], a no-op.
 //!
 //! The client double answers `authenticate` with the port's typed unavailable
-//! error: the gate does not reach it under R-65.
+//! error: the gate does not reach it under R-65, and no request is driven on
+//! these paths.
 //!
 //! # Bind-address table (R-6)
 //!
 //! Every composition that reaches promotion binds its own `127.0.0.0/8`
 //! address on TCP/443: `127.<octet>.<hi>.<lo>` for ordinal `n` with
-//! `hi = n / 250`, `lo = n % 250 + 1`; the Service frontend (with a listening
-//! socket on port 8080, so the connector's real `connect(2)` completes) is
-//! `127.<octet>.<200 + hi>.<lo>`. The integration binary owns second octets
+//! `hi = n / 250`, `lo = n % 250 + 1`; the Service frontend address (the
+//! Service's own address, with a listening socket on port 8080; the gate makes
+//! no connection to it, R-65) is `127.<octet>.<200 + hi>.<lo>`. The integration binary owns second octets
 //! 41..=62.
 //!
 //! | octet | owner |
@@ -142,8 +145,8 @@ pub(super) const GRACE: Duration = Duration::from_secs(5);
 /// The typed outcome a release delivers to a parked gate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ProbeOutcome {
-    /// `ensure_current` returns the current facts: the gate goes on to the
-    /// connector probe.
+    /// `ensure_current` returns the current facts: the gate goes on to its
+    /// next gateway-local check.
     Usable,
     /// `ensure_current` returns the typed `ReconcilerUnavailable`: the gate
     /// reports `Identity(..)`, a gateway-local failure.
@@ -311,8 +314,9 @@ struct ConnectState {
 }
 
 /// Answers every `open_upstream` with a fresh unconnected socket and a freshly
-/// minted nonzero cookie; `take_receipt` answers `Selected`: the gate's probe
-/// accepts it without resolving an identity or authenticating the peer (R-65).
+/// minted nonzero cookie; `take_receipt` answers `Selected`. The gate calls
+/// neither (R-65): they exist because the port requires them, for a request
+/// path these compositions do not drive.
 /// The first `probe` call of the boot parks (the owner latches the proof, so no
 /// later candidate calls it again) until its entry is released.
 pub(super) struct HeldConnectDouble {
@@ -769,6 +773,8 @@ impl Composition {
         )
         .await
         .expect("gateway builder");
+        let routes = unbound.route_commands();
+        let status = unbound.status_reads();
         let (builder, _seal) = unbound.into_builder();
 
         let limits = GatewayLimits::first_slice();
@@ -783,8 +789,7 @@ impl Composition {
             HeldIdentity::new(Arc::clone(&probes)),
             Arc::new(UnavailableRelay),
         );
-        let (handle, routes, status) =
-            builder.start_with(dependencies, Arc::clone(&admission)).await.into_parts();
+        let handle = builder.start_with(dependencies, Arc::clone(&admission)).await.into_parts();
         Self {
             routes,
             status,

@@ -811,6 +811,8 @@ impl World {
         )
         .await
         .expect("gateway builder");
+        let routes = builder.route_commands();
+        let status = builder.status_reads();
         let (builder, seal) = builder.into_builder();
 
         let relay = Arc::new(SimGatewayRelay::new(clock_port));
@@ -823,7 +825,7 @@ impl World {
             CurrentIdentity::new(),
             wrap(Arc::clone(&relay)),
         );
-        let (handle, routes, status) = builder.start(dependencies).await.into_parts();
+        let handle = builder.start(dependencies).await.into_parts();
         routes.routes().apply(route(spec.route_path)).await.expect("declare the Route");
         wait_promoted(&status).await;
         mtls.start_serving();
@@ -1022,6 +1024,8 @@ async fn start_behind_substrate(
     )
     .await
     .expect("gateway builder");
+    let routes = builder.route_commands();
+    let status = builder.status_reads();
     let (builder, seal) = builder.into_builder();
     let relay = Arc::new(SimGatewayRelay::new(clock_port));
     relay.present_substrate(lie);
@@ -1032,7 +1036,7 @@ async fn start_behind_substrate(
         CurrentIdentity::new(),
         relay as Arc<dyn GatewayRelay>,
     );
-    let (handle, routes, status) = builder.start(dependencies).await.into_parts();
+    let handle = builder.start(dependencies).await.into_parts();
     routes.routes().apply(route("/")).await.expect("declare the Route");
     (clock, status, handle, SocketAddrV4::new(slot.bind(ordinal), 443), site, frontend)
 }

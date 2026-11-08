@@ -229,7 +229,6 @@ fn registered_socket_is_selected_and_its_dial_reaches_the_backend_from_the_loopb
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER consuming-port-unavailable-outcome"]
 fn a_stale_service_entry_with_a_dead_backend_selects_it_and_the_dial_fails() {
     let rig = HostRig::new("h56");
     let rt = runtime();
@@ -260,7 +259,6 @@ fn a_stale_service_entry_with_a_dead_backend_selects_it_and_the_dial_fails() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER gateway-boot-and-shutdown"]
 fn the_sentinel_probe_passes_on_the_real_hook_and_an_elapsed_deadline_times_out() {
     let rig = HostRig::new("h57");
     let rt = runtime();

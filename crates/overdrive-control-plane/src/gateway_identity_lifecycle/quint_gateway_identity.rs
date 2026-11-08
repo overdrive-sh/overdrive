@@ -142,8 +142,6 @@ struct Owners {
     lifecycle: ControlPlaneGatewayIdentityLifecycle,
     /// The broker the control submits its retained evaluation to.
     broker: Arc<Mutex<EvaluationBroker>>,
-    /// The retained evaluation (reconciler name and `node/<id>` target).
-    evaluation: Evaluation,
 }
 
 struct IdentityConfDriver {
@@ -206,10 +204,10 @@ impl IdentityConfDriver {
         let lifecycle = ControlPlaneGatewayIdentityLifecycle::new(
             Arc::new(slot.lifecycle_target()),
             Arc::clone(&broker),
-            evaluation.clone(),
+            evaluation,
             Arc::clone(clock) as Arc<dyn Clock>,
         );
-        Owners { slot, lifecycle, broker, evaluation }
+        Owners { slot, lifecycle, broker }
     }
 
     fn init(&mut self) {

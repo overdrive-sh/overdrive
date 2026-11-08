@@ -1461,12 +1461,11 @@ pub async fn node_list(
 // ---------------------------------------------------------------------------
 // Public-ingress gateway handlers
 //
-// SCAFFOLD: true. The three paths, their request/response shapes and their
-// `AppState` accessors are the DESIGN-pinned surface. Behaviour is DELIVER's:
 // POST and DELETE check `state.gateway.routes()` first and answer the typed
 // `ControlPlaneError::GatewayDisabled` before any parse, owner or store access;
-// `GET /v1/gateway/status` reads only through the two redacted `GatewayStatusReads`
-// point reads. Every body fails with SCAFFOLD text until then.
+// `GET /v1/gateway/status` reads only through the two redacted
+// `GatewayStatusReads` point reads, and a disabled node answers the fixed body
+// without a read (R-47).
 // ---------------------------------------------------------------------------
 
 /// `POST /v1/routes` — declare, replace or re-apply the one public Route.
@@ -1486,17 +1485,43 @@ pub async fn node_list(
     ),
     tag = "gateway",
 )]
-#[allow(
-    clippy::todo,
-    clippy::unused_async,
-    clippy::needless_pass_by_value,
-    reason = "public-ingress DISTILL scaffold: the handler body is DELIVER's"
-)]
 pub async fn submit_route(
-    State(_state): State<AppState>,
-    _body: Bytes,
+    State(state): State<AppState>,
+    body: Bytes,
 ) -> Result<(axum::http::StatusCode, Json<api::SubmitRouteResponse>), ControlPlaneError> {
-    todo!("SCAFFOLD: POST /v1/routes")
+    use overdrive_core::public_ingress::{PublicRouteInput, Route, RouteApplyOutcome};
+
+    let commands = state.gateway.routes().ok_or(ControlPlaneError::GatewayDisabled)?;
+    let input: PublicRouteInput = serde_json::from_slice(&body).map_err(|error| {
+        ControlPlaneError::Validation { message: error.to_string(), field: None }
+    })?;
+    let route = Route::from_submit(input).map_err(|error| ControlPlaneError::Validation {
+        message: error.to_string(),
+        field: None,
+    })?;
+    let route_id = route.route_id().to_string();
+    let route_generation = route.route_generation().to_string();
+    let outcome = commands.routes().apply(route).await.map_err(route_set_error)?;
+    let status = match outcome {
+        RouteApplyOutcome::Declared => axum::http::StatusCode::CREATED,
+        RouteApplyOutcome::Replaced | RouteApplyOutcome::Unchanged => axum::http::StatusCode::OK,
+    };
+    Ok((status, Json(api::SubmitRouteResponse { route_id, route_generation, outcome })))
+}
+
+/// Map a Route-set command failure: a Route conflict is 409, a store or owner
+/// fault is the 500 class.
+fn route_set_error(error: overdrive_gateway::route_set::PublicRouteSetError) -> ControlPlaneError {
+    use overdrive_gateway::route_set::PublicRouteSetError;
+
+    match error {
+        PublicRouteSetError::OccupiedByDifferentRoute { .. }
+        | PublicRouteSetError::WithdrawIdMismatch { .. } => {
+            ControlPlaneError::Conflict { message: error.to_string() }
+        }
+        PublicRouteSetError::Intent(source) => ControlPlaneError::Intent(source),
+        other => ControlPlaneError::internal("public Route set", other),
+    }
 }
 
 /// `DELETE /v1/routes/{id}` — withdraw the same-ID Route; an already-empty set
@@ -1515,17 +1540,20 @@ pub async fn submit_route(
     ),
     tag = "gateway",
 )]
-#[allow(
-    clippy::todo,
-    clippy::unused_async,
-    clippy::needless_pass_by_value,
-    reason = "public-ingress DISTILL scaffold: the handler body is DELIVER's"
-)]
 pub async fn withdraw_route(
-    State(_state): State<AppState>,
-    Path(_route_id): Path<String>,
+    State(state): State<AppState>,
+    Path(route_id): Path<String>,
 ) -> Result<Json<api::WithdrawRouteResponse>, ControlPlaneError> {
-    todo!("SCAFFOLD: DELETE /v1/routes/{{id}}")
+    use overdrive_core::public_ingress::RouteId;
+
+    let commands = state.gateway.routes().ok_or(ControlPlaneError::GatewayDisabled)?;
+    let id = RouteId::new(&route_id).map_err(|error| ControlPlaneError::Validation {
+        message: error.to_string(),
+        field: Some("id".to_owned()),
+    })?;
+    let canonical_id = id.to_string();
+    let outcome = commands.routes().withdraw(id).await.map_err(route_set_error)?;
+    Ok(Json(api::WithdrawRouteResponse { route_id: canonical_id, outcome }))
 }
 
 /// `GET /v1/gateway/status` — enabled flag, configured bind, listener state and
@@ -1539,14 +1567,36 @@ pub async fn withdraw_route(
     ),
     tag = "gateway",
 )]
-#[allow(
-    clippy::todo,
-    clippy::unused_async,
-    clippy::needless_pass_by_value,
-    reason = "public-ingress DISTILL scaffold: the handler body is DELIVER's"
-)]
 pub async fn gateway_status(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
 ) -> Result<Json<api::GatewayStatusResponse>, ControlPlaneError> {
-    todo!("SCAFFOLD: GET /v1/gateway/status")
+    use overdrive_gateway::application::GatewayStatusReadError;
+
+    let (Some(reads), Some(configured_address)) =
+        (state.gateway.status(), state.gateway.configured_address())
+    else {
+        return Ok(Json(api::GatewayStatusResponse {
+            enabled: false,
+            configured_address: None,
+            listener_bound: false,
+            application: None,
+            certified_key: None,
+        }));
+    };
+    let to_error = |error: GatewayStatusReadError| match error {
+        GatewayStatusReadError::Application(source)
+        | GatewayStatusReadError::CertifiedKey(source) => ControlPlaneError::Observation(source),
+    };
+    let application = reads.application_status().await.map_err(to_error)?;
+    let certified_key = reads.certified_key_status().await.map_err(to_error)?;
+    let listener_bound = application.as_ref().is_some_and(|row| {
+        matches!(row.listener, overdrive_core::public_ingress::GatewayListenerStatus::Bound { .. })
+    });
+    Ok(Json(api::GatewayStatusResponse {
+        enabled: true,
+        configured_address: Some(configured_address),
+        listener_bound,
+        application: application.map(api::GatewayApplicationStatusBody::from),
+        certified_key: certified_key.map(api::PublicCertifiedKeyStatusBody::from),
+    }))
 }

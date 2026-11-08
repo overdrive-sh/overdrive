@@ -116,14 +116,21 @@ async fn native_metal_kvm_public_ingress_gateway_streams_a_workload_response_ove
     let world = GatewayWorld::serving(&trace, 100, GuestKind::Example).await;
     let address = world.gateway_address();
 
-    // The relay probe and the connect probe ran before the bind: when the
-    // listener is first observed bound, the probe occurrence is already
-    // recorded and no gateway refusal was emitted.
+    // The gate is gateway-local (R-65) and ran in order before the bind: when
+    // the listener is first observed bound, the relay probe, the sentinel probe
+    // and the Gateway Identity wait have passed (identity Current, connect path
+    // Ready, no unavailable cause), no gateway refusal was emitted, and the
+    // gate made no connection to the Route's Service (no receipt occurrence).
     world.wait_listener_bound(Duration::from_secs(30)).await;
     let before_bind = trace.snapshot();
+    let bound = world.gateway_status().await;
+    assert_eq!(bound["listener_bound"], true, "the listener is bound: {bound}");
+    assert_eq!(bound["application"]["gateway_identity"]["state"], "current", "{bound}");
+    assert_eq!(bound["application"]["connect_path"], "ready", "{bound}");
+    assert!(bound["application"]["unavailable"].is_null(), "no unavailable cause: {bound}");
     assert!(
-        !receipt_occurrences(&before_bind, "probe").is_empty(),
-        "the connect-probe occurrence precedes the first observed bind"
+        receipt_occurrences(&before_bind).is_empty(),
+        "the gate made no connection to the Service before the first request"
     );
     assert!(
         startup_refusal_reasons(&before_bind).iter().all(|reason| !reason.starts_with("gateway.")),
@@ -171,7 +178,7 @@ async fn native_metal_kvm_public_ingress_gateway_streams_a_workload_response_ove
     // And: the receipt occurrence names a Selected backend whose applied
     // identity is the api allocation.
     let events = trace.since(mark);
-    let occurrences = receipt_occurrences(&events, "request");
+    let occurrences = receipt_occurrences(&events);
     assert_eq!(occurrences.len(), 1, "exactly one receipt occurrence for the request");
     let receipt = occurrences[0];
     assert_eq!(receipt.fields.get("receipt_outcome").map(String::as_str), Some("selected"));
@@ -325,9 +332,9 @@ async fn native_metal_kvm_public_ingress_gateway_never_succeeds_through_a_stoppe
 ///
 /// Given the production composition serving one request
 /// When it shuts down gracefully with the 5 s drain
-/// Then the gateway reconciler was registered, the connect probe preceded the
-///      bind, status shows identity Current and the connect path Ready, the
-///      stage `gateway` begins and completes before `mtls_worker_owner` begins,
+/// Then the gateway reconciler was registered, the gate's probes passed before
+///      the bind (the gate made no connection to the Service), status shows
+///      identity Current and the connect path Ready, the stage `gateway` begins and completes before `mtls_worker_owner` begins,
 ///      exactly one drain is begun with a 5 s deadline, and the shutdown fits it.
 ///
 /// CONTRACT_SHAPE: bounded-change.
@@ -361,8 +368,8 @@ async fn native_metal_kvm_public_ingress_gateway_runs_its_stages_in_order_and_sh
     assert_eq!(status["application"]["gateway_identity"]["state"], "current");
     assert_eq!(status["application"]["connect_path"], "ready");
     assert!(
-        !receipt_occurrences(&trace.snapshot(), "probe").is_empty(),
-        "the connect probe ran before the bind"
+        receipt_occurrences(&trace.snapshot()).is_empty(),
+        "the gate made no connection to the Service before the first request"
     );
     assert!(startup_refusal_reasons(&trace.snapshot()).is_empty(), "no gate refused");
 

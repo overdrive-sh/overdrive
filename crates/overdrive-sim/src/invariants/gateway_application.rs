@@ -673,6 +673,8 @@ async fn compose(
     )
     .await
     .map_err(|error| format!("gateway builder: {error}"))?;
+    let routes = builder.route_commands();
+    let status = builder.status_reads();
     let (builder, seal) = builder.into_builder();
     let client = SimGatewayClientMtls::new(seal, ports.relay.clone(), clock_port.clone());
     client.set_peer(ports.backend_identity.clone());
@@ -697,7 +699,7 @@ async fn compose(
         Arc::new(lifecycle),
         ports.relay.clone(),
     );
-    Ok(builder.start(dependencies).await.into_parts())
+    Ok((builder.start(dependencies).await.into_parts(), routes, status))
 }
 
 fn write_private(path: &std::path::Path, contents: &str, mode: u32) -> Result<(), String> {

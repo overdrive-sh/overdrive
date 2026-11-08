@@ -13,11 +13,15 @@
 //! and 10, "Re-pinned composition signatures"). The enabled constructor has no
 //! production caller until the boot composition (steps G1-G4) lands.
 
+use std::net::SocketAddrV4;
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use overdrive_core::gateway_identity::{
     GatewayIdentityDesired, GatewayIdentityEpoch, GatewayIdentityFacts, GatewayIdentityView,
 };
+use overdrive_core::id::{ContentHash, ServiceVip};
+use overdrive_core::traits::service_vip_view::ServiceVipView;
 use overdrive_gateway::application::{GatewayRouteCommands, GatewayStatusReads};
 use overdrive_gateway::ports::GatewayIdentityActionTarget;
 
@@ -72,6 +76,7 @@ pub struct GatewayAppStateComposition {
     identity_actions: GatewayIdentityActionComposition,
     routes: Option<GatewayRouteCommands>,
     status: Option<GatewayStatusReads>,
+    configured_address: Option<SocketAddrV4>,
 }
 
 impl GatewayAppStateComposition {
@@ -84,18 +89,30 @@ impl GatewayAppStateComposition {
             identity_actions: GatewayIdentityActionComposition::disabled(),
             routes: None,
             status: None,
+            configured_address: None,
         }
     }
 
     /// The enabled composition; constructed by the boot composition only.
-    #[allow(dead_code, reason = "constructed by the enabled boot composition (steps G1-G4)")]
     pub(crate) fn enabled(
         identity_view: Arc<dyn GatewayIdentityView>,
         identity_actions: GatewayIdentityActionComposition,
         routes: GatewayRouteCommands,
         status: GatewayStatusReads,
+        configured_address: SocketAddrV4,
     ) -> Self {
-        Self { identity_view, identity_actions, routes: Some(routes), status: Some(status) }
+        Self {
+            identity_view,
+            identity_actions,
+            routes: Some(routes),
+            status: Some(status),
+            configured_address: Some(configured_address),
+        }
+    }
+
+    /// The configured public bind address; `None` when the gateway is disabled.
+    pub(crate) const fn configured_address(&self) -> Option<SocketAddrV4> {
+        self.configured_address
     }
 
     /// The gateway-identity read port the hydration boundary lends out.
@@ -148,5 +165,31 @@ impl GatewayIdentityView for DisabledGatewayIdentityRead {
 
     fn current(&self) -> Option<GatewayIdentityFacts> {
         None
+    }
+}
+
+/// The assigned-VIP read the gateway's Service frontend resolver uses, over the
+/// one allocator `AppState` shares. The lock is taken only inside
+/// [`ServiceVipView::assigned_vip`] and released before it returns, so the
+/// caller holds no lock afterwards.
+pub(crate) struct AllocatorServiceVipView {
+    allocator:
+        Arc<tokio::sync::Mutex<overdrive_dataplane::allocators::PersistentServiceVipAllocator>>,
+}
+
+impl AllocatorServiceVipView {
+    pub(crate) fn new(
+        allocator: Arc<
+            tokio::sync::Mutex<overdrive_dataplane::allocators::PersistentServiceVipAllocator>,
+        >,
+    ) -> Self {
+        Self { allocator }
+    }
+}
+
+#[async_trait]
+impl ServiceVipView for AllocatorServiceVipView {
+    async fn assigned_vip(&self, spec_digest: &ContentHash) -> Option<ServiceVip> {
+        self.allocator.lock().await.assigned_vip(spec_digest).await
     }
 }

@@ -10,9 +10,8 @@
 //! `SERVICE_MAP` swap under the commit guard, so a `Selected` receipt can always
 //! resolve its identity and never an uncommitted one.
 //!
-//! `open_upstream`, `take_receipt`, `selected_backend_identity` and the cleanup
-//! capability are implemented. `probe` is the boot sentinel step's and is still
-//! the scaffold. The commit-guard internals (`BackendIdentityState`,
+//! `probe`, `open_upstream`, `take_receipt`, `selected_backend_identity` and the
+//! cleanup capability are implemented. The commit-guard internals (`BackendIdentityState`,
 //! `ServiceApplyUndo`, `ServiceCleanupDebt`, the `service_apply_commit` guard) are
 //! private structure and are the crafter's.
 
@@ -220,6 +219,49 @@ fn prepared_socket() -> Result<tokio::net::TcpSocket, GatewayConnectDataplaneErr
     Ok(unsafe { tokio::net::TcpSocket::from_raw_fd(std::os::fd::IntoRawFd::into_raw_fd(fd)) })
 }
 
+/// The sentinel the boot probe dials: a TEST-NET-1 address and the discard
+/// port, never programmed as a Service.
+const SENTINEL_ADDRESS: Ipv4Addr = Ipv4Addr::new(192, 0, 2, 1);
+const SENTINEL_PORT: u16 = 9;
+
+fn sentinel_service_key() -> Result<ServiceKey, GatewayConnectDataplaneError> {
+    let vip = ServiceVip::new(IpAddr::V4(SENTINEL_ADDRESS))
+        .map_err(|_| GatewayConnectDataplaneError::Unavailable)?;
+    let port = NonZeroU16::new(SENTINEL_PORT).ok_or(GatewayConnectDataplaneError::Unavailable)?;
+    let frontend = ServiceFrontend::new(vip, port, Proto::Tcp)
+        .map_err(|_| GatewayConnectDataplaneError::Unavailable)?;
+    Ok(ServiceKey::from_frontend(frontend))
+}
+
+impl EbpfDataplane {
+    /// Retry the reverse-NAT keys earlier cleanups could not delete (R-61). A
+    /// key that still fails stays in `service_cleanup_debt` as closed debt; a
+    /// key its owner has since re-claimed is dropped from the debt untouched.
+    pub(crate) fn retry_service_cleanup_debt(&self) {
+        // Serialised with `update_service`, which holds this guard for its whole
+        // map work.
+        let _serialised = self.service_apply_commit.write();
+        let live_nat: std::collections::BTreeSet<crate::maps::BackendKeyPod> = self
+            .service_reverse_nat_keys
+            .lock()
+            .values()
+            .flat_map(|keys| keys.iter().copied())
+            .collect();
+        let mut reverse_nat_map = self.reverse_nat_map.lock();
+        let mut debt = self.service_cleanup_debt.lock();
+        debt.retain(|key| {
+            if live_nat.contains(key) {
+                return false;
+            }
+            match reverse_nat_map.remove(key) {
+                Ok(()) => false,
+                Err(error) if is_key_absent(&error) => false,
+                Err(_) => true,
+            }
+        });
+    }
+}
+
 impl GatewayConnectCleanup for EbpfDataplane {
     fn cleanup(&self, intent: &GatewayConnectIntent) -> Result<(), GatewayConnectDataplaneError> {
         let cookie = intent.socket_cookie.get().get();
@@ -245,6 +287,9 @@ impl GatewayConnectCleanup for EbpfDataplane {
         let removed_receipts = remove_all(&mut receipts)?;
         drop(receipts);
         drop(intents);
+        // The boot probe and the shutdown sweep both retry the closed
+        // reverse-NAT debt (R-61).
+        self.retry_service_cleanup_debt();
         Ok(GatewayConnectCleanupSweep { removed_intents, removed_receipts })
     }
 
@@ -310,19 +355,50 @@ fn remove_all<V: aya::Pod>(
 
 #[async_trait]
 impl GatewayConnectDataplane for EbpfDataplane {
-    #[allow(
-        clippy::todo,
-        clippy::unused_async,
-        clippy::unused_self,
-        unused_variables,
-        reason = "`probe` is the boot sentinel step's (public-ingress-gateway)"
-    )]
     async fn probe(
         &self,
         deadline: Instant,
         clock: &dyn Clock,
     ) -> Result<(), GatewayConnectDataplaneError> {
-        todo!("SCAFFOLD: EbpfDataplane::probe (GatewayConnectDataplane)")
+        // 1. Sweep residue left by the previous process, then retry the closed
+        //    reverse-NAT debt (R-61): a key that still fails stays in the set.
+        self.cleanup_all_gateway_intents()?;
+        // 2. A deadline that has already elapsed is the typed timeout; nothing
+        //    has been registered, so no residue remains.
+        let remaining = deadline.saturating_duration_since(clock.now());
+        if remaining.is_zero() {
+            return Err(GatewayConnectDataplaneError::ProbeTimeout);
+        }
+        // 3. The sentinel connect: an unprogrammed Service key. The registered
+        //    selection hook denies it and records a `NoBackend` receipt.
+        let sentinel = sentinel_service_key()?;
+        let (socket, intent) = self.open_upstream(sentinel)?.into_parts();
+        let target = std::net::SocketAddr::from((SENTINEL_ADDRESS, SENTINEL_PORT));
+        let outcome = {
+            let connect = socket.connect(target);
+            tokio::pin!(connect);
+            let timeout = clock.sleep(remaining);
+            tokio::pin!(timeout);
+            tokio::select! {
+                result = &mut connect => Some(result),
+                () = &mut timeout => None,
+            }
+        };
+        let verdict = match outcome {
+            None => Err(GatewayConnectDataplaneError::ProbeTimeout),
+            // The sentinel is never programmed: a completed connect means the
+            // hook did not deny it.
+            Some(Ok(_stream)) => Err(GatewayConnectDataplaneError::Unavailable),
+            Some(Err(_denied)) => match self.take_receipt(&intent) {
+                Ok(GatewaySelectionReceipt::NoBackend { .. }) => Ok(()),
+                Ok(GatewaySelectionReceipt::Selected { .. }) => {
+                    Err(GatewayConnectDataplaneError::ReceiptMismatch)
+                }
+                Err(error) => Err(error),
+            },
+        };
+        let cleaned = self.cleanup(&intent);
+        verdict.and(cleaned)
     }
 
     fn open_upstream(

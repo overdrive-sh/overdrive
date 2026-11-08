@@ -47,39 +47,17 @@ impl GatewayUpstreamConnector {
         Self { dataplane, client_mtls, limits, clock, budget, cleanup_ledger }
     }
 
-    /// One actual-frontend probe: a `NoBackend` receipt is `ReadyNoBackend`
-    /// and a validated `Selected` receipt is `ReadySelected`; both are
-    /// bind-valid (ADR-0242, R-65). The probe resolves no backend identity and
-    /// performs no mTLS, so the selected backend's health and authentication
-    /// never gate bind.
-    pub(crate) async fn probe(
-        &self,
-        frontend: ServiceFrontend,
-        deadline: Instant,
-    ) -> Result<GatewayConnectProbeOutcome, GatewayUpstreamConnectError> {
-        match self.dial(PROBE_OPERATION, frontend, deadline).await {
-            Ok(selected) => {
-                emit_probe_selected_receipt(&selected.intent, selected.backend_id);
-                Ok(GatewayConnectProbeOutcome::ReadySelected)
-            }
-            Err(GatewayUpstreamConnectError::NoBackend) => {
-                Ok(GatewayConnectProbeOutcome::ReadyNoBackend)
-            }
-            Err(error) => Err(error),
-        }
-    }
-
     pub(crate) async fn connect(
         &self,
         frontend: ServiceFrontend,
         deadline: Instant,
     ) -> Result<GatewayUpstream, GatewayUpstreamConnectError> {
-        let selected = self.dial(REQUEST_OPERATION, frontend, deadline).await?;
+        let selected = self.dial(frontend, deadline).await?;
         let peer = self
             .dataplane
             .selected_backend_identity(selected.backend_id)
             .map_err(GatewayUpstreamConnectError::SelectedIdentity)?;
-        emit_selected_receipt(REQUEST_OPERATION, &selected.intent, selected.backend_id, &peer);
+        emit_selected_receipt(&selected.intent, selected.backend_id, &peer);
         let std_stream =
             selected.stream.into_std().map_err(|_| GatewayUpstreamConnectError::Connect)?;
         let connected: OwnedFd = std_stream.into();
@@ -89,13 +67,11 @@ impl GatewayUpstreamConnector {
             .map_err(GatewayUpstreamConnectError::Mtls)
     }
 
-    /// The prepare-then-dial sequence shared by probe and request, up to a
-    /// validated `Selected` receipt; `operation` labels the receipt occurrence
-    /// as a `probe` or a `request`. The returned value keeps the connect permit
+    /// The prepare-then-dial sequence, up to a validated `Selected` receipt.
+    /// The returned value keeps the connect permit
     /// and the intent cleanup guard alive until the caller finishes with it.
     async fn dial(
         &self,
-        operation: &'static str,
         frontend: ServiceFrontend,
         deadline: Instant,
     ) -> Result<SelectedDial<'_>, GatewayUpstreamConnectError> {
@@ -113,27 +89,55 @@ impl GatewayUpstreamConnector {
         let address = SocketAddr::V4(SocketAddrV4::new(frontend.vip_v4(), frontend.port().get()));
         let connect_deadline =
             deadline.min(self.clock.now() + self.limits.upstream_connect_deadline());
-        let stream = tokio::select! {
-            connected = socket.connect(address) => {
-                connected.map_err(|_| GatewayUpstreamConnectError::Connect)?
-            }
+        let connected = tokio::select! {
+            connected = socket.connect(address) => connected,
             () = self.clock.sleep(connect_deadline.saturating_duration_since(self.clock.now())) => {
                 return Err(GatewayUpstreamConnectError::ConnectTimeout);
             }
         };
-        let receipt =
-            self.dataplane.take_receipt(&intent).map_err(GatewayUpstreamConnectError::Receipt)?;
-        cleanup.receipt_taken();
+        // The receipt is the hook's verdict, so it is taken once after
+        // `connect(2)` completes, `Ok` or `Err`, and the outcome is classified
+        // by the pair (receipt, connect result), never by errno.
+        let receipt = self.dataplane.take_receipt(&intent);
+        if receipt.is_ok() {
+            cleanup.receipt_taken();
+        }
+        match (receipt, connected) {
+            (Ok(receipt), connected) => {
+                Self::classify_receipt(receipt, &intent, connected, cleanup, permit)
+            }
+            (Err(GatewayConnectDataplaneError::ReceiptMissing), Err(_)) => {
+                Err(GatewayUpstreamConnectError::Connect)
+            }
+            (Err(error), _) => Err(GatewayUpstreamConnectError::Receipt(error)),
+        }
+    }
+
+    /// Classify a taken receipt against the connect result.
+    fn classify_receipt<'a>(
+        receipt: GatewaySelectionReceipt,
+        intent: &GatewayConnectIntent,
+        connected: std::io::Result<tokio::net::TcpStream>,
+        cleanup: IntentCleanupGuard<'a>,
+        permit: GatewayConnectPermit,
+    ) -> Result<SelectedDial<'a>, GatewayUpstreamConnectError> {
         match receipt {
             GatewaySelectionReceipt::Selected { socket_cookie, service_key, backend_id }
                 if socket_cookie == intent.socket_cookie && service_key == intent.service_key =>
             {
-                Ok(SelectedDial { stream, _cleanup: cleanup, _permit: permit, intent, backend_id })
+                let stream = connected.map_err(|_| GatewayUpstreamConnectError::Connect)?;
+                Ok(SelectedDial {
+                    stream,
+                    _cleanup: cleanup,
+                    _permit: permit,
+                    intent: intent.clone(),
+                    backend_id,
+                })
             }
             GatewaySelectionReceipt::NoBackend { socket_cookie, service_key }
                 if socket_cookie == intent.socket_cookie && service_key == intent.service_key =>
             {
-                emit_no_backend_receipt(operation, &intent);
+                emit_no_backend_receipt(intent);
                 Err(GatewayUpstreamConnectError::NoBackend)
             }
             GatewaySelectionReceipt::Selected { .. }
@@ -204,9 +208,6 @@ impl Drop for IntentCleanupGuard<'_> {
     }
 }
 
-const PROBE_OPERATION: &str = "probe";
-const REQUEST_OPERATION: &str = "request";
-
 /// Whether the connector took the selection receipt before cleanup ran.
 #[derive(Clone, Copy)]
 enum ReceiptState {
@@ -217,7 +218,6 @@ enum ReceiptState {
 /// The `Selected` receipt occurrence: after exact receipt validation and
 /// selected-identity resolution, before the mTLS handshake.
 fn emit_selected_receipt(
-    operation: &'static str,
     intent: &GatewayConnectIntent,
     backend_id: BackendId,
     expected_peer: &SpiffeId,
@@ -226,7 +226,6 @@ fn emit_selected_receipt(
         name: "gateway.upstream.receipt.validated",
         target: "overdrive::gateway_connector",
         event = "gateway.upstream.receipt.validated",
-        operation = operation,
         socket_cookie = intent.socket_cookie.get().get(),
         service_key_vip = %intent.service_key.vip(),
         service_key_port = intent.service_key.port().get(),
@@ -238,32 +237,12 @@ fn emit_selected_receipt(
     );
 }
 
-/// The probe's `Selected` receipt occurrence: emitted immediately after exact
-/// receipt validation. The probe resolves no backend identity (R-65), so it
-/// carries no expected peer.
-fn emit_probe_selected_receipt(intent: &GatewayConnectIntent, backend_id: BackendId) {
-    tracing::debug!(
-        name: "gateway.upstream.receipt.validated",
-        target: "overdrive::gateway_connector",
-        event = "gateway.upstream.receipt.validated",
-        operation = PROBE_OPERATION,
-        socket_cookie = intent.socket_cookie.get().get(),
-        service_key_vip = %intent.service_key.vip(),
-        service_key_port = intent.service_key.port().get(),
-        service_key_protocol = intent.service_key.protocol().as_str(),
-        receipt_outcome = "selected",
-        backend_id = backend_id.get(),
-        "validated gateway upstream BPF selection receipt",
-    );
-}
-
 /// The `NoBackend` receipt occurrence: after exact receipt validation.
-fn emit_no_backend_receipt(operation: &'static str, intent: &GatewayConnectIntent) {
+fn emit_no_backend_receipt(intent: &GatewayConnectIntent) {
     tracing::debug!(
         name: "gateway.upstream.receipt.validated",
         target: "overdrive::gateway_connector",
         event = "gateway.upstream.receipt.validated",
-        operation = operation,
         socket_cookie = intent.socket_cookie.get().get(),
         service_key_vip = %intent.service_key.vip(),
         service_key_port = intent.service_key.port().get(),
@@ -271,12 +250,6 @@ fn emit_no_backend_receipt(operation: &'static str, intent: &GatewayConnectInten
         receipt_outcome = "no_backend",
         "validated gateway upstream BPF selection receipt",
     );
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum GatewayConnectProbeOutcome {
-    ReadyNoBackend,
-    ReadySelected,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -636,6 +609,16 @@ mod acceptance {
         );
     }
 
+    /// Closes the frontend port: the listener lives in the accept task, so
+    /// cancelling the task closes it and the kernel refuses every later dial.
+    async fn close_the_frontend(fx: &mut Fixture) {
+        fx.accept.abort();
+        assert!(
+            (&mut fx.accept).await.expect_err("the accept task never completed").is_cancelled(),
+            "the listener is closed, so the frontend port refuses every dial",
+        );
+    }
+
     async fn fixture(receipt_mode: ReceiptMode) -> Fixture {
         fixture_with(receipt_mode, Some(wrong_valid_peer_mismatch()), false).await
     }
@@ -886,22 +869,20 @@ mod acceptance {
     /// make a later request fail with `CleanupLedgerFull`.
     ///
     /// The frontend is a real loopback port that was bound and then closed, so
-    /// the kernel refuses each `connect(2)`. The conversion-to-std failure arm
-    /// of the connector is not reachable through a real socket and is covered
-    /// by inspection.
+    /// the kernel refuses each `connect(2)`. The double runs in
+    /// `ReceiptMode::Missing`: the refusal carries no hook verdict. The
+    /// connector takes the receipt once after the refused connect, finds it
+    /// absent (`ReceiptMissing`) and classifies the pair (absent, refused) as
+    /// `Connect`. The conversion-to-std failure arm of the connector is not
+    /// reachable through a real socket and is covered by inspection.
     ///
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
     async fn refused_upstream_dials_release_their_ledger_slot_and_intent() {
         /// More attempts than the 128-slot ledger holds.
         const ATTEMPTS: u32 = 130;
-        let mut fx = fixture(ReceiptMode::Selected).await;
-        // Dropping the listener (it lives in the accept task) closes the port.
-        fx.accept.abort();
-        assert!(
-            (&mut fx.accept).await.expect_err("the accept task never completed").is_cancelled(),
-            "the listener is closed, so the frontend port refuses every dial",
-        );
+        let mut fx = fixture(ReceiptMode::Missing).await;
+        close_the_frontend(&mut fx).await;
 
         for attempt in 1..=ATTEMPTS {
             let error = connect_error(&fx).await;
@@ -924,12 +905,64 @@ mod acceptance {
             "each registered intent is cleaned up exactly once",
         );
         assert_eq!(fx.dataplane.live_receipts().expect("receipt count").len(), 0);
-        assert_eq!(count(&fx.dataplane.receipts_taken), 0, "no receipt is taken before a dial");
+        assert_eq!(
+            count(&fx.dataplane.receipts_taken),
+            ATTEMPTS,
+            "the receipt is taken once after each refused connect, whatever its result",
+        );
         assert_eq!(count(&fx.mtls.attempts), 0, "no handshake follows a refused dial");
         assert!(
             fx.ledger.retry_all(fx.dataplane.as_ref()).is_empty(),
             "no saturation and no retained cleanup",
         );
+    }
+
+    /// S-PIG-138: a refused dial whose hook selected a backend is a dial
+    /// failure. The pair (`Selected`, refused) is `Connect` (502): the receipt
+    /// is taken once, no identity is resolved, no handshake starts and no
+    /// byte is sent.
+    ///
+    /// CONTRACT_SHAPE: bounded-change.
+    #[tokio::test]
+    async fn a_selected_backend_whose_dial_is_refused_is_a_connect_failure() {
+        let mut fx = fixture(ReceiptMode::Selected).await;
+        close_the_frontend(&mut fx).await;
+
+        let error = connect_error(&fx).await;
+
+        assert!(
+            matches!(error, GatewayUpstreamConnectError::Connect),
+            "(Selected, refused) is Connect, got {error:?}",
+        );
+        assert_fail_closed_residue_is_empty(&fx);
+        assert_eq!(count(&fx.dataplane.receipts_taken), 1, "the receipt is taken exactly once");
+        assert!(fx.dataplane.identity_lookups.lock().expect("identity log").is_empty());
+        assert_eq!(count(&fx.mtls.attempts), 0, "no handshake follows a refused dial");
+    }
+
+    /// S-PIG-139: a refused dial whose hook denied the connect is
+    /// `NoBackend` (503), never `Connect`: the receipt is the verdict, not the
+    /// refusal. The connector takes the receipt after the refused connect,
+    /// resolves no identity, starts no handshake and never waits on the clock.
+    ///
+    /// CONTRACT_SHAPE: bounded-change.
+    #[tokio::test]
+    async fn a_dial_the_hook_denied_is_no_backend_not_a_connect_failure() {
+        let mut fx = fixture(ReceiptMode::NoBackend).await;
+        close_the_frontend(&mut fx).await;
+        let before = fx.clock.now();
+
+        let error = connect_error(&fx).await;
+
+        assert!(
+            matches!(error, GatewayUpstreamConnectError::NoBackend),
+            "(NoBackend, refused) is NoBackend, got {error:?}",
+        );
+        assert_fail_closed_residue_is_empty(&fx);
+        assert_eq!(count(&fx.dataplane.receipts_taken), 1, "the receipt is taken exactly once");
+        assert!(fx.dataplane.identity_lookups.lock().expect("identity log").is_empty());
+        assert_eq!(count(&fx.mtls.attempts), 0, "no handshake follows a denied dial");
+        assert_eq!(fx.clock.now(), before, "the denied dial never waited");
     }
 
     /// S-PIG-134: a connect future dropped while it is parked inside the

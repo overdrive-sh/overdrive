@@ -712,6 +712,15 @@ pub enum ControlPlaneError {
     #[error(transparent)]
     DnsResponderBoot(#[from] crate::dns_responder::responder::DnsResponderError),
 
+    /// Public-ingress gateway boot refusal (boot steps G1 and G2): invalid
+    /// configuration, an unreadable or invalid manual certified key, a custody
+    /// failure or a Route-store failure. Typed, never stringified; happens
+    /// BEFORE the listener binds, so the `to_response` arm is
+    /// exhaustiveness-only. The composition root emits `health.startup.refused`
+    /// with reason `gateway.boot`.
+    #[error(transparent)]
+    GatewayBoot(#[from] overdrive_gateway::application::GatewayBootError),
+
     /// VM driver composition boot-time refusal (ADR-0082 §D8 / ADR-0083
     /// §D8, GH #42, step 01-09). Fires ONLY when the composition root's
     /// `NodeAdapters` declared the VM capability `VmCapability::Required` (a
@@ -1162,6 +1171,12 @@ pub fn to_response(err: ControlPlaneError) -> (StatusCode, ErrorBody) {
             // structured startup diagnostics; the typed `CaBootError`'s own
             // `Display` carries the distinct boot cause (absent-KEK vs
             // wrong-KEK vs tampered-envelope).
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ErrorBody { error: "internal".into(), message: e.to_string(), field: None },
+        ),
+        ControlPlaneError::GatewayBoot(e) => (
+            // Boot-path shape as `DnsResponderBoot` above: refused before the
+            // operator listener binds, so this arm is exhaustiveness-only.
             StatusCode::INTERNAL_SERVER_ERROR,
             ErrorBody { error: "internal".into(), message: e.to_string(), field: None },
         ),

@@ -1150,15 +1150,16 @@ pub fn tls_record_types(segments: &[&Segment]) -> BTreeSet<u8> {
 // Tracing occurrences
 // ---------------------------------------------------------------------------
 
-/// The receipt occurrences with `operation` among `events`.
+/// The upstream receipt occurrences among `events`. Only the request path
+/// emits one: the activation gate connects to nothing of the Route's Service
+/// (R-65), so a window with no request holds none.
 #[must_use]
-pub fn receipt_occurrences<'a>(events: &'a [TraceEvent], operation: &str) -> Vec<&'a TraceEvent> {
+pub fn receipt_occurrences(events: &[TraceEvent]) -> Vec<&TraceEvent> {
     events
         .iter()
         .filter(|event| {
             event.fields.get("event").map(String::as_str)
                 == Some("gateway.upstream.receipt.validated")
-                && event.fields.get("operation").map(String::as_str) == Some(operation)
         })
         .collect()
 }
