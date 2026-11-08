@@ -59,6 +59,7 @@
 //! | 89 | public half-close (S-PIG-122) |
 //! | 90 | ambiguous request framing (S-PIG-77) |
 //! | 91 | ambiguous response framing (S-PIG-78) |
+//! | 92 | request authority errors end to end (S-PIG-142, R-67) |
 //! | 96 | public server configuration (S-PIG-118) |
 //! | 130 | response head after a slow upload (S-PIG-120, 118 s arm) |
 //! | 131 | stalled request body (S-PIG-121, 408 arms) |
@@ -187,6 +188,7 @@ const EARLY_ANSWER: Slot = Slot(88);
 const HALF_CLOSE: Slot = Slot(89);
 const AMBIGUOUS_REQUEST: Slot = Slot(90);
 const AMBIGUOUS_RESPONSE: Slot = Slot(91);
+const REQUEST_AUTHORITY: Slot = Slot(92);
 const SERVER_CONFIGURATION: Slot = Slot(96);
 const UPLOAD_COMPLETES_LATE: Slot = Slot(130);
 const STALLED_REQUEST_BODY: Slot = Slot(131);
@@ -3542,4 +3544,84 @@ async fn the_public_server_configuration_lists_exactly_the_two_aes_gcm_suites() 
     assert!(config.enable_secret_extraction, "secret extraction is enabled for kernel arming");
     assert_eq!(config.send_tls13_tickets, 0, "no session tickets");
     assert_eq!(config.max_early_data_size, 0, "no 0-RTT");
+}
+
+// ---------------------------------------------------------------------------
+// S-PIG-142 (R-67): the one authority rule on the public request path
+// ---------------------------------------------------------------------------
+
+/// A request head with the given raw `Host` lines (none for `&[]`).
+fn request_with_host_lines(host_lines: &[&[u8]]) -> Vec<u8> {
+    let mut wire = b"GET /a HTTP/1.1\r\n".to_vec();
+    for line in host_lines {
+        wire.extend_from_slice(b"Host: ");
+        wire.extend_from_slice(line);
+        wire.extend_from_slice(b"\r\n");
+    }
+    wire.extend_from_slice(b"\r\n");
+    wire
+}
+
+/// S-PIG-142: every `RouteAuthorityError` variant and every port spelling the
+/// rule distinguishes reaches the client through the real accept loop and
+/// exchange driver as the pinned status (400, or 421 for a Host that differs
+/// from the TLS SNI), the refusal is gateway-authored on the same connection
+/// rules as the other pre-upstream refusals, and nothing is opened or sent
+/// upstream. The control `Host: api.example.com:443` is accepted and proceeds
+/// to Route selection.
+///
+/// The row set also holds on the code before R-67: the replaced `check_host`
+/// refused the same spellings, so this is a behaviour-preserving guard for the
+/// move to the one `normalize_route_authority`.
+///
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test]
+async fn every_authority_error_and_port_spelling_is_refused_before_any_upstream_work() {
+    let world = World::start(REQUEST_AUTHORITY, Spec::default()).await;
+    let host = |value: &str| request_with_host_lines(&[value.as_bytes()]);
+    let cases: Vec<(&str, Vec<u8>, u16)> = vec![
+        ("MissingHost", request_with_host_lines(&[]), 400),
+        ("DuplicateHost", request_with_host_lines(&[b"api.example.com", b"api.example.com"]), 400),
+        (
+            "DuplicateHost naming another name",
+            request_with_host_lines(&[b"api.example.com", b"other.example.com"]),
+            400,
+        ),
+        ("NonAsciiHost", request_with_host_lines(&[b"api\xc3\xa9.example.com"]), 400),
+        ("InvalidAuthority: two colons", host("api.example.com:80:90"), 400),
+        ("InvalidAuthority: userinfo", host("user@api.example.com"), 400),
+        ("InvalidAuthority: userinfo with port", host("user@api.example.com:443"), 400),
+        ("InvalidAuthority: bracketed", host("[::1]"), 400),
+        ("InvalidAuthority: empty name", host(":443"), 400),
+        ("InvalidHostname", host("-bad.example.com"), 400),
+        ("UnsupportedPort :8443", host("api.example.com:8443"), 400),
+        ("UnsupportedPort :80", host("api.example.com:80"), 400),
+        ("UnsupportedPort :0", host("api.example.com:0"), 400),
+        ("InvalidAuthority: signed port :+443", host("api.example.com:+443"), 400),
+        ("InvalidAuthority: padded port :0443", host("api.example.com:0443"), 400),
+        ("InvalidAuthority: padded port :00443", host("api.example.com:00443"), 400),
+        ("InvalidAuthority: empty port", host("api.example.com:"), 400),
+        ("InvalidAuthority: non-digit port :4a3", host("api.example.com:4a3"), 400),
+        ("InvalidAuthority: port above 65535", host("api.example.com:65536"), 400),
+        ("SniMismatch", host("other.example.com"), 421),
+        ("SniMismatch with :443", host("other.example.com:443"), 421),
+    ];
+    for (what, request, status) in cases {
+        assert_refused_before_upstream(&world, request, status, what).await;
+    }
+
+    let opens_before = world.opens();
+    let legs = world
+        .run(client_sends(&host("api.example.com:443")), vec![origin_answers(&ok_response(b"ok"))])
+        .await;
+    assert_eq!(
+        legs.public_statuses(),
+        vec![200],
+        "Host :443 is accepted and reaches Route selection"
+    );
+    assert_eq!(
+        world.opens() - opens_before,
+        1,
+        "the accepted authority opens exactly one upstream"
+    );
 }

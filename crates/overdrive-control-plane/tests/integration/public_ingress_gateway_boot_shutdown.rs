@@ -34,6 +34,9 @@
 //! | `a_probe_that_times_out_keeps_the_public_port_unbound` | S-PIG-74 (c) | ignored |
 //! | `a_refused_relay_probe_keeps_the_public_port_unbound_and_the_connect_probe_unrun` | S-PIG-100 | ignored |
 //! | `the_relay_probe_runs_once_per_boot_across_a_route_replacement` | S-PIG-100 | ignored |
+//! | `an_undecodable_stored_route_is_a_typed_500_route_decode_on_post_and_delete` | S-PIG-140 (R-67), garbage arm | `#[ignore]` pending `route-set-error-mapping` |
+//! | `a_well_formed_envelope_holding_an_invalid_route_is_a_typed_500_route_decode` | S-PIG-140 (R-67), invalid-Route arm | `#[ignore]` pending `route-set-error-mapping` and a pinned read-side Route validation |
+//! | `a_route_owner_that_ended_in_shutdown_answers_503_gateway_owner_unavailable_on_both_methods` | S-PIG-141 (R-67), shutdown arm | `#[ignore]` pending `route-set-error-mapping` |
 //!
 //! # Bind-address table (R-6)
 //!
@@ -56,6 +59,7 @@
 //! | 158, 159, 160 | S-PIG-62 (disabled, enabled, gated) |
 //! | 163, 164 | S-PIG-74 (b), (c); (a), a hook that does not fire (`GatewayConnectDataplane::probe` returns `Unavailable`, sentinel receipt absent), is the S-PIG-57 (I) stimulus. 161 is unused |
 //! | 165, 166 | S-PIG-100 (refused relay probe; once per boot) |
+//! | 169, 170, 171 | S-PIG-140 (garbage; invalid Route), S-PIG-141 (shutdown). No Service is deployed, so none binds TCP/443 |
 
 #![allow(
     clippy::doc_markdown,
@@ -92,6 +96,7 @@ use overdrive_core::id::{BackendId, NodeId, PublicCertifiedKeyId, SpiffeId};
 use overdrive_core::public_ingress::{
     PublicHostname, PublicRouteInput, ServiceKey, ServiceListenerReferenceInput, SocketCookie,
 };
+use overdrive_core::public_ingress::{PublicRouteSetV1, Route};
 use overdrive_core::reconcilers::Reconciler;
 use overdrive_core::traits::ca::{
     Ca, CaError, CaFactory, IntermediateHandle, RootCaHandle, SvidMaterial, SvidRequest,
@@ -100,6 +105,7 @@ use overdrive_core::traits::ca::{
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{Driver, DriverType};
 use overdrive_core::traits::entropy::Entropy;
+use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_dataplane::allocators::VipRange;
 use overdrive_gateway::ports::{
     GatewayClientMtls, GatewayClientMtlsDeps, GatewayClientMtlsError, GatewayClientMtlsFactory,
@@ -119,6 +125,7 @@ use overdrive_sim::adapters::gateway::{
 };
 use overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner;
 use overdrive_sim::adapters::kek::SimKek;
+use overdrive_store_local::LocalIntentStore;
 use serial_test::serial;
 use tempfile::TempDir;
 use tracing::field::{Field, Visit};
@@ -635,6 +642,9 @@ struct World {
     /// `GatewayClientMtls::authenticate` calls.
     authenticate_calls: Arc<AtomicU32>,
     handle: Option<ServerHandle>,
+    /// The node's intent store, the same instance the boot composes: the
+    /// driven port a Route-set fault is delivered through (S-PIG-140).
+    intent: Arc<LocalIntentStore>,
     client: reqwest::Client,
     base: String,
 }
@@ -696,6 +706,7 @@ impl World {
         };
 
         let mut boot: BootAdapters = super::node_adapters::boot_adapters(&config);
+        let intent = Arc::clone(boot.stores.intent.store());
         boot.clock = Arc::clone(&clock_port);
         boot.dataplane =
             Arc::new(FixtureComposer { dataplane: Arc::clone(&dataplane), connect: capability });
@@ -744,6 +755,7 @@ impl World {
             receipt_takes,
             authenticate_calls,
             handle: Some(handle),
+            intent,
             client,
             base: format!("https://localhost:{}", bound.port()),
         }
@@ -1684,4 +1696,312 @@ async fn the_relay_probe_runs_once_per_boot_across_a_route_replacement() {
         "no second connect probe either: the one probe ran after the one relay probe"
     );
     world.shutdown().await;
+}
+
+// ---------------------------------------------------------------------------
+// S-PIG-140 and S-PIG-141 (R-67): Route command failures are typed, never
+// flattened
+// ---------------------------------------------------------------------------
+
+/// The store key of the singleton Route-set record. The gateway crate keeps
+/// the constant crate-private; the stimulus below is addressed to the key the
+/// production owner reads, so a rename there fails these bodies at their
+/// precondition.
+const ROUTE_SET_KEY: &[u8] = b"public-ingress/route-set";
+/// A syntactically valid Route ID that is not the declared one.
+const OTHER_ROUTE_ID: &str = "other-route";
+
+/// One operator answer to a Route command: the status and the JSON body.
+#[derive(Debug)]
+struct RouteReply {
+    status: u16,
+    body: serde_json::Value,
+}
+
+impl RouteReply {
+    fn error_kind(&self) -> Option<&str> {
+        self.body.get("error").and_then(serde_json::Value::as_str)
+    }
+
+    /// The reply is the typed error `(status, kind, message)` with no field
+    /// and no cause text.
+    fn assert_typed(&self, status: u16, kind: &str, message: &str, what: &str) {
+        assert_eq!(self.status, status, "{what}: status; body {}", self.body);
+        assert_eq!(self.error_kind(), Some(kind), "{what}: error kind; body {}", self.body);
+        assert_eq!(
+            self.body.get("message").and_then(serde_json::Value::as_str),
+            Some(message),
+            "{what}: the fixed message, no cause text"
+        );
+        assert!(
+            self.body.get("field").is_none_or(serde_json::Value::is_null),
+            "{what}: no field; body {}",
+            self.body
+        );
+    }
+}
+
+fn route_input(path: &str) -> PublicRouteInput {
+    PublicRouteInput {
+        id: ROUTE_ID.to_owned(),
+        hostname: HOSTNAME.to_owned(),
+        path: path.to_owned(),
+        path_match: "segment_prefix".to_owned(),
+        certified_key: CERTIFIED_KEY_ID.to_owned(),
+        target: ServiceListenerReferenceInput {
+            service: SERVICE_ID.to_owned(),
+            port: SERVICE_PORT,
+            protocol: "tcp".to_owned(),
+        },
+    }
+}
+
+impl World {
+    async fn try_route_post(&self, path: &str) -> Result<RouteReply, reqwest::Error> {
+        let response = self
+            .client
+            .post(format!("{}/v1/routes", self.base))
+            .json(&route_input(path))
+            .send()
+            .await?;
+        Self::reply(response).await
+    }
+
+    async fn try_route_delete(&self, id: &str) -> Result<RouteReply, reqwest::Error> {
+        let response = self.client.delete(format!("{}/v1/routes/{id}", self.base)).send().await?;
+        Self::reply(response).await
+    }
+
+    async fn reply(response: reqwest::Response) -> Result<RouteReply, reqwest::Error> {
+        let status = response.status().as_u16();
+        let body = response.json().await.unwrap_or(serde_json::Value::Null);
+        Ok(RouteReply { status, body })
+    }
+
+    async fn route_post(&self, path: &str) -> RouteReply {
+        self.try_route_post(path).await.expect("POST /v1/routes")
+    }
+
+    async fn route_delete(&self, id: &str) -> RouteReply {
+        self.try_route_delete(id).await.expect("DELETE a Route by id")
+    }
+
+    /// The bytes the intent store holds at the Route-set key, read through the
+    /// `IntentStore` port.
+    async fn stored_route_set(&self) -> Option<Vec<u8>> {
+        self.intent
+            .get(ROUTE_SET_KEY)
+            .await
+            .expect("read the Route-set key")
+            .map(|bytes| bytes.as_ref().to_vec())
+    }
+
+    async fn store_route_set_bytes(&self, bytes: &[u8]) {
+        self.intent.put(ROUTE_SET_KEY, bytes).await.expect("write the Route-set key");
+    }
+
+    /// The Route-set record fault of S-PIG-140: `bytes` are what the store
+    /// returns at the Route-set key. Both methods answer the typed
+    /// `route_decode` 500, the store is left as it was, the operator surface
+    /// still answers, and after the slot is restored to a valid empty set a
+    /// declare succeeds: the fault did not wedge the owner.
+    async fn assert_decode_fault_is_typed_and_does_not_wedge(&self, bytes: &[u8], arm: &str) {
+        self.store_route_set_bytes(bytes).await;
+
+        let post = self.route_post("/").await;
+        post.assert_typed(
+            500,
+            "route_decode",
+            "stored public Route is undecodable",
+            &format!("{arm}: POST"),
+        );
+        let delete = self.route_delete(ROUTE_ID).await;
+        delete.assert_typed(
+            500,
+            "route_decode",
+            "stored public Route is undecodable",
+            &format!("{arm}: DELETE"),
+        );
+
+        assert_eq!(
+            self.stored_route_set().await.as_deref(),
+            Some(bytes),
+            "{arm}: neither command rewrote the stored bytes"
+        );
+        let status = self.status().await;
+        assert!(status.enabled, "{arm}: the operator surface still answers");
+
+        let empty =
+            PublicRouteSetV1 { route: None }.archive_for_store().expect("archive empty set");
+        self.store_route_set_bytes(empty.as_slice()).await;
+        let declared = self.try_route_post("/").await.expect("POST after restore");
+        assert_eq!(
+            declared.status, 201,
+            "{arm}: a declare after the restore succeeds; {declared:?}"
+        );
+        assert_eq!(
+            declared.body.get("outcome").and_then(serde_json::Value::as_str),
+            Some("Declared"),
+            "{arm}: the owner is not wedged"
+        );
+    }
+}
+
+/// S-PIG-140 (R-67), garbage arm: bytes at the Route-set key that are no
+/// envelope at all reach the operator as the typed 500 `route_decode` on both
+/// `POST /v1/routes` and `DELETE /v1/routes/{id}`, not as `internal` or any
+/// other class; the stored bytes are unchanged; the owner is not wedged.
+///
+/// The fault enters through the `IntentStore` driven port on the booted
+/// composition's own store; the Route handlers and the Route owner are the
+/// production ones. `PublicRouteSetError::Encode` is reachable through no
+/// production port, so no scenario drives it (R-67 no-obligation ruling).
+///
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[serial(cgroup)]
+#[ignore = "pending DELIVER route-set-error-mapping"]
+async fn an_undecodable_stored_route_is_a_typed_500_route_decode_on_post_and_delete() {
+    let mut world = World::boot(Spec::enabled(169)).await;
+    world
+        .assert_decode_fault_is_typed_and_does_not_wedge(
+            b"\x00 not an rkyv envelope \xff\xfe",
+            "garbage bytes",
+        )
+        .await;
+    world.shutdown().await;
+}
+
+/// The bytes of a well-formed `PublicRouteSetV1` envelope whose Route holds a
+/// hostname no Route validation accepts: a valid archive with the hostname's
+/// octets replaced by an equally long name containing underscores.
+fn envelope_holding_an_invalid_route() -> Vec<u8> {
+    let route = Route::from_submit(route_input("/")).expect("a valid Route");
+    let mut bytes = PublicRouteSetV1 { route: Some(route) }
+        .archive_for_store()
+        .expect("archive the set")
+        .as_slice()
+        .to_vec();
+    let valid = HOSTNAME.as_bytes();
+    let invalid = HOSTNAME.replace(['.'], "_");
+    assert_eq!(invalid.len(), valid.len());
+    let at: Vec<usize> = bytes
+        .windows(valid.len())
+        .enumerate()
+        .filter_map(|(index, window)| (window == valid).then_some(index))
+        .collect();
+    assert_eq!(at.len(), 1, "the hostname appears once in the archived Route");
+    bytes[at[0]..at[0] + valid.len()].copy_from_slice(invalid.as_bytes());
+    PublicRouteSetV1::from_store_bytes(&bytes, std::path::Path::new("<fixture>"), None)
+        .expect("the patched bytes are still a well-formed envelope");
+    bytes
+}
+
+/// S-PIG-140 (R-67), invalid-Route arm: a well-formed envelope whose Route
+/// fails Route validation is the same typed 500 `route_decode` on both
+/// methods, with the same oracle as the garbage arm.
+///
+/// Held back by a design gap reported at DISTILL: R-67 pins no read-side
+/// Route validation, so `RouteCodecError::InvalidRoute` has no producer and
+/// the owner decodes this envelope successfully. The ignore is removed when
+/// DESIGN pins where a stored Route is revalidated.
+///
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[serial(cgroup)]
+#[ignore = "pending DELIVER route-set-error-mapping, blocked on a pinned read-side Route validation (DISTILL gap)"]
+async fn a_well_formed_envelope_holding_an_invalid_route_is_a_typed_500_route_decode() {
+    let mut world = World::boot(Spec::enabled(170)).await;
+    world
+        .assert_decode_fault_is_typed_and_does_not_wedge(
+            &envelope_holding_an_invalid_route(),
+            "envelope holding an invalid Route",
+        )
+        .await;
+    world.shutdown().await;
+}
+
+/// S-PIG-141 (R-67), shutdown arm: once the gateway stage of the graceful
+/// shutdown has ended the Route owner, and while the operator listener still
+/// drains, both Route commands answer the typed 503
+/// `gateway_owner_unavailable`, and the Route set in the store is unchanged.
+///
+/// The operator client polls both methods through the shutdown; every answer
+/// before the owner ends is a success or a Route conflict (the DELETE names
+/// another Route, so it never writes). The first non-success answer of each
+/// method must be the 503. A refused boot after G1 drops the same receiver but
+/// tears the operator listener down with it, so that arm has no HTTP
+/// observer; see the DISTILL report.
+///
+/// CONTRACT_SHAPE: unbounded-preservation.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[serial(cgroup)]
+#[ignore = "pending DELIVER route-set-error-mapping"]
+async fn a_route_owner_that_ended_in_shutdown_answers_503_gateway_owner_unavailable_on_both_methods()
+ {
+    let mut world = World::boot(Spec::enabled(171)).await;
+    world.declare_route("/").await;
+    let before = world.stored_route_set().await;
+    assert!(before.is_some(), "the declared Route is stored");
+
+    let handle = world.handle.take().expect("the server handle");
+    let clock = Arc::clone(&world.clock);
+    let mut shutdown = std::pin::pin!(handle.shutdown(Duration::from_secs(5)));
+    let (mut post_503, mut delete_503) = (None, None);
+    let mut shutdown_done = false;
+    let deadline = Instant::now() + WAIT;
+    while !(shutdown_done || post_503.is_some() && delete_503.is_some()) {
+        assert!(Instant::now() < deadline, "timed out polling the Route commands");
+        tokio::select! {
+            biased;
+            result = &mut shutdown => {
+                result.expect("graceful shutdown");
+                shutdown_done = true;
+            }
+            (post, delete) = async {
+                tokio::join!(world.try_route_post("/"), world.try_route_delete(OTHER_ROUTE_ID))
+            } => {
+                for (what, answer, seen) in
+                    [("POST", post, &mut post_503), ("DELETE", delete, &mut delete_503)]
+                {
+                    match answer {
+                        Ok(reply) if reply.status == 503 => *seen = Some(reply),
+                        Ok(reply) if reply.status == 409 || reply.status < 300 => {}
+                        Ok(reply) => panic!("{what} answered neither success nor 503: {reply:?}"),
+                        Err(_) => {}
+                    }
+                }
+                clock.tick(TICK);
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        }
+    }
+    if !shutdown_done {
+        loop {
+            tokio::select! {
+                biased;
+                result = &mut shutdown => { result.expect("graceful shutdown"); break; }
+                () = tokio::time::sleep(Duration::from_millis(5)) => clock.tick(TICK),
+            }
+        }
+    }
+
+    let message = "public Route owner is unavailable";
+    post_503.expect("POST /v1/routes answered during the shutdown window").assert_typed(
+        503,
+        "gateway_owner_unavailable",
+        message,
+        "POST",
+    );
+    delete_503.expect("DELETE /v1/routes/{id} answered during the shutdown window").assert_typed(
+        503,
+        "gateway_owner_unavailable",
+        message,
+        "DELETE",
+    );
+    assert_eq!(
+        world.stored_route_set().await,
+        before,
+        "no write reached the intent store after the owner ended"
+    );
 }

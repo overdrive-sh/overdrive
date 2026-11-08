@@ -147,6 +147,94 @@ mod properties {
         }
     }
 
+    /// S-PIG-13 (R-67): the port spellings that already hold: exactly `443` is
+    /// accepted and removed; an empty port, any non-digit and a value above
+    /// 65535 are `InvalidAuthority`.
+    ///
+    /// CONTRACT_SHAPE: pure-function.
+    #[test]
+    fn exact_443_is_accepted_and_malformed_port_spellings_are_invalid_authority() {
+        assert_eq!(
+            normalize_route_authority(&host_headers("api.example.com:443"), &sni()),
+            Ok(sni()),
+            "the control :443 equals the SNI"
+        );
+        for port in ["", "4a3", " 443", "44 3", "-443", "443x", "65536", "99999", "4294967296"] {
+            assert_eq!(
+                normalize_route_authority(
+                    &host_headers(&format!("api.example.com:{port}")),
+                    &sni()
+                ),
+                Err(RouteAuthorityError::InvalidAuthority),
+                "port {port:?} is InvalidAuthority: not a canonical decimal in range"
+            );
+        }
+    }
+
+    /// S-PIG-13 (R-67): a sign or a leading zero on a multi-digit port is
+    /// `InvalidAuthority`, never `UnsupportedPort`, never an SNI mismatch and
+    /// never accepted: `+443`, `0443` and `00443` are not the spelling `443`,
+    /// and `UnsupportedPort { got: u16 }` cannot report a spelling its number
+    /// erases. The single digit `0` stays `UnsupportedPort { got: 0 }`.
+    ///
+    /// CONTRACT_SHAPE: pure-function.
+    #[test]
+    #[ignore = "pending DELIVER request-authority-single-implementation"]
+    fn a_signed_or_zero_padded_port_is_invalid_authority_not_443() {
+        for port in ["+443", "0443", "00443", "+0", "00", "000", "+80", "0080", "00443"] {
+            assert_eq!(
+                normalize_route_authority(
+                    &host_headers(&format!("api.example.com:{port}")),
+                    &sni()
+                ),
+                Err(RouteAuthorityError::InvalidAuthority),
+                "port {port:?} is InvalidAuthority"
+            );
+        }
+        assert_eq!(
+            normalize_route_authority(&host_headers("api.example.com:0"), &sni()),
+            Err(RouteAuthorityError::UnsupportedPort { got: 0 }),
+            "the canonical single digit 0 is an unsupported port"
+        );
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(256))]
+
+        /// S-PIG-13 (R-67): padding any in-range port with leading zeros, or
+        /// writing it with a leading `+`, makes it `InvalidAuthority`
+        /// whatever the number (443 included), never the verdict of the
+        /// unpadded spelling.
+        ///
+        /// CONTRACT_SHAPE: pure-function.
+        #[test]
+        #[ignore = "pending DELIVER request-authority-single-implementation"]
+        fn a_non_canonical_spelling_of_any_port_is_invalid_authority(
+            port in any::<u16>(),
+            zeros in 1usize..4,
+            signed in any::<bool>(),
+        ) {
+            let digits = if signed { format!("+{port}") } else { format!("{}{port}", "0".repeat(zeros)) };
+            // `0` padded is `00`: still a multi-digit leading-zero spelling.
+            prop_assert_eq!(
+                normalize_route_authority(&host_headers(&format!("api.example.com:{digits}")), &sni()),
+                Err(RouteAuthorityError::InvalidAuthority),
+            );
+        }
+
+        /// S-PIG-13 (R-67): a digit string above 65535 is `InvalidAuthority`
+        /// (not a TCP port), never `UnsupportedPort` and never accepted.
+        ///
+        /// CONTRACT_SHAPE: pure-function.
+        #[test]
+        fn a_port_above_65535_is_invalid_authority(port in 65_536u64..=u64::from(u32::MAX)) {
+            prop_assert_eq!(
+                normalize_route_authority(&host_headers(&format!("api.example.com:{port}")), &sni()),
+                Err(RouteAuthorityError::InvalidAuthority),
+            );
+        }
+    }
+
     /// S-PIG-13: every authority failure is its own variant: missing,
     /// duplicate, non-ASCII, malformed (including userinfo), wrong port,
     /// invalid hostname and SNI mismatch.
