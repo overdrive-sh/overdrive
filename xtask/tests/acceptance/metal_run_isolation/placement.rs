@@ -39,8 +39,7 @@ fn wrapper(fixture: &Fixture, binary: &str, name: &str) -> Command {
     fs::create_dir_all(&tmp).expect("already-prepared command context input");
     let dispatcher = if binary == NATIVE_BINARY {
         let target = std::env::var_os("CARGO_TARGET_DIR")
-            .map(std::path::PathBuf::from)
-            .unwrap_or_else(|| workspace_file("target"));
+            .map_or_else(|| workspace_file("target"), std::path::PathBuf::from);
         let original = target.join("debug/overdrive-fwd-guest-suite");
         let staged = fixture.source.join("target/prepared/overdrive-fwd-guest-suite");
         fs::create_dir_all(staged.parent().expect("prepared executable parent"))
