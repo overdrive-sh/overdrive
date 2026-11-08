@@ -15,12 +15,16 @@
 //!
 //! # Addresses (R-6)
 //!
-//! Every composition binds two `127.0.0.0/8` addresses: the public bind address
+//! Every composition owns two `127.0.0.0/8` addresses: the public bind address
 //! `127.K.x.y` and the Service frontend `127.(K+2).x.y`, where the second octet
 //! `K` is the kind (`120` generation lifecycle, `121` shutdown). The slot
-//! `x.y` is searched from a start mixed from the seed and the process id and is
-//! the first whose endpoints can be bound, so parallel processes that run the
-//! same seed do not share an address. Neither address appears in the trace.
+//! `x.y` is claimed atomically: `Rig::start` binds the Service frontend
+//! listener at the slot, starting from a slot mixed from the seed and the
+//! process id, and moves to the next slot on `AddrInUse`. The held listener is
+//! the claim, and the public bind address is derived from the same slot, so a
+//! composition that owns the frontend listener owns the pair; there is no
+//! probe-bind-and-drop. Parallel processes that run the same seed therefore
+//! never share an address. Neither address appears in the trace.
 //!
 //! # The trace
 //!
@@ -292,37 +296,43 @@ struct Addresses {
 }
 
 impl Addresses {
-    /// A free pair of loopback addresses for one case of `kind`.
-    ///
-    /// The addresses are process-private state: nothing in the trace renders
-    /// them (the status shows only `bound`). The search starts from a slot
-    /// mixed from the seed and the process id and takes the first slot whose
-    /// two endpoints can both be bound, so concurrent processes that run the
-    /// same or neighbouring seeds land apart without touching the
-    /// seed-determined trace.
-    fn choose(kind: u8, seed: u64) -> Result<Self, String> {
-        let mixed =
-            (seed ^ (u64::from(std::process::id()) << 32)).wrapping_mul(0x9e37_79b9_7f4a_7c15);
-        let start = (mixed >> 16) % SLOTS;
-        for step in 0..SLOTS {
-            let slot = (start + step) % SLOTS;
-            let third = u8::try_from(slot / 250).unwrap_or(0);
-            let fourth = u8::try_from(slot % 250).unwrap_or(0) + 1;
-            let candidate = Self {
-                bind: Ipv4Addr::new(127, kind, third, fourth),
-                vip: Ipv4Addr::new(127, kind + 2, third, fourth),
-            };
-            if candidate.is_free() {
-                return Ok(candidate);
+    /// The address pair of `slot` for a case of `kind`.
+    fn at(kind: u8, slot: u64) -> Self {
+        let third = u8::try_from(slot / 250).unwrap_or(0);
+        let fourth = u8::try_from(slot % 250).unwrap_or(0) + 1;
+        Self {
+            bind: Ipv4Addr::new(127, kind, third, fourth),
+            vip: Ipv4Addr::new(127, kind + 2, third, fourth),
+        }
+    }
+}
+
+/// Claim a distinct address pair for one case of `kind` by binding the Service
+/// frontend listener at the first free slot.
+///
+/// The addresses are process-private state: nothing in the trace renders them
+/// (the status shows only `bound`). The search starts from a slot mixed from
+/// the seed and the process id, so concurrent processes that run the same or
+/// neighbouring seeds land apart without touching the seed-determined trace.
+/// The bind is the claim: `AddrInUse` moves to the next slot, any other error
+/// is returned.
+fn claim_addresses(kind: u8, seed: u64) -> Result<(Addresses, std::net::TcpListener), String> {
+    let mixed = (seed ^ (u64::from(std::process::id()) << 32)).wrapping_mul(0x9e37_79b9_7f4a_7c15);
+    let start = (mixed >> 16) % SLOTS;
+    for step in 0..SLOTS {
+        let addresses = Addresses::at(kind, (start + step) % SLOTS);
+        match std::net::TcpListener::bind((addresses.vip, SERVICE_PORT)) {
+            Ok(listener) => return Ok((addresses, listener)),
+            Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => {}
+            Err(error) => {
+                return Err(format!(
+                    "Service frontend listener {}:{SERVICE_PORT}: {error}",
+                    addresses.vip
+                ));
             }
         }
-        Err("no free loopback address pair for the case".to_owned())
     }
-
-    fn is_free(self) -> bool {
-        std::net::TcpListener::bind((self.vip, SERVICE_PORT)).is_ok()
-            && std::net::TcpListener::bind((self.bind, PUBLIC_PORT)).is_ok()
-    }
+    Err("no free loopback address pair for the case".to_owned())
 }
 
 /// The durable stores and Sim ports one composition is built from; they
@@ -354,12 +364,24 @@ struct Rig {
     shutdown: Option<tokio::task::JoinHandle<GatewayShutdownReport>>,
 }
 
+/// Poll `ready` every `WAIT_STEP` of real time, at most `WAIT_STEPS` times.
+async fn poll_until(mut ready: impl FnMut() -> bool) -> bool {
+    for _ in 0..WAIT_STEPS {
+        if ready() {
+            return true;
+        }
+        tokio::time::sleep(WAIT_STEP).await;
+    }
+    false
+}
+
 fn node_id() -> Result<NodeId, String> {
     NodeId::new(HOST).map_err(|error| format!("node ID: {error}"))
 }
 
 impl Rig {
-    async fn start(seed: u64, addresses: Addresses) -> Result<Self, String> {
+    async fn start(seed: u64, kind: u8) -> Result<Self, String> {
+        let (addresses, listener) = claim_addresses(kind, seed)?;
         let dir = tempfile::tempdir().map_err(|error| format!("tempdir: {error}"))?;
         let chain_path = dir.path().join("api-origin-chain.pem");
         let key_path = dir.path().join("api-origin-key.pem");
@@ -373,10 +395,6 @@ impl Rig {
         let node = node_id()?;
         let observations = Arc::new(SimObservationStore::single_peer(node.clone(), seed));
         let vip_view = persist_api_service(&intent, addresses.vip).await?;
-        let listener =
-            std::net::TcpListener::bind((addresses.vip, SERVICE_PORT)).map_err(|error| {
-                format!("Service frontend listener {}:{SERVICE_PORT}: {error}", addresses.vip)
-            })?;
         listener
             .set_nonblocking(true)
             .map_err(|error| format!("nonblocking frontend listener: {error}"))?;
@@ -464,13 +482,32 @@ impl Rig {
     /// Wait until the connect path holds no intent and no receipt: every probe
     /// has completed and its cleanup has run.
     async fn wait_connect_idle(&self) -> Result<(), String> {
-        for _ in 0..WAIT_STEPS {
-            if self.live_counts() == (Some(0), Some(0)) {
-                return Ok(());
-            }
-            tokio::time::sleep(WAIT_STEP).await;
+        if poll_until(|| self.live_counts() == (Some(0), Some(0))).await {
+            return Ok(());
         }
         Err(format!("the connect path never went idle; counts {:?}", self.live_counts()))
+    }
+
+    /// Wait until exactly `probes` connect probes are parked at
+    /// `GatewayClientMtls::authenticate`. A parked probe has run `open_upstream`
+    /// (one live intent), `connect` and `take_receipt` (the receipt consumed) and
+    /// not yet reached its cleanup, so the quiescent connect path holds `probes`
+    /// intents and no receipt. Both reads are of settled state: each parked
+    /// probe's task is blocked on the hold until released, so nothing further
+    /// moves until the next action.
+    async fn wait_probes_parked(&self, probes: u32) -> Result<(), String> {
+        let hold = &self.ports.hold;
+        let settled = (Some(probes), Some(0));
+        let parked = usize::try_from(probes).unwrap_or(usize::MAX);
+        if poll_until(|| hold.held_entries() == parked && self.live_counts() == settled).await {
+            return Ok(());
+        }
+        Err(format!(
+            "the connect probe hold did not settle: expected {probes} parked with counts \
+             {settled:?}, found {} parked with counts {:?}",
+            hold.held_entries(),
+            self.live_counts()
+        ))
     }
 
     fn live_counts(&self) -> (Option<u32>, Option<u32>) {
@@ -502,18 +539,17 @@ impl Rig {
         let client = TcpStream::connect(SocketAddrV4::new(self.ports.addresses.bind, PUBLIC_PORT))
             .map_err(|error| format!("connect to the public listener: {error}"))?;
         self.retained = Some(client);
-        for _ in 0..WAIT_STEPS {
-            let served = self
-                .ports
-                .relay
+        let relay = &self.ports.relay;
+        let served = poll_until(|| {
+            relay
                 .leg_transcripts()
                 .iter()
                 .skip(first)
-                .any(|leg| leg.written.windows(12).any(|window| window == b"HTTP/1.1 200"));
-            if served {
-                return Ok(());
-            }
-            tokio::time::sleep(WAIT_STEP).await;
+                .any(|leg| leg.written.windows(12).any(|window| window == b"HTTP/1.1 200"))
+        })
+        .await;
+        if served {
+            return Ok(());
         }
         Err("the retained connection never served its first response".to_owned())
     }
@@ -522,12 +558,9 @@ impl Rig {
     /// clock, the peer's close_notify arrives and the connection closes.
     async fn release_retained(&mut self) -> Result<(), String> {
         self.ports.clock.tick(RETAIN_SPAN);
-        for _ in 0..WAIT_STEPS {
-            if self.ports.relay.live_leg_count() == 0 {
-                self.retained = None;
-                return Ok(());
-            }
-            tokio::time::sleep(WAIT_STEP).await;
+        if poll_until(|| self.ports.relay.live_leg_count() == 0).await {
+            self.retained = None;
+            return Ok(());
         }
         Err("the retained connection never closed after its idle span".to_owned())
     }
@@ -783,10 +816,11 @@ struct Observer {
     /// depends on how far the shutdown task has progressed, so the trace
     /// records the label only and the universal checks still run.
     shutdown_in_progress: bool,
-    /// A connect probe is parked: whether its intent is registered yet is a
-    /// scheduling race, so the trace omits the live counts until the probe is
-    /// released and the connect path is idle again.
+    /// The connect probe hold is armed for the frontend.
     probe_held: bool,
+    /// Probes parked at `authenticate` since the hold was armed; each is proven
+    /// parked (quiescent live counts) before the next action.
+    held_probes: u32,
 }
 
 impl Observer {
@@ -796,6 +830,7 @@ impl Observer {
             generations: Generations { first: None, second: None, third: None },
             shutdown_in_progress: false,
             probe_held: false,
+            held_probes: 0,
         }
     }
 
@@ -807,14 +842,10 @@ impl Observer {
     ) -> Result<Option<GatewayApplicationStatusRowV1>, String> {
         let row = rig.status().await?;
         let (intents, receipts) = rig.live_counts();
-        let line = if self.probe_held {
-            format!("{label}: {}", render_row(row.as_ref()))
-        } else {
-            format!(
-                "{label}: {} intents={intents:?} receipts={receipts:?}",
-                render_row(row.as_ref())
-            )
-        };
+        let line = format!(
+            "{label}: {} intents={intents:?} receipts={receipts:?}",
+            render_row(row.as_ref())
+        );
         if self.shutdown_in_progress {
             self.trace.push(format!("{label}: shutdown in progress"));
         } else {
@@ -826,8 +857,13 @@ impl Observer {
             {
                 return Err(format!("Staged equals Current ({line})"));
             }
-            if let (Some(second), Some(_third), Some(current)) =
-                (self.generations.second, self.generations.third, &row.current)
+            // The second generation is superseded once the third exists; until
+            // then its probe is held, so it cannot be Current either.
+            let barred = self
+                .generations
+                .second
+                .filter(|_| self.probe_held || self.generations.third.is_some());
+            if let (Some(second), Some(current)) = (barred, &row.current)
                 && current.route_generation == second
             {
                 return Err(format!("the superseded second generation became Current ({line})"));
@@ -864,11 +900,12 @@ fn due_faults<'a>(
 
 async fn run_case(
     seed: u64,
-    addresses: Addresses,
-    case: GatewayApplicationInvariantCase,
+    kind: u8,
+    build_case: fn(u64, ServiceFrontend) -> GatewayApplicationInvariantCase,
     check_lifecycle: bool,
 ) -> Result<Outcome, String> {
-    let mut rig = Rig::start(seed, addresses).await?;
+    let mut rig = Rig::start(seed, kind).await?;
+    let case = build_case(seed, frontend_for(rig.ports.addresses)?);
     let mut observer = Observer::new();
     let mut delivered = vec![false; case.faults.len()];
     let mut applies = 0_u32;
@@ -880,15 +917,25 @@ async fn run_case(
         for fault in due_faults(&case, index, &mut delivered) {
             match fault {
                 GatewayApplicationSimFault::HoldConnectProbe(frontend) => {
+                    // No probe may be in flight when the hold is armed.
+                    rig.wait_probes_parked(0).await?;
                     rig.ports.hold.hold(*frontend);
                     observer.probe_held = true;
                     observer.trace.push("fault: connect probe held".to_owned());
                 }
                 GatewayApplicationSimFault::ReleaseConnectProbe(frontend) => {
+                    // The hold provably fired: every held probe is parked before the
+                    // release is delivered. Once shutdown is running it owns the held
+                    // probe's teardown (the sweep removes its intent), so the proof is
+                    // the one recorded when the probe parked.
+                    if !observer.shutdown_in_progress {
+                        rig.wait_probes_parked(observer.held_probes).await?;
+                    }
                     rig.ports.hold.release(*frontend);
                     observer.trace.push("fault: connect probe released".to_owned());
                     rig.wait_connect_idle().await?;
                     observer.probe_held = false;
+                    observer.held_probes = 0;
                     if check_lifecycle {
                         // The stale completion is delivered; the successor must
                         // become Current and the stale generation never does.
@@ -964,6 +1011,12 @@ async fn run_case(
                         observer.generations.third =
                             row.staged.as_ref().map(|s| s.route_generation);
                     }
+                }
+                if observer.probe_held {
+                    // This generation's probe reaches `authenticate` and parks; the
+                    // observation below is taken only once it has.
+                    observer.held_probes += 1;
+                    rig.wait_probes_parked(observer.held_probes).await?;
                 }
                 observer.observe(&rig, &format!("route {applies} applied")).await?;
             }
@@ -1047,7 +1100,15 @@ async fn run_case(
             GatewayApplicationSimInput::BeginShutdown => {
                 rig.begin_shutdown()?;
                 observer.shutdown_in_progress = true;
-                tokio::time::sleep(Duration::from_millis(20)).await;
+                // Shutdown has stopped accepts and closed the application (its
+                // first externally visible step) and then waits on the injected
+                // clock for the drain, which only this case advances.
+                rig.wait_status("shutdown to unbind and clear Staged and Current", |row| {
+                    matches!(row.listener, GatewayListenerStatus::Unbound)
+                        && row.staged.is_none()
+                        && row.current.is_none()
+                })
+                .await?;
                 observer.trace.push("shutdown begun".to_owned());
             }
         }
@@ -1109,10 +1170,7 @@ fn frontend_for(addresses: Addresses) -> Result<ServiceFrontend, String> {
 /// withdrawn or superseded generation.
 pub(crate) async fn evaluate_generation_lifecycle_is_safe(seed: u64) -> InvariantResult {
     let outcome = async {
-        let addresses = Addresses::choose(120, seed)?;
-        let case =
-            GatewayApplicationInvariantCase::generation_lifecycle(seed, frontend_for(addresses)?);
-        run_case(seed, addresses, case, true).await
+        run_case(seed, 120, GatewayApplicationInvariantCase::generation_lifecycle, true).await
     }
     .await;
     verdict(GENERATION_LIFECYCLE_NAME, seed, outcome.map(|outcome| outcome.trace))
@@ -1124,9 +1182,7 @@ pub(crate) async fn evaluate_generation_lifecycle_is_safe(seed: u64) -> Invarian
 /// intent or receipt.
 pub(crate) async fn evaluate_shutdown_converges(seed: u64) -> InvariantResult {
     let outcome = async {
-        let addresses = Addresses::choose(121, seed)?;
-        let case = GatewayApplicationInvariantCase::shutdown(seed, frontend_for(addresses)?);
-        let outcome = run_case(seed, addresses, case, false).await?;
+        let outcome = run_case(seed, 121, GatewayApplicationInvariantCase::shutdown, false).await?;
         let report = outcome.report.as_ref().ok_or("the case never began shutdown")?;
         if !report.is_clean() {
             return Err(format!("the shutdown report is not clean: {report:?}"));

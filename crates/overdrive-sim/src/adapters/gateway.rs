@@ -1,6 +1,6 @@
 //! Sim adapters of the public-ingress gateway driven ports.
 //!
-//! SCAFFOLD: true. This file holds the kernel-relay share (G1):
+//! This file holds the kernel-relay share (G1):
 //! [`SimGatewayRelay`] — the `GatewayRelay` port backed by in-memory record
 //! queues on the injected clock — and its test-support surface; and the
 //! dataplane-side share: [`SimGatewayConnectDataplane`] (over the shared
@@ -8,8 +8,7 @@
 //! client, arming through the Sim relay), [`SimConnectHold`] (the probe hold
 //! they share), and the gateway identity doubles
 //! ([`SimGatewayIdentityActionTarget`], [`SimGatewayIdentityLifecycleControl`]).
-//! Port bodies fail with SCAFFOLD text until DELIVER; the scripting data types
-//! are plain data and are real. [`SimGatewayClientMtlsFactory`] and
+//! [`SimGatewayClientMtlsFactory`] and
 //! [`SimGatewayAdapters`] (R-20) assemble the Sim relay and the Sim exact-peer
 //! client behind the pinned `GatewayClientMtlsFactory` port.
 //!
@@ -53,16 +52,13 @@
 //! host/Sim equivalence comparison.
 
 #![allow(
-    clippy::todo,
     clippy::doc_markdown,
     clippy::needless_pass_by_value,
     clippy::missing_const_for_fn,
     clippy::unused_async,
     clippy::unused_self,
     clippy::needless_pass_by_ref_mut,
-    dead_code,
-    unused_variables,
-    reason = "public-ingress DISTILL scaffold: the Sim port bodies are DELIVER's"
+    reason = "Sim port bodies implement async trait signatures that need not use every argument; doc comments name pinned identifiers"
 )]
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::num::{NonZeroU64, NonZeroUsize};
@@ -778,7 +774,7 @@ impl SimGatewayRelay {
     pub fn arm_upstream_leg(
         &self,
         connected: OwnedFd,
-        expected_peer: &SpiffeId,
+        _expected_peer: &SpiffeId,
     ) -> Result<KtlsLeg, KtlsArmError> {
         let mut state = self.state.lock();
         if let Some(kind) = state.upstream_arm_failure.take() {
@@ -849,7 +845,7 @@ fn source_ended(end: &LegEnd, owed: u64) -> RelayError {
 
 #[async_trait]
 impl GatewayRelay for SimGatewayRelay {
-    async fn probe(&self, deadline: Instant) -> Result<(), RelayProbeError> {
+    async fn probe(&self, _deadline: Instant) -> Result<(), RelayProbeError> {
         let mut state = self.state.lock();
         state.probe_calls += 1;
         match state.lie.clone() {
@@ -874,8 +870,8 @@ impl GatewayRelay for SimGatewayRelay {
     async fn accept_public(
         &self,
         accepted: OwnedFd,
-        tls: Arc<rustls::ServerConfig>,
-        deadline: Instant,
+        _tls: Arc<rustls::ServerConfig>,
+        _deadline: Instant,
     ) -> Result<AcceptedPublicLeg, PublicHandshakeError> {
         let mut state = self.state.lock();
         if let Some(kind) = state.public_arm_failure.take() {
@@ -1016,7 +1012,7 @@ impl GatewayRelay for SimGatewayRelay {
     async fn close_write(
         &self,
         to: &mut KtlsWriteHalf,
-        deadline: Instant,
+        _deadline: Instant,
     ) -> Result<(), LegWriteError> {
         let leg = leg_of_write(to);
         leg.record(RelayCall::CloseWrite);
@@ -1093,9 +1089,9 @@ struct HoldState {
     /// Frontends whose `Selected` probes park.
     held: Vec<ServiceFrontend>,
     /// Frontends a `Selected` receipt was taken for while held, by the backend
-    /// identity the receipt selected; `authenticate` finds its entry by
-    /// `expected_peer`, never by arrival order.
-    pending: BTreeMap<SpiffeId, Vec<ServiceFrontend>>,
+    /// identity the receipt selected, oldest first; `authenticate` finds its
+    /// entry by `expected_peer`, never by arrival order.
+    pending: BTreeMap<SpiffeId, VecDeque<ServiceFrontend>>,
     parked: usize,
 }
 
@@ -1127,10 +1123,14 @@ impl SimConnectHold {
     }
 
     /// Release every probe held for `frontend`: usable = `Ok(GatewayUpstream)`.
+    /// A noted entry whose probe has not parked is dropped, so a later probe
+    /// never parks on a hold that was released before it arrived.
     pub fn release(&self, frontend: ServiceFrontend) {
         {
             let mut state = self.shared.state.lock();
             state.held.retain(|held| *held != frontend);
+            state.pending.values_mut().for_each(|entries| entries.retain(|f| *f != frontend));
+            state.pending.retain(|_, entries| !entries.is_empty());
         }
         self.shared.changed.send_modify(|epoch| *epoch += 1);
     }
@@ -1145,7 +1145,19 @@ impl SimConnectHold {
     fn note_selected(&self, frontend: ServiceFrontend, identity: SpiffeId) {
         let mut state = self.shared.state.lock();
         if state.held.contains(&frontend) {
-            state.pending.entry(identity).or_default().push(frontend);
+            state.pending.entry(identity).or_default().push_back(frontend);
+        }
+    }
+
+    /// The probe noted for `peer` ends before it can park (the peer identity
+    /// check refused it): its entry is dropped.
+    fn discard(&self, peer: &SpiffeId) {
+        let mut state = self.shared.state.lock();
+        if let Some(entries) = state.pending.get_mut(peer) {
+            entries.pop_front();
+            if entries.is_empty() {
+                state.pending.remove(peer);
+            }
         }
     }
 
@@ -1157,7 +1169,9 @@ impl SimConnectHold {
             let Some(frontends) = state.pending.get_mut(peer) else {
                 return;
             };
-            let frontend = frontends.remove(0);
+            let Some(frontend) = frontends.pop_front() else {
+                return;
+            };
             if frontends.is_empty() {
                 state.pending.remove(peer);
             }
@@ -1398,6 +1412,13 @@ impl SimGatewayClientMtls {
         Self { seal, relay, clock, peer: Mutex::new(None), hold: None }
     }
 
+    /// A probe refused before it can park leaves no held entry behind.
+    fn discard_held_entry(&self, peer: &SpiffeId) {
+        if let Some(hold) = &self.hold {
+            hold.discard(peer);
+        }
+    }
+
     /// The identity the scripted peer presents.
     pub fn set_peer(&self, peer: SpiffeId) {
         *self.peer.lock() = Some(peer);
@@ -1418,13 +1439,15 @@ impl GatewayClientMtls for SimGatewayClientMtls {
         &self,
         connected: OwnedFd,
         expected_peer: SpiffeId,
-        deadline: Instant,
+        _deadline: Instant,
     ) -> Result<GatewayUpstream, GatewayClientMtlsError> {
         let presented = self.peer.lock().clone();
         let Some(actual) = presented else {
+            self.discard_held_entry(&expected_peer);
             return Err(GatewayClientMtlsError::PeerCertificateMissing);
         };
         if actual != expected_peer {
+            self.discard_held_entry(&expected_peer);
             return Err(GatewayClientMtlsError::PeerSpiffeMismatch {
                 expected: expected_peer,
                 actual,
