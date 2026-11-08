@@ -40,6 +40,32 @@ Bare metal removes the nesting. That is the whole reason this exists.
    dir plus this worktree's HEAD and index). The first sync moves the whole
    common dir; later syncs are incremental.
 
+## Checkout-specific remote source
+
+Each Git checkout owns one remote source and build directory. A linked
+worktree's identity is its canonical worktree-specific Git directory, so a
+branch switch or detached `HEAD` keeps the same remote directory. An ordinary
+clone uses its physical checkout root and full branch ref; detached ordinary
+clones are refused. The resulting full SHA-256 key selects
+`~/overdrive-worktrees/<key>` or `~/overdrive-branches/<key>`. Branch spelling
+is diagnostic only, so equal branches and names that sanitize alike cannot
+merge source, build artifacts, or retained evidence.
+
+Existing branch-name directories remain untouched. A new identity starts cold
+and binds only a new or empty remote directory. The root file
+`.overdrive-metal-checkout.v1` records the complete identity; an unbound
+non-empty directory, malformed binding, or different owner is refused. An
+`OVERDRIVE_METAL_REMOTE_SUBDIR` override selects a relative directory below the
+physical remote home and receives the same full-owner check. The override is
+refused if it contains an empty, `.` or `..` component, invalid characters, or
+a symlink component.
+
+Sync and pull share a lock derived from the canonical absolute remote
+directory. Pull checks the binding but does not rebind it, so named evidence
+can be retrieved after local source edits. `sync` and `pull` report a missing
+remote `rsync` as `runner_preparation_failed` with status 75; they do not
+install packages on the Metal box.
+
 ## Durable runs and collection
 
 `cargo xtask metal run -- COMMAND [ARG ...]` now registers a run record before
@@ -82,10 +108,10 @@ cargo xtask metal pull specs/quint/<subsystem>/evidence
 cargo xtask metal pull <path> [<path> ...]
 ```
 
-Each named repo-relative path is rsynced from the box's tree for the current
-branch (`~/overdrive-branches/<branch>`) to the same path in the local
-checkout (`bootstrap.sh --pull -- <path>...`). It takes the branch tree's
-lock, so it cannot race a sync or a run of that tree, and it prints one
+Each named repo-relative path is rsynced from the box's tree bound to the
+current Git checkout to the same path in the local checkout
+(`bootstrap.sh --pull -- <path>...`). It takes that checkout's lock, so it
+cannot race a sync or a run of that checkout, and it prints one
 itemized line per transferred entry. It transfers only what is named, never
 `target/`, and never deletes local files (no `--delete`), so files removed on
 the box stay locally until you remove them. Absolute paths and paths with `..`,

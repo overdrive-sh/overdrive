@@ -36,7 +36,6 @@ fn assert_binding(source: &Path, binding: &Path, kind: &str) -> String {
 /// CONTRACT_SHAPE: bounded-change (each selected checkout's source/binding only;
 /// the sibling source, build artifact and retained evidence complement is exact).
 #[test]
-#[ignore = "pending DELIVER: metal-run-isolation canonical checkout identity"]
 fn same_branch_worktrees_keep_source_artifacts_and_evidence_disjoint() {
     let fixture = Fixture::new();
     let second = fixture.temp.path().join("second");
@@ -85,7 +84,6 @@ fn same_branch_worktrees_keep_source_artifacts_and_evidence_disjoint() {
 /// CONTRACT_SHAPE: bounded-change (one worktree binding survives branch changes
 /// and detached HEAD; no new remote owner or cold path is created).
 #[test]
-#[ignore = "pending DELIVER: metal-run-isolation canonical checkout identity"]
 fn linked_identity_survives_branch_switch_and_detachment() {
     let fixture = Fixture::new();
     let linked = fixture.temp.path().join("linked");
@@ -111,7 +109,6 @@ fn linked_identity_survives_branch_switch_and_detachment() {
 /// CONTRACT_SHAPE: bounded-change (attached clone fallback is physical-root plus
 /// full branch; sanitisation aliases and moved metadata select cold state).
 #[test]
-#[ignore = "pending DELIVER: metal-run-isolation canonical checkout identity"]
 fn attached_clone_fallback_and_sanitised_spellings_never_adopt_old_state() {
     let fixture = Fixture::new();
     let legacy = fixture.remote.join("overdrive-branches/metal-isolation");
@@ -144,7 +141,6 @@ fn attached_clone_fallback_and_sanitised_spellings_never_adopt_old_state() {
 /// CONTRACT_SHAPE: bounded-change (invalid local identity/override produces only
 /// a typed refusal; remote source/artifact/evidence universe is unchanged).
 #[test]
-#[ignore = "pending DELIVER: metal-run-isolation identity refusals"]
 fn sad_invalid_identity_and_override_never_contact_a_mutating_remote() {
     for override_value in ["", "/absolute", "a//b", "a/./b", "a/../b", "a/", "a b", "a;true"] {
         let fixture = Fixture::new();
@@ -182,7 +178,6 @@ fn sad_invalid_identity_and_override_never_contact_a_mutating_remote() {
 /// CONTRACT_SHAPE: bounded-change (fresh override binds once; unbound nonempty,
 /// malformed/full-owner conflict and symlink aliases cannot change source).
 #[test]
-#[ignore = "pending DELIVER: metal-run-isolation canonical binding"]
 fn sad_override_conflicts_preserve_the_full_remote_complement() {
     for state in ["nonempty", "foreign", "malformed", "symlink"] {
         let fixture = Fixture::new();
@@ -236,7 +231,6 @@ fn sad_override_conflicts_preserve_the_full_remote_complement() {
 /// CONTRACT_SHAPE: bounded-change (pull changes only named local generated paths;
 /// dirty local inputs do not rebind or rewrite remote source/build/evidence).
 #[test]
-#[ignore = "pending DELIVER: metal-run-isolation source fidelity"]
 fn pull_uses_binding_after_local_source_changes_and_repeated_sync_preserves_target() {
     let fixture = Fixture::new();
     success(&fixture.sync(&fixture.source));
@@ -261,7 +255,6 @@ fn pull_uses_binding_after_local_source_changes_and_repeated_sync_preserves_targ
 /// CONTRACT_SHAPE: bounded-change (missing transfer prerequisite is a preparation
 /// refusal; no host package install or source/retained-run mutation is allowed).
 #[test]
-#[ignore = "pending DELIVER: metal-run-isolation source preparation"]
 fn sad_missing_rsync_is_typed_without_installing_packages() {
     let fixture = Fixture::new();
     success(&fixture.sync(&fixture.source));

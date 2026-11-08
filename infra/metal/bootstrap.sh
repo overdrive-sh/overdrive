@@ -8,17 +8,15 @@
 #
 # Idempotent: re-run freely. Subsequent syncs are incremental.
 #
-# Locking model (two lock levels, always taken global -> tree):
+# Locking model (two lock levels, always taken global -> checkout):
 #   * GLOBAL lease (/run/lock/overdrive-metal-shared.lock): one holder per box.
 #     --run, --shell and bootstrap (provisioning) take it, because they mutate
 #     node-global kernel state (nft tables, routes, cgroups, netns, KVM).
-#   * TREE lock (/run/lock/overdrive-metal-tree-<tree>.lock): one holder per
-#     branch tree. --sync-only and --pull take ONLY this lock, since they touch only
-#     the branch's private tree, so it never waits behind another workspace's
-#     run. --run also takes it (after the global lease) around its own rsync,
-#     and the durable run command re-takes it for the whole command, so a
-#     concurrent sync of the same tree is excluded even after the controller
-#     disconnects. See the run-mode comments below.
+#   * CHECKOUT lock (/run/lock/overdrive-metal-tree-<sha256>.lock): one holder
+#     per canonical remote checkout directory. --sync-only and --pull take only
+#     this lock; --run also takes it after the global lease. The durable command
+#     retains it for the whole command, excluding sync and pull after controller
+#     disconnection. See the run-mode comments below.
 #
 # Usage:
 #   infra/metal/bootstrap.sh root@1.2.3.4
@@ -29,33 +27,33 @@
 #   infra/metal/bootstrap.sh root@1.2.3.4 --pull -- specs/quint/<subsystem>/evidence
 set -euo pipefail
 
-REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-# Relative to the login user's HOME, not an absolute /root path. Scaleway's
-# Ubuntu images log in as `ubuntu`, not `root` (root's authorized_keys carries
-# the stock "please login as ubuntu" forced command), so anything hardcoded
-# under /root fails on the first mkdir. The login user IS the build user.
-#
-# Each branch syncs into its own tree, so parallel workspaces on the shared
-# box never rsync over (or --delete inside) another session's tree. The
-# directory is the current branch name with every character outside
-# [A-Za-z0-9._-] (notably `/`) replaced by `-`; a detached HEAD falls back to
-# the local workspace directory name. OVERDRIVE_METAL_REMOTE_SUBDIR overrides
-# the whole subdirectory (relative to the remote HOME). Each tree keeps its own
-# cargo target dir, so a branch's first run on the box builds cold.
-if [ -n "${OVERDRIVE_METAL_REMOTE_SUBDIR:-}" ]; then
-  REMOTE_SUBDIR="${OVERDRIVE_METAL_REMOTE_SUBDIR}"
-else
-  BRANCH="$(git -C "${REPO}" symbolic-ref --quiet --short HEAD 2>/dev/null || basename "${REPO}")"
-  REMOTE_SUBDIR="overdrive-branches/$(printf '%s' "${BRANCH}" | tr -c 'A-Za-z0-9._-' '-')"
-fi
-case "${REMOTE_SUBDIR}" in
-  ""|/*|*..*) echo "FATAL: invalid remote subdirectory '${REMOTE_SUBDIR}'" >&2; exit 64 ;;
-esac
-[[ "${REMOTE_SUBDIR}" =~ ^[A-Za-z0-9._/-]+$ ]] || {
-  echo "FATAL: remote subdirectory '${REMOTE_SUBDIR}' has characters outside [A-Za-z0-9._/-]" >&2
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
+SSH_OPTS=(-o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30)
+
+checkout_identity_invalid() {
+  printf 'OVERDRIVE_METAL_RUNNER_ERROR error=checkout_identity_invalid\n' >&2
   exit 64
 }
-SSH_OPTS=(-o StrictHostKeyChecking=accept-new -o ServerAliveInterval=30)
+
+remote_subdir_invalid() {
+  printf 'OVERDRIVE_METAL_RUNNER_ERROR error=remote_subdir_invalid\n' >&2
+  exit 64
+}
+
+checkout_identity_conflict() {
+  printf 'OVERDRIVE_METAL_RUNNER_ERROR error=checkout_identity_conflict\n' >&2
+  exit 78
+}
+
+source_mismatch() {
+  printf 'OVERDRIVE_METAL_RUNNER_ERROR error=source_mismatch\n' >&2
+  exit 78
+}
+
+rsync_prerequisite_failed() {
+  printf 'OVERDRIVE_METAL_RUNNER_ERROR error=runner_preparation_failed prerequisite=rsync\n' >&2
+  exit 75
+}
 
 [ $# -ge 1 ] || { echo "usage: $0 <user@host> [--data-disk DEV] [--sync-only | --pull -- PATH... | --run -- CMD... | --shell | --collect ID]" >&2; exit 1; }
 TARGET="$1"; shift
@@ -125,6 +123,75 @@ if [ "${COLLECT_MODE}" -eq 1 ] && ! [[ "${COLLECT_RUN_ID}" =~ ^[0-9a-f]{24}$ ]];
   exit 64
 fi
 
+# Collection is keyed only by the durable run id. Every source operation uses
+# a local checkout identity before contacting the remote host.
+CHECKOUT_KIND=""
+CHECKOUT_KEY=""
+CHECKOUT_IDENTITY_B64=""
+CHECKOUT_BINDING_B64=""
+REMOTE_SUBDIR=""
+REMOTE_SUBDIR_IS_OVERRIDE=0
+if [ "${COLLECT_MODE}" -eq 0 ]; then
+  GIT_BARE="$(git -C "${REPO}" rev-parse --is-bare-repository 2>/dev/null)" \
+    || checkout_identity_invalid
+  [ "${GIT_BARE}" = false ] || checkout_identity_invalid
+
+  GIT_TOP="$(git -C "${REPO}" rev-parse --show-toplevel 2>/dev/null)" \
+    || checkout_identity_invalid
+  REPO="$(cd "${GIT_TOP}" 2>/dev/null && pwd -P)" || checkout_identity_invalid
+  GIT_DIR="$(git -C "${REPO}" rev-parse --absolute-git-dir 2>/dev/null)" \
+    || checkout_identity_invalid
+  GIT_COMMON="$(git -C "${REPO}" rev-parse --git-common-dir 2>/dev/null)" \
+    || checkout_identity_invalid
+  case "${GIT_COMMON}" in
+    /*) ;;
+    *) GIT_COMMON="${REPO}/${GIT_COMMON}" ;;
+  esac
+  GIT_DIR="$(cd "${GIT_DIR}" 2>/dev/null && pwd -P)" || checkout_identity_invalid
+  GIT_COMMON="$(cd "${GIT_COMMON}" 2>/dev/null && pwd -P)" || checkout_identity_invalid
+
+  if [ "${GIT_DIR}" = "${GIT_COMMON}" ]; then
+    GIT_REF="$(git -C "${REPO}" symbolic-ref --quiet HEAD 2>/dev/null)" \
+      || checkout_identity_invalid
+    case "${GIT_REF}" in
+      refs/heads/?*) ;;
+      *) checkout_identity_invalid ;;
+    esac
+    git -C "${REPO}" check-ref-format "${GIT_REF}" >/dev/null 2>&1 \
+      || checkout_identity_invalid
+    CHECKOUT_KIND="branch"
+    CHECKOUT_IDENTITY_B64="$(printf '%s\0%s' "${REPO}" "${GIT_REF}" | base64 | tr -d '\r\n')"
+    CHECKOUT_KEY="$({
+      printf 'overdrive-metal-checkout-v1\0branch\0'
+      printf '%s\0%s' "${REPO}" "${GIT_REF}"
+    } | shasum -a 256 | awk '{print $1}')"
+    CHECKOUT_DEFAULT_PREFIX="overdrive-branches"
+  else
+    CHECKOUT_KIND="worktree"
+    CHECKOUT_IDENTITY_B64="$(printf '%s' "${GIT_DIR}" | base64 | tr -d '\r\n')"
+    CHECKOUT_KEY="$(printf 'overdrive-metal-checkout-v1\0worktree\0%s' "${GIT_DIR}" \
+      | shasum -a 256 | awk '{print $1}')"
+    CHECKOUT_DEFAULT_PREFIX="overdrive-worktrees"
+  fi
+
+  if [ -n "${OVERDRIVE_METAL_REMOTE_SUBDIR:-}" ]; then
+    REMOTE_SUBDIR="${OVERDRIVE_METAL_REMOTE_SUBDIR}"
+    [[ "${REMOTE_SUBDIR}" =~ ^[A-Za-z0-9._/-]+$ ]] || remote_subdir_invalid
+    [[ "${REMOTE_SUBDIR}" != /* ]] || remote_subdir_invalid
+    case "/${REMOTE_SUBDIR}/" in
+      *//*|*/./*|*/../*) remote_subdir_invalid ;;
+    esac
+    REMOTE_SUBDIR_IS_OVERRIDE=1
+  else
+    REMOTE_SUBDIR="${CHECKOUT_DEFAULT_PREFIX}/${CHECKOUT_KEY}"
+  fi
+
+  CHECKOUT_BINDING_B64="$(printf \
+    'format=overdrive-metal-checkout-v1\nkind=%s\ncheckout_key=%s\nidentity_b64=%s\n' \
+    "${CHECKOUT_KIND}" "${CHECKOUT_KEY}" "${CHECKOUT_IDENTITY_B64}" \
+    | base64 | tr -d '\r\n')"
+fi
+
 RUN_ID=""
 if [ "${RUN_MODE}" -eq 1 ]; then
   RUN_ID="$(printf '%s-%s-%s' "$$" "$(date +%s%N)" "${RANDOM}" | shasum -a 256 | cut -c1-24)"
@@ -134,11 +201,6 @@ fi
 METAL_LOCK_PATH="${OVERDRIVE_METAL_LOCK_PATH:-/run/lock/overdrive-metal-shared.lock}"
 METAL_OWNER_PATH="${OVERDRIVE_METAL_OWNER_PATH:-/run/lock/overdrive-metal-shared.owner}"
 METAL_LEASE_TIMEOUT_SECONDS="${OVERDRIVE_METAL_LEASE_TIMEOUT_SECONDS:-120}"
-# Per-tree lock: named after the remote tree (REMOTE_SUBDIR with `/` -> `-`).
-# Both paths are overridable, mirroring the global pair, for test fixtures.
-TREE_NAME="${REMOTE_SUBDIR//\//-}"
-METAL_TREE_LOCK_PATH="${OVERDRIVE_METAL_TREE_LOCK_PATH:-/run/lock/overdrive-metal-tree-${TREE_NAME}.lock}"
-METAL_TREE_OWNER_PATH="${OVERDRIVE_METAL_TREE_OWNER_PATH:-/run/lock/overdrive-metal-tree-${TREE_NAME}.owner}"
 METAL_RUNS_ROOT="/var/lib/overdrive-metal/runs"
 LEASE_TOKEN="${RUN_ID:-$(printf '%s-%s-%s' "$$" "$(date +%s)" "${RANDOM}" | shasum -a 256 | cut -c1-24)}"
 LEASE_TMP=""
@@ -176,6 +238,77 @@ trap cleanup_lease EXIT
 trap 'exit 130' INT TERM HUP
 
 log() { printf '\n########## [bootstrap] %s\n' "$*"; }
+
+ensure_checkout_binding() {
+  local mode="$1"
+  local probe_script probe_command result writer_script writer_command
+
+  probe_script='set -eu
+dir=$1
+expected_b64=$2
+mode=$3
+if [ -L "$dir" ]; then printf "conflict\n"; exit 0; fi
+if [ ! -e "$dir" ]; then
+  if [ "$mode" = bind ]; then printf "new\n"; else printf "conflict\n"; fi
+  exit 0
+fi
+if [ ! -d "$dir" ]; then printf "conflict\n"; exit 0; fi
+binding="$dir/.overdrive-metal-checkout.v1"
+if [ -L "$binding" ]; then printf "conflict\n"; exit 0; fi
+if [ -e "$binding" ]; then
+  if [ ! -f "$binding" ]; then printf "conflict\n"; exit 0; fi
+  if printf "%s" "$expected_b64" | base64 -d | cmp -s "$binding" -; then
+    printf "valid\n"
+  else
+    printf "conflict\n"
+  fi
+  exit 0
+fi
+shopt -s dotglob nullglob
+entries=("$dir"/*)
+if [ "${#entries[@]}" -ne 0 ]; then
+  printf "conflict\n"
+elif [ "$mode" = bind ]; then
+  printf "new\n"
+else
+  printf "conflict\n"
+fi'
+  printf -v probe_command 'bash -c %q metal-checkout-binding %q %q %q' \
+    "${probe_script}" "${REMOTE_DIR}" "${CHECKOUT_BINDING_B64}" "${mode}"
+  result="$(ssh "${SSH_OPTS[@]}" "${TARGET}" "${probe_command}")" || return "$?"
+
+  case "${result}" in
+    valid) return 0 ;;
+    new)
+      [ "${mode}" = bind ] || {
+        if [ "${NO_SYNC}" -eq 1 ]; then source_mismatch; fi
+        checkout_identity_conflict
+      }
+      writer_script='set -eu
+dir=$1
+expected_b64=$2
+binding="$dir/.overdrive-metal-checkout.v1"
+mkdir -p "$dir"
+if [ -e "$binding" ] || [ -L "$binding" ]; then exit 78; fi
+tmp="$binding.tmp.$$.${RANDOM:-0}"
+umask 077
+printf "%s" "$expected_b64" | base64 -d > "$tmp"
+mv -f -- "$tmp" "$binding"'
+      printf -v writer_command 'bash -c %q metal-checkout-binding-writer %q %q' \
+        "${writer_script}" "${REMOTE_DIR}" "${CHECKOUT_BINDING_B64}"
+      ssh "${SSH_OPTS[@]}" "${TARGET}" "${writer_command}"
+      return 0
+      ;;
+    conflict)
+      if [ "${NO_SYNC}" -eq 1 ]; then source_mismatch; fi
+      checkout_identity_conflict
+      ;;
+    *)
+      if [ "${NO_SYNC}" -eq 1 ]; then source_mismatch; fi
+      checkout_identity_conflict
+      ;;
+  esac
+}
 
 # ---------------------------------------------------------------------------
 # rsync flavour — prefer a real rsync 3.x, tolerate openrsync.
@@ -232,10 +365,46 @@ if ! ssh "${SSH_OPTS[@]}" -o ConnectTimeout=10 -o BatchMode=yes \
   echo "  Look for 'Will attempt key' (your key was found) vs 'no such identity'." >&2
   exit 1
 fi
-# Resolve the remote home and whether we need sudo. Both vary by image:
-# root on some, `ubuntu` on Scaleway's.
-REMOTE_HOME="$(ssh "${SSH_OPTS[@]}" "${TARGET}" 'echo $HOME')"
-REMOTE_DIR="${REMOTE_HOME%/}/${REMOTE_SUBDIR}"
+# Resolve the remote home and selected directory without creating anything.
+# The canonical absolute directory also names the checkout-exclusion lock.
+REMOTE_HOME_RAW="$(ssh "${SSH_OPTS[@]}" "${TARGET}" 'echo $HOME')"
+REMOTE_HOME="${REMOTE_HOME_RAW}"
+REMOTE_DIR=""
+if [ "${COLLECT_MODE}" -eq 0 ]; then
+  REMOTE_PATH_RESOLVER='set -eu
+home=$(realpath -e -- "$1") || { printf "invalid\n"; exit 0; }
+subdir=$2
+check_symlinks=$3
+candidate="$home/$subdir"
+if [ "$check_symlinks" = 1 ]; then
+  remaining=$subdir
+  path=$home
+  while [ -n "$remaining" ]; do
+    component=${remaining%%/*}
+    path="$path/$component"
+    [ ! -L "$path" ] || { printf "invalid\n"; exit 0; }
+    if [ "$remaining" = "$component" ]; then break; fi
+    remaining=${remaining#*/}
+  done
+fi
+canonical=$(realpath -m -- "$candidate") || { printf "invalid\n"; exit 0; }
+case "$canonical" in
+  "$home"/*) printf "ok\n%s\n%s\n" "$home" "$canonical" ;;
+  *) printf "invalid\n" ;;
+esac'
+  printf -v REMOTE_PATH_COMMAND 'bash -c %q metal-remote-path %q %q %q' \
+    "${REMOTE_PATH_RESOLVER}" "${REMOTE_HOME_RAW}" "${REMOTE_SUBDIR}" \
+    "${REMOTE_SUBDIR_IS_OVERRIDE}"
+  REMOTE_PATH_RESULT="$(ssh "${SSH_OPTS[@]}" "${TARGET}" "${REMOTE_PATH_COMMAND}")"
+  [ "${REMOTE_PATH_RESULT}" != invalid ] || remote_subdir_invalid
+  [[ "${REMOTE_PATH_RESULT}" == $'ok\n'* ]] || remote_subdir_invalid
+  REMOTE_PATH_RESULT="${REMOTE_PATH_RESULT#*$'\n'}"
+  [[ "${REMOTE_PATH_RESULT}" == *$'\n'* ]] || remote_subdir_invalid
+  REMOTE_HOME="${REMOTE_PATH_RESULT%%$'\n'*}"
+  REMOTE_DIR="${REMOTE_PATH_RESULT#*$'\n'}"
+fi
+
+# The login user and home vary by image: root on some, `ubuntu` on Scaleway's.
 REMOTE_USER="$(ssh "${SSH_OPTS[@]}" "${TARGET}" 'id -un')"
 if [ "${REMOTE_USER}" = "root" ]; then
   SUDO=""
@@ -248,6 +417,12 @@ else
   fi
 fi
 log "remote user=${REMOTE_USER} home=${REMOTE_HOME} sudo='${SUDO:-<none, already root>}'"
+
+if [ "${COLLECT_MODE}" -eq 0 ]; then
+  TREE_HASH="$(printf '%s' "${REMOTE_DIR}" | shasum -a 256 | awk '{print $1}')"
+  METAL_TREE_LOCK_PATH="${OVERDRIVE_METAL_TREE_LOCK_PATH:-/run/lock/overdrive-metal-tree-${TREE_HASH}.lock}"
+  METAL_TREE_OWNER_PATH="${OVERDRIVE_METAL_TREE_OWNER_PATH:-/run/lock/overdrive-metal-tree-${TREE_HASH}.owner}"
+fi
 
 collect_remote() {
   local helper_b64 remote_command status
@@ -483,11 +658,17 @@ fi
 # only the named paths from the remote tree into this checkout. No --delete
 # (files removed remotely stay locally), `target/` is never transferred, and
 # nothing is written to the remote tree.
+REMOTE_RSYNC_READY=0
+if [ "${SYNC_ONLY}" -eq 1 ] && [ "${NO_SYNC}" -eq 0 ]; then
+  ssh "${SSH_OPTS[@]}" "${TARGET}" 'command -v rsync >/dev/null' \
+    || rsync_prerequisite_failed
+  REMOTE_RSYNC_READY=1
+fi
+
 if [ "${PULL_MODE}" -eq 1 ]; then
-  ssh "${SSH_OPTS[@]}" "${TARGET}" 'command -v rsync >/dev/null' || {
-    echo "FATAL: rsync is not installed on ${TARGET}; run \`cargo xtask metal sync\` once to install it" >&2
-    exit 1
-  }
+  ssh "${SSH_OPTS[@]}" "${TARGET}" 'command -v rsync >/dev/null' \
+    || rsync_prerequisite_failed
+  ensure_checkout_binding check
   for _path in "${RUN_ARGS[@]}"; do
     _path="${_path%/}"
     # shellcheck disable=SC2029
@@ -515,14 +696,24 @@ if [ "${PULL_MODE}" -eq 1 ]; then
   exit 0
 fi
 
+if [ "${NO_SYNC}" -eq 1 ]; then
+  ensure_checkout_binding check
+else
+  ensure_checkout_binding bind
+fi
+
 if [ "${NO_SYNC}" -eq 0 ]; then
-ssh "${SSH_OPTS[@]}" "${TARGET}" 'command -v rsync >/dev/null' || {
-  log "installing rsync on the remote"
-  # shellcheck disable=SC2029
-  ssh "${SSH_OPTS[@]}" "${TARGET}" \
-    "${SUDO} env DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=600 update -qq && \
-     ${SUDO} env DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=600 install -y -qq rsync"
-}
+  if [ "${REMOTE_RSYNC_READY}" -eq 0 ] \
+    && ! ssh "${SSH_OPTS[@]}" "${TARGET}" 'command -v rsync >/dev/null'; then
+    if [ "${SYNC_ONLY}" -eq 1 ] || [ "${PULL_MODE}" -eq 1 ]; then
+      rsync_prerequisite_failed
+    fi
+    log "installing rsync on the remote"
+    # shellcheck disable=SC2029
+    ssh "${SSH_OPTS[@]}" "${TARGET}" \
+      "${SUDO} env DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=600 update -qq && \
+       ${SUDO} env DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=600 install -y -qq rsync"
+  fi
 
 # ---------------------------------------------------------------------------
 log "sync ${REPO} -> ${TARGET}:${REMOTE_DIR}"
@@ -538,6 +729,7 @@ ssh "${SSH_OPTS[@]}" "${TARGET}" "mkdir -p ${REMOTE_DIR}"
   --exclude='spike-scratch/*/out/' \
   --exclude='node_modules/' \
   --exclude='/vendors/linux/' \
+  --exclude='/.overdrive-metal-checkout.v1' \
   --exclude='.DS_Store' \
   --exclude='/.git' \
   --exclude='/.git/' \
@@ -589,19 +781,18 @@ ssh "${SSH_OPTS[@]}" "${TARGET}" \
    git -C ${REMOTE_DIR} config --unset core.worktree 2>/dev/null; \
    git -C ${REMOTE_DIR} status --short --branch | head -5" || true
 
-printf '%s\n' "${EXPECTED_MARKER}" | ssh "${SSH_OPTS[@]}" "${TARGET}" \
-  "cat > ${REMOTE_DIR}/.overdrive-metal-source"
+SOURCE_MARKER="${REMOTE_DIR}/.overdrive-metal-source"
+SOURCE_MARKER_TMP="${SOURCE_MARKER}.tmp.${LEASE_TOKEN}"
+printf -v SOURCE_MARKER_COMMAND 'tmp=%q; marker=%q; cat > "$tmp" && mv -f -- "$tmp" "$marker"' \
+  "${SOURCE_MARKER_TMP}" "${SOURCE_MARKER}"
+printf '%s\n' "${EXPECTED_MARKER}" \
+  | ssh "${SSH_OPTS[@]}" "${TARGET}" "${SOURCE_MARKER_COMMAND}"
 else
   log "no-sync source identity check"
   ACTUAL_MARKER="$(ssh "${SSH_OPTS[@]}" "${TARGET}" \
     "cat ${REMOTE_DIR}/.overdrive-metal-source 2>/dev/null" || true)"
   if [ "${ACTUAL_MARKER}" != "${EXPECTED_MARKER}" ]; then
-    echo "FATAL: --no-sync refused stale or mismatched metal source" >&2
-    echo "expected:" >&2
-    printf '%s\n' "${EXPECTED_MARKER}" | sed 's/^/  /' >&2
-    echo "actual:" >&2
-    printf '%s\n' "${ACTUAL_MARKER:-<missing>}" | sed 's/^/  /' >&2
-    exit 1
+    source_mismatch
   fi
 fi
 
