@@ -1892,24 +1892,35 @@ fn envelope_holding_an_invalid_route() -> Vec<u8> {
         .collect();
     assert_eq!(at.len(), 1, "the hostname appears once in the archived Route");
     bytes[at[0]..at[0] + valid.len()].copy_from_slice(invalid.as_bytes());
-    PublicRouteSetV1::from_store_bytes(&bytes, std::path::Path::new("<fixture>"), None)
-        .expect("the patched bytes are still a well-formed envelope");
+    // The decode validates the stored Route (R-67 (4)): an envelope that is
+    // well formed and holds a Route no constructor accepts is refused with
+    // `RouteCodecError::InvalidRoute(RouteValidationError::Hostname(_))`, and
+    // never with an `Envelope` failure. The two facts together prove the
+    // patched bytes are a well-formed envelope holding an invalid Route. The
+    // variant is read through `Debug` so this file compiles against the
+    // decode's present return type as well as its R-67 return type.
+    let refusal = PublicRouteSetV1::from_store_bytes(
+        &bytes,
+        std::path::Path::new("<fixture>"),
+        Some("public-ingress/route-set"),
+    )
+    .expect_err("the decode refuses a Route no constructor accepts (R-67 (4))");
+    assert!(
+        format!("{refusal:?}").starts_with("InvalidRoute(Hostname("),
+        "the patched bytes are a well-formed envelope holding an invalid hostname, got {refusal:?}"
+    );
     bytes
 }
 
 /// S-PIG-140 (R-67), invalid-Route arm: a well-formed envelope whose Route
 /// fails Route validation is the same typed 500 `route_decode` on both
-/// methods, with the same oracle as the garbage arm.
-///
-/// Held back by a design gap reported at DISTILL: R-67 pins no read-side
-/// Route validation, so `RouteCodecError::InvalidRoute` has no producer and
-/// the owner decodes this envelope successfully. The ignore is removed when
-/// DESIGN pins where a stored Route is revalidated.
+/// methods, with the same oracle as the garbage arm. The stored Route is
+/// validated by the decode itself (R-67 (4)).
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER route-set-error-mapping, blocked on a pinned read-side Route validation (DISTILL gap)"]
+#[ignore = "pending DELIVER route-set-error-mapping"]
 async fn a_well_formed_envelope_holding_an_invalid_route_is_a_typed_500_route_decode() {
     let mut world = World::boot(Spec::enabled(170)).await;
     world
@@ -1921,17 +1932,56 @@ async fn a_well_formed_envelope_holding_an_invalid_route_is_a_typed_500_route_de
     world.shutdown().await;
 }
 
-/// S-PIG-141 (R-67), shutdown arm: once the gateway stage of the graceful
-/// shutdown has ended the Route owner, and while the operator listener still
-/// drains, both Route commands answer the typed 503
-/// `gateway_owner_unavailable`, and the Route set in the store is unchanged.
+/// A client that issues one Route command after another against the operator
+/// listener until told to stop, so a command is always queued or awaiting its
+/// reply while the node shuts down. `post` selects `POST /v1/routes` (a
+/// declare of the stored Route, which never conflicts) or `DELETE` of another
+/// Route's ID (which never writes). It returns every answer it received;
+/// transport errors (the listener already closed) are not answers.
+fn keep_a_route_command_in_flight(
+    client: reqwest::Client,
+    base: String,
+    post: bool,
+    answered: Arc<AtomicU32>,
+    stop: Arc<AtomicBool>,
+) -> tokio::task::JoinHandle<Vec<RouteReply>> {
+    tokio::spawn(async move {
+        let mut answers = Vec::new();
+        while !stop.load(Ordering::SeqCst) {
+            let sent = if post {
+                client.post(format!("{base}/v1/routes")).json(&route_input("/")).send().await
+            } else {
+                client.delete(format!("{base}/v1/routes/{OTHER_ROUTE_ID}")).send().await
+            };
+            match sent {
+                Ok(response) => {
+                    answers.push(World::reply(response).await.expect("read the reply"));
+                    answered.fetch_add(1, Ordering::SeqCst);
+                }
+                Err(_) => tokio::time::sleep(Duration::from_millis(1)).await,
+            }
+        }
+        answers
+    })
+}
+
+/// S-PIG-141 (R-67), shutdown arm: a Route command queued, awaiting its reply,
+/// or sent after the gateway stage of the graceful shutdown ended the Route
+/// owner, while the operator listener still drains, answers the typed 503
+/// `gateway_owner_unavailable`; the Route set in the store is unchanged.
 ///
-/// The operator client polls both methods through the shutdown; every answer
-/// before the owner ends is a success or a Route conflict (the DELETE names
-/// another Route, so it never writes). The first non-success answer of each
-/// method must be the 503. A refused boot after G1 drops the same receiver but
-/// tears the operator listener down with it, so that arm has no HTTP
-/// observer; see the DISTILL report.
+/// One command of each method is kept in flight continuously across the
+/// shutdown (R-67 (5)): the window between the end of the Route owner and the
+/// close of the operator listener is not bounded in width, so sampling it
+/// would be a race, whereas a command that is queued or awaiting its reply
+/// when the owner is cancelled is answered `OwnerUnavailable` by construction.
+/// Every answer before the owner ends is a success or a Route conflict (the
+/// DELETE names another Route, so it never writes); the first other answer of
+/// each method must be the 503, and each method must have received it.
+///
+/// The refused-boot arm of S-PIG-141 takes a no-obligation ruling (R-67 (5)):
+/// every refusal after G1 precedes the spawn of the operator listener's
+/// server task, so no HTTP request can observe the dropped receiver.
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -1944,61 +1994,63 @@ async fn a_route_owner_that_ended_in_shutdown_answers_503_gateway_owner_unavaila
     let before = world.stored_route_set().await;
     assert!(before.is_some(), "the declared Route is stored");
 
+    let stop = Arc::new(AtomicBool::new(false));
+    let (posts_answered, deletes_answered) =
+        (Arc::new(AtomicU32::new(0)), Arc::new(AtomicU32::new(0)));
+    let poster = keep_a_route_command_in_flight(
+        world.client.clone(),
+        world.base.clone(),
+        true,
+        Arc::clone(&posts_answered),
+        Arc::clone(&stop),
+    );
+    let deleter = keep_a_route_command_in_flight(
+        world.client.clone(),
+        world.base.clone(),
+        false,
+        Arc::clone(&deletes_answered),
+        Arc::clone(&stop),
+    );
+    // Both clients are live (each has been answered once) before the shutdown
+    // starts, so each has a command in flight from then on.
+    let live_deadline = Instant::now() + WAIT;
+    while posts_answered.load(Ordering::SeqCst) == 0 || deletes_answered.load(Ordering::SeqCst) == 0
+    {
+        assert!(Instant::now() < live_deadline, "the Route command clients never got an answer");
+        tokio::time::sleep(Duration::from_millis(1)).await;
+    }
+
     let handle = world.handle.take().expect("the server handle");
     let clock = Arc::clone(&world.clock);
     let mut shutdown = std::pin::pin!(handle.shutdown(Duration::from_secs(5)));
-    let (mut post_503, mut delete_503) = (None, None);
-    let mut shutdown_done = false;
-    let deadline = Instant::now() + WAIT;
-    while !(shutdown_done || post_503.is_some() && delete_503.is_some()) {
-        assert!(Instant::now() < deadline, "timed out polling the Route commands");
+    let shutdown_deadline = Instant::now() + WAIT;
+    loop {
+        assert!(Instant::now() < shutdown_deadline, "the graceful shutdown never completed");
         tokio::select! {
             biased;
-            result = &mut shutdown => {
-                result.expect("graceful shutdown");
-                shutdown_done = true;
-            }
-            (post, delete) = async {
-                tokio::join!(world.try_route_post("/"), world.try_route_delete(OTHER_ROUTE_ID))
-            } => {
-                for (what, answer, seen) in
-                    [("POST", post, &mut post_503), ("DELETE", delete, &mut delete_503)]
-                {
-                    match answer {
-                        Ok(reply) if reply.status == 503 => *seen = Some(reply),
-                        Ok(reply) if reply.status == 409 || reply.status < 300 => {}
-                        Ok(reply) => panic!("{what} answered neither success nor 503: {reply:?}"),
-                        Err(_) => {}
-                    }
-                }
-                clock.tick(TICK);
-                tokio::time::sleep(Duration::from_millis(1)).await;
-            }
+            result = &mut shutdown => { result.expect("graceful shutdown"); break; }
+            () = tokio::time::sleep(Duration::from_millis(5)) => clock.tick(TICK),
         }
     }
-    if !shutdown_done {
-        loop {
-            tokio::select! {
-                biased;
-                result = &mut shutdown => { result.expect("graceful shutdown"); break; }
-                () = tokio::time::sleep(Duration::from_millis(5)) => clock.tick(TICK),
-            }
-        }
-    }
+    stop.store(true, Ordering::SeqCst);
+    let posts = poster.await.expect("the declare client");
+    let deletes = deleter.await.expect("the delete client");
 
     let message = "public Route owner is unavailable";
-    post_503.expect("POST /v1/routes answered during the shutdown window").assert_typed(
-        503,
-        "gateway_owner_unavailable",
-        message,
-        "POST",
-    );
-    delete_503.expect("DELETE /v1/routes/{id} answered during the shutdown window").assert_typed(
-        503,
-        "gateway_owner_unavailable",
-        message,
-        "DELETE",
-    );
+    for (what, answers) in [("POST", &posts), ("DELETE", &deletes)] {
+        let first_refusal = answers
+            .iter()
+            .find(|reply| !(reply.status < 300 || reply.status == 409))
+            .unwrap_or_else(|| panic!("{what}: no command was refused by the shutdown window"));
+        first_refusal.assert_typed(503, "gateway_owner_unavailable", message, what);
+        assert!(
+            answers
+                .iter()
+                .skip_while(|reply| reply.status < 300 || reply.status == 409)
+                .all(|reply| reply.status == 503),
+            "{what}: after the first refusal every answer is the 503; {answers:?}"
+        );
+    }
     assert_eq!(
         world.stored_route_set().await,
         before,
