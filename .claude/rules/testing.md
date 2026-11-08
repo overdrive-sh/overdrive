@@ -1816,25 +1816,54 @@ virtualized host is never permission to treat that host's test result as
 evidence.
 
 **The canonical runner is `cargo xtask metal run --`** — the metal sibling
-of `cargo xtask lima run --`. It (1) rsyncs the working tree up via
-`infra/metal/bootstrap.sh --sync-only`, then (2) ssh-executes under a
-`bash -lc` login shell wrapped in `sudo … env "HOME=$HOME" "PATH=$PATH" …`
-so the run has the root permission surface KVM/cgroups need and cargo on
-PATH. The `block-bare-nextest` hook allows `cargo xtask metal run` exactly
-as it allows `cargo xtask lima run`.
+of `cargo xtask lima run --`. An ordinary Metal run binds its canonical
+checkout, transfers that source, and executes under a durable systemd owner
+with the root permission surface KVM/cgroups need and cargo on `PATH`.
+Independent worktrees take shared physical-maintenance admission and can run
+ordinary verification concurrently; a run, sync, or pull for the same
+checkout remains exclusive. The `block-bare-nextest` hook allows
+`cargo xtask metal run` exactly as it allows `cargo xtask lima run`.
 
 | ❌ don't | ✅ do |
 |---|---|
 | `ssh <box> '… cargo nextest run …'` | `cargo xtask metal run -- cargo nextest run …` |
 | `cargo xtask lima run -- … --features kvm-tests` (virtualized Lima is non-signal) | `cargo xtask metal run -- cargo nextest run -p overdrive-cli --features integration-tests,kvm-tests` |
 
+Ordinary `metal run` accepts the existing Cargo build/check/clippy/fmt,
+doctest, approved xtask setup/lint/model, nextest, prepared guest-suite, and
+pure Sim command forms. Arbitrary commands, shell chains, `cargo test` bodies,
+and `cargo xtask kmod-load` refuse before START. The reviewed
+`--exclusive -- COMMAND` mode retains arbitrary privileged maintenance with
+exclusive physical-maintenance ownership; `metal shell` and provisioning
+remain exclusive too.
+
+On ordinary Metal runs, the checked-in Nextest wrapper is mandatory for every
+profile. It executes the actual selected test ELF and preserves its libtest
+arguments, Nextest helper executables, declared environment, attempt number,
+and result. Host-pure bodies keep the original runner chain; native-launcher
+bodies get a local-vsock namespace; guest-group bodies run in a fresh guest
+instance for each attempt. Unknown placement or missing dispatcher refuses
+before the test body. `cargo xtask guest-kit-prepare` incrementally prepares
+the existing guest-suite dispatcher alongside its existing artifacts. The
+explicit `overdrive-fwd-guest-suite` command keeps its existing batched groups.
+
+Prepare and load guest prerequisites as separate commands, preserving the
+physical-host module-load boundary:
+
+```bash
+cargo xtask metal run -- env OVERDRIVE_BPF_NATIVE=1 cargo xtask bpf-build
+cargo xtask metal run -- cargo xtask guest-kit-prepare
+cargo xtask metal run --exclusive -- cargo xtask kmod-load
+cargo xtask metal run -- cargo nextest run -p overdrive-cli --features integration-tests,kvm-tests
+```
+
 The target host (`user@host`) comes from `OVERDRIVE_METAL_TARGET` in the
 process environment or a workspace-root `.env` (gitignored; see
-`.env.example`) — never hardcoded. `--no-sync` skips the pre-run rsync
-(re-run a suite against an already-synced tree); `--no-sudo` runs as the
-login user. The sync is folded into `run` on purpose: it removes the
-"tested stale code" hazard of a separate sync-then-ssh dance. `cargo xtask
-metal sync` and `cargo xtask metal shell` cover the standalone cases.
+`.env.example`) — never hardcoded. `--no-sync` runs against the already-bound
+remote source after verifying its checkout marker; `--no-sudo` runs as the
+login user. Source transfer is part of `run`, avoiding a separate
+sync-then-ssh step. `cargo xtask metal sync` and `cargo xtask metal shell`
+cover standalone sync and exclusive administration.
 
 Outputs a metal run writes into the remote tree (recorded evidence, generated
 files) do not come back on their own. `cargo xtask metal pull <path>...`

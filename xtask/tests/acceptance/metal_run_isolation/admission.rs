@@ -35,7 +35,6 @@ fn assert_held_lock(owner: &std::path::Path, lock: &std::path::Path, mode: &str)
 /// CONTRACT_SHAPE: bounded-change (two invocation process/record/descriptor
 /// universes; completing one leaves the surviving owner's process and locks live).
 #[test]
-#[ignore = "pending DELIVER: metal-run-isolation durable shared admission"]
 fn independent_ordinary_owners_overlap_after_controller_loss() {
     let fixture = Fixture::new();
     let mut first =
@@ -82,7 +81,6 @@ fn independent_ordinary_owners_overlap_after_controller_loss() {
 /// CONTRACT_SHAPE: bounded-change (a contending invocation registers/waits then
 /// retains its typed timeout; held source, owner and selected body stay unchanged).
 #[test]
-#[ignore = "pending DELIVER: metal-run-isolation checkout exclusion"]
 fn sad_own_checkout_and_maintenance_deadlines_have_distinct_causes() {
     for (blocking_class, competing_tree, expected) in [
         ("ordinary", "same-tree", "checkout_timeout"),
@@ -121,7 +119,6 @@ fn sad_own_checkout_and_maintenance_deadlines_have_distinct_causes() {
 /// CONTRACT_SHAPE: bounded-change (only one exact runner terminal is published;
 /// tagged ABORT and EOF produce no selected-command/source/artifact delta).
 #[test]
-#[ignore = "pending DELIVER: metal-run-isolation preparation abort protocol"]
 fn sad_prestart_controls_retain_the_approved_error_set_without_a_body() {
     for (control, expected) in [
         (Some("ABORT error=checkout_identity_conflict"), "checkout_identity_conflict"),
@@ -154,7 +151,6 @@ fn sad_prestart_controls_retain_the_approved_error_set_without_a_body() {
 /// CONTRACT_SHAPE: bounded-change (late control cannot replay a selected body;
 /// exact command terminal survives controller disconnection).
 #[test]
-#[ignore = "pending DELIVER: metal-run-isolation one-shot durable start"]
 fn duplicate_start_never_replays_a_selected_command() {
     let fixture = Fixture::new();
     let count = fixture.temp.path().join("body-count");
@@ -174,7 +170,6 @@ fn duplicate_start_never_replays_a_selected_command() {
 /// CONTRACT_SHAPE: bounded-change (sync/pull own only their requested checkout
 /// lock; a running owner excludes both without acquiring physical maintenance).
 #[test]
-#[ignore = "pending DELIVER: metal-run-isolation source exclusion"]
 fn sad_sync_and_pull_wait_on_the_running_checkout_without_source_mutation() {
     let fixture = Fixture::new();
     // The exact lock-path substitutions are the already-supported shell fixture
@@ -216,7 +211,6 @@ fn sad_sync_and_pull_wait_on_the_running_checkout_without_source_mutation() {
 /// CONTRACT_SHAPE: bounded-change (one actual admission budget covers two real
 /// contended locks; no selected body or unrelated source/owner state changes).
 #[test]
-#[ignore = "pending DELIVER: metal-run-isolation single admission deadline"]
 fn sad_waiting_for_both_locks_cannot_restart_the_existing_admission_budget() {
     struct Holder(Option<std::process::Child>);
     impl Drop for Holder {

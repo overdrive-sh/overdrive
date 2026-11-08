@@ -104,10 +104,25 @@ metadata_valid() {
   local run_id="$2"
   local unit="$3"
   local value
-  ordered_record_shape "$path" \
-    format run_id token unit created_at scenario_b64 workspace_b64 commit \
-    source_digest remote_dir_b64 target_user_b64 execution_mode || return 1
-  [ "$(record_value "$path" 1)" = overdrive-metal-run-v1 ] || return 1
+  case "$(basename "$path")" in
+    metadata.v1)
+      METADATA_VERSION=1
+      ordered_record_shape "$path" \
+        format run_id token unit created_at scenario_b64 workspace_b64 commit \
+        source_digest remote_dir_b64 target_user_b64 execution_mode || return 1
+      [ "$(record_value "$path" 1)" = overdrive-metal-run-v1 ] || return 1
+      ;;
+    metadata.v2)
+      METADATA_VERSION=2
+      ordered_record_shape "$path" \
+        format run_id token unit created_at scenario_b64 workspace_b64 commit \
+        source_digest remote_dir_b64 target_user_b64 execution_mode execution_class || return 1
+      [ "$(record_value "$path" 1)" = overdrive-metal-run-v2 ] || return 1
+      value="$(record_value "$path" 13)"
+      [ "$value" = ordinary ] || [ "$value" = exclusive ] || return 1
+      ;;
+    *) return 1 ;;
+  esac
   [ "$(record_value "$path" 2)" = "$run_id" ] || return 1
   [ "$(record_value "$path" 3)" = "$run_id" ] || return 1
   [ "$(record_value "$path" 4)" = "$unit" ] || return 1
@@ -123,6 +138,151 @@ metadata_valid() {
   canonical_base64 "$(record_value "$path" 11)" || return 1
   value="$(record_value "$path" 12)"
   [ "$value" = privileged ] || [ "$value" = login ] || return 1
+}
+
+METADATA_VERSION=0
+COMPLETION_KIND=""
+COMPLETION_ERROR=""
+COMPLETION_ROOT=""
+
+completion_valid() {
+  local path="$1"
+  local run_id="$2"
+  local count
+  COMPLETION_KIND=""
+  COMPLETION_ERROR=""
+  COMPLETION_ROOT=""
+  [ -f "$path" ] && [ ! -L "$path" ] || return 1
+  record_has_final_newline "$path" || return 1
+  [ "$(record_value "$path" 1)" = overdrive-metal-completion-v1 ] || return 1
+  [ "$(record_value "$path" 2)" = "$run_id" ] || return 1
+  COMPLETION_KIND="$(record_value "$path" 3)"
+  count="$(wc -l <"$path" | tr -d '[:space:]')"
+  case "$COMPLETION_KIND" in
+    complete)
+      ordered_record_shape "$path" format run_id kind finished_at || return 1
+      [ "$count" -eq 4 ] || return 1
+      is_rfc3339_utc "$(record_value "$path" 4)" || return 1
+      ;;
+    runner)
+      ordered_record_shape "$path" format run_id kind error root finished_at || return 1
+      [ "$count" -eq 6 ] || return 1
+      COMPLETION_ERROR="$(record_value "$path" 4)"
+      [ "$COMPLETION_ERROR" = cleanup_failed ] || return 1
+      COMPLETION_ROOT="$(record_value "$path" 5)"
+      case "$COMPLETION_ROOT" in guest_staging|vmm_runtime|command_tmp) ;; *) return 1 ;; esac
+      is_rfc3339_utc "$(record_value "$path" 6)" || return 1
+      ;;
+    *) return 1 ;;
+  esac
+}
+
+write_completion_complete() {
+  local run_id="$1"
+  local directory="$2"
+  atomic_write "$directory/completion.v1" "format=overdrive-metal-completion-v1
+run_id=${run_id}
+kind=complete
+finished_at=$(utc_now)
+"
+}
+
+write_completion_cleanup_failed() {
+  local run_id="$1"
+  local directory="$2"
+  local root="$3"
+  atomic_write "$directory/completion.v1" "format=overdrive-metal-completion-v1
+run_id=${run_id}
+kind=runner
+error=cleanup_failed
+root=${root}
+finished_at=$(utc_now)
+"
+}
+
+safe_owned_root() {
+  local path="$1"
+  local expected="$2"
+  local canonical component current
+  local -a components=()
+  [[ "$path" = /* ]] || return 1
+  [[ "$path" != *$'\n'* && "$path" != *$'\r'* ]] || return 1
+  case "${path}/" in *//*|*/./*|*/../*) return 1 ;; esac
+  canonical="$(realpath -m -- "$path" 2>/dev/null)" || return 1
+  [ "$canonical" = "$path" ] || return 1
+  [ "$canonical" = "$expected" ] || return 1
+  current=""
+  IFS='/' read -r -a components <<<"${path#/}"
+  for component in "${components[@]}"; do
+    [ -n "$component" ] || continue
+    current="${current}/${component}"
+    [ ! -L "$current" ] || return 1
+  done
+}
+
+remove_owned_root() {
+  local path="$1"
+  local expected="$2"
+  safe_owned_root "$path" "$expected" || return 1
+  if [ -L "$path" ]; then
+    return 1
+  fi
+  if [ -e "$path" ]; then
+    [ -d "$path" ] || return 1
+    rm -rf -- "$path" || return 1
+  fi
+  [ ! -e "$path" ] && [ ! -L "$path" ]
+}
+
+finalize_run() {
+  local run_id="$1"
+  local runs_root="$2"
+  local run_directory="${runs_root}/${run_id}"
+  local metadata="${run_directory}/metadata.v2"
+  local remote_dir
+  local root
+  local index
+
+  if ! valid_run_id "$run_id"; then
+    collector_marker invalid_run_id
+    return 64
+  fi
+  if [ ! -d "$run_directory" ] || [ -L "$run_directory" ] || \
+    ! metadata_valid "$metadata" "$run_id" "overdrive-metal-run-${run_id}.service" || \
+    [ "$METADATA_VERSION" -ne 2 ]; then
+    collector_marker run_artifact_io
+    return 74
+  fi
+  remote_dir="$(printf '%s' "$(record_value "$metadata" 10)" | base64 -d 2>/dev/null)" || {
+    collector_marker run_artifact_io
+    return 74
+  }
+  [[ "$remote_dir" = /* ]] || { collector_marker run_artifact_io; return 74; }
+
+  local -a roots=(
+    "/srv/vm/metal/${run_id}"
+    "/run/ovd-gk/${run_id}"
+    "${remote_dir}/target/metal-run-tmp/${run_id}"
+  )
+  local -a expected=(
+    "/srv/vm/metal/${run_id}"
+    "/run/ovd-gk/${run_id}"
+    "${remote_dir}/target/metal-run-tmp/${run_id}"
+  )
+  local -a names=(guest_staging vmm_runtime command_tmp)
+
+  for index in 0 1 2; do
+    root="${names[$index]}"
+    if ! remove_owned_root "${roots[$index]}" "${expected[$index]}"; then
+      write_completion_cleanup_failed "$run_id" "$run_directory" "$root" || true
+      printf 'OVERDRIVE_METAL_RUNNER_ERROR error=cleanup_failed root=%s\n' "$root" >&2
+      return 74
+    fi
+  done
+  write_completion_complete "$run_id" "$run_directory" || {
+    collector_marker run_artifact_io
+    return 74
+  }
 }
 
 phase_valid() {
@@ -174,7 +334,9 @@ terminal_valid() {
     TERMINAL_KIND=runner
     TERMINAL_ERROR="$(record_value "$path" 4)"
     case "$TERMINAL_ERROR" in
-      lease_timeout|launch_aborted|controller_eof_before_start|\
+      lease_timeout|maintenance_timeout|checkout_timeout|\
+      checkout_identity_conflict|source_mismatch|runner_preparation_failed|\
+      preflight_failed|launch_aborted|controller_eof_before_start|\
       command_launch_failed|log_write_failed|log_finalize_failed) ;;
       *) return 1 ;;
     esac
@@ -235,6 +397,62 @@ unit_is_live() {
   [ "$load" = loaded ] || return 1
   [ "$active" = activating ] || [ "$active" = active ] || \
     [ "$active" = deactivating ]
+}
+
+remaining_lock_timeout() {
+  local deadline_ns="$1"
+  local now_ns remaining_ns seconds milliseconds
+  now_ns="$(date +%s%N)" || return 1
+  [[ "$now_ns" =~ ^[0-9]+$ ]] || return 1
+  remaining_ns=$((deadline_ns - now_ns))
+  [ "$remaining_ns" -gt 1000000 ] || return 1
+  seconds=$((remaining_ns / 1000000000))
+  milliseconds=$(((remaining_ns % 1000000000) / 1000000))
+  printf -v REMAINING_LOCK_TIMEOUT '%d.%03d' "$seconds" "$milliseconds"
+}
+
+wait_for_admitted_ordinary_units() {
+  local deadline_ns="$1"
+  local current_run_id="$2"
+  local runs_root="$3"
+  local directory run_id metadata phase unit execution_class pending
+  while :; do
+    pending=0
+    if [ -d "$runs_root" ]; then
+      for directory in "$runs_root"/*; do
+        [ -d "$directory" ] && [ ! -L "$directory" ] || continue
+        run_id="${directory##*/}"
+        valid_run_id "$run_id" || continue
+        [ "$run_id" = "$current_run_id" ] && continue
+        metadata="$directory/metadata.v2"
+        phase="$directory/phase.v1"
+        [ -e "$metadata" ] || [ -L "$metadata" ] || continue
+        unit="overdrive-metal-run-${run_id}.service"
+        if ! metadata_valid "$metadata" "$run_id" "$unit" || \
+          [ "$METADATA_VERSION" -ne 2 ] || ! phase_valid "$phase" "$run_id"; then
+          unit_is_live "$unit" && return 2
+          continue
+        fi
+        execution_class="$(record_value "$metadata" 13)"
+        [ "$execution_class" = ordinary ] || continue
+        case "$(record_value "$phase" 3)" in
+          preparing|running)
+            if unit_is_live "$unit"; then
+              pending=1
+              break
+            fi
+            ;;
+          waiting_for_lease) ;;
+          *)
+            unit_is_live "$unit" && return 2
+            ;;
+        esac
+      done
+    fi
+    [ "$pending" -eq 0 ] && return 0
+    remaining_lock_timeout "$deadline_ns" || return 1
+    sleep 0.1
+  done
 }
 
 collector_marker() {
@@ -308,6 +526,26 @@ terminal_result() {
   fi
   error="$TERMINAL_ERROR"
   case "$error" in
+    maintenance_timeout)
+      if [ -n "$COLLECT_TIMEOUT_SECONDS" ]; then
+        printf 'FATAL: timed out after %ss acquiring %s\n' \
+          "$COLLECT_TIMEOUT_SECONDS" "$COLLECT_LOCK_PATH" >&2
+        if [ -r "$COLLECT_OWNER_PATH" ]; then
+          printf 'current lease owner:\n' >&2
+          sed 's/^/  /' "$COLLECT_OWNER_PATH" >&2
+        fi
+      fi
+      collector_marker "$error"
+      return 75
+      ;;
+    checkout_timeout|runner_preparation_failed)
+      collector_marker "$error"
+      return 75
+      ;;
+    checkout_identity_conflict|source_mismatch|preflight_failed)
+      collector_marker "$error"
+      return 78
+      ;;
     lease_timeout|launch_aborted|controller_eof_before_start|command_launch_failed)
       if [ "$error" = lease_timeout ] && [ -n "$COLLECT_TIMEOUT_SECONDS" ]; then
         printf 'FATAL: timed out after %ss acquiring %s\n' \
@@ -336,9 +574,13 @@ collect_run() {
   local runs_root="$2"
   local run_directory="${runs_root}/${run_id}"
   local unit="overdrive-metal-run-${run_id}.service"
-  local metadata="${run_directory}/metadata.v1"
+  local metadata_v1="${run_directory}/metadata.v1"
+  local metadata_v2="${run_directory}/metadata.v2"
+  local metadata=""
+  local completion="${run_directory}/completion.v1"
   local phase="${run_directory}/phase.v1"
   local terminal="${run_directory}/terminal.v1"
+  local final_log="${run_directory}/output.log"
   local partial_log="${run_directory}/output.log.partial"
   local offset=0
   local phase_value
@@ -366,7 +608,18 @@ collect_run() {
     # The service publishes metadata and its initial phase atomically before
     # attempting the canonical flock.  A live unit with either file absent is
     # therefore a registration window; a dead unit is an artifact failure.
-    if [ ! -f "$metadata" ] || [ ! -f "$phase" ]; then
+    if { [ -e "$metadata_v1" ] || [ -L "$metadata_v1" ]; } && \
+      { [ -e "$metadata_v2" ] || [ -L "$metadata_v2" ]; }; then
+      collector_artifact_error
+      return 74
+    elif [ -f "$metadata_v1" ] && [ ! -L "$metadata_v1" ]; then
+      metadata="$metadata_v1"
+    elif [ -f "$metadata_v2" ] && [ ! -L "$metadata_v2" ]; then
+      metadata="$metadata_v2"
+    else
+      metadata=""
+    fi
+    if [ -z "$metadata" ] || [ ! -f "$phase" ] || [ -L "$phase" ]; then
       if unit_is_live "$unit"; then
         sleep 0.1
         continue
@@ -389,6 +642,28 @@ collect_run() {
     # phase record.  A malformed phase is a persisted-record contradiction and
     # must fail closed before a saved command status can be replayed.
     if [ -f "$terminal" ]; then
+      if [ "$METADATA_VERSION" -eq 2 ]; then
+        while unit_is_live "$unit"; do sleep 0.1; done
+        if ! terminal_valid "$terminal" "$run_id"; then
+          collector_artifact_error
+          return 74
+        fi
+        if ! completion_valid "$completion" "$run_id"; then
+          collector_artifact_error
+          return 74
+        fi
+        if [ "$COMPLETION_KIND" = runner ]; then
+          if [ "$TERMINAL_KIND" = command ]; then
+            if [ ! -f "$final_log" ] || ! emit_available "$final_log" "$offset"; then
+              collector_artifact_error
+              return 74
+            fi
+          fi
+          printf 'OVERDRIVE_METAL_RUNNER_ERROR error=cleanup_failed root=%s\n' \
+            "$COMPLETION_ROOT" >&2
+          return 74
+        fi
+      fi
       terminal_result "$run_directory" "$run_id" "$offset"
       return $?
     fi
@@ -396,6 +671,25 @@ collect_run() {
     if [ "$phase_value" = running ]; then
       while :; do
         if [ -f "$terminal" ]; then
+          if [ "$METADATA_VERSION" -eq 2 ]; then
+            while unit_is_live "$unit"; do sleep 0.1; done
+            if ! terminal_valid "$terminal" "$run_id" || \
+              ! completion_valid "$completion" "$run_id"; then
+              collector_artifact_error
+              return 74
+            fi
+            if [ "$COMPLETION_KIND" = runner ]; then
+              if [ "$TERMINAL_KIND" = command ]; then
+                if [ ! -f "$final_log" ] || ! emit_available "$final_log" "$offset"; then
+                  collector_artifact_error
+                  return 74
+                fi
+              fi
+              printf 'OVERDRIVE_METAL_RUNNER_ERROR error=cleanup_failed root=%s\n' \
+                "$COMPLETION_ROOT" >&2
+              return 74
+            fi
+          fi
           terminal_result "$run_directory" "$run_id" "$offset"
           return $?
         fi
@@ -444,12 +738,12 @@ collect_run() {
 }
 
 durable_main() {
-  [ "$#" -eq 15 ] || {
-    printf 'durable lease holder: expected 15 arguments\n' >&2
+  [ "$#" -eq 18 ] || {
+    printf 'durable lease holder: expected 18 arguments\n' >&2
     return 74
   }
-  local lock_path="$1"
-  owner_path="$2"
+  local maintenance_lock_path="$1"
+  maintenance_owner_path="$2"
   local timeout_seconds="$3"
   token="$4"
   local scenario="$5"
@@ -463,13 +757,19 @@ durable_main() {
   local remote_path="${13}"
   local command_string="${14}"
   local runs_root="${15}"
+  local tree_lock_path="${16}"
+  tree_owner_path="${17}"
+  local execution_class="${18}"
   local unit="overdrive-metal-run-${token}.service"
   local run_directory="${runs_root}/${token}"
-  local metadata="${run_directory}/metadata.v1"
+  local metadata="${run_directory}/metadata.v2"
+  owner_path="${run_directory}/owner.v1"
   local partial_log="${run_directory}/output.log.partial"
   local final_log="${run_directory}/output.log"
   output_fifo="${run_directory}/output.pipe"
   owner_tmp="${owner_path}.tmp.$$"
+  tree_owner_tmp="${tree_owner_path}.tmp.$$"
+  maintenance_owner_tmp="${maintenance_owner_path}.tmp.$$"
   local control=""
   local logger_pid=""
   local command_pid=""
@@ -478,12 +778,22 @@ durable_main() {
   local supervisor_terminated=0
   local running=0
   owner_written=0
+  tree_owner_written=0
+  maintenance_owner_written=0
   terminal_written=0
   local metadata_content
+  local deadline_start_ns
+  local deadline_ns
+  local wait_result
 
   valid_run_id "$token" || return 74
   [ "$execution_mode" = privileged ] || [ "$execution_mode" = login ] || return 74
-  metadata_content="format=overdrive-metal-run-v1
+  [ "$execution_class" = ordinary ] || [ "$execution_class" = exclusive ] || return 74
+  [[ "$timeout_seconds" =~ ^[0-9]+$ ]] || return 74
+  deadline_start_ns="$(date +%s%N)" || return 74
+  [[ "$deadline_start_ns" =~ ^[0-9]+$ ]] || return 74
+  deadline_ns=$((deadline_start_ns + timeout_seconds * 1000000000))
+  metadata_content="format=overdrive-metal-run-v2
 run_id=${token}
 token=${token}
 unit=${unit}
@@ -495,6 +805,7 @@ source_digest=${source_digest}
 remote_dir_b64=$(base64_encode "$remote_dir")
 target_user_b64=$(base64_encode "$target_user")
 execution_mode=${execution_mode}
+execution_class=${execution_class}
 "
 
   umask 077
@@ -514,7 +825,15 @@ execution_mode=${execution_mode}
       grep -qx "token=${token}" "$owner_path"; then
       rm -f "$owner_path"
     fi
-    rm -f "$owner_tmp" "$output_fifo"
+    if [ "$tree_owner_written" -eq 1 ] && [ -r "$tree_owner_path" ] && \
+      grep -qx "token=${token}" "$tree_owner_path"; then
+      rm -f "$tree_owner_path"
+    fi
+    if [ "$maintenance_owner_written" -eq 1 ] && [ -r "$maintenance_owner_path" ] && \
+      grep -qx "token=${token}" "$maintenance_owner_path"; then
+      rm -f "$maintenance_owner_path"
+    fi
+    rm -f "$owner_tmp" "$tree_owner_tmp" "$maintenance_owner_tmp" "$output_fifo"
   }
   handle_signal() {
     if [ "$running" -eq 0 ]; then
@@ -547,14 +866,63 @@ execution_mode=${execution_mode}
   # was printed before any durable record existed.
   printf 'OVERDRIVE_METAL_RUN_REGISTERED run_id=%s\n' "$token"
 
-  exec 8>"$lock_path"
-  if ! flock -w "$timeout_seconds" 8; then
-    write_terminal_runner "$run_directory" "$token" lease_timeout || true
+  if ! exec 8>"$maintenance_lock_path"; then
+    write_terminal_runner "$run_directory" "$token" runner_preparation_failed || true
+    terminal_written=1
+    return 75
+  fi
+  if ! remaining_lock_timeout "$deadline_ns"; then
+    write_terminal_runner "$run_directory" "$token" maintenance_timeout || true
+    terminal_written=1
+    return 75
+  fi
+  if [ "$execution_class" = ordinary ]; then
+    if ! flock -s -w "$REMAINING_LOCK_TIMEOUT" 8; then
+      write_terminal_runner "$run_directory" "$token" maintenance_timeout || true
+      terminal_written=1
+      return 75
+    fi
+  elif ! flock -x -w "$REMAINING_LOCK_TIMEOUT" 8; then
+    write_terminal_runner "$run_directory" "$token" maintenance_timeout || true
     terminal_written=1
     return 75
   fi
 
-  {
+  if [ "$execution_class" = exclusive ]; then
+    if wait_for_admitted_ordinary_units "$deadline_ns" "$token" "$runs_root"; then
+      wait_result=0
+    else
+      wait_result=$?
+    fi
+    if [ "$wait_result" -eq 1 ]; then
+      write_terminal_runner "$run_directory" "$token" maintenance_timeout || true
+      terminal_written=1
+      return 75
+    elif [ "$wait_result" -ne 0 ]; then
+      printf 'OVERDRIVE_METAL_RUNNER_ERROR error=preflight_failed probe=owner\n' >&2
+      write_terminal_runner "$run_directory" "$token" preflight_failed || true
+      terminal_written=1
+      return 78
+    fi
+  fi
+
+  if ! exec 10>"$tree_lock_path"; then
+    write_terminal_runner "$run_directory" "$token" runner_preparation_failed || true
+    terminal_written=1
+    return 75
+  fi
+  if ! remaining_lock_timeout "$deadline_ns"; then
+    write_terminal_runner "$run_directory" "$token" checkout_timeout || true
+    terminal_written=1
+    return 75
+  fi
+  if ! flock -x -w "$REMAINING_LOCK_TIMEOUT" 10; then
+    write_terminal_runner "$run_directory" "$token" checkout_timeout || true
+    terminal_written=1
+    return 75
+  fi
+
+  if ! {
     printf 'pid=%s\n' "$$"
     printf 'started_at=%s\n' "$(utc_now)"
     printf 'action=run\n'
@@ -565,11 +933,67 @@ execution_mode=${execution_mode}
     printf 'run_id=%s\n' "$token"
     printf 'unit=%s\n' "$unit"
     printf 'source_digest=%s\n' "$source_digest"
-  } >"$owner_tmp"
-  sync_path "$owner_tmp"
-  mv -f "$owner_tmp" "$owner_path"
-  sync_path "$(dirname "$owner_path")"
+  } >"$owner_tmp"; then
+    write_terminal_runner "$run_directory" "$token" runner_preparation_failed || true
+    terminal_written=1
+    return 75
+  fi
+  if ! sync_path "$owner_tmp" || ! mv -f "$owner_tmp" "$owner_path" || \
+    ! sync_path "$(dirname "$owner_path")"; then
+    write_terminal_runner "$run_directory" "$token" runner_preparation_failed || true
+    terminal_written=1
+    return 75
+  fi
   owner_written=1
+
+  if ! {
+    printf 'pid=%s\n' "$$"
+    printf 'started_at=%s\n' "$(utc_now)"
+    printf 'action=run\n'
+    printf 'scenario=%s\n' "$scenario"
+    printf 'workspace=%s\n' "$workspace"
+    printf 'commit=%s\n' "$commit"
+    printf 'token=%s\n' "$token"
+  } >"$tree_owner_tmp"; then
+    write_terminal_runner "$run_directory" "$token" runner_preparation_failed || true
+    terminal_written=1
+    return 75
+  fi
+  if ! sync_path "$tree_owner_tmp" || ! mv -f "$tree_owner_tmp" "$tree_owner_path" || \
+    ! sync_path "$(dirname "$tree_owner_path")"; then
+    write_terminal_runner "$run_directory" "$token" runner_preparation_failed || true
+    terminal_written=1
+    return 75
+  fi
+  tree_owner_written=1
+
+  if [ "$execution_class" = exclusive ]; then
+    if ! {
+      printf 'pid=%s\n' "$$"
+      printf 'started_at=%s\n' "$(utc_now)"
+      printf 'action=run\n'
+      printf 'scenario=%s\n' "$scenario"
+      printf 'workspace=%s\n' "$workspace"
+      printf 'commit=%s\n' "$commit"
+      printf 'token=%s\n' "$token"
+      printf 'run_id=%s\n' "$token"
+      printf 'unit=%s\n' "$unit"
+      printf 'source_digest=%s\n' "$source_digest"
+    } >"$maintenance_owner_tmp"; then
+      write_terminal_runner "$run_directory" "$token" runner_preparation_failed || true
+      terminal_written=1
+      return 75
+    fi
+    if ! sync_path "$maintenance_owner_tmp" || \
+      ! mv -f "$maintenance_owner_tmp" "$maintenance_owner_path" || \
+      ! sync_path "$(dirname "$maintenance_owner_path")"; then
+      write_terminal_runner "$run_directory" "$token" runner_preparation_failed || true
+      terminal_written=1
+      return 75
+    fi
+    maintenance_owner_written=1
+  fi
+
   write_phase "$run_directory" "$token" preparing || {
     write_terminal_runner "$run_directory" "$token" log_finalize_failed || true
     terminal_written=1
@@ -586,6 +1010,16 @@ execution_mode=${execution_mode}
     START) ;;
     ABORT)
       write_terminal_runner "$run_directory" "$token" launch_aborted || true
+      terminal_written=1
+      return 75
+      ;;
+    "ABORT error=checkout_identity_conflict"|"ABORT error=source_mismatch"|"ABORT error=preflight_failed")
+      write_terminal_runner "$run_directory" "$token" "${control#ABORT error=}" || true
+      terminal_written=1
+      return 78
+      ;;
+    "ABORT error=runner_preparation_failed")
+      write_terminal_runner "$run_directory" "$token" runner_preparation_failed || true
       terminal_written=1
       return 75
       ;;
@@ -730,16 +1164,35 @@ if [ "${1:-}" = --durable ]; then
   exit $?
 fi
 
-if [ "${1:-}" = --collect ]; then
+if [ "${1:-}" = --finalize ]; then
   shift
-  [ "$#" -eq 1 ] || [ "$#" -eq 4 ] || {
+  [ "$#" -eq 2 ] || {
     collector_marker invalid_run_id
     exit 64
   }
-  COLLECT_TIMEOUT_SECONDS="${2:-}"
-  COLLECT_LOCK_PATH="${3:-}"
-  COLLECT_OWNER_PATH="${4:-}"
-  collect_run "$1" "$RUNS_ROOT_DEFAULT"
+  finalize_run "$1" "$2"
+  exit $?
+fi
+
+if [ "${1:-}" = --collect ]; then
+  shift
+  [ "$#" -eq 1 ] || [ "$#" -eq 2 ] || \
+    [ "$#" -eq 4 ] || [ "$#" -eq 5 ] || {
+    collector_marker invalid_run_id
+    exit 64
+  }
+  run_id="$1"
+  if [ "$#" -eq 2 ] || [ "$#" -eq 5 ]; then
+    runs_root="$2"
+    shift 2
+  else
+    runs_root="$RUNS_ROOT_DEFAULT"
+    shift
+  fi
+  COLLECT_TIMEOUT_SECONDS="${1:-}"
+  COLLECT_LOCK_PATH="${2:-}"
+  COLLECT_OWNER_PATH="${3:-}"
+  collect_run "$run_id" "$runs_root"
   exit $?
 fi
 
@@ -758,9 +1211,17 @@ SCENARIO="$6"
 WORKSPACE="$7"
 COMMIT="$8"
 RELEASE_FD="${9:-0}"
+LOCK_DEADLINE_START_NS="$(date +%s%N)"
+LOCK_DEADLINE_NS=$((LOCK_DEADLINE_START_NS + TIMEOUT_SECONDS * 1000000000))
 
 exec 8>"${LOCK_PATH}"
-if ! flock -w "${TIMEOUT_SECONDS}" 8; then
+if ! remaining_lock_timeout "$LOCK_DEADLINE_NS" || \
+  ! flock -x -w "${REMAINING_LOCK_TIMEOUT}" 8; then
+  if [ "${ACTION}" = sync ] || [ "${ACTION}" = pull ]; then
+    collector_marker checkout_timeout
+  else
+    collector_marker maintenance_timeout
+  fi
   echo "FATAL: timed out after ${TIMEOUT_SECONDS}s acquiring ${LOCK_PATH}" >&2
   if [ -r "${OWNER_PATH}" ]; then
     echo "current lease owner:" >&2
@@ -791,6 +1252,20 @@ trap 'exit 143' HUP INT TERM
   printf 'token=%s\n' "${TOKEN}"
 } >"${OWNER_TMP}"
 mv "${OWNER_TMP}" "${OWNER_PATH}"
+
+if [ "${ACTION}" != sync ] && [ "${ACTION}" != pull ]; then
+  if wait_for_admitted_ordinary_units "$LOCK_DEADLINE_NS" "${TOKEN}" "$RUNS_ROOT_DEFAULT"; then
+    :
+  else
+    wait_result=$?
+    if [ "$wait_result" -eq 1 ]; then
+      collector_marker maintenance_timeout
+      exit 75
+    fi
+    printf 'OVERDRIVE_METAL_RUNNER_ERROR error=preflight_failed probe=owner\n' >&2
+    exit 78
+  fi
+fi
 
 printf 'OVERDRIVE_METAL_LEASE_ACQUIRED token=%s pid=%s\n' "${TOKEN}" "$$"
 # The streamed launcher supplies this script through `bash -c`, leaving the

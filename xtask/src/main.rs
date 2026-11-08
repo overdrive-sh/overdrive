@@ -430,10 +430,13 @@ enum MetalAction {
     /// `--no-sudo` to run as the login user, `--no-sync` to skip the
     /// pre-run rsync (e.g. to re-run a suite against an already-synced tree).
     ///
-    /// Holds the box-wide lease for the whole run, and the branch tree's lock
-    /// too (re-taken by the durable command itself, so a concurrent sync of
-    /// the tree is excluded even if this controller disconnects).
+    /// Ordinary commands share the physical-maintenance barrier and own their
+    /// checkout. `--exclusive` preserves the physical-maintenance boundary for
+    /// explicit administration and arbitrary commands.
     Run {
+        /// Retain exclusive physical-maintenance ownership for this command.
+        #[arg(long)]
+        exclusive: bool,
         /// Skip the pre-run rsync; run against whatever is already on the box.
         #[arg(long)]
         no_sync: bool,
@@ -984,7 +987,7 @@ fn metal(action: MetalAction) -> Result<u8> {
                     )?;
                     Ok(0)
                 }
-                MetalAction::Run { no_sync, no_sudo, args } => {
+                MetalAction::Run { exclusive, no_sync, no_sudo, args } => {
                     if args.is_empty() {
                         bail!(
                             "no command given; use `cargo xtask metal run -- cargo nextest run \
@@ -995,6 +998,9 @@ fn metal(action: MetalAction) -> Result<u8> {
                     let mut command = Command::new("bash");
                     command.args([METAL_BOOTSTRAP, &target, "--run"]);
                     command.env(METAL_KERNEL_ENV, kernel).env(METAL_ROOTFS_ENV, rootfs);
+                    if exclusive {
+                        command.arg("--exclusive");
+                    }
                     if no_sync {
                         command.arg("--no-sync");
                     }
@@ -1771,7 +1777,6 @@ mod metal_qualification_tests {
     /// sync-only keeps checkout exclusion. Ordinary shared admission has its
     /// independent acceptance cases.
     #[cfg(feature = "integration-tests")]
-    #[ignore = "pending DELIVER: metal-run-isolation exclusive qualification transition"]
     #[test]
     fn metal_run_and_bootstrap_share_the_global_lease_and_sync_takes_only_the_tree_lock() {
         legacy_contract::exclusive_maintenance_and_sync_keep_their_distinct_boundaries();
@@ -1786,7 +1791,6 @@ mod metal_qualification_tests {
 
     /// CONTRACT_SHAPE: bounded-change (root metal runs explicitly receive guest artifacts).
     #[cfg(feature = "integration-tests")]
-    #[ignore = "pending DELIVER: metal-run-isolation exclusive qualification transition"]
     #[test]
     fn metal_run_reinjects_guest_artifacts_without_sudo_environment_preservation() {
         legacy_contract::privileged_command_gets_explicit_selected_artifacts_without_sudo_preservation();

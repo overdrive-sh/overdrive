@@ -32,10 +32,12 @@
     clippy::expect_used,
     clippy::panic,
     clippy::print_stdout,
-    reason = "a fail-closed native test runner reports each guest's evidence"
+    clippy::print_stderr,
+    reason = "the test runner reports guest evidence and exact typed failures"
 )]
 
 use std::fs;
+use std::os::unix::process::CommandExt as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
@@ -127,6 +129,9 @@ const NESTED_REFLINK_IMAGE: &str = "/var/lib/overdrive-testing/reflink.xfs";
 const NESTED_PREBUILT_INIT: &str = "/opt/overdrive-testing/prebuilt-overdrive-init";
 const XFS_MODULE_GUEST_PATH: &str = "/lib/overdrive-testing/modules/xfs.ko";
 const STEP14_NATIVE_CELL_BOUND: Duration = Duration::from_secs(600);
+// The current Nextest profiles cap an attempt below this value; Nextest owns
+// timeout, retry, and aggregate-status decisions for the selected attempt.
+const NEXTTEST_ATTEMPT_RESPONSE_BOUND: Duration = Duration::from_secs(86_400);
 
 // The two existing correctness bodies declare exactly 64 workload VMs at
 // 128 MiB each. Account for every inner VMM at the production MemoryPlan
@@ -312,7 +317,7 @@ test ! -L /var/run
 test -L /var/run
 test "$(cd /var/run && pwd -P)" = /run
 test -d /var/run/netns
-test -r /home/ubuntu/overdrive/target/bpf/overdrive_bpf.o
+test -r "$1"
 expected_passwd="$(printf '%s\n' 'root:x:0:0:root:/root:/bin/sh' 'tcpdump:x:985:985:tcpdump:/nonexistent:/usr/sbin/nologin')"
 expected_group="$(printf '%s\n' 'root:x:0:' 'tcpdump:x:985:')"
 test "$(/usr/bin/cat /etc/passwd)" = "$expected_passwd"
@@ -337,7 +342,7 @@ esac
 /usr/bin/nft --version
 /usr/bin/strace -V
 /usr/bin/tcpdump --version
-bpf_sha256="$(/usr/bin/python3 -c 'import hashlib; print(hashlib.sha256(open("/home/ubuntu/overdrive/target/bpf/overdrive_bpf.o", "rb").read()).hexdigest())')"
+bpf_sha256="$(/usr/bin/python3 -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$1")"
 echo "DATAPLANE-NATIVE preconditions: cgroup2=mounted bpffs=mounted varrun=alias bpf_artifact=present bpf_sha256=$bpf_sha256 python=socket tools=present tcpdump_identity=$capture_identity"
 "#;
 // GuestKit has no NIC/default route. The two host-local constant-rule cells
@@ -1362,8 +1367,6 @@ impl GuestRun {
         memory_mib: u32,
         vcpus: u8,
     ) -> Result<Self, GuestKitError> {
-        let staging = default_staging_root();
-        let work = WorkDir::create(&staging, &format!("fwd-suite-{name}"))?;
         extra.insert(
             0,
             GuestFile {
@@ -1372,6 +1375,24 @@ impl GuestRun {
                 with_shared_libraries: true,
             },
         );
+        Self::boot_with_files(kit, name, slot, extra, module_paths, memory_mib, vcpus)
+    }
+
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "private attempt boot keeps the selected group and static resource envelope explicit"
+    )]
+    fn boot_with_files(
+        kit: &GuestKit,
+        name: &str,
+        slot: u32,
+        extra: Vec<GuestFile>,
+        module_paths: Vec<String>,
+        memory_mib: u32,
+        vcpus: u8,
+    ) -> Result<Self, GuestKitError> {
+        let staging = default_staging_root();
+        let work = WorkDir::create(&staging, &format!("fwd-suite-{name}"))?;
         let image = kit.image(
             work.path(),
             name,
@@ -1393,6 +1414,37 @@ impl GuestRun {
             },
         )?;
         Ok(Self { guest, module_paths, _work: work })
+    }
+
+    fn exec_nextest_attempt(
+        &mut self,
+        program: &str,
+        test_args: &[String],
+        environment: &[(String, String)],
+        working_directory: &Path,
+        bound: Duration,
+    ) -> Result<i32, GuestKitError> {
+        let mut command =
+            vec![GUEST_PEER_GUEST_PATH.to_owned(), subcommand::RUN_WITH_MODULES.to_owned()];
+        command.push(LOOPBACK_MODULE_GUEST_PATH.to_owned());
+        command.extend(self.module_paths.iter().cloned());
+        command.extend([
+            "--".to_owned(),
+            "/usr/bin/env".to_owned(),
+            "--chdir".to_owned(),
+            working_directory.display().to_string(),
+        ]);
+        command.extend(environment.iter().map(|(key, value)| format!("{key}={value}")));
+        command.push(program.to_owned());
+        command.extend(test_args.iter().cloned());
+        let argv = command.iter().map(String::as_str).collect::<Vec<_>>();
+        self.guest.peer().exec(&argv, bound).map_err(|source| GuestKitError::Staging {
+            detail: format!("selected nextest attempt {program:?} did not return within {bound:?}"),
+            source: std::io::Error::other(format!(
+                "{source}; full disposable guest console:\n{}",
+                self.guest.vm.console()
+            )),
+        })
     }
 
     fn exec(
@@ -1620,6 +1672,12 @@ fn workspace_bpf_artifact() -> GuestFile {
     GuestFile { guest: host.clone(), host, with_shared_libraries: false }
 }
 
+fn workspace_bpf_guest_path() -> PathBuf {
+    // The test ELF embeds this checkout's CARGO_MANIFEST_DIR; mirror its
+    // source-owned target path instead of assuming a singleton ~/overdrive.
+    workspace_root().join("target/bpf/overdrive_bpf.o")
+}
+
 fn python_stdlib_archive(dir: &Path) -> Result<GuestFile, GuestKitError> {
     let output = Command::new("python3")
         .args(["-c", "import sysconfig; print(sysconfig.get_path('stdlib'), end='')"])
@@ -1718,12 +1776,22 @@ fn base_tools() -> Vec<GuestFile> {
 fn workspace_forwarder_module(kit: &GuestKit) -> GuestFile {
     GuestFile {
         host: kit.forwarder_module.clone(),
-        guest: PathBuf::from(format!(
-            "/home/ubuntu/overdrive/target/kmod/{}/ovd_fwd.ko",
-            kit.kernel_release
-        )),
+        // Match forwarder_module::built_module_path in this checkout's test
+        // ELF even when the Metal source lives under its identity directory.
+        guest: workspace_root().join("target/kmod").join(&kit.kernel_release).join("ovd_fwd.ko"),
         with_shared_libraries: false,
     }
+}
+
+fn setup_dataplane_native_guest(guest: &mut GuestRun) -> Result<(), GuestKitError> {
+    let bpf_object = workspace_bpf_guest_path();
+    guest.command(&[
+        "/usr/bin/sh",
+        "-c",
+        DATAPLANE_NATIVE_SETUP,
+        "dataplane-native",
+        bpf_object.to_str().expect("workspace BPF guest path is UTF-8"),
+    ])
 }
 
 fn cgroup_tools(
@@ -2074,7 +2142,7 @@ fn run_mtls_relay(kit: &GuestKit, _fwd_tests: &InGuestTests) -> Result<(), Guest
     let loaded = native_module_paths.clone();
     guest.command_with_modules(&loaded, "/usr/bin/true", &[])?;
     guest.module_paths.extend(native_module_paths);
-    guest.command(&["/usr/bin/sh", "-c", DATAPLANE_NATIVE_SETUP])?;
+    setup_dataplane_native_guest(&mut guest)?;
     let native_passed = exec_required_cells(&mut guest, DATAPLANE_NATIVE)?;
     if native_passed != DATAPLANE_NATIVE_BODIES {
         return Err(GuestKitError::Staging {
@@ -2931,7 +2999,697 @@ fn run_nested_boundary(kit: &GuestKit, tests: &InGuestTests) -> Result<(), Guest
     guest.finish("nested-boundary")
 }
 
+#[derive(Debug)]
+enum NextestDispatchFailure {
+    LaneNotPrepared(String),
+    GuestExecution(String),
+}
+
+#[derive(Clone, Copy)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "these independent prepared-fixture switches select existing group setup scripts"
+)]
+struct CgroupAttemptFlags {
+    step13_04: bool,
+    step13_05: bool,
+    step13_06: bool,
+    normal_gate: bool,
+}
+
+struct CgroupAttemptFiles {
+    extra: Vec<GuestFile>,
+    module_paths: Vec<String>,
+    flags: CgroupAttemptFlags,
+}
+
+struct MtlsAttemptFiles {
+    extra: Vec<GuestFile>,
+    module_paths: Vec<String>,
+    native_module_paths: Vec<String>,
+    setup_native: bool,
+}
+
+struct NextestGuestPlan {
+    name: &'static str,
+    cid: u32,
+    extra: Vec<GuestFile>,
+    module_paths: Vec<String>,
+    memory_mib: u32,
+    vcpus: u8,
+    cgroup_flags: Option<CgroupAttemptFlags>,
+    mtls_native_paths: Vec<String>,
+    setup_mtls_native: bool,
+    nested: bool,
+}
+
+fn nextest_environment() -> Result<Vec<(String, String)>, NextestDispatchFailure> {
+    const PROPTEST_KEYS: &[&str] = &[
+        "PROPTEST_CASES",
+        "PROPTEST_DISABLE_FAILURE_PERSISTENCE",
+        "PROPTEST_FORK",
+        "PROPTEST_MAX_DEFAULT_SIZE_RANGE",
+        "PROPTEST_MAX_FLAT_MAP_REGENS",
+        "PROPTEST_MAX_GLOBAL_REJECTS",
+        "PROPTEST_MAX_LOCAL_REJECTS",
+        "PROPTEST_MAX_SHRINK_ITERS",
+        "PROPTEST_MAX_SHRINK_TIME",
+        "PROPTEST_RNG_ALGORITHM",
+        "PROPTEST_RNG_SEED",
+        "PROPTEST_TIMEOUT",
+        "PROPTEST_VERBOSE",
+    ];
+    let mut values = std::env::vars_os()
+        .filter_map(|(key, value)| {
+            let key = key.into_string().ok()?;
+            let selected = key.starts_with("NEXTEST_")
+                || PROPTEST_KEYS.contains(&key.as_str())
+                || matches!(
+                    key.as_str(),
+                    "OVERDRIVE_BPF_NATIVE"
+                        | "OVERDRIVE_FWD_GUEST_GROUP"
+                        | "OVERDRIVE_FWD_GUEST_EXACT"
+                        | "RUST_BACKTRACE"
+                        | "RUST_LOG"
+                );
+            selected.then_some((key, value))
+        })
+        .map(|(key, value)| {
+            let value = value.into_string().map_err(|_| {
+                NextestDispatchFailure::LaneNotPrepared(format!(
+                    "the selected environment value for {key} is not valid UTF-8"
+                ))
+            })?;
+            Ok((key, value))
+        })
+        .collect::<Result<Vec<_>, NextestDispatchFailure>>()?;
+    values.sort_by(|left, right| left.0.cmp(&right.0));
+    Ok(values)
+}
+
+fn nextest_attempt_files(
+    program: &str,
+    environment: &[(String, String)],
+) -> Result<(Vec<GuestFile>, PathBuf), NextestDispatchFailure> {
+    let current_dir = std::env::current_dir().map_err(|error| {
+        NextestDispatchFailure::GuestExecution(format!(
+            "reading the selected attempt working directory: {error}"
+        ))
+    })?;
+    let host_path = PathBuf::from(program);
+    let guest_path =
+        if host_path.is_absolute() { host_path.clone() } else { current_dir.join(&host_path) };
+    let host_binary = host_path
+        .canonicalize()
+        .or_else(|_| current_dir.join(&host_path).canonicalize())
+        .map_err(|error| {
+            NextestDispatchFailure::LaneNotPrepared(format!(
+                "the selected nextest executable {program:?} is absent: {error}"
+            ))
+        })?;
+    let mut files =
+        vec![GuestFile { host: host_binary, guest: guest_path, with_shared_libraries: true }];
+    for (key, value) in environment.iter().filter(|(key, _)| key.starts_with("NEXTEST_BIN_EXE_")) {
+        let host_path = PathBuf::from(value);
+        let guest_path =
+            if host_path.is_absolute() { host_path.clone() } else { current_dir.join(&host_path) };
+        let host = host_path
+            .canonicalize()
+            .or_else(|_| current_dir.join(&host_path).canonicalize())
+            .map_err(|error| {
+                NextestDispatchFailure::LaneNotPrepared(format!(
+                    "the selected nextest helper {key} at {value:?} is absent: {error}"
+                ))
+            })?;
+        files.push(GuestFile { host, guest: guest_path, with_shared_libraries: true });
+    }
+    Ok((files, current_dir))
+}
+
+fn selected_cell(cells: &[Cell], test_name: &str) -> bool {
+    cells.iter().any(
+        |(filter, _, exact)| {
+            if *exact { test_name == *filter } else { test_name.starts_with(filter) }
+        },
+    )
+}
+
+fn stage_modules(
+    kit: &GuestKit,
+    directory: &Path,
+    specs: &[(&str, &str)],
+    extra: &mut Vec<GuestFile>,
+    module_paths: &mut Vec<String>,
+) -> Result<(), GuestKitError> {
+    for &(relative, guest_path) in specs {
+        extra.push(host_module_file(kit, directory, relative, Path::new(guest_path))?);
+        module_paths.push(guest_path.to_owned());
+    }
+    Ok(())
+}
+
+fn core_attempt_files(
+    kit: &GuestKit,
+    directory: &Path,
+) -> Result<(Vec<GuestFile>, Vec<String>), GuestKitError> {
+    let module_specs = [
+        ("net/netfilter/nfnetlink", NFNETLINK_MODULE_GUEST_PATH),
+        ("net/netfilter/nf_tables", NF_TABLES_MODULE_GUEST_PATH),
+        ("net/ipv4/netfilter/nf_reject_ipv4", "/lib/overdrive-testing/modules/nf_reject_ipv4.ko"),
+        ("net/ipv6/netfilter/nf_reject_ipv6", "/lib/overdrive-testing/modules/nf_reject_ipv6.ko"),
+        ("net/netfilter/nft_reject", "/lib/overdrive-testing/modules/nft_reject.ko"),
+        ("net/netfilter/nft_reject_inet", "/lib/overdrive-testing/modules/nft_reject_inet.ko"),
+        ("net/tls/tls", TLS_MODULE_GUEST_PATH),
+    ];
+    let mut extra = base_tools();
+    let mut module_paths = Vec::new();
+    stage_modules(kit, directory, &module_specs, &mut extra, &mut module_paths)?;
+    Ok((extra, module_paths))
+}
+
+fn cgroup_attempt_files(
+    kit: &GuestKit,
+    directory: &Path,
+    test_name: &str,
+) -> Result<CgroupAttemptFiles, GuestKitError> {
+    let stage_step13_04 = selected_cell(STEP13_04_CONTROL_PLANE, test_name)
+        || selected_cell(STEP13_04_WORKER, test_name)
+        || selected_cell(STEP13_04_HOST_LOCAL_FIREWALL, test_name)
+        || selected_cell(STEP13_04_REMOTE_FIREWALL, test_name);
+    let stage_step13_05 = selected_cell(STEP13_05_CONTROL_PLANE, test_name)
+        || selected_cell(STEP13_05_WORKER, test_name);
+    let stage_step13_06 = selected_cell(STEP13_06_WORKER, test_name)
+        || selected_cell(STEP13_06_ROUTED_WORKER, test_name);
+    let stage_normal_gate = selected_cell(CONTROL_PLANE_NORMAL_NATIVE, test_name);
+    let mut extra =
+        cgroup_tools(kit, directory, stage_step13_04, stage_step13_05, stage_normal_gate)?;
+    if stage_step13_06 {
+        extra.extend(["nft", "ss", "strace", "uname"].into_iter().map(tool));
+    }
+    let mut module_paths = Vec::new();
+    stage_modules(kit, directory, NESTED_DEVICE_MODULES, &mut extra, &mut module_paths)?;
+    stage_modules(
+        kit,
+        directory,
+        &[
+            ("net/netfilter/nfnetlink", NFNETLINK_MODULE_GUEST_PATH),
+            ("net/netfilter/nf_tables", NF_TABLES_MODULE_GUEST_PATH),
+            ("drivers/net/veth", VETH_MODULE_GUEST_PATH),
+            ("net/tls/tls", TLS_MODULE_GUEST_PATH),
+        ],
+        &mut extra,
+        &mut module_paths,
+    )?;
+    if stage_step13_04 {
+        stage_modules(kit, directory, STEP13_04_NFT_MODULES, &mut extra, &mut module_paths)?;
+        module_paths.push(DUMMY_MODULE_GUEST_PATH.to_owned());
+    }
+    if stage_step13_06 {
+        stage_modules(kit, directory, STEP13_06_NFT_MODULES, &mut extra, &mut module_paths)?;
+    }
+    Ok(CgroupAttemptFiles {
+        extra,
+        module_paths,
+        flags: CgroupAttemptFlags {
+            step13_04: stage_step13_04,
+            step13_05: stage_step13_05,
+            step13_06: stage_step13_06,
+            normal_gate: stage_normal_gate,
+        },
+    })
+}
+
+fn mtls_attempt_files(
+    kit: &GuestKit,
+    directory: &Path,
+    test_name: &str,
+) -> Result<MtlsAttemptFiles, GuestKitError> {
+    let tests = InGuestTests::prepared("overdrive-dataplane", "overdrive_dataplane")?;
+    let mut extra = dataplane_native_tools();
+    extra.push(GuestFile {
+        host: tests.binary,
+        guest: PathBuf::from(DATAPLANE_LIB_TESTS_PATH),
+        with_shared_libraries: true,
+    });
+    extra.push(workspace_bpf_artifact());
+    extra.push(python_stdlib_archive(directory)?);
+    extra.extend(tcpdump_account_files(directory)?);
+    extra.push(host_module_file(kit, directory, "net/tls/tls", Path::new(TLS_MODULE_GUEST_PATH))?);
+    let module_specs = [
+        ("net/netfilter/nfnetlink", NFNETLINK_MODULE_GUEST_PATH),
+        ("net/netfilter/nf_tables", NF_TABLES_MODULE_GUEST_PATH),
+        ("drivers/net/veth", VETH_MODULE_GUEST_PATH),
+        ("net/ipv4/netfilter/nf_defrag_ipv4", STEP13_04_NFT_MODULES[0].1),
+        ("net/ipv6/netfilter/nf_defrag_ipv6", STEP13_04_NFT_MODULES[1].1),
+        DATAPLANE_NAT_MODULES[0],
+        DATAPLANE_NAT_MODULES[1],
+        ("net/ipv4/netfilter/nf_reject_ipv4", STEP13_04_NFT_MODULES[2].1),
+        ("net/ipv6/netfilter/nf_reject_ipv6", STEP13_04_NFT_MODULES[3].1),
+        ("net/ipv4/netfilter/nf_tproxy_ipv4", STEP13_04_NFT_MODULES[4].1),
+        ("net/ipv6/netfilter/nf_tproxy_ipv6", STEP13_04_NFT_MODULES[5].1),
+        ("net/netfilter/nft_reject", STEP13_04_NFT_MODULES[6].1),
+        ("net/ipv4/netfilter/nft_reject_ipv4", STEP13_04_NFT_MODULES[7].1),
+        ("net/netfilter/nft_tproxy", STEP13_04_NFT_MODULES[8].1),
+        DATAPLANE_NAT_MODULES[2],
+        DATAPLANE_NAT_MODULES[3],
+        DATAPLANE_NAT_MODULES[4],
+    ];
+    let mut native_paths = Vec::new();
+    stage_modules(kit, directory, &module_specs, &mut extra, &mut native_paths)?;
+    let native = !test_name.starts_with(MTLS_RELAY);
+    Ok(MtlsAttemptFiles {
+        extra,
+        module_paths: vec![TLS_MODULE_GUEST_PATH.to_owned()],
+        native_module_paths: native_paths,
+        setup_native: native,
+    })
+}
+
+fn prepare_nested_attempt(guest: &mut GuestRun) -> Result<(), GuestKitError> {
+    guest.command(&["/usr/bin/mkdir", "-p", "/srv/vm"])?;
+    guest.command_with_modules(
+        &["/lib/overdrive-testing/modules/xfs.ko".to_owned()],
+        "/usr/bin/losetup",
+        &["/dev/loop0", NESTED_REFLINK_IMAGE],
+    )?;
+    guest.command(&["/usr/bin/mount", "-t", "xfs", "/dev/loop0", "/srv/vm"])?;
+    guest.command(&[
+        "/usr/bin/mkdir",
+        "-p",
+        "/sys/fs/cgroup",
+        "/sys/fs/bpf",
+        "/sys/kernel/security",
+    ])?;
+    guest.command(&["/usr/bin/mount", "-t", "cgroup2", "none", "/sys/fs/cgroup"])?;
+    guest.command(&["/usr/bin/mount", "-t", "bpf", "bpf", "/sys/fs/bpf"])?;
+    guest.command(&["/usr/bin/mount", "-t", "securityfs", "securityfs", "/sys/kernel/security"])?;
+    guest.command(&["/usr/bin/cat", "/sys/kernel/security/lsm"])?;
+    guest.command(&["/usr/bin/sh", "-c", CGROUP_CONTROLLERS])?;
+    guest.command(&[
+        "/usr/bin/sh",
+        "-c",
+        "set -eu; mkdir -p /var /run/netns; test ! -e /var/run; test ! -L /var/run; ln -s /run /var/run; test -L /var/run; test \"$(cd /var/run && pwd -P)\" = /run; test -d /var/run/netns",
+    ])?;
+    guest.command(&["/usr/bin/chmod", "0660", "/dev/kvm", "/dev/vhost-vsock"])?;
+    guest.command(&[
+        "/usr/bin/stat",
+        "-c",
+        "NEXTTEST-NESTED-DEVICE %n uid=%u gid=%g mode=%a",
+        "/dev/kvm",
+        "/dev/vhost-vsock",
+    ])?;
+    let modules = std::mem::take(&mut guest.module_paths);
+    guest.command_with_modules(&modules, "/usr/bin/true", &[])
+}
+
+fn run_cgroup_attempt_setup(
+    guest: &mut GuestRun,
+    test_name: &str,
+    flags: CgroupAttemptFlags,
+) -> Result<(), GuestKitError> {
+    let modules = guest.module_paths.clone();
+    guest.command_with_modules(&modules, "/usr/bin/sh", &["-c", "true"])?;
+    if flags.step13_04 {
+        guest.command(&["/usr/bin/sh", "-c", DUMMY_AUTO_DEVICE_CLEANUP])?;
+    }
+    guest.command(&["/usr/bin/chmod", "0660", "/dev/kvm", "/dev/vhost-vsock"])?;
+    guest.command(&[
+        "/usr/bin/stat",
+        "-c",
+        "CGROUP-DEVICE %n uid=%u gid=%g mode=%a",
+        "/dev/kvm",
+        "/dev/vhost-vsock",
+    ])?;
+    guest.command(&["/usr/bin/mkdir", "-p", "/sys/fs/cgroup", "/sys/fs/bpf"])?;
+    guest.command(&["/usr/bin/mount", "-t", "cgroup2", "none", "/sys/fs/cgroup"])?;
+    guest.command(&["/usr/bin/mount", "-t", "bpf", "bpf", "/sys/fs/bpf"])?;
+    guest.command(&["/usr/bin/sh", "-c", CGROUP_CONTROLLERS])?;
+    if flags.step13_04 {
+        guest.command(&[
+            "/usr/bin/sh",
+            "-c",
+            "set -eu; mkdir -p /var /run/netns; test ! -e /var/run; test ! -L /var/run; ln -s /run /var/run; test -L /var/run; test \"$(cd /var/run && pwd -P)\" = /run; test -d /var/run/netns",
+        ])?;
+    }
+    if flags.normal_gate {
+        guest.command(&["/usr/bin/sh", "-c", CONTROL_PLANE_NORMAL_NATIVE_SETUP])?;
+    }
+    if flags.step13_05 && selected_cell(STEP13_05_WORKER, test_name) {
+        guest.command(&["/usr/bin/sh", "-c", STEP13_05_LEGB_SETUP])?;
+        guest.command(&["/usr/bin/sh", "-c", STEP13_05_LEGB_AUDIT])?;
+    }
+    Ok(())
+}
+
+fn execute_nextest_attempt(
+    guest: &mut GuestRun,
+    program: &str,
+    args: &[String],
+    environment: &[(String, String)],
+    working_directory: &Path,
+) -> Result<i32, GuestKitError> {
+    let mut attempt_environment = environment.to_vec();
+    attempt_environment.push(("PWD".to_owned(), working_directory.display().to_string()));
+    guest.exec_nextest_attempt(
+        program,
+        args,
+        &attempt_environment,
+        working_directory,
+        NEXTTEST_ATTEMPT_RESPONSE_BOUND,
+    )
+}
+
+fn nextest_guest_plan(
+    kit: &GuestKit,
+    support_dir: &Path,
+    group: &str,
+    test_name: &str,
+) -> Result<Option<NextestGuestPlan>, GuestKitError> {
+    let standard = |name, cid, extra, module_paths, memory_mib, vcpus| NextestGuestPlan {
+        name,
+        cid,
+        extra,
+        module_paths,
+        memory_mib,
+        vcpus,
+        cgroup_flags: None,
+        mtls_native_paths: Vec::new(),
+        setup_mtls_native: false,
+        nested: false,
+    };
+    let plan = match group {
+        "probe" => standard("probe", 7, base_tools(), Vec::new(), STANDARD_OUTER_GUEST_MIB, 2),
+        "core" => {
+            let (extra, module_paths) = core_attempt_files(kit, support_dir)?;
+            standard("core", 8, extra, module_paths, STANDARD_OUTER_GUEST_MIB, 2)
+        }
+        "unload" => standard(
+            "unload",
+            9,
+            vec![workspace_forwarder_module(kit)],
+            Vec::new(),
+            STANDARD_OUTER_GUEST_MIB,
+            2,
+        ),
+        "ulp" => {
+            let tls = host_module_file(
+                kit,
+                support_dir,
+                "net/tls/tls",
+                Path::new(TLS_MODULE_GUEST_PATH),
+            )?;
+            standard(
+                "ulp",
+                10,
+                vec![tls],
+                vec![TLS_MODULE_GUEST_PATH.to_owned()],
+                STANDARD_OUTER_GUEST_MIB,
+                2,
+            )
+        }
+        "stress" => standard("stress", 11, base_tools(), Vec::new(), STANDARD_OUTER_GUEST_MIB, 16),
+        "mtls-relay" => {
+            let files = mtls_attempt_files(kit, support_dir, test_name)?;
+            NextestGuestPlan {
+                name: "mtls-relay",
+                cid: 13,
+                extra: files.extra,
+                module_paths: files.module_paths,
+                memory_mib: STANDARD_OUTER_GUEST_MIB,
+                vcpus: 2,
+                cgroup_flags: None,
+                mtls_native_paths: files.native_module_paths,
+                setup_mtls_native: files.setup_native,
+                nested: false,
+            }
+        }
+        "nested-boundary" => {
+            let (extra, module_paths) = nested_vm_test_support(kit, support_dir)?;
+            NextestGuestPlan {
+                nested: true,
+                ..standard("nested-boundary", 12, extra, module_paths, STANDARD_OUTER_GUEST_MIB, 8)
+            }
+        }
+        "cgroup-default" if focused_selection(test_name).is_some() => {
+            let selected = focused_selection(test_name).expect("matched focused selection");
+            let (extra, module_paths) = nested_vm_test_support(kit, support_dir)?;
+            NextestGuestPlan {
+                nested: true,
+                ..standard(
+                    "cgroup-default",
+                    6,
+                    extra,
+                    module_paths,
+                    selected.resources.memory_mib,
+                    selected.resources.vcpus,
+                )
+            }
+        }
+        "cgroup-default" => {
+            let files = cgroup_attempt_files(kit, support_dir, test_name)?;
+            NextestGuestPlan {
+                name: "cgroup-default",
+                cid: 6,
+                extra: files.extra,
+                module_paths: files.module_paths,
+                memory_mib: STANDARD_OUTER_GUEST_MIB,
+                vcpus: 8,
+                cgroup_flags: Some(files.flags),
+                mtls_native_paths: Vec::new(),
+                setup_mtls_native: false,
+                nested: false,
+            }
+        }
+        _ => return Ok(None),
+    };
+    Ok(Some(plan))
+}
+
+fn guest_attempt_files(
+    mut extra: Vec<GuestFile>,
+    attempt_files: Vec<GuestFile>,
+    source_root: &Path,
+    binary_id: &str,
+    test_name: &str,
+) -> Result<Vec<GuestFile>, NextestDispatchFailure> {
+    extra.push(tool("env"));
+    extra.extend(attempt_files);
+    for name in [".overdrive-metal-source", ".overdrive-metal-checkout.v1"] {
+        let source = source_root.join(name);
+        if source.is_file() {
+            extra.push(GuestFile {
+                host: source.clone(),
+                guest: source,
+                with_shared_libraries: false,
+            });
+        }
+    }
+    let mut deduplicated = Vec::with_capacity(extra.len());
+    let mut seen = std::collections::HashMap::<PathBuf, PathBuf>::new();
+    for file in extra {
+        if !file.host.is_file() {
+            return Err(NextestDispatchFailure::LaneNotPrepared(format!(
+                "required guest input {} is absent for {binary_id}::{test_name}",
+                file.host.display()
+            )));
+        }
+        match seen.get(&file.guest) {
+            Some(host) if host == &file.host => {}
+            Some(_) => {
+                return Err(NextestDispatchFailure::GuestExecution(format!(
+                    "two selected guest inputs map different files to {}",
+                    file.guest.display()
+                )));
+            }
+            None => {
+                seen.insert(file.guest.clone(), file.host.clone());
+                deduplicated.push(file);
+            }
+        }
+    }
+    Ok(deduplicated)
+}
+
+fn prepare_nextest_guest(
+    guest: &mut GuestRun,
+    plan: &mut NextestGuestPlan,
+    test_name: &str,
+) -> Result<(), GuestKitError> {
+    if plan.nested {
+        prepare_nested_attempt(guest)
+    } else if let Some(flags) = plan.cgroup_flags {
+        run_cgroup_attempt_setup(guest, test_name, flags)
+    } else if plan.setup_mtls_native {
+        guest.command_with_modules(&plan.mtls_native_paths, "/usr/bin/true", &[])?;
+        setup_dataplane_native_guest(guest)?;
+        guest.module_paths.append(&mut plan.mtls_native_paths);
+        Ok(())
+    } else {
+        Ok(())
+    }
+}
+
+fn execute_nextest_guest_attempt(
+    mut guest: GuestRun,
+    plan: &NextestGuestPlan,
+    program: &str,
+    args: &[String],
+    environment: &[(String, String)],
+    working_directory: &Path,
+    test_name: &str,
+) -> Result<i32, NextestDispatchFailure> {
+    let route_cleanup = if plan.cgroup_flags.is_some_and(|flags| {
+        flags.step13_04 && selected_cell(STEP13_04_HOST_LOCAL_FIREWALL, test_name)
+    }) {
+        guest
+            .command(&["/usr/bin/sh", "-c", STEP13_04_ROUTE_SETUP])
+            .map_err(|error| NextestDispatchFailure::GuestExecution(format!("{error:?}")))?;
+        Some(STEP13_04_ROUTE_CLEANUP)
+    } else if plan
+        .cgroup_flags
+        .is_some_and(|flags| flags.step13_06 && selected_cell(STEP13_06_ROUTED_WORKER, test_name))
+    {
+        guest
+            .command(&["/usr/bin/sh", "-c", STEP13_06_ROUTE_SETUP])
+            .map_err(|error| NextestDispatchFailure::GuestExecution(format!("{error:?}")))?;
+        Some(STEP13_06_ROUTE_CLEANUP)
+    } else {
+        None
+    };
+    let attempt_result =
+        execute_nextest_attempt(&mut guest, program, args, environment, working_directory);
+    if plan
+        .cgroup_flags
+        .is_some_and(|flags| flags.step13_05 && selected_cell(STEP13_05_WORKER, test_name))
+    {
+        let audit_result = guest.command(&["/usr/bin/sh", "-c", STEP13_05_LEGB_AUDIT]);
+        if attempt_result.as_ref().is_ok_and(|status| *status == 0) {
+            audit_result
+                .map_err(|error| NextestDispatchFailure::GuestExecution(format!("{error:?}")))?;
+        }
+    }
+    if let Some(cleanup) = route_cleanup {
+        let cleanup_result = guest.command(&["/usr/bin/sh", "-c", cleanup]);
+        if attempt_result.as_ref().is_ok_and(|status| *status == 0) {
+            cleanup_result
+                .map_err(|error| NextestDispatchFailure::GuestExecution(format!("{error:?}")))?;
+        }
+    }
+    if plan.cgroup_flags.is_some_and(|flags| flags.normal_gate) {
+        let cleanup_result =
+            guest.command(&["/usr/bin/sh", "-c", CONTROL_PLANE_NORMAL_NATIVE_CLEANUP]);
+        if attempt_result.as_ref().is_ok_and(|status| *status == 0) {
+            cleanup_result
+                .map_err(|error| NextestDispatchFailure::GuestExecution(format!("{error:?}")))?;
+        }
+    }
+    let result = attempt_result
+        .map_err(|error| NextestDispatchFailure::GuestExecution(format!("{error:?}")))?;
+    guest
+        .finish("nextest-attempt")
+        .map_err(|error| NextestDispatchFailure::GuestExecution(format!("{error:?}")))?;
+    Ok(result)
+}
+
+fn run_nextest_group_attempt(
+    group: &str,
+    program: &str,
+    args: &[String],
+    binary_id: &str,
+    test_name: &str,
+) -> Result<i32, NextestDispatchFailure> {
+    let environment = nextest_environment()?;
+    let (attempt_files, current_dir) = nextest_attempt_files(program, &environment)?;
+    let source_root =
+        PathBuf::from(std::env::var("OVERDRIVE_METAL_SOURCE_ROOT").unwrap_or_default());
+    let staging = default_staging_root();
+    let kit = GuestKit::provision(&staging).map_err(|error| {
+        if matches!(error, GuestKitError::LaneNotPrepared { .. }) {
+            NextestDispatchFailure::LaneNotPrepared(format!("{error:?}"))
+        } else {
+            NextestDispatchFailure::GuestExecution(format!("{error:?}"))
+        }
+    })?;
+    let support = WorkDir::create(&staging, &format!("nextest-{group}-support"))
+        .map_err(|error| NextestDispatchFailure::GuestExecution(format!("{error:?}")))?;
+    let Some(mut plan) = nextest_guest_plan(&kit, support.path(), group, test_name)
+        .map_err(|error| NextestDispatchFailure::GuestExecution(format!("{error:?}")))?
+    else {
+        return Err(NextestDispatchFailure::LaneNotPrepared(format!(
+            "guest group {group:?} has no prepared attempt context"
+        )));
+    };
+    plan.extra =
+        guest_attempt_files(plan.extra, attempt_files, &source_root, binary_id, test_name)?;
+    let mut guest = GuestRun::boot_with_files(
+        &kit,
+        &format!("nextest-{}", plan.name),
+        plan.cid,
+        std::mem::take(&mut plan.extra),
+        std::mem::take(&mut plan.module_paths),
+        plan.memory_mib,
+        plan.vcpus,
+    )
+    .map_err(|error| NextestDispatchFailure::GuestExecution(format!("{error:?}")))?;
+    prepare_nextest_guest(&mut guest, &mut plan, test_name)
+        .map_err(|error| NextestDispatchFailure::GuestExecution(format!("{error:?}")))?;
+    execute_nextest_guest_attempt(
+        guest,
+        &plan,
+        program,
+        args,
+        &environment,
+        &current_dir,
+        test_name,
+    )
+}
+
+fn nextest_wrapper_entry(program: &str, args: &[String]) -> Result<i32, NextestDispatchFailure> {
+    let binary_id = std::env::var("NEXTEST_BINARY_ID").unwrap_or_default();
+    let test_name = std::env::var("NEXTEST_TEST_NAME").unwrap_or_default();
+    if binary_id == "overdrive-init::bin/overdrive-init"
+        && test_name.starts_with("integration::in_guest_lane::")
+    {
+        let error = Command::new(program).args(args).exec();
+        return Err(NextestDispatchFailure::GuestExecution(format!(
+            "could not exec the existing guest-lane host driver: {error}"
+        )));
+    }
+    let group = std::env::var("OVERDRIVE_FWD_GUEST_GROUP").unwrap_or_default();
+    run_nextest_group_attempt(&group, program, args, &binary_id, &test_name)
+}
+
+fn report_nextest_dispatch_failure(error: NextestDispatchFailure) -> ! {
+    match error {
+        NextestDispatchFailure::LaneNotPrepared(detail) => {
+            eprintln!("OVERDRIVE_METAL_TEST_ERROR error=lane_not_prepared");
+            eprintln!("{detail}");
+            std::process::exit(78);
+        }
+        NextestDispatchFailure::GuestExecution(detail) => {
+            eprintln!("OVERDRIVE_METAL_TEST_ERROR error=guest_execution_failed");
+            eprintln!("{detail}");
+            std::process::exit(70);
+        }
+    }
+}
+
 fn main() {
+    let mut args = std::env::args();
+    let _program_name = args.next();
+    if args.next().as_deref() == Some("--nextest-wrapper") {
+        let Some(program) = args.next() else {
+            report_nextest_dispatch_failure(NextestDispatchFailure::LaneNotPrepared(
+                "the selected nextest executable argument is absent".to_owned(),
+            ));
+        };
+        let test_args = args.collect::<Vec<_>>();
+        let status = match nextest_wrapper_entry(&program, &test_args) {
+            Ok(status) => status,
+            Err(error) => report_nextest_dispatch_failure(error),
+        };
+        std::process::exit(status);
+    }
     let staging = default_staging_root();
     let kit = GuestKit::provision(&staging).expect("the prepared GuestKit provisions on metal");
     let tests = InGuestTests::prepared("overdrive-fwd", "integration")

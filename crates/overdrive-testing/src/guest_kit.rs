@@ -420,6 +420,23 @@ fn staging(detail: impl Into<String>) -> impl FnOnce(io::Error) -> GuestKitError
     move |source| GuestKitError::Staging { detail, source }
 }
 
+fn runtime_staging_root() -> Result<PathBuf, GuestKitError> {
+    let Some(run_id) = std::env::var_os("OVERDRIVE_METAL_RUN_ID") else {
+        return Ok(PathBuf::from("/run"));
+    };
+    let run_id = run_id.to_string_lossy();
+    if run_id.len() != 24
+        || !run_id.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Err(GuestKitError::Staging {
+            detail: "valid OVERDRIVE_METAL_RUN_ID is required before selecting a VMM runtime root"
+                .into(),
+            source: io::Error::new(io::ErrorKind::InvalidInput, "invalid metal run id"),
+        });
+    }
+    Ok(PathBuf::from("/run/ovd-gk").join(run_id.as_ref()))
+}
+
 impl GuestKit {
     /// Provisions (or re-verifies) the kit under `staging_root`: the shared
     /// VM fixture's preflight and kernel, the static `overdrive-init`, and —
@@ -433,6 +450,7 @@ impl GuestKit {
     /// [`GuestKitError::LaneNotPrepared`] when the setup step's artefacts
     /// are missing.
     pub fn provision(staging_root: &Path) -> Result<Self, GuestKitError> {
+        let _ = runtime_staging_root()?;
         let fixture = VmFixture::provision(staging_root)?;
         let _lock = take_lock(&staging_root.join(".guest-kit-lock"))?;
         // The production VMM drops to uid/gid 4200 before opening its
@@ -561,10 +579,10 @@ impl GuestKit {
             .map_err(|e| launch(format!("allocation id: {e}")))?;
         let cid = GuestCid::new(boot.cid).map_err(|e| launch(format!("guest CID: {e}")))?;
         // Cloud Hypervisor's pathname Unix socket is limited by `sun_path`.
-        // Keep only per-launch runtime artifacts under this bounded path; the
-        // rootfs clone and its index stay under the caller's reflink-capable
-        // `boot.run_dir` below.
-        let runtime = WorkDir::create(Path::new("/run"), "ovd-gk")?;
+        // Keep per-launch runtime artifacts below the invocation-owned Metal
+        // root (or `/run` outside Metal); the rootfs clone and its index stay
+        // under the caller's reflink-capable `boot.run_dir`.
+        let runtime = WorkDir::create(&runtime_staging_root()?, "ovd-gk")?;
         // `CloudHypervisorVmm::create` chowns the per-allocation child run
         // directory to the confined VMM identity (uid/gid 4200).  The Metal
         // runner's umask creates this runtime parent as `root:root 0750`,

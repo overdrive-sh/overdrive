@@ -31,6 +31,7 @@
 //! | `ovd_fwd.ko` for the running kernel | `<workspace>/target/kmod/<release>/ovd_fwd.ko` (EVMOD-BUILD; workspace-scoped, never the shared cargo target dir; `$OVERDRIVE_KMOD_DIR` in a mutation run) | `forwarder_module::require_forwarder_module`, `guest_kit::GuestKit::provision` |
 //! | the static scripted peer | `<musl-triple>/release/overdrive-guest-peer` | `guest_kit::GuestKit::provision` |
 //! | an in-guest libtest binary | `guest-kit/in-guest/<package>--<bin>` | `guest_lane::InGuestTests::prepared` |
+//! | the nextest guest dispatcher | `<target>/debug/overdrive-fwd-guest-suite` | `OVERDRIVE_METAL_TEST_DISPATCHER` |
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -39,6 +40,8 @@ use color_eyre::eyre::{Result, WrapErr, bail, eyre};
 
 /// The name of the scripted peer's binary target in `overdrive-testing`.
 pub const GUEST_PEER_BIN: &str = "overdrive-guest-peer";
+/// The prepared host-side dispatcher used by the nextest run-wrapper.
+const GUEST_SUITE_BIN: &str = "overdrive-fwd-guest-suite";
 
 /// Which cargo target of a package an in-guest lane's libtest binary is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -207,6 +210,12 @@ pub fn guest_peer_path(target_dir: &Path, triple: &str) -> PathBuf {
     target_dir.join(triple).join("release").join(GUEST_PEER_BIN)
 }
 
+/// Where the prepared host-side guest dispatcher is written.
+#[must_use]
+fn guest_suite_path(target_dir: &Path) -> PathBuf {
+    target_dir.join("debug").join(GUEST_SUITE_BIN)
+}
+
 /// Runs the lane setup: the forwarder module, the scripted peer, the
 /// in-guest test binaries — each verified at its contract path.
 ///
@@ -271,6 +280,20 @@ pub fn run(workspace_root: &Path, target_dir: &Path) -> Result<()> {
             .wrap_err_with(|| format!("staging {} at {}", built.display(), staged.display()))?;
         eprintln!("guest-kit-prepare: {} {} -> {}", lane.package, lane.bin, staged.display());
     }
+    let mut guest_suite_build = Command::new("cargo");
+    guest_suite_build
+        .args([
+            "build",
+            "--package",
+            "overdrive-testing",
+            "--bin",
+            GUEST_SUITE_BIN,
+            "--features",
+            "integration-tests",
+        ])
+        .current_dir(workspace_root);
+    run_step(&mut guest_suite_build, "building the prepared guest dispatcher")?;
+    require(&guest_suite_path(target_dir), GUEST_SUITE_BIN)?;
     eprintln!("guest-kit-prepare: kernel {release}, target {triple}: the lane is prepared");
     Ok(())
 }

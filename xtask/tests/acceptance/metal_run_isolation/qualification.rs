@@ -51,7 +51,6 @@ fn preflight(fixture: &Fixture) -> Command {
 /// CONTRACT_SHAPE: bounded-change (typed negative qualification output and
 /// transient probe processes only; source, invocation and physical kernel unchanged).
 #[test]
-#[ignore = "pending DELIVER: metal-run-isolation typed native qualification"]
 fn sad_each_existing_native_prerequisite_has_the_exact_probe_and_retained_cause() {
     for probe in [
         "arch",

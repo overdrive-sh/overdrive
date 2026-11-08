@@ -252,9 +252,8 @@ impl VmFixture {
 
 /// A reasonable default staging root for local/manual use.
 ///
-/// `/srv/vm`'s `overdrive-testing` subdirectory when `/srv/vm` exists (the
-/// metal box's own convention — `infra/metal/provision.sh` mounts it
-/// XFS-reflink-formatted when `--data-disk` was given), else a path under
+/// `/srv/vm/metal/<run-id>` for a Metal invocation, otherwise `/srv/vm`'s
+/// `overdrive-testing` subdirectory when `/srv/vm` exists, else a path under
 /// `std::env::temp_dir()`.
 ///
 /// This is a convenience a caller opts into by calling it explicitly and
@@ -264,6 +263,14 @@ impl VmFixture {
 /// at the call site).
 #[must_use]
 pub fn default_staging_root() -> PathBuf {
+    if let Some(run_id) = std::env::var_os("OVERDRIVE_METAL_RUN_ID") {
+        let run_id = run_id.to_string_lossy();
+        if run_id.len() == 24
+            && run_id.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        {
+            return PathBuf::from("/srv/vm/metal").join(run_id.as_ref());
+        }
+    }
     let srv_vm = Path::new("/srv/vm");
     if srv_vm.is_dir() {
         srv_vm.join("overdrive-testing")

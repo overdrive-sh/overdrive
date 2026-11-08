@@ -86,7 +86,6 @@ fn wrapper(fixture: &Fixture, binary: &str, name: &str) -> Command {
 /// CONTRACT_SHAPE: bounded-change (host-pure attempt changes only its output and
 /// fixture files, preserving exact argv/env/status with no dispatcher dependency).
 #[test]
-#[ignore = "pending DELIVER: metal-run-isolation mandatory nextest placement"]
 fn host_pure_attempt_preserves_exact_arguments_environment_and_255_without_a_guest() {
     let fixture = Fixture::new();
     let executable_path = body(&fixture);
@@ -124,7 +123,6 @@ fn host_pure_attempt_preserves_exact_arguments_environment_and_255_without_a_gue
 /// CONTRACT_SHAPE: bounded-change (outside ordinary Metal context execs the exact
 /// original runner chain; placement/dispatcher cannot block non-Metal/exclusive).
 #[test]
-#[ignore = "pending DELIVER: metal-run-isolation non-Metal coexistence"]
 fn non_metal_and_explicit_exclusive_attempts_preserve_the_original_exec_chain() {
     for context in ["non-metal", "exclusive"] {
         let fixture = Fixture::new();
@@ -153,7 +151,6 @@ fn non_metal_and_explicit_exclusive_attempts_preserve_the_original_exec_chain() 
 /// CONTRACT_SHAPE: bounded-change (malformed ordinary context/placement may emit
 /// only typed refusal; no selected body, guest preparation or remote mutation).
 #[test]
-#[ignore = "pending DELIVER: metal-run-isolation closed placement refusal"]
 fn sad_invalid_context_missing_identity_and_missing_guest_dispatcher_never_run_the_body() {
     for state in [
         "short-id",
@@ -218,7 +215,6 @@ fn sad_invalid_context_missing_identity_and_missing_guest_dispatcher_never_run_t
 /// CONTRACT_SHAPE: bounded-change (closed exact-identity placement refuses malformed
 /// or duplicate data; source/retained evidence and attempted-body complement unchanged).
 #[test]
-#[ignore = "pending DELIVER: metal-run-isolation placement schema validation"]
 fn sad_invalid_duplicate_and_ambiguous_placement_is_fail_closed() {
     for state in [
         "empty",
@@ -268,7 +264,6 @@ fn sad_invalid_duplicate_and_ambiguous_placement_is_fail_closed() {
 /// CONTRACT_SHAPE: bounded-change (launcher anonymous local-vsock namespace and
 /// child process only; initial namespace modes and physical kernel complement stay unchanged).
 #[test]
-#[ignore = "pending DELIVER: metal-run-isolation native launcher resource context"]
 fn native_launcher_gets_a_local_vsock_namespace_without_changing_the_initial_mode() {
     let fixture = Fixture::new_accessible();
     let executable_path = body(&fixture);
@@ -295,7 +290,6 @@ fn native_launcher_gets_a_local_vsock_namespace_without_changing_the_initial_mod
 /// CONTRACT_SHAPE: bounded-change (capability-denied parent namespace produces
 /// exact typed failure before a body; no global CID or raw-host fallback).
 #[test]
-#[ignore = "pending DELIVER: metal-run-isolation namespace refusal"]
 fn sad_namespace_permission_denial_never_falls_back_to_the_host() {
     let fixture = Fixture::new_accessible();
     let executable_path = body(&fixture);
@@ -323,7 +317,6 @@ fn sad_namespace_permission_denial_never_falls_back_to_the_host() {
 /// CONTRACT_SHAPE: bounded-change (read-only placement comparison and output only;
 /// data extensions are exact identities, never absence-means-host or fixed counts).
 #[test]
-#[ignore = "pending DELIVER: metal-run-isolation complete test placement"]
 fn runtime_placement_preserves_the_reviewed_partition_and_declares_new_acceptance_identities() {
     let design: Value = serde_json::from_str(&text(&workspace_file(
         "docs/feature/metal-run-isolation/design/test-placement-inventory.json",
@@ -366,7 +359,6 @@ fn runtime_placement_preserves_the_reviewed_partition_and_declares_new_acceptanc
 /// CONTRACT_SHAPE: bounded-change (fresh fixture mount/user namespaces and actual
 /// syscall refusals only; physical namespace modes and selected body remain unchanged).
 #[test]
-#[ignore = "pending DELIVER: metal-run-isolation namespace operation failures"]
 fn sad_each_later_namespace_operation_keeps_its_exact_step_and_errno() {
     for (step, errno) in [("child_mode", "30"), ("local", "28")] {
         let fixture = Fixture::new_accessible();
@@ -415,7 +407,6 @@ fn sad_each_later_namespace_operation_keeps_its_exact_step_and_errno() {
 /// verification reader only; no syscall result, namespace mode or guest evidence is faked).
 #[test]
 #[cfg(target_arch = "x86_64")]
-#[ignore = "pending DELIVER: metal-run-isolation namespace verification failure"]
 fn sad_actual_verification_read_failure_preserves_its_step_and_errno() {
     let fixture = Fixture::new_accessible();
     let executable_path = body(&fixture);

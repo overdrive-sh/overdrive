@@ -41,21 +41,232 @@ remote_subdir_invalid() {
 }
 
 checkout_identity_conflict() {
+  if [ "${RUN_MODE:-0}" -eq 1 ] && [ "${RUN_CONTROL_OPEN:-0}" -eq 1 ]; then
+    abort_registered_run checkout_identity_conflict
+  fi
   printf 'OVERDRIVE_METAL_RUNNER_ERROR error=checkout_identity_conflict\n' >&2
   exit 78
 }
 
 source_mismatch() {
+  if [ "${RUN_MODE:-0}" -eq 1 ] && [ "${RUN_CONTROL_OPEN:-0}" -eq 1 ]; then
+    abort_registered_run source_mismatch
+  fi
   printf 'OVERDRIVE_METAL_RUNNER_ERROR error=source_mismatch\n' >&2
   exit 78
 }
 
 rsync_prerequisite_failed() {
   printf 'OVERDRIVE_METAL_RUNNER_ERROR error=runner_preparation_failed prerequisite=rsync\n' >&2
+  if [ "${RUN_MODE:-0}" -eq 1 ] && [ "${RUN_CONTROL_OPEN:-0}" -eq 1 ]; then
+    abort_registered_run runner_preparation_failed
+  fi
   exit 75
 }
 
-[ $# -ge 1 ] || { echo "usage: $0 <user@host> [--data-disk DEV] [--sync-only | --pull -- PATH... | --run -- CMD... | --shell | --collect ID]" >&2; exit 1; }
+run_preparation_failed() {
+  printf 'OVERDRIVE_METAL_RUNNER_ERROR error=runner_preparation_failed\n' >&2
+  if [ "${RUN_MODE:-0}" -eq 1 ] && [ "${RUN_CONTROL_OPEN:-0}" -eq 1 ]; then
+    abort_registered_run runner_preparation_failed
+  fi
+  exit 75
+}
+
+invalid_mode() {
+  printf 'OVERDRIVE_METAL_RUNNER_ERROR error=invalid_mode\n' >&2
+  exit 64
+}
+
+unsupported_ordinary_command() {
+  printf 'OVERDRIVE_METAL_RUNNER_ERROR error=unsupported_ordinary_command\n' >&2
+  exit 64
+}
+
+execution_override_refused() {
+  printf 'OVERDRIVE_METAL_RUNNER_ERROR error=execution_override_refused\n' >&2
+  exit 64
+}
+
+artifact_scope_mismatch() {
+  printf 'OVERDRIVE_METAL_RUNNER_ERROR error=artifact_scope_mismatch\n' >&2
+  exit 64
+}
+
+validate_ordinary_command() {
+  local index=0
+  local key value argument subcommand package="" binary=""
+  local has_doc=0
+  local separator=0
+  local position
+  local -a seen_environment=()
+  ORDINARY_NEXTTEST=0
+  ORDINARY_SUITE_RUN=0
+  if [ "${#RUN_ARGS[@]}" -eq 0 ]; then
+    unsupported_ordinary_command
+  fi
+  if [ "${RUN_ARGS[0]}" = env ] || [ "${RUN_ARGS[0]}" = /usr/bin/env ]; then
+    index=1
+    while [ "$index" -lt "${#RUN_ARGS[@]}" ] && [[ "${RUN_ARGS[$index]}" == *=* ]]; do
+      argument="${RUN_ARGS[$index]}"
+      key="${argument%%=*}"
+      value="${argument#*=}"
+      [[ "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || unsupported_ordinary_command
+      for existing in "${seen_environment[@]}"; do
+        [ "$existing" != "$key" ] || unsupported_ordinary_command
+      done
+      seen_environment+=("$key")
+      case "$key" in
+        OVERDRIVE_BPF_NATIVE)
+          [ "$value" = 1 ] || unsupported_ordinary_command
+          ;;
+        OVERDRIVE_FWD_GUEST_GROUP)
+          case "$value" in
+            all|probe|core|unload|ulp|mtls-relay|cgroup-default|stress|nested-boundary) ;;
+            *) unsupported_ordinary_command ;;
+          esac
+          ;;
+        OVERDRIVE_FWD_GUEST_EXACT|RUST_BACKTRACE|RUST_LOG|NEXTEST_PROFILE|\
+        PROPTEST_CASES|PROPTEST_DISABLE_FAILURE_PERSISTENCE|PROPTEST_FORK|\
+        PROPTEST_MAX_DEFAULT_SIZE_RANGE|PROPTEST_MAX_FLAT_MAP_REGENS|\
+        PROPTEST_MAX_GLOBAL_REJECTS|PROPTEST_MAX_LOCAL_REJECTS|\
+        PROPTEST_MAX_SHRINK_ITERS|PROPTEST_MAX_SHRINK_TIME|\
+        PROPTEST_RNG_ALGORITHM|PROPTEST_RNG_SEED|PROPTEST_TIMEOUT|PROPTEST_VERBOSE)
+          if ! printf '%s' "$value" | iconv -f UTF-8 -t UTF-8 >/dev/null 2>&1; then
+            unsupported_ordinary_command
+          fi
+          ;;
+        *) unsupported_ordinary_command ;;
+      esac
+      index=$((index + 1))
+    done
+  fi
+  [ "$index" -lt "${#RUN_ARGS[@]}" ] || unsupported_ordinary_command
+  [ "${RUN_ARGS[$index]}" = cargo ] || unsupported_ordinary_command
+  COMMAND_INDEX="$index"
+  index=$((index + 1))
+  [ "$index" -lt "${#RUN_ARGS[@]}" ] || unsupported_ordinary_command
+  subcommand="${RUN_ARGS[$index]}"
+  case "$subcommand" in
+    build|check|clippy|fmt) ;;
+    test)
+      position=$((index + 1))
+      while [ "$position" -lt "${#RUN_ARGS[@]}" ]; do
+        argument="${RUN_ARGS[$position]}"
+        [ "$argument" != -- ] || break
+        [ "$argument" != --doc ] || has_doc=1
+        position=$((position + 1))
+      done
+      [ "$has_doc" -eq 1 ] || unsupported_ordinary_command
+      ;;
+    nextest)
+      [ "$((index + 1))" -lt "${#RUN_ARGS[@]}" ] && \
+        [ "${RUN_ARGS[$((index + 1))]}" = run ] || unsupported_ordinary_command
+      ORDINARY_NEXTTEST=1
+      ;;
+    xtask)
+      [ "$((index + 1))" -lt "${#RUN_ARGS[@]}" ] || unsupported_ordinary_command
+      case "${RUN_ARGS[$((index + 1))]}" in
+        guest-kit-prepare|bpf-build|bpf-clippy|bpf-unit|kmod-build|\
+        dst-lint|cloexec-lint|conformance-lint|yaml-free-cli|quint|mutants) ;;
+        *) unsupported_ordinary_command ;;
+      esac
+      ;;
+    run)
+      position=$((index + 1))
+      while [ "$position" -lt "${#RUN_ARGS[@]}" ]; do
+        argument="${RUN_ARGS[$position]}"
+        [ "$argument" != -- ] || { separator=1; break; }
+        case "$argument" in
+          -p|--package)
+            position=$((position + 1))
+            [ "$position" -lt "${#RUN_ARGS[@]}" ] || unsupported_ordinary_command
+            [ -z "$package" ] || unsupported_ordinary_command
+            package="${RUN_ARGS[$position]}"
+            ;;
+          --package=*)
+            [ -z "$package" ] || unsupported_ordinary_command
+            package="${argument#--package=}"
+            ;;
+          --bin)
+            position=$((position + 1))
+            [ "$position" -lt "${#RUN_ARGS[@]}" ] || unsupported_ordinary_command
+            [ -z "$binary" ] || unsupported_ordinary_command
+            binary="${RUN_ARGS[$position]}"
+            ;;
+          --bin=*)
+            [ -z "$binary" ] || unsupported_ordinary_command
+            binary="${argument#--bin=}"
+            ;;
+        esac
+        position=$((position + 1))
+      done
+      case "$package/$binary" in
+        overdrive-testing/overdrive-fwd-guest-suite)
+          ORDINARY_SUITE_RUN=1
+          ;;
+        overdrive-sim/dst|overdrive-control-plane/openapi) ;;
+        *) unsupported_ordinary_command ;;
+      esac
+      ;;
+    *) unsupported_ordinary_command ;;
+  esac
+
+  position=$((COMMAND_INDEX + 1))
+  while [ "$position" -lt "${#RUN_ARGS[@]}" ]; do
+    argument="${RUN_ARGS[$position]}"
+    [ "$argument" != -- ] || break
+    case "$argument" in
+      --config|--config=*|--config-file|--config-file=*|\
+      --tool-config-file|--tool-config-file=*|--user-config-file|\
+      --user-config-file=*|--debugger|--debugger=*|--tracer|--tracer=*)
+        execution_override_refused
+        ;;
+      --archive-file|--archive-file=*|--archive-format|--archive-format=*|\
+      --extract-to|--extract-to=*|--extract-overwrite|\
+      --persist-extract-tempdir|--cargo-metadata|--cargo-metadata=*|\
+      --binaries-metadata|--binaries-metadata=*|--workspace-remap|\
+      --workspace-remap=*|--target-dir-remap|--target-dir-remap=*|\
+      --build-dir-remap|--build-dir-remap=*)
+        artifact_scope_mismatch
+        ;;
+    esac
+    position=$((position + 1))
+  done
+}
+
+validate_remote_artifact_paths() {
+  local index argument value candidate remote_command result
+  local -a artifact_paths=()
+  index=$((COMMAND_INDEX + 1))
+  while [ "$index" -lt "${#RUN_ARGS[@]}" ]; do
+    argument="${RUN_ARGS[$index]}"
+    [ "$argument" != -- ] || break
+    case "$argument" in
+      --manifest-path=*) artifact_paths+=("${argument#--manifest-path=}") ;;
+      --target-dir=*) artifact_paths+=("${argument#--target-dir=}") ;;
+      --manifest-path|--target-dir)
+        index=$((index + 1))
+        [ "$index" -lt "${#RUN_ARGS[@]}" ] || artifact_scope_mismatch
+        artifact_paths+=("${RUN_ARGS[$index]}")
+        ;;
+    esac
+    index=$((index + 1))
+  done
+  for value in "${artifact_paths[@]}"; do
+    if [[ "$value" = /* ]]; then
+      candidate="$value"
+    else
+      candidate="${REMOTE_DIR}/${value}"
+    fi
+    printf -v remote_command \
+      'candidate=%q; checkout=%q; scratch=%q; canonical=$(realpath -m -- "$candidate") || exit 1; case "$canonical" in "$checkout"|"$checkout"/*|"$scratch"|"$scratch"/*) printf "ok\\n" ;; *) printf "invalid\\n" ;; esac' \
+      "$candidate" "$REMOTE_DIR" "$METAL_RUN_TMP"
+    result="$(ssh "${SSH_OPTS[@]}" "${TARGET}" "$remote_command")" || artifact_scope_mismatch
+    [ "$result" = ok ] || artifact_scope_mismatch
+  done
+}
+
+[ $# -ge 1 ] || { echo "usage: $0 <user@host> [--data-disk DEV] [--sync-only | --pull -- PATH... | --run [--exclusive] -- CMD... | --shell | --collect ID]" >&2; exit 1; }
 TARGET="$1"; shift
 
 DATA_DISK=""
@@ -63,6 +274,7 @@ BREAK_RAID_DISK=""
 SYNC_ONLY=0
 PULL_MODE=0
 RUN_MODE=0
+EXCLUSIVE_MODE=0
 SHELL_MODE=0
 COLLECT_MODE=0
 COLLECT_RUN_ID=""
@@ -76,6 +288,7 @@ while [ $# -gt 0 ]; do
     --sync-only) SYNC_ONLY=1; shift ;;
     --pull) PULL_MODE=1; shift ;;
     --run) RUN_MODE=1; shift ;;
+    --exclusive) EXCLUSIVE_MODE=1; shift ;;
     --shell) SHELL_MODE=1; shift ;;
     --collect)
       [ $# -ge 2 ] || { echo "FATAL: --collect requires a run id" >&2; exit 64; }
@@ -86,6 +299,15 @@ while [ $# -gt 0 ]; do
     *) echo "unknown arg: $1" >&2; exit 1 ;;
   esac
 done
+
+if [ "$EXCLUSIVE_MODE" -eq 1 ] && [ "$RUN_MODE" -eq 0 ]; then
+  invalid_mode
+fi
+if [ "$EXCLUSIVE_MODE" -eq 1 ] && \
+  { [ "$SYNC_ONLY" -eq 1 ] || [ "$PULL_MODE" -eq 1 ] || \
+    [ "$SHELL_MODE" -eq 1 ] || [ "$COLLECT_MODE" -eq 1 ]; }; then
+  invalid_mode
+fi
 
 [ $((SYNC_ONLY + PULL_MODE + RUN_MODE + SHELL_MODE + COLLECT_MODE)) -le 1 ] || {
   echo "FATAL: choose only one of --sync-only, --pull, --run, --shell, or --collect" >&2
@@ -99,6 +321,25 @@ done
   echo "FATAL: --pull requires one or more repo-relative paths after --" >&2
   exit 1
 }
+if [ "$RUN_MODE" -eq 1 ] && [ "$EXCLUSIVE_MODE" -eq 0 ]; then
+  validate_ordinary_command
+  if [ "$ORDINARY_NEXTTEST" -eq 1 ]; then
+    [ -f "${REPO}/.config/nextest.toml" ] || execution_override_refused
+    grep -Fq 'command = { command-line = "infra/metal/test-wrapper.sh", relative-to = "workspace-root" }' \
+      "${REPO}/.config/nextest.toml" || execution_override_refused
+    grep -Fq 'target-runner = "within-wrapper"' "${REPO}/.config/nextest.toml" \
+      || execution_override_refused
+    grep -Fq 'run-wrapper = "metal"' "${REPO}/.config/nextest.toml" \
+      || execution_override_refused
+    for config in "${REPO}/.cargo/config.toml" "${REPO}/.cargo/config"; do
+      if [ -f "$config" ] && \
+        awk '!/^[[:space:]]*#/ && /^[[:space:]]*runner[[:space:]]*=/' \
+          "$config" | grep -q .; then
+        execution_override_refused
+      fi
+    done
+  fi
+fi
 # Pulled paths are validated here as well as by `cargo xtask metal pull`, so a
 # direct caller gets the same refusal: repo-relative, no `.`/`..`/`.git`/empty
 # component, and a charset that needs no shell quoting on either side.
@@ -193,8 +434,10 @@ if [ "${COLLECT_MODE}" -eq 0 ]; then
 fi
 
 RUN_ID=""
+EXECUTION_CLASS="ordinary"
 if [ "${RUN_MODE}" -eq 1 ]; then
   RUN_ID="$(printf '%s-%s-%s' "$$" "$(date +%s%N)" "${RANDOM}" | shasum -a 256 | cut -c1-24)"
+  [ "$EXCLUSIVE_MODE" -eq 0 ] || EXECUTION_CLASS="exclusive"
   printf 'OVERDRIVE_METAL_RUN_ID=%s\n' "${RUN_ID}" >&2
 fi
 
@@ -423,6 +666,15 @@ if [ "${COLLECT_MODE}" -eq 0 ]; then
   METAL_TREE_LOCK_PATH="${OVERDRIVE_METAL_TREE_LOCK_PATH:-/run/lock/overdrive-metal-tree-${TREE_HASH}.lock}"
   METAL_TREE_OWNER_PATH="${OVERDRIVE_METAL_TREE_OWNER_PATH:-/run/lock/overdrive-metal-tree-${TREE_HASH}.owner}"
 fi
+METAL_RUN_TMP=""
+METAL_TEST_DISPATCHER=""
+if [ "${RUN_MODE}" -eq 1 ]; then
+  METAL_RUN_TMP="${REMOTE_DIR}/target/metal-run-tmp/${RUN_ID}"
+  METAL_TEST_DISPATCHER="${REMOTE_DIR}/target/guest-kit/overdrive-fwd-guest-suite"
+  if [ "${EXCLUSIVE_MODE}" -eq 0 ]; then
+    validate_remote_artifact_paths
+  fi
+fi
 
 collect_remote() {
   local helper_b64 remote_command status
@@ -431,8 +683,8 @@ collect_remote() {
   # The collector itself validates the run id again before deriving any unit
   # or path, and it never opens the canonical lease.
   printf -v remote_command \
-    'lease_script=$(printf %%s %q | base64 -d); exec %s bash -c "$lease_script" overdrive-metal-lease --collect %q %q %q %q' \
-    "${helper_b64}" "${SUDO}" "${COLLECT_RUN_ID:-$1}" \
+    'lease_script=$(printf %%s %q | base64 -d); exec %s bash -c "$lease_script" overdrive-metal-lease --collect %q %q %q %q %q' \
+    "${helper_b64}" "${SUDO}" "${COLLECT_RUN_ID:-$1}" "${METAL_RUNS_ROOT}" \
     "${METAL_LEASE_TIMEOUT_SECONDS}" "${METAL_LOCK_PATH}" "${METAL_OWNER_PATH}"
   set +e
   ssh "${SSH_OPTS[@]}" "${TARGET}" "${remote_command}"
@@ -441,15 +693,52 @@ collect_remote() {
   return "${status}"
 }
 
+abort_registered_run() {
+  local error="$1"
+  local status
+  if [ "${RUN_CONTROL_OPEN}" -eq 1 ]; then
+    printf 'ABORT error=%s\n' "$error" >&9 2>/dev/null || true
+    exec 9>&- || true
+    RUN_CONTROL_OPEN=0
+  fi
+  if [ -n "${LEASE_PID}" ]; then
+    wait "${LEASE_PID}" 2>/dev/null || true
+    LEASE_PID=""
+  fi
+  COLLECT_RUN_ID="${RUN_ID}"
+  set +e
+  collect_remote "${RUN_ID}"
+  status=$?
+  set -e
+  exit "${status}"
+}
+
+disconnect_registered_run() {
+  local status
+  exec 9>&- || true
+  RUN_CONTROL_OPEN=0
+  if [ -n "${LEASE_PID}" ]; then
+    wait "${LEASE_PID}" 2>/dev/null || true
+    LEASE_PID=""
+  fi
+  COLLECT_RUN_ID="${RUN_ID}"
+  set +e
+  collect_remote "${RUN_ID}"
+  status=$?
+  set -e
+  exit "${status}"
+}
+
 if [ "${COLLECT_MODE}" -eq 1 ]; then
   collect_remote "${COLLECT_RUN_ID}"
   exit $?
 fi
 
 # ---------------------------------------------------------------------------
-# --sync-only writes only into this branch's private tree, so it takes the
-# per-tree lock INSTEAD of the global lease; every other action takes the
-# global lease (run additionally takes the tree lock, below).
+# --sync-only and --pull write only into this checkout, so they take the
+# checkout lock and never the physical-maintenance barrier. Durable runs take
+# both locks in the owner service; shell and provisioning take the exclusive
+# physical-maintenance barrier.
 if [ "${SYNC_ONLY}" -eq 1 ] || [ "${PULL_MODE}" -eq 1 ]; then
   HOLDER_LOCK_PATH="${METAL_TREE_LOCK_PATH}"
   HOLDER_OWNER_PATH="${METAL_TREE_OWNER_PATH}"
@@ -459,7 +748,7 @@ else
   HOLDER_LOCK_PATH="${METAL_LOCK_PATH}"
   HOLDER_OWNER_PATH="${METAL_OWNER_PATH}"
   HOLDER_UMASK=""
-  log "acquire canonical metal lease (${HOLDER_LOCK_PATH})"
+  log "acquire exclusive physical-maintenance barrier (${HOLDER_LOCK_PATH})"
 fi
 # ---------------------------------------------------------------------------
 ACTION="bootstrap"
@@ -486,38 +775,29 @@ LEASE_TMP="$(mktemp -d "${TMPDIR:-/tmp}/overdrive-metal-lease.XXXXXX")"
 mkfifo "${LEASE_TMP}/release"
 LEASE_HELPER_B64="$(base64 < "${REPO}/infra/metal/lease-holder.sh" | tr -d '\n')"
 if [ "${RUN_MODE}" -eq 1 ]; then
-  # A durable run service needs the login user's PATH and HOME explicitly:
-  # the transient service is root-owned, while the command still starts in
-  # the target user's login shell before the existing sudo transition.
-  # The supervisor resolves the login PATH after it owns the canonical lease;
-  # no extra SSH mutation/query is performed while a writer is still waiting.
+  # The durable service owns both locks before the controller transfers source.
+  # The service keeps them through command completion; the controller never
+  # releases and reacquires the checkout lock around START.
   REMOTE_PATH=""
   JOINED=""
   for arg in "${RUN_ARGS[@]}"; do
     printf -v QUOTED '%q' "${arg}"
     JOINED+="${QUOTED} "
   done
-  # The durable command re-takes the per-tree lock for its whole lifetime and,
-  # under that lock, re-verifies the synced source marker before running the
-  # user command. The controller releases its own tree lock just before START,
-  # and the run outlives the controller's ssh session, so this guard is what
-  # keeps a later sync of the same tree out for the run's full duration; a
-  # sync that slips into the release->reacquire window changes the marker and
-  # the run fails closed. fd 7 is opened read-only (no O_CREAT: the file was
-  # created by the controller's tree holder) and stays open in this login
-  # shell, so the command must not be exec'd: it runs, then its status is
-  # returned.
-  printf -v TREE_GUARD \
-    'exec 7<%q && flock -w %q 7 || { echo "FATAL: could not acquire metal tree lock %s" >&2; exit 75; }; [ "$(cat %q/.overdrive-metal-source 2>/dev/null)" = %q ] || { echo "FATAL: metal source marker changed before the run started; refusing to run against a different tree" >&2; exit 1; }; ' \
-    "${METAL_TREE_LOCK_PATH}" "${METAL_LEASE_TIMEOUT_SECONDS}" "${METAL_TREE_LOCK_PATH}" \
-    "${REMOTE_DIR}" "${EXPECTED_MARKER}"
+  RUN_EXEC="${JOINED}"
+  if [ "${EXCLUSIVE_MODE}" -eq 0 ] && [ "${ORDINARY_SUITE_RUN}" -eq 1 ]; then
+    printf -v RUN_EXEC 'bash %q --guest-suite %s' \
+      "${REMOTE_DIR}/infra/metal/test-wrapper.sh" "${JOINED}"
+  fi
+  printf -v REMOTE_CWD 'cd %q' "${REMOTE_DIR}"
+  printf -v METAL_RUN_ENV \
+    'TMPDIR=%q OVERDRIVE_METAL_RUN_ID=%q OVERDRIVE_METAL_EXECUTION_CLASS=%q OVERDRIVE_METAL_SOURCE_ROOT=%q OVERDRIVE_METAL_TEST_DISPATCHER=%q OVERDRIVE_METAL_KERNEL=%q OVERDRIVE_METAL_ROOTFS=%q' \
+    "${METAL_RUN_TMP}" "${RUN_ID}" "${EXECUTION_CLASS}" "${REMOTE_DIR}" \
+    "${METAL_TEST_DISPATCHER}" "${OVERDRIVE_METAL_KERNEL:-}" "${OVERDRIVE_METAL_ROOTFS:-}"
   if [ "${NO_SUDO}" -eq 1 ]; then
-    INNER="${TREE_GUARD}cd ${REMOTE_DIR} && ${JOINED}; rc=\$?; exit \"\$rc\""
+    INNER="${REMOTE_CWD} && env ${METAL_RUN_ENV} ${RUN_EXEC}; rc=\$?; exit \"\$rc\""
     EXECUTION_MODE="login"
   else
-    printf -v METAL_RUN_ENV \
-      'OVERDRIVE_METAL_KERNEL=%q OVERDRIVE_METAL_ROOTFS=%q' \
-      "${OVERDRIVE_METAL_KERNEL:-}" "${OVERDRIVE_METAL_ROOTFS:-}"
     # The command runs as root inside the rsynced tree, so anything it creates
     # or rewrites (recorded evidence, root-only dirs) would be root-owned and
     # make the login user's next --sync-only rsync fail with "Permission
@@ -525,20 +805,28 @@ if [ "${RUN_MODE}" -eq 1 ]; then
     # whatever its status; /target is excluded by rsync and is huge, so it is
     # pruned. The chown is best effort and silent: it never changes the
     # command's exit status or output.
-    INNER="${TREE_GUARD}cd ${REMOTE_DIR} && sudo -n env \"HOME=\$HOME\" \"PATH=\$PATH\" ${METAL_RUN_ENV} ${JOINED}; rc=\$?; sudo -n find ${REMOTE_DIR} -path ${REMOTE_DIR}/target -prune -o ! -user \"\$(id -un)\" -exec chown -h \"\$(id -u):\$(id -g)\" {} + >/dev/null 2>&1 || true; exit \"\$rc\""
+    INNER="${REMOTE_CWD} && sudo -n env \"HOME=\$HOME\" \"PATH=\$PATH\" ${METAL_RUN_ENV} ${RUN_EXEC}; rc=\$?; sudo -n find ${REMOTE_DIR} -path ${REMOTE_DIR}/target -prune -o ! -user \"\$(id -un)\" -exec chown -h \"\$(id -u):\$(id -g)\" {} + >/dev/null 2>&1 || true; exit \"\$rc\""
     EXECUTION_MODE="privileged"
   fi
+  # ExecStopPost runs only after systemd's mixed-mode stop has drained the
+  # unit's descendants. Keep this invocation's helper bytes in the unit
+  # property so a later source sync cannot replace the finalizer it runs.
+  printf -v FINALIZER_COMMAND \
+    'echo %s | base64 -d | /bin/bash -s -- --finalize %s %s' \
+    "${LEASE_HELPER_B64}" "${RUN_ID}" "${METAL_RUNS_ROOT}"
+  printf -v FINALIZER_PROPERTY 'ExecStopPost=/bin/bash -c "%s"' "${FINALIZER_COMMAND}"
   # Decode the helper into bash -c's argument. Every durable argument is
-  # quoted by bash's own `%q`; systemd-run receives the exact command string
-  # and --expand-environment=no prevents it from interpreting its dollar
-  # signs.
+  # quoted by bash's own `%q`; the stop-post command carries this invocation's
+  # helper bytes so later checkout sync cannot change its finalizer.
   printf -v REMOTE_LEASE_CMD \
-    'lease_script=$(printf %%s %q | base64 -d); exec %s systemd-run --quiet --unit=%q --pipe --wait --collect --expand-environment=no --property=Type=exec --property=KillMode=mixed bash -c "$lease_script" overdrive-metal-lease --durable %q %q %q %q %q %q %q %q %q %q %q %q %q %q %q' \
+    'lease_script=$(printf %%s %q | base64 -d); exec %s systemd-run --quiet --unit=%q --pipe --wait --collect --expand-environment=no --property=Type=exec --property=KillMode=mixed --property=%q bash -c "$lease_script" overdrive-metal-lease --durable %q %q %q %q %q %q %q %q %q %q %q %q %q %q %q %q %q %q' \
     "${LEASE_HELPER_B64}" "${SUDO}" "overdrive-metal-run-${RUN_ID}.service" \
+    "${FINALIZER_PROPERTY}" \
     "${METAL_LOCK_PATH}" "${METAL_OWNER_PATH}" "${METAL_LEASE_TIMEOUT_SECONDS}" \
     "${RUN_ID}" "${SCENARIO}" "${WORKSPACE}" "${COMMIT}" "${SOURCE_DIGEST}" \
     "${REMOTE_DIR}" "${REMOTE_USER}" "${EXECUTION_MODE}" "${REMOTE_HOME}" \
-    "${REMOTE_PATH}" "${INNER}" "${METAL_RUNS_ROOT}"
+    "${REMOTE_PATH}" "${INNER}" "${METAL_RUNS_ROOT}" \
+    "${METAL_TREE_LOCK_PATH}" "${METAL_TREE_OWNER_PATH}" "${EXECUTION_CLASS}"
 else
   # Existing sync/shell/bootstrap lease holder: its stdin remains the release
   # stream, with no remote helper file written before the lock exists. For
@@ -598,41 +886,6 @@ if [ "${RUN_MODE}" -eq 1 ]; then
     exit "${status}"
   fi
   cat "${LEASE_TMP}/status"
-
-  # Per-tree lock, taken AFTER the global lease (lock order is always
-  # global -> tree; --sync-only takes only the tree lock, so no cycle). It
-  # excludes a concurrent sync of this tree while this controller rsyncs and
-  # writes the source marker. Nothing mutates before it is held. The holder
-  # ssh is started with fd 9 closed so it cannot keep the global release
-  # stream open.
-  TREE_TOKEN="${LEASE_TOKEN}-tree"
-  mkfifo "${LEASE_TMP}/tree-release"
-  printf -v TREE_LEASE_CMD \
-    'lease_script=$(printf %%s %q | base64 -d); umask 022; exec %s bash -c "$lease_script" overdrive-metal-lease %q %q %q %q %q %q %q %q' \
-    "${LEASE_HELPER_B64}" "${SUDO}" "${METAL_TREE_LOCK_PATH}" "${METAL_TREE_OWNER_PATH}" \
-    "${METAL_LEASE_TIMEOUT_SECONDS}" "${TREE_TOKEN}" "${ACTION}" "${SCENARIO}" \
-    "${WORKSPACE}" "${COMMIT}"
-  log "acquire metal tree lock (${METAL_TREE_LOCK_PATH})"
-  ssh "${SSH_OPTS[@]}" "${TARGET}" "${TREE_LEASE_CMD}" \
-    <"${LEASE_TMP}/tree-release" >"${LEASE_TMP}/tree-status" 2>&1 9>&- &
-  TREE_PID=$!
-  exec 6>"${LEASE_TMP}/tree-release"
-  for _attempt in $(seq 1 "${LEASE_POLL_ATTEMPTS}"); do
-    if grep -q "OVERDRIVE_METAL_LEASE_ACQUIRED token=${TREE_TOKEN}" "${LEASE_TMP}/tree-status"; then
-      break
-    fi
-    if ! kill -0 "${TREE_PID}" 2>/dev/null; then
-      cat "${LEASE_TMP}/tree-status" >&2
-      exit 75
-    fi
-    sleep 0.1
-  done
-  if ! grep -q "OVERDRIVE_METAL_LEASE_ACQUIRED token=${TREE_TOKEN}" "${LEASE_TMP}/tree-status"; then
-    echo "FATAL: tree lock holder did not acknowledge acquisition" >&2
-    cat "${LEASE_TMP}/tree-status" >&2
-    exit 75
-  fi
-  cat "${LEASE_TMP}/tree-status"
 else
   for _attempt in $(seq 1 "${LEASE_POLL_ATTEMPTS}"); do
     if grep -q "OVERDRIVE_METAL_LEASE_ACQUIRED token=${LEASE_TOKEN}" "${LEASE_TMP}/status"; then
@@ -663,6 +916,13 @@ if [ "${SYNC_ONLY}" -eq 1 ] && [ "${NO_SYNC}" -eq 0 ]; then
   ssh "${SSH_OPTS[@]}" "${TARGET}" 'command -v rsync >/dev/null' \
     || rsync_prerequisite_failed
   REMOTE_RSYNC_READY=1
+fi
+if [ "${RUN_MODE}" -eq 1 ] && [ "${NO_SYNC}" -eq 0 ]; then
+  if ssh "${SSH_OPTS[@]}" "${TARGET}" 'command -v rsync >/dev/null'; then
+    REMOTE_RSYNC_READY=1
+  elif [ "${EXCLUSIVE_MODE}" -eq 0 ]; then
+    rsync_prerequisite_failed
+  fi
 fi
 
 if [ "${PULL_MODE}" -eq 1 ]; then
@@ -802,20 +1062,62 @@ if [ "${SYNC_ONLY}" -eq 1 ]; then
 fi
 
 if [ "${RUN_MODE}" -eq 1 ]; then
+  RUN_DIRECTORY="${METAL_RUNS_ROOT}/${RUN_ID}"
+  REMOTE_CHECKOUT_BINDING="${REMOTE_DIR}/.overdrive-metal-checkout.v1"
+  printf -v REMOTE_CHECKOUT_PREP \
+    'set -eu; source=%q; run=%q; [ -f "$source" ] && [ ! -L "$source" ]; [ ! -e "$run/checkout.v1" ] && [ ! -L "$run/checkout.v1" ]; tmp="$run/checkout.v1.tmp.%s"; umask 077; cp -- "$source" "$tmp"; sync -d "$tmp"; mv -f -- "$tmp" "$run/checkout.v1"; sync -f "$run"' \
+    "${REMOTE_CHECKOUT_BINDING}" "${RUN_DIRECTORY}" "${RUN_ID}"
+  if ssh "${SSH_OPTS[@]}" "${TARGET}" "${SUDO} bash -c $(printf '%q' "${REMOTE_CHECKOUT_PREP}")"; then
+    :
+  else
+    REMOTE_PREP_STATUS=$?
+    if [ "${REMOTE_PREP_STATUS}" -eq 255 ]; then
+      disconnect_registered_run
+    fi
+    run_preparation_failed
+  fi
+
+  printf -v REMOTE_TMP_PREP \
+    'set -eu; remote=%q; target="$remote/target"; base="$target/metal-run-tmp"; run=%q; user=%q; mode=%q; staging_base=/srv/vm/metal; staging_run="$staging_base/%s"; runtime_base=/run/ovd-gk; runtime_run="$runtime_base/%s"; [ ! -L "$target" ] || exit 1; if [ ! -d "$target" ]; then %s install -d -m 0755 -o "$user" "$target"; fi; [ ! -L "$base" ] || exit 1; if [ ! -d "$base" ]; then %s install -d -m 0755 -o root "$base"; fi; [ ! -e "$run" ] && [ ! -L "$run" ] || exit 1; if [ "$mode" = privileged ]; then %s install -d -m 0700 -o root "$run"; else %s install -d -m 0700 -o "$user" "$run"; fi; [ ! -L "$staging_base" ] && [ ! -L "$runtime_base" ] || exit 1; [ ! -e "$staging_run" ] && [ ! -L "$staging_run" ] || exit 1; [ ! -e "$runtime_run" ] && [ ! -L "$runtime_run" ] || exit 1; %s install -d -o root -m 0710 "$staging_base"; %s chown 0:4200 "$staging_base"; %s chmod 0710 "$staging_base"; %s install -d -o root -m 0710 "$staging_run"; %s chown 0:4200 "$staging_run"; %s chmod 0710 "$staging_run"; %s install -d -o root -m 0710 "$runtime_base"; %s chown 0:4200 "$runtime_base"; %s chmod 0710 "$runtime_base"; %s install -d -o root -m 0710 "$runtime_run"; %s chown 0:4200 "$runtime_run"; %s chmod 0710 "$runtime_run"' \
+    "${REMOTE_DIR}" "${METAL_RUN_TMP}" "${REMOTE_USER}" "${EXECUTION_MODE}" \
+    "${RUN_ID}" "${RUN_ID}" \
+    "${SUDO}" "${SUDO}" "${SUDO}" "${SUDO:+${SUDO} -u ${REMOTE_USER}}" \
+    "${SUDO}" "${SUDO}" "${SUDO}" "${SUDO}" "${SUDO}" "${SUDO}" \
+    "${SUDO}" "${SUDO}" "${SUDO}" "${SUDO}" "${SUDO}" "${SUDO}"
+  if ssh "${SSH_OPTS[@]}" "${TARGET}" "bash -c $(printf '%q' "${REMOTE_TMP_PREP}")"; then
+    :
+  else
+    REMOTE_PREP_STATUS=$?
+    if [ "${REMOTE_PREP_STATUS}" -eq 255 ]; then
+      disconnect_registered_run
+    fi
+    run_preparation_failed
+  fi
+
   log "fail-closed native x86_64/KVM preflight"
   printf -v REMOTE_PREFLIGHT_CMD \
     '%s env OVERDRIVE_EXPECTED_TOKEN=%q OVERDRIVE_EXPECTED_COMMIT=%q OVERDRIVE_EXPECTED_WORKSPACE=%q OVERDRIVE_EXPECTED_SOURCE=%q OVERDRIVE_REMOTE_DIR=%q OVERDRIVE_METAL_OWNER_PATH=%q OVERDRIVE_METAL_KERNEL=%q OVERDRIVE_METAL_ROOTFS=%q bash %q' \
     "${SUDO}" "${LEASE_TOKEN}" "${COMMIT}" "${WORKSPACE}" "${SOURCE_DIGEST}" "${REMOTE_DIR}" \
-    "${METAL_OWNER_PATH}" "${OVERDRIVE_METAL_KERNEL:-}" "${OVERDRIVE_METAL_ROOTFS:-}" \
+    "${RUN_DIRECTORY}/owner.v1" "${OVERDRIVE_METAL_KERNEL:-}" "${OVERDRIVE_METAL_ROOTFS:-}" \
     "${REMOTE_DIR}/infra/metal/native-preflight.sh"
-  ssh "${SSH_OPTS[@]}" "${TARGET}" "${REMOTE_PREFLIGHT_CMD}"
+  PREFLIGHT_STDERR="${LEASE_TMP}/preflight.stderr"
+  if ssh "${SSH_OPTS[@]}" "${TARGET}" "${REMOTE_PREFLIGHT_CMD}" 2>"${PREFLIGHT_STDERR}"; then
+    cat "${PREFLIGHT_STDERR}" >&2
+  else
+    PREFLIGHT_STATUS=$?
+    cat "${PREFLIGHT_STDERR}" >&2
+    if grep -q 'OVERDRIVE_METAL_RUNNER_ERROR error=preflight_failed probe=' \
+      "${PREFLIGHT_STDERR}"; then
+      abort_registered_run preflight_failed
+    fi
+    [ "${PREFLIGHT_STATUS}" -ne 255 ] || disconnect_registered_run
+    run_preparation_failed
+  fi
 
   # START is the one controller word.  Closing the pipe immediately after it
   # lets the service detach all three inherited descriptors and makes an SSH
-  # disconnect harmless; it never retries or submits the command again.
-  # The tree lock is released only now, after the preflight; the durable
-  # command re-takes it and re-verifies the marker (see TREE_GUARD).
-  release_tree_lease
+  # disconnect harmless; it never retries or submits the command again. The
+  # service keeps both admission descriptors for the complete command.
   START_SENT=1
   printf 'START\n' >&9 2>/dev/null || true
   exec 9>&- || true

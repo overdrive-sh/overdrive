@@ -9,7 +9,6 @@ use std::time::Duration;
 /// CONTRACT_SHAPE: bounded-change (collector output/status only; retained records,
 /// source, other invocation and owned ephemeral files are byte-for-byte unchanged).
 #[test]
-#[ignore = "pending DELIVER: metal-run-isolation completion-gated collection"]
 fn retained_v1_and_v2_commands_return_exact_status_on_read_only_repeat_collection() {
     for version in [1, 2] {
         for code in [0, 1, 64, 70, 74, 75, 78, 100, 254, 255] {
@@ -45,7 +44,6 @@ fn retained_v1_and_v2_commands_return_exact_status_on_read_only_repeat_collectio
 /// CONTRACT_SHAPE: bounded-change (a v2 result is emitted only after its actual
 /// observed unit stops; waiting/collection never rewrites terminal or receipt).
 #[test]
-#[ignore = "pending DELIVER: metal-run-isolation unit-stop collection gate"]
 fn collection_waits_for_owner_stop_even_when_terminal_and_receipt_exist() {
     let fixture = Fixture::new();
     fixture.retained(RUN_A, 2, Some(("command", "255")), Some("complete"));
@@ -73,7 +71,6 @@ fn collection_waits_for_owner_stop_even_when_terminal_and_receipt_exist() {
 /// CONTRACT_SHAPE: bounded-change (typed completion/artifact failures only; actual
 /// selected-command terminal and every owned/foreign file remain retained).
 #[test]
-#[ignore = "pending DELIVER: metal-run-isolation completion error taxonomy"]
 fn sad_cleanup_and_artifact_failures_never_become_command_results() {
     for state in [
         "guest_staging",
@@ -142,7 +139,6 @@ fn sad_cleanup_and_artifact_failures_never_become_command_results() {
 /// CONTRACT_SHAPE: bounded-change (closed runner error/status vocabulary; malformed
 /// terminal numbers, fields, order, LF and receipt enums cannot escape as results).
 #[test]
-#[ignore = "pending DELIVER: metal-run-isolation retained protocol validation"]
 fn sad_retained_records_enforce_closed_error_and_command_status_domains() {
     for value in ["-1", "256", "0255", "", "abc"] {
         let fixture = Fixture::new();
@@ -215,7 +211,6 @@ fn sad_retained_records_enforce_closed_error_and_command_status_domains() {
 /// CONTRACT_SHAPE: bounded-change (invalid/unknown retrieval changes only output;
 /// collection without registration cannot create records or clean anything).
 #[test]
-#[ignore = "pending DELIVER: metal-run-isolation retrieval refusal"]
 fn sad_collection_without_a_run_preserves_absence() {
     let fixture = Fixture::new();
     for invalid in [
