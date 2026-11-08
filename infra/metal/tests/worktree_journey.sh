@@ -81,8 +81,9 @@ PY
 done
 [ -f "$out/overlap.json" ] || { echo 'two actual ordinary command intervals did not overlap' >&2; exit 1; }
 printf '%s\n%s\n' "$first_id" "$second_id" > "$out/run-ids"
-# Controller disconnection after the observed START. The existing durable owner
-# must retain its own source lock and complete; collect does not recreate it.
+# Disconnect the controller after START, then drive the already-approved
+# SupervisorLost -> StopOwner fault through this invocation's real systemd owner.
+# Ending it explicitly exposes the survivor boundary without racing equal suites.
 end_controller() {
   local parent="$1" child
   for child in $(pgrep -P "$parent" || true); do end_controller "$child"; done
@@ -90,16 +91,17 @@ end_controller() {
 }
 end_controller "$first_controller"
 wait "$first_controller" 2>/dev/null || true
-for ((attempt=0; attempt<1200; attempt++)); do
-  observe "$first_id" "$second_id" > "$out/boundary-$attempt.json"
-  if python3 - "$out/overlap.json" "$out/boundary-$attempt.json" <<'PY_SURVIVOR'
+ssh "$OVERDRIVE_METAL_TARGET" "sudo -n systemctl kill --kill-whom=main --signal=KILL -- overdrive-metal-run-$first_id.service && sudo -n systemctl stop -- overdrive-metal-run-$first_id.service" > "$out/first.owner-stop.stdout" 2> "$out/first.owner-stop.stderr"
+observe "$first_id" "$second_id" > "$out/survivor-boundary.json"
+python3 - "$out/overlap.json" "$out/survivor-boundary.json" "$first_id" "$second_id" <<'PY_SURVIVOR'
 import json,sys
 initial=json.load(open(sys.argv[1]))['owners']; now=json.load(open(sys.argv[2]))['owners']
 completed=[r for r,o in now.items() if o.get('completion.v1',{}).get('kind')=='complete' and o['unit']['ActiveState'] not in ('active','activating','deactivating')]
 live=[r for r,o in now.items() if o['unit']['ActiveState']=='active' and o['processes']]
-assert len(completed)==1 and len(live)==1
-finished=now[completed[0]]; survivor=now[live[0]]
+assert completed==[sys.argv[3]] and live==[sys.argv[4]], 'the stopped owner must complete while its peer continues'
+finished=now[sys.argv[3]]; survivor=now[sys.argv[4]]
 assert not finished['processes'] and not any(root['exists'] for root in finished['roots'].values())
+assert 'terminal.v1' not in finished, 'actual supervisor loss cannot invent a command terminal'
 assert survivor['checkout']==initial[live[0]]['checkout']
 assert survivor['source_marker']==initial[live[0]]['source_marker']
 assert survivor['roots']==initial[live[0]]['roots'], 'finishing peer cannot remove or change survivor staging/runtime/tmp roots'
@@ -108,12 +110,15 @@ for pid,netns in old_vmm.items():
  assert survivor['processes'][pid]['netns']==netns, 'finishing peer cannot end or replace survivor VMM'
 assert old_vmm
 PY_SURVIVOR
-  then cp "$out/boundary-$attempt.json" "$out/survivor-boundary.json"; break; fi
-  sleep 0.1
-done
-[ -f "$out/survivor-boundary.json" ] || { echo 'no completed-owner / continuing-owner complement was observed' >&2; exit 1; }
-invoke "$first" collect "$first_id" > "$out/first.collect.stdout" 2> "$out/first.collect.stderr"
-invoke "$first" collect "$first_id" > "$out/first.repeat.stdout" 2> "$out/first.repeat.stderr"
+first_collect_status=0
+invoke "$first" collect "$first_id" > "$out/first.collect.stdout" 2> "$out/first.collect.stderr" || first_collect_status=$?
+printf '%s\n' "$first_collect_status" > "$out/first.collect.status"
+[ "$first_collect_status" = 70 ]
+first_repeat_status=0
+invoke "$first" collect "$first_id" > "$out/first.repeat.stdout" 2> "$out/first.repeat.stderr" || first_repeat_status=$?
+printf '%s\n' "$first_repeat_status" > "$out/first.repeat.status"
+[ "$first_repeat_status" = 70 ]
+rg -qx 'OVERDRIVE_METAL_RUNNER_ERROR error=supervisor_lost' "$out/first.collect.stderr"
 cmp "$out/first.collect.stdout" "$out/first.repeat.stdout"
 cmp "$out/first.collect.stderr" "$out/first.repeat.stderr"
 observe "$first_id" "$second_id" > "$out/first-complete.json"
@@ -124,6 +129,7 @@ set -e
 [ "$second_status" = 0 ]
 invoke "$second" collect "$second_id" > "$out/second.collect.stdout" 2> "$out/second.collect.stderr"
 invoke "$second" collect "$second_id" > "$out/second.repeat.stdout" 2> "$out/second.repeat.stderr"
+rg -qx "OVERDRIVE_METAL_RUN_COMPLETE run_id=$second_id exit_code=0 cause=command_returned" "$out/second.collect.stderr"
 cmp "$out/second.collect.stdout" "$out/second.repeat.stdout"
 cmp "$out/second.collect.stderr" "$out/second.repeat.stderr"
 observe "$first_id" "$second_id" > "$out/after.json"
@@ -138,9 +144,11 @@ for run_id in (a,b):
  assert not o['processes'], 'owned descendants survived completion'
  assert o['completion.v1']['kind']=='complete'
  assert not any(root['exists'] for root in o['roots'].values()), 'owned root survived completion'
- assert o['terminal.v1']['kind']=='command' and o['terminal.v1']['exit_code']=='0'
-for prefix in ('first','second'):
- log=(out/(prefix+'.collect.stdout')).read_text()
- assert 'disposable guest core' in log
+ if run_id==a:
+  assert 'terminal.v1' not in o, 'lost supervisor must retain its missing-terminal outcome'
+ else:
+  assert o['terminal.v1']['kind']=='command' and o['terminal.v1']['exit_code']=='0' and o['terminal.v1']['cause']=='command_returned'
+log=(out/'second.collect.stdout').read_text()
+assert 'disposable guest core' in log and '86 passed; 0 failed' in log
 print('METAL-ISOLATION-JOURNEY overlapping_ordinary_commands=true attributable_results=true physical_complement_unchanged=true owned_roots_absent=true')
 PY
