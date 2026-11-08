@@ -1,0 +1,114 @@
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+   Compiling unicode-ident v1.0.24
+   Compiling proc-macro2 v1.0.106
+   Compiling quote v1.0.45
+   Compiling serde_core v1.0.228
+   Compiling libc v0.2.190
+   Compiling cfg-if v1.0.4
+   Compiling serde v1.0.228
+   Compiling once_cell v1.21.4
+   Compiling version_check v0.9.5
+   Compiling lazy_static v1.5.0
+   Compiling memchr v2.8.0
+   Compiling zerocopy v0.8.48
+   Compiling typenum v1.20.0
+   Compiling pin-project-lite v0.2.17
+   Compiling owo-colors v4.3.0
+   Compiling utf8parse v0.2.2
+   Compiling thread_local v1.1.9
+   Compiling zmij v1.0.21
+   Compiling sharded-slab v0.1.7
+   Compiling object v0.37.3
+   Compiling tracing-core v0.1.36
+   Compiling anstyle-parse v1.0.0
+   Compiling colorchoice v1.0.5
+   Compiling getrandom v0.4.2
+   Compiling tracing v0.1.44
+   Compiling tracing-subscriber v0.3.23
+   Compiling eyre v0.6.12
+   Compiling hashbrown v0.17.0
+   Compiling itoa v1.0.18
+   Compiling generic-array v0.14.7
+   Compiling adler2 v2.0.1
+   Compiling rustix v1.1.4
+   Compiling equivalent v1.0.2
+   Compiling camino v1.2.2
+   Compiling is_terminal_polyfill v1.70.2
+   Compiling gimli v0.32.3
+   Compiling serde_json v1.0.149
+   Compiling color-spantrace v0.3.0
+   Compiling thiserror v1.0.69
+   Compiling anstyle v1.0.14
+   Compiling anstyle-query v1.1.5
+   Compiling anstream v1.0.0
+   Compiling addr2line v0.25.1
+   Compiling tracing-error v0.2.1
+   Compiling indexmap v2.14.0
+   Compiling syn v2.0.117
+   Compiling miniz_oxide v0.8.9
+   Compiling powerfmt v0.2.0
+   Compiling bitflags v2.11.1
+   Compiling num-conv v0.1.0
+   Compiling indenter v0.3.4
+   Compiling winnow v0.7.15
+   Compiling heck v0.5.0
+   Compiling strsim v0.11.1
+   Compiling clap_lex v1.1.0
+   Compiling rustc-demangle v0.1.27
+   Compiling time-core v0.1.7
+   Compiling toml_write v0.1.2
+   Compiling block-buffer v0.10.4
+   Compiling crypto-common v0.1.7
+   Compiling thiserror v2.0.18
+   Compiling digest v0.10.7
+   Compiling semver v1.0.28
+   Compiling deranged v0.5.8
+   Compiling time-macros v0.2.25
+   Compiling clap_builder v4.6.0
+   Compiling getrandom v0.2.17
+   Compiling errno v0.3.14
+   Compiling rand_core v0.6.4
+   Compiling backtrace v0.3.76
+   Compiling cpufeatures v0.2.17
+   Compiling fastrand v2.4.1
+   Compiling sha2 v0.10.9
+   Compiling dotenvy v0.15.7
+   Compiling hex v0.4.3
+   Compiling ppv-lite86 v0.2.21
+   Compiling rand_chacha v0.3.1
+   Compiling rand v0.8.6
+   Compiling time v0.3.45
+   Compiling tempfile v3.27.0
+   Compiling color-eyre v0.6.5
+   Compiling serde_derive v1.0.228
+   Compiling thiserror-impl v1.0.69
+   Compiling thiserror-impl v2.0.18
+   Compiling clap_derive v4.6.1
+   Compiling clap v4.6.1
+   Compiling toml_datetime v0.6.11
+   Compiling serde_spanned v0.6.9
+   Compiling cargo-platform v0.1.9
+   Compiling cargo_metadata v0.18.1
+   Compiling toml_edit v0.22.27
+   Compiling toml v0.8.23
+   Compiling xtask v0.0.0 (/private/tmp/metal-run-isolation-peer.UKMMtE6B/xtask)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 18.70s
+     Running `target/debug/xtask metal run -- env OVERDRIVE_FWD_GUEST_GROUP=core cargo run -p overdrive-testing --bin overdrive-fwd-guest-suite --features integration-tests`
+xtask: running metal run (one bootstrap lease session)
+OVERDRIVE_METAL_RUN_ID=be3b95671f4ab77148735ae2
+OVERDRIVE_METAL_RUN_REGISTERED run_id=be3b95671f4ab77148735ae2
+FATAL: timed out after 5s acquiring /run/lock/overdrive-metal-shared.lock
+current lease owner:
+  pid=1758326
+  started_at=2026-11-08T21:02:45Z
+  action=run
+  scenario=unspecified
+  workspace=/Users/marcus/conductor/workspaces/helios/bangalore-v1
+  commit=036032935f101fc29e6d79d69d2796e9345a2b23
+  token=9e34103f0e184c634e5cd7af
+  run_id=9e34103f0e184c634e5cd7af
+  unit=overdrive-metal-run-9e34103f0e184c634e5cd7af.service
+  source_digest=19e8a3fb8636bb72b2e7a3508d11c764a320767a5f9f382f98755d5143b5073c
+OVERDRIVE_METAL_RUNNER_ERROR error=maintenance_timeout

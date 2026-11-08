@@ -29,8 +29,9 @@ the step 01-02 source files were copied into it, and its source list is retained
 in [`second-source.status`](second-source.status). The implementation commit
 was created after this proof attempt as `2ba2232208ce9a5e91666f61b6b9845d9797c62a`.
 
-The prepared host reported kernel `7.0.0-38-generic` and target
-`x86_64-unknown-linux-musl`. `guest-kit-prepare` completed through ordinary
+The target was `ubuntu@151.115.99.251`; the prepared host reported kernel
+`7.0.0-38-generic` and target `x86_64-unknown-linux-musl`.
+`guest-kit-prepare` completed through ordinary
 Metal admission for both inputs before this attempt. The final proof command
 itself was an ordinary run of the existing explicit `core` guest-suite path;
 it did not use `--exclusive`, direct SSH execution, or a physical-host
@@ -54,6 +55,16 @@ The existing owner reported by both callers was:
 | Workspace | `/Users/marcus/conductor/workspaces/helios/bangalore-v1` |
 | Commit | `036032935f101fc29e6d79d69d2796e9345a2b23` |
 | Started at | `2026-11-08T20:42:33Z` |
+| Source digest | `19e8a3fb8636bb72b2e7a3508d11c764a320767a5f9f382f98755d5143b5073c` |
+
+The owner record does not include its selected command line; no command is
+inferred for it. The two new invocation source digests and remote directories
+from the real owner observations were:
+
+| Checkout | Source digest | Remote directory |
+|---|---|---|
+| `ouagadougou` | `2bd2735a4e76e6afe1fcd4f65ba63cb1342bc706864dec338a764e8bb36b7639` | `/home/ubuntu/overdrive-worktrees/e3d831d7dafe621226ae6047ebcac3536f37470cafcf5dbb64eb9598886af410` |
+| Detached peer | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` | `/home/ubuntu/overdrive-worktrees/052a646313948d416e08f7afb85c82411ecddc98659ed0825aa09bcde3be0f39` |
 | Held boundary | `/run/lock/overdrive-metal-shared.lock` |
 
 The driver's repeated observations saw both new owners waiting, then inactive;
