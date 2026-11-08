@@ -1,0 +1,4 @@
+{
+  "reason": "Both durable invocations were observed terminal command/0, completion complete, no processes and owned roots absent. The required one-complete/one-live witness was missed and cannot reappear for these terminal invocations. Stop only the local observer after this established assertion failure; preserve raw observations.",
+  "local_driver_pid": 21341
+}
