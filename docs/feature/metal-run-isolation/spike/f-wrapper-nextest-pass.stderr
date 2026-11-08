@@ -1,0 +1,10 @@
+info: experimental features enabled: wrapper-scripts
+   Compiling metal-isolation-wrapper-spike v0.0.0 (/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/spike-scratch/metal-run-isolation/increment-e)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.44s
+────────────
+ Nextest run ID ebc1ff3e-2017-4ad4-ad98-50f8cde98401 with nextest profile: default
+    Starting 1 test across 2 binaries (1 test skipped)
+       START [         ] (1/1) metal-isolation-wrapper-spike selected_guest_has_an_independent_kernel_boot_id
+        PASS [  29.627s] (1/1) metal-isolation-wrapper-spike selected_guest_has_an_independent_kernel_boot_id
+────────────
+     Summary [  29.627s] 1 test run: 1 passed, 1 skipped

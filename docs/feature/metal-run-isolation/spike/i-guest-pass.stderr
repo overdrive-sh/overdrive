@@ -1,0 +1,10 @@
+   Compiling metal-isolation-local-vsock-spike v0.0.0 (/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/spike-scratch/metal-run-isolation/increment-g)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.42s
+info: using target runner `python3 /home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/spike-scratch/metal-run-isolation/increment-i/target_runner.py /home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/target/debug/metal-isolation-local-vsock-spike` defined by environment variable `CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER`
+────────────
+ Nextest run ID 996d814f-c217-4f35-b526-e7ff8ea0a37e with nextest profile: default
+    Starting 1 test across 2 binaries (2 tests skipped)
+       START [         ] (1/1) metal-isolation-local-vsock-spike selected_guest_has_an_independent_kernel_boot_id
+        PASS [   7.752s] (1/1) metal-isolation-local-vsock-spike selected_guest_has_an_independent_kernel_boot_id
+────────────
+     Summary [   7.752s] 1 test run: 1 passed, 2 skipped

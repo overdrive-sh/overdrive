@@ -1,0 +1,68 @@
+--- before/runner_protocol.qnt
++++ after/runner_protocol.qnt
+@@ -15,7 +15,7 @@
+   val IDS = Set(1, 2)
+   type Run = { p: int, ctl: bool, checked: bool, ever: bool, starts: int,
+                term: int, desc: bool, roots: bool, receipt: int }
+-  type ConfStep = { op: str, actor: int, value: int }
++  type ConfStep = { tag: str, value: { actor: int, value: int } }
+   var runs: int -> Run
+   var second_tree: int
+   var maintenance: int // 0 waiting, 1 exclusive barrier, 2 mutating, 3 resolved
+@@ -49,13 +49,13 @@
+   action initFor(c: int): bool = all {
+     runs' = IDS.mapBy(r => blank), second_tree' = c, maintenance' = 0,
+     source_revision' = IDS.mapBy(c => 0), observed' = IDS.mapBy(r => -2),
+-    conf_step' = { op: "init", actor: 0, value: c },
++    conf_step' = { tag: "init", value: { actor: 0, value: c } },
+   }
+   action init = { nondet c = IDS.oneOf(); initFor(c) }
+   action setRun(r: int, x: Run, op: str, value: int): bool = all {
+     runs' = runs.set(r, x), second_tree' = second_tree, maintenance' = maintenance,
+     source_revision' = source_revision, observed' = observed,
+-    conf_step' = if (REC) { op: op, actor: r, value: value } else conf_step,
++    conf_step' = if (REC) { tag: op, value: { actor: r, value: value } } else conf_step,
+   }
+   action Register(r: int): bool = all { runs.get(r).p == 0, setRun(r, { ...blank, p: 1 }, "Register", 0) }
+   action Barrier(r: int): bool = all { canBarrier(r), setRun(r, { ...runs.get(r), p: 2 }, "Barrier", 0) }
+@@ -67,7 +67,7 @@
+     runs' = runs.set(r, { ...runs.get(r), checked: true }),
+     source_revision' = source_revision.set(tree(r), 0), second_tree' = second_tree,
+     maintenance' = maintenance, observed' = observed,
+-    conf_step' = if (REC) { op: "Prepare", actor: r, value: 0 } else conf_step,
++    conf_step' = if (REC) { tag: "Prepare", value: { actor: r, value: 0 } } else conf_step,
+   }
+   action Start(r: int): bool = all {
+     runs.get(r).p == 3, runs.get(r).checked, runs.get(r).ctl,
+@@ -107,14 +107,14 @@
+       observed' = observed.set(r, if (early) runs.get(r).term else result(r)),
+       runs' = runs, second_tree' = second_tree, maintenance' = maintenance,
+       source_revision' = source_revision,
+-      conf_step' = if (REC) { op: "Collect", actor: r, value: 0 } else conf_step,
++      conf_step' = if (REC) { tag: "Collect", value: { actor: r, value: 0 } } else conf_step,
+     }
+   }
+   action Sync(c: int): bool = all {
+     canSync(c), source_revision.get(c) == 0,
+     source_revision' = source_revision.set(c, 1), runs' = runs,
+     second_tree' = second_tree, maintenance' = maintenance, observed' = observed,
+-    conf_step' = if (REC) { op: "Sync", actor: c, value: 1 } else conf_step,
++    conf_step' = if (REC) { tag: "Sync", value: { actor: c, value: 1 } } else conf_step,
+   }
+   action NoSyncRefusal(r: int): bool = all {
+     runs.get(r).p == 3, source_revision.get(tree(r)) != 0,
+@@ -128,11 +128,12 @@
+     maintenance' = if (op == 0) 3 else op,
+     runs' = runs, second_tree' = second_tree, observed' = observed,
+     source_revision' = source_revision,
+-    conf_step' = if (REC) { op: "Maintain", actor: 0, value: op } else conf_step,
++    conf_step' = if (REC) { tag: "Maintain", value: { actor: 0, value: op } } else conf_step,
+   }
+   action Idle = all {
+     runs' = runs, second_tree' = second_tree, maintenance' = maintenance,
+-    source_revision' = source_revision, observed' = observed, conf_step' = conf_step,
++    source_revision' = source_revision, observed' = observed,
++    conf_step' = if (REC) { tag: "Idle", value: { actor: 0, value: 0 } } else conf_step,
+   }
+   action step = {
+     nondet r = IDS.oneOf()

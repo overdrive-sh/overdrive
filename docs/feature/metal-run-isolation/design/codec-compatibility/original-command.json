@@ -1,0 +1,13 @@
+{
+  "argv": [
+    "/var/folders/11/l6dd1mtj007b7wkb4280qxdm0000gn/T/metal-quint-codec-1wo8deex/harness/target/debug/metal-quint-codec-probe",
+    "/var/folders/11/l6dd1mtj007b7wkb4280qxdm0000gn/T/metal-quint-codec-1wo8deex/runner_protocol.qnt",
+    "named:independent_worktrees",
+    "/Users/marcus/conductor/workspaces/helios/ouagadougou/docs/feature/metal-run-isolation/design/codec-compatibility/original-flat-driver.json",
+    "20261108"
+  ],
+  "expected_exit": 2,
+  "actual_exit": 2,
+  "negative_result": "Original flat record fails before Driver::step",
+  "original_model_sha256": "268c7b584c9bb5ec68ff29d9efb959980e111cf90f18dc8157c06c15a8e03f2d"
+}

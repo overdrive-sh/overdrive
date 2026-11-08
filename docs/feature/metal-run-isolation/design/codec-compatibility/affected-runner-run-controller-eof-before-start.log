@@ -1,0 +1,14 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.08s
+     Running `target/debug/xtask quint check --subsystem metal-run-isolation --name runner-run-controller-eof-before-start --tlc-workers 1 --tlc-heap 1g`
+xtask quint check: 1 check(s), budget 4992 MiB / 16 CPU (--jobs ≤ 16), TLC heap 1024 MiB × 1 workers, Apalache heap 3072 MiB + 1 CPU, start-up bounds 120s to the server, 45s from it to the first pass, 60s from it to a TLC check's TLC run, 60s from its outcome to Quint's verdict, client failures retried up to 2 attempts, run id 45844-1794138470.319
+xtask quint check: estimate ~0.0 min at ~1 concurrent from previous durations
+[    0.0s] start  metal-run-isolation/runner-run-controller-eof-before-start [evaluator] attempt 1 reserves 2560 MiB / 1 CPU (quint test); in use 2560 MiB / 1 CPU of 4992 MiB / 16 CPU port none timeout 900s (1 running, 0 queued)
+[    0.8s] PASS   metal-run-isolation/runner-run-controller-eof-before-start expect=holds got=holds (0.8s, peak 0 of 2560 MiB)
+xtask quint check: verified no Quint/JVM process from this run remains
+xtask quint check: wrote /Users/marcus/conductor/workspaces/helios/ouagadougou/target/quint/metal-run-isolation/45844-1794138470.319/summary.json
+
+CHECK                                                       BACKEND   EXPECT     OUTCOME          SECS  TRY  RETRY S    WALL S        RESERVED  PEAK MiB  RESULT
+metal-run-isolation/runner-run-controller-eof-before-start  evaluator  holds      holds             0.8    1      0.0       0.8      2560M/1cpu         0  PASS
+wall clock: 0.8s; budget 4992 MiB / 16 CPU; peak host memory in use: unknown
+logs: /Users/marcus/conductor/workspaces/helios/ouagadougou/target/quint/metal-run-isolation/45844-1794138470.319
+xtask quint check: 1 check(s) passed

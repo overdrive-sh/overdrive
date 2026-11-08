@@ -1,0 +1,80 @@
+[
+  {
+    "run": "independent_worktrees",
+    "states": 14,
+    "nonrecording_states_identical": true,
+    "same_actions_and_picks": true
+  },
+  {
+    "run": "same_checkout_excludes_sync",
+    "states": 11,
+    "nonrecording_states_identical": true,
+    "same_actions_and_picks": true
+  },
+  {
+    "run": "controller_eof_before_start",
+    "states": 8,
+    "nonrecording_states_identical": true,
+    "same_actions_and_picks": true
+  },
+  {
+    "run": "controller_loss_after_start",
+    "states": 10,
+    "nonrecording_states_identical": true,
+    "same_actions_and_picks": true
+  },
+  {
+    "run": "supervisor_loss_is_not_a_result",
+    "states": 9,
+    "nonrecording_states_identical": true,
+    "same_actions_and_picks": true
+  },
+  {
+    "run": "cleanup_failure_keeps_command",
+    "states": 9,
+    "nonrecording_states_identical": true,
+    "same_actions_and_picks": true
+  },
+  {
+    "run": "missing_completion_refuses",
+    "states": 9,
+    "nonrecording_states_identical": true,
+    "same_actions_and_picks": true
+  },
+  {
+    "run": "maintenance_waits_for_stop",
+    "states": 11,
+    "nonrecording_states_identical": true,
+    "same_actions_and_picks": true
+  },
+  {
+    "run": "no_sync_mismatch_refuses",
+    "states": 8,
+    "nonrecording_states_identical": true,
+    "same_actions_and_picks": true
+  },
+  {
+    "run": "repeat_collection_agrees",
+    "states": 10,
+    "nonrecording_states_identical": true,
+    "same_actions_and_picks": true
+  },
+  {
+    "run": "admission_timeout",
+    "states": 6,
+    "nonrecording_states_identical": true,
+    "same_actions_and_picks": true
+  },
+  {
+    "run": "preflight_aborts_before_start",
+    "states": 7,
+    "nonrecording_states_identical": true,
+    "same_actions_and_picks": true
+  },
+  {
+    "run": "missing_rsync_aborts_before_start",
+    "states": 7,
+    "nonrecording_states_identical": true,
+    "same_actions_and_picks": true
+  }
+]

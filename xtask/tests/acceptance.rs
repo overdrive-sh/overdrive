@@ -22,6 +22,8 @@ mod acceptance {
     //! binary relocated; the openapi gate moved to
     //! `crates/overdrive-control-plane/tests/` alongside the openapi
     //! library module.
+    #[cfg(target_os = "linux")]
+    mod metal_run_isolation;
     mod dst_lint_banned_apis;
     mod dst_lint_catches_reconciler_violation;
 }

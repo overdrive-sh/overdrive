@@ -1,0 +1,33 @@
+   Compiling unicode-ident v1.0.24
+   Compiling serde_core v1.0.228
+   Compiling libc v0.2.190
+   Compiling serde_json v1.0.149
+   Compiling nix v0.30.1
+   Compiling fastrand v2.4.1
+   Compiling aws-lc-rs v1.16.3
+   Compiling aws-lc-sys v0.40.0
+   Compiling proc-macro2 v1.0.106
+   Compiling rustls v0.23.39
+   Compiling bit-vec v0.8.0
+   Compiling quick-error v1.2.3
+   Compiling overdrive-dataplane v0.0.0 (/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/crates/overdrive-dataplane)
+   Compiling unarray v0.1.4
+   Compiling tinyvec_macros v0.1.1
+   Compiling matchit v0.7.3
+   Compiling webpki-roots v1.0.7
+   Compiling sdd v3.0.10
+   Compiling rand v0.10.1
+error: failed to run custom build command for `overdrive-dataplane v0.0.0 (/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/crates/overdrive-dataplane)`
+
+Caused by:
+  process didn't exit successfully: `/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/target/debug/build/overdrive-dataplane-69a6d8e08189d9fb/build-script-build` (exit status: 1)
+  --- stdout
+  cargo:rerun-if-changed=build.rs
+  cargo:rerun-if-env-changed=OVERDRIVE_BPF_OBJECT
+  cargo:rustc-env=CARGO_WORKSPACE_DIR=/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks
+  cargo:rerun-if-changed=/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/target/bpf/overdrive_bpf.o
+
+  --- stderr
+  error: BPF object not found at /home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/target/bpf/overdrive_bpf.o; run `cargo xtask bpf-build` first
+warning: build failed, waiting for other jobs to finish...
+error: command `/home/ubuntu/.rustup/toolchains/1.95.0-x86_64-unknown-linux-gnu/bin/cargo '--color=auto' test --no-run --message-format json-render-diagnostics --workspace --features integration-tests,kvm-tests` exited with code 101

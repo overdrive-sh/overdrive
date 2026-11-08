@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# External owner-observation partition, not a fabricated systemd execution.
+set -euo pipefail
+case "$*" in
+  *--property=LoadState*) printf 'loaded\n' ;;
+  *--property=ActiveState*) cat "$METAL_FIXTURE_UNIT_STATE" ;;
+  *) printf 'unsupported fixture systemctl request: %s\n' "$*" >&2; exit 94 ;;
+esac

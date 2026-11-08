@@ -1,0 +1,17 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.26s
+     Running `target/debug/xtask quint check --subsystem metal-run-isolation --name runner-owners-progress --tlc-workers 1 --tlc-heap 1g`
+xtask quint check: 1 check(s), budget 4992 MiB / 16 CPU (--jobs ≤ 16), TLC heap 1024 MiB × 1 workers, Apalache heap 3072 MiB + 1 CPU, start-up bounds 120s to the server, 45s from it to the first pass, 60s from it to a TLC check's TLC run, 60s from its outcome to Quint's verdict, client failures retried up to 2 attempts, run id 36070-1794138122.753
+xtask quint check: metal-run-isolation/runner-owners-progress reserves 5888 MiB / 1 CPU, more than the budget; it will run alone
+xtask quint check: estimate ~1.9 min at ~1 concurrent from previous durations
+[    0.0s] start  metal-run-isolation/runner-owners-progress [tlc] attempt 1 reserves 5888 MiB / 1 CPU (heap 1024 MiB, 1 workers); in use 5888 MiB / 1 CPU of 4992 MiB / 16 CPU port 51947 timeout 900s (1 running, 0 queued)
+[  151.6s] PASS   metal-run-isolation/runner-owners-progress expect=holds got=holds (151.6s, peak 0 of 5888 MiB)
+xtask quint: cleanup of process group 36073: killing process group 36073: Operation not permitted (os error 1)
+xtask quint check: verified no Quint/JVM process from this run remains
+xtask quint check: wrote /Users/marcus/conductor/workspaces/helios/ouagadougou/target/quint/metal-run-isolation/36070-1794138122.753/summary.json
+
+CHECK                                       BACKEND   EXPECT     OUTCOME          SECS  TRY  RETRY S    WALL S        RESERVED  PEAK MiB  RESULT
+metal-run-isolation/runner-owners-progress  tlc       holds      holds           151.6    1      0.0     151.6      5888M/1cpu         0  PASS
+wall clock: 151.6s; budget 4992 MiB / 16 CPU; peak host memory in use: unknown
+warning: metal-run-isolation/runner-owners-progress is `ci = true` but took 151.6s of its own time (rule: ≤ 120s); shrink the model's constants or raise `workers`, or set `ci = false` in /Users/marcus/conductor/workspaces/helios/ouagadougou/specs/quint/metal-run-isolation/checks.toml
+logs: /Users/marcus/conductor/workspaces/helios/ouagadougou/target/quint/metal-run-isolation/36070-1794138122.753
+xtask quint check: 1 check(s) passed

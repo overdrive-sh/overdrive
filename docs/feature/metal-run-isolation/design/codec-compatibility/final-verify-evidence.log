@@ -1,0 +1,4 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.21s
+     Running `target/debug/xtask quint verify-evidence --subsystem metal-run-isolation`
+  ok    metal-run-isolation: evidence matches the specs; every outcome met `expect`
+xtask quint verify-evidence: 1 subsystem(s) verified

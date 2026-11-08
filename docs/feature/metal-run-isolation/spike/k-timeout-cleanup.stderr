@@ -1,0 +1,6 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.09s
+Traceback (most recent call last):
+  File "/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/spike-scratch/metal-run-isolation/increment-h/driver.py", line 35, in <module>
+    assert 'METAL-DESIGN-VM-UP' in captured and 'TIMEOUT' in captured,(label,'expected ready guest followed by actual nextest timeout',captured[-10000:])
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: ('without-cleanup', 'expected ready guest followed by actual nextest timeout', '')

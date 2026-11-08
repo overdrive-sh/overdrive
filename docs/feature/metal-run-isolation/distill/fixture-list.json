@@ -1,0 +1,20 @@
+{
+  "test-count": 2,
+  "identities": {
+    "metal-run-isolation-attempt-fixture::attempt": [
+      "selected_attempt_waits_for_its_timeout",
+      "selected_environment_and_status"
+    ],
+    "metal-run-isolation-attempt-fixture::bin/metal-run-isolation-helper": []
+  },
+  "non-test-binaries": {
+    "path+file:///home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/infra/metal/tests/fixtures/attempt#metal-run-isolation-attempt-fixture@0.0.0": [
+      {
+        "name": "metal-run-isolation-helper",
+        "kind": "bin-exe",
+        "path": "debug/metal-run-isolation-helper",
+        "build-platform": "target"
+      }
+    ]
+  }
+}

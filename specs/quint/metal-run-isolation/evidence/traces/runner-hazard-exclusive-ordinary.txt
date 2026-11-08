@@ -1,0 +1,18 @@
+# runner-hazard-exclusive-ordinary: counterexample, 4 state(s) (from the TLC trace)
+
+State 1
+  runs = << [ p |-> 0, ctl |-> TRUE, checked |-> FALSE, ever |-> FALSE, starts |-> 0, term |-> -1, desc |-> FALSE, roots |-> FALSE, receipt |-> 0 ], [ p |-> 0, ctl |-> TRUE, checked |-> FALSE, ever |-> FALSE, starts |-> 0, term |-> -1, desc |-> FALSE, roots |-> FALSE, receipt |-> 0 ] >>
+  source_revision = <<0, 0>>
+  second_tree = 1
+  maintenance = 0
+  observed = <<-2, -2>>
+  conf_step = [tag |-> "init", value |-> [value |-> 1, actor |-> 0]]
+
+State 2 [Register]
+  runs = << [ p |-> 1, ctl |-> TRUE, checked |-> FALSE, ever |-> FALSE, starts |-> 0, term |-> -1, desc |-> FALSE, roots |-> FALSE, receipt |-> 0 ], [ p |-> 0, ctl |-> TRUE, checked |-> FALSE, ever |-> FALSE, starts |-> 0, term |-> -1, desc |-> FALSE, roots |-> FALSE, receipt |-> 0 ] >>
+
+State 3 [Barrier]
+  runs = << [ p |-> 2, ctl |-> TRUE, checked |-> FALSE, ever |-> FALSE, starts |-> 0, term |-> -1, desc |-> FALSE, roots |-> FALSE, receipt |-> 0 ], [ p |-> 0, ctl |-> TRUE, checked |-> FALSE, ever |-> FALSE, starts |-> 0, term |-> -1, desc |-> FALSE, roots |-> FALSE, receipt |-> 0 ] >>
+
+State 4 [Register]
+  runs = << [ p |-> 2, ctl |-> TRUE, checked |-> FALSE, ever |-> FALSE, starts |-> 0, term |-> -1, desc |-> FALSE, roots |-> FALSE, receipt |-> 0 ], [ p |-> 1, ctl |-> TRUE, checked |-> FALSE, ever |-> FALSE, starts |-> 0, term |-> -1, desc |-> FALSE, roots |-> FALSE, receipt |-> 0 ] >>

@@ -1,0 +1,12 @@
+# Standalone input fixture for the existing nextest exec adapter, not a tool.
+[package]
+name = "metal-run-isolation-attempt-fixture"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[[bin]]
+name = "metal-run-isolation-helper"
+path = "src/main.rs"

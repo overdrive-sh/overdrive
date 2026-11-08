@@ -1,0 +1,16 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.21s
+────────────
+ Nextest run ID d4ae54a6-70a8-4e26-b09a-d5dc13514b5d with nextest profile: default
+    Starting 1 test across 1 binary (35 tests skipped)
+       START [         ] (1/1) overdrive-host::integration integration::vsock_vmm_device::the_fork_boots_and_passes_data_under_the_production_launch_identity
+        SLOW [> 60.000s] (───) overdrive-host::integration integration::vsock_vmm_device::the_fork_boots_and_passes_data_under_the_production_launch_identity
+
+thread 'integration::vsock_vmm_device::the_fork_boots_and_passes_data_under_the_production_launch_identity' (194753) panicked at crates/overdrive-host/tests/integration/vsock_vmm_device.rs:437:10:
+the guest dials the host over the fork-opened device: NeverConnected { port: 1053052757, bound: 60s }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+        FAIL [  60.755s] (1/1) overdrive-host::integration integration::vsock_vmm_device::the_fork_boots_and_passes_data_under_the_production_launch_identity
+  Cancelling due to test failure
+────────────
+     Summary [  60.757s] 1 test run: 0 passed, 1 failed, 35 skipped
+        FAIL [  60.755s] (1/1) overdrive-host::integration integration::vsock_vmm_device::the_fork_boots_and_passes_data_under_the_production_launch_identity
+error: test run failed

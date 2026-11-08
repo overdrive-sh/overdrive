@@ -1,0 +1,26 @@
+{
+  "recording_erased_model_text_identical": true,
+  "erasure": "Remove only the ConfStep type declaration and conf_step next-state assignments; compare all remaining text modulo whitespace.",
+  "normalized_sha256": "4ffa11b3d00602273933e8f754de1f9474ae9fcb189aea0ef90b6cdf95291b9c",
+  "checks_toml_byte_identical": true,
+  "checks_toml_sha256": "aca65dde0e79ac0dd4a19f0f5b95ebce7725e418f841f3e53dff5eef6b452b16",
+  "hazard_byte_hash_unchanged": true,
+  "hazard_sha256": "907af15a80388e355818f249abc69fbd3b339b20867266b3d9174fa15daeb2f7",
+  "named_runs_unchanged": [
+    "independent_worktrees",
+    "same_checkout_excludes_sync",
+    "controller_eof_before_start",
+    "controller_loss_after_start",
+    "supervisor_loss_is_not_a_result",
+    "cleanup_failure_keeps_command",
+    "missing_completion_refuses",
+    "maintenance_waits_for_stop",
+    "no_sync_mismatch_refuses",
+    "admission_timeout",
+    "preflight_aborts_before_start",
+    "missing_rsync_aborts_before_start",
+    "repeat_collection_agrees"
+  ],
+  "before_model_sha256": "268c7b584c9bb5ec68ff29d9efb959980e111cf90f18dc8157c06c15a8e03f2d",
+  "after_model_sha256": "f67ed362807560c981a60be33d127106f47329a290f5148add70fadcbd732b5e"
+}

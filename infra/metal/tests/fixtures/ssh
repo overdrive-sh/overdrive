@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Test-only remote command transport. Real Bash/flock/files/rsync do the work.
+set -euo pipefail
+command="${!#}"
+printf '%s\0' "$command" >> "$METAL_FIXTURE_SSH_LOG"
+case "$command" in
+  'echo ok') exit 0 ;;
+  'echo $HOME') printf '%s\n' "$METAL_FIXTURE_REMOTE_HOME"; exit 0 ;;
+  'id -un') printf 'root\n'; exit 0 ;;
+  *'command -v rsync'*)
+    [ "${METAL_FIXTURE_MISSING_RSYNC:-0}" = 0 ]; exit $? ;;
+esac
+if [[ "$command" == *apt-get* ]]; then
+  printf '%s\n' "$command" >> "$METAL_FIXTURE_FORBIDDEN_INSTALL"
+  exit 93
+fi
+exec bash -c "$command"

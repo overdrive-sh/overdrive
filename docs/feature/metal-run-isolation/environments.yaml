@@ -1,0 +1,221 @@
+# DEVOPS machine inventory; fixture cases reuse existing environments.
+# Documentation names below are not new runner flags, settings or targets.
+feature: metal-run-isolation
+wave: DEVOPS
+date: "2026-11-08"
+authority: feature-delta.md
+target_environments:
+  - name: metal
+    description: Existing configured physical Metal launcher and durable runner.
+    platform: [native-x86_64-linux]
+    preconditions:
+      - Existing OVERDRIVE_METAL_TARGET from environment or workspace .env; no checked-in host address.
+      - Physical x86_64 host; systemd-detect-virt reports none; usable KVM API/create-VM and CPU VMX/SVM.
+      - Linux 7.0 family, cgroup v2, existing production Cloud Hypervisor fork and confinement identity/groups.
+      - Existing canonical maintenance barrier, systemd transient units, SSH and provisioned rsync/toolchain.
+      - Updated runner in both callers for ordinary-v2 concurrency credit.
+    cases: [E1, E2, E3, E4, E5, E6, E7, E8, E9]
+  - name: disposable-guest
+    description: Existing fresh guest groups and exact init operator/owner contexts on Metal.
+    platform: [x86_64-linux-7.0]
+    preconditions:
+      - Qualified physical Metal launcher and the selected checkout's prepared artifacts.
+      - Current dispatcher prepared by guest-kit-prepare; actual Cargo-reported ELF/helper closure.
+      - Existing guest kernel/rootfs/module and fixture inputs; no wrapper-triggered build.
+    groups: [probe, core, unload, ulp, mtls-relay, cgroup-default, stress, nested-boundary]
+    cases: [E3, E7, E8, E9]
+    evidence_boundary: >
+      Guest kernel effects are guest evidence. Existing named nested cells keep
+      only their approved correctness credit; no substitution for direct-native VMM launch.
+  - name: overdrive
+    description: Existing Lima VM for ordinary Linux unit, Sim, build, documentation and lint checks.
+    platform: [lima-linux-x86_64, lima-linux-aarch64]
+    preconditions:
+      - Existing infra/lima/overdrive-dev.yaml and cargo xtask lima run entrypoint.
+      - Current Linux/tool inputs appropriate to the selected existing check.
+    cases: [coexistence-non-metal]
+    evidence_boundary: >
+      Non-Metal adapter behavior and ordinary Linux checks only; no direct-native
+      VMM, physical-host complement or two-Metal-worktree concurrency credit.
+  - name: ubuntu-latest
+    description: Existing GitHub Actions ci.yml hosted runner and its Lima jobs.
+    platform: [github-actions-ubuntu-latest]
+    preconditions:
+      - Existing pull_request to main, push to main or workflow_dispatch trigger.
+      - Existing source checkout, job dependencies and workflow tool preparation.
+    cases: [coexistence-non-metal]
+    evidence_boundary: >
+      Existing CI build/test/lint/model gates only. Hosted runner labels do not
+      establish this feature's qualified physical Metal evidence.
+
+# Each case exercises a distinct ownership/provenance/lifecycle dimension.
+# These are selected cases, not a Cartesian product or a new execution lane.
+environmental_cases:
+  - id: E1
+    environment: metal
+    dimension: checkout identity and canonical binding
+    states:
+      - distinct linked worktrees, including equal branches with different dirty source
+      - different branch names whose sanitised spellings match
+      - linked worktree branch switch or detached HEAD; stable Git-directory identity
+      - ordinary clone attached branch fallback; separate clone with same branch
+      - detached ordinary clone or invalid Git discovery refuses
+      - valid fresh override versus invalid, foreign, malformed or unbound nonempty override
+    acceptance: [AC-2]
+    kpis: [K2]
+    validation: >
+      Validate exact bindings, source/artifact/lock targets and typed refusals.
+      Pure identity/record fixtures avoid repeating guest execution for each spelling.
+  - id: E2
+    environment: metal
+    dimension: same-checkout source and artifact exclusion
+    states:
+      - running durable command with competing same-checkout run, sync or pull
+      - controller loss after START; durable checkout owner still alive
+      - different checkout ordinary command admitted concurrently
+    acceptance: [AC-1, AC-3, AC-6]
+    kpis: [K1, K2]
+    validation: Actual durable owner locks/processes and source stability, including own-checkout timeout.
+  - id: E3
+    environment: metal
+    dimension: prepared and missing verification inputs
+    states:
+      - prepared current dispatcher, selected ELF/helpers and required fixture artifacts
+      - missing required guest input or dispatcher; refuse before body without host fallback
+      - missing transfer rsync; preparation failure before START without package installation
+      - host-pure selected body without dispatcher; no guest dependency
+    acceptance: [AC-4, AC-6, AC-7]
+    kpis: [K2, K3]
+    validation: >
+      Preserve DESIGN's exact lane_not_prepared/preflight_failed/runner_preparation_failed
+      representations at their owners. Test absent-input states in scoped fixtures;
+      do not remove shared installed prerequisites from the physical host.
+  - id: E4
+    environment: metal
+    dimension: ordinary and exclusive maintenance admission
+    states:
+      - two ordinary SH holders coexist
+      - exclusive request waits for admitted units through systemd stop and finalization
+      - unadmitted waiting ordinary unit does not block the exclusive owner
+      - maintenance deadline versus own-checkout deadline
+    acceptance: [AC-1, AC-3, AC-7]
+    kpis: [K1, K3]
+    validation: >
+      Canonical barrier descriptor mode and actual maintenance-command start;
+      one existing admission budget, maintenance_timeout versus checkout_timeout.
+  - id: E5
+    environment: metal
+    dimension: retained protocol versions and completion-gated collection
+    states:
+      - legacy metadata.v1 with existing terminal; no receipt required
+      - metadata.v2 with actual terminal, stopped unit and complete receipt
+      - supported command failure or nextest timeout and scoped finalization
+      - cleanup_failed, missing/malformed receipt, missing terminal or conflicting metadata
+      - repeat read-only collection after post-START controller loss
+    acceptance: [AC-5, AC-6]
+    kpis: [K2, K3]
+    validation: >
+      Exact typed record/marker/status mappings and precedence; actual process/root
+      complements at owner stop. No record writes or cleanup by the collector.
+  - id: E6
+    environment: metal
+    dimension: source fidelity and non-destructive cold migration
+    states:
+      - no-sync binding and source marker match
+      - no-sync binding or digest mismatch refuses before START
+      - cold canonical default alongside retained branch-derived cache and v1 records
+      - pull after local dirty source changes uses original binding/checkout exclusion
+    acceptance: [AC-2, AC-3, AC-6]
+    kpis: [K2]
+    validation: >
+      source_mismatch/78, actual transferred bytes and approved pull semantics;
+      no automatic legacy cache adoption or deletion.
+  - id: E7
+    environment: metal
+    dimension: actual two-worktree operator journey
+    states:
+      - ouagadougou and san-antonio, both updated and prepared from their actual source
+      - overlapping existing explicit guest-suite selections
+      - one supported failure/controller-loss path and repeat collection
+    acceptance: [AC-1, AC-2, AC-5, AC-6]
+    kpis: [K1, K2, K3]
+    validation: >
+      One bounded retained delivery capture through cargo xtask metal run and
+      metal collect; distinct IDs, actual command intervals/source/logs/statuses.
+      Reuse its observations for all KPIs; no repeated throughput benchmark.
+    capacity: Two standard 4096 MiB groups plus existing reserves, launcher and build overhead.
+  - id: E8
+    environment: metal
+    dimension: physical test-kernel complement and surviving invocation
+    states:
+      - before and after one invocation completes while the other remains active
+      - supported terminal cleanup after owner stop
+    acceptance: [AC-4, AC-5, AC-7]
+    kpis: [K3]
+    validation: >
+      Read actual initial-namespace modules/nftables/BPF/routes/test-cgroups and
+      vsock modes; distinguish finite permitted launcher resources. Inspect unit
+      process/cgroup complement and lstat absence of its three exact P5 roots.
+      Surviving run retains resources, source, artifacts and continuing control/output.
+  - id: E9
+    environment: metal
+    dimension: selected test placement and evidence applicability
+    states:
+      - host-pure/Sim body executes directly without guest dependency
+      - native-launcher body uses direct physical KVM and owned local vsock namespace
+      - selected kernel attempt/retry uses fresh existing guest group
+      - explicit suite retains batching; init operator/owner and named nested cells retain context
+      - invalid/duplicate/missing placement or unprepared guest context refuses
+    acceptance: [AC-4, AC-5, AC-7]
+    kpis: [K2, K3]
+    validation: >
+      Exact selected ELF/argv/helpers/property and nextest attempt metadata; body
+      executes once and returns its actual status. Retain current CID bands,
+      per-nextest host-kernel-shared max-threads=1 and all native confinement assertions.
+
+coexistence_matrix:
+  - tool: Git worktrees and SSH/rsync source transfer
+    must_not_break: true
+    contract: Full checkout binding/source fidelity, same-checkout exclusion and retained legacy caches.
+  - tool: metal sync/run/pull/collect/shell and provisioning
+    must_not_break: true
+    contract: Existing command meanings plus only approved run --exclusive; exact results and read-only collection.
+  - tool: nextest and .config/nextest.toml
+    must_not_break: true
+    contract: Ordinary placement is mandatory; preserve profiles, filters, attempts and reporting; pass through outside ordinary Metal.
+  - tool: existing disposable guest suite and production VMM fork
+    must_not_break: true
+    contract: Existing groups/cells, native confinement, exact selected artifacts, source and invocation ownership.
+  - tool: Lefthook, infra/hooks/linux-run.sh and agent command guards
+    must_not_break: true
+    contract: >
+      Preserve canonical Linux routing/checks while removing implicit host-module
+      preparation from ordinary Metal verification; no automatic exclusive fallback.
+  - tool: existing Rust CI, Lima overdrive and website workflows
+    must_not_break: true
+    contract: Preserve current triggers/jobs and non-Metal wrapper behavior; no website KPI changes.
+  - tool: older exclusive callers and retained metadata.v1
+    must_not_break: true
+    contract: Old callers stay exclusive; legacy collection keeps original rules; no pruning/adoption.
+
+platform_coverage:
+  controller: Existing macOS/Linux Git and Bash/OpenSSH/rsync tooling; no new OS-version support promise.
+  metal: Physical x86_64 Linux 7.0 family; DESIGN observed 7.0.0-38-generic and systemd 259.
+  guest_kernel: Existing prepared Linux 7.0 guest on the qualified Metal launcher.
+  nextest: Native DESIGN inspected 0.9.149; local help inspection was 0.9.150; retain run-wrapper compatibility.
+  lima: Existing overdrive Ubuntu 26.04 template on native x86_64 or aarch64; direct-native evidence excluded.
+  ci: Existing GitHub Actions ubuntu-latest jobs; label alone is not native/kernel qualification.
+  exclusions: No new WSL, host architecture, kernel matrix, remote fleet or staging/production platform.
+
+deployment_assumptions:
+  - Deployment is reviewed checked-in tooling source, not a published service or installed daemon.
+  - Both dogfood worktrees must use the updated ordinary runner; no automatic update of another worktree.
+  - Sync and preparation repeat under the bound checkout lock; no implicit legacy cache adoption.
+  - Finalization is scoped to exactly this invocation's three P5 roots after descendants end; missing roots are clean.
+  - Collection is repeatable and read-only; records/logs are retained without automatic pruning.
+  - Rollback waits for existing invocation owners; retain a v2-capable reader for v2 records.
+  - Rollback never deletes source, artifacts, bindings, another invocation's roots or retained results.
+  - Ordinary native admission keeps qualification and exact typed failure mappings; no host fallback.
+  - Unix privileged/login mode stays separate from ordinary/exclusive maintenance authority.
+  - No new hook framework, package-install behavior, flag, environment variable or error contract.
+  - Mutation testing is disabled for this feature session by explicit user instruction; no global policy/config edit.

@@ -1,0 +1,824 @@
+{
+  "source": "crates/overdrive-testing/bin/fwd_guest_suite.rs",
+  "source_sha256": "d8ba2e26bb71b9e1ba7483940026154f56b4acb3818bd7ba037c0a597bd4f190",
+  "arrays": {
+    "DATAPLANE_NATIVE": [
+      {
+        "selector": "integration::atomic_swap::atomic_swap_under_50kpps_traffic_drops_zero_packets",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::atomic_swap::hash_of_maps_handle_create_swap_delete_round_trip",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::atomic_swap::kernel_rejects_inner_map_alloc_existing_mapping_preserved",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::atomic_swap::removing_backend_purges_orphaned_backend_map_entries",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::atomic_swap::swap_inner_map_distributes_traffic_across_new_backend_set",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::atomic_swap::verifier_budget_xdp_reverse_nat_lookup_within_absolute_ceiling",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::atomic_swap::verifier_budget_xdp_service_map_lookup_within_20pct_of_baseline",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::deregister_retry_safety::deregister_purges_reverse_entry_when_forward_already_removed",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::local_backend_proto_connect::tcp_and_udp_connect_to_same_vip_port_reach_proto_correct_backend",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::maglev_real::maglev_real_distribution_under_xdp_trafficgen",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::mtls_agent_handshake::agent_handshake_presents_held_svid_server_role",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::mtls_guardrails::guardrails_fail_closed_limits_supervision_exemption_authn_boundary",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::mtls_inbound_enforce::inbound_enforce_origdst_server_mtls_ktls_rx_splice_to_server",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::multi_listener_tcp_udp_e2e::adding_listener_on_resubmit_converges_without_breaking_existing",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::multi_listener_tcp_udp_e2e::each_listener_reverse_path_independently_vip_sourced",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::multi_listener_tcp_udp_e2e::empty_backend_purge_of_one_listener_preserves_co_resident_proto",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::multi_listener_tcp_udp_e2e::two_listener_service_installs_both_protocol_paths",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::redirect_neigh_attach::loader_attaches_xdp_reverse_nat_on_backend_veth_and_retires_tc_egress",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::reverse_nat_e2e::empty_backend_deregistration_releases_allocator_memo_entries",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::reverse_nat_e2e::empty_backend_purge_scoped_to_frontend_leaves_other_ports_alive",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::reverse_nat_e2e::empty_backend_update_removes_service_map_and_reverse_nat_entries",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::reverse_nat_e2e::real_tcp_connection_completes_through_vip_with_payload_echo",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::reverse_nat_e2e::removing_backend_purges_reverse_nat_entry_no_stale_rewrite",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::reverse_nat_udp_e2e::every_udp_reply_independently_source_rewritten",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::reverse_nat_udp_e2e::missing_backend_response_distinguished_from_wrong_source",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::reverse_nat_udp_e2e::single_udp_listener_round_trip_carries_vip_source",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::sanity_mixed_batch::mixed_batch_increments_per_class_counters_correctly",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::service_map_forward::ten_tcp_syns_to_vip_are_rewritten_and_forwarded_via_veth",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::service_map_vip_port::service_map_keyed_on_vip_port_not_backend_port",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::unconnected_udp_reply_hardening::below_floor_kernel_refuses_at_attach_preflight_observably",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::unconnected_udp_reply_hardening::non_service_unconnected_udp_reads_real_source_recvmsg4_noop_on_miss",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::unconnected_udp_roundtrip::forward_and_reverse_map_entries_present_after_one_register",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::unconnected_udp_roundtrip::kernel_reply_source_meets_tier1_reply_mirror_at_backend_identity",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::unconnected_udp_roundtrip::second_unconnected_query_reuses_same_mapping_statelessly",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::unconnected_udp_roundtrip::unconnected_sendto_recvfrom_reads_vip_sourced_reply",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::veth_attach::missing_iface_returns_typed_iface_not_found_error",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      }
+    ],
+    "DATAPLANE_LIB_NATIVE": [
+      {
+        "selector": "maps::hash_of_maps::tests::alloc_failure_with_zero_inner_entries_yields_typed_variant",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "maps::hash_of_maps::tests::create_outer_and_inner_then_atomic_swap",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "maps::reverse_local_map_handle::real_map_tests::remove_deletes_the_reverse_entry",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      }
+    ],
+    "CGROUP_ACCEPTANCE": [
+      {
+        "selector": "acceptance::job_stop_idempotent::stop_on_already_stopped_job_returns_already_stopped_outcome",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "acceptance::job_stop_intent_key::stop_writes_separate_intent_key_preserving_spec",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "acceptance::job_stop_unknown::stop_on_unknown_job_returns_404",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      }
+    ],
+    "CGROUP_CONTROL_PLANE": [
+      {
+        "selector": "integration::backend_discovery_bridge::boot_composition::attach_mode_fallback_emits_structured_event_on_dummy_iface",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::backend_discovery_bridge::boot_composition::boot_composes_ebpf_dataplane_and_attaches_xdp_to_both_ifaces",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::backend_discovery_bridge::boot_composition::boot_refuses_when_client_iface_does_not_exist",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::backend_discovery_bridge::boot_composition::boot_refuses_when_earned_trust_probe_fails",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::backend_discovery_bridge::boot_composition::boot_refuses_when_iface_has_no_ipv4_address",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::backend_discovery_bridge::boot_composition::boot_resolves_host_ipv4_via_getifaddrs_on_client_iface",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::backend_discovery_bridge::boot_composition::boot_succeeds_when_earned_trust_probe_round_trips_backend_map",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::backend_discovery_bridge::boot_composition::graceful_shutdown_detaches_xdp_and_removes_bpffs_pin",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::built_in_ca_operator_composition::serve_persistent_ca::refuse_to_start_does_not_remint_the_root",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::built_in_ca_operator_composition::serve_persistent_ca::serve_first_boot_generates_seals_and_persists_root",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::built_in_ca_operator_composition::serve_persistent_ca::serve_refuses_on_absent_kek",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::built_in_ca_operator_composition::serve_persistent_ca::serve_refuses_on_corrupted_envelope",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::built_in_ca_operator_composition::serve_persistent_ca::serve_refuses_on_wrong_kek_material",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::built_in_ca_operator_composition::serve_persistent_ca::serve_restart_adopts_same_root_no_remint",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::built_in_ca_operator_composition::serve_persistent_ca::serve_refusal_causes_are_pairwise_distinct",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::cgroup_isolation::alloc_scope_has_writable_cpu_weight_and_memory_max::",
+        "expected_passed": 2,
+        "forbid_runtime_skip": false
+      },
+      {
+        "selector": "integration::cgroup_isolation::subtree_control_delegation_is_idempotent::",
+        "expected_passed": 1,
+        "forbid_runtime_skip": false
+      },
+      {
+        "selector": "integration::concurrent_submit_toctou::",
+        "expected_passed": 2,
+        "forbid_runtime_skip": false
+      },
+      {
+        "selector": "integration::describe_round_trip::get_v1_jobs_id_returns_described_job_after_submit",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::describe_round_trip::get_v1_jobs_malformed_id_returns_400_with_field_id",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::describe_round_trip::get_v1_jobs_unknown_id_returns_404_with_error_body",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::describe_round_trip::describe_spec_digest_equals_content_hash_of_archived_bytes",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::describe_round_trip::describe_returns_spec_digest_matching_submit_response",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::describe_round_trip::submit_then_describe_round_trips_spec_and_digest",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::idempotent_resubmit::",
+        "expected_passed": 5,
+        "forbid_runtime_skip": false
+      },
+      {
+        "selector": "integration::serve_kernel_assigned_vsock_ports::",
+        "expected_passed": 1,
+        "forbid_runtime_skip": false
+      },
+      {
+        "selector": "integration::server_lifecycle::run_server_binds_on_ephemeral_port_and_reports_bound_address",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::server_lifecycle::reqwest_client_with_minted_ca_gets_200_on_v1_cluster_info",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::server_lifecycle::response_alpn_negotiation_is_http_2",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::server_lifecycle::cancellation_token_shutdown_drains_in_flight_request",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::server_lifecycle::all_adr_0008_paths_return_200_on_stub_router",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::shared_guest_network_startup::serve_boots_through_the_pinned_order_with_the_guest_network_composed",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::shared_guest_network_startup::an_rlimit_nofile_below_the_owner_budget_refuses_boot",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::shared_guest_network_startup::a_failed_beacon_bind_refuses_boot",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::submit_round_trip::",
+        "expected_passed": 5,
+        "forbid_runtime_skip": false
+      }
+    ],
+    "CGROUP_WORKER": [
+      {
+        "selector": "integration::cgroup_manager::write_to_readonly_cgroup_file::write_to_readonly_cgroup_events_propagates_real_eacces",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::real_cgroup_fs::cgroup_kill_terminates_pids::cgroup_kill_terminates_every_pid_within_two_seconds",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::real_cgroup_fs::controller_validation::cpu_weight_out_of_range_returns_einval",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::real_cgroup_fs::procs_pid_movement::writing_pid_to_cgroup_procs_moves_the_process_into_scope",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::real_cgroup_fs::pseudo_file_synthesis::cgroup_events_appears_at_mkdir_time",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::real_cgroup_fs::refused_thread_kill::a_kill_write_under_thread_refusal_returns_an_io_error_and_never_aborts",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::vsock_mesh_egress_mtls::registered_mesh_flow_reaches_its_registered_backend_over_mtls_without_leg_f_resolving_again",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::real_cgroup_fs::rmdir_auto_reap::empty_scope_rmdir_succeeds_kernel_reaps_pseudo_files",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::real_cgroup_fs::subtree_control_ebusy::no_internal_process_rule_returns_ebusy_dispatches_to_typed_variant",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      }
+    ],
+    "STEP13_04_CONTROL_PLANE": [
+      {
+        "selector": "integration::boot_member_clear_refusal::a_rejected_boot_member_clear_refuses_the_composed_boot_with_its_own_cause",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::boot_member_clear_refusal::a_boot_member_clear_that_leaves_members_refuses_with_the_members_it_observed",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::boot_member_clear_refusal::a_boot_member_clear_that_commits_after_the_refusal_publishes_nothing",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::shared_element_cleanup_failure::shared_element_cleanup_failure_deletion_rejected_retains_retirement_and_address",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::shared_element_cleanup_failure::shared_element_cleanup_failure_readback_failed_retains_retirement_and_address",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::shared_guest_network_startup::a_failed_step8_table_write_refuses_boot_and_the_restart_converges",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      }
+    ],
+    "STEP13_04_WORKER": [
+      {
+        "selector": "integration::mtls_intercept_install::shared_program_absence_create_readback_idempotence_and_guard_drop",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::mtls_intercept_install::shared_program_replaces_only_listener_targets_and_preserves_foreign_complement",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::mtls_intercept_install::shared_program_valid_wrong_target_observation_is_non_mutating",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::netns_density_shared_owner::stopping_one_shared_allocation_preserves_the_unrelated_handle_and_complete_listener_owner",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::netns_density_shared_owner::member_loss_is_an_ipsets_failure_and_repair_restores_exactly_the_member",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::netns_density_shared_owner::policy_route_loss_is_repaired_with_live_members_and_the_prior_guard_is_relinquished",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::netns_density_shared_owner::a_differently_targeted_program_is_never_rewritten",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::shared_intercept_members::each_deleted_intercept_object_is_restored_exactly_with_live_allocations",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      }
+    ],
+    "STEP13_04_HOST_LOCAL_FIREWALL": [
+      {
+        "selector": "integration::vsock_constant_guest_prefix_rules::a_host_local_connection_to_a_guest_prefix_address_is_rejected_at_once",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::vsock_constant_guest_prefix_rules::a_host_local_datagram_to_a_guest_prefix_address_fails_eperm",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      }
+    ],
+    "STEP13_04_REMOTE_FIREWALL": [
+      {
+        "selector": "integration::vsock_constant_guest_prefix_rules::a_remote_connection_to_an_unassigned_guest_prefix_address_is_dropped",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::vsock_constant_guest_prefix_rules::a_leg_c_diverted_remote_connection_reaches_leg_c_both_ways",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      }
+    ],
+    "STEP13_05_CONTROL_PLANE": [
+      {
+        "selector": "integration::shared_guest_network_startup::a_vip_range_overlapping_the_guest_prefix_refuses_boot_before_any_effect",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::shared_guest_network_startup::a_node_address_inside_the_guest_prefix_refuses_boot_naming_the_interface",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      }
+    ],
+    "STEP13_05_WORKER": [
+      {
+        "selector": "integration::vsock_legb_dial::a_same_node_mesh_dial_is_marked_source_bound_and_reaches_leg_c",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::vsock_legb_dial::a_dial_to_a_peer_outside_the_guest_prefix_is_neither_marked_nor_bound",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::vsock_legb_dial::a_marked_dial_to_an_unregistered_tuple_is_refused_and_reaches_no_host_socket",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      }
+    ],
+    "STEP13_06_WORKER": [
+      {
+        "selector": "integration::vsock_host_internal_enforce::a_marked_tcp_connect_to_a_loopback_service_is_refused_econnrefused_without_hang",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::vsock_host_internal_enforce::a_marked_tcp_connect_to_a_host_interface_address_is_refused",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::vsock_host_internal_enforce::a_marked_udp_first_transmit_to_a_local_service_fails_eperm",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::vsock_host_internal_enforce::a_marked_udp_socket_reusing_an_unmarked_flows_source_port_is_still_rejected",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::vsock_host_internal_enforce::a_marked_udp_transmit_to_a_subnet_directed_broadcast_reaches_no_service",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::vsock_host_internal_enforce::a_marked_tcp_connect_to_a_link_local_service_is_refused",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::vsock_host_internal_enforce::a_marked_tcp_connect_to_a_neighbour_stays_reachable",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::vsock_host_internal_enforce::a_packet_carrying_the_owner_bit_among_other_bits_is_refused",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::vsock_host_internal_enforce::a_packet_carrying_only_the_leg_s_or_tproxy_mark_reaches_a_local_service",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::vsock_host_internal_enforce::a_marked_connect_storm_across_repeated_table_replacements_reaches_no_local_service",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      }
+    ],
+    "STEP13_06_ROUTED_WORKER": [
+      {
+        "selector": "integration::vsock_host_internal_enforce::a_marked_udp_transmit_to_the_limited_broadcast_reaches_no_service",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::vsock_host_internal_enforce::a_marked_udp_transmit_to_the_all_hosts_multicast_group_is_rejected_eperm",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::vsock_host_internal_enforce::a_marked_udp_transmit_to_an_off_host_address_is_not_rejected",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      }
+    ],
+    "CONTROL_PLANE_NORMAL_NATIVE": [
+      {
+        "selector": "integration::adopt_on_restart::serve_restart_readopts_surviving_slot_and_gcs_orphan_netns",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::adopt_on_restart::serve_restart_sweeps_surviving_per_workload_tproxy_rule",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::dns_responder_bind::empty_fallback_binds_zero_sockets_and_warns_it_is_deaf",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::dns_responder_bind::per_gateway_addr_fallback_binds_when_wildcard_is_held",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::dns_responder_bind::probe_refuses_when_no_bindable_port",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::dns_responder_bind::probe_refuses_when_store_unreadable_at_listseed",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::dns_responder_bind::run_server_refuses_boot_when_the_guest_dns_probe_fails_through_the_required_port",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::dns_responder_bind::the_responder_audit_reads_back_its_socket_and_fails_after_loss",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::dns_responder_bind::wildcard_bind_answers_frontend_and_source_pins_reply",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::serve_boot_provisions_veth::serve_boot_attaches_two_distinct_xdp_programs_to_two_distinct_veths",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::serve_boot_provisions_veth::single_iface_collision_surfaces_typed_iface_xdp_slot_busy",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::veth_provision_idempotent::provision_complete_pair_converges_to_silent_success",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::veth_provision_idempotent::provision_completes_half_provisioned_pair",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::veth_provision_idempotent::provision_creates_pair_when_absent",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::veth_provision_idempotent::provision_disables_tx_offload_on_both_ends_and_is_idempotent",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::veth_provision_idempotent::provision_recreates_pair_when_client_absent_but_peer_present",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::veth_provision_idempotent::provision_recreates_pair_when_peer_absent",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::veth_provision_idempotent::provision_repairs_tx_offload_drifted_back_on",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::workload_netns_provision::provision_creates_and_idempotently_converges_per_workload_netns",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::workload_netns_provision::provision_injects_node_local_responder_into_netns_resolv_conf",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      }
+    ],
+    "STEP14_01_CONTROL_PLANE": [
+      {
+        "selector": "integration::guest_flow_through_serve::the_forwarder_inventory_counts_every_held_guest_flow_through_serve",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::guest_flow_through_serve::a_killed_launchs_attachment_leaves_the_owner_and_the_next_launch_is_accepted",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::guest_flow_through_serve::the_forwarder_inventory_counts_probe_and_relay_watches_through_serve",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::guest_flow_through_serve::a_dropped_probe_stream_is_an_abort_at_the_guest_through_serve",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::guest_flow_through_serve::a_vmm_exit_under_a_held_relay_stream_resets_the_client_through_serve",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      }
+    ],
+    "STEP14_01_CLI": [
+      {
+        "selector": "integration::vsock_walking_skeleton::a_vm_workload_round_trips_tcp_and_udp_through_serve_and_deploy",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      }
+    ],
+    "STEP14_02_CLI": [
+      {
+        "selector": "integration::vsock_fault_matrix::the_serve_owners_death_resets_every_far_end_and_the_next_boot_reclaims_the_vm",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::vsock_fault_matrix::a_guest_reset_ends_the_vmm_and_resets_every_far_end",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::vsock_fault_matrix::a_killed_vmm_resets_the_far_end_of_its_flow",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::vsock_fault_matrix::a_far_reader_that_stops_blocks_the_sender_and_the_flow_resumes_in_order",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::vsock_fault_matrix::closed_udp_sockets_release_their_slots_before_and_after_pairing",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      }
+    ],
+    "STEP14_02_WORKER": [
+      {
+        "selector": "leg_f_repair_rebinds_transparent_listener",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      }
+    ],
+    "VM_COHORT_CLI": [
+      {
+        "selector": "integration::vsock_density::every_vm_at_density_round_trips_through_its_own_attachment",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      },
+      {
+        "selector": "integration::vsock_density::serve_down_at_density_is_fail_closed_and_the_next_boot_reclaims_every_vm",
+        "expected_passed": 1,
+        "forbid_runtime_skip": true
+      }
+    ]
+  }
+}

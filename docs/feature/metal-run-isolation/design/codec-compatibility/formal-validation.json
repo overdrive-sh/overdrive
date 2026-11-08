@@ -1,0 +1,85 @@
+{
+  "run_id": "47182-1794138494.593",
+  "checks": 18,
+  "holds": 16,
+  "expected_violations": 2,
+  "unexpected": 0,
+  "record_command_exit": 0,
+  "verify_evidence_exit": 0,
+  "typecheck_files": 53,
+  "tools": {
+    "quint": "0.32.0",
+    "apalache": "0.56.1 | build: 70cdaf4",
+    "java": "openjdk version \"21.0.11\" 2026-04-21",
+    "kernel": "25.1.0"
+  },
+  "wall_seconds": 284.2,
+  "state_counts": {
+    "runner-safety": {
+      "before": {
+        "generated": 19473450,
+        "distinct": 695458,
+        "queue": 0
+      },
+      "after": {
+        "generated": 19473450,
+        "distinct": 695458,
+        "queue": 0
+      }
+    },
+    "runner-owners-progress": {
+      "before": {
+        "generated": 19473450,
+        "distinct": 695458,
+        "queue": 0
+      },
+      "after": {
+        "generated": 19473450,
+        "distinct": 695458,
+        "queue": 0
+      }
+    },
+    "runner-maintenance-progress": {
+      "before": {
+        "generated": 19473450,
+        "distinct": 695458,
+        "queue": 0
+      },
+      "after": {
+        "generated": 19473450,
+        "distinct": 695458,
+        "queue": 0
+      }
+    },
+    "runner-hazard-exclusive-ordinary": {
+      "before": {
+        "generated": 575,
+        "distinct": 64,
+        "queue": 48
+      },
+      "after": {
+        "generated": 575,
+        "distinct": 64,
+        "queue": 48
+      }
+    },
+    "runner-hazard-collect-at-terminal": {
+      "before": {
+        "generated": 81168,
+        "distinct": 5407,
+        "queue": 3300
+      },
+      "after": {
+        "generated": 81168,
+        "distinct": 5407,
+        "queue": 3300
+      }
+    }
+  },
+  "all_13_named_runs_passed": true,
+  "inputs": {
+    "checks.toml": "aca65dde0e79ac0dd4a19f0f5b95ebce7725e418f841f3e53dff5eef6b452b16",
+    "hazard/runner_hazards.qnt": "907af15a80388e355818f249abc69fbd3b339b20867266b3d9174fa15daeb2f7",
+    "runner_protocol.qnt": "f67ed362807560c981a60be33d127106f47329a290f5148add70fadcbd732b5e"
+  }
+}

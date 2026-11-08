@@ -1,0 +1,50 @@
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+OVERDRIVE_METAL_RUN_ID=8d05ef07c5e1f3218a36aeec
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_RUN_REGISTERED run_id=8d05ef07c5e1f3218a36aeec
+OVERDRIVE_METAL_LEASE_ACQUIRED token=8d05ef07c5e1f3218a36aeec pid=4143625
+
+########## [bootstrap] acquire metal tree lock (/run/lock/overdrive-metal-tree-overdrive-branches-marcus-sa-nw-bugfix-crash-restart-tasks.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=8d05ef07c5e1f3218a36aeec-tree pid=4177524
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/ouagadougou -> ubuntu@151.115.99.251:/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks
+
+sent 2,009,956 bytes  received 30,641 bytes  816,238.80 bytes/sec
+total size is 1,852,296,374  speedup is 907.72
+
+########## [bootstrap] materialising standalone .git (common dir 7.4G)
+
+sent 287,590 bytes  received 18,447 bytes  204,024.67 bytes/sec
+total size is 860,321,382  speedup is 2,811.17
+## marcus-sa/nw-bugfix-crash-restart-tasks...origin/marcus-sa/nw-bugfix-crash-restart-tasks [ahead 135, behind 1]
+ M AGENTS.md
+ M crates/overdrive-control-plane/src/worker/exit_observer.rs
+ M crates/overdrive-control-plane/tests/acceptance/crash_ending_authority.rs
+ M crates/overdrive-control-plane/tests/acceptance/terminal_hook_ownership.rs
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+DESIGN-COMMAND local-vsock-namespace-probe ["python3", "spike-scratch/metal-run-isolation/increment-f/netns_probe.py"]
+DESIGN-RESULT local-vsock-namespace-probe status=0 seconds=0.164
+DESIGN-COMMAND bpf-build ["cargo", "xtask", "bpf-build"]
+DESIGN-RESULT bpf-build status=0 seconds=31.067
+DESIGN-COMMAND guest-kit-prepare ["cargo", "xtask", "guest-kit-prepare"]
+DESIGN-RESULT guest-kit-prepare status=0 seconds=438.789
+DESIGN-COMMAND nextest-list-workspace ["cargo", "nextest", "list", "--workspace", "--features", "integration-tests,kvm-tests", "--message-format", "json"]
+DESIGN-RESULT nextest-list-workspace status=0 seconds=154.134
+DESIGN-COMMAND wrapper-spike-build ["cargo", "build", "--manifest-path", "/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/spike-scratch/metal-run-isolation/increment-e/Cargo.toml", "--target-dir", "/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/target"]
+DESIGN-RESULT wrapper-spike-build status=0 seconds=19.386
+DESIGN-COMMAND wrapper-nextest-pass ["cargo", "nextest", "run", "--manifest-path", "/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/spike-scratch/metal-run-isolation/increment-e/Cargo.toml", "--target-dir", "/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/target", "--config-file", "/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/spike-scratch/metal-run-isolation/increment-e/nextest.toml", "-E", "test(selected_guest_has_an_independent_kernel_boot_id)", "--no-capture"]
+DESIGN-RESULT wrapper-nextest-pass status=0 seconds=30.286
+DESIGN-COMMAND wrapper-nextest-255 ["cargo", "nextest", "run", "--manifest-path", "/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/spike-scratch/metal-run-isolation/increment-e/Cargo.toml", "--target-dir", "/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/target", "--config-file", "/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/spike-scratch/metal-run-isolation/increment-e/nextest.toml", "-E", "test(selected_guest_status_is_255)", "--no-capture"]
+DESIGN-RESULT wrapper-nextest-255 status=100 seconds=2.068
+DESIGN-COMMAND wrapper-existing-kernel-cell ["cargo", "nextest", "run", "-p", "overdrive-fwd", "--test", "integration", "--features", "integration-tests,kvm-tests", "--config-file", "/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/spike-scratch/metal-run-isolation/increment-e/nextest.toml", "-E", "test(integration::probe_gold::the_probe_passes_and_leaves_no_residue_on_a_correctly_provisioned_node)", "--no-capture"]
+DESIGN-RESULT wrapper-existing-kernel-cell status=0 seconds=13.097
+DESIGN-WRAPPER-PROOF complete=true
+DESIGN-COMMAND local-vsock-wrapper-driver ["python3", "spike-scratch/metal-run-isolation/increment-g/driver.py"]
+DESIGN-RESULT local-vsock-wrapper-driver status=0 seconds=14.043

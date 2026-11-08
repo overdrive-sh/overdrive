@@ -1,0 +1,13 @@
+info: experimental features enabled: wrapper-scripts
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.08s
+────────────
+ Nextest run ID 79d9c750-6641-41cc-a45a-4f64725ba008 with nextest profile: default
+    Starting 1 test across 2 binaries (3 tests skipped)
+       START [         ] (1/1) metal-isolation-local-vsock-spike selected_guest_timeout_owns_resources
+ TERMINATING [> 20.000s] (───) metal-isolation-local-vsock-spike selected_guest_timeout_owns_resources
+     TIMEOUT [  20.002s] (1/1) metal-isolation-local-vsock-spike selected_guest_timeout_owns_resources
+  Cancelling due to test failure
+────────────
+     Summary [  20.002s] 1 test run: 0 passed, 1 timed out, 3 skipped
+     TIMEOUT [  20.002s] (1/1) metal-isolation-local-vsock-spike selected_guest_timeout_owns_resources
+error: test run failed

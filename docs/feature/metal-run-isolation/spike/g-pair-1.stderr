@@ -1,0 +1,15 @@
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+info: experimental features enabled: wrapper-scripts
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on artifact directory
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.47s
+────────────
+ Nextest run ID 844c33ef-d206-4e97-8035-c9f6ca45c48b with nextest profile: default
+    Starting 1 test across 2 binaries (1 test skipped)
+       START [         ] (1/1) metal-isolation-local-vsock-spike selected_guest_has_an_independent_kernel_boot_id
+        PASS [   7.507s] (1/1) metal-isolation-local-vsock-spike selected_guest_has_an_independent_kernel_boot_id
+────────────
+     Summary [   7.507s] 1 test run: 1 passed, 1 skipped

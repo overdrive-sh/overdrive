@@ -1,0 +1,9 @@
+info: experimental features enabled: wrapper-scripts
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.09s
+────────────
+ Nextest run ID 28dda97a-83bb-4a2c-ada1-b6445b3d2164 with nextest profile: default
+    Starting 1 test across 2 binaries (3 tests skipped)
+       START [         ] (1/1) metal-isolation-local-vsock-spike selected_guest_environment_is_preserved
+        PASS [   1.839s] (1/1) metal-isolation-local-vsock-spike selected_guest_environment_is_preserved
+────────────
+     Summary [   1.839s] 1 test run: 1 passed, 3 skipped

@@ -1,0 +1,11 @@
+
+running 1 test
+test acceptance::gateway_relay_exchange::seeded_peer_events_never_move_an_octet_past_a_message_boundary_and_leave_no_residue ... FAILED
+
+failures:
+
+failures:
+    acceptance::gateway_relay_exchange::seeded_peer_events_never_move_an_octet_past_a_message_boundary_and_leave_no_residue
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 126 filtered out; finished in 0.01s
+

@@ -1,0 +1,15 @@
+{
+  "all_132_mbt_actions_match_recorded_tags": true,
+  "counts": {
+    "AdmissionTimeout": 3,
+    "Collect": 43,
+    "Idle": 45,
+    "LoseController": 2,
+    "Maintain": 8,
+    "Register": 8,
+    "StopOwner": 8,
+    "SupervisorLost": 3,
+    "Sync": 8,
+    "init": 4
+  }
+}

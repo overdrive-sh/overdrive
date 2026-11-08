@@ -1,0 +1,18 @@
+[package]
+name = "metal-isolation-local-vsock-spike"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+overdrive-core = { path = "../../../crates/overdrive-core" }
+overdrive-testing = { path = "../../../crates/overdrive-testing" }
+
+[lib]
+path = "src/probe_tests.rs"
+
+[[bin]]
+name = "metal-isolation-local-vsock-spike"
+path = "src/main.rs"

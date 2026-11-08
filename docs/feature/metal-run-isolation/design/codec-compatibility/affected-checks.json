@@ -1,0 +1,23 @@
+{
+  "all_18_passed_individually": true,
+  "logs": [
+    "affected-runner-hazard-collect-at-terminal.log",
+    "affected-runner-hazard-exclusive-ordinary.log",
+    "affected-runner-maintenance-progress.log",
+    "affected-runner-owners-progress.log",
+    "affected-runner-run-admission-timeout.log",
+    "affected-runner-run-cleanup-failure-keeps-command.log",
+    "affected-runner-run-controller-eof-before-start.log",
+    "affected-runner-run-controller-loss-after-start.log",
+    "affected-runner-run-independent-worktrees.log",
+    "affected-runner-run-maintenance-waits-for-stop.log",
+    "affected-runner-run-missing-completion-refuses.log",
+    "affected-runner-run-missing-rsync-aborts-before-start.log",
+    "affected-runner-run-no-sync-mismatch-refuses.log",
+    "affected-runner-run-preflight-aborts-before-start.log",
+    "affected-runner-run-repeat-collection-agrees.log",
+    "affected-runner-run-same-checkout-excludes-sync.log",
+    "affected-runner-run-supervisor-loss-is-not-a-result.log",
+    "affected-runner-safety.log"
+  ]
+}

@@ -1,0 +1,25 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.31s
+     Running `target/debug/xtask metal run -- python3 spike-scratch/metal-run-isolation/increment-i/all_driver.py`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+OVERDRIVE_METAL_RUN_ID=ca3066ef011a86f5de6b1fb0
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_RUN_REGISTERED run_id=ca3066ef011a86f5de6b1fb0
+FATAL: timed out after 120s acquiring /run/lock/overdrive-metal-shared.lock
+current lease owner:
+  pid=176567
+  started_at=2026-11-07T23:23:36Z
+  action=run
+  scenario=unspecified
+  workspace=/Users/marcus/conductor/workspaces/helios/bangalore-v1
+  commit=e7ec7ca474e228de4dcbf148aea9c40187a0a2a0
+  token=7d0bf7ee56ced7e0f1e5d0bd
+  run_id=7d0bf7ee56ced7e0f1e5d0bd
+  unit=overdrive-metal-run-7d0bf7ee56ced7e0f1e5d0bd.service
+  source_digest=009b52e49c56e1a248c628138b9ed5649d396258f39f5168828a9ddfdac9e812
+OVERDRIVE_METAL_RUNNER_ERROR error=run_not_started

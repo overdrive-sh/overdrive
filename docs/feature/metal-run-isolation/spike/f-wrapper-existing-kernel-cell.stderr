@@ -1,0 +1,23 @@
+info: experimental features enabled: wrapper-scripts
+   Compiling ring v0.17.14
+   Compiling rustls-webpki v0.103.13
+   Compiling rcgen v0.14.8
+   Compiling overdrive-host v0.0.0 (/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/crates/overdrive-host)
+   Compiling rustls v0.23.39
+   Compiling overdrive-testing v0.0.0 (/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/crates/overdrive-testing)
+   Compiling overdrive-gateway v0.0.0 (/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/crates/overdrive-gateway)
+   Compiling tokio-rustls v0.26.4
+   Compiling axum-server v0.7.3
+   Compiling overdrive-dataplane v0.0.0 (/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/crates/overdrive-dataplane)
+   Compiling overdrive-worker v0.0.0 (/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/crates/overdrive-worker)
+   Compiling overdrive-control-plane v0.0.0 (/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/crates/overdrive-control-plane)
+   Compiling overdrive-sim v0.0.0 (/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/crates/overdrive-sim)
+   Compiling overdrive-fwd v0.0.0 (/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/crates/overdrive-fwd)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 10.24s
+────────────
+ Nextest run ID f8532829-7d2a-4e42-bfe7-ec606a5e1e1f with nextest profile: default
+    Starting 1 test across 1 binary (99 tests skipped)
+       START [         ] (1/1) overdrive-fwd::integration integration::probe_gold::the_probe_passes_and_leaves_no_residue_on_a_correctly_provisioned_node
+        PASS [   2.433s] (1/1) overdrive-fwd::integration integration::probe_gold::the_probe_passes_and_leaves_no_residue_on_a_correctly_provisioned_node
+────────────
+     Summary [   2.433s] 1 test run: 1 passed, 99 skipped

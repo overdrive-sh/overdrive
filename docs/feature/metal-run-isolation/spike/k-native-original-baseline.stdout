@@ -1,0 +1,12 @@
+
+running 1 test
+test integration::vsock_vmm_device::the_fork_boots_and_passes_data_under_the_production_launch_identity has been running for over 60 seconds
+test integration::vsock_vmm_device::the_fork_boots_and_passes_data_under_the_production_launch_identity ... FAILED
+
+failures:
+
+failures:
+    integration::vsock_vmm_device::the_fork_boots_and_passes_data_under_the_production_launch_identity
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 35 filtered out; finished in 60.75s
+

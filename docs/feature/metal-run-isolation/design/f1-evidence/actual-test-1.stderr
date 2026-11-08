@@ -1,0 +1,5 @@
+S-PIG-102 seed=0 ending=ClientFailsMidBody(UnexpectedRecord)
+
+thread 'acceptance::gateway_relay_exchange::seeded_peer_events_never_move_an_octet_past_a_message_boundary_and_leave_no_residue' (631867) panicked at crates/overdrive-sim/tests/acceptance/gateway_relay_exchange.rs:138:73:
+frontend: Os { code: 98, kind: AddrInUse, message: "Address already in use" }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace

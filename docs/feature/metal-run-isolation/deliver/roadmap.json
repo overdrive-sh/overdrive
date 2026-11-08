@@ -1,0 +1,118 @@
+{
+  "roadmap": {
+    "project_id": "metal-run-isolation",
+    "created_at": "2026-11-08T14:53:31Z",
+    "total_steps": 2
+  },
+  "phases": [
+    {
+      "id": "01",
+      "name": "Concurrent worktree verification",
+      "description": "One release slice: establish source ownership, then complete guest placement, invocation resource ownership and durable completion before admitting shared ordinary execution. Exact P1–P5 contracts and the delivery activation/verification notes in feature-delta.md are authoritative; all four consolidated DISTILL reviews are APPROVED.",
+      "default_agent": "nw-software-crafter",
+      "default_deps_strategy": "sequential",
+      "steps": [
+        {
+          "id": "01-01",
+          "name": "Bind each checkout's source and retained artifacts",
+          "criteria": [
+            "Linked-worktree identity survives branch changes; clone fallback, equal branches and sanitised spellings select disjoint full bindings without adopting legacy caches.",
+            "Sync and pull preserve bound source/artifact/evidence complements under checkout exclusion; pull retrieves named evidence after local edits without rebinding.",
+            "Invalid discovery, override and full-owner conflicts produce P1's exact typed refusals before foreign mutation; transfer prerequisites never trigger ordinary package installation.",
+            "All seven assigned pre-authored identity/transfer cases pass through the real bootstrap in Lima; ordinary command execution retains existing exclusive authority."
+          ],
+          "test_file": "xtask/tests/acceptance/metal_run_isolation/identity.rs",
+          "scenario_name": "acceptance::metal_run_isolation::identity::same_branch_worktrees_keep_source_artifacts_and_evidence_disjoint",
+          "deps": [],
+          "agent": "nw-software-crafter",
+          "estimated_hours": 2,
+          "files_to_modify": [
+            "infra/metal/bootstrap.sh",
+            "xtask/src/main.rs",
+            "xtask/src/metal_pull.rs",
+            "xtask/tests/acceptance/metal_run_isolation/identity.rs",
+            "infra/metal/README.md"
+          ],
+          "implementation_notes": "P1; exact contract and typed-error mappings: feature-delta.md. Activate only the seven assigned existing markers; preserve bodies. RED/GREEN: Lima identity fixtures, never Metal. Retain existing exclusive execution until the integrated dependency is complete. TEST PARADIGM (mandatory): Rust unit properties use proptest plus strict state-delta assertions over a declared universe; real-I/O integration/E2E remain examples. Preserve every Contract Shape declaration. See delivery notes for exact activation, commands, scope and ambiguity gates. No mutation testing."
+        },
+        {
+          "id": "01-02",
+          "name": "Run ordinary verification concurrently with owned guest cleanup",
+          "criteria": [
+            "P2 admission and P5 completion preserve checkout exclusion, controller detachment, one deadline, exclusive maintenance, v1 compatibility and exact command/runner failures; assigned owner tests pass.",
+            "Ordinary nextest routes the exact selected ELF, argv, helpers, environment and retries through approved placement; unknown or absent context fails closed; non-Metal execution remains unchanged.",
+            "P3 confines native resources and guest test effects to each invocation; P5 drains descendants and cleans only its three roots, preserving every surviving invocation.",
+            "All assigned pre-authored bodies, existing qualification transitions and three external drivers pass at their declared boundaries; all semantic errors retain approved typed representations and precedence.",
+            "The updated two-worktree capture satisfies AC-1–AC-7 and K1–K3: overlap, exact source/results, zero forbidden physical-kernel deltas, zero completed-run residue and zero survivor changes."
+          ],
+          "test_file": "xtask/tests/acceptance/metal_run_isolation/collection.rs",
+          "scenario_name": "acceptance::metal_run_isolation::collection::retained_v1_and_v2_commands_return_exact_status_on_read_only_repeat_collection",
+          "deps": ["01-01"],
+          "agent": "nw-software-crafter",
+          "estimated_hours": 8,
+          "files_to_modify": [
+            "infra/metal/bootstrap.sh",
+            "infra/metal/lease-holder.sh",
+            "infra/metal/native-preflight.sh",
+            "infra/metal/test-wrapper.sh",
+            "infra/metal/test-placement.json",
+            "xtask/src/main.rs",
+            "xtask/src/guest_kit_prepare.rs",
+            "crates/overdrive-testing/bin/fwd_guest_suite.rs",
+            "crates/overdrive-testing/src/guest_kit.rs",
+            "crates/overdrive-testing/src/guest_lane.rs",
+            "crates/overdrive-testing/src/vm_fixture.rs",
+            "crates/overdrive-host/tests/integration/vsock_vmm_device.rs",
+            "crates/overdrive-host/tests/integration/vmm_equivalence.rs",
+            ".config/nextest.toml",
+            "infra/hooks/linux-run.sh",
+            "lefthook.yml",
+            ".claude/hooks/block-bare-nextest.ts",
+            ".claude/hooks/block-cargo-test.ts",
+            "infra/metal/README.md",
+            ".claude/rules/testing.md",
+            "xtask/tests/acceptance/metal_run_isolation/identity.rs",
+            "xtask/tests/acceptance/metal_run_isolation/admission.rs",
+            "xtask/tests/acceptance/metal_run_isolation/collection.rs",
+            "xtask/tests/acceptance/metal_run_isolation/controller.rs",
+            "xtask/tests/acceptance/metal_run_isolation/finalization.rs",
+            "xtask/tests/acceptance/metal_run_isolation/placement.rs",
+            "xtask/tests/acceptance/metal_run_isolation/qualification.rs",
+            "xtask/src/metal_run_isolation_conformance.rs"
+          ],
+          "implementation_notes": "P2–P5 are one invariant-preserving integration: never release ordinary concurrency before placement, namespace, source and cleanup guarantees are complete. Activate the assigned complete DISTILL bodies without rewriting them. RED: Lima v2 collection case; GREEN: supported Lima fixtures, then implemented concurrent-runner/native proof per delivery notes. TEST PARADIGM (mandatory): Rust unit properties use proptest plus strict state-delta assertions over a declared universe; real-I/O integration/E2E remain examples. Preserve Contract Shape declarations. No mutation testing, old exclusive-runner campaigns or SSH bypass. Exact activation, prerequisite and reviewer gates are in feature-delta.md."
+        }
+      ]
+    }
+  ],
+  "implementation_scope": {
+    "source_directories": [
+      "infra/metal/",
+      "infra/hooks/",
+      "xtask/src/",
+      "crates/overdrive-testing/",
+      "crates/overdrive-host/tests/integration/",
+      ".config/",
+      ".claude/hooks/"
+    ],
+    "test_directories": [
+      "xtask/tests/acceptance/metal_run_isolation/",
+      "xtask/src/metal_run_isolation_conformance.rs",
+      "infra/metal/tests/",
+      "crates/overdrive-host/tests/integration/"
+    ],
+    "excluded_patterns": [
+      "docs/feature/service-allocation-readiness-and-ending/**",
+      "specs/quint/**",
+      "spike-scratch/**",
+      "vendors/**"
+    ]
+  },
+  "validation": {
+    "status": "approved",
+    "reviewer": "Codex — independent nWave roadmap reviewer",
+    "approved_at": "2026-11-08T15:05:50Z",
+    "reviewed_at": "2026-11-08T15:05:50Z",
+    "review_artifact": "docs/feature/metal-run-isolation/deliver/review-roadmap.md"
+  }
+}

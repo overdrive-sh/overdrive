@@ -58,3 +58,6 @@ pub mod yaml_free_cli;
 /// block in its `Cargo.toml` on crates.io/GitHub for the highest
 /// `llvm-NN` it declares).
 pub const BPF_NIGHTLY_TOOLCHAIN: &str = "nightly-2026-08-05";
+
+#[cfg(all(test, feature = "integration-tests"))]
+mod metal_run_isolation_conformance;

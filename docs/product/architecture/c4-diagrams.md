@@ -2065,3 +2065,61 @@ crate-class rules; by review rule (no lint clause) gateway code does not import
 InterceptedConnection in gateway-client modules, and the upstream
 socket preparation operation is called only by the gateway connector. BPF POD tests pin receipt
 layout; XDP wire programs remain unchanged.
+
+
+## Metal run isolation proposed
+
+**PROPOSED, 2026-11-08.** [Exact contract, evidence and approval decisions](../../feature/metal-run-isolation/feature-delta.md#wave-design--ref-status-and-authority). No new service, scheduler, product runtime port or outer guest per whole invocation is introduced.
+
+### System context
+
+```mermaid
+C4Context
+    title Metal run isolation — proposed system context
+    Person(engineer, "Marcus / coding agent", "Verifies independent Git worktrees")
+    System(tooling, "Existing Metal verification tooling", "Owns checkout identity, invocation execution and retained results")
+    System_Ext(worktrees, "Git worktrees", "Independent source and build owners")
+    System_Ext(physical, "Qualified physical Metal host", "Native x86_64/KVM and existing systemd")
+    System_Ext(guests, "Existing fresh isolation-group guests", "Actual kernel subjects for selected bodies")
+    Rel(engineer, tooling, "Invokes existing commands or proposed explicit exclusive mode")
+    Rel(tooling, worktrees, "Reads identity and transfers selected source")
+    Rel(tooling, physical, "Qualifies and supervises invocation-owned execution", "SSH / rsync")
+    Rel(physical, guests, "Launches and ends existing groups", "Production CloudHypervisorVmm")
+    Rel(tooling, engineer, "Returns source-matched logs and actual results")
+```
+
+### Container view
+
+```mermaid
+C4Container
+    title Metal run isolation — proposed containers
+    Person(engineer, "Marcus / coding agent")
+    System_Boundary(tooling, "Metal verification tooling") {
+        Container(local, "Existing local xtask / bootstrap", "Rust / Bash", "Resolves identity, admits structured commands and transfers source")
+        Container(service, "Existing durable run service and finalizer", "Bash / systemd", "Owns admission, checkout exclusion and completion")
+        Container(command, "Selected verification coordinator", "Existing nextest or explicit suite", "Owns selection, retries, reports and command result")
+        Boundary(context, "Invocation-owned native launcher context") {
+            Container(adapter, "Existing group / native launcher", "Rust / thin exec adapter", "Reads declared placement; holds anonymous local-mode vsock resources")
+        }
+        Container(guest, "Existing disposable isolation-group guest", "Linux / existing test program", "Executes the exact selected kernel body; named nested cells retain their claims")
+        ContainerDb(checkout, "Bound remote checkout and target", "Filesystem", "Source and artifacts for one Git-worktree identity")
+        ContainerDb(records, "Existing invocation records", "Filesystem", "Source binding, log, actual terminal and proposed completion receipt")
+    }
+    Rel(engineer, local, "Invokes developer commands")
+    Rel(local, service, "Registers and sends one START", "SSH")
+    Rel(local, checkout, "Syncs or pulls under checkout ownership", "rsync")
+    Rel(service, checkout, "Holds source and build exclusion")
+    Rel(service, command, "Executes the admitted command")
+    Rel(command, adapter, "Invokes the exact selected attempt")
+    Rel(adapter, guest, "Stages the actual binary and executes it", "Existing GuestPeer protocol")
+    Rel(guest, adapter, "Returns actual status and serial evidence")
+    Rel(adapter, command, "Returns the attempt result")
+    Rel(service, records, "Publishes actual command result and owned cleanup outcome")
+    Rel(local, records, "Collects repeatedly without mutation", "Existing read-only SSH helper")
+```
+
+Host pure/Sim bodies execute directly without the guest branch. Native-launcher
+bodies remain direct on the physical KVM host; namespace confinement adds no
+hypervisor. Existing nested correctness cells remain explicitly nested, and
+never substitute for direct-native driver boot evidence. Physical maintenance
+is exclusive and is recorded distinctly from ordinary verification.

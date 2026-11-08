@@ -1,0 +1,453 @@
+[
+  {
+    "argv": [
+      "quint",
+      "test",
+      "/Users/marcus/conductor/workspaces/helios/ouagadougou/specs/quint/metal-run-isolation/runner_protocol.qnt",
+      "--main",
+      "runner_conf",
+      "--match",
+      "^independent_worktrees$",
+      "--max-samples",
+      "1",
+      "--seed",
+      "20261108",
+      "--out-itf",
+      "/Users/marcus/conductor/workspaces/helios/ouagadougou/docs/feature/metal-run-isolation/design/codec-compatibility/named-independent_worktrees-{seq}.itf.json",
+      "--verbosity",
+      "0"
+    ],
+    "log": "named-independent_worktrees-generation.log",
+    "exit": 0
+  },
+  {
+    "argv": [
+      "/private/var/folders/11/l6dd1mtj007b7wkb4280qxdm0000gn/T/metal-quint-codec-1wo8deex/harness/target/debug/metal-quint-codec-probe",
+      "/Users/marcus/conductor/workspaces/helios/ouagadougou/specs/quint/metal-run-isolation/runner_protocol.qnt",
+      "named:independent_worktrees",
+      "/Users/marcus/conductor/workspaces/helios/ouagadougou/docs/feature/metal-run-isolation/design/codec-compatibility/named-independent_worktrees-driver.json",
+      "20261108"
+    ],
+    "log": "named-independent_worktrees-runner.log",
+    "exit": 0
+  },
+  {
+    "argv": [
+      "quint",
+      "test",
+      "/Users/marcus/conductor/workspaces/helios/ouagadougou/specs/quint/metal-run-isolation/runner_protocol.qnt",
+      "--main",
+      "runner_conf",
+      "--match",
+      "^same_checkout_excludes_sync$",
+      "--max-samples",
+      "1",
+      "--seed",
+      "20261108",
+      "--out-itf",
+      "/Users/marcus/conductor/workspaces/helios/ouagadougou/docs/feature/metal-run-isolation/design/codec-compatibility/named-same_checkout_excludes_sync-{seq}.itf.json",
+      "--verbosity",
+      "0"
+    ],
+    "log": "named-same_checkout_excludes_sync-generation.log",
+    "exit": 0
+  },
+  {
+    "argv": [
+      "/private/var/folders/11/l6dd1mtj007b7wkb4280qxdm0000gn/T/metal-quint-codec-1wo8deex/harness/target/debug/metal-quint-codec-probe",
+      "/Users/marcus/conductor/workspaces/helios/ouagadougou/specs/quint/metal-run-isolation/runner_protocol.qnt",
+      "named:same_checkout_excludes_sync",
+      "/Users/marcus/conductor/workspaces/helios/ouagadougou/docs/feature/metal-run-isolation/design/codec-compatibility/named-same_checkout_excludes_sync-driver.json",
+      "20261108"
+    ],
+    "log": "named-same_checkout_excludes_sync-runner.log",
+    "exit": 0
+  },
+  {
+    "argv": [
+      "quint",
+      "test",
+      "/Users/marcus/conductor/workspaces/helios/ouagadougou/specs/quint/metal-run-isolation/runner_protocol.qnt",
+      "--main",
+      "runner_conf",
+      "--match",
+      "^controller_eof_before_start$",
+      "--max-samples",
+      "1",
+      "--seed",
+      "20261108",
+      "--out-itf",
+      "/Users/marcus/conductor/workspaces/helios/ouagadougou/docs/feature/metal-run-isolation/design/codec-compatibility/named-controller_eof_before_start-{seq}.itf.json",
+      "--verbosity",
+      "0"
+    ],
+    "log": "named-controller_eof_before_start-generation.log",
+    "exit": 0
+  },
+  {
+    "argv": [
+      "/private/var/folders/11/l6dd1mtj007b7wkb4280qxdm0000gn/T/metal-quint-codec-1wo8deex/harness/target/debug/metal-quint-codec-probe",
+      "/Users/marcus/conductor/workspaces/helios/ouagadougou/specs/quint/metal-run-isolation/runner_protocol.qnt",
+      "named:controller_eof_before_start",
+      "/Users/marcus/conductor/workspaces/helios/ouagadougou/docs/feature/metal-run-isolation/design/codec-compatibility/named-controller_eof_before_start-driver.json",
+      "20261108"
+    ],
+    "log": "named-controller_eof_before_start-runner.log",
+    "exit": 0
+  },
+  {
+    "argv": [
+      "quint",
+      "test",
+      "/Users/marcus/conductor/workspaces/helios/ouagadougou/specs/quint/metal-run-isolation/runner_protocol.qnt",
+      "--main",
+      "runner_conf",
+      "--match",
+      "^controller_loss_after_start$",
+      "--max-samples",
+      "1",
+      "--seed",
+      "20261108",
+      "--out-itf",
+      "/Users/marcus/conductor/workspaces/helios/ouagadougou/docs/feature/metal-run-isolation/design/codec-compatibility/named-controller_loss_after_start-{seq}.itf.json",
+      "--verbosity",
+      "0"
+    ],
+    "log": "named-controller_loss_after_start-generation.log",
+    "exit": 0
+  },
+  {
+    "argv": [
+      "/private/var/folders/11/l6dd1mtj007b7wkb4280qxdm0000gn/T/metal-quint-codec-1wo8deex/harness/target/debug/metal-quint-codec-probe",
+      "/Users/marcus/conductor/workspaces/helios/ouagadougou/specs/quint/metal-run-isolation/runner_protocol.qnt",
+      "named:controller_loss_after_start",
+      "/Users/marcus/conductor/workspaces/helios/ouagadougou/docs/feature/metal-run-isolation/design/codec-compatibility/named-controller_loss_after_start-driver.json",
+      "20261108"
+    ],
+    "log": "named-controller_loss_after_start-runner.log",
+    "exit": 0
+  },
+  {
+    "argv": [
+      "quint",
+      "test",
+      "/Users/marcus/conductor/workspaces/helios/ouagadougou/specs/quint/metal-run-isolation/runner_protocol.qnt",
+      "--main",
+      "runner_conf",
+      "--match",
+      "^supervisor_loss_is_not_a_result$",
+      "--max-samples",
+      "1",
+      "--seed",
+      "20261108",
+      "--out-itf",
+      "/Users/marcus/conductor/workspaces/helios/ouagadougou/docs/feature/metal-run-isolation/design/codec-compatibility/named-supervisor_loss_is_not_a_result-{seq}.itf.json",
+      "--verbosity",
+      "0"
+    ],
+    "log": "named-supervisor_loss_is_not_a_result-generation.log",
+    "exit": 0
+  },
+  {
+    "argv": [
+      "/private/var/folders/11/l6dd1mtj007b7wkb4280qxdm0000gn/T/metal-quint-codec-1wo8deex/harness/target/debug/metal-quint-codec-probe",
+      "/Users/marcus/conductor/workspaces/helios/ouagadougou/specs/quint/metal-run-isolation/runner_protocol.qnt",
+      "named:supervisor_loss_is_not_a_result",
+      "/Users/marcus/conductor/workspaces/helios/ouagadougou/docs/feature/metal-run-isolation/design/codec-compatibility/named-supervisor_loss_is_not_a_result-driver.json",
+      "20261108"
+    ],
+    "log": "named-supervisor_loss_is_not_a_result-runner.log",
+    "exit": 0
+  },
+  {
+    "argv": [
+      "quint",
+      "test",
+      "/Users/marcus/conductor/workspaces/helios/ouagadougou/specs/quint/metal-run-isolation/runner_protocol.qnt",
+      "--main",
+      "runner_conf",
+      "--match",
+      "^cleanup_failure_keeps_command$",
+      "--max-samples",
+      "1",
+      "--seed",
+      "20261108",
+      "--out-itf",
+      "/Users/marcus/conductor/workspaces/helios/ouagadougou/docs/feature/metal-run-isolation/design/codec-compatibility/named-cleanup_failure_keeps_command-{seq}.itf.json",
+      "--verbosity",
+      "0"
+    ],
+    "log": "named-cleanup_failure_keeps_command-generation.log",
+    "exit": 0
+  },
+  {
+    "argv": [
+      "/private/var/folders/11/l6dd1mtj007b7wkb4280qxdm0000gn/T/metal-quint-codec-1wo8deex/harness/target/debug/metal-quint-codec-probe",
+      "/Users/marcus/conductor/workspaces/helios/ouagadougou/specs/quint/metal-run-isolation/runner_protocol.qnt",
+      "named:cleanup_failure_keeps_command",
+      "/Users/marcus/conductor/workspaces/helios/ouagadougou/docs/feature/metal-run-isolation/design/codec-compatibility/named-cleanup_failure_keeps_command-driver.json",
+      "20261108"
+    ],
+    "log": "named-cleanup_failure_keeps_command-runner.log",
+    "exit": 0
+  },
+  {
+    "argv": [
+      "quint",
+      "test",
+      "/Users/marcus/conductor/workspaces/helios/ouagadougou/specs/quint/metal-run-isolation/runner_protocol.qnt",
+      "--main",
+      "runner_conf",
+      "--match",
+      "^missing_completion_refuses$",
+      "--max-samples",
+      "1",
+      "--seed",
+      "20261108",
+      "--out-itf",
+      "/Users/marcus/conductor/workspaces/helios/ouagadougou/docs/feature/metal-run-isolation/design/codec-compatibility/named-missing_completion_refuses-{seq}.itf.json",
+      "--verbosity",
+      "0"
+    ],
+    "log": "named-missing_completion_refuses-generation.log",
+    "exit": 0
+  },
+  {
+    "argv": [
+      "/private/var/folders/11/l6dd1mtj007b7wkb4280qxdm0000gn/T/metal-quint-codec-1wo8deex/harness/target/debug/metal-quint-codec-probe",
+      "/Users/marcus/conductor/workspaces/helios/ouagadougou/specs/quint/metal-run-isolation/runner_protocol.qnt",
+      "named:missing_completion_refuses",
+      "/Users/marcus/conductor/workspaces/helios/ouagadougou/docs/feature/metal-run-isolation/design/codec-compatibility/named-missing_completion_refuses-driver.json",
+      "20261108"
+    ],
+    "log": "named-missing_completion_refuses-runner.log",
+    "exit": 0
+  },
+  {
+    "argv": [
+      "quint",
+      "test",
+      "/Users/marcus/conductor/workspaces/helios/ouagadougou/specs/quint/metal-run-isolation/runner_protocol.qnt",
+      "--main",
+      "runner_conf",
+      "--match",
+      "^maintenance_waits_for_stop$",
+      "--max-samples",
+      "1",
+      "--seed",
+      "20261108",
+      "--out-itf",
+      "/Users/marcus/conductor/workspaces/helios/ouagadougou/docs/feature/metal-run-isolation/design/codec-compatibility/named-maintenance_waits_for_stop-{seq}.itf.json",
+      "--verbosity",
+      "0"
+    ],
+    "log": "named-maintenance_waits_for_stop-generation.log",
+    "exit": 0
+  },
+  {
+    "argv": [
+      "/private/var/folders/11/l6dd1mtj007b7wkb4280qxdm0000gn/T/metal-quint-codec-1wo8deex/harness/target/debug/metal-quint-codec-probe",
+      "/Users/marcus/conductor/workspaces/helios/ouagadougou/specs/quint/metal-run-isolation/runner_protocol.qnt",
+      "named:maintenance_waits_for_stop",
+      "/Users/marcus/conductor/workspaces/helios/ouagadougou/docs/feature/metal-run-isolation/design/codec-compatibility/named-maintenance_waits_for_stop-driver.json",
+      "20261108"
+    ],
+    "log": "named-maintenance_waits_for_stop-runner.log",
+    "exit": 0
+  },
+  {
+    "argv": [
+      "quint",
+      "test",
+      "/Users/marcus/conductor/workspaces/helios/ouagadougou/specs/quint/metal-run-isolation/runner_protocol.qnt",
+      "--main",
+      "runner_conf",
+      "--match",
+      "^no_sync_mismatch_refuses$",
+      "--max-samples",
+      "1",
+      "--seed",
+      "20261108",
+      "--out-itf",
+      "/Users/marcus/conductor/workspaces/helios/ouagadougou/docs/feature/metal-run-isolation/design/codec-compatibility/named-no_sync_mismatch_refuses-{seq}.itf.json",
+      "--verbosity",
+      "0"
+    ],
+    "log": "named-no_sync_mismatch_refuses-generation.log",
+    "exit": 0
+  },
+  {
+    "argv": [
+      "/private/var/folders/11/l6dd1mtj007b7wkb4280qxdm0000gn/T/metal-quint-codec-1wo8deex/harness/target/debug/metal-quint-codec-probe",
+      "/Users/marcus/conductor/workspaces/helios/ouagadougou/specs/quint/metal-run-isolation/runner_protocol.qnt",
+      "named:no_sync_mismatch_refuses",
+      "/Users/marcus/conductor/workspaces/helios/ouagadougou/docs/feature/metal-run-isolation/design/codec-compatibility/named-no_sync_mismatch_refuses-driver.json",
+      "20261108"
+    ],
+    "log": "named-no_sync_mismatch_refuses-runner.log",
+    "exit": 0
+  },
+  {
+    "argv": [
+      "quint",
+      "test",
+      "/Users/marcus/conductor/workspaces/helios/ouagadougou/specs/quint/metal-run-isolation/runner_protocol.qnt",
+      "--main",
+      "runner_conf",
+      "--match",
+      "^repeat_collection_agrees$",
+      "--max-samples",
+      "1",
+      "--seed",
+      "20261108",
+      "--out-itf",
+      "/Users/marcus/conductor/workspaces/helios/ouagadougou/docs/feature/metal-run-isolation/design/codec-compatibility/named-repeat_collection_agrees-{seq}.itf.json",
+      "--verbosity",
+      "0"
+    ],
+    "log": "named-repeat_collection_agrees-generation.log",
+    "exit": 0
+  },
+  {
+    "argv": [
+      "/private/var/folders/11/l6dd1mtj007b7wkb4280qxdm0000gn/T/metal-quint-codec-1wo8deex/harness/target/debug/metal-quint-codec-probe",
+      "/Users/marcus/conductor/workspaces/helios/ouagadougou/specs/quint/metal-run-isolation/runner_protocol.qnt",
+      "named:repeat_collection_agrees",
+      "/Users/marcus/conductor/workspaces/helios/ouagadougou/docs/feature/metal-run-isolation/design/codec-compatibility/named-repeat_collection_agrees-driver.json",
+      "20261108"
+    ],
+    "log": "named-repeat_collection_agrees-runner.log",
+    "exit": 0
+  },
+  {
+    "argv": [
+      "quint",
+      "test",
+      "/Users/marcus/conductor/workspaces/helios/ouagadougou/specs/quint/metal-run-isolation/runner_protocol.qnt",
+      "--main",
+      "runner_conf",
+      "--match",
+      "^admission_timeout$",
+      "--max-samples",
+      "1",
+      "--seed",
+      "20261108",
+      "--out-itf",
+      "/Users/marcus/conductor/workspaces/helios/ouagadougou/docs/feature/metal-run-isolation/design/codec-compatibility/named-admission_timeout-{seq}.itf.json",
+      "--verbosity",
+      "0"
+    ],
+    "log": "named-admission_timeout-generation.log",
+    "exit": 0
+  },
+  {
+    "argv": [
+      "/private/var/folders/11/l6dd1mtj007b7wkb4280qxdm0000gn/T/metal-quint-codec-1wo8deex/harness/target/debug/metal-quint-codec-probe",
+      "/Users/marcus/conductor/workspaces/helios/ouagadougou/specs/quint/metal-run-isolation/runner_protocol.qnt",
+      "named:admission_timeout",
+      "/Users/marcus/conductor/workspaces/helios/ouagadougou/docs/feature/metal-run-isolation/design/codec-compatibility/named-admission_timeout-driver.json",
+      "20261108"
+    ],
+    "log": "named-admission_timeout-runner.log",
+    "exit": 0
+  },
+  {
+    "argv": [
+      "quint",
+      "test",
+      "/Users/marcus/conductor/workspaces/helios/ouagadougou/specs/quint/metal-run-isolation/runner_protocol.qnt",
+      "--main",
+      "runner_conf",
+      "--match",
+      "^preflight_aborts_before_start$",
+      "--max-samples",
+      "1",
+      "--seed",
+      "20261108",
+      "--out-itf",
+      "/Users/marcus/conductor/workspaces/helios/ouagadougou/docs/feature/metal-run-isolation/design/codec-compatibility/named-preflight_aborts_before_start-{seq}.itf.json",
+      "--verbosity",
+      "0"
+    ],
+    "log": "named-preflight_aborts_before_start-generation.log",
+    "exit": 0
+  },
+  {
+    "argv": [
+      "/private/var/folders/11/l6dd1mtj007b7wkb4280qxdm0000gn/T/metal-quint-codec-1wo8deex/harness/target/debug/metal-quint-codec-probe",
+      "/Users/marcus/conductor/workspaces/helios/ouagadougou/specs/quint/metal-run-isolation/runner_protocol.qnt",
+      "named:preflight_aborts_before_start",
+      "/Users/marcus/conductor/workspaces/helios/ouagadougou/docs/feature/metal-run-isolation/design/codec-compatibility/named-preflight_aborts_before_start-driver.json",
+      "20261108"
+    ],
+    "log": "named-preflight_aborts_before_start-runner.log",
+    "exit": 0
+  },
+  {
+    "argv": [
+      "quint",
+      "test",
+      "/Users/marcus/conductor/workspaces/helios/ouagadougou/specs/quint/metal-run-isolation/runner_protocol.qnt",
+      "--main",
+      "runner_conf",
+      "--match",
+      "^missing_rsync_aborts_before_start$",
+      "--max-samples",
+      "1",
+      "--seed",
+      "20261108",
+      "--out-itf",
+      "/Users/marcus/conductor/workspaces/helios/ouagadougou/docs/feature/metal-run-isolation/design/codec-compatibility/named-missing_rsync_aborts_before_start-{seq}.itf.json",
+      "--verbosity",
+      "0"
+    ],
+    "log": "named-missing_rsync_aborts_before_start-generation.log",
+    "exit": 0
+  },
+  {
+    "argv": [
+      "/private/var/folders/11/l6dd1mtj007b7wkb4280qxdm0000gn/T/metal-quint-codec-1wo8deex/harness/target/debug/metal-quint-codec-probe",
+      "/Users/marcus/conductor/workspaces/helios/ouagadougou/specs/quint/metal-run-isolation/runner_protocol.qnt",
+      "named:missing_rsync_aborts_before_start",
+      "/Users/marcus/conductor/workspaces/helios/ouagadougou/docs/feature/metal-run-isolation/design/codec-compatibility/named-missing_rsync_aborts_before_start-driver.json",
+      "20261108"
+    ],
+    "log": "named-missing_rsync_aborts_before_start-runner.log",
+    "exit": 0
+  },
+  {
+    "argv": [
+      "quint",
+      "run",
+      "/Users/marcus/conductor/workspaces/helios/ouagadougou/specs/quint/metal-run-isolation/runner_protocol.qnt",
+      "--main",
+      "runner_conf",
+      "--seed",
+      "20261108",
+      "--max-samples",
+      "4",
+      "--n-traces",
+      "4",
+      "--max-steps",
+      "32",
+      "--out-itf",
+      "/Users/marcus/conductor/workspaces/helios/ouagadougou/docs/feature/metal-run-isolation/design/codec-compatibility/random-{seq}.itf.json",
+      "--mbt",
+      "--verbosity",
+      "0"
+    ],
+    "log": "random-generation.log",
+    "exit": 0
+  },
+  {
+    "argv": [
+      "/private/var/folders/11/l6dd1mtj007b7wkb4280qxdm0000gn/T/metal-quint-codec-1wo8deex/harness/target/debug/metal-quint-codec-probe",
+      "/Users/marcus/conductor/workspaces/helios/ouagadougou/specs/quint/metal-run-isolation/runner_protocol.qnt",
+      "random",
+      "/Users/marcus/conductor/workspaces/helios/ouagadougou/docs/feature/metal-run-isolation/design/codec-compatibility/random-driver.json",
+      "20261108"
+    ],
+    "log": "random-runner.log",
+    "exit": 0
+  }
+]

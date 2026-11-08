@@ -1,0 +1,40 @@
+{
+  "kernel": "7.0.0-38-generic",
+  "namespace": "net:[4026531833]",
+  "same_initial_namespace": true,
+  "test_entry": "acceptance::gateway_relay_exchange::seeded_peer_events_never_move_an_octet_past_a_message_boundary_and_leave_no_residue",
+  "test": {
+    "label": "actual-test",
+    "rows": [
+      {
+        "status": 0,
+        "addr_in_use": false,
+        "pid": 631865
+      },
+      {
+        "status": 101,
+        "addr_in_use": true,
+        "pid": 631866
+      }
+    ],
+    "collision_reproduced": true
+  },
+  "dst": {
+    "label": "actual-dst",
+    "rows": [
+      {
+        "status": 1,
+        "addr_in_use": false,
+        "pid": 632628
+      },
+      {
+        "status": 1,
+        "addr_in_use": false,
+        "pid": 632629
+      }
+    ],
+    "collision_reproduced": false
+  },
+  "scheduling_seam_used": false,
+  "production_source_modified": false
+}

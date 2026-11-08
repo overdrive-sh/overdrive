@@ -1,0 +1,99 @@
+State 1: <Initial predicate>
+/\ runner_bugOrdinaryExclusive_runner_protocol_runs = << [ p |-> 0,
+     ctl |-> TRUE,
+     checked |-> FALSE,
+     ever |-> FALSE,
+     starts |-> 0,
+     term |-> -1,
+     desc |-> FALSE,
+     roots |-> FALSE,
+     receipt |-> 0 ],
+   [ p |-> 0,
+     ctl |-> TRUE,
+     checked |-> FALSE,
+     ever |-> FALSE,
+     starts |-> 0,
+     term |-> -1,
+     desc |-> FALSE,
+     roots |-> FALSE,
+     receipt |-> 0 ] >>
+/\ runner_bugOrdinaryExclusive_runner_protocol_source_revision = <<0, 0>>
+/\ runner_bugOrdinaryExclusive_runner_protocol_second_tree = 1
+/\ runner_bugOrdinaryExclusive_runner_protocol_maintenance = 0
+/\ runner_bugOrdinaryExclusive_runner_protocol_observed = <<-2, -2>>
+/\ runner_bugOrdinaryExclusive_runner_protocol_conf_step = [tag |-> "init", value |-> [value |-> 1, actor |-> 0]]
+
+State 2: <runner_bugOrdinaryExclusive_runner_protocol_Register line 223, col 3 to line 231, col 6 of module runner_bugOrdinaryExclusive>
+/\ runner_bugOrdinaryExclusive_runner_protocol_runs = << [ p |-> 1,
+     ctl |-> TRUE,
+     checked |-> FALSE,
+     ever |-> FALSE,
+     starts |-> 0,
+     term |-> -1,
+     desc |-> FALSE,
+     roots |-> FALSE,
+     receipt |-> 0 ],
+   [ p |-> 0,
+     ctl |-> TRUE,
+     checked |-> FALSE,
+     ever |-> FALSE,
+     starts |-> 0,
+     term |-> -1,
+     desc |-> FALSE,
+     roots |-> FALSE,
+     receipt |-> 0 ] >>
+/\ runner_bugOrdinaryExclusive_runner_protocol_source_revision = <<0, 0>>
+/\ runner_bugOrdinaryExclusive_runner_protocol_second_tree = 1
+/\ runner_bugOrdinaryExclusive_runner_protocol_maintenance = 0
+/\ runner_bugOrdinaryExclusive_runner_protocol_observed = <<-2, -2>>
+/\ runner_bugOrdinaryExclusive_runner_protocol_conf_step = [tag |-> "init", value |-> [value |-> 1, actor |-> 0]]
+
+State 3: <runner_bugOrdinaryExclusive_runner_protocol_Barrier line 629, col 3 to line 636, col 20 of module runner_bugOrdinaryExclusive>
+/\ runner_bugOrdinaryExclusive_runner_protocol_runs = << [ p |-> 2,
+     ctl |-> TRUE,
+     checked |-> FALSE,
+     ever |-> FALSE,
+     starts |-> 0,
+     term |-> -1,
+     desc |-> FALSE,
+     roots |-> FALSE,
+     receipt |-> 0 ],
+   [ p |-> 0,
+     ctl |-> TRUE,
+     checked |-> FALSE,
+     ever |-> FALSE,
+     starts |-> 0,
+     term |-> -1,
+     desc |-> FALSE,
+     roots |-> FALSE,
+     receipt |-> 0 ] >>
+/\ runner_bugOrdinaryExclusive_runner_protocol_source_revision = <<0, 0>>
+/\ runner_bugOrdinaryExclusive_runner_protocol_second_tree = 1
+/\ runner_bugOrdinaryExclusive_runner_protocol_maintenance = 0
+/\ runner_bugOrdinaryExclusive_runner_protocol_observed = <<-2, -2>>
+/\ runner_bugOrdinaryExclusive_runner_protocol_conf_step = [tag |-> "init", value |-> [value |-> 1, actor |-> 0]]
+
+State 4: <runner_bugOrdinaryExclusive_runner_protocol_Register line 223, col 3 to line 231, col 6 of module runner_bugOrdinaryExclusive>
+/\ runner_bugOrdinaryExclusive_runner_protocol_runs = << [ p |-> 2,
+     ctl |-> TRUE,
+     checked |-> FALSE,
+     ever |-> FALSE,
+     starts |-> 0,
+     term |-> -1,
+     desc |-> FALSE,
+     roots |-> FALSE,
+     receipt |-> 0 ],
+   [ p |-> 1,
+     ctl |-> TRUE,
+     checked |-> FALSE,
+     ever |-> FALSE,
+     starts |-> 0,
+     term |-> -1,
+     desc |-> FALSE,
+     roots |-> FALSE,
+     receipt |-> 0 ] >>
+/\ runner_bugOrdinaryExclusive_runner_protocol_source_revision = <<0, 0>>
+/\ runner_bugOrdinaryExclusive_runner_protocol_second_tree = 1
+/\ runner_bugOrdinaryExclusive_runner_protocol_maintenance = 0
+/\ runner_bugOrdinaryExclusive_runner_protocol_observed = <<-2, -2>>
+/\ runner_bugOrdinaryExclusive_runner_protocol_conf_step = [tag |-> "init", value |-> [value |-> 1, actor |-> 0]]

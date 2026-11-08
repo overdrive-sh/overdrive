@@ -1,0 +1,183 @@
+   Compiling indexmap v2.14.0
+   Compiling serde_json v1.0.149
+   Compiling syn v2.0.117
+   Compiling time v0.3.45
+   Compiling uuid v1.23.1
+   Compiling ring v0.17.14
+   Compiling nix v0.30.1
+   Compiling serde_path_to_error v0.1.20
+   Compiling serde_core v1.0.228
+   Compiling relative-path v1.9.3
+   Compiling futures-timer v3.0.3
+   Compiling serde v1.0.228
+   Compiling console v0.16.3
+   Compiling proc-macro-error-attr v1.0.4
+   Compiling overdrive-fwd-frame-parser-test v0.0.0 (/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/tests/ovd-fwd-frame-parser)
+   Compiling proc-macro-error v1.0.4
+   Compiling aya-ebpf v0.1.1
+   Compiling insta v1.47.2
+   Compiling object v0.36.7
+   Compiling yasna v0.6.0
+   Compiling rustls v0.23.39
+   Compiling semver v1.0.28
+   Compiling camino v1.2.2
+   Compiling rustc_version v0.4.1
+   Compiling rstest_macros v0.23.0
+   Compiling synstructure v0.13.2
+   Compiling prettyplease v0.2.37
+   Compiling darling_core v0.21.3
+   Compiling rcgen v0.14.8
+   Compiling rustls-webpki v0.103.13
+   Compiling bindgen v0.66.1
+   Compiling serde_derive v1.0.228
+   Compiling futures-macro v0.3.32
+   Compiling thiserror-impl v2.0.18
+   Compiling tracing-attributes v0.1.31
+   Compiling zerocopy-derive v0.8.48
+   Compiling tokio-macros v2.7.0
+   Compiling ptr_meta_derive v0.3.1
+   Compiling async-trait v0.1.89
+   Compiling bytecheck_derive v0.8.2
+   Compiling thiserror-impl v1.0.69
+   Compiling utoipa-gen v5.4.0
+   Compiling ptr_meta v0.3.1
+   Compiling rancor v0.1.1
+   Compiling munge_macro v0.4.7
+   Compiling futures-util v0.3.32
+   Compiling rkyv_derive v0.8.15
+   Compiling tracing v0.1.44
+   Compiling futures-executor v0.3.32
+   Compiling bytecheck v0.8.2
+   Compiling futures v0.3.32
+   Compiling rend v0.5.3
+   Compiling displaydoc v0.2.5
+   Compiling tracing-subscriber v0.3.23
+   Compiling munge v0.4.7
+   Compiling zerofrom-derive v0.1.7
+   Compiling thiserror v2.0.18
+   Compiling clap_derive v4.6.1
+   Compiling yoke-derive v0.8.2
+   Compiling tracing-error v0.2.1
+   Compiling color-spantrace v0.3.0
+   Compiling color-eyre v0.6.5
+   Compiling zerovec-derive v0.11.3
+   Compiling zerocopy v0.8.48
+   Compiling asn1-rs-impl v0.2.0
+   Compiling thiserror v1.0.69
+   Compiling asn1-rs-derive v0.6.0
+   Compiling libsql-ffi v0.4.1
+   Compiling zerocopy-derive v0.7.35
+   Compiling async-stream-impl v0.3.6
+   Compiling serial_test_derive v3.4.0
+   Compiling darling_macro v0.21.3
+   Compiling bytes v1.11.1
+   Compiling toml_datetime v0.6.11
+   Compiling serde_spanned v0.6.9
+   Compiling tokio v1.52.1
+   Compiling toml_edit v0.22.27
+   Compiling ppv-lite86 v0.2.21
+   Compiling ipnet v2.12.0
+   Compiling half v2.7.1
+   Compiling toml v0.8.23
+   Compiling serde_norway v0.9.42
+   Compiling ciborium-ll v0.2.2
+   Compiling ciborium v0.2.2
+   Compiling rand_chacha v0.3.1
+   Compiling rkyv v0.8.15
+   Compiling http v1.4.0
+   Compiling rand v0.8.6
+   Compiling http-body v1.0.1
+   Compiling tokio-util v0.7.18
+   Compiling asn1-rs v0.7.1
+   Compiling netlink-sys v0.8.8
+   Compiling aya-obj v0.2.1
+   Compiling h2 v0.4.13
+   Compiling netlink-proto v0.12.2
+   Compiling zerofrom v0.1.7
+   Compiling netlink-sys v0.9.0
+   Compiling genetlink v0.2.7
+   Compiling http-body-util v0.1.3
+   Compiling oid-registry v0.8.1
+   Compiling yoke v0.8.2
+   Compiling zerovec v0.11.6
+   Compiling zerotrie v0.2.4
+   Compiling der-parser v10.0.0
+   Compiling aya v0.13.1
+   Compiling netlink-proto v0.13.0
+   Compiling clap v4.6.1
+   Compiling rand_chacha v0.9.0
+   Compiling netlink-packet-route v0.33.0
+   Compiling x509-parser v0.18.1
+   Compiling ethtool v0.2.9
+   Compiling tinystr v0.8.3
+   Compiling potential_utf v0.1.5
+   Compiling icu_locale_core v2.1.1
+   Compiling icu_collections v2.1.1
+   Compiling rand v0.9.4
+   Compiling tower v0.5.3
+   Compiling icu_provider v2.1.1
+   Compiling tokio-rustls v0.26.4
+   Compiling serde_urlencoded v0.7.1
+   Compiling hyper v1.9.0
+   Compiling icu_normalizer v2.1.1
+   Compiling icu_properties v2.1.2
+   Compiling proptest v1.11.0
+   Compiling axum-core v0.4.5
+   Compiling idna_adapter v1.2.1
+   Compiling hyper-util v0.1.20
+   Compiling idna v1.1.0
+   Compiling zerocopy v0.7.35
+   Compiling url v2.5.8
+   Compiling tokio-stream v0.1.18
+   Compiling fs-err v3.3.0
+   Compiling hickory-proto v0.26.1
+   Compiling axum v0.7.9
+   Compiling axum-server v0.7.3
+   Compiling async-stream v0.3.6
+   Compiling hyper-rustls v0.27.9
+   Compiling tower-http v0.6.8
+   Compiling reqwest v0.12.28
+   Compiling serial_test v3.4.0
+   Compiling trybuild v1.0.101
+   Compiling rtnetlink v0.23.0
+   Compiling darling v0.21.3
+   Compiling serde_with_macros v3.17.0
+   Compiling dashu-int v0.4.3
+   Compiling quint-connect-macros v0.1.2
+   Compiling cargo-platform v0.1.9
+   Compiling cargo_metadata v0.18.1
+   Compiling num_enum_derive v0.7.6
+   Compiling cargo-platform v0.3.0
+   Compiling cargo_metadata v0.23.1
+   Compiling xtask v0.0.0 (/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/xtask)
+   Compiling aya-build v0.1.3
+   Compiling aya-ebpf-macros v0.1.1
+   Compiling serde_with v3.17.0
+   Compiling aya-ebpf-cty v0.2.3
+   Compiling aya-ebpf-bindings v0.1.2
+   Compiling utoipa v5.4.0
+   Compiling num_enum v0.7.6
+   Compiling ktls v6.0.2
+   Compiling itf v0.4.0
+   Compiling overdrive-core v0.0.0 (/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/crates/overdrive-core)
+   Compiling utoipa-axum v0.1.3
+   Compiling quint-connect v0.1.2
+   Compiling rstest v0.23.0
+   Compiling overdrive-host v0.0.0 (/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/crates/overdrive-host)
+   Compiling overdrive-fwd v0.0.0 (/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/crates/overdrive-fwd)
+   Compiling overdrive-reconcilers v0.0.0 (/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/crates/overdrive-reconcilers)
+   Compiling overdrive-netlink v0.0.0 (/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/crates/overdrive-netlink)
+   Compiling overdrive-store-local v0.0.0 (/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/crates/overdrive-store-local)
+   Compiling overdrive-bpf v0.0.0 (/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/crates/overdrive-bpf)
+   Compiling overdrive-init v0.0.0 (/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/crates/overdrive-init)
+   Compiling overdrive-gateway v0.0.0 (/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/crates/overdrive-gateway)
+   Compiling overdrive-testing v0.0.0 (/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/crates/overdrive-testing)
+   Compiling overdrive-dataplane v0.0.0 (/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/crates/overdrive-dataplane)
+   Compiling overdrive-worker v0.0.0 (/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/crates/overdrive-worker)
+   Compiling libsql-sys v0.7.0
+   Compiling libsql v0.5.0
+   Compiling overdrive-control-plane v0.0.0 (/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/crates/overdrive-control-plane)
+   Compiling overdrive-sim v0.0.0 (/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/crates/overdrive-sim)
+   Compiling overdrive-cli v0.0.0 (/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/crates/overdrive-cli)
+   Compiling overdrive-system-conformance v0.0.0 (/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/tests/conformance)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2m 33s

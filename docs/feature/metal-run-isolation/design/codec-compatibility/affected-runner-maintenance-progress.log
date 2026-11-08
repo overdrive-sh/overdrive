@@ -1,0 +1,16 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.33s
+     Running `target/debug/xtask quint check --subsystem metal-run-isolation --name runner-maintenance-progress --tlc-workers 1 --tlc-heap 1g`
+xtask quint check: 1 check(s), budget 4992 MiB / 16 CPU (--jobs ≤ 16), TLC heap 1024 MiB × 1 workers, Apalache heap 3072 MiB + 1 CPU, start-up bounds 120s to the server, 45s from it to the first pass, 60s from it to a TLC check's TLC run, 60s from its outcome to Quint's verdict, client failures retried up to 2 attempts, run id 39492-1794138332.345
+xtask quint check: metal-run-isolation/runner-maintenance-progress reserves 5888 MiB / 1 CPU, more than the budget; it will run alone
+xtask quint check: estimate ~1.3 min at ~1 concurrent from previous durations
+[    0.0s] start  metal-run-isolation/runner-maintenance-progress [tlc] attempt 1 reserves 5888 MiB / 1 CPU (heap 1024 MiB, 1 workers); in use 5888 MiB / 1 CPU of 4992 MiB / 16 CPU port 54092 timeout 900s (1 running, 0 queued)
+[   84.5s] PASS   metal-run-isolation/runner-maintenance-progress expect=holds got=holds (84.5s, peak 0 of 5888 MiB)
+xtask quint: cleanup of process group 39536: killing process group 39536: Operation not permitted (os error 1)
+xtask quint check: verified no Quint/JVM process from this run remains
+xtask quint check: wrote /Users/marcus/conductor/workspaces/helios/ouagadougou/target/quint/metal-run-isolation/39492-1794138332.345/summary.json
+
+CHECK                                            BACKEND   EXPECT     OUTCOME          SECS  TRY  RETRY S    WALL S        RESERVED  PEAK MiB  RESULT
+metal-run-isolation/runner-maintenance-progress  tlc       holds      holds            84.5    1      0.0      84.5      5888M/1cpu         0  PASS
+wall clock: 84.5s; budget 4992 MiB / 16 CPU; peak host memory in use: unknown
+logs: /Users/marcus/conductor/workspaces/helios/ouagadougou/target/quint/metal-run-isolation/39492-1794138332.345
+xtask quint check: 1 check(s) passed
