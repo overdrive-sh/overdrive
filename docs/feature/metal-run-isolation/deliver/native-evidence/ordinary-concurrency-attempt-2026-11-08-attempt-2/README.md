@@ -1,10 +1,12 @@
 # Ordinary concurrency proof attempt 2 — pending
 
 This is a second authorized invocation of the existing `worktree_journey.sh`
-driver. It also **did not complete the K1–K3 proof**: the two ordinary durable
-owners remained in `waiting_for_lease` until their bounded maintenance waits
-expired. No test command or guest VMM started. Raw output and every captured
-first failure are retained beside this note; the earlier attempt remains in
+driver. It also **did not complete the K1–K3 proof**. The two ordinary waits
+were sequential: the first timed out before the second run registered, so the
+capture never showed both ordinary runs waiting at once. Each run entered
+`waiting_for_lease` and timed out before START. No test command or guest VMM
+started. Raw output and every captured first failure are retained beside this
+note; the earlier attempt remains in
 [`ordinary-concurrency-attempt-2026-11-08`](../ordinary-concurrency-attempt-2026-11-08/README.md).
 
 ## Invocation and inputs
@@ -39,8 +41,14 @@ The driver registered these two ordinary runs:
 
 | Checkout | Run ID | Remote source digest | Remote directory | Result |
 |---|---|---|---|---|
-| `ouagadougou` | `e83202b4ffbbf9fb44c4a194` | `10ac14cf3c89e4f6fcfb531c3e7b31980731d021174d8444cb4050555237b297` | `/home/ubuntu/overdrive-worktrees/e3d831d7dafe621226ae6047ebcac3536f37470cafcf5dbb64eb9598886af410` | Status 75, `maintenance_timeout` before START |
-| Detached implementation worktree | `be3b95671f4ab77148735ae2` | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` | `/home/ubuntu/overdrive-worktrees/052a646313948d416e08f7afb85c82411ecddc98659ed0825aa09bcde3be0f39` | Status 75, `maintenance_timeout` before START |
+| `ouagadougou` | `e83202b4ffbbf9fb44c4a194` | `10ac14cf3c89e4f6fcfb531c3e7b31980731d021174d8444cb4050555237b297` | `/home/ubuntu/overdrive-worktrees/e3d831d7dafe621226ae6047ebcac3536f37470cafcf5dbb64eb9598886af410` | Captured stream: `maintenance_timeout` before START; command result reported status 75 |
+| Detached implementation worktree | `be3b95671f4ab77148735ae2` | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` | `/home/ubuntu/overdrive-worktrees/052a646313948d416e08f7afb85c82411ecddc98659ed0825aa09bcde3be0f39` | Captured stream: `maintenance_timeout` before START; command result reported status 75 |
+
+The retained controller streams contain the error name but not numeric process
+exit codes; status 75 is the reported command result, not a value present in
+those raw streams. The raw timestamps show
+the first run registered at `21:24:03Z` and timed out at `21:24:08Z`; the
+second registered at `21:24:22Z` and timed out at `21:24:27Z`.
 
 Both controllers reported the same existing owner on
 `/run/lock/overdrive-metal-shared.lock`:
@@ -54,15 +62,17 @@ Both controllers reported the same existing owner on
 | Started at | `2026-11-08T21:02:45Z` |
 | Source digest | `19e8a3fb8636bb72b2e7a3508d11c764a320767a5f9f382f98755d5143b5073c` |
 
-The observed new owners were `ordinary` and `waiting_for_lease`; later snapshots
+The owner fields identify a Bangalore unit different from the one recorded in
+attempt 1. The retained owner record contains `action=run`, but does not contain
+`execution_class` or the selected command; neither is inferred here. The
+observed new run records were `ordinary` and `waiting_for_lease`; later snapshots
 showed them inactive after the five-second timeout. `OVERDRIVE_METAL_RUN_STARTED`
 was absent from both controller logs. The existing owner was not interrupted,
 replaced, or otherwise touched. Once the two timeouts were captured, the local
-driver was stopped instead of continuing its polling loop. The reviewer should
-treat this as a native attempt blocked by the owner, not as successful
+driver was stopped instead of continuing its polling loop. Treat this as a
+native attempt with two sequential admission timeouts, not as successful
 concurrency evidence.
 
-The owner record does not expose its selected command line; none is inferred.
 `admission_journey.sh` and `placement_journey.sh` remain unrun; this authorized
 native proof was restricted to the ordinary concurrent pair. No mutation test,
 exclusive test campaign, direct SSH command execution, or host `kmod-load` was
