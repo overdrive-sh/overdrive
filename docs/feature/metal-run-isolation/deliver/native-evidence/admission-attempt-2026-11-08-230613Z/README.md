@@ -77,4 +77,27 @@ changed here.
 The native admission and placement portions remain unproven. The capture does
 not credit exclusive waiting, predecessor stop ordering, or ordinary waiter
 behavior. No test, remote command, source change, or DES phase event was run
-or recorded during this diagnosis.
+or recorded while establishing this captured failure. The bounded remediation
+and its checks are recorded below.
+
+## Bounded dispatcher-path remediation
+
+The ordinary bootstrap now supplies
+`<remote-checkout>/target/debug/overdrive-fwd-guest-suite`, matching the
+existing `guest-kit-prepare` artifact location and the existing wrapper
+consumer. The wrapper still refuses a genuinely absent or invalid dispatcher
+with `lane_not_prepared`; no on-demand build, alternate host execution, or
+source identity change was introduced.
+
+Focused canonical Lima checks after this change:
+
+| Check | Result |
+|---|---|
+| `cargo nextest run -p xtask --lib -E 'test(the_artefact_paths_are_the_pinned_contract)'` | 1 passed, 277 filtered |
+| `cargo nextest run -p xtask --features integration-tests -E 'test(acceptance::metal_run_isolation::placement::sad_invalid_context_missing_identity_and_missing_guest_dispatcher_never_run_the_body)'` | 1 passed, 377 filtered; absent-dispatcher refusal remains fail-closed |
+| `bash -n infra/metal/bootstrap.sh` | Passed |
+
+The original native capture remains the reproduced RED evidence; this note
+does not claim a new RED execution or DES phase credit. The admission driver
+has not been rerun after the path change. Its native admission result remains
+pending the focused implementation review and authorized follow-up.
