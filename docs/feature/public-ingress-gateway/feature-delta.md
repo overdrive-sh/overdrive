@@ -952,6 +952,7 @@ The user ruled "proceed with the recommendations (prefer correctness)" on the pr
 | R-64, 2026-11-07, user ruling ("Reserve time for the joins inside the one grace period") | Gateway shutdown keeps ONE operator-visible grace budget. `shutdown_deadline = start + grace`; `drain_deadline = shutdown_deadline - GATEWAY_SHUTDOWN_JOIN_RESERVE`. Drain (in-flight exchanges and lingering discards) ends at `drain_deadline`; every step after drain, including the final owner joins, runs until `shutdown_deadline`, so the whole stage still completes within `grace`. `GATEWAY_SHUTDOWN_JOIN_RESERVE` is a crate-private `const` of `overdrive-gateway` equal to `Duration::from_millis(500)`; it is not operator-configurable (a config field would be new surface and is not proposed here). A `grace` no larger than the reserve has an empty drain window by definition (`drain_deadline = start`, computed with `checked_sub`, never a wrapped or clamped deadline that lengthens drain): no exchange is drained, every connection still open is force-aborted at once and counted in the existing `GatewayShutdownReport.forced_connections`, and the final owner joins still run to `shutdown_deadline = start + grace`, never beyond it. Production cannot reach this case: the only production caller passes the fixed 5 s `DEFAULT_DRAIN_DEADLINE`. No new report field, error variant or config surface is added by this ruling. Roadmap owners: step 04-03 (`application.rs` shutdown change) and step 05-01 (the `gateway` shutdown stage). | Gateway shutdown ordering; Lifecycle Gate Ownership (shutdown); scenarios S-PIG-60, 101, 115 |
 | R-65, 2026-11-08, user ruling (approval "yes") | Route activation does not depend on the Service in any way. Whether a Service's address is reachable, whether it has backends, and whether those backends are healthy or authenticate correctly are the Service's concern; they surface per request (no backend: 503; unreachable or failed authentication: 502) and never at activation. Gate G-1 checks only gateway-local facts: custody / Public Certified Key usable; a coherent Route/frontend candidate (a Route naming a nonexistent Service is a reference defect caught here, in candidate validity, G-3); `GatewayRelay::probe` (the kernel capability, no Service); `gateway_connect.probe` (the sentinel `ServiceKey`, not the Route's Service: it proves the BPF hook, registration and receipt path); Gateway Identity Current. The gate performs no connect to the Route's Service address, so there is no actual-frontend probe, no `GatewayConnectProbeOutcome`, and no `GatewayUpstreamConnector::probe`; `GatewayUpstreamConnector` has only `connect`, called by the request path. The selected backend's exact-peer mTLS (`SelectedPeerAuthenticated`) is a per-request fact, never a bind or promotion condition. No backend-outcome or frontend-reachability status exists on the gate or on the operator status surface (a non-blocking frontend status would be new scope: a proposal only, none is made). Consequence for the owner's failed-candidate rule: a candidate fails only for gateway-local reasons, all driven by owner inputs (Route, certified key, Gateway Identity, watch gap) or gateway-local substrate (relay and sentinel probe, gate deadline, listener bind); a failed generation is not re-staged until a Route change, a watch gap, a certified-key change or a Gateway Identity change clears it. Consequence for the held gate (DG-9): a held gate parks at an awaited operation the gate owns (`GatewayConnectDataplane::probe`, `GatewayRelay::probe` or the identity `ensure_current` wait) and needs no backend, no frontend connect and no `Selected` receipt. Rejected: keeping `Selected` -> exact-peer mTLS as a bind condition, and keeping a real connect to the Route's Service address as a bind condition (each ties node ingress to the readiness, reachability or authentication of the Service, which Envoy, Istio, Gateway API, AWS ALB, Cloudflare and Linkerd do not do; research `docs/research/networking/ingress-route-activation-vs-backend-health-comprehensive-research.md`). | Gate G-1 and the Lifecycle Gate Ownership gate rows; D-SYS-11; G3/G4 boot rows; `GatewayUpstreamConnector`; scenarios S-PIG-58, 68, 74; DG-9 and the QC-2 driver pins; `gateway_application` model |
 | R-66, 2026-11-08, user ruling (approval "approved") | Handle exposure is separate from task spawning. `UnboundGatewayBuilder` exposes `route_commands(&self) -> GatewayRouteCommands` and `status_reads(&self) -> GatewayStatusReads`; `StartedGateway::into_parts` returns `GatewayHandle` only. `boot_server` runs `UnboundGatewayBuilder::new` and the two accessors at G1, before `AppState` construction, because `AppState` carries both handles and HTTP serves before G4; `into_builder`, the `client_mtls` factory call and `GatewayBuilder::start` keep their positions (G2, G4). A Route command that arrives before the Route owner task runs is queued on the already-open bounded channel and answered once G4 spawns the owner; the status read answers from the ObservationStore at any time. Inputs to `new` available before `AppState` (`lib.rs` in `boot_server`): `intent` (`store`, bound before `ca_boot`), `observations` (`BootAdapters.observation`, destructured at function entry), `key_codec` (`GatewayAdapters` from `BootAdapters.gateway`, destructured at function entry, built over the boot `Kek`), `clock` (`BootAdapters.clock`), `node_id` (bound before runtime registration), `service_vip_view` (the `Arc<tokio::sync::Mutex<PersistentServiceVipAllocator>>` is bulk-loaded before `AppState`; the `Arc<dyn ServiceVipView>` over that shared allocator is a proposed adapter, not yet pinned). Rejected: spawning the Route owner at `new` (a task before the typed-start gate, contradicting "builder construction spawns no task"); constructing `AppState` after G4 (G4 follows `server_task`, which needs `AppState`); a typed "gateway starting" refusal for early Route commands (the owner's own channel already gives the correct outcome, so an error variant would add a reachable failure that the design otherwise makes unrepresentable). Lifecycle Gate Ownership: no gate is added, moved or reinterpreted. `gateway_application` Quint model: unchanged (`route_declare` already precedes the owner's first run). | Re-pinned composition signatures; D5 boot table G1, G2, G4; Gateway Application "Exact owner, composition, generation and shutdown surface" |
+| R-67, 2026-11-08, user-directed correction (the user pre-approved fixing these three gaps correctly, choosing correctness over avoiding new API; found after step 05-01, HEAD `7a07bfd13`) | Three gaps are closed by the correct mechanism, not by the smallest change. **(1) Route command failures are never flattened.** `ControlPlaneError` gains two variants, `RouteDecode(#[from] RouteCodecError)` and `GatewayOwnerUnavailable`, and `route_set_error` is an exhaustive match over the five `PublicRouteSetError` variants with no wildcard arm. `RouteDecode` is 500 `error = "route_decode"`; `GatewayOwnerUnavailable` is 503 `error = "gateway_owner_unavailable"`. Both bodies carry a fixed message and no cause text. This replaces the sentence in R-66's early-request paragraph that called `OwnerUnavailable` "the 500 store-fault class": a Route owner that is gone (refused boot, shutdown) is unavailable, not a store fault. **(2) `GatewayApplicationError` is the candidate-constructor error and nothing more.** The six variants `Frontend`, `Identity`, `UpstreamProbe`, `Bind`, `WatchGap` and `Superseded` are removed; `CertifiedKeyReferenceMismatch` and `CertifiedKeyHostnameMismatch` remain. `Frontend`, `Identity`, `Bind` and `WatchGap` are produced under another type, the closed `GatewayApplicationUnavailableCause` of the status row (`FrontendUnresolved`, `GatewayIdentityUnusable` / `ConnectPathUnavailable`, `ListenerBindFailed`, `WatchGap`); `UpstreamProbe` is a leftover of the actual-frontend probe removed by R-65 (connect failures are per-request `GatewayUpstreamConnectError`, 502/503); `Superseded` is a leftover of supersession that the owner handles by discarding the late result (S-PIG-68, `SupersededResultNeverRestores`) and which never reaches a return type. **(3) The Host/SNI authority rule has one implementation, and the request path calls it.** The G1 head validator carries a second, divergent authority parser (`check_host` in `http1/head.rs`) beside `normalize_route_authority`, which no production path calls. `parse_request_head` calls `normalize_route_authority` (the one SSOT, called before Route selection as the Request rules already state); `check_host` and the six `Host*` variants of `RequestHeadError` are deleted and replaced by one `Authority(RouteAuthorityError)` variant, with `SniMismatch` alone mapping to 421 and every other authority error to 400. Rejected: keeping both parsers (the same rule in two places drifts, and one of them is dead code under a lint expectation); deleting `normalize_route_authority` and its S-PIG-12/13 properties (it carries the typed taxonomy and the property coverage, and the request path must enforce the rule); a catch-all `Internal` for the two Route-set variants (forbidden by `rust.md` at composition boundaries); mapping `OwnerUnavailable` to 500 (it is not a fault of the store); keeping the six unconstructed variants as a pinned taxonomy (a variant no path constructs is a promise the code does not keep). Roadmap owner of all three: step 05-02 (05-01 is committed and logged; its handler bodies are corrected here, not re-opened). `gateway_application` and every other Quint model: unchanged (none models these types or this rule). | Application HTTP contract; `GatewayApplicationError`; Request rules and `normalize_route_authority`; scenarios S-PIG-12, 13, 82, 140..142; roadmap step 05-02 |
 
 Earlier approvals: D1-D5 (2026-11-01), G1-G4 (2026-11-02). GH #338 (raw TCP ingress) is out of scope; GH #339 is the kernel 7.3 upgrade.
 
@@ -977,7 +978,7 @@ An observation is recorded for DESIGN; it rules no change and adds no scope.
 
 ### PROPOSED — awaiting user
 
-No item below is part of the design until the user adds it. All are optional and non-blocking (P-38 is shown as adopted for the record). R-1..R-65 above are ruled contract text (R-47..R-51 with the provenance stated per row; R-52 user-confirmed 2026-11-04; R-53 and R-54 user rulings of 2026-11-04; R-55, R-56, R-57 and R-58 user rulings of 2026-11-05; R-59 through R-63 user rulings of 2026-11-06; R-64 user ruling of 2026-11-07; R-65 user ruling of 2026-11-08), not proposals.
+No item below is part of the design until the user adds it. All are optional and non-blocking (P-38 is shown as adopted for the record). R-1..R-67 above are ruled contract text (R-47..R-51 with the provenance stated per row; R-52 user-confirmed 2026-11-04; R-53 and R-54 user rulings of 2026-11-04; R-55, R-56, R-57 and R-58 user rulings of 2026-11-05; R-59 through R-63 user rulings of 2026-11-06; R-64 user ruling of 2026-11-07; R-65 user ruling of 2026-11-08; R-66 user ruling of 2026-11-08; R-67 user-directed correction of 2026-11-08), not proposals.
 
 | Id | Proposal | Reachable production failure it prevents | Cost | Cheaper alternative |
 |---|---|---|---|---|
@@ -1514,7 +1515,10 @@ pub(crate) struct ParsedRequestHead { /* method, origin-form target, original He
 impl ParsedRequestHead { pub(crate) fn framing(&self) -> BodyFraming; pub(crate) fn method_is_head(&self) -> bool; }
 pub(crate) enum RequestHeadError {
     Line(LineViolation), VersionNotHttp11, Http10, Connect, NonOriginFormTarget,
-    HostMissing, HostDuplicate, HostInvalid, HostUserinfo, HostPortNot443, HostSniMismatch,
+    /// R-67: the Host authority rule is `runtime::routing::normalize_route_authority`, called once by
+    /// `parse_request_head`; there is no second authority parser. `Authority(SniMismatch)` is 421, every other
+    /// `Authority(_)` is 400.
+    Authority(RouteAuthorityError),
     Framing(FramingFault), DeclaredLengthAboveCeiling, HeadTooLarge, TooManyHeaders,
 }
 impl RequestHeadError { /// 400, 413, 421, 431 or 505 per the Request rules table.
@@ -2041,7 +2045,7 @@ The convergence loop (`:4399`), interest router (`:4447`), emit-drain (`:4474`) 
 **Handle exposure and the early-request window (R-66).** Exposing the Route command handle and the status reads (G1) is separate from spawning the gateway tasks (G4). HTTP serves from `server_task` before G4, so `POST /v1/routes`, `DELETE /v1/routes/{id}` and `GET /v1/gateway/status` can arrive before the Route owner task runs. The contract in that window is:
 
 - **Route commands are queued, not refused.** `PublicRouteSetOwner::open` (called inside `UnboundGatewayBuilder::new`) has already persisted the canonical empty slot and created the bounded command channel (capacity 16) with its receiver held by the owner (`crates/overdrive-gateway/src/route_set.rs:105-121`). `PublicRouteSetHandle::{apply,withdraw}` send the command and await the reply (`:53-60`, `:68-78`). The send succeeds while the owner is not yet running (the receiver is alive) and the request waits; `PublicRouteSetOwner::run` takes the command at G4 and performs the same get-decide-put against the IntentStore it performs at any other time (`:155-188`, `:191-208`). The wait ends when `GatewayBuilder::start` spawns the Route owner, which happens in the same `boot_server` call and before any gate waits (G4 spawns the tasks; the gates run inside the gate task), so it is bounded by boot reaching G4 and no timeout, retry or error variant is added. A 17th concurrent command waits for channel capacity under the same bound.
-- **A boot that refuses after G1 drops the receiver.** A pending or later command then returns the existing `PublicRouteSetError::OwnerUnavailable` (`route_set.rs:58`, `:59`), which is the 500 store-fault class of the Route handlers; the refusing boot tears the operator listener down, so no request outlives it.
+- **A boot that refuses after G1 drops the receiver.** A pending or later command then returns the existing `PublicRouteSetError::OwnerUnavailable` (`route_set.rs:58`, `:59`), which the Route handlers answer as 503 `gateway_owner_unavailable` (R-67; it is not a store fault); the refusing boot tears the operator listener down, so no request outlives it.
 - **`GET /v1/gateway/status` is unchanged by R-66.** It already runs before the gateway tasks start (the status read depends on neither the gate nor the identity; see the Projection pin in the Gateway SVID issue-failure section). It answers the ObservationStore point reads: the row the previous boot left, if any, otherwise absent (`application: None`, `certified_key: None`, `listener_bound` as the row says), with a disabled node answering the fixed body without a read (R-47).
 
 The Quint model already places a Route apply before the owner has run (`route_declare`: "the owner has not yet run"), so the queued-command outcome adds no model state.
@@ -3171,7 +3175,9 @@ Operator HTTP additions are `POST /v1/routes`,
 `DELETE /v1/routes/{id}` and `GET /v1/gateway/status`; all remain on the
 existing operator mTLS listener. `SubmitRouteResponse` reports
 `Declared|Replaced|Unchanged` with Route ID/generation. Route conflict is 409;
-validation is 400; store faults are 500. When gateway config is absent, POST
+validation is 400; store faults are 500; an undecodable stored Route is 500
+`route_decode`; a Route owner that is gone (refused boot, shutdown) is 503
+`gateway_owner_unavailable` (R-67). When gateway config is absent, POST
 and DELETE return typed `ControlPlaneError::GatewayDisabled` as 409
 `ErrorBody { error: "gateway_disabled", message: "public ingress gateway is
 disabled", field: null }` before parse/owner/store, with an empty IntentStore
@@ -3187,7 +3193,7 @@ Contract of the two methods (signatures in "Exact Route, deploy, configuration a
 
 - `withdraw_route(&self, id: &str)` issues `DELETE v1/routes/{id}` with `id` as one percent-encoded path segment. The id is `&str`, like `stop_workload`, `restart_workload` and `describe_workload`, deliberately not `&RouteId`: the client performs no validation, so the server's disabled-gateway check, which precedes `RouteId` parsing (above), is observable through the client with an id the server would refuse to parse. Both server outcomes `Withdrawn` and `Unchanged` are 200 and decode as `WithdrawRouteResponse`.
 - `gateway_status(&self)` issues `GET v1/gateway/status` and decodes `GatewayStatusResponse` on 200.
-- Errors are the existing `CliError` taxonomy and no variant is added: a non-2xx is `CliError::HttpStatus { status, body: ErrorBody }` (disabled gateway: 409, `error = "gateway_disabled"`; invalid id: 400, `error = "validation"`; store or observation fault: 500), a transport failure is `CliError::Transport`, an undecodable 2xx body is `CliError::BodyDecode`, a malformed base URL is `CliError::ConfigLoad`. Neither method retries.
+- Errors are the existing `CliError` taxonomy and no variant is added: a non-2xx is `CliError::HttpStatus { status, body: ErrorBody }` (disabled gateway: 409, `error = "gateway_disabled"`; invalid id: 400, `error = "validation"`; store or observation fault: 500; undecodable stored Route: 500, `error = "route_decode"`; Route owner gone: 503, `error = "gateway_owner_unavailable"`), a transport failure is `CliError::Transport`, an undecodable 2xx body is `CliError::BodyDecode`, a malformed base URL is `CliError::ConfigLoad`. Neither method retries.
 - Both are scaffolded like `submit_route` (a `todo!("SCAFFOLD: ...")` body with the same `#[allow(...)]` set) so the tests compile against the pinned shape; their bodies are DELIVER's, in the step that owns the Route operator surface.
 
 The closed control-plane declaration and mapping are exact:
@@ -3198,9 +3204,18 @@ pub enum ControlPlaneError {
     // existing variants unchanged
     #[error("public ingress gateway is disabled")]
     GatewayDisabled,
+    /// R-67. A stored public Route could not be decoded (envelope or Route
+    /// validation). Reached from `PublicRouteSetError::Decode`.
+    #[error("stored public Route is undecodable: {0}")]
+    RouteDecode(#[from] overdrive_core::public_ingress::RouteCodecError),
+    /// R-67. The Route owner is gone (refused boot after G1, shutdown).
+    /// Reached from `PublicRouteSetError::OwnerUnavailable`.
+    #[error("public Route owner is unavailable")]
+    GatewayOwnerUnavailable,
 }
 
-// Exact new exhaustive arm in error::to_response.
+// Exact new exhaustive arms in error::to_response. Neither body carries the
+// cause text; the typed cause stays on the error value.
 ControlPlaneError::GatewayDisabled => (
     StatusCode::CONFLICT,
     ErrorBody {
@@ -3209,7 +3224,31 @@ ControlPlaneError::GatewayDisabled => (
         field: None,
     },
 )
+ControlPlaneError::RouteDecode(_) => (
+    StatusCode::INTERNAL_SERVER_ERROR,
+    ErrorBody {
+        error: "route_decode".into(),
+        message: "stored public Route is undecodable".into(),
+        field: None,
+    },
+)
+ControlPlaneError::GatewayOwnerUnavailable => (
+    StatusCode::SERVICE_UNAVAILABLE,
+    ErrorBody {
+        error: "gateway_owner_unavailable".into(),
+        message: "public Route owner is unavailable".into(),
+        field: None,
+    },
+)
 ```
+
+`handlers::route_set_error` (crate-private, shared by POST and DELETE) is an
+exhaustive match over `PublicRouteSetError` with no wildcard arm (R-67):
+`OccupiedByDifferentRoute` and `WithdrawIdMismatch` are `Conflict` (409);
+`Intent(source)` is `ControlPlaneError::Intent(source)`; `Decode(source)` is
+`ControlPlaneError::RouteDecode(source)`; `OwnerUnavailable` is
+`ControlPlaneError::GatewayOwnerUnavailable`. No variant reaches
+`ControlPlaneError::internal`.
 
 Route POST accepts `State<AppState>` plus raw `Bytes`, checks
 `state.gateway.control()` first, and only then deserializes
@@ -3217,8 +3256,9 @@ Route POST accepts `State<AppState>` plus raw `Bytes`, checks
 JSON with no owner/store call. DELETE accepts the raw path segment, performs the
 same control check, then parses RouteId. The live `utoipa::path` declarations
 name `PublicRouteInput` as POST request body and include exact responses: 201/
-200 `SubmitRouteResponse`, 400 `ErrorBody`, 409 `ErrorBody`, 500 `ErrorBody`;
-DELETE includes 200 `WithdrawRouteResponse`, 400/409/500 `ErrorBody`; Gateway
+200 `SubmitRouteResponse`, 400 `ErrorBody`, 409 `ErrorBody`, 500 `ErrorBody`,
+503 `ErrorBody` (R-67);
+DELETE includes 200 `WithdrawRouteResponse`, 400/409/500/503 `ErrorBody`; Gateway
 GET includes 200 `GatewayStatusResponse` and 500 `ErrorBody`. All schemas and
 paths are added to the production `ApiDoc`; none is test-only.
 
@@ -3486,7 +3526,10 @@ GatewayDisabled` is the exact pre-parse POST/DELETE branch and maps to 409
 `ErrorBody { error: "gateway_disabled", message: "public ingress gateway is
 disabled", field: None }`. Apply maps Declared to 201 and Replaced/Unchanged to
 200; DELETE maps Withdrawn/Unchanged to 200, invalid ID to 400, different live
-ID to 409, and store error to 500.
+ID to 409, store error to 500, an undecodable stored Route to 500
+`route_decode` and a gone Route owner to 503 `gateway_owner_unavailable`
+(R-67). The `ErrorBody` schema is unchanged; only the two new response codes
+and `error` discriminators are added to the live OpenAPI.
 
 Both parser/wire inputs require exactly `target.service`; `target.workload` is
 an unknown field and there is no serde/TOML alias. `Route::from_submit` parses
@@ -4863,17 +4906,22 @@ pub(crate) struct GatewayDrainTimeout {
     pub connections: u32,
     pub requests: u32,
 }
+/// R-67. The closed error of `GatewayApplicationCandidate::new` only. Failures of
+/// frontend resolution, identity, bind and the watch are not values of this type:
+/// the owner projects them straight to `GatewayApplicationUnavailableCause`
+/// (`FrontendUnresolved`, `GatewayIdentityUnusable` / `ConnectPathUnavailable`,
+/// `ListenerBindFailed`, `WatchGap`). Per-request connect failures are
+/// `GatewayUpstreamConnectError`. A late gate result for a superseded generation
+/// is discarded and has no error value.
 pub(crate) enum GatewayApplicationError {
     CertifiedKeyReferenceMismatch,
     CertifiedKeyHostnameMismatch,
-    Frontend(ServiceFrontendResolveError),
-    Identity(GatewayIdentityLifecycleError),
-    UpstreamProbe(GatewayUpstreamConnectError),
-    Bind(std::io::ErrorKind),
-    WatchGap,
-    Superseded,
 }
 ```
+
+The owner maps each variant to a status cause by an exhaustive `match` with no
+wildcard arm: `CertifiedKeyHostnameMismatch` is `CertifiedKeyUnusable` and
+`CertifiedKeyReferenceMismatch` is `CertifiedKeyAbsent` (unchanged mappings).
 
 `GatewayShutdownReport::is_clean()` is exactly
 `forced_connections == 0 && task_failures.is_empty() &&
@@ -5480,7 +5528,12 @@ TLS SNI. `MissingHost`, `DuplicateHost`, `NonAsciiHost`, `InvalidAuthority`,
 `UnsupportedPort` and `InvalidHostname` map to the already-selected public
 400; `SniMismatch` alone maps to 421. The runtime calls this function before
 hostname/path Route selection; it then calls `matches_raw_path` on that Route's
-`PathMatch`.
+`PathMatch`. The single production call site is `parse_request_head`
+(`runtime/http1/head.rs`), which returns `RequestHeadError::Authority(error)`
+and whose `status()` applies the 400/421 split above (R-67). The function is
+`pub(crate)` with no `dead_code` expectation; no other code parses `Host`.
+The function's own source-local properties (S-PIG-12, 13) and the head
+validator's S-PIG-82 rows therefore test one implementation.
 
 Both header functions take ownership and return a transformed map without
 I/O, clock, global state or hidden input. They remove `Connection`, all valid
@@ -6681,7 +6734,7 @@ the table is the final dormant-surface gate:
 | `GatewayRouteCommands::routes`, `GatewayStatusReads::{application_status,certified_key_status}` | `UnboundGatewayBuilder::{route_commands,status_reads}` (R-66) | Route POST/DELETE and operator-mTLS Gateway GET only; no task/admission/key access |
 | Status rows/envelopes/write variants/kinds/point reads and wire bodies | custody/application writers plus LocalStore/Sim adapters | `GatewayStatusReads` and Gateway GET projection only |
 | `GatewayLimits::first_slice` and read-only accessors | one call in `boot_server` | builder/runtime, `HostGatewayClientMtls` and BPF capacity assertion; no deserializer/builder/mutator |
-| `normalize_route_authority`, `rewrite_request_headers` and `rewrite_response_headers` | public HTTP connection/request path | Route selection and the gateway's head serialiser/framing (ADR-0245); all three are crate-private and their source-local PBT calls the same production functions |
+| `normalize_route_authority`, `rewrite_request_headers` and `rewrite_response_headers` | public HTTP connection/request path (`normalize_route_authority`: `parse_request_head`, the single call site, R-67) | Route selection and the gateway's head serialiser/framing (ADR-0245); all three are crate-private and their source-local PBT calls the same production functions |
 | `GatewayRelay`, `KtlsLeg`/`KtlsReadHalf`/`KtlsWriteHalf`, `AcceptedPublicLeg`, relay error taxonomy | `HostGatewayRelay` (`overdrive-dataplane::gateway_relay`) and `SimGatewayRelay`, built once in `GatewayAdapters::host` / `SimGatewayAdapters` | `GatewayUpstreamConnector` (via the client mTLS adapter), the listener (`accept_public`, taking `Arc<rustls::ServerConfig>`), the exchange driver (head/body methods), the gate task (`probe`) |
 | `ExchangeMachine` and its seven accessors | exchange driver | the exchange driver and the Quint conformance driver (all transitions and accessors) |
 | `GatewayIdentityView` | `GatewayIdentitySlot` | lifecycle hydration and status only; `GatewayIdentityView` has no `subscribe` |
@@ -7370,7 +7423,7 @@ Counts against the 55 pre-reconstruction scenarios: **22 KEEP, 32 ADAPT, 1 DROP*
 | S-PIG-02 | A sound listener with no selectable backend returns 503 and no fallback; unavailable path is typed, never a wait (the I arm only: a client socket through `SimGatewayRelay`, run twice with an empty second delta; the real-hook 503 is observed on the native-metal arm of S-PIG-71); **the I arm is authored, ignored (`a_service_with_no_backend_is_answered_503_twice_with_an_empty_second_delta`)** | ADAPT | I | @error @security @contract-shape:bounded-change | control-plane integration `public_ingress_gateway_boot_shutdown.rs` | consuming-port-unavailable-outcome |
 | S-PIG-03–10 | Route path/host/input/generation laws (exact and segment match, rejected partitions, label 62/63/64, input channels, Route/key/application generation) | KEEP | U | @property/@boundary/@error @contract-shape:pure-function | `overdrive-core/src/public_ingress.rs` | route-value-types |
 | S-PIG-11 | Demand revisions nonzero, monotone, refuse wrap | DROP | — | retired (D2) | — | — |
-| S-PIG-12–17 | Canonical Host/SNI, authority errors, header rewrite both directions, hop-by-hop removal, fixed finite limits | KEEP | U | @property/@security/@boundary @contract-shape:pure-function | `overdrive-gateway/src/runtime/{routing,proxy_headers,limits}.rs` | gateway-application-owner |
+| S-PIG-12–17 | Canonical Host/SNI, authority errors, header rewrite both directions, hop-by-hop removal, fixed finite limits (R-67: `normalize_route_authority` now has its production caller, `parse_request_head`; S-PIG-12, 13 stay as written and S-PIG-142 adds the request-path row; the `cfg_attr(not(test), expect(dead_code))` on `routing.rs` is removed) | KEEP | U | @property/@security/@boundary @contract-shape:pure-function | `overdrive-gateway/src/runtime/{routing,proxy_headers,limits}.rs` | gateway-application-owner |
 | S-PIG-18–20 | Four serve flags; repeated scalar rejected; all-or-none enablement masks name exactly the missing fields; the S-PIG-20 mask test is a CLI integration test in `overdrive-cli/tests/integration/public_ingress_gateway.rs` (no ordering test against the cgroup probe, R-42); the S-PIG-19 argv rejection test is expected GREEN on the scaffolded clap declaration (no ignore) | KEEP | U | @driving_adapter @error @contract-shape:pure-function | `overdrive-cli/tests/acceptance/public_ingress_gateway.rs` | route-operator-surface |
 | S-PIG-21–24 | Route declare/replay/replace/withdraw lifecycle; competing id; wrong-id withdrawal; two concurrent claims | ADAPT | I | @real-io @error @concurrency @contract-shape:bounded-change | `overdrive-gateway/tests/integration/public_ingress_gateway.rs` | gateway-application-owner |
 | S-PIG-25 | Gateway status contains no path, key, ciphertext, nonce or salt | ADAPT | I | @security @contract-shape:unbounded-preservation | same | gateway-application-owner |
@@ -7424,7 +7477,7 @@ Counts against the 55 pre-reconstruction scenarios: **22 KEEP, 32 ADAPT, 1 DROP*
 | S-PIG-79 | Every line the gateway reads (head, chunk-size line, trailer line) holding a bare CR, a bare LF, a NUL, an octet outside RFC 9110 §5.5 or an obsolete line fold is refused before the parser runs | NEW | U | @property @security @contract-shape:pure-function | same | http1-head-validation-and-framing |
 | S-PIG-80 | Chunk framing lines: hexadecimal size parsed with extensions discarded; a size overflowing `u64` or a malformed size line is refused (400 before the response head, else both legs close); trailer lines are consumed and dropped within the head ceiling | NEW | U | @property @boundary @contract-shape:pure-function | same | http1-head-validation-and-framing |
 | S-PIG-81 | Framing is read from the original headers: a `Connection` field nominating `Content-Length` or `Transfer-Encoding` removes nothing before the framing decision, and the forwarded head carries only the framing headers the gateway itself writes | NEW | U | @security @property @contract-shape:pure-function | same + `proxy_headers.rs` | http1-head-validation-and-framing |
-| S-PIG-82 | Request head policy at its boundaries: non-origin-form target or `CONNECT` 400; Host missing, duplicated, invalid, with userinfo or a port other than 443 400; Host different from SNI 421; declared length above the ceiling 413 and at the ceiling accepted; head one octet over the ceiling or 101 fields 431 and at the ceiling or 100 fields accepted; `Upgrade` removed as hop-by-hop | NEW | U | @error @boundary @contract-shape:pure-function | same | http1-head-validation-and-framing |
+| S-PIG-82 | Request head policy at its boundaries: non-origin-form target or `CONNECT` 400; Host missing, duplicated, invalid, with userinfo or a port other than 443 400; Host different from SNI 421; declared length above the ceiling 413 and at the ceiling accepted; head one octet over the ceiling or 101 fields 431 and at the ceiling or 100 fields accepted; `Upgrade` removed as hop-by-hop; the Host rows assert `RequestHeadError::Authority(<RouteAuthorityError>)` produced by the one `normalize_route_authority` (R-67) | NEW | U | @error @boundary @contract-shape:pure-function | same | http1-head-validation-and-framing |
 | S-PIG-83 | Interim heads: an origin `100` reaches the client as a body-less rewritten head; every other interim `1xx` except `101` is read and dropped within the same head limit and deadline; `Expect` is forwarded unchanged and the gateway decides nothing | NEW | U+I | @edge @error @contract-shape:pure-function | `runtime/http1` + the Sim-driven file | http1-head-validation-and-framing |
 | S-PIG-84 | Exchange state laws: reuse only after the response completed, the request body was fully relayed, the response is length-delimited, the connection is not draining and the public peer has not half-closed; an early response, a close-delimited response, a mid-body close and a drain never reuse; an open chunked body is unfinished; octets beyond the declared remainder, `finish` before the response completes and every event after `Closed` are refused or ignored as pinned | NEW | U | @property @error @contract-shape:pure-function | `overdrive-gateway/src/runtime/http1/exchange.rs` (source-local PBT) | exchange-state-machine |
 | S-PIG-85 | Deadline composition: every head or framing-line read receives `min(phase budget, request deadline)` for the first-request, keep-alive, framing-line and response-head budgets; an item can never outlive its request; no 2x on the first head. **Source-local body against `compose_read_deadlines` and `request_deadline` (R-32)**, including the response-head phase with `request_complete_at` `None` and `Some(t0)` (R-37); the first-request, keep-alive, later-request and response-head timelines are also exercised through S-PIG-96 and 120 | NEW | U | @property @boundary @contract-shape:pure-function | `runtime/http1` or `runtime/exchange.rs` (source-local) | exchange-state-machine |
@@ -7485,6 +7538,9 @@ Counts against the 55 pre-reconstruction scenarios: **22 KEEP, 32 ADAPT, 1 DROP*
 | S-PIG-137 | Answering a peer KeyUpdate is cancel-safe while the send buffer is full (user-approved 2026-11-07; regression of `6d11ab373`). The same contract as S-PIG-136 with the transmit lock free and the leg's send buffer full (an earlier large write to a non-reading peer was abandoned part way), so the answer's record send itself cannot complete; the read is dropped three times before the peer reads. Same oracle: head exact, next DATA record decrypts at the peer, exactly one answer when requested and none otherwise, `TlsDecryptError` unchanged, both AES suites. Fault stimulus: cancellation at the answer's record send. Evidence tier: Tier 3 (native metal). Test `a_key_update_answer_survives_reads_dropped_while_the_send_buffer_is_full`. | NEW | T3 | @real-kernel @interruption @contract-shape:bounded-change | `gateway_relay.rs` | kernel-relay-host-adapter |
 | S-PIG-138 | A refused dial whose hook selected a backend is a dial failure. Contract: the receipt-based refusal classification (ADR-0242 outcome section): the pair (`Selected`, refused `connect(2)`) is `Connect` (502); the receipt is taken exactly once, no identity is resolved, no handshake starts, no byte is sent. Owner path: `GatewayUpstreamConnector::connect` over a real loopback `connect(2)` to a bound-then-closed port, with the test-local dataplane double in `ReceiptMode::Selected` and the mTLS double of the neighbouring connector rows. Fault stimulus: a refused connect while the hook's `Selected` receipt is live. Outcome oracle: `Connect`; `receipts_taken == 1`; `identity_lookups` empty; `mtls.attempts == 0`; ledger 0, `live_intent_count() == 0`, one open, the exact intent cleaned once. Evidence tier: Tier 1, `integration-tests`-gated unit test in the connector's `acceptance` module, test `a_selected_backend_whose_dial_is_refused_is_a_connect_failure`; authored and ignored `pending DELIVER gateway-boot-and-shutdown`. | NEW | U | @error @contract-shape:bounded-change | `overdrive-gateway/src/connector.rs` (`acceptance` module) | gateway-boot-and-shutdown |
 | S-PIG-139 | A dial the hook denied is `NoBackend`, not a connect failure. Contract: the pair (`NoBackend`, refused `connect(2)`) is `NoBackend` (503), never `Connect`: the hook's deny makes `connect(2)` fail with `EPERM`, and the connector classifies by the receipt, not by `errno`. No identity lookup, no handshake, no clock wait. Owner path and double as S-PIG-138 with `ReceiptMode::NoBackend` (the double holds the `NoBackend` receipt live while the port refuses). Fault stimulus: a refused connect while the hook's `NoBackend` receipt is live. Outcome oracle: `NoBackend`; `receipts_taken == 1`; `identity_lookups` empty; `mtls.attempts == 0`; the `SimClock` reading is unchanged across the call; ledger 0, `live_intent_count() == 0`, one open, the exact intent cleaned once. Evidence tier: Tier 1, same module, test `a_dial_the_hook_denied_is_no_backend_not_a_connect_failure`; authored and ignored `pending DELIVER gateway-boot-and-shutdown`. | NEW | U | @error @contract-shape:bounded-change | `overdrive-gateway/src/connector.rs` (`acceptance` module) | gateway-boot-and-shutdown |
+| S-PIG-140 | An undecodable stored Route is a typed 500 `route_decode`, not `internal` (R-67). Contract: `PublicRouteSetError::Decode` reaches the operator as `ControlPlaneError::RouteDecode`, status 500, `ErrorBody { error: "route_decode", message: "stored public Route is undecodable", field: None }`, for both `POST /v1/routes` and `DELETE /v1/routes/{id}`; the body carries no cause text; no `ControlPlaneError::Internal` is produced. Owner path: the production Route handlers over the production Route owner on the booted gateway composition. Fault stimulus: the IntentStore driven port returns undecodable bytes at the Route-set key (garbage envelope; and, as a second arm, a well-formed envelope holding a Route that fails Route validation). Outcome oracle: status and body above on each of the two methods and both arms; the stored bytes unchanged afterwards; a following declare after the bytes are restored to a valid empty slot succeeds (201), so the fault does not wedge the owner. Also a unit assertion on `error::to_response(ControlPlaneError::RouteDecode(_))`. Evidence tier: Tier 1 (acceptance, `integration-tests` if it opens real redb). | NEW | I | @error @contract-shape:bounded-change | `overdrive-control-plane` acceptance | route-set-error-mapping |
+| S-PIG-141 | A gone Route owner is a typed 503 `gateway_owner_unavailable` (R-67). Contract: `PublicRouteSetError::OwnerUnavailable` reaches the operator as `ControlPlaneError::GatewayOwnerUnavailable`, status 503, `ErrorBody { error: "gateway_owner_unavailable", message: "public Route owner is unavailable", field: None }`, for both methods; the Route set in the IntentStore is unchanged (empty IntentStore delta). Owner path: the production Route handlers over the production `PublicRouteSetHandle`. Fault stimulus: the Route owner's command receiver is gone, produced by the production paths that drop it (a boot that refuses after G1, R-66; and the owner task having ended in shutdown). Outcome oracle: status and body above on each method and each producing path; no write reaches the IntentStore. Also a unit assertion on `error::to_response(ControlPlaneError::GatewayOwnerUnavailable)`. Evidence tier: Tier 1 (the handler-level arm); the shutdown arm is Tier 1 over the Sim relay composition. | NEW | I | @error @interruption @contract-shape:unbounded-preservation | `overdrive-control-plane` acceptance | route-set-error-mapping |
+| S-PIG-142 | The public request path enforces the one authority rule before any upstream work (R-67). Contract: every `RouteAuthorityError` reaches the client through `parse_request_head` as the status the Request rules pin: missing, duplicate, non-ASCII, malformed, userinfo, invalid-hostname and non-443 port Host are 400; a Host that differs from the TLS SNI is 421; in every case the connector's `connect` is never called, no `open_upstream` occurs, and the response is gateway-authored on the same connection rules as the other pre-upstream refusals. Owner path: a client socket through `SimGatewayRelay` and the accept loop to the exchange driver (the same World as S-PIG-87..101). Fault stimulus: a request head per `RouteAuthorityError` variant on an admitted connection whose SNI is the Route's hostname. Outcome oracle: the status per variant; `connector.connect` call count 0; ledger 0. Also: the S-PIG-82 source-local rows now assert `RequestHeadError::Authority(<RouteAuthorityError variant>)` and the status split, and no `Host*` variant of `RequestHeadError` exists. Evidence tier: Tier 1 (U for the head rows, I for the listener row). | NEW | U+I | @error @security @contract-shape:pure-function (head), bounded-change (driver) | `overdrive-gateway/src/runtime/http1/head.rs`; gateway relay integration file | request-authority-single-implementation |
 
 **SVID issuance failure occurrence scenarios (R-45..R-52; the ids are the DESIGN obligations').** Each failure is driven through the production reconciler or executor; faults enter only at driven ports: a CA whose signing fails (`SigningFailsCa` / `ToggleCa`, test-local `Ca` doubles), and `IssueFaultStore` (a test-local delegating `ObservationStore`, `crates/overdrive-control-plane/tests/common/issue_fault_store.rs`) whose faults are scoped to the `issued_certificates` audit write (`Audit`), the workload failure-record operation (the unrecorded arm), the failure-row read, the gateway status row write and read, and the certified-key status read, and which counts the two status point reads the status handler can issue. The existing one-shot `inject_write_failure` consumes the next write of any family, so it cannot scope the fault; the decorator replaces it for these rows. The Sim clock supplies every instant.
 
