@@ -21,7 +21,9 @@ exec 2> >(tee -a "$out/driver.stderr" >&2)
 : "${OVERDRIVE_METAL_TARGET:?export the existing configured Metal target for read-only observations}"
 observer="$first/infra/metal/tests/observe_host.py"
 observe() { ssh "$OVERDRIVE_METAL_TARGET" 'sudo -n python3 -' "$@" < "$observer"; }
-invoke() { local checkout="$1"; shift; (cd "$checkout" && cargo xtask metal "$@"); }
+# Suppress Cargo's per-launch build/timing banners at their source; compare the
+# collector's retained output and all of its diagnostics without filtering.
+invoke() { local checkout="$1"; shift; (cd "$checkout" && cargo --quiet xtask metal "$@"); }
 for checkout in "$first" "$second"; do
   [ -f "$checkout/infra/metal/test-wrapper.sh" ] || { echo 'pending DELIVER: ordinary Metal adapter is absent' >&2; exit 78; }
 done
