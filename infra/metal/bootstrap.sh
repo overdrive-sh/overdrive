@@ -670,7 +670,7 @@ METAL_RUN_TMP=""
 METAL_TEST_DISPATCHER=""
 if [ "${RUN_MODE}" -eq 1 ]; then
   METAL_RUN_TMP="${REMOTE_DIR}/target/metal-run-tmp/${RUN_ID}"
-  METAL_TEST_DISPATCHER="${REMOTE_DIR}/target/guest-kit/overdrive-fwd-guest-suite"
+  METAL_TEST_DISPATCHER="${REMOTE_DIR}/target/debug/overdrive-fwd-guest-suite"
   if [ "${EXCLUSIVE_MODE}" -eq 0 ]; then
     validate_remote_artifact_paths
   fi
