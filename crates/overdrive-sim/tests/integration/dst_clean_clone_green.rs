@@ -200,6 +200,9 @@ const EXPECTED_INVARIANTS: &[&str] = &[
     "ending-in-flight-is-never-reclaimed",
     // no-host-ip-backend-fallback (ADR-0276) — no BackendKey is shared by two Services.
     "service-backend-keys-are-disjoint",
+    // public-ingress-gateway (ADR-0222) — Gateway Application generation and shutdown safety.
+    "gateway-application-generation-lifecycle-is-safe",
+    "gateway-application-shutdown-converges",
 ];
 
 // -----------------------------------------------------------------------------

@@ -70,7 +70,6 @@ fn assert_holds(invariant: Invariant, seed: u64) -> InvariantResult {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER gateway-application-invariants"]
 fn stale_completion_withdrawal_restart_and_retained_generation_are_safe() {
     for seed in SEEDS {
         assert_holds(Invariant::GatewayApplicationGenerationLifecycleIsSafe, seed);
@@ -84,7 +83,6 @@ fn stale_completion_withdrawal_restart_and_retained_generation_are_safe() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER gateway-application-invariants"]
 fn shutdown_joins_users_before_gateway_identity_retire() {
     for seed in SEEDS {
         assert_holds(Invariant::GatewayApplicationShutdownConverges, seed);
@@ -96,7 +94,6 @@ fn shutdown_joins_users_before_gateway_identity_retire() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER gateway-application-invariants"]
 fn twin_generation_runs_at_one_seed_have_identical_ordered_observation_traces() {
     let invariant = Invariant::GatewayApplicationGenerationLifecycleIsSafe;
     let first = assert_holds(invariant, TWIN_SEED);
@@ -110,7 +107,6 @@ fn twin_generation_runs_at_one_seed_have_identical_ordered_observation_traces() 
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER gateway-application-invariants"]
 fn twin_shutdown_runs_at_one_seed_have_identical_ordered_observation_traces() {
     let invariant = Invariant::GatewayApplicationShutdownConverges;
     let first = assert_holds(invariant, TWIN_SEED);

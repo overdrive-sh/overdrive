@@ -872,6 +872,10 @@ impl Invariant {
         // no-host-ip-backend-fallback (ADR-0276). The evaluator body lives in
         // `crate::invariants::service_backend_keys_disjoint`.
         Self::ServiceBackendKeysAreDisjoint,
+        // public-ingress-gateway step 04-06 (ADR-0222). The evaluator
+        // bodies live in `crate::invariants::gateway_application`.
+        Self::GatewayApplicationGenerationLifecycleIsSafe,
+        Self::GatewayApplicationShutdownConverges,
     ];
 
     /// The canonical kebab-case spelling of this invariant, as a static

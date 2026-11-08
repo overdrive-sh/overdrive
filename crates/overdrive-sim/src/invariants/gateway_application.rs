@@ -15,16 +15,12 @@
 //!
 //! # Addresses (R-6)
 //!
-//! Every composition binds its own `127.0.0.0/8` address: the second octet is
-//! the kind (`120` generation lifecycle, `121` shutdown); the low octets derive
-//! from the seed (`127.K.((seed / 250 + pid) % 200).(seed % 250 + 1)`), the
-//! third octet also folding in the process id so parallel nextest processes
-//! running the same seed do not share a public bind address (the bind address
-//! appears nowhere in the trace). The Service frontend is
-//! `127.K.254.(seed % 250 + 1)`, a pure function of the seed because the seeded
-//! fault schedule names it; two processes running the same seed and kind at
-//! once would still share that frontend, so concurrent same-seed runs are not
-//! supported.
+//! Every composition binds two `127.0.0.0/8` addresses: the public bind address
+//! `127.K.x.y` and the Service frontend `127.(K+2).x.y`, where the second octet
+//! `K` is the kind (`120` generation lifecycle, `121` shutdown). The slot
+//! `x.y` is searched from a start mixed from the seed and the process id and is
+//! the first whose endpoints can be bound, so parallel processes that run the
+//! same seed do not share an address. Neither address appears in the trace.
 //!
 //! # The trace
 //!
@@ -104,6 +100,9 @@ const SHUTDOWN_CONVERGES_NAME: &str = "gateway-application-shutdown-converges";
 const HOST: &str = "gateway-node";
 const HOSTNAME: &str = "api.example.com";
 const SERVICE_PORT: u16 = 8080;
+/// Loopback address slots per case kind: 250 x 250.
+const SLOTS: u64 = 62_500;
+const PUBLIC_PORT: u16 = 443;
 const ROUTE_ID: &str = "api-route";
 /// Real-time bound of every wait on an owner task.
 const WAIT_STEPS: u32 = 600;
@@ -286,27 +285,43 @@ fn route(path: &str) -> Route {
 // The rig: one production composition over Sim ports
 // ---------------------------------------------------------------------------
 
+#[derive(Clone, Copy)]
 struct Addresses {
     bind: Ipv4Addr,
     vip: Ipv4Addr,
 }
 
 impl Addresses {
-    fn derive(kind: u8, seed: u64) -> Self {
-        let low = u8::try_from(seed % 250).unwrap_or(0) + 1;
-        let mid = u8::try_from(seed / 250 % 200).unwrap_or(0);
-        // The public bind address is process-private state: nothing in the
-        // trace renders it (the status shows only `bound`), so folding the
-        // process id in keeps two processes that run the same seed apart
-        // without touching the seed-determined trace. The Service frontend is
-        // part of the seeded case (the fault schedule names it), so it stays
-        // a pure function of the seed.
-        let process = u8::try_from(std::process::id() % 200).unwrap_or(0);
-        let bind_mid = (mid + process) % 200;
-        Self {
-            bind: Ipv4Addr::new(127, kind, bind_mid, low),
-            vip: Ipv4Addr::new(127, kind, 254, low),
+    /// A free pair of loopback addresses for one case of `kind`.
+    ///
+    /// The addresses are process-private state: nothing in the trace renders
+    /// them (the status shows only `bound`). The search starts from a slot
+    /// mixed from the seed and the process id and takes the first slot whose
+    /// two endpoints can both be bound, so concurrent processes that run the
+    /// same or neighbouring seeds land apart without touching the
+    /// seed-determined trace.
+    fn choose(kind: u8, seed: u64) -> Result<Self, String> {
+        let mixed =
+            (seed ^ (u64::from(std::process::id()) << 32)).wrapping_mul(0x9e37_79b9_7f4a_7c15);
+        let start = (mixed >> 16) % SLOTS;
+        for step in 0..SLOTS {
+            let slot = (start + step) % SLOTS;
+            let third = u8::try_from(slot / 250).unwrap_or(0);
+            let fourth = u8::try_from(slot % 250).unwrap_or(0) + 1;
+            let candidate = Self {
+                bind: Ipv4Addr::new(127, kind, third, fourth),
+                vip: Ipv4Addr::new(127, kind + 2, third, fourth),
+            };
+            if candidate.is_free() {
+                return Ok(candidate);
+            }
         }
+        Err("no free loopback address pair for the case".to_owned())
+    }
+
+    fn is_free(self) -> bool {
+        std::net::TcpListener::bind((self.vip, SERVICE_PORT)).is_ok()
+            && std::net::TcpListener::bind((self.bind, PUBLIC_PORT)).is_ok()
     }
 }
 
@@ -325,6 +340,7 @@ struct Ports {
     relay: Arc<SimGatewayRelay>,
     identity: Arc<SimGatewayIdentityActionTarget>,
     backend_identity: SpiffeId,
+    seed: u64,
 }
 
 struct Rig {
@@ -343,8 +359,7 @@ fn node_id() -> Result<NodeId, String> {
 }
 
 impl Rig {
-    async fn start(kind: u8, seed: u64) -> Result<Self, String> {
-        let addresses = Addresses::derive(kind, seed);
+    async fn start(seed: u64, addresses: Addresses) -> Result<Self, String> {
         let dir = tempfile::tempdir().map_err(|error| format!("tempdir: {error}"))?;
         let chain_path = dir.path().join("api-origin-chain.pem");
         let key_path = dir.path().join("api-origin-key.pem");
@@ -358,8 +373,10 @@ impl Rig {
         let node = node_id()?;
         let observations = Arc::new(SimObservationStore::single_peer(node.clone(), seed));
         let vip_view = persist_api_service(&intent, addresses.vip).await?;
-        let listener = std::net::TcpListener::bind((addresses.vip, SERVICE_PORT))
-            .map_err(|error| format!("Service frontend listener: {error}"))?;
+        let listener =
+            std::net::TcpListener::bind((addresses.vip, SERVICE_PORT)).map_err(|error| {
+                format!("Service frontend listener {}:{SERVICE_PORT}: {error}", addresses.vip)
+            })?;
         listener
             .set_nonblocking(true)
             .map_err(|error| format!("nonblocking frontend listener: {error}"))?;
@@ -390,21 +407,7 @@ impl Rig {
         let hold = connect.connect_hold();
         let relay = Arc::new(SimGatewayRelay::new(clock.clone()));
 
-        let identity = Arc::new(SimGatewayIdentityActionTarget::new(GatewayIdentityDesired {
-            epoch: GatewayIdentityEpoch::first(),
-            spiffe_id: Some(SpiffeId::for_gateway(&node)),
-        }));
-        let ca = SimCa::new(Arc::new(SimEntropy::new(seed)));
-        let now = clock.unix_now();
-        let material = ca
-            .issue_svid(&SvidRequest::new(
-                SpiffeId::for_gateway(&node),
-                UnixInstant::from_unix_duration(now),
-                UnixInstant::from_unix_duration(now + Duration::from_secs(86_400)),
-            ))
-            .map_err(|error| format!("gateway SVID: {error}"))?;
-        identity.hold_audited(GatewayIdentityEpoch::first(), material);
-
+        let identity = fresh_identity(&clock, seed)?;
         let ports = Ports {
             chain_path,
             key_path,
@@ -418,6 +421,7 @@ impl Rig {
             relay,
             identity,
             backend_identity,
+            seed,
         };
         let (handle, routes, status) = compose(&ports).await?;
         Ok(Self {
@@ -457,6 +461,18 @@ impl Rig {
         Err(format!("timed out waiting for {what}; last status {}", render_row(last.as_ref())))
     }
 
+    /// Wait until the connect path holds no intent and no receipt: every probe
+    /// has completed and its cleanup has run.
+    async fn wait_connect_idle(&self) -> Result<(), String> {
+        for _ in 0..WAIT_STEPS {
+            if self.live_counts() == (Some(0), Some(0)) {
+                return Ok(());
+            }
+            tokio::time::sleep(WAIT_STEP).await;
+        }
+        Err(format!("the connect path never went idle; counts {:?}", self.live_counts()))
+    }
+
     fn live_counts(&self) -> (Option<u32>, Option<u32>) {
         (
             self.ports.connect.live_intent_count().ok(),
@@ -476,14 +492,14 @@ impl Rig {
         self.ports.relay.script_public_connection(PublicLegScript {
             sni: PublicHostname::new(HOSTNAME).map_err(|error| format!("SNI: {error}"))?,
             inbound: LegScript::new()
-                .octets(b"GET /retained HTTP/1.1\r\nHost: api.example.com\r\n\r\n".to_vec())
+                .octets(b"GET /v1/retained HTTP/1.1\r\nHost: api.example.com\r\n\r\n".to_vec())
                 .quiet(RETAIN_SPAN)
                 .close_notify(),
         });
         self.ports.relay.script_upstream_leg(
             LegScript::new().octets(b"HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\none".to_vec()),
         );
-        let client = TcpStream::connect(SocketAddrV4::new(self.ports.addresses.bind, 443))
+        let client = TcpStream::connect(SocketAddrV4::new(self.ports.addresses.bind, PUBLIC_PORT))
             .map_err(|error| format!("connect to the public listener: {error}"))?;
         self.retained = Some(client);
         for _ in 0..WAIT_STEPS {
@@ -543,12 +559,39 @@ impl Rig {
         if !report.is_clean() {
             return Err(format!("restart's shutdown was not clean: {report:?}"));
         }
+        // The gateway identity is volatile: the clean stop cleared it, and the
+        // node's SVID issuance supplies a fresh one for the restarted owner.
+        self.ports.identity = fresh_identity(&self.ports.clock, self.ports.seed)?;
         let (handle, routes, status) = compose(&self.ports).await?;
         self.routes = routes;
         self.status = status;
         self.handle = Some(handle);
         Ok(())
     }
+}
+
+/// A gateway identity slot holding a freshly issued, audited SVID at the first
+/// epoch.
+fn fresh_identity(
+    clock: &Arc<SimClock>,
+    seed: u64,
+) -> Result<Arc<SimGatewayIdentityActionTarget>, String> {
+    let node = node_id()?;
+    let identity = Arc::new(SimGatewayIdentityActionTarget::new(GatewayIdentityDesired {
+        epoch: GatewayIdentityEpoch::first(),
+        spiffe_id: Some(SpiffeId::for_gateway(&node)),
+    }));
+    let ca = SimCa::new(Arc::new(SimEntropy::new(seed)));
+    let now = clock.unix_now();
+    let material = ca
+        .issue_svid(&SvidRequest::new(
+            SpiffeId::for_gateway(&node),
+            UnixInstant::from_unix_duration(now),
+            UnixInstant::from_unix_duration(now + Duration::from_secs(86_400)),
+        ))
+        .map_err(|error| format!("gateway SVID: {error}"))?;
+    identity.hold_audited(GatewayIdentityEpoch::first(), material);
+    Ok(identity)
 }
 
 /// Compose the production owner over the durable stores and Sim ports.
@@ -736,6 +779,14 @@ struct Generations {
 struct Observer {
     trace: Vec<String>,
     generations: Generations,
+    /// Shutdown is running concurrently with the case: a snapshot taken now
+    /// depends on how far the shutdown task has progressed, so the trace
+    /// records the label only and the universal checks still run.
+    shutdown_in_progress: bool,
+    /// A connect probe is parked: whether its intent is registered yet is a
+    /// scheduling race, so the trace omits the live counts until the probe is
+    /// released and the connect path is idle again.
+    probe_held: bool,
 }
 
 impl Observer {
@@ -743,6 +794,8 @@ impl Observer {
         Self {
             trace: Vec::new(),
             generations: Generations { first: None, second: None, third: None },
+            shutdown_in_progress: false,
+            probe_held: false,
         }
     }
 
@@ -754,18 +807,27 @@ impl Observer {
     ) -> Result<Option<GatewayApplicationStatusRowV1>, String> {
         let row = rig.status().await?;
         let (intents, receipts) = rig.live_counts();
-        let line = format!(
-            "{label}: {} intents={intents:?} receipts={receipts:?}",
-            render_row(row.as_ref())
-        );
-        self.trace.push(line.clone());
+        let line = if self.probe_held {
+            format!("{label}: {}", render_row(row.as_ref()))
+        } else {
+            format!(
+                "{label}: {} intents={intents:?} receipts={receipts:?}",
+                render_row(row.as_ref())
+            )
+        };
+        if self.shutdown_in_progress {
+            self.trace.push(format!("{label}: shutdown in progress"));
+        } else {
+            self.trace.push(line.clone());
+        }
         if let Some(row) = &row {
             if let (Some(staged), Some(current)) = (&row.staged, &row.current)
                 && staged.application_generation == current.application_generation
             {
                 return Err(format!("Staged equals Current ({line})"));
             }
-            if let (Some(second), Some(current)) = (self.generations.second, &row.current)
+            if let (Some(second), Some(_third), Some(current)) =
+                (self.generations.second, self.generations.third, &row.current)
                 && current.route_generation == second
             {
                 return Err(format!("the superseded second generation became Current ({line})"));
@@ -801,12 +863,12 @@ fn due_faults<'a>(
 }
 
 async fn run_case(
-    kind: u8,
     seed: u64,
+    addresses: Addresses,
     case: GatewayApplicationInvariantCase,
     check_lifecycle: bool,
 ) -> Result<Outcome, String> {
-    let mut rig = Rig::start(kind, seed).await?;
+    let mut rig = Rig::start(seed, addresses).await?;
     let mut observer = Observer::new();
     let mut delivered = vec![false; case.faults.len()];
     let mut applies = 0_u32;
@@ -819,11 +881,14 @@ async fn run_case(
             match fault {
                 GatewayApplicationSimFault::HoldConnectProbe(frontend) => {
                     rig.ports.hold.hold(*frontend);
+                    observer.probe_held = true;
                     observer.trace.push("fault: connect probe held".to_owned());
                 }
                 GatewayApplicationSimFault::ReleaseConnectProbe(frontend) => {
                     rig.ports.hold.release(*frontend);
                     observer.trace.push("fault: connect probe released".to_owned());
+                    rig.wait_connect_idle().await?;
+                    observer.probe_held = false;
                     if check_lifecycle {
                         // The stale completion is delivered; the successor must
                         // become Current and the stale generation never does.
@@ -981,6 +1046,7 @@ async fn run_case(
             }
             GatewayApplicationSimInput::BeginShutdown => {
                 rig.begin_shutdown()?;
+                observer.shutdown_in_progress = true;
                 tokio::time::sleep(Duration::from_millis(20)).await;
                 observer.trace.push("shutdown begun".to_owned());
             }
@@ -988,6 +1054,7 @@ async fn run_case(
     }
     if rig.shutdown.is_some() {
         let finished = rig.finish_shutdown().await?;
+        observer.shutdown_in_progress = false;
         let row = observer.observe(&rig, "after shutdown").await?;
         observer.trace.push(format!(
             "report: clean={} forced={} identity_empty={} residual={:?}",
@@ -1026,8 +1093,7 @@ async fn run_case(
 // Evaluators
 // ---------------------------------------------------------------------------
 
-fn frontend_for(kind: u8, seed: u64) -> Result<ServiceFrontend, String> {
-    let addresses = Addresses::derive(kind, seed);
+fn frontend_for(addresses: Addresses) -> Result<ServiceFrontend, String> {
     ServiceFrontend::new(
         ServiceVip::new(addresses.vip.into()).map_err(|error| format!("VIP: {error}"))?,
         NonZeroU16::new(SERVICE_PORT).ok_or("service port is nonzero")?,
@@ -1043,9 +1109,10 @@ fn frontend_for(kind: u8, seed: u64) -> Result<ServiceFrontend, String> {
 /// withdrawn or superseded generation.
 pub(crate) async fn evaluate_generation_lifecycle_is_safe(seed: u64) -> InvariantResult {
     let outcome = async {
+        let addresses = Addresses::choose(120, seed)?;
         let case =
-            GatewayApplicationInvariantCase::generation_lifecycle(seed, frontend_for(120, seed)?);
-        run_case(120, seed, case, true).await
+            GatewayApplicationInvariantCase::generation_lifecycle(seed, frontend_for(addresses)?);
+        run_case(seed, addresses, case, true).await
     }
     .await;
     verdict(GENERATION_LIFECYCLE_NAME, seed, outcome.map(|outcome| outcome.trace))
@@ -1057,8 +1124,9 @@ pub(crate) async fn evaluate_generation_lifecycle_is_safe(seed: u64) -> Invarian
 /// intent or receipt.
 pub(crate) async fn evaluate_shutdown_converges(seed: u64) -> InvariantResult {
     let outcome = async {
-        let case = GatewayApplicationInvariantCase::shutdown(seed, frontend_for(121, seed)?);
-        let outcome = run_case(121, seed, case, false).await?;
+        let addresses = Addresses::choose(121, seed)?;
+        let case = GatewayApplicationInvariantCase::shutdown(seed, frontend_for(addresses)?);
+        let outcome = run_case(seed, addresses, case, false).await?;
         let report = outcome.report.as_ref().ok_or("the case never began shutdown")?;
         if !report.is_clean() {
             return Err(format!("the shutdown report is not clean: {report:?}"));
@@ -1066,15 +1134,9 @@ pub(crate) async fn evaluate_shutdown_converges(seed: u64) -> InvariantResult {
         if !report.identity_empty {
             return Err("the gateway identity slot was not empty after shutdown".to_owned());
         }
-        let residual = report
-            .residual_connect
-            .as_ref()
-            .ok_or("the shutdown report carries no residual connect state")?;
-        if residual.ledger_entries != 0
-            || residual.live_intents != Some(0)
-            || residual.live_receipts != Some(0)
-            || !residual.sweep_failures.is_empty()
-        {
+        // Production reports `None` exactly when the ledger is empty and the
+        // dataplane holds no intent or receipt.
+        if let Some(residual) = &report.residual_connect {
             return Err(format!("residual connect state after shutdown: {residual:?}"));
         }
         Ok(outcome.trace)

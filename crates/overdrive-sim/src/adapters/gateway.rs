@@ -1077,25 +1077,101 @@ pub enum ConnectOperation {
 /// A probe whose receipt is `Selected` parks at
 /// `GatewayClientMtls::authenticate` until released (DG-9). Cloning shares the
 /// state.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct SimConnectHold {
-    _private: (),
+    shared: Arc<HoldShared>,
+}
+
+struct HoldShared {
+    state: Mutex<HoldState>,
+    /// Bumped on every `release`; parked probes re-check their frontend.
+    changed: watch::Sender<u64>,
+}
+
+#[derive(Default)]
+struct HoldState {
+    /// Frontends whose `Selected` probes park.
+    held: Vec<ServiceFrontend>,
+    /// Frontends a `Selected` receipt was taken for while held, by the backend
+    /// identity the receipt selected; `authenticate` finds its entry by
+    /// `expected_peer`, never by arrival order.
+    pending: BTreeMap<SpiffeId, Vec<ServiceFrontend>>,
+    parked: usize,
+}
+
+impl Default for SimConnectHold {
+    fn default() -> Self {
+        let (changed, _) = watch::channel(0);
+        Self { shared: Arc::new(HoldShared { state: Mutex::new(HoldState::default()), changed }) }
+    }
+}
+
+/// Counts a parked probe for as long as its waiter exists, so a waiter that is
+/// dropped stops counting.
+struct ParkedEntry(Arc<HoldShared>);
+
+impl Drop for ParkedEntry {
+    fn drop(&mut self) {
+        let mut state = self.0.state.lock();
+        state.parked = state.parked.saturating_sub(1);
+    }
 }
 
 impl SimConnectHold {
     /// Park the next probe(s) for `frontend` at `authenticate`.
     pub fn hold(&self, frontend: ServiceFrontend) {
-        todo!("SCAFFOLD: SimConnectHold::hold")
+        let mut state = self.shared.state.lock();
+        if !state.held.contains(&frontend) {
+            state.held.push(frontend);
+        }
     }
 
     /// Release every probe held for `frontend`: usable = `Ok(GatewayUpstream)`.
     pub fn release(&self, frontend: ServiceFrontend) {
-        todo!("SCAFFOLD: SimConnectHold::release")
+        {
+            let mut state = self.shared.state.lock();
+            state.held.retain(|held| *held != frontend);
+        }
+        self.shared.changed.send_modify(|epoch| *epoch += 1);
     }
 
     /// Number of probes currently parked.
     pub fn held_entries(&self) -> usize {
-        todo!("SCAFFOLD: SimConnectHold::held_entries")
+        self.shared.state.lock().parked
+    }
+
+    /// A `Selected` receipt for `frontend` selected `identity`: if the frontend
+    /// is held, the probe that follows parks at `authenticate`.
+    fn note_selected(&self, frontend: ServiceFrontend, identity: SpiffeId) {
+        let mut state = self.shared.state.lock();
+        if state.held.contains(&frontend) {
+            state.pending.entry(identity).or_default().push(frontend);
+        }
+    }
+
+    /// Park the caller while its entry's frontend is held; returns at once when
+    /// no entry was noted for `peer`.
+    async fn park_if_held(&self, peer: &SpiffeId) {
+        let (frontend, mut changed) = {
+            let mut state = self.shared.state.lock();
+            let Some(frontends) = state.pending.get_mut(peer) else {
+                return;
+            };
+            let frontend = frontends.remove(0);
+            if frontends.is_empty() {
+                state.pending.remove(peer);
+            }
+            state.parked += 1;
+            let changed = self.shared.changed.subscribe();
+            drop(state);
+            (frontend, changed)
+        };
+        let _entry = ParkedEntry(Arc::clone(&self.shared));
+        while self.shared.state.lock().held.contains(&frontend) {
+            if changed.changed().await.is_err() {
+                return;
+            }
+        }
     }
 }
 
@@ -1273,7 +1349,17 @@ impl GatewayConnectDataplane for SimGatewayConnectDataplane {
         }
         state.receipts.remove(&cookie);
         drop(state);
-        Ok(self.receipt_for(cookie, intent.service_key))
+        let receipt = self.receipt_for(cookie, intent.service_key);
+        if let GatewaySelectionReceipt::Selected { backend_id, service_key, .. } = &receipt {
+            let frontend =
+                ServiceFrontend::new(service_key.vip(), service_key.port(), service_key.protocol());
+            if let (Ok(frontend), Some(identity)) =
+                (frontend, self.dataplane.applied_identity(*backend_id))
+            {
+                self.hold.note_selected(frontend, identity);
+            }
+        }
+        Ok(receipt)
     }
 
     fn selected_backend_identity(
@@ -1343,6 +1429,9 @@ impl GatewayClientMtls for SimGatewayClientMtls {
                 expected: expected_peer,
                 actual,
             });
+        }
+        if let Some(hold) = &self.hold {
+            hold.park_if_held(&expected_peer).await;
         }
         let leg = self
             .relay
