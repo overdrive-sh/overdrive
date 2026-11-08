@@ -9,7 +9,7 @@ Original decision ratified by the user 2026-09-13.
 
 Public HTTP response status describes one data-plane request. Operators need a
 different view of Route/application, certified-key, identity, listener,
-connect-path and independent BPF hydration state. Reusing a public response or
+and connect-path state. Reusing a public response or
 persisting per-request receipts would conflate lifecycle owners and risk
 exposing backend or credential details.
 
@@ -17,8 +17,9 @@ exposing backend or credential details.
 
 Expose one redacted `GatewayStatusResponse` from operator-mTLS
 `GET /v1/gateway/status`, built from ID-scoped application/certified-key LWW
-status rows plus the relevant existing Service hydration rows. Keep Gateway
-Application, Public Certified-Key Custody and BPF hydration generations
+status rows only. Service reachability, backends, health and BPF hydration
+state never enter status; they surface per request as 503/502. Keep Gateway
+Application and Public Certified-Key Custody generations
 separate in the projection. Per-connection receipts, selected BackendId,
 private material, paths and raw adapter errors never enter status.
 

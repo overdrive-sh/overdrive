@@ -2007,7 +2007,7 @@ C4Component
   }
 
   ContainerDb(intent, "IntentStore", "redb/rkyv", "Route set, protected key, workload/VIP inputs")
-  ContainerDb(obs, "ObservationStore", "redb/rkyv", "Independent custody/application/hydration/audit rows")
+  ContainerDb(obs, "ObservationStore", "redb/rkyv", "Independent custody/application status and audit rows")
 
   Rel(operator, routeapi, "Deploys/withdraws Route and reads status through")
   Rel(serve, builder, "Composes and starts")
@@ -2018,7 +2018,6 @@ C4Component
   Rel(routeapi, control, "Submits Route commands and reads redacted gateway status through")
   Rel(control, routeset, "Obtains the typed Route command handle from")
   Rel(control, obs, "Point-reads ID-scoped application/certified-key status from")
-  Rel(routeapi, obs, "Reads relevant Service hydration rows from")
   Rel(routeset, intent, "Persists complete Public Route Set into")
   Rel(handle, routeset, "Cancels and joins after connection drain")
   Rel(files, source, "Supplies chain/key to")
