@@ -116,9 +116,9 @@ use overdrive_gateway::ports::{
     AcceptedPublicLeg, GatewayClientMtls, GatewayClientMtlsError, GatewayConnectCleanup,
     GatewayConnectCleanupSweep, GatewayConnectDataplane, GatewayConnectDataplaneError,
     GatewayConnectIntent, GatewayIdentityLifecycleControl, GatewayIdentityLifecycleError,
-    GatewayRelay, GatewaySelectionReceipt, GatewayUpstream, GatewayUpstreamSeal, HeadTerminator,
-    KtlsLeg, KtlsReadHalf, KtlsWriteHalf, LegReadError, LegWriteError, PreparedUpstream,
-    PublicHandshakeError, ReadDeadlines, RelayDeadlines, RelayError, RelayProbeError, ThroughBytes,
+    GatewayRelay, GatewaySelectionReceipt, GatewayUpstream, HeadTerminator, KtlsReadHalf,
+    KtlsWriteHalf, LegReadError, LegWriteError, PreparedUpstream, PublicHandshakeError,
+    ReadDeadlines, RelayDeadlines, RelayError, RelayProbeError, ThroughBytes,
 };
 use overdrive_gateway::route_set::PublicRouteSetError;
 use overdrive_gateway::runtime::GatewayLimits;
@@ -669,14 +669,14 @@ impl HoldRegistry {
     }
 }
 
-/// Answers every `authenticate` at once. The gate does not reach it (R-65): a
-/// selected backend's mTLS is a per-request matter, not a bind condition.
-struct UsableMtls {
-    seal: GatewayUpstreamSeal,
-}
+/// Answers every `authenticate` with the port's typed unavailable error. The
+/// gate does not reach it (R-65): a selected backend's mTLS is a per-request
+/// matter, not a bind condition, and no scenario of this binary drives a
+/// request through it.
+struct UnavailableMtls;
 
 #[async_trait]
-impl GatewayClientMtls for UsableMtls {
+impl GatewayClientMtls for UnavailableMtls {
     async fn authenticate(
         &self,
         connected: OwnedFd,
@@ -684,7 +684,7 @@ impl GatewayClientMtls for UsableMtls {
         _deadline: Instant,
     ) -> Result<GatewayUpstream, GatewayClientMtlsError> {
         drop(connected);
-        Ok(self.seal.seal_authenticated(KtlsLeg::from_armed(Box::new(()), Box::new(()))))
+        Err(GatewayClientMtlsError::IdentityAbsent)
     }
 }
 
@@ -1125,11 +1125,11 @@ impl World {
             listener
         });
         let builder = unbound(site, plan, &intent, &observations, &clock).await?;
-        let (builder, seal) = builder.into_builder();
+        let (builder, _seal) = builder.into_builder();
         let dependencies = GatewayRuntimeDependencies::new(
             GatewayLimits::first_slice(),
             fx.dataplane.clone(),
-            Arc::new(UsableMtls { seal }),
+            Arc::new(UnavailableMtls),
             fx.identity.clone(),
             fx.relay.clone(),
         );

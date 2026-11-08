@@ -2,8 +2,9 @@
 //! ignored the second time (assumption GA-1).
 //!
 //! The real Application owner is composed over the held-gate doubles of
-//! [`super::held_probe_doubles`]; the oracle is `GatewayStatusReads::application_status()`
-//! alone. The runtime is paused and single-threaded, and the owner reads time
+//! [`super::held_probe_doubles`]; the candidate's gate parks inside the connect
+//! dataplane probe. The oracle is `GatewayStatusReads::application_status()`
+//! and the number of times that probe returned. The runtime is paused and single-threaded, and the owner reads time
 //! from the injected `SimClock`, so no wall-clock sleep takes part. The
 //! composition binds `127.64.0.1:443` (R-6, table in `held_probe_doubles`).
 #![allow(clippy::doc_markdown, reason = "CONTRACT_SHAPE is required metadata")]
@@ -17,10 +18,11 @@ const PROBE_COMPLETION_OCTET: u8 = 64;
 
 /// S-PIG-73 (GA-1): a staged candidate's gate is released usable, the
 /// generation is promoted, and the same held gate is then completed again
-/// with a usable result and with an unusable one. Each second completion finds
-/// no entry; the status row is byte-equal before and after, the Applied
-/// generation is the one the first completion promoted, and nothing is staged
-/// or draining.
+/// with a usable result and with an unusable one. The connect probe returned
+/// exactly once, for the first completion; each second completion finds no
+/// entry and returns nothing more. The status row is byte-equal before and
+/// after, the Applied generation is the one the first completion promoted, and
+/// nothing is staged or draining.
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(start_paused = true)]
@@ -55,6 +57,7 @@ async fn a_probe_result_completed_twice_is_ignored_the_second_time() {
         "the promoted generation is the staged candidate",
     );
     assert_eq!(world.probes.held_count(), 0, "the released entry is no longer held");
+    assert_eq!(world.probes.connect_returned(), 1, "the released connect probe returned once");
 
     // The owner is idle: the status row it published is the "before" snapshot.
     let before = settle(&world.status).await.expect("owner idle after promotion");
@@ -82,6 +85,11 @@ async fn a_probe_result_completed_twice_is_ignored_the_second_time() {
     assert!(row.staged.is_none(), "nothing is staged: {row:?}");
     assert!(row.draining.is_empty(), "nothing is draining: {row:?}");
     assert_eq!(world.probes.held_count(), 0, "no probe was re-parked");
+    assert_eq!(
+        world.probes.connect_returned(),
+        1,
+        "the second completions returned no connect probe",
+    );
 
     world.stop().await;
 }

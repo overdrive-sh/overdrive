@@ -26,7 +26,7 @@
 //! | `route_declare` | `GatewayRouteCommands::routes()` -> `PublicRouteSetHandle::apply` of a Route of a new generation; the owner has not yet run to idle |
 //! | `route_withdraw` | `PublicRouteSetHandle::withdraw`, then yield until the owner is idle; its postcondition: nothing staged, nothing Current |
 //! | `stage` | owner-autonomous, no driving-port call: yield until the owner is idle, then assert through `application_status().staged` that it staged a new generation of the live Route and that exactly one new gate is held; the assertion never adopts a gate or token the model did not name (R-65 pins (b), (c)) |
-//! | `probe_result(tok, ok)` | first let the owner consume any Route event that supersedes `tok` (pin (d)), then release the gate held at the identity wait for candidate `tok` by its `HeldGate` (`ok`: `Ok(facts)`; otherwise the typed `ReconcilerUnavailable`), then yield until idle; releasing a discarded candidate's gate is a no-op. A failed live candidate must leave nothing staged (pin (e)) |
+//! | `probe_result(tok, ok)` | first let the owner consume any Route event that supersedes `tok` (pin (d)), then release the gate held for candidate `tok` by its `HeldGate` (`ok`: the probe passes; otherwise the port's typed unavailable error), then yield until idle. The first gate of a boot parks inside the connect dataplane probe, which the owner cannot cancel: a release after supersession reaches the parked gate, which runs to its end and discards its own result (the driver waits for the probe to return). Any later gate parks at the identity wait, which the owner cancels on supersession, so releasing a discarded candidate's gate is a no-op. A failed live candidate must leave nothing staged (pin (e)) |
 //! | `retire(gid)` | owner-autonomous, no driving-port call: yield until `application_status().draining` no longer lists `gid` |
 //! | `open_connection` | `GatewayAdmission::acquire_connection(now)` on the injected admission; the lease is kept |
 //! | `close_connection(gid)` | drop the kept `GatewayConnectionLease` retaining generation `gid`; the owner has not yet run |
@@ -39,7 +39,13 @@
 //! only. The doubles hold a staged gate at an awaited operation the gate owns
 //! (`held_probe_doubles`, "Held-gate capability"), never at
 //! `GatewayClientMtls::authenticate`, and a failed candidate is not staged
-//! again until the Route changes (`failed_candidate_not_restaged`).
+//! again until the Route changes (`failed_candidate_not_restaged`). The driver
+//! checks it against the owner's own status after every step, so it catches an
+//! owner that re-stages a failed Route generation on its own. It cannot
+//! observe the owner's `failed` record itself: every input that makes the owner
+//! re-evaluate (a Route change, a watch gap, a certified-key or identity
+//! change) clears the record before it evaluates, so no trace re-presents the
+//! failed candidate to a live record.
 //!
 //! Projection (`State::from_driver`), per the pinned table:
 //! `current_generation` / `draining_generations` <-
@@ -100,7 +106,8 @@ use serde::Deserialize;
 use tokio::runtime::Runtime;
 
 use super::held_probe_doubles::{
-    Composition, HeldGate, ProbeOutcome, ROUTE_ID, next_ordinal, route, settle, wait_until,
+    Composition, HeldGate, ParkPoint, ProbeOutcome, ROUTE_ID, ReleaseOutcome, next_ordinal, route,
+    settle, wait_until,
 };
 use super::{GatewayAdmission, GatewayConnectionLease, GatewayRouteCommands, GatewayStatusReads};
 
@@ -123,6 +130,9 @@ struct StagedRecord {
     generation: GatewayApplicationGenerationId,
     route_generation: RouteGeneration,
     gate: HeldGate,
+    /// Where the candidate's gate parked: only the connect probe outlives the
+    /// owner's supersession of the gate.
+    parked_at: ParkPoint,
 }
 
 /// The model-number <-> owner-generation translation recorded at each `stage`
@@ -295,9 +305,6 @@ impl AppConfDriver {
             .as_ref()
             .ok_or_else(|| anyhow!("`stage` with no declared Route"))?
             .route_generation();
-        if self.failed_route == Some(live) {
-            bail!("`stage` is not enabled: this Route generation's candidate failed (pin (e))");
-        }
         let status = self.idle_status()?;
         let row = status.ok_or_else(|| anyhow!("`stage`: the owner published no status row"))?;
         let staged = row.staged.as_ref().ok_or_else(|| {
@@ -315,34 +322,39 @@ impl AppConfDriver {
             bail!("`stage`: the staged generation is not new (pin (c)): {row:?}");
         }
         let claimed = self.ids.claimed_gates();
-        let unclaimed: Vec<HeldGate> = self
-            .world()?
-            .probes
-            .held_gates()
-            .into_iter()
-            .filter(|gate| !claimed.contains(gate))
-            .collect();
-        let [gate] = unclaimed.as_slice() else {
-            bail!(
-                "`stage`: expected exactly one new held gate for the staged candidate, found {}",
-                unclaimed.len()
-            );
+        let probes = &self.world()?.probes;
+        let unclaimed: Vec<HeldGate> =
+            probes.held_gates().into_iter().filter(|gate| !claimed.contains(gate)).collect();
+        // The gate of the staged candidate is the newest one to park. An older
+        // unclaimed gate is the gate of a candidate the owner staged and
+        // superseded before this `stage` (two Route changes between steps):
+        // only a gate parked inside the connect probe, which the owner cannot
+        // cancel, may still be held.
+        let Some((gate, leftovers)) = unclaimed.split_last() else {
+            bail!("`stage`: no new held gate for the staged candidate");
+        };
+        if let Some(leftover) =
+            leftovers.iter().find(|gate| probes.park_point(**gate) != Some(ParkPoint::ConnectProbe))
+        {
+            bail!("`stage`: a superseded gate {leftover:?} outlived its cancelled identity wait");
+        }
+        let parked_at = probes
+            .park_point(*gate)
+            .ok_or_else(|| anyhow!("`stage`: the held gate vanished before it was recorded"))?;
+        let record = StagedRecord {
+            generation: staged.application_generation,
+            route_generation: staged.route_generation,
+            gate: *gate,
+            parked_at,
         };
         self.stages += 1;
-        self.ids.record(
-            self.stages,
-            StagedRecord {
-                generation: staged.application_generation,
-                route_generation: staged.route_generation,
-                gate: *gate,
-            },
-        )
+        self.ids.record(self.stages, record)
     }
 
     fn probe_result(&mut self, tok: i64, ok: bool) -> Result {
-        let (generation, route_generation, gate) = {
+        let (generation, route_generation, gate, parked_at) = {
             let record = self.ids.record_of(tok)?;
-            (record.generation, record.route_generation, record.gate)
+            (record.generation, record.route_generation, record.gate, record.parked_at)
         };
         let live = self.live_route.as_ref().map(Route::route_generation);
         let superseded = live != Some(route_generation);
@@ -358,8 +370,29 @@ impl AppConfDriver {
             bail!("the owner still stages superseded candidate {tok} after it went idle");
         }
         let outcome = if ok { ProbeOutcome::Usable } else { ProbeOutcome::Unusable };
-        // A discarded candidate's gate may be gone: releasing it is a no-op.
-        self.world()?.probes.release(gate, outcome);
+        let probes = &self.world()?.probes;
+        let returned_before = probes.connect_returned();
+        let released = probes.release(gate, outcome);
+        if parked_at == ParkPoint::ConnectProbe {
+            // The connect probe cannot be cancelled: the gate of a superseded
+            // or discarded candidate is still parked, so the release reaches
+            // its waiter. The late result is the gate's own, and the gate
+            // discards it: nothing reaches the owner (checked below, against
+            // the owner's own status and the model).
+            if released != ReleaseOutcome::Released {
+                bail!("the connect probe of candidate {tok} was not parked at its release");
+            }
+            self.runtime
+                .block_on(wait_until(
+                    &self.status,
+                    probes,
+                    "the released connect probe to return",
+                    |_, probes| probes.connect_returned() > returned_before,
+                ))
+                .map_err(|error| anyhow!(error))?;
+        }
+        // A candidate parked at the identity wait is gone once superseded:
+        // releasing it is a no-op.
         if !ok && !superseded && staged_is_tok {
             self.failed_route = Some(route_generation);
         }

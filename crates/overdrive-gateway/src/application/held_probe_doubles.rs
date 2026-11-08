@@ -19,28 +19,39 @@
 //! `connect(2)` to the Service frontend and `take_receipt`, and performs no
 //! `selected_backend_identity` and no `GatewayClientMtls::authenticate`. The
 //! gate therefore parks at an awaited operation it owns, never at
-//! `authenticate`. The two once-per-boot proofs
-//! (`GatewayRelay::probe`, `GatewayConnectDataplane::probe`) cannot hold a
-//! later candidate, so the park point is the one await every staged gate
-//! performs: `GatewayIdentityLifecycleControl::ensure_current`.
+//! `authenticate`. A gate parks at exactly one point ([`ParkPoint`]):
+//!
+//! - the first gate of a boot parks inside `GatewayConnectDataplane::probe`,
+//!   the once-per-boot proof the owner latches. That wait is not cancellable:
+//!   a gate the owner has superseded stays parked there until it is released,
+//!   and then completes a real late result that the gate itself discards;
+//! - every later gate parks at `GatewayIdentityLifecycleControl::ensure_current`,
+//!   the one await every staged gate performs. The owner cancels that wait
+//!   when it supersedes the gate, so only a live staged gate stays parked.
+//!
+//! A gate released usable at the connect probe passes its own identity wait at
+//! once (the double recognises the gate's task), so one gate is one entry and
+//! one verdict:
 //!
 //! 1. each staged gate parks as its own entry ([`HeldProbes::park`]);
 //! 2. one entry is released by the [`HeldGate`] it was given when it parked,
 //!    never by arrival position ([`HeldProbes::release`]);
-//! 3. a release carries a typed outcome: [`ProbeOutcome::Usable`] returns
-//!    `Ok(GatewayIdentityFacts)`, [`ProbeOutcome::Unusable`] returns the typed
-//!    `Err(GatewayIdentityLifecycleError::ReconcilerUnavailable)`, which the
-//!    gate reports as `Identity(..)` (status `GatewayIdentityUnusable`);
-//! 4. the number of entries held is observable ([`HeldProbes::held_count`]).
+//! 3. a release carries a typed outcome: [`ProbeOutcome::Usable`] lets the gate
+//!    go on to the connector probe, [`ProbeOutcome::Unusable`] returns the
+//!    port's typed unavailable error (`GatewayConnectDataplaneError::Unavailable`
+//!    at the connect probe, `GatewayIdentityLifecycleError::ReconcilerUnavailable`
+//!    at the identity wait), which the gate reports as a gateway-local failure;
+//! 4. the number of entries held ([`HeldProbes::held_count`]) and the number of
+//!    connect probes that have returned ([`HeldProbes::connect_returned`]) are
+//!    observable.
 //!
 //! An entry is removed when it is released and when its waiter is dropped (the
 //! owner cancels a superseded gate's identity wait), so releasing an entry
 //! whose waiter is gone or one already released returns
 //! [`ReleaseOutcome::Absent`], a no-op.
 //!
-//! The client double answers `authenticate` at once with a usable upstream: the
-//! gate does not reach it under R-65, and a gate that still does (the
-//! pre-R-65 owner) is not held there.
+//! The client double answers `authenticate` with the port's typed unavailable
+//! error: the gate does not reach it under R-65.
 //!
 //! # Bind-address table (R-6)
 //!
@@ -58,6 +69,7 @@
 //! | 65 | QC-2 `route_withdraw_drain` |
 //! | 66 | QC-2 `late_probe_after_supersession` |
 //! | 67 | QC-2 randomized traces |
+//! | 68..=71 | admission refusals over leases (`admission_acceptance`), one per test |
 //! | 98 | QC-2 `failed_candidate_not_restaged` |
 #![allow(
     clippy::doc_markdown,
@@ -66,7 +78,7 @@
     reason = "CONTRACT_SHAPE metadata, fixture preconditions and the address arithmetic of the table above"
 )]
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::net::{Ipv4Addr, TcpListener};
 use std::num::{NonZeroU64, NonZeroUsize};
 use std::os::fd::OwnedFd;
@@ -111,9 +123,9 @@ use crate::ports::{
     AcceptedPublicLeg, GatewayClientMtls, GatewayClientMtlsError, GatewayConnectCleanup,
     GatewayConnectCleanupSweep, GatewayConnectDataplane, GatewayConnectDataplaneError,
     GatewayConnectIntent, GatewayIdentityLifecycleControl, GatewayIdentityLifecycleError,
-    GatewayRelay, GatewaySelectionReceipt, GatewayUpstream, GatewayUpstreamSeal, HeadTerminator,
-    KtlsLeg, KtlsReadHalf, KtlsWriteHalf, LegReadError, LegWriteError, PreparedUpstream,
-    PublicHandshakeError, ReadDeadlines, RelayDeadlines, RelayError, RelayProbeError, ThroughBytes,
+    GatewayRelay, GatewaySelectionReceipt, GatewayUpstream, HeadTerminator, KtlsReadHalf,
+    KtlsWriteHalf, LegReadError, LegWriteError, PreparedUpstream, PublicHandshakeError,
+    ReadDeadlines, RelayDeadlines, RelayError, RelayProbeError, ThroughBytes,
 };
 use crate::runtime::GatewayLimits;
 use crate::{GatewayConfig, ManualCertifiedKeyConfig};
@@ -152,14 +164,34 @@ pub(super) enum ReleaseOutcome {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) struct HeldGate(u64);
 
+/// Where a gate parks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ParkPoint {
+    /// Inside `GatewayConnectDataplane::probe`: not cancellable.
+    ConnectProbe,
+    /// At `GatewayIdentityLifecycleControl::ensure_current`: cancelled by the
+    /// owner when it supersedes the gate.
+    IdentityWait,
+}
+
+struct HeldEntry {
+    sender: oneshot::Sender<ProbeOutcome>,
+    point: ParkPoint,
+}
+
 #[derive(Default)]
 struct HeldState {
     next_gate: u64,
-    entries: BTreeMap<HeldGate, oneshot::Sender<ProbeOutcome>>,
+    entries: BTreeMap<HeldGate, HeldEntry>,
+    /// Gate tasks released usable at the connect probe: their identity wait
+    /// passes at once.
+    passed: BTreeSet<tokio::task::Id>,
+    /// Connect probes that returned after having been parked.
+    connect_returned: u32,
 }
 
-/// Gates parked at `GatewayIdentityLifecycleControl::ensure_current`, each
-/// addressed by the [`HeldGate`] it was given.
+/// Gates parked at the awaited operations they own, each addressed by the
+/// [`HeldGate`] it was given.
 #[derive(Default)]
 pub(super) struct HeldProbes {
     state: Mutex<HeldState>,
@@ -182,12 +214,12 @@ impl HeldProbes {
         Arc::new(Self::default())
     }
 
-    fn park(self: &Arc<Self>) -> (ParkGuard, oneshot::Receiver<ProbeOutcome>) {
+    fn park(self: &Arc<Self>, point: ParkPoint) -> (ParkGuard, oneshot::Receiver<ProbeOutcome>) {
         let (sender, receiver) = oneshot::channel();
         let mut state = self.state.lock().expect("held probes");
         state.next_gate += 1;
         let gate = HeldGate(state.next_gate);
-        state.entries.insert(gate, sender);
+        state.entries.insert(gate, HeldEntry { sender, point });
         drop(state);
         (ParkGuard { probes: Arc::clone(self), gate }, receiver)
     }
@@ -202,13 +234,39 @@ impl HeldProbes {
         self.state.lock().expect("held probes").entries.keys().copied().collect()
     }
 
+    /// Where `gate` is parked, or `None` once it is released or its waiter is
+    /// gone.
+    pub(super) fn park_point(&self, gate: HeldGate) -> Option<ParkPoint> {
+        self.state.lock().expect("held probes").entries.get(&gate).map(|entry| entry.point)
+    }
+
+    /// Connect probes that have returned after having been parked.
+    pub(super) fn connect_returned(&self) -> u32 {
+        self.state.lock().expect("held probes").connect_returned
+    }
+
     /// Complete the entry of `gate` with `outcome`.
     pub(super) fn release(&self, gate: HeldGate, outcome: ProbeOutcome) -> ReleaseOutcome {
         let removed = self.state.lock().expect("held probes").entries.remove(&gate);
-        match removed.map(|sender| sender.send(outcome)) {
+        match removed.map(|entry| entry.sender.send(outcome)) {
             Some(Ok(())) => ReleaseOutcome::Released,
             Some(Err(_)) | None => ReleaseOutcome::Absent,
         }
+    }
+
+    /// The parked connect probe returned `outcome` to the current gate task.
+    fn connect_probe_returned(&self, usable: bool) {
+        let mut state = self.state.lock().expect("held probes");
+        state.connect_returned += 1;
+        if usable && let Some(task) = tokio::task::try_id() {
+            state.passed.insert(task);
+        }
+    }
+
+    /// Whether the current gate task was released usable at the connect probe.
+    fn identity_already_passed(&self) -> bool {
+        tokio::task::try_id()
+            .is_some_and(|task| self.state.lock().expect("held probes").passed.contains(&task))
     }
 }
 
@@ -216,20 +274,13 @@ impl HeldProbes {
 // GatewayClientMtls double
 // ---------------------------------------------------------------------------
 
-/// Answers every `authenticate` at once with a usable upstream. Under R-65 the
-/// gate never calls it; the request path is not driven on the QC-2 path.
-pub(super) struct UsableClientMtls {
-    seal: GatewayUpstreamSeal,
-}
-
-impl UsableClientMtls {
-    pub(super) fn new(seal: GatewayUpstreamSeal) -> Self {
-        Self { seal }
-    }
-}
+/// Answers every `authenticate` with the port's typed unavailable error. Under
+/// R-65 the gate never calls it, and the request path is not driven on the QC-2
+/// path.
+pub(super) struct UnavailableClientMtls;
 
 #[async_trait]
-impl GatewayClientMtls for UsableClientMtls {
+impl GatewayClientMtls for UnavailableClientMtls {
     async fn authenticate(
         &self,
         connected: OwnedFd,
@@ -237,7 +288,7 @@ impl GatewayClientMtls for UsableClientMtls {
         _deadline: Instant,
     ) -> Result<GatewayUpstream, GatewayClientMtlsError> {
         drop(connected);
-        Ok(self.seal.seal_authenticated(KtlsLeg::from_armed(Box::new(()), Box::new(()))))
+        Err(GatewayClientMtlsError::IdentityAbsent)
     }
 }
 
@@ -245,32 +296,33 @@ impl GatewayClientMtls for UsableClientMtls {
 // GatewayConnectDataplane double
 // ---------------------------------------------------------------------------
 
-/// The peer identity the double answers for one minted backend.
-pub(super) fn backend_identity(backend_id: BackendId) -> SpiffeId {
-    SpiffeId::new(&format!("spiffe://overdrive.local/workload/api/alloc/api-{}", backend_id.get()))
-        .expect("backend SPIFFE ID")
+/// The one backend every receipt of the double names: the gate performs no
+/// backend resolution (R-65), so per-socket backends are not needed.
+fn selected_backend() -> BackendId {
+    BackendId::new(1).expect("backend ID")
 }
 
 #[derive(Default)]
 struct ConnectState {
     next_cookie: u64,
-    next_backend: u32,
-    registered: BTreeMap<SocketCookie, (GatewayConnectIntent, BackendId)>,
-    pending_receipts: BTreeMap<SocketCookie, BackendId>,
+    probe_calls: u32,
+    registered: BTreeMap<SocketCookie, GatewayConnectIntent>,
+    pending_receipts: BTreeSet<SocketCookie>,
 }
 
-/// Answers every `open_upstream` with a fresh unconnected socket, a freshly
-/// minted nonzero cookie and a distinct minted `BackendId`; `take_receipt`
-/// answers `Selected` carrying that backend: the gate's probe accepts it
-/// without resolving an identity or authenticating the peer (R-65).
-#[derive(Default)]
+/// Answers every `open_upstream` with a fresh unconnected socket and a freshly
+/// minted nonzero cookie; `take_receipt` answers `Selected`: the gate's probe
+/// accepts it without resolving an identity or authenticating the peer (R-65).
+/// The first `probe` call of the boot parks (the owner latches the proof, so no
+/// later candidate calls it again) until its entry is released.
 pub(super) struct HeldConnectDouble {
+    probes: Arc<HeldProbes>,
     state: Mutex<ConnectState>,
 }
 
 impl HeldConnectDouble {
-    pub(super) fn new() -> Arc<Self> {
-        Arc::new(Self::default())
+    pub(super) fn new(probes: Arc<HeldProbes>) -> Arc<Self> {
+        Arc::new(Self { probes, state: Mutex::new(ConnectState::default()) })
     }
 
     /// Number of upstream sockets opened so far.
@@ -312,14 +364,14 @@ impl GatewayConnectCleanup for HeldConnectDouble {
         Ok(state
             .pending_receipts
             .iter()
-            .filter_map(|(cookie, backend_id)| {
-                let (intent, _) = state.registered.get(cookie)?;
+            .filter_map(|cookie| {
+                let intent = state.registered.get(cookie)?;
                 Some((
                     *cookie,
                     GatewaySelectionReceipt::Selected {
                         socket_cookie: intent.socket_cookie,
                         service_key: intent.service_key,
-                        backend_id: *backend_id,
+                        backend_id: selected_backend(),
                     },
                 ))
             })
@@ -334,7 +386,19 @@ impl GatewayConnectDataplane for HeldConnectDouble {
         _deadline: Instant,
         _clock: &dyn Clock,
     ) -> Result<(), GatewayConnectDataplaneError> {
-        Ok(())
+        let first = {
+            let mut state = self.state.lock().expect("connect state");
+            state.probe_calls += 1;
+            state.probe_calls == 1
+        };
+        if !first {
+            return Ok(());
+        }
+        let (_parked, outcome) = self.probes.park(ParkPoint::ConnectProbe);
+        let outcome = outcome.await;
+        let usable = matches!(outcome, Ok(ProbeOutcome::Usable));
+        self.probes.connect_probe_returned(usable);
+        if usable { Ok(()) } else { Err(GatewayConnectDataplaneError::Unavailable) }
     }
 
     fn open_upstream(
@@ -345,12 +409,10 @@ impl GatewayConnectDataplane for HeldConnectDouble {
             .map_err(|error| GatewayConnectDataplaneError::SocketCreate(error.kind()))?;
         let mut state = self.state.lock().expect("connect state");
         state.next_cookie += 1;
-        state.next_backend += 1;
         let cookie = SocketCookie::new(state.next_cookie).expect("nonzero cookie");
-        let backend = BackendId::new(state.next_backend).expect("backend ID");
         let intent = GatewayConnectIntent { socket_cookie: cookie, service_key: key };
-        state.registered.insert(cookie, (intent.clone(), backend));
-        state.pending_receipts.insert(cookie, backend);
+        state.registered.insert(cookie, intent.clone());
+        state.pending_receipts.insert(cookie);
         drop(state);
         Ok(PreparedUpstream::new(socket, intent))
     }
@@ -360,17 +422,17 @@ impl GatewayConnectDataplane for HeldConnectDouble {
         intent: &GatewayConnectIntent,
     ) -> Result<GatewaySelectionReceipt, GatewayConnectDataplaneError> {
         let mut state = self.state.lock().expect("connect state");
-        let Some((registered, _)) = state.registered.get(&intent.socket_cookie).cloned() else {
+        let Some(registered) = state.registered.get(&intent.socket_cookie).cloned() else {
             return Err(GatewayConnectDataplaneError::IntentMissing);
         };
-        let Some(backend_id) = state.pending_receipts.remove(&intent.socket_cookie) else {
+        if !state.pending_receipts.remove(&intent.socket_cookie) {
             return Err(GatewayConnectDataplaneError::ReceiptMissing);
-        };
+        }
         drop(state);
         Ok(GatewaySelectionReceipt::Selected {
             socket_cookie: registered.socket_cookie,
             service_key: registered.service_key,
-            backend_id,
+            backend_id: selected_backend(),
         })
     }
 
@@ -378,7 +440,7 @@ impl GatewayConnectDataplane for HeldConnectDouble {
         &self,
         backend_id: BackendId,
     ) -> Result<SpiffeId, GatewayConnectDataplaneError> {
-        Ok(backend_identity(backend_id))
+        Err(GatewayConnectDataplaneError::BackendIdentityMissing { backend_id })
     }
 }
 
@@ -398,9 +460,9 @@ fn gateway_identity_facts() -> GatewayIdentityFacts {
     }
 }
 
-/// Parks every `ensure_current` as its own entry (the gate's identity wait,
-/// DG-9) and answers it with the current facts or the typed
-/// `ReconcilerUnavailable` when released; `current` and `subscribe` answer
+/// Parks every `ensure_current` of a gate that did not already pass the connect
+/// probe as its own entry (the gate's identity wait, DG-9) and answers it with
+/// the current facts or the typed `ReconcilerUnavailable` when released; `current` and `subscribe` answer
 /// immediately with current facts; `disable_after_drain` is a synchronous clear
 /// (R-4).
 pub(super) struct HeldIdentity {
@@ -423,7 +485,10 @@ impl GatewayIdentityLifecycleControl for HeldIdentity {
         &self,
         _deadline: Instant,
     ) -> Result<GatewayIdentityFacts, GatewayIdentityLifecycleError> {
-        let (_parked, outcome) = self.probes.park();
+        if self.probes.identity_already_passed() {
+            return Ok(self.facts.clone());
+        }
+        let (_parked, outcome) = self.probes.park(ParkPoint::IdentityWait);
         match outcome.await {
             Ok(ProbeOutcome::Usable) => Ok(self.facts.clone()),
             Ok(ProbeOutcome::Unusable) | Err(_) => {
@@ -704,17 +769,17 @@ impl Composition {
         )
         .await
         .expect("gateway builder");
-        let (builder, seal) = unbound.into_builder();
+        let (builder, _seal) = unbound.into_builder();
 
         let limits = GatewayLimits::first_slice();
         let budget = GatewayAdmissionBudget::new(Arc::new(limits.clone()));
         let admission = GatewayAdmission::new(budget);
         let probes = HeldProbes::new();
-        let connect = HeldConnectDouble::new();
+        let connect = HeldConnectDouble::new(Arc::clone(&probes));
         let dependencies = GatewayRuntimeDependencies::new(
             limits,
             connect.clone(),
-            Arc::new(UsableClientMtls::new(seal)),
+            Arc::new(UnavailableClientMtls),
             HeldIdentity::new(Arc::clone(&probes)),
             Arc::new(UnavailableRelay),
         );

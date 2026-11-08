@@ -55,6 +55,8 @@ use crate::runtime::GatewayLimits;
 use crate::runtime::exchange::{ConnectionServices, DrainSignal, serve_connection};
 use crate::{GatewayConfig, GatewayConfigError};
 
+#[cfg(test)]
+mod admission_acceptance;
 #[cfg(all(test, feature = "integration-tests"))]
 mod held_probe_doubles;
 #[cfg(test)]

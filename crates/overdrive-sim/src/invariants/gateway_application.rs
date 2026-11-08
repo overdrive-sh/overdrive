@@ -8,9 +8,11 @@
 //! through a real loopback connection to the bound public listener served by
 //! `SimGatewayRelay`, and shutdown through `GatewayHandle::shutdown`. The only
 //! fault is the Sim connect-probe hold/release (a driven-port fault carrying the
-//! real `ServiceFrontend`, parked at the gate's identity wait, an awaited
-//! operation the gate owns; route activation does not depend on backend
-//! authentication, so the gate never reaches `authenticate`, R-65). The
+//! real `ServiceFrontend`, parked at an awaited operation the gate owns: the
+//! once-per-boot connect dataplane probe for the first candidate of a boot,
+//! which the owner cannot cancel, and the identity wait for every later one;
+//! route activation does not depend on backend authentication, so the gate
+//! never reaches `authenticate`, R-65). The
 //! oracles read only the redacted `GatewayApplicationStatusRowV1`, the
 //! non-secret shutdown projections and the dataplane's live intent/receipt
 //! counts; there is no parallel owner model and no handcrafted pass.
@@ -153,10 +155,12 @@ pub(crate) enum GatewayApplicationSimInput {
 
 /// One driven-port fault of a case.
 pub(crate) enum GatewayApplicationSimFault {
-    /// Holds the staged gate's completion for one frontend, parked at the
-    /// identity wait the gate owns (`GatewayIdentityLifecycleControl::
-    /// ensure_current`, DG-9, R-65): a driven-port fault on the Sim identity
-    /// control, needing no backend and no `Selected` receipt.
+    /// Holds the staged gate's completion for one frontend, parked at an
+    /// awaited operation the gate owns (DG-9, R-65): inside the connect
+    /// dataplane probe for the first candidate of a boot (a wait the owner
+    /// cannot cancel), at the identity wait
+    /// (`GatewayIdentityLifecycleControl::ensure_current`) for a later one. A
+    /// driven-port fault needing no backend and no `Selected` receipt.
     HoldConnectProbe(ServiceFrontend),
     ReleaseConnectProbe(ServiceFrontend),
 }
@@ -174,19 +178,25 @@ pub(crate) struct GatewayApplicationInvariantCase {
 }
 
 impl GatewayApplicationInvariantCase {
-    /// Three generations of one Route ID; a connection retained on the first
-    /// Current; the second generation's probe held, superseded by the third;
-    /// the stale completion released; withdrawal; release of the retained
-    /// connection; one restart. The seed selects among the legal tails.
+    /// Four generations of one Route ID. The first (`late`) is held inside the
+    /// connect dataplane probe, a wait the owner cannot cancel, and superseded
+    /// by the second before the hold is released: its late completion is
+    /// delivered to its gate, which discards it, and the second becomes
+    /// Current. A connection is retained on that Current; the third
+    /// generation's gate is held at the identity wait and superseded by the
+    /// fourth (the owner cancels the third's wait, so nothing is delivered for
+    /// it); withdrawal; release of the retained connection; one restart. The
+    /// seed selects among the legal tails.
     pub(crate) fn generation_lifecycle(seed: u64, frontend: ServiceFrontend) -> Self {
         let route_id = route_id();
         let mut inputs = vec![
+            GatewayApplicationSimInput::ApplyRoute(route("/v0")),
             GatewayApplicationSimInput::ApplyRoute(route("/v1")),
             GatewayApplicationSimInput::RetainCurrentPublicConnection,
             GatewayApplicationSimInput::ApplyRoute(route("/v2")),
             GatewayApplicationSimInput::ApplyRoute(route("/v3")),
         ];
-        // The stale completion is delivered after the third apply, before the tail.
+        // The second hold is released after the fourth apply, before the tail.
         let release_slot = inputs.len();
         let tail = pick_tail(seed);
         match tail {
@@ -211,9 +221,13 @@ impl GatewayApplicationInvariantCase {
             faults: vec![
                 GatewayApplicationSimFault::HoldConnectProbe(frontend),
                 GatewayApplicationSimFault::ReleaseConnectProbe(frontend),
+                GatewayApplicationSimFault::HoldConnectProbe(frontend),
+                GatewayApplicationSimFault::ReleaseConnectProbe(frontend),
             ],
-            // Hold before the second apply (index 2); release after the third.
-            fault_slots: vec![2, release_slot],
+            // Hold before the first apply (index 0), release after the second
+            // (before the retained connection); hold before the third apply
+            // (index 3), release after the fourth.
+            fault_slots: vec![0, 2, 3, release_slot],
         }
     }
 
@@ -805,6 +819,9 @@ fn verdict(name: &str, seed: u64, outcome: Result<Vec<String>, String>) -> Invar
 /// What the oracle has learned about the three generations by name.
 #[derive(Default)]
 struct Generations {
+    /// The superseded generation whose gate parks inside the connect probe
+    /// (lifecycle case only).
+    late: Option<RouteGeneration>,
     first: Option<RouteGeneration>,
     second: Option<RouteGeneration>,
     third: Option<RouteGeneration>,
@@ -829,7 +846,7 @@ impl Observer {
     const fn new() -> Self {
         Self {
             trace: Vec::new(),
-            generations: Generations { first: None, second: None, third: None },
+            generations: Generations { late: None, first: None, second: None, third: None },
             shutdown_in_progress: false,
             probe_held: false,
             held_gates: 0,
@@ -869,6 +886,19 @@ impl Observer {
                 && current.route_generation == second
             {
                 return Err(format!("the superseded second generation became Current ({line})"));
+            }
+            if let Some(late) = self.generations.late
+                && row
+                    .staged
+                    .iter()
+                    .chain(row.current.iter())
+                    .chain(row.draining.iter())
+                    .any(|generation| generation.route_generation == late)
+                && self.generations.first.is_some()
+            {
+                return Err(format!(
+                    "the generation superseded while its connect probe was held reappeared ({line})"
+                ));
             }
         }
         Ok(row)
@@ -938,9 +968,34 @@ async fn run_case(
                     rig.wait_connect_idle().await?;
                     observer.probe_held = false;
                     observer.held_gates = 0;
-                    if check_lifecycle {
-                        // The stale completion is delivered; the successor must
-                        // become Current and the stale generation never does.
+                    if check_lifecycle && observer.generations.third.is_none() {
+                        // The first generation's gate was superseded while parked
+                        // inside the connect probe, which the owner cannot cancel:
+                        // the release delivers its late completion to the gate
+                        // itself (both parked gates return), which discards it. The
+                        // replacement becomes Current and the stale generation never
+                        // appears.
+                        rig.wait_gates_parked(0).await?;
+                        let first = observer.generations.first;
+                        let row = rig
+                            .wait_status("the replacement to become Current", |row| {
+                                row.current.as_ref().map(|c| c.route_generation) == first
+                                    && row.staged.is_none()
+                            })
+                            .await?;
+                        let late = observer.generations.late;
+                        if row.draining.iter().any(|d| Some(d.route_generation) == late) {
+                            return Err(format!(
+                                "the stale completion left its generation Draining ({})",
+                                render_row(Some(&row))
+                            ));
+                        }
+                        observer.observe(&rig, "stale connect probe completion released").await?;
+                    } else if check_lifecycle {
+                        // The successor's gate cancelled the held identity wait of the
+                        // generation it superseded, so no completion is delivered for
+                        // it; the successor must become Current and the superseded
+                        // generation never does.
                         let third = observer.generations.third;
                         let row = rig
                             .wait_status("the successor to become Current", |row| {
@@ -959,7 +1014,7 @@ async fn run_case(
                                 render_row(Some(&row))
                             ));
                         }
-                        observer.observe(&rig, "stale completion released").await?;
+                        observer.observe(&rig, "identity hold released").await?;
                     }
                 }
             }
@@ -975,50 +1030,89 @@ async fn run_case(
                     .apply(route.clone())
                     .await
                     .map_err(|error| format!("apply Route {applies}: {error}"))?;
-                match applies {
-                    1 => {
-                        let row = rig
-                            .wait_status("the first generation to become Current", |row| {
-                                row.current.is_some() && row.unavailable.is_none()
-                            })
-                            .await?;
-                        observer.generations.first =
-                            row.current.as_ref().map(|c| c.route_generation);
-                    }
-                    2 => {
-                        let first = observer.generations.first;
-                        let row = rig
-                            .wait_status("the second generation to be Staged", |row| {
-                                row.staged.as_ref().map(|s| s.route_generation) != first
-                                    && row.staged.is_some()
-                            })
-                            .await?;
-                        observer.generations.second =
-                            row.staged.as_ref().map(|s| s.route_generation);
-                        if row.current.as_ref().map(|c| c.route_generation) != first {
-                            return Err(format!(
-                                "Current changed before the second generation was promoted ({})",
-                                render_row(Some(&row))
-                            ));
+                // A hold armed before the first apply parks that gate inside the
+                // connect probe: the generation is Staged, never Current, until
+                // the hold is released.
+                let first_gate_held = applies == 1 && observer.probe_held;
+                let ordinal = applies - u32::from(observer.generations.late.is_some());
+                if first_gate_held {
+                    let row = rig
+                        .wait_status("the held first generation to be Staged", |row| {
+                            row.staged.is_some() && row.current.is_none()
+                        })
+                        .await?;
+                    observer.generations.late = row.staged.as_ref().map(|s| s.route_generation);
+                } else {
+                    match ordinal {
+                        1 if observer.probe_held => {
+                            let late = observer.generations.late;
+                            let row = rig
+                                .wait_status(
+                                    "the replacement to supersede the held Staged",
+                                    |row| {
+                                        row.staged.is_some()
+                                            && row.staged.as_ref().map(|s| s.route_generation)
+                                                != late
+                                    },
+                                )
+                                .await?;
+                            observer.generations.first =
+                                row.staged.as_ref().map(|s| s.route_generation);
+                            if row.current.is_some() {
+                                return Err(format!(
+                                    "Current appeared while every gate was held ({})",
+                                    render_row(Some(&row))
+                                ));
+                            }
                         }
-                    }
-                    _ => {
-                        let second = observer.generations.second;
-                        let row = rig
-                            .wait_status("the third generation to be Staged", |row| {
-                                row.staged.is_some()
-                                    && row.staged.as_ref().map(|s| s.route_generation) != second
-                            })
-                            .await?;
-                        observer.generations.third =
-                            row.staged.as_ref().map(|s| s.route_generation);
+                        1 => {
+                            let row = rig
+                                .wait_status("the first generation to become Current", |row| {
+                                    row.current.is_some() && row.unavailable.is_none()
+                                })
+                                .await?;
+                            observer.generations.first =
+                                row.current.as_ref().map(|c| c.route_generation);
+                        }
+                        2 => {
+                            let first = observer.generations.first;
+                            let row = rig
+                                .wait_status("the second generation to be Staged", |row| {
+                                    row.staged.as_ref().map(|s| s.route_generation) != first
+                                        && row.staged.is_some()
+                                })
+                                .await?;
+                            observer.generations.second =
+                                row.staged.as_ref().map(|s| s.route_generation);
+                            if row.current.as_ref().map(|c| c.route_generation) != first {
+                                return Err(format!(
+                                    "Current changed before the second generation was promoted ({})",
+                                    render_row(Some(&row))
+                                ));
+                            }
+                        }
+                        _ => {
+                            let second = observer.generations.second;
+                            let row = rig
+                                .wait_status("the third generation to be Staged", |row| {
+                                    row.staged.is_some()
+                                        && row.staged.as_ref().map(|s| s.route_generation) != second
+                                })
+                                .await?;
+                            observer.generations.third =
+                                row.staged.as_ref().map(|s| s.route_generation);
+                        }
                     }
                 }
                 if observer.probe_held {
-                    // This generation's gate reaches the identity wait and parks (the
-                    // superseded generation's wait is cancelled, so exactly one gate is
-                    // parked); the observation below is taken only once it has.
-                    observer.held_gates = 1;
+                    // The gate of a generation held at the identity wait parks there
+                    // (the superseded generation's wait is cancelled, so exactly one
+                    // gate is parked). A gate held inside the connect probe is not
+                    // cancelled: the superseded first generation's gate stays parked
+                    // beside its replacement's, so two are. The observation below is
+                    // taken only once they have parked.
+                    observer.held_gates =
+                        if applies == 2 && observer.generations.late.is_some() { 2 } else { 1 };
                     rig.wait_gates_parked(observer.held_gates).await?;
                 }
                 observer.observe(&rig, &format!("route {applies} applied")).await?;
@@ -1084,6 +1178,7 @@ async fn run_case(
                 // Restart relists durable intent: a withdrawn or superseded
                 // generation is never resurrected.
                 if let Some(row) = rig.status().await? {
+                    let late = observer.generations.late;
                     let first = observer.generations.first;
                     let second = observer.generations.second;
                     let present = [row.staged.as_ref(), row.current.as_ref()]
@@ -1091,7 +1186,7 @@ async fn run_case(
                         .flatten()
                         .map(|g| Some(g.route_generation));
                     for generation in present {
-                        if generation == first || generation == second {
+                        if generation == late || generation == first || generation == second {
                             return Err(format!(
                                 "restart resurrected a superseded generation ({})",
                                 render_row(Some(&row))

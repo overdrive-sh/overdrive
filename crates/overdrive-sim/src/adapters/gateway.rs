@@ -1073,14 +1073,25 @@ pub enum ConnectOperation {
 ///
 /// Route activation does not depend on backend health or authentication
 /// (R-65): the gate never reaches `GatewayClientMtls::authenticate`. A held gate
-/// parks at an awaited operation the gate owns (DG-9). The once-per-boot proofs
-/// (`GatewayRelay::probe`, `GatewayConnectDataplane::probe`) cannot hold a later
-/// generation, so the park point is the identity wait every staged gate
-/// performs, [`SimGatewayIdentityLifecycleControl::ensure_current`]. That port
-/// operation carries no frontend, so a hold armed for a frontend parks every
-/// gate that reaches it until that frontend is released; the rigs that use it
-/// compose one Service frontend. A superseded gate's wait is cancelled by the
-/// owner, so only the live staged gate stays parked. Cloning shares the state.
+/// parks at an awaited operation the gate owns (DG-9), and the park point
+/// depends on the gate's place in the boot:
+///
+/// - the owner latches the once-per-boot proof
+///   (`GatewayConnectDataplane::probe`) on its first success, so only the
+///   first candidate of a boot reaches it before the latch is set, and a hold
+///   armed before that candidate parks it (and any candidate that follows it
+///   before the latch) inside [`SimGatewayConnectDataplane::probe`]. That wait
+///   cannot be cancelled: a gate the owner supersedes stays parked until the
+///   hold is released and then completes a real late result, which the gate
+///   discards;
+/// - every gate that reaches the identity wait
+///   ([`SimGatewayIdentityLifecycleControl::ensure_current`]) while the hold is
+///   armed parks there. The owner cancels that wait when it supersedes the gate,
+///   so only the live staged gate stays parked.
+///
+/// Neither port operation carries a frontend, so a hold armed for a frontend
+/// parks every gate that reaches either point until that frontend is released;
+/// the rigs that use it compose one Service frontend. Cloning shares the state.
 #[derive(Clone)]
 pub struct SimConnectHold {
     shared: Arc<HoldShared>,
@@ -1118,7 +1129,8 @@ impl Drop for ParkedEntry {
 }
 
 impl SimConnectHold {
-    /// Park the next gate(s) at the identity wait while `frontend` is held.
+    /// Park the next gate(s) at the held operation they reach while `frontend`
+    /// is held.
     pub fn hold(&self, frontend: ServiceFrontend) {
         let mut state = self.shared.state.lock();
         if !state.held.contains(&frontend) {
@@ -1211,8 +1223,9 @@ impl SimGatewayConnectDataplane {
         self.state.lock().faults.entry(operation).or_default().push_back(error);
     }
 
-    /// The gate hold this adapter exposes; arm it on a
-    /// [`SimGatewayIdentityLifecycleControl`] with `with_hold`.
+    /// The gate hold this adapter parks `probe` on; arm the same hold on a
+    /// [`SimGatewayIdentityLifecycleControl`] with `with_hold` to park the
+    /// identity wait as well.
     pub fn connect_hold(&self) -> SimConnectHold {
         self.hold.clone()
     }
@@ -1300,6 +1313,9 @@ impl GatewayConnectDataplane for SimGatewayConnectDataplane {
         if clock.now() >= deadline {
             return Err(GatewayConnectDataplaneError::ProbeTimeout);
         }
+        // The probe's completion is the held operation: the sweep above has
+        // run, and the result is not delivered until the hold is released.
+        self.hold.park_if_held().await;
         Ok(())
     }
 
