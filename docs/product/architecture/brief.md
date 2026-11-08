@@ -11309,12 +11309,13 @@ claim is bounded memory and no userspace payload copy; no CPU gain is claimed. A
 probe on the real kernel gates the listener bind.
 
 **Lifecycle.** Boot refuses on invalid gateway configuration; the listener
-gates (custody, relay probe, held Gateway SVID, sentinel connect probe, actual-frontend
-probe, application promotion) are not boot-fatal and never touch workload or
-Service state (ADR-0230). Route activation depends on neither backend health nor
-backend authentication: the actual-frontend probe validates the receipt and
-performs no mTLS, and a selected backend's exact-peer mTLS failure is a
-per-request 502. Shutdown runs a gateway stage first, before the
+gates (custody, Route/frontend candidate validity, relay probe, held Gateway SVID,
+sentinel connect probe, application promotion) are gateway-local, are not
+boot-fatal and never touch workload or Service state (ADR-0230). Route
+activation does not depend on the Service in any way: reachability, backend
+presence, health and backend authentication surface per request (503 for no
+backend, 502 for an unreachable address or a failed exact-peer mTLS), and the
+gate makes no connect to the Route's Service. Shutdown runs a gateway stage first, before the
 leg-C worker stage, clearing the volatile Gateway SVID slot in-process, within
 the existing single drain bound (feature delta, D5 section (c)). Gateway Application and BPF hydration generations stay
 independent (ADR-0229).

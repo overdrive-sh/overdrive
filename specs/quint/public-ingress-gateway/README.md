@@ -24,7 +24,7 @@ public-ingress-gateway` fails when it no longer matches the specs).
 | Module | Decision | Safety invariants (`Safety`, TLC exhaustive on `*_ok`) | Named runs (main `*_conf`) |
 |---|---|---|---|
 | `gateway_identity.qnt` | ADR-0225 | `HoldImpliesAudit`, `StaleEpochNeverHolds`, `DisabledSlotIsEmpty` | `issue_hold` (happy path), `reissue_near_expiry`, `disable_races_inflight_issue`, `audit_failure_no_hold`, `restart_reissue` |
-| `gateway_application.qnt` (drain, supersession, failed candidate) | ADR-0222; R-65 / Gate G-1 failed-candidate rule | `DrainRetainsUntilLeasesZero`, `SupersededResultNeverRestores`, `FailedCandidateNotRestaged` | `replace_valid` (supersede, drain, retire), `route_withdraw_drain`, `late_probe_after_supersession` (a superseded staged probe result is discarded), `failed_candidate_not_restaged` (a failed Route generation is not re-staged until the Route changes) |
+| `gateway_application.qnt` (drain, supersession, failed candidate) | ADR-0222; R-65 / Gate G-1 failed-candidate rule | `DrainRetainsUntilLeasesZero`, `SupersededResultNeverRestores`, `FailedCandidateNotRestaged` | `replace_valid` (supersede, drain, retire), `route_withdraw_drain`, `late_probe_after_supersession` (a superseded staged gate result is discarded), `failed_candidate_not_restaged` (a failed Route generation is not re-staged until the Route changes) |
 | `selection_receipt.qnt` | ADR-0232, ADR-0233, ADR-0241 (context ADR-0228, ADR-0242, ADR-0248; see below) | `IdentityReadableOnlyAfterCommit`, `IdentityImmutablePerBackendId`, `ReceiptMatchesIntent`, `NoResidueAfterCleanup`, `RollbackPreservesPriorGeneration`, `EmptyIsNoBackend`, `ReverseNatKeyOneVip` (R-59) | `commit_then_select`, `conflicting_alloc_rejected`, `reverse_nat_conflict_rejected`, `identity_conflict_precedes_reverse_nat`, `restart_destroys_receipts` (conformance-bound, `receipt_conf`); `abandoned_reservation_rolled_back`, `receipt_waits_for_publish_guard` (evaluator-only on `receipt_ok`, not replayed) |
 | `relay_exchange.qnt` (conformance target) | ADR-0239 (context ADR-0245, ADR-0246, ADR-0247, ADR-0253, ADR-0254) | `NoBytePastMessageBoundary` | `exchange_cl_keepalive`, `early_response_closes`, `drain_with_inflight_body`, `half_close_after_request_read`, `upstream_close_mid_body_aborts`, `close_delimited_clean_end`, `public_close_mid_request_aborts` (main `relay_conf`) |
 
@@ -53,10 +53,10 @@ See the header of `checks.toml` (single home).
 - Time is the injected SimClock (`now`, bounded); TTL/RENEW abstract the reused workload SVID half-life policy.
 - `gateway_identity`: one slot, epoch-checked Issue Actions, a synchronous clear at disable (`disable_after_drain` =
   `begin_disable`, no waiting disable, no Drop Action), audit row written before the hold, volatile slot, durable audit rows. Environment actions: `audit_fail`, `advance_time`, `restart`.
-- `gateway_application`: an admission object is `{gid, rg}` (generation id, Route generation); connector probe result per
+- `gateway_application`: an admission object is `{gid, rg}` (generation id, Route generation); gateway-local gate result (`probe_result`) per
   staged token; leases are per-generation connection counts. A result for a superseded or discarded token changes
   nothing. Route activation does not depend on backend health or backend authentication: `probe_result` is the
-  gateway-local gate verdict only (gateway identity usable, connect-path and relay probe, gate deadline, listener bind),
+  gateway-local gate verdict only (gateway identity usable, relay and sentinel connect probes, identity ensure_current, gate deadline, listener bind),
   and the model has no backend variable. `route_declare` is the owner's observation of a Route change; the owner
   records a failed candidate by its Route generation (`failed_rg`) and does not re-stage it until `route_declare`
   (or `route_withdraw`, which ends the Route) clears it. A result for a candidate whose Route the owner has not yet
@@ -82,7 +82,7 @@ See the header of `checks.toml` (single home).
 | A-3 | Every Service backend address lies in the guest prefix. | ADR-0190 consequence; GH #317 |
 | GI-1 | `issue_and_audit` is the existing CA issue+audit path; an audit failure leaves no held material. | `audit_failure_no_hold` run replayed against the production path with a failing Sim ObservationStore write (S-PIG-51 / `ca_issuance` tests) |
 | GI-2 | The injected clock is monotonic. | `SimClock` contract (unit) |
-| GA-1 | The connector probe result is delivered at most once per staged token. | The probe owner's unit-level test: completing a staged probe twice leaves the second ignored |
+| GA-1 | The gateway-local gate result (`probe_result`) is delivered at most once per staged token. | The probe owner's unit-level test: completing a staged probe twice leaves the second ignored |
 | SR-1 | The hook writes exactly one receipt per registered cookie and none for an unregistered one. | S-PIG-50 and the Tier-3 V-GW-1 run (control (d): `receipt=None` for an unregistered cookie) |
 | SR-2 | `restart` empties the Service maps, memo, receipts and applied associations with the dataplane instance. | Source: `EbpfDataplane::new_with_pin_dir` (`crates/overdrive-dataplane/src/lib.rs:430-454`), allocator memo (`allocators/backend_id.rs:9-18`); DISTILL `restart_destroys_receipts` replay plus Tier-3 503-until-rehydrated check |
 

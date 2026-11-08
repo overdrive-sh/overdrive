@@ -28,8 +28,9 @@ typed result: an absent Service entry, an empty slot or a missing backend is
 connect or mTLS failure (public 502); the gateway never reports a wrong-peer
 success. No demand, revision, acknowledgment or wake channel exists, the
 connector adds no poll, sleep or retry, and it consumes no time budget beyond
-the request's existing deadline. Backend absence never blocks the public
-listener bind.
+the request's existing deadline. No Service condition (backend presence,
+health, reachability or authentication) blocks the public listener bind or Route
+promotion; the gate never connects to the Route's Service (R-65).
 
 A selected backend with `BACKEND_MAP.healthy == 0` (the readiness window) is
 classified by ignoring the byte (user ruling P-9 / R-2, 2026-11-02): the

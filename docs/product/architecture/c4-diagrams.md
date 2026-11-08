@@ -1887,10 +1887,10 @@ dial through table 100 → TPROXY to leg-C → rustls server handshake and kTLS 
 network namespace. XDP wire ingress is unchanged and backend enumeration and
 selection remain outside the gateway. The boot sentinel proves the
 registered-connect, hook and receipt edge by consuming a canonical `NoBackend`
-before any gateway identity use. The actual Service Frontend probe treats both
-`NoBackend` and `Selected` as successful and stops at the validated receipt: it
-performs no identity lookup and no exact-peer mTLS, so a selected backend's
-authentication never gates the bind. Exact-peer mTLS runs per request only.
+before any gateway identity use, on a sentinel `ServiceKey` rather than the
+Route's Service. The gate makes no connect to the Route's Service, so no Service
+property (reachability, backends, health, authentication) gates the bind.
+Exact-peer mTLS runs per request only.
 
 ### C4 Level 1 — System Context
 

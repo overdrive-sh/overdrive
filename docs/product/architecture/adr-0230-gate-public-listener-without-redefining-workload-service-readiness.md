@@ -17,16 +17,18 @@ not a listener prerequisite.
 ## Decision
 
 Let the `overdrive serve` gateway gate task bind and admit on public TCP/443
-only after, in order: a usable current certified key, a held current Gateway
-SVID, a passing registered-connect probe (the sentinel connect proves the
-dataplane adapter, hook and receipt path honour their contract in the real
-kernel), an actual-frontend probe that proves the frontend resolves through the
-registered connect path (its `NoBackend` and `Selected` results are both
-bind-valid; it resolves no backend identity and performs no mTLS), and promotion
-of a complete current Route/certified-key generation. Route activation depends
-on neither backend health nor backend authentication: a selected backend whose
-exact-peer mTLS fails is a per-request upstream failure, not a bind condition
-(user ruling R-65, 2026-11-08). Loss or withdrawal of a required
+only after gateway-local facts hold: a usable current certified key, a valid
+Route/frontend candidate, a held current Gateway SVID, the kernel relay
+capability, a passing registered-connect probe (the sentinel connect, made on a
+sentinel `ServiceKey` and not on the Route's Service, proves the dataplane
+adapter, hook and receipt path honour their contract in the real kernel), and
+promotion of a complete current Route/certified-key generation. Route activation
+does not depend on the Service in any way: whether the Service's address is
+reachable, whether it has backends, and whether those backends are healthy or
+authenticate correctly are the Service's concern. They surface per request (no
+backend: 503; unreachable or failed authentication: 502) and never at
+activation. The gate makes no connect to the Route's Service (user ruling R-65,
+2026-11-08). Loss or withdrawal of a required
 identity or key closes new public admission before retiring retained
 generations. A failed gate never refuses the node's boot and never requests
 serve shutdown: TCP/443 stays unbound and the cause is reported through the
@@ -47,6 +49,7 @@ scenarios are in the feature delta; status shapes are ADR-0227.
 | Keep accepting after a required identity/key generation is lost | Admits work that cannot complete safely and encourages fallback behaviour. |
 | Require a healthy backend before binding | Couples node ingress to workload readiness; backend absence is a per-request 503. |
 | Require a selected backend's exact-peer mTLS to succeed before binding or promoting a Route | Couples node ingress to the readiness and authentication of one arbitrary backend, while gateway-local prerequisites already prove the gateway's own credentials; Envoy, Istio, Gateway API, AWS ALB, Cloudflare and Linkerd gate activation on configuration validity and the proxy's own credentials only. A failed peer is a per-request 502 with no fallback. |
+| Connect to the Route's Service address before binding (an actual-frontend probe) | Makes activation depend on the Service: a Service with no backend is refused by the hook, so the gate would hold TCP/443 unbound for a condition that is the Service's concern. The kernel capability is already proved by the sentinel connect, which uses no Route Service. |
 
 ## Consequences
 

@@ -1,14 +1,15 @@
 // -*- mode: Bluespec; -*-
 /**
  * Gateway Application owner, drain and supersession only (public-ingress-gateway DESIGN, remediation r1): ADR-0222
- * (the owner stages a new generation, promotes it after the connector probe, moves the prior generation to Draining,
+ * (the owner stages a new generation, promotes it when the gateway-local gate passes, moves the prior generation to Draining,
  * retires a Draining generation by itself when its admitted connections reach zero (eager), and never restores a superseded
  * generation).
  *
  * Route activation (R-65, Gate G-1 "Failed-candidate rule") does not depend on backend health or backend
- * authentication. `probe_result(tok, ok)` is the GATEWAY-LOCAL gate verdict only: gateway identity usable, connect-path
- * and relay probe accepted, gate deadline, listener bind. The selected backend's exact-peer mTLS is not part of the
- * gate, and the model has no backend variable. `route_declare` models the owner's OBSERVATION of a Route change: a
+ * authentication. `probe_result(tok, ok)` is the GATEWAY-LOCAL GATE verdict only (identity ensure_current usable, relay
+ * and sentinel connect probes accepted, gate deadline, listener bind), delivered at most once per staged token (GA-1).
+ * No Service property (reachability, backends, health, authentication) is an input, and the model has no Service or
+ * backend variable. The action/run/check names (`probe_result`, `late_probe_after_supersession`) are kept as model names. `route_declare` models the owner's OBSERVATION of a Route change: a
  * Route committed in intent but not yet observed by the owner is unobservable, so promoting the candidate the owner
  * holds is equivalent to the Route committing just after the promotion; the discard of a result applies once
  * `route_declare` has happened. The owner records a failed candidate by its Route generation (`failed_rg`, 0 = none) and
@@ -34,7 +35,7 @@
  * `failed_rg`, `conf_step`. Conformance projection:
  * current_generation, draining_generations <- GatewayStatusReads::application_status().
  *
- * ASSUMPTION GA-1: the connector probe result is delivered at most once per staged token (discharged by the probe
+ * ASSUMPTION GA-1: the gateway-local gate result (`probe_result`) is delivered at most once per staged token (discharged by the probe
  * owner's unit-level test). A lease is an RAII guard (released exactly once by construction).
  */
 module gateway_application_conf {
@@ -123,7 +124,7 @@ module gateway_application {
        variant("stage", ())),
   }
 
-  // GatewayUpstreamConnector::probe result
+  // gateway-local gate verdict (identity ensure_current, relay and sentinel connect probes, gate deadline, bind); no Service input
   action probe_result(tok: int, ok: bool): bool = {
     val matches = st.staged.exists(o => o.gid == tok)
     val cand = st.staged.filter(o => o.gid == tok)
