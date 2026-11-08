@@ -1075,16 +1075,26 @@ pub(crate) fn build_overdrive_init_static() -> Result<PathBuf, VmFixtureError> {
     Ok(cargo_target_dir(&root).join(target).join("release").join("overdrive-init"))
 }
 
-/// The workspace root, resolved at RUNTIME via `cargo locate-project
-/// --workspace` (D13) — never `env!("CARGO_MANIFEST_DIR")` alone, which
-/// bakes in the COMPILE-TIME path of whichever workspace last compiled
-/// this test binary. Conductor runs many workspaces against the SAME
-/// Lima VM's cached `target/`; a stale compiled artifact reused from a
-/// different workspace would then stage/build `overdrive-init` against
-/// the WRONG tree entirely — the exact class documented in
-/// `.claude/rules/development.md` § "Stale Lima xtask test artifacts
-/// across workspaces".
+/// The source workspace that owns fixture build artifacts. In ordinary Metal
+/// context, use the canonical source root already validated by the run-wrapper:
+/// a selected nextest manifest may belong to a standalone fixture workspace.
+/// Outside that context, resolve at runtime via `cargo locate-project
+/// --workspace` (D13), never `env!("CARGO_MANIFEST_DIR")` alone, which bakes
+/// in whichever workspace last compiled this test binary. Conductor runs many
+/// workspaces against the same Lima VM's cached `target/`; stale compiled
+/// artifacts must not stage/build `overdrive-init` against another checkout.
 pub(crate) fn workspace_root() -> PathBuf {
+    // The ordinary Metal run-wrapper already validates this canonical source
+    // owner. A selected Nextest manifest may be a standalone fixture workspace,
+    // so Cargo discovery from the dispatcher's inherited working directory can
+    // name that fixture instead of the checkout that owns prepared artifacts.
+    if matches!(
+        std::env::var("OVERDRIVE_METAL_EXECUTION_CLASS"),
+        Ok(ref execution_class) if execution_class == "ordinary"
+    ) && let Some(source_root) = std::env::var_os("OVERDRIVE_METAL_SOURCE_ROOT")
+    {
+        return PathBuf::from(source_root);
+    }
     locate_workspace_root_via_cargo().unwrap_or_else(compile_time_workspace_root_fallback)
 }
 

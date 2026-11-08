@@ -1,0 +1,40 @@
+/usr/bin/ssh
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire exclusive physical-maintenance barrier (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_RUN_REGISTERED run_id=f5612f4192bdb6a36bebec93
+OVERDRIVE_METAL_LEASE_ACQUIRED token=f5612f4192bdb6a36bebec93 pid=1870364
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/ouagadougou -> ubuntu@151.115.99.251:/home/ubuntu/overdrive-worktrees/e3d831d7dafe621226ae6047ebcac3536f37470cafcf5dbb64eb9598886af410
+
+sent 2,034,252 bytes  received 4,963 bytes  582,632.86 bytes/sec
+total size is 2,047,837,382  speedup is 1,004.23
+
+########## [bootstrap] materialising standalone .git (common dir 7.4G)
+
+sent 367,851 bytes  received 18,726 bytes  257,718.00 bytes/sec
+total size is 873,066,287  speedup is 2,258.45
+## marcus-sa/nw-bugfix-crash-restart-tasks...origin/marcus-sa/nw-bugfix-crash-restart-tasks [ahead 152, behind 1]
+ M AGENTS.md
+ M crates/overdrive-control-plane/src/worker/exit_observer.rs
+ M crates/overdrive-control-plane/tests/acceptance/crash_ending_authority.rs
+ M crates/overdrive-control-plane/tests/acceptance/terminal_hook_ownership.rs
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+info: experimental features enabled: wrapper-scripts
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.00s
+────────────
+ Nextest run ID 7d865511-c679-45b1-bee9-d01c1e81c6bb with nextest profile: default
+    Starting 1 test across 2 binaries (2 tests skipped)
+       START [         ] (1/1) metal-run-isolation-attempt-fixture::attempt selected_attempt_waits_for_its_timeout
+OVERDRIVE_METAL_TEST_ERROR error=guest_execution_failed
+Fixture(OverdriveInitBuildFailed { target: "x86_64-unknown-linux-musl", status: Some(101), stderr: "error: package ID specification `overdrive-init` did not match any packages\n" })
+        FAIL [   0.215s] (1/1) metal-run-isolation-attempt-fixture::attempt selected_attempt_waits_for_its_timeout
+  Cancelling due to test failure
+────────────
+     Summary [   0.215s] 1 test run: 0 passed, 1 failed, 2 skipped
+        FAIL [   0.215s] (1/1) metal-run-isolation-attempt-fixture::attempt selected_attempt_waits_for_its_timeout
+error: test run failed
