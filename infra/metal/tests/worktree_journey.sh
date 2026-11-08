@@ -134,10 +134,16 @@ cmp "$out/second.collect.stdout" "$out/second.repeat.stdout"
 cmp "$out/second.collect.stderr" "$out/second.repeat.stderr"
 observe "$first_id" "$second_id" > "$out/after.json"
 python3 - "$out" "$first_id" "$second_id" <<'PY'
-import json,sys
+import copy,json,sys
 from pathlib import Path
 out=Path(sys.argv[1]); a,b=sys.argv[2:]; before=json.loads((out/'before.json').read_text()); after=json.loads((out/'after.json').read_text())
-assert before['physical']==after['physical'], 'physical test-kernel complement changed'
+# Keep raw snapshots intact. Only paired finite RA expiry countdowns vary;
+# route identity, every other attribute and every other physical key stay exact.
+comparison=copy.deepcopy(after['physical'])
+for old,new in zip(before['physical']['routes'],comparison['routes']):
+ if old.get('protocol')==new.get('protocol')=='ra' and type(old.get('expires')) is int and type(new.get('expires')) is int and old['expires']>=0 and new['expires']>=0:
+  new['expires']=old['expires']
+assert before['physical']==comparison, 'physical test-kernel complement changed'
 for run_id in (a,b):
  o=after['owners'][run_id]
  assert o['unit']['ActiveState'] not in ('active','activating','deactivating')
