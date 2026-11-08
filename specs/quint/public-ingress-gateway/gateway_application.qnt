@@ -2,7 +2,7 @@
 /**
  * Gateway Application owner, drain and supersession only (public-ingress-gateway DESIGN, remediation r1): ADR-0222
  * (the owner stages a new generation, promotes it after the connector probe, moves the prior generation to Draining,
- * retires a Draining generation only when its admitted connections reach zero, and never restores a superseded
+ * retires a Draining generation by itself when its admitted connections reach zero (eager), and never restores a superseded
  * generation).
  *
  * Reduced scope: route/frontend/key whole-object coherence, bind gating (ADR-0230), last-usable key preservation
@@ -68,6 +68,12 @@ module gateway_application {
     next_gid: 1, leases: zeroLeases,
   }
 
+  // ADR-0222 (eager retirement): the owner retires a Draining generation by itself the moment its leases reach zero,
+  // so no other step runs while a zero-lease Draining generation is pending; only `retire` may.
+  val noPendingRetire: bool = st.draining.forall(o => st.leases.get(o.gid) > 0)
+  // a demoted Current joins Draining only while it is leased; a zero-lease one is retired in the same action
+  pure def demote(cur: Set[Obj], lv: int -> int): Set[Obj] = cur.filter(o => lv.get(o.gid) > 0)
+
   action init = all { st' = s0, conf_step' = variant("init", ()) }
 
   action go(n: S, c: ConfStep): bool = all {
@@ -77,20 +83,21 @@ module gateway_application {
 
   // PublicRouteSetHandle::apply (declare, or replace of the same Route): a new Route generation
   action route_declare: bool = all {
-    st.route_gen < MAXR,
+    noPendingRetire, st.route_gen < MAXR,
     go({ ...st, route_on: true, route_gen: st.route_gen + 1 }, variant("route_declare", ())),
   }
 
   // withdrawal: the pending candidate is discarded (its token stays in flight), Current moves to Draining
   action route_withdraw: bool = all {
-    st.route_on,
-    go({ ...st, route_on: false, staged: Set(), current: Set(), draining: st.draining.union(st.current) },
+    noPendingRetire, st.route_on,
+    go({ ...st, route_on: false, staged: Set(), current: Set(),
+         draining: st.draining.union(demote(st.current, st.leases)) },
        variant("route_withdraw", ())),
   }
 
   // the owner stages a candidate from the live Route (supersedes a pending one; its probe result may still arrive)
   action stage: bool = all {
-    st.route_on, st.next_gid <= MAXG,
+    noPendingRetire, st.route_on, st.next_gid <= MAXG,
     st.staged.union(st.current).forall(o => o.rg != st.route_gen),
     go({ ...st,
          staged: Set({ gid: st.next_gid, rg: st.route_gen }),
@@ -105,14 +112,14 @@ module gateway_application {
     val cand = st.staged.filter(o => o.gid == tok)
     val promote = matches and ok and st.route_on and cand.forall(o => o.rg == st.route_gen)
     all {
-      st.inflight.contains(tok),
+      noPendingRetire, st.inflight.contains(tok),
       go(
         if (promote) {
           ...st,
           inflight: st.inflight.exclude(Set(tok)),
           staged: Set(),
           current: cand,
-          draining: st.draining.union(st.current),
+          draining: st.draining.union(demote(st.current, st.leases)),
         } else {
           ...st,
           inflight: st.inflight.exclude(Set(tok)),
@@ -131,20 +138,20 @@ module gateway_application {
 
   // GatewayAdmission::acquire_connection: the connection retains the whole Current object
   action open_connection: bool = all {
-    st.current.size() == 1, totalLeases(st.leases) < MAXC,
+    noPendingRetire, st.current.size() == 1, totalLeases(st.leases) < MAXC,
     go({ ...st, leases: st.current.fold(st.leases, (m, o) => m.set(o.gid, m.get(o.gid) + 1)) },
        variant("open_connection", ())),
   }
 
   action close_connection(gid: int): bool = all {
-    st.leases.get(gid) > 0,
+    noPendingRetire, st.leases.get(gid) > 0,
     go({ ...st, leases: st.leases.set(gid, st.leases.get(gid) - 1) }, variant("close_connection", { gid: gid })),
   }
 
   // stutter (QC-2, ruling 7): exhaustive main only; the conformance main (REC = true) never takes it. `stage` and
   // `retire` stay explicit steps: they are owner-autonomous (the owner performs them itself; the driver yields until the
   // owner is idle and asserts the step's postcondition through `application_status()`).
-  action idle: bool = all { not(REC), st' = st, conf_step' = conf_step }
+  action idle: bool = all { not(REC), noPendingRetire, st' = st, conf_step' = conf_step }
 
   action step = {
     nondet t = 1.to(MAXG).oneOf()

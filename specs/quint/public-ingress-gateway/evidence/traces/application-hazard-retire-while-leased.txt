@@ -1,4 +1,4 @@
-# application-hazard-retire-while-leased: counterexample, 8 state(s) (from the TLC trace)
+# application-hazard-retire-while-leased: counterexample, 7 state(s) (from the TLC trace)
 
 State 1
   st = [route_on |-> FALSE, route_gen |-> 0, staged |-> {}, current |-> {}, draining |-> {}, inflight |-> {}, next_gid |-> 1, leases |-> <<0, 0, 0, 0>>]
@@ -7,20 +7,17 @@ State 1
 State 2 [route_declare]
   st = [route_on |-> TRUE, route_gen |-> 1, staged |-> {}, current |-> {}, draining |-> {}, inflight |-> {}, next_gid |-> 1, leases |-> <<0, 0, 0, 0>>]
 
-State 3 [route_declare]
-  st = [route_on |-> TRUE, route_gen |-> 2, staged |-> {}, current |-> {}, draining |-> {}, inflight |-> {}, next_gid |-> 1, leases |-> <<0, 0, 0, 0>>]
+State 3 [stage]
+  st = [route_on |-> TRUE, route_gen |-> 1, staged |-> {[gid |-> 1, rg |-> 1]}, current |-> {}, draining |-> {}, inflight |-> {1}, next_gid |-> 2, leases |-> <<0, 0, 0, 0>>]
 
-State 4 [stage]
-  st = [route_on |-> TRUE, route_gen |-> 2, staged |-> {[gid |-> 1, rg |-> 2]}, current |-> {}, draining |-> {}, inflight |-> {1}, next_gid |-> 2, leases |-> <<0, 0, 0, 0>>]
+State 4 [probe_result]
+  st = [route_on |-> TRUE, route_gen |-> 1, staged |-> {}, current |-> {[gid |-> 1, rg |-> 1]}, draining |-> {}, inflight |-> {}, next_gid |-> 2, leases |-> <<0, 0, 0, 0>>]
 
-State 5 [probe_result]
-  st = [route_on |-> TRUE, route_gen |-> 2, staged |-> {}, current |-> {[gid |-> 1, rg |-> 2]}, draining |-> {}, inflight |-> {}, next_gid |-> 2, leases |-> <<0, 0, 0, 0>>]
+State 5 [open_connection]
+  st = [route_on |-> TRUE, route_gen |-> 1, staged |-> {}, current |-> {[gid |-> 1, rg |-> 1]}, draining |-> {}, inflight |-> {}, next_gid |-> 2, leases |-> <<1, 0, 0, 0>>]
 
-State 6 [open_connection]
-  st = [route_on |-> TRUE, route_gen |-> 2, staged |-> {}, current |-> {[gid |-> 1, rg |-> 2]}, draining |-> {}, inflight |-> {}, next_gid |-> 2, leases |-> <<1, 0, 0, 0>>]
+State 6 [route_withdraw]
+  st = [route_on |-> FALSE, route_gen |-> 1, staged |-> {}, current |-> {}, draining |-> {[gid |-> 1, rg |-> 1]}, inflight |-> {}, next_gid |-> 2, leases |-> <<1, 0, 0, 0>>]
 
-State 7 [route_withdraw]
-  st = [route_on |-> FALSE, route_gen |-> 2, staged |-> {}, current |-> {}, draining |-> {[gid |-> 1, rg |-> 2]}, inflight |-> {}, next_gid |-> 2, leases |-> <<1, 0, 0, 0>>]
-
-State 8 [retire]
-  st = [route_on |-> FALSE, route_gen |-> 2, staged |-> {}, current |-> {}, draining |-> {}, inflight |-> {}, next_gid |-> 2, leases |-> <<1, 0, 0, 0>>]
+State 7 [retire]
+  st = [route_on |-> FALSE, route_gen |-> 1, staged |-> {}, current |-> {}, draining |-> {}, inflight |-> {}, next_gid |-> 2, leases |-> <<1, 0, 0, 0>>]
