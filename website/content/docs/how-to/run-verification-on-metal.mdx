@@ -1,0 +1,197 @@
+---
+title: Run verification on Metal
+description: Prepare a worktree, route selected tests to their declared execution context, and collect durable results from the shared bare-metal host.
+---
+
+`cargo xtask metal` runs repository verification on the shared, physical x86_64
+KVM host. Each Git checkout owns its remote source and build directory. An
+ordinary run takes shared maintenance admission and locks its own checkout.
+Physical-host administration takes exclusive admission.
+
+<Callout title="Native acceptance remains pending">
+  The implementation has passed technical review and local Linux adapter
+  checks. The final two-worktree native capture has not demonstrated overlapping
+  commands or the required kernel and cleanup observations. Both captured
+  ordinary runs timed out before START behind an existing exclusive owner.
+  The native admission and placement journeys also remain unrun. The
+  [engineering account](/blog/sharing-a-metal-box-without-sharing-test-state)
+  separates construction evidence from these outstanding gates.
+</Callout>
+
+## Prepare the selected checkout
+
+Use a provisioned Metal host with SSH access, noninteractive sudo, remote
+`rsync`, the pinned kernel build inputs, Cloud Hypervisor, and prepared guest
+kernel and rootfs files. Host provisioning is an exclusive administrative
+operation. Follow the repository's
+[Metal setup instructions](https://github.com/overdrive-sh/overdrive/blob/2ba2232208ce9a5e91666f61b6b9845d9797c62a/infra/metal/README.md)
+for those prerequisites.
+
+From the repository root, set the target and the artifact paths on that host.
+These values can also come from the checkout's `.env`:
+
+```bash
+export OVERDRIVE_METAL_TARGET=ubuntu@metal.example
+export OVERDRIVE_METAL_KERNEL=/srv/vm/overdrive-testing/kernel
+export OVERDRIVE_METAL_ROOTFS=/srv/vm/overdrive-testing/rootfs.ext4
+```
+
+Prepare the artifacts used by the selected tests:
+
+```bash
+cargo xtask metal run -- env OVERDRIVE_BPF_NATIVE=1 cargo xtask bpf-build
+cargo xtask metal run -- cargo xtask guest-kit-prepare
+```
+
+`guest-kit-prepare` builds the module, scripted guest peer, guest test binaries,
+and host guest-suite dispatcher. It builds artifacts without loading the
+physical host's module. A test wrapper refuses a missing dispatcher with
+`lane_not_prepared` and does not build it on demand.
+
+Each run syncs the checkout before starting its command. Use `--no-sync` only
+when the remote binding and source marker match the current checkout's exact
+commit, workspace, and source digest. A mismatch refuses before START.
+Source transfer preserves this checkout's `target/` directory.
+
+## Let nextest own test selection and results
+
+Run nextest through the ordinary entry point:
+
+```bash
+cargo xtask metal run -- cargo nextest run -p overdrive-cli --features integration-tests,kvm-tests
+```
+
+The checked-in wrapper looks up each exact nextest binary and test identity in
+`infra/metal/test-placement.json`:
+
+| Placement | Execution boundary |
+| --- | --- |
+| Host-pure | Original host execution chain, without a guest dependency |
+| Native launcher | Physical x86_64/KVM launcher in a private local-mode vsock namespace |
+| Guest group | Selected test binary in a fresh instance of its declared disposable guest group |
+| Guest-lane operator or owner | Existing first-level guest fixture and its matching host script |
+
+Missing, duplicate, or malformed placement refuses before the selected body
+runs. There is no default host placement for an unknown test.
+Native and guest launcher placement also requires kernel support and
+permission for local-mode vsock namespaces. Failed setup refuses before the
+selected body runs.
+
+Nextest keeps control of filters, profiles, ignored policy, retries, reports,
+and aggregate status. The guest adapter stages the actual selected binary and
+reported helper executables. It forwards libtest arguments, the supported test
+environment, and nextest attempt metadata. Every guest retry gets a fresh
+instance of the same declared group. A selected body returning 255 fails its
+attempt, and nextest returns its own aggregate failure status, 100.
+
+For the existing batched suite, use its explicit entry point instead:
+
+```bash
+cargo xtask metal run -- env OVERDRIVE_FWD_GUEST_GROUP=core cargo run -p overdrive-testing --bin overdrive-fwd-guest-suite --features integration-tests
+```
+
+That command retains the suite's group batching. A focused nextest attempt does
+not count as a completed batched group.
+
+## Keep host administration explicitly exclusive
+
+Ordinary admission accepts declared Cargo build, check, lint, doctest,
+nextest, preparation, model, mutation, and selected program entry points.
+It accepts literal `cargo` commands with a bounded optional `env` prefix.
+It does not interpret arbitrary shell chains or Cargo aliases. Raw integration
+`cargo test`, caller replacement of the test wrapper or configuration, and
+artifacts outside the bound checkout or invocation scratch directory refuse.
+The [exact command grammar](https://github.com/overdrive-sh/overdrive/blob/59a9296d1195e2516683ff7a44c72f4b042a8c2a/docs/feature/metal-run-isolation/feature-delta.md#wave-design--ref-ordinary-command-and-test-execution--p4)
+lists the supported forms and environment keys.
+
+Use the explicit administrative boundary when an operation requires arbitrary
+physical-host authority. For example, a native fixture that requires a loaded
+host module needs this separate setup step:
+
+```bash
+cargo xtask metal run --exclusive -- cargo xtask kmod-load
+```
+
+`--exclusive` applies only to `metal run`. It takes the exclusive maintenance
+barrier and waits for admitted ordinary units to finish their stop and cleanup
+lifecycle. `metal shell` and provisioning also remain exclusive. `--no-sudo`
+changes the command's Unix execution identity, not its admission class.
+
+Ordinary guest tests load their module inside the disposable guest. Their
+module, nftables, BPF, route, and test-cgroup effects belong to that guest
+kernel. Host VMM processes, KVM/vhost handles, confinement resources, sockets,
+and anonymous launcher namespaces are separately owned host launch resources.
+
+## Keep worktrees and source transfers distinct
+
+| Checkout | Remote identity |
+| --- | --- |
+| Linked Git worktree | Canonical worktree-specific Git metadata directory, stable across branch switches and detached HEAD |
+| Ordinary clone | Physical checkout root plus full attached branch ref, with detached ordinary clones refused |
+
+The full SHA-256 identity key selects `~/overdrive-worktrees/<key>` or
+`~/overdrive-branches/<key>`. Remote reuse also compares the complete identity
+binding. Two worktrees on the same branch retain separate source and artifacts.
+Moving the Git metadata, moving an ordinary clone, or changing an ordinary
+clone's branch selects a cold identity.
+
+Legacy branch-name caches remain untouched. New identities need an explicit
+sync, either `metal sync` or the sync performed by `metal run`.
+`OVERDRIVE_METAL_REMOTE_SUBDIR` selects a relative directory below the remote
+home without changing its owner. It must be new or empty before binding.
+An unbound nonempty directory, foreign binding, or symlink component refuses
+rather than adopting old artifacts.
+
+The checkout lock serializes its runs, syncs, and pulls. Distinct ordinary
+worktrees share the maintenance barrier. An exclusive holder, including a run
+from an older checkout using the exclusive protocol, still blocks ordinary
+admission. A maintenance timeout does not justify bypassing that holder.
+
+## Collect the saved result and retrieve generated files
+
+The runner prints `OVERDRIVE_METAL_RUN_ID=<run-id>` after selecting the
+invocation ID locally, before durable registration. Registration precedes
+transfer and preflight. Wait for
+`OVERDRIVE_METAL_RUN_STARTED` before treating the command as started. A lost
+controller after START does not cancel the durable command.
+
+```bash
+cargo xtask metal collect <run-id>
+```
+
+Collection reads the saved combined log and returns the actual command status,
+including 255 for a directly supervised command. For new-format runs, it waits
+for the transient unit to stop and requires both the command terminal and its
+completion receipt. The unit finalizer removes only this invocation's guest
+staging, VMM runtime, and command scratch roots after descendants end.
+Collection performs no cleanup or record writes, and repeated collections
+agree. Legacy v1 records retain their original collection rules.
+
+Runner failures remain distinct from command results:
+
+| Diagnostic | Meaning |
+| --- | --- |
+| `maintenance_timeout` / `checkout_timeout`, status 75 | Admission ended before the required ownership was acquired |
+| `runner_preparation_failed`, status 75 | Preparation failed, including missing remote `rsync`, without automatic package installation |
+| `source_mismatch`, status 78 | The no-sync binding or source marker did not match |
+| `supervisor_lost`, status 70 | No actual command terminal survived |
+| `cleanup_failed`, status 74 | An owned root could not be removed, with the command terminal still retained |
+| `run_artifact_io`, status 74 | Required retained evidence is missing or malformed |
+
+Retrieve generated evidence before another one-way sync:
+
+```bash
+cargo xtask metal pull specs/quint/metal-run-isolation/evidence
+```
+
+Pull takes the checkout lock and checks its binding, even after local source
+edits. It copies only named repository-relative paths, excludes `target/`, and
+does not delete local files. Collection needs only the target and valid run ID,
+so it does not require the original checkout or branch.
+
+Runs are not reboot-resumable, and retained records have no automatic pruning.
+Direct-native VMM evidence still requires the qualified physical x86_64/KVM
+host. Named nested correctness cells retain only their declared credit and
+cannot replace direct-native launch evidence. The outstanding native journeys
+must establish the completed runner's overlap and isolation guarantees before
+the feature can be finalized.

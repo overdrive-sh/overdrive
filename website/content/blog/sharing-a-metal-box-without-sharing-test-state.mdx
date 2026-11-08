@@ -1,0 +1,237 @@
+---
+title: Sharing a Metal box without sharing test state
+description: Worktree identity, shared maintenance admission, and Linux vsock namespaces separate verification runs, while final native acceptance remains pending.
+date: 2026-11-08
+author: The Overdrive team
+summary: A box-wide lease serialized unrelated verification. Removing it required separate owners for source, guest resources, and cleanup, plus an explicit boundary for physical-host administration.
+---
+
+Overdrive's Metal runner sends repository verification to a shared physical
+x86_64 KVM host. That host supplies direct Cloud Hypervisor launch evidence
+that a nested development VM cannot replace. Its box-wide execution lease also
+made one worktree wait for an unrelated worktree's ordinary verification.
+
+The selected design gives ordinary runs shared maintenance admission and
+separate checkout ownership. Tests keep their declared disposable guest
+boundaries. Physical-host administration stays exclusive. Removing the lease
+alone would leave source, listeners, and cleanup sharing the wrong owners.
+
+The implementation has passed technical review. The final native acceptance
+has not passed. In the retained two-worktree attempt, both ordinary runs timed
+out before START behind an existing exclusive owner. No selected command or
+guest pair started, so that attempt establishes neither concurrency nor its
+failure. The distinction matters throughout this account.
+
+## The checkout owns source, the invocation owns execution
+
+Branch names cannot identify worktrees. Two worktrees can use the same branch,
+and sanitizing names can turn distinct branches into the same remote directory.
+A source digest cannot repair that choice of owner after two callers have
+selected one shared build directory.
+
+The user selected Git-worktree identity with branch fallback. The implemented
+identity uses the canonical worktree-specific Git metadata directory for a
+linked worktree. Switching branches or detaching HEAD leaves that identity
+unchanged. An ordinary clone uses its physical checkout root and full attached
+branch ref. A detached ordinary clone refuses instead of guessing an owner.
+
+A SHA-256 key selects the remote directory, and reuse checks the complete
+identity binding. An override changes the directory without changing its owner.
+Old branch caches remain intact. The cost is explicit: new identities start
+with cold caches, and moving identity-bearing paths selects new state.
+Automatic adoption was left unselected because it would require a migration
+protocol to establish whose artifacts were being adopted.
+
+Source exclusion still belongs to the checkout. Its durable service holds the
+checkout lock across source transfer and command execution. A second run,
+sync, or pull for that checkout waits. A different ordinary checkout takes a
+shared hold on the physical-maintenance barrier instead of excluding the first
+run. Ordinary owner records belong to the invocation. The singleton owner
+record describes exclusive maintenance.
+
+These are different lifetimes. Separating them preserves source consistency
+without making every ordinary command the owner of the whole box.
+
+## Linux already owns the vsock isolation boundary
+
+Overdrive's guest fixtures use vsock, a socket transport between a VM and its
+host. Each guest has a numeric context identifier, or CID. Concurrent copies
+of the same fixture reuse the same CID bands and listener values.
+
+An early proposal divided the available space into 224 CID windows and added
+userspace claim records. A hash alone could not guarantee exclusive ownership,
+and a CID allocator would still leave host listeners needing isolation.
+No completed allocator experiment established that the window design could
+not work. It was superseded because the inspected kernel already supplied
+the required ownership and lifetime.
+
+The pinned Linux v7.0 source keys vsock reachability by network namespace and
+its local or global mode. In local mode, separate namespaces can hold identical
+CID and port values without communicating across that boundary. The actual
+VMM device retains its opener's namespace until the device is released.
+The kernel owns both the claim and its lifetime. The
+[captured source provenance](https://github.com/overdrive-sh/overdrive/blob/59a9296d1195e2516683ff7a44c72f4b042a8c2a/docs/feature/metal-run-isolation/design/kernel-source-provenance.json)
+pins the inspected files to the repository's exact kernel revision.
+
+The launcher creates a fresh anonymous parent network namespace, changes only
+that parent's child-vsock mode to `local`, then creates and verifies its local
+child. The physical host's initial namespace mode stays unchanged. Existing
+CID bands remain. Actual held listeners supply their bound ports, including
+the guest-lane beacon.
+
+A [bounded native construction](https://github.com/overdrive-sh/overdrive/blob/59a9296d1195e2516683ff7a44c72f4b042a8c2a/docs/feature/metal-run-isolation/spike/findings.md#proven-primitives-and-current-composition)
+launched two real GuestKit guests through the production Cloud Hypervisor
+adapter. Both used CID `16785415` in distinct local
+namespaces. Their ready intervals overlapped, their boot IDs differed, and the
+second control path survived the first guest ending. The observed physical
+module, nftables, BPF, route, and test-cgroup state stayed unchanged in that
+construction. This supports the resource mechanism. It is separate from the
+pending two-worktree run through the completed runner.
+
+The namespace confines host launcher resources. It is not a guest around the
+whole invocation. Tests that exercise a module, BPF, routes, or cgroups still
+execute against their disposable guest kernel.
+
+## Keep nextest as the owner of each attempt
+
+The repository already had a suite that boots a fresh guest for each named
+isolation group and batches that group's tests. The user chose to retain it.
+Wrapping an entire run in another VM would change that boundary. A persistent
+guest shared by independent wrapper processes would need an additional broker.
+Replacing nextest with a batch-result interpreter would change who owns
+selection, retries, reporting, and results. These alternatives were left
+unselected for those costs, not declared nonfunctional.
+
+Direct `cargo nextest run` uses nextest's per-test wrapper instead. A checked-in
+map assigns each exact binary and test name to host-pure execution, a native
+launcher, an existing guest group, or an existing guest-lane operator or owner
+fixture. An unknown identity refuses before its body runs.
+
+The adapter carries the actual nextest-selected executable, its libtest
+arguments, reported helpers, supported environment, and attempt metadata into
+the declared context. Nextest retains its normal filters, profiles, retries,
+and aggregate result. A native construction returned body status 255 through
+the guest adapter and observed nextest return its own failure status, 100.
+Those statuses describe different owners.
+
+Each direct guest attempt gets a fresh instance of its existing group,
+including on retry. The explicit suite retains batching. Fresh attempts cost
+guest boots, but avoid adding a shared guest execution broker. Preparation
+builds the dispatcher before tests run. A missing dispatcher refuses rather
+than triggering an on-demand build or host fallback.
+
+Review also found that six Rust simulation acceptance tests owned real,
+deterministic frontend sockets. Two concurrent copies of an unchanged selected
+test reproduced `AddrInUse` on the physical host. Exactly those six placements
+use the existing `cgroup-default` guest context. The separate suspected `dst
+--only` route was unreachable through the current CLI catalogue and remained
+unchanged. This correction came from a
+[native reproduction and caller-path inspection](https://github.com/overdrive-sh/overdrive/blob/59a9296d1195e2516683ff7a44c72f4b042a8c2a/docs/feature/metal-run-isolation/design/f1-disposition.md).
+
+## Arbitrary host authority needs an explicit owner
+
+Guest routing cannot make an arbitrary privileged shell program safe to run
+beside another verification. The runner therefore accepts a finite grammar of
+ordinary Cargo verification and preparation commands. It refuses raw
+integration `cargo test`, shell chains, replacement execution configuration,
+and external shared artifact paths rather than guessing their effects.
+
+The explicit administrative form is:
+
+```bash
+cargo xtask metal run --exclusive -- cargo xtask kmod-load
+```
+
+It retains arbitrary physical-host authority under the exclusive maintenance
+barrier. Provisioning and `metal shell` retain that authority too. Ordinary
+verification uses the default `metal run` path with its mandatory placement
+policy. The command restriction is a compatibility cost of making the shared
+boundary enforceable.
+
+An old checkout using the exclusive protocol still owns its real barrier.
+Updated ordinary callers must wait for it. Concurrency does not authorize
+bypassing or interrupting another operator's maintenance.
+
+Native qualification also keeps its meaning. Production VMM launch and
+confinement evidence require a qualified physical x86_64/KVM launcher. The
+specifically named nested correctness cells retain their declared assertions
+and receive no direct-native boot or benchmark credit.
+
+The construction work checked that distinction rather than weakening it. A
+native fixture failed in both the initial and candidate local namespaces.
+Diagnostics traced the failure to an API-socket parent directory that the
+production VMM identity could not traverse. Preparing that supplied parent
+with group 4200 and mode 0710 made the copied fixture pass in both contexts,
+with the same confinement assertions, data round trip, and 128 MiB guest RAM.
+The namespace was not the cause, and nesting was not the remedy.
+
+## A command result does not prove cleanup completed
+
+The runner already used a transient systemd service to keep execution alive
+after its controller disconnected. That service also supplies the completion
+owner. A supported nextest timeout can end a wrapper without running Rust
+`Drop`, leaving its image and runtime files even after its VMM descendants
+have ended.
+
+Native construction exercised that actual timeout path. A contrast without a
+finalizer left owned files. The same stop lifecycle with a scoped finalizer
+removed them after prior descendants ended. The final retained construction
+included complete raw timeout and cleanup output in its durable log. Earlier
+incomplete captures were not credited as that proof.
+
+The implementation uses the existing unit's `ExecStopPost` hook. It removes
+only the invocation's guest staging, short VMM runtime, and command scratch
+roots, then records a completion receipt. It leaves source, build artifacts,
+other invocations, and retained logs alone.
+
+Collection waits for the new-format unit to stop and validates both the actual
+command terminal and completion receipt. Cleanup failure remains a distinct
+runner failure while preserving the command result. Collection writes no
+records and performs no cleanup, so it can be repeated. Old records retain
+their original reader rules. There is no reboot recovery or automatic pruning
+promise.
+
+## Quint checked the protocol, not Linux
+
+Quint describes executable state machines and searches their permitted
+behaviors. The runner model covers two invocations, equal or distinct
+checkouts, and one exclusive maintainer. It checks admission, source exclusion,
+controller loss, command termination, owner stop, and collection ordering.
+Progress depends on stated fairness and terminating operations. An infinite
+command does not acquire a termination promise by appearing in a model.
+
+The [retained formal record](https://github.com/overdrive-sh/overdrive/blob/59a9296d1195e2516683ff7a44c72f4b042a8c2a/specs/quint/metal-run-isolation/evidence/summary.md)
+contains 18 expected outcomes: 16 holds and two intentional hazard violations.
+One hazard makes ordinary admission exclusive. The other permits collection
+before the owner finishes. Their counterexamples show that the checks reject
+those deliberately removed rules.
+
+Quint did not discover a production bug in this feature. The real socket
+collision came from native testing. A conformance recording codec mismatch
+was modeling infrastructure, not a runner protocol defect. The model makes
+the intended protocol explicit and checks its modeled schedules. It does not
+prove kernel namespace behavior, wrapper placement, or production conformance.
+Those require their own source, adapter, and native evidence.
+
+## The final paired outcome remains unproved
+
+The source-identity and integrated implementation steps passed independent
+technical review. Reported Lima results include 32 integrated acceptance cases,
+24 testing-library cases, and both qualification transitions. ARM Lima cannot
+supply native qualification: its real preflight refuses the architecture.
+
+The [retained native attempt](https://github.com/overdrive-sh/overdrive/blob/59a9296d1195e2516683ff7a44c72f4b042a8c2a/docs/feature/metal-run-isolation/deliver/native-evidence/ordinary-concurrency-attempt-2026-11-08/README.md)
+registered two ordinary runs, then observed both time out with status 75 in
+`waiting_for_lease`. An already-existing exclusive unit held the maintenance
+barrier. Neither run reached START. The native admission and placement journey
+drivers were not run.
+
+The remaining gate is an actual updated-worktree pair with overlapping command
+execution, correct source attribution, retained results after controller loss,
+and the required physical-kernel, process, and owned-root observations. Native
+admission and selected-attempt placement also need their approved captures.
+No speedup or throughput improvement has been measured, and the feature is not
+finalized. The [operator guide](/docs/how-to/run-verification-on-metal) describes
+the implemented commands and these current limits. Completing the native
+captures is what can turn the construction evidence into an accepted shared-run
+outcome.
