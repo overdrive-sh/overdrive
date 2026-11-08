@@ -1,0 +1,13 @@
+[package]
+name = "metal-native-fixture-diagnostic"
+version = "0.0.0"
+edition = "2024"
+publish = false
+[workspace]
+[dependencies]
+overdrive-core = { path = "../../../crates/overdrive-core" }
+overdrive-host = { path = "../../../crates/overdrive-host" }
+overdrive-testing = { path = "../../../crates/overdrive-testing" }
+tokio = { version = "1", features = ["full"] }
+serial_test = "3"
+libc = "0.2"

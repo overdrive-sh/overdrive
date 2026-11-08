@@ -1,0 +1,23 @@
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+OVERDRIVE_METAL_RUN_ID=97120659a1f85f4dc2d643d8
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_RUN_REGISTERED run_id=97120659a1f85f4dc2d643d8
+FATAL: timed out after 3s acquiring /run/lock/overdrive-metal-shared.lock
+current lease owner:
+  pid=4030341
+  started_at=2026-11-07T22:24:47Z
+  action=run
+  scenario=unspecified
+  workspace=/Users/marcus/conductor/workspaces/helios/bangalore-v1
+  commit=e7ec7ca474e228de4dcbf148aea9c40187a0a2a0
+  token=5d7807028aaf4cceb10381ac
+  run_id=5d7807028aaf4cceb10381ac
+  unit=overdrive-metal-run-5d7807028aaf4cceb10381ac.service
+  source_digest=aae0449711c410fdc66d3de4548a610fc495eca713b0beb8ce82b0abcdd58afa
+OVERDRIVE_METAL_RUNNER_ERROR error=run_not_started

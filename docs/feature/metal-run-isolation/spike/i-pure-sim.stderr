@@ -1,0 +1,25 @@
+   Compiling tower v0.5.3
+   Compiling overdrive-host v0.0.0 (/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/crates/overdrive-host)
+   Compiling tokio-rustls v0.26.4
+   Compiling overdrive-netlink v0.0.0 (/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/crates/overdrive-netlink)
+   Compiling overdrive-fwd v0.0.0 (/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/crates/overdrive-fwd)
+   Compiling hyper-rustls v0.27.9
+   Compiling axum-server v0.7.3
+   Compiling axum v0.7.9
+   Compiling tower-http v0.6.8
+   Compiling reqwest v0.12.28
+   Compiling overdrive-gateway v0.0.0 (/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/crates/overdrive-gateway)
+   Compiling overdrive-dataplane v0.0.0 (/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/crates/overdrive-dataplane)
+   Compiling utoipa-axum v0.1.3
+   Compiling overdrive-worker v0.0.0 (/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/crates/overdrive-worker)
+   Compiling overdrive-control-plane v0.0.0 (/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/crates/overdrive-control-plane)
+   Compiling overdrive-sim v0.0.0 (/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/crates/overdrive-sim)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 31.59s
+info: using target runner `python3 /home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/spike-scratch/metal-run-isolation/increment-i/target_runner.py /home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/target/debug/metal-isolation-local-vsock-spike` defined by environment variable `CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER`
+────────────
+ Nextest run ID b5b51297-6223-4ac8-9dc9-830651fed916 with nextest profile: default
+    Starting 1 test across 1 binary (165 tests skipped)
+       START [         ] (1/1) overdrive-sim adapters::beacon_io::tests::a_guest_cannot_connect_before_the_listener_is_bound
+        PASS [   0.026s] (1/1) overdrive-sim adapters::beacon_io::tests::a_guest_cannot_connect_before_the_listener_is_bound
+────────────
+     Summary [   0.034s] 1 test run: 1 passed, 165 skipped

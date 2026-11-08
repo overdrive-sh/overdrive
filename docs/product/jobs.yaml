@@ -681,7 +681,37 @@ jobs:
     served_by_phase: docs-platform
     status: active
 
+  - id: J-PLAT-006
+    title: Verify independent worktree changes concurrently on the shared Metal box
+    situation: >
+      When independent Overdrive changes in separate Git worktrees need
+      verification on the same Metal box,
+    motivation: >
+      I want each worktree's ordinary verification to proceed concurrently
+      in disposable guests with its own source and evidence,
+    outcome: >
+      so I can decide whether to continue or revise each change without
+      waiting for an unrelated test execution lease or trusting
+      contaminated results.
+    source: metal-run-isolation user directions and DISCUSS source inspection, 2026-11-07
+    served_by_phase: metal-run-isolation
+    status: active
+    dimensions:
+      functional: Concurrent verification with source fidelity, guest isolation and exact retained results
+      emotional: Confidence that an unrelated invocation cannot contaminate the result
+      social: Attributable evidence for each proposed change
+    four_forces:
+      push: Box-wide ordinary execution lease serializes independent worktrees
+      pull: Each change obtains an independent source-matched result
+      anxiety: Removing serialization could mix source, guest resources or cleanup ownership
+      habit: Existing metal run, guest preparation and collect commands must remain meaningful
+
 changelog:
+  - date: 2026-11-07
+    change: >
+      Added J-PLAT-006 for metal-run-isolation, a developer-tooling
+      verification outcome grounded in explicit user directions, not
+      external customer research. No existing job contract changed.
   - date: 2026-04-21
     change: Initial job register for phase-1-foundation DISCUSS wave.
   - date: 2026-04-23

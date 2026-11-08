@@ -1,0 +1,163 @@
+# P2/P5 owner protocol only; no product control-plane model or runtime mechanism.
+
+[[check]]
+name = "runner-safety"
+spec = "runner_protocol.qnt"
+main = "runner_ok"
+invariant = "Safety"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "runner-owners-progress"
+spec = "runner_protocol.qnt"
+main = "runner_ok"
+temporal = "OwnersEventuallyEnd"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "runner-maintenance-progress"
+spec = "runner_protocol.qnt"
+main = "runner_ok"
+temporal = "MaintenanceEventuallyResolves"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "runner-hazard-exclusive-ordinary"
+spec = "hazard/runner_hazards.qnt"
+main = "runner_bugOrdinaryExclusive"
+invariant = "OrdinaryDoesNotBlockOrdinary"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "runner-hazard-collect-at-terminal"
+spec = "hazard/runner_hazards.qnt"
+main = "runner_bugCollectAtTerminal"
+invariant = "NoPrematureCommandCompletion"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "runner-run-independent-worktrees"
+spec = "runner_protocol.qnt"
+main = "runner_conf"
+run = "independent_worktrees"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "runner-run-same-checkout-excludes-sync"
+spec = "runner_protocol.qnt"
+main = "runner_conf"
+run = "same_checkout_excludes_sync"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "runner-run-controller-eof-before-start"
+spec = "runner_protocol.qnt"
+main = "runner_conf"
+run = "controller_eof_before_start"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "runner-run-controller-loss-after-start"
+spec = "runner_protocol.qnt"
+main = "runner_conf"
+run = "controller_loss_after_start"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "runner-run-supervisor-loss-is-not-a-result"
+spec = "runner_protocol.qnt"
+main = "runner_conf"
+run = "supervisor_loss_is_not_a_result"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "runner-run-cleanup-failure-keeps-command"
+spec = "runner_protocol.qnt"
+main = "runner_conf"
+run = "cleanup_failure_keeps_command"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "runner-run-missing-completion-refuses"
+spec = "runner_protocol.qnt"
+main = "runner_conf"
+run = "missing_completion_refuses"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "runner-run-maintenance-waits-for-stop"
+spec = "runner_protocol.qnt"
+main = "runner_conf"
+run = "maintenance_waits_for_stop"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "runner-run-no-sync-mismatch-refuses"
+spec = "runner_protocol.qnt"
+main = "runner_conf"
+run = "no_sync_mismatch_refuses"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "runner-run-repeat-collection-agrees"
+spec = "runner_protocol.qnt"
+main = "runner_conf"
+run = "repeat_collection_agrees"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "runner-run-admission-timeout"
+spec = "runner_protocol.qnt"
+main = "runner_conf"
+run = "admission_timeout"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "runner-run-preflight-aborts-before-start"
+spec = "runner_protocol.qnt"
+main = "runner_conf"
+run = "preflight_aborts_before_start"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "runner-run-missing-rsync-aborts-before-start"
+spec = "runner_protocol.qnt"
+main = "runner_conf"
+run = "missing_rsync_aborts_before_start"
+backend = "evaluator"
+expect = "holds"
+ci = true

@@ -1,0 +1,350 @@
+{
+  "codec_only": true,
+  "production_conformance_claimed": false,
+  "quint_connect": "0.1.2",
+  "seed": "20261108",
+  "named_runs": [
+    {
+      "run": "independent_worktrees",
+      "states": 14,
+      "exact_picks_match": true
+    },
+    {
+      "run": "same_checkout_excludes_sync",
+      "states": 11,
+      "exact_picks_match": true
+    },
+    {
+      "run": "controller_eof_before_start",
+      "states": 8,
+      "exact_picks_match": true
+    },
+    {
+      "run": "controller_loss_after_start",
+      "states": 10,
+      "exact_picks_match": true
+    },
+    {
+      "run": "supervisor_loss_is_not_a_result",
+      "states": 9,
+      "exact_picks_match": true
+    },
+    {
+      "run": "cleanup_failure_keeps_command",
+      "states": 9,
+      "exact_picks_match": true
+    },
+    {
+      "run": "missing_completion_refuses",
+      "states": 9,
+      "exact_picks_match": true
+    },
+    {
+      "run": "maintenance_waits_for_stop",
+      "states": 11,
+      "exact_picks_match": true
+    },
+    {
+      "run": "no_sync_mismatch_refuses",
+      "states": 8,
+      "exact_picks_match": true
+    },
+    {
+      "run": "repeat_collection_agrees",
+      "states": 10,
+      "exact_picks_match": true
+    },
+    {
+      "run": "admission_timeout",
+      "states": 6,
+      "exact_picks_match": true
+    },
+    {
+      "run": "preflight_aborts_before_start",
+      "states": 7,
+      "exact_picks_match": true
+    },
+    {
+      "run": "missing_rsync_aborts_before_start",
+      "states": 7,
+      "exact_picks_match": true
+    }
+  ],
+  "named_state_count": 119,
+  "random_traces": 4,
+  "random_states": 132,
+  "random_max_steps": 32,
+  "idle_steps": [
+    {
+      "trace": 0,
+      "index": 2,
+      "mbt_action": "Idle",
+      "previous": "Sync"
+    },
+    {
+      "trace": 0,
+      "index": 12,
+      "mbt_action": "Idle",
+      "previous": "AdmissionTimeout"
+    },
+    {
+      "trace": 0,
+      "index": 15,
+      "mbt_action": "Idle",
+      "previous": "StopOwner"
+    },
+    {
+      "trace": 0,
+      "index": 19,
+      "mbt_action": "Idle",
+      "previous": "Collect"
+    },
+    {
+      "trace": 0,
+      "index": 22,
+      "mbt_action": "Idle",
+      "previous": "Collect"
+    },
+    {
+      "trace": 0,
+      "index": 23,
+      "mbt_action": "Idle",
+      "previous": "Idle"
+    },
+    {
+      "trace": 0,
+      "index": 27,
+      "mbt_action": "Idle",
+      "previous": "Collect"
+    },
+    {
+      "trace": 0,
+      "index": 29,
+      "mbt_action": "Idle",
+      "previous": "Collect"
+    },
+    {
+      "trace": 0,
+      "index": 32,
+      "mbt_action": "Idle",
+      "previous": "Collect"
+    },
+    {
+      "trace": 1,
+      "index": 1,
+      "mbt_action": "Idle",
+      "previous": "init"
+    },
+    {
+      "trace": 1,
+      "index": 9,
+      "mbt_action": "Idle",
+      "previous": "Maintain"
+    },
+    {
+      "trace": 1,
+      "index": 12,
+      "mbt_action": "Idle",
+      "previous": "Maintain"
+    },
+    {
+      "trace": 1,
+      "index": 13,
+      "mbt_action": "Idle",
+      "previous": "Idle"
+    },
+    {
+      "trace": 1,
+      "index": 15,
+      "mbt_action": "Idle",
+      "previous": "Sync"
+    },
+    {
+      "trace": 1,
+      "index": 17,
+      "mbt_action": "Idle",
+      "previous": "StopOwner"
+    },
+    {
+      "trace": 1,
+      "index": 23,
+      "mbt_action": "Idle",
+      "previous": "Collect"
+    },
+    {
+      "trace": 1,
+      "index": 27,
+      "mbt_action": "Idle",
+      "previous": "Collect"
+    },
+    {
+      "trace": 1,
+      "index": 29,
+      "mbt_action": "Idle",
+      "previous": "Collect"
+    },
+    {
+      "trace": 2,
+      "index": 2,
+      "mbt_action": "Idle",
+      "previous": "Sync"
+    },
+    {
+      "trace": 2,
+      "index": 4,
+      "mbt_action": "Idle",
+      "previous": "Maintain"
+    },
+    {
+      "trace": 2,
+      "index": 6,
+      "mbt_action": "Idle",
+      "previous": "Register"
+    },
+    {
+      "trace": 2,
+      "index": 7,
+      "mbt_action": "Idle",
+      "previous": "Idle"
+    },
+    {
+      "trace": 2,
+      "index": 12,
+      "mbt_action": "Idle",
+      "previous": "LoseController"
+    },
+    {
+      "trace": 2,
+      "index": 20,
+      "mbt_action": "Idle",
+      "previous": "Collect"
+    },
+    {
+      "trace": 2,
+      "index": 23,
+      "mbt_action": "Idle",
+      "previous": "Collect"
+    },
+    {
+      "trace": 2,
+      "index": 27,
+      "mbt_action": "Idle",
+      "previous": "Collect"
+    },
+    {
+      "trace": 2,
+      "index": 29,
+      "mbt_action": "Idle",
+      "previous": "Collect"
+    },
+    {
+      "trace": 2,
+      "index": 31,
+      "mbt_action": "Idle",
+      "previous": "Collect"
+    },
+    {
+      "trace": 2,
+      "index": 32,
+      "mbt_action": "Idle",
+      "previous": "Idle"
+    },
+    {
+      "trace": 3,
+      "index": 2,
+      "mbt_action": "Idle",
+      "previous": "Sync"
+    },
+    {
+      "trace": 3,
+      "index": 5,
+      "mbt_action": "Idle",
+      "previous": "Sync"
+    },
+    {
+      "trace": 3,
+      "index": 7,
+      "mbt_action": "Idle",
+      "previous": "Register"
+    },
+    {
+      "trace": 3,
+      "index": 9,
+      "mbt_action": "Idle",
+      "previous": "SupervisorLost"
+    },
+    {
+      "trace": 3,
+      "index": 13,
+      "mbt_action": "Idle",
+      "previous": "StopOwner"
+    },
+    {
+      "trace": 3,
+      "index": 14,
+      "mbt_action": "Idle",
+      "previous": "Idle"
+    },
+    {
+      "trace": 3,
+      "index": 15,
+      "mbt_action": "Idle",
+      "previous": "Idle"
+    },
+    {
+      "trace": 3,
+      "index": 16,
+      "mbt_action": "Idle",
+      "previous": "Idle"
+    },
+    {
+      "trace": 3,
+      "index": 18,
+      "mbt_action": "Idle",
+      "previous": "StopOwner"
+    },
+    {
+      "trace": 3,
+      "index": 19,
+      "mbt_action": "Idle",
+      "previous": "Idle"
+    },
+    {
+      "trace": 3,
+      "index": 22,
+      "mbt_action": "Idle",
+      "previous": "Collect"
+    },
+    {
+      "trace": 3,
+      "index": 23,
+      "mbt_action": "Idle",
+      "previous": "Idle"
+    },
+    {
+      "trace": 3,
+      "index": 24,
+      "mbt_action": "Idle",
+      "previous": "Idle"
+    },
+    {
+      "trace": 3,
+      "index": 26,
+      "mbt_action": "Idle",
+      "previous": "Collect"
+    },
+    {
+      "trace": 3,
+      "index": 28,
+      "mbt_action": "Idle",
+      "previous": "Collect"
+    },
+    {
+      "trace": 3,
+      "index": 32,
+      "mbt_action": "Idle",
+      "previous": "Collect"
+    }
+  ],
+  "random_exact_picks_match": true
+}

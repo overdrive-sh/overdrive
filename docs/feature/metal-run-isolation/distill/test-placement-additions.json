@@ -1,0 +1,516 @@
+{
+  "format": "metal-test-placement-additions-v1",
+  "authority": "Approved P4 inventory extension semantics; DISTILL-owned test-support classifications",
+  "rows": [
+    {
+      "binary_id": "xtask::acceptance",
+      "test_name": "acceptance::metal_run_isolation::admission::independent_ordinary_owners_overlap_after_controller_loss",
+      "descriptor": {
+        "kind": "host-pure"
+      },
+      "source": "xtask/tests/acceptance/metal_run_isolation/admission.rs",
+      "rationale": "Actual tooling owner/file/process boundaries; no physical test-kernel body."
+    },
+    {
+      "binary_id": "xtask::acceptance",
+      "test_name": "acceptance::metal_run_isolation::admission::sad_own_checkout_and_maintenance_deadlines_have_distinct_causes",
+      "descriptor": {
+        "kind": "host-pure"
+      },
+      "source": "xtask/tests/acceptance/metal_run_isolation/admission.rs",
+      "rationale": "Actual tooling owner/file/process boundaries; no physical test-kernel body."
+    },
+    {
+      "binary_id": "xtask::acceptance",
+      "test_name": "acceptance::metal_run_isolation::admission::sad_prestart_controls_retain_the_approved_error_set_without_a_body",
+      "descriptor": {
+        "kind": "host-pure"
+      },
+      "source": "xtask/tests/acceptance/metal_run_isolation/admission.rs",
+      "rationale": "Actual tooling owner/file/process boundaries; no physical test-kernel body."
+    },
+    {
+      "binary_id": "xtask::acceptance",
+      "test_name": "acceptance::metal_run_isolation::admission::duplicate_start_never_replays_a_selected_command",
+      "descriptor": {
+        "kind": "host-pure"
+      },
+      "source": "xtask/tests/acceptance/metal_run_isolation/admission.rs",
+      "rationale": "Actual tooling owner/file/process boundaries; no physical test-kernel body."
+    },
+    {
+      "binary_id": "xtask::acceptance",
+      "test_name": "acceptance::metal_run_isolation::admission::sad_sync_and_pull_wait_on_the_running_checkout_without_source_mutation",
+      "descriptor": {
+        "kind": "host-pure"
+      },
+      "source": "xtask/tests/acceptance/metal_run_isolation/admission.rs",
+      "rationale": "Actual tooling owner/file/process boundaries; no physical test-kernel body."
+    },
+    {
+      "binary_id": "xtask::acceptance",
+      "test_name": "acceptance::metal_run_isolation::admission::sad_waiting_for_both_locks_cannot_restart_the_existing_admission_budget",
+      "descriptor": {
+        "kind": "host-pure"
+      },
+      "source": "xtask/tests/acceptance/metal_run_isolation/admission.rs",
+      "rationale": "Actual tooling owner/file/process boundaries; no physical test-kernel body."
+    },
+    {
+      "binary_id": "xtask::acceptance",
+      "test_name": "acceptance::metal_run_isolation::collection::retained_v1_and_v2_commands_return_exact_status_on_read_only_repeat_collection",
+      "descriptor": {
+        "kind": "host-pure"
+      },
+      "source": "xtask/tests/acceptance/metal_run_isolation/collection.rs",
+      "rationale": "Actual tooling owner/file/process boundaries; no physical test-kernel body."
+    },
+    {
+      "binary_id": "xtask::acceptance",
+      "test_name": "acceptance::metal_run_isolation::collection::collection_waits_for_owner_stop_even_when_terminal_and_receipt_exist",
+      "descriptor": {
+        "kind": "host-pure"
+      },
+      "source": "xtask/tests/acceptance/metal_run_isolation/collection.rs",
+      "rationale": "Actual tooling owner/file/process boundaries; no physical test-kernel body."
+    },
+    {
+      "binary_id": "xtask::acceptance",
+      "test_name": "acceptance::metal_run_isolation::collection::sad_cleanup_and_artifact_failures_never_become_command_results",
+      "descriptor": {
+        "kind": "host-pure"
+      },
+      "source": "xtask/tests/acceptance/metal_run_isolation/collection.rs",
+      "rationale": "Actual tooling owner/file/process boundaries; no physical test-kernel body."
+    },
+    {
+      "binary_id": "xtask::acceptance",
+      "test_name": "acceptance::metal_run_isolation::collection::sad_retained_records_enforce_closed_error_and_command_status_domains",
+      "descriptor": {
+        "kind": "host-pure"
+      },
+      "source": "xtask/tests/acceptance/metal_run_isolation/collection.rs",
+      "rationale": "Actual tooling owner/file/process boundaries; no physical test-kernel body."
+    },
+    {
+      "binary_id": "xtask::acceptance",
+      "test_name": "acceptance::metal_run_isolation::collection::sad_collection_without_a_run_preserves_absence",
+      "descriptor": {
+        "kind": "host-pure"
+      },
+      "source": "xtask/tests/acceptance/metal_run_isolation/collection.rs",
+      "rationale": "Actual tooling owner/file/process boundaries; no physical test-kernel body."
+    },
+    {
+      "binary_id": "xtask::acceptance",
+      "test_name": "acceptance::metal_run_isolation::controller::sad_actual_no_sync_mismatch_aborts_the_registered_owner_before_start",
+      "descriptor": {
+        "kind": "host-pure"
+      },
+      "source": "xtask/tests/acceptance/metal_run_isolation/controller.rs",
+      "rationale": "Actual tooling owner/file/process boundaries; no physical test-kernel body."
+    },
+    {
+      "binary_id": "xtask::acceptance",
+      "test_name": "acceptance::metal_run_isolation::controller::sad_registered_missing_rsync_keeps_its_preparation_error_and_no_sync_needs_no_rsync",
+      "descriptor": {
+        "kind": "host-pure"
+      },
+      "source": "xtask/tests/acceptance/metal_run_isolation/controller.rs",
+      "rationale": "Actual tooling owner/file/process boundaries; no physical test-kernel body."
+    },
+    {
+      "binary_id": "xtask::acceptance",
+      "test_name": "acceptance::metal_run_isolation::finalization::finalization_removes_exact_owned_roots_and_repeating_it_preserves_the_complement",
+      "descriptor": {
+        "kind": "host-pure"
+      },
+      "source": "xtask/tests/acceptance/metal_run_isolation/finalization.rs",
+      "rationale": "Actual tooling owner/file/process boundaries; no physical test-kernel body."
+    },
+    {
+      "binary_id": "xtask::acceptance",
+      "test_name": "acceptance::metal_run_isolation::finalization::sad_each_owned_root_removal_failure_is_produced_and_collected_with_its_exact_root",
+      "descriptor": {
+        "kind": "host-pure"
+      },
+      "source": "xtask/tests/acceptance/metal_run_isolation/finalization.rs",
+      "rationale": "Actual tooling owner/file/process boundaries; no physical test-kernel body."
+    },
+    {
+      "binary_id": "xtask::acceptance",
+      "test_name": "acceptance::metal_run_isolation::identity::same_branch_worktrees_keep_source_artifacts_and_evidence_disjoint",
+      "descriptor": {
+        "kind": "host-pure"
+      },
+      "source": "xtask/tests/acceptance/metal_run_isolation/identity.rs",
+      "rationale": "Actual tooling owner/file/process boundaries; no physical test-kernel body."
+    },
+    {
+      "binary_id": "xtask::acceptance",
+      "test_name": "acceptance::metal_run_isolation::identity::linked_identity_survives_branch_switch_and_detachment",
+      "descriptor": {
+        "kind": "host-pure"
+      },
+      "source": "xtask/tests/acceptance/metal_run_isolation/identity.rs",
+      "rationale": "Actual tooling owner/file/process boundaries; no physical test-kernel body."
+    },
+    {
+      "binary_id": "xtask::acceptance",
+      "test_name": "acceptance::metal_run_isolation::identity::attached_clone_fallback_and_sanitised_spellings_never_adopt_old_state",
+      "descriptor": {
+        "kind": "host-pure"
+      },
+      "source": "xtask/tests/acceptance/metal_run_isolation/identity.rs",
+      "rationale": "Actual tooling owner/file/process boundaries; no physical test-kernel body."
+    },
+    {
+      "binary_id": "xtask::acceptance",
+      "test_name": "acceptance::metal_run_isolation::identity::sad_invalid_identity_and_override_never_contact_a_mutating_remote",
+      "descriptor": {
+        "kind": "host-pure"
+      },
+      "source": "xtask/tests/acceptance/metal_run_isolation/identity.rs",
+      "rationale": "Actual tooling owner/file/process boundaries; no physical test-kernel body."
+    },
+    {
+      "binary_id": "xtask::acceptance",
+      "test_name": "acceptance::metal_run_isolation::identity::sad_override_conflicts_preserve_the_full_remote_complement",
+      "descriptor": {
+        "kind": "host-pure"
+      },
+      "source": "xtask/tests/acceptance/metal_run_isolation/identity.rs",
+      "rationale": "Actual tooling owner/file/process boundaries; no physical test-kernel body."
+    },
+    {
+      "binary_id": "xtask::acceptance",
+      "test_name": "acceptance::metal_run_isolation::identity::pull_uses_binding_after_local_source_changes_and_repeated_sync_preserves_target",
+      "descriptor": {
+        "kind": "host-pure"
+      },
+      "source": "xtask/tests/acceptance/metal_run_isolation/identity.rs",
+      "rationale": "Actual tooling owner/file/process boundaries; no physical test-kernel body."
+    },
+    {
+      "binary_id": "xtask::acceptance",
+      "test_name": "acceptance::metal_run_isolation::identity::sad_missing_rsync_is_typed_without_installing_packages",
+      "descriptor": {
+        "kind": "host-pure"
+      },
+      "source": "xtask/tests/acceptance/metal_run_isolation/identity.rs",
+      "rationale": "Actual tooling owner/file/process boundaries; no physical test-kernel body."
+    },
+    {
+      "binary_id": "xtask::acceptance",
+      "test_name": "acceptance::metal_run_isolation::identity::sad_exclusive_is_only_a_run_mode_at_both_existing_entrypoints",
+      "descriptor": {
+        "kind": "host-pure"
+      },
+      "source": "xtask/tests/acceptance/metal_run_isolation/identity.rs",
+      "rationale": "Actual tooling owner/file/process boundaries; no physical test-kernel body."
+    },
+    {
+      "binary_id": "xtask::acceptance",
+      "test_name": "acceptance::metal_run_isolation::namespace_trace::fixture_exhausts_only_a_real_owned_child_namespace_verification_read",
+      "descriptor": {
+        "kind": "native-launcher"
+      },
+      "source": "xtask/tests/acceptance/metal_run_isolation/namespace_trace.rs",
+      "rationale": "Owned launcher namespace/resource fixture, or actual guest-kernel/profile canary; no substitute native boot credit."
+    },
+    {
+      "binary_id": "xtask::acceptance",
+      "test_name": "acceptance::metal_run_isolation::namespace_trace::fixture_causes_real_child_mode_and_namespace_capacity_refusals_in_owned_contexts",
+      "descriptor": {
+        "kind": "native-launcher"
+      },
+      "source": "xtask/tests/acceptance/metal_run_isolation/namespace_trace.rs",
+      "rationale": "Owned launcher namespace/resource fixture, or actual guest-kernel/profile canary; no substitute native boot credit."
+    },
+    {
+      "binary_id": "xtask::acceptance",
+      "test_name": "acceptance::metal_run_isolation::placement::host_pure_attempt_preserves_exact_arguments_environment_and_255_without_a_guest",
+      "descriptor": {
+        "kind": "host-pure"
+      },
+      "source": "xtask/tests/acceptance/metal_run_isolation/placement.rs",
+      "rationale": "Actual tooling owner/file/process boundaries; no physical test-kernel body."
+    },
+    {
+      "binary_id": "xtask::acceptance",
+      "test_name": "acceptance::metal_run_isolation::placement::non_metal_and_explicit_exclusive_attempts_preserve_the_original_exec_chain",
+      "descriptor": {
+        "kind": "host-pure"
+      },
+      "source": "xtask/tests/acceptance/metal_run_isolation/placement.rs",
+      "rationale": "Actual tooling owner/file/process boundaries; no physical test-kernel body."
+    },
+    {
+      "binary_id": "xtask::acceptance",
+      "test_name": "acceptance::metal_run_isolation::placement::sad_invalid_context_missing_identity_and_missing_guest_dispatcher_never_run_the_body",
+      "descriptor": {
+        "kind": "host-pure"
+      },
+      "source": "xtask/tests/acceptance/metal_run_isolation/placement.rs",
+      "rationale": "Actual tooling owner/file/process boundaries; no physical test-kernel body."
+    },
+    {
+      "binary_id": "xtask::acceptance",
+      "test_name": "acceptance::metal_run_isolation::placement::sad_invalid_duplicate_and_ambiguous_placement_is_fail_closed",
+      "descriptor": {
+        "kind": "host-pure"
+      },
+      "source": "xtask/tests/acceptance/metal_run_isolation/placement.rs",
+      "rationale": "Actual tooling owner/file/process boundaries; no physical test-kernel body."
+    },
+    {
+      "binary_id": "xtask::acceptance",
+      "test_name": "acceptance::metal_run_isolation::placement::native_launcher_gets_a_local_vsock_namespace_without_changing_the_initial_mode",
+      "descriptor": {
+        "kind": "native-launcher"
+      },
+      "source": "xtask/tests/acceptance/metal_run_isolation/placement.rs",
+      "rationale": "Owned launcher namespace/resource fixture, or actual guest-kernel/profile canary; no substitute native boot credit."
+    },
+    {
+      "binary_id": "xtask::acceptance",
+      "test_name": "acceptance::metal_run_isolation::placement::sad_namespace_permission_denial_never_falls_back_to_the_host",
+      "descriptor": {
+        "kind": "native-launcher"
+      },
+      "source": "xtask/tests/acceptance/metal_run_isolation/placement.rs",
+      "rationale": "Owned launcher namespace/resource fixture, or actual guest-kernel/profile canary; no substitute native boot credit."
+    },
+    {
+      "binary_id": "xtask::acceptance",
+      "test_name": "acceptance::metal_run_isolation::placement::runtime_placement_preserves_the_reviewed_partition_and_declares_new_acceptance_identities",
+      "descriptor": {
+        "kind": "host-pure"
+      },
+      "source": "xtask/tests/acceptance/metal_run_isolation/placement.rs",
+      "rationale": "Actual tooling owner/file/process boundaries; no physical test-kernel body."
+    },
+    {
+      "binary_id": "xtask::acceptance",
+      "test_name": "acceptance::metal_run_isolation::placement::sad_each_later_namespace_operation_keeps_its_exact_step_and_errno",
+      "descriptor": {
+        "kind": "native-launcher"
+      },
+      "source": "xtask/tests/acceptance/metal_run_isolation/placement.rs",
+      "rationale": "Owned launcher namespace/resource fixture, or actual guest-kernel/profile canary; no substitute native boot credit."
+    },
+    {
+      "binary_id": "xtask::acceptance",
+      "test_name": "acceptance::metal_run_isolation::placement::sad_actual_verification_read_failure_preserves_its_step_and_errno",
+      "descriptor": {
+        "kind": "host-pure"
+      },
+      "source": "xtask/tests/acceptance/metal_run_isolation/placement.rs",
+      "rationale": "Actual tooling owner/file/process boundaries; no physical test-kernel body."
+    },
+    {
+      "binary_id": "xtask::acceptance",
+      "test_name": "acceptance::metal_run_isolation::placement::selected_guest_body_uses_its_own_kernel_in_existing_profiles",
+      "descriptor": {
+        "kind": "guest-group",
+        "group": "core"
+      },
+      "source": "xtask/tests/acceptance/metal_run_isolation/placement.rs",
+      "rationale": "Owned launcher namespace/resource fixture, or actual guest-kernel/profile canary; no substitute native boot credit."
+    },
+    {
+      "binary_id": "xtask::acceptance",
+      "test_name": "acceptance::metal_run_isolation::qualification::sad_each_existing_native_prerequisite_has_the_exact_probe_and_retained_cause",
+      "descriptor": {
+        "kind": "host-pure"
+      },
+      "source": "xtask/tests/acceptance/metal_run_isolation/qualification.rs",
+      "rationale": "Actual tooling owner/file/process boundaries; no physical test-kernel body."
+    },
+    {
+      "binary_id": "xtask",
+      "test_name": "metal_run_isolation_conformance::protocol_independent_worktrees",
+      "descriptor": {
+        "kind": "host-pure"
+      },
+      "source": "xtask/src/metal_run_isolation_conformance.rs",
+      "rationale": "Actual shell/systemd owner protocol and private source/filesystem/process fixtures; no kernel test body or VMM credit."
+    },
+    {
+      "binary_id": "xtask",
+      "test_name": "metal_run_isolation_conformance::protocol_same_checkout_excludes_sync",
+      "descriptor": {
+        "kind": "host-pure"
+      },
+      "source": "xtask/src/metal_run_isolation_conformance.rs",
+      "rationale": "Actual shell/systemd owner protocol and private source/filesystem/process fixtures; no kernel test body or VMM credit."
+    },
+    {
+      "binary_id": "xtask",
+      "test_name": "metal_run_isolation_conformance::protocol_controller_eof_before_start",
+      "descriptor": {
+        "kind": "host-pure"
+      },
+      "source": "xtask/src/metal_run_isolation_conformance.rs",
+      "rationale": "Actual shell/systemd owner protocol and private source/filesystem/process fixtures; no kernel test body or VMM credit."
+    },
+    {
+      "binary_id": "xtask",
+      "test_name": "metal_run_isolation_conformance::protocol_controller_loss_after_start",
+      "descriptor": {
+        "kind": "host-pure"
+      },
+      "source": "xtask/src/metal_run_isolation_conformance.rs",
+      "rationale": "Actual shell/systemd owner protocol and private source/filesystem/process fixtures; no kernel test body or VMM credit."
+    },
+    {
+      "binary_id": "xtask",
+      "test_name": "metal_run_isolation_conformance::protocol_supervisor_loss_is_not_a_result",
+      "descriptor": {
+        "kind": "host-pure"
+      },
+      "source": "xtask/src/metal_run_isolation_conformance.rs",
+      "rationale": "Actual shell/systemd owner protocol and private source/filesystem/process fixtures; no kernel test body or VMM credit."
+    },
+    {
+      "binary_id": "xtask",
+      "test_name": "metal_run_isolation_conformance::protocol_cleanup_failure_keeps_command",
+      "descriptor": {
+        "kind": "host-pure"
+      },
+      "source": "xtask/src/metal_run_isolation_conformance.rs",
+      "rationale": "Actual shell/systemd owner protocol and private source/filesystem/process fixtures; no kernel test body or VMM credit."
+    },
+    {
+      "binary_id": "xtask",
+      "test_name": "metal_run_isolation_conformance::protocol_missing_completion_refuses",
+      "descriptor": {
+        "kind": "host-pure"
+      },
+      "source": "xtask/src/metal_run_isolation_conformance.rs",
+      "rationale": "Actual shell/systemd owner protocol and private source/filesystem/process fixtures; no kernel test body or VMM credit."
+    },
+    {
+      "binary_id": "xtask",
+      "test_name": "metal_run_isolation_conformance::protocol_maintenance_waits_for_stop",
+      "descriptor": {
+        "kind": "host-pure"
+      },
+      "source": "xtask/src/metal_run_isolation_conformance.rs",
+      "rationale": "Actual shell/systemd owner protocol and private source/filesystem/process fixtures; no kernel test body or VMM credit."
+    },
+    {
+      "binary_id": "xtask",
+      "test_name": "metal_run_isolation_conformance::protocol_no_sync_mismatch_refuses",
+      "descriptor": {
+        "kind": "host-pure"
+      },
+      "source": "xtask/src/metal_run_isolation_conformance.rs",
+      "rationale": "Actual shell/systemd owner protocol and private source/filesystem/process fixtures; no kernel test body or VMM credit."
+    },
+    {
+      "binary_id": "xtask",
+      "test_name": "metal_run_isolation_conformance::protocol_admission_timeout",
+      "descriptor": {
+        "kind": "host-pure"
+      },
+      "source": "xtask/src/metal_run_isolation_conformance.rs",
+      "rationale": "Actual shell/systemd owner protocol and private source/filesystem/process fixtures; no kernel test body or VMM credit."
+    },
+    {
+      "binary_id": "xtask",
+      "test_name": "metal_run_isolation_conformance::protocol_preflight_aborts_before_start",
+      "descriptor": {
+        "kind": "host-pure"
+      },
+      "source": "xtask/src/metal_run_isolation_conformance.rs",
+      "rationale": "Actual shell/systemd owner protocol and private source/filesystem/process fixtures; no kernel test body or VMM credit."
+    },
+    {
+      "binary_id": "xtask",
+      "test_name": "metal_run_isolation_conformance::protocol_missing_rsync_aborts_before_start",
+      "descriptor": {
+        "kind": "host-pure"
+      },
+      "source": "xtask/src/metal_run_isolation_conformance.rs",
+      "rationale": "Actual shell/systemd owner protocol and private source/filesystem/process fixtures; no kernel test body or VMM credit."
+    },
+    {
+      "binary_id": "xtask",
+      "test_name": "metal_run_isolation_conformance::protocol_repeat_collection_agrees",
+      "descriptor": {
+        "kind": "host-pure"
+      },
+      "source": "xtask/src/metal_run_isolation_conformance.rs",
+      "rationale": "Actual shell/systemd owner protocol and private source/filesystem/process fixtures; no kernel test body or VMM credit."
+    },
+    {
+      "binary_id": "xtask",
+      "test_name": "metal_run_isolation_conformance::protocol_randomized_owner_traces",
+      "descriptor": {
+        "kind": "host-pure"
+      },
+      "source": "xtask/src/metal_run_isolation_conformance.rs",
+      "rationale": "Actual shell/systemd owner protocol and private source/filesystem/process fixtures; no kernel test body or VMM credit."
+    },
+    {
+      "binary_id": "xtask",
+      "test_name": "metal_run_isolation_conformance::protocol_illegal_controls_preserve_each_actual_owner_state_boundary",
+      "descriptor": {
+        "kind": "host-pure"
+      },
+      "source": "xtask/src/metal_run_isolation_conformance.rs",
+      "rationale": "Actual shell/systemd owner protocol and private source/filesystem/process fixtures; no kernel test body or VMM credit."
+    },
+    {
+      "binary_id": "metal-run-isolation-attempt-fixture::attempt",
+      "test_name": "selected_environment_and_status",
+      "descriptor": {
+        "kind": "guest-group",
+        "group": "core"
+      },
+      "source": "infra/metal/tests/fixtures/attempt/tests/attempt.rs",
+      "rationale": "Actual guest boot identity/env/helper/status, timeout or peer-loss fixture; host identity guard precedes effects."
+    },
+    {
+      "binary_id": "metal-run-isolation-attempt-fixture::attempt",
+      "test_name": "selected_attempt_waits_for_its_timeout",
+      "descriptor": {
+        "kind": "guest-group",
+        "group": "core"
+      },
+      "source": "infra/metal/tests/fixtures/attempt/tests/attempt.rs",
+      "rationale": "Actual guest boot identity/env/helper/status, timeout or peer-loss fixture; host identity guard precedes effects."
+    },
+    {
+      "binary_id": "metal-run-isolation-attempt-fixture::attempt",
+      "test_name": "selected_attempt_resets_its_guest",
+      "descriptor": {
+        "kind": "guest-group",
+        "group": "core"
+      },
+      "source": "infra/metal/tests/fixtures/attempt/tests/attempt.rs",
+      "rationale": "Actual guest boot identity/env/helper/status, timeout or peer-loss fixture; host identity guard precedes effects."
+    }
+  ],
+  "existing_transitions": [
+    {
+      "binary_id": "xtask::bin/xtask",
+      "test_name": "metal_qualification_tests::metal_run_and_bootstrap_share_the_global_lease_and_sync_takes_only_the_tree_lock",
+      "descriptor": {
+        "kind": "host-pure"
+      },
+      "source": "xtask/src/main.rs",
+      "activation": "Remove pending marker after the approved exclusive-maintenance contract is implemented; pre-authored body delegates to legacy_contract.rs."
+    },
+    {
+      "binary_id": "xtask::bin/xtask",
+      "test_name": "metal_qualification_tests::metal_run_reinjects_guest_artifacts_without_sudo_environment_preservation",
+      "descriptor": {
+        "kind": "host-pure"
+      },
+      "source": "xtask/src/main.rs",
+      "activation": "Remove pending marker after the approved exclusive-maintenance contract is implemented; pre-authored body delegates to legacy_contract.rs."
+    }
+  ]
+}

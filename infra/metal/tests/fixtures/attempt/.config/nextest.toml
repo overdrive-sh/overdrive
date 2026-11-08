@@ -1,0 +1,23 @@
+# Standalone Cargo input fixture uses the same mandatory checked-in adapter.
+# This does not add a profile/lane or permit a caller --config-file replacement.
+experimental = ["wrapper-scripts"]
+
+[scripts.wrapper.metal]
+command = ["bash", "../../../test-wrapper.sh"]
+target-runner = "within-wrapper"
+
+[[profile.default.scripts]]
+filter = "all()"
+run-wrapper = "metal"
+
+[profile.default]
+retries = 0
+slow-timeout = { period = "10s", terminate-after = 1 }
+
+# Same existing capacity owner, scoped to this standalone nextest input fixture.
+[test-groups.host-kernel-shared]
+max-threads = 1
+
+[[profile.default.overrides]]
+filter = 'all()'
+test-group = 'host-kernel-shared'

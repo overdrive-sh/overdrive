@@ -1,0 +1,60 @@
+{
+  "codec_only": true,
+  "error": null,
+  "mode": "named:controller_loss_after_start",
+  "ok": true,
+  "seed": "20261108",
+  "state_comparison": false,
+  "steps_reaching_driver": [
+    {
+      "action": "init",
+      "actor": 0,
+      "value": 2
+    },
+    {
+      "action": "Register",
+      "actor": 1,
+      "value": 0
+    },
+    {
+      "action": "Barrier",
+      "actor": 1,
+      "value": 0
+    },
+    {
+      "action": "Checkout",
+      "actor": 1,
+      "value": 0
+    },
+    {
+      "action": "Prepare",
+      "actor": 1,
+      "value": 0
+    },
+    {
+      "action": "Start",
+      "actor": 1,
+      "value": 0
+    },
+    {
+      "action": "LoseController",
+      "actor": 1,
+      "value": 0
+    },
+    {
+      "action": "MainExit",
+      "actor": 1,
+      "value": 255
+    },
+    {
+      "action": "StopOwner",
+      "actor": 1,
+      "value": 1
+    },
+    {
+      "action": "Collect",
+      "actor": 1,
+      "value": 0
+    }
+  ]
+}

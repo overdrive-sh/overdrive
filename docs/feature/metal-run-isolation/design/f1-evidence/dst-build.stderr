@@ -1,0 +1,4 @@
+   Compiling overdrive-fwd v0.0.0 (/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/crates/overdrive-fwd)
+   Compiling overdrive-control-plane v0.0.0 (/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/crates/overdrive-control-plane)
+   Compiling overdrive-sim v0.0.0 (/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/crates/overdrive-sim)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 19.51s

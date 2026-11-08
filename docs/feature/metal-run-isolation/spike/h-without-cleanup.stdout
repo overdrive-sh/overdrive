@@ -1,0 +1,3 @@
+METAL-DESIGN-LOCAL-NAMESPACE net:[4026532936]
+METAL-DESIGN-WRAPPER binary_id=metal-isolation-local-vsock-spike identity=selected_guest_timeout_owns_resources test_group=@global argv=["/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/target/debug/deps/metal_isolation_local_vsock_spike-b7eb93e599fd5841", "--exact", "selected_guest_timeout_owns_resources", "--nocapture"]
+METAL-DESIGN-VM-UP namespace=net:[4026532936] cid=16785415 pid=378808 vm_up_ns=1794099326038402769

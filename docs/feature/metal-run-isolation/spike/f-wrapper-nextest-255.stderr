@@ -1,0 +1,12 @@
+info: experimental features enabled: wrapper-scripts
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.08s
+────────────
+ Nextest run ID 720cb9da-90ec-47d4-b8ab-5373fb707926 with nextest profile: default
+    Starting 1 test across 2 binaries (1 test skipped)
+       START [         ] (1/1) metal-isolation-wrapper-spike selected_guest_status_is_255
+        FAIL [   1.776s] (1/1) metal-isolation-wrapper-spike selected_guest_status_is_255
+  Cancelling due to test failure
+────────────
+     Summary [   1.776s] 1 test run: 0 passed, 1 failed, 1 skipped
+        FAIL [   1.776s] (1/1) metal-isolation-wrapper-spike selected_guest_status_is_255
+error: test run failed

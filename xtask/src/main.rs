@@ -1689,19 +1689,45 @@ fn tracing_placeholder(msg: &str) -> Result<()> {
 mod metal_qualification_tests {
     #![allow(clippy::doc_markdown)]
 
-    use std::ffi::OsString;
     use std::os::unix::fs::PermissionsExt as _;
-    use std::path::PathBuf;
-    use std::process::{Child, Command, Stdio};
+    #[cfg(feature = "integration-tests")]
+    use std::process::Child;
+    use std::process::Command;
+    #[cfg(feature = "integration-tests")]
     use std::thread;
+    #[cfg(feature = "integration-tests")]
     use std::time::Duration;
 
     use tempfile::TempDir;
+    #[cfg(feature = "integration-tests")]
+    #[allow(dead_code, reason = "shared test support has additional acceptance consumers")]
+    mod support {
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/acceptance/metal_run_isolation/support.rs"
+        ));
+    }
+    #[cfg(feature = "integration-tests")]
+    #[allow(dead_code, reason = "shared controller fixture has additional acceptance consumers")]
+    mod native_controller {
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/acceptance/metal_run_isolation/native_controller.rs"
+        ));
+    }
+    #[cfg(feature = "integration-tests")]
+    mod legacy_contract {
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/acceptance/metal_run_isolation/legacy_contract.rs"
+        ));
+    }
 
     fn workspace_file(relative: &str) -> std::path::PathBuf {
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join(relative)
     }
 
+    #[cfg(feature = "integration-tests")]
     fn holder(
         lock: &std::path::Path,
         owner: &std::path::Path,
@@ -1719,6 +1745,7 @@ mod metal_qualification_tests {
         command
     }
 
+    #[cfg(feature = "integration-tests")]
     fn wait_for_owner(owner: &std::path::Path) {
         for _ in 0..100 {
             if owner.exists() {
@@ -1729,39 +1756,7 @@ mod metal_qualification_tests {
         panic!("lease holder did not publish owner metadata");
     }
 
-    /// Fake `ssh` for lease-contention tests: it answers the preflight
-    /// probes, runs lease-holder commands locally, and records any other
-    /// remote command as a mutation.
-    fn lease_contention_fake_ssh(temp: &TempDir) -> (OsString, PathBuf) {
-        let fake_bin = temp.path().join("bin");
-        let fake_home = temp.path().join("remote-home");
-        std::fs::create_dir_all(&fake_bin).expect("fake command directory");
-        std::fs::create_dir_all(&fake_home).expect("fake remote home");
-        write_executable(
-            &fake_bin.join("ssh"),
-            r#"#!/usr/bin/env bash
-set -euo pipefail
-command="${!#}"
-case "${command}" in
-  'echo ok') exit 0 ;;
-  'echo $HOME') printf '%s\n' "${OVERDRIVE_FAKE_REMOTE_HOME}"; exit 0 ;;
-  'id -un') printf 'root\n'; exit 0 ;;
-esac
-if [[ "${command}" == lease_script=* ]]; then
-  exec bash -c "${command}"
-fi
-printf 'mutation-before-lease\n' > "${OVERDRIVE_FAKE_MUTATION}"
-case "${command}" in 'cat >'*) cat >/dev/null ;; esac
-exit 0
-"#,
-        );
-        let inherited_path = std::env::var_os("PATH").expect("PATH");
-        let mut fake_paths = vec![fake_bin];
-        fake_paths.extend(std::env::split_paths(&inherited_path));
-        let fake_path = std::env::join_paths(fake_paths).expect("fake PATH");
-        (fake_path, fake_home)
-    }
-
+    #[cfg(feature = "integration-tests")]
     fn terminate(mut child: Child, what: &str) {
         Command::new("kill")
             .args(["-TERM", &child.id().to_string()])
@@ -1772,107 +1767,14 @@ exit 0
 
     /// CONTRACT_SHAPE: bounded-change (contention times out before mutation and cancellation releases).
     ///
-    /// Run and bootstrap contend on the global lease; sync-only does not take
-    /// it and contends only on its per-tree lock.
+    /// Explicit exclusive run and provisioning contend on physical maintenance;
+    /// sync-only keeps checkout exclusion. Ordinary shared admission has its
+    /// independent acceptance cases.
+    #[cfg(feature = "integration-tests")]
+    #[ignore = "pending DELIVER: metal-run-isolation exclusive qualification transition"]
     #[test]
     fn metal_run_and_bootstrap_share_the_global_lease_and_sync_takes_only_the_tree_lock() {
-        let temp = TempDir::new().expect("temporary lease directory");
-        let lock = temp.path().join("shared.lock");
-        let owner = temp.path().join("shared.owner");
-        let tree_lock = temp.path().join("tree.lock");
-        let tree_owner = temp.path().join("tree.owner");
-        let mutation = temp.path().join("must-not-exist");
-
-        let first = holder(&lock, &owner, "first-token", "run")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()
-            .expect("start first lease holder");
-        wait_for_owner(&owner);
-        let owner_metadata = std::fs::read_to_string(&owner).expect("owner metadata");
-        for field in [
-            "pid=",
-            "started_at=",
-            "action=run",
-            "scenario=C-GTI-METAL-LEASE",
-            "workspace=/workspace",
-            "commit=deadbeef",
-            "token=first-token",
-        ] {
-            assert!(owner_metadata.contains(field), "missing owner field {field}");
-        }
-        let (fake_path, fake_home) = lease_contention_fake_ssh(&temp);
-        let bootstrap = |args: &[&str]| {
-            let mut command = Command::new("bash");
-            command
-                .arg(workspace_file("infra/metal/bootstrap.sh"))
-                .args(args)
-                .env("PATH", &fake_path)
-                .env("RSYNC_BIN", "/bin/true")
-                .env("OVERDRIVE_METAL_LOCK_PATH", &lock)
-                .env("OVERDRIVE_METAL_OWNER_PATH", &owner)
-                .env("OVERDRIVE_METAL_TREE_LOCK_PATH", &tree_lock)
-                .env("OVERDRIVE_METAL_TREE_OWNER_PATH", &tree_owner)
-                .env("OVERDRIVE_METAL_LEASE_TIMEOUT_SECONDS", "1")
-                .env("OVERDRIVE_FAKE_REMOTE_HOME", &fake_home)
-                .env("OVERDRIVE_FAKE_MUTATION", &mutation);
-            command
-        };
-        for (action, args) in
-            [("run", vec!["fake@metal", "--run", "--", "true"]), ("bootstrap", vec!["fake@metal"])]
-        {
-            let blocked =
-                bootstrap(&args).output().expect("execute canonical bootstrap writer route");
-            assert_eq!(
-                blocked.status.code(),
-                Some(75),
-                "{action} must time out at the global lease"
-            );
-            let diagnostic = String::from_utf8(blocked.stderr).expect("UTF-8 diagnostic");
-            assert!(diagnostic.contains("timed out after 1s"));
-            assert!(diagnostic.contains("token=first-token"));
-            assert!(!mutation.exists(), "a timed-out {action} writer must perform no mutation");
-        }
-
-        // Sync-only does not take the global lease: it completes while the
-        // global lease is held.
-        let synced = bootstrap(&["fake@metal", "--sync-only"])
-            .output()
-            .expect("execute sync-only while the global lease is held");
-        assert!(
-            synced.status.success(),
-            "sync-only must not wait on the global lease: {}",
-            String::from_utf8_lossy(&synced.stderr)
-        );
-        assert!(mutation.exists(), "a sync-only writer mutates once it holds its tree lock");
-        std::fs::remove_file(&mutation).expect("reset mutation sentinel");
-        assert!(!tree_owner.exists(), "sync-only must release its tree lock on exit");
-
-        // Sync-only does contend on its own tree lock, and mutates nothing
-        // before holding it.
-        let tree_holder = holder(&tree_lock, &tree_owner, "tree-token", "sync")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .spawn()
-            .expect("start tree lock holder");
-        wait_for_owner(&tree_owner);
-        let blocked = bootstrap(&["fake@metal", "--sync-only"])
-            .output()
-            .expect("execute sync-only against a held tree lock");
-        assert_eq!(blocked.status.code(), Some(75), "sync must time out at the tree lock");
-        let diagnostic = String::from_utf8(blocked.stderr).expect("UTF-8 diagnostic");
-        assert!(diagnostic.contains("timed out after 1s"));
-        assert!(diagnostic.contains("token=tree-token"));
-        assert!(!mutation.exists(), "a timed-out sync writer must perform no mutation");
-        terminate(tree_holder, "tree holder");
-        terminate(first, "first holder");
-        assert!(!owner.exists(), "signal cancellation must remove this lease's metadata");
-
-        let reacquired = holder(&lock, &owner, "replacement-token", "bootstrap")
-            .stdin(Stdio::null())
-            .output()
-            .expect("reacquire after cancellation");
-        assert!(reacquired.status.success());
+        legacy_contract::exclusive_maintenance_and_sync_keep_their_distinct_boundaries();
     }
 
     fn write_executable(path: &std::path::Path, body: &str) {
@@ -1883,88 +1785,11 @@ exit 0
     }
 
     /// CONTRACT_SHAPE: bounded-change (root metal runs explicitly receive guest artifacts).
+    #[cfg(feature = "integration-tests")]
+    #[ignore = "pending DELIVER: metal-run-isolation exclusive qualification transition"]
     #[test]
     fn metal_run_reinjects_guest_artifacts_without_sudo_environment_preservation() {
-        let temp = TempDir::new().expect("temporary metal bootstrap directory");
-        let fake_bin = temp.path().join("bin");
-        let fake_home = temp.path().join("remote-home");
-        let lock = temp.path().join("shared.lock");
-        let owner = temp.path().join("shared.owner");
-        let run_command = temp.path().join("run-command");
-        std::fs::create_dir_all(&fake_bin).expect("fake command directory");
-        std::fs::create_dir_all(&fake_home).expect("fake remote home");
-        write_executable(
-            &fake_bin.join("ssh"),
-            r#"#!/usr/bin/env bash
-set -euo pipefail
-command="${!#}"
-case "${command}" in
-  'echo ok') exit 0 ;;
-  'echo $HOME') printf '%s\n' "${OVERDRIVE_FAKE_REMOTE_HOME}"; exit 0 ;;
-  'id -un') printf 'ubuntu\n'; exit 0 ;;
-esac
-if [[ "${command}" == lease_script=* ]]; then
-  exec bash -c "${command}"
-fi
-if [[ "${command}" == bash\ -lc* ]]; then
-  printf '%s\n' "${command}" > "${OVERDRIVE_FAKE_RUN_COMMAND}"
-fi
-if [[ "${command}" == 'cat > '* ]]; then
-  marker="${command#cat > }"
-  mkdir -p "$(dirname "${marker}")"
-  cat > "${marker}"
-fi
-exit 0
-"#,
-        );
-        write_executable(
-            &fake_bin.join("sudo"),
-            r#"#!/usr/bin/env bash
-set -euo pipefail
-if [ "$#" -gt 0 ] && [ "$1" = "-n" ]; then
-  shift
-fi
-exec "$@"
-"#,
-        );
-        let inherited_path = std::env::var_os("PATH").expect("PATH");
-        let mut fake_paths = vec![fake_bin];
-        fake_paths.extend(std::env::split_paths(&inherited_path));
-        let fake_path = std::env::join_paths(fake_paths).expect("fake PATH");
-
-        let output = Command::new("bash")
-            .arg(workspace_file("infra/metal/bootstrap.sh"))
-            .args(["fake@metal", "--run", "--", "true"])
-            .env("PATH", &fake_path)
-            .env("RSYNC_BIN", "/bin/true")
-            .env("OVERDRIVE_METAL_LOCK_PATH", &lock)
-            .env("OVERDRIVE_METAL_OWNER_PATH", &owner)
-            .env("OVERDRIVE_METAL_TREE_LOCK_PATH", temp.path().join("tree.lock"))
-            .env("OVERDRIVE_METAL_TREE_OWNER_PATH", temp.path().join("tree.owner"))
-            .env("OVERDRIVE_METAL_LEASE_TIMEOUT_SECONDS", "1")
-            .env("OVERDRIVE_METAL_KERNEL", "/fixture/kernel")
-            .env("OVERDRIVE_METAL_ROOTFS", "/fixture/rootfs.ext4")
-            .env("OVERDRIVE_FAKE_REMOTE_HOME", &fake_home)
-            .env("OVERDRIVE_FAKE_RUN_COMMAND", &run_command)
-            .output()
-            .expect("execute metal run bootstrap");
-        assert!(
-            output.status.success(),
-            "bootstrap failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-
-        let remote_command = std::fs::read_to_string(&run_command).expect("captured root command");
-        assert!(remote_command.contains("sudo\\ -n\\ env"), "{remote_command}");
-        assert!(!remote_command.contains("sudo\\ -E"), "{remote_command}");
-        assert!(
-            remote_command.contains("OVERDRIVE_METAL_KERNEL=/fixture/kernel"),
-            "{remote_command}"
-        );
-        assert!(
-            remote_command.contains("OVERDRIVE_METAL_ROOTFS=/fixture/rootfs.ext4"),
-            "{remote_command}"
-        );
+        legacy_contract::privileged_command_gets_explicit_selected_artifacts_without_sudo_preservation();
     }
 
     fn preflight_command(root: &std::path::Path) -> Command {

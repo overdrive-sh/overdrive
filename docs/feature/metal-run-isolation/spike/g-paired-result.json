@@ -1,0 +1,24 @@
+{
+  "kernel": "7.0.0-38-generic",
+  "actual_guest_intervals_overlap": true,
+  "same_cid_separate_local_namespaces": [
+    {
+      "status": 0,
+      "cid": 16785415,
+      "namespace": "net:[4026532936]",
+      "vm_up_ns": 1794093610970649080,
+      "vm_end_ns": 1794093616069172936,
+      "guest_boot_id": "bd8343a7-df14-4416-8806-b924e1774677"
+    },
+    {
+      "status": 0,
+      "cid": 16785415,
+      "namespace": "net:[4026533041]",
+      "vm_up_ns": 1794093611436450732,
+      "vm_end_ns": 1794093616555304900,
+      "guest_boot_id": "5dc6d342-af64-4970-ae28-bcc069d666d7"
+    }
+  ],
+  "physical_host_test_surfaces_unchanged": true,
+  "nextest_status_255_body_aggregate": 100
+}

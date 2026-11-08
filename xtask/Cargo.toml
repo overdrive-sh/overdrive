@@ -69,3 +69,7 @@ cargo_metadata       = "0.18"
 [dev-dependencies]
 proptest.workspace = true
 serial_test.workspace = true
+# Replay the approved Metal admission/completion model against actual shell owners.
+quint-connect.workspace = true
+itf.workspace = true
+anyhow.workspace = true

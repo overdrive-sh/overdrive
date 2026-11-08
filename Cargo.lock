@@ -4970,15 +4970,18 @@ dependencies = [
 name = "xtask"
 version = "0.0.0"
 dependencies = [
+ "anyhow",
  "cargo_metadata 0.18.1",
  "clap",
  "color-eyre",
  "dotenvy",
  "eyre",
  "hex",
+ "itf",
  "libc",
  "proc-macro2",
  "proptest",
+ "quint-connect",
  "rand 0.8.6",
  "serde",
  "serde_json",

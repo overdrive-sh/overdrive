@@ -1,0 +1,132 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.39s
+     Running `target/debug/xtask metal run -- python3 spike-scratch/metal-run-isolation/review-f1/prove.py`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+OVERDRIVE_METAL_RUN_ID=eb2bc9a1a2f401aa7935d2a3
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_RUN_REGISTERED run_id=eb2bc9a1a2f401aa7935d2a3
+OVERDRIVE_METAL_LEASE_ACQUIRED token=eb2bc9a1a2f401aa7935d2a3 pid=630271
+
+########## [bootstrap] acquire metal tree lock (/run/lock/overdrive-metal-tree-overdrive-branches-marcus-sa-nw-bugfix-crash-restart-tasks.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=eb2bc9a1a2f401aa7935d2a3-tree pid=630424
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/ouagadougou -> ubuntu@151.115.99.251:/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks
+
+sent 1,969,407 bytes  received 30,312 bytes  571,348.29 bytes/sec
+total size is 1,856,185,658  speedup is 928.22
+
+########## [bootstrap] materialising standalone .git (common dir 7.4G)
+
+sent 287,584 bytes  received 18,442 bytes  204,017.33 bytes/sec
+total size is 860,321,382  speedup is 2,811.27
+## marcus-sa/nw-bugfix-crash-restart-tasks...origin/marcus-sa/nw-bugfix-crash-restart-tasks [ahead 135, behind 1]
+ M AGENTS.md
+ M crates/overdrive-control-plane/src/worker/exit_observer.rs
+ M crates/overdrive-control-plane/tests/acceptance/crash_ending_authority.rs
+ M crates/overdrive-control-plane/tests/acceptance/terminal_hook_ownership.rs
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+RAW actual-test 0
+
+running 1 test
+test acceptance::gateway_relay_exchange::seeded_peer_events_never_move_an_octet_past_a_message_boundary_and_leave_no_residue ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 126 filtered out; finished in 2.63s
+
+S-PIG-102 seed=0 ending=ClientFailsMidBody(UnexpectedRecord)
+S-PIG-102 seed=1 ending=ClientFailsMidBody(Reset)
+S-PIG-102 seed=2 ending=Completes
+S-PIG-102 seed=3 ending=OriginFailsMidBody(CloseNotify)
+S-PIG-102 seed=4 ending=OriginFailsMidBody(UnexpectedRecord)
+S-PIG-102 seed=5 ending=Completes
+S-PIG-102 seed=6 ending=Completes
+S-PIG-102 seed=7 ending=OriginClosesBeforeHead(CloseNotify)
+S-PIG-102 seed=8 ending=OriginFailsMidBody(Alert)
+S-PIG-102 seed=9 ending=OriginFailsMidBody(UnexpectedRecord)
+S-PIG-102 seed=10 ending=OriginClosesBeforeHead(CloseNotify)
+S-PIG-102 seed=11 ending=Completes
+S-PIG-102 seed=12 ending=OriginClosesBeforeHead(Alert)
+S-PIG-102 seed=13 ending=OriginFailsMidBody(UnexpectedRecord)
+S-PIG-102 seed=14 ending=ClientFailsMidBody(UnexpectedRecord)
+S-PIG-102 seed=15 ending=ClientFailsMidBody(UnexpectedRecord)
+S-PIG-102 seed=16 ending=ClientFailsMidBody(Reset)
+S-PIG-102 seed=17 ending=OriginFailsMidBody(UnexpectedRecord)
+S-PIG-102 seed=18 ending=OriginClosesBeforeHead(Reset)
+S-PIG-102 seed=19 ending=ClientFailsMidBody(Reset)
+S-PIG-102 seed=20 ending=OriginClosesBeforeHead(Alert)
+S-PIG-102 seed=21 ending=ClientFailsMidBody(CloseNotify)
+S-PIG-102 seed=22 ending=ClientFailsMidBody(CloseNotify)
+S-PIG-102 seed=23 ending=Completes
+S-PIG-102 seed=24 ending=OriginFailsMidBody(Alert)
+S-PIG-102 seed=25 ending=OriginFailsMidBody(UnexpectedRecord)
+S-PIG-102 seed=26 ending=OriginClosesBeforeHead(Alert)
+S-PIG-102 seed=27 ending=ClientFailsMidBody(CloseNotify)
+S-PIG-102 seed=28 ending=OriginClosesBeforeHead(Alert)
+S-PIG-102 seed=29 ending=ClientFailsMidBody(CloseNotify)
+S-PIG-102 seed=30 ending=OriginClosesBeforeHead(Reset)
+S-PIG-102 seed=31 ending=Completes
+S-PIG-102 seed=32 ending=OriginClosesBeforeHead(Alert)
+S-PIG-102 seed=33 ending=OriginFailsMidBody(Alert)
+S-PIG-102 seed=34 ending=OriginFailsMidBody(CloseNotify)
+S-PIG-102 seed=35 ending=OriginFailsMidBody(Reset)
+S-PIG-102 seed=36 ending=OriginClosesBeforeHead(UnexpectedRecord)
+S-PIG-102 seed=37 ending=Completes
+S-PIG-102 seed=38 ending=OriginClosesBeforeHead(CloseNotify)
+S-PIG-102 seed=39 ending=OriginFailsMidBody(UnexpectedRecord)
+S-PIG-102 seed=40 ending=ClientFailsMidBody(Alert)
+S-PIG-102 seed=41 ending=OriginClosesBeforeHead(Alert)
+S-PIG-102 seed=42 ending=Completes
+S-PIG-102 seed=43 ending=ClientFailsMidBody(Reset)
+S-PIG-102 seed=44 ending=OriginClosesBeforeHead(Alert)
+S-PIG-102 seed=45 ending=OriginFailsMidBody(Alert)
+S-PIG-102 seed=46 ending=ClientFailsMidBody(UnexpectedRecord)
+S-PIG-102 seed=47 ending=ClientFailsMidBody(Alert)
+
+RAW actual-test 1
+
+running 1 test
+test acceptance::gateway_relay_exchange::seeded_peer_events_never_move_an_octet_past_a_message_boundary_and_leave_no_residue ... FAILED
+
+failures:
+
+failures:
+    acceptance::gateway_relay_exchange::seeded_peer_events_never_move_an_octet_past_a_message_boundary_and_leave_no_residue
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 126 filtered out; finished in 0.01s
+
+S-PIG-102 seed=0 ending=ClientFailsMidBody(UnexpectedRecord)
+
+thread 'acceptance::gateway_relay_exchange::seeded_peer_events_never_move_an_octet_past_a_message_boundary_and_leave_no_residue' (631867) panicked at crates/overdrive-sim/tests/acceptance/gateway_relay_exchange.rs:138:73:
+frontend: Os { code: 98, kind: AddrInUse, message: "Address already in use" }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+PAIR-RESULT actual-test [{"status": 0, "addr_in_use": false, "pid": 631865}, {"status": 101, "addr_in_use": true, "pid": 631866}]
+RAW actual-dst 0
+dst failed: 
+   0: [91m--only name "gateway-application-generation-lifecycle-is-safe" is not a known invariant[0m
+   1: [91munknown invariant name: "gateway-application-generation-lifecycle-is-safe"[0m
+
+Location:
+   [35mcrates/overdrive-sim/src/bin/dst.rs[0m:[35m71[0m
+
+Backtrace omitted. Run with RUST_BACKTRACE=1 environment variable to display it.
+Run with RUST_BACKTRACE=full to include source snippets.
+
+RAW actual-dst 1
+dst failed: 
+   0: [91m--only name "gateway-application-generation-lifecycle-is-safe" is not a known invariant[0m
+   1: [91munknown invariant name: "gateway-application-generation-lifecycle-is-safe"[0m
+
+Location:
+   [35mcrates/overdrive-sim/src/bin/dst.rs[0m:[35m71[0m
+
+Backtrace omitted. Run with RUST_BACKTRACE=1 environment variable to display it.
+Run with RUST_BACKTRACE=full to include source snippets.
+
+PAIR-RESULT actual-dst [{"status": 1, "addr_in_use": false, "pid": 632628}, {"status": 1, "addr_in_use": false, "pid": 632629}]
+F1-REACHABILITY {"dst": {"collision_reproduced": false, "label": "actual-dst", "rows": [{"addr_in_use": false, "pid": 632628, "status": 1}, {"addr_in_use": false, "pid": 632629, "status": 1}]}, "kernel": "7.0.0-38-generic", "namespace": "net:[4026531833]", "production_source_modified": false, "same_initial_namespace": true, "scheduling_seam_used": false, "test": {"collision_reproduced": true, "label": "actual-test", "rows": [{"addr_in_use": false, "pid": 631865, "status": 0}, {"addr_in_use": true, "pid": 631866, "status": 101}]}, "test_entry": "acceptance::gateway_relay_exchange::seeded_peer_events_never_move_an_octet_past_a_message_boundary_and_leave_no_residue"}

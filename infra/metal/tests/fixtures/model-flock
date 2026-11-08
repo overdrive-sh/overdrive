@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# External flock adapter: gate invocation timing, then perform the REAL syscall.
+# No success/failure or owner state is synthesized.
+set -euo pipefail
+if [ -n "${METAL_MODEL_ACTOR:-}" ]; then
+  selected="${!#}"
+  if [[ "$selected" =~ ^[0-9]+$ ]]; then selected="$(readlink "/proc/$PPID/fd/$selected")"; fi
+  if [ "$selected" = "$METAL_MODEL_BARRIER" ]; then gate="$METAL_MODEL_ACTOR/barrier";
+  elif [ "$selected" = "$METAL_MODEL_TREE" ]; then gate="$METAL_MODEL_ACTOR/checkout";
+  else gate=''; fi
+  if [ -n "$gate" ]; then while [ ! -f "$gate" ]; do sleep 0.01; done; fi
+fi
+# A timeout stimulus is a bounded real contended kernel wait at this external
+# primitive boundary. It is not evidence that the generous outer owner clock
+# budget elapsed; the separate real-budget acceptance test covers that contract.
+if [ -n "${METAL_MODEL_ACTOR:-}" ] && [ -f "$METAL_MODEL_ACTOR/short-wait" ]; then
+  args=(); next=0
+  for arg in "$@"; do
+    if [ "$next" = 1 ]; then args+=(0.2); next=0; continue; fi
+    case "$arg" in
+      -w|--wait|--timeout) args+=("$arg"); next=1 ;;
+      --wait=*|--timeout=*) args+=(--timeout=0.2) ;;
+      *) args+=("$arg") ;;
+    esac
+  done
+  exec /usr/bin/flock "${args[@]}"
+fi
+exec /usr/bin/flock "$@"

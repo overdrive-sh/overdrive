@@ -1,0 +1,10 @@
+[package]
+name = "metal-quint-codec-probe"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+quint-connect = "=0.1.2"
+serde = "1"
+serde_json = "1"

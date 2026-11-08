@@ -1,0 +1,35 @@
+# Closed placement inventory — proposed
+
+The native build/listing completed through the existing runner in invocation `8d05ef07c5e1f3218a36aeec`:
+
+```text
+cargo nextest list --workspace --features integration-tests,kvm-tests --message-format json
+94 binaries; 4,640 discovered test identities; 0 unclassified identities
+```
+
+This is an inventory of the actual compiled Linux composition, including ignored bodies. It is not a test-pass claim. [Original native metadata](../spike/f-nextest-list-workspace.stdout), [build/list stderr](../spike/f-nextest-list-workspace.stderr), [every identity, its proposed placement and source](test-placement-inventory.json). The authoring script is [retained](../../../../spike-scratch/metal-run-isolation/inventory/build_inventory.py); it emits this reviewed data, not an execution-time source/command heuristic. All entries remain proposed pending approval of the execution boundary.
+
+| Placement | Identities | Boundary |
+|---|---:|---|
+| Host pure / Sim / private files / tooling | 3,809 | Exact selected binary and arguments; no guest and no unrelated-run execution exclusion |
+| Native launcher or existing first-level-guest orchestration | 38 | Direct physical KVM/host adapter, inside invocation-owned launcher resource context; an existing orchestration body keeps its own fresh guest |
+| Existing disposable guest group | 782 | Exactly the selected body inside its existing group setup; node/global kernel state is guest state |
+| Existing init operator lane | 4 | Existing `run_in_guest_cell` context, exact selected in-guest body |
+| Existing init owner lane | 7 | Existing `run_in_guest_owner_cell` plus that body's already-authored host script |
+
+Important owner distinctions established from actual code:
+
+- `overdrive-control-plane`'s composed liveness and listener-gate fixtures use `SimVmm`, `SimBeaconIo`, `SimCgroupFs`, `SimCgroupAccounting` and `SimGuestStreamDial` (`src/reconciler_runtime/liveness_gate_fixture.rs:275-345`). They remain host Sim tests; the word “VM” in a fixture is not native VMM evidence.
+- The admission/latency spike's current `sim_boot` replaces VM host state, dataplane, intercept and guest DNS; `run_server_with_obs_and_driver` receives `SimSharedGuestNetworkOwner` (`overdrive-sim/tests/vm_lifecycle_latency_283_spike.rs:310-326,491-499`). Its `NoopNetworkProvisioner` is explicit at `:56-63`. Existing nextest comments about an older real-network composition do not establish current kernel effects. Its 13 identities remain host Sim.
+- The three acceptance `job_stop_*` cases really call `tests/common/node_adapters::boot`, whose bundle keeps `RealCgroupFs` (`node_adapters.rs:90-95,133-144,155-164`). They are already declared in `CGROUP_ACCEPTANCE` and stay in the existing `cgroup-default` guest.
+- Most source-local `overdrive-netlink` tests build/decode messages and run a dedicated ordinary thread. They do not enter a network namespace (`src/client.rs:822`, `src/setns.rs:98-141`, `src/ethtool.rs:418`). They remain host tests despite the crate owning a real adapter.
+- The dataplane's artifact-removal diagnostic test modifies only its checkout's BPF file and invokes Cargo (`tests/integration/build_rs_artifact_check.rs:25-70`). It remains host, protected by checkout ownership. The actual BPF, XDP, kTLS and adapter-equivalence bodies go to the existing kernel/relay group.
+- Real `SystemdCredsKeyring` cases install keys using Linux keyctl/add_key (`overdrive-host/tests/integration/systemd_creds_keyring.rs:1-24,97-140`); fake-file `CgroupAccounting` equivalence does not write cgroupfs (`cgroup_accounting_equivalence.rs:1-13`). Their placements differ accordingly.
+- Six `overdrive-sim::acceptance` Gateway identities use retained real deterministic frontend sockets despite their Sim driven ports. The two relay-exchange examples are active; four lifecycle cases remain ignored and selectable. The existing relay example was executed twice through its exact compiled test entry with no scheduling seam: one returned 0 and the other 101 with `AddrInUse` at the retained frontend bind. These six are therefore guest-routed through the existing `cgroup-default` context; their source/arguments/ignored status are unchanged. [Bounded source path and proof](f1-disposition.md).
+- The corresponding production `dst --only` concern is **not reachable today**. `Invariant::from_str` iterates `Invariant::ALL`, which omits both Gateway Application variants pending their activation. The default harness uses that same catalogue. The real CLI rejected the proposed selector before printing a seed; the explicit typed `Harness::only` path is available only to the current Rust cases. This design neither activates those variants nor changes the CLI, its status, or its current host execution boundary.
+- Gateway Application Sim fixtures deliberately reuse fixed loopback addresses and TCP/443 across invocations (`overdrive-gateway/tests/integration/public_ingress_gateway.rs:16-24`; relay sibling `:25-34`; source-local application conformance `src/application/quint_gateway_application.rs:25`). They need resource isolation even though their driven relay is simulated. They use a guest context rather than claiming that a fixed per-test table is unique across worktrees.
+- Init's 11 `real_kernel` cells require either the production-init operator context or an explicit host script. The existing outer file already pins all 11 exact cell-to-fixture mappings (`overdrive-init/tests/integration/in_guest_lane.rs:41-53,223-252,263-463`). The adapter reuses those contexts and runs the selected cell once; it does not invent a new guest owner or execute an extra unselected cell.
+
+The initial wrapper policy is an explicit partition of these current identities and their existing owner contexts. It must never infer host safety merely because a name is absent from a guest list. Unknown or multiply classified identities refuse before a body starts. Implementation may compact this reviewed inventory into explicit binary/module/cell tables beside the existing suite tables; it may not change a placement or use a runtime source scan to guess effects. A change that introduces a new kernel owner requires a placement update with its test-support review. DISTILL registers placement for new tests as test support and demonstrates that RED reaches the intended domain assertion; an unclassified-test refusal is an infrastructure failure, not feature RED.
+
+The existing `host-kernel-shared` group remains the finite per-nextest capacity owner. Extend its assignment to guest-routed Gateway Application fixtures and raw init guest cells that currently lack it; retain `max-threads=1`. This bounds an ordinary invocation to one such active guest factory without adding a scheduler or serializing unrelated worktrees. Pure host/Sim targets receive no new cross-run exclusion. Direct nextest may instantiate a fresh existing group for each selected attempt; the explicit suite retains its established batching. That boot-cost/lifetime choice is material and must be surfaced for approval, not hidden as fixture detail.

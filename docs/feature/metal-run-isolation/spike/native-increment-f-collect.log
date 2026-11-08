@@ -1,0 +1,28 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.37s
+     Running `target/debug/xtask metal collect 8d05ef07c5e1f3218a36aeec`
+/usr/bin/ssh
+xtask: running metal collect (read-only durable run record)
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+DESIGN-COMMAND local-vsock-namespace-probe ["python3", "spike-scratch/metal-run-isolation/increment-f/netns_probe.py"]
+DESIGN-RESULT local-vsock-namespace-probe status=0 seconds=0.164
+DESIGN-COMMAND bpf-build ["cargo", "xtask", "bpf-build"]
+DESIGN-RESULT bpf-build status=0 seconds=31.067
+DESIGN-COMMAND guest-kit-prepare ["cargo", "xtask", "guest-kit-prepare"]
+DESIGN-RESULT guest-kit-prepare status=0 seconds=438.789
+DESIGN-COMMAND nextest-list-workspace ["cargo", "nextest", "list", "--workspace", "--features", "integration-tests,kvm-tests", "--message-format", "json"]
+DESIGN-RESULT nextest-list-workspace status=0 seconds=154.134
+DESIGN-COMMAND wrapper-spike-build ["cargo", "build", "--manifest-path", "/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/spike-scratch/metal-run-isolation/increment-e/Cargo.toml", "--target-dir", "/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/target"]
+DESIGN-RESULT wrapper-spike-build status=0 seconds=19.386
+DESIGN-COMMAND wrapper-nextest-pass ["cargo", "nextest", "run", "--manifest-path", "/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/spike-scratch/metal-run-isolation/increment-e/Cargo.toml", "--target-dir", "/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/target", "--config-file", "/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/spike-scratch/metal-run-isolation/increment-e/nextest.toml", "-E", "test(selected_guest_has_an_independent_kernel_boot_id)", "--no-capture"]
+DESIGN-RESULT wrapper-nextest-pass status=0 seconds=30.286
+DESIGN-COMMAND wrapper-nextest-255 ["cargo", "nextest", "run", "--manifest-path", "/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/spike-scratch/metal-run-isolation/increment-e/Cargo.toml", "--target-dir", "/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/target", "--config-file", "/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/spike-scratch/metal-run-isolation/increment-e/nextest.toml", "-E", "test(selected_guest_status_is_255)", "--no-capture"]
+DESIGN-RESULT wrapper-nextest-255 status=100 seconds=2.068
+DESIGN-COMMAND wrapper-existing-kernel-cell ["cargo", "nextest", "run", "-p", "overdrive-fwd", "--test", "integration", "--features", "integration-tests,kvm-tests", "--config-file", "/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/spike-scratch/metal-run-isolation/increment-e/nextest.toml", "-E", "test(integration::probe_gold::the_probe_passes_and_leaves_no_residue_on_a_correctly_provisioned_node)", "--no-capture"]
+DESIGN-RESULT wrapper-existing-kernel-cell status=0 seconds=13.097
+DESIGN-WRAPPER-PROOF complete=true
+DESIGN-COMMAND local-vsock-wrapper-driver ["python3", "spike-scratch/metal-run-isolation/increment-g/driver.py"]
+DESIGN-RESULT local-vsock-wrapper-driver status=0 seconds=14.043
+OVERDRIVE_METAL_RUN_COMPLETE run_id=8d05ef07c5e1f3218a36aeec exit_code=0 cause=command_returned

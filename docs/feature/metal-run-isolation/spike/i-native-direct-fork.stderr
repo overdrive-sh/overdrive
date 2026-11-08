@@ -1,0 +1,24 @@
+   Compiling overdrive-host v0.0.0 (/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/crates/overdrive-host)
+   Compiling overdrive-gateway v0.0.0 (/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/crates/overdrive-gateway)
+   Compiling overdrive-testing v0.0.0 (/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/crates/overdrive-testing)
+   Compiling overdrive-dataplane v0.0.0 (/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/crates/overdrive-dataplane)
+   Compiling overdrive-worker v0.0.0 (/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/crates/overdrive-worker)
+   Compiling overdrive-control-plane v0.0.0 (/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/crates/overdrive-control-plane)
+   Compiling overdrive-sim v0.0.0 (/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/crates/overdrive-sim)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 26.53s
+info: using target runner `python3 /home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/spike-scratch/metal-run-isolation/increment-i/target_runner.py /home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/target/debug/metal-isolation-local-vsock-spike` defined by environment variable `CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER`
+────────────
+ Nextest run ID 5c4fe7d3-3aaf-4cbf-b398-678332602ec8 with nextest profile: default
+    Starting 1 test across 1 binary (35 tests skipped)
+       START [         ] (1/1) overdrive-host::integration integration::vsock_vmm_device::the_fork_boots_and_passes_data_under_the_production_launch_identity
+        SLOW [> 60.000s] (───) overdrive-host::integration integration::vsock_vmm_device::the_fork_boots_and_passes_data_under_the_production_launch_identity
+
+thread 'integration::vsock_vmm_device::the_fork_boots_and_passes_data_under_the_production_launch_identity' (186215) panicked at crates/overdrive-host/tests/integration/vsock_vmm_device.rs:437:10:
+the guest dials the host over the fork-opened device: NeverConnected { port: 2406947071, bound: 60s }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+        FAIL [  60.860s] (1/1) overdrive-host::integration integration::vsock_vmm_device::the_fork_boots_and_passes_data_under_the_production_launch_identity
+  Cancelling due to test failure
+────────────
+     Summary [  60.862s] 1 test run: 0 passed, 1 failed, 35 skipped
+        FAIL [  60.860s] (1/1) overdrive-host::integration integration::vsock_vmm_device::the_fork_boots_and_passes_data_under_the_production_launch_identity
+error: test run failed

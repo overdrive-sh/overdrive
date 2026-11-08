@@ -1,0 +1,76 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.08s
+     Running `target/debug/xtask quint check --subsystem metal-run-isolation --record --jobs 3 --tlc-workers 1 --tlc-heap 1g`
+xtask quint check: 18 check(s), budget 4992 MiB / 16 CPU (--jobs ≤ 3), TLC heap 1024 MiB × 1 workers, Apalache heap 3072 MiB + 1 CPU, start-up bounds 120s to the server, 45s from it to the first pass, 60s from it to a TLC check's TLC run, 60s from its outcome to Quint's verdict, client failures retried up to 2 attempts, run id 47182-1794138494.593
+xtask quint check: metal-run-isolation/runner-safety reserves 5888 MiB / 1 CPU, more than the budget; it will run alone
+xtask quint check: metal-run-isolation/runner-owners-progress reserves 5888 MiB / 1 CPU, more than the budget; it will run alone
+xtask quint check: metal-run-isolation/runner-maintenance-progress reserves 5888 MiB / 1 CPU, more than the budget; it will run alone
+xtask quint check: metal-run-isolation/runner-hazard-exclusive-ordinary reserves 5888 MiB / 1 CPU, more than the budget; it will run alone
+xtask quint check: metal-run-isolation/runner-hazard-collect-at-terminal reserves 5888 MiB / 1 CPU, more than the budget; it will run alone
+xtask quint check: estimate ~5.4 min at ~1 concurrent from previous durations
+[    0.0s] start  metal-run-isolation/runner-owners-progress [tlc] attempt 1 reserves 5888 MiB / 1 CPU (heap 1024 MiB, 1 workers); in use 5888 MiB / 1 CPU of 4992 MiB / 16 CPU port 55591 timeout 900s (1 running, 17 queued)
+[  117.7s] PASS   metal-run-isolation/runner-owners-progress expect=holds got=holds (117.7s, peak 0 of 5888 MiB)
+xtask quint: cleanup of process group 47343: killing process group 47343: Operation not permitted (os error 1)
+[  117.7s] start  metal-run-isolation/runner-maintenance-progress [tlc] attempt 1 reserves 5888 MiB / 1 CPU (heap 1024 MiB, 1 workers); in use 5888 MiB / 1 CPU of 4992 MiB / 16 CPU port 56647 timeout 900s (1 running, 16 queued)
+[  201.2s] PASS   metal-run-isolation/runner-maintenance-progress expect=holds got=holds (83.4s, peak 0 of 5888 MiB)
+xtask quint: cleanup of process group 52342: killing process group 52342: Operation not permitted (os error 1)
+[  201.2s] start  metal-run-isolation/runner-safety [tlc] attempt 1 reserves 5888 MiB / 1 CPU (heap 1024 MiB, 1 workers); in use 5888 MiB / 1 CPU of 4992 MiB / 16 CPU port 57304 timeout 900s (1 running, 15 queued)
+[  253.9s] PASS   metal-run-isolation/runner-safety expect=holds got=holds (52.8s, peak 0 of 5888 MiB)
+xtask quint: cleanup of process group 54956: killing process group 54956: Operation not permitted (os error 1)
+[  254.0s] start  metal-run-isolation/runner-hazard-collect-at-terminal [tlc] attempt 1 reserves 5888 MiB / 1 CPU (heap 1024 MiB, 1 workers); in use 5888 MiB / 1 CPU of 4992 MiB / 16 CPU port 57826 timeout 900s (1 running, 14 queued)
+[  264.1s] PASS   metal-run-isolation/runner-hazard-collect-at-terminal expect=violation got=violation (10.2s, peak 0 of 5888 MiB)
+xtask quint: cleanup of process group 58500: killing process group 58500: Operation not permitted (os error 1)
+[  264.1s] start  metal-run-isolation/runner-hazard-exclusive-ordinary [tlc] attempt 1 reserves 5888 MiB / 1 CPU (heap 1024 MiB, 1 workers); in use 5888 MiB / 1 CPU of 4992 MiB / 16 CPU port 57951 timeout 900s (1 running, 13 queued)
+[  274.0s] PASS   metal-run-isolation/runner-hazard-exclusive-ordinary expect=violation got=violation (9.9s, peak 0 of 5888 MiB)
+xtask quint: cleanup of process group 59160: killing process group 59160: Operation not permitted (os error 1)
+[  274.0s] start  metal-run-isolation/runner-run-supervisor-loss-is-not-a-result [evaluator] attempt 1 reserves 2560 MiB / 1 CPU (quint test); in use 2560 MiB / 1 CPU of 4992 MiB / 16 CPU port none timeout 900s (1 running, 12 queued)
+[  275.0s] PASS   metal-run-isolation/runner-run-supervisor-loss-is-not-a-result expect=holds got=holds (1.0s, peak 0 of 2560 MiB)
+[  275.0s] start  metal-run-isolation/runner-run-admission-timeout [evaluator] attempt 1 reserves 2560 MiB / 1 CPU (quint test); in use 2560 MiB / 1 CPU of 4992 MiB / 16 CPU port none timeout 900s (1 running, 11 queued)
+[  275.8s] PASS   metal-run-isolation/runner-run-admission-timeout expect=holds got=holds (0.8s, peak 0 of 2560 MiB)
+[  275.8s] start  metal-run-isolation/runner-run-controller-loss-after-start [evaluator] attempt 1 reserves 2560 MiB / 1 CPU (quint test); in use 2560 MiB / 1 CPU of 4992 MiB / 16 CPU port none timeout 900s (1 running, 10 queued)
+[  276.6s] PASS   metal-run-isolation/runner-run-controller-loss-after-start expect=holds got=holds (0.8s, peak 0 of 2560 MiB)
+[  276.6s] start  metal-run-isolation/runner-run-missing-completion-refuses [evaluator] attempt 1 reserves 2560 MiB / 1 CPU (quint test); in use 2560 MiB / 1 CPU of 4992 MiB / 16 CPU port none timeout 900s (1 running, 9 queued)
+[  277.3s] PASS   metal-run-isolation/runner-run-missing-completion-refuses expect=holds got=holds (0.8s, peak 0 of 2560 MiB)
+[  277.3s] start  metal-run-isolation/runner-run-cleanup-failure-keeps-command [evaluator] attempt 1 reserves 2560 MiB / 1 CPU (quint test); in use 2560 MiB / 1 CPU of 4992 MiB / 16 CPU port none timeout 900s (1 running, 8 queued)
+[  278.1s] PASS   metal-run-isolation/runner-run-cleanup-failure-keeps-command expect=holds got=holds (0.8s, peak 0 of 2560 MiB)
+[  278.1s] start  metal-run-isolation/runner-run-same-checkout-excludes-sync [evaluator] attempt 1 reserves 2560 MiB / 1 CPU (quint test); in use 2560 MiB / 1 CPU of 4992 MiB / 16 CPU port none timeout 900s (1 running, 7 queued)
+[  278.8s] PASS   metal-run-isolation/runner-run-same-checkout-excludes-sync expect=holds got=holds (0.8s, peak 0 of 2560 MiB)
+[  278.8s] start  metal-run-isolation/runner-run-repeat-collection-agrees [evaluator] attempt 1 reserves 2560 MiB / 1 CPU (quint test); in use 2560 MiB / 1 CPU of 4992 MiB / 16 CPU port none timeout 900s (1 running, 6 queued)
+[  279.6s] PASS   metal-run-isolation/runner-run-repeat-collection-agrees expect=holds got=holds (0.8s, peak 0 of 2560 MiB)
+[  279.6s] start  metal-run-isolation/runner-run-maintenance-waits-for-stop [evaluator] attempt 1 reserves 2560 MiB / 1 CPU (quint test); in use 2560 MiB / 1 CPU of 4992 MiB / 16 CPU port none timeout 900s (1 running, 5 queued)
+[  280.4s] PASS   metal-run-isolation/runner-run-maintenance-waits-for-stop expect=holds got=holds (0.8s, peak 0 of 2560 MiB)
+[  280.4s] start  metal-run-isolation/runner-run-no-sync-mismatch-refuses [evaluator] attempt 1 reserves 2560 MiB / 1 CPU (quint test); in use 2560 MiB / 1 CPU of 4992 MiB / 16 CPU port none timeout 900s (1 running, 4 queued)
+[  281.1s] PASS   metal-run-isolation/runner-run-no-sync-mismatch-refuses expect=holds got=holds (0.8s, peak 0 of 2560 MiB)
+[  281.1s] start  metal-run-isolation/runner-run-controller-eof-before-start [evaluator] attempt 1 reserves 2560 MiB / 1 CPU (quint test); in use 2560 MiB / 1 CPU of 4992 MiB / 16 CPU port none timeout 900s (1 running, 3 queued)
+[  281.9s] PASS   metal-run-isolation/runner-run-controller-eof-before-start expect=holds got=holds (0.8s, peak 0 of 2560 MiB)
+[  281.9s] start  metal-run-isolation/runner-run-independent-worktrees [evaluator] attempt 1 reserves 2560 MiB / 1 CPU (quint test); in use 2560 MiB / 1 CPU of 4992 MiB / 16 CPU port none timeout 900s (1 running, 2 queued)
+[  282.6s] PASS   metal-run-isolation/runner-run-independent-worktrees expect=holds got=holds (0.8s, peak 0 of 2560 MiB)
+[  282.6s] start  metal-run-isolation/runner-run-missing-rsync-aborts-before-start [evaluator] attempt 1 reserves 2560 MiB / 1 CPU (quint test); in use 2560 MiB / 1 CPU of 4992 MiB / 16 CPU port none timeout 900s (1 running, 1 queued)
+[  283.4s] PASS   metal-run-isolation/runner-run-missing-rsync-aborts-before-start expect=holds got=holds (0.8s, peak 0 of 2560 MiB)
+[  283.4s] start  metal-run-isolation/runner-run-preflight-aborts-before-start [evaluator] attempt 1 reserves 2560 MiB / 1 CPU (quint test); in use 2560 MiB / 1 CPU of 4992 MiB / 16 CPU port none timeout 900s (1 running, 0 queued)
+[  284.2s] PASS   metal-run-isolation/runner-run-preflight-aborts-before-start expect=holds got=holds (0.8s, peak 0 of 2560 MiB)
+xtask quint check: verified no Quint/JVM process from this run remains
+xtask quint check: wrote /Users/marcus/conductor/workspaces/helios/ouagadougou/target/quint/metal-run-isolation/47182-1794138494.593/summary.json
+
+CHECK                                                             BACKEND   EXPECT     OUTCOME          SECS  TRY  RETRY S    WALL S        RESERVED  PEAK MiB  RESULT
+metal-run-isolation/runner-safety                                 tlc       holds      holds            52.8    1      0.0      52.8      5888M/1cpu         0  PASS
+metal-run-isolation/runner-owners-progress                        tlc       holds      holds           117.7    1      0.0     117.7      5888M/1cpu         0  PASS
+metal-run-isolation/runner-maintenance-progress                   tlc       holds      holds            83.4    1      0.0      83.4      5888M/1cpu         0  PASS
+metal-run-isolation/runner-hazard-exclusive-ordinary              tlc       violation  violation         9.9    1      0.0       9.9      5888M/1cpu         0  PASS
+metal-run-isolation/runner-hazard-collect-at-terminal             tlc       violation  violation        10.2    1      0.0      10.2      5888M/1cpu         0  PASS
+metal-run-isolation/runner-run-independent-worktrees              evaluator  holds      holds             0.8    1      0.0       0.8      2560M/1cpu         0  PASS
+metal-run-isolation/runner-run-same-checkout-excludes-sync        evaluator  holds      holds             0.8    1      0.0       0.8      2560M/1cpu         0  PASS
+metal-run-isolation/runner-run-controller-eof-before-start        evaluator  holds      holds             0.8    1      0.0       0.8      2560M/1cpu         0  PASS
+metal-run-isolation/runner-run-controller-loss-after-start        evaluator  holds      holds             0.8    1      0.0       0.8      2560M/1cpu         0  PASS
+metal-run-isolation/runner-run-supervisor-loss-is-not-a-result    evaluator  holds      holds             1.0    1      0.0       1.0      2560M/1cpu         0  PASS
+metal-run-isolation/runner-run-cleanup-failure-keeps-command      evaluator  holds      holds             0.8    1      0.0       0.8      2560M/1cpu         0  PASS
+metal-run-isolation/runner-run-missing-completion-refuses         evaluator  holds      holds             0.8    1      0.0       0.8      2560M/1cpu         0  PASS
+metal-run-isolation/runner-run-maintenance-waits-for-stop         evaluator  holds      holds             0.8    1      0.0       0.8      2560M/1cpu         0  PASS
+metal-run-isolation/runner-run-no-sync-mismatch-refuses           evaluator  holds      holds             0.8    1      0.0       0.8      2560M/1cpu         0  PASS
+metal-run-isolation/runner-run-repeat-collection-agrees           evaluator  holds      holds             0.8    1      0.0       0.8      2560M/1cpu         0  PASS
+metal-run-isolation/runner-run-admission-timeout                  evaluator  holds      holds             0.8    1      0.0       0.8      2560M/1cpu         0  PASS
+metal-run-isolation/runner-run-preflight-aborts-before-start      evaluator  holds      holds             0.8    1      0.0       0.8      2560M/1cpu         0  PASS
+metal-run-isolation/runner-run-missing-rsync-aborts-before-start  evaluator  holds      holds             0.8    1      0.0       0.8      2560M/1cpu         0  PASS
+wall clock: 284.2s; budget 4992 MiB / 16 CPU; peak host memory in use: unknown
+logs: /Users/marcus/conductor/workspaces/helios/ouagadougou/target/quint/metal-run-isolation/47182-1794138494.593
+xtask quint check: recorded 18 check(s) into /Users/marcus/conductor/workspaces/helios/ouagadougou/specs/quint/metal-run-isolation/evidence
+xtask quint check: 18 check(s) passed

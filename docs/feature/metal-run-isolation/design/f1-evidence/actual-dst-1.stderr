@@ -1,0 +1,9 @@
+dst failed: 
+   0: [91m--only name "gateway-application-generation-lifecycle-is-safe" is not a known invariant[0m
+   1: [91munknown invariant name: "gateway-application-generation-lifecycle-is-safe"[0m
+
+Location:
+   [35mcrates/overdrive-sim/src/bin/dst.rs[0m:[35m71[0m
+
+Backtrace omitted. Run with RUST_BACKTRACE=1 environment variable to display it.
+Run with RUST_BACKTRACE=full to include source snippets.

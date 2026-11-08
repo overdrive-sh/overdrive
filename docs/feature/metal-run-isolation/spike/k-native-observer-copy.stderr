@@ -1,0 +1,21 @@
+   Compiling sdd v3.0.10
+   Compiling serial_test_derive v3.4.0
+   Compiling log v0.4.29
+   Compiling scc v2.4.0
+   Compiling serial_test v3.4.0
+   Compiling metal-native-fixture-diagnostic v0.0.0 (/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/spike-scratch/metal-run-isolation/increment-k)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.88s
+────────────
+ Nextest run ID 19fe5452-e0d5-40ad-8bfe-581fa77c09e7 with nextest profile: default
+    Starting 1 test across 1 binary (7 tests skipped)
+       START [         ] (1/1) metal-native-fixture-diagnostic integration::vsock_vmm_device::the_fork_boots_and_passes_data_under_the_production_launch_identity
+
+thread 'integration::vsock_vmm_device::the_fork_boots_and_passes_data_under_the_production_launch_identity' (195722) panicked at src/integration/vsock_vmm_device.rs:357:45:
+the prepared guest kit provisions: Fixture(OverdriveInitBuildFailed { target: "x86_64-unknown-linux-musl", status: Some(101), stderr: "error: package ID specification `overdrive-init` did not match any packages\n\nhelp: a package with a similar name exists: `overdrive-host`\n" })
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+        FAIL [   0.135s] (1/1) metal-native-fixture-diagnostic integration::vsock_vmm_device::the_fork_boots_and_passes_data_under_the_production_launch_identity
+  Cancelling due to test failure
+────────────
+     Summary [   0.135s] 1 test run: 0 passed, 1 failed, 7 skipped
+        FAIL [   0.135s] (1/1) metal-native-fixture-diagnostic integration::vsock_vmm_device::the_fork_boots_and_passes_data_under_the_production_launch_identity
+error: test run failed

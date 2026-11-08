@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Preserve all rsync options and actual source bytes; remove only the fake host.
+set -euo pipefail
+args=()
+for arg in "$@"; do
+  case "$arg" in fixture@metal:*) args+=("${arg#fixture@metal:}") ;; *) args+=("$arg") ;; esac
+done
+exec /usr/bin/rsync "${args[@]}"

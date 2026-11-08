@@ -1,0 +1,12 @@
+info: experimental features enabled: wrapper-scripts
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.09s
+────────────
+ Nextest run ID 250bd280-d749-42b1-ab05-e5270ee064b4 with nextest profile: default
+    Starting 1 test across 2 binaries (1 test skipped)
+       START [         ] (1/1) metal-isolation-local-vsock-spike selected_guest_status_is_255
+        FAIL [   1.755s] (1/1) metal-isolation-local-vsock-spike selected_guest_status_is_255
+  Cancelling due to test failure
+────────────
+     Summary [   1.756s] 1 test run: 0 passed, 1 failed, 1 skipped
+        FAIL [   1.755s] (1/1) metal-isolation-local-vsock-spike selected_guest_status_is_255
+error: test run failed

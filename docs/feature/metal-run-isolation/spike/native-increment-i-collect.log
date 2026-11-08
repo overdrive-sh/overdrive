@@ -1,0 +1,69 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.26s
+     Running `target/debug/xtask metal collect a6fdec37854b2f475314a794`
+/usr/bin/ssh
+xtask: running metal collect (read-only durable run record)
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+DESIGN-COMMAND build ["cargo", "build", "--manifest-path", "/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/spike-scratch/metal-run-isolation/increment-g/Cargo.toml", "--target-dir", "/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/target"]
+DESIGN-RESULT build status=0
+DESIGN-COMMAND pure-sim ["cargo", "nextest", "run", "-p", "overdrive-sim", "--lib", "-E", "test(adapters::beacon_io::tests::a_guest_cannot_connect_before_the_listener_is_bound)", "--no-capture"]
+DESIGN-RESULT pure-sim status=0
+DESIGN-COMMAND guest-pass ["cargo", "nextest", "run", "--manifest-path", "/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/spike-scratch/metal-run-isolation/increment-g/Cargo.toml", "--target-dir", "/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/target", "-E", "test(selected_guest_has_an_independent_kernel_boot_id)", "--no-capture"]
+DESIGN-RESULT guest-pass status=0
+DESIGN-COMMAND guest-255-retry ["cargo", "nextest", "run", "--manifest-path", "/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/spike-scratch/metal-run-isolation/increment-g/Cargo.toml", "--target-dir", "/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/target", "-E", "test(selected_guest_status_is_255)", "--retries", "1", "--no-fail-fast", "--no-capture"]
+DESIGN-RESULT guest-255-retry status=100
+DESIGN-COMMAND existing-kernel-cell ["cargo", "nextest", "run", "-p", "overdrive-fwd", "--test", "integration", "--features", "integration-tests,kvm-tests", "-E", "test(integration::probe_gold::the_probe_passes_and_leaves_no_residue_on_a_correctly_provisioned_node)", "--no-capture"]
+DESIGN-RESULT existing-kernel-cell status=0
+DESIGN-COMMAND native-direct-fork ["cargo", "nextest", "run", "-p", "overdrive-host", "--test", "integration", "--features", "integration-tests,kvm-tests", "-E", "test(integration::vsock_vmm_device::the_fork_boots_and_passes_data_under_the_production_launch_identity)", "--no-capture"]
+DESIGN-RESULT native-direct-fork status=100
+METAL-DESIGN-LOCAL-NAMESPACE net:[4026532936]
+METAL-DESIGN-WRAPPER binary_id=overdrive-host::integration identity=integration::vsock_vmm_device::the_fork_boots_and_passes_data_under_the_production_launch_identity test_group=host-kernel-shared argv=["/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/target/debug/deps/integration-80c4e3e490fb29e4", "--exact", "integration::vsock_vmm_device::the_fork_boots_and_passes_data_under_the_production_launch_identity", "--nocapture"]
+METAL-DESIGN-NATIVE-DIRECT namespace=net:[4026532936]
+
+running 1 test
+test integration::vsock_vmm_device::the_fork_boots_and_passes_data_under_the_production_launch_identity has been running for over 60 seconds
+test integration::vsock_vmm_device::the_fork_boots_and_passes_data_under_the_production_launch_identity ... FAILED
+
+failures:
+
+failures:
+    integration::vsock_vmm_device::the_fork_boots_and_passes_data_under_the_production_launch_identity
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 35 filtered out; finished in 60.81s
+
+   Compiling overdrive-host v0.0.0 (/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/crates/overdrive-host)
+   Compiling overdrive-gateway v0.0.0 (/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/crates/overdrive-gateway)
+   Compiling overdrive-testing v0.0.0 (/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/crates/overdrive-testing)
+   Compiling overdrive-dataplane v0.0.0 (/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/crates/overdrive-dataplane)
+   Compiling overdrive-worker v0.0.0 (/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/crates/overdrive-worker)
+   Compiling overdrive-control-plane v0.0.0 (/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/crates/overdrive-control-plane)
+   Compiling overdrive-sim v0.0.0 (/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/crates/overdrive-sim)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 26.53s
+info: using target runner `python3 /home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/spike-scratch/metal-run-isolation/increment-i/target_runner.py /home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/target/debug/metal-isolation-local-vsock-spike` defined by environment variable `CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER`
+────────────
+ Nextest run ID 5c4fe7d3-3aaf-4cbf-b398-678332602ec8 with nextest profile: default
+    Starting 1 test across 1 binary (35 tests skipped)
+       START [         ] (1/1) overdrive-host::integration integration::vsock_vmm_device::the_fork_boots_and_passes_data_under_the_production_launch_identity
+        SLOW [> 60.000s] (───) overdrive-host::integration integration::vsock_vmm_device::the_fork_boots_and_passes_data_under_the_production_launch_identity
+
+thread 'integration::vsock_vmm_device::the_fork_boots_and_passes_data_under_the_production_launch_identity' (186215) panicked at crates/overdrive-host/tests/integration/vsock_vmm_device.rs:437:10:
+the guest dials the host over the fork-opened device: NeverConnected { port: 2406947071, bound: 60s }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+        FAIL [  60.860s] (1/1) overdrive-host::integration integration::vsock_vmm_device::the_fork_boots_and_passes_data_under_the_production_launch_identity
+  Cancelling due to test failure
+────────────
+     Summary [  60.862s] 1 test run: 0 passed, 1 failed, 35 skipped
+        FAIL [  60.860s] (1/1) overdrive-host::integration integration::vsock_vmm_device::the_fork_boots_and_passes_data_under_the_production_launch_identity
+error: test run failed
+
+Traceback (most recent call last):
+  File "/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/spike-scratch/metal-run-isolation/increment-i/all_driver.py", line 3, in <module>
+    subprocess.run(['python3',path],check=True)
+    ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/subprocess.py", line 578, in run
+    raise CalledProcessError(retcode, process.args,
+                             output=stdout, stderr=stderr)
+subprocess.CalledProcessError: Command '['python3', 'spike-scratch/metal-run-isolation/increment-i/driver.py']' returned non-zero exit status 100.
+OVERDRIVE_METAL_RUN_COMPLETE run_id=a6fdec37854b2f475314a794 exit_code=1 cause=command_returned

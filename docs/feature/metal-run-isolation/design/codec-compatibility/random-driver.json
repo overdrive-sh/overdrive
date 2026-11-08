@@ -1,0 +1,670 @@
+{
+  "codec_only": true,
+  "error": null,
+  "mode": "random",
+  "ok": true,
+  "seed": "20261108",
+  "state_comparison": false,
+  "steps_reaching_driver": [
+    {
+      "action": "init",
+      "actor": 0,
+      "value": 2
+    },
+    {
+      "action": "Sync",
+      "actor": 2,
+      "value": 1
+    },
+    {
+      "action": "Idle",
+      "actor": 0,
+      "value": 0
+    },
+    {
+      "action": "Register",
+      "actor": 2,
+      "value": 0
+    },
+    {
+      "action": "Maintain",
+      "actor": 0,
+      "value": 1
+    },
+    {
+      "action": "Register",
+      "actor": 1,
+      "value": 0
+    },
+    {
+      "action": "SupervisorLost",
+      "actor": 2,
+      "value": 0
+    },
+    {
+      "action": "Maintain",
+      "actor": 0,
+      "value": 2
+    },
+    {
+      "action": "Sync",
+      "actor": 1,
+      "value": 1
+    },
+    {
+      "action": "StopOwner",
+      "actor": 2,
+      "value": 1
+    },
+    {
+      "action": "Maintain",
+      "actor": 0,
+      "value": 3
+    },
+    {
+      "action": "AdmissionTimeout",
+      "actor": 1,
+      "value": 0
+    },
+    {
+      "action": "Idle",
+      "actor": 0,
+      "value": 0
+    },
+    {
+      "action": "Collect",
+      "actor": 2,
+      "value": 0
+    },
+    {
+      "action": "StopOwner",
+      "actor": 1,
+      "value": 0
+    },
+    {
+      "action": "Idle",
+      "actor": 0,
+      "value": 0
+    },
+    {
+      "action": "Collect",
+      "actor": 1,
+      "value": 0
+    },
+    {
+      "action": "Collect",
+      "actor": 1,
+      "value": 0
+    },
+    {
+      "action": "Collect",
+      "actor": 2,
+      "value": 0
+    },
+    {
+      "action": "Idle",
+      "actor": 0,
+      "value": 0
+    },
+    {
+      "action": "Collect",
+      "actor": 1,
+      "value": 0
+    },
+    {
+      "action": "Collect",
+      "actor": 2,
+      "value": 0
+    },
+    {
+      "action": "Idle",
+      "actor": 0,
+      "value": 0
+    },
+    {
+      "action": "Idle",
+      "actor": 0,
+      "value": 0
+    },
+    {
+      "action": "Collect",
+      "actor": 1,
+      "value": 0
+    },
+    {
+      "action": "Collect",
+      "actor": 2,
+      "value": 0
+    },
+    {
+      "action": "Collect",
+      "actor": 1,
+      "value": 0
+    },
+    {
+      "action": "Idle",
+      "actor": 0,
+      "value": 0
+    },
+    {
+      "action": "Collect",
+      "actor": 1,
+      "value": 0
+    },
+    {
+      "action": "Idle",
+      "actor": 0,
+      "value": 0
+    },
+    {
+      "action": "Collect",
+      "actor": 1,
+      "value": 0
+    },
+    {
+      "action": "Collect",
+      "actor": 1,
+      "value": 0
+    },
+    {
+      "action": "Idle",
+      "actor": 0,
+      "value": 0
+    },
+    {
+      "action": "init",
+      "actor": 0,
+      "value": 2
+    },
+    {
+      "action": "Idle",
+      "actor": 0,
+      "value": 0
+    },
+    {
+      "action": "Maintain",
+      "actor": 0,
+      "value": 1
+    },
+    {
+      "action": "Register",
+      "actor": 2,
+      "value": 0
+    },
+    {
+      "action": "LoseController",
+      "actor": 2,
+      "value": 0
+    },
+    {
+      "action": "Register",
+      "actor": 1,
+      "value": 0
+    },
+    {
+      "action": "AdmissionTimeout",
+      "actor": 1,
+      "value": 0
+    },
+    {
+      "action": "Sync",
+      "actor": 2,
+      "value": 1
+    },
+    {
+      "action": "Maintain",
+      "actor": 0,
+      "value": 2
+    },
+    {
+      "action": "Idle",
+      "actor": 0,
+      "value": 0
+    },
+    {
+      "action": "StopOwner",
+      "actor": 2,
+      "value": 0
+    },
+    {
+      "action": "Maintain",
+      "actor": 0,
+      "value": 3
+    },
+    {
+      "action": "Idle",
+      "actor": 0,
+      "value": 0
+    },
+    {
+      "action": "Idle",
+      "actor": 0,
+      "value": 0
+    },
+    {
+      "action": "Sync",
+      "actor": 1,
+      "value": 1
+    },
+    {
+      "action": "Idle",
+      "actor": 0,
+      "value": 0
+    },
+    {
+      "action": "StopOwner",
+      "actor": 1,
+      "value": 1
+    },
+    {
+      "action": "Idle",
+      "actor": 0,
+      "value": 0
+    },
+    {
+      "action": "Collect",
+      "actor": 2,
+      "value": 0
+    },
+    {
+      "action": "Collect",
+      "actor": 2,
+      "value": 0
+    },
+    {
+      "action": "Collect",
+      "actor": 2,
+      "value": 0
+    },
+    {
+      "action": "Collect",
+      "actor": 1,
+      "value": 0
+    },
+    {
+      "action": "Collect",
+      "actor": 2,
+      "value": 0
+    },
+    {
+      "action": "Idle",
+      "actor": 0,
+      "value": 0
+    },
+    {
+      "action": "Collect",
+      "actor": 1,
+      "value": 0
+    },
+    {
+      "action": "Collect",
+      "actor": 2,
+      "value": 0
+    },
+    {
+      "action": "Collect",
+      "actor": 2,
+      "value": 0
+    },
+    {
+      "action": "Idle",
+      "actor": 0,
+      "value": 0
+    },
+    {
+      "action": "Collect",
+      "actor": 2,
+      "value": 0
+    },
+    {
+      "action": "Idle",
+      "actor": 0,
+      "value": 0
+    },
+    {
+      "action": "Collect",
+      "actor": 1,
+      "value": 0
+    },
+    {
+      "action": "Collect",
+      "actor": 1,
+      "value": 0
+    },
+    {
+      "action": "Collect",
+      "actor": 2,
+      "value": 0
+    },
+    {
+      "action": "init",
+      "actor": 0,
+      "value": 1
+    },
+    {
+      "action": "Sync",
+      "actor": 2,
+      "value": 1
+    },
+    {
+      "action": "Idle",
+      "actor": 0,
+      "value": 0
+    },
+    {
+      "action": "Maintain",
+      "actor": 0,
+      "value": 0
+    },
+    {
+      "action": "Sync",
+      "actor": 1,
+      "value": 1
+    },
+    {
+      "action": "Idle",
+      "actor": 0,
+      "value": 0
+    },
+    {
+      "action": "Register",
+      "actor": 1,
+      "value": 0
+    },
+    {
+      "action": "Idle",
+      "actor": 0,
+      "value": 0
+    },
+    {
+      "action": "SupervisorLost",
+      "actor": 1,
+      "value": 0
+    },
+    {
+      "action": "Idle",
+      "actor": 0,
+      "value": 0
+    },
+    {
+      "action": "Register",
+      "actor": 2,
+      "value": 0
+    },
+    {
+      "action": "SupervisorLost",
+      "actor": 2,
+      "value": 0
+    },
+    {
+      "action": "StopOwner",
+      "actor": 1,
+      "value": 2
+    },
+    {
+      "action": "Idle",
+      "actor": 0,
+      "value": 0
+    },
+    {
+      "action": "Idle",
+      "actor": 0,
+      "value": 0
+    },
+    {
+      "action": "Idle",
+      "actor": 0,
+      "value": 0
+    },
+    {
+      "action": "Idle",
+      "actor": 0,
+      "value": 0
+    },
+    {
+      "action": "StopOwner",
+      "actor": 2,
+      "value": 0
+    },
+    {
+      "action": "Idle",
+      "actor": 0,
+      "value": 0
+    },
+    {
+      "action": "Idle",
+      "actor": 0,
+      "value": 0
+    },
+    {
+      "action": "Collect",
+      "actor": 1,
+      "value": 0
+    },
+    {
+      "action": "Collect",
+      "actor": 1,
+      "value": 0
+    },
+    {
+      "action": "Idle",
+      "actor": 0,
+      "value": 0
+    },
+    {
+      "action": "Idle",
+      "actor": 0,
+      "value": 0
+    },
+    {
+      "action": "Idle",
+      "actor": 0,
+      "value": 0
+    },
+    {
+      "action": "Collect",
+      "actor": 2,
+      "value": 0
+    },
+    {
+      "action": "Idle",
+      "actor": 0,
+      "value": 0
+    },
+    {
+      "action": "Collect",
+      "actor": 1,
+      "value": 0
+    },
+    {
+      "action": "Idle",
+      "actor": 0,
+      "value": 0
+    },
+    {
+      "action": "Collect",
+      "actor": 1,
+      "value": 0
+    },
+    {
+      "action": "Collect",
+      "actor": 2,
+      "value": 0
+    },
+    {
+      "action": "Collect",
+      "actor": 1,
+      "value": 0
+    },
+    {
+      "action": "Idle",
+      "actor": 0,
+      "value": 0
+    },
+    {
+      "action": "init",
+      "actor": 0,
+      "value": 1
+    },
+    {
+      "action": "Sync",
+      "actor": 1,
+      "value": 1
+    },
+    {
+      "action": "Idle",
+      "actor": 0,
+      "value": 0
+    },
+    {
+      "action": "Maintain",
+      "actor": 0,
+      "value": 0
+    },
+    {
+      "action": "Idle",
+      "actor": 0,
+      "value": 0
+    },
+    {
+      "action": "Register",
+      "actor": 1,
+      "value": 0
+    },
+    {
+      "action": "Idle",
+      "actor": 0,
+      "value": 0
+    },
+    {
+      "action": "Idle",
+      "actor": 0,
+      "value": 0
+    },
+    {
+      "action": "AdmissionTimeout",
+      "actor": 1,
+      "value": 0
+    },
+    {
+      "action": "Register",
+      "actor": 2,
+      "value": 0
+    },
+    {
+      "action": "StopOwner",
+      "actor": 1,
+      "value": 2
+    },
+    {
+      "action": "LoseController",
+      "actor": 2,
+      "value": 0
+    },
+    {
+      "action": "Idle",
+      "actor": 0,
+      "value": 0
+    },
+    {
+      "action": "StopOwner",
+      "actor": 2,
+      "value": 0
+    },
+    {
+      "action": "Sync",
+      "actor": 2,
+      "value": 1
+    },
+    {
+      "action": "Collect",
+      "actor": 1,
+      "value": 0
+    },
+    {
+      "action": "Collect",
+      "actor": 1,
+      "value": 0
+    },
+    {
+      "action": "Collect",
+      "actor": 2,
+      "value": 0
+    },
+    {
+      "action": "Collect",
+      "actor": 2,
+      "value": 0
+    },
+    {
+      "action": "Collect",
+      "actor": 1,
+      "value": 0
+    },
+    {
+      "action": "Idle",
+      "actor": 0,
+      "value": 0
+    },
+    {
+      "action": "Collect",
+      "actor": 2,
+      "value": 0
+    },
+    {
+      "action": "Collect",
+      "actor": 2,
+      "value": 0
+    },
+    {
+      "action": "Idle",
+      "actor": 0,
+      "value": 0
+    },
+    {
+      "action": "Collect",
+      "actor": 2,
+      "value": 0
+    },
+    {
+      "action": "Collect",
+      "actor": 1,
+      "value": 0
+    },
+    {
+      "action": "Collect",
+      "actor": 1,
+      "value": 0
+    },
+    {
+      "action": "Idle",
+      "actor": 0,
+      "value": 0
+    },
+    {
+      "action": "Collect",
+      "actor": 1,
+      "value": 0
+    },
+    {
+      "action": "Idle",
+      "actor": 0,
+      "value": 0
+    },
+    {
+      "action": "Collect",
+      "actor": 1,
+      "value": 0
+    },
+    {
+      "action": "Idle",
+      "actor": 0,
+      "value": 0
+    },
+    {
+      "action": "Idle",
+      "actor": 0,
+      "value": 0
+    }
+  ]
+}

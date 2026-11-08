@@ -1,0 +1,46 @@
+{
+  "upstream": "official Linux torvalds repository at kernel.org",
+  "tag_ref_evidence": "../spike/linux-v7-tag.txt",
+  "files": [
+    {
+      "path": "net/vmw_vsock/af_vsock.c",
+      "revision": "028ef9c96e96197026887c0f092424679298aae8",
+      "tag": "v7.0",
+      "url": "https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/plain/net/vmw_vsock/af_vsock.c?id=028ef9c96e96197026887c0f092424679298aae8",
+      "captured_path": "spike-scratch/metal-run-isolation/increment-d/kernel-source/af_vsock-pinned.c",
+      "sha256": "cdd0764b591f6565c5348573fe1d407e2050f840a8978277865aa2ab1b27bac0"
+    },
+    {
+      "path": "drivers/vhost/vsock.c",
+      "revision": "028ef9c96e96197026887c0f092424679298aae8",
+      "tag": "v7.0",
+      "url": "https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/plain/drivers/vhost/vsock.c?id=028ef9c96e96197026887c0f092424679298aae8",
+      "captured_path": "spike-scratch/metal-run-isolation/increment-d/kernel-source/vhost-vsock.c",
+      "sha256": "2f9e8abbe1e002a1efbec0a697a3c7ab72a4b50cd23ce77d6d522a3120efff51"
+    },
+    {
+      "path": "include/net/af_vsock.h",
+      "revision": "028ef9c96e96197026887c0f092424679298aae8",
+      "tag": "v7.0",
+      "url": "https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/plain/include/net/af_vsock.h?id=028ef9c96e96197026887c0f092424679298aae8",
+      "captured_path": "spike-scratch/metal-run-isolation/increment-d/kernel-source/af_vsock.h",
+      "sha256": "97c9c5d2ac35834a9c7c65ef7e11427d6390c9b76504ba6307601d4065ddef87"
+    },
+    {
+      "path": "include/net/netns/vsock.h",
+      "revision": "028ef9c96e96197026887c0f092424679298aae8",
+      "tag": "v7.0",
+      "url": "https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/plain/include/net/netns/vsock.h?id=028ef9c96e96197026887c0f092424679298aae8",
+      "captured_path": "spike-scratch/metal-run-isolation/increment-d/kernel-source/vsock-netns.h",
+      "sha256": "dfe7c2261de7837de69f668029cdaecfe459dc9516563c601f7c9e24c68d3b08"
+    },
+    {
+      "path": "kernel/cgroup/cgroup.c",
+      "revision": "028ef9c96e96197026887c0f092424679298aae8",
+      "tag": "v7.0",
+      "url": "https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/plain/kernel/cgroup/cgroup.c?id=028ef9c96e96197026887c0f092424679298aae8",
+      "captured_path": "spike-scratch/metal-run-isolation/increment-d/kernel-source/cgroup.c",
+      "sha256": "b40c3181443e3b323b71d2b89230d36534b4ba51896f28e16d1d0f0436c0fa23"
+    }
+  ]
+}

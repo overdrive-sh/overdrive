@@ -1,0 +1,9 @@
+info: experimental features enabled: wrapper-scripts
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.20s
+────────────
+ Nextest run ID f5868a0f-2663-48e0-8a1e-7c9549031a1c with nextest profile: default
+    Starting 1 test across 1 binary (99 tests skipped)
+       START [         ] (1/1) overdrive-fwd::integration integration::probe_gold::the_probe_passes_and_leaves_no_residue_on_a_correctly_provisioned_node
+        PASS [   2.349s] (1/1) overdrive-fwd::integration integration::probe_gold::the_probe_passes_and_leaves_no_residue_on_a_correctly_provisioned_node
+────────────
+     Summary [   2.349s] 1 test run: 1 passed, 99 skipped

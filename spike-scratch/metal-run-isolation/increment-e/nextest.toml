@@ -1,0 +1,11 @@
+experimental = ["wrapper-scripts"]
+
+[scripts.wrapper.metal-design]
+command = "target/debug/metal-isolation-wrapper-spike"
+
+[[profile.default.scripts]]
+filter = "all()"
+run-wrapper = "metal-design"
+
+[profile.default]
+slow-timeout = { period = "60s", terminate-after = 8 }

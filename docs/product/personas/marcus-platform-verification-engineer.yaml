@@ -1,0 +1,29 @@
+schema_version: 1
+
+persona:
+  id: marcus-platform-verification-engineer
+  name: Marcus
+  role: Overdrive engineer verifying independent changes from multiple Git worktrees
+  one_liner: >
+    Uses the shared Metal box through the repository's existing developer
+    commands and needs concurrent verification whose source, guest effects,
+    resource cleanup and retained result belong to the correct invocation.
+  source: metal-run-isolation user directions recorded in the DISCUSS handoff, 2026-11-07
+  characteristics:
+    - Maintains separate Git worktrees with potentially different uncommitted source changes
+    - Uses coding agents that invoke the same developer commands
+    - Requires exact command results and honest native evidence before trusting a change
+  context:
+    surface: cargo xtask metal run, sync, pull and collect
+    triggers:
+      - Another worktree's ordinary verification holds the box-wide execution lease
+      - The same suite needs to run independently for two changes
+  motivations:
+    functional: Verify changes concurrently without source, resource or evidence interference
+    emotional: Trust each result without waiting on an unrelated invocation
+    social: Present attributable verification evidence for each change
+  emotional_arc:
+    start: Frustrated by unrelated serialization and uncertain result ownership
+    middle: Focused on each invocation's source, run id and guest output
+    end: Confident to continue or revise each change from its own retained result
+  related_jobs: [J-PLAT-006]

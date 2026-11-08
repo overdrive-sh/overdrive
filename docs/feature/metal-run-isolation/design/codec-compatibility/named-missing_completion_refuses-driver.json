@@ -1,0 +1,55 @@
+{
+  "codec_only": true,
+  "error": null,
+  "mode": "named:missing_completion_refuses",
+  "ok": true,
+  "seed": "20261108",
+  "state_comparison": false,
+  "steps_reaching_driver": [
+    {
+      "action": "init",
+      "actor": 0,
+      "value": 2
+    },
+    {
+      "action": "Register",
+      "actor": 1,
+      "value": 0
+    },
+    {
+      "action": "Barrier",
+      "actor": 1,
+      "value": 0
+    },
+    {
+      "action": "Checkout",
+      "actor": 1,
+      "value": 0
+    },
+    {
+      "action": "Prepare",
+      "actor": 1,
+      "value": 0
+    },
+    {
+      "action": "Start",
+      "actor": 1,
+      "value": 0
+    },
+    {
+      "action": "MainExit",
+      "actor": 1,
+      "value": 0
+    },
+    {
+      "action": "StopOwner",
+      "actor": 1,
+      "value": 3
+    },
+    {
+      "action": "Collect",
+      "actor": 1,
+      "value": 0
+    }
+  ]
+}

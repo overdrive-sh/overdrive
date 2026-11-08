@@ -1,0 +1,8 @@
+== Running model based tests for codec-only named:independent_worktrees
+   Generating 1 traces using `20261108` as random seed ...
+   Replaying traces ...
+   [FAIL] codec-only named:independent_worktrees 
+   Reproduce this error with `QUINT_SEED=20261108`
+
+Expected action to be a sum type variant.
+Value found: { actor: 0, op: "init", value: 2 }

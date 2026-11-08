@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Test-only real Linux resource refusals. The caller creates the fresh private
+# mount/user namespace; nothing is mounted or written in the physical namespace.
+set -euo pipefail
+step="$1"; input="$2"; shift 2
+case "$step" in
+  child_mode)
+    mount --make-rprivate /
+    mount --bind /proc/sys /proc/sys
+    mount -o remount,bind,ro /proc/sys
+    exec "$@"
+    ;;
+  local)
+    # Per-current-user-namespace sysctl, not the initial user namespace.
+    # kernel/ucount.c:29-36,89-102,201-220 @ v7.0.
+    printf '1\n' > /proc/sys/user/max_net_namespaces
+    exec "$@"
+    ;;
+  *) exit 64 ;;
+esac

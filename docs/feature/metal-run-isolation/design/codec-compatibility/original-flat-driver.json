@@ -1,0 +1,9 @@
+{
+  "codec_only": true,
+  "error": "Expected action to be a sum type variant.\nValue found: { actor: 0, op: \"init\", value: 2 }",
+  "mode": "named:independent_worktrees",
+  "ok": false,
+  "seed": "20261108",
+  "state_comparison": false,
+  "steps_reaching_driver": []
+}

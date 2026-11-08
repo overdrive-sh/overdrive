@@ -1,0 +1,14 @@
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+info: experimental features enabled: wrapper-scripts
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+   Compiling metal-isolation-local-vsock-spike v0.0.0 (/home/ubuntu/overdrive-branches/marcus-sa-nw-bugfix-crash-restart-tasks/spike-scratch/metal-run-isolation/increment-g)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.48s
+────────────
+ Nextest run ID 924c4913-cced-4017-b180-eed2716afa02 with nextest profile: default
+    Starting 1 test across 2 binaries (1 test skipped)
+       START [         ] (1/1) metal-isolation-local-vsock-spike selected_guest_has_an_independent_kernel_boot_id
+        PASS [   7.035s] (1/1) metal-isolation-local-vsock-spike selected_guest_has_an_independent_kernel_boot_id
+────────────
+     Summary [   7.036s] 1 test run: 1 passed, 1 skipped

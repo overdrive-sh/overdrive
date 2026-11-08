@@ -1,0 +1,78 @@
+schema_version: 1
+
+journey:
+  name: Verify independent worktrees on the shared Metal box
+  feature: metal-run-isolation
+  status: requirements-ready-design-pending
+  goal: >
+    Verify two independent worktree changes concurrently, retaining each
+    source-matched result and confining ordinary test kernel mutations to
+    existing fresh disposable guest isolation groups.
+  persona: marcus-platform-verification-engineer
+  jobs: [J-PLAT-006]
+  emotional_arc:
+    start: Frustrated by unrelated execution-lease waiting
+    middle: Focused on separate invocation and guest-group output
+    end: Confident to decide from each attributable result
+
+steps:
+  - id: 1
+    name: Choose and prepare each worktree's verification
+    command: cargo xtask metal run -- cargo xtask guest-kit-prepare
+    integration_checkpoint: >
+      Prepared inputs match the selected worktree's source; this action
+      does not resume or alter another feature's stopped delivery.
+    failure_modes:
+      - Missing guest inputs or unqualified native launcher
+      - Remote worktree identity aliases another checkout
+  - id: 2
+    name: Run existing guest verification from both worktrees
+    command: cargo xtask metal run -- cargo run -p overdrive-testing --bin overdrive-fwd-guest-suite --features integration-tests
+    tui_mockup: |
+      OVERDRIVE_METAL_RUN_ID=${run_id}
+      ===== disposable guest core =====
+      [actual guest console output]
+    shared_artifacts:
+      - name: run_id
+        source: Existing durable Metal invocation registration
+        displayed_as: ${run_id}
+        consumers: [live output, retained log, collection]
+      - name: source_identity
+        source: Worktree source snapshot and existing synced source marker
+        consumers: [sync, command preflight, retained source attribution]
+    integration_checkpoint: >
+      Both execution intervals overlap with sufficient host capacity;
+      source/build state, guest identities and listeners do not collide;
+      ordinary test kernel effects are inside the disposable groups.
+    failure_modes:
+      - Unrelated ordinary invocation still owns a box-wide execution lease
+      - Guest identities, listeners or cleanup interfere across invocations
+  - id: 3
+    name: Collect and decide independently
+    command: cargo xtask metal collect <run-id>
+    tui_mockup: |
+      [retained combined command log]
+      OVERDRIVE_METAL_RUN_COMPLETE run_id=${run_id} exit_code=${command_status} cause=command_returned
+    shared_artifacts:
+      - name: run_id
+        source: Existing durable Metal invocation registration
+        displayed_as: ${run_id}
+        consumers: [collection, retained log]
+      - name: command_status
+        source: Existing durable supervisor terminal record
+        displayed_as: ${command_status}
+        consumers: [completion marker, process exit status, repeat collection]
+    integration_checkpoint: >
+      Controller loss after command start does not cancel execution;
+      repeat read-only collection returns the exact result, including
+      nonzero statuses; cleanup affects only this invocation's resources.
+    failure_modes:
+      - Runner failure is confused with command status
+      - Evidence is credited to the wrong source or execution boundary
+
+acceptance_reference: docs/feature/metal-run-isolation/feature-delta.md
+
+changelog:
+  - date: 2026-11-07
+    feature: metal-run-isolation
+    change: Requirements journey for existing developer command surfaces; design and implementation remain pending.
