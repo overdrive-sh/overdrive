@@ -77,6 +77,45 @@ Nextest's per-attempt timeout starts, without increasing the timeout or
 changing the body marker. No new API, build variant, preparation command,
 timeout rule or test fixture is authorized by this evidence.
 
+## Bounded preparation-owner remediation
+
+The existing `guest-kit-prepare` owner now builds and requires the same static
+init artifact as `vm_fixture::build_overdrive_init_static`: package
+`overdrive-init`, the host's existing musl triple, default features, and
+`--release`, under the target directory selected by the existing
+`cargo_target_dir` owner. `GuestKit::provision` keeps its existing Cargo build;
+after preparation it is an incremental no-op verification when the prepared
+artifact is current. No manual binary copy or alternate target was added.
+
+For the failed native capture, the guest fixture's standalone
+`--target-dir target/metal-run-isolation-fixture` belongs to the outer Cargo
+Nextest test executable. The captured inner `rustc --out-dir` for
+`overdrive-init` was under the bound source checkout's
+`target/x86_64-unknown-linux-musl/release/deps`; the nested Cargo build had no
+fixture `--target-dir`. `guest-kit-prepare` and `vm_fixture` both resolve
+`cargo_target_dir` from the same ordinary Metal environment, so this new
+prepared artifact lands beside the path the runtime build consumes.
+
+The existing `cargo xtask guest-kit-prepare` entry completed in canonical Lima
+with kernel `7.0.0-38-generic` and target `aarch64-unknown-linux-musl`. Because
+its new `require` checks the static-init path before reporting `lane prepared`,
+that command validates the new preparation artifact and target-scoped path on
+Lima. It does not replace the later native x86_64 admission rerun.
+
+Focused checks after the preparation-owner change:
+
+| Check | Result |
+|---|---|
+| `cargo check -p xtask --all-targets --features integration-tests` | Passed |
+| `cargo nextest run -p xtask --lib --features integration-tests -E 'test(the_artefact_paths_are_the_pinned_contract)'` | 1 passed, 292 filtered |
+| `cargo clippy -p xtask --all-targets --features integration-tests -- -D warnings` | Passed |
+| `rustfmt --edition 2024 --check xtask/src/guest_kit_prepare.rs` | Passed |
+
+The raw admission failure above remains unchanged. No Metal preparation,
+admission/placement rerun, test-body change, DES phase event, or mutation run
+was performed after this remediation; independent focused review is the next
+gate before the prescribed native preparation and drivers.
+
 No admission owner snapshot was captured before the body-start guard failed,
 so this attempt does not establish exclusive maintenance wait, predecessor
 stop ordering, an unadmitted waiter, or a successful admission journey. The

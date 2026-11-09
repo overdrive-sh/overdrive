@@ -2,15 +2,14 @@
 //! native-metal lanes (GH #295, T-1; EVMOD-GUEST-KIT, ADR-0206).
 //!
 //! The guest-kit fixture (`overdrive_testing::guest_kit`, `guest_lane`)
-//! needs three build artefacts before any of its tests can run: the
-//! forwarder module built for the running kernel, the static scripted guest
-//! program, and the libtest binaries the in-guest lane runs inside a guest.
-//! Building them is not a test's job: a nested `cargo` inside a test body
-//! couples a test result to a build result and contends for the target-dir
-//! lock the running `nextest` holds. So the lane runs this step first, as
-//! its declared setup, and the fixture only checks that each artefact is
-//! where this step leaves it, refusing with a precondition message naming
-//! this command when one is missing:
+//! prepares the artifacts the guest-kit fixture and ordinary Metal nextest
+//! dispatcher consume: the forwarder module built for the running kernel, the
+//! static scripted peer, the static production init binary, the in-guest
+//! libtest binaries, and the host-side dispatcher. Building these before a
+//! selected attempt is not the test body's job: an on-demand `cargo` build
+//! inside nextest's per-attempt timeout can expire before the guest starts.
+//! The lane runs this step first, as its declared setup, and the fixture
+//! verifies each artifact at the same target-scoped path this step leaves:
 //!
 //! ```text
 //! cargo xtask metal run -- cargo xtask guest-kit-prepare
@@ -30,6 +29,7 @@
 //! |---|---|---|
 //! | `ovd_fwd.ko` for the running kernel | `<workspace>/target/kmod/<release>/ovd_fwd.ko` (EVMOD-BUILD; workspace-scoped, never the shared cargo target dir; `$OVERDRIVE_KMOD_DIR` in a mutation run) | `forwarder_module::require_forwarder_module`, `guest_kit::GuestKit::provision` |
 //! | the static scripted peer | `<musl-triple>/release/overdrive-guest-peer` | `guest_kit::GuestKit::provision` |
+//! | the static production init binary | `<target>/<musl-triple>/release/overdrive-init` | `vm_fixture::build_overdrive_init_static` |
 //! | an in-guest libtest binary | `guest-kit/in-guest/<package>--<bin>` | `guest_lane::InGuestTests::prepared` |
 //! | the nextest guest dispatcher | `<target>/debug/overdrive-fwd-guest-suite` | `OVERDRIVE_METAL_TEST_DISPATCHER` |
 
@@ -270,6 +270,18 @@ pub fn run(workspace_root: &Path, target_dir: &Path) -> Result<()> {
     }
     run_step(&mut guest_peer_build, "building overdrive-guest-peer")?;
     require(&guest_peer_path(target_dir, triple), GUEST_PEER_BIN)?;
+
+    // GuestKit::provision uses this exact package/target/profile when it
+    // re-verifies the fixture's production init. Prepare it before a nextest
+    // per-attempt timeout starts so dispatcher provisioning does not compile
+    // overdrive-init on the attempt's timed execution path.
+    let mut overdrive_init_build = Command::new("cargo");
+    overdrive_init_build
+        .args(["build", "--package", "overdrive-init", "--target", triple, "--release"])
+        .current_dir(workspace_root);
+    run_step(&mut overdrive_init_build, "building static overdrive-init")?;
+    let overdrive_init = target_dir.join(triple).join("release").join("overdrive-init");
+    require(&overdrive_init, "static overdrive-init")?;
 
     for lane in IN_GUEST_LANES {
         let built = build_in_guest_tests(workspace_root, lane)?;
