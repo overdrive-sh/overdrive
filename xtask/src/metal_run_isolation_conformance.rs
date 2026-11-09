@@ -954,7 +954,28 @@ impl Driver for RunnerDriver {
             })
         })();
         result.map_err(|error| {
-            let context = format!("{step}\n{error}");
+            let maintenance = self.owner.as_ref().and_then(|world| {
+                world.maintenance.as_ref().map(|unit| {
+                    let facts = unit_facts(&unit.id);
+                    let pid = facts
+                        .as_ref()
+                        .ok()
+                        .and_then(|facts| facts.get("MainPID"))
+                        .and_then(|pid| pid.parse::<u32>().ok())
+                        .unwrap_or(0);
+                    (
+                        unit.id.clone(),
+                        facts,
+                        fs::read_to_string(unit.directory.join("phase.v1")),
+                        lock_mode(pid, &world.fixture.temp.path().join("maintenance.lock")),
+                        fs::read_to_string(unit.directory.join("terminal.v1")),
+                        unit.actor.join("body.pid").is_file(),
+                    )
+                })
+            });
+            let context = format!(
+                "{step}\n{error}\nactual_maintenance(id,unit,phase,barrier_mode,terminal,body_pid_file)={maintenance:?}"
+            );
             error.context(context)
         })
     }
