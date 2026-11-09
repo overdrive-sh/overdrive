@@ -1,0 +1,26 @@
+{
+  "command": [
+    "cargo",
+    "xtask",
+    "metal",
+    "run",
+    "--",
+    "cargo",
+    "nextest",
+    "run",
+    "-p",
+    "xtask",
+    "--lib",
+    "--features",
+    "integration-tests",
+    "-E",
+    "test(=metal_run_isolation_conformance::protocol_randomized_owner_traces)",
+    "--no-capture"
+  ],
+  "started_at": "2026-11-09T06:47:37.714710+00:00",
+  "source_head": "73b47241a84db1a3db8faa5c411f61e992001298",
+  "source_status": " M AGENTS.md\n M crates/overdrive-control-plane/src/worker/exit_observer.rs\n M crates/overdrive-control-plane/tests/acceptance/crash_ending_authority.rs\n M crates/overdrive-control-plane/tests/acceptance/terminal_hook_ownership.rs\n M crates/overdrive-core/src/traits/driver.rs\n M crates/overdrive-testing/bin/fwd_guest_suite.rs\n M docs/feature/metal-run-isolation/deliver/review-01-02.md\n M docs/feature/service-allocation-readiness-and-ending/deliver/roadmap.json\n M xtask/src/metal_run_isolation_conformance.rs\n?? docs/feature/service-allocation-readiness-and-ending/deliver/execution-log.json\n",
+  "diagnostic_input": "Existing quint_run seed attribute temporarily fixed to 0x8c542458; failure-only step/actual-owner diagnostics. LoseController ordering unchanged.",
+  "finished_at": "2026-11-09T06:48:32.137278+00:00",
+  "exit_code": 100
+}

@@ -1,0 +1,81 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.06s
+     Running `target/debug/xtask metal run -- cargo nextest run -p xtask --lib --features integration-tests -E 'test(=metal_run_isolation_conformance::protocol_randomized_owner_traces)' --no-capture`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+OVERDRIVE_METAL_RUN_ID=022a073ef7c34c364efec25b
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire exclusive physical-maintenance barrier (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_RUN_REGISTERED run_id=022a073ef7c34c364efec25b
+OVERDRIVE_METAL_LEASE_ACQUIRED token=022a073ef7c34c364efec25b pid=2283022
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/ouagadougou -> ubuntu@151.115.99.251:/home/ubuntu/overdrive-worktrees/e3d831d7dafe621226ae6047ebcac3536f37470cafcf5dbb64eb9598886af410
+
+sent 2,890,492 bytes  received 58,020 bytes  1,179,404.80 bytes/sec
+total size is 2,070,876,819  speedup is 702.35
+
+########## [bootstrap] materialising standalone .git (common dir 7.4G)
+
+sent 447,271 bytes  received 19,454 bytes  311,150.00 bytes/sec
+total size is 877,136,389  speedup is 1,879.34
+## marcus-sa/nw-bugfix-crash-restart-tasks...origin/marcus-sa/nw-bugfix-crash-restart-tasks [ahead 178, behind 1]
+ M AGENTS.md
+ M crates/overdrive-control-plane/src/worker/exit_observer.rs
+ M crates/overdrive-control-plane/tests/acceptance/crash_ending_authority.rs
+ M crates/overdrive-control-plane/tests/acceptance/terminal_hook_ownership.rs
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+OVERDRIVE_METAL_RUN_STARTED run_id=022a073ef7c34c364efec25b
+info: experimental features enabled: wrapper-scripts
+   Compiling xtask v0.0.0 (/home/ubuntu/overdrive-worktrees/e3d831d7dafe621226ae6047ebcac3536f37470cafcf5dbb64eb9598886af410/xtask)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.94s
+────────────
+ Nextest run ID f9ffdbcc-9cbe-4d00-a560-b93332be2194 with nextest profile: default
+    Starting 1 test across 1 binary (292 tests skipped)
+       START [         ] (1/1) xtask metal_run_isolation_conformance::protocol_randomized_owner_traces
+
+running 1 test
+== Running model based tests for protocol_randomized_owner_traces
+   Generating 4 traces using `0x8c542458` as random seed ...
+   Replaying traces ...
+Failed to stop overdrive-metal-run-c0afce25238fa3fc8875d164.service: Unit overdrive-metal-run-c0afce25238fa3fc8875d164.service not loaded.
+Failed to stop overdrive-metal-run-6d0691687458107d86a0c56b.service: Unit overdrive-metal-run-6d0691687458107d86a0c56b.service not loaded.
+Failed to stop overdrive-metal-run-a878c77e20e93c193cced049.service: Unit overdrive-metal-run-a878c77e20e93c193cced049.service not loaded.
+Failed to stop overdrive-metal-run-ec42561453a4cca41cb82584.service: Unit overdrive-metal-run-ec42561453a4cca41cb82584.service not loaded.
+   [FAIL] protocol_randomized_owner_traces 
+   Reproduce this error with `QUINT_SEED=0x8c542458`
+
+
+thread 'metal_run_isolation_conformance::protocol_randomized_owner_traces' (2284251) panicked at xtask/src/metal_run_isolation_conformance.rs:1318:1:
+Action taken: LoseController
+Nondet picks:
++ actor: 2
++ value: 0
+Next state:
++ runner_conf::runner_protocol::conf_step: LoseController({ actor: 2, value: 0 })
++ runner_conf::runner_protocol::maintenance: 3
++ runner_conf::runner_protocol::observed: Map(1 -> -2, 2 -> -2)
++ runner_conf::runner_protocol::runs: Map(1 -> { checked: false, ctl: true, desc: false, ever: false, p: 0, receipt: 0, roots: false, starts: 0, term: -1 }, 2 -> { checked: false, ctl: false, desc: false, ever: false, p: 5, receipt: 0, roots: false, starts: 0, term: 75 })
++ runner_conf::runner_protocol::second_tree: 2
++ runner_conf::runner_protocol::source_revision: Map(1 -> 1, 2 -> 1)
+actual owner never reached retained command/runner terminal; actual_owner=7b32882826ec503938d59353 unit=Ok({"ActiveState": "active", "ControlGroup": "/system.slice/overdrive-metal-run-7b32882826ec503938d59353.service", "LoadState": "loaded", "MainPID": "2286825"}) phase=Ok("format=overdrive-metal-phase-v1\nrun_id=7b32882826ec503938d59353\nphase=waiting_for_lease\nupdated_at=2026-11-09T06:48:21Z\n") terminal=Err(Os { code: 2, kind: NotFound, message: "No such file or directory" }) owner_argv=Ok("/usr/bin/bash\0/home/ubuntu/overdrive-worktrees/e3d831d7dafe621226ae6047ebcac3536f37470cafcf5dbb64eb9598886af410/target/metal-run-tmp/022a073ef7c34c364efec25b/.tmpl5IIyd/actor-2/captured-holder.sh\0--durable\0/home/ubuntu/overdrive-worktrees/e3d831d7dafe621226ae6047ebcac3536f37470cafcf5dbb64eb9598886af410/target/metal-run-tmp/022a073ef7c34c364efec25b/.tmpl5IIyd/maintenance.lock\0/home/ubuntu/overdrive-worktrees/e3d831d7dafe621226ae6047ebcac3536f37470cafcf5dbb64eb9598886af410/target/metal-run-tmp/022a073ef7c34c364efec25b/.tmpl5IIyd/maintenance.owner\0120\07b32882826ec503938d59353\0metal-protocol-conformance\0/home/ubuntu/overdrive-worktrees/e3d831d7dafe621226ae6047ebcac3536f37470cafcf5dbb64eb9598886af410/target/metal-run-tmp/022a073ef7c34c364efec25b/.tmpl5IIyd/second-local\084b2b6922b04c392a99db9d8ff083eb8b8f6840c\028c494a2680ff9dfddcbbe2d0a417f9b4e4c1c5e4d13db655445f2a551771aa8\0/home/ubuntu/overdrive-worktrees/e3d831d7dafe621226ae6047ebcac3536f37470cafcf5dbb64eb9598886af410/target/metal-run-tmp/022a073ef7c34c364efec25b/.tmpl5IIyd/remote/overdrive-worktrees/60de126023192283e730010a95e8e3cbd0746bf69429db37c46643d2f34e799d\0root\0privileged\0/home/ubuntu/overdrive-worktrees/e3d831d7dafe621226ae6047ebcac3536f37470cafcf5dbb64eb9598886af410/target/metal-run-tmp/022a073ef7c34c364efec25b/.tmpl5IIyd/remote\0/home/ubuntu/overdrive-worktrees/e3d831d7dafe621226ae6047ebcac3536f37470cafcf5dbb64eb9598886af410/target/metal-run-tmp/022a073ef7c34c364efec25b/.tmpl5IIyd/bin:/home/ubuntu/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin\0/home/ubuntu/overdrive-worktrees/e3d831d7dafe621226ae6047ebcac3536f37470cafcf5dbb64eb9598886af410/target/metal-run-tmp/022a073ef7c34c364efec25b/.tmpl5IIyd/actor-2/selected-command\0/home/ubuntu/overdrive-worktrees/e3d831d7dafe621226ae6047ebcac3536f37470cafcf5dbb64eb9598886af410/target/metal-run-tmp/022a073ef7c34c364efec25b/.tmpl5IIyd/runs\0/home/ubuntu/overdrive-worktrees/e3d831d7dafe621226ae6047ebcac3536f37470cafcf5dbb64eb9598886af410/target/metal-run-tmp/022a073ef7c34c364efec25b/.tmpl5IIyd/second.lock\0/home/ubuntu/overdrive-worktrees/e3d831d7dafe621226ae6047ebcac3536f37470cafcf5dbb64eb9598886af410/target/metal-run-tmp/022a073ef7c34c364efec25b/.tmpl5IIyd/second.owner\0ordinary\0") descriptors=Ok([("0", Ok("pipe:[64422737]"), Ok("pos:\t0\nflags:\t00\nmnt_id:\t18\nino:\t64422737\n")), ("1", Ok("/home/ubuntu/overdrive-worktrees/e3d831d7dafe621226ae6047ebcac3536f37470cafcf5dbb64eb9598886af410/target/metal-run-tmp/022a073ef7c34c364efec25b/.tmpl5IIyd/actor-2/controller.stdout"), Ok("pos:\t63\nflags:\t0100001\nmnt_id:\t34\nino:\t10623247\n")), ("2", Ok("/home/ubuntu/overdrive-worktrees/e3d831d7dafe621226ae6047ebcac3536f37470cafcf5dbb64eb9598886af410/target/metal-run-tmp/022a073ef7c34c364efec25b/.tmpl5IIyd/actor-2/controller.stderr"), Ok("pos:\t0\nflags:\t0100001\nmnt_id:\t34\nino:\t10623248\n")), ("8", Ok("/home/ubuntu/overdrive-worktrees/e3d831d7dafe621226ae6047ebcac3536f37470cafcf5dbb64eb9598886af410/target/metal-run-tmp/022a073ef7c34c364efec25b/.tmpl5IIyd/maintenance.lock"), Ok("pos:\t0\nflags:\t0100001\nmnt_id:\t34\nino:\t10623219\nlock:\t1: FLOCK  ADVISORY  READ 2286859 09:01:10623219 0 EOF\n")), ("10", Ok("/home/ubuntu/overdrive-worktrees/e3d831d7dafe621226ae6047ebcac3536f37470cafcf5dbb64eb9598886af410/target/metal-run-tmp/022a073ef7c34c364efec25b/.tmpl5IIyd/second.lock"), Ok("pos:\t0\nflags:\t0100001\nmnt_id:\t34\nino:\t10623240\n")), ("255", Ok("/home/ubuntu/overdrive-worktrees/e3d831d7dafe621226ae6047ebcac3536f37470cafcf5dbb64eb9598886af410/target/metal-run-tmp/022a073ef7c34c364efec25b/.tmpl5IIyd/actor-2/captured-holder.sh"), Ok("pos:\t36823\nflags:\t02100000\nmnt_id:\t34\nino:\t10623238\n"))]) fixture_input_files(barrier,checkout,short-wait,stop,body.pid)=[("barrier", true), ("checkout", false), ("short-wait", false), ("stop", false), ("body.pid", false)]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test metal_run_isolation_conformance::protocol_randomized_owner_traces ... FAILED
+
+failures:
+
+failures:
+    metal_run_isolation_conformance::protocol_randomized_owner_traces
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 292 filtered out; finished in 17.92s
+
+        FAIL [  17.973s] (1/1) xtask metal_run_isolation_conformance::protocol_randomized_owner_traces
+  Cancelling due to test failure
+────────────
+     Summary [  17.980s] 1 test run: 0 passed, 1 failed, 292 skipped
+        FAIL [  17.973s] (1/1) xtask metal_run_isolation_conformance::protocol_randomized_owner_traces
+error: test run failed
+OVERDRIVE_METAL_RUN_COMPLETE run_id=022a073ef7c34c364efec25b exit_code=100 cause=command_returned

@@ -1,0 +1,89 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.08s
+     Running `target/debug/xtask metal run -- cargo nextest run -p xtask --lib --features integration-tests -E 'test(=metal_run_isolation_conformance::protocol_randomized_owner_traces) | test(=metal_run_isolation_conformance::protocol_controller_eof_before_start) | test(=metal_run_isolation_conformance::protocol_controller_loss_after_start)' --no-capture`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+OVERDRIVE_METAL_RUN_ID=b6d20e6b5d764f20c8245f03
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire exclusive physical-maintenance barrier (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_RUN_REGISTERED run_id=b6d20e6b5d764f20c8245f03
+OVERDRIVE_METAL_LEASE_ACQUIRED token=b6d20e6b5d764f20c8245f03 pid=2289720
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/ouagadougou -> ubuntu@151.115.99.251:/home/ubuntu/overdrive-worktrees/e3d831d7dafe621226ae6047ebcac3536f37470cafcf5dbb64eb9598886af410
+
+sent 2,180,721 bytes  received 57,522 bytes  639,498.00 bytes/sec
+total size is 2,070,916,563  speedup is 925.24
+
+########## [bootstrap] materialising standalone .git (common dir 7.4G)
+
+sent 400,025 bytes  received 19,014 bytes  167,615.60 bytes/sec
+total size is 877,138,968  speedup is 2,093.22
+## marcus-sa/nw-bugfix-crash-restart-tasks...origin/marcus-sa/nw-bugfix-crash-restart-tasks [ahead 179, behind 1]
+ M AGENTS.md
+ M crates/overdrive-control-plane/src/worker/exit_observer.rs
+ M crates/overdrive-control-plane/tests/acceptance/crash_ending_authority.rs
+ M crates/overdrive-control-plane/tests/acceptance/terminal_hook_ownership.rs
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+OVERDRIVE_METAL_RUN_STARTED run_id=b6d20e6b5d764f20c8245f03
+info: experimental features enabled: wrapper-scripts
+   Compiling xtask v0.0.0 (/home/ubuntu/overdrive-worktrees/e3d831d7dafe621226ae6047ebcac3536f37470cafcf5dbb64eb9598886af410/xtask)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.61s
+────────────
+ Nextest run ID f2a68e32-fcb0-4de4-ba4f-fb5516772f79 with nextest profile: default
+    Starting 3 tests across 1 binary (290 tests skipped)
+       START [         ] (1/3) xtask metal_run_isolation_conformance::protocol_controller_eof_before_start
+
+running 1 test
+== Running model based tests for protocol_controller_eof_before_start
+   Generating 1 traces using `0xdcc87f15` as random seed ...
+   Replaying traces ...
+Failed to stop overdrive-metal-run-e7f16e930d12e6c05fde3aa6.service: Unit overdrive-metal-run-e7f16e930d12e6c05fde3aa6.service not loaded.
+   [OK] protocol_controller_eof_before_start
+test metal_run_isolation_conformance::protocol_controller_eof_before_start ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 292 filtered out; finished in 4.04s
+
+        PASS [   4.088s] (1/3) xtask metal_run_isolation_conformance::protocol_controller_eof_before_start
+       START [         ] (2/3) xtask metal_run_isolation_conformance::protocol_controller_loss_after_start
+
+running 1 test
+== Running model based tests for protocol_controller_loss_after_start
+   Generating 1 traces using `0x3d6cb635` as random seed ...
+   Replaying traces ...
+Failed to stop overdrive-metal-run-1acb39c44ce856007fde1cf9.service: Unit overdrive-metal-run-1acb39c44ce856007fde1cf9.service not loaded.
+   [OK] protocol_controller_loss_after_start
+test metal_run_isolation_conformance::protocol_controller_loss_after_start ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 292 filtered out; finished in 4.32s
+
+        PASS [   4.370s] (2/3) xtask metal_run_isolation_conformance::protocol_controller_loss_after_start
+       START [         ] (3/3) xtask metal_run_isolation_conformance::protocol_randomized_owner_traces
+
+running 1 test
+== Running model based tests for protocol_randomized_owner_traces
+   Generating 4 traces using `0x8c542458` as random seed ...
+   Replaying traces ...
+Failed to stop overdrive-metal-run-3104f4c4bd875f485e5475bd.service: Unit overdrive-metal-run-3104f4c4bd875f485e5475bd.service not loaded.
+Failed to stop overdrive-metal-run-ccd09a57bab25ac65453c19d.service: Unit overdrive-metal-run-ccd09a57bab25ac65453c19d.service not loaded.
+Failed to stop overdrive-metal-run-1934616d46954a2665c55f6d.service: Unit overdrive-metal-run-1934616d46954a2665c55f6d.service not loaded.
+Failed to stop overdrive-metal-run-5ce3e600f42d0eeb200e1237.service: Unit overdrive-metal-run-5ce3e600f42d0eeb200e1237.service not loaded.
+Failed to stop overdrive-metal-run-2ffde019b60a22865eff2268.service: Unit overdrive-metal-run-2ffde019b60a22865eff2268.service not loaded.
+Failed to stop overdrive-metal-run-ea71641b055840e39c7ab0a6.service: Unit overdrive-metal-run-ea71641b055840e39c7ab0a6.service not loaded.
+Failed to stop overdrive-metal-run-cee723a19a208b2cfc775f60.service: Unit overdrive-metal-run-cee723a19a208b2cfc775f60.service not loaded.
+Failed to stop overdrive-metal-run-8e5e2c31eef87bf6ef65fb6e.service: Unit overdrive-metal-run-8e5e2c31eef87bf6ef65fb6e.service not loaded.
+Failed to stop overdrive-metal-run-13eaefc02539526ee52b3ec2.service: Unit overdrive-metal-run-13eaefc02539526ee52b3ec2.service not loaded.
+Failed to stop overdrive-metal-run-f3120e65c5046777aa944bcd.service: Unit overdrive-metal-run-f3120e65c5046777aa944bcd.service not loaded.
+Failed to stop overdrive-metal-run-adefd7dfcbcd9b33f50b7fe6.service: Unit overdrive-metal-run-adefd7dfcbcd9b33f50b7fe6.service not loaded.
+   [OK] protocol_randomized_owner_traces
+test metal_run_isolation_conformance::protocol_randomized_owner_traces ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 292 filtered out; finished in 27.28s
+
+        PASS [  27.335s] (3/3) xtask metal_run_isolation_conformance::protocol_randomized_owner_traces
+────────────
+     Summary [  35.807s] 3 tests run: 3 passed, 290 skipped
+OVERDRIVE_METAL_RUN_COMPLETE run_id=b6d20e6b5d764f20c8245f03 exit_code=0 cause=command_returned

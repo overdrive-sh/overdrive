@@ -1,0 +1,131 @@
+diff --git a/xtask/src/metal_run_isolation_conformance.rs b/xtask/src/metal_run_isolation_conformance.rs
+index e41dbc0c7..3d53020dd 100644
+--- a/xtask/src/metal_run_isolation_conformance.rs
++++ b/xtask/src/metal_run_isolation_conformance.rs
+@@ -315,6 +315,44 @@ impl NativeUnit {
+     }
+     fn terminal(&self) -> Result {
+         poll(|| self.directory.join("terminal.v1").is_file(), "retained command/runner terminal")
++            .map_err(|error| {
++                // Failure-only reads: retain the actual blocked owner before
++                // World/TempDir cleanup removes its records and operation gates.
++                let facts = unit_facts(&self.id);
++                let pid = facts
++                    .as_ref()
++                    .ok()
++                    .and_then(|facts| facts.get("MainPID"))
++                    .and_then(|pid| pid.parse::<u32>().ok())
++                    .unwrap_or(0);
++                let descriptors = fs::read_dir(format!("/proc/{pid}/fd")).map(|entries| {
++                    entries
++                        .filter_map(std::result::Result::ok)
++                        .map(|entry| {
++                            let number = entry.file_name();
++                            let target = fs::read_link(entry.path());
++                            let info = fs::read_to_string(format!(
++                                "/proc/{pid}/fdinfo/{}",
++                                number.to_string_lossy()
++                            ));
++                            (number, target, info)
++                        })
++                        .collect::<Vec<_>>()
++                });
++                let context = format!(
++                    "{error}; actual_owner={} unit={facts:?} phase={:?} terminal={:?} \
++                     owner_argv={:?} descriptors={descriptors:?} \
++                     fixture_input_files(barrier,checkout,short-wait,stop,body.pid)={:?}",
++                    self.id,
++                    fs::read_to_string(self.directory.join("phase.v1")),
++                    fs::read_to_string(self.directory.join("terminal.v1")),
++                    fs::read(format!("/proc/{pid}/cmdline"))
++                        .map(|bytes| String::from_utf8_lossy(&bytes).into_owned()),
++                    ["barrier", "checkout", "short-wait", "stop", "body.pid"]
++                        .map(|name| (name, self.actor.join(name).is_file())),
++                );
++                error.context(context)
++            })
+     }
+     fn stopped(&self) -> Result {
+         poll(|| unit_facts(&self.id).is_ok_and(|f| !live(&f)), "actual systemd stop completion")
+@@ -516,8 +554,22 @@ impl World {
+         let unit = self.unit_mut(actor)?;
+         drop(unit.child.stdin.take());
+         if unit.phase().as_deref() != Some("running") {
++            let source_before = snapshot(&unit.source);
++            // EOF is queued on the real control pipe. The owner reads it only
++            // after admission; do not strand that read behind our operation
++            // gates when this action will never issue a later Checkout step.
++            unit.gate("barrier")?;
++            unit.gate("checkout")?;
+             unit.terminal()?;
+             unit.ended()?;
++            let terminal = fields(&unit.directory.join("terminal.v1"));
++            if terminal["kind"] != "runner"
++                || terminal["error"] != "controller_eof_before_start"
++                || unit.actor.join("body.pid").exists()
++                || snapshot(&unit.source) != source_before
++            {
++                return Err(failed("pre-start controller loss changed its typed cause or ran/mutated a body/source").into());
++            }
+         }
+         Ok(())
+     }
+@@ -880,24 +932,30 @@ impl Driver for RunnerDriver {
+         if let Some(world) = &mut self.owner {
+             world.collector_return = None;
+         }
+-        switch!(step {
+-            init(actor:i64,value:i64)=> {if actor!=0{return Err(failed("invalid initial actor").into());}self.owner=Some(World::new(value)?);},
+-            Register(actor:i64,value:i64)=> {let _=value;self.owner_mut()?.register(actor)?;},
+-            Barrier(actor:i64,value:i64)=> {let _=value;self.owner()?.barrier(actor)?;},
+-            Checkout(actor:i64,value:i64)=> {let _=value;self.owner()?.checkout(actor)?;},
+-            Prepare(actor:i64,value:i64)=> {let _=value;self.owner()?.prepare(actor)?;},
+-            Start(actor:i64,value:i64)=> {let _=value;self.owner_mut()?.start(actor)?;},
+-            LoseController(actor:i64,value:i64)=> {let _=value;self.owner_mut()?.lose_controller(actor)?;},
+-            AdmissionTimeout(actor:i64,value:i64)=> {let _=value;self.owner()?.admission_timeout(actor)?;},
+-            AbortPreparation(actor:i64,value:i64)=> self.owner_mut()?.abort(actor,value)?,
+-            MainExit(actor:i64,value:i64)=> self.owner()?.main_exit(actor,value)?,
+-            SupervisorLost(actor:i64,value:i64)=> {let _=value;self.owner()?.supervisor_lost(actor)?;},
+-            StopOwner(actor:i64,value:i64)=> self.owner()?.stop_owner(actor,value)?,
+-            Collect(actor:i64,value:i64)=> {let _=value;self.owner_mut()?.collect(actor)?;},
+-            Sync(actor:i64,value:i64)=> {if value!=1{return Err(failed("invalid sync revision stimulus").into());}self.owner()?.source_transfer(actor,1,false)?;},
+-            NoSyncRefusal(actor:i64,value:i64)=> {let _=value;self.owner_mut()?.no_sync_refusal(actor)?;},
+-            Maintain(actor:i64,value:i64)=> {if actor!=0{return Err(failed("invalid maintainer actor").into());}self.owner_mut()?.maintain(value)?;},
+-            Idle(actor:i64,value:i64)=> {let _=(actor,value);self.owner()?.idle()?;},
++        let result = (|| -> Result {
++            switch!(step {
++                init(actor:i64,value:i64)=> {if actor!=0{return Err(failed("invalid initial actor").into());}self.owner=Some(World::new(value)?);},
++                Register(actor:i64,value:i64)=> {let _=value;self.owner_mut()?.register(actor)?;},
++                Barrier(actor:i64,value:i64)=> {let _=value;self.owner()?.barrier(actor)?;},
++                Checkout(actor:i64,value:i64)=> {let _=value;self.owner()?.checkout(actor)?;},
++                Prepare(actor:i64,value:i64)=> {let _=value;self.owner()?.prepare(actor)?;},
++                Start(actor:i64,value:i64)=> {let _=value;self.owner_mut()?.start(actor)?;},
++                LoseController(actor:i64,value:i64)=> {let _=value;self.owner_mut()?.lose_controller(actor)?;},
++                AdmissionTimeout(actor:i64,value:i64)=> {let _=value;self.owner()?.admission_timeout(actor)?;},
++                AbortPreparation(actor:i64,value:i64)=> self.owner_mut()?.abort(actor,value)?,
++                MainExit(actor:i64,value:i64)=> self.owner()?.main_exit(actor,value)?,
++                SupervisorLost(actor:i64,value:i64)=> {let _=value;self.owner()?.supervisor_lost(actor)?;},
++                StopOwner(actor:i64,value:i64)=> self.owner()?.stop_owner(actor,value)?,
++                Collect(actor:i64,value:i64)=> {let _=value;self.owner_mut()?.collect(actor)?;},
++                Sync(actor:i64,value:i64)=> {if value!=1{return Err(failed("invalid sync revision stimulus").into());}self.owner()?.source_transfer(actor,1,false)?;},
++                NoSyncRefusal(actor:i64,value:i64)=> {let _=value;self.owner_mut()?.no_sync_refusal(actor)?;},
++                Maintain(actor:i64,value:i64)=> {if actor!=0{return Err(failed("invalid maintainer actor").into());}self.owner_mut()?.maintain(value)?;},
++                Idle(actor:i64,value:i64)=> {let _=(actor,value);self.owner()?.idle()?;},
++            })
++        })();
++        result.map_err(|error| {
++            let context = format!("{step}\n{error}");
++            error.context(context)
+         })
+     }
+ }
+@@ -1275,7 +1333,8 @@ fn protocol_repeat_collection_agrees() -> impl Driver {
+     spec = "../specs/quint/metal-run-isolation/runner_protocol.qnt",
+     main = "runner_conf",
+     max_samples = 4,
+-    max_steps = 24
++    max_steps = 24,
++    seed = "0x8c542458"
+ )]
+ fn protocol_randomized_owner_traces() -> impl Driver {
+     RunnerDriver::fresh()
