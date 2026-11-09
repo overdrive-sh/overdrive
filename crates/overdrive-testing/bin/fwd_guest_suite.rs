@@ -1944,6 +1944,16 @@ fn nested_vm_test_support(
     .into_iter()
     .map(tool)
     .collect();
+    // The nested scripted-image builder asks its existing `ldd`-backed
+    // `GuestKit::image` path to inspect `tc`. `ldd` is a shell script on the
+    // qualified Metal host, so stage it without recursively asking ldd for
+    // ldd's libraries, and stage its Bash interpreter at the shebang path.
+    let mut ldd = tool("ldd");
+    ldd.with_shared_libraries = false;
+    extra.push(ldd);
+    let mut bash = tool("bash");
+    bash.guest = PathBuf::from("/bin/bash");
+    extra.push(bash);
     let sleep = tool("sleep");
     extra.push(GuestFile { guest: PathBuf::from("/bin/sleep"), ..sleep });
     extra.push(tool("systemd-detect-virt"));
