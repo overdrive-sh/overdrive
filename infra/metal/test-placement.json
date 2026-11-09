@@ -4890,11 +4890,31 @@
         "kind": "guest-group",
         "group": "cgroup-default"
       },
+      "integration::public_ingress_gateway_boot_shutdown::a_route_owner_that_ended_in_shutdown_answers_503_gateway_owner_unavailable_on_both_methods": {
+        "kind": "guest-group",
+        "group": "cgroup-default"
+      },
+      "integration::public_ingress_gateway_boot_shutdown::a_route_replacement_behind_a_backend_that_refuses_mtls_is_promoted_and_drains_the_prior_generation": {
+        "kind": "guest-group",
+        "group": "cgroup-default"
+      },
+      "integration::public_ingress_gateway_boot_shutdown::a_selected_backend_that_refuses_mtls_is_bind_valid_and_its_first_request_is_one_502": {
+        "kind": "guest-group",
+        "group": "cgroup-default"
+      },
       "integration::public_ingress_gateway_boot_shutdown::a_service_with_no_backend_is_answered_503_twice_with_an_empty_second_delta": {
         "kind": "guest-group",
         "group": "cgroup-default"
       },
+      "integration::public_ingress_gateway_boot_shutdown::a_well_formed_envelope_holding_an_invalid_route_is_a_typed_500_route_decode": {
+        "kind": "guest-group",
+        "group": "cgroup-default"
+      },
       "integration::public_ingress_gateway_boot_shutdown::an_absent_sentinel_receipt_keeps_the_public_port_unbound": {
+        "kind": "guest-group",
+        "group": "cgroup-default"
+      },
+      "integration::public_ingress_gateway_boot_shutdown::an_undecodable_stored_route_is_a_typed_500_route_decode_on_post_and_delete": {
         "kind": "guest-group",
         "group": "cgroup-default"
       },
@@ -9479,6 +9499,31 @@
       }
     },
     "overdrive-gateway": {
+      "application::admission_acceptance::over_leases::a_request_beyond_the_global_request_ceiling_is_refused_and_leaks_nothing": {
+        "kind": "guest-group",
+        "group": "cgroup-default"
+      },
+      "application::admission_acceptance::over_leases::a_second_request_on_a_connection_with_one_in_flight_is_refused": {
+        "kind": "guest-group",
+        "group": "cgroup-default"
+      },
+      "application::admission_acceptance::over_leases::the_connection_beyond_the_ceiling_is_refused_by_admission_and_leaks_nothing": {
+        "kind": "guest-group",
+        "group": "cgroup-default"
+      },
+      "application::admission_acceptance::over_leases::the_request_beyond_the_per_connection_ceiling_is_refused": {
+        "kind": "guest-group",
+        "group": "cgroup-default"
+      },
+      "application::admission_acceptance::the_connect_beyond_the_connect_ceiling_is_refused_and_leaks_nothing": {
+        "kind": "host-pure"
+      },
+      "application::admission_acceptance::the_connection_beyond_the_public_connection_ceiling_is_refused_and_leaks_nothing": {
+        "kind": "host-pure"
+      },
+      "application::admission_acceptance::the_request_beyond_the_global_request_ceiling_is_refused_and_leaks_nothing": {
+        "kind": "host-pure"
+      },
       "application::ledger_acceptance::bound_reservation_holds_its_slot_until_complete_removes_the_record": {
         "kind": "guest-group",
         "group": "cgroup-default"
@@ -9507,6 +9552,10 @@
         "kind": "guest-group",
         "group": "cgroup-default"
       },
+      "application::quint_gateway_application::gateway_application_failed_candidate_not_restaged": {
+        "kind": "guest-group",
+        "group": "cgroup-default"
+      },
       "application::quint_gateway_application::gateway_application_late_probe_after_supersession": {
         "kind": "guest-group",
         "group": "cgroup-default"
@@ -9523,6 +9572,12 @@
         "kind": "host-pure"
       },
       "connector::acceptance::a_connect_dropped_mid_handshake_releases_its_ledger_slot_and_intent": {
+        "kind": "host-pure"
+      },
+      "connector::acceptance::a_dial_the_hook_denied_is_no_backend_not_a_connect_failure": {
+        "kind": "host-pure"
+      },
+      "connector::acceptance::a_selected_backend_whose_dial_is_refused_is_a_connect_failure": {
         "kind": "host-pure"
       },
       "connector::acceptance::every_gateway_client_mtls_fault_is_mapped_and_cleans_intent_state": {
@@ -9711,10 +9766,22 @@
       "runtime::routing::properties::a_different_valid_hostname_is_exactly_an_sni_mismatch": {
         "kind": "host-pure"
       },
+      "runtime::routing::properties::a_non_canonical_spelling_of_any_port_is_invalid_authority": {
+        "kind": "host-pure"
+      },
+      "runtime::routing::properties::a_port_above_65535_is_invalid_authority": {
+        "kind": "host-pure"
+      },
+      "runtime::routing::properties::a_signed_or_zero_padded_port_is_invalid_authority_not_443": {
+        "kind": "host-pure"
+      },
       "runtime::routing::properties::canonical_authority_accepts_ascii_case_and_optional_443": {
         "kind": "host-pure"
       },
       "runtime::routing::properties::every_explicit_port_other_than_443_is_unsupported": {
+        "kind": "host-pure"
+      },
+      "runtime::routing::properties::exact_443_is_accepted_and_malformed_port_spellings_are_invalid_authority": {
         "kind": "host-pure"
       },
       "runtime::routing::properties::malformed_duplicate_wrong_port_and_sni_mismatch_are_distinct": {
@@ -9755,6 +9822,10 @@
         "group": "cgroup-default"
       },
       "integration::public_ingress_gateway::a_restarted_gateway_over_an_undecodable_prior_status_row_counts_from_zero": {
+        "kind": "guest-group",
+        "group": "cgroup-default"
+      },
+      "integration::public_ingress_gateway::a_selected_backend_with_no_applied_identity_does_not_stop_the_gate": {
         "kind": "guest-group",
         "group": "cgroup-default"
       },
@@ -9815,6 +9886,10 @@
         "group": "cgroup-default"
       },
       "integration::public_ingress_gateway::operator_status_carries_no_manual_path_or_credential_material": {
+        "kind": "guest-group",
+        "group": "cgroup-default"
+      },
+      "integration::public_ingress_gateway::request_path_dataplane_errors_are_not_gate_inputs": {
         "kind": "guest-group",
         "group": "cgroup-default"
       },
@@ -9931,6 +10006,10 @@
         "group": "cgroup-default"
       },
       "integration::public_ingress_gateway_relay::drain_closes_idle_connections_at_once_and_ends_inflight_work_at_the_one_deadline": {
+        "kind": "guest-group",
+        "group": "cgroup-default"
+      },
+      "integration::public_ingress_gateway_relay::every_authority_error_and_port_spelling_is_refused_before_any_upstream_work": {
         "kind": "guest-group",
         "group": "cgroup-default"
       },
