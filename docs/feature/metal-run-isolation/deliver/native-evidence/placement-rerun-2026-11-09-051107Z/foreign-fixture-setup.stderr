@@ -1,0 +1,6 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.21s
+     Running `target/debug/xtask metal run --exclusive -- mktemp -d /tmp/metal-placement-foreign.XXXXXXXX`
+xtask: running metal run (one bootstrap lease session)
+OVERDRIVE_METAL_RUN_ID=c36bef8a62871f09d000ec1b
+OVERDRIVE_METAL_RUN_STARTED run_id=c36bef8a62871f09d000ec1b
+OVERDRIVE_METAL_RUN_COMPLETE run_id=c36bef8a62871f09d000ec1b exit_code=0 cause=command_returned
