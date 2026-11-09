@@ -226,6 +226,18 @@ case "$PLACEMENT_KIND" in
     esac
     if [ "$PLACEMENT_KIND" = guest-group ]; then
       export OVERDRIVE_FWD_GUEST_GROUP="$PLACEMENT_GROUP"
+    elif [ "$PLACEMENT_KIND" = guest-lane-operator ] || [ "$PLACEMENT_KIND" = guest-lane-owner ]; then
+      export OVERDRIVE_FWD_GUEST_LANE_KIND="$PLACEMENT_KIND"
+      export OVERDRIVE_FWD_GUEST_LANE_FIXTURE="$PLACEMENT_FIXTURE"
+      export OVERDRIVE_FWD_GUEST_NEXTTEST_ELF="$1"
+      GUEST_ARGUMENTS="$(python3 - "$@" <<'PY'
+import sys
+
+arguments = sys.argv[2:]
+print(f"{len(arguments)}:" + ";".join(argument.encode().hex() for argument in arguments))
+PY
+)" || test_error test_unclassified 78
+      export OVERDRIVE_FWD_GUEST_NEXTTEST_ARGV="$GUEST_ARGUMENTS"
     fi
     export OVERDRIVE_FWD_GUEST_EXACT="$TEST_NAME"
     run_local_vsock_namespace "$DISPATCHER_CANONICAL" --nextest-wrapper "$@"

@@ -52,6 +52,7 @@
 #![cfg(target_os = "linux")]
 #![allow(clippy::doc_markdown, reason = "kernel and file names in prose")]
 
+use std::collections::HashMap;
 use std::io::{self, Write};
 use std::net::Ipv4Addr;
 use std::path::{Path, PathBuf};
@@ -130,6 +131,8 @@ pub const IN_GUEST_TESTS_PATH: &str = "/opt/overdrive-testing/in-guest-tests";
 pub const READY_BOUND: Duration = Duration::from_secs(60);
 /// How long one cell may run.
 pub const CELL_BOUND: Duration = Duration::from_secs(300);
+const NEXTTEST_LANE_ARGV: &str = "OVERDRIVE_FWD_GUEST_NEXTTEST_ARGV";
+const NEXTTEST_LANE_ELF: &str = "OVERDRIVE_FWD_GUEST_NEXTTEST_ELF";
 /// The launch token every lane guest carries (32 lowercase hex, non-zero;
 /// the lane runs no owner that checks it).
 pub const LANE_LAUNCH_TOKEN: &str = "6c616e652d6c61756e63682d746f6b65";
@@ -243,6 +246,201 @@ fn read_line(stream: &VsockStream, bound: Duration) -> io::Result<Option<String>
     }
 }
 
+struct NextestLaneAttempt {
+    guest_binary: PathBuf,
+    working_directory: PathBuf,
+    args: Vec<String>,
+    environment: Vec<(String, String)>,
+    files: Vec<GuestFile>,
+}
+
+fn nextest_lane_not_prepared(artifact: &str, path: PathBuf) -> GuestKitError {
+    GuestKitError::LaneNotPrepared { artifact: artifact.to_owned(), path }
+}
+
+fn decode_nextest_argv() -> Result<Option<Vec<String>>, GuestKitError> {
+    let Some(encoded) = std::env::var_os(NEXTTEST_LANE_ARGV) else {
+        return Ok(None);
+    };
+    let encoded = encoded.into_string().map_err(|_| {
+        nextest_lane_not_prepared("selected nextest argv", PathBuf::from(NEXTTEST_LANE_ARGV))
+    })?;
+    let (count, values) = encoded.split_once(':').ok_or_else(|| {
+        nextest_lane_not_prepared("selected nextest argv", PathBuf::from(NEXTTEST_LANE_ARGV))
+    })?;
+    let count = count.parse::<usize>().map_err(|_| {
+        nextest_lane_not_prepared("selected nextest argv", PathBuf::from(NEXTTEST_LANE_ARGV))
+    })?;
+    if count > 4096 {
+        return Err(nextest_lane_not_prepared(
+            "selected nextest argv",
+            PathBuf::from(NEXTTEST_LANE_ARGV),
+        ));
+    }
+    let encoded_values = if count == 0 {
+        if !values.is_empty() {
+            return Err(nextest_lane_not_prepared(
+                "selected nextest argv",
+                PathBuf::from(NEXTTEST_LANE_ARGV),
+            ));
+        }
+        Vec::new()
+    } else {
+        let values = values.split(';').collect::<Vec<_>>();
+        if values.len() != count {
+            return Err(nextest_lane_not_prepared(
+                "selected nextest argv",
+                PathBuf::from(NEXTTEST_LANE_ARGV),
+            ));
+        }
+        values
+    };
+    encoded_values
+        .into_iter()
+        .map(|value| {
+            if value.len() % 2 != 0 || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+                return Err(nextest_lane_not_prepared(
+                    "selected nextest argv",
+                    PathBuf::from(NEXTTEST_LANE_ARGV),
+                ));
+            }
+            let bytes = value
+                .as_bytes()
+                .chunks_exact(2)
+                .map(|pair| {
+                    std::str::from_utf8(pair)
+                        .ok()
+                        .and_then(|pair| u8::from_str_radix(pair, 16).ok())
+                        .ok_or_else(|| {
+                            nextest_lane_not_prepared(
+                                "selected nextest argv",
+                                PathBuf::from(NEXTTEST_LANE_ARGV),
+                            )
+                        })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            String::from_utf8(bytes).map_err(|_| {
+                nextest_lane_not_prepared(
+                    "selected nextest argv",
+                    PathBuf::from(NEXTTEST_LANE_ARGV),
+                )
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map(Some)
+}
+
+fn nextest_lane_attempt(tests: &InGuestTests) -> Result<Option<NextestLaneAttempt>, GuestKitError> {
+    let Some(args) = decode_nextest_argv()? else {
+        return Ok(None);
+    };
+    let working_directory = std::env::current_dir()
+        .map_err(|error| lane_error(format!("reading nextest working directory: {error}")))?;
+    let binary = tests
+        .binary
+        .canonicalize()
+        .map_err(|_| nextest_lane_not_prepared("selected nextest ELF", tests.binary.clone()))?;
+    let selected_elf = std::env::var_os(NEXTTEST_LANE_ELF).ok_or_else(|| {
+        nextest_lane_not_prepared("selected nextest ELF argument", PathBuf::from(NEXTTEST_LANE_ELF))
+    })?;
+    let selected_elf = selected_elf.into_string().map_err(|_| {
+        nextest_lane_not_prepared("selected nextest ELF argument", PathBuf::from(NEXTTEST_LANE_ELF))
+    })?;
+    let selected_elf = PathBuf::from(selected_elf);
+    let guest_binary = if selected_elf.is_absolute() {
+        selected_elf
+    } else {
+        working_directory.join(selected_elf)
+    };
+    let mut files = vec![GuestFile {
+        host: binary.clone(),
+        guest: guest_binary.clone(),
+        with_shared_libraries: true,
+    }];
+    let mut seen = HashMap::from([(guest_binary.clone(), binary)]);
+    for (key, value) in std::env::vars_os() {
+        let Some(key) = key.to_str() else {
+            continue;
+        };
+        if !key.starts_with("NEXTEST_BIN_EXE_") {
+            continue;
+        }
+        let value = value.into_string().map_err(|_| {
+            nextest_lane_not_prepared("selected nextest helper", PathBuf::from(key))
+        })?;
+        let path = PathBuf::from(&value);
+        let host = path
+            .canonicalize()
+            .or_else(|_| working_directory.join(&path).canonicalize())
+            .map_err(|_| nextest_lane_not_prepared("selected nextest helper", path.clone()))?;
+        let guest = if path.is_absolute() { path } else { working_directory.join(path) };
+        match seen.get(&guest) {
+            Some(existing) if existing == &host => continue,
+            Some(_) => {
+                return Err(nextest_lane_not_prepared(
+                    "conflicting selected nextest helper",
+                    guest,
+                ));
+            }
+            None => {}
+        }
+        seen.insert(guest.clone(), host.clone());
+        files.push(GuestFile { host, guest, with_shared_libraries: true });
+    }
+    let mut environment = std::env::vars_os()
+        .filter_map(|(key, value)| {
+            let key = key.into_string().ok()?;
+            let selected = key.starts_with("NEXTEST_")
+                || key.starts_with("PROPTEST_")
+                || matches!(
+                    key.as_str(),
+                    "OVERDRIVE_BPF_NATIVE"
+                        | "OVERDRIVE_FWD_GUEST_GROUP"
+                        | "OVERDRIVE_FWD_GUEST_EXACT"
+                        | "RUST_BACKTRACE"
+                        | "RUST_LOG"
+                );
+            selected.then_some((key, value))
+        })
+        .map(|(key, value)| {
+            value.into_string().map(|value| (key.clone(), value)).map_err(|_| {
+                nextest_lane_not_prepared("selected nextest environment value", PathBuf::from(key))
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    environment.sort_by(|left, right| left.0.cmp(&right.0));
+    environment.push(("PWD".to_owned(), working_directory.display().to_string()));
+    Ok(Some(NextestLaneAttempt { guest_binary, working_directory, args, environment, files }))
+}
+
+fn guest_lane_exec_argv(attempt: &NextestLaneAttempt) -> Vec<String> {
+    let mut argv = vec![
+        "/usr/bin/env".to_owned(),
+        "--chdir".to_owned(),
+        attempt.working_directory.display().to_string(),
+    ];
+    argv.extend(attempt.environment.iter().map(|(key, value)| format!("{key}={value}")));
+    argv.push(attempt.guest_binary.display().to_string());
+    argv.extend(attempt.args.iter().cloned());
+    argv
+}
+
+fn guest_lane_image_files(
+    tests: &InGuestTests,
+    attempt: Option<&NextestLaneAttempt>,
+) -> Vec<GuestFile> {
+    attempt.map_or_else(
+        || {
+            vec![GuestFile {
+                host: tests.binary.clone(),
+                guest: PathBuf::from(IN_GUEST_TESTS_PATH),
+                with_shared_libraries: true,
+            }]
+        },
+        |attempt| attempt.files.clone(),
+    )
+}
+
 fn lane_error(detail: String) -> GuestKitError {
     GuestKitError::Staging { detail, source: io::Error::other("in-guest lane") }
 }
@@ -272,6 +470,7 @@ pub fn run_in_guest_cell(
     work: &Path,
 ) -> Result<CellRun, GuestKitError> {
     let name = cell.replace("::", "-");
+    let attempt = nextest_lane_attempt(tests)?;
     let image = kit.image(
         work,
         &name,
@@ -279,11 +478,7 @@ pub fn run_in_guest_cell(
             init: GuestInit::OverdriveInit,
             forwarder_module: true,
             loopback_module: true,
-            extra: vec![GuestFile {
-                host: tests.binary.clone(),
-                guest: PathBuf::from(IN_GUEST_TESTS_PATH),
-                with_shared_libraries: true,
-            }],
+            extra: guest_lane_image_files(tests, attempt.as_ref()),
         },
     )?;
     let listeners = HostListeners::bind()?;
@@ -328,20 +523,20 @@ pub fn run_in_guest_cell(
             return Err(lane_error(format!("{cell}: expected READY, got {ready:?} ({other:?})")));
         }
     }
-    let argv: Vec<String> = [
-        GUEST_PEER_GUEST_PATH,
-        subcommand::RUN_WITH_MODULES,
-        LOOPBACK_MODULE_GUEST_PATH,
-        "--",
-        IN_GUEST_TESTS_PATH,
-        "--exact",
-        cell,
-        "--test-threads=1",
-        "--nocapture",
-    ]
-    .iter()
-    .map(|s| (*s).to_owned())
-    .collect();
+    let mut argv: Vec<String> =
+        [GUEST_PEER_GUEST_PATH, subcommand::RUN_WITH_MODULES, LOOPBACK_MODULE_GUEST_PATH, "--"]
+            .iter()
+            .map(|s| (*s).to_owned())
+            .collect();
+    if let Some(attempt) = &attempt {
+        argv.extend(guest_lane_exec_argv(attempt));
+    } else {
+        argv.extend(
+            [IN_GUEST_TESTS_PATH, "--exact", cell, "--test-threads=1", "--nocapture"]
+                .into_iter()
+                .map(str::to_owned),
+        );
+    }
     let exec = BeaconMessage::Exec { argv };
     (&conn)
         .write_all(format!("{exec}\n").as_bytes())
@@ -893,6 +1088,7 @@ pub fn run_in_guest_owner_cell<R>(
     host: impl FnOnce(&mut OwnerLaneHost) -> R,
 ) -> Result<(CellRun, R), GuestKitError> {
     let name = cell.replace("::", "-");
+    let attempt = nextest_lane_attempt(tests)?;
     let image = kit.image(
         work,
         &name,
@@ -900,11 +1096,7 @@ pub fn run_in_guest_owner_cell<R>(
             init: GuestInit::ScriptedPeer,
             forwarder_module: true,
             loopback_module: true,
-            extra: vec![GuestFile {
-                host: tests.binary.clone(),
-                guest: PathBuf::from(IN_GUEST_TESTS_PATH),
-                with_shared_libraries: true,
-            }],
+            extra: guest_lane_image_files(tests, attempt.as_ref()),
         },
     )?;
     let listeners = HostListeners::bind()?;
@@ -922,7 +1114,22 @@ pub fn run_in_guest_owner_cell<R>(
             vcpus: Some(2),
         },
     )?;
-    let argv = cell_argv(cell, &[]);
+    let argv = attempt.as_ref().map_or_else(
+        || cell_argv(cell, &[]),
+        |attempt| {
+            let mut argv: Vec<String> = [
+                GUEST_PEER_GUEST_PATH,
+                subcommand::RUN_WITH_MODULES,
+                LOOPBACK_MODULE_GUEST_PATH,
+                "--",
+            ]
+            .iter()
+            .map(|s| (*s).to_owned())
+            .collect();
+            argv.extend(guest_lane_exec_argv(attempt));
+            argv
+        },
+    );
     guest.peer().spawn("cell", PeerCommand::Exec { argv })?;
     let deadline = Instant::now() + READY_BOUND;
     let script = loop {
