@@ -74,13 +74,27 @@ PY
 done
 [ -f "$out/maintenance-waited.json" ]
 for ((attempt=0; attempt<1200; attempt++)); do
-  if rg -q 'METAL-MAINTENANCE-START predecessor_stopped=true predecessor_roots_absent=true' "$out/maintenance.stdout"; then break; fi
+  if observe "$ordinary_id" "$maintenance_id" > "$out/admitted-$attempt.json" 2> "$out/admitted-query-$attempt.stderr"; then
+    if python3 - "$out/admitted-$attempt.json" "$ordinary_id" "$maintenance_id" <<'PY_EXCLUSIVE_HELD'
+import json,sys
+owners=json.load(open(sys.argv[1]))['owners']; ordinary,maintenance=(owners[run] for run in sys.argv[2:])
+assert ordinary['unit']['ActiveState'] not in ('active','activating','deactivating')
+assert ordinary['completion.v1']['kind']=='complete' and not ordinary['processes'] and not any(root['exists'] for root in ordinary['roots'].values())
+assert maintenance['metadata']['execution_class']=='exclusive'
+assert maintenance['unit']['ActiveState']=='active' and maintenance['phase.v1']['phase'] in ('preparing','running')
+main=maintenance['processes'][maintenance['unit']['MainPID']]
+assert any(fd['target']=='/run/lock/overdrive-metal-shared.lock' and 'FLOCK' in fd['fdinfo'] and 'WRITE' in fd['fdinfo'] for fd in main['fds'].values()), 'the actual exclusive owner must hold the canonical barrier'
+PY_EXCLUSIVE_HELD
+    then cp "$out/admitted-$attempt.json" "$out/maintenance-admitted.json"; break; fi
+  fi
+  if ! kill -0 "$maintenance_controller" 2>/dev/null; then break; fi
   printf "phase=admission attempt=%s timestamp=%s\n" "$attempt" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$out/observations.log"
   sleep 0.05
 done
-rg -q 'METAL-MAINTENANCE-START predecessor_stopped=true predecessor_roots_absent=true' "$out/maintenance.stdout"
-# Register an ordinary request while the real exclusive body owns admission.
-# Its waiting record must not turn it into a predecessor that blocks that owner.
+[ -f "$out/maintenance-admitted.json" ]
+# Register behind the observed EX descriptor as soon as admission is held,
+# including source/preflight preparation. Collected body output arrives only
+# after command completion and cannot establish this live-owner boundary.
 (cd "$checkout" && exec cargo xtask metal run -- cargo check -p xtask) > "$out/waiter.stdout" 2> "$out/waiter.stderr" &
 waiter_controller=$!
 for ((attempt=0; attempt<100; attempt++)); do
@@ -89,8 +103,13 @@ for ((attempt=0; attempt<100; attempt++)); do
     if python3 - "$out/waiter-$attempt.json" "$maintenance_id" "$waiter_id" <<'PY'
 import json,sys
 x=json.load(open(sys.argv[1]))['owners']; m,w=x[sys.argv[2]],x[sys.argv[3]]
-assert m['unit']['ActiveState']=='active' and m['phase.v1']['phase']=='running'
-assert w['phase.v1']['phase']=='waiting_for_lease'
+assert m['metadata']['execution_class']=='exclusive'
+assert m['unit']['ActiveState']=='active' and m['phase.v1']['phase'] in ('preparing','running')
+main=m['processes'][m['unit']['MainPID']]
+assert any(fd['target']=='/run/lock/overdrive-metal-shared.lock' and 'FLOCK' in fd['fdinfo'] and 'WRITE' in fd['fdinfo'] for fd in main['fds'].values()), 'the exclusive owner must still hold admission'
+assert w['metadata']['execution_class']=='ordinary'
+assert w['unit']['ActiveState']=='active' and w['phase.v1']['phase']=='waiting_for_lease'
+assert not any(fd['target']=='/run/lock/overdrive-metal-shared.lock' and 'FLOCK' in fd['fdinfo'] for process in w['processes'].values() for fd in process['fds'].values()), 'a registered but unadmitted waiter cannot own a shared barrier descriptor'
 PY
     then cp "$out/waiter-$attempt.json" "$out/unadmitted-waiter.json"; break; fi
   fi
@@ -103,6 +122,8 @@ wait "$maintenance_controller"; maintenance_status=$?
 wait "$waiter_controller"; waiter_status=$?
 set -e
 [ "$ordinary_status" = 100 ] && [ "$maintenance_status" = 0 ] && [ "$waiter_status" = 0 ]
+rg -q 'TIMEOUT .*selected_attempt_waits_for_its_timeout' "$out/ordinary.stdout"
+rg -q 'METAL-MAINTENANCE-START predecessor_stopped=true predecessor_roots_absent=true' "$out/maintenance.stdout"
 observe "$ordinary_id" "$maintenance_id" "$waiter_id" > "$out/completed.json"
 python3 - "$out/completed.json" <<'PY'
 import json,sys
