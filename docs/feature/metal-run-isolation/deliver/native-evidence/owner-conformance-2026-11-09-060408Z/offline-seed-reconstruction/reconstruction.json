@@ -1,0 +1,42 @@
+{
+  "kind": "offline reconstruction of existing logged stimuli; not native owner observations",
+  "seed": "0x8c542458",
+  "quint_version": "0.32.0",
+  "quint_connect_source": "0.1.2",
+  "model_runtime_source_commit": "eb210bb204e6d93f860faa8de20b1cc30ca35462",
+  "model_sha256": "f67ed362807560c981a60be33d127106f47329a290f5148add70fadcbd732b5e",
+  "quint_command": [
+    "quint",
+    "run",
+    "specs/quint/metal-run-isolation/runner_protocol.qnt",
+    "--seed",
+    "0x8c542458",
+    "--max-samples",
+    "4",
+    "--n-traces",
+    "4",
+    "--out-itf",
+    "/tmp/metal-owner-seed-8c542458.kIpzPTYN/run_{seq}.itf.json",
+    "--mbt",
+    "--verbosity",
+    "0",
+    "--main",
+    "runner_conf",
+    "--max-steps",
+    "24"
+  ],
+  "execution_boundary": "Existing canonical Lima tool; no Metal owner/test replay; unchanged model",
+  "exit_code": 0,
+  "traces": {
+    "run_0.itf.json": "366dfcc674b1f572bcf54a19e9b32244c6aeb3dca5ef1e506aa393d08783761f",
+    "run_1.itf.json": "51bd61bfcc26ea11418598ce7e4e94da47ea6c51d47e8a42846230753973677c",
+    "run_2.itf.json": "b00ffca3fe6533b761dd45dc497715d9dfaa6a7e8b6bd40e5683d7d03923acca",
+    "run_3.itf.json": "1e0c67ae08963cb8ead7c5e811ea66723ab826dca5dffd3c94c56267ebd2bb22"
+  },
+  "limits": [
+    "Original native trace files were not retained by quint-connect TempDir; these are regenerated diagnostic artifacts",
+    "Native foreground did not record Quint version or per-step/owner-state telemetry",
+    "Native trace-file ReadDir order is not recorded and is not sorted by the library",
+    "No new formal/manifest/model check or native owner replay was executed"
+  ]
+}
