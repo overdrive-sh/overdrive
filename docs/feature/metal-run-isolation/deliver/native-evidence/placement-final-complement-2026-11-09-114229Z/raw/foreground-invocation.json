@@ -1,0 +1,34 @@
+{
+  "command": [
+    "bash",
+    "/tmp/metal-placement-final-observer-20261109T114229Z/final-observer.sh",
+    "/Users/marcus/conductor/workspaces/helios/ouagadougou",
+    "/tmp/metal-placement-final-observer-20261109T114229Z/placement",
+    "1b54417e839c436092b85ad3",
+    "599aaa9da34be0fb5cd26f9f"
+  ],
+  "started_at": "2026-11-09T11:42:43.058968+00:00",
+  "source_before": {
+    "head": "f8c0f02d224887f2cd7ef67c3f0547950e7b71d7",
+    "status": " M AGENTS.md\n M crates/overdrive-control-plane/src/worker/exit_observer.rs\n M crates/overdrive-control-plane/tests/acceptance/crash_ending_authority.rs\n M crates/overdrive-control-plane/tests/acceptance/terminal_hook_ownership.rs\n M crates/overdrive-core/src/traits/driver.rs\n M docs/feature/metal-run-isolation/feature-delta.md\n M docs/feature/service-allocation-readiness-and-ending/deliver/roadmap.json\n M website/content/blog/sharing-a-metal-box-without-sharing-test-state.mdx\n M website/content/docs/how-to/run-verification-on-metal.mdx\n?? docs/feature/metal-run-isolation/deliver/review-slice.md\n?? docs/feature/service-allocation-readiness-and-ending/deliver/execution-log.json\n",
+    "sha256": {
+      "infra/metal/bootstrap.sh": "47e7152b18ef5d7b57a26d288f473769d70258d8086477bdb563cd9c17e2f625",
+      "infra/metal/lease-holder.sh": "f7d453b40d2c6523fa809daed8343d4e3648e7fbaa8e7aebc2c71cb7a98a5e8d",
+      "infra/metal/tests/placement_journey.sh": "19b4cf738293299b862e1bfe6c71c661f8eee086f3432e6ea775c7179be56dac",
+      "infra/metal/tests/observe_host.py": "7ce09c87e07380dffe79ab378f085b33ccec90b12192a548b39165ce29ce931f"
+    }
+  },
+  "scope": "Only the existing final observer and unchanged physical/owner assertion tail. No test command or prefix/mode rerun.",
+  "exit_code": 0,
+  "finished_at": "2026-11-09T11:42:44.932785+00:00",
+  "source_after": {
+    "head": "f8c0f02d224887f2cd7ef67c3f0547950e7b71d7",
+    "status": " M AGENTS.md\n M crates/overdrive-control-plane/src/worker/exit_observer.rs\n M crates/overdrive-control-plane/tests/acceptance/crash_ending_authority.rs\n M crates/overdrive-control-plane/tests/acceptance/terminal_hook_ownership.rs\n M crates/overdrive-core/src/traits/driver.rs\n M docs/feature/metal-run-isolation/feature-delta.md\n M docs/feature/service-allocation-readiness-and-ending/deliver/roadmap.json\n M website/content/blog/sharing-a-metal-box-without-sharing-test-state.mdx\n M website/content/docs/how-to/run-verification-on-metal.mdx\n?? docs/feature/metal-run-isolation/deliver/review-slice.md\n?? docs/feature/service-allocation-readiness-and-ending/deliver/execution-log.json\n",
+    "sha256": {
+      "infra/metal/bootstrap.sh": "47e7152b18ef5d7b57a26d288f473769d70258d8086477bdb563cd9c17e2f625",
+      "infra/metal/lease-holder.sh": "f7d453b40d2c6523fa809daed8343d4e3648e7fbaa8e7aebc2c71cb7a98a5e8d",
+      "infra/metal/tests/placement_journey.sh": "19b4cf738293299b862e1bfe6c71c661f8eee086f3432e6ea775c7179be56dac",
+      "infra/metal/tests/observe_host.py": "7ce09c87e07380dffe79ab378f085b33ccec90b12192a548b39165ce29ce931f"
+    }
+  }
+}

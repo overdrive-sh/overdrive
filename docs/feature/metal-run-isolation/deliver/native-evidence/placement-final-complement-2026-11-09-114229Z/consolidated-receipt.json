@@ -1,0 +1,453 @@
+{
+  "disposition": "remaining preauthored placement oracles held across explicitly attributed retained executions; one unrelated baseline body excluded; no single-SHA/full-driver/all-owner-green or feature approval claim",
+  "prefix_source_head": "8914e5ee47da37689919399382b9304d75d18a21",
+  "archive_oracle_correction": "4bea1ebe3dc8da3cae9451c293ddbab4f39f4671",
+  "retained_prefix_statuses": [
+    {
+      "label": "foreign-fixture-setup",
+      "expected": 0,
+      "actual": 0,
+      "receipt": "docs/feature/metal-run-isolation/deliver/native-evidence/feature-native-closeout-2026-11-09-104319Z/initial/placement/foreign-fixture-setup.status"
+    },
+    {
+      "label": "attempts",
+      "expected": 100,
+      "actual": 100,
+      "receipt": "docs/feature/metal-run-isolation/deliver/native-evidence/feature-native-closeout-2026-11-09-104319Z/initial/placement/attempts.status"
+    },
+    {
+      "label": "attempts-collect",
+      "expected": 100,
+      "actual": 100,
+      "receipt": "docs/feature/metal-run-isolation/deliver/native-evidence/feature-native-closeout-2026-11-09-104319Z/initial/placement/attempts-collect.status"
+    },
+    {
+      "label": "attempts-repeat",
+      "expected": 100,
+      "actual": 100,
+      "receipt": "docs/feature/metal-run-isolation/deliver/native-evidence/feature-native-closeout-2026-11-09-104319Z/initial/placement/attempts-repeat.status"
+    },
+    {
+      "label": "timeout",
+      "expected": 100,
+      "actual": 100,
+      "receipt": "docs/feature/metal-run-isolation/deliver/native-evidence/feature-native-closeout-2026-11-09-104319Z/initial/placement/timeout.status"
+    },
+    {
+      "label": "timeout-collect",
+      "expected": 100,
+      "actual": 100,
+      "receipt": "docs/feature/metal-run-isolation/deliver/native-evidence/feature-native-closeout-2026-11-09-104319Z/initial/placement/timeout-collect.status"
+    },
+    {
+      "label": "guest-execution-failure",
+      "expected": 100,
+      "actual": 100,
+      "receipt": "docs/feature/metal-run-isolation/deliver/native-evidence/feature-native-closeout-2026-11-09-104319Z/initial/placement/guest-execution-failure.status"
+    },
+    {
+      "label": "profile-default",
+      "expected": 100,
+      "actual": 100,
+      "receipt": "docs/feature/metal-run-isolation/deliver/native-evidence/feature-native-closeout-2026-11-09-104319Z/initial/placement/profile-default.status"
+    },
+    {
+      "label": "profile-ci",
+      "expected": 100,
+      "actual": 100,
+      "receipt": "docs/feature/metal-run-isolation/deliver/native-evidence/feature-native-closeout-2026-11-09-104319Z/initial/placement/profile-ci.status"
+    },
+    {
+      "label": "direct-native",
+      "expected": 0,
+      "actual": 0,
+      "receipt": "docs/feature/metal-run-isolation/deliver/native-evidence/feature-native-closeout-2026-11-09-104319Z/initial/placement/direct-native.status"
+    },
+    {
+      "label": "named-nested",
+      "expected": 0,
+      "actual": 0,
+      "receipt": "docs/feature/metal-run-isolation/deliver/native-evidence/feature-native-closeout-2026-11-09-104319Z/initial/placement/named-nested.status"
+    },
+    {
+      "label": "operator-cell",
+      "expected": 0,
+      "actual": 0,
+      "receipt": "docs/feature/metal-run-isolation/deliver/native-evidence/feature-native-closeout-2026-11-09-104319Z/initial/placement/operator-cell.status"
+    },
+    {
+      "label": "command-255",
+      "expected": 255,
+      "actual": 255,
+      "receipt": "docs/feature/metal-run-isolation/deliver/native-evidence/feature-native-closeout-2026-11-09-104319Z/initial/placement/command-255.status"
+    },
+    {
+      "label": "command-255-collect",
+      "expected": 255,
+      "actual": 255,
+      "receipt": "docs/feature/metal-run-isolation/deliver/native-evidence/feature-native-closeout-2026-11-09-104319Z/initial/placement/command-255-collect.status"
+    },
+    {
+      "label": "command-255-repeat",
+      "expected": 255,
+      "actual": 255,
+      "receipt": "docs/feature/metal-run-isolation/deliver/native-evidence/feature-native-closeout-2026-11-09-104319Z/initial/placement/command-255-repeat.status"
+    },
+    {
+      "label": "unknown-invariant",
+      "expected": 1,
+      "actual": 1,
+      "receipt": "docs/feature/metal-run-isolation/deliver/native-evidence/feature-native-closeout-2026-11-09-104319Z/initial/placement/unknown-invariant.status"
+    },
+    {
+      "label": "raw-test",
+      "expected": 64,
+      "actual": 64,
+      "receipt": "docs/feature/metal-run-isolation/deliver/native-evidence/feature-native-closeout-2026-11-09-104319Z/initial/placement/raw-test.status"
+    },
+    {
+      "label": "shell-chain",
+      "expected": 64,
+      "actual": 64,
+      "receipt": "docs/feature/metal-run-isolation/deliver/native-evidence/feature-native-closeout-2026-11-09-104319Z/initial/placement/shell-chain.status"
+    },
+    {
+      "label": "host-module",
+      "expected": 64,
+      "actual": 64,
+      "receipt": "docs/feature/metal-run-isolation/deliver/native-evidence/feature-native-closeout-2026-11-09-104319Z/initial/placement/host-module.status"
+    },
+    {
+      "label": "config-replacement",
+      "expected": 64,
+      "actual": 64,
+      "receipt": "docs/feature/metal-run-isolation/deliver/native-evidence/feature-native-closeout-2026-11-09-104319Z/initial/placement/config-replacement.status"
+    },
+    {
+      "label": "debugger-replacement",
+      "expected": 64,
+      "actual": 64,
+      "receipt": "docs/feature/metal-run-isolation/deliver/native-evidence/feature-native-closeout-2026-11-09-104319Z/initial/placement/debugger-replacement.status"
+    },
+    {
+      "label": "archive-reuse",
+      "expected": 64,
+      "actual": 64,
+      "receipt": "docs/feature/metal-run-isolation/deliver/native-evidence/feature-native-closeout-2026-11-09-104319Z/initial/placement/archive-reuse.status"
+    },
+    {
+      "label": "foreign-target",
+      "expected": 64,
+      "actual": 64,
+      "receipt": "docs/feature/metal-run-isolation/deliver/native-evidence/feature-native-closeout-2026-11-09-104319Z/initial/placement/foreign-target.status"
+    },
+    {
+      "label": "foreign-manifest",
+      "expected": 64,
+      "actual": 64,
+      "receipt": "docs/feature/metal-run-isolation/deliver/native-evidence/feature-native-closeout-2026-11-09-104319Z/initial/placement/foreign-manifest.status"
+    },
+    {
+      "label": "duplicate-env",
+      "expected": 64,
+      "actual": 64,
+      "receipt": "docs/feature/metal-run-isolation/deliver/native-evidence/feature-native-closeout-2026-11-09-104319Z/initial/placement/duplicate-env.status"
+    },
+    {
+      "label": "context-env",
+      "expected": 64,
+      "actual": 64,
+      "receipt": "docs/feature/metal-run-isolation/deliver/native-evidence/feature-native-closeout-2026-11-09-104319Z/initial/placement/context-env.status"
+    },
+    {
+      "label": "invalid-bpf-selector",
+      "expected": 64,
+      "actual": 64,
+      "receipt": "docs/feature/metal-run-isolation/deliver/native-evidence/feature-native-closeout-2026-11-09-104319Z/initial/placement/invalid-bpf-selector.status"
+    },
+    {
+      "label": "invalid-group",
+      "expected": 64,
+      "actual": 64,
+      "receipt": "docs/feature/metal-run-isolation/deliver/native-evidence/feature-native-closeout-2026-11-09-104319Z/initial/placement/invalid-group.status"
+    },
+    {
+      "label": "env-option",
+      "expected": 64,
+      "actual": 64,
+      "receipt": "docs/feature/metal-run-isolation/deliver/native-evidence/feature-native-closeout-2026-11-09-104319Z/initial/placement/env-option.status"
+    },
+    {
+      "label": "conflicting-package",
+      "expected": 64,
+      "actual": 64,
+      "receipt": "docs/feature/metal-run-isolation/deliver/native-evidence/feature-native-closeout-2026-11-09-104319Z/initial/placement/conflicting-package.status"
+    },
+    {
+      "label": "foreign-fixture-cleanup",
+      "expected": 0,
+      "actual": 0,
+      "receipt": "docs/feature/metal-run-isolation/deliver/native-evidence/feature-native-closeout-2026-11-09-104319Z/initial/placement/foreign-fixture-cleanup.status"
+    }
+  ],
+  "corrected_negative_marker_loops": "PASS against retained native stderr, unchanged approved artifact_scope_mismatch mapping",
+  "invalid_mode": {
+    "expected": 2,
+    "actual": 2,
+    "receipt": "docs/feature/metal-run-isolation/deliver/native-evidence/feature-native-closeout-2026-11-09-104319Z/login-mode-continuation/placement/invalid-mode.status"
+  },
+  "mode_source": {
+    "head": "060359bc1cf88c78252e9d789396821413b41d7e",
+    "status": " M AGENTS.md\n M crates/overdrive-control-plane/src/worker/exit_observer.rs\n M crates/overdrive-control-plane/tests/acceptance/crash_ending_authority.rs\n M crates/overdrive-control-plane/tests/acceptance/terminal_hook_ownership.rs\n M crates/overdrive-core/src/traits/driver.rs\n M docs/feature/metal-run-isolation/feature-delta.md\n M docs/feature/service-allocation-readiness-and-ending/deliver/roadmap.json\n M website/content/blog/sharing-a-metal-box-without-sharing-test-state.mdx\n M website/content/docs/how-to/run-verification-on-metal.mdx\n?? docs/feature/metal-run-isolation/deliver/review-slice.md\n?? docs/feature/service-allocation-readiness-and-ending/deliver/execution-log.json\n",
+    "bootstrap_sha256": "47e7152b18ef5d7b57a26d288f473769d70258d8086477bdb563cd9c17e2f625"
+  },
+  "four_mode_receipts": [
+    {
+      "invocation": "docs/feature/metal-run-isolation/deliver/native-evidence/login-mode-cache-argument-correction-2026-11-09-113245Z/final-source-four-mode-pass/ordinary-login-no-sudo.invocation.json",
+      "actual_command": [
+        "cargo",
+        "xtask",
+        "metal",
+        "run",
+        "--no-sudo",
+        "--",
+        "cargo",
+        "nextest",
+        "run",
+        "-p",
+        "xtask",
+        "--test",
+        "acceptance",
+        "--features",
+        "integration-tests",
+        "-E",
+        "test(placement::non_metal_and_explicit_exclusive_attempts_preserve_the_original_exec_chain)",
+        "--no-capture"
+      ],
+      "source_head": "060359bc1cf88c78252e9d789396821413b41d7e",
+      "outer_status": 0,
+      "run_id": "06ea1168e446d77960b36bb4",
+      "completion_marker": "exit_code=0 cause=command_returned"
+    },
+    {
+      "invocation": "docs/feature/metal-run-isolation/deliver/native-evidence/login-mode-cache-argument-correction-2026-11-09-113245Z/final-source-four-mode-pass/ordinary-login-no-sync-no-sudo.invocation.json",
+      "actual_command": [
+        "cargo",
+        "xtask",
+        "metal",
+        "run",
+        "--no-sync",
+        "--no-sudo",
+        "--",
+        "cargo",
+        "nextest",
+        "run",
+        "-p",
+        "xtask",
+        "--test",
+        "acceptance",
+        "--features",
+        "integration-tests",
+        "-E",
+        "test(placement::non_metal_and_explicit_exclusive_attempts_preserve_the_original_exec_chain)",
+        "--no-capture"
+      ],
+      "source_head": "060359bc1cf88c78252e9d789396821413b41d7e",
+      "outer_status": 0,
+      "run_id": "772d30eb605de6b8f5f0e13a",
+      "completion_marker": "exit_code=0 cause=command_returned"
+    },
+    {
+      "invocation": "docs/feature/metal-run-isolation/deliver/native-evidence/login-mode-cache-argument-correction-2026-11-09-113245Z/final-source-four-mode-pass/ordinary-privileged-no-sync.invocation.json",
+      "actual_command": [
+        "cargo",
+        "xtask",
+        "metal",
+        "run",
+        "--no-sync",
+        "--",
+        "cargo",
+        "nextest",
+        "run",
+        "-p",
+        "xtask",
+        "--test",
+        "acceptance",
+        "--features",
+        "integration-tests",
+        "-E",
+        "test(placement::non_metal_and_explicit_exclusive_attempts_preserve_the_original_exec_chain)",
+        "--no-capture"
+      ],
+      "source_head": "060359bc1cf88c78252e9d789396821413b41d7e",
+      "outer_status": 0,
+      "run_id": "8e7b311b75348b3612cf43ad",
+      "completion_marker": "exit_code=0 cause=command_returned"
+    },
+    {
+      "invocation": "docs/feature/metal-run-isolation/deliver/native-evidence/login-mode-cache-argument-correction-2026-11-09-113245Z/final-source-four-mode-pass/ordinary-privileged.invocation.json",
+      "actual_command": [
+        "cargo",
+        "xtask",
+        "metal",
+        "run",
+        "--",
+        "cargo",
+        "nextest",
+        "run",
+        "-p",
+        "xtask",
+        "--test",
+        "acceptance",
+        "--features",
+        "integration-tests",
+        "-E",
+        "test(placement::non_metal_and_explicit_exclusive_attempts_preserve_the_original_exec_chain)",
+        "--no-capture"
+      ],
+      "source_head": "060359bc1cf88c78252e9d789396821413b41d7e",
+      "outer_status": 0,
+      "run_id": "eac8724e1b762671708565f7",
+      "completion_marker": "exit_code=0 cause=command_returned"
+    }
+  ],
+  "final_observer_source": {
+    "head": "f8c0f02d224887f2cd7ef67c3f0547950e7b71d7",
+    "status": " M AGENTS.md\n M crates/overdrive-control-plane/src/worker/exit_observer.rs\n M crates/overdrive-control-plane/tests/acceptance/crash_ending_authority.rs\n M crates/overdrive-control-plane/tests/acceptance/terminal_hook_ownership.rs\n M crates/overdrive-core/src/traits/driver.rs\n M docs/feature/metal-run-isolation/feature-delta.md\n M docs/feature/service-allocation-readiness-and-ending/deliver/roadmap.json\n M website/content/blog/sharing-a-metal-box-without-sharing-test-state.mdx\n M website/content/docs/how-to/run-verification-on-metal.mdx\n?? docs/feature/metal-run-isolation/deliver/review-slice.md\n?? docs/feature/service-allocation-readiness-and-ending/deliver/execution-log.json\n",
+    "sha256": {
+      "infra/metal/bootstrap.sh": "47e7152b18ef5d7b57a26d288f473769d70258d8086477bdb563cd9c17e2f625",
+      "infra/metal/lease-holder.sh": "f7d453b40d2c6523fa809daed8343d4e3648e7fbaa8e7aebc2c71cb7a98a5e8d",
+      "infra/metal/tests/placement_journey.sh": "19b4cf738293299b862e1bfe6c71c661f8eee086f3432e6ea775c7179be56dac",
+      "infra/metal/tests/observe_host.py": "7ce09c87e07380dffe79ab378f085b33ccec90b12192a548b39165ce29ce931f"
+    }
+  },
+  "final_observer_status": 0,
+  "physical": {
+    "forbidden_delta_count": 0,
+    "raw_equal": false,
+    "permitted_ra_expiry_changes": [
+      {
+        "route": {
+          "dev": "eno12399np0",
+          "dst": "2001:bc8:1f90:1f::/64",
+          "flags": [],
+          "metric": 100,
+          "pref": "medium",
+          "protocol": "ra"
+        },
+        "before": 2591998,
+        "after": 2591997
+      },
+      {
+        "route": {
+          "dev": "eno12399np0",
+          "dst": "default",
+          "flags": [],
+          "gateway": "fe80::2e4f:52ff:fefc:65d3",
+          "metric": 100,
+          "nhid": 2725555664,
+          "pref": "medium",
+          "protocol": "ra"
+        },
+        "before": 13,
+        "after": 12
+      }
+    ],
+    "protected_keys": [
+      "bpf_programs",
+      "initial_vsock_modes",
+      "modules",
+      "nft",
+      "routes",
+      "test_cgroups"
+    ]
+  },
+  "observed_original_tail_owners": [
+    {
+      "run_id": "1b54417e839c436092b85ad3",
+      "unit": {
+        "ActiveState": "inactive",
+        "ControlGroup": "",
+        "LoadState": "not-found",
+        "MainPID": "0"
+      },
+      "terminal": {
+        "cause": "command_returned",
+        "exit_code": "100",
+        "finished_at": "2026-11-09T10:54:54Z",
+        "format": "overdrive-metal-terminal-v1",
+        "kind": "command",
+        "run_id": "1b54417e839c436092b85ad3"
+      },
+      "completion": {
+        "finished_at": "2026-11-09T10:54:54Z",
+        "format": "overdrive-metal-completion-v1",
+        "kind": "complete",
+        "run_id": "1b54417e839c436092b85ad3"
+      },
+      "process_count": 0,
+      "roots": {
+        "command_tmp": {
+          "exists": false
+        },
+        "guest_staging": {
+          "exists": false
+        },
+        "vmm_runtime": {
+          "exists": false
+        }
+      }
+    },
+    {
+      "run_id": "599aaa9da34be0fb5cd26f9f",
+      "unit": {
+        "ActiveState": "inactive",
+        "ControlGroup": "",
+        "LoadState": "not-found",
+        "MainPID": "0"
+      },
+      "terminal": {
+        "cause": "command_returned",
+        "exit_code": "255",
+        "finished_at": "2026-11-09T10:59:36Z",
+        "format": "overdrive-metal-terminal-v1",
+        "kind": "command",
+        "run_id": "599aaa9da34be0fb5cd26f9f"
+      },
+      "completion": {
+        "finished_at": "2026-11-09T10:59:36Z",
+        "format": "overdrive-metal-completion-v1",
+        "kind": "complete",
+        "run_id": "599aaa9da34be0fb5cd26f9f"
+      },
+      "process_count": 0,
+      "roots": {
+        "command_tmp": {
+          "exists": false
+        },
+        "guest_staging": {
+          "exists": false
+        },
+        "vmm_runtime": {
+          "exists": false
+        }
+      }
+    }
+  ],
+  "exclusion": {
+    "user_instruction": "stop focusing on failures that are not related to this feature !!!!!",
+    "excluded_driver_command": "run_case owner-cell 0 run -- cargo nextest run -p overdrive-init --bin overdrive-init --features integration-tests,kvm-tests -E 'test(guest_flow::real_kernel::a_burst_of_host_aborts_resets_every_application_connection)' --no-capture",
+    "excluded_identity": "guest_flow::real_kernel::a_burst_of_host_aborts_resets_every_application_connection",
+    "reason": "Known unrelated preimplementation owner-burst fixture failure, independently reproduced at 0e8ae265c2d80d98c345b342a396057940837e3a with the identical fixture/body blobs and the same 1000-end/1s assertion. All other original driver bytes, assertions and command/status/physical complements remain unchanged.",
+    "baseline_evidence": "docs/feature/metal-run-isolation/deliver/native-evidence/owner-burst-preimplementation-baseline-2026-11-09/README.md",
+    "baseline_outer_status": 100,
+    "baseline_ends_consumed": 78,
+    "qualified_result_only": true
+  },
+  "historical_failures_retained": [
+    "docs/feature/metal-run-isolation/deliver/native-evidence/feature-native-closeout-2026-11-09-104319Z/initial/placement",
+    "docs/feature/metal-run-isolation/deliver/native-evidence/feature-native-closeout-2026-11-09-104319Z/invalidated-continuation",
+    "docs/feature/metal-run-isolation/deliver/native-evidence/feature-native-closeout-2026-11-09-104319Z/login-mode-continuation"
+  ],
+  "worktree_admission_evidence": "docs/feature/metal-run-isolation/deliver/native-evidence/feature-native-closeout-2026-11-09-104319Z/README.md"
+}

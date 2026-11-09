@@ -1,0 +1,16 @@
+{
+  "command": [
+    "bash",
+    "/tmp/metal-placement-final-observer-20261109T114229Z/final-observer.sh",
+    "/Users/marcus/conductor/workspaces/helios/ouagadougou",
+    "/tmp/metal-placement-final-observer-20261109T114229Z/placement",
+    "1b54417e839c436092b85ad3",
+    "599aaa9da34be0fb5cd26f9f"
+  ],
+  "immutable_before": "/Users/marcus/conductor/workspaces/helios/ouagadougou/docs/feature/metal-run-isolation/deliver/native-evidence/feature-native-closeout-2026-11-09-104319Z/initial/placement/before.json",
+  "immutable_before_sha256": "27c6e7fb25b9f86f5829457bfcd6a2b3d2804532f9abf3b17fe31b19f8354695",
+  "preauthored_driver": "/Users/marcus/conductor/workspaces/helios/ouagadougou/infra/metal/tests/placement_journey.sh",
+  "preauthored_driver_sha256": "19b4cf738293299b862e1bfe6c71c661f8eee086f3432e6ea775c7179be56dac",
+  "exact_final_tail_sha256": "8e86a211bafd9dd69bb3e5ea3ca8faeb56c32b24441ad69ca6d7233e4745a209",
+  "scope": "Only the existing final observer and unchanged physical/owner assertion tail. No test command or prefix/mode rerun."
+}
