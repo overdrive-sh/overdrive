@@ -128,6 +128,12 @@ const STEP13_06_NFT_MODULES: &[(&str, &str)] = &[
     ("net/netfilter/nft_fib", "/lib/overdrive-testing/modules/nft_fib.ko"),
     ("net/ipv4/netfilter/nft_fib_ipv4", "/lib/overdrive-testing/modules/nft_fib_ipv4.ko"),
 ];
+/// Host tools every `cgroup-default` guest stages, batched or per-test. The
+/// guests boot `serve`, whose shared mTLS nft program is installed
+/// unconditionally, and the bodies that inspect it shell out to `nft`; this is
+/// the single definition, alongside the module closure below.
+const CGROUP_DEFAULT_TOOLS: [&str; 8] =
+    ["cat", "chmod", "ip", "mkdir", "mount", "nft", "sh", "stat"];
 /// Every `cgroup-default` guest boots `serve`, whose always-installed shared
 /// mTLS nft program needs the `nf_tables` core, veth, TLS, and the complete
 /// tproxy / reject / fib expression closure. The guest has no `/lib/modules`,
@@ -1914,10 +1920,9 @@ fn cgroup_tools(
     stage_step13_05_legb: bool,
     stage_normal_gate_native: bool,
 ) -> Result<Vec<GuestFile>, GuestKitError> {
-    let mut files: Vec<_> =
-        ["cat", "chmod", "ip", "mkdir", "mount", "sh", "stat"].into_iter().map(tool).collect();
+    let mut files: Vec<_> = CGROUP_DEFAULT_TOOLS.into_iter().map(tool).collect();
     if stage_step13_04_nft {
-        files.extend(["ln", "nft", "ss", "strace", "uname"].into_iter().map(tool));
+        files.extend(["ln", "ss", "strace", "uname"].into_iter().map(tool));
     }
     if stage_step13_05_legb {
         // The V-LEGB-MARK fixture pins and reads back route_localnet=0. The
@@ -3505,7 +3510,7 @@ fn cgroup_attempt_files(
     let mut extra =
         cgroup_tools(kit, directory, stage_step13_04, stage_step13_05, stage_normal_gate)?;
     if stage_step13_06 {
-        extra.extend(["nft", "ss", "strace", "uname"].into_iter().map(tool));
+        extra.extend(["ss", "strace", "uname"].into_iter().map(tool));
     }
     let mut module_paths = Vec::new();
     stage_modules(kit, directory, &cgroup_default_module_specs(), &mut extra, &mut module_paths)?;
@@ -3899,15 +3904,14 @@ fn execute_nextest_guest_attempt(
     } else {
         None
     };
-    let attempt_result =
-        execute_nextest_attempt(
-            &mut guest,
-            plan.name == CGROUP_DEFAULT_GROUP,
-            program,
-            args,
-            environment,
-            working_directory,
-        );
+    let attempt_result = execute_nextest_attempt(
+        &mut guest,
+        plan.name == CGROUP_DEFAULT_GROUP,
+        program,
+        args,
+        environment,
+        working_directory,
+    );
     if plan
         .cgroup_flags
         .is_some_and(|flags| flags.step13_05 && selected_cell(STEP13_05_WORKER, test_name))
@@ -4481,5 +4485,10 @@ mod tests {
         for required in STEP13_04_NFT_MODULES.iter().chain(STEP13_06_NFT_MODULES) {
             assert!(specs.contains(required), "missing nft module {}", required.0);
         }
+    }
+
+    #[test]
+    fn every_cgroup_default_attempt_stages_the_nft_binary() {
+        assert!(CGROUP_DEFAULT_TOOLS.contains(&"nft"));
     }
 }

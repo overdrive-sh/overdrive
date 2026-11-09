@@ -12991,6 +12991,9 @@
       "tests::an_attempt_without_raised_nofile_starts_with_env": {
         "kind": "host-pure"
       },
+      "tests::every_cgroup_default_attempt_stages_the_nft_binary": {
+        "kind": "host-pure"
+      },
       "tests::every_cgroup_default_attempt_stages_the_shared_mtls_nft_modules": {
         "kind": "host-pure"
       }
