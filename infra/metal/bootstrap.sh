@@ -1085,8 +1085,8 @@ if [ "${RUN_MODE}" -eq 1 ]; then
     'set -eu; remote=%q; target="$remote/target"; base="$target/metal-run-tmp"; run=%q; user=%q; mode=%q; user_group="$(id -g "$user")"; staging_base=/srv/vm/metal; staging_run="$staging_base/%s"; runtime_base=/run/ovd-gk; runtime_run="$runtime_base/%s"; [ ! -L "$target" ] || exit 1; if [ ! -d "$target" ]; then %s install -d -m 0755 -o "$user" "$target"; fi; [ ! -L "$base" ] || exit 1; %s install -d -m 01730 -o root -g "$user_group" "$base"; [ ! -e "$run" ] && [ ! -L "$run" ] || exit 1; if [ "$mode" = login ]; then [ ! -L "$target/debug" ] || exit 1; if [ -d "$target/debug" ]; then %s chown -R --from=0 "$user" "$target/debug"; fi; fi; if [ "$mode" = privileged ]; then %s install -d -m 0700 -o root "$run"; else %s install -d -m 0700 -o "$user" "$run"; fi; [ ! -L "$staging_base" ] && [ ! -L "$runtime_base" ] || exit 1; [ ! -e "$staging_run" ] && [ ! -L "$staging_run" ] || exit 1; [ ! -e "$runtime_run" ] && [ ! -L "$runtime_run" ] || exit 1; %s install -d -o root -m 0710 "$staging_base"; %s chown 0:4200 "$staging_base"; %s chmod 0710 "$staging_base"; %s install -d -o root -m 0710 "$staging_run"; %s chown 0:4200 "$staging_run"; %s chmod 0710 "$staging_run"; %s install -d -o root -m 0710 "$runtime_base"; %s chown 0:4200 "$runtime_base"; %s chmod 0710 "$runtime_base"; %s install -d -o root -m 0710 "$runtime_run"; %s chown 0:4200 "$runtime_run"; %s chmod 0710 "$runtime_run"' \
     "${REMOTE_DIR}" "${METAL_RUN_TMP}" "${REMOTE_USER}" "${EXECUTION_MODE}" \
     "${RUN_ID}" "${RUN_ID}" \
-    "${SUDO}" "${SUDO}" "${SUDO}" "${SUDO:+${SUDO} -u ${REMOTE_USER}}" \
-    "${SUDO}" \
+    "${SUDO}" "${SUDO}" "${SUDO}" "${SUDO}" \
+    "${SUDO:+${SUDO} -u ${REMOTE_USER}}" \
     "${SUDO}" "${SUDO}" "${SUDO}" "${SUDO}" "${SUDO}" "${SUDO}" \
     "${SUDO}" "${SUDO}" "${SUDO}" "${SUDO}" "${SUDO}" "${SUDO}"
   if ssh "${SSH_OPTS[@]}" "${TARGET}" "bash -c $(printf '%q' "${REMOTE_TMP_PREP}")"; then
