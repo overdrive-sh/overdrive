@@ -59,6 +59,15 @@ use overdrive_testing::vm_fixture::default_staging_root;
 use overdrive_testing::vsock::VsockStream;
 
 const STANDARD_OUTER_GUEST_MIB: u32 = 4_096;
+const QUINT_RUNTIME_DIR: &str = "guest-kit/quint-test-runtime";
+const QUINT_RUNTIME_FILES_DIR: &str = "files";
+const QUINT_RUNTIME_MANIFEST: &str = "manifest.v1";
+const QUINT_RUNTIME_FORMAT: &str = "overdrive-quint-test-runtime-v1";
+const QUINT_APPLICATION_BINARY: &str = "overdrive-gateway";
+const QUINT_APPLICATION_TEST: &str =
+    "application::quint_gateway_application::gateway_application_failed_candidate_not_restaged";
+const QUINT_APPLICATION_MODEL: &str =
+    "../../specs/quint/public-ingress-gateway/gateway_application.qnt";
 const GUEST_EXACT_ENV: &str = "OVERDRIVE_FWD_GUEST_EXACT";
 const GUEST_LANE_KIND_ENV: &str = "OVERDRIVE_FWD_GUEST_LANE_KIND";
 const GUEST_LANE_FIXTURE_ENV: &str = "OVERDRIVE_FWD_GUEST_LANE_FIXTURE";
@@ -3225,6 +3234,180 @@ fn nextest_attempt_files(
     Ok((files, current_dir))
 }
 
+fn quint_test_guest_files(current_dir: &Path) -> Result<Vec<GuestFile>, NextestDispatchFailure> {
+    let dispatcher = std::env::current_exe().map_err(|error| {
+        NextestDispatchFailure::LaneNotPrepared(format!(
+            "locating the prepared dispatcher for the Quint runtime inputs: {error}"
+        ))
+    })?;
+    let target_dir = dispatcher.parent().and_then(Path::parent).ok_or_else(|| {
+        NextestDispatchFailure::LaneNotPrepared(format!(
+            "prepared dispatcher path has no target directory: {}",
+            dispatcher.display()
+        ))
+    })?;
+    let prepared = target_dir.join(QUINT_RUNTIME_DIR);
+    let manifest_path = prepared.join(QUINT_RUNTIME_MANIFEST);
+    let manifest = fs::read_to_string(&manifest_path).map_err(|error| {
+        NextestDispatchFailure::LaneNotPrepared(format!(
+            "Quint test runtime is not prepared at {}: {error}; run cargo xtask guest-kit-prepare",
+            manifest_path.display()
+        ))
+    })?;
+    let mut lines = manifest.lines();
+    if lines.next() != Some(QUINT_RUNTIME_FORMAT) {
+        return Err(NextestDispatchFailure::LaneNotPrepared(format!(
+            "unsupported Quint runtime manifest at {}",
+            manifest_path.display()
+        )));
+    }
+
+    let mut fields = std::collections::BTreeMap::new();
+    let mut files = std::collections::BTreeSet::new();
+    let mut shared_libraries = std::collections::BTreeSet::new();
+    for line in lines {
+        let Some((key, value)) = line.split_once('=') else {
+            return Err(NextestDispatchFailure::LaneNotPrepared(format!(
+                "malformed Quint runtime manifest line in {}",
+                manifest_path.display()
+            )));
+        };
+        match key {
+            "file" => {
+                if !files.insert(PathBuf::from(value)) {
+                    return Err(NextestDispatchFailure::LaneNotPrepared(format!(
+                        "duplicate Quint runtime file in {}: {value}",
+                        manifest_path.display()
+                    )));
+                }
+            }
+            "shared" => {
+                if !shared_libraries.insert(PathBuf::from(value)) {
+                    return Err(NextestDispatchFailure::LaneNotPrepared(format!(
+                        "duplicate shared-library input in {}: {value}",
+                        manifest_path.display()
+                    )));
+                }
+            }
+            "quint_version"
+            | "node_version"
+            | "node_guest_path"
+            | "launcher_guest_path"
+            | "cli_wrapper_guest_path"
+            | "cli_entry_guest_path" => {
+                if fields.insert(key, value).is_some() {
+                    return Err(NextestDispatchFailure::LaneNotPrepared(format!(
+                        "duplicate Quint runtime manifest field {key:?}"
+                    )));
+                }
+            }
+            _ => {
+                return Err(NextestDispatchFailure::LaneNotPrepared(format!(
+                    "unknown Quint runtime manifest field {key:?}"
+                )));
+            }
+        }
+    }
+
+    for key in ["quint_version", "node_version"] {
+        if fields
+            .get(key)
+            .is_none_or(|value| value.is_empty() || value.chars().any(char::is_control))
+        {
+            return Err(NextestDispatchFailure::LaneNotPrepared(format!(
+                "Quint runtime manifest has no valid {key}"
+            )));
+        }
+    }
+    let path_field = |key: &str| {
+        fields.get(key).map(PathBuf::from).ok_or_else(|| {
+            NextestDispatchFailure::LaneNotPrepared(format!("Quint runtime manifest has no {key}"))
+        })
+    };
+    let node_guest_path = path_field("node_guest_path")?;
+    let launcher_guest_path = path_field("launcher_guest_path")?;
+    let cli_wrapper_guest_path = path_field("cli_wrapper_guest_path")?;
+    let cli_entry_guest_path = path_field("cli_entry_guest_path")?;
+    if files.iter().chain(&shared_libraries).any(|path| {
+        !path.is_absolute()
+            || path.components().any(|component| {
+                matches!(component, std::path::Component::CurDir | std::path::Component::ParentDir)
+            })
+    }) || [
+        &node_guest_path,
+        &launcher_guest_path,
+        &cli_wrapper_guest_path,
+        &cli_entry_guest_path,
+    ]
+    .iter()
+    .any(|path| {
+        !path.is_absolute()
+            || path.components().any(|component| {
+                matches!(component, std::path::Component::CurDir | std::path::Component::ParentDir)
+            })
+    }) {
+        return Err(NextestDispatchFailure::LaneNotPrepared(
+            "Quint runtime manifest contains a non-normalized guest path".to_owned(),
+        ));
+    }
+    let required = [
+        node_guest_path.clone(),
+        launcher_guest_path.clone(),
+        cli_wrapper_guest_path.clone(),
+        cli_entry_guest_path.clone(),
+        PathBuf::from("/bin/sh"),
+    ];
+    if required.iter().any(|path| !files.contains(path))
+        || !shared_libraries.contains(&node_guest_path)
+        || !shared_libraries.contains(Path::new("/bin/sh"))
+        || shared_libraries.len() != 2
+        || shared_libraries.iter().any(|path| !files.contains(path))
+    {
+        return Err(NextestDispatchFailure::LaneNotPrepared(
+            "Quint runtime manifest has an incomplete ELF shared-library closure".to_owned(),
+        ));
+    }
+
+    let files_root = prepared.join(QUINT_RUNTIME_FILES_DIR);
+    let mut guest_files = Vec::with_capacity(files.len() + 1);
+    for guest in files {
+        let relative = guest.strip_prefix("/").map_err(|error| {
+            NextestDispatchFailure::LaneNotPrepared(format!(
+                "invalid Quint guest path {}: {error}",
+                guest.display()
+            ))
+        })?;
+        let host = files_root.join(relative);
+        if !host.is_file() {
+            return Err(NextestDispatchFailure::LaneNotPrepared(format!(
+                "prepared Quint input {} is absent at {}",
+                guest.display(),
+                host.display()
+            )));
+        }
+        guest_files.push(GuestFile {
+            host,
+            guest: guest.clone(),
+            with_shared_libraries: shared_libraries.contains(&guest),
+        });
+    }
+
+    // Keep the test's existing relative `quint test` argument and exact CWD.
+    // Stage only the source file that argument resolves to in the selected
+    // checkout; its sole model import is in this same file.
+    let model = current_dir.join(QUINT_APPLICATION_MODEL).canonicalize().map_err(|error| {
+        NextestDispatchFailure::LaneNotPrepared(format!(
+            "the selected Quint model {QUINT_APPLICATION_MODEL:?} is absent from the selected test checkout: {error}"
+        ))
+    })?;
+    guest_files.push(GuestFile { host: model.clone(), guest: model, with_shared_libraries: false });
+    Ok(guest_files)
+}
+
+fn selected_quint_application_test(binary_id: &str, test_name: &str) -> bool {
+    binary_id == QUINT_APPLICATION_BINARY && test_name == QUINT_APPLICATION_TEST
+}
+
 fn selected_cell(cells: &[Cell], test_name: &str) -> bool {
     cells.iter().any(
         |(filter, _, exact)| {
@@ -3707,7 +3890,10 @@ fn run_nextest_group_attempt(
     test_name: &str,
 ) -> Result<i32, NextestDispatchFailure> {
     let environment = nextest_environment()?;
-    let (attempt_files, current_dir) = nextest_attempt_files(program, &environment)?;
+    let (mut attempt_files, current_dir) = nextest_attempt_files(program, &environment)?;
+    if selected_quint_application_test(binary_id, test_name) {
+        attempt_files.extend(quint_test_guest_files(&current_dir)?);
+    }
     let source_root =
         PathBuf::from(std::env::var("OVERDRIVE_METAL_SOURCE_ROOT").unwrap_or_default());
     let staging = default_staging_root();

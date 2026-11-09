@@ -750,6 +750,25 @@ test-group = 'host-kernel-shared'
 filter = 'package(overdrive-control-plane) & binary(integration)'
 test-group = 'host-kernel-shared'
 
+# The new public-ingress Gateway guest identities consume the existing finite
+# guest capacity through the same single-writer owner. Their placement selects
+# the disposable cgroup-default guest; this group also serializes guest boots
+# against the node-global host VMM/vhost resources used to create those guests.
+[[profile.default.overrides]]
+filter = '''
+    package(overdrive-gateway) & (
+        test(=application::admission_acceptance::over_leases::a_request_beyond_the_global_request_ceiling_is_refused_and_leaks_nothing)
+        | test(=application::admission_acceptance::over_leases::a_second_request_on_a_connection_with_one_in_flight_is_refused)
+        | test(=application::admission_acceptance::over_leases::the_connection_beyond_the_ceiling_is_refused_by_admission_and_leaks_nothing)
+        | test(=application::admission_acceptance::over_leases::the_request_beyond_the_per_connection_ceiling_is_refused)
+        | test(=application::quint_gateway_application::gateway_application_failed_candidate_not_restaged)
+        | test(=integration::public_ingress_gateway::a_selected_backend_with_no_applied_identity_does_not_stop_the_gate)
+        | test(=integration::public_ingress_gateway::request_path_dataplane_errors_are_not_gate_inputs)
+        | test(=integration::public_ingress_gateway_relay::every_authority_error_and_port_spelling_is_refused_before_any_upstream_work)
+    )
+'''
+test-group = 'host-kernel-shared'
+
 [[profile.default.overrides]]
 filter = 'package(overdrive-dataplane) & binary(integration)'
 test-group = 'host-kernel-shared'
