@@ -126,7 +126,7 @@ for binary_id, tests in policy["placements"].items():
 descriptor = policy["placements"].get(sys.argv[2], {}).get(sys.argv[3])
 if descriptor is None:
     raise SystemExit(12)
-print("{}\t{}\t{}".format(
+print("{}\x1f{}\x1f{}".format(
     descriptor["kind"],
     descriptor.get("group", ""),
     descriptor.get("fixture", ""),
@@ -141,7 +141,7 @@ PY
     12) test_error test_unclassified 78 ;;
     *) test_error placement_invalid 78 ;;
   esac
-  IFS=$'\t' read -r PLACEMENT_KIND PLACEMENT_GROUP PLACEMENT_FIXTURE <<<"$PLACEMENT"
+  IFS=$'\x1f' read -r PLACEMENT_KIND PLACEMENT_GROUP PLACEMENT_FIXTURE <<<"$PLACEMENT"
 fi
 
 run_local_vsock_namespace() {
