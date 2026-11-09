@@ -21,7 +21,13 @@ observe() { ssh "$OVERDRIVE_METAL_TARGET" 'sudo -n python3 -' "$@" < "$checkout/
 run_case() {
   local label="$1" expected="$2"; shift 2
   local status=0
-  (cd "$checkout" && cargo xtask metal "$@") > "$out/$label.stdout" 2> "$out/$label.stderr" || status=$?
+  # Repeated collection compares product diagnostics byte-for-byte. Suppress
+  # only Cargo's launcher banners at source, as in the worktree driver.
+  if [ "$1" = collect ]; then
+    (cd "$checkout" && cargo --quiet xtask metal "$@") > "$out/$label.stdout" 2> "$out/$label.stderr" || status=$?
+  else
+    (cd "$checkout" && cargo xtask metal "$@") > "$out/$label.stdout" 2> "$out/$label.stderr" || status=$?
+  fi
   printf '%s\n' "$status" > "$out/$label.status"
   [ "$status" = "$expected" ] || { cat "$out/$label.stderr" >&2; echo "$label: expected $expected, got $status" >&2; exit 1; }
 }
