@@ -1,0 +1,49 @@
+Traceback (most recent call last):
+  File "<stdin>", line 3, in <module>
+AssertionError
+Traceback (most recent call last):
+  File "<stdin>", line 3, in <module>
+AssertionError
+Traceback (most recent call last):
+  File "<stdin>", line 3, in <module>
+AssertionError
+Traceback (most recent call last):
+  File "<stdin>", line 3, in <module>
+AssertionError
+Traceback (most recent call last):
+  File "<stdin>", line 3, in <module>
+AssertionError
+Traceback (most recent call last):
+  File "<stdin>", line 3, in <module>
+AssertionError
+Traceback (most recent call last):
+  File "<stdin>", line 3, in <module>
+AssertionError
+Traceback (most recent call last):
+  File "<stdin>", line 3, in <module>
+AssertionError
+Traceback (most recent call last):
+  File "<stdin>", line 4, in <module>
+AssertionError: the actual selected body has not been observed in its owned guest console
+Traceback (most recent call last):
+  File "<stdin>", line 4, in <module>
+AssertionError: the actual selected body has not been observed in its owned guest console
+Traceback (most recent call last):
+  File "<stdin>", line 7, in <module>
+AssertionError
+Traceback (most recent call last):
+  File "<stdin>", line 7, in <module>
+AssertionError
+Traceback (most recent call last):
+  File "<stdin>", line 7, in <module>
+AssertionError
+Traceback (most recent call last):
+  File "<stdin>", line 7, in <module>
+AssertionError
+Traceback (most recent call last):
+  File "<stdin>", line 7, in <module>
+AssertionError
+Traceback (most recent call last):
+  File "<stdin>", line 7, in <module>
+AssertionError
+METAL-ISOLATION-ADMISSION public_guest_timeout=true e4_boundary=controlled-owner-fixture maintenance_waited=true stopped_owner_before_start=true unadmitted_waiter_did_not_block=true
