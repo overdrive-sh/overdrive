@@ -55,8 +55,28 @@ run_case attempts-collect 100 collect "$attempt_id"
 run_case attempts-repeat 100 collect "$attempt_id"
 cmp "$out/attempts-collect.stdout" "$out/attempts-repeat.stdout"
 cmp "$out/attempts-collect.stderr" "$out/attempts-repeat.stderr"
-run_case timeout 100 run -- env "RUST_LOG=metal_host_boot_id=$host_boot_id" cargo nextest run --manifest-path infra/metal/tests/fixtures/attempt/Cargo.toml --target-dir target/metal-run-isolation-fixture --run-ignored only -E 'test(selected_attempt_waits_for_its_timeout)' --no-capture
-rg -q 'METAL-ISOLATION-TIMEOUT body_started=true' "$out/timeout.stdout"
+: > "$out/timeout.stderr"
+(
+  trap - EXIT
+  run_case timeout 100 run -- env "RUST_LOG=metal_host_boot_id=$host_boot_id" cargo nextest run --manifest-path infra/metal/tests/fixtures/attempt/Cargo.toml --target-dir target/metal-run-isolation-fixture --run-ignored only -E 'test(selected_attempt_waits_for_its_timeout)' --no-capture
+) &
+timeout_controller=$!
+for ((attempt=0; attempt<1200; attempt++)); do
+  timeout_id="$(sed -n 's/^OVERDRIVE_METAL_RUN_ID=\([0-9a-f]\{24\}\)$/\1/p' "$out/timeout.stderr" | head -1)"
+  if [ -n "$timeout_id" ] && observe "$timeout_id" > "$out/timeout-start-$attempt.json" 2> "$out/timeout-start-query-$attempt.stderr"; then
+    if python3 - "$out/timeout-start-$attempt.json" "$timeout_id" <<'PY_BODY_STARTED'
+import base64,json,sys
+owner=json.load(open(sys.argv[1]))['owners'][sys.argv[2]]
+assert owner['unit']['ActiveState']=='active' and owner['phase.v1']['phase']=='running'
+assert any(b'METAL-ISOLATION-TIMEOUT body_started=true' in base64.b64decode(process['guest_console']['raw_b64'],validate=True).splitlines() for process in owner['processes'].values() if 'guest_console' in process), 'the actual selected body has not been observed in its owned guest console'
+PY_BODY_STARTED
+    then cp "$out/timeout-start-$attempt.json" "$out/timeout.body-start.json"; break; fi
+  fi
+  if ! kill -0 "$timeout_controller" 2>/dev/null; then break; fi
+  sleep 0.1
+done
+wait "$timeout_controller"
+[ -f "$out/timeout.body-start.json" ] || { echo 'actual timeout body-start was not observed; inspect owned-console snapshots and query errors' >&2; exit 1; }
 rg -q 'TIMEOUT' "$out/timeout.stdout"
 timeout_id="$(sed -n 's/^OVERDRIVE_METAL_RUN_ID=\([0-9a-f]\{24\}\)$/\1/p' "$out/timeout.stderr" | head -1)"
 run_case timeout-collect 100 collect "$timeout_id"
