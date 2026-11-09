@@ -119,3 +119,74 @@ The correction is sufficient and adds no runtime promise or API. The original au
 **APPROVED.** The operator guide, engineering blog, and how-to navigation satisfy this documentation review. No required documentation finding remains open.
 
 This approval covers documentation accuracy, writing, decision narrative, discovery, and the recorded website validation disposition. It does not establish final native acceptance, complete the feature, authorize another native run, or authorize publication. Both retained ordinary-concurrency attempts ended before START, and the required implemented-path native proof remains pending.
+
+## Iteration 3 — final native evidence reconciliation
+
+### Metadata, scope and authority
+
+- Date: 2026-11-09.
+- Reviewer: Codex, independently dispatched for the final documentation and blog review.
+- Reviewed content commit: `33654e76715810c6fe172cc5a60f4e5833c94279`.
+- Reviewed implementation authority: [the approved final slice review](review-slice.md), including the bounded runtime correction through `060359bc1cf88c78252e9d789396821413b41d7e`.
+- Verdict: **APPROVED**, with no open documentation finding.
+
+This iteration reviews the complete current [operator guide](../../../../website/content/docs/how-to/run-verification-on-metal.mdx), [engineering post](../../../../website/content/blog/sharing-a-metal-box-without-sharing-test-state.mdx), the non-normative DELIVER `[REF]` disposition in [feature-delta.md](../feature-delta.md), and [the final documentation validation record](documentation-validation-final.md). It supersedes the earlier documentation verdict's pending-native statements for this content version. Iterations 1 and 2 remain unchanged as historical reviews of their recorded sources. D1 remains closed.
+
+The reviewer read the applicable `AGENTS.md`, `.claude/rules/finalize.md`, `.claude/rules/domain-naming.md`, `website/CLAUDE.md`, and the repository [technical-writer skill](../../../../.claude/skills/technical-writer/SKILL.md). The skill governed the factual, context, writing and subtractive review throughout both pages and this review artifact. The finalization rule expressly permits the blog's engineering history while requiring the guide to describe the current system.
+
+Factual checks used the approved final slice review and its source/error mapping, the source-qualified native receipts below, the original documentation review, the resource-alternative and construction findings, the socket-collision disposition, and the retained formal summary. A bounded read of the current durable helper checked the queued-EOF mechanism. This documentation review does not duplicate the completed full implementation audit or execute another native campaign.
+
+### Findings and factual assessment
+
+**No new blocking or non-blocking documentation finding.** The updated claims match the recorded implementation and evidence boundaries.
+
+| Area | Evidence and assessment |
+| --- | --- |
+| Operator commands and ownership | The guide retains ordinary shared maintenance admission, checkout-specific exclusion, exact nextest placement, explicit `metal run --exclusive`, exclusive shell/provisioning, and the Unix-identity meaning of `--no-sudo`. Preparation, sync/no-sync, collection and pull remain distinct operations. Commands do not imply arbitrary ordinary shell authority or a host fallback. |
+| Identifier, registration and START | The guide preserves D1's correction. A locally emitted run ID precedes durable registration. Registration precedes transfer/preflight. START establishes command start and the subsequent controller-loss guarantee. |
+| Typed runner outcomes | The added `controller_eof_before_start`/75 entry describes loss before START, including queued admission. Current `lease-holder.sh` observes the control pipe while its real flock waiter is queued, cancels and reaps that invocation's waiter on EOF, and retains the existing error mapping. The remaining 75/78/70/74 diagnostics preserve their approved semantic distinctions. Actual command results remain separate. No new error representation or runtime behavior is proposed. |
+| Initial formal results versus later discovery | The retained formal summary contains 16 holds and two intentional hazard violations, matching the post. The post introduces Quint, scopes fairness and termination, and expressly says those early checks found no unknown production bug. It distinguishes the native socket collision and recording-codec infrastructure from later actual-owner conformance. |
+| Queued-controller defect and correction | [The native owner receipt](native-evidence/owner-queued-eof-verification-2026-11-09-090213Z/README.md) records the actual independent exclusive maintainer, pre-START ordinary EOF, real queued lock wait, exact failing seed `0x8e8e19a4`, and correction `8b1dd117`. The exact seed, both existing controller-loss controls and fresh randomized seed `0x83bfe04` passed. The post attributes this defect to real-owner conformance without changing the model or claiming a fresh all-fifteen campaign. |
+| Worktree and survivor proof | [The November 9 receipt](native-evidence/feature-native-closeout-2026-11-09-104319Z/README.md) reports worktree/admission drivers 0 at root `8914e5ee` and peer `06f25ce2`, with matching recorded feature hashes. The post accurately describes actual shared maintenance locks, distinct checkout owners, same-CID VMM overlap in distinct namespaces, the first supervisor's retained loss result and cleanup, the unchanged survivor, its 86 passing guest tests, and exact physical snapshots. It does not move these executions to the later preparation-correction source. |
+| Admission proof | The same receipt separates the real public guest timeout from the approved E4 controlled-prior-owner witness. The post retains that controlled-owner boundary and describes maintenance progress only after the prior owner's finalizer, while the ordinary waiter remains unadmitted. It does not claim a full public guest stop window or a different barrier. |
+| Composite placement and execution modes | [The consolidated receipt](native-evidence/placement-final-complement-2026-11-09-114229Z/README.md) separately attributes the original prefix, corrected archive-marker assertions, invalid-mode result, [four final mode executions](native-evidence/login-mode-cache-argument-correction-2026-11-09-113245Z/README.md), and final observer. The post and DELIVER disposition preserve these sources, the approved `artifact_scope_mismatch`/64 cause, the retained historical failures, and all four privileged/login and sync/no-sync passes at frozen runtime source `060359bc`. Neither claims one uninterrupted full driver pass at one SHA. |
+| Final complement | The final observer returned 0 with no forbidden physical deltas, no owned processes and no owned roots. The post states that only the two paired finite IPv6 RA expiry countdowns changed in raw snapshots, under the existing approved comparison. It does not convert raw snapshots into exact byte equality or weaken a zero-state invariant. |
+| Known unrelated owner-burst failure | [The preimplementation receipt](native-evidence/owner-burst-preimplementation-baseline-2026-11-09/README.md) records the same unchanged one-second/1,000-flow assertion failing with 78 consumed ends after successful preparation. [The current original-fixture comparison](native-evidence/owner-burst-current-branch-comparison-2026-11-09/README.md) also fails independently of the new dispatcher. The post and disposition retain that failure and the single omitted body without manufacturing owner-cell GREEN. The user's instruction, “stop focusing on failures that are not related to this feature !!!!!”, excludes investigation or remediation of this known baseline failure. It is no documentation blocker and no waiver of P1–P5. |
+| Normative contract and completion status | Independent byte comparison confirms that every byte before the DELIVER `[REF]` disposition matches the content commit's parent. P1–P5 are unchanged. The disposition accurately records final slice approval and pending documentation approval at its authored time. The validation record explicitly says the author does not approve or finalize the feature. |
+
+### Decision narrative and technical writing
+
+The post explains the concrete lease constraint before discussing mechanisms. It covers the serious alternatives and their actual dispositions: branch ownership and automatic cache adoption, an insufficient numeric hash, the superseded 224-window allocator, a whole-run outer guest, a persistent guest broker and a batch-result interpreter. It does not claim a successful or uncompleted alternative experiment proved the alternative impossible. The selected kernel boundary is connected to CID/listener ownership and lifetime. Cold caches, per-attempt guest boots and the finite ordinary-command grammar have explicit costs.
+
+The consequential discoveries remain distinct: exact Linux local-mode behavior, actual socket collisions in six Rust identities, the native fixture's parent-traversal failure in both namespace contexts, nextest timeout bypassing Drop, later queued-controller EOF, the archive assertion's wrong typed marker and login-mode preparation permissions. Each passage identifies the component and intended behavior before explaining its result. The post supplies enough context to understand these examples without opening their supporting links. It does not become a chronological account of every delivery task.
+
+The guide describes implemented usage and current limitations. The post uses the historical account allowed by the finalization rule. Both preserve the exact checkout, invocation, transient owner, maintainer, selected attempt, guest kernel, host-launch resource and collector boundaries. Both keep named nested correctness credit separate from direct-native launch evidence. No speedup or throughput gain is claimed. Lack of reboot recovery and automatic pruning remains explicit.
+
+The writing uses concrete owners and active verbs, introduces vsock/CIDs, nextest ownership, the transient service and Quint before relying on them, and names real tradeoffs. Source links support the explanations instead of replacing them. No authored semicolons appear in either MDX file. Equal-weight subtractive review found no necessary additional mechanism, warning, example, historical task list or troubleshooting matrix. No style preference is promoted into a required change.
+
+### Independent bounded checks and validation limits
+
+The reviewer independently checked:
+
+- The current guide, post and feature-delta bytes match commit `33654e767` and the three SHA-256 values retained by the author.
+- All **12** authored page links resolve to local routes or the exact retained Git objects. Both GitHub heading anchors exist at their pinned source. This proves local target correctness, not public availability of an unpushed commit.
+- The guide occurs exactly once in how-to navigation. Regenerated Fumadocs server imports and browser collection maps contain both pages. Blog frontmatter contains its required metadata, November 9 date and no `draft: true` override.
+- The normative feature-delta prefix is byte-identical to the reviewed commit's parent. All local links in the final disposition and validation record resolve.
+- Scoped committed-diff whitespace checks pass. All seven unrelated dirty file hashes still match the author's before/after preservation snapshots.
+
+The initial ad hoc discovery check also looked for literal page maps in generated `dynamic.ts`. That file loads configuration dynamically and contains no such maps. The reviewer corrected that checker assumption and verified the actual generated `server.ts` imports and `browser.ts` maps. It was not a website failure or a content change.
+
+The reviewer read the retained final typecheck and lint logs and the scoped validation log under `.context/metal-documentation-final-20261109/`. Their contents support the author's recorded final collection-generation/typecheck, lint, links, discovery and scope results. This reviewer did not independently rerun typecheck or lint. The short stdout logs do not independently encode process exit values, so exit 0 remains attributed to the author's explicit execution record.
+
+The original review's Next/OpenNext build, one-index and focused Worker observations retain their original source and attribution. No final rendered-HTTP, Worker, full build or broad acceptance pass is claimed. The existing search-ranking failure in `test:blog`, `test:mcp` and `test:mcp:analytics` remains recorded as a reproduced baseline limit. Later analytics assertions remain unexecuted. The final validation record accurately distinguishes these earlier observations from its current scoped checks. No unrelated ranking investigation or repeat failure campaign is required.
+
+No production source, test, model, native evidence, website prose, navigation, validation record, normative design or DES event was changed. No Metal, SSH, native, model, mutation, Rust-test, deployment, publication, push or commit command was run. This reviewer owns only the appended review iteration in this file.
+
+### Remediation disposition and current final documentation verdict
+
+| Finding | Disposition |
+| --- | --- |
+| D1 — local identifier versus durable registration | **CLOSED**, unchanged from iteration 2 and preserved in the reviewed guide. |
+| Final evidence reconciliation | **APPROVED**, no new documentation finding or required remediation. |
+
+**APPROVED — final operator documentation, engineering post and recorded validation disposition at `33654e767`.** Factual accuracy, consequential decision story, technical-writer compliance throughout, limitations, links, navigation, blog discovery and validation honesty satisfy the final documentation gate. The source-scoped composite evidence and single pre-existing burst-body exception remain explicit. This verdict completes the documentation review. The orchestrator still owns finalization bookkeeping. It does not authorize publication or deployment.
