@@ -117,6 +117,13 @@ fn launch_config_on(
     alloc: &str,
     extra: &[&str],
 ) -> VmConfig {
+    // The fixture owns this intermediate parent; Vmm::create prepares only
+    // its per-allocation child. Match GuestKit's group-only traversal input.
+    std::fs::create_dir_all(run_root).expect("create invocation-owned run parent");
+    std::os::unix::fs::chown(run_root, None, Some(OVERDRIVE_VMM_UID))
+        .expect("give the production VMM group traversal through its run parent");
+    std::fs::set_permissions(run_root, std::fs::Permissions::from_mode(0o710))
+        .expect("set invocation-owned run parent traversal mode");
     let alloc = AllocationId::new(alloc).expect("valid alloc id");
     let header = read_kernel_header(&fixture.kernel_path);
     let kernel = KernelImage::validate(fixture.kernel_path.clone(), HostArch::X86_64, &header)
@@ -432,9 +439,25 @@ async fn the_fork_boots_and_passes_data_under_the_production_launch_identity() {
         .expect("the fork opens /dev/vhost-vsock and boots under production confinement");
     let pid = process.control.pid;
     let _kill = KillOnDrop(pid);
-    let mut peer = control
-        .accept_peer(guest_cid, SCRIPTED_BOOT_BOUND)
-        .expect("the guest dials the host over the fork-opened device");
+    let mut peer = match control.accept_peer(guest_cid, SCRIPTED_BOOT_BOUND) {
+        Ok(peer) => peer,
+        Err(error) => {
+            // Capture only this fixture's existing bounded diagnostics before
+            // KillOnDrop/WorkDir cleanup. A pending exit watch adds no wait.
+            let ending = tokio::time::timeout(Duration::ZERO, process.exit.recv()).await;
+            let directory_status = |path: &Path| {
+                std::fs::symlink_metadata(path)
+                    .map(|metadata| (metadata.uid(), metadata.gid(), metadata.mode() & 0o7777))
+            };
+            panic!(
+                "the guest dials the host over the fork-opened device: {error:?}; \
+                 run_parent={:?}; allocation_dir={:?}; ending={ending:?}; stderr_tail={:?}",
+                directory_status(config.run_dir.path().parent().expect("allocation run parent")),
+                directory_status(config.run_dir.path()),
+                process.diagnostics.console_tail(),
+            );
+        }
+    };
 
     let passwd = std::fs::read_to_string("/etc/passwd").expect("read the metal host passwd file");
     assert!(
