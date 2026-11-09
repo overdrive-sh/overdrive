@@ -111,6 +111,8 @@ const STEP13_06_NFT_MODULES: &[(&str, &str)] = &[
 ];
 const NESTED_GUEST_KIT_MODULE_SOURCES: &[&str] = &[
     "drivers/net/dummy",
+    "net/sched/sch_prio",
+    "net/sched/sch_netem",
     "net/ipv4/inet_diag",
     "net/ipv4/tcp_diag",
     "net/ipv4/udp_diag",
