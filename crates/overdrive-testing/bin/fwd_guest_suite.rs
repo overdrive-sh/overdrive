@@ -37,23 +37,33 @@
 )]
 
 use std::fs;
+use std::io::Write as _;
 use std::os::unix::process::CommandExt as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
+use overdrive_core::guest_transport::wire::{ControlMessage, FlowId, FlowOrigin};
 use overdrive_core::vm::config::MemoryPlan;
 use overdrive_testing::guest_app::{GUEST_PEER_GUEST_PATH, subcommand};
-use overdrive_testing::guest_kit::cid_bands::FWD_GUEST_BOUNDARY;
+use overdrive_testing::guest_kit::cid_bands::{FWD_GUEST_BOUNDARY, INIT_IN_GUEST_LANE};
 use overdrive_testing::guest_kit::{
     DUMMY_MODULE_GUEST_PATH, GuestFile, GuestImageSpec, GuestInit, GuestKit, GuestKitError,
     LOOPBACK_MODULE_GUEST_PATH, ScriptedBootExtra, WorkDir, host_module_file,
 };
-use overdrive_testing::guest_lane::{CELL_BOUND, IN_GUEST_TESTS_PATH, InGuestTests};
+use overdrive_testing::guest_lane::{
+    CELL_BOUND, IN_GUEST_TESTS_PATH, InGuestTests, OwnerLaneHost, control_messages_within,
+    owner_lane, run_in_guest_cell, run_in_guest_owner_cell, send_control,
+};
 use overdrive_testing::vm_fixture::default_staging_root;
+use overdrive_testing::vsock::VsockStream;
 
 const STANDARD_OUTER_GUEST_MIB: u32 = 4_096;
 const GUEST_EXACT_ENV: &str = "OVERDRIVE_FWD_GUEST_EXACT";
+const GUEST_LANE_KIND_ENV: &str = "OVERDRIVE_FWD_GUEST_LANE_KIND";
+const GUEST_LANE_FIXTURE_ENV: &str = "OVERDRIVE_FWD_GUEST_LANE_FIXTURE";
+const GUEST_LANE_ARGV_ENV: &str = "OVERDRIVE_FWD_GUEST_NEXTTEST_ARGV";
+const GUEST_LANE_ELF_ENV: &str = "OVERDRIVE_FWD_GUEST_NEXTTEST_ELF";
 const TEST_THREADS: &str = "--test-threads=1";
 const NO_CAPTURE: &str = "--nocapture";
 const ABSENT_LOOPBACK: &str = "integration::probe_gold::an_absent_vsock_loopback_transport_is_refused_naming_stream_round_trip";
@@ -1286,6 +1296,83 @@ const STEP14_01_NATIVE_BODIES: usize = STEP14_01_CONTROL_PLANE_BODIES + STEP14_0
 const STEP14_02_CLI_BODIES: usize = 5;
 const STEP14_02_WORKER_BODIES: usize = 1;
 const VM_COHORT_CLI_BODIES: usize = 2;
+
+#[derive(Clone, Copy)]
+struct GuestLanePlacement {
+    kind: &'static str,
+    fixture: &'static str,
+    test: &'static str,
+    slot: u32,
+}
+
+const INIT_GUEST_LANE_PLACEMENTS: &[GuestLanePlacement] = &[
+    GuestLanePlacement {
+        kind: "guest-lane-operator",
+        fixture: "integration::in_guest_lane::the_guest_transport_is_configured_before_ready_in_a_real_guest",
+        test: "transport::real_kernel::the_guest_transport_is_configured_on_the_real_guest_kernel",
+        slot: 0,
+    },
+    GuestLanePlacement {
+        kind: "guest-lane-operator",
+        fixture: "integration::in_guest_lane::the_reserved_intake_ports_refuse_application_binds_in_a_real_guest",
+        test: "transport::real_kernel::the_reserved_intake_ports_refuse_application_binds_of_their_protocol_only",
+        slot: 1,
+    },
+    GuestLanePlacement {
+        kind: "guest-lane-operator",
+        fixture: "integration::in_guest_lane::the_guest_kits_module_matches_the_running_guest_kernel",
+        test: "transport::real_kernel::the_guest_kits_module_release_matches_the_running_kernel",
+        slot: 2,
+    },
+    GuestLanePlacement {
+        kind: "guest-lane-operator",
+        fixture: "integration::in_guest_lane::the_guest_accept_path_matches_the_sim_in_a_real_guest",
+        test: "guest_flow::real_kernel::the_accept_path_matches_the_sim_per_connection",
+        slot: 3,
+    },
+    GuestLanePlacement {
+        kind: "guest-lane-owner",
+        fixture: "integration::in_guest_lane::the_v24_kernel_shape_holds_in_a_real_guest",
+        test: "guest_flow::real_kernel::the_v24_kernel_shape_holds_in_both_accept_orders",
+        slot: 5,
+    },
+    GuestLanePlacement {
+        kind: "guest-lane-owner",
+        fixture: "integration::in_guest_lane::a_host_abort_before_the_guest_accepts_ends_the_flow_in_a_real_guest",
+        test: "guest_flow::real_kernel::a_flow_aborted_before_its_v_g_is_accepted_ends_with_no_application_connection",
+        slot: 6,
+    },
+    GuestLanePlacement {
+        kind: "guest-lane-owner",
+        fixture: "integration::in_guest_lane::a_session_loss_abort_ends_the_flow_and_the_owner_reconnects_in_a_real_guest",
+        test: "guest_flow::real_kernel::a_flow_aborted_by_session_loss_ends_and_the_session_is_held_again",
+        slot: 7,
+    },
+    GuestLanePlacement {
+        kind: "guest-lane-owner",
+        fixture: "integration::in_guest_lane::a_host_close_after_the_guest_accepted_ends_the_flow_in_a_real_guest",
+        test: "guest_flow::real_kernel::a_flow_the_host_closes_after_the_guest_accepted_it_ends_on_the_guest",
+        slot: 8,
+    },
+    GuestLanePlacement {
+        kind: "guest-lane-owner",
+        fixture: "integration::in_guest_lane::an_abort_for_an_unheld_flow_is_discarded_in_a_real_guest",
+        test: "guest_flow::real_kernel::an_abort_for_a_flow_the_guest_does_not_hold_changes_nothing_and_the_flow_ends_on_the_close",
+        slot: 9,
+    },
+    GuestLanePlacement {
+        kind: "guest-lane-owner",
+        fixture: "integration::in_guest_lane::a_burst_of_host_aborts_resets_every_connection_in_a_real_guest",
+        test: "guest_flow::real_kernel::a_burst_of_host_aborts_resets_every_application_connection",
+        slot: 10,
+    },
+    GuestLanePlacement {
+        kind: "guest-lane-owner",
+        fixture: "integration::in_guest_lane::tcp_correlation_preserves_identity_and_cleanup_in_a_real_guest",
+        test: "guest_flow::real_kernel::tcp_correlation_preserves_exact_identity_and_cleans_transients_for_every_handshake_path",
+        slot: 11,
+    },
+];
 
 #[derive(Clone, Copy)]
 struct NestedVmGuestResources {
@@ -3672,9 +3759,358 @@ fn run_nextest_group_attempt(
     )
 }
 
+fn owner_lane_flow(sequence: u32) -> FlowId {
+    FlowId::new(FlowOrigin::Host, sequence).expect("the existing owner-lane sequence is valid")
+}
+
+const fn owner_lane_flow_of(message: &ControlMessage) -> FlowId {
+    match *message {
+        ControlMessage::Paired { flow }
+        | ControlMessage::Refused { flow, .. }
+        | ControlMessage::Abort { flow }
+        | ControlMessage::TimedOut { flow, .. } => flow,
+    }
+}
+
+fn owner_lane_expect(host: &mut OwnerLaneHost, line: &str) -> Result<(), String> {
+    let heard = host
+        .script
+        .hear(line, Duration::from_secs(60))
+        .map_err(|error| format!("waiting for {line}: {error}"))?;
+    if heard == line { Ok(()) } else { Err(format!("expected {line}, the cell said {heard}")) }
+}
+
+fn owner_lane_say(host: &OwnerLaneHost, line: &str) -> Result<(), String> {
+    host.script.say(line).map_err(|error| format!("saying {line}: {error}"))
+}
+
+fn owner_lane_open_session(host: &OwnerLaneHost) -> Result<VsockStream, String> {
+    let session = host
+        .accept_session(Duration::from_secs(60))
+        .map_err(|error| format!("control session: {error}"))?;
+    owner_lane_say(host, owner_lane::SESSION_ACCEPTED)?;
+    Ok(session)
+}
+
+fn owner_lane_drain(session: &VsockStream) -> Result<Vec<ControlMessage>, String> {
+    control_messages_within(session, Duration::from_millis(500))
+        .map_err(|error| format!("control session: {error}"))
+}
+
+fn owner_lane_none_for(
+    messages: &[ControlMessage],
+    flow: FlowId,
+    when: &str,
+) -> Result<(), String> {
+    messages.iter().find(|message| owner_lane_flow_of(message) == flow).map_or(Ok(()), |message| {
+        Err(format!("{when}: the guest wrote {message:?} for the aborted flow"))
+    })
+}
+
+fn owner_lane_serve_control_flow(
+    host: &mut OwnerLaneHost,
+    session: &VsockStream,
+) -> Result<(), String> {
+    let v_h = host
+        .open_tcp_accept(owner_lane::CONTROL_FLOW, owner_lane::APP_PORT)
+        .map_err(|error| format!("control flow V_h: {error}"))?;
+    owner_lane_say(host, owner_lane::REQUESTED)?;
+    owner_lane_expect(host, owner_lane::PAIRED)?;
+    let messages = owner_lane_drain(session)?;
+    let control = owner_lane_flow(owner_lane::CONTROL_FLOW);
+    if !messages.contains(&ControlMessage::Paired { flow: control }) {
+        return Err(format!("the control flow's Paired did not arrive: {messages:?}"));
+    }
+    drop(v_h);
+    owner_lane_say(host, owner_lane::CLOSED)
+}
+
+fn owner_lane_finish(host: &mut OwnerLaneHost, session: &VsockStream) -> Result<(), String> {
+    owner_lane_expect(host, owner_lane::DONE)?;
+    owner_lane_none_for(
+        &owner_lane_drain(session)?,
+        owner_lane_flow(owner_lane::ABORTED_FLOW),
+        "after the cell's checks",
+    )
+}
+
+fn guest_owner_v24_script(host: &mut OwnerLaneHost) -> Result<(), String> {
+    owner_lane_expect(host, owner_lane::LISTENING)?;
+    let v_h = host
+        .open_tcp_accept_on(owner_lane::RAW_PORT, owner_lane::ABORTED_FLOW, owner_lane::APP_PORT)
+        .map_err(|error| format!("queued V_h: {error}"))?;
+    drop(v_h);
+    owner_lane_say(host, owner_lane::RAW_QUEUED)?;
+    let v_h =
+        host.connect_raw(owner_lane::RAW_PORT).map_err(|error| format!("raw V_h: {error}"))?;
+    owner_lane_say(host, owner_lane::RAW_CONNECTED)?;
+    owner_lane_expect(host, owner_lane::RAW_ACCEPTED)?;
+    let request = host
+        .tcp_accept_request(owner_lane::ABORTED_FLOW, owner_lane::APP_PORT)
+        .map_err(|error| format!("request: {error}"))?;
+    (&v_h).write_all(&request).map_err(|error| format!("write: {error}"))?;
+    drop(v_h);
+    owner_lane_say(host, owner_lane::CLOSED)?;
+    owner_lane_expect(host, owner_lane::DONE)
+}
+
+fn guest_owner_abort_before_accept_script(host: &mut OwnerLaneHost) -> Result<(), String> {
+    let session = owner_lane_open_session(host)?;
+    owner_lane_expect(host, owner_lane::PAUSED)?;
+    let v_h = host
+        .open_tcp_accept(owner_lane::ABORTED_FLOW, owner_lane::APP_PORT)
+        .map_err(|error| format!("V_h: {error}"))?;
+    drop(v_h);
+    owner_lane_say(host, owner_lane::QUEUED)?;
+    owner_lane_serve_control_flow(host, &session)?;
+    owner_lane_none_for(
+        &owner_lane_drain(&session)?,
+        owner_lane_flow(owner_lane::ABORTED_FLOW),
+        "before the cell's end",
+    )?;
+    owner_lane_finish(host, &session)
+}
+
+fn guest_owner_session_loss_script(host: &mut OwnerLaneHost) -> Result<(), String> {
+    let first = owner_lane_open_session(host)?;
+    owner_lane_expect(host, owner_lane::PAUSED)?;
+    let v_h = host
+        .open_tcp_accept(owner_lane::ABORTED_FLOW, owner_lane::APP_PORT)
+        .map_err(|error| format!("V_h: {error}"))?;
+    drop(v_h);
+    owner_lane_none_for(
+        &owner_lane_drain(&first)?,
+        owner_lane_flow(owner_lane::ABORTED_FLOW),
+        "on the first session",
+    )?;
+    drop(first);
+    owner_lane_say(host, owner_lane::QUEUED_THEN_SESSION_CLOSED)?;
+    let second = owner_lane_open_session(host)?;
+    owner_lane_serve_control_flow(host, &second)?;
+    owner_lane_finish(host, &second)
+}
+
+fn guest_owner_close_after_accept_script(host: &mut OwnerLaneHost) -> Result<(), String> {
+    let session = owner_lane_open_session(host)?;
+    let v_h = host
+        .open_tcp_accept(owner_lane::ABORTED_FLOW, owner_lane::APP_PORT)
+        .map_err(|error| format!("V_h: {error}"))?;
+    owner_lane_say(host, owner_lane::REQUESTED)?;
+    owner_lane_expect(host, owner_lane::ACCEPTED)?;
+    drop(v_h);
+    owner_lane_say(host, owner_lane::CLOSED)?;
+    let aborted = owner_lane_flow(owner_lane::ABORTED_FLOW);
+    let before_control = owner_lane_drain(&session)?;
+    let other: Vec<_> = before_control
+        .iter()
+        .filter(|message| {
+            owner_lane_flow_of(message) == aborted
+                && **message != ControlMessage::Paired { flow: aborted }
+        })
+        .collect();
+    if !other.is_empty() {
+        return Err(format!("the guest wrote more than a late Paired for the flow: {other:?}"));
+    }
+    owner_lane_expect(host, owner_lane::PAUSED)?;
+    owner_lane_serve_control_flow(host, &session)?;
+    owner_lane_expect(host, owner_lane::DONE)?;
+    owner_lane_drain(&session)?
+        .iter()
+        .find(|message| owner_lane_flow_of(message) == aborted)
+        .map_or(Ok(()), |message| {
+            Err(format!("after the cell's checks the guest wrote {message:?} for the flow"))
+        })
+}
+
+fn guest_owner_unheld_abort_script(host: &mut OwnerLaneHost) -> Result<(), String> {
+    let session = owner_lane_open_session(host)?;
+    send_control(
+        &session,
+        &ControlMessage::Abort { flow: owner_lane_flow(owner_lane::ABORTED_FLOW) },
+    )
+    .map_err(|error| format!("Abort: {error}"))?;
+    owner_lane_say(host, owner_lane::ABORT_SENT)?;
+    owner_lane_expect(host, owner_lane::PAUSED)?;
+    owner_lane_none_for(
+        &owner_lane_drain(&session)?,
+        owner_lane_flow(owner_lane::ABORTED_FLOW),
+        "after the Abort",
+    )?;
+    let v_h = host
+        .open_tcp_accept(owner_lane::ABORTED_FLOW, owner_lane::APP_PORT)
+        .map_err(|error| format!("V_h: {error}"))?;
+    drop(v_h);
+    owner_lane_say(host, owner_lane::QUEUED)?;
+    owner_lane_serve_control_flow(host, &session)?;
+    owner_lane_finish(host, &session)
+}
+
+fn guest_owner_burst_abort_script(host: &mut OwnerLaneHost) -> Result<(), String> {
+    let session = owner_lane_open_session(host)?;
+    let mut v_hs = Vec::with_capacity(owner_lane::BURST as usize);
+    for seq in owner_lane::BURST_FIRST..owner_lane::BURST_FIRST + owner_lane::BURST {
+        v_hs.push(
+            host.open_tcp_accept(seq, owner_lane::APP_PORT)
+                .map_err(|error| format!("burst V_h {seq}: {error}"))?,
+        );
+    }
+    owner_lane_say(host, owner_lane::REQUESTED)?;
+    owner_lane_expect(host, owner_lane::ALL_PAIRED)?;
+    let paired = owner_lane_drain(&session)?;
+    let missing = (owner_lane::BURST_FIRST..owner_lane::BURST_FIRST + owner_lane::BURST)
+        .filter(|seq| !paired.contains(&ControlMessage::Paired { flow: owner_lane_flow(*seq) }))
+        .count();
+    if missing != 0 {
+        return Err(format!("{missing} burst flows' Paired did not arrive"));
+    }
+    drop(v_hs);
+    owner_lane_say(host, owner_lane::CLOSED_ALL)?;
+    owner_lane_expect(host, owner_lane::DONE)
+}
+
+fn run_guest_lane_owner_script(fixture: &str, host: &mut OwnerLaneHost) -> Result<(), String> {
+    match fixture {
+        "integration::in_guest_lane::the_v24_kernel_shape_holds_in_a_real_guest" => {
+            guest_owner_v24_script(host)
+        }
+        "integration::in_guest_lane::a_host_abort_before_the_guest_accepts_ends_the_flow_in_a_real_guest" => {
+            guest_owner_abort_before_accept_script(host)
+        }
+        "integration::in_guest_lane::a_session_loss_abort_ends_the_flow_and_the_owner_reconnects_in_a_real_guest" => {
+            guest_owner_session_loss_script(host)
+        }
+        "integration::in_guest_lane::a_host_close_after_the_guest_accepted_ends_the_flow_in_a_real_guest" => {
+            guest_owner_close_after_accept_script(host)
+        }
+        "integration::in_guest_lane::an_abort_for_an_unheld_flow_is_discarded_in_a_real_guest" => {
+            guest_owner_unheld_abort_script(host)
+        }
+        "integration::in_guest_lane::a_burst_of_host_aborts_resets_every_connection_in_a_real_guest" => {
+            guest_owner_burst_abort_script(host)
+        }
+        "integration::in_guest_lane::tcp_correlation_preserves_identity_and_cleanup_in_a_real_guest" => {
+            owner_lane_expect(host, owner_lane::DONE)
+        }
+        _ => Err(format!("no existing owner-lane host script for {fixture:?}")),
+    }
+}
+
+fn encode_nextest_argv(args: &[String]) -> String {
+    let values = args
+        .iter()
+        .map(|argument| {
+            let mut encoded = String::with_capacity(argument.len() * 2);
+            for byte in argument.as_bytes() {
+                const HEX: &[u8; 16] = b"0123456789abcdef";
+                encoded.push(char::from(HEX[usize::from(byte >> 4)]));
+                encoded.push(char::from(HEX[usize::from(byte & 0x0f)]));
+            }
+            encoded
+        })
+        .collect::<Vec<_>>();
+    format!("{}:{}", values.len(), values.join(";"))
+}
+
+fn guest_lane_dispatch(
+    program: &str,
+    args: &[String],
+    binary_id: &str,
+    test_name: &str,
+) -> Result<i32, NextestDispatchFailure> {
+    let lane_kind = std::env::var(GUEST_LANE_KIND_ENV).unwrap_or_default();
+    let fixture = std::env::var(GUEST_LANE_FIXTURE_ENV).unwrap_or_default();
+    if binary_id != "overdrive-init::bin/overdrive-init" {
+        return Err(NextestDispatchFailure::LaneNotPrepared(format!(
+            "guest-lane placement is bound to overdrive-init::bin/overdrive-init, got {binary_id:?}"
+        )));
+    }
+    let Some(placement) = INIT_GUEST_LANE_PLACEMENTS.iter().find(|placement| {
+        placement.kind == lane_kind && placement.fixture == fixture && placement.test == test_name
+    }) else {
+        return Err(NextestDispatchFailure::LaneNotPrepared(format!(
+            "no closed guest-lane placement maps {lane_kind:?}/{fixture:?} to {test_name:?}"
+        )));
+    };
+    if std::env::var(GUEST_LANE_ARGV_ENV).ok().as_deref() != Some(&encode_nextest_argv(args))
+        || !args.iter().any(|argument| argument == test_name)
+        || std::env::var(GUEST_LANE_ELF_ENV).ok().as_deref() != Some(program)
+    {
+        return Err(NextestDispatchFailure::LaneNotPrepared(
+            "the selected nextest ELF/argv does not retain its exact guest-lane invocation"
+                .to_owned(),
+        ));
+    }
+    let environment = nextest_environment()?;
+    let (attempt_files, _) = nextest_attempt_files(program, &environment)?;
+    let binary = attempt_files.first().map(|file| file.host.clone()).ok_or_else(|| {
+        NextestDispatchFailure::LaneNotPrepared(
+            "the selected guest-lane ELF is absent from the attempt inputs".to_owned(),
+        )
+    })?;
+    let staging = default_staging_root();
+    let kit = GuestKit::provision(&staging).map_err(|error| {
+        if matches!(error, GuestKitError::LaneNotPrepared { .. }) {
+            NextestDispatchFailure::LaneNotPrepared(format!("{error:?}"))
+        } else {
+            NextestDispatchFailure::GuestExecution(format!("{error:?}"))
+        }
+    })?;
+    let work = WorkDir::create(&staging, &format!("nextest-init-lane-{}", placement.slot))
+        .map_err(|error| NextestDispatchFailure::GuestExecution(format!("{error:?}")))?;
+    let tests = InGuestTests { binary };
+    let result = if placement.kind == "guest-lane-operator" {
+        run_in_guest_cell(
+            &kit,
+            &tests,
+            test_name,
+            INIT_IN_GUEST_LANE.raw(placement.slot),
+            work.path(),
+        )
+        .map(|run| (run.exit_status, run.console, None))
+    } else {
+        run_in_guest_owner_cell(
+            &kit,
+            &tests,
+            test_name,
+            INIT_IN_GUEST_LANE.raw(placement.slot),
+            work.path(),
+            512,
+            |host| run_guest_lane_owner_script(fixture.as_str(), host),
+        )
+        .map(|(run, host_result)| (run.exit_status, run.console, Some(host_result)))
+    }
+    .map_err(|error| {
+        if matches!(error, GuestKitError::LaneNotPrepared { .. }) {
+            NextestDispatchFailure::LaneNotPrepared(format!("{error:?}"))
+        } else {
+            NextestDispatchFailure::GuestExecution(format!("{error:?}"))
+        }
+    })?;
+    let (status, console, host_result) = result;
+    if status != 0 {
+        return Ok(status);
+    }
+    if !console.contains("test result: ok. 1 passed") {
+        return Err(NextestDispatchFailure::GuestExecution(format!(
+            "guest-lane cell {test_name:?} exited zero without its single-pass libtest summary; console:\n{console}"
+        )));
+    }
+    if let Some(Err(error)) = host_result {
+        return Err(NextestDispatchFailure::GuestExecution(format!(
+            "existing host script for {fixture:?} failed: {error}; guest console:\n{console}"
+        )));
+    }
+    Ok(0)
+}
+
 fn nextest_wrapper_entry(program: &str, args: &[String]) -> Result<i32, NextestDispatchFailure> {
     let binary_id = std::env::var("NEXTEST_BINARY_ID").unwrap_or_default();
     let test_name = std::env::var("NEXTEST_TEST_NAME").unwrap_or_default();
+    if std::env::var_os(GUEST_LANE_KIND_ENV).is_some()
+        || std::env::var_os(GUEST_LANE_FIXTURE_ENV).is_some()
+    {
+        return guest_lane_dispatch(program, args, &binary_id, &test_name);
+    }
     if binary_id == "overdrive-init::bin/overdrive-init"
         && test_name.starts_with("integration::in_guest_lane::")
     {
