@@ -252,7 +252,7 @@ fn executable_on_path(name: &str) -> Option<PathBuf> {
     })
 }
 
-fn quint_launcher_paths(wrapper: &Path) -> Result<(PathBuf, PathBuf)> {
+fn quint_launcher_paths(wrapper: &Path) -> Result<(PathBuf, PathBuf, PathBuf)> {
     let script = std::fs::read_to_string(wrapper)
         .wrap_err_with(|| format!("reading Quint launcher {}", wrapper.display()))?;
     let node_bin = script
@@ -273,9 +273,19 @@ fn quint_launcher_paths(wrapper: &Path) -> Result<(PathBuf, PathBuf)> {
         .ok_or_else(|| {
             eyre!("Quint launcher {} has no literal CLI exec target", wrapper.display())
         })?;
+    let quint_home = script
+        .lines()
+        .find_map(|line| {
+            line.strip_prefix("export QUINT_HOME=\"${QUINT_HOME:-")?.strip_suffix("}\"")
+        })
+        .map(PathBuf::from)
+        .ok_or_else(|| {
+            eyre!("Quint launcher {} has no literal QUINT_HOME default", wrapper.display())
+        })?;
     normalized_guest_path(&node_bin, "Quint Node directory")?;
     normalized_guest_path(&cli_wrapper, "Quint CLI wrapper")?;
-    Ok((node_bin, cli_wrapper))
+    normalized_guest_path(&quint_home, "Quint home directory")?;
+    Ok((node_bin, cli_wrapper, quint_home))
 }
 
 fn package_manifest(path: &Path) -> Result<serde_json::Value> {
@@ -300,6 +310,21 @@ fn quint_package_root(entry: &Path) -> Result<PathBuf> {
             .parent()
             .ok_or_else(|| eyre!("Quint CLI entry is not inside {QUINT_PACKAGE_NAME}"))?;
     }
+}
+
+fn quint_evaluator_version(package_root: &Path) -> Result<String> {
+    const VERSION_LINE: &str = "exports.QUINT_EVALUATOR_VERSION = '";
+    let source = package_root.join("dist/src/rust/binaryManager.js");
+    let contents = std::fs::read_to_string(&source)
+        .wrap_err_with(|| format!("reading the Quint evaluator version at {}", source.display()))?;
+    let version = contents
+        .split_once(VERSION_LINE)
+        .and_then(|(_, rest)| rest.split_once('\'').map(|(version, _)| version))
+        .filter(|version| !version.is_empty() && !version.chars().any(char::is_control))
+        .ok_or_else(|| {
+            eyre!("Quint package has no pinned Rust evaluator version at {}", source.display())
+        })?;
+    Ok(version.to_owned())
 }
 
 fn copy_quint_package_tree(
@@ -469,16 +494,16 @@ pub fn run(workspace_root: &Path, target_dir: &Path) -> Result<()> {
         .current_dir(workspace_root);
     run_step(&mut guest_suite_build, "building the prepared guest dispatcher")?;
     require(&guest_suite_path(target_dir), GUEST_SUITE_BIN)?;
-    if let Some((quint_version, node_version, files)) = quint_runtime {
+    if let Some((quint_version, node_version, evaluator_version, files)) = quint_runtime {
         eprintln!(
-            "guest-kit-prepare: Quint {quint_version}, Node {node_version}: staged {files} runtime inputs"
+            "guest-kit-prepare: Quint {quint_version}, Node {node_version}, Rust evaluator {evaluator_version}: staged {files} runtime inputs"
         );
     }
     eprintln!("guest-kit-prepare: kernel {release}, target {triple}: the lane is prepared");
     Ok(())
 }
 
-fn prepare_quint_runtime(target_dir: &Path) -> Result<Option<(String, String, usize)>> {
+fn prepare_quint_runtime(target_dir: &Path) -> Result<Option<(String, String, String, usize)>> {
     let prepared = target_dir.join(QUINT_RUNTIME_DIR);
     let staging = target_dir.join(format!("{QUINT_RUNTIME_DIR}.staging"));
     for path in [&prepared, &staging] {
@@ -495,12 +520,12 @@ fn prepare_quint_runtime(target_dir: &Path) -> Result<Option<(String, String, us
         return Ok(None);
     };
 
-    // The selected consumer invokes the existing `quint test` simulator. Its
-    // runtime closure is the installed Quint package and Node binary, not the
-    // separate Java/Apalache or Rust-evaluator distributions in QUINT_HOME.
-    // Preserve the host wrapper's paths/env and prepare only the package tree
-    // and executable files the per-attempt image will stage.
-    let (node_bin, cli_wrapper) = quint_launcher_paths(&quint_command)?;
+    // The selected consumer invokes `quint test` with Quint's default Rust
+    // backend. Prepare the installed Quint package, its Node runtime and its
+    // pinned Rust evaluator; the test does not invoke verify/Apalache or need
+    // the JDK. Preserve the host wrapper's paths/env and stage only this
+    // executable/model dependency closure into the per-attempt image.
+    let (node_bin, cli_wrapper, quint_home) = quint_launcher_paths(&quint_command)?;
     let node_host = node_bin
         .join("node")
         .canonicalize()
@@ -514,6 +539,16 @@ fn prepare_quint_runtime(target_dir: &Path) -> Result<Option<(String, String, us
         .as_str()
         .ok_or_else(|| eyre!("Quint package has no version at {}", package_root.display()))?
         .to_owned();
+    let evaluator_version = quint_evaluator_version(&package_root)?;
+    let evaluator_guest_path =
+        quint_home.join(format!("rust-evaluator-{evaluator_version}")).join("quint_evaluator");
+    normalized_guest_path(&evaluator_guest_path, "Quint Rust evaluator")?;
+    if !evaluator_guest_path.is_file() {
+        bail!(
+            "Quint {package_version} defaults `quint test` to Rust evaluator {evaluator_version}, but its existing host input is absent at {}; prepare the current evaluator before running guest-kit-prepare",
+            evaluator_guest_path.display()
+        );
+    }
 
     let quint_check = Command::new(&quint_command)
         .arg("--version")
@@ -555,6 +590,7 @@ fn prepare_quint_runtime(target_dir: &Path) -> Result<Option<(String, String, us
 
     let node_guest_path = node_bin.join("node");
     let launcher_guest_path = PathBuf::from(QUINT_GUEST_COMMAND);
+    let evaluator_host_path = evaluator_guest_path.clone();
     let shell_host = executable_on_path("sh").ok_or_else(|| {
         eyre!("the existing host shell needed by Quint's /bin/sh launcher is absent")
     })?;
@@ -566,6 +602,7 @@ fn prepare_quint_runtime(target_dir: &Path) -> Result<Option<(String, String, us
         (&quint_command, &launcher_guest_path),
         (&node_host, &node_guest_path),
         (&shell_host, &shell_guest_path),
+        (&evaluator_host_path, &evaluator_guest_path),
     ] {
         copy_file_at_guest_path(host, guest, &files_root)?;
         files.insert(guest.clone());
@@ -585,9 +622,11 @@ fn prepare_quint_runtime(target_dir: &Path) -> Result<Option<(String, String, us
 
     let manifest_path = staging.join(QUINT_RUNTIME_MANIFEST);
     let mut manifest = format!(
-        "{QUINT_RUNTIME_FORMAT}\nquint_version={quint_version}\nnode_version={node_version}\nnode_guest_path={}\nshared=/bin/sh\nshared={}\nlauncher_guest_path={}\ncli_wrapper_guest_path={}\ncli_entry_guest_path={}\n",
+        "{QUINT_RUNTIME_FORMAT}\nquint_version={quint_version}\nnode_version={node_version}\nrust_evaluator_version={evaluator_version}\nnode_guest_path={}\nrust_evaluator_guest_path={}\nshared=/bin/sh\nshared={}\nshared={}\nlauncher_guest_path={}\ncli_wrapper_guest_path={}\ncli_entry_guest_path={}\n",
         node_guest_path.display(),
+        evaluator_guest_path.display(),
         node_guest_path.display(),
+        evaluator_guest_path.display(),
         launcher_guest_path.display(),
         cli_wrapper_guest_path.display(),
         cli_entry_guest_path.display(),
@@ -606,7 +645,7 @@ fn prepare_quint_runtime(target_dir: &Path) -> Result<Option<(String, String, us
     std::fs::rename(&staging, &prepared)
         .wrap_err_with(|| format!("publishing prepared Quint runtime {}", prepared.display()))?;
 
-    Ok(Some((quint_version, node_version, files.len())))
+    Ok(Some((quint_version, node_version, evaluator_version, files.len())))
 }
 
 fn run_step(command: &mut Command, what: &str) -> Result<std::process::Output> {

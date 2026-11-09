@@ -3291,7 +3291,9 @@ fn quint_test_guest_files(current_dir: &Path) -> Result<Vec<GuestFile>, NextestD
             }
             "quint_version"
             | "node_version"
+            | "rust_evaluator_version"
             | "node_guest_path"
+            | "rust_evaluator_guest_path"
             | "launcher_guest_path"
             | "cli_wrapper_guest_path"
             | "cli_entry_guest_path" => {
@@ -3309,7 +3311,7 @@ fn quint_test_guest_files(current_dir: &Path) -> Result<Vec<GuestFile>, NextestD
         }
     }
 
-    for key in ["quint_version", "node_version"] {
+    for key in ["quint_version", "node_version", "rust_evaluator_version"] {
         if fields
             .get(key)
             .is_none_or(|value| value.is_empty() || value.chars().any(char::is_control))
@@ -3325,6 +3327,7 @@ fn quint_test_guest_files(current_dir: &Path) -> Result<Vec<GuestFile>, NextestD
         })
     };
     let node_guest_path = path_field("node_guest_path")?;
+    let evaluator_guest_path = path_field("rust_evaluator_guest_path")?;
     let launcher_guest_path = path_field("launcher_guest_path")?;
     let cli_wrapper_guest_path = path_field("cli_wrapper_guest_path")?;
     let cli_entry_guest_path = path_field("cli_entry_guest_path")?;
@@ -3335,6 +3338,7 @@ fn quint_test_guest_files(current_dir: &Path) -> Result<Vec<GuestFile>, NextestD
             })
     }) || [
         &node_guest_path,
+        &evaluator_guest_path,
         &launcher_guest_path,
         &cli_wrapper_guest_path,
         &cli_entry_guest_path,
@@ -3352,6 +3356,7 @@ fn quint_test_guest_files(current_dir: &Path) -> Result<Vec<GuestFile>, NextestD
     }
     let required = [
         node_guest_path.clone(),
+        evaluator_guest_path.clone(),
         launcher_guest_path.clone(),
         cli_wrapper_guest_path.clone(),
         cli_entry_guest_path.clone(),
@@ -3359,8 +3364,9 @@ fn quint_test_guest_files(current_dir: &Path) -> Result<Vec<GuestFile>, NextestD
     ];
     if required.iter().any(|path| !files.contains(path))
         || !shared_libraries.contains(&node_guest_path)
+        || !shared_libraries.contains(&evaluator_guest_path)
         || !shared_libraries.contains(Path::new("/bin/sh"))
-        || shared_libraries.len() != 2
+        || shared_libraries.len() != 3
         || shared_libraries.iter().any(|path| !files.contains(path))
     {
         return Err(NextestDispatchFailure::LaneNotPrepared(
