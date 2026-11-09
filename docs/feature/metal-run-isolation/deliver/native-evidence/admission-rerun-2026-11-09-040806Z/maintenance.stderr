@@ -1,0 +1,16 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.06s
+     Running `target/debug/xtask metal run --exclusive -- bash -c 'set -eu
+active=$(systemctl show "overdrive-metal-run-$1.service" --property=ActiveState --value)
+case "$active" in active|activating|deactivating) echo premature-maintenance >&2; exit 91;; esac
+test '\!' -e "/srv/vm/metal/$1"
+test '\!' -L "/srv/vm/metal/$1"
+test '\!' -e "/run/ovd-gk/$1"
+test '\!' -L "/run/ovd-gk/$1"
+test '\!' -e "$2/target/metal-run-tmp/$1"
+test '\!' -L "$2/target/metal-run-tmp/$1"
+printf "METAL-MAINTENANCE-START predecessor_stopped=true predecessor_roots_absent=true\n"
+sleep 3' metal-admission 720d538ab20a3acea6ed6890 /home/ubuntu/overdrive-worktrees/e3d831d7dafe621226ae6047ebcac3536f37470cafcf5dbb64eb9598886af410`
+xtask: running metal run (one bootstrap lease session)
+OVERDRIVE_METAL_RUN_ID=6be19464e6425bf79800a401
+OVERDRIVE_METAL_RUN_STARTED run_id=6be19464e6425bf79800a401
+OVERDRIVE_METAL_RUN_COMPLETE run_id=6be19464e6425bf79800a401 exit_code=0 cause=command_returned

@@ -1,0 +1,6 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.06s
+     Running `target/debug/xtask metal run -- cargo check -p xtask`
+xtask: running metal run (one bootstrap lease session)
+OVERDRIVE_METAL_RUN_ID=57d086dd1a7cc29840e3bf63
+OVERDRIVE_METAL_RUN_STARTED run_id=57d086dd1a7cc29840e3bf63
+OVERDRIVE_METAL_RUN_COMPLETE run_id=57d086dd1a7cc29840e3bf63 exit_code=0 cause=command_returned

@@ -1,0 +1,4 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.06s
+     Running `target/debug/xtask metal collect 55821f47026be863c07de264`
+xtask: running metal collect (read-only durable run record)
+OVERDRIVE_METAL_RUN_COMPLETE run_id=55821f47026be863c07de264 exit_code=100 cause=command_returned
