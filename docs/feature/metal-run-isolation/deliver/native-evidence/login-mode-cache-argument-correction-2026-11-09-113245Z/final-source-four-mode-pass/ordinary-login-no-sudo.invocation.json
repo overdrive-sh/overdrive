@@ -1,0 +1,30 @@
+{
+  "command": [
+    "cargo",
+    "xtask",
+    "metal",
+    "run",
+    "--no-sudo",
+    "--",
+    "cargo",
+    "nextest",
+    "run",
+    "-p",
+    "xtask",
+    "--test",
+    "acceptance",
+    "--features",
+    "integration-tests",
+    "-E",
+    "test(placement::non_metal_and_explicit_exclusive_attempts_preserve_the_original_exec_chain)",
+    "--no-capture"
+  ],
+  "started_at": "2026-11-09T11:38:30.794267+00:00",
+  "source": {
+    "head": "060359bc1cf88c78252e9d789396821413b41d7e",
+    "status": " M AGENTS.md\n M crates/overdrive-control-plane/src/worker/exit_observer.rs\n M crates/overdrive-control-plane/tests/acceptance/crash_ending_authority.rs\n M crates/overdrive-control-plane/tests/acceptance/terminal_hook_ownership.rs\n M crates/overdrive-core/src/traits/driver.rs\n M docs/feature/metal-run-isolation/feature-delta.md\n M docs/feature/service-allocation-readiness-and-ending/deliver/roadmap.json\n M website/content/blog/sharing-a-metal-box-without-sharing-test-state.mdx\n M website/content/docs/how-to/run-verification-on-metal.mdx\n?? docs/feature/metal-run-isolation/deliver/review-slice.md\n?? docs/feature/service-allocation-readiness-and-ending/deliver/execution-log.json\n",
+    "bootstrap_sha256": "47e7152b18ef5d7b57a26d288f473769d70258d8086477bdb563cd9c17e2f625"
+  },
+  "finished_at": "2026-11-09T11:38:54.296586+00:00",
+  "exit_code": 0
+}

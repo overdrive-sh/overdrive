@@ -39,9 +39,9 @@ command correctly returned 78 `source_mismatch` because the Git binding
 changed. This is an invalidated pair, not a runtime regression or no-sync
 acceptance result.
 
-## Final-source validation pending
+## Final-source mode validation
 
-The exact four existing placement-driver mode selectors must be rerun after
+The exact four existing placement-driver mode selectors were rerun after
 the argument-order correction on a frozen committed source:
 
 1. ordinary privileged;
@@ -50,5 +50,23 @@ the argument-order correction on a frozen committed source:
 4. ordinary login with `--no-sync --no-sudo`.
 
 No additional placement rows, owner burst, mutation, or model campaigns are
-part of this correction. Final-source native results are not included in this
-capture and must be added only after their actual invocations complete.
+part of this correction. At HEAD
+`060359bc1cf88c78252e9d789396821413b41d7e`, all four outer commands returned
+0 and each durable owner completed with command status 0. Both no-sync runs
+passed source identity checks. The before/after source records are byte
+identical and pin `infra/metal/bootstrap.sh` SHA-256
+`47e7152b18ef5d7b57a26d288f473769d70258d8086477bdb563cd9c17e2f625`.
+
+| Mode | Run ID | Outer status |
+|---|---|---:|
+| ordinary privileged | `eac8724e1b762671708565f7` | 0 |
+| ordinary privileged, no-sync | `8e7b311b75348b3612cf43ad` | 0 |
+| ordinary login, no-sudo | `06ea1168e446d77960b36bb4` | 0 |
+| ordinary login, no-sync and no-sudo | `772d30eb605de6b8f5f0e13a` | 0 |
+
+Raw commands, combined stdout/stderr, completion statuses, source metadata
+and exact file hashes are retained in
+[`final-source-four-mode-pass/`](final-source-four-mode-pass/). These four
+existing mode selections pass. They do not claim that the full placement
+journey, its final physical-complement assertion, or the entire feature is
+complete.
