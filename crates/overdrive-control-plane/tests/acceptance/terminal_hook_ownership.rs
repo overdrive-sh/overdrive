@@ -401,7 +401,6 @@ fn yields_of(seed: u64) -> u32 {
 /// reconciler runs and the `SimClock` is never advanced, so no restart backoff elapses.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER: D1 exit observer ends probe supervision"]
 async fn a_crashed_allocation_stops_probing_as_soon_as_the_observer_consumes_the_exit() {
     for seed in 0..SEEDS {
         let f = Fixture::new();
@@ -443,7 +442,6 @@ async fn a_crashed_allocation_stops_probing_as_soon_as_the_observer_consumes_the
 /// none of its own for the predecessor.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER: D1 exit observer ends probe supervision"]
 async fn a_restart_leaves_only_the_successor_supervised_without_a_second_hook_call() {
     for seed in 0..SEEDS {
         let f = Fixture::new();
@@ -501,7 +499,6 @@ async fn a_restart_leaves_only_the_successor_supervised_without_a_second_hook_ca
 /// same, the row stays `Running`, and the degraded `LifecycleEvent` is still sent.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER: D1 exit observer ends probe supervision"]
 async fn a_crash_ends_probe_supervision_even_when_every_row_write_attempt_fails() {
     for seed in 0..SEEDS {
         let f = Fixture::new();
@@ -550,7 +547,6 @@ async fn a_crash_ends_probe_supervision_even_when_every_row_write_attempt_fails(
 /// row (so the observer writes nothing). Its supervisor is still gone.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER: D1 exit observer ends probe supervision"]
 async fn a_crash_with_no_prior_row_still_ends_probe_supervision() {
     let f = Fixture::new();
     let _observer = f.spawn_observer();
@@ -749,7 +745,6 @@ async fn the_terminal_hook_is_idempotent_and_a_no_op_for_unknown_ids() {
 /// nothing, and the sibling's supervisor is untouched.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER: D1 exit observer ends probe supervision"]
 async fn a_crash_then_a_finalize_fire_the_hook_twice_with_one_effect() {
     let f = Fixture::new();
     let _observer = f.spawn_observer();
@@ -786,7 +781,6 @@ async fn a_crash_then_a_finalize_fire_the_hook_twice_with_one_effect() {
 /// produced), its row is unchanged, and no `service_backends` row is authored by the hook.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER: D1 exit observer ends probe supervision"]
 async fn a_crash_ends_only_the_crashed_allocations_supervision() {
     let f = Fixture::new();
     let _observer = f.spawn_observer();

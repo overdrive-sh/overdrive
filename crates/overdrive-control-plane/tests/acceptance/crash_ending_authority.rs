@@ -110,7 +110,6 @@ async fn crash_after_the_deadline_before_the_first_look_is_restarted_not_finalis
 /// longer grows the streak; no `StartupProbeFailed` finalisation arises.
 #[tokio::test]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D1 exit observer ends probe supervision at the crash"]
 async fn crash_with_a_partial_streak_is_not_probed_after_the_crash() {
     let mut world = RestartWorld::compose(Shape::StartupProbe).await;
     let first = world.place_first_attempt().await;

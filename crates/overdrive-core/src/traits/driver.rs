@@ -757,18 +757,63 @@ pub trait Driver: Send + Sync + 'static {
     /// continue to compile.
     fn on_alloc_running(&self, _spec: &AllocationSpec) {}
 
-    /// Lifecycle hook fired by the action shim when an allocation
-    /// transitions to a terminal state (Terminated / Failed) — i.e.
-    /// immediately after the action shim writes the terminal
-    /// `AllocStatusRow` via `obs.write`.
+    /// Lifecycle hook: this allocation's workload has ended, or its terminal
+    /// state is being claimed. Release every per-allocation supervision
+    /// resource the driver holds for `alloc_id`.
     ///
-    /// Production [`crate::traits::driver::Driver`] implementations
-    /// that hold a reference to the worker's `ProbeRunner` override
-    /// this to call `probe_runner.stop_alloc(alloc_id)`, cooperatively
-    /// shutting down every per-probe task spawned under the
-    /// allocation's supervisor per ADR-0054 § 2.
+    /// Production drivers that hold the worker's `ProbeRunner` override this
+    /// to call `probe_runner.stop_alloc(alloc_id)`, cooperatively cancelling
+    /// every per-probe task and dropping the allocation's supervisor
+    /// (ADR-0054 § 2).
     ///
-    /// Default no-op — symmetric with [`Self::on_alloc_running`].
+    /// # Who calls it
+    ///
+    /// Whoever ends an allocation or observes its end, for the driver that
+    /// owns it: the exit observer once per `ExitEvent` it consumes, before and
+    /// independently of any row write; the action shim after `StopAllocation`
+    /// and after a genuine-terminal `FinalizeFailed`. A caller never needs a
+    /// terminal `AllocStatusRow` to exist first, and there is no ordering
+    /// relative to the row write. A restart's predecessor needs no separate
+    /// call: its end was already announced by one of the callers above.
+    ///
+    /// # Preconditions
+    ///
+    /// - `alloc_id` names one physical execution attempt that will not be
+    ///   started again under the same id (allocation ids are not reused after
+    ///   a terminal, ADR-0105). A fresh replacement has a different id.
+    /// - Called from a synchronous context. The caller holds no lock the
+    ///   implementation may need.
+    ///
+    /// # Postconditions
+    ///
+    /// - After return, the driver holds no probe supervisor for `alloc_id`: no
+    ///   further probe task is started for it, and each task parked on its
+    ///   interval exits at its next scheduling point. A probe attempt already
+    ///   past its interval wait at the time of the call may complete and write
+    ///   one `ProbeResultRow` for `alloc_id`. This is bounded by one attempt
+    ///   per task and by the descriptor timeout, and no reader acts on it (see
+    ///   Q3).
+    /// - Supervision of every other allocation, including the successor of a
+    ///   restarted allocation, is unchanged.
+    ///
+    /// # Edge cases
+    ///
+    /// - **Unknown, never-registered, or already-stopped `alloc_id`: no-op.**
+    ///   This is the normal case for a second author and for non-VM drivers.
+    /// - **Repeated calls, from the same or different callers, in any order:
+    ///   idempotent.** Concurrent calls are safe.
+    /// - **A driver with no probe runner: default no-op.**
+    /// - Infallible and non-blocking: it does no I/O and no `.await`, and
+    ///   writes no observation row.
+    ///
+    /// # Observable invariants
+    ///
+    /// - For a driver with a `ProbeRunner`: the supervised-allocation count
+    ///   falls by exactly one when `alloc_id` was supervised, and is unchanged
+    ///   otherwise.
+    /// - A call never changes the `AllocStatusRow` of any allocation.
+    ///
+    /// Default no-op, symmetric with [`Self::on_alloc_running`].
     fn on_alloc_terminal(&self, _alloc_id: &AllocationId) {}
 
     /// Lifecycle hook fired by the action shim when an allocation is

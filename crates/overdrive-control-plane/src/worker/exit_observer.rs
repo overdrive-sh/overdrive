@@ -11,6 +11,10 @@
 //! row to obs. The reconciler picks the row up on the next convergence
 //! tick and re-enqueues a fresh allocation.
 //!
+//! Before attempting that row write, the observer calls
+//! [`Driver::on_alloc_terminal`] for every consumed `ExitEvent`. The exit
+//! ends probe supervision even when no row can be written.
+//!
 //! # Lifecycle event emission
 //!
 //! After every successful `obs.write`, the observer broadcasts a
@@ -82,9 +86,10 @@ const RETRY_BACKOFFS: [Duration; 3] =
     [Duration::from_millis(50), Duration::from_millis(100), Duration::from_millis(200)];
 
 /// Spawn the `exit_observer` subsystem. The returned task consumes
-/// `ExitEvent`s from `driver.take_exit_receiver()`, writes
-/// `AllocStatusRow`s to `obs`, and broadcasts `LifecycleEvent`s on
-/// `events`.
+/// `ExitEvent`s from `driver.take_exit_receiver()`, calls
+/// [`Driver::on_alloc_terminal`] for each consumed event before and
+/// independently of its row write, writes `AllocStatusRow`s to `obs`, and
+/// broadcasts `LifecycleEvent`s on `events`.
 ///
 /// # Arguments
 ///
@@ -124,9 +129,10 @@ pub fn spawn(
 
 /// Production entry-point.
 ///
-/// Same as [`spawn`]. The observer's entire effect is the
-/// `AllocStatusRow` write plus the `LifecycleEvent` broadcast — it does
-/// NOT name its consumers. Per the ADR-0084 §5 single-cut migration the
+/// Same as [`spawn`]. For each consumed exit, the observer first calls
+/// [`Driver::on_alloc_terminal`] and then performs the `AllocStatusRow`
+/// write and `LifecycleEvent` broadcast. It does NOT name its consumers.
+/// Per the ADR-0084 §5 single-cut migration the
 /// three current `alloc_status` consumers (`workload-lifecycle`,
 /// `service-lifecycle`, `svid-lifecycle`) are woken declaratively by the
 /// interest router's fan-out on the accepted write: `workload-lifecycle` and
@@ -205,6 +211,14 @@ pub fn spawn_with_runtime(
                     None => break,
                 },
             };
+            // The consumed exit establishes that this allocation's workload
+            // has ended, whether or not an observation row can be written.
+            // Keep the driver upgrade transient and release it before the
+            // retry loop's first await.
+            if let Some(driver) = driver_weak.upgrade() {
+                driver.on_alloc_terminal(&event.alloc);
+                drop(driver);
+            }
             let outcome = run_with_retry(obs.as_ref(), &event, clock.as_ref(), driver_kind).await;
             match outcome {
                 RetryOutcome::Wrote { occurrence } => {
@@ -221,10 +235,12 @@ pub fn spawn_with_runtime(
                             "lifecycle event broadcast send returned error (no subscribers?); ignored",
                         );
                     }
-                    // The exit observer's whole effect is (1) the
-                    // `AllocStatusRow` write above (via `run_with_retry`) and
-                    // (2) the `LifecycleEvent` broadcast just made. It no
-                    // longer NAMES its consumers: the three current
+                    // The exit observer also called the driver's terminal
+                    // hook before the row write. Its observation-side effect
+                    // is (1) the `AllocStatusRow` write above (via
+                    // `run_with_retry`) and (2) the `LifecycleEvent`
+                    // broadcast just made. It no longer NAMES its consumers:
+                    // the three current
                     // `alloc_status` consumers (`workload-lifecycle`,
                     // `service-lifecycle`, `svid-lifecycle`) are woken
                     // declaratively by the interest router's fan-out on this
