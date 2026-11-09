@@ -1,0 +1,11 @@
+{
+  "command": [
+    "ssh",
+    "ubuntu@151.115.99.251",
+    "sudo -n stat -c %n:%u:%g:%a -- /home/ubuntu/overdrive-worktrees/e3d831d7dafe621226ae6047ebcac3536f37470cafcf5dbb64eb9598886af410/target/metal-run-tmp"
+  ],
+  "started_at": "2026-11-09T11:09:43.939119+00:00",
+  "scope": "Read-only stat of the exact failed login invocation parent, scoped through its retained remote_dir metadata.",
+  "exit_code": 0,
+  "finished_at": "2026-11-09T11:09:45.258424+00:00"
+}

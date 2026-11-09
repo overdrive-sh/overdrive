@@ -1,0 +1,20 @@
+/usr/bin/ssh
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire exclusive physical-maintenance barrier (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_RUN_REGISTERED run_id=a5165a9d720f5399bbc6114a
+OVERDRIVE_METAL_LEASE_ACQUIRED token=a5165a9d720f5399bbc6114a pid=2866471
+
+########## [bootstrap] no-sync source identity check
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+info: experimental features enabled: wrapper-scripts
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.14s
+────────────
+ Nextest run ID 676ca71e-aace-45a5-b07e-ff4a52fac77d with nextest profile: default
+    Starting 1 test across 1 binary (50 tests skipped)
+────────────
+     Summary [   0.341s] 1 test run: 1 passed, 50 skipped

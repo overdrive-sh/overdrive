@@ -1,0 +1,6 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.06s
+     Running `target/debug/xtask metal run --exclusive -- sh -c 'exit 255'`
+xtask: running metal run (one bootstrap lease session)
+OVERDRIVE_METAL_RUN_ID=599aaa9da34be0fb5cd26f9f
+OVERDRIVE_METAL_RUN_STARTED run_id=599aaa9da34be0fb5cd26f9f
+OVERDRIVE_METAL_RUN_COMPLETE run_id=599aaa9da34be0fb5cd26f9f exit_code=255 cause=command_returned

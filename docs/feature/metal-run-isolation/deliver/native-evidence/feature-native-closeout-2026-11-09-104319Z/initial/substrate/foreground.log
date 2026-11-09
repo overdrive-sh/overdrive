@@ -1,0 +1,77 @@
+{
+  "kernel": {
+    "system": "Linux",
+    "node": "em-determined-roentgen",
+    "release": "7.0.0-38-generic",
+    "version": "#38-Ubuntu SMP PREEMPT_DYNAMIC Fri Sep  4 09:10:14 UTC 2026",
+    "machine": "x86_64",
+    "processor": ""
+  },
+  "boot_id": "acdbd1e5-824c-4946-9aa7-e3b67c05d9a5\n",
+  "tools": {
+    "uname": {
+      "command": [
+        "uname",
+        "-a"
+      ],
+      "status": 0,
+      "stdout": "Linux em-determined-roentgen 7.0.0-38-generic #38-Ubuntu SMP PREEMPT_DYNAMIC Fri Sep  4 09:10:14 UTC 2026 x86_64 GNU/Linux\n",
+      "stderr": ""
+    },
+    "bash": {
+      "command": [
+        "bash",
+        "--version"
+      ],
+      "status": 0,
+      "stdout": "GNU bash, version 5.3.9(1)-release (x86_64-pc-linux-gnu)\nCopyright (C) 2025 Free Software Foundation, Inc.\nLicense GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>\n\nThis is free software; you are free to change and redistribute it.\nThere is NO WARRANTY, to the extent permitted by law.\n",
+      "stderr": ""
+    },
+    "systemd": {
+      "command": [
+        "systemctl",
+        "--version"
+      ],
+      "status": 0,
+      "stdout": "systemd 259 (259.5-0ubuntu3.4)\n+PAM +AUDIT +SELINUX +APPARMOR +IMA +IPE +SMACK +SECCOMP +GCRYPT -GNUTLS +OPENSSL +ACL +BLKID +CURL +ELFUTILS +FIDO2 +IDN2 -IDN +KMOD +LIBCRYPTSETUP +LIBCRYPTSETUP_PLUGINS +LIBFDISK +PCRE2 +PWQUALITY +P11KIT +QRENCODE +TPM2 +BZIP2 +LZ4 +XZ +ZLIB +ZSTD +BPF_FRAMEWORK +BTF -XKBCOMMON -UTMP +SYSVINIT +LIBARCHIVE\n",
+      "stderr": ""
+    },
+    "flock": {
+      "command": [
+        "flock",
+        "--version"
+      ],
+      "status": 0,
+      "stdout": "flock from util-linux 2.41.3\n",
+      "stderr": ""
+    },
+    "ip": {
+      "command": [
+        "ip",
+        "-Version"
+      ],
+      "status": 0,
+      "stdout": "ip utility, iproute2-6.19.0, libbpf 1.6.3\n",
+      "stderr": ""
+    },
+    "cargo": {
+      "command": [
+        "/home/ubuntu/.cargo/bin/cargo",
+        "--version"
+      ],
+      "status": 0,
+      "stdout": "cargo 1.95.0 (f2d3ce0bd 2026-03-21)\n",
+      "stderr": ""
+    },
+    "nextest": {
+      "command": [
+        "/home/ubuntu/.cargo/bin/cargo",
+        "nextest",
+        "--version"
+      ],
+      "status": 0,
+      "stdout": "cargo-nextest 0.9.149 (3fe4ef319 2026-10-20)\nrelease: 0.9.149\ncommit-hash: 3fe4ef31972f24e0c94cfe291718eab0fe678260\ncommit-date: 2026-10-20\nhost: x86_64-unknown-linux-gnu\n",
+      "stderr": ""
+    }
+  }
+}

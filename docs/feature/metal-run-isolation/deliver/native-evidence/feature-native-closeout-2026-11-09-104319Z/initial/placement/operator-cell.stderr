@@ -1,0 +1,6 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.06s
+     Running `target/debug/xtask metal run -- cargo nextest run -p overdrive-init --bin overdrive-init --features integration-tests,kvm-tests -E 'test(guest_flow::real_kernel::the_accept_path_matches_the_sim_per_connection)' --no-capture`
+xtask: running metal run (one bootstrap lease session)
+OVERDRIVE_METAL_RUN_ID=291ec8a608d42600c8301888
+OVERDRIVE_METAL_RUN_STARTED run_id=291ec8a608d42600c8301888
+OVERDRIVE_METAL_RUN_COMPLETE run_id=291ec8a608d42600c8301888 exit_code=0 cause=command_returned

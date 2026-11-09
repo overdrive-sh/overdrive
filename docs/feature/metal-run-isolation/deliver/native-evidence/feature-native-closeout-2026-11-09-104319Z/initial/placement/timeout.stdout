@@ -1,0 +1,39 @@
+/usr/bin/ssh
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire exclusive physical-maintenance barrier (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_RUN_REGISTERED run_id=d83e7519edca4b491c382a09
+OVERDRIVE_METAL_LEASE_ACQUIRED token=d83e7519edca4b491c382a09 pid=2791356
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/ouagadougou -> ubuntu@151.115.99.251:/home/ubuntu/overdrive-worktrees/e3d831d7dafe621226ae6047ebcac3536f37470cafcf5dbb64eb9598886af410
+
+sent 2,090,675 bytes  received 5,099 bytes  838,309.60 bytes/sec
+total size is 2,076,022,748  speedup is 990.58
+
+########## [bootstrap] materialising standalone .git (common dir 7.4G)
+
+sent 417,062 bytes  received 19,060 bytes  290,748.00 bytes/sec
+total size is 878,388,176  speedup is 2,014.09
+## marcus-sa/nw-bugfix-crash-restart-tasks...origin/marcus-sa/nw-bugfix-crash-restart-tasks [ahead 2]
+ M AGENTS.md
+ M crates/overdrive-control-plane/src/worker/exit_observer.rs
+ M crates/overdrive-control-plane/tests/acceptance/crash_ending_authority.rs
+ M crates/overdrive-control-plane/tests/acceptance/terminal_hook_ownership.rs
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+info: experimental features enabled: wrapper-scripts
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.00s
+────────────
+ Nextest run ID 933ebaaa-6b0f-44e8-b018-3b921bd3198c with nextest profile: default
+    Starting 1 test across 2 binaries (2 tests skipped)
+       START [         ] (1/1) metal-run-isolation-attempt-fixture::attempt selected_attempt_waits_for_its_timeout
+ TERMINATING [> 10.000s] (───) metal-run-isolation-attempt-fixture::attempt selected_attempt_waits_for_its_timeout
+     TIMEOUT [  10.002s] (1/1) metal-run-isolation-attempt-fixture::attempt selected_attempt_waits_for_its_timeout
+  Cancelling due to test failure
+────────────
+     Summary [  10.002s] 1 test run: 0 passed, 1 timed out, 2 skipped
+     TIMEOUT [  10.002s] (1/1) metal-run-isolation-attempt-fixture::attempt selected_attempt_waits_for_its_timeout
+error: test run failed

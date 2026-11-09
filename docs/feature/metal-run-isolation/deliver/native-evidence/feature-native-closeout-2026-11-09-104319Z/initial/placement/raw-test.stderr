@@ -1,0 +1,4 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.26s
+     Running `target/debug/xtask metal run -- cargo test -p overdrive-core`
+xtask: running metal run (one bootstrap lease session)
+OVERDRIVE_METAL_RUNNER_ERROR error=unsupported_ordinary_command

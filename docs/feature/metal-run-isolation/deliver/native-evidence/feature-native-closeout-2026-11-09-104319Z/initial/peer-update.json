@@ -1,0 +1,57 @@
+{
+  "root_checkout": "/Users/marcus/conductor/workspaces/helios/ouagadougou",
+  "peer_checkout": "/tmp/metal-run-isolation-peer.UKMMtE6B",
+  "peer_canonical": "/private/tmp/metal-run-isolation-peer.UKMMtE6B",
+  "source_head": "06f25ce2d83af4578db9f1dcabad682e0cccb544",
+  "source_status": " M AGENTS.md\n M crates/overdrive-control-plane/src/worker/exit_observer.rs\n M crates/overdrive-control-plane/tests/acceptance/crash_ending_authority.rs\n M crates/overdrive-control-plane/tests/acceptance/terminal_hook_ownership.rs\n M crates/overdrive-core/src/traits/driver.rs\n M docs/feature/service-allocation-readiness-and-ending/deliver/roadmap.json\n?? docs/feature/metal-run-isolation/deliver/native-evidence/owner-burst-preimplementation-baseline-2026-11-09/\n?? docs/feature/service-allocation-readiness-and-ending/deliver/execution-log.json\n",
+  "peer_before_head": "22320c881bc8b2ec004dbbb89cce14634b9cd025",
+  "peer_before_status": "",
+  "peer_ignored": "!! .context/\n!! target/\n",
+  "peer_ignored_before": {
+    ".context": {
+      "device": 16777232,
+      "inode": 445190668,
+      "mode": 493,
+      "uid": 501,
+      "gid": 0,
+      "symlink": false
+    },
+    "target": {
+      "device": 16777232,
+      "inode": 444357944,
+      "mode": 493,
+      "uid": 501,
+      "gid": 0,
+      "symlink": false
+    }
+  },
+  "peer_update_command": [
+    "git",
+    "-C",
+    "/tmp/metal-run-isolation-peer.UKMMtE6B",
+    "switch",
+    "--detach",
+    "06f25ce2d83af4578db9f1dcabad682e0cccb544"
+  ],
+  "peer_update_output": "Previous HEAD position was 22320c881 fix(metal-run-isolation): stage nextest environment helper\nHEAD is now at 06f25ce2d docs(metal-run-isolation): retain owner burst comparison evidence\n",
+  "peer_after_head": "06f25ce2d83af4578db9f1dcabad682e0cccb544",
+  "peer_after_status": "",
+  "peer_ignored_after": {
+    ".context": {
+      "device": 16777232,
+      "inode": 445190668,
+      "mode": 493,
+      "uid": 501,
+      "gid": 0,
+      "symlink": false
+    },
+    "target": {
+      "device": 16777232,
+      "inode": 444357944,
+      "mode": 493,
+      "uid": 501,
+      "gid": 0,
+      "symlink": false
+    }
+  }
+}

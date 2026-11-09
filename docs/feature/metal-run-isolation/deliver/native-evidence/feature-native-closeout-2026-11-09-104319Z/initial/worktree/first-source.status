@@ -1,0 +1,9 @@
+ M AGENTS.md
+ M crates/overdrive-control-plane/src/worker/exit_observer.rs
+ M crates/overdrive-control-plane/tests/acceptance/crash_ending_authority.rs
+ M crates/overdrive-control-plane/tests/acceptance/terminal_hook_ownership.rs
+ M crates/overdrive-core/src/traits/driver.rs
+ M docs/feature/service-allocation-readiness-and-ending/deliver/roadmap.json
+ M website/content/blog/sharing-a-metal-box-without-sharing-test-state.mdx
+ M website/content/docs/how-to/run-verification-on-metal.mdx
+?? docs/feature/service-allocation-readiness-and-ending/deliver/execution-log.json

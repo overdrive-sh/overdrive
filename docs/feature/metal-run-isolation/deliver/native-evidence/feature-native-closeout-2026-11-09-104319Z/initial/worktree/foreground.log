@@ -1,0 +1,28 @@
+Traceback (most recent call last):
+  File "<stdin>", line 4, in <module>
+AssertionError
+Traceback (most recent call last):
+  File "<stdin>", line 4, in <module>
+AssertionError
+Traceback (most recent call last):
+  File "<stdin>", line 4, in <module>
+AssertionError
+Traceback (most recent call last):
+  File "<stdin>", line 4, in <module>
+AssertionError
+Traceback (most recent call last):
+  File "<stdin>", line 4, in <module>
+AssertionError
+Traceback (most recent call last):
+  File "<stdin>", line 24, in <module>
+AssertionError: real guest VMM must be live in both invocations
+Traceback (most recent call last):
+  File "<stdin>", line 24, in <module>
+AssertionError: real guest VMM must be live in both invocations
+Traceback (most recent call last):
+  File "<stdin>", line 24, in <module>
+AssertionError: real guest VMM must be live in both invocations
+Traceback (most recent call last):
+  File "<stdin>", line 24, in <module>
+AssertionError: real guest VMM must be live in both invocations
+METAL-ISOLATION-JOURNEY overlapping_ordinary_commands=true attributable_results=true physical_complement_unchanged=true owned_roots_absent=true

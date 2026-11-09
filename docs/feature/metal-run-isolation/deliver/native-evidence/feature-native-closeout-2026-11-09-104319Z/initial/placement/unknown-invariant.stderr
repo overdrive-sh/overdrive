@@ -1,0 +1,6 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.07s
+     Running `target/debug/xtask metal run -- cargo run -p overdrive-sim --bin dst -- --only metal-isolation-does-not-exist`
+xtask: running metal run (one bootstrap lease session)
+OVERDRIVE_METAL_RUN_ID=208ac058fd996a45586d8384
+OVERDRIVE_METAL_RUN_STARTED run_id=208ac058fd996a45586d8384
+OVERDRIVE_METAL_RUN_COMPLETE run_id=208ac058fd996a45586d8384 exit_code=1 cause=command_returned

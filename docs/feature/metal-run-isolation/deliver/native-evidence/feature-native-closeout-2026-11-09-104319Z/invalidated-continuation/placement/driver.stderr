@@ -1,0 +1,6 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.07s
+     Running `target/debug/xtask metal run --no-sync -- cargo nextest run -p xtask --test acceptance --features integration-tests -E 'test(placement::non_metal_and_explicit_exclusive_attempts_preserve_the_original_exec_chain)'`
+xtask: running metal run (one bootstrap lease session)
+OVERDRIVE_METAL_RUN_ID=9176d0f5b01bbe9af2ed6f26
+OVERDRIVE_METAL_RUNNER_ERROR error=source_mismatch
+pure--no-sync: expected 0, got 78

@@ -1,0 +1,26 @@
+/usr/bin/ssh
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire exclusive physical-maintenance barrier (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_RUN_REGISTERED run_id=599aaa9da34be0fb5cd26f9f
+OVERDRIVE_METAL_LEASE_ACQUIRED token=599aaa9da34be0fb5cd26f9f pid=2813358
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/ouagadougou -> ubuntu@151.115.99.251:/home/ubuntu/overdrive-worktrees/e3d831d7dafe621226ae6047ebcac3536f37470cafcf5dbb64eb9598886af410
+
+sent 2,187,084 bytes  received 58,961 bytes  641,727.14 bytes/sec
+total size is 2,076,025,443  speedup is 924.30
+
+########## [bootstrap] materialising standalone .git (common dir 7.4G)
+
+sent 417,062 bytes  received 19,068 bytes  290,753.33 bytes/sec
+total size is 878,388,176  speedup is 2,014.05
+## marcus-sa/nw-bugfix-crash-restart-tasks...origin/marcus-sa/nw-bugfix-crash-restart-tasks [ahead 2]
+ M AGENTS.md
+ M crates/overdrive-control-plane/src/worker/exit_observer.rs
+ M crates/overdrive-control-plane/tests/acceptance/crash_ending_authority.rs
+ M crates/overdrive-control-plane/tests/acceptance/terminal_hook_ownership.rs
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight

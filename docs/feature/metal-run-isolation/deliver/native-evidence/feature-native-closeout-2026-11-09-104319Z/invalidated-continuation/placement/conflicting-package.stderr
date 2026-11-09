@@ -1,0 +1,4 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.06s
+     Running `target/debug/xtask metal run -- cargo run -p overdrive-sim --package overdrive-testing --bin dst`
+xtask: running metal run (one bootstrap lease session)
+OVERDRIVE_METAL_RUNNER_ERROR error=unsupported_ordinary_command

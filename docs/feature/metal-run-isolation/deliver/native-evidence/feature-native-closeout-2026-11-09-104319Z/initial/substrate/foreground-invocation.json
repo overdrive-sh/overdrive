@@ -1,0 +1,86 @@
+{
+  "command": [
+    "ssh",
+    "ubuntu@151.115.99.251",
+    "python3",
+    "-"
+  ],
+  "cwd": "/Users/marcus/conductor/workspaces/helios/ouagadougou",
+  "started_at": "2026-11-09T10:44:32.194158+00:00",
+  "sources": {
+    "root": {
+      "canonical_checkout": "/Users/marcus/conductor/workspaces/helios/ouagadougou",
+      "head": "8914e5ee47da37689919399382b9304d75d18a21",
+      "status": " M AGENTS.md\n M crates/overdrive-control-plane/src/worker/exit_observer.rs\n M crates/overdrive-control-plane/tests/acceptance/crash_ending_authority.rs\n M crates/overdrive-control-plane/tests/acceptance/terminal_hook_ownership.rs\n M crates/overdrive-core/src/traits/driver.rs\n M docs/feature/service-allocation-readiness-and-ending/deliver/roadmap.json\n?? docs/feature/service-allocation-readiness-and-ending/deliver/execution-log.json\n",
+      "source_sha256": {
+        "infra/metal/lease-holder.sh": "f7d453b40d2c6523fa809daed8343d4e3648e7fbaa8e7aebc2c71cb7a98a5e8d",
+        "infra/metal/bootstrap.sh": "e12d6546c749ca723a014d205ef7cb224f157eff491eb020a8709e00a69808e5",
+        "infra/metal/test-wrapper.sh": "a721abc66e7aa02c35e9691e3ae755f424a3f93d4d38144535510e024d35f270",
+        "infra/metal/tests/worktree_journey.sh": "29431b7967c7ef574a12d1e1e8ed28271bb8cb586fdf71a7e1e7baf5ec599ede",
+        "infra/metal/tests/admission_journey.sh": "f7ea4ed3d26c0911e667ebe6537c74a608e52e26d20d83da0f3b0c02ef3520b1",
+        "infra/metal/tests/placement_journey.sh": "64e48c6a1b05f15e787be02a2cb18ad091e30ed18d1b6966f2d7da07aa121c39",
+        "infra/metal/tests/observe_host.py": "7ce09c87e07380dffe79ab378f085b33ccec90b12192a548b39165ce29ce931f",
+        "crates/overdrive-testing/src/guest_lane.rs": "70cdbfbdc38d23282c5bf200c451509dfd95afc7f2a3eea829971af581128b39",
+        "crates/overdrive-testing/bin/fwd_guest_suite.rs": "61346ebd1674a5eb807cdbc46a6841a8abd1d4e68532d1bf6cc16f7ee88e96ef"
+      }
+    },
+    "peer": {
+      "canonical_checkout": "/private/tmp/metal-run-isolation-peer.UKMMtE6B",
+      "head": "06f25ce2d83af4578db9f1dcabad682e0cccb544",
+      "status": "",
+      "source_sha256": {
+        "infra/metal/lease-holder.sh": "f7d453b40d2c6523fa809daed8343d4e3648e7fbaa8e7aebc2c71cb7a98a5e8d",
+        "infra/metal/bootstrap.sh": "e12d6546c749ca723a014d205ef7cb224f157eff491eb020a8709e00a69808e5",
+        "infra/metal/test-wrapper.sh": "a721abc66e7aa02c35e9691e3ae755f424a3f93d4d38144535510e024d35f270",
+        "infra/metal/tests/worktree_journey.sh": "29431b7967c7ef574a12d1e1e8ed28271bb8cb586fdf71a7e1e7baf5ec599ede",
+        "infra/metal/tests/admission_journey.sh": "f7ea4ed3d26c0911e667ebe6537c74a608e52e26d20d83da0f3b0c02ef3520b1",
+        "infra/metal/tests/placement_journey.sh": "64e48c6a1b05f15e787be02a2cb18ad091e30ed18d1b6966f2d7da07aa121c39",
+        "infra/metal/tests/observe_host.py": "7ce09c87e07380dffe79ab378f085b33ccec90b12192a548b39165ce29ce931f",
+        "crates/overdrive-testing/src/guest_lane.rs": "70cdbfbdc38d23282c5bf200c451509dfd95afc7f2a3eea829971af581128b39",
+        "crates/overdrive-testing/bin/fwd_guest_suite.rs": "61346ebd1674a5eb807cdbc46a6841a8abd1d4e68532d1bf6cc16f7ee88e96ef"
+      }
+    }
+  },
+  "configured_inputs": {
+    "OVERDRIVE_METAL_TARGET": "ubuntu@151.115.99.251",
+    "OVERDRIVE_METAL_KERNEL": "/srv/vm/overdrive-testing/kernel",
+    "OVERDRIVE_METAL_ROOTFS": "/srv/vm/overdrive-testing/rootfs.ext4"
+  },
+  "stdin_sha256": "646ec6dfd2d3fe7c43e6b9204fa66b058789f3f3d5c8bde6aa91e3434395fa3d",
+  "finished_at": "2026-11-09T10:44:34.352290+00:00",
+  "exit_code": 0,
+  "sources_after": {
+    "root": {
+      "canonical_checkout": "/Users/marcus/conductor/workspaces/helios/ouagadougou",
+      "head": "8914e5ee47da37689919399382b9304d75d18a21",
+      "status": " M AGENTS.md\n M crates/overdrive-control-plane/src/worker/exit_observer.rs\n M crates/overdrive-control-plane/tests/acceptance/crash_ending_authority.rs\n M crates/overdrive-control-plane/tests/acceptance/terminal_hook_ownership.rs\n M crates/overdrive-core/src/traits/driver.rs\n M docs/feature/service-allocation-readiness-and-ending/deliver/roadmap.json\n?? docs/feature/service-allocation-readiness-and-ending/deliver/execution-log.json\n",
+      "source_sha256": {
+        "infra/metal/lease-holder.sh": "f7d453b40d2c6523fa809daed8343d4e3648e7fbaa8e7aebc2c71cb7a98a5e8d",
+        "infra/metal/bootstrap.sh": "e12d6546c749ca723a014d205ef7cb224f157eff491eb020a8709e00a69808e5",
+        "infra/metal/test-wrapper.sh": "a721abc66e7aa02c35e9691e3ae755f424a3f93d4d38144535510e024d35f270",
+        "infra/metal/tests/worktree_journey.sh": "29431b7967c7ef574a12d1e1e8ed28271bb8cb586fdf71a7e1e7baf5ec599ede",
+        "infra/metal/tests/admission_journey.sh": "f7ea4ed3d26c0911e667ebe6537c74a608e52e26d20d83da0f3b0c02ef3520b1",
+        "infra/metal/tests/placement_journey.sh": "64e48c6a1b05f15e787be02a2cb18ad091e30ed18d1b6966f2d7da07aa121c39",
+        "infra/metal/tests/observe_host.py": "7ce09c87e07380dffe79ab378f085b33ccec90b12192a548b39165ce29ce931f",
+        "crates/overdrive-testing/src/guest_lane.rs": "70cdbfbdc38d23282c5bf200c451509dfd95afc7f2a3eea829971af581128b39",
+        "crates/overdrive-testing/bin/fwd_guest_suite.rs": "61346ebd1674a5eb807cdbc46a6841a8abd1d4e68532d1bf6cc16f7ee88e96ef"
+      }
+    },
+    "peer": {
+      "canonical_checkout": "/private/tmp/metal-run-isolation-peer.UKMMtE6B",
+      "head": "06f25ce2d83af4578db9f1dcabad682e0cccb544",
+      "status": "",
+      "source_sha256": {
+        "infra/metal/lease-holder.sh": "f7d453b40d2c6523fa809daed8343d4e3648e7fbaa8e7aebc2c71cb7a98a5e8d",
+        "infra/metal/bootstrap.sh": "e12d6546c749ca723a014d205ef7cb224f157eff491eb020a8709e00a69808e5",
+        "infra/metal/test-wrapper.sh": "a721abc66e7aa02c35e9691e3ae755f424a3f93d4d38144535510e024d35f270",
+        "infra/metal/tests/worktree_journey.sh": "29431b7967c7ef574a12d1e1e8ed28271bb8cb586fdf71a7e1e7baf5ec599ede",
+        "infra/metal/tests/admission_journey.sh": "f7ea4ed3d26c0911e667ebe6537c74a608e52e26d20d83da0f3b0c02ef3520b1",
+        "infra/metal/tests/placement_journey.sh": "64e48c6a1b05f15e787be02a2cb18ad091e30ed18d1b6966f2d7da07aa121c39",
+        "infra/metal/tests/observe_host.py": "7ce09c87e07380dffe79ab378f085b33ccec90b12192a548b39165ce29ce931f",
+        "crates/overdrive-testing/src/guest_lane.rs": "70cdbfbdc38d23282c5bf200c451509dfd95afc7f2a3eea829971af581128b39",
+        "crates/overdrive-testing/bin/fwd_guest_suite.rs": "61346ebd1674a5eb807cdbc46a6841a8abd1d4e68532d1bf6cc16f7ee88e96ef"
+      }
+    }
+  }
+}

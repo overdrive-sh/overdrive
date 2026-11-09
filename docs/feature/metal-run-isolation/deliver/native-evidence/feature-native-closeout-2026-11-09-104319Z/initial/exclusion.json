@@ -1,0 +1,10 @@
+{
+  "user_instruction": "stop focusing on failures that are not related to this feature !!!!!",
+  "excluded_driver_command": "run_case owner-cell 0 run -- cargo nextest run -p overdrive-init --bin overdrive-init --features integration-tests,kvm-tests -E 'test(guest_flow::real_kernel::a_burst_of_host_aborts_resets_every_application_connection)' --no-capture",
+  "excluded_identity": "guest_flow::real_kernel::a_burst_of_host_aborts_resets_every_application_connection",
+  "reason": "Known unrelated preimplementation owner-burst fixture failure, independently reproduced at 0e8ae265c2d80d98c345b342a396057940837e3a with the identical fixture/body blobs and the same 1000-end/1s assertion. All other original driver bytes, assertions and command/status/physical complements remain unchanged.",
+  "baseline_evidence": "docs/feature/metal-run-isolation/deliver/native-evidence/owner-burst-preimplementation-baseline-2026-11-09/README.md",
+  "baseline_outer_status": 100,
+  "baseline_ends_consumed": 78,
+  "qualified_result_only": true
+}

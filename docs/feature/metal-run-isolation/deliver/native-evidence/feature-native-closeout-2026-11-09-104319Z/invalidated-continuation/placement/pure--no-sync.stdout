@@ -1,0 +1,11 @@
+/usr/bin/ssh
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire exclusive physical-maintenance barrier (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_RUN_REGISTERED run_id=9176d0f5b01bbe9af2ed6f26
+OVERDRIVE_METAL_LEASE_ACQUIRED token=9176d0f5b01bbe9af2ed6f26 pid=2863743
+
+########## [bootstrap] no-sync source identity check

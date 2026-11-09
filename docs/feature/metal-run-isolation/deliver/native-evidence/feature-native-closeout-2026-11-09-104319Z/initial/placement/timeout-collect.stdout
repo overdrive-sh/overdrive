@@ -1,0 +1,18 @@
+/usr/bin/ssh
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+info: experimental features enabled: wrapper-scripts
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.00s
+────────────
+ Nextest run ID 933ebaaa-6b0f-44e8-b018-3b921bd3198c with nextest profile: default
+    Starting 1 test across 2 binaries (2 tests skipped)
+       START [         ] (1/1) metal-run-isolation-attempt-fixture::attempt selected_attempt_waits_for_its_timeout
+ TERMINATING [> 10.000s] (───) metal-run-isolation-attempt-fixture::attempt selected_attempt_waits_for_its_timeout
+     TIMEOUT [  10.002s] (1/1) metal-run-isolation-attempt-fixture::attempt selected_attempt_waits_for_its_timeout
+  Cancelling due to test failure
+────────────
+     Summary [  10.002s] 1 test run: 0 passed, 1 timed out, 2 skipped
+     TIMEOUT [  10.002s] (1/1) metal-run-isolation-attempt-fixture::attempt selected_attempt_waits_for_its_timeout
+error: test run failed

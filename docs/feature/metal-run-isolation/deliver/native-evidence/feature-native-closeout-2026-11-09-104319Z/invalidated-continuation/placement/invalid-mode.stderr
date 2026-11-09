@@ -1,0 +1,7 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.27s
+     Running `target/debug/xtask metal sync --exclusive`
+error: unexpected argument '--exclusive' found
+
+Usage: xtask metal sync
+
+For more information, try '--help'.

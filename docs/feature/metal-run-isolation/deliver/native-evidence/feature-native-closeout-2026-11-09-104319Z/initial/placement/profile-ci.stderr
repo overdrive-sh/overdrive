@@ -1,0 +1,6 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.06s
+     Running `target/debug/xtask metal run -- env RUST_LOG=metal_host_boot_id=acdbd1e5-824c-4946-9aa7-e3b67c05d9a5 cargo nextest run -p xtask --test acceptance --features integration-tests --profile ci --run-ignored only -E 'test(=acceptance::metal_run_isolation::placement::selected_guest_body_uses_its_own_kernel_in_existing_profiles)' --no-capture`
+xtask: running metal run (one bootstrap lease session)
+OVERDRIVE_METAL_RUN_ID=2251ca808653f44646eef113
+OVERDRIVE_METAL_RUN_STARTED run_id=2251ca808653f44646eef113
+OVERDRIVE_METAL_RUN_COMPLETE run_id=2251ca808653f44646eef113 exit_code=100 cause=command_returned

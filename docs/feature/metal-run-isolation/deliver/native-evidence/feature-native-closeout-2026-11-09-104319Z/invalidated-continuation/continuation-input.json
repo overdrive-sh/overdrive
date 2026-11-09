@@ -1,0 +1,99 @@
+{
+  "prefix_capture": "/tmp/metal-feature-closeout-20261109T104319Z/placement",
+  "prefix_source_head": "8914e5ee47da37689919399382b9304d75d18a21",
+  "continuation_source_head": "4bea1ebe3dc8da3cae9451c293ddbab4f39f4671",
+  "continuation_command": [
+    "bash",
+    "/tmp/metal-feature-placement-continuation-20261109T110421Z/continue-placement.sh",
+    "/Users/marcus/conductor/workspaces/helios/ouagadougou",
+    "/tmp/metal-feature-placement-continuation-20261109T110421Z/placement",
+    "1b54417e839c436092b85ad3",
+    "599aaa9da34be0fb5cd26f9f"
+  ],
+  "copied_prefix_files": [
+    {
+      "name": "before.json",
+      "origin": "/tmp/metal-feature-closeout-20261109T104319Z/placement/before.json",
+      "sha256": "27c6e7fb25b9f86f5829457bfcd6a2b3d2804532f9abf3b17fe31b19f8354695"
+    },
+    {
+      "name": "raw-test.stderr",
+      "origin": "/tmp/metal-feature-closeout-20261109T104319Z/placement/raw-test.stderr",
+      "sha256": "c0e40f4648e5af48bcff6ee6ebb0b915eae62e79bcd06133c6f3c747769e78ac"
+    },
+    {
+      "name": "shell-chain.stderr",
+      "origin": "/tmp/metal-feature-closeout-20261109T104319Z/placement/shell-chain.stderr",
+      "sha256": "fed34ebbeaa73f85496ab67fece6b292d01bb66477d8be10e1c142cb7d83c39d"
+    },
+    {
+      "name": "host-module.stderr",
+      "origin": "/tmp/metal-feature-closeout-20261109T104319Z/placement/host-module.stderr",
+      "sha256": "902f6d4a287f0051a9b7d69fdfd6628b409cb6d8ab78afb964c075e0aa1acbfe"
+    },
+    {
+      "name": "duplicate-env.stderr",
+      "origin": "/tmp/metal-feature-closeout-20261109T104319Z/placement/duplicate-env.stderr",
+      "sha256": "f0a40a8208ca1467a36e38d75a9cf562dd09c1fe84fd4eb48d4955d13cbf0762"
+    },
+    {
+      "name": "context-env.stderr",
+      "origin": "/tmp/metal-feature-closeout-20261109T104319Z/placement/context-env.stderr",
+      "sha256": "a5a45167f6c8ba9fc7d659f958b4f48276448ac441ecaaa10922950e04370bf7"
+    },
+    {
+      "name": "invalid-bpf-selector.stderr",
+      "origin": "/tmp/metal-feature-closeout-20261109T104319Z/placement/invalid-bpf-selector.stderr",
+      "sha256": "2f077aeeda100b514a826c7616a62868de18eb5a3716f3623babfff7892e26d6"
+    },
+    {
+      "name": "invalid-group.stderr",
+      "origin": "/tmp/metal-feature-closeout-20261109T104319Z/placement/invalid-group.stderr",
+      "sha256": "f3a99108f0110c6c9a4f30dd62fabd8d4fd87427161bcddf4007169e6eb6b314"
+    },
+    {
+      "name": "env-option.stderr",
+      "origin": "/tmp/metal-feature-closeout-20261109T104319Z/placement/env-option.stderr",
+      "sha256": "ad3a8cc0942dfc43d5b10a10bcbaef369bd827c0ec345c3989a0853c890d3178"
+    },
+    {
+      "name": "conflicting-package.stderr",
+      "origin": "/tmp/metal-feature-closeout-20261109T104319Z/placement/conflicting-package.stderr",
+      "sha256": "0f991bc1cd049fa439a0f4c3c9b75696c218d16fcfa99e3b8b840fe91419af89"
+    },
+    {
+      "name": "config-replacement.stderr",
+      "origin": "/tmp/metal-feature-closeout-20261109T104319Z/placement/config-replacement.stderr",
+      "sha256": "b857f646b3fb3cd53caa49fdd949f79d3366c779f4c63f090f859c1fa892d59f"
+    },
+    {
+      "name": "debugger-replacement.stderr",
+      "origin": "/tmp/metal-feature-closeout-20261109T104319Z/placement/debugger-replacement.stderr",
+      "sha256": "6761df3bae007836db6dcc1694a2a20c77257292ae44b76483776d003d05df0a"
+    },
+    {
+      "name": "archive-reuse.stderr",
+      "origin": "/tmp/metal-feature-closeout-20261109T104319Z/placement/archive-reuse.stderr",
+      "sha256": "e283072a54afe8b1650553c7dd05814f5fb3d5512dd94b6d7719822058eb586c"
+    },
+    {
+      "name": "foreign-target.stderr",
+      "origin": "/tmp/metal-feature-closeout-20261109T104319Z/placement/foreign-target.stderr",
+      "sha256": "d874b5f6d68251712519367b6e08b4bceeb0a83ef24cbe9a65730a386c1cd774"
+    },
+    {
+      "name": "foreign-manifest.stderr",
+      "origin": "/tmp/metal-feature-closeout-20261109T104319Z/placement/foreign-manifest.stderr",
+      "sha256": "e0baee9867089cc84521251ef80436073780370ceb933ddb68d1efca4e7f41a7"
+    }
+  ],
+  "remaining_original_commands": [
+    "invalid-mode sync --exclusive (expected2)",
+    "pure ordinary host-pure (expected0)",
+    "pure --no-sync (expected0)",
+    "pure --no-sudo (expected0)",
+    "pure --no-sync --no-sudo (expected0)"
+  ],
+  "ownership": "The original foreign fixture was already removed by the completed failed driver cleanup with status0. No new foreign fixture is needed by the unchanged tail. Original invocation IDs and initial physical snapshot remain the actual earlier observations; no prefix command is claimed to rerun at this source.",
+  "exclusion": "Only preexisting owner burst body excluded, as recorded in original exclusion.json; original archive oracle failure retained unchanged."
+}

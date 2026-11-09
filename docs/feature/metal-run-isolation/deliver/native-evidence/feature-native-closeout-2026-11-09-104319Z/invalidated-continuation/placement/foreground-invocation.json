@@ -1,0 +1,26 @@
+{
+  "command": [
+    "bash",
+    "/tmp/metal-feature-placement-continuation-20261109T110421Z/continue-placement.sh",
+    "/Users/marcus/conductor/workspaces/helios/ouagadougou",
+    "/tmp/metal-feature-placement-continuation-20261109T110421Z/placement",
+    "1b54417e839c436092b85ad3",
+    "599aaa9da34be0fb5cd26f9f"
+  ],
+  "started_at": "2026-11-09T11:04:43.319136+00:00",
+  "source_head": "4bea1ebe3dc8da3cae9451c293ddbab4f39f4671",
+  "source_status": " M AGENTS.md\n M crates/overdrive-control-plane/src/worker/exit_observer.rs\n M crates/overdrive-control-plane/tests/acceptance/crash_ending_authority.rs\n M crates/overdrive-control-plane/tests/acceptance/terminal_hook_ownership.rs\n M crates/overdrive-core/src/traits/driver.rs\n M docs/feature/metal-run-isolation/feature-delta.md\n M docs/feature/service-allocation-readiness-and-ending/deliver/roadmap.json\n M website/content/blog/sharing-a-metal-box-without-sharing-test-state.mdx\n M website/content/docs/how-to/run-verification-on-metal.mdx\n?? docs/feature/metal-run-isolation/deliver/review-slice.md\n?? docs/feature/service-allocation-readiness-and-ending/deliver/execution-log.json\n",
+  "source_sha256": {
+    "infra/metal/lease-holder.sh": "f7d453b40d2c6523fa809daed8343d4e3648e7fbaa8e7aebc2c71cb7a98a5e8d",
+    "infra/metal/bootstrap.sh": "e12d6546c749ca723a014d205ef7cb224f157eff491eb020a8709e00a69808e5",
+    "infra/metal/test-wrapper.sh": "a721abc66e7aa02c35e9691e3ae755f424a3f93d4d38144535510e024d35f270",
+    "infra/metal/tests/placement_journey.sh": "19b4cf738293299b862e1bfe6c71c661f8eee086f3432e6ea775c7179be56dac",
+    "crates/overdrive-testing/src/guest_lane.rs": "70cdbfbdc38d23282c5bf200c451509dfd95afc7f2a3eea829971af581128b39",
+    "crates/overdrive-testing/bin/fwd_guest_suite.rs": "61346ebd1674a5eb807cdbc46a6841a8abd1d4e68532d1bf6cc16f7ee88e96ef"
+  },
+  "scope": "Continuation only: original immutable prefix remains attributed to 8914e5ee; corrected marker loops replay its captured outputs, then original invalid-mode/four pure-mode commands and final physical/owner assertions execute unchanged. Earlier foreign-fixture cleanup0 retained; no new fixture or setup needed.",
+  "exit_code": 1,
+  "finished_at": "2026-11-09T11:05:36.687723+00:00",
+  "source_head_after": "4bea1ebe3dc8da3cae9451c293ddbab4f39f4671",
+  "source_status_after": " M AGENTS.md\n M crates/overdrive-control-plane/src/worker/exit_observer.rs\n M crates/overdrive-control-plane/tests/acceptance/crash_ending_authority.rs\n M crates/overdrive-control-plane/tests/acceptance/terminal_hook_ownership.rs\n M crates/overdrive-core/src/traits/driver.rs\n M docs/feature/metal-run-isolation/feature-delta.md\n M docs/feature/service-allocation-readiness-and-ending/deliver/roadmap.json\n M website/content/blog/sharing-a-metal-box-without-sharing-test-state.mdx\n M website/content/docs/how-to/run-verification-on-metal.mdx\n?? docs/feature/metal-run-isolation/deliver/native-evidence/feature-native-closeout-2026-11-09-104319Z/\n?? docs/feature/metal-run-isolation/deliver/review-slice.md\n?? docs/feature/service-allocation-readiness-and-ending/deliver/execution-log.json\n"
+}

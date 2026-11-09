@@ -1,0 +1,4 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.06s
+     Running `target/debug/xtask metal run -- cargo nextest run -p xtask --test acceptance -E 'test(=acceptance::metal_run_isolation::placement::non_metal_and_explicit_exclusive_attempts_preserve_the_original_exec_chain)' --config-file .config/nextest.toml`
+xtask: running metal run (one bootstrap lease session)
+OVERDRIVE_METAL_RUNNER_ERROR error=execution_override_refused

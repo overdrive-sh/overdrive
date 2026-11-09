@@ -1,0 +1,7 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.06s
+     Running `target/debug/xtask metal run --no-sudo -- cargo nextest run -p xtask --test acceptance --features integration-tests -E 'test(placement::non_metal_and_explicit_exclusive_attempts_preserve_the_original_exec_chain)'`
+xtask: running metal run (one bootstrap lease session)
+OVERDRIVE_METAL_RUN_ID=cbc4adb69839725766cd35be
+install: cannot create directory '/home/ubuntu/overdrive-worktrees/e3d831d7dafe621226ae6047ebcac3536f37470cafcf5dbb64eb9598886af410/target/metal-run-tmp/cbc4adb69839725766cd35be': Permission denied
+OVERDRIVE_METAL_RUNNER_ERROR error=runner_preparation_failed
+OVERDRIVE_METAL_RUNNER_ERROR error=runner_preparation_failed

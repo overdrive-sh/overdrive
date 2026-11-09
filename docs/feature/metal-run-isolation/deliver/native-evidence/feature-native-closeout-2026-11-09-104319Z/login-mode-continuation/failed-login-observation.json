@@ -1,0 +1,12 @@
+{
+  "command": [
+    "ssh",
+    "ubuntu@151.115.99.251",
+    "sudo -n python3 -",
+    "cbc4adb69839725766cd35be"
+  ],
+  "started_at": "2026-11-09T11:09:18.239673+00:00",
+  "scope": "Existing read-only observe_host for the exact failed login invocation after canonical command returned75; no test or mutation.",
+  "exit_code": 0,
+  "finished_at": "2026-11-09T11:09:19.894065+00:00"
+}
