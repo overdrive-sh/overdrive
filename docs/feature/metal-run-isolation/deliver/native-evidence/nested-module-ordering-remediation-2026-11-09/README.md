@@ -9,12 +9,16 @@ KVM and vhost modules were loaded.
 
 ## Change
 
-`crates/overdrive-testing/bin/fwd_guest_suite.rs` now keeps XFS staged outside
-the bulk module list because `prepare_nested_attempt` loads it first for
-`losetup`. The existing bulk `guest.module_paths` load now runs before the
-device-node chmod. This follows the existing `run_nested_boundary` order:
-load XFS for reflink setup, load the nested device modules, then set device
-permissions. All staged module failures still propagate through the existing
+The first focused fix removed XFS from the shared `nested_vm_test_support`
+module list. Review found that the existing batched
+`run_nested_vm_test_binary_with_resources` caller also consumes that list and
+needs XFS loaded before its `losetup`/reflink setup. The final correction keeps
+XFS in the shared list. In the nextest per-test path, `prepare_nested_attempt`
+loads XFS explicitly for `losetup`, then removes only that known path from its
+local bulk list to avoid a duplicate load; it loads the remaining staged
+modules before the device-node chmod. This matches the existing batch's
+module-before-chmod order while preserving its shared XFS precondition. All
+module load failures still propagate through the existing
 `guest_execution_failed` path. No test body, kernel configuration, VMM
 identity, confinement, guest input, or oracle changed.
 
