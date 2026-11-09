@@ -19,6 +19,7 @@ fn arb_proto() -> impl Strategy<Value = Proto> {
 proptest! {
     /// Every protocol x every non-zero port round-trips through the text form.
     #[test]
+    /// CONTRACT_SHAPE: pure-function.
     #[ignore = "pending DELIVER: D13 LISTEN beacon line wire form"]
     fn listen_round_trips_for_every_protocol_and_port(
         protocol in arb_proto(),
@@ -36,6 +37,7 @@ proptest! {
 
     /// A non-numeric or out-of-range port is a typed error, never a panic.
     #[test]
+    /// CONTRACT_SHAPE: pure-function.
     #[ignore = "pending DELIVER: D13 LISTEN beacon line wire form"]
     fn listen_with_an_out_of_range_port_is_a_typed_error(
         protocol in arb_proto(),
@@ -55,6 +57,7 @@ proptest! {
 /// Wrong field count, port 0, unknown protocol and a non-numeric port are each
 /// `BeaconParseError::MalformedListen` carrying the full line (DG-M).
 #[test]
+/// CONTRACT_SHAPE: pure-function.
 #[ignore = "pending DELIVER: D13 LISTEN beacon line wire form"]
 fn malformed_listen_lines_are_rejected_with_a_typed_error() {
     for line in [

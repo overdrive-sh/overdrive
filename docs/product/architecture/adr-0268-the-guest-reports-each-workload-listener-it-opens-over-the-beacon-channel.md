@@ -2,13 +2,13 @@
 
 ## Status
 
-User-approved, 2026-11-03; the rulings PR-1 (read seam) and PR-2 (hook scope; V42 held,
-[findings](../../feature/service-allocation-readiness-and-ending/spike/findings-workload-cgroup.md))
-are recorded in the feature delta's approval record, as are A1 (the board's entry lives from
-`open` to `close`; the frozen-at-end-of-wait rule is the host reader's) and A3 (a host-input
-conformance projection of the report model), both accepted 2026-11-04; not yet Accepted (remaining gates:
-model check, design review). Not implemented. GH #318, GH #334. Contract
-and status: [feature delta](../../feature/service-allocation-readiness-and-ending/feature-delta.md) (D13).
+**Accepted, 2026-11-09, after user rulings and independent full DESIGN review
+iteration 4** ([review](../../feature/service-allocation-readiness-and-ending/design/review.md)).
+PR-1, PR-2, A1 and A3 are in the [feature delta](../../feature/service-allocation-readiness-and-ending/feature-delta.md)
+(D13); V42 is held ([findings](../../feature/service-allocation-readiness-and-ending/spike/findings-workload-cgroup.md)).
+The exact D13-S1 `VmDriver::new` and `ReportedListeners` signatures were
+user-approved 2026-11-09 (“rest is fine”) and are pinned there. Not implemented.
+GH #318, GH #334.
 Related: [ADR-0272](adr-0272-the-guest-observes-workload-listeners-with-kernel-hooks-not-a-poll.md)
 (what produces the report), [ADR-0269](adr-0269-a-service-with-no-declared-startup-probe-waits-on-a-guest-listener-startup-probe.md)
 (who consumes it), [ADR-0256](adr-0256-the-shim-registers-probe-supervision-before-it-releases-the-exit-event-gate.md)

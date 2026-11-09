@@ -3,7 +3,14 @@
 ## Status
 
 Accepted, 2026-11-03 (approval: feature delta § Approval record, D11, all seven
-shape choices; the defect is finding F-5 in the same document). Not implemented.
+shape choices; the defect is finding F-5 in the same document). **Amended by
+D11-E1, user-approved 2026-11-09** (user: “Approve all three exact contracts”):
+the in-process Service stream returns a typed read error; the original
+no-new-public-surface statement below is superseded only for that Rust error
+type. The exact signature and error mapping are in the feature delta § D11
+interface changes. Bounded technical review iteration 2 and independent full
+DESIGN review iteration 4 approved the exact amendment
+([review](../../feature/service-allocation-readiness-and-ending/design/review.md)). Not implemented.
 GH #318, GH #334. The Job stream's related defects (F-6) are GH #340 and are not
 changed here. The exact contract, the lifecycle gate (G-8), the formal protocol
 model and the DISTILL obligations (S-39 to S-42) live in the
@@ -40,9 +47,11 @@ stream terminal, reports it and ends; otherwise it waits as before.**
   restartable stop and a superseded attempt's terminal are not a verdict.
 - On a lagged subscriber the stream reads again.
 - A failed read ends the stream with a stream error. It is not treated as "no
-  verdict".
+  verdict". D11-E1 preserves the typed observation-store cause at the Rust
+  stream boundary and keeps line-emission failures a separate error variant.
 - The owner is the stream handler. The deploy handler, the reconcilers, the wire,
-  the persisted state and the CLI do not change, and no public surface is added.
+  the persisted state and the CLI wire do not change. D11-E1 adds one public
+  in-process Rust stream error type and changes the stream item's error type.
 
 ## Alternatives considered
 
@@ -68,7 +77,8 @@ stream terminal, reports it and ends; otherwise it waits as before.**
   once.
 - Positive: the first-deploy race and the lagged-subscriber wait are closed by the
   same read.
-- Positive: no new public surface, no wire, persisted or CLI change.
+- Positive: the observation-read failure is typed at the in-process stream
+  boundary (D11-E1); no wire, persisted or CLI wire change.
 - Negative: the stream now reports a recorded `Stopped` for an operator-stopped
   workload (exit 0) on an unchanged redeploy; it does not resume the workload.
 - Negative: the Job stream keeps its own recovery, which absorbs a read failure and

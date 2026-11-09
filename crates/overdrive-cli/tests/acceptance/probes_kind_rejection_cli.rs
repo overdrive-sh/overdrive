@@ -33,6 +33,7 @@ use overdrive_cli::render::cli_error_to_exit_code;
 use overdrive_core::aggregate::{
     JOB_PROBES_GUIDANCE, ParseError, SCHEDULE_PROBES_GUIDANCE, WorkloadSpecInput,
 };
+use overdrive_core::observation::ProbeRole;
 use tempfile::TempDir;
 
 /// Write `body` to a `*.toml` fixture in a fresh tempdir and return the
@@ -194,5 +195,47 @@ async fn given_service_with_probe_section_when_submit_then_accepted_no_parse_err
             panic!("Service + probe must NOT trip the kind-rejection (regression guard)");
         }
         other => panic!("expected Service kind to parse, got {other:?}"),
+    }
+}
+
+/// D14-E2: both CLI deploy modes preserve the parser's typed platform-only
+/// cause and exit 1 before reading config or making an HTTP request.
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test]
+#[ignore = "pending DELIVER: D14-E2 typed GuestListeners TOML error through both CLI deploy modes"]
+async fn canonical_guest_listeners_token_is_typed_in_each_role_on_both_cli_modes() {
+    let base = SERVICE_WITH_READINESS_PROBE
+        .split("[[health_check.readiness]]")
+        .next()
+        .expect("fixture has a readiness stanza");
+    for role in [ProbeRole::Startup, ProbeRole::Readiness, ProbeRole::Liveness] {
+        let name = match role {
+            ProbeRole::Startup => "startup",
+            ProbeRole::Readiness => "readiness",
+            ProbeRole::Liveness => "liveness",
+        };
+        for token in ["guest_listeners", "GUEST_LISTENERS"] {
+            let toml = format!("{base}\n[[health_check.{name}]]\ntype = \"{token}\"\n");
+            let (spec, _tmp) = write_fixture(&toml);
+            let args = DeployArgs { spec, config_path: PathBuf::from("/nonexistent/config") };
+            for streaming in [false, true] {
+                let error = if streaming {
+                    deploy::deploy_streaming(args.clone()).await.expect_err("platform-only token")
+                } else {
+                    deploy::deploy(args.clone()).await.expect_err("platform-only token")
+                };
+                match &error {
+                    CliError::ParseError(ParseError::GuestListenersNotOperatorConfigurable {
+                        role: got,
+                        probe_idx,
+                    }) => {
+                        assert_eq!(*got, role, "{name}/{token}/{streaming}");
+                        assert_eq!(*probe_idx, 0);
+                    }
+                    other => panic!("{name}/{token}/{streaming}: wrong typed CLI error: {other:?}"),
+                }
+                assert_eq!(cli_error_to_exit_code(&error), 1);
+            }
+        }
     }
 }

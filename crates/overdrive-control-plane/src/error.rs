@@ -998,7 +998,12 @@ pub fn to_response(err: ControlPlaneError) -> (StatusCode, ErrorBody) {
             // `None` for validation errors routed through `#[from]`.
             let field = match &e {
                 AggregateError::Validation { field, .. } => Some((*field).to_string()),
-                AggregateError::Id(_) | AggregateError::Resources(_) => None,
+                // RED scaffold: D14-E2's exact field mapping lands with the
+                // GuestListeners admission checks in DELIVER 05-04.
+                AggregateError::GuestListenersInvalidRole { .. }
+                | AggregateError::GuestListenersNotSoleStartup { .. }
+                | AggregateError::Id(_)
+                | AggregateError::Resources(_) => None,
             };
             (
                 StatusCode::BAD_REQUEST,

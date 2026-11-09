@@ -39,6 +39,7 @@ fn startup_stopped(row: &overdrive_core::traits::observation_store::AllocStatusR
 /// `Failed { StartupProbeFailed { 0, last_fail, 5 } }` with the row terminal
 /// `ServiceFailed { StartupProbeFailed }`.
 #[tokio::test]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D7 a startup-probe failure stops the allocation and the restart authority names it at give-up"]
 async fn never_ready_guest_is_stopped_and_restarted_until_give_up_names_the_startup_failure() {
     let mut world = RestartWorld::compose(Shape::StartupProbe).await;
@@ -102,6 +103,7 @@ async fn never_ready_guest_is_stopped_and_restarted_until_give_up_names_the_star
 /// first terminal is `Failed { Timeout { 90 } }` carrying the first attempt's
 /// startup stop as `last_attempt`; the give-up arrives on the row later.
 #[tokio::test]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D7 startup stop; D10 progress deadline carries the last attempt"]
 async fn never_ready_guest_with_the_default_startup_window_times_out_naming_the_first_stop() {
     let mut world = RestartWorld::compose(Shape::DefaultStartupWindow).await;
@@ -141,6 +143,7 @@ async fn never_ready_guest_with_the_default_startup_window_times_out_naming_the_
 /// S-22 (a successor that binds): the stream ends `Stable`, and no
 /// `StartupProbeFailed` is ever written.
 #[tokio::test]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D7 a startup-probe failure stops the allocation"]
 async fn successor_that_binds_after_a_startup_stop_ends_the_stream_stable() {
     let mut world = RestartWorld::compose(Shape::StartupProbe).await;
@@ -189,6 +192,7 @@ async fn opt_out_service_never_receives_the_startup_stop() {
 /// budget and termination are unchanged) and the give-up names the startup
 /// failure.
 #[tokio::test]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D7 a startup-probe failure stops the allocation and the restart authority names it at give-up"]
 async fn crash_racing_the_startup_stop_leaves_the_stop_row_and_the_give_up_names_startup() {
     let mut world = RestartWorld::compose(Shape::StartupProbe).await;
@@ -217,6 +221,7 @@ async fn crash_racing_the_startup_stop_leaves_the_stop_row_and_the_give_up_names
 /// `Terminated` / `Stopped { StartupProbe }` after the first success; the
 /// successor starts only after the stop landed.
 #[tokio::test]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D8 a startup stop that does not land is retried once per new written startup probe row"]
 async fn failed_startup_stop_is_retried_once_per_new_startup_row() {
     let mut world = RestartWorld::compose(Shape::StartupProbe).await;
@@ -255,6 +260,7 @@ async fn failed_startup_stop_is_retried_once_per_new_startup_row() {
 /// S-30 (D8, late `Pass`): the stop fails, then the startup probe passes: no
 /// further stop is emitted and the allocation reaches `Stable`.
 #[tokio::test]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D8 a startup pass after a stop that did not land ends the retry and reaches Stable"]
 async fn late_startup_pass_after_a_failed_stop_ends_the_retry_and_reaches_stable() {
     let mut world = RestartWorld::compose(Shape::StartupProbe).await;
@@ -281,6 +287,7 @@ async fn late_startup_pass_after_a_failed_stop_ends_the_retry_and_reaches_stable
 /// retry finds the guest stopped (not-found tolerated), writes the row, and
 /// only then does the supervised-allocation count fall.
 #[tokio::test]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: B2 on_alloc_terminal fires after the stop's terminal row write succeeds"]
 async fn failed_stop_row_write_keeps_the_supervisor_and_the_next_probe_row_retries() {
     let mut world = RestartWorld::compose(Shape::StartupProbe).await;

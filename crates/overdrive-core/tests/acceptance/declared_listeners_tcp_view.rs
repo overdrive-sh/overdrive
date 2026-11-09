@@ -48,6 +48,7 @@ fn arb_listener() -> impl Strategy<Value = Listener> {
 
 proptest! {
     /// S-55: for every declared list the TCP view is the TCP filter, in order.
+    /// CONTRACT_SHAPE: pure-function.
     #[test]
     #[ignore = "pending DELIVER: PR-4 tcp_service_ports is the TCP filter of declared_listeners"]
     fn the_tcp_view_is_the_tcp_filter_of_the_declared_listeners_in_declaration_order(
@@ -64,6 +65,7 @@ proptest! {
 
 /// S-55 golden cases: a UDP-only declaration has an empty TCP view (so no
 /// TPROXY rule is installed for it); a mixed one keeps TCP ports in order.
+/// CONTRACT_SHAPE: pure-function.
 #[test]
 #[ignore = "pending DELIVER: PR-4 tcp_service_ports is the TCP filter of declared_listeners"]
 fn a_udp_only_declaration_has_no_tcp_ports_and_a_mixed_one_keeps_tcp_order() {

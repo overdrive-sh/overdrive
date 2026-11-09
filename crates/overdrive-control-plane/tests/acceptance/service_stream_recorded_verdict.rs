@@ -11,6 +11,8 @@
 //! * S-41 — the line built from a committed row equals the line built from the event
 //!   the shim published for that write.
 //! * S-42 — a failed observation read ends the stream with an error.
+//!   Its states are Accepted/open, subscribed/waiting, Lagged/relisting and
+//!   closed; a read fault in either read state transitions directly to closed.
 //!
 //! S-40 and S-42 drive `build_service_stream` directly with rows written through
 //! `SimObservationStore` and events sent on the bus at scripted points; the
@@ -26,6 +28,7 @@
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::too_many_lines)]
 #![allow(clippy::doc_markdown, clippy::print_stderr, clippy::large_futures)]
 
+use std::error::Error as _;
 use std::pin::Pin;
 use std::time::Duration;
 
@@ -34,11 +37,13 @@ use futures::{FutureExt as _, Stream, StreamExt as _};
 use overdrive_control_plane::action_shim::LifecycleEvent;
 use overdrive_control_plane::api::{AllocStateWire, IdempotencyOutcome, TransitionSource};
 use overdrive_control_plane::streaming::{
-    ServiceSubmitEvent, build_service_accepted, build_service_stream, service_event_from_terminal,
+    ServiceStreamError, ServiceSubmitEvent, build_service_accepted, build_service_stream,
+    service_event_from_terminal,
 };
 use overdrive_core::TransitionReason;
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::WorkloadKind;
+use overdrive_core::codec::EnvelopeError;
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::reconcilers::Action;
 use overdrive_core::traits::observation_store::{
@@ -50,7 +55,7 @@ use overdrive_core::transition_reason::{
 
 use super::service_stream_support::{Node, service_spec, settle};
 
-type Lines = Pin<Box<dyn Stream<Item = Result<Bytes, std::io::Error>> + Send>>;
+type Lines = Pin<Box<dyn Stream<Item = Result<Bytes, ServiceStreamError>> + Send>>;
 
 /// One poll of the stream: what it yields right now, if anything.
 #[derive(Debug, PartialEq)]
@@ -226,6 +231,7 @@ fn verdicts(workload: &str) -> Vec<Verdict> {
 /// subscribes and reads is read, not missed: the line is the same one the live path
 /// would deliver, and it is yielded exactly once.
 #[tokio::test(flavor = "current_thread")]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D11 recorded verdict read before the stream waits"]
 async fn a_terminal_committed_and_published_before_the_stream_reads_is_reported_once() {
     let seed = 4001;
@@ -274,6 +280,7 @@ async fn a_terminal_committed_and_published_after_the_read_is_delivered_live() {
 /// overflows with other workloads' events) and recovers the terminal by relisting the
 /// rows.
 #[tokio::test(flavor = "current_thread")]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D11 relist on Lagged"]
 async fn a_lagged_stream_recovers_the_terminal_it_missed_by_relisting() {
     let seed = 4003;
@@ -390,52 +397,118 @@ async fn an_event_arriving_with_the_deadline_wins_over_the_timeout() {
 // S-42 — a failed read is not absorbed
 // ===========================================================================
 
+fn read_failure(case: &str) -> ObservationStoreError {
+    match case {
+        "unreachable" => ObservationStoreError::Unreachable { peer: "peer-b".to_owned() },
+        "io" => ObservationStoreError::Io(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "read denied",
+        )),
+        "envelope" => ObservationStoreError::Envelope {
+            source: EnvelopeError::UnknownVersion {
+                observed: 7,
+                type_name: "AllocStatusRowEnvelope",
+                supported_max: 2,
+            },
+        },
+        _ => panic!("unknown observation cause"),
+    }
+}
+
+fn assert_read_failure(stream: &mut Lines, case: &str) {
+    let error = match stream.next().now_or_never() {
+        Some(Some(Err(error))) => error,
+        other => panic!("{case}: expected a typed read failure without waiting, got {other:?}"),
+    };
+    assert!(
+        error.source().and_then(|source| source.downcast_ref::<ObservationStoreError>()).is_some(),
+        "the in-process error chain retains the original typed observation cause",
+    );
+    match (case, error) {
+        (
+            "unreachable",
+            ServiceStreamError::ObservationRead {
+                source: ObservationStoreError::Unreachable { peer },
+            },
+        ) => assert_eq!(peer, "peer-b"),
+        (
+            "io",
+            ServiceStreamError::ObservationRead { source: ObservationStoreError::Io(source) },
+        ) => {
+            assert_eq!(source.kind(), std::io::ErrorKind::PermissionDenied);
+            assert_eq!(source.to_string(), "read denied");
+        }
+        (
+            "envelope",
+            ServiceStreamError::ObservationRead {
+                source:
+                    ObservationStoreError::Envelope {
+                        source: EnvelopeError::UnknownVersion { observed, type_name, supported_max },
+                    },
+            },
+        ) => {
+            assert_eq!(observed, 7);
+            assert_eq!(type_name, "AllocStatusRowEnvelope");
+            assert_eq!(supported_max, 2);
+        }
+        (_, other) => panic!("{case}: unexpected typed stream failure: {other:?}"),
+    }
+    assert_eq!(poll_once(stream), Polled::Ended, "one error then end");
+}
+
 /// S-42 — a failed observation read at open ends the stream with an error: it does
 /// not yield `Timeout`, wait for the deadline, or treat the fault as "no verdict";
 /// the store is unchanged.
+/// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread")]
 #[ignore = "pending DELIVER: D11 a failed read ends the stream with an error"]
 async fn a_failed_read_at_open_ends_the_stream_with_an_error_and_never_waits() {
-    let seed = 4201;
-    eprintln!("service-stream-recorded-verdict seed={seed} case=read-fails-at-open");
-    let node = Node::boot(seed).await;
-    let mut stream = open(&node, "w-read", Duration::from_secs(3600)).await;
-    let rows_before = node.obs.alloc_status_rows().await.expect("rows");
-    node.obs.inject_alloc_status_rows_failure(ObservationStoreError::Unreachable {
-        peer: "peer-b".to_owned(),
-    });
-
-    let polled = poll_once(&mut stream);
-
-    assert!(matches!(polled, Polled::Error(_)), "a typed stream error, not a wait; got {polled:?}");
-    assert_eq!(poll_once(&mut stream), Polled::Ended, "the stream ended");
-    assert_eq!(node.obs.alloc_status_rows().await.expect("rows"), rows_before, "store unchanged");
-    node.clock.tick(Duration::from_secs(7200));
-    settle().await;
-    assert_eq!(poll_once(&mut stream), Polled::Ended, "no Timeout after the deadline either");
+    for (index, case) in ["unreachable", "io", "envelope"].into_iter().enumerate() {
+        let seed = 4201 + index as u64;
+        eprintln!("service-stream-recorded-verdict seed={seed} case=read-fails-at-open/{case}");
+        let node = Node::boot(seed).await;
+        let mut stream = open(&node, "w-read", Duration::from_secs(3600)).await;
+        let rows_before = node.obs.alloc_status_rows().await.expect("rows");
+        node.obs.inject_alloc_status_rows_failure(read_failure(case));
+        assert_read_failure(&mut stream, case);
+        assert_eq!(
+            node.obs.alloc_status_rows().await.expect("rows"),
+            rows_before,
+            "store unchanged"
+        );
+        node.clock.tick(Duration::from_secs(7200));
+        settle().await;
+        assert_eq!(poll_once(&mut stream), Polled::Ended, "no Timeout after the deadline either");
+    }
 }
 
 /// S-42 — a failed read on the relist after `Lagged` ends the stream with an error.
+/// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread")]
 #[ignore = "pending DELIVER: D11 relist on Lagged; a failed relist ends the stream with an error"]
 async fn a_failed_relist_after_lagged_ends_the_stream_with_an_error() {
-    let seed = 4202;
-    eprintln!("service-stream-recorded-verdict seed={seed} case=relist-fails");
-    let node = Node::boot(seed).await;
-    let mut stream = open(&node, "w-relist", Duration::from_secs(3600)).await;
-    assert_eq!(poll_once(&mut stream), Polled::Pending, "nothing recorded: waits");
-    let noise = row("noise", 0, 1, AllocState::Running, None, None);
-    for _ in 0..(overdrive_control_plane::DEFAULT_LIFECYCLE_BROADCAST_CAPACITY + 8) {
-        publish(&node, &noise);
+    for (index, case) in ["unreachable", "io", "envelope"].into_iter().enumerate() {
+        let seed = 4211 + index as u64;
+        eprintln!("service-stream-recorded-verdict seed={seed} case=relist-fails/{case}");
+        let node = Node::boot(seed).await;
+        let mut stream = open(&node, "w-relist", Duration::from_secs(3600)).await;
+        assert_eq!(poll_once(&mut stream), Polled::Pending, "nothing recorded: waits");
+        let rows_before = node.obs.alloc_status_rows().await.expect("rows");
+        let noise = row("noise", 0, 1, AllocState::Running, None, None);
+        for _ in 0..(overdrive_control_plane::DEFAULT_LIFECYCLE_BROADCAST_CAPACITY + 8) {
+            publish(&node, &noise);
+        }
+        node.obs.inject_alloc_status_rows_failure(read_failure(case));
+        assert_read_failure(&mut stream, case);
+        assert_eq!(
+            node.obs.alloc_status_rows().await.expect("rows"),
+            rows_before,
+            "store unchanged"
+        );
+        node.clock.tick(Duration::from_secs(7200));
+        settle().await;
+        assert_eq!(poll_once(&mut stream), Polled::Ended, "no Timeout after the deadline either");
     }
-    node.obs.inject_alloc_status_rows_failure(ObservationStoreError::Unreachable {
-        peer: "peer-b".to_owned(),
-    });
-
-    let polled = poll_once(&mut stream);
-
-    assert!(matches!(polled, Polled::Error(_)), "a typed stream error; got {polled:?}");
-    assert_eq!(poll_once(&mut stream), Polled::Ended);
 }
 
 // ===========================================================================
@@ -542,6 +615,7 @@ async fn the_line_built_from_a_committed_row_equals_the_line_built_from_its_even
 /// `Accepted { unchanged }` then `Stable` with the recorded `settled_in_ms` and
 /// witness, with no clock advance, and the redeploy writes no row and no event.
 #[tokio::test(flavor = "current_thread")]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D11 redeploy reports the recorded Stable"]
 async fn a_redeploy_of_a_stable_service_ends_stable_at_once() {
     let seed = 3901;
@@ -577,6 +651,7 @@ async fn a_redeploy_of_a_stable_service_ends_stable_at_once() {
 /// redeploy yields the recorded `Failed` at once, byte-equal to the line the first
 /// deploy's stream carried.
 #[tokio::test(flavor = "current_thread")]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D11 redeploy reports the recorded give-up"]
 async fn a_redeploy_of_a_given_up_service_reports_the_recorded_give_up_at_once() {
     let seed = 3902;
@@ -703,6 +778,7 @@ async fn a_redeploy_while_a_probe_stopped_attempts_successor_starts_waits_for_th
 /// S-39 (e) — the first deploy was operator-stopped: the redeploy yields `Stopped`
 /// naming the operator at once (the `/stop` sentinel persists until a restart).
 #[tokio::test(flavor = "current_thread")]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D11 redeploy reports an operator stop"]
 async fn a_redeploy_of_an_operator_stopped_service_reports_the_operator_stop_at_once() {
     let seed = 3905;

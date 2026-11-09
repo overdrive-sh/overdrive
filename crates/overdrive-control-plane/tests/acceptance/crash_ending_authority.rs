@@ -53,6 +53,7 @@ async fn crash_loop_to_the_ceiling(
 /// `ServiceLifecycle` writes nothing; `WorkloadLifecycle` restarts it; the
 /// recorded cause stays the crash; the probe supervisor is gone (D1).
 #[tokio::test]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D5 startup verdict announced only for a non-terminal allocation"]
 async fn crashed_allocation_with_exhausted_startup_probes_is_restarted_not_finalised() {
     let mut world = RestartWorld::compose(Shape::StartupProbe).await;
@@ -85,6 +86,7 @@ async fn crashed_allocation_with_exhausted_startup_probes_is_restarted_not_final
 /// S-10 (second variant): the crash lands after the deadline and before the
 /// `Running` row was ever evaluated.
 #[tokio::test]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D5 startup verdict announced only for a non-terminal allocation"]
 async fn crash_after_the_deadline_before_the_first_look_is_restarted_not_finalised() {
     let mut world = RestartWorld::compose(Shape::StartupProbe).await;
@@ -107,6 +109,7 @@ async fn crash_after_the_deadline_before_the_first_look_is_restarted_not_finalis
 /// with no `Pass` and a streak below `max_attempts`. Post-crash probing no
 /// longer grows the streak; no `StartupProbeFailed` finalisation arises.
 #[tokio::test]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D1 exit observer ends probe supervision at the crash"]
 async fn crash_with_a_partial_streak_is_not_probed_after_the_crash() {
     let mut world = RestartWorld::compose(Shape::StartupProbe).await;
@@ -136,6 +139,7 @@ async fn crash_with_a_partial_streak_is_not_probed_after_the_crash() {
 /// last attempt's crash; every predecessor row stays `Failed` with its crash;
 /// the only terminal write is `WorkloadLifecycle`'s.
 #[tokio::test]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D6 restart authority names a pre-startup crash loop at give-up"]
 async fn pre_startup_crash_loop_ends_the_stream_with_early_exit_at_give_up() {
     let mut world = RestartWorld::compose(Shape::StartupProbe).await;
@@ -190,6 +194,7 @@ async fn pre_startup_crash_loop_ends_the_stream_with_early_exit_at_give_up() {
 /// S-16 (b): the first attempt crashes before a pass, the successor passes its
 /// startup probe: the stream ends `Stable` and no `EarlyExit` is written.
 #[tokio::test]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D6 ServiceLifecycle no longer finalises a crashed allocation"]
 async fn pre_startup_crash_then_a_passing_successor_ends_the_stream_stable() {
     let mut world = RestartWorld::compose(Shape::StartupProbe).await;
@@ -248,6 +253,7 @@ async fn crash_loop_after_a_recorded_startup_pass_gives_up_backoff_exhausted() {
 /// S-16 (d): a control-plane restart between the last crash and the ceiling
 /// decision re-derives the same terminal from the durable rows.
 #[tokio::test]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D6 restart authority names a pre-startup crash loop at give-up"]
 async fn control_plane_restart_before_the_ceiling_decision_rederives_early_exit() {
     let mut world = RestartWorld::compose(Shape::StartupProbe).await;
@@ -272,6 +278,7 @@ async fn control_plane_restart_before_the_ceiling_decision_rederives_early_exit(
 /// S-45 (B3): the guest is killed by the cgroup OOM killer on every start; the
 /// give-up is `EarlyExit { exit_code: None }`.
 #[tokio::test]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: B3 pre-startup crash predicate accepts VmOutOfMemory"]
 async fn out_of_memory_crash_loop_gives_up_as_early_exit_without_an_exit_code() {
     let mut world = RestartWorld::compose(Shape::StartupProbe).await;

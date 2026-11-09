@@ -214,6 +214,7 @@ proptest! {
     ///
     /// Mutation target: the action swap, the D5 guard, each gate.
     #[test]
+    /// CONTRACT_SHAPE: bounded-change.
     #[ignore = "pending DELIVER: D5 D7 startup-probe failure stops a live allocation, terminal row yields no action"]
     fn startup_probe_failure_stops_only_a_live_allocation(
         state in prop_oneof![
@@ -296,6 +297,7 @@ proptest! {
     /// Mutation target: the `run_seq > recorded` comparison, the `Pass`
     /// exemption, the top-of-loop dedup for `Running` facts.
     #[test]
+    /// CONTRACT_SHAPE: bounded-change.
     #[ignore = "pending DELIVER: D8 startup stop re-emitted once per new startup probe row"]
     fn startup_stop_is_emitted_once_per_new_startup_row(
         running in any::<bool>(),
@@ -378,6 +380,7 @@ proptest! {
     ///
     /// Mutation target: the `stable_committed` test (removed, negated, or
     /// read from the startup row), the opt-out exemption, the readiness rule.
+    /// CONTRACT_SHAPE: pure-function.
     #[test]
     #[ignore = "pending DELIVER: D12 backend eligibility keys on the committed Stable"]
     fn startup_probed_allocation_is_a_backend_only_after_its_stable_is_committed(

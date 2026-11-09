@@ -383,6 +383,7 @@ mod acceptance {
     // service-allocation-readiness-and-ending D14 item 2 (S-55) — the TCP view is a
     // filter of the declared listener set.
     mod declared_listeners_tcp_view;
+    mod guest_listeners_input_rejection;
     // D13 item 2 — the `LISTEN <tcp|udp> <port>` beacon line.
     mod beacon_listen_wire_form;
 }

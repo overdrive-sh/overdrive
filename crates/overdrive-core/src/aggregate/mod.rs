@@ -73,6 +73,18 @@ mod service_spec;
 /// where appropriate and locally-defined otherwise.
 #[derive(Debug, Error)]
 pub enum AggregateError {
+    /// D14-E2 RED scaffold: invalid placement or submitted role for GuestListeners.
+    #[error(
+        "guest listeners at {vector_role:?} probe index {index} has descriptor role {descriptor_role:?}"
+    )]
+    GuestListenersInvalidRole {
+        vector_role: crate::observation::ProbeRole,
+        descriptor_role: crate::observation::ProbeRole,
+        index: usize,
+    },
+    /// D14-E2 RED scaffold: a GuestListeners startup probe must be the only one.
+    #[error("guest listeners must be the sole startup probe; found {count}")]
+    GuestListenersNotSoleStartup { count: usize },
     /// Scalar-field validation failure. `field` names the offending field
     /// in the aggregate's public shape; `message` is the human-readable
     /// reason. Both fire before any store write per US-03 AC.

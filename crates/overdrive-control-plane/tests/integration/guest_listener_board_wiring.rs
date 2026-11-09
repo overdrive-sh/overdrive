@@ -31,6 +31,8 @@
 //! Gate G-10; the design pins the shared board as a DELIVER obligation checked
 //! at the composition root.
 
+#![allow(clippy::doc_markdown, reason = "per-test CONTRACT_SHAPE is an exact protocol marker")]
+
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -255,6 +257,7 @@ impl Node {
 /// partial set change nothing; the report that completes the declared set
 /// writes the one `Pass` row.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D13 host shared board, one GuestListenerBoard shared by VmDriver and ProbeRunner"]
 async fn a_listen_line_on_the_drivers_beacon_completes_the_probe_tasks_declared_set() {
     let node = Node::boot().await;

@@ -151,6 +151,7 @@ fn fail_reason(row: &ProbeResultRow) -> &str {
 /// one `Pass` at once: the first written row, `run_seq` 1, `same_status_runs` 1,
 /// with no earlier row.
 #[tokio::test]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D14 guest-listener task writes the startup rows"]
 async fn completing_the_declared_set_writes_one_pass_row_with_no_earlier_row() {
     let rig = Rig::start(vec![listener(Proto::Tcp, 8080), listener(Proto::Udp, 5353)]).await;
@@ -173,6 +174,7 @@ async fn completing_the_declared_set_writes_one_pass_row_with_no_earlier_row() {
 /// and the missing listeners in declared order; one further `Fail` per interval
 /// follows with the streak rising 2, 3, ...
 #[tokio::test]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D14 guest-listener task deadline Fail cadence"]
 async fn an_incomplete_set_writes_no_row_before_the_deadline_then_one_fail_per_interval() {
     let rig = Rig::start(vec![listener(Proto::Tcp, 8080), listener(Proto::Udp, 5353)]).await;
@@ -201,6 +203,7 @@ async fn an_incomplete_set_writes_no_row_before_the_deadline_then_one_fail_per_i
 
 /// S-53: the Fail reason lists only the listeners still missing.
 #[tokio::test]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D14 guest-listener task deadline Fail cadence"]
 async fn the_deadline_fail_reason_names_only_the_missing_listeners() {
     let rig = Rig::start(vec![listener(Proto::Tcp, 8080), listener(Proto::Udp, 5353)]).await;
@@ -217,6 +220,7 @@ async fn the_deadline_fail_reason_names_only_the_missing_listeners() {
 /// S-53: a failing observation write on the `Pass` is retried until it lands,
 /// and the failed write advanced neither `run_seq` nor `same_status_runs`.
 #[tokio::test]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D14 guest-listener task retries a failed Pass write"]
 async fn a_failed_pass_write_is_retried_until_it_lands_without_advancing_the_counters() {
     let rig = Rig::start(vec![listener(Proto::Tcp, 8080)]).await;
@@ -243,6 +247,7 @@ async fn a_failed_pass_write_is_retried_until_it_lands_without_advancing_the_cou
 /// S-53: a failing write on a `Fail` advances neither number: the next `Fail`
 /// that lands is still the first written row.
 #[tokio::test]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D14 guest-listener task Fail write failure accounting"]
 async fn a_failed_fail_write_advances_neither_number() {
     let rig = Rig::start(vec![listener(Proto::Tcp, 8080)]).await;
@@ -266,6 +271,7 @@ async fn a_failed_fail_write_advances_neither_number() {
 /// control allocation on the same runner, not stopped, shows the task does write
 /// when it is not cancelled (so the absence is not vacuous).
 #[tokio::test]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D14 guest-listener task observes cancellation before a write"]
 async fn no_row_is_written_after_stop_alloc() {
     let rig = Rig::start(vec![listener(Proto::Tcp, 8080)]).await;
@@ -296,6 +302,7 @@ async fn no_row_is_written_after_stop_alloc() {
 /// S-53: a report for an undeclared listener or a duplicate of an already
 /// reported one never completes the declared set.
 #[tokio::test]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D14 guest-listener task completes only on the declared set"]
 async fn an_undeclared_or_duplicate_report_never_completes_the_set() {
     let rig = Rig::start(vec![listener(Proto::Tcp, 8080), listener(Proto::Tcp, 8081)]).await;

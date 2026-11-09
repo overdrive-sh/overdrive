@@ -57,6 +57,7 @@ proptest! {
     /// startup deadline, keeps the floor, and is at least the startup deadline plus
     /// the margin.
     #[test]
+    /// CONTRACT_SHAPE: pure-function.
     #[ignore = "pending DELIVER: D10 progress_deadline derivation"]
     fn the_progress_deadline_exceeds_the_startup_deadline_and_keeps_the_floor(
         probes in descriptors(),
@@ -75,6 +76,7 @@ proptest! {
 /// S-34 — the default spec (no declared startup probe, the platform default startup
 /// deadline of 60 s) yields exactly the 90 s streaming cap.
 #[test]
+/// CONTRACT_SHAPE: pure-function.
 #[ignore = "pending DELIVER: D10 progress_deadline derivation"]
 fn the_default_spec_yields_ninety_seconds() {
     assert_eq!(DEFAULT_STARTUP_DEADLINE, Duration::from_secs(60));
@@ -86,6 +88,7 @@ fn the_default_spec_yields_ninety_seconds() {
 /// `startup_deadline + margin`; one below it keeps the floor; only startup probe
 /// index 0 counts.
 #[test]
+/// CONTRACT_SHAPE: pure-function.
 #[ignore = "pending DELIVER: D10 progress_deadline derivation"]
 fn a_long_startup_deadline_lifts_the_progress_deadline_and_a_short_one_keeps_the_floor() {
     let long = [startup_probe(0, 10, 12)];

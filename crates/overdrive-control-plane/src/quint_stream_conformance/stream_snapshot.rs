@@ -61,13 +61,15 @@ use tokio::runtime::Runtime;
 use super::{Composition, alloc_row, commit, compose, publish};
 use crate::api::IdempotencyOutcome;
 use crate::guest_network::quint_itf::{self, ItfError, Qualified};
-use crate::streaming::{ServiceSubmitEvent, build_service_accepted, build_service_stream};
+use crate::streaming::{
+    ServiceStreamError, ServiceSubmitEvent, build_service_accepted, build_service_stream,
+};
 
 const MAIN: &str = "ss_conf";
 const MODULE: &str = "stream_snapshot";
 const WORKLOAD: &str = "ss";
 
-type Lines = Pin<Box<dyn Stream<Item = std::result::Result<Bytes, std::io::Error>> + Send>>;
+type Lines = Pin<Box<dyn Stream<Item = std::result::Result<Bytes, ServiceStreamError>> + Send>>;
 
 /// What one poll of the stream produced.
 enum Polled {
@@ -489,39 +491,39 @@ fn attempt_of(alloc_id: &str) -> Result<i64> {
 // D11 lands: the stream does not yet subscribe, read the recorded verdict or relist.
 
 /// Named run `redeploy_unchanged_of_stable_ends_stable` (D11).
-/// CONTRACT_SHAPE: bounded-change.
 #[quint_test(
     spec = "../../specs/quint/service-allocation-readiness-and-ending/stream_snapshot.qnt",
     main = "ss_conf",
     test = "redeploy_unchanged_of_stable_ends_stable",
     max_samples = 1
 )]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D11 recorded verdict read before the stream waits"]
 fn quint_stream_snapshot_redeploy_unchanged_of_stable_ends_stable() -> impl Driver {
     StreamSnapshotDriver::new()
 }
 
 /// Named run `terminal_between_subscribe_and_read_is_not_lost` (D11).
-/// CONTRACT_SHAPE: bounded-change.
 #[quint_test(
     spec = "../../specs/quint/service-allocation-readiness-and-ending/stream_snapshot.qnt",
     main = "ss_conf",
     test = "terminal_between_subscribe_and_read_is_not_lost",
     max_samples = 1
 )]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D11 recorded verdict read before the stream waits"]
 fn quint_stream_snapshot_terminal_between_subscribe_and_read_is_not_lost() -> impl Driver {
     StreamSnapshotDriver::new()
 }
 
 /// Named run `restartable_stop_recorded_is_not_a_verdict` (D11, D7 item 5).
-/// CONTRACT_SHAPE: bounded-change.
 #[quint_test(
     spec = "../../specs/quint/service-allocation-readiness-and-ending/stream_snapshot.qnt",
     main = "ss_conf",
     test = "restartable_stop_recorded_is_not_a_verdict",
     max_samples = 1
 )]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D7 and D11 a restartable probe stop is not a stream terminal"]
 fn quint_stream_snapshot_restartable_stop_recorded_is_not_a_verdict() -> impl Driver {
     StreamSnapshotDriver::new()
@@ -543,13 +545,13 @@ fn quint_stream_snapshot_superseded_attempt_terminal_is_not_reported() -> impl D
 }
 
 /// Named run `lagged_relist_recovers_terminal` (D11).
-/// CONTRACT_SHAPE: bounded-change.
 #[quint_test(
     spec = "../../specs/quint/service-allocation-readiness-and-ending/stream_snapshot.qnt",
     main = "ss_conf",
     test = "lagged_relist_recovers_terminal",
     max_samples = 1
 )]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D11 relist on Lagged"]
 fn quint_stream_snapshot_lagged_relist_recovers_terminal() -> impl Driver {
     StreamSnapshotDriver::new()
@@ -573,24 +575,24 @@ fn quint_stream_snapshot_publish_after_relist_reaches_channel() -> impl Driver {
 }
 
 /// Named run `failed_read_ends_with_error` (D11, G-8 failure projection).
-/// CONTRACT_SHAPE: bounded-change.
 #[quint_test(
     spec = "../../specs/quint/service-allocation-readiness-and-ending/stream_snapshot.qnt",
     main = "ss_conf",
     test = "failed_read_ends_with_error",
     max_samples = 1
 )]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D11 a failed read ends the stream with an error"]
 fn quint_stream_snapshot_failed_read_ends_with_error() -> impl Driver {
     StreamSnapshotDriver::new()
 }
 
 /// Randomized traces of `ss_conf` (seed printed on failure).
-/// CONTRACT_SHAPE: bounded-change.
 #[quint_run(
     spec = "../../specs/quint/service-allocation-readiness-and-ending/stream_snapshot.qnt",
     main = "ss_conf"
 )]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D11 recorded verdict read, relist and failed read"]
 fn quint_stream_snapshot_randomized() -> impl Driver {
     StreamSnapshotDriver::new()

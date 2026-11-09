@@ -35,6 +35,7 @@ const TCP_PORT: u16 = 18777;
 const UDP_PORT: u16 = 18778;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: PR-4 inbound install reads tcp_service_ports of declared_listeners"]
 async fn a_udp_declared_listener_gets_no_inbound_capture_and_a_tcp_one_does() {
     if !is_root() {

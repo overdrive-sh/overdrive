@@ -516,63 +516,63 @@ fn classify(event: &ServiceSubmitEvent) -> Result<(&'static str, &'static str)> 
 // the scaffold.
 
 /// Named run `slow_start_within_startup_deadline_reaches_stable_not_timeout` (D10).
-/// CONTRACT_SHAPE: bounded-change.
 #[quint_test(
     spec = "../../specs/quint/service-allocation-readiness-and-ending/progress_deadline.qnt",
     main = "pd_conf",
     test = "slow_start_within_startup_deadline_reaches_stable_not_timeout",
     max_samples = 1
 )]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D10 progress deadline derived from the startup deadline"]
 fn quint_progress_deadline_slow_start_reaches_stable_not_timeout() -> impl Driver {
     ProgressDeadlineDriver::new()
 }
 
 /// Named run `never_ready_times_out_with_last_attempt_cause` (D10).
-/// CONTRACT_SHAPE: bounded-change.
 #[quint_test(
     spec = "../../specs/quint/service-allocation-readiness-and-ending/progress_deadline.qnt",
     main = "pd_conf",
     test = "never_ready_times_out_with_last_attempt_cause",
     max_samples = 1
 )]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D10 timeout carries the last attempt"]
 fn quint_progress_deadline_never_ready_times_out_with_last_attempt_cause() -> impl Driver {
     ProgressDeadlineDriver::new()
 }
 
 /// Named run `giveup_inside_deadline_wins_over_timeout` (D10).
-/// CONTRACT_SHAPE: bounded-change.
 #[quint_test(
     spec = "../../specs/quint/service-allocation-readiness-and-ending/progress_deadline.qnt",
     main = "pd_conf",
     test = "giveup_inside_deadline_wins_over_timeout",
     max_samples = 1
 )]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D10 progress deadline derived from the startup deadline"]
 fn quint_progress_deadline_giveup_inside_deadline_wins_over_timeout() -> impl Driver {
     ProgressDeadlineDriver::new()
 }
 
 /// Named run `redeploy_unchanged_opens_new_clock` (D10).
-/// CONTRACT_SHAPE: bounded-change.
 #[quint_test(
     spec = "../../specs/quint/service-allocation-readiness-and-ending/progress_deadline.qnt",
     main = "pd_conf",
     test = "redeploy_unchanged_opens_new_clock",
     max_samples = 1
 )]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D10 progress deadline derived from the startup deadline"]
 fn quint_progress_deadline_redeploy_unchanged_opens_new_clock() -> impl Driver {
     ProgressDeadlineDriver::new()
 }
 
 /// Randomized traces of `pd_conf` (seed printed on failure).
-/// CONTRACT_SHAPE: bounded-change.
 #[quint_run(
     spec = "../../specs/quint/service-allocation-readiness-and-ending/progress_deadline.qnt",
     main = "pd_conf"
 )]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D10 progress deadline derived from the startup deadline"]
 fn quint_progress_deadline_randomized() -> impl Driver {
     ProgressDeadlineDriver::new()

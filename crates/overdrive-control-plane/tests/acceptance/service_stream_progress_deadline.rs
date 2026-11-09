@@ -60,6 +60,7 @@ fn alloc_rows_without_clock_noise(rows: &[AllocStatusRow]) -> Vec<(String, Strin
 /// `Stable` and never reports `Timeout` for the healthy, slow-starting Service
 /// (`HealthySlowStartNeverTimesOut`, under DL-6).
 #[tokio::test(flavor = "current_thread")]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D10 progress deadline derived from the startup deadline"]
 async fn a_service_that_becomes_stable_after_ninety_seconds_ends_stable_not_timeout() {
     let seed = 3501;
@@ -98,6 +99,7 @@ async fn a_service_that_becomes_stable_after_ninety_seconds_ends_stable_not_time
 /// latest attempt-ending observation (the startup stop of the first attempt) as
 /// labelled detail, `alloc_id: None`, and the stream writes no row.
 #[tokio::test(flavor = "current_thread")]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D10 timeout carries the last attempt; D7 startup stop"]
 async fn a_never_ready_service_times_out_at_the_progress_deadline_naming_the_last_attempt() {
     let seed = 3502;
@@ -139,6 +141,7 @@ async fn a_never_ready_service_times_out_at_the_progress_deadline_naming_the_las
 /// inside the 90 s progress deadline and the stream ends with that give-up, with no
 /// `last_attempt` (a give-up is the verdict, not the labelled detail).
 #[tokio::test(flavor = "current_thread")]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D7 startup stop and give-up; D10 give-up inside the deadline is unchanged"]
 async fn a_give_up_inside_the_progress_deadline_ends_the_stream_with_the_give_up() {
     let seed = 3503;
@@ -168,6 +171,7 @@ async fn a_give_up_inside_the_progress_deadline_ends_the_stream_with_the_give_up
 /// opens a new stream with a new clock; its `last_attempt` is drawn from events after
 /// it opened only, never from an attempt that ended before.
 #[tokio::test(flavor = "current_thread")]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D10 timeout carries the last attempt; D7 startup stop"]
 async fn an_unchanged_redeploy_of_a_stuck_service_opens_a_new_clock_and_reports_only_new_attempts()
 {

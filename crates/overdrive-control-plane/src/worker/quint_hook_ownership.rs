@@ -952,6 +952,7 @@ impl State<HookOwnershipDriver> for HookState {
     max_samples = 1,
     test = "crash_without_restart"
 )]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D1 exit observer ends probe supervision; D3 shim registers supervision before the gate release"]
 fn quint_hook_ownership_crash_without_restart() -> impl Driver {
     HookOwnershipDriver::new()
@@ -964,6 +965,7 @@ fn quint_hook_ownership_crash_without_restart() -> impl Driver {
     max_samples = 1,
     test = "crash_then_fresh_id_restart"
 )]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D1 exit observer ends probe supervision; D3 shim registers supervision before the gate release"]
 fn quint_hook_ownership_crash_then_fresh_id_restart() -> impl Driver {
     HookOwnershipDriver::new()
@@ -976,6 +978,7 @@ fn quint_hook_ownership_crash_then_fresh_id_restart() -> impl Driver {
     max_samples = 1,
     test = "write_exhaustion_still_stops_probes"
 )]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D1 exit observer ends probe supervision; D3 shim registers supervision before the gate release"]
 fn quint_hook_ownership_write_exhaustion_still_stops_probes() -> impl Driver {
     HookOwnershipDriver::new()
@@ -988,6 +991,7 @@ fn quint_hook_ownership_write_exhaustion_still_stops_probes() -> impl Driver {
     max_samples = 1,
     test = "operator_or_liveness_stop_emits_no_exit_event"
 )]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D3 shim registers supervision before the gate release; B2 shim releases a stop's supervision after its terminal row is durable"]
 fn quint_hook_ownership_operator_or_liveness_stop_emits_no_exit_event() -> impl Driver {
     HookOwnershipDriver::new()
@@ -1000,6 +1004,7 @@ fn quint_hook_ownership_operator_or_liveness_stop_emits_no_exit_event() -> impl 
     max_samples = 1,
     test = "finalize_on_live_vm_stops_probes"
 )]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D3 shim registers supervision before the gate release"]
 fn quint_hook_ownership_finalize_on_live_vm_stops_probes() -> impl Driver {
     HookOwnershipDriver::new()
@@ -1012,17 +1017,18 @@ fn quint_hook_ownership_finalize_on_live_vm_stops_probes() -> impl Driver {
     max_samples = 1,
     test = "double_fire_is_idempotent"
 )]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D1 exit observer ends probe supervision; D3 shim registers supervision before the gate release"]
 fn quint_hook_ownership_double_fire_is_idempotent() -> impl Driver {
     HookOwnershipDriver::new()
 }
 
 /// Randomized traces of the recording main; the seed is printed on failure.
-/// CONTRACT_SHAPE: bounded-change.
 #[quint_run(
     spec = "../../specs/quint/service-allocation-readiness-and-ending/hook_ownership.qnt",
     main = "hooks_conf"
 )]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D1 exit observer ends probe supervision; D3 shim registers supervision before the gate release; B2 shim releases a stop's supervision after its terminal row is durable"]
 fn quint_hook_ownership_randomized_traces() -> impl Driver {
     HookOwnershipDriver::new()

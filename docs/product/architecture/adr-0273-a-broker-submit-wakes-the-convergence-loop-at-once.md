@@ -2,9 +2,14 @@
 
 ## Status
 
-**Accepted, 2026-11-03.** Not implemented. GH #318, GH #334. The exact contract (D17), the
-interface signatures, the model decision and the DISTILL obligation (S-48) live in the
+**Accepted, 2026-11-03.** Not implemented. GH #318, GH #334. The D17 behavior,
+the model decision and the DISTILL obligation (S-48) live in the
 [feature delta](../../feature/service-allocation-readiness-and-ending/feature-delta.md).
+The full DESIGN review found that `BrokerDrain` and `broker()` callable shapes
+were not pinned. [D17-S1](../../feature/service-allocation-readiness-and-ending/feature-delta.md)
+pins their exact signatures, **user-approved 2026-11-09** (user: “rest is fine”)
+and independently approved at full DESIGN review iteration 4
+([review](../../feature/service-allocation-readiness-and-ending/design/review.md)).
 Related: [ADR-0084](adr-0084-reconciler-cadence-and-interest-declarations.md) (the wakeup
 model this decision keeps: resync routes through the broker and re-arms at most once
 per period), ADR-0035 and ADR-0036 (the reconciler runtime),

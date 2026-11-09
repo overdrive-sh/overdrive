@@ -1,11 +1,12 @@
 # Feature delta — `service-allocation-readiness-and-ending` (GH #318, GH #334)
 
-> DESIGN wave, PROPOSE mode, authored by Morgan (nw-solution-architect), 2026-11-02.
-> Source of truth for this feature's exact interface contract. D1 to D12 and **D17** are
-> **Accepted** (§ Approval record). B1 (ADR-0265), B2 (ADR-0266) and B3 (ADR-0258) are
+> DESIGN wave, independently APPROVED at full review iteration 4 on 2026-11-09;
+> authored by Morgan (nw-solution-architect), 2026-11-02.
+> Source of truth for this feature's exact interface contract. D1 to D17 are
+> **Accepted** after full DESIGN review iteration 4 (§ Approval record). B1 (ADR-0265), B2 (ADR-0266) and B3 (ADR-0258) are
 > accepted, B5 is rejected, B4 is D12 (ADR-0267; it amends the operative ADR-0096).
-> **D13 to D16 (guest-reported listener readiness) are user-approved and the D13 contract
-> shape is accepted; V41 (boot cost) and V42 (workload cgroup) are held.** Four items inside
+> **D13 to D16 (guest-reported listener readiness) are accepted; V41 (boot cost)
+> and V42 (workload cgroup) are held.** Four items inside
 > D13 and D14 are ruled (2026-11-04): **PR-1** the driver-to-probe-task seam (D13 item 10),
 > **PR-3** the `Fail` cadence (D14 item 3) and **PR-4** one declared-listener field (D14
 > item 2) are accepted; **PR-2** the scope of the listen hooks (D13 items 1 and 7) is
@@ -16,8 +17,24 @@
 > host-input conformance projection of the report model; **R1** (`VmmExit` and the
 > three-valued `exitrep`), **R1-a** (`exitrep` is read from the exit observer's row) and
 > **R2** (model trims) are also accepted.
-> Nothing here authorises DISTILL or DELIVER until the independent DESIGN re-review approves
-> the revision (`.claude/rules/design.md` § "Surface material design decisions").
+> The independent full DESIGN review approved this exact revision in
+> [`design/review.md`](design/review.md), iteration 4. The independent full
+> DISTILL review approved the acceptance suite in [`distill/review.md`](distill/review.md),
+> iteration 4. Roadmap validation remains a separate pending gate before DELIVER.
+> **User-approved 2026-11-09:** D11-E1 (typed Service stream error), D14-A1 (owned
+> TCP view signature), and D14-E2 (typed GuestListeners input rejection) amend the
+> exact contract below. The bounded technical review approved these shapes in
+> [`design/review-contract-remediation.md`](design/review-contract-remediation.md),
+> iteration 2; the full D1–D17 DESIGN review approved them at iteration 4.
+> **User-approved 2026-11-09:** exact D13-S1 and D17-S1 signatures are pinned
+> below (user: “rest is fine”). For D16, the user explicitly waived only
+> historical-byte/backward-read compatibility for this greenfield feature:
+> “"preserve historical bytes" -> what do um ean? we dont need to preserve
+> anything yet. this is greenfield. not used in production. rest is fine”.
+> **D16-G1 accepted under that exact greenfield waiver:** the five affected
+> current envelope payload layouts are rebaselined in place under existing tags.
+> The exact current-format contract is below; the full review approved it at
+> iteration 4. Current lifecycle, readiness and typed-error outcomes remain unchanged.
 > The research that supports D7 to D10 is
 > `docs/research/orchestration/probe-failure-restart-authority-and-give-up-reporting-research.md`
 > (Kubernetes @7b4bd5d3, Nomad @64cdf9f9, source-cited); it is cited in each
@@ -82,7 +99,7 @@ User rulings of 2026-11-02, recorded verbatim in outcome:
 | D10 | **Approved in full, 2026-11-02 (ruling 3), every shape choice in § D10** (server-side stream handler owns it; `max(streaming_cap, startup_deadline + 30 s)`, derived, no spec key or flag; clock at stream open, not extended; optional `last_attempt: LastAttemptWire { alloc_id, reason, terminal, detail }` on `ServiceSubmitEvent::Failed`; `ServiceFailureReason` untouched; CLI request timeout = deadline + 30 s; the timeout wording; K1 as restated). | ADR-0262 (deadline) and ADR-0264 (`last_attempt` detail, split out of ADR-0262 on review; content unchanged) |
 | F-4 | Included 2026-11-02: add the missing ADR-0087 golden fixture for `StoppedBy::LivenessProbe` beside D7's `StartupProbe` fixture. Test support in an existing format; a DISTILL obligation (S-25), not a design decision. | § Obligations |
 | F-5 | **Verified real, 2026-11-02 (ruling 4: "check now and, if real, fold the fix into this design").** Code evidence in § Findings. The fix is D11. | § D11, ADR-0263 (Accepted) |
-| D11 | **Approved in full, 2026-11-03 (ruling "proceed with recommendations")**, all seven shape choices in § D11 exactly as proposed: the stream subscribes then reads the recorded verdict; reuse of `current_alloc` and `service_event_from_terminal` with no new surface; only the current attempt's own terminal counts (restartable probe stops are not a verdict); relist on `Lagged`; a failed read ends the stream with an error; any recorded verdict is reported, including `Stopped { Operator }` (exit 0); no new timer or config. | ADR-0263 (Accepted) |
+| D11 | **Approved in full, 2026-11-03 (ruling "proceed with recommendations")**, all seven shape choices in § D11 exactly as proposed: the stream subscribes then reads the recorded verdict; reuse of `current_alloc` and `service_event_from_terminal` (the original no-new-surface clause is amended by D11-E1 below); only the current attempt's own terminal counts (restartable probe stops are not a verdict); relist on `Lagged`; a failed read ends the stream with an error; any recorded verdict is reported, including `Stopped { Operator }` (exit 0); no new timer or config. | ADR-0263 (Accepted, amended D11-E1) |
 | F-6 | **Filed as GH #340 (type Bug), 2026-11-03**, on the user's ruling. Not changed by this feature. | § Findings |
 | B1 | **Accepted as proposed, 2026-11-03 ("proceed with recommendations").** `Stable` is announced from the committed row (`ServiceAllocFact.stable_committed`); the `stable_announced` marker no longer decides emission. | ADR-0265 (Accepted) |
 | B2 | **Accepted as proposed, 2026-11-03.** The `StopAllocation` arm fires `on_alloc_terminal` after the terminal row write succeeds; amends D4's and D7 item 4's "the shim is unchanged" for this one statement. | ADR-0266 (Accepted) |
@@ -92,7 +109,7 @@ User rulings of 2026-11-02, recorded verbatim in outcome:
 | R2-1 | **Approved, 2026-11-03.** The redundant ADR-0096 per-allocation backend veto and the veto-before-stop ordering are removed. | ADR-0267, ADR-0096 (supersession note), § Interface contract changes |
 | R2-2 | **Approved, 2026-11-03 ("remove it if no reader remains").** No reader remains after B1, so the `stable_announced` view field is removed. | ADR-0265, § Interface contract changes |
 | D13, D14, D15 | **User-approved in direction, 2026-11-03 ("add it. and proceed with recommendations").** Gate on every declared listener, TCP and UDP; the opt-out `startup = []` is kept; no minimum-healthy window; ADR-0058 is superseded on acceptance of ADR-0270. | ADR-0268, 0269, 0270, 0272 |
-| D16 | **Option R approved in direction, 2026-11-03** (remove `inferred` with the envelope procedure). | ADR-0271 |
+| D16 | **Option R approved, 2026-11-03** (remove `inferred`; its historical-read procedure was superseded only for this feature by the 2026-11-09 greenfield compatibility waiver and exact D16-G1 current-format policy below). | ADR-0271 |
 | D17 | **Accepted, 2026-11-03** ("add it"; shape choices S1 to S6 accepted as proposed): S1 `Notify::notify_one`; S2 signal after the lock is released; S3 one submit path including the loop's own resync; S4 `BrokerDrain` without `submit`, `broker_mutex` removed; S5 `submit_evaluation` and `BrokerDrain` `pub`, `submitted` `pub(crate)`; S6 no Quint model. | ADR-0273 |
 | D13 contract shape | **Accepted, 2026-11-03.** Sockops `TCP_LISTEN_CB` arm as a separate small program in the same object (PR-2); `post_bind4` and `post_bind6` `CgroupSock` programs, both returning 1, both filtering protocol 17; loopback exclusion; one ordered beacon writer; drain `LISTEN` before `EXIT`; the host reader ends the guest-report wait only on `EXIT` or EOF. | ADR-0268, 0272 |
 | V41 | **Held** (boot-cost spike, `spike/findings-boot-cost.md`): +0.36 ms at p50 on the pre-`READY` path (D13 item 6). | § Spike table |
@@ -122,12 +139,20 @@ User rulings of 2026-11-02, recorded verbatim in outcome:
 | DG-11 | **Approved, 2026-11-05 (pin).** The declared listeners reach both mechanic-summary formatters as a parameter. No wire field and no field on `ProbeMechanic::GuestListeners`. | D14 item 4 |
 | DG-13 | **Approved, 2026-11-05.** Clause (9a) of G-10 boundary (9), init's own binds produce no `LISTEN` line, carries no test obligation. The failure it would defend, false readiness from Overdrive's own in-guest binds, is unreachable, and a report of init's binds has no production effect. Every TCP and UDP socket init binds or listens on comes from fixed constants inside `guest_reserved_ports()` (61000..=62024); init's other sockets are connect-only flow sockets on ephemeral ports and an AF_VSOCK listener. The Service validator rejects any declared port in that range through the same function (`ListenerPortReserved`), so no declared listener can match init's binds. The board ignores a report for an undeclared listener (D13 item 10; `guest_listener_board.rs::a_pending_changed_completes_on_an_insertion_and_on_no_no_op`, the undeclared-pair case). PR-2 additionally keeps init outside the hooked workload cgroup, so init's binds produce no events; a regression there would add only ignored beacon lines. Clause (9b) is covered by `guest_listener_real_boot.rs::every_declared_listener_a_real_workload_binds_is_reported_before_it_exits`. | Gate G-10 (9) |
 | DG-12 | **Approved, 2026-11-05 (changes D6, behaviour).** Every allocation `ServiceLifecycle` observes in `Failed` or `Terminated` joins `ServiceLifecycleView.terminal_announced`, whatever its `started_at`. | D6 item 1, S-56 |
-| DG-M | **Approved, 2026-11-05 (pin).** `BeaconParseError::MalformedListen { raw: String, detail: String }` for a rejected `LISTEN` line. `guest_report_host`'s `Idle` maps to a read-only `GuestListenerReports::reported(alloc)` call compared with the previous projected value. D16's historical V1 fixtures that hold `inferred` land with the version bump in DELIVER. | § Interface changes (D13 to D16), § Formal protocol model — D13 to D16 |
+| DG-M | **Approved, 2026-11-05 (pin).** `BeaconParseError::MalformedListen { raw: String, detail: String }` for a rejected `LISTEN` line. `guest_report_host`'s `Idle` maps to a read-only `GuestListenerReports::reported(alloc)` call compared with the previous projected value. The original D16 historical-fixture/version-bump clause was superseded only by the explicit 2026-11-09 greenfield compatibility waiver below; the parse and model pins remain approved. | § Interface changes (D13 to D16), § Formal protocol model — D13 to D16 |
+| D11-E1 | **Approved as the exact contract, 2026-11-09** (user: “Approve all three exact contracts”). `build_service_stream` returns a stream whose item is `Result<Bytes, ServiceStreamError>`, with typed `ObservationRead { source: ObservationStoreError }` and `LineEmission { source: std::io::Error }`. The prior D11 “no new public surface” clause is amended only for this in-process Rust error type; HTTP/NDJSON and CLI wire remain unchanged. | D11 item 5, § D11 interface changes; bounded technical review iteration 2 |
+| D14-A1 | **Approved as the exact contract, 2026-11-09** (same user ruling). `AllocationSpec::tcp_service_ports(&self) -> Vec<NonZeroU16>` returns an owned TCP filter of `declared_listeners` in declaration order. | D14 item 2, § Interface changes (D13 to D16); bounded technical review iteration 2 |
+| D14-E2 | **Approved as the exact contract, 2026-11-09** (same user ruling). `AggregateError::GuestListenersInvalidRole { vector_role, descriptor_role, index }`, `AggregateError::GuestListenersNotSoleStartup { count }`, and `ParseError::GuestListenersNotOperatorConfigurable { role, probe_idx }` with the ingress and HTTP/CLI mappings below. | § D14-E2 typed input rejection, § Interface changes (D13 to D16); bounded technical review iteration 2 |
+| D13-S1 | **Approved as the exact contract, 2026-11-09** (user: “rest is fine”, referring to D13-S1 and D17-S1 in the surfaced proposal). `VmDriver::new` takes the board as its ninth/last mandatory argument; `ReportedListeners::{contains,len,is_empty}` have the exact signatures below. | D13 item 10, § Interface changes (D13 to D16), ADR-0268 |
+| D17-S1 | **Approved as the exact contract, 2026-11-09** (same ruling). `BrokerDrain<'a>` has a private guard and only the exact three drain/read methods below; `ReconcilerRuntime::broker(&self) -> BrokerDrain<'_>`. | § D17-S1 interface changes, ADR-0273 |
+| D16 greenfield waiver | **Explicitly approved, 2026-11-09**, user: “"preserve historical bytes" -> what do um ean? we dont need to preserve anything yet. this is greenfield. not used in production. rest is fine”. This waives historical persisted-byte/backward-read compatibility and the historical nested types, conversion chains and fixture additions needed solely for it **for this feature only**; current behavior and unrelated schema systems or fixture literals remain unchanged. | § D16, `design/full-review-remediation.md` |
+| D16-G1 | **Accepted as the exact current-format consequence of the user's greenfield waiver, independently approved 2026-11-09 (full review iteration 4).** Rebaseline only the five affected current envelope payloads under existing version tags; no backward-read promise or new historical machinery. | § D16, `design/full-review-remediation.md`, `design/review.md` |
 
 ## Wave: DESIGN / [REF] Decisions
 
-D1 to D12 and D17 are accepted. D13 to D16 are user-approved; PR-1, PR-3 and PR-4 inside
-them and PR-2 are accepted in contract shape (V42 held; § Decisions D13 to D16). B1 to B3 are accepted rulings recorded in the approval
+D1 to D17 are accepted following the independent full DESIGN review at
+iteration 4, with D16-G1's exact greenfield waiver recorded above. PR-1 to PR-4
+and B1 to B3 retain their accepted user rulings (V42 held; § Decisions D13 to D16). The approval
 record and as ADR-0265, ADR-0266 and ADR-0258.
 
 ### D1 — The exit observer fires `on_alloc_terminal` for every `ExitEvent` it consumes
@@ -861,7 +886,8 @@ service is `Stable` (exit 0), then `overdrive deploy web.toml` again (same bytes
    `workload_event_from_lifecycle_with_state` precedent, `streaming.rs:259-262`);
    it does not treat the failure as "no verdict" (`.claude/rules/rust.md` § "Distinct
    failure modes get distinct error variants"). The Job stream's `.ok()?` (`:585`) is
-   not copied.
+   not copied. **D11-E1 (user-approved 2026-11-09)** pins the exact typed error
+   representation and mappings under § D11 interface changes below.
 6. **Unchanged:** `ServiceLifecycle`'s once-per-allocation `Stable` announcement and
    its dedup (**B1** changes what the dedup keys on, not that there is one), the Job
    stream, the wire (`ServiceSubmitEvent`, `ServiceFailureReason`, ADR-0264's
@@ -878,7 +904,8 @@ service is `Stable` (exit 0), then `overdrive deploy web.toml` again (same bytes
 8. **Reporting any stored verdict.** The stream reports `Stopped { Operator }` (exit 0)
    for a stopped workload and a stored give-up for a given-up one. It states what is
    recorded; it does not retry, restart or clear anything. No new timer, deadline,
-   config, public surface or wire change; D10's deadline arms after the read.
+   config or wire change; D11-E1 adds only the in-process Rust stream error type;
+   D10's deadline arms after the read.
 
 **Owner.** The Service submit stream handler, which already owns "what does this
 deploy report" (ADR-0056, ADR-0059 Q4), reading state through the existing
@@ -1079,7 +1106,8 @@ D1-D5 change one interface text and no signature, type, variant, error, wire or 
 D6 changes the public surface below and adds no archived, wire or persisted shape. D7 adds one archived, wire and API-visible
 enum variant. D8 adds one additive CBOR `View` field. D9 adds one `pub` method and one docstring
 sentence. D10 adds two pure functions, one constant, one wire field with one wire struct, and two
-changed public signatures. D11 adds no public surface.
+changed public signatures. D11-E1 adds one in-process public Rust error enum and changes
+`build_service_stream`'s stream item error type; HTTP/NDJSON is unchanged.
 
 ### `Driver::on_alloc_terminal` — replacement docstring (D2)
 
@@ -1220,11 +1248,43 @@ reference must not be live across (2) (`exit_observer.rs:177-197`). Module docs 
 
 | Surface | Change |
 |---|---|
-| `build_service_stream` (`streaming.rs:988`) | **Behaviour contract only; signature unchanged.** Docstring gains: the current attempt's recorded verdict is reported first; `Lagged` relists; a failed read ends the stream with an error; subscribe precedes the read |
+| `build_service_stream` (`streaming.rs:988`) | D10's four arguments remain, with `progress_deadline: Duration` last. **D11-E1 changes the stream item** to `Result<Bytes, ServiceStreamError>`; it still returns `impl Stream + Send + 'static`. Docstring gains: the current attempt's recorded verdict is reported first; `Lagged` relists; a failed read ends the stream with an error; subscribe precedes the read |
+| `overdrive_control_plane::streaming::ServiceStreamError` (D11-E1) | New public in-process enum with exactly `ObservationRead { source: ObservationStoreError }` and `LineEmission { source: std::io::Error }`; implements `std::error::Error + Send + Sync + 'static`, and `Error::source` exposes the nested typed source |
 | `overdrive_reconcilers::current_alloc`, `service_event_from_terminal` | **Reused unchanged** |
-| Wire, archived, CBOR `View`, OpenAPI, CLI, handler | **None** |
+| Wire, archived, CBOR `View`, OpenAPI, CLI wire parser, handler route | **None**; `Body::from_stream` consumes the new Rust error type through its existing `Error + Send + Sync` bound |
 
-Conformance accessors for D7 to D11: § "Formal protocol model"; no API added.
+The exact public Rust type and signature are:
+
+```rust
+pub enum ServiceStreamError {
+    ObservationRead { source: ObservationStoreError },
+    LineEmission { source: std::io::Error },
+}
+
+pub fn build_service_stream(
+    state: AppState,
+    workload_id: WorkloadId,
+    accepted: ServiceSubmitEvent,
+    progress_deadline: Duration,
+) -> impl Stream<Item = Result<Bytes, ServiceStreamError>> + Send + 'static;
+```
+
+For `ObservationStore::alloc_status_rows` at stream open and on every `Lagged` relist,
+each `ObservationStoreError::Unreachable { peer }`, `Io(error)` and
+`Envelope { source }` maps unchanged into
+`ServiceStreamError::ObservationRead { source: original_error }`. The original
+variant, payload, `io::ErrorKind` and envelope cause remain inspectable. The
+stream yields that `Err` once and ends, never arms or waits for a timeout after
+an open-read failure and never resumes after a failed relist. The existing
+`emit_service_line` failure at Accepted, live or recorded terminal, or a
+synthesized terminal maps to `ServiceStreamError::LineEmission { source:
+original_io_error }`, yields once and ends. These are the exhaustive stream-error
+variants: no `Other`, string-only classification, error-to-absence conversion,
+retry, or synthetic `ServiceSubmitEvent::Failed` for an observation read. Open
+and relist are two sites of the same semantic read failure. The local adapter's
+ordinary corrupt-row scan still logs and skips under ADR-0048; its declared
+port error set nevertheless includes `Envelope`. The Job stream is unchanged.
+Conformance accessors for D7 to D11 remain those in § Formal protocol model.
 
 ### Interface changes of B1, B2, B3, D12 and D17
 
@@ -1237,7 +1297,40 @@ Conformance accessors for D7 to D11: § "Formal protocol model"; no API added.
 | B3 | `WorkloadLifecycle` ceiling classification | The pre-startup-crash predicate accepts `WorkloadCrashedImmediately` and `VmOutOfMemory`; `exit_code` is `None` for the latter. No new variant |
 | D12 (was B4) | `compute_backend_healthy` (private) | **Behaviour only**: reads `ServiceAllocFact.stable_committed`; the `terminal_announced` successor hold is deleted. No field, signature, wire or persisted change |
 | B5 | None | **Rejected.** `PROGRESS_DEADLINE_MARGIN` stays the literal 30 s |
-| D17 (Accepted 2026-11-03) | `ReconcilerRuntime` (`reconciler_runtime.rs`) | **New `pub`: `submit_evaluation(&self, eval: Evaluation, now: Instant, eligibility: EvaluationEligibility)`** (submit, release the lock, signal; the only production submit path), **`BrokerDrain<'_>`** (guard newtype: `drain_pending`, `next_eligible_at`, `counters`, no `submit`) and **`pub(crate) async submitted(&self)`** (consumes the stored or delivered permit; called only by the loop). **Changed:** `broker()` returns `BrokerDrain`; **`broker_mutex()` is removed**. Callers that took the mutex to submit take the runtime; `InterestRouterBroker::from_runtime` submits through `submit_evaluation`; `from_shared_broker` is unchanged and does not wake. `EvaluationBroker` unchanged. Detail: § D17, ADR-0273 |
+| D17 (Accepted 2026-11-03, exact guard shape D17-S1 approved 2026-11-09) | `ReconcilerRuntime` (`reconciler_runtime.rs`) | **New `pub`: `submit_evaluation(&self, eval: Evaluation, now: Instant, eligibility: EvaluationEligibility)`** (submit, release the lock, signal; the only production submit path), **`BrokerDrain<'_>`** (guard newtype: `drain_pending`, `next_eligible_at`, `counters`, no `submit`) and **`pub(crate) async submitted(&self)`** (consumes the stored or delivered permit; called only by the loop). **Changed:** `broker() -> BrokerDrain<'_>`; **`broker_mutex()` is removed**. Exact receivers, parameters and result types are pinned below. Callers that took the mutex to submit take the runtime; `InterestRouterBroker::from_runtime` submits through `submit_evaluation`; `from_shared_broker` is unchanged and does not wake. `EvaluationBroker` unchanged. Detail: § D17, ADR-0273 |
+
+#### D17-S1 — exact drain-only guard interface
+
+```rust
+pub struct BrokerDrain<'a> { /* private guard; no public fields */ }
+
+impl<'a> BrokerDrain<'a> {
+    pub fn drain_pending(
+        &mut self,
+        limit: usize,
+        blocked_targets: &BTreeSet<TargetResource>,
+        now: Instant,
+        now_unix: UnixInstant,
+    ) -> Vec<(Evaluation, Duration)>;
+    pub fn next_eligible_at(
+        &self,
+        blocked_targets: &BTreeSet<TargetResource>,
+    ) -> Option<UnixInstant>;
+    pub fn counters(&self) -> BrokerCounters;
+}
+
+impl ReconcilerRuntime {
+    pub fn broker(&self) -> BrokerDrain<'_>;
+}
+```
+
+`BrokerDrain` wraps the per-runtime `parking_lot::MutexGuard<EvaluationBroker>`
+and exposes only these three read/drain methods. The parameter and result
+types keep `EvaluationBroker`'s existing FIFO, blocked-target, `NotBefore` and
+counter meanings. No `submit`, `Deref`/`DerefMut`, `AsRef`/`AsMut`, public guard
+field or other escape to `EvaluationBroker` is exposed: every production submit
+must call `submit_evaluation` and wake the loop. The loop drops this guard
+before any `.await`; the existing `EvaluationBroker` remains unchanged.
 
 Comments naming the early-exit branch's owner, and those D8 to D10 make false (the `streaming_cap` doc, the `build_service_stream` contract, the `Timeout` doc, the `submit_workload_streaming` comment, the `stable_this_tick` comments), are updated in the same change.
 
@@ -1284,7 +1377,7 @@ Comments naming the early-exit branch's owner, and those D8 to D10 make false (t
 | `ProbeRunner` guest-listener task (D14 item 3) | EXTEND (one task kind beside the dial task; writes only that allocation's startup `ProbeResultRow`s through the dial task's run state) | bounded-change | Mutation set: startup rows of the allocation. Assert (S-53): `Pass` (`same_status_runs` 1) on the insertion that completes the declared set, no row before the deadline, first `Fail` at the deadline (`same_status_runs` 1), one `Fail` per interval after (2, 3, …), no row write started after the task observed cancellation (seeded sim with `SimGuestListenerReports` and `SimClock`) |
 | `ServiceAllocFact.max_attempts` -> `startup_attempts_required` and the stop gate at `service_lifecycle.rs:1199` (D14 item 3, P1) | EXTEND (rename one in-memory State field; its only reader is the gate; hydration sets it from the descriptor's mechanic) | pure-function (return-only) | Universe: the `Option<Action>` the gate returns. Assert (S-54): for `Tcp` and `Http` the gate is today's `attempts >= max_attempts`; for `GuestListeners` it holds at `attempts >= 1` with the elapsed and no-pass conditions; proptest over mechanic x streak x elapsed x pass; mutation target |
 | Beacon line reading in `VmDriver` (D13 item 3) | EXTEND (behaviour: classify by kind, never block the stop or command path) | bounded-change | Mutation set: the board and the exit report of one allocation. Assert: `Listen` never occupies the exit report; garbage and post-`Exit` lines change nothing (scripted lines through the reader's existing beacon seam) |
-| New components, ports, variants, errors | D7: one variant (`StoppedBy::StartupProbe`). D8: one `View` field. D9: one `pub` method. D10: one const, two pure functions, one wire field and one wire struct. D11: none. D17: one `pub` runtime method, one `pub(crate)` method, one `pub` guard type (one accessor removed). D13 to D16: see § Interface changes (D13 to D16) and the three rows above. D1 to D12 and D17 add no new component, crate, port, `Action` or error type | n/a | D6 adds one in-memory State field and no port; D7 adds one in-memory State field, one enum variant and no port. |
+| New components, ports, variants, errors | D7: one variant (`StoppedBy::StartupProbe`). D8: one `View` field. D9: one `pub` method. D10: one const, two pure functions, one wire field and one wire struct. D11-E1: one public in-process `ServiceStreamError` with two variants. D17: one `pub` runtime method, one `pub(crate)` method, one `pub` guard type (one accessor removed). D13 to D16: see § Interface changes (D13 to D16) and the three rows above. D1 to D12 and D17 add no new component, crate, port or `Action` | n/a | D6 adds one in-memory State field and no port; D7 adds one in-memory State field and one enum variant; D14-E2 adds three typed input-error variants. |
 
 Effect isolation: the hook is a pure-intent call through `Weak<dyn Driver>`; no new adapter or external dependency, so no `probe()` is specified.
 
@@ -1730,7 +1823,7 @@ path does not write.
 | S-39 | **F-5, redeploy ends at once.** `NoMissedTerminal`, `RecordedVerdictNeverStale` | submit handler (`Inserted` then `Unchanged`, NDJSON lane) -> `build_service_stream`, with the real shim, `ServiceLifecycle`, `WorkloadLifecycle` and `SimObservationStore` | the same spec submitted twice: (a) the first reached `Stable`; (b) the first was given up (each of the four give-up terminals); (c) the first is starting; (d) the first's current attempt was stopped for a probe (startup, liveness) and its successor is starting; (e) the first was operator-stopped; (f) `overdrive workload restart` after a give-up, redeploy while the successor starts | (a) second stream yields `Accepted { outcome: unchanged }` then `Stable` with the recorded `settled_in_ms` and witness, no clock advance; (b) the recorded `Failed`; (c), (d), (f) no terminal until the live event or D10's deadline, and (f) never reports the superseded give-up; (e) `Stopped` naming the operator. The redeploy writes no row, event or `View`. `Inserted`-path behaviour unchanged | Tier 1 composed, seeded |
 | S-40 | **Ordering.** `NoMissedTerminal` | `build_service_stream` with rows written and events published at scripted points around the stream's subscription and read | seeded schedule: commit+publish before the stream's first poll; between `Accepted` and the read; after the read; `Lagged` with a missed commit then relist; a superseding fresh-id attempt | In every schedule exactly one terminal line, the same whichever path delivers it; none lost or duplicated; a `Lagged` stream recovers the terminal it missed; a line from a live event names an attempt that was current when the event was published (R-4); seed printed | Tier 1 seeded sim invariant |
 | S-41 | **Snapshot equals live line.** ADR-0037 §4 | the shim `FinalizeFailed` (`Stable`, give-ups) and `StopAllocation` rows, written through the real shim, and the event published for each write | none | For each terminal class the line built from the committed row equals the line built from the published event (byte-equal); an event received implies its row is readable (commit precedes publish). A mismatch is a design deviation to surface | Tier 1 composed |
-| S-42 | **Failed read.** `FailedReadNeverWaits` | `build_service_stream` with a `SimObservationStore` whose `alloc_status_rows` fails: at open, and on a relist after `Lagged` | injected read fault | The stream ends with a stream error; it does not yield `Timeout`, wait for the deadline, or treat the fault as "no verdict"; the store is unchanged | Tier 1 |
+| S-42 | **Failed read (D11-E1).** `FailedReadNeverWaits` | `build_service_stream` with a `SimObservationStore` whose `alloc_status_rows` fails: at open, and on a relist after `Lagged` | injected `ObservationStoreError::Unreachable`, `Io` or `Envelope` where the port permits; an ordinary local corrupt-row scan is logged/skipped under ADR-0048, not claimed as an `Envelope` stream error | The stream yields exactly `ServiceStreamError::ObservationRead { source: original_error }` and ends; the source variant/payload survives, no `Timeout` or wait follows, and the store is unchanged. No other stream-error variant is emitted for an observation-read failure | Tier 1 |
 
 Obligations of the 2026-11-03 rulings (B1, B2, B3, D12, D17). B5 was rejected and has no
 obligation; B2's obligation is the row-write variant of S-30.
@@ -2020,15 +2113,16 @@ reviews existing tests that assume nothing drains until `SimClock` advances
 
 ## Wave: DESIGN / [REF] Decisions D13 to D16 — guest-reported listener readiness
 
-> Authored by Morgan (nw-solution-architect), 2026-11-03, PROPOSE mode, scope: all
+> Authored by Morgan (nw-solution-architect), 2026-11-03; accepted after
+> independent full DESIGN review iteration 4 on 2026-11-09. Scope: all
 > priorities. Origin: the user's ruling of 2026-11-03, "Drop inference and take readiness
-> from the guest itself". **Status: user-approved in direction; V41 and V42 held. The rulings
+> from the guest itself". **Status: accepted; V41 and V42 held. The rulings
 > PR-1 to PR-4 are recorded in § Approval record, the one home for their text, with P1 (the
 > row counter and the stop gate's attempts threshold, D14 item 3), A1 (the board's entry
 > lifetime, D13 item 10), A3 (the host-input conformance projection), R1 and R2 (§ Formal
-> protocol model).** None of D13 to D16 is yet
-> **Accepted**, none authorises DISTILL or DELIVER, and ADR-0058 stays operative until
-> ADR-0270 is accepted. Decision records:
+> protocol model).** ADR-0058's inferred-TCP behavior remains operative until
+> the accepted ADR-0270 replacement is implemented. Independent DISTILL and
+> roadmap approval remain necessary before DELIVER. Decision records:
 > [ADR-0272](../../product/architecture/adr-0272-the-guest-observes-workload-listeners-with-kernel-hooks-not-a-poll.md) (D13, observation),
 > [ADR-0268](../../product/architecture/adr-0268-the-guest-reports-each-workload-listener-it-opens-over-the-beacon-channel.md) (D13, report),
 > [ADR-0269](../../product/architecture/adr-0269-a-service-with-no-declared-startup-probe-waits-on-a-guest-listener-startup-probe.md) (D14),
@@ -2300,6 +2394,38 @@ Rejected alternatives (`fentry`, `sock_diag` polling, workload-signalled readine
     `FromIterator<Listener>` (DG-6; every composition and oracle builds values this way).
     `GuestListenerBoard::new() -> Self` is the board's constructor. Behaviour (the trait docstring carries it; DISTILL
     scenarios S-50 to S-52 pin each clause):
+
+    **D13-S1, exact public signatures (user-approved 2026-11-09):**
+
+    ```rust
+    impl VmDriver {
+        pub fn new(
+            vmm: Arc<dyn Vmm>,
+            clock: Arc<dyn Clock>,
+            fs: Arc<dyn CgroupFs>,
+            cgroup_accounting: Arc<dyn CgroupAccounting>,
+            probe_runner: Arc<ProbeRunner>,
+            guest_network_exec: Arc<GuestNetworkExecGate>,
+            layout: VmHostLayout,
+            beacon: BeaconIntake,
+            guest_listener_board: Arc<GuestListenerBoard>,
+        ) -> Self;
+    }
+
+    impl ReportedListeners {
+        pub fn contains(&self, protocol: Proto, port: NonZeroU16) -> bool;
+        pub fn len(&self) -> usize;
+        pub fn is_empty(&self) -> bool;
+    }
+    ```
+
+    The board is the ninth and last mandatory constructor argument; the first
+    eight retain their existing order and types. `contains` takes the pair's
+    constituents by value, `len` counts distinct pairs, and `is_empty` is
+    equivalent to `len() == 0`. `Default`, `FromIterator<Listener>`, equality,
+    the read-only `GuestListenerReports` trait signatures, and the sixth
+    `ProbeRunner::new` parameter remain as already approved. The board's
+    storage and private write-side methods remain implementation choices.
     - **Entry lifetime (one contract; A1, accepted 2026-11-04).** An allocation id has an entry from `open` to `close`
       and none before or after. `reported` on an id with no entry returns the empty set; there
       is no frozen-after-close read, because no production reader exists after close (the
@@ -2383,7 +2509,8 @@ Decision record: ADR-0269.
    tail variant `GuestListeners` (the D7 `StoppedBy::StartupProbe` precedent). It is valid
    only as the sole startup descriptor of a Service (`from_submit` and the parser reject it
    elsewhere), cannot be written in TOML (only D15's default rule produces it), and carries
-   no listener data (that would persist derived state).
+   no listener data (that would persist derived state). D14-E2 below pins the
+   exact typed rejection at each applicable ingress.
 2. **Declared listeners reach the probe runner (PR-4: one field, not two).**
    `AllocationSpec` gains `declared_listeners: Vec<Listener>` (the existing
    `workload_spec::Listener { port: NonZeroU16, protocol: Proto }`), the full declared set in
@@ -2399,7 +2526,8 @@ Decision record: ADR-0269.
    once in `hydrate_desired` (`project_service_listen_ports`, `:590` and `:2053`, becomes the
    declared-set projection; no TCP-only projection remains in `WorkloadLifecycle`).
    `AllocationSpec` gets one read accessor for the TCP view
-   (`tcp_service_ports()`), which those two consumers call, so the TCP set is a filter of the
+   (`pub fn tcp_service_ports(&self) -> Vec<NonZeroU16>`, D14-A1, user-approved
+   2026-11-09), which those two consumers call, so the TCP set is a filter of the
    full set by construction and the two cannot drift. Alternative: keep both fields, each
    projected separately in three `WorkloadLifecycle` construction sites; rejected because
    nothing then ties them together, and a Service edit that changes one projection and not
@@ -2500,6 +2628,80 @@ Decision record: ADR-0269.
    or `udp:<port>` joined by single spaces in declaration order.
 5. Alternatives: see ADR-0269.
 
+#### D14-A1 — exact TCP-view interface
+
+```rust
+impl AllocationSpec {
+    pub fn tcp_service_ports(&self) -> Vec<NonZeroU16>;
+}
+```
+
+`NonZeroU16` is `std::num::NonZeroU16`. Each call returns a newly owned vector
+containing every `declared_listeners` entry whose protocol is `Proto::Tcp`, in
+declaration order; it preserves duplicate TCP declarations if any are present,
+does not sort or include UDP, and does not mutate the spec. The action shim's
+`declared_tcp_listen_ports` converts this vector to `Vec<ListenPort>`; the
+worker's inbound installer derives its capability set and installs rules from
+the vector. No `Driver` trait method, stored TCP field, row or wire change is
+added by this signature pin.
+
+#### D14-E2 — exact typed input rejection
+
+The **user-approved 2026-11-09** semantic error set adds only these variants to
+the existing public enums:
+
+```rust
+// overdrive_core::aggregate::AggregateError
+GuestListenersInvalidRole {
+    vector_role: ProbeRole,
+    descriptor_role: ProbeRole,
+    index: usize,
+},
+GuestListenersNotSoleStartup { count: usize },
+
+// overdrive_core::aggregate::workload_spec::ParseError
+GuestListenersNotOperatorConfigurable {
+    role: ProbeRole,
+    probe_idx: usize,
+},
+```
+
+`ProbeRole` is the existing `overdrive_core::observation::ProbeRole`. Both
+indices are zero-based positions in their containing role vector, not the
+caller-supplied `ProbeDescriptor.idx`. `vector_role` names the input vector and
+`descriptor_role` is the descriptor's own role; the two may disagree on raw
+JSON. The variants and their payloads are the semantic causes. Display text
+names role and index only for diagnosis.
+
+| Ingress condition | Exact typed result | Caller mapping |
+|---|---|---|
+| `Service::from_submit` sees `GuestListeners` in `readiness_probes` or `liveness_probes`, or in `startup_probes` with `ProbeDescriptor.role != Startup` | `AggregateError::GuestListenersInvalidRole { vector_role, descriptor_role, index }`; first invalid in Startup, Readiness, Liveness vector order, then index order. This check precedes the sole-startup and general probe-count checks; existing scalar, driver, listener and mechanic-value validation keeps its current precedence. | `submit_workload` retains `ControlPlaneError::Aggregate` with this exact nested variant. `to_response` returns HTTP 400, `ErrorBody.error = "validation"`, and `field = "<vector_role>_probes[<index>].mechanic"` for a non-startup vector or `"startup_probes[<index>].role"` for a startup-vector role mismatch. `message` is diagnostic only. |
+| The Service startup vector has a correctly role-tagged `GuestListeners` and more than one descriptor | `AggregateError::GuestListenersNotSoleStartup { count: startup_probes.len() }`, after the invalid-role check and before `ProbeCountExceeded`. The count includes all startup descriptors. | The same typed `ControlPlaneError::Aggregate` chain; HTTP 400 `ErrorBody { error: "validation", field: Some("startup_probes"), message: diagnostic }`. |
+| The Service startup vector has exactly one correctly role-tagged `GuestListeners` | Neither new error; other existing validation remains. | Ordinary Service admission. D14 defines no raw-JSON provenance restriction, so none is added. |
+| Service TOML writes canonical `type = "guest_listeners"`, case-insensitive, in startup, readiness or liveness | `WorkloadSpecInput::from_toml_str` returns `ParseError::GuestListenersNotOperatorConfigurable { role, probe_idx }`, first in parser role order Startup, Readiness, Liveness and index order. The shared mechanic parser recognizes this one platform-only token before its `UnknownProbeType` arm. | No HTTP request or intent write. Both CLI deploy modes pass this exact parse error as `CliError::ParseError(source)`, with the existing exit code 1. |
+| Job or Schedule TOML has any probe block | Existing `ParseError::ProbesNotAllowedOnKind { kind: "job" or "schedule", guidance: existing per-kind guidance }` before mechanic parsing. | Existing typed parser error; no D14-E2 variant. |
+
+`guest_listeners` is the canonical snake-case token; `GUEST_LISTENERS` denotes
+the same forbidden mechanic. `GuestListeners` without an underscore remains
+the existing `UnknownProbeType { probe_idx, found: "guestlisteners".to_owned()
+}` under the current lowercase parser; no new alias is introduced. A raw Job
+or Schedule `SubmitSpecInput` cannot contain a probe descriptor: its per-kind
+wire payload has no probe vectors and denies unknown fields. Raw JSON adding a
+probe field fails the `Json<SubmitWorkloadRequest>` extractor before the
+handler body and before `Service::from_submit`. That structural rejection
+requires no new typed Service error or test seam. The existing
+`AggregateError::Validation { field, message }` flattening is not used for the
+two new aggregate variants; `ControlPlaneError::Aggregate` preserves them.
+`to_response` updates its exhaustive aggregate match to set the fields above,
+while the accepted ADR-0015 status 400 and wire error code `"validation"`
+remain unchanged. `ProbeMechanic::validate()` continues to accept the
+fieldless value; role and operator-origin checks live at the constructor and
+parser ingresses. The CLI's existing private `aggregate_to_cli_error`
+exhaustively matches `AggregateError` and needs bounded arms for the two new
+variants; this compiler fallout adds no public `CliError` variant and may not
+use an `unreachable!` panic for a production-reachable input. No additional
+probe-field policy is introduced.
+
 ### D15 — the default startup gate is the guest's report of every declared listener
 
 Decision record: ADR-0270 (supersedes ADR-0058 on acceptance).
@@ -2523,10 +2725,15 @@ exits 1 right after start must not be reported successful.
 
 | Workload behaviour | New outcome |
 |---|---|
-| Exits 1 (or 0) without opening a declared listener (the coinflip) | No `Pass` row; `Stable` never announced; exit consumed (D1), row `Failed`/`Terminated`; `WorkloadLifecycle` restarts to the ceiling, gives up `EarlyExit` (D6). **Closed.** |
+| Exits 1 without opening a declared listener (the coinflip) | No `Pass` row; `Stable` never announced; exit consumed (D1), row `Failed` with `WorkloadCrashedImmediately`; `WorkloadLifecycle` restarts to the ceiling and gives up `EarlyExit` (D6). **Closed.** |
+| Exits 0 before opening a declared listener | No `Pass` row and no `Stable`; the clean exit is `Terminated` with `Stopped { by: Process }`, and the existing D6 ceiling classification gives up `BackoffExhausted`. This is the accepted P-5 exclusion, not an `EarlyExit` classification. |
 | Runs but never opens a declared listener (or only an undeclared one), or opens only some | `Fail` rows from 60 s; D7 stops it, D8 retries the stop, give-up `StartupProbeFailed` with the missing listeners as `last_fail`. **Closed.** |
 | Opens every declared listener, then exits non-zero **before the terminal row is written** | Can be reported `Stable` if the `Pass` row and `Stable` commit land first. **Residual window**, below. |
 | Opens every declared listener, runs long, crashes later | Ordinary post-`Stable` crash: restart authority, `restart_count`, `LastTerminated` (ADR-0078). |
+
+The earlier combined “1 (or 0) → EarlyExit” row contradicted the accepted D6
+predicate, S-15 and the user's 2026-11-02 ruling excluding P-5. This table
+restates those already accepted outcomes; it adds no clean-exit classifier.
 
 **Residual window.** The platform-controlled part is the time from the guest's
 `listen()`/`bind()` to the exit observer writing the terminal row: vsock delivery, the
@@ -2543,38 +2750,84 @@ readiness probe's job, which D12 gates traffic on.
 
 ### D16 — remove `ProbeDescriptor.inferred` and its carriers, single cut
 
-Decision record: ADR-0271 (option R). With D14 the platform-supplied descriptor is identified
-by its mechanic, so the flag is derived state (`inferred == (mechanic == GuestListeners)`).
-Option K (keep the field; no version bumps) is the recorded alternative. The archived and
-wire carriers (the crafter confirms exact envelope names and versions):
+Decision record: ADR-0271 (option R). With D14 the platform-supplied descriptor is
+identified by its mechanic, so the flag is derived state (`inferred ==
+(mechanic == GuestListeners)`). Option K (keep the field) is the rejected
+alternative. The accepted outcome removes `inferred` from the descriptor, the
+probe-result row, the Stable witness, the API/describe wire and CLI render in
+one cut; no replacement field or stub is added.
 
-| Carrier | Where | Versioning |
-|---|---|---|
-| Service intent probes | `ProbeDescriptor` in `ServiceV1` inside `WorkloadIntentEnvelope` (`aggregate/mod.rs:317-367`) | new envelope version (`ServiceV2`); carries both the `inferred` removal and the new `ProbeMechanic::GuestListeners` variant |
-| Service spec probes | `ServiceSpecV1` in `ServiceSpecEnvelope` (`service_spec.rs:37-63`) | new envelope version (`ServiceSpecV2`); carries both the `inferred` removal and the new variant |
-| Probe result row | `ProbeResultRowV1` and `V2` `inferred` (`probe_result_row.rs:398,431`) | `ProbeResultRowV3` without the field; V1/V2 fixtures untouched |
-| `Stable` witness | `ProbeWitness.inferred` in `TerminalCondition::Stable` (`transition_reason.rs:804-806`), in the alloc-status row's envelope | new version of that envelope |
-| Wire | `ProbeDescriptor`, per-alloc probe row (`api.rs:1020-1056`), `ServiceSubmitEvent::Stable` witness, describe | additive removal; `api/openapi.yaml` regenerated (`inferred` is `required` at `:1403`) |
+**Five actual carrier boundaries:** `WorkloadIntentEnvelope` (Service intent),
+`ServiceSpecEnvelope` (parser-side Service spec), `ProbeResultRowEnvelope`,
+`AllocStatusRowEnvelope` (including `LastTerminated.terminal`), and
+`AllocLifecycleOccurrenceRowEnvelope` (the separately persisted lifecycle
+occurrence). The occurrence carrier was omitted from the earlier table; the
+local store archives it in `write_alloc_lifecycle_transaction`. All five must
+carry one coherent current layout after the field removal.
 
-The intent and spec envelopes each ship one new version that carries **both** changes (the
-`inferred` removal and the tail variant `ProbeMechanic::GuestListeners`; a fieldless tail
-variant on an archived enum is itself a layout-visible change), with its own `FIXTURE_V2`
-named for the new version. The existing intent and spec fixtures carry empty probe lists
-(`schema_evolution/workload_intent.rs:49`, `service_spec.rs:34`), so they pin neither
-change; each of those two envelopes also gains a historical V1 fixture holding one probe
-descriptor with `inferred` set, and the V2 fixture holds a `GuestListeners` descriptor.
-Existing fixtures are never touched. One commit per envelope bump.
+**Explicit greenfield compatibility waiver, user 2026-11-09:**
+
+> "preserve historical bytes" -> what do um ean? we dont need to preserve
+> anything yet. this is greenfield. not used in production. rest is fine
+
+This waives historical persisted-byte/backward-read compatibility for this
+feature's pre-D16 archive shapes and the historical nested-type copies,
+old-to-new conversion chains and historical fixture additions that served
+only that compatibility. It does not waive current-format correctness, any
+other accepted D16 deletion, the five-carrier inventory, or unrelated schema
+and fixture contracts. The prior D16 table's V2/V3 historical migration
+instructions are superseded by this waiver; D16-S1 was never accepted.
+
+**D16-G1 — exact current-format contract, accepted under the waiver and
+independently approved at DESIGN review iteration 4.** Keep the five existing
+envelope families and their version tags, latest aliases and constructor
+selection. Rebaseline only their current payload layouts in place; no V2/V3
+variant, historical nested type or new migration reader is added for D16.
+
+| Carrier | Exact current shape after D16-G1 |
+|---|---|
+| Service intent | `WorkloadIntentEnvelope::V1(WorkloadIntentV1)` stays tag 0; `WorkloadIntent`/`WorkloadIntentLatest` stay aliases of `WorkloadIntentV1`, and `Service` stays an alias of `ServiceV1`. `ServiceV1` keeps its field order and three `Vec<ProbeDescriptor>` vectors. The current `ProbeDescriptor` loses only `inferred: bool`; `ProbeMechanic::{Tcp,Http,GuestListeners}` retain tags 0, 1, 2. A current V1 Service intent may contain `GuestListeners`. |
+| Parser-side Service spec | `ServiceSpecEnvelope::V1(ServiceSpecV1)` stays tag 0; `ServiceSpec`/`ServiceSpecLatest` stay aliases of `ServiceSpecV1`. Its fields and three `Vec<ProbeDescriptor>` vectors stay in order and use the current descriptor without `inferred`; operator TOML still rejects `guest_listeners` under D14-E2. |
+| Probe result | `ProbeResultRowEnvelope::{V1(ProbeResultRowV1), V2(ProbeResultRowV2)}` keep tags 0 and 1; `ProbeResultRow`/`ProbeResultRowLatest` stay aliases of V2. Remove `inferred: bool` from both payloads; V2's surviving fields remain `alloc_id`, `probe_idx`, `role`, `status`, `last_observed_at_unix_ms`, `run_seq`, `same_status_runs` in that order. V1 keeps its five surviving fields in order. Its existing V1→V2 run-count conversion remains (`run_seq = FIRST`, `same_status_runs = ONE`, other fields copied). |
+| Allocation status | `AllocStatusRowEnvelope::V1(AllocStatusRowV1)` stays tag 0; `AllocStatusRow`/`AllocStatusRowLatest` stay aliases of V1. Every row field and its order stays. `terminal` and `last_terminated.terminal` use current `TerminalCondition::Stable` with current `ProbeWitness { probe_idx: u32, role: String, mechanic_summary: String }` in that order; only `inferred` is removed. `LastTerminated` and the other `TerminalCondition` variants keep their names and fields. |
+| Allocation lifecycle occurrence | `AllocLifecycleOccurrenceRowEnvelope::V1(AllocLifecycleOccurrenceRowV1)` stays tag 0; `AllocLifecycleOccurrenceRow` and `VersionedEnvelope::Latest` remain V1. Fields and order stay; its `terminal` uses the same current `ProbeWitness` without `inferred`. `LocalObservationStore::write_alloc_lifecycle_transaction` still persists this envelope. |
+
+`latest()` and `into_latest()` keep selecting/projecting the existing latest
+variants. `known_discriminants()` stays `[0]` for the four V1-only envelopes and
+`[0, 1]` for `ProbeResultRowEnvelope`; `WorkloadIntentEnvelope`'s discriminant
+offset remains `None`. The other affected numeric codec offsets are derived from
+new canonical archive bytes and checked with current-layout golden evidence.
+Existing `FIXTURE_V*` byte literals are not rewritten. Their historical-byte
+decode assertions cease to gate only these waived pre-D16 layouts; current-layout
+golden/roundtrip evidence covers all five carriers. Unrelated envelope fixtures
+and tests remain. Earlier unfinished-checkout redb data is discarded before
+using the new build under the repository's greenfield single-cut policy. The
+new build may reject or reinterpret those waived pre-D16 bytes; no dual-read
+period is promised. The archived inner `WorkloadIntentV1::spec_digest` baseline
+may change across builds, including Job/Schedule enum bytes because rkyv sizes
+from the largest variant; within the new build, byte-identical intent remains
+byte-identical and `put_if_absent` idempotency and kind dispatch are unchanged.
+
+Roadmap 05-04 changes the descriptor and rebaselines the Service intent/spec
+layouts in one commit while retaining the default TCP startup gate. Roadmap
+05-05 changes the probe row and witness and rebaselines the three observation
+carrier layouts in one commit. Each includes directly affected constructor,
+offset and current-layout evidence fallout. No intermediate commit writes an
+old nested shape under a changed current payload. This scoped policy adds no
+storage table, historical migration system, new wire field, or test lane.
 
 **Deletion list (single cut, no stub), by behaviour.** The default-startup-probe
 synthesis in the TOML parser (the `STARTUP_*_DEFAULT` constants stay for explicit probes and
 for the materialised `GuestListeners` descriptor); `inferred` as a field of the Service alloc
 fact, its hydration, the `Stable` witness and the opt-out witness; `inferred` on the probe
 descriptor, the probe-result row and the witness, and on the wire and OpenAPI; the CLI
-`(inferred)` suffix and witness text. The tests, fixtures and goldens that pin `inferred`
+`(inferred)` suffix and witness text. Tests and goldens that pin `inferred`
 (the parse tests of the synthesised probe, the probe-count validation test, the
 `service_lifecycle` tests, render and describe tests, the `inferred` proptests, the
-hydration golden) are rewritten or deleted with the code; DISTILL confirms the set by
-running the suite. **Probe cap:** the `GuestListeners` descriptor holds no dial, so it does
+hydration golden) are updated or retired with the code; existing archive
+`FIXTURE_V*` byte literals are not rewritten, and current-layout golden
+evidence is required under D16-G1. DISTILL confirms the
+affected set by running the suite. **Probe cap:** the `GuestListeners` descriptor holds no dial, so it does
 not count toward `GUEST_PROBE_SLOTS` (`guest_transport/mod.rs:554-560`: the cap bounds the
 node flow slots a workload's probe tasks hold outside its quota, one dial per task); the
 count is over the dial-bearing descriptors and the `ProbeCountExceeded` message no longer
@@ -2589,16 +2842,17 @@ gate.
 |---|---|---|
 | `BeaconMessage` | New guest-to-host variant `Listen { protocol: Proto, port: NonZeroU16 }`, text form `LISTEN <tcp\|udp> <port>`, strict three-field parse | `overdrive-core` |
 | `BeaconParseError` (**DG-M**) | New variant `MalformedListen { raw: String, detail: String }`, `#[error("LISTEN message is malformed ({detail}) in line {raw:?}")]`, in the shape of `MalformedArgv` (`beacon.rs:155`): `raw` is the full line, `detail` is the `Display` text of the underlying failure (no `#[source]`, so the enum keeps its `Clone` and `PartialEq` derives). Every rejected `LISTEN` line returns this one variant: wrong field count, unknown protocol, a port that is not a number, out of range or zero. `FieldCount` and `InvalidInt` are not used for `LISTEN` | `overdrive-core` |
-| `ProbeMechanic` | New fieldless tail variant `GuestListeners` (Service, Startup, sole descriptor only) | `overdrive-core` |
+| `ProbeMechanic` | New fieldless tail variant `GuestListeners` (Service, Startup, sole descriptor only); typed ingress errors D14-E2 below | `overdrive-core` |
+| `AggregateError`, `ParseError` (D14-E2) | New exact variants/payloads and mappings in § D14-E2: `GuestListenersInvalidRole { vector_role: ProbeRole, descriptor_role: ProbeRole, index: usize }`, `GuestListenersNotSoleStartup { count: usize }`, `GuestListenersNotOperatorConfigurable { role: ProbeRole, probe_idx: usize }`. Existing `ControlPlaneError::Aggregate`, HTTP 400 `validation`, and `CliError::ParseError` carriers are retained | `overdrive-core`, bounded `overdrive-control-plane` and `overdrive-cli` mapping fallout |
 | `format_mechanic_summary` (reconciler, private) and `format_probe_mechanic_summary` (`overdrive-cli`, `pub`) (**DG-11**) | Each gains a second parameter `&[Listener]`, the declared listeners; used only by the `GuestListeners` arm (D14 item 4). No wire, archived or `ProbeMechanic` change | `overdrive-reconcilers`, `overdrive-cli` |
-| `ReportedListeners`, `GuestListenerBoard` (**DG-6**) | `ReportedListeners`: `Default`, `FromIterator<Listener>`, `is_empty`, beside the pinned `contains`, `len`, equality. `GuestListenerBoard::new() -> Self` | `overdrive-core`, `overdrive-worker` |
-| `AllocationSpec`, `WorkloadLifecycleState` | New `declared_listeners: Vec<Listener>` (in-memory); **PR-4:** replaces `service_ports` in both types, and `AllocationSpec::tcp_service_ports()` is the TCP view the TPROXY consumers read (D14 item 2) | `overdrive-core`, `overdrive-reconcilers` |
+| `ReportedListeners`, `GuestListenerBoard` (**DG-6, D13-S1**) | `ReportedListeners`: `Default`, `FromIterator<Listener>`, equality, and exact `contains(&self, Proto, NonZeroU16) -> bool`, `len(&self) -> usize`, `is_empty(&self) -> bool` signatures (D13 item 10). `GuestListenerBoard::new() -> Self` | `overdrive-core`, `overdrive-worker` |
+| `AllocationSpec`, `WorkloadLifecycleState` | New `declared_listeners: Vec<Listener>` (in-memory); **PR-4:** replaces `service_ports` in both types. **D14-A1:** `AllocationSpec::tcp_service_ports(&self) -> Vec<NonZeroU16>` is the owned TCP view the TPROXY consumers read (D14 item 2) | `overdrive-core`, `overdrive-reconcilers` |
 | `GuestListenerReports` (**PR-1**) | New read-only driven port, `#[async_trait]`, held as `Arc<dyn GuestListenerReports>`: `reported(&AllocationId) -> ReportedListeners`, `async changed(&AllocationId, &ReportedListeners) -> ReportedListeners`; behaviour contract in D13 item 10. New value type `ReportedListeners` | `overdrive-core` |
 | `GuestListenerBoard` (**PR-1**) | New concrete implementation of the port in `overdrive-worker`; its methods and any outcome type are internal (the crafter's). Pinned behaviour only, in D13 item 10: entry created before the beacon reader, removed after `stop_alloc` and on a failed `start`, an insertion-reporting check-and-act, three no-op cases | `overdrive-worker` |
 | `ServiceAllocFact` (**P1**, accepted 2026-11-04) | `max_attempts: u32` is replaced by `startup_attempts_required: u32` (in-memory State; `Tcp`/`Http` descriptor: its `max_attempts`; `GuestListeners`: 1). No row, wire, archived or CBOR change | `overdrive-reconcilers` |
-| `ProbeRunner::new`, `VmDriver::new` (**PR-1**) | Gain a mandatory `Arc<dyn GuestListenerReports>` and `Arc<GuestListenerBoard>` parameter respectively | `overdrive-worker` |
+| `ProbeRunner::new`, `VmDriver::new` (**PR-1, D13-S1**) | Gain a mandatory `Arc<dyn GuestListenerReports>` as ProbeRunner's sixth parameter and `Arc<GuestListenerBoard>` as VmDriver's ninth/last parameter respectively. The full `VmDriver::new` signature is in D13 item 10 | `overdrive-worker` |
 | `SimGuestListenerReports` (**PR-1**) | New `Sim*` implementation of the port (scripting API is DISTILL's) | `overdrive-sim` |
-| `ProbeDescriptor.inferred`, `ProbeResultRow.inferred`, `ProbeWitness.inferred` | Removed (D16 option R); versions per the D16 table | `overdrive-core` |
+| `ProbeDescriptor.inferred`, `ProbeResultRow.inferred`, `ProbeWitness.inferred` | Removed (D16 option R) from current public, wire and all five affected carrier layouts; exact scoped in-place envelope version policy is **accepted D16-G1** (§ D16) | `overdrive-core` |
 | Wire / OpenAPI / CLI | `inferred` removed; describe/render print the mechanic summary; new mechanic value in the probe schema | `overdrive-core`, `overdrive-control-plane`, `overdrive-cli` |
 | Probe runner | A task kind that waits on the reported-set port and writes `Pass`/`Fail` rows through the dial task's run state; takes the declared set from `start_alloc`'s existing `&AllocationSpec` (D13 item 10, D14 item 3) | `overdrive-worker` |
 | Guest | Listen programs: a separate small sockops `TCP_LISTEN_CB` program in the existing object and two `CgroupSock` programs (post-bind4, post-bind6), all three attached to a workload cgroup that init creates and starts the workload in (**PR-2**, V42 held; objects and attachments pinned in D13 item 1, P-a to P-d); forwarding of events as `Listen` lines (structure is the crafter's) | `overdrive-bpf`, `overdrive-init` |
@@ -3005,7 +3259,8 @@ Process items:
    detail), D11 is ADR-0263; ADR-0255 keeps D1, D2 and D4 as one decision. B1 is ADR-0265,
    B2 is ADR-0266, D12 is ADR-0267 (amends the operative ADR-0096 with a dated note), D17 is
    ADR-0273; B3 is text in ADR-0258. D13 to D16 are ADR-0268 to ADR-0272.
-2. **Gate:** the independent DESIGN re-review (approval); no modeler work is outstanding. On
+2. **Gate:** the independent DESIGN review approved this revision at iteration 4
+   (`design/review.md`); no modeler work is outstanding. On
    approval each of ADR-0268 to ADR-0272 moves to Accepted (ADR-0058 stays operative until
    ADR-0270 is accepted).
 3. At landing, `.claude/rules/development.md` § "Reconciler I/O" ("Steady-state tick") and
@@ -3045,7 +3300,7 @@ F-1 is GH #335 and F-2 is GH #336. F-3 was brought in as D7. F-4 was included by
 
 | Origin | Commitment | DDR | Impact |
 |---|---|---|---|
-| DESIGN#Executable obligations | S-1 to S-55 are the scenario authority (numbers not in the table below are unused; S-37, the F-4 fixture, is folded into S-25); each has a production owner path, a fault stimulus and an oracle | D1 to D17 | Every row is covered by an executable Rust body or listed as a waiver or gap below. No `.feature` file exists (`.claude/rules/testing.md`). |
+| DESIGN#Executable obligations | S-1 to S-56 and the D14-E2 input restriction are the scenario authority (numbers not in the table below are unused; S-37, the F-4 fixture, is folded into S-25); each has a production owner path, a fault stimulus and an oracle | D1 to D17 | Every row is covered by an executable Rust body or listed as a waiver or gap below. No `.feature` file exists (`.claude/rules/testing.md`). |
 | DESIGN#Formal protocol model | The stateful `*_conf` modules with named runs are the conformance targets; `guest_report` (full) is a model check only | D1, D3, D5 to D11, D13 | Six `quint-connect` drivers exist, one `#[quint_test]` per named run plus `#[quint_run]`. The guest half of `guest_report` is Tier-3 real-boot evidence (user ruling); no writer seam was added to `overdrive-init`. |
 | DESIGN#Lifecycle Gate Ownership | G-1 to G-10 and their "Required boundary scenarios" (items 1 to 15) | D1 to D15 | Each gate has a gate-available, gate-unavailable and unaffected-state test. Three G-10 scenarios are not authored (DG-8). |
 | DESIGN#Interface contract changes | Exact pinned shapes only; no invented API | D1 to D17 | Scaffolds carry exactly the pinned shape and panic with `RED scaffold`. Where the design does not pin a shape the test stops and the gap is routed to DESIGN (DG-1 to DG-12). |
@@ -3054,7 +3309,7 @@ F-1 is GH #335 and F-2 is GH #336. F-3 was brought in as D7. F-4 was included by
 
 ## Wave: DISTILL / [REF] Reconciliation
 
-Prior-wave reconciliation passed: 0 contradictions. There is no `discuss/` and no `devops/` directory (warned; acceptance criteria derived from DESIGN, default environment matrix, no story-to-scenario traceability). `design/wave-decisions.md` and this delta agree; DESIGN was approved at review round 7 (§ Approval record). The `spike/` findings were read; V39 stays open and is not tested. Policy: `docs/architecture/atdd-infrastructure-policy.md` was inherited; its Python-pilot machinery does not apply (Rust workspace, universe-bound assertions are written as exact before/after observations over port-exposed names).
+Prior-wave reconciliation recorded 0 contract contradictions at the time it was written. There is no `discuss/` and no `devops/` directory (warned; acceptance criteria derived from DESIGN, default environment matrix, no story-to-scenario traceability). A prior version claimed DESIGN approval at review round 7 without a recorded artifact or verdict; that claim remains withdrawn (F-06). The actual independent full DESIGN review approved the current D1–D17 revision at iteration 4 on 2026-11-09 (`design/review.md`), including D16-G1 under the user's quoted greenfield waiver. This does not replace an independent DISTILL review. The `spike/` findings were read; V39 stays open and is not tested. Policy: `docs/architecture/atdd-infrastructure-policy.md` was inherited; its Python-pilot machinery does not apply (Rust workspace, universe-bound assertions are written as exact before/after observations over port-exposed names).
 
 ## Wave: DISTILL / [REF] Scenario coverage
 
@@ -3095,7 +3350,7 @@ Path prefixes: `CP` = `crates/overdrive-control-plane`, `CORE` = `crates/overdri
 | S-39 | D11, F-5, G-8 | `CP/T/a/service_stream_recorded_verdict.rs::a_redeploy_of_a_stable_service_ends_stable_at_once`, `::a_redeploy_of_a_given_up_service_reports_the_recorded_give_up_at_once`, `::a_redeploy_of_an_operator_stopped_service_reports_the_operator_stop_at_once` (ign); `::a_redeploy_of_a_starting_service_waits_for_the_live_event`, `::a_redeploy_while_a_probe_stopped_attempts_successor_starts_waits_for_the_successor`, `::a_redeploy_while_a_restarted_successor_starts_never_reports_the_superseded_give_up` (pass) | T1 composed, `integration-tests` | ign(D11) x3; pass x3 |
 | S-40 | D11, G-8 | `service_stream_recorded_verdict.rs::a_terminal_committed_and_published_before_the_stream_reads_is_reported_once`, `::a_lagged_stream_recovers_the_terminal_it_missed_by_relisting` (ign); `::a_terminal_committed_and_published_after_the_read_is_delivered_live`, `::a_superseded_attempts_give_up_is_never_the_verdict`, `::a_recorded_probe_stop_is_not_a_verdict_and_the_stream_waits`, `::an_event_arriving_with_the_deadline_wins_over_the_timeout` (pass; G-7 `biased` boundary) | T1 composed | ign(D11) x2; pass x4 |
 | S-41 | ADR-0037 section 4 | `service_stream_recorded_verdict.rs::the_line_built_from_a_committed_row_equals_the_line_built_from_its_event` | T1 composed | pass (holds at HEAD) |
-| S-42 | D11 failed read | `service_stream_recorded_verdict.rs::a_failed_read_at_open_ends_the_stream_with_an_error_and_never_waits`, `::a_failed_relist_after_lagged_ends_the_stream_with_an_error` | T1 composed | ign(D11) x2 |
+| S-42 | D11-E1 failed read | `service_stream_recorded_verdict.rs::a_failed_read_at_open_ends_the_stream_with_an_error_and_never_waits`, `::a_failed_relist_after_lagged_ends_the_stream_with_an_error`; each parameterizes `Unreachable`, `Io`, `Envelope`, asserts `ServiceStreamError::ObservationRead` with the original nested variant and payload, one error then end, and no later `Timeout` | T1 composed | ign(D11) x2 |
 | S-46 | D12, G-9 | `CORE/T/a/service_lifecycle_startup_stop.rs::startup_probed_allocation_is_a_backend_only_after_its_stable_is_committed` | T1 pure proptest, default | ign(D12) |
 | S-47 | D12, G-9 | `CP/T/a/startup_gated_backend_eligibility.rs::startup_probed_allocation_is_a_backend_only_after_its_stable_is_committed` (a), `::readiness_met_before_stable_makes_the_backend_eligible_at_the_stable_commit` (i) (ign); `::successor_of_a_startup_stopped_attempt_is_a_backend_only_after_its_own_stable` (b), `::crash_successor_is_a_backend_only_after_its_own_stable` (g), `::startup_failure_after_stable_does_not_make_the_backend_unhealthy` (e), `::control_plane_restart_after_stable_keeps_the_backend_healthy` (f), `::opt_out_service_is_a_backend_at_running` (h) (pass) | T1 composed, default | ign(D12) x2; pass x5 |
 | S-48 | D17 | `CP/src/convergence_loop_wake.rs::a_submit_while_the_loop_is_parked_is_admitted_without_waiting_for_the_tick` (a), `::a_burst_of_submits_coalesces_per_target_and_drains_in_full` (c), `::a_deferred_evaluation_is_not_admitted_early_by_an_unrelated_wake` (f), `::the_admission_order_of_a_burst_is_identical_across_runs_of_one_seed` (DrainOrder, 4 seeds) (ign); `::the_cadence_tick_with_no_submits_drains_nothing_and_keeps_the_loop_alive` (d) (pass) | T1 seeded sim, `--lib` | ign(D17) x4; pass. (b) and (e) waived (DG-9). |
@@ -3107,6 +3362,7 @@ Path prefixes: `CP` = `crates/overdrive-control-plane`, `CORE` = `crates/overdri
 | D14 item 4 (DG-11) | mechanic summary names the declared listeners | `CLI/T/a/probes_section_render.rs::guest_listeners_summary_names_the_declared_listeners_in_declaration_order` (`probes_section` and the CLI formatter take `&[Listener]`); `REC/src/service_lifecycle.rs::guest_listeners_summary_names_the_declared_listeners_in_declaration_order` (reconciler formatter takes `&[Listener]`) | T1 pure, default / `--lib` | ign(D14) x2 |
 | S-55 | PR-4 | `CORE/T/a/declared_listeners_tcp_view.rs::the_tcp_view_is_the_tcp_filter_of_the_declared_listeners_in_declaration_order`, `::a_udp_only_declaration_has_no_tcp_ports_and_a_mixed_one_keeps_tcp_order`; `WRK/tests/integration/inbound_rules_only_for_tcp_declared_listeners.rs::a_udp_declared_listener_gets_no_inbound_capture_and_a_tcp_one_does` | T1 proptest; integration (nft, metal) | ign(PR-4) x3 |
 | S-56 | D6, DG-12 | `CORE/T/a/service_lifecycle_reconcile_branches.rs::terminal_allocation_of_any_start_history_closes_its_mid_startup_window` (oracle: the returned `View.terminal_announced` contains the allocation, `has_alloc_mid_startup_window()` is false, `next_evaluation_at` is `None`, no action) | T1 pure, enumerated grid (state x `started_at`), default | ign(D6) |
+| S-57 | D14-E2 input restriction | `CORE/T/a/guest_listeners_input_rejection.rs::{raw_service_guest_listeners_wrong_role_is_typed, raw_service_guest_listeners_not_sole_startup_precedes_count_check, operator_toml_guest_listeners_is_typed_for_every_role_and_case}`; `CP/T/a/guest_listeners_http_rejection.rs::invalid_guest_listeners_raw_service_is_rejected_at_http_ingress`; `CLI/T/a/probes_kind_rejection_cli.rs::canonical_guest_listeners_token_is_typed_in_each_role_on_both_cli_modes`. The core's `raw_service_guest_listeners_as_sole_startup_is_admitted` is a passing valid-input control. The Job/Schedule TOML kind gate remains covered by existing tests; raw Job/Schedule probe fields cannot enter the typed payload (`deny_unknown_fields`). | T1 pure proptest and in-process ingress (`integration-tests` for HTTP) | ign(D14-E2) x5; valid control pass |
 | G-10 (10) | D13 item 8, D14 item 3, Tier 3 | `CP/tests/integration/guest_listener_real_boot.rs::a_loopback_only_bind_never_satisfies_a_declared_listener` (real guest, `run_server`, `POST /v1/workloads`; observes the startup row in `GET /v1/allocs`) | T3 real boot, `integration-tests,kvm-tests`, native metal | ign(D13 guest side); RED on the probe-runner scaffold, no deadline `Fail` row |
 | G-10 (9) second clause, `guest_report` guest half | D13 items 1 and 10, Tier 3 | `guest_listener_real_boot.rs::every_declared_listener_a_real_workload_binds_is_reported_before_it_exits` (TCP and UDP listener held, then exit; `Pass` seen while `Running`, before the terminal row) | T3 real boot | ign(D13 guest side); RED on the same scaffold, no `Pass` row |
 | DG-6, F-5 | D13 host shared board | `CP/tests/integration/guest_listener_board_wiring.rs::a_listen_line_on_the_drivers_beacon_completes_the_probe_tasks_declared_set` (`run_server` over `SimVmm`, `SimBeaconIo`, `SimMtlsIntercept`; undeclared and partial reports change nothing, the completing report writes one `Pass`) | T1 production composition, `integration-tests` (metal) | ign(D13 host shared board); RED on the `LISTEN` parse scaffold |
@@ -3215,11 +3471,17 @@ Every cargo, nextest, quint and lint command ran through `cargo xtask metal run 
 | `cargo xtask conformance-lint` | 0 violations |
 | `cargo clippy` / `cargo fmt` | clippy `-D warnings` clean; fmt clean |
 | CLI `cli_submit_streaming_service_routes_to_service_submit_event_consumer` (real server) | times out at HEAD `e5c233ba7` as well: pre-existing, not a DISTILL regression |
+| 2026-11-09 D11-E1/D14-E2 focused metal runs | The valid raw-Service `GuestListeners` control passed. Three new core D14-E2 bodies, the HTTP body, the CLI body and the two amended S-42 bodies failed for their named absent behaviour; all compiled and reached their production driving boundary. Details and first failure points: `distill/red-classification.md` § 2026-11-09. The `infra/metal/test-placement.json` additions classify the six new tests in the existing `host-pure` lane; the first focused control attempt returned `test_unclassified` before its body because its placement was absent, then passed after the inventory update. |
+| Focused unaffected controls on Metal | Five passed: raw sole-startup `GuestListeners` admission, the D11 live-after-read Service stream, the pre-existing Job probe-kind CLI rejection, the `quint_stream_snapshot_publish_after_relist_reaches_channel` conformance run, and the Job stream's unchanged-resubmit acceptance. The latter two were run through the control-plane `--lib --test acceptance --features integration-tests` lane. |
+| 2026-11-09 compile/lint/format of bounded amendment | `cargo xtask metal run -- cargo clippy -p overdrive-core -p overdrive-control-plane -p overdrive-cli -p overdrive-reconcilers --all-targets --features integration-tests -- -D warnings` passed. `rustfmt --check` passed on every Rust file changed by this DISTILL remediation; `git diff --check` and both edited JSON parses passed. The Metal workspace `cargo fmt --all -- --check` fails solely on pre-existing clean `xtask/tests/acceptance.rs` module ordering; no DISTILL-remediation file appears in its second run's diff. |
+| Independent DISTILL review iteration 3 F-01 remediation | The reviewer's exact scan initially found 122/156 scheduled pending DELIVER tests without a per-test Contract Shape declaration. All 122 now carry one immediately before their pending marker; the same scan returns 0/156 missing. This is test metadata only; bodies, assertions, ignores and roadmap activations are unchanged. Changed-file `rustfmt --check`, `git diff --check`, and Metal Clippy across the five affected crates with `--all-targets --features integration-tests -- -D warnings` passed. The independent reviewer approved the full suite after re-review at iteration 4 in `distill/review.md`. Its F-02 mapped-nonloopback and F-03 S-53 schedule proposals were withdrawn and were not implemented. |
+| D11-E1 / D14-E2 typed-error contract audit | Open and `Lagged` relist read faults each map `Unreachable { peer }`, `Io(error)` and `Envelope { source }` to `ServiceStreamError::ObservationRead` retaining the original source; line emission maps to `LineEmission { source: io::Error }` with no artificial emitter seam. Raw Service role and cardinality violations map to the exact two `AggregateError` variants, then `ControlPlaneError::Aggregate` and HTTP 400 `validation` with the specified field; canonical case-insensitive operator TOML maps to `ParseError::GuestListenersNotOperatorConfigurable`, then `CliError::ParseError` and exit 1 in both deploy modes. The authored tests reject every other error variant. No material typed-error gap remains. |
 | Review | Sentinel round 1 `needs_revision` (3 blockers, 6 high, 5 low): the restart driver now calls hydrate, reconcile and shim dispatch and reads `claim`, `author` and `done` from the returned actions; the liveness handlers were exercised with a temporary D9 patch; the hook drivers compile and are clippy-clean; the B2 liveness-stop test was added. Subtractive review applied: four duplicate "Failed row yields no action" rewrites and a checked-in-openapi test deleted, one shared `HookedDriver` replaced three per-file drivers, the probe-read fault store merged into `issue_fault_store.rs`, an rkyv roundtrip duplicate and dead helpers deleted, `terminal_announced` assertions removed from the sim invariant test (DG-12). Remaining findings are the design gaps below. |
+| Current DISTILL review status | **APPROVED at independent full-suite review iteration 4** (`distill/review.md`). The historical round-1 verdict and the iteration-2/3 findings and dispositions are preserved there. `deliver/roadmap.json` validation remains `pending` for its separate independent roadmap review. The bounded self-audit is `distill/contract-remediation-audit.md`. |
 
 ## Wave: DISTILL / [REF] Design gaps routed to DESIGN
 
-**All thirteen gaps (DG-1 to DG-13) and the minor items were ruled on 2026-11-05**; the approval is recorded in § Approval record. Each gap was a shape or model fact the design did not pin; DISTILL did not improvise (CLAUDE.md "Implement to the design"). DISTILL applied the rulings: S-56 and the composed restart and give-up leg of S-32 are authored, and the specs, drivers and scaffolds follow the pins below. **DG-1 to DG-13 are closed. DISTILL is complete, pending the independent review.** Detail and file references: `distill/upstream-issues.md`.
+**All thirteen gaps (DG-1 to DG-13) and the minor items were ruled on 2026-11-05**; the approval is recorded in § Approval record. Each gap was a shape or model fact the design did not pin; DISTILL did not improvise (CLAUDE.md "Implement to the design"). DISTILL applied the rulings: S-56 and the composed restart and give-up leg of S-32 are authored, and the specs, drivers and scaffolds follow the pins below. **DG-1 to DG-13 are closed. DISTILL is complete and independently approved at iteration 4.** Detail and file references: `distill/upstream-issues.md` and `distill/review.md`.
 
 | ID | Ruling (2026-11-05) | Recorded in |
 |---|---|---|
@@ -3236,7 +3498,7 @@ Every cargo, nextest, quint and lint command ran through `cargo xtask metal run 
 | DG-11 | Both formatters take `&[Listener]`; no wire field | D14 item 4 |
 | DG-12 | Every `Failed` or `Terminated` fact joins `terminal_announced`; new obligation S-56 | D6 item 1, S-56 |
 | DG-13 | G-10 (9a) carries no test obligation: the failure is unreachable (init's binds come from `guest_reserved_ports()`, the Service validator rejects those ports with `ListenerPortReserved`, the board ignores an undeclared report, PR-2 keeps init outside the hooked cgroup). Clause (9b) stays covered by `guest_listener_real_boot.rs` | `distill/upstream-issues.md` |
-| Minor | `BeaconParseError::MalformedListen { raw, detail }`; `Idle` is a read-only `reported(alloc)` call; D16 historical fixtures land with the version bump (DELIVER); the per-consumer board is fixed by DG-6 | § Interface changes (D13 to D16) |
+| Minor | `BeaconParseError::MalformedListen { raw, detail }`; `Idle` is a read-only `reported(alloc)` call; the original D16 historical-fixture/version-bump obligation is superseded by the 2026-11-09 greenfield waiver and accepted D16-G1 current-format policy; the per-consumer board is fixed by DG-6 | § Interface changes (D13 to D16) |
 
 The gaps as DISTILL routed them:
 
@@ -3255,7 +3517,7 @@ The gaps as DISTILL routed them:
 | DG-11 | D14 item 4 pins `guest listeners tcp:8080 udp:5353`, but `format_mechanic_summary` sees only the fieldless mechanic; where the listener set reaches the formatter is unpinned | pin the carrier |
 | DG-12 | Whether a started `Failed` allocation stays in `terminal_announced` after D6 is unpinned; the sim invariant assertions on it were removed | pin the membership rule |
 
-Minor and unpinned: the `BeaconParseError` variant for a rejected LISTEN line (tests assert `Err` only); the `Idle` action mapping of `guest_report_host`; the parameter type of `service_stream_synth_cap_timeout`; the retry cadence of a failed `Pass` write and whether `<n>` stays at the deadline value in later Fail reasons (S-53); the D16 historical V1-with-`inferred` fixtures, which must land with the version bump (DELIVER); the per-consumer `GuestListenerBoard` in production wiring (inert; DELIVER shares one); pre-existing tests that assume liveness starts at `Running` or that `broker().submit` is drained only by the clock (DELIVER revisits); `RED` bodies still using `inferred` on `ProbeDescriptor` and `ProbeWitness` (D16 delivery drops it).
+Historical minor items from DISTILL: the `BeaconParseError` variant for a rejected LISTEN line, the `Idle` action mapping of `guest_report_host`, and the D16 current-format policy are now pinned above. The parameter type of private `service_stream_synth_cap_timeout`, the retry cadence of a failed `Pass` write and whether `<n>` stays at the deadline value in later Fail reasons, and test-support fixtures remain crafter/DISTILL choices within the accepted observable contract. The original D16 historical fixture/version-bump obligation was superseded by the explicit 2026-11-09 greenfield waiver. The per-consumer `GuestListenerBoard` in production wiring is inert until DELIVER shares one board; pre-existing tests that assume liveness starts at `Running` or that `broker().submit` is drained only by the clock are DELIVER fallout; `RED` bodies still using `inferred` on `ProbeDescriptor` and `ProbeWitness` are removed in the D16 step.
 
 ## Wave: DISTILL / [REF] Carried open items
 

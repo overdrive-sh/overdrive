@@ -1055,6 +1055,12 @@ fn aggregate_to_cli_error(err: AggregateError) -> CliError {
         AggregateError::Resources(msg) => {
             CliError::InvalidSpec { field: "resources".to_string(), message: msg }
         }
+        // RED scaffold: this separate client-side aggregate mapper is not the
+        // D14-E2 HTTP ingress; exact admission and CLI parse routing land later.
+        other @ (AggregateError::GuestListenersInvalidRole { .. }
+        | AggregateError::GuestListenersNotSoleStartup { .. }) => {
+            CliError::InvalidSpec { field: "startup_probes".to_owned(), message: other.to_string() }
+        }
     }
 }
 

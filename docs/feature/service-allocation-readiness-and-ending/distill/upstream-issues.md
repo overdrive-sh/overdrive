@@ -1,8 +1,10 @@
 # Upstream issues — DISTILL to DESIGN
 
+**2026-11-09 contract-remediation update:** D11-E1 and D14-E2 have exact user-approved typed-error sets, payloads and owner mappings in `../design/contract-remediation.md`, incorporated into `../feature-delta.md` and approved by the full DESIGN review at iteration 4. S-42 now asserts the three original observation-read causes at both read sites; S-57 covers the raw Service constructor, operator TOML, actual HTTP handler and both CLI deploy modes. No new `SPECIFICATION_AMBIGUITY` remains. The revised full DISTILL suite was independently **APPROVED at iteration 4** in `review.md`; roadmap validation stays `pending`.
+
 Feature `service-allocation-readiness-and-ending`. These are shapes or model facts the accepted design did not pin. DISTILL did not improvise any of them (CLAUDE.md "Implement to the design"; `.claude/rules/design.md`).
 
-**All of DG-1 to DG-12 and the minor items were ruled on 2026-11-05** (user: "proceed with recommendations"). The approval is recorded in the feature delta's § Approval record (rows DG-1 to DG-12 and DG-M). **No gap remains open; DISTILL is complete, pending the independent review.** Each "Action for DISTILL" below is done: the specs, drivers, scaffolds and tests follow the rulings. Delta references are to `../feature-delta.md`; spec files are under `specs/quint/service-allocation-readiness-and-ending/`. Summary table: delta § "Design gaps routed to DESIGN".
+**All of DG-1 to DG-12 and the minor items were ruled on 2026-11-05** (user: "proceed with recommendations"). The approval is recorded in the feature delta's § Approval record (rows DG-1 to DG-12 and DG-M). **No gap remains open; DISTILL is complete and independently approved at iteration 4.** Each "Action for DISTILL" below is done: the specs, drivers, scaffolds and tests follow the rulings. Delta references are to `../feature-delta.md`; spec files are under `specs/quint/service-allocation-readiness-and-ending/`. Summary table: delta § "Design gaps routed to DESIGN".
 
 ## Gaps that blocked activation of a conformance run or a composed test
 

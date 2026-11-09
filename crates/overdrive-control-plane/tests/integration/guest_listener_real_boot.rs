@@ -321,6 +321,7 @@ fn console_of(alloc: &str) -> String {
 /// listener would hold the `Pass` back (the set is not complete) and the
 /// scenario would fail.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D13 guest side, in-guest listen hooks and LISTEN lines before EXIT (guest_report)"]
 async fn every_declared_listener_a_real_workload_binds_is_reported_before_it_exits() {
     with_node("report-before-exit", |node| Box::pin(report_before_exit(node))).await;
@@ -378,6 +379,7 @@ async fn report_before_exit(node: &Node) {
 /// before the deadline, and `Running` is unaffected (D14 item 3, G-10
 /// "Explicitly unaffected").
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D13 guest side, loopback and v4-mapped binds are not reports (item 8)"]
 async fn a_loopback_only_bind_never_satisfies_a_declared_listener() {
     with_node("loopback-binds", |node| Box::pin(loopback_binds(node))).await;

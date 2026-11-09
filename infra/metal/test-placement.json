@@ -137,6 +137,9 @@
       "acceptance::job_kind_render::job_succeeded_summary_names_exit_code_and_duration": {
         "kind": "host-pure"
       },
+      "acceptance::probes_kind_rejection_cli::canonical_guest_listeners_token_is_typed_in_each_role_on_both_cli_modes": {
+        "kind": "host-pure"
+      },
       "acceptance::probes_kind_rejection_cli::given_job_with_probe_section_when_submit_then_named_error_with_job_guidance_exit_one": {
         "kind": "host-pure"
       },
@@ -3379,6 +3382,9 @@
       "acceptance::generation_read_coupling::reconciler_observes_generation_written_at_for_workload_generation_key": {
         "kind": "host-pure"
       },
+      "acceptance::guest_listeners_http_rejection::invalid_guest_listeners_raw_service_is_rejected_at_http_ingress": {
+        "kind": "host-pure"
+      },
       "acceptance::hydration_characterization_golden::pre_move_hydrated_anystate_golden_covers_all_seven_reconcilers": {
         "kind": "host-pure"
       },
@@ -6145,6 +6151,18 @@
         "kind": "host-pure"
       },
       "acceptance::first_fit_place_branches::placement_returns_none_when_one_resource_fits_other_does_not": {
+        "kind": "host-pure"
+      },
+      "acceptance::guest_listeners_input_rejection::operator_toml_guest_listeners_is_typed_for_every_role_and_case": {
+        "kind": "host-pure"
+      },
+      "acceptance::guest_listeners_input_rejection::raw_service_guest_listeners_as_sole_startup_is_admitted": {
+        "kind": "host-pure"
+      },
+      "acceptance::guest_listeners_input_rejection::raw_service_guest_listeners_not_sole_startup_precedes_count_check": {
+        "kind": "host-pure"
+      },
+      "acceptance::guest_listeners_input_rejection::raw_service_guest_listeners_wrong_role_is_typed": {
         "kind": "host-pure"
       },
       "acceptance::health_check_toml_parse::declared_probe_inherits_adr_0057_defaults_when_fields_omitted": {

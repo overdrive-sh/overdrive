@@ -2,10 +2,17 @@
 
 ## Status
 
-User-approved (option R), 2026-11-03; unaffected by V42 (held 2026-11-04, PR-2 accepted in
-contract shape, [findings](../../feature/service-allocation-readiness-and-ending/spike/findings-workload-cgroup.md));
-not yet Accepted (remaining gates: model check, design review round 4). Not implemented. GH #318, GH #334.
-Contract and status: [feature delta](../../feature/service-allocation-readiness-and-ending/feature-delta.md) (D16).
+**Accepted, 2026-11-09, after the user's option-R approval and explicit
+greenfield compatibility waiver, and independent full DESIGN review iteration 4**
+([review](../../feature/service-allocation-readiness-and-ending/design/review.md)).
+The exact five-carrier D16-G1 current-format policy is in the
+[feature delta](../../feature/service-allocation-readiness-and-ending/feature-delta.md)
+(D16). The user said: “"preserve historical bytes" -> what do um ean? we dont
+need to preserve anything yet. this is greenfield. not used in production. rest
+is fine”. This waives only historical persisted-byte/backward-read compatibility
+for this feature's pre-D16 layouts. The in-place current-format policy is the
+bounded direct consequence of that ruling; the withdrawn historical migration
+proposal was never accepted. Not implemented. GH #318, GH #334.
 Depends on [ADR-0270](adr-0270-a-probe-less-service-is-stable-when-the-guest-reports-every-declared-listener-open.md)
 (which removes the inferred probe). Independently reversible: option K (keep the field,
 set it for the new descriptor) remains the recorded alternative (feature delta § D16).
@@ -20,10 +27,14 @@ guest-listener one: derived state, and misnamed (the platform no longer guesses)
 
 ## Decision
 
-**Remove `inferred` from the descriptor, the probe-result row, the `Stable` witness, the
-wire schemas and the CLI render, in one cut, using the versioned-envelope procedure for
-each archived carrier.** The carriers, the new versions and the fixtures are in the
-feature delta (D16). The mechanic summary string carried by the witness identifies the
+**Remove `inferred` from the descriptor, the probe-result row, the `Stable`
+witness, the wire schemas and the CLI render in one cut.** All five affected
+current carrier layouts must remain internally coherent, including the
+allocation-lifecycle occurrence row. D16-G1 keeps their existing envelope
+families, tags and latest aliases, rebaselining only the current payloads in
+place without a historical read promise. The exact shapes, fixture treatment
+and bounded two-step landing are in the feature delta § D16. The
+mechanic summary string carried by the witness identifies the
 platform-supplied gate.
 
 ## Alternatives considered
@@ -37,8 +48,12 @@ platform-supplied gate.
 
 ## Consequences
 
-- Five versioned carriers move together (feature delta D16); each gets a new envelope
-  version and a historical fixture that contains a probe, because the existing intent and
-  spec fixtures carry no probes and do not pin the layout the removal changes.
+- Five current carrier layouts change under D16: intent, spec, probe-result
+  row, allocation-status row and allocation-lifecycle occurrence row. Under
+  accepted D16-G1, historical nested types,
+  backward-read conversion chains and new historical fixtures are not required
+  under the user's feature-specific greenfield waiver. Existing fixture byte
+  literals and unrelated envelopes are not rewritten; current-layout evidence
+  covers all five affected carriers.
 - `workload describe` no longer prints `(inferred)`; the probe line states its mechanic.
 - Greenfield single cut (no dual-read period), per the project's migration policy.

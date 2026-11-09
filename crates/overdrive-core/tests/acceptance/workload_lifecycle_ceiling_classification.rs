@@ -426,6 +426,7 @@ proptest! {
     /// order and each case of the selection, the `current_startup_probe`
     /// population, the `VmOutOfMemory` arm.
     #[test]
+    /// CONTRACT_SHAPE: bounded-change.
     #[ignore = "pending DELIVER: D6 D7 B3 the restart authority names the give-up cause"]
     fn ceiling_terminal_names_the_final_attempts_cause(
         declared in any::<bool>(),
@@ -506,6 +507,7 @@ proptest! {
 /// nothing: not `BackoffExhausted`, not `LivenessProbeFailed`, and, after D6 and
 /// D7, not `EarlyExit` and not `StartupProbeFailed`.
 #[test]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D6 D7 the idempotency guard also matches EarlyExit and StartupProbeFailed"]
 fn an_already_finalised_row_is_not_finalised_again() {
     let finalised_terminals = [

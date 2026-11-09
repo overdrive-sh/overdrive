@@ -482,6 +482,8 @@ mod acceptance {
     // ports). Composed on the reconciler convergence tick, so the `integration-tests`
     // feature gates them like their siblings above.
     #[cfg(feature = "integration-tests")]
+    mod guest_listeners_http_rejection;
+    #[cfg(feature = "integration-tests")]
     mod service_stream_progress_deadline;
     #[cfg(feature = "integration-tests")]
     mod service_stream_recorded_verdict;

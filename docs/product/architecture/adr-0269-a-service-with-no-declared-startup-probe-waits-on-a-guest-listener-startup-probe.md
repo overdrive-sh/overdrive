@@ -2,11 +2,13 @@
 
 ## Status
 
-User-approved, 2026-11-03; rulings PR-3 and PR-4 are in the feature delta's approval record;
-the gate-threshold decision (P1, option (a)) is Accepted by the user, 2026-11-04 ("proceed
-with recommendations"); the ADR as a whole is not yet Accepted (remaining gates: model check,
-design review). Not implemented. GH #318, GH #334. Contract
-and status: [feature delta](../../feature/service-allocation-readiness-and-ending/feature-delta.md) (D14).
+**Accepted, 2026-11-09, after user rulings and independent full DESIGN review
+iteration 4** ([review](../../feature/service-allocation-readiness-and-ending/design/review.md)).
+PR-3, PR-4 and P1 are in the [feature delta](../../feature/service-allocation-readiness-and-ending/feature-delta.md)
+(D14). The user approved D14-A1's exact TCP-view signature and D14-E2's typed
+input-error contract on 2026-11-09 (“Approve all three exact contracts”);
+bounded technical review iteration 2 and the full review approved their shape.
+Not implemented. GH #318, GH #334.
 Related:
 [ADR-0268](adr-0268-the-guest-reports-each-workload-listener-it-opens-over-the-beacon-channel.md)
 (the guest report), [ADR-0272](adr-0272-the-guest-observes-workload-listeners-with-kernel-hooks-not-a-poll.md)
@@ -62,6 +64,14 @@ new mechanic whose producer is the guest's listener reports rather than a dial.*
   (D12), the startup stop and retry (D7/D8), the give-up `StartupProbeFailed` (D7), the
   progress deadline (D10), and the deploy stream. The one reconciler change is the gate's
   threshold input above.
+- **The platform-only descriptor is admitted at its exact boundary.** It is
+  valid only as the sole Service startup descriptor; Service API admission
+  returns distinct typed causes for an invalid role or a non-sole startup
+  descriptor, and operator TOML rejects the known platform-only mechanic with
+  a distinct typed parse cause (D14-E2). Raw Job/Schedule payloads have no probe
+  field. The TCP-only TPROXY consumers read the owned TCP view of the same
+  declared-listener set (D14-A1). The feature delta owns the exact signatures,
+  variants, payloads and ingress mappings.
 
 ## Alternatives considered
 

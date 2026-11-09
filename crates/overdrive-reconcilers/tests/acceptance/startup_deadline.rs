@@ -42,6 +42,7 @@ fn reference(probes: &[ProbeDescriptor]) -> Duration {
 
 /// Golden cases: the empty list (the platform default), one probe, several probes
 /// (only index 0 counts), zero interval, the largest representable product.
+/// CONTRACT_SHAPE: pure-function.
 #[test]
 #[ignore = "pending DELIVER: D10 startup_deadline extraction"]
 fn the_startup_deadline_matches_the_values_the_derivation_produced_before_extraction() {
@@ -65,6 +66,7 @@ fn the_startup_deadline_matches_the_values_the_derivation_produced_before_extrac
 proptest! {
     /// S-34 — for every descriptor list the extracted function equals the derivation it
     /// was extracted from.
+    /// CONTRACT_SHAPE: pure-function.
     #[test]
     #[ignore = "pending DELIVER: D10 startup_deadline extraction"]
     fn the_startup_deadline_equals_the_original_derivation_for_every_descriptor_list(

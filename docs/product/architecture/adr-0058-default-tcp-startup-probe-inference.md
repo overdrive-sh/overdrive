@@ -5,21 +5,19 @@
 Accepted. 2026-05-24. Decision-makers: Morgan (proposing); DESIGN-wave
 output of `docs/feature/service-health-check-probes/`.
 
-**Supersession user-approved in direction, 2026-11-03; effective only when ADR-0270 is
-Accepted (pending spikes V34 to V39).** This decision is operative (implemented;
-evidence E13). On the user's ruling of 2026-11-03 ("Drop inference and take readiness
-from the guest itself"; "add it. and proceed with recommendations"),
-[ADR-0270](adr-0270-a-probe-less-service-is-stable-when-the-guest-reports-every-declared-listener-open.md)
-supersedes it on acceptance: a Service that declares no startup probe is `Stable` when the
-guest reports every declared listener open, instead of when a 2 s TCP poll of
-`listeners[0]` passes. The opt-out (`[[health_check.startup]] = []`) of §1 is kept
-unchanged. ADR-0270 depends on the guest report
-([ADR-0268](adr-0268-the-guest-reports-each-workload-listener-it-opens-over-the-beacon-channel.md))
-and the host producer
-([ADR-0269](adr-0269-a-service-with-no-declared-startup-probe-waits-on-a-guest-listener-startup-probe.md)),
-whose contract-shaping spikes have not run. Until the user accepts ADR-0270 this record
-governs; on acceptance it is marked Superseded and §§1, 2, 3, 5 and 6 no longer describe
-the code.
+**Replacement design accepted 2026-11-09; implementation pending.** This
+decision remains the operative implemented behavior (evidence E13) until the
+replacement in [ADR-0270](adr-0270-a-probe-less-service-is-stable-when-the-guest-reports-every-declared-listener-open.md)
+lands. The user ruled “Drop inference and take readiness from the guest itself”
+on 2026-11-03; ADR-0270 was independently approved at full DESIGN review
+iteration 4 ([review](../../feature/service-allocation-readiness-and-ending/design/review.md)).
+In the accepted replacement, a Service with no startup probe becomes `Stable`
+when the guest reports every declared listener open, instead of when a 2 s TCP
+poll of `listeners[0]` passes. The explicit empty-list opt-out remains. Its
+guest report and host producer are [ADR-0268](adr-0268-the-guest-reports-each-workload-listener-it-opens-over-the-beacon-channel.md)
+and [ADR-0269](adr-0269-a-service-with-no-declared-startup-probe-waits-on-a-guest-listener-startup-probe.md).
+This record is superseded as the intended design; its implemented behavior is
+not yet replaced. Mark it operationally superseded when D15 lands.
 
 Tags: phase-1, service-kind, operator-config, default-policy,
 rca-a-closure.

@@ -51,6 +51,7 @@ fn drain_stable_events(
 /// with streak 1; after `failure_threshold` post-`Stable` failures the
 /// instance is stopped by the liveness probe and its supervisor ends.
 #[tokio::test(flavor = "current_thread")]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D9 liveness supervision begins at Stable"]
 async fn slow_starting_service_with_failing_liveness_is_stopped_only_after_stable() {
     for seed in 0_u64..8 {
@@ -114,6 +115,7 @@ async fn slow_starting_service_with_failing_liveness_is_stopped_only_after_stabl
 /// S-32: an opt-out Service (no startup probe) is `Stable` at its first
 /// `Running`'s look, and its liveness starts at that moment.
 #[tokio::test(flavor = "current_thread")]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D9 liveness supervision begins at Stable"]
 async fn opt_out_service_starts_liveness_at_its_first_stable() {
     let mut w = LivenessWorld::compose(ProbeSet::ReadinessAndLiveness).await;
@@ -136,6 +138,7 @@ async fn opt_out_service_starts_liveness_at_its_first_stable() {
 /// no committed `Stable`); once the write lands the row carries `Stable`,
 /// liveness is live, and a committed `Stable` is not emitted again.
 #[tokio::test(flavor = "current_thread")]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: B1 and R2-2 a lost Stable is re-announced; no view marker"]
 async fn a_lost_stable_write_is_announced_again_until_it_commits() {
     let mut w = LivenessWorld::compose(ProbeSet::ReadinessAndLiveness).await;
@@ -161,6 +164,7 @@ async fn a_lost_stable_write_is_announced_again_until_it_commits() {
 /// dispatch of the failed `Stable` write. The reloaded view carries no marker
 /// that could suppress the re-announcement.
 #[tokio::test(flavor = "current_thread")]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: B1 and R2-2 a lost Stable is re-announced; no view marker"]
 async fn a_lost_stable_write_is_announced_again_after_a_control_plane_restart() {
     let mut w = LivenessWorld::compose(ProbeSet::ReadinessAndLiveness).await;
@@ -180,6 +184,7 @@ async fn a_lost_stable_write_is_announced_again_after_a_control_plane_restart() 
 /// re-emits the stop, the row becomes `Stopped { LivenessProbe }`, and only
 /// then does the supervisor end.
 #[tokio::test(flavor = "current_thread")]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: B2 the terminal hook fires after the stop row write succeeds (D9 liveness begins at Stable)"]
 async fn failed_liveness_stop_row_write_keeps_the_supervisor_until_the_retry_lands() {
     let mut w = LivenessWorld::compose(ProbeSet::ReadinessAndLiveness).await;
@@ -289,6 +294,7 @@ async fn run_instance_until_stopped_by_liveness(w: &mut LivenessWorld, tag: &str
 /// and gets its own startup, `Stable` and liveness), and at the ceiling is
 /// given up as `ServiceFailed { LivenessProbeFailed }`, which stays final.
 #[tokio::test(flavor = "current_thread")]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D9 liveness supervision begins at Stable (composed restart and give-up leg)"]
 async fn a_service_whose_liveness_keeps_failing_is_restarted_under_the_shared_budget_and_given_up_at_the_ceiling()
  {

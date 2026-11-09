@@ -59,6 +59,7 @@ fn is_startup_stop(terminal: Option<&TerminalCondition>) -> bool {
 /// `workload-lifecycle` under the one budget, and at the ceiling the give-up
 /// `ServiceFailed { StartupProbeFailed }` naming it; never `Stable`.
 #[tokio::test(flavor = "current_thread")]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D13/D14 a dropped listener report leaves the set partial: deadline Fail, startup stop, restart, give-up"]
 async fn a_service_whose_listener_report_never_arrives_is_stopped_at_the_deadline_restarted_and_given_up()
  {

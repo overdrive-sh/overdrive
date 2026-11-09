@@ -11459,7 +11459,28 @@ proposed). ADR-0267 amends the operative ADR-0096. Not implemented:
   a broker submit wakes the convergence loop at once; the cadence tick stays as the
   backstop (Accepted 2026-11-03; shape choices S1 to S6 accepted as proposed).
 
-**D13 to D16 are user-approved (2026-11-03) and not yet Accepted.** The D13 contract shape is
+**Exact contract amendments, user-approved 2026-11-09:** D11-E1 adds a typed
+in-process error at the Service stream's observation-read boundary, preserving
+each `ObservationStoreError` cause without changing HTTP/NDJSON or the CLI wire.
+D14-A1 pins the owned TCP-filter accessor on `AllocationSpec`; D14-E2 pins typed
+Service API and TOML rejection causes for invalid `GuestListeners` input while
+retaining ADR-0015's HTTP 400 `validation` mapping. The exact signatures,
+variants, payloads and ingress mappings live in the
+[feature delta](../../feature/service-allocation-readiness-and-ending/feature-delta.md).
+The bounded technical review approved these amendments at iteration 2; the
+independent full D1–D17 DESIGN review approved the incorporated contract at
+iteration 4 ([review](../../feature/service-allocation-readiness-and-ending/design/review.md)).
+Its iteration-1 findings on D16's archived carriers, D13/D17 public signatures
+and D15's clean-exit summary are recorded in the
+[full-review remediation](../../feature/service-allocation-readiness-and-ending/design/full-review-remediation.md).
+D13-S1 and D17-S1 were **user-approved 2026-11-09** (“rest is fine”) and
+are pinned in the feature delta. The user explicitly waived historical
+persisted-byte/backward-read compatibility for D16's greenfield removal;
+D16-G1's exact in-place current-format policy is accepted as the direct scoped
+consequence of that waiver and was approved at full DESIGN review iteration 4.
+The D15 summary was corrected under accepted D6 and the P-5 exclusion.
+
+**D13 to D16 are accepted after full DESIGN review iteration 4 (2026-11-09), not yet implemented.** The D13 contract shape is
 accepted; spikes V34 to V38, V41 (+0.36 ms at p50 on the pre-`READY` path) and V42 are held, V39 is
 partial. Four items inside D13 and D14 were ruled on 2026-11-04: the driver-to-probe-task read
 seam (read-only `GuestListenerReports` port, PR-1), the `Fail` cadence (no pre-deadline `Fail`,
@@ -11472,7 +11493,7 @@ created directly in the cgroup). Three round-4 items were accepted on 2026-11-04
 stop gate's attempts threshold comes from the Service's startup descriptor (1 for the
 guest-listener mechanic, `max_attempts` for `Tcp`/`Http`; rows carry honest streaks; P1); the
 guest-listener board's entry is removed at close (A1); and the conformance target of the
-`guest_report` model is a host-input projection module (A3). Remaining gates: the `quint-modeler` run and design review round 4. The
+`guest_report` model is a host-input projection module (A3). Remaining gate: independent full D1–D17 DESIGN review, including model-check evidence reconciliation. The
 `guest_report` model is checked against production for the host half only; the guest half is
 covered by Tier-3 boots (no writer seam in `overdrive-init`). See the feature delta. Dual-stack (an `AF_INET6` wildcard report satisfies an IPv4-declared
 listener, and the `V6ONLY` exposure) is recorded against GH #308. A
@@ -11499,6 +11520,8 @@ Contract: [feature delta](../../feature/service-allocation-readiness-and-ending/
 
 | Date | Change |
 |---|---|
+| 2026-11-09 | **service-allocation-readiness-and-ending full DESIGN review iteration 4 APPROVED:** D13-S1/D17-S1 exact signatures user-approved (“rest is fine”); historical D16-S1 migration withdrawn under the user's explicit greenfield byte waiver. D16-G1 rebaselines only the five affected current envelopes in place, with no historical read promise; this is the bounded direct consequence of the waiver. D15 exit-0 remains `BackoffExhausted` under D6/P-5. ADR-0268–0272 are accepted; DISTILL and roadmap independent reviews remain pending before DELIVER. — Independent reviewer. |
+| 2026-11-09 | **service-allocation-readiness-and-ending: exact D11-E1, D14-A1 and D14-E2 contract amendments user-approved** (“Approve all three exact contracts”). Bounded technical review iteration 2 approved the shapes; the full independent D1–D17 DESIGN review remains pending. ADR-0263 and ADR-0269 link the authoritative feature-delta interface and error mappings. — Morgan. |
 | 2026-11-04 | **service-allocation-readiness-and-ending: round-4 rulings P1, A1, A3 accepted ("proceed with recommendations").** P1: the startup stop gate's attempts threshold comes from the startup descriptor (`max_attempts` for `Tcp`/`Http`, 1 for `GuestListeners`); `ServiceAllocFact.max_attempts` becomes `startup_attempts_required`; guest-listener rows carry honest streaks; explicit probes unchanged (ADR-0269). A1: the board entry is removed at close; "frozen at the end of the wait" is the host reader's rule (ADR-0268). A3: a host-input projection module of `guest_report` is the conformance target. Remaining: `quint-modeler` run (M-3, M-6), review round 4. — Morgan. |
 | 2026-11-04 | **service-allocation-readiness-and-ending: spike V42 held; PR-2 accepted in contract shape.** Kernel `7.0.0-38-generic`: 1000/1000 exact workload reports, 0 from init, root programs effective in the child, +0.88 ms p50 (p90 +1.66), second `Ebpf::load` +20.4 ms. D13 pins: listen programs in the existing guest object, root programs stay `BPF_F_ALLOW_MULTI` link attachments, workload created directly in the cgroup, reports cover only the workload cgroup (fails closed). The `BPF_F_ALLOW_MULTI` link-attach citation is `kernel/bpf/cgroup.c:1506-1507 @ v7.0` (re-read; `:1502-1505` in two spike findings was wrong and is corrected). Remaining: `quint-modeler` run (M-6, M-3), review round 4. — Morgan. |
 | 2026-11-04 | **service-allocation-readiness-and-ending: user rulings of 2026-11-04.** PR-1, PR-3 and PR-4 accepted; PR-2 accepted in direction, pending spike V42 (the TCP listen arm becomes a separate small sockops program attached to an init-created workload cgroup); `guest_report` host-half conformance plus Tier-3 boot coverage for the guest half. — Morgan. |

@@ -330,39 +330,39 @@ impl<'de> Deserialize<'de> for LivenessGateState {
 
 /// D9: the liveness probe would have failed from the start; no liveness role
 /// and no stop before Stable.
-/// CONTRACT_SHAPE: bounded-change.
 #[quint_test(
     spec = "../../specs/quint/service-allocation-readiness-and-ending/liveness_gate.qnt",
     main = "lg_conf",
     test = "liveness_failing_during_startup_is_not_stopped",
     max_samples = 1
 )]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D9 liveness supervision begins at Stable"]
 fn liveness_gate_failing_during_startup_is_not_stopped() -> impl Driver {
     LivenessGateDriver::new()
 }
 
 /// D9: liveness starts at Stable and stops the instance after the threshold.
-/// CONTRACT_SHAPE: bounded-change.
 #[quint_test(
     spec = "../../specs/quint/service-allocation-readiness-and-ending/liveness_gate.qnt",
     main = "lg_conf",
     test = "liveness_starts_at_stable_and_stops_on_failure",
     max_samples = 1
 )]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D9 liveness supervision begins at Stable"]
 fn liveness_gate_starts_at_stable_and_stops_on_failure() -> impl Driver {
     LivenessGateDriver::new()
 }
 
 /// D9: the supervisor ended before the Stable hook fired: no liveness.
-/// CONTRACT_SHAPE: bounded-change.
 #[quint_test(
     spec = "../../specs/quint/service-allocation-readiness-and-ending/liveness_gate.qnt",
     main = "lg_conf",
     test = "stable_after_end_starts_no_liveness",
     max_samples = 1
 )]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D9 liveness supervision begins at Stable"]
 fn liveness_gate_stable_after_end_starts_no_liveness() -> impl Driver {
     LivenessGateDriver::new()
@@ -370,37 +370,37 @@ fn liveness_gate_stable_after_end_starts_no_liveness() -> impl Driver {
 
 /// B1: a lost Stable write is announced again; once it lands the hook starts
 /// liveness.
-/// CONTRACT_SHAPE: bounded-change.
 #[quint_test(
     spec = "../../specs/quint/service-allocation-readiness-and-ending/liveness_gate.qnt",
     main = "lg_conf",
     test = "lost_stable_write_is_reannounced",
     max_samples = 1
 )]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: B1 and R2-2 a lost Stable is re-announced; no view marker"]
 fn liveness_gate_lost_stable_write_is_reannounced() -> impl Driver {
     LivenessGateDriver::new()
 }
 
 /// D9: an opt-out Service's first Running is its Stable; liveness starts then.
-/// CONTRACT_SHAPE: bounded-change.
 #[quint_test(
     spec = "../../specs/quint/service-allocation-readiness-and-ending/liveness_gate.qnt",
     main = "lg_conf",
     test = "opt_out_service_starts_liveness_at_first_running_stable",
     max_samples = 1
 )]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D9 liveness supervision begins at Stable"]
 fn liveness_gate_opt_out_service_starts_liveness_at_first_running_stable() -> impl Driver {
     LivenessGateDriver::new()
 }
 
 /// Randomized `lg_conf` traces against the production owners.
-/// CONTRACT_SHAPE: bounded-change.
 #[quint_run(
     spec = "../../specs/quint/service-allocation-readiness-and-ending/liveness_gate.qnt",
     main = "lg_conf"
 )]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D9 liveness supervision begins at Stable"]
 fn liveness_gate_conformance_lg_conf() -> impl Driver {
     LivenessGateDriver::new()

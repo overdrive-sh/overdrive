@@ -103,9 +103,26 @@ use overdrive_core::aggregate::WorkloadKind;
 use overdrive_core::id::{NodeId, WorkloadId};
 use overdrive_core::reconcilers::{Reconciler, TargetResource};
 use overdrive_core::traits::observation_store::{
-    AllocState, AllocStatusRow, LogicalTimestamp, ObservationStore,
+    AllocState, AllocStatusRow, LogicalTimestamp, ObservationStore, ObservationStoreError,
 };
+use thiserror::Error;
 use tokio::sync::broadcast;
+
+/// The two typed failure classes at the in-process Service stream boundary.
+/// D11-E1 RED scaffold: the observation read path lands in DELIVER 04-02.
+#[derive(Debug, Error)]
+pub enum ServiceStreamError {
+    #[error("service stream observation read failed: {source}")]
+    ObservationRead {
+        #[source]
+        source: ObservationStoreError,
+    },
+    #[error("service stream line emission failed: {source}")]
+    LineEmission {
+        #[source]
+        source: std::io::Error,
+    },
+}
 
 use crate::AppState;
 use crate::action_shim::{LifecycleEvent, build_alloc_status_row};
@@ -1011,9 +1028,12 @@ fn emit_service_line(event: &ServiceSubmitEvent) -> std::io::Result<Bytes> {
 /// - **Preconditions**: `state.lifecycle_events` and `state.clock` are
 ///   wired; `accepted` is the synchronous Accepted built by
 ///   [`build_service_accepted`].
-/// - **Postconditions**: the returned stream emits `Accepted` first,
+/// - **Postconditions**: on a successful stream, it emits `Accepted` first,
 ///   then exactly ONE terminal variant
-///   (`Stable` / `Failed` / `Stopped`) before closing. No intermediate
+///   (`Stable` / `Failed` / `Stopped`) before closing. An observation read
+///   failure yields one typed `ServiceStreamError::ObservationRead` and ends;
+///   a line-emission failure yields `ServiceStreamError::LineEmission` and ends.
+///   No intermediate
 ///   `LifecycleTransition` / `Running` / `Pending` lines per ADR-0056
 ///   — the Service-kind wire surface is reduced to
 ///   {Accepted, terminal}.
@@ -1026,9 +1046,8 @@ fn emit_service_line(event: &ServiceSubmitEvent) -> std::io::Result<Bytes> {
 ///     IGNORED — the Service-kind wire surface omits them by design
 ///     (S-SHCP-WIRE-15).
 ///   - Events for a different workload_id are ignored.
-/// - **Observable invariant**: every Service-kind submit produces
-///   exactly ONE terminal line on the wire; the stream never closes
-///   silently.
+/// - **Observable invariant**: every Service-kind submit that does not hit
+///   a typed stream error produces exactly ONE terminal line on the wire.
 pub fn build_service_stream(
     state: AppState,
     workload_id: WorkloadId,
@@ -1036,7 +1055,7 @@ pub fn build_service_stream(
     // SCAFFOLD: true — pinned parameter (feature service-allocation-readiness-and-ending,
     // D10 item 6). Until D10 lands the cap timer still arms from `streaming_cap`.
     _progress_deadline: Duration,
-) -> impl Stream<Item = Result<Bytes, std::io::Error>> + Send + 'static {
+) -> impl Stream<Item = Result<Bytes, ServiceStreamError>> + Send + 'static {
     let bus = state.lifecycle_events.clone();
     let clock = state.clock.clone();
     let cap = state.streaming_cap;
@@ -1046,7 +1065,7 @@ pub fn build_service_stream(
         match emit_service_line(&accepted) {
             Ok(line) => yield Ok(line),
             Err(err) => {
-                yield Err(err);
+                yield Err(ServiceStreamError::LineEmission { source: err });
                 return;
             }
         }
@@ -1097,7 +1116,7 @@ pub fn build_service_stream(
                                     return;
                                 }
                                 Err(err) => {
-                                    yield Err(err);
+                                    yield Err(ServiceStreamError::LineEmission { source: err });
                                     return;
                                 }
                             }
@@ -1113,7 +1132,7 @@ pub fn build_service_stream(
                             let wire = service_stream_synth_closed();
                             match emit_service_line(&wire) {
                                 Ok(line) => yield Ok(line),
-                                Err(err) => yield Err(err),
+                                Err(err) => yield Err(ServiceStreamError::LineEmission { source: err }),
                             }
                             return;
                         }
@@ -1124,7 +1143,7 @@ pub fn build_service_stream(
                     let wire = service_stream_synth_cap_timeout(after_seconds);
                     match emit_service_line(&wire) {
                         Ok(line) => yield Ok(line),
-                        Err(err) => yield Err(err),
+                        Err(err) => yield Err(ServiceStreamError::LineEmission { source: err }),
                     }
                     return;
                 }

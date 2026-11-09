@@ -34,6 +34,7 @@ const STOPPED_BY: [(StoppedBy, bool); 7] = [
 /// S-26 — `Stopped { StartupProbe }` and `Stopped { LivenessProbe }` project to no
 /// stream line: the stream continues.
 #[test]
+/// CONTRACT_SHAPE: pure-function.
 #[ignore = "pending DELIVER: D7 and D9 a restartable probe stop is not a stream terminal"]
 fn a_restartable_probe_stop_projects_to_no_stream_line() {
     for (by, ends_stream) in STOPPED_BY {

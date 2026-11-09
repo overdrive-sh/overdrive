@@ -2,12 +2,12 @@
 
 ## Status
 
-User-approved, 2026-11-03; hook scope (PR-2) accepted in contract shape 2026-11-04
-(direction approved 2026-11-04 pending V42; V42 held 2026-11-04, kernel
-`7.0.0-38-generic`, [findings](../../feature/service-allocation-readiness-and-ending/spike/findings-workload-cgroup.md));
-not yet Accepted (remaining gates: model check, design review round 4). Not implemented.
-GH #318, GH #334. Contract
-and status: [feature delta](../../feature/service-allocation-readiness-and-ending/feature-delta.md) (D13).
+**Accepted, 2026-11-09, after user rulings and independent full DESIGN review
+iteration 4** ([review](../../feature/service-allocation-readiness-and-ending/design/review.md)).
+PR-2's workload-cgroup hook scope is supported by held V42 on kernel
+`7.0.0-38-generic` ([findings](../../feature/service-allocation-readiness-and-ending/spike/findings-workload-cgroup.md)).
+Not implemented. GH #318, GH #334. Exact contract:
+[feature delta](../../feature/service-allocation-readiness-and-ending/feature-delta.md) (D13).
 Related:
 [ADR-0268](adr-0268-the-guest-reports-each-workload-listener-it-opens-over-the-beacon-channel.md)
 (how the observation crosses to the host), [ADR-0150](adr-0150-guest-kernel-aya-adaptation-controlled-by-overdrive-init.md)

@@ -39,6 +39,7 @@ async fn stable_commits(world: &mut RestartWorld) {
 /// not a backend from `Running` until the `Stable` row is committed, then a
 /// backend; the resolver fails closed before and routes to it after.
 #[tokio::test]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D12 a startup-probed allocation is a backend only after its own Stable is committed"]
 async fn startup_probed_allocation_is_a_backend_only_after_its_stable_is_committed() {
     let mut world = RestartWorld::compose(Shape::StartupProbe).await;
@@ -128,6 +129,7 @@ async fn opt_out_service_is_a_backend_at_running() {
 /// S-47 (i): a readiness-probed Service whose readiness streak met the
 /// threshold before `Stable` is eligible at the `Stable` commit, not before.
 #[tokio::test]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D12 the readiness rule only narrows a committed Stable"]
 async fn readiness_met_before_stable_makes_the_backend_eligible_at_the_stable_commit() {
     let mut world = RestartWorld::compose(Shape::StartupAndReadiness).await;

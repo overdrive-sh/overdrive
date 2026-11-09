@@ -248,6 +248,7 @@ proptest! {
 /// Stable within the deadline and that the platform may still be restarting it,
 /// pointing at `workload describe`.
 #[test]
+/// CONTRACT_SHAPE: pure-function.
 #[ignore = "pending DELIVER: D10 Timeout wording names Stable and the platform restarting it"]
 fn timeout_block_says_the_workload_did_not_become_stable_and_may_still_be_restarting() {
     let rendered = format_service_failed_block(
@@ -274,6 +275,7 @@ fn timeout_block_says_the_workload_did_not_become_stable_and_may_still_be_restar
 /// observation renders the labelled `last attempt (alloc <id>):` block with the
 /// reason text and the detail tail, after the reason line.
 #[test]
+/// CONTRACT_SHAPE: pure-function.
 #[ignore = "pending DELIVER: D10 last attempt block in the Timeout render"]
 fn timeout_block_with_a_last_attempt_renders_the_labelled_last_attempt_block() {
     let attempt = startup_stop_attempt();

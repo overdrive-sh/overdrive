@@ -907,6 +907,7 @@ impl State<RestartAuthorityDriver> for RaState {
     test = "crashed_and_rejected_allocs_join_terminal_announced",
     max_samples = 1
 )]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D6 DG-12 every Failed or Terminated allocation joins terminal_announced"]
 fn restart_authority_crashed_and_rejected_allocs_join_terminal_announced() -> impl Driver {
     RestartAuthorityDriver::new()
@@ -934,6 +935,7 @@ fn restart_authority_crash_after_attempts_exhausted_then_deadline_passes() -> im
     test = "running_alloc_with_exhausted_probes_past_deadline_is_stopped",
     max_samples = 1
 )]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D7 startup stop (StopAllocation { Stopped { StartupProbe } }), D5 guard, D8 startup_last_acted_run"]
 fn restart_authority_running_alloc_with_exhausted_probes_past_deadline_is_stopped() -> impl Driver {
     RestartAuthorityDriver::new()
@@ -945,6 +947,7 @@ fn restart_authority_running_alloc_with_exhausted_probes_past_deadline_is_stoppe
     test = "pre_startup_crash_loop_gives_up_early_exit",
     max_samples = 1
 )]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D6/D7 give-up classification (WorkloadLifecycle alone authors the ending)"]
 fn restart_authority_pre_startup_crash_loop_gives_up_early_exit() -> impl Driver {
     RestartAuthorityDriver::new()
@@ -956,6 +959,7 @@ fn restart_authority_pre_startup_crash_loop_gives_up_early_exit() -> impl Driver
     test = "pre_startup_crash_then_successor_passes",
     max_samples = 1
 )]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D6 ServiceLifecycle loses the early-exit branch (WorkloadLifecycle alone authors the ending)"]
 fn restart_authority_pre_startup_crash_then_successor_passes() -> impl Driver {
     RestartAuthorityDriver::new()
@@ -997,6 +1001,7 @@ fn restart_authority_non_crash_failed_row_gives_up_backoff_exhausted() -> impl D
     test = "liveness_kill_loop_gives_up_liveness_probe_failed",
     max_samples = 1
 )]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D6/D7 give-up classification (WorkloadLifecycle alone authors the ending)"]
 fn restart_authority_liveness_kill_loop_gives_up_liveness_probe_failed() -> impl Driver {
     RestartAuthorityDriver::new()
@@ -1008,6 +1013,7 @@ fn restart_authority_liveness_kill_loop_gives_up_liveness_probe_failed() -> impl
     test = "startup_never_passes_loop_gives_up_startup_probe_failed",
     max_samples = 1
 )]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D7 startup stop (StopAllocation { Stopped { StartupProbe } }), D5 guard, D8 startup_last_acted_run"]
 fn restart_authority_startup_never_passes_loop_gives_up_startup_probe_failed() -> impl Driver {
     RestartAuthorityDriver::new()
@@ -1019,6 +1025,7 @@ fn restart_authority_startup_never_passes_loop_gives_up_startup_probe_failed() -
     test = "pass_then_fails_before_stable_is_stopped",
     max_samples = 1
 )]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D7 startup stop (StopAllocation { Stopped { StartupProbe } }), D5 guard, D8 startup_last_acted_run"]
 fn restart_authority_pass_then_fails_before_stable_is_stopped() -> impl Driver {
     RestartAuthorityDriver::new()
@@ -1030,6 +1037,7 @@ fn restart_authority_pass_then_fails_before_stable_is_stopped() -> impl Driver {
     test = "startup_stop_then_successor_passes_is_stable",
     max_samples = 1
 )]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D7 startup stop (StopAllocation { Stopped { StartupProbe } }), D5 guard, D8 startup_last_acted_run"]
 fn restart_authority_startup_stop_then_successor_passes_is_stable() -> impl Driver {
     RestartAuthorityDriver::new()
@@ -1041,6 +1049,7 @@ fn restart_authority_startup_stop_then_successor_passes_is_stable() -> impl Driv
     test = "startup_stop_then_crash_names_last_cause",
     max_samples = 1
 )]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D7 startup stop (StopAllocation { Stopped { StartupProbe } }), D5 guard, D8 startup_last_acted_run"]
 fn restart_authority_startup_stop_then_crash_names_last_cause() -> impl Driver {
     RestartAuthorityDriver::new()
@@ -1052,6 +1061,7 @@ fn restart_authority_startup_stop_then_crash_names_last_cause() -> impl Driver {
     test = "crash_then_startup_stop_names_last_cause",
     max_samples = 1
 )]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D7 startup stop (StopAllocation { Stopped { StartupProbe } }), D5 guard, D8 startup_last_acted_run"]
 fn restart_authority_crash_then_startup_stop_names_last_cause() -> impl Driver {
     RestartAuthorityDriver::new()
@@ -1063,6 +1073,7 @@ fn restart_authority_crash_then_startup_stop_names_last_cause() -> impl Driver {
     test = "startup_stop_is_not_intentional_stop",
     max_samples = 1
 )]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D7 startup stop (StopAllocation { Stopped { StartupProbe } }), D5 guard, D8 startup_last_acted_run"]
 fn restart_authority_startup_stop_is_not_intentional_stop() -> impl Driver {
     RestartAuthorityDriver::new()
@@ -1074,6 +1085,7 @@ fn restart_authority_startup_stop_is_not_intentional_stop() -> impl Driver {
     test = "first_fail_at_deadline_with_no_earlier_row_stops",
     max_samples = 1
 )]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D14 item 3 startup gate threshold 1 for a GuestListeners descriptor; D7 startup stop"]
 fn restart_authority_first_fail_at_deadline_with_no_earlier_row_stops() -> impl Driver {
     RestartAuthorityDriver::new()
@@ -1101,6 +1113,7 @@ fn restart_authority_explicit_probe_fail_after_deadline_keeps_counted_streak() -
     test = "failed_startup_stop_is_retried_on_next_row",
     max_samples = 1
 )]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D7 startup stop (StopAllocation { Stopped { StartupProbe } }), D5 guard, D8 startup_last_acted_run"]
 fn restart_authority_failed_startup_stop_is_retried_on_next_row() -> impl Driver {
     RestartAuthorityDriver::new()
@@ -1112,6 +1125,7 @@ fn restart_authority_failed_startup_stop_is_retried_on_next_row() -> impl Driver
     test = "late_pass_after_failed_stop_reaches_stable",
     max_samples = 1
 )]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D7 startup stop (StopAllocation { Stopped { StartupProbe } }), D5 guard, D8 startup_last_acted_run"]
 fn restart_authority_late_pass_after_failed_stop_reaches_stable() -> impl Driver {
     RestartAuthorityDriver::new()
@@ -1123,6 +1137,7 @@ fn restart_authority_late_pass_after_failed_stop_reaches_stable() -> impl Driver
     test = "stop_row_write_failure_is_retried",
     max_samples = 1
 )]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D7 startup stop (StopAllocation { Stopped { StartupProbe } }), D5 guard, D8 startup_last_acted_run"]
 fn restart_authority_stop_row_write_failure_is_retried() -> impl Driver {
     RestartAuthorityDriver::new()
@@ -1134,6 +1149,7 @@ fn restart_authority_stop_row_write_failure_is_retried() -> impl Driver {
     test = "control_plane_restart_keeps_acted_run",
     max_samples = 1
 )]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D7 startup stop (StopAllocation { Stopped { StartupProbe } }), D5 guard, D8 startup_last_acted_run"]
 fn restart_authority_control_plane_restart_keeps_acted_run() -> impl Driver {
     RestartAuthorityDriver::new()
@@ -1144,6 +1160,7 @@ fn restart_authority_control_plane_restart_keeps_acted_run() -> impl Driver {
     spec = "../../specs/quint/service-allocation-readiness-and-ending/restart_authority.qnt",
     main = "ra_conf"
 )]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D5-D8, D14, DG-12 restart authority (the random traces reach the unimplemented D6/D7 endings and the DG-12 announcement)"]
 fn restart_authority_conformance_ra_conf() -> impl Driver {
     RestartAuthorityDriver::new()

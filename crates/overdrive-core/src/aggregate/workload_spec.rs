@@ -41,6 +41,9 @@ use crate::guest_transport::{GUEST_PROBE_SLOTS, guest_reserved_ports};
 /// corrective action — per ADR-0047 §2 / Slice 01 AC.
 #[derive(Debug, Error)]
 pub enum ParseError {
+    /// D14-E2 RED scaffold: the platform-only mechanic cannot be written in operator TOML.
+    #[error("guest_listeners is platform-only at {role:?} probe index {probe_idx}")]
+    GuestListenersNotOperatorConfigurable { role: crate::observation::ProbeRole, probe_idx: usize },
     /// Both `[service]` and `[job]` are present. Per ADR-0047 §1, exactly
     /// one is required.
     #[error(

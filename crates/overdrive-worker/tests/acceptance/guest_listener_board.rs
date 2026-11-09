@@ -353,6 +353,7 @@ fn declared_pair(i: usize) -> (Proto, NonZeroU16) {
 /// of another allocation does not reach this one; lines after close are no-ops.
 /// Driven only through the beacon reader and `VmDriver::start` / terminal hook.
 #[test]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D13 PR-1 guest listener board entry lifetime and declared-set growth"]
 fn the_reported_set_only_grows_within_the_declared_set_and_ends_with_the_entry() {
     let mut runner = proptest::test_runner::TestRunner::new(ProptestConfig {
@@ -478,6 +479,7 @@ fn waiter(
 /// pair, another allocation's report, a no-entry id, a record after close; the
 /// waiter pending at close is not woken; and it completes on a real insertion.
 #[tokio::test]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D13 PR-1 changed completes only on an insertion"]
 async fn a_pending_changed_completes_on_an_insertion_and_on_no_no_op() {
     let mut harness = Harness::new().await;
@@ -534,6 +536,7 @@ async fn a_pending_changed_completes_on_an_insertion_and_on_no_no_op() {
 /// event naming the allocation, and the following `Listen` and `Exit` still
 /// take effect.
 #[tokio::test]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D13 item 3 reader drops an unparseable line with a warn event"]
 async fn a_garbage_line_is_dropped_with_a_warning_and_later_lines_take_effect() {
     let captured = Captured::default();
@@ -573,6 +576,7 @@ async fn a_garbage_line_is_dropped_with_a_warning_and_later_lines_take_effect() 
 /// exit report, and a `Listen` never occupies the exit report: the report is the
 /// `Exit` status, not the later line.
 #[tokio::test]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D13 item 3 reader ignores a Listen line after Exit"]
 async fn a_listen_after_exit_changes_neither_the_set_nor_the_exit_report() {
     let mut harness = Harness::new().await;
@@ -598,6 +602,7 @@ async fn a_listen_after_exit_changes_neither_the_set_nor_the_exit_report() {
 /// board's declared filter (it never inserts an undeclared pair), so the script
 /// feeds the sim the same observable stimulus the reader gives the board.
 #[tokio::test]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D13 PR-1 board and sim agree on reported and changed"]
 async fn guest_listener_reports_equivalence() {
     let mut harness = Harness::new().await;
@@ -707,6 +712,7 @@ fn schedule(seed: u64) -> Vec<Op> {
 /// clock: the test never advances time. The seed of each schedule is in the
 /// failure message.
 #[tokio::test]
+/// CONTRACT_SHAPE: bounded-change.
 #[ignore = "pending DELIVER: D13 PR-1 changed never misses an insertion and is cancel-safe"]
 async fn changed_never_misses_an_insertion_under_seeded_schedules() {
     for seed in 1..=6_u64 {

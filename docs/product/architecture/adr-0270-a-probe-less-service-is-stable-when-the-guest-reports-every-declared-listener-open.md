@@ -2,12 +2,13 @@
 
 ## Status
 
-User-approved, 2026-11-03; the D13 hook scope it depends on (PR-2) is accepted in contract
-shape (V42 held 2026-11-04, [findings](../../feature/service-allocation-readiness-and-ending/spike/findings-workload-cgroup.md));
-not yet Accepted (remaining gates: model check, design review round 4). Not implemented. GH #318, GH #334. Contract
-and status: [feature delta](../../feature/service-allocation-readiness-and-ending/feature-delta.md) (D15).
-**Supersedes [ADR-0058](adr-0058-default-tcp-startup-probe-inference.md) on acceptance**;
-ADR-0058 is operative (implemented, with E13 evidence) and stays in force until then.
+**Accepted, 2026-11-09, after user ruling and independent full DESIGN review
+iteration 4** ([review](../../feature/service-allocation-readiness-and-ending/design/review.md)).
+The D13 hook scope it depends on is supported by held V42
+([findings](../../feature/service-allocation-readiness-and-ending/spike/findings-workload-cgroup.md)).
+Not implemented. GH #318, GH #334. Exact contract: [feature delta](../../feature/service-allocation-readiness-and-ending/feature-delta.md)
+(D15). This accepted design replaces [ADR-0058](adr-0058-default-tcp-startup-probe-inference.md)
+when implemented; ADR-0058's inferred TCP gate remains the current runtime behavior until then.
 Related:
 [ADR-0268](adr-0268-the-guest-reports-each-workload-listener-it-opens-over-the-beacon-channel.md),
 [ADR-0269](adr-0269-a-service-with-no-declared-startup-probe-waits-on-a-guest-listener-startup-probe.md),
