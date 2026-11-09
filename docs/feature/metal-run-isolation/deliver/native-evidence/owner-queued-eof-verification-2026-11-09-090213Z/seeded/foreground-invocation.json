@@ -1,0 +1,34 @@
+{
+  "command": [
+    "cargo",
+    "xtask",
+    "metal",
+    "run",
+    "--",
+    "cargo",
+    "nextest",
+    "run",
+    "-p",
+    "xtask",
+    "--lib",
+    "--features",
+    "integration-tests",
+    "-E",
+    "test(=metal_run_isolation_conformance::protocol_randomized_owner_traces) | test(=metal_run_isolation_conformance::protocol_controller_eof_before_start) | test(=metal_run_isolation_conformance::protocol_controller_loss_after_start)",
+    "--no-capture"
+  ],
+  "started_at": "2026-11-09T09:02:13.535260+00:00",
+  "source_head": "1b623e6e167c4d3113efcf0d393c74748fbe9834",
+  "source_status": " M AGENTS.md\n M crates/overdrive-control-plane/src/worker/exit_observer.rs\n M crates/overdrive-control-plane/tests/acceptance/crash_ending_authority.rs\n M crates/overdrive-control-plane/tests/acceptance/terminal_hook_ownership.rs\n M crates/overdrive-core/src/traits/driver.rs\n M docs/feature/metal-run-isolation/deliver/review-01-02.md\n M docs/feature/service-allocation-readiness-and-ending/deliver/roadmap.json\n M xtask/src/metal_run_isolation_conformance.rs\n?? docs/feature/metal-run-isolation/deliver/native-evidence/placement-rerun-2026-11-09-072512Z/\n?? docs/feature/service-allocation-readiness-and-ending/deliver/execution-log.json\n",
+  "diagnostic_input": "Existing quint_run temporary seed 0x8e8e19a4; controller-loss behavior/projection unchanged. Successful pre-start EOF logs real ordinary/maintenance owner observations.",
+  "source_sha256": {
+    "infra/metal/lease-holder.sh": "f7d453b40d2c6523fa809daed8343d4e3648e7fbaa8e7aebc2c71cb7a98a5e8d",
+    "infra/metal/bootstrap.sh": "e12d6546c749ca723a014d205ef7cb224f157eff491eb020a8709e00a69808e5",
+    "xtask/src/metal_run_isolation_conformance.rs": "525b3aceefd33d5a3f3ed79c6044fd659afb382004ca14078092344818a30d3f",
+    "specs/quint/metal-run-isolation/runner_protocol.qnt": "f67ed362807560c981a60be33d127106f47329a290f5148add70fadcbd732b5e"
+  },
+  "finished_at": "2026-11-09T09:04:18.203171+00:00",
+  "exit_code": 0,
+  "source_head_after": "1b623e6e167c4d3113efcf0d393c74748fbe9834",
+  "source_status_after": " M AGENTS.md\n M crates/overdrive-control-plane/src/worker/exit_observer.rs\n M crates/overdrive-control-plane/tests/acceptance/crash_ending_authority.rs\n M crates/overdrive-control-plane/tests/acceptance/terminal_hook_ownership.rs\n M crates/overdrive-core/src/traits/driver.rs\n M docs/feature/metal-run-isolation/deliver/review-01-02.md\n M docs/feature/service-allocation-readiness-and-ending/deliver/roadmap.json\n M xtask/src/metal_run_isolation_conformance.rs\n?? docs/feature/metal-run-isolation/deliver/native-evidence/placement-rerun-2026-11-09-072512Z/\n?? docs/feature/service-allocation-readiness-and-ending/deliver/execution-log.json\n"
+}
