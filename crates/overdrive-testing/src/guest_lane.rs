@@ -465,6 +465,26 @@ fn guest_lane_image_files(
     )
 }
 
+fn build_guest_lane_image(
+    kit: &GuestKit,
+    work: &Path,
+    name: &str,
+    spec: &GuestImageSpec,
+    attempt: Option<&NextestLaneAttempt>,
+) -> Result<crate::guest_kit::GuestImage, GuestKitError> {
+    attempt.map_or_else(
+        || kit.image(work, name, spec),
+        |attempt| {
+            kit.image_with_directories(
+                work,
+                name,
+                spec,
+                std::slice::from_ref(&attempt.working_directory),
+            )
+        },
+    )
+}
+
 fn lane_error(detail: String) -> GuestKitError {
     GuestKitError::Staging { detail, source: io::Error::other("in-guest lane") }
 }
@@ -495,16 +515,13 @@ pub fn run_in_guest_cell(
 ) -> Result<CellRun, GuestKitError> {
     let name = cell.replace("::", "-");
     let attempt = nextest_lane_attempt(tests)?;
-    let image = kit.image(
-        work,
-        &name,
-        &GuestImageSpec {
-            init: GuestInit::OverdriveInit,
-            forwarder_module: true,
-            loopback_module: true,
-            extra: guest_lane_image_files(tests, attempt.as_ref()),
-        },
-    )?;
+    let spec = GuestImageSpec {
+        init: GuestInit::OverdriveInit,
+        forwarder_module: true,
+        loopback_module: true,
+        extra: guest_lane_image_files(tests, attempt.as_ref()),
+    };
+    let image = build_guest_lane_image(kit, work, &name, &spec, attempt.as_ref())?;
     let listeners = HostListeners::bind()?;
     let token = listeners.transport_token(cid);
     let HostListeners { beacon, stream: _stream, control } = listeners;
@@ -1113,16 +1130,13 @@ pub fn run_in_guest_owner_cell<R>(
 ) -> Result<(CellRun, R), GuestKitError> {
     let name = cell.replace("::", "-");
     let attempt = nextest_lane_attempt(tests)?;
-    let image = kit.image(
-        work,
-        &name,
-        &GuestImageSpec {
-            init: GuestInit::ScriptedPeer,
-            forwarder_module: true,
-            loopback_module: true,
-            extra: guest_lane_image_files(tests, attempt.as_ref()),
-        },
-    )?;
+    let spec = GuestImageSpec {
+        init: GuestInit::ScriptedPeer,
+        forwarder_module: true,
+        loopback_module: true,
+        extra: guest_lane_image_files(tests, attempt.as_ref()),
+    };
+    let image = build_guest_lane_image(kit, work, &name, &spec, attempt.as_ref())?;
     let listeners = HostListeners::bind()?;
     let token = listeners.transport_token(cid);
     let HostListeners { beacon: _beacon, stream: _stream, control } = listeners;

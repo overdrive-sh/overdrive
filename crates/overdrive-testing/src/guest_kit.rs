@@ -62,7 +62,7 @@ use std::io;
 use std::num::NonZeroU8;
 use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
 use std::os::unix::process::ExitStatusExt as _;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::{Command, ExitStatus};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::{Duration, Instant};
@@ -490,6 +490,16 @@ impl GuestKit {
         name: &str,
         spec: &GuestImageSpec,
     ) -> Result<GuestImage, GuestKitError> {
+        self.image_with_directories(dir, name, spec, &[])
+    }
+
+    pub(crate) fn image_with_directories(
+        &self,
+        dir: &Path,
+        name: &str,
+        spec: &GuestImageSpec,
+        directories: &[PathBuf],
+    ) -> Result<GuestImage, GuestKitError> {
         let stage = dir.join(format!("{name}-stage"));
         if stage.exists() {
             fs::remove_dir_all(&stage).map_err(staging(format!("clearing {}", stage.display())))?;
@@ -506,6 +516,32 @@ impl GuestKit {
             "lib/overdrive-testing/modules",
         ] {
             fs::create_dir_all(stage.join(sub)).map_err(staging(format!("creating /{sub}")))?;
+        }
+        for directory in directories {
+            if !directory.is_absolute()
+                || directory
+                    .components()
+                    .any(|component| matches!(component, Component::ParentDir | Component::CurDir))
+            {
+                return Err(GuestKitError::Staging {
+                    detail: format!(
+                        "invalid exact guest working directory {}",
+                        directory.display()
+                    ),
+                    source: io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "guest path is not normalized",
+                    ),
+                });
+            }
+            let relative = directory.strip_prefix("/").map_err(|error| GuestKitError::Staging {
+                detail: format!("guest working directory {} is not rooted", directory.display()),
+                source: io::Error::other(error.to_string()),
+            })?;
+            fs::create_dir_all(stage.join(relative)).map_err(staging(format!(
+                "creating exact guest working directory {}",
+                directory.display()
+            )))?;
         }
         let init = &self.peer_bin;
         install(&stage, init, Path::new(vm_fixture::GUEST_INIT_SBIN_PATH))?;
