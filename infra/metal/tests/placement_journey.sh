@@ -129,10 +129,10 @@ run_case conflicting-package 64 run -- cargo run -p overdrive-sim --package over
 for label in raw-test shell-chain host-module duplicate-env context-env invalid-bpf-selector invalid-group env-option conflicting-package; do
   rg -q 'OVERDRIVE_METAL_RUNNER_ERROR error=unsupported_ordinary_command' "$out/$label.stderr"
 done
-for label in config-replacement debugger-replacement archive-reuse; do
+for label in config-replacement debugger-replacement; do
   rg -q 'OVERDRIVE_METAL_RUNNER_ERROR error=execution_override_refused' "$out/$label.stderr"
 done
-for label in foreign-target foreign-manifest; do
+for label in archive-reuse foreign-target foreign-manifest; do
   rg -q 'OVERDRIVE_METAL_RUNNER_ERROR error=artifact_scope_mismatch' "$out/$label.stderr"
 done
 run_case invalid-mode 2 sync --exclusive
