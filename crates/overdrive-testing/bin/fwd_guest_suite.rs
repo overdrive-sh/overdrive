@@ -1985,12 +1985,15 @@ fn nested_vm_test_support(
     });
 
     let mut module_paths = Vec::new();
+    // `prepare_nested_attempt` loads XFS before it creates the reflink loop
+    // device. Keep the module staged, but out of the later bulk module list
+    // so that setup does not try to load it twice.
+    extra.push(host_module_file(kit, dir, "fs/xfs/xfs", Path::new(XFS_MODULE_GUEST_PATH))?);
     let mut stage_module = |relative: &str, guest_path: &str| -> Result<(), GuestKitError> {
         extra.push(host_module_file(kit, dir, relative, Path::new(guest_path))?);
         module_paths.push(guest_path.to_owned());
         Ok(())
     };
-    stage_module("fs/xfs/xfs", XFS_MODULE_GUEST_PATH)?;
     for &(relative, guest_path) in NESTED_DEVICE_MODULES {
         stage_module(relative, guest_path)?;
     }
@@ -3290,6 +3293,12 @@ fn prepare_nested_attempt(guest: &mut GuestRun) -> Result<(), GuestKitError> {
         "-c",
         "set -eu; mkdir -p /var /run/netns; test ! -e /var/run; test ! -L /var/run; ln -s /run /var/run; test -L /var/run; test \"$(cd /var/run && pwd -P)\" = /run; test -d /var/run/netns",
     ])?;
+    // Load the already-staged nested device modules before changing their
+    // device-node permissions. This mirrors the existing batched
+    // `run_nested_boundary` setup. XFS was loaded separately above for
+    // losetup, so it is deliberately not in this bulk list.
+    let modules = std::mem::take(&mut guest.module_paths);
+    guest.command_with_modules(&modules, "/usr/bin/true", &[])?;
     guest.command(&["/usr/bin/chmod", "0660", "/dev/kvm", "/dev/vhost-vsock"])?;
     guest.command(&[
         "/usr/bin/stat",
@@ -3298,8 +3307,7 @@ fn prepare_nested_attempt(guest: &mut GuestRun) -> Result<(), GuestKitError> {
         "/dev/kvm",
         "/dev/vhost-vsock",
     ])?;
-    let modules = std::mem::take(&mut guest.module_paths);
-    guest.command_with_modules(&modules, "/usr/bin/true", &[])
+    Ok(())
 }
 
 fn run_cgroup_attempt_setup(
