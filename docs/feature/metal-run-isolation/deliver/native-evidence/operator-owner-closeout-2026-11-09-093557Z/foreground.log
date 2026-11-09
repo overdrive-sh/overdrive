@@ -1,0 +1,59 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.23s
+     Running `target/debug/xtask metal run -- cargo nextest run -p overdrive-init --bin overdrive-init --features integration-tests,kvm-tests -E 'test(=guest_flow::real_kernel::the_accept_path_matches_the_sim_per_connection) | test(=guest_flow::real_kernel::a_burst_of_host_aborts_resets_every_application_connection)' --no-capture --no-fail-fast`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+OVERDRIVE_METAL_RUN_ID=f9b12837ee5c63a8646f19d3
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire exclusive physical-maintenance barrier (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_RUN_REGISTERED run_id=f9b12837ee5c63a8646f19d3
+OVERDRIVE_METAL_LEASE_ACQUIRED token=f9b12837ee5c63a8646f19d3 pid=2600164
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/ouagadougou -> ubuntu@151.115.99.251:/home/ubuntu/overdrive-worktrees/e3d831d7dafe621226ae6047ebcac3536f37470cafcf5dbb64eb9598886af410
+
+sent 2,192,769 bytes  received 60,018 bytes  643,653.43 bytes/sec
+total size is 2,074,561,641  speedup is 920.89
+
+########## [bootstrap] materialising standalone .git (common dir 7.4G)
+
+sent 758,384 bytes  received 573,910 bytes  532,917.60 bytes/sec
+total size is 878,063,615  speedup is 659.06
+## marcus-sa/nw-bugfix-crash-restart-tasks...origin/marcus-sa/nw-bugfix-crash-restart-tasks [ahead 190, behind 1]
+ M AGENTS.md
+ M crates/overdrive-control-plane/src/worker/exit_observer.rs
+ M crates/overdrive-control-plane/tests/acceptance/crash_ending_authority.rs
+ M crates/overdrive-control-plane/tests/acceptance/terminal_hook_ownership.rs
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+OVERDRIVE_METAL_RUN_STARTED run_id=f9b12837ee5c63a8646f19d3
+info: experimental features enabled: wrapper-scripts
+   Compiling ring v0.17.14
+   Compiling rustls v0.23.39
+   Compiling rustls-webpki v0.103.13
+   Compiling rcgen v0.14.8
+   Compiling overdrive-host v0.0.0 (/home/ubuntu/overdrive-worktrees/e3d831d7dafe621226ae6047ebcac3536f37470cafcf5dbb64eb9598886af410/crates/overdrive-host)
+   Compiling overdrive-testing v0.0.0 (/home/ubuntu/overdrive-worktrees/e3d831d7dafe621226ae6047ebcac3536f37470cafcf5dbb64eb9598886af410/crates/overdrive-testing)
+   Compiling overdrive-gateway v0.0.0 (/home/ubuntu/overdrive-worktrees/e3d831d7dafe621226ae6047ebcac3536f37470cafcf5dbb64eb9598886af410/crates/overdrive-gateway)
+   Compiling tokio-rustls v0.26.4
+   Compiling axum-server v0.7.3
+   Compiling overdrive-dataplane v0.0.0 (/home/ubuntu/overdrive-worktrees/e3d831d7dafe621226ae6047ebcac3536f37470cafcf5dbb64eb9598886af410/crates/overdrive-dataplane)
+   Compiling overdrive-worker v0.0.0 (/home/ubuntu/overdrive-worktrees/e3d831d7dafe621226ae6047ebcac3536f37470cafcf5dbb64eb9598886af410/crates/overdrive-worker)
+   Compiling overdrive-control-plane v0.0.0 (/home/ubuntu/overdrive-worktrees/e3d831d7dafe621226ae6047ebcac3536f37470cafcf5dbb64eb9598886af410/crates/overdrive-control-plane)
+   Compiling overdrive-sim v0.0.0 (/home/ubuntu/overdrive-worktrees/e3d831d7dafe621226ae6047ebcac3536f37470cafcf5dbb64eb9598886af410/crates/overdrive-sim)
+   Compiling overdrive-init v0.0.0 (/home/ubuntu/overdrive-worktrees/e3d831d7dafe621226ae6047ebcac3536f37470cafcf5dbb64eb9598886af410/crates/overdrive-init)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 12.04s
+────────────
+ Nextest run ID cb457bbe-872a-4fe1-a7cb-61df1d51d08b with nextest profile: default
+    Starting 2 tests across 1 binary (199 tests skipped)
+       START [         ] (1/2) overdrive-init::bin/overdrive-init guest_flow::real_kernel::a_burst_of_host_aborts_resets_every_application_connection
+        FAIL [   7.228s] (1/2) overdrive-init::bin/overdrive-init guest_flow::real_kernel::a_burst_of_host_aborts_resets_every_application_connection
+       START [         ] (2/2) overdrive-init::bin/overdrive-init guest_flow::real_kernel::the_accept_path_matches_the_sim_per_connection
+        PASS [   6.178s] (2/2) overdrive-init::bin/overdrive-init guest_flow::real_kernel::the_accept_path_matches_the_sim_per_connection
+────────────
+     Summary [  13.416s] 2 tests run: 1 passed, 1 failed, 199 skipped
+        FAIL [   7.228s] (1/2) overdrive-init::bin/overdrive-init guest_flow::real_kernel::a_burst_of_host_aborts_resets_every_application_connection
+error: test run failed
+OVERDRIVE_METAL_RUN_COMPLETE run_id=f9b12837ee5c63a8646f19d3 exit_code=100 cause=command_returned
