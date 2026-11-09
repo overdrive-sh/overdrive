@@ -15,8 +15,13 @@
 //! call sequence at layer 3+ — `@example`, not `@property`.
 
 #![allow(clippy::unused_async)]
+#![allow(
+    clippy::doc_markdown,
+    reason = "per-test CONTRACT_SHAPE declarations are machine-readable repository contracts"
+)]
 
 use std::num::NonZeroU8;
+use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -25,8 +30,8 @@ use overdrive_core::cgroup::CgroupPath;
 use overdrive_core::guest_transport::{GUEST_CID_BASE, GuestCid};
 use overdrive_core::traits::vmm::{VmTermination, Vmm};
 use overdrive_core::vm::config::{
-    HostArch, KERNEL_MAGIC_WINDOW, KernelCmdline, KernelImage, MemoryPlan, RootfsPlan, VmConfig,
-    VmConfinement, VmRunDir,
+    HostArch, KERNEL_MAGIC_WINDOW, KernelCmdline, KernelImage, MemoryPlan, OVERDRIVE_VMM_UID,
+    RootfsPlan, VmConfig, VmConfinement, VmRunDir,
 };
 use overdrive_host::CloudHypervisorVmm;
 use overdrive_sim::SimVmm;
@@ -69,6 +74,13 @@ fn sample_confinement() -> VmConfinement {
 /// run-dir path) — callers reuse the SAME suffix across two calls to
 /// exercise the "replace a stale clone destination" edge case.
 fn sample_vm_config(fixture: &VmFixture, run_root: &Path, alloc_suffix: &str) -> VmConfig {
+    // The supplied parent is fixture-owned; the production adapter owns only
+    // the allocation child. Preserve its caller's uid and grant group traversal.
+    std::fs::create_dir_all(run_root).expect("create invocation-owned run parent");
+    std::os::unix::fs::chown(run_root, None, Some(OVERDRIVE_VMM_UID))
+        .expect("give the production VMM group traversal through its run parent");
+    std::fs::set_permissions(run_root, std::fs::Permissions::from_mode(0o710))
+        .expect("set invocation-owned run parent traversal mode");
     let alloc = AllocationId::new(alloc_suffix).expect("valid alloc id");
     let master_bytes = std::fs::metadata(&fixture.rootfs_path).expect("stat staged rootfs").len();
     VmConfig {
@@ -162,6 +174,7 @@ async fn drive_shared_sequence(vmm: &dyn Vmm, fixture: &VmFixture, run_root: &Pa
     );
 }
 
+/// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 async fn vmm_equivalence_sim_vmm() {
     let staging_root = default_staging_root();
