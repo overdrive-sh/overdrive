@@ -1,0 +1,25 @@
+{
+  "command": [
+    "cargo",
+    "xtask",
+    "metal",
+    "run",
+    "--",
+    "cargo",
+    "nextest",
+    "run",
+    "-p",
+    "xtask",
+    "--lib",
+    "--features",
+    "integration-tests",
+    "-E",
+    "test(=metal_run_isolation_conformance::protocol_repeat_collection_agrees) | test(=metal_run_isolation_conformance::protocol_same_checkout_excludes_sync) | test(=metal_run_isolation_conformance::protocol_supervisor_loss_is_not_a_result)",
+    "--no-capture"
+  ],
+  "started_at": "2026-11-09T06:06:32.148189+00:00",
+  "source_head": "9fb6840ddb055269ba832cea392a2318815d20e5",
+  "source_status": " M AGENTS.md\n M crates/overdrive-control-plane/src/worker/exit_observer.rs\n M crates/overdrive-control-plane/tests/acceptance/crash_ending_authority.rs\n M crates/overdrive-control-plane/tests/acceptance/terminal_hook_ownership.rs\n M crates/overdrive-core/src/traits/driver.rs\n M docs/feature/metal-run-isolation/deliver/review-01-02.md\n M docs/feature/service-allocation-readiness-and-ending/deliver/roadmap.json\n?? docs/feature/service-allocation-readiness-and-ending/deliver/execution-log.json\n",
+  "finished_at": "2026-11-09T06:07:20.241177+00:00",
+  "exit_code": 0
+}
