@@ -1,0 +1,2 @@
+xtask: running metal collect (read-only durable run record)
+OVERDRIVE_METAL_RUN_COMPLETE run_id=dee9322a6cf58cc2f8637f17 exit_code=100 cause=command_returned

@@ -1,0 +1,13 @@
+{
+  "command": [
+    "bash",
+    "infra/metal/tests/placement_journey.sh",
+    "/Users/marcus/conductor/workspaces/helios/ouagadougou",
+    "/tmp/metal-native-remaining-20261109T072512Z-placement"
+  ],
+  "started_at": "2026-11-09T07:27:33.127289+00:00",
+  "source_head": "e26f0448aaa09f692b7bb2be2d601a87ea79c43d",
+  "source_status": " M AGENTS.md\n M crates/overdrive-control-plane/src/worker/exit_observer.rs\n M crates/overdrive-control-plane/tests/acceptance/crash_ending_authority.rs\n M crates/overdrive-control-plane/tests/acceptance/terminal_hook_ownership.rs\n M crates/overdrive-core/src/traits/driver.rs\n M docs/feature/metal-run-isolation/deliver/review-01-02.md\n M docs/feature/service-allocation-readiness-and-ending/deliver/roadmap.json\n?? docs/feature/service-allocation-readiness-and-ending/deliver/execution-log.json\n",
+  "finished_at": "2026-11-09T07:33:24.146384+00:00",
+  "exit_code": 1
+}
