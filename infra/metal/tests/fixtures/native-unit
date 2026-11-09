@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Shared, already-authored NativeUnit process inputs. No runner protocol or
+# records are implemented here: the callback execs the captured real finalizer.
+set -euo pipefail
+operation="$1"; shift
+case "$operation" in
+  command)
+    [ "$#" = 1 ]
+    actor="$1"
+    printf '%s\n' "$$" >> "$actor/body.pid"
+    while [ ! -f "$actor/command.exit" ]; do sleep 0.01; done
+    exit "$(cat "$actor/command.exit")"
+    ;;
+  finalize)
+    [ "$#" = 5 ]
+    actor="$1"; driver_pid="$2"; captured="$3"; run_id="$4"; runs="$5"
+    limit=$((SECONDS+20))
+    while [ ! -f "$actor/stop" ] && kill -0 "$driver_pid" 2>/dev/null && [ "$SECONDS" -lt "$limit" ]; do sleep 0.01; done
+    exec bash "$captured" --finalize "$run_id" "$runs"
+    ;;
+  input)
+    [ "$#" = 2 ]
+    case "$2" in
+      command.exit) printf '0\n' > "$1/command.exit" ;;
+      stop) printf 'release\n' > "$1/stop" ;;
+      *) exit 64 ;;
+    esac
+    ;;
+  *) exit 64 ;;
+esac
