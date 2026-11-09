@@ -3473,6 +3473,7 @@ fn guest_attempt_files(
     test_name: &str,
 ) -> Result<Vec<GuestFile>, NextestDispatchFailure> {
     extra.push(tool("env"));
+    extra.push(tool("mkdir"));
     extra.extend(attempt_files);
     for name in [".overdrive-metal-source", ".overdrive-metal-checkout.v1"] {
         let source = source_root.join(name);
@@ -3632,6 +3633,13 @@ fn run_nextest_group_attempt(
     )
     .map_err(|error| NextestDispatchFailure::GuestExecution(format!("{error:?}")))?;
     prepare_nextest_guest(&mut guest, &mut plan, test_name)
+        .map_err(|error| NextestDispatchFailure::GuestExecution(format!("{error:?}")))?;
+    // The guest image contains the selected ELF and nextest helpers, not the
+    // host checkout tree. Materialize only Nextest's exact selected CWD so the
+    // existing `env --chdir` can preserve it without copying host files.
+    let guest_working_directory = current_dir.display().to_string();
+    guest
+        .command(&["/usr/bin/mkdir", "-p", "--", &guest_working_directory])
         .map_err(|error| NextestDispatchFailure::GuestExecution(format!("{error:?}")))?;
     execute_nextest_guest_attempt(
         guest,

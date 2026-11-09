@@ -1,0 +1,11 @@
+Traceback (most recent call last):
+  File "<stdin>", line 173, in <module>
+  File "<stdin>", line 87, in owner
+  File "<stdin>", line 40, in record
+  File "/usr/lib/python3.14/pathlib/__init__.py", line 778, in read_bytes
+    with self.open(mode='rb', buffering=0) as f:
+         ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.14/pathlib/__init__.py", line 772, in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+FileNotFoundError: [Errno 2] No such file or directory: '/var/lib/overdrive-metal/runs/e6f13d369350e848d51c0192/metadata.v2'
