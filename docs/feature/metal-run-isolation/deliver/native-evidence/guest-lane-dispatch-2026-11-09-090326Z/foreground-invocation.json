@@ -1,0 +1,27 @@
+{
+  "command": [
+    "cargo",
+    "xtask",
+    "metal",
+    "run",
+    "--",
+    "cargo",
+    "nextest",
+    "run",
+    "-p",
+    "overdrive-init",
+    "--bin",
+    "overdrive-init",
+    "--features",
+    "integration-tests,kvm-tests",
+    "-E",
+    "test(=guest_flow::real_kernel::the_accept_path_matches_the_sim_per_connection) | test(=guest_flow::real_kernel::a_burst_of_host_aborts_resets_every_application_connection)",
+    "--no-capture",
+    "--no-fail-fast"
+  ],
+  "started_at": "2026-11-09T09:03:26.216442+00:00",
+  "source_head": "1b623e6e167c4d3113efcf0d393c74748fbe9834",
+  "source_status": " M AGENTS.md\n M crates/overdrive-control-plane/src/worker/exit_observer.rs\n M crates/overdrive-control-plane/tests/acceptance/crash_ending_authority.rs\n M crates/overdrive-control-plane/tests/acceptance/terminal_hook_ownership.rs\n M crates/overdrive-core/src/traits/driver.rs\n M docs/feature/metal-run-isolation/deliver/review-01-02.md\n M docs/feature/service-allocation-readiness-and-ending/deliver/roadmap.json\n M xtask/src/metal_run_isolation_conformance.rs\n?? docs/feature/metal-run-isolation/deliver/native-evidence/placement-rerun-2026-11-09-072512Z/\n?? docs/feature/service-allocation-readiness-and-ending/deliver/execution-log.json\n",
+  "finished_at": "2026-11-09T09:05:51.142692+00:00",
+  "exit_code": 100
+}
