@@ -2670,6 +2670,10 @@ async fn dispatch_single(
                         }
                     }
                 }
+                // Register probe supervision before releasing the exit-event
+                // gate so the observer cannot end an allocation before its
+                // supervisor exists (D3, ADR-0256).
+                driver.on_alloc_running(&spec);
                 if guest_command_release_permitted(true, true, stable_exact_rule_baseline)
                     && let Some(handle) = &handle_opt
                 {
@@ -2684,7 +2688,6 @@ async fn dispatch_single(
                 // dispatch to its configured `ProbeRunner`. Default
                 // no-op for SimDriver and any driver wired without
                 // a probe runner.
-                driver.on_alloc_running(&spec);
             }
             emit_lifecycle_occurrence(bus, occurrence.as_ref());
             if let Some(error) = rejected_network_cleanup {
@@ -3199,8 +3202,8 @@ async fn dispatch_single(
                             }
                         }
                     }
-                    driver.release_for_exit_emission(handle).await;
                     driver.on_alloc_running(&spec);
+                    driver.release_for_exit_emission(handle).await;
                     emit_lifecycle_occurrence(bus, occurrence.as_ref());
                     Ok(())
                 }
@@ -3269,9 +3272,6 @@ async fn dispatch_single(
             .await?;
             let terminal_driver =
                 alloc_drivers.lock().get(&alloc_id).copied().and_then(|kind| drivers.get(kind));
-            if let Some(driver) = terminal_driver {
-                driver.on_alloc_terminal(&alloc_id);
-            }
 
             // `Driver::stop` awaits process quiescence. Its exit observer can
             // therefore contend with an intentional-stop observation while
@@ -3284,6 +3284,7 @@ async fn dispatch_single(
             // closes both partitions: exit observation before the read, and
             // equal-timestamp exit observation between the read and write.
             let mut occurrence = None;
+            let mut terminal_row_durable = false;
             for _ in 0..2 {
                 let prior_row = match find_prior_alloc_row(obs, &alloc_id).await {
                     Ok(Some(prior_row)) => prior_row,
@@ -3299,6 +3300,7 @@ async fn dispatch_single(
                     }
                 };
                 if prior_row.state == AllocState::Terminated && prior_row.terminal == terminal {
+                    terminal_row_durable = true;
                     break;
                 }
 
@@ -3357,6 +3359,7 @@ async fn dispatch_single(
                 match obs.write_alloc_lifecycle(row, TransitionSource::Reconciler).await {
                     Ok(Some(event)) => {
                         occurrence = Some(event);
+                        terminal_row_durable = true;
                         break;
                     }
                     Ok(None) => {}
@@ -3367,6 +3370,9 @@ async fn dispatch_single(
                         return Err(error.into());
                     }
                 }
+            }
+            if terminal_row_durable && let Some(driver) = terminal_driver {
+                driver.on_alloc_terminal(&alloc_id);
             }
             if let Some(driver) = terminal_driver {
                 driver.release_supervision(&alloc_id);

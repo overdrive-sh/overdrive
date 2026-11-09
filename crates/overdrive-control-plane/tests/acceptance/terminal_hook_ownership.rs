@@ -577,7 +577,6 @@ async fn a_crash_with_no_prior_row_still_ends_probe_supervision() {
 /// `RestartAllocation` successor is `on_alloc_running` before `release_for_exit_emission`.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER: D3 shim registers probe supervision before it releases the exit-event gate"]
 async fn a_start_registers_probe_supervision_before_it_releases_the_exit_gate() {
     let f = Fixture::new();
     let _observer = f.spawn_observer();
@@ -618,7 +617,6 @@ async fn a_start_registers_probe_supervision_before_it_releases_the_exit_gate() 
 /// schedule, after the observer consumed the event no supervisor remains for the id.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER: D3 shim registers probe supervision before it releases the exit-event gate"]
 async fn an_exit_available_the_instant_the_gate_releases_leaves_no_supervisor() {
     for seed in 0..SEEDS {
         let f = Fixture::new();

@@ -19,7 +19,7 @@
 //! `SimObservationStore`, reached through a `Driver` whose probe hooks forward to it as
 //! `VmDriver`'s do. Process start, stop and the Running-confirmed gate are the `SimDriver`'s.
 //! That `Driver` ([`PacedDriver`]) is the only double: it records hook order, it is the
-//! watcher (it knows a guest died and releases an `ExitEvent` only after the gate), and it
+//! watcher (it knows a guest died and queues an `ExitEvent` only after the gate), and it
 //! parks a shim dispatch at the step boundaries the model has inside one dispatch (see
 //! "Pacing"). It authors no row, no decision and no supervisor.
 //!
@@ -30,7 +30,9 @@
 //! is the call), the end of `Driver::stop` (`StopEffects`) and before `on_alloc_terminal`
 //! (`StopRow` runs the dispatch up to there; `StopHook` is the call). The exit observer and
 //! the probe tasks run on the driver's own current-thread runtime, which only runs while a
-//! step awaits it: an `ExitEvent` queued by `Emit` waits there until `Consume`.
+//! step awaits it. `Emit` holds the watcher's event in test-local pending state;
+//! `Consume(a, wrote)` forwards only that event to the real observer receiver. This
+//! preserves one-observer-event-per-Consume pacing when several ids are queued.
 //!
 //! Action -> production call or environment fault:
 //!
@@ -42,8 +44,8 @@
 //! | `Register(a)` | the parked dispatch continues through the `Running` row write and `on_alloc_running`; it must have called `on_alloc_running` by the time it parks before the gate release (the pre-D3 order reaches the gate first and fails the step) |
 //! | `Release(a)` | the parked dispatch performs `release_for_exit_emission` and completes |
 //! | `Die(a)` | the guest dies: the watcher double records it (environment fault, no production call) |
-//! | `Emit(a)` | the watcher sends the `ExitEvent` into the observer's receiver (enabled only after the gate release) |
-//! | `Consume(a, wrote)` | the observer runtime runs until the observer has handled the event; `wrote = false` first scripts a non-retryable write failure on `SimObservationStore` |
+//! | `Emit(a)` | the watcher queues its `ExitEvent` in test-local pending state (enabled only after the gate release) |
+//! | `Consume(a, wrote)` | the pending event is sent to the production observer receiver; the runtime runs through this event's release call; `wrote = false` first scripts a non-retryable write failure on `SimObservationStore` |
 //! | `StopEffects(a)` | shim `dispatch(StopAllocation)`, parked after `Driver::stop` |
 //! | `StopRow(a, wrote)` | the dispatch continues to the row write (failing it when `wrote = false`: the dispatch ends with its error) and parks before `on_alloc_terminal`; with no dispatch parked it is the retry, a fresh `StopAllocation` |
 //! | `StopHook(a)` | the parked dispatch calls `on_alloc_terminal` and completes (when `FinalizeFailed` already ended the id, the retry stop has no hook to call: that earlier hook is the call) |
@@ -287,6 +289,10 @@ impl PacedDriver {
     fn has(&self, call: &Call) -> bool {
         self.calls.lock().contains(call)
     }
+
+    fn call_count(&self, call: &Call) -> usize {
+        self.calls.lock().iter().filter(|recorded| *recorded == call).count()
+    }
 }
 
 #[async_trait]
@@ -497,6 +503,8 @@ struct HookOwnershipDriver {
     /// `StopEffects`/`StopRow`/`StopHook`).
     start: BTreeMap<i64, Dispatch>,
     stop: BTreeMap<i64, Dispatch>,
+    /// Watcher events emitted by the model but not yet forwarded to the observer.
+    pending_exits: BTreeMap<i64, ExitEvent>,
     /// Allocations whose guest the watcher knows died (`Die`).
     dead: Vec<i64>,
     /// Stops that completed without parking because an earlier hook had already ended the id.
@@ -569,6 +577,7 @@ impl HookOwnershipDriver {
             _tmp: tmp,
             start: BTreeMap::new(),
             stop: BTreeMap::new(),
+            pending_exits: BTreeMap::new(),
             dead: Vec::new(),
             hook_already_fired: Vec::new(),
         }
@@ -706,26 +715,38 @@ impl HookOwnershipDriver {
         self.dead.push(a);
     }
 
-    fn emit(&self, a: i64) -> std::result::Result<(), DriverError2> {
+    fn emit(&mut self, a: i64) -> std::result::Result<(), DriverError2> {
         let id = alloc_of(a);
         if !self.dead.contains(&a) || !self.comp.driver.has(&Call::Release(id.clone())) {
             return Err(not_enabled("Emit", "the guest is alive or the gate is not released"));
         }
-        self.comp
-            .driver
-            .exit_tx
-            .try_send(ExitEvent {
+        if self.pending_exits.contains_key(&a) {
+            return Err(not_enabled("Emit", "the watcher already queued this ExitEvent"));
+        }
+        self.pending_exits.insert(
+            a,
+            ExitEvent {
                 alloc: id,
                 kind: ExitKind::Crashed { exit_code: Some(1), signal: None },
                 intentional_stop: false,
                 stderr_tail: None,
                 oom: None,
-            })
-            .map_err(|e| DriverError2::Production(e.to_string()))
+            },
+        );
+        Ok(())
     }
 
-    fn consume(&self, a: i64, wrote: bool) -> std::result::Result<(), DriverError2> {
+    fn consume(&mut self, a: i64, wrote: bool) -> std::result::Result<(), DriverError2> {
         let id = alloc_of(a);
+        let event = self
+            .pending_exits
+            .remove(&a)
+            .ok_or_else(|| not_enabled("Consume", "the watcher has no queued ExitEvent"))?;
+        // A shim dispatch may already have released this id's supervision
+        // claim. Consume waits for the observer's *new* release, not mere
+        // membership in the recording driver's call history.
+        let release = Call::ReleaseSupervision(id);
+        let releases_before = self.comp.driver.call_count(&release);
         // A write failure is scripted only where the observer will attempt a write; against an id
         // that already has a terminal row its write is the same-attempt no-write (`NoWrite`), the
         // other input the model's `wrote = false` stands for, and a queued failure would leak into
@@ -735,9 +756,14 @@ impl HookOwnershipDriver {
                 io::Error::from(io::ErrorKind::PermissionDenied),
             ));
         }
+        self.comp
+            .driver
+            .exit_tx
+            .try_send(event)
+            .map_err(|error| DriverError2::Production(error.to_string()))?;
         // The observer's last step for one event is `release_supervision`, after every outcome.
         self.settle("the observer handled the ExitEvent", |s| {
-            s.comp.driver.has(&Call::ReleaseSupervision(id.clone()))
+            s.comp.driver.call_count(&release) > releases_before
         })
     }
 
@@ -953,7 +979,6 @@ impl State<HookOwnershipDriver> for HookState {
     test = "crash_without_restart"
 )]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D1 exit observer ends probe supervision; D3 shim registers supervision before the gate release"]
 fn quint_hook_ownership_crash_without_restart() -> impl Driver {
     HookOwnershipDriver::new()
 }
@@ -966,7 +991,6 @@ fn quint_hook_ownership_crash_without_restart() -> impl Driver {
     test = "crash_then_fresh_id_restart"
 )]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D1 exit observer ends probe supervision; D3 shim registers supervision before the gate release"]
 fn quint_hook_ownership_crash_then_fresh_id_restart() -> impl Driver {
     HookOwnershipDriver::new()
 }
@@ -979,7 +1003,6 @@ fn quint_hook_ownership_crash_then_fresh_id_restart() -> impl Driver {
     test = "write_exhaustion_still_stops_probes"
 )]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D1 exit observer ends probe supervision; D3 shim registers supervision before the gate release"]
 fn quint_hook_ownership_write_exhaustion_still_stops_probes() -> impl Driver {
     HookOwnershipDriver::new()
 }
@@ -992,7 +1015,6 @@ fn quint_hook_ownership_write_exhaustion_still_stops_probes() -> impl Driver {
     test = "operator_or_liveness_stop_emits_no_exit_event"
 )]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D3 shim registers supervision before the gate release; B2 shim releases a stop's supervision after its terminal row is durable"]
 fn quint_hook_ownership_operator_or_liveness_stop_emits_no_exit_event() -> impl Driver {
     HookOwnershipDriver::new()
 }
@@ -1005,7 +1027,6 @@ fn quint_hook_ownership_operator_or_liveness_stop_emits_no_exit_event() -> impl 
     test = "finalize_on_live_vm_stops_probes"
 )]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D3 shim registers supervision before the gate release"]
 fn quint_hook_ownership_finalize_on_live_vm_stops_probes() -> impl Driver {
     HookOwnershipDriver::new()
 }
@@ -1018,7 +1039,6 @@ fn quint_hook_ownership_finalize_on_live_vm_stops_probes() -> impl Driver {
     test = "double_fire_is_idempotent"
 )]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D1 exit observer ends probe supervision; D3 shim registers supervision before the gate release"]
 fn quint_hook_ownership_double_fire_is_idempotent() -> impl Driver {
     HookOwnershipDriver::new()
 }
@@ -1029,7 +1049,6 @@ fn quint_hook_ownership_double_fire_is_idempotent() -> impl Driver {
     main = "hooks_conf"
 )]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D1 exit observer ends probe supervision; D3 shim registers supervision before the gate release; B2 shim releases a stop's supervision after its terminal row is durable"]
 fn quint_hook_ownership_randomized_traces() -> impl Driver {
     HookOwnershipDriver::new()
 }

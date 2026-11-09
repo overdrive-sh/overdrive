@@ -755,6 +755,10 @@ pub trait Driver: Send + Sync + 'static {
     /// Per ADR-0054 § 2 probes are a worker-level concern; sim /
     /// future drivers that delegate to other observation surfaces
     /// continue to compile.
+    /// The action shim calls this before it calls
+    /// [`Self::release_for_exit_emission`] for the same allocation, so any
+    /// `ExitEvent` for the allocation is emitted only after its probe
+    /// supervision is registered.
     fn on_alloc_running(&self, _spec: &AllocationSpec) {}
 
     /// Lifecycle hook: this allocation's workload has ended, or its terminal

@@ -1,0 +1,25 @@
+# Hook ownership conformance driver sequencing remediation
+
+Status: **bounded DISTILL test-support fix, pending independent acceptance review and the original step 01-02 crafter's adoption**. The production D3/B2 implementation, activated test markers, DESIGN contract, Quint model, projection, and DES events were not changed here.
+
+## Reproduced failure and owner path
+
+The original step 01-02 crafter reported a reproducible `quint_hook_ownership_randomized_traces` failure at `QUINT_SEED=0x1a5311b9`. I replayed that seed against the dirty pre-remediation tree through `cargo xtask metal run -- cargo nextest run -p overdrive-control-plane --features integration-tests --lib -E 'test(quint_hook_ownership_randomized_traces)'`. It failed at trace step 20, `Consume(2, false)`: the model projected no terminal row for allocation 2, while the driver read a terminal row through `ObservationStore::alloc_status_row`. The before log is `.context/step-01-02-distill-seed-before.log`; the original crafter's detailed trace is `.context/step-01-02-randomized-replay.log`.
+
+The production owner is `exit_observer::spawn_with_runtime`. The watcher test double supplies an `ExitEvent`; the observer calls `Driver::on_alloc_terminal`, runs the real `handle_exit_event`/`run_with_retry` observation write, and finally calls `release_supervision`. The driver's `Consume` action scripted `ObservationStoreError::Io(PermissionDenied)` through `SimObservationStore::inject_write_failure` for `wrote = false`. That error is terminal under the production `ObservationStoreError::is_retryable` contract, so a correctly targeted write must leave the allocation's terminal row absent while the hook still ends supervision.
+
+The initial fixture had two scheduling errors. Its `row_is_terminal` precheck used `self.rt.block_on` before fault injection, which could advance the observer runtime. More decisively, `Consume` waited for **any prior** recorded `ReleaseSupervision(id)` call, so a shim release could satisfy the wait without the observer finishing that event. A temporary diagnostic replay showed the resulting stale event for allocation 1 consuming the queued write fault at step 20; allocation 2's observer write then succeeded. After replacing the membership wait with a count-increase wait, a second reproducible seed (`0x94ef88cb`) exposed the other half: with two `ExitEvent`s already in the real receiver, one runtime drive processed both events during `Consume(1, true)`, although the model's second event was still queued. The temporary diagnostic instrumentation was removed; `crates/overdrive-sim/src/adapters/observation_store.rs` is clean.
+
+## Bounded test-support change
+
+Only `crates/overdrive-control-plane/src/worker/quint_hook_ownership.rs` changed for this remediation. `Emit(a)` still requires the guest-death and gate-release preconditions and builds the same `ExitEvent`, but holds it in a private, per-id pending map. `Consume(a, wrote)` scripts the same non-retryable write fault when needed, forwards only that id's pending event into the **existing production observer receiver**, then drives the observer runtime until `ReleaseSupervision(id)` has been recorded once more than before this Consume. This enforces the model's one-event-per-Consume pacing, including when both ids have queued events. The projection still reads terminal rows through the approved `ObservationStore::alloc_status_row` port and supervisor presence through the real `ProbeRunner`; no row, hook, decision, or supervisor is authored by the fixture. The private pending map is test support, with no new production API, Sim seam, or persisted state.
+
+| Evidence | Result |
+|---|---|
+| `QUINT_SEED=0x1a5311b9`, before fix | Failed at `Consume(2, false)`, expected `row=false`, observed `row=true`. |
+| `QUINT_SEED=0x94ef88cb`, intermediate count-only fix | Failed at `Consume(1, true)`: the observer drained allocation 2's queued event in the same runtime drive. |
+| Both fixed seeds, final support change | Passed, one `quint_hook_ownership_randomized_traces` run per seed. Logs: `.context/step-01-02-distill-seed1a-fixed.log`, `.context/step-01-02-distill-seed94-fixed.log`. |
+| Unseeded named and randomized hook conformance suite | 7/7 passed through `cargo xtask metal run -- cargo nextest run -p overdrive-control-plane --features integration-tests --lib --no-fail-fast -E 'test(quint_hook_ownership)'`; log `.context/step-01-02-distill-hooks-final.log`. |
+| Static checks | `rustfmt --check` on the changed driver and `git diff --check` passed; Metal `cargo clippy -p overdrive-control-plane --lib --features integration-tests -- -D warnings` passed. |
+
+The temporary `.cargo/config.toml` seed/verbosity settings were restored byte-for-byte from the pre-replay copy and are clean. The original crafter retains step 01-02 RED/GREEN/COMMIT ownership; no DES phase event or commit was created by DISTILL. The independent acceptance reviewer should check this sequencing fix before the crafter adopts it and completes the step.
