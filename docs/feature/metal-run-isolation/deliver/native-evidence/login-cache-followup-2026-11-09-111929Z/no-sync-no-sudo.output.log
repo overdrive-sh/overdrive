@@ -1,0 +1,25 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.21s
+     Running `target/debug/xtask metal run --no-sync --no-sudo -- cargo nextest run -p xtask --test acceptance --features integration-tests -E 'test(placement::non_metal_and_explicit_exclusive_attempts_preserve_the_original_exec_chain)' --no-capture`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+OVERDRIVE_METAL_RUN_ID=04241420430e5cd67d0298cb
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire exclusive physical-maintenance barrier (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_RUN_REGISTERED run_id=04241420430e5cd67d0298cb
+OVERDRIVE_METAL_LEASE_ACQUIRED token=04241420430e5cd67d0298cb pid=2871217
+
+########## [bootstrap] no-sync source identity check
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+OVERDRIVE_METAL_RUN_STARTED run_id=04241420430e5cd67d0298cb
+info: experimental features enabled: wrapper-scripts
+error: failed to open: /home/ubuntu/overdrive-worktrees/e3d831d7dafe621226ae6047ebcac3536f37470cafcf5dbb64eb9598886af410/target/debug/.cargo-lock
+
+Caused by:
+  Permission denied (os error 13)
+error: command `/home/ubuntu/.rustup/toolchains/1.95.0-x86_64-unknown-linux-gnu/bin/cargo '--color=auto' test --no-run --message-format json-render-diagnostics --package xtask --test acceptance --features integration-tests` exited with code 101
+OVERDRIVE_METAL_RUN_COMPLETE run_id=04241420430e5cd67d0298cb exit_code=101 cause=command_returned

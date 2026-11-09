@@ -1,0 +1,5 @@
+{
+  "head": "7d8da10c9a5fa5de15fdf45837b1393418176278",
+  "status": " M AGENTS.md\n M crates/overdrive-control-plane/src/worker/exit_observer.rs\n M crates/overdrive-control-plane/tests/acceptance/crash_ending_authority.rs\n M crates/overdrive-control-plane/tests/acceptance/terminal_hook_ownership.rs\n M crates/overdrive-core/src/traits/driver.rs\n M docs/feature/metal-run-isolation/feature-delta.md\n M docs/feature/service-allocation-readiness-and-ending/deliver/roadmap.json\n M infra/metal/bootstrap.sh\n M website/content/blog/sharing-a-metal-box-without-sharing-test-state.mdx\n M website/content/docs/how-to/run-verification-on-metal.mdx\n?? docs/feature/metal-run-isolation/deliver/review-slice.md\n?? docs/feature/service-allocation-readiness-and-ending/deliver/execution-log.json\n",
+  "bootstrap_sha256": "5224234003ec4142f700bac42320de5d4e500e567c2036bb5abb917ba4cb996a"
+}
