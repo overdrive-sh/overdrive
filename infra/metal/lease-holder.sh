@@ -411,6 +411,72 @@ remaining_lock_timeout() {
   printf -v REMAINING_LOCK_TIMEOUT '%d.%03d' "$seconds" "$milliseconds"
 }
 
+poll_prestart_control() {
+  local interval="$1"
+  local read_status
+  if [ "$control_received" -eq 1 ]; then
+    sleep "$interval"
+    return 0
+  fi
+  if IFS= read -r -t "$interval" -u 0 control; then
+    # Preserve any existing control line verbatim; its current precedence is
+    # still applied after the same admission and checkout locks are held.
+    control_received=1
+    return 0
+  else
+    read_status=$?
+  fi
+  [ "$read_status" -gt 128 ] && return 0
+  return 2
+}
+
+cancel_prestart_lock_waiter() {
+  [ -n "$lock_wait_pid" ] || return 0
+  kill -TERM "$lock_wait_pid" 2>/dev/null || true
+  if wait "$lock_wait_pid" 2>/dev/null; then :; fi
+  lock_wait_pid=""
+}
+
+prestart_lock_waiter_running() {
+  local active_pids
+  active_pids="$(jobs -pr)"
+  [[ $'\n'"$active_pids"$'\n' == *$'\n'"$lock_wait_pid"$'\n'* ]]
+}
+
+wait_for_prestart_lock() {
+  local lock_mode="$1"
+  local lock_fd="$2"
+  local deadline_ns="$3"
+  local poll_status
+  remaining_lock_timeout "$deadline_ns" || return 1
+  # Keep one flock waiter queued on the inherited descriptor while the
+  # supervisor observes controller EOF. A successful flock remains held by
+  # the parent descriptor after this child exits.
+  flock "$lock_mode" -w "$REMAINING_LOCK_TIMEOUT" "$lock_fd" &
+  lock_wait_pid=$!
+  while prestart_lock_waiter_running; do
+    if [ "$control_received" -eq 1 ]; then
+      sleep 0.01
+      continue
+    fi
+    if poll_prestart_control 0.05; then
+      continue
+    else
+      poll_status=$?
+      if [ "$poll_status" -eq 2 ]; then
+        cancel_prestart_lock_waiter
+        return 2
+      fi
+    fi
+  done
+  if wait "$lock_wait_pid"; then
+    lock_wait_pid=""
+    return 0
+  fi
+  lock_wait_pid=""
+  return 1
+}
+
 wait_for_admitted_ordinary_units() {
   local deadline_ns="$1"
   local current_run_id="$2"
@@ -785,6 +851,8 @@ durable_main() {
   local deadline_start_ns
   local deadline_ns
   local wait_result
+  lock_wait_pid=""
+  control_received=0
 
   valid_run_id "$token" || return 74
   [ "$execution_mode" = privileged ] || [ "$execution_mode" = login ] || return 74
@@ -821,6 +889,7 @@ execution_class=${execution_class}
   write_phase "$run_directory" "$token" waiting_for_lease || return 74
 
   cleanup_durable() {
+    cancel_prestart_lock_waiter
     if [ "$owner_written" -eq 1 ] && [ -r "$owner_path" ] && \
       grep -qx "token=${token}" "$owner_path"; then
       rm -f "$owner_path"
@@ -837,6 +906,7 @@ execution_class=${execution_class}
   }
   handle_signal() {
     if [ "$running" -eq 0 ]; then
+      cancel_prestart_lock_waiter
       if [ "$terminal_written" -eq 0 ]; then
         write_terminal_runner "$run_directory" "$token" launch_aborted || true
         terminal_written=1
@@ -850,6 +920,7 @@ execution_class=${execution_class}
   }
   handle_pipe() {
     if [ "$running" -eq 0 ]; then
+      cancel_prestart_lock_waiter
       if [ "$terminal_written" -eq 0 ]; then
         write_terminal_runner "$run_directory" "$token" controller_eof_before_start || true
         terminal_written=1
@@ -871,21 +942,34 @@ execution_class=${execution_class}
     terminal_written=1
     return 75
   fi
-  if ! remaining_lock_timeout "$deadline_ns"; then
-    write_terminal_runner "$run_directory" "$token" maintenance_timeout || true
-    terminal_written=1
-    return 75
-  fi
   if [ "$execution_class" = ordinary ]; then
-    if ! flock -s -w "$REMAINING_LOCK_TIMEOUT" 8; then
+    if wait_for_prestart_lock -s 8 "$deadline_ns"; then
+      :
+    else
+      wait_result=$?
+      if [ "$wait_result" -eq 2 ]; then
+        write_terminal_runner "$run_directory" "$token" controller_eof_before_start || true
+        terminal_written=1
+        return 75
+      fi
       write_terminal_runner "$run_directory" "$token" maintenance_timeout || true
       terminal_written=1
       return 75
     fi
-  elif ! flock -x -w "$REMAINING_LOCK_TIMEOUT" 8; then
-    write_terminal_runner "$run_directory" "$token" maintenance_timeout || true
-    terminal_written=1
-    return 75
+  else
+    if wait_for_prestart_lock -x 8 "$deadline_ns"; then
+      :
+    else
+      wait_result=$?
+      if [ "$wait_result" -eq 2 ]; then
+        write_terminal_runner "$run_directory" "$token" controller_eof_before_start || true
+        terminal_written=1
+        return 75
+      fi
+      write_terminal_runner "$run_directory" "$token" maintenance_timeout || true
+      terminal_written=1
+      return 75
+    fi
   fi
 
   if [ "$execution_class" = exclusive ]; then
@@ -911,12 +995,15 @@ execution_class=${execution_class}
     terminal_written=1
     return 75
   fi
-  if ! remaining_lock_timeout "$deadline_ns"; then
-    write_terminal_runner "$run_directory" "$token" checkout_timeout || true
-    terminal_written=1
-    return 75
-  fi
-  if ! flock -x -w "$REMAINING_LOCK_TIMEOUT" 10; then
+  if wait_for_prestart_lock -x 10 "$deadline_ns"; then
+    :
+  else
+    wait_result=$?
+    if [ "$wait_result" -eq 2 ]; then
+      write_terminal_runner "$run_directory" "$token" controller_eof_before_start || true
+      terminal_written=1
+      return 75
+    fi
     write_terminal_runner "$run_directory" "$token" checkout_timeout || true
     terminal_written=1
     return 75
@@ -1001,10 +1088,12 @@ execution_class=${execution_class}
   }
   printf 'OVERDRIVE_METAL_LEASE_ACQUIRED token=%s pid=%s\n' "$token" "$$"
 
-  if ! IFS= read -r control; then
-    write_terminal_runner "$run_directory" "$token" controller_eof_before_start || true
-    terminal_written=1
-    return 75
+  if [ "$control_received" -eq 0 ]; then
+    if ! IFS= read -r control; then
+      write_terminal_runner "$run_directory" "$token" controller_eof_before_start || true
+      terminal_written=1
+      return 75
+    fi
   fi
   case "$control" in
     START) ;;
