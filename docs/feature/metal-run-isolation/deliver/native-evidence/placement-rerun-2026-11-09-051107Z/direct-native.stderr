@@ -1,0 +1,6 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.06s
+     Running `target/debug/xtask metal run -- cargo nextest run -p overdrive-host --test integration --features integration-tests,kvm-tests -E 'test(integration::vsock_vmm_device::the_fork_boots_and_passes_data_under_the_production_launch_identity)' --no-capture`
+xtask: running metal run (one bootstrap lease session)
+OVERDRIVE_METAL_RUN_ID=dca66678b632b1a68122ddd2
+OVERDRIVE_METAL_RUN_STARTED run_id=dca66678b632b1a68122ddd2
+OVERDRIVE_METAL_RUN_COMPLETE run_id=dca66678b632b1a68122ddd2 exit_code=0 cause=command_returned

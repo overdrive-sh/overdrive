@@ -1,0 +1,6 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.06s
+     Running `target/debug/xtask metal run -- cargo nextest run -p overdrive-fwd --test integration --features integration-tests,kvm-tests -E 'test(integration::guest_boundary::a_guest_application_reset_reaches_the_host_application_as_a_reset)' --no-capture`
+xtask: running metal run (one bootstrap lease session)
+OVERDRIVE_METAL_RUN_ID=9c28953bbc4e4e93803cb8f8
+OVERDRIVE_METAL_RUN_STARTED run_id=9c28953bbc4e4e93803cb8f8
+OVERDRIVE_METAL_RUN_COMPLETE run_id=9c28953bbc4e4e93803cb8f8 exit_code=100 cause=command_returned
