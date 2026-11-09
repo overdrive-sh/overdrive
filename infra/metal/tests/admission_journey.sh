@@ -24,11 +24,19 @@ host_boot_id="$(ssh "$OVERDRIVE_METAL_TARGET" 'cat /proc/sys/kernel/random/boot_
 ordinary_controller=$!
 for ((attempt=0; attempt<1200; attempt++)); do
   ordinary_id="$(run_id "$out/ordinary.stderr")"
-  if [ -n "$ordinary_id" ] && rg -q 'METAL-ISOLATION-TIMEOUT body_started=true' "$out/ordinary.stdout"; then break; fi
+  if [ -n "$ordinary_id" ] && observe "$ordinary_id" > "$out/ordinary-start-$attempt.json" 2> "$out/ordinary-start-query-$attempt.stderr"; then
+    if python3 - "$out/ordinary-start-$attempt.json" "$ordinary_id" <<'PY_BODY_STARTED'
+import base64,json,sys
+owner=json.load(open(sys.argv[1]))['owners'][sys.argv[2]]
+assert owner['unit']['ActiveState']=='active' and owner['phase.v1']['phase']=='running'
+assert any(b'METAL-ISOLATION-TIMEOUT body_started=true' in base64.b64decode(process['guest_console']['raw_b64'],validate=True).splitlines() for process in owner['processes'].values() if 'guest_console' in process), 'the actual selected body has not been observed in its owned guest console'
+PY_BODY_STARTED
+    then cp "$out/ordinary-start-$attempt.json" "$out/ordinary-running.json"; break; fi
+  fi
+  if ! kill -0 "$ordinary_controller" 2>/dev/null; then break; fi
   sleep 0.1
 done
-[ -n "$ordinary_id" ] && rg -q 'METAL-ISOLATION-TIMEOUT body_started=true' "$out/ordinary.stdout"
-observe "$ordinary_id" > "$out/ordinary-running.json"
+[ -f "$out/ordinary-running.json" ] || { echo 'actual guest body-start was not observed; inspect owned-console snapshots and query errors' >&2; exit 1; }
 remote_source="$(python3 - "$out/ordinary-running.json" <<'PY'
 import base64,json,sys
 owner=next(iter(json.load(open(sys.argv[1]))['owners'].values()))

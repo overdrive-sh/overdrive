@@ -4,6 +4,7 @@
 Run on the actual Metal host through the external acceptance driver. Model
 history/ghosts are deliberately absent. A missing observation raises an error.
 """
+import base64
 import json
 import os
 from pathlib import Path
@@ -46,6 +47,37 @@ def record(path):
             raise ValueError(f"duplicate {key} in {path}")
         result[key] = value
     return result
+
+
+def guest_console(argv, runtime_root):
+    """Read only the actual VMM serial file below its invocation runtime root."""
+    if not argv or Path(argv[0]).name != "cloud-hypervisor" or "--serial" not in argv:
+        return None
+    if argv.count("--serial") != 1:
+        raise ValueError("ambiguous VMM serial file")
+    serial = argv[argv.index("--serial") + 1]
+    if not serial.startswith("file="):
+        raise ValueError("the owned VMM serial console is not a file")
+    path = Path(serial.removeprefix("file="))
+    relative = path.relative_to(runtime_root)
+    if not path.is_absolute() or not relative.parts or ".." in path.parts:
+        raise ValueError("VMM serial file is outside its invocation runtime root")
+    # Do not follow a final or ancestor symlink into another invocation or an
+    # arbitrary host file. A vanished file remains an explicit query error.
+    directory = os.open("/", os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for component in path.parts[1:-1]:
+            child = os.open(component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory)
+            os.close(directory)
+            directory = child
+        descriptor = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
+        with os.fdopen(descriptor, "rb") as console:
+            if not stat.S_ISREG(os.fstat(console.fileno()).st_mode):
+                raise ValueError("VMM serial console is not a regular file")
+            raw = console.read()
+    finally:
+        os.close(directory)
+    return {"path": str(path), "raw_b64": base64.b64encode(raw).decode()}
 
 
 def owner(run_id):
@@ -108,6 +140,12 @@ def owner(run_id):
                 except FileNotFoundError:
                     continue
             result["processes"][str(pid)] = {"argv": (proc / "cmdline").read_bytes().decode(errors="replace").split("\0"), "netns": os.readlink(proc / "ns/net"), "fds": fds}
+            try:
+                console = guest_console(result["processes"][str(pid)]["argv"], Path("/run/ovd-gk", run_id))
+                if console is not None:
+                    result["processes"][str(pid)]["guest_console"] = console
+            except (OSError, ValueError, IndexError) as error:
+                result["processes"][str(pid)]["guest_console_error"] = {"kind": type(error).__name__, "message": str(error)}
         except FileNotFoundError:
             continue
     result["roots"] = {}
