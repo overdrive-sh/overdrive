@@ -11,6 +11,7 @@ from pathlib import Path
 import stat
 import subprocess
 import sys
+import time
 
 
 def command(argv):
@@ -80,6 +81,19 @@ def guest_console(argv, runtime_root):
     return {"path": str(path), "raw_b64": base64.b64encode(raw).decode()}
 
 
+def unit_state(run_id):
+    query = subprocess.run(["systemctl", "show", f"overdrive-metal-run-{run_id}.service", "--property=MainPID,ActiveState,ControlGroup,LoadState"], capture_output=True, text=True)
+    facts = dict(line.split("=", 1) for line in query.stdout.splitlines())
+    # Same read boundary as NativeUnit::unit_facts: a collected transient unit
+    # can be genuinely not-found. Require every actual field, never synthesize
+    # an inactive owner from a missing process or the driver's input handles.
+    if not all(key in facts for key in ("MainPID", "ActiveState", "ControlGroup", "LoadState")):
+        raise ValueError(f"incomplete systemd observation: {query.stdout!r}; {query.stderr!r}")
+    if query.returncode and facts["LoadState"] != "not-found":
+        raise subprocess.CalledProcessError(query.returncode, query.args, query.stdout, query.stderr)
+    return facts
+
+
 def owner(run_id):
     if len(run_id) != 24 or any(char not in "0123456789abcdef" for char in run_id):
         raise ValueError("invalid test input run ID")
@@ -93,9 +107,7 @@ def owner(run_id):
     for name in ("owner.v1", "phase.v1", "terminal.v1", "completion.v1"):
         if (root / name).exists():
             result[name] = record(root / name)
-    unit = f"overdrive-metal-run-{run_id}.service"
-    facts = command(["systemctl", "show", unit, "--property=MainPID,ActiveState,ControlGroup"])
-    unit_facts = dict(line.split("=", 1) for line in facts.splitlines())
+    unit_facts = unit_state(run_id)
     result["unit"] = unit_facts
     pids = set()
     cgroup_path = Path("/sys/fs/cgroup", unit_facts.get("ControlGroup", "").lstrip("/"))
@@ -170,4 +182,14 @@ def owner(run_id):
     return result
 
 
-print(json.dumps({"physical": physical(), "owners": {run_id: owner(run_id) for run_id in sys.argv[1:]}}, sort_keys=True))
+started = time.monotonic_ns()
+result = {"physical": physical(), "owners": {run_id: owner(run_id) for run_id in sys.argv[1:]}}
+# Bracket the whole multi-owner read. E4 uses monotonic lifecycle/phase states
+# to require that the prior unit remained deactivating throughout the read,
+# rather than combining its earlier state with a later waiter's registration.
+for run_id, observed in result["owners"].items():
+    observed["unit_after"] = unit_state(run_id)
+    phase = Path("/var/lib/overdrive-metal/runs", run_id, "phase.v1")
+    observed["phase_after"] = record(phase) if phase.is_file() else None
+result["observation"] = {"started_monotonic_ns": started, "finished_monotonic_ns": time.monotonic_ns()}
+print(json.dumps(result, sort_keys=True))

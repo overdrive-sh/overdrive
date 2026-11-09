@@ -190,12 +190,15 @@ impl NativeUnit {
             format!("{:x}", Sha256::digest(actor.as_os_str().as_encoded_bytes()))[..24].to_owned();
         let captured = actor.join("captured-holder.sh");
         fs::copy(workspace_file("infra/metal/lease-holder.sh"), &captured)?;
+        let primitive = actor.join("native-unit");
+        fs::copy(workspace_file("infra/metal/tests/fixtures/native-unit"), &primitive)?;
         let gate = actor.join("finalizer");
         executable(
             &gate,
             &format!(
-                "#!/usr/bin/env bash\nset -eu\nlimit=$((SECONDS+20))\nwhile [ ! -f '{}' ] && kill -0 {} 2>/dev/null && [ \"$SECONDS\" -lt \"$limit\" ]; do sleep 0.01; done\nexec bash '{}' --finalize '{}' '{}'\n",
-                actor.join("stop").display(),
+                "#!/usr/bin/env bash\nexec bash '{}' finalize '{}' {} '{}' '{}' '{}'\n",
+                primitive.display(),
+                actor.display(),
                 std::process::id(),
                 captured.display(),
                 id,
@@ -206,10 +209,9 @@ impl NativeUnit {
         executable(
             &body,
             &format!(
-                "#!/usr/bin/env bash\nset -eu\nprintf '%s\\n' \"$$\" >> '{}'\nwhile [ ! -f '{}' ]; do sleep 0.01; done\nexit \"$(cat '{}')\"\n",
-                actor.join("body.pid").display(),
-                actor.join("command.exit").display(),
-                actor.join("command.exit").display()
+                "#!/usr/bin/env bash\nexec bash '{}' command '{}'\n",
+                primitive.display(),
+                actor.display()
             ),
         );
         let marker = expected;
