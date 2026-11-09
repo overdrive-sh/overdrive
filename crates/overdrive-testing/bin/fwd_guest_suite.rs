@@ -128,6 +128,23 @@ const STEP13_06_NFT_MODULES: &[(&str, &str)] = &[
     ("net/netfilter/nft_fib", "/lib/overdrive-testing/modules/nft_fib.ko"),
     ("net/ipv4/netfilter/nft_fib_ipv4", "/lib/overdrive-testing/modules/nft_fib_ipv4.ko"),
 ];
+/// Every `cgroup-default` guest boots `serve`, whose always-installed shared
+/// mTLS nft program needs the `nf_tables` core, veth, TLS, and the complete
+/// tproxy / reject / fib expression closure. The guest has no `/lib/modules`,
+/// so nothing autoloads: this is the single definition both the batched and
+/// the per-test attempts stage, unconditionally for the group.
+fn cgroup_default_module_specs() -> Vec<(&'static str, &'static str)> {
+    let mut specs = NESTED_DEVICE_MODULES.to_vec();
+    specs.extend([
+        ("net/netfilter/nfnetlink", NFNETLINK_MODULE_GUEST_PATH),
+        ("net/netfilter/nf_tables", NF_TABLES_MODULE_GUEST_PATH),
+        ("drivers/net/veth", VETH_MODULE_GUEST_PATH),
+        ("net/tls/tls", TLS_MODULE_GUEST_PATH),
+    ]);
+    specs.extend_from_slice(STEP13_04_NFT_MODULES);
+    specs.extend_from_slice(STEP13_06_NFT_MODULES);
+    specs
+}
 const NESTED_GUEST_KIT_MODULE_SOURCES: &[&str] = &[
     "drivers/net/dummy",
     "net/sched/sch_prio",
@@ -221,6 +238,13 @@ if [ "$hard" -lt 376832 ] || [ "$soft" -lt 376832 ]; then
 fi
 exec "$@"
 "#;
+/// The one group whose guests run `serve`, which requires the raised
+/// `RLIMIT_NOFILE` budget. SSOT for both the batched and per-test paths.
+const CGROUP_DEFAULT_GROUP: &str = "cgroup-default";
+/// Argv prefix that raises `RLIMIT_NOFILE` and then execs the remaining argv.
+const fn cgroup_nofile_prefix() -> [&'static str; 4] {
+    ["/usr/bin/sh", "-c", CGROUP_NOFILE_EXEC, CGROUP_DEFAULT_GROUP]
+}
 const CONTROL_PLANE_NORMAL_NATIVE_SETUP: &str = r#"
 set -eu
 test -f /etc/resolv.conf
@@ -1520,21 +1544,17 @@ impl GuestRun {
         test_args: &[String],
         environment: &[(String, String)],
         working_directory: &Path,
+        raise_nofile: bool,
         bound: Duration,
     ) -> Result<i32, GuestKitError> {
-        let mut command =
-            vec![GUEST_PEER_GUEST_PATH.to_owned(), subcommand::RUN_WITH_MODULES.to_owned()];
-        command.push(LOOPBACK_MODULE_GUEST_PATH.to_owned());
-        command.extend(self.module_paths.iter().cloned());
-        command.extend([
-            "--".to_owned(),
-            "/usr/bin/env".to_owned(),
-            "--chdir".to_owned(),
-            working_directory.display().to_string(),
-        ]);
-        command.extend(environment.iter().map(|(key, value)| format!("{key}={value}")));
-        command.push(program.to_owned());
-        command.extend(test_args.iter().cloned());
+        let command = nextest_attempt_command(
+            &self.module_paths,
+            program,
+            test_args,
+            environment,
+            working_directory,
+            raise_nofile,
+        );
         let argv = command.iter().map(String::as_str).collect::<Vec<_>>();
         self.guest.peer().exec(&argv, bound).map_err(|source| GuestKitError::Staging {
             detail: format!("selected nextest attempt {program:?} did not return within {bound:?}"),
@@ -1658,14 +1678,9 @@ impl GuestRun {
         let mut command = vec![GUEST_PEER_GUEST_PATH, subcommand::RUN_WITH_MODULES];
         command.push(LOOPBACK_MODULE_GUEST_PATH);
         command.extend(self.module_paths.iter().map(String::as_str));
-        command.extend([
-            "--",
-            "/usr/bin/sh",
-            "-c",
-            CGROUP_NOFILE_EXEC,
-            "cgroup-default",
-            IN_GUEST_TESTS_PATH,
-        ]);
+        command.push("--");
+        command.extend(cgroup_nofile_prefix());
+        command.push(IN_GUEST_TESTS_PATH);
         command.extend_from_slice(test_args);
         let code = match self.guest.peer().exec(&command, bound) {
             Ok(code) => code,
@@ -2099,21 +2114,7 @@ fn nested_vm_test_support(
         Ok(())
     };
     stage_module("fs/xfs/xfs", XFS_MODULE_GUEST_PATH)?;
-    for &(relative, guest_path) in NESTED_DEVICE_MODULES {
-        stage_module(relative, guest_path)?;
-    }
-    for &(relative, guest_path) in &[
-        ("net/netfilter/nfnetlink", NFNETLINK_MODULE_GUEST_PATH),
-        ("net/netfilter/nf_tables", NF_TABLES_MODULE_GUEST_PATH),
-        ("drivers/net/veth", VETH_MODULE_GUEST_PATH),
-        ("net/tls/tls", TLS_MODULE_GUEST_PATH),
-    ] {
-        stage_module(relative, guest_path)?;
-    }
-    for &(relative, guest_path) in STEP13_04_NFT_MODULES {
-        stage_module(relative, guest_path)?;
-    }
-    for &(relative, guest_path) in STEP13_06_NFT_MODULES {
+    for (relative, guest_path) in cgroup_default_module_specs() {
         stage_module(relative, guest_path)?;
     }
     Ok((extra, module_paths))
@@ -3507,25 +3508,9 @@ fn cgroup_attempt_files(
         extra.extend(["nft", "ss", "strace", "uname"].into_iter().map(tool));
     }
     let mut module_paths = Vec::new();
-    stage_modules(kit, directory, NESTED_DEVICE_MODULES, &mut extra, &mut module_paths)?;
-    stage_modules(
-        kit,
-        directory,
-        &[
-            ("net/netfilter/nfnetlink", NFNETLINK_MODULE_GUEST_PATH),
-            ("net/netfilter/nf_tables", NF_TABLES_MODULE_GUEST_PATH),
-            ("drivers/net/veth", VETH_MODULE_GUEST_PATH),
-            ("net/tls/tls", TLS_MODULE_GUEST_PATH),
-        ],
-        &mut extra,
-        &mut module_paths,
-    )?;
+    stage_modules(kit, directory, &cgroup_default_module_specs(), &mut extra, &mut module_paths)?;
     if stage_step13_04 {
-        stage_modules(kit, directory, STEP13_04_NFT_MODULES, &mut extra, &mut module_paths)?;
         module_paths.push(DUMMY_MODULE_GUEST_PATH.to_owned());
-    }
-    if stage_step13_06 {
-        stage_modules(kit, directory, STEP13_06_NFT_MODULES, &mut extra, &mut module_paths)?;
     }
     Ok(CgroupAttemptFiles {
         extra,
@@ -3669,8 +3654,36 @@ fn run_cgroup_attempt_setup(
     Ok(())
 }
 
+fn nextest_attempt_command(
+    module_paths: &[String],
+    program: &str,
+    test_args: &[String],
+    environment: &[(String, String)],
+    working_directory: &Path,
+    raise_nofile: bool,
+) -> Vec<String> {
+    let mut command =
+        vec![GUEST_PEER_GUEST_PATH.to_owned(), subcommand::RUN_WITH_MODULES.to_owned()];
+    command.push(LOOPBACK_MODULE_GUEST_PATH.to_owned());
+    command.extend(module_paths.iter().cloned());
+    command.push("--".to_owned());
+    if raise_nofile {
+        command.extend(cgroup_nofile_prefix().map(str::to_owned));
+    }
+    command.extend([
+        "/usr/bin/env".to_owned(),
+        "--chdir".to_owned(),
+        working_directory.display().to_string(),
+    ]);
+    command.extend(environment.iter().map(|(key, value)| format!("{key}={value}")));
+    command.push(program.to_owned());
+    command.extend(test_args.iter().cloned());
+    command
+}
+
 fn execute_nextest_attempt(
     guest: &mut GuestRun,
+    raise_nofile: bool,
     program: &str,
     args: &[String],
     environment: &[(String, String)],
@@ -3683,6 +3696,7 @@ fn execute_nextest_attempt(
         args,
         &attempt_environment,
         working_directory,
+        raise_nofile,
         NEXTTEST_ATTEMPT_RESPONSE_BOUND,
     )
 }
@@ -3886,7 +3900,14 @@ fn execute_nextest_guest_attempt(
         None
     };
     let attempt_result =
-        execute_nextest_attempt(&mut guest, program, args, environment, working_directory);
+        execute_nextest_attempt(
+            &mut guest,
+            plan.name == CGROUP_DEFAULT_GROUP,
+            program,
+            args,
+            environment,
+            working_directory,
+        );
     if plan
         .cgroup_flags
         .is_some_and(|flags| flags.step13_05 && selected_cell(STEP13_05_WORKER, test_name))
@@ -4408,4 +4429,57 @@ fn main() {
         }
     }
     assert!(matched, "unknown OVERDRIVE_FWD_GUEST_GROUP={selected:?}");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn after_separator(command: &[String]) -> &[String] {
+        let separator = command.iter().position(|argument| argument == "--").expect("separator");
+        &command[separator + 1..]
+    }
+
+    fn attempt(raise_nofile: bool) -> Vec<String> {
+        nextest_attempt_command(
+            &["/lib/overdrive-testing/modules/tls.ko".to_owned()],
+            "/opt/test-binary",
+            &["--exact".to_owned(), "a_test".to_owned()],
+            &[("KEY".to_owned(), "value".to_owned())],
+            Path::new("/work"),
+            raise_nofile,
+        )
+    }
+
+    #[test]
+    fn a_raised_nofile_attempt_runs_the_cgroup_nofile_wrapper_before_env() {
+        let command = attempt(true);
+        let tail = after_separator(&command);
+        assert_eq!(
+            &tail[..7],
+            [
+                "/usr/bin/sh",
+                "-c",
+                CGROUP_NOFILE_EXEC,
+                "cgroup-default",
+                "/usr/bin/env",
+                "--chdir",
+                "/work"
+            ]
+        );
+    }
+
+    #[test]
+    fn an_attempt_without_raised_nofile_starts_with_env() {
+        let command = attempt(false);
+        assert_eq!(after_separator(&command)[0], "/usr/bin/env");
+    }
+
+    #[test]
+    fn every_cgroup_default_attempt_stages_the_shared_mtls_nft_modules() {
+        let specs = cgroup_default_module_specs();
+        for required in STEP13_04_NFT_MODULES.iter().chain(STEP13_06_NFT_MODULES) {
+            assert!(specs.contains(required), "missing nft module {}", required.0);
+        }
+    }
 }

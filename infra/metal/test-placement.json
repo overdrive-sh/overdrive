@@ -12936,6 +12936,17 @@
         "kind": "host-pure"
       }
     },
+    "overdrive-testing::bin/overdrive-fwd-guest-suite": {
+      "tests::a_raised_nofile_attempt_runs_the_cgroup_nofile_wrapper_before_env": {
+        "kind": "host-pure"
+      },
+      "tests::an_attempt_without_raised_nofile_starts_with_env": {
+        "kind": "host-pure"
+      },
+      "tests::every_cgroup_default_attempt_stages_the_shared_mtls_nft_modules": {
+        "kind": "host-pure"
+      }
+    },
     "overdrive-worker": {
       "cgroup_manager::tests::cpu_weight_for_pins_division_and_clamp": {
         "kind": "host-pure"
