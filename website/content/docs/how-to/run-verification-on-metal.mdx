@@ -8,23 +8,13 @@ KVM host. Each Git checkout owns its remote source and build directory. An
 ordinary run takes shared maintenance admission and locks its own checkout.
 Physical-host administration takes exclusive admission.
 
-<Callout title="Native acceptance remains pending">
-  The implementation has passed technical review and local Linux adapter
-  checks. The final two-worktree native capture has not demonstrated overlapping
-  commands or the required kernel and cleanup observations. Both captured
-  ordinary runs timed out before START behind an existing exclusive owner.
-  The native admission and placement journeys also remain unrun. The
-  [engineering account](/blog/sharing-a-metal-box-without-sharing-test-state)
-  separates construction evidence from these outstanding gates.
-</Callout>
-
 ## Prepare the selected checkout
 
 Use a provisioned Metal host with SSH access, noninteractive sudo, remote
 `rsync`, the pinned kernel build inputs, Cloud Hypervisor, and prepared guest
 kernel and rootfs files. Host provisioning is an exclusive administrative
 operation. Follow the repository's
-[Metal setup instructions](https://github.com/overdrive-sh/overdrive/blob/2ba2232208ce9a5e91666f61b6b9845d9797c62a/infra/metal/README.md)
+[Metal setup instructions](https://github.com/overdrive-sh/overdrive/blob/47328fb88d21d5f3f57d25a935d1a17c505cbb9b/infra/metal/README.md)
 for those prerequisites.
 
 From the repository root, set the target and the artifact paths on that host.
@@ -172,6 +162,7 @@ Runner failures remain distinct from command results:
 | Diagnostic | Meaning |
 | --- | --- |
 | `maintenance_timeout` / `checkout_timeout`, status 75 | Admission ended before the required ownership was acquired |
+| `controller_eof_before_start`, status 75 | The controller disconnected before START, including while waiting for admission |
 | `runner_preparation_failed`, status 75 | Preparation failed, including missing remote `rsync`, without automatic package installation |
 | `source_mismatch`, status 78 | The no-sync binding or source marker did not match |
 | `supervisor_lost`, status 70 | No actual command terminal survived |
@@ -192,6 +183,7 @@ so it does not require the original checkout or branch.
 Runs are not reboot-resumable, and retained records have no automatic pruning.
 Direct-native VMM evidence still requires the qualified physical x86_64/KVM
 host. Named nested correctness cells retain only their declared credit and
-cannot replace direct-native launch evidence. The outstanding native journeys
-must establish the completed runner's overlap and isolation guarantees before
-the feature can be finalized.
+cannot replace direct-native launch evidence. The existing owner-burst fixture
+has a one-second assertion failure reproduced before this runner change. The
+[engineering account](/blog/sharing-a-metal-box-without-sharing-test-state)
+describes the native captures and their verification boundaries.
