@@ -2886,7 +2886,8 @@ impl ServerHandle {
     /// Rust cannot halt a task without dropping it, so this is what still runs,
     /// in order:
     ///
-    /// 1. axum's immediate (non-graceful) shutdown notification, then abort and
+    /// 1. The in-flight handshake abort (R-69 7a), axum's immediate
+    ///    (non-graceful) shutdown notification, then abort and
     ///    join of the server, convergence, emit-drain, interest-router and
     ///    exit-observer tasks. Their futures are dropped on runtime threads:
     ///    listeners, connections, `AppState` clones and store handles are
@@ -2916,7 +2917,7 @@ impl ServerHandle {
             inner,
             server_task,
             connections: _,
-            handshake_abort: _,
+            handshake_abort,
             convergence_task,
             exit_observer_tasks,
             emit_drain_task,
@@ -2948,6 +2949,10 @@ impl ServerHandle {
             Some(handle) => Some(handle.shutdown(Duration::ZERO).await),
             None => None,
         };
+        // Abort in-flight handshakes first, as every shutdown path does
+        // (R-69 7a); a handshake still parked would otherwise hold its
+        // connection state until the server task is dropped.
+        handshake_abort.cancel();
         inner.shutdown();
         server_task.abort();
         convergence_task.abort();
@@ -3001,7 +3006,8 @@ impl ServerHandle {
     /// transaction; it is unreachable in production because the serve process
     /// exits after shutdown.
     ///
-    /// Ordering — convergence task FIRST, then axum graceful, then
+    /// Ordering — convergence task FIRST, then in-flight TLS handshakes are
+    /// aborted (R-69 7a) together with the axum graceful shutdown, then
     /// `server_task` join, then exit-observer task last. The
     /// convergence task holds `Arc<dyn Driver>` references; reversing
     /// this ordering risks reconciler tasks driving the driver while

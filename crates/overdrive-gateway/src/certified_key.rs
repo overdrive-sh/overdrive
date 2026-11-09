@@ -406,7 +406,7 @@ impl PublicCertifiedKeyCustody {
         codec: Arc<PublicCertifiedKeyAeadCodec>,
         clock: Arc<dyn Clock>,
     ) -> Result<(Self, PublicCertifiedKeyCustodyHandle), PublicCertifiedKeyError> {
-        let key = Self::record_key(&id);
+        let key = IntentKey::for_public_certified_key(&id);
         let stored = intent.get(key.as_bytes()).await.map_err(PublicCertifiedKeyError::Intent)?;
         let current = if let Some(bytes) = stored {
             Some(Self::adopt(&id, &bytes, key.as_str(), &codec)?)
@@ -437,10 +437,6 @@ impl PublicCertifiedKeyCustody {
             commands,
         };
         Ok((custody, handle))
-    }
-
-    fn record_key(id: &PublicCertifiedKeyId) -> IntentKey {
-        IntentKey::for_public_certified_key(id)
     }
 
     fn adopt(
@@ -556,7 +552,7 @@ impl PublicCertifiedKeyCustody {
         let bytes =
             record.archive_for_store().map_err(|_| PublicCertifiedKeyError::RustlsConfiguration)?;
         self.intent
-            .put(Self::record_key(&self.id).as_bytes(), bytes.as_slice())
+            .put(IntentKey::for_public_certified_key(&self.id).as_bytes(), bytes.as_slice())
             .await
             .map_err(PublicCertifiedKeyError::Intent)?;
         let outcome = if self.current.is_some() {

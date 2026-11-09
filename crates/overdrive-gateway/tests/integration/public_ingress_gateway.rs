@@ -1261,15 +1261,15 @@ async fn intent_universe(intent: &LocalIntentStore) -> Vec<(Bytes, Bytes)> {
 }
 
 /// `None`: key absent. `Some(None)`: persisted empty set. `Some(Some(_))`: one Route.
-async fn route_set(intent: &LocalIntentStore, _redb_path: &Path) -> Option<Option<Route>> {
+async fn route_set(intent: &LocalIntentStore) -> Option<Option<Route>> {
     let bytes =
         intent.get(IntentKey::public_route_set().as_bytes()).await.expect("read Route Set")?;
     let set = PublicRouteSetV1::from_store_bytes(&bytes).expect("decode the persisted Route Set");
     Some(set.route)
 }
 
-async fn persisted_route(intent: &LocalIntentStore, redb_path: &Path) -> Option<Route> {
-    route_set(intent, redb_path).await.expect("the Route Set key is persisted")
+async fn persisted_route(intent: &LocalIntentStore) -> Option<Route> {
+    route_set(intent).await.expect("the Route Set key is persisted")
 }
 
 fn certified_key_generation(
@@ -1313,7 +1313,7 @@ async fn route_declare_replay_replace_and_withdraw_return_exact_outcomes_over_re
     let v1 = route("public-api", "/");
     assert_eq!(world.declare(v1.clone()).await.expect("declare"), RouteApplyOutcome::Declared);
     assert_eq!(
-        persisted_route(&world.intent, &site.intent_path).await,
+        persisted_route(&world.intent).await,
         Some(v1.clone()),
         "the singleton slot holds the declared Route",
     );
@@ -1329,7 +1329,7 @@ async fn route_declare_replay_replace_and_withdraw_return_exact_outcomes_over_re
     let v2 = route("public-api", "/v2");
     assert_ne!(v1.route_generation(), v2.route_generation(), "the replacement is a new generation");
     assert_eq!(world.declare(v2.clone()).await.expect("replace"), RouteApplyOutcome::Replaced);
-    assert_eq!(persisted_route(&world.intent, &site.intent_path).await, Some(v2));
+    assert_eq!(persisted_route(&world.intent).await, Some(v2));
 
     assert_eq!(
         world.routes.routes().withdraw(route_id("public-api")).await.expect("withdraw"),
@@ -1396,7 +1396,7 @@ async fn a_different_route_id_is_rejected_with_the_typed_conflict_and_an_unchang
         "the typed conflict stays apart from the redacted status projection",
     );
     assert_eq!(
-        persisted_route(&world.intent, &site.intent_path).await,
+        persisted_route(&world.intent).await,
         Some(first.clone()),
         "the original Route remains in the slot",
     );
@@ -1429,7 +1429,7 @@ async fn withdrawal_by_a_different_route_id_has_an_empty_delta() {
             if current.as_str() == "public-api" && attempted.as_str() == "other-api"
     ));
     assert_eq!(intent_universe(&world.intent).await, before, "empty state delta");
-    assert_eq!(persisted_route(&world.intent, &site.intent_path).await, Some(first.clone()));
+    assert_eq!(persisted_route(&world.intent).await, Some(first.clone()));
     assert_eq!(world.declare(first).await.expect("original replay"), RouteApplyOutcome::Unchanged);
 }
 
@@ -1518,7 +1518,7 @@ async fn claim_round(round: u16, seed: u64, rng: &mut SplitMix64) {
         );
     }
     assert_eq!(
-        persisted_route(&world.intent, &site.intent_path).await,
+        persisted_route(&world.intent).await,
         Some(winner),
         "the store holds exactly the winner's Route, no partial Route (seed {seed}, round {round})",
     );
@@ -1715,7 +1715,7 @@ async fn unreadable_and_malformed_manual_keys_refuse_boot_with_distinct_causes_a
             Arc::new(SimObservationStore::single_peer(node_id(), 55));
         let clock = Arc::new(SimClock::new());
         let custody_before = custody_records(&intent).await;
-        let route_before = route_set(&intent, &site.intent_path).await;
+        let route_before = route_set(&intent).await;
         assert!(matches!(route_before, None | Some(None)), "no Route before boot");
 
         let plan = Plan::route_only(KEY_REFUSALS).ordinal(u16::try_from(index).expect("index"));
@@ -1738,7 +1738,7 @@ async fn unreadable_and_malformed_manual_keys_refuse_boot_with_distinct_causes_a
             custody_before,
             "no custody record for {fault:?}"
         );
-        let route_after = route_set(&intent, &site.intent_path).await;
+        let route_after = route_set(&intent).await;
         assert!(matches!(route_after, None | Some(None)), "no Route mutation for {fault:?}");
         assert!(
             observations
@@ -1833,7 +1833,7 @@ async fn route_set_cardinality_zero_one_and_many_is_closed_at_one() {
         RouteApplyOutcome::Unchanged,
     );
     assert_eq!(
-        persisted_route(&world.intent, &site.intent_path).await,
+        persisted_route(&world.intent).await,
         Some(route("public-api", "/")),
         "many never grows the slot past one",
     );
@@ -3031,7 +3031,7 @@ async fn custody_replay_across_a_restart_keeps_the_generation_and_the_applicatio
     let promoted = wait_promoted(&first.status).await;
     let key_before = first.status.certified_key_status().await.expect("status").expect("row");
     let custody_before = custody_records(&first.intent).await;
-    let route_before = persisted_route(&first.intent, &site.intent_path).await;
+    let route_before = persisted_route(&first.intent).await;
     let clock = Arc::clone(&first.clock);
     let report = first.stop().await;
     assert!(report.is_clean(), "{report:?}");
@@ -3047,7 +3047,7 @@ async fn custody_replay_across_a_restart_keeps_the_generation_and_the_applicatio
         "the replayed custody install keeps the generation",
     );
     assert_eq!(custody_records(&second.intent).await, custody_before, "empty custody delta");
-    assert_eq!(persisted_route(&second.intent, &site.intent_path).await, route_before);
+    assert_eq!(persisted_route(&second.intent).await, route_before);
     assert_eq!(
         repromoted.current.as_ref().map(|current| current.application_generation),
         promoted.current.as_ref().map(|current| current.application_generation),
@@ -3212,7 +3212,7 @@ async fn a_watch_lag_is_reported_and_the_gateway_relists_instead_of_reading_an_e
         "the custody watcher relisted the same generation",
     );
     assert_eq!(
-        persisted_route(&world.intent, &site.intent_path).await,
+        persisted_route(&world.intent).await,
         Some(replacement),
         "the Route Set is untouched by the unrelated burst",
     );
@@ -3302,7 +3302,7 @@ async fn a_late_probe_result_after_supersession_is_never_delivered() {
     .await;
     assert_eq!(world.clock.now(), now, "the injected clock did not move");
     assert_eq!(
-        persisted_route(&world.intent, &site.intent_path).await,
+        persisted_route(&world.intent).await,
         Some(second),
         "the persisted Route is the replacement",
     );

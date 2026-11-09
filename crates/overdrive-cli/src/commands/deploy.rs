@@ -1091,9 +1091,11 @@ pub struct RouteDeployOutput {
 
 /// Deploy one document, workload or Route.
 ///
-/// Parses once, then dispatches a workload document to [`deploy`] /
-/// [`deploy_streaming`] unchanged, or a `[route]` document to the one-shot
-/// Route POST (`--detach` has no further effect on a Route).
+/// Reads and syntax-checks the document once to classify it. A `[route]`
+/// document reuses that parsed table for the one-shot Route POST (`--detach`
+/// has no further effect on a Route). A workload document is dispatched
+/// unchanged to [`deploy`] / [`deploy_streaming`], which read and parse the
+/// spec file themselves.
 ///
 /// # Errors
 ///
