@@ -133,6 +133,7 @@ pub const READY_BOUND: Duration = Duration::from_secs(60);
 pub const CELL_BOUND: Duration = Duration::from_secs(300);
 const NEXTTEST_LANE_ARGV: &str = "OVERDRIVE_FWD_GUEST_NEXTTEST_ARGV";
 const NEXTTEST_LANE_ELF: &str = "OVERDRIVE_FWD_GUEST_NEXTTEST_ELF";
+const NEXTTEST_ENVIRONMENT_COMMAND: &str = "/usr/bin/env";
 /// The launch token every lane guest carries (32 lowercase hex, non-zero;
 /// the lane runs no owner that checks it).
 pub const LANE_LAUNCH_TOKEN: &str = "6c616e652d6c61756e63682d746f6b65";
@@ -330,6 +331,26 @@ fn decode_nextest_argv() -> Result<Option<Vec<String>>, GuestKitError> {
         .map(Some)
 }
 
+fn nextest_environment_command_file(
+    seen: &mut HashMap<PathBuf, PathBuf>,
+) -> Result<Option<GuestFile>, GuestKitError> {
+    let guest = PathBuf::from(NEXTTEST_ENVIRONMENT_COMMAND);
+    let host = guest.canonicalize().map_err(|_| {
+        nextest_lane_not_prepared("selected nextest environment command", guest.clone())
+    })?;
+    match seen.get(&guest) {
+        Some(existing) if existing == &host => Ok(None),
+        Some(_) => Err(nextest_lane_not_prepared(
+            "conflicting selected nextest environment command",
+            guest,
+        )),
+        None => {
+            seen.insert(guest.clone(), host.clone());
+            Ok(Some(GuestFile { host, guest, with_shared_libraries: true }))
+        }
+    }
+}
+
 fn nextest_lane_attempt(tests: &InGuestTests) -> Result<Option<NextestLaneAttempt>, GuestKitError> {
     let Some(args) = decode_nextest_argv()? else {
         return Ok(None);
@@ -358,6 +379,9 @@ fn nextest_lane_attempt(tests: &InGuestTests) -> Result<Option<NextestLaneAttemp
         with_shared_libraries: true,
     }];
     let mut seen = HashMap::from([(guest_binary.clone(), binary)]);
+    if let Some(environment_command) = nextest_environment_command_file(&mut seen)? {
+        files.push(environment_command);
+    }
     for (key, value) in std::env::vars_os() {
         let Some(key) = key.to_str() else {
             continue;
@@ -415,7 +439,7 @@ fn nextest_lane_attempt(tests: &InGuestTests) -> Result<Option<NextestLaneAttemp
 
 fn guest_lane_exec_argv(attempt: &NextestLaneAttempt) -> Vec<String> {
     let mut argv = vec![
-        "/usr/bin/env".to_owned(),
+        NEXTTEST_ENVIRONMENT_COMMAND.to_owned(),
         "--chdir".to_owned(),
         attempt.working_directory.display().to_string(),
     ];
