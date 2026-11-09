@@ -10,7 +10,7 @@ use overdrive_core::public_ingress::{PublicRouteSetV1, RouteCodecError};
 
 /// A real envelope decode failure, produced by the codec's own public decode.
 fn an_envelope_error() -> EnvelopeError {
-    match PublicRouteSetV1::from_store_bytes(&[], std::path::Path::new("<fixture>"), None) {
+    match PublicRouteSetV1::from_store_bytes(&[]) {
         Err(RouteCodecError::Envelope(source)) => source,
         other => panic!("empty bytes are an envelope failure, got {other:?}"),
     }

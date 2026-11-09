@@ -428,12 +428,12 @@ pub enum ControlPlaneError {
 
     /// The stored public Route set failed to decode or validate; maps to 500
     /// `route_decode` with a fixed message.
-    #[error("stored public Route is undecodable")]
+    #[error("stored public Route is undecodable: {0}")]
     RouteDecode(#[from] overdrive_core::public_ingress::RouteCodecError),
 
     /// The public Route set could not be serialised for a write; maps to 500
     /// `route_encode` with a fixed message.
-    #[error("public Route set could not be serialised")]
+    #[error("public Route set could not be serialised: {0}")]
     RouteEncode(overdrive_core::codec::EnvelopeError),
 
     /// The public Route owner task is gone; maps to 503

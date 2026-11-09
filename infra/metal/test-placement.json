@@ -654,6 +654,14 @@
         "kind": "guest-group",
         "group": "cgroup-default"
       },
+      "integration::public_ingress_gateway::a_route_document_that_is_not_exactly_one_route_table_is_rejected_and_deploys_nothing": {
+        "kind": "guest-group",
+        "group": "cgroup-default"
+      },
+      "integration::public_ingress_gateway::route_deploy_operator_text_is_the_pinned_three_lines_in_both_stream_modes": {
+        "kind": "guest-group",
+        "group": "cgroup-default"
+      },
       "integration::public_ingress_gateway::route_deploy_is_one_shot_with_the_same_outcome_in_both_stream_modes": {
         "kind": "guest-group",
         "group": "cgroup-default"
@@ -5065,6 +5073,10 @@
         "group": "cgroup-default"
       },
       "integration::server_lifecycle::graceful_shutdown_propagates_worker_failure_without_a_retry_capability": {
+        "kind": "guest-group",
+        "group": "cgroup-default"
+      },
+      "integration::server_lifecycle::shutdown_ends_every_connection_including_stalled_handshakes_by_the_drain_deadline": {
         "kind": "guest-group",
         "group": "cgroup-default"
       },

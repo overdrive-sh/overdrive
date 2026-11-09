@@ -35,6 +35,9 @@
 //! | 173 | S-PIG-42 |
 //! | 174 | SVID issuance failure on the gateway status body (O-SIF-G1, G2) |
 //! | 175 | the enabled boot that leaves a status row (O-SIF-G4) |
+//! | 176 | S-PIG-34 operator text (stream mode off) |
+//! | 177 | S-PIG-34 operator text (stream mode on) |
+//! | 178 | S-PIG-35 document shape |
 
 #![allow(clippy::doc_markdown, reason = "CONTRACT_SHAPE metadata tags")]
 
@@ -448,6 +451,144 @@ async fn route_deploy_is_one_shot_with_the_same_outcome_in_both_stream_modes() {
         drop(node.tmp);
     }
     assert_eq!(first_outcomes[0], first_outcomes[1], "both modes declare the same Route");
+}
+
+/// S-PIG-34 (operator output, R-71) — the operator text of a Route deploy is
+/// exactly three newline-terminated lines, `Route '<id>' <outcome>.`,
+/// `Generation:   <generation>` and `Endpoint:     <endpoint>`, with the
+/// outcome in its lowercase label (`declared`, `unchanged`, `replaced`), and
+/// the text is the same whether or not the deploy streams (a Route is a
+/// one-shot POST; `--detach` changes nothing).
+///
+/// Two nodes, one per stream mode, each driven through declare, identical
+/// re-apply and changed re-apply. Across the two nodes the declared text is
+/// byte-identical once the node's own endpoint is factored out.
+///
+/// CONTRACT_SHAPE: pure-function.
+#[tokio::test]
+async fn route_deploy_operator_text_is_the_pinned_three_lines_in_both_stream_modes() {
+    let mut declared_by_mode = Vec::new();
+    for (stream_workloads, octet) in [(false, 176_u8), (true, 177_u8)] {
+        let node = spawn_gateway_enabled_server(octet).await;
+        let config = config_path(node.tmp.path());
+        let endpoint = ApiClient::from_config(&config).expect("operator client").base_url().clone();
+        let spec = write_spec(node.tmp.path(), "route.toml", VALID_ROUTE);
+        let changed = write_spec(node.tmp.path(), "route-v2.toml", VALID_ROUTE_NEW_PATH);
+
+        let mut rendered = Vec::new();
+        for (path, label) in [(&spec, "declared"), (&spec, "unchanged"), (&changed, "replaced")] {
+            let output = deploy_resource(
+                DeployArgs { spec: path.clone(), config_path: config.clone() },
+                stream_workloads,
+            )
+            .await
+            .expect("the Route deploy succeeds");
+            let DeployResourceOutput::Route(output) = output else {
+                panic!("a Route document yields the one-shot Route output, got {output:?}");
+            };
+            let text = overdrive_cli::render::route_deploy_accepted(&output);
+            assert_eq!(
+                text,
+                format!(
+                    "Route 'public-api' {label}.\nGeneration:   {}\nEndpoint:     {endpoint}\n",
+                    output.route_generation
+                ),
+                "stream={stream_workloads}: the {label} deploy renders the pinned three lines"
+            );
+            rendered.push(text);
+        }
+        declared_by_mode.push(rendered[0].replace(endpoint.as_str(), "<endpoint>"));
+        node.handle.shutdown().await.expect("clean shutdown");
+    }
+    assert_eq!(
+        declared_by_mode[0], declared_by_mode[1],
+        "the operator text is identical in --detach and streaming mode"
+    );
+}
+
+/// S-PIG-35 (document shape, R-73) — a Route document is exactly one top-level
+/// `[route]` table, and a document that is not is rejected by the CLI as a
+/// typed `InvalidSpec` before any request is made:
+///
+/// - `[route]` beside a `[job]` table: `InvalidSpec { field: "route" }` whose
+///   message names the offending key `job`;
+/// - an unknown field inside `[route]`: `InvalidSpec { field: "route" }` whose
+///   message names the unknown field;
+/// - a TOML syntax error: `InvalidSpec { field: "toml" }` with the message
+///   `failed to parse TOML: ...`, never classified as a workload document.
+///
+/// Nothing is deployed by any of the three: the gateway answers the valid
+/// Route that follows as `Declared` (not `Replaced` or `Unchanged`), and the
+/// intent store holds a Route key only after that deploy.
+///
+/// CONTRACT_SHAPE: unbounded-preservation.
+#[tokio::test]
+async fn a_route_document_that_is_not_exactly_one_route_table_is_rejected_and_deploys_nothing() {
+    let rejected: [(&str, String, &str, &str); 3] = [
+        (
+            "route-with-job.toml",
+            format!("{VALID_ROUTE}\n[job]\nid = \"payments\"\ncommand = \"/bin/true\"\n"),
+            "route",
+            "job",
+        ),
+        (
+            "route-with-unknown-field.toml",
+            VALID_ROUTE.replace("[route]\n", "[route]\nbogus_field = 1\n"),
+            "route",
+            "bogus_field",
+        ),
+        (
+            "route-with-syntax-error.toml",
+            format!("{VALID_ROUTE}\n[route.extra\n"),
+            "toml",
+            "failed to parse TOML: ",
+        ),
+    ];
+
+    let node = spawn_gateway_enabled_server(178).await;
+    let config = config_path(node.tmp.path());
+    let data_dir = node.tmp.path().join("data");
+
+    for (name, body, expected_field, expected_in_message) in &rejected {
+        let spec = write_spec(node.tmp.path(), name, body);
+        for stream_workloads in [false, true] {
+            let result = deploy_resource(
+                DeployArgs { spec: spec.clone(), config_path: config.clone() },
+                stream_workloads,
+            )
+            .await;
+            match result {
+                Err(CliError::InvalidSpec { field, message }) => {
+                    assert_eq!(field, *expected_field, "{name} (stream={stream_workloads}): field");
+                    assert!(
+                        message.contains(expected_in_message),
+                        "{name} (stream={stream_workloads}): the message must contain \
+                         `{expected_in_message}`, got `{message}`"
+                    );
+                }
+                other => panic!(
+                    "{name} (stream={stream_workloads}): expected the typed InvalidSpec \
+                     rejection, got {other:?}"
+                ),
+            }
+        }
+    }
+
+    let valid = write_spec(node.tmp.path(), "route.toml", VALID_ROUTE);
+    let first = deploy_resource(DeployArgs { spec: valid, config_path: config }, false)
+        .await
+        .expect("the valid Route deploy succeeds");
+    let DeployResourceOutput::Route(first) = first else { panic!("Route output expected") };
+    assert_eq!(
+        first.outcome,
+        RouteApplyOutcome::Declared,
+        "no rejected document deployed anything: the first valid Route is a fresh declaration"
+    );
+
+    node.handle.shutdown().await.expect("clean shutdown");
+    let keys = intent_keys(&data_dir).await;
+    let route_keys = keys.iter().filter(|key| key.to_ascii_lowercase().contains("route")).count();
+    assert_eq!(route_keys, 1, "only the valid Route's key is in the intent store: {keys:?}");
 }
 
 /// S-PIG-35 — through the operator client against the production handlers: a

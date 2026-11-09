@@ -781,14 +781,6 @@ async fn spawn_clocked_vm_server_at_with_vmm(
         .expect("production run_server over the host bundle with the clock/VMM replaced")
 }
 
-/// Bridges the narrow race between `ServeHandle::shutdown` returning and the
-/// `redb` file descriptors actually closing, so a reboot against the SAME
-/// `data_dir` does not observe `"Database already open"`. Mirrors
-/// `vm_reclamation_tier3.rs::wait_for_data_dir_release`.
-async fn wait_for_data_dir_release() {
-    tokio::time::sleep(Duration::from_millis(500)).await;
-}
-
 /// Polls until Platform Reclamation retains the predecessor and a distinct VM
 /// allocation reaches Running with fresh-row history fields.
 async fn poll_until_fresh_vm_running(
@@ -1650,7 +1642,6 @@ async fn restarted_vm_boots_from_a_clean_unmodified_rootfs_copy() {
     // reclaims it and the SAME live serve session's WorkloadLifecycle
     // re-drives it under a fresh identity (S-VM-28's transitioned sequence).
     handle.shutdown().await.expect("shutdown boot #1 without stopping the workload");
-    wait_for_data_dir_release().await;
 
     // Boot #2 -- SAME data_dir. The boot-epoch reclaim discards the mutated
     // clone; the intent-still-stands re-drive starts a fresh allocation,

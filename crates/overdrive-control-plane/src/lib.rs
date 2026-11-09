@@ -1013,6 +1013,11 @@ pub struct ServerHandle {
     /// [`TrackedMakeService`]); `shutdown` joins it after `server_task` so
     /// every `AppState` clone a connection task held is dropped on return.
     connections: tokio_util::task::TaskTracker,
+    /// Cancelled immediately before `graceful_shutdown`: every TLS
+    /// handshake still in flight (or begun afterwards) is aborted, so every
+    /// connection ends by the drain deadline (see
+    /// [`ShutdownAbortingAcceptor`]).
+    handshake_abort: CancellationToken,
     /// `JoinHandle` for the convergence-tick spawn loop that drains
     /// the `EvaluationBroker` and dispatches actions through the
     /// action shim. See [`run_server_with_obs_and_driver`] for the
@@ -2911,6 +2916,7 @@ impl ServerHandle {
             inner,
             server_task,
             connections: _,
+            handshake_abort: _,
             convergence_task,
             exit_observer_tasks,
             emit_drain_task,
@@ -3068,6 +3074,7 @@ impl ServerHandle {
         //    complete within `drain_deadline`; new connections are
         //    refused.
         tracing::debug!(name: "serve.shutdown.stage_begin", stage = "axum_graceful");
+        self.handshake_abort.cancel();
         self.inner.graceful_shutdown(Some(drain_deadline));
         tracing::debug!(name: "serve.shutdown.stage_complete", stage = "axum_graceful");
 
@@ -3768,6 +3775,45 @@ pub async fn run_server_with_obs_and_drivers(
         guest_network_exec,
     )
     .await
+}
+
+/// Wraps the TLS acceptor so a handshake never outlives the start of
+/// shutdown: `accept` races the inner accept (the TLS handshake) against the
+/// handle's `handshake_abort` token. On abort it resolves to an
+/// `Interrupted` error, which drops the stream and the connection's service
+/// (router clone and tracker token), so the `connections` join is bounded by
+/// the drain deadline rather than `handshake_timeout`. A handshaking
+/// connection carries no request.
+#[derive(Clone)]
+struct ShutdownAbortingAcceptor<A> {
+    inner: A,
+    abort: CancellationToken,
+}
+
+impl<A, S> axum_server::accept::Accept<tokio::net::TcpStream, S> for ShutdownAbortingAcceptor<A>
+where
+    A: axum_server::accept::Accept<tokio::net::TcpStream, S>,
+    A::Stream: Send + 'static,
+    A::Service: Send + 'static,
+    A::Future: Send + 'static,
+{
+    type Stream = A::Stream;
+    type Service = A::Service;
+    type Future = std::pin::Pin<
+        Box<dyn std::future::Future<Output = std::io::Result<(A::Stream, A::Service)>> + Send>,
+    >;
+
+    fn accept(&self, stream: tokio::net::TcpStream, service: S) -> Self::Future {
+        let handshake = self.inner.accept(stream, service);
+        let abort = self.abort.clone();
+        Box::pin(async move {
+            tokio::select! {
+                biased;
+                () = abort.cancelled() => Err(std::io::Error::from(std::io::ErrorKind::Interrupted)),
+                accepted = handshake => accepted,
+            }
+        })
+    }
 }
 
 /// The make-service `axum_server` serves: each accepted connection gets a
@@ -4907,8 +4953,11 @@ async fn boot_server(
     }
 
     let axum_handle = AxumHandle::new();
-    let server =
-        axum_server::from_tcp_rustls(std_listener, axum_rustls).handle(axum_handle.clone());
+    let handshake_abort = CancellationToken::new();
+    let abort_for_acceptor = handshake_abort.clone();
+    let server = axum_server::from_tcp_rustls(std_listener, axum_rustls)
+        .map(move |inner| ShutdownAbortingAcceptor { inner, abort: abort_for_acceptor })
+        .handle(axum_handle.clone());
 
     let connections = tokio_util::task::TaskTracker::new();
     let make_service = TrackedMakeService { router, tracker: connections.clone() };
@@ -4944,6 +4993,7 @@ async fn boot_server(
         inner: axum_handle,
         server_task,
         connections,
+        handshake_abort,
         convergence_task,
         exit_observer_tasks,
         emit_drain_task,

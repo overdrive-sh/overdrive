@@ -23,8 +23,8 @@ use thiserror::Error;
 
 use crate::codec::{EnvelopeError, VersionedEnvelope, decode_envelope_bytes};
 use crate::id::{
-    AllocationId, ContentHash, CorrelationKey, InvestigationId, NodeId, PolicyId, Region,
-    WorkloadId,
+    AllocationId, ContentHash, CorrelationKey, InvestigationId, NodeId, PolicyId,
+    PublicCertifiedKeyId, Region, WorkloadId,
 };
 use crate::traits::driver::Resources;
 use crate::traits::intent_store::{IntentStore, IntentStoreError};
@@ -1331,8 +1331,17 @@ impl IntentKey {
     /// stored (`public-ingress/certified-key/<PublicCertifiedKeyId>`). The
     /// only production definition of this literal.
     #[must_use]
-    pub const fn public_certified_key_prefix() -> &'static str {
-        "public-ingress/certified-key/"
+    pub const fn public_certified_key_prefix() -> &'static [u8] {
+        b"public-ingress/certified-key/"
+    }
+
+    /// The custody record key of one public certified key
+    /// (`public-ingress/certified-key/<PublicCertifiedKeyId>`), built from
+    /// [`Self::public_certified_key_prefix`].
+    pub fn for_public_certified_key(id: &PublicCertifiedKeyId) -> Self {
+        let mut key = Self::public_certified_key_prefix().to_vec();
+        key.extend_from_slice(id.as_str().as_bytes());
+        Self(key)
     }
 
     /// Derive the intent key for an Allocation.

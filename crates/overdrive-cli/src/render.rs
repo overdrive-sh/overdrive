@@ -794,13 +794,16 @@ pub const fn cli_error_to_exit_code(err: &CliError) -> i32 {
 // `"is running with"` substring patterns.
 
 /// Render the accepted block of a one-shot Route deploy: the Route ID, the
-/// outcome (`Declared`, `Replaced` or `Unchanged`), its generation and the
+/// outcome (`declared`, `replaced` or `unchanged`), its generation and the
 /// endpoint the POST went to.
 #[must_use]
 pub fn route_deploy_accepted(out: &RouteDeployOutput) -> String {
     format!(
-        "Route '{}' {:?}.\nGeneration:   {}\nEndpoint:     {}\n",
-        out.route_id, out.outcome, out.route_generation, out.endpoint
+        "Route '{}' {}.\nGeneration:   {}\nEndpoint:     {}\n",
+        out.route_id,
+        out.outcome.as_str(),
+        out.route_generation,
+        out.endpoint
     )
 }
 

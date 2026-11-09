@@ -1250,7 +1250,7 @@ async fn wait_for<T>(what: &str, mut probe: impl FnMut() -> Option<T>) -> T {
 
 async fn custody_records(intent: &LocalIntentStore) -> Vec<(Bytes, Bytes)> {
     intent
-        .scan_prefix(IntentKey::public_certified_key_prefix().as_bytes())
+        .scan_prefix(IntentKey::public_certified_key_prefix())
         .await
         .expect("scan custody records")
 }
@@ -1261,15 +1261,10 @@ async fn intent_universe(intent: &LocalIntentStore) -> Vec<(Bytes, Bytes)> {
 }
 
 /// `None`: key absent. `Some(None)`: persisted empty set. `Some(Some(_))`: one Route.
-async fn route_set(intent: &LocalIntentStore, redb_path: &Path) -> Option<Option<Route>> {
+async fn route_set(intent: &LocalIntentStore, _redb_path: &Path) -> Option<Option<Route>> {
     let bytes =
         intent.get(IntentKey::public_route_set().as_bytes()).await.expect("read Route Set")?;
-    let set = PublicRouteSetV1::from_store_bytes(
-        &bytes,
-        redb_path,
-        Some(IntentKey::public_route_set().as_str()),
-    )
-    .expect("decode the persisted Route Set");
+    let set = PublicRouteSetV1::from_store_bytes(&bytes).expect("decode the persisted Route Set");
     Some(set.route)
 }
 

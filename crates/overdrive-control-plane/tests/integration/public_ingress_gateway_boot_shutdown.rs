@@ -1896,12 +1896,8 @@ fn envelope_holding_an_invalid_route() -> Vec<u8> {
     // `RouteCodecError::InvalidRoute(RouteValidationError::Hostname(_))`, and
     // never with an `Envelope` failure. The two facts together prove the
     // patched bytes are a well-formed envelope holding an invalid Route.
-    let refusal = PublicRouteSetV1::from_store_bytes(
-        &bytes,
-        std::path::Path::new("<fixture>"),
-        Some(IntentKey::public_route_set().as_str()),
-    )
-    .expect_err("the decode refuses a Route no constructor accepts (R-67 (4))");
+    let refusal = PublicRouteSetV1::from_store_bytes(&bytes)
+        .expect_err("the decode refuses a Route no constructor accepts (R-67 (4))");
     assert!(
         matches!(refusal, RouteCodecError::InvalidRoute(RouteValidationError::Hostname(_))),
         "the patched bytes are a well-formed envelope holding an invalid hostname, got {refusal:?}"

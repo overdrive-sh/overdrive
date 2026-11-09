@@ -61,10 +61,9 @@ fn split_authority(authority: &str) -> Result<&str, RouteAuthorityError> {
     if name.is_empty() || port.contains(':') || port.is_empty() {
         return Err(RouteAuthorityError::InvalidAuthority);
     }
-    if !port.bytes().all(|octet| octet.is_ascii_digit()) {
-        return Err(RouteAuthorityError::InvalidAuthority);
-    }
-    if port.len() > 1 && port.starts_with('0') {
+    if !port.bytes().all(|octet| octet.is_ascii_digit())
+        || (port.len() > 1 && port.starts_with('0'))
+    {
         return Err(RouteAuthorityError::InvalidAuthority);
     }
     let got: u16 = port.parse().map_err(|_| RouteAuthorityError::InvalidAuthority)?;

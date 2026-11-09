@@ -409,7 +409,7 @@ impl PublicCertifiedKeyCustody {
         let key = Self::record_key(&id);
         let stored = intent.get(key.as_bytes()).await.map_err(PublicCertifiedKeyError::Intent)?;
         let current = if let Some(bytes) = stored {
-            Some(Self::adopt(&id, &bytes, &key, &codec)?)
+            Some(Self::adopt(&id, &bytes, key.as_str(), &codec)?)
         } else {
             Self::canary(&id, &codec)?;
             None
@@ -439,8 +439,8 @@ impl PublicCertifiedKeyCustody {
         Ok((custody, handle))
     }
 
-    fn record_key(id: &PublicCertifiedKeyId) -> String {
-        format!("{}{}", IntentKey::public_certified_key_prefix(), id.as_str())
+    fn record_key(id: &PublicCertifiedKeyId) -> IntentKey {
+        IntentKey::for_public_certified_key(id)
     }
 
     fn adopt(

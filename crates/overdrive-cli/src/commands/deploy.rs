@@ -1106,13 +1106,16 @@ pub async fn deploy_resource(
         field: "spec".to_string(),
         message: format!("failed to read `{}`: {e}", args.spec.display()),
     })?;
-    // Discriminate on the top-level `[route]` table only. The Route's own
-    // validation is the server's: a gateway-disabled node answers before the
-    // document is validated (S-PIG-36).
-    let is_route = toml::from_str::<toml::Table>(&toml_str)
-        .is_ok_and(|document| document.contains_key("route"));
-    if is_route {
-        return deploy_route(&args, &toml_str).await.map(DeployResourceOutput::Route);
+    // Parse once. A syntax error is a typed rejection before any
+    // classification: it is never read as "not a Route". A document with a
+    // top-level `route` key takes the Route lane (the server owns the Route's
+    // own validation: a gateway-disabled node answers first, S-PIG-36).
+    let document: toml::Table = toml::from_str(&toml_str).map_err(|e| CliError::InvalidSpec {
+        field: "toml".to_string(),
+        message: format!("failed to parse TOML: {e}"),
+    })?;
+    if document.contains_key("route") {
+        return deploy_route(&args, document).await.map(DeployResourceOutput::Route);
     }
     if stream_workloads {
         deploy_streaming(args).await.map(DeployResourceOutput::WorkloadStreaming)
@@ -1121,17 +1124,23 @@ pub async fn deploy_resource(
     }
 }
 
-/// A Route document: the `[route]` table, shape-checked only.
+/// A Route document: exactly one top-level `[route]` table. Any other
+/// top-level key is rejected structurally, so no list of workload table
+/// names can go stale.
 #[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RouteDocument {
     route: PublicRouteSpecInput,
 }
 
 /// One-shot `POST /v1/routes` for a Route document.
-async fn deploy_route(args: &DeployArgs, toml_str: &str) -> Result<RouteDeployOutput, CliError> {
-    let document: RouteDocument = toml::from_str(toml_str).map_err(|e| CliError::InvalidSpec {
+async fn deploy_route(
+    args: &DeployArgs,
+    table: toml::Table,
+) -> Result<RouteDeployOutput, CliError> {
+    let document: RouteDocument = table.try_into().map_err(|e| CliError::InvalidSpec {
         field: "route".to_string(),
-        message: format!("failed to parse Route document: {e}"),
+        message: e.to_string(),
     })?;
     let spec = document.route;
     let input = PublicRouteInput {

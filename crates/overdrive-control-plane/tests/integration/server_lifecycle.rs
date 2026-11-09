@@ -54,7 +54,10 @@ use overdrive_worker::mtls_intercept_port::{
 use overdrive_worker::mtls_intercept_worker::MtlsInterceptStopError;
 use parking_lot::Mutex;
 use reqwest::Version;
+use std::io::{Read as _, Write as _};
 use tempfile::TempDir;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpStream;
 
 use super::workload_lifecycle::wait::advance_and_settle;
 
@@ -573,4 +576,277 @@ async fn all_adr_0008_paths_return_200_on_stub_router() {
     assert_eq!(resp.status(), reqwest::StatusCode::OK);
 
     handle.shutdown(Duration::from_secs(2)).await.expect("clean server shutdown");
+}
+
+// -------------------------------------------------------------------
+// Shutdown ends every connection, including stalled TLS handshakes,
+// by the drain deadline (public-ingress-gateway R-69 amendment 7a-7e)
+// -------------------------------------------------------------------
+
+/// The server's TLS handshake timeout (`axum-server` default). Shutdown must
+/// finish far below it: a handshake still stalled when shutdown begins may
+/// not hold `ServerHandle::shutdown` until this expires.
+const SERVER_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// A real `rustls` client driven step-wise over a raw TCP stream, so a test
+/// decides which handshake flight is sent and when.
+struct TlsPeer {
+    stream: TcpStream,
+    conn: rustls::ClientConnection,
+}
+
+/// What a peer saw while waiting for the server to close it.
+struct Observation {
+    /// The server closed the connection (EOF, reset or other transport error).
+    closed: bool,
+    /// Decrypted application bytes the server sent (a served response).
+    plaintext: Vec<u8>,
+}
+
+fn tls_client_config(ca_pem: &str) -> Arc<rustls::ClientConfig> {
+    let mut roots = rustls::RootCertStore::empty();
+    for cert in rustls_pemfile::certs(&mut ca_pem.as_bytes()) {
+        roots.add(cert.expect("parse CA certificate")).expect("trust minted CA");
+    }
+    let provider = Arc::new(rustls::crypto::ring::default_provider());
+    let mut config = rustls::ClientConfig::builder_with_provider(provider)
+        .with_safe_default_protocol_versions()
+        .expect("protocol versions")
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+    config.alpn_protocols = vec![b"http/1.1".to_vec()];
+    Arc::new(config)
+}
+
+impl TlsPeer {
+    async fn connect(addr: SocketAddr, config: &Arc<rustls::ClientConfig>) -> Self {
+        let stream = tokio::time::timeout(Duration::from_secs(5), TcpStream::connect(addr))
+            .await
+            .expect("connect within 5s")
+            .expect("connect to the operator address");
+        let name = rustls::pki_types::ServerName::try_from("localhost").expect("server name");
+        let conn = rustls::ClientConnection::new(Arc::clone(config), name).expect("client");
+        Self { stream, conn }
+    }
+
+    /// Send every flight the client has queued.
+    async fn flush(&mut self) -> std::io::Result<()> {
+        let mut out = Vec::new();
+        while self.conn.wants_write() {
+            self.conn.write_tls(&mut out)?;
+        }
+        self.stream.write_all(&out).await
+    }
+
+    /// Read one chunk from the server and feed it to the TLS state machine.
+    /// `Ok(false)` means the server closed the stream.
+    async fn read_chunk(&mut self, within: Duration) -> Result<bool, &'static str> {
+        let mut buf = vec![0_u8; 16 * 1024];
+        match tokio::time::timeout(within, self.stream.read(&mut buf)).await {
+            Err(_) => Err("no bytes from the server in time"),
+            Ok(Ok(0) | Err(_)) => Ok(false),
+            Ok(Ok(n)) => {
+                let mut cursor = &buf[..n];
+                while !cursor.is_empty() {
+                    match self.conn.read_tls(&mut cursor) {
+                        Ok(0) | Err(_) => break,
+                        Ok(_) => {}
+                    }
+                    if self.conn.process_new_packets().is_err() {
+                        return Ok(false);
+                    }
+                }
+                Ok(true)
+            }
+        }
+    }
+
+    /// Complete the handshake in full, sending every client flight.
+    async fn complete_handshake(&mut self) {
+        self.flush().await.expect("send ClientHello");
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        while self.conn.is_handshaking() {
+            let left = deadline.saturating_duration_since(tokio::time::Instant::now());
+            assert!(
+                self.read_chunk(left).await.expect("server flight in time"),
+                "the server closed the connection during a handshake that began before shutdown"
+            );
+        }
+        self.flush().await.expect("send client Finished");
+    }
+
+    /// Send the `ClientHello` and read the server's whole answering flight,
+    /// then stop: the client's final flight stays queued, unsent.
+    async fn handshake_until_final_flight_is_withheld(&mut self) {
+        self.flush().await.expect("send ClientHello");
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        while self.conn.is_handshaking() {
+            let left = deadline.saturating_duration_since(tokio::time::Instant::now());
+            assert!(
+                self.read_chunk(left).await.expect("server flight in time"),
+                "the server closed the connection before shutdown began"
+            );
+        }
+        assert!(self.conn.wants_write(), "the client's final flight is queued and withheld");
+    }
+
+    /// Wait up to `within` for the server to close this connection,
+    /// collecting any application bytes it sends first.
+    async fn observe_until_closed(&mut self, within: Duration) -> Observation {
+        let deadline = tokio::time::Instant::now() + within;
+        let mut plaintext = Vec::new();
+        loop {
+            let left = deadline.saturating_duration_since(tokio::time::Instant::now());
+            let Ok(alive) = self.read_chunk(left).await else {
+                return Observation { closed: false, plaintext };
+            };
+            let mut buf = [0_u8; 4096];
+            while let Ok(n) = self.conn.reader().read(&mut buf) {
+                if n == 0 {
+                    break;
+                }
+                plaintext.extend_from_slice(&buf[..n]);
+            }
+            if !alive {
+                return Observation { closed: true, plaintext };
+            }
+        }
+    }
+}
+
+/// True once the operator listener refuses new connections, which is how a
+/// peer observes that graceful shutdown has begun.
+async fn listener_refuses_connections(addr: SocketAddr, within: Duration) -> bool {
+    let deadline = tokio::time::Instant::now() + within;
+    while tokio::time::Instant::now() < deadline {
+        match tokio::time::timeout(Duration::from_millis(500), TcpStream::connect(addr)).await {
+            Ok(Err(error)) if error.kind() == std::io::ErrorKind::ConnectionRefused => return true,
+            _ => tokio::time::sleep(Duration::from_millis(10)).await,
+        }
+    }
+    false
+}
+
+/// Outcome anchor: OUT-IGW-SHUTDOWN-HANDSHAKE-BOUND
+/// R-69 7e — Shutdown ends every connection by the drain deadline
+/// CONTRACT_SHAPE: bounded-change.
+///
+/// Four peers hold the operator listener when shutdown begins: (i) a TCP
+/// connection that sent the first bytes of a ClientHello and stopped, (ii) a
+/// client holding a completed handshake with no request, (iii) a client that
+/// sent a full ClientHello and withholds its final flight, and (iv) a client
+/// with a request still in flight past the deadline. With a drain deadline of
+/// a few hundred milliseconds, `ServerHandle::shutdown` returns within the
+/// deadline plus a fixed margin and far below the server's handshake timeout;
+/// (i), (ii) and (iv) observe a closed connection; (iii) completes its
+/// handshake only after shutdown began and no request is served on it; and the
+/// data directory boots again at once, with no sleep and no retry.
+#[allow(
+    clippy::doc_markdown,
+    clippy::too_many_lines,
+    reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line; \
+              the body is one boot-hold-shutdown-observe-reboot narrative"
+)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn shutdown_ends_every_connection_including_stalled_handshakes_by_the_drain_deadline() {
+    const DRAIN_DEADLINE: Duration = Duration::from_millis(400);
+    // Fixed margin for the other teardown stages; far below the 10 s handshake timeout.
+    const MARGIN: Duration = Duration::from_secs(2);
+    const OBSERVE: Duration = Duration::from_secs(3);
+
+    let (handle, bound, tmp, ca_pem) = spawn_server().await;
+    let data_dir = tmp.path().join("data");
+    let operator_config_dir = tmp.path().join("conf");
+    let config = tls_client_config(&ca_pem);
+
+    // GIVEN (i) a stalled partial ClientHello: the first bytes only.
+    let mut stalled = {
+        let mut hello = TlsPeer::connect(bound, &config).await;
+        let mut flight = Vec::new();
+        hello.conn.write_tls(&mut flight).expect("ClientHello bytes");
+        hello.stream.write_all(&flight[..flight.len().min(24)]).await.expect("partial hello");
+        hello.stream
+    };
+    // (ii) a completed handshake holding the connection with no request.
+    let mut held = TlsPeer::connect(bound, &config).await;
+    held.complete_handshake().await;
+    // (iii) a full ClientHello with the final flight withheld.
+    let mut withholding = TlsPeer::connect(bound, &config).await;
+    withholding.handshake_until_final_flight_is_withheld().await;
+    // (iv) one request in flight: headers and one body byte of a 4096 byte body.
+    let mut in_flight = TlsPeer::connect(bound, &config).await;
+    in_flight.complete_handshake().await;
+    in_flight
+        .conn
+        .writer()
+        .write_all(
+            b"POST /v1/workloads HTTP/1.1\r\nHost: localhost\r\n\
+              Content-Type: application/json\r\nContent-Length: 4096\r\n\r\n{",
+        )
+        .expect("queue request head");
+    in_flight.flush().await.expect("send request head");
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    // WHEN shutdown begins with a short drain deadline.
+    let began = std::time::Instant::now();
+    let shutdown = tokio::spawn(handle.shutdown(DRAIN_DEADLINE));
+    assert!(
+        listener_refuses_connections(bound, Duration::from_secs(2)).await,
+        "graceful shutdown never began: the operator listener still accepts connections"
+    );
+
+    // AND the stalled client completes its handshake only after shutdown began.
+    let completion = withholding.flush().await;
+    let _ = withholding.conn.writer().write_all(
+        b"GET /v1/cluster/info HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+    );
+    let _ = withholding.flush().await;
+
+    // THEN shutdown returns by the deadline plus the margin, far below the handshake timeout.
+    let joined = tokio::time::timeout(Duration::from_secs(15), shutdown).await;
+    let elapsed = began.elapsed();
+    let result = joined.expect("shutdown returns at all within 15s").expect("shutdown task joins");
+    result.expect("clean server shutdown");
+    assert!(
+        elapsed <= DRAIN_DEADLINE + MARGIN,
+        "shutdown took {elapsed:?}; it must end every connection by the drain deadline \
+         {DRAIN_DEADLINE:?} plus {MARGIN:?}, not wait for a stalled handshake"
+    );
+    assert!(
+        elapsed < SERVER_HANDSHAKE_TIMEOUT / 2,
+        "shutdown took {elapsed:?}, near the handshake timeout"
+    );
+
+    // AND every held connection observes a closed connection.
+    let mut buf = [0_u8; 64];
+    let stalled_closed =
+        matches!(tokio::time::timeout(OBSERVE, stalled.read(&mut buf)).await, Ok(Ok(0) | Err(_)));
+    assert!(stalled_closed, "the stalled partial ClientHello connection is closed by the server");
+    let held_seen = held.observe_until_closed(OBSERVE).await;
+    assert!(held_seen.closed, "the idle handshaken connection is closed by the server");
+    let in_flight_seen = in_flight.observe_until_closed(OBSERVE).await;
+    assert!(in_flight_seen.closed, "the request still in flight past the deadline is dropped");
+    assert!(
+        !String::from_utf8_lossy(&in_flight_seen.plaintext).contains("200 OK"),
+        "the unfinished request is not answered as a success"
+    );
+
+    // AND the late completion fails: the connection is closed and no request is served on it.
+    let late_seen = withholding.observe_until_closed(OBSERVE).await;
+    assert!(
+        late_seen.closed && late_seen.plaintext.is_empty(),
+        "late handshake completion (flush: {completion:?}) must fail with no response served; \
+         closed={}, {} plaintext bytes",
+        late_seen.closed,
+        late_seen.plaintext.len(),
+    );
+
+    // AND the data directory boots again at once: no sleep, no retry.
+    let reboot_config = super::node_adapters::test_config(data_dir, operator_config_dir);
+    let rebooted =
+        tokio::time::timeout(Duration::from_secs(30), super::node_adapters::boot(reboot_config))
+            .await
+            .expect("reboot over the same data directory within 30s")
+            .expect("every store handle was released on return from shutdown");
+    rebooted.shutdown(Duration::from_secs(2)).await.expect("clean second shutdown");
 }

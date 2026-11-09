@@ -348,6 +348,7 @@ pub struct PublicRouteInput {
 
 /// Public Route TOML-parser input.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PublicRouteSpecInput {
     pub id: String,
     pub hostname: String,
@@ -481,6 +482,19 @@ pub enum RouteApplyOutcome {
     Declared,
     Replaced,
     Unchanged,
+}
+
+impl RouteApplyOutcome {
+    /// Lowercase operator-facing label. Display only: the wire form is the
+    /// serde variant name.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Declared => "declared",
+            Self::Replaced => "replaced",
+            Self::Unchanged => "unchanged",
+        }
+    }
 }
 
 /// Route withdrawal outcome.
@@ -965,42 +979,26 @@ impl PublicRouteSetV1 {
         archive_envelope(&PublicRouteSetEnvelope::latest(self.clone()))
     }
 
-    /// Decode persisted intent bytes into a validated Route set; emits
-    /// `health.startup.refused` on failure.
+    /// Decode persisted intent bytes into a validated Route set.
     ///
     /// The envelope is decoded first; a stored Route is then rebuilt through
     /// the validating constructors, so a well-formed envelope holding a Route
     /// the submit path would refuse (or whose derived generation disagrees
-    /// with its inputs) is refused too.
+    /// with its inputs) is refused too. Emits no event: the caller knows
+    /// whether it is at boot or at request time.
     ///
     /// # Errors
     ///
     /// [`RouteCodecError::Envelope`] for empty, truncated, corrupt or
     /// future-version bytes; [`RouteCodecError::InvalidRoute`] for a stored
     /// Route that fails validation or is not canonical.
-    pub fn from_store_bytes(
-        bytes: &[u8],
-        redb_path: &Path,
-        key: Option<&str>,
-    ) -> Result<Self, RouteCodecError> {
-        let decoded = decode_intent_envelope::<PublicRouteSetEnvelope>(bytes, redb_path, key)
-            .map_err(|error| match error {
-                IntentStoreError::Envelope { source, .. } => RouteCodecError::Envelope(source),
-                other => unreachable!("decode_intent_envelope only returns Envelope: {other}"),
-            })?;
+    pub fn from_store_bytes(bytes: &[u8]) -> Result<Self, RouteCodecError> {
+        let decoded = decode_envelope_bytes::<PublicRouteSetEnvelope>(bytes)
+            .map_err(RouteCodecError::Envelope)?;
         let Some(stored) = decoded.route.as_ref() else {
             return Ok(decoded);
         };
-        stored.revalidated().map_err(|validation| {
-            tracing::error!(
-                name: "health.startup.refused",
-                redb_path = %redb_path.display(),
-                key = key.unwrap_or("<unknown>"),
-                validation_error = ?validation,
-                "persisted Route failed validation; control-plane refusing to start",
-            );
-            RouteCodecError::InvalidRoute(validation)
-        })?;
+        stored.revalidated().map_err(RouteCodecError::InvalidRoute)?;
         Ok(decoded)
     }
 }

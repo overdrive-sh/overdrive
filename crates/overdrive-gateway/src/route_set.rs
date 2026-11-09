@@ -4,7 +4,6 @@
 //! reads the slot, decides and writes inside that task's turn, so two
 //! competing Route IDs cannot both claim the slot.
 
-use std::path::Path;
 use std::sync::Arc;
 
 use overdrive_core::aggregate::IntentKey;
@@ -17,10 +16,6 @@ use overdrive_core::traits::intent_store::{IntentStoreError, PutOutcome};
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
-
-/// Label handed to the intent codec where a store file path would go: the
-/// `IntentStore` port exposes no path.
-const INTENT_STORE_LABEL: &str = "<intent store>";
 
 /// Command channel depth: commands are small and answered one at a time.
 const COMMAND_CAPACITY: usize = 16;
@@ -138,13 +133,19 @@ impl PublicRouteSetOwner {
         else {
             return Ok(None);
         };
-        PublicRouteSetV1::from_store_bytes(
-            &bytes,
-            Path::new(INTENT_STORE_LABEL),
-            Some(IntentKey::public_route_set().as_str()),
-        )
-        .map(|set| set.route)
-        .map_err(PublicRouteSetError::Decode)
+        let decoded = PublicRouteSetV1::from_store_bytes(&bytes);
+        match decoded {
+            Ok(set) => Ok(set.route),
+            Err(source) => {
+                let key = IntentKey::public_route_set();
+                tracing::error!(
+                    name: "gateway.route_set.decode_failed",
+                    key = key.as_str(),
+                    error = ?source,
+                );
+                Err(PublicRouteSetError::Decode(source))
+            }
+        }
     }
 
     async fn write(&self, route: Option<Route>) -> Result<(), PublicRouteSetError> {

@@ -2,12 +2,10 @@
 //! read: both `GatewayStatusReadError` variants map to the same fixed, redacted
 //! 500 body carrying none of the underlying cause text.
 //!
-//! Activation (DELIVER gateway-status-read-redaction): once
-//! `ControlPlaneError::GatewayStatusRead` exists, register this file in
-//! `tests/acceptance.rs` (`mod gateway_status_read_error_mapping;`, beside
-//! `route_set_error_mapping`) and remove the `#[ignore]` markers. The file is
-//! unregistered until then because it names the variant and would otherwise
-//! stop the acceptance binary compiling.
+//! Each variant is built around a distinct underlying read failure whose text
+//! contains a marker string. The assertions pin the status, the error code,
+//! the fixed message, the absent field, and that the serialised body never
+//! contains the marker.
 
 use overdrive_control_plane::api::ErrorBody;
 use overdrive_control_plane::error::{ControlPlaneError, to_response};
