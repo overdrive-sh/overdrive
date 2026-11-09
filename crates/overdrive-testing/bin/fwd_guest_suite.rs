@@ -3234,34 +3234,21 @@ fn nextest_attempt_files(
     Ok((files, current_dir))
 }
 
-fn quint_test_guest_files(current_dir: &Path) -> Result<Vec<GuestFile>, NextestDispatchFailure> {
-    let dispatcher = std::env::current_exe().map_err(|error| {
-        NextestDispatchFailure::LaneNotPrepared(format!(
-            "locating the prepared dispatcher for the Quint runtime inputs: {error}"
-        ))
-    })?;
-    let target_dir = dispatcher.parent().and_then(Path::parent).ok_or_else(|| {
-        NextestDispatchFailure::LaneNotPrepared(format!(
-            "prepared dispatcher path has no target directory: {}",
-            dispatcher.display()
-        ))
-    })?;
-    let prepared = target_dir.join(QUINT_RUNTIME_DIR);
-    let manifest_path = prepared.join(QUINT_RUNTIME_MANIFEST);
-    let manifest = fs::read_to_string(&manifest_path).map_err(|error| {
-        NextestDispatchFailure::LaneNotPrepared(format!(
-            "Quint test runtime is not prepared at {}: {error}; run cargo xtask guest-kit-prepare",
-            manifest_path.display()
-        ))
-    })?;
-    let mut lines = manifest.lines();
-    if lines.next() != Some(QUINT_RUNTIME_FORMAT) {
-        return Err(NextestDispatchFailure::LaneNotPrepared(format!(
-            "unsupported Quint runtime manifest at {}",
-            manifest_path.display()
-        )));
-    }
+struct PreparedQuintRuntime {
+    files: std::collections::BTreeSet<PathBuf>,
+    shared_libraries: std::collections::BTreeSet<PathBuf>,
+}
 
+struct QuintRuntimeRecords {
+    fields: std::collections::BTreeMap<String, String>,
+    files: std::collections::BTreeSet<PathBuf>,
+    shared_libraries: std::collections::BTreeSet<PathBuf>,
+}
+
+fn parse_quint_runtime_records<'a>(
+    lines: impl Iterator<Item = &'a str>,
+    manifest_path: &Path,
+) -> Result<QuintRuntimeRecords, NextestDispatchFailure> {
     let mut fields = std::collections::BTreeMap::new();
     let mut files = std::collections::BTreeSet::new();
     let mut shared_libraries = std::collections::BTreeSet::new();
@@ -3297,7 +3284,7 @@ fn quint_test_guest_files(current_dir: &Path) -> Result<Vec<GuestFile>, NextestD
             | "launcher_guest_path"
             | "cli_wrapper_guest_path"
             | "cli_entry_guest_path" => {
-                if fields.insert(key, value).is_some() {
+                if fields.insert(key.to_owned(), value.to_owned()).is_some() {
                     return Err(NextestDispatchFailure::LaneNotPrepared(format!(
                         "duplicate Quint runtime manifest field {key:?}"
                     )));
@@ -3310,7 +3297,46 @@ fn quint_test_guest_files(current_dir: &Path) -> Result<Vec<GuestFile>, NextestD
             }
         }
     }
+    Ok(QuintRuntimeRecords { fields, files, shared_libraries })
+}
 
+fn normalized_quint_guest_path(
+    fields: &std::collections::BTreeMap<String, String>,
+    key: &str,
+) -> Result<PathBuf, NextestDispatchFailure> {
+    let path = fields.get(key).map(PathBuf::from).ok_or_else(|| {
+        NextestDispatchFailure::LaneNotPrepared(format!("Quint runtime manifest has no {key}"))
+    })?;
+    if !path.is_absolute()
+        || path.components().any(|component| {
+            matches!(component, std::path::Component::CurDir | std::path::Component::ParentDir)
+        })
+    {
+        return Err(NextestDispatchFailure::LaneNotPrepared(format!(
+            "Quint runtime manifest has a non-normalized {key}: {}",
+            path.display()
+        )));
+    }
+    Ok(path)
+}
+
+fn prepared_quint_runtime(prepared: &Path) -> Result<PreparedQuintRuntime, NextestDispatchFailure> {
+    let manifest_path = prepared.join(QUINT_RUNTIME_MANIFEST);
+    let manifest = fs::read_to_string(&manifest_path).map_err(|error| {
+        NextestDispatchFailure::LaneNotPrepared(format!(
+            "Quint test runtime is not prepared at {}: {error}; run cargo xtask guest-kit-prepare",
+            manifest_path.display()
+        ))
+    })?;
+    let mut lines = manifest.lines();
+    if lines.next() != Some(QUINT_RUNTIME_FORMAT) {
+        return Err(NextestDispatchFailure::LaneNotPrepared(format!(
+            "unsupported Quint runtime manifest at {}",
+            manifest_path.display()
+        )));
+    }
+    let QuintRuntimeRecords { fields, files, shared_libraries } =
+        parse_quint_runtime_records(lines, &manifest_path)?;
     for key in ["quint_version", "node_version", "rust_evaluator_version"] {
         if fields
             .get(key)
@@ -3321,30 +3347,12 @@ fn quint_test_guest_files(current_dir: &Path) -> Result<Vec<GuestFile>, NextestD
             )));
         }
     }
-    let path_field = |key: &str| {
-        fields.get(key).map(PathBuf::from).ok_or_else(|| {
-            NextestDispatchFailure::LaneNotPrepared(format!("Quint runtime manifest has no {key}"))
-        })
-    };
-    let node_guest_path = path_field("node_guest_path")?;
-    let evaluator_guest_path = path_field("rust_evaluator_guest_path")?;
-    let launcher_guest_path = path_field("launcher_guest_path")?;
-    let cli_wrapper_guest_path = path_field("cli_wrapper_guest_path")?;
-    let cli_entry_guest_path = path_field("cli_entry_guest_path")?;
+    let node_guest_path = normalized_quint_guest_path(&fields, "node_guest_path")?;
+    let evaluator_guest_path = normalized_quint_guest_path(&fields, "rust_evaluator_guest_path")?;
+    let launcher_guest_path = normalized_quint_guest_path(&fields, "launcher_guest_path")?;
+    let cli_wrapper_guest_path = normalized_quint_guest_path(&fields, "cli_wrapper_guest_path")?;
+    let cli_entry_guest_path = normalized_quint_guest_path(&fields, "cli_entry_guest_path")?;
     if files.iter().chain(&shared_libraries).any(|path| {
-        !path.is_absolute()
-            || path.components().any(|component| {
-                matches!(component, std::path::Component::CurDir | std::path::Component::ParentDir)
-            })
-    }) || [
-        &node_guest_path,
-        &evaluator_guest_path,
-        &launcher_guest_path,
-        &cli_wrapper_guest_path,
-        &cli_entry_guest_path,
-    ]
-    .iter()
-    .any(|path| {
         !path.is_absolute()
             || path.components().any(|component| {
                 matches!(component, std::path::Component::CurDir | std::path::Component::ParentDir)
@@ -3355,14 +3363,14 @@ fn quint_test_guest_files(current_dir: &Path) -> Result<Vec<GuestFile>, NextestD
         ));
     }
     let required = [
-        node_guest_path.clone(),
-        evaluator_guest_path.clone(),
-        launcher_guest_path.clone(),
-        cli_wrapper_guest_path.clone(),
-        cli_entry_guest_path.clone(),
-        PathBuf::from("/bin/sh"),
+        &node_guest_path,
+        &evaluator_guest_path,
+        &launcher_guest_path,
+        &cli_wrapper_guest_path,
+        &cli_entry_guest_path,
     ];
-    if required.iter().any(|path| !files.contains(path))
+    if required.iter().any(|path| !files.contains(*path))
+        || !files.contains(Path::new("/bin/sh"))
         || !shared_libraries.contains(&node_guest_path)
         || !shared_libraries.contains(&evaluator_guest_path)
         || !shared_libraries.contains(Path::new("/bin/sh"))
@@ -3373,10 +3381,16 @@ fn quint_test_guest_files(current_dir: &Path) -> Result<Vec<GuestFile>, NextestD
             "Quint runtime manifest has an incomplete ELF shared-library closure".to_owned(),
         ));
     }
+    Ok(PreparedQuintRuntime { files, shared_libraries })
+}
 
+fn quint_runtime_guest_files(
+    prepared: &Path,
+    runtime: &PreparedQuintRuntime,
+) -> Result<Vec<GuestFile>, NextestDispatchFailure> {
     let files_root = prepared.join(QUINT_RUNTIME_FILES_DIR);
-    let mut guest_files = Vec::with_capacity(files.len() + 1);
-    for guest in files {
+    let mut guest_files = Vec::with_capacity(runtime.files.len());
+    for guest in &runtime.files {
         let relative = guest.strip_prefix("/").map_err(|error| {
             NextestDispatchFailure::LaneNotPrepared(format!(
                 "invalid Quint guest path {}: {error}",
@@ -3394,9 +3408,27 @@ fn quint_test_guest_files(current_dir: &Path) -> Result<Vec<GuestFile>, NextestD
         guest_files.push(GuestFile {
             host,
             guest: guest.clone(),
-            with_shared_libraries: shared_libraries.contains(&guest),
+            with_shared_libraries: runtime.shared_libraries.contains(guest),
         });
     }
+    Ok(guest_files)
+}
+
+fn quint_test_guest_files(current_dir: &Path) -> Result<Vec<GuestFile>, NextestDispatchFailure> {
+    let dispatcher = std::env::current_exe().map_err(|error| {
+        NextestDispatchFailure::LaneNotPrepared(format!(
+            "locating the prepared dispatcher for the Quint runtime inputs: {error}"
+        ))
+    })?;
+    let target_dir = dispatcher.parent().and_then(Path::parent).ok_or_else(|| {
+        NextestDispatchFailure::LaneNotPrepared(format!(
+            "prepared dispatcher path has no target directory: {}",
+            dispatcher.display()
+        ))
+    })?;
+    let prepared = target_dir.join(QUINT_RUNTIME_DIR);
+    let runtime = prepared_quint_runtime(&prepared)?;
+    let mut guest_files = quint_runtime_guest_files(&prepared, &runtime)?;
 
     // Keep the test's existing relative `quint test` argument and exact CWD.
     // Stage only the source file that argument resolves to in the selected
