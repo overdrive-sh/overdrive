@@ -1,0 +1,34 @@
+Traceback (most recent call last):
+  File "<stdin>", line 3, in <module>
+AssertionError
+Traceback (most recent call last):
+  File "<stdin>", line 3, in <module>
+AssertionError
+Traceback (most recent call last):
+  File "<stdin>", line 3, in <module>
+AssertionError
+Traceback (most recent call last):
+  File "<stdin>", line 3, in <module>
+AssertionError
+Traceback (most recent call last):
+  File "<stdin>", line 3, in <module>
+AssertionError
+Traceback (most recent call last):
+  File "<stdin>", line 3, in <module>
+AssertionError
+Traceback (most recent call last):
+  File "<stdin>", line 3, in <module>
+AssertionError
+Traceback (most recent call last):
+  File "<stdin>", line 4, in <module>
+AssertionError: the actual selected body has not been observed in its owned guest console
+Traceback (most recent call last):
+  File "<stdin>", line 4, in <module>
+AssertionError: the actual selected body has not been observed in its owned guest console
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.08s
+     Running `target/debug/xtask metal run -- cargo nextest run -p overdrive-init --bin overdrive-init --features integration-tests,kvm-tests -E 'test(guest_flow::real_kernel::the_accept_path_matches_the_sim_per_connection)' --no-capture`
+xtask: running metal run (one bootstrap lease session)
+OVERDRIVE_METAL_RUN_ID=e729cf26ccc3b47d53f750f2
+OVERDRIVE_METAL_RUN_STARTED run_id=e729cf26ccc3b47d53f750f2
+OVERDRIVE_METAL_RUN_COMPLETE run_id=e729cf26ccc3b47d53f750f2 exit_code=100 cause=command_returned
+operator-cell: expected 0, got 100
