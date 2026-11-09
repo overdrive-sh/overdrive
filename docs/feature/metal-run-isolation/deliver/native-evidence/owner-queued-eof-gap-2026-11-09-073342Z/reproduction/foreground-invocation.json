@@ -1,0 +1,26 @@
+{
+  "command": [
+    "cargo",
+    "xtask",
+    "metal",
+    "run",
+    "--",
+    "cargo",
+    "nextest",
+    "run",
+    "-p",
+    "xtask",
+    "--lib",
+    "--features",
+    "integration-tests",
+    "-E",
+    "test(=metal_run_isolation_conformance::protocol_randomized_owner_traces)",
+    "--no-capture"
+  ],
+  "started_at": "2026-11-09T07:48:26.160505+00:00",
+  "source_head": "e26f0448aaa09f692b7bb2be2d601a87ea79c43d",
+  "source_status": " M AGENTS.md\n M crates/overdrive-control-plane/src/worker/exit_observer.rs\n M crates/overdrive-control-plane/tests/acceptance/crash_ending_authority.rs\n M crates/overdrive-control-plane/tests/acceptance/terminal_hook_ownership.rs\n M crates/overdrive-core/src/traits/driver.rs\n M docs/feature/metal-run-isolation/deliver/review-01-02.md\n M docs/feature/service-allocation-readiness-and-ending/deliver/roadmap.json\n M xtask/src/metal_run_isolation_conformance.rs\n?? docs/feature/metal-run-isolation/deliver/native-evidence/placement-rerun-2026-11-09-072512Z/\n?? docs/feature/service-allocation-readiness-and-ending/deliver/execution-log.json\n",
+  "diagnostic_input": "Temporary existing macro seed0x8e8e19a4, existing controller-loss behavior unchanged; failure-only actual maintainer/lock observation added.",
+  "finished_at": "2026-11-09T07:49:20.593045+00:00",
+  "exit_code": 100
+}
