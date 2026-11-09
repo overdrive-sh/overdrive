@@ -220,7 +220,7 @@ case "$PLACEMENT_KIND" in
     [ -f "$DISPATCHER_CANONICAL" ] && [ -x "$DISPATCHER_CANONICAL" ] || test_error lane_not_prepared 78
     case "$PLACEMENT_KIND" in
       guest-lane-operator|guest-lane-owner)
-        IN_GUEST_LANE_BINARY="${DISPATCHER_CANONICAL%/*}/in-guest/overdrive-init--overdrive-init"
+        IN_GUEST_LANE_BINARY="$SOURCE_ROOT/target/guest-kit/in-guest/overdrive-init--overdrive-init"
         [ -f "$IN_GUEST_LANE_BINARY" ] && [ -x "$IN_GUEST_LANE_BINARY" ] || test_error lane_not_prepared 78
         ;;
     esac
