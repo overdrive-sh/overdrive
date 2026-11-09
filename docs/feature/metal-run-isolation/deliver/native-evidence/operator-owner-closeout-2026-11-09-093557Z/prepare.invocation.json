@@ -1,0 +1,17 @@
+{
+  "command": [
+    "cargo",
+    "xtask",
+    "metal",
+    "run",
+    "--",
+    "cargo",
+    "xtask",
+    "guest-kit-prepare"
+  ],
+  "started_at": "2026-11-09T09:33:10.449804+00:00",
+  "source_head": "47328fb88d21d5f3f57d25a935d1a17c505cbb9b",
+  "source_status": " M AGENTS.md\n M crates/overdrive-control-plane/src/worker/exit_observer.rs\n M crates/overdrive-control-plane/tests/acceptance/crash_ending_authority.rs\n M crates/overdrive-control-plane/tests/acceptance/terminal_hook_ownership.rs\n M crates/overdrive-core/src/traits/driver.rs\n M docs/feature/metal-run-isolation/deliver/review-01-02.md\n M docs/feature/service-allocation-readiness-and-ending/deliver/roadmap.json\n?? docs/feature/metal-run-isolation/deliver/native-evidence/placement-rerun-2026-11-09-072512Z/\n?? docs/feature/service-allocation-readiness-and-ending/deliver/execution-log.json\n",
+  "finished_at": "2026-11-09T09:35:44.129565+00:00",
+  "exit_code": 0
+}
