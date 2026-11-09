@@ -1,0 +1,93 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.21s
+     Running `target/debug/xtask metal run -- cargo nextest run -p xtask --lib --features integration-tests -E 'test(=metal_run_isolation_conformance::protocol_randomized_owner_traces) | test(=metal_run_isolation_conformance::protocol_controller_eof_before_start) | test(=metal_run_isolation_conformance::protocol_controller_loss_after_start)' --no-capture`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+OVERDRIVE_METAL_RUN_ID=c660f27ac6cee37876c896d0
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire exclusive physical-maintenance barrier (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_RUN_REGISTERED run_id=c660f27ac6cee37876c896d0
+OVERDRIVE_METAL_LEASE_ACQUIRED token=c660f27ac6cee37876c896d0 pid=2496687
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/ouagadougou -> ubuntu@151.115.99.251:/home/ubuntu/overdrive-worktrees/e3d831d7dafe621226ae6047ebcac3536f37470cafcf5dbb64eb9598886af410
+
+sent 2,707,798 bytes  received 58,584 bytes  790,394.86 bytes/sec
+total size is 2,074,320,705  speedup is 749.83
+
+########## [bootstrap] materialising standalone .git (common dir 7.4G)
+
+sent 406,192 bytes  received 19,000 bytes  283,461.33 bytes/sec
+total size is 877,600,011  speedup is 2,064.01
+## marcus-sa/nw-bugfix-crash-restart-tasks...origin/marcus-sa/nw-bugfix-crash-restart-tasks [ahead 186, behind 1]
+ M AGENTS.md
+ M crates/overdrive-control-plane/src/worker/exit_observer.rs
+ M crates/overdrive-control-plane/tests/acceptance/crash_ending_authority.rs
+ M crates/overdrive-control-plane/tests/acceptance/terminal_hook_ownership.rs
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+OVERDRIVE_METAL_RUN_STARTED run_id=c660f27ac6cee37876c896d0
+info: experimental features enabled: wrapper-scripts
+   Compiling xtask v0.0.0 (/home/ubuntu/overdrive-worktrees/e3d831d7dafe621226ae6047ebcac3536f37470cafcf5dbb64eb9598886af410/xtask)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.63s
+────────────
+ Nextest run ID 843e8946-3db6-4675-8881-2bb955804484 with nextest profile: default
+    Starting 3 tests across 1 binary (290 tests skipped)
+       START [         ] (1/3) xtask metal_run_isolation_conformance::protocol_controller_eof_before_start
+
+running 1 test
+== Running model based tests for protocol_controller_eof_before_start
+   Generating 1 traces using `0x6f68740e` as random seed ...
+   Replaying traces ...
+pre-start EOF actor=1 actual_terminal={"error": "controller_eof_before_start", "finished_at": "2026-11-09T09:03:46Z", "format": "overdrive-metal-terminal-v1", "kind": "runner", "run_id": "049fe10391fb9cc426643b2f"} actual_owner_unit={"ActiveState": "deactivating", "ControlGroup": "/system.slice/overdrive-metal-run-049fe10391fb9cc426643b2f.service", "LoadState": "loaded", "MainPID": "0"} actual_maintenance(id,unit,phase,barrier_mode,terminal)=None
+Failed to stop overdrive-metal-run-049fe10391fb9cc426643b2f.service: Unit overdrive-metal-run-049fe10391fb9cc426643b2f.service not loaded.
+   [OK] protocol_controller_eof_before_start
+test metal_run_isolation_conformance::protocol_controller_eof_before_start ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 292 filtered out; finished in 4.10s
+
+        PASS [   4.154s] (1/3) xtask metal_run_isolation_conformance::protocol_controller_eof_before_start
+       START [         ] (2/3) xtask metal_run_isolation_conformance::protocol_controller_loss_after_start
+
+running 1 test
+== Running model based tests for protocol_controller_loss_after_start
+   Generating 1 traces using `0xb785a3e3` as random seed ...
+   Replaying traces ...
+Failed to stop overdrive-metal-run-ade0e91b98df1e3524ef9c5f.service: Unit overdrive-metal-run-ade0e91b98df1e3524ef9c5f.service not loaded.
+   [OK] protocol_controller_loss_after_start
+test metal_run_isolation_conformance::protocol_controller_loss_after_start ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 292 filtered out; finished in 4.22s
+
+        PASS [   4.272s] (2/3) xtask metal_run_isolation_conformance::protocol_controller_loss_after_start
+       START [         ] (3/3) xtask metal_run_isolation_conformance::protocol_randomized_owner_traces
+
+running 1 test
+== Running model based tests for protocol_randomized_owner_traces
+   Generating 4 traces using `0x8e8e19a4` as random seed ...
+   Replaying traces ...
+Failed to stop overdrive-metal-run-c97ee6f4785ad35fb0c73a5d.service: Unit overdrive-metal-run-c97ee6f4785ad35fb0c73a5d.service not loaded.
+Failed to stop overdrive-metal-run-cf4fe11804022d32b1adcd44.service: Unit overdrive-metal-run-cf4fe11804022d32b1adcd44.service not loaded.
+pre-start EOF actor=1 actual_terminal={"error": "controller_eof_before_start", "finished_at": "2026-11-09T09:04:00Z", "format": "overdrive-metal-terminal-v1", "kind": "runner", "run_id": "b92b366452bf37e5f5e9b27d"} actual_owner_unit={"ActiveState": "deactivating", "ControlGroup": "/system.slice/overdrive-metal-run-b92b366452bf37e5f5e9b27d.service", "LoadState": "loaded", "MainPID": "0"} actual_maintenance(id,unit,phase,barrier_mode,terminal)=Some(("be0a9867709b059b090d9b89", Ok({"ActiveState": "active", "ControlGroup": "/system.slice/overdrive-metal-run-be0a9867709b059b090d9b89.service", "LoadState": "loaded", "MainPID": "2517636"}), Ok("format=overdrive-metal-phase-v1\nrun_id=be0a9867709b059b090d9b89\nphase=waiting_for_lease\nupdated_at=2026-11-09T09:04:00Z\n"), Ok(Some("exclusive")), Err(Os { code: 2, kind: NotFound, message: "No such file or directory" })))
+Failed to stop overdrive-metal-run-be0a9867709b059b090d9b89.service: Unit overdrive-metal-run-be0a9867709b059b090d9b89.service not loaded.
+Failed to stop overdrive-metal-run-b92b366452bf37e5f5e9b27d.service: Unit overdrive-metal-run-b92b366452bf37e5f5e9b27d.service not loaded.
+Failed to stop overdrive-metal-run-2504f95fb531d8ae22fcd3c8.service: Unit overdrive-metal-run-2504f95fb531d8ae22fcd3c8.service not loaded.
+pre-start EOF actor=1 actual_terminal={"error": "controller_eof_before_start", "finished_at": "2026-11-09T09:04:09Z", "format": "overdrive-metal-terminal-v1", "kind": "runner", "run_id": "9b5ddb3d0f20fe87a33a7992"} actual_owner_unit={"ActiveState": "deactivating", "ControlGroup": "/system.slice/overdrive-metal-run-9b5ddb3d0f20fe87a33a7992.service", "LoadState": "loaded", "MainPID": "0"} actual_maintenance(id,unit,phase,barrier_mode,terminal)=Some(("d5aea375c90beaf90f81ac9b", Ok({"ActiveState": "inactive", "ControlGroup": "", "LoadState": "not-found", "MainPID": "0"}), Ok("format=overdrive-metal-phase-v1\nrun_id=d5aea375c90beaf90f81ac9b\nphase=running\nupdated_at=2026-11-09T09:04:06Z\n"), Ok(None), Ok("format=overdrive-metal-terminal-v1\nrun_id=d5aea375c90beaf90f81ac9b\nkind=command\nexit_code=0\ncause=command_returned\nfinished_at=2026-11-09T09:04:07Z\n")))
+Failed to stop overdrive-metal-run-d5aea375c90beaf90f81ac9b.service: Unit overdrive-metal-run-d5aea375c90beaf90f81ac9b.service not loaded.
+Failed to stop overdrive-metal-run-9b5ddb3d0f20fe87a33a7992.service: Unit overdrive-metal-run-9b5ddb3d0f20fe87a33a7992.service not loaded.
+Failed to stop overdrive-metal-run-6fd5b9a89de27bdba9f76457.service: Unit overdrive-metal-run-6fd5b9a89de27bdba9f76457.service not loaded.
+pre-start EOF actor=2 actual_terminal={"error": "controller_eof_before_start", "finished_at": "2026-11-09T09:04:14Z", "format": "overdrive-metal-terminal-v1", "kind": "runner", "run_id": "2c0ea246210dd63bd21b5bf8"} actual_owner_unit={"ActiveState": "deactivating", "ControlGroup": "/system.slice/overdrive-metal-run-2c0ea246210dd63bd21b5bf8.service", "LoadState": "loaded", "MainPID": "0"} actual_maintenance(id,unit,phase,barrier_mode,terminal)=Some(("cfe06297d12be06a5ffda924", Ok({"ActiveState": "inactive", "ControlGroup": "", "LoadState": "not-found", "MainPID": "0"}), Ok("format=overdrive-metal-phase-v1\nrun_id=cfe06297d12be06a5ffda924\nphase=running\nupdated_at=2026-11-09T09:04:13Z\n"), Ok(None), Ok("format=overdrive-metal-terminal-v1\nrun_id=cfe06297d12be06a5ffda924\nkind=command\nexit_code=0\ncause=command_returned\nfinished_at=2026-11-09T09:04:14Z\n")))
+Failed to stop overdrive-metal-run-cfe06297d12be06a5ffda924.service: Unit overdrive-metal-run-cfe06297d12be06a5ffda924.service not loaded.
+Failed to stop overdrive-metal-run-250ae8991fceb00a4fb1d67d.service: Unit overdrive-metal-run-250ae8991fceb00a4fb1d67d.service not loaded.
+Failed to stop overdrive-metal-run-2c0ea246210dd63bd21b5bf8.service: Unit overdrive-metal-run-2c0ea246210dd63bd21b5bf8.service not loaded.
+   [OK] protocol_randomized_owner_traces
+test metal_run_isolation_conformance::protocol_randomized_owner_traces ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 292 filtered out; finished in 24.74s
+
+        PASS [  24.787s] (3/3) xtask metal_run_isolation_conformance::protocol_randomized_owner_traces
+────────────
+     Summary [  33.227s] 3 tests run: 3 passed, 290 skipped
+OVERDRIVE_METAL_RUN_COMPLETE run_id=c660f27ac6cee37876c896d0 exit_code=0 cause=command_returned

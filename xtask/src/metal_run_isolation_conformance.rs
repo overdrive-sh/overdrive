@@ -555,9 +555,9 @@ impl World {
         drop(unit.child.stdin.take());
         if unit.phase().as_deref() != Some("running") {
             let source_before = snapshot(&unit.source);
-            // EOF is queued on the real control pipe. The owner reads it only
-            // after admission; do not strand that read behind our operation
-            // gates when this action will never issue a later Checkout step.
+            // Release only this actor's operation gates. EOF must terminate
+            // even when another real owner still excludes kernel admission;
+            // no later Checkout step will release these fixture inputs.
             unit.gate("barrier")?;
             unit.gate("checkout")?;
             unit.terminal()?;
@@ -570,6 +570,26 @@ impl World {
             {
                 return Err(failed("pre-start controller loss changed its typed cause or ran/mutated a body/source").into());
             }
+            let owner_facts = unit_facts(&unit.id)?;
+            let maintenance = self.maintenance.as_ref().map(|maintainer| {
+                let facts = unit_facts(&maintainer.id);
+                let pid = facts
+                    .as_ref()
+                    .ok()
+                    .and_then(|facts| facts.get("MainPID"))
+                    .and_then(|pid| pid.parse::<u32>().ok())
+                    .unwrap_or(0);
+                (
+                    maintainer.id.clone(),
+                    facts,
+                    fs::read_to_string(maintainer.directory.join("phase.v1")),
+                    lock_mode(pid, &self.fixture.temp.path().join("maintenance.lock")),
+                    fs::read_to_string(maintainer.directory.join("terminal.v1")),
+                )
+            });
+            eprintln!(
+                "pre-start EOF actor={actor} actual_terminal={terminal:?} actual_owner_unit={owner_facts:?} actual_maintenance(id,unit,phase,barrier_mode,terminal)={maintenance:?}"
+            );
         }
         Ok(())
     }
