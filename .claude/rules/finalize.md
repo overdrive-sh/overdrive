@@ -19,8 +19,8 @@ required completion gates, not follow-up tasks.
 - Dispatch an independent reviewer agent for the documentation and blog post.
   The reviewer checks factual accuracy against the implemented behavior and
   evidence, completeness of the decision narrative below, compliance with the
-  technical-writer skill throughout the content, current limitations, writing
-  quality, links, and validation results.
+  technical-writer skill throughout the content, the voice rules below,
+  current limitations, writing quality, links, and validation results.
   Resolve blocking findings and obtain reviewer approval before finalization.
 - Check in the documentation and post, and include their paths and validation
   results, reviewer verdict, and review artifact path in the finalization record.
@@ -53,3 +53,32 @@ nonfunctional merely because it was not selected. Explain the actual selection
 criteria. Lead with the motivating problem and decision, then use implementation
 details to explain the journey. Select the consequential experiments rather than
 recounting every delivery task.
+
+## Write as the team, in the active voice
+
+The blog and docs speak for Overdrive. The decisions in them are the team's
+decisions, so the post says so.
+
+- **Write "we".** "We chose Git-worktree identity", "we kept the existing
+  suite", "we dropped the window design". The team decided; the post owns it.
+- **Never write "the user".** "The user selected", "the user chose", "the user
+  ruled" leak the agent workflow that produced the feature into public prose.
+  The person approving a decision in a design session is part of the team, not
+  a third party the reader has never met. The same goes for "the agent", "the
+  reviewer", "the architect", "the crafter", wave names (DISCUSS, DESIGN,
+  DISTILL, DELIVER), roadmap step IDs and review rounds: they describe how the
+  work was organised, not what was decided or why.
+- **Name who acted; no agentless passive for decisions.** "It was chosen",
+  "it was superseded", "was left unselected", "were not credited", "has been
+  measured" hide the decision-maker. Rewrite as "we chose", "we dropped it
+  because", "we did not count", "we have not measured". The passive is fine
+  for things no one decided ("the device is released when the VMM exits");
+  it is wrong for choices.
+- Translate design-artifact vocabulary rather than copying it. Feature
+  documents record "the user approved D-3 on 2026-11-02"; the post says what
+  we decided and why.
+
+**Symptoms during review:** "the user" anywhere in a post or docs page;
+"selected design", "was left unselected", "it was decided", "it was
+superseded" for a choice the team made; wave names, step IDs or agent roles
+in reader-facing prose.

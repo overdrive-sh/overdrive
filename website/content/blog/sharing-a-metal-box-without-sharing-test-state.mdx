@@ -11,8 +11,8 @@ x86_64 KVM host. That host supplies direct Cloud Hypervisor launch evidence
 that a nested development VM cannot replace. Its box-wide execution lease also
 made one worktree wait for an unrelated worktree's ordinary verification.
 
-The selected design gives ordinary runs shared maintenance admission and
-separate checkout ownership. Tests keep their declared disposable guest
+We gave ordinary runs shared maintenance admission and separate checkout
+ownership. Tests keep their declared disposable guest
 boundaries. Physical-host administration stays exclusive. Removing the lease
 alone would leave source, listeners, and cleanup sharing the wrong owners.
 
@@ -30,8 +30,7 @@ and sanitizing names can turn distinct branches into the same remote directory.
 A source digest cannot repair that choice of owner after two callers have
 selected one shared build directory.
 
-The user selected Git-worktree identity with branch fallback. The implemented
-identity uses the canonical worktree-specific Git metadata directory for a
+We chose Git-worktree identity with a branch fallback. The identity uses the canonical worktree-specific Git metadata directory for a
 linked worktree. Switching branches or detaching HEAD leaves that identity
 unchanged. An ordinary clone uses its physical checkout root and full attached
 branch ref. A detached ordinary clone refuses instead of guessing an owner.
@@ -40,8 +39,8 @@ A SHA-256 key selects the remote directory, and reuse checks the complete
 identity binding. An override changes the directory without changing its owner.
 Old branch caches remain intact. The cost is explicit: new identities start
 with cold caches, and moving identity-bearing paths selects new state.
-Automatic adoption was left unselected because it would require a migration
-protocol to establish whose artifacts were being adopted.
+We did not add automatic adoption, because it would need a migration protocol
+to establish whose artifacts were being adopted.
 
 Source exclusion still belongs to the checkout. Its durable service holds the
 checkout lock across source transfer and command execution. A second run,
@@ -62,9 +61,9 @@ of the same fixture reuse the same CID bands and listener values.
 An early proposal divided the available space into 224 CID windows and added
 userspace claim records. A hash alone could not guarantee exclusive ownership,
 and a CID allocator would still leave host listeners needing isolation.
-No completed allocator experiment established that the window design could
-not work. It was superseded because the inspected kernel already supplied
-the required ownership and lifetime.
+No completed allocator experiment showed that the window design could not
+work. We dropped it because the kernel already supplies the ownership and
+lifetime we needed.
 
 The pinned Linux v7.0 source keys vsock reachability by network namespace and
 its local or global mode. In local mode, separate namespaces can hold identical
@@ -97,12 +96,12 @@ execute against their disposable guest kernel.
 ## Keep nextest as the owner of each attempt
 
 The repository already had a suite that boots a fresh guest for each named
-isolation group and batches that group's tests. The user chose to retain it.
+isolation group and batches that group's tests. We kept it.
 Wrapping an entire run in another VM would change that boundary. A persistent
 guest shared by independent wrapper processes would need an additional broker.
 Replacing nextest with a batch-result interpreter would change who owns
-selection, retries, reporting, and results. These alternatives were left
-unselected for those costs, not declared nonfunctional.
+selection, retries, reporting, and results. We passed on these
+alternatives for those costs, not because they could not work.
 
 Direct `cargo nextest run` uses nextest's per-test wrapper instead. A checked-in
 map assigns each exact binary and test name to host-pure execution, a native
@@ -178,8 +177,8 @@ have ended.
 Native construction exercised that actual timeout path. A contrast without a
 finalizer left owned files. The same stop lifecycle with a scoped finalizer
 removed them after prior descendants ended. The final retained construction
-included complete raw timeout and cleanup output in its durable log. Earlier
-incomplete captures were not credited as that proof.
+included complete raw timeout and cleanup output in its durable log. We did not
+count earlier incomplete captures as that proof.
 
 The implementation uses the existing unit's `ExecStopPost` hook. It removes
 only the invocation's guest staging, short VMM runtime, and command scratch
@@ -284,6 +283,6 @@ with 78 of 1,000 flow ends consumed. Its unchanged test body and fixture also
 fail through the original composition at the current source. That failure
 does not establish a new isolation defect, and it is not counted as a pass.
 
-No speedup or throughput improvement has been measured. The
+We have not measured a speedup or throughput improvement. The
 [operator guide](/docs/how-to/run-verification-on-metal) describes the commands,
 execution owners, and current limits.
