@@ -74,37 +74,40 @@ PY
 done
 [ -f "$out/maintenance-waited.json" ]
 for ((attempt=0; attempt<1200; attempt++)); do
-  if observe "$ordinary_id" "$maintenance_id" > "$out/admitted-$attempt.json" 2> "$out/admitted-query-$attempt.stderr"; then
-    if python3 - "$out/admitted-$attempt.json" "$ordinary_id" "$maintenance_id" <<'PY_EXCLUSIVE_HELD'
+  if observe "$ordinary_id" "$maintenance_id" > "$out/stopping-$attempt.json" 2> "$out/stopping-query-$attempt.stderr"; then
+    if python3 - "$out/stopping-$attempt.json" "$ordinary_id" "$maintenance_id" <<'PY_EXCLUSIVE_HELD'
 import json,sys
 owners=json.load(open(sys.argv[1]))['owners']; ordinary,maintenance=(owners[run] for run in sys.argv[2:])
-assert ordinary['unit']['ActiveState'] not in ('active','activating','deactivating')
-assert ordinary['completion.v1']['kind']=='complete' and not ordinary['processes'] and not any(root['exists'] for root in ordinary['roots'].values())
+assert ordinary['metadata']['execution_class']=='ordinary' and ordinary['phase.v1']['phase']=='running'
+assert ordinary['unit']['ActiveState']=='deactivating', 'the admitted predecessor must still be in its real stop/cleanup path'
+assert ordinary['terminal.v1']['kind']=='command' and ordinary['terminal.v1']['exit_code']=='100'
 assert maintenance['metadata']['execution_class']=='exclusive'
-assert maintenance['unit']['ActiveState']=='active' and maintenance['phase.v1']['phase'] in ('preparing','running')
+assert maintenance['unit']['ActiveState']=='active' and maintenance['phase.v1']['phase']=='waiting_for_lease'
 main=maintenance['processes'][maintenance['unit']['MainPID']]
 assert any(fd['target']=='/run/lock/overdrive-metal-shared.lock' and 'FLOCK' in fd['fdinfo'] and 'WRITE' in fd['fdinfo'] for fd in main['fds'].values()), 'the actual exclusive owner must hold the canonical barrier'
 PY_EXCLUSIVE_HELD
-    then cp "$out/admitted-$attempt.json" "$out/maintenance-admitted.json"; break; fi
+    then cp "$out/stopping-$attempt.json" "$out/maintenance-stopping-predecessor.json"; break; fi
   fi
   if ! kill -0 "$maintenance_controller" 2>/dev/null; then break; fi
   printf "phase=admission attempt=%s timestamp=%s\n" "$attempt" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$out/observations.log"
   sleep 0.05
 done
-[ -f "$out/maintenance-admitted.json" ]
-# Register behind the observed EX descriptor as soon as admission is held,
-# including source/preflight preparation. Collected body output arrives only
-# after command completion and cannot establish this live-owner boundary.
+[ -f "$out/maintenance-stopping-predecessor.json" ]
+# Register behind the real EX descriptor while the previously admitted unit is
+# still stopping. Its waiting record must not become another admitted predecessor.
 (cd "$checkout" && exec cargo xtask metal run -- cargo check -p xtask) > "$out/waiter.stdout" 2> "$out/waiter.stderr" &
 waiter_controller=$!
 for ((attempt=0; attempt<100; attempt++)); do
   waiter_id="$(run_id "$out/waiter.stderr")"
-  if [ -n "$waiter_id" ] && observe "$maintenance_id" "$waiter_id" > "$out/waiter-$attempt.json" 2> "$out/waiter-query-$attempt.stderr"; then
-    if python3 - "$out/waiter-$attempt.json" "$maintenance_id" "$waiter_id" <<'PY'
+  if [ -n "$waiter_id" ] && observe "$ordinary_id" "$maintenance_id" "$waiter_id" > "$out/waiter-$attempt.json" 2> "$out/waiter-query-$attempt.stderr"; then
+    if python3 - "$out/waiter-$attempt.json" "$ordinary_id" "$maintenance_id" "$waiter_id" <<'PY'
 import json,sys
-x=json.load(open(sys.argv[1]))['owners']; m,w=x[sys.argv[2]],x[sys.argv[3]]
+owners=json.load(open(sys.argv[1]))['owners']; ordinary,m,w=(owners[run] for run in sys.argv[2:])
+assert ordinary['metadata']['execution_class']=='ordinary' and ordinary['phase.v1']['phase']=='running'
+assert ordinary['unit']['ActiveState']=='deactivating', 'the admitted predecessor must still be stopping alongside the unadmitted waiter'
+assert ordinary['terminal.v1']['kind']=='command' and ordinary['terminal.v1']['exit_code']=='100'
 assert m['metadata']['execution_class']=='exclusive'
-assert m['unit']['ActiveState']=='active' and m['phase.v1']['phase'] in ('preparing','running')
+assert m['unit']['ActiveState']=='active' and m['phase.v1']['phase']=='waiting_for_lease'
 main=m['processes'][m['unit']['MainPID']]
 assert any(fd['target']=='/run/lock/overdrive-metal-shared.lock' and 'FLOCK' in fd['fdinfo'] and 'WRITE' in fd['fdinfo'] for fd in main['fds'].values()), 'the exclusive owner must still hold admission'
 assert w['metadata']['execution_class']=='ordinary'
@@ -116,6 +119,28 @@ PY
   sleep 0.01
 done
 [ -f "$out/unadmitted-waiter.json" ]
+# The predecessor may now finish stopping. EX must pass its admitted-unit wait
+# while the registered ordinary waiter remains unadmitted behind the same lock.
+for ((attempt=0; attempt<1200; attempt++)); do
+  if observe "$ordinary_id" "$maintenance_id" "$waiter_id" > "$out/progress-$attempt.json" 2> "$out/progress-query-$attempt.stderr"; then
+    if python3 - "$out/progress-$attempt.json" "$ordinary_id" "$maintenance_id" "$waiter_id" <<'PY_EXCLUSIVE_PROGRESS'
+import json,sys
+owners=json.load(open(sys.argv[1]))['owners']; ordinary,m,w=(owners[run] for run in sys.argv[2:])
+assert ordinary['unit']['ActiveState'] not in ('active','activating','deactivating')
+assert ordinary['completion.v1']['kind']=='complete' and not ordinary['processes'] and not any(root['exists'] for root in ordinary['roots'].values())
+assert m['metadata']['execution_class']=='exclusive'
+assert m['unit']['ActiveState']=='active' and m['phase.v1']['phase'] in ('preparing','running')
+main=m['processes'][m['unit']['MainPID']]
+assert any(fd['target']=='/run/lock/overdrive-metal-shared.lock' and 'FLOCK' in fd['fdinfo'] and 'WRITE' in fd['fdinfo'] for fd in main['fds'].values())
+assert w['metadata']['execution_class']=='ordinary' and w['unit']['ActiveState']=='active' and w['phase.v1']['phase']=='waiting_for_lease'
+assert not any(fd['target']=='/run/lock/overdrive-metal-shared.lock' and 'FLOCK' in fd['fdinfo'] for process in w['processes'].values() for fd in process['fds'].values())
+PY_EXCLUSIVE_PROGRESS
+    then cp "$out/progress-$attempt.json" "$out/maintenance-passed-unadmitted-waiter.json"; break; fi
+  fi
+  if ! kill -0 "$maintenance_controller" 2>/dev/null; then break; fi
+  sleep 0.05
+done
+[ -f "$out/maintenance-passed-unadmitted-waiter.json" ]
 set +e
 wait "$ordinary_controller"; ordinary_status=$?
 wait "$maintenance_controller"; maintenance_status=$?
