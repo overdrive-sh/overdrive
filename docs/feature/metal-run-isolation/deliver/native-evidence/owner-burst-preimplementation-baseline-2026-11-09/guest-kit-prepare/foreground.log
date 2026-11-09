@@ -1,0 +1,228 @@
+   Compiling unicode-ident v1.0.24
+   Compiling proc-macro2 v1.0.106
+   Compiling quote v1.0.45
+   Compiling libc v0.2.190
+   Compiling serde_core v1.0.228
+   Compiling cfg-if v1.0.4
+   Compiling once_cell v1.21.4
+   Compiling serde v1.0.228
+   Compiling version_check v0.9.5
+   Compiling typenum v1.20.0
+   Compiling lazy_static v1.5.0
+   Compiling memchr v2.8.0
+   Compiling zerocopy v0.8.48
+   Compiling pin-project-lite v0.2.17
+   Compiling object v0.37.3
+   Compiling sharded-slab v0.1.7
+   Compiling thread_local v1.1.9
+   Compiling zmij v1.0.21
+   Compiling tracing-core v0.1.36
+   Compiling owo-colors v4.3.0
+   Compiling utf8parse v0.2.2
+   Compiling anstyle-parse v1.0.0
+   Compiling tracing v0.1.44
+   Compiling tracing-subscriber v0.3.23
+   Compiling gimli v0.32.3
+   Compiling rustix v1.1.4
+   Compiling itoa v1.0.18
+   Compiling generic-array v0.14.7
+   Compiling thiserror v1.0.69
+   Compiling getrandom v0.4.2
+   Compiling anstyle v1.0.14
+   Compiling eyre v0.6.12
+   Compiling colorchoice v1.0.5
+   Compiling is_terminal_polyfill v1.70.2
+   Compiling adler2 v2.0.1
+   Compiling camino v1.2.2
+   Compiling hashbrown v0.17.0
+   Compiling equivalent v1.0.2
+   Compiling serde_json v1.0.149
+   Compiling anstyle-query v1.1.5
+   Compiling color-spantrace v0.3.0
+   Compiling indexmap v2.14.0
+   Compiling addr2line v0.25.1
+   Compiling anstream v1.0.0
+   Compiling syn v2.0.117
+   Compiling miniz_oxide v0.8.9
+   Compiling tracing-error v0.2.1
+   Compiling toml_write v0.1.2
+   Compiling clap_lex v1.1.0
+   Compiling time-core v0.1.7
+   Compiling num-conv v0.1.0
+   Compiling powerfmt v0.2.0
+   Compiling thiserror v2.0.18
+   Compiling winnow v0.7.15
+   Compiling indenter v0.3.4
+   Compiling strsim v0.11.1
+   Compiling bitflags v2.11.1
+   Compiling heck v0.5.0
+   Compiling rustc-demangle v0.1.27
+   Compiling clap_builder v4.6.0
+   Compiling deranged v0.5.8
+   Compiling time-macros v0.2.25
+   Compiling semver v1.0.28
+   Compiling fastrand v2.4.1
+   Compiling block-buffer v0.10.4
+   Compiling crypto-common v0.1.7
+   Compiling digest v0.10.7
+   Compiling dotenvy v0.15.7
+   Compiling hex v0.4.3
+   Compiling ppv-lite86 v0.2.21
+   Compiling getrandom v0.2.17
+   Compiling rand_core v0.6.4
+   Compiling errno v0.3.14
+   Compiling rand_chacha v0.3.1
+   Compiling cpufeatures v0.2.17
+   Compiling backtrace v0.3.76
+   Compiling sha2 v0.10.9
+   Compiling serde_derive v1.0.228
+   Compiling thiserror-impl v1.0.69
+   Compiling thiserror-impl v2.0.18
+   Compiling clap_derive v4.6.1
+   Compiling time v0.3.45
+   Compiling rand v0.8.6
+   Compiling color-eyre v0.6.5
+   Compiling clap v4.6.1
+   Compiling tempfile v3.27.0
+   Compiling toml_datetime v0.6.11
+   Compiling serde_spanned v0.6.9
+   Compiling cargo-platform v0.1.9
+   Compiling cargo_metadata v0.18.1
+   Compiling toml_edit v0.22.27
+   Compiling toml v0.8.23
+   Compiling xtask v0.0.0 (/private/tmp/metal-run-isolation-preimplementation-0e8ae265c/xtask)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 21.23s
+     Running `target/debug/xtask metal run -- cargo xtask guest-kit-prepare`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+OVERDRIVE_METAL_RUN_ID=b103df0107d2c5d9ae85f84f
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire canonical metal lease (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_RUN_REGISTERED run_id=b103df0107d2c5d9ae85f84f
+OVERDRIVE_METAL_LEASE_ACQUIRED token=b103df0107d2c5d9ae85f84f pid=2651020
+
+########## [bootstrap] acquire metal tree lock (/run/lock/overdrive-metal-tree-overdrive-branches-metal-run-isolation-preimplementation-0e8ae265c.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=b103df0107d2c5d9ae85f84f-tree pid=2651118
+
+########## [bootstrap] sync /private/tmp/metal-run-isolation-preimplementation-0e8ae265c -> ubuntu@151.115.99.251:/home/ubuntu/overdrive-branches/metal-run-isolation-preimplementation-0e8ae265c
+
+sent 292,242,760 bytes  received 970,799 bytes  20,221,624.76 bytes/sec
+total size is 1,837,815,052  speedup is 6.27
+
+########## [bootstrap] materialising standalone .git (common dir 7.4G)
+
+sent 629,718,386 bytes  received 97,400 bytes  21,349,687.66 bytes/sec
+total size is 878,345,430  speedup is 1.39
+## HEAD (no branch)
+ D vendors/linux
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+   Compiling unicode-ident v1.0.24
+   Compiling proc-macro2 v1.0.106
+   Compiling quote v1.0.45
+   Compiling serde_core v1.0.228
+   Compiling cfg-if v1.0.4
+   Compiling libc v0.2.190
+   Compiling once_cell v1.21.4
+   Compiling serde v1.0.228
+   Compiling version_check v0.9.5
+   Compiling memchr v2.8.0
+   Compiling zerocopy v0.8.48
+   Compiling typenum v1.20.0
+   Compiling lazy_static v1.5.0
+   Compiling object v0.37.3
+   Compiling pin-project-lite v0.2.17
+   Compiling thread_local v1.1.9
+   Compiling sharded-slab v0.1.7
+   Compiling owo-colors v4.3.0
+   Compiling utf8parse v0.2.2
+   Compiling zmij v1.0.21
+   Compiling tracing-core v0.1.36
+   Compiling anstyle-parse v1.0.0
+   Compiling getrandom v0.4.2
+   Compiling is_terminal_polyfill v1.70.2
+   Compiling eyre v0.6.12
+   Compiling tracing-subscriber v0.3.23
+   Compiling tracing v0.1.44
+   Compiling itoa v1.0.18
+   Compiling gimli v0.32.3
+   Compiling hashbrown v0.17.0
+   Compiling color-spantrace v0.3.0
+   Compiling camino v1.2.2
+   Compiling anstyle v1.0.14
+   Compiling equivalent v1.0.2
+   Compiling thiserror v1.0.69
+   Compiling rustix v1.1.4
+   Compiling colorchoice v1.0.5
+   Compiling anstyle-query v1.1.5
+   Compiling adler2 v2.0.1
+   Compiling generic-array v0.14.7
+   Compiling serde_json v1.0.149
+   Compiling miniz_oxide v0.8.9
+   Compiling syn v2.0.117
+   Compiling anstream v1.0.0
+   Compiling indexmap v2.14.0
+   Compiling tracing-error v0.2.1
+   Compiling block-buffer v0.10.4
+   Compiling crypto-common v0.1.7
+   Compiling toml_write v0.1.2
+   Compiling thiserror v2.0.18
+   Compiling strsim v0.11.1
+   Compiling indenter v0.3.4
+   Compiling rustc-demangle v0.1.27
+   Compiling winnow v0.7.15
+   Compiling bitflags v2.11.1
+   Compiling heck v0.5.0
+   Compiling getrandom v0.2.17
+   Compiling powerfmt v0.2.0
+   Compiling rand_core v0.6.4
+   Compiling time-core v0.1.7
+   Compiling linux-raw-sys v0.12.1
+   Compiling clap_lex v1.1.0
+   Compiling num-conv v0.1.0
+   Compiling time-macros v0.2.25
+   Compiling semver v1.0.28
+   Compiling addr2line v0.25.1
+   Compiling clap_builder v4.6.0
+   Compiling deranged v0.5.8
+   Compiling digest v0.10.7
+   Compiling fastrand v2.4.1
+   Compiling cpufeatures v0.2.17
+   Compiling sha2 v0.10.9
+   Compiling hex v0.4.3
+   Compiling dotenvy v0.15.7
+   Compiling tempfile v3.27.0
+   Compiling ppv-lite86 v0.2.21
+   Compiling rand_chacha v0.3.1
+   Compiling backtrace v0.3.76
+   Compiling rand v0.8.6
+   Compiling time v0.3.45
+   Compiling color-eyre v0.6.5
+   Compiling serde_derive v1.0.228
+   Compiling thiserror-impl v1.0.69
+   Compiling thiserror-impl v2.0.18
+   Compiling clap_derive v4.6.1
+   Compiling clap v4.6.1
+   Compiling serde_spanned v0.6.9
+   Compiling toml_datetime v0.6.11
+   Compiling cargo-platform v0.1.9
+   Compiling cargo_metadata v0.18.1
+   Compiling toml_edit v0.22.27
+   Compiling toml v0.8.23
+   Compiling xtask v0.0.0 (/home/ubuntu/overdrive-branches/metal-run-isolation-preimplementation-0e8ae265c/xtask)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 23.16s
+     Running `target/debug/xtask guest-kit-prepare`
+guest-kit-prepare: overdrive-init overdrive-init -> /home/ubuntu/overdrive-branches/metal-run-isolation-preimplementation-0e8ae265c/target/guest-kit/in-guest/overdrive-init--overdrive-init
+guest-kit-prepare: overdrive-fwd integration -> /home/ubuntu/overdrive-branches/metal-run-isolation-preimplementation-0e8ae265c/target/guest-kit/in-guest/overdrive-fwd--integration
+guest-kit-prepare: overdrive-dataplane integration -> /home/ubuntu/overdrive-branches/metal-run-isolation-preimplementation-0e8ae265c/target/guest-kit/in-guest/overdrive-dataplane--integration
+guest-kit-prepare: overdrive-dataplane overdrive_dataplane -> /home/ubuntu/overdrive-branches/metal-run-isolation-preimplementation-0e8ae265c/target/guest-kit/in-guest/overdrive-dataplane--overdrive_dataplane
+guest-kit-prepare: overdrive-control-plane acceptance -> /home/ubuntu/overdrive-branches/metal-run-isolation-preimplementation-0e8ae265c/target/guest-kit/in-guest/overdrive-control-plane--acceptance
+guest-kit-prepare: overdrive-control-plane integration -> /home/ubuntu/overdrive-branches/metal-run-isolation-preimplementation-0e8ae265c/target/guest-kit/in-guest/overdrive-control-plane--integration
+guest-kit-prepare: overdrive-cli integration -> /home/ubuntu/overdrive-branches/metal-run-isolation-preimplementation-0e8ae265c/target/guest-kit/in-guest/overdrive-cli--integration
+guest-kit-prepare: overdrive-worker integration -> /home/ubuntu/overdrive-branches/metal-run-isolation-preimplementation-0e8ae265c/target/guest-kit/in-guest/overdrive-worker--integration
+guest-kit-prepare: overdrive-worker leg_f_repair -> /home/ubuntu/overdrive-branches/metal-run-isolation-preimplementation-0e8ae265c/target/guest-kit/in-guest/overdrive-worker--leg_f_repair
+guest-kit-prepare: kernel 7.0.0-38-generic, target x86_64-unknown-linux-musl: the lane is prepared

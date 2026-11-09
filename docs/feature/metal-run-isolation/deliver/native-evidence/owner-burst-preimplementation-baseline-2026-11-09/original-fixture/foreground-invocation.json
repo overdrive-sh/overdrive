@@ -1,0 +1,27 @@
+{
+  "command": [
+    "cargo",
+    "xtask",
+    "metal",
+    "run",
+    "--",
+    "cargo",
+    "nextest",
+    "run",
+    "-p",
+    "overdrive-init",
+    "--test",
+    "integration",
+    "--features",
+    "integration-tests,kvm-tests",
+    "-E",
+    "test(=integration::in_guest_lane::a_burst_of_host_aborts_resets_every_connection_in_a_real_guest)",
+    "--no-capture",
+    "--no-fail-fast"
+  ],
+  "started_at": "2026-11-09T10:39:22.939218+00:00",
+  "source_head": "0e8ae265c2d80d98c345b342a396057940837e3a",
+  "source_status": "",
+  "finished_at": "2026-11-09T10:40:41.880131+00:00",
+  "exit_code": 100
+}
