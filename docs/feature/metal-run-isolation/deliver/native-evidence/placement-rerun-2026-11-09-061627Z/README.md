@@ -58,3 +58,20 @@ and does not record the target `ldd` file or its downstream helper closure.
 The direct-native V1C success establishes the host's existing scripted-image
 path, but does not establish that the outer guest has the same helper inputs.
 No new API, fallback, product behavior, or test oracle is implicated.
+
+## Canonical read-only target helper probe
+
+After the placement capture, one read-only command ran through the existing
+exclusive Metal entry point. Run `0d0e9d1b211cf7d68b933ff2` completed with
+status 0. It reported target architecture `x86_64`; `/usr/bin/ldd` resolves to
+itself, is mode 0755 root:root, and is a Bourne-Again shell script with
+shebang `#!/bin/bash`. `/bin/bash` is an ELF executable using
+`/lib64/ld-linux-x86-64.so.2`; `ldd /bin/bash` reports `libtinfo.so.6`,
+`libc.so.6`, and that loader. `ldd /usr/sbin/tc` reports `libbpf.so.1`,
+`libelf.so.1`, `libmnl.so.0`, `libcap.so.2`, `libm.so.6`, `libxtables.so.12`,
+`libc.so.6`, `libz.so.1`, `libzstd.so.1`, and the same loader.
+
+The bounded probe retained the ldd shebang and Bash runtime set; it printed
+only the first twelve ldd script lines, so it does not claim an exhaustive list
+of any further external helper commands in that script. This is read-only host
+metadata, not evidence that the nested GuestKit image already has those files.
