@@ -1,0 +1,31 @@
+Traceback (most recent call last):
+  File "<stdin>", line 3, in <module>
+AssertionError
+Traceback (most recent call last):
+  File "<stdin>", line 3, in <module>
+AssertionError
+Traceback (most recent call last):
+  File "<stdin>", line 3, in <module>
+AssertionError
+Traceback (most recent call last):
+  File "<stdin>", line 3, in <module>
+AssertionError
+Traceback (most recent call last):
+  File "<stdin>", line 3, in <module>
+AssertionError
+Traceback (most recent call last):
+  File "<stdin>", line 3, in <module>
+AssertionError
+Traceback (most recent call last):
+  File "<stdin>", line 3, in <module>
+AssertionError
+Traceback (most recent call last):
+  File "<stdin>", line 4, in <module>
+AssertionError: the actual selected body has not been observed in its owned guest console
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.07s
+     Running `target/debug/xtask metal run -- cargo nextest run -p overdrive-fwd --test integration --features integration-tests,kvm-tests -E 'test(integration::guest_boundary::a_guest_application_reset_reaches_the_host_application_as_a_reset)' --no-capture`
+xtask: running metal run (one bootstrap lease session)
+OVERDRIVE_METAL_RUN_ID=a52bdbc1f4a0ecbd65be1cb3
+OVERDRIVE_METAL_RUN_STARTED run_id=a52bdbc1f4a0ecbd65be1cb3
+OVERDRIVE_METAL_RUN_COMPLETE run_id=a52bdbc1f4a0ecbd65be1cb3 exit_code=100 cause=command_returned
+named-nested: expected 0, got 100

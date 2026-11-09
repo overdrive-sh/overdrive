@@ -1,0 +1,6 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.08s
+     Running `target/debug/xtask metal run --exclusive -- python3 -c 'import shutil,sys; shutil.rmtree(sys.argv[1])' /tmp/metal-placement-foreign.YRaxCsGv`
+xtask: running metal run (one bootstrap lease session)
+OVERDRIVE_METAL_RUN_ID=c531a61e10dabacb001bd7ac
+OVERDRIVE_METAL_RUN_STARTED run_id=c531a61e10dabacb001bd7ac
+OVERDRIVE_METAL_RUN_COMPLETE run_id=c531a61e10dabacb001bd7ac exit_code=0 cause=command_returned
