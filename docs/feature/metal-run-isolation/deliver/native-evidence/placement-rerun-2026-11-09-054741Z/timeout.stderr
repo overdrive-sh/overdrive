@@ -1,0 +1,6 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.06s
+     Running `target/debug/xtask metal run -- env RUST_LOG=metal_host_boot_id=acdbd1e5-824c-4946-9aa7-e3b67c05d9a5 cargo nextest run --manifest-path infra/metal/tests/fixtures/attempt/Cargo.toml --target-dir target/metal-run-isolation-fixture --run-ignored only -E 'test(selected_attempt_waits_for_its_timeout)' --no-capture`
+xtask: running metal run (one bootstrap lease session)
+OVERDRIVE_METAL_RUN_ID=3b72eb14a3ae113280e8e62c
+OVERDRIVE_METAL_RUN_STARTED run_id=3b72eb14a3ae113280e8e62c
+OVERDRIVE_METAL_RUN_COMPLETE run_id=3b72eb14a3ae113280e8e62c exit_code=100 cause=command_returned

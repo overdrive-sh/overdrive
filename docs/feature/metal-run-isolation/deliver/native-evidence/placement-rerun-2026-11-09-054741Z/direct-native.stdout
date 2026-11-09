@@ -1,0 +1,55 @@
+/usr/bin/ssh
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire exclusive physical-maintenance barrier (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_RUN_REGISTERED run_id=e0d720ab1d2a2919487e7424
+OVERDRIVE_METAL_LEASE_ACQUIRED token=e0d720ab1d2a2919487e7424 pid=2162964
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/ouagadougou -> ubuntu@151.115.99.251:/home/ubuntu/overdrive-worktrees/e3d831d7dafe621226ae6047ebcac3536f37470cafcf5dbb64eb9598886af410
+
+sent 2,101,941 bytes  received 55,806 bytes  863,098.80 bytes/sec
+total size is 2,068,361,920  speedup is 958.57
+
+########## [bootstrap] materialising standalone .git (common dir 7.4G)
+
+sent 392,927 bytes  received 18,992 bytes  274,612.67 bytes/sec
+total size is 876,474,222  speedup is 2,127.78
+## marcus-sa/nw-bugfix-crash-restart-tasks...origin/marcus-sa/nw-bugfix-crash-restart-tasks [ahead 173, behind 1]
+ M AGENTS.md
+ M crates/overdrive-control-plane/src/worker/exit_observer.rs
+ M crates/overdrive-control-plane/tests/acceptance/crash_ending_authority.rs
+ M crates/overdrive-control-plane/tests/acceptance/terminal_hook_ownership.rs
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+info: experimental features enabled: wrapper-scripts
+   Compiling ring v0.17.14
+   Compiling rustls v0.23.39
+   Compiling rustls-webpki v0.103.13
+   Compiling rcgen v0.14.8
+   Compiling overdrive-host v0.0.0 (/home/ubuntu/overdrive-worktrees/e3d831d7dafe621226ae6047ebcac3536f37470cafcf5dbb64eb9598886af410/crates/overdrive-host)
+   Compiling overdrive-testing v0.0.0 (/home/ubuntu/overdrive-worktrees/e3d831d7dafe621226ae6047ebcac3536f37470cafcf5dbb64eb9598886af410/crates/overdrive-testing)
+   Compiling overdrive-gateway v0.0.0 (/home/ubuntu/overdrive-worktrees/e3d831d7dafe621226ae6047ebcac3536f37470cafcf5dbb64eb9598886af410/crates/overdrive-gateway)
+   Compiling tokio-rustls v0.26.4
+   Compiling axum-server v0.7.3
+   Compiling overdrive-dataplane v0.0.0 (/home/ubuntu/overdrive-worktrees/e3d831d7dafe621226ae6047ebcac3536f37470cafcf5dbb64eb9598886af410/crates/overdrive-dataplane)
+   Compiling overdrive-worker v0.0.0 (/home/ubuntu/overdrive-worktrees/e3d831d7dafe621226ae6047ebcac3536f37470cafcf5dbb64eb9598886af410/crates/overdrive-worker)
+   Compiling overdrive-control-plane v0.0.0 (/home/ubuntu/overdrive-worktrees/e3d831d7dafe621226ae6047ebcac3536f37470cafcf5dbb64eb9598886af410/crates/overdrive-control-plane)
+   Compiling overdrive-sim v0.0.0 (/home/ubuntu/overdrive-worktrees/e3d831d7dafe621226ae6047ebcac3536f37470cafcf5dbb64eb9598886af410/crates/overdrive-sim)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 11.48s
+────────────
+ Nextest run ID 20c95819-86a1-494b-a287-e357fc8e4758 with nextest profile: default
+    Starting 1 test across 1 binary (35 tests skipped)
+       START [         ] (1/1) overdrive-host::integration integration::vsock_vmm_device::the_fork_boots_and_passes_data_under_the_production_launch_identity
+
+running 1 test
+V1C kernel=7.0.0-38-generic pid=2166331 uid=4200 gid=4200 groups=[991] kvm_gid=991 vhost_gid=991 vhost_fds=1 filter=[("2166331", 1, 2), ("2166332", 1, 2), ("2166333", 1, 2), ("2166334", 1, 2), ("2166336", 1, 2), ("2166337", 1, 2), ("2166339", 1, 2), ("2166340", 1, 2), ("2166341", 1, 2), ("2166342", 1, 2)] data_round_trip_port=39239 argv=["/usr/local/bin/cloud-hypervisor", "--cpus", "boot=1", "--memory", "size=134217728", "--kernel", "/srv/vm/metal/e0d720ab1d2a2919487e7424/v1c-production-identity-2166220-0/run/v1c-production-identity/kernel", "--cmdline", "console=ttyS0 panic=1 root=/dev/vda rw overdrive.testpeer=3292296501", "--disk", "path=/srv/vm/metal/e0d720ab1d2a2919487e7424/v1c-production-identity-2166220-0/run/.overdrive-vm-rootfs-v1c-production-identity.img,image_type=raw", "--serial", "file=/srv/vm/metal/e0d720ab1d2a2919487e7424/v1c-production-identity-2166220-0/run/v1c-production-identity/console.log", "--console", "off", "--vsock", "cid=16778246,backend=vhost-kernel", "--api-socket", "/srv/vm/metal/e0d720ab1d2a2919487e7424/v1c-production-identity-2166220-0/run/v1c-production-identity/api", "--seccomp", "true", "--landlock", "--landlock-rules", "path=/srv/vm/metal/e0d720ab1d2a2919487e7424/v1c-production-identity-2166220-0/run/v1c-production-identity,access=rw"]
+test integration::vsock_vmm_device::the_fork_boots_and_passes_data_under_the_production_launch_identity ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 35 filtered out; finished in 2.15s
+
+        PASS [   2.237s] (1/1) overdrive-host::integration integration::vsock_vmm_device::the_fork_boots_and_passes_data_under_the_production_launch_identity
+────────────
+     Summary [   2.239s] 1 test run: 1 passed, 35 skipped
