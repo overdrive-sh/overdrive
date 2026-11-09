@@ -592,7 +592,6 @@ fn skipped_warnings_naming(captured: &CapturedEvents, table: &str, key: &str) ->
 /// CONTRACT_SHAPE: bounded-change.
 #[allow(clippy::doc_markdown, reason = "CONTRACT_SHAPE is required scenario metadata")]
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending DELIVER gateway-svid-issue-failure-occurrence"]
 async fn an_undecodable_gateway_status_row_reads_as_absent_with_one_skipped_warning() {
     let captured = CapturedEvents::default();
     let subscriber = Registry::default().with(captured.clone());

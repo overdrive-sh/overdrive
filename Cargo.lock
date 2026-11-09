@@ -2378,6 +2378,7 @@ dependencies = [
  "tokio-util",
  "toml",
  "tower",
+ "tower-service",
  "tracing",
  "tracing-subscriber",
  "trybuild",

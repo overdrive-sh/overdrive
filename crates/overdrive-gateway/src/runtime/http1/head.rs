@@ -3,18 +3,18 @@
 //!
 //! No function reads a clock, a socket or a global.
 
-use http::header::{CONTENT_LENGTH, HOST, HeaderName, HeaderValue, TRANSFER_ENCODING};
+use http::header::{CONTENT_LENGTH, HeaderName, HeaderValue, TRANSFER_ENCODING};
 use http::{HeaderMap, Method, StatusCode};
 use overdrive_core::public_ingress::PublicHostname;
 
 use super::exchange::BodyFraming;
 use crate::runtime::GatewayLimits;
+use crate::runtime::routing::{RouteAuthorityError, normalize_route_authority};
 
 const CRLF: &[u8] = b"\r\n";
 const HEADER_BLOCK_END: &[u8] = b"\r\n\r\n";
 const HTTP_11: &[u8] = b"HTTP/1.1";
 const HTTP_10: &[u8] = b"HTTP/1.0";
-const PUBLIC_PORT: &str = "443";
 
 /// Byte-level validator applied to every line the gateway reads: a request or
 /// response head (the whole header block), a chunk-size line, a chunk
@@ -82,7 +82,8 @@ pub(crate) fn parse_request_head(
             }
         },
     )?;
-    let authority = check_host(&headers, sni)?;
+    let authority =
+        normalize_route_authority(&headers, sni).map_err(RequestHeadError::Authority)?;
     let framing =
         derive_framing(&headers, FramingRole::Request).map_err(RequestHeadError::Framing)?;
     if let BodyFraming::Length(declared) = framing
@@ -134,12 +135,7 @@ pub(crate) enum RequestHeadError {
     Http10,
     Connect,
     NonOriginFormTarget,
-    HostMissing,
-    HostDuplicate,
-    HostInvalid,
-    HostUserinfo,
-    HostPortNot443,
-    HostSniMismatch,
+    Authority(RouteAuthorityError),
     Framing(FramingFault),
     DeclaredLengthAboveCeiling,
     HeadTooLarge,
@@ -150,16 +146,11 @@ impl RequestHeadError {
     /// 400, 413, 421, 431 or 505 per the Request rules table.
     pub(crate) const fn status(&self) -> http::StatusCode {
         match self {
-            Self::Line(_)
-            | Self::Connect
-            | Self::NonOriginFormTarget
-            | Self::HostMissing
-            | Self::HostDuplicate
-            | Self::HostInvalid
-            | Self::HostUserinfo
-            | Self::HostPortNot443
-            | Self::Framing(_) => StatusCode::BAD_REQUEST,
-            Self::HostSniMismatch => StatusCode::MISDIRECTED_REQUEST,
+            Self::Line(_) | Self::Connect | Self::NonOriginFormTarget | Self::Framing(_) => {
+                StatusCode::BAD_REQUEST
+            }
+            Self::Authority(RouteAuthorityError::SniMismatch) => StatusCode::MISDIRECTED_REQUEST,
+            Self::Authority(_) => StatusCode::BAD_REQUEST,
             Self::DeclaredLengthAboveCeiling => StatusCode::PAYLOAD_TOO_LARGE,
             Self::HeadTooLarge | Self::TooManyHeaders => {
                 StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE
@@ -192,34 +183,6 @@ fn parse_request_line(line: &[u8]) -> Result<(Method, String), RequestHeadError>
     let target =
         String::from_utf8(target.to_vec()).map_err(|_| RequestHeadError::NonOriginFormTarget)?;
     Ok((method, target))
-}
-
-fn check_host(
-    headers: &HeaderMap,
-    sni: &PublicHostname,
-) -> Result<PublicHostname, RequestHeadError> {
-    let mut hosts = headers.get_all(HOST).iter();
-    let host = hosts.next().ok_or(RequestHeadError::HostMissing)?;
-    if hosts.next().is_some() {
-        return Err(RequestHeadError::HostDuplicate);
-    }
-    let host = host.to_str().map_err(|_| RequestHeadError::HostInvalid)?;
-    if host.contains('@') {
-        return Err(RequestHeadError::HostUserinfo);
-    }
-    let name = match host.rsplit_once(':') {
-        Some((name, port)) if port == PUBLIC_PORT => name,
-        Some((_, port)) if !port.is_empty() && port.bytes().all(|octet| octet.is_ascii_digit()) => {
-            return Err(RequestHeadError::HostPortNot443);
-        }
-        Some(_) => return Err(RequestHeadError::HostInvalid),
-        None => host,
-    };
-    let authority = PublicHostname::new(name).map_err(|_| RequestHeadError::HostInvalid)?;
-    if authority.as_str() != sni.as_str() {
-        return Err(RequestHeadError::HostSniMismatch);
-    }
-    Ok(authority)
 }
 
 /// Response head -> typed value. `request_was_head` selects the no-body rule of
@@ -516,6 +479,8 @@ mod laws {
     use http::header::{CONNECTION, CONTENT_LENGTH, HeaderName, HeaderValue, TRANSFER_ENCODING};
     use http::{HeaderMap, StatusCode};
     use proptest::prelude::*;
+
+    use overdrive_core::public_ingress::PublicHostnameError;
 
     use super::*;
     use crate::runtime::proxy_headers::rewrite_request_headers;
@@ -1203,27 +1168,34 @@ mod laws {
     // S-PIG-82: request head policy at its boundaries
     // -----------------------------------------------------------------
 
-    /// S-PIG-82: `RequestHeadError::status` is the Request-rules table: line
-    /// violations, framing faults, a non-origin-form target, `CONNECT` and
-    /// every Host fault except the SNI mismatch are 400; the SNI mismatch is
-    /// 421; a declared length above the ceiling is 413; an oversized head or
-    /// too many fields is 431; a version other than HTTP/1.1 is 505.
+    /// S-PIG-82 (R-67): `RequestHeadError::status` is the Request-rules table. Line
+    /// violations, framing faults, a non-origin-form target, `CONNECT` and every
+    /// `Authority(_)` error except the SNI mismatch are 400; `Authority(SniMismatch)`
+    /// is 421; a declared length above the ceiling is 413; an oversized head or too
+    /// many fields is 431; a version other than HTTP/1.1 is 505. One row per
+    /// `RouteAuthorityError` variant.
     ///
     /// CONTRACT_SHAPE: pure-function.
     #[test]
     fn every_request_head_error_maps_to_its_status() {
-        let table: [(RequestHeadError, u16); 18] = [
+        let table: [(RequestHeadError, u16); 19] = [
             (RequestHeadError::Line(LineViolation::Nul), 400),
             (RequestHeadError::Connect, 400),
             (RequestHeadError::NonOriginFormTarget, 400),
-            (RequestHeadError::HostMissing, 400),
-            (RequestHeadError::HostDuplicate, 400),
-            (RequestHeadError::HostInvalid, 400),
-            (RequestHeadError::HostUserinfo, 400),
-            (RequestHeadError::HostPortNot443, 400),
+            (RequestHeadError::Authority(RouteAuthorityError::MissingHost), 400),
+            (RequestHeadError::Authority(RouteAuthorityError::DuplicateHost), 400),
+            (RequestHeadError::Authority(RouteAuthorityError::NonAsciiHost), 400),
+            (RequestHeadError::Authority(RouteAuthorityError::InvalidAuthority), 400),
+            (RequestHeadError::Authority(RouteAuthorityError::UnsupportedPort { got: 8443 }), 400),
+            (
+                RequestHeadError::Authority(RouteAuthorityError::InvalidHostname(
+                    PublicHostnameError::InvalidLabel,
+                )),
+                400,
+            ),
+            (RequestHeadError::Authority(RouteAuthorityError::SniMismatch), 421),
             (RequestHeadError::Framing(FramingFault::BothLengthAndCoding), 400),
             (RequestHeadError::Framing(FramingFault::ContentLengthOverflow), 400),
-            (RequestHeadError::HostSniMismatch, 421),
             (RequestHeadError::DeclaredLengthAboveCeiling, 413),
             (RequestHeadError::HeadTooLarge, 431),
             (RequestHeadError::TooManyHeaders, 431),
@@ -1237,15 +1209,21 @@ mod laws {
         }
     }
 
-    /// S-PIG-82 (target and Host): a non-origin-form target and `CONNECT` are
-    /// refused; Host missing, duplicated, invalid, with userinfo or with a port
-    /// other than 443 is refused; an explicit `:443` and the canonical Host are
-    /// accepted; a Host that differs from the SNI is a 421.
+    /// S-PIG-82 (target and Host, R-67): a non-origin-form target and `CONNECT` are
+    /// refused; every Host row is the `Authority(<RouteAuthorityError>)` the one
+    /// `normalize_route_authority` produces: missing, duplicated, invalid, with
+    /// userinfo, with a port other than 443 and with a non-canonical port spelling
+    /// are 400; an explicit `:443` and the canonical Host are accepted; a Host that
+    /// differs from the SNI is a 421.
     ///
     /// CONTRACT_SHAPE: pure-function.
     #[test]
     fn target_and_host_rules_hold_at_their_boundaries() {
         let host = |value: &str| block("GET /a HTTP/1.1", &[format!("Host: {value}")]);
+        let authority = |value: &str| match request_error(&host(value)) {
+            Some(RequestHeadError::Authority(error)) => error,
+            other => panic!("Host {value:?}: expected an Authority error, got {other:?}"),
+        };
 
         assert_eq!(request_result(&request_with("GET /a HTTP/1.1", &[])), Ok(BodyFraming::NoBody));
         assert_eq!(request_result(&host("api.example.com:443")), Ok(BodyFraming::NoBody));
@@ -1267,27 +1245,31 @@ mod laws {
 
         assert_eq!(
             request_error(&block("GET /a HTTP/1.1", &[])),
-            Some(RequestHeadError::HostMissing),
+            Some(RequestHeadError::Authority(RouteAuthorityError::MissingHost)),
         );
         assert_eq!(
             request_error(&block(
                 "GET /a HTTP/1.1",
                 &["Host: api.example.com".to_owned(), "Host: api.example.com".to_owned()],
             )),
-            Some(RequestHeadError::HostDuplicate),
+            Some(RequestHeadError::Authority(RouteAuthorityError::DuplicateHost)),
         );
-        assert_eq!(request_error(&host("bad host!")), Some(RequestHeadError::HostInvalid));
+        assert!(matches!(authority("bad host!"), RouteAuthorityError::InvalidHostname(_)));
+        assert_eq!(authority("user@api.example.com"), RouteAuthorityError::InvalidAuthority);
         assert_eq!(
-            request_error(&host("user@api.example.com")),
-            Some(RequestHeadError::HostUserinfo),
+            authority("api.example.com:8443"),
+            RouteAuthorityError::UnsupportedPort { got: 8443 },
         );
-        assert_eq!(
-            request_error(&host("api.example.com:8443")),
-            Some(RequestHeadError::HostPortNot443),
-        );
+        for spelling in [":+443", ":0443", ":00443", ":", ":4a3", ":65536"] {
+            assert_eq!(
+                authority(&format!("api.example.com{spelling}")),
+                RouteAuthorityError::InvalidAuthority,
+                "{spelling:?}",
+            );
+        }
 
         let mismatch = request_error(&host("other.example.com")).expect("Host differs from SNI");
-        assert_eq!(mismatch, RequestHeadError::HostSniMismatch);
+        assert_eq!(mismatch, RequestHeadError::Authority(RouteAuthorityError::SniMismatch));
         assert_eq!(mismatch.status(), StatusCode::MISDIRECTED_REQUEST);
     }
 

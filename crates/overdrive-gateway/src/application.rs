@@ -13,6 +13,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use arc_swap::ArcSwapOption;
+use overdrive_core::aggregate::IntentKey;
 use overdrive_core::dataplane::ServiceFrontend;
 use overdrive_core::id::NodeId;
 use overdrive_core::public_ingress::{
@@ -39,17 +40,15 @@ use crate::certified_key::{
     PublicCertifiedKeyCustody, PublicCertifiedKeyCustodyHandle, PublicCertifiedKeyError,
     PublicCertifiedKeySnapshot,
 };
-use crate::connector::{GatewayUpstreamConnectError, GatewayUpstreamConnector};
+use crate::connector::GatewayUpstreamConnector;
 use crate::frontend::IntentServiceFrontendResolver;
 use crate::ports::{
     GatewayClientMtls, GatewayConnectCleanup, GatewayConnectDataplane,
     GatewayConnectDataplaneError, GatewayConnectIntent, GatewayIdentityLifecycleControl,
     GatewayIdentityLifecycleError, GatewayRelay, GatewayUpstreamSeal, RelayProbeError,
-    ServiceFrontendResolve, ServiceFrontendResolveError,
+    ServiceFrontendResolve,
 };
-use crate::route_set::{
-    PublicRouteSetError, PublicRouteSetHandle, PublicRouteSetOwner, ROUTE_SET_KEY,
-};
+use crate::route_set::{PublicRouteSetError, PublicRouteSetHandle, PublicRouteSetOwner};
 use crate::runtime::GatewayLimits;
 use crate::runtime::exchange::{ConnectionServices, DrainSignal, serve_connection};
 use crate::{GatewayConfig, GatewayConfigError};
@@ -1278,8 +1277,8 @@ struct StatusWriter {
     dirty: bool,
 }
 
-/// A candidate whose gate failed is not re-staged until an owner input changes, because only
-/// an input change (Route, watch gap, certified key, identity) triggers a re-evaluation.
+/// A candidate whose gate failed is not re-staged until an owner input event arrives, because
+/// only an input event (Route, watch gap, certified key, identity) triggers a re-evaluation.
 pub(crate) struct GatewayApplicationOwner {
     node_id: NodeId,
     intent: Arc<dyn IntentStore>,
@@ -1371,7 +1370,7 @@ impl GatewayApplicationOwner {
     pub(crate) async fn run(mut self) -> Result<(), GatewayOwnerTaskError> {
         let mut route_events = self
             .intent
-            .watch(ROUTE_SET_KEY.as_bytes())
+            .watch(IntentKey::public_route_set().as_bytes())
             .await
             .map_err(|_| GatewayOwnerTaskError::Failed)?;
         let mut key_events = self.certified_key.subscribe();
@@ -1587,7 +1586,7 @@ impl GatewayApplicationOwner {
                     .close_application(GatewayApplicationUnavailableCause::CertifiedKeyUnusable)
                     .await;
             }
-            Err(_) => {
+            Err(GatewayApplicationError::CertifiedKeyReferenceMismatch) => {
                 return self
                     .close_application(GatewayApplicationUnavailableCause::CertifiedKeyAbsent)
                     .await;
@@ -2389,19 +2388,9 @@ pub(crate) struct GatewayDrainTimeout {
 }
 
 #[derive(Debug)]
-#[expect(
-    dead_code,
-    reason = "the design pins this closed error taxonomy; these variants have no producer yet"
-)]
 pub(crate) enum GatewayApplicationError {
     CertifiedKeyReferenceMismatch,
     CertifiedKeyHostnameMismatch,
-    Frontend(ServiceFrontendResolveError),
-    Identity(GatewayIdentityLifecycleError),
-    UpstreamProbe(GatewayUpstreamConnectError),
-    Bind(std::io::ErrorKind),
-    WatchGap,
-    Superseded,
 }
 
 // ---------------------------------------------------------------------------

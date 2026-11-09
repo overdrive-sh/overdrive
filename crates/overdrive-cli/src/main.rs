@@ -17,6 +17,7 @@
 use clap::Parser;
 use color_eyre::eyre::Result;
 use overdrive_cli::cli::Cli;
+use overdrive_cli::commands::deploy::DeployResourceOutput;
 use tracing_subscriber::EnvFilter;
 
 fn main() -> Result<()> {
@@ -87,52 +88,35 @@ async fn run(cli: Cli) -> Result<()> {
                 detach,
                 overdrive_cli::commands::deploy::StdoutTerminalProbe::is_terminal(&probe),
             );
-            if stream {
-                // Streaming-default lane — slice 02 step 02-04 shape.
-                match overdrive_cli::commands::deploy::deploy_streaming(args).await {
-                    Ok(out) => {
-                        // The streaming summary already includes the
-                        // operator-facing block — print it verbatim.
-                        print!("{}", out.summary);
-                        if out.exit_code == 0 {
-                            Ok(())
-                        } else {
-                            // Convergence failed — exit with the
-                            // workload's kernel-observed exit code from
-                            // the terminal `Failed` event. Emit a
-                            // discrete exit so the `eyre::Report` path
-                            // does not collapse 1 and 2 into the same
-                            // shell signal.
-                            std::process::exit(out.exit_code);
-                        }
-                    }
-                    Err(err) => {
-                        // Render through the CLI-side error formatter
-                        // so operators see actionable next steps on
-                        // `CliError::Transport`, not the raw Display form.
-                        eprint!("{}", overdrive_cli::render::cli_error(&err));
-                        let code = overdrive_cli::render::cli_error_to_exit_code(&err);
-                        std::process::exit(code);
+            // One dispatch for both document kinds: a workload document takes
+            // the streaming or detached lane as before; a Route document is a
+            // one-shot POST whatever the lane.
+            match overdrive_cli::commands::deploy::deploy_resource(args, stream).await {
+                Ok(DeployResourceOutput::WorkloadStreaming(out)) => {
+                    // The streaming summary already includes the
+                    // operator-facing block — print it verbatim.
+                    print!("{}", out.summary);
+                    if out.exit_code == 0 {
+                        Ok(())
+                    } else {
+                        // Convergence failed — exit with the workload's
+                        // kernel-observed exit code from the terminal
+                        // `Failed` event.
+                        std::process::exit(out.exit_code);
                     }
                 }
-            } else {
-                // Detached / non-TTY lane — JSON ack only, no NDJSON
-                // consumer engaged. Fires when `--detach` is set OR
-                // stdout is redirected (pipe / file / non-TTY).
-                match overdrive_cli::commands::deploy::deploy(args).await {
-                    Ok(out) => {
-                        print!("{}", overdrive_cli::render::workload_submit_accepted(&out));
-                        // Exit code 0 on `Inserted`/`Unchanged` per the
-                        // criteria. The renderer prints the typed
-                        // outcome verbatim so operators see which
-                        // branch fired.
-                        Ok(())
-                    }
-                    Err(err) => {
-                        eprint!("{}", overdrive_cli::render::cli_error(&err));
-                        let code = overdrive_cli::render::cli_error_to_exit_code(&err);
-                        std::process::exit(code);
-                    }
+                Ok(DeployResourceOutput::WorkloadDetached(out)) => {
+                    print!("{}", overdrive_cli::render::workload_submit_accepted(&out));
+                    Ok(())
+                }
+                Ok(DeployResourceOutput::Route(out)) => {
+                    print!("{}", overdrive_cli::render::route_deploy_accepted(&out));
+                    Ok(())
+                }
+                Err(err) => {
+                    eprint!("{}", overdrive_cli::render::cli_error(&err));
+                    let code = overdrive_cli::render::cli_error_to_exit_code(&err);
+                    std::process::exit(code);
                 }
             }
         }

@@ -426,6 +426,26 @@ pub enum ControlPlaneError {
     #[error("public ingress gateway is disabled")]
     GatewayDisabled,
 
+    /// The stored public Route set failed to decode or validate; maps to 500
+    /// `route_decode` with a fixed message.
+    #[error("stored public Route is undecodable")]
+    RouteDecode(#[from] overdrive_core::public_ingress::RouteCodecError),
+
+    /// The public Route set could not be serialised for a write; maps to 500
+    /// `route_encode` with a fixed message.
+    #[error("public Route set could not be serialised")]
+    RouteEncode(overdrive_core::codec::EnvelopeError),
+
+    /// The public Route owner task is gone; maps to 503
+    /// `gateway_owner_unavailable`.
+    #[error("public Route owner is unavailable")]
+    GatewayOwnerUnavailable,
+
+    /// A gateway status point read failed; maps to a redacted 500
+    /// `gateway_status_read` whose body names neither the store nor the cause.
+    #[error("gateway status could not be read")]
+    GatewayStatusRead(#[from] overdrive_gateway::application::GatewayStatusReadError),
+
     #[error(transparent)]
     Intent(#[from] overdrive_core::traits::intent_store::IntentStoreError),
 
@@ -921,6 +941,38 @@ pub fn to_response(err: ControlPlaneError) -> (StatusCode, ErrorBody) {
             ErrorBody {
                 error: "gateway_disabled".into(),
                 message: "public ingress gateway is disabled".into(),
+                field: None,
+            },
+        ),
+        ControlPlaneError::RouteDecode(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ErrorBody {
+                error: "route_decode".into(),
+                message: "stored public Route is undecodable".into(),
+                field: None,
+            },
+        ),
+        ControlPlaneError::RouteEncode(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ErrorBody {
+                error: "route_encode".into(),
+                message: "public Route set could not be serialised".into(),
+                field: None,
+            },
+        ),
+        ControlPlaneError::GatewayStatusRead(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ErrorBody {
+                error: "gateway_status_read".into(),
+                message: "gateway status could not be read".into(),
+                field: None,
+            },
+        ),
+        ControlPlaneError::GatewayOwnerUnavailable => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            ErrorBody {
+                error: "gateway_owner_unavailable".into(),
+                message: "public Route owner is unavailable".into(),
                 field: None,
             },
         ),

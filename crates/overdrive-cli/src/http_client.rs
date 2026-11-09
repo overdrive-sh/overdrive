@@ -208,19 +208,11 @@ impl ApiClient {
     ///
     /// See [`CliError`] variants; a gateway-disabled control plane answers
     /// [`CliError::HttpStatus`] 409 with `error = "gateway_disabled"`.
-    #[allow(
-        clippy::todo,
-        clippy::unused_async,
-        clippy::needless_pass_by_value,
-        clippy::unused_self,
-        reason = "public-ingress DISTILL scaffold: the Route POST body is DELIVER's"
-    )]
     pub async fn submit_route(
         &self,
         input: PublicRouteInput,
     ) -> Result<SubmitRouteResponse, CliError> {
-        let _ = (&self.inner, &self.base, &input);
-        todo!("SCAFFOLD: ApiClient::submit_route")
+        self.post_typed("v1/routes", &input).await
     }
 
     /// `DELETE /v1/routes/{id}` — withdraw the Route named `id`. `id` is one
@@ -232,15 +224,17 @@ impl ApiClient {
     ///
     /// See [`CliError`] variants; a gateway-disabled control plane answers
     /// [`CliError::HttpStatus`] 409 with `error = "gateway_disabled"`.
-    #[allow(
-        clippy::todo,
-        clippy::unused_async,
-        clippy::unused_self,
-        reason = "public-ingress DISTILL scaffold: the Route DELETE call is DELIVER's"
-    )]
     pub async fn withdraw_route(&self, id: &str) -> Result<WithdrawRouteResponse, CliError> {
-        let _ = (&self.inner, &self.base, id);
-        todo!("SCAFFOLD: ApiClient::withdraw_route")
+        let mut url = self.build_url("v1/routes/")?;
+        url.path_segments_mut()
+            .map_err(|()| CliError::ConfigLoad {
+                path: self.base.to_string(),
+                cause: "endpoint URL cannot carry a path".to_owned(),
+            })?
+            .pop_if_empty()
+            .push(id);
+        let resp = self.inner.delete(url).send().await.map_err(|e| self.transport_err(&e))?;
+        self.decode_typed(resp).await
     }
 
     /// `GET /v1/gateway/status` — the redacted gateway status projection (R-53).
@@ -248,15 +242,8 @@ impl ApiClient {
     /// # Errors
     ///
     /// See [`CliError`] variants.
-    #[allow(
-        clippy::todo,
-        clippy::unused_async,
-        clippy::unused_self,
-        reason = "public-ingress DISTILL scaffold: the gateway status GET is DELIVER's"
-    )]
     pub async fn gateway_status(&self) -> Result<GatewayStatusResponse, CliError> {
-        let _ = (&self.inner, &self.base);
-        todo!("SCAFFOLD: ApiClient::gateway_status")
+        self.get_typed("v1/gateway/status").await
     }
 
     /// `POST /v1/workloads` with `Accept: application/json` — submit a

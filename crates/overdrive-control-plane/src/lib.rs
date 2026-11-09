@@ -1009,6 +1009,10 @@ impl ServerConfig {
 pub struct ServerHandle {
     inner: AxumHandle,
     server_task: tokio::task::JoinHandle<std::io::Result<()>>,
+    /// One token per accepted connection's service (see
+    /// [`TrackedMakeService`]); `shutdown` joins it after `server_task` so
+    /// every `AppState` clone a connection task held is dropped on return.
+    connections: tokio_util::task::TaskTracker,
     /// `JoinHandle` for the convergence-tick spawn loop that drains
     /// the `EvaluationBroker` and dispatches actions through the
     /// action shim. See [`run_server_with_obs_and_driver`] for the
@@ -2906,6 +2910,7 @@ impl ServerHandle {
         let Self {
             inner,
             server_task,
+            connections: _,
             convergence_task,
             exit_observer_tasks,
             emit_drain_task,
@@ -2981,7 +2986,14 @@ impl ServerHandle {
     /// Trigger graceful shutdown with a drain deadline. In-flight
     /// requests complete; new connections are refused; the convergence
     /// loop stops draining the broker; the listener is dropped.
-    /// Awaits the server task to completion.
+    /// Awaits the server task and every accepted connection's service to
+    /// completion.
+    ///
+    /// On return, every store handle the node opened is released. The one
+    /// exposure (D-1): a store `spawn_blocking` closure orphaned by a
+    /// force-dropped request can outlive shutdown, bounded by one redb
+    /// transaction; it is unreachable in production because the serve process
+    /// exits after shutdown.
     ///
     /// Ordering — convergence task FIRST, then axum graceful, then
     /// `server_task` join, then exit-observer task last. The
@@ -3066,6 +3078,15 @@ impl ServerHandle {
         tracing::debug!(name: "serve.shutdown.stage_begin", stage = "server_task");
         let _ = self.server_task.await;
         tracing::debug!(name: "serve.shutdown.stage_complete", stage = "server_task");
+
+        // 3b. Join every accepted connection's service. `server_task`
+        //     returning does not drop the connection tasks' `AppState`
+        //     clones (and so their store handles); the tracker resolves once
+        //     each per-connection service has been dropped.
+        tracing::debug!(name: "serve.shutdown.stage_begin", stage = "connections");
+        self.connections.close();
+        self.connections.wait().await;
+        tracing::debug!(name: "serve.shutdown.stage_complete", stage = "connections");
 
         // 4. Cancel the observer's shutdown token, then await the
         //    observer task. The observer's `tokio::select!`
@@ -3747,6 +3768,63 @@ pub async fn run_server_with_obs_and_drivers(
         guest_network_exec,
     )
     .await
+}
+
+/// The make-service `axum_server` serves: each accepted connection gets a
+/// [`TrackedConnection`] carrying one `TaskTracker` token, so
+/// [`ServerHandle::shutdown`] can join every connection's service.
+struct TrackedMakeService {
+    router: Router,
+    tracker: tokio_util::task::TaskTracker,
+}
+
+impl<Target> tower_service::Service<Target> for TrackedMakeService {
+    type Response = TrackedConnection;
+    type Error = std::convert::Infallible;
+    type Future = std::future::Ready<Result<TrackedConnection, std::convert::Infallible>>;
+
+    fn poll_ready(
+        &mut self,
+        _cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        std::task::Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, _target: Target) -> Self::Future {
+        std::future::ready(Ok(TrackedConnection {
+            router: self.router.clone(),
+            _token: Arc::new(self.tracker.token()),
+        }))
+    }
+}
+
+/// One connection's service: the router plus the connection's tracker token,
+/// released when the last clone of the service (the connection or its
+/// force-dropped task) drops.
+#[derive(Clone)]
+struct TrackedConnection {
+    router: Router,
+    _token: Arc<tokio_util::task::task_tracker::TaskTrackerToken>,
+}
+
+impl<Body> tower_service::Service<axum::http::Request<Body>> for TrackedConnection
+where
+    Router: tower_service::Service<axum::http::Request<Body>>,
+{
+    type Response = <Router as tower_service::Service<axum::http::Request<Body>>>::Response;
+    type Error = <Router as tower_service::Service<axum::http::Request<Body>>>::Error;
+    type Future = <Router as tower_service::Service<axum::http::Request<Body>>>::Future;
+
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        tower_service::Service::poll_ready(&mut self.router, cx)
+    }
+
+    fn call(&mut self, request: axum::http::Request<Body>) -> Self::Future {
+        tower_service::Service::call(&mut self.router, request)
+    }
 }
 
 /// The boot sequence of § *Composition* over `guest_network`'s owner.
@@ -4832,7 +4910,9 @@ async fn boot_server(
     let server =
         axum_server::from_tcp_rustls(std_listener, axum_rustls).handle(axum_handle.clone());
 
-    let server_task = tokio::spawn(async move { server.serve(router.into_make_service()).await });
+    let connections = tokio_util::task::TaskTracker::new();
+    let make_service = TrackedMakeService { router, tracker: connections.clone() };
+    let server_task = tokio::spawn(async move { server.serve(make_service).await });
 
     // Public-ingress gateway, boot step G4: start the Route, custody,
     // application, connection and gate tasks. The gate runs the relay and
@@ -4863,6 +4943,7 @@ async fn boot_server(
     Ok(ServerHandle {
         inner: axum_handle,
         server_task,
+        connections,
         convergence_task,
         exit_observer_tasks,
         emit_drain_task,

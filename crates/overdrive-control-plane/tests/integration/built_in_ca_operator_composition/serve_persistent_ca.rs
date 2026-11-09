@@ -552,24 +552,12 @@ const ROOT_CERT_MATERIAL_KEY: &[u8] = b"ca/root/cert-material/v1";
 /// envelope. Mirrors `ca_boot::ROOT_KEY_ENVELOPE_KEY`.
 const ROOT_KEY_ENVELOPE_KEY: &[u8] = b"ca/root/key-envelope/v1";
 
-/// Open the persisted IntentStore out of band, retrying with an ASYNC sleep
-/// while the just-shut-down `run_server`'s background tasks finish releasing the
-/// redb single-writer lock (`DatabaseAlreadyOpen` is transient post-shutdown —
-/// the `AppState` store Arc drops as the joined task closures are reaped, which
-/// needs the tokio runtime to keep progressing, so a BLOCKING sleep would
-/// deadlock the release). Panics if the lock never releases within the window.
-async fn open_persisted_intent_store(dirs: &ServeDirs) -> overdrive_store_local::LocalIntentStore {
-    for _ in 0..100 {
-        match overdrive_store_local::LocalIntentStore::open(dirs.intent_redb()) {
-            Ok(store) => return store,
-            Err(_) => {
-                tokio::task::yield_now().await;
-                tokio::time::sleep(Duration::from_millis(20)).await;
-            }
-        }
-    }
+/// Open the persisted IntentStore out of band. `run_server`'s shutdown has
+/// released every store handle by the time it returns, so one direct open
+/// suffices.
+fn open_persisted_intent_store(dirs: &ServeDirs) -> overdrive_store_local::LocalIntentStore {
     overdrive_store_local::LocalIntentStore::open(dirs.intent_redb())
-        .expect("open persisted IntentStore (redb lock did not release after shutdown)")
+        .expect("open persisted IntentStore")
 }
 
 /// Open the persisted IntentStore and read the public root cert material bytes
@@ -577,7 +565,7 @@ async fn open_persisted_intent_store(dirs: &ServeDirs) -> overdrive_store_local:
 /// scenario that calls this has already persisted the root.
 async fn persisted_root_cert_material(dirs: &ServeDirs) -> Vec<u8> {
     use overdrive_core::traits::intent_store::IntentStore as _;
-    let store = open_persisted_intent_store(dirs).await;
+    let store = open_persisted_intent_store(dirs);
     store
         .get(ROOT_CERT_MATERIAL_KEY)
         .await
@@ -594,7 +582,7 @@ async fn persisted_root_key_envelope_exists(dirs: &ServeDirs) -> bool {
     if !dirs.intent_redb().exists() {
         return false;
     }
-    let store = open_persisted_intent_store(dirs).await;
+    let store = open_persisted_intent_store(dirs);
     store.get(ROOT_KEY_ENVELOPE_KEY).await.expect("IntentStore get envelope").is_some()
 }
 
@@ -608,7 +596,7 @@ async fn persisted_root_key_envelope_exists(dirs: &ServeDirs) -> bool {
 /// distinct cause, so the corruption MUST be structural per ADR-0063 D4.)
 async fn corrupt_root_key_envelope_structurally(dirs: &ServeDirs) {
     use overdrive_core::traits::intent_store::IntentStore as _;
-    let store = open_persisted_intent_store(dirs).await;
+    let store = open_persisted_intent_store(dirs);
     let bytes = store
         .get(ROOT_KEY_ENVELOPE_KEY)
         .await

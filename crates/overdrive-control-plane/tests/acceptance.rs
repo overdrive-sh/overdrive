@@ -189,6 +189,8 @@ mod acceptance {
     mod dns_wire;
     mod error_mapping_exhaustive;
     mod eval_broker_collapse;
+    mod gateway_status_read_error_mapping;
+    mod route_set_error_mapping;
     // reconciler-framework-improvements step 01-02 (ADR-0084 §4, Piece A) —
     // the `spawn_convergence_loop` next-wake table drives resync via
     // `broker.submit` once per period. S-266-02/03/04/05 drive the pure

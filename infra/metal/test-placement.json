@@ -3367,6 +3367,15 @@
       "acceptance::finalize_failed_forward_carries_workload_addr::finalize_failed_stable_keeps_the_running_alloc_workload_addr": {
         "kind": "host-pure"
       },
+      "acceptance::gateway_status_read_error_mapping::a_failed_application_status_read_maps_to_a_redacted_500_gateway_status_read": {
+        "kind": "host-pure"
+      },
+      "acceptance::gateway_status_read_error_mapping::a_failed_certified_key_status_read_maps_to_the_same_redacted_500": {
+        "kind": "host-pure"
+      },
+      "acceptance::gateway_status_read_error_mapping::both_status_read_variants_produce_an_identical_body": {
+        "kind": "host-pure"
+      },
       "acceptance::generation_read_coupling::reconciler_observes_generation_written_at_for_workload_generation_key": {
         "kind": "host-pure"
       },
@@ -3635,6 +3644,15 @@
         "kind": "host-pure"
       },
       "acceptance::restart_workload_unknown::restart_on_unknown_id_is_404_with_no_mutation_and_no_enqueue": {
+        "kind": "host-pure"
+      },
+      "acceptance::route_set_error_mapping::a_gone_route_owner_maps_to_a_503_gateway_owner_unavailable": {
+        "kind": "host-pure"
+      },
+      "acceptance::route_set_error_mapping::a_route_decode_failure_maps_to_a_500_route_decode_without_cause_text": {
+        "kind": "host-pure"
+      },
+      "acceptance::route_set_error_mapping::a_route_encode_failure_maps_to_a_500_route_encode_distinct_from_route_decode": {
         "kind": "host-pure"
       },
       "acceptance::row_body_conversions::alloc_status_row_body_carries_all_four_fields_verbatim": {

@@ -23,7 +23,9 @@ use overdrive_core::guest_network::ServeShutdownRequest;
 use overdrive_core::guest_transport::NodeVsockPortConfig;
 use overdrive_core::id::PublicCertifiedKeyId;
 use overdrive_core::traits::cgroup_fs::CgroupFs;
-use overdrive_gateway::{GatewayConfig, GatewayConfigError};
+use overdrive_gateway::{
+    GatewayConfig, GatewayConfigError, GatewayConfigField, ManualCertifiedKeyConfig,
+};
 use overdrive_host::RealCgroupFs;
 use url::Url;
 
@@ -81,14 +83,33 @@ impl ServeArgs {
     /// # Errors
     ///
     /// [`GatewayConfigError::PartialEnablement`] for a partial set.
-    #[allow(
-        clippy::todo,
-        clippy::unused_self,
-        clippy::missing_const_for_fn,
-        reason = "public-ingress DISTILL scaffold: the enablement truth table is DELIVER's"
-    )]
     pub fn gateway_config(&self) -> Result<Option<GatewayConfig>, GatewayConfigError> {
-        todo!("SCAFFOLD: ServeArgs::gateway_config")
+        match (
+            self.gateway_address,
+            self.gateway_certified_key_id.as_ref(),
+            self.gateway_certificate_chain.as_ref(),
+            self.gateway_private_key.as_ref(),
+        ) {
+            (None, None, None, None) => Ok(None),
+            (Some(address), Some(id), Some(chain), Some(key)) => {
+                let manual = ManualCertifiedKeyConfig::new(id.clone(), chain.clone(), key.clone());
+                Ok(Some(GatewayConfig::new(address, manual)))
+            }
+            (address, id, chain, key) => {
+                let present = [
+                    (GatewayConfigField::Address, address.is_some()),
+                    (GatewayConfigField::CertifiedKeyId, id.is_some()),
+                    (GatewayConfigField::CertificateChainPath, chain.is_some()),
+                    (GatewayConfigField::PrivateKeyPath, key.is_some()),
+                ];
+                let missing = present
+                    .into_iter()
+                    .filter(|(_, supplied)| !supplied)
+                    .map(|(field, _)| field)
+                    .collect();
+                Err(GatewayConfigError::PartialEnablement { missing })
+            }
+        }
     }
 }
 
@@ -122,7 +143,10 @@ impl ServeHandle {
 
     /// Trigger graceful shutdown. In-flight requests complete within a
     /// 5-second deadline; new connections are refused immediately.
-    /// Awaits the server task to completion.
+    /// Awaits the server task and every accepted connection's service to
+    /// completion. On return, every store handle the node opened is released,
+    /// qualified by the exposure documented on
+    /// `overdrive_control_plane::ServerHandle::shutdown`.
     ///
     /// # Errors
     ///
@@ -192,6 +216,10 @@ pub async fn run_with_adapters<F>(
 where
     F: FnOnce(&ServerConfig, Arc<dyn CgroupFs>) -> Result<NodeAdapters, ControlPlaneError>,
 {
+    // The first operation: a partial `--gateway-*` set is refused before any
+    // startup effect (probe, store open, bind).
+    let gateway =
+        args.gateway_config().map_err(|source| CliError::GatewayConfiguration { source })?;
     let requested_endpoint = format!("https://{}", args.bind);
 
     // ADR-0054 § Composition root wiring — Earned-Trust probe, BEFORE the
@@ -215,6 +243,7 @@ where
         data_dir: args.data_dir,
         operator_config_dir: args.config_dir,
         vsock_ports: args.vsock_ports,
+        gateway,
         ..ServerConfig::new()
     };
     let map_boot_error = |e: ControlPlaneError| {

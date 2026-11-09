@@ -1309,6 +1309,20 @@ impl IntentKey {
         b"workflows/"
     }
 
+    /// The one intent key holding the singleton public-ingress Route set.
+    /// The only production definition of this literal.
+    pub fn public_route_set() -> Self {
+        Self(b"public-ingress/route-set".to_vec())
+    }
+
+    /// The prefix under which public certified-key custody records are
+    /// stored (`public-ingress/certified-key/<PublicCertifiedKeyId>`). The
+    /// only production definition of this literal.
+    #[must_use]
+    pub const fn public_certified_key_prefix() -> &'static str {
+        "public-ingress/certified-key/"
+    }
+
     /// Derive the intent key for an Allocation.
     pub fn for_allocation(id: &AllocationId) -> Self {
         Self(format!("allocations/{id}").into_bytes())

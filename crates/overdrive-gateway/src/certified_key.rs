@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
+use overdrive_core::aggregate::IntentKey;
 use overdrive_core::id::NodeId;
 use overdrive_core::public_ingress::{
     CertificateFingerprint, CertifiedKeyFailure, CertifiedKeyGeneration, CertifiedKeyProvenance,
@@ -296,9 +297,6 @@ impl PublicCertifiedKeyAvailability {
     }
 }
 
-/// Prefix of the protected custody records.
-pub(crate) const CUSTODY_PREFIX: &str = "public-ingress/certified-key/";
-
 /// Private finite maintenance cadence of the custody owner and the manual
 /// source: expiry rechecks, status retry and file refresh.
 const MAINTENANCE_CADENCE: Duration = Duration::from_secs(30);
@@ -442,7 +440,7 @@ impl PublicCertifiedKeyCustody {
     }
 
     fn record_key(id: &PublicCertifiedKeyId) -> String {
-        format!("{CUSTODY_PREFIX}{}", id.as_str())
+        format!("{}{}", IntentKey::public_certified_key_prefix(), id.as_str())
     }
 
     fn adopt(

@@ -3,13 +3,6 @@
 //! Source-local properties implement S-PIG-12 and S-PIG-13.
 
 #![allow(clippy::doc_markdown, reason = "CONTRACT_SHAPE is required metadata")]
-#![cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "authority normalization has no production caller yet; the source-local properties pin it"
-    )
-)]
 
 use http::HeaderMap;
 use http::header::HOST;
@@ -66,6 +59,12 @@ fn split_authority(authority: &str) -> Result<&str, RouteAuthorityError> {
         return Ok(authority);
     };
     if name.is_empty() || port.contains(':') || port.is_empty() {
+        return Err(RouteAuthorityError::InvalidAuthority);
+    }
+    if !port.bytes().all(|octet| octet.is_ascii_digit()) {
+        return Err(RouteAuthorityError::InvalidAuthority);
+    }
+    if port.len() > 1 && port.starts_with('0') {
         return Err(RouteAuthorityError::InvalidAuthority);
     }
     let got: u16 = port.parse().map_err(|_| RouteAuthorityError::InvalidAuthority)?;
@@ -179,7 +178,6 @@ mod properties {
     ///
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER request-authority-single-implementation"]
     fn a_signed_or_zero_padded_port_is_invalid_authority_not_443() {
         for port in ["+443", "0443", "00443", "+0", "00", "000", "+80", "0080", "00443"] {
             assert_eq!(
@@ -208,7 +206,6 @@ mod properties {
         ///
         /// CONTRACT_SHAPE: pure-function.
         #[test]
-        #[ignore = "pending DELIVER request-authority-single-implementation"]
         fn a_non_canonical_spelling_of_any_port_is_invalid_authority(
             port in any::<u16>(),
             zeros in 1usize..4,

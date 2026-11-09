@@ -469,6 +469,10 @@ pub enum RouteValidationError {
     UnknownProtocol,
     #[error("public ingress requires TCP")]
     ProtocolNotTcp,
+    /// A stored Route rebuilt through the validating constructors is not
+    /// equal to the decoded Route (a derived field disagrees with its inputs).
+    #[error("persisted Route is not canonical")]
+    NotCanonical,
 }
 
 /// Route application outcome.
@@ -961,18 +965,86 @@ impl PublicRouteSetV1 {
         archive_envelope(&PublicRouteSetEnvelope::latest(self.clone()))
     }
 
-    /// Decode persisted intent bytes; emits `health.startup.refused` on failure.
+    /// Decode persisted intent bytes into a validated Route set; emits
+    /// `health.startup.refused` on failure.
+    ///
+    /// The envelope is decoded first; a stored Route is then rebuilt through
+    /// the validating constructors, so a well-formed envelope holding a Route
+    /// the submit path would refuse (or whose derived generation disagrees
+    /// with its inputs) is refused too.
     ///
     /// # Errors
     ///
-    /// Returns [`IntentStoreError::Envelope`] for empty, truncated, corrupt or
-    /// future-version bytes.
+    /// [`RouteCodecError::Envelope`] for empty, truncated, corrupt or
+    /// future-version bytes; [`RouteCodecError::InvalidRoute`] for a stored
+    /// Route that fails validation or is not canonical.
     pub fn from_store_bytes(
         bytes: &[u8],
         redb_path: &Path,
         key: Option<&str>,
-    ) -> Result<Self, IntentStoreError> {
-        decode_intent_envelope::<PublicRouteSetEnvelope>(bytes, redb_path, key)
+    ) -> Result<Self, RouteCodecError> {
+        let decoded = decode_intent_envelope::<PublicRouteSetEnvelope>(bytes, redb_path, key)
+            .map_err(|error| match error {
+                IntentStoreError::Envelope { source, .. } => RouteCodecError::Envelope(source),
+                other => unreachable!("decode_intent_envelope only returns Envelope: {other}"),
+            })?;
+        let Some(stored) = decoded.route.as_ref() else {
+            return Ok(decoded);
+        };
+        stored.revalidated().map_err(|validation| {
+            tracing::error!(
+                name: "health.startup.refused",
+                redb_path = %redb_path.display(),
+                key = key.unwrap_or("<unknown>"),
+                validation_error = ?validation,
+                "persisted Route failed validation; control-plane refusing to start",
+            );
+            RouteCodecError::InvalidRoute(validation)
+        })?;
+        Ok(decoded)
+    }
+}
+
+impl Route {
+    /// Rebuild this Route through the validating constructors and require the
+    /// result to equal `self`.
+    fn revalidated(&self) -> Result<(), RouteValidationError> {
+        let route_id =
+            RouteId::new(self.route_id.as_str()).map_err(RouteValidationError::RouteId)?;
+        let public_hostname = PublicHostname::new(self.public_hostname.as_str())
+            .map_err(RouteValidationError::Hostname)?;
+        let path_match = match &self.path_match {
+            PathMatch::Exact(path) => PathMatch::Exact(
+                PublicPath::new(path.as_str()).map_err(RouteValidationError::Path)?,
+            ),
+            PathMatch::SegmentPrefix(path) => PathMatch::SegmentPrefix(
+                PublicPath::new(path.as_str()).map_err(RouteValidationError::Path)?,
+            ),
+        };
+        let public_certified_key_id =
+            PublicCertifiedKeyId::new(self.public_certified_key_id.as_str())
+                .map_err(RouteValidationError::CertifiedKeyId)?;
+        let listener = &self.service_listener;
+        let service =
+            WorkloadId::new(listener.service().as_str()).map_err(RouteValidationError::Service)?;
+        let service_listener =
+            ServiceListenerReference::new(service, listener.port(), listener.protocol())?;
+        let route_generation = RouteGeneration::from_route_fields(
+            &route_id,
+            &public_hostname,
+            &path_match,
+            &service_listener,
+            &public_certified_key_id,
+        );
+        let rebuilt = Self {
+            route_id,
+            route_generation,
+            public_hostname,
+            path_match,
+            service_listener,
+            public_certified_key_id,
+        };
+        if rebuilt == *self { Ok(()) } else { Err(RouteValidationError::NotCanonical) }
     }
 }
 

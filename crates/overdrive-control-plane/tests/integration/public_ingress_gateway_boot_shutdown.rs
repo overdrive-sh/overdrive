@@ -87,7 +87,7 @@ use overdrive_control_plane::{
     BootAdapters, ComposedDataplane, DataplaneComposer, DataplanePlan, GatewayAdapters,
     ServerHandle, run_server_with_obs_and_driver,
 };
-use overdrive_core::aggregate::{DriverInput, ResourcesInput, VmInput};
+use overdrive_core::aggregate::{DriverInput, IntentKey, ResourcesInput, VmInput};
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput, SubmitSpecInput};
 use overdrive_core::ca::kek::KEK_LEN;
 use overdrive_core::ca::root_key_envelope::KekId;
@@ -96,7 +96,9 @@ use overdrive_core::id::{BackendId, NodeId, PublicCertifiedKeyId, SpiffeId};
 use overdrive_core::public_ingress::{
     PublicHostname, PublicRouteInput, ServiceKey, ServiceListenerReferenceInput, SocketCookie,
 };
-use overdrive_core::public_ingress::{PublicRouteSetV1, Route};
+use overdrive_core::public_ingress::{
+    PublicRouteSetV1, Route, RouteCodecError, RouteValidationError,
+};
 use overdrive_core::reconcilers::Reconciler;
 use overdrive_core::traits::ca::{
     Ca, CaError, CaFactory, IntermediateHandle, RootCaHandle, SvidMaterial, SvidRequest,
@@ -1703,11 +1705,6 @@ async fn the_relay_probe_runs_once_per_boot_across_a_route_replacement() {
 // flattened
 // ---------------------------------------------------------------------------
 
-/// The store key of the singleton Route-set record. The gateway crate keeps
-/// the constant crate-private; the stimulus below is addressed to the key the
-/// production owner reads, so a rename there fails these bodies at their
-/// precondition.
-const ROUTE_SET_KEY: &[u8] = b"public-ingress/route-set";
 /// A syntactically valid Route ID that is not the declared one.
 const OTHER_ROUTE_ID: &str = "other-route";
 
@@ -1790,14 +1787,17 @@ impl World {
     /// `IntentStore` port.
     async fn stored_route_set(&self) -> Option<Vec<u8>> {
         self.intent
-            .get(ROUTE_SET_KEY)
+            .get(IntentKey::public_route_set().as_bytes())
             .await
             .expect("read the Route-set key")
             .map(|bytes| bytes.as_ref().to_vec())
     }
 
     async fn store_route_set_bytes(&self, bytes: &[u8]) {
-        self.intent.put(ROUTE_SET_KEY, bytes).await.expect("write the Route-set key");
+        self.intent
+            .put(IntentKey::public_route_set().as_bytes(), bytes)
+            .await
+            .expect("write the Route-set key");
     }
 
     /// The Route-set record fault of S-PIG-140: `bytes` are what the store
@@ -1860,7 +1860,6 @@ impl World {
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER route-set-error-mapping"]
 async fn an_undecodable_stored_route_is_a_typed_500_route_decode_on_post_and_delete() {
     let mut world = World::boot(Spec::enabled(169)).await;
     world
@@ -1896,17 +1895,15 @@ fn envelope_holding_an_invalid_route() -> Vec<u8> {
     // well formed and holds a Route no constructor accepts is refused with
     // `RouteCodecError::InvalidRoute(RouteValidationError::Hostname(_))`, and
     // never with an `Envelope` failure. The two facts together prove the
-    // patched bytes are a well-formed envelope holding an invalid Route. The
-    // variant is read through `Debug` so this file compiles against the
-    // decode's present return type as well as its R-67 return type.
+    // patched bytes are a well-formed envelope holding an invalid Route.
     let refusal = PublicRouteSetV1::from_store_bytes(
         &bytes,
         std::path::Path::new("<fixture>"),
-        Some("public-ingress/route-set"),
+        Some(IntentKey::public_route_set().as_str()),
     )
     .expect_err("the decode refuses a Route no constructor accepts (R-67 (4))");
     assert!(
-        format!("{refusal:?}").starts_with("InvalidRoute(Hostname("),
+        matches!(refusal, RouteCodecError::InvalidRoute(RouteValidationError::Hostname(_))),
         "the patched bytes are a well-formed envelope holding an invalid hostname, got {refusal:?}"
     );
     bytes
@@ -1920,7 +1917,6 @@ fn envelope_holding_an_invalid_route() -> Vec<u8> {
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER route-set-error-mapping"]
 async fn a_well_formed_envelope_holding_an_invalid_route_is_a_typed_500_route_decode() {
     let mut world = World::boot(Spec::enabled(170)).await;
     world
@@ -1986,7 +1982,6 @@ fn keep_a_route_command_in_flight(
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
-#[ignore = "pending DELIVER route-set-error-mapping"]
 async fn a_route_owner_that_ended_in_shutdown_answers_503_gateway_owner_unavailable_on_both_methods()
  {
     let mut world = World::boot(Spec::enabled(171)).await;

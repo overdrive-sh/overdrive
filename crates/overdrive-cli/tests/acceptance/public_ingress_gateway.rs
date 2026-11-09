@@ -88,7 +88,6 @@ fn missing_of(error: &GatewayConfigError) -> &[GatewayConfigField] {
 ///
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER route-operator-surface"]
 fn complete_gateway_flag_set_enables_the_gateway_on_the_supplied_address() {
     let args = serve_args_from(&argv_for_mask(0b1111)).expect("four flags parse");
 
@@ -106,7 +105,6 @@ fn complete_gateway_flag_set_enables_the_gateway_on_the_supplied_address() {
 ///
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER route-operator-surface"]
 fn no_gateway_flags_leave_the_gateway_disabled() {
     let args = serve_args_from(&[]).expect("bare serve parses");
 
@@ -153,7 +151,6 @@ fn repeated_or_malformed_gateway_arguments_are_rejected_at_argv() {
 ///
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER route-operator-surface"]
 fn partial_gateway_flag_sets_name_exactly_the_missing_fields() {
     for mask in 1u8..0b1111 {
         let args = serve_args_from(&argv_for_mask(mask)).expect("partial argv still parses");

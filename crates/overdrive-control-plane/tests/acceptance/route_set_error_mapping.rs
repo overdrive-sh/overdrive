@@ -1,24 +1,17 @@
 //! S-PIG-140 / S-PIG-141 (R-67) unit assertions on `error::to_response`.
 //!
-//! NOT IN THE BUILD. These bodies name `ControlPlaneError::{RouteDecode, RouteEncode,
-//! GatewayOwnerUnavailable}`, which do not exist until roadmap step 05-02 (key
-//! `route-set-error-mapping`). The crafter, in the commit that adds those variants:
-//!   1. moves this file to `crates/overdrive-control-plane/tests/acceptance/route_set_error_mapping.rs`;
-//!   2. adds `mod route_set_error_mapping;` next to `mod error_mapping_exhaustive;` in
-//!      `crates/overdrive-control-plane/tests/acceptance.rs`.
-//! The bodies are not to be edited. `RouteEncode` has no scenario (reachable through no
-//! production port, R-67); this unit assertion is its whole obligation.
+//! `RouteEncode` has no scenario (reachable through no production port, R-67);
+//! this unit assertion is its whole obligation.
 
 use overdrive_control_plane::api::ErrorBody;
 use overdrive_control_plane::error::{ControlPlaneError, to_response};
 use overdrive_core::codec::EnvelopeError;
 use overdrive_core::public_ingress::{PublicRouteSetV1, RouteCodecError};
-use overdrive_core::traits::intent_store::IntentStoreError;
 
 /// A real envelope decode failure, produced by the codec's own public decode.
 fn an_envelope_error() -> EnvelopeError {
     match PublicRouteSetV1::from_store_bytes(&[], std::path::Path::new("<fixture>"), None) {
-        Err(IntentStoreError::Envelope { source, .. }) => source,
+        Err(RouteCodecError::Envelope(source)) => source,
         other => panic!("empty bytes are an envelope failure, got {other:?}"),
     }
 }

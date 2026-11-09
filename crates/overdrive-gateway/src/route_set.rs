@@ -7,6 +7,8 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use overdrive_core::aggregate::IntentKey;
+use overdrive_core::codec::envelope::EnvelopeError;
 use overdrive_core::public_ingress::{
     PublicRouteSetV1, Route, RouteApplyOutcome, RouteCodecError, RouteId, RouteWithdrawOutcome,
 };
@@ -15,9 +17,6 @@ use overdrive_core::traits::intent_store::{IntentStoreError, PutOutcome};
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
-
-/// Store key of the singleton Route-set record.
-pub(crate) const ROUTE_SET_KEY: &str = "public-ingress/route-set";
 
 /// Label handed to the intent codec where a store file path would go: the
 /// `IntentStore` port exposes no path.
@@ -84,6 +83,8 @@ pub enum PublicRouteSetError {
     Intent(IntentStoreError),
     #[error("Route decode failed: {0}")]
     Decode(RouteCodecError),
+    #[error("Route encode failed: {0}")]
+    Encode(EnvelopeError),
     #[error("Route slot is occupied by {current}; attempted {attempted}")]
     OccupiedByDifferentRoute { current: RouteId, attempted: RouteId },
     #[error("Route withdrawal ID {attempted} does not match {current}")]
@@ -107,7 +108,7 @@ impl PublicRouteSetOwner {
     ) -> Result<(Self, PublicRouteSetHandle), PublicRouteSetError> {
         let empty = Self::encode(&PublicRouteSetV1 { route: None })?;
         match intent
-            .put_if_absent(ROUTE_SET_KEY.as_bytes(), empty.as_ref())
+            .put_if_absent(IntentKey::public_route_set().as_bytes(), empty.as_ref())
             .await
             .map_err(PublicRouteSetError::Intent)?
         {
@@ -123,31 +124,33 @@ impl PublicRouteSetOwner {
     fn encode(set: &PublicRouteSetV1) -> Result<Vec<u8>, PublicRouteSetError> {
         set.archive_for_store()
             .map(|bytes| bytes.as_slice().to_vec())
-            .map_err(|error| PublicRouteSetError::Decode(RouteCodecError::Envelope(error)))
+            .map_err(PublicRouteSetError::Encode)
     }
 
     /// The persisted slot; an absent key reads as the empty set.
     pub(crate) async fn read(
         intent: &dyn IntentStore,
     ) -> Result<Option<Route>, PublicRouteSetError> {
-        let Some(bytes) =
-            intent.get(ROUTE_SET_KEY.as_bytes()).await.map_err(PublicRouteSetError::Intent)?
+        let Some(bytes) = intent
+            .get(IntentKey::public_route_set().as_bytes())
+            .await
+            .map_err(PublicRouteSetError::Intent)?
         else {
             return Ok(None);
         };
         PublicRouteSetV1::from_store_bytes(
             &bytes,
             Path::new(INTENT_STORE_LABEL),
-            Some(ROUTE_SET_KEY),
+            Some(IntentKey::public_route_set().as_str()),
         )
         .map(|set| set.route)
-        .map_err(PublicRouteSetError::Intent)
+        .map_err(PublicRouteSetError::Decode)
     }
 
     async fn write(&self, route: Option<Route>) -> Result<(), PublicRouteSetError> {
         let bytes = Self::encode(&PublicRouteSetV1 { route })?;
         self.intent
-            .put(ROUTE_SET_KEY.as_bytes(), bytes.as_slice())
+            .put(IntentKey::public_route_set().as_bytes(), bytes.as_slice())
             .await
             .map_err(PublicRouteSetError::Intent)
     }

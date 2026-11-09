@@ -120,6 +120,9 @@ color-eyre.workspace  = true
 # `ServerHandle` carries a `tokio_util::sync::CancellationToken` that
 # the convergence-loop spawn observes for ordered shutdown.
 tokio-util.workspace  = true
+# The per-connection tracked service in `boot_server` implements the
+# `tower_service::Service` trait `axum_server` serves.
+tower-service.workspace = true
 # Per `fix-convergence-loop-not-spawned` Step 01-02: the broker-mutability
 # adapter wraps `EvaluationBroker` in a `parking_lot::Mutex` so handlers
 # (`submit_job`, `stop_job`) and the spawn loop can call `submit` /

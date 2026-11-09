@@ -35,6 +35,7 @@ use overdrive_core::aggregate::{
 };
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput, SubmitSpecInput};
 use overdrive_core::id::WorkloadId;
+use overdrive_core::public_ingress::{PublicRouteInput, PublicRouteSpecInput};
 use url::Url;
 
 use crate::http_client::{ApiClient, CliError};
@@ -1091,16 +1092,57 @@ pub struct RouteDeployOutput {
 /// # Errors
 ///
 /// See [`CliError`] variants.
-#[allow(
-    clippy::todo,
-    clippy::unused_async,
-    clippy::needless_pass_by_value,
-    reason = "public-ingress DISTILL scaffold: the document discrimination is DELIVER's"
-)]
 pub async fn deploy_resource(
     args: DeployArgs,
     stream_workloads: bool,
 ) -> Result<DeployResourceOutput, CliError> {
-    let _ = (&args, stream_workloads);
-    todo!("SCAFFOLD: deploy_resource")
+    let toml_str = std::fs::read_to_string(&args.spec).map_err(|e| CliError::InvalidSpec {
+        field: "spec".to_string(),
+        message: format!("failed to read `{}`: {e}", args.spec.display()),
+    })?;
+    // Discriminate on the top-level `[route]` table only. The Route's own
+    // validation is the server's: a gateway-disabled node answers before the
+    // document is validated (S-PIG-36).
+    let is_route = toml::from_str::<toml::Table>(&toml_str)
+        .is_ok_and(|document| document.contains_key("route"));
+    if is_route {
+        return deploy_route(&args, &toml_str).await.map(DeployResourceOutput::Route);
+    }
+    if stream_workloads {
+        deploy_streaming(args).await.map(DeployResourceOutput::WorkloadStreaming)
+    } else {
+        deploy(args).await.map(DeployResourceOutput::WorkloadDetached)
+    }
+}
+
+/// A Route document: the `[route]` table, shape-checked only.
+#[derive(serde::Deserialize)]
+struct RouteDocument {
+    route: PublicRouteSpecInput,
+}
+
+/// One-shot `POST /v1/routes` for a Route document.
+async fn deploy_route(args: &DeployArgs, toml_str: &str) -> Result<RouteDeployOutput, CliError> {
+    let document: RouteDocument = toml::from_str(toml_str).map_err(|e| CliError::InvalidSpec {
+        field: "route".to_string(),
+        message: format!("failed to parse Route document: {e}"),
+    })?;
+    let spec = document.route;
+    let input = PublicRouteInput {
+        id: spec.id,
+        hostname: spec.hostname,
+        path: spec.path,
+        path_match: spec.path_match,
+        certified_key: spec.certified_key,
+        target: spec.target,
+    };
+    let client = ApiClient::from_config(&args.config_path)?;
+    let endpoint = client.base_url().clone();
+    let response = client.submit_route(input).await?;
+    Ok(RouteDeployOutput {
+        route_id: response.route_id,
+        route_generation: response.route_generation,
+        outcome: response.outcome,
+        endpoint,
+    })
 }

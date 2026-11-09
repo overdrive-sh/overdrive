@@ -1482,6 +1482,7 @@ pub async fn node_list(
         (status = 400, description = "Validation error", body = api::ErrorBody),
         (status = 409, description = "Gateway disabled, or the singleton is occupied by another Route", body = api::ErrorBody),
         (status = 500, description = "Internal error", body = api::ErrorBody),
+        (status = 503, description = "Route owner unavailable", body = api::ErrorBody),
     ),
     tag = "gateway",
 )]
@@ -1509,8 +1510,9 @@ pub async fn submit_route(
     Ok((status, Json(api::SubmitRouteResponse { route_id, route_generation, outcome })))
 }
 
-/// Map a Route-set command failure: a Route conflict is 409, a store or owner
-/// fault is the 500 class.
+/// Map a Route-set command failure: a Route conflict is 409, an undecodable or
+/// unserialisable Route set is a typed 500, a gone owner is 503, a store fault
+/// is the store's own mapping.
 fn route_set_error(error: overdrive_gateway::route_set::PublicRouteSetError) -> ControlPlaneError {
     use overdrive_gateway::route_set::PublicRouteSetError;
 
@@ -1520,7 +1522,9 @@ fn route_set_error(error: overdrive_gateway::route_set::PublicRouteSetError) -> 
             ControlPlaneError::Conflict { message: error.to_string() }
         }
         PublicRouteSetError::Intent(source) => ControlPlaneError::Intent(source),
-        other => ControlPlaneError::internal("public Route set", other),
+        PublicRouteSetError::Decode(source) => ControlPlaneError::RouteDecode(source),
+        PublicRouteSetError::Encode(source) => ControlPlaneError::RouteEncode(source),
+        PublicRouteSetError::OwnerUnavailable => ControlPlaneError::GatewayOwnerUnavailable,
     }
 }
 
@@ -1537,6 +1541,7 @@ fn route_set_error(error: overdrive_gateway::route_set::PublicRouteSetError) -> 
         (status = 400, description = "Validation error", body = api::ErrorBody),
         (status = 409, description = "Gateway disabled, or a different Route is live", body = api::ErrorBody),
         (status = 500, description = "Internal error", body = api::ErrorBody),
+        (status = 503, description = "Route owner unavailable", body = api::ErrorBody),
     ),
     tag = "gateway",
 )]
@@ -1583,9 +1588,13 @@ pub async fn gateway_status(
             certified_key: None,
         }));
     };
-    let to_error = |error: GatewayStatusReadError| match error {
-        GatewayStatusReadError::Application(source)
-        | GatewayStatusReadError::CertifiedKey(source) => ControlPlaneError::Observation(source),
+    let to_error = |error: GatewayStatusReadError| {
+        let (read, source) = match &error {
+            GatewayStatusReadError::Application(source) => ("application", source),
+            GatewayStatusReadError::CertifiedKey(source) => ("certified_key", source),
+        };
+        tracing::error!(name: "gateway.status.read_failed", read, error = ?source);
+        ControlPlaneError::from(error)
     };
     let application = reads.application_status().await.map_err(to_error)?;
     let certified_key = reads.certified_key_status().await.map_err(to_error)?;

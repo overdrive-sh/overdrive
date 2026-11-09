@@ -147,7 +147,6 @@ async fn intent_keys(data_dir: &Path) -> Vec<String> {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER route-operator-surface"]
 async fn route_deploy_on_a_gateway_disabled_node_is_rejected_before_the_spec_is_parsed() {
     let (handle, tmp) = spawn_gateway_disabled_server().await;
     let config = config_path(tmp.path());
@@ -201,7 +200,6 @@ async fn route_deploy_on_a_gateway_disabled_node_is_rejected_before_the_spec_is_
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER route-operator-surface"]
 async fn route_withdraw_on_a_gateway_disabled_node_is_rejected_before_the_id_is_parsed() {
     let (handle, tmp) = spawn_gateway_disabled_server().await;
     let client = ApiClient::from_config(&config_path(tmp.path())).expect("client from config");
@@ -390,7 +388,6 @@ fn route_input(id: &str, path: &str) -> PublicRouteInput {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER route-operator-surface"]
 async fn route_deploy_is_one_shot_with_the_same_outcome_in_both_stream_modes() {
     let mut first_outcomes = Vec::new();
     for (stream_workloads, octet) in [(false, 170_u8), (true, 171_u8)] {
@@ -462,7 +459,6 @@ async fn route_deploy_is_one_shot_with_the_same_outcome_in_both_stream_modes() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER route-operator-surface"]
 async fn the_operator_client_declares_conflicts_and_rejects_withdraws_and_reads_status() {
     let node = spawn_gateway_enabled_server(172).await;
     let api = ApiClient::from_config(&config_path(node.tmp.path())).expect("operator client");
@@ -505,9 +501,12 @@ async fn the_operator_client_declares_conflicts_and_rejects_withdraws_and_reads_
 }
 
 /// S-PIG-42 — a point-read failure behind `GET /v1/gateway/status` is a 500
-/// with a fixed redacted body: it carries none of the injected error text, no
-/// path, no key or ciphertext text. Once the fault is lifted the next read is
-/// the normal 200 projection.
+/// with the fixed redacted body `gateway_status_read` / "gateway status could
+/// not be read" and no field: it carries none of the injected error text, no
+/// path, no key or ciphertext text. The body is identical whichever point read
+/// fails (the Gateway Application row alone, the certified-key row alone, or
+/// both), and once the fault is lifted the next read is the normal 200
+/// projection.
 ///
 /// The fault is a delegating observation store at the existing driven port;
 /// the status is read through the operator client, so the 500 surfaces as the
@@ -515,37 +514,46 @@ async fn the_operator_client_declares_conflicts_and_rejects_withdraws_and_reads_
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test]
-#[ignore = "pending DELIVER route-operator-surface"]
 async fn a_status_point_read_failure_is_a_redacted_500_and_the_next_read_recovers() {
     let node = spawn_gateway_enabled_server(173).await;
     let api = ApiClient::from_config(&config_path(node.tmp.path())).expect("operator client");
     let healthy = api.gateway_status().await.expect("the baseline read is healthy");
     assert!(healthy.enabled, "the baseline projection is served");
 
-    node.faults.fail_gateway_status_reads.store(true, Ordering::SeqCst);
-    node.faults.fail_certified_key_status_reads.store(true, Ordering::SeqCst);
-    let Err(CliError::HttpStatus { status: code, body }) = api.gateway_status().await else {
-        panic!("a failed point read is a typed server error");
-    };
-    assert_eq!(code, 500, "a failed point read is a server error");
-    let rendered = serde_json::to_string(&body).expect("the error body serialises");
-    for forbidden in [
-        super::issue_fault_store::ISSUE_FAULT_MARKER,
-        "api-origin-chain.pem",
-        "api-origin-key.pem",
-        "PRIVATE KEY",
-        "BEGIN CERTIFICATE",
-        "ciphertext",
-        "intent.redb",
-    ] {
-        assert!(!rendered.contains(forbidden), "the 500 body leaks {forbidden:?}: {rendered}");
-    }
-    assert!(!body.error.is_empty(), "the 500 body is the typed error shape: {rendered}");
+    // (application read fails, certified-key read fails)
+    for (application_fails, certified_key_fails) in [(true, false), (false, true), (true, true)] {
+        node.faults.fail_gateway_status_reads.store(application_fails, Ordering::SeqCst);
+        node.faults.fail_certified_key_status_reads.store(certified_key_fails, Ordering::SeqCst);
+        let case = format!("application={application_fails} certified_key={certified_key_fails}");
 
-    node.faults.fail_gateway_status_reads.store(false, Ordering::SeqCst);
-    node.faults.fail_certified_key_status_reads.store(false, Ordering::SeqCst);
-    let recovered = api.gateway_status().await.expect("the next healthy read recovers");
-    assert!(recovered.enabled, "the normal projection is served again");
+        let Err(CliError::HttpStatus { status: code, body }) = api.gateway_status().await else {
+            panic!("a failed point read is a typed server error ({case})");
+        };
+        assert_eq!(code, 500, "a failed point read is a server error ({case})");
+        assert_eq!(body.error, "gateway_status_read", "the fixed error code ({case})");
+        assert_eq!(body.message, "gateway status could not be read", "the fixed message ({case})");
+        assert_eq!(body.field, None, "no field is named ({case})");
+        let rendered = serde_json::to_string(&body).expect("the error body serialises");
+        for forbidden in [
+            super::issue_fault_store::ISSUE_FAULT_MARKER,
+            "api-origin-chain.pem",
+            "api-origin-key.pem",
+            "PRIVATE KEY",
+            "BEGIN CERTIFICATE",
+            "ciphertext",
+            "intent.redb",
+        ] {
+            assert!(
+                !rendered.contains(forbidden),
+                "the 500 body leaks {forbidden:?} ({case}): {rendered}"
+            );
+        }
+
+        node.faults.fail_gateway_status_reads.store(false, Ordering::SeqCst);
+        node.faults.fail_certified_key_status_reads.store(false, Ordering::SeqCst);
+        let recovered = api.gateway_status().await.expect("the next healthy read recovers");
+        assert!(recovered.enabled, "the normal projection is served again ({case})");
+    }
     node.handle.shutdown().await.expect("clean shutdown");
 }
 
@@ -672,7 +680,6 @@ impl Node {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER gateway-svid-issue-failure-occurrence"]
 async fn a_gateway_whose_issuance_keeps_failing_reports_the_count_and_cause_on_the_status_body() {
     let root = TempDir::new().expect("tempdir");
     let node = spawn_node(root.path(), Some(174), true).await;
@@ -714,7 +721,6 @@ async fn a_gateway_whose_issuance_keeps_failing_reports_the_count_and_cause_on_t
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test]
-#[ignore = "pending DELIVER gateway-svid-issue-failure-occurrence"]
 async fn a_disabled_node_answers_the_fixed_body_without_reading_a_stale_row() {
     let root = TempDir::new().expect("tempdir");
 
@@ -729,7 +735,14 @@ async fn a_disabled_node_answers_the_fixed_body_without_reading_a_stale_row() {
     enabled
         .status_until("the enabled boot's status row", |status| status.application.is_some())
         .await;
-    enabled.handle.shutdown().await.expect("clean shutdown of the enabled boot");
+    // R-69: shutdown releases every store handle the node opened, but the test
+    // must also release the ones it owns. The fault store wraps the booted
+    // observation store, so it is dropped (with the operator client) before the
+    // same-directory reboot; the reboot below is immediate, with no sleep or retry.
+    let Node { handle, client, faults, .. } = enabled;
+    drop(faults);
+    drop(client);
+    handle.shutdown().await.expect("clean shutdown of the enabled boot");
 
     let disabled = spawn_node(root.path(), None, false).await;
     let reads_before = disabled.faults.status_point_read_count();

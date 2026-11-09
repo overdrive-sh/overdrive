@@ -34,7 +34,7 @@ pub mod schedule;
 // deleted together in the same commit.
 
 use crate::commands::cluster::ClusterStatusOutput;
-use crate::commands::deploy::{DeployOutput, StopOutput};
+use crate::commands::deploy::{DeployOutput, RouteDeployOutput, StopOutput};
 use crate::commands::node::NodeListOutput;
 use crate::commands::workload::{RestartOutput, WorkloadDescribeOutput};
 use crate::http_client::CliError;
@@ -792,6 +792,17 @@ pub const fn cli_error_to_exit_code(err: &CliError) -> i32 {
 // bug under audit (RCA: B+C+D conjunction) renders Job-kind submits via
 // these dedicated functions whose output cannot contain the historical
 // `"is running with"` substring patterns.
+
+/// Render the accepted block of a one-shot Route deploy: the Route ID, the
+/// outcome (`Declared`, `Replaced` or `Unchanged`), its generation and the
+/// endpoint the POST went to.
+#[must_use]
+pub fn route_deploy_accepted(out: &RouteDeployOutput) -> String {
+    format!(
+        "Route '{}' {:?}.\nGeneration:   {}\nEndpoint:     {}\n",
+        out.route_id, out.outcome, out.route_generation, out.endpoint
+    )
+}
 
 /// Render the operator-facing submit echo for a Job-kind workload.
 ///

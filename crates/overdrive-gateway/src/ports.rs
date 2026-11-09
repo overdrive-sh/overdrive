@@ -185,8 +185,12 @@ pub enum GatewayConnectDataplaneError {
 
 #[async_trait]
 pub trait GatewayIdentityLifecycleControl: Send + Sync {
-    /// Cancel-safe: dropping the future before completion leaves no partial state. The
-    /// evaluation is submitted on first poll and is not retracted.
+    /// Ensure a usable gateway identity. The identity evaluation is submitted on
+    /// first poll and is not retracted by dropping the future. Returns the held
+    /// facts when a usable identity is already held; otherwise waits until the
+    /// identity changes to a usable one, or until `deadline` passes
+    /// ([`GatewayIdentityLifecycleError::Timeout`]). Returns
+    /// [`GatewayIdentityLifecycleError::Closed`] if the identity sender drops.
     async fn ensure_current(
         &self,
         deadline: Instant,

@@ -135,10 +135,6 @@ use tokio::sync::{Barrier, Notify, watch};
 // Constants and per-test address slots (R-6)
 // ---------------------------------------------------------------------------
 
-/// Key of the singleton Route Set record.
-const ROUTE_SET_KEY: &str = "public-ingress/route-set";
-/// Prefix of the protected certified-key custody records.
-const CUSTODY_PREFIX: &[u8] = b"public-ingress/certified-key/";
 const SERVICE_PORT: u16 = 8080;
 const GRACE: Duration = Duration::from_secs(5);
 /// Real-time ceiling for any wait on an owner task.
@@ -1253,7 +1249,10 @@ async fn wait_for<T>(what: &str, mut probe: impl FnMut() -> Option<T>) -> T {
 }
 
 async fn custody_records(intent: &LocalIntentStore) -> Vec<(Bytes, Bytes)> {
-    intent.scan_prefix(CUSTODY_PREFIX).await.expect("scan custody records")
+    intent
+        .scan_prefix(IntentKey::public_certified_key_prefix().as_bytes())
+        .await
+        .expect("scan custody records")
 }
 
 /// The whole intent universe: Route Set, Service, custody records.
@@ -1263,9 +1262,14 @@ async fn intent_universe(intent: &LocalIntentStore) -> Vec<(Bytes, Bytes)> {
 
 /// `None`: key absent. `Some(None)`: persisted empty set. `Some(Some(_))`: one Route.
 async fn route_set(intent: &LocalIntentStore, redb_path: &Path) -> Option<Option<Route>> {
-    let bytes = intent.get(ROUTE_SET_KEY.as_bytes()).await.expect("read Route Set")?;
-    let set = PublicRouteSetV1::from_store_bytes(&bytes, redb_path, Some(ROUTE_SET_KEY))
-        .expect("decode the persisted Route Set");
+    let bytes =
+        intent.get(IntentKey::public_route_set().as_bytes()).await.expect("read Route Set")?;
+    let set = PublicRouteSetV1::from_store_bytes(
+        &bytes,
+        redb_path,
+        Some(IntentKey::public_route_set().as_str()),
+    )
+    .expect("decode the persisted Route Set");
     Some(set.route)
 }
 
@@ -1305,7 +1309,7 @@ async fn route_declare_replay_replace_and_withdraw_return_exact_outcomes_over_re
         .expect("gateway starts");
     let initially_empty = world
         .intent
-        .get(ROUTE_SET_KEY.as_bytes())
+        .get(IntentKey::public_route_set().as_bytes())
         .await
         .expect("read initial set")
         .expect("the empty Route Set is persisted at owner start");
@@ -1338,7 +1342,7 @@ async fn route_declare_replay_replace_and_withdraw_return_exact_outcomes_over_re
     );
     let after_withdrawal = world
         .intent
-        .get(ROUTE_SET_KEY.as_bytes())
+        .get(IntentKey::public_route_set().as_bytes())
         .await
         .expect("read withdrawn set")
         .expect("withdrawal persists the empty slot instead of deleting the key");
@@ -1353,7 +1357,7 @@ async fn route_declare_replay_replace_and_withdraw_return_exact_outcomes_over_re
     assert!(report.is_clean(), "Route owner shutdown releases the real store: {report:?}");
     let reopened = LocalIntentStore::open(&site.intent_path).expect("reopen the same redb");
     assert_eq!(
-        reopened.get(ROUTE_SET_KEY.as_bytes()).await.expect("read after reopen"),
+        reopened.get(IntentKey::public_route_set().as_bytes()).await.expect("read after reopen"),
         Some(initially_empty),
         "the persisted empty slot survives reopen",
     );
@@ -1780,7 +1784,7 @@ async fn withdraw_from_empty_is_unchanged_and_the_empty_set_survives_reopen() {
         .expect("gateway starts");
     let before = world
         .intent
-        .get(ROUTE_SET_KEY.as_bytes())
+        .get(IntentKey::public_route_set().as_bytes())
         .await
         .expect("read empty set")
         .expect("the owner persists the empty set at start");
@@ -1796,7 +1800,7 @@ async fn withdraw_from_empty_is_unchanged_and_the_empty_set_survives_reopen() {
 
     let reopened = LocalIntentStore::open(&site.intent_path).expect("reopen");
     assert_eq!(
-        reopened.get(ROUTE_SET_KEY.as_bytes()).await.expect("read after reopen"),
+        reopened.get(IntentKey::public_route_set().as_bytes()).await.expect("read after reopen"),
         Some(before),
         "the empty key remains present with the same canonical bytes",
     );
@@ -2474,7 +2478,6 @@ fn absent_identity() -> Fixtures {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER gateway-svid-issue-failure-occurrence"]
 async fn a_gateway_whose_identity_never_issues_reads_absent_with_the_failure_count_and_cause() {
     let site = Site::new();
     let world =
@@ -2500,7 +2503,11 @@ async fn a_gateway_whose_identity_never_issues_reads_absent_with_the_failure_cou
     );
     assert_eq!(outside_the_occurrence(&after_first), outside_the_occurrence(&fresh));
 
-    world.clock.tick(Duration::from_secs(30));
+    // Half the application gate's own deadline: the Sim clock moves between the
+    // two failures, yet stays strictly inside the deadline, so the staged gate
+    // is still waiting on the identity (a tick of the whole deadline would expire
+    // the gate and read as a gate timeout, not as "identity never issued").
+    world.clock.tick(GatewayLimits::first_slice().application_gate_deadline() / 2);
     let second = issue_failure(SvidIssueFailureCause::Audit, &world.clock);
     assert!(second.at > first.at, "the Sim clock advanced between the two failures");
     world.fx.identity.record_failure(second);
@@ -2537,7 +2544,6 @@ async fn a_gateway_whose_identity_never_issues_reads_absent_with_the_failure_cou
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER gateway-svid-issue-failure-occurrence"]
 async fn the_failure_count_never_decreases_across_failures_successes_and_restarts() {
     const SEED: u64 = 0x5A1F_0A11;
     let mut rng = SplitMix64(SEED);
@@ -2611,7 +2617,6 @@ async fn the_failure_count_never_decreases_across_failures_successes_and_restart
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER gateway-svid-issue-failure-occurrence"]
 async fn a_restarted_gateway_continues_the_failure_count_from_the_prior_row() {
     let site = Site::new();
     let clock = Arc::new(SimClock::new());
@@ -2659,7 +2664,6 @@ async fn a_restarted_gateway_continues_the_failure_count_from_the_prior_row() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER gateway-svid-issue-failure-occurrence"]
 async fn a_prior_row_read_error_is_retried_and_never_defaulted_to_zero() {
     let site = Site::new();
     let clock = Arc::new(SimClock::new());
@@ -2722,7 +2726,6 @@ async fn a_prior_row_read_error_is_retried_and_never_defaulted_to_zero() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER gateway-svid-issue-failure-occurrence"]
 async fn a_restarted_gateway_over_an_undecodable_prior_status_row_counts_from_zero() {
     let site = Site::new();
     let clock = Arc::new(SimClock::new());
@@ -2897,7 +2900,6 @@ async fn a_status_row_from_an_earlier_boot_is_still_carried_when_no_route_exists
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER gateway-svid-issue-failure-occurrence"]
 async fn held_identity_past_its_expiry_projects_unusable_at_the_failure_wake() {
     // Both the expiry instant itself (`not_after == now`, not after the clock)
     // and an instant well past it.
@@ -2938,7 +2940,6 @@ async fn held_identity_past_its_expiry_projects_unusable_at_the_failure_wake() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER gateway-svid-issue-failure-occurrence"]
 async fn a_boot_identity_timeout_sets_the_application_cause_and_leaves_the_identity_as_the_slot_says()
  {
     let site = Site::new();
@@ -2976,7 +2977,6 @@ async fn a_boot_identity_timeout_sets_the_application_cause_and_leaves_the_ident
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER gateway-svid-issue-failure-occurrence"]
 async fn a_failing_status_write_loses_nothing_the_next_write_carries_the_full_count() {
     let site = Site::new();
     let clock = Arc::new(SimClock::new());

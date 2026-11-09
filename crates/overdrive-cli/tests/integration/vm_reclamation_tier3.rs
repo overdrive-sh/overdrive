@@ -327,19 +327,6 @@ fn config_path(config_dir: &Path) -> PathBuf {
     config_dir.join(".overdrive").join("config")
 }
 
-/// Bridges the real, narrow race between `ServeHandle::shutdown` returning
-/// and its `LocalIntentStore` / `LocalObservationStore` redb file
-/// descriptors actually closing (the convergence-loop / exit-observer
-/// background tasks are signalled via `CancellationToken` but not
-/// necessarily joined before `shutdown` returns). A restart against the
-/// SAME `data_dir` immediately after `shutdown()` can otherwise observe
-/// `"Database already open. Cannot acquire lock."` on the redb reopen.
-/// Every scenario in this file that reboots against the same `data_dir`
-/// calls this between the two boots.
-async fn wait_for_data_dir_release() {
-    tokio::time::sleep(Duration::from_millis(500)).await;
-}
-
 // ---------------------------------------------------------------------
 // Spec authoring + polling + host-path helpers.
 // ---------------------------------------------------------------------
@@ -687,7 +674,6 @@ async fn vm_survivor_with_no_vm_registry_entry_is_reclaimed_via_observed_empty()
     let alloc_id = format!("alloc-{}-0", submit.workload_id);
     assert!(scope_path(&alloc_id).exists(), "sanity: the scope must exist while Running");
     handle.shutdown().await.expect("shutdown boot #1 without stopping the workload");
-    wait_for_data_dir_release().await;
 
     // Boot #2 -- SAME data_dir, with `cloud-hypervisor` hidden from PATH so
     // discovery finds no hypervisor and NO [vm] driver is composed:
@@ -753,7 +739,6 @@ async fn boot_epoch_reclamation_settles_before_adopt_on_restart_recovery() {
     poll_until_running(&cfg, &submit.workload_id, Duration::from_secs(60)).await;
     let alloc_id = format!("alloc-{}-0", submit.workload_id);
     handle.shutdown().await.expect("shutdown boot #1 without stopping the workload");
-    wait_for_data_dir_release().await;
 
     // Boot #2 -- SAME data_dir, mTLS-composed again (so
     // adopt_on_restart_recovery's netns-adopt pass genuinely runs and
@@ -994,7 +979,6 @@ async fn restart_orphan_terminal_row_is_byte_unchanged_after_reclamation() {
         "a clean guest exit reaches Terminated"
     );
     handle.shutdown().await.expect("shutdown boot #1 (no further action against this row)");
-    wait_for_data_dir_release().await;
 
     // If a natural exit's artifacts survive to disk (SD-2's framing --
     // VmReclamation is the general sweep, not only the failure-path
@@ -1269,7 +1253,6 @@ async fn reclaiming_an_svid_holding_allocation_submits_the_fourth_evaluation() {
     // what makes the boot-epoch reclaim's restart (S-VM-26), not a
     // stay-terminal finish, the correct next act.
     handle.shutdown().await.expect("shutdown boot #1 without stopping the workload");
-    wait_for_data_dir_release().await;
 
     // Boot #2 -- SAME data_dir, mTLS-composed again. Its brand-new
     // `VmDriver` has supervised nothing yet in THIS process
@@ -1393,7 +1376,6 @@ async fn reclaim_then_fresh_start_retains_predecessor_and_resets_history() {
     // (`Command::kill_on_drop` is deliberately `false` on the production
     // spawn) and the row stays non-terminal (Running).
     handle.shutdown().await.expect("shutdown boot #1 without stopping the workload");
-    wait_for_data_dir_release().await;
 
     // Boot #2 -- SAME data_dir. Its brand-new `VmDriver` has supervised
     // nothing yet in THIS process (`Observed(∅)`), so the boot-epoch
@@ -1591,7 +1573,6 @@ async fn guest_self_exit_without_stop_leaves_no_rootfs_clone_in_operator_dir() {
         "a natural guest exit must not leave a durable clone-index link behind"
     );
     handle.shutdown().await.expect("shutdown boot #1 without stopping the workload");
-    wait_for_data_dir_release().await;
 
     // Boot #2 — the boot-epoch VmReclamation drive runs synchronously
     // inside run_server and remains idempotent when the natural-exit watcher
@@ -1664,7 +1645,6 @@ async fn hypervisor_death_without_stop_leaves_no_rootfs_clone_in_operator_dir() 
     // Shut down boot #1 promptly. No `stop` is used; the exit observer's
     // VMM-death cleanup has already removed the clone and index entry.
     handle.shutdown().await.expect("shutdown boot #1 after the hypervisor died");
-    wait_for_data_dir_release().await;
     assert!(!pid_is_alive(vmm_pid), "the hypervisor process is genuinely gone");
     assert!(
         artifact_path_is_absent(&clone_path(&staging_dir, &alloc_id)),
@@ -1698,7 +1678,7 @@ async fn hypervisor_death_without_stop_leaves_no_rootfs_clone_in_operator_dir() 
 /// unclean shutdown that drops the in-memory `RootfsPlan` (the same
 /// shape S-VM-30/23/81 use; `kill_on_drop(false)` leaves the real VMM
 /// surviving). Boot #2 against the SAME `data_dir` (via
-/// `wait_for_data_dir_release` then `spawn_vm_server`) runs the
+/// `spawn_vm_server`) runs the
 /// boot-epoch `VmReclamation` drive synchronously inside `run_server`,
 /// which reads the DURABLE clone index under `<data_dir>/vm/clone-index/`
 /// (§ D3g: `data_dir`, not `/run` — the index must survive the process)
@@ -1748,7 +1728,6 @@ async fn serve_restart_losing_in_memory_rootfs_plan_leaves_no_rootfs_clone() {
         "sanity: both the platform-staged clone and its durable index link exist while Running"
     );
     handle.shutdown().await.expect("shutdown boot #1 without stopping the workload");
-    wait_for_data_dir_release().await;
 
     // Boot #2 — the brand-new `VmDriver` has NO in-memory `RootfsPlan` for
     // this allocation. The boot-epoch drive reclaims the operator clone
