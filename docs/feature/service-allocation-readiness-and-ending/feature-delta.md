@@ -1238,11 +1238,28 @@ reference must not be live across (2) (`exit_observer.rs:177-197`). Module docs 
 | `build_service_stream` (`streaming.rs:988`) | **Signature gains `progress_deadline: Duration` as its last parameter (DG-7)**; the cap timer arms from it |
 | `ServiceSubmitEvent::Failed` (`streaming.rs:776`) | **New optional field `last_attempt: Option<LastAttemptWire>`**, `#[serde(default, skip_serializing_if = "Option::is_none")]`; set only by the synthesised timeout |
 | `LastAttemptWire { alloc_id: String, reason: TransitionReason, terminal: Option<TerminalCondition>, detail: Option<String> }` | **New wire struct**, serde + `ToSchema`, composed of existing types; defined in `overdrive_control_plane::streaming` (DG-7) |
-| `service_stream_synth_cap_timeout` (`streaming.rs:906`) | Takes the latest attempt-ending observation and fills `last_attempt` |
+| `overdrive_control_plane::streaming::service_stream_synth_cap_timeout(after_seconds: u32, last_attempt: Option<LastAttemptWire>) -> ServiceSubmitEvent` (**D10-H1 exact helper-shape clarification**) | Public pure helper consumes the stream's latest attempt-ending observation by value and returns `ServiceSubmitEvent::Failed { alloc_id: None, reason: Timeout { after_seconds }, stderr_tail: None, last_attempt }`. `None` remains the no-observation case; the helper, rather than its caller, owns field population. No new wire type, error, retry or lifecycle state |
 | `ApiClient::submit_workload_streaming` (`http_client.rs:270`) | **Signature gains the server deadline as its second parameter (DG-7)**; total request timeout = deadline + 30 s; the Job lane passes `DEFAULT_STREAMING_CAP` |
 | `format_service_failed_block` (`render.rs`) | `early_exit_timing` replaced by `last_attempt: Option<&LastAttemptWire>`; renders the `Timeout` text and `last attempt` block |
 | `ServiceFailureReason` (archived), `TerminalCondition`, `AllocStatusRow`, CBOR `View`, TOML spec, `AppState::streaming_cap` | **None** |
 | `api/openapi.yaml` | `ServiceSubmitEvent::Failed` gains `last_attempt`; `LastAttemptWire` added (regenerated) |
+
+**D10-H1 ownership and provenance.** D10 item 4 and ADR-0264 already require
+the stream's optional last attempt to travel as the owned
+`ServiceSubmitEvent::Failed.last_attempt: Option<LastAttemptWire>` field; the
+accepted D10 interface table already assigned this helper the population of
+that field but left its parameter untyped. `service_stream_synth_cap_timeout`
+is `pub` in the public `streaming` module and is called from a separate
+integration-test crate, so its signature is an interface contract. Passing the
+existing `Option<LastAttemptWire>` by value moves the stream's in-memory value
+into the approved owned wire field without cloning. At the
+deadline `build_service_stream` calls the helper with its current value and
+does not mutate the returned event. Existing one-argument callers that test
+the no-observation timeout supply `None`. This pins the accepted D10 behavior
+without adding a new decision about what the stream reports. The independent
+bounded DESIGN review in
+`design/review-progress-deadline-helper-contract-remediation.md` approved this
+exact clarification before DELIVER step 04-01 resumed.
 
 ### D11 interface changes
 
@@ -3432,7 +3449,7 @@ Every scaffold has exactly the pinned shape, a `// SCAFFOLD: true` marker, and (
 | `format_mechanic_summary(.., &[Listener])` (reconciler) and `format_probe_mechanic_summary(.., &[Listener])`, `probes_section(.., &[Listener])` (CLI) | `REC/src/service_lifecycle.rs`, `CLI/src/render.rs` | D14 item 4, DG-11 | `GuestListeners` arm not implemented |
 | `SimGuestListenerReports` (`new`/`open`/`insert`/`close`) | `SIM/src/adapters/guest_listener_reports.rs` | D13 item 10 (scripting API is DISTILL's) | real implementation, not a scaffold |
 
-Not scaffolded: `ServiceAllocFact.startup_attempts_required` (S-54 drives hydration instead), `WorkloadLifecycleState.declared_listeners`, the removal of `inferred` (D16), `BrokerDrain`/`submitted`/`broker()` (D17), and `service_stream_synth_cap_timeout`'s new parameter (unpinned). `api/openapi.yaml` is regenerated; the existing `FIXTURE_V*` literals are untouched.
+Not scaffolded at DISTILL time: `ServiceAllocFact.startup_attempts_required` (S-54 drives hydration instead), `WorkloadLifecycleState.declared_listeners`, the removal of `inferred` (D16), `BrokerDrain`/`submitted`/`broker()` (D17), and `service_stream_synth_cap_timeout`'s new parameter (then unpinned; exact D10-H1 signature is now in § D10 interface changes). `api/openapi.yaml` is regenerated; the existing `FIXTURE_V*` literals are untouched.
 
 ## Wave: DISTILL / [REF] Test placement and lanes
 
@@ -3517,7 +3534,7 @@ The gaps as DISTILL routed them:
 | DG-11 | D14 item 4 pins `guest listeners tcp:8080 udp:5353`, but `format_mechanic_summary` sees only the fieldless mechanic; where the listener set reaches the formatter is unpinned | pin the carrier |
 | DG-12 | Whether a started `Failed` allocation stays in `terminal_announced` after D6 is unpinned; the sim invariant assertions on it were removed | pin the membership rule |
 
-Historical minor items from DISTILL: the `BeaconParseError` variant for a rejected LISTEN line, the `Idle` action mapping of `guest_report_host`, and the D16 current-format policy are now pinned above. The parameter type of private `service_stream_synth_cap_timeout`, the retry cadence of a failed `Pass` write and whether `<n>` stays at the deadline value in later Fail reasons, and test-support fixtures remain crafter/DISTILL choices within the accepted observable contract. The original D16 historical fixture/version-bump obligation was superseded by the explicit 2026-11-09 greenfield waiver. The per-consumer `GuestListenerBoard` in production wiring is inert until DELIVER shares one board; pre-existing tests that assume liveness starts at `Running` or that `broker().submit` is drained only by the clock are DELIVER fallout; `RED` bodies still using `inferred` on `ProbeDescriptor` and `ProbeWitness` are removed in the D16 step.
+Historical minor items from DISTILL: the `BeaconParseError` variant for a rejected LISTEN line, the `Idle` action mapping of `guest_report_host`, and the D16 current-format policy are now pinned above. The formerly unpinned parameter type of the **public** `service_stream_synth_cap_timeout` is pinned by D10-H1 in § D10 interface changes. The retry cadence of a failed `Pass` write and whether `<n>` stays at the deadline value in later Fail reasons, and test-support fixtures remain crafter/DISTILL choices within the accepted observable contract. The original D16 historical fixture/version-bump obligation was superseded by the explicit 2026-11-09 greenfield waiver. The per-consumer `GuestListenerBoard` in production wiring is inert until DELIVER shares one board; pre-existing tests that assume liveness starts at `Running` or that `broker().submit` is drained only by the clock are DELIVER fallout; `RED` bodies still using `inferred` on `ProbeDescriptor` and `ProbeWitness` are removed in the D16 step.
 
 ## Wave: DISTILL / [REF] Carried open items
 

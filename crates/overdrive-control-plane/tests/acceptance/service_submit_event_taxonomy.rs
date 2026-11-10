@@ -274,13 +274,13 @@ proptest! {
 
 proptest! {
     /// S-SHCP-WIRE-07 (cap-timer arm) — `service_stream_synth_cap_timeout
-    /// (after_seconds)` synthesises `Failed { alloc_id: None, reason:
+    /// (after_seconds, None)` synthesises `Failed { alloc_id: None, reason:
     /// Timeout { after_seconds }, stderr_tail: None }` round-tripping
     /// byte-equal through serde JSON per ADR-0059 Q4.
     /// CONTRACT_SHAPE: bounded-change.
     #[test]
     fn cap_timer_synth_timeout(after_seconds in 0u32..3600) {
-        let event = service_stream_synth_cap_timeout(after_seconds);
+        let event = service_stream_synth_cap_timeout(after_seconds, None);
         match &event {
             ServiceSubmitEvent::Failed {
                 alloc_id,

@@ -967,14 +967,18 @@ fn render_custom_detail(detail: Option<&[u8]>) -> String {
 
 /// Synthesise the Service stream's wall-clock Timeout terminal per
 /// ADR-0059 Q4. Streaming-loop-only — the reconciler MUST NOT emit
-/// this variant.
+/// this variant. `last_attempt` is passed through as labelled detail; `None`
+/// means the stream observed no attempt-ending event.
 #[must_use]
-pub fn service_stream_synth_cap_timeout(after_seconds: u32) -> ServiceSubmitEvent {
+pub fn service_stream_synth_cap_timeout(
+    after_seconds: u32,
+    last_attempt: Option<LastAttemptWire>,
+) -> ServiceSubmitEvent {
     ServiceSubmitEvent::Failed {
         alloc_id: None,
         reason: overdrive_core::transition_reason::ServiceFailureReason::Timeout { after_seconds },
         stderr_tail: None,
-        last_attempt: None,
+        last_attempt,
     }
 }
 
@@ -1164,10 +1168,7 @@ pub fn build_service_stream(
                 }
                 () = &mut deadline_future => {
                     let after_seconds = u32::try_from(progress_deadline.as_secs()).unwrap_or(u32::MAX);
-                    let mut wire = service_stream_synth_cap_timeout(after_seconds);
-                    if let ServiceSubmitEvent::Failed { last_attempt: timeout_attempt, .. } = &mut wire {
-                        *timeout_attempt = last_attempt;
-                    }
+                    let wire = service_stream_synth_cap_timeout(after_seconds, last_attempt);
                     match emit_service_line(&wire) {
                         Ok(line) => yield Ok(line),
                         Err(err) => yield Err(ServiceStreamError::LineEmission { source: err }),
