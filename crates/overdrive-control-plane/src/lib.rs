@@ -290,11 +290,9 @@ pub struct AppState {
     /// the channel is `tokio::sync::broadcast` so multiple
     /// concurrent `submit --watch` requests share a single emit.
     pub lifecycle_events: Arc<tokio::sync::broadcast::Sender<crate::action_shim::LifecycleEvent>>,
-    /// Wall-clock cap on streaming `submit --watch` connections —
-    /// after this duration, the streaming handler emits a
-    /// `Timeout { after_seconds }` terminal event and closes the
-    /// stream. Default 60s; configurable via
-    /// `[server] streaming_submit_cap_seconds` per architecture.md §10.
+    /// Construction/test override for the Job streaming cap and the floor
+    /// of the Service stream's derived progress deadline. Production defaults
+    /// to 90 s; no operator setting supplies this value.
     pub streaming_cap: Duration,
     /// Injected `Clock` used by the streaming submit handler for the
     /// cap timer. The dst-lint gate enforces that `tokio::time::sleep`
