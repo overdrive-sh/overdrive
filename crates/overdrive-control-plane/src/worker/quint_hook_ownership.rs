@@ -232,6 +232,11 @@ impl Dispatch {
     fn grant(&self, point: Point) {
         let mut state = self.script.state.lock();
         state.grant = Some(point);
+        // The park the grant releases is over. Clearing it here, under the same
+        // lock, means a later `wait_parked_or_done` can only be satisfied by the
+        // dispatch's NEXT park (or its end) — never by the stale arrival the
+        // dispatch thread has not yet woken to clear itself.
+        state.parked = None;
         self.script.cv.notify_all();
     }
 

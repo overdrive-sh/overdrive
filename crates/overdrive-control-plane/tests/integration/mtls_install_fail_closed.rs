@@ -43,7 +43,7 @@
 //!       |
 //!       +-- driver.start Ok --> Running(row written, watcher parked)
 //!               |
-//!               +-- start_alloc Ok  --> release_for_exit_emission, on_alloc_running
+//!               +-- start_alloc Ok  --> on_alloc_running, release_for_exit_emission
 //!               |
 //!               +-- start_alloc Err --> [fail_closed_on_mtls_install]
 //!                                          stop driver (best effort)
@@ -1043,7 +1043,10 @@ async fn assert_activation_failure_projection(
 /// CONTRACT_SHAPE: bounded-change.
 ///
 /// The RETAINED ordering: start_alloc, the protection-live event, activation,
-/// the EXEC release, then the running hook. It holds with or without the EXEC
+/// the running hook, then the EXEC release — probe supervision is registered
+/// before the exit-event gate opens, so an exit emitted the instant the gate
+/// releases always finds its supervisor (service-allocation-readiness-and-ending
+/// D3, ADR-0256). It holds with or without the EXEC
 /// gate wait; the wait itself is the sibling body pending 12-01. The seam
 /// fixture is all sim ports and needs no privilege.
 #[tokio::test]
@@ -1070,11 +1073,11 @@ async fn tap_activation_occurs_after_intercept_success_and_before_exec_release()
             Step::DriverStart,
             Step::InstallSuccessEvent,
             Step::Activate,
-            Step::ReleaseForExitEmission,
             Step::OnAllocRunning,
+            Step::ReleaseForExitEmission,
         ],
-        "start_alloc, then the protection-live event, then activation, then the EXEC release, \
-         then the running hook"
+        "start_alloc, then the protection-live event, then activation, then the running hook \
+         (probe supervision registered), then the EXEC release"
     );
 
     fixture.worker.stop_alloc(&alloc).await.expect("allocation protection teardown succeeds");
@@ -1153,10 +1156,10 @@ async fn tap_activation_waits_on_a_recovering_exec_gate_and_runs_once_after_reop
             Step::DriverStart,
             Step::InstallSuccessEvent,
             Step::Activate,
-            Step::ReleaseForExitEmission,
             Step::OnAllocRunning,
+            Step::ReleaseForExitEmission,
         ],
-        "after the reopen: exactly one activation, then the EXEC release, then the running hook"
+        "after the reopen: exactly one activation, then the running hook, then the EXEC release"
     );
     let row = fixture
         .obs
@@ -1180,6 +1183,7 @@ struct HoldingReleaseDriver {
     release_cancelled: AtomicBool,
     release_completed: AtomicBool,
     on_alloc_running_called: AtomicBool,
+    release_started: AtomicBool,
 }
 
 impl HoldingReleaseDriver {
@@ -1191,6 +1195,7 @@ impl HoldingReleaseDriver {
             release_cancelled: AtomicBool::new(false),
             release_completed: AtomicBool::new(false),
             on_alloc_running_called: AtomicBool::new(false),
+            release_started: AtomicBool::new(false),
         }
     }
 }
@@ -1237,6 +1242,7 @@ impl Driver for HoldingReleaseDriver {
     async fn release_for_exit_emission(&self, handle: &AllocationHandle) {
         let mut drop_marker =
             HeldReleaseDrop { cancelled: &self.release_cancelled, completed: false };
+        self.release_started.store(true, Ordering::SeqCst);
         self.release_entered.add_permits(1);
         self.release_permit.acquire().await.expect("release permit remains open").forget();
         self.inner.release_for_exit_emission(handle).await;
@@ -1246,8 +1252,8 @@ impl Driver for HoldingReleaseDriver {
 
     fn on_alloc_running(&self, spec: &AllocationSpec) {
         assert!(
-            self.release_completed.load(Ordering::SeqCst),
-            "on_alloc_running must follow completed async release for {}",
+            !self.release_started.load(Ordering::SeqCst),
+            "on_alloc_running must precede the async release for {}",
             spec.alloc
         );
         self.on_alloc_running_called.store(true, Ordering::SeqCst);
@@ -1260,9 +1266,10 @@ impl Driver for HoldingReleaseDriver {
 ///
 /// The RETAINED action-shim await/cancellation contract, kept as its own body
 /// when S-ND295-52 retargeted its former home: after activation the start arm
-/// awaits the async EXEC release in place; cancelling the dispatch while that
-/// release is held drops the same release future, and neither the release nor
-/// the running hook completes afterwards.
+/// registers the running hook and then awaits the async EXEC release in place;
+/// cancelling the dispatch while that release is held drops the same release
+/// future, and the release never completes afterwards. The running hook already
+/// ran before the release began and is not undone.
 #[tokio::test]
 async fn cancelling_dispatch_while_the_exec_release_is_held_drops_that_release() {
     let journal: Journal = Arc::new(parking_lot::Mutex::new(Vec::new()));
@@ -1313,7 +1320,10 @@ async fn cancelling_dispatch_while_the_exec_release_is_held_drops_that_release()
         "provision, protection, the protection-live event, and activation precede the release"
     );
     assert!(!driver.release_completed.load(Ordering::SeqCst));
-    assert!(!driver.on_alloc_running_called.load(Ordering::SeqCst));
+    assert!(
+        driver.on_alloc_running_called.load(Ordering::SeqCst),
+        "the running hook precedes the held release"
+    );
 
     task.abort();
     assert!(task.await.expect_err("dispatch task is cancelled").is_cancelled());
@@ -1323,7 +1333,10 @@ async fn cancelling_dispatch_while_the_exec_release_is_held_drops_that_release()
         "cancelling dispatch must drop the same release future"
     );
     assert!(!driver.release_completed.load(Ordering::SeqCst));
-    assert!(!driver.on_alloc_running_called.load(Ordering::SeqCst));
+    assert!(
+        driver.on_alloc_running_called.load(Ordering::SeqCst),
+        "the running hook was registered before the release and is not undone by cancellation"
+    );
 
     fixture.worker.stop_alloc(&alloc).await.expect("allocation protection teardown succeeds");
     fixture.worker.shutdown_owner().await.expect("the shared owner shuts down");

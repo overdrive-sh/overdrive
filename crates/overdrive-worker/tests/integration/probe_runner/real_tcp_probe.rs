@@ -10,10 +10,12 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
-use std::process::Command;
+use std::net::Ipv4Addr;
+use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use overdrive_core::traits::prober::{ProbeOutcome, TcpProber};
+use overdrive_testing::cidr_lease::TestCidrLease;
 use overdrive_worker::probe_runner::TokioTcpProber;
 use tokio::net::TcpListener;
 
@@ -75,46 +77,78 @@ async fn given_unbound_port_when_tokio_tcp_prober_probes_then_returns_fail_conne
 /// when run in the same VM.
 const PROBE_DROP_TABLE: &str = "overdrive_probetest";
 
-/// RAII teardown for the nft silent-SYN-drop rule installed by
-/// [`install_syn_drop`]. `Drop` runs on the normal return path AND on
-/// unwind (a failed assertion), so a panicking probe assertion cannot
-/// leak the nft table into the VM and poison a later run. Bind it with
-/// `let _guard = ...;` BEFORE the probe call.
-struct NftDropGuard {
-    table: &'static str,
+/// Stable lease name for the probe-timeout destination. The destination
+/// is drawn from the shared fixture pool (`10.250.0.0/16`), which is
+/// disjoint from the production workload subnet.
+const PROBE_DROP_LEASE: &str = "worker-tcp-probe-timeout";
+
+/// Run `ip` with `args`, asserting success.
+fn ip(args: &[&str]) {
+    let status = Command::new("ip")
+        .args(args)
+        .status()
+        .expect("ip must be invocable (root inside the guest / CI harness)");
+    assert!(status.success(), "ip {args:?} failed with status {status:?}");
 }
 
-impl Drop for NftDropGuard {
+/// RAII teardown for the route and nft silent-SYN-drop rule installed by
+/// [`install_syn_drop`]. `Drop` runs on the normal return path AND on
+/// unwind (a failed assertion), so a panicking probe assertion cannot
+/// leak the table or route into the guest and poison a later run. Bind it
+/// with `let _guard = ...;` BEFORE the probe call. The CIDR lease is
+/// released after the kernel objects are removed (field drop order).
+struct DropRuleGuard {
+    table: &'static str,
+    route: String,
+    _lease: TestCidrLease,
+}
+
+impl Drop for DropRuleGuard {
     fn drop(&mut self) {
-        // Best-effort teardown — the table must be gone after the test
-        // regardless of outcome. Ignore the status: if the table is
-        // already absent (e.g. a prior failure removed it) the delete
-        // is a harmless no-op.
+        // Best-effort teardown — both objects must be gone after the test
+        // regardless of outcome. Ignore statuses: an already-absent
+        // object is a harmless no-op.
         let _ = Command::new("nft").args(["delete", "table", "inet", self.table]).status();
+        let _ = Command::new("ip").args(["route", "del", &self.route]).status();
     }
 }
 
-/// Install an nft OUTPUT `drop` rule that silently discards TCP SYNs to
-/// `192.0.2.1:80` *before* they leave the host. No SYN-ACK ever returns,
-/// so `connect()` blocks until the app-level timeout fires — a
+/// Make a destination that has a ROUTE but silently loses every TCP SYN,
+/// and return it with its RAII teardown.
+///
+/// The destination is the leased fixture network's workload address,
+/// reached through a `/32` route on `lo`: `connect()` finds a route (no
+/// `ENETUNREACH`, which a guest with no uplink returns for any
+/// unrouted address), the SYN reaches the nft OUTPUT hook, and an nft
+/// `drop` discards it *before* it leaves the host. No SYN-ACK ever
+/// returns, so `connect()` blocks until the app-level timeout fires — a
 /// deterministic timeout that does NOT depend on the host's networking
-/// backend (Lima user-v2/gvisor SYN-ACKs every destination, so the bare
-/// TEST-NET-1 address connects rather than blackholing). A kernel
-/// `blackhole`/`unreachable` route is wrong here: it returns
-/// `EINVAL`/`EHOSTUNREACH` *immediately* and would route through the
-/// prober's connect-error branch rather than the `tokio::time::timeout`
-/// elapsed branch this test exercises.
-fn install_syn_drop() -> NftDropGuard {
-    // Clear any stale table from a SIGKILL'd prior run (the exact
-    // leftover-state hazard this fixture defends against). Tolerate
-    // "not found" — a clean VM has nothing to delete.
-    let _ = Command::new("nft").args(["delete", "table", "inet", PROBE_DROP_TABLE]).status();
+/// backend. A kernel `blackhole`/`unreachable` route is wrong here: it
+/// fails *immediately* and routes through the prober's connect-error
+/// branch rather than the `tokio::time::timeout` elapsed branch this test
+/// exercises.
+fn install_syn_drop() -> (DropRuleGuard, Ipv4Addr) {
+    let lease = TestCidrLease::acquire(PROBE_DROP_LEASE).expect("lease a route-disjoint /24");
+    let dest = lease.workload_addr();
+
+    // Clear any stale table from a SIGKILL'd prior run (the leftover-state
+    // hazard this fixture defends against). Tolerate "not found".
+    let _ = Command::new("nft")
+        .args(["delete", "table", "inet", PROBE_DROP_TABLE])
+        .stderr(Stdio::null())
+        .status();
+
+    let route = format!("{dest}/32");
+    let _ = Command::new("ip").args(["route", "del", &route]).stderr(Stdio::null()).status();
+    ip(&["route", "add", &route, "dev", "lo"]);
+    // From here the guard owns teardown, including on a later setup panic.
+    let guard = DropRuleGuard { table: PROBE_DROP_TABLE, route, _lease: lease };
 
     let table = format!("inet {PROBE_DROP_TABLE}");
     let chain = format!(
         "inet {PROBE_DROP_TABLE} out {{ type filter hook output priority 0; policy accept; }}"
     );
-    let rule = format!("inet {PROBE_DROP_TABLE} out ip daddr 192.0.2.1 tcp dport 80 drop");
+    let rule = format!("inet {PROBE_DROP_TABLE} out ip daddr {dest} tcp dport 80 drop");
 
     for args in [vec!["add", "table"], vec!["add", "chain"], vec!["add", "rule"]] {
         let target = match args[1] {
@@ -126,11 +160,11 @@ fn install_syn_drop() -> NftDropGuard {
             .args(&args)
             .arg(target)
             .status()
-            .expect("nft must be invocable (root inside Lima / CI LVH harness)");
+            .expect("nft must be invocable (root inside the guest / CI harness)");
         assert!(status.success(), "nft {args:?} {target:?} failed with status {status:?}");
     }
 
-    NftDropGuard { table: PROBE_DROP_TABLE }
+    (guard, dest)
 }
 
 /// S-SHCP-INT-01-03 (US-01 WS / K1 sad path) — a non-responding target
@@ -142,23 +176,22 @@ fn install_syn_drop() -> NftDropGuard {
 /// non-response is produced by an nft OUTPUT `drop` rule that silently
 /// discards the TCP SYN before it leaves the host: no SYN-ACK ever
 /// returns, so `connect()` blocks until the 250ms app-level timeout
-/// elapses. This does NOT rely on `192.0.2.1` being unroutable — Lima's
-/// default user-v2/gvisor network stack SYN-ACKs every destination
-/// locally, so a bare connect to TEST-NET-1 succeeds; the silent SYN
-/// drop is what makes the timeout deterministic across networking
-/// backends. The probe target keeps `192.0.2.1:80` (RFC 5737 TEST-NET-1,
-/// reserved for documentation/test use) so the address still reads
-/// correctly as a test destination.
+/// elapses. The destination is deliberately NOT an unrouted address: a
+/// guest with no uplink fails such a connect with `ENETUNREACH` at route
+/// lookup, before the SYN exists, and Lima's user-v2/gvisor stack
+/// SYN-ACKs every destination. A leased, route-disjoint address with a
+/// `/32` route on `lo` plus the silent SYN drop makes the timeout
+/// deterministic across networking backends.
 #[tokio::test]
 async fn given_blackhole_address_when_tokio_tcp_prober_probes_then_returns_fail_timeout() {
     // Install the silent-SYN-drop rule and bind its RAII teardown BEFORE
     // the probe, so a panicking assertion below still tears the table
     // down on unwind.
-    let _guard = install_syn_drop();
+    let (_guard, dest) = install_syn_drop();
 
     let prober = TokioTcpProber::new();
     let outcome = prober
-        .probe("192.0.2.1", 80, Duration::from_millis(250))
+        .probe(&dest.to_string(), 80, Duration::from_millis(250))
         .await
         .expect("probe call returns Ok even on timeout");
 

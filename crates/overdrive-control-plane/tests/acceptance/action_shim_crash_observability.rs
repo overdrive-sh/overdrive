@@ -212,9 +212,15 @@ struct RejectedStartResult {
     terminal_calls: usize,
 }
 
+/// Drives one rejected `StartAllocation`. When `finalize_replay` is set, the
+/// production owner of the teardown retry then re-drives the same allocation:
+/// the `WorkloadLifecycle` reconciler never re-emits `StartAllocation` for an
+/// id with a durable `Failed` row (it mints a fresh id per start, and the
+/// guest-network owner refuses a same-id start while the lease is retiring), so
+/// the retry arrives as `FinalizeFailed` with the exhausted-budget terminal.
 async fn drive_rejected_start(
     fail_first_teardown: bool,
-    dispatch_count: usize,
+    finalize_replay: bool,
 ) -> RejectedStartResult {
     let obs = Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("node id"), 0));
     let terminal_calls = Arc::new(AtomicUsize::new(0));
@@ -242,11 +248,17 @@ async fn drive_rejected_start(
         spec: vm_spec(),
         kind: WorkloadKind::Service,
     };
-    let mut dispatches = Vec::with_capacity(dispatch_count);
-    for attempt in 0..dispatch_count {
-        // Only the first teardown fails when scripted to; replay retries.
-        owner.script_teardown_failure(fail_first_teardown && attempt == 0);
-        dispatches.push(fixture.dispatch(vec![action.clone()], &tick).await);
+    let mut dispatches = Vec::with_capacity(2);
+    // Only the first teardown fails when scripted to; the replay retries.
+    owner.script_teardown_failure(fail_first_teardown);
+    dispatches.push(fixture.dispatch(vec![action], &tick).await);
+    if finalize_replay {
+        owner.script_teardown_failure(false);
+        let finalize = Action::FinalizeFailed {
+            alloc_id: alloc_id(),
+            terminal: Some(TerminalCondition::BackoffExhausted { attempts: 3 }),
+        };
+        dispatches.push(fixture.dispatch(vec![finalize], &tick).await);
     }
     let row = obs
         .alloc_status_row(&alloc_id())
@@ -275,7 +287,7 @@ async fn drive_rejected_start(
 /// CONTRACT_SHAPE: bounded-change (typed rejection persists Failed before release).
 #[tokio::test]
 async fn driver_rejected_start_persists_failed_occurrence_before_release() {
-    let mut outcome = drive_rejected_start(false, 1).await;
+    let mut outcome = drive_rejected_start(false, false).await;
 
     outcome
         .dispatches
@@ -295,7 +307,7 @@ async fn driver_rejected_start_persists_failed_occurrence_before_release() {
 /// CONTRACT_SHAPE: bounded-change (cleanup replay cannot be suppressed by duplicate ownership).
 #[tokio::test]
 async fn rejected_start_teardown_failure_replays_after_failed_closure() {
-    let outcome = drive_rejected_start(true, 2).await;
+    let outcome = drive_rejected_start(true, true).await;
 
     assert!(
         outcome.dispatches[0].is_err(),
@@ -303,18 +315,25 @@ async fn rejected_start_teardown_failure_replays_after_failed_closure() {
     );
     assert!(
         outcome.dispatches[1].is_ok(),
-        "replay retries and completes structural teardown instead of being suppressed"
+        "the finalize replay retries and completes structural teardown instead of being suppressed"
     );
     assert_eq!(outcome.row.state, AllocState::Failed);
+    assert_eq!(
+        outcome.row.terminal,
+        Some(TerminalCondition::BackoffExhausted { attempts: 3 }),
+        "the replay's closure lands the typed terminal claim on the Failed row"
+    );
     assert_eq!(outcome.occurrence.alloc_id, outcome.row.alloc_id);
     assert_eq!(outcome.occurrence.to, outcome.row.state);
     assert!(matches!(
         outcome.occurrence.from,
         AllocLifecyclePredecessor::State(AllocState::Failed)
     ));
+    assert_eq!(outcome.occurrence.source, TransitionSource::Reconciler);
     assert_eq!(
-        outcome.terminal_calls, 2,
-        "each rejected start releases after the durable boundary"
+        outcome.terminal_calls, 1,
+        "supervision is released once, at the rejected start's durable Failed row; \
+         the replay does not release it again"
     );
     assert_eq!(outcome.teardown_attempts, 2);
     assert_eq!(outcome.teardown_completions, 1);
@@ -852,7 +871,18 @@ async fn assert_terminal_write_partition(arm: TerminalActionArm, outcome: Termin
             completed = &mut dispatch => panic!("terminal dispatch completed before its compound write resolved: {completed:?}"),
         }
 
-        assert_eq!(driver.terminal_calls.load(Ordering::SeqCst), 1);
+        // FinalizeFailed ends probe supervision before it commits the terminal
+        // claim; StopAllocation ends it only once its terminal row is durable
+        // (service-allocation-readiness-and-ending D3, ADR-0256), so no
+        // `on_alloc_terminal` can have run while the Stop write is pending.
+        assert_eq!(
+            driver.terminal_calls.load(Ordering::SeqCst),
+            match arm {
+                TerminalActionArm::FinalizeFailed => 1,
+                TerminalActionArm::StopAllocation => 0,
+            },
+            "the probe-supervision end hook is ordered relative to the pending terminal write per arm contract",
+        );
         assert_eq!(
             driver.live_allocations(),
             Some(vec![alloc.clone()]),
@@ -886,6 +916,31 @@ async fn assert_terminal_write_partition(arm: TerminalActionArm, outcome: Termin
         driver.releases.load(Ordering::SeqCst),
         1,
         "both accepted and failed terminal writes release supervision exactly once after resolution",
+    );
+    // `on_alloc_terminal` fires for a StopAllocation only when its terminal row
+    // is durable (an accepted proposal, or the exact requested terminal already
+    // present). A failed write, a failed point read, or a second rejection by
+    // the exit observer's winner leaves it to the observer that authored the
+    // surviving row; the shim still releases supervision exactly once.
+    let expected_terminal_calls = match (arm, outcome) {
+        (TerminalActionArm::FinalizeFailed, _)
+        | (
+            TerminalActionArm::StopAllocation,
+            TerminalWriteOutcome::Accepted
+            | TerminalWriteOutcome::RejectedByConcurrentExit
+            | TerminalWriteOutcome::ExactRequestedTerminal,
+        ) => 1,
+        (
+            TerminalActionArm::StopAllocation,
+            TerminalWriteOutcome::Failed
+            | TerminalWriteOutcome::RejectedTwiceByConcurrentExit
+            | TerminalWriteOutcome::PointReadFailed,
+        ) => 0,
+    };
+    assert_eq!(
+        driver.terminal_calls.load(Ordering::SeqCst),
+        expected_terminal_calls,
+        "the probe-supervision end hook fires once, and for a Stop only behind a durable terminal row, for {outcome:?}",
     );
     assert!(
         driver.try_begin_reclamation(&alloc),

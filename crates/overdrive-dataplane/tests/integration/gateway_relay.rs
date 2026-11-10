@@ -47,7 +47,7 @@
 
 use std::io;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use overdrive_dataplane::gateway_relay::HostGatewayRelay;
@@ -1280,13 +1280,19 @@ async fn the_discard_ends_at_max_octets_at_the_deadline_and_at_the_no_progress_w
     let mut rig = Rig::new(Offer::Aes256).await;
     let client = rig.public.peer.clone();
     let accepted = Arc::new(AtomicU64::new(0));
+    let stop = Arc::new(AtomicBool::new(false));
     let flood = {
         let client = client.clone();
         let accepted = Arc::clone(&accepted);
+        let stop = Arc::clone(&stop);
         std::thread::spawn(move || -> io::Result<()> {
             // 256 MiB: far above `max` plus every socket buffer, so the sender
-            // can only stall because the relay stopped reading.
+            // can only stall because the relay stopped reading. The sender also
+            // stops when told to, so it can be let go without a reset.
             for i in 0..4096 {
+                if stop.load(Ordering::SeqCst) {
+                    return Ok(());
+                }
                 client.send(&pattern(i * PIECE, PIECE))?;
                 accepted.fetch_add(PIECE as u64, Ordering::SeqCst);
             }
@@ -1320,8 +1326,34 @@ async fn the_discard_ends_at_max_octets_at_the_deadline_and_at_the_no_progress_w
         "the peer got {frozen_at} octets in, within max + buffers ({bound})"
     );
     assert!(!flood.is_finished(), "the sender is blocked, not failed: the leg was not reset");
+    // Let the sender go WITHOUT resetting it mid-send: a reset that wakes a sender
+    // blocked in the kernel TLS transmit path leaks the kernel's global TCP memory
+    // accounting on the guest kernel (Linux 7.0.14: `/proc/net/sockstat` TCP mem
+    // jumps to ~370 MB and stays above the hard `tcp_mem` limit, so every later send
+    // in the process blocks forever). Ask the sender to stop, drain what it still
+    // has in flight, and only then drop every holder of the leg.
+    stop.store(true, Ordering::SeqCst);
+    let Rig { relay, public, .. } = &mut rig;
+    let drained = relay
+        .discard_remaining(
+            &mut public.read,
+            nz64(1 << 40),
+            relay_within(20, Duration::from_millis(500)),
+        )
+        .await;
+    assert_eq!(
+        drained.err(),
+        Some(LegReadError::Deadline),
+        "the stopped sender's in-flight octets drain and the leg then goes quiet"
+    );
+    let waited = Instant::now();
+    while !flood.is_finished() && waited.elapsed() < Duration::from_secs(10) {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(flood.is_finished(), "the stopped sender finished within 10 s of being let go");
+    assert!(flood.join().expect("sender thread").is_ok(), "the sender ended without an error");
+    drop(client);
     drop(rig);
-    let _ = blocking(move || flood.join()).await;
 
     // deadline (a drain deadline passed as `absolute`): a silent peer.
     let mut rig = Rig::new(Offer::Aes128).await;

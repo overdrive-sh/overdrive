@@ -50,7 +50,7 @@ use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::mtls_enforcement::{MtlsEnforcement, MtlsLimits};
 use overdrive_core::traits::mtls_resolve::{MtlsResolution, MtlsResolve};
 use overdrive_core::traits::observation_store::{AllocState, ObservationStore};
-use overdrive_core::transition_reason::{StoppedBy, TerminalCondition};
+use overdrive_core::transition_reason::{StoppedBy, TerminalCondition, TransitionReason};
 use overdrive_core::wall_clock::UnixInstant;
 use overdrive_sim::adapters::ca::SimCa;
 use overdrive_sim::adapters::clock::SimClock;
@@ -909,26 +909,45 @@ fn tick(counter: u64) -> TickContext {
 /// S-ND295-06 — Start publishes no partial attachment
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-async fn provision_refusal_stops_before_driver_start_and_preserves_the_typed_owner_cause() {
+async fn provision_refusal_stops_before_driver_start_and_records_the_owner_cause_on_a_failed_row() {
     const REFUSED: &str = "nd295-provision-refused";
     let fixture = SeamFixture::with_sim_owner().await;
     fixture.sim_owner.script_provision_failure(true);
     let start = fixture.trace.mark();
 
-    let error = fixture
-        .dispatch(start_action(REFUSED))
-        .await
-        .expect_err("typed provision refusal reaches the production action owner");
+    // Production fails closed: the dispatch itself succeeds because the
+    // refusal is durably recorded, and the allocation reaches Failed instead of
+    // looping Pending while the reconciler re-emits the start.
+    fixture.dispatch(start_action(REFUSED)).await.expect(
+        "a provision refusal is recorded as a Failed row, not returned as a dispatch error",
+    );
 
+    let row = fixture
+        .state
+        .obs
+        .alloc_status_row(&alloc_id(REFUSED))
+        .await
+        .expect("allocation row read succeeds")
+        .expect("the refused allocation has a durable row");
+    assert_eq!(row.state, AllocState::Failed, "the refused allocation is Failed");
+    // The row carries the owner's cause as the typed reason's stage plus the
+    // operation-naming rendering of the owner's error; the Rust error value
+    // itself is not persisted, so the operation name in the text is the
+    // observable that identifies the refused attachment.
+    match &row.reason {
+        Some(TransitionReason::WorkloadNetnsProvisionFailed { stage, detail }) => {
+            assert_eq!(stage, "guest_network", "the failing stage is the guest network owner");
+            assert!(
+                detail.contains("PairAttach") && detail.contains("I/O"),
+                "the reason names the owner's refused pair attachment, got {detail:?}"
+            );
+        }
+        other => panic!("the Failed row carries WorkloadNetnsProvisionFailed, got {other:?}"),
+    }
+    let row_detail = row.detail.as_deref().unwrap_or_default();
     assert!(
-        matches!(
-            error,
-            ShimError::GuestNetwork(GuestNetworkError::Io {
-                operation: GuestNetworkOperation::PairAttach,
-                ..
-            })
-        ),
-        "the owner's typed provision cause is the dispatch error, got {error:?}"
+        row_detail.contains("PairAttach"),
+        "the row's detail names the refused pair attachment, got {row_detail:?}"
     );
     assert!(fixture.driver.inner.started_specs().is_empty(), "the VMM driver is never entered");
     assert_eq!(fixture.driver.inner.live_count(), 0);
