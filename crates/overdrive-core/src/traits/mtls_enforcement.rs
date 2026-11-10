@@ -12,11 +12,13 @@
 //!   (`splice(legB → legF)`, a zero-copy `splice` out of leg B's kTLS-RX).
 //! - **INBOUND**: TPROXY-intercept → `getsockname` orig-dst → rustls SERVER
 //!   handshake on leg C (present the server SVID, REQUIRE+VERIFY the client SVID
-//!   chains to the bundle via `WebPkiClientVerifier`) → arm kTLS-RX → dial the
-//!   server workload (leg S) → DELIVER pump (`splice(legC → legS)`, a zero-copy
-//!   `splice` out of leg C's kTLS-RX) + RESPONSE pump (a blocking
-//!   `splice(legS → pipe → legC)` into leg C's kTLS-TX); fail-closed on
-//!   `nocert`/`wrongca` (`findings-inbound-intercept.md`).
+//!   chains to the bundle via `WebPkiClientVerifier`) → arm kTLS → dial the
+//!   VM workload through the guest-flow owner's `GuestStreamDial` and relay leg C
+//!   to the guest stream; fail-closed on `nocert`/`wrongca`
+//!   (`findings-inbound-intercept.md`). Only VM workloads exist, so an
+//!   `Inbound` destination that is not the workload address of an Active VM
+//!   allocation is refused `GuestDial(NotServing)`, leg C reset, nothing
+//!   registered.
 //!
 //! **Agent-light in BOTH directions: no TLS crypto, no per-byte userspace
 //! copy.** "Agent-light" means the agent does NO TLS crypto in userspace — the

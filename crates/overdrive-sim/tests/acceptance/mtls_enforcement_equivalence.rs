@@ -89,6 +89,15 @@ fn agent_leg() -> OwnedFd {
     OwnedFd::from(agent_end)
 }
 
+/// A guest-flow dial that answers every target, so an inbound connection reaches
+/// an Active VM workload address (the only inbound path).
+fn serving_guest_dial() -> Arc<overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial> {
+    use overdrive_sim::adapters::guest_stream_dial::{SimDialScript, SimGuestStreamDial};
+    let dial = SimGuestStreamDial::new();
+    dial.script_default(SimDialScript::accept());
+    Arc::new(dial)
+}
+
 /// Build an `InterceptedConnection` in the given direction for `alloc`, carrying a
 /// real owned leg. `expected_peer` is `None` (v1 authn-only — #242 is the upgrade).
 fn intercepted(direction: Direction, alloc: AllocationId) -> InterceptedConnection {
@@ -156,7 +165,7 @@ fn sim_mtls_enforcement_outcome_matches_contract_both_directions() {
                 // after idempotent teardown. (bundle_present == true arm.)
                 if bundle_present {
                     let identity = Arc::new(SimIdentityRead::new(held, Some(bundle())));
-                    let sim = SimMtlsEnforcement::new(identity, MtlsLimits::default(), Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()));
+                    let sim = SimMtlsEnforcement::new(identity, MtlsLimits::default(), serving_guest_dial());
 
                     let conn = intercepted(direction, held_alloc.clone());
                     let handle = rt
@@ -197,7 +206,7 @@ fn sim_mtls_enforcement_outcome_matches_contract_both_directions() {
                 } else {
                     // (3) ABSENT BUNDLE (svid present) ⇒ AbsentBundle (fail-closed).
                     let identity = Arc::new(SimIdentityRead::new(held, None));
-                    let sim = SimMtlsEnforcement::new(identity, MtlsLimits::default(), Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()));
+                    let sim = SimMtlsEnforcement::new(identity, MtlsLimits::default(), serving_guest_dial());
 
                     let conn = intercepted(direction, held_alloc.clone());
                     let err = rt
@@ -231,11 +240,7 @@ fn sim_mtls_enforcement_probe_ok_and_unknown_handle_is_gone() {
         .expect("tokio runtime builds");
 
     let identity = Arc::new(SimIdentityRead::new(BTreeMap::new(), Some(bundle())));
-    let sim = SimMtlsEnforcement::new(
-        identity,
-        MtlsLimits::default(),
-        Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
-    );
+    let sim = SimMtlsEnforcement::new(identity, MtlsLimits::default(), serving_guest_dial());
 
     // probe: the in-process substrate honours its contract by construction.
     rt.block_on(sim.probe()).expect("sim probe is Ok (no kernel kTLS arm to fail)");
@@ -265,11 +270,7 @@ fn established_adapter(held_alloc: &AllocationId) -> SimMtlsEnforcement {
         svid("spiffe://overdrive.local/workload/j/alloc/held", 1_900_000_000),
     );
     let identity = Arc::new(SimIdentityRead::new(held, Some(bundle())));
-    SimMtlsEnforcement::new(
-        identity,
-        MtlsLimits::default(),
-        Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
-    )
+    SimMtlsEnforcement::new(identity, MtlsLimits::default(), serving_guest_dial())
 }
 
 /// `@in-memory` — the F4/F7 CONCRETE-VALUE limit trips are the SAME cause-distinct

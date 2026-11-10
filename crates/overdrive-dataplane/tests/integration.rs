@@ -75,7 +75,6 @@ mod integration {
     /// (`ss -tie rxconf:sw`), byte-exact plaintext at the server S, client-leg
     /// 0x17-only (cleartext-hits=0), and splice-only deliver (strace), through the
     /// `MtlsEnforcement` driving port.
-    mod mtls_inbound_enforce;
     /// GH #295 R5-54 Tier-3 half (LEGS-DIAL, D-14): the real
     /// `HostMtlsEnforcement`'s inbound path to a guest-prefix target —
     /// handshake, awaited dial, relay with the 0.5-RTT plaintext first, no

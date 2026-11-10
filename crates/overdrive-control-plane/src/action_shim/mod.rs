@@ -47,8 +47,8 @@ use crate::identity_mgr::IdentityMgr;
 use crate::journal::WorkflowId;
 use overdrive_core::guest_transport::GuestTransportAssignment;
 use overdrive_core::net::ListenPort;
-// The retained exec/process namespace lifecycle wiring: per-host slot
-// allocator, slot→plan derivation, gateway-as-responder helper, and netns
+// Historical slot-shaped netns wiring kept only for bounded test
+// compositions: per-host slot allocator, slot→plan derivation and netns
 // provision/teardown executors. VM guest networking uses GuestNetworkPlan.
 use crate::veth_provisioner::{NetSlotAllocator, VethProvisionError, WorkloadNetnsPlan};
 #[cfg(any(test, feature = "integration-tests"))]
@@ -904,7 +904,7 @@ pub type AllocDriverIndex =
 /// it acknowledges the exact derived plans and the shim still injects every
 /// field before `Driver::start`.
 pub trait WorkloadNetworkProvisioner: Send + Sync {
-    /// Converge the derived exec/process workload netns plan.
+    /// Converge the derived slot-shaped workload netns plan (test compositions only).
     ///
     /// # Errors
     ///

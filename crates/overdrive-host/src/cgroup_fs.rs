@@ -73,8 +73,8 @@ impl RealCgroupFs {
     /// catches missing injections at every call site. This builder
     /// is the opposite shape: an *internal adapter knob* on a single
     /// `PathBuf` field. It does NOT relax the port-trait-mandatory
-    /// rule at `ExecDriver::new` (step 01-05); the
-    /// `Arc<dyn CgroupFs>` parameter there stays mandatory.
+    /// rule for the `Arc<dyn CgroupFs>` constructor parameter, which stays
+    /// mandatory.
     ///
     /// # Use cases
     ///

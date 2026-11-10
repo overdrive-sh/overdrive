@@ -1,11 +1,10 @@
 //! `vm_reclamation_boot::converge` — the boot-epoch drive for
 //! `VmReclamation` (ADR-0083 §D7, `brief.md` §105a.6, GH #42).
 //!
-//! Runs ONCE, in `run_server`, IMMEDIATELY BEFORE
-//! `veth_provisioner::adopt_on_restart_recovery` — so any `rmdir` this
-//! drive issues (via `VmHostState::kill_scope`'s settle postcondition)
-//! has succeeded or returned `NotFound` before `adopt_on_restart_recovery`
-//! reads the same cgroup tree via `alloc_scope_pids` (S-VM-23). It is
+//! Runs ONCE, in `run_server`, before any later boot step reads the cgroup
+//! tree — so any `rmdir` this drive issues (via `VmHostState::kill_scope`'s
+//! settle postcondition) has succeeded or returned `NotFound` first
+//! (S-VM-23). It is
 //! placed OUTSIDE the `state.mtls_worker.is_some()` gate — VM allocations
 //! exist whether or not mTLS is composed.
 //!
@@ -66,10 +65,8 @@ use crate::reconciler_runtime::build_hydration_context;
 /// [`ConvergeError::Host`] on a genuine (non-benign-absence)
 /// `VmHostState::observe` substrate failure, or
 /// [`ConvergeError::Reclamation`] when an executor fails. Any of the
-/// three refuses the whole boot (mirroring `adopt_on_restart_recovery`'s
-/// own fail-closed posture) — the same cgroup tree
-/// `adopt_on_restart_recovery` reads next must not be read out from
-/// under a still-in-flight `rmdir`.
+/// three refuses the whole boot (fail-closed) — the cgroup tree later boot
+/// steps read must not be read out from under a still-in-flight `rmdir`.
 #[expect(
     clippy::significant_drop_tightening,
     reason = "the allocator/listener_facts MutexGuards are lent into the HydrationContext \

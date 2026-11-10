@@ -10,7 +10,7 @@
 //! consumers, non-trivial setup).
 //!
 //! The rule install MUST be the production `start_alloc` call site — these
-//! helpers NEVER call `install_inbound_tproxy` themselves (vertical-slice rule,
+//! helpers never install the intercept themselves (vertical-slice rule,
 //! CLAUDE.md § "Build vertical slices through production entry points").
 
 #![allow(

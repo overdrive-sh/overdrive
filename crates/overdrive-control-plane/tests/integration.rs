@@ -130,7 +130,6 @@ mod integration {
     /// real orphan netns: the fresh (post-restart) allocator ADOPTS the
     /// survivor's slot (a later `assign` cannot collide) and the orphan netns
     /// is GC'd. Root + CAP_NET_ADMIN; SKIP otherwise.
-    mod adopt_on_restart;
     /// transparent-mtls-enrollment step 04-01 (Path A / ADR-0071, D-TME-12 /
     /// AC14) — Tier-3 acceptance for the C3 action-shim seam. Drives the
     /// PRODUCTION `action_shim::dispatch` with `mtls_worker: Some(...)` (the

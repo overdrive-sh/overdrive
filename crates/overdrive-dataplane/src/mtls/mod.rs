@@ -58,7 +58,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use ipnet::Ipv4Net;
 use overdrive_core::AllocationId;
-use overdrive_core::dataplane::{MTLS_LEG_S_DIAL_MARK, MTLS_TPROXY_MARK};
+use overdrive_core::dataplane::MTLS_TPROXY_MARK;
 use overdrive_core::guest_transport::dial::GuestStreamDial;
 use overdrive_core::traits::IdentityRead;
 use overdrive_core::traits::ca::SvidMaterial;
@@ -1018,42 +1018,6 @@ fn dial_leg(peer: SocketAddrV4, guest_prefix: Ipv4Net, deadline: Duration) -> Re
     }
 }
 
-/// Dial `peer` for the agent's INBOUND leg S (the server workload), stamping
-/// [`MTLS_LEG_S_DIAL_MARK`](overdrive_core::dataplane::MTLS_LEG_S_DIAL_MARK)
-/// via `SO_MARK` so the nft-TPROXY prerouting rule skips the agent's own dial
-/// (F5 intercept-recursion exemption — the inbound analogue of the outbound
-/// leg-B cgroup-scoping exemption).
-fn dial_leg_s(peer: SocketAddrV4, deadline: Duration) -> Result<TcpStream> {
-    // Create the socket, set SO_MARK, THEN connect (the mark must be set before the
-    // SYN so prerouting sees it on the outgoing packet).
-    let sock = unsafe { libc::socket(libc::AF_INET, libc::SOCK_STREAM | libc::SOCK_CLOEXEC, 0) };
-    if sock < 0 {
-        return Err(MtlsEnforcementError::Io(std::io::Error::last_os_error()));
-    }
-    let mark: u32 = MTLS_LEG_S_DIAL_MARK;
-    // SAFETY: SO_MARK takes a u32 (needs CAP_NET_ADMIN — the agent has it).
-    let rc = unsafe {
-        libc::setsockopt(
-            sock,
-            libc::SOL_SOCKET,
-            libc::SO_MARK,
-            std::ptr::from_ref(&mark).cast(),
-            std::mem::size_of::<u32>() as libc::socklen_t,
-        )
-    };
-    if rc != 0 {
-        let err = std::io::Error::last_os_error();
-        unsafe { libc::close(sock) };
-        return Err(MtlsEnforcementError::Io(err));
-    }
-    // SAFETY: take ownership of the marked socket fd and connect via std.
-    let stream = unsafe { std::os::fd::OwnedFd::from_raw_fd(sock) };
-    let stream = TcpStream::from(stream);
-    stream.set_nodelay(true).map_err(MtlsEnforcementError::Io)?;
-    stream.connect_timeout_marked(peer, deadline)?;
-    Ok(stream)
-}
-
 /// `connect_timeout` analogue for an already-created (marked) socket. `std`'s
 /// `TcpStream::connect_timeout` creates its own socket, so we hand-roll a
 /// non-blocking connect-with-deadline on the marked fd.
@@ -1216,27 +1180,17 @@ impl HostMtlsEnforcement {
         let leg_c = conn.leg;
         let id = self.next_id(alloc.clone());
 
-        let established = if self.guest_prefix.contains(orig_dst.ip()) {
-            inbound::establish_guest(
-                leg_c,
-                orig_dst,
-                &svid,
-                &bundle,
-                &alloc,
-                limits,
-                Arc::clone(&self.guest_dial),
-                tokio::runtime::Handle::current(),
-            )
-            .await?
-        } else {
-            tokio::task::spawn_blocking(move || {
-                inbound::establish_tcp(leg_c, orig_dst, &svid, &bundle, &alloc, limits)
-            })
-            .await
-            .map_err(|error| {
-                MtlsEnforcementError::Io(std::io::Error::other(format!("enforce task: {error}")))
-            })??
-        };
+        let established = inbound::establish_guest(
+            leg_c,
+            orig_dst,
+            &svid,
+            &bundle,
+            &alloc,
+            limits,
+            Arc::clone(&self.guest_dial),
+            tokio::runtime::Handle::current(),
+        )
+        .await?;
 
         Ok(self.register(id, established))
     }

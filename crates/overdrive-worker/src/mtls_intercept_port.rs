@@ -284,7 +284,7 @@ pub trait MtlsIntercept: Send + Sync + 'static {
     /// ([`InterceptError::NftRuleInstallFailed`](crate::mtls_intercept::InterceptError::NftRuleInstallFailed)
     /// and siblings), each naming the failing operation.
     /// The caller installs N captures for N declared ports and ZERO for a
-    /// Job-kind / host-netns workload; that N-vs-0 decision is the CALLER's,
+    /// Job-kind workload; that N-vs-0 decision is the CALLER's,
     /// not this method's.
     ///
     /// # Observable invariants

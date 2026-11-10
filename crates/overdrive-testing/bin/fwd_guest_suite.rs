@@ -586,11 +586,6 @@ const DATAPLANE_NATIVE: &[Cell] = &[
         true,
     ),
     (
-        "integration::mtls_inbound_enforce::inbound_enforce_origdst_server_mtls_ktls_rx_splice_to_server",
-        1,
-        true,
-    ),
-    (
         "integration::multi_listener_tcp_udp_e2e::adding_listener_on_resubmit_converges_without_breaking_existing",
         1,
         true,
@@ -1149,16 +1144,6 @@ const STEP13_06_ROUTED_WORKER: &[Cell] = &[
 /// root/CAP bailout or a real privileged substrate failure. They extend the
 /// existing control-plane guest after the retained 57+18+5 boundary.
 const CONTROL_PLANE_NORMAL_NATIVE: &[Cell] = &[
-    (
-        "integration::adopt_on_restart::serve_restart_readopts_surviving_slot_and_gcs_orphan_netns",
-        1,
-        true,
-    ),
-    (
-        "integration::adopt_on_restart::serve_restart_sweeps_surviving_per_workload_tproxy_rule",
-        1,
-        true,
-    ),
     (
         "integration::dns_responder_bind::empty_fallback_binds_zero_sockets_and_warns_it_is_deaf",
         1,

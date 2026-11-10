@@ -425,11 +425,11 @@ fn probe_status_from_wire(
 ///
 /// `error:` is the row's verbatim driver / OS detail. It is deliberately
 /// NOT labelled as a stderr tail: the field carries whatever the driver
-/// captured — a boot diagnostic, a guest console tail, a process stderr
-/// tail — and only `LastTerminatedBody::stderr_tail` (rendered by
+/// captured — a boot diagnostic, a guest console tail — and only
+/// `LastTerminatedBody::stderr_tail` (rendered by
 /// [`render_last_terminated_detail`]) and the streaming
 /// [`format_job_failed_summary`] read a typed stderr field that earns
-/// `ExecDriver`'s `STDERR_TAIL_LINES` line-budget wording. A multi-line
+/// the guest console tail's line-budget wording. A multi-line
 /// detail renders as an indented block under a bare `error:` label so a
 /// console tail stays readable; a single-line detail stays inline.
 ///
@@ -566,10 +566,9 @@ fn render_svid_issue_failure_detail(
 /// The describe handler populates every row's `resources` from the workload
 /// intent (`handlers` builds `ResourcesBody` from `job.resources` /
 /// `svc.resources` / `sched.job.resources`, kind-agnostically), so the
-/// figure is the SAME whether the allocation is backed by a process driver
-/// or the microVM driver: a VM allocation reports the declared memory the
-/// SAME way a process allocation does, through this one render surface —
-/// never a parallel VM-only renderer. Every row of a workload carries the
+/// figure is the SAME for every workload kind: a VM allocation reports the
+/// declared memory through this one render surface — never a parallel
+/// kind-specific renderer. Every row of a workload carries the
 /// same declared figure, so the first row is representative.
 ///
 /// Presence-guarded + additive: omitted entirely at 0 allocations, or when

@@ -95,7 +95,6 @@ mod integration {
     mod inbound_rules_only_for_tcp_declared_listeners;
     mod inbound_rules_per_listener;
     mod inbound_tproxy_harness;
-    mod job_kind_installs_no_inbound_rule;
 
     // transparent-mtls-enrollment (ADR-0071, step 05-03; re-oracled at the
     // increment-m promotion) — the OUTBOUND enforce-substrate agent-light
@@ -107,7 +106,7 @@ mod integration {
     // FORWARD blocking splice into leg B's kTLS-TX — zero userspace copy,
     // `findings-ktls-tx-blocking-splice.md`), and ≥1 leg fd is both a splice source
     // and destination (the RETURN splice out of leg B's kTLS-RX shares the leg fds).
-    // Structural mirror of the SURVIVING dataplane `mtls_inbound_enforce.rs` (the
+    // Structural mirror of the former inbound deliver-direction (the
     // deliver-direction zero-copy oracle). Q4 authn-only (encryption + mechanism,
     // NOT intended-peer).
     mod outbound_enforce_substrate_splice;

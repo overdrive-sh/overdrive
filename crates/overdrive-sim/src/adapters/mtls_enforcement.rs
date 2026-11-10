@@ -67,7 +67,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use async_trait::async_trait;
 use overdrive_core::AllocationId;
-use overdrive_core::guest_transport::GUEST_NODE_PREFIX;
 use overdrive_core::guest_transport::dial::{
     DialPurpose, GuestStream, GuestStreamDial, GuestStreamEnd,
 };
@@ -277,7 +276,7 @@ impl MtlsEnforcement for SimMtlsEnforcement {
 
         let allocation = conn.alloc;
         let (owned_leg, relay, relay_stop) = match conn.routed {
-            Routed::Inbound { orig_dst } if GUEST_NODE_PREFIX.contains(orig_dst.ip()) => {
+            Routed::Inbound { orig_dst } => {
                 let stream = match self.guest_dial.dial(orig_dst, DialPurpose::Relay).await {
                     Ok(stream) => stream,
                     Err(source) => {
@@ -290,7 +289,7 @@ impl MtlsEnforcement for SimMtlsEnforcement {
                 let relay = tokio::spawn(relay_guest_stream(leg, stream, stop));
                 (None, Some(relay), Some(relay_stop))
             }
-            _ => (Some(conn.leg), None, None),
+            Routed::Outbound { .. } => (Some(conn.leg), None, None),
         };
 
         // Steady-state-established: mint a stable per-connection id and retain

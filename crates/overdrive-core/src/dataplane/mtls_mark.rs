@@ -1,23 +1,17 @@
-//! `MTLS_LEG_S_DIAL_MARK` — the cross-adapter `SO_MARK` for the inbound
-//! mTLS leg-S dial (F5 intercept-recursion exemption).
+//! `MTLS_LEG_S_DIAL_MARK` — the cross-adapter `SO_MARK` for agent-owned
+//! sockets the nft-TPROXY rule must not re-intercept (F5 exemption).
 //!
 //! A shared dataplane protocol constant on the same footing as
 //! `maglev_table_size::DEFAULT_M` and `drop_class::DropClass`: the value
 //! is read by BOTH adapters, so it has exactly one SSOT here in
 //! `overdrive-core`. No I/O — a plain `pub const u32`.
 
-/// The `SO_MARK` the agent stamps on its INBOUND leg-S dial (F5 inbound
-/// intercept-recursion exemption).
+/// The `SO_MARK` the agent stamps on sockets it owns that the nft-TPROXY
+/// rules must not re-intercept (F5 intercept-recursion exemption): the
+/// transparent leg-C listener's accepted sockets and the probe sockets.
 ///
-/// The nft-TPROXY `prerouting` rule intercepts the server's virtual address;
-/// the agent's leg-S dial targets that same logical address the client aimed
-/// at, so without this mark the SYN would be TPROXY'd back to the agent's
-/// leg-C listener, recursing instead of reaching the server. The production
-/// nft-TPROXY rule excludes this mark; the test harness mirrors it.
-///
-/// Shared SSOT for both adapters: `overdrive-dataplane` STAMPS it (SO_MARK on
-/// the leg-S dial, `mtls::dial_leg_s`); `overdrive-worker` EXCLUDES it (the
-/// nft prerouting rule in `mtls_intercept::install_inbound_tproxy`).
+/// Shared SSOT: `overdrive-worker` STAMPS it (`make_transparent_listener`,
+/// the probers); the shared nft table EXEMPTS it (`overdrive-netlink`).
 pub const MTLS_LEG_S_DIAL_MARK: u32 = 0x2;
 
 /// The leg-C / leg-F TPROXY fwmark (DG-9). Today the worker's private

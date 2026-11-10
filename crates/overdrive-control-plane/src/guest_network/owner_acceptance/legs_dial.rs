@@ -42,7 +42,7 @@
 
 use std::collections::BTreeMap;
 use std::io::Read as _;
-use std::net::{Ipv4Addr, SocketAddrV4};
+use std::net::SocketAddrV4;
 use std::os::fd::OwnedFd;
 use std::os::unix::net::UnixStream;
 use std::sync::Arc;
@@ -400,22 +400,4 @@ async fn a_leg_s_dial_error_closes_leg_c_and_returns_guest_dial() {
     );
     let observed = c.observe().await;
     assert_eq!(relay_dials(&observed, &lease), 0, "no Relay entry is held");
-}
-
-/// R5-54 / LEGS-DIAL — a target outside the guest prefix keeps today's TCP
-/// leg S: the enforcement makes no dial through the owner.
-///
-/// CONTRACT_SHAPE: unbounded-preservation.
-#[tokio::test(flavor = "current_thread", start_paused = true)]
-async fn a_target_outside_the_guest_prefix_makes_no_owner_dial() {
-    let (c, enforcement, _lease, _session) = serving(54_004, Verification::Anchored).await;
-    let outside = SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 5), PORT);
-    assert!(!GUEST_NODE_PREFIX.contains(outside.ip()), "precondition: outside the prefix");
-    let (leg, _client) = leg_c();
-
-    let enforced = spawn_inbound(&enforcement, leg, outside);
-    c.settle().await;
-    let outcome = enforced.await.expect("the enforce task does not panic");
-    eprintln!("outside-prefix enforce: {:?}", outcome.as_ref().err());
-    assert!(c.io.dials().is_empty(), "no dial through the guest-flow owner");
 }

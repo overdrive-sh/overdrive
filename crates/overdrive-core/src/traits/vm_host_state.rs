@@ -145,9 +145,9 @@ pub trait VmHostState: Send + Sync + 'static {
     /// - **Does NOT return until the scope directory's removal has
     ///   succeeded or returned `NotFound`.** This settle contract is a
     ///   postcondition of the port, not a rule the caller must remember
-    ///   — `adopt_on_restart_recovery`'s boot-time read of the same tree
-    ///   treats a mid-deletion scope as a hard `ObserveRead` error that
-    ///   refuses the boot (`brief.md` §105a.5 / ADR-0083 §D7).
+    ///   — a boot-time read of the same tree treats a mid-deletion scope as
+    ///   a hard error that refuses the boot (`brief.md` §105a.5 / ADR-0083
+    ///   §D7).
     ///
     /// # Edge cases
     /// - **Idempotent.** An already-absent scope: `cgroup.kill` write and

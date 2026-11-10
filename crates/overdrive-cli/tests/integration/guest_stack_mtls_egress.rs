@@ -2364,51 +2364,6 @@ where
     }
 }
 
-/// CONTRACT_SHAPE: bounded-change (an early observation failure still awaits every fixture owner).
-#[tokio::test]
-async fn restart_observation_failure_awaits_cleanup_before_reporting() {
-    let (server, _tmp, _cuts) = spawn_capture_observed_mtls_server().await;
-    let endpoint = server.endpoint().clone();
-    // Server boot is allowed to sweep residue from an earlier crashed owner;
-    // the assertion-safe interval begins after that production recovery step.
-    let exact_before = fault_fixture::PacketPathBaseline::capture();
-    let malformed = fault_fixture::ProductInputHookFixture::install();
-    let wire = WireCapture::start(LOOPBACK_IFACE);
-    let result: Result<(), String> = tokio::time::timeout(
-        Duration::from_secs(15),
-        finish_after_authoritative_cleanup(
-            Err("injected failure after real server, capture, and packet-path owners exist"
-                .to_owned()),
-            async move {
-                drop(wire);
-                malformed.finish();
-                Ok(())
-            },
-            async move {
-                server.shutdown().await.map_err(|error| {
-                    format!("drain real recovery server after injected failure: {error}")
-                })
-            },
-        ),
-    )
-    .await
-    .expect("injected post-owner failure restores and joins within its own bound");
-    assert!(result.is_err());
-    assert_eq!(
-        fault_fixture::PacketPathBaseline::capture(),
-        exact_before,
-        "post-owner assertion failure restores the exact packet-path baseline"
-    );
-    let addr = SocketAddr::new(
-        "127.0.0.1".parse().expect("loopback address"),
-        endpoint.port_or_known_default().expect("serve endpoint port"),
-    );
-    assert!(
-        std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(1)).is_err(),
-        "post-owner assertion failure synchronously drains the real server listener"
-    );
-}
-
 /// S-GTI-08b — status 78 after READY and EXEC is an ordinary Job result.
 /// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
@@ -2480,6 +2435,3 @@ async fn operator_exit_78_after_ready_is_an_ordinary_result() {
     );
     handle.shutdown().await.expect("clean exit-78 server shutdown");
 }
-
-#[path = "guest_stack_mtls_egress_fault_fixture.rs"]
-mod fault_fixture;

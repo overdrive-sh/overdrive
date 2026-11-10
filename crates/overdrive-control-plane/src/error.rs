@@ -544,39 +544,6 @@ pub enum ControlPlaneError {
     #[error(transparent)]
     GuestNetworkBoot(#[from] crate::guest_network::GuestNetworkError),
 
-    /// Post-reclamation netns adopt/GC failed: a slot-correlation conflict, an
-    /// `ip netns` / procfs observe failure, or an obs-store read failure.
-    /// Boot-epoch VM reclamation has already made unsupervised non-terminal
-    /// instances terminal; this pass handles structural network residue rather
-    /// than reconstructing a live VM survivor. Pass-through
-    /// `#[from]` per `.claude/rules/development.md` § "Never flatten a typed
-    /// error to `Internal(String)`" so the composition root can `matches!(e,
-    /// ControlPlaneError::NetnsRecovery(_))` and branch on the inner
-    /// `NetnsRecoveryError` cause without `Display`-grepping. Same boot-path
-    /// shape as `MtlsBoot` / `DataplaneBoot`: happens BEFORE the listener
-    /// binds (the `to_response` arm is exhaustiveness-only) and is fail-closed
-    /// — the node refuses to start (`health.startup.refused`, reason
-    /// `netns.adopt`) rather than serve with an untrusted allocator view.
-    #[error(transparent)]
-    NetnsRecovery(#[from] crate::veth_provisioner::NetnsRecoveryError),
-
-    /// Post-reclamation nft-rule-sweep failure. After netns adopt/GC, the boot
-    /// pass sweeps every original per-workload nft-TPROXY rule from the shared
-    /// `overdrive-mtls prerouting` chain (their listeners ended with the prior
-    /// serve owner, so the retained mark-first rules are dead-weight
-    /// survivors); a by-handle `nft delete rule` failing surfaces here.
-    /// Pass-through `#[from]` per `.claude/rules/development.md` § "Never flatten
-    /// a typed error to `Internal(String)`" — NOT `internal(...)` — so the
-    /// composition root can `matches!(e, ControlPlaneError::NftRuleSweep(_))` and
-    /// branch on the inner `InterceptError` cause without `Display`-grepping.
-    /// Same boot-path shape as `NetnsRecovery` / `MtlsBoot`: happens BEFORE the
-    /// listener binds (the `to_response` arm is exhaustiveness-only) and is
-    /// fail-closed — the node refuses to start (`health.startup.refused`, reason
-    /// `nft.sweep`) rather than serve with stale per-workload rules that would
-    /// duplicate-stack on the next per-alloc re-install.
-    #[error(transparent)]
-    NftRuleSweep(#[from] overdrive_worker::mtls_intercept::InterceptError),
-
     /// `[dataplane.vip_allocator]` TOML parser refusal per
     /// ADR-0049 § 5b / service-vip-allocator step 02-02. Pass-through
     /// embedding so the CLI / composition root can branch on
@@ -609,7 +576,7 @@ pub enum ControlPlaneError {
     /// mid-rebuild), so the composition root can `matches!(e,
     /// ControlPlaneError::FrontendRebuild(_))` for structured
     /// `health.startup.refused` diagnostics. Same boot-path shape as
-    /// `NetnsRecovery` / `ListenerFactRebuild`: the rebuild happens BEFORE the
+    /// `ListenerFactRebuild`: the rebuild happens BEFORE the
     /// listener binds, so the `to_response` arm is exhaustiveness-only (an
     /// `Exhausted` cause maps to HTTP 503, every other cause to HTTP 500).
     #[error(transparent)]
@@ -767,8 +734,8 @@ pub enum ControlPlaneError {
     /// §105a.6, GH #42, step 02-02). Fires when [`crate::vm_reclamation_boot::converge`]
     /// fails — a genuine `VmHostState` substrate error (not a
     /// benign-absence) or a reclamation-executor failure. Same boot-path
-    /// shape as `NetnsRecovery` / `NftRuleSweep`: the drive runs AFTER
-    /// `AppState` and BEFORE `adopt_on_restart_recovery`, emitting
+    /// shape as `MtlsBoot` / `DataplaneBoot`: the drive runs AFTER
+    /// `AppState` and BEFORE the listener binds, emitting
     /// `health.startup.refused` (reason `vm_reclamation.boot`) itself;
     /// this arm is exhaustiveness-only.
     #[error(transparent)]
@@ -1082,28 +1049,10 @@ pub fn to_response(err: ControlPlaneError) -> (StatusCode, ErrorBody) {
             StatusCode::INTERNAL_SERVER_ERROR,
             ErrorBody { error: "internal".into(), message: e.to_string(), field: None },
         ),
-        ControlPlaneError::NetnsRecovery(e) => (
-            // Same boot-path shape as `MtlsBoot` / `DataplaneBoot` above:
-            // adopt-on-restart recovery runs AFTER `AppState` and BEFORE
-            // the listener binds (step 04-04), emitting `health.startup.
-            // refused` (reason `netns.adopt`) itself; this arm is
-            // exhaustiveness-only.
-            StatusCode::INTERNAL_SERVER_ERROR,
-            ErrorBody { error: "internal".into(), message: e.to_string(), field: None },
-        ),
-        ControlPlaneError::NftRuleSweep(e) => (
-            // Same boot-path shape as `NetnsRecovery` above: the §5
-            // per-workload nft-rule sweep runs AFTER `AppState` and BEFORE
-            // the listener binds (step 04-04 §5), emitting `health.startup.
-            // refused` (reason `nft.sweep`) itself; this arm is
-            // exhaustiveness-only.
-            StatusCode::INTERNAL_SERVER_ERROR,
-            ErrorBody { error: "internal".into(), message: e.to_string(), field: None },
-        ),
         ControlPlaneError::VmReclamationBoot(e) => (
-            // Same boot-path shape as `NetnsRecovery` / `NftRuleSweep`
+            // Same boot-path shape as `MtlsBoot` / `DataplaneBoot`
             // above: the boot-epoch VmReclamation drive runs AFTER
-            // `AppState` and BEFORE `adopt_on_restart_recovery`, emitting
+            // `AppState` and BEFORE the listener binds, emitting
             // `health.startup.refused` (reason `vm_reclamation.boot`)
             // itself; this arm is exhaustiveness-only.
             StatusCode::INTERNAL_SERVER_ERROR,
