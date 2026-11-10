@@ -105,11 +105,11 @@ use overdrive_core::reconcilers::{Reconciler, TargetResource};
 use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRow, LogicalTimestamp, ObservationStore, ObservationStoreError,
 };
+use overdrive_reconcilers::current_alloc;
 use thiserror::Error;
 use tokio::sync::broadcast;
 
 /// The two typed failure classes at the in-process Service stream boundary.
-/// D11-E1 RED scaffold: the observation read path lands in DELIVER 04-02.
 #[derive(Debug, Error)]
 pub enum ServiceStreamError {
     #[error("service stream observation read failed: {source}")]
@@ -1023,15 +1023,29 @@ fn emit_service_line(event: &ServiceSubmitEvent) -> std::io::Result<Bytes> {
     Ok(buf.freeze())
 }
 
+/// Project the current allocation's recorded terminal to the Service stream wire.
+///
+/// `current_alloc` owns the attempt-selection rule. Restartable probe stops and
+/// terminals without a Service wire projection remain non-verdicts.
+fn service_event_from_rows(
+    workload_id: &WorkloadId,
+    rows: &[AllocStatusRow],
+) -> Option<ServiceSubmitEvent> {
+    let workload_rows: Vec<&AllocStatusRow> =
+        rows.iter().filter(|row| &row.workload_id == workload_id).collect();
+    let row = current_alloc(&workload_rows)?;
+    let terminal = row.terminal.as_ref()?;
+    service_event_from_terminal(row.alloc_id.as_str(), terminal, row.detail.clone(), None)
+}
+
 /// Build the streaming response body for the Service-kind NDJSON
 /// lane per ADR-0056 / ADR-0059.
 ///
-/// Service-kind streams emit a synchronous `Accepted` line, then
-/// await broadcast `LifecycleEvent`s and project ONLY terminal events
-/// (`TerminalCondition::{Stable, ServiceFailed, Stopped,
-/// BackoffExhausted, Custom}`) into `ServiceSubmitEvent::{Stable,
-/// Failed, Stopped}` via [`service_event_from_terminal`]. The stream
-/// closes after the first terminal.
+/// Service-kind streams emit a synchronous `Accepted` line, subscribe to
+/// lifecycle events, then report the current allocation's recorded verdict if
+/// one exists before waiting. Live and recorded terminals project through
+/// [`service_event_from_terminal`], and the stream closes after the first
+/// terminal. A lagged receiver relists the observation rows.
 ///
 /// Contract (per `.claude/rules/development.md` § *Trait definitions
 /// specify behavior, not just signature*):
@@ -1049,6 +1063,8 @@ fn emit_service_line(event: &ServiceSubmitEvent) -> std::io::Result<Bytes> {
 ///   — the Service-kind wire surface is reduced to
 ///   {Accepted, terminal}.
 /// - **Edge cases**:
+///   - A failed open read or relist yields one typed
+///     [`ServiceStreamError::ObservationRead`] and ends the stream.
 ///   - Progress-deadline expiry → `Failed { reason: Timeout { after_seconds } }`
 ///     per D10 and ADR-0059 Q4 via [`service_stream_synth_cap_timeout`].
 ///   - Broadcast `Closed` → `Failed { reason: StreamInterrupted }`
@@ -1066,6 +1082,7 @@ pub fn build_service_stream(
     progress_deadline: Duration,
 ) -> impl Stream<Item = Result<Bytes, ServiceStreamError>> + Send + 'static {
     let bus = state.lifecycle_events.clone();
+    let obs = state.obs.clone();
     let clock = state.clock.clone();
 
     async_stream::stream! {
@@ -1078,12 +1095,29 @@ pub fn build_service_stream(
             }
         }
 
-        // 2. Subscribe after Accepted. Drop the local Sender clone so
-        //    `RecvError::Closed` is reachable when external Senders
-        //    drop.
+        // 2. Subscribe before reading so a terminal committed around this read is
+        //    either visible in the rows or remains queued on the receiver.
         let mut sub = bus.subscribe();
         drop(bus);
 
+        // 3. Report a terminal already committed on the current attempt.
+        let rows = match obs.alloc_status_rows().await {
+            Ok(rows) => rows,
+            Err(source) => {
+                yield Err(ServiceStreamError::ObservationRead { source });
+                return;
+            }
+        };
+        if let Some(wire) = service_event_from_rows(&workload_id, &rows) {
+            match emit_service_line(&wire) {
+                Ok(line) => yield Ok(line),
+                Err(source) => yield Err(ServiceStreamError::LineEmission { source }),
+            }
+            return;
+        }
+
+        // 4. The D10 progress deadline begins only when the recorded read found no
+        //    verdict.
         let deadline_future = clock.sleep(progress_deadline);
         tokio::pin!(deadline_future);
         let mut last_attempt: Option<LastAttemptWire> = None;
@@ -1150,11 +1184,20 @@ pub fn build_service_stream(
                             }
                         }
                         Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
-                            // No observation-store fallback for the
-                            // Service-kind sibling surface in Phase 1
-                            // — a lagged Service stream waits for the
-                            // next live event or the progress deadline.
-                            // Falls through to the next select! iteration.
+                            let rows = match obs.alloc_status_rows().await {
+                                Ok(rows) => rows,
+                                Err(source) => {
+                                    yield Err(ServiceStreamError::ObservationRead { source });
+                                    return;
+                                }
+                            };
+                            if let Some(wire) = service_event_from_rows(&workload_id, &rows) {
+                                match emit_service_line(&wire) {
+                                    Ok(line) => yield Ok(line),
+                                    Err(source) => yield Err(ServiceStreamError::LineEmission { source }),
+                                }
+                                return;
+                            }
                         }
                         Err(tokio::sync::broadcast::error::RecvError::Closed) => {
                             let wire = service_stream_synth_closed();

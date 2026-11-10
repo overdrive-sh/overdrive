@@ -232,7 +232,6 @@ fn verdicts(workload: &str) -> Vec<Verdict> {
 /// would deliver, and it is yielded exactly once.
 #[tokio::test(flavor = "current_thread")]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D11 recorded verdict read before the stream waits"]
 async fn a_terminal_committed_and_published_before_the_stream_reads_is_reported_once() {
     let seed = 4001;
     eprintln!("service-stream-recorded-verdict seed={seed} schedule=commit+publish-before-read");
@@ -281,7 +280,6 @@ async fn a_terminal_committed_and_published_after_the_read_is_delivered_live() {
 /// rows.
 #[tokio::test(flavor = "current_thread")]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D11 relist on Lagged"]
 async fn a_lagged_stream_recovers_the_terminal_it_missed_by_relisting() {
     let seed = 4003;
     eprintln!("service-stream-recorded-verdict seed={seed} schedule=lagged-then-relist");
@@ -461,7 +459,6 @@ fn assert_read_failure(stream: &mut Lines, case: &str) {
 /// the store is unchanged.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending DELIVER: D11 a failed read ends the stream with an error"]
 async fn a_failed_read_at_open_ends_the_stream_with_an_error_and_never_waits() {
     for (index, case) in ["unreachable", "io", "envelope"].into_iter().enumerate() {
         let seed = 4201 + index as u64;
@@ -485,7 +482,6 @@ async fn a_failed_read_at_open_ends_the_stream_with_an_error_and_never_waits() {
 /// S-42 — a failed read on the relist after `Lagged` ends the stream with an error.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending DELIVER: D11 relist on Lagged; a failed relist ends the stream with an error"]
 async fn a_failed_relist_after_lagged_ends_the_stream_with_an_error() {
     for (index, case) in ["unreachable", "io", "envelope"].into_iter().enumerate() {
         let seed = 4211 + index as u64;
@@ -616,7 +612,6 @@ async fn the_line_built_from_a_committed_row_equals_the_line_built_from_its_even
 /// witness, with no clock advance, and the redeploy writes no row and no event.
 #[tokio::test(flavor = "current_thread")]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D11 redeploy reports the recorded Stable"]
 async fn a_redeploy_of_a_stable_service_ends_stable_at_once() {
     let seed = 3901;
     eprintln!("service-stream-recorded-verdict seed={seed} case=redeploy-stable");
@@ -652,7 +647,6 @@ async fn a_redeploy_of_a_stable_service_ends_stable_at_once() {
 /// deploy's stream carried.
 #[tokio::test(flavor = "current_thread")]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D11 redeploy reports the recorded give-up"]
 async fn a_redeploy_of_a_given_up_service_reports_the_recorded_give_up_at_once() {
     let seed = 3902;
     eprintln!("service-stream-recorded-verdict seed={seed} case=redeploy-given-up");
@@ -779,7 +773,6 @@ async fn a_redeploy_while_a_probe_stopped_attempts_successor_starts_waits_for_th
 /// naming the operator at once (the `/stop` sentinel persists until a restart).
 #[tokio::test(flavor = "current_thread")]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D11 redeploy reports an operator stop"]
 async fn a_redeploy_of_an_operator_stopped_service_reports_the_operator_stop_at_once() {
     let seed = 3905;
     eprintln!("service-stream-recorded-verdict seed={seed} case=redeploy-operator-stopped");

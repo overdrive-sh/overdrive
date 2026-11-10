@@ -498,7 +498,6 @@ fn attempt_of(alloc_id: &str) -> Result<i64> {
     max_samples = 1
 )]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D11 recorded verdict read before the stream waits"]
 fn quint_stream_snapshot_redeploy_unchanged_of_stable_ends_stable() -> impl Driver {
     StreamSnapshotDriver::new()
 }
@@ -511,7 +510,6 @@ fn quint_stream_snapshot_redeploy_unchanged_of_stable_ends_stable() -> impl Driv
     max_samples = 1
 )]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D11 recorded verdict read before the stream waits"]
 fn quint_stream_snapshot_terminal_between_subscribe_and_read_is_not_lost() -> impl Driver {
     StreamSnapshotDriver::new()
 }
@@ -524,7 +522,6 @@ fn quint_stream_snapshot_terminal_between_subscribe_and_read_is_not_lost() -> im
     max_samples = 1
 )]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D7 and D11 a restartable probe stop is not a stream terminal"]
 fn quint_stream_snapshot_restartable_stop_recorded_is_not_a_verdict() -> impl Driver {
     StreamSnapshotDriver::new()
 }
@@ -552,7 +549,6 @@ fn quint_stream_snapshot_superseded_attempt_terminal_is_not_reported() -> impl D
     max_samples = 1
 )]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D11 relist on Lagged"]
 fn quint_stream_snapshot_lagged_relist_recovers_terminal() -> impl Driver {
     StreamSnapshotDriver::new()
 }
@@ -582,7 +578,6 @@ fn quint_stream_snapshot_publish_after_relist_reaches_channel() -> impl Driver {
     max_samples = 1
 )]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D11 a failed read ends the stream with an error"]
 fn quint_stream_snapshot_failed_read_ends_with_error() -> impl Driver {
     StreamSnapshotDriver::new()
 }
@@ -593,7 +588,6 @@ fn quint_stream_snapshot_failed_read_ends_with_error() -> impl Driver {
     main = "ss_conf"
 )]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D11 recorded verdict read, relist and failed read"]
 fn quint_stream_snapshot_randomized() -> impl Driver {
     StreamSnapshotDriver::new()
 }
