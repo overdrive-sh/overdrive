@@ -37,7 +37,7 @@ use proptest::prelude::*;
 // §2 defaults (timeout 5, interval 2, max_attempts 30).
 // Universe (port-exposed observable surface of the parsed descriptor):
 // mechanic (path / port / host), timeout_seconds, interval_seconds,
-// max_attempts, inferred. Every slot is asserted; none silently drifts.
+// and max_attempts. Every slot is asserted; none silently drifts.
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(64))]
     #[test]
@@ -90,7 +90,6 @@ port = {port}
         prop_assert_eq!(p.timeout_seconds, 5);
         prop_assert_eq!(p.interval_seconds, 2);
         prop_assert_eq!(p.max_attempts, 30);
-        prop_assert!(!p.inferred, "operator-declared probe carries inferred=false");
     }
 }
 
@@ -226,7 +225,6 @@ proptest! {
             Some(1),
             "ADR-0057 §2 / ADR-0055 §6 success_threshold default is 1"
         );
-        prop_assert_eq!(probe.inferred, false, "operator-declared probe is not inferred");
     }
 }
 
@@ -261,7 +259,6 @@ proptest! {
             Some(3),
             "ADR-0057 §2 / DDD-14 failure_threshold default is 3"
         );
-        prop_assert_eq!(probe.inferred, false, "operator-declared probe is not inferred");
     }
 
     /// Operator-supplied `failure_threshold` overrides the default —
@@ -445,7 +442,7 @@ memory_bytes = 134217728
             .expect("parse must succeed");
         let svc = unwrap_service(input);
 
-        prop_assert_eq!(svc.startup_probes.len(), 1, "exactly one inferred startup probe");
+        prop_assert_eq!(svc.startup_probes.len(), 1, "exactly one default startup probe");
         let p: &ProbeDescriptor = &svc.startup_probes[0];
         prop_assert_eq!(p.role, ProbeRole::Startup);
         match &p.mechanic {
@@ -455,7 +452,6 @@ memory_bytes = 134217728
             }
             other @ (ProbeMechanic::Http { .. } | ProbeMechanic::GuestListeners) => prop_assert!(false, "expected Tcp mechanic, got {:?}", other),
         }
-        prop_assert!(p.inferred, "inferred default carries inferred: true");
         prop_assert_eq!(p.timeout_seconds, 5);
         prop_assert_eq!(p.interval_seconds, 2);
         prop_assert_eq!(p.max_attempts, 30);
@@ -579,10 +575,6 @@ fn tcp_type_field_is_case_insensitive() {
                 panic!("expected Tcp mechanic for casing {casing:?}, got {other:?}")
             }
         }
-        assert!(
-            !svc.startup_probes[0].inferred,
-            "operator-declared probe must NOT carry inferred=true"
-        );
     }
 }
 
@@ -600,7 +592,6 @@ fn declared_probe_inherits_adr_0057_defaults_when_fields_omitted() {
     assert_eq!(p.timeout_seconds, 5);
     assert_eq!(p.interval_seconds, 2);
     assert_eq!(p.max_attempts, 30);
-    assert!(!p.inferred);
 }
 
 // Regression: parse_http_mechanic / parse_string_array hardcoded
@@ -657,7 +648,6 @@ proptest! {
             ProbeMechanic::Tcp { port: pp, .. } => prop_assert_eq!(*pp, port),
             other @ (ProbeMechanic::Http { .. } | ProbeMechanic::GuestListeners) => prop_assert!(false, "expected Tcp, got {:?}", other),
         }
-        prop_assert!(!p.inferred);
     }
 }
 
@@ -818,20 +808,19 @@ proptest! {
     }
 }
 
-/// The ADR-0058 default-inference site assigns `idx = 0` — it
+/// The ADR-0058 default-probe synthesis assigns `idx = 0` — it
 /// synthesises the sole member of the startup array.
 #[test]
-fn inferred_default_startup_probe_carries_per_role_index_zero() {
+fn default_startup_probe_carries_per_role_index_zero() {
     let spec = unwrap_service(
         WorkloadSpecInput::from_toml_str(SERVICE_PRELUDE).expect("bare service parses"),
     );
-    assert_eq!(spec.startup_probes.len(), 1, "ADR-0058 infers one default startup probe");
-    let inferred = &spec.startup_probes[0];
-    assert!(inferred.inferred, "the synthesised probe is flagged inferred");
+    assert_eq!(spec.startup_probes.len(), 1, "ADR-0058 supplies one default startup probe");
+    let probe = &spec.startup_probes[0];
     assert_eq!(
-        inferred.idx,
+        probe.idx,
         overdrive_core::observation::ProbeIdx::new(0),
-        "the inferred probe is the sole member of the startup array, so its per-role index \
+        "the default probe is the sole member of the startup array, so its per-role index \
          is 0",
     );
 }

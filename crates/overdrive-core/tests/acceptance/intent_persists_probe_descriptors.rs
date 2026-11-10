@@ -79,7 +79,6 @@ fn arb_probe_descriptor() -> impl Strategy<Value = ProbeDescriptor> {
         1u32..=300,
         proptest::option::of(1u32..=10),
         proptest::option::of(1u32..=10),
-        any::<bool>(),
     )
         .prop_map(
             |(
@@ -91,7 +90,6 @@ fn arb_probe_descriptor() -> impl Strategy<Value = ProbeDescriptor> {
                 max_attempts,
                 failure_threshold,
                 success_threshold,
-                inferred,
             )| ProbeDescriptor {
                 idx: ProbeIdx::new(idx),
                 role,
@@ -101,7 +99,6 @@ fn arb_probe_descriptor() -> impl Strategy<Value = ProbeDescriptor> {
                 max_attempts,
                 failure_threshold,
                 success_threshold,
-                inferred,
             },
         )
 }
@@ -362,8 +359,8 @@ fn at_04_toml_to_intent_end_to_end_carries_startup_probes() {
         other => panic!("expected WorkloadSpecInput::Service, got {other:?}"),
     };
 
-    // The parser MUST have populated startup_probes — either with
-    // the explicitly declared probe or the default-inferred one.
+    // The parser MUST have populated startup_probes from the explicit
+    // `[[health_check.startup]]` block.
     // We declared one explicitly above, so expect exactly one.
     assert_eq!(
         service_spec.startup_probes.len(),
@@ -371,16 +368,6 @@ fn at_04_toml_to_intent_end_to_end_carries_startup_probes() {
         "parser must populate startup_probes from the [[health_check.startup]] block; \
          got {:?}",
         service_spec.startup_probes,
-    );
-
-    // The parser-declared probe MUST NOT be flagged as inferred —
-    // operator declared it explicitly. (Inferred probes per ADR-0058
-    // are the platform-synthesised default; operator-declared ones
-    // carry inferred=false.)
-    assert!(
-        !service_spec.startup_probes[0].inferred,
-        "operator-declared probe must carry inferred=false; descriptor={:?}",
-        service_spec.startup_probes[0],
     );
 
     // Wire side — project parser-side `ServiceSpec` to wire-side

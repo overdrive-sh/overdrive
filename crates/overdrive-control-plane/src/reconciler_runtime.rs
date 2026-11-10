@@ -2770,7 +2770,6 @@ mod tests {
                 max_attempts: 30,
                 failure_threshold: None,
                 success_threshold: if role == ProbeRole::Readiness { Some(1) } else { None },
-                inferred: false,
             };
 
             let svc = Service::from_submit(ServiceSpecInput {

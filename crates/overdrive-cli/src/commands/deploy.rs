@@ -231,7 +231,10 @@ pub async fn deploy(args: DeployArgs) -> Result<DeployOutput, CliError> {
         //
         // * `ProbesNotAllowedOnKind` — Slice 07 / US-07: probes on a
         //   non-Service workload.
-        Err(parse_err @ ParseError::ProbesNotAllowedOnKind { .. }) => {
+        Err(
+            parse_err @ (ParseError::ProbesNotAllowedOnKind { .. }
+            | ParseError::GuestListenersNotOperatorConfigurable { .. }),
+        ) => {
             return Err(CliError::ParseError(parse_err));
         }
         // Schedule kind and other parse failures fall through to the
@@ -526,6 +529,9 @@ pub async fn deploy_streaming(args: DeployArgs) -> Result<DeployStreamingOutput,
             field: "spec.kind".to_string(),
             message: "schedule submission is not yet implemented (ADR-0051 OQ-5)".to_string(),
         }),
+        Err(parse_err @ ParseError::GuestListenersNotOperatorConfigurable { .. }) => {
+            Err(CliError::ParseError(parse_err))
+        }
         Err(parse_err) => Err(CliError::InvalidSpec {
             field: "toml".to_string(),
             message: format!("failed to parse workload spec: {parse_err}"),
@@ -1055,8 +1061,8 @@ fn aggregate_to_cli_error(err: AggregateError) -> CliError {
         AggregateError::Resources(msg) => {
             CliError::InvalidSpec { field: "resources".to_string(), message: msg }
         }
-        // RED scaffold: this separate client-side aggregate mapper is not the
-        // D14-E2 HTTP ingress; exact admission and CLI parse routing land later.
+        // These Service-only variants are not produced by parser-produced CLI
+        // input: operator TOML rejects `GuestListeners` before this mapper.
         other @ (AggregateError::GuestListenersInvalidRole { .. }
         | AggregateError::GuestListenersNotSoleStartup { .. }) => {
             CliError::InvalidSpec { field: "startup_probes".to_owned(), message: other.to_string() }

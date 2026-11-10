@@ -43,7 +43,6 @@ fn descriptor(role: ProbeRole) -> ProbeDescriptor {
         max_attempts: 30,
         failure_threshold: (role == ProbeRole::Liveness).then_some(3),
         success_threshold: (role == ProbeRole::Readiness).then_some(1),
-        inferred: false,
     }
 }
 

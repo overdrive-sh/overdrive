@@ -141,7 +141,6 @@ fn liveness_descriptor() -> ProbeDescriptor {
         max_attempts: 30,
         failure_threshold: Some(3),
         success_threshold: None,
-        inferred: false,
     }
 }
 
@@ -388,7 +387,6 @@ fn http_liveness_descriptor(port: u16) -> ProbeDescriptor {
         max_attempts: 30,
         failure_threshold: Some(3),
         success_threshold: None,
-        inferred: false,
     }
 }
 
@@ -581,7 +579,6 @@ async fn eight_probes_of_one_vm_allocation_dial_across_startup_and_stable_period
                 max_attempts: 30,
                 failure_threshold: Some(3),
                 success_threshold: Some(1),
-                inferred: false,
             });
             port += 1;
         }

@@ -105,12 +105,7 @@ fn build_app_state(tmp: &TempDir) -> AppState {
 
 /// A probe descriptor with the ADR-0057 defaults applied, as the parser
 /// would emit it.
-fn descriptor(
-    role: ProbeRole,
-    idx: u32,
-    mechanic: ProbeMechanic,
-    inferred: bool,
-) -> ProbeDescriptor {
+fn descriptor(role: ProbeRole, idx: u32, mechanic: ProbeMechanic) -> ProbeDescriptor {
     ProbeDescriptor {
         idx: ProbeIdx::new(idx),
         role,
@@ -120,7 +115,6 @@ fn descriptor(
         max_attempts: 30,
         failure_threshold: matches!(role, ProbeRole::Liveness).then_some(3),
         success_threshold: matches!(role, ProbeRole::Readiness).then_some(1),
-        inferred,
     }
 }
 
@@ -142,7 +136,6 @@ async fn install_service(state: &AppState) -> Service {
             ProbeRole::Startup,
             0,
             ProbeMechanic::Tcp { host: "0.0.0.0".to_owned(), port: 8080 },
-            /*inferred=*/ true,
         )],
         readiness_probes: vec![],
         liveness_probes: vec![descriptor(
@@ -153,7 +146,6 @@ async fn install_service(state: &AppState) -> Service {
                 port: 8080,
                 host: Some("127.0.0.1".to_owned()),
             },
-            /*inferred=*/ false,
         )],
     };
     let svc = Service::from_submit(spec).expect("Service::from_submit");
@@ -320,16 +312,13 @@ async fn alloc_status_projects_service_probe_declarations_in_role_then_idx_order
          restored `ProbeDescriptor.idx` to prevent",
     );
 
-    // The mechanic and the inferred flag are what the operator render
-    // reads out of the declaration side.
+    // The mechanic is what the operator render reads out of the declaration side.
     assert!(
         matches!(&body.probes[0].mechanic, ProbeMechanic::Tcp { host, port }
                  if host == "0.0.0.0" && *port == 8080),
         "the declaration's mechanic must survive the projection verbatim; got {:?}",
         body.probes[0].mechanic,
     );
-    assert!(body.probes[0].inferred, "the startup probe was declared inferred");
-    assert!(!body.probes[1].inferred, "the liveness probe was operator-declared");
 }
 
 // ---------------------------------------------------------------------------

@@ -170,9 +170,6 @@
       "acceptance::probes_section_render::given_service_kind_when_format_json_then_probes_array_present": {
         "kind": "host-pure"
       },
-      "acceptance::probes_section_render::given_stable_service_with_inferred_default_probe_when_render_then_marked_inferred": {
-        "kind": "host-pure"
-      },
       "acceptance::probes_section_render::given_stable_service_with_three_probes_pass_when_render_then_probes_section_one_row_each": {
         "kind": "host-pure"
       },
@@ -3643,7 +3640,7 @@
       "acceptance::service_lifecycle_hydrate::gap_1_at_08_reconciler_unreachable_when_running_alloc_has_no_started_at": {
         "kind": "host-pure"
       },
-      "acceptance::service_lifecycle_hydrate::gap_1_smoke_inferred_probe_carries_inferred_flag_through_actual": {
+      "acceptance::service_lifecycle_hydrate::default_tcp_startup_probe_supplies_hydration_mechanic": {
         "kind": "host-pure"
       },
       "acceptance::service_lifecycle_liveness::fresh_alloc_starts_with_first_run_liveness_streak": {
@@ -6017,7 +6014,7 @@
       "acceptance::health_check_toml_parse::http_field_error_in_readiness_probe_reports_wildcard_section": {
         "kind": "host-pure"
       },
-      "acceptance::health_check_toml_parse::inferred_default_startup_probe_carries_per_role_index_zero": {
+      "acceptance::health_check_toml_parse::default_startup_probe_carries_per_role_index_zero": {
         "kind": "host-pure"
       },
       "acceptance::health_check_toml_parse::liveness_failure_threshold_is_operator_configurable": {
@@ -7007,7 +7004,7 @@
       "acceptance::vsock_deploy_validation::deploy_refuses_a_reserved_port_among_ordinary_listeners": {
         "kind": "host-pure"
       },
-      "acceptance::vsock_deploy_validation::deploy_refuses_nine_probes_counting_the_inferred_startup_probe": {
+      "acceptance::vsock_deploy_validation::deploy_refuses_nine_probes_counting_the_default_startup_probe": {
         "kind": "host-pure"
       },
       "acceptance::vsock_deploy_validation::deploy_refuses_reserved_listener_port_naming_the_range": {
@@ -7976,7 +7973,7 @@
       "schema_evolution::service_spec::service_spec_envelope_type_name_is_exact_string": {
         "kind": "host-pure"
       },
-      "schema_evolution::service_spec::service_spec_v1_direct_fixture_round_trips_with_sole_tag_zero": {
+      "schema_evolution::service_spec::current_layout_service_spec_with_guest_listeners_archives_and_roundtrips": {
         "kind": "host-pure"
       },
       "schema_evolution::workflow_start::print_fixture_v1_bytes": {
@@ -7997,13 +7994,7 @@
       "schema_evolution::workload_intent::workload_intent_v1_envelope_reports_sole_discriminant": {
         "kind": "host-pure"
       },
-      "schema_evolution::workload_intent::workload_intent_v1_job_decodes_through_current_envelope": {
-        "kind": "host-pure"
-      },
-      "schema_evolution::workload_intent::workload_intent_v1_schedule_decodes_through_current_envelope": {
-        "kind": "host-pure"
-      },
-      "schema_evolution::workload_intent::workload_intent_v1_service_decodes_through_current_envelope": {
+      "schema_evolution::workload_intent::current_layout_service_intent_with_guest_listeners_archives_and_roundtrips": {
         "kind": "host-pure"
       },
       "schema_evolution::workload_svid_issue_status_row::round_trip::the_row_round_trips_every_occurrence_through_the_envelope": {

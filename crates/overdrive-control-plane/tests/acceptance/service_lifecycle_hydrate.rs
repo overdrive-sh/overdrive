@@ -135,7 +135,6 @@ fn declared_tcp_probe(port: u16, max_attempts: u32, interval_seconds: u32) -> Pr
         max_attempts,
         failure_threshold: None,
         success_threshold: None,
-        inferred: false,
     }
 }
 
@@ -149,7 +148,6 @@ fn inferred_tcp_probe(port: u16) -> ProbeDescriptor {
         max_attempts: 30,
         failure_threshold: None,
         success_threshold: None,
-        inferred: true,
     }
 }
 
@@ -578,7 +576,6 @@ fn gap_1_at_07_reconciler_skips_when_started_at_none_on_failed_alloc() {
         startup_attempts_required: 0, // terminal state wins even when the startup gate could fire
         startup_deadline: Duration::from_secs(60),
         mechanic_summary: "tcp 0.0.0.0:8080".to_string(),
-        inferred: false,
         startup_probes_empty: false,
         latest_readiness_probe: None,
         has_readiness_probe: false,
@@ -658,7 +655,6 @@ fn gap_1_at_08_reconciler_unreachable_when_running_alloc_has_no_started_at() {
         startup_attempts_required: 30,
         startup_deadline: Duration::from_secs(60),
         mechanic_summary: "tcp 0.0.0.0:8080".to_string(),
-        inferred: false,
         startup_probes_empty: false,
         latest_readiness_probe: None,
         has_readiness_probe: false,
@@ -778,12 +774,12 @@ async fn crash_reason_remains_on_observation_row_after_service_hydration() {
 }
 
 // ===========================================================================
-// Smoke: inferred-probe spec hydrates with inferred=true on the fact.
+// Smoke: the synthesized TCP startup probe supplies the hydration mechanic.
 // ===========================================================================
 
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-async fn gap_1_smoke_inferred_probe_carries_inferred_flag_through_actual() {
+async fn default_tcp_startup_probe_supplies_hydration_mechanic() {
     let tmp = TempDir::new().expect("tmpdir");
     let obs = Arc::new(SimObservationStore::single_peer(node_id("local"), 0))
         as Arc<dyn ObservationStore>;
@@ -807,7 +803,6 @@ async fn gap_1_smoke_inferred_probe_carries_inferred_flag_through_actual() {
             .expect("hydrate_actual"),
     );
     let fact = actual.allocs.get(&aid).expect("fact present");
-    assert!(fact.inferred, "inferred=true probe must surface inferred=true on fact");
     assert_eq!(fact.mechanic_summary, "tcp 0.0.0.0:8080");
 }
 

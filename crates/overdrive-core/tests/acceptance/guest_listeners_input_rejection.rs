@@ -39,7 +39,6 @@ const fn descriptor(role: ProbeRole, mechanic: ProbeMechanic) -> ProbeDescriptor
         max_attempts: 30,
         failure_threshold: None,
         success_threshold: None,
-        inferred: false,
     }
 }
 
@@ -54,7 +53,6 @@ proptest! {
     /// the first invalid GuestListeners rejection; no aggregate is constructed.
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER: D14-E2 typed GuestListeners role and placement rejection"]
     fn raw_service_guest_listeners_wrong_role_is_typed(
         vector in 0usize..3,
         descriptor_role in prop_oneof![Just(ProbeRole::Startup), Just(ProbeRole::Readiness), Just(ProbeRole::Liveness)],
@@ -96,7 +94,6 @@ proptest! {
 /// startup with another descriptor, even when the general probe cap is exceeded.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER: D14-E2 sole startup check precedes general probe count"]
 fn raw_service_guest_listeners_not_sole_startup_precedes_count_check() {
     for count in [2usize, 7, 8, 9] {
         let mut input = service_input();
@@ -139,7 +136,6 @@ const SERVICE_TOML: &str = "[service]\nid = \"guest-listener-input\"\nreplicas =
 /// platform-only mechanic in each Service role at its exact position.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER: D14-E2 canonical GuestListeners TOML token is typed"]
 fn operator_toml_guest_listeners_is_typed_for_every_role_and_case() {
     for role in [ProbeRole::Startup, ProbeRole::Readiness, ProbeRole::Liveness] {
         let name = match role {

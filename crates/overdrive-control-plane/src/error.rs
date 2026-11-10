@@ -965,12 +965,22 @@ pub fn to_response(err: ControlPlaneError) -> (StatusCode, ErrorBody) {
             // `None` for validation errors routed through `#[from]`.
             let field = match &e {
                 AggregateError::Validation { field, .. } => Some((*field).to_string()),
-                // RED scaffold: D14-E2's exact field mapping lands with the
-                // GuestListeners admission checks in DELIVER 05-04.
-                AggregateError::GuestListenersInvalidRole { .. }
-                | AggregateError::GuestListenersNotSoleStartup { .. }
-                | AggregateError::Id(_)
-                | AggregateError::Resources(_) => None,
+                AggregateError::GuestListenersInvalidRole { vector_role, index, .. } => {
+                    let role = match vector_role {
+                        overdrive_core::observation::ProbeRole::Startup => "startup",
+                        overdrive_core::observation::ProbeRole::Readiness => "readiness",
+                        overdrive_core::observation::ProbeRole::Liveness => "liveness",
+                    };
+                    Some(if *vector_role == overdrive_core::observation::ProbeRole::Startup {
+                        format!("startup_probes[{index}].role")
+                    } else {
+                        format!("{role}_probes[{index}].mechanic")
+                    })
+                }
+                AggregateError::GuestListenersNotSoleStartup { .. } => {
+                    Some("startup_probes".to_string())
+                }
+                AggregateError::Id(_) | AggregateError::Resources(_) => None,
             };
             (
                 StatusCode::BAD_REQUEST,

@@ -145,7 +145,6 @@ pub fn service_spec(id: &str, interval_seconds: u32, max_attempts: u32) -> Servi
             max_attempts,
             failure_threshold: None,
             success_threshold: None,
-            inferred: false,
         }],
         readiness_probes: vec![],
         liveness_probes: vec![],

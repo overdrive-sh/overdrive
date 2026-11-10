@@ -85,7 +85,6 @@ fn descriptor_tcp_1s(host: &str, port: u16) -> ProbeDescriptor {
         max_attempts: 30,
         failure_threshold: None,
         success_threshold: None,
-        inferred: false,
     }
 }
 
@@ -128,7 +127,7 @@ async fn yield_for_task_poll() {
 ///     the LWW resolver (one row per `(alloc_id, probe_idx=0)`)
 ///   - `max_attempts` / `startup_deadline` ← `ProbeDescriptor` fields
 ///     (persisted on the Service intent post-GAP-6)
-///   - `mechanic_summary` / `inferred` ← derived from `ProbeDescriptor`
+///   - `mechanic_summary` ← derived from `ProbeDescriptor`
 ///   - `startup_probes_empty` ← `false` (descriptor is present)
 fn fact_from_row_and_intent(
     row: &overdrive_core::observation::ProbeResultRow,
@@ -166,7 +165,6 @@ fn fact_from_row_and_intent(
             u64::from(descriptor.max_attempts) * u64::from(descriptor.interval_seconds),
         ),
         mechanic_summary,
-        inferred: descriptor.inferred,
         startup_probes_empty: false,
         latest_readiness_probe: None,
         has_readiness_probe: false,

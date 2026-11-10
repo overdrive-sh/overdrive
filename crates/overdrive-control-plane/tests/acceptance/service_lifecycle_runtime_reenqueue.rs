@@ -117,7 +117,6 @@ fn startup_probe(port: u16) -> ProbeDescriptor {
         max_attempts: 30,
         failure_threshold: None,
         success_threshold: None,
-        inferred: false,
     }
 }
 

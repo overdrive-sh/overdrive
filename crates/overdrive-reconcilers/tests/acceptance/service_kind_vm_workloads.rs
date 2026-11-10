@@ -71,7 +71,6 @@ fn running_fact(
         startup_attempts_required: max_attempts,
         startup_deadline: Duration::from_secs(1),
         mechanic_summary: "tcp 0.0.0.0:18081".to_string(),
-        inferred: false,
         startup_probes_empty: false,
         latest_readiness_probe: None,
         has_readiness_probe: false,

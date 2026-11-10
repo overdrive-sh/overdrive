@@ -151,7 +151,7 @@ impl ServiceAllocPhase {
     reason = "hydrate-boundary fact-bundle projection (one row's observed + spec-derived inputs), \
               not a domain entity — Object Calisthenics applies to the hexagonal core, not to \
               the runtime's per-alloc observation projection. Each bool names an independent \
-              observed/spec fact (inferred / startup_probes_empty / has_readiness_probe / \
+              observed/spec fact (startup_probes_empty / has_readiness_probe / \
               has_liveness_probe); collapsing them into enums would obscure the projection."
 )]
 pub struct ServiceAllocFact {
@@ -213,10 +213,6 @@ pub struct ServiceAllocFact {
     /// `ProbeWitness.mechanic_summary` from this field at the
     /// deciding tick.
     pub mechanic_summary: String,
-    /// `true` IFF the startup probe was inferred by the platform
-    /// per ADR-0058 default-TCP-startup rule. Surfaces on
-    /// `ProbeWitness.inferred`.
-    pub inferred: bool,
     /// `true` IFF the operator's `ServiceSpec.startup_probes` is the
     /// empty array (`[[health_check.startup]] = []`) — the
     /// deliberate first-Running-IS-Stable opt-out per ADR-0058 §4 /
@@ -623,7 +619,7 @@ impl Reconciler for ServiceLifecycleReconciler {
                     probe_idx: 0,
                     role: "startup".to_string(),
                     mechanic_summary: fact.mechanic_summary.clone(),
-                    inferred: fact.inferred,
+                    inferred: false,
                 };
                 actions.push(Action::FinalizeFailed {
                     alloc_id: alloc_id.clone(),
@@ -794,10 +790,10 @@ fn format_mechanic_summary(mechanic: &ProbeMechanic, listeners: &[Listener]) -> 
 }
 
 /// Project the spec-derived startup facts uniform across every alloc.
-fn spec_facts_for_service(svc: &Service) -> (u32, Duration, String, bool, bool) {
+fn spec_facts_for_service(svc: &Service) -> (u32, Duration, String, bool) {
     let startup_probes_empty = svc.startup_probes.is_empty();
     if startup_probes_empty {
-        return (30, startup_deadline(&svc.startup_probes), String::new(), false, true);
+        return (30, startup_deadline(&svc.startup_probes), String::new(), true);
     }
     let probe = &svc.startup_probes[0];
     let startup_attempts_required = match &probe.mechanic {
@@ -806,7 +802,7 @@ fn spec_facts_for_service(svc: &Service) -> (u32, Duration, String, bool, bool) 
     };
     let startup_deadline = startup_deadline(&svc.startup_probes);
     let mechanic_summary = format_mechanic_summary(&probe.mechanic, &svc.listeners);
-    (startup_attempts_required, startup_deadline, mechanic_summary, probe.inferred, false)
+    (startup_attempts_required, startup_deadline, mechanic_summary, false)
 }
 
 /// The startup deadline of a Service's startup probes: `interval x max_attempts`
@@ -910,17 +906,12 @@ fn latest_probe_row(
 async fn hydrate_service_alloc_facts(
     ctx: &HydrationContext<'_>,
     workload_id: &WorkloadId,
-    spec_facts: &(u32, Duration, String, bool, bool),
+    spec_facts: &(u32, Duration, String, bool),
     readiness_facts: &(bool, u32),
     liveness_facts: &(bool, u32),
 ) -> Result<BTreeMap<AllocationId, ServiceAllocFact>, HydrateError> {
-    let (
-        startup_attempts_required,
-        startup_deadline,
-        mechanic_summary,
-        inferred,
-        startup_probes_empty,
-    ) = spec_facts;
+    let (startup_attempts_required, startup_deadline, mechanic_summary, startup_probes_empty) =
+        spec_facts;
     let (has_readiness_probe, readiness_success_threshold) = *readiness_facts;
     let (has_liveness_probe, liveness_failure_threshold) = *liveness_facts;
     let rows = ctx
@@ -967,7 +958,6 @@ async fn hydrate_service_alloc_facts(
             startup_attempts_required: *startup_attempts_required,
             startup_deadline: *startup_deadline,
             mechanic_summary: mechanic_summary.clone(),
-            inferred: *inferred,
             startup_probes_empty: *startup_probes_empty,
             latest_readiness_probe: latest_readiness_probe.map(|row| row.status.clone()),
             has_readiness_probe,
@@ -1334,7 +1324,6 @@ mod tests {
                                             startup_attempts_required: 3,
                                             startup_deadline: Duration::from_secs(30),
                                             mechanic_summary: "tcp 0.0.0.0:8080".into(),
-                                            inferred: false,
                                             startup_probes_empty: opt_out,
                                             latest_readiness_probe: readiness.clone(),
                                             has_readiness_probe: enabled,
@@ -1422,7 +1411,6 @@ mod tests {
             startup_attempts_required: 3,
             startup_deadline: Duration::from_secs(60),
             mechanic_summary: "tcp 0.0.0.0:8080".to_owned(),
-            inferred: false,
             startup_probes_empty: false,
             latest_readiness_probe: None,
             has_readiness_probe: false,

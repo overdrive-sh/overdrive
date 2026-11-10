@@ -146,7 +146,6 @@ fn guest_listener_intent(kernel: &str, rootfs: &str) -> WorkloadIntent {
         max_attempts: 30,
         failure_threshold: None,
         success_threshold: None,
-        inferred: true,
     };
     let listeners = vec![
         tcp_listener(super::probe_count_fixture::LISTENER_PORT),

@@ -202,7 +202,6 @@ async fn given_service_with_probe_section_when_submit_then_accepted_no_parse_err
 /// cause and exit 1 before reading config or making an HTTP request.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER: D14-E2 typed GuestListeners TOML error through both CLI deploy modes"]
 async fn canonical_guest_listeners_token_is_typed_in_each_role_on_both_cli_modes() {
     let base = SERVICE_WITH_READINESS_PROBE
         .split("[[health_check.readiness]]")

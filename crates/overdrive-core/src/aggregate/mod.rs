@@ -73,7 +73,8 @@ mod service_spec;
 /// where appropriate and locally-defined otherwise.
 #[derive(Debug, Error)]
 pub enum AggregateError {
-    /// D14-E2 RED scaffold: invalid placement or submitted role for GuestListeners.
+    /// The Service submit payload placed `GuestListeners` outside the sole
+    /// correctly tagged startup descriptor.
     #[error(
         "guest listeners at {vector_role:?} probe index {index} has descriptor role {descriptor_role:?}"
     )]
@@ -82,7 +83,7 @@ pub enum AggregateError {
         descriptor_role: crate::observation::ProbeRole,
         index: usize,
     },
-    /// D14-E2 RED scaffold: a GuestListeners startup probe must be the only one.
+    /// A `GuestListeners` startup descriptor must be the only startup probe.
     #[error("guest listeners must be the sole startup probe; found {count}")]
     GuestListenersNotSoleStartup { count: usize },
     /// Scalar-field validation failure. `field` names the offending field
@@ -456,6 +457,9 @@ impl ServiceV1 {
         validate_probe_mechanics(&readiness_probes, "readiness_probes")?;
         validate_probe_mechanics(&liveness_probes, "liveness_probes")?;
 
+        validate_guest_listener_roles(&startup_probes, &readiness_probes, &liveness_probes)?;
+        validate_guest_listener_sole_startup(&startup_probes)?;
+
         validate_guest_probe_count(&startup_probes, &readiness_probes, &liveness_probes)?;
 
         // ADR-0080 § D1 — this is the SECOND ingress (the API/wire
@@ -624,6 +628,42 @@ fn validate_probe_mechanics(
             field,
             message: format!("[{idx}]: {message}"),
         })?;
+    }
+    Ok(())
+}
+
+fn validate_guest_listener_roles(
+    startup: &[ProbeDescriptor],
+    readiness: &[ProbeDescriptor],
+    liveness: &[ProbeDescriptor],
+) -> Result<(), AggregateError> {
+    use crate::observation::ProbeRole;
+
+    for (vector_role, probes) in [
+        (ProbeRole::Startup, startup),
+        (ProbeRole::Readiness, readiness),
+        (ProbeRole::Liveness, liveness),
+    ] {
+        for (index, probe) in probes.iter().enumerate() {
+            if matches!(probe.mechanic, ProbeMechanic::GuestListeners)
+                && (vector_role != ProbeRole::Startup || probe.role != ProbeRole::Startup)
+            {
+                return Err(AggregateError::GuestListenersInvalidRole {
+                    vector_role,
+                    descriptor_role: probe.role,
+                    index,
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_guest_listener_sole_startup(startup: &[ProbeDescriptor]) -> Result<(), AggregateError> {
+    if startup.iter().any(|probe| matches!(probe.mechanic, ProbeMechanic::GuestListeners))
+        && startup.len() != 1
+    {
+        return Err(AggregateError::GuestListenersNotSoleStartup { count: startup.len() });
     }
     Ok(())
 }

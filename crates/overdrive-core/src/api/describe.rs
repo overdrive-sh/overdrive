@@ -189,7 +189,6 @@ mod tests {
             any::<u32>(),
             proptest::option::of(any::<u32>()),
             proptest::option::of(any::<u32>()),
-            any::<bool>(),
         )
             .prop_map(
                 |(
@@ -202,7 +201,6 @@ mod tests {
                     max_attempts,
                     failure_threshold,
                     success_threshold,
-                    inferred,
                 )| ProbeDescriptor {
                     idx: ProbeIdx::new(idx),
                     role,
@@ -212,7 +210,6 @@ mod tests {
                     max_attempts,
                     failure_threshold,
                     success_threshold,
-                    inferred,
                 },
             )
     }
@@ -314,7 +311,6 @@ mod tests {
             max_attempts: 30,
             failure_threshold: None,
             success_threshold: None,
-            inferred: false,
         };
         let input = ServiceSpecInput {
             id: "describe-svc".to_owned(),

@@ -84,7 +84,6 @@ fn fact(state: AllocState, started: bool, startup_probes_empty: bool) -> Service
         startup_attempts_required: MAX_ATTEMPTS,
         startup_deadline: DEADLINE,
         mechanic_summary: "tcp 0.0.0.0:8080".to_string(),
-        inferred: false,
         startup_probes_empty,
         latest_readiness_probe: None,
         has_readiness_probe: false,

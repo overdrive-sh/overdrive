@@ -89,7 +89,6 @@ impl Mechanic {
             max_attempts: MAX_ATTEMPTS,
             failure_threshold: None,
             success_threshold: None,
-            inferred: false,
         }
     }
 

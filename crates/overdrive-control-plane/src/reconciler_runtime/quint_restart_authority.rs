@@ -199,7 +199,6 @@ fn tcp(role: ProbeRole, port: u16, interval: u32, max_attempts: u32) -> ProbeDes
         max_attempts,
         failure_threshold: (role == ProbeRole::Liveness).then_some(1),
         success_threshold: None,
-        inferred: false,
     }
 }
 

@@ -546,7 +546,6 @@ fn make_http_probe(path: &str) -> ProbeDescriptor {
         max_attempts: 30,
         failure_threshold: None,
         success_threshold: None,
-        inferred: false,
     }
 }
 
@@ -610,7 +609,6 @@ fn service_from_submit_rejects_http_probe_with_zero_port() {
         max_attempts: 30,
         failure_threshold: None,
         success_threshold: None,
-        inferred: false,
     }];
 
     let err = Service::from_submit(spec).expect_err("http probe with port 0 must be rejected");
@@ -635,7 +633,6 @@ fn service_from_submit_rejects_tcp_probe_with_zero_port() {
         max_attempts: 30,
         failure_threshold: None,
         success_threshold: None,
-        inferred: false,
     }];
 
     let err = Service::from_submit(spec).expect_err("tcp probe with port 0 must be rejected");

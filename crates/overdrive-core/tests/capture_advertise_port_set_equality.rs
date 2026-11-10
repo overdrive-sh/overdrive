@@ -115,7 +115,6 @@ fn advertise_port_set(svc: &Service) -> BTreeSet<NonZeroU16> {
             startup_attempts_required: 30,
             startup_deadline: Duration::from_secs(60),
             mechanic_summary: String::new(),
-            inferred: false,
             startup_probes_empty: true,
             latest_readiness_probe: None,
             has_readiness_probe: false,

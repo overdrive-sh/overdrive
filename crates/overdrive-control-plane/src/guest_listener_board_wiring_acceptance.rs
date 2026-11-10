@@ -217,7 +217,6 @@ impl Node {
                 max_attempts: 30,
                 failure_threshold: None,
                 success_threshold: None,
-                inferred: false,
             }],
             readiness_probes: Vec::new(),
             liveness_probes: Vec::new(),

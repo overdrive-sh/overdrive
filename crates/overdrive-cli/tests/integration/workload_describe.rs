@@ -915,12 +915,7 @@ fn job_alloc_status_surfaces_issued_certificate_summary() {
 // ---------------------------------------------------------------------------
 
 /// Build a probe descriptor for the render-layer join fixtures.
-fn fixture_descriptor(
-    role: ProbeRole,
-    idx: u32,
-    mechanic: ProbeMechanic,
-    inferred: bool,
-) -> ProbeDescriptor {
+fn fixture_descriptor(role: ProbeRole, idx: u32, mechanic: ProbeMechanic) -> ProbeDescriptor {
     ProbeDescriptor {
         idx: ProbeIdx::new(idx),
         role,
@@ -930,7 +925,6 @@ fn fixture_descriptor(
         max_attempts: 30,
         failure_threshold: matches!(role, ProbeRole::Liveness).then_some(3),
         success_threshold: matches!(role, ProbeRole::Readiness).then_some(1),
-        inferred,
     }
 }
 
@@ -971,7 +965,6 @@ fn declared_probe_with_no_observed_row_renders_pending() {
         ProbeRole::Startup,
         0,
         ProbeMechanic::Tcp { host: "0.0.0.0".to_owned(), port: 8080 },
-        /*inferred=*/ true,
     )];
     // No `probe_results` — the probe has been declared but has not
     // ticked yet.
@@ -1057,7 +1050,6 @@ fn probe_rows_do_not_bleed_across_allocations() {
             port: 8080,
             host: Some("127.0.0.1".to_owned()),
         },
-        /*inferred=*/ false,
     )];
     // Only replica 0 has been observed, and it is FAILING. Replica 1 has
     // no row at all.
@@ -1114,7 +1106,6 @@ fn failing_probe_renders_no_fabricated_failure_ratio() {
             port: 8080,
             host: Some("127.0.0.1".to_owned()),
         },
-        /*inferred=*/ false,
     )];
     response.probe_results = vec![fixture_probe_result(
         "alloc-payments-0",

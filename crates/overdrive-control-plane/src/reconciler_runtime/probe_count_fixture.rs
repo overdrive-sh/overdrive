@@ -193,7 +193,6 @@ pub(super) fn tcp(role: ProbeRole, port: u16) -> ProbeDescriptor {
         max_attempts: 30,
         failure_threshold: (role == ProbeRole::Liveness).then_some(LIVENESS_FAILURE_THRESHOLD),
         success_threshold: (role == ProbeRole::Readiness).then_some(READINESS_SUCCESS_THRESHOLD),
-        inferred: false,
     }
 }
 

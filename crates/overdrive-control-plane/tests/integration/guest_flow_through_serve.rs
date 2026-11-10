@@ -413,7 +413,6 @@ impl Node {
                 max_attempts: 30,
                 failure_threshold: None,
                 success_threshold: Some(1),
-                inferred: false,
             }],
             liveness_probes: Vec::new(),
         };

@@ -181,7 +181,6 @@ impl ProgressDeadlineDriver {
             max_attempts: 1,
             failure_threshold: None,
             success_threshold: None,
-            inferred: false,
         }];
         let counter = self.next_counter();
         let running = alloc_row(

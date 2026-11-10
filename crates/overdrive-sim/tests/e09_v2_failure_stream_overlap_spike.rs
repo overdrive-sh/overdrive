@@ -260,7 +260,6 @@ async fn drive(overlap: bool) {
             max_attempts: 3,
             failure_threshold: None,
             success_threshold: None,
-            inferred: false,
         }],
         readiness_probes: vec![],
         liveness_probes: vec![],

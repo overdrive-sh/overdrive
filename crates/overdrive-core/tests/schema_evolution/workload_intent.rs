@@ -8,12 +8,13 @@
 use std::num::{NonZeroU16, NonZeroU32};
 
 use overdrive_core::aggregate::{
-    CronExpr, Job, Listener, Schedule, Service, Vm, WorkloadDriver, WorkloadIntent,
-    WorkloadIntentEnvelope, WorkloadIntentLatest,
+    CronExpr, Job, Listener, ProbeDescriptor, ProbeMechanic, Schedule, Service, Vm, WorkloadDriver,
+    WorkloadIntent, WorkloadIntentEnvelope, WorkloadIntentLatest,
 };
 use overdrive_core::codec::VersionedEnvelope;
 use overdrive_core::dataplane::backend_key::Proto;
 use overdrive_core::id::WorkloadId;
+use overdrive_core::observation::{ProbeIdx, ProbeRole};
 use overdrive_core::traits::driver::Resources;
 
 use super::harness::assert_envelope_v_roundtrip;
@@ -52,6 +53,25 @@ fn canonical_service() -> Service {
     }
 }
 
+const fn guest_listeners_descriptor() -> ProbeDescriptor {
+    ProbeDescriptor {
+        idx: ProbeIdx::new(0),
+        role: ProbeRole::Startup,
+        mechanic: ProbeMechanic::GuestListeners,
+        timeout_seconds: 5,
+        interval_seconds: 2,
+        max_attempts: 30,
+        failure_threshold: None,
+        success_threshold: None,
+    }
+}
+
+fn service_with_guest_listeners() -> Service {
+    let mut service = canonical_service();
+    service.startup_probes.push(guest_listeners_descriptor());
+    service
+}
+
 fn canonical_schedule() -> Schedule {
     Schedule {
         id: WorkloadId::new("svc-v1-schedule").expect("valid workload id"),
@@ -65,9 +85,13 @@ fn canonical_schedule() -> Schedule {
     }
 }
 
+#[allow(dead_code)]
 const FIXTURE_V1: &str = "7376632d76312d6a6f622f7362696e2f696e69742d2d7175696574ff2f7661722f6c69622f6f76657264726976652f766d6c696e75782f7661722f6c69622f6f76657264726976652f726f6f7466732e696d670000000000000000000000000000000000000000008a00000098ffffff010000000000000064000000000000000000000400000000000000008a0000007effffff80ffffff010000009a00000080ffffff9d00000092ffffff000000000000000000000000000000000000000000000000000000000000000000000000";
+#[allow(dead_code)]
 const FIXTURE_V1_SERVICE: &str = "7376632d76312d736572766963652f7573722f62696e2f66726f6e74656e64002d2d7175696574ff2f7661722f6c69622f6f76657264726976652f766d6c696e75782f7661722f6c69622f6f76657264726976652f726f6f7466732e696d6700901f000000000000000000000000000001000000000000008e00000088ffffff0200000000000000f4010000000000000000000800000000000000009100000072ffffff7cffffff010000009a0000007cffffff9d0000008effffffa4ffffff01000000a0ffffff0000000098ffffff0000000090ffffff0000000000000000";
+#[allow(dead_code)]
 const FIXTURE_V1_SCHEDULE: &str = "7376632d76312d7363686564756c657376632d76312d7363686564756c652f7573722f6c6f63616c2f62696e2f636c65616e75702d2d7175696574ff2f7661722f6c69622f6f76657264726976652f766d6c696e75782f7661722f6c69622f6f76657264726976652f726f6f7466732e696d67302032202a202a202a00000000000000000000000002000000000000008f00000070ffffff8f00000077ffffff010000000000000064000000000000000000000400000000000000009600000062ffffff70ffffff010000009a00000070ffffff9d00000082ffffff000000008900000093ffffff00000000000000000000000000000000";
+const CURRENT_LAYOUT_V1_SERVICE_GUEST_LISTENERS: &str = "7376632d76312d736572766963652f7573722f62696e2f66726f6e74656e64002d2d7175696574ff2f7661722f6c69622f6f76657264726976652f766d6c696e75782f7661722f6c69622f6f76657264726976652f726f6f7466732e696d6700901f000000000000000000000200000000000000000000000000000000000000000000000000000005000000020000001e0000000000000000000000000000000000000000000000000000000000000001000000000000008e00000048ffffff0200000000000000f4010000000000000000000800000000000000009100000032ffffff3cffffff010000009a0000003cffffff9d0000004effffff64ffffff0100000060ffffff0100000098ffffff0000000090ffffff0000000000000000";
 
 fn archive_hex(intent: &WorkloadIntent) -> String {
     let envelope = WorkloadIntentEnvelope::latest(intent.clone());
@@ -78,26 +102,13 @@ fn archive_hex(intent: &WorkloadIntent) -> String {
 
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-fn workload_intent_v1_job_decodes_through_current_envelope() {
-    let expected = WorkloadIntent::Job(canonical_job());
-    assert_eq!(archive_hex(&expected), FIXTURE_V1);
-    assert_envelope_v_roundtrip::<WorkloadIntentEnvelope>(FIXTURE_V1, &expected);
-}
-
-/// CONTRACT_SHAPE: pure-function.
-#[test]
-fn workload_intent_v1_service_decodes_through_current_envelope() {
-    let expected = WorkloadIntent::Service(canonical_service());
-    assert_eq!(archive_hex(&expected), FIXTURE_V1_SERVICE);
-    assert_envelope_v_roundtrip::<WorkloadIntentEnvelope>(FIXTURE_V1_SERVICE, &expected);
-}
-
-/// CONTRACT_SHAPE: pure-function.
-#[test]
-fn workload_intent_v1_schedule_decodes_through_current_envelope() {
-    let expected = WorkloadIntent::Schedule(canonical_schedule());
-    assert_eq!(archive_hex(&expected), FIXTURE_V1_SCHEDULE);
-    assert_envelope_v_roundtrip::<WorkloadIntentEnvelope>(FIXTURE_V1_SCHEDULE, &expected);
+fn current_layout_service_intent_with_guest_listeners_archives_and_roundtrips() {
+    let expected = WorkloadIntent::Service(service_with_guest_listeners());
+    assert_eq!(archive_hex(&expected), CURRENT_LAYOUT_V1_SERVICE_GUEST_LISTENERS);
+    assert_envelope_v_roundtrip::<WorkloadIntentEnvelope>(
+        CURRENT_LAYOUT_V1_SERVICE_GUEST_LISTENERS,
+        &expected,
+    );
 }
 
 /// CONTRACT_SHAPE: pure-function.

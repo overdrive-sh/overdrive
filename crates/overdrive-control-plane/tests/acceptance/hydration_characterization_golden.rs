@@ -205,7 +205,6 @@ fn service_with_startup_probe(id: &str) -> Service {
             max_attempts: 30,
             failure_threshold: None,
             success_threshold: None,
-            inferred: false,
         }],
         readiness_probes: vec![],
         liveness_probes: vec![],

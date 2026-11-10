@@ -9,10 +9,9 @@
 //! Per ADR-0058 §1 ("honest by default"): if zero startup probes are
 //! declared AND at least one `[[listener]]` is present, the parser
 //! synthesises a single `ProbeDescriptor` with
-//! `mechanic: ProbeMechanic::Tcp { host, port: listeners[0].port }`
-//! and `inferred: true`. An empty `[[health_check.startup]] = []`
-//! array is the explicit opt-out (preserves Phase 1 first-Running
-//! semantics).
+//! `mechanic: ProbeMechanic::Tcp { host, port: listeners[0].port }`.
+//! An empty `[[health_check.startup]] = []` array is the explicit
+//! opt-out (preserves Phase 1 first-Running semantics).
 
 use serde::{Deserialize, Serialize};
 
@@ -59,8 +58,8 @@ pub const SCHEDULE_PROBES_GUIDANCE: &str =
 )]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ProbeMechanic {
-    /// TCP-connect against `host:port`. Default for inferred probes
-    /// per ADR-0058 (host defaults to bind-side wildcard
+    /// TCP-connect against `host:port`. Default startup mechanic per
+    /// ADR-0058 (host defaults to bind-side wildcard
     /// translated to loopback at probe time).
     Tcp { host: String, port: u16 },
     /// HTTP GET against `http://host:port<path>`. Phase 1 = plain
@@ -125,9 +124,6 @@ impl ProbeMechanic {
 /// - `success_threshold` (readiness only): 1 (per ADR-0055 §6 /
 ///   P2-Q8); configurable upward.
 ///
-/// `inferred` distinguishes platform-synthesised default probes
-/// (per ADR-0058) from operator-declared probes. Renderer surfaces
-/// as `(inferred)` suffix per US-06 AC.
 #[derive(
     Debug,
     Clone,
@@ -161,8 +157,4 @@ pub struct ProbeDescriptor {
     pub failure_threshold: Option<u32>,
     /// Readiness only. `None` for startup / liveness. Default 1.
     pub success_threshold: Option<u32>,
-    /// `true` IFF this descriptor was synthesised by the platform's
-    /// default-TCP inference rule per ADR-0058. `false` for every
-    /// operator-declared probe.
-    pub inferred: bool,
 }

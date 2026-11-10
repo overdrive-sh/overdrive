@@ -41,7 +41,7 @@ use crate::guest_transport::{GUEST_PROBE_SLOTS, guest_reserved_ports};
 /// corrective action — per ADR-0047 §2 / Slice 01 AC.
 #[derive(Debug, Error)]
 pub enum ParseError {
-    /// D14-E2 RED scaffold: the platform-only mechanic cannot be written in operator TOML.
+    /// A canonical platform-only `guest_listeners` mechanic was written in Service TOML.
     #[error("guest_listeners is platform-only at {role:?} probe index {probe_idx}")]
     GuestListenersNotOperatorConfigurable { role: crate::observation::ProbeRole, probe_idx: usize },
     /// Both `[service]` and `[job]` are present. Per ADR-0047 §1, exactly
@@ -286,10 +286,11 @@ pub enum ParseError {
     },
 
     /// The spec's startup, readiness and liveness probes together exceed
-    /// `GUEST_PROBE_SLOTS` (D-UP-12). `count` includes an inferred default
-    /// startup probe (ADR-0058); `max` is `GUEST_PROBE_SLOTS`.
+    /// `GUEST_PROBE_SLOTS` (D-UP-12). `count` includes a synthesized default
+    /// startup probe when the parser supplies one (ADR-0058); `max` is
+    /// `GUEST_PROBE_SLOTS`.
     #[error(
-        "[[health_check.*]] declares {count} probes across startup, readiness and liveness (including any inferred default startup probe); at most {max} probes per workload are supported"
+        "[[health_check.*]] declares {count} probes across startup, readiness and liveness (including a synthesized default startup probe when applicable); at most {max} probes per workload are supported"
     )]
     ProbeCountExceeded { count: usize, max: u32 },
 }
@@ -775,7 +776,7 @@ impl WorkloadSpecInput {
             let listeners = parse_listeners(table)?;
 
             // Step 01-02 — ADR-0057 §1 [[health_check.startup]] TCP
-            // variant + ADR-0058 default-inference. Discover the
+            // variant + ADR-0058 default startup probe. Discover the
             // `health_check.startup` value (absent vs explicit-empty
             // vs populated) and either parse declared probes or
             // synthesise the default TCP probe against `listeners[0]`.
@@ -1195,11 +1196,11 @@ fn parse_startup_probes(
         )?,
     };
 
-    // Default-inference per ADR-0058: zero probes declared AND no
+    // Default-probe synthesis per ADR-0058: zero probes declared AND no
     // explicit shape AND at least one listener -> synthesise default.
     if !was_explicit && !listeners.is_empty() {
         let first = &listeners[0];
-        let inferred = ProbeDescriptor {
+        let default_probe = ProbeDescriptor {
             // Sole member of the synthesised startup array (ADR-0058).
             idx: ProbeIdx::new(0),
             role: ProbeRole::Startup,
@@ -1209,9 +1210,8 @@ fn parse_startup_probes(
             max_attempts: STARTUP_MAX_ATTEMPTS_DEFAULT,
             failure_threshold: None,
             success_threshold: None,
-            inferred: true,
         };
-        return Ok((vec![inferred], false));
+        return Ok((vec![default_probe], false));
     }
 
     // Parse each declared entry into a ProbeDescriptor.
@@ -1228,7 +1228,7 @@ fn parse_one_startup_probe(
     entry: &toml::value::Table,
     probe_idx: usize,
 ) -> Result<ProbeDescriptor, ParseError> {
-    let mechanic = parse_probe_mechanic(entry, probe_idx)?;
+    let mechanic = parse_probe_mechanic(entry, probe_idx, ProbeRole::Startup)?;
 
     let timeout_seconds =
         parse_optional_positive_u32(entry, "timeout_seconds", STARTUP_TIMEOUT_DEFAULT_S, probe_idx)
@@ -1253,7 +1253,6 @@ fn parse_one_startup_probe(
         max_attempts,
         failure_threshold: None,
         success_threshold: None,
-        inferred: false,
     })
 }
 
@@ -1264,6 +1263,7 @@ fn parse_one_startup_probe(
 fn parse_probe_mechanic(
     entry: &toml::value::Table,
     probe_idx: usize,
+    role: ProbeRole,
 ) -> Result<ProbeMechanic, ParseError> {
     // type field — case-insensitive per § Newtype completeness.
     let type_raw = entry.get("type").ok_or_else(|| ParseError::Field {
@@ -1276,6 +1276,9 @@ fn parse_probe_mechanic(
     })?;
 
     match type_str.to_ascii_lowercase().as_str() {
+        "guest_listeners" => {
+            Err(ParseError::GuestListenersNotOperatorConfigurable { role, probe_idx })
+        }
         "tcp" => {
             let port_raw =
                 entry.get("port").ok_or(ParseError::TcpProbeMissingPort { probe_idx })?;
@@ -1351,7 +1354,7 @@ fn parse_readiness_probes(table: &toml::value::Table) -> Result<Vec<ProbeDescrip
 
     let mut out = Vec::with_capacity(entries.len());
     for (probe_idx, entry) in entries.iter().enumerate() {
-        let mechanic = parse_probe_mechanic(entry, probe_idx)?;
+        let mechanic = parse_probe_mechanic(entry, probe_idx, ProbeRole::Readiness)?;
         let timeout_seconds = parse_optional_positive_u32(
             entry,
             "timeout_seconds",
@@ -1386,7 +1389,6 @@ fn parse_readiness_probes(table: &toml::value::Table) -> Result<Vec<ProbeDescrip
             max_attempts: STARTUP_MAX_ATTEMPTS_DEFAULT,
             failure_threshold: None,
             success_threshold: Some(success_threshold),
-            inferred: false,
         });
     }
     Ok(out)
@@ -1449,7 +1451,7 @@ fn parse_liveness_probes(table: &toml::value::Table) -> Result<Vec<ProbeDescript
 
     let mut out = Vec::with_capacity(entries.len());
     for (probe_idx, entry) in entries.iter().enumerate() {
-        let mechanic = parse_probe_mechanic(entry, probe_idx)?;
+        let mechanic = parse_probe_mechanic(entry, probe_idx, ProbeRole::Liveness)?;
         let timeout_seconds = parse_optional_positive_u32(
             entry,
             "timeout_seconds",
@@ -1484,7 +1486,6 @@ fn parse_liveness_probes(table: &toml::value::Table) -> Result<Vec<ProbeDescript
             max_attempts: STARTUP_MAX_ATTEMPTS_DEFAULT,
             failure_threshold: Some(failure_threshold),
             success_threshold: None,
-            inferred: false,
         });
     }
     Ok(out)

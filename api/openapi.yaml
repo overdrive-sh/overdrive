@@ -1441,7 +1441,7 @@ components:
           type: string
     ProbeDescriptor:
       type: object
-      description: |-
+      description: |
         Validated probe declaration after TOML parse + defaults applied.
 
         Per ADR-0057 §2 (TOML defaults table):
@@ -1453,10 +1453,6 @@ components:
         - `failure_threshold` (liveness only): 3.
         - `success_threshold` (readiness only): 1 (per ADR-0055 §6 /
           P2-Q8); configurable upward.
-
-        `inferred` distinguishes platform-synthesised default probes
-        (per ADR-0058) from operator-declared probes. Renderer surfaces
-        as `(inferred)` suffix per US-06 AC.
       required:
       - idx
       - role
@@ -1464,7 +1460,6 @@ components:
       - timeout_seconds
       - interval_seconds
       - max_attempts
-      - inferred
       properties:
         failure_threshold:
           type:
@@ -1486,12 +1481,6 @@ components:
             consumes it verbatim — it MUST NOT derive an index from the
             flat concatenated descriptor vector, whose position carries no
             index semantics.
-        inferred:
-          type: boolean
-          description: |-
-            `true` IFF this descriptor was synthesised by the platform's
-            default-TCP inference rule per ADR-0058. `false` for every
-            operator-declared probe.
         interval_seconds:
           type: integer
           format: int32
@@ -1530,8 +1519,8 @@ components:
       oneOf:
       - type: object
         description: |-
-          TCP-connect against `host:port`. Default for inferred probes
-          per ADR-0058 (host defaults to bind-side wildcard
+          TCP-connect against `host:port`. Default startup mechanic per
+          ADR-0058 (host defaults to bind-side wildcard
           translated to loopback at probe time).
         required:
         - host
@@ -1573,13 +1562,11 @@ components:
             enum:
             - http
       - type: object
-        description: |-
+        description: |
           The platform's default startup gate for a Service: every declared
           listener has been reported open by the guest (D14 item 1, ADR-0269).
           Fieldless; valid only as the sole startup descriptor of a Service;
           cannot be written in TOML.
-
-          SCAFFOLD: true — pinned shape (`feature-delta.md` § D14 item 1).
         required:
         - type
         properties:
@@ -2050,10 +2037,11 @@ components:
             - startup_timeout
       - type: object
         description: |-
-          Startup probe exhausted `max_attempts` without a Pass result
-          within `startup_deadline`. `last_fail` carries the last
-          observed `ProbeStatus::Fail.last_fail_reason` for direct
-          operator-renderable surface.
+          The final attempt was stopped after its startup probe failed, and the
+          restart budget was spent. `attempts` is the consumed restart budget at
+          give-up, not the startup probe's consecutive-failure count. `last_fail`
+          carries the final attempt's observed `ProbeStatus::Fail.last_fail_reason`
+          for direct operator-renderable surface.
         required:
         - data
         - reason
@@ -2061,10 +2049,11 @@ components:
           data:
             type: object
             description: |-
-              Startup probe exhausted `max_attempts` without a Pass result
-              within `startup_deadline`. `last_fail` carries the last
-              observed `ProbeStatus::Fail.last_fail_reason` for direct
-              operator-renderable surface.
+              The final attempt was stopped after its startup probe failed, and the
+              restart budget was spent. `attempts` is the consumed restart budget at
+              give-up, not the startup probe's consecutive-failure count. `last_fail`
+              carries the final attempt's observed `ProbeStatus::Fail.last_fail_reason`
+              for direct operator-renderable surface.
             required:
             - probe_idx
             - last_fail
@@ -2086,9 +2075,10 @@ components:
             - startup_probe_failed
       - type: object
         description: |-
-          Workload exited before any startup probe could pass AND
-          within `startup_deadline` window. Closes RCA-A coinflip
-          case per US-08.
+          The Service's final restart attempt crashed before any declared
+          startup probe passed, and the restart budget was then spent. The
+          reason is classified at the give-up decision; it carries no timing
+          claim against `startup_deadline`.
         required:
         - data
         - reason
@@ -2096,9 +2086,10 @@ components:
           data:
             type: object
             description: |-
-              Workload exited before any startup probe could pass AND
-              within `startup_deadline` window. Closes RCA-A coinflip
-              case per US-08.
+              The Service's final restart attempt crashed before any declared
+              startup probe passed, and the restart budget was then spent. The
+              reason is classified at the give-up decision; it carries no timing
+              claim against `startup_deadline`.
             properties:
               exit_code:
                 type:

@@ -96,7 +96,6 @@ fn liveness_running_fact(alloc_id: &AllocationId) -> ServiceAllocFact {
         startup_attempts_required: u32::MAX,
         startup_deadline: Duration::from_secs(60),
         mechanic_summary: "tcp 0.0.0.0:8080".to_string(),
-        inferred: false,
         startup_probes_empty: false,
         latest_readiness_probe: None,
         has_readiness_probe: false,

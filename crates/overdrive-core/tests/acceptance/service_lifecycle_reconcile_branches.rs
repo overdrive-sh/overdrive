@@ -86,7 +86,6 @@ fn fact(
         startup_attempts_required: max_attempts,
         startup_deadline,
         mechanic_summary: "tcp 0.0.0.0:8080".to_string(),
-        inferred: false,
         startup_probes_empty: false,
         // Step 03-01 — this startup-branch suite carries no readiness
         // probe; the readiness branch is a no-op (no service_dataplane).
@@ -963,7 +962,6 @@ fn readiness_fact(
         startup_attempts_required: 30,
         startup_deadline: Duration::from_secs(60),
         mechanic_summary: "tcp 0.0.0.0:8080".to_string(),
-        inferred: false,
         startup_probes_empty: false,
         latest_readiness_probe: latest_readiness,
         has_readiness_probe,
@@ -1207,7 +1205,6 @@ fn liveness_fact(
         startup_attempts_required: u32::MAX, // never trips StartupProbeFailed
         startup_deadline: Duration::from_secs(60),
         mechanic_summary: "tcp 0.0.0.0:8080".to_string(),
-        inferred: false,
         startup_probes_empty: false,
         latest_readiness_probe: None,
         has_readiness_probe: false,

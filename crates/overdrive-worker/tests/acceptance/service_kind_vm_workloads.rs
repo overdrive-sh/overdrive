@@ -46,7 +46,6 @@ fn tcp_descriptor(host: &str) -> ProbeDescriptor {
         max_attempts: 30,
         failure_threshold: None,
         success_threshold: None,
-        inferred: false,
     }
 }
 
@@ -64,7 +63,6 @@ fn http_descriptor(host: Option<&str>, port: u16, path: &str) -> ProbeDescriptor
         max_attempts: 30,
         failure_threshold: None,
         success_threshold: None,
-        inferred: false,
     }
 }
 

@@ -61,7 +61,6 @@ fn startup_probe() -> ProbeDescriptor {
         max_attempts: 3,
         failure_threshold: None,
         success_threshold: None,
-        inferred: false,
     }
 }
 

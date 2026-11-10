@@ -142,7 +142,6 @@ async fn one_server_boot_shares_exactly_one_trusted_probe_runner_with_vm_driver(
             max_attempts: 30,
             failure_threshold: None,
             success_threshold: None,
-            inferred: false,
         }],
     );
 

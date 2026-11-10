@@ -180,7 +180,6 @@ fn fact_for(
         startup_attempts_required: 1,
         startup_deadline: Duration::from_secs(1),
         mechanic_summary: "tcp 0.0.0.0:18081".to_string(),
-        inferred: false,
         startup_probes_empty: false,
         latest_readiness_probe: Some(readiness),
         has_readiness_probe: true,
@@ -409,7 +408,6 @@ fn vm_probe_descriptors() -> (ProbeDescriptor, ProbeDescriptor) {
         max_attempts: 1,
         failure_threshold: None,
         success_threshold: None,
-        inferred: false,
     };
     let readiness = ProbeDescriptor {
         role: ProbeRole::Readiness,

@@ -76,7 +76,6 @@ fn fact_running_with_pass(alloc_id: AllocationId, started_at_unix_ms: u64) -> Se
         startup_attempts_required: 30,
         startup_deadline: Duration::from_secs(60),
         mechanic_summary: "tcp 127.0.0.1:8080".to_string(),
-        inferred: true,
         startup_probes_empty: false,
         latest_readiness_probe: None,
         has_readiness_probe: false,
@@ -104,7 +103,6 @@ fn fact_failed_after_start(alloc_id: AllocationId, started_at_unix_ms: u64) -> S
         startup_attempts_required: 30,
         startup_deadline: Duration::from_secs(60),
         mechanic_summary: "tcp 127.0.0.1:8080".to_string(),
-        inferred: true,
         startup_probes_empty: false,
         latest_readiness_probe: None,
         has_readiness_probe: false,
@@ -186,7 +184,6 @@ fn given_running_alloc_with_pass_startup_probe_when_reconcile_then_emits_stable_
             assert_eq!(witness.probe_idx, 0);
             assert_eq!(witness.role, "startup");
             assert_eq!(witness.mechanic_summary, "tcp 127.0.0.1:8080");
-            assert!(witness.inferred);
         }
         other => panic!("expected Stable action, got {other:?}"),
     }

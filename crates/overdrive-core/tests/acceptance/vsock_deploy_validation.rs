@@ -18,8 +18,8 @@
 //!
 //! The probe cap (§ "Per-allocation probe cap"): the TOML ingress returns
 //! `ParseError::ProbeCountExceeded { count, max }` after the three role
-//! arrays are parsed and ADR-0058's default startup probe is inferred (so an
-//! inferred probe counts); the API ingress returns `AggregateError::Validation
+//! arrays are parsed and ADR-0058's default startup probe is synthesized (so a
+//! synthesized probe counts); the API ingress returns `AggregateError::Validation
 //! { field: "probes", message }` with that `Display` text. Both read
 //! `GUEST_PROBE_SLOTS`; neither spells 8.
 //!
@@ -226,7 +226,6 @@ fn tcp_probe(role: ProbeRole, idx: u32) -> ProbeDescriptor {
         max_attempts: 30,
         failure_threshold: matches!(role, ProbeRole::Liveness).then_some(3),
         success_threshold: matches!(role, ProbeRole::Readiness).then_some(1),
-        inferred: false,
     }
 }
 
@@ -268,11 +267,11 @@ fn deploy_accepts_eight_probes_in_total_in_any_shape() {
 }
 
 /// R5-60: nine probes are refused before any intent exists — eight declared
-/// readiness and liveness probes with no startup section, whose inferred
+/// readiness and liveness probes with no startup section, whose synthesized
 /// default startup probe is the ninth, and nine declared probes.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-fn deploy_refuses_nine_probes_counting_the_inferred_startup_probe() {
+fn deploy_refuses_nine_probes_counting_the_default_startup_probe() {
     for (startup, readiness, liveness) in [(0usize, 4usize, 4usize), (9, 0, 0), (3, 3, 3)] {
         let toml = service_toml_with_probes(startup, readiness, liveness);
         match WorkloadSpecInput::from_toml_str(&toml) {
@@ -315,19 +314,19 @@ fn api_ingress_refuses_nine_probes_with_validation() {
     }
 }
 
-/// The probe-cap refusal names the count, the inferred probe and the cap.
+/// The probe-cap refusal names the count and the cap.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
 fn the_probe_cap_refusal_renders_its_pinned_message() {
     assert_eq!(
         ParseError::ProbeCountExceeded { count: 9, max: 8 }.to_string(),
-        "[[health_check.*]] declares 9 probes across startup, readiness and liveness (including any inferred default startup probe); at most 8 probes per workload are supported"
+        "[[health_check.*]] declares 9 probes across startup, readiness and liveness (including a synthesized default startup probe when applicable); at most 8 probes per workload are supported"
     );
 }
 
 proptest! {
     // Property (R5-60 count boundary): a spec is refused iff its probe count
-    // — the declared probes plus an inferred default startup probe when no
+    // — the declared probes plus a synthesized default startup probe when no
     // startup section is written — exceeds GUEST_PROBE_SLOTS.
     /// CONTRACT_SHAPE: pure-function.
     #[test]
@@ -336,8 +335,8 @@ proptest! {
         readiness in 0usize..=6,
         liveness in 0usize..=6,
     ) {
-        let inferred = usize::from(startup == 0);
-        let count = startup + readiness + liveness + inferred;
+        let default_startup = usize::from(startup == 0);
+        let count = startup + readiness + liveness + default_startup;
         let max = usize::try_from(GUEST_PROBE_SLOTS).expect("fits usize");
         let parsed = WorkloadSpecInput::from_toml_str(&service_toml_with_probes(startup, readiness, liveness));
         if count > max {

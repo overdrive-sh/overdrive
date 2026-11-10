@@ -9,7 +9,6 @@
 //!   ABSENT for Job / Schedule (the kind-guard is load-bearing).
 //! - Each row: role + probe_idx + mechanic summary + last status +
 //!   last_observed_at.
-//! - `(inferred)` suffix on synthesised default probes.
 //! - `last=pending` for probes with no `ProbeResultRow` yet.
 //! - `(<consecutive_failures>/<threshold>)` suffix when a
 //!   liveness/readiness probe is currently failing.
@@ -42,7 +41,6 @@ fn pass_row(role: ProbeRole, idx: u32, mechanic: ProbeMechanic, at_ms: u64) -> P
         mechanic,
         status: Some(ProbeStatus::Pass),
         last_observed_at_unix_ms: Some(at_ms),
-        inferred: false,
         consecutive_failures: 0,
         failure_threshold: None,
     }
@@ -153,7 +151,6 @@ fn given_probe_fail_row_when_render_then_last_fail_reason_in_output() {
         },
         status: Some(ProbeStatus::Fail { last_fail_reason: "HTTP 503".to_string() }),
         last_observed_at_unix_ms: Some(4000),
-        inferred: false,
         consecutive_failures: 2,
         failure_threshold: Some(3),
     }];
@@ -176,31 +173,11 @@ fn given_just_started_service_with_no_probe_result_yet_when_render_then_last_equ
         mechanic: ProbeMechanic::Tcp { host: "127.0.0.1".to_string(), port: 8080 },
         status: None,
         last_observed_at_unix_ms: None,
-        inferred: false,
         consecutive_failures: 0,
         failure_threshold: None,
     }];
     let rendered = probes_section(WorkloadKind::Service, &probes, &[], /*no_color=*/ true);
     assert!(rendered.contains("last=pending"), "expected last=pending; got:\n{rendered}");
-}
-
-/// S-SHCP-CLI-06 (US-01 — inferred default render) — Stable Service
-/// submitted WITHOUT explicit probes renders the inferred TCP startup
-/// probe with `(inferred)` suffix.
-#[test]
-fn given_stable_service_with_inferred_default_probe_when_render_then_marked_inferred() {
-    let probes = vec![ProbeRenderRow {
-        role: ProbeRole::Startup,
-        probe_idx: ProbeIdx::new(0),
-        mechanic: ProbeMechanic::Tcp { host: "127.0.0.1".to_string(), port: 8080 },
-        status: Some(ProbeStatus::Pass),
-        last_observed_at_unix_ms: Some(1000),
-        inferred: true,
-        consecutive_failures: 0,
-        failure_threshold: None,
-    }];
-    let rendered = probes_section(WorkloadKind::Service, &probes, &[], /*no_color=*/ true);
-    assert!(rendered.contains("(inferred)"), "expected (inferred) suffix; got:\n{rendered}");
 }
 
 /// NO_COLOR AC — with `no_color = true`, render output contains zero
@@ -217,7 +194,6 @@ fn given_no_color_when_render_then_zero_ansi_escapes() {
         },
         status: Some(ProbeStatus::Fail { last_fail_reason: "HTTP 503".to_string() }),
         last_observed_at_unix_ms: Some(4000),
-        inferred: false,
         consecutive_failures: 2,
         failure_threshold: Some(3),
     }];
@@ -328,7 +304,6 @@ proptest! {
                 mechanic,
                 status: Some(ProbeStatus::Pass),
                 last_observed_at_unix_ms: Some(1000),
-                inferred: false,
                 consecutive_failures: 0,
                 failure_threshold: None,
             }]
@@ -369,7 +344,6 @@ proptest! {
             mechanic,
             status,
             last_observed_at_unix_ms: Some(4000),
-            inferred: false,
             consecutive_failures: if failing { 2 } else { 0 },
             failure_threshold: Some(3),
         }];

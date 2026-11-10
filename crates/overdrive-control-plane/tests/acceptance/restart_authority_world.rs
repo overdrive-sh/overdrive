@@ -115,7 +115,6 @@ pub fn tcp_with(role: ProbeRole, port: u16, max_attempts: u32, interval: u32) ->
         max_attempts,
         failure_threshold: (role == ProbeRole::Liveness).then_some(1),
         success_threshold: (role == ProbeRole::Readiness).then_some(1),
-        inferred: false,
     }
 }
 

@@ -65,7 +65,6 @@ fn arb_probe_descriptor() -> impl Strategy<Value = ProbeDescriptor> {
         1u32..=300,
         proptest::option::of(1u32..=10),
         proptest::option::of(1u32..=10),
-        any::<bool>(),
     )
         .prop_map(
             |(
@@ -77,7 +76,6 @@ fn arb_probe_descriptor() -> impl Strategy<Value = ProbeDescriptor> {
                 max_attempts,
                 failure_threshold,
                 success_threshold,
-                inferred,
             )| {
                 ProbeDescriptor {
                     idx: ProbeIdx::new(idx),
@@ -88,7 +86,6 @@ fn arb_probe_descriptor() -> impl Strategy<Value = ProbeDescriptor> {
                     max_attempts,
                     failure_threshold,
                     success_threshold,
-                    inferred,
                 }
             },
         )

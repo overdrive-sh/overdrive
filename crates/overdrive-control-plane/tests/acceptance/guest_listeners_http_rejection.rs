@@ -28,7 +28,6 @@ const fn guest(role: ProbeRole) -> ProbeDescriptor {
         max_attempts: 30,
         failure_threshold: None,
         success_threshold: None,
-        inferred: false,
     }
 }
 
@@ -36,7 +35,6 @@ const fn guest(role: ProbeRole) -> ProbeDescriptor {
 /// before intent insertion. The nested typed cause and HTTP field agree.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[ignore = "pending DELIVER: D14-E2 typed Service ingress and HTTP field mapping"]
 async fn invalid_guest_listeners_raw_service_is_rejected_at_http_ingress() {
     for (case, expected_field) in [
         ("readiness", "readiness_probes[0].mechanic"),

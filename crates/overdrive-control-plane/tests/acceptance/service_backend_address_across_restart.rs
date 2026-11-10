@@ -126,7 +126,6 @@ async fn drive(seed: u64) {
             max_attempts: 1,
             failure_threshold: None,
             success_threshold: None,
-            inferred: false,
         }],
         readiness_probes: vec![],
         liveness_probes: vec![],

@@ -371,7 +371,6 @@ async fn submit_service(client: &reqwest::Client, base: &str, id: &str) {
                 max_attempts: 1,
                 failure_threshold: None,
                 success_threshold: None,
-                inferred: false,
             }],
             readiness_probes: Vec::new(),
             liveness_probes: Vec::new(),

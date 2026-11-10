@@ -89,7 +89,6 @@ fn tcp_descriptor(role: ProbeRole, idx: u32, port: u16) -> ProbeDescriptor {
         max_attempts: 30,
         failure_threshold: if role == ProbeRole::Liveness { Some(3) } else { None },
         success_threshold: if role == ProbeRole::Readiness { Some(1) } else { None },
-        inferred: false,
     }
 }
 

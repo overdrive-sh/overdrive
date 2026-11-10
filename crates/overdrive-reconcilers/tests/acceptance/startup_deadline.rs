@@ -28,7 +28,6 @@ fn startup_probe(idx: u32, interval_seconds: u32, max_attempts: u32) -> ProbeDes
         max_attempts,
         failure_threshold: None,
         success_threshold: None,
-        inferred: false,
     }
 }
 

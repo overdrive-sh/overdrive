@@ -1,5 +1,5 @@
 //! `ProbeRunner` subsystem — per-alloc-per-probe tokio task graph
-//! that ticks declared/inferred probes and writes
+//! that ticks declared probes and writes
 //! `ProbeResultRow`s to the `ObservationStore`.
 //!
 //! Per ADR-0054:
@@ -743,7 +743,7 @@ async fn record_probe_status(
         same_status_runs: run_state.next_streak(&status),
         run_seq: run_state.next_run(),
         last_observed_at_unix_ms: unix_ms_from_clock(clock),
-        inferred: descriptor.inferred,
+        inferred: false,
         status,
     };
     if let Err(source) = observation_store.write_probe_result(row.clone()).await {

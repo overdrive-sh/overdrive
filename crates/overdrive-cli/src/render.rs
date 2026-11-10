@@ -362,13 +362,6 @@ fn probe_render_rows(response: &AllocStatusResponse) -> Vec<ProbeRenderRow> {
                 mechanic: descriptor.mechanic.clone(),
                 status: row.map(|r| probe_status_from_wire(&r.status)),
                 last_observed_at_unix_ms: row.map(|r| r.last_observed_at_unix_ms),
-                // `inferred` is an INTENT fact (ADR-0058 synthesis
-                // happens at parse time), so it is read from the
-                // descriptor — which is populated whether or not the
-                // probe has ticked. The observation row mirrors the
-                // same flag; taking it from the declaration keeps the
-                // `(inferred)` suffix correct in the pending case too.
-                inferred: descriptor.inferred,
                 // ---------------------------------------------------
                 // The producer row now carries `same_status_runs`, but the
                 // operator-facing renderer deliberately keeps the existing
@@ -1348,7 +1341,7 @@ pub fn format_service_stable_summary(
 // `ProbeRenderRow` is the typed render-input (newtype/typed discipline
 // per `.claude/rules/development.md` § "Newtypes"). It is composed by
 // the caller from the spec-side `ProbeDescriptor` (mechanic, role,
-// inferred, failure_threshold) and the observation-side
+// failure_threshold) and the observation-side
 // `ProbeResultRow` (status, last_observed_at_unix_ms,
 // same_status_runs). The render layer is pure over this input — it
 // performs no hydration of its own.
@@ -1372,9 +1365,6 @@ pub struct ProbeRenderRow {
     /// Wall-clock (UNIX-epoch ms) of the latest observation; `None`
     /// when no row exists yet.
     pub last_observed_at_unix_ms: Option<u64>,
-    /// `true` IFF the platform synthesised this probe per ADR-0058
-    /// (renders an `(inferred)` suffix).
-    pub inferred: bool,
     /// Retained renderer field for the existing output contract. The
     /// producer's typed streak is consumed by lifecycle reconciliation; the
     /// CLI does not render a new ratio.
@@ -1456,8 +1446,7 @@ fn format_probe_last_status(
 /// (`ProbeRenderIsKindGuarded` property test).
 ///
 /// Each row carries `role`, `probe_idx`, mechanic summary, last
-/// status, and `last_observed_at`. An `(inferred)` suffix marks
-/// synthesised default probes, `last=pending` marks
+/// status, and `last_observed_at`. `last=pending` marks
 /// declared-but-unobserved probes, and a
 /// `(<consecutive_failures>/<threshold>)` ratio suffix marks a probe
 /// currently failing under a declared threshold.
@@ -1498,8 +1487,6 @@ pub fn probes_section(
             || "last_observed_at=\u{2014}".to_string(),
             |ms| format!("last_observed_at={ms}"),
         );
-        let inferred_suffix = if probe.inferred { " (inferred)" } else { "" };
-
         // Failure-ratio suffix: rendered only when the probe is
         // currently failing AND a threshold is declared.
         let failing = matches!(
@@ -1515,7 +1502,7 @@ pub fn probes_section(
 
         let _ = writeln!(
             s,
-            "  {role} probe[{idx}] {mechanic} {last} {observed}{ratio_suffix}{inferred_suffix}",
+            "  {role} probe[{idx}] {mechanic} {last} {observed}{ratio_suffix}",
             idx = probe.probe_idx.get(),
         );
     }
