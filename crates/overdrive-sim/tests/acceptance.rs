@@ -104,9 +104,6 @@ mod acceptance {
 
     // Step 04-05 — Reconciler-primitive DST invariants.
     mod reconciler_invariants_pass;
-    // guest-stack-transparent-mtls-intercept ADR-0089 §6 — registered
-    // seeded VM provision-failure cleanup + smallest-free slot reuse invariant.
-    mod provision_failure_cleanup;
     // guest-stack-transparent-mtls-intercept BTR-1 — fixed-seed catalogue pin
     // for the registered Stop/exit-observer contention invariant.
     mod terminal_contention;

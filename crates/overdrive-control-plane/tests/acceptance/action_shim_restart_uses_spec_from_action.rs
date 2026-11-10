@@ -27,10 +27,6 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 
-use overdrive_control_plane::action_shim::{
-    WorkloadNetworkProvisioner, dispatch_with_network_provisioner,
-};
-use overdrive_control_plane::veth_provisioner::{VethProvisionError, WorkloadNetnsPlan};
 use overdrive_core::SpiffeId;
 use overdrive_core::UnixInstant;
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
@@ -44,26 +40,13 @@ use overdrive_core::traits::observation_store::{
 };
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 
+use crate::acceptance::vm_dispatch::{VmDispatchFixture, VmDispatchPorts};
+
 /// Recording fake driver. Captures every `AllocationSpec` passed to
 /// `start()` so the test can assert on what the shim actually
 /// dispatched.
 struct RecordingDriver {
     spawned_specs: Arc<Mutex<Vec<AllocationSpec>>>,
-}
-
-/// This scenario observes only the spec handed to the driver. Structural
-/// workload networking is a driven port and must not mutate the host merely
-/// because the action happens to be VM-shaped.
-struct NoopNetworkProvisioner;
-
-impl WorkloadNetworkProvisioner for NoopNetworkProvisioner {
-    fn provision(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
-        Ok(())
-    }
-
-    fn teardown(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
-        Ok(())
-    }
 }
 
 impl RecordingDriver {
@@ -114,13 +97,6 @@ async fn action_shim_restart_passes_spec_from_action_to_driver_start_unchanged()
     let driver = Arc::new(RecordingDriver::new());
     let captured = driver.captured_specs();
     let driver_dyn: Arc<dyn Driver> = driver.clone();
-    let drivers: Arc<overdrive_core::traits::driver::DriverRegistry> = {
-        let mut r = overdrive_core::traits::driver::DriverRegistry::new();
-        r.insert(Arc::clone(&driver_dyn));
-        Arc::new(r)
-    };
-    let alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::default();
-
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("NodeId"), 0));
 
@@ -195,56 +171,11 @@ async fn action_shim_restart_passes_spec_from_action_to_driver_start_unchanged()
         deadline: now + Duration::from_secs(1),
     };
 
-    // Broadcast channel for `LifecycleEvent` — required by `dispatch`
-    // per slice 02 step 02-01 (architecture.md §10). This test does
-    // not assert on the broadcast surface; the channel is constructed
-    // but its receiver is dropped with the binding.
-    let (lifecycle_tx, _lifecycle_rx) = tokio::sync::broadcast::channel(16);
-
-    // Dispatch the action through the shim.
-    let dataplane: std::sync::Arc<dyn overdrive_core::traits::dataplane::Dataplane> =
-        std::sync::Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new());
-    let writer_node = overdrive_core::id::NodeId::new("writer-1").expect("NodeId");
-    // service-vip-allocator step 03-02 — the action shim's dispatch
-    // signature carries the allocator for the ReleaseServiceVip arm.
-    // This test does NOT dispatch ReleaseServiceVip; an ephemeral
-    // tempdir-backed allocator is sufficient.
-    let tmp_alloc = tempfile::TempDir::new().expect("tempdir");
-    let alloc_store: std::sync::Arc<dyn overdrive_core::traits::intent_store::IntentStore> =
-        std::sync::Arc::new(
-            overdrive_store_local::LocalIntentStore::open(tmp_alloc.path().join("intent.redb"))
-                .expect("open store for allocator"),
-        );
-    let allocator = overdrive_control_plane::test_default_allocator(alloc_store);
-    let test_broker = parking_lot::Mutex::new(overdrive_core::eval_broker::EvaluationBroker::new());
-    let mtls_worker_0501_0 = crate::acceptance::serve_ports::worker();
-    dispatch_with_network_provisioner(
-        vec![action],
-        drivers.as_ref(),
-        &alloc_drivers,
-        obs.as_ref(),
-        dataplane.as_ref(),
-        &overdrive_sim::adapters::ca::SimCa::new(std::sync::Arc::new(
-            overdrive_sim::adapters::entropy::SimEntropy::new(0),
-        )),
-        &overdrive_sim::adapters::clock::SimClock::new(),
-        &overdrive_control_plane::identity_mgr::IdentityMgr::new(None),
-        &overdrive_control_plane::GatewayIdentityActionComposition::disabled(),
-        &lifecycle_tx,
-        &tick,
-        &writer_node,
-        allocator,
-        &test_broker,
-        None,
-        &mtls_worker_0501_0,
-        // transparent-mtls-enrollment step 04-01: a fresh per-host slot
-        // allocator — this fixture exercises no netns provisioning.
-        &overdrive_control_plane::veth_provisioner::NetSlotAllocator::new(),
-        &NoopNetworkProvisioner,
-        &overdrive_sim::adapters::vm_host_state::SimVmHostState::new(),
-    )
-    .await
-    .expect("dispatch must succeed");
+    // Dispatch the action through the production VM guest-network seam.
+    let mut ports = VmDispatchPorts::sim(Arc::clone(&driver_dyn));
+    ports.obs = Arc::clone(&obs);
+    let fixture = VmDispatchFixture::boot(ports).await;
+    fixture.dispatch(vec![action], &tick).await.expect("dispatch must succeed");
 
     // The shim must have called `Driver::start` exactly once with the
     // spec carried on the action — NOT with the deleted /bin/sleep

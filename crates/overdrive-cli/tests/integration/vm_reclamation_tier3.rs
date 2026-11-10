@@ -28,7 +28,7 @@
 //! correct regardless of the label swap):
 //!
 //! - S-VM-30 (folded from 02-02 scope): [`vm_survivor_with_no_vm_registry_entry_is_reclaimed_via_observed_empty`]
-//! - S-VM-23 (folded from 02-02 scope): [`boot_epoch_reclamation_settles_before_adopt_on_restart_recovery`]
+//! - S-VM-23 (folded from 02-02 scope): [`restart_under_the_production_composition_reclaims_a_surviving_vm_before_serving`]
 //! - S-VM-21: [`steady_state_sweep_reclaims_a_stranded_scope_without_restarting_serve`]
 //! - S-VM-22: [`steady_state_sweep_kills_a_surviving_vmm_at_a_later_tick`]
 //! - S-VM-25 shape (a): [`restart_orphan_terminal_row_is_byte_unchanged_after_reclamation`]
@@ -239,8 +239,9 @@ async fn spawn_vm_server(data_dir: &Path, config_dir: &Path) -> ServeHandle {
 }
 
 /// Real serve, `[vm]` driver composed, mTLS-composed (real `EbpfDataplane`,
-/// real SVID/CA machinery) — needed for S-VM-23 (adopt-on-restart
-/// ordering) and S-VM-81 (SVID issuance).
+/// real SVID/CA machinery) — needed for S-VM-23 (a restart under the
+/// production composition reclaims a surviving VM) and S-VM-81 (SVID
+/// issuance).
 async fn spawn_vm_server_mtls_composed(
     data_dir: &Path,
     config_dir: &Path,
@@ -701,18 +702,19 @@ async fn vm_survivor_with_no_vm_registry_entry_is_reclaimed_via_observed_empty()
 }
 
 // ---------------------------------------------------------------------
-// S-VM-23 (folded) — boot-epoch reclamation settles BEFORE
-// adopt_on_restart_recovery reads the tree.
+// S-VM-23 (folded) — a restart under the production composition reclaims a
+// surviving VM before serving.
 // ---------------------------------------------------------------------
 
-/// A restart whose boot-epoch `VmReclamation` drive reclaims N surviving
-/// VM cgroup scopes must NOT have `adopt_on_restart_recovery` refuse the
-/// boot with `NetnsRecoveryError::ObserveRead` -- the load-bearing
-/// PINNED ORDER (reclaim -> settle -> adopt reads the tree) is observed
-/// indirectly: if the ordering regressed, this boot would refuse.
+/// A restart whose boot-epoch `VmReclamation` drive reclaims a surviving VM
+/// allocation's cgroup scope and run dir, under the production composition
+/// (`[vm]` driver composed, real `EbpfDataplane` and SVID/CA machinery), must
+/// complete the boot rather than refuse it. Reclamation has finished before
+/// the second boot returns: the scope and run dir are gone. (S-VM-30 covers
+/// the same reclamation on a node with no `[vm]` driver composed.)
 #[tokio::test]
 #[serial(cgroup)]
-async fn boot_epoch_reclamation_settles_before_adopt_on_restart_recovery() {
+async fn restart_under_the_production_composition_reclaims_a_surviving_vm_before_serving() {
     let fixture = VmFixture::provision(&shared_staging_root()).expect("provision fixture");
     let tmp = tempfile::Builder::new()
         .prefix("vm-reclaim-s23-")
@@ -740,12 +742,12 @@ async fn boot_epoch_reclamation_settles_before_adopt_on_restart_recovery() {
     let alloc_id = format!("alloc-{}-0", submit.workload_id);
     handle.shutdown().await.expect("shutdown boot #1 without stopping the workload");
 
-    // Boot #2 -- SAME data_dir, mTLS-composed again (so
-    // adopt_on_restart_recovery's netns-adopt pass genuinely runs and
-    // reads the same cgroup tree the reclamation drive just touched).
+    // Boot #2 -- SAME data_dir, mTLS-composed again, so the boot-epoch
+    // reclamation drive runs under the production composition against the
+    // cgroup tree boot #1 left behind.
     let handle2 = spawn_vm_server_mtls_composed(&data_dir, &config_dir).await.expect(
-        "boot #2 must NOT refuse -- a NetnsRecoveryError::ObserveRead would surface here if the \
-         reclaim-before-adopt ordering (or kill_scope's settle postcondition) regressed",
+        "boot #2 must NOT refuse -- reclaiming the surviving scope (and kill_scope's settle \
+         postcondition) must leave a tree the boot can proceed over",
     );
 
     assert!(!scope_path(&alloc_id).exists(), "the surviving scope must be reclaimed at boot");
@@ -769,8 +771,9 @@ async fn boot_epoch_reclamation_settles_before_adopt_on_restart_recovery() {
     // reclamation model, which counts the clone as one of three observation
     // surfaces. Asserting "reclaimed" here would be false; asserting
     // "leaked" would ratify a leak this step has no authority to bless.
-    // The scenario's own claim -- named in its function name -- is about
-    // the reclaim-before-adopt ORDERING, and that claim is asserted in full above.
+    // The scenario's own claim -- named in its function name -- is that the
+    // restart reclaims the surviving scope and run dir before serving, and
+    // that claim is asserted in full above.
 
     handle2.shutdown().await.expect("clean shutdown");
 }

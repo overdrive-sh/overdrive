@@ -391,7 +391,7 @@ async fn per_gateway_addr_fallback_binds_when_wildcard_is_held() {
     );
 
     // WHEN probe attempts the wildcard bind, gets EADDRINUSE, and falls back to
-    // per-gateway-addr sockets re-derived from net_slot_allocator.snapshot().
+    // per-gateway-addr sockets.
     // THEN the fallback binds one :53 per assigned gateway with no error.
     dns.probe()
         .await

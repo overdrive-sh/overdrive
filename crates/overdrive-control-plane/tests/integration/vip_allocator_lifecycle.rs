@@ -67,7 +67,7 @@ use ipnet::Ipv4Net;
 use tempfile::TempDir;
 
 use overdrive_control_plane::AppState;
-use overdrive_control_plane::action_shim::dispatch;
+use overdrive_control_plane::action_shim::dispatch_with_guest_network_provisioner_for_test;
 use overdrive_control_plane::api::{
     AllocStatusResponse, IdempotencyOutcome, SubmitWorkloadRequest, SubmitWorkloadResponse,
 };
@@ -235,37 +235,17 @@ fn digest_for_spec(spec: ServiceSpecInput) -> [u8; 32] {
 }
 
 /// Drive a `Action::ReleaseServiceVip` through the production
-/// `action_shim::dispatch` against the supplied shared allocator. The
+/// VM guest-network dispatch seam against the supplied state allocator. The
 /// non-allocator ports (`driver`, `obs`, `dataplane`, broadcast bus) are
 /// untouched by the `ReleaseServiceVip` arm — the same shape the focused
 /// acceptance test in `release_service_vip_dispatch.rs` uses, so the
 /// end-to-end integration here exercises EXACTLY the production
 /// dispatch arm.
-async fn dispatch_release(
-    allocator: Arc<tokio::sync::Mutex<PersistentServiceVipAllocator>>,
-    workload_id: &str,
-    digest_bytes: [u8; 32],
-) {
+async fn dispatch_release(state: &AppState, workload_id: &str, digest_bytes: [u8; 32]) {
     let digest = overdrive_core::id::ContentHash::from_bytes(digest_bytes);
     let target = format!("workload-lifecycle/{workload_id}");
     let correlation = CorrelationKey::derive(&target, &digest, "release-service-vip");
     let action = Action::ReleaseServiceVip { spec_digest: digest, correlation };
-
-    let obs: Arc<dyn ObservationStore> =
-        Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("NodeId"), 0));
-    let dataplane: Arc<dyn overdrive_core::traits::dataplane::Dataplane> =
-        Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new());
-    // The dispatch path's Driver port is not touched by the
-    // ReleaseServiceVip arm — a SimDriver is sufficient.
-    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Vm));
-    let drivers: Arc<overdrive_core::traits::driver::DriverRegistry> = {
-        let mut r = overdrive_core::traits::driver::DriverRegistry::new();
-        r.insert(Arc::clone(&driver));
-        Arc::new(r)
-    };
-    let alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::default();
-    let (lifecycle_tx, _lifecycle_rx) = tokio::sync::broadcast::channel(16);
-    let writer_node = NodeId::new("writer-1").expect("NodeId");
 
     let now = Instant::now();
     let tick = TickContext {
@@ -275,34 +255,12 @@ async fn dispatch_release(
         deadline: now + Duration::from_secs(1),
     };
 
-    let test_broker = parking_lot::Mutex::new(overdrive_core::eval_broker::EvaluationBroker::new());
-    let mtls_worker_0501_0 = crate::integration::serve_ports::worker();
-    dispatch(
-        vec![action],
-        drivers.as_ref(),
-        &alloc_drivers,
-        obs.as_ref(),
-        dataplane.as_ref(),
-        &overdrive_sim::adapters::ca::SimCa::new(std::sync::Arc::new(
-            overdrive_sim::adapters::entropy::SimEntropy::new(0),
-        )),
-        &overdrive_sim::adapters::clock::SimClock::new(),
-        &overdrive_control_plane::identity_mgr::IdentityMgr::new(None),
-        &overdrive_control_plane::GatewayIdentityActionComposition::disabled(),
-        &lifecycle_tx,
-        &tick,
-        &writer_node,
-        Arc::clone(&allocator),
-        &test_broker,
-        None,
-        &mtls_worker_0501_0,
-        // transparent-mtls-enrollment step 04-01: a fresh per-host slot
-        // allocator — this fixture exercises no netns provisioning.
-        &overdrive_control_plane::veth_provisioner::NetSlotAllocator::new(),
-        &overdrive_sim::adapters::vm_host_state::SimVmHostState::new(),
-    )
-    .await
-    .expect("dispatch must succeed");
+    // The release arm never touches the guest network; a Sim owner is the
+    // seam's provisioner.
+    let owner = crate::integration::serve_ports::owner();
+    dispatch_with_guest_network_provisioner_for_test(vec![action], state, &tick, owner.as_ref())
+        .await
+        .expect("dispatch must succeed");
 }
 
 // ---------------------------------------------------------------------------
@@ -366,7 +324,7 @@ async fn submit_then_release_dispatch_frees_vip_end_to_end() {
     //         the reconciler tick now emits on intent withdrawal
     //         (desired.job.is_none(); ADR-0049 2026-06-28). The dispatch
     //         arm under audit is the production seam from step 03-02.
-    dispatch_release(Arc::clone(&allocator), "payments", digest_bytes).await;
+    dispatch_release(&state, "payments", digest_bytes).await;
 
     // ---- (4) Post-condition: the allocator has released the digest.
     {
@@ -453,7 +411,7 @@ async fn alloc_status_projects_service_udp_listener_protocol() {
 #[tokio::test]
 async fn released_vip_reusable_on_next_allocation() {
     let tmp = TempDir::new().expect("tempdir");
-    let (state, allocator) = build_state_with_range(&tmp, one_address_vip_range());
+    let (state, _allocator) = build_state_with_range(&tmp, one_address_vip_range());
 
     // ---- Submit A — consume the sole VIP.
     let spec_a = service_spec("svc-a", 8001);
@@ -476,7 +434,7 @@ async fn released_vip_reusable_on_next_allocation() {
 
     // ---- Release A via action-shim dispatch.
     let digest_a = digest_for_spec(spec_a);
-    dispatch_release(Arc::clone(&allocator), "svc-a", digest_a).await;
+    dispatch_release(&state, "svc-a", digest_a).await;
 
     // ---- Submit B — byte-different spec (distinct id + distinct port).
     //      The digest derivation is content-addressed, so a different id
@@ -524,7 +482,7 @@ async fn released_vip_reusable_on_next_allocation() {
 #[tokio::test]
 async fn vip_allocator_pool_exhaustion_and_recovery() {
     let tmp = TempDir::new().expect("tempdir");
-    let (state, allocator) = build_state_with_range(&tmp, one_address_vip_range());
+    let (state, _allocator) = build_state_with_range(&tmp, one_address_vip_range());
 
     let spec_a = service_spec("svc-keep", 9000);
     let resp_a = submit_json(
@@ -564,7 +522,7 @@ async fn vip_allocator_pool_exhaustion_and_recovery() {
 
     // Release A through the production action-shim dispatch arm.
     let digest_a = digest_for_spec(spec_a);
-    dispatch_release(Arc::clone(&allocator), "svc-keep", digest_a).await;
+    dispatch_release(&state, "svc-keep", digest_a).await;
 
     // Re-submit B — must succeed and receive the recovered VIP.
     let resp_b =

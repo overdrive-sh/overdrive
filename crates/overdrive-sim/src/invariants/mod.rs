@@ -19,16 +19,15 @@
 use std::fmt::{self, Display};
 use std::str::FromStr;
 
-use overdrive_control_plane::action_shim::WorkloadNetworkProvisioner;
-use overdrive_control_plane::veth_provisioner::{VethProvisionError, WorkloadNetnsPlan};
-
 pub(crate) mod serve_ports {
     use std::collections::BTreeMap;
     use std::net::Ipv4Addr;
     use std::sync::Arc;
 
-    use overdrive_control_plane::guest_network::GuestAddressPool;
-    use overdrive_core::guest_network::{GuestNetworkExecGate, GuestNetworkExecWiring};
+    use overdrive_control_plane::guest_network::{GuestAddressPool, SharedGuestNetworkOwner};
+    use overdrive_core::guest_network::{
+        GuestNetworkExecGate, GuestNetworkExecSupervisor, GuestNetworkExecWiring,
+    };
     use overdrive_core::traits::mtls_enforcement::{MtlsEnforcement, MtlsLimits};
     use overdrive_core::traits::mtls_resolve::{MtlsResolution, MtlsResolve};
 
@@ -59,6 +58,38 @@ pub(crate) mod serve_ports {
         Arc::new(SimSharedGuestNetworkOwner::default())
     }
 
+    /// The VM-path composition a convergence-driven invariant boots over: the
+    /// mTLS worker started over the sim, the shared guest-network owner
+    /// converged (so `AppState::new` copies its bound flow ports), and the EXEC
+    /// gate opened after boot. The owner is also the `GuestNetworkProvisioner`
+    /// the guest-network convergence seam is driven with.
+    pub struct VmComposition {
+        pub worker: Arc<overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker>,
+        pub owner: Arc<SimSharedGuestNetworkOwner>,
+        pub gate: Arc<GuestNetworkExecGate>,
+        pub pool: Arc<GuestAddressPool>,
+        _supervisor: Arc<GuestNetworkExecSupervisor>,
+    }
+
+    impl VmComposition {
+        pub async fn boot() -> Result<Self, String> {
+            let worker = worker();
+            worker
+                .start_shared_owner()
+                .await
+                .map_err(|e| format!("shared mTLS owner start: {e:?}"))?;
+            let owner = owner();
+            owner.converge_shared().await.map_err(|e| format!("shared owner converge: {e:?}"))?;
+            let wiring = GuestNetworkExecWiring::new(Arc::new(SimClock::new()));
+            let gate = wiring.gate();
+            let supervisor = wiring.supervisor();
+            if !supervisor.open_after_boot() {
+                return Err("the EXEC gate did not leave BootClosed".to_owned());
+            }
+            Ok(Self { worker, owner, gate, pool: pool(), _supervisor: supervisor })
+        }
+    }
+
     pub fn exec_gate() -> Arc<GuestNetworkExecGate> {
         GuestNetworkExecWiring::new(Arc::new(SimClock::new())).gate()
     }
@@ -70,22 +101,6 @@ pub(crate) mod serve_ports {
             Ipv4Addr::new(100, 95, 0, 1),
             Arc::new(crate::adapters::entropy::SimEntropy::new(0x295)),
         ))
-    }
-}
-
-/// In-memory network adapter for simulator compositions. The production
-/// action shim still receives the complete workload-netns plan; this adapter
-/// keeps the simulator's driven boundary free of host netns I/O.
-#[derive(Debug, Default)]
-pub(crate) struct NoopNetworkProvisioner;
-
-impl WorkloadNetworkProvisioner for NoopNetworkProvisioner {
-    fn provision(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
-        Ok(())
-    }
-
-    fn teardown(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
-        Ok(())
     }
 }
 
@@ -184,13 +199,6 @@ pub mod exit_event_observable_outcome;
 // arm's first read and compound write, observes the actual equal-timestamp
 // LWW loss, and pins the one-rebase terminal/cleanup convergence contract.
 pub mod terminal_contention;
-// guest-stack-transparent-mtls-intercept ADR-0089 §6. The seeded
-// `VmProvisionFailureCleansNetworkAndReusesSlot` invariant drives the real
-// StartAllocation action shim through a Sim `WorkloadNetworkProvisioner` that
-// creates partial logical VM-network state before returning the existing typed
-// failure. It pins durable Failed classification, structural teardown,
-// zero-residue cleanup, and smallest-free slot reuse by a successor.
-pub mod provision_failure_cleanup;
 // workload-gc-absent-stale-allocs step 01-03. Two DST scenarios
 // pinning the GC reconciler arm convergence + resubmit-after-GC
 // race: (1) `WorkloadGcOrphanConverges` — Submit Job(X), drain to
@@ -492,20 +500,6 @@ pub enum Invariant {
     /// `SimObservationStore`; its ordering decorator never authors a row.
     TerminalContentionConverges,
 
-    /// guest-stack-transparent-mtls-intercept ADR-0089 §6 — safety,
-    /// liveness, and convergence invariant. A blocker holds slot 0; a VM
-    /// allocation obtains slot 1 and the seeded Sim provisioner creates a
-    /// non-empty proper subset of its logical netns/veth/route/resolver
-    /// artifacts before failing through the real
-    /// `WorkloadNetworkProvisioner` port. The production action shim must
-    /// record `Failed { WorkloadNetnsProvisionFailed }`, invoke structural
-    /// teardown, remove every created artifact, and release only after
-    /// cleanup. A subsequent VM allocation is then driven through the same
-    /// production allocator/provision path and must be observed on slot 1,
-    /// never slot 2. The evaluator and cleanup-fact negative control live in
-    /// `crate::invariants::provision_failure_cleanup`.
-    VmProvisionFailureCleansNetworkAndReusesSlot,
-
     /// workload-gc-absent-stale-allocs step 01-03 — eventually
     /// invariant. After `IntentStore::delete("jobs/X")` removes
     /// the desired Job, every non-terminal `AllocStatusRow` for
@@ -802,10 +796,6 @@ impl Invariant {
         // lives in `crate::invariants::terminal_contention` and includes a
         // report-only negative control that removes the observed LWW loser.
         Self::TerminalContentionConverges,
-        // guest-stack-transparent-mtls-intercept ADR-0089 §6. The evaluator
-        // lives in `crate::invariants::provision_failure_cleanup` and carries
-        // a negative control that removes one observed artifact-removal fact.
-        Self::VmProvisionFailureCleansNetworkAndReusesSlot,
         // workload-gc-absent-stale-allocs steps 01-03 + 01-04.
         // Evaluator bodies live in
         // `crate::invariants::workload_gc_absent_intent`. Both
@@ -916,9 +906,6 @@ impl Invariant {
             Self::HydratorIdempotentSteadyState => "hydrator-idempotent-steady-state",
             Self::ExitEventObservableOutcome => "exit-event-observable-outcome",
             Self::TerminalContentionConverges => "terminal-contention-converges",
-            Self::VmProvisionFailureCleansNetworkAndReusesSlot => {
-                "vm-provision-failure-cleans-network-and-reuses-slot"
-            }
             // workload-gc-absent-stale-allocs step 01-03.
             Self::WorkloadGcOrphanConverges => "workload-gc-orphan-converges",
             Self::WorkloadGcResubmitCreatesFresh => "workload-gc-resubmit-creates-fresh",

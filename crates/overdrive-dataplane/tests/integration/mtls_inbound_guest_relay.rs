@@ -343,6 +343,21 @@ impl Client {
         Ok(Self { conn, tcp })
     }
 
+    /// The SPIFFE id in the sole URI SAN of the server leaf the client
+    /// verified (chain position 0 of the handshake's verified chain).
+    fn presented_server_spiffe(&self) -> Option<overdrive_core::SpiffeId> {
+        use x509_parser::prelude::FromDer as _;
+        let leaf = self.conn.peer_certificates()?.first()?;
+        let (_, parsed) =
+            x509_parser::certificate::X509Certificate::from_der(leaf.as_ref()).ok()?;
+        let san = parsed.subject_alternative_name().ok()??;
+        let uri = san.value.general_names.iter().find_map(|gn| match gn {
+            x509_parser::extensions::GeneralName::URI(uri) => Some(*uri),
+            _ => None,
+        })?;
+        uri.parse().ok()
+    }
+
     fn write(&mut self, bytes: &[u8]) -> std::io::Result<()> {
         let mut tls = rustls::Stream::new(&mut self.conn, &mut self.tcp);
         tls.write_all(bytes)?;
@@ -746,4 +761,52 @@ async fn teardown_returns_only_after_the_relay_dropped_leg_s() {
     assert_eq!(rig.enforcement.liveness(&handle), PumpLiveness::Gone);
     let ended = join(client);
     assert!(ended.is_err() || ended == Ok(Vec::new()), "leg C is closed: {ended:?}");
+}
+
+/// Handshake identity, server role (ADR-0069 F1/F3; GH #26): the agent's
+/// leg-C server handshake presents the HELD SVID of the destination
+/// workload's allocation and requires and verifies the client's SVID. A valid
+/// client completes the handshake; the leaf the client verified chains to the
+/// bundle root and its sole URI SAN is the held server SVID's SPIFFE id. The
+/// workload (here the guest application) is handed no SVID material: the
+/// agent reads it through the `IdentityRead` port, a required constructor
+/// argument of the enforcement. Were the identity-read wiring deleted, the
+/// agent would present no server leaf and the client's verification fails.
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn agent_handshake_presents_held_svid_server_role() {
+    let dial = ScriptedDial::new(DialScript::Pair { delay: Duration::ZERO });
+    let rig = Rig::new(Arc::clone(&dial), MtlsLimits::default()).await;
+    let (conn, client) = rig.intercept(Presents::TrustedClient, |client| {
+        let mut client = client.expect("a valid client SVID completes the server handshake");
+        let presented = client.presented_server_spiffe();
+        client.write(REQUEST_HEAD).expect("request");
+        let (reply, read) = client.read_up_to(RESPONSE.len());
+        (presented, reply, read.map_err(|e| e.kind()))
+    });
+
+    let handle = rig.enforcement.enforce(conn).await.expect("the mutual handshake completes");
+    assert_eq!(rig.enforcement.liveness(&handle), PumpLiveness::Running);
+
+    let mut guest = dial.guest_app().await;
+    let mut request = vec![0_u8; REQUEST_HEAD.len()];
+    tokio::time::timeout(WAIT, guest.read_exact(&mut request))
+        .await
+        .expect("bounded")
+        .expect("the decrypted request reaches the guest application");
+    assert_eq!(request, REQUEST_HEAD, "byte-exact decrypted request");
+    guest.write_all(RESPONSE).await.expect("the guest replies");
+
+    let (presented, reply, read) = join(client);
+    assert_eq!(read, Ok(()));
+    assert_eq!(reply, RESPONSE, "the client reads the guest's reply over leg C");
+    assert_eq!(
+        presented.as_ref(),
+        Some(&rig.pki.server_leaf.spiffe),
+        "the agent's server handshake presents the destination allocation's HELD SVID: the \
+         verified leaf's URI SAN is the server workload's SPIFFE id"
+    );
+
+    rig.enforcement.teardown(handle.clone()).await.expect("teardown");
+    assert_eq!(rig.enforcement.liveness(&handle), PumpLiveness::Gone);
 }

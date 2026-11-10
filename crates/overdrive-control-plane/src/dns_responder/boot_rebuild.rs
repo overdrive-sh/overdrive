@@ -5,9 +5,8 @@
 //!
 //! # Why a boot rebuild
 //!
-//! The [`FrontendAddrAllocator`] is the EPHEMERAL
-//! [`crate::veth_provisioner::NetSlotAllocator`] model — empty on every fresh
-//! process boot, carrying NO cross-restart persistence. On a `serve` restart
+//! The [`FrontendAddrAllocator`] is EPHEMERAL
+//! runtime state — empty on every fresh process boot, carrying NO cross-restart persistence. On a `serve` restart
 //! the in-RAM `<workload> → F` map is reconstructed EMPTY, but the declared-Service
 //! intent rows SURVIVE in the [`IntentStore`] (a prior boot's
 //! `submit_workload` wrote them). The DECLARED-SERVICE INTENT IS THE SSOT the

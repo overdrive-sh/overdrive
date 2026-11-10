@@ -2,8 +2,7 @@
 //! forwarding is Active (P6-S12, G-V2; the G-V3 rows `QuiescenceLatched`,
 //! `ControlSessionPending` and a Retiring lease's refused activation), VMM
 //! death and the pre-READY exit
-//! (P6-S10, G-V4 rows 4/5, ATTR-TOKEN), and the feature-disabled row
-//! (P6-S12b, `AllocationSpec.transport: None`; C5a / C5b).
+//! (P6-S10, G-V4 rows 4/5, ATTR-TOKEN).
 //!
 //! Driven through the action shim's dispatch with the production guest-flow
 //! owner (`HostSharedGuestNetworkOwner::with_flow_io` over `SimGuestFlowIo`),
@@ -70,10 +69,7 @@ use overdrive_store_local::LocalIntentStore;
 use parking_lot::Mutex;
 use tempfile::TempDir;
 
-use super::{
-    ShimError, WorkloadNetworkProvisioner, dispatch_with_guest_network_provisioner_for_test,
-    dispatch_with_workflow_intent_and_network_provisioner_for_test,
-};
+use super::{ShimError, dispatch_with_guest_network_provisioner_for_test};
 use crate::guest_network::flow_io::FlowListener;
 use crate::guest_network::flow_io::sim::{SimEffectKind, SimGuestFlowIo};
 use crate::guest_network::{
@@ -81,7 +77,6 @@ use crate::guest_network::{
     GuestNetworkOperation, HostSharedGuestNetworkOwner, SharedGuestNetworkOwner,
 };
 use crate::shared_network_test_ports::worker_over;
-use crate::veth_provisioner::{VethProvisionError, WorkloadNetnsPlan};
 
 const LISTEN_PORT: u16 = 8080;
 const DESTINATION: SocketAddrV4 = SocketAddrV4::new(Ipv4Addr::new(198, 51, 100, 9), 443);
@@ -174,24 +169,6 @@ impl Driver for RecordingVmDriver {
         _handle: &AllocationHandle,
         _resources: Resources,
     ) -> Result<(), DriverError> {
-        Ok(())
-    }
-}
-
-/// The C3 lane's driven port for the feature-disabled body: it acknowledges
-/// the derived plan and records that it was asked.
-#[derive(Default)]
-struct RecordingNetnsProvisioner {
-    provisioned: Mutex<u32>,
-}
-
-impl WorkloadNetworkProvisioner for RecordingNetnsProvisioner {
-    fn provision(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
-        *self.provisioned.lock() += 1;
-        Ok(())
-    }
-
-    fn teardown(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
         Ok(())
     }
 }
@@ -616,77 +593,4 @@ async fn a_vmm_death_aborts_its_flows_and_a_stale_launch_flow_is_closed_unattrib
         fixture.io.socket_observation().closed_by_owner.contains(&stale),
         "the stale launch's connection is closed by the owner"
     );
-}
-
-// ---------------------------------------------------------------------------
-// P6-S12b — feature disabled (`transport: None`)
-// ---------------------------------------------------------------------------
-
-/// P6-S12b — An allocation started without the guest transport runs as
-/// today: no lease, no activation, EXEC on today's path; the same allocation
-/// with the guest network composed is leased and activated before EXEC.
-/// CONTRACT_SHAPE: unbounded-preservation.
-///
-/// Given a VM allocation dispatched through the shim lane with no guest
-/// network (the pre-feature `network: None` baseline). When it starts, then
-/// the driver sees `transport: None`, the pool holds no lease, the owner
-/// holds no CID, the C3 provisioner was asked once, the row is Running and
-/// EXEC is released once. And when the same allocation shape is dispatched
-/// with the guest network composed, then it is leased, its spec carries the
-/// transport, and EXEC follows its activation (C5b contrast).
-#[tokio::test(flavor = "current_thread", start_paused = true)]
-async fn an_allocation_without_a_guest_transport_runs_as_today() {
-    let fixture = ShimFixture::build().await;
-    let netns = RecordingNetnsProvisioner::default();
-    let disabled = "nd295-p6-s12b-off";
-
-    Box::pin(dispatch_with_workflow_intent_and_network_provisioner_for_test(
-        vec![start(disabled)],
-        &fixture.state,
-        &ShimFixture::tick(),
-        &netns,
-    ))
-    .await
-    .expect("the pre-feature lane starts the allocation");
-
-    let started = fixture.driver.started();
-    assert_eq!(started.len(), 1);
-    assert!(started[0].transport.is_none(), "no guest transport on the pre-feature lane");
-    assert!(fixture.lease(&alloc_id(disabled)).is_none(), "no lease is taken");
-    assert!(fixture.owner.flow_observation().await.cids.is_empty(), "no CID, no activate");
-    assert_eq!(*netns.provisioned.lock(), 1, "today's C3 lane provisioned once");
-    let row = fixture
-        .state
-        .obs
-        .alloc_status_row(&alloc_id(disabled))
-        .await
-        .expect("row readable")
-        .expect("a row");
-    assert_eq!(row.state, AllocState::Running);
-    assert_eq!(fixture.driver.exec_released(), vec![alloc_id(disabled)], "EXEC on today's path");
-
-    let enabled = "nd295-p6-s12b-on";
-    let (dispatched, ()) = tokio::join!(fixture.dispatch(start(enabled)), async {
-        let (cid, launch) = fixture.activation_pending(&alloc_id(enabled)).await;
-        assert!(
-            !fixture.driver.exec_released().contains(&alloc_id(enabled)),
-            "no EXEC before activation"
-        );
-        fixture.open_control_session(cid, launch).await;
-    });
-    dispatched.expect("the guest-network lane starts the allocation");
-    let started = fixture.driver.started();
-    assert!(
-        started.iter().any(|spec| spec.alloc == alloc_id(enabled) && spec.transport.is_some()),
-        "the composed lane carries the transport"
-    );
-    assert_eq!(
-        fixture.driver.exec_released(),
-        vec![alloc_id(disabled), alloc_id(enabled)],
-        "EXEC once each, the composed one after activation"
-    );
-    fixture
-        .dispatch(Action::StopAllocation { alloc_id: alloc_id(enabled), terminal: None })
-        .await
-        .expect("fixture cleanup tears down the active guest allocation");
 }

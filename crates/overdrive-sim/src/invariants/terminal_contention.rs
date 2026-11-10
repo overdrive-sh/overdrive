@@ -36,9 +36,11 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use overdrive_control_plane::action_shim::{AllocDriverIndex, LifecycleEvent, dispatch};
+use overdrive_control_plane::AppState;
+use overdrive_control_plane::action_shim::{
+    LifecycleEvent, dispatch_with_guest_network_provisioner_for_test,
+};
 use overdrive_control_plane::identity_mgr::IdentityMgr;
-use overdrive_control_plane::veth_provisioner::NetSlotAllocator;
 use overdrive_control_plane::worker::exit_observer;
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::WorkloadKind;
@@ -74,7 +76,6 @@ use crate::adapters::dataplane::SimDataplane;
 use crate::adapters::driver::SimDriver;
 use crate::adapters::entropy::SimEntropy;
 use crate::adapters::observation_store::SimObservationStore;
-use crate::adapters::vm_host_state::SimVmHostState;
 use crate::harness::{InvariantResult, InvariantStatus};
 use overdrive_core::public_ingress::{
     GatewayApplicationStatusRowV1, PublicCertifiedKeyId, PublicCertifiedKeyStatusRowV1,
@@ -470,8 +471,6 @@ async fn drive(seed: u64) -> Result<Evidence, String> {
     let driver_port: Arc<dyn Driver> = driver.clone();
     let mut drivers = DriverRegistry::new();
     drivers.insert(driver_port.clone());
-    let alloc_drivers = AllocDriverIndex::default();
-    alloc_drivers.lock().insert(alloc.clone(), DriverType::Vm);
 
     let (events_tx, mut events_rx) = tokio::sync::broadcast::channel(8);
     let mut observer = exit_observer::spawn(
@@ -482,17 +481,22 @@ async fn drive(seed: u64) -> Result<Evidence, String> {
     );
 
     let tempdir = TempDir::new().map_err(|error| format!("tempdir: {error}"))?;
-    let intent: Arc<dyn IntentStore> = Arc::new(
-        LocalIntentStore::open(tempdir.path().join("intent.redb"))
+    let store_path = tempdir.path().join("intent.redb");
+    let store = Arc::new(
+        LocalIntentStore::open(&store_path)
             .map_err(|error| format!("open local intent store: {error}"))?,
     );
-    let allocator = overdrive_control_plane::test_default_allocator(intent);
-    let dataplane = SimDataplane::new();
-    let ca = SimCa::new(Arc::new(SimEntropy::new(seed)));
-    let identity = IdentityMgr::new(None);
-    let broker = Mutex::new(overdrive_core::eval_broker::EvaluationBroker::new());
-    let net_slots = NetSlotAllocator::new();
-    let host = SimVmHostState::new();
+    let allocator =
+        overdrive_control_plane::test_default_allocator(Arc::clone(&store) as Arc<dyn IntentStore>);
+    let mut runtime = overdrive_control_plane::reconciler_runtime::ReconcilerRuntime::new_with_redb_view_store_for_test(
+        tempdir.path(),
+    )
+    .map_err(|error| format!("runtime: {error:?}"))?;
+    runtime
+        .register(overdrive_control_plane::noop_heartbeat())
+        .await
+        .map_err(|error| format!("register heartbeat: {error:?}"))?;
+    let vm = crate::invariants::serve_ports::VmComposition::boot().await?;
     let now = clock.now();
     let tick = TickContext {
         now,
@@ -503,33 +507,39 @@ async fn drive(seed: u64) -> Result<Evidence, String> {
     let writer_node = NodeId::new("writer-terminal-contention")
         .map_err(|error| format!("writer node: {error:?}"))?;
     let requested_terminal = TerminalCondition::Stopped { by: StoppedBy::Operator };
-    let mtls_worker = crate::invariants::serve_ports::worker();
+    let mut state = AppState::new(
+        store,
+        store_path,
+        contention.clone() as Arc<dyn ObservationStore>,
+        Arc::new(runtime),
+        driver_port.clone(),
+        clock.clone(),
+        Arc::new(SimDataplane::new()),
+        Arc::new(SimCa::new(Arc::new(SimEntropy::new(seed)))),
+        Arc::new(IdentityMgr::new(None)),
+        writer_node,
+        allocator,
+        overdrive_control_plane::test_empty_listener_facts(),
+        std::net::Ipv4Addr::LOCALHOST,
+        Arc::clone(&vm.worker),
+        Arc::clone(&vm.owner)
+            as Arc<dyn overdrive_control_plane::guest_network::SharedGuestNetworkOwner>,
+        Arc::clone(&vm.gate),
+        Arc::clone(&vm.pool),
+    );
+    state.drivers = Arc::new(drivers);
+    state.lifecycle_events = Arc::new(events_tx.clone());
+    state.alloc_drivers.lock().insert(alloc.clone(), DriverType::Vm);
 
     {
-        let gateway_identity =
-            overdrive_control_plane::GatewayIdentityActionComposition::disabled();
-        let dispatch = dispatch(
+        let dispatch = dispatch_with_guest_network_provisioner_for_test(
             vec![Action::StopAllocation {
                 alloc_id: alloc.clone(),
                 terminal: Some(requested_terminal.clone()),
             }],
-            &drivers,
-            &alloc_drivers,
-            contention.as_ref(),
-            &dataplane,
-            &ca,
-            clock.as_ref(),
-            &identity,
-            &gateway_identity,
-            &events_tx,
+            &state,
             &tick,
-            &writer_node,
-            allocator,
-            &broker,
-            None,
-            &mtls_worker,
-            &net_slots,
-            &host,
+            vm.owner.as_ref(),
         );
         tokio::pin!(dispatch);
 
@@ -550,10 +560,10 @@ async fn drive(seed: u64) -> Result<Evidence, String> {
         .await
         .map_err(|error| format!("read occurrences: {error}"))?;
     let attempts = contention.attempts();
-    let route_removed = !alloc_drivers.lock().contains_key(&alloc);
+    let route_removed = !state.alloc_drivers.lock().contains_key(&alloc);
     let supervision_released = driver.live_allocations() == Some(Vec::new());
 
-    drop(drivers);
+    drop(state);
     drop(driver_port);
     drop(driver);
     let observer_drained = await_observer_drain(&mut observer).await?;

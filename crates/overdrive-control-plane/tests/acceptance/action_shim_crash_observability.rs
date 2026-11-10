@@ -16,16 +16,15 @@
 //!
 //! # PORT-TO-PORT litmus
 //!
-//! Drives the production driving port `action_shim::dispatch` and
+//! Drives the production VM guest-network dispatch seam and
 //! asserts at the driven-port boundary (the `AllocStatusRow` written to
 //! the `SimObservationStore`) — never on internal state. This is the
 //! falsifiable form of the § D2 per-site disposition table: a site that
 //! passes the wrong `prior`, or a builder that stops computing the facts
 //! from `(prior, state)`, turns these RED.
 //!
-//! Default lane: sim adapters for every port, `mtls_worker: None`, no
-//! root, no netns. The Tier-3 sibling that drives the REAL exit observer
-//! through two crash cycles is
+//! Default lane: sim adapters for every port, no root. The Tier-3 sibling
+//! that drives the REAL exit observer through two crash cycles is
 //! `tests/integration/workload_lifecycle/crash_observability_two_cycles.rs`
 //! (T-F).
 
@@ -34,15 +33,11 @@
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
-use overdrive_control_plane::action_shim::{
-    ShimError, WorkloadNetworkProvisioner, dispatch, dispatch_with_network_provisioner,
-};
-use overdrive_control_plane::veth_provisioner::{
-    NET_SLOT_MAX, NetSlotAllocator, VethProvisionError, WorkloadNetnsPlan,
-};
+use overdrive_control_plane::action_shim::ShimError;
+use overdrive_control_plane::guest_network::{GuestNetworkOperation, SharedGuestNetworkOwner};
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::WorkloadKind;
 use overdrive_core::ca::issue_failure::SvidIssueFailure;
@@ -59,7 +54,6 @@ use overdrive_core::traits::driver::{
     AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverStartClass,
     DriverStartFailure, DriverType, Resources, VmPayload, VmStartFailure,
 };
-use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::WorkloadSvidIssueStatusRowV1;
 use overdrive_core::traits::observation_store::{
     AllocLifecycleOccurrenceRow, AllocLifecyclePredecessor, AllocState, AllocStatusRow,
@@ -69,11 +63,11 @@ use overdrive_core::traits::observation_store::{
 };
 use overdrive_core::transition_reason::{TerminalCondition, TransitionReason};
 use overdrive_core::workflow::{SignalKey, SignalValue, WorkflowStatus};
-use overdrive_dataplane::allocators::{PersistentServiceVipAllocator, VipRange};
+use overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
-use overdrive_store_local::LocalIntentStore;
-use tempfile::TempDir;
 use tokio::sync::{Semaphore, oneshot};
+
+use crate::acceptance::vm_dispatch::{VmDispatchFixture, VmDispatchPorts};
 
 /// Driver double whose `start` outcome is the variable under test:
 /// `Accept` models a driver that brings the workload back up (T-C),
@@ -149,207 +143,21 @@ impl Driver for ScriptedDriver {
     }
 }
 
-#[derive(Default)]
-struct CountingNetworkProvisioner {
-    attempts: AtomicUsize,
-    teardowns: AtomicUsize,
-    failures_remaining: AtomicUsize,
+/// Boots the VM-path dispatch composition over `obs`, scripted `driver`, and
+/// the recording `owner` (the one shared guest-network owner).
+async fn vm_fixture(
+    driver: Arc<dyn Driver>,
+    obs: Arc<dyn ObservationStore>,
+    owner: &Arc<SimSharedGuestNetworkOwner>,
+) -> VmDispatchFixture {
+    let mut ports = VmDispatchPorts::sim(driver);
+    ports.obs = obs;
+    ports.owner = Arc::clone(owner) as Arc<dyn SharedGuestNetworkOwner>;
+    VmDispatchFixture::boot(ports).await
 }
 
-impl CountingNetworkProvisioner {
-    const fn fail_first_teardown() -> Self {
-        Self {
-            attempts: AtomicUsize::new(0),
-            teardowns: AtomicUsize::new(0),
-            failures_remaining: AtomicUsize::new(1),
-        }
-    }
-
-    const fn succeed() -> Self {
-        Self {
-            attempts: AtomicUsize::new(0),
-            teardowns: AtomicUsize::new(0),
-            failures_remaining: AtomicUsize::new(0),
-        }
-    }
-}
-
-impl WorkloadNetworkProvisioner for CountingNetworkProvisioner {
-    fn provision(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
-        Ok(())
-    }
-
-    fn teardown(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
-        self.attempts.fetch_add(1, Ordering::SeqCst);
-        if self
-            .failures_remaining
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |remaining| remaining.checked_sub(1))
-            .is_ok()
-        {
-            return Err(VethProvisionError::SysctlSetFailed {
-                key: "net.ipv4.ip_forward".to_owned(),
-                value: "1".to_owned(),
-                path: "/injected/finalization/teardown".to_owned(),
-                source: std::io::Error::other("injected first teardown failure"),
-            });
-        }
-        self.teardowns.fetch_add(1, Ordering::SeqCst);
-        Ok(())
-    }
-}
-
-/// A C3 driven-port double that fails only the post-assignment provision
-/// operation and records the externally observable cleanup order.
-struct ProvisionFailureNetwork {
-    trace: Arc<parking_lot::Mutex<Vec<&'static str>>>,
-    teardown_fails: bool,
-}
-
-impl ProvisionFailureNetwork {
-    fn error(operation: &str) -> VethProvisionError {
-        VethProvisionError::SysctlSetFailed {
-            key: "net.ipv4.ip_forward".to_owned(),
-            value: "1".to_owned(),
-            path: format!("/injected/post-assignment/{operation}"),
-            source: std::io::Error::other(format!("injected {operation} failure")),
-        }
-    }
-}
-
-impl WorkloadNetworkProvisioner for ProvisionFailureNetwork {
-    fn provision(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
-        self.trace.lock().push("provision");
-        Err(Self::error("provision"))
-    }
-
-    fn teardown(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
-        self.trace.lock().push("teardown");
-        if self.teardown_fails { Err(Self::error("teardown")) } else { Ok(()) }
-    }
-}
-
-struct ProvisionFailureResult {
-    result: Result<(), ShimError>,
-    row: Option<AllocStatusRow>,
-    slot_held: bool,
-    slot_released_at_failed_write: bool,
-    driver_starts: usize,
-    trace: Vec<&'static str>,
-}
-
-#[allow(
-    clippy::too_many_lines,
-    reason = "the accepted C3 composition needs all real action-shim ports to observe one post-assignment failure"
-)]
-async fn drive_post_assignment_provision_failure(
-    teardown_fails: bool,
-    failed_write: bool,
-    exhaust_slots: bool,
-) -> ProvisionFailureResult {
-    let tmp = TempDir::new().expect("tempdir");
-    let store: Arc<dyn IntentStore> = Arc::new(
-        LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open intent store"),
-    );
-    let inner =
-        Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("node id"), 0));
-    let net_slots = Arc::new(NetSlotAllocator::new());
-    let trace = Arc::new(parking_lot::Mutex::new(Vec::new()));
-    let slot_released_at_failed_write = Arc::new(AtomicBool::new(false));
-    let (pending, _entered) = PendingTerminalObservationStore::new(
-        Arc::clone(&inner),
-        alloc_id(),
-        if failed_write { TerminalWriteOutcome::Failed } else { TerminalWriteOutcome::Accepted },
-    );
-    let observed_slots = Arc::clone(&net_slots);
-    let observed_release = Arc::clone(&slot_released_at_failed_write);
-    let observed_alloc = alloc_id();
-    let pending = pending.with_write_trace(Arc::clone(&trace)).with_write_hook(move || {
-        observed_release
-            .store(!observed_slots.snapshot().contains_key(&observed_alloc), Ordering::SeqCst);
-    });
-    // The decorator still records the write at the actual driven-port
-    // boundary, but this table does not need to suspend dispatch there.
-    pending.resolve();
-
-    let driver_starts = Arc::new(AtomicUsize::new(0));
-    let driver: Arc<dyn Driver> = Arc::new(ScriptedDriver {
-        outcome: StartOutcome::Accept,
-        driver_type: DriverType::Vm,
-        terminal_calls: Arc::new(AtomicUsize::new(0)),
-        start_calls: Arc::clone(&driver_starts),
-        stop_calls: Arc::new(AtomicUsize::new(0)),
-        stop_failures_remaining: Arc::new(AtomicUsize::new(0)),
-    });
-    let drivers = {
-        let mut registry = overdrive_core::traits::driver::DriverRegistry::new();
-        registry.insert(driver);
-        registry
-    };
-    let alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::default();
-    let allocator = Arc::new(tokio::sync::Mutex::new(PersistentServiceVipAllocator::new(
-        VipRange::default(),
-        Arc::clone(&store),
-    )));
-    if exhaust_slots {
-        for slot in 0..=NET_SLOT_MAX {
-            let holder = format!("post-assignment-slot-holder-{slot}");
-            net_slots
-                .assign(AllocationId::new(&holder).expect("valid held allocation id"))
-                .expect("each held allocation takes one distinct slot");
-        }
-    }
-
-    let action = Action::StartAllocation {
-        alloc_id: alloc_id(),
-        workload_id: workload_id(),
-        node_id: node_id(),
-        spec: vm_spec(),
-        kind: WorkloadKind::Service,
-    };
-    let network = ProvisionFailureNetwork { trace: Arc::clone(&trace), teardown_fails };
-    let (lifecycle_tx, _lifecycle_rx) = tokio::sync::broadcast::channel(16);
-    let now = Instant::now();
-    let tick = TickContext {
-        now,
-        now_unix: UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_100)),
-        tick: 1,
-        deadline: now + Duration::from_secs(2),
-    };
-
-    let mtls_worker_0501_0 = crate::acceptance::serve_ports::worker();
-    let result = dispatch_with_network_provisioner(
-        vec![action],
-        &drivers,
-        &alloc_drivers,
-        &pending,
-        &overdrive_sim::adapters::dataplane::SimDataplane::new(),
-        &overdrive_sim::adapters::ca::SimCa::new(Arc::new(
-            overdrive_sim::adapters::entropy::SimEntropy::new(0),
-        )),
-        &overdrive_sim::adapters::clock::SimClock::new(),
-        &overdrive_control_plane::identity_mgr::IdentityMgr::new(None),
-        &overdrive_control_plane::GatewayIdentityActionComposition::disabled(),
-        &lifecycle_tx,
-        &tick,
-        &NodeId::new("writer-1").expect("writer node"),
-        allocator,
-        &parking_lot::Mutex::new(overdrive_core::eval_broker::EvaluationBroker::new()),
-        None,
-        &mtls_worker_0501_0,
-        net_slots.as_ref(),
-        &network,
-        &overdrive_sim::adapters::vm_host_state::SimVmHostState::new(),
-    )
-    .await;
-
-    ProvisionFailureResult {
-        result,
-        row: inner.alloc_status_row(&alloc_id()).await.expect("read allocation row"),
-        slot_held: net_slots.snapshot().contains_key(&alloc_id()),
-        slot_released_at_failed_write: slot_released_at_failed_write.load(Ordering::SeqCst),
-        driver_starts: driver_starts.load(Ordering::SeqCst),
-        trace: trace.lock().clone(),
-    }
+fn owner_count(owner: &SimSharedGuestNetworkOwner, op: GuestNetworkOperation) -> usize {
+    owner.calls().iter().filter(|call| **call == op).count()
 }
 
 fn alloc_id() -> AllocationId {
@@ -399,24 +207,15 @@ struct RejectedStartResult {
     dispatches: Vec<Result<(), ShimError>>,
     row: AllocStatusRow,
     occurrence: AllocLifecycleOccurrenceRow,
-    slot_held: bool,
     teardown_attempts: usize,
     teardown_completions: usize,
     terminal_calls: usize,
 }
 
-#[allow(
-    clippy::too_many_lines,
-    reason = "the fresh-start composition returns one complete observation, occurrence, release, and network-cleanup result"
-)]
 async fn drive_rejected_start(
-    network: &CountingNetworkProvisioner,
+    fail_first_teardown: bool,
     dispatch_count: usize,
 ) -> RejectedStartResult {
-    let tmp = TempDir::new().expect("tempdir");
-    let store: Arc<dyn IntentStore> = Arc::new(
-        LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open intent store"),
-    );
     let obs = Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("node id"), 0));
     let terminal_calls = Arc::new(AtomicUsize::new(0));
     let driver: Arc<dyn Driver> = Arc::new(ScriptedDriver {
@@ -427,18 +226,8 @@ async fn drive_rejected_start(
         stop_calls: Arc::new(AtomicUsize::new(0)),
         stop_failures_remaining: Arc::new(AtomicUsize::new(0)),
     });
-    let drivers = {
-        let mut registry = overdrive_core::traits::driver::DriverRegistry::new();
-        registry.insert(driver);
-        registry
-    };
-    let alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::default();
-    let allocator = Arc::new(tokio::sync::Mutex::new(PersistentServiceVipAllocator::new(
-        VipRange::default(),
-        Arc::clone(&store),
-    )));
-    let net_slots = NetSlotAllocator::new();
-    let (lifecycle_tx, _lifecycle_rx) = tokio::sync::broadcast::channel(16);
+    let owner = Arc::new(SimSharedGuestNetworkOwner::default());
+    let fixture = vm_fixture(driver, Arc::clone(&obs) as Arc<dyn ObservationStore>, &owner).await;
     let now = Instant::now();
     let tick = TickContext {
         now,
@@ -454,34 +243,10 @@ async fn drive_rejected_start(
         kind: WorkloadKind::Service,
     };
     let mut dispatches = Vec::with_capacity(dispatch_count);
-    let mtls_worker_0501_1 = crate::acceptance::serve_ports::worker();
-    for _ in 0..dispatch_count {
-        dispatches.push(
-            dispatch_with_network_provisioner(
-                vec![action.clone()],
-                &drivers,
-                &alloc_drivers,
-                obs.as_ref(),
-                &overdrive_sim::adapters::dataplane::SimDataplane::new(),
-                &overdrive_sim::adapters::ca::SimCa::new(Arc::new(
-                    overdrive_sim::adapters::entropy::SimEntropy::new(0),
-                )),
-                &overdrive_sim::adapters::clock::SimClock::new(),
-                &overdrive_control_plane::identity_mgr::IdentityMgr::new(None),
-                &overdrive_control_plane::GatewayIdentityActionComposition::disabled(),
-                &lifecycle_tx,
-                &tick,
-                &NodeId::new("writer-1").expect("writer node"),
-                Arc::clone(&allocator),
-                &parking_lot::Mutex::new(overdrive_core::eval_broker::EvaluationBroker::new()),
-                None,
-                &mtls_worker_0501_1,
-                &net_slots,
-                network,
-                &overdrive_sim::adapters::vm_host_state::SimVmHostState::new(),
-            )
-            .await,
-        );
+    for attempt in 0..dispatch_count {
+        // Only the first teardown fails when scripted to; replay retries.
+        owner.script_teardown_failure(fail_first_teardown && attempt == 0);
+        dispatches.push(fixture.dispatch(vec![action.clone()], &tick).await);
     }
     let row = obs
         .alloc_status_row(&alloc_id())
@@ -496,13 +261,13 @@ async fn drive_rejected_start(
         .last()
         .expect("the Failed transition has an occurrence");
 
+    let teardown_attempts = owner_count(&owner, GuestNetworkOperation::PairAbort);
     RejectedStartResult {
         dispatches,
         row,
         occurrence,
-        slot_held: net_slots.snapshot().contains_key(&alloc_id()),
-        teardown_attempts: network.attempts.load(Ordering::SeqCst),
-        teardown_completions: network.teardowns.load(Ordering::SeqCst),
+        teardown_attempts,
+        teardown_completions: teardown_attempts - usize::from(fail_first_teardown),
         terminal_calls: terminal_calls.load(Ordering::SeqCst),
     }
 }
@@ -510,8 +275,7 @@ async fn drive_rejected_start(
 /// CONTRACT_SHAPE: bounded-change (typed rejection persists Failed before release).
 #[tokio::test]
 async fn driver_rejected_start_persists_failed_occurrence_before_release() {
-    let network = CountingNetworkProvisioner::succeed();
-    let mut outcome = drive_rejected_start(&network, 1).await;
+    let mut outcome = drive_rejected_start(false, 1).await;
 
     outcome
         .dispatches
@@ -524,7 +288,6 @@ async fn driver_rejected_start_persists_failed_occurrence_before_release() {
     assert_eq!(outcome.occurrence.from, AllocLifecyclePredecessor::Absent);
     assert_eq!(outcome.occurrence.source, TransitionSource::Driver(DriverType::Vm));
     assert_eq!(outcome.terminal_calls, 1, "supervision releases only after Failed is durable");
-    assert!(!outcome.slot_held);
     assert_eq!(outcome.teardown_attempts, 1);
     assert_eq!(outcome.teardown_completions, 1);
 }
@@ -532,8 +295,7 @@ async fn driver_rejected_start_persists_failed_occurrence_before_release() {
 /// CONTRACT_SHAPE: bounded-change (cleanup replay cannot be suppressed by duplicate ownership).
 #[tokio::test]
 async fn rejected_start_teardown_failure_replays_after_failed_closure() {
-    let network = CountingNetworkProvisioner::fail_first_teardown();
-    let outcome = drive_rejected_start(&network, 2).await;
+    let outcome = drive_rejected_start(true, 2).await;
 
     assert!(
         outcome.dispatches[0].is_err(),
@@ -554,7 +316,6 @@ async fn rejected_start_teardown_failure_replays_after_failed_closure() {
         outcome.terminal_calls, 2,
         "each rejected start releases after the durable boundary"
     );
-    assert!(!outcome.slot_held, "replay releases the retained structural-network slot");
     assert_eq!(outcome.teardown_attempts, 2);
     assert_eq!(outcome.teardown_completions, 1);
 }
@@ -593,10 +354,6 @@ fn seeded_failed_row(
 /// Dispatch `action` against a store seeded with `seed`, and return the
 /// LWW-winner row afterwards.
 async fn dispatch_against_seed(seed: AllocStatusRow, action: Action) -> AllocStatusRow {
-    let tmp = TempDir::new().expect("tempdir");
-    let store_path = tmp.path().join("intent.redb");
-    let store: Arc<dyn IntentStore> =
-        Arc::new(LocalIntentStore::open(&store_path).expect("open intent store"));
     let obs = Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("node id"), 0));
 
     obs.write_alloc_lifecycle(
@@ -606,7 +363,12 @@ async fn dispatch_against_seed(seed: AllocStatusRow, action: Action) -> AllocSta
     .await
     .expect("seed prior row");
 
-    dispatch_with_driver(obs.as_ref(), store, action, StartOutcome::Reject).await;
+    dispatch_with_driver(
+        Arc::clone(&obs) as Arc<dyn ObservationStore>,
+        action,
+        StartOutcome::Reject,
+    )
+    .await;
 
     obs.alloc_status_row(&alloc_id())
         .await
@@ -615,13 +377,10 @@ async fn dispatch_against_seed(seed: AllocStatusRow, action: Action) -> AllocSta
 }
 
 async fn dispatch_with_driver(
-    obs: &dyn ObservationStore,
-    store: Arc<dyn IntentStore>,
+    obs: Arc<dyn ObservationStore>,
     action: Action,
     outcome: StartOutcome,
 ) {
-    let dataplane: Arc<dyn overdrive_core::traits::dataplane::Dataplane> =
-        Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new());
     let driver: Arc<dyn Driver> = Arc::new(ScriptedDriver {
         outcome,
         driver_type: DriverType::Vm,
@@ -630,20 +389,8 @@ async fn dispatch_with_driver(
         stop_calls: Arc::new(AtomicUsize::new(0)),
         stop_failures_remaining: Arc::new(AtomicUsize::new(0)),
     });
-    let drivers: Arc<overdrive_core::traits::driver::DriverRegistry> = {
-        let mut r = overdrive_core::traits::driver::DriverRegistry::new();
-        r.insert(Arc::clone(&driver));
-        Arc::new(r)
-    };
-    let alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::default();
-    let (lifecycle_tx, _lifecycle_rx) = tokio::sync::broadcast::channel(16);
-    let writer_node = NodeId::new("writer-1").expect("NodeId");
-    let allocator = Arc::new(tokio::sync::Mutex::new(PersistentServiceVipAllocator::new(
-        VipRange::default(),
-        Arc::clone(&store),
-    )));
-    let net_slot_allocator = NetSlotAllocator::new();
-    let test_broker = parking_lot::Mutex::new(overdrive_core::eval_broker::EvaluationBroker::new());
+    let owner = Arc::new(SimSharedGuestNetworkOwner::default());
+    let fixture = vm_fixture(driver, obs, &owner).await;
 
     let now = Instant::now();
     let tick = TickContext {
@@ -653,31 +400,7 @@ async fn dispatch_with_driver(
         deadline: now + Duration::from_secs(1),
     };
 
-    let mtls_worker_0501_2 = crate::acceptance::serve_ports::worker();
-    dispatch(
-        vec![action],
-        drivers.as_ref(),
-        &alloc_drivers,
-        obs,
-        dataplane.as_ref(),
-        &overdrive_sim::adapters::ca::SimCa::new(Arc::new(
-            overdrive_sim::adapters::entropy::SimEntropy::new(0),
-        )),
-        &overdrive_sim::adapters::clock::SimClock::new(),
-        &overdrive_control_plane::identity_mgr::IdentityMgr::new(None),
-        &overdrive_control_plane::GatewayIdentityActionComposition::disabled(),
-        &lifecycle_tx,
-        &tick,
-        &writer_node,
-        Arc::clone(&allocator),
-        &test_broker,
-        None,
-        &mtls_worker_0501_2,
-        &net_slot_allocator,
-        &overdrive_sim::adapters::vm_host_state::SimVmHostState::new(),
-    )
-    .await
-    .expect("dispatch must succeed");
+    fixture.dispatch(vec![action], &tick).await.expect("dispatch must succeed");
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -731,16 +454,6 @@ impl PendingTerminalObservationStore {
 
     fn resolve(&self) {
         self.resume.add_permits(1);
-    }
-
-    fn with_write_trace(mut self, trace: Arc<parking_lot::Mutex<Vec<&'static str>>>) -> Self {
-        self.write_trace = Some(trace);
-        self
-    }
-
-    fn with_write_hook(mut self, hook: impl Fn() + Send + Sync + 'static) -> Self {
-        self.write_hook = Some(Arc::new(hook));
-        self
     }
 
     fn terminal_proposal_count(&self) -> usize {
@@ -1078,10 +791,6 @@ impl TerminalActionArm {
     reason = "the production dispatch must remain live while the test inspects the pending compound-write ownership fence"
 )]
 async fn assert_terminal_write_partition(arm: TerminalActionArm, outcome: TerminalWriteOutcome) {
-    let tmp = TempDir::new().expect("tempdir");
-    let store: Arc<dyn IntentStore> = Arc::new(
-        LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open intent store"),
-    );
     let alloc = alloc_id();
     let mut prior = seeded_failed_row(7, 0, None);
     if matches!(arm, TerminalActionArm::StopAllocation) {
@@ -1107,29 +816,13 @@ async fn assert_terminal_write_partition(arm: TerminalActionArm, outcome: Termin
 
     let driver = Arc::new(TerminalFenceDriver::holding(&alloc));
     let driver_port: Arc<dyn Driver> = driver.clone();
-    let drivers = {
-        let mut registry = overdrive_core::traits::driver::DriverRegistry::new();
-        registry.insert(driver_port);
-        registry
-    };
-    let alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::default();
-    alloc_drivers.lock().insert(alloc.clone(), DriverType::Vm);
+    let owner = Arc::new(SimSharedGuestNetworkOwner::default());
+    let fixture =
+        vm_fixture(driver_port, Arc::clone(&pending_store) as Arc<dyn ObservationStore>, &owner)
+            .await;
+    fixture.state.alloc_drivers.lock().insert(alloc.clone(), DriverType::Vm);
+    let mut lifecycle_rx = fixture.state.lifecycle_events.subscribe();
 
-    let dataplane = overdrive_sim::adapters::dataplane::SimDataplane::new();
-    let ca = overdrive_sim::adapters::ca::SimCa::new(Arc::new(
-        overdrive_sim::adapters::entropy::SimEntropy::new(0),
-    ));
-    let clock = overdrive_sim::adapters::clock::SimClock::new();
-    let identity = overdrive_control_plane::identity_mgr::IdentityMgr::new(None);
-    let (lifecycle_tx, mut lifecycle_rx) = tokio::sync::broadcast::channel(16);
-    let writer_node = NodeId::new("writer-1").expect("writer node");
-    let allocator = Arc::new(tokio::sync::Mutex::new(PersistentServiceVipAllocator::new(
-        VipRange::default(),
-        Arc::clone(&store),
-    )));
-    let broker = parking_lot::Mutex::new(overdrive_core::eval_broker::EvaluationBroker::new());
-    let net_slots = NetSlotAllocator::new();
-    let host_state = overdrive_sim::adapters::vm_host_state::SimVmHostState::new();
     let now = Instant::now();
     let tick = TickContext {
         now,
@@ -1146,28 +839,7 @@ async fn assert_terminal_write_partition(arm: TerminalActionArm, outcome: Termin
         deadline: now + Duration::from_secs(2),
     };
 
-    let gateway_identity = overdrive_control_plane::GatewayIdentityActionComposition::disabled();
-    let mtls_worker_0501_3 = crate::acceptance::serve_ports::worker();
-    let dispatch = dispatch(
-        vec![arm.action(alloc.clone())],
-        &drivers,
-        &alloc_drivers,
-        pending_store.as_ref(),
-        &dataplane,
-        &ca,
-        &clock,
-        &identity,
-        &gateway_identity,
-        &lifecycle_tx,
-        &tick,
-        &writer_node,
-        allocator,
-        &broker,
-        None,
-        &mtls_worker_0501_3,
-        &net_slots,
-        &host_state,
-    );
+    let dispatch = fixture.dispatch(vec![arm.action(alloc.clone())], &tick);
     tokio::pin!(dispatch);
 
     let bypasses_terminal_write = matches!(
@@ -1298,7 +970,7 @@ async fn assert_terminal_write_partition(arm: TerminalActionArm, outcome: Termin
         "only an accepted Stop terminal proposal broadcasts an occurrence",
     );
 
-    let route = alloc_drivers.lock().get(&alloc).copied();
+    let route = fixture.state.alloc_drivers.lock().get(&alloc).copied();
     match outcome {
         TerminalWriteOutcome::Accepted
         | TerminalWriteOutcome::RejectedByConcurrentExit
@@ -1349,10 +1021,6 @@ async fn stop_allocation_retries_after_equal_timestamp_exit_wins() {
     reason = "the production stop dispatch must remain live while the test deterministically authors the exit-observer winner"
 )]
 async fn stop_allocation_rebases_terminal_write_on_exit_observer_winner() {
-    let tmp = TempDir::new().expect("tempdir");
-    let store: Arc<dyn IntentStore> = Arc::new(
-        LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open intent store"),
-    );
     let alloc = alloc_id();
     let mut running = seeded_failed_row(7, 0, None);
     running.kind = WorkloadKind::Job;
@@ -1368,29 +1036,10 @@ async fn stop_allocation_rebases_terminal_write_on_exit_observer_winner() {
     let (driver, stop_entered) = TerminalFenceDriver::holding_with_blocked_stop(&alloc);
     let driver = Arc::new(driver);
     let driver_port: Arc<dyn Driver> = driver.clone();
-    let drivers = {
-        let mut registry = overdrive_core::traits::driver::DriverRegistry::new();
-        registry.insert(driver_port);
-        registry
-    };
-    let alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::default();
-    alloc_drivers.lock().insert(alloc.clone(), DriverType::Vm);
-
-    let dataplane = overdrive_sim::adapters::dataplane::SimDataplane::new();
-    let ca = overdrive_sim::adapters::ca::SimCa::new(Arc::new(
-        overdrive_sim::adapters::entropy::SimEntropy::new(0),
-    ));
-    let clock = overdrive_sim::adapters::clock::SimClock::new();
-    let identity = overdrive_control_plane::identity_mgr::IdentityMgr::new(None);
-    let (lifecycle_tx, _lifecycle_rx) = tokio::sync::broadcast::channel(16);
-    let writer_node = NodeId::new("writer-1").expect("writer node");
-    let allocator = Arc::new(tokio::sync::Mutex::new(PersistentServiceVipAllocator::new(
-        VipRange::default(),
-        Arc::clone(&store),
-    )));
-    let broker = parking_lot::Mutex::new(overdrive_core::eval_broker::EvaluationBroker::new());
-    let net_slots = NetSlotAllocator::new();
-    let host_state = overdrive_sim::adapters::vm_host_state::SimVmHostState::new();
+    let owner = Arc::new(SimSharedGuestNetworkOwner::default());
+    let fixture =
+        vm_fixture(driver_port, Arc::clone(&obs) as Arc<dyn ObservationStore>, &owner).await;
+    fixture.state.alloc_drivers.lock().insert(alloc.clone(), DriverType::Vm);
     let now = Instant::now();
     let tick = TickContext {
         now,
@@ -1402,27 +1051,9 @@ async fn stop_allocation_rebases_terminal_write_on_exit_observer_winner() {
         by: overdrive_core::transition_reason::StoppedBy::Operator,
     });
 
-    let gateway_identity = overdrive_control_plane::GatewayIdentityActionComposition::disabled();
-    let mtls_worker_0501_4 = crate::acceptance::serve_ports::worker();
-    let dispatch = dispatch(
+    let dispatch = fixture.dispatch(
         vec![Action::StopAllocation { alloc_id: alloc.clone(), terminal: terminal.clone() }],
-        &drivers,
-        &alloc_drivers,
-        obs.as_ref(),
-        &dataplane,
-        &ca,
-        &clock,
-        &identity,
-        &gateway_identity,
-        &lifecycle_tx,
         &tick,
-        &writer_node,
-        allocator,
-        &broker,
-        None,
-        &mtls_worker_0501_4,
-        &net_slots,
-        &host_state,
     );
     tokio::pin!(dispatch);
 
@@ -1607,15 +1238,7 @@ async fn same_job_finalization_is_terminal_and_count_preserving() {
     let terminal = Some(TerminalCondition::Failed { exit_code: Some(78) });
     let action = Action::FinalizeFailed { alloc_id: alloc_id(), terminal: terminal.clone() };
 
-    let tmp = TempDir::new().expect("tempdir");
-    let store: Arc<dyn IntentStore> = Arc::new(
-        LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open intent store"),
-    );
     let obs = Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("node id"), 0));
-    obs.write_alloc_lifecycle(seed.clone(), TransitionSource::Reconciler)
-        .await
-        .expect("seed the pre-final row");
-
     let terminal_calls = Arc::new(AtomicUsize::new(0));
     let driver: Arc<dyn Driver> = Arc::new(ScriptedDriver {
         outcome: StartOutcome::Accept,
@@ -1625,21 +1248,8 @@ async fn same_job_finalization_is_terminal_and_count_preserving() {
         stop_calls: Arc::new(AtomicUsize::new(0)),
         stop_failures_remaining: Arc::new(AtomicUsize::new(0)),
     });
-    let drivers = {
-        let mut registry = overdrive_core::traits::driver::DriverRegistry::new();
-        registry.insert(driver);
-        registry
-    };
-    let alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::default();
-    alloc_drivers.lock().insert(alloc_id(), DriverType::Vm);
-    let net_slots = NetSlotAllocator::new();
-    net_slots.assign(alloc_id()).expect("pre-final allocation owns one network slot");
-    let network = CountingNetworkProvisioner::succeed();
-    let (lifecycle_tx, mut lifecycle_rx) = tokio::sync::broadcast::channel(16);
-    let allocator = Arc::new(tokio::sync::Mutex::new(PersistentServiceVipAllocator::new(
-        VipRange::default(),
-        Arc::clone(&store),
-    )));
+    let owner = Arc::new(SimSharedGuestNetworkOwner::default());
+    let fixture = vm_fixture(driver, Arc::clone(&obs) as Arc<dyn ObservationStore>, &owner).await;
     let now = Instant::now();
     let tick = TickContext {
         now,
@@ -1647,34 +1257,38 @@ async fn same_job_finalization_is_terminal_and_count_preserving() {
         tick: 0,
         deadline: now + Duration::from_secs(1),
     };
-
-    for _ in 0..2 {
-        let mtls_worker_0501_5 = crate::acceptance::serve_ports::worker();
-        dispatch_with_network_provisioner(
-            vec![action.clone()],
-            &drivers,
-            &alloc_drivers,
-            obs.as_ref(),
-            &overdrive_sim::adapters::dataplane::SimDataplane::new(),
-            &overdrive_sim::adapters::ca::SimCa::new(Arc::new(
-                overdrive_sim::adapters::entropy::SimEntropy::new(0),
-            )),
-            &overdrive_sim::adapters::clock::SimClock::new(),
-            &overdrive_control_plane::identity_mgr::IdentityMgr::new(None),
-            &overdrive_control_plane::GatewayIdentityActionComposition::disabled(),
-            &lifecycle_tx,
+    // The pre-final allocation owns one guest-network lease: it is taken the
+    // production way, by a dispatched start, and the pre-final row then
+    // replaces the Running row that start authored.
+    fixture
+        .dispatch(
+            vec![Action::StartAllocation {
+                alloc_id: alloc_id(),
+                workload_id: workload_id(),
+                node_id: node_id(),
+                spec: vm_spec(),
+                kind: WorkloadKind::Service,
+            }],
             &tick,
-            &NodeId::new("writer-1").expect("writer node"),
-            Arc::clone(&allocator),
-            &parking_lot::Mutex::new(overdrive_core::eval_broker::EvaluationBroker::new()),
-            None,
-            &mtls_worker_0501_5,
-            &net_slots,
-            &network,
-            &overdrive_sim::adapters::vm_host_state::SimVmHostState::new(),
         )
         .await
-        .expect("first finalization commits and replay is an exact no-op");
+        .expect("the pre-final allocation starts");
+    obs.write_alloc_lifecycle(seed.clone(), TransitionSource::Reconciler)
+        .await
+        .expect("seed the pre-final row")
+        .expect("the pre-final row dominates the start's Running row");
+    let occurrences_through_seed = obs
+        .alloc_lifecycle_occurrences(&alloc_id())
+        .await
+        .expect("read occurrences through the seed")
+        .len();
+    let mut lifecycle_rx = fixture.state.lifecycle_events.subscribe();
+
+    for _ in 0..2 {
+        fixture
+            .dispatch(vec![action.clone()], &tick)
+            .await
+            .expect("first finalization commits and replay is an exact no-op");
     }
 
     let row = obs
@@ -1686,15 +1300,17 @@ async fn same_job_finalization_is_terminal_and_count_preserving() {
     assert_eq!(row.terminal, terminal);
     assert_eq!(row.restart_count, seed.restart_count, "finalization never counts a restart");
     assert_eq!(row.updated_at.counter, seed.updated_at.counter + 1);
-    assert_eq!(network.attempts.load(Ordering::SeqCst), 1);
-    assert_eq!(network.teardowns.load(Ordering::SeqCst), 1);
+    assert_eq!(owner_count(&owner, GuestNetworkOperation::PairAbort), 1);
     assert_eq!(terminal_calls.load(Ordering::SeqCst), 2, "terminal hook and release run once");
-    assert!(!net_slots.snapshot().contains_key(&alloc_id()));
     let occurrences = obs
         .alloc_lifecycle_occurrences(&alloc_id())
         .await
         .expect("read compound lifecycle occurrences");
-    assert_eq!(occurrences.len(), 2, "seed plus exactly one final occurrence");
+    assert_eq!(
+        occurrences.len(),
+        occurrences_through_seed + 1,
+        "seed plus exactly one final occurrence"
+    );
     let event = lifecycle_rx.try_recv().expect("first finalization broadcasts once");
     assert_eq!(event.alloc_id, alloc_id());
     assert!(matches!(
@@ -1874,97 +1490,4 @@ async fn stop_allocation_second_lww_rejection_completes_without_event() {
     ] {
         assert_terminal_write_partition(TerminalActionArm::StopAllocation, outcome).await;
     }
-}
-
-/// S-GTI-BTR-02 / `@contract-shape:bounded-change` `@in-memory` `@error` —
-/// every provision error after successful slot assignment runs the existing
-/// allocation-keyed structural teardown before the Failed disposition.
-///
-/// This preserved test drives `StartAllocation` through
-/// [`dispatch_with_network_provisioner`]. Corrective GH #284 replacement
-/// provisioning is separately specified by the pending driver-neutral Sim
-/// contract; this active test sends no replacement action. A test-owned
-/// [`WorkloadNetworkProvisioner`] records `provision -> teardown` and fails
-/// provisioning after the production allocator has assigned a slot.
-/// Successful teardown must release that slot; teardown failure must retain
-/// it. In both partitions the durable row keeps the original
-/// `WorkloadNetnsProvisionFailed` cause. A store-write failure keeps its
-/// existing precedence over the captured teardown error. Slot exhaustion is
-/// the pre-assignment complement and must make no teardown call.
-/// CONTRACT_SHAPE: bounded-change.
-#[tokio::test]
-async fn post_assignment_provision_failure_tears_down_before_slot_release() {
-    {
-        let outcome = drive_post_assignment_provision_failure(false, false, false).await;
-
-        outcome.result.expect("successful teardown and Failed write resolve the action");
-        assert_eq!(
-            outcome.trace,
-            ["provision", "teardown", "failed-write"],
-            "the Failed disposition commits only after the assigned slot's teardown"
-        );
-        assert!(!outcome.slot_held, "successful teardown releases the assigned slot");
-        assert!(
-            outcome.slot_released_at_failed_write,
-            "the slot is absent at the Failed disposition boundary"
-        );
-        assert_eq!(outcome.driver_starts, 0, "the provision seam precedes driver start");
-        let row = outcome.row.expect("the original provision cause is durably recorded");
-        assert_eq!(row.state, AllocState::Failed);
-        assert!(matches!(
-            row.reason,
-            Some(TransitionReason::WorkloadNetnsProvisionFailed { ref stage, .. })
-                if stage == "netns_provision"
-        ));
-    }
-
-    {
-        let outcome = drive_post_assignment_provision_failure(true, false, false).await;
-
-        assert!(matches!(outcome.result, Err(ShimError::WorkloadNetnsProvision(_))));
-        assert_eq!(outcome.trace, ["provision", "teardown", "failed-write"]);
-        assert!(outcome.slot_held, "a failed teardown retains the assigned slot for recovery");
-        assert!(
-            !outcome.slot_released_at_failed_write,
-            "a failed teardown remains visibly held at the Failed disposition boundary"
-        );
-        let row = outcome.row.expect("the original provision cause is still durable");
-        assert!(matches!(
-            row.reason,
-            Some(TransitionReason::WorkloadNetnsProvisionFailed { ref stage, .. })
-                if stage == "netns_provision"
-        ));
-    }
-
-    let outcome = drive_post_assignment_provision_failure(true, true, false).await;
-    assert!(matches!(outcome.result, Err(ShimError::Observation(_))), "the store error wins");
-    assert_eq!(outcome.trace, ["provision", "teardown", "failed-write"]);
-    assert!(
-        outcome.slot_held,
-        "the failed teardown still retains its slot when recording also fails"
-    );
-    assert!(
-        !outcome.slot_released_at_failed_write,
-        "the failed teardown remains visibly held at the rejected write boundary"
-    );
-    assert!(outcome.row.is_none(), "the rejected Failed write leaves no fresh row");
-
-    let outcome = drive_post_assignment_provision_failure(false, false, true).await;
-    outcome.result.expect("pre-assignment exhaustion still writes the existing Failed disposition");
-    assert_eq!(
-        outcome.trace,
-        ["failed-write"],
-        "slot exhaustion never calls provision or teardown"
-    );
-    assert!(!outcome.slot_held, "the target allocation never acquired a slot");
-    assert!(
-        outcome.slot_released_at_failed_write,
-        "the pre-assignment complement is absent at its Failed disposition boundary"
-    );
-    let row = outcome.row.expect("slot exhaustion is durably classified");
-    assert!(matches!(
-        row.reason,
-        Some(TransitionReason::WorkloadNetnsProvisionFailed { ref stage, .. })
-            if stage == "net_slot_assign"
-    ));
 }

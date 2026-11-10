@@ -29,11 +29,10 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use overdrive_control_plane::action_shim::WorkloadNetworkProvisioner;
 use overdrive_control_plane::reconciler_runtime::{
-    ReconcilerRuntime, run_convergence_tick, run_convergence_tick_with_network_provisioner_for_test,
+    ReconcilerRuntime, run_convergence_tick,
+    run_convergence_tick_with_guest_network_provisioner_for_test,
 };
-use overdrive_control_plane::veth_provisioner::{VethProvisionError, WorkloadNetnsPlan};
 use overdrive_control_plane::{AppState, noop_heartbeat, workload_lifecycle};
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::{
@@ -53,22 +52,6 @@ use overdrive_sim::adapters::driver::SimDriver;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_store_local::LocalIntentStore;
 use tempfile::TempDir;
-
-/// The convergence-loop fixture uses only Sim adapters. Keep the production
-/// reconciliation/action path intact while substituting the privileged host
-/// netns/veth mutation port, so this acceptance test cannot collide with
-/// concurrently running native-kernel scenarios on the metal host.
-struct NoopNetworkProvisioner;
-
-impl WorkloadNetworkProvisioner for NoopNetworkProvisioner {
-    fn provision(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
-        Ok(())
-    }
-
-    fn teardown(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
-        Ok(())
-    }
-}
 
 /// Build an `AppState` whose runtime carries both production reconcilers
 /// (`noop-heartbeat` and `workload-lifecycle`) — matching the `run_server`
@@ -549,7 +532,8 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
 async fn stop_after_failed_alloc_drains_broker() {
     let tmp = TempDir::new().expect("tempdir");
     let clock = Arc::new(SimClock::new());
-    let network = NoopNetworkProvisioner;
+    let (seam_owner, seam_gate, _seam_supervisor) =
+        crate::acceptance::vm_dispatch::converged_owner_and_open_gate().await;
 
     // --- Build AppState. Reject starts so the action shim writes
     //     `AllocState::Failed` and the reconciler enters the
@@ -584,10 +568,11 @@ async fn stop_after_failed_alloc_drains_broker() {
         overdrive_control_plane::test_empty_listener_facts(),
         std::net::Ipv4Addr::LOCALHOST,
         crate::acceptance::serve_ports::worker(),
-        crate::acceptance::serve_ports::owner(),
-        crate::acceptance::serve_ports::exec_gate(),
+        seam_owner.clone(),
+        seam_gate.clone(),
         crate::acceptance::serve_ports::pool(),
     );
+    crate::acceptance::vm_dispatch::start_shared_mtls_owner(&state).await;
 
     // --- Preload IntentStore: one Job. The driver will reject its
     //     start, the action shim writes `AllocState::Failed`, the
@@ -660,14 +645,14 @@ async fn stop_after_failed_alloc_drains_broker() {
             )
         };
         for (eval, _) in pending {
-            run_convergence_tick_with_network_provisioner_for_test(
+            run_convergence_tick_with_guest_network_provisioner_for_test(
                 &state,
                 &eval.reconciler,
                 &eval.target,
                 now,
                 warm_up_ticks,
                 deadline,
-                &network,
+                seam_owner.as_ref(),
             )
             .await
             .expect("convergence tick succeeds");
@@ -737,14 +722,14 @@ async fn stop_after_failed_alloc_drains_broker() {
             )
         };
         for (eval, _) in pending {
-            run_convergence_tick_with_network_provisioner_for_test(
+            run_convergence_tick_with_guest_network_provisioner_for_test(
                 &state,
                 &eval.reconciler,
                 &eval.target,
                 now,
                 warm_up_ticks + tick_n,
                 deadline,
-                &network,
+                seam_owner.as_ref(),
             )
             .await
             .expect("convergence tick succeeds");
@@ -913,6 +898,7 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
         crate::acceptance::serve_ports::exec_gate(),
         crate::acceptance::serve_ports::pool(),
     );
+    crate::acceptance::vm_dispatch::start_shared_mtls_owner(&state).await;
 
     // --- Preload a Job that the SimDriver will reject — this drives
     //     the alloc into Failed and exercises the restart-with-backoff
@@ -1247,6 +1233,7 @@ async fn run_one_tick_with_seeded_view(restart_counts_value: u32) -> u64 {
         crate::acceptance::serve_ports::exec_gate(),
         crate::acceptance::serve_ports::pool(),
     );
+    crate::acceptance::vm_dispatch::start_shared_mtls_owner(&state).await;
 
     // Seed Job (intent) so hydrate_desired returns Some(job).
     let job = Job::from_submit(JobSpecInput {

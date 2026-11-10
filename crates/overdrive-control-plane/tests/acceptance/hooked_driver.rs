@@ -21,7 +21,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use overdrive_control_plane::veth_provisioner::{VethProvisionError, WorkloadNetnsPlan};
 use overdrive_core::guest_transport::GuestTransportAssignment;
 use overdrive_core::id::AllocationId;
 use overdrive_core::observation::ProbeRole;
@@ -238,20 +237,5 @@ impl Driver for HookedDriver {
 
     fn release_supervision(&self, alloc: &AllocationId) {
         self.sim.release_supervision(alloc);
-    }
-}
-
-/// The network provisioner stub: provisioning and teardown succeed without
-/// touching the host.
-#[derive(Debug, Default)]
-pub struct NoopNetworkProvisioner;
-
-impl overdrive_control_plane::action_shim::WorkloadNetworkProvisioner for NoopNetworkProvisioner {
-    fn provision(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
-        Ok(())
-    }
-
-    fn teardown(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
-        Ok(())
     }
 }

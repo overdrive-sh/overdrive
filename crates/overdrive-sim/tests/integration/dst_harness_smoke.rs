@@ -118,7 +118,6 @@ const EXPECTED_INVARIANTS: &[&str] = &[
     // observer-write-retry.md:64` left open.
     "exit-event-observable-outcome",
     "terminal-contention-converges",
-    "vm-provision-failure-cleans-network-and-reuses-slot",
     // workload-gc-absent-stale-allocs steps 01-03 + 01-04 — DST
     // scenarios covering the absent-intent workload GC arm and the
     // resubmit-after-GC race. Step 01-04 promoted

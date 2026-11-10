@@ -29,7 +29,7 @@
 //!
 //! Enters through TWO production driving ports composed together —
 //! `probe_runner_boot::compose_and_probe_runner_gate` (the same
-//! Earned-Trust gate `run_server` calls) and `action_shim::dispatch`
+//! Earned-Trust gate `run_server` calls) and the VM dispatch seam
 //! (the runtime's action driving port) — and asserts on the
 //! `ProbeRunner`'s own inspection surface (`active_alloc_count` /
 //! `is_role_live`). No test-only wiring stands in for a production call
@@ -52,9 +52,7 @@ use std::str::FromStr as _;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use overdrive_control_plane::action_shim::dispatch;
 use overdrive_control_plane::probe_runner_boot::compose_and_probe_runner_gate;
-use overdrive_control_plane::veth_provisioner::NetSlotAllocator;
 use overdrive_core::SpiffeId;
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::WorkloadKind;
@@ -65,20 +63,19 @@ use overdrive_core::reconcilers::{Action, TickContext};
 use overdrive_core::traits::driver::{
     AllocationSpec, Driver, DriverPayload, DriverType, Resources, VmPayload,
 };
-use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRow, LogicalTimestamp, ObservationStore,
 };
 use overdrive_core::transition_reason::{ProbeWitness, TerminalCondition, TransitionReason};
 use overdrive_core::vm::config::{Gid, HostArch, VmConfinement, VmmIdentity};
-use overdrive_dataplane::allocators::{PersistentServiceVipAllocator, VipRange};
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_sim::adapters::probers::{SimHttpProber, SimTcpProber};
-use overdrive_store_local::LocalIntentStore;
 use overdrive_worker::probe_runner::ProbeRunner;
 use overdrive_worker::{VmDriver, VmHostLayout};
 use tempfile::TempDir;
+
+use crate::acceptance::vm_dispatch::{VmDispatchFixture, VmDispatchPorts};
 
 /// A TCP descriptor at the given per-role array position (ADR-0080
 /// § D1 — `idx` is per-role, parser-assigned).
@@ -148,15 +145,13 @@ fn stable_terminal_startup_pass() -> TerminalCondition {
 /// observation store the shim writes through.
 struct Harness {
     driver: Arc<dyn Driver>,
-    // Single-entry registry over `driver` (ADR-0083 §D1, GH #42) +
-    // its per-boot routing index — constructed once in `harness()` and
-    // reused across every `dispatch_one` call so the index persists
-    // across a Start-then-terminal sequence within one test.
-    drivers: Arc<overdrive_core::traits::driver::DriverRegistry>,
-    alloc_drivers: overdrive_control_plane::action_shim::AllocDriverIndex,
+    // The VM dispatch composition over `driver`: its single-entry registry
+    // and per-boot routing index (`fixture.state.alloc_drivers`) persist
+    // across every `dispatch_one` call so the index survives a
+    // Start-then-terminal sequence within one test.
+    fixture: VmDispatchFixture,
     runner: Arc<ProbeRunner>,
     obs: Arc<dyn ObservationStore>,
-    intent: Arc<dyn IntentStore>,
     _tmp: TempDir,
 }
 
@@ -166,9 +161,6 @@ async fn harness() -> Harness {
         NodeId::new("stable-probe-test").expect("valid NodeId"),
         0,
     ));
-    let intent: Arc<dyn IntentStore> =
-        Arc::new(LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open intent"));
-
     let sim_clock = Arc::new(SimClock::new());
     let runner = compose_and_probe_runner_gate(
         // Empty prober queues → every attempt Passes. The probe tasks
@@ -218,13 +210,11 @@ async fn harness() -> Harness {
         beacon,
         Arc::new(overdrive_worker::GuestListenerBoard::new()),
     ));
-    let drivers: Arc<overdrive_core::traits::driver::DriverRegistry> = {
-        let mut r = overdrive_core::traits::driver::DriverRegistry::new();
-        r.insert(Arc::clone(&driver));
-        Arc::new(r)
-    };
-    let alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::default();
-    Harness { driver, drivers, alloc_drivers, runner, obs, intent, _tmp: tmp }
+    let mut ports = VmDispatchPorts::sim(Arc::clone(&driver));
+    ports.obs = Arc::clone(&obs);
+    ports.node_id = NodeId::new("writer-1").expect("NodeId");
+    let fixture = VmDispatchFixture::boot(ports).await;
+    Harness { driver, fixture, runner, obs, _tmp: tmp }
 }
 
 /// Seed the `Running` prior row the `FinalizeFailed` arm reads.
@@ -256,20 +246,9 @@ async fn seed_running_row(obs: &dyn ObservationStore, alloc: &AllocationId, node
     .expect("seed Running row");
 }
 
-/// Drive ONE action through the production `action_shim::dispatch`
+/// Drive ONE action through the production VM dispatch seam
 /// against the harness's composed driver.
 async fn dispatch_one(h: &Harness, action: Action) {
-    let dataplane: Arc<dyn overdrive_core::traits::dataplane::Dataplane> =
-        Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new());
-    let (lifecycle_tx, _lifecycle_rx) = tokio::sync::broadcast::channel(16);
-    let writer_node = NodeId::new("writer-1").expect("NodeId");
-    let allocator = Arc::new(tokio::sync::Mutex::new(PersistentServiceVipAllocator::new(
-        VipRange::default(),
-        Arc::clone(&h.intent),
-    )));
-    let net_slot_allocator = NetSlotAllocator::new();
-    let broker = parking_lot::Mutex::new(overdrive_core::eval_broker::EvaluationBroker::new());
-
     let now = Instant::now();
     let tick = TickContext {
         now,
@@ -278,31 +257,7 @@ async fn dispatch_one(h: &Harness, action: Action) {
         deadline: now + Duration::from_secs(1),
     };
 
-    let mtls_worker_0501_0 = crate::acceptance::serve_ports::worker();
-    dispatch(
-        vec![action],
-        h.drivers.as_ref(),
-        &h.alloc_drivers,
-        h.obs.as_ref(),
-        dataplane.as_ref(),
-        &overdrive_sim::adapters::ca::SimCa::new(Arc::new(
-            overdrive_sim::adapters::entropy::SimEntropy::new(0),
-        )),
-        &overdrive_sim::adapters::clock::SimClock::new(),
-        &overdrive_control_plane::identity_mgr::IdentityMgr::new(None),
-        &overdrive_control_plane::GatewayIdentityActionComposition::disabled(),
-        &lifecycle_tx,
-        &tick,
-        &writer_node,
-        Arc::clone(&allocator),
-        &broker,
-        None,
-        &mtls_worker_0501_0,
-        &net_slot_allocator,
-        &overdrive_sim::adapters::vm_host_state::SimVmHostState::new(),
-    )
-    .await
-    .expect("dispatch must succeed");
+    h.fixture.dispatch(vec![action], &tick).await.expect("dispatch must succeed");
 }
 
 /// ADR-0080 § D7 item 4, **startup-probe-Pass branch**
@@ -336,7 +291,7 @@ async fn stable_from_startup_pass_retires_startup_only_and_keeps_readiness_super
             tcp_descriptor(ProbeRole::Readiness, 0, 8080),
         ],
     ));
-    h.alloc_drivers.lock().insert(alloc.clone(), DriverType::Vm);
+    h.fixture.state.alloc_drivers.lock().insert(alloc.clone(), DriverType::Vm);
     assert_eq!(h.runner.active_alloc_count(), 1, "on_alloc_running registers the supervisor");
     assert!(h.runner.is_role_live(&alloc, ProbeRole::Startup), "startup supervised pre-Stable");
     assert!(h.runner.is_role_live(&alloc, ProbeRole::Readiness), "readiness supervised pre-Stable");
@@ -390,7 +345,7 @@ async fn stable_from_empty_startup_optout_keeps_readiness_supervised() {
 
     h.driver
         .on_alloc_running(&spec_with(&alloc, vec![tcp_descriptor(ProbeRole::Readiness, 0, 8080)]));
-    h.alloc_drivers.lock().insert(alloc.clone(), DriverType::Vm);
+    h.fixture.state.alloc_drivers.lock().insert(alloc.clone(), DriverType::Vm);
     assert_eq!(h.runner.active_alloc_count(), 1, "on_alloc_running registers the supervisor");
 
     seed_running_row(h.obs.as_ref(), &alloc, &node).await;
@@ -440,7 +395,7 @@ async fn genuine_terminal_still_stops_the_whole_supervisor() {
             tcp_descriptor(ProbeRole::Liveness, 0, 8080),
         ],
     ));
-    h.alloc_drivers.lock().insert(alloc.clone(), DriverType::Vm);
+    h.fixture.state.alloc_drivers.lock().insert(alloc.clone(), DriverType::Vm);
     assert_eq!(h.runner.active_alloc_count(), 1, "supervisor registered");
 
     seed_running_row(h.obs.as_ref(), &alloc, &node).await;
@@ -471,7 +426,7 @@ async fn stop_allocation_still_stops_the_whole_supervisor() {
 
     h.driver
         .on_alloc_running(&spec_with(&alloc, vec![tcp_descriptor(ProbeRole::Readiness, 0, 8080)]));
-    h.alloc_drivers.lock().insert(alloc.clone(), DriverType::Vm);
+    h.fixture.state.alloc_drivers.lock().insert(alloc.clone(), DriverType::Vm);
     assert_eq!(h.runner.active_alloc_count(), 1, "supervisor registered");
 
     seed_running_row(h.obs.as_ref(), &alloc, &node).await;

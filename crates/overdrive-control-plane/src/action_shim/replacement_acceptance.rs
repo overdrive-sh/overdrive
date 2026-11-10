@@ -22,14 +22,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
-use super::{
-    AllocDriverIndex, MtlsInterceptLifecycle, ShimError, WorkloadNetworkProvisioner,
-    dispatch_with_network_provisioner_and_guest,
-};
+use super::{AllocDriverIndex, MtlsInterceptLifecycle, ShimError, dispatch_with_guest_network};
 use crate::guest_network::{GuestAddressPool, SharedGuestNetworkOwner};
 use crate::identity_mgr::IdentityMgr;
 use crate::shared_network_test_ports::TestSharedOwner;
-use crate::veth_provisioner::{NetSlotAllocator, VethProvisionError, WorkloadNetnsPlan};
 use async_trait::async_trait;
 use overdrive_core::SpiffeId;
 use overdrive_core::aggregate::WorkloadKind;
@@ -84,8 +80,6 @@ enum TraceEvent {
     Stop(AllocationId),
     MtlsStart(AllocationId),
     MtlsStop(AllocationId),
-    Provision(String),
-    Teardown(String),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -237,25 +231,6 @@ impl Driver for RecordingDriver {
     }
 }
 
-/// Records every workload-netns provision and teardown. A VM allocation has
-/// no workload netns and never calls the provisioner (D-UP-15), so every
-/// recorded event for these VM-only cases is a defect the assertions name.
-#[derive(Default)]
-struct RecordingNetwork {
-    trace: Arc<Mutex<Vec<TraceEvent>>>,
-}
-
-/// D-UP-15: no VM allocation provisions or tears down a workload netns.
-fn assert_no_workload_netns(trace: &[TraceEvent]) {
-    assert!(
-        !trace
-            .iter()
-            .any(|event| matches!(event, TraceEvent::Provision(_) | TraceEvent::Teardown(_))),
-        "a VM allocation provisions and tears down no workload network namespace (D-UP-15): \
-         {trace:?}"
-    );
-}
-
 struct RecordingMtlsLifecycle {
     inner: Mutex<RecordingMtlsState>,
     trace: Arc<Mutex<Vec<TraceEvent>>>,
@@ -324,18 +299,6 @@ impl MtlsInterceptLifecycle for RecordingMtlsLifecycle {
         }
         state.allocations.remove(alloc_id);
         drop(state);
-        Ok(())
-    }
-}
-
-impl WorkloadNetworkProvisioner for RecordingNetwork {
-    fn provision(&self, workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
-        self.trace.lock().push(TraceEvent::Provision(workload.netns.as_str().to_owned()));
-        Ok(())
-    }
-
-    fn teardown(&self, workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
-        self.trace.lock().push(TraceEvent::Teardown(workload.netns.as_str().to_owned()));
         Ok(())
     }
 }
@@ -422,8 +385,6 @@ async fn dispatch_one(
     driver: Arc<RecordingDriver>,
     obs: &dyn ObservationStore,
     alloc_drivers: &AllocDriverIndex,
-    slots: &NetSlotAllocator,
-    network: &dyn WorkloadNetworkProvisioner,
     mtls_lifecycle: &dyn MtlsInterceptLifecycle,
 ) -> Result<(), ShimError> {
     let tmp = tempfile::tempdir().expect("temporary intent store");
@@ -460,7 +421,7 @@ async fn dispatch_one(
     );
     let gate = wiring.gate();
 
-    dispatch_with_network_provisioner_and_guest(
+    dispatch_with_guest_network(
         vec![action],
         &registry,
         alloc_drivers,
@@ -477,8 +438,6 @@ async fn dispatch_one(
         &Mutex::new(EvaluationBroker::new()),
         None,
         mtls_lifecycle,
-        slots,
-        network,
         Some((&guest_network, &guest_pool, Some(flow_ports))),
         Some(gate.as_ref()),
         &SimVmHostState::new(),
@@ -516,8 +475,6 @@ async fn successor_outcome_precedes_blocked_predecessor_cleanup_for_every_driver
         let driver = Arc::new(
             RecordingDriver::new(driver_type, predecessor.clone()).with_blocked_predecessor_stop(),
         );
-        let slots = NetSlotAllocator::new();
-        let network = RecordingNetwork { trace: Arc::clone(&driver.trace) };
         let mtls = RecordingMtlsLifecycle::new(Arc::clone(&driver.trace));
         mtls.start_alloc(&successor_spec(driver_type, &workload, &predecessor))
             .await
@@ -535,15 +492,8 @@ async fn successor_outcome_precedes_blocked_predecessor_cleanup_for_every_driver
         let stop_entered = driver.stop_entered.notified();
         tokio::pin!(start_entered);
         tokio::pin!(stop_entered);
-        let dispatch = dispatch_one(
-            action,
-            Arc::clone(&driver),
-            obs.as_ref(),
-            &alloc_drivers,
-            &slots,
-            &network,
-            &mtls,
-        );
+        let dispatch =
+            dispatch_one(action, Arc::clone(&driver), obs.as_ref(), &alloc_drivers, &mtls);
         tokio::pin!(dispatch);
 
         let mut stop_entered_seen = false;
@@ -610,7 +560,6 @@ async fn successor_outcome_precedes_blocked_predecessor_cleanup_for_every_driver
         assert!(!mtls_after.allocations.contains_key(&predecessor));
         assert_eq!(mtls_after.allocations.get(&successor), Some(&RecordingMtlsStateKind::Live));
         let trace = driver.trace.lock().clone();
-        assert_no_workload_netns(&trace);
         let start = trace
             .iter()
             .position(|event| event == &TraceEvent::Start(successor.clone()))
@@ -648,8 +597,6 @@ async fn successor_and_cleanup_outcomes_follow_the_ratified_precedence_table() {
                     configured_driver = configured_driver.with_failed_predecessor_stop();
                 }
                 let driver = Arc::new(configured_driver);
-                let slots = NetSlotAllocator::new();
-                let network = RecordingNetwork { trace: Arc::clone(&driver.trace) };
                 let mtls = RecordingMtlsLifecycle::new(Arc::clone(&driver.trace));
                 mtls.start_alloc(&successor_spec(driver_type, &workload, &predecessor))
                     .await
@@ -674,8 +621,6 @@ async fn successor_and_cleanup_outcomes_follow_the_ratified_precedence_table() {
                     Arc::clone(&driver),
                     obs.as_ref(),
                     &index,
-                    &slots,
-                    &network,
                     &mtls,
                 )
                 .await;
@@ -713,7 +658,6 @@ async fn successor_and_cleanup_outcomes_follow_the_ratified_precedence_table() {
                     .iter()
                     .position(|event| event == &TraceEvent::Stop(predecessor.clone()))
                     .expect("one exact predecessor driver cleanup attempt");
-                assert_no_workload_netns(&trace);
                 if start_behavior == StartBehavior::IoFailure {
                     assert!(
                         !trace.contains(&TraceEvent::Stop(successor.clone())),
@@ -966,8 +910,6 @@ async fn rejected_successor_publication_fully_unwinds_without_immediate_second_p
     let driver = Arc::new(RecordingDriver::new(DriverType::Vm, predecessor.clone()));
     let index = AllocDriverIndex::default();
     index.lock().insert(predecessor.clone(), DriverType::Vm);
-    let slots = NetSlotAllocator::new();
-    let network = RecordingNetwork { trace: Arc::clone(&driver.trace) };
     let mtls = RecordingMtlsLifecycle::new(Arc::clone(&driver.trace));
     mtls.start_alloc(&successor_spec(DriverType::Vm, &workload, &predecessor))
         .await
@@ -983,15 +925,12 @@ async fn rejected_successor_publication_fully_unwinds_without_immediate_second_p
         Arc::clone(&driver),
         &obs,
         &index,
-        &slots,
-        &network,
         &mtls,
     )
     .await
     .expect("a rejected Running proposal unwinds without a second proposal or action");
 
     let trace = driver.trace.lock().clone();
-    assert_no_workload_netns(&trace);
     let successor_start = trace
         .iter()
         .position(|event| event == &TraceEvent::Start(successor.clone()))

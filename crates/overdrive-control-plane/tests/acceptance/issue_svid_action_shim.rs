@@ -32,25 +32,18 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use overdrive_control_plane::action_shim::dispatch;
 use overdrive_control_plane::identity_mgr::IdentityMgr;
-use overdrive_control_plane::test_default_allocator;
 use overdrive_core::id::{AllocationId, CorrelationKey, NodeId};
 use overdrive_core::reconcilers::{Action, TickContext};
-use overdrive_core::traits::ca::Ca;
-use overdrive_core::traits::clock::Clock;
-use overdrive_core::traits::dataplane::Dataplane;
 use overdrive_core::traits::driver::{Driver, DriverType};
-use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{ObservationStore, ObservationStoreError};
 use overdrive_core::{SpiffeId, UnixInstant};
 use overdrive_sim::adapters::ca::SimCa;
-use overdrive_sim::adapters::clock::SimClock;
-use overdrive_sim::adapters::dataplane::SimDataplane;
 use overdrive_sim::adapters::driver::SimDriver;
 use overdrive_sim::adapters::entropy::SimEntropy;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
-use tempfile::TempDir;
+
+use crate::acceptance::vm_dispatch::{VmDispatchFixture, VmDispatchPorts};
 
 /// The node the SVID is issued on (also the obs-store writer).
 fn issuing_node() -> NodeId {
@@ -95,17 +88,6 @@ fn make_tick(tick_n: u64) -> TickContext {
     }
 }
 
-/// A fresh real `LocalIntentStore` for the allocator boilerplate. The allocator
-/// is a mandatory `dispatch` port but is NOT exercised by the `IssueSvid` arm —
-/// this mirrors the `lifecycle_broadcast.rs` precedent (real redb in the
-/// default acceptance lane, allocator unused by the arm under test).
-fn intent_store(dir: &TempDir) -> Arc<dyn IntentStore> {
-    Arc::new(
-        overdrive_store_local::LocalIntentStore::open(dir.path().join("intent.redb"))
-            .expect("open intent store"),
-    )
-}
-
 /// `@in-memory` `@S-WIM-02` -- `Action::IssueSvid` calls
 /// `ca_issuance::issue_and_audit`, observes the `issued_certificates` audit row,
 /// then holds the returned `SvidMaterial` in `IdentityMgr`.
@@ -113,52 +95,20 @@ fn intent_store(dir: &TempDir) -> Arc<dyn IntentStore> {
 async fn issue_svid_executor_audits_before_hold() {
     // GIVEN the action-shim driving port wired with a sim CA, a sim observation
     // store (the audit PORT), a held-SVID store, and the non-CA shim ports.
-    let ca: Arc<dyn Ca> = Arc::new(SimCa::new(Arc::new(SimEntropy::new(0xCA_02))));
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(issuing_node(), 0xCA_02));
-    let identity = IdentityMgr::new(None);
-    let clock: Arc<dyn Clock> = Arc::new(SimClock::new());
-
-    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Vm));
-    let drivers: Arc<overdrive_core::traits::driver::DriverRegistry> = {
-        let mut r = overdrive_core::traits::driver::DriverRegistry::new();
-        r.insert(Arc::clone(&driver));
-        Arc::new(r)
-    };
-    let alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::default();
-    let dataplane: Arc<dyn Dataplane> = Arc::new(SimDataplane::new());
-    let dir = TempDir::new().expect("intent tempdir");
-    let allocator = test_default_allocator(intent_store(&dir));
-    let (tx, _rx) = tokio::sync::broadcast::channel(16);
-    let broker = parking_lot::Mutex::new(overdrive_core::eval_broker::EvaluationBroker::new());
+    let identity = Arc::new(IdentityMgr::new(None));
+    let mut ports =
+        VmDispatchPorts::sim(Arc::new(SimDriver::new(DriverType::Vm)) as Arc<dyn Driver>);
+    ports.ca = Arc::new(SimCa::new(Arc::new(SimEntropy::new(0xCA_02))));
+    ports.obs = Arc::clone(&obs);
+    ports.identity = Arc::clone(&identity);
+    ports.node_id = issuing_node();
+    let fixture = VmDispatchFixture::boot(ports).await;
     let tick = make_tick(0);
 
     // WHEN the reconciler-emitted IssueSvid is dispatched through the shim.
-    let mtls_worker_0501_0 = crate::acceptance::serve_ports::worker();
-    dispatch(
-        vec![issue_action()],
-        drivers.as_ref(),
-        &alloc_drivers,
-        obs.as_ref(),
-        dataplane.as_ref(),
-        ca.as_ref(),
-        clock.as_ref(),
-        &identity,
-        &overdrive_control_plane::GatewayIdentityActionComposition::disabled(),
-        &tx,
-        &tick,
-        &issuing_node(),
-        allocator,
-        &broker,
-        None,
-        &mtls_worker_0501_0,
-        // transparent-mtls-enrollment step 04-01: a fresh per-host slot
-        // allocator — this fixture exercises no netns provisioning.
-        &overdrive_control_plane::veth_provisioner::NetSlotAllocator::new(),
-        &overdrive_sim::adapters::vm_host_state::SimVmHostState::new(),
-    )
-    .await
-    .expect("IssueSvid dispatch succeeds");
+    fixture.dispatch(vec![issue_action()], &tick).await.expect("IssueSvid dispatch succeeds");
 
     // THEN (a) exactly one issued_certificates audit row is observable.
     let rows = obs.issued_certificate_rows().await.expect("read audit rows");
@@ -193,54 +143,23 @@ async fn audit_write_failure_refuses_hold() {
     // GIVEN a sim CA but an observation store whose NEXT write fails — the
     // audit-write fault injected through the sim adapter's queue (the audit
     // path flows through ObservationStore::write, so the fault lands there).
-    let ca: Arc<dyn Ca> = Arc::new(SimCa::new(Arc::new(SimEntropy::new(0xCA_07))));
     let obs = SimObservationStore::single_peer(issuing_node(), 0xCA_07);
     obs.inject_write_failure(ObservationStoreError::Io(std::io::Error::other(
         "audit store unavailable (injected)",
     )));
     let obs: Arc<dyn ObservationStore> = Arc::new(obs);
-    let identity = IdentityMgr::new(None);
-    let clock: Arc<dyn Clock> = Arc::new(SimClock::new());
-
-    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Vm));
-    let drivers: Arc<overdrive_core::traits::driver::DriverRegistry> = {
-        let mut r = overdrive_core::traits::driver::DriverRegistry::new();
-        r.insert(Arc::clone(&driver));
-        Arc::new(r)
-    };
-    let alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::default();
-    let dataplane: Arc<dyn Dataplane> = Arc::new(SimDataplane::new());
-    let dir = TempDir::new().expect("intent tempdir");
-    let allocator = test_default_allocator(intent_store(&dir));
-    let (tx, _rx) = tokio::sync::broadcast::channel(16);
-    let broker = parking_lot::Mutex::new(overdrive_core::eval_broker::EvaluationBroker::new());
+    let identity = Arc::new(IdentityMgr::new(None));
+    let mut ports =
+        VmDispatchPorts::sim(Arc::new(SimDriver::new(DriverType::Vm)) as Arc<dyn Driver>);
+    ports.ca = Arc::new(SimCa::new(Arc::new(SimEntropy::new(0xCA_07))));
+    ports.obs = Arc::clone(&obs);
+    ports.identity = Arc::clone(&identity);
+    ports.node_id = issuing_node();
+    let fixture = VmDispatchFixture::boot(ports).await;
     let tick = make_tick(0);
 
     // WHEN IssueSvid is dispatched against the failing audit store.
-    let mtls_worker_0501_1 = crate::acceptance::serve_ports::worker();
-    let result = dispatch(
-        vec![issue_action()],
-        drivers.as_ref(),
-        &alloc_drivers,
-        obs.as_ref(),
-        dataplane.as_ref(),
-        ca.as_ref(),
-        clock.as_ref(),
-        &identity,
-        &overdrive_control_plane::GatewayIdentityActionComposition::disabled(),
-        &tx,
-        &tick,
-        &issuing_node(),
-        allocator,
-        &broker,
-        None,
-        &mtls_worker_0501_1,
-        // transparent-mtls-enrollment step 04-01: a fresh per-host slot
-        // allocator — this fixture exercises no netns provisioning.
-        &overdrive_control_plane::veth_provisioner::NetSlotAllocator::new(),
-        &overdrive_sim::adapters::vm_host_state::SimVmHostState::new(),
-    )
-    .await;
+    let result = fixture.dispatch(vec![issue_action()], &tick).await;
 
     // THEN dispatch surfaces the failure (no unaudited SVID escaped silently).
     assert!(result.is_err(), "an audit-write failure must surface from dispatch, got {result:?}");

@@ -834,95 +834,9 @@ later failures misleading.
 
 ---
 
-## Net slots are partitioned across parallel tests — draw from the registry, never a fresh allocator
+## Hand-built real-netns fixtures must be route-disjoint from production
 
-Integration tests that provision REAL workload network namespaces derive
-every system-global kernel name from the net slot index
-(`derive_workload_netns_plan` in
-`crates/overdrive-control-plane/src/veth_provisioner.rs`:
-`ovd-ns-<4hex>`, `ovd-hv-<slot>`, `ovd-wl-<slot>`, the per-slot `/30`,
-`/etc/netns/<netns>/`). nextest runs each test in its own process in
-parallel, so two tests ANYWHERE in the suite that both draw slots from a
-fresh `NetSlotAllocator::new()` land on slot 0 and collide on the same
-kernel objects.
-
-**The failure shape is maximally misleading**: a DIFFERENT test fails
-each run (whichever loses the interleaving), at the same
-fixture/assertion line, within milliseconds — and the file is green
-serially (`-j 1`) and green in isolation. Before debugging the test's
-logic, check the slot derivation.
-
-### The rule
-
-- **Every test that provisions a real netns draws its slot from the
-  per-file band registry** —
-  `crates/overdrive-control-plane/tests/common/net_slots.rs`, the ONE
-  SSOT (the `.claude/rules/rust.md` § one-SSOT discipline applied to
-  slot space). Each participating file owns a named
-  `SLOTS_PER_FILE`-wide band; a test takes `BAND.nth(offset)` and
-  pre-adopts it via the production `NetSlotAllocator::adopt(alloc,
-  slot)` seam before dispatch. Adding a file = adding a band constant
-  to the registry, nothing else.
-- **Slots `0..PRODUCTION_BAND` are reserved for production.** A booted
-  `run_server` owns its internal allocator and assigns smallest-free
-  from 0; a test-pinned slot in that band would collide with a
-  production-assigned one. Tests never adopt from it.
-- **Never** a bare `NetSlotAllocator::new()` + `assign` in a test whose
-  dispatch reaches real provisioning; **never** raw slot literals in a
-  test file; **never** a file-local slot scheme (pid-derived,
-  park-holder allocators) beside the registry — a second mechanism is
-  the drift.
-- The registry's default-lane guard test
-  (`registered_bands_are_pairwise_disjoint_and_within_domain`, run via
-  the `net_slots_registry` binary) enforces pairwise band disjointness,
-  the production-band floor, and the `NET_SLOT_MAX` domain bound — an
-  overlapping or overflowing band fails the suite at the registry, not
-  the next unlucky parallel run.
-- **Sim-only files are exempt.** A test that passes `mtls_worker: None`
-  (or otherwise never crosses the real-provisioning gate) creates no
-  system-global state; constructing a throwaway allocator to satisfy a
-  signature is fine there.
-
-### What slot partitioning cannot fix
-
-Slots partition slot-DERIVED names only. Node-global axes stay
-serialized via the `host-kernel-shared` nextest group
-(`max-threads = 1`, `.config/nextest.toml`) — do NOT remove a test from
-that group because "the slots are disjoint now":
-
-- **A global sweep/GC** that enumerates ALL `ovd-ns-*` and reaps the
-  ones it cannot account for (the restart-recovery pass): any
-  concurrent test's netns is prey regardless of slot.
-- **The node-global `overdrive-mtls` nft table** — one table name for
-  the whole mTLS surface; slots cannot partition a table name.
-- **Process-global binds (`:53` DNS) and production-owned allocators**
-  inside a booted `run_server` — the server assigns its own slots from
-  the production band; the test cannot adopt them.
-
-Decision test: does the test OBSERVE or MUTATE state it did not derive
-from its own slot? Then it needs the serialization group, not (only) a
-band.
-
-### Symptoms during review
-
-- `NetSlotAllocator::new()` in a test file whose dispatch path reaches
-  real netns provisioning — the slot-0 collision waiting for a parallel
-  run.
-- A raw slot number in a test outside `net_slots.rs`.
-- A new band constant added without the guard test compiling it in —
-  or a band placed by eye instead of adjacent to the highest existing
-  one.
-- A flake report shaped "different test each run, same assertion line,
-  ~ms failure, green serially" — that is this class.
-
-### Hand-built real-netns fixtures must be route-disjoint from production
-
-Some Tier-3 tests construct a veth/netns topology directly instead of using
-the production `NetSlotAllocator`. A unique namespace or interface name is not
-enough: the host route selected for the fixture can still overlap a retained
-production VM route. If both sides use the same gateway/workload CIDR, the
-kernel may send the test packet into the production namespace and the failure
-looks like a missing TPROXY listener or a dead backend.
+A unique namespace or interface name is not enough: the host route selected for a hand-built veth/netns fixture can overlap a retained production route. If both use the same gateway/workload CIDR, the kernel can send the test packet into the production namespace and the failure looks like a missing listener or dead backend.
 
 For every hand-built real-netns fixture:
 
@@ -938,7 +852,7 @@ For every hand-built real-netns fixture:
 - Keep the lease name stable and unique to the topology module. The lease
   handle supplies the host gateway, workload address, and prefix used by the
   topology. Each module therefore owns a distinct CIDR even when a prior
-  interrupted run leaves a route behind; do not reuse production slot-0
+  interrupted run leaves a route behind; do not reuse production
   addresses merely because the test's namespace names differ.
 - Keep host-loopback backend addresses and routes disjoint from production
   addresses as well. Record the allocator pool and stable lease name in the
@@ -948,9 +862,6 @@ For every hand-built real-netns fixture:
   namespaces (`ip route`, `ip rule`, `ip netns list`). After a panic or
   cancellation, remove only the named fixture resources or restart the test
   VM; do not paper over a collision with connection retries.
-
-This is distinct from slot partitioning: it protects manually chosen address
-and route state, while the registry protects slot-derived kernel names.
 
 ---
 

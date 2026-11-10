@@ -11,10 +11,8 @@
 
 use async_trait::async_trait;
 use base64::Engine;
-use overdrive_control_plane::action_shim::WorkloadNetworkProvisioner;
 use overdrive_control_plane::api::{SubmitWorkloadRequest, SubmitWorkloadResponse};
 use overdrive_control_plane::dataplane_config::DataplaneConfig;
-use overdrive_control_plane::veth_provisioner::{VethProvisionError, WorkloadNetnsPlan};
 use overdrive_control_plane::{
     BootAdapters, NodeAdapters, ServerConfig, run_server_with_obs_and_driver,
 };
@@ -49,19 +47,6 @@ use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::{Layer, Registry};
 
 static SERVER_SCENARIO_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-
-#[derive(Debug, Default)]
-struct NoopNetworkProvisioner;
-
-impl WorkloadNetworkProvisioner for NoopNetworkProvisioner {
-    fn provision(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
-        Ok(())
-    }
-
-    fn teardown(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
-        Ok(())
-    }
-}
 
 #[derive(Clone, Debug)]
 struct CapturedEvent {
@@ -1058,7 +1043,8 @@ async fn view_fsync_failure_prevents_dispatch_and_recovers() {
     use overdrive_control_plane::AppState;
     use overdrive_control_plane::identity_mgr::IdentityMgr;
     use overdrive_control_plane::reconciler_runtime::{
-        ConvergenceError, ReconcilerRuntime, run_convergence_tick_with_network_provisioner_for_test,
+        ConvergenceError, ReconcilerRuntime,
+        run_convergence_tick_with_guest_network_provisioner_for_test,
     };
     use overdrive_control_plane::view_store::ViewStoreExt;
     use overdrive_core::reconcilers::{ReconcilerName, TargetResource};
@@ -1082,6 +1068,39 @@ async fn view_fsync_failure_prevents_dispatch_and_recovers() {
     let driver = Arc::new(SimDriver::with_clock(DriverType::Vm, clock.clone()));
     let allocator =
         overdrive_control_plane::test_default_allocator(store.clone() as Arc<dyn IntentStore>);
+    // The VM-path composition: mTLS worker started over the sim, the shared
+    // guest-network owner converged before `AppState::new` copies its flow
+    // ports, and the EXEC gate opened after boot.
+    let worker = Arc::new(overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker::new(
+        Arc::new(overdrive_sim::adapters::mtls_enforcement::SimMtlsEnforcement::new(
+            Arc::new(overdrive_sim::adapters::SimIdentityRead::new(
+                std::collections::BTreeMap::new(),
+                None,
+            )),
+            overdrive_core::traits::mtls_enforcement::MtlsLimits::default(),
+            Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
+        )),
+        Arc::new(overdrive_sim::adapters::SimMtlsResolve::new(
+            std::collections::BTreeMap::new(),
+            overdrive_core::traits::mtls_resolve::MtlsResolution::NonMesh,
+        )),
+        Arc::new(overdrive_sim::adapters::clock::SimClock::new()),
+        Arc::new(overdrive_sim::adapters::SimMtlsIntercept::new()),
+    ));
+    worker.start_shared_owner().await.unwrap();
+    let owner =
+        Arc::new(overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner::default());
+    overdrive_control_plane::guest_network::SharedGuestNetworkOwner::converge_shared(
+        owner.as_ref(),
+    )
+    .await
+    .unwrap();
+    let wiring = overdrive_core::guest_network::GuestNetworkExecWiring::new(Arc::new(
+        overdrive_sim::adapters::clock::SimClock::new(),
+    ));
+    let gate = wiring.gate();
+    let supervisor = wiring.supervisor();
+    assert!(supervisor.open_after_boot());
     let state = AppState::new(
         store,
         path,
@@ -1096,27 +1115,10 @@ async fn view_fsync_failure_prevents_dispatch_and_recovers() {
         allocator,
         overdrive_control_plane::test_empty_listener_facts(),
         std::net::Ipv4Addr::LOCALHOST,
-        Arc::new(overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker::new(
-            Arc::new(overdrive_sim::adapters::mtls_enforcement::SimMtlsEnforcement::new(
-                Arc::new(overdrive_sim::adapters::SimIdentityRead::new(
-                    std::collections::BTreeMap::new(),
-                    None,
-                )),
-                overdrive_core::traits::mtls_enforcement::MtlsLimits::default(),
-                Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
-            )),
-            Arc::new(overdrive_sim::adapters::SimMtlsResolve::new(
-                std::collections::BTreeMap::new(),
-                overdrive_core::traits::mtls_resolve::MtlsResolution::NonMesh,
-            )),
-            Arc::new(overdrive_sim::adapters::clock::SimClock::new()),
-            Arc::new(overdrive_sim::adapters::SimMtlsIntercept::new()),
-        )),
-        Arc::new(overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner::default()),
-        overdrive_core::guest_network::GuestNetworkExecWiring::new(Arc::new(
-            overdrive_sim::adapters::clock::SimClock::new(),
-        ))
-        .gate(),
+        worker,
+        Arc::clone(&owner)
+            as Arc<dyn overdrive_control_plane::guest_network::SharedGuestNetworkOwner>,
+        gate,
         Arc::new(overdrive_control_plane::guest_network::GuestAddressPool::new(
             "100.95.0.0/16".parse().expect("static guest prefix"),
             std::net::Ipv4Addr::new(100, 95, 0, 1),
@@ -1130,14 +1132,14 @@ async fn view_fsync_failure_prevents_dispatch_and_recovers() {
     runtime_job_input(&state, "fsync-subject").await;
     let now = clock.now();
     let deadline = now + Duration::from_secs(1);
-    run_convergence_tick_with_network_provisioner_for_test(
+    run_convergence_tick_with_guest_network_provisioner_for_test(
         &state,
         &name,
         &control,
         now,
         0,
         deadline,
-        &NoopNetworkProvisioner,
+        owner.as_ref(),
     )
     .await
     .unwrap();
@@ -1151,14 +1153,14 @@ async fn view_fsync_failure_prevents_dispatch_and_recovers() {
         views.bulk_load("workload-lifecycle").await.unwrap();
     let mut lifecycle = state.lifecycle_events.subscribe();
     views.inject_fsync_failure();
-    let failure = run_convergence_tick_with_network_provisioner_for_test(
+    let failure = run_convergence_tick_with_guest_network_provisioner_for_test(
         &state,
         &name,
         &subject,
         now,
         1,
         deadline,
-        &NoopNetworkProvisioner,
+        owner.as_ref(),
     )
     .await;
     assert!(matches!(failure, Err(ConvergenceError::ViewPersist(_))), "seed={seed}: {failure:?}");
@@ -1182,14 +1184,14 @@ async fn view_fsync_failure_prevents_dispatch_and_recovers() {
     assert_eq!(stored_after, stored_before);
 
     views.clear_fsync_failure();
-    run_convergence_tick_with_network_provisioner_for_test(
+    run_convergence_tick_with_guest_network_provisioner_for_test(
         &state,
         &name,
         &subject,
         now,
         2,
         deadline,
-        &NoopNetworkProvisioner,
+        owner.as_ref(),
     )
     .await
     .unwrap();
@@ -1200,14 +1202,14 @@ async fn view_fsync_failure_prevents_dispatch_and_recovers() {
     let durable: std::collections::BTreeMap<TargetResource, WorkloadLifecycleView> =
         views.bulk_load("workload-lifecycle").await.unwrap();
     assert_eq!(durable, recovered, "seed={seed}: recovered View is durable");
-    run_convergence_tick_with_network_provisioner_for_test(
+    run_convergence_tick_with_guest_network_provisioner_for_test(
         &state,
         &name,
         &subject,
         now,
         3,
         deadline,
-        &NoopNetworkProvisioner,
+        owner.as_ref(),
     )
     .await
     .unwrap();

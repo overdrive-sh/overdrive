@@ -4,7 +4,7 @@
 //! The composition under test is the production one, assembled in-process with
 //! `Sim*` adapters at the driven ports only: the production exit observer
 //! (`exit_observer::spawn_with_runtime`) consuming `ExitEvent`s from a
-//! `Driver`'s receiver, the production action shim (`action_shim::dispatch*`)
+//! `Driver`'s receiver, the production action shim (the VM dispatch seam)
 //! dispatching `StartAllocation`, `RestartAllocation`, `StopAllocation` and
 //! `FinalizeFailed`, a real `ProbeRunner` over `SimClock`, `SimTcpProber` and
 //! `SimObservationStore`, and a `SimDriver`-backed VM-typed driver whose probe
@@ -39,44 +39,30 @@ use std::str::FromStr as _;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use overdrive_control_plane::action_shim::{
-    AllocDriverIndex, LifecycleEvent, dispatch_with_network_provisioner,
-};
-use overdrive_control_plane::identity_mgr::IdentityMgr;
-use overdrive_control_plane::veth_provisioner::NetSlotAllocator;
+use overdrive_control_plane::action_shim::LifecycleEvent;
 use overdrive_control_plane::worker::exit_observer;
 use overdrive_core::SpiffeId;
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::WorkloadKind;
 use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
-use overdrive_core::eval_broker::EvaluationBroker;
 use overdrive_core::id::{AllocationId, NodeId};
 use overdrive_core::observation::{ProbeIdx, ProbeRole};
 use overdrive_core::reconcilers::{Action, TickContext};
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{
-    AllocationSpec, Driver, DriverPayload, DriverRegistry, DriverType, ExitEvent, ExitKind,
-    Resources, VmPayload,
+    AllocationSpec, Driver, DriverPayload, DriverType, ExitEvent, ExitKind, Resources, VmPayload,
 };
-use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{
     AllocState, ObservationStore, ObservationStoreError,
 };
 use overdrive_core::transition_reason::{StoppedBy, TerminalCondition, TransitionReason};
-use overdrive_dataplane::allocators::{PersistentServiceVipAllocator, VipRange};
-use overdrive_sim::adapters::ca::SimCa;
 use overdrive_sim::adapters::clock::SimClock;
-use overdrive_sim::adapters::dataplane::SimDataplane;
 use overdrive_sim::adapters::driver::SimDriver;
-use overdrive_sim::adapters::entropy::SimEntropy;
 use overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_sim::adapters::probers::{SimHttpProber, SimTcpProber};
-use overdrive_sim::adapters::vm_host_state::SimVmHostState;
-use overdrive_store_local::LocalIntentStore;
 use overdrive_worker::probe_runner::ProbeRunner;
 use parking_lot::Mutex;
-use tempfile::TempDir;
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 
@@ -91,7 +77,8 @@ const ROLES: [(ProbeRole, &str); 3] = [
 
 // ----- the recorded driver -------------------------------------------------------------
 
-use crate::acceptance::hooked_driver::{Call, HookedDriver, NoopNetworkProvisioner};
+use crate::acceptance::hooked_driver::{Call, HookedDriver};
+use crate::acceptance::vm_dispatch::{VmDispatchFixture, VmDispatchPorts};
 
 fn crash_event(alloc: &AllocationId) -> ExitEvent {
     ExitEvent {
@@ -110,12 +97,9 @@ struct Fixture {
     clock: Arc<SimClock>,
     runner: Arc<ProbeRunner>,
     driver: Arc<HookedDriver>,
-    drivers: Arc<DriverRegistry>,
-    alloc_drivers: AllocDriverIndex,
+    vm: VmDispatchFixture,
     events: Arc<broadcast::Sender<LifecycleEvent>>,
-    intent: Arc<dyn IntentStore>,
     ticks: Mutex<u64>,
-    _tmp: TempDir,
 }
 
 fn node() -> NodeId {
@@ -173,8 +157,7 @@ fn spec(alloc: &AllocationId, probe_descriptors: Vec<ProbeDescriptor>) -> Alloca
 
 impl Fixture {
     /// The production observer, the production shim and a real runner over `Sim*` ports.
-    fn new() -> Self {
-        let tmp = TempDir::new().expect("tempdir");
+    async fn new() -> Self {
         let obs =
             Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("node id"), 0));
         let clock = Arc::new(SimClock::new());
@@ -189,26 +172,13 @@ impl Fixture {
         let sim =
             Arc::new(SimDriver::with_clock(DriverType::Vm, Arc::clone(&clock) as Arc<dyn Clock>));
         let driver = Arc::new(HookedDriver::new(sim, Arc::clone(&runner), Arc::clone(&clock)));
-        let drivers = {
-            let mut registry = DriverRegistry::new();
-            registry.insert(Arc::clone(&driver) as Arc<dyn Driver>);
-            Arc::new(registry)
-        };
-        let intent: Arc<dyn IntentStore> =
-            Arc::new(LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open intent"));
-        let (events, _rx) = broadcast::channel(64);
-        Self {
-            obs,
-            clock,
-            runner,
-            driver,
-            drivers,
-            alloc_drivers: AllocDriverIndex::default(),
-            events: Arc::new(events),
-            intent,
-            ticks: Mutex::new(0),
-            _tmp: tmp,
-        }
+        let mut ports = VmDispatchPorts::sim(Arc::clone(&driver) as Arc<dyn Driver>);
+        ports.obs = Arc::clone(&obs) as Arc<dyn ObservationStore>;
+        ports.clock = Arc::clone(&clock) as Arc<dyn Clock>;
+        ports.node_id = node();
+        let vm = VmDispatchFixture::boot(ports).await;
+        let events = Arc::clone(&vm.state.lifecycle_events);
+        Self { obs, clock, runner, driver, vm, events, ticks: Mutex::new(0) }
     }
 
     /// Spawns the production exit observer over the fixture's driver.
@@ -225,7 +195,7 @@ impl Fixture {
         token
     }
 
-    /// One action through the production `action_shim::dispatch*` driving port.
+    /// One action through the production VM dispatch seam.
     async fn dispatch(
         &self,
         action: Action,
@@ -242,34 +212,7 @@ impl Fixture {
             tick: tick_no,
             deadline: now + Duration::from_secs(1),
         };
-        let allocator = Arc::new(tokio::sync::Mutex::new(PersistentServiceVipAllocator::new(
-            VipRange::default(),
-            Arc::clone(&self.intent),
-        )));
-        let broker = Mutex::new(EvaluationBroker::new());
-        let mtls_worker = crate::acceptance::serve_ports::worker();
-        dispatch_with_network_provisioner(
-            vec![action],
-            self.drivers.as_ref(),
-            &self.alloc_drivers,
-            self.obs.as_ref(),
-            &SimDataplane::new(),
-            &SimCa::new(Arc::new(SimEntropy::new(0))),
-            self.clock.as_ref(),
-            &IdentityMgr::new(None),
-            &overdrive_control_plane::GatewayIdentityActionComposition::disabled(),
-            &self.events,
-            &tick,
-            &node(),
-            allocator,
-            &broker,
-            None,
-            &mtls_worker,
-            &NetSlotAllocator::new(),
-            &NoopNetworkProvisioner,
-            &SimVmHostState::new(),
-        )
-        .await
+        self.vm.dispatch(vec![action], &tick).await
     }
 
     /// `StartAllocation` of a probed Service allocation through the shim.
@@ -403,7 +346,7 @@ fn yields_of(seed: u64) -> u32 {
 #[tokio::test]
 async fn a_crashed_allocation_stops_probing_as_soon_as_the_observer_consumes_the_exit() {
     for seed in 0..SEEDS {
-        let f = Fixture::new();
+        let f = Fixture::new().await;
         let _observer = f.spawn_observer();
         let a = alloc("alloc-crash-0");
         f.start(&a).await;
@@ -444,7 +387,7 @@ async fn a_crashed_allocation_stops_probing_as_soon_as_the_observer_consumes_the
 #[tokio::test]
 async fn a_restart_leaves_only_the_successor_supervised_without_a_second_hook_call() {
     for seed in 0..SEEDS {
-        let f = Fixture::new();
+        let f = Fixture::new().await;
         let _observer = f.spawn_observer();
         let pred = alloc("alloc-restart-0");
         let succ = alloc("alloc-restart-1");
@@ -501,7 +444,7 @@ async fn a_restart_leaves_only_the_successor_supervised_without_a_second_hook_ca
 #[tokio::test]
 async fn a_crash_ends_probe_supervision_even_when_every_row_write_attempt_fails() {
     for seed in 0..SEEDS {
-        let f = Fixture::new();
+        let f = Fixture::new().await;
         let mut bus = f.events.subscribe();
         let _observer = f.spawn_observer();
         let a = alloc("alloc-exhaust-0");
@@ -548,7 +491,7 @@ async fn a_crash_ends_probe_supervision_even_when_every_row_write_attempt_fails(
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 async fn a_crash_with_no_prior_row_still_ends_probe_supervision() {
-    let f = Fixture::new();
+    let f = Fixture::new().await;
     let _observer = f.spawn_observer();
     let a = alloc("alloc-norow-0");
     // Supervision registered through the driver hook; the shim never wrote a row.
@@ -578,7 +521,7 @@ async fn a_crash_with_no_prior_row_still_ends_probe_supervision() {
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 async fn a_start_registers_probe_supervision_before_it_releases_the_exit_gate() {
-    let f = Fixture::new();
+    let f = Fixture::new().await;
     let _observer = f.spawn_observer();
     let first = alloc("alloc-order-0");
     let successor = alloc("alloc-order-1");
@@ -619,7 +562,7 @@ async fn a_start_registers_probe_supervision_before_it_releases_the_exit_gate() 
 #[tokio::test]
 async fn an_exit_available_the_instant_the_gate_releases_leaves_no_supervisor() {
     for seed in 0..SEEDS {
-        let f = Fixture::new();
+        let f = Fixture::new().await;
         let _observer = f.spawn_observer();
         let a = alloc("alloc-instant-0");
         f.driver.exit_at_release(&a, yields_of(seed));
@@ -655,7 +598,7 @@ async fn an_exit_available_the_instant_the_gate_releases_leaves_no_supervisor() 
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 async fn an_operator_stop_ends_probe_supervision_exactly_once() {
-    let f = Fixture::new();
+    let f = Fixture::new().await;
     let _observer = f.spawn_observer();
     let a = alloc("alloc-stop-0");
     f.start(&a).await;
@@ -678,7 +621,7 @@ async fn an_operator_stop_ends_probe_supervision_exactly_once() {
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 async fn finalizing_a_live_allocation_ends_probe_supervision_exactly_once() {
-    let f = Fixture::new();
+    let f = Fixture::new().await;
     let _observer = f.spawn_observer();
     let a = alloc("alloc-finalize-0");
     f.start(&a).await;
@@ -704,7 +647,7 @@ async fn finalizing_a_live_allocation_ends_probe_supervision_exactly_once() {
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 async fn the_terminal_hook_is_idempotent_and_a_no_op_for_unknown_ids() {
-    let f = Fixture::new();
+    let f = Fixture::new().await;
     let sibling = alloc("alloc-idem-1");
     let ended = alloc("alloc-idem-0");
     let unknown = alloc("alloc-idem-9");
@@ -744,7 +687,7 @@ async fn the_terminal_hook_is_idempotent_and_a_no_op_for_unknown_ids() {
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 async fn a_crash_then_a_finalize_fire_the_hook_twice_with_one_effect() {
-    let f = Fixture::new();
+    let f = Fixture::new().await;
     let _observer = f.spawn_observer();
     let a = alloc("alloc-double-0");
     let sibling = alloc("alloc-double-1");
@@ -780,7 +723,7 @@ async fn a_crash_then_a_finalize_fire_the_hook_twice_with_one_effect() {
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 async fn a_crash_ends_only_the_crashed_allocations_supervision() {
-    let f = Fixture::new();
+    let f = Fixture::new().await;
     let _observer = f.spawn_observer();
     let crashed = alloc("alloc-sibling-0");
     let sibling = alloc("alloc-sibling-1");
@@ -804,7 +747,7 @@ async fn a_crash_ends_only_the_crashed_allocations_supervision() {
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 async fn a_crash_leaves_the_siblings_supervision_and_row_untouched() {
-    let f = Fixture::new();
+    let f = Fixture::new().await;
     let _observer = f.spawn_observer();
     let crashed = alloc("alloc-control-0");
     let sibling = alloc("alloc-control-1");

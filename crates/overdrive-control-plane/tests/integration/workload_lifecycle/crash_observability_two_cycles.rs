@@ -37,36 +37,14 @@ use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{
     AllocationSpec, Driver, DriverPayload, DriverType, ExitKind, Resources, VmPayload,
 };
-use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, ObservationStore};
 use overdrive_core::transition_reason::TransitionReason;
-use overdrive_dataplane::allocators::{PersistentServiceVipAllocator, VipRange};
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::driver::SimDriver;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
-use overdrive_store_local::LocalIntentStore;
-use tempfile::TempDir;
-use tokio::sync::broadcast;
 
-use overdrive_control_plane::action_shim::{
-    LifecycleEvent, WorkloadNetworkProvisioner, dispatch_with_network_provisioner,
-};
-use overdrive_control_plane::veth_provisioner::NetSlotAllocator;
-use overdrive_control_plane::veth_provisioner::{VethProvisionError, WorkloadNetnsPlan};
+use crate::integration::vm_dispatch::{VmDispatchFixture, VmDispatchPorts};
 use overdrive_control_plane::worker::exit_observer;
-
-#[derive(Debug, Default)]
-struct NoopNetworkProvisioner;
-
-impl WorkloadNetworkProvisioner for NoopNetworkProvisioner {
-    fn provision(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
-        Ok(())
-    }
-
-    fn teardown(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
-        Ok(())
-    }
-}
 
 /// A workload that exits non-zero after a short delay. The delay gives
 /// the action shim's `Running` write and the observer's Running-gate
@@ -136,18 +114,15 @@ async fn two_crash_cycles_use_fresh_successors_and_preserve_each_terminal() {
     let clock: Arc<dyn Clock> = sim_clock.clone();
     let driver_concrete = Arc::new(SimDriver::with_clock(DriverType::Vm, sim_clock.clone()));
     let driver: Arc<dyn Driver> = driver_concrete.clone();
-    let drivers: Arc<overdrive_core::traits::driver::DriverRegistry> = {
-        let mut r = overdrive_core::traits::driver::DriverRegistry::new();
-        r.insert(Arc::clone(&driver));
-        Arc::new(r)
-    };
-    let alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::default();
-
     let node_id = NodeId::new("local").expect("valid node id");
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(node_id.clone(), 0));
-    let (events_tx, _events_rx) = broadcast::channel::<LifecycleEvent>(256);
-    let events = Arc::new(events_tx);
+    let mut ports = VmDispatchPorts::sim(Arc::clone(&driver));
+    ports.obs = Arc::clone(&obs);
+    ports.clock = Arc::clone(&clock);
+    let fx = VmDispatchFixture::boot(ports).await;
+    crate::integration::vm_dispatch::start_shared_mtls_owner(fx.state.as_ref()).await;
+    let events = Arc::clone(&fx.state.lifecycle_events);
 
     let alloc = AllocationId::new("alloc-crashobs2-0").expect("valid alloc id");
     let successor_one = AllocationId::new("alloc-crashobs2-1").expect("valid alloc id");
@@ -159,18 +134,9 @@ async fn two_crash_cycles_use_fresh_successors_and_preserve_each_terminal() {
     let observer_handle =
         exit_observer::spawn(obs.clone(), driver.clone(), events.clone(), clock.clone());
 
-    let tmp = TempDir::new().expect("tempdir");
-    let store_path = tmp.path().join("intent.redb");
-    let store: Arc<dyn IntentStore> =
-        Arc::new(LocalIntentStore::open(&store_path).expect("open intent store"));
-
     // ---- Cycle 1: StartAllocation -> Running, crash -> Failed. --------
     dispatch_one(
-        obs.as_ref(),
-        drivers.as_ref(),
-        &alloc_drivers,
-        &store,
-        &events,
+        &fx,
         Action::StartAllocation {
             alloc_id: alloc.clone(),
             workload_id: workload.clone(),
@@ -226,11 +192,7 @@ async fn two_crash_cycles_use_fresh_successors_and_preserve_each_terminal() {
 
     // ---- Cycle 1 recovery: predecessor A0 -> fresh Running A1. -----
     dispatch_one(
-        obs.as_ref(),
-        drivers.as_ref(),
-        &alloc_drivers,
-        &store,
-        &events,
+        &fx,
         Action::RestartAllocation {
             alloc_id: alloc.clone(),
             spec: crashing_spec(&successor_one),
@@ -286,11 +248,7 @@ async fn two_crash_cycles_use_fresh_successors_and_preserve_each_terminal() {
 
     // ---- Cycle 2 recovery: predecessor A1 -> fresh Running A2. -----
     dispatch_one(
-        obs.as_ref(),
-        drivers.as_ref(),
-        &alloc_drivers,
-        &store,
-        &events,
+        &fx,
         Action::RestartAllocation {
             alloc_id: successor_one.clone(),
             // A VM payload so the final Running row is stable for the
@@ -322,11 +280,7 @@ async fn two_crash_cycles_use_fresh_successors_and_preserve_each_terminal() {
     // Reap the final allocation through the production stop path. This also
     // exercises exact-key stop forward-carry on A2.
     dispatch_one(
-        obs.as_ref(),
-        drivers.as_ref(),
-        &alloc_drivers,
-        &store,
-        &events,
+        &fx,
         Action::StopAllocation { alloc_id: successor_two.clone(), terminal: None },
         3,
     )
@@ -349,27 +303,8 @@ async fn two_crash_cycles_use_fresh_successors_and_preserve_each_terminal() {
     let _ = tokio::time::timeout(Duration::from_secs(2), observer_handle).await;
 }
 
-/// Dispatch exactly one action through the production
-/// `action_shim::dispatch` with sim adapters for every orthogonal port.
-async fn dispatch_one(
-    obs: &dyn ObservationStore,
-    drivers: &overdrive_core::traits::driver::DriverRegistry,
-    alloc_drivers: &overdrive_control_plane::action_shim::AllocDriverIndex,
-    store: &Arc<dyn IntentStore>,
-    events: &Arc<broadcast::Sender<LifecycleEvent>>,
-    action: Action,
-    tick_n: u64,
-) {
-    let dataplane: Arc<dyn overdrive_core::traits::dataplane::Dataplane> =
-        Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new());
-    let writer_node = NodeId::new("local").expect("NodeId");
-    let allocator = Arc::new(tokio::sync::Mutex::new(PersistentServiceVipAllocator::new(
-        VipRange::default(),
-        Arc::clone(store),
-    )));
-    let net_slot_allocator = NetSlotAllocator::new();
-    let test_broker = parking_lot::Mutex::new(overdrive_core::eval_broker::EvaluationBroker::new());
-
+/// Dispatch exactly one action through the production action composition.
+async fn dispatch_one(fx: &VmDispatchFixture, action: Action, tick_n: u64) {
     let now = Instant::now();
     let tick = TickContext {
         now,
@@ -380,30 +315,5 @@ async fn dispatch_one(
         deadline: now + Duration::from_secs(10),
     };
 
-    let mtls_worker_0501_0 = crate::integration::serve_ports::worker();
-    dispatch_with_network_provisioner(
-        vec![action],
-        drivers,
-        alloc_drivers,
-        obs,
-        dataplane.as_ref(),
-        &overdrive_sim::adapters::ca::SimCa::new(Arc::new(
-            overdrive_sim::adapters::entropy::SimEntropy::new(0),
-        )),
-        &overdrive_sim::adapters::clock::SimClock::new(),
-        &overdrive_control_plane::identity_mgr::IdentityMgr::new(None),
-        &overdrive_control_plane::GatewayIdentityActionComposition::disabled(),
-        events,
-        &tick,
-        &writer_node,
-        Arc::clone(&allocator),
-        &test_broker,
-        None,
-        &mtls_worker_0501_0,
-        &net_slot_allocator,
-        &NoopNetworkProvisioner,
-        &overdrive_sim::adapters::vm_host_state::SimVmHostState::new(),
-    )
-    .await
-    .expect("dispatch must succeed");
+    fx.dispatch(vec![action], &tick).await.expect("dispatch must succeed");
 }

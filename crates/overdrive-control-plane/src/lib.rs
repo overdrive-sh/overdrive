@@ -433,24 +433,6 @@ pub struct AppState {
     /// passes them to `GuestAddressPool::assign` (GUEST-PORTS).
     pub(crate) guest_flow_ports:
         Arc<std::sync::OnceLock<overdrive_core::guest_transport::GuestFlowPorts>>,
-    /// DNS reply-source fallback allocator. It is retained only by the DNS
-    /// responder's source-pinning adapter; guest attachment ownership lives in
-    /// `SharedGuestNetworkOwner`.
-    ///
-    /// NOT an `Option`: unlike `mtls_worker`, the allocator is harmless on the
-    /// non-mTLS fixture surface (it just hands out slots nobody provisions),
-    /// so a non-optional `Default`-constructed field keeps every fixture
-    /// ripple-free. The type is already `#[derive(Clone, Default)]` and holds
-    /// its `Arc<Mutex<BTreeMap<…>>>` INTERNALLY (it self-shares on clone,
-    /// exactly like `IdentityMgr`), so the field is a plain value — no outer
-    /// `Arc<Mutex<…>>` wrapper. Ephemeral runtime state, never persisted:
-    /// on a fresh process boot nothing is held (criterion 6).
-    pub(crate) dns_slots: veth_provisioner::NetSlotAllocator,
-    /// Legacy fixture-only compatibility storage; production guest
-    /// attachment ownership never reads this value.
-    #[doc(hidden)]
-    #[cfg(any(test, feature = "integration-tests"))]
-    pub net_slot_allocator: veth_provisioner::NetSlotAllocator,
     /// Per-host stable per-`<workload>` frontend-address allocator
     /// (dial-by-name-responder step 01-05; ADR-0072 REV-2/REV-3, GH #243).
     /// The SINGLE source of frontend truth (DDN-2): the ONE `Arc`-shared
@@ -460,7 +442,7 @@ pub struct AppState {
     /// `<workload> → F` binding; 02-01 LATER injects the SAME cloned instance into
     /// the `DnsResponder` + re-keyed `MtlsResolve` readers.
     ///
-    /// Plain `Clone` value field (mirrors `net_slot_allocator`), NOT an outer
+    /// Plain `Clone` value field, NOT an outer
     /// `Arc<Mutex<…>>`: [`crate::dns_responder::frontend_addr_allocator::
     /// FrontendAddrAllocator`] holds its `Arc<Mutex<BTreeMap<…>>>` INTERNALLY,
     /// so a `.clone()` shares the same held map — exactly how the single
@@ -811,17 +793,6 @@ impl AppState {
                 &guest_pool,
             )),
             guest_pool,
-            // Default-construct the per-host slot allocator INSIDE the
-            // constructor (transparent-mtls-enrollment D-TME-12 G3, step
-            // 04-01) — NOT a constructor parameter. This is the same
-            // ripple-avoidance `mtls_worker` (`None`) + `workflow_engine`
-            // (empty registry) use: the ~42 non-mTLS fixtures and the
-            // `reconciler_runtime`/`listener_facts` callers need no change.
-            // On a fresh process boot nothing is held; still-Running allocs
-            // re-assign on their next lifecycle pass (criterion 6).
-            dns_slots: veth_provisioner::NetSlotAllocator::new(),
-            #[cfg(any(test, feature = "integration-tests"))]
-            net_slot_allocator: veth_provisioner::NetSlotAllocator::new(),
             // The per-host frontend-address allocator is now a CONSTRUCTOR
             // PARAMETER (02-01) — NOT default-constructed here. DDN-2 requires
             // ONE `Arc`-shared instance the composition root injects into BOTH
@@ -4556,7 +4527,7 @@ async fn boot_server(
         // Converge-on-boot frontend-address rebuild (dial-by-name-responder step
         // 01-05; ADR-0072 REV-3, GH #243). The `FrontendAddrAllocator` is
         // reconstructed EMPTY on every fresh boot (ephemeral, no cross-restart
-        // persistence — the `NetSlotAllocator` model). This Bar-1 converge-on-boot
+        // persistence). This Bar-1 converge-on-boot
         // pass re-derives every `<workload> → F` binding from the declared-Service intent
         // SSOT (`.claude/rules/reconcilers.md` § "Bar 1"; the same `workloads/`
         // intent scan as `ListenerFactStore::rebuild_from_intent`). It runs AFTER

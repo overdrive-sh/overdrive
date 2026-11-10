@@ -48,12 +48,6 @@ mod integration {
     /// phase-2-xdp-service-map Slice 04 (US-04; S-2.2-15) —
     /// Maglev real-distribution under XDP traffic on real veth.
     mod maglev_real;
-    /// transparent-mtls-host-socket (ADR-0069, GH #26; step 02-02, F1/F3) — the
-    /// focused agent mutual-TLS HANDSHAKE-IDENTITY acceptance test (client leg B +
-    /// server leg C). Drives `HostMtlsEnforcement::enforce` for BOTH directions and
-    /// asserts the presented leaf chains to the root + its URI SAN is the workload
-    /// SPIFFE id, from the captured handshake at the test tier.
-    mod mtls_agent_handshake;
     /// transparent-mtls-host-socket (ADR-0069, GH #26; step 04-01, F1/F4/F5/F6/F7) —
     /// the guardrails AT: fail-closed cause-distinct (inbound nocert/wrongca DISTINCT
     /// reasons before any splice, server gets 0 bytes), the F4/F7 limits at their

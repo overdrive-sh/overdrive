@@ -5,6 +5,7 @@
 
 use std::net::SocketAddrV4;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use overdrive_core::guest_transport::dial::{
     DialPurpose, GuestDialError, GuestStream, GuestStreamDial,
@@ -28,4 +29,34 @@ impl GuestStreamDial for NotServingDial {
 /// The enforcement's `guest_dial` for a fixture with no VM backend.
 pub fn not_serving() -> Arc<dyn GuestStreamDial> {
     Arc::new(NotServingDial)
+}
+
+/// A `NotServing` dial that counts how often the enforcement dialled it, for
+/// cells that assert a fail-closed connection never reached the guest.
+#[derive(Default)]
+pub struct CountingNotServing {
+    dials: AtomicUsize,
+}
+
+impl CountingNotServing {
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self::default())
+    }
+
+    /// How many dials the enforcement attempted.
+    pub fn dials(&self) -> usize {
+        self.dials.load(Ordering::SeqCst)
+    }
+}
+
+#[async_trait::async_trait]
+impl GuestStreamDial for CountingNotServing {
+    async fn dial(
+        &self,
+        _target: SocketAddrV4,
+        _purpose: DialPurpose,
+    ) -> Result<GuestStream, GuestDialError> {
+        self.dials.fetch_add(1, Ordering::SeqCst);
+        Err(GuestDialError::NotServing)
+    }
 }

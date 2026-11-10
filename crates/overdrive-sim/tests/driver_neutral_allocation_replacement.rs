@@ -24,15 +24,12 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use overdrive_control_plane::action_shim::{
-    AllocDriverIndex, MtlsInterceptLifecycle, ShimError, WorkloadNetworkProvisioner,
-    dispatch_with_network_provisioner,
+    AllocDriverIndex, ShimError, dispatch_with_guest_network_provisioner_for_test,
 };
+use overdrive_control_plane::guest_network::{GuestAddressPool, SharedGuestNetworkOwner};
 use overdrive_control_plane::identity_mgr::IdentityMgr;
 use overdrive_control_plane::reconciler_runtime::{
-    ReconcilerRuntime, run_convergence_tick_with_network_provisioner_for_test,
-};
-use overdrive_control_plane::veth_provisioner::{
-    NetSlotAllocator, VethProvisionError, WorkloadNetnsPlan,
+    ReconcilerRuntime, run_convergence_tick_with_guest_network_provisioner_for_test,
 };
 use overdrive_control_plane::view_store::redb::RedbViewStore;
 use overdrive_control_plane::view_store::{
@@ -46,7 +43,9 @@ use overdrive_core::aggregate::{
 use overdrive_core::api::{ListenerInput, ServiceSpecInput};
 use overdrive_core::ca::issue_failure::SvidIssueFailure;
 use overdrive_core::ca::issued_certificate_row::IssuedCertificateRow;
-use overdrive_core::eval_broker::EvaluationBroker;
+use overdrive_core::guest_network::{
+    GuestNetworkExecGate, GuestNetworkExecSupervisor, GuestNetworkExecWiring,
+};
 use overdrive_core::id::{
     AllocationId, CorrelationKey, IssuanceOrdinal, NodeId, ServiceId, WorkloadId,
 };
@@ -74,9 +73,9 @@ use overdrive_sim::adapters::ca::SimCa;
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::dataplane::SimDataplane;
 use overdrive_sim::adapters::entropy::SimEntropy;
+use overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_sim::adapters::view_store::SimViewStore;
-use overdrive_sim::adapters::{SimMtlsInterceptLifecycle, SimVmHostState};
 use overdrive_store_local::LocalIntentStore;
 use parking_lot::Mutex;
 
@@ -86,8 +85,53 @@ const SEED: u64 = 284_105_106;
 enum TraceEvent {
     Start(AllocationId),
     Stop(AllocationId),
-    Provision(String),
-    Teardown(String),
+}
+
+/// The VM-path composition every dispatch in this file runs over: the mTLS
+/// worker started over the sim, the shared guest-network owner converged
+/// before `AppState::new` copies its flow ports, and the EXEC gate opened
+/// after boot. The owner is also the guest-network provisioner the seam is
+/// driven with.
+struct VmComposition {
+    worker: Arc<overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker>,
+    owner: Arc<SimSharedGuestNetworkOwner>,
+    gate: Arc<GuestNetworkExecGate>,
+    pool: Arc<GuestAddressPool>,
+    _supervisor: Arc<GuestNetworkExecSupervisor>,
+}
+
+impl VmComposition {
+    async fn boot() -> Self {
+        let worker = Arc::new(overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker::new(
+            Arc::new(overdrive_sim::adapters::mtls_enforcement::SimMtlsEnforcement::new(
+                Arc::new(overdrive_sim::adapters::SimIdentityRead::new(
+                    std::collections::BTreeMap::new(),
+                    None,
+                )),
+                overdrive_core::traits::mtls_enforcement::MtlsLimits::default(),
+                Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
+            )),
+            Arc::new(overdrive_sim::adapters::SimMtlsResolve::new(
+                std::collections::BTreeMap::new(),
+                overdrive_core::traits::mtls_resolve::MtlsResolution::NonMesh,
+            )),
+            Arc::new(SimClock::new()),
+            Arc::new(overdrive_sim::adapters::SimMtlsIntercept::new()),
+        ));
+        worker.start_shared_owner().await.expect("the shared mTLS owner starts over the sim");
+        let owner = Arc::new(SimSharedGuestNetworkOwner::default());
+        owner.converge_shared().await.expect("the shared guest-network owner converges");
+        let wiring = GuestNetworkExecWiring::new(Arc::new(SimClock::new()));
+        let gate = wiring.gate();
+        let supervisor = wiring.supervisor();
+        assert!(supervisor.open_after_boot(), "the EXEC gate opens after boot");
+        let pool = Arc::new(GuestAddressPool::new(
+            "100.95.0.0/16".parse().expect("static guest prefix"),
+            std::net::Ipv4Addr::new(100, 95, 0, 1),
+            Arc::new(SimEntropy::new(0x295)),
+        ));
+        Self { worker, owner, gate, pool, _supervisor: supervisor }
+    }
 }
 
 fn service_intent(workload: &str) -> WorkloadIntent {
@@ -158,6 +202,7 @@ async fn production_owner_replacement_case(driver_type: DriverType) {
         Arc::clone(&intent) as Arc<dyn IntentStore>
     );
     let clock = Arc::new(SimClock::new());
+    let vm = VmComposition::boot().await;
     let mut state = AppState::new(
         Arc::clone(&intent),
         intent_path,
@@ -172,32 +217,10 @@ async fn production_owner_replacement_case(driver_type: DriverType) {
         allocator,
         overdrive_control_plane::test_empty_listener_facts(),
         std::net::Ipv4Addr::LOCALHOST,
-        Arc::new(overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker::new(
-            Arc::new(overdrive_sim::adapters::mtls_enforcement::SimMtlsEnforcement::new(
-                Arc::new(overdrive_sim::adapters::SimIdentityRead::new(
-                    std::collections::BTreeMap::new(),
-                    None,
-                )),
-                overdrive_core::traits::mtls_enforcement::MtlsLimits::default(),
-                Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
-            )),
-            Arc::new(overdrive_sim::adapters::SimMtlsResolve::new(
-                std::collections::BTreeMap::new(),
-                overdrive_core::traits::mtls_resolve::MtlsResolution::NonMesh,
-            )),
-            Arc::new(overdrive_sim::adapters::clock::SimClock::new()),
-            Arc::new(overdrive_sim::adapters::SimMtlsIntercept::new()),
-        )),
-        Arc::new(overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner::default()),
-        overdrive_core::guest_network::GuestNetworkExecWiring::new(Arc::new(
-            overdrive_sim::adapters::clock::SimClock::new(),
-        ))
-        .gate(),
-        Arc::new(overdrive_control_plane::guest_network::GuestAddressPool::new(
-            "100.95.0.0/16".parse().expect("static guest prefix"),
-            std::net::Ipv4Addr::new(100, 95, 0, 1),
-            Arc::new(overdrive_sim::adapters::entropy::SimEntropy::new(0x295)),
-        )),
+        Arc::clone(&vm.worker),
+        Arc::clone(&vm.owner) as Arc<dyn SharedGuestNetworkOwner>,
+        Arc::clone(&vm.gate),
+        Arc::clone(&vm.pool),
     );
     let desired = service_intent(&workload);
     let workload_id = wid(&workload);
@@ -219,17 +242,16 @@ async fn production_owner_replacement_case(driver_type: DriverType) {
         .expect("persist Service kind");
     let target = TargetResource::new(&format!("workload/{workload}")).expect("target");
     let owner = ReconcilerName::new("workload-lifecycle").expect("owner name");
-    let network = RecordingNetwork::default();
 
     persisted.store(false, Ordering::SeqCst);
-    run_convergence_tick_with_network_provisioner_for_test(
+    run_convergence_tick_with_guest_network_provisioner_for_test(
         &state,
         &owner,
         &target,
         clock.now(),
         1,
         clock.now() + Duration::from_secs(2),
-        &network,
+        vm.owner.as_ref(),
     )
     .await
     .expect("production owner publishes the initial rejected predecessor");
@@ -244,14 +266,14 @@ async fn production_owner_replacement_case(driver_type: DriverType) {
 
     persisted.store(false, Ordering::SeqCst);
     clock.tick(Duration::from_secs(2));
-    run_convergence_tick_with_network_provisioner_for_test(
+    run_convergence_tick_with_guest_network_provisioner_for_test(
         &state,
         &owner,
         &target,
         clock.now(),
         2,
         clock.now() + Duration::from_secs(2),
-        &network,
+        vm.owner.as_ref(),
     )
     .await
     .expect("rejected successor publication fully unwinds without another proposal");
@@ -275,14 +297,14 @@ async fn production_owner_replacement_case(driver_type: DriverType) {
 
     persisted.store(false, Ordering::SeqCst);
     clock.tick(Duration::from_secs(2));
-    run_convergence_tick_with_network_provisioner_for_test(
+    run_convergence_tick_with_guest_network_provisioner_for_test(
         &state,
         &owner,
         &target,
         clock.now(),
         3,
         clock.now() + Duration::from_secs(2),
-        &network,
+        vm.owner.as_ref(),
     )
     .await
     .expect("reopened owner re-drives above the consumed rejected successor");
@@ -486,26 +508,6 @@ impl Driver for OwnerPathDriver {
     }
 }
 
-/// Records every workload-netns provision and teardown. A VM allocation has
-/// no workload netns and never calls the provisioner (D-UP-15), so every
-/// recorded event for these VM-only cases is a defect the assertions name.
-#[derive(Default)]
-struct RecordingNetwork {
-    trace: Arc<Mutex<Vec<TraceEvent>>>,
-}
-
-impl WorkloadNetworkProvisioner for RecordingNetwork {
-    fn provision(&self, workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
-        self.trace.lock().push(TraceEvent::Provision(workload.netns.as_str().to_owned()));
-        Ok(())
-    }
-
-    fn teardown(&self, workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
-        self.trace.lock().push(TraceEvent::Teardown(workload.netns.as_str().to_owned()));
-        Ok(())
-    }
-}
-
 struct RecordingRedbViewStore {
     inner: RedbViewStore,
     persisted: Arc<AtomicBool>,
@@ -624,41 +626,46 @@ fn predecessor_row(
 async fn dispatch_one(
     action: Action,
     driver: Arc<RecordingDriver>,
-    obs: &dyn ObservationStore,
+    obs: Arc<dyn ObservationStore>,
     alloc_drivers: &AllocDriverIndex,
-    slots: &NetSlotAllocator,
-    network: &dyn WorkloadNetworkProvisioner,
-    mtls_lifecycle: &dyn MtlsInterceptLifecycle,
 ) -> Result<(), ShimError> {
     let tmp = tempfile::tempdir().expect("temporary intent store");
-    let intent: Arc<dyn IntentStore> = Arc::new(
-        LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open intent store"),
-    );
-    let allocator = overdrive_control_plane::test_default_allocator(intent);
-    let mut registry = overdrive_core::traits::driver::DriverRegistry::new();
+    let store_path = tmp.path().join("intent.redb");
+    let store = Arc::new(LocalIntentStore::open(&store_path).expect("open intent store"));
+    let allocator =
+        overdrive_control_plane::test_default_allocator(Arc::clone(&store) as Arc<dyn IntentStore>);
+    let mut runtime = ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path())
+        .expect("reconciler runtime");
+    runtime.register(overdrive_control_plane::noop_heartbeat()).await.expect("register heartbeat");
+    let vm = VmComposition::boot().await;
     let driver_dyn: Arc<dyn Driver> = driver;
-    registry.insert(driver_dyn);
-    let (bus, _rx) = tokio::sync::broadcast::channel(8);
-    dispatch_with_network_provisioner(
-        vec![action],
-        &registry,
-        alloc_drivers,
+    let state = AppState::new(
+        store,
+        store_path,
         obs,
-        &SimDataplane::new(),
-        &SimCa::new(Arc::new(SimEntropy::new(SEED))),
-        &SimClock::new(),
-        &IdentityMgr::new(None),
-        &overdrive_control_plane::GatewayIdentityActionComposition::disabled(),
-        &bus,
-        &tick(),
-        &nid("writer"),
+        Arc::new(runtime),
+        driver_dyn,
+        Arc::new(SimClock::new()),
+        Arc::new(SimDataplane::new()),
+        Arc::new(SimCa::new(Arc::new(SimEntropy::new(SEED)))),
+        Arc::new(IdentityMgr::new(None)),
+        nid("writer"),
         allocator,
-        &Mutex::new(EvaluationBroker::new()),
-        None,
-        mtls_lifecycle,
-        slots,
-        network,
-        &SimVmHostState::new(),
+        overdrive_control_plane::test_empty_listener_facts(),
+        std::net::Ipv4Addr::LOCALHOST,
+        Arc::clone(&vm.worker),
+        Arc::clone(&vm.owner) as Arc<dyn SharedGuestNetworkOwner>,
+        Arc::clone(&vm.gate),
+        Arc::clone(&vm.pool),
+    );
+    for (alloc, driver_type) in alloc_drivers.lock().iter() {
+        state.alloc_drivers.lock().insert(alloc.clone(), *driver_type);
+    }
+    dispatch_with_guest_network_provisioner_for_test(
+        vec![action],
+        &state,
+        &tick(),
+        vm.owner.as_ref(),
     )
     .await
 }
@@ -694,7 +701,6 @@ async fn accepted_failed_successor_publishes_at_fresh_key_with_zero_history() {
     );
     let index = AllocDriverIndex::default();
     index.lock().insert(predecessor.clone(), DriverType::Vm);
-    let mtls = SimMtlsInterceptLifecycle::new();
 
     dispatch_one(
         Action::RestartAllocation {
@@ -703,11 +709,8 @@ async fn accepted_failed_successor_publishes_at_fresh_key_with_zero_history() {
             kind: WorkloadKind::Service,
         },
         Arc::clone(&driver),
-        obs.as_ref(),
+        Arc::clone(&obs) as Arc<dyn ObservationStore>,
         &index,
-        &NetSlotAllocator::new(),
-        &RecordingNetwork::default(),
-        &mtls,
     )
     .await
     .expect("StartRejected is represented as a Failed successor row");

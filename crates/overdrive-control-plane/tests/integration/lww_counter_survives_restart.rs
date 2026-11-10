@@ -31,14 +31,9 @@
 //! overdrive-control-plane --features integration-tests`. Never
 //! `--no-run` — a compile-only gate proves nothing about a substrate.
 
-use std::net::Ipv4Addr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use tokio::sync::broadcast;
-
-use overdrive_control_plane::action_shim::dispatch;
-use overdrive_control_plane::veth_provisioner::NetSlotAllocator;
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::WorkloadKind;
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
@@ -48,10 +43,11 @@ use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRow, LogicalTimestamp, ObservationStore,
 };
 use overdrive_core::transition_reason::TransitionReason;
-use overdrive_dataplane::allocators::{PersistentServiceVipAllocator, VipRange};
 use overdrive_sim::adapters::driver::SimDriver;
-use overdrive_store_local::{LocalIntentStore, LocalObservationStore};
+use overdrive_store_local::LocalObservationStore;
 use tempfile::TempDir;
+
+use crate::integration::vm_dispatch::{VmDispatchFixture, VmDispatchPorts};
 
 /// The pre-restart counter. Deliberately the RCA's measured 29 s-outage
 /// value: a process that ran ~27 s before restarting. Any value above the
@@ -108,60 +104,18 @@ fn tick_at(tick: u64) -> TickContext {
     }
 }
 
-/// The VIP allocator the dispatch signature requires; the `StopAllocation`
-/// arm never touches it, so a one-address pool suffices.
-fn build_vip_allocator(
-    store: Arc<dyn overdrive_core::traits::intent_store::IntentStore>,
-) -> Arc<tokio::sync::Mutex<PersistentServiceVipAllocator>> {
-    let cidr = ipnet::Ipv4Net::new(Ipv4Addr::new(10, 96, 0, 1), 32).expect("/32 prefix");
-    let range = VipRange::new(vec![cidr], std::collections::BTreeSet::new()).expect("vip range");
-    Arc::new(tokio::sync::Mutex::new(PersistentServiceVipAllocator::new(range, store)))
-}
-
-/// Drive the PRODUCTION driving port for one action at a given tick.
+/// Drive the PRODUCTION VM dispatch seam for one action at a given tick.
 async fn dispatch_one_at_tick(
     action: Action,
-    obs: &dyn ObservationStore,
-    intent: Arc<dyn overdrive_core::traits::intent_store::IntentStore>,
+    obs: Arc<dyn ObservationStore>,
     tick: u64,
 ) -> Result<(), overdrive_control_plane::action_shim::ShimError> {
-    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Vm));
-    let drivers: Arc<overdrive_core::traits::driver::DriverRegistry> = {
-        let mut r = overdrive_core::traits::driver::DriverRegistry::new();
-        r.insert(Arc::clone(&driver));
-        Arc::new(r)
-    };
-    let alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::default();
-    let dataplane: Arc<dyn overdrive_core::traits::dataplane::Dataplane> =
-        Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new());
-    let (lifecycle_tx, _lifecycle_rx) = broadcast::channel(64);
-    let broker = parking_lot::Mutex::new(overdrive_core::eval_broker::EvaluationBroker::new());
-    let net_slot_allocator = NetSlotAllocator::new();
-
-    let mtls_worker_0501_0 = crate::integration::serve_ports::worker();
-    dispatch(
-        vec![action],
-        drivers.as_ref(),
-        &alloc_drivers,
-        obs,
-        dataplane.as_ref(),
-        &overdrive_sim::adapters::ca::SimCa::new(Arc::new(
-            overdrive_sim::adapters::entropy::SimEntropy::new(0),
-        )),
-        &overdrive_sim::adapters::clock::SimClock::new(),
-        &overdrive_control_plane::identity_mgr::IdentityMgr::new(None),
-        &overdrive_control_plane::GatewayIdentityActionComposition::disabled(),
-        &lifecycle_tx,
-        &tick_at(tick),
-        &ids().2,
-        build_vip_allocator(intent),
-        &broker,
-        None,
-        &mtls_worker_0501_0,
-        &net_slot_allocator,
-        &overdrive_sim::adapters::vm_host_state::SimVmHostState::new(),
-    )
-    .await
+    let mut ports =
+        VmDispatchPorts::sim(Arc::new(SimDriver::new(DriverType::Vm)) as Arc<dyn Driver>);
+    ports.obs = obs;
+    ports.node_id = ids().2;
+    let fixture = VmDispatchFixture::boot(ports).await;
+    fixture.dispatch(vec![action], &tick_at(tick)).await
 }
 
 // ---------------------------------------------------------------------------
@@ -172,8 +126,6 @@ async fn dispatch_one_at_tick(
 async fn stop_after_restart_wins_the_lww_merge_at_tick_zero() {
     let tmp = TempDir::new().expect("tempdir");
     let obs_path = tmp.path().join("observation.redb");
-    let intent: Arc<dyn overdrive_core::traits::intent_store::IntentStore> =
-        Arc::new(LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open intent"));
     let (alloc_id, _, _) = ids();
 
     // --- Process lifetime 1: the alloc reaches Running at a high counter. ---
@@ -190,7 +142,7 @@ async fn stop_after_restart_wins_the_lww_merge_at_tick_zero() {
     }
 
     // --- Process lifetime 2: a NEW process, so the tick is back at 0. ---
-    let store = LocalObservationStore::open(&obs_path).expect("open (lifetime 2)");
+    let store = Arc::new(LocalObservationStore::open(&obs_path).expect("open (lifetime 2)"));
 
     // The substrate fact this whole ADR is about: the ROW survived the
     // restart at its full counter, while the tick did not.
@@ -205,8 +157,7 @@ async fn stop_after_restart_wins_the_lww_merge_at_tick_zero() {
     // The operator stops the workload on the FIRST tick of the new process.
     dispatch_one_at_tick(
         Action::StopAllocation { alloc_id: alloc_id.clone(), terminal: None },
-        &store,
-        Arc::clone(&intent),
+        Arc::clone(&store) as Arc<dyn ObservationStore>,
         POST_RESTART_TICK,
     )
     .await

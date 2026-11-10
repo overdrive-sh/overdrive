@@ -68,15 +68,14 @@ use std::time::{Duration, Instant};
 
 use std::io;
 
-use overdrive_control_plane::action_shim::WorkloadNetworkProvisioner;
 use overdrive_control_plane::api::AllocStateWire;
 use overdrive_control_plane::reconciler_runtime::{
-    ReconcilerRuntime, run_convergence_tick_with_network_provisioner_for_test,
+    ReconcilerRuntime, run_convergence_tick_with_guest_network_provisioner_for_test,
 };
-use overdrive_control_plane::veth_provisioner::{VethProvisionError, WorkloadNetnsPlan};
 use overdrive_control_plane::worker::exit_observer;
 use overdrive_control_plane::{AppState, noop_heartbeat, workload_lifecycle};
 use overdrive_core::aggregate::{DriverInput, IntentKey, Job, JobSpecInput, ResourcesInput};
+use overdrive_core::guest_network::GuestNetworkExecSupervisor;
 use overdrive_core::id::{AllocationId, NodeId};
 use overdrive_core::reconcilers::TargetResource;
 use overdrive_core::traits::driver::{Driver, DriverType, ExitKind};
@@ -86,22 +85,10 @@ use overdrive_core::traits::observation_store::{
 };
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::driver::SimDriver;
+use overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_store_local::LocalIntentStore;
 use tempfile::TempDir;
-
-#[derive(Debug, Default)]
-struct NoopNetworkProvisioner;
-
-impl WorkloadNetworkProvisioner for NoopNetworkProvisioner {
-    fn provision(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
-        Ok(())
-    }
-
-    fn teardown(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
-        Ok(())
-    }
-}
 
 // -----------------------------------------------------------------------
 // Harness — mirrors the shape in `exit_observer.rs` so the surface
@@ -112,6 +99,8 @@ impl WorkloadNetworkProvisioner for NoopNetworkProvisioner {
 // -----------------------------------------------------------------------
 
 struct Harness {
+    seam_owner: Arc<SimSharedGuestNetworkOwner>,
+    _seam_supervisor: Arc<GuestNetworkExecSupervisor>,
     state: AppState,
     #[allow(dead_code)]
     sim_obs: Arc<SimObservationStore>,
@@ -142,6 +131,8 @@ async fn build_harness(tmp: &TempDir) -> Harness {
     let allocator = overdrive_control_plane::test_default_allocator(
         Arc::clone(&store) as Arc<dyn overdrive_core::traits::intent_store::IntentStore>
     );
+    let (seam_owner, seam_gate, seam_supervisor) =
+        crate::integration::vm_dispatch::converged_owner_and_open_gate().await;
     let state = AppState::new(
         store,
         store_path,
@@ -159,10 +150,11 @@ async fn build_harness(tmp: &TempDir) -> Harness {
         overdrive_control_plane::test_empty_listener_facts(),
         std::net::Ipv4Addr::LOCALHOST,
         crate::integration::serve_ports::worker(),
-        crate::integration::serve_ports::owner(),
-        crate::integration::serve_ports::exec_gate(),
+        seam_owner.clone(),
+        seam_gate.clone(),
         crate::integration::serve_ports::pool(),
     );
+    crate::integration::vm_dispatch::start_shared_mtls_owner(&state).await;
 
     exit_observer::spawn(
         state.obs.clone(),
@@ -208,7 +200,17 @@ async fn build_harness(tmp: &TempDir) -> Harness {
         }
     });
 
-    Harness { state, sim_obs, sim_driver, target, alloc_id, sim_clock, ticker_handle }
+    Harness {
+        seam_owner,
+        _seam_supervisor: seam_supervisor,
+        state,
+        sim_obs,
+        sim_driver,
+        target,
+        alloc_id,
+        sim_clock,
+        ticker_handle,
+    }
 }
 
 // -----------------------------------------------------------------------
@@ -272,14 +274,14 @@ async fn watcher_cannot_emit_exit_before_running_row_committed() {
 
     let mut found_terminal_event: Option<AllocStateWire> = None;
     'outer: for tick_n in 0_u64..60 {
-        run_convergence_tick_with_network_provisioner_for_test(
+        run_convergence_tick_with_guest_network_provisioner_for_test(
             &h.state,
             &workload_lifecycle_name,
             &h.target,
             start + Duration::from_millis(tick_n.saturating_mul(100)),
             tick_n,
             deadline,
-            &NoopNetworkProvisioner,
+            h.seam_owner.as_ref(),
         )
         .await
         .expect("tick");
@@ -386,14 +388,14 @@ async fn degraded_escalation_still_fires_running_gate() {
     let mut tick_n: u64 = 0;
     let mut reached_running = false;
     while tick_n < 30 && !reached_running {
-        run_convergence_tick_with_network_provisioner_for_test(
+        run_convergence_tick_with_guest_network_provisioner_for_test(
             &h.state,
             &workload_lifecycle_name,
             &h.target,
             start + Duration::from_millis(tick_n.saturating_mul(100)),
             tick_n,
             deadline,
-            &NoopNetworkProvisioner,
+            h.seam_owner.as_ref(),
         )
         .await
         .expect("tick");
@@ -446,14 +448,14 @@ async fn degraded_escalation_still_fires_running_gate() {
     //    watcher).
     let mut saw_degraded_event = false;
     'outer: for tick_n in tick_n..(tick_n + 50) {
-        run_convergence_tick_with_network_provisioner_for_test(
+        run_convergence_tick_with_guest_network_provisioner_for_test(
             &h.state,
             &workload_lifecycle_name,
             &h.target,
             start + Duration::from_millis(tick_n.saturating_mul(100)),
             tick_n,
             deadline,
-            &NoopNetworkProvisioner,
+            h.seam_owner.as_ref(),
         )
         .await
         .expect("tick");

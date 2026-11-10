@@ -14,16 +14,14 @@
 //!
 //! This allocator is the SSOT for that stable `F`. It is a per-host,
 //! in-memory `<workload> → Ipv4Addr` map — empty on boot, rebuilt by re-`assign`ing
-//! every still-declared `<workload>` (the [`NetSlotAllocator`] restart precedent).
+//! every still-declared `<workload>`.
 //!
 //! # Keyed by the logical `<workload>`, released only on logical deletion
 //!
-//! [`crate::veth_provisioner::NetSlotAllocator`] is the structural precedent
-//! — a pure smallest-free scan separated from an atomic held-map wrapper — but
-//! this allocator diverges from it on the ONE load-bearing axis:
+//! The structure is a pure smallest-free scan separated from an atomic
+//! held-map wrapper. The ONE load-bearing axis is the key and the release
+//! rule:
 //!
-//! - `NetSlotAllocator` keys on `AllocationId` and releases on alloc terminal
-//!   (each alloc cycle ⇒ a new slot).
 //! - `FrontendAddrAllocator` keys on the **logical `<workload>`**
 //!   ([`MeshServiceName`] — the `<workload>` label in `<workload>.svc.overdrive.local`)
 //!   and releases **ONLY on logical-workload deletion** — NEVER on an alloc
@@ -145,8 +143,7 @@ fn frontend_block_capacity() -> u64 {
 /// answers `<workload>.svc.overdrive.local` with. The held `MeshServiceName →
 /// Ipv4Addr` map is the allocator's state.
 ///
-/// Held-state shape mirrors [`crate::veth_provisioner::NetSlotAllocator`]:
-/// ephemeral runtime state, NEVER persisted, rebuilt on restart by
+/// Held-state shape: ephemeral runtime state, NEVER persisted, rebuilt on restart by
 /// re-`assign`ing every still-declared `<workload>` (single-node Phase 1; no
 /// cross-restart persistence). `BTreeMap` (not `HashMap`) for deterministic
 /// iteration order (`.claude/rules/development.md` § "Ordered-collection
@@ -272,8 +269,7 @@ mod tests {
     /// PURE decision — over an empty held set the smallest-free address is the
     /// FIRST USABLE host (`10.98.0.1`), NEVER the reserved network address
     /// `10.98.0.0`. Pins the network-endpoint reservation at the pure-scan level
-    /// (a `network()+1 → network()+0` mutant flips this to `10.98.0.0`); mirrors
-    /// `NetSlotAllocator::smallest_free_slot`'s empty-set test.
+    /// (a `network()+1 → network()+0` mutant flips this to `10.98.0.0`).
     #[test]
     fn smallest_free_addr_of_empty_held_set_is_the_first_usable_host() {
         let held = BTreeSet::new();
@@ -286,7 +282,7 @@ mod tests {
 
     /// PURE decision — the scan returns the LOWEST GAP, not the next-monotonic
     /// address, so a released (lower) address is reclaimed ahead of an unused
-    /// higher one. Mirrors `NetSlotAllocator`'s lowest-gap test and is the
+    /// higher one. It is the
     /// pure-level companion to the FRONTEND-04 reclaim assertion.
     #[test]
     fn smallest_free_addr_returns_the_lowest_gap_not_the_next_monotonic() {
@@ -309,7 +305,7 @@ mod tests {
     /// 65534-address span makes a port-level exhaustion test prohibitively
     /// expensive, so this pure seam is where refusal is exercised affordably —
     /// the exact reason `smallest_free_addr` is separated from the held-map
-    /// wrapper (mirrors `NetSlotAllocator`'s full-space exhaustion test).
+    /// wrapper.
     #[test]
     fn smallest_free_addr_of_full_block_is_exhausted_error() {
         let first = u32::from(WORKLOAD_FRONTEND_BASE.network()) + 1;

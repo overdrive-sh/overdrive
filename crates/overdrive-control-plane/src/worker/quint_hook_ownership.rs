@@ -88,7 +88,6 @@ use overdrive_core::SpiffeId;
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::WorkloadKind;
 use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
-use overdrive_core::eval_broker::EvaluationBroker;
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::observation::{ProbeIdx, ProbeRole};
 use overdrive_core::reconcilers::{Action, TickContext};
@@ -102,7 +101,6 @@ use overdrive_core::traits::observation_store::{
     AllocState, ObservationStore, ObservationStoreError,
 };
 use overdrive_core::transition_reason::{StoppedBy, TerminalCondition};
-use overdrive_dataplane::allocators::{PersistentServiceVipAllocator, VipRange};
 use overdrive_sim::adapters::ca::SimCa;
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::dataplane::SimDataplane;
@@ -111,7 +109,6 @@ use overdrive_sim::adapters::entropy::SimEntropy;
 use overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_sim::adapters::probers::{SimHttpProber, SimTcpProber};
-use overdrive_sim::adapters::vm_host_state::SimVmHostState;
 use overdrive_store_local::LocalIntentStore;
 use overdrive_worker::probe_runner::ProbeRunner;
 use parking_lot::{Condvar, Mutex};
@@ -123,12 +120,15 @@ use tokio::sync::{broadcast, mpsc};
 use tokio_util::sync::CancellationToken;
 
 use super::exit_observer;
-use crate::action_shim::{
-    AllocDriverIndex, LifecycleEvent, WorkloadNetworkProvisioner, dispatch_with_network_provisioner,
-};
+use crate::AppState;
+use crate::action_shim::dispatch_with_guest_network_provisioner_for_test;
+use crate::guest_network::SharedGuestNetworkOwner;
 use crate::guest_network::quint_itf::{self, ItfError, Qualified};
 use crate::identity_mgr::IdentityMgr;
-use crate::veth_provisioner::{NetSlotAllocator, VethProvisionError, WorkloadNetnsPlan};
+use crate::shared_network_test_ports::TestSharedOwner;
+use overdrive_core::guest_network::{
+    GuestNetworkExecGate, GuestNetworkExecSupervisor, GuestNetworkExecWiring,
+};
 
 const MAIN: &str = "hooks_conf";
 const MODULE: &str = "hook_ownership";
@@ -371,25 +371,6 @@ impl DriverPort for PacedDriver {
     }
 }
 
-#[derive(Debug, Default)]
-struct SimNetworkProvisioner;
-
-impl WorkloadNetworkProvisioner for SimNetworkProvisioner {
-    fn provision(
-        &self,
-        _workload: &WorkloadNetnsPlan,
-    ) -> std::result::Result<(), VethProvisionError> {
-        Ok(())
-    }
-
-    fn teardown(
-        &self,
-        _workload: &WorkloadNetnsPlan,
-    ) -> std::result::Result<(), VethProvisionError> {
-        Ok(())
-    }
-}
-
 fn tcp_descriptor(role: ProbeRole, idx: u32) -> ProbeDescriptor {
     ProbeDescriptor {
         idx: ProbeIdx::new(idx),
@@ -435,13 +416,15 @@ struct Composition {
     /// The same store's fault-injection handle (environment fault: a failing row write). Never
     /// read by the projection.
     write_faults: Arc<SimObservationStore>,
-    clock: Arc<SimClock>,
     runner: Arc<ProbeRunner>,
     driver: Arc<PacedDriver>,
-    drivers: Arc<DriverRegistry>,
-    alloc_drivers: AllocDriverIndex,
-    events: Arc<broadcast::Sender<LifecycleEvent>>,
-    intent: Arc<dyn IntentStore>,
+    /// The production dispatch composition's state (drivers, lifecycle bus, allocator, guest
+    /// pool, EXEC gate, shared guest-network owner) the VM seam dispatches over.
+    state: Arc<AppState>,
+    /// The one shared guest-network owner (converged before `state` copied its flow ports).
+    owner: Arc<TestSharedOwner>,
+    _supervisor: Arc<GuestNetworkExecSupervisor>,
+    _gate: Arc<GuestNetworkExecGate>,
     ticks: Mutex<u64>,
 }
 
@@ -459,32 +442,11 @@ impl Composition {
             tick: tick_no,
             deadline: now + Duration::from_secs(1),
         };
-        let allocator = Arc::new(tokio::sync::Mutex::new(PersistentServiceVipAllocator::new(
-            VipRange::default(),
-            Arc::clone(&self.intent),
-        )));
-        let broker = Mutex::new(EvaluationBroker::new());
-        let mtls_worker = crate::shared_network_test_ports::mtls_worker();
-        dispatch_with_network_provisioner(
+        dispatch_with_guest_network_provisioner_for_test(
             vec![action],
-            self.drivers.as_ref(),
-            &self.alloc_drivers,
-            self.obs.as_ref(),
-            &SimDataplane::new(),
-            &SimCa::new(Arc::new(SimEntropy::new(0))),
-            self.clock.as_ref(),
-            &IdentityMgr::new(None),
-            &crate::GatewayIdentityActionComposition::disabled(),
-            &self.events,
+            self.state.as_ref(),
             &tick,
-            &NodeId::new("node-001").expect("valid node id"),
-            allocator,
-            &broker,
-            None,
-            &mtls_worker,
-            &NetSlotAllocator::new(),
-            &SimNetworkProvisioner,
-            &SimVmHostState::new(),
+            self.owner.as_ref(),
         )
         .await
         .map_err(|e| e.to_string())
@@ -543,19 +505,59 @@ impl HookOwnershipDriver {
             registry.insert(Arc::clone(&driver) as Arc<dyn DriverPort>);
             Arc::new(registry)
         };
-        let intent: Arc<dyn IntentStore> =
-            Arc::new(LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open intent"));
+        let store_path = tmp.path().join("intent.redb");
+        let store = Arc::new(LocalIntentStore::open(&store_path).expect("open intent"));
         let (events, _rx) = broadcast::channel(64);
+        let owner = Arc::new(TestSharedOwner::new());
+        let (supervisor, gate, state) = rt.block_on(async {
+            let mut runtime =
+                crate::reconciler_runtime::ReconcilerRuntime::new_with_redb_view_store_for_test(
+                    tmp.path(),
+                )
+                .expect("runtime");
+            runtime.register(crate::noop_heartbeat()).await.expect("register heartbeat");
+            // Converged BEFORE `AppState::new`, which copies the owner's bound flow ports.
+            owner.converge_shared().await.expect("the fixture owner converges");
+            let worker = crate::shared_network_test_ports::mtls_worker();
+            worker.start_shared_owner().await.expect("the shared mTLS owner starts over the sim");
+            let wiring = GuestNetworkExecWiring::new(Arc::new(SimClock::new()));
+            let gate = wiring.gate();
+            let supervisor = wiring.supervisor();
+            assert!(supervisor.open_after_boot(), "the EXEC gate opens after boot");
+            let allocator =
+                crate::test_default_allocator(Arc::clone(&store) as Arc<dyn IntentStore>);
+            let mut state = AppState::new(
+                store,
+                store_path,
+                Arc::clone(&obs) as Arc<dyn ObservationStore>,
+                Arc::new(runtime),
+                Arc::clone(&driver) as Arc<dyn DriverPort>,
+                Arc::clone(&clock) as Arc<dyn Clock>,
+                Arc::new(SimDataplane::new()),
+                Arc::new(SimCa::new(Arc::new(SimEntropy::new(0)))),
+                Arc::new(IdentityMgr::new(None)),
+                NodeId::new("node-001").expect("valid node id"),
+                allocator,
+                crate::test_empty_listener_facts(),
+                std::net::Ipv4Addr::LOCALHOST,
+                worker,
+                Arc::clone(&owner) as Arc<dyn SharedGuestNetworkOwner>,
+                Arc::clone(&gate),
+                crate::shared_network_test_ports::guest_pool(),
+            );
+            state.drivers = drivers;
+            state.lifecycle_events = Arc::new(events);
+            (supervisor, gate, Arc::new(state))
+        });
         let comp = Arc::new(Composition {
             obs: Arc::clone(&obs) as Arc<dyn ObservationStore>,
             write_faults: Arc::clone(&obs),
-            clock: Arc::clone(&clock),
             runner,
             driver: Arc::clone(&driver),
-            drivers,
-            alloc_drivers: AllocDriverIndex::default(),
-            events: Arc::new(events),
-            intent,
+            state,
+            owner,
+            _supervisor: supervisor,
+            _gate: gate,
             ticks: Mutex::new(0),
         });
         // The production exit observer, for the driver it is spawned for.
@@ -564,7 +566,7 @@ impl HookOwnershipDriver {
             exit_observer::spawn_with_runtime(
                 Arc::clone(&obs) as Arc<dyn ObservationStore>,
                 Arc::clone(&driver) as Arc<dyn DriverPort>,
-                Arc::clone(&comp.events),
+                Arc::clone(&comp.state.lifecycle_events),
                 Arc::clone(&clock) as Arc<dyn Clock>,
                 None,
                 CancellationToken::new(),

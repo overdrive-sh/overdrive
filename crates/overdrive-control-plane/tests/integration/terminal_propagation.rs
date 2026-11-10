@@ -23,13 +23,14 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use overdrive_control_plane::action_shim::{LifecycleEvent, WorkloadNetworkProvisioner};
+use overdrive_control_plane::action_shim::LifecycleEvent;
+use overdrive_control_plane::guest_network::SharedGuestNetworkOwner;
 use overdrive_control_plane::reconciler_runtime::{
-    ReconcilerRuntime, run_convergence_tick_with_network_provisioner_for_test,
+    ReconcilerRuntime, run_convergence_tick_with_guest_network_provisioner_for_test,
 };
-use overdrive_control_plane::veth_provisioner::{VethProvisionError, WorkloadNetnsPlan};
 use overdrive_control_plane::{AppState, noop_heartbeat, workload_lifecycle};
 use overdrive_core::aggregate::{DriverInput, IntentKey, Job, JobSpecInput, ResourcesInput};
+use overdrive_core::guest_network::GuestNetworkExecSupervisor;
 use overdrive_core::id::NodeId;
 use overdrive_core::reconcilers::TargetResource;
 use overdrive_core::traits::driver::{Driver, DriverType};
@@ -37,22 +38,17 @@ use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{AllocState, ObservationStore};
 use overdrive_core::transition_reason::{StoppedBy, TerminalCondition};
 use overdrive_sim::adapters::driver::SimDriver;
+use overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_store_local::LocalIntentStore;
 use tempfile::TempDir;
 use tokio::sync::broadcast;
 
-#[derive(Debug, Default)]
-struct NoopNetworkProvisioner;
-
-impl WorkloadNetworkProvisioner for NoopNetworkProvisioner {
-    fn provision(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
-        Ok(())
-    }
-
-    fn teardown(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
-        Ok(())
-    }
+/// The converged `Sim` shared guest-network owner (the seam's provisioner) and
+/// the supervisor that keeps the EXEC gate open for the test's lifetime.
+struct GuestNetwork {
+    owner: Arc<SimSharedGuestNetworkOwner>,
+    _supervisor: Arc<GuestNetworkExecSupervisor>,
 }
 
 /// Async bootstrap — wires runtime, store, obs, driver, and state with
@@ -62,8 +58,12 @@ impl WorkloadNetworkProvisioner for NoopNetworkProvisioner {
 async fn bootstrap_async(
     tmp: &TempDir,
     fail_starts: bool,
-) -> (AppState, broadcast::Receiver<LifecycleEvent>, Arc<overdrive_sim::adapters::clock::SimClock>)
-{
+) -> (
+    AppState,
+    broadcast::Receiver<LifecycleEvent>,
+    Arc<overdrive_sim::adapters::clock::SimClock>,
+    GuestNetwork,
+) {
     let mut runtime =
         ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime");
     runtime.register(noop_heartbeat()).await.expect("register noop");
@@ -91,6 +91,12 @@ async fn bootstrap_async(
     // never reaches CEILING. SimClock advances when the background
     // ticker calls `clock.tick(...)` so the backoff window crosses
     // and the reconciler emits FinalizeFailed within the test budget.
+    // `run_server` starts the worker's shared owner at boot; a VM allocation's
+    // intercept install is refused until it is healthy.
+    let worker = crate::integration::serve_ports::worker();
+    worker.start_shared_owner().await.expect("the worker's shared owner starts");
+    let (owner, gate, supervisor) =
+        crate::integration::vm_dispatch::converged_owner_and_open_gate().await;
     let allocator = overdrive_control_plane::test_default_allocator(
         Arc::clone(&store) as Arc<dyn overdrive_core::traits::intent_store::IntentStore>
     );
@@ -110,13 +116,13 @@ async fn bootstrap_async(
         allocator,
         overdrive_control_plane::test_empty_listener_facts(),
         std::net::Ipv4Addr::LOCALHOST,
-        crate::integration::serve_ports::worker(),
-        crate::integration::serve_ports::owner(),
-        crate::integration::serve_ports::exec_gate(),
+        worker,
+        Arc::clone(&owner) as Arc<dyn SharedGuestNetworkOwner>,
+        gate,
         crate::integration::serve_ports::pool(),
     );
     let receiver = state.lifecycle_events.subscribe();
-    (state, receiver, sim_clock)
+    (state, receiver, sim_clock, GuestNetwork { owner, _supervisor: supervisor })
 }
 
 /// Drain all currently-buffered events from the receiver into a Vec.
@@ -142,7 +148,7 @@ fn drain(rx: &mut broadcast::Receiver<LifecycleEvent>) -> Vec<LifecycleEvent> {
 #[tokio::test]
 async fn terminal_backoff_exhausted_appears_on_alloc_status_and_streaming() {
     let tmp = TempDir::new().expect("tempdir");
-    let (state, mut rx, sim_clock) = bootstrap_async(&tmp, true).await;
+    let (state, mut rx, sim_clock, guest_network) = bootstrap_async(&tmp, true).await;
 
     // Background ticker — advances logical time so any clock.sleep(...)
     // parked inside the driver wakes promptly.
@@ -188,14 +194,14 @@ async fn terminal_backoff_exhausted_appears_on_alloc_status_and_streaming() {
     // emit FinalizeFailed) plus headroom for backoff timer ticks.
     let mut terminal_row = None;
     for tick_n in 0..200_u64 {
-        run_convergence_tick_with_network_provisioner_for_test(
+        run_convergence_tick_with_guest_network_provisioner_for_test(
             &state,
             &workload_lifecycle_name,
             &target,
             now + Duration::from_millis(tick_n.saturating_mul(100)),
             tick_n,
             deadline,
-            &NoopNetworkProvisioner,
+            guest_network.owner.as_ref(),
         )
         .await
         .expect("tick");
@@ -245,7 +251,7 @@ async fn terminal_backoff_exhausted_appears_on_alloc_status_and_streaming() {
 #[tokio::test]
 async fn terminal_stopped_appears_on_both_surfaces() {
     let tmp = TempDir::new().expect("tempdir");
-    let (state, mut rx, sim_clock) = bootstrap_async(&tmp, false).await;
+    let (state, mut rx, sim_clock, guest_network) = bootstrap_async(&tmp, false).await;
 
     let ticker_clock = sim_clock.clone();
     let _ticker = tokio::spawn(async move {
@@ -284,14 +290,14 @@ async fn terminal_stopped_appears_on_both_surfaces() {
     // Drive until Running.
     let mut converged_running = false;
     for tick_n in 0..30_u64 {
-        run_convergence_tick_with_network_provisioner_for_test(
+        run_convergence_tick_with_guest_network_provisioner_for_test(
             &state,
             &workload_lifecycle_name,
             &target,
             now + Duration::from_millis(tick_n.saturating_mul(100)),
             tick_n,
             deadline,
-            &NoopNetworkProvisioner,
+            guest_network.owner.as_ref(),
         )
         .await
         .expect("tick");
@@ -315,14 +321,14 @@ async fn terminal_stopped_appears_on_both_surfaces() {
     // and the row + event must carry terminal=Stopped{by:Operator}.
     let mut terminal_row = None;
     for tick_n in 30..120_u64 {
-        run_convergence_tick_with_network_provisioner_for_test(
+        run_convergence_tick_with_guest_network_provisioner_for_test(
             &state,
             &workload_lifecycle_name,
             &target,
             now + Duration::from_millis(tick_n.saturating_mul(100)),
             tick_n,
             deadline,
-            &NoopNetworkProvisioner,
+            guest_network.owner.as_ref(),
         )
         .await
         .expect("tick");
@@ -364,7 +370,7 @@ async fn terminal_stopped_appears_on_both_surfaces() {
 #[tokio::test]
 async fn non_terminal_transitions_emit_none() {
     let tmp = TempDir::new().expect("tempdir");
-    let (state, mut rx, sim_clock) = bootstrap_async(&tmp, false).await;
+    let (state, mut rx, sim_clock, guest_network) = bootstrap_async(&tmp, false).await;
 
     let ticker_clock = sim_clock.clone();
     let _ticker = tokio::spawn(async move {
@@ -404,14 +410,14 @@ async fn non_terminal_transitions_emit_none() {
     // Drive until Running, then stop early.
     let mut converged_running = false;
     for tick_n in 0..30_u64 {
-        run_convergence_tick_with_network_provisioner_for_test(
+        run_convergence_tick_with_guest_network_provisioner_for_test(
             &state,
             &workload_lifecycle_name,
             &target,
             now + Duration::from_millis(tick_n.saturating_mul(100)),
             tick_n,
             deadline,
-            &NoopNetworkProvisioner,
+            guest_network.owner.as_ref(),
         )
         .await
         .expect("tick");

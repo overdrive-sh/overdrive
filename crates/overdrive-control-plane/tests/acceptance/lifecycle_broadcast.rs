@@ -36,10 +36,7 @@ use std::time::{Duration, Instant};
 use async_trait::async_trait;
 use proptest::prelude::*;
 
-use overdrive_control_plane::action_shim::{
-    LifecycleEvent, ShimError, WorkloadNetworkProvisioner, dispatch_with_network_provisioner,
-};
-use overdrive_control_plane::veth_provisioner::{VethProvisionError, WorkloadNetnsPlan};
+use overdrive_control_plane::action_shim::{LifecycleEvent, ShimError};
 use overdrive_core::SpiffeId;
 use overdrive_core::TransitionReason;
 use overdrive_core::UnixInstant;
@@ -55,23 +52,7 @@ use overdrive_core::traits::observation_store::{
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use tokio::sync::{Notify, Semaphore, broadcast};
 
-/// service-vip-allocator step 03-02 — the action shim's dispatch
-/// signature carries the allocator for the `ReleaseServiceVip` arm.
-/// These lifecycle-broadcast tests do not dispatch `ReleaseServiceVip`,
-/// so an ephemeral tempdir-backed allocator is sufficient. The
-/// returned tuple keeps the tempdir alive for the test's lifetime.
-fn fresh_test_allocator() -> (
-    tempfile::TempDir,
-    Arc<tokio::sync::Mutex<overdrive_dataplane::allocators::PersistentServiceVipAllocator>>,
-) {
-    let tmp = tempfile::TempDir::new().expect("tempdir");
-    let store: Arc<dyn overdrive_core::traits::intent_store::IntentStore> = Arc::new(
-        overdrive_store_local::LocalIntentStore::open(tmp.path().join("intent.redb"))
-            .expect("open store for allocator"),
-    );
-    let allocator = overdrive_control_plane::test_default_allocator(store);
-    (tmp, allocator)
-}
+use crate::acceptance::vm_dispatch::{VmDispatchFixture, VmDispatchPorts};
 
 // ---------------------------------------------------------------------------
 // Test doubles
@@ -204,17 +185,16 @@ impl Driver for FailingDriver {
 // Helpers
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Default)]
-struct NoopNetworkProvisioner;
-
-impl WorkloadNetworkProvisioner for NoopNetworkProvisioner {
-    fn provision(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
-        Ok(())
-    }
-
-    fn teardown(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
-        Ok(())
-    }
+/// Boot the VM dispatch composition over `driver` and `obs`; the shim's
+/// writer node is `writer-1`.
+async fn boot_fixture(
+    driver: Arc<dyn Driver>,
+    obs: Arc<dyn ObservationStore>,
+) -> VmDispatchFixture {
+    let mut ports = VmDispatchPorts::sim(driver);
+    ports.obs = obs;
+    ports.node_id = NodeId::new("writer-1").expect("NodeId");
+    VmDispatchFixture::boot(ports).await
 }
 
 fn build_spec(alloc_id: &AllocationId, workload_id: &WorkloadId) -> AllocationSpec {
@@ -294,19 +274,12 @@ proptest! {
             .expect("tokio runtime");
 
         runtime.block_on(async move {
-            // Broadcast channel — capacity comfortably above N=32 so
-            // no slow-receiver lag in this test.
-            let (tx, mut rx) = broadcast::channel::<LifecycleEvent>(256);
-
             let driver: Arc<dyn Driver> = Arc::new(AlwaysOkDriver);
-            let drivers: Arc<overdrive_core::traits::driver::DriverRegistry> = {
-                let mut r = overdrive_core::traits::driver::DriverRegistry::new();
-                r.insert(Arc::clone(&driver));
-                Arc::new(r)
-            };
-            let alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::default();
             let obs: Arc<dyn ObservationStore> =
                 Arc::new(SimObservationStore::single_peer(fresh_node(), 0));
+            let fixture = boot_fixture(driver, obs).await;
+            // Subscribe to the lifecycle bus BEFORE dispatch.
+            let mut rx = fixture.state.lifecycle_events.subscribe();
             let workload_id = WorkloadId::new("payments").expect("job id");
             let node_id = fresh_node();
 
@@ -331,27 +304,7 @@ proptest! {
             let tick = make_tick(0);
 
             // Dispatch — the shim writes N rows AND broadcasts N events.
-            let dataplane: std::sync::Arc<dyn overdrive_core::traits::dataplane::Dataplane> = std::sync::Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new());
-            let writer_node = overdrive_core::id::NodeId::new("writer-1").expect("NodeId");
-            let (_alloc_tmp, allocator) = fresh_test_allocator();
-            let test_broker = parking_lot::Mutex::new(
-                overdrive_core::eval_broker::EvaluationBroker::new(),
-            );
-            let mtls_worker_0501_0 = crate::acceptance::serve_ports::worker();
-            dispatch_with_network_provisioner(actions, drivers.as_ref(), &alloc_drivers, obs.as_ref(), dataplane.as_ref(),
-                &overdrive_sim::adapters::ca::SimCa::new(std::sync::Arc::new(overdrive_sim::adapters::entropy::SimEntropy::new(0))),
-                &overdrive_sim::adapters::clock::SimClock::new(),
-                &overdrive_control_plane::identity_mgr::IdentityMgr::new(None),
-&overdrive_control_plane::GatewayIdentityActionComposition::disabled(),
-                &tx, &tick, &writer_node, allocator, &test_broker, None,&mtls_worker_0501_0,
-        // transparent-mtls-enrollment step 04-01: a fresh per-host slot
-        // allocator — this fixture exercises no netns provisioning.
-        &overdrive_control_plane::veth_provisioner::NetSlotAllocator::new(),
-        &NoopNetworkProvisioner,
-        &overdrive_sim::adapters::vm_host_state::SimVmHostState::new(),
-    )
-                .await
-                .expect("dispatch must succeed");
+            fixture.dispatch(actions, &tick).await.expect("dispatch must succeed");
 
             // Assert exactly N events arrived on the channel, in submit
             // order (broadcast preserves send order to all subscribers).
@@ -387,17 +340,11 @@ async fn run_classifier_scenario(
     reason_text: &str,
     expected_reason: TransitionReason,
 ) {
-    let (tx, mut rx) = broadcast::channel::<LifecycleEvent>(16);
-
     let driver: Arc<dyn Driver> = Arc::new(FailingDriver::new(class, reason_text));
-    let drivers: Arc<overdrive_core::traits::driver::DriverRegistry> = {
-        let mut r = overdrive_core::traits::driver::DriverRegistry::new();
-        r.insert(Arc::clone(&driver));
-        Arc::new(r)
-    };
-    let alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::default();
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(fresh_node(), 0));
+    let fixture = boot_fixture(driver, Arc::clone(&obs)).await;
+    let mut rx = fixture.state.lifecycle_events.subscribe();
 
     let alloc_id = AllocationId::new("alloc-fail").expect("alloc id");
     let workload_id = WorkloadId::new("payments").expect("job id");
@@ -413,41 +360,10 @@ async fn run_classifier_scenario(
 
     let tick = make_tick(0);
 
-    let dataplane: std::sync::Arc<dyn overdrive_core::traits::dataplane::Dataplane> =
-        std::sync::Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new());
-
-    let writer_node = overdrive_core::id::NodeId::new("writer-1").expect("NodeId");
-
-    let (_alloc_tmp, allocator) = fresh_test_allocator();
-    let test_broker = parking_lot::Mutex::new(overdrive_core::eval_broker::EvaluationBroker::new());
-    let mtls_worker_0501_1 = crate::acceptance::serve_ports::worker();
-    dispatch_with_network_provisioner(
-        vec![action],
-        drivers.as_ref(),
-        &alloc_drivers,
-        obs.as_ref(),
-        dataplane.as_ref(),
-        &overdrive_sim::adapters::ca::SimCa::new(std::sync::Arc::new(
-            overdrive_sim::adapters::entropy::SimEntropy::new(0),
-        )),
-        &overdrive_sim::adapters::clock::SimClock::new(),
-        &overdrive_control_plane::identity_mgr::IdentityMgr::new(None),
-        &overdrive_control_plane::GatewayIdentityActionComposition::disabled(),
-        &tx,
-        &tick,
-        &writer_node,
-        allocator,
-        &test_broker,
-        None,
-        &mtls_worker_0501_1,
-        // transparent-mtls-enrollment step 04-01: a fresh per-host slot
-        // allocator — this fixture exercises no netns provisioning.
-        &overdrive_control_plane::veth_provisioner::NetSlotAllocator::new(),
-        &NoopNetworkProvisioner,
-        &overdrive_sim::adapters::vm_host_state::SimVmHostState::new(),
-    )
-    .await
-    .expect("dispatch must succeed even on driver failure (failure is recorded)");
+    fixture
+        .dispatch(vec![action], &tick)
+        .await
+        .expect("dispatch must succeed even on driver failure (failure is recorded)");
 
     // Assert the row.
     let rows = obs.alloc_status_rows().await.expect("read rows");
@@ -481,18 +397,11 @@ async fn run_classifier_scenario(
 }
 
 async fn dispatch_cleanup_composition_action(
-    driver: Arc<dyn Driver>,
-    obs: &SimObservationStore,
-    tx: &broadcast::Sender<LifecycleEvent>,
+    fixture: &VmDispatchFixture,
     alloc_id: &AllocationId,
     tick: u64,
     restart: bool,
 ) -> Result<(), ShimError> {
-    let drivers = {
-        let mut registry = overdrive_core::traits::driver::DriverRegistry::new();
-        registry.insert(driver);
-        registry
-    };
     let workload_id = WorkloadId::new("cleanup-composition").expect("workload id");
     let spec = build_spec(alloc_id, &workload_id);
     let action = if restart {
@@ -510,34 +419,7 @@ async fn dispatch_cleanup_composition_action(
             kind: overdrive_core::aggregate::WorkloadKind::Service,
         }
     };
-    let alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::default();
-    let (_tmp, allocator) = fresh_test_allocator();
-    let broker = parking_lot::Mutex::new(overdrive_core::eval_broker::EvaluationBroker::new());
-    let mtls_worker_0501_2 = crate::acceptance::serve_ports::worker();
-    dispatch_with_network_provisioner(
-        vec![action],
-        &drivers,
-        &alloc_drivers,
-        obs,
-        &overdrive_sim::adapters::dataplane::SimDataplane::new(),
-        &overdrive_sim::adapters::ca::SimCa::new(Arc::new(
-            overdrive_sim::adapters::entropy::SimEntropy::new(0),
-        )),
-        &overdrive_sim::adapters::clock::SimClock::new(),
-        &overdrive_control_plane::identity_mgr::IdentityMgr::new(None),
-        &overdrive_control_plane::GatewayIdentityActionComposition::disabled(),
-        tx,
-        &make_tick(tick),
-        &NodeId::new("writer-1").expect("writer node"),
-        allocator,
-        &broker,
-        None,
-        &mtls_worker_0501_2,
-        &overdrive_control_plane::veth_provisioner::NetSlotAllocator::new(),
-        &NoopNetworkProvisioner,
-        &overdrive_sim::adapters::vm_host_state::SimVmHostState::new(),
-    )
-    .await
+    fixture.dispatch(vec![action], &make_tick(tick)).await
 }
 
 /// Outcome anchor: DISCUSS Elevator Pitch
@@ -581,27 +463,25 @@ async fn barriered_starting_and_live_duplicate_actions_preserve_the_real_shim_ro
         entered: Notify::new(),
         release: Semaphore::new(0),
     });
-    let (tx, mut rx) = broadcast::channel(16);
+    let fixture = Arc::new(
+        boot_fixture(
+            Arc::clone(&driver) as Arc<dyn Driver>,
+            Arc::clone(&obs) as Arc<dyn ObservationStore>,
+        )
+        .await,
+    );
+    let mut rx = fixture.state.lifecycle_events.subscribe();
 
-    let original_obs = Arc::clone(&obs);
-    let original_driver = Arc::clone(&driver);
-    let original_tx = tx.clone();
+    let original_fixture = Arc::clone(&fixture);
     let original_alloc = alloc.clone();
     let original = tokio::spawn(async move {
-        dispatch_cleanup_composition_action(
-            original_driver,
-            original_obs.as_ref(),
-            &original_tx,
-            &original_alloc,
-            11,
-            false,
-        )
-        .await
-        .expect("the original start dispatch succeeds");
+        dispatch_cleanup_composition_action(original_fixture.as_ref(), &original_alloc, 11, false)
+            .await
+            .expect("the original start dispatch succeeds");
     });
     driver.entered.notified().await;
 
-    dispatch_cleanup_composition_action(driver.clone(), obs.as_ref(), &tx, &alloc, 12, false)
+    dispatch_cleanup_composition_action(fixture.as_ref(), &alloc, 12, false)
         .await
         .expect("the Starting duplicate is a handled conflict");
     assert_eq!(
@@ -623,7 +503,7 @@ async fn barriered_starting_and_live_duplicate_actions_preserve_the_real_shim_ro
     assert_eq!(started.to, overdrive_control_plane::api::AllocStateWire::Running);
     assert!(rx.try_recv().is_err());
 
-    dispatch_cleanup_composition_action(driver.clone(), obs.as_ref(), &tx, &alloc, 13, false)
+    dispatch_cleanup_composition_action(fixture.as_ref(), &alloc, 13, false)
         .await
         .expect("the Live duplicate is a handled conflict");
     assert_eq!(
@@ -654,17 +534,11 @@ async fn s_cp_05_classifier_unclassified_falls_through_to_driver_internal_error(
 
 #[tokio::test]
 async fn stop_action_also_broadcasts_lifecycle_event() {
-    let (tx, mut rx) = broadcast::channel::<LifecycleEvent>(16);
-
     let driver: Arc<dyn Driver> = Arc::new(AlwaysOkDriver);
-    let drivers: Arc<overdrive_core::traits::driver::DriverRegistry> = {
-        let mut r = overdrive_core::traits::driver::DriverRegistry::new();
-        r.insert(Arc::clone(&driver));
-        Arc::new(r)
-    };
-    let alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::default();
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(fresh_node(), 0));
+    let fixture = boot_fixture(driver, Arc::clone(&obs)).await;
+    let mut rx = fixture.state.lifecycle_events.subscribe();
 
     // Seed a prior alloc row so `find_prior_alloc_row` finds it on the
     // Stop arm.
@@ -706,39 +580,7 @@ async fn stop_action_also_broadcasts_lifecycle_event() {
     // reconciler is the single source of every terminal claim.
     let action = Action::StopAllocation { alloc_id: alloc_id.clone(), terminal: None };
     let tick = make_tick(1);
-    let dataplane: std::sync::Arc<dyn overdrive_core::traits::dataplane::Dataplane> =
-        std::sync::Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new());
-    let writer_node = overdrive_core::id::NodeId::new("writer-1").expect("NodeId");
-    let (_alloc_tmp, allocator) = fresh_test_allocator();
-    let test_broker = parking_lot::Mutex::new(overdrive_core::eval_broker::EvaluationBroker::new());
-    let mtls_worker_0501_3 = crate::acceptance::serve_ports::worker();
-    dispatch_with_network_provisioner(
-        vec![action],
-        drivers.as_ref(),
-        &alloc_drivers,
-        obs.as_ref(),
-        dataplane.as_ref(),
-        &overdrive_sim::adapters::ca::SimCa::new(std::sync::Arc::new(
-            overdrive_sim::adapters::entropy::SimEntropy::new(0),
-        )),
-        &overdrive_sim::adapters::clock::SimClock::new(),
-        &overdrive_control_plane::identity_mgr::IdentityMgr::new(None),
-        &overdrive_control_plane::GatewayIdentityActionComposition::disabled(),
-        &tx,
-        &tick,
-        &writer_node,
-        allocator,
-        &test_broker,
-        None,
-        &mtls_worker_0501_3,
-        // transparent-mtls-enrollment step 04-01: a fresh per-host slot
-        // allocator — this fixture exercises no netns provisioning.
-        &overdrive_control_plane::veth_provisioner::NetSlotAllocator::new(),
-        &NoopNetworkProvisioner,
-        &overdrive_sim::adapters::vm_host_state::SimVmHostState::new(),
-    )
-    .await
-    .expect("dispatch must succeed");
+    fixture.dispatch(vec![action], &tick).await.expect("dispatch must succeed");
 
     let event = rx.try_recv().expect("broadcast event must arrive");
     assert_eq!(event.alloc_id, alloc_id);

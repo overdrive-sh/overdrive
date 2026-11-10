@@ -38,10 +38,7 @@ For `guest-stack-transparent-mtls-intercept`, the registered
 `terminal-contention-converges` invariant is specifically the real
 Stop/exit-observer equal-timestamp LWW loss followed by one bounded rebase; it
 does not replace the focused 0/1/2-proposal and typed-error table.
-`vm-provision-failure-cleans-network-and-reuses-slot` is specifically the
-post-assignment partial-network failure, successful structural cleanup, and
-smallest-free slot reuse; teardown-failure retention and store-error
-precedence remain focused examples. GH #284's corrective replacement ordering
+GH #284's corrective replacement ordering
 belongs in the fixed-seed
 `driver_neutral_allocation_replacement::production_owner_replacement_survives_rejected_publication_and_reopen_for_exec_and_vm`
 scenario. It enters through registered `WorkloadLifecycle`, lets the runtime

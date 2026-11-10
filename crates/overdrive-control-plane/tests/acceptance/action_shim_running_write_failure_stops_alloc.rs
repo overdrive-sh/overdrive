@@ -24,15 +24,14 @@
 //!
 //! # PORT-TO-PORT litmus
 //!
-//! Drives the production driving port `action_shim::dispatch` and asserts
+//! Drives the production driving port `action_shim` VM guest-network dispatch seam and asserts
 //! at the driven-port boundary. The VM-shaped `SimDriver` asserts both
 //! started-workload teardown and release of its phased supervision claim.
 //!
 //! Per-driver teardown internals stay covered by the driver-level suites
 //! (`vm_driver_stop_totality.rs`, `driver.rs` gate tests).
 //!
-//! Default lane: sim adapters for every port, `mtls_worker: None`, no
-//! root, no netns.
+//! Default lane: sim adapters for every port, no root.
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
@@ -41,53 +40,24 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use overdrive_control_plane::action_shim::{
-    AllocDriverIndex, ShimError, WorkloadNetworkProvisioner, dispatch_with_network_provisioner,
-};
-use overdrive_control_plane::identity_mgr::IdentityMgr;
-use overdrive_control_plane::veth_provisioner::{
-    NetSlotAllocator, VethProvisionError, WorkloadNetnsPlan,
-};
+use overdrive_control_plane::action_shim::ShimError;
+use overdrive_control_plane::guest_network::{GuestNetworkOperation, SharedGuestNetworkOwner};
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::WorkloadKind;
-use overdrive_core::eval_broker::EvaluationBroker;
 use overdrive_core::id::{AllocationId, NodeId, SpiffeId, WorkloadId};
 use overdrive_core::reconcilers::{Action, TickContext};
 use overdrive_core::traits::driver::{
-    AllocationSpec, Driver, DriverPayload, DriverRegistry, DriverType, Resources, VmPayload,
+    AllocationSpec, Driver, DriverPayload, DriverType, Resources, VmPayload,
 };
-use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{
     AllocState, ObservationStore, ObservationStoreError,
 };
-use overdrive_dataplane::allocators::{PersistentServiceVipAllocator, VipRange};
-use overdrive_sim::adapters::ca::SimCa;
 use overdrive_sim::adapters::clock::SimClock;
-use overdrive_sim::adapters::dataplane::SimDataplane;
 use overdrive_sim::adapters::driver::SimDriver;
-use overdrive_sim::adapters::entropy::SimEntropy;
+use overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
-use overdrive_sim::adapters::vm_host_state::SimVmHostState;
-use overdrive_store_local::LocalIntentStore;
-use tempfile::TempDir;
 
-#[derive(Debug, Default)]
-struct SimNetworkProvisioner {
-    provisions: parking_lot::Mutex<Vec<WorkloadNetnsPlan>>,
-    teardowns: parking_lot::Mutex<Vec<WorkloadNetnsPlan>>,
-}
-
-impl WorkloadNetworkProvisioner for SimNetworkProvisioner {
-    fn provision(&self, workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
-        self.provisions.lock().push(workload.clone());
-        Ok(())
-    }
-
-    fn teardown(&self, workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
-        self.teardowns.lock().push(workload.clone());
-        Ok(())
-    }
-}
+use crate::acceptance::vm_dispatch::{VmDispatchFixture, VmDispatchPorts};
 
 fn alloc_id() -> AllocationId {
     AllocationId::new("alloc-writefail-0").expect("valid alloc id")
@@ -132,28 +102,12 @@ async fn dispatch_action(
     obs: &Arc<SimObservationStore>,
     sim_driver: &Arc<SimDriver>,
     action: Action,
-    network_provisioner: &SimNetworkProvisioner,
+    owner: &Arc<SimSharedGuestNetworkOwner>,
 ) -> Result<(), ShimError> {
-    let tmp = TempDir::new().expect("tempdir");
-    let store_path = tmp.path().join("intent.redb");
-    let store: Arc<dyn IntentStore> =
-        Arc::new(LocalIntentStore::open(&store_path).expect("open intent store"));
-    let obs_dyn: Arc<dyn ObservationStore> = Arc::clone(obs) as Arc<dyn ObservationStore>;
-
-    let drivers: Arc<DriverRegistry> = {
-        let mut r = DriverRegistry::new();
-        r.insert(Arc::clone(sim_driver) as Arc<dyn overdrive_core::traits::driver::Driver>);
-        Arc::new(r)
-    };
-    let alloc_drivers = AllocDriverIndex::default();
-    let (lifecycle_tx, _lifecycle_rx) = tokio::sync::broadcast::channel(16);
-    let writer_node = NodeId::new("writer-1").expect("NodeId");
-    let allocator = Arc::new(tokio::sync::Mutex::new(PersistentServiceVipAllocator::new(
-        VipRange::default(),
-        Arc::clone(&store),
-    )));
-    let net_slot_allocator = NetSlotAllocator::new();
-    let broker = parking_lot::Mutex::new(EvaluationBroker::new());
+    let mut ports = VmDispatchPorts::sim(Arc::clone(sim_driver) as Arc<dyn Driver>);
+    ports.obs = Arc::clone(obs) as Arc<dyn ObservationStore>;
+    ports.owner = Arc::clone(owner) as Arc<dyn SharedGuestNetworkOwner>;
+    let fixture = VmDispatchFixture::boot(ports).await;
 
     let now = Instant::now();
     let tick = TickContext {
@@ -162,30 +116,7 @@ async fn dispatch_action(
         tick: 0,
         deadline: now + Duration::from_secs(1),
     };
-
-    let mtls_worker_0501_0 = crate::acceptance::serve_ports::worker();
-    dispatch_with_network_provisioner(
-        vec![action],
-        drivers.as_ref(),
-        &alloc_drivers,
-        obs_dyn.as_ref(),
-        &SimDataplane::new(),
-        &SimCa::new(Arc::new(SimEntropy::new(0))),
-        &SimClock::new(),
-        &IdentityMgr::new(None),
-        &overdrive_control_plane::GatewayIdentityActionComposition::disabled(),
-        &lifecycle_tx,
-        &tick,
-        &writer_node,
-        Arc::clone(&allocator),
-        &broker,
-        None,
-        &mtls_worker_0501_0,
-        &net_slot_allocator,
-        network_provisioner,
-        &SimVmHostState::new(),
-    )
-    .await
+    fixture.dispatch(vec![action], &tick).await
 }
 
 /// The defect under fix: a `Running`-write failure after a successful
@@ -206,8 +137,13 @@ async fn running_write_failure_stops_the_started_alloc() {
         io::ErrorKind::PermissionDenied,
     )));
 
-    let result =
-        dispatch_action(&obs, &sim_driver, start_action(), &SimNetworkProvisioner::default()).await;
+    let result = dispatch_action(
+        &obs,
+        &sim_driver,
+        start_action(),
+        &Arc::new(SimSharedGuestNetworkOwner::default()),
+    )
+    .await;
 
     // The write error still surfaces to the caller (behaviour unchanged
     // from the bare `?` — the fix only ADDS teardown before propagating).
@@ -250,8 +186,13 @@ async fn running_write_success_keeps_the_started_alloc() {
     let sim_driver = Arc::new(SimDriver::with_clock(DriverType::Vm, Arc::new(SimClock::new())));
 
     // No injected failure — the Running write commits.
-    let result =
-        dispatch_action(&obs, &sim_driver, start_action(), &SimNetworkProvisioner::default()).await;
+    let result = dispatch_action(
+        &obs,
+        &sim_driver,
+        start_action(),
+        &Arc::new(SimSharedGuestNetworkOwner::default()),
+    )
+    .await;
     assert!(result.is_ok(), "a clean StartAllocation must succeed; got {result:?}");
 
     assert_eq!(
@@ -297,7 +238,7 @@ async fn vm_running_write_failure_releases_the_supervision_claim() {
         io::ErrorKind::PermissionDenied,
     )));
 
-    let network = SimNetworkProvisioner::default();
+    let network = Arc::new(SimSharedGuestNetworkOwner::default());
     let result = dispatch_action(&obs, &sim_driver, start_action(), &network).await;
     assert!(
         result.is_err(),
@@ -336,7 +277,7 @@ async fn vm_running_write_success_keeps_the_supervision_claim() {
     let sim_driver = Arc::new(SimDriver::with_clock(DriverType::Vm, Arc::new(SimClock::new())));
 
     // No injected failure — the Running write commits.
-    let network = SimNetworkProvisioner::default();
+    let network = Arc::new(SimSharedGuestNetworkOwner::default());
     let result = dispatch_action(&obs, &sim_driver, start_action(), &network).await;
     assert!(result.is_ok(), "a clean StartAllocation must succeed; got {result:?}");
 
@@ -355,18 +296,16 @@ async fn vm_running_write_success_keeps_the_supervision_claim() {
     assert_eq!(row.state, AllocState::Running, "the committed row is Running");
 
     assert_eq!(
-        network.provisions.lock().len(),
+        network.calls().iter().filter(|op| **op == GuestNetworkOperation::PairAttach).count(),
         1,
         "the supported component composition acknowledges one C3 plan"
     );
     let started = sim_driver.started_specs();
     assert_eq!(started.len(), 1, "the VM-shaped driver is exercised exactly once");
-    // `mtls_worker: None` composes no guest network: the allocation takes no
-    // guest-address lease and starts with no guest transport (the pre-feature
-    // path, P6-S12b).
+    // Every admitted allocation is a VM allocation: it holds a guest-address
+    // lease and starts with the pool-assigned guest transport.
     assert!(
-        started[0].transport.is_none(),
-        "no guest transport without a composed guest network; got {:?}",
-        started[0].transport
+        started[0].transport.is_some(),
+        "a started VM allocation carries its guest transport assignment"
     );
 }

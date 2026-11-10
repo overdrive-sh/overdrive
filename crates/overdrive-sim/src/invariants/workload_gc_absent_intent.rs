@@ -3,7 +3,7 @@
 //!
 //! Two scenarios drive end-to-end through the live `SimIntentStore +
 //! SimObservationStore + WorkloadLifecycle` runtime stack via the
-//! public `submit` (intent put) / `tick` (run_convergence_tick_with_network_provisioner_for_test)
+//! public `submit` (intent put) / `tick` (run_convergence_tick_with_guest_network_provisioner_for_test)
 //! harness driving ports. Assertions land at the
 //! `ObservationStore::alloc_status_rows()` driven port boundary.
 //! No reconciler internals are exercised directly.
@@ -91,7 +91,7 @@ use std::time::{Duration, Instant};
 
 use overdrive_control_plane::identity_mgr::IdentityMgr;
 use overdrive_control_plane::reconciler_runtime::{
-    ReconcilerRuntime, run_convergence_tick_with_network_provisioner_for_test,
+    ReconcilerRuntime, run_convergence_tick_with_guest_network_provisioner_for_test,
 };
 use overdrive_control_plane::{AppState, noop_heartbeat, workload_lifecycle};
 use overdrive_core::aggregate::{
@@ -106,7 +106,6 @@ use overdrive_core::transition_reason::StoppedBy;
 use overdrive_core::{TerminalCondition, WorkloadId};
 use tempfile::TempDir;
 
-use super::NoopNetworkProvisioner;
 use crate::adapters::ca::SimCa;
 use crate::adapters::clock::SimClock;
 use crate::adapters::dataplane::SimDataplane;
@@ -181,14 +180,14 @@ async fn drive_orphan_converges() -> Result<(), String> {
     let start_tick = h.next_tick.load(std::sync::atomic::Ordering::Relaxed);
     let mut converged = false;
     for tick_n in start_tick..(start_tick + MAX_TICKS_GC) {
-        run_convergence_tick_with_network_provisioner_for_test(
+        run_convergence_tick_with_guest_network_provisioner_for_test(
             &h.state,
             &h.reconciler_name,
             &h.target,
             h.start + Duration::from_millis(tick_n.saturating_mul(100)),
             tick_n,
             h.deadline,
-            &NoopNetworkProvisioner,
+            h.vm.owner.as_ref(),
         )
         .await
         .map_err(|e| format!("tick {tick_n}: {e:?}"))?;
@@ -254,14 +253,14 @@ async fn drive_resubmit_creates_fresh() -> Result<(), String> {
     let start_tick = h.next_tick.load(std::sync::atomic::Ordering::Relaxed);
     let mut converged = false;
     for tick_n in start_tick..(start_tick + MAX_TICKS_GC) {
-        run_convergence_tick_with_network_provisioner_for_test(
+        run_convergence_tick_with_guest_network_provisioner_for_test(
             &h.state,
             &h.reconciler_name,
             &h.target,
             h.start + Duration::from_millis(tick_n.saturating_mul(100)),
             tick_n,
             h.deadline,
-            &NoopNetworkProvisioner,
+            h.vm.owner.as_ref(),
         )
         .await
         .map_err(|e| format!("tick {tick_n}: {e:?}"))?;
@@ -293,14 +292,14 @@ async fn drive_resubmit_creates_fresh() -> Result<(), String> {
     let resubmit_start_tick = h.next_tick.load(std::sync::atomic::Ordering::Relaxed);
     let mut placed_fresh = false;
     for tick_n in resubmit_start_tick..(resubmit_start_tick + MAX_TICKS_RESUBMIT) {
-        run_convergence_tick_with_network_provisioner_for_test(
+        run_convergence_tick_with_guest_network_provisioner_for_test(
             &h.state,
             &h.reconciler_name,
             &h.target,
             h.start + Duration::from_millis(tick_n.saturating_mul(100)),
             tick_n,
             h.deadline,
-            &NoopNetworkProvisioner,
+            h.vm.owner.as_ref(),
         )
         .await
         .map_err(|e| format!("tick {tick_n}: {e:?}"))?;
@@ -366,14 +365,14 @@ async fn drive_to_running(h: &Harness) -> Result<Vec<AllocationId>, String> {
     let mut last_tick = start_tick;
     for tick_n in start_tick..(start_tick + MAX_TICKS_TO_RUNNING) {
         last_tick = tick_n;
-        run_convergence_tick_with_network_provisioner_for_test(
+        run_convergence_tick_with_guest_network_provisioner_for_test(
             &h.state,
             &h.reconciler_name,
             &h.target,
             h.start + Duration::from_millis(tick_n.saturating_mul(100)),
             tick_n,
             h.deadline,
-            &NoopNetworkProvisioner,
+            h.vm.owner.as_ref(),
         )
         .await
         .map_err(|e| format!("drive_to_running tick {tick_n}: {e:?}"))?;
@@ -445,13 +444,15 @@ async fn yield_a_few() {
 // ---------------------------------------------------------------------------
 
 struct Harness {
+    /// The VM-path composition (converged owner, opened EXEC gate) the ticks drive over.
+    vm: crate::invariants::serve_ports::VmComposition,
     state: AppState,
     target: TargetResource,
     reconciler_name: ReconcilerName,
     start: Instant,
     deadline: Instant,
     /// Monotonic tick counter shared across the scenario phases. Each
-    /// `run_convergence_tick_with_network_provisioner_for_test` call uses this value and the harness
+    /// `run_convergence_tick_with_guest_network_provisioner_for_test` call uses this value and the harness
     /// bumps it after the call. `AtomicU64` (not `Cell`) because the
     /// futures returned by the evaluator must be `Send` so the harness
     /// can run them via `tokio::spawn` / Send-bound combinators —
@@ -508,6 +509,7 @@ async fn build_harness(tmp: &TempDir) -> Result<Harness, String> {
 
     let allocator =
         overdrive_control_plane::test_default_allocator(Arc::clone(&store) as Arc<dyn IntentStore>);
+    let vm = crate::invariants::serve_ports::VmComposition::boot().await?;
     let state = AppState::new(
         store,
         tmp.path().join("intent.redb"),
@@ -522,10 +524,11 @@ async fn build_harness(tmp: &TempDir) -> Result<Harness, String> {
         allocator,
         overdrive_control_plane::test_empty_listener_facts(),
         std::net::Ipv4Addr::LOCALHOST,
-        crate::invariants::serve_ports::worker(),
-        crate::invariants::serve_ports::owner(),
-        crate::invariants::serve_ports::exec_gate(),
-        crate::invariants::serve_ports::pool(),
+        Arc::clone(&vm.worker),
+        Arc::clone(&vm.owner)
+            as Arc<dyn overdrive_control_plane::guest_network::SharedGuestNetworkOwner>,
+        Arc::clone(&vm.gate),
+        Arc::clone(&vm.pool),
     );
 
     // Initial submit — Job(X). The kind discriminator key is omitted;
@@ -562,6 +565,7 @@ async fn build_harness(tmp: &TempDir) -> Result<Harness, String> {
     });
 
     Ok(Harness {
+        vm,
         state,
         target,
         reconciler_name,

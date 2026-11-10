@@ -2364,6 +2364,92 @@ where
     }
 }
 
+/// An observation that fails early, after the real server, the wire capture and
+/// the deployed microVM workload exist, still awaits every cleanup owner before
+/// it reports: the workload is stopped through the still-live control plane,
+/// the capture is joined, and the server listener is drained. The fault is a
+/// refused VMM spawn at the `Vmm` driven port: the capture-ready cut is
+/// abandoned without acknowledgement, so the production driver's spawn fails.
+/// CONTRACT_SHAPE: bounded-change (an early observation failure still awaits every fixture owner).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[serial(cgroup)]
+async fn early_observation_failure_awaits_every_cleanup_owner_before_reporting() {
+    let fixture =
+        VmFixture::provision(&shared_staging_root()).expect("provision shared VM fixture");
+    let tmp = tempfile::Builder::new()
+        .prefix("gti-early-failure-")
+        .tempdir_in(shared_staging_root())
+        .expect("early-failure tempdir on metal staging root");
+    let spin = build_spin_binary(tmp.path());
+    let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &spin, "gti-refused");
+    let (server, server_tmp, cuts) = spawn_capture_observed_mtls_server().await;
+    let endpoint = server.endpoint().clone();
+    let cfg = config_path(server_tmp.path());
+    let spec = write_toml(
+        server_tmp.path(),
+        "gti-refused.toml",
+        &vm_job_toml("gti-refused", "/sbin/gti-refused", &[], &fixture.kernel_path, &rootfs),
+    );
+    let wire = WireCapture::start(LOOPBACK_IFACE);
+    let submit = deploy(DeployArgs { spec, config_path: cfg.clone() })
+        .await
+        .expect("deploy the VM workload whose spawn will be refused");
+
+    // The production driver reaches the VMM spawn; the cut is dropped without
+    // acknowledgement, which the spawn reports as a refusal. The observation
+    // fails early, before the workload ever runs.
+    let cut = receive_vmm_cut(&cuts).await;
+    drop(cut);
+    let observation: Result<(), String> =
+        Err("injected failure after the real server, capture, and workload exist".to_owned());
+
+    let workload_id = submit.workload_id.clone();
+    let stop_cfg = cfg.clone();
+    let peer_stopped = Arc::new(AtomicBool::new(false));
+    let peer_stopped_seen = Arc::clone(&peer_stopped);
+    let result: Result<(), String> = tokio::time::timeout(
+        Duration::from_secs(60),
+        finish_after_authoritative_cleanup(
+            observation,
+            async move {
+                drop(wire);
+                stop(StopArgs { id: workload_id, config_path: stop_cfg }).await.map_err(
+                    |error| format!("stop the workload through the live server: {error}"),
+                )?;
+                peer_stopped_seen.store(true, Ordering::SeqCst);
+                Ok(())
+            },
+            async move {
+                server.shutdown().await.map_err(|error| {
+                    format!("drain the server after the injected failure: {error}")
+                })
+            },
+        ),
+    )
+    .await
+    .expect("the injected post-owner failure restores and joins within its own bound");
+
+    let reported = result.expect_err("the injected observation failure is still reported");
+    assert!(
+        reported.contains("injected failure after the real server, capture, and workload exist")
+            && reported.contains("peer_cleanup=Ok(())")
+            && reported.contains("server_cleanup=Ok(())"),
+        "the failure is reported only with both cleanup owners complete: {reported}"
+    );
+    assert!(
+        peer_stopped.load(Ordering::SeqCst),
+        "the workload was stopped through the control plane before the server drained"
+    );
+    let addr = SocketAddr::new(
+        "127.0.0.1".parse().expect("loopback address"),
+        endpoint.port_or_known_default().expect("serve endpoint port"),
+    );
+    assert!(
+        std::net::TcpStream::connect_timeout(&addr, Duration::from_secs(1)).is_err(),
+        "the failure report awaited the server listener's drain"
+    );
+}
+
 /// S-GTI-08b — status 78 after READY and EXEC is an ordinary Job result.
 /// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.

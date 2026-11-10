@@ -30,15 +30,15 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
-use overdrive_control_plane::action_shim::WorkloadNetworkProvisioner;
+use overdrive_control_plane::guest_network::SharedGuestNetworkOwner;
 use overdrive_control_plane::reconciler_runtime::{
     ReconcilerRuntime, hydrate_actual_for_test,
-    run_convergence_tick_with_network_provisioner_for_test,
+    run_convergence_tick_with_guest_network_provisioner_for_test,
 };
-use overdrive_control_plane::veth_provisioner::{VethProvisionError, WorkloadNetnsPlan};
 use overdrive_control_plane::worker::exit_observer;
 use overdrive_control_plane::{AppState, noop_heartbeat, workload_lifecycle};
 use overdrive_core::aggregate::{DriverInput, IntentKey, Job, JobSpecInput, ResourcesInput};
+use overdrive_core::guest_network::GuestNetworkExecWiring;
 use overdrive_core::id::{AllocationId, NodeId};
 use overdrive_core::reconcilers::TargetResource;
 use overdrive_core::traits::driver::{
@@ -51,6 +51,7 @@ use overdrive_core::traits::vm_host_state::VmHostState;
 use overdrive_reconcilers::{AnyReconciler, AnyState, VmReclamation};
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::driver::SimDriver;
+use overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_sim::adapters::vm_host_state::SimVmHostState;
 use overdrive_store_local::LocalIntentStore;
@@ -58,19 +59,6 @@ use parking_lot::Mutex;
 use proptest::prelude::*;
 use tempfile::TempDir;
 use tokio::sync::mpsc;
-
-#[derive(Debug, Default)]
-struct NoopNetworkProvisioner;
-
-impl WorkloadNetworkProvisioner for NoopNetworkProvisioner {
-    fn provision(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
-        Ok(())
-    }
-
-    fn teardown(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
-        Ok(())
-    }
-}
 
 // ---------------------------------------------------------------------------
 // `ClaimTrackingDriver` — a `Driver` port-boundary test double wrapping a
@@ -179,6 +167,9 @@ impl Driver for ClaimTrackingDriver {
 
 struct Harness {
     state: AppState,
+    owner: Arc<SimSharedGuestNetworkOwner>,
+    #[allow(dead_code)]
+    supervisor: Arc<overdrive_core::guest_network::GuestNetworkExecSupervisor>,
     sim_obs: Arc<SimObservationStore>,
     driver: ClaimTrackingDriver,
     target: TargetResource,
@@ -215,6 +206,10 @@ async fn build_harness(tmp: &TempDir, workload_id: &str, driver_type: DriverType
     let allocator = overdrive_control_plane::test_default_allocator(
         Arc::clone(&store) as Arc<dyn overdrive_core::traits::intent_store::IntentStore>
     );
+    let owner = crate::acceptance::serve_ports::owner();
+    owner.converge_shared().await.expect("the shared owner converges");
+    let wiring = GuestNetworkExecWiring::new(Arc::new(SimClock::new()));
+    assert!(wiring.supervisor().open_after_boot(), "the gate leaves BootClosed once");
     let state = AppState::new(
         store,
         store_path,
@@ -232,10 +227,12 @@ async fn build_harness(tmp: &TempDir, workload_id: &str, driver_type: DriverType
         overdrive_control_plane::test_empty_listener_facts(),
         std::net::Ipv4Addr::LOCALHOST,
         crate::acceptance::serve_ports::worker(),
-        crate::acceptance::serve_ports::owner(),
-        crate::acceptance::serve_ports::exec_gate(),
+        Arc::clone(&owner) as Arc<dyn SharedGuestNetworkOwner>,
+        wiring.gate(),
         crate::acceptance::serve_ports::pool(),
     );
+
+    crate::acceptance::vm_dispatch::start_shared_mtls_owner(&state).await;
 
     exit_observer::spawn(
         state.obs.clone(),
@@ -272,7 +269,16 @@ async fn build_harness(tmp: &TempDir, workload_id: &str, driver_type: DriverType
         }
     });
 
-    Harness { state, sim_obs, driver, target, sim_clock, ticker_handle }
+    Harness {
+        state,
+        owner,
+        supervisor: wiring.supervisor(),
+        sim_obs,
+        driver,
+        target,
+        sim_clock,
+        ticker_handle,
+    }
 }
 
 async fn drive_to_first_running(h: &Harness, start: Instant) -> AllocationId {
@@ -281,16 +287,15 @@ async fn drive_to_first_running(h: &Harness, start: Instant) -> AllocationId {
             .expect("workload-lifecycle reconciler name");
     let deadline = start + Duration::from_secs(120);
     let mut tick_n = 0_u64;
-    let network = NoopNetworkProvisioner;
     loop {
-        run_convergence_tick_with_network_provisioner_for_test(
+        run_convergence_tick_with_guest_network_provisioner_for_test(
             &h.state,
             &workload_lifecycle_name,
             &h.target,
             start + Duration::from_millis(tick_n.saturating_mul(100)),
             tick_n,
             deadline,
-            &network,
+            h.owner.as_ref(),
         )
         .await
         .expect("tick");

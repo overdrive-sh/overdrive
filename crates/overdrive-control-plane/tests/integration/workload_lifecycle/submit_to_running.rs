@@ -8,11 +8,9 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use overdrive_control_plane::action_shim::WorkloadNetworkProvisioner;
 use overdrive_control_plane::reconciler_runtime::{
-    ReconcilerRuntime, run_convergence_tick_with_network_provisioner_for_test,
+    ReconcilerRuntime, run_convergence_tick_with_guest_network_provisioner_for_test,
 };
-use overdrive_control_plane::veth_provisioner::{VethProvisionError, WorkloadNetnsPlan};
 use overdrive_control_plane::{AppState, noop_heartbeat, workload_lifecycle};
 use overdrive_core::aggregate::{DriverInput, IntentKey, Job, JobSpecInput, ResourcesInput};
 use overdrive_core::id::NodeId;
@@ -25,19 +23,6 @@ use overdrive_sim::adapters::driver::SimDriver;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_store_local::LocalIntentStore;
 use tempfile::TempDir;
-
-#[derive(Debug, Default)]
-struct NoopNetworkProvisioner;
-
-impl WorkloadNetworkProvisioner for NoopNetworkProvisioner {
-    fn provision(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
-        Ok(())
-    }
-
-    fn teardown(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
-        Ok(())
-    }
-}
 
 #[tokio::test]
 async fn submitted_job_reaches_running_via_simulated_vm_driver() {
@@ -58,6 +43,8 @@ async fn submitted_job_reaches_running_via_simulated_vm_driver() {
     let allocator = overdrive_control_plane::test_default_allocator(
         Arc::clone(&store) as Arc<dyn overdrive_core::traits::intent_store::IntentStore>
     );
+    let (seam_owner, seam_gate, _seam_supervisor) =
+        crate::integration::vm_dispatch::converged_owner_and_open_gate().await;
     let state = AppState::new(
         store,
         store_path,
@@ -75,10 +62,11 @@ async fn submitted_job_reaches_running_via_simulated_vm_driver() {
         overdrive_control_plane::test_empty_listener_facts(),
         std::net::Ipv4Addr::LOCALHOST,
         crate::integration::serve_ports::worker(),
-        crate::integration::serve_ports::owner(),
-        crate::integration::serve_ports::exec_gate(),
+        seam_owner.clone(),
+        seam_gate.clone(),
         crate::integration::serve_ports::pool(),
     );
+    crate::integration::vm_dispatch::start_shared_mtls_owner(&state).await;
 
     // Submit a 1-replica VM job. The simulated VM driver makes the
     // production lifecycle path observable without a host process.
@@ -111,14 +99,14 @@ async fn submitted_job_reaches_running_via_simulated_vm_driver() {
     // cadence). We expect convergence within a handful of ticks.
     let mut converged = false;
     for tick_n in 0..30_u64 {
-        run_convergence_tick_with_network_provisioner_for_test(
+        run_convergence_tick_with_guest_network_provisioner_for_test(
             &state,
             &workload_lifecycle_name,
             &target,
             now + Duration::from_millis(tick_n.saturating_mul(100)),
             tick_n,
             deadline,
-            &NoopNetworkProvisioner,
+            seam_owner.as_ref(),
         )
         .await
         .expect("tick");

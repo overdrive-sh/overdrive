@@ -1383,9 +1383,8 @@ impl FromStr for BackendId {
 /// Machine-minted per-allocation network-namespace NAME (`ovd-ns-<4hex>`).
 ///
 /// INTERNAL newtype: never operator-typed, never persisted. The value is
-/// minted at exactly ONE site — `derive_workload_netns_plan`
-/// (`overdrive-control-plane`) — from a validated `NetSlot`; this type
-/// makes the shape invariant that derivation previously left implicit
+/// minted only through [`NetnsName::from_hex4`] from an already-rendered
+/// 4-char lowercase-hex segment; this type makes that shape invariant
 /// explicit.
 ///
 /// Used at BOTH [`crate::traits::driver::AllocationSpec::netns`] and
@@ -1429,12 +1428,9 @@ impl NetnsName {
     /// chars, ≤ IFNAMSIZ (15) and ≤ NAME_MAX (255) by construction.
     pub const PREFIX: &'static str = "ovd-ns-";
 
-    /// Construct from a 4-char lowercase-hex slot segment
-    /// (`NetSlot::to_hex4`). Validates: exactly 4 chars, all `0-9a-f`;
-    /// the name is `PREFIX + hex`. This is the ONLY constructor — core
-    /// cannot depend on `NetSlot` (`overdrive-control-plane`), so the
-    /// constructor takes the already-rendered hex segment rather than
-    /// the slot itself.
+    /// Construct from a 4-char lowercase-hex segment. Validates: exactly 4
+    /// chars, all `0-9a-f`; the name is `PREFIX + hex`. This is the ONLY
+    /// constructor.
     ///
     /// # Errors
     ///

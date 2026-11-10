@@ -101,15 +101,10 @@ mod integration {
     #[path = "../common/node_adapters.rs"]
     pub mod node_adapters;
 
-    // Cross-file net-slot partitioning registry (SSOT). Every real-netns test
-    // file draws its per-test `NetSlot` from a named, disjoint band here via
-    // `super::net_slots::<FILE>.nth(offset)`, so no two tests derive the same
-    // system-global `ovd-ns-<slot>` / veth / `/30` names under nextest's
-    // process-per-test parallelism. Same `#[path]`-shared-source shape as
-    // `dataplane_lo`; the default-lane disjointness guard lives in the sibling
-    // top-level `tests/net_slots_registry.rs` binary.
-    #[path = "../common/net_slots.rs"]
-    pub mod net_slots;
+    // VM-path dispatch fixture: the action shim driven through the
+    // production guest-network seam over a booted `AppState`.
+    #[path = "../common/vm_dispatch.rs"]
+    pub mod vm_dispatch;
 
     // built-in-ca (GH #28) — DISTILL RED scaffolds. `ca_equivalence` is the
     // central `Ca` trait-contract enforcement test driving BOTH `RcgenCa`
@@ -122,23 +117,6 @@ mod integration {
     mod ca_boot_and_audit;
     mod ca_equivalence;
 
-    /// transparent-mtls-enrollment step 04-04 (D-TME-12 § "Amended 2026-06-18
-    /// (02-06 adopt-on-restart)", §1–§4) — Tier-3 acceptance for the
-    /// `run_server` boot-recovery pass. Drives the PRODUCTION
-    /// `veth_provisioner::adopt_on_restart_recovery` seam against a real
-    /// surviving netns + spawned PID + cgroup scope + Running obs row and a
-    /// real orphan netns: the fresh (post-restart) allocator ADOPTS the
-    /// survivor's slot (a later `assign` cannot collide) and the orphan netns
-    /// is GC'd. Root + CAP_NET_ADMIN; SKIP otherwise.
-    /// transparent-mtls-enrollment step 04-01 (Path A / ADR-0071, D-TME-12 /
-    /// AC14) — Tier-3 acceptance for the C3 action-shim seam. Drives the
-    /// PRODUCTION `action_shim::dispatch` with `mtls_worker: Some(...)` (the
-    /// ACTIVE seam path) + a real `NetSlotAllocator`: provision-before-spawn +
-    /// lands-in-`ovd-ns-<slot>` (`ip netns identify`) + terminal teardown
-    /// (root-gated, SKIP otherwise), and provision-failure → `Failed` row
-    /// carrying `WorkloadNetnsProvisionFailed` (deterministic, slot exhaustion,
-    /// no root — mirrors `fail_closed_on_mtls_install`).
-    mod alloc_netns_lifecycle;
     mod concurrent_submit_toctou;
     /// Action-shim `deregister_local_backend::dispatch` mutation kill
     /// per ADR-0053 § 3 — asserts the post-dispatch observable state
@@ -165,13 +143,11 @@ mod integration {
     /// `docs/feature/fix-orphaned-node-health-writer/deliver/rca.md`.
     /// mtls-intercept-install-fault-seam step 04-01 (GH #250 / ADR-0076 §5.2) —
     /// Tier-3 acceptance for the intercept-install FAIL-CLOSED CALL-SITE
-    /// ORDERING. Drives the PRODUCTION `action_shim::dispatch` on both the
+    /// ORDERING. Drives the production action shim through the guest-network seam on both the
     /// `StartAllocation` and `RestartAllocation` arms with a `SimMtlsIntercept`
     /// armed to refuse the leg-F bind: the arms `return` BEFORE
     /// `release_for_exit_emission` / `on_alloc_running`, so a now-`Failed`
-    /// allocation never releases its exit watcher. Root + real `ip netns`
-    /// (the netns provision seam is gated on the same `mtls_worker.is_some()`
-    /// flag); SKIP otherwise.
+    /// allocation never releases its exit watcher.
     mod mtls_install_fail_closed;
 
     /// ADR-0077 § D7 Layer 3 (T2) — the cross-restart LWW regression test.
@@ -268,14 +244,6 @@ mod integration {
     /// `veth_provisioner::provision`: creates-when-absent +
     /// adopts-pre-existing-without-recreating.
     mod veth_provision_idempotent;
-    /// transparent-mtls-enrollment step 02-02 (Path A / ADR-0071) — Tier-3
-    /// per-allocation netns + veth provision. Drives real `ip netns` /
-    /// `ip -n <ns>` / `sysctl` / `ethtool` through
-    /// `veth_provisioner::provision_workload_netns` + `teardown_workload_netns`:
-    /// fresh-create (netns + pair, all three up-states, addresses, default
-    /// route, ip_forward, rp_filter, tx-off) + idempotent re-converge +
-    /// half-provisioned heal + zero-residue teardown.
-    mod workload_netns_provision;
     /// workflow-primitive DISTILL (GH #39, J-PLAT-005) — `@real-io`
     /// journal-persistence scenario S-WP-01-04 (US-WP-2 AC1/AC2, K5/O6).
     /// Exercises a REAL `RedbJournalStore` (real redb file) per

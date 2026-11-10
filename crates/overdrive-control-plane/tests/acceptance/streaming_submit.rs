@@ -24,7 +24,7 @@ use axum::body::{Body, to_bytes};
 use axum::http::{Method, Request, StatusCode, header};
 use axum::routing::post;
 use overdrive_control_plane::AppState;
-use overdrive_control_plane::action_shim::{LifecycleEvent, dispatch};
+use overdrive_control_plane::action_shim::LifecycleEvent;
 use overdrive_control_plane::api::{
     AllocStateWire, IdempotencyOutcome, SubmitWorkloadRequest, SubmitWorkloadResponse,
     TransitionSource,
@@ -51,6 +51,8 @@ use overdrive_store_local::LocalIntentStore;
 use serde_json::Value;
 use tempfile::TempDir;
 use tower::ServiceExt as _;
+
+use crate::acceptance::vm_dispatch::{VmDispatchFixture, VmDispatchPorts};
 
 // ---------------------------------------------------------------------------
 // Test fixtures
@@ -923,7 +925,7 @@ async fn s_cp_11_stop_while_streaming_closes_stream_with_stopped_result() {
 // ===========================================================================
 // S-LT-01 — LifecycleEvent.from reflects prior alloc state (regression)
 //
-// Exercises action_shim::dispatch() directly — NOT emit_lifecycle().
+// Exercises the VM dispatch seam directly — NOT emit_lifecycle().
 // This is the only test path that reaches build_lifecycle_event, where
 // the bug lives: `from` is set to `to_wire` (the new state) instead of
 // the prior state read from observation.
@@ -935,8 +937,14 @@ async fn s_cp_11_stop_while_streaming_closes_stream_with_stopped_result() {
 
 #[tokio::test]
 async fn s_lt_01_lifecycle_transition_from_reflects_prior_alloc_state() {
-    let tmp = TempDir::new().expect("tmpdir");
-    let state = build_app_state(&tmp, Arc::new(SimClock::new()));
+    let obs: Arc<dyn ObservationStore> =
+        Arc::new(SimObservationStore::single_peer(sample_node(), 0));
+    let mut ports =
+        VmDispatchPorts::sim(Arc::new(SimDriver::new(DriverType::Vm)) as Arc<dyn Driver>);
+    ports.obs = obs;
+    ports.node_id = NodeId::new("writer-1").unwrap();
+    let fixture = VmDispatchFixture::boot(ports).await;
+    let state = &fixture.state;
 
     let alloc_id = AllocationId::from_str("alloc-payments-0").expect("alloc id");
     let workload_id = WorkloadId::from_str("payments-v0").expect("job id");
@@ -966,35 +974,16 @@ async fn s_lt_01_lifecycle_transition_from_reflects_prior_alloc_state() {
         deadline: now + Duration::from_secs(5),
     };
 
-    let test_broker = parking_lot::Mutex::new(overdrive_core::eval_broker::EvaluationBroker::new());
-    let mtls_worker_0501_0 = crate::acceptance::serve_ports::worker();
-    dispatch(
-        // ADR-0037 §4: emission sites outside a reconciler tick (here, a
-        // direct test-bench dispatch) emit `terminal: None` — the
-        // reconciler is the single source of every terminal claim.
-        vec![Action::StopAllocation { alloc_id: alloc_id.clone(), terminal: None }],
-        state.drivers.as_ref(),
-        &state.alloc_drivers,
-        state.obs.as_ref(),
-        state.dataplane.as_ref(),
-        state.ca.as_ref(),
-        state.clock.as_ref(),
-        state.identity.as_ref(),
-        &overdrive_control_plane::GatewayIdentityActionComposition::disabled(),
-        &state.lifecycle_events,
-        &tick,
-        &state.node_id,
-        std::sync::Arc::clone(&state.allocator),
-        &test_broker,
-        None,
-        &mtls_worker_0501_0,
-        // transparent-mtls-enrollment step 04-01: the AppState-owned per-host
-        // slot allocator (this fixture exercises no netns provisioning).
-        &state.net_slot_allocator,
-        state.vm_host_state.as_ref(),
-    )
-    .await
-    .expect("dispatch succeeds");
+    fixture
+        .dispatch(
+            // ADR-0037 §4: emission sites outside a reconciler tick (here, a
+            // direct test-bench dispatch) emit `terminal: None` — the
+            // reconciler is the single source of every terminal claim.
+            vec![Action::StopAllocation { alloc_id: alloc_id.clone(), terminal: None }],
+            &tick,
+        )
+        .await
+        .expect("dispatch succeeds");
 
     // Receive the broadcast event within 1 second — a missed event is a
     // test bug (subscribe-before-dispatch ordering was violated).

@@ -539,43 +539,11 @@
       "integration::endpoint_from_config::job_submit_reads_endpoint_from_config_when_no_override_is_provided": {
         "kind": "host-pure"
       },
+      "integration::guest_stack_mtls_egress::early_observation_failure_awaits_every_cleanup_owner_before_reporting": {
+        "kind": "guest-group",
+        "group": "cgroup-default"
+      },
       "integration::guest_stack_mtls_egress::every_d7_decoder_and_oracle_error_fails_closed": {
-        "kind": "guest-group",
-        "group": "cgroup-default"
-      },
-      "integration::guest_stack_mtls_egress::fault_fixture::a_clean_network_namespace_captures_an_absent_table_100_route_baseline": {
-        "kind": "guest-group",
-        "group": "cgroup-default"
-      },
-      "integration::guest_stack_mtls_egress::fault_fixture::audited_duplicate_repair_is_atomic_at_every_operation_boundary": {
-        "kind": "guest-group",
-        "group": "cgroup-default"
-      },
-      "integration::guest_stack_mtls_egress::fault_fixture::clean_network_namespace_real_installer_delta_is_exactly_reconciled": {
-        "kind": "guest-group",
-        "group": "cgroup-default"
-      },
-      "integration::guest_stack_mtls_egress::fault_fixture::cleanup_fault_matrix_restores_exact_production_and_disposable_baselines": {
-        "kind": "guest-group",
-        "group": "cgroup-default"
-      },
-      "integration::guest_stack_mtls_egress::fault_fixture::input_hook_fault_is_typed_and_normal_restoration_is_structurally_exact": {
-        "kind": "guest-group",
-        "group": "cgroup-default"
-      },
-      "integration::guest_stack_mtls_egress::fault_fixture::prior_fixture_duplicate_exemptions_are_safely_repaired_once": {
-        "kind": "guest-group",
-        "group": "cgroup-default"
-      },
-      "integration::guest_stack_mtls_egress::fault_fixture::setup_fault_matrix_restores_the_exact_production_object_graph": {
-        "kind": "guest-group",
-        "group": "cgroup-default"
-      },
-      "integration::guest_stack_mtls_egress::fault_fixture::table_creation_gap_restores_an_absent_disposable_table": {
-        "kind": "guest-group",
-        "group": "cgroup-default"
-      },
-      "integration::guest_stack_mtls_egress::fault_fixture::trapped_fixture_paths_restore_programs_counters_handles_userdata_and_fib": {
         "kind": "guest-group",
         "group": "cgroup-default"
       },
@@ -588,10 +556,6 @@
         "group": "cgroup-default"
       },
       "integration::guest_stack_mtls_egress::peer_wire_reassembly_uses_sequence_space_and_deduplicates_loopback_copies": {
-        "kind": "guest-group",
-        "group": "cgroup-default"
-      },
-      "integration::guest_stack_mtls_egress::restart_observation_failure_awaits_cleanup_before_reporting": {
         "kind": "guest-group",
         "group": "cgroup-default"
       },
@@ -744,10 +708,6 @@
         "kind": "guest-group",
         "group": "cgroup-default"
       },
-      "integration::vm_reclamation_tier3::boot_epoch_reclamation_settles_before_adopt_on_restart_recovery": {
-        "kind": "guest-group",
-        "group": "cgroup-default"
-      },
       "integration::vm_reclamation_tier3::failed_stop_orphan_terminal_row_is_byte_unchanged_after_reclamation": {
         "kind": "guest-group",
         "group": "cgroup-default"
@@ -769,6 +729,10 @@
         "group": "cgroup-default"
       },
       "integration::vm_reclamation_tier3::restart_orphan_terminal_row_is_byte_unchanged_after_reclamation": {
+        "kind": "guest-group",
+        "group": "cgroup-default"
+      },
+      "integration::vm_reclamation_tier3::restart_under_the_production_composition_reclaims_a_surviving_vm_before_serving": {
         "kind": "guest-group",
         "group": "cgroup-default"
       },
@@ -1148,9 +1112,6 @@
         "kind": "host-pure"
       },
       "action_shim::guest_activation_acceptance::an_activation_after_teardown_is_refused_and_releases_no_exec": {
-        "kind": "host-pure"
-      },
-      "action_shim::guest_activation_acceptance::an_allocation_without_a_guest_transport_runs_as_today": {
         "kind": "host-pure"
       },
       "action_shim::guest_activation_acceptance::exec_is_released_only_after_the_allocation_is_active": {
@@ -2674,36 +2635,6 @@
       "veth_provisioner::offload_read_failure_propagation::host_netns_offload_read_failure_propagates_not_reported_off": {
         "kind": "host-pure"
       },
-      "veth_provisioner::offload_read_failure_propagation::workload_host_side_offload_read_failure_propagates_not_reported_off": {
-        "kind": "host-pure"
-      },
-      "veth_provisioner::tests::adopt_claims_a_free_slot_so_a_later_assign_cannot_collide": {
-        "kind": "host-pure"
-      },
-      "veth_provisioner::tests::adopt_conflict_holds_for_any_distinct_allocs_and_slot": {
-        "kind": "host-pure"
-      },
-      "veth_provisioner::tests::adopt_conflicts_when_slot_held_by_a_different_alloc": {
-        "kind": "host-pure"
-      },
-      "veth_provisioner::tests::adopt_is_idempotent_for_the_same_alloc_and_slot": {
-        "kind": "host-pure"
-      },
-      "veth_provisioner::tests::allocator_assign_at_capacity_refuses_new_alloc_with_typed_error": {
-        "kind": "host-pure"
-      },
-      "veth_provisioner::tests::allocator_assigns_ascending_smallest_free_to_distinct_allocs": {
-        "kind": "host-pure"
-      },
-      "veth_provisioner::tests::allocator_re_assign_of_held_alloc_returns_existing_slot_idempotently": {
-        "kind": "host-pure"
-      },
-      "veth_provisioner::tests::allocator_release_frees_the_slot_for_reuse": {
-        "kind": "host-pure"
-      },
-      "veth_provisioner::tests::allocator_release_of_unheld_and_double_release_are_noops": {
-        "kind": "host-pure"
-      },
       "veth_provisioner::tests::converge_complete_pair_is_route_only_noop": {
         "kind": "host-pure"
       },
@@ -2734,106 +2665,16 @@
       "veth_provisioner::tests::derivation_is_deterministic": {
         "kind": "host-pure"
       },
-      "veth_provisioner::tests::derives_distinct_subnet_and_name_for_nonzero_slot": {
-        "kind": "host-pure"
-      },
       "veth_provisioner::tests::derives_on_link_gateway_and_route_from_first_vip_range": {
-        "kind": "host-pure"
-      },
-      "veth_provisioner::tests::derives_per_alloc_netns_veth_names_and_addresses": {
-        "kind": "host-pure"
-      },
-      "veth_provisioner::tests::distinct_slots_yield_distinct_names_and_subnets": {
-        "kind": "host-pure"
-      },
-      "veth_provisioner::tests::every_slot_name_fits_ifnamsiz_and_tiles_the_base": {
         "kind": "host-pure"
       },
       "veth_provisioner::tests::gateway_is_first_usable_host_and_route_is_input_range": {
         "kind": "host-pure"
       },
-      "veth_provisioner::tests::io_error_is_benign_absence_only_classifies_not_found_as_benign": {
-        "kind": "host-pure"
-      },
-      "veth_provisioner::tests::net_slot_new_validates_bound": {
-        "kind": "host-pure"
-      },
-      "veth_provisioner::tests::net_slot_rejects_first_value_above_max_before_any_guest_plan_is_derived": {
-        "kind": "host-pure"
-      },
-      "veth_provisioner::tests::net_slot_roundtrips_and_rejects_out_of_range": {
-        "kind": "host-pure"
-      },
-      "veth_provisioner::tests::net_slot_to_hex4_is_zero_padded_lowercase": {
-        "kind": "host-pure"
-      },
       "veth_provisioner::tests::operation_specific_errno_rules_never_report_disappeared_create_as_success": {
         "kind": "host-pure"
       },
-      "veth_provisioner::tests::plan_adopt_actions_on_empty_is_empty": {
-        "kind": "host-pure"
-      },
-      "veth_provisioner::tests::plan_adopt_actions_splits_owned_from_orphan": {
-        "kind": "host-pure"
-      },
       "veth_provisioner::tests::plan_carries_config_iface_names_verbatim": {
-        "kind": "host-pure"
-      },
-      "veth_provisioner::tests::resolv_conf_contents_is_a_single_nameserver_line": {
-        "kind": "host-pure"
-      },
-      "veth_provisioner::tests::smallest_free_slot_of_empty_held_set_is_zero": {
-        "kind": "host-pure"
-      },
-      "veth_provisioner::tests::smallest_free_slot_of_full_space_is_exhausted_error": {
-        "kind": "host-pure"
-      },
-      "veth_provisioner::tests::smallest_free_slot_returns_an_unheld_minimum": {
-        "kind": "host-pure"
-      },
-      "veth_provisioner::tests::smallest_free_slot_returns_the_lowest_gap_not_the_next_monotonic": {
-        "kind": "host-pure"
-      },
-      "veth_provisioner::tests::snapshot_reflects_the_live_alloc_to_slot_bindings": {
-        "kind": "host-pure"
-      },
-      "veth_provisioner::tests::sysctl_proc_path_maps_dotted_key_to_proc_sys_file": {
-        "kind": "host-pure"
-      },
-      "veth_provisioner::tests::workload_converge_brings_in_netns_end_and_loopback_up_when_down": {
-        "kind": "host-pure"
-      },
-      "veth_provisioner::tests::workload_converge_complete_is_noop": {
-        "kind": "host-pure"
-      },
-      "veth_provisioner::tests::workload_converge_completes_half_provisioned_missing_workload_addr": {
-        "kind": "host-pure"
-      },
-      "veth_provisioner::tests::workload_converge_creates_everything_when_wholly_absent": {
-        "kind": "host-pure"
-      },
-      "veth_provisioner::tests::workload_converge_disables_ipv6_before_the_ipv4_only_link_is_live": {
-        "kind": "host-pure"
-      },
-      "veth_provisioner::tests::workload_converge_emits_host_prereqs_only_when_unsatisfied": {
-        "kind": "host-pure"
-      },
-      "veth_provisioner::tests::workload_converge_rebuilds_pair_when_either_single_end_absent": {
-        "kind": "host-pure"
-      },
-      "veth_provisioner::tests::workload_converge_recreates_veth_when_pair_absent_but_netns_present": {
-        "kind": "host-pure"
-      },
-      "veth_provisioner::tests::workload_converge_writes_resolv_conf_only_when_not_injected": {
-        "kind": "host-pure"
-      },
-      "veth_provisioner::tests::workload_derivation_is_deterministic": {
-        "kind": "host-pure"
-      },
-      "veth_provisioner::tests::workload_netns_converge_steps_are_minimal_and_idempotent": {
-        "kind": "host-pure"
-      },
-      "veth_provisioner::workload_address_inverse_distill::assigned_workload_address_inverse_accepts_only_exact_second_usable_hosts": {
         "kind": "host-pure"
       },
       "view_store::redb::tests::bulk_load_iterates_targets_in_ord_order": {
@@ -4227,9 +4068,6 @@
       "acceptance::terminal_hook_ownership::the_terminal_hook_is_idempotent_and_a_no_op_for_unknown_ids": {
         "kind": "host-pure"
       },
-      "acceptance::terminal_netns_cleanup_from_observed_addr::terminal_cleanup_recovers_only_exact_unheld_slot_from_prior_running_address": {
-        "kind": "host-pure"
-      },
       "acceptance::tick_context_now_unix_runtime::run_convergence_tick_populates_now_unix_from_state_clock": {
         "kind": "host-pure"
       },
@@ -4404,26 +4242,6 @@
       }
     },
     "overdrive-control-plane::integration": {
-      "integration::adopt_on_restart::serve_restart_readopts_surviving_slot_and_gcs_orphan_netns": {
-        "kind": "guest-group",
-        "group": "cgroup-default"
-      },
-      "integration::adopt_on_restart::serve_restart_sweeps_surviving_per_workload_tproxy_rule": {
-        "kind": "guest-group",
-        "group": "cgroup-default"
-      },
-      "integration::alloc_netns_lifecycle::finalize_failed_genuine_failure_still_tears_down_alloc": {
-        "kind": "guest-group",
-        "group": "cgroup-default"
-      },
-      "integration::alloc_netns_lifecycle::finalize_failed_stable_does_not_tear_down_live_running_alloc": {
-        "kind": "guest-group",
-        "group": "cgroup-default"
-      },
-      "integration::alloc_netns_lifecycle::provision_failure_drives_alloc_to_failed_row_not_pending_retry": {
-        "kind": "guest-group",
-        "group": "cgroup-default"
-      },
       "integration::backend_discovery_bridge::boot_composition::attach_mode_fallback_emits_structured_event_on_dummy_iface": {
         "kind": "guest-group",
         "group": "cgroup-default"
@@ -5352,19 +5170,6 @@
       "integration::workload_lifecycle::submit_to_running::submitted_job_reaches_running_via_simulated_vm_driver": {
         "kind": "guest-group",
         "group": "cgroup-default"
-      },
-      "integration::workload_netns_provision::provision_creates_and_idempotently_converges_per_workload_netns": {
-        "kind": "guest-group",
-        "group": "cgroup-default"
-      },
-      "integration::workload_netns_provision::provision_injects_node_local_responder_into_netns_resolv_conf": {
-        "kind": "guest-group",
-        "group": "cgroup-default"
-      }
-    },
-    "overdrive-control-plane::net_slots_registry": {
-      "net_slots::tests::registered_bands_are_pairwise_disjoint_and_within_domain": {
-        "kind": "host-pure"
       }
     },
     "overdrive-core": {
@@ -8782,19 +8587,11 @@
         "kind": "guest-group",
         "group": "mtls-relay"
       },
-      "integration::mtls_agent_handshake::agent_handshake_presents_held_svid_server_role": {
-        "kind": "guest-group",
-        "group": "mtls-relay"
-      },
       "integration::mtls_guardrails::guardrails_fail_closed_limits_supervision_exemption_authn_boundary": {
         "kind": "guest-group",
         "group": "mtls-relay"
       },
       "integration::mtls_guardrails::wrong_but_valid_peer_is_peer_identity_mismatch": {
-        "kind": "guest-group",
-        "group": "mtls-relay"
-      },
-      "integration::mtls_inbound_enforce::inbound_enforce_origdst_server_mtls_ktls_rx_splice_to_server": {
         "kind": "guest-group",
         "group": "mtls-relay"
       },
@@ -8815,6 +8612,10 @@
         "group": "mtls-relay"
       },
       "integration::mtls_inbound_guest_relay::a_guest_application_reset_resets_leg_c": {
+        "kind": "guest-group",
+        "group": "mtls-relay"
+      },
+      "integration::mtls_inbound_guest_relay::agent_handshake_presents_held_svid_server_role": {
         "kind": "guest-group",
         "group": "mtls-relay"
       },
@@ -11787,12 +11588,6 @@
       "invariants::netns_density_boot_order::tests::reclamation_completes_before_stale_shared_network_sweep_for_every_seeded_prior_vm": {
         "kind": "host-pure"
       },
-      "invariants::provision_failure_cleanup::tests::fixed_seed_converges_and_reuses_the_smallest_free_slot": {
-        "kind": "host-pure"
-      },
-      "invariants::provision_failure_cleanup::tests::invariant_has_teeth_when_one_cleanup_fact_is_removed": {
-        "kind": "host-pure"
-      },
       "invariants::service_backend_keys_disjoint::tests::the_service_backend_keys_invariant_passes_over_the_sim_dataplane": {
         "kind": "host-pure"
       },
@@ -11895,9 +11690,6 @@
         "kind": "host-pure"
       },
       "acceptance::netns_density_retiring_cleanup::a_failed_element_removal_keeps_the_address_until_a_retry_converges": {
-        "kind": "host-pure"
-      },
-      "acceptance::provision_failure_cleanup::registered_invariant_converges_for_the_fixed_seed": {
         "kind": "host-pure"
       },
       "acceptance::reconciler_invariants_pass::at_least_one_reconciler_registered_passes_on_default_harness": {
@@ -12860,48 +12652,37 @@
     },
     "overdrive-system-conformance::public_ingress_gateway_end_to_end": {
       "native_metal_kvm_public_ingress_gateway_answers_408_for_a_stalled_request_body": {
-        "kind": "guest-group",
-        "group": "cgroup-default"
+        "kind": "native-launcher"
       },
       "native_metal_kvm_public_ingress_gateway_answers_408_for_a_stalled_request_head": {
-        "kind": "guest-group",
-        "group": "cgroup-default"
+        "kind": "native-launcher"
       },
       "native_metal_kvm_public_ingress_gateway_answers_502_when_the_guest_flow_ends_mid_request": {
-        "kind": "guest-group",
-        "group": "cgroup-default"
+        "kind": "native-launcher"
       },
       "native_metal_kvm_public_ingress_gateway_answers_503_until_the_hydrator_reprograms_after_a_serve_restart": {
-        "kind": "guest-group",
-        "group": "cgroup-default"
+        "kind": "native-launcher"
       },
       "native_metal_kvm_public_ingress_gateway_holds_128_concurrent_exchanges_within_the_descriptor_and_memory_budget": {
-        "kind": "guest-group",
-        "group": "cgroup-default"
+        "kind": "native-launcher"
       },
       "native_metal_kvm_public_ingress_gateway_lets_the_client_read_the_response_before_a_clean_close": {
-        "kind": "guest-group",
-        "group": "cgroup-default"
+        "kind": "native-launcher"
       },
       "native_metal_kvm_public_ingress_gateway_never_succeeds_through_a_stopped_workloads_stale_service_entry": {
-        "kind": "guest-group",
-        "group": "cgroup-default"
+        "kind": "native-launcher"
       },
       "native_metal_kvm_public_ingress_gateway_relays_exact_length_and_chunked_bodies_octet_exact_over_keep_alive": {
-        "kind": "guest-group",
-        "group": "cgroup-default"
+        "kind": "native-launcher"
       },
       "native_metal_kvm_public_ingress_gateway_runs_its_stages_in_order_and_shuts_down_within_one_drain": {
-        "kind": "guest-group",
-        "group": "cgroup-default"
+        "kind": "native-launcher"
       },
       "native_metal_kvm_public_ingress_gateway_sends_no_key_update_across_a_sixteen_mebibyte_response": {
-        "kind": "guest-group",
-        "group": "cgroup-default"
+        "kind": "native-launcher"
       },
       "native_metal_kvm_public_ingress_gateway_streams_a_workload_response_over_kernel_tls_legs": {
-        "kind": "guest-group",
-        "group": "cgroup-default"
+        "kind": "native-launcher"
       }
     },
     "overdrive-system-conformance::shared_guest_network_fail_stop_recovery": {
@@ -13652,10 +13433,6 @@
         "kind": "guest-group",
         "group": "cgroup-default"
       },
-      "integration::job_kind_installs_no_inbound_rule::job_kind_workload_with_no_listeners_installs_no_inbound_capture_rule": {
-        "kind": "guest-group",
-        "group": "cgroup-default"
-      },
       "integration::mtls_intercept_equivalence::a_convergence_from_a_stale_prior_is_refused_and_changes_nothing": {
         "kind": "guest-group",
         "group": "cgroup-default"
@@ -13708,10 +13485,6 @@
         "kind": "guest-group",
         "group": "cgroup-default"
       },
-      "integration::mtls_intercept_install::same_egress_guard_install_twice_adopts_one_rule": {
-        "kind": "guest-group",
-        "group": "cgroup-default"
-      },
       "integration::mtls_intercept_install::shared_program_absence_create_readback_idempotence_and_guard_drop": {
         "kind": "guest-group",
         "group": "cgroup-default"
@@ -13724,19 +13497,7 @@
         "kind": "guest-group",
         "group": "cgroup-default"
       },
-      "integration::mtls_intercept_install::shared_tproxy_infrastructure_converges_on_second_ensure": {
-        "kind": "guest-group",
-        "group": "cgroup-default"
-      },
       "integration::mtls_intercept_install::the_host_listener_reports_a_redirected_inbound_virtual_address_as_local": {
-        "kind": "guest-group",
-        "group": "cgroup-default"
-      },
-      "integration::mtls_intercept_install::worker_inbound_leg_s_marked_dial_bypasses_redirect": {
-        "kind": "guest-group",
-        "group": "cgroup-default"
-      },
-      "integration::mtls_intercept_install::worker_inbound_multi_virt_coexist_and_per_virt_teardown": {
         "kind": "guest-group",
         "group": "cgroup-default"
       },

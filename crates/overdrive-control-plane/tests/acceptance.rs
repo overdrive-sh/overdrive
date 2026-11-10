@@ -109,6 +109,12 @@ mod acceptance {
     #[path = "../common/node_adapters.rs"]
     pub mod node_adapters;
 
+    // VM-path dispatch fixture: the action shim driven through the
+    // production guest-network seam over a booted `AppState`.
+    #[cfg(feature = "integration-tests")]
+    #[path = "../common/vm_dispatch.rs"]
+    pub mod vm_dispatch;
+
     // S-CP-09 — AllocStatusRow rkyv round-trip with the new
     // `reason: Option<TransitionReason>` and `detail: Option<String>`
     // fields per ADR-0032 §3 (Amendment 2026-04-30) and §4.
@@ -342,11 +348,6 @@ mod acceptance {
     // Default-lane: real `action_shim::dispatch` + `SimDriver` (live_count)
     // + `SimObservationStore` (inject_write_failure).
     mod action_shim_running_write_failure_stops_alloc;
-
-    // ADR-0098 — genuine terminal cleanup can re-derive an unheld slot only
-    // from the exact C3-assigned address retained on the prior Running row.
-    // Default lane: action-shim dispatch plus a recording provisioner seam.
-    mod terminal_netns_cleanup_from_observed_addr;
 
     // Regression: Service workload convergence must not panic via stale
     // `unreachable!()` in `read_job`. Gated behind `integration-tests`

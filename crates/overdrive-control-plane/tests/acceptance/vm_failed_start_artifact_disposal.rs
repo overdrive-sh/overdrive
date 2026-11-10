@@ -11,13 +11,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
-use overdrive_control_plane::action_shim::{
-    WorkloadNetworkProvisioner, dispatch_with_network_provisioner,
-};
-use overdrive_control_plane::identity_mgr::IdentityMgr;
-use overdrive_control_plane::veth_provisioner::{
-    NetSlotAllocator, VethProvisionError, WorkloadNetnsPlan,
-};
+use overdrive_control_plane::guest_network::{GuestNetworkOperation, SharedGuestNetworkOwner};
 use overdrive_core::SpiffeId;
 use overdrive_core::aggregate::WorkloadKind;
 use overdrive_core::cgroup::CgroupPath;
@@ -27,11 +21,9 @@ use overdrive_core::guest_transport::{
 };
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::reconcilers::{Action, TickContext};
-use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{
-    AllocationSpec, Driver, DriverPayload, DriverRegistry, DriverType, Resources, VmPayload,
+    AllocationSpec, Driver, DriverPayload, DriverType, Resources, VmPayload,
 };
-use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{
     AllocLifecyclePredecessor, AllocState, ObservationStore, TransitionSource,
 };
@@ -42,41 +34,21 @@ use overdrive_core::traits::vmm::{
 use overdrive_core::vm::config::{
     Gid, HostArch, KERNEL_MAGIC_WINDOW, RootfsPlan, VmConfig, VmConfinement, VmmIdentity,
 };
-use overdrive_dataplane::allocators::{PersistentServiceVipAllocator, VipRange};
 use overdrive_host::vm_host_state::RealVmHostState;
 use overdrive_reconcilers::vm_reclamation::{
     SupervisionSet, VmAllocFacts, VmReclamationState, plan_reclamation,
 };
-use overdrive_sim::adapters::ca::SimCa;
 use overdrive_sim::adapters::clock::SimClock;
-use overdrive_sim::adapters::dataplane::SimDataplane;
-use overdrive_sim::adapters::entropy::SimEntropy;
+use overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_sim::adapters::probers::{SimHttpProber, SimTcpProber};
 use overdrive_sim::{SimCgroupAccounting, SimCgroupFs};
-use overdrive_store_local::LocalIntentStore;
 use overdrive_worker::beacon_intake::BeaconIntake;
 use overdrive_worker::probe_runner::ProbeRunner;
 use overdrive_worker::{VmDriver, VmHostLayout};
 use tempfile::TempDir;
 
-#[derive(Default)]
-struct RecordingNetworkProvisioner {
-    provisions: AtomicUsize,
-    teardowns: AtomicUsize,
-}
-
-impl WorkloadNetworkProvisioner for RecordingNetworkProvisioner {
-    fn provision(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
-        self.provisions.fetch_add(1, Ordering::SeqCst);
-        Ok(())
-    }
-
-    fn teardown(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
-        self.teardowns.fetch_add(1, Ordering::SeqCst);
-        Ok(())
-    }
-}
+use crate::acceptance::vm_dispatch::{VmDispatchFixture, VmDispatchPorts};
 
 /// Leaves an allocation-indexed directory where the rootfs clone must be a
 /// file, then rejects creation. The real `VmDriver` attempts every cleanup
@@ -170,56 +142,26 @@ fn spec(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn dispatch(
-    action: Action,
-    drivers: &DriverRegistry,
-    alloc_drivers: &overdrive_control_plane::action_shim::AllocDriverIndex,
-    obs: &dyn ObservationStore,
-    store: Arc<dyn IntentStore>,
-    clock: &dyn Clock,
-    node: &NodeId,
-    net_slots: &NetSlotAllocator,
-    network: &RecordingNetworkProvisioner,
-    host: &dyn VmHostState,
-    tick_number: u64,
-) {
-    let (events, _receiver) = tokio::sync::broadcast::channel(16);
+async fn dispatch(fixture: &VmDispatchFixture, action: Action, tick_number: u64) {
     let now = Instant::now();
-    let mtls_worker_0501_0 = crate::acceptance::serve_ports::worker();
-    dispatch_with_network_provisioner(
-        vec![action],
-        drivers,
-        alloc_drivers,
-        obs,
-        &SimDataplane::new(),
-        &SimCa::new(Arc::new(SimEntropy::new(0))),
-        clock,
-        &IdentityMgr::new(None),
-        &overdrive_control_plane::GatewayIdentityActionComposition::disabled(),
-        &events,
-        &TickContext {
-            now,
-            now_unix: overdrive_core::UnixInstant::from_unix_duration(Duration::from_secs(
-                1_700_000_000 + tick_number,
-            )),
-            tick: tick_number,
-            deadline: now + Duration::from_secs(2),
-        },
-        node,
-        Arc::new(tokio::sync::Mutex::new(PersistentServiceVipAllocator::new(
-            VipRange::default(),
-            store,
-        ))),
-        &parking_lot::Mutex::new(overdrive_core::eval_broker::EvaluationBroker::new()),
-        None,
-        &mtls_worker_0501_0,
-        net_slots,
-        network,
-        host,
-    )
-    .await
-    .expect("the production action boundary handles the action");
+    fixture
+        .dispatch(
+            vec![action],
+            &TickContext {
+                now,
+                now_unix: overdrive_core::UnixInstant::from_unix_duration(Duration::from_secs(
+                    1_700_000_000 + tick_number,
+                )),
+                tick: tick_number,
+                deadline: now + Duration::from_secs(2),
+            },
+        )
+        .await
+        .expect("the production action boundary handles the action");
+}
+
+fn owner_count(owner: &SimSharedGuestNetworkOwner, op: GuestNetworkOperation) -> usize {
+    owner.calls().iter().filter(|call| **call == op).count()
 }
 
 /// Outcome anchor: DISCUSS Elevator Pitch
@@ -305,23 +247,21 @@ async fn failed_vm_cleanup_hands_only_stranded_vm_artifacts_to_disposal() {
         .expect("the node beacon intake binds over the sim"),
         Arc::new(overdrive_worker::GuestListenerBoard::new()),
     ));
-    let mut drivers = DriverRegistry::new();
-    drivers.insert(Arc::clone(&driver) as Arc<dyn Driver>);
-    let alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::default();
     let obs = Arc::new(SimObservationStore::single_peer(node.clone(), 0));
-    let store: Arc<dyn IntentStore> = Arc::new(
-        LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open intent store"),
-    );
-    let clock = SimClock::new();
-    let net_slots = NetSlotAllocator::new();
-    let network = RecordingNetworkProvisioner::default();
-    let host = RealVmHostState::new(
+    let owner = Arc::new(SimSharedGuestNetworkOwner::default());
+    let host = Arc::new(RealVmHostState::new(
         layout.cgroup_root.clone(),
         layout.run_dir_root.clone(),
         layout.clone_index_dir.clone(),
-    );
+    ));
+    let mut ports = VmDispatchPorts::sim(Arc::clone(&driver) as Arc<dyn Driver>);
+    ports.obs = Arc::clone(&obs) as Arc<dyn ObservationStore>;
+    ports.owner = Arc::clone(&owner) as Arc<dyn SharedGuestNetworkOwner>;
+    ports.vm_host_state = Arc::clone(&host) as Arc<dyn VmHostState>;
+    let fixture = VmDispatchFixture::boot(ports).await;
 
     dispatch(
+        &fixture,
         Action::StartAllocation {
             alloc_id: alloc.clone(),
             workload_id: workload.clone(),
@@ -329,15 +269,6 @@ async fn failed_vm_cleanup_hands_only_stranded_vm_artifacts_to_disposal() {
             spec: spec(&alloc, &workload, kernel, master),
             kind: WorkloadKind::Job,
         },
-        &drivers,
-        &alloc_drivers,
-        obs.as_ref(),
-        Arc::clone(&store),
-        &clock,
-        &node,
-        &net_slots,
-        &network,
-        &host,
         1,
     )
     .await;
@@ -358,9 +289,8 @@ async fn failed_vm_cleanup_hands_only_stranded_vm_artifacts_to_disposal() {
     assert_eq!(driver.live_allocations(), Some(Vec::new()), "claim releases after the write");
     assert_eq!(vmm.creates.load(Ordering::SeqCst), 1);
     assert_eq!(vmm.terminates.load(Ordering::SeqCst), 0, "no VMM control/EXEC existed");
-    assert!(!net_slots.snapshot().contains_key(&alloc));
-    assert_eq!(network.provisions.load(Ordering::SeqCst), 1);
-    assert_eq!(network.teardowns.load(Ordering::SeqCst), 1);
+    assert_eq!(owner_count(&owner, GuestNetworkOperation::PairAttach), 1);
+    assert_eq!(owner_count(&owner, GuestNetworkOperation::PairAbort), 1);
     assert!(rootfs.clone_dest().is_dir(), "the failed cleanup leaves indexed residue");
     assert!(rootfs.index_link().is_symlink());
 
@@ -388,20 +318,7 @@ async fn failed_vm_cleanup_hands_only_stranded_vm_artifacts_to_disposal() {
     assert_eq!(actions, vec![Action::DiscardStrandedArtifacts { alloc_id: alloc.clone() }]);
 
     let stale_disposal = actions[0].clone();
-    dispatch(
-        stale_disposal.clone(),
-        &drivers,
-        &alloc_drivers,
-        obs.as_ref(),
-        Arc::clone(&store),
-        &clock,
-        &node,
-        &net_slots,
-        &network,
-        &host,
-        2,
-    )
-    .await;
+    dispatch(&fixture, stale_disposal.clone(), 2).await;
     assert!(!rootfs.clone_dest().exists());
     assert!(!rootfs.index_link().exists());
     assert_eq!(
@@ -416,20 +333,7 @@ async fn failed_vm_cleanup_hands_only_stranded_vm_artifacts_to_disposal() {
 
     // A stale replay is idempotent: there is still exactly one Failed
     // occurrence, no target residue reappears, and every sibling byte remains.
-    dispatch(
-        stale_disposal,
-        &drivers,
-        &alloc_drivers,
-        obs.as_ref(),
-        store,
-        &clock,
-        &node,
-        &net_slots,
-        &network,
-        &host,
-        3,
-    )
-    .await;
+    dispatch(&fixture, stale_disposal, 3).await;
     assert!(!rootfs.clone_dest().exists());
     assert!(!rootfs.index_link().exists());
     assert_eq!(obs.alloc_lifecycle_occurrences(&alloc).await.unwrap(), occurrences);
@@ -440,6 +344,6 @@ async fn failed_vm_cleanup_hands_only_stranded_vm_artifacts_to_disposal() {
         std::fs::read_link(sibling_rootfs.index_link()).unwrap(),
         sibling_rootfs.clone_dest(),
     );
-    assert_eq!(network.provisions.load(Ordering::SeqCst), 1);
-    assert_eq!(network.teardowns.load(Ordering::SeqCst), 1);
+    assert_eq!(owner_count(&owner, GuestNetworkOperation::PairAttach), 1);
+    assert_eq!(owner_count(&owner, GuestNetworkOperation::PairAbort), 1);
 }

@@ -19,8 +19,7 @@
 //! scan's EXHAUSTION and CAPACITY paths — which a port-level test cannot reach
 //! without assigning the whole 65534-address block — are unit-tested directly
 //! against the private `smallest_free_addr` / `frontend_block_capacity` in the
-//! module's own `#[cfg(test)] mod tests` (mirroring `NetSlotAllocator`'s
-//! pure-fn suite in `veth_provisioner.rs`).
+//! module's own `#[cfg(test)] mod tests`.
 
 #![allow(clippy::expect_used)]
 #![allow(clippy::unwrap_used)]

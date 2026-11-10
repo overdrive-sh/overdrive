@@ -16,8 +16,8 @@
 //!   'Authn-only boundary']
 //! - **AC2 (inbound fail-closed, DISTINCT reasons)** — `nocert` ("peer sent no
 //!   certificates") and `wrongca` ("invalid peer certificate: BadSignature") each
-//!   reject with their DISTINCT reason BEFORE any splice; the server workload S
-//!   receives 0 bytes. [findings-inbound-intercept.md §4]
+//!   reject with their DISTINCT reason BEFORE any relay; the guest application is
+//!   never dialled. [findings-inbound-intercept.md §4]
 //! - **AC3 (resource limits at CONCRETE values)** — `max_prearm_bytes == 256 KiB` ⇒
 //!   `BufferLimitExceeded` fires at exactly 256 KiB+1 (buffer dropped, leg reset, no
 //!   cleartext); `handshake_deadline == 5 s` ⇒ `HandshakeTimeout`;
@@ -40,12 +40,12 @@
 //!
 //! **Litmus (falsifiability / port-to-port)**: delete the `InFlightLedger` gate in
 //! `enforce` and AC3's 129th-pre-arm assertion reddens; delete the cause-distinct
-//! nocert/wrongca mapping in `inbound.rs` and AC2's distinct-reason + 0-bytes
+//! nocert/wrongca mapping in `inbound.rs` and AC2's distinct-reason + never-dialled
 //! assertions redden; delete the F6 derivation and AC4 reddens. Every observable is
 //! derived from the real adapter outcome / real subprocess / real wire, never the
 //! adapter's own bookkeeping.
 //!
-//! Tier 3 ONLY (sockops/TPROXY/cgroup_sock_addr/kTLS/splice have no
+//! Tier 3 ONLY (kTLS/splice have no
 //! `BPF_PROG_TEST_RUN`): `cargo xtask lima run -- cargo nextest run -p
 //! overdrive-dataplane --features integration-tests -E 'test(mtls_guardrails)'`,
 //! ACTUALLY EXECUTING on the real 6.18+ kernel (a `--no-run` gate is green even when
@@ -54,9 +54,8 @@
 #![cfg(target_os = "linux")]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 #![allow(clippy::print_stderr, clippy::needless_pass_by_ref_mut)]
-// One composed Tier-3 acceptance fn drives all five ACs against one real topology —
-// splitting it would re-stand-up the netns/cgroup/server topology per AC for no
-// behavioural gain. Leg names (C/S/F/B) + ADR-0069 / F-tokens are contract vocabulary.
+// One composed Tier-3 acceptance fn drives all five ACs against one real kernel —
+// splitting it would re-stand-up the peers and enforcement per AC for no behavioural gain. Leg names (C/S/F/B) + ADR-0069 / F-tokens are contract vocabulary.
 #![allow(clippy::too_many_lines, clippy::doc_markdown)]
 // Raw libc syscall glue (setsockopt / bind / getsockname): the size_of → socklen_t
 // casts are FFI-width conversions on compile-time-constant values; `leg_c`/`leg_s` are
@@ -87,9 +86,8 @@ use overdrive_core::traits::mtls_enforcement::{
 };
 use overdrive_dataplane::mtls::HostMtlsEnforcement;
 
-use super::helpers::mtls_netns_topology::{MtlsTopology, TopologyError};
+use super::helpers::guest_dial::CountingNotServing;
 use super::helpers::mtls_pki::{Leaf, TestPki};
-use super::helpers::mtls_roles::InboundServer;
 
 /// The agent's held-identity store — the ONLY holder of SVID material. Workloads
 /// hold nothing; the agent reads through this `IdentityRead` port and never mints.
@@ -123,23 +121,14 @@ fn pick_free_port() -> u16 {
 /// The composed 04-01 guardrails acceptance gate.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn guardrails_fail_closed_limits_supervision_exemption_authn_boundary() {
-    let tag = format!("gr{}", std::process::id());
-    let topo = match MtlsTopology::create(&tag) {
-        Ok(t) => t,
-        Err(e @ TopologyError::Unsupported(_)) => panic!(
-            "guardrails gate MUST run on the real kernel (root + CAP_NET_ADMIN + cgroup v2 + \
-             nft_tproxy); topology-unsupported is a gate FAILURE, not a skip — run via \
-             `cargo xtask lima run -- cargo nextest run -p overdrive-dataplane \
-             --features integration-tests -E 'test(mtls_guardrails)'`: {e}"
-        ),
-        Err(e) => panic!("topology setup failed (not a skip): {e}"),
-    };
-    let mut topo = topo;
-
+    // The dev-dependency on `overdrive-sim` unifies the `aws-lc-rs` rustls feature into
+    // this binary, so rustls cannot pick a process default on its own. A second install
+    // returns `Err`; ignore it.
+    let _ = rustls::crypto::ring::default_provider().install_default();
     let pki = TestPki::mint();
 
     // ============================================================
-    // AC1 — OUTBOUND fail-closed, cause-distinct (no topology needed; loopback peer)
+    // AC1 — OUTBOUND fail-closed, cause-distinct (loopback peer)
     // ============================================================
     // Absent SVID ⇒ AbsentSvid: the agent refuses, the peer leg is never armed, no
     // cleartext. We point the outbound at a never-accepting loopback peer; the
@@ -347,14 +336,19 @@ async fn guardrails_fail_closed_limits_supervision_exemption_authn_boundary() {
     // ============================================================
     // AC2 — INBOUND fail-closed, DISTINCT reasons (nocert / wrongca), server gets 0 bytes
     // ============================================================
-    let agent_port = pick_free_port();
-    topo.install_tproxy(agent_port)
-        .expect("inbound TPROXY + leg-S routing must install on the real 6.18 kernel");
+    // The guest dial is counted: a fail-closed handshake must never reach the guest.
+    let counting_dial = CountingNotServing::new();
+    let inbound_adapter = HostMtlsEnforcement::new(
+        Arc::new(held_identities(&pki)),
+        MtlsLimits::default(),
+        overdrive_core::guest_transport::GUEST_NODE_PREFIX,
+        counting_dial.clone(),
+    );
 
     // nocert: a client presenting NO certificate ⇒ PeerVerificationFailed
-    // ("peer sent no certificates"); the server S receives 0 bytes (no splice).
+    // ("peer sent no certificates"); the guest is never dialled (no relay).
     let nocert =
-        drive_inbound_rejection(&topo, &pki, agent_port, &adapter, ClientPresentation::NoCert)
+        drive_inbound_rejection(&pki, &inbound_adapter, &counting_dial, ClientPresentation::NoCert)
             .await;
     assert!(
         matches!(&nocert.err, MtlsEnforcementError::PeerVerificationFailed { reason }
@@ -364,8 +358,8 @@ async fn guardrails_fail_closed_limits_supervision_exemption_authn_boundary() {
         nocert.err
     );
     assert_eq!(
-        nocert.server_bytes, 0,
-        "AC2 (nocert): the server workload S receives 0 bytes (no splice)"
+        nocert.guest_dials, 0,
+        "AC2 (nocert): the guest application is never dialled (no relay)"
     );
 
     // wrongca: a client presenting a cert from an UNTRUSTED CA ⇒ PeerVerificationFailed
@@ -376,9 +370,13 @@ async fn guardrails_fail_closed_limits_supervision_exemption_authn_boundary() {
     // findings-inbound-intercept.md §4). The load-bearing guarantee is that the chain
     // is GENUINELY evaluated (the reason names a real peer-cert verification failure)
     // and that it is DISTINCT from the nocert reason. S gets 0 bytes.
-    let wrongca =
-        drive_inbound_rejection(&topo, &pki, agent_port, &adapter, ClientPresentation::WrongCa)
-            .await;
+    let wrongca = drive_inbound_rejection(
+        &pki,
+        &inbound_adapter,
+        &counting_dial,
+        ClientPresentation::WrongCa,
+    )
+    .await;
     assert!(
         matches!(&wrongca.err, MtlsEnforcementError::PeerVerificationFailed { reason }
             if reason.contains("invalid peer certificate")),
@@ -388,8 +386,8 @@ async fn guardrails_fail_closed_limits_supervision_exemption_authn_boundary() {
         wrongca.err
     );
     assert_eq!(
-        wrongca.server_bytes, 0,
-        "AC2 (wrongca): the server workload S receives 0 bytes (no splice)"
+        wrongca.guest_dials, 0,
+        "AC2 (wrongca): the guest application is never dialled (no relay)"
     );
 
     // The two rejections carry DISTINCT reasons — the verifier genuinely evaluates the
@@ -454,13 +452,12 @@ async fn guardrails_fail_closed_limits_supervision_exemption_authn_boundary() {
     // Gone-no-leak reclaim above exercises the SAME teardown path the (B) self-teardown
     // calls. The full (C)+(B) behavioural proof (peer vanishes → ETIMEDOUT →
     // self-teardown → Gone, no leak) lands in step 06-03's e2e gate.
-
-    let _ = &topo; // topology lifetime spans the inbound rejections above
 }
 
 // =====================================================================
-// In-file inbound rejection driver — install client presenting nocert / wrongca,
-// drive `enforce(Inbound)`, observe the cause-distinct error + the server's 0-byte read.
+// In-file inbound rejection driver — a client presenting nocert / wrongca,
+// `enforce(Inbound)` toward a guest backend, observe the cause-distinct error and
+// that the guest is never dialled.
 // =====================================================================
 
 /// How the in-file inbound client presents its identity (the AC2 negatives).
@@ -476,30 +473,33 @@ enum ClientPresentation {
 
 struct RejectionOutcome {
     err: MtlsEnforcementError,
-    /// Bytes the server workload S received off leg S — MUST be 0 (no splice on a
-    /// fail-closed handshake).
-    server_bytes: usize,
+    /// Dials the enforcement attempted toward the guest application — MUST be 0
+    /// (a fail-closed handshake never reaches the guest, so nothing is relayed).
+    guest_dials: usize,
 }
 
-/// Drive one inbound rejection: spawn S, bind leg C, spawn the rogue/nocert client
-/// toward the VIRT addr (TPROXY-intercepted to leg C), accept leg C, recover orig-dst,
-/// `enforce(Inbound)` — assert the cause-distinct error and that S got 0 bytes.
+/// The VM backend the client's connection was destined for: inside the node guest
+/// prefix, so the enforcement takes the guest path.
+const GUEST_BACKEND: SocketAddrV4 = SocketAddrV4::new(std::net::Ipv4Addr::new(100, 95, 0, 7), 8080);
+
+/// Drive one inbound rejection: bind a loopback leg-C stand-in, spawn the
+/// nocert/wrongca client toward it, accept leg C, `enforce(Inbound)` toward a guest
+/// backend — assert the cause-distinct error and that the guest was never dialled.
 async fn drive_inbound_rejection(
-    topo: &MtlsTopology,
     pki: &TestPki,
-    agent_port: u16,
     adapter: &HostMtlsEnforcement,
+    dial: &CountingNotServing,
     presentation: ClientPresentation,
 ) -> RejectionOutcome {
-    // S binds its netns listener; the agent NEVER dials it on a fail-closed handshake.
-    let server = InboundServer::spawn(topo);
+    let dials_before = dial.dials();
+    let leg_c_listener = TcpListener::bind("127.0.0.1:0").expect("bind the leg-C stand-in");
+    let leg_c_addr = match leg_c_listener.local_addr().expect("leg-C addr") {
+        std::net::SocketAddr::V4(a) => a,
+        std::net::SocketAddr::V6(a) => unreachable!("bound an IPv4 address, got {a}"),
+    };
 
-    // Bind the agent's IP_TRANSPARENT leg-C listener on the agreed port.
-    let leg_c_listener = make_transparent_listener(agent_port);
-
-    // Spawn the in-file client: connect to VIRT addr (intercepted to leg C), present
-    // nocert / wrongca, drive the handshake (which the agent will REJECT).
-    let virt = SocketAddrV4::new(MtlsTopology::VIRT_IP.parse().unwrap(), MtlsTopology::VIRT_PORT);
+    // Spawn the in-file client: present nocert / wrongca, drive the handshake (which
+    // the agent will REJECT).
     let ca_pem = pki.ca_cert_pem().to_string();
     let (client_cert, client_key, intermediate): (Option<_>, Option<_>, Option<_>) =
         match presentation {
@@ -510,18 +510,15 @@ async fn drive_inbound_rejection(
             }
         };
     let client = std::thread::spawn(move || {
-        rogue_inbound_client(virt, client_cert, intermediate, client_key, &ca_pem);
+        rogue_inbound_client(leg_c_addr, client_cert, intermediate, client_key, &ca_pem);
     });
 
-    // Accept leg C + recover orig-dst (the worker role).
-    let (leg_c, peer) = accept_with_timeout(&leg_c_listener, Duration::from_secs(12))
-        .expect("leg-C accept (TPROXY must deliver the connection)");
-    let _ = peer;
-    let orig_dst = getsockname_orig(leg_c.as_raw_fd());
+    let (leg_c, _peer) = accept_with_timeout(&leg_c_listener, Duration::from_secs(12))
+        .expect("leg-C accept (the client must connect)");
 
     let conn = InterceptedConnection {
         leg: OwnedFd::from(leg_c),
-        routed: Routed::Inbound { orig_dst },
+        routed: Routed::Inbound { orig_dst: GUEST_BACKEND },
         alloc: pki.server_alloc.clone(),
         expected_peer: None,
     };
@@ -530,19 +527,14 @@ async fn drive_inbound_rejection(
     );
 
     let _ = client.join();
-    // S never received the agent's leg-S dial (the handshake failed before any splice):
-    // its accept times out → non-zero exit → received_request_byte_exact == false → 0 bytes.
-    let server_result = server.join();
-    let server_bytes = usize::from(server_result.received_request_byte_exact); // 0 unless S got the request
-
-    RejectionOutcome { err, server_bytes }
+    RejectionOutcome { err, guest_dials: dial.dials() - dials_before }
 }
 
 /// An in-file inbound rustls client presenting (or omitting) a client cert, aimed at
 /// the VIRT addr. Drives the handshake until the agent rejects it (the agent's server
 /// handshake aborts on nocert/wrongca). Best-effort — the client failing IS expected.
 fn rogue_inbound_client(
-    virt: SocketAddrV4,
+    server: SocketAddrV4,
     cert: Option<rustls::pki_types::CertificateDer<'static>>,
     intermediate: Option<rustls::pki_types::CertificateDer<'static>>,
     key: Option<rustls::pki_types::PrivateKeyDer<'static>>,
@@ -566,7 +558,7 @@ fn rogue_inbound_client(
         }
         _ => builder.with_no_client_auth(),
     };
-    let Ok(tcp) = TcpStream::connect(virt) else { return };
+    let Ok(tcp) = TcpStream::connect(server) else { return };
     tcp.set_nodelay(true).ok();
     let sni = ServerName::try_from(TestPki::SERVER_SNI.to_string()).expect("SNI");
     let Ok(mut conn) = ClientConnection::new(Arc::new(cfg), sni) else { return };
@@ -721,9 +713,6 @@ async fn wrong_but_valid_peer_is_peer_identity_mismatch() {
 // Small kernel/socket helpers (self-contained, mirroring the inbound test's shape).
 // =====================================================================
 
-/// IP_TRANSPARENT is option 19 (IPPROTO_IP) — libc 0.2 does not expose it by name.
-const IP_TRANSPARENT: libc::c_int = 19;
-
 /// A real connected `(agent_end, workload_end)` AF_UNIX stream pair — the agent owns
 /// `agent_end` (leg F), the workload writes the pre-arm plaintext on `workload_end`.
 fn real_socketpair() -> (OwnedFd, std::os::unix::net::UnixStream) {
@@ -747,44 +736,6 @@ fn set_socket_buf(fd: std::os::fd::RawFd, bytes: usize) {
             );
         }
     }
-}
-
-/// Bind an `IP_TRANSPARENT` leg-C listener on `127.0.0.1:port` (the TPROXY target).
-fn make_transparent_listener(port: u16) -> TcpListener {
-    let sock = unsafe { libc::socket(libc::AF_INET, libc::SOCK_STREAM, 0) };
-    assert!(sock >= 0, "socket() for leg-C listener");
-    let one: libc::c_int = 1;
-    unsafe {
-        libc::setsockopt(
-            sock,
-            libc::SOL_SOCKET,
-            libc::SO_REUSEADDR,
-            std::ptr::from_ref(&one).cast(),
-            std::mem::size_of::<libc::c_int>() as libc::socklen_t,
-        );
-        libc::setsockopt(
-            sock,
-            libc::IPPROTO_IP,
-            IP_TRANSPARENT,
-            std::ptr::from_ref(&one).cast(),
-            std::mem::size_of::<libc::c_int>() as libc::socklen_t,
-        );
-    }
-    let mut sa: libc::sockaddr_in = unsafe { std::mem::zeroed() };
-    sa.sin_family = libc::AF_INET as libc::sa_family_t;
-    sa.sin_port = port.to_be();
-    sa.sin_addr.s_addr = u32::from_ne_bytes([127, 0, 0, 1]);
-    let rc = unsafe {
-        libc::bind(
-            sock,
-            std::ptr::from_ref(&sa).cast(),
-            std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t,
-        )
-    };
-    assert_eq!(rc, 0, "bind leg-C listener: {}", std::io::Error::last_os_error());
-    let rc = unsafe { libc::listen(sock, 16) };
-    assert_eq!(rc, 0, "listen leg-C");
-    unsafe { std::net::TcpListener::from_raw_fd_checked(sock) }
 }
 
 /// Accept with a bounded timeout (so a fail-closed scenario where the client never
@@ -812,29 +763,5 @@ fn accept_with_timeout(
             }
             Err(e) => return Err(e),
         }
-    }
-}
-
-/// Recover the original destination via `getsockname` on the TPROXY-accepted leg C
-/// (under TPROXY the orig-dst IS the accepted socket's local addr).
-fn getsockname_orig(fd: std::os::fd::RawFd) -> SocketAddrV4 {
-    let mut sa: libc::sockaddr_in = unsafe { std::mem::zeroed() };
-    let mut len = std::mem::size_of::<libc::sockaddr_in>() as libc::socklen_t;
-    let rc = unsafe {
-        libc::getsockname(fd, std::ptr::from_mut(&mut sa).cast(), std::ptr::from_mut(&mut len))
-    };
-    assert_eq!(rc, 0, "getsockname orig-dst");
-    let ip = std::net::Ipv4Addr::from(u32::from_be(sa.sin_addr.s_addr));
-    SocketAddrV4::new(ip, u16::from_be(sa.sin_port))
-}
-
-/// Tiny extension: build a `TcpListener` from a raw fd (the IP_TRANSPARENT socket).
-trait FromRawFdChecked {
-    unsafe fn from_raw_fd_checked(fd: std::os::fd::RawFd) -> Self;
-}
-impl FromRawFdChecked for TcpListener {
-    unsafe fn from_raw_fd_checked(fd: std::os::fd::RawFd) -> Self {
-        use std::os::fd::FromRawFd;
-        unsafe { TcpListener::from_raw_fd(fd) }
     }
 }

@@ -8,9 +8,8 @@
 //! thread, because `setns` permanently mutates the calling thread's netns and
 //! would poison a thread returned to the runtime for reuse.
 //!
-//! The per-alloc `provision_workload_netns` path that drives it is a **sync**
-//! fn (called from the async action-shim on a tokio worker), so it invokes
-//! [`in_netns`] directly and blocks on the join — the dedicated thread has no
+//! A **sync** caller (on a tokio worker) invokes [`in_netns`] directly and
+//! blocks on the join — the dedicated thread has no
 //! ambient tokio runtime, so the closure is free to build its own
 //! current-thread runtime and drive the in-netns rtnetlink ops without the
 //! "runtime within a runtime" panic a `block_on` on the calling worker would
@@ -66,7 +65,7 @@ fn enter_netns(netns_name: &str) -> Result<(), NetlinkError> {
 ///
 /// The thread is joined before this returns and is **never** returned to a
 /// pool (a `setns`'d thread is unreachable by the tokio worker pool,
-/// ADR-0085 D4). The sync `provision_workload_netns` path calls this directly
+/// ADR-0085 D4). A sync caller invokes this directly
 /// and blocks on the join; the closure — running on a thread with no ambient
 /// tokio runtime — is free to build a current-thread runtime and drive the
 /// in-netns rtnetlink ops (and/or read `/proc/sys/net/**`, which observes the
@@ -103,7 +102,7 @@ mod tests {
     /// generalise): the dedicated-thread runner
     ///
     ///   1. runs the closure on a thread that is NOT the caller's (never the
-    ///      pooled tokio worker that invoked `provision_workload_netns`),
+    ///      pooled tokio worker that invoked the call),
     ///   2. JOINS it (the closure's return value propagates back), and
     ///   3. spawns a FRESH thread PER call (a distinct `ThreadId`, which the
     ///      stdlib guarantees is never reused for the process lifetime — so two

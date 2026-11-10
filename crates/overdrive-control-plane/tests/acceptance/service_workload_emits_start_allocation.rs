@@ -30,11 +30,9 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use overdrive_control_plane::action_shim::WorkloadNetworkProvisioner;
 use overdrive_control_plane::reconciler_runtime::{
-    ReconcilerRuntime, run_convergence_tick_with_network_provisioner_for_test,
+    ReconcilerRuntime, run_convergence_tick_with_guest_network_provisioner_for_test,
 };
-use overdrive_control_plane::veth_provisioner::{VethProvisionError, WorkloadNetnsPlan};
 use overdrive_control_plane::{AppState, noop_heartbeat, workload_lifecycle};
 use overdrive_core::aggregate::{DriverInput, IntentKey, ResourcesInput, WorkloadKind};
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
@@ -47,24 +45,15 @@ use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{AllocState, ObservationStore};
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::driver::SimDriver;
+use overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_store_local::LocalIntentStore;
 use tempfile::TempDir;
 
-#[derive(Debug, Default)]
-struct NoopNetworkProvisioner;
-
-impl WorkloadNetworkProvisioner for NoopNetworkProvisioner {
-    fn provision(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
-        Ok(())
-    }
-
-    fn teardown(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
-        Ok(())
-    }
-}
-
-async fn build_state(tmp: &TempDir, clock: Arc<SimClock>) -> AppState {
+async fn build_state(
+    tmp: &TempDir,
+    clock: Arc<SimClock>,
+) -> (AppState, Arc<SimSharedGuestNetworkOwner>) {
     let mut runtime =
         ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime::new");
     runtime.register(noop_heartbeat()).await.expect("register noop-heartbeat");
@@ -76,7 +65,9 @@ async fn build_state(tmp: &TempDir, clock: Arc<SimClock>) -> AppState {
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Vm));
     let allocator =
         overdrive_control_plane::test_default_allocator(Arc::clone(&store) as Arc<dyn IntentStore>);
-    AppState::new(
+    let (seam_owner, seam_gate, _seam_supervisor) =
+        crate::acceptance::vm_dispatch::converged_owner_and_open_gate().await;
+    let state = AppState::new(
         store,
         store_path,
         obs,
@@ -93,10 +84,12 @@ async fn build_state(tmp: &TempDir, clock: Arc<SimClock>) -> AppState {
         overdrive_control_plane::test_empty_listener_facts(),
         std::net::Ipv4Addr::LOCALHOST,
         crate::acceptance::serve_ports::worker(),
-        crate::acceptance::serve_ports::owner(),
-        crate::acceptance::serve_ports::exec_gate(),
+        seam_owner.clone(),
+        seam_gate.clone(),
         crate::acceptance::serve_ports::pool(),
-    )
+    );
+    crate::acceptance::vm_dispatch::start_shared_mtls_owner(&state).await;
+    (state, seam_owner)
 }
 
 /// GIVEN a `WorkloadIntent::Service` is persisted and an evaluation is
@@ -120,7 +113,7 @@ async fn build_state(tmp: &TempDir, clock: Arc<SimClock>) -> AppState {
 async fn service_workload_convergence_emits_start_allocation_and_running_row() {
     let tmp = TempDir::new().expect("tempdir");
     let clock = Arc::new(SimClock::new());
-    let state = build_state(&tmp, clock.clone()).await;
+    let (state, seam_owner) = build_state(&tmp, clock.clone()).await;
 
     let svc = overdrive_core::aggregate::Service::from_submit(ServiceSpecInput {
         id: "web-frontend".to_string(),
@@ -166,7 +159,6 @@ async fn service_workload_convergence_emits_start_allocation_and_running_row() {
     // action shim invokes SimDriver::start which returns Ok; the row
     // lands as Running. Subsequent ticks observe the converged state.
     let mut saw_running = false;
-    let network = NoopNetworkProvisioner;
     for tick_n in 0..10_u64 {
         let now = clock.now();
         let deadline = now + Duration::from_millis(100);
@@ -180,14 +172,14 @@ async fn service_workload_convergence_emits_start_allocation_and_running_row() {
             )
         };
         for (eval, _) in pending {
-            run_convergence_tick_with_network_provisioner_for_test(
+            run_convergence_tick_with_guest_network_provisioner_for_test(
                 &state,
                 &eval.reconciler,
                 &eval.target,
                 now,
                 tick_n,
                 deadline,
-                &network,
+                seam_owner.as_ref(),
             )
             .await
             .expect("convergence tick succeeds for Service workload");

@@ -51,11 +51,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
-use overdrive_control_plane::action_shim::WorkloadNetworkProvisioner;
 use overdrive_control_plane::reconciler_runtime::{
-    ReconcilerRuntime, run_convergence_tick_with_network_provisioner_for_test,
+    ReconcilerRuntime, run_convergence_tick_with_guest_network_provisioner_for_test,
 };
-use overdrive_control_plane::veth_provisioner::{VethProvisionError, WorkloadNetnsPlan};
 use overdrive_control_plane::{AppState, noop_heartbeat, workload_lifecycle};
 use overdrive_core::aggregate::{
     DriverInput, IntentKey, Job, JobSpecInput, ResourcesInput, WorkloadIntent, WorkloadKind,
@@ -68,27 +66,18 @@ use overdrive_core::traits::intent_store::{IntentStore, TxnOp, TxnOutcome};
 use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::driver::SimDriver;
+use overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_store_local::LocalIntentStore;
 use tempfile::TempDir;
 
-#[derive(Debug, Default)]
-struct NoopNetworkProvisioner;
-
-impl WorkloadNetworkProvisioner for NoopNetworkProvisioner {
-    fn provision(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
-        Ok(())
-    }
-
-    fn teardown(&self, _workload: &WorkloadNetnsPlan) -> Result<(), VethProvisionError> {
-        Ok(())
-    }
-}
-
 /// Build an `AppState` whose runtime carries both production reconcilers
 /// (`noop-heartbeat` + `workload-lifecycle`) — the `run_server` boot shape.
 /// The `SimClock` is held by the caller to source the tick's `now`.
-async fn build_state(tmp: &TempDir, clock: Arc<SimClock>) -> AppState {
+async fn build_state(
+    tmp: &TempDir,
+    clock: Arc<SimClock>,
+) -> (AppState, Arc<SimSharedGuestNetworkOwner>) {
     let mut runtime =
         ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime::new");
     runtime.register(noop_heartbeat()).await.expect("register noop-heartbeat");
@@ -100,7 +89,9 @@ async fn build_state(tmp: &TempDir, clock: Arc<SimClock>) -> AppState {
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Vm));
     let allocator =
         overdrive_control_plane::test_default_allocator(Arc::clone(&store) as Arc<dyn IntentStore>);
-    AppState::new(
+    let (seam_owner, seam_gate, _seam_supervisor) =
+        crate::acceptance::vm_dispatch::converged_owner_and_open_gate().await;
+    let state = AppState::new(
         store,
         store_path,
         obs,
@@ -117,10 +108,12 @@ async fn build_state(tmp: &TempDir, clock: Arc<SimClock>) -> AppState {
         overdrive_control_plane::test_empty_listener_facts(),
         std::net::Ipv4Addr::LOCALHOST,
         crate::acceptance::serve_ports::worker(),
-        crate::acceptance::serve_ports::owner(),
-        crate::acceptance::serve_ports::exec_gate(),
+        seam_owner.clone(),
+        seam_gate.clone(),
         crate::acceptance::serve_ports::pool(),
-    )
+    );
+    crate::acceptance::vm_dispatch::start_shared_mtls_owner(&state).await;
+    (state, seam_owner)
 }
 
 /// GIVEN a declared `payments` Job whose desired-run generation was bumped
@@ -136,7 +129,7 @@ async fn build_state(tmp: &TempDir, clock: Arc<SimClock>) -> AppState {
 async fn reconciler_observes_generation_written_at_for_workload_generation_key() {
     let tmp = TempDir::new().expect("tempdir");
     let clock = Arc::new(SimClock::new());
-    let state = build_state(&tmp, clock.clone()).await;
+    let (state, seam_owner) = build_state(&tmp, clock.clone()).await;
 
     // GIVEN a declared Job workload `payments` (aggregate + kind).
     let workload_id = WorkloadId::new("payments").expect("valid id");
@@ -186,14 +179,14 @@ async fn reconciler_observes_generation_written_at_for_workload_generation_key()
     let target = TargetResource::new("workload/payments").expect("valid target");
     let now = clock.now();
     let deadline = now + Duration::from_millis(100);
-    run_convergence_tick_with_network_provisioner_for_test(
+    run_convergence_tick_with_guest_network_provisioner_for_test(
         &state,
         &name,
         &target,
         now,
         0,
         deadline,
-        &NoopNetworkProvisioner,
+        seam_owner.as_ref(),
     )
     .await
     .expect("convergence tick succeeds");

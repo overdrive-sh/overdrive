@@ -14,7 +14,7 @@
 //!
 //! # Port-to-port
 //!
-//! The driving port is `action_shim::dispatch` (the runtime's async I/O
+//! The driving port is the VM dispatch seam (`dispatch_with_guest_network_provisioner_for_test`, the runtime's async I/O
 //! boundary, ADR-0023). The driven ports are the injected `WorkflowEngine`
 //! (built over `SimJournalStore` + `SimTransport`) and the
 //! `ObservationStore`. The observable outcome is asserted at the engine's
@@ -29,33 +29,26 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use overdrive_control_plane::action_shim::{LifecycleEvent, dispatch};
 use overdrive_control_plane::journal::{JournalCommand, JournalStore, LoadedEntry, WorkflowId};
 use overdrive_control_plane::workflow_runtime::{WorkflowEngine, WorkflowRegistry};
 
 use overdrive_core::UnixInstant;
-use overdrive_core::eval_broker::EvaluationBroker;
 use overdrive_core::id::{ContentHash, CorrelationKey, NodeId};
 use overdrive_core::reconcilers::{Action, TickContext};
 use overdrive_core::testing::workflow::ProvisionRecord;
-use overdrive_core::traits::driver::DriverType;
-use overdrive_core::traits::intent_store::IntentStore;
+use overdrive_core::traits::driver::{Driver, DriverType};
 use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_core::traits::{Clock, Entropy, Transport};
 use overdrive_core::workflow::{WorkflowStart, WorkflowStatus};
 
-use overdrive_dataplane::allocators::{PersistentServiceVipAllocator, VipRange};
-
 use overdrive_sim::adapters::clock::SimClock;
-use overdrive_sim::adapters::dataplane::SimDataplane;
 use overdrive_sim::adapters::driver::SimDriver;
 use overdrive_sim::adapters::entropy::SimEntropy;
 use overdrive_sim::adapters::journal::SimJournalStore;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_sim::adapters::transport::SimTransport;
 
-use overdrive_store_local::LocalIntentStore;
-use tempfile::TempDir;
+use crate::acceptance::vm_dispatch::{VmDispatchFixture, VmDispatchPorts};
 
 #[tokio::test]
 async fn start_workflow_action_is_dispatched_to_the_engine_off_the_shim_not_run_as_a_reconciler() {
@@ -99,28 +92,16 @@ async fn start_workflow_action_is_dispatched_to_the_engine_off_the_shim_not_run_
     // the same way to assert against the journal the engine actually used.
     let workflow_id = WorkflowId::for_correlation(&correlation);
 
-    // --- Remaining action-shim ports (untouched by StartWorkflow) -----
-    let driver = SimDriver::new(DriverType::Vm);
-    let drivers: Arc<overdrive_core::traits::driver::DriverRegistry> = {
-        let mut r = overdrive_core::traits::driver::DriverRegistry::new();
-        r.insert(Arc::new(driver));
-        Arc::new(r)
-    };
-    let alloc_drivers = overdrive_control_plane::action_shim::AllocDriverIndex::default();
-    let obs: Arc<dyn ObservationStore> =
-        Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("node id"), 0));
-    let dataplane = SimDataplane::new();
-    let (bus, _rx) = tokio::sync::broadcast::channel::<LifecycleEvent>(16);
-    let node = NodeId::new("node-a").expect("valid node id");
-
-    let tmp = TempDir::new().expect("tempdir");
-    let store: Arc<dyn IntentStore> =
-        Arc::new(LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open store"));
-    let allocator = Arc::new(tokio::sync::Mutex::new(PersistentServiceVipAllocator::new(
-        VipRange::default(),
-        store,
-    )));
-    let broker = parking_lot::Mutex::new(EvaluationBroker::new());
+    // --- Remaining action-shim ports (untouched by StartWorkflow): the VM
+    // dispatch fixture, with the engine under test installed as the state's
+    // workflow engine before the state is shared.
+    let mut fixture = VmDispatchFixture::boot(VmDispatchPorts::sim(Arc::new(SimDriver::new(
+        DriverType::Vm,
+    )) as Arc<dyn Driver>))
+    .await;
+    let engine = Arc::new(engine);
+    Arc::get_mut(&mut fixture.state).expect("fixture state is not yet shared").workflow_engine =
+        Arc::clone(&engine);
 
     let now = Instant::now();
     let tick = TickContext {
@@ -131,33 +112,10 @@ async fn start_workflow_action_is_dispatched_to_the_engine_off_the_shim_not_run_
     };
 
     // --- Driving port: the action shim, off which the engine runs -----
-    let mtls_worker_0501_0 = crate::acceptance::serve_ports::worker();
-    dispatch(
-        vec![Action::StartWorkflow { start: spec, correlation }],
-        drivers.as_ref(),
-        &alloc_drivers,
-        obs.as_ref(),
-        &dataplane,
-        &overdrive_sim::adapters::ca::SimCa::new(std::sync::Arc::new(
-            overdrive_sim::adapters::entropy::SimEntropy::new(0),
-        )),
-        &overdrive_sim::adapters::clock::SimClock::new(),
-        &overdrive_control_plane::identity_mgr::IdentityMgr::new(None),
-        &overdrive_control_plane::GatewayIdentityActionComposition::disabled(),
-        &bus,
-        &tick,
-        &node,
-        Arc::clone(&allocator),
-        &broker,
-        Some(&engine),
-        &mtls_worker_0501_0,
-        // transparent-mtls-enrollment step 04-01: a fresh per-host slot
-        // allocator — this fixture exercises no netns provisioning.
-        &overdrive_control_plane::veth_provisioner::NetSlotAllocator::new(),
-        &overdrive_sim::adapters::vm_host_state::SimVmHostState::new(),
-    )
-    .await
-    .expect("StartWorkflow dispatch must succeed");
+    fixture
+        .dispatch(vec![Action::StartWorkflow { start: spec, correlation }], &tick)
+        .await
+        .expect("StartWorkflow dispatch must succeed");
 
     // The engine drives `run` as a tracked task off the shim; wait for it.
     engine.join_all().await;
