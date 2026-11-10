@@ -1041,10 +1041,12 @@ every persisted `(reconciler_name, target) → View` blob into a
 per-reconciler `BTreeMap<TargetResource, View>` held in RAM. From that
 moment on the in-memory map is the steady-state read SSOT.
 
-**Steady-state tick** (every `tick_period_ms`, default 100 ms):
+**Convergence-loop iteration** (starts at boot, then re-enters on a broker
+submission wake, an in-flight evaluation completion, the clock timer, or
+shutdown):
 
 ```
-for evaluation in broker.drain_pending():
+for evaluation in runtime.broker().drain_pending(...):
   1. (any_reconciler, views) = registry.lookup(name)
   2. tick    = TickContext::snapshot(clock)
   3. desired = AnyReconciler::hydrate_desired(...)
@@ -1058,7 +1060,17 @@ for evaluation in broker.drain_pending():
   9. action_shim::dispatch(actions, ...)
 ```
 
-Steady-state reconcile pays **zero disk reads**. Every tick reads
+Every production submission to the runtime broker goes through
+`ReconcilerRuntime::submit_evaluation`: it inserts the evaluation, releases
+the broker lock, then signals the loop with `Notify::notify_one`. The runtime's
+`broker()` accessor returns a drain-only `BrokerDrain`; it exposes draining,
+earliest-eligibility lookup, and counters, with no submission or raw-mutex
+escape. The loop's select also retains `clock.sleep(sleep_for)`: `sleep_for`
+is the `tick_period_ms` cadence (default 100 ms) or the earliest deferred
+eligibility, whichever is sooner. That timer remains the level-triggered
+backstop for the submit wake.
+
+Steady-state reconcile pays **zero disk reads**. Every reconciliation reads
 `view = views.get(target).cloned().unwrap_or_default()` from the
 in-memory map, never from disk; redb is touched only on write-through
 and on cold boot.
@@ -1094,10 +1106,11 @@ reconciler returning `Some`. `spawn_convergence_loop` owns a
 iteration, for every due reconciler resolves the schedule's scope to
 concrete target(s) — `resolve_scope(ResyncScope::LocalNode, node_id) =
 [node/<id>]`, using the `NodeId` the loop already owns — and submits one
-`Evaluation` per target through `broker.submit`, then re-arms
-`next_wake = now + period`. Two constraints keep Open Question 5's
-no-storm verdict true: resync MUST route through `broker.submit` (never a
-side channel), and the next-wake table re-arms **at most once per
+`Evaluation` per target through `ReconcilerRuntime::submit_evaluation`, then
+re-arms `next_wake = now + period`. Two constraints keep Open Question 5's
+no-storm verdict true: resync MUST route through
+`ReconcilerRuntime::submit_evaluation` (never a side channel), and the
+next-wake table re-arms **at most once per
 period**. After this change the loop carries no reconciler name, no
 cadence constant, and no hardcoded target scheme — only the generic table
 and a scope resolver. `ResyncScope` ships one variant (`LocalNode`) so
@@ -1112,14 +1125,18 @@ from `AnyReconciler::interests()`. A new runtime task
 `ObservationStore::subscribe_all_events()`: subscribe first (so no
 accepted write is missed in the boot window), List the current snapshot
 of the interested row families and submit one `Evaluation` per row's
-derived target, then Watch the stream. On `SubscriptionEvent::Row(row)`
+derived target through the injected `InterestRouterBroker`, then Watch the
+stream. The production runtime-backed handle routes submissions through
+`ReconcilerRuntime::submit_evaluation`, which wakes the convergence loop;
+the standalone-broker handle remains a separate test composition and does not
+wake the runtime's convergence loop. On `SubscriptionEvent::Row(row)`
 it takes `row.kind()` — the total, no-wildcard `ObservationRow::kind()`
 projection into `ObservationRowKind`, which owns the drift-closure: a new
 `ObservationRow` variant fails to compile at `kind()` until mapped — and,
 if `interest_table.get(&row.kind())` is non-empty, derives the broker
-`TargetResource` inline from the row and `broker.submit`s one Evaluation
-per interested reconciler. The watcher emits a `Row` only for an
-*accepted* (LWW-winner) write, so the fan-out fires on genuine changes
+`TargetResource` inline from the row and submits one Evaluation per
+interested reconciler through that capability. The watcher emits a `Row` only
+for an *accepted* (LWW-winner) write, so the fan-out fires on genuine changes
 only. On `SubscriptionEvent::Lagged` it **relists** (repeat the List);
 and it relists **unconditionally every `INTEREST_ROUTER_RELIST_PERIOD`**
 (30 s, clock-injected — the same `config.clock` instance the convergence
@@ -1127,8 +1144,9 @@ loop reads, never `tokio::time`), re-armed at most once per period and
 not reset by `Row` arrivals. That periodic relist is the level-triggered
 backstop for the row-backed partition — it re-derives the interested
 targets from the snapshot, needs no per-reconciler cadence, and closes
-the quiet-stream boot-LIST-error liveness gap. The router's only effect
-is `broker.submit`.
+the quiet-stream boot-LIST-error liveness gap. The router's only effect is
+to invoke its submit-only `InterestRouterBroker` capability; the runtime
+loop remains the sole broker drainer.
 
 This is a single-cut greenfield migration: the four `exit_observer`
 producer submits that used to name their downstream consumers are
