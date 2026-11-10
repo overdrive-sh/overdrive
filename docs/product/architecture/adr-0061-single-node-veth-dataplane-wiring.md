@@ -6,6 +6,16 @@ Accepted. 2026-06-02. Decision-makers: Titan (system-design, proposing);
 ratified by the user 2026-06-02. Tags: phase-2, dataplane, single-node,
 production-boot, xdp, bug-fix.
 
+**Scope note 2026-11-10 (user ruling: only VM workloads are supported).** This
+ADR's decision is the host client/backend veth pair and the converge-on-boot
+provisioner for it (`veth_provisioner::provision`, § 1-§ 3.1); it stands and the
+VM path and `node_adapters` use it. The per-workload netns/veth plan that § 3.1's
+converge model was later extended to cover in `veth_provisioner.rs` (the net-slot
+allocator, the workload netns plan, `workload_converge_steps`,
+`provision_workload_netns`, `teardown_workload_netns`, `adopt_on_restart_recovery`)
+served the deleted exec/process driver and is removed with its tests. References in
+this ADR to per-workload netns provisioning describe that removed path.
+
 **Amended 2026-06-03 (idempotent converge-on-boot)** — § 3 / § 3.1 and
 DQ-4 reframed from **"detect-and-reuse / adopt untouched"** to
 **"idempotent, per-resource desired-vs-actual converge-on-boot"**. The

@@ -21,6 +21,19 @@ wire contract, `IP_PKTINFO` source-pinning, and the Tier-3 wire evidence are
 unchanged, and the lifecycle port does not simulate the socket path DDN-4 kept
 real.
 
+**Partially superseded 2026-11-10 (user ruling: only VM workloads are
+supported).** The parts of this ADR that bind the responder to per-workload
+network namespaces (the per-netns gateway set read from
+`veth_provisioner::NetSlotAllocator`, `responder_addr_for_slot` and the
+`derive_workload_netns_plan` arithmetic, per-netns `/etc/resolv.conf` injection,
+the per-netns `/30` slot range of the address-plan table) served the deleted
+exec/process driver and are removed with it. The decisions that stand: the
+node-local in-agent responder over the ObservationStore, the REV-2 stable
+per-`<job>` frontend-address answer contract, `IP_PKTINFO` source-pinning, and
+the wire contract. The responder's serving surface for VM guests is defined by
+the guest-network ADRs (ADR-0138 and the netns-density-295 design), not by this
+ADR's slot-derived per-netns gateways.
+
 **REVISED (REV-2, 2026-06-25) — FINAL. Both open forks RATIFIED by the user;
 the gating spike (BLOCKER-1) returned WORKS.** The user ratified shifting the
 answered address from a *volatile per-instance backend addr* to a **stable

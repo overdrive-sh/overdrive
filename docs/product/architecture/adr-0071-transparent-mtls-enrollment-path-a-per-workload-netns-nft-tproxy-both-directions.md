@@ -12,6 +12,24 @@ the DNS-return shape (headless, recommended) — and adds no new v1 dependency, 
 it is not a blocker. Tags: phase-2, dataplane, mtls, ktls, tproxy, netns,
 enrollment, dns, name-layer, #236.
 
+**Partially superseded 2026-11-10 (user ruling: Overdrive supports only VM
+workloads; dead non-VM code is removed).** Path A as written here (a per-workload
+network namespace and veth for an exec/process workload, an nft-TPROXY rule
+installed per workload in that namespace for each direction, the plain-TCP
+leg-S relay to the workload's loopback address, and the per-workload
+install/sweep/recover machinery for those rules) served the exec/process
+workload driver, which no longer exists: `WorkloadDriverV1::Vm` is the only
+driver. That path is deleted, together with its tests. What this ADR decided and
+the VM path still uses stands: the agent-light L4 proxy model, nft-TPROXY +
+`IP_TRANSPARENT` + `getsockname` original-destination recovery, the node-shared
+leg-F and leg-C listeners, `MTLS_LEG_S_DIAL_MARK` and its nft exemption for probe
+sockets, the host client/backend veth pair, and the amended outbound mechanism
+(retiring the `cgroup/connect4` rewrite). The inbound leg-S dial is the guest
+stream dial of the guest-flow owner only; a connection whose recovered
+destination is not an Active VM workload address is refused with
+`GuestDial(NotServing)` (feature `public-ingress-gateway` ruling R-75). Read the
+per-workload-netns text of this ADR as history of the deleted exec path.
+
 **Amends ADR-0069** ("Transparent mTLS via a universal agent-light L4 proxy")
 on exactly one axis: the **OUTBOUND interception + original-destination
 recovery mechanism**. ADR-0069 framed the outbound active side as a

@@ -450,13 +450,10 @@ to a real loop here; do not cut the sized scope there.
 **Precedent** (transparent-mtls-enrollment, #236): the inbound
 interception path (the leg-C `IP_TRANSPARENT` listener + accept loop +
 server-side mTLS handshake + kTLS + splice) and the dial-by-name DNS
-path (per-netns `resolv.conf` injection) were built, wired into
+path were built, wired into
 `start_alloc`, and exercised end-to-end by integration tests — yet
 **neither could be driven through a real `serve` + `deploy`**. The
-production inbound nft-TPROXY rule that feeds leg-C was deferred
-(`start_alloc` records `tproxy_guard = None`), and the DNS responder
-daemon was deferred. The bidirectional Tier-3 test had to hand-install
-`install_inbound_tproxy(virt, leg_c_port)` itself — *the exact
+bidirectional Tier-3 test had to hand-install the inbound capture rule itself — *the exact
 production call site the feature omitted* — so in a deploy the listener
 stood up per allocation and received nothing. The mechanism composed in
 a test; it was dead on the production path. The honest re-size: a thin
