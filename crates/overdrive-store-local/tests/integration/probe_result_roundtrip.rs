@@ -39,7 +39,6 @@ async fn probe_result_row_survives_redb_reopen_bit_identical() {
         role: ProbeRole::Startup,
         status: ProbeStatus::Pass,
         last_observed_at_unix_ms: 42_000,
-        inferred: false,
         run_seq: ProbeRunSeq::new(u64::max(42_000, 1)).unwrap_or(ProbeRunSeq::FIRST),
         same_status_runs: SameStatusRuns::ONE,
     };
@@ -73,7 +72,6 @@ async fn probe_result_lww_strict_dominate_on_last_observed_ms() {
         role: ProbeRole::Startup,
         status: ProbeStatus::Pass,
         last_observed_at_unix_ms: 42_000,
-        inferred: false,
         run_seq: ProbeRunSeq::new(u64::max(42_000, 1)).unwrap_or(ProbeRunSeq::FIRST),
         same_status_runs: SameStatusRuns::ONE,
     };
@@ -128,7 +126,6 @@ async fn accepted_probe_result_emits_once_after_commit_and_lww_losers_are_silent
         role: ProbeRole::Readiness,
         status: ProbeStatus::Pass,
         last_observed_at_unix_ms: 42_000,
-        inferred: false,
         run_seq: ProbeRunSeq::new(u64::max(42_000, 1)).unwrap_or(ProbeRunSeq::FIRST),
         same_status_runs: SameStatusRuns::ONE,
     };
@@ -203,7 +200,6 @@ async fn probe_results_per_alloc_per_probe_idx_independent_keys() {
         role: ProbeRole::Startup,
         status,
         last_observed_at_unix_ms: 10_000 + u64::from(idx),
-        inferred: false,
         run_seq: ProbeRunSeq::new(u64::max(10_000 + u64::from(idx), 1))
             .unwrap_or(ProbeRunSeq::FIRST),
         same_status_runs: SameStatusRuns::ONE,
@@ -272,7 +268,6 @@ async fn probe_results_per_alloc_are_keyed_by_role_as_well_as_index() {
         role,
         status,
         last_observed_at_unix_ms: at,
-        inferred: false,
         run_seq: ProbeRunSeq::new(u64::max(at, 1)).unwrap_or(ProbeRunSeq::FIRST),
         same_status_runs: SameStatusRuns::ONE,
     };

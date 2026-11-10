@@ -66,13 +66,8 @@ fn arb_mechanic_summary() -> impl Strategy<Value = String> {
 }
 
 fn arb_probe_witness() -> impl Strategy<Value = ProbeWitness> {
-    (any::<u32>(), arb_probe_role(), arb_mechanic_summary(), any::<bool>()).prop_map(
-        |(probe_idx, role, mechanic_summary, inferred)| ProbeWitness {
-            probe_idx,
-            role,
-            mechanic_summary,
-            inferred,
-        },
+    (any::<u32>(), arb_probe_role(), arb_mechanic_summary()).prop_map(
+        |(probe_idx, role, mechanic_summary)| ProbeWitness { probe_idx, role, mechanic_summary },
     )
 }
 

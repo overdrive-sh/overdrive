@@ -118,7 +118,6 @@ async fn accepted_probe_result_emits_once_and_lww_losers_are_silent() {
         role: ProbeRole::Readiness,
         status: ProbeStatus::Pass,
         last_observed_at_unix_ms: 42_000,
-        inferred: false,
         run_seq: ProbeRunSeq::new(u64::max(42_000, 1)).unwrap_or(ProbeRunSeq::FIRST),
         same_status_runs: SameStatusRuns::ONE,
     };

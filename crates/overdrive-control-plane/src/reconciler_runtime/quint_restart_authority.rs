@@ -521,7 +521,6 @@ impl RaWorld {
             status,
             last_observed_at_unix_ms: u64::try_from(self.clock.unix_now().as_millis())
                 .unwrap_or(u64::MAX),
-            inferred: false,
             run_seq: ProbeRunSeq::new(seq).expect("non-zero run_seq"),
             same_status_runs: SameStatusRuns::new(if pass { passes } else { fails }.max(1))
                 .expect("non-zero streak"),
@@ -542,7 +541,6 @@ impl RaWorld {
             status: ProbeStatus::Fail { last_fail_reason: "connection refused".to_owned() },
             last_observed_at_unix_ms: u64::try_from(self.clock.unix_now().as_millis())
                 .unwrap_or(u64::MAX),
-            inferred: false,
             run_seq: ProbeRunSeq::new(*seq).expect("non-zero run_seq"),
             same_status_runs: SameStatusRuns::new(1).expect("non-zero streak"),
         };

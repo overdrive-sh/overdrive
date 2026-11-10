@@ -56,7 +56,6 @@ fn row(run_seq: u64, observed_at: u64) -> ProbeResultRow {
             ProbeStatus::Fail { last_fail_reason: format!("refused at run {run_seq}") }
         },
         last_observed_at_unix_ms: observed_at,
-        inferred: false,
         run_seq: ProbeRunSeq::new(run_seq).expect("non-zero run sequence"),
         same_status_runs: SameStatusRuns::ONE,
     }

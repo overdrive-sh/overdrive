@@ -205,7 +205,6 @@ async fn given_start_alloc_with_one_tcp_descriptor_when_clock_ticks_interval_the
     assert_eq!(row.probe_idx.0, 0);
     assert_eq!(row.role, ProbeRole::Startup);
     assert_eq!(row.status, ProbeStatus::Pass);
-    assert!(!row.inferred, "operator-declared descriptor → row.inferred = false");
 
     // Cleanup: cancel the supervisor so the spawned task exits
     // before the test scope drops. Without this the task remains

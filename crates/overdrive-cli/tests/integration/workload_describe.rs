@@ -940,7 +940,6 @@ fn fixture_probe_result(
         role: role.as_str().to_owned(),
         status,
         last_observed_at_unix_ms: 1_700_000_000_000,
-        inferred: false,
     }
 }
 

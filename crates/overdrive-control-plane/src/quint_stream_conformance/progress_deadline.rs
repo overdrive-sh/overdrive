@@ -323,7 +323,6 @@ impl ProgressDeadlineDriver {
                         probe_idx: 0,
                         role: "startup".to_owned(),
                         mechanic_summary: "tcp 127.0.0.1:18999".to_owned(),
-                        inferred: false,
                     },
                 },
             )?,

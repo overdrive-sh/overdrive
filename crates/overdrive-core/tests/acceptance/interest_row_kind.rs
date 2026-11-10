@@ -170,7 +170,6 @@ fn probe_result_row() -> ProbeResultRow {
         role: ProbeRole::Readiness,
         status: ProbeStatus::Pass,
         last_observed_at_unix_ms: 1_700_000_000_000,
-        inferred: false,
         run_seq: ProbeRunSeq::new(u64::max(1_700_000_000_000, 1)).unwrap_or(ProbeRunSeq::FIRST),
         same_status_runs: SameStatusRuns::ONE,
     }

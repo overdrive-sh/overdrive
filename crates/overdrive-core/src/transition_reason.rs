@@ -624,7 +624,7 @@ pub enum TerminalCondition {
     Failed { exit_code: Option<i32> },
     /// `ServiceLifecycle`: the Service alloc has converged to a
     /// stable, fully-probed Running state per ADR-0055 / ADR-0056.
-    /// All declared startup probes (or the inferred default per
+    /// All declared startup probes (or the synthesized default per
     /// ADR-0058) reported Pass; the alloc is considered Stable
     /// from the publication boundary onward.
     ///
@@ -810,9 +810,6 @@ pub struct ProbeWitness {
     /// composes from `ProbeDescriptor.mechanic` at the deciding
     /// tick.
     pub mechanic_summary: String,
-    /// `true` IFF this witness was the platform's inferred default
-    /// probe per ADR-0058.
-    pub inferred: bool,
 }
 
 /// Initiator of a `Cancelled` transition.

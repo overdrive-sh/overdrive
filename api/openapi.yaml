@@ -1509,7 +1509,7 @@ components:
       format: int32
       description: |-
         0-indexed position of a probe within its role's TOML array (or
-        `0` for the inferred default probe per ADR-0058 / C4).
+        `0` for the synthesized default probe per ADR-0058 / C4).
 
         `ProbeIdx` is the load-bearing cross-step variable per
         `discuss/shared-artifacts-registry.md`: it MUST match across
@@ -1600,14 +1600,10 @@ components:
       - role
       - status
       - last_observed_at_unix_ms
-      - inferred
       properties:
         alloc_id:
           type: string
           description: Allocation this probe targets.
-        inferred:
-          type: boolean
-          description: Whether this probe was inferred by the platform per ADR-0058.
         last_observed_at_unix_ms:
           type: integer
           format: int64
@@ -1688,13 +1684,7 @@ components:
       - probe_idx
       - role
       - mechanic_summary
-      - inferred
       properties:
-        inferred:
-          type: boolean
-          description: |-
-            `true` IFF this witness was the platform's inferred default
-            probe per ADR-0058.
         mechanic_summary:
           type: string
           description: |-
@@ -3020,7 +3010,7 @@ components:
         description: |-
           `ServiceLifecycle`: the Service alloc has converged to a
           stable, fully-probed Running state per ADR-0055 / ADR-0056.
-          All declared startup probes (or the inferred default per
+          All declared startup probes (or the synthesized default per
           ADR-0058) reported Pass; the alloc is considered Stable
           from the publication boundary onward.
 
@@ -3050,7 +3040,7 @@ components:
             description: |-
               `ServiceLifecycle`: the Service alloc has converged to a
               stable, fully-probed Running state per ADR-0055 / ADR-0056.
-              All declared startup probes (or the inferred default per
+              All declared startup probes (or the synthesized default per
               ADR-0058) reported Pass; the alloc is considered Stable
               from the publication boundary onward.
 

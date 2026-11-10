@@ -145,7 +145,6 @@ fn put_probe_row(
             role,
             status,
             last_observed_at_unix_ms: run_seq,
-            inferred: false,
             run_seq: ProbeRunSeq::new(run_seq).expect("fixture run sequence is non-zero"),
             same_status_runs: SameStatusRuns::new(same_status_runs)
                 .expect("fixture streak is non-zero"),
@@ -206,7 +205,6 @@ fn stable_fires_when_running_and_startup_probe_pass() {
             assert_eq!(witness.probe_idx, 0);
             assert_eq!(witness.role, "startup");
             assert_eq!(witness.mechanic_summary, "tcp 0.0.0.0:8080");
-            assert!(!witness.inferred);
         }
         other => panic!("expected Stable, got {other:?}"),
     }
@@ -365,7 +363,6 @@ fn empty_probes_opt_out_fires_stable_when_running() {
                 witness.mechanic_summary, "none (opted out)",
                 "branch (a') witness names the opt-out mechanic"
             );
-            assert!(!witness.inferred);
         }
         other => panic!("expected opt-out Stable, got {other:?}"),
     }

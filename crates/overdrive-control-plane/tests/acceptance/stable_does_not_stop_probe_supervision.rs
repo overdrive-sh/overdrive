@@ -118,7 +118,6 @@ fn stable_terminal_empty_startup() -> TerminalCondition {
             probe_idx: 0,
             role: "startup".to_owned(),
             mechanic_summary: "none (opted out)".to_owned(),
-            inferred: false,
         },
     }
 }
@@ -133,7 +132,6 @@ fn stable_terminal_startup_pass() -> TerminalCondition {
             probe_idx: 0,
             role: "startup".to_owned(),
             mechanic_summary: "tcp 127.0.0.1:8080".to_owned(),
-            inferred: true,
         },
     }
 }

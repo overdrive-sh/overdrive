@@ -42,13 +42,11 @@ prop_compose! {
             "liveness".to_string(),
         ]),
         mechanic_summary in "[a-z0-9 /:.@-]{1,40}",
-        inferred in any::<bool>(),
     ) -> ProbeWitness {
         ProbeWitness {
             probe_idx,
             role,
             mechanic_summary,
-            inferred,
         }
     }
 }

@@ -105,7 +105,6 @@ fn describe_names_a_startup_stopped_predecessor_and_shows_the_running_successor(
         role: "startup".to_owned(),
         status: ProbeStatusJson::Fail { last_fail_reason: "connection refused".to_owned() },
         last_observed_at_unix_ms: 1_000,
-        inferred: false,
     };
 
     let rendered = workload_describe(&describe_output(vec![predecessor, successor], vec![fail]));
@@ -149,7 +148,6 @@ fn describe_keeps_the_stable_terminal_line_and_adds_no_stopped_line_for_other_ro
                 probe_idx: 0,
                 role: "startup".to_owned(),
                 mechanic_summary: "tcp 127.0.0.1:8080".to_owned(),
-                inferred: false,
             },
         }),
     );

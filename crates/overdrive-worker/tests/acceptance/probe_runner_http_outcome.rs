@@ -166,7 +166,6 @@ async fn http_connection_refused_outcome_flows_through_probe_runner_to_store() {
         "Http connection-refused outcome carried into row.status verbatim"
     );
     assert_eq!(returned_row.role, ProbeRole::Startup);
-    assert!(!returned_row.inferred);
 
     let after = obs.list_probe_results_for_alloc(&alloc).await.expect("list probe results after");
     assert_eq!(after.len(), 1, "exactly one row written");

@@ -72,7 +72,6 @@ fn the_verdict_terminals_still_project_to_a_stream_line() {
         probe_idx: 0,
         role: "startup".to_owned(),
         mechanic_summary: "tcp 127.0.0.1:8080".to_owned(),
-        inferred: false,
     };
     let verdicts = [
         TerminalCondition::Stable { settled_in_ms: 700, witness },

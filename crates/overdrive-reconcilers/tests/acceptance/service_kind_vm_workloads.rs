@@ -122,7 +122,6 @@ fn record_probe_run(
             role,
             status,
             last_observed_at_unix_ms: run_seq * 1_000,
-            inferred: false,
             run_seq: ProbeRunSeq::new(run_seq).expect("run sequence is non-zero"),
             same_status_runs: SameStatusRuns::new(same_status_runs).expect("streak is non-zero"),
         },
@@ -299,7 +298,6 @@ fn vm_startup_pass_changes_only_service_stable() {
             && witness.probe_idx == 0
             && witness.role == "startup"
             && witness.mechanic_summary == "tcp 0.0.0.0:18081"
-            && !witness.inferred
     ));
     assert!(next_view.observed.contains(&alloc_id));
     assert!(next_view.terminal_announced.is_empty());

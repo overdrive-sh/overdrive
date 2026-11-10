@@ -871,7 +871,6 @@ fn render_workload_describe_renders_only_a_current_stable_terminal_line() {
             probe_idx: 0,
             role: "startup".to_owned(),
             mechanic_summary: "tcp 0.0.0.0:18081".to_owned(),
-            inferred: false,
         },
     });
     let stable = overdrive_cli::render::workload_describe(&wrap_live(AllocStatusResponse {
@@ -1142,7 +1141,6 @@ fn nd295_stable_terminal() -> overdrive_core::transition_reason::TerminalConditi
             probe_idx: 0,
             role: "startup".to_owned(),
             mechanic_summary: "tcp 0.0.0.0:8080".to_owned(),
-            inferred: false,
         },
     }
 }

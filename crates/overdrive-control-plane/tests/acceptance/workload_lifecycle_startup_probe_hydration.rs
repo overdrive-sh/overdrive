@@ -133,7 +133,6 @@ async fn write_startup_row(world: &World, n: u32, status: ProbeStatus, run_seq: 
             role: ProbeRole::Startup,
             status,
             last_observed_at_unix_ms: run_seq,
-            inferred: false,
             run_seq: ProbeRunSeq::new(run_seq).expect("non-zero"),
             same_status_runs: SameStatusRuns::ONE,
         })

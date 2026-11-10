@@ -1,6 +1,11 @@
 //! Schema-evolution golden-bytes test for the V1 allocation lifecycle
 //! occurrence envelope introduced by the recovery amendment R1.
 
+#![allow(
+    clippy::doc_markdown,
+    reason = "required Contract Shape declarations use the exact linted spelling"
+)]
+
 use overdrive_core::codec::VersionedEnvelope;
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::traits::driver::DriverType;
@@ -8,7 +13,7 @@ use overdrive_core::traits::observation_store::{
     AllocLifecycleOccurrenceRowEnvelope, AllocLifecycleOccurrenceRowV1, AllocLifecyclePredecessor,
     AllocState, LogicalTimestamp, TransitionSource,
 };
-use overdrive_core::transition_reason::TransitionReason;
+use overdrive_core::transition_reason::{ProbeWitness, TerminalCondition, TransitionReason};
 
 use super::harness::{
     assert_discriminant_offset_triangulation, assert_envelope_v_roundtrip,
@@ -16,7 +21,14 @@ use super::harness::{
 };
 
 const GOLDEN_DISCRIMINANT_OFFSET_V1: usize = 160;
+#[allow(
+    dead_code,
+    reason = "the greenfield waiver preserves pre-D16 bytes without a backward-read promise"
+)]
 const FIXTURE_V1: &str = "616c6c6f632d6c6966656379636c652d303163616e6f6e6963616c206f6363757272656e63650000000000000000000092000000d0ffffff7061796d656e74730101000005000000010000000000000002000000000000000000000000000000000000000000000000000000000000000000000000000000010000009400000096ffffff010000002a000000000000006e6f64652d303031000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
+
+const CURRENT_LAYOUT_LIFECYCLE_OCCURRENCE_V1: &str = "616c6c6f632d6c6966656379636c652d303163616e6f6e6963616c206f6363757272656e63650000000000000000000092000000d0ffffff7061796d656e74730101000005000000010000000000000002000000000000000000000000000000000000000000000000000000000000000000000000000000010000009400000096ffffff010000002a000000000000006e6f64652d303031000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
+const CURRENT_LAYOUT_LIFECYCLE_OCCURRENCE_V1_STABLE: &str = "616c6c6f632d6c6966656379636c652d303163616e6f6e6963616c206f6363757272656e636574637020302e302e302e303a383038300000000000000000000092000000c0ffffff7061796d656e74730101000005000000010000000000000002000000000000000000000000000000000000000000000000000000000000000000000000000000010000009400000086ffffff010000002a000000000000006e6f64652d30303101000000000000000500000000000000d2040000000000000000000073746172747570ff900000005affffff00000000";
 
 fn canonical_v1_payload() -> AllocLifecycleOccurrenceRowV1 {
     AllocLifecycleOccurrenceRowV1 {
@@ -35,10 +47,30 @@ fn canonical_v1_payload() -> AllocLifecycleOccurrenceRowV1 {
     }
 }
 
+fn payload_with_stable_witness() -> AllocLifecycleOccurrenceRowV1 {
+    let mut row = canonical_v1_payload();
+    row.terminal = Some(TerminalCondition::Stable {
+        settled_in_ms: 1_234,
+        witness: ProbeWitness {
+            probe_idx: 0,
+            role: "startup".to_owned(),
+            mechanic_summary: "tcp 0.0.0.0:8080".to_owned(),
+        },
+    });
+    row
+}
+
+/// CONTRACT_SHAPE: pure-function.
 #[test]
 fn alloc_lifecycle_occurrence_v1_decodes_through_current_envelope() {
-    let expected = canonical_v1_payload();
-    assert_envelope_v_roundtrip::<AllocLifecycleOccurrenceRowEnvelope>(FIXTURE_V1, &expected);
+    assert_envelope_v_roundtrip::<AllocLifecycleOccurrenceRowEnvelope>(
+        CURRENT_LAYOUT_LIFECYCLE_OCCURRENCE_V1,
+        &canonical_v1_payload(),
+    );
+    assert_envelope_v_roundtrip::<AllocLifecycleOccurrenceRowEnvelope>(
+        CURRENT_LAYOUT_LIFECYCLE_OCCURRENCE_V1_STABLE,
+        &payload_with_stable_witness(),
+    );
 }
 
 #[test]
@@ -65,7 +97,14 @@ fn alloc_lifecycle_occurrence_unknown_version_probe_surfaces() {
 fn print_fixture_and_discriminant_offset() {
     let envelope = AllocLifecycleOccurrenceRowEnvelope::latest(canonical_v1_payload());
     let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&envelope).expect("archive occurrence");
-    println!("FIXTURE_V1 = \"{}\"", hex::encode(bytes.as_ref()));
+    println!("CURRENT_LAYOUT_LIFECYCLE_OCCURRENCE_V1 = \"{}\"", hex::encode(bytes.as_ref()));
+    let stable = AllocLifecycleOccurrenceRowEnvelope::latest(payload_with_stable_witness());
+    let stable_bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&stable)
+        .expect("archive lifecycle occurrence with Stable witness");
+    println!(
+        "CURRENT_LAYOUT_LIFECYCLE_OCCURRENCE_V1_STABLE = \"{}\"",
+        hex::encode(stable_bytes.as_ref())
+    );
     for offset in 1..=bytes.len() {
         let mut candidate = bytes.as_ref().to_vec();
         let idx = candidate.len() - offset;

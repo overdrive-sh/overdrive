@@ -2028,7 +2028,6 @@ mod probe_merge_tests {
             role: ProbeRole::Liveness,
             status: ProbeStatus::Fail { last_fail_reason: "refused".to_owned() },
             last_observed_at_unix_ms: observed_at,
-            inferred: false,
             run_seq: ProbeRunSeq::new(run_seq).expect("non-zero run sequence"),
             same_status_runs: SameStatusRuns::new(u32::try_from(run_seq).expect("small"))
                 .expect("non-zero streak"),

@@ -55,19 +55,18 @@ fn arb_probe_status() -> impl Strategy<Value = ProbeStatus> {
 fn arb_probe_result_row() -> impl Strategy<Value = ProbeResultRowV2> {
     (
         (arb_alloc_id(), arb_probe_idx(), arb_probe_role(), arb_probe_status()),
-        (any::<u64>(), any::<bool>(), 1_u64..=u64::MAX, 1_u32..=u32::MAX),
+        (any::<u64>(), 1_u64..=u64::MAX, 1_u32..=u32::MAX),
     )
         .prop_map(
             |(
                 (alloc_id, probe_idx, role, status),
-                (last_observed_at_unix_ms, inferred, run_seq, same_status_runs),
+                (last_observed_at_unix_ms, run_seq, same_status_runs),
             )| ProbeResultRowV2 {
                 alloc_id,
                 probe_idx,
                 role,
                 status,
                 last_observed_at_unix_ms,
-                inferred,
                 run_seq: ProbeRunSeq::new(run_seq).expect("generator yields a non-zero run"),
                 same_status_runs: SameStatusRuns::new(same_status_runs)
                     .expect("generator yields a non-zero streak"),
@@ -82,7 +81,6 @@ fn pinned_row(alloc: &str) -> ProbeResultRowV2 {
         role: ProbeRole::Startup,
         status: ProbeStatus::Pass,
         last_observed_at_unix_ms: 0,
-        inferred: false,
         run_seq: ProbeRunSeq::FIRST,
         same_status_runs: SameStatusRuns::ONE,
     }

@@ -311,7 +311,6 @@ async fn given_probe_runner_writes_pass_row_when_service_lifecycle_reconciles_th
             assert_eq!(witness.probe_idx, 0);
             assert_eq!(witness.role, "startup");
             assert_eq!(witness.mechanic_summary, "tcp 127.0.0.1:8080");
-            assert!(!witness.inferred, "operator-declared descriptor → witness.inferred = false");
         }
         other => panic!("expected Stable action, got {other:?}"),
     }

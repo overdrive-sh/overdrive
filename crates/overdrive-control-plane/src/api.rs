@@ -1215,8 +1215,6 @@ pub struct ProbeResultRowJson {
     /// Wall-clock at which the probe attempt completed. UNIX-epoch
     /// milliseconds; sourced from the ProbeRunner's injected clock.
     pub last_observed_at_unix_ms: u64,
-    /// Whether this probe was inferred by the platform per ADR-0058.
-    pub inferred: bool,
 }
 
 /// Wire projection of `overdrive-core::observation::probe_result_row::
@@ -1251,7 +1249,6 @@ impl From<&overdrive_core::observation::probe_result_row::ProbeResultRow> for Pr
             role,
             status,
             last_observed_at_unix_ms: row.last_observed_at_unix_ms,
-            inferred: row.inferred,
         }
     }
 }

@@ -250,7 +250,6 @@ async fn s_shcp_wire_09_service_submit_dispatches_to_service_submit_event_accept
         probe_idx: 0,
         role: "startup".to_string(),
         mechanic_summary: "http".to_string(),
-        inferred: false,
     };
     emit_lifecycle(
         &state,
@@ -291,7 +290,6 @@ async fn s_shcp_wire_10_terminal_stable_projects_to_service_submit_event_stable(
         probe_idx: 2,
         role: "startup".to_string(),
         mechanic_summary: "tcp 0.0.0.0:8080".to_string(),
-        inferred: false,
     };
     emit_lifecycle(
         &state,
@@ -320,7 +318,6 @@ async fn s_shcp_wire_10_terminal_stable_projects_to_service_submit_event_stable(
     assert_eq!(data["witness"]["probe_idx"], 2);
     assert_eq!(data["witness"]["role"], "startup");
     assert_eq!(data["witness"]["mechanic_summary"], "tcp 0.0.0.0:8080");
-    assert_eq!(data["witness"]["inferred"], false);
 
     let stable_count = lines.iter().filter(|l| l["kind"] == "stable").count();
     assert_eq!(stable_count, 1, "exactly one `stable` line expected; got {stable_count}");
@@ -578,7 +575,6 @@ async fn s_shcp_wire_15_no_intermediate_non_terminal_lines_on_service_wire() {
         probe_idx: 0,
         role: "startup".to_string(),
         mechanic_summary: "http".to_string(),
-        inferred: false,
     };
     emit_lifecycle(
         &state,

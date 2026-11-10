@@ -37,22 +37,15 @@ fn arb_status() -> impl Strategy<Value = ProbeStatus> {
 }
 
 fn arb_v1() -> impl Strategy<Value = ProbeResultRowV1> {
-    (
-        "[a-z][a-z0-9-]{1,19}[a-z0-9]",
-        any::<u32>(),
-        arb_role(),
-        arb_status(),
-        any::<u64>(),
-        any::<bool>(),
-    )
-        .prop_map(|(alloc, idx, role, status, at, inferred)| ProbeResultRowV1 {
+    ("[a-z][a-z0-9-]{1,19}[a-z0-9]", any::<u32>(), arb_role(), arb_status(), any::<u64>()).prop_map(
+        |(alloc, idx, role, status, at)| ProbeResultRowV1 {
             alloc_id: AllocationId::new(&alloc).expect("generated alloc id is valid"),
             probe_idx: ProbeIdx::new(idx),
             role,
             status,
             last_observed_at_unix_ms: at,
-            inferred,
-        })
+        },
+    )
 }
 
 fn arb_v2() -> impl Strategy<Value = ProbeResultRowV2> {
@@ -62,7 +55,6 @@ fn arb_v2() -> impl Strategy<Value = ProbeResultRowV2> {
         role: v1.role,
         status: v1.status,
         last_observed_at_unix_ms: v1.last_observed_at_unix_ms,
-        inferred: v1.inferred,
         run_seq: ProbeRunSeq::new(seq).expect("generated run sequence is non-zero"),
         same_status_runs: SameStatusRuns::new(runs).expect("generated streak is non-zero"),
     })
@@ -132,7 +124,6 @@ proptest! {
             role: v1.role,
             status: v1.status.clone(),
             last_observed_at_unix_ms: v1.last_observed_at_unix_ms,
-            inferred: v1.inferred,
             run_seq: ProbeRunSeq::FIRST,
             same_status_runs: SameStatusRuns::ONE,
         };

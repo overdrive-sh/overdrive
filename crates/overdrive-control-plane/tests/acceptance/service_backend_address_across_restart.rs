@@ -201,7 +201,6 @@ async fn drive(seed: u64) {
         role: ProbeRole::Startup,
         status: ProbeStatus::Fail { last_fail_reason: "HTTP 302".to_owned() },
         last_observed_at_unix_ms: observed_at,
-        inferred: false,
         run_seq: ProbeRunSeq::new(u64::max(observed_at, 1)).unwrap_or(ProbeRunSeq::FIRST),
         same_status_runs: SameStatusRuns::ONE,
     })

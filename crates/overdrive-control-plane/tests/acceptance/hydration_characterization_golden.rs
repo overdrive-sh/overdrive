@@ -430,7 +430,6 @@ async fn drive_characterization(mode: GoldenMode) {
             role: ProbeRole::Startup,
             status: ProbeStatus::Pass,
             last_observed_at_unix_ms: FIXED_PROBE_AT_MS,
-            inferred: false,
             run_seq: ProbeRunSeq::new(u64::max(FIXED_PROBE_AT_MS, 1)).unwrap_or(ProbeRunSeq::FIRST),
             same_status_runs: SameStatusRuns::ONE,
         })

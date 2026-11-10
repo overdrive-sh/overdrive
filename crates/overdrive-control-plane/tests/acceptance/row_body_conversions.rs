@@ -116,7 +116,6 @@ fn alloc_status_row_body_projects_the_current_stable_terminal_claim() {
             probe_idx: 0,
             role: "startup".to_owned(),
             mechanic_summary: "tcp 0.0.0.0:18081".to_owned(),
-            inferred: false,
         },
     };
     row.terminal = Some(terminal.clone());
@@ -135,7 +134,6 @@ fn alloc_status_row_body_projects_the_current_stable_terminal_claim() {
                     "probe_idx": 0,
                     "role": "startup",
                     "mechanic_summary": "tcp 0.0.0.0:18081",
-                    "inferred": false,
                 },
             },
         })),

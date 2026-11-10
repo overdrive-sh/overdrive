@@ -48,7 +48,6 @@ ServiceLifecycle(
                 startup_attempts_required: 30,
                 startup_deadline: 60s,
                 mechanic_summary: "tcp 0.0.0.0:8080",
-                inferred: false,
                 startup_probes_empty: false,
                 latest_readiness_probe: None,
                 has_readiness_probe: false,
@@ -72,7 +71,6 @@ ServiceLifecycle(
                         role: Startup,
                         status: Pass,
                         last_observed_at_unix_ms: 1700000000000,
-                        inferred: false,
                         run_seq: ProbeRunSeq(
                             1700000000000,
                         ),

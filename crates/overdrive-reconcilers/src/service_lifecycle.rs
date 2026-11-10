@@ -596,7 +596,6 @@ impl Reconciler for ServiceLifecycleReconciler {
                     probe_idx: 0,
                     role: "startup".to_string(),
                     mechanic_summary: "none (opted out)".to_string(),
-                    inferred: false,
                 };
                 actions.push(Action::FinalizeFailed {
                     alloc_id: alloc_id.clone(),
@@ -619,7 +618,6 @@ impl Reconciler for ServiceLifecycleReconciler {
                     probe_idx: 0,
                     role: "startup".to_string(),
                     mechanic_summary: fact.mechanic_summary.clone(),
-                    inferred: false,
                 };
                 actions.push(Action::FinalizeFailed {
                     alloc_id: alloc_id.clone(),
@@ -1343,7 +1341,6 @@ mod tests {
                                                     role: ProbeRole::Readiness,
                                                     status,
                                                     last_observed_at_unix_ms: 1_000,
-                                                    inferred: false,
                                                     run_seq: ProbeRunSeq::FIRST,
                                                     same_status_runs: SameStatusRuns::new(same_status_runs)
                                                         .expect("generated streak is non-zero"),

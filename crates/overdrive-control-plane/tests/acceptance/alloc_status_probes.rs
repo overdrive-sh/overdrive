@@ -243,7 +243,6 @@ async fn write_probe_row(
             role,
             status,
             last_observed_at_unix_ms: at_ms,
-            inferred: false,
             run_seq: ProbeRunSeq::new(u64::max(at_ms, 1)).unwrap_or(ProbeRunSeq::FIRST),
             same_status_runs: SameStatusRuns::ONE,
         })

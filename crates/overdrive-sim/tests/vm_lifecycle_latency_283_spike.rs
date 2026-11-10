@@ -1350,7 +1350,6 @@ async fn same_workload_reconcilers_share_the_complete_evaluation_lease() {
         role: ProbeRole::Startup,
         status: ProbeStatus::Pass,
         last_observed_at_unix_ms: 1,
-        inferred: false,
         run_seq: ProbeRunSeq::new(u64::max(1, 1)).unwrap_or(ProbeRunSeq::FIRST),
         same_status_runs: SameStatusRuns::ONE,
     };

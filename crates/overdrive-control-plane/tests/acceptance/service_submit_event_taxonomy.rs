@@ -444,7 +444,7 @@ proptest! {
     /// contains exactly one `Action::FinalizeFailed` with
     /// `TerminalCondition::Stable { settled_in_ms, witness:
     /// ProbeWitness { probe_idx: 0, role: "startup", mechanic_summary:
-    /// "none (opted out)", inferred: false } }`, and
+    /// "none (opted out)" } }`, and
     /// keeps the allocation in its observed watch until the row commits.
     /// CONTRACT_SHAPE: bounded-change.
     #[test]
@@ -472,7 +472,6 @@ proptest! {
                 prop_assert_eq!(witness.probe_idx, 0);
                 prop_assert_eq!(&witness.role, "startup");
                 prop_assert_eq!(&witness.mechanic_summary, "none (opted out)");
-                prop_assert!(!witness.inferred);
             }
             other => prop_assert!(
                 false,

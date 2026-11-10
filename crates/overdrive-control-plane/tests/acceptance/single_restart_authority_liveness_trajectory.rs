@@ -112,7 +112,6 @@ fn liveness_running_fact(alloc_id: &AllocationId) -> ServiceAllocFact {
                 role: ProbeRole::Liveness,
                 status,
                 last_observed_at_unix_ms: 1,
-                inferred: false,
                 run_seq: ProbeRunSeq::FIRST,
                 same_status_runs: SameStatusRuns::ONE,
             },

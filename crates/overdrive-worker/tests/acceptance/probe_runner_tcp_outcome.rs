@@ -88,7 +88,6 @@ async fn given_sim_tcp_prober_with_pass_outcome_when_probe_then_returns_pass() {
     assert_eq!(returned_row.alloc_id, alloc);
     assert_eq!(returned_row.probe_idx, ProbeIdx::new(0));
     assert_eq!(returned_row.role, ProbeRole::Startup);
-    assert!(!returned_row.inferred, "operator-declared descriptor → row.inferred = false");
 
     // STATE-DELTA: ObservationStore now carries one row.
     let after = obs.list_probe_results_for_alloc(&alloc).await.expect("list probe results after");

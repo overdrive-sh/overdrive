@@ -1575,7 +1575,6 @@ async fn foreign_service_terminal_does_not_leak_into_service_stream() {
             probe_idx: 0,
             role: "startup".to_string(),
             mechanic_summary: "tcp 0.0.0.0:8080".to_string(),
-            inferred: false,
         },
     });
     emit_lifecycle(&state, our_terminal);

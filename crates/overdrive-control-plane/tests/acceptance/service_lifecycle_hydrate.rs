@@ -17,7 +17,7 @@
 //!   3. `IntentStore::get(IntentKey::for_workload(workload_id))` →
 //!      `WorkloadIntent::Service(Service)` (with probe vecs
 //!      persisted post-GAP-6) — sources `max_attempts`,
-//!      `startup_deadline`, `mechanic_summary`, `inferred`,
+//!      `startup_deadline`, `mechanic_summary`,
 //!      `startup_probes_empty`.
 //!
 //! Per the audit's GAP-1-AT-08, the reconciler `unreachable!()` on the
@@ -265,7 +265,6 @@ async fn write_probe_result(
         role,
         status,
         last_observed_at_unix_ms,
-        inferred: false,
         run_seq: ProbeRunSeq::new(u64::max(last_observed_at_unix_ms, 1))
             .unwrap_or(ProbeRunSeq::FIRST),
         same_status_runs: SameStatusRuns::ONE,
@@ -670,7 +669,6 @@ fn gap_1_at_08_reconciler_unreachable_when_running_alloc_has_no_started_at() {
                 role: ProbeRole::Startup,
                 status: ProbeStatus::Pass,
                 last_observed_at_unix_ms: 1,
-                inferred: false,
                 run_seq: ProbeRunSeq::FIRST,
                 same_status_runs: SameStatusRuns::ONE,
             },

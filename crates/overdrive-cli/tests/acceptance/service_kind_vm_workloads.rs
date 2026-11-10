@@ -220,7 +220,6 @@ async fn stream_stable_response(
             probe_idx: 0,
             role: "startup".to_owned(),
             mechanic_summary: "tcp 0.0.0.0:8080".to_owned(),
-            inferred: false,
         },
     };
     let response = format!(
@@ -373,7 +372,6 @@ async fn streaming_service_success_summary_orders_one_accepted_before_one_stable
             probe_idx: 0,
             role: "startup".to_owned(),
             mechanic_summary: "tcp 0.0.0.0:8080".to_owned(),
-            inferred: false,
         },
     );
     let accepted_at = output.summary.find(&expected_accepted).expect("one Accepted block");

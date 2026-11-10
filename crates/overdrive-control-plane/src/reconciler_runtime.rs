@@ -2480,7 +2480,6 @@ mod tests {
                 role,
                 status,
                 last_observed_at_unix_ms,
-                inferred: false,
                 // One row per observation instant: the run number follows
                 // the observation time, so the merge keeps the latest row
                 // whether it decides on `run_seq` or on the observation time.
@@ -2898,7 +2897,6 @@ mod tests {
                     role,
                     status,
                     last_observed_at_unix_ms: observed_at,
-                    inferred: false,
                     // The run number follows the observation time (see
                     // `write_probe` above).
                     run_seq: overdrive_core::observation::ProbeRunSeq::new(observed_at.max(1))

@@ -686,7 +686,6 @@ proptest! {
                     role: ProbeRole::Startup,
                     status,
                     last_observed_at_unix_ms: 1,
-                    inferred: false,
                     run_seq: ProbeRunSeq::new(u64::from(attempts))
                         .expect("positive attempts produce a row"),
                     same_status_runs: SameStatusRuns::new(attempts)

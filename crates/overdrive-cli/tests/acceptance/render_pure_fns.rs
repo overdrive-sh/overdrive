@@ -263,7 +263,6 @@ fn stable_summary_names_settled_ms_and_witness_role_idx_mechanic() {
         probe_idx: 2,
         role: "startup".to_string(),
         mechanic_summary: "tcp 127.0.0.1:8080".to_string(),
-        inferred: false,
     };
     let rendered = format_service_stable_summary("payments", 1234, &witness);
     assert!(rendered.contains("payments"), "names workload; got:\n{rendered}");
@@ -271,19 +270,6 @@ fn stable_summary_names_settled_ms_and_witness_role_idx_mechanic() {
     assert!(rendered.contains("startup"), "names witness role; got:\n{rendered}");
     assert!(rendered.contains("probe[2]"), "names witness probe_idx; got:\n{rendered}");
     assert!(rendered.contains("tcp 127.0.0.1:8080"), "names mechanic; got:\n{rendered}");
-    assert!(!rendered.contains("inferred"), "non-inferred witness omits marker; got:\n{rendered}");
-}
-
-#[test]
-fn stable_summary_marks_inferred_witness() {
-    let witness = ProbeWitness {
-        probe_idx: 0,
-        role: "startup".to_string(),
-        mechanic_summary: "tcp 0.0.0.0:80".to_string(),
-        inferred: true,
-    };
-    let rendered = format_service_stable_summary("web", 50, &witness);
-    assert!(rendered.contains("inferred"), "inferred witness marks the witness; got:\n{rendered}");
 }
 
 #[test]

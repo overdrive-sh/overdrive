@@ -235,7 +235,6 @@ async fn stop_emitted(mechanic: Mechanic, latest: Latest, elapsed_secs: u64) -> 
         role: ProbeRole::Startup,
         status,
         last_observed_at_unix_ms: (STARTED_SECS + elapsed_secs) * 1000,
-        inferred: false,
         run_seq: ProbeRunSeq::new(u64::from(streak)).expect("non-zero"),
         same_status_runs: SameStatusRuns::new(streak).expect("non-zero"),
     })

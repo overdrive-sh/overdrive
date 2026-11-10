@@ -186,7 +186,6 @@ fn put_readiness_row(
             role: ProbeRole::Readiness,
             status,
             last_observed_at_unix_ms: run_seq,
-            inferred: false,
             run_seq: ProbeRunSeq::new(run_seq).expect("fixture run sequence is non-zero"),
             same_status_runs: SameStatusRuns::new(same_status_runs)
                 .expect("fixture streak is non-zero"),
@@ -212,7 +211,6 @@ fn put_startup_row(
             role: ProbeRole::Startup,
             status,
             last_observed_at_unix_ms: 1,
-            inferred: false,
             run_seq: ProbeRunSeq::FIRST,
             same_status_runs: SameStatusRuns::ONE,
         },

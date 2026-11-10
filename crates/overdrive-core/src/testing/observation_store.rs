@@ -1037,7 +1037,6 @@ fn probe_row(
         role,
         status,
         last_observed_at_unix_ms: observed_at,
-        inferred: false,
         run_seq: ProbeRunSeq::new(u64::max(observed_at, 1)).unwrap_or(ProbeRunSeq::FIRST),
         same_status_runs: SameStatusRuns::ONE,
     }

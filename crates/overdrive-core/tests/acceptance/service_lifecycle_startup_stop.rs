@@ -121,7 +121,6 @@ fn put_row(
             role,
             status,
             last_observed_at_unix_ms: run_seq,
-            inferred: false,
             run_seq: ProbeRunSeq::new(run_seq).expect("non-zero run sequence"),
             same_status_runs: SameStatusRuns::new(streak).expect("non-zero streak"),
         },

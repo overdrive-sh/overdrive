@@ -38,7 +38,7 @@ use crate::codec::{EnvelopeError, VersionedEnvelope};
 use crate::id::AllocationId;
 
 /// 0-indexed position of a probe within its role's TOML array (or
-/// `0` for the inferred default probe per ADR-0058 / C4).
+/// `0` for the synthesized default probe per ADR-0058 / C4).
 ///
 /// `ProbeIdx` is the load-bearing cross-step variable per
 /// `discuss/shared-artifacts-registry.md`: it MUST match across
@@ -392,10 +392,6 @@ pub struct ProbeResultRowV1 {
     /// milliseconds; sourced from the ProbeRunner's injected
     /// `Clock::unix_now()` per ADR-0013.
     pub last_observed_at_unix_ms: u64,
-    /// Whether this probe was inferred by the platform (per ADR-0058
-    /// default-TCP-startup inference rule) vs explicitly declared
-    /// by the operator. Renderer surfaces as `(inferred)` suffix.
-    pub inferred: bool,
 }
 
 /// `ProbeResultRow` V2 payload (PROBE-RUN-COUNT, ADR-0191): every
@@ -427,8 +423,6 @@ pub struct ProbeResultRowV2 {
     pub status: ProbeStatus,
     /// Observation time shown to operators; no longer decides the merge.
     pub last_observed_at_unix_ms: u64,
-    /// Whether this probe was inferred by the platform (ADR-0058).
-    pub inferred: bool,
     /// The producer's run sequence for `(alloc_id, role, probe_idx)`.
     pub run_seq: ProbeRunSeq,
     /// The producer's observed streak of `status` ending with this run.
@@ -448,7 +442,6 @@ impl From<ProbeResultRowV1> for ProbeResultRowV2 {
             role: v1.role,
             status: v1.status,
             last_observed_at_unix_ms: v1.last_observed_at_unix_ms,
-            inferred: v1.inferred,
             run_seq: ProbeRunSeq::FIRST,
             same_status_runs: SameStatusRuns::ONE,
         }
@@ -501,17 +494,17 @@ impl VersionedEnvelope for ProbeResultRowEnvelope {
     }
 
     /// Discriminant offset for `ProbeResultRowEnvelope` archives,
-    /// measured from the END of the archive bytes.
+    /// measured from the END of the current-layout archive bytes.
     ///
     /// rkyv 0.8 places the archived envelope root at the end of the
     /// buffer and sizes it to its largest variant, so every archive (V1
-    /// or V2 variant) carries the tag at the root's first byte: 72 bytes
-    /// from the end (`tag` + 7 padding + the 64-byte archived
-    /// `ProbeResultRowV2`). Re-pinned at the V2 bump together with the
-    /// schema-evolution fixture's `GOLDEN_DISCRIMINANT_OFFSET` per
-    /// `.claude/rules/development.md` § "Version-bump procedure".
+    /// or V2 variant) carries the tag at the root's first byte: 64 bytes
+    /// from the end (`tag` + 7 padding + the 56-byte archived
+    /// `ProbeResultRowV2`). Re-pinned for D16-G1 together with the
+    /// current-layout schema-evolution golden per
+    /// `.claude/rules/development.md` § "rkyv schema evolution".
     fn discriminant_offset_from_end() -> Option<usize> {
-        Some(72)
+        Some(64)
     }
 
     fn known_discriminants() -> &'static [u8] {

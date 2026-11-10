@@ -1317,10 +1317,9 @@ pub fn format_service_stable_summary(
     settled_in_ms: u64,
     witness: &overdrive_core::transition_reason::ProbeWitness,
 ) -> String {
-    let inferred = if witness.inferred { " inferred" } else { "" };
     format!(
         "Service '{workload_name}' is stable (settled in {settled_in_ms}ms; \
-         witness:{inferred} {role} probe[{idx}] ({mech}))\n",
+         witness: {role} probe[{idx}] ({mech}))\n",
         role = witness.role,
         idx = witness.probe_idx,
         mech = witness.mechanic_summary,

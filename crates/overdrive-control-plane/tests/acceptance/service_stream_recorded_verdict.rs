@@ -109,7 +109,6 @@ fn stable_terminal() -> TerminalCondition {
             probe_idx: 0,
             role: "startup".to_owned(),
             mechanic_summary: "tcp 127.0.0.1:8080".to_owned(),
-            inferred: false,
         },
     }
 }
@@ -193,7 +192,6 @@ fn verdicts(workload: &str) -> Vec<Verdict> {
                     probe_idx: 0,
                     role: "startup".to_owned(),
                     mechanic_summary: "tcp 127.0.0.1:8080".to_owned(),
-                    inferred: false,
                 },
             },
         ),

@@ -221,7 +221,6 @@ fn fixture_result_row(role: ProbeRole, status: ProbeStatus) -> ProbeResultRow {
         role,
         status,
         last_observed_at_unix_ms: 1000,
-        inferred: false,
         run_seq: ProbeRunSeq::FIRST,
         same_status_runs: SameStatusRuns::ONE,
     }

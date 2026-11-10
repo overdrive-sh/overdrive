@@ -71,7 +71,6 @@ fn stable_terminal() -> TerminalCondition {
             probe_idx: 0,
             role: "startup".to_owned(),
             mechanic_summary: "none (opted out)".to_owned(),
-            inferred: false,
         },
     }
 }
