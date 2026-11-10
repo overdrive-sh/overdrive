@@ -188,7 +188,7 @@ fn start_allocation_branch_emits_service_and_svid_enqueues() {
         workload_kind: WorkloadKind::Service,
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: GuestAttachmentObservation {
             occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
             leases: BTreeMap::new(),
@@ -205,7 +205,7 @@ fn start_allocation_branch_emits_service_and_svid_enqueues() {
         workload_kind: WorkloadKind::Service,
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: GuestAttachmentObservation {
             occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
             leases: BTreeMap::new(),
@@ -252,7 +252,7 @@ fn stop_allocation_branch_emits_service_and_svid_enqueues() {
         workload_kind: WorkloadKind::Service,
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: GuestAttachmentObservation {
             occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
             leases: BTreeMap::new(),
@@ -269,7 +269,7 @@ fn stop_allocation_branch_emits_service_and_svid_enqueues() {
         workload_kind: WorkloadKind::Service,
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: GuestAttachmentObservation {
             occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
             leases: BTreeMap::new(),
@@ -316,7 +316,7 @@ fn gc_stop_branch_emits_service_and_svid_enqueues() {
         workload_kind: WorkloadKind::Service,
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: GuestAttachmentObservation {
             occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
             leases: BTreeMap::new(),
@@ -333,7 +333,7 @@ fn gc_stop_branch_emits_service_and_svid_enqueues() {
         workload_kind: WorkloadKind::Service,
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: GuestAttachmentObservation {
             occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
             leases: BTreeMap::new(),
@@ -382,7 +382,7 @@ fn finalize_failed_branch_emits_service_and_svid_enqueues() {
         workload_kind: WorkloadKind::Service,
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: GuestAttachmentObservation {
             occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
             leases: BTreeMap::new(),
@@ -399,7 +399,7 @@ fn finalize_failed_branch_emits_service_and_svid_enqueues() {
         workload_kind: WorkloadKind::Service,
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: GuestAttachmentObservation {
             occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
             leases: BTreeMap::new(),
@@ -455,7 +455,7 @@ fn converged_tick_emits_no_lifecycle_enqueue() {
         workload_kind: WorkloadKind::Service,
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: GuestAttachmentObservation {
             occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
             leases: BTreeMap::new(),
@@ -472,7 +472,7 @@ fn converged_tick_emits_no_lifecycle_enqueue() {
         workload_kind: WorkloadKind::Service,
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: GuestAttachmentObservation {
             occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
             leases: BTreeMap::new(),
@@ -545,7 +545,7 @@ fn release_service_vip_only_tick_emits_no_lifecycle_enqueue() {
         workload_kind: WorkloadKind::Service,
         service_spec_digest: Some(digest),
         probe_descriptors: Vec::new(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: GuestAttachmentObservation {
             occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
             leases: BTreeMap::new(),
@@ -562,7 +562,7 @@ fn release_service_vip_only_tick_emits_no_lifecycle_enqueue() {
         workload_kind: WorkloadKind::Service,
         service_spec_digest: Some(digest),
         probe_descriptors: Vec::new(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: GuestAttachmentObservation {
             occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
             leases: BTreeMap::new(),
@@ -605,7 +605,7 @@ fn job_kind_start_allocation_emits_no_service_enqueue() {
         workload_kind: WorkloadKind::Job,
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: GuestAttachmentObservation {
             occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
             leases: BTreeMap::new(),
@@ -622,7 +622,7 @@ fn job_kind_start_allocation_emits_no_service_enqueue() {
         workload_kind: WorkloadKind::Job,
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: GuestAttachmentObservation {
             occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
             leases: BTreeMap::new(),

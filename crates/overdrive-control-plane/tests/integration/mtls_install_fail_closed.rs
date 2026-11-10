@@ -211,7 +211,6 @@ fn build_spec(alloc: &AllocationId) -> AllocationSpec {
         // The C3 provision seam SETS these — supplied `None` so the seam's own
         // assign/provision/inject runs for real.
         transport: None,
-        service_ports: Vec::new(),
     }
 }
 

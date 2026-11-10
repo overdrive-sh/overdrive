@@ -79,7 +79,7 @@ mod integration {
 
     // canonical-workload-address-inbound-tproxy (GH #241) — DISTILL RED scaffolds.
     // The keystone slice: production-installed inbound nft-TPROXY (from
-    // `start_alloc` off `spec.{workload_addr, service_ports}`), NO test-installed
+    // `start_alloc` off `spec.transport.workload_addr` and `declared_listeners`), NO test-installed
     // rule, NO synthetic loopback virt. The S-WS keystone
     // (`canonical_address_inbound_walking_skeleton`) RELOCATED to the
     // `overdrive-control-plane` test tree (R1): it drives in-process `run_server`,

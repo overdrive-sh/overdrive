@@ -80,7 +80,6 @@ fn spec(alloc: &AllocationId, declared: Vec<Listener>) -> AllocationSpec {
         resources: Resources { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
         probe_descriptors: vec![startup_descriptor()],
         transport: None,
-        service_ports: Vec::new(),
     }
 }
 

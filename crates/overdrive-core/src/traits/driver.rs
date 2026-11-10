@@ -19,6 +19,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use utoipa::ToSchema;
 
+use crate::aggregate::Listener;
 use crate::aggregate::probe_descriptor::ProbeDescriptor;
 use crate::guest_transport::GuestTransportAssignment;
 use crate::{AllocationId, SpiffeId};
@@ -325,42 +326,23 @@ pub struct AllocationSpec {
     /// production `StartAllocation` always sets it.
     pub transport: Option<GuestTransportAssignment>,
 
-    /// Declared Service listener ports projected from the live intent at
-    /// hydrate-desired time via
-    /// `overdrive_reconcilers::project_service_listen_ports` (D-A1 /
-    /// D-BLOCKER1, GH #241). Consumed by the inbound intercept
-    /// install, keyed on `workload_addr`. Empty for Job-kind / Schedule-kind
-    /// workloads (every current fixture); a Service projects its
-    /// `listeners[].port` set in declaration order.
-    ///
-    /// D-BLOCKER1 — this is the SAME single source the
-    /// ServiceLifecycle backend projection reads; the two readers MUST agree,
-    /// so the value bottoms out in `svc.listeners`.
-    /// Threaded through `WorkloadLifecycleState.service_ports` and cloned
-    /// into the emitted `AllocationSpec` at the IDENTICAL site/shape as
-    /// `probe_descriptors`. Same pure-in-memory derive discipline as the
-    /// fields above (no serde / rkyv).
-    pub service_ports: Vec<NonZeroU16>,
-
-    /// The full declared listener set of the Service, in declaration order
-    /// (PR-4, D14 item 2): in-memory only, projected in `hydrate_desired`.
-    /// PR-4 replaces `service_ports` by this field; DELIVER removes
-    /// `service_ports` and routes the TPROXY consumers through
-    /// [`AllocationSpec::tcp_service_ports`].
-    ///
-    /// SCAFFOLD: true — pinned shape (`feature-delta.md` § D14 item 2).
-    pub declared_listeners: Vec<crate::aggregate::Listener>,
+    /// The full declared Service listener set in declaration order (D14 item
+    /// 2). `WorkloadLifecycle` projects the live intent's `listeners` at
+    /// hydrate-desired time and clones them into emitted allocations. This is
+    /// in-memory only; Job, Schedule and absent intents have no listeners.
+    pub declared_listeners: Vec<Listener>,
 }
 
 impl AllocationSpec {
     /// The TCP view of [`Self::declared_listeners`]: the TCP-protocol
     /// listeners' ports in declaration order (PR-4).
-    ///
-    /// SCAFFOLD: true — pinned shape (`feature-delta.md` § D14 item 2).
     #[must_use]
-    #[allow(clippy::unused_self)] // SCAFFOLD: true — the body lands with PR-4
     pub fn tcp_service_ports(&self) -> Vec<NonZeroU16> {
-        panic!("RED scaffold: PR-4 AllocationSpec::tcp_service_ports")
+        self.declared_listeners
+            .iter()
+            .filter(|listener| listener.protocol == crate::dataplane::Proto::Tcp)
+            .map(|listener| listener.port)
+            .collect()
     }
 }
 

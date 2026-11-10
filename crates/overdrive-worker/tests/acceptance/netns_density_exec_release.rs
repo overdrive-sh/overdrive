@@ -87,7 +87,6 @@ fn spec(tmp: &TempDir, alloc: &AllocationId, argument_bytes: usize) -> Allocatio
             "100.95.0.1".parse().expect("gateway"),
             0,
         )),
-        service_ports: Vec::new(),
     }
 }
 

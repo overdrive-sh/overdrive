@@ -4,12 +4,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::time::Duration;
 
-use std::num::NonZeroU16;
-
 use overdrive_core::SpiffeId;
 use overdrive_core::aggregate::{
-    IntentKey, Job, Node, NodeSpecInput, ProbeDescriptor, Vm, WorkloadDriver, WorkloadIntent,
-    WorkloadKind,
+    IntentKey, Job, Listener, Node, NodeSpecInput, ProbeDescriptor, Vm, WorkloadDriver,
+    WorkloadIntent, WorkloadKind,
 };
 use overdrive_core::guest_network::{GuestAttachmentOccupancy, MAX_GUEST_NETWORK_ATTACHMENTS};
 use overdrive_core::id::{AllocationId, ContentHash, CorrelationKey, NodeId, WorkloadId};
@@ -568,13 +566,12 @@ fn baseline_nodes_phase1() -> BTreeMap<NodeId, Node> {
 
 /// Read a workload from the `IntentStore` and project it onto a kind-agnostic
 /// [`Job`] shape (+ the Service spec digest, probe descriptors, and declared
-/// service ports). Returns `Ok((None, None, empty, empty))` when the key is
+/// listeners). Returns `Ok((None, None, empty, empty))` when the key is
 /// absent.
 async fn read_job(
     ctx: &HydrationContext<'_>,
     workload_id: &WorkloadId,
-) -> Result<(Option<Job>, Option<ContentHash>, Vec<ProbeDescriptor>, Vec<NonZeroU16>), HydrateError>
-{
+) -> Result<(Option<Job>, Option<ContentHash>, Vec<ProbeDescriptor>, Vec<Listener>), HydrateError> {
     let key = IntentKey::for_workload(workload_id);
     let bytes = ctx
         .intent_store
@@ -586,11 +583,13 @@ async fn read_job(
         WorkloadIntent::from_store_bytes(b.as_ref(), ctx.intent_redb_path, Some(key.as_str()))
             .map_err(|e| HydrateError::IntentRead(e.to_string()))?;
     // Project the live intent's probe descriptors (GAP-8) + declared Service
-    // listener ports (D-A1, GH #241) at the hydrate-desired seam.
+    // listeners (D14) at the hydrate-desired seam.
     let probe_descriptors = super::project_probe_descriptors(&intent);
-    let service_ports = super::project_service_listen_ports(&intent);
+    let declared_listeners = project_declared_listeners(&intent);
     match &intent {
-        WorkloadIntent::Job(job) => Ok((Some(job.clone()), None, probe_descriptors, service_ports)),
+        WorkloadIntent::Job(job) => {
+            Ok((Some(job.clone()), None, probe_descriptors, declared_listeners))
+        }
         WorkloadIntent::Service(svc) => {
             // Project Service onto a kind-agnostic Job shape — field-for-field
             // equivalent over (id, replicas, resources, driver).
@@ -602,9 +601,9 @@ async fn read_job(
             };
             let digest =
                 intent.spec_digest().map_err(|e| HydrateError::IntentRead(e.to_string()))?;
-            Ok((Some(job), Some(digest), probe_descriptors, service_ports))
+            Ok((Some(job), Some(digest), probe_descriptors, declared_listeners))
         }
-        WorkloadIntent::Schedule(_) => Ok((None, None, probe_descriptors, service_ports)),
+        WorkloadIntent::Schedule(_) => Ok((None, None, probe_descriptors, declared_listeners)),
     }
 }
 
@@ -661,7 +660,8 @@ async fn hydrate_workload_lifecycle_desired(
     ctx: &HydrationContext<'_>,
     workload_id: &WorkloadId,
 ) -> Result<WorkloadLifecycleState, HydrateError> {
-    let (job, intent_digest, probe_descriptors, service_ports) = read_job(ctx, workload_id).await?;
+    let (job, intent_digest, probe_descriptors, declared_listeners) =
+        read_job(ctx, workload_id).await?;
     let desired_to_stop = stop_intent_present(ctx, workload_id).await?;
     let generation = generation_value(ctx, workload_id).await?;
     let nodes = baseline_nodes_phase1();
@@ -679,14 +679,14 @@ async fn hydrate_workload_lifecycle_desired(
         workload_kind,
         service_spec_digest,
         probe_descriptors,
-        service_ports,
+        declared_listeners,
         guest_attachments: unobserved_guest_attachments(),
     })
 }
 
 /// Build the `actual` projection from the `ObservationStore`. `job` /
 /// `desired_to_stop` are unused on the actual side; `probe_descriptors` /
-/// `service_ports` are empty (the desired side drives both action arms).
+/// `declared_listeners` are empty (the desired side drives both action arms).
 async fn hydrate_workload_lifecycle_actual(
     ctx: &HydrationContext<'_>,
     workload_id: &WorkloadId,
@@ -733,7 +733,7 @@ async fn hydrate_workload_lifecycle_actual(
         workload_kind,
         service_spec_digest,
         probe_descriptors: Vec::new(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments,
     })
 }
@@ -1371,7 +1371,6 @@ impl WorkloadLifecycle {
                             workload_id: job.id.clone(),
                             node_id,
                             spec: AllocationSpec {
-                                declared_listeners: Vec::new(),
                                 alloc: alloc_id.clone(),
                                 identity,
                                 driver,
@@ -1383,12 +1382,11 @@ impl WorkloadLifecycle {
                                 // → liveness in canonical order. See
                                 // `WorkloadLifecycleState::probe_descriptors`.
                                 probe_descriptors: desired.probe_descriptors.clone(),
-                                // D-A1 / D-BLOCKER1 (GH #241): declared Service
-                                // listener ports, projected at hydrate-desired
+                                // D14: declared Service listeners, projected at hydrate-desired
                                 // time — same clone-from-desired shape as
                                 // `probe_descriptors`. See the RestartAllocation
                                 // spec above.
-                                service_ports: desired.service_ports.clone(),
+                                declared_listeners: desired.declared_listeners.clone(),
                                 // Netns/veth/addr-agnostic reconciler (JOIN-2 +
                                 // D-A1) — see the RestartAllocation spec above.
                                 transport: None,
@@ -1675,13 +1673,12 @@ fn restart_allocation_action(
     Action::RestartAllocation {
         alloc_id: predecessor.alloc_id.clone(),
         spec: AllocationSpec {
-            declared_listeners: Vec::new(),
             alloc: successor_alloc_id,
             identity,
             driver,
             resources: job.resources,
             probe_descriptors: desired.probe_descriptors.clone(),
-            service_ports: desired.service_ports.clone(),
+            declared_listeners: desired.declared_listeners.clone(),
             transport: None,
         },
         kind: desired.workload_kind,
@@ -1985,15 +1982,11 @@ pub struct WorkloadLifecycleState {
     /// silently dropping Service-kind probes even after GAP-6 admission
     /// + GAP-7 spawn-loop wiring landed.
     pub probe_descriptors: Vec<ProbeDescriptor>,
-    /// Declared Service listener ports projected from the live intent at
-    /// hydrate-desired time via [`project_service_listen_ports`]
-    /// (canonical-workload-address inbound-TPROXY, D-A1 / D-BLOCKER1, GH
-    /// #241). Empty for Job-kind / Schedule-kind / absent intent; a Service
-    /// carries its `listeners[].port` set in declaration order. The
-    /// reconciler clones this into every emitted `AllocationSpec.service_ports`
-    /// at the IDENTICAL site/shape as [`Self::probe_descriptors`] so the
-    /// inbound-TPROXY install (step 03-01) receives the declared port set.
-    pub service_ports: Vec<std::num::NonZeroU16>,
+    /// Full declared Service listener set projected from the live intent at
+    /// hydrate-desired time. Empty for Job-kind / Schedule-kind / absent
+    /// intent; a Service carries `listeners` in declaration order. The
+    /// reconciler clones this into each emitted allocation specification.
+    pub declared_listeners: Vec<Listener>,
     /// Node guest-attachment occupancy plus the leases of this workload's row
     /// allocations, read as one snapshot through the hydration read-port
     /// (D-295-R8, ADR-0134). Placement passes its `occupancy` to the
@@ -2094,6 +2087,15 @@ pub fn project_service_listen_ports(
     }
 }
 
+/// Project the Service's full declared listener list without changing its
+/// protocols, order, or multiplicity.
+fn project_declared_listeners(intent: &WorkloadIntent) -> Vec<Listener> {
+    match intent {
+        WorkloadIntent::Job(_) | WorkloadIntent::Schedule(_) => Vec::new(),
+        WorkloadIntent::Service(service) => service.listeners.clone(),
+    }
+}
+
 /// Reconstruct the immutable allocation inputs for a live allocation whose
 /// process and C3 namespace survived a control-plane owner restart.
 ///
@@ -2121,13 +2123,12 @@ pub fn allocation_spec_for_live_intent(
         }),
     };
     Some(AllocationSpec {
-        declared_listeners: Vec::new(),
         alloc: alloc.clone(),
         identity: SpiffeId::for_allocation(workload_id, alloc),
         driver,
         resources,
         probe_descriptors: project_probe_descriptors(intent),
-        service_ports: project_service_listen_ports(intent),
+        declared_listeners: project_declared_listeners(intent),
         transport: None,
     })
 }
@@ -2471,7 +2472,7 @@ mod service_vip_release_emission_tests {
             workload_kind: WorkloadKind::Service,
             service_spec_digest: Some(digest),
             probe_descriptors: Vec::new(),
-            service_ports: Vec::new(),
+            declared_listeners: Vec::new(),
             guest_attachments: GuestAttachmentObservation {
                 occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
                 leases: BTreeMap::new(),
@@ -2575,7 +2576,7 @@ mod service_vip_release_emission_tests {
             // The v1 hydrator zeroes the digest alongside the intent.
             service_spec_digest: None,
             probe_descriptors: Vec::new(),
-            service_ports: Vec::new(),
+            declared_listeners: Vec::new(),
             guest_attachments: GuestAttachmentObservation {
                 occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
                 leases: BTreeMap::new(),
@@ -2934,7 +2935,7 @@ mod eligibility_tests {
             workload_kind: WorkloadKind::Service,
             service_spec_digest: None,
             probe_descriptors: Vec::new(),
-            service_ports: Vec::new(),
+            declared_listeners: Vec::new(),
             guest_attachments: GuestAttachmentObservation {
                 occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
                 leases: BTreeMap::new(),
@@ -3180,7 +3181,7 @@ mod netns_density_lifecycle_fixture {
             workload_kind: kind,
             service_spec_digest: None,
             probe_descriptors: Vec::new(),
-            service_ports: Vec::new(),
+            declared_listeners: Vec::new(),
             guest_attachments: guest_attachments.clone(),
         };
         let actual = WorkloadLifecycleState {

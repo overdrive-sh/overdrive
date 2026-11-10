@@ -244,7 +244,6 @@ pub(super) fn vm_spec(
     intent: &WorkloadIntent,
 ) -> AllocationSpec {
     AllocationSpec {
-        declared_listeners: Vec::new(),
         alloc: alloc.clone(),
         identity: SpiffeId::for_allocation(workload, alloc),
         driver: DriverPayload::Vm(VmPayload {
@@ -266,7 +265,10 @@ pub(super) fn vm_spec(
             GuestFlowPorts::new(VsockPort::new(50_240), VsockPort::new(50_243))
                 .expect("two distinct ports above the reserved range"),
         )),
-        service_ports: vec![NonZeroU16::new(LISTENER_PORT).expect("non-zero listener port")],
+        declared_listeners: vec![overdrive_core::aggregate::Listener {
+            protocol: overdrive_core::dataplane::Proto::Tcp,
+            port: NonZeroU16::new(LISTENER_PORT).expect("non-zero listener port"),
+        }],
     }
 }
 

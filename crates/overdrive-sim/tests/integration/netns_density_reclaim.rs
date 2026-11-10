@@ -1007,7 +1007,6 @@ fn filler_action(tag: &str, index: usize) -> Action {
             resources: Resources { cpu_milli: 0, memory_bytes: 256 * 1024 },
             probe_descriptors: Vec::new(),
             transport: None,
-            service_ports: Vec::new(),
         },
         kind: WorkloadKind::Job,
     }

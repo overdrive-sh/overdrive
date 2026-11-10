@@ -3,8 +3,8 @@
 //! listener installs exactly one inbound capture (the TCP tuple) and none for the
 //! UDP port.
 //!
-//! The spec carries ONLY `declared_listeners` (`service_ports` empty), so the
-//! install can learn the TCP port only by reading the declared set via
+//! The spec carries the full declared listener set, so the install can learn
+//! the TCP port only by reading the set via
 //! `AllocationSpec::tcp_service_ports()`. Requires root; non-root SKIPs. Run via
 //! `cargo xtask metal run -- cargo nextest run -p overdrive-worker --features
 //! integration-tests`.
@@ -36,7 +36,6 @@ const UDP_PORT: u16 = 18778;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: PR-4 inbound install reads tcp_service_ports of declared_listeners"]
 async fn a_udp_declared_listener_gets_no_inbound_capture_and_a_tcp_one_does() {
     if !is_root() {
         eprintln!(
@@ -47,6 +46,12 @@ async fn a_udp_declared_listener_gets_no_inbound_capture_and_a_tcp_one_does() {
     record_uname("pr4-tcp-view");
     let _kernel_lock = KernelStateLock::acquire();
     clean_shared_infra();
+    assert!(
+        nft::observe_shared_ip_intercept_state()
+            .expect("observe the scrubbed shared program")
+            .is_none(),
+        "the guest fixture starts without a shared intercept program"
+    );
 
     let workload_addr: Ipv4Addr = WORKLOAD_ADDR.parse().expect("workload addr");
     let worker = build_worker();
@@ -75,4 +80,10 @@ async fn a_udp_declared_listener_gets_no_inbound_capture_and_a_tcp_one_does() {
     worker.stop_alloc(&alloc).await.expect("allocation teardown succeeds");
     worker.shutdown_owner().await.expect("the node-shared listener owner shuts down cleanly");
     clean_shared_infra();
+    assert!(
+        nft::observe_shared_ip_intercept_state()
+            .expect("observe the cleaned shared program")
+            .is_none(),
+        "guest cleanup removes the shared intercept program"
+    );
 }

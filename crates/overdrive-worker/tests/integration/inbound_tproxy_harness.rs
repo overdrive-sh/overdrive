@@ -147,14 +147,14 @@ pub fn nft_list_chain() -> Result<String, String> {
 }
 
 /// Build an [`AllocationSpec`] for the inbound scenarios. `workload_addr` +
-/// `service_ports` are the channel the C3 provision seam + `WorkloadLifecycle`
+/// `tcp_ports` are the channel the C3 provision seam + `WorkloadLifecycle`
 /// populate in production (01-02); the AT supplies them directly to drive the
 /// inbound-rule install. `host_veth = None` (no outbound egress rule — these
 /// scenarios isolate the INBOUND install).
 pub fn build_inbound_spec(
     alloc: &AllocationId,
     workload_addr: Option<Ipv4Addr>,
-    service_ports: Vec<NonZeroU16>,
+    tcp_ports: Vec<NonZeroU16>,
 ) -> AllocationSpec {
     AllocationSpec {
         alloc: alloc.clone(),
@@ -184,8 +184,13 @@ pub fn build_inbound_spec(
                     .expect("the default guest-flow listener ports"),
             )
         }),
-        service_ports,
-        declared_listeners: Vec::new(),
+        declared_listeners: tcp_ports
+            .into_iter()
+            .map(|port| overdrive_core::aggregate::Listener {
+                protocol: overdrive_core::dataplane::Proto::Tcp,
+                port,
+            })
+            .collect(),
     }
 }
 

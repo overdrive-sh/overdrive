@@ -61,7 +61,6 @@ fn spec(alloc: &AllocationId, roles: &[ProbeRole]) -> AllocationSpec {
         resources: Resources { cpu_milli: 100, memory_bytes: 32 * 1024 * 1024 },
         probe_descriptors: roles.iter().map(|r| descriptor(*r)).collect(),
         transport: None,
-        service_ports: Vec::new(),
     }
 }
 

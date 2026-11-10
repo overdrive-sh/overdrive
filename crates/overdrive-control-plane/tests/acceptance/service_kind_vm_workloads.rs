@@ -68,7 +68,6 @@ fn allocation_spec(
             GuestFlowPorts::new(GUEST_FLOW_STREAM_PORT, GUEST_FLOW_CONTROL_PORT)
                 .expect("the default guest-flow listener ports"),
         )),
-        service_ports: Vec::new(),
     }
 }
 

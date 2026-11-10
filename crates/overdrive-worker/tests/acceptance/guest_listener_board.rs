@@ -210,7 +210,6 @@ impl Harness {
                 GuestFlowPorts::new(VsockPort::new(FLOW_STREAM), VsockPort::new(FLOW_CONTROL))
                     .expect("two distinct ports above the reserved range"),
             )),
-            service_ports: Vec::new(),
         }
     }
 

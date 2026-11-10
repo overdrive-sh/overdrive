@@ -180,7 +180,7 @@ fn at_01_service_kind_projects_startup_probes_into_start_allocation_spec() {
         workload_kind: WorkloadKind::Service,
         service_spec_digest: None,
         probe_descriptors: descriptors.clone(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: GuestAttachmentObservation {
             occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
             leases: BTreeMap::new(),
@@ -197,7 +197,7 @@ fn at_01_service_kind_projects_startup_probes_into_start_allocation_spec() {
         workload_kind: WorkloadKind::Service,
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: GuestAttachmentObservation {
             occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
             leases: BTreeMap::new(),
@@ -270,7 +270,7 @@ fn at_02_job_kind_yields_empty_probe_descriptors_in_start_allocation_spec() {
         // path projects empty for Job; the regression guard asserts the
         // reconciler doesn't synthesise anything else.
         probe_descriptors: Vec::new(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: GuestAttachmentObservation {
             occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
             leases: BTreeMap::new(),
@@ -287,7 +287,7 @@ fn at_02_job_kind_yields_empty_probe_descriptors_in_start_allocation_spec() {
         workload_kind: WorkloadKind::Job,
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: GuestAttachmentObservation {
             occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
             leases: BTreeMap::new(),
@@ -346,7 +346,7 @@ fn at_03_restart_allocation_arm_projects_probe_descriptors_identically() {
         workload_kind: WorkloadKind::Service,
         service_spec_digest: None,
         probe_descriptors: descriptors.clone(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: GuestAttachmentObservation {
             occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
             leases: BTreeMap::new(),
@@ -363,7 +363,7 @@ fn at_03_restart_allocation_arm_projects_probe_descriptors_identically() {
         workload_kind: WorkloadKind::Service,
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: GuestAttachmentObservation {
             occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
             leases: BTreeMap::new(),
@@ -453,7 +453,7 @@ fn at_04_canonical_role_order_startup_readiness_liveness_is_preserved() {
         workload_kind: WorkloadKind::Service,
         service_spec_digest: None,
         probe_descriptors: projected,
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: GuestAttachmentObservation {
             occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
             leases: BTreeMap::new(),
@@ -470,7 +470,7 @@ fn at_04_canonical_role_order_startup_readiness_liveness_is_preserved() {
         workload_kind: WorkloadKind::Service,
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: GuestAttachmentObservation {
             occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
             leases: BTreeMap::new(),

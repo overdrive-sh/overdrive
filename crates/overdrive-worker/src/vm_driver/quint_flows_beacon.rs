@@ -419,7 +419,6 @@ impl FlowsBeaconDriver {
                 lease.launch,
                 assignment_flow_ports(),
             )),
-            service_ports: Vec::new(),
         };
         let alloc = lease.alloc.clone();
         let token = lease.launch;

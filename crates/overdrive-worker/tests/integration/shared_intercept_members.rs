@@ -763,7 +763,6 @@ fn member_spec(alloc: &str, address: Ipv4Addr) -> AllocationSpec {
         .expect("an in-range guest CID");
     let launch = LaunchToken::from_bytes([0x5a; 16]).expect("a non-zero launch token");
     AllocationSpec {
-        declared_listeners: Vec::new(),
         alloc: AllocationId::new(alloc).expect("a valid allocation id"),
         identity: SpiffeId::new("spiffe://overdrive.local/workload/sa/alloc/01")
             .expect("a valid SPIFFE id"),
@@ -783,7 +782,10 @@ fn member_spec(alloc: &str, address: Ipv4Addr) -> AllocationSpec {
             GuestFlowPorts::new(GUEST_FLOW_STREAM_PORT, GUEST_FLOW_CONTROL_PORT)
                 .expect("the default guest-flow listener ports"),
         )),
-        service_ports: vec![NonZeroU16::new(MEMBER_SERVICE_PORT).expect("a non-zero port")],
+        declared_listeners: vec![overdrive_core::aggregate::Listener {
+            protocol: overdrive_core::dataplane::Proto::Tcp,
+            port: NonZeroU16::new(MEMBER_SERVICE_PORT).expect("a non-zero port"),
+        }],
     }
 }
 

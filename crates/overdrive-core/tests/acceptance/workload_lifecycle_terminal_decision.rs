@@ -174,7 +174,7 @@ fn workload_lifecycle_stamps_backoff_exhausted_terminal_when_attempts_reach_ceil
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: GuestAttachmentObservation {
             occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
             leases: BTreeMap::new(),
@@ -191,7 +191,7 @@ fn workload_lifecycle_stamps_backoff_exhausted_terminal_when_attempts_reach_ceil
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: GuestAttachmentObservation {
             occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
             leases: BTreeMap::new(),
@@ -254,7 +254,7 @@ fn workload_lifecycle_stamps_stopped_terminal_when_operator_stop_converges() {
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: GuestAttachmentObservation {
             occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
             leases: BTreeMap::new(),
@@ -271,7 +271,7 @@ fn workload_lifecycle_stamps_stopped_terminal_when_operator_stop_converges() {
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: GuestAttachmentObservation {
             occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
             leases: BTreeMap::new(),
@@ -317,7 +317,7 @@ fn workload_lifecycle_emits_no_terminal_for_pending_to_running() {
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: GuestAttachmentObservation {
             occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
             leases: BTreeMap::new(),
@@ -334,7 +334,7 @@ fn workload_lifecycle_emits_no_terminal_for_pending_to_running() {
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: GuestAttachmentObservation {
             occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
             leases: BTreeMap::new(),
@@ -386,7 +386,7 @@ fn workload_lifecycle_emits_no_terminal_when_failed_with_budget_remaining() {
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: GuestAttachmentObservation {
             occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
             leases: BTreeMap::new(),
@@ -403,7 +403,7 @@ fn workload_lifecycle_emits_no_terminal_when_failed_with_budget_remaining() {
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: GuestAttachmentObservation {
             occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
             leases: BTreeMap::new(),
@@ -500,7 +500,7 @@ proptest! {
                     workload_kind: WorkloadKind::default(),
                     service_spec_digest: None,
                     probe_descriptors: Vec::new(),
-            service_ports: Vec::new(),
+            declared_listeners: Vec::new(),
             guest_attachments: GuestAttachmentObservation { occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 }, leases: BTreeMap::new() },
         };
         let actual = WorkloadLifecycleState {
@@ -514,7 +514,7 @@ proptest! {
             workload_kind: WorkloadKind::default(),
             service_spec_digest: None,
             probe_descriptors: Vec::new(),
-            service_ports: Vec::new(),
+            declared_listeners: Vec::new(),
             guest_attachments: GuestAttachmentObservation { occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 }, leases: BTreeMap::new() },
         };
         let mut restart_counts = BTreeMap::new();
@@ -716,7 +716,7 @@ fn states_with_actual_allocs(
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: GuestAttachmentObservation {
             occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
             leases: BTreeMap::new(),
@@ -733,7 +733,7 @@ fn states_with_actual_allocs(
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: GuestAttachmentObservation {
             occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
             leases: BTreeMap::new(),

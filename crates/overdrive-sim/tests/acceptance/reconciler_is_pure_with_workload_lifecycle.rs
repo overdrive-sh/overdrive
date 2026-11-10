@@ -78,7 +78,7 @@ fn happy_path_state() -> WorkloadLifecycleState {
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: overdrive_core::traits::GuestAttachmentObservation {
             occupancy: overdrive_core::guest_network::GuestAttachmentOccupancy {
                 held: 0,
@@ -117,7 +117,7 @@ fn workload_lifecycle_satisfies_reconciler_is_pure_invariant() {
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: overdrive_core::traits::GuestAttachmentObservation {
             occupancy: overdrive_core::guest_network::GuestAttachmentOccupancy {
                 held: 0,
@@ -169,7 +169,7 @@ fn workload_lifecycle_run_emits_start_allocation_when_no_running_alloc() {
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: overdrive_core::traits::GuestAttachmentObservation {
             occupancy: overdrive_core::guest_network::GuestAttachmentOccupancy {
                 held: 0,

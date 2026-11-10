@@ -476,8 +476,8 @@ enum SharedElement {
 fn allocation_elements(spec: &AllocationSpec) -> BTreeSet<SharedElement> {
     let address =
         spec.transport.as_ref().expect("shared allocation has a transport").workload_addr();
-    spec.service_ports
-        .iter()
+    spec.tcp_service_ports()
+        .into_iter()
         .map(|port| SharedElement::InboundDestination(SocketAddrV4::new(address, port.get())))
         .collect()
 }
@@ -1149,7 +1149,6 @@ fn allocation_spec_at(name: &str, address: Ipv4Addr) -> AllocationSpec {
         .expect("an in-range guest CID");
     let launch = LaunchToken::from_bytes([0x5a; 16]).expect("a non-zero launch token");
     AllocationSpec {
-        declared_listeners: Vec::new(),
         alloc: AllocationId::new(name).expect("allocation id"),
         identity: SpiffeId::new(&format!(
             "spiffe://overdrive.local/workload/shared-owner/alloc/{name}"
@@ -1171,9 +1170,12 @@ fn allocation_spec_at(name: &str, address: Ipv4Addr) -> AllocationSpec {
             GuestFlowPorts::new(GUEST_FLOW_STREAM_PORT, GUEST_FLOW_CONTROL_PORT)
                 .expect("the default guest-flow listener ports"),
         )),
-        service_ports: [8080_u16, 8443]
+        declared_listeners: [8080_u16, 8443]
             .into_iter()
-            .map(|port| std::num::NonZeroU16::new(port).expect("non-zero port"))
+            .map(|port| overdrive_core::aggregate::Listener {
+                protocol: overdrive_core::dataplane::Proto::Tcp,
+                port: std::num::NonZeroU16::new(port).expect("non-zero port"),
+            })
             .collect(),
     }
 }

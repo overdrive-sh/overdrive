@@ -431,7 +431,6 @@ impl Composition {
             resources: Resources { cpu_milli: 1, memory_bytes: 1 },
             probe_descriptors: Vec::new(),
             transport: Some(lease.plan.assignment().clone()),
-            service_ports: Vec::new(),
         };
         self.mtls.start_alloc(&spec).await.expect("the allocation becomes intercept-live");
     }

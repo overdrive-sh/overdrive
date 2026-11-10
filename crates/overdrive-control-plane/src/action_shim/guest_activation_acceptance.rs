@@ -379,7 +379,6 @@ fn alloc_id(name: &str) -> AllocationId {
 
 fn spec(name: &str) -> AllocationSpec {
     AllocationSpec {
-        declared_listeners: Vec::new(),
         alloc: alloc_id(name),
         identity: SpiffeId::new(&format!("spiffe://overdrive.local/workload/nd295/alloc/{name}"))
             .expect("SPIFFE ID"),
@@ -392,7 +391,10 @@ fn spec(name: &str) -> AllocationSpec {
         resources: Resources { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
         probe_descriptors: Vec::new(),
         transport: None,
-        service_ports: vec![NonZeroU16::new(LISTEN_PORT).expect("non-zero listener port")],
+        declared_listeners: vec![overdrive_core::aggregate::Listener {
+            protocol: overdrive_core::dataplane::Proto::Tcp,
+            port: NonZeroU16::new(LISTEN_PORT).expect("non-zero listener port"),
+        }],
     }
 }
 

@@ -150,7 +150,6 @@ fn spec(alloc: &AllocationId, probe_descriptors: Vec<ProbeDescriptor>) -> Alloca
         resources: Resources { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
         probe_descriptors,
         transport: None,
-        service_ports: Vec::new(),
         declared_listeners: Vec::new(),
     }
 }

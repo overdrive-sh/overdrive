@@ -115,7 +115,7 @@ fn dispatch_routes_workload_lifecycle_triple_to_workload_lifecycle_view() {
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: GuestAttachmentObservation {
             occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
             leases: BTreeMap::new(),
@@ -132,7 +132,7 @@ fn dispatch_routes_workload_lifecycle_triple_to_workload_lifecycle_view() {
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: GuestAttachmentObservation {
             occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
             leases: BTreeMap::new(),

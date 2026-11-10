@@ -207,7 +207,7 @@ fn stop_branch_skipped_when_stop_intent_set_but_no_job() {
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: GuestAttachmentObservation {
             occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
             leases: BTreeMap::new(),
@@ -224,7 +224,7 @@ fn stop_branch_skipped_when_stop_intent_set_but_no_job() {
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: GuestAttachmentObservation {
             occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
             leases: BTreeMap::new(),
@@ -283,7 +283,7 @@ fn stop_branch_skipped_when_job_present_but_no_stop_intent() {
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: GuestAttachmentObservation {
             occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
             leases: BTreeMap::new(),
@@ -300,7 +300,7 @@ fn stop_branch_skipped_when_job_present_but_no_stop_intent() {
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: GuestAttachmentObservation {
             occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
             leases: BTreeMap::new(),
@@ -354,7 +354,7 @@ fn stop_branch_emits_one_stop_per_running_alloc_only() {
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: GuestAttachmentObservation {
             occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
             leases: BTreeMap::new(),
@@ -371,7 +371,7 @@ fn stop_branch_emits_one_stop_per_running_alloc_only() {
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: GuestAttachmentObservation {
             occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
             leases: BTreeMap::new(),
@@ -435,7 +435,7 @@ fn run_branch_emits_nothing_when_an_alloc_is_already_running() {
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: GuestAttachmentObservation {
             occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
             leases: BTreeMap::new(),
@@ -452,7 +452,7 @@ fn run_branch_emits_nothing_when_an_alloc_is_already_running() {
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: GuestAttachmentObservation {
             occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
             leases: BTreeMap::new(),
@@ -488,7 +488,7 @@ fn run_branch_starts_fresh_alloc_when_no_running_no_failed() {
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: GuestAttachmentObservation {
             occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
             leases: BTreeMap::new(),
@@ -505,7 +505,7 @@ fn run_branch_starts_fresh_alloc_when_no_running_no_failed() {
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: GuestAttachmentObservation {
             occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
             leases: BTreeMap::new(),
@@ -625,7 +625,7 @@ fn run_with_failed_alloc_and_attempts(attempts: u32) -> Vec<Action> {
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: GuestAttachmentObservation {
             occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
             leases: BTreeMap::new(),
@@ -642,7 +642,7 @@ fn run_with_failed_alloc_and_attempts(attempts: u32) -> Vec<Action> {
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: GuestAttachmentObservation {
             occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
             leases: BTreeMap::new(),
@@ -762,7 +762,7 @@ fn run_with_failed_alloc_and_seen_at(now_unix: UnixInstant, seen_at: UnixInstant
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: GuestAttachmentObservation {
             occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
             leases: BTreeMap::new(),
@@ -779,7 +779,7 @@ fn run_with_failed_alloc_and_seen_at(now_unix: UnixInstant, seen_at: UnixInstant
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: GuestAttachmentObservation {
             occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
             leases: BTreeMap::new(),
@@ -848,7 +848,7 @@ fn fresh_failure_writes_seen_at_into_next_view() {
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: GuestAttachmentObservation {
             occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
             leases: BTreeMap::new(),
@@ -865,7 +865,7 @@ fn fresh_failure_writes_seen_at_into_next_view() {
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: GuestAttachmentObservation {
             occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
             leases: BTreeMap::new(),
@@ -941,7 +941,7 @@ fn subsequent_tick_within_backoff_window_emits_nothing() {
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: GuestAttachmentObservation {
             occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
             leases: BTreeMap::new(),
@@ -958,7 +958,7 @@ fn subsequent_tick_within_backoff_window_emits_nothing() {
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: GuestAttachmentObservation {
             occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
             leases: BTreeMap::new(),
@@ -1041,7 +1041,7 @@ fn tick_after_backoff_elapsed_emits_restart_and_advances_seen_at() {
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: GuestAttachmentObservation {
             occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
             leases: BTreeMap::new(),
@@ -1058,7 +1058,7 @@ fn tick_after_backoff_elapsed_emits_restart_and_advances_seen_at() {
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: GuestAttachmentObservation {
             occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
             leases: BTreeMap::new(),
@@ -1181,7 +1181,7 @@ fn stop_branch_clears_last_failure_seen_at_when_no_running_allocs() {
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: GuestAttachmentObservation {
             occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
             leases: BTreeMap::new(),
@@ -1198,7 +1198,7 @@ fn stop_branch_clears_last_failure_seen_at_when_no_running_allocs() {
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: GuestAttachmentObservation {
             occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
             leases: BTreeMap::new(),
@@ -1288,7 +1288,7 @@ fn run_branch_blocked_when_alloc_has_terminal_operator_stop() {
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: GuestAttachmentObservation {
             occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
             leases: BTreeMap::new(),
@@ -1305,7 +1305,7 @@ fn run_branch_blocked_when_alloc_has_terminal_operator_stop() {
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: GuestAttachmentObservation {
             occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
             leases: BTreeMap::new(),
@@ -1395,7 +1395,7 @@ fn absent_workload_with_running_rows_emits_system_gc_stops() {
             workload_kind: *kind,
             service_spec_digest: None,
             probe_descriptors: Vec::new(),
-            service_ports: Vec::new(),
+            declared_listeners: Vec::new(),
             guest_attachments: GuestAttachmentObservation {
                 occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
                 leases: BTreeMap::new(),
@@ -1412,7 +1412,7 @@ fn absent_workload_with_running_rows_emits_system_gc_stops() {
             workload_kind: *kind,
             service_spec_digest: None,
             probe_descriptors: Vec::new(),
-            service_ports: Vec::new(),
+            declared_listeners: Vec::new(),
             guest_attachments: GuestAttachmentObservation {
                 occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
                 leases: BTreeMap::new(),
@@ -1477,7 +1477,7 @@ fn absent_workload_with_no_allocs_clears_view_backoff() {
             workload_kind: *kind,
             service_spec_digest: None,
             probe_descriptors: Vec::new(),
-            service_ports: Vec::new(),
+            declared_listeners: Vec::new(),
             guest_attachments: GuestAttachmentObservation {
                 occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
                 leases: BTreeMap::new(),
@@ -1494,7 +1494,7 @@ fn absent_workload_with_no_allocs_clears_view_backoff() {
             workload_kind: *kind,
             service_spec_digest: None,
             probe_descriptors: Vec::new(),
-            service_ports: Vec::new(),
+            declared_listeners: Vec::new(),
             guest_attachments: GuestAttachmentObservation {
                 occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
                 leases: BTreeMap::new(),
@@ -1570,7 +1570,7 @@ fn absent_workload_with_only_terminal_allocs_is_idempotent() {
             workload_kind: *kind,
             service_spec_digest: None,
             probe_descriptors: Vec::new(),
-            service_ports: Vec::new(),
+            declared_listeners: Vec::new(),
             guest_attachments: GuestAttachmentObservation {
                 occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
                 leases: BTreeMap::new(),
@@ -1587,7 +1587,7 @@ fn absent_workload_with_only_terminal_allocs_is_idempotent() {
             workload_kind: *kind,
             service_spec_digest: None,
             probe_descriptors: Vec::new(),
-            service_ports: Vec::new(),
+            declared_listeners: Vec::new(),
             guest_attachments: GuestAttachmentObservation {
                 occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
                 leases: BTreeMap::new(),
@@ -1656,7 +1656,7 @@ fn absent_workload_mixed_states_only_stops_running_rows() {
             workload_kind: *kind,
             service_spec_digest: None,
             probe_descriptors: Vec::new(),
-            service_ports: Vec::new(),
+            declared_listeners: Vec::new(),
             guest_attachments: GuestAttachmentObservation {
                 occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
                 leases: BTreeMap::new(),
@@ -1673,7 +1673,7 @@ fn absent_workload_mixed_states_only_stops_running_rows() {
             workload_kind: *kind,
             service_spec_digest: None,
             probe_descriptors: Vec::new(),
-            service_ports: Vec::new(),
+            declared_listeners: Vec::new(),
             guest_attachments: GuestAttachmentObservation {
                 occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
                 leases: BTreeMap::new(),
@@ -1780,7 +1780,7 @@ fn run_branch_with_system_gc_row_only_places_fresh_alloc() {
             workload_kind: *kind,
             service_spec_digest: None,
             probe_descriptors: Vec::new(),
-            service_ports: Vec::new(),
+            declared_listeners: Vec::new(),
             guest_attachments: GuestAttachmentObservation {
                 occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
                 leases: BTreeMap::new(),
@@ -1797,7 +1797,7 @@ fn run_branch_with_system_gc_row_only_places_fresh_alloc() {
             workload_kind: *kind,
             service_spec_digest: None,
             probe_descriptors: Vec::new(),
-            service_ports: Vec::new(),
+            declared_listeners: Vec::new(),
             guest_attachments: GuestAttachmentObservation {
                 occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
                 leases: BTreeMap::new(),
@@ -1866,7 +1866,7 @@ fn run_branch_with_operator_stopped_row_short_circuits_to_zero_actions() {
             workload_kind: *kind,
             service_spec_digest: None,
             probe_descriptors: Vec::new(),
-            service_ports: Vec::new(),
+            declared_listeners: Vec::new(),
             guest_attachments: GuestAttachmentObservation {
                 occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
                 leases: BTreeMap::new(),
@@ -1883,7 +1883,7 @@ fn run_branch_with_operator_stopped_row_short_circuits_to_zero_actions() {
             workload_kind: *kind,
             service_spec_digest: None,
             probe_descriptors: Vec::new(),
-            service_ports: Vec::new(),
+            declared_listeners: Vec::new(),
             guest_attachments: GuestAttachmentObservation {
                 occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
                 leases: BTreeMap::new(),
@@ -1933,7 +1933,7 @@ fn run_branch_operator_stop_takes_precedence_over_system_gc() {
             workload_kind: *kind,
             service_spec_digest: None,
             probe_descriptors: Vec::new(),
-            service_ports: Vec::new(),
+            declared_listeners: Vec::new(),
             guest_attachments: GuestAttachmentObservation {
                 occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
                 leases: BTreeMap::new(),
@@ -1950,7 +1950,7 @@ fn run_branch_operator_stop_takes_precedence_over_system_gc() {
             workload_kind: *kind,
             service_spec_digest: None,
             probe_descriptors: Vec::new(),
-            service_ports: Vec::new(),
+            declared_listeners: Vec::new(),
             guest_attachments: GuestAttachmentObservation {
                 occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
                 leases: BTreeMap::new(),
@@ -2001,7 +2001,7 @@ fn run_branch_system_gc_row_excluded_failed_row_drives_restart() {
             workload_kind: *kind,
             service_spec_digest: None,
             probe_descriptors: Vec::new(),
-            service_ports: Vec::new(),
+            declared_listeners: Vec::new(),
             guest_attachments: GuestAttachmentObservation {
                 occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
                 leases: BTreeMap::new(),
@@ -2018,7 +2018,7 @@ fn run_branch_system_gc_row_excluded_failed_row_drives_restart() {
             workload_kind: *kind,
             service_spec_digest: None,
             probe_descriptors: Vec::new(),
-            service_ports: Vec::new(),
+            declared_listeners: Vec::new(),
             guest_attachments: GuestAttachmentObservation {
                 occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
                 leases: BTreeMap::new(),
@@ -2166,7 +2166,7 @@ fn intentional_stop_marker_in_reason_only_filters_row() {
             workload_kind: *kind,
             service_spec_digest: None,
             probe_descriptors: Vec::new(),
-            service_ports: Vec::new(),
+            declared_listeners: Vec::new(),
             guest_attachments: GuestAttachmentObservation {
                 occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
                 leases: BTreeMap::new(),
@@ -2183,7 +2183,7 @@ fn intentional_stop_marker_in_reason_only_filters_row() {
             workload_kind: *kind,
             service_spec_digest: None,
             probe_descriptors: Vec::new(),
-            service_ports: Vec::new(),
+            declared_listeners: Vec::new(),
             guest_attachments: GuestAttachmentObservation {
                 occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
                 leases: BTreeMap::new(),
@@ -2294,7 +2294,7 @@ fn intentional_stop_via_reason_only_operator_short_circuits() {
             workload_kind: *kind,
             service_spec_digest: None,
             probe_descriptors: Vec::new(),
-            service_ports: Vec::new(),
+            declared_listeners: Vec::new(),
             guest_attachments: GuestAttachmentObservation {
                 occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
                 leases: BTreeMap::new(),
@@ -2311,7 +2311,7 @@ fn intentional_stop_via_reason_only_operator_short_circuits() {
             workload_kind: *kind,
             service_spec_digest: None,
             probe_descriptors: Vec::new(),
-            service_ports: Vec::new(),
+            declared_listeners: Vec::new(),
             guest_attachments: GuestAttachmentObservation {
                 occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
                 leases: BTreeMap::new(),
@@ -2393,7 +2393,7 @@ fn pending_row_does_not_trigger_natural_exit_finalize() {
             workload_kind: WorkloadKind::Job,
             service_spec_digest: None,
             probe_descriptors: Vec::new(),
-            service_ports: Vec::new(),
+            declared_listeners: Vec::new(),
             guest_attachments: GuestAttachmentObservation {
                 occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
                 leases: BTreeMap::new(),
@@ -2410,7 +2410,7 @@ fn pending_row_does_not_trigger_natural_exit_finalize() {
             workload_kind: WorkloadKind::Job,
             service_spec_digest: None,
             probe_descriptors: Vec::new(),
-            service_ports: Vec::new(),
+            declared_listeners: Vec::new(),
             guest_attachments: GuestAttachmentObservation {
                 occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
                 leases: BTreeMap::new(),

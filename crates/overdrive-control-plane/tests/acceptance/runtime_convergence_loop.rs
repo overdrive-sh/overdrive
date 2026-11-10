@@ -1052,7 +1052,7 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: overdrive_core::traits::GuestAttachmentObservation {
             occupancy: overdrive_core::guest_network::GuestAttachmentOccupancy {
                 held: 0,
@@ -1072,7 +1072,7 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
         workload_kind: WorkloadKind::default(),
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: overdrive_core::traits::GuestAttachmentObservation {
             occupancy: overdrive_core::guest_network::GuestAttachmentOccupancy {
                 held: 0,

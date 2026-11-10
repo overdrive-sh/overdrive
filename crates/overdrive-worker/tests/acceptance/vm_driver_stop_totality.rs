@@ -160,7 +160,6 @@ fn build_spec(alloc: &AllocationId, tmp: &TempDir) -> AllocationSpec {
             "100.96.0.5".parse().expect("valid fixture gateway"),
             0,
         )),
-        service_ports: Vec::new(),
     }
 }
 

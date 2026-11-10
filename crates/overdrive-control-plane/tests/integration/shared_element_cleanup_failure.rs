@@ -715,13 +715,18 @@ fn tick(counter: u64) -> TickContext {
     }
 }
 
-fn service_ports() -> Vec<NonZeroU16> {
-    SERVICE_PORTS.iter().map(|port| NonZeroU16::new(*port).expect("non-zero port")).collect()
+fn declared_listeners() -> Vec<overdrive_core::aggregate::Listener> {
+    SERVICE_PORTS
+        .iter()
+        .map(|port| overdrive_core::aggregate::Listener {
+            protocol: overdrive_core::dataplane::Proto::Tcp,
+            port: NonZeroU16::new(*port).expect("non-zero port"),
+        })
+        .collect()
 }
 
 fn spec(name: &str, transport: Option<GuestTransportAssignment>) -> AllocationSpec {
     AllocationSpec {
-        declared_listeners: Vec::new(),
         alloc: AllocationId::new(name).expect("allocation id"),
         identity: SpiffeId::new(&format!(
             "spiffe://overdrive.local/workload/svc-element-cleanup/alloc/{name}"
@@ -736,7 +741,7 @@ fn spec(name: &str, transport: Option<GuestTransportAssignment>) -> AllocationSp
         resources: Resources { cpu_milli: 50, memory_bytes: 32 * 1024 * 1024 },
         probe_descriptors: Vec::new(),
         transport,
-        service_ports: service_ports(),
+        declared_listeners: declared_listeners(),
     }
 }
 

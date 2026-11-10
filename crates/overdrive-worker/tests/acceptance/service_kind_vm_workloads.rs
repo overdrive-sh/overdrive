@@ -107,7 +107,6 @@ fn allocation_spec(
         probe_descriptors,
         transport: workload_addr
             .map(|address| super::support::transport(address, GUEST_NODE_GATEWAY, 0)),
-        service_ports: Vec::new(),
     }
 }
 

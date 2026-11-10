@@ -36,7 +36,6 @@ async fn default_lane_does_not_spawn_real_processes() {
         // transparent-mtls-enrollment step 04-01 (JOIN-4/JOIN-6): off the
         // mTLS-composed boot gate — no provisioned netns/veth.
         transport: None,
-        service_ports: Vec::new(),
     };
 
     // Action — enter through the driving port.

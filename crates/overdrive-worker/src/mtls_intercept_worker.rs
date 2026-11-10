@@ -2720,7 +2720,8 @@ impl MtlsInterceptWorker {
             };
             owner.leg_c_addr
         };
-        let allowed_ports = spec.service_ports.iter().copied().collect::<BTreeSet<_>>();
+        let tcp_service_ports = spec.tcp_service_ports();
+        let allowed_ports = tcp_service_ports.iter().copied().collect::<BTreeSet<_>>();
         let Some(transport) = spec.transport.as_ref() else {
             return Err(MtlsInterceptInstallError::SharedOwner {
                 source: MtlsSharedOwnerError::NotStarted,
@@ -2744,7 +2745,7 @@ impl MtlsInterceptWorker {
         };
         let element_effects = self.element_effects.lock().await;
         let effects = (|| {
-            for port in &spec.service_ports {
+            for port in &tcp_service_ports {
                 let inbound = self.intercept.install_inbound(
                     SocketAddrV4::new(transport.workload_addr(), port.get()),
                     leg_c_addr.port(),
@@ -4057,7 +4058,6 @@ mod tests {
 
     fn minimal_spec(alloc: AllocationId) -> AllocationSpec {
         AllocationSpec {
-            declared_listeners: Vec::new(),
             identity: SpiffeId::for_allocation(
                 &overdrive_core::WorkloadId::new("worker-owner-test").expect("valid workload id"),
                 &alloc,
@@ -4072,7 +4072,7 @@ mod tests {
             resources: Resources { cpu_milli: 1, memory_bytes: 1 },
             probe_descriptors: Vec::new(),
             transport: None,
-            service_ports: Vec::new(),
+            declared_listeners: Vec::new(),
         }
     }
 
@@ -4090,7 +4090,10 @@ mod tests {
             GuestFlowPorts::new(GUEST_FLOW_STREAM_PORT, GUEST_FLOW_CONTROL_PORT)
                 .expect("the default guest-flow listener ports"),
         ));
-        spec.service_ports = vec![NonZeroU16::new(8443).expect("non-zero port")];
+        spec.declared_listeners = vec![overdrive_core::aggregate::Listener {
+            protocol: overdrive_core::dataplane::Proto::Tcp,
+            port: NonZeroU16::new(8443).expect("non-zero port"),
+        }];
         spec
     }
 

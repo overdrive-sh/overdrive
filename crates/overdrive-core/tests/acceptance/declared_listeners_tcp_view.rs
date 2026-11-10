@@ -32,7 +32,6 @@ fn spec_with(declared: Vec<Listener>) -> AllocationSpec {
         resources: Resources { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
         probe_descriptors: Vec::new(),
         transport: None,
-        service_ports: Vec::new(),
         declared_listeners: declared,
     }
 }
@@ -50,7 +49,6 @@ proptest! {
     /// S-55: for every declared list the TCP view is the TCP filter, in order.
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER: PR-4 tcp_service_ports is the TCP filter of declared_listeners"]
     fn the_tcp_view_is_the_tcp_filter_of_the_declared_listeners_in_declaration_order(
         declared in proptest::collection::vec(arb_listener(), 0..=12),
     ) {
@@ -67,7 +65,6 @@ proptest! {
 /// TPROXY rule is installed for it); a mixed one keeps TCP ports in order.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER: PR-4 tcp_service_ports is the TCP filter of declared_listeners"]
 fn a_udp_only_declaration_has_no_tcp_ports_and_a_mixed_one_keeps_tcp_order() {
     let l = |protocol, port: u16| Listener { protocol, port: NonZeroU16::new(port).expect("port") };
     assert!(spec_with(vec![l(Proto::Udp, 5353)]).tcp_service_ports().is_empty());

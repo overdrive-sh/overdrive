@@ -12,7 +12,7 @@
 //! Litmus (the install is production code, not the fixture): revert
 //! `start_alloc` to omit inbound acquisition and this test goes RED — the two
 //! destination elements never appear. The fixture only supplies
-//! `workload_addr` + `service_ports` on the spec; production `start_alloc`
+//! `transport.workload_addr` + `declared_listeners` on the spec; production `start_alloc`
 //! acquires the captures. The fixture never installs them itself.
 //!
 //! Requires root + `CAP_NET_ADMIN`/`CAP_SYS_ADMIN`; a non-root run SKIPs. Run via
@@ -72,7 +72,7 @@ async fn two_declared_listeners_install_exactly_two_inbound_captures() {
 
     // PORT-TO-PORT: drive the worker's `start_alloc` inherent driving port — the
     // production install path the action-shim fires at `on_alloc_running`. The
-    // fixture supplied `workload_addr` + two `service_ports`; the production
+    // fixture supplied a workload address + two TCP declared listeners; the production
     // per-port install loop acquires the destination elements.
     worker
         .start_alloc(&spec)

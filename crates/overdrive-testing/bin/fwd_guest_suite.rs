@@ -266,6 +266,7 @@ exec "$@"
 /// The one group whose guests run `serve`, which requires the raised
 /// `RLIMIT_NOFILE` budget. SSOT for both the batched and per-test paths.
 const CGROUP_DEFAULT_GROUP: &str = "cgroup-default";
+const DECLARED_LISTENER_TCP_CAPTURE_TEST: &str = "integration::inbound_rules_only_for_tcp_declared_listeners::a_udp_declared_listener_gets_no_inbound_capture_and_a_tcp_one_does";
 /// Argv prefix that raises `RLIMIT_NOFILE` and then execs the remaining argv.
 const fn cgroup_nofile_prefix() -> [&'static str; 4] {
     ["/usr/bin/sh", "-c", CGROUP_NOFILE_EXEC, CGROUP_DEFAULT_GROUP]
@@ -3638,6 +3639,13 @@ fn run_cgroup_attempt_setup(
     // node's interface set (the node-qualification readbacks require `lo`
     // only), not merely for the bodies that later create their own sink.
     guest.command(&["/usr/bin/sh", "-c", DUMMY_AUTO_DEVICE_CLEANUP])?;
+    if test_name == DECLARED_LISTENER_TCP_CAPTURE_TEST {
+        guest.command(&[
+            "/usr/bin/sh",
+            "-c",
+            "set -eu; /usr/bin/nft --version; /usr/bin/uname -r",
+        ])?;
+    }
     guest.command(&["/usr/bin/chmod", "0660", "/dev/kvm", "/dev/vhost-vsock"])?;
     guest.command(&[
         "/usr/bin/stat",

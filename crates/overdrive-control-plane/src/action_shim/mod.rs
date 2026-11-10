@@ -1190,11 +1190,11 @@ async fn provision_and_inject_netns(
 }
 
 /// The allocation's declared TCP listener ports as the pool's `ListenPort`s:
-/// `spec.service_ports` is already the PORT-295-C TCP projection, distinct
-/// (`ServiceV1::listen_ports`).
+/// `spec.tcp_service_ports()` is the declared TCP listener view, distinct
+/// from the shared owner’s `ListenPort` capability type.
 fn declared_tcp_listen_ports(spec: &AllocationSpec) -> Vec<ListenPort> {
-    spec.service_ports
-        .iter()
+    spec.tcp_service_ports()
+        .into_iter()
         .map(|port| {
             ListenPort::new(port.get()).unwrap_or_else(|_| {
                 unreachable!("a NonZeroU16 listener port is a valid ListenPort")
@@ -4419,7 +4419,6 @@ mod admission_refusal_acceptance {
 
     fn spec(name: &str) -> AllocationSpec {
         AllocationSpec {
-            declared_listeners: Vec::new(),
             alloc: alloc_id(name),
             identity: SpiffeId::new(&format!(
                 "spiffe://overdrive.local/workload/nd295/alloc/{name}"
@@ -4434,7 +4433,10 @@ mod admission_refusal_acceptance {
             resources: Resources { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
             probe_descriptors: Vec::new(),
             transport: None,
-            service_ports: vec![NonZeroU16::new(8080).expect("non-zero listener port")],
+            declared_listeners: vec![overdrive_core::aggregate::Listener {
+                protocol: overdrive_core::dataplane::Proto::Tcp,
+                port: NonZeroU16::new(8080).expect("non-zero listener port"),
+            }],
         }
     }
 

@@ -195,7 +195,7 @@ fn workload_states(row: AllocStatusRow) -> (WorkloadLifecycleState, WorkloadLife
         workload_kind: WorkloadKind::Service,
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: overdrive_core::traits::GuestAttachmentObservation {
             occupancy: overdrive_core::guest_network::GuestAttachmentOccupancy {
                 held: 0,

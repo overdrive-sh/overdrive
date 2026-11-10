@@ -689,7 +689,6 @@ impl Fixture {
 
     fn start_action(workload: &str, alloc: &AllocationId) -> Action {
         let spec = AllocationSpec {
-            declared_listeners: Vec::new(),
             alloc: alloc.clone(),
             identity: SpiffeId::new(&format!(
                 "spiffe://overdrive.local/workload/{workload}/alloc/{alloc}"
@@ -704,7 +703,10 @@ impl Fixture {
             resources: Resources { cpu_milli: 0, memory_bytes: 256 * 1024 },
             probe_descriptors: Vec::new(),
             transport: None,
-            service_ports: vec![NonZeroU16::new(8080).expect("non-zero listener port")],
+            declared_listeners: vec![overdrive_core::aggregate::Listener {
+                protocol: overdrive_core::dataplane::Proto::Tcp,
+                port: NonZeroU16::new(8080).expect("non-zero listener port"),
+            }],
         };
         Action::StartAllocation {
             alloc_id: alloc.clone(),

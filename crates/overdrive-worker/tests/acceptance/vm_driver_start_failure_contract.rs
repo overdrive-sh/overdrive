@@ -133,7 +133,6 @@ fn build_spec(alloc: &AllocationId, tmp: &TempDir, cid_offset: u32) -> Allocatio
             "100.96.0.5".parse().expect("valid fixture gateway"),
             cid_offset,
         )),
-        service_ports: Vec::new(),
     }
 }
 

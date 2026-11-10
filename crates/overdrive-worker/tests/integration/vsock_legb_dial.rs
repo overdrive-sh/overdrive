@@ -443,7 +443,6 @@ pub(super) mod node {
             .expect("an in-range guest CID");
         let launch = LaunchToken::from_bytes([0x6b; 16]).expect("a non-zero launch token");
         AllocationSpec {
-            declared_listeners: Vec::new(),
             alloc: alloc.clone(),
             identity: SERVER_SPIFFE.parse().expect("valid spiffe id"),
             driver: DriverPayload::Vm(VmPayload {
@@ -462,7 +461,10 @@ pub(super) mod node {
                 GuestFlowPorts::new(GUEST_FLOW_STREAM_PORT, GUEST_FLOW_CONTROL_PORT)
                     .expect("the default guest-flow listener ports"),
             )),
-            service_ports: vec![NonZeroU16::new(port).expect("a non-zero service port")],
+            declared_listeners: vec![overdrive_core::aggregate::Listener {
+                protocol: overdrive_core::dataplane::Proto::Tcp,
+                port: NonZeroU16::new(port).expect("a non-zero service port"),
+            }],
         }
     }
 

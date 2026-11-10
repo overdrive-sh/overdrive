@@ -379,7 +379,7 @@ mod tests {
             workload_kind: WorkloadKind::Job,
             service_spec_digest: None,
             probe_descriptors: Vec::new(),
-            service_ports: Vec::new(),
+            declared_listeners: Vec::new(),
             guest_attachments: overdrive_core::traits::GuestAttachmentObservation {
                 occupancy: overdrive_core::guest_network::GuestAttachmentOccupancy {
                     held: 0,
@@ -996,7 +996,6 @@ pub(crate) mod sim_vm_host {
             resources: Resources { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
             probe_descriptors: Vec::new(),
             transport: Some(plan.assignment().clone()),
-            service_ports: Vec::new(),
         }
     }
 }

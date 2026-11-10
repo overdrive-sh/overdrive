@@ -350,7 +350,6 @@ fn successor_spec(
         resources: Resources { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
         probe_descriptors: Vec::new(),
         transport: None,
-        service_ports: Vec::new(),
     }
 }
 

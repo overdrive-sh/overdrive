@@ -408,7 +408,6 @@ fn spec_of(alloc: &AllocationId) -> AllocationSpec {
             tcp_descriptor(ProbeRole::Liveness, 0),
         ],
         transport: None,
-        service_ports: Vec::new(),
         declared_listeners: Vec::new(),
     }
 }

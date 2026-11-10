@@ -69,7 +69,6 @@ fn vm_spec(alloc: &AllocationId, probe_descriptors: Vec<ProbeDescriptor>) -> All
         resources: Resources { cpu_milli: 100, memory_bytes: 32 * 1024 * 1024 },
         probe_descriptors,
         transport: None,
-        service_ports: Vec::new(),
     }
 }
 

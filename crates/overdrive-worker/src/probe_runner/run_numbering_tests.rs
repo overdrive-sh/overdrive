@@ -147,7 +147,6 @@ fn liveness_descriptor() -> ProbeDescriptor {
 
 fn vm_spec(alloc: &AllocationId) -> AllocationSpec {
     AllocationSpec {
-        declared_listeners: Vec::new(),
         alloc: alloc.clone(),
         identity: SpiffeId::for_allocation(&WorkloadId::new("probed").expect("workload"), alloc),
         driver: DriverPayload::Vm(VmPayload {
@@ -166,7 +165,10 @@ fn vm_spec(alloc: &AllocationId) -> AllocationSpec {
             GuestFlowPorts::new(GUEST_FLOW_STREAM_PORT, GUEST_FLOW_CONTROL_PORT)
                 .expect("the default guest-flow listener ports"),
         )),
-        service_ports: vec![NonZeroU16::new(8080).expect("non-zero port")],
+        declared_listeners: vec![overdrive_core::aggregate::Listener {
+            protocol: overdrive_core::dataplane::Proto::Tcp,
+            port: NonZeroU16::new(8080).expect("non-zero port"),
+        }],
     }
 }
 

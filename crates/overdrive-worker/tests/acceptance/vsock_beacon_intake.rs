@@ -251,7 +251,6 @@ impl Node {
                 launch,
                 flow_ports(),
             )),
-            service_ports: Vec::new(),
         }
     }
 

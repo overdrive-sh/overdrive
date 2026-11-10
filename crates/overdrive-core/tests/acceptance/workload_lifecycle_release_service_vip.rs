@@ -166,7 +166,7 @@ fn service_state_with_terminal_alloc(
         workload_kind: WorkloadKind::Service,
         service_spec_digest: spec_digest,
         probe_descriptors: Vec::new(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: GuestAttachmentObservation {
             occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
             leases: BTreeMap::new(),
@@ -183,7 +183,7 @@ fn service_state_with_terminal_alloc(
         workload_kind: WorkloadKind::Service,
         service_spec_digest: spec_digest,
         probe_descriptors: Vec::new(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: GuestAttachmentObservation {
             occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
             leases: BTreeMap::new(),
@@ -330,7 +330,7 @@ fn service_release_correlation_uses_workload_id_not_unknown() {
         workload_kind: WorkloadKind::Service,
         service_spec_digest: Some(digest),
         probe_descriptors: Vec::new(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: GuestAttachmentObservation {
             occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
             leases: BTreeMap::new(),
@@ -347,7 +347,7 @@ fn service_release_correlation_uses_workload_id_not_unknown() {
         workload_kind: WorkloadKind::Service,
         service_spec_digest: Some(digest),
         probe_descriptors: Vec::new(),
-        service_ports: Vec::new(),
+        declared_listeners: Vec::new(),
         guest_attachments: GuestAttachmentObservation {
             occupancy: GuestAttachmentOccupancy { held: 0, retiring: 0 },
             leases: BTreeMap::new(),

@@ -214,7 +214,6 @@ fn service_spec(root: &Path, alloc: &AllocationId) -> AllocationSpec {
         resources: Resources { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
         probe_descriptors: Vec::new(),
         transport: None,
-        service_ports: vec![NonZeroU16::new(80).expect("a non-zero port")],
         declared_listeners,
     }
 }

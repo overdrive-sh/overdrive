@@ -390,7 +390,6 @@ fn build_client_spec(pki: &TestPki, _host_veth: Option<String>) -> AllocationSpe
         resources: Resources { cpu_milli: 50, memory_bytes: 32 * 1024 * 1024 },
         probe_descriptors: Vec::new(),
         transport: None,
-        service_ports: Vec::new(),
     }
 }
 
@@ -624,7 +623,10 @@ fn shared_metal_spec(
         GuestFlowPorts::new(GUEST_FLOW_STREAM_PORT, GUEST_FLOW_CONTROL_PORT)
             .expect("the default guest-flow listener ports"),
     ));
-    spec.service_ports = vec![std::num::NonZeroU16::new(8443).expect("non-zero port")];
+    spec.declared_listeners = vec![overdrive_core::aggregate::Listener {
+        protocol: overdrive_core::dataplane::Proto::Tcp,
+        port: std::num::NonZeroU16::new(8443).expect("non-zero port"),
+    }];
     spec
 }
 
@@ -843,7 +845,9 @@ fn assert_shared_intercept_state(
         .flat_map(|spec| {
             let address =
                 spec.transport.as_ref().expect("shared allocation transport").workload_addr();
-            spec.service_ports.iter().map(move |port| SocketAddrV4::new(address, port.get()))
+            spec.tcp_service_ports()
+                .into_iter()
+                .map(move |port| SocketAddrV4::new(address, port.get()))
         })
         .collect::<BTreeSet<_>>();
     assert_eq!(
@@ -854,7 +858,7 @@ fn assert_shared_intercept_state(
     assert_eq!(state.inbound_destinations(), &inbound, "destination membership is exact");
     assert_eq!(
         state.inbound_destinations().len(),
-        specs.iter().map(|spec| spec.service_ports.len()).sum::<usize>(),
+        specs.iter().map(|spec| spec.tcp_service_ports().len()).sum::<usize>(),
         "the complete dynamic universe contains exactly P elements per allocation"
     );
 }

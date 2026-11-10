@@ -2672,7 +2672,6 @@ mod tests {
             resources: Resources { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
             probe_descriptors: vec![],
             transport: Some(test_transport()),
-            service_ports: vec![],
         };
         let terminate_calls = Arc::new(AtomicUsize::new(0));
         let vmm: Arc<dyn Vmm> =

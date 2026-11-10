@@ -220,7 +220,6 @@ fn build_spec(alloc_id: &AllocationId, workload_id: &WorkloadId) -> AllocationSp
         probe_descriptors: Vec::new(),
         // transparent-mtls-enrollment step 04-01 (JOIN-4/JOIN-6): off the mTLS-composed boot gate.
         transport: None,
-        service_ports: Vec::new(),
     }
 }
 
