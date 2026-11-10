@@ -41,7 +41,6 @@ emitted_actions:
             },
             probe_descriptors: [],
             transport: None,
-            service_ports: [],
             declared_listeners: [],
         },
         kind: Job,

@@ -54,7 +54,7 @@ WorkloadLifecycle(
         workload_kind: Job,
         service_spec_digest: None,
         probe_descriptors: [],
-        service_ports: [],
+        declared_listeners: [],
         guest_attachments: GuestAttachmentObservation {
             occupancy: GuestAttachmentOccupancy {
                 held: 0,
@@ -130,7 +130,7 @@ WorkloadLifecycle(
         workload_kind: Job,
         service_spec_digest: None,
         probe_descriptors: [],
-        service_ports: [],
+        declared_listeners: [],
         guest_attachments: GuestAttachmentObservation {
             occupancy: GuestAttachmentOccupancy {
                 held: 0,
