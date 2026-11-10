@@ -914,6 +914,7 @@ pub(crate) mod sim_vm_host {
         let wiring =
             overdrive_core::guest_network::GuestNetworkExecWiring::new(Arc::new(clock.clone()));
         assert!(wiring.supervisor().open_after_boot(), "fixture EXEC gate opens");
+        let guest_listener_board = Arc::new(overdrive_worker::GuestListenerBoard::new());
         let probe_runner = Arc::new(ProbeRunner::new(
             Arc::new(SimTcpProber::new()),
             Arc::new(SimHttpProber::new()),
@@ -923,7 +924,8 @@ pub(crate) mod sim_vm_host {
                 0,
             )) as Arc<dyn ObservationStore>,
             Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
-            Arc::new(overdrive_worker::GuestListenerBoard::new()),
+            Arc::clone(&guest_listener_board)
+                as Arc<dyn overdrive_core::traits::GuestListenerReports>,
         ));
         let driver = VmDriver::new(
             Arc::new(RecordingVmm { inner: vmm.clone(), host: Arc::clone(host) }),
@@ -944,7 +946,7 @@ pub(crate) mod sim_vm_host {
                 ),
             },
             intake,
-            Arc::new(overdrive_worker::GuestListenerBoard::new()),
+            guest_listener_board,
         );
         let pool =
             Arc::new(GuestAddressPool::new(prefix, GATEWAY, Arc::new(SimEntropy::new(seed))));

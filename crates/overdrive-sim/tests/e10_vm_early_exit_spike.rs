@@ -344,13 +344,14 @@ async fn drive(seed: u64, restart: bool) {
     guest_dial.script_default(overdrive_sim::adapters::guest_stream_dial::SimDialScript::Accept {
         reply: b"HTTP/1.1 302 Found\r\nContent-Length: 0\r\n\r\n".to_vec(),
     });
+    let guest_listener_board = Arc::new(overdrive_worker::GuestListenerBoard::new());
     let probes = Arc::new(ProbeRunner::new(
         Arc::new(SimTcpProber::new()),
         http,
         clock.clone(),
         obs.clone(),
         Arc::clone(&guest_dial) as Arc<dyn overdrive_core::guest_transport::dial::GuestStreamDial>,
-        Arc::new(overdrive_worker::GuestListenerBoard::new()),
+        Arc::clone(&guest_listener_board) as Arc<dyn overdrive_core::traits::GuestListenerReports>,
     ));
     let wiring = overdrive_core::guest_network::GuestNetworkExecWiring::new(clock.clone());
     let beacon_io = Arc::new(SimBeaconIo::new(vmm.inner.clone()));
@@ -379,7 +380,7 @@ async fn drive(seed: u64, restart: bool) {
         wiring.gate(),
         layout.clone(),
         intake,
-        Arc::new(overdrive_worker::GuestListenerBoard::new()),
+        guest_listener_board,
     ));
     let mut runtime = ReconcilerRuntime::new_with_redb_view_store_for_test(temp.path()).unwrap();
     runtime.register(workload_lifecycle()).await.unwrap();

@@ -329,7 +329,7 @@ impl Captured {
 enum Step {
     Declared(usize),
     Undeclared,
-    Duplicate(usize),
+    Repeat(usize), // a repeat attempt; it inserts if the pair has not arrived yet
     OtherAllocation(usize),
 }
 
@@ -337,7 +337,7 @@ fn step_strategy() -> impl Strategy<Value = Step> {
     prop_oneof![
         (0..2_usize).prop_map(Step::Declared),
         Just(Step::Undeclared),
-        (0..2_usize).prop_map(Step::Duplicate),
+        (0..2_usize).prop_map(Step::Repeat),
         (0..2_usize).prop_map(Step::OtherAllocation),
     ]
 }
@@ -353,7 +353,6 @@ fn declared_pair(i: usize) -> (Proto, NonZeroU16) {
 /// Driven only through the beacon reader and `VmDriver::start` / terminal hook.
 #[test]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D13 PR-1 guest listener board entry lifetime and declared-set growth"]
 fn the_reported_set_only_grows_within_the_declared_set_and_ends_with_the_entry() {
     let mut runner = proptest::test_runner::TestRunner::new(ProptestConfig {
         cases: 12,
@@ -381,13 +380,32 @@ fn the_reported_set_only_grows_within_the_declared_set_and_ends_with_the_entry()
                     let first = harness.launch().await;
                     let other = harness.launch().await;
                     prop_assert!(harness.reported(&first).is_empty(), "an open entry starts empty");
+                    harness.send(&first, &listen_line(tcp_9999())).await;
+                    prop_assert!(
+                        harness.reported(&first).is_empty(),
+                        "an undeclared first line leaves the entry empty"
+                    );
 
                     let mut expected: BTreeSet<(Proto, NonZeroU16)> = BTreeSet::new();
                     let mut other_expected: BTreeSet<(Proto, NonZeroU16)> = BTreeSet::new();
+                    let first_pair = declared_pair(0);
+                    harness.send(&first, &listen_line(first_pair)).await;
+                    expected.insert(first_pair);
                     let mut previous = harness.reported(&first);
+                    prop_assert_eq!(pairs_of(&previous), expected.clone(), "first report inserts");
+                    harness.send(&first, &listen_line(first_pair)).await;
+                    prop_assert_eq!(
+                        harness.reported(&first),
+                        previous.clone(),
+                        "a repeated report of an already recorded pair is a no-op"
+                    );
                     for step in &steps {
+                        let actual_duplicate = matches!(
+                            step,
+                            Step::Repeat(i) if expected.contains(&declared_pair(*i))
+                        );
                         match step {
-                            Step::Declared(i) | Step::Duplicate(i) => {
+                            Step::Declared(i) | Step::Repeat(i) => {
                                 let pair = declared_pair(*i);
                                 harness.send(&first, &listen_line(pair)).await;
                                 expected.insert(pair);
@@ -416,7 +434,7 @@ fn the_reported_set_only_grows_within_the_declared_set_and_ends_with_the_entry()
                             pairs_of(&previous).is_subset(&pairs_of(&now)),
                             "the set only grows while the entry exists"
                         );
-                        if matches!(step, Step::Duplicate(_)) {
+                        if actual_duplicate {
                             prop_assert_eq!(&now, &previous, "a duplicate changes nothing");
                         }
                         prop_assert_eq!(
@@ -434,7 +452,7 @@ fn the_reported_set_only_grows_within_the_declared_set_and_ends_with_the_entry()
                     );
                     for step in &after_close {
                         let pair = match step {
-                            Step::Declared(i) | Step::Duplicate(i) | Step::OtherAllocation(i) => {
+                            Step::Declared(i) | Step::Repeat(i) | Step::OtherAllocation(i) => {
                                 declared_pair(*i)
                             }
                             Step::Undeclared => tcp_9999(),
@@ -479,7 +497,6 @@ fn waiter(
 /// waiter pending at close is not woken; and it completes on a real insertion.
 #[tokio::test]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D13 PR-1 changed completes only on an insertion"]
 async fn a_pending_changed_completes_on_an_insertion_and_on_no_no_op() {
     let mut harness = Harness::new().await;
     let reports = Arc::clone(&harness.board) as Arc<dyn GuestListenerReports>;
@@ -536,7 +553,6 @@ async fn a_pending_changed_completes_on_an_insertion_and_on_no_no_op() {
 /// take effect.
 #[tokio::test]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D13 item 3 reader drops an unparseable line with a warn event"]
 async fn a_garbage_line_is_dropped_with_a_warning_and_later_lines_take_effect() {
     let captured = Captured::default();
     let subscriber = tracing_subscriber::fmt()
@@ -576,7 +592,6 @@ async fn a_garbage_line_is_dropped_with_a_warning_and_later_lines_take_effect() 
 /// `Exit` status, not the later line.
 #[tokio::test]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D13 item 3 reader ignores a Listen line after Exit"]
 async fn a_listen_after_exit_changes_neither_the_set_nor_the_exit_report() {
     let mut harness = Harness::new().await;
     let launched = harness.launch().await;
@@ -602,7 +617,6 @@ async fn a_listen_after_exit_changes_neither_the_set_nor_the_exit_report() {
 /// feeds the sim the same observable stimulus the reader gives the board.
 #[tokio::test]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D13 PR-1 board and sim agree on reported and changed"]
 async fn guest_listener_reports_equivalence() {
     let mut harness = Harness::new().await;
     let launched = harness.launch().await;
@@ -712,7 +726,6 @@ fn schedule(seed: u64) -> Vec<Op> {
 /// failure message.
 #[tokio::test]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D13 PR-1 changed never misses an insertion and is cancel-safe"]
 async fn changed_never_misses_an_insertion_under_seeded_schedules() {
     for seed in 1..=6_u64 {
         let ops = schedule(seed);

@@ -54,7 +54,7 @@ use super::support::{BeaconHarness, GuestSession};
 // Fixtures — mirror `vm_driver_stop_totality.rs`'s established shapes.
 // ---------------------------------------------------------------------
 
-fn probe_runner() -> Arc<ProbeRunner> {
+fn probe_runner(board: &Arc<overdrive_worker::GuestListenerBoard>) -> Arc<ProbeRunner> {
     Arc::new(ProbeRunner::new(
         Arc::new(SimTcpProber::new()),
         Arc::new(SimHttpProber::new()),
@@ -64,7 +64,7 @@ fn probe_runner() -> Arc<ProbeRunner> {
             0,
         )) as Arc<dyn ObservationStore>,
         Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
-        Arc::new(overdrive_worker::GuestListenerBoard::new()),
+        Arc::clone(board) as Arc<dyn overdrive_core::traits::GuestListenerReports>,
     ))
 }
 
@@ -153,16 +153,17 @@ async fn build_driver(
         overdrive_core::guest_network::GuestNetworkExecWiring::new(Arc::new(clock.clone()));
     assert!(wiring.supervisor().open_after_boot());
     let beacon = BeaconHarness::new(sim);
+    let guest_listener_board = Arc::new(overdrive_worker::GuestListenerBoard::new());
     let driver = VmDriver::new(
         beacon.vmm(vmm),
         Arc::new(clock.clone()),
         fs,
         accounting,
-        probe_runner(),
+        probe_runner(&guest_listener_board),
         wiring.gate(),
         layout,
         beacon.intake().await,
-        Arc::new(overdrive_worker::GuestListenerBoard::new()),
+        guest_listener_board,
     );
     (driver, clock, cgroup_fs, beacon)
 }

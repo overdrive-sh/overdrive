@@ -533,13 +533,15 @@ fn compose(node: &Node, boot: u32) -> Composed {
         .await
         .expect("the sim beacon listener binds");
         let beacon_port = intake.bound_port();
+        let guest_listener_board = Arc::new(overdrive_worker::GuestListenerBoard::new());
         let probe_runner = Arc::new(ProbeRunner::new(
             Arc::new(SimTcpProber::new()),
             Arc::new(SimHttpProber::new()),
             Arc::clone(&clock) as Arc<dyn Clock>,
             Arc::clone(&node.obs) as Arc<dyn ObservationStore>,
             Arc::new(SimGuestStreamDial::new()),
-            Arc::new(overdrive_worker::GuestListenerBoard::new()),
+            Arc::clone(&guest_listener_board)
+                as Arc<dyn overdrive_core::traits::GuestListenerReports>,
         ));
         let vm_driver = VmDriver::new(
             Arc::new(RecordingVmm { inner: node.vmm.clone(), host: Arc::clone(&node.host) }),
@@ -560,7 +562,7 @@ fn compose(node: &Node, boot: u32) -> Composed {
                 ),
             },
             intake,
-            Arc::new(overdrive_worker::GuestListenerBoard::new()),
+            guest_listener_board,
         );
         // D-21: every composition reopens the node's stores from disk
         // through the composition root's open (`StoreAdapters::open` over

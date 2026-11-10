@@ -80,13 +80,14 @@ async fn process() -> Process {
         0,
     ));
     let tcp = Arc::new(SimTcpProber::new());
+    let guest_listener_board = Arc::new(overdrive_worker::GuestListenerBoard::new());
     let runner = Arc::new(ProbeRunner::new(
         Arc::clone(&tcp) as _,
         Arc::new(SimHttpProber::new()),
         Arc::clone(&clock) as _,
         Arc::clone(&obs) as Arc<dyn ObservationStore>,
         Arc::new(SimGuestStreamDial::new()),
-        Arc::new(overdrive_worker::GuestListenerBoard::new()),
+        Arc::clone(&guest_listener_board) as Arc<dyn overdrive_core::traits::GuestListenerReports>,
     ));
     let wiring = overdrive_core::guest_network::GuestNetworkExecWiring::new(clock.clone());
     assert!(wiring.supervisor().open_after_boot());
@@ -116,7 +117,7 @@ async fn process() -> Process {
             ),
         },
         beacon,
-        Arc::new(overdrive_worker::GuestListenerBoard::new()),
+        guest_listener_board,
     );
     Process { driver, runner, clock, obs, tcp }
 }

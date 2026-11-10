@@ -35,7 +35,7 @@ use tempfile::TempDir;
 
 use super::support::{BeaconHarness, GuestSession};
 
-fn probe_runner() -> Arc<ProbeRunner> {
+fn probe_runner(board: &Arc<overdrive_worker::GuestListenerBoard>) -> Arc<ProbeRunner> {
     Arc::new(ProbeRunner::new(
         Arc::new(SimTcpProber::new()),
         Arc::new(SimHttpProber::new()),
@@ -45,7 +45,7 @@ fn probe_runner() -> Arc<ProbeRunner> {
             0,
         )) as Arc<dyn ObservationStore>,
         Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
-        Arc::new(overdrive_worker::GuestListenerBoard::new()),
+        Arc::clone(board) as Arc<dyn overdrive_core::traits::GuestListenerReports>,
     ))
 }
 
@@ -97,16 +97,17 @@ async fn driver(
     let layout = layout(tmp);
     let vmm = SimVmm::new();
     let beacon = BeaconHarness::new(&vmm);
+    let guest_listener_board = Arc::new(overdrive_worker::GuestListenerBoard::new());
     let driver = VmDriver::new(
         beacon.vmm(Arc::new(vmm.clone())),
         Arc::new(SimClock::new()),
         Arc::new(SimCgroupFs::new()),
         Arc::new(SimCgroupAccounting::new()),
-        probe_runner(),
+        probe_runner(&guest_listener_board),
         wiring.gate(),
         layout,
         beacon.intake().await,
-        Arc::new(overdrive_worker::GuestListenerBoard::new()),
+        guest_listener_board,
     );
     (driver, beacon, vmm)
 }

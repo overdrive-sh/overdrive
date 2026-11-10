@@ -718,7 +718,6 @@ impl State<GuestReportHostDriver> for HostReportState {
     test = "host_all_declared_reported"
 )]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D13 guest report host reader and board"]
 fn quint_guest_report_host_all_declared_reported() -> impl Driver {
     GuestReportHostDriver::new()
 }
@@ -731,7 +730,6 @@ fn quint_guest_report_host_all_declared_reported() -> impl Driver {
     test = "host_garbage_line_is_dropped"
 )]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D13 guest report host reader and board"]
 fn quint_guest_report_host_garbage_line_is_dropped() -> impl Driver {
     GuestReportHostDriver::new()
 }
@@ -744,7 +742,6 @@ fn quint_guest_report_host_garbage_line_is_dropped() -> impl Driver {
     test = "host_beacon_closes_with_partial_set"
 )]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D13 guest report host reader and board"]
 fn quint_guest_report_host_beacon_closes_with_partial_set() -> impl Driver {
     GuestReportHostDriver::new()
 }
@@ -757,7 +754,6 @@ fn quint_guest_report_host_beacon_closes_with_partial_set() -> impl Driver {
     test = "host_listen_after_exit_is_ignored"
 )]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D13 guest report host reader and board"]
 fn quint_guest_report_host_listen_after_exit_is_ignored() -> impl Driver {
     GuestReportHostDriver::new()
 }
@@ -768,7 +764,6 @@ fn quint_guest_report_host_listen_after_exit_is_ignored() -> impl Driver {
     main = "gr_host_conf"
 )]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D13 guest report host reader and board"]
 fn quint_guest_report_host_randomized_traces() -> impl Driver {
     GuestReportHostDriver::new()
 }

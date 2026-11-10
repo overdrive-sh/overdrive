@@ -16,22 +16,22 @@ State 4 [Register]
 State 5 [Release]
   al = << [ started |-> TRUE, regd |-> TRUE, rel |-> TRUE, dead |-> TRUE, ev |-> "none", vmstop |-> FALSE, srw |-> FALSE, stopped |-> FALSE, fin |-> FALSE, sup |-> TRUE, row |-> FALSE, late |-> FALSE ], [ started |-> FALSE, regd |-> FALSE, rel |-> FALSE, dead |-> FALSE, ev |-> "none", vmstop |-> FALSE, srw |-> FALSE, stopped |-> FALSE, fin |-> FALSE, sup |-> FALSE, row |-> FALSE, late |-> FALSE ] >>
 
-State 6 [Finalize]
-  al = << [ started |-> TRUE, regd |-> TRUE, rel |-> TRUE, dead |-> TRUE, ev |-> "none", vmstop |-> FALSE, srw |-> FALSE, stopped |-> FALSE, fin |-> TRUE, sup |-> FALSE, row |-> TRUE, late |-> FALSE ], [ started |-> FALSE, regd |-> FALSE, rel |-> FALSE, dead |-> FALSE, ev |-> "none", vmstop |-> FALSE, srw |-> FALSE, stopped |-> FALSE, fin |-> FALSE, sup |-> FALSE, row |-> FALSE, late |-> FALSE ] >>
+State 6 [Emit]
+  al = << [ started |-> TRUE, regd |-> TRUE, rel |-> TRUE, dead |-> TRUE, ev |-> "queued", vmstop |-> FALSE, srw |-> FALSE, stopped |-> FALSE, fin |-> FALSE, sup |-> TRUE, row |-> FALSE, late |-> FALSE ], [ started |-> FALSE, regd |-> FALSE, rel |-> FALSE, dead |-> FALSE, ev |-> "none", vmstop |-> FALSE, srw |-> FALSE, stopped |-> FALSE, fin |-> FALSE, sup |-> FALSE, row |-> FALSE, late |-> FALSE ] >>
 
-State 7 [Start]
-  al = << [ started |-> TRUE, regd |-> TRUE, rel |-> TRUE, dead |-> TRUE, ev |-> "none", vmstop |-> FALSE, srw |-> FALSE, stopped |-> FALSE, fin |-> TRUE, sup |-> FALSE, row |-> TRUE, late |-> FALSE ], [ started |-> TRUE, regd |-> FALSE, rel |-> FALSE, dead |-> FALSE, ev |-> "none", vmstop |-> FALSE, srw |-> FALSE, stopped |-> FALSE, fin |-> FALSE, sup |-> FALSE, row |-> FALSE, late |-> FALSE ] >>
+State 7 [Finalize]
+  al = << [ started |-> TRUE, regd |-> TRUE, rel |-> TRUE, dead |-> TRUE, ev |-> "queued", vmstop |-> FALSE, srw |-> FALSE, stopped |-> FALSE, fin |-> TRUE, sup |-> FALSE, row |-> TRUE, late |-> FALSE ], [ started |-> FALSE, regd |-> FALSE, rel |-> FALSE, dead |-> FALSE, ev |-> "none", vmstop |-> FALSE, srw |-> FALSE, stopped |-> FALSE, fin |-> FALSE, sup |-> FALSE, row |-> FALSE, late |-> FALSE ] >>
 
-State 8 [Emit]
+State 8 [Start]
   al = << [ started |-> TRUE, regd |-> TRUE, rel |-> TRUE, dead |-> TRUE, ev |-> "queued", vmstop |-> FALSE, srw |-> FALSE, stopped |-> FALSE, fin |-> TRUE, sup |-> FALSE, row |-> TRUE, late |-> FALSE ], [ started |-> TRUE, regd |-> FALSE, rel |-> FALSE, dead |-> FALSE, ev |-> "none", vmstop |-> FALSE, srw |-> FALSE, stopped |-> FALSE, fin |-> FALSE, sup |-> FALSE, row |-> FALSE, late |-> FALSE ] >>
 
-State 9 [Consume]
-  al = << [ started |-> TRUE, regd |-> TRUE, rel |-> TRUE, dead |-> TRUE, ev |-> "consumed", vmstop |-> FALSE, srw |-> FALSE, stopped |-> FALSE, fin |-> TRUE, sup |-> FALSE, row |-> TRUE, late |-> FALSE ], [ started |-> TRUE, regd |-> FALSE, rel |-> FALSE, dead |-> FALSE, ev |-> "none", vmstop |-> FALSE, srw |-> FALSE, stopped |-> FALSE, fin |-> FALSE, sup |-> FALSE, row |-> FALSE, late |-> FALSE ] >>
+State 9 [Die]
+  al = << [ started |-> TRUE, regd |-> TRUE, rel |-> TRUE, dead |-> TRUE, ev |-> "queued", vmstop |-> FALSE, srw |-> FALSE, stopped |-> FALSE, fin |-> TRUE, sup |-> FALSE, row |-> TRUE, late |-> FALSE ], [ started |-> TRUE, regd |-> FALSE, rel |-> FALSE, dead |-> TRUE, ev |-> "none", vmstop |-> FALSE, srw |-> FALSE, stopped |-> FALSE, fin |-> FALSE, sup |-> FALSE, row |-> FALSE, late |-> FALSE ] >>
 
-State 10 [Die]
-  al = << [ started |-> TRUE, regd |-> TRUE, rel |-> TRUE, dead |-> TRUE, ev |-> "consumed", vmstop |-> FALSE, srw |-> FALSE, stopped |-> FALSE, fin |-> TRUE, sup |-> FALSE, row |-> TRUE, late |-> FALSE ], [ started |-> TRUE, regd |-> FALSE, rel |-> FALSE, dead |-> TRUE, ev |-> "none", vmstop |-> FALSE, srw |-> FALSE, stopped |-> FALSE, fin |-> FALSE, sup |-> FALSE, row |-> FALSE, late |-> FALSE ] >>
+State 10 [Register]
+  al = << [ started |-> TRUE, regd |-> TRUE, rel |-> TRUE, dead |-> TRUE, ev |-> "queued", vmstop |-> FALSE, srw |-> FALSE, stopped |-> FALSE, fin |-> TRUE, sup |-> FALSE, row |-> TRUE, late |-> FALSE ], [ started |-> TRUE, regd |-> TRUE, rel |-> FALSE, dead |-> TRUE, ev |-> "none", vmstop |-> FALSE, srw |-> FALSE, stopped |-> FALSE, fin |-> FALSE, sup |-> TRUE, row |-> FALSE, late |-> FALSE ] >>
 
-State 11 [Register]
+State 11 [Consume]
   al = << [ started |-> TRUE, regd |-> TRUE, rel |-> TRUE, dead |-> TRUE, ev |-> "consumed", vmstop |-> FALSE, srw |-> FALSE, stopped |-> FALSE, fin |-> TRUE, sup |-> FALSE, row |-> TRUE, late |-> FALSE ], [ started |-> TRUE, regd |-> TRUE, rel |-> FALSE, dead |-> TRUE, ev |-> "none", vmstop |-> FALSE, srw |-> FALSE, stopped |-> FALSE, fin |-> FALSE, sup |-> TRUE, row |-> FALSE, late |-> FALSE ] >>
 
 State 12 [Release]

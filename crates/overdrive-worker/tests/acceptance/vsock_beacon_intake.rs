@@ -112,6 +112,7 @@ async fn driver_over_vmm(
     let wiring =
         overdrive_core::guest_network::GuestNetworkExecWiring::new(Arc::new(clock.clone()));
     assert!(wiring.supervisor().open_after_boot(), "fixture EXEC gate opens");
+    let guest_listener_board = Arc::new(overdrive_worker::GuestListenerBoard::new());
     let probe_runner = Arc::new(ProbeRunner::new(
         Arc::new(SimTcpProber::new()),
         Arc::new(SimHttpProber::new()),
@@ -121,7 +122,7 @@ async fn driver_over_vmm(
             0,
         )) as Arc<dyn ObservationStore>,
         Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
-        Arc::new(overdrive_worker::GuestListenerBoard::new()),
+        Arc::clone(&guest_listener_board) as Arc<dyn overdrive_core::traits::GuestListenerReports>,
     ));
     let driver = VmDriver::new(
         vmm,
@@ -132,7 +133,7 @@ async fn driver_over_vmm(
         wiring.gate(),
         layout(root),
         beacon,
-        Arc::new(overdrive_worker::GuestListenerBoard::new()),
+        guest_listener_board,
     );
     (driver, beacon_port)
 }

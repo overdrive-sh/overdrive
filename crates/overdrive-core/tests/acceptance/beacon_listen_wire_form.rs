@@ -20,7 +20,6 @@ proptest! {
     /// Every protocol x every non-zero port round-trips through the text form.
     #[test]
     /// CONTRACT_SHAPE: pure-function.
-    #[ignore = "pending DELIVER: D13 LISTEN beacon line wire form"]
     fn listen_round_trips_for_every_protocol_and_port(
         protocol in arb_proto(),
         port in 1_u16..=u16::MAX,
@@ -38,7 +37,6 @@ proptest! {
     /// A non-numeric or out-of-range port is a typed error, never a panic.
     #[test]
     /// CONTRACT_SHAPE: pure-function.
-    #[ignore = "pending DELIVER: D13 LISTEN beacon line wire form"]
     fn listen_with_an_out_of_range_port_is_a_typed_error(
         protocol in arb_proto(),
         port in 65_536_u32..=u32::MAX,
@@ -58,7 +56,6 @@ proptest! {
 /// `BeaconParseError::MalformedListen` carrying the full line (DG-M).
 #[test]
 /// CONTRACT_SHAPE: pure-function.
-#[ignore = "pending DELIVER: D13 LISTEN beacon line wire form"]
 fn malformed_listen_lines_are_rejected_with_a_typed_error() {
     for line in [
         "LISTEN",

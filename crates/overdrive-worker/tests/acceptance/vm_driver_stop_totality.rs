@@ -64,7 +64,9 @@ use super::support::{BeaconHarness, GuestSession, beacon_key};
 // Fixture builders
 // ---------------------------------------------------------------------
 
-fn probe_runner() -> std::sync::Arc<ProbeRunner> {
+fn probe_runner(
+    board: &std::sync::Arc<overdrive_worker::GuestListenerBoard>,
+) -> std::sync::Arc<ProbeRunner> {
     std::sync::Arc::new(ProbeRunner::new(
         std::sync::Arc::new(SimTcpProber::new()),
         std::sync::Arc::new(SimHttpProber::new()),
@@ -74,7 +76,8 @@ fn probe_runner() -> std::sync::Arc<ProbeRunner> {
             0,
         )) as std::sync::Arc<dyn ObservationStore>,
         std::sync::Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
-        std::sync::Arc::new(overdrive_worker::GuestListenerBoard::new()),
+        std::sync::Arc::clone(board)
+            as std::sync::Arc<dyn overdrive_core::traits::GuestListenerReports>,
     ))
 }
 
@@ -181,16 +184,17 @@ async fn build_driver(
     ));
     assert!(wiring.supervisor().open_after_boot());
     let beacon = BeaconHarness::new(sim);
+    let guest_listener_board = std::sync::Arc::new(overdrive_worker::GuestListenerBoard::new());
     let driver = VmDriver::new(
         beacon.vmm(vmm),
         std::sync::Arc::new(clock.clone()),
         fs,
         cgroup_accounting,
-        probe_runner(),
+        probe_runner(&guest_listener_board),
         wiring.gate(),
         layout,
         beacon.intake().await,
-        std::sync::Arc::new(overdrive_worker::GuestListenerBoard::new()),
+        guest_listener_board,
     );
     (driver, clock, beacon)
 }
@@ -219,16 +223,17 @@ async fn build_driver_with_cgroup_fs(
     ));
     assert!(wiring.supervisor().open_after_boot());
     let beacon = BeaconHarness::new(sim);
+    let guest_listener_board = std::sync::Arc::new(overdrive_worker::GuestListenerBoard::new());
     let driver = VmDriver::new(
         beacon.vmm(vmm),
         std::sync::Arc::new(clock.clone()),
         fs,
         cgroup_accounting,
-        probe_runner(),
+        probe_runner(&guest_listener_board),
         wiring.gate(),
         layout,
         beacon.intake().await,
-        std::sync::Arc::new(overdrive_worker::GuestListenerBoard::new()),
+        guest_listener_board,
     );
     (driver, clock, cgroup_fs, beacon)
 }
@@ -1760,16 +1765,17 @@ async fn exit_event_is_gated_until_running_confirmed_release() {
     ));
     assert!(wiring.supervisor().open_after_boot());
     let beacon = BeaconHarness::new(&sim);
+    let guest_listener_board = std::sync::Arc::new(overdrive_worker::GuestListenerBoard::new());
     let driver = VmDriver::new(
         beacon.vmm(std::sync::Arc::new(sim.clone())),
         std::sync::Arc::new(clock.clone()),
         std::sync::Arc::new(held_cleanup.clone()),
         std::sync::Arc::new(SimCgroupAccounting::new()),
-        probe_runner(),
+        probe_runner(&guest_listener_board),
         wiring.gate(),
         layout,
         beacon.intake().await,
-        std::sync::Arc::new(overdrive_worker::GuestListenerBoard::new()),
+        guest_listener_board,
     );
 
     // Drain the driver's `ExitEvent` channel — the exit observer's role.

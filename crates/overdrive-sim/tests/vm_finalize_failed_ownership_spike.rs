@@ -233,13 +233,14 @@ async fn drive(seed: u64, finalize: bool) {
     guest_dial.script_default(overdrive_sim::adapters::guest_stream_dial::SimDialScript::Accept {
         reply: b"HTTP/1.1 302 Found\r\nContent-Length: 0\r\n\r\n".to_vec(),
     });
+    let guest_listener_board = Arc::new(overdrive_worker::GuestListenerBoard::new());
     let probes = Arc::new(ProbeRunner::new(
         Arc::new(SimTcpProber::new()),
         http_prober,
         clock.clone(),
         obs.clone(),
         guest_dial,
-        Arc::new(overdrive_worker::GuestListenerBoard::new()),
+        Arc::clone(&guest_listener_board) as Arc<dyn overdrive_core::traits::GuestListenerReports>,
     ));
     let wiring = overdrive_core::guest_network::GuestNetworkExecWiring::new(clock.clone());
     let beacon_io = Arc::new(SimBeaconIo::new(vmm.inner.clone()));
@@ -258,7 +259,7 @@ async fn drive(seed: u64, finalize: bool) {
         wiring.gate(),
         layout.clone(),
         intake,
-        Arc::new(overdrive_worker::GuestListenerBoard::new()),
+        guest_listener_board,
     ));
     let pool = Arc::new(GuestAddressPool::new(
         "100.95.0.0/16".parse().expect("static guest prefix"),

@@ -572,6 +572,8 @@ impl BeaconWriter {
         socket: BeaconSocket,
         vmm: Arc<dyn Vmm>,
         control: VmControl,
+        alloc: AllocationId,
+        guest_listener_board: Arc<crate::GuestListenerBoard>,
     ) -> (Arc<Self>, mpsc::Receiver<io::Result<Option<String>>>) {
         let (commands, command_rx) = mpsc::channel(1);
         let (stop, stop_rx) = watch::channel(false);
@@ -587,6 +589,9 @@ impl BeaconWriter {
             lines: lines_tx,
             vmm,
             control,
+            alloc,
+            guest_listener_board,
+            exit_seen: false,
             closed: closed_tx,
             emergency_gates: Arc::clone(&emergency_gates),
         };
@@ -697,6 +702,9 @@ struct BeaconWriterTaskState {
     lines: mpsc::Sender<io::Result<Option<String>>>,
     vmm: Arc<dyn Vmm>,
     control: VmControl,
+    alloc: AllocationId,
+    guest_listener_board: Arc<crate::GuestListenerBoard>,
+    exit_seen: bool,
     closed: watch::Sender<bool>,
     emergency_gates: Arc<Mutex<Vec<oneshot::Sender<()>>>>,
 }
@@ -772,7 +780,36 @@ async fn run_beacon_writer(
                 state.io.read_line(socket).await
             } => {
                 let terminal = match line {
-                    Ok(Some(line)) => state.lines.send(Ok(Some(line))).await.is_err(),
+                    Ok(Some(_)) if state.exit_seen => false,
+                    Ok(Some(line)) => match line.parse::<BeaconMessage>() {
+                        Ok(BeaconMessage::Listen { protocol, port }) => {
+                            state.guest_listener_board.record(&state.alloc, protocol, port);
+                            false
+                        }
+                        Ok(BeaconMessage::Exit { .. }) => {
+                            state.exit_seen = true;
+                            state.lines.send(Ok(Some(line))).await.is_err()
+                        }
+                        Ok(_) => {
+                            warn!(
+                                name: "vm.beacon.line.dropped",
+                                alloc = %state.alloc,
+                                raw = %line,
+                                "dropping unexpected guest beacon line"
+                            );
+                            false
+                        }
+                        Err(error) => {
+                            warn!(
+                                name: "vm.beacon.line.dropped",
+                                alloc = %state.alloc,
+                                raw = %line,
+                                error = %error,
+                                "dropping malformed guest beacon line"
+                            );
+                            false
+                        }
+                    },
                     Ok(None) => {
                         let _ = state.lines.send(Ok(None)).await;
                         true
@@ -1039,8 +1076,7 @@ pub struct VmDriver {
     beacon: Arc<BeaconIntake>,
     beacon_state: Arc<Mutex<BeaconState>>,
     /// The host-side board of reported guest listeners (PR-1): the beacon
-    /// reader is its writer. SCAFFOLD: true — wired by DELIVER.
-    #[allow(dead_code)]
+    /// reader is its writer, and the probe runner reads it through its port.
     guest_listener_board: Arc<crate::GuestListenerBoard>,
     live: Arc<LiveMap>,
     exit_tx: mpsc::Sender<ExitEvent>,
@@ -1607,6 +1643,7 @@ impl Driver for VmDriver {
         match outcome {
             BootRaceOutcome::Beacon(Ok((socket, _key))) => {
                 tracing::info!(name: "vm.lifecycle.ready", alloc = %spec.alloc, "VM READY accepted");
+                self.guest_listener_board.open(&spec.alloc, &spec.declared_listeners);
                 // ADR-0089 §1 / Q9: retain the existing EXEC reply on the
                 // guest-initiated session, but do NOT write it here. `start`
                 // returns once READY is accepted; the action shim installs
@@ -1638,6 +1675,8 @@ impl Driver for VmDriver {
                     socket,
                     Arc::clone(&self.vmm),
                     control.clone(),
+                    spec.alloc.clone(),
+                    Arc::clone(&self.guest_listener_board),
                 );
                 let beacon_witness = Arc::downgrade(&beacon);
                 {
@@ -2066,6 +2105,7 @@ impl Driver for VmDriver {
 
     fn on_alloc_terminal(&self, alloc_id: &AllocationId) {
         self.probe_runner.stop_alloc(alloc_id);
+        self.guest_listener_board.close(alloc_id);
     }
 
     fn on_alloc_stable(&self, alloc_id: &AllocationId) {
@@ -2368,7 +2408,7 @@ mod tests {
 
     use super::*;
 
-    fn test_probe_runner() -> Arc<ProbeRunner> {
+    fn test_probe_runner(board: &Arc<crate::GuestListenerBoard>) -> Arc<ProbeRunner> {
         Arc::new(ProbeRunner::new(
             Arc::new(SimTcpProber::new()),
             Arc::new(SimHttpProber::new()),
@@ -2378,7 +2418,7 @@ mod tests {
                 0,
             )) as Arc<dyn ObservationStore>,
             Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
-            Arc::new(crate::GuestListenerBoard::new()),
+            Arc::clone(board) as Arc<dyn overdrive_core::traits::GuestListenerReports>,
         ))
     }
 
@@ -2682,16 +2722,17 @@ mod tests {
         let wiring = overdrive_core::guest_network::GuestNetworkExecWiring::new(clock.clone());
         assert!(wiring.supervisor().open_after_boot());
         let reader = Arc::new(ScriptedConsoleReader { outcome, calls: AtomicUsize::new(0) });
+        let guest_listener_board = Arc::new(crate::GuestListenerBoard::new());
         let driver = VmDriver::new(
             vmm,
             Arc::clone(&clock),
             cgroup_fs,
             accounting,
-            test_probe_runner(),
+            test_probe_runner(&guest_listener_board),
             wiring.gate(),
             layout,
             test_beacon_intake().await,
-            Arc::new(crate::GuestListenerBoard::new()),
+            guest_listener_board,
         )
         .with_guest_console_reader(reader.clone());
         (driver, spec, reader, terminate_calls, rootfs, run_dir)
@@ -2769,16 +2810,17 @@ mod tests {
         let clock: Arc<dyn Clock> = Arc::new(SimClock::new());
         let wiring = overdrive_core::guest_network::GuestNetworkExecWiring::new(clock.clone());
         assert!(wiring.supervisor().open_after_boot());
+        let guest_listener_board = Arc::new(crate::GuestListenerBoard::new());
         let driver = VmDriver::new(
             Arc::new(CleanupTerminateFails { attempts: AtomicUsize::new(0) }),
             Arc::clone(&clock),
             Arc::new(fs.clone()),
             Arc::new(SimCgroupAccounting::new()),
-            test_probe_runner(),
+            test_probe_runner(&guest_listener_board),
             wiring.gate(),
             layout.clone(),
             test_beacon_intake().await,
-            Arc::new(crate::GuestListenerBoard::new()),
+            guest_listener_board,
         );
         let alloc = AllocationId::new("alloc-cleanup-partitions").expect("valid allocation");
         driver.live.lock().insert(alloc.clone(), VmSupervision::Starting);
@@ -2993,6 +3035,8 @@ mod tests {
             socket,
             Arc::new(vmm),
             VmControl { pid: 0, api_socket: PathBuf::new() },
+            AllocationId::new("beacon-writer-test").expect("valid test allocation"),
+            Arc::new(crate::GuestListenerBoard::new()),
         );
         let witness = Arc::downgrade(&beacon);
         (beacon, witness, line_rx)

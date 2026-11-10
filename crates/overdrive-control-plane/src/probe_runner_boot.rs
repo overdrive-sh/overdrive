@@ -61,13 +61,32 @@ pub async fn compose_and_probe_runner_gate(
     observation_store: Arc<dyn ObservationStore>,
     guest_dial: Arc<dyn GuestStreamDial>,
 ) -> Result<Arc<ProbeRunner>, ControlPlaneError> {
-    let runner = Arc::new(ProbeRunner::new(
+    compose_and_probe_runner_gate_with_reports(
         tcp_prober,
         http_prober,
         clock,
         observation_store,
         guest_dial,
         Arc::new(overdrive_worker::GuestListenerBoard::new()),
+    )
+    .await
+}
+
+pub(crate) async fn compose_and_probe_runner_gate_with_reports(
+    tcp_prober: Arc<dyn TcpProber>,
+    http_prober: Arc<dyn HttpProber>,
+    clock: Arc<dyn Clock>,
+    observation_store: Arc<dyn ObservationStore>,
+    guest_dial: Arc<dyn GuestStreamDial>,
+    guest_listener_reports: Arc<dyn overdrive_core::traits::GuestListenerReports>,
+) -> Result<Arc<ProbeRunner>, ControlPlaneError> {
+    let runner = Arc::new(ProbeRunner::new(
+        tcp_prober,
+        http_prober,
+        clock,
+        observation_store,
+        guest_dial,
+        guest_listener_reports,
     ));
     match runner.probe().await {
         Ok(()) => Ok(runner),

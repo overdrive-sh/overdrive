@@ -78,7 +78,7 @@ State 2: <ra_bugStampAtEmission_restart_authority_Deploy line 174, col 3 to line
 /\ ra_bugStampAtEmission_restart_authority_used = 0
 /\ ra_bugStampAtEmission_restart_authority_cur = 0
 
-State 3: <ra_bugStampAtEmission_restart_authority_CleanExit line 266, col 3 to line 312, col 61 of module ra_bugStampAtEmission>
+State 3: <ra_bugStampAtEmission_restart_authority_StartupRow line 576, col 3 to line 620, col 61 of module ra_bugStampAtEmission>
 /\ ra_bugStampAtEmission_restart_authority_deployed = TRUE
 /\ ra_bugStampAtEmission_restart_authority_gl = FALSE
 /\ ra_bugStampAtEmission_restart_authority_done = FALSE
@@ -86,17 +86,17 @@ State 3: <ra_bugStampAtEmission_restart_authority_CleanExit line 266, col 3 to l
 /\ ra_bugStampAtEmission_restart_authority_g = [startupOverTerm |-> FALSE, emitCount |-> 0, stableOverAnn |-> FALSE]
 /\ ra_bugStampAtEmission_restart_authority_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ ra_bugStampAtEmission_restart_authority_at = ( 0 :>
-      [ row |-> "t_clean",
-        sup |-> FALSE,
-        srow |-> "absent",
-        sseq |-> 0,
-        sstreak |-> 0,
+      [ row |-> "running",
+        sup |-> TRUE,
+        srow |-> "fail",
+        sseq |-> 1,
+        sstreak |-> 1,
         dl |-> FALSE,
         stable |-> FALSE,
         ann |-> FALSE,
         acted |-> 0,
         stopped |-> "none",
-        vm |-> FALSE,
+        vm |-> TRUE,
         claim |-> "",
         author |-> "",
         crashed |-> FALSE ] @@
@@ -118,7 +118,7 @@ State 3: <ra_bugStampAtEmission_restart_authority_CleanExit line 266, col 3 to l
 /\ ra_bugStampAtEmission_restart_authority_used = 0
 /\ ra_bugStampAtEmission_restart_authority_cur = 0
 
-State 4: <ra_bugStampAtEmission_restart_authority_WLRestart line 769, col 3 to line 796, col 61 of module ra_bugStampAtEmission>
+State 4: <ra_bugStampAtEmission_restart_authority_StartupRow line 576, col 3 to line 620, col 61 of module ra_bugStampAtEmission>
 /\ ra_bugStampAtEmission_restart_authority_deployed = TRUE
 /\ ra_bugStampAtEmission_restart_authority_gl = FALSE
 /\ ra_bugStampAtEmission_restart_authority_done = FALSE
@@ -126,66 +126,11 @@ State 4: <ra_bugStampAtEmission_restart_authority_WLRestart line 769, col 3 to l
 /\ ra_bugStampAtEmission_restart_authority_g = [startupOverTerm |-> FALSE, emitCount |-> 0, stableOverAnn |-> FALSE]
 /\ ra_bugStampAtEmission_restart_authority_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ ra_bugStampAtEmission_restart_authority_at = ( 0 :>
-      [ row |-> "t_clean",
-        sup |-> FALSE,
-        srow |-> "absent",
-        sseq |-> 0,
-        sstreak |-> 0,
-        dl |-> FALSE,
-        stable |-> FALSE,
-        ann |-> FALSE,
-        acted |-> 0,
-        stopped |-> "none",
-        vm |-> FALSE,
-        claim |-> "",
-        author |-> "",
-        crashed |-> FALSE ] @@
-  1 :>
-      [ row |-> "running",
-        sup |-> TRUE,
-        srow |-> "absent",
-        sseq |-> 0,
-        sstreak |-> 0,
-        dl |-> FALSE,
-        stable |-> FALSE,
-        ann |-> FALSE,
-        acted |-> 0,
-        stopped |-> "none",
-        vm |-> TRUE,
-        claim |-> "",
-        author |-> "",
-        crashed |-> FALSE ] )
-/\ ra_bugStampAtEmission_restart_authority_used = 1
-/\ ra_bugStampAtEmission_restart_authority_cur = 1
-
-State 5: <ra_bugStampAtEmission_restart_authority_StartupRow line 576, col 3 to line 620, col 61 of module ra_bugStampAtEmission>
-/\ ra_bugStampAtEmission_restart_authority_deployed = TRUE
-/\ ra_bugStampAtEmission_restart_authority_gl = FALSE
-/\ ra_bugStampAtEmission_restart_authority_done = FALSE
-/\ ra_bugStampAtEmission_restart_authority_decl = TRUE
-/\ ra_bugStampAtEmission_restart_authority_g = [startupOverTerm |-> FALSE, emitCount |-> 0, stableOverAnn |-> FALSE]
-/\ ra_bugStampAtEmission_restart_authority_conf_step = [init |-> [tag |-> "UNIT"]]
-/\ ra_bugStampAtEmission_restart_authority_at = ( 0 :>
-      [ row |-> "t_clean",
-        sup |-> FALSE,
-        srow |-> "absent",
-        sseq |-> 0,
-        sstreak |-> 0,
-        dl |-> FALSE,
-        stable |-> FALSE,
-        ann |-> FALSE,
-        acted |-> 0,
-        stopped |-> "none",
-        vm |-> FALSE,
-        claim |-> "",
-        author |-> "",
-        crashed |-> FALSE ] @@
-  1 :>
       [ row |-> "running",
         sup |-> TRUE,
         srow |-> "fail",
-        sseq |-> 1,
-        sstreak |-> 1,
+        sseq |-> 2,
+        sstreak |-> 2,
         dl |-> FALSE,
         stable |-> FALSE,
         ann |-> FALSE,
@@ -194,19 +139,9 @@ State 5: <ra_bugStampAtEmission_restart_authority_StartupRow line 576, col 3 to 
         vm |-> TRUE,
         claim |-> "",
         author |-> "",
-        crashed |-> FALSE ] )
-/\ ra_bugStampAtEmission_restart_authority_used = 1
-/\ ra_bugStampAtEmission_restart_authority_cur = 1
-
-State 6: <ra_bugStampAtEmission_restart_authority_Deadline line 398, col 3 to line 428, col 61 of module ra_bugStampAtEmission>
-/\ ra_bugStampAtEmission_restart_authority_deployed = TRUE
-/\ ra_bugStampAtEmission_restart_authority_gl = FALSE
-/\ ra_bugStampAtEmission_restart_authority_done = FALSE
-/\ ra_bugStampAtEmission_restart_authority_decl = TRUE
-/\ ra_bugStampAtEmission_restart_authority_g = [startupOverTerm |-> FALSE, emitCount |-> 0, stableOverAnn |-> FALSE]
-/\ ra_bugStampAtEmission_restart_authority_conf_step = [init |-> [tag |-> "UNIT"]]
-/\ ra_bugStampAtEmission_restart_authority_at = ( 0 :>
-      [ row |-> "t_clean",
+        crashed |-> FALSE ] @@
+  1 :>
+      [ row |-> "none",
         sup |-> FALSE,
         srow |-> "absent",
         sseq |-> 0,
@@ -219,26 +154,11 @@ State 6: <ra_bugStampAtEmission_restart_authority_Deadline line 398, col 3 to li
         vm |-> FALSE,
         claim |-> "",
         author |-> "",
-        crashed |-> FALSE ] @@
-  1 :>
-      [ row |-> "running",
-        sup |-> TRUE,
-        srow |-> "fail",
-        sseq |-> 1,
-        sstreak |-> 1,
-        dl |-> TRUE,
-        stable |-> FALSE,
-        ann |-> FALSE,
-        acted |-> 0,
-        stopped |-> "none",
-        vm |-> TRUE,
-        claim |-> "",
-        author |-> "",
         crashed |-> FALSE ] )
-/\ ra_bugStampAtEmission_restart_authority_used = 1
-/\ ra_bugStampAtEmission_restart_authority_cur = 1
+/\ ra_bugStampAtEmission_restart_authority_used = 0
+/\ ra_bugStampAtEmission_restart_authority_cur = 0
 
-State 7: <ra_bugStampAtEmission_restart_authority_StartupRow line 576, col 3 to line 620, col 61 of module ra_bugStampAtEmission>
+State 5: <ra_bugStampAtEmission_restart_authority_Deadline line 398, col 3 to line 428, col 61 of module ra_bugStampAtEmission>
 /\ ra_bugStampAtEmission_restart_authority_deployed = TRUE
 /\ ra_bugStampAtEmission_restart_authority_gl = FALSE
 /\ ra_bugStampAtEmission_restart_authority_done = FALSE
@@ -246,21 +166,6 @@ State 7: <ra_bugStampAtEmission_restart_authority_StartupRow line 576, col 3 to 
 /\ ra_bugStampAtEmission_restart_authority_g = [startupOverTerm |-> FALSE, emitCount |-> 0, stableOverAnn |-> FALSE]
 /\ ra_bugStampAtEmission_restart_authority_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ ra_bugStampAtEmission_restart_authority_at = ( 0 :>
-      [ row |-> "t_clean",
-        sup |-> FALSE,
-        srow |-> "absent",
-        sseq |-> 0,
-        sstreak |-> 0,
-        dl |-> FALSE,
-        stable |-> FALSE,
-        ann |-> FALSE,
-        acted |-> 0,
-        stopped |-> "none",
-        vm |-> FALSE,
-        claim |-> "",
-        author |-> "",
-        crashed |-> FALSE ] @@
-  1 :>
       [ row |-> "running",
         sup |-> TRUE,
         srow |-> "fail",
@@ -274,11 +179,26 @@ State 7: <ra_bugStampAtEmission_restart_authority_StartupRow line 576, col 3 to 
         vm |-> TRUE,
         claim |-> "",
         author |-> "",
+        crashed |-> FALSE ] @@
+  1 :>
+      [ row |-> "none",
+        sup |-> FALSE,
+        srow |-> "absent",
+        sseq |-> 0,
+        sstreak |-> 0,
+        dl |-> FALSE,
+        stable |-> FALSE,
+        ann |-> FALSE,
+        acted |-> 0,
+        stopped |-> "none",
+        vm |-> FALSE,
+        claim |-> "",
+        author |-> "",
         crashed |-> FALSE ] )
-/\ ra_bugStampAtEmission_restart_authority_used = 1
-/\ ra_bugStampAtEmission_restart_authority_cur = 1
+/\ ra_bugStampAtEmission_restart_authority_used = 0
+/\ ra_bugStampAtEmission_restart_authority_cur = 0
 
-State 8: <ra_bugStampAtEmission_restart_authority_SLStartupStop line 1036, col 3 to line 1089, col 61 of module ra_bugStampAtEmission>
+State 6: <ra_bugStampAtEmission_restart_authority_SLStartupStop line 1036, col 3 to line 1089, col 61 of module ra_bugStampAtEmission>
 /\ ra_bugStampAtEmission_restart_authority_deployed = TRUE
 /\ ra_bugStampAtEmission_restart_authority_gl = FALSE
 /\ ra_bugStampAtEmission_restart_authority_done = FALSE
@@ -286,21 +206,6 @@ State 8: <ra_bugStampAtEmission_restart_authority_SLStartupStop line 1036, col 3
 /\ ra_bugStampAtEmission_restart_authority_g = [startupOverTerm |-> FALSE, emitCount |-> 1, stableOverAnn |-> FALSE]
 /\ ra_bugStampAtEmission_restart_authority_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ ra_bugStampAtEmission_restart_authority_at = ( 0 :>
-      [ row |-> "t_clean",
-        sup |-> FALSE,
-        srow |-> "absent",
-        sseq |-> 0,
-        sstreak |-> 0,
-        dl |-> FALSE,
-        stable |-> FALSE,
-        ann |-> TRUE,
-        acted |-> 0,
-        stopped |-> "none",
-        vm |-> FALSE,
-        claim |-> "",
-        author |-> "",
-        crashed |-> FALSE ] @@
-  1 :>
       [ row |-> "running",
         sup |-> TRUE,
         srow |-> "fail",
@@ -314,11 +219,26 @@ State 8: <ra_bugStampAtEmission_restart_authority_SLStartupStop line 1036, col 3
         vm |-> TRUE,
         claim |-> "",
         author |-> "",
+        crashed |-> FALSE ] @@
+  1 :>
+      [ row |-> "none",
+        sup |-> FALSE,
+        srow |-> "absent",
+        sseq |-> 0,
+        sstreak |-> 0,
+        dl |-> FALSE,
+        stable |-> FALSE,
+        ann |-> FALSE,
+        acted |-> 0,
+        stopped |-> "none",
+        vm |-> FALSE,
+        claim |-> "",
+        author |-> "",
         crashed |-> FALSE ] )
-/\ ra_bugStampAtEmission_restart_authority_used = 1
-/\ ra_bugStampAtEmission_restart_authority_cur = 1
+/\ ra_bugStampAtEmission_restart_authority_used = 0
+/\ ra_bugStampAtEmission_restart_authority_cur = 0
 
-State 9: <ra_bugStampAtEmission_restart_authority_StartupRow line 576, col 3 to line 620, col 61 of module ra_bugStampAtEmission>
+State 7: <ra_bugStampAtEmission_restart_authority_StartupRow line 576, col 3 to line 620, col 61 of module ra_bugStampAtEmission>
 /\ ra_bugStampAtEmission_restart_authority_deployed = TRUE
 /\ ra_bugStampAtEmission_restart_authority_gl = FALSE
 /\ ra_bugStampAtEmission_restart_authority_done = FALSE
@@ -326,21 +246,6 @@ State 9: <ra_bugStampAtEmission_restart_authority_StartupRow line 576, col 3 to 
 /\ ra_bugStampAtEmission_restart_authority_g = [startupOverTerm |-> FALSE, emitCount |-> 1, stableOverAnn |-> FALSE]
 /\ ra_bugStampAtEmission_restart_authority_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ ra_bugStampAtEmission_restart_authority_at = ( 0 :>
-      [ row |-> "t_clean",
-        sup |-> FALSE,
-        srow |-> "absent",
-        sseq |-> 0,
-        sstreak |-> 0,
-        dl |-> FALSE,
-        stable |-> FALSE,
-        ann |-> TRUE,
-        acted |-> 0,
-        stopped |-> "none",
-        vm |-> FALSE,
-        claim |-> "",
-        author |-> "",
-        crashed |-> FALSE ] @@
-  1 :>
       [ row |-> "running",
         sup |-> TRUE,
         srow |-> "fail",
@@ -354,8 +259,23 @@ State 9: <ra_bugStampAtEmission_restart_authority_StartupRow line 576, col 3 to 
         vm |-> TRUE,
         claim |-> "",
         author |-> "",
+        crashed |-> FALSE ] @@
+  1 :>
+      [ row |-> "none",
+        sup |-> FALSE,
+        srow |-> "absent",
+        sseq |-> 0,
+        sstreak |-> 0,
+        dl |-> FALSE,
+        stable |-> FALSE,
+        ann |-> FALSE,
+        acted |-> 0,
+        stopped |-> "none",
+        vm |-> FALSE,
+        claim |-> "",
+        author |-> "",
         crashed |-> FALSE ] )
-/\ ra_bugStampAtEmission_restart_authority_used = 1
-/\ ra_bugStampAtEmission_restart_authority_cur = 1
+/\ ra_bugStampAtEmission_restart_authority_used = 0
+/\ ra_bugStampAtEmission_restart_authority_cur = 0
 
-State 10: Stuttering
+State 8: Stuttering

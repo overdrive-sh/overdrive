@@ -279,6 +279,7 @@ async fn vm_driver(
     let wiring =
         overdrive_core::guest_network::GuestNetworkExecWiring::new(Arc::new(clock.clone()));
     assert!(wiring.supervisor().open_after_boot(), "fixture EXEC gate opens");
+    let guest_listener_board = Arc::new(crate::GuestListenerBoard::new());
     // PORTS-CONFIG: kernel-assigned (the sim chooses a port above 1023); the
     // guest's beacon connections are keyed by its CID and source port only.
     let intake =
@@ -300,7 +301,8 @@ async fn vm_driver(
                 0,
             )) as Arc<dyn ObservationStore>,
             Arc::new(SimGuestStreamDial::new()),
-            Arc::new(crate::GuestListenerBoard::new()),
+            Arc::clone(&guest_listener_board)
+                as Arc<dyn overdrive_core::traits::GuestListenerReports>,
         )),
         wiring.gate(),
         VmHostLayout {
@@ -315,7 +317,7 @@ async fn vm_driver(
             ),
         },
         intake,
-        Arc::new(crate::GuestListenerBoard::new()),
+        guest_listener_board,
     );
     (driver, beacon_port)
 }

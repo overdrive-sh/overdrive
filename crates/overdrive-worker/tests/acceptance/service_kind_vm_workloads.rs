@@ -125,13 +125,14 @@ async fn shared_vm_driver() -> (VmDriver, Arc<ProbeRunner>) {
         NodeId::new("svm-hook-driver").expect("valid node ID"),
         0,
     ));
+    let guest_listener_board = Arc::new(overdrive_worker::GuestListenerBoard::new());
     let probe_runner = Arc::new(ProbeRunner::new(
         Arc::new(SimTcpProber::new()),
         Arc::new(SimHttpProber::new()),
         Arc::clone(&clock) as Arc<dyn Clock>,
         observation_store,
         Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
-        Arc::new(overdrive_worker::GuestListenerBoard::new()),
+        Arc::clone(&guest_listener_board) as Arc<dyn overdrive_core::traits::GuestListenerReports>,
     ));
     let layout = VmHostLayout {
         cgroup_root: PathBuf::from("/tmp/svm-hooks-cgroup"),
@@ -162,7 +163,7 @@ async fn shared_vm_driver() -> (VmDriver, Arc<ProbeRunner>) {
         wiring.gate(),
         layout,
         intake,
-        Arc::new(overdrive_worker::GuestListenerBoard::new()),
+        guest_listener_board,
     );
     (driver, probe_runner)
 }

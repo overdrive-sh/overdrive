@@ -261,10 +261,11 @@ module guest_report_host {
     conf_step' = variant("init", ()),
   }
 
-  // the real reader consumes the next scripted line and routes it, or sees EOF on an empty closed stream
+  // the real reader consumes the next scripted line and routes it, or sees EOF on an empty closed stream;
+  // VmmExit has closed the connection, so no further read grant can be made
   action HostRead = any {
     all {
-      lines != List(),
+      exitrep == "none", lines != List(),
       lines' = lines.tail(),
       rset' = if (lines.head().k == "listen" and wait == "waiting" and DECL.contains(lines.head().p)) rset.union(Set(lines.head().p)) else rset,
       gstat' = if (lines.head().k == "exit") true else gstat,
@@ -274,23 +275,24 @@ module guest_report_host {
       conf_step' = if (REC) variant("HostRead", ()) else conf_step,
     },
     all {
-      lines == List(), eof, wait == "waiting",
+      exitrep == "none", lines == List(), eof, wait == "waiting",
       wait' = "ended",
       rset' = rset, exitrep' = exitrep, gstat' = gstat, lines' = lines, eof' = eof,
       conf_step' = if (REC) variant("HostRead", ()) else conf_step,
     },
   }
 
-  // a valid LISTEN line is written to the beacon (the guest side; nothing is appended once the beacon is closed)
+  // a valid LISTEN line is written to the beacon. After the reader sees EXIT but before VmmExit,
+  // exitrep is still none and the open channel permits a late LISTEN; after VmmExit it is closed.
   action AppendListen(p: str): bool = all {
-    not(eof), lines.length() < LMAX, ALPHA.contains(p),
+    exitrep == "none", not(eof), lines.length() < LMAX, ALPHA.contains(p),
     lines' = lines.append({ k: "listen", p: p }),
     rset' = rset, exitrep' = exitrep, gstat' = gstat, wait' = wait, eof' = eof,
     conf_step' = if (REC) variant("AppendListen", { p: p }) else conf_step,
   }
 
   action AppendExit = all {
-    not(eof), lines.length() < LMAX,
+    exitrep == "none", not(eof), lines.length() < LMAX,
     lines' = lines.append({ k: "exit", p: "" }),
     rset' = rset, exitrep' = exitrep, gstat' = gstat, wait' = wait, eof' = eof,
     conf_step' = if (REC) variant("AppendExit", ()) else conf_step,
@@ -298,7 +300,7 @@ module guest_report_host {
 
   // an unparseable line: no effect on rset, wait or exitrep
   action HostGarbage = all {
-    not(eof), lines.length() < LMAX,
+    exitrep == "none", not(eof), lines.length() < LMAX,
     lines' = lines.append({ k: "junk", p: "" }),
     rset' = rset, exitrep' = exitrep, gstat' = gstat, wait' = wait, eof' = eof,
     conf_step' = if (REC) variant("HostGarbage", ()) else conf_step,
@@ -306,7 +308,7 @@ module guest_report_host {
 
   // EOF: the stream ends after the lines already written
   action BeaconClose = all {
-    not(eof),
+    exitrep == "none", not(eof),
     eof' = true,
     rset' = rset, exitrep' = exitrep, gstat' = gstat, wait' = wait, lines' = lines,
     conf_step' = if (REC) variant("BeaconClose", ()) else conf_step,

@@ -162,7 +162,6 @@ pub enum BeaconParseError {
     /// that is not a number, is out of range or is zero (D13 item 2, DG-M). `detail`
     /// is the `Display` text of the underlying failure (no `#[source]`, so the enum
     /// keeps its `Clone` and `PartialEq` derives).
-    // SCAFFOLD: true — pinned shape; the `LISTEN` parse that returns it is DELIVER's.
     #[error("LISTEN message is malformed ({detail}) in line {raw:?}")]
     MalformedListen {
         /// The full line that failed to parse.
@@ -234,8 +233,6 @@ pub enum BeaconMessage {
     /// Sent guest → host, once per distinct `(protocol, port)` a socket of
     /// the workload opens (D13 item 2). Wire: `LISTEN <tcp|udp> <port>`.
     ///
-    /// SCAFFOLD: true — pinned shape (`feature-delta.md` § D13 item 2); the
-    /// text form and the strict three-field parse are DELIVER's.
     Listen {
         /// The L4 protocol of the opened listener.
         protocol: Proto,
@@ -258,8 +255,7 @@ impl fmt::Display for BeaconMessage {
                 write!(f, "EXEC {}", serde_json::to_string(argv).map_err(|_| fmt::Error)?)
             }
             Self::Exit { status } => write!(f, "EXIT {status}"),
-            // SCAFFOLD: true
-            Self::Listen { .. } => panic!("RED scaffold: D13 LISTEN beacon line text form"),
+            Self::Listen { protocol, port } => write!(f, "LISTEN {protocol} {port}"),
             Self::Shutdown => f.write_str("SHUTDOWN"),
         }
     }
@@ -292,8 +288,7 @@ impl FromStr for BeaconMessage {
             "READY" => parse_ready(line, &rest),
             "EXIT" => parse_exit(line, &rest),
             "SHUTDOWN" => parse_shutdown(line, &rest),
-            // SCAFFOLD: true
-            "LISTEN" => panic!("RED scaffold: D13 LISTEN beacon line strict parse"),
+            "LISTEN" => parse_listen(line, &rest),
             other => Err(BeaconParseError::UnknownKind {
                 kind: other.to_string(),
                 raw: line.to_string(),
@@ -393,6 +388,37 @@ fn parse_shutdown(raw: &str, rest: &[&str]) -> Result<BeaconMessage, BeaconParse
     const KIND: &str = "SHUTDOWN";
     check_field_count(KIND, 0, rest, raw)?;
     Ok(BeaconMessage::Shutdown)
+}
+
+fn parse_listen(raw: &str, rest: &[&str]) -> Result<BeaconMessage, BeaconParseError> {
+    if rest.len() != 2 {
+        return Err(BeaconParseError::MalformedListen {
+            raw: raw.to_string(),
+            detail: format!("expected 2 fields, found {}", rest.len()),
+        });
+    }
+
+    let protocol = match rest[0] {
+        "tcp" => Proto::Tcp,
+        "udp" => Proto::Udp,
+        other => {
+            return Err(BeaconParseError::MalformedListen {
+                raw: raw.to_string(),
+                detail: format!("unknown protocol {other:?}"),
+            });
+        }
+    };
+
+    let port = rest[1].parse::<u16>().map_err(|source| BeaconParseError::MalformedListen {
+        raw: raw.to_string(),
+        detail: source.to_string(),
+    })?;
+    let port = NonZeroU16::new(port).ok_or_else(|| BeaconParseError::MalformedListen {
+        raw: raw.to_string(),
+        detail: "port must be non-zero".to_string(),
+    })?;
+
+    Ok(BeaconMessage::Listen { protocol, port })
 }
 
 /// Parses `EXEC`'s payload — the raw JSON-array remainder after the

@@ -3283,12 +3283,16 @@ pub async fn run_server(
     let owner_dial = Arc::new(guest_network_composition::OwnerDial::unbound());
     let guest_dial: Arc<dyn overdrive_core::guest_transport::dial::GuestStreamDial> =
         Arc::clone(&owner_dial) as _;
-    let probe_runner = probe_runner_boot::compose_and_probe_runner_gate(
+    let guest_listener_board = Arc::new(overdrive_worker::GuestListenerBoard::new());
+    let guest_listener_reports: Arc<dyn overdrive_core::traits::GuestListenerReports> =
+        Arc::clone(&guest_listener_board) as _;
+    let probe_runner = probe_runner_boot::compose_and_probe_runner_gate_with_reports(
         probers.tcp,
         probers.http,
         Arc::clone(&clock),
         Arc::clone(&boot.observation),
         guest_dial,
+        guest_listener_reports,
     )
     .await?;
     let guest_network_exec = GuestNetworkExecWiring::new(Arc::clone(&clock));
@@ -3309,6 +3313,7 @@ pub async fn run_server(
         Arc::clone(&clock),
         fs,
         Arc::clone(&probe_runner),
+        Arc::clone(&guest_listener_board),
         guest_network_exec.gate(),
         vm,
         config.vsock_ports.beacon(),
@@ -3512,6 +3517,7 @@ async fn compose_vm_driver(
     clock: Arc<dyn Clock>,
     fs: Arc<dyn overdrive_core::traits::cgroup_fs::CgroupFs>,
     probe_runner: Arc<overdrive_worker::probe_runner::ProbeRunner>,
+    guest_listener_board: Arc<overdrive_worker::GuestListenerBoard>,
     guest_network_exec: Arc<overdrive_core::guest_network::GuestNetworkExecGate>,
     vm: VmAdapters,
     beacon_port: overdrive_core::guest_transport::VsockListenPort,
@@ -3662,7 +3668,7 @@ async fn compose_vm_driver(
             guest_network_exec,
             layout,
             beacon,
-            Arc::new(overdrive_worker::GuestListenerBoard::new()),
+            guest_listener_board,
         ),
         bound,
     ))
@@ -5821,8 +5827,9 @@ mod tests {
         use crate::{VmComposeError, compose_vm_driver};
 
         #[allow(clippy::expect_used)]
-        fn test_probe_runner() -> Arc<ProbeRunner> {
-            Arc::new(ProbeRunner::new(
+        fn test_probe_runner() -> (Arc<ProbeRunner>, Arc<overdrive_worker::GuestListenerBoard>) {
+            let board = Arc::new(overdrive_worker::GuestListenerBoard::new());
+            let runner = Arc::new(ProbeRunner::new(
                 Arc::new(SimTcpProber::new()),
                 Arc::new(SimHttpProber::new()),
                 Arc::new(SimClock::new()),
@@ -5831,8 +5838,9 @@ mod tests {
                     0,
                 )),
                 Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
-                Arc::new(overdrive_worker::GuestListenerBoard::new()),
-            ))
+                Arc::clone(&board) as Arc<dyn overdrive_core::traits::GuestListenerReports>,
+            ));
+            (runner, board)
         }
 
         #[tokio::test]
@@ -5845,6 +5853,7 @@ mod tests {
             // (per `overdrive_worker::vm_driver::VmDriver`), so
             // formatting the whole `Result` on assertion failure would
             // not compile. Neither of these tests reaches `Ok`.
+            let (probe_runner, guest_listener_board) = test_probe_runner();
             let err = compose_vm_driver(
                 PathBuf::from("/sys/fs/cgroup/overdrive.slice"),
                 overdrive_core::vm::config::clone_index_dir(&PathBuf::from("/srv/overdrive/data")),
@@ -5853,7 +5862,8 @@ mod tests {
                 )),
                 Arc::new(SimClock::new()),
                 Arc::new(SimCgroupFs::new()),
-                test_probe_runner(),
+                probe_runner,
+                guest_listener_board,
                 overdrive_core::guest_network::GuestNetworkExecWiring::new(Arc::new(
                     SimClock::new(),
                 ))
@@ -5916,6 +5926,7 @@ mod tests {
             let sim_vmm = SimVmm::new();
             sim_vmm.inject_probe_failure(SimVmmProbeFault::LandlockLsmAbsent);
 
+            let (probe_runner, guest_listener_board) = test_probe_runner();
             let err = compose_vm_driver(
                 PathBuf::from("/sys/fs/cgroup/overdrive.slice"),
                 overdrive_core::vm::config::clone_index_dir(&PathBuf::from("/srv/overdrive/data")),
@@ -5924,7 +5935,8 @@ mod tests {
                 )),
                 Arc::new(SimClock::new()),
                 Arc::new(SimCgroupFs::new()),
-                test_probe_runner(),
+                probe_runner,
+                guest_listener_board,
                 overdrive_core::guest_network::GuestNetworkExecWiring::new(Arc::new(
                     SimClock::new(),
                 ))
@@ -5964,6 +5976,7 @@ mod tests {
             sim_cgroup_accounting
                 .inject_probe_substrate_error(std::io::ErrorKind::PermissionDenied);
 
+            let (probe_runner, guest_listener_board) = test_probe_runner();
             let err = compose_vm_driver(
                 PathBuf::from("/sys/fs/cgroup/overdrive.slice"),
                 overdrive_core::vm::config::clone_index_dir(&PathBuf::from("/srv/overdrive/data")),
@@ -5972,7 +5985,8 @@ mod tests {
                 )),
                 Arc::new(SimClock::new()),
                 Arc::new(SimCgroupFs::new()),
-                test_probe_runner(),
+                probe_runner,
+                guest_listener_board,
                 overdrive_core::guest_network::GuestNetworkExecWiring::new(Arc::new(
                     SimClock::new(),
                 ))
