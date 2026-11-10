@@ -219,7 +219,6 @@ async fn crash_racing_the_startup_stop_leaves_the_stop_row_and_the_give_up_names
 /// successor starts only after the stop landed.
 #[tokio::test]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D8 a startup stop that does not land is retried once per new written startup probe row"]
 async fn failed_startup_stop_is_retried_once_per_new_startup_row() {
     let mut world = RestartWorld::compose(Shape::StartupProbe).await;
     let first = world.place_first_attempt().await;
@@ -249,16 +248,31 @@ async fn failed_startup_stop_is_retried_once_per_new_startup_row() {
 
     let successor = world.restart_successor().await;
     let calls = world.driver.calls();
-    let stopped = calls.iter().rposition(|c| *c == DriverCall::Stop(first.clone()));
-    let started = calls.iter().position(|c| *c == DriverCall::Start(successor.clone()));
-    assert!(stopped < started, "the successor starts only after the stop landed: {calls:?}");
+    let terminal = calls
+        .iter()
+        .position(|c| *c == DriverCall::Terminal(first.clone()))
+        .expect("the successful stop fires the predecessor's terminal hook");
+    let started = calls
+        .iter()
+        .position(|c| *c == DriverCall::Start(successor.clone()))
+        .expect("the successor starts");
+    assert_eq!(
+        calls[..terminal].iter().filter(|c| **c == DriverCall::Stop(first.clone())).count(),
+        3,
+        "two failed startup stops and the successful retry precede the terminal hook: {calls:?}"
+    );
+    assert!(terminal < started, "the terminal stop lands before the successor starts: {calls:?}");
+    assert_eq!(
+        calls[started..].iter().filter(|c| **c == DriverCall::Stop(first.clone())).count(),
+        1,
+        "restart cleans the exact predecessor once after starting the successor: {calls:?}"
+    );
 }
 
 /// S-30 (D8, late `Pass`): the stop fails, then the startup probe passes: no
 /// further stop is emitted and the allocation reaches `Stable`.
 #[tokio::test]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D8 a startup pass after a stop that did not land ends the retry and reaches Stable"]
 async fn late_startup_pass_after_a_failed_stop_ends_the_retry_and_reaches_stable() {
     let mut world = RestartWorld::compose(Shape::StartupProbe).await;
     let first = world.place_first_attempt().await;
@@ -285,7 +299,6 @@ async fn late_startup_pass_after_a_failed_stop_ends_the_retry_and_reaches_stable
 /// only then does the supervised-allocation count fall.
 #[tokio::test]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: B2 on_alloc_terminal fires after the stop's terminal row write succeeds"]
 async fn failed_stop_row_write_keeps_the_supervisor_and_the_next_probe_row_retries() {
     let mut world = RestartWorld::compose(Shape::StartupProbe).await;
     let first = world.place_first_attempt().await;

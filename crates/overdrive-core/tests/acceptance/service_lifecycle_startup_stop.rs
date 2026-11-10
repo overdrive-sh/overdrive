@@ -296,7 +296,6 @@ proptest! {
     /// exemption, the top-of-loop dedup for `Running` facts.
     #[test]
     /// CONTRACT_SHAPE: bounded-change.
-    #[ignore = "pending DELIVER: D8 startup stop re-emitted once per new startup probe row"]
     fn startup_stop_is_emitted_once_per_new_startup_row(
         running in any::<bool>(),
         announced in any::<bool>(),

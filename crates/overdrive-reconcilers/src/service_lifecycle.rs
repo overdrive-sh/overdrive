@@ -409,8 +409,9 @@ pub struct ServiceLifecycleView {
     ///    `next_evaluation_at` hook subtracts BOTH terminal sets from
     ///    [`Self::observed`]; once an alloc lands here the hook returns
     ///    no boundary, so a terminal-failed alloc stops requeueing.
-    /// 2. **Startup-stop dedup** — a live allocation stopped for a startup
-    ///    failure is not emitted for again on every tick.
+    /// 2. **Startup-stop/liveness gating** — a live allocation stopped for a
+    ///    startup failure remains excluded from liveness until the stop lands
+    ///    or a later startup `Pass` announces `Stable`.
     ///
     /// Records observed lifecycle membership, never a derived flag. A terminal
     /// row joins this set at the head of its per-allocation reconcile step,
@@ -425,7 +426,6 @@ pub struct ServiceLifecycleView {
     #[serde(default)]
     pub liveness_last_acted_run: BTreeMap<(AllocationId, ProbeIdx), ProbeRunSeq>,
 
-    // SCAFFOLD: true — pinned shape (D8 item 1): additive CBOR field, no envelope.
     /// The `run_seq` of the startup probe row on which this reconciler last
     /// emitted a startup stop, keyed `(alloc, ProbeIdx::new(0))`. An input, not a
     /// derived value; written only when a stop is emitted; absent means never
@@ -579,10 +579,13 @@ impl Reconciler for ServiceLifecycleReconciler {
                 continue;
             }
 
-            // A startup stop was already emitted for this live allocation;
-            // skip it on later ticks. Terminal rows are handled at the
-            // head of this loop above.
-            if next_view.terminal_announced.contains(alloc_id) {
+            // A live allocation in `terminal_announced` still needs the D8
+            // startup-stop rule evaluated against each new probe row. Keep the
+            // existing dedup for non-Running facts; terminal rows were handled
+            // at the head of this loop above.
+            if next_view.terminal_announced.contains(alloc_id)
+                && fact.state() != AllocState::Running
+            {
                 continue;
             }
 
@@ -650,6 +653,7 @@ impl Reconciler for ServiceLifecycleReconciler {
                     terminal: Some(TerminalCondition::Stable { settled_in_ms, witness }),
                 });
                 next_view.stable_announced.insert(alloc_id.clone());
+                next_view.terminal_announced.remove(alloc_id);
                 stable_this_tick.insert(alloc_id.clone());
                 continue;
             }
@@ -657,19 +661,24 @@ impl Reconciler for ServiceLifecycleReconciler {
             // Branch (b): stop this startup attempt when its producer-recorded
             // streak is exhausted, the deadline elapsed, and no Pass was
             // observed. A missing row consumes no attempt.
-            let attempts = fact
-                .probe_rows
-                .get(&(ProbeRole::Startup, ProbeIdx::new(0)))
+            let startup_row_key = (alloc_id.clone(), ProbeIdx::new(0));
+            let latest_startup_row = fact.probe_rows.get(&(ProbeRole::Startup, ProbeIdx::new(0)));
+            let newer_than_last_startup_stop = latest_startup_row.is_some_and(|row| {
+                next_view
+                    .startup_last_acted_run
+                    .get(&startup_row_key)
+                    .is_none_or(|last| row.run_seq > *last)
+            });
+            let attempts = latest_startup_row
                 .filter(|row| matches!(&row.status, ProbeStatus::Fail { .. }))
                 .map_or(0, |row| row.same_status_runs.get());
-            if let Some(action) =
-                startup_probe_failed_action(alloc_id, fact, attempts, tick.now_unix)
+            if newer_than_last_startup_stop
+                && let Some(action) =
+                    startup_probe_failed_action(alloc_id, fact, attempts, tick.now_unix)
             {
                 actions.push(action);
-                if let Some(row) = fact.probe_rows.get(&(ProbeRole::Startup, ProbeIdx::new(0))) {
-                    next_view
-                        .startup_last_acted_run
-                        .insert((alloc_id.clone(), ProbeIdx::new(0)), row.run_seq);
+                if let Some(row) = latest_startup_row {
+                    next_view.startup_last_acted_run.insert(startup_row_key, row.run_seq);
                 }
                 // Record that this reconciler has finished watching the
                 // allocation after emitting its startup stop.
