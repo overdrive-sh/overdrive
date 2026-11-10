@@ -601,8 +601,9 @@ pub enum TerminalCondition {
     /// **Additive position**: appended after `Custom` to keep the
     /// pre-existing rkyv discriminants (`BackoffExhausted=0`,
     /// `Stopped=1`, `Custom=2`) stable. This variant takes
-    /// discriminant `3`, `Failed` takes discriminant `4`. Existing
-    /// archived rows decode unchanged.
+    /// discriminant `3`, `Failed` takes discriminant `4`. The existing
+    /// variant tags remain unchanged in the current `TerminalCondition`
+    /// declaration.
     Completed { exit_code: i32 },
     /// `WorkloadLifecycle`: workload exited with a non-zero status (Job-kind
     /// natural termination interpreted as failure by the reconciler).
@@ -637,14 +638,11 @@ pub enum TerminalCondition {
     /// **Additive position**: appended after `Failed` to keep the
     /// pre-existing rkyv discriminants (`BackoffExhausted=0`,
     /// `Stopped=1`, `Custom=2`, `Completed=3`, `Failed=4`) stable.
-    /// This variant takes discriminant `5`. Existing archived rows
-    /// decode unchanged (the canonical `Option<TerminalCondition>`
-    /// embeddings in `AllocStatusRowV1` continue to decode through
-    /// the same `AllocStatusRowEnvelope::V1` shape; the V1 fixture
-    /// is regenerated against the new canonical layout per
-    /// `.claude/rules/development.md` § "rkyv schema evolution"
-    /// greenfield single-cut exception, because no shipped consumer
-    /// has persisted bytes against the pre-existing V1 layout).
+    /// This variant takes discriminant `5`. D16-G1 removes the witness
+    /// provenance field in place, so the current `AllocStatusRowEnvelope::V1`
+    /// and `AllocLifecycleOccurrenceRowEnvelope::V1` layouts are rebaselined
+    /// under the existing tags. Pre-D16 archived bytes under those tags have
+    /// no backward-read guarantee under the greenfield waiver.
     Stable { settled_in_ms: u64, witness: ProbeWitness },
     /// `ServiceLifecycle`: the Service alloc transitioned to a
     /// terminal Failed state per ADR-0055 / ADR-0056. The `reason`

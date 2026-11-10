@@ -367,7 +367,9 @@ pub enum ProbeStatus {
 ///
 /// Composite PK: `(alloc_id, role, probe_idx)` per ADR-0080 § D2.
 /// Superseded as the latest payload by [`ProbeResultRowV2`]; retained as
-/// envelope variant V1 for decoding rows written before PROBE-RUN-COUNT.
+/// payload variant V1 in the current envelope. The V1-to-V2 projection below
+/// supplies the initial run count; it does not promise decoding bytes archived
+/// with the pre-D16 V1 layout.
 #[derive(
     Debug,
     Clone,
