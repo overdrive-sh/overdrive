@@ -141,7 +141,7 @@ impl ServiceAllocPhase {
 /// of the per-`(alloc, probe_idx)` `ProbeResultRow`s for the
 /// startup role.
 ///
-/// `max_attempts` + `startup_deadline` + `mechanic_summary` come
+/// `startup_attempts_required` + `startup_deadline` + `mechanic_summary` come
 /// from the live `ServiceSpec` (intent side) — re-evaluated every
 /// tick per `.claude/rules/development.md` § "Persist inputs, not
 /// derived state".
@@ -201,10 +201,10 @@ pub struct ServiceAllocFact {
     /// fact fixtures. Probe-run counting reads the producer's typed
     /// `same_status_runs` from the hydrated row instead of this timestamp.
     pub latest_startup_probe_observed_at: Option<UnixInstant>,
-    /// Operator-spec-declared maximum number of startup probe
-    /// attempts before `StartupProbeFailed` fires. Default per
-    /// ADR-0057 §2 = 30.
-    pub max_attempts: u32,
+    /// Startup-row streak required before `StartupProbeFailed` fires.
+    /// TCP and HTTP use the descriptor's `max_attempts`; guest listeners
+    /// use 1 because their first failure row is written at the deadline.
+    pub startup_attempts_required: u32,
     /// Operator-spec-declared startup deadline window. Default per
     /// ADR-0057 §2 = 60s.
     pub startup_deadline: Duration,
@@ -772,12 +772,23 @@ fn format_mechanic_summary(mechanic: &ProbeMechanic, listeners: &[Listener]) -> 
         ProbeMechanic::Http { path, port, host } => host
             .as_ref()
             .map_or_else(|| format!("http {path}"), |h| format!("http {h}:{port}{path}")),
-        // SCAFFOLD: true — placeholder. D14 item 4 pins the text
-        // `guest listeners tcp:8080 udp:5353` (declared order) from `listeners`; DELIVER
-        // implements it.
         ProbeMechanic::GuestListeners => {
-            let _ = listeners;
-            "guest listeners".to_owned()
+            let names = listeners
+                .iter()
+                .map(|listener| {
+                    let protocol = match listener.protocol {
+                        Proto::Tcp => "tcp",
+                        Proto::Udp => "udp",
+                    };
+                    format!("{protocol}:{}", listener.port)
+                })
+                .collect::<Vec<_>>()
+                .join(" ");
+            if names.is_empty() {
+                "guest listeners".to_owned()
+            } else {
+                format!("guest listeners {names}")
+            }
         }
     }
 }
@@ -789,10 +800,13 @@ fn spec_facts_for_service(svc: &Service) -> (u32, Duration, String, bool, bool) 
         return (30, startup_deadline(&svc.startup_probes), String::new(), false, true);
     }
     let probe = &svc.startup_probes[0];
-    let max_attempts = probe.max_attempts;
+    let startup_attempts_required = match &probe.mechanic {
+        ProbeMechanic::GuestListeners => 1,
+        ProbeMechanic::Tcp { .. } | ProbeMechanic::Http { .. } => probe.max_attempts,
+    };
     let startup_deadline = startup_deadline(&svc.startup_probes);
     let mechanic_summary = format_mechanic_summary(&probe.mechanic, &svc.listeners);
-    (max_attempts, startup_deadline, mechanic_summary, probe.inferred, false)
+    (startup_attempts_required, startup_deadline, mechanic_summary, probe.inferred, false)
 }
 
 /// The startup deadline of a Service's startup probes: `interval x max_attempts`
@@ -900,8 +914,13 @@ async fn hydrate_service_alloc_facts(
     readiness_facts: &(bool, u32),
     liveness_facts: &(bool, u32),
 ) -> Result<BTreeMap<AllocationId, ServiceAllocFact>, HydrateError> {
-    let (max_attempts, startup_deadline, mechanic_summary, inferred, startup_probes_empty) =
-        spec_facts;
+    let (
+        startup_attempts_required,
+        startup_deadline,
+        mechanic_summary,
+        inferred,
+        startup_probes_empty,
+    ) = spec_facts;
     let (has_readiness_probe, readiness_success_threshold) = *readiness_facts;
     let (has_liveness_probe, liveness_failure_threshold) = *liveness_facts;
     let rows = ctx
@@ -945,7 +964,7 @@ async fn hydrate_service_alloc_facts(
             latest_startup_probe_observed_at: latest_startup_probe.map(|row| {
                 UnixInstant::from_unix_duration(Duration::from_millis(row.last_observed_at_unix_ms))
             }),
-            max_attempts: *max_attempts,
+            startup_attempts_required: *startup_attempts_required,
             startup_deadline: *startup_deadline,
             mechanic_summary: mechanic_summary.clone(),
             inferred: *inferred,
@@ -1173,8 +1192,7 @@ fn compute_backend_healthy(fact: &ServiceAllocFact) -> bool {
 /// Branch (b) — startup-probe stop action, or `None` when the three-gate
 /// condition is not met.
 ///
-/// The terminal CONDITION is unchanged from the inline branch it was
-/// extracted from: `attempts >= max_attempts && elapsed_ms >=
+/// The terminal CONDITION is mechanic-specific: `attempts >= startup_attempts_required && elapsed_ms >=
 /// deadline_ms && no_pass`. The `attempts` argument is the producer-recorded
 /// consecutive-fail count from the latest startup row.
 ///
@@ -1198,7 +1216,7 @@ fn startup_probe_failed_action(
     let elapsed_ms = elapsed_ms_from(now_unix, started);
     let deadline_ms = u64::try_from(fact.startup_deadline.as_millis()).unwrap_or(u64::MAX);
     let no_pass = !matches!(fact.latest_startup_probe, Some(ProbeStatus::Pass));
-    if attempts >= fact.max_attempts && elapsed_ms >= deadline_ms && no_pass {
+    if attempts >= fact.startup_attempts_required && elapsed_ms >= deadline_ms && no_pass {
         Some(Action::StopAllocation {
             alloc_id: alloc_id.clone(),
             terminal: Some(TerminalCondition::Stopped { by: StoppedBy::StartupProbe }),
@@ -1242,7 +1260,6 @@ mod tests {
     /// declaration order, `tcp:<port>` or `udp:<port>` joined by single spaces.
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER: D14 guest listeners mechanic summary names the declared listeners"]
     fn guest_listeners_summary_names_the_declared_listeners_in_declaration_order() {
         let declared = [
             Listener { port: NonZeroU16::new(8080).expect("non-zero"), protocol: Proto::Tcp },
@@ -1314,7 +1331,7 @@ mod tests {
                                             started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1))),
                                             latest_startup_probe: startup.clone(),
                                             latest_startup_probe_observed_at: None,
-                                            max_attempts: 3,
+                                            startup_attempts_required: 3,
                                             startup_deadline: Duration::from_secs(30),
                                             mechanic_summary: "tcp 0.0.0.0:8080".into(),
                                             inferred: false,
@@ -1402,7 +1419,7 @@ mod tests {
             started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(100))),
             latest_startup_probe: None,
             latest_startup_probe_observed_at: None,
-            max_attempts: 3,
+            startup_attempts_required: 3,
             startup_deadline: Duration::from_secs(60),
             mechanic_summary: "tcp 0.0.0.0:8080".to_owned(),
             inferred: false,

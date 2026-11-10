@@ -73,7 +73,7 @@ fn fact_running_with_pass(alloc_id: AllocationId, started_at_unix_ms: u64) -> Se
         latest_startup_probe_observed_at: Some(UnixInstant::from_unix_duration(
             Duration::from_millis(1),
         )),
-        max_attempts: 30,
+        startup_attempts_required: 30,
         startup_deadline: Duration::from_secs(60),
         mechanic_summary: "tcp 127.0.0.1:8080".to_string(),
         inferred: true,
@@ -101,7 +101,7 @@ fn fact_failed_after_start(alloc_id: AllocationId, started_at_unix_ms: u64) -> S
         ))),
         latest_startup_probe: None,
         latest_startup_probe_observed_at: None,
-        max_attempts: 30,
+        startup_attempts_required: 30,
         startup_deadline: Duration::from_secs(60),
         mechanic_summary: "tcp 127.0.0.1:8080".to_string(),
         inferred: true,
@@ -247,7 +247,7 @@ fn given_startup_probe_exhausts_attempts_when_reconcile_then_emits_startup_stop(
         Some(ProbeStatus::Fail { last_fail_reason: "connection refused".to_string() });
     fact.latest_startup_probe_observed_at =
         Some(UnixInstant::from_unix_duration(Duration::from_millis(1200)));
-    fact.max_attempts = 3;
+    fact.startup_attempts_required = 3;
     fact.startup_deadline = Duration::from_millis(100);
     let mut actual = state_with(vec![fact]);
     put_startup_row(

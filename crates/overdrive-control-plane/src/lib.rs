@@ -185,6 +185,11 @@ mod quint_quiescence;
 mod quint_stream_conformance;
 #[cfg(all(test, feature = "integration-tests"))]
 mod shared_network_recovery_acceptance;
+// D13/DG-6: run_server shares the beacon reader's board with the probe runner.
+// Source-local placement can supply the existing crate-private guest-flow Sim
+// port while retaining the production run_server composition.
+#[cfg(all(test, feature = "integration-tests"))]
+mod guest_listener_board_wiring_acceptance;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::SocketAddr;

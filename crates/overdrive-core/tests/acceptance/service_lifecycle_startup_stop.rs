@@ -81,7 +81,7 @@ fn fact(state: AllocState, started: bool, startup_probes_empty: bool) -> Service
             .then(|| UnixInstant::from_unix_duration(Duration::from_millis(STARTED_AT_MS))),
         latest_startup_probe: None,
         latest_startup_probe_observed_at: None,
-        max_attempts: MAX_ATTEMPTS,
+        startup_attempts_required: MAX_ATTEMPTS,
         startup_deadline: DEADLINE,
         mechanic_summary: "tcp 0.0.0.0:8080".to_string(),
         inferred: false,

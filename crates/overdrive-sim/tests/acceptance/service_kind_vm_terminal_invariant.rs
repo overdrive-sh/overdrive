@@ -177,7 +177,7 @@ fn fact_for(
         latest_startup_probe_observed_at: Some(UnixInstant::from_unix_duration(
             Duration::from_secs(2),
         )),
-        max_attempts: 1,
+        startup_attempts_required: 1,
         startup_deadline: Duration::from_secs(1),
         mechanic_summary: "tcp 0.0.0.0:18081".to_string(),
         inferred: false,

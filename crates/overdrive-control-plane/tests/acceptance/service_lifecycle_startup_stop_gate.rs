@@ -326,7 +326,6 @@ proptest! {
     /// 1 once the deadline has elapsed, never before it; a `Pass` never stops.
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER: D14 P1 startup_attempts_required stop gate for GuestListeners"]
     fn the_startup_stop_gate_takes_its_attempts_threshold_from_the_mechanic(
         mechanic in arb_mechanic(),
         latest in arb_latest(),
@@ -373,7 +372,6 @@ async fn dial_mechanics_stop_only_at_max_attempts() {
 
 #[tokio::test]
 /// CONTRACT_SHAPE: pure-function.
-#[ignore = "pending DELIVER: D14 P1 startup_attempts_required stop gate for GuestListeners"]
 async fn guest_listeners_stop_at_streak_one_once_the_deadline_elapsed() {
     assert!(!stop_emitted(Mechanic::GuestListeners, Latest::Fail(1), DEADLINE_SECS - 1).await);
     assert!(stop_emitted(Mechanic::GuestListeners, Latest::Fail(1), DEADLINE_SECS).await);

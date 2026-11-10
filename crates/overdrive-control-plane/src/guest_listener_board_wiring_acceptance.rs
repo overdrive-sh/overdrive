@@ -16,40 +16,54 @@
 //!
 //! **Production composition, Sim adapters at driven ports only.** `run_server`
 //! over the host bundle with the VMM and the beacon replaced by `SimVmm` and
-//! `SimBeaconIo` (the `VmAdapters` seam of ADR-0219) and the mTLS intercept by
-//! `SimMtlsIntercept`, exactly as `shared_guest_network_startup.rs` boots. The
+//! `SimBeaconIo` (the `VmAdapters` seam of ADR-0219), the guest-flow owner seam
+//! by its existing `SimGuestFlowIo`, and the mTLS intercept by
+//! `SimMtlsIntercept`. The guest-flow control session is scripted at its
+//! existing driven port so allocation activation and the ordinary EXEC hook
+//! complete before the workload reports listeners. The
 //! guest's `READY` carries the launch token the production guest-network
 //! owner leased, read through `ServerHandle::guest_flow_observation()`. The
 //! workload is submitted through `POST /v1/workloads`, the handler `overdrive
 //! deploy` calls. Nothing is installed that `run_server` does not install; the
 //! board is never touched by the test.
 //!
-//! Lane: `integration-tests`, native metal (`cargo xtask metal run --`), the
-//! `host-kernel-shared` group like every binary-wide `run_server` boot.
+//! Lane: source-local `integration-tests`, native metal (`cargo xtask metal
+//! run --`), the existing `cgroup-default` group for `run_server`'s cgroup boot.
 //!
 //! Traceability: DG-6 (ruled 2026-11-05), D13 item 10 composition paragraph,
 //! Gate G-10; the design pins the shared board as a DELIVER obligation checked
 //! at the composition root.
 
-#![allow(clippy::doc_markdown, reason = "per-test CONTRACT_SHAPE is an exact protocol marker")]
+#![allow(
+    clippy::doc_markdown,
+    clippy::expect_used,
+    reason = "test fixtures assert their own preconditions and CONTRACT_SHAPE is an exact protocol marker"
+)]
 
 use std::sync::Arc;
 use std::time::Duration;
+use std::{net::Ipv4Addr, net::SocketAddr};
 
-use overdrive_control_plane::api::{
+use crate::api::{
     AllocStateWire, AllocStatusResponse, ProbeStatusJson, SubmitWorkloadRequest,
     SubmitWorkloadResponse,
 };
-use overdrive_control_plane::node_adapters::VmCapability;
-use overdrive_control_plane::{ServerHandle, run_server};
+use crate::guest_network::GuestConnKey;
+use crate::guest_network::flow_io::sim::{SimEffectKind, SimGuestFlowIo};
+use crate::guest_network::flow_io::{FlowListener, GuestFlowIo};
+use crate::node_adapters::{GuestFlowAdapter, VmCapability};
+use crate::shared_network_test_ports::{TestDataplaneComposer, TestGuestDnsFactory};
+use crate::{NodeAdapters, ServerConfig, ServerHandle, run_server};
 use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
 use overdrive_core::aggregate::{DriverInput, ResourcesInput, VmInput};
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput, SubmitSpecInput};
-use overdrive_core::guest_transport::GuestCid;
+use overdrive_core::guest_transport::wire::ControlOpen;
+use overdrive_core::guest_transport::{GuestCid, LaunchToken, NodeVsockPortConfig};
 use overdrive_core::observation::{ProbeIdx, ProbeRole};
 use overdrive_core::vm::beacon::BeaconConnKey;
 use overdrive_core::vm::config::VsockPort;
-use overdrive_sim::adapters::{SimBeaconIo, SimMtlsIntercept, SimVmm};
+use overdrive_host::RealCgroupFs;
+use overdrive_sim::adapters::{SimBeaconIo, SimKek, SimMtlsIntercept, SimVmm};
 use overdrive_testing::vm_fixture::default_staging_root;
 use tempfile::TempDir;
 
@@ -101,26 +115,50 @@ struct Node {
     base: String,
     vmm: SimVmm,
     beacon: Arc<SimBeaconIo>,
+    flow_io: Arc<SimGuestFlowIo>,
 }
 
 impl Node {
     async fn boot() -> Self {
         // The node's data directory sits on the staging root: the VM driver
         // FICLONEs each rootfs into it, and a clone is intra-filesystem.
+        let staging_root = default_staging_root();
+        std::fs::create_dir_all(&staging_root).expect("create the guest's VM fixture staging root");
         let tmp = tempfile::Builder::new()
             .prefix("guest-listener-board-")
-            .tempdir_in(default_staging_root())
+            .tempdir_in(&staging_root)
             .expect("server tempdir on the reflink-capable staging root");
         let data_dir = tmp.path().join("data");
         let operator_config_dir = tmp.path().join("conf");
         std::fs::create_dir_all(&data_dir).expect("data dir");
         std::fs::create_dir_all(&operator_config_dir).expect("operator config dir");
-        let config = super::node_adapters::test_config(data_dir, operator_config_dir.clone());
+        let config = ServerConfig {
+            bind: "127.0.0.1:0".parse::<SocketAddr>().expect("loopback API bind"),
+            data_dir,
+            operator_config_dir: operator_config_dir.clone(),
+            dataplane: Some(crate::dataplane_config::DataplaneConfig {
+                client_iface: "lo".to_owned(),
+                backend_iface: "lo".to_owned(),
+            }),
+            vsock_ports: NodeVsockPortConfig::kernel_assigned(),
+            ..ServerConfig::new()
+        };
 
         let vmm = SimVmm::new();
         let beacon = Arc::new(SimBeaconIo::new(vmm.clone()));
-        let mut adapters = super::node_adapters::node_adapters(&config);
+        let flow_io = SimGuestFlowIo::new(0x0503_0010);
+        flow_io.auto_release(SimEffectKind::ProbeForwarder);
+        overdrive_testing::forwarder_module::expect_forwarder_module();
+        let mut adapters = NodeAdapters::host(
+            &config,
+            Arc::new(RealCgroupFs::new()),
+            Arc::new(SimKek::for_boot()),
+        )
+        .expect("the host bundle opens stores under the fixture data directory");
+        adapters.boot.dataplane = Arc::new(TestDataplaneComposer::new(Ipv4Addr::LOCALHOST));
         adapters.boot.mtls.intercept = Arc::new(SimMtlsIntercept::new());
+        adapters.boot.guest_dns = Arc::new(TestGuestDnsFactory::default());
+        adapters.guest_flow = GuestFlowAdapter(Arc::clone(&flow_io) as Arc<dyn GuestFlowIo>);
         // A SimVmm process is not a host pid: the cgroup ports are simulated too.
         adapters.cgroup_fs = Arc::new(overdrive_sim::SimCgroupFs::new());
         adapters.vm.cgroup_accounting = Arc::new(overdrive_sim::SimCgroupAccounting::new());
@@ -128,7 +166,10 @@ impl Node {
         adapters.vm.beacon = Arc::clone(&beacon) as _;
         adapters.vm.capability = VmCapability::Required;
 
-        let handle = run_server(config, adapters).await.expect("serve boots on metal");
+        let handle = tokio::time::timeout(RUNNING_BOUND, run_server(config, adapters))
+            .await
+            .expect("run_server boot completes within the bound")
+            .expect("serve boots on metal");
         let bound = handle.local_addr().await.expect("the API listener is bound");
         Self {
             handle,
@@ -137,6 +178,7 @@ impl Node {
             base: format!("https://localhost:{}", bound.port()),
             vmm,
             beacon,
+            flow_io,
         }
     }
 
@@ -204,7 +246,7 @@ impl Node {
 
     /// The leased CID and launch token of the workload's allocation, once
     /// the VMM holds its device: what the guest read from its command line.
-    async fn guest_identity(&self, id: &str) -> (GuestCid, String, u32) {
+    async fn guest_identity(&self, id: &str) -> (GuestCid, LaunchToken, u32) {
         let deadline = tokio::time::Instant::now() + RUNNING_BOUND;
         loop {
             if let Some(observation) = self.handle.guest_flow_observation().await {
@@ -212,7 +254,7 @@ impl Node {
                 if let Some((cid, entry)) = observation.cids.iter().next()
                     && let Some(pid) = holders.get(cid)
                 {
-                    return (*cid, entry.launch.to_string(), *pid);
+                    return (*cid, entry.launch, *pid);
                 }
             }
             assert!(
@@ -230,6 +272,23 @@ impl Node {
             );
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
+    }
+
+    /// The simulated guest opens its existing guest-flow control port with
+    /// the launch token leased by the production owner. This is the guest's
+    /// ordinary activation preamble, not a board or probe-task injection.
+    fn open_control_session(&self, cid: GuestCid, launch: LaunchToken) {
+        let key = GuestConnKey {
+            listener: self.handle.vsock_ports().flow.control(),
+            peer_cid: cid,
+            peer_port: VsockPort::new(49_100),
+        };
+        self.flow_io.queue_connection(
+            FlowListener::Control,
+            key,
+            Some(ControlOpen { launch }.encode().to_vec()),
+            Some(launch),
+        );
     }
 
     /// The startup rows of the workload's allocation as `(alloc, status)`.
@@ -258,7 +317,6 @@ impl Node {
 /// writes the one `Pass` row.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D13 host shared board, one GuestListenerBoard shared by VmDriver and ProbeRunner"]
 async fn a_listen_line_on_the_drivers_beacon_completes_the_probe_tasks_declared_set() {
     let node = Node::boot().await;
     let id = node.deploy_guest_listener_service("shared-board").await;
@@ -274,10 +332,21 @@ async fn a_listen_line_on_the_drivers_beacon_completes_the_probe_tasks_declared_
             &[format!("READY pid=1 port={beacon_port} launch={launch}").as_str()],
         )
         .expect("the guest's beacon connection queues");
+    node.open_control_session(cid, launch);
 
     let deadline = tokio::time::Instant::now() + RUNNING_BOUND;
-    while !node.running(&id).await {
-        assert!(tokio::time::Instant::now() < deadline, "the allocation reaches Running");
+    while !node.running(&id).await
+        || !node
+            .beacon
+            .written_lines(key)
+            .is_some_and(|lines| lines.iter().any(|line| line.starts_with("EXEC ")))
+    {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the allocation activates and releases EXEC; guest owner: {:?}; beacon writes: {:?}",
+            node.handle.guest_flow_observation().await,
+            node.beacon.written_lines(key)
+        );
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
     assert!(node.startup_rows(&id).await.is_empty(), "no startup row exists before any report");
@@ -302,7 +371,11 @@ async fn a_listen_line_on_the_drivers_beacon_completes_the_probe_tasks_declared_
         }
         assert!(
             tokio::time::Instant::now() < deadline,
-            "the completing report writes the startup Pass row within {ROW_BOUND:?}; rows: {rows:?}"
+            "the completing report writes the startup Pass row within {ROW_BOUND:?}; \
+             rows: {rows:?}; snapshot: {:?}; beacon writes: {:?}; guest owner: {:?}",
+            node.snapshot(&id).await,
+            node.beacon.written_lines(key),
+            node.handle.guest_flow_observation().await
         );
         tokio::time::sleep(Duration::from_millis(200)).await;
     }

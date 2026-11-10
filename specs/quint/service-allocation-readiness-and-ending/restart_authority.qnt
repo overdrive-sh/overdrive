@@ -224,12 +224,16 @@ module restart_authority {
 
   // ---------------------------------------------------------------- ServiceLifecycle
   // Each ServiceLifecycle tick scans this workload's full allocation set. D6/DG-12
-  // acknowledges every Failed or Terminated fact it sees, even when this tick
-  // also announces Stable or a stop for another attempt.
-  pure def acknowledgeTerminalFacts(rows: int -> Att): int -> Att =
+  // acknowledges every Failed or Terminated fact it sees; B1 also commits Stable
+  // for every Running fact whose startup condition is met, even when the step's
+  // named target is another attempt. A terminal row never enters Stable.
+  pure def serviceLifecycleFacts(rows: int -> Att, declared: bool): int -> Att =
     IDS.fold(rows, (acc, i) => {
       val a = acc.get(i)
-      if (a.row != "none" and a.row != "running") acc.set(i, { ...a, ann: true }) else acc
+      if (a.row != "none" and a.row != "running") acc.set(i, { ...a, ann: true })
+      else if (a.row == "running" and not(a.stable) and (if (declared) a.srow == "pass" else true)
+               and (not(a.ann) or a.srow == "pass")) acc.set(i, { ...a, stable: true, ann: false })
+      else acc
     })
 
   // Stable: Running, and (a startup probe passed, or the opt-out first Running). D8 item 3: an announced id whose latest
@@ -240,7 +244,7 @@ module restart_authority {
       a.row == "running", not(a.stable),
       if (decl) a.srow == "pass" else true,
       (a.ann implies (a.srow == "pass")),
-      at' = acknowledgeTerminalFacts(at).set(i, { ...a, stable: true, ann: false }),
+      at' = serviceLifecycleFacts(at, decl).set(i, { ...a, stable: true, ann: false }),
       g' = { ...g, stableOverAnn: g.stableOverAnn or (a.ann and a.srow != "pass") },
       deployed' = deployed, decl' = decl, gl' = gl, cur' = cur, used' = used, done' = done,
       conf_step' = if (REC) variant("SLStable", { i: i }) else conf_step,
@@ -275,7 +279,7 @@ module restart_authority {
     val a = at.get(i)
     all {
       startupStopEnabled(a),
-      at' = acknowledgeTerminalFacts(at).set(i, { ...afterStop(a, stage, "t_startup", BUG_HOOKFIRST), acted: a.sseq, ann: true,
+      at' = serviceLifecycleFacts(at, decl).set(i, { ...afterStop(a, stage, "t_startup", BUG_HOOKFIRST), acted: a.sseq, ann: true,
                         stopped: if (stage == "landed") "landed" else "failed" }),
       g' = { ...g, startupOverTerm: g.startupOverTerm or a.row != "running",
              emitCount: g.emitCount + 1 },
@@ -291,7 +295,7 @@ module restart_authority {
     val a = at.get(i)
     all {
       a.row == "running", a.stable,
-      at' = acknowledgeTerminalFacts(at).set(i, afterStop(a, stage, "t_liveness", BUG_HOOKFIRST)),
+      at' = serviceLifecycleFacts(at, decl).set(i, afterStop(a, stage, "t_liveness", BUG_HOOKFIRST)),
       deployed' = deployed, decl' = decl, gl' = gl, cur' = cur, used' = used, done' = done, g' = g,
       conf_step' = if (REC) variant("SLLivenessStop", { i: i, stage: stage }) else conf_step,
     }
@@ -303,7 +307,7 @@ module restart_authority {
     val a = at.get(i)
     all {
       a.row != "none", a.row != "running", not(a.ann),
-      at' = acknowledgeTerminalFacts(at),
+      at' = serviceLifecycleFacts(at, decl),
       deployed' = deployed, decl' = decl, gl' = gl, cur' = cur, used' = used, done' = done, g' = g,
       conf_step' = if (REC) variant("SLAnnounceTerminal", { i: i }) else conf_step,
     }

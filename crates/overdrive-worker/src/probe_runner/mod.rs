@@ -43,7 +43,9 @@ use std::net::{Ipv4Addr, SocketAddrV4};
 use std::sync::Arc;
 use std::time::Duration;
 
+use overdrive_core::aggregate::Listener;
 use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
+use overdrive_core::dataplane::backend_key::Proto;
 use overdrive_core::guest_transport::GUEST_NODE_PREFIX;
 use overdrive_core::guest_transport::dial::{DialPurpose, GuestDialError, GuestStreamDial};
 use overdrive_core::id::AllocationId;
@@ -54,6 +56,7 @@ use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{AllocationSpec, DriverType};
 use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_core::traits::prober::{HttpProber, ProbeFailure, ProbeOutcome, TcpProber};
+use overdrive_core::traits::{GuestListenerReports, ReportedListeners};
 use parking_lot::Mutex;
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
@@ -103,9 +106,7 @@ pub struct ProbeRunner {
     /// `SimGuestStreamDial`.
     guest_dial: Arc<dyn GuestStreamDial>,
     /// The read-only port over reported guest listeners (D13 item 10, PR-1).
-    /// SCAFFOLD: true — consumed by the guest-listener task (D14 item 3).
-    #[allow(dead_code)]
-    guest_listener_reports: Arc<dyn overdrive_core::traits::GuestListenerReports>,
+    guest_listener_reports: Arc<dyn GuestListenerReports>,
     /// Per-alloc supervisors. `BTreeMap` per
     /// `.claude/rules/development.md` § "Ordered-collection choice"
     /// — the supervisor map is drained on `stop_alloc` and iterated
@@ -126,7 +127,7 @@ impl ProbeRunner {
         clock: Arc<dyn Clock>,
         observation_store: Arc<dyn ObservationStore>,
         guest_dial: Arc<dyn GuestStreamDial>,
-        guest_listener_reports: Arc<dyn overdrive_core::traits::GuestListenerReports>,
+        guest_listener_reports: Arc<dyn GuestListenerReports>,
     ) -> Self {
         Self {
             tcp_prober,
@@ -332,7 +333,6 @@ impl ProbeRunner {
         }
         supervisor.mark_started();
         for mut descriptor in spec.probe_descriptors.clone() {
-            project_network_probe_target(&mut descriptor, spec);
             // ADR-0080 § D1 — consume the parser-assigned per-role
             // index verbatim. The flat vector `project_probe_descriptors`
             // hands us is a TRANSPORT concatenating startup ++ readiness
@@ -342,8 +342,16 @@ impl ProbeRunner {
             // `startup_probes.len()` while every consumer filtered on
             // per-role index 0 — the read-miss that made readiness and
             // liveness structurally unobservable.
+            project_network_probe_target(&mut descriptor, spec);
             if descriptor.role == ProbeRole::Liveness {
                 supervisor.retain_liveness(descriptor);
+            } else if matches!(&descriptor.mechanic, ProbeMechanic::GuestListeners) {
+                self.spawn_guest_listener_task(
+                    supervisor,
+                    &spec.alloc,
+                    descriptor,
+                    spec.declared_listeners.clone(),
+                );
             } else {
                 self.spawn_probe_task(supervisor, &spec.alloc, descriptor);
             }
@@ -453,6 +461,33 @@ impl ProbeRunner {
             .await;
         });
     }
+
+    fn spawn_guest_listener_task(
+        &self,
+        supervisor: &mut AllocSupervisor,
+        alloc_id: &AllocationId,
+        descriptor: ProbeDescriptor,
+        declared_listeners: Vec<Listener>,
+    ) {
+        let handle = supervisor.spawn_probe_task(descriptor.role);
+        let child_token = handle.cancellation_token();
+        let guest_listener_reports = Arc::clone(&self.guest_listener_reports);
+        let clock = Arc::clone(&self.clock);
+        let observation_store = Arc::clone(&self.observation_store);
+        let alloc_id_for_task = alloc_id.clone();
+        tokio::spawn(async move {
+            supervised_guest_listener_loop(
+                guest_listener_reports,
+                clock,
+                observation_store,
+                alloc_id_for_task,
+                descriptor,
+                declared_listeners,
+                child_token,
+            )
+            .await;
+        });
+    }
 }
 
 /// Errors surfaced by the runner subsystem.
@@ -501,7 +536,6 @@ fn project_network_probe_target(descriptor: &mut ProbeDescriptor, spec: &Allocat
     let needs_guest_address = match &descriptor.mechanic {
         ProbeMechanic::Tcp { host, .. } => host == "0.0.0.0",
         ProbeMechanic::Http { host, .. } => host.is_none() || host.as_deref() == Some("0.0.0.0"),
-        // SCAFFOLD: true — the guest-listener task holds no dial (D14 item 3).
         ProbeMechanic::GuestListeners => false,
     };
     if !needs_guest_address {
@@ -653,11 +687,10 @@ async fn probe_tick(
                     })?,
                 }
             }
-            // SCAFFOLD: true — the guest-listener task (D14 item 3) holds no dial.
+            // `start_alloc` routes this mechanic to its event-driven task, which
+            // has the declared listener set and does not dial.
             ProbeMechanic::GuestListeners => {
-                panic!(
-                    "RED scaffold: D14 guest-listener task replaces probe_tick for GuestListeners"
-                )
+                unreachable!("GuestListeners descriptors use the event-driven supervised task")
             }
         };
         Ok(Some(outcome))
@@ -681,17 +714,37 @@ async fn probe_tick(
         ProbeOutcome::Pass => ProbeStatus::Pass,
         ProbeOutcome::Fail { reason } => ProbeStatus::Fail { last_fail_reason: reason },
     };
-    let last_observed_at_unix_ms = unix_ms_from_clock(clock);
-    let same_status_runs = run_state.next_streak(&status);
+    let row = record_probe_status(
+        clock,
+        observation_store,
+        alloc_id,
+        probe_idx,
+        descriptor,
+        run_state,
+        status,
+    )
+    .await?;
+    Ok(Some(row))
+}
+
+async fn record_probe_status(
+    clock: &dyn Clock,
+    observation_store: &dyn ObservationStore,
+    alloc_id: &AllocationId,
+    probe_idx: ProbeIdx,
+    descriptor: &ProbeDescriptor,
+    run_state: &mut ProbeRunState,
+    status: ProbeStatus,
+) -> Result<ProbeResultRow, ProbeRunnerError> {
     let row = ProbeResultRow {
         alloc_id: alloc_id.clone(),
         probe_idx,
         role: descriptor.role,
-        status,
-        last_observed_at_unix_ms,
-        inferred: descriptor.inferred,
+        same_status_runs: run_state.next_streak(&status),
         run_seq: run_state.next_run(),
-        same_status_runs,
+        last_observed_at_unix_ms: unix_ms_from_clock(clock),
+        inferred: descriptor.inferred,
+        status,
     };
     if let Err(source) = observation_store.write_probe_result(row.clone()).await {
         let error = ProbeRunnerError::ObservationWriteFailed {
@@ -703,7 +756,119 @@ async fn probe_tick(
         return Err(error);
     }
     run_state.record_written(row.run_seq, &row.status);
-    Ok(Some(row))
+    Ok(row)
+}
+
+async fn supervised_guest_listener_loop(
+    guest_listener_reports: Arc<dyn GuestListenerReports>,
+    clock: Arc<dyn Clock>,
+    observation_store: Arc<dyn ObservationStore>,
+    alloc_id: AllocationId,
+    descriptor: ProbeDescriptor,
+    declared_listeners: Vec<Listener>,
+    child_token: CancellationToken,
+) {
+    let interval = Duration::from_secs(u64::from(descriptor.interval_seconds));
+    let startup_deadline =
+        interval.checked_mul(descriptor.max_attempts).unwrap_or(Duration::from_secs(60));
+    let started_at = clock.now();
+    let mut next_fail_at = startup_deadline;
+    let mut pass_retry_at: Option<Duration> = None;
+    let mut run_state = ProbeRunState::default();
+    let mut seen = guest_listener_reports.reported(&alloc_id);
+
+    loop {
+        if child_token.is_cancelled() {
+            return;
+        }
+
+        let reported = guest_listener_reports.reported(&alloc_id);
+        let now = clock.now();
+        let elapsed = now.saturating_duration_since(started_at);
+        if declared_listeners
+            .iter()
+            .all(|listener| reported.contains(listener.protocol, listener.port))
+        {
+            if let Some(retry_at) = pass_retry_at
+                && elapsed < retry_at
+            {
+                let retry_after = retry_at.saturating_sub(elapsed);
+                tokio::select! {
+                    biased;
+                    () = child_token.cancelled() => return,
+                    updated = guest_listener_reports.changed(&alloc_id, &seen) => seen = updated,
+                    () = clock.sleep(retry_after) => {}
+                }
+                continue;
+            }
+
+            let status = ProbeStatus::Pass;
+            if record_probe_status(
+                clock.as_ref(),
+                observation_store.as_ref(),
+                &alloc_id,
+                descriptor.idx,
+                &descriptor,
+                &mut run_state,
+                status,
+            )
+            .await
+            .is_ok()
+            {
+                return;
+            }
+            pass_retry_at =
+                Some(clock.now().saturating_duration_since(started_at).saturating_add(interval));
+            continue;
+        }
+
+        pass_retry_at = None;
+        if elapsed >= next_fail_at {
+            let reason =
+                guest_listener_fail_reason(&declared_listeners, &reported, startup_deadline);
+            let status = ProbeStatus::Fail { last_fail_reason: reason };
+            let _ = record_probe_status(
+                clock.as_ref(),
+                observation_store.as_ref(),
+                &alloc_id,
+                descriptor.idx,
+                &descriptor,
+                &mut run_state,
+                status,
+            )
+            .await;
+            next_fail_at =
+                clock.now().saturating_duration_since(started_at).saturating_add(interval);
+            continue;
+        }
+
+        let until_fail = next_fail_at.saturating_sub(elapsed);
+        tokio::select! {
+            biased;
+            () = child_token.cancelled() => return,
+            updated = guest_listener_reports.changed(&alloc_id, &seen) => seen = updated,
+            () = clock.sleep(until_fail) => {}
+        }
+    }
+}
+
+fn guest_listener_fail_reason(
+    declared_listeners: &[Listener],
+    reported: &ReportedListeners,
+    startup_deadline: Duration,
+) -> String {
+    let missing = declared_listeners
+        .iter()
+        .filter(|listener| !reported.contains(listener.protocol, listener.port))
+        .map(|listener| {
+            let protocol = match listener.protocol {
+                Proto::Tcp => "tcp",
+                Proto::Udp => "udp",
+            };
+            format!("{protocol}:{}", listener.port)
+        })
+        .collect::<Vec<_>>();
+    format!("guest listeners not open after {}s: {}", startup_deadline.as_secs(), missing.join(" "))
 }
 
 #[allow(

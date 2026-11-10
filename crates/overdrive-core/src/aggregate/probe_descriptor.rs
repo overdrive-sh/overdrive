@@ -72,7 +72,6 @@ pub enum ProbeMechanic {
     /// Fieldless; valid only as the sole startup descriptor of a Service;
     /// cannot be written in TOML.
     ///
-    /// SCAFFOLD: true — pinned shape (`feature-delta.md` § D14 item 1).
     GuestListeners,
 }
 

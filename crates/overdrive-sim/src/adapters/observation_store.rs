@@ -184,6 +184,10 @@ struct PeerState {
     /// [`SimObservationStore::inject_write_failure`] for the public
     /// surface and queue semantics.
     pending_write_failures: Mutex<VecDeque<ObservationStoreError>>,
+    /// Test-only failures consumed only by allocation lifecycle writes, so a
+    /// composed tick's earlier backend-row write cannot steal a scripted
+    /// stop-row failure.
+    pending_alloc_lifecycle_write_failures: Mutex<VecDeque<ObservationStoreError>>,
     /// Test-only FIFO of read failures to inject on
     /// [`ObservationStore::alloc_status_rows`]. Each call pops the front
     /// entry BEFORE reading the LWW snapshot; when the queue is empty the
@@ -275,6 +279,7 @@ impl PeerState {
             next_issuance_ordinal: Mutex::new(0),
             fan_out,
             pending_write_failures: Mutex::new(VecDeque::new()),
+            pending_alloc_lifecycle_write_failures: Mutex::new(VecDeque::new()),
             pending_alloc_status_rows_failures: Mutex::new(VecDeque::new()),
         })
     }
@@ -717,10 +722,17 @@ impl SimObservationStore {
         self.inner.pending_write_failures.lock().push_back(error);
     }
 
+    /// Script a failure for the next allocation lifecycle write only. Other
+    /// observation writes in the same composed tick remain real inputs.
+    pub fn inject_alloc_lifecycle_write_failure(&self, error: ObservationStoreError) {
+        self.inner.pending_alloc_lifecycle_write_failures.lock().push_back(error);
+    }
+
     /// Test-only helper: discard any queued write failures that no write consumed, so an
     /// armed fault cannot leak into a later write.
     pub fn clear_write_failures(&self) {
         self.inner.pending_write_failures.lock().clear();
+        self.inner.pending_alloc_lifecycle_write_failures.lock().clear();
     }
 
     /// Test-only helper: queue a read failure for the next call to
@@ -830,6 +842,10 @@ impl ObservationStore for SimObservationStore {
         current: AllocStatusRow,
         source: TransitionSource,
     ) -> Result<Option<AllocLifecycleOccurrenceRow>, ObservationStoreError> {
+        let targeted = self.inner.pending_alloc_lifecycle_write_failures.lock().pop_front();
+        if let Some(injected) = targeted {
+            return Err(injected);
+        }
         let injected = self.inner.pending_write_failures.lock().pop_front();
         if let Some(injected) = injected {
             return Err(injected);

@@ -112,7 +112,7 @@ fn advertise_port_set(svc: &Service) -> BTreeSet<NonZeroU16> {
             started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(0))),
             latest_startup_probe: None,
             latest_startup_probe_observed_at: None,
-            max_attempts: 30,
+            startup_attempts_required: 30,
             startup_deadline: Duration::from_secs(60),
             mechanic_summary: String::new(),
             inferred: false,

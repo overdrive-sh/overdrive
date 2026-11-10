@@ -100,7 +100,7 @@ fn fact_with_readiness(
         latest_startup_probe_observed_at: Some(UnixInstant::from_unix_duration(
             Duration::from_millis(1),
         )),
-        max_attempts: 30,
+        startup_attempts_required: 30,
         startup_deadline: Duration::from_secs(60),
         mechanic_summary: "tcp 127.0.0.1:8080".to_string(),
         inferred: true,
@@ -132,7 +132,7 @@ fn fact_without_readiness(index: usize) -> ServiceAllocFact {
         latest_startup_probe_observed_at: Some(UnixInstant::from_unix_duration(
             Duration::from_millis(1),
         )),
-        max_attempts: 30,
+        startup_attempts_required: 30,
         startup_deadline: Duration::from_secs(60),
         mechanic_summary: "tcp 127.0.0.1:8080".to_string(),
         inferred: true,

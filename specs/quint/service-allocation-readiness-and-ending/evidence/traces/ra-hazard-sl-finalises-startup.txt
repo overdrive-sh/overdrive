@@ -16,10 +16,10 @@ State 2 [Deploy]
   at = ( 0 :> [ row |-> "running", sup |-> TRUE, srow |-> "absent", sseq |-> 0, sstreak |-> 0, dl |-> FALSE, stable |-> FALSE, ann |-> FALSE, acted |-> 0, stopped |-> "none", vm |-> TRUE, claim |-> "", author |-> "", crashed |-> FALSE ] @@ 1 :> [ row |-> "none", sup |-> FALSE, srow |-> "absent", sseq |-> 0, sstreak |-> 0, dl |-> FALSE, stable |-> FALSE, ann |-> FALSE, acted |-> 0, stopped |-> "none", vm |-> FALSE, claim |-> "", author |-> "", crashed |-> FALSE ] )
   deployed = TRUE
 
-State 3 [Deadline]
-  at = ( 0 :> [ row |-> "running", sup |-> TRUE, srow |-> "absent", sseq |-> 0, sstreak |-> 0, dl |-> TRUE, stable |-> FALSE, ann |-> FALSE, acted |-> 0, stopped |-> "none", vm |-> TRUE, claim |-> "", author |-> "", crashed |-> FALSE ] @@ 1 :> [ row |-> "none", sup |-> FALSE, srow |-> "absent", sseq |-> 0, sstreak |-> 0, dl |-> FALSE, stable |-> FALSE, ann |-> FALSE, acted |-> 0, stopped |-> "none", vm |-> FALSE, claim |-> "", author |-> "", crashed |-> FALSE ] )
+State 3 [StartupRow]
+  at = ( 0 :> [ row |-> "running", sup |-> TRUE, srow |-> "fail", sseq |-> 1, sstreak |-> 1, dl |-> FALSE, stable |-> FALSE, ann |-> FALSE, acted |-> 0, stopped |-> "none", vm |-> TRUE, claim |-> "", author |-> "", crashed |-> FALSE ] @@ 1 :> [ row |-> "none", sup |-> FALSE, srow |-> "absent", sseq |-> 0, sstreak |-> 0, dl |-> FALSE, stable |-> FALSE, ann |-> FALSE, acted |-> 0, stopped |-> "none", vm |-> FALSE, claim |-> "", author |-> "", crashed |-> FALSE ] )
 
-State 4 [StartupRow]
+State 4 [Deadline]
   at = ( 0 :> [ row |-> "running", sup |-> TRUE, srow |-> "fail", sseq |-> 1, sstreak |-> 1, dl |-> TRUE, stable |-> FALSE, ann |-> FALSE, acted |-> 0, stopped |-> "none", vm |-> TRUE, claim |-> "", author |-> "", crashed |-> FALSE ] @@ 1 :> [ row |-> "none", sup |-> FALSE, srow |-> "absent", sseq |-> 0, sstreak |-> 0, dl |-> FALSE, stable |-> FALSE, ann |-> FALSE, acted |-> 0, stopped |-> "none", vm |-> FALSE, claim |-> "", author |-> "", crashed |-> FALSE ] )
 
 State 5 [StartupRow]

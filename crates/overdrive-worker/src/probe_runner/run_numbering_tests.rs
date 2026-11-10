@@ -216,6 +216,15 @@ async fn settle() {
     }
 }
 
+/// Drive the runner half of `VmDriver::on_alloc_stable`: Startup retires and
+/// retained Liveness begins only after the allocation's Stable transition.
+fn after_stable(runner: &ProbeRunner, alloc: &AllocationId) {
+    assert!(!runner.is_role_live(alloc, ProbeRole::Liveness), "Liveness is absent before Stable");
+    runner.stop_role(alloc, ProbeRole::Startup);
+    runner.start_liveness(alloc);
+    assert!(runner.is_role_live(alloc, ProbeRole::Liveness), "Liveness starts at Stable");
+}
+
 impl Probed {
     async fn start() -> Self {
         let obs = Arc::new(SimObservationStore::single_peer(NodeId::new("n").expect("node"), 0));
@@ -231,6 +240,7 @@ impl Probed {
         );
         let alloc = AllocationId::new("probed-0").expect("alloc");
         let _token = runner.start_alloc(&vm_spec(&alloc));
+        after_stable(&runner, &alloc);
         settle().await;
         Self { runner, obs, clock, dial, alloc }
     }
@@ -426,6 +436,8 @@ async fn liveness_row_of(
 async fn http_vm_probe_runs_its_request_over_the_guest_stream() {
     let port = 8090;
     let (runner, obs, clock, dial, alloc) = start_with(vec![http_liveness_descriptor(port)]).await;
+    after_stable(&runner, &alloc);
+    settle().await;
     let target = SocketAddrV4::new(WORKLOAD_ADDR, port);
 
     dial.script(
@@ -497,6 +509,8 @@ async fn elapse(clock: &SimClock, by: Duration) {
 async fn a_probe_whose_dial_or_request_outlives_the_timeout_fails_and_drops_it() {
     let port = 8091;
     let (runner, obs, clock, dial, alloc) = start_with(vec![http_liveness_descriptor(port)]).await;
+    after_stable(&runner, &alloc);
+    settle().await;
     let target = SocketAddrV4::new(WORKLOAD_ADDR, port);
     // The descriptor's timeout, read off the descriptor the runner was given.
     let timeout = Duration::from_secs(u64::from(http_liveness_descriptor(port).timeout_seconds));
@@ -544,13 +558,15 @@ async fn a_probe_whose_dial_or_request_outlives_the_timeout_fails_and_drops_it()
     runner.stop_alloc(&alloc);
 }
 
-/// R5-60 (D-UP-12, sim half): with `GUEST_PROBE_SLOTS` (8) probes on one VM
-/// allocation — 3 startup, 3 readiness, 2 liveness — every probe dials its
-/// own target with `DialPurpose::Probe` in the same period and writes its
-/// row. The parse-time refusal of a ninth probe is the deploy validation's.
+/// R5-60 (D-UP-12, sim half) under D9: one VM declares the full
+/// `GUEST_PROBE_SLOTS` (8) descriptors — 3 startup, 3 readiness, 2 liveness.
+/// Startup and readiness dial in the pre-Stable period; after Stable retires
+/// startup, readiness and liveness dial in the next period. Every descriptor
+/// dials its own target and writes a row across these reachable periods.
+/// The parse-time refusal of a ninth probe is the deploy validation's.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-async fn eight_probes_of_one_vm_allocation_all_dial_in_one_period() {
+async fn eight_probes_of_one_vm_allocation_dial_across_startup_and_stable_periods() {
     let roles = [(ProbeRole::Startup, 3_u32), (ProbeRole::Readiness, 3), (ProbeRole::Liveness, 2)];
     let mut descriptors = Vec::new();
     let mut port = 9000_u16;
@@ -576,12 +592,34 @@ async fn eight_probes_of_one_vm_allocation_all_dial_in_one_period() {
     clock.tick(INTERVAL);
     settle().await;
 
+    let before_stable_dials = dial.dials();
+    let before_stable_targets: std::collections::BTreeSet<SocketAddrV4> =
+        before_stable_dials.iter().map(|d| d.target).collect();
+    let startup_and_readiness: std::collections::BTreeSet<SocketAddrV4> =
+        (9000_u16..9006).map(|port| SocketAddrV4::new(WORKLOAD_ADDR, port)).collect();
+    assert_eq!(before_stable_targets, startup_and_readiness);
+    assert_eq!(
+        obs.list_probe_results_for_alloc(&alloc).await.expect("list pre-Stable rows").len(),
+        6,
+        "startup and readiness write their six rows before Stable"
+    );
+
+    after_stable(&runner, &alloc);
+    settle().await;
+    clock.tick(INTERVAL);
+    settle().await;
+
     let dials = dial.dials();
+    let after_stable_targets: std::collections::BTreeSet<SocketAddrV4> =
+        dials.iter().skip(before_stable_dials.len()).map(|d| d.target).collect();
+    let readiness_and_liveness: std::collections::BTreeSet<SocketAddrV4> =
+        (9003_u16..9008).map(|port| SocketAddrV4::new(WORKLOAD_ADDR, port)).collect();
+    assert_eq!(after_stable_targets, readiness_and_liveness);
     let targets: std::collections::BTreeSet<SocketAddrV4> =
         dials.iter().map(|d| d.target).collect();
     let expected: std::collections::BTreeSet<SocketAddrV4> =
         (9000_u16..9008).map(|port| SocketAddrV4::new(WORKLOAD_ADDR, port)).collect();
-    assert_eq!(targets, expected, "every one of the eight probes dialled its own target");
+    assert_eq!(targets, expected, "every descriptor dialled in its live phase");
     assert!(dials.iter().all(|d| d.purpose == DialPurpose::Probe), "probe dials are quota-exempt");
     let rows = obs.list_probe_results_for_alloc(&alloc).await.expect("list rows");
     assert_eq!(rows.len(), 8, "every probe wrote its row: {rows:?}");

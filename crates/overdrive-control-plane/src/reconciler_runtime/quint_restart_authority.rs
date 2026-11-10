@@ -476,7 +476,7 @@ impl RaWorld {
                 self.driver.script_stop_failure(Some("scripted Driver::stop failure"));
             }
             Some("row_write") => {
-                self.write_faults.inject_write_failure(ObservationStoreError::Io(
+                self.write_faults.inject_alloc_lifecycle_write_failure(ObservationStoreError::Io(
                     std::io::Error::other("injected terminal row write failure"),
                 ));
             }
@@ -1077,7 +1077,6 @@ fn restart_authority_startup_stop_is_not_intentional_stop() -> impl Driver {
     max_samples = 1
 )]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D14 item 3 startup gate threshold 1 for a GuestListeners descriptor; D7 startup stop"]
 fn restart_authority_first_fail_at_deadline_with_no_earlier_row_stops() -> impl Driver {
     RestartAuthorityDriver::new()
 }
@@ -1148,7 +1147,6 @@ fn restart_authority_control_plane_restart_keeps_acted_run() -> impl Driver {
     main = "ra_conf"
 )]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D5-D8, D14, DG-12 restart authority (the random traces reach the unimplemented D6/D7 endings and the DG-12 announcement)"]
 fn restart_authority_conformance_ra_conf() -> impl Driver {
     RestartAuthorityDriver::new()
 }

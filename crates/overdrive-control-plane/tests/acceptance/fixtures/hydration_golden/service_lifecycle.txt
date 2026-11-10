@@ -45,7 +45,7 @@ ServiceLifecycle(
                         1700000000s,
                     ),
                 ),
-                max_attempts: 30,
+                startup_attempts_required: 30,
                 startup_deadline: 60s,
                 mechanic_summary: "tcp 0.0.0.0:8080",
                 inferred: false,

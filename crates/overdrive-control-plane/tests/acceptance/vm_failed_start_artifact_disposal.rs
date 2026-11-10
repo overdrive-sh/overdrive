@@ -59,7 +59,7 @@ struct CloneRemovalPartitionVmm {
     terminates: AtomicUsize,
 }
 
-fn probe_runner(board: Arc<overdrive_worker::GuestListenerBoard>) -> Arc<ProbeRunner> {
+fn probe_runner(board: &Arc<overdrive_worker::GuestListenerBoard>) -> Arc<ProbeRunner> {
     Arc::new(ProbeRunner::new(
         Arc::new(SimTcpProber::new()),
         Arc::new(SimHttpProber::new()),
@@ -69,7 +69,7 @@ fn probe_runner(board: Arc<overdrive_worker::GuestListenerBoard>) -> Arc<ProbeRu
             0,
         )),
         Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
-        Arc::clone(&board) as Arc<dyn overdrive_core::traits::GuestListenerReports>,
+        Arc::clone(board) as Arc<dyn overdrive_core::traits::GuestListenerReports>,
     ))
 }
 
@@ -234,7 +234,7 @@ async fn failed_vm_cleanup_hands_only_stranded_vm_artifacts_to_disposal() {
         Arc::clone(&clock),
         Arc::new(SimCgroupFs::new()),
         Arc::new(SimCgroupAccounting::new()),
-        probe_runner(Arc::clone(&guest_listener_board)),
+        probe_runner(&guest_listener_board),
         wiring.gate(),
         layout.clone(),
         BeaconIntake::bind(

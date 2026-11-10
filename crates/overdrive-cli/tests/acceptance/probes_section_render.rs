@@ -386,7 +386,6 @@ proptest! {
 /// listeners in declaration order.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER: D14 guest listeners mechanic summary names the declared listeners"]
 fn guest_listeners_summary_names_the_declared_listeners_in_declaration_order() {
     use overdrive_core::aggregate::Listener;
     use overdrive_core::dataplane::backend_key::Proto;

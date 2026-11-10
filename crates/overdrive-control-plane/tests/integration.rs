@@ -221,10 +221,6 @@ mod integration {
     // R5-41) on native metal with guest-kit microVMs.
     #[cfg(feature = "kvm-tests")]
     mod guest_flow_through_serve;
-    // service-allocation-readiness-and-ending, D13 item 10 / DG-6: the
-    // production composition shares one `GuestListenerBoard` between the VM
-    // driver and the probe runner (SimVmm + SimBeaconIo at the driven ports).
-    mod guest_listener_board_wiring;
     // service-allocation-readiness-and-ending, Gate G-10 (10) and the guest
     // half of `guest_report`: real-boot guest-kit microVMs on native metal.
     #[cfg(feature = "kvm-tests")]

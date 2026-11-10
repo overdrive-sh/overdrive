@@ -1409,11 +1409,24 @@ pub fn format_probe_mechanic_summary(
             let host = host.as_deref().unwrap_or("0.0.0.0");
             format!("http GET http://{host}:{port}{path}")
         }
-        // SCAFFOLD: true — D14 item 4 pins the text `guest listeners tcp:8080 udp:5353`
-        // (declared order) from `listeners`; DELIVER implements it.
         ProbeMechanic::GuestListeners => {
-            let _ = listeners;
-            "guest listeners".to_owned()
+            use overdrive_core::dataplane::backend_key::Proto;
+            let names = listeners
+                .iter()
+                .map(|listener| {
+                    let protocol = match listener.protocol {
+                        Proto::Tcp => "tcp",
+                        Proto::Udp => "udp",
+                    };
+                    format!("{protocol}:{}", listener.port)
+                })
+                .collect::<Vec<_>>()
+                .join(" ");
+            if names.is_empty() {
+                "guest listeners".to_owned()
+            } else {
+                format!("guest listeners {names}")
+            }
         }
     }
 }

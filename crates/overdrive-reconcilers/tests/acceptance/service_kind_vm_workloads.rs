@@ -68,7 +68,7 @@ fn running_fact(
         latest_startup_probe_observed_at: Some(UnixInstant::from_unix_duration(
             Duration::from_millis(1),
         )),
-        max_attempts,
+        startup_attempts_required: max_attempts,
         startup_deadline: Duration::from_secs(1),
         mechanic_summary: "tcp 0.0.0.0:18081".to_string(),
         inferred: false,

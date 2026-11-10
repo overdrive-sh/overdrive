@@ -665,7 +665,7 @@ proptest! {
             latest_startup_probe_observed_at: latest_startup_probe
                 .as_ref()
                 .map(|_| UnixInstant::from_unix_duration(Duration::from_millis(1))),
-            max_attempts: 30,
+            startup_attempts_required: 30,
             startup_deadline: Duration::from_secs(60),
             mechanic_summary: "tcp 0.0.0.0:8080".to_string(),
             inferred: false,

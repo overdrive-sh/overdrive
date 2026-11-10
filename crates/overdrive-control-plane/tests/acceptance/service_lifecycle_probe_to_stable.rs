@@ -161,7 +161,7 @@ fn fact_from_row_and_intent(
         latest_startup_probe_observed_at: Some(UnixInstant::from_unix_duration(
             Duration::from_millis(row.last_observed_at_unix_ms),
         )),
-        max_attempts: descriptor.max_attempts,
+        startup_attempts_required: descriptor.max_attempts,
         startup_deadline: Duration::from_secs(
             u64::from(descriptor.max_attempts) * u64::from(descriptor.interval_seconds),
         ),

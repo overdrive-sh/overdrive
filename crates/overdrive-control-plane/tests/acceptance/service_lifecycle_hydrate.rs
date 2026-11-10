@@ -575,7 +575,7 @@ fn gap_1_at_07_reconciler_skips_when_started_at_none_on_failed_alloc() {
         started_at: None,
         latest_startup_probe: None,
         latest_startup_probe_observed_at: None,
-        max_attempts: 0, // terminal state wins even when the startup gate could fire
+        startup_attempts_required: 0, // terminal state wins even when the startup gate could fire
         startup_deadline: Duration::from_secs(60),
         mechanic_summary: "tcp 0.0.0.0:8080".to_string(),
         inferred: false,
@@ -655,7 +655,7 @@ fn gap_1_at_08_reconciler_unreachable_when_running_alloc_has_no_started_at() {
         latest_startup_probe_observed_at: Some(UnixInstant::from_unix_duration(
             Duration::from_millis(1),
         )),
-        max_attempts: 30,
+        startup_attempts_required: 30,
         startup_deadline: Duration::from_secs(60),
         mechanic_summary: "tcp 0.0.0.0:8080".to_string(),
         inferred: false,

@@ -5,23 +5,23 @@ State 1
   w = [cur |-> 0, com |-> (0 :> "none" @@ 1 :> "none"), pub |-> (0 :> -1 @@ 1 :> -1)]
   conf_step = [init |-> [tag |-> "UNIT"]]
 
-State 2 [Commit]
-  w = [ cur |-> 0, com |-> (0 :> "stable" @@ 1 :> "none"), pub |-> (0 :> -1 @@ 1 :> -1) ]
-
-State 3 [Publish]
-  w = [cur |-> 0, com |-> (0 :> "stable" @@ 1 :> "none"), pub |-> (0 :> 0 @@ 1 :> -1)]
-
-State 4 [Restart]
-  w = [cur |-> 1, com |-> (0 :> "stable" @@ 1 :> "none"), pub |-> (0 :> 0 @@ 1 :> -1)]
-
-State 5 [Read]
+State 2 [Read]
   s = [ st |-> "open", phase |-> "readfirst", chan |-> <<>>, lagged |-> FALSE, armed |-> TRUE, kind |-> "", src |-> "", closeTerm |-> "", closeAtt |-> -1, readCur |-> -1, closes |-> 0, readFail |-> FALSE, lags |-> 0 ]
 
+State 3 [Commit]
+  w = [ cur |-> 0, com |-> (0 :> "startup_stop" @@ 1 :> "none"), pub |-> (0 :> -1 @@ 1 :> -1) ]
+
+State 4 [Publish]
+  w = [ cur |-> 0, com |-> (0 :> "startup_stop" @@ 1 :> "none"), pub |-> (0 :> 0 @@ 1 :> -1) ]
+
+State 5 [Restart]
+  w = [ cur |-> 1, com |-> (0 :> "startup_stop" @@ 1 :> "none"), pub |-> (0 :> 0 @@ 1 :> -1) ]
+
 State 6 [Commit]
-  w = [ cur |-> 1, com |-> (0 :> "stable" @@ 1 :> "giveup"), pub |-> (0 :> 0 @@ 1 :> -1) ]
+  w = [ cur |-> 1, com |-> (0 :> "startup_stop" @@ 1 :> "giveup"), pub |-> (0 :> 0 @@ 1 :> -1) ]
 
 State 7 [Publish]
-  w = [ cur |-> 1, com |-> (0 :> "stable" @@ 1 :> "giveup"), pub |-> (0 :> 0 @@ 1 :> 1) ]
+  w = [ cur |-> 1, com |-> (0 :> "startup_stop" @@ 1 :> "giveup"), pub |-> (0 :> 0 @@ 1 :> 1) ]
 
 State 8 [Subscribe]
   s = [ st |-> "open", phase |-> "rd", chan |-> <<>>, lagged |-> FALSE, armed |-> TRUE, kind |-> "", src |-> "", closeTerm |-> "", closeAtt |-> -1, readCur |-> -1, closes |-> 0, readFail |-> FALSE, lags |-> 0 ]
