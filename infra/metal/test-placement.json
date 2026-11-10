@@ -6512,9 +6512,6 @@
       "acceptance::service_lifecycle_reconcile_branches::s_roh_a_01_liveness_threshold_emits_stop_allocation": {
         "kind": "host-pure"
       },
-      "acceptance::service_lifecycle_reconcile_branches::stable_this_tick_suppresses_liveness_restart_same_tick": {
-        "kind": "host-pure"
-      },
       "acceptance::service_lifecycle_reconcile_branches::stable_dedup_skips_already_announced_alloc": {
         "kind": "host-pure"
       },

@@ -1556,15 +1556,10 @@ fn readiness_branch_emits_write_when_healthy_flag_changes() {
 }
 
 // -------------------------------------------------------------------
-// D1.3 — same-tick liveness suppression when a stable/startup terminal
-// is announced. LIVE at service_lifecycle.rs:970
-// (`if next_view.terminal_announced.contains(..) || stable_this_tick
-//   .contains(..) { continue; }`). Post-ADR-0087 the liveness path emits
-// `StopAllocation { Stopped { by: LivenessProbe } }` (NOT the deleted
-// `RestartAllocation`), so these assert the SUPPRESSION of that
-// `StopAllocation` when the SAME tick already announced a stable/startup
-// terminal, and the RESUME on a later tick (the transient `stable_this_
-// tick` guard must not persist after the committed Stable row).
+// D7/D9 — a startup stop suppresses a competing liveness stop at the pure
+// reconciler boundary; in the reachable owner trajectory, liveness rows begin
+// only after the Stable row commits. The later-tick case below pins the
+// post-Stable liveness stop and the absence of a second Stable announcement.
 // -------------------------------------------------------------------
 
 /// D7: a Running alloc that fires the startup stop on the startup loop
@@ -1646,72 +1641,10 @@ fn startup_probe_failure_suppresses_liveness_stop_same_tick() {
     assert!(next.terminal_announced.contains(&aid(id)), "alloc recorded in terminal_announced");
 }
 
-/// A Running alloc that reaches `Stable` on the startup loop (recorded in
-/// `stable_this_tick`) AND has a liveness streak
-/// tripping the threshold on the SAME tick must emit ONLY the Stable
-/// terminal — the liveness loop skips it via `stable_this_tick`. Without
-/// the guard, both `FinalizeFailed { Stable }` AND `StopAllocation` land
-/// for one alloc.
-/// CONTRACT_SHAPE: bounded-change.
-#[test]
-fn stable_this_tick_suppresses_liveness_restart_same_tick() {
-    let id = "svc-stable-liveness-0";
-    let f = ServiceAllocFact {
-        stable_committed: false,
-        latest_liveness_probe: Some(ProbeStatus::Fail {
-            last_fail_reason: "liveness refused".to_string(),
-        }),
-        has_liveness_probe: true,
-        liveness_failure_threshold: 3,
-        ..fact(
-            id,
-            AllocState::Running,
-            1_000,
-            Some(ProbeStatus::Pass), // Running + startup Pass ⇒ Stable
-            u32::MAX,                // never trips StartupProbeFailed
-            Duration::from_secs(60),
-        )
-    };
-    let mut actual = one_alloc_state(f);
-    put_probe_row(
-        &mut actual,
-        &aid(id),
-        ProbeRole::Liveness,
-        ProbeStatus::Fail { last_fail_reason: "liveness refused".to_string() },
-        3,
-        3,
-    );
-    let view = ServiceLifecycleView::default();
-
-    let recon = ServiceLifecycleReconciler::new();
-    let (actions, next) =
-        recon.reconcile(&ServiceLifecycleState::default(), &actual, &view, &tick_at_ms(10_000));
-
-    let stable = actions
-        .iter()
-        .filter(|a| {
-            matches!(
-                a,
-                Action::FinalizeFailed { terminal: Some(TerminalCondition::Stable { .. }), .. }
-            )
-        })
-        .count();
-    assert_eq!(stable, 1, "exactly one Stable terminal; got {actions:?}");
-
-    let stops = actions.iter().filter(|a| matches!(a, Action::StopAllocation { .. })).count();
-    assert_eq!(
-        stops, 0,
-        "liveness must NOT StopAllocation an alloc announced Stable this tick; got {actions:?}"
-    );
-    assert_eq!(actions.len(), 1, "exactly one action total (Stable only); got {actions:?}");
-    assert!(next.observed.contains(&aid(id)), "the allocation remains observed");
-}
-
-/// Once the alloc's Stable row committed on a PRIOR tick, the same-tick
-/// suppression must NOT persist: on a later tick the liveness loop resumes
-/// and emits `StopAllocation { Stopped { by: LivenessProbe } }` when the
-/// threshold is met. The suppression is keyed on the transient
-/// `stable_this_tick` set; the committed row permits liveness on later ticks.
+/// After the allocation's Stable row commits, the runner can produce a
+/// liveness streak; `ServiceLifecycle` emits `StopAllocation { Stopped {
+/// by: LivenessProbe } }` when the threshold is met, without re-emitting
+/// Stable. This is the reachable D9 owner order.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn liveness_resumes_after_prior_tick_stable_announcement() {
@@ -1757,7 +1690,7 @@ fn liveness_resumes_after_prior_tick_stable_announcement() {
         stops.len(),
         1,
         "liveness must emit StopAllocation for a post-Stable alloc when threshold is met \
-         (the prior tick's transient guard must not persist); got {actions:?}",
+         after the Stable row committed; got {actions:?}",
     );
     match stops[0] {
         Action::StopAllocation { terminal, .. } => {
