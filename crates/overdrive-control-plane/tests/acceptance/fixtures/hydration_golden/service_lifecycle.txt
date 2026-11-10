@@ -37,7 +37,6 @@ ServiceLifecycle(
                         1700000000s,
                     ),
                 ),
-                exit_code: None,
                 latest_startup_probe: Some(
                     Pass,
                 ),

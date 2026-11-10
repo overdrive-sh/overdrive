@@ -1,4 +1,4 @@
-# ra-hazard-stamp-at-emission: counterexample, 9 state(s) (from the TLC trace)
+# ra-hazard-stamp-at-emission: counterexample, 8 state(s) (from the TLC trace)
 
 State 1
   deployed = FALSE
@@ -32,12 +32,9 @@ State 6 [StartupRow]
 
 State 7 [SLStartupStop]
   g = [startupOverTerm |-> FALSE, emitCount |-> 1, stableOverAnn |-> FALSE]
-  at = ( 0 :> [ row |-> "failed_other", sup |-> FALSE, srow |-> "absent", sseq |-> 0, sstreak |-> 0, dl |-> FALSE, stable |-> FALSE, ann |-> FALSE, acted |-> 0, stopped |-> "none", vm |-> FALSE, claim |-> "", author |-> "", crashed |-> FALSE ] @@ 1 :> [ row |-> "running", sup |-> TRUE, srow |-> "fail", sseq |-> 2, sstreak |-> 2, dl |-> TRUE, stable |-> FALSE, ann |-> TRUE, acted |-> 2, stopped |-> "failed", vm |-> FALSE, claim |-> "", author |-> "", crashed |-> FALSE ] )
+  at = ( 0 :> [ row |-> "failed_other", sup |-> FALSE, srow |-> "absent", sseq |-> 0, sstreak |-> 0, dl |-> FALSE, stable |-> FALSE, ann |-> TRUE, acted |-> 0, stopped |-> "none", vm |-> FALSE, claim |-> "", author |-> "", crashed |-> FALSE ] @@ 1 :> [ row |-> "running", sup |-> TRUE, srow |-> "fail", sseq |-> 2, sstreak |-> 2, dl |-> TRUE, stable |-> FALSE, ann |-> TRUE, acted |-> 2, stopped |-> "failed", vm |-> FALSE, claim |-> "", author |-> "", crashed |-> FALSE ] )
 
 State 8 [StartupRow]
-  at = ( 0 :> [ row |-> "failed_other", sup |-> FALSE, srow |-> "absent", sseq |-> 0, sstreak |-> 0, dl |-> FALSE, stable |-> FALSE, ann |-> FALSE, acted |-> 0, stopped |-> "none", vm |-> FALSE, claim |-> "", author |-> "", crashed |-> FALSE ] @@ 1 :> [ row |-> "running", sup |-> TRUE, srow |-> "fail", sseq |-> 3, sstreak |-> 2, dl |-> TRUE, stable |-> FALSE, ann |-> TRUE, acted |-> 2, stopped |-> "failed", vm |-> FALSE, claim |-> "", author |-> "", crashed |-> FALSE ] )
-
-State 9 [SLAnnounceTerminal]
   at = ( 0 :> [ row |-> "failed_other", sup |-> FALSE, srow |-> "absent", sseq |-> 0, sstreak |-> 0, dl |-> FALSE, stable |-> FALSE, ann |-> TRUE, acted |-> 0, stopped |-> "none", vm |-> FALSE, claim |-> "", author |-> "", crashed |-> FALSE ] @@ 1 :> [ row |-> "running", sup |-> TRUE, srow |-> "fail", sseq |-> 3, sstreak |-> 2, dl |-> TRUE, stable |-> FALSE, ann |-> TRUE, acted |-> 2, stopped |-> "failed", vm |-> FALSE, claim |-> "", author |-> "", crashed |-> FALSE ] )
 
--> stutters forever in State 9
+-> stutters forever in State 8

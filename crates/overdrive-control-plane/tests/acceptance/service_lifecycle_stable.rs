@@ -69,7 +69,6 @@ fn fact_running_with_pass(alloc_id: AllocationId, started_at_unix_ms: u64) -> Se
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_millis(
             started_at_unix_ms,
         ))),
-        exit_code: None,
         latest_startup_probe: Some(ProbeStatus::Pass),
         latest_startup_probe_observed_at: Some(UnixInstant::from_unix_duration(
             Duration::from_millis(1),
@@ -89,11 +88,7 @@ fn fact_running_with_pass(alloc_id: AllocationId, started_at_unix_ms: u64) -> Se
     }
 }
 
-fn fact_failed_within_deadline(
-    alloc_id: AllocationId,
-    started_at_unix_ms: u64,
-    exit_code: i32,
-) -> ServiceAllocFact {
+fn fact_failed_after_start(alloc_id: AllocationId, started_at_unix_ms: u64) -> ServiceAllocFact {
     ServiceAllocFact {
         stable_committed: false,
         alloc_id,
@@ -104,7 +99,6 @@ fn fact_failed_within_deadline(
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_millis(
             started_at_unix_ms,
         ))),
-        exit_code: Some(exit_code),
         latest_startup_probe: None,
         latest_startup_probe_observed_at: None,
         max_attempts: 30,
@@ -223,9 +217,8 @@ fn given_stable_already_announced_when_reconcile_then_emits_no_actions() {
     assert!(next_view.stable_announced.contains(&alloc_id));
 }
 
-/// S-SHCP-RECON-05 (US-08 AC — exit after Stable is NOT EarlyExit)
-/// — alloc Failed row arrives AFTER Stable announced →
-/// reconciler does NOT emit EarlyExit; dedup applies.
+/// S-SHCP-RECON-05 as amended by D6/DG-12: a Failed row after Stable
+/// produces no ServiceLifecycle action and closes its terminal watch.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn given_alloc_exits_after_stable_when_reconcile_then_does_not_emit_early_exit() {
@@ -235,13 +228,14 @@ fn given_alloc_exits_after_stable_when_reconcile_then_does_not_emit_early_exit()
     let mut view = ServiceLifecycleView::default();
     view.stable_announced.insert(alloc_id.clone());
     // Now the alloc dies
-    let actual = state_with(vec![fact_failed_within_deadline(alloc_id.clone(), 1000, 1)]);
+    let actual = state_with(vec![fact_failed_after_start(alloc_id.clone(), 1000)]);
     let desired = actual.clone();
     let tick = tick_at(1500);
 
-    let (actions, _next_view) = reconciler.reconcile(&desired, &actual, &view, &tick);
+    let (actions, next_view) = reconciler.reconcile(&desired, &actual, &view, &tick);
 
-    assert!(actions.is_empty(), "exit after Stable must NOT emit EarlyExit; got {actions:?}");
+    assert!(actions.is_empty(), "a terminal allocation emits no action; got {actions:?}");
+    assert!(next_view.terminal_announced.contains(&alloc_id), "the terminal watch closes");
 }
 
 /// S-SHCP-RECON-03 (US-01 / K1 sad path) — startup probe never

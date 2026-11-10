@@ -389,7 +389,6 @@ fn opt_out_fact(alloc_id: AllocationId, started_at_unix_ms: u64) -> ServiceAlloc
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_millis(
             started_at_unix_ms,
         ))),
-        exit_code: None,
         latest_startup_probe: None,
         latest_startup_probe_observed_at: None,
         max_attempts: 30,
@@ -423,7 +422,6 @@ fn fact_with_probes(alloc_id: AllocationId, started_at_unix_ms: u64) -> ServiceA
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_millis(
             started_at_unix_ms,
         ))),
-        exit_code: None,
         latest_startup_probe: None,
         latest_startup_probe_observed_at: None,
         max_attempts: 30,

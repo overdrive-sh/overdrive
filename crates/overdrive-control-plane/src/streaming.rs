@@ -1096,7 +1096,15 @@ pub fn build_service_stream(
                                 continue;
                             };
                             let alloc_id_str = event.alloc_id.to_string();
-                            let stderr_tail = event.detail.clone();
+                            // A guest crash carries stderr in its typed cause;
+                            // `detail` remains the fallback for other terminal causes.
+                            let stderr_tail = match &event.reason {
+                                TransitionReason::WorkloadCrashedImmediately {
+                                    stderr_tail: Some(stderr_tail),
+                                    ..
+                                } => Some(stderr_tail.clone()),
+                                _ => event.detail.clone(),
+                            };
                             let Some(wire) = service_event_from_terminal(
                                 &alloc_id_str,
                                 terminal,

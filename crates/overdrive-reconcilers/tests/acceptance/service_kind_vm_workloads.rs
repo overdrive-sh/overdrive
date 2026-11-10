@@ -64,7 +64,6 @@ fn running_fact(
             },
         ),
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(10))),
-        exit_code: None,
         latest_startup_probe: Some(startup),
         latest_startup_probe_observed_at: Some(UnixInstant::from_unix_duration(
             Duration::from_millis(1),

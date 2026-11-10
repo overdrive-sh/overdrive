@@ -10,7 +10,8 @@
 //! Three-source join per the audit's recommended fix:
 //!
 //!   1. `obs.alloc_status_rows()` filtered to the target workload —
-//!      sources `alloc_id`, `state`, `started_at`, `exit_code`.
+//!      sources `alloc_id`, `state`, `started_at`. The crash's typed
+//!      `reason` stays on the observation row for `WorkloadLifecycle`.
 //!   2. `obs.list_probe_results_for_alloc(...)` LWW projection —
 //!      sources `latest_startup_probe`.
 //!   3. `IntentStore::get(IntentKey::for_workload(workload_id))` →
@@ -225,12 +226,9 @@ fn make_alloc_status_row(
     }
 }
 
-/// Like [`make_alloc_status_row`] but carries an explicit
-/// `reason: Option<TransitionReason>` so the `exit_code` projection
-/// (GAP-11) can be exercised. The Service-kind hydration sources
-/// `exit_code` from the row's `WorkloadCrashedImmediately` variant,
-/// mirroring the Job-kind precedent at
-/// `workload_lifecycle.rs::classify_natural_exit_terminal`.
+/// Like [`make_alloc_status_row`] but carries an explicit typed reason so
+/// the durable crash cause remains available to `WorkloadLifecycle` after
+/// Service-kind hydration (D6; no `ServiceAllocFact.exit_code` projection).
 fn make_alloc_status_row_with_reason(
     wid: &WorkloadId,
     aid: &AllocationId,
@@ -348,7 +346,7 @@ async fn gap_1_at_01b_hydrate_desired_handles_empty_startup_probes() {
 }
 
 // ===========================================================================
-// GAP-1-AT-02 — hydrate_actual sources state, started_at, exit_code
+// GAP-1-AT-02 — hydrate_actual sources state and started_at
 //                from alloc_status row
 // ===========================================================================
 
@@ -552,22 +550,16 @@ async fn gap_1_at_06_started_at_none_propagates_as_none() {
 }
 
 // ===========================================================================
-// GAP-1-AT-07 — reconciler skip branches on None
-//                (EarlyExit / StartupProbeFailed)
+// GAP-1-AT-07 — a terminal fact closes the ServiceLifecycle watch
 // ===========================================================================
 
-/// Per the audit's locked-in semantic answers:
-///   - EarlyExit (branch c) skips when `started_at == None`
-///   - StartupProbeFailed (branch b) skips when `started_at == None`
-///
-/// Construct facts with `state == Failed` AND `started_at == None`;
-/// invoke the reconciler directly; assert that NO EarlyExit AND NO
-/// StartupProbeFailed Action is emitted from those branches.
+/// D6/DG-12: a `Failed` allocation with no `started_at` emits no
+/// action and joins `terminal_announced`. The same outcome now holds
+/// for a started terminal allocation (S-56).
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn gap_1_at_07_reconciler_skips_when_started_at_none_on_failed_alloc() {
-    use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
-    use overdrive_core::transition_reason::TerminalCondition;
+    use overdrive_core::reconcilers::{Reconciler, TickContext};
     use overdrive_reconcilers::service_lifecycle::{
         ServiceAllocFact, ServiceLifecycleReconciler, ServiceLifecycleView,
     };
@@ -580,11 +572,10 @@ fn gap_1_at_07_reconciler_skips_when_started_at_none_on_failed_alloc() {
             overdrive_reconcilers::service_lifecycle::NotRunningState::new(AllocState::Failed)
                 .expect("not Running"),
         ),
-        started_at: None, // load-bearing: triggers skip on both branches
-        exit_code: Some(99),
+        started_at: None,
         latest_startup_probe: None,
         latest_startup_probe_observed_at: None,
-        max_attempts: 0, // would otherwise satisfy StartupProbeFailed gate
+        max_attempts: 0, // terminal state wins even when the startup gate could fire
         startup_deadline: Duration::from_secs(60),
         mechanic_summary: "tcp 0.0.0.0:8080".to_string(),
         inferred: false,
@@ -613,32 +604,15 @@ fn gap_1_at_07_reconciler_skips_when_started_at_none_on_failed_alloc() {
     };
 
     let reconciler = ServiceLifecycleReconciler::new();
-    let (actions, _) = reconciler.reconcile(
+    let (actions, next_view) = reconciler.reconcile(
         &ServiceLifecycleState::default(),
         &actual,
         &ServiceLifecycleView::default(),
         &tick,
     );
 
-    // No EarlyExit emission AND no StartupProbeFailed emission from
-    // the two branches that would normally fire when `started_at` is
-    // present.
-    for action in &actions {
-        if let Action::FinalizeFailed { terminal: Some(term), .. } = action {
-            match term {
-                TerminalCondition::ServiceFailed { reason } => {
-                    panic!(
-                        "branches (b) and (c) must SKIP when started_at == None; \
-                         got terminal {reason:?}",
-                    );
-                }
-                TerminalCondition::Stable { .. } => {
-                    panic!("Stable must NOT fire on Failed alloc (state guard); got {action:?}",);
-                }
-                _ => {}
-            }
-        }
-    }
+    assert!(actions.is_empty(), "a terminal fact emits no ServiceLifecycle action: {actions:?}");
+    assert!(next_view.terminal_announced.contains(&aid), "the terminal watch closes");
 }
 
 // ===========================================================================
@@ -677,7 +651,6 @@ fn gap_1_at_08_reconciler_unreachable_when_running_alloc_has_no_started_at() {
             },
         ), // load-bearing: triggers the unreachable
         started_at: None, // invalid combination
-        exit_code: None,
         latest_startup_probe: Some(ProbeStatus::Pass),
         latest_startup_probe_observed_at: Some(UnixInstant::from_unix_duration(
             Duration::from_millis(1),
@@ -733,30 +706,18 @@ fn gap_1_at_08_reconciler_unreachable_when_running_alloc_has_no_started_at() {
 }
 
 // ===========================================================================
-// GAP-11 — hydrate_actual projects exit_code from row.reason
-//          (WorkloadCrashedImmediately) for the Service kind.
+// D6 — the crash cause stays on the durable row, not ServiceAllocFact.
 // ===========================================================================
 
-/// The Service-kind hydration MUST source the alloc's `exit_code` from
-/// the row's `reason: Option<TransitionReason>` — specifically the
-/// `WorkloadCrashedImmediately { exit_code, .. }` variant — and project
-/// `None` for any other reason shape. This mirrors the Job-kind
-/// precedent at `workload_lifecycle.rs::classify_natural_exit_terminal`
-/// (line ~944) and closes GAP-11: before the fix the projection
-/// hardcoded `exit_code: None`, so every EarlyExit wire surface
-/// reported `exit_code: 0`.
-///
-/// Three cases pin both the match arm AND the `_ => None` fallback as
-/// mutation targets:
-///   1. crashed with `exit_code: Some(1)` → fact carries `Some(1)`
-///   2. crashed with `exit_code: None` (signal-only) → fact carries `None`
-///   3. a non-crash reason → fact carries `None` (the `_` fallback)
+/// Service-kind hydration leaves the observed row intact. The restart
+/// authority reads its typed cause at give-up (D6): crash with an exit code,
+/// signal-only crash, and a non-crash reason retain their distinct payloads.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-async fn gap_11_hydrate_actual_projects_exit_code_from_crash_reason() {
+async fn crash_reason_remains_on_observation_row_after_service_hydration() {
     use overdrive_core::transition_reason::{StoppedBy, TransitionReason};
 
-    let cases: Vec<(&str, Option<TransitionReason>, Option<i32>)> = vec![
+    let cases: Vec<(&str, Option<TransitionReason>)> = vec![
         (
             "crash-exit-1",
             Some(TransitionReason::WorkloadCrashedImmediately {
@@ -764,7 +725,6 @@ async fn gap_11_hydrate_actual_projects_exit_code_from_crash_reason() {
                 signal: None,
                 stderr_tail: None,
             }),
-            Some(1),
         ),
         (
             "crash-signal-only",
@@ -773,12 +733,11 @@ async fn gap_11_hydrate_actual_projects_exit_code_from_crash_reason() {
                 signal: Some(9),
                 stderr_tail: None,
             }),
-            None,
         ),
-        ("non-crash-reason", Some(TransitionReason::Stopped { by: StoppedBy::Process }), None),
+        ("non-crash-reason", Some(TransitionReason::Stopped { by: StoppedBy::Process })),
     ];
 
-    for (suffix, reason, expected_exit_code) in cases {
+    for (suffix, reason) in cases {
         let tmp = TempDir::new().expect("tmpdir");
         let obs = Arc::new(SimObservationStore::single_peer(node_id("local"), 0))
             as Arc<dyn ObservationStore>;
@@ -790,9 +749,8 @@ async fn gap_11_hydrate_actual_projects_exit_code_from_crash_reason() {
 
         let aid = alloc_id(&format!("svc-exit-{suffix}-0"));
         let started = UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000));
-        // Failed row with a started_at so the fact projects without the
-        // Running-invariant unreachable; the exit_code projection is the
-        // assertion under test.
+        // The row carries the typed cause the restart authority will read;
+        // ServiceLifecycle hydration projects state and start time only.
         write_alloc_status(
             &state,
             make_alloc_status_row_with_reason(
@@ -801,7 +759,7 @@ async fn gap_11_hydrate_actual_projects_exit_code_from_crash_reason() {
                 AllocState::Failed,
                 Some(started),
                 1,
-                reason,
+                reason.clone(),
             ),
         )
         .await;
@@ -812,11 +770,10 @@ async fn gap_11_hydrate_actual_projects_exit_code_from_crash_reason() {
                 .expect("hydrate_actual"),
         );
         let fact = actual.allocs.get(&aid).expect("fact present");
-        assert_eq!(
-            fact.exit_code, expected_exit_code,
-            "exit_code must project from row.reason for case {suffix:?}: expected {expected_exit_code:?}, got {:?}",
-            fact.exit_code,
-        );
+        assert_eq!(fact.state(), AllocState::Failed, "{suffix}: state is still hydrated");
+        assert_eq!(fact.started_at, Some(started), "{suffix}: started_at is still hydrated");
+        let observed = state.obs.alloc_status_row(&aid).await.expect("row read").expect("row");
+        assert_eq!(observed.reason, reason, "{suffix}: the typed cause remains on its row");
     }
 }
 

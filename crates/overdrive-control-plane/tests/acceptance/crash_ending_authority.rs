@@ -23,7 +23,7 @@ use overdrive_core::transition_reason::ServiceFailureReason;
 use overdrive_reconcilers::RESTART_BACKOFF_CEILING;
 
 use crate::acceptance::restart_authority_world::{
-    Dial, RestartWorld, Shape, assert_universe_unchanged,
+    Dial, DriverCall, RestartWorld, Shape, assert_universe_unchanged,
 };
 
 /// Crash every attempt through the production exit observer, with a
@@ -139,7 +139,6 @@ async fn crash_with_a_partial_streak_is_not_probed_after_the_crash() {
 /// the only terminal write is `WorkloadLifecycle`'s.
 #[tokio::test]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D6 restart authority names a pre-startup crash loop at give-up"]
 async fn pre_startup_crash_loop_ends_the_stream_with_early_exit_at_give_up() {
     let mut world = RestartWorld::compose(Shape::StartupProbe).await;
     let stream = world.open_stream().await;
@@ -158,6 +157,12 @@ async fn pre_startup_crash_loop_ends_the_stream_with_early_exit_at_give_up() {
     world.guest_exits(&alloc, Some(1), None).await;
     world.service_tick().await.expect("look");
     assert!(!stream.closed(), "the stream stays open until the budget is spent");
+    assert_eq!(
+        world.driver.terminal_hook_calls(),
+        usize::try_from(RESTART_BACKOFF_CEILING + 1).unwrap(),
+        "the exit observer fires once per crashed attempt; ServiceLifecycle adds none"
+    );
+    assert_eq!(world.runner.active_alloc_count(), 0, "all crashed supervisors have ended");
     world.advance(std::time::Duration::from_secs(2)).await;
     world.workload_tick().await.expect("workload-lifecycle gives up at the ceiling");
     crate::acceptance::restart_authority_world::settle().await;
@@ -183,10 +188,27 @@ async fn pre_startup_crash_loop_ends_the_stream_with_early_exit_at_give_up() {
             assert!(format!("{:?}", row.reason).contains("WorkloadCrashedImmediately"));
         }
     }
+    let calls = world.driver.calls();
+    for id in rows.keys() {
+        let count = calls
+            .iter()
+            .filter(|call| matches!(call, DriverCall::Terminal(hooked) if hooked == id))
+            .count();
+        assert_eq!(
+            count,
+            if *id == alloc { 2 } else { 1 },
+            "each crash fires the observer hook; FinalizeFailed repeats it only for the final id"
+        );
+    }
     assert_eq!(
         world.driver.terminal_hook_calls(),
-        usize::try_from(RESTART_BACKOFF_CEILING + 1).unwrap(),
-        "one terminal hook per crashed attempt (D1); ServiceLifecycle drives no teardown effect"
+        usize::try_from(RESTART_BACKOFF_CEILING + 2).unwrap(),
+        "six observer calls plus the retained FinalizeFailed hook (D4)"
+    );
+    assert_eq!(
+        world.runner.active_alloc_count(),
+        0,
+        "the repeated final hook has one probe-supervision effect (D2)"
     );
 }
 
@@ -194,7 +216,6 @@ async fn pre_startup_crash_loop_ends_the_stream_with_early_exit_at_give_up() {
 /// startup probe: the stream ends `Stable` and no `EarlyExit` is written.
 #[tokio::test]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D6 ServiceLifecycle no longer finalises a crashed allocation"]
 async fn pre_startup_crash_then_a_passing_successor_ends_the_stream_stable() {
     let mut world = RestartWorld::compose(Shape::StartupProbe).await;
     let stream = world.open_stream().await;
@@ -253,7 +274,6 @@ async fn crash_loop_after_a_recorded_startup_pass_gives_up_backoff_exhausted() {
 /// decision re-derives the same terminal from the durable rows.
 #[tokio::test]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D6 restart authority names a pre-startup crash loop at give-up"]
 async fn control_plane_restart_before_the_ceiling_decision_rederives_early_exit() {
     let mut world = RestartWorld::compose(Shape::StartupProbe).await;
     let mut alloc = world.place_first_attempt().await;
@@ -278,7 +298,6 @@ async fn control_plane_restart_before_the_ceiling_decision_rederives_early_exit(
 /// give-up is `EarlyExit { exit_code: None }`.
 #[tokio::test]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: B3 pre-startup crash predicate accepts VmOutOfMemory"]
 async fn out_of_memory_crash_loop_gives_up_as_early_exit_without_an_exit_code() {
     let mut world = RestartWorld::compose(Shape::StartupProbe).await;
     let stream = world.open_stream().await;

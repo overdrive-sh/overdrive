@@ -62,7 +62,6 @@ fn liveness_fact(
             },
         ),
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1))),
-        exit_code: None,
         latest_startup_probe: None,
         latest_startup_probe_observed_at: None,
         max_attempts: u32::MAX,

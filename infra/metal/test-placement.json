@@ -3609,7 +3609,7 @@
       "acceptance::service_lifecycle_hydrate::backend_address::two_services_publish_only_their_own_allocations_and_disjoint_backend_keys": {
         "kind": "host-pure"
       },
-      "acceptance::service_lifecycle_hydrate::gap_11_hydrate_actual_projects_exit_code_from_crash_reason": {
+      "acceptance::service_lifecycle_hydrate::crash_reason_remains_on_observation_row_after_service_hydration": {
         "kind": "host-pure"
       },
       "acceptance::service_lifecycle_hydrate::gap_1_at_01_hydrate_desired_succeeds_when_service_intent_persisted": {
@@ -6456,12 +6456,6 @@
         "kind": "host-pure"
       },
       "acceptance::service_kind_vm_workloads::service_vm_http_tcp_spec_parses_to_vm_driver_without_rewriting_probe_intent": {
-        "kind": "host-pure"
-      },
-      "acceptance::service_lifecycle_reconcile_branches::early_exit_does_not_fire_out_of_deadline_even_with_no_pass": {
-        "kind": "host-pure"
-      },
-      "acceptance::service_lifecycle_reconcile_branches::early_exit_does_not_fire_when_pass_observed": {
         "kind": "host-pure"
       },
       "acceptance::service_lifecycle_reconcile_branches::empty_probes_opt_out_does_not_fire_when_state_is_not_running": {

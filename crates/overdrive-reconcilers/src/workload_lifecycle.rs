@@ -13,6 +13,7 @@ use overdrive_core::aggregate::{
 };
 use overdrive_core::guest_network::{GuestAttachmentOccupancy, MAX_GUEST_NETWORK_ATTACHMENTS};
 use overdrive_core::id::{AllocationId, ContentHash, CorrelationKey, NodeId, WorkloadId};
+use overdrive_core::observation::{ProbeIdx, ProbeRole, ProbeStatus};
 use overdrive_core::reconcilers::{HydrateError, HydrationContext};
 use overdrive_core::traits::GuestAttachmentObservation;
 use overdrive_core::traits::driver::{AllocationSpec, DriverPayload, VmPayload};
@@ -699,6 +700,21 @@ async fn hydrate_workload_lifecycle_actual(
     for row in rows.into_iter().filter(|r| &r.workload_id == workload_id) {
         allocations.insert(row.alloc_id.clone(), row);
     }
+    let current_attempt = current_alloc(&allocations.values().collect::<Vec<_>>());
+    let current_startup_probe = if let Some(row) = current_attempt
+        .filter(|row| matches!(row.state, AllocState::Failed | AllocState::Terminated))
+    {
+        ctx.observation_store
+            .list_probe_results_for_alloc(&row.alloc_id)
+            .await
+            .map_err(|e| HydrateError::ObservationRead(e.to_string()))?
+            .into_iter()
+            .filter(|probe| probe.role == ProbeRole::Startup && probe.probe_idx == ProbeIdx::new(0))
+            .max_by_key(|probe| probe.run_seq)
+            .map(|probe| probe.status)
+    } else {
+        None
+    };
     let allocation_ids = allocations.keys().cloned().collect::<Vec<_>>();
     let guest_attachments = ctx.guest_attachments.observe(&allocation_ids);
     let nodes = baseline_nodes_phase1();
@@ -707,7 +723,7 @@ async fn hydrate_workload_lifecycle_actual(
     let service_spec_digest =
         if workload_kind == WorkloadKind::Service { intent_digest } else { None };
     Ok(WorkloadLifecycleState {
-        current_startup_probe: None,
+        current_startup_probe,
         workload_id: workload_id.clone(),
         job: None,
         desired_to_stop: false,
@@ -1148,6 +1164,7 @@ impl WorkloadLifecycle {
                                 TerminalCondition::BackoffExhausted { .. }
                                     | TerminalCondition::ServiceFailed {
                                         reason: ServiceFailureReason::LivenessProbeFailed { .. }
+                                            | ServiceFailureReason::EarlyExit { .. }
                                     }
                             )
                         ) {
@@ -1176,12 +1193,40 @@ impl WorkloadLifecycle {
                         // `BackoffExhausted`'s, never the liveness streak
                         // (that would require reading ServiceLifecycle's
                         // private View, the cross-read this ADR eliminates).
+                        let pre_startup_crash_exit_code = if desired.workload_kind
+                            == WorkloadKind::Service
+                            && desired
+                                .probe_descriptors
+                                .iter()
+                                .any(|descriptor| descriptor.role == ProbeRole::Startup)
+                            && failed.state == AllocState::Failed
+                            && !matches!(
+                                actual.current_startup_probe.as_ref(),
+                                Some(ProbeStatus::Pass)
+                            ) {
+                            match failed.reason.as_ref() {
+                                Some(TransitionReason::WorkloadCrashedImmediately {
+                                    exit_code,
+                                    ..
+                                }) => Some(*exit_code),
+                                Some(TransitionReason::VmOutOfMemory { .. }) => Some(None),
+                                _ => None,
+                            }
+                        } else {
+                            None
+                        };
+                        // D7's startup-probe give-up case is inserted between the
+                        // existing liveness case and this D6 crash classification.
                         let terminal = if is_liveness_killed(failed) {
                             TerminalCondition::ServiceFailed {
                                 reason: ServiceFailureReason::LivenessProbeFailed {
                                     probe_idx: 0,
                                     attempts,
                                 },
+                            }
+                        } else if let Some(exit_code) = pre_startup_crash_exit_code {
+                            TerminalCondition::ServiceFailed {
+                                reason: ServiceFailureReason::EarlyExit { exit_code },
                             }
                         } else {
                             TerminalCondition::BackoffExhausted { attempts }
@@ -1931,8 +1976,6 @@ pub struct WorkloadLifecycleState {
     /// (D-295-R8, ADR-0134). Placement passes its `occupancy` to the
     /// scheduler.
     pub guest_attachments: GuestAttachmentObservation,
-    // SCAFFOLD: true — pinned shape (D6 item 4, D7 item 3). Populated only by
-    // `hydrate_actual`; `hydrate_desired` leaves it `None`.
     /// Status of the latest result row for role `Startup`, probe index 0, of the
     /// workload's current attempt only, read only when that row's state is
     /// `Failed` or `Terminated`; `None` when there is no such row or result row.

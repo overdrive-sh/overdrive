@@ -171,7 +171,6 @@ async fn a_backoff_exhausted_terminal_is_an_exhausted_budget_with_its_attempts()
 /// `used == RESTART_BACKOFF_CEILING`.
 #[tokio::test]
 /// CONTRACT_SHAPE: pure-function.
-#[ignore = "pending DELIVER: D6 an EarlyExit give-up is an exhausted restart budget"]
 async fn an_early_exit_give_up_is_an_exhausted_budget_at_the_ceiling() {
     let budget = budget_for(
         Some(TerminalCondition::ServiceFailed {

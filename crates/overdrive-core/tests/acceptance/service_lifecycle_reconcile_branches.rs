@@ -7,9 +7,8 @@
 //! A. **Stable branch** — `state == Running && Some(Pass)` ⇒
 //!    one `Action::FinalizeFailed { Stable { settled_in_ms, witness } }`
 //!    AND alloc inserted into `next_view.stable_announced`.
-//! B. **EarlyExit branch** — `state == Failed` ∧ `elapsed_ms < deadline_ms`
-//!    ∧ no Pass observed ⇒ `Action::FinalizeFailed { ServiceFailed {
-//!    EarlyExit { exit_code } } }`. Boundary tests pin `<` vs `==/>/<=`.
+//! B. **D6 terminal rows** — a `Failed` or `Terminated` fact emits no action
+//!    and joins `terminal_announced`; S-56 covers the state/startup grid.
 //! C. **StartupProbeFailed branch** — `attempts >= max_attempts`
 //!    ∧ `elapsed_ms >= deadline_ms` ∧ no Pass ⇒ `Action::FinalizeFailed {
 //!    ServiceFailed { StartupProbeFailed { probe_idx: 0, last_fail,
@@ -52,7 +51,6 @@ fn fact(
     alloc_id: &str,
     state: AllocState,
     started_at_unix_ms: u64,
-    exit_code: Option<i32>,
     latest_startup_probe: Option<ProbeStatus>,
     max_attempts: u32,
     startup_deadline: Duration,
@@ -81,7 +79,6 @@ fn fact(
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_millis(
             started_at_unix_ms,
         ))),
-        exit_code,
         latest_startup_probe_observed_at: latest_startup_probe
             .as_ref()
             .map(|_| UnixInstant::from_unix_duration(Duration::from_millis(1))),
@@ -187,7 +184,6 @@ fn stable_fires_when_running_and_startup_probe_pass() {
         "alloc-svc-0",
         AllocState::Running,
         1_000,
-        None,
         Some(ProbeStatus::Pass),
         30,
         Duration::from_secs(60),
@@ -222,10 +218,9 @@ fn stable_fires_when_running_and_startup_probe_pass() {
 }
 
 /// Stable does NOT fire when state != Running (kills `==` → `!=` mutant
-/// at line 256 — Running case fires WITHOUT the mutation, and only Failed
-/// (which fires EarlyExit/StartupProbeFailed) or Pending exercise the
-/// alternative. We use Pending here — neither Failed-fall-through nor
-/// StartupProbeFailed gate fires (max_attempts not reached).
+/// at line 256 — Running case fires WITHOUT the mutation. A terminal
+/// Failed state now closes its watch under D6; this case uses Pending to
+/// isolate the Stable state guard.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn stable_does_not_fire_when_state_is_not_running() {
@@ -233,7 +228,6 @@ fn stable_does_not_fire_when_state_is_not_running() {
         "alloc-svc-0",
         AllocState::Pending,
         1_000,
-        None,
         Some(ProbeStatus::Pass),
         30,
         Duration::from_secs(60),
@@ -263,7 +257,6 @@ fn stable_does_not_fire_when_running_but_probe_is_fail() {
         "alloc-svc-0",
         AllocState::Running,
         1_000,
-        None,
         Some(ProbeStatus::Fail { last_fail_reason: "connection refused".to_string() }),
         30,
         Duration::from_secs(60),
@@ -288,8 +281,7 @@ fn stable_does_not_fire_when_running_but_probe_is_fail() {
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn stable_does_not_fire_when_running_but_no_probe_observed() {
-    let f =
-        fact("alloc-svc-0", AllocState::Running, 1_000, None, None, 30, Duration::from_secs(60));
+    let f = fact("alloc-svc-0", AllocState::Running, 1_000, None, 30, Duration::from_secs(60));
     let actual = one_alloc_state(f);
     let view = ServiceLifecycleView::default();
     let tick = tick_at_ms(2_000);
@@ -308,7 +300,6 @@ fn stable_dedup_skips_already_announced_alloc() {
         "alloc-svc-0",
         AllocState::Running,
         1_000,
-        None,
         Some(ProbeStatus::Pass),
         30,
         Duration::from_secs(60),
@@ -348,7 +339,7 @@ fn empty_probes_fact(
         stable_committed: false,
         startup_probes_empty: true,
         latest_startup_probe: None,
-        ..fact(alloc_id, state, started_at_unix_ms, None, None, 30, Duration::from_secs(60))
+        ..fact(alloc_id, state, started_at_unix_ms, None, 30, Duration::from_secs(60))
     }
 }
 
@@ -420,87 +411,6 @@ fn empty_probes_opt_out_does_not_fire_when_state_is_not_running() {
 }
 
 // =====================================================================
-// Category B — EarlyExit branch
-// =====================================================================
-// elapsed_ms < deadline_ms gate at line 282
-// no_pass at line 283 (delete `!` mutant)
-// && at line 284 (&& → || mutant)
-// state == Failed at line 276 (== → != mutant)
-
-/// EarlyExit does NOT fire when Failed but Pass already observed.
-/// Kills line 283 `delete !` mutant (without `!`, no_pass becomes
-/// `matches!(probe, Some(Pass))` which is FALSE here, but combined with
-/// `within_deadline=true`, the && becomes false, so EarlyExit would
-/// continue NOT firing — except the `delete !` flips no_pass semantics
-/// so `within_deadline && !no_pass` would fire when probe IS Pass).
-/// This test sets probe = Pass + within deadline: production says
-/// no_pass=false → no EarlyExit; mutant says no_pass=true → EarlyExit
-/// fires (but only when within deadline AND no_pass=true), so flipping
-/// `!` would make this test fire EarlyExit unexpectedly.
-/// CONTRACT_SHAPE: bounded-change.
-#[test]
-fn early_exit_does_not_fire_when_pass_observed() {
-    let f = fact(
-        "alloc-svc-1",
-        AllocState::Failed,
-        1_000,
-        Some(1),
-        Some(ProbeStatus::Pass),
-        30,
-        Duration::from_secs(60),
-    );
-    // Within deadline (elapsed = 3000 < 60000), Pass observed.
-    let tick = tick_at_ms(4_000);
-    let r = ServiceLifecycleReconciler::new();
-    let (actions, _) = r.reconcile(
-        &ServiceLifecycleState::default(),
-        &one_alloc_state(f),
-        &ServiceLifecycleView::default(),
-        &tick,
-    );
-    // Note: state == Failed, Pass observed. Production: no Stable (state != Running),
-    // no EarlyExit (no_pass=false). StartupProbeFailed gate: attempts(0) >= max(30) is false.
-    // Expected: zero actions.
-    assert!(
-        actions.is_empty(),
-        "Failed + Pass observed within deadline => no action (no_pass=false); got {actions:?}"
-    );
-}
-
-/// EarlyExit `&&` → `||` mutation: with `||` instead of `&&`, EarlyExit
-/// would fire when EITHER within_deadline OR no_pass is true. We pick
-/// a case where exactly ONE is true: out-of-deadline (within_deadline=false)
-/// but no_pass=true. Production must NOT fire EarlyExit; mutant WOULD fire.
-/// Also need to ensure StartupProbeFailed does NOT fire to isolate the
-/// EarlyExit gate — set max_attempts very high.
-/// CONTRACT_SHAPE: bounded-change.
-#[test]
-fn early_exit_does_not_fire_out_of_deadline_even_with_no_pass() {
-    let f = fact(
-        "alloc-svc-1",
-        AllocState::Failed,
-        1_000,
-        Some(99),
-        None,
-        u32::MAX, // StartupProbeFailed cannot fire (attempts(0) < u32::MAX)
-        Duration::from_secs(10),
-    );
-    // elapsed = 30_000 - 1_000 = 29_000 > 10_000 deadline → within_deadline=false.
-    let tick = tick_at_ms(30_000);
-    let r = ServiceLifecycleReconciler::new();
-    let (actions, _) = r.reconcile(
-        &ServiceLifecycleState::default(),
-        &one_alloc_state(f),
-        &ServiceLifecycleView::default(),
-        &tick,
-    );
-    assert!(
-        actions.is_empty(),
-        "out-of-deadline + no_pass => no EarlyExit (kills && → || mutant); got {actions:?}"
-    );
-}
-
-// =====================================================================
 // Category C — StartupProbeFailed branch
 // =====================================================================
 // Line 304: delete `!` on no_pass
@@ -523,7 +433,6 @@ fn startup_probe_failure_stops_the_allocation_when_all_three_gates_are_met() {
         "alloc-svc-2",
         AllocState::Pending,
         1_000,
-        None,
         Some(ProbeStatus::Fail { last_fail_reason: "tcp_refused".to_string() }),
         30,
         Duration::from_secs(60),
@@ -567,7 +476,6 @@ fn startup_probe_failed_does_not_fire_when_attempts_below_max() {
         "alloc-svc-2",
         AllocState::Pending,
         1_000,
-        None,
         Some(ProbeStatus::Fail { last_fail_reason: "x".to_string() }),
         30,
         Duration::from_secs(60),
@@ -600,7 +508,6 @@ fn startup_probe_failed_does_not_fire_when_elapsed_below_deadline() {
         "alloc-svc-2",
         AllocState::Pending,
         1_000,
-        None,
         Some(ProbeStatus::Fail { last_fail_reason: "x".to_string() }),
         30,
         Duration::from_secs(60),
@@ -632,7 +539,6 @@ fn startup_probe_failed_does_not_fire_when_pass_observed() {
         "alloc-svc-2",
         AllocState::Pending,
         1_000,
-        None,
         Some(ProbeStatus::Pass),
         30,
         Duration::from_secs(60),
@@ -661,7 +567,6 @@ fn startup_probe_failed_does_not_fire_with_only_two_of_three_gates() {
         "alloc-svc-2",
         AllocState::Pending,
         1_000,
-        None,
         Some(ProbeStatus::Fail { last_fail_reason: "x".to_string() }),
         30,
         Duration::from_secs(60),
@@ -747,8 +652,7 @@ fn mid_startup_window_false_when_observed_and_stable() {
 /// The instant the alloc reaches a non-Stable terminal (recorded in
 /// `terminal_announced`), the predicate flips to false. Kills a mutant
 /// that ignores `terminal_announced` in the subtraction — without it a
-/// dead (EarlyExit / StartupProbeFailed) alloc would spin the runtime
-/// forever, which is worse than the GAP-9 gap.
+/// terminal allocation would keep the runtime's startup window open.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn mid_startup_window_false_when_observed_and_terminal_failed() {
@@ -789,8 +693,7 @@ fn mid_startup_window_true_when_any_observed_alloc_still_mid_flight() {
 fn reconcile_records_observed_for_mid_window_alloc_and_predicate_is_true() {
     // Running, probe not yet observed → no branch fires, alloc is
     // recorded as observed (mid-flight).
-    let f =
-        fact("alloc-svc-9", AllocState::Running, 1_000, None, None, 30, Duration::from_secs(60));
+    let f = fact("alloc-svc-9", AllocState::Running, 1_000, None, 30, Duration::from_secs(60));
     let actual = one_alloc_state(f);
     let view = ServiceLifecycleView::default();
     let tick = tick_at_ms(2_000);
@@ -823,7 +726,6 @@ fn reconcile_startup_stop_clears_mid_window_and_dedups() {
         "alloc-svc-8",
         AllocState::Pending,
         1_000,
-        None,
         Some(ProbeStatus::Fail { last_fail_reason: "tcp_refused".to_string() }),
         5,
         Duration::from_secs(60),
@@ -879,10 +781,8 @@ fn reconcile_startup_stop_clears_mid_window_and_dedups() {
 /// A service alloc that reaches `Failed` BEFORE ever starting
 /// (`started_at == None` — driver spawn error, ENOMEM on fork, missing
 /// exec binary) must be recorded in `terminal_announced` so the Shape B
-/// predicate returns false for it. The reconciler does NOT classify
-/// this alloc (the elapsed-vs-deadline `EarlyExit` reasoning needs a
-/// `started_at`), so it emits zero actions — but it MUST still
-/// acknowledge the terminal-set membership.
+/// predicate returns false for it. Under D6 it emits zero actions and
+/// acknowledges terminal-set membership regardless of start history.
 ///
 /// Without that membership the alloc stays in `observed` but in neither
 /// terminal set, so `has_alloc_mid_startup_window` stays true forever.
@@ -895,20 +795,11 @@ fn reconcile_startup_stop_clears_mid_window_and_dedups() {
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn pre_running_failed_alloc_is_terminal_and_not_mid_startup_window() {
-    // Failed with `started_at == None` — the EarlyExit branch's
-    // `let Some(started) = ... else { ... }` arm fires.
+    // Failed before Running: terminal membership closes the watch.
     let f = ServiceAllocFact {
         stable_committed: false,
         started_at: None,
-        ..fact(
-            "alloc-svc-prefail",
-            AllocState::Failed,
-            1_000,
-            Some(127),
-            None,
-            30,
-            Duration::from_secs(60),
-        )
+        ..fact("alloc-svc-prefail", AllocState::Failed, 1_000, None, 30, Duration::from_secs(60))
     };
     let actual = one_alloc_state(f);
     let view = ServiceLifecycleView::default();
@@ -943,7 +834,6 @@ fn pre_running_failed_alloc_is_terminal_and_not_mid_startup_window() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER: D6 a started Failed allocation joins terminal_announced (DG-12)"]
 fn terminal_allocation_of_any_start_history_closes_its_mid_startup_window() {
     let r = ServiceLifecycleReconciler::new();
     let alloc = aid("alloc-svc-crashed");
@@ -962,15 +852,8 @@ fn terminal_allocation_of_any_start_history_closes_its_mid_startup_window() {
                     let case = format!(
                         "state {state:?}, started {started}, probe {probe:?}, declared {declared}"
                     );
-                    let mut f = fact(
-                        "alloc-svc-crashed",
-                        state,
-                        1_000,
-                        Some(1),
-                        None,
-                        30,
-                        Duration::from_secs(60),
-                    );
+                    let mut f =
+                        fact("alloc-svc-crashed", state, 1_000, None, 30, Duration::from_secs(60));
                     f.stable_committed = false;
                     f.startup_probes_empty = !declared;
                     if !started {
@@ -1030,7 +913,6 @@ fn terminal_allocation_of_any_start_history_closes_its_mid_startup_window() {
         AllocState::Running,
         1_000,
         None,
-        None,
         30,
         Duration::from_secs(60),
     ));
@@ -1061,7 +943,6 @@ proptest! {
             "alloc-prop",
             AllocState::Running,
             started_at_ms,
-            None,
             Some(ProbeStatus::Pass),
             30,
             Duration::from_secs(3_600),
@@ -1124,7 +1005,6 @@ fn readiness_fact(
             },
         ),
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1))),
-        exit_code: None,
         latest_startup_probe: Some(ProbeStatus::Pass),
         latest_startup_probe_observed_at: Some(UnixInstant::from_unix_duration(
             Duration::from_millis(1),
@@ -1367,9 +1247,8 @@ fn liveness_fact(
             overdrive_reconcilers::service_lifecycle::ServiceAllocPhase::NotRunning,
         ),
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1))),
-        exit_code: None,
-        // No startup-probe observation — keeps the Stable / EarlyExit /
-        // StartupProbeFailed branches inert so the liveness branch is
+        // No startup-probe observation — keeps the Stable and startup-stop
+        // branches inert so the liveness branch is
         // the only emitter under test (startup branches require a Pass
         // or a Failed state we do not set here for the Running cases).
         latest_startup_probe: None,
@@ -1566,7 +1445,6 @@ fn failed_alloc_excluded_from_backend_row() {
         overdrive_reconcilers::service_lifecycle::NotRunningState::new(AllocState::Failed)
             .expect("not Running"),
     );
-    f.exit_code = Some(1);
     f.started_at = Some(UnixInstant::from_unix_duration(Duration::from_secs(1)));
     f.latest_startup_probe = None;
     let state = readiness_state(vec![f]);
@@ -1766,7 +1644,6 @@ fn startup_probe_failure_suppresses_liveness_stop_same_tick() {
             id,
             AllocState::Running,
             1_000,
-            None,
             Some(ProbeStatus::Fail { last_fail_reason: "conn refused".to_string() }),
             1, // max_attempts — one observed Fail this tick trips StartupProbeFailed
             Duration::from_secs(60),
@@ -1843,7 +1720,6 @@ fn stable_announced_suppresses_liveness_restart_same_tick() {
             id,
             AllocState::Running,
             1_000,
-            None,
             Some(ProbeStatus::Pass), // Running + startup Pass ⇒ Stable
             u32::MAX,                // never trips StartupProbeFailed
             Duration::from_secs(60),
@@ -1906,7 +1782,6 @@ fn liveness_resumes_after_prior_tick_stable_announcement() {
             id,
             AllocState::Running,
             1_000,
-            None,
             Some(ProbeStatus::Pass), // Stable was already announced on a prior tick
             u32::MAX,
             Duration::from_secs(60),

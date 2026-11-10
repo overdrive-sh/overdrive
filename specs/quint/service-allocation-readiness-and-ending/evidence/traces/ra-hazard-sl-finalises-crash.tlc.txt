@@ -118,7 +118,7 @@ State 3: <ra_bugSlFinalisesCrash_restart_authority_Crash line 212, col 3 to line
         author |-> "",
         crashed |-> FALSE ] )
 
-State 4: <ra_bugSlFinalisesCrash_restart_authority_SLFinalizeCrash line 791, col 3 to line 827, col 62 of module ra_bugSlFinalisesCrash>
+State 4: <ra_bugSlFinalisesCrash_restart_authority_SLFinalizeCrash line 677, col 3 to line 713, col 62 of module ra_bugSlFinalisesCrash>
 /\ ra_bugSlFinalisesCrash_restart_authority_g = [startupOverTerm |-> FALSE, emitCount |-> 0, stableOverAnn |-> FALSE]
 /\ ra_bugSlFinalisesCrash_restart_authority_cur = 0
 /\ ra_bugSlFinalisesCrash_restart_authority_gl = FALSE

@@ -136,8 +136,8 @@ impl ServiceAllocPhase {
 /// `Stable` / `Failed` / no-op for a single Service-kind allocation.
 ///
 /// Sourced by the runtime's hydrate-actual / hydrate-desired pass:
-/// `state` + `started_at` + `exit_code` come from the
-/// alloc-status row; `latest_startup_probe` is the LWW projection
+/// `state` + `started_at` come from the alloc-status row;
+/// `latest_startup_probe` is the LWW projection
 /// of the per-`(alloc, probe_idx)` `ProbeResultRow`s for the
 /// startup role.
 ///
@@ -170,19 +170,19 @@ pub struct ServiceAllocFact {
     ///
     /// - `None`: the alloc has not been observed Running yet
     ///   (Pending only, or driver-rejected start). The branches
-    ///   that need a started-at timestamp (Stable, EarlyExit-elapsed,
+    ///   that need a started-at timestamp (Stable and
     ///   StartupProbeFailed-elapsed) handle `None` explicitly per
     ///   the per-branch contract:
     ///   - Stable / opt-out Stable: `unreachable!()` — hydrate
     ///     invariant says a `Running` alloc carries
     ///     `Some(started_at)`.
-    ///   - EarlyExit / StartupProbeFailed: skip the branch — the
+    ///   - StartupProbeFailed: skip the branch — the
     ///     alloc never reached Running, so the elapsed-vs-deadline
     ///     classification doesn't apply. The row's typed `terminal`
     ///     flows through other projections (e.g., Custom → Other).
     /// - `Some(ts)`: the alloc reached Running at wall-clock `ts`;
-    ///   used by EarlyExit's `elapsed < startup_deadline` gate and
-    ///   Stable's `settled_in_ms = tick.now_unix - ts` arithmetic.
+    ///   used by Stable's `settled_in_ms = tick.now_unix - ts`
+    ///   arithmetic and the startup-probe failure deadline.
     ///
     /// Per `.claude/rules/development.md` § "Persist inputs, not
     /// derived state": this is INPUT, not derived. `elapsed_ms` and
@@ -194,9 +194,6 @@ pub struct ServiceAllocFact {
     /// `unwrap_or(Duration::ZERO)` — the `None` and `Some` cases
     /// mean different things.
     pub started_at: Option<UnixInstant>,
-    /// Exit code observed on Failed transition. `None` for Running
-    /// / Pending allocs.
-    pub exit_code: Option<i32>,
     /// Latest-observed startup probe outcome at index 0. `None` if
     /// no probe result has yet been written for this alloc.
     pub latest_startup_probe: Option<ProbeStatus>,
@@ -401,33 +398,23 @@ pub struct ServiceLifecycleView {
     /// difference against the two terminal sets every read.
     pub observed: BTreeSet<AllocationId>,
 
-    /// GAP-9 — per-alloc set of allocs that reached a NON-Stable
-    /// terminal verdict (`EarlyExit` / `StartupProbeFailed`). The
-    /// Stable terminal continues to use [`Self::stable_announced`];
-    /// this set is its non-Stable sibling.
+    /// Per-alloc set of allocations this reconciler has finished watching:
+    /// every observed `Failed` or `Terminated` allocation, and every live
+    /// allocation for which it emitted a startup stop. The Stable terminal
+    /// continues to use [`Self::stable_announced`].
     ///
     /// Two jointly load-bearing roles:
     ///
-    /// 1. **Dedup** — without it the `EarlyExit` / `StartupProbeFailed`
-    ///    branches re-emit their terminal `FinalizeFailed` action on
-    ///    EVERY subsequent tick (a latent re-emission bug independent
-    ///    of GAP-9), which would also keep the §18 action-emitted
-    ///    re-enqueue alive forever — a busy-loop on a dead alloc.
-    /// 2. **Hook falseness at terminal** — the
+    /// 1. **Hook falseness at terminal** — the
     ///    `next_evaluation_at` hook subtracts BOTH terminal sets from
     ///    [`Self::observed`]; once an alloc lands here the hook returns
     ///    no boundary, so a terminal-failed alloc stops requeueing.
+    /// 2. **Startup-stop dedup** — a live allocation stopped for a startup
+    ///    failure is not emitted for again on every tick.
     ///
-    /// Per the same persist-inputs rule: records the observed fact
-    /// "this alloc reached a non-Stable terminal," never a derived
-    /// flag.
-    ///
-    /// Also covers pre-Running-Failed allocs (`state == Failed`,
-    /// `started_at == None`) the reconciler acknowledges-but-does-not-
-    /// classify: it emits no terminal action for them, but still
-    /// records membership here so the Shape B predicate flips false
-    /// once such a dead alloc is archived (otherwise its stale
-    /// `observed` entry would retain a stale scheduling boundary).
+    /// Records observed lifecycle membership, never a derived flag. A terminal
+    /// row joins this set at the head of its per-allocation reconcile step,
+    /// whatever its `started_at` value; the reconciler emits no action for it.
     pub terminal_announced: BTreeSet<AllocationId>,
 
     /// Per liveness probe key, the `run_seq` of the probe row on which this
@@ -490,7 +477,7 @@ use overdrive_core::reconcilers::{
 };
 use overdrive_core::traits::dataplane::Backend;
 use overdrive_core::traits::observation_store::{LogicalTimestamp, ServiceBackendRow};
-use overdrive_core::transition_reason::{StoppedBy, TerminalCondition, TransitionReason};
+use overdrive_core::transition_reason::{StoppedBy, TerminalCondition};
 use overdrive_core::wall_clock::UnixInstant;
 
 /// Service-kind lifecycle reconciler per ADR-0055.
@@ -500,8 +487,8 @@ use overdrive_core::wall_clock::UnixInstant;
 /// no `.await`, no port dependencies, no wall-clock outside
 /// `tick.now_unix`.
 ///
-/// The reconcile body covers Slice 01 branches (Stable, EarlyExit,
-/// StartupProbeFailed). Slice 04 (readiness → Backend.healthy) and
+/// The reconcile body covers Stable and startup-probe failure handling.
+/// Slice 04 (readiness → Backend.healthy) and
 /// Slice 05 (liveness → restart) extend the body in follow-up
 /// slices.
 #[derive(Debug, Clone)]
@@ -546,11 +533,10 @@ impl Reconciler for ServiceLifecycleReconciler {
         &self.name
     }
 
-    /// Row-backed: `service-lifecycle` converges `Stable` /
-    /// `StartupProbeFailed` / `EarlyExit` terminal conditions against the
-    /// running `AllocStatusRow` set, so an accepted `alloc_status` transition
-    /// (a Running → Failed is exactly an `EarlyExit` witness for a Service
-    /// alloc) must wake it (ADR-0084 §5 single-cut migration — the declarative
+    /// Row-backed: `service-lifecycle` converges `Stable`, startup-probe
+    /// handling and terminal membership against the `AllocStatusRow` set, so
+    /// an accepted `alloc_status` transition must wake it (ADR-0084 §5
+    /// single-cut migration — the declarative
     /// replacement for the deleted `exit_observer` producer-push). An accepted
     /// `ProbeResult` also wakes it so readiness health converges immediately;
     /// the router validates the current Service allocation before deriving the
@@ -580,6 +566,13 @@ impl Reconciler for ServiceLifecycleReconciler {
         let mut startup_failed_this_tick: BTreeSet<AllocationId> = BTreeSet::new();
 
         for (alloc_id, fact) in &actual.allocs {
+            // A terminal row ends this reconciler's watch. This is before
+            // every other per-allocation branch, including Stable dedup.
+            if matches!(fact.state(), AllocState::Failed | AllocState::Terminated) {
+                next_view.terminal_announced.insert(alloc_id.clone());
+                continue;
+            }
+
             if next_view.stable_announced.contains(alloc_id) {
                 // S-SHCP-RECON-02: dedup — Stable already announced
                 // for this alloc; emit nothing further. Falls
@@ -587,13 +580,9 @@ impl Reconciler for ServiceLifecycleReconciler {
                 continue;
             }
 
-            // GAP-9 dedup — a non-Stable terminal verdict (EarlyExit /
-            // StartupProbeFailed) was already announced for this alloc.
-            // Without this guard those two branches re-emit their
-            // terminal `FinalizeFailed` on EVERY tick (latent
-            // re-emission bug) AND keep the runtime's §18
-            // action-emitted re-enqueue alive forever — a busy-loop on
-            // a dead alloc. Mirrors the `stable_announced` dedup above.
+            // A startup stop was already emitted for this live allocation;
+            // skip it on later ticks. Terminal rows are handled at the
+            // head of this loop above.
             if next_view.terminal_announced.contains(alloc_id) {
                 continue;
             }
@@ -666,49 +655,6 @@ impl Reconciler for ServiceLifecycleReconciler {
                 continue;
             }
 
-            // Branch (c): EarlyExit — alloc Failed within startup_deadline,
-            // no Pass observed. Closes RCA-A per US-08.
-            //
-            // `started_at == None` on a Failed alloc means the alloc
-            // never reached Running — the elapsed-vs-deadline
-            // classification doesn't apply. Skip the EarlyExit
-            // branch; the row's typed `terminal` flows through other
-            // projections (Custom → Other) per the audit's branch
-            // semantics table.
-            if fact.state() == AllocState::Failed {
-                let Some(started) = fact.started_at else {
-                    // Pre-Running Failed: the alloc reached a terminal state but
-                    // never started, so the elapsed-vs-deadline EarlyExit
-                    // classification does not apply and the reconciler emits no
-                    // FinalizeFailed (the row's typed terminal flows through other
-                    // projections via WorkloadLifecycle). Still record the terminal
-                    // membership so `has_alloc_mid_startup_window` returns false and
-                    // the runtime stops self-re-enqueueing this dead alloc after it
-                    // is archived (otherwise the stale `observed` entry — inserted
-                    // above — keeps the predicate true forever → no-op busy-loop).
-                    next_view.terminal_announced.insert(alloc_id.clone());
-                    continue;
-                };
-                let elapsed_ms = elapsed_ms_from(tick.now_unix, started);
-                let deadline_ms =
-                    u64::try_from(fact.startup_deadline.as_millis()).unwrap_or(u64::MAX);
-                let within_deadline = elapsed_ms < deadline_ms;
-                let no_pass = !matches!(fact.latest_startup_probe, Some(ProbeStatus::Pass));
-                if within_deadline && no_pass {
-                    actions.push(Action::FinalizeFailed {
-                        alloc_id: alloc_id.clone(),
-                        terminal: Some(TerminalCondition::ServiceFailed {
-                            reason: ServiceFailureReason::EarlyExit { exit_code: fact.exit_code },
-                        }),
-                    });
-                    // GAP-9 — record the non-Stable terminal so the
-                    // dedup guard above skips this alloc next tick and
-                    // the Shape B predicate returns false for it.
-                    next_view.terminal_announced.insert(alloc_id.clone());
-                    continue;
-                } // fall-through to StartupProbeFailed branch
-            }
-
             // Branch (b): StartupProbeFailed — attempts exhausted AND
             // deadline elapsed AND no Pass observed. Extracted into
             // Startup attempts are the producer's observed streak on the
@@ -723,8 +669,8 @@ impl Reconciler for ServiceLifecycleReconciler {
             {
                 actions.push(action);
                 startup_failed_this_tick.insert(alloc_id.clone());
-                // GAP-9 — record the non-Stable terminal (see EarlyExit
-                // branch for the dedup + predicate-falseness rationale).
+                // Record that this reconciler has finished watching the
+                // allocation after emitting its startup stop.
                 next_view.terminal_announced.insert(alloc_id.clone());
             }
         }
@@ -1022,16 +968,11 @@ async fn hydrate_service_alloc_facts(
                     alloc_id: refused.alloc_id,
                 })?;
 
-        let exit_code = match row.reason {
-            Some(TransitionReason::WorkloadCrashedImmediately { exit_code, .. }) => exit_code,
-            _ => None,
-        };
         let fact = ServiceAllocFact {
             stable_committed: false,
             alloc_id: row.alloc_id.clone(),
             phase,
             started_at: row.started_at,
-            exit_code,
             latest_startup_probe: latest_startup_probe.map(|row| row.status.clone()),
             latest_startup_probe_observed_at: latest_startup_probe.map(|row| {
                 UnixInstant::from_unix_duration(Duration::from_millis(row.last_observed_at_unix_ms))
@@ -1317,7 +1258,7 @@ fn startup_probe_failed_action(
     // branch-coverage suite (`tests/acceptance/service_lifecycle_reconcile_branches.rs::
     // startup_probe_failed_fires_when_all_three_gates_met` et al.)
     // deliberately drives this branch from `AllocState::Pending` (no
-    // Stable/EarlyExit gate applies yet, but the three attempts/deadline/
+    // Stable gate applies yet, but the three attempts/deadline/
     // no-pass gates below still must fire) — an allow-list would silently
     // break that pinned, already-covered case. `Terminated` is the one
     // state this branch is never entitled to act on: every reachable
@@ -1364,10 +1305,8 @@ fn settled_in_ms_from(now: UnixInstant, started_at: UnixInstant) -> u64 {
 }
 
 /// Compute `now - started_at` as milliseconds, mirroring
-/// [`settled_in_ms_from`] but named for the EarlyExit /
-/// StartupProbeFailed branches that read it as `elapsed_ms`. Inlined
-/// so the two call sites read the same shape; the two functions exist
-/// to keep call-site intent (settled vs elapsed) legible.
+/// [`settled_in_ms_from`] but named for the startup-probe failure deadline
+/// that reads it as `elapsed_ms`.
 #[inline]
 #[must_use]
 fn elapsed_ms_from(now: UnixInstant, started_at: UnixInstant) -> u64 {
@@ -1430,7 +1369,7 @@ mod tests {
                                 ip: "192.0.2.10".parse().unwrap(),
                             }),
                             started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1))),
-                            exit_code: None, latest_startup_probe: None,
+                            latest_startup_probe: None,
                             latest_startup_probe_observed_at: None, max_attempts: 3,
                             startup_deadline: Duration::from_secs(30), mechanic_summary: "tcp 0.0.0.0:8080".into(),
                             inferred: false, startup_probes_empty: false,
@@ -1492,7 +1431,6 @@ mod tests {
                 ip: "192.0.2.10".parse().expect("valid IPv4"),
             }),
             started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(100))),
-            exit_code: None,
             latest_startup_probe: None,
             latest_startup_probe_observed_at: None,
             max_attempts: 3,

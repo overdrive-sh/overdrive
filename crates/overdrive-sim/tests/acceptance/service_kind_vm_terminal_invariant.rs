@@ -173,7 +173,6 @@ fn fact_for(
             overdrive_reconcilers::service_lifecycle::ServiceAllocPhase::NotRunning,
         ),
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1))),
-        exit_code: Some(1).filter(|_| state == AllocState::Failed),
         latest_startup_probe: Some(startup),
         latest_startup_probe_observed_at: Some(UnixInstant::from_unix_duration(
             Duration::from_secs(2),

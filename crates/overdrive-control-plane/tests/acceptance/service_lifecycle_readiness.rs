@@ -94,7 +94,6 @@ fn fact_with_readiness(
             },
         ),
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1))),
-        exit_code: None,
         // Startup already passed — these allocs are Stable backends.
         latest_startup_probe: Some(ProbeStatus::Pass),
         latest_startup_probe_observed_at: Some(UnixInstant::from_unix_duration(
@@ -128,7 +127,6 @@ fn fact_without_readiness(index: usize) -> ServiceAllocFact {
             },
         ),
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1))),
-        exit_code: None,
         latest_startup_probe: Some(ProbeStatus::Pass),
         latest_startup_probe_observed_at: Some(UnixInstant::from_unix_duration(
             Duration::from_millis(1),

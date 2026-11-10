@@ -158,7 +158,6 @@ fn fact_from_row_and_intent(
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_millis(
             started_at_unix_ms,
         ))),
-        exit_code: None,
         latest_startup_probe: Some(row.status.clone()),
         latest_startup_probe_observed_at: Some(UnixInstant::from_unix_duration(
             Duration::from_millis(row.last_observed_at_unix_ms),

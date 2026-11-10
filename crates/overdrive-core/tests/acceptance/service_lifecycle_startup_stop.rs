@@ -79,7 +79,6 @@ fn fact(state: AllocState, started: bool, startup_probes_empty: bool) -> Service
         ),
         started_at: started
             .then(|| UnixInstant::from_unix_duration(Duration::from_millis(STARTED_AT_MS))),
-        exit_code: None,
         latest_startup_probe: None,
         latest_startup_probe_observed_at: None,
         max_attempts: MAX_ATTEMPTS,

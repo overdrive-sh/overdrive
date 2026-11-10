@@ -27,7 +27,7 @@
 //! | `OperatorStop(i)` | the operator stop intent key (`put_if_absent`, as `stop_workload`), then a `workload-lifecycle` tick |
 //! | `StartupRow(i, res)` | a startup `ProbeResultRow` (probe 0, next `run_seq`, the producer-counted streak) written through `SimObservationStore`: an input |
 //! | `Deadline(i)` | `SimClock::tick` past the startup deadline |
-//! | `SLStable(i)` / `SLStartupStop(i, stage)` / `SLLivenessStop(i, stage)` | a `service-lifecycle` tick; stage `pre_hook` scripts `SimDriver::stop` to fail, `row_write` injects one terminal-row write failure |
+//! | `SLStable(i)` / `SLStartupStop(i, stage)` / `SLLivenessStop(i, stage)` | a whole-workload `service-lifecycle` tick: DG-12 also acknowledges every terminal predecessor; stage `pre_hook` scripts `SimDriver::stop` to fail, `row_write` injects one terminal-row write failure |
 //! | `WLRestart(ok)` / `WLGiveUp` | the start outcome scripted as for `Deploy` (`WLRestart` only), then a `workload-lifecycle` tick after the restart backoff |
 //! | `SLFinalizeCrash` / `SLFinalizeStartup` | hazard-only actions: the driver bails with the action name |
 //! | `Idle` | the runtime is driven to quiescence; the comparison checks nothing changed |
@@ -908,7 +908,6 @@ impl State<RestartAuthorityDriver> for RaState {
     max_samples = 1
 )]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D6 DG-12 every Failed or Terminated allocation joins terminal_announced"]
 fn restart_authority_crashed_and_rejected_allocs_join_terminal_announced() -> impl Driver {
     RestartAuthorityDriver::new()
 }
@@ -948,7 +947,6 @@ fn restart_authority_running_alloc_with_exhausted_probes_past_deadline_is_stoppe
     max_samples = 1
 )]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D6/D7 give-up classification (WorkloadLifecycle alone authors the ending)"]
 fn restart_authority_pre_startup_crash_loop_gives_up_early_exit() -> impl Driver {
     RestartAuthorityDriver::new()
 }
@@ -960,7 +958,6 @@ fn restart_authority_pre_startup_crash_loop_gives_up_early_exit() -> impl Driver
     max_samples = 1
 )]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D6 ServiceLifecycle loses the early-exit branch (WorkloadLifecycle alone authors the ending)"]
 fn restart_authority_pre_startup_crash_then_successor_passes() -> impl Driver {
     RestartAuthorityDriver::new()
 }

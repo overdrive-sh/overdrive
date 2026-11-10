@@ -79,39 +79,12 @@ State 3: <hooks_bugGateBeforeRegistration_hook_ownership_Release line 480, col 3
      row |-> FALSE,
      late |-> FALSE ] >>
 
-State 4: <hooks_bugGateBeforeRegistration_hook_ownership_Die line 376, col 3 to line 390, col 68 of module hooks_bugGateBeforeRegistration>
+State 4: <hooks_bugGateBeforeRegistration_hook_ownership_Finalize line 256, col 3 to line 277, col 68 of module hooks_bugGateBeforeRegistration>
 /\ hooks_bugGateBeforeRegistration_hook_ownership_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ hooks_bugGateBeforeRegistration_hook_ownership_al = << [ started |-> TRUE,
      regd |-> FALSE,
      rel |-> TRUE,
-     dead |-> TRUE,
-     ev |-> "none",
-     vmstop |-> FALSE,
-     srw |-> FALSE,
-     stopped |-> FALSE,
-     fin |-> FALSE,
-     sup |-> FALSE,
-     row |-> FALSE,
-     late |-> FALSE ],
-   [ started |-> FALSE,
-     regd |-> FALSE,
-     rel |-> FALSE,
      dead |-> FALSE,
-     ev |-> "none",
-     vmstop |-> FALSE,
-     srw |-> FALSE,
-     stopped |-> FALSE,
-     fin |-> FALSE,
-     sup |-> FALSE,
-     row |-> FALSE,
-     late |-> FALSE ] >>
-
-State 5: <hooks_bugGateBeforeRegistration_hook_ownership_Finalize line 256, col 3 to line 277, col 68 of module hooks_bugGateBeforeRegistration>
-/\ hooks_bugGateBeforeRegistration_hook_ownership_conf_step = [init |-> [tag |-> "UNIT"]]
-/\ hooks_bugGateBeforeRegistration_hook_ownership_al = << [ started |-> TRUE,
-     regd |-> FALSE,
-     rel |-> TRUE,
-     dead |-> TRUE,
      ev |-> "none",
      vmstop |-> FALSE,
      srw |-> FALSE,
@@ -133,12 +106,12 @@ State 5: <hooks_bugGateBeforeRegistration_hook_ownership_Finalize line 256, col 
      row |-> FALSE,
      late |-> FALSE ] >>
 
-State 6: <hooks_bugGateBeforeRegistration_hook_ownership_Register line 318, col 3 to line 344, col 68 of module hooks_bugGateBeforeRegistration>
+State 5: <hooks_bugGateBeforeRegistration_hook_ownership_Register line 318, col 3 to line 344, col 68 of module hooks_bugGateBeforeRegistration>
 /\ hooks_bugGateBeforeRegistration_hook_ownership_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ hooks_bugGateBeforeRegistration_hook_ownership_al = << [ started |-> TRUE,
      regd |-> TRUE,
      rel |-> TRUE,
-     dead |-> TRUE,
+     dead |-> FALSE,
      ev |-> "none",
      vmstop |-> FALSE,
      srw |-> FALSE,

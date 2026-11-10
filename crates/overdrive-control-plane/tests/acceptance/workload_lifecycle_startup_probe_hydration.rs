@@ -155,7 +155,6 @@ async fn hydrate(world: &World) -> Result<Option<ProbeStatus>, ConvergenceError>
 /// one probe-row read per hydration.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending DELIVER: D6 D7 hydrate_actual populates current_startup_probe"]
 async fn current_attempts_startup_status_is_hydrated_for_a_terminal_row() {
     for (row_state, status) in [
         (AllocState::Failed, ProbeStatus::Pass),
@@ -207,7 +206,6 @@ async fn no_startup_status_is_hydrated_without_a_result_row_or_for_a_live_row() 
 /// startup row.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending DELIVER: D6 D7 hydrate_actual reads only the current attempt's startup row"]
 async fn a_superseded_attempts_startup_rows_are_never_read() {
     let w = world();
     write_row(&w, 0, AllocState::Terminated, 1).await;
@@ -225,7 +223,6 @@ async fn a_superseded_attempts_startup_rows_are_never_read() {
 /// never as `None`.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending DELIVER: D6 D7 a failed startup-row read is an ObservationRead error"]
 async fn a_failed_startup_row_read_is_an_observation_read_error() {
     let w = world();
     write_row(&w, 0, AllocState::Failed, 1).await;

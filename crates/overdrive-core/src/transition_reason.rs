@@ -699,9 +699,10 @@ pub enum ServiceFailureReason {
     /// observed `ProbeStatus::Fail.last_fail_reason` for direct
     /// operator-renderable surface.
     StartupProbeFailed { probe_idx: u32, last_fail: String, attempts: u32 },
-    /// Workload exited before any startup probe could pass AND
-    /// within `startup_deadline` window. Closes RCA-A coinflip
-    /// case per US-08.
+    /// The Service's final restart attempt crashed before any declared
+    /// startup probe passed, and the restart budget was then spent. The
+    /// reason is classified at the give-up decision; it carries no timing
+    /// claim against `startup_deadline`.
     EarlyExit { exit_code: Option<i32> },
     /// Liveness probe consecutive-failure count reached its
     /// threshold AND restart-budget reached

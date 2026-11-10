@@ -661,7 +661,6 @@ proptest! {
             alloc_id: alloc.clone(),
             phase: overdrive_reconcilers::service_lifecycle::ServiceAllocPhase::NotRunning(overdrive_reconcilers::service_lifecycle::NotRunningState::new(AllocState::Terminated).expect("not Running")),
             started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1))),
-            exit_code: None,
             latest_startup_probe: latest_startup_probe.clone(),
             latest_startup_probe_observed_at: latest_startup_probe
                 .as_ref()
