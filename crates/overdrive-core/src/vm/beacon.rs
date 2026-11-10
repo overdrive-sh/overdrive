@@ -13,6 +13,7 @@
 //! ```text
 //! guest -> host   "READY pid=<u32> port=<u32> launch=<token>"   exactly once, before exec
 //! host  -> guest  "EXEC <json-argv>"             exactly once, after READY, before exec
+//! guest -> host   "LISTEN <tcp|udp> <port>"       once per distinct workload listener, before exit
 //! guest -> host   "EXIT <i32>"                   exactly once, after waitpid
 //! host  -> guest  "SHUTDOWN"                     at most once (§D4)
 //!                 EOF                             terminates the session
@@ -88,10 +89,10 @@ pub enum BeaconParseError {
     /// The line had no content at all.
     #[error("empty beacon line")]
     Empty,
-    /// The first token was not `READY`, `EXIT`, `SHUTDOWN`, or an `EXEC`
-    /// carrying a payload (a bare `EXEC` with no trailing-space payload
-    /// falls through to this generic bucket too, since it never reaches
-    /// the dedicated `EXEC ` prefix match).
+    /// The first token was not `READY`, `LISTEN`, `EXIT`, `SHUTDOWN`, or an
+    /// `EXEC` carrying a payload (a bare `EXEC` with no trailing-space
+    /// payload falls through to this generic bucket too, since it never
+    /// reaches the dedicated `EXEC ` prefix match).
     #[error("unrecognised beacon message kind {kind:?} in line {raw:?}")]
     UnknownKind {
         /// The unrecognised first token.

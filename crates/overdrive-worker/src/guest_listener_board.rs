@@ -27,7 +27,7 @@ struct ListenerEntry {
 }
 
 /// Host-side board of reported guest listeners. See the module docs.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct GuestListenerBoard {
     entries: Mutex<BTreeMap<AllocationId, Arc<Mutex<ListenerEntry>>>>,
 }
@@ -37,10 +37,11 @@ impl GuestListenerBoard {
     #[must_use]
     #[allow(
         clippy::missing_const_for_fn,
+        clippy::new_without_default,
         reason = "the pinned shape is `new() -> Self`; the real board's constructor is not const"
     )]
     pub fn new() -> Self {
-        Self::default()
+        Self { entries: Mutex::new(BTreeMap::new()) }
     }
 
     pub(crate) fn open(&self, alloc: &AllocationId, declared: &[Listener]) {

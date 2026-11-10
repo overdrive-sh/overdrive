@@ -1,11 +1,9 @@
 //! [`GuestListenerReports`] — the read-only port over the set of workload
 //! listeners a guest has reported over the beacon channel (D13 item 10, PR-1).
 //!
-//! SCAFFOLD: true — RED scaffold created by DISTILL for the exact shape the
-//! design pins in `feature-delta.md` § "D13 item 10" and § "Interface changes
-//! (D13 to D16)". The trait and the value type are pinned, including the value
-//! type's construction surface (`Default`, `FromIterator<Listener>`, `is_empty`;
-//! DG-6).
+//! The value type is constructed through `Default` or
+//! `FromIterator<Listener>` (DG-6); the port exposes only level reads and
+//! insertion-driven change notifications.
 
 use std::collections::BTreeSet;
 use std::num::NonZeroU16;

@@ -1088,14 +1088,14 @@ impl VmDriver {
     /// Every port is a mandatory constructor parameter — no
     /// `with_vmm`-style builder override
     /// (`.claude/rules/development.md` § "Port-trait dependencies").
-    /// Arity and parameter order are pinned by ADR-0090: the trusted
-    /// `probe_runner` is the mandatory fifth constructor argument. The bound
-    /// beacon intake is the last (DG-4, DG-2 row 15): a driver without a
-    /// bound beacon listener is unrepresentable.
+    /// The trusted `probe_runner` is the mandatory fifth constructor argument
+    /// (ADR-0090). D13-S1 pins `guest_listener_board` as the mandatory ninth
+    /// and last argument, after the bound beacon intake; a driver without
+    /// either is unrepresentable.
     #[must_use]
     #[allow(
         clippy::too_many_arguments,
-        reason = "DG-4 pins the constructor's eight parameters; every port is mandatory"
+        reason = "D13-S1 pins the constructor's nine parameters; every port is mandatory"
     )]
     pub fn new(
         vmm: Arc<dyn Vmm>,
