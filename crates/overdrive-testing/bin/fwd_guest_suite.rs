@@ -63,11 +63,17 @@ const QUINT_RUNTIME_DIR: &str = "guest-kit/quint-test-runtime";
 const QUINT_RUNTIME_FILES_DIR: &str = "files";
 const QUINT_RUNTIME_MANIFEST: &str = "manifest.v1";
 const QUINT_RUNTIME_FORMAT: &str = "overdrive-quint-test-runtime-v1";
-const QUINT_APPLICATION_BINARY: &str = "overdrive-gateway";
-const QUINT_APPLICATION_TEST: &str =
-    "application::quint_gateway_application::gateway_application_failed_candidate_not_restaged";
-const QUINT_APPLICATION_MODEL: &str =
-    "../../specs/quint/public-ingress-gateway/gateway_application.qnt";
+/// Every guest-placed test whose module path carries a `quint_*` segment runs
+/// the Quint CLI, so it is staged the prepared runtime; the model it resolves
+/// relative to its working directory is declared once per (binary, module
+/// prefix) here. A guest-placed `quint_*` module absent from this table fails
+/// closed at staging (`quint_guest_model`) instead of surfacing later as a
+/// failed Quint command inside the guest.
+const QUINT_GUEST_MODULES: &[(&str, &str, &str)] = &[(
+    "overdrive-gateway",
+    "application::quint_gateway_application::",
+    "../../specs/quint/public-ingress-gateway/gateway_application.qnt",
+)];
 const GUEST_EXACT_ENV: &str = "OVERDRIVE_FWD_GUEST_EXACT";
 const GUEST_LANE_KIND_ENV: &str = "OVERDRIVE_FWD_GUEST_LANE_KIND";
 const GUEST_LANE_FIXTURE_ENV: &str = "OVERDRIVE_FWD_GUEST_LANE_FIXTURE";
@@ -132,8 +138,21 @@ const STEP13_06_NFT_MODULES: &[(&str, &str)] = &[
 /// guests boot `serve`, whose shared mTLS nft program is installed
 /// unconditionally, and the bodies that inspect it shell out to `nft`; this is
 /// the single definition, alongside the module closure below.
-const CGROUP_DEFAULT_TOOLS: [&str; 8] =
-    ["cat", "chmod", "ip", "mkdir", "mount", "nft", "sh", "stat"];
+///
+/// Beyond the boot and nft tooling, bodies across the group shell out to `ss`
+/// (socket-state oracles), `strace` and `uname` (syscall evidence), `ln` (the
+/// `/var/run` compatibility link) and `openssl` (chain verification of minted
+/// certificates). Staging them for the whole group, not per selected cell, is
+/// what keeps a newly placed body from failing with "command not found".
+const CGROUP_DEFAULT_TOOLS: [&str; 13] = [
+    "cat", "chmod", "ip", "ln", "mkdir", "mount", "nft", "openssl", "sh", "ss", "stat", "strace",
+    "uname",
+];
+/// `ip netns add` publishes handles under `/run/netns`, while the authored
+/// fixtures and production's `overdrive-netlink` open the traditional
+/// `/var/run/netns` spelling. The standard `/var/run -> /run` link makes both
+/// resolve to one directory in the disposable guest.
+const NETNS_VAR_RUN_COMPAT: &str = "set -eu; mkdir -p /var /run/netns; test ! -e /var/run; test ! -L /var/run; ln -s /run /var/run; test -L /var/run; test \"$(cd /var/run && pwd -P)\" = /run; test -d /var/run/netns";
 /// Every `cgroup-default` guest boots `serve`, whose always-installed shared
 /// mTLS nft program needs the `nf_tables` core, veth, TLS, and the complete
 /// tproxy / reject / fib expression closure. The guest has no `/lib/modules`,
@@ -1901,14 +1920,10 @@ fn setup_dataplane_native_guest(guest: &mut GuestRun) -> Result<(), GuestKitErro
 fn cgroup_tools(
     kit: &GuestKit,
     support_dir: &Path,
-    stage_step13_04_nft: bool,
     stage_step13_05_legb: bool,
     stage_normal_gate_native: bool,
 ) -> Result<Vec<GuestFile>, GuestKitError> {
     let mut files: Vec<_> = CGROUP_DEFAULT_TOOLS.into_iter().map(tool).collect();
-    if stage_step13_04_nft {
-        files.extend(["ln", "ss", "strace", "uname"].into_iter().map(tool));
-    }
     if stage_step13_05_legb {
         // The V-LEGB-MARK fixture pins and reads back route_localnet=0. The
         // five selected bodies call no Python interpreter; do not stage a
@@ -2440,11 +2455,7 @@ fn run_nested_vm_test_binary_with_resources(
     guest.command(&["/usr/bin/mount", "-t", "securityfs", "securityfs", "/sys/kernel/security"])?;
     guest.command(&["/usr/bin/cat", "/sys/kernel/security/lsm"])?;
     guest.command(&["/usr/bin/sh", "-c", CGROUP_CONTROLLERS])?;
-    guest.command(&[
-        "/usr/bin/sh",
-        "-c",
-        "set -eu; mkdir -p /var /run/netns; test ! -e /var/run; test ! -L /var/run; ln -s /run /var/run; test -L /var/run; test \"$(cd /var/run && pwd -P)\" = /run; test -d /var/run/netns",
-    ])?;
+    guest.command(&["/usr/bin/sh", "-c", NETNS_VAR_RUN_COMPAT])?;
     guest.command(&["/usr/bin/losetup", "/dev/loop0", NESTED_REFLINK_IMAGE])?;
     guest.command(&["/usr/bin/mount", "-t", "xfs", "/dev/loop0", "/srv/vm"])?;
     guest.command(&["/usr/bin/cp", GUEST_PEER_GUEST_PATH, "/srv/vm/reflink-probe"])?;
@@ -2658,13 +2669,8 @@ fn run_cgroup_binary(
     let tests = InGuestTests::prepared(package, target)?;
     let staging = default_staging_root();
     let modules = WorkDir::create(&staging, &format!("fwd-suite-{name}-kernel-modules"))?;
-    let mut extra = cgroup_tools(
-        kit,
-        modules.path(),
-        stage_step13_04_nft,
-        stage_step13_05_legb,
-        stage_normal_gate_native,
-    )?;
+    let mut extra =
+        cgroup_tools(kit, modules.path(), stage_step13_05_legb, stage_normal_gate_native)?;
     let mut module_paths = Vec::new();
     for &(relative, guest_path) in NESTED_DEVICE_MODULES {
         extra.push(host_module_file(kit, modules.path(), relative, Path::new(guest_path))?);
@@ -2736,11 +2742,7 @@ fn run_cgroup_binary(
         // existing PeerNetns fixture opens the traditional /var/run/netns
         // spelling. Keep that authored fixture unchanged inside the
         // disposable guest by installing the standard compatibility symlink.
-        guest.command(&[
-            "/usr/bin/sh",
-            "-c",
-            "set -eu; mkdir -p /var /run/netns; test ! -e /var/run; test ! -L /var/run; ln -s /run /var/run; test -L /var/run; test \"$(cd /var/run && pwd -P)\" = /run; test -d /var/run/netns",
-        ])?;
+        guest.command(&["/usr/bin/sh", "-c", NETNS_VAR_RUN_COMPAT])?;
     }
 
     let baseline_passed = exec_cells(&mut guest, baseline_cells)?;
@@ -3405,7 +3407,10 @@ fn quint_runtime_guest_files(
     Ok(guest_files)
 }
 
-fn quint_test_guest_files(current_dir: &Path) -> Result<Vec<GuestFile>, NextestDispatchFailure> {
+fn quint_test_guest_files(
+    current_dir: &Path,
+    model: &str,
+) -> Result<Vec<GuestFile>, NextestDispatchFailure> {
     let dispatcher = std::env::current_exe().map_err(|error| {
         NextestDispatchFailure::LaneNotPrepared(format!(
             "locating the prepared dispatcher for the Quint runtime inputs: {error}"
@@ -3424,17 +3429,40 @@ fn quint_test_guest_files(current_dir: &Path) -> Result<Vec<GuestFile>, NextestD
     // Keep the test's existing relative `quint test` argument and exact CWD.
     // Stage only the source file that argument resolves to in the selected
     // checkout; its sole model import is in this same file.
-    let model = current_dir.join(QUINT_APPLICATION_MODEL).canonicalize().map_err(|error| {
+    let model_path = current_dir.join(model).canonicalize().map_err(|error| {
         NextestDispatchFailure::LaneNotPrepared(format!(
-            "the selected Quint model {QUINT_APPLICATION_MODEL:?} is absent from the selected test checkout: {error}"
+            "the selected Quint model {model:?} is absent from the selected test checkout: {error}"
         ))
     })?;
-    guest_files.push(GuestFile { host: model.clone(), guest: model, with_shared_libraries: false });
+    guest_files.push(GuestFile {
+        host: model_path.clone(),
+        guest: model_path,
+        with_shared_libraries: false,
+    });
     Ok(guest_files)
 }
 
-fn selected_quint_application_test(binary_id: &str, test_name: &str) -> bool {
-    binary_id == QUINT_APPLICATION_BINARY && test_name == QUINT_APPLICATION_TEST
+/// The Quint model a guest-placed test needs, or `None` when the test's module
+/// path has no `quint_*` segment. A `quint_*` module with no declared model is
+/// a staging failure, never a silent skip.
+fn quint_guest_model(
+    binary_id: &str,
+    test_name: &str,
+) -> Result<Option<&'static str>, NextestDispatchFailure> {
+    let mut segments = test_name.split("::").collect::<Vec<_>>();
+    segments.pop();
+    if !segments.iter().any(|segment| segment.starts_with("quint_")) {
+        return Ok(None);
+    }
+    QUINT_GUEST_MODULES
+        .iter()
+        .find(|(binary, prefix, _)| *binary == binary_id && test_name.starts_with(prefix))
+        .map(|&(_, _, model)| Some(model))
+        .ok_or_else(|| {
+            NextestDispatchFailure::LaneNotPrepared(format!(
+                "guest-placed Quint test {binary_id}::{test_name} has no model declared in QUINT_GUEST_MODULES"
+            ))
+        })
 }
 
 fn selected_cell(cells: &[Cell], test_name: &str) -> bool {
@@ -3492,11 +3520,7 @@ fn cgroup_attempt_files(
     let stage_step13_06 = selected_cell(STEP13_06_WORKER, test_name)
         || selected_cell(STEP13_06_ROUTED_WORKER, test_name);
     let stage_normal_gate = selected_cell(CONTROL_PLANE_NORMAL_NATIVE, test_name);
-    let mut extra =
-        cgroup_tools(kit, directory, stage_step13_04, stage_step13_05, stage_normal_gate)?;
-    if stage_step13_06 {
-        extra.extend(["ss", "strace", "uname"].into_iter().map(tool));
-    }
+    let mut extra = cgroup_tools(kit, directory, stage_step13_05, stage_normal_gate)?;
     let mut module_paths = Vec::new();
     stage_modules(kit, directory, &cgroup_default_module_specs(), &mut extra, &mut module_paths)?;
     if stage_step13_04 {
@@ -3580,11 +3604,7 @@ fn prepare_nested_attempt(guest: &mut GuestRun) -> Result<(), GuestKitError> {
     guest.command(&["/usr/bin/mount", "-t", "securityfs", "securityfs", "/sys/kernel/security"])?;
     guest.command(&["/usr/bin/cat", "/sys/kernel/security/lsm"])?;
     guest.command(&["/usr/bin/sh", "-c", CGROUP_CONTROLLERS])?;
-    guest.command(&[
-        "/usr/bin/sh",
-        "-c",
-        "set -eu; mkdir -p /var /run/netns; test ! -e /var/run; test ! -L /var/run; ln -s /run /var/run; test -L /var/run; test \"$(cd /var/run && pwd -P)\" = /run; test -d /var/run/netns",
-    ])?;
+    guest.command(&["/usr/bin/sh", "-c", NETNS_VAR_RUN_COMPAT])?;
     // XFS was loaded explicitly above for losetup. Preserve it in the shared
     // staged module list used by the batch owner, while avoiding a second
     // load in this per-test path. Load the remaining modules before changing
@@ -3612,9 +3632,12 @@ fn run_cgroup_attempt_setup(
 ) -> Result<(), GuestKitError> {
     let modules = guest.module_paths.clone();
     guest.command_with_modules(&modules, "/usr/bin/sh", &["-c", "true"])?;
-    if flags.step13_04 {
-        guest.command(&["/usr/bin/sh", "-c", DUMMY_AUTO_DEVICE_CLEANUP])?;
-    }
+    // The scripted guest's PID 1 loads the staged dummy module at boot for
+    // every attempt, so every attempt starts with the automatic dummy0 that a
+    // production node does not have. Remove it before any body observes the
+    // node's interface set (the node-qualification readbacks require `lo`
+    // only), not merely for the bodies that later create their own sink.
+    guest.command(&["/usr/bin/sh", "-c", DUMMY_AUTO_DEVICE_CLEANUP])?;
     guest.command(&["/usr/bin/chmod", "0660", "/dev/kvm", "/dev/vhost-vsock"])?;
     guest.command(&[
         "/usr/bin/stat",
@@ -3627,13 +3650,9 @@ fn run_cgroup_attempt_setup(
     guest.command(&["/usr/bin/mount", "-t", "cgroup2", "none", "/sys/fs/cgroup"])?;
     guest.command(&["/usr/bin/mount", "-t", "bpf", "bpf", "/sys/fs/bpf"])?;
     guest.command(&["/usr/bin/sh", "-c", CGROUP_CONTROLLERS])?;
-    if flags.step13_04 {
-        guest.command(&[
-            "/usr/bin/sh",
-            "-c",
-            "set -eu; mkdir -p /var /run/netns; test ! -e /var/run; test ! -L /var/run; ln -s /run /var/run; test -L /var/run; test \"$(cd /var/run && pwd -P)\" = /run; test -d /var/run/netns",
-        ])?;
-    }
+    // Every body that creates a netns through iproute2 and reopens it by its
+    // `/var/run/netns` path needs the standard link, not only STEP 13-04.
+    guest.command(&["/usr/bin/sh", "-c", NETNS_VAR_RUN_COMPAT])?;
     if flags.normal_gate {
         guest.command(&["/usr/bin/sh", "-c", CONTROL_PLANE_NORMAL_NATIVE_SETUP])?;
     }
@@ -3939,8 +3958,8 @@ fn run_nextest_group_attempt(
 ) -> Result<i32, NextestDispatchFailure> {
     let environment = nextest_environment()?;
     let (mut attempt_files, current_dir) = nextest_attempt_files(program, &environment)?;
-    if selected_quint_application_test(binary_id, test_name) {
-        attempt_files.extend(quint_test_guest_files(&current_dir)?);
+    if let Some(model) = quint_guest_model(binary_id, test_name)? {
+        attempt_files.extend(quint_test_guest_files(&current_dir, model)?);
     }
     let source_root =
         PathBuf::from(std::env::var("OVERDRIVE_METAL_SOURCE_ROOT").unwrap_or_default());
@@ -4475,5 +4494,60 @@ mod tests {
     #[test]
     fn every_cgroup_default_attempt_stages_the_nft_binary() {
         assert!(CGROUP_DEFAULT_TOOLS.contains(&"nft"));
+    }
+
+    #[test]
+    fn every_cgroup_default_attempt_stages_the_diagnostic_and_certificate_tools() {
+        for required in ["ss", "strace", "uname", "ln", "openssl"] {
+            assert!(CGROUP_DEFAULT_TOOLS.contains(&required), "missing tool {required}");
+        }
+    }
+
+    #[test]
+    fn the_netns_compatibility_link_needs_only_group_staged_tools() {
+        for program in ["mkdir", "ln"] {
+            assert!(CGROUP_DEFAULT_TOOLS.contains(&program), "missing tool {program}");
+        }
+        assert!(NETNS_VAR_RUN_COMPAT.contains("ln -s /run /var/run"));
+    }
+
+    #[test]
+    fn every_test_of_a_declared_quint_module_resolves_its_model() {
+        for name in [
+            "gateway_application_replace_valid",
+            "gateway_application_route_withdraw_drain",
+            "gateway_application_late_probe_after_supersession",
+            "gateway_application_app_conf_randomized_traces",
+            "gateway_application_failed_candidate_not_restaged",
+        ] {
+            let test = format!("application::quint_gateway_application::{name}");
+            let model = quint_guest_model("overdrive-gateway", &test).expect("declared module");
+            assert_eq!(
+                model,
+                Some("../../specs/quint/public-ingress-gateway/gateway_application.qnt")
+            );
+        }
+    }
+
+    #[test]
+    fn a_test_outside_any_quint_module_is_staged_no_quint_runtime() {
+        let model = quint_guest_model(
+            "overdrive-gateway",
+            "application::probe_completion_acceptance::a_test",
+        )
+        .expect("not a quint module");
+        assert_eq!(model, None);
+        let named = quint_guest_model("overdrive-gateway", "application::quint_named_test")
+            .expect("a quint-named test fn is not a quint module");
+        assert_eq!(named, None);
+    }
+
+    #[test]
+    fn an_undeclared_quint_module_fails_closed() {
+        assert!(quint_guest_model("overdrive-gateway", "runtime::quint_other::a_test").is_err());
+        assert!(
+            quint_guest_model("overdrive-worker", "application::quint_gateway_application::a_test")
+                .is_err()
+        );
     }
 }
