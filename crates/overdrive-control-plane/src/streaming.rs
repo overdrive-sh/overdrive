@@ -870,7 +870,9 @@ pub fn progress_deadline(
 ///
 /// Returns `None` for `TerminalCondition` variants without a Service-
 /// kind wire projection (e.g. `Completed { exit_code }` — Job-kind
-/// natural exit, not reachable on the Service-kind broadcast lane).
+/// natural exit, not reachable on the Service-kind broadcast lane), and for
+/// restartable `Stopped` causes (`LivenessProbe` and `StartupProbe`) that do
+/// not end the Service stream.
 ///
 /// `stderr_tail` is read by the caller from the row's `stderr_tail`
 /// field (typically via `obs.alloc_status_row(...).stderr_tail`).
@@ -885,7 +887,7 @@ pub fn service_event_from_terminal(
     last_exit_code: Option<i32>,
 ) -> Option<ServiceSubmitEvent> {
     use overdrive_core::transition_reason::{
-        BackoffCause, ServiceFailureReason, TerminalCondition,
+        BackoffCause, ServiceFailureReason, StoppedBy, TerminalCondition,
     };
     match terminal {
         TerminalCondition::Stable { settled_in_ms, witness } => Some(ServiceSubmitEvent::Stable {
@@ -899,6 +901,9 @@ pub fn service_event_from_terminal(
             stderr_tail,
             last_attempt: None,
         }),
+        TerminalCondition::Stopped { by: StoppedBy::LivenessProbe | StoppedBy::StartupProbe } => {
+            None
+        }
         TerminalCondition::Stopped { by } => {
             Some(ServiceSubmitEvent::Stopped { alloc_id: alloc_id.to_string(), by: *by })
         }

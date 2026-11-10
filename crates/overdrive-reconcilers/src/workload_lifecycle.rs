@@ -1165,6 +1165,7 @@ impl WorkloadLifecycle {
                                     | TerminalCondition::ServiceFailed {
                                         reason: ServiceFailureReason::LivenessProbeFailed { .. }
                                             | ServiceFailureReason::EarlyExit { .. }
+                                            | ServiceFailureReason::StartupProbeFailed { .. }
                                     }
                             )
                         ) {
@@ -1221,6 +1222,20 @@ impl WorkloadLifecycle {
                             TerminalCondition::ServiceFailed {
                                 reason: ServiceFailureReason::LivenessProbeFailed {
                                     probe_idx: 0,
+                                    attempts,
+                                },
+                            }
+                        } else if is_startup_killed(failed) {
+                            let last_fail = match actual.current_startup_probe.as_ref() {
+                                Some(ProbeStatus::Fail { last_fail_reason }) => {
+                                    last_fail_reason.clone()
+                                }
+                                _ => String::new(),
+                            };
+                            TerminalCondition::ServiceFailed {
+                                reason: ServiceFailureReason::StartupProbeFailed {
+                                    probe_idx: 0,
+                                    last_fail,
                                     attempts,
                                 },
                             }
@@ -1629,6 +1644,14 @@ fn is_liveness_killed(row: &AllocStatusRow) -> bool {
             row.reason,
             Some(TransitionReason::Stopped { by: StoppedBy::LivenessProbe })
         ))
+}
+
+/// True iff the final attempt's terminal disposition records a startup-probe
+/// stop. The restart authority reads this durable cause when the budget is
+/// spent.
+fn is_startup_killed(row: &AllocStatusRow) -> bool {
+    row.state == AllocState::Terminated
+        && matches!(row.terminal, Some(TerminalCondition::Stopped { by: StoppedBy::StartupProbe }))
 }
 
 /// Build a predecessor-to-fresh-successor restart action. Keeping action

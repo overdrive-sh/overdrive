@@ -1394,26 +1394,30 @@ fn issued_certificates_for_rows(
 /// Derive a [`RestartBudget`] from the durable
 /// [`AllocStatusRow.terminal`] field per ADR-0037 §4. The budget is
 /// exhausted iff any of the job's rows carries
-/// `BackoffExhausted` or `ServiceFailed { EarlyExit }` — the
+/// `BackoffExhausted`, `ServiceFailed { EarlyExit }`, or
+/// `ServiceFailed { StartupProbeFailed }` — the
 /// reconciler-emitted terminal claims. Per § Persist inputs, not
 /// derived state: `exhausted` is recomputed on every read from the
 /// durable inputs (`row.terminal`) so a future per-job budget policy
 /// change does not require a row migration.
 ///
 /// `used` reflects the attempts count from `BackoffExhausted`, or the
-/// policy ceiling for `ServiceFailed { EarlyExit }` (which does not carry
-/// an attempts field), else 0; `max` is sourced from
+/// policy ceiling for `ServiceFailed { EarlyExit }` and
+/// `ServiceFailed { StartupProbeFailed }`, else 0; `max` is sourced from
 /// [`RESTART_BACKOFF_CEILING`], the `WorkloadLifecycle` policy ceiling —
 /// single source of truth shared with the reconciler so the wire
 /// field cannot drift from the runtime policy.
 fn restart_budget_from_rows(rows: &[AllocStatusRow]) -> RestartBudget {
-    let exhausted_attempts = rows.iter().find_map(|row| match &row.terminal {
-        Some(TerminalCondition::BackoffExhausted { attempts }) => Some(*attempts),
-        Some(TerminalCondition::ServiceFailed {
-            reason: ServiceFailureReason::EarlyExit { .. },
-        }) => Some(RESTART_BACKOFF_CEILING),
-        _ => None,
-    });
+    let exhausted_attempts =
+        rows.iter().find_map(|row| match &row.terminal {
+            Some(TerminalCondition::BackoffExhausted { attempts }) => Some(*attempts),
+            Some(TerminalCondition::ServiceFailed {
+                reason:
+                    ServiceFailureReason::EarlyExit { .. }
+                    | ServiceFailureReason::StartupProbeFailed { .. },
+            }) => Some(RESTART_BACKOFF_CEILING),
+            _ => None,
+        });
     let used = exhausted_attempts.unwrap_or(0);
     let exhausted = exhausted_attempts.is_some();
     RestartBudget { used, max: RESTART_BACKOFF_CEILING, exhausted }

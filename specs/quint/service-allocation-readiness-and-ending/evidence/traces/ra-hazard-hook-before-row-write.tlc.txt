@@ -78,7 +78,7 @@ State 2: <ra_bugHookBeforeRowWrite_restart_authority_Deploy line 175, col 3 to l
 /\ ra_bugHookBeforeRowWrite_restart_authority_gl = FALSE
 /\ ra_bugHookBeforeRowWrite_restart_authority_used = 0
 
-State 3: <ra_bugHookBeforeRowWrite_restart_authority_SLStable line 887, col 3 to line 932, col 64 of module ra_bugHookBeforeRowWrite>
+State 3: <ra_bugHookBeforeRowWrite_restart_authority_SLStable line 898, col 3 to line 943, col 64 of module ra_bugHookBeforeRowWrite>
 /\ ra_bugHookBeforeRowWrite_restart_authority_at = ( 0 :>
       [ row |-> "running",
         sup |-> TRUE,
@@ -118,7 +118,7 @@ State 3: <ra_bugHookBeforeRowWrite_restart_authority_SLStable line 887, col 3 to
 /\ ra_bugHookBeforeRowWrite_restart_authority_gl = FALSE
 /\ ra_bugHookBeforeRowWrite_restart_authority_used = 0
 
-State 4: <ra_bugHookBeforeRowWrite_restart_authority_SLLivenessStop line 959, col 3 to line 989, col 64 of module ra_bugHookBeforeRowWrite>
+State 4: <ra_bugHookBeforeRowWrite_restart_authority_SLLivenessStop line 970, col 3 to line 1000, col 64 of module ra_bugHookBeforeRowWrite>
 /\ ra_bugHookBeforeRowWrite_restart_authority_at = ( 0 :>
       [ row |-> "running",
         sup |-> FALSE,

@@ -40,7 +40,6 @@ fn startup_stopped(row: &overdrive_core::traits::observation_store::AllocStatusR
 /// `ServiceFailed { StartupProbeFailed }`.
 #[tokio::test]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D7 a startup-probe failure stops the allocation and the restart authority names it at give-up"]
 async fn never_ready_guest_is_stopped_and_restarted_until_give_up_names_the_startup_failure() {
     let mut world = RestartWorld::compose(Shape::StartupProbe).await;
     let stream = world.open_stream().await;
@@ -144,7 +143,6 @@ async fn never_ready_guest_with_the_default_startup_window_times_out_naming_the_
 /// `StartupProbeFailed` is ever written.
 #[tokio::test]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D7 a startup-probe failure stops the allocation"]
 async fn successor_that_binds_after_a_startup_stop_ends_the_stream_stable() {
     let mut world = RestartWorld::compose(Shape::StartupProbe).await;
     let stream = world.open_stream().await;
@@ -193,7 +191,6 @@ async fn opt_out_service_never_receives_the_startup_stop() {
 /// failure.
 #[tokio::test]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D7 a startup-probe failure stops the allocation and the restart authority names it at give-up"]
 async fn crash_racing_the_startup_stop_leaves_the_stop_row_and_the_give_up_names_startup() {
     let mut world = RestartWorld::compose(Shape::StartupProbe).await;
     let mut alloc = world.place_first_attempt().await;

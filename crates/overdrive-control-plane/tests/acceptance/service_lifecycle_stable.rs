@@ -244,7 +244,6 @@ fn given_alloc_exits_after_stable_when_reconcile_then_does_not_emit_early_exit()
 /// { probe_idx, last_fail, attempts } }`.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER: D7 a startup-probe failure stops the allocation instead of finalising it"]
 fn given_startup_probe_exhausts_attempts_when_reconcile_then_emits_startup_stop() {
     let reconciler = ServiceLifecycleReconciler::new();
     let alloc_id = alloc("never-binds-0");

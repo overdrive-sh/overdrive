@@ -214,7 +214,6 @@ proptest! {
     /// Mutation target: the action swap, the D5 guard, each gate.
     #[test]
     /// CONTRACT_SHAPE: bounded-change.
-    #[ignore = "pending DELIVER: D5 D7 startup-probe failure stops a live allocation, terminal row yields no action"]
     fn startup_probe_failure_stops_only_a_live_allocation(
         state in prop_oneof![
             Just(AllocState::Pending), Just(AllocState::Running), Just(AllocState::Failed),

@@ -563,7 +563,6 @@ impl Reconciler for ServiceLifecycleReconciler {
         let mut actions: Vec<Action> = Vec::new();
         let mut next_view = view.clone();
         let mut stable_this_tick: BTreeSet<AllocationId> = BTreeSet::new();
-        let mut startup_failed_this_tick: BTreeSet<AllocationId> = BTreeSet::new();
 
         for (alloc_id, fact) in &actual.allocs {
             // A terminal row ends this reconciler's watch. This is before
@@ -655,10 +654,9 @@ impl Reconciler for ServiceLifecycleReconciler {
                 continue;
             }
 
-            // Branch (b): StartupProbeFailed — attempts exhausted AND
-            // deadline elapsed AND no Pass observed. Extracted into
-            // Startup attempts are the producer's observed streak on the
-            // latest written startup row. A missing row consumes no attempt.
+            // Branch (b): stop this startup attempt when its producer-recorded
+            // streak is exhausted, the deadline elapsed, and no Pass was
+            // observed. A missing row consumes no attempt.
             let attempts = fact
                 .probe_rows
                 .get(&(ProbeRole::Startup, ProbeIdx::new(0)))
@@ -668,7 +666,11 @@ impl Reconciler for ServiceLifecycleReconciler {
                 startup_probe_failed_action(alloc_id, fact, attempts, tick.now_unix)
             {
                 actions.push(action);
-                startup_failed_this_tick.insert(alloc_id.clone());
+                if let Some(row) = fact.probe_rows.get(&(ProbeRole::Startup, ProbeIdx::new(0))) {
+                    next_view
+                        .startup_last_acted_run
+                        .insert((alloc_id.clone(), ProbeIdx::new(0)), row.run_seq);
+                }
                 // Record that this reconciler has finished watching the
                 // allocation after emitting its startup stop.
                 next_view.terminal_announced.insert(alloc_id.clone());
@@ -680,28 +682,9 @@ impl Reconciler for ServiceLifecycleReconciler {
         // ServiceLifecycle owns the complete row: current Running
         // membership, listener address materialization, and the existing
         // readiness/terminal-veto policy are composed before comparing with
-        // the observed row. Place all row/hydrator groups before the first
-        // startup-failure publication so a deciding tick withdraws a vetoed
-        // backend before its terminal condition is dispatched.
-        let backend_actions =
-            service_backend_row_actions(actual, &mut next_view, tick, &startup_failed_this_tick);
-        if !backend_actions.is_empty() {
-            let insert_at = actions
-                .iter()
-                .position(|action| {
-                    matches!(
-                        action,
-                        Action::FinalizeFailed {
-                            terminal: Some(TerminalCondition::ServiceFailed {
-                                reason: ServiceFailureReason::StartupProbeFailed { .. },
-                            }),
-                            ..
-                        }
-                    )
-                })
-                .unwrap_or(actions.len());
-            actions.splice(insert_at..insert_at, backend_actions);
-        }
+        // the observed row. A startup stop remains ahead of backend-row
+        // projection so the stop is the first action for that allocation.
+        actions.extend(service_backend_row_actions(actual, &mut next_view, tick));
 
         // ---- Step 03-02 / Slice 05 — liveness → RestartAllocation ----
         collect_liveness_actions(actual, &stable_this_tick, &mut next_view, &mut actions);
@@ -1115,7 +1098,6 @@ fn service_backend_row_actions(
     actual: &ServiceLifecycleState,
     next_view: &mut ServiceLifecycleView,
     tick: &TickContext,
-    startup_failed_this_tick: &BTreeSet<AllocationId>,
 ) -> Vec<Action> {
     if actual.service_dataplane.is_empty() {
         return Vec::new();
@@ -1129,8 +1111,7 @@ fn service_backend_row_actions(
         if fact.state() != AllocState::Running {
             continue;
         }
-        let terminal_startup_veto = startup_failed_this_tick.contains(alloc_id)
-            || next_view.terminal_announced.contains(alloc_id);
+        let terminal_startup_veto = next_view.terminal_announced.contains(alloc_id);
         let healthy = compute_backend_healthy(alloc_id, fact, next_view, terminal_startup_veto);
         healthy_by_alloc.insert(alloc_id.clone(), healthy);
     }
@@ -1229,8 +1210,8 @@ fn compute_backend_healthy(
         && row.same_status_runs.get() >= fact.readiness_success_threshold
 }
 
-/// Branch (b) — StartupProbeFailed terminal action, or `None` when the
-/// three-gate condition is not met.
+/// Branch (b) — startup-probe stop action, or `None` when the three-gate
+/// condition is not met.
 ///
 /// The terminal CONDITION is unchanged from the inline branch it was
 /// extracted from: `attempts >= max_attempts && elapsed_ms >=
@@ -1246,25 +1227,11 @@ fn startup_probe_failed_action(
     attempts: u32,
     now_unix: UnixInstant,
 ) -> Option<Action> {
-    // `AllocState` gate (brief.md §105a.9/§105a.10, S-VM-29). This branch
-    // previously read NO `AllocState` at all — it fired for ANY state
-    // reaching it, including `Terminated`. A platform-reclaimed row
-    // (`brief.md` §105a.5) is ALWAYS `Terminated` (never `Pending` /
-    // `Running` / `Failed`), so an already-reclaimed allocation whose
-    // startup probes had been failing raced a fabricated
-    // `ServiceFailed { StartupProbeFailed }` claim over an ending already
-    // authored elsewhere. Excluding `Terminated` specifically — rather
-    // than allow-listing `Running | Failed` — is deliberate: the existing
-    // branch-coverage suite (`tests/acceptance/service_lifecycle_reconcile_branches.rs::
-    // startup_probe_failed_fires_when_all_three_gates_met` et al.)
-    // deliberately drives this branch from `AllocState::Pending` (no
-    // Stable gate applies yet, but the three attempts/deadline/
-    // no-pass gates below still must fire) — an allow-list would silently
-    // break that pinned, already-covered case. `Terminated` is the one
-    // state this branch is never entitled to act on: every reachable
-    // `Terminated` row already carries a different ending authored by
-    // another path (reclamation, an operator/reconciler stop, …).
-    if fact.state() == AllocState::Terminated {
+    // D5: a row that already carries an ending cannot receive a startup
+    // verdict. `is_terminal` excludes both `Failed` and `Terminated`; Pending
+    // remains eligible because the existing branch contract exercises the
+    // three startup gates before the allocation reaches Running.
+    if fact.state().is_terminal() {
         return None;
     }
     let started = fact.started_at?;
@@ -1272,19 +1239,9 @@ fn startup_probe_failed_action(
     let deadline_ms = u64::try_from(fact.startup_deadline.as_millis()).unwrap_or(u64::MAX);
     let no_pass = !matches!(fact.latest_startup_probe, Some(ProbeStatus::Pass));
     if attempts >= fact.max_attempts && elapsed_ms >= deadline_ms && no_pass {
-        let last_fail = match &fact.latest_startup_probe {
-            Some(ProbeStatus::Fail { last_fail_reason }) => last_fail_reason.clone(),
-            _ => String::new(),
-        };
-        Some(Action::FinalizeFailed {
+        Some(Action::StopAllocation {
             alloc_id: alloc_id.clone(),
-            terminal: Some(TerminalCondition::ServiceFailed {
-                reason: ServiceFailureReason::StartupProbeFailed {
-                    probe_idx: 0,
-                    last_fail,
-                    attempts,
-                },
-            }),
+            terminal: Some(TerminalCondition::Stopped { by: StoppedBy::StartupProbe }),
         })
     } else {
         None

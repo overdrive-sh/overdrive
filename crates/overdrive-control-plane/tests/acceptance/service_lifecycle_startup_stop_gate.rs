@@ -5,7 +5,7 @@
 //! Service whose startup descriptor has the mechanic under test, so the
 //! reconciler's own `spec_facts_for_service` supplies the gate's attempts
 //! threshold) and `ServiceLifecycleReconciler::reconcile`. Oracle: whether the
-//! returned actions carry the startup-probe-failed ending.
+//! returned actions contain the exact D7 startup stop and its view membership.
 //!
 //! Expected, per the design: for `Tcp` and `Http` the stop requires the latest
 //! startup `Fail` row's streak `>= max_attempts` (as before), the deadline
@@ -38,12 +38,13 @@ use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::observation::{
     ProbeIdx, ProbeResultRow, ProbeRole, ProbeRunSeq, ProbeStatus, SameStatusRuns,
 };
-use overdrive_core::reconcilers::{Reconciler, TargetResource, TickContext};
+use overdrive_core::reconcilers::{Action, Reconciler, TargetResource, TickContext};
 use overdrive_core::traits::driver::{Driver, DriverType};
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRow, LogicalTimestamp, ObservationStore, TransitionSource,
 };
+use overdrive_core::transition_reason::{ServiceFailureReason, StoppedBy, TerminalCondition};
 use overdrive_core::wall_clock::UnixInstant;
 use overdrive_reconcilers::service_lifecycle::{
     ServiceLifecycleReconciler, ServiceLifecycleState, ServiceLifecycleView,
@@ -193,6 +194,7 @@ async fn stop_emitted(mechanic: Mechanic, latest: Latest, elapsed_secs: u64) -> 
         .expect("put kind");
 
     let aid = AllocationId::new("startup-gate-0").expect("alloc id");
+    let expected_alloc = aid.clone();
     let started = UnixInstant::from_unix_duration(Duration::from_secs(STARTED_SECS));
     state
         .obs
@@ -257,13 +259,41 @@ async fn stop_emitted(mechanic: Mechanic, latest: Latest, elapsed_secs: u64) -> 
         tick: 0,
         deadline: now + Duration::from_secs(1),
     };
-    let (actions, _) = ServiceLifecycleReconciler::new().reconcile(
+    let (actions, next_view) = ServiceLifecycleReconciler::new().reconcile(
         &desired as &ServiceLifecycleState,
         &actual,
         &ServiceLifecycleView::default(),
         &tick,
     );
-    actions.iter().any(|a| format!("{a:?}").contains("StartupProbeFailed"))
+    let mut stop_count = 0;
+    for action in &actions {
+        match action {
+            Action::StopAllocation {
+                alloc_id,
+                terminal: Some(TerminalCondition::Stopped { by: StoppedBy::StartupProbe }),
+            } if alloc_id == &expected_alloc => stop_count += 1,
+            Action::StopAllocation { alloc_id, .. } if alloc_id == &expected_alloc => {
+                panic!("the allocation received a stop with the wrong terminal: {action:?}");
+            }
+            Action::FinalizeFailed {
+                alloc_id,
+                terminal:
+                    Some(TerminalCondition::ServiceFailed {
+                        reason: ServiceFailureReason::StartupProbeFailed { .. },
+                    }),
+            } if alloc_id == &expected_alloc => {
+                panic!("D7 forbids a live startup failure from finalising: {action:?}");
+            }
+            _ => {}
+        }
+    }
+    assert!(stop_count <= 1, "at most one startup stop per evaluation: {actions:?}");
+    assert_eq!(
+        next_view.terminal_announced.contains(&expected_alloc),
+        stop_count == 1,
+        "the returned view records exactly the emitted startup stop"
+    );
+    stop_count == 1
 }
 
 const fn expected_stop(mechanic: Mechanic, latest: Latest, elapsed_secs: u64) -> bool {

@@ -54,7 +54,6 @@ async fn crash_loop_to_the_ceiling(
 /// recorded cause stays the crash; the probe supervisor is gone (D1).
 #[tokio::test]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D5 startup verdict announced only for a non-terminal allocation"]
 async fn crashed_allocation_with_exhausted_startup_probes_is_restarted_not_finalised() {
     let mut world = RestartWorld::compose(Shape::StartupProbe).await;
     let first = world.place_first_attempt().await;
@@ -87,7 +86,6 @@ async fn crashed_allocation_with_exhausted_startup_probes_is_restarted_not_final
 /// `Running` row was ever evaluated.
 #[tokio::test]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D5 startup verdict announced only for a non-terminal allocation"]
 async fn crash_after_the_deadline_before_the_first_look_is_restarted_not_finalised() {
     let mut world = RestartWorld::compose(Shape::StartupProbe).await;
     let first = world.place_first_attempt().await;

@@ -760,7 +760,9 @@ fn claim_of(terminal: Option<&TerminalCondition>) -> &'static str {
     }
 }
 
-/// The model's row class of a production row.
+/// The model's row class of a production row. After `WLGiveUp`, the
+/// `FinalizeFailed` shim writes `Failed`; a prior startup stop therefore
+/// projects as `failed_other`, while `claim` retains `StartupProbeFailed`.
 fn row_class(row: Option<&AllocStatusRow>) -> &'static str {
     let Some(row) = row else { return "none" };
     let claim = claim_of(row.terminal.as_ref());
@@ -935,7 +937,6 @@ fn restart_authority_crash_after_attempts_exhausted_then_deadline_passes() -> im
     max_samples = 1
 )]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D7 startup stop (StopAllocation { Stopped { StartupProbe } }), D5 guard, D8 startup_last_acted_run"]
 fn restart_authority_running_alloc_with_exhausted_probes_past_deadline_is_stopped() -> impl Driver {
     RestartAuthorityDriver::new()
 }
@@ -1011,7 +1012,6 @@ fn restart_authority_liveness_kill_loop_gives_up_liveness_probe_failed() -> impl
     max_samples = 1
 )]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D7 startup stop (StopAllocation { Stopped { StartupProbe } }), D5 guard, D8 startup_last_acted_run"]
 fn restart_authority_startup_never_passes_loop_gives_up_startup_probe_failed() -> impl Driver {
     RestartAuthorityDriver::new()
 }
@@ -1023,7 +1023,6 @@ fn restart_authority_startup_never_passes_loop_gives_up_startup_probe_failed() -
     max_samples = 1
 )]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D7 startup stop (StopAllocation { Stopped { StartupProbe } }), D5 guard, D8 startup_last_acted_run"]
 fn restart_authority_pass_then_fails_before_stable_is_stopped() -> impl Driver {
     RestartAuthorityDriver::new()
 }
@@ -1035,7 +1034,6 @@ fn restart_authority_pass_then_fails_before_stable_is_stopped() -> impl Driver {
     max_samples = 1
 )]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D7 startup stop (StopAllocation { Stopped { StartupProbe } }), D5 guard, D8 startup_last_acted_run"]
 fn restart_authority_startup_stop_then_successor_passes_is_stable() -> impl Driver {
     RestartAuthorityDriver::new()
 }
@@ -1047,7 +1045,6 @@ fn restart_authority_startup_stop_then_successor_passes_is_stable() -> impl Driv
     max_samples = 1
 )]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D7 startup stop (StopAllocation { Stopped { StartupProbe } }), D5 guard, D8 startup_last_acted_run"]
 fn restart_authority_startup_stop_then_crash_names_last_cause() -> impl Driver {
     RestartAuthorityDriver::new()
 }
@@ -1059,7 +1056,6 @@ fn restart_authority_startup_stop_then_crash_names_last_cause() -> impl Driver {
     max_samples = 1
 )]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D7 startup stop (StopAllocation { Stopped { StartupProbe } }), D5 guard, D8 startup_last_acted_run"]
 fn restart_authority_crash_then_startup_stop_names_last_cause() -> impl Driver {
     RestartAuthorityDriver::new()
 }
@@ -1071,7 +1067,6 @@ fn restart_authority_crash_then_startup_stop_names_last_cause() -> impl Driver {
     max_samples = 1
 )]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D7 startup stop (StopAllocation { Stopped { StartupProbe } }), D5 guard, D8 startup_last_acted_run"]
 fn restart_authority_startup_stop_is_not_intentional_stop() -> impl Driver {
     RestartAuthorityDriver::new()
 }

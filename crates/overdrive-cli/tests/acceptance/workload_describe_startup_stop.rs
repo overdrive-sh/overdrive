@@ -93,7 +93,6 @@ fn describe_output(
 /// `Fail` startup probe line; the `Running` successor renders no such line.
 #[test]
 /// CONTRACT_SHAPE: pure-function.
-#[ignore = "pending DELIVER: D7 describe line for a startup-stopped predecessor"]
 fn describe_names_a_startup_stopped_predecessor_and_shows_the_running_successor() {
     let predecessor = row(
         "alloc-payments-0",

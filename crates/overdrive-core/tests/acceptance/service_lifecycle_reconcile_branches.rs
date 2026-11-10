@@ -426,7 +426,6 @@ fn empty_probes_opt_out_does_not_fire_when_state_is_not_running() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER: D7 a startup-probe failure stops the allocation instead of finalising it"]
 fn startup_probe_failure_stops_the_allocation_when_all_three_gates_are_met() {
     // state is Pending so Stable does not fire.
     let mut f = fact(
@@ -720,7 +719,6 @@ fn reconcile_records_observed_for_mid_window_alloc_and_predicate_is_true() {
 /// emits zero actions (no terminal re-emission busy-loop).
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER: D7 the startup stop is the terminal decision recorded in terminal_announced"]
 fn reconcile_startup_stop_clears_mid_window_and_dedups() {
     let mut f = fact(
         "alloc-svc-8",
@@ -1627,7 +1625,6 @@ fn readiness_branch_emits_write_when_healthy_flag_changes() {
 /// `StopAllocation { LivenessProbe }` land for one alloc — contradictory.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER: D7 the startup stop replaces the startup finalisation"]
 fn startup_probe_failure_suppresses_liveness_stop_same_tick() {
     let id = "svc-dual-0";
     // Running, startup probe Fail, past deadline (StartupProbeFailed

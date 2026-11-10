@@ -193,7 +193,6 @@ async fn an_early_exit_give_up_is_an_exhausted_budget_at_the_ceiling() {
 /// `used == RESTART_BACKOFF_CEILING`.
 #[tokio::test]
 /// CONTRACT_SHAPE: pure-function.
-#[ignore = "pending DELIVER: D7 a StartupProbeFailed give-up is an exhausted restart budget"]
 async fn a_startup_probe_failed_give_up_is_an_exhausted_budget_at_the_ceiling() {
     let budget = budget_for(
         Some(TerminalCondition::ServiceFailed {

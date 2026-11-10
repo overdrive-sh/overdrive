@@ -238,7 +238,7 @@ State 6: <ra_bugGuardAcceptsFailed_restart_authority_Crash line 213, col 3 to li
 /\ ra_bugGuardAcceptsFailed_restart_authority_gl = FALSE
 /\ ra_bugGuardAcceptsFailed_restart_authority_conf_step = [init |-> [tag |-> "UNIT"]]
 
-State 7: <ra_bugGuardAcceptsFailed_restart_authority_SLStartupStop line 1030, col 3 to line 1083, col 64 of module ra_bugGuardAcceptsFailed>
+State 7: <ra_bugGuardAcceptsFailed_restart_authority_SLStartupStop line 1041, col 3 to line 1094, col 64 of module ra_bugGuardAcceptsFailed>
 /\ ra_bugGuardAcceptsFailed_restart_authority_used = 0
 /\ ra_bugGuardAcceptsFailed_restart_authority_deployed = TRUE
 /\ ra_bugGuardAcceptsFailed_restart_authority_at = ( 0 :>

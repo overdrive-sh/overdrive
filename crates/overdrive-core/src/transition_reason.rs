@@ -408,7 +408,6 @@ pub enum StoppedBy {
     /// additive-position discipline. A fieldless tail variant adds no
     /// layout size, so existing archived rows decode unchanged.
     LivenessProbe,
-    // SCAFFOLD: true — pinned shape (feature service-allocation-readiness-and-ending, D7 item 1)
     /// A startup-probe failure (detected by `ServiceLifecycle`) stopped
     /// this instance; the workload's intent still stands and
     /// `WorkloadLifecycle` restarts it under its single budget;
@@ -694,10 +693,11 @@ pub enum ServiceFailureReason {
     /// `probe_idx` names the last-attempted probe; `attempts`
     /// records how many attempts were made.
     StartupTimeout { probe_idx: u32, attempts: u32 },
-    /// Startup probe exhausted `max_attempts` without a Pass result
-    /// within `startup_deadline`. `last_fail` carries the last
-    /// observed `ProbeStatus::Fail.last_fail_reason` for direct
-    /// operator-renderable surface.
+    /// The final attempt was stopped after its startup probe failed, and the
+    /// restart budget was spent. `attempts` is the consumed restart budget at
+    /// give-up, not the startup probe's consecutive-failure count. `last_fail`
+    /// carries the final attempt's observed `ProbeStatus::Fail.last_fail_reason`
+    /// for direct operator-renderable surface.
     StartupProbeFailed { probe_idx: u32, last_fail: String, attempts: u32 },
     /// The Service's final restart attempt crashed before any declared
     /// startup probe passed, and the restart budget was then spent. The

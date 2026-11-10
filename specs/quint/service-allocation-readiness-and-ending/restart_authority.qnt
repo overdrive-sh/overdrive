@@ -348,10 +348,16 @@ module restart_authority {
     conf_step' = if (REC) variant("WLRestart", { ok: ok }) else conf_step,
   }
 
-  // the give-up at the ceiling: the only author of a failure claim
+  // The give-up at the ceiling: the only author of a failure claim. The
+  // FinalizeFailed shim writes a Failed row. It forwards the prior typed
+  // reason: a crash stays failed_crash, while a startup/liveness stop or
+  // other restartable cause becomes failed_other. `claim` separately records
+  // the exact typed terminal, so this row-state projection loses no verdict.
   action WLGiveUp = all {
     giveUpEnabled,
-    at' = at.set(cur, { ...at.get(cur), claim: classify(at.get(cur)), author: "workload_lifecycle" }),
+    at' = at.set(cur, { ...at.get(cur),
+                       row: if (at.get(cur).row == "failed_crash") "failed_crash" else "failed_other",
+                       claim: classify(at.get(cur)), author: "workload_lifecycle" }),
     done' = true,
     cur' = cur, used' = used, deployed' = deployed, decl' = decl, gl' = gl, g' = g,
     conf_step' = if (REC) variant("WLGiveUp", ()) else conf_step,
