@@ -266,8 +266,9 @@ impl ProbeRunner {
 
     /// Lifecycle hook called by the worker driver's
     /// `on_alloc_running` callback when an allocation reaches the
-    /// `Running` state. Spawns one tokio task per declared/inferred
-    /// `ProbeDescriptor` under the per-alloc supervisor.
+    /// `Running` state. Spawns startup and readiness tasks and retains
+    /// liveness descriptors until the Stable hook starts them under the
+    /// per-alloc supervisor.
     ///
     /// Per ADR-0054 § 2: every spawned task ticks its descriptor on
     /// the descriptor-declared interval, invokes the adapter, and
@@ -313,12 +314,11 @@ impl ProbeRunner {
     pub fn start_alloc(&self, spec: &AllocationSpec) -> CancellationToken {
         let root_token = self.register_alloc(&spec.alloc);
 
-        // Per-descriptor task spawn. Each task carries cloned Arcs
-        // for its prober adapter, the injected clock, and the
-        // observation store — no `&self` borrow escapes into the
-        // spawned future. The supervisor's child token is the
-        // cooperative-shutdown handle observed by the `select!`
-        // arm.
+        // Startup/readiness tasks carry cloned Arcs for their prober
+        // adapter, the injected clock, and the observation store — no
+        // `&self` borrow escapes into the spawned future. The
+        // supervisor's child token is the cooperative-shutdown handle
+        // observed by the `select!` arm.
         let mut supervisors = self.supervisors.lock();
         let Some(supervisor) = supervisors.get_mut(&spec.alloc) else {
             // Logically unreachable — `register_alloc` above just
@@ -342,29 +342,11 @@ impl ProbeRunner {
             // `startup_probes.len()` while every consumer filtered on
             // per-role index 0 — the read-miss that made readiness and
             // liveness structurally unobservable.
-            let probe_idx = descriptor.idx;
-            let handle = supervisor.spawn_probe_task(descriptor.role);
-            let child_token = handle.cancellation_token();
-            let tcp_prober = Arc::clone(&self.tcp_prober);
-            let http_prober = Arc::clone(&self.http_prober);
-            let guest_dial = Arc::clone(&self.guest_dial);
-            let clock = Arc::clone(&self.clock);
-            let observation_store = Arc::clone(&self.observation_store);
-            let alloc_id_for_task = spec.alloc.clone();
-            tokio::spawn(async move {
-                supervised_probe_loop(
-                    tcp_prober,
-                    http_prober,
-                    guest_dial,
-                    clock,
-                    observation_store,
-                    alloc_id_for_task,
-                    probe_idx,
-                    descriptor,
-                    child_token,
-                )
-                .await;
-            });
+            if descriptor.role == ProbeRole::Liveness {
+                supervisor.retain_liveness(descriptor);
+            } else {
+                self.spawn_probe_task(supervisor, &spec.alloc, descriptor);
+            }
         }
         drop(supervisors);
         root_token
@@ -391,9 +373,9 @@ impl ProbeRunner {
     /// Idempotent: an unknown alloc, or a role with no live tasks, is
     /// a no-op.
     ///
-    /// Per ADR-0080 § D4 this is what `Stable` drives — `Stable` is a
-    /// NON-terminal condition (ADR-0055), so it retires the startup
-    /// role only and leaves readiness / liveness supervision intact.
+    /// Per ADR-0080 § D4 `Stable` is a NON-terminal condition
+    /// (ADR-0055), so the Stable hook retires the startup role and
+    /// starts retained liveness supervision while readiness continues.
     /// [`Self::active_alloc_count`] still reports the alloc afterwards;
     /// the supervisor is alive, only one role's tasks are cancelled.
     pub fn stop_role(&self, alloc_id: &AllocationId, role: ProbeRole) {
@@ -409,17 +391,18 @@ impl ProbeRunner {
     /// Idempotent (a second call spawns nothing); a no-op for an
     /// unknown, ended or already-stopped allocation; serialised with
     /// [`Self::stop_alloc`] by the supervisor lock.
-    // SCAFFOLD: true — the exact shape D9 item 2 pins; DELIVER replaces the body.
-    #[allow(
-        clippy::panic,
-        clippy::missing_const_for_fn,
-        clippy::needless_pass_by_ref_mut,
-        clippy::unused_self,
-        reason = "RED scaffold pinned by D9 item 2 of service-allocation-readiness-and-ending"
-    )]
     pub fn start_liveness(&self, alloc_id: &AllocationId) {
-        let _ = alloc_id;
-        panic!("RED scaffold: D9 ProbeRunner::start_liveness is not implemented");
+        let mut supervisors = self.supervisors.lock();
+        let Some(supervisor) = supervisors.get_mut(alloc_id) else {
+            return;
+        };
+        if supervisor.token().is_cancelled() {
+            return;
+        }
+        for descriptor in supervisor.take_retained_liveness() {
+            self.spawn_probe_task(supervisor, alloc_id, descriptor);
+        }
+        drop(supervisors);
     }
 
     /// Whether `role` is still supervised for `alloc_id`. Inspection
@@ -438,6 +421,37 @@ impl ProbeRunner {
     #[must_use]
     pub fn active_alloc_count(&self) -> usize {
         self.supervisors.lock().len()
+    }
+
+    fn spawn_probe_task(
+        &self,
+        supervisor: &mut AllocSupervisor,
+        alloc_id: &AllocationId,
+        descriptor: ProbeDescriptor,
+    ) {
+        let probe_idx = descriptor.idx;
+        let handle = supervisor.spawn_probe_task(descriptor.role);
+        let child_token = handle.cancellation_token();
+        let tcp_prober = Arc::clone(&self.tcp_prober);
+        let http_prober = Arc::clone(&self.http_prober);
+        let guest_dial = Arc::clone(&self.guest_dial);
+        let clock = Arc::clone(&self.clock);
+        let observation_store = Arc::clone(&self.observation_store);
+        let alloc_id_for_task = alloc_id.clone();
+        tokio::spawn(async move {
+            supervised_probe_loop(
+                tcp_prober,
+                http_prober,
+                guest_dial,
+                clock,
+                observation_store,
+                alloc_id_for_task,
+                probe_idx,
+                descriptor,
+                child_token,
+            )
+            .await;
+        });
     }
 }
 

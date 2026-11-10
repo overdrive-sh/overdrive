@@ -2070,6 +2070,7 @@ impl Driver for VmDriver {
 
     fn on_alloc_stable(&self, alloc_id: &AllocationId) {
         self.probe_runner.stop_role(alloc_id, ProbeRole::Startup);
+        self.probe_runner.start_liveness(alloc_id);
     }
 }
 

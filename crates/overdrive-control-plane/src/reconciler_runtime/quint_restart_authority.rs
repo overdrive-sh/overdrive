@@ -1000,7 +1000,6 @@ fn restart_authority_non_crash_failed_row_gives_up_backoff_exhausted() -> impl D
     max_samples = 1
 )]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D6/D7 give-up classification (WorkloadLifecycle alone authors the ending)"]
 fn restart_authority_liveness_kill_loop_gives_up_liveness_probe_failed() -> impl Driver {
     RestartAuthorityDriver::new()
 }

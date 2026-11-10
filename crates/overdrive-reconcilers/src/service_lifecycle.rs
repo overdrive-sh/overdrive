@@ -545,7 +545,6 @@ impl Reconciler for ServiceLifecycleReconciler {
     ) -> (Vec<Action>, Self::View) {
         let mut actions: Vec<Action> = Vec::new();
         let mut next_view = view.clone();
-        let mut stable_this_tick: BTreeSet<AllocationId> = BTreeSet::new();
 
         for (alloc_id, fact) in &actual.allocs {
             // A terminal row ends this reconciler's watch. This is before
@@ -631,7 +630,6 @@ impl Reconciler for ServiceLifecycleReconciler {
                     terminal: Some(TerminalCondition::Stable { settled_in_ms, witness }),
                 });
                 next_view.terminal_announced.remove(alloc_id);
-                stable_this_tick.insert(alloc_id.clone());
                 continue;
             }
 
@@ -672,7 +670,7 @@ impl Reconciler for ServiceLifecycleReconciler {
         actions.extend(service_backend_row_actions(actual, tick));
 
         // ---- Step 03-02 / Slice 05 — liveness → RestartAllocation ----
-        collect_liveness_actions(actual, &stable_this_tick, &mut next_view, &mut actions);
+        collect_liveness_actions(actual, &mut next_view, &mut actions);
 
         (actions, next_view)
     }
@@ -1015,12 +1013,11 @@ async fn hydrate_service_lifecycle_actual(
 /// limit.
 fn collect_liveness_actions(
     actual: &ServiceLifecycleState,
-    stable_this_tick: &BTreeSet<AllocationId>,
     next_view: &mut ServiceLifecycleView,
     actions: &mut Vec<Action>,
 ) {
     for (alloc_id, fact) in &actual.allocs {
-        if next_view.terminal_announced.contains(alloc_id) || stable_this_tick.contains(alloc_id) {
+        if next_view.terminal_announced.contains(alloc_id) {
             continue;
         }
         let latest_row = fact.probe_rows.get(&(ProbeRole::Liveness, ProbeIdx::new(0)));

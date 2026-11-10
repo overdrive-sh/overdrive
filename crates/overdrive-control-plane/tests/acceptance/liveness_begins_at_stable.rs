@@ -160,7 +160,6 @@ const ALL: [ProbeRole; 3] = [ProbeRole::Startup, ProbeRole::Readiness, ProbeRole
 /// liveness; the terminal hook removes the supervisor.
 #[tokio::test]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D9 liveness supervision begins at Stable"]
 async fn liveness_supervision_begins_when_the_allocation_becomes_stable() {
     let p = process().await;
     let alloc = aid("gate-alloc-a");
@@ -191,7 +190,6 @@ async fn liveness_supervision_begins_when_the_allocation_becomes_stable() {
 /// `Stable` hook; the first lands one interval after it with its streak at 1.
 #[tokio::test]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D9 liveness supervision begins at Stable"]
 async fn first_liveness_row_lands_one_interval_after_stable_with_streak_one() {
     let p = process().await;
     let alloc = aid("gate-alloc-b");
@@ -215,7 +213,6 @@ async fn first_liveness_row_lands_one_interval_after_stable_with_streak_one() {
 /// S-31 — a second `on_alloc_stable` spawns nothing (idempotent).
 #[tokio::test]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D9 liveness supervision begins at Stable"]
 async fn a_second_stable_hook_spawns_no_second_liveness_task() {
     let p = process().await;
     let alloc = aid("gate-alloc-c");
@@ -283,7 +280,6 @@ async fn an_allocation_without_a_liveness_descriptor_never_has_a_liveness_role()
 /// role for a removed supervisor.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D9 start_liveness is atomic with stop_alloc"]
 async fn concurrent_stop_and_start_liveness_never_leave_liveness_for_an_ended_id() {
     let p = process().await;
     let handle = tokio::runtime::Handle::current();
@@ -334,7 +330,6 @@ async fn concurrent_stop_and_start_liveness_never_leave_liveness_for_an_ended_id
 /// owned and covered by `vm_reclamation_boot`.)
 #[tokio::test]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D9 liveness supervision begins at Stable"]
 async fn a_restarted_process_starts_liveness_only_for_the_successor_at_its_own_stable() {
     let old = aid("gate-old");
     let first = process().await;

@@ -4,7 +4,9 @@
 //! [`ProbeRole`] so a single role can be stopped independently.
 //!
 //! Per ADR-0054 §2: each allocation gets ONE supervisor; that
-//! supervisor spawns ONE task per declared/inferred probe. Tasks
+//! supervisor owns ONE task per started declared/inferred probe.
+//! Startup and readiness start at Running; liveness descriptors are
+//! retained until Stable. Tasks
 //! observe their cancellation token on every `select!` round and exit
 //! cooperatively — no [`tokio::task::JoinHandle::abort`]. The
 //! supervisor holds no [`tokio::task::JoinSet`]; cancellation alone is
@@ -13,8 +15,8 @@
 //!
 //! Per ADR-0080 § D4 the token graph is two levels deep —
 //! `root → per-role → per-task` — so `Stable` (a NON-terminal
-//! condition per ADR-0055) can retire only the startup role while
-//! readiness and liveness keep ticking. Cancelling `root` still
+//! condition per ADR-0055) retires the startup role and starts liveness
+//! while readiness keeps ticking. Cancelling `root` still
 //! cancels every role transitively, so the whole-supervisor teardown
 //! stays atomic.
 //!
@@ -24,6 +26,7 @@
 
 use std::collections::BTreeMap;
 
+use overdrive_core::aggregate::probe_descriptor::ProbeDescriptor;
 use overdrive_core::observation::ProbeRole;
 use tokio_util::sync::CancellationToken;
 
@@ -79,14 +82,16 @@ pub struct AllocSupervisor {
     /// [`Self::is_role_live`]'s sibling diagnostics and by DST
     /// observation.
     per_role: BTreeMap<ProbeRole, CancellationToken>,
-    /// Set to `true` after the first `start_alloc` spawns probe
-    /// tasks. Subsequent calls return the existing token without
-    /// re-spawning — structural guard against duplicate task sets
-    /// writing to the same `(alloc_id, role, probe_idx)` store keys at
-    /// double cadence. Load-bearing for per-role cancellation: a
+    /// Set to `true` after the first `start_alloc` registers the
+    /// allocation's probe descriptors. Subsequent calls return the
+    /// existing token without re-spawning or replacing retained
+    /// descriptors. Load-bearing for per-role cancellation: a
     /// cancelled role token can never parent a newly-spawned task,
     /// because no second spawn round happens.
     started: bool,
+    /// Liveness descriptors are retained at Running until Stable opens
+    /// their supervision gate.
+    retained_liveness: Vec<ProbeDescriptor>,
 }
 
 impl AllocSupervisor {
@@ -95,7 +100,12 @@ impl AllocSupervisor {
     /// [`Self::spawn_probe_task`] is called.
     #[must_use]
     pub fn new() -> Self {
-        Self { root: CancellationToken::new(), per_role: BTreeMap::new(), started: false }
+        Self {
+            root: CancellationToken::new(),
+            per_role: BTreeMap::new(),
+            started: false,
+            retained_liveness: Vec::new(),
+        }
     }
 
     /// The root cancellation token. Per-probe tasks observe a
@@ -148,16 +158,27 @@ impl AllocSupervisor {
         self.per_role.get(&role).is_some_and(|token| !token.is_cancelled())
     }
 
-    /// Whether probe tasks have already been spawned under this
-    /// supervisor. Used by `start_alloc` to guard against duplicate
-    /// task spawning on re-entry.
+    /// Whether the allocation's descriptor set has already been
+    /// registered under this supervisor. Used by `start_alloc` to
+    /// guard against duplicate task spawning or descriptor retention.
     pub const fn is_started(&self) -> bool {
         self.started
     }
 
-    /// Mark this supervisor as having spawned its probe tasks.
+    /// Mark this supervisor as having registered its descriptor set.
     pub const fn mark_started(&mut self) {
         self.started = true;
+    }
+
+    /// Retain a liveness descriptor until the Stable hook opens the gate.
+    pub(super) fn retain_liveness(&mut self, descriptor: ProbeDescriptor) {
+        self.retained_liveness.push(descriptor);
+    }
+
+    /// Take retained descriptors once. Empty means none were declared or
+    /// liveness supervision has already started.
+    pub(super) fn take_retained_liveness(&mut self) -> Vec<ProbeDescriptor> {
+        std::mem::take(&mut self.retained_liveness)
     }
 
     /// Cancel every per-probe task spawned under this supervisor,

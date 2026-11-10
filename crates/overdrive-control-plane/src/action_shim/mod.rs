@@ -1671,7 +1671,8 @@ async fn dispatch_single(
             // a later stop/terminal arm still needs the entry.
             if is_stable {
                 // Stable is a non-destructive success transition. Commit its
-                // row first, then retire only startup supervision.
+                // row first, then retire startup and start liveness
+                // supervision through the driver's Stable hook.
                 let occurrence =
                     obs.write_alloc_lifecycle(row.clone(), TransitionSource::Reconciler).await?;
                 for driver in resolve_drivers_for_alloc(drivers, alloc_drivers, &row.alloc_id) {

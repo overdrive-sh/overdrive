@@ -827,6 +827,8 @@ pub trait Driver: Send + Sync + 'static {
     /// post-Stable per [`crate::observation::ProbeRole`]'s contract.
     /// Implementations stop ONLY the startup-role tasks and leave the
     /// supervisor alive.
+    /// The production driver also starts the allocation's liveness
+    /// supervision.
     ///
     /// Per ADR-0080 § D4 this hook exists because routing `Stable`
     /// through [`Self::on_alloc_terminal`] was a category error: it

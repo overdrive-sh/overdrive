@@ -52,7 +52,6 @@ fn drain_stable_events(
 /// instance is stopped by the liveness probe and its supervisor ends.
 #[tokio::test(flavor = "current_thread")]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D9 liveness supervision begins at Stable"]
 async fn slow_starting_service_with_failing_liveness_is_stopped_only_after_stable() {
     for seed in 0_u64..8 {
         let pass_at = 3 + (seed * 5) % 18;
@@ -116,7 +115,6 @@ async fn slow_starting_service_with_failing_liveness_is_stopped_only_after_stabl
 /// `Running`'s look, and its liveness starts at that moment.
 #[tokio::test(flavor = "current_thread")]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D9 liveness supervision begins at Stable"]
 async fn opt_out_service_starts_liveness_at_its_first_stable() {
     let mut w = LivenessWorld::compose(ProbeSet::ReadinessAndLiveness).await;
     assert!(!w.liveness_live(), "Running alone starts no liveness");
@@ -183,7 +181,6 @@ async fn a_lost_stable_write_is_announced_again_after_a_control_plane_restart() 
 /// then does the supervisor end.
 #[tokio::test(flavor = "current_thread")]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: B2 the terminal hook fires after the stop row write succeeds (D9 liveness begins at Stable)"]
 async fn failed_liveness_stop_row_write_keeps_the_supervisor_until_the_retry_lands() {
     let mut w = LivenessWorld::compose(ProbeSet::ReadinessAndLiveness).await;
     w.period(&RunOutcome::Pass, &[]).await;
@@ -293,7 +290,6 @@ async fn run_instance_until_stopped_by_liveness(w: &mut LivenessWorld, tag: &str
 /// given up as `ServiceFailed { LivenessProbeFailed }`, which stays final.
 #[tokio::test(flavor = "current_thread")]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D9 liveness supervision begins at Stable (composed restart and give-up leg)"]
 async fn a_service_whose_liveness_keeps_failing_is_restarted_under_the_shared_budget_and_given_up_at_the_ceiling()
  {
     for seed in 0_u64..3 {

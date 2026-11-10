@@ -487,15 +487,22 @@ async fn vm_driver_delegates_existing_probe_lifecycle_hooks_to_shared_runner() {
     assert_eq!(runner.active_alloc_count(), 1, "Running registers one allocation supervisor");
     assert!(runner.is_role_live(&spec.alloc, ProbeRole::Startup));
     assert!(runner.is_role_live(&spec.alloc, ProbeRole::Readiness));
-    assert!(runner.is_role_live(&spec.alloc, ProbeRole::Liveness));
+    assert!(
+        !runner.is_role_live(&spec.alloc, ProbeRole::Liveness),
+        "Running retains liveness descriptors without starting their tasks"
+    );
 
     driver.on_alloc_stable(&spec.alloc);
+    assert_eq!(runner.active_alloc_count(), 1, "Stable keeps the allocation supervisor");
     assert!(!runner.is_role_live(&spec.alloc, ProbeRole::Startup));
     assert!(runner.is_role_live(&spec.alloc, ProbeRole::Readiness));
     assert!(runner.is_role_live(&spec.alloc, ProbeRole::Liveness));
 
     driver.on_alloc_terminal(&spec.alloc);
     assert_eq!(runner.active_alloc_count(), 0, "terminal stops the allocation supervisor");
+    for role in [ProbeRole::Startup, ProbeRole::Readiness, ProbeRole::Liveness] {
+        assert!(!runner.is_role_live(&spec.alloc, role), "terminal stops {role:?} supervision");
+    }
 }
 
 /// S-SVM-16 — registering the same allocation again after restart is
