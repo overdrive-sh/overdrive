@@ -5148,16 +5148,14 @@ fn spawn_convergence_loop(
             let capacity = CONVERGENCE_MAX_IN_FLIGHT.saturating_sub(active.len());
             let mut sleep_for = cadence;
             if !admission_closed && capacity > 0 {
+                for eval in
+                    due_resync_evaluations(&cadence_table, &mut next_wake, now_unix, &state.node_id)
+                {
+                    state.runtime.submit_evaluation(eval, now, EvaluationEligibility::Immediate);
+                }
+
                 let pending = {
                     let mut broker = state.runtime.broker();
-                    for eval in due_resync_evaluations(
-                        &cadence_table,
-                        &mut next_wake,
-                        now_unix,
-                        &state.node_id,
-                    ) {
-                        broker.submit(eval, now, EvaluationEligibility::Immediate);
-                    }
                     broker.drain_pending(capacity, &active_targets, now, now_unix)
                 };
 
@@ -5245,6 +5243,7 @@ fn spawn_convergence_loop(
                         error = tracing::field::debug(&error),
                     );
                 }
+                () = state.runtime.submitted(), if !admission_closed => {}
                 () = clock.sleep(sleep_for), if !admission_closed => {}
             }
         }
@@ -5308,7 +5307,7 @@ impl InterestRouterBroker {
     ) -> Self {
         Self {
             submit: Arc::new(move |eval| {
-                runtime.broker().submit(eval, clock.now(), EvaluationEligibility::Immediate);
+                runtime.submit_evaluation(eval, clock.now(), EvaluationEligibility::Immediate);
             }),
         }
     }

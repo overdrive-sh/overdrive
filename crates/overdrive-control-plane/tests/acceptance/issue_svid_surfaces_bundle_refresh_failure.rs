@@ -268,7 +268,7 @@ async fn issue_svid_surfaces_bundle_refresh_failure_without_unwinding_hold() {
     // emits `IssueSvid`; the shim's executor issues + audits + holds successfully,
     // then the D6 bundle refresh calls the failing CA and fails.
     write_running_alloc(&state, &workload, &alloc, 1).await;
-    state.runtime.broker().submit(
+    state.runtime.submit_evaluation(
         Evaluation { reconciler: svid_reconciler_name(), target: target.clone() },
         std::time::Instant::now(),
         overdrive_core::eval_broker::EvaluationEligibility::Immediate,

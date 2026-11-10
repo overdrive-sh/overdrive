@@ -261,7 +261,7 @@ async fn service_lifecycle_reenqueues_until_pass_then_emits_stable() {
     // Seed the FIRST enqueue (Shape C's job is to do this in
     // production; here we submit directly to isolate Shape B — the
     // self-re-enqueue is the property under test).
-    state.runtime.broker().submit(
+    state.runtime.submit_evaluation(
         Evaluation { reconciler: service_reconciler_name(), target: target.clone() },
         std::time::Instant::now(),
         overdrive_core::eval_broker::EvaluationEligibility::Immediate,
@@ -298,7 +298,7 @@ async fn service_lifecycle_reenqueues_until_pass_then_emits_stable() {
 
     // An accepted external observation submission promotes the deferred key
     // to Immediate without resetting its queue age.
-    state.runtime.broker().submit(
+    state.runtime.submit_evaluation(
         Evaluation { reconciler: service_reconciler_name(), target: target.clone() },
         state.clock.now(),
         overdrive_core::eval_broker::EvaluationEligibility::Immediate,

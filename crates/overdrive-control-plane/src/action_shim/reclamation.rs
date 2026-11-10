@@ -34,7 +34,7 @@
 
 use overdrive_core::AllocationId;
 use overdrive_core::TransitionReason;
-use overdrive_core::eval_broker::{Evaluation, EvaluationBroker, EvaluationEligibility};
+use overdrive_core::eval_broker::{Evaluation, EvaluationEligibility};
 use overdrive_core::id::NodeId;
 use overdrive_core::reconcilers::TargetResource;
 use overdrive_core::traits::clock::Clock;
@@ -45,7 +45,9 @@ use overdrive_core::traits::observation_store::{
 use overdrive_core::traits::vm_host_state::VmHostState;
 use overdrive_core::transition_reason::StoppedBy;
 
+use super::EvaluationSubmission;
 use super::build_alloc_status_row;
+use crate::reconciler_runtime::ReconcilerRuntime;
 
 /// Process-local exclusive lease around one kill-capable reclamation
 /// execution. The planner's supervision read cannot protect the interval
@@ -172,7 +174,29 @@ pub async fn execute_reclaim_allocation(
     obs: &dyn ObservationStore,
     clock: &dyn Clock,
     writer_node: &NodeId,
-    broker: &parking_lot::Mutex<EvaluationBroker>,
+    runtime: &ReconcilerRuntime,
+) -> Result<(), ReclamationError> {
+    let submission = EvaluationSubmission::Runtime(runtime);
+    execute_reclaim_allocation_with_submission(
+        alloc_id,
+        drivers,
+        host,
+        obs,
+        clock,
+        writer_node,
+        &submission,
+    )
+    .await
+}
+
+pub(super) async fn execute_reclaim_allocation_with_submission(
+    alloc_id: &AllocationId,
+    drivers: &DriverRegistry,
+    host: &dyn VmHostState,
+    obs: &dyn ObservationStore,
+    clock: &dyn Clock,
+    writer_node: &NodeId,
+    submission: &EvaluationSubmission<'_>,
 ) -> Result<(), ReclamationError> {
     let Some(_lease) = ReclamationLease::try_acquire(drivers, alloc_id) else {
         tracing::info!(
@@ -251,8 +275,7 @@ pub async fn execute_reclaim_allocation(
     // unconditional, mirroring the observer's own unconditional shape —
     // a spurious enqueue costs exactly one empty reconcile.
     if let Ok(target) = TargetResource::new(&format!("workload/{}", row.workload_id)) {
-        let mut guard = broker.lock();
-        guard.submit(
+        submission.submit(
             Evaluation {
                 reconciler: evaluation_targets::workload_lifecycle(),
                 target: target.clone(),
@@ -260,7 +283,7 @@ pub async fn execute_reclaim_allocation(
             clock.now(),
             EvaluationEligibility::Immediate,
         );
-        guard.submit(
+        submission.submit(
             Evaluation {
                 reconciler: evaluation_targets::service_lifecycle(),
                 target: target.clone(),
@@ -268,7 +291,7 @@ pub async fn execute_reclaim_allocation(
             clock.now(),
             EvaluationEligibility::Immediate,
         );
-        guard.submit(
+        submission.submit(
             Evaluation { reconciler: evaluation_targets::svid_lifecycle(), target },
             clock.now(),
             EvaluationEligibility::Immediate,
@@ -325,12 +348,15 @@ mod tests {
 
     use overdrive_core::UnixInstant;
     use overdrive_core::aggregate::WorkloadKind;
+    use overdrive_core::eval_broker::EvaluationBroker;
     use overdrive_core::id::WorkloadId;
     use overdrive_core::traits::observation_store::AllocStatusRow;
     use overdrive_sim::adapters::clock::SimClock;
     use overdrive_sim::adapters::observation_store::SimObservationStore;
     use overdrive_sim::adapters::vm_host_state::SimVmHostState;
     use tracing_subscriber::layer::SubscriberExt as _;
+
+    use crate::action_shim::EvaluationSubmission;
 
     use super::*;
 
@@ -484,11 +510,20 @@ mod tests {
         .expect("seed the prior Running row");
         let clock = SimClock::new();
         let broker = parking_lot::Mutex::new(EvaluationBroker::new());
+        let submission = EvaluationSubmission::Standalone(&broker);
         let drivers = no_vm_driver();
 
-        execute_reclaim_allocation(&a, &drivers, &host, &obs, &clock, &n, &broker)
-            .await
-            .expect("authorised reclaim succeeds");
+        execute_reclaim_allocation_with_submission(
+            &a,
+            &drivers,
+            &host,
+            &obs,
+            &clock,
+            &n,
+            &submission,
+        )
+        .await
+        .expect("authorised reclaim succeeds");
 
         // Host artifacts gone.
         let observed = host.observe().await.expect("observe succeeds");
@@ -629,6 +664,7 @@ mod tests {
         .expect("seed the prior Terminated row");
         let clock = SimClock::new();
         let broker = parking_lot::Mutex::new(EvaluationBroker::new());
+        let submission = EvaluationSubmission::Standalone(&broker);
         let drivers = no_vm_driver();
 
         // D2 (02-03 review) — capture tracing events for the duration of
@@ -639,9 +675,17 @@ mod tests {
         let subscriber = tracing_subscriber::Registry::default().with(capture.clone());
         let guard = tracing::subscriber::set_default(subscriber);
 
-        execute_reclaim_allocation(&a, &drivers, &host, &obs, &clock, &n, &broker)
-            .await
-            .expect("a refusal is Ok(()), never an error");
+        execute_reclaim_allocation_with_submission(
+            &a,
+            &drivers,
+            &host,
+            &obs,
+            &clock,
+            &n,
+            &submission,
+        )
+        .await
+        .expect("a refusal is Ok(()), never an error");
 
         drop(guard);
         let refused = capture
@@ -699,11 +743,20 @@ mod tests {
         let obs = SimObservationStore::single_peer(n.clone(), 0);
         let clock = SimClock::new();
         let broker = parking_lot::Mutex::new(EvaluationBroker::new());
+        let submission = EvaluationSubmission::Standalone(&broker);
         let drivers = no_vm_driver();
 
-        execute_reclaim_allocation(&a, &drivers, &host, &obs, &clock, &n, &broker)
-            .await
-            .expect("a refusal is Ok(()), never an error");
+        execute_reclaim_allocation_with_submission(
+            &a,
+            &drivers,
+            &host,
+            &obs,
+            &clock,
+            &n,
+            &submission,
+        )
+        .await
+        .expect("a refusal is Ok(()), never an error");
 
         assert!(
             obs.alloc_status_row(&a).await.expect("read succeeds").is_none(),
@@ -755,14 +808,15 @@ mod tests {
         let clock = SimClock::new();
         let drivers = no_vm_driver();
         let running_broker = parking_lot::Mutex::new(EvaluationBroker::new());
-        execute_reclaim_allocation(
+        let running_submission = EvaluationSubmission::Standalone(&running_broker);
+        execute_reclaim_allocation_with_submission(
             &running_alloc,
             &drivers,
             &running_host,
             &running_obs,
             &clock,
             &n,
-            &running_broker,
+            &running_submission,
         )
         .await
         .expect("ok");
@@ -791,14 +845,15 @@ mod tests {
             .await
             .expect("seed Terminated row");
         let terminal_broker = parking_lot::Mutex::new(EvaluationBroker::new());
-        execute_reclaim_allocation(
+        let terminal_submission = EvaluationSubmission::Standalone(&terminal_broker);
+        execute_reclaim_allocation_with_submission(
             &terminal_alloc,
             &drivers,
             &terminal_host,
             &terminal_obs,
             &clock,
             &n,
-            &terminal_broker,
+            &terminal_submission,
         )
         .await
         .expect("ok");

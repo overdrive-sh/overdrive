@@ -150,7 +150,7 @@ async fn tick_svid(state: &AppState, target: &TargetResource, now: std::time::In
             overdrive_core::UnixInstant::from_unix_duration(std::time::Duration::ZERO),
         );
     }
-    state.runtime.broker().submit(
+    state.runtime.submit_evaluation(
         Evaluation { reconciler: svid_reconciler_name(), target: target.clone() },
         now,
         overdrive_core::eval_broker::EvaluationEligibility::Immediate,

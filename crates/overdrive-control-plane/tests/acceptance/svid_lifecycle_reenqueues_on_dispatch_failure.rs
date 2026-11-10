@@ -176,16 +176,18 @@ async fn write_running_alloc(state: &AppState, w: &WorkloadId, a: &AllocationId,
 /// consuming it)? Drain-and-resubmit — the broker is LWW so re-submit is
 /// idempotent.
 fn svid_eval_pending(state: &AppState) -> bool {
-    let mut broker = state.runtime.broker();
-    let drained = broker.drain_pending(
-        usize::MAX,
-        &std::collections::BTreeSet::new(),
-        std::time::Instant::now(),
-        overdrive_core::UnixInstant::from_unix_duration(std::time::Duration::ZERO),
-    );
+    let drained = {
+        let mut broker = state.runtime.broker();
+        broker.drain_pending(
+            usize::MAX,
+            &std::collections::BTreeSet::new(),
+            std::time::Instant::now(),
+            overdrive_core::UnixInstant::from_unix_duration(std::time::Duration::ZERO),
+        )
+    };
     let present = drained.iter().any(|(e, _)| e.reconciler.as_str() == SVID_LIFECYCLE);
     for (e, _) in drained {
-        broker.submit(
+        state.runtime.submit_evaluation(
             e,
             std::time::Instant::now(),
             overdrive_core::eval_broker::EvaluationEligibility::Immediate,
@@ -218,7 +220,7 @@ async fn svid_lifecycle_reenqueues_when_issue_dispatch_fails() {
 
     // Seed the FIRST enqueue (Shape C's job in production; here we submit
     // directly to isolate the failed-dispatch self-re-enqueue under test).
-    state.runtime.broker().submit(
+    state.runtime.submit_evaluation(
         Evaluation { reconciler: svid_reconciler_name(), target: target.clone() },
         std::time::Instant::now(),
         overdrive_core::eval_broker::EvaluationEligibility::Immediate,

@@ -33,7 +33,7 @@
 //! the project-wide ordered-collection-as-nondeterminism rule in
 //! `.claude/rules/development.md`).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -61,7 +61,9 @@ use crate::AppState;
 use crate::action_shim;
 use crate::error::ControlPlaneError;
 use crate::view_store::{ViewStore, ViewStoreExt};
-use overdrive_core::eval_broker::{Evaluation, EvaluationBroker, EvaluationEligibility};
+use overdrive_core::eval_broker::{
+    BrokerCounters, Evaluation, EvaluationBroker, EvaluationEligibility,
+};
 
 /// Per-reconciler-kind in-memory view map. Mirrors the `AnyReconciler`
 /// enum's variant set so the runtime can dispatch typed `View` reads
@@ -156,19 +158,47 @@ pub struct ReconcilerRuntime {
     /// Cancelable-eval-set evaluation broker per ADR-0013 §8.
     ///
     /// Wrapped in [`parking_lot::Mutex`] per
-    /// `fix-convergence-loop-not-spawned` Step 01-02 (RCA Option B2):
-    /// `submit_workload` / `stop_workload` (handler path) and the spawn loop in
-    /// [`crate::run_server_with_obs_and_driver`] both call broker
-    /// methods that need `&mut self` (`submit`, `drain_pending`).
-    /// Since `state.runtime` is `Arc<ReconcilerRuntime>`, neither
-    /// caller has unique ownership; a sync mutex is the smallest
-    /// adapter. Per `.claude/rules/development.md` § Concurrency &
-    /// async — `parking_lot` over `std::sync` because the critical
-    /// sections are straight-line and panic-free; no `.await` is
-    /// ever held across the lock (broker methods are sync; the
-    /// spawn loop drains into a local `Vec<Evaluation>` and drops
-    /// the guard before per-eval `.await`).
+    /// ADR-0273: submissions and drains share this lock, but only
+    /// [`Self::submit_evaluation`] can submit in production. The convergence
+    /// loop drops the drain guard before every `.await`.
     broker: parking_lot::Mutex<EvaluationBroker>,
+    /// Stored, coalescing wake permit for the convergence loop (ADR-0273).
+    submitted: tokio::sync::Notify,
+}
+
+/// Drain-side access to the runtime's evaluation broker.
+///
+/// This guard intentionally exposes no submission or dereference path: all
+/// production submissions go through [`ReconcilerRuntime::submit_evaluation`]
+/// so they also wake the convergence loop.
+pub struct BrokerDrain<'a> {
+    guard: parking_lot::MutexGuard<'a, EvaluationBroker>,
+}
+
+impl BrokerDrain<'_> {
+    /// Drain eligible pending evaluations in broker order.
+    pub fn drain_pending(
+        &mut self,
+        limit: usize,
+        blocked_targets: &BTreeSet<TargetResource>,
+        now: Instant,
+        now_unix: UnixInstant,
+    ) -> Vec<(Evaluation, Duration)> {
+        self.guard.drain_pending(limit, blocked_targets, now, now_unix)
+    }
+
+    /// Read the earliest eligibility time among unblocked pending targets.
+    pub fn next_eligible_at(
+        &self,
+        blocked_targets: &BTreeSet<TargetResource>,
+    ) -> Option<UnixInstant> {
+        self.guard.next_eligible_at(blocked_targets)
+    }
+
+    /// Read the broker's cumulative counters.
+    pub fn counters(&self) -> BrokerCounters {
+        self.guard.counters()
+    }
 }
 
 impl ReconcilerRuntime {
@@ -210,6 +240,7 @@ impl ReconcilerRuntime {
             view_store,
             reconcilers: BTreeMap::new(),
             broker: parking_lot::Mutex::new(EvaluationBroker::new()),
+            submitted: tokio::sync::Notify::new(),
         })
     }
 
@@ -393,56 +424,29 @@ impl ReconcilerRuntime {
         self.reconcilers.keys().cloned().collect()
     }
 
-    /// Borrow the evaluation broker through the per-runtime mutex.
-    ///
-    /// Returns a [`parking_lot::MutexGuard`] which derefs to
-    /// `&EvaluationBroker` AND `&mut EvaluationBroker` so both reads
-    /// (`counters`) and writes (`submit`, `drain_pending`) work
-    /// uniformly through the same accessor. Callers MUST drop the
-    /// guard before any `.await` per the no-locks-across-await rule
-    /// in `.claude/rules/development.md` § Concurrency & async; the
-    /// spawn loop in [`crate::run_server_with_obs_and_driver`] drains
-    /// into a local `Vec<Evaluation>` and drops the guard before
-    /// dispatching.
-    pub fn broker(&self) -> parking_lot::MutexGuard<'_, EvaluationBroker> {
-        self.broker.lock()
+    /// Borrow the broker through its drain-only guard.
+    pub fn broker(&self) -> BrokerDrain<'_> {
+        BrokerDrain { guard: self.broker.lock() }
     }
 
     /// Submit an evaluation and wake the convergence loop at once (D17,
     /// ADR-0273): take the broker lock, insert, release it, then signal.
-    // SCAFFOLD: true — the exact shape D17 pins; DELIVER replaces the body.
-    #[allow(
-        clippy::panic,
-        clippy::missing_const_for_fn,
-        clippy::needless_pass_by_value,
-        clippy::unused_self,
-        reason = "RED scaffold pinned by D17 of service-allocation-readiness-and-ending"
-    )]
     pub fn submit_evaluation(
         &self,
         eval: Evaluation,
         now: Instant,
         eligibility: EvaluationEligibility,
     ) {
-        let _ = (eval, now, eligibility);
-        panic!("RED scaffold: D17 ReconcilerRuntime::submit_evaluation is not implemented");
+        let mut broker = self.broker.lock();
+        broker.submit(eval, now, eligibility);
+        drop(broker);
+        self.submitted.notify_one();
     }
 
-    /// Borrow the broker's mutex directly (rather than the
-    /// `MutexGuard`). Lets callers pass the lock by reference into a
-    /// dispatch path that takes a brief lock-grab-submit-release per
-    /// `Action::EnqueueEvaluation` without holding the guard across
-    /// `.await` per `.claude/rules/development.md` § Concurrency &
-    /// async.
-    ///
-    /// Used by [`action_shim::dispatch`] so the cross-reconciler
-    /// handoff variant can re-enqueue downstream reconcilers
-    /// directly. See UI-05 (the
-    /// `backend-discovery-bridge-service-reachability` step 02-04
-    /// architectural remediation) for the rationale.
-    #[must_use]
-    pub fn broker_mutex(&self) -> &parking_lot::Mutex<EvaluationBroker> {
-        &self.broker
+    /// Wait for a broker submission's stored or delivered wake permit.
+    /// Called only by the convergence loop.
+    pub(crate) async fn submitted(&self) {
+        self.submitted.notified().await;
     }
 
     /// Iterate the registered reconcilers. Used by the ADR-0017
@@ -1733,7 +1737,7 @@ async fn run_convergence_tick_inner(
     // `(reconciler, target)` so a flapping target produces one
     // pending evaluation, not N.
     if let Some(eligibility) = requeue_eligibility {
-        state.runtime.broker().submit(
+        state.runtime.submit_evaluation(
             Evaluation { reconciler: reconciler_name.clone(), target: target.clone() },
             state.clock.now(),
             eligibility,

@@ -21,7 +21,10 @@
 use std::sync::Arc;
 
 use overdrive_core::TransitionReason;
+use overdrive_core::eval_broker::Evaluation;
+#[cfg(any(test, feature = "integration-tests"))]
 use overdrive_core::eval_broker::EvaluationBroker;
+use overdrive_core::eval_broker::EvaluationEligibility;
 use overdrive_core::id::{AllocationId, ContentHash, CorrelationKey, NodeId, SpiffeId, WorkloadId};
 use overdrive_core::reconcilers::{Action, TickContext};
 use overdrive_core::traits::ca::Ca;
@@ -45,6 +48,7 @@ use crate::gateway_composition::GatewayIdentityActionComposition;
 use crate::guest_network::GuestNetworkProvisioner;
 use crate::identity_mgr::IdentityMgr;
 use crate::journal::WorkflowId;
+use crate::reconciler_runtime::ReconcilerRuntime;
 use crate::workflow_runtime::WorkflowEngine;
 use overdrive_core::guest_transport::GuestTransportAssignment;
 use overdrive_core::net::ListenPort;
@@ -65,6 +69,32 @@ type GuestNetworkProvisionerAndPool<'a> = Option<(
     &'a crate::guest_network::GuestAddressPool,
     Option<overdrive_core::guest_transport::GuestFlowPorts>,
 )>;
+
+/// Submission route for action-shim dispatch. Production holds the runtime,
+/// which is the only production path that can submit to its broker. The
+/// standalone broker variant exists for the action-shim's isolated tests.
+pub(super) enum EvaluationSubmission<'a> {
+    Runtime(&'a ReconcilerRuntime),
+    #[cfg(any(test, feature = "integration-tests"))]
+    Standalone(&'a parking_lot::Mutex<EvaluationBroker>),
+}
+
+impl EvaluationSubmission<'_> {
+    pub(super) fn submit(
+        &self,
+        evaluation: Evaluation,
+        now: std::time::Instant,
+        eligibility: EvaluationEligibility,
+    ) {
+        match self {
+            Self::Runtime(runtime) => {
+                runtime.submit_evaluation(evaluation, now, eligibility);
+            }
+            #[cfg(any(test, feature = "integration-tests"))]
+            Self::Standalone(broker) => broker.lock().submit(evaluation, now, eligibility),
+        }
+    }
+}
 
 /// Allocation-scoped lifecycle boundary for transparent mTLS interception.
 ///
@@ -857,7 +887,7 @@ async fn dispatch_with_guest_network(
     tick: &TickContext,
     writer_node: &NodeId,
     allocator: Arc<tokio::sync::Mutex<PersistentServiceVipAllocator>>,
-    broker: &parking_lot::Mutex<EvaluationBroker>,
+    broker: &EvaluationSubmission<'_>,
     workflow_engine: Option<&WorkflowEngine>,
     mtls_lifecycle: &dyn MtlsInterceptLifecycle,
     guest_network: GuestNetworkProvisionerAndPool<'_>,
@@ -1051,6 +1081,7 @@ async fn dispatch_with_network_owner(
     tick: &TickContext,
     mtls_lifecycle: &dyn MtlsInterceptLifecycle,
 ) -> Result<(), ShimError> {
+    let broker = EvaluationSubmission::Runtime(&state.runtime);
     dispatch_with_guest_network(
         actions,
         state.drivers.as_ref(),
@@ -1065,7 +1096,7 @@ async fn dispatch_with_network_owner(
         tick,
         &state.node_id,
         Arc::clone(&state.allocator),
-        state.runtime.broker_mutex(),
+        &broker,
         Some(state.workflow_engine.as_ref()),
         mtls_lifecycle,
         Some((
@@ -1097,6 +1128,7 @@ pub async fn dispatch_with_guest_network_provisioner_for_test(
     let (dispatchable, preflight_err) =
         persist_workflow_intents(state.store.as_ref(), actions).await;
     let mtls_lifecycle = &state.mtls_worker as &dyn MtlsInterceptLifecycle;
+    let broker = EvaluationSubmission::Runtime(&state.runtime);
     let dispatch_result = dispatch_with_guest_network(
         dispatchable,
         state.drivers.as_ref(),
@@ -1111,7 +1143,7 @@ pub async fn dispatch_with_guest_network_provisioner_for_test(
         tick,
         &state.node_id,
         Arc::clone(&state.allocator),
-        state.runtime.broker_mutex(),
+        &broker,
         Some(state.workflow_engine.as_ref()),
         mtls_lifecycle,
         Some((provisioner, state.guest_pool.as_ref(), state.guest_flow_ports.get().copied())),
@@ -1406,7 +1438,7 @@ async fn dispatch_single(
     tick: &TickContext,
     writer_node: &NodeId,
     allocator: &Arc<tokio::sync::Mutex<PersistentServiceVipAllocator>>,
-    broker: &parking_lot::Mutex<EvaluationBroker>,
+    broker: &EvaluationSubmission<'_>,
     workflow_engine: Option<&WorkflowEngine>,
     mtls_lifecycle: &dyn MtlsInterceptLifecycle,
     guest_network: GuestNetworkProvisionerAndPool<'_>,
@@ -2862,16 +2894,11 @@ async fn dispatch_single(
             write_service_backend_row::dispatch(&action, obs).await.map_err(ShimError::from)
         }
         // backend-discovery-bridge-service-reachability UI-05 —
-        // cross-reconciler handoff at the action boundary. The
-        // wrapper takes a brief lock-grab-submit-release on the
-        // broker mutex; per `.claude/rules/development.md`
-        // § Concurrency & async the guard is dropped before any
-        // subsequent `.await` (the wrapper is a sync function and
-        // the per-action loop awaits between iterations).
+        // cross-reconciler handoff at the action boundary. Production
+        // dispatch uses the runtime's sole submit entry and signals after
+        // releasing the broker lock.
         action @ Action::EnqueueEvaluation { .. } => {
-            let mut guard = broker.lock();
-            enqueue_evaluation::dispatch(&action, &mut guard, clock.now());
-            drop(guard);
+            enqueue_evaluation::dispatch_for_submission(&action, broker, clock.now());
             Ok(())
         }
         // ADR-0053 § 3 — same-host backend delivery via
@@ -2934,17 +2961,19 @@ async fn dispatch_single(
             reclaim_guest_network(&alloc_id, drivers, alloc_drivers, mtls_lifecycle, guest_network)
                 .await
         }
-        Action::ReclaimAllocation { alloc_id } => reclamation::execute_reclaim_allocation(
-            &alloc_id,
-            drivers,
-            host,
-            obs,
-            clock,
-            writer_node,
-            broker,
-        )
-        .await
-        .map_err(ShimError::from),
+        Action::ReclaimAllocation { alloc_id } => {
+            reclamation::execute_reclaim_allocation_with_submission(
+                &alloc_id,
+                drivers,
+                host,
+                obs,
+                clock,
+                writer_node,
+                broker,
+            )
+            .await
+            .map_err(ShimError::from)
+        }
         // `DiscardStrandedArtifacts` authors NO ending: kill -> discard,
         // nothing else (no row write, no evaluation — DD-5's "declared
         // delta empty over the observation universe" is structural, per

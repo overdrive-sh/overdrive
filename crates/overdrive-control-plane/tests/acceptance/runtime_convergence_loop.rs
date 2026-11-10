@@ -192,7 +192,7 @@ async fn noop_heartbeat_against_converged_target_does_not_re_enqueue() {
     //     target — N entries collapse to N dispatches per distinct
     //     `(reconciler, target)` key, per whitepaper §18 / ADR-0013 §8.
     let target = TargetResource::new("workload/payments").expect("valid target");
-    state.runtime.broker().submit(
+    state.runtime.submit_evaluation(
         Evaluation {
             reconciler: ReconcilerName::new("workload-lifecycle").expect("valid reconciler name"),
             target: target.clone(),
@@ -390,7 +390,7 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
 
     // --- Submit ONE evaluation naming `workload-lifecycle` only.
     let target = TargetResource::new("workload/payments").expect("valid target");
-    state.runtime.broker().submit(
+    state.runtime.submit_evaluation(
         Evaluation {
             reconciler: ReconcilerName::new("workload-lifecycle").expect("valid reconciler name"),
             target: target.clone(),
@@ -609,7 +609,7 @@ async fn stop_after_failed_alloc_drains_broker() {
 
     // --- Submit the seed evaluation.
     let target = TargetResource::new("workload/payments").expect("valid target");
-    state.runtime.broker().submit(
+    state.runtime.submit_evaluation(
         Evaluation {
             reconciler: ReconcilerName::new("workload-lifecycle").expect("valid reconciler name"),
             target: target.clone(),
@@ -696,7 +696,7 @@ async fn stop_after_failed_alloc_drains_broker() {
     // --- Re-submit the evaluation so the next tick re-evaluates the
     //     target with the new stop signal in scope. This mirrors what
     //     the production handler does on a stop submission.
-    state.runtime.broker().submit(
+    state.runtime.submit_evaluation(
         Evaluation {
             reconciler: ReconcilerName::new("workload-lifecycle").expect("valid reconciler name"),
             target: target.clone(),
@@ -928,7 +928,7 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
 
     // --- Submit the seed evaluation.
     let target = TargetResource::new("workload/payments").expect("valid target");
-    state.runtime.broker().submit(
+    state.runtime.submit_evaluation(
         Evaluation {
             reconciler: ReconcilerName::new("workload-lifecycle").expect("valid reconciler name"),
             target: target.clone(),
@@ -1325,7 +1325,7 @@ async fn run_one_tick_with_seeded_view(restart_counts_value: u32) -> u64 {
     // Submit and drain the seed eval — without re-submitting, the
     // broker is empty going into the tick. After the tick, queued
     // reflects ONLY whether `has_work` re-enqueued.
-    state.runtime.broker().submit(
+    state.runtime.submit_evaluation(
         Evaluation {
             reconciler: ReconcilerName::new("workload-lifecycle").expect("valid reconciler name"),
             target: target.clone(),

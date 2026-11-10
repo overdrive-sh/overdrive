@@ -22,7 +22,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
-use super::{AllocDriverIndex, MtlsInterceptLifecycle, ShimError, dispatch_with_guest_network};
+use super::{
+    AllocDriverIndex, EvaluationSubmission, MtlsInterceptLifecycle, ShimError,
+    dispatch_with_guest_network,
+};
 use crate::guest_network::{GuestAddressPool, SharedGuestNetworkOwner};
 use crate::identity_mgr::IdentityMgr;
 use crate::shared_network_test_ports::TestSharedOwner;
@@ -421,6 +424,8 @@ async fn dispatch_one(
     );
     let gate = wiring.gate();
 
+    let broker = Mutex::new(EvaluationBroker::new());
+    let submission = EvaluationSubmission::Standalone(&broker);
     dispatch_with_guest_network(
         vec![action],
         &registry,
@@ -435,7 +440,7 @@ async fn dispatch_one(
         &tick(),
         &nid("writer"),
         allocator,
-        &Mutex::new(EvaluationBroker::new()),
+        &submission,
         None,
         mtls_lifecycle,
         Some((&guest_network, &guest_pool, Some(flow_ports))),

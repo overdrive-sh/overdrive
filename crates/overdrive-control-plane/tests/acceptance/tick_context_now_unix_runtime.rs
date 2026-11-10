@@ -175,7 +175,7 @@ async fn run_convergence_tick_populates_now_unix_from_state_clock() {
     // production construction site at line 248-256 of
     // `reconciler_runtime.rs`.
     let target = TargetResource::new("workload/payments").expect("valid target");
-    state.runtime.broker().submit(
+    state.runtime.submit_evaluation(
         Evaluation {
             reconciler: ReconcilerName::new("workload-lifecycle").expect("valid reconciler name"),
             target: target.clone(),

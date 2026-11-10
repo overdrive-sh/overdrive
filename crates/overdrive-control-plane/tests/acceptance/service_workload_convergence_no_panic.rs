@@ -113,7 +113,7 @@ async fn service_workload_convergence_tick_does_not_panic() {
         .expect("put workload kind");
 
     let target = TargetResource::new("workload/web-frontend").expect("valid target");
-    state.runtime.broker().submit(
+    state.runtime.submit_evaluation(
         Evaluation {
             reconciler: ReconcilerName::new("workload-lifecycle").expect("valid reconciler name"),
             target: target.clone(),

@@ -288,7 +288,7 @@ impl World {
         let target =
             TargetResource::new(&format!("workload/{WORKLOAD_NAME}")).expect("valid target");
         let now = std::time::Instant::now();
-        self.state.runtime.broker().submit(
+        self.state.runtime.submit_evaluation(
             Evaluation { reconciler: name.clone(), target },
             now,
             EvaluationEligibility::Immediate,

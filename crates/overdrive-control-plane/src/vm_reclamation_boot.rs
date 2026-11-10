@@ -133,7 +133,7 @@ pub async fn converge(state: &AppState) -> Result<(), ConvergeError> {
                     state.obs.as_ref(),
                     state.clock.as_ref(),
                     &state.node_id,
-                    state.runtime.broker_mutex(),
+                    &state.runtime,
                 )
                 .await
                 .map_err(ConvergeError::Reclamation)?;

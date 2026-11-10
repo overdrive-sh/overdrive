@@ -172,7 +172,6 @@ impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for AdmissionOrder {
 /// advance, exactly once.
 #[tokio::test(flavor = "current_thread")]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D17 a broker submit wakes the convergence loop at once"]
 async fn a_submit_while_the_loop_is_parked_is_admitted_without_waiting_for_the_tick() {
     let l = parked_loop().await;
     assert_eq!(l.counters().dispatched, 0);
@@ -191,7 +190,6 @@ async fn a_submit_while_the_loop_is_parked_is_admitted_without_waiting_for_the_t
 /// dispatch.
 #[tokio::test(flavor = "current_thread")]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D17 a broker submit wakes the convergence loop at once"]
 async fn a_burst_of_submits_coalesces_per_target_and_drains_in_full() {
     let l = parked_loop().await;
     for n in 0..12 {
@@ -231,7 +229,6 @@ async fn the_cadence_tick_with_no_submits_drains_nothing_and_keeps_the_loop_aliv
 /// because of an unrelated wake.
 #[tokio::test(flavor = "current_thread")]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D17 a broker submit wakes the convergence loop at once"]
 async fn a_deferred_evaluation_is_not_admitted_early_by_an_unrelated_wake() {
     let l = parked_loop().await;
     let not_before = UnixInstant::from_clock(&*l.clock) + Duration::from_secs(5);
@@ -252,7 +249,6 @@ async fn a_deferred_evaluation_is_not_admitted_early_by_an_unrelated_wake() {
 /// same seed.
 #[tokio::test(flavor = "current_thread")]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D17 a broker submit wakes the convergence loop at once"]
 async fn the_admission_order_of_a_burst_is_identical_across_runs_of_one_seed() {
     async fn run(seed: u64) -> Vec<String> {
         let order = AdmissionOrder::default();

@@ -22,23 +22,20 @@
 //! [`Evaluation`]: overdrive_core::eval_broker::Evaluation
 //! [`EvaluationBroker`]: overdrive_core::eval_broker::EvaluationBroker
 
-use overdrive_core::eval_broker::{Evaluation, EvaluationBroker, EvaluationEligibility};
+use overdrive_core::eval_broker::{Evaluation, EvaluationEligibility};
 use overdrive_core::reconcilers::Action;
 use std::time::Instant;
+
+use super::EvaluationSubmission;
+use crate::reconciler_runtime::ReconcilerRuntime;
 
 /// Dispatch one `Action::EnqueueEvaluation`. Submits an
 /// [`Evaluation { reconciler, target }`] to the per-runtime
 /// [`EvaluationBroker`] so the downstream reconciler ticks against
 /// `target` on the next convergence cycle.
 ///
-/// The broker access is supplied as a `&mut EvaluationBroker`
-/// rather than the runtime's `parking_lot::MutexGuard` so the
-/// caller is responsible for the lock-discipline contract (drop
-/// the guard before `.await` per
-/// `.claude/rules/development.md` § Concurrency & async). The
-/// caller in [`super::dispatch_single`] holds the guard for the
-/// duration of one synchronous submit and drops it before the next
-/// `.await`.
+/// Production submissions go through the runtime so the convergence loop is
+/// woken after the broker lock is released.
 ///
 /// # Panics
 ///
@@ -48,7 +45,16 @@ use std::time::Instant;
 /// established precedent across action-shim dispatch wrappers (see
 /// [`super::write_service_backend_row::dispatch`] and
 /// [`super::dataplane_update_service::dispatch`]).
-pub fn dispatch(action: &Action, broker: &mut EvaluationBroker, now: Instant) {
+pub fn dispatch(action: &Action, runtime: &ReconcilerRuntime, now: Instant) {
+    let submission = EvaluationSubmission::Runtime(runtime);
+    dispatch_for_submission(action, &submission, now);
+}
+
+pub(super) fn dispatch_for_submission(
+    action: &Action,
+    submission: &EvaluationSubmission<'_>,
+    now: Instant,
+) {
     let Action::EnqueueEvaluation { reconciler, target } = action else {
         panic!(
             "action_shim::enqueue_evaluation::dispatch invoked with \
@@ -56,7 +62,7 @@ pub fn dispatch(action: &Action, broker: &mut EvaluationBroker, now: Instant) {
              match arm and is the sole expected caller"
         );
     };
-    broker.submit(
+    submission.submit(
         Evaluation { reconciler: reconciler.clone(), target: target.clone() },
         now,
         EvaluationEligibility::Immediate,
@@ -72,14 +78,22 @@ pub fn dispatch(action: &Action, broker: &mut EvaluationBroker, now: Instant) {
 mod tests {
     use std::time::Instant;
 
-    use overdrive_core::eval_broker::EvaluationBroker;
     use overdrive_core::reconcilers::{Action, ReconcilerName, TargetResource};
+
+    use crate::reconciler_runtime::ReconcilerRuntime;
 
     use super::dispatch;
 
+    fn runtime() -> (tempfile::TempDir, ReconcilerRuntime) {
+        let tmp = tempfile::TempDir::new().expect("temporary runtime directory");
+        let runtime =
+            ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime");
+        (tmp, runtime)
+    }
+
     #[test]
     fn dispatch_submits_evaluation_to_broker() {
-        let mut broker = EvaluationBroker::new();
+        let (_tmp, runtime) = runtime();
         let expected_reconciler = ReconcilerName::new("service-map-hydrator").expect("valid name");
         let expected_target = TargetResource::new("service/42").expect("valid target");
         let action = Action::EnqueueEvaluation {
@@ -87,15 +101,18 @@ mod tests {
             target: expected_target.clone(),
         };
 
-        dispatch(&action, &mut broker, Instant::now());
+        dispatch(&action, &runtime, Instant::now());
 
         // Drain — the submitted evaluation must appear exactly once.
-        let drained = broker.drain_pending(
-            8,
-            &std::collections::BTreeSet::new(),
-            Instant::now(),
-            overdrive_core::UnixInstant::from_unix_duration(std::time::Duration::ZERO),
-        );
+        let drained = {
+            let mut broker = runtime.broker();
+            broker.drain_pending(
+                8,
+                &std::collections::BTreeSet::new(),
+                Instant::now(),
+                overdrive_core::UnixInstant::from_unix_duration(std::time::Duration::ZERO),
+            )
+        };
         assert_eq!(drained.len(), 1, "exactly one evaluation must be pending");
         assert_eq!(drained[0].0.reconciler, expected_reconciler);
         assert_eq!(drained[0].0.target, expected_target);
@@ -103,20 +120,23 @@ mod tests {
 
     #[test]
     fn dispatch_collapses_duplicate_submits_at_same_key() {
-        let mut broker = EvaluationBroker::new();
+        let (_tmp, runtime) = runtime();
         let reconciler = ReconcilerName::new("service-map-hydrator").expect("valid name");
         let target = TargetResource::new("service/7").expect("valid target");
         let action = Action::EnqueueEvaluation { reconciler, target };
 
-        dispatch(&action, &mut broker, Instant::now());
-        dispatch(&action, &mut broker, Instant::now());
+        dispatch(&action, &runtime, Instant::now());
+        dispatch(&action, &runtime, Instant::now());
 
-        let drained = broker.drain_pending(
-            8,
-            &std::collections::BTreeSet::new(),
-            Instant::now(),
-            overdrive_core::UnixInstant::from_unix_duration(std::time::Duration::ZERO),
-        );
+        let drained = {
+            let mut broker = runtime.broker();
+            broker.drain_pending(
+                8,
+                &std::collections::BTreeSet::new(),
+                Instant::now(),
+                overdrive_core::UnixInstant::from_unix_duration(std::time::Duration::ZERO),
+            )
+        };
         assert_eq!(
             drained.len(),
             1,
@@ -129,7 +149,7 @@ mod tests {
         expected = "action_shim::enqueue_evaluation::dispatch invoked with wrong Action variant"
     )]
     fn dispatch_panics_on_wrong_variant() {
-        let mut broker = EvaluationBroker::new();
-        dispatch(&Action::Noop, &mut broker, Instant::now());
+        let (_tmp, runtime) = runtime();
+        dispatch(&Action::Noop, &runtime, Instant::now());
     }
 }

@@ -57,7 +57,7 @@ trait WakeSubmit: Send + Sync {
 
 impl WakeSubmit for ReconcilerRuntime {
     fn submit(&self, evaluation: Evaluation, now: Instant) {
-        self.broker().submit(evaluation, now, EvaluationEligibility::Immediate);
+        self.submit_evaluation(evaluation, now, EvaluationEligibility::Immediate);
     }
 }
 

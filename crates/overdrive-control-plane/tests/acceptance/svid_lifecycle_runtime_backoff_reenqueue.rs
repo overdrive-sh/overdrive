@@ -206,7 +206,7 @@ async fn svid_lifecycle_reenqueues_while_issue_backoff_pending() {
 
     // Seed the FIRST enqueue (Shape C's job in production; here we submit
     // directly to isolate the self-re-enqueue under test).
-    state.runtime.broker().submit(
+    state.runtime.submit_evaluation(
         Evaluation { reconciler: svid_reconciler_name(), target: target.clone() },
         std::time::Instant::now(),
         overdrive_core::eval_broker::EvaluationEligibility::Immediate,
