@@ -61,7 +61,6 @@ fn alloc_rows_without_clock_noise(rows: &[AllocStatusRow]) -> Vec<(String, Strin
 /// (`HealthySlowStartNeverTimesOut`, under DL-6).
 #[tokio::test(flavor = "current_thread")]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D10 progress deadline derived from the startup deadline"]
 async fn a_service_that_becomes_stable_after_ninety_seconds_ends_stable_not_timeout() {
     let seed = 3501;
     eprintln!("service-stream-progress-deadline seed={seed} case=slow-start");
@@ -100,7 +99,6 @@ async fn a_service_that_becomes_stable_after_ninety_seconds_ends_stable_not_time
 /// labelled detail, `alloc_id: None`, and the stream writes no row.
 #[tokio::test(flavor = "current_thread")]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D10 timeout carries the last attempt; D7 startup stop"]
 async fn a_never_ready_service_times_out_at_the_progress_deadline_naming_the_last_attempt() {
     let seed = 3502;
     eprintln!("service-stream-progress-deadline seed={seed} case=never-ready");
@@ -122,14 +120,15 @@ async fn a_never_ready_service_times_out_at_the_progress_deadline_naming_the_las
     assert_eq!(alloc_id, None, "a synthesised timeout names no allocation");
     assert_eq!(reason, ServiceFailureReason::Timeout { after_seconds: 90 });
     assert_eq!(stderr_tail, None);
-    let Some(LastAttemptWire { alloc_id: attempt, reason: why, terminal: ended, detail: _ }) =
+    let Some(LastAttemptWire { alloc_id: attempt, reason: why, terminal: ended, detail }) =
         last_attempt
     else {
         panic!("the timeout carries the latest attempt-ending observation");
     };
     assert_eq!(attempt, first_attempt.to_string(), "the first attempt, startup-stopped");
-    assert_eq!(why, TransitionReason::Stopped { by: StoppedBy::StartupProbe });
+    assert_eq!(why, TransitionReason::Stopped { by: StoppedBy::Reconciler });
     assert_eq!(ended, Some(TerminalCondition::Stopped { by: StoppedBy::StartupProbe }));
+    assert_eq!(detail, None, "the stop event carries no driver detail");
     assert_eq!(
         alloc_rows_without_clock_noise(&rows_at_the_timeout),
         alloc_rows_without_clock_noise(&node.rows_of("never-ready").await),
@@ -142,7 +141,6 @@ async fn a_never_ready_service_times_out_at_the_progress_deadline_naming_the_las
 /// `last_attempt` (a give-up is the verdict, not the labelled detail).
 #[tokio::test(flavor = "current_thread")]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D7 startup stop and give-up; D10 give-up inside the deadline is unchanged"]
 async fn a_give_up_inside_the_progress_deadline_ends_the_stream_with_the_give_up() {
     let seed = 3503;
     eprintln!("service-stream-progress-deadline seed={seed} case=give-up-first");
@@ -172,7 +170,6 @@ async fn a_give_up_inside_the_progress_deadline_ends_the_stream_with_the_give_up
 /// it opened only, never from an attempt that ended before.
 #[tokio::test(flavor = "current_thread")]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D10 timeout carries the last attempt; D7 startup stop"]
 async fn an_unchanged_redeploy_of_a_stuck_service_opens_a_new_clock_and_reports_only_new_attempts()
 {
     let seed = 3504;

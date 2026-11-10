@@ -1524,9 +1524,7 @@ pub fn format_service_failed_block(
     workload_name: &str,
     reason: &overdrive_core::transition_reason::ServiceFailureReason,
     stderr_tail: Option<&str>,
-    // SCAFFOLD: true — pinned parameter (feature service-allocation-readiness-and-ending,
-    // D10 item 7 / D6): the `Timeout` wording and the `last attempt` block land with D10.
-    _last_attempt: Option<&overdrive_control_plane::streaming::LastAttemptWire>,
+    last_attempt: Option<&overdrive_control_plane::streaming::LastAttemptWire>,
 ) -> String {
     use overdrive_core::transition_reason::{BackoffCause, ServiceFailureReason};
     use std::fmt::Write as _;
@@ -1563,7 +1561,9 @@ pub fn format_service_failed_block(
             format!("custom failure '{source}': {message}")
         }
         ServiceFailureReason::Timeout { after_seconds } => {
-            format!("workload did not converge within {after_seconds}s")
+            format!(
+                "workload did not become Stable within {after_seconds}s; the platform may still be restarting it (see `overdrive workload describe`)"
+            )
         }
         ServiceFailureReason::StreamInterrupted => {
             "server-side stream interrupted before convergence".to_string()
@@ -1571,6 +1571,16 @@ pub fn format_service_failed_block(
         _ => "unknown failure reason".to_string(),
     };
     let _ = writeln!(s, "  reason: {reason_text}");
+
+    if matches!(reason, ServiceFailureReason::Timeout { .. })
+        && let Some(attempt) = last_attempt
+    {
+        let _ = writeln!(s, "  last attempt (alloc {}):", attempt.alloc_id);
+        let _ = writeln!(s, "    reason: {}", attempt.reason.human_readable());
+        if let Some(detail) = attempt.detail.as_deref().filter(|detail| !detail.is_empty()) {
+            let _ = writeln!(s, "    detail: {detail}");
+        }
+    }
 
     // S-SHCP-CLI-07 / 08 (Slice 08, RCA-A render hardening) — the
     // `EarlyExit` failure on a Service-kind alloc renders a multi-line

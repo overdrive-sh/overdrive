@@ -58,7 +58,6 @@ proptest! {
     /// the margin.
     #[test]
     /// CONTRACT_SHAPE: pure-function.
-    #[ignore = "pending DELIVER: D10 progress_deadline derivation"]
     fn the_progress_deadline_exceeds_the_startup_deadline_and_keeps_the_floor(
         probes in descriptors(),
         floor_seconds in 0_u64..=3_600,
@@ -77,7 +76,6 @@ proptest! {
 /// deadline of 60 s) yields exactly the 90 s streaming cap.
 #[test]
 /// CONTRACT_SHAPE: pure-function.
-#[ignore = "pending DELIVER: D10 progress_deadline derivation"]
 fn the_default_spec_yields_ninety_seconds() {
     assert_eq!(DEFAULT_STARTUP_DEADLINE, Duration::from_secs(60));
     assert_eq!(PROGRESS_DEADLINE_MARGIN, Duration::from_secs(30));
@@ -89,7 +87,6 @@ fn the_default_spec_yields_ninety_seconds() {
 /// index 0 counts.
 #[test]
 /// CONTRACT_SHAPE: pure-function.
-#[ignore = "pending DELIVER: D10 progress_deadline derivation"]
 fn a_long_startup_deadline_lifts_the_progress_deadline_and_a_short_one_keeps_the_floor() {
     let long = [startup_probe(0, 10, 12)];
     assert_eq!(progress_deadline(&long, DEFAULT_STREAMING_CAP), Duration::from_secs(150));

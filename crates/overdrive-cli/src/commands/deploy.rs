@@ -665,11 +665,11 @@ async fn deploy_streaming_service(
     // `streaming::build_service_stream` (typed `ServiceSubmitEvent`
     // lane per step 01-03e3) based on the persisted discriminator.
     let request = SubmitWorkloadRequest { spec: SubmitSpecInput::Service(spec_input) };
-    // SCAFFOLD: true — D10 item 7: the Service lane passes
-    // `progress_deadline(&spec.startup_probes, DEFAULT_STREAMING_CAP)`.
-    let response = client
-        .submit_workload_streaming(request, overdrive_control_plane::DEFAULT_STREAMING_CAP)
-        .await?;
+    let server_deadline = overdrive_control_plane::streaming::progress_deadline(
+        &validated.startup_probes,
+        overdrive_control_plane::DEFAULT_STREAMING_CAP,
+    );
+    let response = client.submit_workload_streaming(request, server_deadline).await?;
 
     consume_stream(response, endpoint, validated_workload_id).await
 }

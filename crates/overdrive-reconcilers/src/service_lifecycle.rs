@@ -786,13 +786,11 @@ fn format_mechanic_summary(mechanic: &ProbeMechanic, listeners: &[Listener]) -> 
 fn spec_facts_for_service(svc: &Service) -> (u32, Duration, String, bool, bool) {
     let startup_probes_empty = svc.startup_probes.is_empty();
     if startup_probes_empty {
-        return (30, DEFAULT_STARTUP_DEADLINE, String::new(), false, true);
+        return (30, startup_deadline(&svc.startup_probes), String::new(), false, true);
     }
     let probe = &svc.startup_probes[0];
     let max_attempts = probe.max_attempts;
-    let interval = Duration::from_secs(u64::from(probe.interval_seconds));
-    let startup_deadline =
-        interval.checked_mul(probe.max_attempts).unwrap_or(DEFAULT_STARTUP_DEADLINE);
+    let startup_deadline = startup_deadline(&svc.startup_probes);
     let mechanic_summary = format_mechanic_summary(&probe.mechanic, &svc.listeners);
     (max_attempts, startup_deadline, mechanic_summary, probe.inferred, false)
 }
@@ -805,8 +803,12 @@ fn spec_facts_for_service(svc: &Service) -> (u32, Duration, String, bool, bool) 
 pub fn startup_deadline(
     startup_probes: &[overdrive_core::aggregate::probe_descriptor::ProbeDescriptor],
 ) -> Duration {
-    let _ = startup_probes;
-    panic!("RED scaffold: D10 startup_deadline")
+    let Some(probe) = startup_probes.first() else {
+        return DEFAULT_STARTUP_DEADLINE;
+    };
+    Duration::from_secs(u64::from(probe.interval_seconds))
+        .checked_mul(probe.max_attempts)
+        .unwrap_or(DEFAULT_STARTUP_DEADLINE)
 }
 
 /// Project the readiness facts uniform across every alloc.

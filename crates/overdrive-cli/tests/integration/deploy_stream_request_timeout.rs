@@ -114,7 +114,6 @@ async fn time_until_the_stalled_body_ends(client: &ApiClient, deadline: Duration
 /// to emit is not hidden.
 #[tokio::test]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D10 total request timeout is the server deadline plus 30 s"]
 async fn the_service_lane_waits_the_server_deadline_plus_thirty_seconds() {
     let (client, _config) = stalled_stream_endpoint();
 

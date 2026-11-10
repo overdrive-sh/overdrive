@@ -25,6 +25,7 @@ use overdrive_control_plane::api::{
     RestartWorkloadResponse, StopWorkloadResponse, SubmitRouteResponse, SubmitWorkloadRequest,
     SubmitWorkloadResponse, WithdrawRouteResponse, WorkloadDescription,
 };
+use overdrive_control_plane::streaming::PROGRESS_DEADLINE_MARGIN;
 use overdrive_control_plane::tls_bootstrap::{TrustTriple, load_trust_triple};
 use overdrive_core::guest_network::ServeShutdownRequest;
 use overdrive_core::public_ingress::PublicRouteInput;
@@ -293,30 +294,26 @@ impl ApiClient {
     pub async fn submit_workload_streaming(
         &self,
         req: SubmitWorkloadRequest,
-        // SCAFFOLD: true — pinned parameter (feature service-allocation-readiness-and-ending,
-        // D10 item 7): the server's stream deadline. Until D10 lands the total request
-        // timeout stays the fixed 120 s.
-        _server_deadline: Duration,
+        server_deadline: Duration,
     ) -> Result<reqwest::Response, CliError> {
         let url = self.build_url("v1/workloads")?;
         // Override the client-wide 30s `.timeout(...)` for the streaming
-        // lane. The server-side `streaming_cap` (90s default per
-        // `lib.rs::DEFAULT_STREAMING_CAP`) is the authoritative wall-
-        // clock guarantee — it always fires a terminal failure event
+        // lane. The server-side deadline is the authoritative wall-clock
+        // guarantee — it fires a terminal event
         // (`JobSubmitEvent::Failed` / `ServiceSubmitEvent::Failed`)
         // before the connection stalls. A client-side timeout shorter
-        // than the cap aborts the body read mid-stream, surfaces as
+        // than the deadline aborts the body read mid-stream, surfaces as
         // `CliError::Transport { cause: "request timed out" }`, and
-        // hides the typed terminal event the server WAS about to emit.
-        // 120 s == streaming_cap (90 s) + a 30 s envelope for round-trip
-        // + reconciler tick latency. Pre-Accepted failures still surface
+        // hides the typed terminal event the server was about to emit.
+        // D10 keeps a 30 s envelope beyond the server deadline for the
+        // terminal line. Pre-Accepted failures still surface
         // through `is_connect()` / `is_decode()` paths, which are
         // bounded by the connect_timeout (10 s).
         let resp = self
             .inner
             .post(url)
             .header(reqwest::header::ACCEPT, "application/x-ndjson")
-            .timeout(Duration::from_secs(120))
+            .timeout(server_deadline + PROGRESS_DEADLINE_MARGIN)
             .json(&req)
             .send()
             .await

@@ -103,7 +103,6 @@ async fn never_ready_guest_is_stopped_and_restarted_until_give_up_names_the_star
 /// startup stop as `last_attempt`; the give-up arrives on the row later.
 #[tokio::test]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D7 startup stop; D10 progress deadline carries the last attempt"]
 async fn never_ready_guest_with_the_default_startup_window_times_out_naming_the_first_stop() {
     let mut world = RestartWorld::compose(Shape::DefaultStartupWindow).await;
     let stream = world.open_stream().await;

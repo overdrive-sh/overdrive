@@ -523,7 +523,6 @@ fn classify(event: &ServiceSubmitEvent) -> Result<(&'static str, &'static str)> 
     max_samples = 1
 )]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D10 progress deadline derived from the startup deadline"]
 fn quint_progress_deadline_slow_start_reaches_stable_not_timeout() -> impl Driver {
     ProgressDeadlineDriver::new()
 }
@@ -536,7 +535,6 @@ fn quint_progress_deadline_slow_start_reaches_stable_not_timeout() -> impl Drive
     max_samples = 1
 )]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D10 timeout carries the last attempt"]
 fn quint_progress_deadline_never_ready_times_out_with_last_attempt_cause() -> impl Driver {
     ProgressDeadlineDriver::new()
 }
@@ -549,7 +547,6 @@ fn quint_progress_deadline_never_ready_times_out_with_last_attempt_cause() -> im
     max_samples = 1
 )]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D10 progress deadline derived from the startup deadline"]
 fn quint_progress_deadline_giveup_inside_deadline_wins_over_timeout() -> impl Driver {
     ProgressDeadlineDriver::new()
 }
@@ -562,7 +559,6 @@ fn quint_progress_deadline_giveup_inside_deadline_wins_over_timeout() -> impl Dr
     max_samples = 1
 )]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D10 progress deadline derived from the startup deadline"]
 fn quint_progress_deadline_redeploy_unchanged_opens_new_clock() -> impl Driver {
     ProgressDeadlineDriver::new()
 }
@@ -573,7 +569,6 @@ fn quint_progress_deadline_redeploy_unchanged_opens_new_clock() -> impl Driver {
     main = "pd_conf"
 )]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D10 progress deadline derived from the startup deadline"]
 fn quint_progress_deadline_randomized() -> impl Driver {
     ProgressDeadlineDriver::new()
 }

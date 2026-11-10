@@ -44,7 +44,6 @@ fn reference(probes: &[ProbeDescriptor]) -> Duration {
 /// (only index 0 counts), zero interval, the largest representable product.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER: D10 startup_deadline extraction"]
 fn the_startup_deadline_matches_the_values_the_derivation_produced_before_extraction() {
     assert_eq!(startup_deadline(&[]), Duration::from_secs(60));
     assert_eq!(startup_deadline(&[startup_probe(0, 5, 12)]), Duration::from_secs(60));
@@ -68,7 +67,6 @@ proptest! {
     /// was extracted from.
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER: D10 startup_deadline extraction"]
     fn the_startup_deadline_equals_the_original_derivation_for_every_descriptor_list(
         specs in prop::collection::vec((any::<u32>(), any::<u32>()), 0..4),
     ) {

@@ -841,8 +841,10 @@ pub fn progress_deadline(
     startup_probes: &[overdrive_core::aggregate::probe_descriptor::ProbeDescriptor],
     floor: Duration,
 ) -> Duration {
-    let _ = (startup_probes, floor);
-    panic!("RED scaffold: D10 progress_deadline")
+    floor.max(
+        overdrive_reconcilers::service_lifecycle::startup_deadline(startup_probes)
+            + PROGRESS_DEADLINE_MARGIN,
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -963,7 +965,7 @@ fn render_custom_detail(detail: Option<&[u8]>) -> String {
     )
 }
 
-/// Synthesise the streaming wall-clock cap-timer terminal per
+/// Synthesise the Service stream's wall-clock Timeout terminal per
 /// ADR-0059 Q4. Streaming-loop-only — the reconciler MUST NOT emit
 /// this variant.
 #[must_use]
@@ -1043,8 +1045,8 @@ fn emit_service_line(event: &ServiceSubmitEvent) -> std::io::Result<Bytes> {
 ///   — the Service-kind wire surface is reduced to
 ///   {Accepted, terminal}.
 /// - **Edge cases**:
-///   - Cap timer expiry → `Failed { reason: Timeout { after_seconds } }`
-///     per ADR-0059 Q4 via [`service_stream_synth_cap_timeout`].
+///   - Progress-deadline expiry → `Failed { reason: Timeout { after_seconds } }`
+///     per D10 and ADR-0059 Q4 via [`service_stream_synth_cap_timeout`].
 ///   - Broadcast `Closed` → `Failed { reason: StreamInterrupted }`
 ///     per ADR-0059 Q4 via [`service_stream_synth_closed`].
 ///   - Non-terminal events (`event.terminal.is_none()`) are SILENTLY
@@ -1057,13 +1059,10 @@ pub fn build_service_stream(
     state: AppState,
     workload_id: WorkloadId,
     accepted: ServiceSubmitEvent,
-    // SCAFFOLD: true — pinned parameter (feature service-allocation-readiness-and-ending,
-    // D10 item 6). Until D10 lands the cap timer still arms from `streaming_cap`.
-    _progress_deadline: Duration,
+    progress_deadline: Duration,
 ) -> impl Stream<Item = Result<Bytes, ServiceStreamError>> + Send + 'static {
     let bus = state.lifecycle_events.clone();
     let clock = state.clock.clone();
-    let cap = state.streaming_cap;
 
     async_stream::stream! {
         // 1. Emit Accepted SYNCHRONOUSLY.
@@ -1081,8 +1080,9 @@ pub fn build_service_stream(
         let mut sub = bus.subscribe();
         drop(bus);
 
-        let cap_future = clock.sleep(cap);
-        tokio::pin!(cap_future);
+        let deadline_future = clock.sleep(progress_deadline);
+        tokio::pin!(deadline_future);
+        let mut last_attempt: Option<LastAttemptWire> = None;
 
         loop {
             tokio::select! {
@@ -1092,6 +1092,17 @@ pub fn build_service_stream(
                         Ok(event) => {
                             if event.workload_id != workload_id {
                                 continue;
+                            }
+                            if matches!(
+                                event.to,
+                                AllocStateWire::Failed | AllocStateWire::Terminated,
+                            ) {
+                                last_attempt = Some(LastAttemptWire {
+                                    alloc_id: event.alloc_id.to_string(),
+                                    reason: event.reason.clone(),
+                                    terminal: event.terminal.clone(),
+                                    detail: event.detail.clone(),
+                                });
                             }
                             // Service-kind: only terminal events
                             // project to a wire line. Non-terminal
@@ -1119,7 +1130,7 @@ pub fn build_service_stream(
                                 // TerminalCondition variant without a
                                 // Service-kind wire projection (e.g.
                                 // Job-kind natural exit). Skip — the
-                                // cap timer or a subsequent broadcast
+                                // progress deadline or a subsequent broadcast
                                 // event will close the stream.
                                 continue;
                             };
@@ -1138,7 +1149,7 @@ pub fn build_service_stream(
                             // No observation-store fallback for the
                             // Service-kind sibling surface in Phase 1
                             // — a lagged Service stream waits for the
-                            // next live event or the cap timer.
+                            // next live event or the progress deadline.
                             // Falls through to the next select! iteration.
                         }
                         Err(tokio::sync::broadcast::error::RecvError::Closed) => {
@@ -1151,9 +1162,12 @@ pub fn build_service_stream(
                         }
                     }
                 }
-                () = &mut cap_future => {
-                    let after_seconds = u32::try_from(cap.as_secs()).unwrap_or(u32::MAX);
-                    let wire = service_stream_synth_cap_timeout(after_seconds);
+                () = &mut deadline_future => {
+                    let after_seconds = u32::try_from(progress_deadline.as_secs()).unwrap_or(u32::MAX);
+                    let mut wire = service_stream_synth_cap_timeout(after_seconds);
+                    if let ServiceSubmitEvent::Failed { last_attempt: timeout_attempt, .. } = &mut wire {
+                        *timeout_attempt = last_attempt;
+                    }
                     match emit_service_line(&wire) {
                         Ok(line) => yield Ok(line),
                         Err(err) => yield Err(ServiceStreamError::LineEmission { source: err }),
