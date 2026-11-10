@@ -319,7 +319,7 @@ async fn given_probe_runner_writes_pass_row_when_service_lifecycle_reconciles_th
         other => panic!("expected Stable action, got {other:?}"),
     }
     assert!(
-        next_view.stable_announced.contains(&fact.alloc_id),
-        "next-View must include alloc in stable_announced (dedup guard)",
+        next_view.observed.contains(&fact.alloc_id),
+        "the allocation remains observed until its Stable row commits",
     );
 }

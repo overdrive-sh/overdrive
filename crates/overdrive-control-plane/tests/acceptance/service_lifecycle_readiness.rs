@@ -77,15 +77,16 @@ fn dataplane_identity() -> ServiceDataplaneIdentity {
     }
 }
 
-/// Build a Service alloc fact carrying a readiness probe with the given
-/// latest status. `started_at` is `Some` (the alloc reached Running).
+/// Build a post-Stable Service allocation fact carrying a readiness probe
+/// with the given latest status. `started_at` is `Some` and the allocation's
+/// Stable claim has committed on its Running row.
 fn fact_with_readiness(
     index: usize,
     latest_readiness: Option<ProbeStatus>,
     success_threshold: u32,
 ) -> ServiceAllocFact {
     ServiceAllocFact {
-        stable_committed: false,
+        stable_committed: true,
         alloc_id: alloc(&format!("svc-{index}")),
         phase: overdrive_reconcilers::service_lifecycle::ServiceAllocPhase::Running(
             overdrive_reconcilers::service_lifecycle::ServiceBackendIdentity {
@@ -94,7 +95,7 @@ fn fact_with_readiness(
             },
         ),
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1))),
-        // Startup already passed — these allocs are Stable backends.
+        // Startup passed and its Stable row committed for these backends.
         latest_startup_probe: Some(ProbeStatus::Pass),
         latest_startup_probe_observed_at: Some(UnixInstant::from_unix_duration(
             Duration::from_millis(1),
@@ -114,11 +115,11 @@ fn fact_with_readiness(
     }
 }
 
-/// Build a Service alloc fact with NO readiness probe (backward-compat
-/// default — `healthy = true` post-Stable).
+/// Build a post-Stable Service allocation fact with NO readiness probe
+/// (backward-compat default — `healthy = true` after its Stable commit).
 fn fact_without_readiness(index: usize) -> ServiceAllocFact {
     ServiceAllocFact {
-        stable_committed: false,
+        stable_committed: true,
         alloc_id: alloc(&format!("svc-{index}")),
         phase: overdrive_reconcilers::service_lifecycle::ServiceAllocPhase::Running(
             overdrive_reconcilers::service_lifecycle::ServiceBackendIdentity {

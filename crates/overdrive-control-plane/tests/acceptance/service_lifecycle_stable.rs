@@ -162,7 +162,7 @@ fn put_startup_row(
 /// has Running status row AND startup probe #0 has Pass row →
 /// reconciler emits `Action::FinalizeFailed { terminal:
 /// Some(Stable { settled_in_ms, witness }) }` exactly once AND
-/// inserts the alloc into next-View's `stable_announced`.
+/// keeps the allocation in the observed watch until the Stable row commits.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn given_running_alloc_with_pass_startup_probe_when_reconcile_then_emits_stable_once() {
@@ -190,31 +190,27 @@ fn given_running_alloc_with_pass_startup_probe_when_reconcile_then_emits_stable_
         }
         other => panic!("expected Stable action, got {other:?}"),
     }
-    assert!(
-        next_view.stable_announced.contains(&alloc_id),
-        "next-View must include alloc in stable_announced"
-    );
+    assert!(next_view.observed.contains(&alloc_id), "the allocation remains observed");
 }
 
-/// S-SHCP-RECON-02 (US-01 / DDD-6 dedup) — once Stable announced
-/// for an alloc, a second reconcile tick with unchanged inputs
-/// emits zero Stable actions. View's `stable_announced` BTreeSet
-/// is the dedup guard.
+/// S-SHCP-RECON-02 (B1/R2-2) — a committed Stable row suppresses a second
+/// announcement, independently of the persisted view.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn given_stable_already_announced_when_reconcile_then_emits_no_actions() {
     let reconciler = ServiceLifecycleReconciler::new();
     let alloc_id = alloc("payments-0");
-    let actual = state_with(vec![fact_running_with_pass(alloc_id.clone(), 1000)]);
+    let mut committed = fact_running_with_pass(alloc_id.clone(), 1000);
+    committed.stable_committed = true;
+    let actual = state_with(vec![committed]);
     let desired = actual.clone();
-    let mut view = ServiceLifecycleView::default();
-    view.stable_announced.insert(alloc_id.clone());
+    let view = ServiceLifecycleView::default();
     let tick = tick_at(2000);
 
     let (actions, next_view) = reconciler.reconcile(&desired, &actual, &view, &tick);
 
-    assert!(actions.is_empty(), "Stable must NOT re-emit once announced; got {actions:?}");
-    assert!(next_view.stable_announced.contains(&alloc_id));
+    assert!(actions.is_empty(), "a committed Stable must NOT re-emit; got {actions:?}");
+    assert_eq!(next_view, view, "the committed row needs no view marker");
 }
 
 /// S-SHCP-RECON-05 as amended by D6/DG-12: a Failed row after Stable
@@ -224,9 +220,8 @@ fn given_stable_already_announced_when_reconcile_then_emits_no_actions() {
 fn given_alloc_exits_after_stable_when_reconcile_then_does_not_emit_early_exit() {
     let reconciler = ServiceLifecycleReconciler::new();
     let alloc_id = alloc("payments-0");
-    // Stable already announced previously
-    let mut view = ServiceLifecycleView::default();
-    view.stable_announced.insert(alloc_id.clone());
+    // The failed row itself closes this allocation's terminal watch.
+    let view = ServiceLifecycleView::default();
     // Now the alloc dies
     let actual = state_with(vec![fact_failed_after_start(alloc_id.clone(), 1000)]);
     let desired = actual.clone();

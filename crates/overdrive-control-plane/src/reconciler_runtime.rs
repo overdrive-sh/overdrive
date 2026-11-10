@@ -2707,6 +2707,7 @@ mod tests {
         use overdrive_core::traits::observation_store::{
             AllocState, AllocStatusRow, LogicalTimestamp, ObservationStore,
         };
+        use overdrive_core::transition_reason::TerminalCondition;
         use overdrive_reconcilers::service_lifecycle::{
             ServiceLifecycleReconciler, ServiceLifecycleState, ServiceLifecycleView,
         };
@@ -2972,6 +2973,7 @@ mod tests {
         /// than merely being derivable as `false`: pre-fix `healthy`
         /// was permanently `false` for any Service with a readiness
         /// probe, so a recovery could never flip it back.
+        /// CONTRACT_SHAPE: bounded-change.
         #[tokio::test]
         async fn readiness_observation_drives_backend_healthy_false_then_true() {
             let tmp = TempDir::new().expect("tempdir");
@@ -3012,6 +3014,47 @@ mod tests {
                 !fact.startup_probes_empty,
                 "the fixture declares a startup probe — the production-typical shape under \
                  ADR-0058 inference, and the shape the flat index broke",
+            );
+
+            // The startup Pass first produces the production Stable action.
+            // Commit that claim on the actual allocation row before evaluating
+            // post-Stable readiness: B1 hydrates the row, not an emission marker.
+            let (startup_actions, _) = ServiceLifecycleReconciler::new().reconcile(
+                &actual,
+                &actual,
+                &ServiceLifecycleView::default(),
+                &tick_at(1),
+            );
+            let stable = startup_actions
+                .iter()
+                .find_map(|action| match action {
+                    Action::FinalizeFailed {
+                        alloc_id: emitted,
+                        terminal: Some(terminal @ TerminalCondition::Stable { .. }),
+                    } if emitted == &alloc_id() => Some(terminal.clone()),
+                    _ => None,
+                })
+                .expect("startup Pass emits Stable for this allocation");
+            let mut row = state
+                .obs
+                .alloc_status_row(&alloc_id())
+                .await
+                .expect("read allocation row")
+                .expect("Running allocation row");
+            row.updated_at = LogicalTimestamp { counter: 2, writer: writer_node() };
+            row.terminal = Some(stable);
+            state
+                .obs
+                .write_alloc_lifecycle(
+                    row,
+                    overdrive_core::traits::observation_store::TransitionSource::Reconciler,
+                )
+                .await
+                .expect("commit Stable allocation row");
+            let actual = hydrate(&state).await;
+            assert!(
+                actual.allocs.get(&alloc_id()).expect("committed allocation fact").stable_committed,
+                "post-Stable readiness must read the committed allocation row"
             );
 
             let (healthy_on_fail, view_after_fail) =

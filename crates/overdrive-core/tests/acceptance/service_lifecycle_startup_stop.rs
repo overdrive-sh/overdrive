@@ -379,7 +379,6 @@ proptest! {
     /// read from the startup row), the opt-out exemption, the readiness rule.
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[ignore = "pending DELIVER: D12 backend eligibility keys on the committed Stable"]
     fn startup_probed_allocation_is_a_backend_only_after_its_stable_is_committed(
         opt_out in any::<bool>(),
         stable_committed in any::<bool>(),

@@ -241,7 +241,6 @@ async fn hydrate_backend(state: &mut ServiceLifecycleState, store: &SimObservati
 /// becomes eligible again.
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "current_thread")]
-#[ignore = "pending DELIVER: D5 D6 D12 a Failed row yields no ServiceLifecycle action; eligibility keys on the committed Stable"]
 async fn terminal_state_wins_and_dead_vm_backend_never_returns_to_eligibility() {
     eprintln!("service-kind-vm terminal invariant seed={SEED}");
     let node = NodeId::new("svm-025717").expect("static node ID is valid");

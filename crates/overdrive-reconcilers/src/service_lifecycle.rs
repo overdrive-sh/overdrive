@@ -287,8 +287,6 @@ pub struct ServiceAllocFact {
     /// projections (PROBE-RUN-COUNT).
     #[doc(hidden)]
     pub probe_rows: BTreeMap<(ProbeRole, ProbeIdx), ProbeResultRow>,
-    // SCAFFOLD: true — pinned shape (B1, ADR-0265): hydrated from `row.terminal`
-    // being `Stable`; in-memory State field only.
     /// The allocation's status row carries a committed `Stable` claim.
     pub stable_committed: bool,
 }
@@ -375,15 +373,10 @@ pub struct ServiceDataplaneIdentity {
 /// boundary.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ServiceLifecycleView {
-    /// Per-alloc set of allocs that have already had their Stable
-    /// terminal condition announced. Used to dedup per-tick
-    /// re-emission of Stable (per DDD-6: encoded as `BTreeSet`,
-    /// NOT a flag on `TerminalCondition`, per ADR-0037 §5 layering).
-    pub stable_announced: BTreeSet<AllocationId>,
-
     /// GAP-9 — per-alloc set of allocs the reconciler has OBSERVED in
     /// a non-terminal state (i.e. it has begun watching the alloc's
-    /// startup window but has not yet announced a terminal verdict).
+    /// startup window but has not yet observed a committed Stable or
+    /// startup-stop terminal).
     ///
     /// This is the load-bearing input for the reconciler's pure
     /// `next_evaluation_at` hook: during the active startup window the
@@ -395,20 +388,21 @@ pub struct ServiceLifecycleView {
     /// derived state": this records an OBSERVED FACT ("the reconciler
     /// is watching alloc X"), not a derived "needs re-enqueue now"
     /// boolean — the predicate recomputes that from the set
-    /// difference against the two terminal sets every read.
+    /// difference against `terminal_announced` and the hydrated committed
+    /// `Stable` claim every read.
     pub observed: BTreeSet<AllocationId>,
 
     /// Per-alloc set of allocations this reconciler has finished watching:
     /// every observed `Failed` or `Terminated` allocation, and every live
-    /// allocation for which it emitted a startup stop. The Stable terminal
-    /// continues to use [`Self::stable_announced`].
+    /// allocation for which it emitted a startup stop. A committed Stable
+    /// is read from the allocation status row instead.
     ///
     /// Two jointly load-bearing roles:
     ///
     /// 1. **Hook falseness at terminal** — the
-    ///    `next_evaluation_at` hook subtracts BOTH terminal sets from
-    ///    [`Self::observed`]; once an alloc lands here the hook returns
-    ///    no boundary, so a terminal-failed alloc stops requeueing.
+    ///    `next_evaluation_at` hook filters [`Self::observed`] against this
+    ///    set and the hydrated committed `Stable` claim; once an allocation
+    ///    lands in either terminal state the hook returns no boundary.
     /// 2. **Startup-stop/liveness gating** — a live allocation stopped for a
     ///    startup failure remains excluded from liveness until the stop lands
     ///    or a later startup `Pass` announces `Stable`.
@@ -432,17 +426,6 @@ pub struct ServiceLifecycleView {
     /// acted.
     #[serde(default)]
     pub startup_last_acted_run: BTreeMap<(AllocationId, ProbeIdx), ProbeRunSeq>,
-}
-
-impl ServiceLifecycleView {
-    /// Return whether any observed allocation remains unannounced and
-    /// therefore belongs to an active startup window.
-    #[must_use]
-    pub fn has_alloc_mid_startup_window(&self) -> bool {
-        self.observed.iter().any(|alloc| {
-            !self.stable_announced.contains(alloc) && !self.terminal_announced.contains(alloc)
-        })
-    }
 }
 
 /// Default startup deadline used by the reconciler when computing
@@ -548,8 +531,8 @@ impl Reconciler for ServiceLifecycleReconciler {
     }
 
     // ServiceLifecycle's reconcile is one cohesive transition pipeline: it
-    // updates the per-allocation terminal view, orders the backend projection
-    // before startup-failure publication, and then collects liveness actions.
+    // updates per-allocation startup-stop memory, emits the backend projection,
+    // then collects liveness actions.
     // Splitting those transitions solely for the line-count lint would thread
     // mutable view/action state through helpers and obscure that ordering.
     #[allow(clippy::too_many_lines)]
@@ -566,16 +549,15 @@ impl Reconciler for ServiceLifecycleReconciler {
 
         for (alloc_id, fact) in &actual.allocs {
             // A terminal row ends this reconciler's watch. This is before
-            // every other per-allocation branch, including Stable dedup.
+            // every other per-allocation branch, including committed Stable.
             if matches!(fact.state(), AllocState::Failed | AllocState::Terminated) {
                 next_view.terminal_announced.insert(alloc_id.clone());
                 continue;
             }
 
-            if next_view.stable_announced.contains(alloc_id) {
-                // S-SHCP-RECON-02: dedup — Stable already announced
-                // for this alloc; emit nothing further. Falls
-                // through to no-action.
+            if fact.stable_committed {
+                // B1: the committed allocation row is authoritative for
+                // Stable. No View marker is needed to deduplicate emission.
                 continue;
             }
 
@@ -590,15 +572,12 @@ impl Reconciler for ServiceLifecycleReconciler {
             }
 
             // GAP-9 Shape B — record that the reconciler is watching
-            // this alloc's startup window. This is the load-bearing
-            // input for `ServiceLifecycleView::has_alloc_mid_startup_window`
-            // (consulted by this reconciler's pure deadline hook). During
+            // this alloc's startup window. During
             // the active window the branches below emit no action, so this
             // membership supplies the retained scheduling boundary. The
-            // alloc is removed from the "still mid-flight" set the
-            // instant it lands in either terminal set (the hook
-            // subtracts both), so a terminal alloc does NOT keep the
-            // runtime spinning.
+            // hook reads the observed membership together with the hydrated
+            // committed Stable claim and terminal startup-stop set, so a
+            // completed alloc does NOT keep the runtime spinning.
             next_view.observed.insert(alloc_id.clone());
 
             // Branch (a'): Empty-probes opt-out — operator declared
@@ -628,7 +607,6 @@ impl Reconciler for ServiceLifecycleReconciler {
                     alloc_id: alloc_id.clone(),
                     terminal: Some(TerminalCondition::Stable { settled_in_ms, witness }),
                 });
-                next_view.stable_announced.insert(alloc_id.clone());
                 continue;
             }
 
@@ -652,7 +630,6 @@ impl Reconciler for ServiceLifecycleReconciler {
                     alloc_id: alloc_id.clone(),
                     terminal: Some(TerminalCondition::Stable { settled_in_ms, witness }),
                 });
-                next_view.stable_announced.insert(alloc_id.clone());
                 next_view.terminal_announced.remove(alloc_id);
                 stable_this_tick.insert(alloc_id.clone());
                 continue;
@@ -689,11 +666,10 @@ impl Reconciler for ServiceLifecycleReconciler {
         // ---- ADR-0101 — authoritative ServiceBackendRow projection ----
         //
         // ServiceLifecycle owns the complete row: current Running
-        // membership, listener address materialization, and the existing
-        // readiness/terminal-veto policy are composed before comparing with
-        // the observed row. A startup stop remains ahead of backend-row
-        // projection so the stop is the first action for that allocation.
-        actions.extend(service_backend_row_actions(actual, &mut next_view, tick));
+        // membership, listener address materialization, the committed Stable
+        // startup gate, and the readiness rule are composed before comparing
+        // with the observed row. A startup stop remains before this projection.
+        actions.extend(service_backend_row_actions(actual, tick));
 
         // ---- Step 03-02 / Slice 05 — liveness → RestartAllocation ----
         collect_liveness_actions(actual, &stable_this_tick, &mut next_view, &mut actions);
@@ -733,15 +709,12 @@ impl Reconciler for ServiceLifecycleReconciler {
         next_view: &Self::View,
         tick: &TickContext,
     ) -> Option<UnixInstant> {
-        if !next_view.has_alloc_mid_startup_window() {
-            return None;
-        }
         actual
             .allocs
             .values()
             .filter_map(|fact| {
                 if !next_view.observed.contains(&fact.alloc_id)
-                    || next_view.stable_announced.contains(&fact.alloc_id)
+                    || fact.stable_committed
                     || next_view.terminal_announced.contains(&fact.alloc_id)
                     || fact.started_at.is_none()
                     || fact.state() == AllocState::Terminated
@@ -961,7 +934,10 @@ async fn hydrate_service_alloc_facts(
                 })?;
 
         let fact = ServiceAllocFact {
-            stable_committed: false,
+            stable_committed: matches!(
+                row.terminal.as_ref(),
+                Some(TerminalCondition::Stable { .. })
+            ),
             alloc_id: row.alloc_id.clone(),
             phase,
             started_at: row.started_at,
@@ -1094,20 +1070,16 @@ fn liveness_terminate_action(
 /// return the changed row/hydrator-handoff action pairs.
 ///
 /// `healthy` derivation per backend, in priority order:
-/// - alloc has NO readiness probe → `healthy = true` (backward-compat
-///   default — the service serves traffic the instant it is Stable,
-///   S-SHCP-RECON-08b).
-/// - alloc HAS a readiness probe → `healthy = (latest_readiness == Pass
-///   AND producer same_status_runs >= success_threshold)`. Initial state
-///   (no Pass row yet) → `healthy = false`
-///   (S-SHCP-RECON-08c — avoids the inverse race).
+/// - A startup-probed allocation without its own committed Stable is
+///   ineligible.
+/// - Otherwise, no readiness probe → `healthy = true`; a declared readiness
+///   probe uses its latest result and producer streak against the threshold.
+///   Initial state (no Pass row yet) → `healthy = false` (S-SHCP-RECON-08c —
+///   avoids the inverse race). The explicit startup opt-out is eligible at
+///   Running, as its first Running row is its Stable.
 ///
 /// The threshold is read from the latest producer row on every reconcile.
-fn service_backend_row_actions(
-    actual: &ServiceLifecycleState,
-    next_view: &mut ServiceLifecycleView,
-    tick: &TickContext,
-) -> Vec<Action> {
+fn service_backend_row_actions(actual: &ServiceLifecycleState, tick: &TickContext) -> Vec<Action> {
     if actual.service_dataplane.is_empty() {
         return Vec::new();
     }
@@ -1120,8 +1092,7 @@ fn service_backend_row_actions(
         if fact.state() != AllocState::Running {
             continue;
         }
-        let terminal_startup_veto = next_view.terminal_announced.contains(alloc_id);
-        let healthy = compute_backend_healthy(alloc_id, fact, next_view, terminal_startup_veto);
+        let healthy = compute_backend_healthy(fact);
         healthy_by_alloc.insert(alloc_id.clone(), healthy);
     }
 
@@ -1182,29 +1153,10 @@ fn service_backend_row_actions(
     actions
 }
 
-/// Recompute one backend's `healthy` flag from the latest producer row at the
-/// current read. See [`service_backend_row_actions`] for the row projection
-/// contract.
-#[allow(
-    clippy::needless_pass_by_ref_mut,
-    reason = "ADR-0101 pins the existing four-argument helper shape; the retained mutable view parameter is no longer mutated after producer-row threshold relocation"
-)]
-fn compute_backend_healthy(
-    _alloc_id: &AllocationId,
-    fact: &ServiceAllocFact,
-    next_view: &mut ServiceLifecycleView,
-    startup_failed_this_tick: bool,
-) -> bool {
-    if startup_failed_this_tick {
-        return false;
-    }
-    if !fact.startup_probes_empty
-        && !next_view.terminal_announced.is_empty()
-        && !matches!(fact.latest_startup_probe, Some(ProbeStatus::Pass))
-    {
-        // A fresh successor has no startup observation yet. Keep it out of
-        // backend eligibility until its own startup owner reports a result;
-        // a predecessor's terminal decision must not be inherited.
+/// Recompute one backend's `healthy` flag from the hydrated allocation fact.
+/// See [`service_backend_row_actions`] for the row projection contract.
+fn compute_backend_healthy(fact: &ServiceAllocFact) -> bool {
+    if !fact.startup_probes_empty && !fact.stable_committed {
         return false;
     }
     if !fact.has_readiness_probe {
@@ -1311,71 +1263,123 @@ mod tests {
         })]
 
         /// CONTRACT_SHAPE: pure-function.
-        /// ADR-0101 policy complement: the terminal veto dominates readiness;
-        /// otherwise the producer row's current streak is compared directly
-        /// with the threshold, and no-readiness leaves every View input
-        /// untouched.
-        /// This is a pure policy truth table, not a claim that a seeded View is
-        /// reachable. The composed Sim tests establish that separate premise.
+        /// D12/R2-1 backend policy through the public reconciler: a startup-
+        /// probed allocation is eligible only after its own committed Stable;
+        /// opt-out keeps the prior readiness rule. Startup row and terminal-
+        /// membership inputs do not change that policy, and unrelated view
+        /// membership survives the projection.
         #[test]
-        fn backend_policy_preserves_veto_threshold_and_unrelated_view_inputs(
+        fn backend_policy_uses_committed_stable_and_readiness_without_a_veto(
             same_status_runs in prop_oneof![Just(1), Just(u32::MAX), 1_u32..=u32::MAX],
             threshold in prop_oneof![Just(1), Just(u32::MAX), 1_u32..=u32::MAX],
         ) {
             let alloc = AllocationId::new("policy-property").unwrap();
             let unrelated = AllocationId::new("unrelated-policy").unwrap();
-            for enabled in [false, true] {
-                for veto in [false, true] {
-                    for status in [None, Some(ProbeStatus::Pass), Some(ProbeStatus::Fail { last_fail_reason: "refused".into() })] {
-                        let mut fact = ServiceAllocFact {
-                            stable_committed: false,
-                            alloc_id: alloc.clone(),
-                            phase: ServiceAllocPhase::Running(ServiceBackendIdentity {
-                                spiffe: SpiffeId::new("spiffe://overdrive.local/workload/policy/alloc/0").unwrap(),
-                                ip: "192.0.2.10".parse().unwrap(),
-                            }),
-                            started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1))),
-                            latest_startup_probe: None,
-                            latest_startup_probe_observed_at: None, max_attempts: 3,
-                            startup_deadline: Duration::from_secs(30), mechanic_summary: "tcp 0.0.0.0:8080".into(),
-                            inferred: false, startup_probes_empty: false,
-                            latest_readiness_probe: status.clone(), has_readiness_probe: enabled,
-                            readiness_success_threshold: threshold,
-                            latest_liveness_probe: None, has_liveness_probe: false, liveness_failure_threshold: 3,
-                            probe_rows: BTreeMap::new(),
-                        };
-                        let probe_idx = ProbeIdx::new(0);
-                        if let Some(status) = status.clone() {
-                            fact.probe_rows.insert(
-                                (ProbeRole::Readiness, probe_idx),
-                                ProbeResultRow {
-                                    alloc_id: alloc.clone(),
-                                    probe_idx,
-                                    role: ProbeRole::Readiness,
-                                    status,
-                                    last_observed_at_unix_ms: 1_000,
-                                    inferred: false,
-                                    run_seq: ProbeRunSeq::FIRST,
-                                    same_status_runs: SameStatusRuns::new(same_status_runs)
-                                        .expect("generated streak is non-zero"),
-                                },
-                            );
+            let service_id = ServiceId::new(42).unwrap();
+            let identity = ServiceDataplaneIdentity {
+                port: NonZeroU16::new(8080).unwrap(),
+                protocol: Proto::Tcp,
+                vip: ServiceVip::new("10.0.0.42".parse().unwrap()).unwrap(),
+                writer: NodeId::new("policy-writer").unwrap(),
+            };
+            let tick = TickContext {
+                now: Instant::now(),
+                now_unix: UnixInstant::from_unix_duration(Duration::from_secs(2)),
+                tick: 2,
+                deadline: Instant::now() + Duration::from_secs(1),
+            };
+            let startup_rows = [
+                None,
+                Some(ProbeStatus::Pass),
+                Some(ProbeStatus::Fail { last_fail_reason: "startup refused".into() }),
+            ];
+            let readiness_rows = [
+                None,
+                Some(ProbeStatus::Pass),
+                Some(ProbeStatus::Fail { last_fail_reason: "readiness refused".into() }),
+            ];
+            for opt_out in [false, true] {
+                for committed in [false, true] {
+                    for enabled in [false, true] {
+                        for own_announced in [false, true] {
+                            for unrelated_announced in [false, true] {
+                                for startup in &startup_rows {
+                                    for readiness in &readiness_rows {
+                                        let mut fact = ServiceAllocFact {
+                                            stable_committed: committed,
+                                            alloc_id: alloc.clone(),
+                                            phase: ServiceAllocPhase::Running(ServiceBackendIdentity {
+                                                spiffe: SpiffeId::new("spiffe://overdrive.local/workload/policy/alloc/0").unwrap(),
+                                                ip: "192.0.2.10".parse().unwrap(),
+                                            }),
+                                            started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1))),
+                                            latest_startup_probe: startup.clone(),
+                                            latest_startup_probe_observed_at: None,
+                                            max_attempts: 3,
+                                            startup_deadline: Duration::from_secs(30),
+                                            mechanic_summary: "tcp 0.0.0.0:8080".into(),
+                                            inferred: false,
+                                            startup_probes_empty: opt_out,
+                                            latest_readiness_probe: readiness.clone(),
+                                            has_readiness_probe: enabled,
+                                            readiness_success_threshold: threshold,
+                                            latest_liveness_probe: None,
+                                            has_liveness_probe: false,
+                                            liveness_failure_threshold: 3,
+                                            probe_rows: BTreeMap::new(),
+                                        };
+                                        let probe_idx = ProbeIdx::new(0);
+                                        if let Some(status) = readiness.clone() {
+                                            fact.probe_rows.insert(
+                                                (ProbeRole::Readiness, probe_idx),
+                                                ProbeResultRow {
+                                                    alloc_id: alloc.clone(),
+                                                    probe_idx,
+                                                    role: ProbeRole::Readiness,
+                                                    status,
+                                                    last_observed_at_unix_ms: 1_000,
+                                                    inferred: false,
+                                                    run_seq: ProbeRunSeq::FIRST,
+                                                    same_status_runs: SameStatusRuns::new(same_status_runs)
+                                                        .expect("generated streak is non-zero"),
+                                                },
+                                            );
+                                        }
+                                        let state = ServiceLifecycleState {
+                                            allocs: BTreeMap::from([(alloc.clone(), fact)]),
+                                            service_dataplane: BTreeMap::from([(service_id, identity.clone())]),
+                                            observed_backend_rows: BTreeMap::new(),
+                                        };
+                                        let mut view = ServiceLifecycleView::default();
+                                        view.observed.insert(alloc.clone());
+                                        if own_announced {
+                                            view.terminal_announced.insert(alloc.clone());
+                                        }
+                                        if unrelated_announced {
+                                            view.terminal_announced.insert(unrelated.clone());
+                                        }
+                                        let (actions, next_view) = ServiceLifecycleReconciler::new()
+                                            .reconcile(&state, &state, &view, &tick);
+                                        let row = actions.iter().find_map(|action| match action {
+                                            Action::WriteServiceBackendRow { row, .. } => Some(row),
+                                            _ => None,
+                                        }).expect("backend projection is written from an empty observation");
+                                        let readiness_passed = matches!(readiness, Some(ProbeStatus::Pass));
+                                        let expected_healthy = (opt_out || committed)
+                                            && (!enabled || (readiness_passed && same_status_runs >= threshold));
+                                        prop_assert_eq!(row.backends.len(), 1);
+                                        prop_assert_eq!(row.backends[0].healthy, expected_healthy);
+                                        prop_assert_eq!(next_view.observed, view.observed);
+                                        prop_assert_eq!(next_view.liveness_last_acted_run, view.liveness_last_acted_run);
+                                        prop_assert_eq!(next_view.startup_last_acted_run, view.startup_last_acted_run);
+                                        prop_assert_eq!(
+                                            next_view.terminal_announced.contains(&unrelated),
+                                            unrelated_announced,
+                                        );
+                                    }
+                                }
+                            }
                         }
-                        let mut actual = ServiceLifecycleView::default();
-                        actual.terminal_announced.insert(unrelated.clone());
-                        actual.stable_announced.insert(unrelated.clone());
-                        actual.observed.insert(alloc.clone());
-                        let expected = actual.clone();
-                        let passes = matches!(status, Some(ProbeStatus::Pass));
-                        let startup_gate_blocks = !fact.startup_probes_empty
-                            && !expected.terminal_announced.is_empty()
-                            && !matches!(fact.latest_startup_probe, Some(ProbeStatus::Pass));
-                        let expected_healthy =
-                            !startup_gate_blocks && !veto
-                                && (!enabled || (passes && same_status_runs >= threshold));
-                        let healthy = compute_backend_healthy(&alloc, &fact, &mut actual, veto);
-                        prop_assert_eq!(healthy, expected_healthy);
-                        prop_assert_eq!(actual, expected);
                     }
                 }
             }

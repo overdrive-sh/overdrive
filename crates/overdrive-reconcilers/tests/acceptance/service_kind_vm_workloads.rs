@@ -140,8 +140,8 @@ fn service_dataplane() -> ServiceDataplaneIdentity {
 }
 
 /// S-SVM-18 — Beacon/driver start commits Running before probe registration.
-/// A closed guest startup port leaves Running intact and only the existing
-/// startup-attempt/deadline path can produce `StartupProbeFailed`.
+/// A closed guest startup port leaves Running intact until the startup gate
+/// emits a restartable `Stopped { StartupProbe }` action.
 /// CONTRACT_SHAPE: unbounded-preservation.
 /// Outcome anchor: DISCUSS Elevator Pitch.
 #[test]
@@ -169,31 +169,24 @@ fn vm_startup_failure_leaves_running_owned_by_beacon_and_fails_only_startup() {
     );
 
     assert_eq!(actual.allocs[&alloc_id].state(), AllocState::Running);
-    assert_eq!(actions.len(), 1, "startup failure must emit only its existing terminal action");
+    assert_eq!(actions.len(), 1, "startup failure must emit only its stop action");
     assert!(matches!(
         &actions[0],
-        Action::FinalizeFailed {
+        Action::StopAllocation {
             alloc_id: action_alloc_id,
-            terminal: Some(TerminalCondition::ServiceFailed {
-                reason: ServiceFailureReason::StartupProbeFailed {
-                    probe_idx: 0,
-                    last_fail,
-                    attempts: 1,
-                },
-            }),
-        } if action_alloc_id == &alloc_id && last_fail == "guest TCP port 18081 refused"
+            terminal: Some(TerminalCondition::Stopped { by: StoppedBy::StartupProbe }),
+        } if action_alloc_id == &alloc_id
     ));
     assert!(next_view.terminal_announced.contains(&alloc_id));
-    assert!(!next_view.stable_announced.contains(&alloc_id));
+    assert!(next_view.observed.contains(&alloc_id));
 }
 
-/// ADR-0096 — a deciding StartupProbeFailed writes the existing unhealthy
-/// backend row before its existing terminal, while a non-terminal no-readiness
-/// allocation remains eligible and a late observation cannot revive the
-/// terminal allocation.
+/// D12/R2-1 — a startup-probed allocation without committed Stable is
+/// ineligible, whether its startup stop is due or it is still within the
+/// window. A later unchanged probe row does not revive eligibility.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-fn startup_probe_failure_vetoes_backend_eligibility_before_terminal_publication() {
+fn startup_probed_running_allocations_are_unhealthy_before_stable() {
     let alloc_id = alloc_id();
     let mut actual = state_for(running_fact(
         alloc_id.clone(),
@@ -221,14 +214,12 @@ fn startup_probe_failure_vetoes_backend_eligibility_before_terminal_publication(
     assert!(matches!(
         &actions[..],
         [
+            Action::StopAllocation {
+                alloc_id: action_alloc_id,
+                terminal: Some(TerminalCondition::Stopped { by: StoppedBy::StartupProbe }),
+            },
             Action::WriteServiceBackendRow { row, .. },
             Action::EnqueueEvaluation { reconciler, target },
-            Action::FinalizeFailed {
-                alloc_id: action_alloc_id,
-                terminal: Some(TerminalCondition::ServiceFailed {
-                    reason: ServiceFailureReason::StartupProbeFailed { .. },
-                }),
-            },
         ] if reconciler.as_str() == "service-map-hydrator"
             && target.as_str() == "service/42"
             && row.backends.len() == 1
@@ -248,10 +239,7 @@ fn startup_probe_failure_vetoes_backend_eligibility_before_terminal_publication(
     }
     let (late_actions, _) =
         ServiceLifecycleReconciler::new().reconcile(&actual, &actual, &next_view, &tick(12));
-    assert!(
-        late_actions.is_empty(),
-        "the persisted unhealthy row remains the current backend projection; a late tick must not re-enable it"
-    );
+    assert!(late_actions.is_empty(), "an unchanged probe row cannot re-enable the backend");
 
     let fresh_alloc = AllocationId::new("alloc-service-vm-e08-1").expect("valid allocation ID");
     let mut fresh = state_for(running_fact(
@@ -278,7 +266,7 @@ fn startup_probe_failure_vetoes_backend_eligibility_before_terminal_publication(
     assert!(matches!(
         &fresh_actions[..],
         [Action::WriteServiceBackendRow { row, .. }, Action::EnqueueEvaluation { reconciler, target }]
-            if row.backends.len() == 1 && row.backends[0].healthy
+            if row.backends.len() == 1 && !row.backends[0].healthy
                 && reconciler.as_str() == "service-map-hydrator" && target.as_str() == "service/42"
     ));
 }
@@ -314,7 +302,7 @@ fn vm_startup_pass_changes_only_service_stable() {
             && witness.mechanic_summary == "tcp 0.0.0.0:18081"
             && !witness.inferred
     ));
-    assert!(next_view.stable_announced.contains(&alloc_id));
+    assert!(next_view.observed.contains(&alloc_id));
     assert!(next_view.terminal_announced.is_empty());
     assert!(next_view.liveness_last_acted_run.is_empty());
 }
@@ -328,6 +316,8 @@ fn vm_readiness_flaps_only_backend_eligibility_and_recovers() {
     let alloc_id = alloc_id();
     let service_id = ServiceId::new(42).expect("service id");
     let mut actual = state_for(running_fact(alloc_id.clone(), ProbeStatus::Pass, 30));
+    // Readiness begins its projection after the separate Stable write lands.
+    actual.allocs.get_mut(&alloc_id).expect("allocation fact").stable_committed = true;
     actual.service_dataplane = BTreeMap::from([(service_id, service_dataplane())]);
     actual.allocs.get_mut(&alloc_id).expect("allocation fact").latest_readiness_probe =
         Some(ProbeStatus::Pass);
@@ -348,9 +338,12 @@ fn vm_readiness_flaps_only_backend_eligibility_and_recovers() {
         reconciler.reconcile(&actual, &actual, &ServiceLifecycleView::default(), &tick(15));
 
     let initial_row = service_backend_row(&initial_actions);
-    assert!(initial_row.backends[0].healthy, "a readiness Pass makes the Running backend eligible");
+    assert!(initial_row.backends[0].healthy, "a committed Stable plus readiness Pass is eligible");
     assert_eq!(actual.allocs[&alloc_id].state(), AllocState::Running);
-    assert!(stable_view.stable_announced.contains(&alloc_id));
+    assert!(!initial_actions.iter().any(|action| matches!(
+        action,
+        Action::FinalizeFailed { .. } | Action::StopAllocation { .. }
+    )));
     assert!(!has_restart(&initial_actions));
     assert_eq!(initial_row.backends.len(), 1);
     assert_eq!(initial_row.service_id, service_id);
@@ -372,7 +365,7 @@ fn vm_readiness_flaps_only_backend_eligibility_and_recovers() {
     assert!(!withdrawn_row.backends[0].healthy, "readiness Fail withdraws eligibility");
     assert_eq!(withdrawn_row.backends[0].alloc, initial_row.backends[0].alloc);
     assert_eq!(actual.allocs[&alloc_id].state(), AllocState::Running);
-    assert!(unready_view.stable_announced.contains(&alloc_id));
+    assert!(actual.allocs[&alloc_id].stable_committed);
     assert!(unready_view.liveness_last_acted_run.is_empty());
     assert!(!has_restart(&withdraw_actions));
     assert!(!withdraw_actions.iter().any(|action| matches!(
@@ -389,7 +382,7 @@ fn vm_readiness_flaps_only_backend_eligibility_and_recovers() {
     assert!(restored_row.backends[0].healthy, "readiness Pass restores eligibility");
     assert_eq!(restored_row.backends[0].alloc, initial_row.backends[0].alloc);
     assert_eq!(actual.allocs[&alloc_id].state(), AllocState::Running);
-    assert!(ready_view.stable_announced.contains(&alloc_id));
+    assert!(actual.allocs[&alloc_id].stable_committed);
     assert!(ready_view.liveness_last_acted_run.is_empty());
     assert!(!has_restart(&restore_actions));
     assert!(!restore_actions.iter().any(|action| matches!(
@@ -509,6 +502,9 @@ fn vm_liveness_threshold_emits_only_the_existing_liveness_stop() {
     )));
 
     let mut observed = actual.clone();
+    // The preceding Stable action has landed on the allocation row before
+    // liveness probe rows can arrive; B1 hydrates this committed claim.
+    observed.allocs.get_mut(&alloc_id).expect("allocation fact").stable_committed = true;
     record_probe_run(
         &mut observed,
         &alloc_id,

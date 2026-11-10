@@ -36,6 +36,14 @@ fn decode(bytes: &[u8]) -> ServiceLifecycleView {
 /// The persisted shape before the startup-stop retry memory landed.
 #[derive(Serialize)]
 struct PersistedViewBeforeStartupRetry {
+    observed: BTreeSet<AllocationId>,
+    terminal_announced: BTreeSet<AllocationId>,
+    liveness_last_acted_run: BTreeMap<(AllocationId, ProbeIdx), ProbeRunSeq>,
+}
+
+/// Only the legacy CBOR payload carries the removed Stable announcement key.
+#[derive(Serialize)]
+struct LegacyPersistedViewWithStableAnnouncement {
     stable_announced: BTreeSet<AllocationId>,
     observed: BTreeSet<AllocationId>,
     terminal_announced: BTreeSet<AllocationId>,
@@ -53,7 +61,6 @@ fn blob_without_startup_last_acted_run_decodes_with_an_empty_map() {
         ProbeRunSeq::new(3).expect("non-zero"),
     )]);
     let persisted = PersistedViewBeforeStartupRetry {
-        stable_announced: BTreeSet::new(),
         observed: BTreeSet::from([alloc.clone()]),
         terminal_announced: BTreeSet::from([alloc]),
         liveness_last_acted_run: live.clone(),
@@ -71,10 +78,9 @@ fn blob_without_startup_last_acted_run_decodes_with_an_empty_map() {
 /// key is ignored: every other field is kept, nothing remains of the key.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER: R2-2 the stable_announced view field is deleted"]
 fn blob_carrying_the_removed_stable_announced_key_is_ignored() {
     let alloc = aid("svc-0");
-    let persisted = PersistedViewBeforeStartupRetry {
+    let persisted = LegacyPersistedViewWithStableAnnouncement {
         stable_announced: BTreeSet::from([alloc.clone()]),
         observed: BTreeSet::from([alloc.clone()]),
         terminal_announced: BTreeSet::new(),

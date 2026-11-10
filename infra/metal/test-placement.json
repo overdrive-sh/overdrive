@@ -6476,16 +6476,7 @@
       "acceptance::service_lifecycle_reconcile_branches::mid_startup_window_false_for_empty_view": {
         "kind": "host-pure"
       },
-      "acceptance::service_lifecycle_reconcile_branches::mid_startup_window_false_when_observed_and_stable": {
-        "kind": "host-pure"
-      },
-      "acceptance::service_lifecycle_reconcile_branches::mid_startup_window_false_when_observed_and_terminal_failed": {
-        "kind": "host-pure"
-      },
       "acceptance::service_lifecycle_reconcile_branches::mid_startup_window_true_when_any_observed_alloc_still_mid_flight": {
-        "kind": "host-pure"
-      },
-      "acceptance::service_lifecycle_reconcile_branches::mid_startup_window_true_when_observed_not_terminal": {
         "kind": "host-pure"
       },
       "acceptance::service_lifecycle_reconcile_branches::pending_alloc_excluded_from_backend_row": {
@@ -6524,7 +6515,7 @@
       "acceptance::service_lifecycle_reconcile_branches::s_roh_a_01_liveness_threshold_emits_stop_allocation": {
         "kind": "host-pure"
       },
-      "acceptance::service_lifecycle_reconcile_branches::stable_announced_suppresses_liveness_restart_same_tick": {
+      "acceptance::service_lifecycle_reconcile_branches::stable_this_tick_suppresses_liveness_restart_same_tick": {
         "kind": "host-pure"
       },
       "acceptance::service_lifecycle_reconcile_branches::stable_dedup_skips_already_announced_alloc": {
@@ -10914,7 +10905,7 @@
       "gateway_svid_lifecycle::acceptance::retry_memory_suppresses_an_early_issue_and_reemits_at_the_exact_deadline": {
         "kind": "host-pure"
       },
-      "service_lifecycle::tests::backend_policy_preserves_veto_threshold_and_unrelated_view_inputs": {
+      "service_lifecycle::tests::backend_policy_uses_committed_stable_and_readiness_without_a_veto": {
         "kind": "host-pure"
       },
       "service_lifecycle::tests::guest_listeners_summary_names_the_declared_listeners_in_declaration_order": {
@@ -11060,7 +11051,7 @@
       "acceptance::service_alloc_phase_totality::not_running_state_excludes_running_and_preserves_every_other_state": {
         "kind": "host-pure"
       },
-      "acceptance::service_kind_vm_workloads::startup_probe_failure_vetoes_backend_eligibility_before_terminal_publication": {
+      "acceptance::service_kind_vm_workloads::startup_probed_running_allocations_are_unhealthy_before_stable": {
         "kind": "host-pure"
       },
       "acceptance::service_kind_vm_workloads::vm_liveness_threshold_emits_only_the_existing_liveness_stop": {

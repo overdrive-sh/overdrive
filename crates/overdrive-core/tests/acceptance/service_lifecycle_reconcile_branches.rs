@@ -6,7 +6,7 @@
 //!
 //! A. **Stable branch** — `state == Running && Some(Pass)` ⇒
 //!    one `Action::FinalizeFailed { Stable { settled_in_ms, witness } }`
-//!    AND alloc inserted into `next_view.stable_announced`.
+//!    while the committed row remains the authority for re-announcement.
 //! B. **D6 terminal rows** — a `Failed` or `Terminated` fact emits no action
 //!    and joins `terminal_announced`; S-56 covers the state/startup grid.
 //! C. **StartupProbeFailed branch** — `attempts >= max_attempts`
@@ -169,13 +169,13 @@ fn tick_at_ms(now_unix_ms: u64) -> TickContext {
 // =====================================================================
 
 /// Stable branch fires when state == Running AND latest_startup_probe
-/// == Some(Pass) AND alloc not already in stable_announced.
+/// == Some(Pass) AND the row has no committed Stable terminal.
 ///
 /// Kills mutations:
 ///   - line 256:27 `replace == with != in fact.state == AllocState::Running`
 ///   - line 257:17 `replace && with || in <Running condition> && matches!(Pass)`
 ///   - line 268 settled_in_ms = now - started_at (also exercises line 330)
-///   - line 270 next_view.stable_announced.insert(alloc_id)
+///   - B1: a missing committed Stable permits re-announcement
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
@@ -211,10 +211,7 @@ fn stable_fires_when_running_and_startup_probe_pass() {
         }
         other => panic!("expected Stable, got {other:?}"),
     }
-    assert!(
-        next_view.stable_announced.contains(&aid("alloc-svc-0")),
-        "alloc must be inserted into stable_announced after emission"
-    );
+    assert!(next_view.observed.contains(&aid("alloc-svc-0")));
 }
 
 /// Stable does NOT fire when state != Running (kills `==` → `!=` mutant
@@ -241,10 +238,7 @@ fn stable_does_not_fire_when_state_is_not_running() {
         r.reconcile(&ServiceLifecycleState::default(), &actual, &view, &tick);
 
     assert!(actions.is_empty(), "no Stable emission for non-Running state; got {actions:?}");
-    assert!(
-        !next_view.stable_announced.contains(&aid("alloc-svc-0")),
-        "alloc must NOT be inserted into stable_announced when Stable did not fire"
-    );
+    assert!(next_view.observed.contains(&aid("alloc-svc-0")), "the pending row stays observed");
 }
 
 /// Stable does NOT fire when state == Running but probe is Fail (kills
@@ -273,7 +267,7 @@ fn stable_does_not_fire_when_running_but_probe_is_fail() {
         actions.is_empty(),
         "Running + probe Fail must NOT fire Stable (kills && → || mutant); got {actions:?}"
     );
-    assert!(!next_view.stable_announced.contains(&aid("alloc-svc-0")));
+    assert!(next_view.observed.contains(&aid("alloc-svc-0")));
 }
 
 /// Stable does NOT fire when Running but probe is None (also kills
@@ -292,7 +286,7 @@ fn stable_does_not_fire_when_running_but_no_probe_observed() {
     assert!(actions.is_empty());
 }
 
-/// Dedup: when alloc already in `stable_announced`, no Stable re-emission.
+/// B1/R2-2: a committed Stable row needs no re-announcement.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn stable_dedup_skips_already_announced_alloc() {
@@ -305,15 +299,15 @@ fn stable_dedup_skips_already_announced_alloc() {
         Duration::from_secs(60),
     );
     let actual = one_alloc_state(f);
-    let mut announced = BTreeSet::new();
-    announced.insert(aid("alloc-svc-0"));
-    let view = ServiceLifecycleView { stable_announced: announced, ..Default::default() };
+    let view = ServiceLifecycleView::default();
+    let mut actual = actual;
+    actual.allocs.get_mut(&aid("alloc-svc-0")).expect("allocation fact").stable_committed = true;
     let tick = tick_at_ms(5_000);
 
     let r = ServiceLifecycleReconciler::new();
     let (actions, _next_view) =
         r.reconcile(&ServiceLifecycleState::default(), &actual, &view, &tick);
-    assert!(actions.is_empty(), "Stable already announced; must not re-emit. got {actions:?}");
+    assert!(actions.is_empty(), "committed Stable must not re-emit; got {actions:?}");
 }
 
 // =====================================================================
@@ -345,7 +339,7 @@ fn empty_probes_fact(
 
 /// Branch (a') fires when `startup_probes_empty == true` AND
 /// `state == Running` ⇒ one `Stable { witness.mechanic_summary ==
-/// "none (opted out)" }` AND alloc inserted into `stable_announced`.
+/// "none (opted out)" }` while the row has no committed Stable.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn empty_probes_opt_out_fires_stable_when_running() {
@@ -376,10 +370,7 @@ fn empty_probes_opt_out_fires_stable_when_running() {
         }
         other => panic!("expected opt-out Stable, got {other:?}"),
     }
-    assert!(
-        next_view.stable_announced.contains(&aid("alloc-svc-optout")),
-        "opt-out alloc must be inserted into stable_announced after emission"
-    );
+    assert!(next_view.observed.contains(&aid("alloc-svc-optout")));
 }
 
 /// Branch (a') does NOT fire when `startup_probes_empty == true` but
@@ -404,10 +395,7 @@ fn empty_probes_opt_out_does_not_fire_when_state_is_not_running() {
         "opt-out Stable must NOT fire for non-Running state (kills == Running → != Running \
          mutant at line 405); got {actions:?}"
     );
-    assert!(
-        !next_view.stable_announced.contains(&aid("alloc-svc-optout")),
-        "alloc must NOT be inserted into stable_announced when branch (a') did not fire"
-    );
+    assert!(next_view.observed.contains(&aid("alloc-svc-optout")));
 }
 
 // =====================================================================
@@ -589,96 +577,58 @@ fn startup_probe_failed_does_not_fire_with_only_two_of_three_gates() {
 // The settled_in_ms surfaces inside Stable's TerminalCondition.
 
 // =====================================================================
-// Category E — GAP-9 Shape B: has_alloc_mid_startup_window predicate
+// Category E — GAP-9 Shape B: committed-row startup-window scheduling
 // =====================================================================
-//
-// The runtime's `view_has_backoff_pending` ServiceLifecycle arm
-// delegates to `ServiceLifecycleView::has_alloc_mid_startup_window`.
-// The load-bearing contract: TRUE while an observed alloc is
-// mid-startup-window (observed, not yet terminal); FALSE the instant
-// the alloc reaches ANY terminal (Stable OR ServiceFailed). Get this
-// wrong and GAP-9's fix trades a dead reconciler for a spinning one.
-//
-// This is a pure predicate over the View — the canonical port-to-port
-// shape for a domain function (the method signature IS its driving
-// port).
+// The former View-only predicate was removed by B1/R2-2. Reconcile and
+// next_evaluation_at below prove the active and closed window outcomes.
 
-/// Empty view (no observed allocs) is NOT mid-startup-window — the
-/// busy-loop-avoidance baseline: a default view (e.g. a Job-kind
-/// enqueue that hydrated an empty Service state) must return false so
-/// the runtime does not re-enqueue.
+/// An empty Service state and View schedule no startup boundary, so the
+/// runtime does not re-enqueue a no-work evaluation.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn mid_startup_window_false_for_empty_view() {
+    let state = ServiceLifecycleState::default();
     let view = ServiceLifecycleView::default();
-    assert!(
-        !view.has_alloc_mid_startup_window(),
-        "default/empty view must NOT be mid-startup-window (no observed alloc)"
+    let tick = tick_at_ms(2_000);
+    assert_eq!(
+        ServiceLifecycleReconciler::new().next_evaluation_at(&state, &state, &view, &tick),
+        None
     );
 }
 
-/// Observed-but-not-terminal alloc IS mid-startup-window → predicate
-/// true → runtime self-re-enqueues. This is the active startup window:
-/// the reconciler has recorded the alloc in `observed` but has not yet
-/// announced Stable or a failure terminal.
-/// CONTRACT_SHAPE: bounded-change.
-#[test]
-fn mid_startup_window_true_when_observed_not_terminal() {
-    let mut view = ServiceLifecycleView::default();
-    view.observed.insert(aid("alloc-svc-0"));
-    assert!(
-        view.has_alloc_mid_startup_window(),
-        "observed alloc not in any terminal set must be mid-startup-window (true)"
-    );
-}
-
-/// The instant the alloc reaches Stable (recorded in
-/// `stable_announced`), the predicate flips to false — the runtime
-/// stops re-enqueueing. Kills a mutant that ignores `stable_announced`
-/// in the subtraction.
-/// CONTRACT_SHAPE: bounded-change.
-#[test]
-fn mid_startup_window_false_when_observed_and_stable() {
-    let mut view = ServiceLifecycleView::default();
-    view.observed.insert(aid("alloc-svc-0"));
-    view.stable_announced.insert(aid("alloc-svc-0"));
-    assert!(
-        !view.has_alloc_mid_startup_window(),
-        "alloc in stable_announced is terminal → NOT mid-startup-window (no busy-loop)"
-    );
-}
-
-/// The instant the alloc reaches a non-Stable terminal (recorded in
-/// `terminal_announced`), the predicate flips to false. Kills a mutant
-/// that ignores `terminal_announced` in the subtraction — without it a
-/// terminal allocation would keep the runtime's startup window open.
-/// CONTRACT_SHAPE: bounded-change.
-#[test]
-fn mid_startup_window_false_when_observed_and_terminal_failed() {
-    let mut view = ServiceLifecycleView::default();
-    view.observed.insert(aid("alloc-svc-0"));
-    view.terminal_announced.insert(aid("alloc-svc-0"));
-    assert!(
-        !view.has_alloc_mid_startup_window(),
-        "alloc in terminal_announced is terminal → NOT mid-startup-window (no busy-loop)"
-    );
-}
-
-/// Mixed populations: one alloc still mid-flight, one terminal → the
-/// predicate is true (the ANY semantics: as long as ONE observed alloc
-/// is non-terminal, the runtime must keep re-enqueueing). Kills a
-/// mutant that flips `any` → `all`.
+/// A committed Stable row with a late startup Fail has no startup boundary;
+/// another observed Running allocation still schedules its own deadline.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn mid_startup_window_true_when_any_observed_alloc_still_mid_flight() {
-    let mut view = ServiceLifecycleView::default();
-    view.observed.insert(aid("alloc-svc-0"));
-    view.observed.insert(aid("alloc-svc-1"));
-    // alloc-0 reached Stable; alloc-1 still mid-flight.
-    view.stable_announced.insert(aid("alloc-svc-0"));
-    assert!(
-        view.has_alloc_mid_startup_window(),
-        "ANY mid-flight observed alloc keeps the predicate true (kills any→all mutant)"
+    let mut committed = fact(
+        "alloc-svc-0",
+        AllocState::Running,
+        1_000,
+        Some(ProbeStatus::Fail { last_fail_reason: "late result".to_string() }),
+        30,
+        Duration::from_secs(60),
+    );
+    committed.stable_committed = true;
+    let waiting =
+        fact("alloc-svc-1", AllocState::Running, 2_000, None, 30, Duration::from_secs(60));
+    let actual = ServiceLifecycleState {
+        allocs: BTreeMap::from([(aid("alloc-svc-0"), committed), (aid("alloc-svc-1"), waiting)]),
+        ..ServiceLifecycleState::default()
+    };
+    let view = ServiceLifecycleView {
+        observed: BTreeSet::from([aid("alloc-svc-0"), aid("alloc-svc-1")]),
+        ..ServiceLifecycleView::default()
+    };
+    assert_eq!(
+        ServiceLifecycleReconciler::new().next_evaluation_at(
+            &ServiceLifecycleState::default(),
+            &actual,
+            &view,
+            &tick_at_ms(3_000),
+        ),
+        Some(UnixInstant::from_unix_duration(Duration::from_secs(62))),
+        "only the still-waiting allocation retains its deadline"
     );
 }
 
@@ -706,9 +656,10 @@ fn reconcile_records_observed_for_mid_window_alloc_and_predicate_is_true() {
         next_view.observed.contains(&aid("alloc-svc-9")),
         "reconcile must record the observed alloc so Shape B can keep it alive"
     );
-    assert!(
-        next_view.has_alloc_mid_startup_window(),
-        "next_view from a mid-window tick must be mid-startup-window (runtime re-enqueues)"
+    assert_eq!(
+        r.next_evaluation_at(&ServiceLifecycleState::default(), &actual, &next_view, &tick),
+        Some(UnixInstant::from_unix_duration(Duration::from_secs(61))),
+        "the active window retains its startup-deadline evaluation"
     );
 }
 
@@ -761,9 +712,10 @@ fn reconcile_startup_stop_clears_mid_window_and_dedups() {
         next_view.terminal_announced.contains(&aid("alloc-svc-8")),
         "terminal verdict must be recorded in terminal_announced"
     );
-    assert!(
-        !next_view.has_alloc_mid_startup_window(),
-        "a terminal-failed alloc must NOT keep the runtime spinning (predicate false)"
+    assert_eq!(
+        r.next_evaluation_at(&ServiceLifecycleState::default(), &actual, &next_view, &tick),
+        None,
+        "the startup stop closes the deadline evaluation"
     );
 
     // Dedup: a second reconcile against the same (now-terminal) view
@@ -783,7 +735,7 @@ fn reconcile_startup_stop_clears_mid_window_and_dedups() {
 /// acknowledges terminal-set membership regardless of start history.
 ///
 /// Without that membership the alloc stays in `observed` but in neither
-/// terminal set, so `has_alloc_mid_startup_window` stays true forever.
+/// terminal set, so a stale startup boundary could be scheduled forever.
 /// Once WorkloadLifecycle finalises the alloc and the action shim
 /// archives the observation row, the alloc vanishes from `actual.allocs`
 /// — the reconcile loop can no longer re-touch it to clear the stale
@@ -815,9 +767,10 @@ fn pre_running_failed_alloc_is_terminal_and_not_mid_startup_window() {
         next_view.terminal_announced.contains(&aid("alloc-svc-prefail")),
         "pre-Running Failed alloc must be recorded in terminal_announced"
     );
-    assert!(
-        !next_view.has_alloc_mid_startup_window(),
-        "a pre-Running Failed alloc must NOT keep the runtime spinning (predicate false)"
+    assert_eq!(
+        r.next_evaluation_at(&ServiceLifecycleState::default(), &actual, &next_view, &tick),
+        None,
+        "a pre-Running Failed allocation schedules no startup boundary"
     );
 }
 
@@ -882,10 +835,6 @@ fn terminal_allocation_of_any_start_history_closes_its_mid_startup_window() {
                         next_view.terminal_announced.contains(&alloc),
                         "{case}: joins terminal_announced"
                     );
-                    assert!(
-                        !next_view.has_alloc_mid_startup_window(),
-                        "{case}: the mid-startup window is closed"
-                    );
                     assert_eq!(
                         r.next_evaluation_at(
                             &ServiceLifecycleState::default(),
@@ -922,7 +871,11 @@ fn terminal_allocation_of_any_start_history_closes_its_mid_startup_window() {
         r.reconcile(&ServiceLifecycleState::default(), &running, &view, &tick);
     assert!(actions.is_empty(), "control: no gate met, no action; got {actions:?}");
     assert!(!next_view.terminal_announced.contains(&alloc), "control: Running is not terminal");
-    assert!(next_view.has_alloc_mid_startup_window(), "control: the window stays open");
+    assert_eq!(
+        r.next_evaluation_at(&ServiceLifecycleState::default(), &running, &next_view, &tick),
+        Some(UnixInstant::from_unix_duration(Duration::from_secs(61))),
+        "control: the running allocation retains its startup boundary"
+    );
 }
 
 proptest! {
@@ -1614,7 +1567,7 @@ fn readiness_branch_emits_write_when_healthy_flag_changes() {
 // `RestartAllocation`), so these assert the SUPPRESSION of that
 // `StopAllocation` when the SAME tick already announced a stable/startup
 // terminal, and the RESUME on a later tick (the transient `stable_this_
-// tick` guard must not persist via the durable `stable_announced` set).
+// tick` guard must not persist after the committed Stable row).
 // -------------------------------------------------------------------
 
 /// D7: a Running alloc that fires the startup stop on the startup loop
@@ -1697,14 +1650,14 @@ fn startup_probe_failure_suppresses_liveness_stop_same_tick() {
 }
 
 /// A Running alloc that reaches `Stable` on the startup loop (recorded in
-/// `stable_announced` AND `stable_this_tick`) AND has a liveness streak
+/// `stable_this_tick`) AND has a liveness streak
 /// tripping the threshold on the SAME tick must emit ONLY the Stable
 /// terminal — the liveness loop skips it via `stable_this_tick`. Without
 /// the guard, both `FinalizeFailed { Stable }` AND `StopAllocation` land
 /// for one alloc.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-fn stable_announced_suppresses_liveness_restart_same_tick() {
+fn stable_this_tick_suppresses_liveness_restart_same_tick() {
     let id = "svc-stable-liveness-0";
     let f = ServiceAllocFact {
         stable_committed: false,
@@ -1754,22 +1707,20 @@ fn stable_announced_suppresses_liveness_restart_same_tick() {
         "liveness must NOT StopAllocation an alloc announced Stable this tick; got {actions:?}"
     );
     assert_eq!(actions.len(), 1, "exactly one action total (Stable only); got {actions:?}");
-    assert!(next.stable_announced.contains(&aid(id)), "alloc recorded in stable_announced");
+    assert!(next.observed.contains(&aid(id)), "the allocation remains observed");
 }
 
-/// Once an alloc entered `stable_announced` on a PRIOR tick, the same-tick
+/// Once the alloc's Stable row committed on a PRIOR tick, the same-tick
 /// suppression must NOT persist: on a later tick the liveness loop resumes
 /// and emits `StopAllocation { Stopped { by: LivenessProbe } }` when the
 /// threshold is met. The suppression is keyed on the transient
-/// `stable_this_tick` set, NOT the durable `stable_announced` set — a
-/// regression that consulted `stable_announced` here would suppress
-/// liveness for the alloc's entire life.
+/// `stable_this_tick` set; the committed row permits liveness on later ticks.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn liveness_resumes_after_prior_tick_stable_announcement() {
     let id = "svc-post-stable-0";
     let f = ServiceAllocFact {
-        stable_committed: false,
+        stable_committed: true,
         latest_liveness_probe: Some(ProbeStatus::Fail {
             last_fail_reason: "liveness refused".to_string(),
         }),
@@ -1779,12 +1730,12 @@ fn liveness_resumes_after_prior_tick_stable_announcement() {
             id,
             AllocState::Running,
             1_000,
-            Some(ProbeStatus::Pass), // Stable was already announced on a prior tick
+            Some(ProbeStatus::Pass), // Stable committed on a prior tick
             u32::MAX,
             Duration::from_secs(60),
         )
     };
-    // Prior tick already announced Stable (durable set) + observed.
+    // Prior tick committed Stable on the row; the view merely records observation.
     let mut actual = one_alloc_state(f);
     put_probe_row(
         &mut actual,
@@ -1795,14 +1746,13 @@ fn liveness_resumes_after_prior_tick_stable_announcement() {
         3,
     );
     let mut view = ServiceLifecycleView::default();
-    view.stable_announced.insert(aid(id));
     view.observed.insert(aid(id));
 
     let recon = ServiceLifecycleReconciler::new();
     let (actions, _next) =
         recon.reconcile(&ServiceLifecycleState::default(), &actual, &view, &tick_at_ms(20_000));
 
-    // Startup loop skips (already in stable_announced — correct dedup);
+    // Startup loop skips the committed Stable row;
     // liveness loop MUST resume and terminate on the met threshold.
     let stops: Vec<_> =
         actions.iter().filter(|a| matches!(a, Action::StopAllocation { .. })).collect();
@@ -1810,8 +1760,7 @@ fn liveness_resumes_after_prior_tick_stable_announcement() {
         stops.len(),
         1,
         "liveness must emit StopAllocation for a post-Stable alloc when threshold is met \
-         (kills a regression that keys same-tick suppression on the durable stable_announced \
-         set); got {actions:?}",
+         (the prior tick's transient guard must not persist); got {actions:?}",
     );
     match stops[0] {
         Action::StopAllocation { terminal, .. } => {
@@ -1824,7 +1773,7 @@ fn liveness_resumes_after_prior_tick_stable_announcement() {
         other => panic!("expected StopAllocation, got {other:?}"),
     }
 
-    // No Stable re-emission (the startup loop's stable_announced dedup is correct).
+    // No Stable re-emission from the committed row.
     let stable = actions
         .iter()
         .filter(|a| {

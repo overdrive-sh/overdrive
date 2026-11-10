@@ -442,12 +442,12 @@ fn fact_with_probes(alloc_id: AllocationId, started_at_unix_ms: u64) -> ServiceA
 proptest! {
     /// S-SHCP-RECON-05 — for arbitrary `ServiceAllocFact` with
     /// `startup_probes_empty == true` + `state == Running` + view
-    /// without `alloc_id` in `stable_announced`, reconcile output
+    /// without a committed Stable row, reconcile output
     /// contains exactly one `Action::FinalizeFailed` with
     /// `TerminalCondition::Stable { settled_in_ms, witness:
     /// ProbeWitness { probe_idx: 0, role: "startup", mechanic_summary:
     /// "none (opted out)", inferred: false } }`, and
-    /// `next_view.stable_announced` contains `alloc_id`.
+    /// keeps the allocation in its observed watch until the row commits.
     /// CONTRACT_SHAPE: bounded-change.
     #[test]
     fn opt_out_stable_emission(
@@ -482,7 +482,7 @@ proptest! {
                 other
             ),
         }
-        prop_assert!(next_view.stable_announced.contains(&aid));
+        prop_assert!(next_view.observed.contains(&aid));
     }
 }
 
@@ -529,13 +529,13 @@ fn opt_out_idempotent_no_double_emit() {
         service_dataplane: BTreeMap::new(),
         observed_backend_rows: BTreeMap::new(),
     };
-    let mut view = ServiceLifecycleView::default();
-    view.stable_announced.insert(aid.clone());
+    let view = ServiceLifecycleView::default();
+    let mut state = state;
+    state.allocs.get_mut(&aid).expect("opt-out fact").stable_committed = true;
     let reconciler = ServiceLifecycleReconciler::new();
     let tick = tick_at(100);
 
-    // S-SHCP-RECON-06: re-running with stable_announced already
-    // containing alloc_id must emit ZERO new actions.
+    // S-SHCP-RECON-06 (B1): a committed Stable row emits ZERO new actions.
     let (actions, _) = reconciler.reconcile(&state, &state, &view, &tick);
     assert!(actions.is_empty(), "opt-out branch must be idempotent; got: {actions:?}");
 }

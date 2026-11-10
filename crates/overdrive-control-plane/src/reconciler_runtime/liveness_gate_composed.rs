@@ -139,7 +139,6 @@ async fn opt_out_service_starts_liveness_at_its_first_stable() {
 /// liveness is live, and a committed `Stable` is not emitted again.
 #[tokio::test(flavor = "current_thread")]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: B1 and R2-2 a lost Stable is re-announced; no view marker"]
 async fn a_lost_stable_write_is_announced_again_until_it_commits() {
     let mut w = LivenessWorld::compose(ProbeSet::ReadinessAndLiveness).await;
     let mut events = w.state.lifecycle_events.subscribe();
@@ -165,7 +164,6 @@ async fn a_lost_stable_write_is_announced_again_until_it_commits() {
 /// that could suppress the re-announcement.
 #[tokio::test(flavor = "current_thread")]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: B1 and R2-2 a lost Stable is re-announced; no view marker"]
 async fn a_lost_stable_write_is_announced_again_after_a_control_plane_restart() {
     let mut w = LivenessWorld::compose(ProbeSet::ReadinessAndLiveness).await;
     w.fail_next_write();

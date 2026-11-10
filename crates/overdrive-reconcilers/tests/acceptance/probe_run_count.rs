@@ -52,7 +52,8 @@ fn decode(bytes: &[u8]) -> ServiceLifecycleView {
 }
 
 /// A view persisted before PROBE-RUN-COUNT decodes: the removed streak
-/// fields are dropped, the announcement sets are kept, and
+/// fields and the legacy Stable announcement key are dropped, while
+/// the terminal and observed sets are kept, and
 /// `liveness_last_acted_run` starts empty — so no reconciler-side streak
 /// survives the upgrade to be miscounted against the producer's rows.
 /// CONTRACT_SHAPE: pure-function.
@@ -73,7 +74,6 @@ fn persisted_view_with_streak_fields_decodes_without_them() {
     let decoded = decode(&cbor(&persisted));
 
     let expected = ServiceLifecycleView {
-        stable_announced: BTreeSet::from([alloc.clone()]),
         observed: BTreeSet::from([alloc]),
         ..ServiceLifecycleView::default()
     };

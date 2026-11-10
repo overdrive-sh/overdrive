@@ -43,6 +43,7 @@ use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRow, LogicalTimestamp, ObservationStore,
 };
+use overdrive_core::transition_reason::TerminalCondition;
 use overdrive_core::wall_clock::UnixInstant;
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::dataplane::SimDataplane;
@@ -290,7 +291,7 @@ async fn service_lifecycle_reenqueues_until_pass_then_emits_stable() {
 
     // -----------------------------------------------------------------
     // The ProbeRunner writes a Pass row. The next cadence's reconcile
-    // observes it → emits Stable → records stable_announced → the
+    // observes it → emits and commits Stable → the
     // deadline-gated requeue is promoted by the accepted observation.
     // -----------------------------------------------------------------
     write_pass_probe(&obs, &alloc, 5_000).await;
@@ -306,21 +307,15 @@ async fn service_lifecycle_reenqueues_until_pass_then_emits_stable() {
     let ran_pass = run_one_cadence(&state, 4).await;
     assert!(ran_pass, "the Pass-observing cadence must run the pending service-lifecycle eval");
 
-    // The persisted view must now record Stable for the alloc.
-    let views = state
-        .runtime
-        .loaded_service_lifecycle_views_for_test(&service_reconciler_name())
-        .expect("service-lifecycle view map present");
-    let view = views.get(&target).expect("view for target present");
+    // The committed observation row, not an emission marker, owns Stable.
+    let row = obs.alloc_status_row(&alloc).await.expect("read allocation row").expect("row");
     assert!(
-        view.stable_announced.contains(&alloc),
-        "after observing the Pass row the reconciler must announce Stable for the alloc; \
-         view = {view:?}"
+        matches!(row.terminal, Some(TerminalCondition::Stable { .. })),
+        "after observing Pass the runtime must commit Stable on the allocation row; row = {row:?}"
     );
 
     // The action-emitted Stable re-enqueues once more; that final
-    // cadence sees the alloc already in stable_announced (dedup →
-    // 0 actions) AND the predicate is false (alloc is terminal), so the
+    // cadence sees the committed Stable row (dedup → 0 actions), so the
     // runtime drains to empty — the reconciler goes quiet.
     let _ = run_one_cadence(&state, 5).await;
     assert!(
