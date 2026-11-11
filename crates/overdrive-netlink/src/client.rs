@@ -423,7 +423,7 @@ impl Client {
     }
 
     /// `ip route add default via <gateway>` — the in-netns default route
-    /// (called inside [`crate::in_netns`] so it lands in the workload netns).
+    /// (run from the netns the route belongs in).
     /// The kernel resolves the output interface from the gateway's on-link
     /// subnet (the workload veth already carries its /30 address). `-EEXIST`
     /// (the route is already present) surfaces via [`NetlinkError::errno`] for

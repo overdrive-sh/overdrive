@@ -154,8 +154,7 @@ pub mod transition_reason;
 // D2.5): `DiskAttachment`, `MemoryPlan` + `reserve_bytes`, `KernelImage`,
 // `VmConfinement`. Landed incrementally — step 01-01 PART 1 (this commit)
 // closes two of the three original blockers: `CgroupPath` is now relocated
-// into [`cgroup`] and the `NetnsName` newtype now exists in [`id`]
-// (ADR-0082 §D2 Amendment 2026-08-12). `VmRunDir`, the outer `VmConfig`
+// into [`cgroup`]. `VmRunDir`, the outer `VmConfig`
 // aggregate, and the `Vmm` port trait (which references `VmConfig`) remain
 // deferred — the residual blocker is the still-under-specified
 // `RootfsPlan` / `KernelCmdline` newtypes — see `vm::config`'s module doc

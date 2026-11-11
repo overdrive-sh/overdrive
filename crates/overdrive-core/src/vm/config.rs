@@ -28,10 +28,9 @@
 //!
 //! # What step 01-01 PART 2 lands
 //!
-//! PART 1 (commit `2636ba1c`) resolved the first two of three blockers
+//! PART 1 (commit `2636ba1c`) resolved the first of three blockers
 //! on `VmConfig`'s remaining field types (`cgroup_scope: CgroupPath`
-//! relocated into [`crate::cgroup`]; `netns: Option<NetnsName>` via the
-//! new [`crate::id::NetnsName`] newtype). PART 2 closes the third and
+//! relocated into [`crate::cgroup`]). PART 2 closes the others and
 //! lands everything it unblocks:
 //!
 //! - [`RootfsPlan`] (§D2, gap 3) — the rootfs staging plan: the
@@ -759,8 +758,7 @@ impl KernelCmdline {
 
 /// The vsock port the guest agent dials for the beacon connection
 /// (ADR-0082 §D2.2). INTERNAL newtype: a platform-internal beacon port,
-/// never operator-typed, never persisted — same completeness class as
-/// [`crate::id::NetnsName`], so no `serde`, `rkyv`, or `FromStr`.
+/// never operator-typed, never persisted, so it carries no `serde`, `rkyv`, or `FromStr`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct VsockPort(u32);
 

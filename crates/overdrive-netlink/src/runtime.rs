@@ -8,21 +8,17 @@
 //! `std::thread`** that builds its own current-thread runtime the rtnetlink
 //! `Client` connection is spawned on:
 //!
-//! - HOST-netns ops via [`block_on_host_netlink`] (a fresh host-netns thread);
-//! - IN-NETNS ops via [`crate::in_netns`] (its own setns'd dedicated thread)
+//! - HOST-netns ops via [`block_on_host_netlink`] (a fresh host-netns thread)
 //!   with [`block_on_netlink`] inside the closure.
 //!
-//! This is the single auditable home for the bridge, mirroring
-//! [`crate::in_netns`] — both consumers share one implementation instead of
-//! duplicating it verbatim.
+//! This is the single auditable home for the bridge.
 
 use crate::error::NetlinkError;
 
 /// Build a fresh current-thread tokio runtime and drive `fut` to completion.
 ///
-/// Used INSIDE an [`crate::in_netns`] closure (a `setns`'d dedicated thread
-/// with no ambient runtime) and by [`block_on_host_netlink`] (a fresh
-/// host-netns thread) — both need a runtime the rtnetlink `Client` connection
+/// Used by [`block_on_host_netlink`] (a fresh host-netns thread with no
+/// ambient runtime), which needs a runtime the rtnetlink `Client` connection
 /// is spawned on.
 ///
 /// # Errors

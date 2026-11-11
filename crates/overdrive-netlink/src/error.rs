@@ -120,15 +120,6 @@ pub enum NetlinkError {
         /// convention.
         source: std::io::Error,
     },
-    /// Entering a network namespace failed — opening `/var/run/netns/<name>`
-    /// or `setns(CLONE_NEWNET)` (the `in_netns` dedicated-thread helper, D4).
-    #[error("entering netns `{netns}` failed: {source}")]
-    Setns {
-        /// The target netns name.
-        netns: String,
-        /// The `open`/`setns` failure.
-        source: std::io::Error,
-    },
     /// A network-namespace lifecycle op failed — creating (`NetworkNamespace::add`,
     /// a fork+unshare+mount, no `exec`), removing (`NetworkNamespace::del`), or
     /// opening `/var/run/netns/<name>` to move a link into it (`setns_by_fd`).
@@ -190,12 +181,6 @@ impl NetlinkError {
         Self::Nft { op, source }
     }
 
-    /// Construct a [`NetlinkError::Setns`].
-    #[must_use]
-    pub fn setns(netns: impl Into<String>, source: std::io::Error) -> Self {
-        Self::Setns { netns: netns.into(), source }
-    }
-
     /// Construct a [`NetlinkError::Netns`].
     #[must_use]
     pub const fn netns(op: &'static str, source: std::io::Error) -> Self {
@@ -215,14 +200,13 @@ impl NetlinkError {
             | Self::Address { source, .. }
             | Self::Route { source, .. } => rtnetlink_errno(source),
             Self::LinkAbsent { .. } => Some(NEG_ENODEV),
-            // The ethtool / setns / netns `io::Error` carries the POSITIVE
+            // The ethtool / netns `io::Error` carries the POSITIVE
             // errno (when it is a real fs/syscall failure); re-negate to the
             // netlink `-errno` convention so a caller sees one sign. A netns
             // fork/mount message wrapped via `io::Error::other` has no
             // `raw_os_error` ⇒ `None` (structural failure, never swallowed).
             Self::Ethtool { source, .. }
             | Self::Nft { source, .. }
-            | Self::Setns { source, .. }
             | Self::Netns { source, .. } => source.raw_os_error().map(|raw| -raw.abs()),
             // A connect failure carries no kernel errno (structural); a
             // successful FIB lookup with no route message has no errno either.
@@ -312,7 +296,7 @@ mod tests {
         assert!(!errno_is_idempotent(err.errno()));
     }
 
-    /// The `io::Error`-carrying variants (ethtool / nft / setns / netns) hold a
+    /// The `io::Error`-carrying variants (ethtool / nft / netns) hold a
     /// POSITIVE OS errno; [`NetlinkError::errno`] MUST re-negate it to the
     /// netlink `-errno` convention (`|raw| -raw.abs()`). Pins the sign so a
     /// dropped negation — which would make a `-EEXIST` idempotency check silently
@@ -329,10 +313,6 @@ mod tests {
             NetlinkError::ethtool("features-set", std::io::Error::from_raw_os_error(libc::EPERM))
                 .errno(),
             Some(-libc::EPERM)
-        );
-        assert_eq!(
-            NetlinkError::setns("ns", std::io::Error::from_raw_os_error(libc::ENOENT)).errno(),
-            Some(-libc::ENOENT)
         );
         assert_eq!(
             NetlinkError::netns("add", std::io::Error::from_raw_os_error(libc::EACCES)).errno(),

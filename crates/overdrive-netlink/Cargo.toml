@@ -34,8 +34,8 @@ crate_class = "adapter-host"
 integration-tests = []
 
 [dependencies]
-# `NetnsName` — the netns identity `in_netns` targets (ADR-0085 D4). Direction
-# adapter-host → core is the sanctioned dependency edge.
+# Dataplane constants and guest-transport addressing the nft encoders consume.
+# Direction adapter-host → core is the sanctioned dependency edge.
 overdrive-core.workspace = true
 # rtnetlink client (link/addr/route over `NETLINK_ROUTE`). Spike increment-a
 # proved the full veth/addr/route surface on a real kernel.
@@ -47,8 +47,6 @@ ethtool.workspace     = true
 # Raw `NETLINK_GENERIC` socket for the hand-rolled `ETHTOOL_MSG_FEATURES_SET`
 # encoder, and `CLONE_NEWNET` / fd constants.
 libc.workspace        = true
-# `nix::sched::setns` for the dedicated-`std::thread` netns entry (D4).
-nix.workspace         = true
 tokio.workspace       = true
 # `TryStreamExt` for draining rtnetlink reply streams.
 futures.workspace     = true
