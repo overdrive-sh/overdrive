@@ -6,19 +6,20 @@
 |---|---|
 | Feature | `service-allocation-readiness-and-ending` |
 | Step | `05-06` — Guest listen hooks, ordered forwarding and workload cgroup |
-| Iteration | 1 — final |
+| Iteration | 2 — final; iteration 1 is recorded below |
 | Implementation commit | `d4a5eb3a5252319d16eaf7b393ac5fa4c8313358` |
 | COMMIT audit | `5e5562591b5a65a5d9637d952e23dc8d31093559` |
+| Lint-remediation commit | `a6f428d292dd904cf4027c33e4c49e34eb85de0f` |
 | Review scope | D13 guest hook programs, workload-cgroup attachment and placement, beacon ordering, real-boot acceptance, guest-lane fixture, and the existing verifier-regress gate extension |
-| Working tree at review start and end | Three unrelated dirty `netns-density-295` files; preserved and not reviewed |
+| Working tree | Iteration 1 preserved three unrelated dirty `netns-density-295` files. During iteration 2, in-progress 05-07 changes were also present; all remained untouched and outside this review. |
 
 ## Verdict
 
-**APPROVED — iteration 1.** The implementation matches D13's accepted guest-side contract and step 05-06's bounded evidence obligations. The two required native Tier-3 tests pass, the three named guest programs have their own measured verifier counts and 500,000-instruction limit, and the existing dataplane verifier corpus still passes. The two externally owned failure modes remain explicitly failed or skipped and are not represented as green; the user's scoped direction permits this step to proceed without waiting for those fixes.
+**APPROVED — iteration 2 (final).** The implementation matches D13's accepted guest-side contract and step 05-06's bounded evidence obligations. The two required native Tier-3 tests pass, the three named guest programs have their own measured verifier counts and 500,000-instruction limit, and the existing dataplane verifier corpus still passes. The two externally owned failure modes remain explicitly failed or skipped and are not represented as green; the user's scoped direction permits this step to proceed without waiting for those fixes. A later workspace Clippy diagnostic on the two exact test-contract rustdoc lines was closed by a per-test lint allowance, as recorded in iteration 2 below.
 
 `praise:` The implementation keeps listener observation in the existing guest eBPF object, makes workload placement atomic with the hooks through `CLONE_INTO_CGROUP`, and keeps all beacon writes on the existing single `&mut File` path. The native tests exercise the real `run_server` composition and production `overdrive-init` guest rather than a test-installed hook or board.
 
-No blocking or advisory findings require remediation. This review did not rerun tests or change production code, tests, models, DES events, or commits.
+Iteration 1 had no accepted findings. Iteration 2 reviews only the two per-test lint allowances in `verifier_budget.rs`; no D13 behavior, tests, models, DES events, or in-progress 05-07 work were changed by this reviewer.
 
 ## Contract review
 
@@ -78,8 +79,34 @@ The parallel Fast Open child-correlation timeout passed in isolation and in the 
 
 ## Findings and remediation dispositions
 
-No accepted findings. No remediation is required. The external failure modes above retain their approved nonblocking disposition for this step; they are not approval findings or green test results.
+Iteration 1 accepted no findings. Iteration 2's lint finding and remediation are recorded below and are closed. The external failure modes above retain their approved nonblocking disposition for this step; they are not approval findings or green test results.
 
 ## Iteration 1 disposition
 
 **APPROVED.** Step 05-06 satisfies its accepted D13 contract and verification criteria within the recorded, user-approved external-failure scope. The next roadmap step may proceed.
+
+## Iteration 2 — verifier-test rustdoc lint follow-up
+
+### D1 — `issue (blocking):` exact Contract Shape declarations triggered `doc_markdown`
+
+**Severity:** Blocking for the reported strict Clippy gate; closed by the original crafter
+
+**Locations:** `crates/overdrive-dataplane/bin/verifier_budget.rs:599`, `:639` before remediation; `:599`, `:640` after the first inserted allowance shifts the second test
+
+**Disposition:** Closed by remediation commit `a6f428d292dd904cf4027c33e4c49e34eb85de0f`
+
+`doc_markdown` flagged each exact `/// CONTRACT_SHAPE: pure-function.` rustdoc line. Those declarations are mandatory machine-readable test metadata, so changing their text or formatting to satisfy the lint would violate the test-contract rule. The crafter added `#[allow(clippy::doc_markdown, reason = "exact per-test contract declaration")]` directly to the two affected test functions (`verifier_budget.rs:600`, `:641`). The lint is suppressed only for those function items; there is no module-, file-, crate-, or workspace-level allowance and no suppression for other Clippy lints. The exact rustdoc declarations remain unchanged.
+
+`git show a6f428d29` confirms that the remediation changes only `verifier_budget.rs` and adds exactly those two item-level attributes. Their positions associate each allowance with the test whose mandated rustdoc triggers the warning. No production behavior, test assertion, verifier threshold, API, or budget changed.
+
+### Iteration 2 verification and disposition
+
+| Check | Result | Evidence and limit |
+|---|---|---|
+| Targeted all-target `overdrive-dataplane` Clippy with warnings denied | **PASS** | Original crafter's retained result after `a6f428d29`; this reviewer did not rerun the command. |
+| Package formatting | **PASS** | Original crafter's retained result after `a6f428d29`; no formatter or test-contract text change. |
+| Remediation diff whitespace check | **PASS** | Original crafter's retained `git diff --check` result. |
+| Commit attribution | **PASS** | `a6f428d29` retains Marcus as author and has exactly `Co-Authored-By: Codex <codex@openai.com>`; no Claude or Anthropic attribution. |
+| D13 native tests, guest verifier gate, or other step checks | **Not rerun** | The remediation is limited to lint attributes; the iteration-1 behavioral and native evidence remains applicable. |
+
+No finding remains open. **Iteration 2 verdict: APPROVED.** The iteration-1 verdict remains valid, and step 05-06 is finally approved.
