@@ -583,16 +583,36 @@ impl OwnerFlowsDriver {
             })?;
             (opened.key, flow)
         };
-        let cid = self.current_lease("HostAcceptFlow")?.cid;
+        // The accepted flow belongs to the CID it was opened on, which may be an
+        // earlier lease generation's CID (Retiring or gone) by now.
+        let cid = key.peer_cid;
         let observed = self.observe();
-        let quiesced_refusal = observed.admission == GuestAdmission::Quiesced
-            && observed
-                .cids
-                .get(&cid)
-                .is_some_and(|state| state.phase == CidPhase::Active && state.session.is_some());
+        // CONFALIGN-2: production registers a refusal reader whenever the CID
+        // has a live control session and is not Retiring; that reader sends
+        // exactly one `Refused` — `NotActive` while the CID is not Active,
+        // `Quiesced` when Active and quiesced. Unknown, Retiring and
+        // sessionless CIDs close silently (no reader is registered).
+        // The refusal travels on the CID's control session: when the guest of
+        // that session is gone (`VmStop`, its loss not yet processed) the
+        // reader still runs and closes the flow, but the write fails (the
+        // owner then closes the session) and no message reaches the guest.
+        let sockets = self.composition().io.socket_observation();
+        let cid_state = observed.cids.get(&cid);
+        let refusal = cid_state
+            .filter(|state| state.session.is_some() && state.phase != CidPhase::Retiring)
+            .and_then(|state| match state.phase {
+                CidPhase::Active if observed.admission == GuestAdmission::Quiesced => {
+                    Some(FlowRefusal::Quiesced)
+                }
+                CidPhase::Active => None,
+                _ => Some(FlowRefusal::NotActive),
+            });
+        let session_guest_alive = cid_state
+            .and_then(|state| state.session)
+            .is_some_and(|session| !sockets.peer_gone.contains(&session));
         let outbox_at_accept = self.composition().io.outbox(cid).len();
         self.composition().io.release_accept(key);
-        if quiesced_refusal {
+        if refusal.is_some() {
             // ADMISSIONREFUSAL1: the formal failed-admission branch is one
             // owner action. First settle until accept created the record
             // handle and parked its reader; then deliver the already-buffered
@@ -603,14 +623,16 @@ impl OwnerFlowsDriver {
             self.composition().io.release_read(key, None);
         }
         self.settle();
-        if quiesced_refusal {
+        if let Some(refusal) = refusal {
             let messages = self.composition().io.outbox(cid);
             let emitted = messages.get(outbox_at_accept..).unwrap_or_default();
-            let expected = [ControlMessage::Refused { flow, refusal: FlowRefusal::Quiesced }];
-            if emitted != expected.as_slice() {
+            let expected = [ControlMessage::Refused { flow, refusal }];
+            let expected: &[ControlMessage] =
+                if session_guest_alive { expected.as_slice() } else { &[] };
+            if emitted != expected {
                 return Err(not_playable(
                     "HostAcceptFlow",
-                    format!("quiesced admission emitted {emitted:?}, not one Refused(Quiesced)"),
+                    format!("refused admission emitted {emitted:?}, expected {expected:?}"),
                 ));
             }
         }
@@ -976,7 +998,7 @@ impl OwnerFlowsDriver {
         }
         if private.control_tasks.len() != private.unread.len()
             || private.control_tasks.keys().copied().ne(private.unread.iter().copied())
-            || private.control_tasks.values().any(|task| task.owner_launch != Some(lease.launch))
+            || private.control_tasks.values().any(|task| task.owner_launch.is_none())
         {
             anyhow::bail!(
                 "CID {} cleanup row is not exactly its accepted-unread control tasks",

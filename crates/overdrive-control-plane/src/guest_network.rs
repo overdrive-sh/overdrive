@@ -969,9 +969,10 @@ impl GuestNetworkProvisioner for HostSharedGuestNetworkOwner {
                 && old.datagrams.is_empty()
                 && old.control_tasks.len() == old.unread.len()
                 && old.unread.iter().all(|key| {
-                    old.control_tasks
-                        .get(key)
-                        .is_some_and(|task| task.owner_launch == Some(old.launch))
+                    // CONFALIGN-1: a retained task keeps the launch it was
+                    // accepted under (its attribution identity), so any
+                    // launch of this CID — not only `old.launch` — is valid.
+                    old.control_tasks.get(key).is_some_and(|task| task.owner_launch.is_some())
                 })
                 && !state.pairs.values().any(|pair| pair.cid == cid)
                 && !state.dial_watches.values().any(|(owner_cid, _)| *owner_cid == cid)
