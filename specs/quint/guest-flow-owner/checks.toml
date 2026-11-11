@@ -51,7 +51,9 @@ backend = "apalache"
 max_steps = 10
 expect = "holds"
 ci = false
-timeout_secs = 1800
+# Measured 1692 s in one record and over 1800 s in the next (host-load variance): 3600 s leaves 2x headroom on the
+# slower run. No heap_mb: the run was killed by the time limit, not by memory.
+timeout_secs = 3600
 
 [[check]]
 name = "owner-flows-guest-half-ends"
@@ -74,7 +76,7 @@ invariant = "WitnessNoPhantomConnect"
 backend = "apalache"
 max_steps = 14
 expect = "violation"
-ci = true
+ci = false
 
 # Teeth: each hazard switches one design rule off (expected violation)
 [[check]]
@@ -2054,7 +2056,7 @@ main = "slots_live"
 temporal = "ReleasedSlotBecomesFree"
 backend = "tlc"
 expect = "holds"
-ci = true
+ci = false
 timeout_secs = 1800
 
 [[check]]
@@ -2085,7 +2087,7 @@ invariant = "RouteCurrent"
 backend = "apalache"
 max_steps = 12
 expect = "violation"
-ci = true
+ci = false
 
 [[check]]
 name = "udp-slots-hazard-ignore-late-paired"

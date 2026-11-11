@@ -214,7 +214,8 @@ for a Provisioned CID quiescence has priority, then a missing session),
 `Teardown`, `Release`, `Quiesce`, `Restore`;
 `GuestOpenSession`, `WorkloadOpenSession`, `HostAcceptSession`, `HostReadOpen`, `HostClaimSession`, `HostSessionLoss`, `HostDeadSessionLoss`;
 `GuestOpenFlow`, `HostAcceptFlow` (admitted: release accept only; Quiesced: release the complete buffered request in
-the same action, require the real `Refused { Quiesced }`, close with zero admitted state/place), `HostReadReq`,
+the same action, require the real `Refused { Quiesced }`, close with zero admitted state/place; a refusal onto a
+session whose guest is gone is a session loss, processed in the same dispatch: CONFALIGN-2a), `HostReadReq`,
 `HostStartConnect`, `HostConnectDone` (attach (V_h, D), then `Paired`:
 EVMOD-PAIR),
 `HostConnectDiscard`, `HostFlowEnds`; the dial `DialOpen`, `DialNotServing`, `DialQuiesced`,

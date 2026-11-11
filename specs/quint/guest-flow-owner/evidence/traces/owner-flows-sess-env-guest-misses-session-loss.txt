@@ -52,28 +52,27 @@ State 6 [VmStart]
   vmUp = TRUE
 
 State 7 [step]
-  gSess = 2
-  sess = <<[st |-> "none", gen |-> 0], [st |-> "pending", gen |-> 2]>>
+  gSess = 1
+  sess = <<[st |-> "pending", gen |-> 2], [st |-> "none", gen |-> 0]>>
 
 State 8 [step]
-  sess = <<[st |-> "none", gen |-> 0], [st |-> "reading", gen |-> 2]>>
+  sess = <<[st |-> "reading", gen |-> 2], [st |-> "none", gen |-> 0]>>
 
 State 9 [step]
-  sess = <<[st |-> "none", gen |-> 0], [st |-> "live", gen |-> 2]>>
-  claim = 2
+  sess = <<[st |-> "reading", gen |-> 2], [st |-> "pending", gen |-> 2]>>
 
 State 10 [step]
-  sess = <<[st |-> "none", gen |-> 0], [st |-> "closed", gen |-> 2]>>
-  claim = 0
+  sess = <<[st |-> "live", gen |-> 2], [st |-> "pending", gen |-> 2]>>
+  claim = 1
 
-State 11 [ActivatePending]
-  act = "ControlSessionPending"
+State 11 [step]
+  sess = <<[st |-> "live", gen |-> 2], [st |-> "reading", gen |-> 2]>>
 
 State 12 [step]
-  quiesced = TRUE
-  act = "none"
+  sess = <<[st |-> "live", gen |-> 2], [st |-> "closed", gen |-> 2]>>
 
 State 13 [step]
-  quiesced = FALSE
+  sess = <<[st |-> "closed", gen |-> 2], [st |-> "closed", gen |-> 2]>>
+  claim = 0
 
--> loops back to State 11
+-> stutters forever in State 13

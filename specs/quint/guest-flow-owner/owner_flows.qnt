@@ -564,14 +564,16 @@ module owner_flows {
     heldByOther' = heldByOther, keepSessRest,
   }
   // Loss (peer EOF / reset, or a malformed message): release the claim, abort every flow of the VM.
-  action sessionLoss(c: int): bool = all {
+  action sessionLossWith(c: int, fl: int -> Flow): bool = all {
     sess' = sess.set(c, { ...sess.get(c), st: "closed" }),
     claim' = if (claim == c) 0 else claim,
-    flows' = if (BUG_NO_ABORT_ON_LOSS) flows else abortAll,
+    flows' = fl,
     alloc' = alloc, gen' = gen, vmGen' = vmGen, vmUp' = vmUp, quiesced' = quiesced,
     badPaired' = badPaired, keepAttr, hf' = abortAllH, gf' = gf, toHostPaired' = Set(), toHostRefused' = Set(), toGuestAbort' = Set(), toHostAbort' = Set(),
     keepGhostsHNoDl, dl' = { ...dlEnd("NoSession"), tout: Set() }, keepX,
   }
+  action sessionLoss(c: int): bool =
+    sessionLossWith(c, if (BUG_NO_ABORT_ON_LOSS) flows else abortAll)
   action HostSessionLoss(c: int): bool = all {
     conf_step' = if (REC) variant("HostSessionLoss", { c: c }) else conf_step, gSess' = gSess,
     sessUp(sess.get(c).st), sessionLoss(c),
@@ -598,12 +600,21 @@ module owner_flows {
   // CID's flow table — one owner step (U-1). A Quiesced refusal remains outside admitted state,
   // reads the already-buffered complete request, emits Refused { Quiesced } and closes in this
   // same formal action; a NotActive refusal likewise emits exactly one Refused { NotActive }
-  // (abstracted; no state change); only unknown, Retiring or no-session CIDs close without a message.
+  // (CONFALIGN-2/2a): a refusal onto a live session changes nothing (the message is abstracted); a refusal
+  // onto a session whose guest is gone fails its write, which ends the session in this same dispatch (claim
+  // released, every flow aborted, the refused flow closed); unknown, Retiring or no-session CIDs close
+  // without a message.
+  val refusalWriteFails: bool =
+    not(admissible) and alloc.in(Set("Provisioned", "Active")) and claim != 0 and not(writerUp(sess.get(claim).gen))
   action HostAcceptFlow(f: int): bool = all {
     conf_step' = if (REC) variant("HostAcceptFlow", { f: f }) else conf_step, gSess' = gSess,
     flows.get(f).st == "queued",
-    flows' = flows.set(f, { ...flows.get(f), st: if (admissible) "accepted" else "closed" }),
-    badPaired' = badPaired, crossMsg' = crossMsg, keepFlowRest,
+    if (refusalWriteFails)
+      sessionLossWith(claim, abortAll.set(f, { ...flows.get(f), st: "closed" }))
+    else all {
+      flows' = flows.set(f, { ...flows.get(f), st: if (admissible) "accepted" else "closed" }),
+      badPaired' = badPaired, crossMsg' = crossMsg, keepFlowRest,
+    },
   }
   // step 3: read the request in userspace (in one or two pieces); once all of it is read, compare
   // its launch token with the CID's live launch token: a mismatch closes V_h and removes the

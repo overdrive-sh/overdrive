@@ -21,122 +21,122 @@ State 1: <Initial predicate>
 /\ quiesce_live_bugForeignIgnored_quiescence_dmg = [C1 |-> FALSE, C2 |-> FALSE]
 /\ quiesce_live_bugForeignIgnored_quiescence_att = [C1 |-> 0, C2 |-> 0]
 
-State 2: <quiesce_live_bugForeignIgnored_quiescence_LeakHold line 744, col 3 to line 794, col 63 of module quiesce_live_bugForeignIgnored>
+State 2: <quiesce_live_bugForeignIgnored_quiescence_Damage line 345, col 3 to line 384, col 63 of module quiesce_live_bugForeignIgnored>
 /\ quiesce_live_bugForeignIgnored_quiescence_foreign = FALSE
 /\ quiesce_live_bugForeignIgnored_quiescence_flowsOpen = 0
 /\ quiesce_live_bugForeignIgnored_quiescence_conf_step = [InitDown |-> [tag |-> "UNIT"]]
 /\ quiesce_live_bugForeignIgnored_quiescence_up = TRUE
-/\ quiesce_live_bugForeignIgnored_quiescence_leaked = 1
+/\ quiesce_live_bugForeignIgnored_quiescence_leaked = 0
 /\ quiesce_live_bugForeignIgnored_quiescence_rec = [C1 |-> "idle", C2 |-> "idle"]
 /\ quiesce_live_bugForeignIgnored_quiescence_g = [ reopenEarly |-> FALSE,
   overlapped |-> FALSE,
   stillQuiesced |-> FALSE,
   failStopped |-> FALSE,
-  dropped |-> TRUE,
+  dropped |-> FALSE,
+  refusedBoot |-> FALSE,
+  foreignChanged |-> FALSE ]
+/\ quiesce_live_bugForeignIgnored_quiescence_cnt = 0
+/\ quiesce_live_bugForeignIgnored_quiescence_stop = "none"
+/\ quiesce_live_bugForeignIgnored_quiescence_roundState = [C1 |-> "outside", C2 |-> "outside"]
+/\ quiesce_live_bugForeignIgnored_quiescence_repLeft = -1
+/\ quiesce_live_bugForeignIgnored_quiescence_table = TRUE
+/\ quiesce_live_bugForeignIgnored_quiescence_latch = FALSE
+/\ quiesce_live_bugForeignIgnored_quiescence_dmg = [C1 |-> TRUE, C2 |-> FALSE]
+/\ quiesce_live_bugForeignIgnored_quiescence_att = [C1 |-> 0, C2 |-> 0]
+
+State 3: <quiesce_live_bugForeignIgnored_quiescence_Damage line 345, col 3 to line 384, col 63 of module quiesce_live_bugForeignIgnored>
+/\ quiesce_live_bugForeignIgnored_quiescence_foreign = FALSE
+/\ quiesce_live_bugForeignIgnored_quiescence_flowsOpen = 0
+/\ quiesce_live_bugForeignIgnored_quiescence_conf_step = [InitDown |-> [tag |-> "UNIT"]]
+/\ quiesce_live_bugForeignIgnored_quiescence_up = TRUE
+/\ quiesce_live_bugForeignIgnored_quiescence_leaked = 0
+/\ quiesce_live_bugForeignIgnored_quiescence_rec = [C1 |-> "idle", C2 |-> "idle"]
+/\ quiesce_live_bugForeignIgnored_quiescence_g = [ reopenEarly |-> FALSE,
+  overlapped |-> FALSE,
+  stillQuiesced |-> FALSE,
+  failStopped |-> FALSE,
+  dropped |-> FALSE,
+  refusedBoot |-> FALSE,
+  foreignChanged |-> FALSE ]
+/\ quiesce_live_bugForeignIgnored_quiescence_cnt = 0
+/\ quiesce_live_bugForeignIgnored_quiescence_stop = "none"
+/\ quiesce_live_bugForeignIgnored_quiescence_roundState = [C1 |-> "outside", C2 |-> "outside"]
+/\ quiesce_live_bugForeignIgnored_quiescence_repLeft = -1
+/\ quiesce_live_bugForeignIgnored_quiescence_table = TRUE
+/\ quiesce_live_bugForeignIgnored_quiescence_latch = FALSE
+/\ quiesce_live_bugForeignIgnored_quiescence_dmg = [C1 |-> TRUE, C2 |-> TRUE]
+/\ quiesce_live_bugForeignIgnored_quiescence_att = [C1 |-> 0, C2 |-> 0]
+
+State 4: <quiesce_live_bugForeignIgnored_quiescence_ForeignRestore line 800, col 3 to line 862, col 63 of module quiesce_live_bugForeignIgnored>
+/\ quiesce_live_bugForeignIgnored_quiescence_foreign = TRUE
+/\ quiesce_live_bugForeignIgnored_quiescence_flowsOpen = 0
+/\ quiesce_live_bugForeignIgnored_quiescence_conf_step = [InitDown |-> [tag |-> "UNIT"]]
+/\ quiesce_live_bugForeignIgnored_quiescence_up = TRUE
+/\ quiesce_live_bugForeignIgnored_quiescence_leaked = 0
+/\ quiesce_live_bugForeignIgnored_quiescence_rec = [C1 |-> "idle", C2 |-> "idle"]
+/\ quiesce_live_bugForeignIgnored_quiescence_g = [ reopenEarly |-> FALSE,
+  overlapped |-> FALSE,
+  stillQuiesced |-> FALSE,
+  failStopped |-> FALSE,
+  dropped |-> FALSE,
+  refusedBoot |-> FALSE,
+  foreignChanged |-> FALSE ]
+/\ quiesce_live_bugForeignIgnored_quiescence_cnt = 0
+/\ quiesce_live_bugForeignIgnored_quiescence_stop = "none"
+/\ quiesce_live_bugForeignIgnored_quiescence_roundState = [C1 |-> "outside", C2 |-> "outside"]
+/\ quiesce_live_bugForeignIgnored_quiescence_repLeft = -1
+/\ quiesce_live_bugForeignIgnored_quiescence_table = TRUE
+/\ quiesce_live_bugForeignIgnored_quiescence_latch = FALSE
+/\ quiesce_live_bugForeignIgnored_quiescence_dmg = [C1 |-> TRUE, C2 |-> TRUE]
+/\ quiesce_live_bugForeignIgnored_quiescence_att = [C1 |-> 0, C2 |-> 0]
+
+State 5: <quiesce_live_bugForeignIgnored_quiescence_recStep line 1312, col 4 to line 1313, col 111 of module quiesce_live_bugForeignIgnored>
+/\ quiesce_live_bugForeignIgnored_quiescence_foreign = TRUE
+/\ quiesce_live_bugForeignIgnored_quiescence_flowsOpen = 0
+/\ quiesce_live_bugForeignIgnored_quiescence_conf_step = [InitDown |-> [tag |-> "UNIT"]]
+/\ quiesce_live_bugForeignIgnored_quiescence_up = TRUE
+/\ quiesce_live_bugForeignIgnored_quiescence_leaked = 0
+/\ quiesce_live_bugForeignIgnored_quiescence_rec = [C1 |-> "held", C2 |-> "idle"]
+/\ quiesce_live_bugForeignIgnored_quiescence_g = [ reopenEarly |-> FALSE,
+  overlapped |-> FALSE,
+  stillQuiesced |-> FALSE,
+  failStopped |-> FALSE,
+  dropped |-> FALSE,
   refusedBoot |-> FALSE,
   foreignChanged |-> FALSE ]
 /\ quiesce_live_bugForeignIgnored_quiescence_cnt = 1
 /\ quiesce_live_bugForeignIgnored_quiescence_stop = "none"
-/\ quiesce_live_bugForeignIgnored_quiescence_roundState = [C1 |-> "outside", C2 |-> "outside"]
+/\ quiesce_live_bugForeignIgnored_quiescence_roundState = [C1 |-> "pending", C2 |-> "outside"]
 /\ quiesce_live_bugForeignIgnored_quiescence_repLeft = -1
 /\ quiesce_live_bugForeignIgnored_quiescence_table = TRUE
 /\ quiesce_live_bugForeignIgnored_quiescence_latch = TRUE
-/\ quiesce_live_bugForeignIgnored_quiescence_dmg = [C1 |-> FALSE, C2 |-> FALSE]
+/\ quiesce_live_bugForeignIgnored_quiescence_dmg = [C1 |-> TRUE, C2 |-> TRUE]
 /\ quiesce_live_bugForeignIgnored_quiescence_att = [C1 |-> 0, C2 |-> 0]
 
-State 3: <quiesce_live_bugForeignIgnored_quiescence_recStep line 1317, col 9 to line 1318, col 109 of module quiesce_live_bugForeignIgnored>
-/\ quiesce_live_bugForeignIgnored_quiescence_foreign = FALSE
-/\ quiesce_live_bugForeignIgnored_quiescence_flowsOpen = 0
-/\ quiesce_live_bugForeignIgnored_quiescence_conf_step = [InitDown |-> [tag |-> "UNIT"]]
-/\ quiesce_live_bugForeignIgnored_quiescence_up = FALSE
-/\ quiesce_live_bugForeignIgnored_quiescence_leaked = 0
-/\ quiesce_live_bugForeignIgnored_quiescence_rec = [C1 |-> "idle", C2 |-> "idle"]
-/\ quiesce_live_bugForeignIgnored_quiescence_g = [ reopenEarly |-> FALSE,
-  overlapped |-> FALSE,
-  stillQuiesced |-> FALSE,
-  failStopped |-> TRUE,
-  dropped |-> TRUE,
-  refusedBoot |-> FALSE,
-  foreignChanged |-> FALSE ]
-/\ quiesce_live_bugForeignIgnored_quiescence_cnt = 0
-/\ quiesce_live_bugForeignIgnored_quiescence_stop = "failstop"
-/\ quiesce_live_bugForeignIgnored_quiescence_roundState = [C1 |-> "outside", C2 |-> "outside"]
-/\ quiesce_live_bugForeignIgnored_quiescence_repLeft = -1
-/\ quiesce_live_bugForeignIgnored_quiescence_table = TRUE
-/\ quiesce_live_bugForeignIgnored_quiescence_latch = FALSE
-/\ quiesce_live_bugForeignIgnored_quiescence_dmg = [C1 |-> FALSE, C2 |-> FALSE]
-/\ quiesce_live_bugForeignIgnored_quiescence_att = [C1 |-> 0, C2 |-> 0]
-
-State 4: <quiesce_live_bugForeignIgnored_quiescence_RestartWith line 904, col 3 to line 948, col 63 of module quiesce_live_bugForeignIgnored>
-/\ quiesce_live_bugForeignIgnored_quiescence_foreign = FALSE
-/\ quiesce_live_bugForeignIgnored_quiescence_flowsOpen = 0
-/\ quiesce_live_bugForeignIgnored_quiescence_conf_step = [InitDown |-> [tag |-> "UNIT"]]
-/\ quiesce_live_bugForeignIgnored_quiescence_up = TRUE
-/\ quiesce_live_bugForeignIgnored_quiescence_leaked = 0
-/\ quiesce_live_bugForeignIgnored_quiescence_rec = [C1 |-> "idle", C2 |-> "idle"]
-/\ quiesce_live_bugForeignIgnored_quiescence_g = [ reopenEarly |-> FALSE,
-  overlapped |-> FALSE,
-  stillQuiesced |-> FALSE,
-  failStopped |-> TRUE,
-  dropped |-> TRUE,
-  refusedBoot |-> FALSE,
-  foreignChanged |-> FALSE ]
-/\ quiesce_live_bugForeignIgnored_quiescence_cnt = 0
-/\ quiesce_live_bugForeignIgnored_quiescence_stop = "none"
-/\ quiesce_live_bugForeignIgnored_quiescence_roundState = [C1 |-> "outside", C2 |-> "outside"]
-/\ quiesce_live_bugForeignIgnored_quiescence_repLeft = -1
-/\ quiesce_live_bugForeignIgnored_quiescence_table = TRUE
-/\ quiesce_live_bugForeignIgnored_quiescence_latch = FALSE
-/\ quiesce_live_bugForeignIgnored_quiescence_dmg = [C1 |-> FALSE, C2 |-> FALSE]
-/\ quiesce_live_bugForeignIgnored_quiescence_att = [C1 |-> 0, C2 |-> 0]
-
-State 5: <quiesce_live_bugForeignIgnored_quiescence_ForeignRestore line 800, col 3 to line 862, col 63 of module quiesce_live_bugForeignIgnored>
+State 6: <quiesce_live_bugForeignIgnored_quiescence_RecRepair line 489, col 3 to line 537, col 63 of module quiesce_live_bugForeignIgnored>
 /\ quiesce_live_bugForeignIgnored_quiescence_foreign = TRUE
 /\ quiesce_live_bugForeignIgnored_quiescence_flowsOpen = 0
 /\ quiesce_live_bugForeignIgnored_quiescence_conf_step = [InitDown |-> [tag |-> "UNIT"]]
 /\ quiesce_live_bugForeignIgnored_quiescence_up = TRUE
 /\ quiesce_live_bugForeignIgnored_quiescence_leaked = 0
-/\ quiesce_live_bugForeignIgnored_quiescence_rec = [C1 |-> "idle", C2 |-> "idle"]
+/\ quiesce_live_bugForeignIgnored_quiescence_rec = [C1 |-> "repaired", C2 |-> "idle"]
 /\ quiesce_live_bugForeignIgnored_quiescence_g = [ reopenEarly |-> FALSE,
   overlapped |-> FALSE,
   stillQuiesced |-> FALSE,
-  failStopped |-> TRUE,
-  dropped |-> TRUE,
+  failStopped |-> FALSE,
+  dropped |-> FALSE,
   refusedBoot |-> FALSE,
   foreignChanged |-> FALSE ]
-/\ quiesce_live_bugForeignIgnored_quiescence_cnt = 0
+/\ quiesce_live_bugForeignIgnored_quiescence_cnt = 1
 /\ quiesce_live_bugForeignIgnored_quiescence_stop = "none"
-/\ quiesce_live_bugForeignIgnored_quiescence_roundState = [C1 |-> "outside", C2 |-> "outside"]
+/\ quiesce_live_bugForeignIgnored_quiescence_roundState = [C1 |-> "pending", C2 |-> "outside"]
 /\ quiesce_live_bugForeignIgnored_quiescence_repLeft = -1
 /\ quiesce_live_bugForeignIgnored_quiescence_table = TRUE
-/\ quiesce_live_bugForeignIgnored_quiescence_latch = FALSE
-/\ quiesce_live_bugForeignIgnored_quiescence_dmg = [C1 |-> FALSE, C2 |-> FALSE]
-/\ quiesce_live_bugForeignIgnored_quiescence_att = [C1 |-> 0, C2 |-> 0]
-
-State 6: <quiesce_live_bugForeignIgnored_quiescence_Damage line 345, col 3 to line 384, col 63 of module quiesce_live_bugForeignIgnored>
-/\ quiesce_live_bugForeignIgnored_quiescence_foreign = TRUE
-/\ quiesce_live_bugForeignIgnored_quiescence_flowsOpen = 0
-/\ quiesce_live_bugForeignIgnored_quiescence_conf_step = [InitDown |-> [tag |-> "UNIT"]]
-/\ quiesce_live_bugForeignIgnored_quiescence_up = TRUE
-/\ quiesce_live_bugForeignIgnored_quiescence_leaked = 0
-/\ quiesce_live_bugForeignIgnored_quiescence_rec = [C1 |-> "idle", C2 |-> "idle"]
-/\ quiesce_live_bugForeignIgnored_quiescence_g = [ reopenEarly |-> FALSE,
-  overlapped |-> FALSE,
-  stillQuiesced |-> FALSE,
-  failStopped |-> TRUE,
-  dropped |-> TRUE,
-  refusedBoot |-> FALSE,
-  foreignChanged |-> FALSE ]
-/\ quiesce_live_bugForeignIgnored_quiescence_cnt = 0
-/\ quiesce_live_bugForeignIgnored_quiescence_stop = "none"
-/\ quiesce_live_bugForeignIgnored_quiescence_roundState = [C1 |-> "outside", C2 |-> "outside"]
-/\ quiesce_live_bugForeignIgnored_quiescence_repLeft = -1
-/\ quiesce_live_bugForeignIgnored_quiescence_table = TRUE
-/\ quiesce_live_bugForeignIgnored_quiescence_latch = FALSE
+/\ quiesce_live_bugForeignIgnored_quiescence_latch = TRUE
 /\ quiesce_live_bugForeignIgnored_quiescence_dmg = [C1 |-> FALSE, C2 |-> TRUE]
 /\ quiesce_live_bugForeignIgnored_quiescence_att = [C1 |-> 0, C2 |-> 0]
 
-State 7: <quiesce_live_bugForeignIgnored_quiescence_recStep line 1312, col 4 to line 1313, col 111 of module quiesce_live_bugForeignIgnored>
+State 7: <quiesce_live_bugForeignIgnored_quiescence_RecRestore line 1101, col 3 to line 1185, col 63 of module quiesce_live_bugForeignIgnored>
 /\ quiesce_live_bugForeignIgnored_quiescence_foreign = TRUE
 /\ quiesce_live_bugForeignIgnored_quiescence_flowsOpen = 0
 /\ quiesce_live_bugForeignIgnored_quiescence_conf_step = [InitDown |-> [tag |-> "UNIT"]]
@@ -144,10 +144,10 @@ State 7: <quiesce_live_bugForeignIgnored_quiescence_recStep line 1312, col 4 to 
 /\ quiesce_live_bugForeignIgnored_quiescence_leaked = 0
 /\ quiesce_live_bugForeignIgnored_quiescence_rec = [C1 |-> "idle", C2 |-> "held"]
 /\ quiesce_live_bugForeignIgnored_quiescence_g = [ reopenEarly |-> FALSE,
-  overlapped |-> FALSE,
-  stillQuiesced |-> FALSE,
-  failStopped |-> TRUE,
-  dropped |-> TRUE,
+  overlapped |-> TRUE,
+  stillQuiesced |-> TRUE,
+  failStopped |-> FALSE,
+  dropped |-> FALSE,
   refusedBoot |-> FALSE,
   foreignChanged |-> FALSE ]
 /\ quiesce_live_bugForeignIgnored_quiescence_cnt = 1
@@ -167,10 +167,10 @@ State 8: <quiesce_live_bugForeignIgnored_quiescence_RepFail line 1240, col 3 to 
 /\ quiesce_live_bugForeignIgnored_quiescence_leaked = 0
 /\ quiesce_live_bugForeignIgnored_quiescence_rec = [C1 |-> "idle", C2 |-> "held"]
 /\ quiesce_live_bugForeignIgnored_quiescence_g = [ reopenEarly |-> FALSE,
-  overlapped |-> FALSE,
-  stillQuiesced |-> FALSE,
-  failStopped |-> TRUE,
-  dropped |-> TRUE,
+  overlapped |-> TRUE,
+  stillQuiesced |-> TRUE,
+  failStopped |-> FALSE,
+  dropped |-> FALSE,
   refusedBoot |-> FALSE,
   foreignChanged |-> FALSE ]
 /\ quiesce_live_bugForeignIgnored_quiescence_cnt = 1
@@ -190,10 +190,10 @@ State 9: <quiesce_live_bugForeignIgnored_quiescence_RepFail line 1240, col 3 to 
 /\ quiesce_live_bugForeignIgnored_quiescence_leaked = 0
 /\ quiesce_live_bugForeignIgnored_quiescence_rec = [C1 |-> "idle", C2 |-> "held"]
 /\ quiesce_live_bugForeignIgnored_quiescence_g = [ reopenEarly |-> FALSE,
-  overlapped |-> FALSE,
-  stillQuiesced |-> FALSE,
-  failStopped |-> TRUE,
-  dropped |-> TRUE,
+  overlapped |-> TRUE,
+  stillQuiesced |-> TRUE,
+  failStopped |-> FALSE,
+  dropped |-> FALSE,
   refusedBoot |-> FALSE,
   foreignChanged |-> FALSE ]
 /\ quiesce_live_bugForeignIgnored_quiescence_cnt = 1

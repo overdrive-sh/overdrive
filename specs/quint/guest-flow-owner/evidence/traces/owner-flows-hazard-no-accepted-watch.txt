@@ -1,4 +1,4 @@
-# owner-flows-hazard-no-accepted-watch: counterexample, 12 state(s) (from the TLC trace)
+# owner-flows-hazard-no-accepted-watch: counterexample, 13 state(s) (from the TLC trace)
 
 State 1
   act = "none"
@@ -37,43 +37,47 @@ State 2 [Provision]
   alloc = "Provisioned"
   gen = 1
 
-State 3 [VmStart]
+State 3 [Teardown]
+  alloc = "Retiring"
+
+State 4 [Release]
+  alloc = "Absent"
+
+State 5 [Provision]
+  alloc = "Provisioned"
+  gen = 2
+
+State 6 [VmStart]
   vmUp = TRUE
-  vmGen = 1
-
-State 4 [step]
-  flows = <<[st |-> "queued", gen |-> 1, req |-> 0, inFlight |-> FALSE]>>
-
-State 5 [step]
-  gSess = 2
-  sess = <<[st |-> "none", gen |-> 0], [st |-> "pending", gen |-> 1]>>
-
-State 6 [step]
-  sess = <<[st |-> "pending", gen |-> 1], [st |-> "pending", gen |-> 1]>>
+  vmGen = 2
 
 State 7 [step]
-  sess = <<[st |-> "reading", gen |-> 1], [st |-> "pending", gen |-> 1]>>
+  gSess = 2
+  sess = <<[st |-> "none", gen |-> 0], [st |-> "pending", gen |-> 2]>>
 
 State 8 [step]
-  sess = <<[st |-> "live", gen |-> 1], [st |-> "pending", gen |-> 1]>>
-  claim = 1
+  sess = <<[st |-> "none", gen |-> 0], [st |-> "reading", gen |-> 2]>>
 
-State 9 [Activate]
+State 9 [step]
+  sess = <<[st |-> "none", gen |-> 0], [st |-> "live", gen |-> 2]>>
+  claim = 2
+
+State 10 [Activate]
   act = "Activated"
   alloc = "Active"
 
-State 10 [step]
+State 11 [step]
   act = "none"
   dl = [ res |-> <<"pending">>, adm |-> {}, tout |-> {}, earlyDl |-> FALSE, lateReply |-> FALSE ]
-  hf = <<[st |-> "req", gen |-> 1]>>
-
-State 11 [step]
-  dl = [ res |-> <<"NoSession">>, adm |-> {}, tout |-> {}, earlyDl |-> FALSE, lateReply |-> FALSE ]
-  sess = <<[st |-> "closed", gen |-> 1], [st |-> "pending", gen |-> 1]>>
-  claim = 0
-  hf = <<[st |-> "closed", gen |-> 1]>>
+  hf = <<[st |-> "req", gen |-> 2]>>
 
 State 12 [step]
-  gf = <<[st |-> "acc", gen |-> 1, c |-> 0]>>
+  dl = [ res |-> <<"NoSession">>, adm |-> {}, tout |-> {}, earlyDl |-> FALSE, lateReply |-> FALSE ]
+  sess = <<[st |-> "none", gen |-> 0], [st |-> "closed", gen |-> 2]>>
+  claim = 0
+  hf = <<[st |-> "closed", gen |-> 2]>>
 
--> stutters forever in State 12
+State 13 [step]
+  gf = <<[st |-> "acc", gen |-> 2, c |-> 0]>>
+
+-> stutters forever in State 13

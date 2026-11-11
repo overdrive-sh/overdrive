@@ -42,27 +42,27 @@ State 3
   vmUp = true
 
 State 4
-  sess = Map(1 -> { gen: 1, st: "pending" }, 2 -> { gen: 0, st: "none" })
-  gSess = 1
+  flows = Map(1 -> { gen: 1, inFlight: false, req: 0, st: "queued" }, 2 -> { gen: 0, inFlight: false, req: 0, st: "none" })
 
 State 5
-  sess = Map(1 -> { gen: 1, st: "reading" }, 2 -> { gen: 0, st: "none" })
+  sess = Map(1 -> { gen: 0, st: "none" }, 2 -> { gen: 1, st: "pending" })
+  gSess = 2
 
 State 6
-  flows = Map(1 -> { gen: 0, inFlight: false, req: 0, st: "none" }, 2 -> { gen: 1, inFlight: false, req: 0, st: "queued" })
+  sess = Map(1 -> { gen: 0, st: "none" }, 2 -> { gen: 1, st: "reading" })
 
 State 7
-  claim = 1
-  sess = Map(1 -> { gen: 1, st: "live" }, 2 -> { gen: 0, st: "none" })
+  claim = 2
+  sess = Map(1 -> { gen: 0, st: "none" }, 2 -> { gen: 1, st: "live" })
 
 State 8
   alloc = "Active"
   act = "Activated"
 
 State 9
-  flows = Map(1 -> { gen: 0, inFlight: false, req: 0, st: "none" }, 2 -> { gen: 1, inFlight: false, req: 0, st: "accepted" })
+  flows = Map(1 -> { gen: 1, inFlight: false, req: 0, st: "accepted" }, 2 -> { gen: 0, inFlight: false, req: 0, st: "none" })
   act = "none"
 
 State 10
   claim = 0
-  sess = Map(1 -> { gen: 1, st: "closed" }, 2 -> { gen: 0, st: "none" })
+  sess = Map(1 -> { gen: 0, st: "none" }, 2 -> { gen: 1, st: "closed" })

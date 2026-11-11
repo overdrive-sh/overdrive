@@ -9711,6 +9711,94 @@ the lease `Retiring` until `release`.
 > the quint-modeler corrects the comment in the spec. The model abstracts control
 > messages, so no state changes.
 >
+> **CONFALIGN-2a — a refusal written to a session whose guest is gone is a
+> session loss, processed in the same dispatch (RULED, user approval 2026-11-11;
+> refines CONFALIGN-2, no production change).** CONFALIGN-2 says the
+> refusal changes no state "in the model". That holds only when the session
+> carrying the refusal can still be written. A session whose guest is gone
+> (model `sess.st == "dead"`: the VM stopped after the session went live, the
+> owner has not yet seen the loss) stays a live session to the owner until its
+> first I/O fails (K-A2′: a dead peer's failure surfaces at the first I/O; the
+> owner does not probe a session before writing, so the design has no earlier
+> observation of the loss, and `HostDeadSessionLoss` is the model's only other
+> way to process it). The refusal reader is registered per CONFALIGN-2, hands
+> `Refused { NotActive | Quiesced }` to the session writer, and
+> `io.write_record` fails (`owner_runtime.rs:427`: the writer arm yields `None`
+> on `is_err()`, which leaves the loop and ends the session task). The owner
+> closes the session as for any peer reset: claim released, every flow of the
+> CID aborted, pending dials ended `NoSession` (`owner_flows.qnt:566-574`). The
+> refused flow is closed with it. Nothing reaches the wire: the guest is gone.
+>
+> *Decision.* The production behaviour is the contract: a failed refusal write
+> is a session loss and is handled in the dispatch that attempted the write
+> (the same session-loss rules as `HostSessionLoss`; it does not wait for
+> `HostDeadSessionLoss`). Rejected: not writing the refusal when the writer is
+> "known down". The owner cannot know that before the write fails (K-A2′ above);
+> a pre-write liveness check would be a heuristic around an unobservable fact
+> (`.claude/rules/design.md` § "Design the correct mechanism"), and the write
+> is the only authoritative observation. Rejected: leaving the session open and
+> the flow closed with no loss processing, which would defer a loss the owner
+> has just observed and leave the claim held by a session whose task has ended.
+>
+> *Spec change (quint-modeler; `owner_flows.qnt`).*
+> 1. Split the loss action: `sessionLossWith(c, fl)` is `sessionLoss`'s body
+>    with `flows' = fl` in place of the current `flows'` expression;
+>    `sessionLoss(c)` becomes `sessionLossWith(c, if (BUG_NO_ABORT_ON_LOSS) flows else abortAll)`.
+>    Behaviour of every existing caller is unchanged.
+> 2. `HostAcceptFlow(f)`: guard unchanged (`flows.get(f).st == "queued"`).
+>    New predicate `refusalWriteFails` =
+>    `not(admissible) and alloc.in(Set("Provisioned","Active")) and claim != 0 and not(writerUp(sess.get(claim).gen))`
+>    (a refusal reader exists exactly when the CID is not Retiring and has a
+>    session, per CONFALIGN-2; the session carrying it is the claim holder; its
+>    guest is gone, which coincides with `sess.st == "dead"`).
+>    Effect: when `refusalWriteFails`, apply `sessionLossWith(claim, abortAll.set(f, {...flows.get(f), st: "closed"}))`
+>    (the refused flow is `queued`, which `abortAll` does not touch, so it is
+>    closed explicitly); otherwise the existing effect (`flows.get(f).st` becomes
+>    `accepted` if `admissible`, else `closed`; no other change). `conf_step'`
+>    and `gSess'` stay as written. An admissible accept onto a dead session is
+>    unchanged (no write happens, the loss waits for the next write or
+>    `HostDeadSessionLoss`).
+> 3. Replace the comment at 597-601: a refusal onto a session whose guest is
+>    gone ends the session (claim released, all flows aborted, the refused flow
+>    closed); onto a live session it changes nothing; unknown, Retiring or
+>    no-session CIDs close without a message.
+> 4. README action map (line 216): `HostAcceptFlow` gains "a refusal onto a
+>    session whose guest is gone is a session loss". Re-record evidence.
+>
+> *Checks affected.* No run, hazard, witness or invariant is added or removed.
+> Re-run `owner-flows` in full because `HostAcceptFlow` and `sessionLoss` change.
+> Expected to be unaffected: `SessionLossAbortsFlowsAndReconnectRestores` and
+> `QuiesceAbortsFlowsAndRefusesAdmissionUntilRestore` (their `HostAcceptFlow(2)`
+> runs with no live session or a live writer, so the refusal write succeeds or
+> no reader exists); `VmDeathMakesLiveSessionDeadThenLossIsProcessed` (uses
+> `HostDeadSessionLoss`, whose guard `st == "dead"` is still satisfiable because
+> the new path is only entered from `HostAcceptFlow`);
+> `StaleLaunchFlowIsClosedAtRequestReadWithNoMessage` (admissible accept).
+> `owner-flows-hazard-refusal-registers` (`TypedRefusalChangesNothing`) must be
+> read by the modeler: the refusal changes nothing only while the session can be
+> written, so the invariant's antecedent must exclude `refusalWriteFails`, or
+> the hazard's trace must still violate it from a live-writer state; any change
+> to that invariant is a modeler finding for approval, not an edit made here.
+> `owner-flows-hazard-no-abort-on-loss` is unaffected (it keeps `flows` through
+> `sessionLossWith`). The weak-fairness property on `HostDeadSessionLoss` is
+> unaffected (the new path only removes dead sessions earlier).
+>
+> *Driver expectation (`quint_owner_flows.rs` `host_accept_flow`).* When the
+> model's `refusalWriteFails` holds, the driver releases the accept and requires:
+> no control message observed on the session (the guest is gone; the refusal is
+> dropped by the failed write, never delivered); the flow closed; the session
+> closed (claim released, so projected `claim` 0 and `sess` closed). The Provisioned
+> and quiesced trace `…VmStop, HostAcceptFlow(1)` then agrees: `claim` 0,
+> `sess(2)` closed, `flows(1)` closed. When the session's guest is up the
+> existing expectation stands: exactly one `Refused { NotActive }` (phase not
+> Active) or `Refused { Quiesced }` (Active and quiesced).
+>
+> *Production.* Unchanged: no code, API, wire or persisted-format change; the
+> replay disagreement was a spec omission (the same abstraction slip as
+> CONFALIGN-2's "no state change"), not a production defect. No Lifecycle Gate
+> change. The seeded replay (`QUINT_SEED=0xb8b073d`, `flows_conf_randomized_traces`)
+> is the regression witness once the spec is corrected.
+>
 > **CONFALIGN-3 — the guest closes a paired flow's descriptors in a dispatch of
 > its own, after the end record, on every abort path.** The design (§ Owner
 > aborts, "abort the pair (its record is queued before `abort` returns), then
