@@ -597,6 +597,7 @@ mod tests {
     }
 
     /// CONTRACT_SHAPE: pure-function.
+    #[allow(clippy::doc_markdown, reason = "exact per-test contract declaration")]
     #[test]
     fn evaluate_does_not_match_programs_across_bpf_objects() {
         let baselines = vec![BaselineRecord {
@@ -637,6 +638,7 @@ mod tests {
     }
 
     /// CONTRACT_SHAPE: pure-function.
+    #[allow(clippy::doc_markdown, reason = "exact per-test contract declaration")]
     #[test]
     fn parse_baseline_file_requires_object_identity() {
         let text = "prog=bar verified_insns=42\n";
