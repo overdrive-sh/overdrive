@@ -256,28 +256,28 @@ fn sad_waiting_for_both_locks_cannot_restart_the_existing_admission_budget() {
     );
     owner.wait_for(&owner.directory.join("phase.v1"), "phase=waiting_for_lease");
     thread::sleep(Duration::from_millis(1100));
-    drop(barrier_holder);
-    let mut shared_held = false;
+    drop(tree_holder);
+    let mut tree_held = false;
     for _ in 0..30 {
         let status = Command::new("/usr/bin/flock")
             .args(["--exclusive", "--nonblock"])
-            .arg(&barrier)
+            .arg(&tree)
             .arg("true")
             .status()
             .expect("kernel lock observation");
         if status.code() == Some(1) {
-            shared_held = true;
+            tree_held = true;
             break;
         }
         thread::sleep(Duration::from_millis(10));
     }
     assert!(
-        shared_held,
-        "actual ordinary owner must progress from maintenance to checkout contention"
+        tree_held,
+        "actual ordinary owner must progress from checkout to maintenance contention"
     );
     thread::sleep(Duration::from_millis(1100));
-    drop(tree_holder);
-    // A wrong new two-second budget reaches preparing after checkout is freed.
+    drop(barrier_holder);
+    // A wrong new two-second budget reaches preparing after the barrier is freed.
     // End it via its real ABORT input so the eventual exact cause exposes that
     // defect without starting a body or leaving a fixture process behind.
     for _ in 0..100 {
@@ -295,6 +295,41 @@ fn sad_waiting_for_both_locks_cannot_restart_the_existing_admission_budget() {
     owner.terminal();
     let terminal = fields(&owner.directory.join("terminal.v1"));
     assert_eq!(terminal["kind"], "runner");
-    assert_eq!(terminal["error"], "checkout_timeout");
+    assert_eq!(terminal["error"], "maintenance_timeout");
     assert!(!owner.source.join("must-not-run").exists());
+}
+
+/// CONTRACT_SHAPE: bounded-change (a run queued behind its own checkout holds
+/// neither barrier mode; an unrelated shared admission is granted meanwhile).
+#[test]
+fn exclusive_run_waiting_for_its_checkout_never_holds_the_maintenance_barrier() {
+    let fixture = Fixture::new();
+    let mut first =
+        Durable::spawn(&fixture, RUN_A, "same-tree", "ordinary", &waiting_body(&fixture, "held"));
+    first.preparing();
+    let mut second = Durable::spawn_with_timeout(
+        &fixture,
+        RUN_B,
+        "same-tree",
+        "exclusive",
+        "printf forbidden > must-not-run",
+        "30",
+    );
+    second.wait_for(&second.directory.join("phase.v1"), "phase=waiting_for_lease");
+    thread::sleep(Duration::from_millis(500));
+    let barrier = fixture.temp.path().join("maintenance.lock");
+    let status = Command::new("/usr/bin/flock")
+        .args(["--shared", "--nonblock"])
+        .arg(&barrier)
+        .arg("true")
+        .status()
+        .expect("kernel lock observation");
+    assert_eq!(
+        status.code(),
+        Some(0),
+        "a run waiting for its own checkout must not hold the node-wide barrier"
+    );
+    first.send("ABORT");
+    first.terminal();
+    drop(second);
 }

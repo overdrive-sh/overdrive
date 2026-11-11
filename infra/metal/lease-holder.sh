@@ -937,6 +937,31 @@ execution_class=${execution_class}
   # was printed before any durable record existed.
   printf 'OVERDRIVE_METAL_RUN_REGISTERED run_id=%s\n' "$token"
 
+  # Lock order is always checkout lease first, then the node-wide
+  # physical-maintenance barrier (shared for ordinary, exclusive for
+  # --exclusive).  A run therefore never holds the barrier while waiting for
+  # a checkout lease only it needs; the barrier is taken only by holders of a
+  # checkout lease and nobody waits for a checkout lease while holding the
+  # barrier, so no wait cycle exists.  Release is the reverse (process exit).
+  if ! exec 10>"$tree_lock_path"; then
+    write_terminal_runner "$run_directory" "$token" runner_preparation_failed || true
+    terminal_written=1
+    return 75
+  fi
+  if wait_for_prestart_lock -x 10 "$deadline_ns"; then
+    :
+  else
+    wait_result=$?
+    if [ "$wait_result" -eq 2 ]; then
+      write_terminal_runner "$run_directory" "$token" controller_eof_before_start || true
+      terminal_written=1
+      return 75
+    fi
+    write_terminal_runner "$run_directory" "$token" checkout_timeout || true
+    terminal_written=1
+    return 75
+  fi
+
   if ! exec 8>"$maintenance_lock_path"; then
     write_terminal_runner "$run_directory" "$token" runner_preparation_failed || true
     terminal_written=1
@@ -988,25 +1013,6 @@ execution_class=${execution_class}
       terminal_written=1
       return 78
     fi
-  fi
-
-  if ! exec 10>"$tree_lock_path"; then
-    write_terminal_runner "$run_directory" "$token" runner_preparation_failed || true
-    terminal_written=1
-    return 75
-  fi
-  if wait_for_prestart_lock -x 10 "$deadline_ns"; then
-    :
-  else
-    wait_result=$?
-    if [ "$wait_result" -eq 2 ]; then
-      write_terminal_runner "$run_directory" "$token" controller_eof_before_start || true
-      terminal_written=1
-      return 75
-    fi
-    write_terminal_runner "$run_directory" "$token" checkout_timeout || true
-    terminal_written=1
-    return 75
   fi
 
   if ! {
