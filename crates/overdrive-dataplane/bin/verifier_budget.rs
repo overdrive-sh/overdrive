@@ -9,7 +9,7 @@
 //!
 //! 1. [`parse_baseline_file`] — line-by-line key=value parser that
 //!    skips `#`-comment and blank lines; returns one
-//!    [`BaselineRecord`] per data line.
+//!    [`BaselineRecord`] per data line, keyed by object and program.
 //! 2. [`parse_measured_output`] — same key=value parser used to
 //!    re-parse measurements written by the gate binary itself (kept as
 //!    a separate entry point so a future format pivot — e.g. JSON dump
@@ -72,11 +72,14 @@ use thiserror::Error;
 /// One row of `perf-baseline/main/verifier-budget/<prog>.txt`.
 ///
 /// Per-file format documented inline in the baseline files: leading
-/// `#` comments + one or more `key=value` data lines. The parser keys
-/// off `prog=` and `verified_insns=` — every other key (`file=`,
-/// `verdict=`) is metadata and is ignored at the gate.
+/// `#` comments + one or more `key=value` data lines. Both `file=` and
+/// `prog=` identify the measured program; `verified_insns=` is its
+/// baseline count. `verdict=` remains informational.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BaselineRecord {
+    /// Object path recorded in the baseline (`target/bpf/overdrive_bpf.o`
+    /// or `target/bpf/overdrive_guest_bpf.o`).
+    pub object: String,
     /// Program name (e.g. `xdp_service_map_lookup`). Matches the
     /// `prog=<name>` field in baseline files and in measured output.
     pub program: String,
@@ -92,6 +95,8 @@ pub struct BaselineRecord {
 /// and call sites, not the baseline-file surface.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MeasuredRecord {
+    /// Object path from which the gate loaded this program.
+    pub object: String,
     /// Program name (matches [`BaselineRecord::program`] for join).
     pub program: String,
     /// Measured verifier instruction count for this gate run.
@@ -171,6 +176,8 @@ pub enum BreachKind {
 /// One per program that failed.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Breach {
+    /// Object path for the baseline and measurement.
+    pub object: String,
     pub program: String,
     pub baseline_insns: u64,
     /// Measured value when present. `0` for
@@ -202,9 +209,12 @@ pub fn evaluate(
     let mut breaches: Vec<Breach> = Vec::new();
 
     for baseline in baselines {
-        let candidate = candidates.iter().find(|c| c.program == baseline.program);
+        let candidate = candidates
+            .iter()
+            .find(|c| c.object == baseline.object && c.program == baseline.program);
         let Some(candidate) = candidate else {
             breaches.push(Breach {
+                object: baseline.object.clone(),
                 program: baseline.program.clone(),
                 baseline_insns: baseline.verified_insns,
                 measured_insns: 0,
@@ -231,6 +241,7 @@ pub fn evaluate(
         // issue #201.
         if growth_fraction > policy.max_growth_fraction && growth_insns > policy.max_growth_insns {
             breaches.push(Breach {
+                object: baseline.object.clone(),
                 program: baseline.program.clone(),
                 baseline_insns: baseline.verified_insns,
                 measured_insns: candidate.verified_insns,
@@ -247,6 +258,7 @@ pub fn evaluate(
             (policy.ceiling_insns as f64) * (1.0 - policy.ceiling_proximity_fraction);
         if measured_f >= ceiling_threshold {
             breaches.push(Breach {
+                object: baseline.object.clone(),
                 program: baseline.program.clone(),
                 baseline_insns: baseline.verified_insns,
                 measured_insns: candidate.verified_insns,
@@ -266,6 +278,8 @@ pub fn evaluate(
 /// per `.claude/rules/development.md` § Errors.
 #[derive(Debug, Error)]
 pub enum ParseError {
+    #[error("line {lineno}: missing `file=<object>` in {line:?}")]
+    MissingObject { lineno: usize, line: String },
     #[error("line {lineno}: missing `prog=<name>` in {line:?}")]
     MissingProg { lineno: usize, line: String },
     #[error("line {lineno}: missing `verified_insns=<N>` in {line:?}")]
@@ -284,9 +298,9 @@ pub type Result<T, E = ParseError> = std::result::Result<T, E>;
 /// Parse a `perf-baseline/main/verifier-budget/<prog>.txt` file.
 ///
 /// Skips `#`-comment lines and blank lines; every remaining line MUST
-/// contain `prog=<name>` and `verified_insns=<N>` somewhere in its
-/// space-separated key=value pairs. Other keys (`file=`, `verdict=`)
-/// are ignored.
+/// contain `file=<object>`, `prog=<name>` and `verified_insns=<N>`
+/// somewhere in its space-separated key=value pairs. Other keys (such
+/// as `verdict=`) are ignored.
 ///
 /// # Errors
 ///
@@ -299,8 +313,8 @@ pub fn parse_baseline_file(text: &str) -> Result<Vec<BaselineRecord>> {
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
-        let (program, verified_insns) = parse_kv_line(line, lineno + 1)?;
-        records.push(BaselineRecord { program, verified_insns });
+        let (object, program, verified_insns) = parse_kv_line(line, lineno + 1)?;
+        records.push(BaselineRecord { object, program, verified_insns });
     }
     Ok(records)
 }
@@ -319,15 +333,16 @@ pub fn parse_measured_output(text: &str) -> Result<Vec<MeasuredRecord>> {
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
-        let (program, verified_insns) = parse_kv_line(line, lineno + 1)?;
-        records.push(MeasuredRecord { program, verified_insns });
+        let (object, program, verified_insns) = parse_kv_line(line, lineno + 1)?;
+        records.push(MeasuredRecord { object, program, verified_insns });
     }
     Ok(records)
 }
 
-/// Parse one `key=value` data line into `(prog, verified_insns)`.
+/// Parse one `key=value` data line into `(file, prog, verified_insns)`.
 /// `lineno` is 1-based and used only for error context.
-fn parse_kv_line(line: &str, lineno: usize) -> Result<(String, u64)> {
+fn parse_kv_line(line: &str, lineno: usize) -> Result<(String, String, u64)> {
+    let mut object: Option<String> = None;
     let mut prog: Option<String> = None;
     let mut insns: Option<u64> = None;
     for token in line.split_whitespace() {
@@ -335,6 +350,7 @@ fn parse_kv_line(line: &str, lineno: usize) -> Result<(String, u64)> {
             continue;
         };
         match key {
+            "file" => object = Some(value.to_string()),
             "prog" => prog = Some(value.to_string()),
             "verified_insns" => {
                 let parsed: u64 = value.parse().map_err(|source| ParseError::NotAU64 {
@@ -347,10 +363,12 @@ fn parse_kv_line(line: &str, lineno: usize) -> Result<(String, u64)> {
             _ => {}
         }
     }
+    let object =
+        object.ok_or_else(|| ParseError::MissingObject { lineno, line: line.to_string() })?;
     let prog = prog.ok_or_else(|| ParseError::MissingProg { lineno, line: line.to_string() })?;
     let insns =
         insns.ok_or_else(|| ParseError::MissingVerifiedInsns { lineno, line: line.to_string() })?;
-    Ok((prog, insns))
+    Ok((object, prog, insns))
 }
 
 /// Render a [`GateOutcome::Fail`] as a structured human-readable
@@ -366,7 +384,8 @@ pub fn render_failure(breaches: &[Breach]) -> String {
                 let growth_insns = breach.measured_insns.saturating_sub(breach.baseline_insns);
                 let _ = writeln!(
                     out,
-                    "  • {} — verified_insns: baseline={}, measured={}, growth=+{} insns / {:.2}% (threshold > {} insns AND > {:.0}%)",
+                    "  • {}::{} — verified_insns: baseline={}, measured={}, growth=+{} insns / {:.2}% (threshold > {} insns AND > {:.0}%)",
+                    breach.object,
                     breach.program,
                     breach.baseline_insns,
                     breach.measured_insns,
@@ -380,7 +399,8 @@ pub fn render_failure(breaches: &[Breach]) -> String {
                 let proximity = (breach.measured_insns as f64) / (*ceiling_insns as f64) * 100.0;
                 let _ = writeln!(
                     out,
-                    "  • {} — verified_insns={} approaches ceiling {} ({:.2}% of ceiling; threshold ≥ {:.0}%)",
+                    "  • {}::{} — verified_insns={} approaches ceiling {} ({:.2}% of ceiling; threshold ≥ {:.0}%)",
+                    breach.object,
                     breach.program,
                     breach.measured_insns,
                     ceiling_insns,
@@ -391,8 +411,8 @@ pub fn render_failure(breaches: &[Breach]) -> String {
             BreachKind::MissingFromCandidates => {
                 let _ = writeln!(
                     out,
-                    "  • {} — baseline names this program but the gate produced no measurement (baseline={}); silent baseline rot — re-baseline or remove the file",
-                    breach.program, breach.baseline_insns,
+                    "  • {}::{} — baseline names this program but the gate produced no measurement (baseline={}); silent baseline rot — re-baseline or remove the file",
+                    breach.object, breach.program, breach.baseline_insns,
                 );
             }
         }
@@ -407,7 +427,11 @@ pub fn render_failure(breaches: &[Breach]) -> String {
 pub fn render_measured(records: &[MeasuredRecord]) -> String {
     let mut out = String::new();
     for r in records {
-        let _ = writeln!(out, "prog={} verified_insns={}", r.program, r.verified_insns);
+        let _ = writeln!(
+            out,
+            "file={} prog={} verified_insns={}",
+            r.object, r.program, r.verified_insns
+        );
     }
     out
 }
@@ -417,10 +441,28 @@ pub fn render_measured(records: &[MeasuredRecord]) -> String {
 mod tests {
     use super::*;
 
+    const TEST_OBJECT: &str = "target/bpf/overdrive_bpf.o";
+
+    fn baseline(program: &str, verified_insns: u64) -> BaselineRecord {
+        BaselineRecord {
+            object: TEST_OBJECT.to_owned(),
+            program: program.to_owned(),
+            verified_insns,
+        }
+    }
+
+    fn measured(program: &str, verified_insns: u64) -> MeasuredRecord {
+        MeasuredRecord {
+            object: TEST_OBJECT.to_owned(),
+            program: program.to_owned(),
+            verified_insns,
+        }
+    }
+
     #[test]
     fn evaluate_passes_when_candidates_match_baseline_exactly() {
-        let baselines = vec![BaselineRecord { program: "x".to_string(), verified_insns: 1000 }];
-        let candidates = vec![MeasuredRecord { program: "x".to_string(), verified_insns: 1000 }];
+        let baselines = vec![baseline("x", 1000)];
+        let candidates = vec![measured("x", 1000)];
         let outcome = evaluate(&baselines, &candidates, &GatePolicy::default());
         assert!(matches!(outcome, GateOutcome::Pass));
     }
@@ -432,8 +474,8 @@ mod tests {
         // the 5% relative threshold, but only 2 insns, far below the
         // 50-insn absolute floor. Requiring BOTH thresholds keeps tiny
         // programs editable.
-        let baselines = vec![BaselineRecord { program: "cgroup".to_string(), verified_insns: 26 }];
-        let candidates = vec![MeasuredRecord { program: "cgroup".to_string(), verified_insns: 28 }];
+        let baselines = vec![baseline("cgroup", 26)];
+        let candidates = vec![measured("cgroup", 28)];
         let outcome = evaluate(&baselines, &candidates, &GatePolicy::default());
         assert!(
             matches!(outcome, GateOutcome::Pass),
@@ -446,10 +488,8 @@ mod tests {
         // The large-XDP case: 150_000 → 160_000 is +10_000 insns =
         // 6.67% — above the 5% relative threshold AND far above the
         // 50-insn absolute floor. Both tripped → breach.
-        let baselines =
-            vec![BaselineRecord { program: "xdp".to_string(), verified_insns: 150_000 }];
-        let candidates =
-            vec![MeasuredRecord { program: "xdp".to_string(), verified_insns: 160_000 }];
+        let baselines = vec![baseline("xdp", 150_000)];
+        let candidates = vec![measured("xdp", 160_000)];
         let outcome = evaluate(&baselines, &candidates, &GatePolicy::default());
         let breaches = match outcome {
             GateOutcome::Pass => {
@@ -471,10 +511,8 @@ mod tests {
         // 0.04% — below the 5% relative threshold. The AND requires the
         // relative half too, so this passes. Guards against the gate
         // collapsing to absolute-only.
-        let baselines =
-            vec![BaselineRecord { program: "xdp".to_string(), verified_insns: 150_000 }];
-        let candidates =
-            vec![MeasuredRecord { program: "xdp".to_string(), verified_insns: 150_060 }];
+        let baselines = vec![baseline("xdp", 150_000)];
+        let candidates = vec![measured("xdp", 150_060)];
         let outcome = evaluate(&baselines, &candidates, &GatePolicy::default());
         assert!(
             matches!(outcome, GateOutcome::Pass),
@@ -490,22 +528,14 @@ mod tests {
         // (== floor) and 50% (>> 5%): the relative half is tripped, so
         // only the strict-greater absolute comparison keeps this a pass.
         let policy = GatePolicy::default();
-        let at_floor = evaluate(
-            &[BaselineRecord { program: "p".to_string(), verified_insns: 100 }],
-            &[MeasuredRecord { program: "p".to_string(), verified_insns: 150 }],
-            &policy,
-        );
+        let at_floor = evaluate(&[baseline("p", 100)], &[measured("p", 150)], &policy);
         assert!(
             matches!(at_floor, GateOutcome::Pass),
             "+50 insns == floor must pass (strict >): {at_floor:?}"
         );
         // One instruction past the floor (51 insns, still 51% relative)
         // tips both halves → breach.
-        let past_floor = evaluate(
-            &[BaselineRecord { program: "p".to_string(), verified_insns: 100 }],
-            &[MeasuredRecord { program: "p".to_string(), verified_insns: 151 }],
-            &policy,
-        );
+        let past_floor = evaluate(&[baseline("p", 100)], &[measured("p", 151)], &policy);
         assert!(
             matches!(past_floor, GateOutcome::Fail { .. }),
             "+51 insns > floor with relative also tripped must fail: {past_floor:?}"
@@ -522,11 +552,7 @@ mod tests {
         // fragility): baseline 1000 → 1500 is +500 insns (>> 50 floor)
         // and exactly 50%.
         let policy = GatePolicy { max_growth_fraction: 0.5, ..GatePolicy::default() };
-        let outcome = evaluate(
-            &[BaselineRecord { program: "p".to_string(), verified_insns: 1000 }],
-            &[MeasuredRecord { program: "p".to_string(), verified_insns: 1500 }],
-            &policy,
-        );
+        let outcome = evaluate(&[baseline("p", 1000)], &[measured("p", 1500)], &policy);
         assert!(
             matches!(outcome, GateOutcome::Pass),
             "growth exactly at the relative threshold must pass (strict >): {outcome:?}"
@@ -540,6 +566,7 @@ mod tests {
         // threshold — a viewer reading the gate output needs all of
         // them to understand why the breach fired.
         let breaches = vec![Breach {
+            object: TEST_OBJECT.to_owned(),
             program: "xdp_service_map_lookup".to_string(),
             baseline_insns: 150_000,
             measured_insns: 160_000,
@@ -547,6 +574,7 @@ mod tests {
             kind: BreachKind::GrowthExceeded { threshold_fraction: 0.05, threshold_insns: 50 },
         }];
         let rendered = render_failure(&breaches);
+        assert!(rendered.contains(TEST_OBJECT), "names the ELF object: {rendered:?}");
         assert!(rendered.contains("xdp_service_map_lookup"), "names the program: {rendered:?}");
         assert!(rendered.contains("150000"), "echoes the baseline: {rendered:?}");
         assert!(rendered.contains("160000"), "echoes the measurement: {rendered:?}");
@@ -557,8 +585,7 @@ mod tests {
 
     #[test]
     fn evaluate_fails_when_baseline_program_missing_from_candidates() {
-        let baselines =
-            vec![BaselineRecord { program: "missing_prog".to_string(), verified_insns: 1000 }];
+        let baselines = vec![baseline("missing_prog", 1000)];
         let candidates: Vec<MeasuredRecord> = vec![];
         let outcome = evaluate(&baselines, &candidates, &GatePolicy::default());
         let breaches = match outcome {
@@ -566,6 +593,32 @@ mod tests {
             GateOutcome::Fail { breaches } => breaches,
         };
         assert_eq!(breaches.len(), 1);
+        assert!(matches!(breaches[0].kind, BreachKind::MissingFromCandidates));
+    }
+
+    /// CONTRACT_SHAPE: pure-function.
+    #[test]
+    fn evaluate_does_not_match_programs_across_bpf_objects() {
+        let baselines = vec![BaselineRecord {
+            object: "target/bpf/overdrive_guest_bpf.o".to_owned(),
+            program: "listen_tcp".to_owned(),
+            verified_insns: 700,
+        }];
+        let candidates = vec![MeasuredRecord {
+            object: TEST_OBJECT.to_owned(),
+            program: "listen_tcp".to_owned(),
+            verified_insns: 700,
+        }];
+
+        let outcome = evaluate(&baselines, &candidates, &GatePolicy::default());
+        let breaches = match outcome {
+            GateOutcome::Pass => {
+                panic!("a dataplane measurement cannot satisfy the guest baseline")
+            }
+            GateOutcome::Fail { breaches } => breaches,
+        };
+        assert_eq!(breaches.len(), 1);
+        assert_eq!(breaches[0].object, "target/bpf/overdrive_guest_bpf.o");
         assert!(matches!(breaches[0].kind, BreachKind::MissingFromCandidates));
     }
 
@@ -583,12 +636,17 @@ mod tests {
         assert!(matches!(err, ParseError::MissingProg { .. }));
     }
 
+    /// CONTRACT_SHAPE: pure-function.
+    #[test]
+    fn parse_baseline_file_requires_object_identity() {
+        let text = "prog=bar verified_insns=42\n";
+        let err = parse_baseline_file(text).expect_err("missing file must error");
+        assert!(matches!(err, ParseError::MissingObject { .. }));
+    }
+
     #[test]
     fn render_measured_round_trips_through_parse() {
-        let original = vec![
-            MeasuredRecord { program: "a".to_string(), verified_insns: 100 },
-            MeasuredRecord { program: "b".to_string(), verified_insns: 200 },
-        ];
+        let original = vec![measured("a", 100), measured("b", 200)];
         let rendered = render_measured(&original);
         let parsed = parse_measured_output(&rendered).expect("round-trip");
         assert_eq!(parsed, original);

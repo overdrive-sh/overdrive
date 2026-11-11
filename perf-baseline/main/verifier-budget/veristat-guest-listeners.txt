@@ -1,0 +1,17 @@
+# Verifier-budget baseline — D13 guest listener programs
+#
+# Initial baseline for the three separate workload-listener programs in
+# `target/bpf/overdrive_guest_bpf.o`. Measured through the existing
+# `verifier-regress` gate on the pinned Linux kernel 7.0.0-38-generic.
+# Each new guest program must remain at or below 500,000 verified
+# instructions (50% of the privileged one-million-instruction ceiling).
+# Subsequent runs also apply the existing verifier-regress growth policy.
+# These values are measured for the accepted separate `listen_tcp`,
+# `post_bind4`, and `post_bind6` programs; they are not inferred from
+# V37's superseded merged `tcp_correlation` arm.
+#
+# Object identity is part of every baseline row so a dataplane ELF
+# measurement cannot satisfy a guest-program baseline.
+file=target/bpf/overdrive_guest_bpf.o prog=listen_tcp verdict=success verified_insns=91
+file=target/bpf/overdrive_guest_bpf.o prog=post_bind4 verdict=success verified_insns=31
+file=target/bpf/overdrive_guest_bpf.o prog=post_bind6 verdict=success verified_insns=70

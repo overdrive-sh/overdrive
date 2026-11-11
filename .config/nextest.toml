@@ -216,6 +216,13 @@ test-group = 'trybuild'
 [test-groups.host-kernel-shared]
 max-threads = 1
 
+# The guest-listener native real-boot bodies compose the production server,
+# root-cgroup dataplane and Cloud Hypervisor on the host. Keep the module in
+# the same single-writer group as the other native `run_server` boots.
+[[profile.default.overrides]]
+filter = 'package(overdrive-control-plane) & binary(integration) & test(guest_listener_real_boot)'
+test-group = 'host-kernel-shared'
+
 # remove-legacy-exec-workload-driver step 01-03 — the VM path now provisions
 # its current netns/veth/TAP plan even when the mTLS worker is not composed.
 # These production-server simulations intentionally use the real host network

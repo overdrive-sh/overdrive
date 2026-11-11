@@ -59,7 +59,7 @@ const HEAD: &str = "overdrive.transport=vsock2,addr=100.95.0.7,dns=100.95.0.1,la
 /// GUEST_UDP_SLOTS - 1`), spelled out so the oracle does not depend on the
 /// scaffolded `guest_reserved_ports()`.
 const RESERVED: RangeInclusive<u16> = 61_000..=62_024;
-const ALL_PROGRAMS: [GuestProgram; 7] = [
+const ALL_PROGRAMS: [GuestProgram; 10] = [
     GuestProgram::TcpCorrelation,
     GuestProgram::TcpCorrelationCandidate,
     GuestProgram::Connect4,
@@ -67,6 +67,9 @@ const ALL_PROGRAMS: [GuestProgram; 7] = [
     GuestProgram::Getpeername4,
     GuestProgram::Recvmsg4,
     GuestProgram::SockRelease,
+    GuestProgram::ListenTcp,
+    GuestProgram::ListenUdp4,
+    GuestProgram::ListenUdp6,
 ];
 
 fn launch() -> LaunchToken {
@@ -481,6 +484,9 @@ fn label_enums_render_lower_snake_case() {
         "getpeername4",
         "recvmsg4",
         "sock_release",
+        "listen_tcp",
+        "post_bind4",
+        "post_bind6",
     ];
     for (program, label) in ALL_PROGRAMS.into_iter().zip(labels) {
         assert_eq!(program.as_str(), label);
@@ -728,14 +734,14 @@ proptest! {
 // ---------------------------------------------------------------------------
 
 /// A clean run calls every step once, in the pinned order — two-object map
-/// preparation, then the seven capture programs, then the forwarder module,
+/// preparation, then the ten guest programs, then the forwarder module,
 /// its context and the inbound listener — and returns `Ok`.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
 fn configure_runs_every_step_in_the_pinned_order() {
     let mut ops = RecordingOps::default();
     configure_guest_transport(&token(), &mut ops).expect("no step fails");
-    assert_eq!(ops.calls.len(), 8 + 1_024 + 1 + 14 + 3);
+    assert_eq!(ops.calls.len(), 8 + 1_024 + 1 + 20 + 3);
     assert_eq!(ops.calls, expected_order());
     let prepare =
         ops.calls.iter().position(|s| *s == Step::PrepareGuestPrograms).expect("preparation");

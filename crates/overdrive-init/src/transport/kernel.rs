@@ -7,12 +7,13 @@ use std::ffi::CString;
 use std::fs::{self, File};
 use std::io;
 use std::net::{Ipv4Addr, SocketAddrV4, TcpListener, UdpSocket};
-use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+use std::num::NonZeroU16;
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use aya::maps::{Array, Queue};
+use aya::maps::{Array, MapData, PerCpuArray, Queue, RingBuf};
 use aya::programs::{CgroupAttachMode, CgroupSock, CgroupSockAddr, FEntry, SockOps};
 use aya::{Btf, Ebpf, EbpfError, EbpfLoader};
 use nix::errno::Errno;
@@ -23,6 +24,7 @@ use nix::sys::socket::{
     AddressFamily, NetlinkAddr, SockFlag, SockProtocol, SockType, VsockAddr, bind, recv, sendto,
     socket,
 };
+use overdrive_core::dataplane::backend_key::Proto;
 use overdrive_core::guest_transport::forwarder::{
     ForwarderError, ForwarderOp, ForwarderProbeObservation, ForwarderProbeStage,
 };
@@ -39,6 +41,7 @@ use super::{
 
 const DUMMY_IFNAME: &str = "ovd0";
 const CGROUP_PATH: &str = "/sys/fs/cgroup";
+const WORKLOAD_CGROUP_PATH: &str = "/sys/fs/cgroup/workload";
 const CGROUP2_FS_MAGIC: libc::c_long = 0x6367_7270;
 const BPF_FS_PATH: &str = "/sys/fs/bpf";
 const BPF_FS_MAGIC: libc::c_long = 0xcafe_4a11;
@@ -116,12 +119,56 @@ static STAGING_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 pub(crate) struct KernelGuestTransportOps {
     pub(crate) token: Option<GuestTransportToken>,
     pub(crate) cgroup: Option<File>,
+    workload_cgroup: Option<File>,
     pub(crate) tcp_intake: Option<TcpListener>,
     pub(crate) udp_slots: Vec<UdpSocket>,
     pub(crate) inbound_listener: Option<OwnedFd>,
     pub(crate) bpf: Option<Ebpf>,
     candidate_bpf: Option<Ebpf>,
     pub(crate) forwarder: Option<KernelFlowForwarder>,
+}
+
+/// The child cgroup and listen-event reader held by PID 1 while it supervises
+/// the workload. The BPF object and its links remain owned by the guest-flow
+/// owner thread.
+pub(crate) struct GuestListenerRuntime {
+    workload_cgroup: File,
+    events: RingBuf<MapData>,
+    counters: PerCpuArray<MapData, u64>,
+}
+
+impl GuestListenerRuntime {
+    /// The cgroup fd used by `clone3(CLONE_INTO_CGROUP)`.
+    pub(crate) fn cgroup_fd(&self) -> RawFd {
+        self.workload_cgroup.as_raw_fd()
+    }
+
+    /// Returns the next valid kernel report, dropping malformed ring records.
+    pub(crate) fn next_event(&mut self) -> Option<(Proto, NonZeroU16)> {
+        loop {
+            let item = self.events.next()?;
+            let bytes: &[u8] = &item;
+            if bytes.len() != 8 {
+                continue;
+            }
+            let protocol = u32::from_ne_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+            let raw_port = u32::from_ne_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]);
+            let protocol = match protocol {
+                6 => Proto::Tcp,
+                17 => Proto::Udp,
+                _ => continue,
+            };
+            let Ok(port) = u16::try_from(raw_port) else { continue };
+            let Some(port) = NonZeroU16::new(port) else { continue };
+            return Some((protocol, port));
+        }
+    }
+
+    /// The drop counter remains readable from the guest without adding a wire
+    /// or host reporting surface.
+    pub(crate) fn dropped_events(&self) -> Result<u64, aya::maps::MapError> {
+        self.counters.get(&0, 0).map(|counts| counts.iter().copied().sum())
+    }
 }
 
 impl KernelGuestTransportOps {
@@ -132,6 +179,7 @@ impl KernelGuestTransportOps {
         Self {
             token,
             cgroup: None,
+            workload_cgroup: None,
             tcp_intake: None,
             udp_slots: Vec::with_capacity(usize::from(GUEST_UDP_SLOTS)),
             inbound_listener: None,
@@ -139,6 +187,29 @@ impl KernelGuestTransportOps {
             candidate_bpf: None,
             forwarder: None,
         }
+    }
+
+    pub(crate) fn take_listener_runtime(
+        &mut self,
+    ) -> Result<GuestListenerRuntime, GuestTransportSetupError> {
+        let workload_cgroup = self
+            .workload_cgroup
+            .take()
+            .ok_or(GuestTransportSetupError::WorkloadCgroupUnavailable)?;
+        let bpf = self.bpf.as_mut().ok_or(GuestTransportSetupError::GuestBpfUnavailable)?;
+        let event_map = bpf
+            .take_map("LISTEN_EVENTS")
+            .ok_or(GuestTransportSetupError::ListenerMapMissing { map: "LISTEN_EVENTS" })?;
+        let events = RingBuf::try_from(event_map).map_err(|source| {
+            GuestTransportSetupError::ListenerMap { map: "LISTEN_EVENTS", source }
+        })?;
+        let counter_map = bpf
+            .take_map("LISTEN_COUNTERS")
+            .ok_or(GuestTransportSetupError::ListenerMapMissing { map: "LISTEN_COUNTERS" })?;
+        let counters = PerCpuArray::try_from(counter_map).map_err(|source| {
+            GuestTransportSetupError::ListenerMap { map: "LISTEN_COUNTERS", source }
+        })?;
+        Ok(GuestListenerRuntime { workload_cgroup, events, counters })
     }
 
     fn initialize_guest_maps(&mut self) -> Result<(), EbpfError> {
@@ -173,6 +244,24 @@ impl KernelGuestTransportOps {
             .try_clone()
     }
 
+    fn create_workload_cgroup(&mut self) -> io::Result<()> {
+        drop(self.cgroup_file()?);
+        fs::create_dir(WORKLOAD_CGROUP_PATH)?;
+        self.workload_cgroup = Some(File::open(WORKLOAD_CGROUP_PATH)?);
+        Ok(())
+    }
+
+    fn program_cgroup_file(&mut self, program: GuestProgram) -> io::Result<File> {
+        if program.is_workload_listener() {
+            return self
+                .workload_cgroup
+                .as_ref()
+                .ok_or_else(|| io::Error::other("workload cgroup was not created"))?
+                .try_clone();
+        }
+        self.cgroup_file()
+    }
+
     fn load_aya_program(&mut self, program: GuestProgram) -> Result<(), EbpfError> {
         if program == GuestProgram::TcpCorrelationCandidate {
             let bpf = self
@@ -199,14 +288,17 @@ impl KernelGuestTransportOps {
             GuestProgram::Getpeername4 => "getpeername4",
             GuestProgram::Recvmsg4 => "recvmsg4",
             GuestProgram::SockRelease => "sock_release",
+            GuestProgram::ListenTcp => "listen_tcp",
+            GuestProgram::ListenUdp4 => "post_bind4",
+            GuestProgram::ListenUdp6 => "post_bind6",
         };
         match program {
-            GuestProgram::TcpCorrelation => {
+            GuestProgram::TcpCorrelation | GuestProgram::ListenTcp => {
                 let prog: &mut SockOps =
                     bpf.program_mut(name).ok_or_else(|| missing_bpf_item(name))?.try_into()?;
                 prog.load()?;
             }
-            GuestProgram::SockRelease => {
+            GuestProgram::SockRelease | GuestProgram::ListenUdp4 | GuestProgram::ListenUdp6 => {
                 let prog: &mut CgroupSock =
                     bpf.program_mut(name).ok_or_else(|| missing_bpf_item(name))?.try_into()?;
                 prog.load()?;
@@ -230,7 +322,9 @@ impl GuestTransportOps for KernelGuestTransportOps {
         self.initialize_guest_maps().map_err(|source| GuestTransportSetupError::ProgramLoad {
             program: GuestProgram::TcpCorrelation,
             source,
-        })
+        })?;
+        self.create_workload_cgroup()
+            .map_err(|source| GuestTransportSetupError::WorkloadCgroup { source })
     }
 
     fn create_dummy_device(&mut self) -> io::Result<()> {
@@ -308,9 +402,13 @@ impl GuestTransportOps for KernelGuestTransportOps {
             return Ok(());
         }
 
-        let cgroup = self.cgroup_file().map_err(|error| {
+        let cgroup = self.program_cgroup_file(program).map_err(|error| {
             aya::programs::ProgramError::SyscallError(aya::sys::SyscallError {
-                call: "prepare cgroup v2 root",
+                call: if program.is_workload_listener() {
+                    "prepare workload cgroup"
+                } else {
+                    "prepare cgroup v2 root"
+                },
                 io_error: error,
             })
         })?;
@@ -325,14 +423,17 @@ impl GuestTransportOps for KernelGuestTransportOps {
             GuestProgram::Getpeername4 => "getpeername4",
             GuestProgram::Recvmsg4 => "recvmsg4",
             GuestProgram::SockRelease => "sock_release",
+            GuestProgram::ListenTcp => "listen_tcp",
+            GuestProgram::ListenUdp4 => "post_bind4",
+            GuestProgram::ListenUdp6 => "post_bind6",
         };
         match program {
-            GuestProgram::TcpCorrelation => {
+            GuestProgram::TcpCorrelation | GuestProgram::ListenTcp => {
                 let prog: &mut SockOps =
                     bpf.program_mut(name).ok_or_else(|| invalid_program_name(name))?.try_into()?;
                 prog.attach(cgroup, CgroupAttachMode::Single)?;
             }
-            GuestProgram::SockRelease => {
+            GuestProgram::SockRelease | GuestProgram::ListenUdp4 | GuestProgram::ListenUdp6 => {
                 let prog: &mut CgroupSock =
                     bpf.program_mut(name).ok_or_else(|| invalid_program_name(name))?.try_into()?;
                 prog.attach(cgroup, CgroupAttachMode::Single)?;

@@ -13,8 +13,9 @@
 //! deadline). The workload is the guest application's `bind` subcommand: it
 //! binds exactly the sockets a scenario names and does nothing else. The only
 //! state observed is production-written: the allocation snapshot (`GET
-//! /v1/allocs`) with its startup `ProbeResultRow`s and allocation rows. No
-//! board is read and nothing in `overdrive-init` is observed.
+//! /v1/allocs`) with its startup `ProbeResultRow`s and allocation rows, plus
+//! the workload's serial console capture. No board or init-private state is
+//! read.
 //!
 //! Lane: `integration-tests,kvm-tests`, native x86_64 metal, after
 //! `cargo xtask kmod-build`, `kmod-load` and `guest-kit-prepare` (see
@@ -46,6 +47,7 @@
 
 #![allow(clippy::doc_markdown)]
 
+use std::io::Read as _;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -301,15 +303,21 @@ fn assert_guest_listener_descriptor(snapshot: &AllocStatusResponse) {
     );
 }
 
+/// The production serial-console capture path for an allocation.
+fn console_path(alloc: &str) -> Option<std::path::PathBuf> {
+    let id = overdrive_core::id::AllocationId::new(alloc).ok()?;
+    Some(
+        overdrive_core::vm::config::VmRunDir::for_alloc(
+            std::path::Path::new("/run/overdrive/vm"),
+            &id,
+        )
+        .console_log(),
+    )
+}
+
 /// The guest console so far, for failure messages.
 fn console_of(alloc: &str) -> String {
-    let Ok(id) = overdrive_core::id::AllocationId::new(alloc) else { return String::new() };
-    let path = overdrive_core::vm::config::VmRunDir::for_alloc(
-        std::path::Path::new("/run/overdrive/vm"),
-        &id,
-    )
-    .console_log();
-    std::fs::read_to_string(path).unwrap_or_default()
+    console_path(alloc).and_then(|path| std::fs::read_to_string(path).ok()).unwrap_or_default()
 }
 
 /// G-10 (9) second clause, and the guest half of `guest_report` (D13 items 1
@@ -321,7 +329,6 @@ fn console_of(alloc: &str) -> String {
 /// scenario would fail.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D13 guest side, in-guest listen hooks and LISTEN lines before EXIT (guest_report)"]
 async fn every_declared_listener_a_real_workload_binds_is_reported_before_it_exits() {
     with_node("report-before-exit", |node| Box::pin(report_before_exit(node))).await;
 }
@@ -333,6 +340,11 @@ async fn report_before_exit(node: &Node) {
     node.deploy(id, &declared, 8, 0, &specs).await;
 
     let alloc = node.running_alloc(id).await;
+    // Keep the production console inode open while the allocation is live:
+    // VmDriver removes its run directory before publishing the exit event.
+    let mut console =
+        std::fs::File::open(console_path(&alloc).expect("allocation id from the API"))
+            .expect("the live allocation's production console is readable");
     let mut pass_seen_while_running = false;
     let deadline = tokio::time::Instant::now() + PASS_BOUND + Duration::from_secs(20);
     loop {
@@ -367,7 +379,14 @@ async fn report_before_exit(node: &Node) {
          allocation was Running, before the exit report's terminal row; console:\n{}",
         console_of(&alloc)
     );
-    assert!(console_of(&alloc).contains(BOUND_PREFIX), "the workload bound its sockets");
+    let mut console_text = String::new();
+    console.read_to_string(&mut console_text).expect("read the held production console");
+    for spec in &specs {
+        assert!(
+            console_text.contains(&format!("{BOUND_PREFIX}{spec}")),
+            "the workload bound {spec} before exit; held console:\n{console_text}"
+        );
+    }
 }
 
 /// G-10 (10), Tier 3: binds to `127.0.0.1`, `::1` and `::ffff:127.0.0.1`
@@ -379,7 +398,6 @@ async fn report_before_exit(node: &Node) {
 /// "Explicitly unaffected").
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D13 guest side, loopback and v4-mapped binds are not reports (item 8)"]
 async fn a_loopback_only_bind_never_satisfies_a_declared_listener() {
     with_node("loopback-binds", |node| Box::pin(loopback_binds(node))).await;
 }

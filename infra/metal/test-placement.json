@@ -4562,12 +4562,10 @@
         "group": "cgroup-default"
       },
       "integration::guest_listener_real_boot::a_loopback_only_bind_never_satisfies_a_declared_listener": {
-        "kind": "guest-group",
-        "group": "cgroup-default"
+        "kind": "host-pure"
       },
       "integration::guest_listener_real_boot::every_declared_listener_a_real_workload_binds_is_reported_before_it_exits": {
-        "kind": "guest-group",
-        "group": "cgroup-default"
+        "kind": "host-pure"
       },
       "integration::idempotent_resubmit::byte_identical_resubmit_returns_outcome_unchanged_and_same_digest": {
         "kind": "guest-group",
@@ -8835,6 +8833,9 @@
       "verifier_budget::tests::evaluate_fails_when_baseline_program_missing_from_candidates": {
         "kind": "host-pure"
       },
+      "verifier_budget::tests::evaluate_does_not_match_programs_across_bpf_objects": {
+        "kind": "host-pure"
+      },
       "verifier_budget::tests::evaluate_fails_when_large_program_grows_above_both_thresholds": {
         "kind": "host-pure"
       },
@@ -8854,6 +8855,9 @@
         "kind": "host-pure"
       },
       "verifier_budget::tests::parse_baseline_file_rejects_line_missing_prog": {
+        "kind": "host-pure"
+      },
+      "verifier_budget::tests::parse_baseline_file_requires_object_identity": {
         "kind": "host-pure"
       },
       "verifier_budget::tests::parse_baseline_file_rejects_line_missing_verified_insns": {

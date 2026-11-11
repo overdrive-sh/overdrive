@@ -58,13 +58,16 @@
 #![allow(clippy::print_stderr)]
 #![deny(unsafe_code)]
 
+use std::collections::BTreeSet;
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::net::Ipv4Addr;
 use std::os::fd::{AsFd, AsRawFd};
+#[cfg(test)]
 use std::os::unix::process::CommandExt;
 use std::os::unix::process::ExitStatusExt;
 use std::path::{Path, PathBuf};
+#[cfg(test)]
 use std::process::Command;
 use std::time::{Duration, Instant};
 
@@ -85,6 +88,7 @@ use overdrive_core::vm::beacon::{self, BeaconMessage};
 // owner.
 mod guest_flow;
 mod transport;
+mod workload;
 
 use std::sync::Arc;
 
@@ -93,7 +97,7 @@ use guest_flow::{
     MonotonicGuestClock,
 };
 use transport::{
-    GuestTransportSetupError, GuestTransportToken, KernelGuestTransportOps,
+    GuestListenerRuntime, GuestTransportSetupError, GuestTransportToken, KernelGuestTransportOps,
     configure_guest_transport, parse_transport_token,
 };
 
@@ -122,7 +126,9 @@ fn run() -> Result<(), InitError> {
         load_vsock_modules,
         connect_beacon,
         configure_guest_network,
-        |(token, ops): (GuestTransportToken, KernelGuestTransportOps)| {
+        |(token, mut ops): (GuestTransportToken, KernelGuestTransportOps)| {
+            let listener_runtime =
+                ops.take_listener_runtime().map_err(InitError::GuestTransportSetup)?;
             let owner_io = KernelGuestOwnerIo::new(ops).map_err(InitError::GuestTransportSetup)?;
             let _owner_thread = start_guest_flow_owner(
                 token,
@@ -130,7 +136,7 @@ fn run() -> Result<(), InitError> {
                 Arc::new(MonotonicGuestClock),
                 report_guest_owner_fatal,
             )?;
-            Ok(token)
+            Ok((token, listener_runtime))
         },
         |conn, token: GuestTransportToken| send(conn, &ready_message(pid, &token)),
         recv_exec,
@@ -148,6 +154,7 @@ fn complete_guest_lifecycle<
     Conn,
     Setup,
     Token,
+    Runtime,
     Root,
     Modules,
     Connect,
@@ -175,16 +182,17 @@ where
     Modules: FnOnce() -> Result<(), InitError>,
     Connect: FnOnce() -> Result<Conn, InitError>,
     Network: FnOnce() -> Result<Setup, InitError>,
-    StartOwner: FnOnce(Setup) -> Result<Token, InitError>,
+    StartOwner: FnOnce(Setup) -> Result<(Token, Runtime), InitError>,
     Ready: FnOnce(&mut Conn, Token) -> Result<(), InitError>,
     ReceiveExec: FnOnce(&Conn) -> Result<Vec<String>, InitError>,
-    Execute: FnOnce(&mut Conn, &[String]) -> Result<i32, InitError>,
+    Execute: FnOnce(&mut Conn, &mut Runtime, &[String]) -> Result<i32, InitError>,
     SendExit: FnOnce(&mut Conn, i32) -> Result<(), InitError>,
     PowerOff: FnOnce() -> Result<(), InitError>,
 {
-    let mut conn = complete_pre_ready_init(root, modules, connect, network, start_owner, ready)?;
+    let (mut conn, mut runtime) =
+        complete_pre_ready_init_with_runtime(root, modules, connect, network, start_owner, ready)?;
     let argv = receive_exec(&conn)?;
-    let status = execute(&mut conn, &argv)?;
+    let status = execute(&mut conn, &mut runtime, &argv)?;
     send_exit(&mut conn, status)?;
     // The VSOCK write only queues EXIT in the guest.  Close this beacon
     // socket before rebooting so Linux can apply the socket's linger policy
@@ -197,6 +205,7 @@ where
 /// transport token is parsed and the transport configured there, DG-5), the
 /// guest flow owner started on its own thread over the setup's results
 /// (DG-5), then READY carrying the token the network step produced.
+#[cfg(test)]
 fn complete_pre_ready_init<Conn, Setup, Token, Root, Modules, Connect, Network, StartOwner, Ready>(
     root: Root,
     modules: Modules,
@@ -213,13 +222,52 @@ where
     StartOwner: FnOnce(Setup) -> Result<Token, InitError>,
     Ready: FnOnce(&mut Conn, Token) -> Result<(), InitError>,
 {
+    complete_pre_ready_init_with_runtime(
+        root,
+        modules,
+        connect,
+        network,
+        |setup| start_owner(setup).map(|token| (token, ())),
+        ready,
+    )
+    .map(|(conn, ())| conn)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn complete_pre_ready_init_with_runtime<
+    Conn,
+    Setup,
+    Token,
+    Runtime,
+    Root,
+    Modules,
+    Connect,
+    Network,
+    StartOwner,
+    Ready,
+>(
+    root: Root,
+    modules: Modules,
+    connect: Connect,
+    network: Network,
+    start_owner: StartOwner,
+    ready: Ready,
+) -> Result<(Conn, Runtime), InitError>
+where
+    Root: FnOnce() -> Result<(), InitError>,
+    Modules: FnOnce() -> Result<(), InitError>,
+    Connect: FnOnce() -> Result<Conn, InitError>,
+    Network: FnOnce() -> Result<Setup, InitError>,
+    StartOwner: FnOnce(Setup) -> Result<(Token, Runtime), InitError>,
+    Ready: FnOnce(&mut Conn, Token) -> Result<(), InitError>,
+{
     root()?;
     modules()?;
     let mut conn = connect()?;
     let setup = network()?;
-    let token = start_owner(setup)?;
+    let (token, runtime) = start_owner(setup)?;
     ready(&mut conn, token)?;
-    Ok(conn)
+    Ok((conn, runtime))
 }
 
 /// DG-5: the guest flow owner is constructed after `configure_guest_transport`
@@ -717,15 +765,13 @@ fn recv_exec(conn: &File) -> Result<Vec<String>, InitError> {
     }
 }
 
-/// Execs the operator's command (`argv`, received via `EXEC` —
-/// [`recv_exec`]), forwarding stdio untouched (the default
-/// `std::process::Command` behaviour — the guest kernel opens
-/// `/dev/console` as fd 0/1/2 for init before devtmpfs is up, ADR-0082
-/// §D7, so inheriting IS forwarding), and returns the guest's own
-/// encoding of the real exit status. Never inspects or validates the
-/// operator's own stdout/stderr/exit code beyond encoding it onto the
-/// wire.
-fn exec_operator_command(conn: &mut File, argv: &[String]) -> Result<i32, InitError> {
+/// Creates and supervises the operator command in the workload cgroup. The
+/// child's stdio remains inherited from PID 1's console descriptors.
+fn exec_operator_command(
+    conn: &mut File,
+    listener_runtime: &mut GuestListenerRuntime,
+    argv: &[String],
+) -> Result<i32, InitError> {
     // `argv` is never empty here: the only producer of this value is
     // `recv_exec`, which only returns `Ok` after `BeaconMessage::from_str`
     // has already rejected an empty argv as `BeaconParseError::EmptyArgv`
@@ -735,14 +781,9 @@ fn exec_operator_command(conn: &mut File, argv: &[String]) -> Result<i32, InitEr
             "recv_exec only returns argv already validated non-empty by BeaconMessage::from_str"
         )
     });
-    let mut child_command = Command::new(command);
-    child_command.args(&argv[1..]).process_group(0);
-    let mut child = child_command
-        .spawn()
+    let child = workload::spawn_in_cgroup(argv, listener_runtime.cgroup_fd())
         .map_err(|source| InitError::Spawn { command: command.clone(), source })?;
-    let child_pid =
-        Pid::from_raw(i32::try_from(child.id()).map_err(|_| InitError::Wait(Errno::EOVERFLOW))?);
-    supervise_command(conn, &mut child, child_pid)
+    supervise_command(conn, Pid::from_raw(child), Some(listener_runtime))
 }
 
 const GUEST_STOP_GRACE: Duration = Duration::from_secs(5);
@@ -750,8 +791,8 @@ const GUEST_SUPERVISION_POLL: Duration = Duration::from_millis(10);
 
 fn supervise_command(
     conn: &mut File,
-    _child: &mut std::process::Child,
     child_pid: Pid,
+    mut listener_runtime: Option<&mut GuestListenerRuntime>,
 ) -> Result<i32, InitError> {
     let supervisor_started = Instant::now();
     let mut direct_status = None;
@@ -761,11 +802,16 @@ fn supervise_command(
     let mut shutdown_requested = false;
     let mut shutdown_deadline = None;
     let mut sigkill_sent = false;
+    let mut reported = BTreeSet::new();
 
     std::thread::sleep(GUEST_SUPERVISION_POLL);
 
     loop {
         reap_children(child_pid, &mut direct_status)?;
+
+        if let Some(runtime) = listener_runtime.as_deref_mut() {
+            drain_listener_reports(conn, runtime, &mut reported)?;
+        }
 
         let group_live = process_group_live(child_pid)?;
         if direct_status.is_some() && !group_live {
@@ -831,6 +877,11 @@ fn supervise_command(
         }
     }
 
+    if let Some(runtime) = listener_runtime {
+        drain_listener_reports(conn, runtime, &mut reported)?;
+        report_listener_drops(runtime);
+    }
+
     guest_diagnostic("group-complete", supervisor_started);
     // Both the successful EXIT path and main's existing fatal path request
     // poweroff immediately after this supervisor returns. Record the same
@@ -844,6 +895,27 @@ fn supervise_command(
         return Err(error);
     }
     Ok(status)
+}
+
+fn drain_listener_reports(
+    conn: &mut File,
+    runtime: &mut GuestListenerRuntime,
+    reported: &mut BTreeSet<(overdrive_core::dataplane::backend_key::Proto, std::num::NonZeroU16)>,
+) -> Result<(), InitError> {
+    while let Some((protocol, port)) = runtime.next_event() {
+        if reported.insert((protocol, port)) {
+            send(conn, &BeaconMessage::Listen { protocol, port })?;
+        }
+    }
+    Ok(())
+}
+
+fn report_listener_drops(runtime: &GuestListenerRuntime) {
+    match runtime.dropped_events() {
+        Ok(0) => {}
+        Ok(count) => eprintln!("overdrive-init: guest listener ring dropped={count}"),
+        Err(error) => eprintln!("overdrive-init: guest listener drop counter unavailable: {error}"),
+    }
 }
 
 fn handle_control_line(
@@ -1150,7 +1222,7 @@ mod tests {
                 trace.borrow_mut().push(PreReadyStage::Network);
                 network()
             },
-            Ok,
+            |setup| Ok((setup, ())),
             |_, ()| {
                 trace.borrow_mut().push(PreReadyStage::Ready);
                 ready()
@@ -1159,7 +1231,7 @@ mod tests {
                 trace.borrow_mut().push(PreReadyStage::Exec);
                 Ok(vec!["/bin/true".to_owned()])
             },
-            |_, _| {
+            |_, _, _| {
                 trace.borrow_mut().push(PreReadyStage::Operator);
                 Ok(0)
             },
@@ -1173,6 +1245,22 @@ mod tests {
             },
         );
         (result, trace.into_inner())
+    }
+
+    fn exec_test_command(conn: &mut File, argv: &[String]) -> Result<i32, InitError> {
+        let command =
+            argv.first().unwrap_or_else(|| unreachable!("test command argv is non-empty"));
+        let mut child_command = Command::new(command);
+        child_command.args(&argv[1..]).process_group(0);
+        let child = child_command
+            .spawn()
+            .map_err(|source| InitError::Spawn { command: command.clone(), source })?;
+        let child_pid = Pid::from_raw(
+            i32::try_from(child.id()).map_err(|_| InitError::Wait(Errno::EOVERFLOW))?,
+        );
+        let result = supervise_command(conn, child_pid, None);
+        drop(child);
+        result
     }
 
     /// CONTRACT_SHAPE: pure-function.
@@ -1232,7 +1320,7 @@ mod tests {
                     trace.borrow_mut().push(PreReadyStage::Network);
                     Ok(())
                 },
-                Ok,
+                |setup| Ok((setup, ())),
                 |_, ()| {
                     trace.borrow_mut().push(PreReadyStage::Ready);
                     Ok(())
@@ -1241,7 +1329,7 @@ mod tests {
                     trace.borrow_mut().push(PreReadyStage::Exec);
                     recv_exec(conn)
                 },
-                |_, _| {
+                |_, _, _| {
                     trace.borrow_mut().push(PreReadyStage::Operator);
                     Ok(0)
                 },
@@ -1314,7 +1402,7 @@ mod tests {
                 "-c".to_owned(),
                 "trap 'exit 41' TERM; while :; do /bin/sleep 1; done".to_owned(),
             ];
-            let result = exec_operator_command(&mut conn, &command);
+            let result = exec_test_command(&mut conn, &command);
             drop(writer);
             result.expect_err(label)
         }
@@ -1405,7 +1493,7 @@ mod tests {
             ];
             let cpu_before = thread_cpu_time();
             let wall_before = Instant::now();
-            let result = exec_operator_command(&mut conn, &command);
+            let result = exec_test_command(&mut conn, &command);
             (result, thread_cpu_time().saturating_sub(cpu_before), wall_before.elapsed())
         });
 
@@ -1442,7 +1530,7 @@ mod tests {
         let command = vec!["/bin/sh".to_owned(), "-c".to_owned(), "kill -KILL $$".to_owned()];
         let expected = exit_status_to_wire(std::process::ExitStatus::from_raw(nix::libc::SIGKILL));
 
-        let observed = exec_operator_command(&mut conn, &command)
+        let observed = exec_test_command(&mut conn, &command)
             .expect("a signal-terminated direct child is a successful supervision result");
 
         assert_eq!(expected, 137, "the retained signal mapping must encode SIGKILL as 137");

@@ -8,7 +8,8 @@
 //! kit (the metal host's 7.0 kernel, the `ovd_fwd.ko` built for it, the
 //! production static `overdrive-init` as PID 1) and runs exactly one cell in
 //! it through `overdrive_testing::guest_lane::run_in_guest_cell`: the lane
-//! plays the node beacon (READY → `EXEC` → `EXIT`) and holds the guest
+//! plays the node beacon (READY → `EXEC` → zero or more `LISTEN` reports →
+//! `EXIT`) and holds the guest
 //! owner's control session; the cell binary is this crate's libtest binary
 //! built with `integration-tests,kvm-tests`.
 //!

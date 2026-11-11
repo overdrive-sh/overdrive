@@ -14,6 +14,8 @@
 
 #[path = "programs/guest_capture.rs"]
 mod guest_capture;
+#[path = "programs/listen.rs"]
+mod listen;
 #[path = "programs/tcp_correlation.rs"]
 mod tcp_correlation;
 

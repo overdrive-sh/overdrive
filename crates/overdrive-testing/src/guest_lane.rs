@@ -10,7 +10,8 @@
 //! [`run_in_guest_cell`] does exactly what the host side of a launch does
 //! for such a guest, and no more: it plays the node beacon (accepts the
 //! guest's beacon connection, reads READY, answers `EXEC` with the cell's
-//! argv, reads `EXIT`) and holds the guest owner's control session open
+//! argv, reads zero or more valid `LISTEN` reports followed by `EXIT`) and
+//! holds the guest owner's control session open
 //! (accepted and drained; nothing is answered on it). It runs no host flow
 //! owner: the cells are about the guest, and the guest owner's host peer is
 //! not their subject.
@@ -582,20 +583,30 @@ pub fn run_in_guest_cell(
     (&conn)
         .write_all(format!("{exec}\n").as_bytes())
         .map_err(|e| lane_error(format!("{cell}: writing EXEC: {e}")))?;
-    let exit = read_line(&conn, CELL_BOUND)
-        .map_err(|e| {
-            lane_error(format!("{cell}: reading EXIT: {e}; console:\n{}", vm.console_tail(16_384)))
-        })?
-        .ok_or_else(|| {
-            lane_error(format!(
-                "{cell}: no EXIT within {CELL_BOUND:?}; console:\n{}",
-                vm.console_tail(16_384)
-            ))
-        })?;
-    let exit_status = match exit.parse::<BeaconMessage>() {
-        Ok(BeaconMessage::Exit { status }) => status,
-        other => {
-            return Err(lane_error(format!("{cell}: expected EXIT, got {exit:?} ({other:?})")));
+    let exit_deadline = Instant::now() + CELL_BOUND;
+    let exit_status = loop {
+        let remaining = exit_deadline.saturating_duration_since(Instant::now());
+        let line = read_line(&conn, remaining)
+            .map_err(|e| {
+                lane_error(format!(
+                    "{cell}: reading LISTEN or EXIT: {e}; console:\n{}",
+                    vm.console_tail(16_384)
+                ))
+            })?
+            .ok_or_else(|| {
+                lane_error(format!(
+                    "{cell}: no EXIT within {CELL_BOUND:?}; console:\n{}",
+                    vm.console_tail(16_384)
+                ))
+            })?;
+        match line.parse::<BeaconMessage>() {
+            Ok(BeaconMessage::Listen { .. }) => {}
+            Ok(BeaconMessage::Exit { status }) => break status,
+            other => {
+                return Err(lane_error(format!(
+                    "{cell}: expected LISTEN or EXIT, got {line:?} ({other:?})"
+                )));
+            }
         }
     };
     // The guest powers off once EXIT is sent; the console is complete when

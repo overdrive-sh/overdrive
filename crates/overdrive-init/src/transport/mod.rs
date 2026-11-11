@@ -247,7 +247,7 @@ pub(crate) fn configure_guest_transport(
 }
 
 mod kernel;
-pub(crate) use kernel::KernelGuestTransportOps;
+pub(crate) use kernel::{GuestListenerRuntime, KernelGuestTransportOps};
 
 /// Why `overdrive-init` exits before READY (G-V7). Rendered to the console as
 /// `overdrive-init: guest transport setup failed: <Display>`; the host sees the
@@ -317,6 +317,32 @@ pub(crate) enum GuestTransportSetupError {
         program: GuestProgram,
         /// aya's error.
         source: aya::programs::ProgramError,
+    },
+    /// Creating or opening the workload cgroup failed.
+    #[error("creating the guest workload cgroup failed: {source}")]
+    WorkloadCgroup {
+        /// The filesystem error.
+        source: std::io::Error,
+    },
+    /// The configured workload cgroup was not retained for the workload.
+    #[error("the guest workload cgroup was unavailable after transport setup")]
+    WorkloadCgroupUnavailable,
+    /// The loaded guest object was not retained for listener event setup.
+    #[error("the loaded guest eBPF object was unavailable after transport setup")]
+    GuestBpfUnavailable,
+    /// A required guest listener map was absent from the loaded guest object.
+    #[error("guest listener map {map} was not present in the loaded object")]
+    ListenerMapMissing {
+        /// The expected BPF map name.
+        map: &'static str,
+    },
+    /// Opening a required guest listener map failed.
+    #[error("opening guest listener map {map} failed: {source}")]
+    ListenerMap {
+        /// The BPF map name.
+        map: &'static str,
+        /// aya's map error.
+        source: aya::maps::MapError,
     },
     /// Binding the inbound vsock listener on `GUEST_INBOUND_PORT` failed.
     #[error("binding the inbound vsock listener failed: {source}")]
@@ -432,11 +458,17 @@ pub(crate) enum GuestProgram {
     Recvmsg4,
     /// `sock_release`: reports released sockets.
     SockRelease,
+    /// `sock_ops`: reports a TCP socket entering `TCP_LISTEN`.
+    ListenTcp,
+    /// `cgroup/post_bind4`: reports non-loopback IPv4 UDP binds.
+    ListenUdp4,
+    /// `cgroup/post_bind6`: reports non-loopback IPv6 UDP binds.
+    ListenUdp6,
 }
 
 impl GuestProgram {
     /// Every program, in load-and-attach (enum) order.
-    pub(crate) const ALL: [Self; 7] = [
+    pub(crate) const ALL: [Self; 10] = [
         Self::TcpCorrelation,
         Self::TcpCorrelationCandidate,
         Self::Connect4,
@@ -444,6 +476,9 @@ impl GuestProgram {
         Self::Getpeername4,
         Self::Recvmsg4,
         Self::SockRelease,
+        Self::ListenTcp,
+        Self::ListenUdp4,
+        Self::ListenUdp6,
     ];
 
     /// The program's lower snake case label.
@@ -456,7 +491,15 @@ impl GuestProgram {
             Self::Getpeername4 => "getpeername4",
             Self::Recvmsg4 => "recvmsg4",
             Self::SockRelease => "sock_release",
+            Self::ListenTcp => "listen_tcp",
+            Self::ListenUdp4 => "post_bind4",
+            Self::ListenUdp6 => "post_bind6",
         }
+    }
+
+    /// Whether this program is attached only to the workload cgroup.
+    pub(crate) const fn is_workload_listener(self) -> bool {
+        matches!(self, Self::ListenTcp | Self::ListenUdp4 | Self::ListenUdp6)
     }
 }
 
