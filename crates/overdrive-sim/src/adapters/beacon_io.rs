@@ -107,6 +107,9 @@ struct Conn {
     read_grants: usize,
     /// `read_line` calls currently waiting on this connection.
     read_waiters: usize,
+    /// `read_line` deliveries already taken: the first is the modelled READY
+    /// read (`HostReadReady`); later reads are the exit watcher's.
+    reads_taken: usize,
 }
 
 #[derive(Debug, Default)]
@@ -234,6 +237,7 @@ impl SimBeaconIo {
                 live_at_accept: None,
                 read_grants: 0,
                 read_waiters: 0,
+                reads_taken: 0,
             },
         );
         state.queue.push_back(seq);
@@ -349,7 +353,15 @@ impl SimBeaconIo {
         let orphan = conn.live_at_accept == Some(false);
         let deliverable =
             !conn.inbound.is_empty() || conn.guest_closed || orphan || self.dead(conn);
-        deliverable && (!self.stepped || conn.read_grants > 0)
+        // After the modelled READY read, a dead VM's connection needs no
+        // grant: the host kernel resets every connected socket of a released
+        // `/dev/vhost-vsock` (`ECONNRESET` + `sk_error_report`,
+        // `vhost_vsock_reset_orphans`, `drivers/vhost/vsock.c:721-750 @ v7.0`),
+        // so the real adapter's `readable()` wakes and the exit watcher's read
+        // fails promptly with no peer action. The READY read itself stays a
+        // modelled, grant-gated step.
+        let exit_watch_read_of_dead_vm = conn.reads_taken > 0 && self.dead(conn);
+        deliverable && (!self.stepped || conn.read_grants > 0 || exit_watch_read_of_dead_vm)
     }
 
     /// An accepted connection whose VMM died after the accept: its next I/O
@@ -392,9 +404,10 @@ impl SimBeaconIo {
         if !self.read_ready(conn) {
             return None;
         }
-        if self.stepped {
+        if self.stepped && conn.read_grants > 0 {
             conn.read_grants -= 1;
         }
+        conn.reads_taken += 1;
         if self.dead(conn) {
             return Some(Err(io::Error::new(
                 io::ErrorKind::ConnectionReset,

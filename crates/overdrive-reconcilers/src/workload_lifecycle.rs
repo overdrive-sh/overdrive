@@ -2286,7 +2286,13 @@ mod project_service_listen_ports_tests {
         /// read.
         #[test]
         fn service_projection_equals_declared_listener_set(
-            ports in prop::collection::btree_set(1u16..=u16::MAX, 1..=8)
+            ports in prop::collection::btree_set(
+                (1u16..=u16::MAX).prop_filter(
+                    "listener ports exclude the guest-transport reserved range",
+                    |port| !overdrive_core::guest_transport::guest_reserved_ports().contains(port),
+                ),
+                1..=8,
+            )
         ) {
             let declared: Vec<u16> = ports.iter().copied().collect();
             let intent = service_with_ports(&declared);
