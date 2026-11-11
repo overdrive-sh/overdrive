@@ -1,4 +1,4 @@
-# owner-flows-sess-env-guest-misses-session-loss: counterexample, 10 state(s) (from the TLC trace)
+# owner-flows-sess-env-guest-misses-session-loss: counterexample, 13 state(s) (from the TLC trace)
 
 State 1
   bHeldByOther = FALSE
@@ -66,4 +66,14 @@ State 10 [step]
   sess = <<[st |-> "none", gen |-> 0], [st |-> "closed", gen |-> 2]>>
   claim = 0
 
--> stutters forever in State 10
+State 11 [ActivatePending]
+  act = "ControlSessionPending"
+
+State 12 [step]
+  quiesced = TRUE
+  act = "none"
+
+State 13 [step]
+  quiesced = FALSE
+
+-> loops back to State 11

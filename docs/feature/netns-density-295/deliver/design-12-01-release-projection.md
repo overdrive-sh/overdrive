@@ -148,7 +148,10 @@ after the pool lease is released only when all of these are true:
   `dial_cancels`, `dial_requests`, and `datagrams` are empty;
 - no pair or dial watch belongs to the CID;
 - `control_tasks.len() == unread.len()`; and
-- every retained control task has `owner_launch = Some(the tombstone launch)`.
+- every retained control task has `owner_launch = Some(l)`, `l` the launch it was
+  accepted under (the tombstone's launch or an earlier launch of the CID after a
+  same-CID replacement). *Ruled CONFALIGN-1, user approved 2026-11-11; see
+  `feature-delta.md`.*
 
 The tombstone is not an allocation lease and takes no attachment or flow
 place. It is fail-closed: new accepts cannot register against it, activation

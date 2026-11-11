@@ -591,7 +591,9 @@ module fwd_pair {
   def ownerAbort(t: St, s: str): St =
     val t1 = abortSide(fault(t), s, "Detached", false)
     if (not(watchSide(t, s)))
-      shutAll(setPr(t1, s, { ...t1.pr.get(s), closed: true }), s)
+      // host owner: the close is in the same dispatch as the abort. Guest owner: the close is a separate dispatch
+      // after the record is read (CONFALIGN-3, hold_close_until_end), so the abort alone is applied here
+      if (s == "h") shutAll(setPr(t1, s, { ...t1.pr.get(s), closed: true }), s) else t1
     else if (not(t.strmHeld))
       { ...shutAll(t1, "h"), strmAbort: false, hres: "none", guestAbortSent: t1.vmUp }
     else

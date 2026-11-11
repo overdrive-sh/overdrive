@@ -597,7 +597,8 @@ module owner_flows {
   // step 3: accept V_h; check Active + live session + not quiesced (+ quota); register in the
   // CID's flow table — one owner step (U-1). A Quiesced refusal remains outside admitted state,
   // reads the already-buffered complete request, emits Refused { Quiesced } and closes in this
-  // same formal action; other unavailable-boundary cases close without a message.
+  // same formal action; a NotActive refusal likewise emits exactly one Refused { NotActive }
+  // (abstracted; no state change); only unknown, Retiring or no-session CIDs close without a message.
   action HostAcceptFlow(f: int): bool = all {
     conf_step' = if (REC) variant("HostAcceptFlow", { f: f }) else conf_step, gSess' = gSess,
     flows.get(f).st == "queued",

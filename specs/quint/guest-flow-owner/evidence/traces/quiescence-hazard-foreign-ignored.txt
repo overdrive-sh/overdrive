@@ -1,4 +1,4 @@
-# quiescence-hazard-foreign-ignored: counterexample, 13 state(s) (from the TLC trace)
+# quiescence-hazard-foreign-ignored: counterexample, 9 state(s) (from the TLC trace)
 
 State 1
   foreign = FALSE
@@ -32,41 +32,25 @@ State 3 [recStep]
   latch = FALSE
 
 State 4 [RestartWith]
-  g = [ reopenEarly |-> FALSE, overlapped |-> FALSE, stillQuiesced |-> FALSE, failStopped |-> TRUE, dropped |-> TRUE, refusedBoot |-> TRUE, foreignChanged |-> FALSE ]
-  stop = "refused"
-
-State 5 [RestartWith]
   up = TRUE
   stop = "none"
 
-State 6 [ForeignRestore]
+State 5 [ForeignRestore]
   foreign = TRUE
 
-State 7 [Damage]
+State 6 [Damage]
   dmg = [C1 |-> FALSE, C2 |-> TRUE]
 
-State 8 [Damage]
-  dmg = [C1 |-> TRUE, C2 |-> TRUE]
-
-State 9 [recStep]
-  rec = [C1 |-> "held", C2 |-> "idle"]
+State 7 [recStep]
+  rec = [C1 |-> "idle", C2 |-> "held"]
   cnt = 1
-  roundState = [C1 |-> "pending", C2 |-> "outside"]
+  roundState = [C1 |-> "outside", C2 |-> "pending"]
   latch = TRUE
 
-State 10 [RecRepair]
-  rec = [C1 |-> "repaired", C2 |-> "idle"]
-  dmg = [C1 |-> FALSE, C2 |-> TRUE]
-
-State 11 [RecRestore]
-  rec = [C1 |-> "idle", C2 |-> "held"]
-  g = [ reopenEarly |-> FALSE, overlapped |-> TRUE, stillQuiesced |-> TRUE, failStopped |-> TRUE, dropped |-> TRUE, refusedBoot |-> TRUE, foreignChanged |-> FALSE ]
-  roundState = [C1 |-> "outside", C2 |-> "pending"]
-
-State 12 [RepFail]
+State 8 [RepFail]
   att = [C1 |-> 0, C2 |-> 1]
 
-State 13 [RepFail]
+State 9 [RepFail]
   att = [C1 |-> 0, C2 |-> 2]
 
--> stutters forever in State 13
+-> stutters forever in State 9

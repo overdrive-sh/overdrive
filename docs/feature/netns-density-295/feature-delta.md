@@ -9647,7 +9647,9 @@ the lease `Retiring` until `release`.
 > cancellation authority are absent; every flow task/id, guest flow, dial and
 > its reply/cancel/request state, datagram, pair and watch is absent; held
 > flows are zero; `control_tasks` has exactly the keys in `unread`; and every
-> retained task's `owner_launch` is the cleanup row's launch. The row is not a
+> retained task has `owner_launch = Some(l)`, `l` the launch the task was
+> accepted under (the cleanup row's launch, or an earlier launch of the same
+> CID after a same-CID replacement; CONFALIGN-1). The row is not a
 > lease, owns no attachment/flow place, admits nothing, cannot activate or
 > claim a session, and continues to project the old connection as `reading`.
 > Its final task finish removes the row when no newer launch replaced it.
@@ -9663,6 +9665,84 @@ the lease `Retiring` until `release`.
 > seed replay, unchanged owner-flow targets, the complete three-job record,
 > `verify-evidence`, and independent proof/source review remain mandatory;
 > roadmap validation remains pending.
+
+> **CONFALIGN-1 / -2 / -3 — RULED 2026-11-11 (user approved 2026-11-11).**
+> Three conformance failures exposed disagreements between the spec, this delta
+> and production. Each ruling below is the correct contract, not the least
+> change.
+>
+> **CONFALIGN-1 — a retained control task keeps the launch it was accepted
+> under.** The RELEASEPROJ1 sentence "every retained task's `owner_launch` is the
+> cleanup row's launch" was wrong once a same-CID `Provision` has transferred a
+> predecessor's tasks; it is corrected in place above (the following paragraph,
+> which keeps `owner_launch` unchanged on transfer, was right and production
+> already implements that transfer). `owner_launch` is the task's attribution identity:
+> `finish_connection` and `control_session` match it against the reader's own
+> `accepted_launch` (`owner_runtime.rs:392,1662-1666`); rewriting it on transfer
+> would orphan the task (never removed from `unread`/`control_tasks`, row never
+> reclaimed). The invariant is therefore: every retained control task has
+> `owner_launch = Some(l)` where `l` is the launch the task was accepted under —
+> the row's launch or an earlier launch of the same CID — and its key is in
+> `unread`. The same predicate governs `Provision`'s replace-Retiring check: a
+> Retiring row whose unread tasks carry any earlier launch is still the exact
+> cleanup tombstone and may be replaced, transferring those tasks unchanged.
+> Reachable production failure under the current predicate
+> (`guest_network.rs:971-975` requires `== Some(old.launch)`): launch L1's
+> accepted-unread connection survives L2's provision-replace; L2 is torn down
+> before that read ends; `provision` for L3 on the same CID is refused
+> `PostconditionMismatch` although the row is a valid tombstone. Path: crash-loop
+> restarts reusing the smallest-free CID, with provision-to-teardown under the
+> control read deadline (2 s, `owner_runtime.rs:368`) or the VMM reset. The
+> exposure is bounded by that deadline and surfaces as a typed provision failure
+> the restart policy retries; it is still a contract violation.
+>
+> **CONFALIGN-2 — every owner-side refusal of an attributable flow sends one
+> `Refused`.** ADMISSIONREFUSAL1 already states the first admission failure is
+> `NotActive`, then `Quiesced`, then `Capacity`, and the refusal-code table
+> lists `NotActive` as a host-sent refusal ("a CID with no live control session
+> cannot receive any refusal", so one that has a session can). A flow accepted while the CID is `Provisioned` with
+> a live session is refused `Refused { NotActive }` by a refusal reader exactly as
+> a Quiesced one is, in the same formal `HostAcceptFlow` action. Only an unknown
+> CID, a Retiring CID or a CID with no control session closes silently (no
+> reader is registered: `register_flow_task` returns `(None, true)`). Production
+> already refuses with `NotActive`, so this ruling states existing behaviour and
+> adds none. The `owner_flows.qnt` comment at 597-600 ("other unavailable-boundary
+> cases close without a message") is wrong for the Provisioned-with-session case;
+> the quint-modeler corrects the comment in the spec. The model abstracts control
+> messages, so no state changes.
+>
+> **CONFALIGN-3 — the guest closes a paired flow's descriptors in a dispatch of
+> its own, after the end record, on every abort path.** The design (§ Owner
+> aborts, "abort the pair (its record is queued before `abort` returns), then
+> close the descriptors as above"; D-4 "the guest's close stays a dispatch of its
+> own"; `OwnerClose(g)`) defers the guest's close until its record is consumed
+> (`owner.rs:842-855,1026`, `hold_close_until_end`). Closing earlier would
+> release the pair's descriptors while the forwarder still owns the pair, and the
+> deferred close would then run against closed descriptors (double close). The
+> guest owner's only abort entry is the host's `Abort { flow }` message, which is
+> what `GuestAbort(g)` models, so `Abort(g)` and `GuestAbort(g)` have one
+> contract. Only the host closes in the aborting dispatch (quiesce awaits its
+> flow tasks, then closes both owned descriptors). The 2026-10-26
+> "non-watch abort closure" alignment generalised the host behaviour to both
+> sides; it is narrowed to the host. An unattached flow closed with no record
+> (`CloseUnattached(g)`, the guest's unpaired/accepted abort branches) is
+> unchanged: no record exists, so the close is immediate.
+>
+> Change list (ruled 2026-11-11; the spec edits go through the quint-modeler, the
+> production and driver edits are DELIVER work): spec — `fwd_pair.qnt` `ownerAbort` (594): apply the
+> `pr.closed = true` + `shutAll` branch only for `s == "h"`; for `g` the result is
+> `abortSide(fault(t), "g", "Detached", false)`, identical to `GuestAbort`'s live
+> branch; correct the `owner_flows.qnt` 597-600 comment; README action map for
+> `Abort(s)`; re-record evidence. Production — `guest_network.rs:971-975`:
+> `owner_launch.is_some()`. Driver — `quint_owner_flows.rs:977-985`: require
+> `owner_launch.is_some()` for each retained task (not `== lease.launch`);
+> `host_accept_flow` (578-618): run the refusal path whenever production would
+> register a refusal reader, expecting exactly one
+> `Refused { NotActive }` when the observed phase is not Active, or
+> `Refused { Quiesced }` when Active and quiesced. `quint_fwd_pair.rs`: no
+> change. No API, wire or formal state change. Named runs and hazards: none
+> added or removed; `OwnerAbortResetsBothFarEnds` uses `Abort("h")` and is
+> unaffected; the modeler re-runs `fwd_pair` checks that use `Abort("g")`.
 
 ##### QPROJ-4 — VM driver beacon observation (`VmDriver`, `overdrive-worker`)
 

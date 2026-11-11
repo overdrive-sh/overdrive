@@ -13,7 +13,7 @@ State 1: <Initial predicate>
 /\ quiesce_bugDropDecrements_quiescence_up = TRUE
 /\ quiesce_bugDropDecrements_quiescence_rec = [C1 |-> "idle", C2 |-> "idle"]
 /\ quiesce_bugDropDecrements_quiescence_foreign = FALSE
-/\ quiesce_bugDropDecrements_quiescence_flowsOpen = 1
+/\ quiesce_bugDropDecrements_quiescence_flowsOpen = 0
 /\ quiesce_bugDropDecrements_quiescence_conf_step = [InitDown |-> [tag |-> "UNIT"]]
 /\ quiesce_bugDropDecrements_quiescence_cnt = 0
 /\ quiesce_bugDropDecrements_quiescence_stop = "none"

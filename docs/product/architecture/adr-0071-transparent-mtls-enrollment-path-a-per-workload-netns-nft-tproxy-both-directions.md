@@ -29,6 +29,10 @@ stream dial of the guest-flow owner only; a connection whose recovered
 destination is not an Active VM workload address is refused with
 `GuestDial(NotServing)` (feature `public-ingress-gateway` ruling R-75). Read the
 per-workload-netns text of this ADR as history of the deleted exec path.
+User rulings 2026-11-11 bound the removal: `DriverType::Unikernel` / `DriverType::Wasm`
+and the outbound mTLS `dial_leg` branch for peers outside the guest prefix are
+kept, and a guest-network provision refusal keeps recording its cause as text on
+the Failed row (no structured field).
 
 **Amends ADR-0069** ("Transparent mTLS via a universal agent-light L4 proxy")
 on exactly one axis: the **OUTBOUND interception + original-destination

@@ -131,7 +131,7 @@ State 1: <Initial predicate>
         loss |-> FALSE,
         lost |-> 0 ] ]
 
-State 2: <pair_bugHolderTrustsRead_fwd_pair_Attach line 4034, col 3 to line 4044, col 77 of module pair_bugHolderTrustsRead>
+State 2: <pair_bugHolderTrustsRead_fwd_pair_Attach line 4036, col 3 to line 4046, col 77 of module pair_bugHolderTrustsRead>
 /\ pair_bugHolderTrustsRead_fwd_pair_conf_step = [InitWith |-> [m |-> "watch"]]
 /\ pair_bugHolderTrustsRead_fwd_pair_strmAbort = FALSE
 /\ pair_bugHolderTrustsRead_fwd_pair_pr = [ g |->
@@ -264,7 +264,7 @@ State 2: <pair_bugHolderTrustsRead_fwd_pair_Attach line 4034, col 3 to line 4044
         loss |-> FALSE,
         lost |-> 0 ] ]
 
-State 3: <pair_bugHolderTrustsRead_fwd_pair_Abort line 3840, col 3 to line 3847, col 51 of module pair_bugHolderTrustsRead>
+State 3: <pair_bugHolderTrustsRead_fwd_pair_Abort line 3842, col 3 to line 3849, col 51 of module pair_bugHolderTrustsRead>
 /\ pair_bugHolderTrustsRead_fwd_pair_conf_step = [InitWith |-> [m |-> "watch"]]
 /\ pair_bugHolderTrustsRead_fwd_pair_strmAbort = FALSE
 /\ pair_bugHolderTrustsRead_fwd_pair_pr = [ g |->
@@ -274,7 +274,7 @@ State 3: <pair_bugHolderTrustsRead_fwd_pair_Abort line 3840, col 3 to line 3847,
         cause |-> "Detached",
         errno |-> "none",
         byRel |-> FALSE,
-        closed |-> TRUE,
+        closed |-> FALSE,
         nrec |-> 1,
         cgen |-> 0 ],
   h |->
@@ -397,7 +397,7 @@ State 3: <pair_bugHolderTrustsRead_fwd_pair_Abort line 3840, col 3 to line 3847,
         loss |-> TRUE,
         lost |-> 0 ] ]
 
-State 4: <pair_bugHolderTrustsRead_fwd_pair_VCtl line 4065, col 3 to line 4069, col 51 of module pair_bugHolderTrustsRead>
+State 4: <pair_bugHolderTrustsRead_fwd_pair_VCtl line 4067, col 3 to line 4071, col 51 of module pair_bugHolderTrustsRead>
 /\ pair_bugHolderTrustsRead_fwd_pair_conf_step = [InitWith |-> [m |-> "watch"]]
 /\ pair_bugHolderTrustsRead_fwd_pair_strmAbort = FALSE
 /\ pair_bugHolderTrustsRead_fwd_pair_pr = [ g |->
@@ -407,7 +407,7 @@ State 4: <pair_bugHolderTrustsRead_fwd_pair_VCtl line 4065, col 3 to line 4069, 
         cause |-> "Detached",
         errno |-> "none",
         byRel |-> FALSE,
-        closed |-> TRUE,
+        closed |-> FALSE,
         nrec |-> 1,
         cgen |-> 0 ],
   h |->
@@ -540,7 +540,7 @@ State 5: <pair_bugHolderTrustsRead_fwd_pair_HolderEnd line 2002, col 3 to line 2
         cause |-> "Detached",
         errno |-> "none",
         byRel |-> FALSE,
-        closed |-> TRUE,
+        closed |-> FALSE,
         nrec |-> 1,
         cgen |-> 0 ],
   h |->
@@ -663,7 +663,7 @@ State 5: <pair_bugHolderTrustsRead_fwd_pair_HolderEnd line 2002, col 3 to line 2
         loss |-> TRUE,
         lost |-> 0 ] ]
 
-State 6: <pair_bugHolderTrustsRead_fwd_pair_ReadEof line 3596, col 3 to line 3645, col 52 of module pair_bugHolderTrustsRead>
+State 6: <pair_bugHolderTrustsRead_fwd_pair_ReadEof line 3598, col 3 to line 3647, col 52 of module pair_bugHolderTrustsRead>
 /\ pair_bugHolderTrustsRead_fwd_pair_conf_step = [InitWith |-> [m |-> "watch"]]
 /\ pair_bugHolderTrustsRead_fwd_pair_strmAbort = FALSE
 /\ pair_bugHolderTrustsRead_fwd_pair_pr = [ g |->
@@ -673,7 +673,7 @@ State 6: <pair_bugHolderTrustsRead_fwd_pair_ReadEof line 3596, col 3 to line 364
         cause |-> "Detached",
         errno |-> "none",
         byRel |-> FALSE,
-        closed |-> TRUE,
+        closed |-> FALSE,
         nrec |-> 1,
         cgen |-> 0 ],
   h |->

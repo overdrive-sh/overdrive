@@ -294,8 +294,10 @@ the TCP half with `SO_LINGER{1,0}` and the vsock half ({S, R}), the host also wr
 session is live, and `attEnded` rises by one), `GuestAbort` (the guest owner takes `Abort { flow }`: it aborts the
 flow's pair, or closes the flow it has not attached), `CloseUnattached` (the guest owner
 closes a flow it has not attached — a pending intake child that reset, the pairing deadline, session loss — with
-`SO_LINGER{1,0}` on the TCP half, D20, and {S, R} on V_g; no record), `Abort` (Detached; for a non-watch pair the
-owner queues the record and closes its owned descriptors in the same step (`closed`, vsock {S,R}); in watch mode the
+`SO_LINGER{1,0}` on the TCP half, D20, and {S, R} on V_g; no record), `Abort` (Detached; for a non-watch pair on
+side h the owner queues the record and closes its owned descriptors in the same step (`closed`, vsock {S,R}); on side
+g only the abort applies (the guest owner's close is a separate dispatch after the record is read,
+`hold_close_until_end`, CONFALIGN-3), as in `GuestAbort`'s live branch; in watch mode the
 pre-handoff `strmHeld = false` branch cancels the pending dial and closes owner-held V_h, while the held-stream
 branch is WATCH-ABORT / EVMOD-STREAM-ABORT: record queued, callbacks restored, module reference dropped, V_h
 untouched, `strmAbort` set so every later stream call returns `ConnectionAborted`; both write `Abort { flow }`
