@@ -169,7 +169,7 @@ async fn relay_guest_stream(
             return PumpExit::Graceful;
         }
         if !client_to_guest_open && !guest_to_client_open {
-            return PumpExit::Graceful;
+            return PumpExit::Completed;
         }
 
         state.record_pending.store(false, Ordering::SeqCst);
@@ -450,6 +450,7 @@ fn drive_handshake_server(
 ) -> Result<()> {
     use std::io::ErrorKind;
     let start = std::time::Instant::now();
+    let mut records = super::RecordAssembler::new();
     loop {
         if super::limits::handshake_expired(start.elapsed(), deadline) {
             return Err(MtlsEnforcementError::HandshakeTimeout { alloc: alloc.clone(), deadline });
@@ -468,8 +469,8 @@ fn drive_handshake_server(
             }
             return Ok(());
         }
-        match conn.read_tls(tcp) {
-            Ok(0) => {
+        match records.next_record(tcp) {
+            Ok(None) => {
                 if conn.peer_certificates().is_none() {
                     return Err(MtlsEnforcementError::PeerVerificationFailed {
                         reason: "client closed before presenting a verified certificate".into(),
@@ -479,9 +480,9 @@ fn drive_handshake_server(
                     reason: "EOF during handshake (client closed)".into(),
                 });
             }
-            Ok(_) => {
+            Ok(Some(record)) => {
                 // client-auth failures surface HERE as a rustls error → fail-closed
-                conn.process_new_packets().map_err(|e| {
+                super::feed_record(conn, &record).map_err(|e| {
                     MtlsEnforcementError::PeerVerificationFailed { reason: format!("{e}") }
                 })?;
             }

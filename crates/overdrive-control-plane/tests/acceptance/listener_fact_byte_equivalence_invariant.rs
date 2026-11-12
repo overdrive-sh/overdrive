@@ -29,13 +29,13 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use axum::Json;
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::http::HeaderMap;
 use axum::response::Response;
 
 use overdrive_control_plane::AppState;
 use overdrive_control_plane::api::SubmitWorkloadRequest;
-use overdrive_control_plane::handlers::submit_workload;
+use overdrive_control_plane::handlers::{stop_workload, submit_workload};
 use overdrive_control_plane::listener_facts::ListenerFactStore;
 use overdrive_control_plane::reconciler_runtime::ReconcilerRuntime;
 
@@ -172,5 +172,43 @@ async fn edge_maintained_store_equals_rebuild_from_committed_intent() {
     assert_eq!(
         edge_store, rebuilt,
         "edge-maintained ListenerFactStore must equal a fresh rebuild over the committed intent set",
+    );
+}
+
+async fn stop(state: AppState, id: &str) {
+    let _response =
+        stop_workload(State(state), Path(id.to_owned())).await.expect("stop must succeed");
+}
+
+/// R-76 (ADR-0062 amendment 2026-11-10) — invariant B with a stop step. A stop
+/// is not an eviction edge: after submits and a stop through the driving ports,
+/// the edge-maintained store still equals a rebuild over the committed intent,
+/// which includes the stopped Service.
+#[tokio::test]
+async fn edge_maintained_store_after_a_stop_equals_rebuild_over_the_stopped_intent() {
+    let tmp = TempDir::new().expect("tmpdir");
+    let state = build_app_state(&tmp);
+
+    submit(state.clone(), service_spec("web", vec![(80, "tcp"), (443, "tcp"), (53, "udp")])).await;
+    submit(state.clone(), service_spec("api", vec![(9000, "tcp")])).await;
+    submit(state.clone(), job_spec("batch")).await;
+    let before_stop: ListenerFactStore = { state.listener_facts.lock().await.clone() };
+
+    stop(state.clone(), "web").await;
+    stop(state.clone(), "batch").await;
+
+    let edge_store: ListenerFactStore = { state.listener_facts.lock().await.clone() };
+    let rebuilt = ListenerFactStore::rebuild_from_intent(
+        &state.store,
+        &state.intent_redb_path,
+        &state.allocator,
+    )
+    .await
+    .expect("rebuild_from_intent");
+
+    assert_eq!(edge_store, before_stop, "a stop changes neither map");
+    assert_eq!(
+        edge_store, rebuilt,
+        "edge-maintained ListenerFactStore after a stop must equal a rebuild over the committed intent set",
     );
 }

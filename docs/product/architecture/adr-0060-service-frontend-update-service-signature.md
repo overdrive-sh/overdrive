@@ -4,6 +4,11 @@
 
 Accepted (2026-06-02)
 
+**Note 2026-11-10.** C3 is unchanged. ADR-0062 was amended on 2026-11-10 so that
+listener facts are no longer evicted when a Service is stopped; a stopped
+Service's `NoListenerProto` skip was a symptom of that eviction, not a new case of
+C3, and the empty-backend purge now reaches `SERVICE_MAP`.
+
 Supersedes the **paper** `Q-Sig locked-A` decision recorded in
 `docs/feature/phase-2-xdp-service-map/design/architecture.md` § 5 and
 mirrored at `docs/product/architecture/brief.md` § 46 — see *Supersession*

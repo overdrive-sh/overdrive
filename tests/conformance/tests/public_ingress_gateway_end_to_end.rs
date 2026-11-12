@@ -54,10 +54,8 @@
 //!
 //! # Activation
 //!
-//! Every test carries the reason `pending DELIVER public-request-end-to-end`;
-//! the native-metal selector runs them once DELIVER lands the enabled
-//! composition, with the reason later replaced by
-//! `native x86_64 KVM host required`.
+//! The native-metal selector (`kvm-tests` on a native x86_64 KVM host) runs
+//! them.
 
 #![cfg(feature = "integration-tests")]
 #![allow(
@@ -66,19 +64,23 @@
     clippy::too_many_lines,
     clippy::cast_possible_truncation,
     clippy::significant_drop_tightening,
-    reason = "conformance bodies carry CONTRACT_SHAPE markers and the whole Given/When/Then narrative"
+    clippy::print_stdout,
+    reason = "conformance bodies carry CONTRACT_SHAPE markers and the whole Given/When/Then narrative; the memory tests print the measured series"
 )]
 
 use std::time::{Duration, Instant};
 
 use overdrive_system_conformance::TraceHistory;
 use overdrive_system_conformance::gateway::{
-    BODY_CEILING_OCTETS, BODY_NO_PROGRESS_DEADLINE, DRAIN_DEADLINE, FIVE_SECOND_DEADLINE,
-    GatewayWorld, GuestKind, HEAD_CEILING_OCTETS, KernelSample, LoadChild, MAX_PUBLIC_CONNECTIONS,
-    PIPE_CAPACITY_OCTETS, Request, RequestBody, StreamEnd, Suite, TlsStat, WireCapture, blocking,
-    first_pattern_mismatch, fnv1a, kernel_sample, kill_vmm, live_gateway_counts, nofile_limit,
+    BODY_CEILING_OCTETS, BODY_NO_PROGRESS_DEADLINE, DESCRIPTORS_PER_EXCHANGE, DRAIN_DEADLINE,
+    EXCHANGE_DESCRIPTOR_BUDGET, EXCHANGE_PIPE_GROWTH_OCTETS,
+    EXCHANGE_RESIDENT_GROWTH_BUDGET_OCTETS, FIVE_SECOND_DEADLINE, GatewayWorld, GuestKind,
+    HEAD_CEILING_OCTETS, KernelSample, LoadChild, MAX_PUBLIC_CONNECTIONS, PIPE_CAPACITY_OCTETS,
+    PLATEAU_BURSTS, PLATEAU_TOLERANCE_OCTETS, Request, RequestBody, StreamEnd, Suite, TlsStat,
+    WireCapture, blocking, describe_fd_kind_delta, first_pattern_mismatch, fnv1a,
+    in_use_heap_octets, kernel_sample, kill_vmm, live_gateway_counts, nofile_limit, open_fd_kinds,
     open_fds, pattern_bytes, pipe_capacity_octets, receipt_occurrences, rss_kib,
-    run_load_child_if_requested, service_map_entries, shutdown_stage_events,
+    run_load_child_if_requested, service_map_entries, settled_kernel_sample, shutdown_stage_events,
     startup_refusal_reasons, tls_record_types,
 };
 use rustls::CipherSuite;
@@ -109,37 +111,45 @@ fn stream_body() -> Vec<u8> {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-#[ignore = "pending DELIVER public-request-end-to-end"]
 async fn native_metal_kvm_public_ingress_gateway_streams_a_workload_response_over_kernel_tls_legs()
 {
     let trace = TraceHistory::install_global();
-    let world = GatewayWorld::serving(&trace, 100, GuestKind::Example).await;
+    let world = GatewayWorld::deployed(&trace, 100, GuestKind::Example).await;
     let address = world.gateway_address();
 
     // The gate is gateway-local (R-65) and ran in order before the bind: when
     // the listener is first observed bound, the relay probe, the sentinel probe
     // and the Gateway Identity wait have passed (identity Current, connect path
     // Ready, no unavailable cause), no gateway refusal was emitted, and the
-    // gate made no connection to the Route's Service (no receipt occurrence).
+    // gate made no connection to the Route's Service. Nothing has been
+    // requested through the gateway yet: the Service's readiness is read from
+    // the allocation status, so a receipt occurrence could only be the gate's.
     world.wait_listener_bound(Duration::from_secs(30)).await;
-    let before_bind = trace.snapshot();
     let bound = world.gateway_status().await;
     assert_eq!(bound["listener_bound"], true, "the listener is bound: {bound}");
     assert_eq!(bound["application"]["gateway_identity"]["state"], "current", "{bound}");
     assert_eq!(bound["application"]["connect_path"], "ready", "{bound}");
     assert!(bound["application"]["unavailable"].is_null(), "no unavailable cause: {bound}");
+    world.wait_running().await;
+    let before_request = trace.snapshot();
     assert!(
-        receipt_occurrences(&before_bind).is_empty(),
+        receipt_occurrences(&before_request).is_empty(),
         "the gate made no connection to the Service before the first request"
     );
     assert!(
-        startup_refusal_reasons(&before_bind).iter().all(|reason| !reason.starts_with("gateway.")),
+        startup_refusal_reasons(&before_request)
+            .iter()
+            .all(|reason| !reason.starts_with("gateway.")),
         "no gateway gate refused: {:?}",
-        startup_refusal_reasons(&before_bind)
+        startup_refusal_reasons(&before_request)
     );
+    world.wait_until_serving().await;
 
     // Baseline kernel state, then the request with a loopback capture running.
-    let baseline = blocking(move || kernel_sample(address)).await;
+    // The kernel-TLS counters are host-global, so the baseline is taken once
+    // they have stopped moving: a setup socket still closing would otherwise
+    // be counted against the exchange.
+    let baseline = blocking(move || settled_kernel_sample(address)).await;
     let capture = blocking(WireCapture::start).await;
     let mark = trace.mark();
     let client = world.client();
@@ -233,9 +243,12 @@ async fn native_metal_kvm_public_ingress_gateway_streams_a_workload_response_ove
         );
     })
     .await;
-    let after = blocking(move || kernel_sample(address)).await;
-    assert_eq!(after.tls.delta(&baseline.tls, "TlsCurrTxSw"), 0, "no armed leg remains");
-    assert_eq!(after.tls.delta(&baseline.tls, "TlsCurrRxSw"), 0, "no armed leg remains");
+    // Host-global counters: unrelated sockets that were live at the baseline
+    // may close, so the legs of this exchange are gone when the counts are no
+    // higher than the baseline (never above it).
+    let after = blocking(move || settled_kernel_sample(address)).await;
+    assert!(after.tls.delta(&baseline.tls, "TlsCurrTxSw") <= 0, "no armed leg remains: {after:?}");
+    assert!(after.tls.delta(&baseline.tls, "TlsCurrRxSw") <= 0, "no armed leg remains: {after:?}");
 
     world.tear_down().await;
 }
@@ -258,14 +271,13 @@ async fn native_metal_kvm_public_ingress_gateway_streams_a_workload_response_ove
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-#[ignore = "pending DELIVER public-request-end-to-end"]
 async fn native_metal_kvm_public_ingress_gateway_never_succeeds_through_a_stopped_workloads_stale_service_entry()
  {
     let trace = TraceHistory::install_global();
     let world = GatewayWorld::serving(&trace, 104, GuestKind::Conformance).await;
     assert!(blocking(service_map_entries).await >= 1, "the Service is programmed while serving");
 
-    world.stop_service().await;
+    world.stop_service_and_wait().await;
     let client = world.client();
     let mut observed = Vec::<(bool, u16, bool)>::new();
     let window = Instant::now();
@@ -339,11 +351,10 @@ async fn native_metal_kvm_public_ingress_gateway_never_succeeds_through_a_stoppe
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-#[ignore = "pending DELIVER public-request-end-to-end"]
 async fn native_metal_kvm_public_ingress_gateway_runs_its_stages_in_order_and_shuts_down_within_one_drain()
  {
     let trace = TraceHistory::install_global();
-    let world = GatewayWorld::serving(&trace, 105, GuestKind::Conformance).await;
+    let world = GatewayWorld::deployed(&trace, 105, GuestKind::Conformance).await;
     world.wait_listener_bound(Duration::from_secs(30)).await;
 
     // Boot: the gateway gates ran in order. G0 registered the reconciler, the
@@ -367,11 +378,16 @@ async fn native_metal_kvm_public_ingress_gateway_runs_its_stages_in_order_and_sh
     assert_eq!(status["enabled"], true);
     assert_eq!(status["application"]["gateway_identity"]["state"], "current");
     assert_eq!(status["application"]["connect_path"], "ready");
+    // Nothing has been requested through the gateway: the Service's readiness
+    // is read from the allocation status, so a receipt occurrence could only
+    // be the gate's.
+    world.wait_running().await;
     assert!(
         receipt_occurrences(&trace.snapshot()).is_empty(),
         "the gate made no connection to the Service before the first request"
     );
     assert!(startup_refusal_reasons(&trace.snapshot()).is_empty(), "no gate refused");
+    world.wait_until_serving().await;
 
     // One request is served, the Route and the Service are withdrawn and
     // stopped, and the graceful shutdown with the 5 s drain runs.
@@ -430,7 +446,6 @@ async fn native_metal_kvm_public_ingress_gateway_runs_its_stages_in_order_and_sh
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-#[ignore = "pending DELIVER public-request-end-to-end"]
 async fn native_metal_kvm_public_ingress_gateway_answers_502_when_the_guest_flow_ends_mid_request()
 {
     let trace = TraceHistory::install_global();
@@ -480,7 +495,6 @@ async fn native_metal_kvm_public_ingress_gateway_answers_502_when_the_guest_flow
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-#[ignore = "pending DELIVER public-request-end-to-end"]
 async fn native_metal_kvm_public_ingress_gateway_answers_408_for_a_stalled_request_head() {
     let trace = TraceHistory::install_global();
     let world = GatewayWorld::serving(&trace, 108, GuestKind::Conformance).await;
@@ -513,11 +527,12 @@ async fn native_metal_kvm_public_ingress_gateway_answers_408_for_a_stalled_reque
 /// Given a serving workload and a request declaring a 1024-octet body
 /// When the client sends ten body octets and then stays silent
 /// Then the answer is 408 after 30 s of no progress (and within 2 s more), and
-///      the workload never saw a request.
+///      the workload saw the request head (the gateway forwards the head while
+///      the body is in flight, R-37) but never a completed exchange: the 408 is
+///      the gateway's, not a relayed workload answer.
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-#[ignore = "pending DELIVER public-request-end-to-end"]
 async fn native_metal_kvm_public_ingress_gateway_answers_408_for_a_stalled_request_body() {
     let trace = TraceHistory::install_global();
     let world = GatewayWorld::serving(&trace, 109, GuestKind::Conformance).await;
@@ -543,8 +558,9 @@ async fn native_metal_kvm_public_ingress_gateway_answers_408_for_a_stalled_reque
     );
     assert_eq!(
         world.workload_request_count().await,
-        0,
-        "the stalled request never reached the guest"
+        1,
+        "the guest counted the forwarded head of the stalled request exactly once; its \
+         echo never completed (the client's answer was the gateway's 408)"
     );
 
     world.tear_down().await;
@@ -568,7 +584,6 @@ async fn native_metal_kvm_public_ingress_gateway_answers_408_for_a_stalled_reque
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-#[ignore = "pending DELIVER public-request-end-to-end"]
 async fn native_metal_kvm_public_ingress_gateway_answers_503_until_the_hydrator_reprograms_after_a_serve_restart()
  {
     let trace = TraceHistory::install_global();
@@ -622,6 +637,146 @@ async fn native_metal_kvm_public_ingress_gateway_answers_503_until_the_hydrator_
 // S-PIG-113
 // ---------------------------------------------------------------------------
 
+const HOLD_TEST: &str = "native_metal_kvm_public_ingress_gateway_holds_128_concurrent_exchanges_within_the_descriptor_and_memory_budget";
+const PLATEAU_TEST: &str = "native_metal_kvm_public_ingress_gateway_returns_to_a_stable_in_use_heap_across_repeated_128_exchange_bursts";
+
+/// What one burst of 128 concurrent exchanges observed in the gateway process.
+struct Burst {
+    fds_before: usize,
+    fds_peak: usize,
+    rss_before_kib: u64,
+    rss_peak_kib: u64,
+    heap_after_drain_octets: u64,
+    pipes_before: u64,
+    pipes_peak: u64,
+    kinds_before: std::collections::BTreeMap<&'static str, usize>,
+    kinds_peak: std::collections::BTreeMap<&'static str, usize>,
+}
+
+impl Burst {
+    const fn resident_growth(&self) -> u64 {
+        self.rss_peak_kib.saturating_sub(self.rss_before_kib) * 1024
+    }
+    const fn pipe_growth(&self) -> u64 {
+        self.pipes_peak.saturating_sub(self.pipes_before)
+    }
+}
+
+/// Hold 128 `GET /hold` exchanges from a fresh load child, observe the
+/// process, optionally probe the 129th connection, drain, and wait (bounded)
+/// for descriptors and pipe capacity to return to the baseline.
+///
+/// The baseline is taken after the child is spawned and before it opens any
+/// connection, so the child's own stdin/stdout/stderr pipes are excluded from
+/// the growth.
+async fn hold_burst(world: &GatewayWorld, probe_129th: bool) -> Burst {
+    let entry = if probe_129th { HOLD_TEST } else { PLATEAU_TEST };
+    let load = LoadChild::spawn(
+        entry,
+        world.gateway_address(),
+        MAX_PUBLIC_CONNECTIONS,
+        &world.write_ca_der(),
+    );
+    let mut load = blocking(move || {
+        let ready = load.wait_for("READY");
+        assert_eq!(ready.trim(), "READY");
+        load
+    })
+    .await;
+    let (fds_before, rss_before_kib, pipes_before, kinds_before) =
+        blocking(|| (open_fds(), rss_kib(), pipe_capacity_octets(), open_fd_kinds())).await;
+    let (load, line) = blocking(move || {
+        load.start();
+        let line = load.wait_for("INFLIGHT");
+        (load, line)
+    })
+    .await;
+    let mut load = load;
+    assert_eq!(
+        line.trim(),
+        format!("INFLIGHT {MAX_PUBLIC_CONNECTIONS}"),
+        "all {MAX_PUBLIC_CONNECTIONS} exchanges are in flight with their response heads received"
+    );
+    let (fds_peak, rss_peak_kib, pipes_peak, kinds_peak) =
+        blocking(|| (open_fds(), rss_kib(), pipe_capacity_octets(), open_fd_kinds())).await;
+
+    if probe_129th {
+        let client = world.client();
+        blocking(move || client.closed_before_any_tls_octet(FIVE_SECOND_DEADLINE))
+            .await
+            .expect("the 129th connection is closed before any TLS octet");
+    }
+
+    let done = blocking(move || {
+        load.drain();
+        let line = load.wait_for("DONE");
+        load.finish();
+        line
+    })
+    .await;
+    assert_eq!(done.trim(), format!("DONE {MAX_PUBLIC_CONNECTIONS}"), "every body arrived exact");
+    let kinds_for_message = kinds_before.clone();
+    let heap_after_drain_octets = blocking(move || {
+        // Bounded wait; on expiry the message attributes the residue by kind.
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            let (fds, pipes) = (open_fds(), pipe_capacity_octets());
+            if fds <= fds_before && pipes <= pipes_before {
+                return in_use_heap_octets();
+            }
+            assert!(
+                Instant::now() < deadline,
+                "descriptors and pipes return to the baseline after drain within 30 s: \
+                 descriptors {fds_before} -> {fds}, pipe capacity {pipes_before} -> {pipes}; \
+                 by kind ({})",
+                describe_fd_kind_delta(&kinds_for_message, &open_fd_kinds())
+            );
+            std::thread::sleep(Duration::from_millis(200));
+        }
+    })
+    .await;
+    Burst {
+        fds_before,
+        fds_peak,
+        rss_before_kib,
+        rss_peak_kib,
+        heap_after_drain_octets,
+        pipes_before,
+        pipes_peak,
+        kinds_before,
+        kinds_peak,
+    }
+}
+
+/// The R-74 terms for one burst. The pipe term and the resident term are
+/// separate bounds; they are never summed.
+fn assert_burst_within_budget(burst: &Burst) {
+    assert!(
+        burst.fds_peak <= burst.fds_before + EXCHANGE_DESCRIPTOR_BUDGET,
+        "process descriptors stay within the accounted {EXCHANGE_DESCRIPTOR_BUDGET} \
+         (at most {DESCRIPTORS_PER_EXCHANGE} x {MAX_PUBLIC_CONNECTIONS}; 7 per exchange \
+         measured): {} -> {}; by kind ({}). A larger figure falsifies the budget and returns \
+         to DESIGN",
+        burst.fds_before,
+        burst.fds_peak,
+        describe_fd_kind_delta(&burst.kinds_before, &burst.kinds_peak)
+    );
+    assert_eq!(
+        burst.pipe_growth(),
+        EXCHANGE_PIPE_GROWTH_OCTETS,
+        "summed pipe capacity growth is exactly one relay pipe at the capacity floor per \
+         active exchange (65,536 x {MAX_PUBLIC_CONNECTIONS}); a different figure falsifies the \
+         budget and returns to DESIGN"
+    );
+    assert!(
+        burst.resident_growth() <= EXCHANGE_RESIDENT_GROWTH_BUDGET_OCTETS,
+        "resident-set growth {} exceeds {EXCHANGE_RESIDENT_GROWTH_BUDGET_OCTETS} \
+         (173 KiB x {MAX_PUBLIC_CONNECTIONS} + 0.73 MB + 1 MB): a larger figure falsifies the \
+         budget and returns to DESIGN",
+        burst.resident_growth()
+    );
+}
+
 /// S-PIG-113 -- 128 concurrent streaming exchanges through the production
 /// composition stay within the accounted descriptor and memory budget; the 129th
 /// connection is closed before any TLS octet; everything is released after drain.
@@ -631,14 +786,15 @@ async fn native_metal_kvm_public_ingress_gateway_answers_503_until_the_hydrator_
 ///   `GET /hold` exchange open with its response head received
 /// When the process descriptor count, resident set and pipe capacity are read
 ///  And a 129th connection is made
-/// Then descriptors stay within the baseline plus 768, resident-set growth plus
-///      pipe capacity growth stays within 24 MiB (128 x 192 KiB), the 129th
-///      connection is closed before any TLS octet, and after the exchanges drain
-///      the descriptor count and pipe capacity return to the baseline.
+/// Then process-wide descriptors stay within the baseline plus 1,152, pipe
+///      capacity grows by exactly 65,536 x 128, resident-set growth stays within
+///      24,405,456 octets (173 KiB x 128 + 0.73 MB + 1 MB; never summed with the
+///      pipe term), the 129th connection is closed before any TLS octet, and
+///      after the exchanges drain the descriptor count and pipe capacity return
+///      to the baseline.
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-#[ignore = "pending DELIVER public-request-end-to-end"]
 async fn native_metal_kvm_public_ingress_gateway_holds_128_concurrent_exchanges_within_the_descriptor_and_memory_budget()
  {
     // Re-executed as the load client: hold the exchanges and speak the line
@@ -650,74 +806,72 @@ async fn native_metal_kvm_public_ingress_gateway_holds_128_concurrent_exchanges_
 
     let trace = TraceHistory::install_global();
     let world = GatewayWorld::serving(&trace, 111, GuestKind::Conformance).await;
-    let address = world.gateway_address();
-    let ca = world.write_ca_der();
-
     let (soft, hard) = nofile_limit();
     tracing::info!(soft, hard, "RLIMIT_NOFILE reported, not raised");
-    let (fds_before, rss_before, pipes_before) =
-        blocking(|| (open_fds(), rss_kib(), pipe_capacity_octets())).await;
 
-    let mut load = LoadChild::spawn(
-        "native_metal_kvm_public_ingress_gateway_holds_128_concurrent_exchanges_within_the_descriptor_and_memory_budget",
-        address,
-        MAX_PUBLIC_CONNECTIONS,
-        &ca,
+    let burst = hold_burst(&world, true).await;
+    println!(
+        "S-PIG-113: descriptors {} -> {}, pipe growth {}, resident growth {} octets",
+        burst.fds_before,
+        burst.fds_peak,
+        burst.pipe_growth(),
+        burst.resident_growth()
     );
-    let established = blocking(move || {
-        let line = load.wait_for("INFLIGHT");
-        (load, line)
-    })
-    .await;
-    let (mut load, line) = established;
-    assert_eq!(
-        line.trim(),
-        format!("INFLIGHT {MAX_PUBLIC_CONNECTIONS}"),
-        "all {MAX_PUBLIC_CONNECTIONS} exchanges are in flight with their response heads received"
-    );
+    assert_burst_within_budget(&burst);
 
-    let (fds_peak, rss_peak, pipes_peak) =
-        blocking(|| (open_fds(), rss_kib(), pipe_capacity_octets())).await;
-    assert!(
-        fds_peak <= fds_before + 768,
-        "descriptors stay within the accounted 768: {fds_before} -> {fds_peak}"
-    );
-    let resident_growth = rss_peak.saturating_sub(rss_before) * 1024;
-    let pipe_growth = pipes_peak.saturating_sub(pipes_before);
-    assert!(
-        resident_growth + pipe_growth <= 24 * 1024 * 1024,
-        "resident growth {resident_growth} plus pipe capacity growth {pipe_growth} exceeds the \
-         accounted 24 MiB (128 x 192 KiB): the budget is falsified and returns to DESIGN"
-    );
-    assert!(
-        pipe_growth >= 2 * PIPE_CAPACITY_OCTETS,
-        "the relay pipes exist while exchanges are in flight: {pipe_growth}"
-    );
+    world.tear_down().await;
+}
 
-    // The 129th concurrent connection is closed before any TLS octet.
-    let client = world.client();
-    blocking(move || client.closed_before_any_tls_octet(FIVE_SECOND_DEADLINE))
-        .await
-        .expect("the 129th connection is closed before any TLS octet");
+/// Repeated bursts of 128 concurrent exchanges in one process return to a stable
+/// in-use heap: no burst-over-burst retention. The oracle is glibc's in-use heap
+/// (`mallinfo2().uordblks`), not the raw resident set, which includes free heap
+/// glibc keeps mapped.
+///
+/// Given a serving workload
+/// When five bursts of 128 concurrent `GET /hold` exchanges each run and drain in
+///      the same gateway process
+/// Then every burst's peak resident growth, from that burst's own baseline, stays
+///      within the R-74 resident bound, and the post-drain resident set after the
+///      fifth burst is within 1 MB of the post-drain resident set after the second.
+///
+/// CONTRACT_SHAPE: unbounded-preservation.
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
+async fn native_metal_kvm_public_ingress_gateway_returns_to_a_stable_in_use_heap_across_repeated_128_exchange_bursts()
+ {
+    run_load_child_if_requested();
+    if std::env::var_os(overdrive_system_conformance::gateway::LOAD_CHILD_ENV).is_some() {
+        return;
+    }
 
-    // Drain: every exchange completes its 1 MiB body; the process returns to
-    // its baseline.
-    let done = blocking(move || {
-        load.drain();
-        let line = load.wait_for("DONE");
-        load.finish();
-        line
-    })
-    .await;
-    assert_eq!(done.trim(), format!("DONE {MAX_PUBLIC_CONNECTIONS}"), "every body arrived exact");
-    blocking(move || {
-        overdrive_system_conformance::wait_until(
-            Duration::from_secs(30),
-            "descriptors and pipes return to the baseline after drain",
-            || open_fds() <= fds_before && pipe_capacity_octets() <= pipes_before,
+    // The collector is deliberately not installed: it retains every event for the
+    // life of the process, which would put harness state inside the measured heap.
+    let trace = TraceHistory::default();
+    let world = GatewayWorld::serving(&trace, 115, GuestKind::Conformance).await;
+
+    let mut post_drain_heap: Vec<u64> = Vec::with_capacity(PLATEAU_BURSTS);
+    for number in 1..=PLATEAU_BURSTS {
+        let burst = hold_burst(&world, false).await;
+        println!(
+            "plateau burst {number}: pre-burst {} KiB, peak {} KiB (growth {} octets), \
+             post-drain in-use heap {} octets",
+            burst.rss_before_kib,
+            burst.rss_peak_kib,
+            burst.resident_growth(),
+            burst.heap_after_drain_octets
         );
-    })
-    .await;
+        assert_burst_within_budget(&burst);
+        post_drain_heap.push(burst.heap_after_drain_octets);
+    }
+    println!("plateau post-drain in-use heap series (octets): {post_drain_heap:?}");
+
+    let second = post_drain_heap[1];
+    let last = post_drain_heap[PLATEAU_BURSTS - 1];
+    assert!(
+        last <= second + PLATEAU_TOLERANCE_OCTETS,
+        "post-drain in-use heap grows burst over burst: after burst 2 {second} octets, after \
+         burst {PLATEAU_BURSTS} {last} octets (series in octets {post_drain_heap:?}); more than \
+         {PLATEAU_TOLERANCE_OCTETS} octets of growth is a possible leak"
+    );
 
     world.tear_down().await;
 }
@@ -741,7 +895,6 @@ async fn native_metal_kvm_public_ingress_gateway_holds_128_concurrent_exchanges_
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-#[ignore = "pending DELIVER public-request-end-to-end"]
 async fn native_metal_kvm_public_ingress_gateway_relays_exact_length_and_chunked_bodies_octet_exact_over_keep_alive()
  {
     let trace = TraceHistory::install_global();
@@ -849,7 +1002,6 @@ async fn native_metal_kvm_public_ingress_gateway_relays_exact_length_and_chunked
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-#[ignore = "pending DELIVER public-request-end-to-end"]
 async fn native_metal_kvm_public_ingress_gateway_sends_no_key_update_across_a_sixteen_mebibyte_response()
  {
     let trace = TraceHistory::install_global();
@@ -902,7 +1054,6 @@ async fn native_metal_kvm_public_ingress_gateway_sends_no_key_update_across_a_si
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
-#[ignore = "pending DELIVER public-request-end-to-end"]
 async fn native_metal_kvm_public_ingress_gateway_lets_the_client_read_the_response_before_a_clean_close()
  {
     let trace = TraceHistory::install_global();

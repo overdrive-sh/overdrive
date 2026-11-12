@@ -214,6 +214,7 @@ fn drive_handshake_client(
     deadline: std::time::Duration,
 ) -> Result<()> {
     let start = std::time::Instant::now();
+    let mut records = super::RecordAssembler::new();
     loop {
         if super::limits::handshake_expired(start.elapsed(), deadline) {
             return Err(MtlsEnforcementError::HandshakeTimeout { alloc: alloc.clone(), deadline });
@@ -226,14 +227,14 @@ fn drive_handshake_client(
         if !conn.is_handshaking() {
             return Ok(());
         }
-        match conn.read_tls(tcp) {
-            Ok(0) => {
+        match records.next_record(tcp) {
+            Ok(None) => {
                 return Err(MtlsEnforcementError::HandshakeFailed {
                     reason: "EOF during handshake (peer closed)".into(),
                 });
             }
-            Ok(_) => {
-                conn.process_new_packets().map_err(|e| {
+            Ok(Some(record)) => {
+                super::feed_record(conn, &record).map_err(|e| {
                     MtlsEnforcementError::PeerVerificationFailed { reason: format!("{e}") }
                 })?;
             }

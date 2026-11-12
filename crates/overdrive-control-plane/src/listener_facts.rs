@@ -22,10 +22,10 @@
 //!   `ServiceMapHydrator` resolves `service_id` from its target and
 //!   keys `desired` by that id, so `ServiceId` is the natural read key.
 //! * **secondary** `WorkloadId -> Vec<ServiceId>` — a cleanup index.
-//!   It exists ONLY because the stop handler holds a [`WorkloadId`],
-//!   not the per-listener [`ServiceId`]s; on workload removal the index
-//!   tells [`ListenerFactStore::remove_workload`] exactly which primary
-//!   entries to evict.
+//!   It lets [`ListenerFactStore::upsert`] find the primary entries a
+//!   workload's prior listener set derived, so a re-upsert replaces them.
+//!   A stop never evicts facts (R-76, ADR-0062 amendment 2026-11-10): the
+//!   hydrator keeps projecting a stopped Service so it can purge its backend.
 //!
 //! Per listener the store derives `ServiceId::derive(&vip, port,
 //! protocol, "service-map")` — the identical derivation
@@ -62,16 +62,15 @@ const SERVICE_MAP_PURPOSE: &str = "service-map";
 /// See the module docs for the rationale behind the two-map shape. The
 /// store owns no I/O and persists nothing — it is rebuilt from the
 /// intent SSOT at boot via [`Self::rebuild_from_intent`] and maintained
-/// incrementally via [`Self::upsert`] / [`Self::remove_workload`] on
-/// the submit / stop paths.
+/// incrementally via [`Self::upsert`] on the submit path.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ListenerFactStore {
     /// Read-path index: derived `ServiceId` → the listener's
     /// `(port, protocol, vip)` row. One entry per listener.
     primary: BTreeMap<ServiceId, ListenerRow>,
     /// Cleanup index: workload → the `ServiceId`s its listeners
-    /// derived, in listener (declaration) order. Drives eviction in
-    /// [`Self::remove_workload`].
+    /// derived, in listener (declaration) order. Drives the replace
+    /// pre-pass in [`Self::upsert`].
     secondary: BTreeMap<WorkloadId, Vec<ServiceId>>,
 }
 
@@ -106,18 +105,14 @@ impl ListenerFactStore {
     /// A re-upsert of the same `workload_id` fully REPLACES its prior
     /// facts: any `ServiceId` from a superseded set (a changed `vip`,
     /// port, or protocol) is evicted from the primary map before the new
-    /// set is inserted, so no orphan survives that `remove_workload`
-    /// — which keys eviction off the secondary index — could no longer
-    /// reach. For an unchanged set this is a no-op delta (the same ids
+    /// set is inserted, so no orphan survives a changed set. For an unchanged set this is a no-op delta (the same ids
     /// are evicted then re-inserted), so cross-call idempotency holds.
     pub fn upsert(&mut self, workload_id: WorkloadId, vip: &ServiceVip, listeners: &[Listener]) {
         // Replace pre-pass: evict any primary entries this workload
         // registered on a prior `upsert` before inserting the new set.
         // The secondary `Vec` is overwritten wholesale below, so without
         // this the `ServiceId`s of a superseded set (changed vip / port /
-        // proto) would be unreachable orphans — `remove_workload` keys
-        // eviction off the secondary index and would only ever clean the
-        // latest set. Evicting up-front honours the "or replace" half of
+        // proto) would be unreachable orphans. Evicting up-front honours the "or replace" half of
         // the contract; for an unchanged set the same ids are removed and
         // re-inserted (a no-op delta), preserving idempotency.
         if let Some(old_ids) = self.secondary.get(&workload_id) {
@@ -175,26 +170,6 @@ impl ListenerFactStore {
             ids.push(service_id);
         }
         self.secondary.insert(workload_id, ids);
-    }
-
-    /// Evict every listener fact recorded for `workload_id`.
-    ///
-    /// Looks up the workload's `Vec<ServiceId>` in the secondary index,
-    /// removes each from the primary map, and drops the secondary entry.
-    /// Other workloads' facts are untouched.
-    ///
-    /// # Postconditions
-    ///
-    /// A missing `workload_id` is a no-op (idempotent). After return,
-    /// `self.fact_for(&id)` returns `None` for every `id` that was
-    /// derived from `workload_id`'s listeners, and the workload has no
-    /// secondary entry.
-    pub fn remove_workload(&mut self, workload_id: &WorkloadId) {
-        if let Some(ids) = self.secondary.remove(workload_id) {
-            for id in &ids {
-                self.primary.remove(id);
-            }
-        }
     }
 
     /// O(1) keyed read of the listener fact for `service_id`.
@@ -648,9 +623,7 @@ mod tests {
     /// fully REPLACE the prior facts, not leak orphans. Before the
     /// replace pre-pass, `upsert` overwrote the secondary `Vec` but never
     /// evicted the primary entries keyed by the OLD set's `ServiceId`s —
-    /// so the superseded entry stayed in `primary` forever, and
-    /// `remove_workload` (which keys eviction off the now-overwritten
-    /// secondary index) could no longer reach it. The docstring promised
+    /// so the superseded entry stayed in `primary` forever. The docstring promised
     /// "Record (or replace)"; this test pins the "replace" half.
     ///
     /// Not reachable through the current submit handler (a changed spec
@@ -691,14 +664,6 @@ mod tests {
             Some(1),
             "secondary Vec carries only the new set's single ServiceId",
         );
-
-        // And the cleanup index is now consistent: `remove_workload`
-        // fully drains the workload with no orphan left behind.
-        store.remove_workload(&wid);
-        assert!(
-            store.snapshot().service_facts.is_empty(),
-            "remove_workload fully cleans up after a changed-set replace",
-        );
     }
 
     /// Defensive-invariant guard: two listeners with the SAME
@@ -719,40 +684,6 @@ mod tests {
 
         let mut store = ListenerFactStore::new();
         store.upsert(workload("malformed"), &v, &listeners);
-    }
-
-    // -----------------------------------------------------------------
-    // U2 — remove_workload evicts only the target's ServiceIds
-    // -----------------------------------------------------------------
-
-    #[test]
-    fn remove_workload_evicts_only_target_service_ids() {
-        let vip_web = vip("10.96.0.7");
-        let vip_api = vip("10.96.0.8");
-        let mut store = ListenerFactStore::new();
-        store.upsert(workload("web"), &vip_web, &[listener(80, Proto::Tcp)]);
-        store.upsert(workload("api"), &vip_api, &[listener(9000, Proto::Tcp)]);
-
-        store.remove_workload(&workload("web"));
-
-        // web's id is gone; api's survives.
-        let (web_sid, _) = derived(&vip_web, 80, Proto::Tcp);
-        let (api_sid, api_row) = derived(&vip_api, 9000, Proto::Tcp);
-        assert_eq!(store.fact_for(web_sid), None, "web's fact must be evicted");
-        assert_eq!(store.fact_for(api_sid), Some(api_row), "api's fact must be untouched");
-        let snapshot = store.snapshot();
-        assert!(
-            !snapshot.workload_index.iter().any(|(w, _)| w == &workload("web")),
-            "web's secondary entry dropped"
-        );
-        assert!(
-            snapshot.workload_index.iter().any(|(w, _)| w == &workload("api")),
-            "api's secondary entry retained"
-        );
-
-        // Removing an absent workload is a no-op.
-        store.remove_workload(&workload("does-not-exist"));
-        assert_eq!(store.fact_for(api_sid), Some(api_row), "no-op removal leaves api intact");
     }
 
     // -----------------------------------------------------------------
@@ -887,24 +818,6 @@ mod tests {
         // (A source-text grep for "HashMap" is the AST-shape
         // anti-pattern per nw-test-optimization §2; the type signature
         // is the real, refactor-safe invariant.)
-    }
-
-    // -----------------------------------------------------------------
-    // U6 — a non-upsert flow leaves both maps unchanged
-    // -----------------------------------------------------------------
-
-    #[test]
-    fn conflict_release_does_not_insert_facts() {
-        // A construct-then-non-upsert flow (e.g. a VIP conflict that
-        // releases without ever calling upsert) leaves the store empty.
-        let mut store = ListenerFactStore::new();
-        // A no-op removal of an absent workload is the kind of flow a
-        // release path performs — it must not insert anything.
-        store.remove_workload(&workload("conflicted"));
-        let snapshot = store.snapshot();
-        assert!(snapshot.service_facts.is_empty(), "primary stays empty without upsert");
-        assert!(snapshot.workload_index.is_empty(), "secondary stays empty without upsert");
-        assert_eq!(store, ListenerFactStore::new(), "store equals a fresh empty store");
     }
 
     // -----------------------------------------------------------------
@@ -1408,10 +1321,13 @@ mod tests {
         assert_eq!(before, after, "conflict-release branch must be a store NO-OP");
     }
 
-    /// Submit-then-stop evicts the workload's facts from BOTH the primary
-    /// and secondary maps via the stop edge's `remove_workload`.
+    /// R-76 (ADR-0062 amendment 2026-11-10) — a stop never evicts listener
+    /// facts: submit-then-stop leaves BOTH the primary and the secondary map
+    /// exactly as the submit left them, and every fact still resolves. Facts
+    /// are evicted only on logical deletion, so the hydrator still projects the
+    /// stopped Service and emits the empty update that purges its backend.
     #[tokio::test]
-    async fn stop_removes_workload_facts() {
+    async fn stop_leaves_workload_facts_unchanged() {
         let tmp = TempDir::new().expect("tmpdir");
         let obs = Arc::new(SimObservationStore::single_peer(node_id("local"), 24));
         let state = build_app_state(&tmp, obs as Arc<dyn ObservationStore>);
@@ -1419,26 +1335,85 @@ mod tests {
         submit_via_handler(&state, wire_service("web", &[(80, Proto::Tcp), (443, Proto::Tcp)]))
             .await
             .expect("Service submit must succeed");
-        // Non-empty before stop.
-        let before = { state.listener_facts.lock().await.clone() }.snapshot();
-        assert_eq!(before.service_facts.len(), 2, "two primary entries before stop");
+        let before = { state.listener_facts.lock().await.clone() };
+        let before_snapshot = before.snapshot();
+        assert_eq!(before_snapshot.service_facts.len(), 2, "two primary entries before stop");
         assert!(
-            before.workload_index.iter().any(|(w, _)| w == &workload("web")),
+            before_snapshot.workload_index.iter().any(|(w, _)| w == &workload("web")),
             "secondary entry before stop"
         );
 
         stop_via_handler(&state, "web").await;
 
-        let after = { state.listener_facts.lock().await.clone() }.snapshot();
-        assert!(after.service_facts.is_empty(), "primary evicted after stop");
-        assert!(
-            !after.workload_index.iter().any(|(w, _)| w == &workload("web")),
-            "secondary entry dropped after stop"
-        );
-        assert_eq!(
-            after,
-            ListenerFactStore::new().snapshot(),
-            "store empty after the only workload is stopped"
-        );
+        let after = { state.listener_facts.lock().await.clone() };
+        assert_eq!(after, before, "stop leaves both maps unchanged");
+        for (service_id, row) in &before_snapshot.service_facts {
+            assert_eq!(
+                after.fact_for(*service_id),
+                Some(*row),
+                "the stopped Service's fact still resolves for {service_id:?}"
+            );
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // B-stop (proptest) — the edge-maintained store across submits AND stops
+    // equals the rebuild over the same committed intent (R-76)
+    // -----------------------------------------------------------------
+
+    async fn edge_store_and_rebuild_after_submits_and_stops(
+        set: &IntentSet,
+        stopped: &[bool],
+    ) -> (ListenerFactStore, ListenerFactStore) {
+        let tmp = TempDir::new().expect("tmpdir");
+        let obs = Arc::new(SimObservationStore::single_peer(node_id("local"), 7));
+        let state = build_app_state(&tmp, obs as Arc<dyn ObservationStore>);
+
+        for (name, _vip, listeners) in &set.services {
+            let wire: Vec<(u16, Proto)> =
+                listeners.iter().map(|l| (l.port.get(), l.protocol)).collect();
+            submit_via_handler(&state, wire_service(name, &wire))
+                .await
+                .expect("Service submit must succeed");
+        }
+        // The stop step: stop the flagged Services through the driving port.
+        for ((name, _vip, _listeners), stop) in set.services.iter().zip(stopped) {
+            if *stop {
+                stop_via_handler(&state, name).await;
+            }
+        }
+        let edge = { state.listener_facts.lock().await.clone() };
+        let rebuilt = ListenerFactStore::rebuild_from_intent(
+            &state.store,
+            &state.intent_redb_path,
+            &state.allocator,
+        )
+        .await
+        .expect("rebuild");
+        (edge, rebuilt)
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig { cases: 48, ..ProptestConfig::default() })]
+
+        /// Invariant B across the operation model `submit* ; stop*`: after any
+        /// set of Service submits and any subset of them stopped, the
+        /// edge-maintained store equals a rebuild over the committed intent,
+        /// which still contains every stopped Service. A stop that evicted
+        /// facts would leave the edge store short of the rebuild.
+        #[test]
+        fn edge_maintained_store_across_submits_and_stops_equals_rebuild(
+            set in intent_set_strategy(),
+            stop_mask in prop::collection::vec(any::<bool>(), 5),
+        ) {
+            prop_assume!(set.services.iter().any(|(_, _, l)| !l.is_empty()));
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+            let (edge, rebuilt) =
+                rt.block_on(edge_store_and_rebuild_after_submits_and_stops(&set, &stop_mask));
+            prop_assert_eq!(edge, rebuilt);
+        }
     }
 }

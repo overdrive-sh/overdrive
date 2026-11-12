@@ -269,13 +269,26 @@ fn set_no_check(_socket: &Socket) -> io::Result<()> {
     Err(io::Error::new(io::ErrorKind::Unsupported, "SO_NO_CHECK is available only on Linux"))
 }
 
+/// Completes a non-blocking `connect(2)` that returned `EINPROGRESS`.
+///
+/// A writable edge is only a hint: a fresh AF_VSOCK socket in `TCP_CLOSE`
+/// already reports `EPOLLOUT` (`net/vmw_vsock/af_vsock.c:1335-1340 @ v7.0`),
+/// so the edge can fire before the connection exists. The connect has
+/// completed only when the kernel reports an error (`SO_ERROR`) or an
+/// established peer (`getpeername`); `ENOTCONN` means it is still in flight,
+/// so the readiness latch is cleared and the wait repeats.
 async fn finish_nonblocking_connect(socket: &AsyncFd<Socket>) -> io::Result<()> {
-    let ready = socket.writable().await?;
-    drop(ready);
-    if let Some(error) = socket.get_ref().take_error()? {
-        return Err(error);
+    loop {
+        let mut ready = socket.writable().await?;
+        if let Some(error) = socket.get_ref().take_error()? {
+            return Err(error);
+        }
+        match socket.get_ref().peer_addr() {
+            Ok(_) => return Ok(()),
+            Err(error) if error.raw_os_error() == Some(libc::ENOTCONN) => ready.clear_ready(),
+            Err(error) => return Err(error),
+        }
     }
-    Ok(())
 }
 
 fn current_cgroup_path(contents: &str) -> io::Result<PathBuf> {

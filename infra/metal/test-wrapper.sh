@@ -147,7 +147,10 @@ fi
 run_local_vsock_namespace() {
   exec python3 - "$@" <<'PY'
 import ctypes
+import fcntl
 import os
+import socket
+import struct
 import sys
 
 CLONE_NEWNET = 0x40000000
@@ -190,6 +193,18 @@ except OSError as error:
     fail("verify", error.errno)
 if mode != b"local":
     fail("verify")
+
+# A fresh network namespace starts with `lo` down; the tests this namespace
+# hosts bind and connect on loopback (the forwarder probe's TCP pair, the
+# gateway's 127/8 listener), so bring it up before the test body runs.
+try:
+    control = socket.socket(socket.AF_INET, socket.SOCK_DGRAM | socket.SOCK_CLOEXEC)
+    request = struct.pack("16sH14x", b"lo", 0)
+    flags = struct.unpack("16sH14x", fcntl.ioctl(control, 0x8913, request))[1]
+    fcntl.ioctl(control, 0x8914, struct.pack("16sH14x", b"lo", flags | 0x1))
+    control.close()
+except OSError as error:
+    fail("loopback", error.errno)
 
 argv = sys.argv[1:]
 if not argv:

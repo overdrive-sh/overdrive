@@ -162,8 +162,13 @@ mod integration {
     /// network cleanup has not finished as cleanup-pending, never as a
     /// running replica.
     mod network_cleanup_pending_status;
+
     mod node_health_writer_runs_at_boot;
     mod observation_empty_rows;
+    /// R-76 (ADR-0062 amendment 2026-11-10) — a stopped Service's last backend
+    /// is purged from the service map, and the outcome holds after a node
+    /// restart.
+    mod stopped_service_dataplane_purge;
 
     // GH #266 (ADR-0084 §5, Piece B) — S-266-01 walking skeleton: the
     // production entry `run_server_with_obs_and_driver` spawns the interest

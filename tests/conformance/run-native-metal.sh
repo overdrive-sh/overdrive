@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Native-metal entrypoint reserved for reasoned-ignored KVM conformance cases.
+# Native-metal entrypoint for the KVM conformance cases (`native_metal_kvm_*`).
+# These tests are no longer ignored; the selector runs them and only them.
 # Direct-handler/API recovery tests without a real guest run under ordinary
 # nextest and are deliberately excluded from this selector.
 set -euo pipefail
@@ -24,4 +25,4 @@ grep -Eq '(^|[[:space:]])(vmx|svm)([[:space:]]|$)' /proc/cpuinfo \
 ulimit -n 1048576 || die "could not raise the descriptor limit for the in-process production boot"
 
 exec cargo nextest run --manifest-path "$manifest" --features integration-tests \
-  --run-ignored ignored-only --no-capture -E 'test(/^native_metal_kvm_/)'
+  --no-capture -E 'test(/^native_metal_kvm_/)'

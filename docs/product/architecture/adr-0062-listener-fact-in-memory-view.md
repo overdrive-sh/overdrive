@@ -4,6 +4,12 @@
 
 Accepted (2026-06-03). Extends ADR-0035; amends ADR-0042; references ADR-0049; preserves ADR-0060 C3.
 
+**Amended 2026-11-10 (user ruling): listener facts are evicted only on logical
+deletion, never on stop.** § Decision (2) and § "Stop / remove path" are
+superseded on the eviction trigger only; see § "Amendment 2026-11-10" below.
+The two-map shape, the `ServiceId` keying, the boot rebuild, the secondary
+cleanup index and invariants A, B and C are unchanged.
+
 ## Context
 
 `ServiceMapHydrator` hydrates its desired state by calling
@@ -319,6 +325,83 @@ keyed to the read path's `ServiceId`.
 observed by DST invariants; iteration order must be seed-deterministic; no
 `HashMap`.
 
+## Amendment 2026-11-10 — evict on logical deletion (and conflict release), never on stop
+
+**Operative decision superseded.** This ADR is implemented. § Decision (2) says
+the facts are maintained by `remove_workload` "on stop and on conflict-release",
+and § "Stop / remove path" chose approach (b) so the stop edge can evict
+without an intent decode. The original rationale for evicting on stop was
+ordering: the facts had to be gone before the downstream `ReleaseServiceVip`
+freed the VIP, because (a) needed the VIP to derive the keys. That rationale
+ended when commit `88679ed8` made a stopped-but-declared Service **retain its
+VIP**, released only on logical deletion (`desired.job.is_none()`, ADR-0049
+amendment 2026-06-28, `WorkloadLifecycle::reconcile`).
+
+**Defect.** `stop_workload` (`handlers.rs`, the `facts_guard.remove_workload`
+block) still evicts the facts on stop. After `88679ed8` the stopped Service's
+VIP, `service_backends` rows and `SERVICE_MAP` entry all remain, but its listener
+fact is gone. `ServiceLifecycle` writes the zero-backend `service_backends` row;
+`ServiceMapHydrator::hydrate_desired` reads `fact_for(row.service_id)`, finds
+nothing, and `project_service_desired` yields `NoListenerProto`, so the row is
+skipped (ADR-0060 C3: an unresolvable protocol is skipped, never defaulted to
+`Tcp`). The hydrator never emits the empty `DataplaneUpdateService` that purges
+the backend, and the stopped Service's backend stays in `SERVICE_MAP` for as long
+as the node runs. Pre-existing on `main`; the C3 guard behaved correctly, the
+input it was given was wrong.
+
+**New decision.** Listener facts have the lifetime of the declared workload and
+of its VIP: the facts exist while the workload's intent is declared, whether it
+is running or stopped, and are evicted only when the intent is logically
+withdrawn (deletion) or when a submit's conflict path releases state it had
+itself just created. Concretely:
+
+1. `stop_workload` does not touch `ListenerFactStore`. A stop records the stop
+   sentinel and enqueues the lifecycle evaluation, nothing else.
+2. A resubmit or restart of a stopped workload needs no re-upsert: the facts are
+   already present and are keyed by the same `ServiceId`s (the VIP is retained).
+3. `remove_workload` is called only from the logical-deletion edge. The
+   conflict-release path is already a deliberate no-op for facts (the rejected
+   spec never had facts upserted, and a `remove_workload` there would evict the
+   existing workload's facts); that stays.
+4. The boot rebuild is unchanged and already correct: `rebuild_from_intent`
+   projects every declared Service intent whose VIP the allocator holds,
+   regardless of the stop sentinel. Before this amendment the edge-maintained
+   store diverged from the rebuild for a stopped Service (edge: absent; rebuild:
+   present), violating invariant B; the amendment restores it. A stopped Service
+   therefore behaves identically before and after a node restart.
+
+**Contract shape of the changed handler path:** bounded-change (the stop handler's
+declared mutation set loses the listener-fact store; it keeps the stop sentinel
+and the evaluation enqueue). Invariant B gains the stopped state: store
+byte-equivalent to `rebuild_from_intent` over an intent set that includes stopped
+Services.
+
+**Alternatives considered.**
+- *Keep evicting on stop and make the hydrator purge a service with no fact.*
+  Rejected: the hydrator cannot distinguish "fact evicted" from "protocol never
+  resolvable", which is exactly the C3 case it must skip; the purge would need a
+  second signal for a fact the design already holds.
+- *Persist a "stopped" marker in the fact or purge from the stop handler.*
+  Rejected: the stop handler would take on dataplane purge ownership that
+  belongs to `ServiceMapHydrator`, and the marker is derived state
+  (`development.md` § "Persist inputs, not derived state").
+- *Re-derive facts from intent inside the hydrator when absent.* Rejected: it
+  restores the per-tick intent read this ADR exists to remove (invariant A).
+
+**Open design item, not decided here (surfaced to the user).** No production
+logical-deletion edge exists today: no handler withdraws a workload's intent,
+only the reconciler's `desired.job.is_none()` branch consumes it. After this
+amendment nothing in production calls `remove_workload`. The deletion feature
+must evict the facts at its edge, and the same defect would recur there if the
+facts are evicted before the hydrator has emitted the empty purge; its design
+has to order or decouple the two. Until that edge exists the method and its unit
+tests stay as the store contract the deletion edge will use; whether to retain
+or delete an unwired method is for the user to decide under the deletion
+discipline.
+
+**ADR-0060 C3** is preserved verbatim: the amendment changes which inputs reach
+the guard, not the guard.
+
 ## C4 — System Context (L1)
 
 ```mermaid
@@ -360,13 +443,13 @@ C4Component
   title Component Diagram — ListenerFactStore read/write path
   Container_Boundary(b, "overdrive-control-plane") {
     Component(submit, "handlers::submit_workload", "fn", "decodes Service intent; allocates VIP; commits intent")
-    Component(stop, "handlers::stop_workload", "fn", "writes stop sentinel; removes facts by workload")
+    Component(stop, "handlers::stop_workload", "fn", "writes stop sentinel; leaves listener facts untouched (amended 2026-11-10)")
     Component(store, "ListenerFactStore", "struct", "upsert / remove_workload / fact_for(service_id) / rebuild_from_intent")
     Component(hydrate, "ServiceMapHydrator hydrate arm", "fn", "reads fact_for(row.service_id) per backend row")
     Component(boot, "startup wiring", "fn", "rebuild_from_intent at boot, beside allocator bulk_load")
   }
   Rel(submit, store, "upsert(workload_id, vip, &listeners) after Inserted — one ServiceId entry per listener")
-  Rel(stop, store, "remove_workload(&workload_id) via secondary index")
+  Rel(stop, store, "no interaction (amended 2026-11-10: eviction only on logical deletion)")
   Rel(boot, store, "rebuild_from_intent(state) — both maps")
   Rel(hydrate, store, "fact_for(&row.service_id) -> ListenerRow", "O(1), zero redb, no port filter")
 ```

@@ -103,6 +103,11 @@ pub(super) struct PumpState {
     /// The peer must observe a TCP reset when the last owned leg is dropped.
     /// Used by the LEGS-DIAL stream relay when the guest reports an abort.
     pub reset_peer_on_reclaim: AtomicBool,
+    /// Set when the pump finished because both relay directions reached a clean
+    /// end ([`PumpExit::Completed`]): the connection carries nothing further, so
+    /// its owned legs are released with an ordinary close that lets the kernel
+    /// flush already-queued response bytes, not an abortive one.
+    pub completed: AtomicBool,
     /// Wall-clock nanos (since the process monotonic origin) of the last progress
     /// advance, for the `Stalled { since }` computation.
     pub last_progress_unix_nanos: AtomicU64,
@@ -305,6 +310,10 @@ pub(super) enum PumpExit {
     Graceful,
     /// A leg error / the (C) kernel-reaped `ETIMEDOUT` — the connection is dead.
     TransportDeath,
+    /// Both relay directions ended cleanly (client FIN and guest FIN, no `stop`):
+    /// the exchange is finished and the connection's legs are reclaimed with an
+    /// ordinary close.
+    Completed,
 }
 
 /// A1 (ADR-0070 amendment 2026-07-01, Root Cause A): forward a source directional
@@ -417,8 +426,11 @@ fn mark_exited(state: &PumpState, exit: PumpExit) {
     if exit == PumpExit::TransportDeath {
         state.terminal_role.store(state.role.load(Ordering::SeqCst), Ordering::SeqCst);
     }
+    if exit == PumpExit::Completed {
+        state.completed.store(true, Ordering::SeqCst);
+    }
     state.running.store(false, Ordering::SeqCst);
-    if exit == PumpExit::TransportDeath {
+    if matches!(exit, PumpExit::TransportDeath | PumpExit::Completed) {
         state.fire_self_teardown_if_unexpected();
     }
 }

@@ -267,6 +267,21 @@ impl HostMtlsEnforcement {
         let conns = Arc::clone(&self.conns);
         Arc::new(move || {
             let alloc = id.alloc().clone();
+            let completed = conns
+                .lock()
+                .get(&id)
+                .is_some_and(|state| state.pump.state.completed.load(Ordering::SeqCst));
+            if completed {
+                // A finished exchange is not a death: release the legs without the
+                // stall diagnostics. Reclaim off a detached thread (it joins the
+                // pump, whose thread is the caller).
+                let conns = Arc::clone(&conns);
+                let id = id.clone();
+                std::thread::spawn(move || {
+                    let _reclaimed = reclaim_connection(&conns, &id);
+                });
+                return;
+            }
             trace_transport_death_diagnostics(&conns, &id, &alloc);
             tracing::warn!(
                 name: "mtls.pump.stalled",
@@ -343,6 +358,7 @@ fn reclaim_connection(
         return false; // already reclaimed by a racing teardown / sibling self-teardown
     };
     let reset_peer = state.pump.state.reset_peer_on_reclaim.load(Ordering::SeqCst);
+    let completed = state.pump.state.completed.load(Ordering::SeqCst);
     // Signal EVERY pump BEFORE waking it, so a pump woken out of a blocked
     // syscall classifies its exit as deliberate teardown (`stop == true`): no
     // spurious self-teardown re-fire or half-close forward. The async relay also
@@ -351,7 +367,12 @@ fn reclaim_connection(
     for aux in &mut state.aux_pumps {
         aux.request_stop();
     }
-    if reset_peer {
+    if completed {
+        // The relay finished cleanly: both FINs are already exchanged and the pump
+        // has exited, so nothing is parked on a leg. Closing the legs below is an
+        // ordinary close — an abortive linger here would discard response bytes the
+        // kernel has queued but the client has not yet read.
+    } else if reset_peer {
         for leg in &state.legs {
             set_abortive_linger(leg.as_raw_fd());
         }
@@ -769,6 +790,88 @@ fn drain_recv_queue(
     std::mem::forget(stream);
     result?;
     Ok(held)
+}
+
+/// Reads exactly one TLS record at a time from a stream, never consuming a byte
+/// beyond the record's end.
+///
+/// A handshake driven record-by-record leaves rustls holding only whole records
+/// when it completes, so the bytes after the peer's final handshake record stay in
+/// the socket for the kernel record parser armed by `TLS_RX`. Letting `read_tls`
+/// pull a socket-sized chunk instead can leave a partial record in rustls's
+/// deframer, which `dangerous_extract_secrets` discards, so the kernel would start
+/// parsing mid-record (`net/tls/tls_sw.c` `tls_strp_check_rcv` @ v7.0).
+pub(super) struct RecordAssembler {
+    buf: Vec<u8>,
+}
+
+impl RecordAssembler {
+    const HEADER_LEN: usize = 5;
+
+    pub(super) const fn new() -> Self {
+        Self { buf: Vec::new() }
+    }
+
+    /// Bytes still missing from the record being assembled.
+    fn missing(&self) -> usize {
+        if self.buf.len() < Self::HEADER_LEN {
+            return Self::HEADER_LEN - self.buf.len();
+        }
+        let body = usize::from(u16::from_be_bytes([self.buf[3], self.buf[4]]));
+        (Self::HEADER_LEN + body).saturating_sub(self.buf.len())
+    }
+
+    /// Assemble the next record. `Ok(None)` is a clean EOF on a record boundary;
+    /// an error (including `WouldBlock` from a receive timeout) keeps the partial
+    /// record so the caller can call again.
+    pub(super) fn next_record(
+        &mut self,
+        stream: &mut dyn Read,
+    ) -> std::io::Result<Option<Vec<u8>>> {
+        loop {
+            let missing = self.missing();
+            if missing == 0 {
+                return Ok(Some(std::mem::take(&mut self.buf)));
+            }
+            // Read straight into the record buffer's tail: `missing` is bounded by the
+            // 16-bit record length, and a failed or short read trims the tail back.
+            let filled = self.buf.len();
+            self.buf.resize(filled + missing, 0);
+            let read = stream.read(&mut self.buf[filled..]);
+            let n = match read {
+                Ok(n) => n,
+                Err(error) => {
+                    self.buf.truncate(filled);
+                    return Err(error);
+                }
+            };
+            self.buf.truncate(filled + n);
+            if n == 0 {
+                if self.buf.is_empty() {
+                    return Ok(None);
+                }
+                return Err(std::io::ErrorKind::UnexpectedEof.into());
+            }
+        }
+    }
+}
+
+/// Hand one whole TLS record to rustls and process it.
+pub(super) fn feed_record<D>(
+    conn: &mut rustls::ConnectionCommon<D>,
+    record: &[u8],
+) -> std::result::Result<(), rustls::Error> {
+    let mut rest = record;
+    while !rest.is_empty() {
+        let taken = conn
+            .read_tls(&mut rest)
+            .map_err(|error| rustls::Error::General(format!("read_tls: {error}")))?;
+        conn.process_new_packets()?;
+        if taken == 0 {
+            break;
+        }
+    }
+    Ok(())
 }
 
 /// Drain every byte of already-decrypted plaintext rustls buffered during the

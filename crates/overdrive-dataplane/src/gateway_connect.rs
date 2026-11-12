@@ -305,6 +305,21 @@ impl GatewayConnectCleanup for EbpfDataplane {
     }
 }
 
+/// Project a closed `SO_COOKIE` read failure onto the dataplane error.
+fn cookie_read_error(error: SocketCookieReadError) -> GatewayConnectDataplaneError {
+    match error {
+        SocketCookieReadError::Unsupported => {
+            GatewayConnectDataplaneError::CookieRead(std::io::ErrorKind::Unsupported)
+        }
+        SocketCookieReadError::Syscall { source } => {
+            GatewayConnectDataplaneError::CookieRead(source.kind())
+        }
+        SocketCookieReadError::Zero => {
+            GatewayConnectDataplaneError::CookieRead(std::io::ErrorKind::InvalidData)
+        }
+    }
+}
+
 /// Remove `cookie`; an absent key is success, any other failure is `Cleanup`.
 fn remove_key<V: aya::Pod>(
     map: &mut aya::maps::HashMap<aya::maps::MapData, u64, V>,
@@ -352,6 +367,8 @@ impl GatewayConnectDataplane for EbpfDataplane {
         if remaining.is_zero() {
             return Err(GatewayConnectDataplaneError::ProbeTimeout);
         }
+        // 2b. The host can read a nonzero, stable socket cookie.
+        SocketCookieReader::new().probe().map_err(cookie_read_error)?;
         // 3. The sentinel connect: an unprogrammed Service key. The registered
         //    selection hook denies it and records a `NoBackend` receipt.
         let sentinel = sentinel_service_key()?;
@@ -391,17 +408,7 @@ impl GatewayConnectDataplane for EbpfDataplane {
         let intent_value = intent_pod(&key)?;
         let socket = prepared_socket()?;
         let socket_cookie =
-            SocketCookieReader::new().read(socket.as_fd()).map_err(|error| match error {
-                SocketCookieReadError::Unsupported => {
-                    GatewayConnectDataplaneError::CookieRead(std::io::ErrorKind::Unsupported)
-                }
-                SocketCookieReadError::Syscall { source } => {
-                    GatewayConnectDataplaneError::CookieRead(source.kind())
-                }
-                SocketCookieReadError::Zero => {
-                    GatewayConnectDataplaneError::CookieRead(std::io::ErrorKind::InvalidData)
-                }
-            })?;
+            SocketCookieReader::new().read(socket.as_fd()).map_err(cookie_read_error)?;
         let raw_cookie = socket_cookie.get().get();
 
         // Registration rejects a live cookie, drops a stale receipt for it, then

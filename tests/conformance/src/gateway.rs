@@ -28,24 +28,29 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
+use std::fs::Permissions;
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpStream};
 use std::os::fd::AsRawFd as _;
 use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use overdrive_control_plane::{NodeAdapters, ServerConfig, ServerHandle, run_server};
+use overdrive_core::ca::kek::KEK_LEN;
+use overdrive_core::ca::root_key_envelope::KekId;
 use overdrive_core::guest_transport::NodeVsockPortConfig;
 use overdrive_core::id::PublicCertifiedKeyId;
 use overdrive_gateway::{GatewayConfig, ManualCertifiedKeyConfig};
 use overdrive_host::RealCgroupFs;
 use overdrive_sim::adapters::SimKek;
-use overdrive_testing::vm_fixture::{VmFixture, default_staging_root};
+use overdrive_testing::guest_kit::{GuestFile, GuestImageSpec, GuestKit};
+use overdrive_testing::vm_fixture::default_staging_root;
 use rcgen::{
     BasicConstraints, CertificateParams, DnType, ExtendedKeyUsagePurpose, IsCa, Issuer, KeyPair,
     KeyUsagePurpose, PKCS_ECDSA_P256_SHA256, date_time_ymd,
@@ -855,21 +860,130 @@ pub fn public_leg_sockets(address: Ipv4Addr) -> Vec<SsSocket> {
         .collect()
 }
 
-/// Upstream-leg sockets: armed loopback sockets that are not on a public
-/// listener (the gateway's dial and leg-C's accepted end).
+/// Upstream-leg sockets: the armed sockets of the gateway's upstream leg.
+///
+/// The design pins (feature-delta "Gateway upstream socket preparation", steps 2
+/// and 5; D-SYS-6) as a loopback-sourced dial (`127.0.0.1`, mark 1) whose
+/// destination the connect hook rewrites to the selected backend's workload
+/// address in the guest prefix `100.95.0.0/16`. The registered-tuple TPROXY
+/// rule diverts that dial to leg-C, so the two armed ends are the gateway's
+/// dial (local `127.0.0.1`, peer the workload address) and leg-C's accepted
+/// end (local the workload address, peer `127.0.0.1`).
 #[must_use]
 pub fn armed_upstream_sockets(address: Ipv4Addr) -> Vec<SsSocket> {
+    let in_guest_prefix = |ip: std::net::IpAddr| matches!(ip, std::net::IpAddr::V4(v4) if v4.octets()[0] == 100 && v4.octets()[1] == 95);
+    let is_loopback = |ip: std::net::IpAddr| ip == std::net::IpAddr::V4(Ipv4Addr::LOCALHOST);
     established_sockets()
         .into_iter()
         .filter(|socket| {
+            let gateway_dial = is_loopback(socket.local.ip()) && in_guest_prefix(socket.peer.ip());
+            let leg_c_accepted =
+                in_guest_prefix(socket.local.ip()) && is_loopback(socket.peer.ip());
             socket.tls_ulp
-                && socket.local.ip() == Ipv4Addr::LOCALHOST
-                && socket.peer.ip() == Ipv4Addr::LOCALHOST
+                && (gateway_dial || leg_c_accepted)
                 && socket.local.port() != 443
                 && socket.peer.port() != 443
                 && socket.local != SocketAddr::from((address, 443))
         })
         .collect()
+}
+
+/// Descriptors one admitted exchange holds in the serving process (R-74 D-1).
+///
+/// The VM Service path is the only backend path. Every holder is in the one
+/// `overdrive serve` process, whose `RLIMIT_NOFILE` is the one limit:
+///
+/// 1. the public client socket (the gateway's accepted connection);
+/// 2. the upstream dial socket (the gateway's connection to the workload
+///    address);
+/// 3. up to two relay pipes, one per read half, 2 descriptors each: 4
+///    descriptors (a streaming-response exchange holds one pipe, 2 descriptors,
+///    steady; both directions mid-body hold both);
+/// 4. the leg-C accepted socket (the agent's inbound leg);
+/// 5. the leg-C relay duplicate of that socket (a second descriptor on the same
+///    open file description, held for the exchange's life);
+/// 6. the guest vsock stream to the workload's VM.
+///
+/// 7 steady, 9 at the transient peak; the budget is the peak.
+pub const DESCRIPTORS_PER_EXCHANGE: usize = 9;
+/// R-74 D-3: process-wide descriptors at `MAX_PUBLIC_CONNECTIONS` concurrent
+/// exchanges, `9 x 128 = 1,152`. Holders per exchange are listed on
+/// [`DESCRIPTORS_PER_EXCHANGE`].
+pub const EXCHANGE_DESCRIPTOR_BUDGET: usize =
+    DESCRIPTORS_PER_EXCHANGE * MAX_PUBLIC_CONNECTIONS as usize;
+/// R-74 pipe term: the relay pipe one active exchange holds, at its capacity
+/// floor (`PIPE_FLOOR`), in octets.
+pub const RELAY_PIPE_OCTETS_PER_EXCHANGE: u64 = PIPE_CAPACITY_OCTETS;
+/// R-74 pipe term: summed `F_GETPIPE_SZ` growth at 128 exchanges.
+///
+/// Exactly one relay pipe per exchange: `65,536 x 128 = 8,388,608`. A pipe is kernel memory, not resident set, so
+/// this term is asserted on its own and never summed with the resident term.
+pub const EXCHANGE_PIPE_GROWTH_OCTETS: u64 =
+    RELAY_PIPE_OCTETS_PER_EXCHANGE * MAX_PUBLIC_CONNECTIONS as u64;
+/// R-74 resident term, measured per exchange, in KiB.
+pub const RESIDENT_PER_EXCHANGE_KIB: u64 = 173;
+/// R-74 resident term, measured fixed cost independent of the exchange count
+/// (0.73 MB), in octets.
+pub const RESIDENT_FIXED_OCTETS: u64 = 730_000;
+/// R-74 resident term, allowance for run-to-run variance (1 MB), in octets.
+pub const RESIDENT_VARIANCE_OCTETS: u64 = 1_000_000;
+/// R-74 resident term: resident-set growth ceiling at 128 exchanges.
+///
+/// `173 KiB x 128 + 0.73 MB + 1 MB = 24,405,456` octets.
+/// A larger figure falsifies the budget and returns to DESIGN.
+pub const EXCHANGE_RESIDENT_GROWTH_BUDGET_OCTETS: u64 =
+    MAX_PUBLIC_CONNECTIONS as u64 * RESIDENT_PER_EXCHANGE_KIB * 1024
+        + RESIDENT_FIXED_OCTETS
+        + RESIDENT_VARIANCE_OCTETS;
+/// Plateau obligation: bursts of `MAX_PUBLIC_CONNECTIONS` exchanges run in one
+/// process (at least five).
+pub const PLATEAU_BURSTS: usize = 5;
+/// Plateau obligation: the in-use heap after the last burst drains stays
+/// within this many octets (1 MB) of the in-use heap after burst 2.
+pub const PLATEAU_TOLERANCE_OCTETS: u64 = 1_000_000;
+
+/// The process's open descriptors counted by the kind `readlink` reports:
+/// `socket` (this includes AF_VSOCK sockets, which the kernel names
+/// `socket:[inode]`), `pipe`, `anon_inode`, and `other`.
+#[must_use]
+pub fn open_fd_kinds() -> BTreeMap<&'static str, usize> {
+    let mut kinds: BTreeMap<&'static str, usize> =
+        ["socket", "pipe", "anon_inode", "other"].into_iter().map(|kind| (kind, 0)).collect();
+    for entry in std::fs::read_dir("/proc/self/fd").expect("/proc/self/fd is readable").flatten() {
+        let kind = std::fs::read_link(entry.path()).map_or("other", |target| {
+            let target = target.to_string_lossy();
+            if target.starts_with("socket:") {
+                "socket"
+            } else if target.starts_with("pipe:") {
+                "pipe"
+            } else if target.starts_with("anon_inode:") {
+                "anon_inode"
+            } else {
+                "other"
+            }
+        });
+        *kinds.entry(kind).or_default() += 1;
+    }
+    kinds
+}
+
+/// The per-kind descriptor delta between two [`open_fd_kinds`] samples, for a
+/// failure message that attributes a miscount to a holder class.
+#[must_use]
+pub fn describe_fd_kind_delta(
+    before: &BTreeMap<&'static str, usize>,
+    after: &BTreeMap<&'static str, usize>,
+) -> String {
+    after
+        .iter()
+        .map(|(kind, now)| {
+            let was = before.get(kind).copied().unwrap_or(0);
+            let delta =
+                i64::try_from(*now).unwrap_or(i64::MAX) - i64::try_from(was).unwrap_or(i64::MAX);
+            format!("{kind}: {was} -> {now} ({delta:+})")
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// The process's open descriptor count.
@@ -888,6 +1002,17 @@ pub fn rss_kib() -> u64 {
     let page =
         u64::try_from(unsafe { nix::libc::sysconf(nix::libc::_SC_PAGESIZE) }).unwrap_or(4096);
     pages * page / 1024
+}
+
+/// Bytes of glibc heap handed out to the program (`mallinfo2().uordblks`).
+///
+/// Summed over every arena. Unlike the resident set it excludes free heap glibc
+/// keeps mapped, so it is the observable for burst-over-burst retention.
+#[must_use]
+pub fn in_use_heap_octets() -> u64 {
+    // SAFETY: `mallinfo2` takes no arguments and only reads allocator statistics.
+    let info = unsafe { nix::libc::mallinfo2() };
+    u64::try_from(info.uordblks).expect("in-use heap fits u64")
 }
 
 /// The summed capacity (`F_GETPIPE_SZ`) in octets of the distinct pipes this
@@ -979,6 +1104,28 @@ pub fn kernel_sample(address: Ipv4Addr) -> KernelSample {
         tls: TlsStat::read(),
         public_armed: public_leg_sockets(address).iter().filter(|s| s.tls_ulp).count(),
         upstream_armed: armed_upstream_sockets(address).len(),
+    }
+}
+
+/// Sample the kernel TLS state once the counters have settled.
+///
+/// Settled means the node-global current-socket counters were unchanged across
+/// consecutive reads one second apart (at most 30 s), so a socket that is still
+/// closing is not folded into a baseline.
+#[must_use]
+pub fn settled_kernel_sample(address: Ipv4Addr) -> KernelSample {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let mut previous = kernel_sample(address);
+    loop {
+        thread::sleep(Duration::from_secs(1));
+        let current = kernel_sample(address);
+        let steady = ["TlsCurrTxSw", "TlsCurrRxSw"]
+            .iter()
+            .all(|name| current.tls.delta(&previous.tls, name) == 0);
+        if steady || Instant::now() >= deadline {
+            return current;
+        }
+        previous = current;
     }
 }
 
@@ -1225,15 +1372,38 @@ fn run_checked(program: &str, args: &[&str]) {
     );
 }
 
+/// Stage the guest the Service boots: the guest kit's kernel and a workload
+/// image (the production `overdrive-init` as PID 1 and the kit's forwarder
+/// module), the same staging the other in-process `serve` VM tests use. The
+/// base fixture kernel and rootfs lack the kit, so the production init would
+/// refuse before the Service could listen.
 fn stage_guest(kind: GuestKind, work: &Path) -> StagedGuest {
-    let fixture = VmFixture::provision(&default_staging_root()).expect("provision the VM fixture");
+    let kit = GuestKit::provision(&default_staging_root())
+        .expect("precondition: the guest kit provisions (run `cargo xtask guest-kit-prepare`)");
     match kind {
         GuestKind::Example => {
+            // The example's own preparation script installs its server into a
+            // copy of a base image; hand it the kit's kernel and a kit
+            // workload image as that base.
+            let base = kit
+                .image(work, "pig-example-base", &GuestImageSpec::workload())
+                .expect("the workload image");
             let script = example_dir().join("prepare.sh");
             let script = script.to_string_lossy().into_owned();
             // A previous run may have left its marker-owned materialisation.
             let _ = command_output("bash", &[&script, "cleanup"]);
-            run_checked("bash", &[&script, "prepare"]);
+            let prepared = std::process::Command::new("bash")
+                .args([&script, "prepare"])
+                .env("PIG_EXAMPLE_BASE_KERNEL", &kit.kernel_path)
+                .env("PIG_EXAMPLE_BASE_ROOTFS", &base.rootfs)
+                .output()
+                .expect("run the example preparation script");
+            assert!(
+                prepared.status.success(),
+                "example prepare failed: {}{}",
+                String::from_utf8_lossy(&prepared.stdout),
+                String::from_utf8_lossy(&prepared.stderr)
+            );
             StagedGuest {
                 kernel: Path::new(EXAMPLE_OUTPUT_ROOT).join("kernel"),
                 rootfs: Path::new(EXAMPLE_OUTPUT_ROOT).join("rootfs.ext4"),
@@ -1260,42 +1430,16 @@ fn stage_guest(kind: GuestKind, work: &Path) -> StagedGuest {
                     &source.to_string_lossy(),
                 ],
             );
-            // A private rootfs copy on the staging filesystem (the per-launch
-            // clone is intra-filesystem), the guest binary injected through a
-            // loop mount on the host before the guest ever boots. There is no
-            // typed API for loop devices; the mount and the loop device are
-            // released before this returns.
-            let rootfs = work.join("rootfs.ext4");
-            std::fs::copy(&fixture.rootfs_path, &rootfs).expect("copy the base rootfs");
-            let mountpoint = work.join("rootfs-mnt");
-            std::fs::create_dir_all(&mountpoint).expect("create the mount point");
-            let attach =
-                command_output("losetup", &["--find", "--show", &rootfs.to_string_lossy()]);
-            assert!(
-                attach.status.success(),
-                "losetup failed: {}",
-                String::from_utf8_lossy(&attach.stderr)
-            );
-            let loop_device = String::from_utf8_lossy(&attach.stdout).trim().to_owned();
-            let mounted = command_output("mount", &[&loop_device, &mountpoint.to_string_lossy()]);
-            if mounted.status.success() {
-                let target = mountpoint.join("opt/overdrive/conformance");
-                std::fs::create_dir_all(&target).expect("create the guest directory");
-                let dest = target.join("pig-guest");
-                std::fs::copy(&binary, &dest).expect("install the guest binary");
-                std::fs::set_permissions(&dest, std::fs::Permissions::from_mode(0o755))
-                    .expect("chmod the guest binary");
-                run_checked("umount", &[&mountpoint.to_string_lossy()]);
-            }
-            run_checked("losetup", &["-d", &loop_device]);
-            assert!(
-                mounted.status.success(),
-                "mount of the private rootfs failed: {}",
-                String::from_utf8_lossy(&mounted.stderr)
-            );
+            let mut spec = GuestImageSpec::workload();
+            spec.extra.push(GuestFile {
+                host: binary,
+                guest: PathBuf::from(CONFORMANCE_GUEST_COMMAND),
+                with_shared_libraries: false,
+            });
+            let image = kit.image(work, "pig-conformance", &spec).expect("the workload image");
             StagedGuest {
-                kernel: fixture.kernel_path,
-                rootfs,
+                kernel: kit.kernel_path,
+                rootfs: image.rootfs,
                 command: CONFORMANCE_GUEST_COMMAND,
                 example_owned: false,
             }
@@ -1330,6 +1474,10 @@ impl GatewayWorld {
     pub async fn boot(trace: &TraceHistory, second_octet: u8, guest: GuestKind) -> Self {
         assert_native_metal();
         overdrive_testing::forwarder_module::expect_forwarder_module();
+        // The Metal runner's umask (0027) would create the server's `data/vm`
+        // chain `0750 root:root`, closed to the confined VMM gid; the
+        // production process runs under the conventional 022.
+        nix::sys::stat::umask(nix::sys::stat::Mode::from_bits_truncate(0o022));
         let cleanup = CleanupObservation::capture(&[Path::new(WORKLOAD_SCOPES)]);
         // The serve data directory lives on the reflink-capable staging
         // filesystem: each per-launch rootfs clone is intra-filesystem.
@@ -1337,6 +1485,14 @@ impl GatewayWorld {
             .prefix("pig-conformance-")
             .tempdir_in(default_staging_root())
             .expect("conformance directory on the staging filesystem");
+        // The uid-dropped VMM (gid 4200) reaches its rootfs clone beneath this
+        // directory, so it carries the same traverse grant as the staging
+        // root above it (`0710 root:4200`).
+        std::os::unix::fs::chown(root.path(), Some(0), Some(4200))
+            .expect("grant the confined gid the conformance directory");
+        tokio::fs::set_permissions(root.path(), Permissions::from_mode(0o710))
+            .await
+            .expect("traverse mode on the conformance directory");
         let data_dir = root.path().join("data");
         let config_dir = root.path().join("conf");
         tokio::fs::create_dir_all(&data_dir).await.expect("create the data dir");
@@ -1367,6 +1523,21 @@ impl GatewayWorld {
         world.deploy_service().await;
         world.declare_route().await;
         world.wait_until_serving().await;
+        world
+    }
+
+    /// Boot, deploy the Service and declare the whole-host Route, and stop
+    /// there: nothing is requested through the gateway, so the gate window
+    /// (boot to the first bound observation) stays free of any Service
+    /// traffic. A test that asserts what the gate did (R-65: no connection to
+    /// the Service) observes the gate with [`Self::wait_listener_bound`],
+    /// reads the Service's readiness through the API with
+    /// [`Self::wait_running`], and only then calls
+    /// [`Self::wait_until_serving`].
+    pub async fn deployed(trace: &TraceHistory, second_octet: u8, guest: GuestKind) -> Self {
+        let world = Self::boot(trace, second_octet, guest).await;
+        world.deploy_service().await;
+        world.declare_route().await;
         world
     }
 
@@ -1621,6 +1792,61 @@ impl GatewayWorld {
 
 impl Drop for GatewayWorld {
     fn drop(&mut self) {
+        // `ServerHandle` does not stop the server on drop, and a serve-booting
+        // body that panics before `shutdown` leaves the DNS responder's
+        // blocking thread alive, so the test runtime's teardown never returns
+        // (GH #350). A world still holding its handle (a panic or an early
+        // return) stops its Service and shuts the server down here, on
+        // dedicated threads with their own runtimes: the test runtime's
+        // workers keep running the server's tasks while this thread waits.
+        if let Some(handle) = self.handle.take() {
+            let api = self.api.clone();
+            let stopped = thread::spawn(move || {
+                let runtime = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("cleanup runtime");
+                runtime.block_on(async move {
+                    let stop = async {
+                        api.stop_workload(SERVICE_ID).await;
+                        loop {
+                            let idle = match api.get(&format!("/v1/allocs?job={SERVICE_ID}")).await
+                            {
+                                Ok(response) => response
+                                    .json::<serde_json::Value>()
+                                    .await
+                                    .is_ok_and(|status| status["replicas_running"] == 0),
+                                Err(_) => false,
+                            };
+                            if idle {
+                                return;
+                            }
+                            tokio::time::sleep(Duration::from_millis(500)).await;
+                        }
+                    };
+                    let _ = tokio::time::timeout(Duration::from_secs(20), stop).await;
+                });
+            })
+            .join();
+            if stopped.is_err() {
+                eprintln!("unwind cleanup: stopping the Service failed; shutting down anyway");
+            }
+            let shut = thread::spawn(move || {
+                let runtime = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("cleanup runtime");
+                runtime
+                    .block_on(handle.shutdown(DRAIN_DEADLINE))
+                    .map_err(|error| format!("{error:?}"))
+            })
+            .join();
+            match shut {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => eprintln!("unwind cleanup: server shutdown failed: {error}"),
+                Err(_) => eprintln!("unwind cleanup: server shutdown panicked"),
+            }
+        }
         if self.staged.example_owned {
             let script = example_dir().join("prepare.sh");
             let cleanup = command_output("bash", &[&script.to_string_lossy(), "cleanup"]);
@@ -1655,9 +1881,11 @@ async fn start_server(
     };
     // The production host bundle over this data dir; the hermetic KEK is the
     // only simulated edge (the production keyring refuses a cold boot).
-    let adapters =
-        NodeAdapters::host(&config, Arc::new(RealCgroupFs::new()), Arc::new(SimKek::for_boot()))
-            .expect("the host bundle opens the stores");
+    // The hermetic KEK carries the boot KEK and the gateway's custody KEK.
+    let custody_kek = KekId::new("overdrive-public-certified-key").expect("custody KEK id");
+    let kek = SimKek::for_boot().with(&custody_kek, [0x5a; KEK_LEN]);
+    let adapters = NodeAdapters::host(&config, Arc::new(RealCgroupFs::new()), Arc::new(kek))
+        .expect("the host bundle opens the stores");
     let handle = run_server(config, adapters).await.expect("start the production server");
     let api = PublicApi::from_trust_config(&config_dir.join(".overdrive/config"))
         .expect("load the server trust triple");
@@ -1678,11 +1906,22 @@ const LOAD_LINE: &str = "PIG-LOAD ";
 /// The child is the test binary re-executed, never the `overdrive` binary. The
 /// clients live in another process so the parent's descriptor and resident-set
 /// observations describe the gateway's process only.
+///
+/// Dropping it kills and reaps the child, so a failed assertion never leaves an
+/// orphan holding the run's stdout and stderr open. Every read from the child is
+/// bounded by [`LOAD_CHILD_READ_BOUND`].
 pub struct LoadChild {
     child: Child,
-    lines: BufReader<ChildStdout>,
+    lines: Receiver<io::Result<String>>,
     stdin: ChildStdin,
+    /// Every stdout line that is not a protocol line, and every progress line.
+    transcript: Arc<std::sync::Mutex<Vec<String>>>,
+    /// The child's stderr, captured to be reported when a bound expires.
+    stderr_log: Arc<std::sync::Mutex<String>>,
 }
+
+/// The longest the parent waits for one protocol line, or for the child to exit.
+pub const LOAD_CHILD_READ_BOUND: Duration = Duration::from_secs(180);
 
 impl LoadChild {
     /// Start a child holding `connections` concurrent `GET /hold` exchanges.
@@ -1693,21 +1932,76 @@ impl LoadChild {
             .env(LOAD_CHILD_ENV, format!("{address}|{connections}|{}", ca_der.display()))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
+            .stderr(Stdio::piped())
             .spawn()
             .expect("spawn the load-client child");
-        let lines = BufReader::new(child.stdout.take().expect("child stdout"));
+        let stdout = BufReader::new(child.stdout.take().expect("child stdout"));
+        let stderr = BufReader::new(child.stderr.take().expect("child stderr"));
+        let (sender, lines) = std::sync::mpsc::channel();
+        let transcript = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let stderr_log = Arc::new(std::sync::Mutex::new(String::new()));
+        let stdout_transcript = Arc::clone(&transcript);
+        thread::Builder::new()
+            .name("load-child-stdout".to_owned())
+            .spawn(move || {
+                for line in stdout.lines() {
+                    if let Ok(text) = &line {
+                        stdout_transcript.lock().expect("transcript lock").push(text.clone());
+                    }
+                    let failed = line.is_err();
+                    if sender.send(line).is_err() || failed {
+                        return;
+                    }
+                }
+            })
+            .expect("spawn the child stdout reader");
+        let stderr_sink = Arc::clone(&stderr_log);
+        thread::Builder::new()
+            .name("load-child-stderr".to_owned())
+            .spawn(move || {
+                for line in stderr.lines() {
+                    let Ok(text) = line else { return };
+                    // Still visible in the run's own output, as before.
+                    eprintln!("[load-child] {text}");
+                    let mut log = stderr_sink.lock().expect("stderr log lock");
+                    log.push_str(&text);
+                    log.push('\n');
+                }
+            })
+            .expect("spawn the child stderr reader");
         let stdin = child.stdin.take().expect("child stdin");
-        Self { child, lines, stdin }
+        Self { child, lines, stdin, transcript, stderr_log }
     }
 
-    /// Wait for the child's next protocol line starting with `prefix`.
-    pub fn wait_for(&mut self, prefix: &str) -> String {
-        let mut line = String::new();
+    /// What the child has said so far: its stdout lines (protocol and progress)
+    /// and its stderr, for a failure message.
+    fn report(&self) -> String {
+        let transcript = self.transcript.lock().expect("transcript lock").join("\n");
+        let stderr = self.stderr_log.lock().expect("stderr log lock").clone();
+        format!("child stdout so far:\n{transcript}\nchild stderr so far:\n{stderr}")
+    }
+
+    /// Wait for the child's next protocol line starting with `prefix`, for at
+    /// most [`LOAD_CHILD_READ_BOUND`].
+    pub fn wait_for(&self, prefix: &str) -> String {
+        let deadline = Instant::now() + LOAD_CHILD_READ_BOUND;
         loop {
-            line.clear();
-            let read = self.lines.read_line(&mut line).expect("read the child's stdout");
-            assert!(read > 0, "the load-client child ended before reporting {prefix:?}");
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            let line = match self.lines.recv_timeout(remaining) {
+                Ok(line) => line.expect("read the child's stdout"),
+                Err(RecvTimeoutError::Timeout) => {
+                    panic!(
+                        "the load-client child did not report {prefix:?} within the bound\n{}",
+                        self.report()
+                    )
+                }
+                Err(RecvTimeoutError::Disconnected) => {
+                    panic!(
+                        "the load-client child ended before reporting {prefix:?}\n{}",
+                        self.report()
+                    )
+                }
+            };
             if let Some(rest) = line.trim().strip_prefix(LOAD_LINE)
                 && rest.starts_with(prefix)
             {
@@ -1716,16 +2010,42 @@ impl LoadChild {
         }
     }
 
+    /// Release the child to open its connections. The child opens none until
+    /// this is sent, so a baseline taken after waiting for the `READY` line
+    /// excludes every exchange.
+    pub fn start(&mut self) {
+        self.stdin.write_all(b"START\n").expect("tell the child to start");
+        self.stdin.flush().expect("flush");
+    }
+
     /// Tell the child to read every body to its end.
     pub fn drain(&mut self) {
         self.stdin.write_all(b"DRAIN\n").expect("tell the child to drain");
         self.stdin.flush().expect("flush");
     }
 
-    /// Reap the child.
+    /// Reap the child, which must exit within [`LOAD_CHILD_READ_BOUND`].
     pub fn finish(mut self) {
-        let status = self.child.wait().expect("wait for the load-client child");
+        let deadline = Instant::now() + LOAD_CHILD_READ_BOUND;
+        let status = loop {
+            if let Some(status) = self.child.try_wait().expect("poll the load-client child") {
+                break status;
+            }
+            assert!(Instant::now() < deadline, "the load-client child exits within the bound");
+            thread::sleep(Duration::from_millis(50));
+        };
         assert!(status.success(), "the load-client child exits cleanly: {status}");
+    }
+}
+
+impl Drop for LoadChild {
+    fn drop(&mut self) {
+        // Already reaped after `finish`: the kill then reports an error, which
+        // is the expected outcome and carries no information.
+        if self.child.try_wait().ok().flatten().is_none() {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
     }
 }
 
@@ -1743,10 +2063,14 @@ pub fn run_load_child_if_requested() {
         key_path: PathBuf::new(),
     };
     let client = PublicClient::new(address, &pki);
+    writeln!(io::stdout(), "{LOAD_LINE}READY").expect("report to the parent");
+    io::stdout().flush().expect("flush");
+    let mut start = String::new();
+    io::stdin().read_line(&mut start).expect("read the parent's start command");
     let (ready_tx, ready_rx) = std::sync::mpsc::channel::<bool>();
     let go = Arc::new((std::sync::Mutex::new(false), std::sync::Condvar::new()));
     let mut workers = Vec::new();
-    for _ in 0..connections {
+    for index in 0..connections {
         let client = client.clone();
         let ready = ready_tx.clone();
         let go = Arc::clone(&go);
@@ -1754,10 +2078,26 @@ pub fn run_load_child_if_requested() {
             thread::Builder::new()
                 .stack_size(256 * 1024)
                 .spawn(move || {
-                    let opened = client.connect().ok().and_then(|mut connection| {
-                        connection.send(&Request::get("/hold").encode()).ok()?;
+                    let connected = client.connect();
+                    if let Err(error) = &connected {
+                        eprintln!("client {index}: handshake failed: {error:?}");
+                    }
+                    let opened = connected.ok().and_then(|mut connection| {
+                        if let Err(error) = connection.send(&Request::get("/hold").encode()) {
+                            eprintln!("client {index}: request send failed: {error:?}");
+                            return None;
+                        }
                         connection.set_read_timeout(Some(Duration::from_secs(60)));
-                        let head = connection.read_head().ok()?;
+                        let head = match connection.read_head() {
+                            Ok(head) => head,
+                            Err(error) => {
+                                eprintln!("client {index}: response head failed: {error:?}");
+                                return None;
+                            }
+                        };
+                        if head.status != 200 {
+                            eprintln!("client {index}: response status {}", head.status);
+                        }
                         (head.status == 200).then_some((connection, head))
                     });
                     let _ = ready.send(opened.is_some());
@@ -1776,7 +2116,24 @@ pub fn run_load_child_if_requested() {
         );
     }
     drop(ready_tx);
-    let established = ready_rx.iter().filter(|ok| *ok).count();
+    let mut established = 0_u32;
+    let mut reported = 0_u32;
+    // Receive exactly one result per worker. Each worker keeps its `ready`
+    // sender alive while it waits on `go`, so the channel does not disconnect
+    // until the workers are released, which only happens after INFLIGHT is sent.
+    for _ in 0..connections {
+        let Ok(opened) = ready_rx.recv() else { break };
+        reported += 1;
+        established += u32::from(opened);
+        if reported.is_multiple_of(16) {
+            writeln!(
+                io::stdout(),
+                "progress: {reported}/{connections} settled, {established} established"
+            )
+            .expect("report progress");
+            io::stdout().flush().expect("flush");
+        }
+    }
     writeln!(io::stdout(), "{LOAD_LINE}INFLIGHT {established}").expect("report to the parent");
     io::stdout().flush().expect("flush");
     let mut command = String::new();

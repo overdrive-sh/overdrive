@@ -1016,6 +1016,55 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-11-09T20:46:58Z"
+    },
+    {
+      "sid": "05-03",
+      "p": "RED",
+      "s": "SKIPPED",
+      "d": "CHECKPOINT_PENDING: guest image staged without the guest kit; overdrive-init fails the transport dummy device (os error 95), so the 11 tests fail on fixture staging, not business logic; needs a decision on guest staging scope",
+      "t": "2026-11-09T22:14:34Z"
+    },
+    {
+      "sid": "05-03",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "CHECKPOINT_PENDING: guest image staged without the guest kit; overdrive-init fails the transport dummy device (os error 95), so the 11 tests fail on fixture staging, not business logic; needs a decision on guest staging scope",
+      "t": "2026-11-09T22:14:34Z"
+    },
+    {
+      "sid": "05-03",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "CHECKPOINT_PENDING: guest image staged without the guest kit; overdrive-init fails the transport dummy device (os error 95), so the 11 tests fail on fixture staging, not business logic; needs a decision on guest staging scope",
+      "t": "2026-11-09T22:14:34Z"
+    },
+    {
+      "sid": "05-03",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-09T23:01:37Z"
+    },
+    {
+      "sid": "05-03",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "CHECKPOINT_PENDING: GREEN not reached; S-PIG-01 blocked on a test-support oracle (armed_upstream_sockets requires a 127.0.0.1 peer, production dials the workload address 100.95.0.2:8080); intermittent upstream ConnectionReset 502s undiagnosed; nothing committed",
+      "t": "2026-11-09T23:13:02Z"
+    },
+    {
+      "sid": "05-03",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "CHECKPOINT_PENDING: GREEN not reached; S-PIG-01 blocked on a test-support oracle (armed_upstream_sockets requires a 127.0.0.1 peer, production dials the workload address 100.95.0.2:8080); intermittent upstream ConnectionReset 502s undiagnosed; nothing committed",
+      "t": "2026-11-09T23:13:02Z"
+    },
+    {
+      "sid": "05-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-12T14:12:25Z"
     }
   ]
 }

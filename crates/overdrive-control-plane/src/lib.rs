@@ -347,7 +347,7 @@ pub struct AppState {
     /// 01-02 lands this field and the boot-time construction (rebuilt
     /// immediately AFTER the allocator's `bulk_load` — ordering is
     /// load-bearing: the rebuild joins allocator-issued VIPs). The
-    /// submit / stop edge maintenance lands in 01-03; the hydrator
+    /// submit edge maintenance lands in 01-03; the hydrator
     /// read-path switch lands in 01-04. After this step the store
     /// exists and is boot-rebuilt but is not yet mutated on the edge nor
     /// read by the hydrator.

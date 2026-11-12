@@ -66,6 +66,8 @@ These rules apply to everything under `tests/conformance/` and specialize
 - Route execution through Lima for ordinary Linux conformance and through the
   native-metal runner for tests marked as requiring KVM or real guest/kernel
   behavior.
-- Native-metal tests remain reasoned-ignored in the ordinary lane and are
-  activated only by the dedicated `tests/conformance/run-native-metal.sh`
-  entrypoint.
+- Native-metal tests (`native_metal_kvm_*`) are active, not ignored. The
+  `tests/conformance/run-native-metal.sh` entrypoint selects exactly those and
+  runs them with `--no-capture`; it requires qualified native metal and raises
+  the descriptor limit for the in-process production boot. Run them only
+  through `cargo xtask metal run --`.

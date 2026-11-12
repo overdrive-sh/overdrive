@@ -1067,7 +1067,6 @@ mod acceptance {
     ///
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
-    #[ignore = "pending DELIVER public-request-end-to-end"]
     async fn owner_restart_mid_request_surfaces_the_typed_error_and_leaves_no_residue() {
         let fx = fixture_with(ReceiptMode::Selected, Some(GatewayClientMtlsError::Handshake), true)
             .await;

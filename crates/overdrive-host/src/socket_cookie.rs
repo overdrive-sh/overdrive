@@ -7,13 +7,12 @@
 //! stays intact.
 
 #![allow(
-    clippy::todo,
     clippy::unused_self,
-    clippy::missing_const_for_fn,
-    reason = "`probe` is the boot sentinel step's (public-ingress-gateway)"
+    reason = "the reader is a stateless adapter handle; its methods keep `&self` so the \
+              dataplane holds it like every other host adapter"
 )]
 
-use std::os::fd::BorrowedFd;
+use std::os::fd::{AsFd, BorrowedFd};
 
 use overdrive_core::public_ingress::SocketCookie;
 use thiserror::Error;
@@ -29,8 +28,30 @@ impl SocketCookieReader {
     }
 
     /// Prove the host can read a nonzero socket cookie.
+    ///
+    /// Opens a throwaway loopback socket and reads its cookie twice: the
+    /// kernel assigns a cookie once per socket, so the two reads must agree
+    /// and be nonzero.
+    ///
+    /// # Errors
+    ///
+    /// Any [`SocketCookieReader::read`] failure; a socket that cannot be
+    /// created, or whose two reads disagree, is a
+    /// [`SocketCookieReadError::Syscall`].
     pub fn probe(&self) -> Result<(), SocketCookieReadError> {
-        todo!("SCAFFOLD: SocketCookieReader::probe")
+        let socket = std::net::UdpSocket::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+            .map_err(|source| SocketCookieReadError::Syscall { source })?;
+        let first = self.read(socket.as_fd())?;
+        let second = self.read(socket.as_fd())?;
+        if first != second {
+            return Err(SocketCookieReadError::Syscall {
+                source: std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "SO_COOKIE changed between two reads of one socket",
+                ),
+            });
+        }
+        Ok(())
     }
 
     /// Read the stable kernel cookie for one borrowed socket.

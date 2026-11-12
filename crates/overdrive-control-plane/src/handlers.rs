@@ -577,9 +577,8 @@ pub async fn submit_workload(
                 // the `Inserted` arm above, which this branch did not
                 // take. There is nothing to remove (symmetric with the
                 // VIP, which was allocated-then-released for the rejected
-                // spec). Adding a `remove_workload` here would evict the
-                // EXISTING workload's facts on a conflicting resubmit —
-                // exactly the corruption U6 guards against.
+                // spec). Evicting here would drop the EXISTING
+                // workload's facts on a conflicting resubmit.
                 //
                 // The FRONTEND allocator is ALSO a deliberate NO-OP here
                 // (dial-by-name-responder step 01-05) — but for a DIFFERENT
@@ -878,24 +877,10 @@ pub async fn stop_workload(
         PutOutcome::KeyExists { .. } => StopOutcome::AlreadyStopped,
     };
 
-    // Evict the workload's listener facts on the stop edge per ADR-0062
-    // § Decision (2). `stop_workload` holds ONLY the `WorkloadId` (not
-    // the ServiceIds or VIP), so the store's secondary cleanup index —
-    // workload → derived ServiceIds — is what makes eviction possible
-    // without an intent decode or an allocator lock. `remove_workload`
-    // is idempotent: a redundant stop (AlreadyStopped) finds no
-    // secondary entry and is a no-op, which is why both outcomes run it
-    // unconditionally.
-    //
-    // Lock discipline (`.claude/rules/development.md` § "Concurrency &
-    // async"): acquire the `listener_facts` guard, perform the
-    // synchronous `remove_workload`, and DROP it before the subsequent
-    // `enqueue_workload_lifecycle_eval`.
-    {
-        let mut facts_guard = state.listener_facts.lock().await;
-        facts_guard.remove_workload(&workload_id);
-        drop(facts_guard);
-    }
+    // A stop never evicts the workload's listener facts (R-76, ADR-0062
+    // amendment 2026-11-10): they are evicted only on logical deletion, so the
+    // `ServiceMapHydrator` still projects the stopped Service and emits the
+    // empty update that purges its backend from the dataplane.
 
     // Edge-triggered ingress per whitepaper §18: enqueue an
     // evaluation for the workload-lifecycle reconciler so the
