@@ -7,10 +7,10 @@
 //! There is no portable runtime hook for "a guard crossed an `.await`"
 //! (distill § C honesty note). The falsifiable proxy is contention:
 //! the `listener_facts` store is `Arc<tokio::sync::Mutex<...>>`, shared
-//! by the hydrate read, the submit-edge `upsert`, and the keyed
-//! `fact_for` reads. If the hydrate path acquired the guard and then
+//! by the hydrate read, the submit-edge `upsert`, and the stop-edge
+//! `remove_workload`. If the hydrate path acquired the guard and then
 //! `.await`ed the `ObservationStore` read (or any other future) while
-//! holding it, concurrent `upsert` / `fact_for` tasks racing on
+//! holding it, concurrent `upsert` / `remove_workload` tasks racing on
 //! the same mutex would stall — and a bounded `timeout` wrapping the
 //! whole concurrent batch would elapse. The correct
 //! acquire → clone → drop discipline lets every task make progress, so
@@ -147,9 +147,9 @@ async fn persist_and_allocate(
     vip
 }
 
-/// Concurrent hydrate-read + submit-upsert + keyed fact reads on the shared
+/// Concurrent hydrate-read + submit-upsert + stop-remove on the shared
 /// `Arc<Mutex<ListenerFactStore>>`. A guard held across `.await` in the
-/// hydrate path deadlocks/stalls the upsert + read tasks, so the
+/// hydrate path deadlocks/stalls the upsert + remove tasks, so the
 /// bounded `timeout` over the joined batch elapses; the correct
 /// acquire→clone→drop discipline lets every op complete promptly.
 ///
@@ -199,8 +199,7 @@ async fn listener_fact_guard_never_held_across_await_under_contention() {
     }
 
     // Spawn contending tasks: repeated hydrate reads + repeated upserts +
-    // repeated keyed fact reads, all racing on the shared listener_facts
-    // mutex. A stop leaves the facts in place, so no eviction races here.
+    // repeated removes, all racing on the shared listener_facts mutex.
     let iterations = 50usize;
 
     let read_state = Arc::clone(&state);
@@ -231,39 +230,30 @@ async fn listener_fact_guard_never_held_across_await_under_contention() {
         }
     });
 
-    let fact_state = Arc::clone(&state);
-    let fact_vip = vip;
-    let fact_listeners = listeners.clone();
-    let fact_reader = tokio::spawn(async move {
+    let remove_state = Arc::clone(&state);
+    let remove_wid = wid.clone();
+    let remover = tokio::spawn(async move {
         for _ in 0..iterations {
-            for listener in &fact_listeners {
-                let sid = ServiceId::derive(
-                    &fact_vip,
-                    listener.port,
-                    listener.protocol,
-                    SERVICE_MAP_PURPOSE,
-                );
-                let facts = fact_state.listener_facts.lock().await;
-                let _ = facts.fact_for(sid);
-                drop(facts);
-                tokio::task::yield_now().await;
-            }
+            let mut facts = remove_state.listener_facts.lock().await;
+            facts.remove_workload(&remove_wid);
+            drop(facts);
+            tokio::task::yield_now().await;
         }
     });
 
     // Liveness: every contending op completes within the budget. A
-    // guard-across-await in the hydrate path stalls upsert/fact reads and
+    // guard-across-await in the hydrate path stalls upsert/remove and
     // this elapses.
     let outcome = tokio::time::timeout(Duration::from_secs(5), async {
         reader.await.expect("reader task");
         upserter.await.expect("upsert task");
-        fact_reader.await.expect("fact read task");
+        remover.await.expect("remove task");
     })
     .await;
 
     assert!(
         outcome.is_ok(),
-        "concurrent hydrate-read + upsert + fact reads must all complete within the budget; \
+        "concurrent hydrate-read + upsert + remove must all complete within the budget; \
          a stall means the hydrate path held the listener_facts guard across an .await"
     );
 }
