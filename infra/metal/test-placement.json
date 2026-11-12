@@ -8192,6 +8192,9 @@
       "mtls::limits::tests::stall_elapsed_trips_at_and_past_the_deadline": {
         "kind": "host-pure"
       },
+      "mtls::outbound::tests::probe_handshake_drivers_fail_when_the_peer_goes_silent": {
+        "kind": "host-pure"
+      },
       "mtls::outbound::tests::sentinel_client_cannot_continue_before_server_arm_acknowledgement": {
         "kind": "host-pure"
       },

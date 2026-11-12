@@ -1436,7 +1436,6 @@ mod tests {
         assert_eq!(stream.reads, record.len());
     }
 
-
     use super::splice::PumpHandle;
     use super::{ConnState, HostMtlsEnforcement, new_conn_state_bidi, now_unix_nanos};
 

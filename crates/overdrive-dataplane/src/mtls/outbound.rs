@@ -221,8 +221,10 @@ fn drive_handshake_client(
         }
         // One blocking read per iteration, never longer than what is left of the
         // overall deadline, so a trickling peer cannot outlive it.
-        tcp.set_read_timeout(Some(deadline.saturating_sub(start.elapsed()).max(super::MIN_READ_WAIT)))
-            .ok();
+        tcp.set_read_timeout(Some(
+            deadline.saturating_sub(start.elapsed()).max(super::MIN_READ_WAIT),
+        ))
+        .ok();
         while conn.wants_write() {
             conn.write_tls(tcp).map_err(|e| MtlsEnforcementError::HandshakeFailed {
                 reason: format!("write_tls: {e}"),
@@ -498,10 +500,9 @@ fn sentinel_peer_recv(
     tcp.set_nodelay(true).ok();
     let fd = tcp.as_raw_fd();
     let mut tcp = tcp;
-    tcp.set_read_timeout(Some(std::time::Duration::from_secs(5))).ok();
     let mut conn = rustls::ServerConnection::new(std::sync::Arc::new(cfg))
         .map_err(|e| format!("sentinel ServerConnection: {e}"))?;
-    drive_server_handshake(&mut conn, &mut tcp)?;
+    drive_server_handshake(&mut conn, &mut tcp, PROBE_HANDSHAKE_DEADLINE)?;
     arm_handoff.wait_for_client_arm()?;
     // Drain any 0.5-RTT early plaintext rustls decrypted while finishing the
     // handshake BEFORE extract consumes the connection — those bytes seed `got` so
@@ -554,8 +555,7 @@ fn sentinel_client_handshake(leg_b: TcpStream) -> std::result::Result<ExtractedS
     let mut conn = ClientConnection::new(std::sync::Arc::new(cfg), sni)
         .map_err(|e| format!("sentinel ClientConnection: {e}"))?;
     let mut tcp = leg_b;
-    tcp.set_read_timeout(Some(std::time::Duration::from_secs(5))).ok();
-    drive_client_handshake_raw(&mut conn, &mut tcp)?;
+    drive_client_handshake_raw(&mut conn, &mut tcp, PROBE_HANDSHAKE_DEADLINE)?;
     // Drain any early plaintext rustls decrypted before extract consumes the
     // connection (kTLS early-data correctness — see `mtls::drain_early_plaintext`).
     // The probe's leg B is forward-only (the sentinel peer reads, never replies
@@ -611,16 +611,39 @@ impl rustls::client::danger::ServerCertVerifier for SentinelAcceptAny {
     }
 }
 
+/// Overall bound on each sentinel handshake of the boot probe.
+const PROBE_HANDSHAKE_DEADLINE: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Fail the probe handshake once `deadline` has elapsed since `start`; otherwise cap
+/// the next read at what is left of it, so a silent or trickling sentinel peer cannot
+/// outlive the overall bound.
+fn arm_probe_read_deadline(
+    tcp: &TcpStream,
+    start: std::time::Instant,
+    deadline: std::time::Duration,
+    side: &str,
+) -> std::result::Result<(), String> {
+    let elapsed = start.elapsed();
+    if super::limits::handshake_expired(elapsed, deadline) {
+        return Err(format!("sentinel {side} handshake timed out after {deadline:?}"));
+    }
+    tcp.set_read_timeout(Some(deadline.saturating_sub(elapsed).max(super::MIN_READ_WAIT)))
+        .map_err(|e| format!("set_read_timeout: {e}"))
+}
+
 /// Raw client-handshake driver (no typed `MtlsEnforcementError` — `probe` collects
 /// a `String` cause).
 fn drive_client_handshake_raw(
     conn: &mut ClientConnection,
     tcp: &mut TcpStream,
+    deadline: std::time::Duration,
 ) -> std::result::Result<(), String> {
     // Whole records only (see `RecordAssembler`): the bytes after the final
     // handshake record stay in the socket for the kernel record parser.
     let mut records = super::RecordAssembler::new();
+    let start = std::time::Instant::now();
     loop {
+        arm_probe_read_deadline(tcp, start, deadline, "client")?;
         while conn.wants_write() {
             conn.write_tls(tcp).map_err(|e| format!("write_tls: {e}"))?;
         }
@@ -643,11 +666,14 @@ fn drive_client_handshake_raw(
 fn drive_server_handshake(
     conn: &mut rustls::ServerConnection,
     tcp: &mut TcpStream,
+    deadline: std::time::Duration,
 ) -> std::result::Result<(), String> {
     // Whole records only (see `RecordAssembler`): the bytes after the final
     // handshake record stay in the socket for the kernel record parser.
     let mut records = super::RecordAssembler::new();
+    let start = std::time::Instant::now();
     loop {
+        arm_probe_read_deadline(tcp, start, deadline, "client")?;
         while conn.wants_write() {
             conn.write_tls(tcp).map_err(|e| format!("write_tls: {e}"))?;
         }
@@ -678,6 +704,45 @@ mod tests {
     )]
 
     use super::*;
+
+    /// A sentinel peer that accepts and then goes silent makes each probe handshake
+    /// driver fail with a timeout error instead of waiting forever.
+    #[test]
+    fn probe_handshake_drivers_fail_when_the_peer_goes_silent() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let deadline = std::time::Duration::from_millis(150);
+
+        let mut client_side = TcpStream::connect(addr).unwrap();
+        let (_silent_peer, _) = listener.accept().unwrap();
+        let (cert, key) = sentinel_cert().unwrap();
+        let provider = std::sync::Arc::new(rustls::crypto::ring::default_provider());
+        let server_cfg = rustls::ServerConfig::builder_with_provider(provider.clone())
+            .with_safe_default_protocol_versions()
+            .unwrap()
+            .with_no_client_auth()
+            .with_single_cert(vec![cert], key)
+            .unwrap();
+        let mut server_conn =
+            rustls::ServerConnection::new(std::sync::Arc::new(server_cfg)).unwrap();
+        let server_error =
+            drive_server_handshake(&mut server_conn, &mut client_side, deadline).unwrap_err();
+        assert!(server_error.contains("timed out"), "{server_error}");
+
+        let mut dialer = TcpStream::connect(addr).unwrap();
+        let (_silent_server, _) = listener.accept().unwrap();
+        let client_cfg = rustls::ClientConfig::builder_with_provider(provider)
+            .with_safe_default_protocol_versions()
+            .unwrap()
+            .dangerous()
+            .with_custom_certificate_verifier(std::sync::Arc::new(SentinelAcceptAny))
+            .with_no_client_auth();
+        let sni = ServerName::try_from("sentinel.overdrive.invalid".to_string()).unwrap();
+        let mut client_conn = ClientConnection::new(std::sync::Arc::new(client_cfg), sni).unwrap();
+        let client_error =
+            drive_client_handshake_raw(&mut client_conn, &mut dialer, deadline).unwrap_err();
+        assert!(client_error.contains("timed out"), "{client_error}");
+    }
 
     /// CONTRACT_SHAPE: bounded-change (client continuation remains blocked until the server kTLS arm is acknowledged).
     #[test]

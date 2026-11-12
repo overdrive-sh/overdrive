@@ -457,8 +457,10 @@ fn drive_handshake_server(
         }
         // One blocking read per iteration, never longer than what is left of the
         // overall deadline, so a trickling peer cannot outlive it.
-        tcp.set_read_timeout(Some(deadline.saturating_sub(start.elapsed()).max(super::MIN_READ_WAIT)))
-            .ok();
+        tcp.set_read_timeout(Some(
+            deadline.saturating_sub(start.elapsed()).max(super::MIN_READ_WAIT),
+        ))
+        .ok();
         while conn.wants_write() {
             conn.write_tls(tcp).map_err(|e| MtlsEnforcementError::HandshakeFailed {
                 reason: format!("write_tls: {e}"),
