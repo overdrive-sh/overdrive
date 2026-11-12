@@ -133,7 +133,7 @@ impl Fixture {
     pub fn new_accessible() -> Self {
         // A nested user namespace cannot use init-user-namespace DAC override
         // to traverse a login user's private home. Keep its owned test inputs
-        // below the already-prepared uid-0 runtime root when Metal supplies one.
+        // below the already-prepared uid-0 staging root when Metal supplies one.
         let base = std::env::var_os("OVERDRIVE_METAL_RUN_ID").map_or_else(
             || PathBuf::from("/tmp"),
             |id| {
@@ -143,7 +143,9 @@ impl Fixture {
                         && id.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
                     "valid enclosing service context"
                 );
-                let root = PathBuf::from("/run/ovd-gk").join(id.as_ref());
+                // /run is mounted noexec on the host, so the executable fixtures
+                // live in the run's prepared staging root, which is executable.
+                let root = PathBuf::from("/srv/vm/metal").join(id.as_ref());
                 assert!(
                     root.is_dir(),
                     "prepare the enclosing P3 runtime context before activating namespace fixtures"
@@ -270,6 +272,10 @@ impl Fixture {
         }
         command
             .env("PATH", self.path())
+            // The universe may sit inside an enclosing checkout (an ordinary run's
+            // TMPDIR does); git discovery must never climb out of it.
+            .env("GIT_CEILING_DIRECTORIES", self.temp.path())
+            .env("OVERDRIVE_METAL_RUNS_ROOT", &self.runs)
             .env("RSYNC_BIN", self.bin.join("rsync"))
             .env("METAL_FIXTURE_REMOTE_HOME", &self.remote)
             .env("METAL_FIXTURE_SSH_LOG", self.temp.path().join("ssh.log"))

@@ -8,7 +8,9 @@
 # token-matched owner cleanup one implementation.
 set -euo pipefail
 
-RUNS_ROOT_DEFAULT="/var/lib/overdrive-metal/runs"
+# OVERDRIVE_METAL_RUNS_ROOT scopes the run-record scan of an exclusive admission
+# to one root, as OVERDRIVE_METAL_LOCK_PATH scopes the lock.
+RUNS_ROOT_DEFAULT="${OVERDRIVE_METAL_RUNS_ROOT:-/var/lib/overdrive-metal/runs}"
 
 utc_now() {
   date -u +%Y-%m-%dT%H:%M:%SZ
