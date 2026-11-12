@@ -1,9 +1,9 @@
 # Step 05-07 verification record
 
-Date: 2026-11-13  
-Crafter: Codex replacement  
-Feature: service-allocation-readiness-and-ending  
-Step: 05-07 — Default startup gate is guest-reported listeners  
+Date: 2026-11-13
+Crafter: Codex replacement
+Feature: service-allocation-readiness-and-ending
+Step: 05-07 — Default startup gate is guest-reported listeners
 Status: GREEN; this record is included in the step COMMIT.
 
 ## Source and contract
@@ -55,4 +55,3 @@ The one-off negative capture driver is retained at .context/step-05-07-native/re
 The core parser now synthesizes GuestListeners for an omitted Service startup section and the probe cap counts only TCP/HTTP dial-bearing descriptors. The empty-list opt-out and explicit probe behavior are unchanged. Existing core probe-count acceptance cases were updated to the new dial-bearing meaning, including the bounded D15 fallout in vsock_deploy_validation.rs. Metal placement follows the renamed pre-authored D15 properties.
 
 The native proof required the following private support: prepare_clone_staging_root secures both platform-owned clone path ancestors; the E08 preparation validates the actual in-guest module closure; overdrive-init mounts sysfs before loading guest BTF programs and establishes the guest transport file-descriptor limit. The native positive boot and the two guest-listener real-boot tests passed through the production composition. No API or typed public error contract was invented or weakened.
-
