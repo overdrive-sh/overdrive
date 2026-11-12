@@ -532,6 +532,15 @@ impl FwdPairGuestDriver {
 
     fn guest_abort(&mut self) -> std::result::Result<(), DriverError> {
         let flow = self.flow("GuestAbort")?;
+        // The host writes `Abort { flow }` only on a live control session. The
+        // guest owner ends that session itself when it closes an unattached
+        // flow (`CloseUnattached(g)`), so a later host-side abort has no
+        // session to travel on: nothing reaches the owner, and the spec's
+        // `GuestAbort` over the already-ended guest pair is the no-op whose
+        // state the comparison after this step verifies.
+        if self.io.session_socket().is_none() {
+            return Ok(());
+        }
         self.io.host_control(ControlMessage::Abort { flow });
         self.settle();
         Ok(())
