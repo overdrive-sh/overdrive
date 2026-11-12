@@ -1,18 +1,24 @@
-# runner-hazard-exclusive-ordinary: counterexample, 4 state(s) (from the TLC trace)
+# runner-hazard-exclusive-ordinary: counterexample, 6 state(s) (from the TLC trace)
 
 State 1
   runs = << [ p |-> 0, ctl |-> TRUE, checked |-> FALSE, ever |-> FALSE, starts |-> 0, term |-> -1, desc |-> FALSE, roots |-> FALSE, receipt |-> 0 ], [ p |-> 0, ctl |-> TRUE, checked |-> FALSE, ever |-> FALSE, starts |-> 0, term |-> -1, desc |-> FALSE, roots |-> FALSE, receipt |-> 0 ] >>
   source_revision = <<0, 0>>
-  second_tree = 1
+  second_tree = 2
   maintenance = 0
   observed = <<-2, -2>>
-  conf_step = [tag |-> "init", value |-> [value |-> 1, actor |-> 0]]
+  conf_step = [tag |-> "init", value |-> [value |-> 2, actor |-> 0]]
 
 State 2 [Register]
   runs = << [ p |-> 1, ctl |-> TRUE, checked |-> FALSE, ever |-> FALSE, starts |-> 0, term |-> -1, desc |-> FALSE, roots |-> FALSE, receipt |-> 0 ], [ p |-> 0, ctl |-> TRUE, checked |-> FALSE, ever |-> FALSE, starts |-> 0, term |-> -1, desc |-> FALSE, roots |-> FALSE, receipt |-> 0 ] >>
 
-State 3 [Barrier]
+State 3 [Checkout]
   runs = << [ p |-> 2, ctl |-> TRUE, checked |-> FALSE, ever |-> FALSE, starts |-> 0, term |-> -1, desc |-> FALSE, roots |-> FALSE, receipt |-> 0 ], [ p |-> 0, ctl |-> TRUE, checked |-> FALSE, ever |-> FALSE, starts |-> 0, term |-> -1, desc |-> FALSE, roots |-> FALSE, receipt |-> 0 ] >>
 
-State 4 [Register]
-  runs = << [ p |-> 2, ctl |-> TRUE, checked |-> FALSE, ever |-> FALSE, starts |-> 0, term |-> -1, desc |-> FALSE, roots |-> FALSE, receipt |-> 0 ], [ p |-> 1, ctl |-> TRUE, checked |-> FALSE, ever |-> FALSE, starts |-> 0, term |-> -1, desc |-> FALSE, roots |-> FALSE, receipt |-> 0 ] >>
+State 4 [Barrier]
+  runs = << [ p |-> 3, ctl |-> TRUE, checked |-> FALSE, ever |-> TRUE, starts |-> 0, term |-> -1, desc |-> FALSE, roots |-> TRUE, receipt |-> 0 ], [ p |-> 0, ctl |-> TRUE, checked |-> FALSE, ever |-> FALSE, starts |-> 0, term |-> -1, desc |-> FALSE, roots |-> FALSE, receipt |-> 0 ] >>
+
+State 5 [Register]
+  runs = << [ p |-> 3, ctl |-> TRUE, checked |-> FALSE, ever |-> TRUE, starts |-> 0, term |-> -1, desc |-> FALSE, roots |-> TRUE, receipt |-> 0 ], [ p |-> 1, ctl |-> TRUE, checked |-> FALSE, ever |-> FALSE, starts |-> 0, term |-> -1, desc |-> FALSE, roots |-> FALSE, receipt |-> 0 ] >>
+
+State 6 [Checkout]
+  runs = << [ p |-> 3, ctl |-> TRUE, checked |-> FALSE, ever |-> TRUE, starts |-> 0, term |-> -1, desc |-> FALSE, roots |-> TRUE, receipt |-> 0 ], [ p |-> 2, ctl |-> TRUE, checked |-> FALSE, ever |-> FALSE, starts |-> 0, term |-> -1, desc |-> FALSE, roots |-> FALSE, receipt |-> 0 ] >>

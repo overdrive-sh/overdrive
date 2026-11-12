@@ -11,10 +11,10 @@ State 1
 State 2 [Register]
   runs = << [ p |-> 1, ctl |-> TRUE, checked |-> FALSE, ever |-> FALSE, starts |-> 0, term |-> -1, desc |-> FALSE, roots |-> FALSE, receipt |-> 0 ], [ p |-> 0, ctl |-> TRUE, checked |-> FALSE, ever |-> FALSE, starts |-> 0, term |-> -1, desc |-> FALSE, roots |-> FALSE, receipt |-> 0 ] >>
 
-State 3 [Barrier]
+State 3 [Checkout]
   runs = << [ p |-> 2, ctl |-> TRUE, checked |-> FALSE, ever |-> FALSE, starts |-> 0, term |-> -1, desc |-> FALSE, roots |-> FALSE, receipt |-> 0 ], [ p |-> 0, ctl |-> TRUE, checked |-> FALSE, ever |-> FALSE, starts |-> 0, term |-> -1, desc |-> FALSE, roots |-> FALSE, receipt |-> 0 ] >>
 
-State 4 [Checkout]
+State 4 [Barrier]
   runs = << [ p |-> 3, ctl |-> TRUE, checked |-> FALSE, ever |-> TRUE, starts |-> 0, term |-> -1, desc |-> FALSE, roots |-> TRUE, receipt |-> 0 ], [ p |-> 0, ctl |-> TRUE, checked |-> FALSE, ever |-> FALSE, starts |-> 0, term |-> -1, desc |-> FALSE, roots |-> FALSE, receipt |-> 0 ] >>
 
 State 5 [Prepare]

@@ -477,27 +477,33 @@ impl World {
         self.units.insert(actor, unit);
         Ok(())
     }
-    fn barrier(&self, actor: i64) -> Result {
-        let unit = self.unit(actor)?;
-        unit.gate("barrier")?;
-        poll(
-            || {
-                lock_mode(unit.main_pid(), &self.fixture.temp.path().join("maintenance.lock"))
-                    .is_ok_and(|m| m.as_deref() == Some("shared"))
-            },
-            "actual shared admission descriptor",
-        )
-    }
     fn checkout(&self, actor: i64) -> Result {
         let unit = self.unit(actor)?;
+        let barrier = self.fixture.temp.path().join("maintenance.lock");
         unit.gate("checkout")?;
         poll(
             || {
+                unit.phase().as_deref() == Some("waiting_for_lease")
+                    && lock_mode(unit.main_pid(), &unit.tree)
+                        .is_ok_and(|m| m.as_deref() == Some("exclusive"))
+                    && lock_mode(unit.main_pid(), &barrier).is_ok_and(|m| m.is_none())
+            },
+            "actual checkout exclusion without the barrier",
+        )
+    }
+    fn barrier(&self, actor: i64) -> Result {
+        let unit = self.unit(actor)?;
+        let barrier = self.fixture.temp.path().join("maintenance.lock");
+        unit.gate("barrier")?;
+        poll(
+            || {
                 unit.phase().as_deref() == Some("preparing")
+                    && lock_mode(unit.main_pid(), &barrier)
+                        .is_ok_and(|m| m.as_deref() == Some("shared"))
                     && lock_mode(unit.main_pid(), &unit.tree)
                         .is_ok_and(|m| m.as_deref() == Some("exclusive"))
             },
-            "actual checkout exclusion",
+            "actual barrier admission with the checkout still held",
         )
     }
     fn source_transfer(&self, tree: i64, revision: u8, under_owned_preparation: bool) -> Result {
@@ -558,8 +564,8 @@ impl World {
             // Release only this actor's operation gates. EOF must terminate
             // even when another real owner still excludes kernel admission;
             // no later Checkout step will release these fixture inputs.
-            unit.gate("barrier")?;
             unit.gate("checkout")?;
+            unit.gate("barrier")?;
             unit.terminal()?;
             unit.ended()?;
             let terminal = fields(&unit.directory.join("terminal.v1"));
@@ -654,13 +660,14 @@ impl World {
     }
     fn admission_timeout(&self, actor: i64) -> Result {
         let unit = self.unit(actor)?;
-        // From abstract phase 1 the real owner may acquire its shared barrier
-        // before its existing deadline expires on checkout. Both actual timeout
-        // causes project to the model's approved representative 75.
-        let _holder = HeldLock::try_exclusive(&unit.tree, &unit.actor.join("blocker.held"))?;
+        // From abstract phase 2 the real owner holds its checkout lease and its
+        // deadline expires waiting for the barrier. The actual timeout cause
+        // projects to the model's approved representative 75.
+        let barrier = self.fixture.temp.path().join("maintenance.lock");
+        let _holder = HeldLock::try_exclusive(&barrier, &unit.actor.join("blocker.held"))?;
         unit.gate("short-wait")?;
-        unit.gate("barrier")?;
         unit.gate("checkout")?;
+        unit.gate("barrier")?;
         unit.terminal()?;
         unit.ended()
     }
@@ -752,8 +759,8 @@ impl World {
             )?;
             let unit = self.spawn_maintainer()?;
             unit.gate("short-wait")?;
-            unit.gate("barrier")?;
             unit.gate("checkout")?;
+            unit.gate("barrier")?;
             unit.terminal()?;
             let terminal = fields(&unit.directory.join("terminal.v1"));
             if terminal["kind"] != "runner" || terminal["error"] != "maintenance_timeout" {
@@ -764,8 +771,8 @@ impl World {
             self.maintenance = Some(unit);
         } else if value == 1 {
             let unit = self.spawn_maintainer()?;
-            unit.gate("barrier")?;
             unit.gate("checkout")?;
+            unit.gate("barrier")?;
             poll(
                 || {
                     lock_mode(unit.main_pid(), &barrier)
@@ -1063,9 +1070,10 @@ impl State<RunnerDriver> for Projection {
                 4
             } else if phase["phase"] == "preparing"
                 && lock_mode(pid, &unit.tree)?.as_deref() == Some("exclusive")
+                && lock_mode(pid, &barrier)?.as_deref() == Some("shared")
             {
                 3
-            } else if lock_mode(pid, &barrier)?.as_deref() == Some("shared") {
+            } else if lock_mode(pid, &unit.tree)?.as_deref() == Some("exclusive") {
                 2
             } else {
                 1
@@ -1394,15 +1402,15 @@ fn protocol_illegal_controls_preserve_each_actual_owner_state_boundary() -> Resu
         world = World::new(2)?;
         world.register(1)?;
         if stage >= 2 {
-            world.barrier(1)?;
+            world.checkout(1)?;
         }
         if stage >= 3 {
-            world.checkout(1)?;
+            world.barrier(1)?;
         }
         let unit = world.unit_mut(1)?;
         unit.control("START extra")?;
-        unit.gate("barrier")?;
         unit.gate("checkout")?;
+        unit.gate("barrier")?;
         unit.terminal()?;
         unit.ended()?;
         let terminal = fields(&unit.directory.join("terminal.v1"));
@@ -1418,8 +1426,8 @@ fn protocol_illegal_controls_preserve_each_actual_owner_state_boundary() -> Resu
     drop(world);
     let mut world = World::new(2)?;
     world.register(1)?;
-    world.barrier(1)?;
     world.checkout(1)?;
+    world.barrier(1)?;
     world.prepare(1)?;
     world.start(1)?;
     let initial_body = fs::read(world.unit(1)?.actor.join("body.pid"))?;

@@ -48,7 +48,7 @@ State 2: <runner_bugCollectAtTerminal_runner_protocol_Register line 263, col 3 t
      roots |-> FALSE,
      receipt |-> 0 ] >>
 
-State 3: <runner_bugCollectAtTerminal_runner_protocol_Barrier line 675, col 3 to line 682, col 20 of module runner_bugCollectAtTerminal>
+State 3: <runner_bugCollectAtTerminal_runner_protocol_Checkout line 694, col 3 to line 701, col 21 of module runner_bugCollectAtTerminal>
 /\ runner_bugCollectAtTerminal_runner_protocol_observed = <<-2, -2>>
 /\ runner_bugCollectAtTerminal_runner_protocol_source_revision = <<0, 0>>
 /\ runner_bugCollectAtTerminal_runner_protocol_second_tree = 1
@@ -73,7 +73,7 @@ State 3: <runner_bugCollectAtTerminal_runner_protocol_Barrier line 675, col 3 to
      roots |-> FALSE,
      receipt |-> 0 ] >>
 
-State 4: <runner_bugCollectAtTerminal_runner_protocol_Checkout line 688, col 3 to line 701, col 21 of module runner_bugCollectAtTerminal>
+State 4: <runner_bugCollectAtTerminal_runner_protocol_Barrier line 675, col 3 to line 688, col 20 of module runner_bugCollectAtTerminal>
 /\ runner_bugCollectAtTerminal_runner_protocol_observed = <<-2, -2>>
 /\ runner_bugCollectAtTerminal_runner_protocol_source_revision = <<0, 0>>
 /\ runner_bugCollectAtTerminal_runner_protocol_second_tree = 1

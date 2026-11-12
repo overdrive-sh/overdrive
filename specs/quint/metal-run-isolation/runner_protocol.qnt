@@ -1,8 +1,9 @@
 /**
  * Existing Metal admission/completion owner protocol (P2, P5).
  * Two invocations, two possible checkouts, one exclusive maintainer.
- * Phase: 0 absent; 1 registered; 2 shared barrier held; 3 checkout held;
- * 4 command running; 5 main ended but unit live; 6 unit stopped.
+ * Lock order (LOCKORDER1): checkout lease first, shared barrier second.
+ * Phase: 0 absent; 1 registered; 2 checkout held, no barrier; 3 both held
+ * (preparing); 4 command running; 5 main ended but unit live; 6 unit stopped.
  * StopOwner is the blocking systemd owner operation: native evidence discharges
  * drain-before-finalizer and return-after-control-group-stop. It is not a new
  * runtime operation or recovery protocol. Record validation/atomic publication,
@@ -26,15 +27,15 @@ module runner_protocol {
   val blank: Run = { p: 0, ctl: true, checked: false, ever: false, starts: 0,
                     term: -1, desc: false, roots: false, receipt: 0 }
   def tree(r: int): int = if (r == 1) 1 else second_tree
-  def shared(r: int): bool = Set(2, 3, 4).contains(runs.get(r).p)
-  def checkout(r: int): bool = Set(3, 4).contains(runs.get(r).p)
+  def shared(r: int): bool = Set(3, 4).contains(runs.get(r).p)
+  def checkout(r: int): bool = Set(2, 3, 4).contains(runs.get(r).p)
   def liveAdmitted(r: int): bool = runs.get(r).ever and runs.get(r).p < 6
   def canBarrier(r: int): bool = and {
-    runs.get(r).p == 1, not(Set(1, 2).contains(maintenance)),
+    runs.get(r).p == 2, not(Set(1, 2).contains(maintenance)),
     not(OFF.contains("ordinaryExclusive")) or not(IDS.exists(a => shared(a))),
   }
   def canCheckout(r: int): bool = and {
-    runs.get(r).p == 2,
+    runs.get(r).p == 1,
     not(IDS.exists(a => a != r and checkout(a) and tree(a) == tree(r))),
   }
   def canSync(c: int): bool = not(IDS.exists(a => checkout(a) and tree(a) == c))
@@ -58,9 +59,9 @@ module runner_protocol {
     conf_step' = if (REC) { tag: op, value: { actor: r, value: value } } else conf_step,
   }
   action Register(r: int): bool = all { runs.get(r).p == 0, setRun(r, { ...blank, p: 1 }, "Register", 0) }
-  action Barrier(r: int): bool = all { canBarrier(r), setRun(r, { ...runs.get(r), p: 2 }, "Barrier", 0) }
-  action Checkout(r: int): bool = all {
-    canCheckout(r), setRun(r, { ...runs.get(r), p: 3, ever: true, roots: true }, "Checkout", 0),
+  action Checkout(r: int): bool = all { canCheckout(r), setRun(r, { ...runs.get(r), p: 2 }, "Checkout", 0) }
+  action Barrier(r: int): bool = all {
+    canBarrier(r), setRun(r, { ...runs.get(r), p: 3, ever: true, roots: true }, "Barrier", 0),
   }
   action Prepare(r: int): bool = all {
     runs.get(r).p == 3, not(runs.get(r).checked),
@@ -143,9 +144,10 @@ module runner_protocol {
       SupervisorLost(r), StopOwner(r, outcome), Collect(r), Sync(r), NoSyncRefusal(r),
       Maintain(0), Maintain(1), Maintain(2), Maintain(3), Idle }
   }
+  val LockOrder = IDS.forall(r => shared(r).implies(checkout(r)))
   val CheckoutExclusive = not(and { checkout(1), checkout(2), tree(1) == tree(2) })
   val OrdinaryDoesNotBlockOrdinary = IDS.forall(r =>
-    (runs.get(r).p == 1 and not(Set(1, 2).contains(maintenance))).implies(canBarrier(r)))
+    (runs.get(r).p == 2 and not(Set(1, 2).contains(maintenance))).implies(canBarrier(r)))
   val MaintenanceExcludesOwners = (maintenance == 2).implies(not(IDS.exists(r => shared(r) or liveAdmitted(r))))
   val SourceStableDuringCommand = IDS.forall(r => (runs.get(r).p == 4).implies(source_revision.get(tree(r)) == 0))
   val AtMostOneStart = IDS.forall(r => runs.get(r).starts <= 1)
@@ -154,7 +156,7 @@ module runner_protocol {
     not(runs.get(r).roots), not(runs.get(r).desc), observed.get(r) == runs.get(r).term,
   }))
   val NoFabricatedResult = IDS.forall(r => (runs.get(r).term == -1).implies(not(Set(0, 255).contains(observed.get(r)))))
-  val Safety = and { CheckoutExclusive, OrdinaryDoesNotBlockOrdinary, MaintenanceExcludesOwners,
+  val Safety = and { LockOrder, CheckoutExclusive, OrdinaryDoesNotBlockOrdinary, MaintenanceExcludesOwners,
     SourceStableDuringCommand, AtMostOneStart, NoPrematureCommandCompletion, NoFabricatedResult }
   temporal FairOwners = IDS.forall(r => and {
     weakFair(AdmissionTimeout(r), (runs, second_tree, maintenance, source_revision, observed, conf_step)),
@@ -174,48 +176,48 @@ module runner_protocol {
   temporal MaintenanceEventuallyResolves = (FairOwners and FairMaintenance).implies(eventually(maintenance == 3))
 
   run independent_worktrees = initFor(2).then(Register(1)).then(Register(2))
-    .then(Barrier(1)).then(Barrier(2)).then(Checkout(1)).then(Checkout(2))
+    .then(Checkout(1)).then(Checkout(2)).then(Barrier(1)).then(Barrier(2))
     .then(Prepare(1)).then(Prepare(2)).then(Start(1)).then(Start(2))
     .expect(runs.get(1).p == 4 and runs.get(2).p == 4 and Safety)
     .then(MainExit(1, 0)).then(StopOwner(1, 1)).then(Collect(1))
     .expect(runs.get(2).p == 4 and observed.get(1) == 0 and Safety)
   run same_checkout_excludes_sync = initFor(1).then(Register(1)).then(Register(2))
-    .then(Barrier(1)).then(Barrier(2)).then(Checkout(1)).then(Prepare(1)).then(Start(1))
+    .then(Checkout(1)).then(Barrier(1)).then(Prepare(1)).then(Start(1))
     .expect(not(canCheckout(2)) and not(canSync(1)) and Safety)
-    .then(MainExit(1, 0)).then(StopOwner(1, 1)).then(Checkout(2)).expect(Safety)
-  run controller_eof_before_start = initFor(2).then(Register(1)).then(Barrier(1))
-    .then(Checkout(1)).then(Prepare(1)).then(LoseController(1)).then(StopOwner(1, 1)).then(Collect(1))
+    .then(MainExit(1, 0)).then(StopOwner(1, 1)).then(Checkout(2)).then(Barrier(2)).expect(Safety)
+  run controller_eof_before_start = initFor(2).then(Register(1)).then(Checkout(1))
+    .then(Barrier(1)).then(Prepare(1)).then(LoseController(1)).then(StopOwner(1, 1)).then(Collect(1))
     .expect(observed.get(1) == 75 and runs.get(1).starts == 0 and Safety)
-  run controller_loss_after_start = initFor(2).then(Register(1)).then(Barrier(1)).then(Checkout(1))
+  run controller_loss_after_start = initFor(2).then(Register(1)).then(Checkout(1)).then(Barrier(1))
     .then(Prepare(1)).then(Start(1)).then(LoseController(1)).expect(runs.get(1).p == 4)
     .then(MainExit(1, 255)).then(StopOwner(1, 1)).then(Collect(1))
     .expect(observed.get(1) == 255 and Safety)
-  run supervisor_loss_is_not_a_result = initFor(2).then(Register(1)).then(Barrier(1)).then(Checkout(1))
+  run supervisor_loss_is_not_a_result = initFor(2).then(Register(1)).then(Checkout(1)).then(Barrier(1))
     .then(Prepare(1)).then(Start(1)).then(SupervisorLost(1)).then(StopOwner(1, 1)).then(Collect(1))
     .expect(observed.get(1) == 70 and Safety)
-  run cleanup_failure_keeps_command = initFor(2).then(Register(1)).then(Barrier(1)).then(Checkout(1))
+  run cleanup_failure_keeps_command = initFor(2).then(Register(1)).then(Checkout(1)).then(Barrier(1))
     .then(Prepare(1)).then(Start(1)).then(MainExit(1, 0)).then(StopOwner(1, 2)).then(Collect(1))
     .expect(observed.get(1) == 74 and runs.get(1).term == 0 and runs.get(1).roots and Safety)
-  run missing_completion_refuses = initFor(2).then(Register(1)).then(Barrier(1)).then(Checkout(1))
+  run missing_completion_refuses = initFor(2).then(Register(1)).then(Checkout(1)).then(Barrier(1))
     .then(Prepare(1)).then(Start(1)).then(MainExit(1, 0)).then(StopOwner(1, 3)).then(Collect(1))
     .expect(observed.get(1) == 74 and not(runs.get(1).roots) and Safety)
-  run maintenance_waits_for_stop = initFor(2).then(Register(1)).then(Barrier(1)).then(Checkout(1))
+  run maintenance_waits_for_stop = initFor(2).then(Register(1)).then(Checkout(1)).then(Barrier(1))
     .then(Prepare(1)).then(Start(1)).then(MainExit(1, 0)).then(Maintain(1))
     .expect(not(canMaintenanceBegin) and Safety)
     .then(StopOwner(1, 1)).then(Maintain(2)).then(Maintain(3)).expect(Safety)
-  run no_sync_mismatch_refuses = initFor(2).then(Sync(1)).then(Register(1)).then(Barrier(1))
-    .then(Checkout(1)).then(NoSyncRefusal(1)).then(StopOwner(1, 1)).then(Collect(1))
+  run no_sync_mismatch_refuses = initFor(2).then(Sync(1)).then(Register(1)).then(Checkout(1))
+    .then(Barrier(1)).then(NoSyncRefusal(1)).then(StopOwner(1, 1)).then(Collect(1))
     .expect(observed.get(1) == 78 and Safety)
-  run admission_timeout = initFor(2).then(Register(1)).then(Barrier(1))
+  run admission_timeout = initFor(2).then(Register(1)).then(Checkout(1))
     .then(AdmissionTimeout(1)).then(StopOwner(1, 1)).then(Collect(1))
     .expect(observed.get(1) == 75 and runs.get(1).starts == 0 and Safety)
-  run preflight_aborts_before_start = initFor(2).then(Register(1)).then(Barrier(1)).then(Checkout(1))
+  run preflight_aborts_before_start = initFor(2).then(Register(1)).then(Checkout(1)).then(Barrier(1))
     .then(AbortPreparation(1, 78)).then(StopOwner(1, 1)).then(Collect(1))
     .expect(observed.get(1) == 78 and runs.get(1).starts == 0 and Safety)
-  run missing_rsync_aborts_before_start = initFor(2).then(Register(1)).then(Barrier(1)).then(Checkout(1))
+  run missing_rsync_aborts_before_start = initFor(2).then(Register(1)).then(Checkout(1)).then(Barrier(1))
     .then(AbortPreparation(1, 75)).then(StopOwner(1, 1)).then(Collect(1))
     .expect(observed.get(1) == 75 and runs.get(1).starts == 0 and Safety)
-  run repeat_collection_agrees = initFor(2).then(Register(1)).then(Barrier(1)).then(Checkout(1))
+  run repeat_collection_agrees = initFor(2).then(Register(1)).then(Checkout(1)).then(Barrier(1))
     .then(Prepare(1)).then(Start(1)).then(MainExit(1, 255)).then(StopOwner(1, 1))
     .then(Collect(1)).expect(observed.get(1) == 255).then(Collect(1))
     .expect(observed.get(1) == 255 and Safety)

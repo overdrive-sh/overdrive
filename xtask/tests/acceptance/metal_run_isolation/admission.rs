@@ -385,13 +385,8 @@ fn exclusive_admission_waits_only_for_unfinished_ordinary_units() {
     let unfinished = format!("{:024x}", 0x2001);
     let directory = fixture.retained(&unfinished, 2, None, None);
     fs::remove_file(directory.join("output.log")).expect("unfinished run has no log yet");
-    let mut blocked = Durable::spawn(
-        &fixture,
-        RUN_B,
-        "tree-b",
-        "exclusive",
-        "printf forbidden > must-not-run",
-    );
+    let mut blocked =
+        Durable::spawn(&fixture, RUN_B, "tree-b", "exclusive", "printf forbidden > must-not-run");
     blocked.terminal();
     let terminal = fields(&blocked.directory.join("terminal.v1"));
     assert_eq!(terminal["error"], "maintenance_timeout");
