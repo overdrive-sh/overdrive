@@ -18,7 +18,7 @@ The accepted private E08 support was revalidated through the default-feature pro
 
 The replacement independently reran RED from the rebased HEAD. In isolated worktree /private/tmp/step-05-07-red-rebased-20261112, the active D15 parser property and its test-placement entry were overlaid while the production parser remained at HEAD. Metal run 0f9e3f9e7f0253e49ba986ed failed for the expected semantic assertion: the parser produced Tcp { host: "0.0.0.0", port: 1 } where the property required GuestListeners. This replacement recorded RED FAIL at 2026-11-12T22:15:12Z.
 
-GREEN passed on the rebased implementation. This replacement recorded GREEN PASS at 2026-11-12T23:33:45Z. DES COMMIT is recorded by the commit helper after staging this artifact and the step-owned files. No mutation test was run; the single wave gate remains after all step reviews.
+GREEN passed on the rebased implementation. This replacement recorded GREEN PASS at 2026-11-12T23:33:45Z. Implementation commit 229edec40ad544fce501823888b49cfe2c1b92db contains the step-owned changes and this verification record. After it passed, this replacement recorded DES COMMIT PASS at 2026-11-12T23:43:17Z; the follow-up record commit stores that event. No mutation test was run; the single wave gate remains after all step reviews.
 
 ## Verification
 
