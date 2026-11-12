@@ -395,6 +395,8 @@ struct World {
     expected: [BTreeMap<String, String>; 2],
     // A single actual driving-port return, consumed by this step's comparison.
     collector_return: Option<(i64, Output)>,
+    // Source-marker transfers issued so far; gives each transfer a distinct mtime.
+    transfers: std::cell::Cell<u64>,
 }
 impl World {
     fn new(second_tree: i64) -> Result<Self> {
@@ -442,6 +444,7 @@ impl World {
             maintenance: None,
             expected,
             collector_return: None,
+            transfers: std::cell::Cell::new(0),
         })
     }
     fn unit(&self, actor: i64) -> Result<&NativeUnit> {
@@ -508,7 +511,17 @@ impl World {
     }
     fn source_transfer(&self, tree: i64, revision: u8, under_owned_preparation: bool) -> Result {
         let index = usize::try_from(tree - 1)?;
-        fs::write(self.locals[index].join("source-marker"), format!("revision{revision}\n"))?;
+        let marker = self.locals[index].join("source-marker");
+        fs::write(&marker, format!("revision{revision}\n"))?;
+        // The transfer adapter's rsync quick check treats equal size and equal
+        // whole-second mtime as unchanged, and the two revision markers have the
+        // same size. Give every transfer a distinct mtime so a revision flip
+        // within one second is still transferred.
+        let sequence = self.transfers.get() + 1;
+        self.transfers.set(sequence);
+        fs::File::options().write(true).open(&marker)?.set_modified(
+            std::time::UNIX_EPOCH + Duration::from_secs(1_000_000_000 + sequence),
+        )?;
         let mut command = self.fixture.bootstrap(&self.locals[index], &["--sync-only"]);
         // The same trusted controller already owns the durable checkout lock.
         // Invoke the real transfer adapter, not a second source implementation;
@@ -724,9 +737,13 @@ impl World {
     }
     fn collect(&mut self, actor: i64) -> Result {
         let id = self.unit(actor)?.id.clone();
-        let before = snapshot(&self.fixture.runs);
+        // Read-only is a property of the collected owner's retained record. Other
+        // live owners (a running maintainer or a second invocation) keep
+        // updating their own records concurrently and are not the collector's.
+        let retained = self.fixture.runs.join(&id);
+        let before = snapshot(&retained);
         let output = self.fixture.collect(&id).output()?;
-        if snapshot(&self.fixture.runs) != before {
+        if snapshot(&retained) != before {
             return Err(failed("collector rewrote retained owner state").into());
         }
         self.collector_return = Some((actor, output));

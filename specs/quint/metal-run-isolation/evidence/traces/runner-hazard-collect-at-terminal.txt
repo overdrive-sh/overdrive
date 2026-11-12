@@ -3,8 +3,8 @@
 State 1
   observed = <<-2, -2>>
   source_revision = <<0, 0>>
-  second_tree = 1
-  conf_step = [tag |-> "init", value |-> [value |-> 1, actor |-> 0]]
+  second_tree = 2
+  conf_step = [tag |-> "init", value |-> [value |-> 2, actor |-> 0]]
   maintenance = 0
   runs = << [ p |-> 0, ctl |-> TRUE, checked |-> FALSE, ever |-> FALSE, starts |-> 0, term |-> -1, desc |-> FALSE, roots |-> FALSE, receipt |-> 0 ], [ p |-> 0, ctl |-> TRUE, checked |-> FALSE, ever |-> FALSE, starts |-> 0, term |-> -1, desc |-> FALSE, roots |-> FALSE, receipt |-> 0 ] >>
 

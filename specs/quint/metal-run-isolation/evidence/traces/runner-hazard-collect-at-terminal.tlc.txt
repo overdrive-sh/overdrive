@@ -1,8 +1,8 @@
 State 1: <Initial predicate>
 /\ runner_bugCollectAtTerminal_runner_protocol_observed = <<-2, -2>>
 /\ runner_bugCollectAtTerminal_runner_protocol_source_revision = <<0, 0>>
-/\ runner_bugCollectAtTerminal_runner_protocol_second_tree = 1
-/\ runner_bugCollectAtTerminal_runner_protocol_conf_step = [tag |-> "init", value |-> [value |-> 1, actor |-> 0]]
+/\ runner_bugCollectAtTerminal_runner_protocol_second_tree = 2
+/\ runner_bugCollectAtTerminal_runner_protocol_conf_step = [tag |-> "init", value |-> [value |-> 2, actor |-> 0]]
 /\ runner_bugCollectAtTerminal_runner_protocol_maintenance = 0
 /\ runner_bugCollectAtTerminal_runner_protocol_runs = << [ p |-> 0,
      ctl |-> TRUE,
@@ -26,8 +26,8 @@ State 1: <Initial predicate>
 State 2: <runner_bugCollectAtTerminal_runner_protocol_Register line 263, col 3 to line 271, col 6 of module runner_bugCollectAtTerminal>
 /\ runner_bugCollectAtTerminal_runner_protocol_observed = <<-2, -2>>
 /\ runner_bugCollectAtTerminal_runner_protocol_source_revision = <<0, 0>>
-/\ runner_bugCollectAtTerminal_runner_protocol_second_tree = 1
-/\ runner_bugCollectAtTerminal_runner_protocol_conf_step = [tag |-> "init", value |-> [value |-> 1, actor |-> 0]]
+/\ runner_bugCollectAtTerminal_runner_protocol_second_tree = 2
+/\ runner_bugCollectAtTerminal_runner_protocol_conf_step = [tag |-> "init", value |-> [value |-> 2, actor |-> 0]]
 /\ runner_bugCollectAtTerminal_runner_protocol_maintenance = 0
 /\ runner_bugCollectAtTerminal_runner_protocol_runs = << [ p |-> 1,
      ctl |-> TRUE,
@@ -48,11 +48,11 @@ State 2: <runner_bugCollectAtTerminal_runner_protocol_Register line 263, col 3 t
      roots |-> FALSE,
      receipt |-> 0 ] >>
 
-State 3: <runner_bugCollectAtTerminal_runner_protocol_Checkout line 694, col 3 to line 701, col 21 of module runner_bugCollectAtTerminal>
+State 3: <runner_bugCollectAtTerminal_runner_protocol_Checkout line 696, col 3 to line 703, col 21 of module runner_bugCollectAtTerminal>
 /\ runner_bugCollectAtTerminal_runner_protocol_observed = <<-2, -2>>
 /\ runner_bugCollectAtTerminal_runner_protocol_source_revision = <<0, 0>>
-/\ runner_bugCollectAtTerminal_runner_protocol_second_tree = 1
-/\ runner_bugCollectAtTerminal_runner_protocol_conf_step = [tag |-> "init", value |-> [value |-> 1, actor |-> 0]]
+/\ runner_bugCollectAtTerminal_runner_protocol_second_tree = 2
+/\ runner_bugCollectAtTerminal_runner_protocol_conf_step = [tag |-> "init", value |-> [value |-> 2, actor |-> 0]]
 /\ runner_bugCollectAtTerminal_runner_protocol_maintenance = 0
 /\ runner_bugCollectAtTerminal_runner_protocol_runs = << [ p |-> 2,
      ctl |-> TRUE,
@@ -73,11 +73,11 @@ State 3: <runner_bugCollectAtTerminal_runner_protocol_Checkout line 694, col 3 t
      roots |-> FALSE,
      receipt |-> 0 ] >>
 
-State 4: <runner_bugCollectAtTerminal_runner_protocol_Barrier line 675, col 3 to line 688, col 20 of module runner_bugCollectAtTerminal>
+State 4: <runner_bugCollectAtTerminal_runner_protocol_Barrier line 677, col 3 to line 690, col 20 of module runner_bugCollectAtTerminal>
 /\ runner_bugCollectAtTerminal_runner_protocol_observed = <<-2, -2>>
 /\ runner_bugCollectAtTerminal_runner_protocol_source_revision = <<0, 0>>
-/\ runner_bugCollectAtTerminal_runner_protocol_second_tree = 1
-/\ runner_bugCollectAtTerminal_runner_protocol_conf_step = [tag |-> "init", value |-> [value |-> 1, actor |-> 0]]
+/\ runner_bugCollectAtTerminal_runner_protocol_second_tree = 2
+/\ runner_bugCollectAtTerminal_runner_protocol_conf_step = [tag |-> "init", value |-> [value |-> 2, actor |-> 0]]
 /\ runner_bugCollectAtTerminal_runner_protocol_maintenance = 0
 /\ runner_bugCollectAtTerminal_runner_protocol_runs = << [ p |-> 3,
      ctl |-> TRUE,
@@ -101,8 +101,8 @@ State 4: <runner_bugCollectAtTerminal_runner_protocol_Barrier line 675, col 3 to
 State 5: <runner_bugCollectAtTerminal_runner_protocol_Prepare line 310, col 3 to line 350, col 65 of module runner_bugCollectAtTerminal>
 /\ runner_bugCollectAtTerminal_runner_protocol_observed = <<-2, -2>>
 /\ runner_bugCollectAtTerminal_runner_protocol_source_revision = <<0, 0>>
-/\ runner_bugCollectAtTerminal_runner_protocol_second_tree = 1
-/\ runner_bugCollectAtTerminal_runner_protocol_conf_step = [tag |-> "init", value |-> [value |-> 1, actor |-> 0]]
+/\ runner_bugCollectAtTerminal_runner_protocol_second_tree = 2
+/\ runner_bugCollectAtTerminal_runner_protocol_conf_step = [tag |-> "init", value |-> [value |-> 2, actor |-> 0]]
 /\ runner_bugCollectAtTerminal_runner_protocol_maintenance = 0
 /\ runner_bugCollectAtTerminal_runner_protocol_runs = << [ p |-> 3,
      ctl |-> TRUE,
@@ -126,8 +126,8 @@ State 5: <runner_bugCollectAtTerminal_runner_protocol_Prepare line 310, col 3 to
 State 6: <runner_bugCollectAtTerminal_runner_protocol_Start line 356, col 3 to line 390, col 18 of module runner_bugCollectAtTerminal>
 /\ runner_bugCollectAtTerminal_runner_protocol_observed = <<-2, -2>>
 /\ runner_bugCollectAtTerminal_runner_protocol_source_revision = <<0, 0>>
-/\ runner_bugCollectAtTerminal_runner_protocol_second_tree = 1
-/\ runner_bugCollectAtTerminal_runner_protocol_conf_step = [tag |-> "init", value |-> [value |-> 1, actor |-> 0]]
+/\ runner_bugCollectAtTerminal_runner_protocol_second_tree = 2
+/\ runner_bugCollectAtTerminal_runner_protocol_conf_step = [tag |-> "init", value |-> [value |-> 2, actor |-> 0]]
 /\ runner_bugCollectAtTerminal_runner_protocol_maintenance = 0
 /\ runner_bugCollectAtTerminal_runner_protocol_runs = << [ p |-> 4,
      ctl |-> TRUE,
@@ -151,8 +151,8 @@ State 6: <runner_bugCollectAtTerminal_runner_protocol_Start line 356, col 3 to l
 State 7: <runner_bugCollectAtTerminal_runner_protocol_MainExit line 482, col 3 to line 498, col 72 of module runner_bugCollectAtTerminal>
 /\ runner_bugCollectAtTerminal_runner_protocol_observed = <<-2, -2>>
 /\ runner_bugCollectAtTerminal_runner_protocol_source_revision = <<0, 0>>
-/\ runner_bugCollectAtTerminal_runner_protocol_second_tree = 1
-/\ runner_bugCollectAtTerminal_runner_protocol_conf_step = [tag |-> "init", value |-> [value |-> 1, actor |-> 0]]
+/\ runner_bugCollectAtTerminal_runner_protocol_second_tree = 2
+/\ runner_bugCollectAtTerminal_runner_protocol_conf_step = [tag |-> "init", value |-> [value |-> 2, actor |-> 0]]
 /\ runner_bugCollectAtTerminal_runner_protocol_maintenance = 0
 /\ runner_bugCollectAtTerminal_runner_protocol_runs = << [ p |-> 5,
      ctl |-> TRUE,
@@ -176,8 +176,8 @@ State 7: <runner_bugCollectAtTerminal_runner_protocol_MainExit line 482, col 3 t
 State 8: <runner_bugCollectAtTerminal_runner_protocol_Collect line 583, col 3 to line 616, col 65 of module runner_bugCollectAtTerminal>
 /\ runner_bugCollectAtTerminal_runner_protocol_observed = <<0, -2>>
 /\ runner_bugCollectAtTerminal_runner_protocol_source_revision = <<0, 0>>
-/\ runner_bugCollectAtTerminal_runner_protocol_second_tree = 1
-/\ runner_bugCollectAtTerminal_runner_protocol_conf_step = [tag |-> "init", value |-> [value |-> 1, actor |-> 0]]
+/\ runner_bugCollectAtTerminal_runner_protocol_second_tree = 2
+/\ runner_bugCollectAtTerminal_runner_protocol_conf_step = [tag |-> "init", value |-> [value |-> 2, actor |-> 0]]
 /\ runner_bugCollectAtTerminal_runner_protocol_maintenance = 0
 /\ runner_bugCollectAtTerminal_runner_protocol_runs = << [ p |-> 5,
      ctl |-> TRUE,

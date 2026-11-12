@@ -38,7 +38,12 @@ module runner_protocol {
     runs.get(r).p == 1,
     not(IDS.exists(a => a != r and checkout(a) and tree(a) == tree(r))),
   }
-  def canSync(c: int): bool = not(IDS.exists(a => checkout(a) and tree(a) == c))
+  // An exclusive maintainer holds the checkout lease of tree 1 for as long as it
+  // holds or waits on the barrier (LOCKORDER1), so a Sync of that checkout waits.
+  def canSync(c: int): bool = and {
+    not(IDS.exists(a => checkout(a) and tree(a) == c)),
+    not(c == 1 and Set(1, 2).contains(maintenance)),
+  }
   val canMaintenanceBegin = maintenance == 1 and not(IDS.exists(r => liveAdmitted(r)))
   def result(r: int): int = {
     val x = runs.get(r)

@@ -48,7 +48,7 @@ State 2: <runner_bugOrdinaryExclusive_runner_protocol_Register line 223, col 3 t
 /\ runner_bugOrdinaryExclusive_runner_protocol_observed = <<-2, -2>>
 /\ runner_bugOrdinaryExclusive_runner_protocol_conf_step = [tag |-> "init", value |-> [value |-> 2, actor |-> 0]]
 
-State 3: <runner_bugOrdinaryExclusive_runner_protocol_Checkout line 648, col 3 to line 655, col 21 of module runner_bugOrdinaryExclusive>
+State 3: <runner_bugOrdinaryExclusive_runner_protocol_Checkout line 650, col 3 to line 657, col 21 of module runner_bugOrdinaryExclusive>
 /\ runner_bugOrdinaryExclusive_runner_protocol_runs = << [ p |-> 2,
      ctl |-> TRUE,
      checked |-> FALSE,
@@ -73,7 +73,7 @@ State 3: <runner_bugOrdinaryExclusive_runner_protocol_Checkout line 648, col 3 t
 /\ runner_bugOrdinaryExclusive_runner_protocol_observed = <<-2, -2>>
 /\ runner_bugOrdinaryExclusive_runner_protocol_conf_step = [tag |-> "init", value |-> [value |-> 2, actor |-> 0]]
 
-State 4: <runner_bugOrdinaryExclusive_runner_protocol_Barrier line 629, col 3 to line 642, col 20 of module runner_bugOrdinaryExclusive>
+State 4: <runner_bugOrdinaryExclusive_runner_protocol_Barrier line 631, col 3 to line 644, col 20 of module runner_bugOrdinaryExclusive>
 /\ runner_bugOrdinaryExclusive_runner_protocol_runs = << [ p |-> 3,
      ctl |-> TRUE,
      checked |-> FALSE,
@@ -123,7 +123,7 @@ State 5: <runner_bugOrdinaryExclusive_runner_protocol_Register line 223, col 3 t
 /\ runner_bugOrdinaryExclusive_runner_protocol_observed = <<-2, -2>>
 /\ runner_bugOrdinaryExclusive_runner_protocol_conf_step = [tag |-> "init", value |-> [value |-> 2, actor |-> 0]]
 
-State 6: <runner_bugOrdinaryExclusive_runner_protocol_Checkout line 648, col 3 to line 655, col 21 of module runner_bugOrdinaryExclusive>
+State 6: <runner_bugOrdinaryExclusive_runner_protocol_Checkout line 650, col 3 to line 657, col 21 of module runner_bugOrdinaryExclusive>
 /\ runner_bugOrdinaryExclusive_runner_protocol_runs = << [ p |-> 3,
      ctl |-> TRUE,
      checked |-> FALSE,
