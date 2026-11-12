@@ -572,9 +572,21 @@ impl SimState {
         }
         sock.closed = true;
         sock.read_pending = None;
-        let (flow, outer, linger, stage, channel, kernel) =
-            (sock.flow, sock.outer, sock.linger, sock.stage, sock.channel, sock.kernel.clone());
-        if let Some(kernel) = &kernel {
+        let (flow, outer, linger, stage, channel, kernel, slot) = (
+            sock.flow,
+            sock.outer,
+            sock.linger,
+            sock.stage,
+            sock.channel,
+            sock.kernel.clone(),
+            sock.slot,
+        );
+        // A datagram V_g attached to its slot pair is owned by the kernel pair
+        // (`kernel_io` drops the owner's descriptor at `attach_slot`); the
+        // owner's close does not shut it. Its `{S, R}` is applied at slot-pair
+        // end ([`SimGuestOwnerIo::shut_ended_datagram_vsocks`], CONFALIGN-5).
+        let kernel_pair_owned = matches!(stage, Stage::Pair) && !outer && slot.is_some();
+        if !kernel_pair_owned && let Some(kernel) = &kernel {
             kernel.close_from_owner(reset || linger);
         }
         // The SimSocket is the QPROJ-8 arbiter; its first far-end event wins.
@@ -1464,10 +1476,35 @@ impl SimGuestOwnerIo {
     /// The V_g of `slot`'s current or most recently ended association (the
     /// host is its far peer; D-5 keeps the arbiter readable after close).
     pub(crate) fn slot_vsock(&self, slot: SocketAddrV4) -> Option<SimSocket> {
+        self.shut_ended_datagram_vsocks();
         let mut st = self.st();
         let rec = st.slot_mut(slot);
         let id = rec.vsock.or(rec.last_vsock)?;
         st.sockets.get(&id).and_then(|s| s.kernel.clone())
+    }
+
+    /// The kernel pair owns a datagram V_g after `attach_slot`, so V_g is shut
+    /// `{S, R}` when its slot pair ends (the forwarder drops its reference):
+    /// on a completed pair, an abort, a peer abort and the context's release
+    /// (CONFALIGN-5). The sim applies it when V_g's facts are read, from the
+    /// forwarder's own record of whether the pair is still live.
+    fn shut_ended_datagram_vsocks(&self) {
+        let candidates: Vec<(ForwardId, SimSocket)> = {
+            let st = self.st();
+            st.pairs
+                .iter()
+                .filter(|(_, pair)| pair.slot.is_some())
+                .filter_map(|(id, pair)| {
+                    let kernel = st.sockets.get(&pair.vsock?)?.kernel.clone()?;
+                    Some((*id, kernel))
+                })
+                .collect()
+        };
+        for (id, kernel) in candidates {
+            if self.forwarder_pair_state(id).is_none() {
+                kernel.close_from_owner(false);
+            }
+        }
     }
 
     /// The host sends one datagram frame toward the guest on `slot`'s attached

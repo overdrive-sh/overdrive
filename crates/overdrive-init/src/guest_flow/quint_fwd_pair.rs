@@ -219,6 +219,17 @@ fn pre() -> std::result::Result<Qualified, DriverError> {
         .ok_or_else(|| DriverError::Decode("pre-state (none stashed)".to_owned()))
 }
 
+/// The pre-state's `pr(s).<field>` string.
+fn pre_pr_str(s: &str, field: &str) -> std::result::Result<String, DriverError> {
+    let vars = pre()?;
+    let decode = || -> std::result::Result<String, ItfError> {
+        let prs = quint_itf::str_map(vars.var("pr")?, |x| Ok(x.clone()))?;
+        let pr = prs.get(s).ok_or_else(|| ItfError::MissingField(s.to_owned()))?;
+        quint_itf::string(quint_itf::field(pr, field)?)
+    };
+    decode().map_err(|e| DriverError::Decode(e.to_string()))
+}
+
 /// The pre-state's `dir(d).<field>` list of unit numbers.
 fn pre_dir_list(d: &str, field: &str) -> std::result::Result<Vec<i64>, DriverError> {
     let vars = pre()?;
@@ -519,7 +530,8 @@ impl FwdPairGuestDriver {
         let _paired = self.io.host_take_first(|m| *m == ControlMessage::Paired { flow });
         self.note_pair();
         if let Some(vsock) = self.vsock()
-            && vsock.received_shutdown() == Some(SimShutdown::Both)
+            && (vsock.received_shutdown() == Some(SimShutdown::Both)
+                || self.datagram_clean_end_with_nothing_queued(vsock.received_shutdown())?)
             && let Some(pair) = self.pair
         {
             let _ = self.io.run_forwarder_once(pair, self.vsock_side());
@@ -539,6 +551,15 @@ impl FwdPairGuestDriver {
         // `GuestAbort` over the already-ended guest pair is the no-op whose
         // state the comparison after this step verifies.
         if self.io.session_socket().is_none() {
+            return Ok(());
+        }
+        // The owner consumed the flow's record (`TakeEnd(g)`) and its
+        // descriptors' close is still a deferred dispatch of its own
+        // (`OwnerClose(g)`). The owner pops deferred closes before it reads
+        // the next control message, so a settled delivery here would run
+        // that close early; the abort of a flow that has left the owner's
+        // table is a no-op, so the message is left for `OwnerClose(g)`.
+        if pre_pr_str("g", "rec")? == "read" {
             return Ok(());
         }
         self.io.host_control(ControlMessage::Abort { flow });
@@ -598,6 +619,21 @@ impl FwdPairGuestDriver {
         self.settle();
     }
 
+    /// Datagram mode: a clean-class end (`0x2`) of V_g with no whole frame
+    /// left to send completes the pair when the forwarder's queued run
+    /// executes ("The peer's end with frames queued"). The model folds that
+    /// run into the callback (`markClean`, `dir(hg).q1` empty), so the driver
+    /// executes the run the callback queued; an end with frames queued is
+    /// left to the model's own `Hop1(hg)` runs.
+    fn datagram_clean_end_with_nothing_queued(
+        &self,
+        received: Option<SimShutdown>,
+    ) -> std::result::Result<bool, DriverError> {
+        Ok(self.mode == Mode::Dgram
+            && received == Some(SimShutdown::Send)
+            && pre_dir_list("hg", "q1")?.is_empty())
+    }
+
     fn vctl_hg(&self) -> std::result::Result<(), DriverError> {
         let flags = pre_ctl_head("hg")?;
         let vsock = self
@@ -616,7 +652,9 @@ impl FwdPairGuestDriver {
             vsock.peer_shutdown(SimShutdown::Send);
         }
         let context_open = self.io.forwarder_contexts().first().is_some_and(|context| context.open);
-        if callback_abort
+        let clean_end_completes = self.datagram_clean_end_with_nothing_queued(vsock.received_shutdown())?
+            && !flags.contains("R");
+        if (callback_abort || clean_end_completes)
             && context_open
             && let Some(pair) = self.pair
         {
