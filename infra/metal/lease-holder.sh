@@ -490,28 +490,35 @@ wait_for_admitted_ordinary_units() {
         run_id="${directory##*/}"
         valid_run_id "$run_id" || continue
         [ "$run_id" = "$current_run_id" ] && continue
+        # A run that has published its terminal record has finished; it can
+        # no longer be an admitted ordinary unit, and any process still
+        # exiting holds the shared barrier this caller has already won
+        # exclusively.  Records are retained indefinitely, so the wait must
+        # cost the number of unfinished runs, not the length of history:
+        # validating a record forks dozens of processes.
+        if [ -e "$directory/terminal.v1" ] || [ -L "$directory/terminal.v1" ]; then
+          continue
+        fi
         metadata="$directory/metadata.v2"
         phase="$directory/phase.v1"
         [ -e "$metadata" ] || [ -L "$metadata" ] || continue
         unit="overdrive-metal-run-${run_id}.service"
+        # A record whose unit is not alive (a holder that died before it
+        # could publish a terminal record) admits nothing, whatever it says.
+        unit_is_live "$unit" || continue
         if ! metadata_valid "$metadata" "$run_id" "$unit" || \
           [ "$METADATA_VERSION" -ne 2 ] || ! phase_valid "$phase" "$run_id"; then
-          unit_is_live "$unit" && return 2
-          continue
+          return 2
         fi
         execution_class="$(record_value "$metadata" 13)"
         [ "$execution_class" = ordinary ] || continue
         case "$(record_value "$phase" 3)" in
           preparing|running)
-            if unit_is_live "$unit"; then
-              pending=1
-              break
-            fi
+            pending=1
+            break
             ;;
           waiting_for_lease) ;;
-          *)
-            unit_is_live "$unit" && return 2
-            ;;
+          *) return 2 ;;
         esac
       done
     fi

@@ -333,3 +333,64 @@ fn exclusive_run_waiting_for_its_checkout_never_holds_the_maintenance_barrier() 
     first.terminal();
     drop(second);
 }
+
+/// CONTRACT_SHAPE: bounded-change (an exclusive admission pass costs the number
+/// of unfinished runs, not the number of retained records; the barrier is held
+/// only for that bounded pass).
+#[test]
+fn exclusive_admission_does_not_scale_with_retained_finished_runs() {
+    let fixture = Fixture::new();
+    for index in 0..400u32 {
+        let id = format!("{:024x}", 0x1000 + index);
+        fixture.retained(&id, 2, Some(("command", "0")), Some("complete"));
+    }
+    let mut exclusive = Durable::spawn_with_timeout(
+        &fixture,
+        RUN_A,
+        "some-tree",
+        "exclusive",
+        "printf forbidden > must-not-run",
+        "30",
+    );
+    // `wait_for` allows three seconds; a per-record validation pass over 400
+    // retained records takes far longer than that.
+    exclusive.preparing();
+    exclusive.send("ABORT");
+    exclusive.terminal();
+}
+
+/// CONTRACT_SHAPE: bounded-change (a finished run whose unit still reports
+/// active is not an admitted ordinary unit; an unfinished one still is).
+#[test]
+fn exclusive_admission_waits_only_for_unfinished_ordinary_units() {
+    let fixture = Fixture::new();
+    fs::write(fixture.temp.path().join("unit-state"), "active\n").expect("units report live");
+    let finished = format!("{:024x}", 0x2000);
+    fixture.retained(&finished, 2, Some(("command", "0")), Some("complete"));
+    let mut exclusive = Durable::spawn_with_timeout(
+        &fixture,
+        RUN_A,
+        "tree-a",
+        "exclusive",
+        "printf forbidden > must-not-run",
+        "30",
+    );
+    exclusive.preparing();
+    exclusive.send("ABORT");
+    exclusive.terminal();
+    drop(exclusive);
+
+    let unfinished = format!("{:024x}", 0x2001);
+    let directory = fixture.retained(&unfinished, 2, None, None);
+    fs::remove_file(directory.join("output.log")).expect("unfinished run has no log yet");
+    let mut blocked = Durable::spawn(
+        &fixture,
+        RUN_B,
+        "tree-b",
+        "exclusive",
+        "printf forbidden > must-not-run",
+    );
+    blocked.terminal();
+    let terminal = fields(&blocked.directory.join("terminal.v1"));
+    assert_eq!(terminal["error"], "maintenance_timeout");
+}

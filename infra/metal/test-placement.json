@@ -14799,6 +14799,15 @@
       "acceptance::metal_run_isolation::admission::sad_waiting_for_both_locks_cannot_restart_the_existing_admission_budget": {
         "kind": "host-pure"
       },
+      "acceptance::metal_run_isolation::admission::exclusive_run_waiting_for_its_checkout_never_holds_the_maintenance_barrier": {
+        "kind": "host-pure"
+      },
+      "acceptance::metal_run_isolation::admission::exclusive_admission_does_not_scale_with_retained_finished_runs": {
+        "kind": "host-pure"
+      },
+      "acceptance::metal_run_isolation::admission::exclusive_admission_waits_only_for_unfinished_ordinary_units": {
+        "kind": "host-pure"
+      },
       "acceptance::metal_run_isolation::collection::retained_v1_and_v2_commands_return_exact_status_on_read_only_repeat_collection": {
         "kind": "host-pure"
       },
