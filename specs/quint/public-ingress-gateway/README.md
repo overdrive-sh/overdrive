@@ -16,7 +16,7 @@ run is listed in `checks.toml` (`backend = "evaluator"`). Each design decision h
 Run (metal host, never a local build): `cargo xtask metal run -- cargo xtask quint typecheck`, then
 `cargo xtask metal run -- cargo xtask quint check --subsystem specs/quint/public-ingress-gateway [--name <check>] [--ci]`
 (`--subsystem` also accepts the bare directory name `public-ingress-gateway`; a value containing `/` is taken as a path).
-Evidence of the last full run: `evidence/` (written only by `--record`; `cargo xtask quint verify-evidence --subsystem
+Evidence of the last recorded run: `evidence/` (written only by `--record`, which re-runs only stale checks unless given `--full`; `cargo xtask quint verify-evidence --subsystem
 public-ingress-gateway` fails when it no longer matches the specs).
 
 ## Modules, decisions, scenario -> named run

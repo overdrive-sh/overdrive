@@ -7,7 +7,7 @@ oracle for DISTILL `quint-connect` drivers (`.claude/rules/testing.md` § "Quint
 
 Run: `cargo xtask lima run -- cargo xtask quint typecheck`, then
 `cargo xtask lima run -- cargo xtask quint check --subsystem probe-count [--name <check>]`.
-Evidence: `evidence/summary.md` (written only by `--record`; `cargo xtask quint verify-evidence --subsystem probe-count`).
+Evidence: `evidence/summary.md` (written only by `--record`, which re-runs only stale checks unless given `--full`; `cargo xtask quint verify-evidence --subsystem probe-count`).
 
 ## Abstraction and rule
 

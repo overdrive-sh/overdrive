@@ -15,7 +15,7 @@ cargo xtask lima run -- cargo xtask quint check --subsystem tcp-capture-pending 
 ```
 
 Recorded evidence is in `evidence/summary.md`. It is written only by the
-runner's `--record` mode and checked with:
+runner's `--record` mode (incremental, `--full` re-runs every check) and checked with:
 
 ```text
 cargo xtask lima run -- cargo xtask quint verify-evidence --subsystem tcp-capture-pending

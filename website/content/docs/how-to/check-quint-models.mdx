@@ -78,7 +78,7 @@ cargo xtask lima run -- cargo xtask quint check \
 The runner admits checks only when their CPU and memory reservations fit.
 `--jobs` sets a concurrency ceiling, not a guarantee that every slot stays busy.
 Full runs can be expensive. Use a named check while iterating on a rule, then
-run the full affected subsystem before replacing its recorded evidence.
+run the full affected subsystem before recording its evidence.
 
 The same command accepts `--subsystem tcp-capture-pending`. To select only
 manifest entries marked `ci = true`, use:
@@ -107,19 +107,40 @@ and assumptions before deciding whether the specification, driver, or production
 contract needs correction. Do not treat a simulated kernel effect as proof that
 the real kernel does it.
 
-## Record a complete subsystem
+## Record a subsystem's evidence
 
-After a full check is warranted, record it with:
+When the specs are final, record the subsystem's evidence with:
 
 ```bash
 cargo xtask lima run -- cargo xtask quint check \
   --subsystem guest-flow-owner --jobs 3 --record
 ```
 
-`--record` requires one `--subsystem` and refuses `--name` or `--ci`. It replaces
-that subsystem's `evidence/` using a staged swap so the directory does not mix
-runs. Recording preserves results even when they miss expectations. It does not
-turn a failed run into acceptance evidence.
+`--record` requires one `--subsystem` and refuses `--name` or `--ci`. Recording
+is incremental. Each recorded check carries an input key, a hash of the Quint
+and Java versions, the check's `checks.toml` entry (without `ci`), and its spec
+together with every spec it imports, directly or transitively. The runner
+re-runs only the checks whose key changed, plus any check with no usable
+recorded result, and carries the other recorded verdicts and traces over
+unchanged. Editing a spec re-runs the checks on that spec and on specs that
+import it. Editing a file no check loads re-runs nothing. A change of Quint or
+Java version re-runs every check. A check removed from `checks.toml` is dropped
+from the evidence, and a new check runs.
+
+To re-run every check regardless of the recorded evidence, add `--full`:
+
+```bash
+cargo xtask lima run -- cargo xtask quint check \
+  --subsystem guest-flow-owner --jobs 3 --record --full
+```
+
+If the Apalache version differs from the one that produced the carried-over
+results, the runner stops without writing and tells you to re-record with
+`--full`.
+
+The runner swaps the new `evidence/` in as a whole, so the directory does not
+mix runs. Recording preserves results even when they miss expectations. It does
+not turn a failed run into acceptance evidence.
 
 The directory contains `summary.json`, `summary.md`, counterexample traces, and
 logs for failed checks. Full logs for passing checks remain under `target/`.
@@ -134,9 +155,12 @@ cargo xtask lima run -- cargo xtask quint verify-evidence \
   --subsystem guest-flow-owner
 ```
 
-Verification recomputes model and manifest input hashes and checks that recorded
-outcomes match expectations and required counterexample traces exist. A stale
-record fails. This command checks the retained record rather than searching the
+Verification recomputes each check's input key and checks that recorded
+outcomes match expectations and required counterexample traces exist. A check
+whose spec, import, or `checks.toml` entry changed since it was recorded fails
+as stale. Evidence recorded without per-check keys is verified by comparing the
+hashes of all inputs instead. Incremental recording does not weaken this
+command, which remains the authority on whether the record is current. This command checks the retained record rather than searching the
 state space again. Omit `--subsystem` to verify every discovered subsystem.
 
 Keep the evidence boundary explicit in reviews. Record the selected model

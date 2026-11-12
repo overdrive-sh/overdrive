@@ -16,7 +16,7 @@ by proptest S-46 and the composed S-47; `restart_authority` and `liveness_gate` 
 
 Run (the user's directive: metal, never Lima): `cargo xtask metal run -- cargo xtask quint typecheck`, then
 `cargo xtask metal run -- cargo xtask quint check --subsystem service-allocation-readiness-and-ending [--name <check>]`.
-Evidence: `evidence/summary.md` (written only by `--record`; `cargo xtask quint verify-evidence --subsystem service-allocation-readiness-and-ending`).
+Evidence: `evidence/summary.md` (written only by `--record`, which re-runs only stale checks unless given `--full`; `cargo xtask quint verify-evidence --subsystem service-allocation-readiness-and-ending`).
 
 ## Modules (each is a state machine with `init`, `step` and named runs)
 

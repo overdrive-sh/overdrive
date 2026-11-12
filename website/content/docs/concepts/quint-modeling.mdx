@@ -108,10 +108,14 @@ of implementation from specification.
 
 ## Evidence identifies exactly what was checked
 
-A full `--record` run writes a subsystem's `evidence/summary.json` and Markdown
+A `--record` run writes a subsystem's `evidence/summary.json` and Markdown
 summary, with tool versions, repository identity, input hashes, checks, outcomes,
-and counterexample references. `verify-evidence` checks input freshness,
-expected outcomes, and required counterexample traces. It does not rerun the
+and counterexample references. Recording is incremental. Each check carries an
+input key built from the tool versions, its `checks.toml` entry, and its spec
+with the specs it imports, so a run re-checks only what changed and carries the
+other verdicts over. `--record --full` re-checks everything.
+`verify-evidence` checks each check's input freshness, expected outcomes, and
+required counterexample traces. It does not rerun the
 model checker or inspect the Rust binary.
 
 The retained records contain 279 guest-flow-owner checks, 31 probe-count checks,

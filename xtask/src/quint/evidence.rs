@@ -1,10 +1,14 @@
-//! `specs/quint/<subsystem>/evidence/` — the recorded evidence of the latest
-//! full run of a subsystem's checks against its current specs.
+//! `specs/quint/<subsystem>/evidence/` — the recorded evidence of a
+//! subsystem's checks against its current specs.
 //!
 //! `cargo xtask quint check --subsystem <dir> --record` is the only writer.
-//! At the end of a completed run (whatever the verdicts) it builds the new
-//! evidence in a hidden staging directory beside `evidence/` and swaps it in,
-//! so `evidence/` never holds a mix of two runs. A counterexample whose trace
+//! It is incremental: each recorded check carries an *input key* (see
+//! [`check_input_key`]) and a recording run re-runs only the checks whose key
+//! changed (or that have no usable recorded result), carrying every other
+//! check's recorded verdict and trace over unchanged. `--full` re-runs every
+//! check. At the end of a completed run (whatever the verdicts) it builds the
+//! new evidence in a hidden staging directory beside `evidence/` and swaps it
+//! in, so `evidence/` is never half-written. A counterexample whose trace
 //! cannot be read, parsed or staged does not stop the recording: the check is
 //! recorded with its outcome and a typed [`TraceRecordError`], its full log
 //! goes to `failures/`, and every other check's evidence is still swapped in.
@@ -28,9 +32,11 @@
 //! Full logs of passing checks stay under `target/quint/` only. Earlier runs
 //! live in git history, not beside the current one.
 //!
-//! `cargo xtask quint verify-evidence` recomputes the input hashes and fails
-//! when `summary.json` is stale, any recorded outcome misses its `expect`, or
-//! a counterexample was recorded without its trace.
+//! `cargo xtask quint verify-evidence` recomputes every check's input key and
+//! fails when a recorded check's key is stale, any recorded outcome misses its
+//! `expect`, or a counterexample was recorded without its trace. Evidence
+//! whose checks carry no input key (recorded before incremental recording) is
+//! verified the old way: every input hash must match.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
@@ -45,7 +51,7 @@ use sha2::{Digest, Sha256};
 use super::trace;
 use super::{
     Backend, CHECKS_FILE, Check, CheckFilter, CheckRecord, Expect, Job, Outcome, Property,
-    collect_qnt, judge,
+    collect_qnt, judge, reachable_specs, spec_index,
 };
 
 /// Evidence directory name inside a subsystem directory.
@@ -64,14 +70,15 @@ pub enum RecordArgsError {
     #[error("--record needs --subsystem <dir>: evidence belongs to exactly one subsystem")]
     NoSubsystem,
     /// `--name` given.
-    #[error("--record records a full run of the subsystem; it cannot be combined with --name")]
+    #[error("--record records the whole subsystem; it cannot be combined with --name")]
     Name,
     /// `--ci` given.
-    #[error("--record records a full run of the subsystem; it cannot be combined with --ci")]
+    #[error("--record records the whole subsystem; it cannot be combined with --ci")]
     Ci,
 }
 
-/// `--record` is allowed only for a full run of one subsystem.
+/// `--record` is allowed only for a full selection of one subsystem (the run
+/// itself re-runs only the stale checks of it).
 pub const fn validate_record_args(filter: &CheckFilter) -> Result<(), RecordArgsError> {
     if filter.subsystem.is_none() {
         Err(RecordArgsError::NoSubsystem)
@@ -187,6 +194,15 @@ pub struct CheckEvidence {
     /// `condensed` are then `None`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trace_error: Option<TraceRecordError>,
+    /// The check's input key when it was run ([`check_input_key`]). Evidence
+    /// recorded before incremental recording has none, and is then verified
+    /// against the global input hashes and re-run by the next `--record`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_key: Option<String>,
+    /// The run that produced this record. Differs from the summary's
+    /// `run_id` for a check carried over unchanged from an earlier recording.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<String>,
 }
 
 /// Why a counterexample's trace was not recorded.
@@ -241,6 +257,284 @@ pub fn hash_inputs(dir: &Path) -> Result<BTreeMap<String, String>> {
         out.insert(key, hex::encode(Sha256::digest(&bytes)));
     }
     Ok(out)
+}
+
+/// Index every `.qnt` file under `dir`.
+///
+/// Same selection and keys as [`hash_inputs`]. A file the lexer cannot index is left out: a check whose
+/// import closure reaches it then has no input key and counts as stale.
+pub fn index_specs(dir: &Path) -> Result<BTreeMap<String, spec_index::QntIndex>> {
+    let mut paths = Vec::new();
+    collect_qnt(dir, &mut paths)?;
+    let mut out = BTreeMap::new();
+    for path in paths {
+        let rel = path.strip_prefix(dir).wrap_err("spec outside the subsystem dir")?;
+        let key = rel
+            .components()
+            .map(|c| c.as_os_str().to_string_lossy().into_owned())
+            .collect::<Vec<_>>()
+            .join("/");
+        let body =
+            fs::read_to_string(&path).wrap_err_with(|| format!("reading {}", path.display()))?;
+        if let Ok(idx) = spec_index::index(&body) {
+            out.insert(key, idx);
+        }
+    }
+    Ok(out)
+}
+
+/// The tool versions whose change invalidates every recorded check.
+///
+/// Quint (which pins the TLC and Apalache it downloads) and the JVM they run on.
+/// The kernel is recorded for provenance but does not invalidate anything.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolKey {
+    /// `quint --version`.
+    pub quint: String,
+    /// First line of `java -version`.
+    pub java: String,
+}
+
+impl From<&Tools> for ToolKey {
+    fn from(t: &Tools) -> Self {
+        Self { quint: t.quint.clone(), java: t.java.clone() }
+    }
+}
+
+/// Why a check has no input key.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum KeyError {
+    /// A file in the check's import closure is not an input hashed by
+    /// [`hash_inputs`] (missing, or under a hidden or `_`-prefixed directory).
+    #[error("`{file}` (loaded by the check's spec) is not a hashed input")]
+    Unhashed {
+        /// Path relative to the subsystem directory.
+        file: String,
+    },
+    /// A file in the check's import closure could not be indexed, so its own
+    /// imports are unknown.
+    #[error("`{file}` (loaded by the check's spec) cannot be indexed")]
+    Unindexed {
+        /// Path relative to the subsystem directory.
+        file: String,
+    },
+}
+
+/// The input key of one check: sha256 (hex) over everything that can change
+/// its verdict —
+///
+/// - the tool versions ([`ToolKey`]);
+/// - the check's own `checks.toml` entry: name, spec, main, property,
+///   backend, `max_steps`, `expect`, `timeout_secs`, `heap_mb` and `workers`
+///   (`ci` only selects checks, it does not change a verdict);
+/// - the sha256 of its spec and of every file the spec imports, transitively
+///   (`hashes` from [`hash_inputs`], `files` from [`index_specs`]).
+///
+/// Other `.qnt` files of the subsystem and the other `[[check]]` entries are
+/// not part of the key. Fails closed: a closure file with no hash or no index
+/// is an error, never silently ignored.
+pub fn check_input_key(
+    check: &Check,
+    hashes: &BTreeMap<String, String>,
+    files: &BTreeMap<String, spec_index::QntIndex>,
+    tools: &ToolKey,
+) -> Result<String, KeyError> {
+    let spec = check.spec.to_string_lossy().replace('\\', "/");
+    let mut h = Sha256::new();
+    let mut line = |s: String| {
+        h.update(s.as_bytes());
+        h.update(b"\n");
+    };
+    line("quint-check-input-key v1".to_owned());
+    line(format!("tool quint {}", tools.quint));
+    line(format!("tool java {}", tools.java));
+    line(format!("name {}", check.name));
+    line(format!("spec {spec}"));
+    line(format!("main {}", check.main));
+    line(match &check.property {
+        Property::Invariant(p) => format!("invariant {p}"),
+        Property::Temporal(p) => format!("temporal {p}"),
+        Property::Run(p) => format!("run {p}"),
+    });
+    line(format!("backend {}", check.backend.as_str()));
+    line(format!("max_steps {:?}", check.max_steps));
+    line(format!("expect {}", check.expect.as_str()));
+    line(format!("timeout_secs {:?}", check.timeout_secs));
+    line(format!("heap_mb {:?}", check.heap_mb));
+    line(format!("workers {:?}", check.workers));
+    for file in reachable_specs(files, &spec) {
+        let sha = hashes.get(&file).ok_or_else(|| KeyError::Unhashed { file: file.clone() })?;
+        if !files.contains_key(&file) {
+            return Err(KeyError::Unindexed { file });
+        }
+        line(format!("file {file} {sha}"));
+    }
+    Ok(hex::encode(h.finalize()))
+}
+
+/// [`check_input_key`] of every check, by name.
+pub fn check_keys(
+    checks: &[Check],
+    hashes: &BTreeMap<String, String>,
+    files: &BTreeMap<String, spec_index::QntIndex>,
+    tools: &ToolKey,
+) -> BTreeMap<String, Result<String, KeyError>> {
+    checks.iter().map(|c| (c.name.clone(), check_input_key(c, hashes, files, tools))).collect()
+}
+
+/// The recorded evidence a recording run starts from.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Prior {
+    /// No `evidence/summary.json`.
+    Absent,
+    /// `summary.json` exists but cannot be used (undecodable).
+    Unreadable(String),
+    /// A decoded summary and the files under `evidence/` (relative).
+    Found(Box<EvidenceSummary>, BTreeSet<String>),
+}
+
+/// Read the recorded evidence of `dir`. An I/O error other than a missing
+/// `summary.json` is an `Err`; an undecodable summary is [`Prior::Unreadable`].
+pub fn load_prior(dir: &Path) -> Result<Prior> {
+    let evidence = dir.join(EVIDENCE_DIR);
+    let path = evidence.join(SUMMARY_JSON);
+    let body = match fs::read_to_string(&path) {
+        Ok(b) => b,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Prior::Absent),
+        Err(e) => return Err(eyre!("reading {}: {e}", path.display())),
+    };
+    match serde_json::from_str::<EvidenceSummary>(&body) {
+        Ok(s) => Ok(Prior::Found(Box::new(s), list_files(&evidence)?)),
+        Err(e) => Ok(Prior::Unreadable(e.to_string())),
+    }
+}
+
+/// What a recording run does with each check of the manifest.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RecordPlan {
+    /// Manifest order of every check.
+    pub order: Vec<String>,
+    /// Checks whose recorded result stands, carried over unchanged.
+    pub reuse: BTreeMap<String, CheckEvidence>,
+    /// Checks to run, each with the reason (in manifest order).
+    pub rerun: Vec<(String, String)>,
+    /// Current input key of every check that has one.
+    pub keys: BTreeMap<String, String>,
+    /// Apalache version of the prior evidence (checked against the run's own
+    /// when some results are reused).
+    pub prior_apalache: Option<String>,
+}
+
+impl RecordPlan {
+    /// Whether `name` is to be run.
+    pub fn runs(&self, name: &str) -> bool {
+        self.rerun.iter().any(|(n, _)| n == name)
+    }
+}
+
+/// Decide which checks a recording run must run.
+///
+/// A check's recorded result is reused only when every one of these holds,
+/// and re-run otherwise (fail closed):
+///
+/// - the prior summary decodes and uses [`SCHEMA_VERSION`], and was recorded
+///   under the current tool versions (any tool change re-runs everything);
+/// - the check has a record carrying an input key equal to its current one;
+/// - the record's outcome meets its `expect`, has no trace error, and every
+///   evidence file it references is present.
+///
+/// A recorded check no longer in the manifest is simply not carried over.
+pub fn plan_record(
+    prior: &Prior,
+    full: bool,
+    tools: &ToolKey,
+    checks: &[Check],
+    hashes: &BTreeMap<String, String>,
+    files: &BTreeMap<String, spec_index::QntIndex>,
+) -> RecordPlan {
+    let keys = check_keys(checks, hashes, files, tools);
+    let order: Vec<String> = checks.iter().map(|c| c.name.clone()).collect();
+    let all = |reason: String| RecordPlan {
+        order: order.clone(),
+        reuse: BTreeMap::new(),
+        rerun: order.iter().map(|n| (n.clone(), reason.clone())).collect(),
+        keys: keys
+            .iter()
+            .filter_map(|(n, k)| k.as_ref().ok().map(|k| (n.clone(), k.clone())))
+            .collect(),
+        prior_apalache: None,
+    };
+    if full {
+        return all("--full".to_owned());
+    }
+    let (summary, present) = match prior {
+        Prior::Absent => return all("no recorded evidence".to_owned()),
+        Prior::Unreadable(e) => return all(format!("recorded summary.json is unusable: {e}")),
+        Prior::Found(s, present) => (s, present),
+    };
+    if summary.schema != SCHEMA_VERSION {
+        return all(format!("recorded schema {} differs from {SCHEMA_VERSION}", summary.schema));
+    }
+    if ToolKey::from(&summary.tools) != *tools {
+        return all("tool versions changed since the recorded run".to_owned());
+    }
+    let recorded: BTreeMap<&str, &CheckEvidence> =
+        summary.checks.iter().map(|c| (c.name.as_str(), c)).collect();
+    let mut reuse = BTreeMap::new();
+    let mut rerun = Vec::new();
+    for c in checks {
+        let verdict = match (recorded.get(c.name.as_str()), keys.get(&c.name)) {
+            (None, _) => Err("not in the recorded evidence".to_owned()),
+            (_, Some(Err(e))) => Err(format!("no input key: {e}")),
+            (Some(rec), Some(Ok(key))) => match rec.input_key.as_deref() {
+                None => Err("recorded without an input key".to_owned()),
+                Some(old) if old != key => {
+                    Err("its spec, an import or its checks.toml entry changed".to_owned())
+                }
+                Some(_) if !judge(rec.expect, rec.outcome) => {
+                    Err("its recorded outcome missed `expect`".to_owned())
+                }
+                Some(_) if rec.trace_error.is_some() => {
+                    Err("its counterexample trace was not recorded".to_owned())
+                }
+                Some(_) => {
+                    let absent = [&rec.trace, &rec.condensed, &rec.failure_log]
+                        .into_iter()
+                        .flatten()
+                        .find(|f| !present.contains(*f));
+                    absent.map_or_else(
+                        || Ok((*rec).clone()),
+                        |f| Err(format!("its recorded file `{f}` is missing")),
+                    )
+                }
+            },
+            (Some(_), None) => Err("no input key".to_owned()),
+        };
+        match verdict {
+            Ok(rec) => {
+                reuse.insert(c.name.clone(), rec);
+            }
+            Err(reason) => rerun.push((c.name.clone(), reason)),
+        }
+    }
+    RecordPlan {
+        order,
+        reuse,
+        rerun,
+        keys: keys.into_iter().filter_map(|(n, k)| k.ok().map(|k| (n, k))).collect(),
+        prior_apalache: summary.tools.apalache.clone(),
+    }
+}
+
+/// The tool versions of this machine.
+pub fn current_tools() -> Result<Tools> {
+    let quint =
+        first_line(&run_tool(Command::new("quint").arg("--version"), "quint --version")?.stdout);
+    let java_out = run_tool(Command::new("java").arg("-version"), "java -version")?;
+    let java =
+        first_line(if java_out.stderr.is_empty() { &java_out.stdout } else { &java_out.stderr });
+    let kernel = first_line(&run_tool(Command::new("uname").arg("-r"), "uname -r")?.stdout);
+    Ok(Tools { quint, apalache: None, java, kernel })
 }
 
 /// The `# APALACHE version: …` banner of a check log.
@@ -313,6 +607,15 @@ pub fn render_md(s: &EvidenceSummary) -> String {
     );
     let _ = writeln!(out, "| Run | `{}`, {} → {} |", s.run_id, s.started, s.finished);
     let _ = writeln!(out, "| Jobs | {} |", s.jobs);
+    let carried =
+        s.checks.iter().filter(|c| c.run_id.as_deref().is_some_and(|r| r != s.run_id)).count();
+    if carried > 0 {
+        let _ = writeln!(
+            out,
+            "| Carried over | {carried} check(s) were not re-run by this run: their inputs are \
+             unchanged since the run named in their `run_id` in summary.json |"
+        );
+    }
     let _ = writeln!(
         out,
         "| Git | `{}`{} |",
@@ -394,6 +697,14 @@ pub enum EvidenceProblem {
         /// Input path.
         file: String,
     },
+    /// A recorded check's input key no longer matches its current inputs.
+    #[error("stale: check `{name}`: {reason}")]
+    CheckStale {
+        /// Check name.
+        name: String,
+        /// What differs.
+        reason: String,
+    },
     /// A check in `checks.toml` has no record.
     #[error("check `{name}` in checks.toml has no recorded outcome")]
     CheckNotRecorded {
@@ -441,20 +752,12 @@ pub enum EvidenceProblem {
     },
 }
 
-/// Compare a recorded summary with the current inputs, manifest and evidence files.
-///
-/// `files` are paths relative to `evidence/`. Empty means the evidence
-/// stands for the current specs and every recorded outcome matched.
-pub fn verify_summary(
+/// Legacy staleness: any input file whose hash differs from the summary's.
+fn stale_inputs(
     summary: &EvidenceSummary,
     inputs: &BTreeMap<String, String>,
-    checks: &[Check],
-    files: &BTreeSet<String>,
 ) -> Vec<EvidenceProblem> {
     let mut problems = Vec::new();
-    if summary.schema != SCHEMA_VERSION {
-        problems.push(EvidenceProblem::Schema { found: summary.schema });
-    }
     for (file, sha) in inputs {
         match summary.inputs.get(file) {
             None => problems.push(EvidenceProblem::InputAdded { file: file.clone() }),
@@ -466,6 +769,45 @@ pub fn verify_summary(
     }
     for file in summary.inputs.keys().filter(|f| !inputs.contains_key(*f)) {
         problems.push(EvidenceProblem::InputRemoved { file: file.clone() });
+    }
+    problems
+}
+
+/// Compare a recorded summary with the current inputs, manifest and evidence files.
+///
+/// `files` are paths relative to `evidence/`; `keys` are the current input
+/// keys of `checks` under the summary's tool versions ([`check_keys`]). Empty
+/// means the evidence stands for the current specs and every recorded outcome
+/// matched.
+///
+/// When every recorded check carries an input key, each must equal its
+/// current key; files no check loads do not matter. Otherwise (evidence from
+/// before incremental recording) every input hash must match.
+pub fn verify_summary(
+    summary: &EvidenceSummary,
+    inputs: &BTreeMap<String, String>,
+    keys: &BTreeMap<String, Result<String, KeyError>>,
+    checks: &[Check],
+    files: &BTreeSet<String>,
+) -> Vec<EvidenceProblem> {
+    let mut problems = Vec::new();
+    if summary.schema != SCHEMA_VERSION {
+        problems.push(EvidenceProblem::Schema { found: summary.schema });
+    }
+    let keyed = !summary.checks.is_empty() && summary.checks.iter().all(|c| c.input_key.is_some());
+    if keyed {
+        for c in &summary.checks {
+            let reason = match (keys.get(&c.name), c.input_key.as_deref()) {
+                (Some(Ok(now)), Some(rec)) if now == rec => continue,
+                (Some(Ok(_)), _) => "its spec, an import or its checks.toml entry changed".into(),
+                (Some(Err(e)), _) => format!("its inputs cannot be keyed: {e}"),
+                // Not in the manifest: reported as `CheckNotInManifest` below.
+                (None, _) => continue,
+            };
+            problems.push(EvidenceProblem::CheckStale { name: c.name.clone(), reason });
+        }
+    } else {
+        problems.extend(stale_inputs(summary, inputs));
     }
     let recorded: BTreeSet<&str> = summary.checks.iter().map(|c| c.name.as_str()).collect();
     for c in checks.iter().filter(|c| !recorded.contains(c.name.as_str())) {
@@ -546,7 +888,9 @@ pub fn verify_dir(dir: &Path, checks: &[Check]) -> Result<Vec<String>> {
             return Ok(vec![format!("{} is not a valid summary: {e}", summary_path.display())]);
         }
     };
-    let problems = verify_summary(&summary, &hash_inputs(dir)?, checks, &list_files(&evidence)?);
+    let hashes = hash_inputs(dir)?;
+    let keys = check_keys(checks, &hashes, &index_specs(dir)?, &ToolKey::from(&summary.tools));
+    let problems = verify_summary(&summary, &hashes, &keys, checks, &list_files(&evidence)?);
     Ok(problems.iter().map(ToString::to_string).collect())
 }
 
@@ -601,6 +945,8 @@ pub(super) struct RunMeta<'a> {
     pub jobs: usize,
     /// Input hashes taken before the run.
     pub inputs: BTreeMap<String, String>,
+    /// Which checks the run ran and which recorded results it carries over.
+    pub plan: &'a RecordPlan,
 }
 
 /// The full logs of a check: every attempt's log, then `events.log`. A log
@@ -684,6 +1030,13 @@ impl Stage {
             Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
             _ => Ok(()),
         }
+    }
+
+    /// Copy one file of the current `evidence/` into the stage (same path).
+    fn carry_over(&self, rel: &str) -> Result<()> {
+        let from = self.target.join(rel);
+        let bytes = fs::read(&from).wrap_err_with(|| format!("reading {}", from.display()))?;
+        self.write_or_fail(rel, &bytes)
     }
 
     /// Swap the staged directory in place of `evidence/`.
@@ -818,6 +1171,8 @@ fn check_evidence(job: &Job, rec: &CheckRecord, stage: &Stage) -> Result<CheckEv
         condensed: None,
         failure_log: None,
         trace_error: None,
+        input_key: None,
+        run_id: None,
     };
     if rec.outcome == Outcome::Violation {
         match stage_trace(job, rec, stage) {
@@ -852,8 +1207,10 @@ fn stage_checks(
 pub(super) struct RecordReport {
     /// The installed `evidence/` directory.
     pub evidence_dir: PathBuf,
-    /// Checks recorded.
+    /// Checks recorded (run now plus carried over).
     pub checks: usize,
+    /// Of those, checks whose recorded result was carried over unchanged.
+    pub carried_over: usize,
     /// `(check, error, failure log relative to evidence/)` for every
     /// counterexample recorded without its trace.
     pub trace_errors: Vec<(String, TraceRecordError, Option<String>)>,
@@ -880,7 +1237,12 @@ pub(super) fn record(
         );
     }
     let stage = Stage::create(meta.dir, meta.run_id)?;
-    let checks = stage_checks(jobs, records, &stage)?;
+    let mut ran: BTreeMap<String, CheckEvidence> = BTreeMap::new();
+    for mut ev in stage_checks(jobs, records, &stage)? {
+        ev.input_key = meta.plan.keys.get(&ev.name).cloned();
+        ev.run_id = Some(meta.run_id.to_owned());
+        ran.insert(ev.name.clone(), ev);
+    }
     let mut apalache = None;
     for rec in records {
         if apalache.is_none() {
@@ -893,15 +1255,39 @@ pub(super) fn record(
             }
         }
     }
-    let quint =
-        first_line(&run_tool(Command::new("quint").arg("--version"), "quint --version")?.stdout);
-    let java_out = run_tool(Command::new("java").arg("-version"), "java -version")?;
-    let java =
-        first_line(if java_out.stderr.is_empty() { &java_out.stdout } else { &java_out.stderr });
-    let kernel = first_line(&run_tool(Command::new("uname").arg("-r"), "uname -r")?.stdout);
+    let mut tools = current_tools()?;
+    if !meta.plan.reuse.is_empty() {
+        // Carried-over results were produced by the prior run's Apalache.
+        if let (Some(now), Some(then)) = (&apalache, &meta.plan.prior_apalache)
+            && now != then
+        {
+            bail!(
+                "Apalache changed from `{then}` to `{now}` while {} recorded check(s) were \
+                 carried over; evidence not recorded (re-record with --full)",
+                meta.plan.reuse.len()
+            );
+        }
+        if apalache.is_none() {
+            apalache.clone_from(&meta.plan.prior_apalache);
+        }
+    }
+    tools.apalache = apalache;
     let head = first_line(&git(meta.root, &["rev-parse", "HEAD"])?.stdout);
     let dirty = !git(meta.root, &["status", "--porcelain"])?.stdout.is_empty();
 
+    let mut checks = Vec::with_capacity(meta.plan.order.len());
+    for name in &meta.plan.order {
+        if let Some(ev) = ran.remove(name) {
+            checks.push(ev);
+        } else if let Some(ev) = meta.plan.reuse.get(name) {
+            for f in [&ev.trace, &ev.condensed, &ev.failure_log].into_iter().flatten() {
+                stage.carry_over(f)?;
+            }
+            checks.push(ev.clone());
+        } else {
+            bail!("check `{name}` was neither run nor carried over; evidence not recorded");
+        }
+    }
     let summary = EvidenceSummary {
         schema: SCHEMA_VERSION,
         subsystem: meta.subsystem.to_owned(),
@@ -909,7 +1295,7 @@ pub(super) fn record(
         started: rfc3339(meta.started_unix)?,
         finished: rfc3339(meta.finished_unix)?,
         jobs: meta.jobs,
-        tools: Tools { quint, apalache, java, kernel },
+        tools,
         git: GitState { head, dirty },
         inputs: after,
         checks,
@@ -921,6 +1307,7 @@ pub(super) fn record(
     Ok(RecordReport {
         evidence_dir: meta.dir.join(EVIDENCE_DIR),
         checks: summary.checks.len(),
+        carried_over: meta.plan.reuse.len(),
         trace_errors: summary
             .checks
             .into_iter()
@@ -974,6 +1361,8 @@ mod tests {
             condensed: violation.then(|| format!("traces/{name}.txt")),
             failure_log: (!pass).then(|| format!("failures/{name}.log")),
             trace_error: None,
+            input_key: None,
+            run_id: None,
         }
     }
 
@@ -1075,6 +1464,7 @@ mod tests {
             verify_summary(
                 &legacy,
                 &legacy.inputs,
+                &BTreeMap::new(),
                 &[check("w", Expect::Violation)],
                 &files(&legacy)
             )
@@ -1093,7 +1483,10 @@ mod tests {
             rec("h", Expect::Holds, Outcome::Holds),
         ]);
         let checks = [check("w", Expect::Violation), check("h", Expect::Holds)];
-        assert_eq!(verify_summary(&s, &s.inputs.clone(), &checks, &files(&s)), vec![]);
+        assert_eq!(
+            verify_summary(&s, &s.inputs.clone(), &BTreeMap::new(), &checks, &files(&s)),
+            vec![]
+        );
     }
 
     #[test]
@@ -1104,7 +1497,7 @@ mod tests {
         now.insert("hazard/b.qnt".into(), "33".into());
         now.remove("checks.toml");
         assert_eq!(
-            verify_summary(&s, &now, &[check("h", Expect::Holds)], &files(&s)),
+            verify_summary(&s, &now, &BTreeMap::new(), &[check("h", Expect::Holds)], &files(&s)),
             vec![
                 EvidenceProblem::InputChanged { file: "a.qnt".into() },
                 EvidenceProblem::InputAdded { file: "hazard/b.qnt".into() },
@@ -1120,7 +1513,7 @@ mod tests {
         let s = summary(vec![lying, rec("t", Expect::Violation, Outcome::TimedOut)]);
         let checks = [check("t", Expect::Violation), check("new", Expect::Holds)];
         assert_eq!(
-            verify_summary(&s, &s.inputs.clone(), &checks, &files(&s)),
+            verify_summary(&s, &s.inputs.clone(), &BTreeMap::new(), &checks, &files(&s)),
             vec![
                 EvidenceProblem::CheckNotRecorded { name: "new".into() },
                 EvidenceProblem::CheckNotInManifest { name: "x".into() },
@@ -1148,14 +1541,14 @@ mod tests {
         no_trace.checks[0].trace = None;
         let checks = [check("w", Expect::Violation)];
         assert_eq!(
-            verify_summary(&s, &s.inputs.clone(), &checks, &present),
+            verify_summary(&s, &s.inputs.clone(), &BTreeMap::new(), &checks, &present),
             vec![
                 EvidenceProblem::Schema { found: 99 },
                 EvidenceProblem::MissingFile { file: "traces/w.itf.json".into() },
             ]
         );
         assert!(
-            verify_summary(&no_trace, &s.inputs.clone(), &checks, &files(&s))
+            verify_summary(&no_trace, &s.inputs.clone(), &BTreeMap::new(), &checks, &files(&s))
                 .contains(&EvidenceProblem::MissingTrace { name: "w".into() })
         );
     }
@@ -1324,7 +1717,7 @@ mod tests {
         // verify-evidence names each untraced counterexample.
         let checks: Vec<Check> =
             s.checks.iter().map(|c| check(&c.name, Expect::Violation)).collect();
-        let problems = verify_summary(&s, &s.inputs.clone(), &checks, &present);
+        let problems = verify_summary(&s, &s.inputs.clone(), &BTreeMap::new(), &checks, &present);
         let untraced: Vec<&str> = problems
             .iter()
             .filter_map(|p| match p {
@@ -1386,5 +1779,283 @@ mod tests {
             .map(|e| e.expect("entry").file_name())
             .collect();
         assert_eq!(leftovers, [std::ffi::OsString::from(EVIDENCE_DIR)]);
+    }
+
+    // ---- incremental recording: input keys and the record plan ----
+
+    fn tools() -> ToolKey {
+        ToolKey { quint: "0.32.0".into(), java: "openjdk version \"21\"".into() }
+    }
+
+    /// Spec files by relative path, from their sources.
+    fn specs(srcs: &[(&str, &str)]) -> BTreeMap<String, spec_index::QntIndex> {
+        srcs.iter().map(|(p, b)| ((*p).to_owned(), spec_index::index(b).expect("index"))).collect()
+    }
+
+    fn hashes(h: &[(&str, &str)]) -> BTreeMap<String, String> {
+        h.iter().map(|(p, s)| ((*p).to_owned(), (*s).to_owned())).collect()
+    }
+
+    fn check_on(name: &str, spec: &str) -> Check {
+        Check { spec: spec.into(), ..check(name, Expect::Holds) }
+    }
+
+    /// `a.qnt` imports `lib/b.qnt`, which imports `lib/c.qnt`; `d.qnt` stands alone.
+    fn world() -> (BTreeMap<String, spec_index::QntIndex>, BTreeMap<String, String>, Vec<Check>) {
+        let files = specs(&[
+            ("a.qnt", "module A { import B.* from \"./lib/b\" }"),
+            ("lib/b.qnt", "module B { import C.* from \"./c\" }"),
+            ("lib/c.qnt", "module C { }"),
+            ("d.qnt", "module D { }"),
+        ]);
+        let h = hashes(&[
+            ("a.qnt", "a1"),
+            ("lib/b.qnt", "b1"),
+            ("lib/c.qnt", "c1"),
+            ("d.qnt", "d1"),
+            ("checks.toml", "t1"),
+        ]);
+        (files, h, vec![check_on("on_a", "a.qnt"), check_on("on_d", "d.qnt")])
+    }
+
+    /// A summary recorded for `checks` under `tools()` with their current keys.
+    fn recorded(
+        checks: &[Check],
+        h: &BTreeMap<String, String>,
+        f: &BTreeMap<String, spec_index::QntIndex>,
+    ) -> EvidenceSummary {
+        let keys = check_keys(checks, h, f, &tools());
+        let mut s = summary(
+            checks
+                .iter()
+                .map(|c| {
+                    let mut r = rec(&c.name, c.expect, Outcome::Holds);
+                    r.input_key = keys[&c.name].clone().ok();
+                    r.run_id = Some("old".into());
+                    r
+                })
+                .collect(),
+        );
+        s.tools.quint = tools().quint;
+        s.tools.java = tools().java;
+        s
+    }
+
+    fn plan(
+        s: &EvidenceSummary,
+        checks: &[Check],
+        h: &BTreeMap<String, String>,
+        f: &BTreeMap<String, spec_index::QntIndex>,
+    ) -> RecordPlan {
+        let present = files(s);
+        plan_record(&Prior::Found(Box::new(s.clone()), present), false, &tools(), checks, h, f)
+    }
+
+    fn rerun_names(p: &RecordPlan) -> Vec<&str> {
+        p.rerun.iter().map(|(n, _)| n.as_str()).collect()
+    }
+
+    #[test]
+    fn unchanged_inputs_run_nothing() {
+        let (f, h, checks) = world();
+        let s = recorded(&checks, &h, &f);
+        let p = plan(&s, &checks, &h, &f);
+        assert!(p.rerun.is_empty(), "{:?}", p.rerun);
+        assert_eq!(p.reuse.len(), 2);
+    }
+
+    #[test]
+    fn a_spec_edit_reruns_only_the_checks_on_that_spec() {
+        let (f, mut h, checks) = world();
+        let s = recorded(&checks, &h, &f);
+        h.insert("d.qnt".into(), "d2".into());
+        assert_eq!(rerun_names(&plan(&s, &checks, &h, &f)), ["on_d"]);
+    }
+
+    #[test]
+    fn an_edit_of_a_transitive_import_reruns_its_dependents() {
+        let (f, mut h, checks) = world();
+        let s = recorded(&checks, &h, &f);
+        h.insert("lib/c.qnt".into(), "c2".into());
+        let p = plan(&s, &checks, &h, &f);
+        assert_eq!(rerun_names(&p), ["on_a"]);
+        assert!(p.reuse.contains_key("on_d"));
+    }
+
+    #[test]
+    fn an_edit_of_a_file_no_check_loads_runs_nothing() {
+        let (mut f, mut h, checks) = world();
+        let s = recorded(&checks, &h, &f);
+        f.insert("hazard/x.qnt".into(), spec_index::index("module X { }").expect("index"));
+        h.insert("hazard/x.qnt".into(), "x1".into());
+        h.insert("checks.toml".into(), "t2".into());
+        assert!(plan(&s, &checks, &h, &f).rerun.is_empty());
+    }
+
+    #[test]
+    fn every_execution_field_of_the_checks_toml_entry_reruns_that_check() {
+        let (f, h, checks) = world();
+        let s = recorded(&checks, &h, &f);
+        let edits: [fn(&mut Check); 9] = [
+            |c| c.main = "other".into(),
+            |c| c.property = Property::Invariant("Other".into()),
+            |c| c.backend = Backend::Tlc,
+            |c| c.max_steps = Some(9),
+            |c| c.expect = Expect::Violation,
+            |c| c.timeout_secs = Some(5),
+            |c| c.heap_mb = Some(512),
+            |c| c.workers = Some(2),
+            |c| c.spec = "d.qnt".into(),
+        ];
+        for edit in edits {
+            let mut edited = checks.clone();
+            edit(&mut edited[0]);
+            let p = plan(&s, &edited, &h, &f);
+            assert_eq!(rerun_names(&p), ["on_a"], "{edited:?}");
+            assert!(p.reuse.contains_key("on_d"));
+        }
+        // `ci` only selects checks; it cannot change a verdict.
+        let mut ci = checks;
+        ci[0].ci = true;
+        assert!(plan(&s, &ci, &h, &f).rerun.is_empty());
+    }
+
+    #[test]
+    fn a_tool_version_change_reruns_every_check() {
+        let (f, h, checks) = world();
+        let s = recorded(&checks, &h, &f);
+        let present = files(&s);
+        for newer in [
+            ToolKey { quint: "0.33.0".into(), ..tools() },
+            ToolKey { java: "openjdk version \"25\"".into(), ..tools() },
+        ] {
+            let p = plan_record(
+                &Prior::Found(Box::new(s.clone()), present.clone()),
+                false,
+                &newer,
+                &checks,
+                &h,
+                &f,
+            );
+            assert_eq!(rerun_names(&p), ["on_a", "on_d"]);
+            assert!(p.reuse.is_empty());
+        }
+    }
+
+    #[test]
+    fn an_added_check_runs_and_a_removed_check_is_dropped() {
+        let (f, h, checks) = world();
+        let s = recorded(&checks, &h, &f);
+        let mut now = vec![checks[0].clone(), check_on("fresh", "d.qnt")];
+        let p = plan(&s, &now, &h, &f);
+        assert_eq!(rerun_names(&p), ["fresh"]);
+        assert_eq!(p.order, ["on_a", "fresh"]);
+        assert_eq!(p.reuse.keys().collect::<Vec<_>>(), ["on_a"]);
+        now.clear();
+        assert!(plan(&s, &now, &h, &f).reuse.is_empty());
+    }
+
+    #[test]
+    fn staleness_that_cannot_be_determined_reruns_the_check() {
+        let (f, h, checks) = world();
+        let s = recorded(&checks, &h, &f);
+        // A closure file that is not a hashed input.
+        let mut unhashed = h.clone();
+        unhashed.remove("lib/c.qnt");
+        assert_eq!(rerun_names(&plan(&s, &checks, &unhashed, &f)), ["on_a"]);
+        // A closure file the lexer could not index.
+        let mut unindexed = f.clone();
+        unindexed.remove("lib/b.qnt");
+        assert_eq!(rerun_names(&plan(&s, &checks, &h, &unindexed)), ["on_a"]);
+        // A record without a key (recorded before incremental recording).
+        let mut keyless = s.clone();
+        keyless.checks[1].input_key = None;
+        assert_eq!(rerun_names(&plan(&keyless, &checks, &h, &f)), ["on_d"]);
+        // Another schema.
+        let mut schema = s;
+        schema.schema += 1;
+        assert_eq!(rerun_names(&plan(&schema, &checks, &h, &f)), ["on_a", "on_d"]);
+        // No usable summary.
+        for prior in [Prior::Absent, Prior::Unreadable("x".into())] {
+            let p = plan_record(&prior, false, &tools(), &checks, &h, &f);
+            assert_eq!(rerun_names(&p), ["on_a", "on_d"]);
+        }
+    }
+
+    #[test]
+    fn unusable_recorded_results_are_not_carried_over() {
+        let (f, h, checks) = world();
+        let s = recorded(&checks, &h, &f);
+        let mut missed = s.clone();
+        missed.checks[0].outcome = Outcome::TimedOut;
+        assert_eq!(rerun_names(&plan(&missed, &checks, &h, &f)), ["on_a"]);
+        let mut untraced = s.clone();
+        untraced.checks[0].trace_error =
+            Some(TraceRecordError::Unreadable { file: "x".into(), error: "e".into() });
+        assert_eq!(rerun_names(&plan(&untraced, &checks, &h, &f)), ["on_a"]);
+        // A referenced evidence file that is absent from `evidence/`.
+        let mut gone = s.clone();
+        gone.checks[1].trace = Some("traces/on_d.itf.json".into());
+        let p =
+            plan_record(&Prior::Found(Box::new(gone), files(&s)), false, &tools(), &checks, &h, &f);
+        assert_eq!(rerun_names(&p), ["on_d"]);
+    }
+
+    #[test]
+    fn full_reruns_everything_even_when_current() {
+        let (f, h, checks) = world();
+        let s = recorded(&checks, &h, &f);
+        let present = files(&s);
+        let p = plan_record(&Prior::Found(Box::new(s), present), true, &tools(), &checks, &h, &f);
+        assert_eq!(rerun_names(&p), ["on_a", "on_d"]);
+        assert!(p.reuse.is_empty());
+    }
+
+    #[test]
+    fn verify_accepts_keyed_evidence_while_an_unrelated_file_changes() {
+        let (f, mut h, checks) = world();
+        let s = recorded(&checks, &h, &f);
+        h.insert("hazard/x.qnt".into(), "x1".into());
+        let keys = check_keys(&checks, &h, &f, &tools());
+        assert_eq!(verify_summary(&s, &h, &keys, &checks, &files(&s)), vec![]);
+    }
+
+    #[test]
+    fn verify_rejects_a_check_whose_inputs_changed_after_recording() {
+        let (f, mut h, checks) = world();
+        let s = recorded(&checks, &h, &f);
+        h.insert("lib/b.qnt".into(), "b2".into());
+        let keys = check_keys(&checks, &h, &f, &tools());
+        let problems = verify_summary(&s, &h, &keys, &checks, &files(&s));
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        assert!(matches!(&problems[0], EvidenceProblem::CheckStale { name, .. } if name == "on_a"));
+    }
+
+    #[test]
+    fn verify_falls_back_to_global_hashes_without_input_keys() {
+        let (f, mut h, checks) = world();
+        let mut s = recorded(&checks, &h, &f);
+        s.inputs = h.clone();
+        s.checks[0].input_key = None;
+        h.insert("d.qnt".into(), "d2".into());
+        let keys = check_keys(&checks, &h, &f, &tools());
+        assert_eq!(
+            verify_summary(&s, &h, &keys, &checks, &files(&s)),
+            vec![EvidenceProblem::InputChanged { file: "d.qnt".into() }]
+        );
+    }
+
+    #[test]
+    fn an_input_key_roundtrips_through_summary_json_and_is_omitted_when_absent() {
+        let (f, h, checks) = world();
+        let s = recorded(&checks, &h, &f);
+        let back: EvidenceSummary =
+            serde_json::from_str(&serde_json::to_string(&s).expect("encode")).expect("decode");
+        assert_eq!(back, s);
+        let mut bare = s;
+        bare.checks[0].input_key = None;
+        bare.checks[0].run_id = None;
+        let json = serde_json::to_string(&bare.checks[0]).expect("encode");
+        assert!(!json.contains("input_key") && !json.contains("run_id"), "{json}");
     }
 }

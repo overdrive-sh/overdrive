@@ -884,8 +884,11 @@ pub struct CheckOptions {
     pub resources: ResourceOverrides,
     /// Per-attempt timeout override in seconds (wins over `timeout_secs`).
     pub timeout_secs: Option<u64>,
-    /// Replace the subsystem's `evidence/` with this run's evidence.
+    /// Record the subsystem's `evidence/`: run only the checks whose inputs
+    /// changed since the recorded evidence and merge their results into it.
     pub record: bool,
+    /// With `record`: run every check, ignoring the recorded evidence.
+    pub full: bool,
 }
 
 /// The wall-clock budget of one attempt: the `--timeout` override, else the
@@ -2493,9 +2496,11 @@ fn write_summaries(
 /// unless every outcome matches its `expect`.
 ///
 /// With `opts.record`, the selection must be one full subsystem
-/// ([`evidence::validate_record_args`]); a completed run then replaces that
-/// subsystem's `evidence/` whatever the verdicts (an interrupted run records
-/// nothing).
+/// ([`evidence::validate_record_args`]). Only the checks whose recorded result
+/// is stale ([`evidence::plan_record`]) run, or all of them with `opts.full`;
+/// a completed run then writes that subsystem's `evidence/` — the new results
+/// merged with the unchanged recorded ones — whatever the verdicts (an
+/// interrupted run records nothing).
 pub fn check(filter: &CheckFilter, opts: CheckOptions) -> Result<()> {
     if opts.record {
         evidence::validate_record_args(filter)?;
@@ -2517,7 +2522,17 @@ pub fn check(filter: &CheckFilter, opts: CheckOptions) -> Result<()> {
     let res = ResourceConfig::resolve(opts.resources, cpus, meminfo().0);
     let started_unix = unix_now();
     let run_id = format!("{}-{started_unix:.3}", std::process::id());
-    let jobs = select_jobs(&root, &specs, filter, opts, &res, &run_id)?;
+    let mut jobs = select_jobs(&root, &specs, filter, opts, &res, &run_id)?;
+    let record_state = if opts.record && !jobs.is_empty() {
+        let state = prepare_record(&jobs, opts.full)?;
+        jobs.retain(|j| state.plan.runs(&j.check.name));
+        Some(state)
+    } else {
+        None
+    };
+    if let Some(state) = record_state.as_ref().filter(|_| jobs.is_empty()) {
+        return record_unchanged(&root, state, &run_id, started_unix);
+    }
     if jobs.is_empty() {
         if let Some(name) = &filter.name {
             bail!("no check named `{name}` matches the selection");
@@ -2525,8 +2540,6 @@ pub fn check(filter: &CheckFilter, opts: CheckOptions) -> Result<()> {
         eprintln!("xtask quint check: no checks selected");
         return Ok(());
     }
-
-    let record_inputs = if opts.record { Some(evidence::hash_inputs(&jobs[0].dir)?) } else { None };
 
     let max_jobs =
         opts.jobs.unwrap_or_else(|| usize::try_from(res.budget.cpus).unwrap_or(usize::MAX)).max(1);
@@ -2568,8 +2581,8 @@ pub fn check(filter: &CheckFilter, opts: CheckOptions) -> Result<()> {
     // Record before printing the table, so the table can show which
     // counterexamples lost their trace. A recording failure is kept, not
     // returned, so the table and every other failure are still reported.
-    let recorded = record_inputs
-        .and_then(|inputs| record_evidence(&root, &jobs, &records, &info, inputs).transpose());
+    let recorded = record_state
+        .and_then(|state| record_evidence(&root, &jobs, &records, &info, &state).transpose());
     let trace_errors: BTreeMap<&str, &evidence::TraceRecordError> = match &recorded {
         Some(Ok(report)) => {
             report.trace_errors.iter().map(|(name, err, _)| (name.as_str(), err)).collect()
@@ -2637,9 +2650,12 @@ fn report_evidence(recorded: Option<&Result<evidence::RecordReport>>) -> Vec<Str
         }
         Some(Ok(report)) => {
             eprintln!(
-                "xtask quint check: recorded {} check(s) into {}",
+                "xtask quint check: recorded {} check(s) into {} ({} run now, {} carried over \
+                 unchanged)",
                 report.checks,
-                report.evidence_dir.display()
+                report.evidence_dir.display(),
+                report.checks - report.carried_over,
+                report.carried_over
             );
             for (name, err, log) in &report.trace_errors {
                 let line = format!(
@@ -2673,30 +2689,97 @@ fn final_message(failures: &[String], total: usize, evidence_failures: &[String]
     parts.join("\n")
 }
 
-/// `--record`: replace the subsystem's `evidence/` after a completed run
-/// (`None` when the run was interrupted and nothing was recorded).
+/// What `--record` decided before the run.
+struct RecordState {
+    subsystem: String,
+    dir: PathBuf,
+    /// Input hashes taken before the run.
+    inputs: BTreeMap<String, String>,
+    plan: evidence::RecordPlan,
+}
+
+/// Decide, from the subsystem's recorded evidence and current inputs, which
+/// of its checks `--record` must run, and say so.
+fn prepare_record(jobs: &[Job], full: bool) -> Result<RecordState> {
+    let first = jobs.first().unwrap_or_else(|| unreachable!("caller checked non-empty"));
+    let checks: Vec<Check> = jobs.iter().map(|j| j.check.clone()).collect();
+    let inputs = evidence::hash_inputs(&first.dir)?;
+    let tools = evidence::ToolKey::from(&evidence::current_tools()?);
+    let prior = evidence::load_prior(&first.dir)?;
+    let plan = evidence::plan_record(
+        &prior,
+        full,
+        &tools,
+        &checks,
+        &inputs,
+        &evidence::index_specs(&first.dir)?,
+    );
+    eprintln!(
+        "xtask quint check --record {}: {} of {} check(s) to run, {} carried over unchanged",
+        first.subsystem,
+        plan.rerun.len(),
+        plan.order.len(),
+        plan.reuse.len()
+    );
+    for (name, reason) in &plan.rerun {
+        eprintln!("  run   {name}: {reason}");
+    }
+    Ok(RecordState { subsystem: first.subsystem.clone(), dir: first.dir.clone(), inputs, plan })
+}
+
+/// `--record` when no check is stale: nothing runs; the evidence is rewritten
+/// from the carried-over results (dropping checks no longer in the manifest).
+fn record_unchanged(
+    root: &Path,
+    state: &RecordState,
+    run_id: &str,
+    started_unix: f64,
+) -> Result<()> {
+    let report = evidence::record(&record_meta(root, state, run_id, started_unix, 1), &[], &[])?;
+    eprintln!(
+        "xtask quint check: nothing stale; recorded {} check(s) into {} (all carried over \
+         unchanged)",
+        report.checks,
+        report.evidence_dir.display()
+    );
+    Ok(())
+}
+
+fn record_meta<'a>(
+    root: &'a Path,
+    state: &'a RecordState,
+    run_id: &'a str,
+    started_unix: f64,
+    jobs: usize,
+) -> evidence::RunMeta<'a> {
+    evidence::RunMeta {
+        root,
+        subsystem: &state.subsystem,
+        dir: &state.dir,
+        run_id,
+        started_unix,
+        finished_unix: unix_now(),
+        jobs,
+        inputs: state.inputs.clone(),
+        plan: &state.plan,
+    }
+}
+
+/// `--record`: write the subsystem's `evidence/` after a completed run (`None`
+/// when the run was interrupted and nothing was recorded).
 fn record_evidence(
     root: &Path,
     jobs: &[Job],
     records: &[CheckRecord],
     info: &RunInfo<'_>,
-    inputs: BTreeMap<String, String>,
+    state: &RecordState,
 ) -> Result<Option<evidence::RecordReport>> {
     if let Some(sig) = info.interrupted {
         eprintln!("xtask quint check: interrupted by signal {sig}; evidence not recorded");
         return Ok(None);
     }
     evidence::record(
-        &evidence::RunMeta {
-            root,
-            subsystem: &jobs[0].subsystem,
-            dir: &jobs[0].dir,
-            run_id: info.run_id,
-            started_unix: info.started_unix,
-            finished_unix: unix_now(),
-            jobs: info.max_jobs,
-            inputs,
-        },
+        &record_meta(root, state, info.run_id, info.started_unix, info.max_jobs),
         jobs,
         records,
     )
@@ -2744,7 +2827,7 @@ pub fn verify_evidence(subsystem: Option<&str>) -> Result<()> {
     } else {
         bail!(
             "Quint evidence is stale or failing for {}; re-record with \
-             `cargo xtask quint check --subsystem <dir> --record`",
+             `cargo xtask quint check --subsystem <dir> --record` (re-runs only the stale checks)",
             failed.join(", ")
         )
     }

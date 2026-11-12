@@ -349,12 +349,18 @@ enum QuintAction {
         /// killed on expiry and the outcome is `timed-out`.
         #[arg(long, value_name = "SECS", value_parser = clap::value_parser!(u64).range(1..))]
         timeout: Option<u64>,
-        /// Replace `<subsystem>/evidence/` with this run's evidence
-        /// (summary.json / summary.md, counterexample traces, logs of failed
-        /// checks), whatever the verdicts. Only for a full run of one
+        /// Record `<subsystem>/evidence/` (summary.json / summary.md,
+        /// counterexample traces, logs of failed checks), whatever the
+        /// verdicts. Incremental: runs only the checks whose spec, imports,
+        /// checks.toml entry or tool versions changed since the recorded
+        /// evidence (or that have no usable recorded result) and carries the
+        /// other recorded results over unchanged. Only for one whole
         /// subsystem: requires `--subsystem`, refuses `--name` and `--ci`.
         #[arg(long)]
         record: bool,
+        /// With `--record`: run every check, ignoring the recorded evidence.
+        #[arg(long, requires = "record")]
+        full: bool,
     },
     /// Fail unless `<subsystem>/evidence/summary.json` was recorded against
     /// the current `.qnt` files and `checks.toml` and every recorded outcome
@@ -544,6 +550,7 @@ fn run() -> Result<()> {
                 apalache_heap,
                 timeout,
                 record,
+                full,
             } => xtask::quint::check(
                 &xtask::quint::CheckFilter { ci, subsystem, name },
                 xtask::quint::CheckOptions {
@@ -557,6 +564,7 @@ fn run() -> Result<()> {
                     },
                     timeout_secs: timeout,
                     record,
+                    full,
                 },
             ),
             QuintAction::VerifyEvidence { subsystem } => {

@@ -12682,6 +12682,9 @@
       "native_metal_kvm_public_ingress_gateway_never_succeeds_through_a_stopped_workloads_stale_service_entry": {
         "kind": "native-launcher"
       },
+      "native_metal_kvm_public_ingress_gateway_returns_to_a_stable_in_use_heap_across_repeated_128_exchange_bursts": {
+        "kind": "native-launcher"
+      },
       "native_metal_kvm_public_ingress_gateway_relays_exact_length_and_chunked_bodies_octet_exact_over_keep_alive": {
         "kind": "native-launcher"
       },
@@ -14365,7 +14368,25 @@
       "mutants::tests::workspace_source_path_rejects_non_mutated_paths": {
         "kind": "host-pure"
       },
+      "quint::evidence::tests::a_spec_edit_reruns_only_the_checks_on_that_spec": {
+        "kind": "host-pure"
+      },
+      "quint::evidence::tests::a_tool_version_change_reruns_every_check": {
+        "kind": "host-pure"
+      },
       "quint::evidence::tests::a_trace_that_cannot_be_recorded_spares_every_other_check": {
+        "kind": "host-pure"
+      },
+      "quint::evidence::tests::an_added_check_runs_and_a_removed_check_is_dropped": {
+        "kind": "host-pure"
+      },
+      "quint::evidence::tests::an_edit_of_a_file_no_check_loads_runs_nothing": {
+        "kind": "host-pure"
+      },
+      "quint::evidence::tests::an_edit_of_a_transitive_import_reruns_its_dependents": {
+        "kind": "host-pure"
+      },
+      "quint::evidence::tests::an_input_key_roundtrips_through_summary_json_and_is_omitted_when_absent": {
         "kind": "host-pure"
       },
       "quint::evidence::tests::apalache_version_reads_the_banner": {
@@ -14374,7 +14395,13 @@
       "quint::evidence::tests::current_passing_evidence_has_no_problems": {
         "kind": "host-pure"
       },
+      "quint::evidence::tests::every_execution_field_of_the_checks_toml_entry_reruns_that_check": {
+        "kind": "host-pure"
+      },
       "quint::evidence::tests::evidence_without_retry_and_wall_seconds_still_decodes_and_verifies": {
+        "kind": "host-pure"
+      },
+      "quint::evidence::tests::full_reruns_everything_even_when_current": {
         "kind": "host-pure"
       },
       "quint::evidence::tests::hash_inputs_covers_specs_and_manifest_but_not_evidence": {
@@ -14398,6 +14425,9 @@
       "quint::evidence::tests::stale_inputs_are_reported_per_file": {
         "kind": "host-pure"
       },
+      "quint::evidence::tests::staleness_that_cannot_be_determined_reruns_the_check": {
+        "kind": "host-pure"
+      },
       "quint::evidence::tests::summary_json_roundtrips_and_pins_field_names": {
         "kind": "host-pure"
       },
@@ -14405,6 +14435,21 @@
         "kind": "host-pure"
       },
       "quint::evidence::tests::trace_error_roundtrips_and_is_omitted_when_absent": {
+        "kind": "host-pure"
+      },
+      "quint::evidence::tests::unchanged_inputs_run_nothing": {
+        "kind": "host-pure"
+      },
+      "quint::evidence::tests::unusable_recorded_results_are_not_carried_over": {
+        "kind": "host-pure"
+      },
+      "quint::evidence::tests::verify_accepts_keyed_evidence_while_an_unrelated_file_changes": {
+        "kind": "host-pure"
+      },
+      "quint::evidence::tests::verify_falls_back_to_global_hashes_without_input_keys": {
+        "kind": "host-pure"
+      },
+      "quint::evidence::tests::verify_rejects_a_check_whose_inputs_changed_after_recording": {
         "kind": "host-pure"
       },
       "quint::resources::tests::admit_bypasses_a_blocked_head_only_within_the_bound": {

@@ -499,11 +499,23 @@ a module that declares a `step` relation declares no named `run`, when a named
 `run` is not listed in its subsystem's `checks.toml`, or when a listed run is
 declared neither by its spec nor by a file the spec imports.
 
-Evidence is written only by the command: a full run with `--record` replaces
-`evidence/` with the summary (tool versions, spec hashes, every verdict) and
-the counterexample traces of that run, and `cargo xtask quint
-verify-evidence` fails when the recorded evidence no longer matches the specs.
-Git history keeps earlier runs. When the run was on the metal box, bring the
+Evidence is written only by the command: `--record` (one whole subsystem)
+is incremental. Each recorded check carries an input key, a sha256 over the
+Quint and Java versions, the check's `checks.toml` entry (without `ci`), and
+its spec with the transitive closure of the specs it imports. `--record`
+re-runs only the checks whose key changed, or that have no usable recorded
+result (no key, a missing trace or log file, an outcome that missed `expect`),
+and merges their results with the unchanged recorded ones. A change of Quint or
+Java version re-runs every check. A check removed from `checks.toml` is
+dropped, and a new one runs. `--record --full` re-runs every check. If the
+Apalache version differs from the one that produced the carried-over results,
+the command aborts without writing and tells you to use `--full`. The result
+replaces `evidence/` with the summary (tool versions, spec hashes, every
+verdict) and the counterexample traces. `cargo xtask quint verify-evidence`
+is the authority: it recomputes every check's input key and fails when a
+recorded key is stale, an outcome misses `expect`, or a trace is missing
+(evidence recorded without keys is verified by comparing the global input
+hashes). Git history keeps earlier runs. When the run was on the metal box, bring the
 recorded evidence back with `cargo xtask metal pull
 specs/quint/<subsystem>/evidence`. The subsystem directory holds only specs,
 `hazard/` specs, `checks.toml`, `README.md` and the recorded `evidence/` —

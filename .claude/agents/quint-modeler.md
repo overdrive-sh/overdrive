@@ -63,18 +63,21 @@ before running it).
    the log path — do not work around it.
 8. Mark `ci = true` only for checks that finish in under two minutes.
 9. When every affected check passes and the specs are final for this design
-   revision, record evidence with one full run: `cargo xtask lima run --
-   cargo xtask quint check --subsystem <subsystem> --record`, then confirm it
+   revision, record evidence: `cargo xtask lima run --
+   cargo xtask quint check --subsystem <subsystem> --record` (incremental: it
+   re-runs only checks whose spec, imports, `checks.toml` entry or tool
+   versions changed and carries the rest over. Add `--full` to re-run every
+   check, which the command asks for when the Apalache version changed), then confirm it
    with `cargo xtask quint verify-evidence --subsystem <subsystem>`. The
    record run is yours to finish: if it reports a mismatch, fix it (step 7
-   checks again), then re-record. A full run can outlast one 30-minute tool
+   checks again), then re-record. A run can outlast one 30-minute tool
    call; then start it detached with an exit-code file
    (`nohup sh -c '<command> > target/quint-record.log 2>&1; echo $? > target/quint-record.exit' &`)
    and wait with a loop that returns the moment the file appears —
    `timeout 1700 sh -c 'until [ -f target/quint-record.exit ]; do sleep 15; done'`,
    repeated until it exists. Never a fixed long `sleep`: it idles after the
    run has finished. Read the log once the exit file exists. The command owns `evidence/`
-   entirely and replaces it; git history keeps earlier runs. Never write to
+   entirely and rewrites it; git history keeps earlier runs. Never write to
    `evidence/` yourself, and never keep scripts, spec copies, or per-round
    directories anywhere under `specs/quint/`.
 

@@ -11,7 +11,7 @@ hazard instance in `hazard/` that removes or weakens its rule, with `expect = "v
 
 Run: `cargo xtask lima run -- cargo xtask quint typecheck`, then
 `cargo xtask lima run -- cargo xtask quint check --subsystem guest-flow-owner [--name <check>] [--ci]`.
-Evidence of the last full run: `evidence/summary.md` (written only by `--record`; `cargo xtask quint
+Evidence of the last recorded run: `evidence/summary.md` (written only by `--record`, which re-runs only stale checks unless given `--full`; `cargo xtask quint
 verify-evidence --subsystem guest-flow-owner` fails when it no longer matches the specs).
 
 Decision ids are (INB-1, R2-END, R2-DRAIN,
