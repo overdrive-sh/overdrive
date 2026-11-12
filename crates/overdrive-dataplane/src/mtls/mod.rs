@@ -308,11 +308,13 @@ impl HostMtlsEnforcement {
                 // sees Reset; inbound relay teardown keeps its existing
                 // GuestStream-derived reset decision and graceful probe cleanup.
                 if let Some(state) = conns.lock().get(&id) {
-                    let is_outbound = |role| {
-                        matches!(role, PumpRole::OutboundForward | PumpRole::OutboundReturn)
-                    };
+                    let is_outbound =
+                        |role| matches!(role, PumpRole::OutboundForward | PumpRole::OutboundReturn);
                     let outbound_transport_death = is_outbound(state.pump.state.terminal_role())
-                        || state.aux_pumps.iter().any(|pump| is_outbound(pump.state.terminal_role()));
+                        || state
+                            .aux_pumps
+                            .iter()
+                            .any(|pump| is_outbound(pump.state.terminal_role()));
                     if outbound_transport_death {
                         state.pump.state.reset_peer_on_reclaim.store(true, Ordering::SeqCst);
                     }

@@ -243,8 +243,7 @@ impl Node {
 /// Then the service map holds no backend for the Service's VIP once the
 ///      replica is Terminated.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_stopped_services_last_backend_is_purged_from_the_service_map()
- {
+async fn a_stopped_services_last_backend_is_purged_from_the_service_map() {
     let dir = TempDir::new().expect("tempdir");
     let dataplane = Arc::new(SimDataplane::new());
     let first = Node::boot(&dir, Arc::clone(&dataplane)).await;

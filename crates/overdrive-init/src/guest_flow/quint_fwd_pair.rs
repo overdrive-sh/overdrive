@@ -652,7 +652,8 @@ impl FwdPairGuestDriver {
             vsock.peer_shutdown(SimShutdown::Send);
         }
         let context_open = self.io.forwarder_contexts().first().is_some_and(|context| context.open);
-        let clean_end_completes = self.datagram_clean_end_with_nothing_queued(vsock.received_shutdown())?
+        let clean_end_completes = self
+            .datagram_clean_end_with_nothing_queued(vsock.received_shutdown())?
             && !flags.contains("R");
         if (callback_abort || clean_end_completes)
             && context_open
