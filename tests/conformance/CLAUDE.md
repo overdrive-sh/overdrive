@@ -70,4 +70,7 @@ These rules apply to everything under `tests/conformance/` and specialize
   `tests/conformance/run-native-metal.sh` entrypoint selects exactly those and
   runs them with `--no-capture`; it requires qualified native metal and raises
   the descriptor limit for the in-process production boot. Run them only
-  through `cargo xtask metal run --`.
+  through an ordinary `cargo xtask metal run --`, never `--exclusive`: the
+  wrapper gives each such test its own node view (cgroup subtree, bpffs, run
+  directories, network namespace and vsock CID space), so concurrent runs from
+  different worktrees do not reap one another's guests.

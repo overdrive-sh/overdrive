@@ -103,7 +103,10 @@ build/check/clippy/fmt, doctests, approved xtask build/setup/lint/model
 commands, nextest, the prepared guest-suite executable, and the declared pure
 Sim programs. Other commands refuse before execution. `cargo nextest run`
 always uses the checked-in placement wrapper: host-pure tests keep the original
-exec chain, native-launcher tests get a private local-vsock namespace, and
+exec chain, native-launcher tests get a private node view (network namespace
+in vsock `local` mode, a per-run cgroup namespace and cgroup2 mount, its own
+bpffs, and private `/run/overdrive` and `/run/netns`, so a `serve` boot reclaims
+only that run's state), and
 guest tests run the selected Cargo-built test binary in a fresh instance of
 its declared guest group. The wrapper preserves the selected binary, libtest
 arguments, Nextest helper executables, test environment, retry number, and
@@ -112,7 +115,8 @@ wrapper does not build it on demand. The explicit guest-suite command keeps
 its existing batched group behavior.
 
 Use `--exclusive` for provisioning, physical-host maintenance, or another
-existing command that needs arbitrary privileged authority. It takes exclusive
+existing command that needs arbitrary privileged authority. Never use it to run
+tests: concurrent ordinary runs from different worktrees do not interfere. It takes exclusive
 physical-maintenance ownership and waits for admitted ordinary runs to finish.
 For example, the host module-load step is an explicit administrative command:
 

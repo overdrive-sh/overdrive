@@ -1748,6 +1748,39 @@ and `cargo xtask kmod-load` refuse before START. The reviewed
 exclusive physical-maintenance ownership; `metal shell` and provisioning
 remain exclusive too.
 
+**No test is ever run with `--exclusive`.** Exclusive mode is for physical
+maintenance only (module load, provisioning). A test that cannot run beside a
+concurrent ordinary run from another worktree is a defect in the runner's
+placement, not a reason to serialise the host: the isolation belongs in the
+namespaces the wrapper gives the test body, never in a lock.
+
+A `native-launcher` test body boots `serve` in-process, and `serve` owns
+node-global state: it reclaims the VM cgroup scopes and run directories it does
+not supervise and sweeps the shared nft table. The wrapper therefore runs such a
+body in its own node view, so the appliance's one-serve-per-node behaviour is
+exercised unchanged and no other run's state is visible to reclamation:
+
+| Node-global state | Per-run isolation |
+|---|---|
+| nft tables, routes, rules, links, loopback and gateway listeners, DNS binds | private network namespace |
+| vsock CIDs | the namespace is in vsock `local` mode, so a CID is unique per namespace (`vhost_vsock_get` / `vsock_net_check_mode`, `drivers/vhost/vsock.c`, `include/net/af_vsock.h` @ v7.0) |
+| `overdrive.slice` (reclamation scope), workload scopes | cgroup namespace rooted at a per-run cgroup, with its own cgroup2 mount over `/sys/fs/cgroup` (`cgroup_do_get_tree`, `kernel/cgroup/cgroup.c` @ v7.0); the node's `overdrive.slice/workloads.slice` is pre-created with controllers delegated, as on a node that has run before |
+| bpffs pins (`/sys/fs/bpf/overdrive`) | own bpffs mount; each bpffs mount is its own instance (`get_tree_nodev`, `kernel/bpf/inode.c` @ v7.0) |
+| VM run directories (`/run/overdrive`), named netns (`/run/netns`) | private mount namespace with a tmpfs over each |
+| `ovd_fwd` module state | held per open context, not in a node-wide registry |
+
+The per-run cgroup lives under `/sys/fs/cgroup/overdrive-metal-runs/` and is
+killed and removed when the wrapper's child exits; a run whose wrapper was
+killed is reclaimed by the next wrapper. `/sys/class/net` still shows the host
+network namespace (a fresh sysfs mount for the run's namespace is not part of
+the isolation), so a test observes its own links through netlink, not sysfs.
+
+BPF object ids are kernel-global: no namespace hides another run's loaded maps
+or programs from `bpftool`. A test oracle that enumerates loaded objects by name
+(`bpftool map show`) sees concurrent runs' objects; it selects its own through a
+handle the run holds (a pinned path in the run's bpffs, or the map ids behind its
+own `/proc/self/fd` entries).
+
 On ordinary Metal runs, the checked-in Nextest wrapper is mandatory for every
 profile. It executes the actual selected test ELF and preserves its libtest
 arguments, Nextest helper executables, declared environment, attempt number,
