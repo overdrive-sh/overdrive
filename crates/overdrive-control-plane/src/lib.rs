@@ -343,14 +343,6 @@ pub struct AppState {
     /// itself is async — `tokio::sync::Mutex` rather than `parking_lot`
     /// per `.claude/rules/development.md` § "Concurrency & async" →
     /// "Never hold a lock across `.await`".
-    ///
-    /// 01-02 lands this field and the boot-time construction (rebuilt
-    /// immediately AFTER the allocator's `bulk_load` — ordering is
-    /// load-bearing: the rebuild joins allocator-issued VIPs). The
-    /// submit edge maintenance lands in 01-03; the hydrator
-    /// read-path switch lands in 01-04. After this step the store
-    /// exists and is boot-rebuilt but is not yet mutated on the edge nor
-    /// read by the hydrator.
     pub listener_facts: Arc<tokio::sync::Mutex<crate::listener_facts::ListenerFactStore>>,
     /// Host's IPv4 address for the configured `[dataplane]
     /// client_iface`. Resolved once at boot by

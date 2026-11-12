@@ -8249,6 +8249,9 @@
       "mtls::tests::reclaim_returns_promptly_while_encrypt_pump_blocked_on_full_dst_leg": {
         "kind": "host-pure"
       },
+      "mtls::tests::record_assembler_returns_to_the_caller_after_each_read": {
+        "kind": "host-pure"
+      },
       "mtls::tests::register_installs_self_teardown_trigger_into_every_pump": {
         "kind": "host-pure"
       },

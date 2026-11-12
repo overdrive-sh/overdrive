@@ -276,10 +276,15 @@ impl HostMtlsEnforcement {
         let conns = Arc::clone(&self.conns);
         Arc::new(move || {
             let alloc = id.alloc().clone();
-            let completed = conns
+            // An already-reclaimed connection has nothing left to tear down and no
+            // death to report: a late sibling fire is a no-op.
+            let Some(completed) = conns
                 .lock()
                 .get(&id)
-                .is_some_and(|state| state.pump.state.completed.load(Ordering::SeqCst));
+                .map(|state| state.pump.state.completed.load(Ordering::SeqCst))
+            else {
+                return;
+            };
             if !completed {
                 trace_transport_death_diagnostics(&conns, &id, &alloc);
                 tracing::warn!(
@@ -794,6 +799,10 @@ fn drain_recv_queue(
     Ok(held)
 }
 
+/// Floor for a handshake read timeout: a zero `SO_RCVTIMEO` means "block forever", so
+/// a sub-millisecond remainder of the deadline is rounded up rather than truncated.
+pub(super) const MIN_READ_WAIT: Duration = Duration::from_millis(1);
+
 /// Reads exactly one TLS record at a time from a stream, never consuming a byte
 /// beyond the record's end.
 ///
@@ -832,38 +841,43 @@ impl RecordAssembler {
         Ok((Self::HEADER_LEN + body).saturating_sub(self.buf.len()))
     }
 
-    /// Assemble the next record. `Ok(None)` is a clean EOF on a record boundary;
-    /// an error (including `WouldBlock` from a receive timeout) keeps the partial
-    /// record so the caller can call again.
+    /// Advance assembly of the next record with AT MOST ONE `read`, so every caller
+    /// re-checks its handshake deadline between reads however slowly bytes arrive.
+    /// `Ok(Some(_))` is a whole record; `Ok(None)` is a clean EOF on a record
+    /// boundary; a record still incomplete after the read returns `WouldBlock`
+    /// (the partial record is kept, call again), as does a receive timeout. Any
+    /// other error also keeps the partial record.
     pub(super) fn next_record(
         &mut self,
         stream: &mut dyn Read,
     ) -> std::io::Result<Option<Vec<u8>>> {
-        loop {
-            let missing = self.missing()?;
-            if missing == 0 {
-                return Ok(Some(std::mem::take(&mut self.buf)));
-            }
-            // Read straight into the record buffer's tail: `missing` is bounded by the
-            // 16-bit record length, and a failed or short read trims the tail back.
-            let filled = self.buf.len();
-            self.buf.resize(filled + missing, 0);
-            let read = stream.read(&mut self.buf[filled..]);
-            let n = match read {
-                Ok(n) => n,
-                Err(error) => {
-                    self.buf.truncate(filled);
-                    return Err(error);
-                }
-            };
-            self.buf.truncate(filled + n);
-            if n == 0 {
-                if self.buf.is_empty() {
-                    return Ok(None);
-                }
-                return Err(std::io::ErrorKind::UnexpectedEof.into());
-            }
+        let missing = self.missing()?;
+        if missing == 0 {
+            return Ok(Some(std::mem::take(&mut self.buf)));
         }
+        // Read straight into the record buffer's tail: `missing` is bounded by the
+        // 16-bit record length, and a failed or short read trims the tail back.
+        let filled = self.buf.len();
+        self.buf.resize(filled + missing, 0);
+        let read = stream.read(&mut self.buf[filled..]);
+        let n = match read {
+            Ok(n) => n,
+            Err(error) => {
+                self.buf.truncate(filled);
+                return Err(error);
+            }
+        };
+        self.buf.truncate(filled + n);
+        if n == 0 {
+            if self.buf.is_empty() {
+                return Ok(None);
+            }
+            return Err(std::io::ErrorKind::UnexpectedEof.into());
+        }
+        if self.missing()? == 0 {
+            return Ok(Some(std::mem::take(&mut self.buf)));
+        }
+        Err(std::io::ErrorKind::WouldBlock.into())
     }
 }
 
@@ -1383,6 +1397,45 @@ mod tests {
     use overdrive_core::traits::IdentityRead;
     use overdrive_core::traits::ca::{SvidMaterial, TrustBundle};
     use overdrive_core::traits::mtls_enforcement::MtlsLimits;
+
+    /// Yields one byte per `read` and counts the calls.
+    struct Trickle<'a> {
+        bytes: &'a [u8],
+        reads: usize,
+    }
+
+    impl std::io::Read for Trickle<'_> {
+        fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
+            self.reads += 1;
+            let Some((&first, rest)) = self.bytes.split_first() else {
+                return Ok(0);
+            };
+            out[0] = first;
+            self.bytes = rest;
+            Ok(1)
+        }
+    }
+
+    /// A peer trickling bytes inside one announced record gets back control after every
+    /// read, so the handshake deadline can fire between reads; the record still
+    /// assembles whole once its last byte arrives.
+    #[test]
+    fn record_assembler_returns_to_the_caller_after_each_read() {
+        let body_len = 40usize;
+        let mut record = vec![22, 3, 3, 0, u8::try_from(body_len).expect("fits")];
+        record.extend(std::iter::repeat_n(7u8, body_len));
+        let mut stream = Trickle { bytes: &record, reads: 0 };
+        let mut assembler = super::RecordAssembler::new();
+        for expected_reads in 1..record.len() {
+            let pending = assembler.next_record(&mut stream).expect_err("record still partial");
+            assert_eq!(pending.kind(), std::io::ErrorKind::WouldBlock);
+            assert_eq!(stream.reads, expected_reads, "exactly one read per call");
+        }
+        let whole = assembler.next_record(&mut stream).expect("last byte").expect("record");
+        assert_eq!(whole, record);
+        assert_eq!(stream.reads, record.len());
+    }
+
 
     use super::splice::PumpHandle;
     use super::{ConnState, HostMtlsEnforcement, new_conn_state_bidi, now_unix_nanos};
