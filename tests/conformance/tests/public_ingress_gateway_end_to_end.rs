@@ -80,7 +80,7 @@ use overdrive_system_conformance::gateway::{
     WireCapture, blocking, describe_fd_kind_delta, first_pattern_mismatch, fnv1a,
     in_use_heap_octets, kernel_sample, kill_vmm, live_gateway_counts, nofile_limit, open_fd_kinds,
     open_fds, pattern_bytes, pipe_capacity_octets, receipt_occurrences, rss_kib,
-    run_load_child_if_requested, service_map_entries, settled_kernel_sample, shutdown_stage_events,
+    run_load_child_if_requested, service_map_entries, shutdown_stage_events,
     startup_refusal_reasons, tls_record_types,
 };
 use rustls::CipherSuite;
@@ -146,10 +146,29 @@ async fn native_metal_kvm_public_ingress_gateway_streams_a_workload_response_ove
     world.wait_until_serving().await;
 
     // Baseline kernel state, then the request with a loopback capture running.
-    // The kernel-TLS counters are host-global, so the baseline is taken once
-    // they have stopped moving: a setup socket still closing would otherwise
-    // be counted against the exchange.
-    let baseline = blocking(move || settled_kernel_sample(address)).await;
+    // The kernel-TLS counters are per network namespace (`net/tls/tls_proc.c:41`,
+    // `:52` @ v7.0) and the native-metal wrapper gives each test its own, so only
+    // this test's sockets move them.
+    // The serving wait and its readiness traffic leave kernel-TLS legs that
+    // close asynchronously; the baseline is taken once none is armed, and the
+    // wait fails the test (naming the last sample) if they never close.
+    let baseline = blocking(move || {
+        overdrive_system_conformance::wait_until(
+            Duration::from_secs(30),
+            "the kernel-TLS legs of the setup traffic close before the baseline",
+            || {
+                let sample = kernel_sample(address);
+                sample.public_armed == 0 && sample.upstream_armed == 0
+            },
+        );
+        kernel_sample(address)
+    })
+    .await;
+    assert_eq!(
+        (baseline.tls.get("TlsCurrTxSw"), baseline.tls.get("TlsCurrRxSw")),
+        (0, 0),
+        "no kernel-TLS socket is live at the baseline: {baseline:?}"
+    );
     let capture = blocking(WireCapture::start).await;
     let mark = trace.mark();
     let client = world.client();
@@ -243,12 +262,12 @@ async fn native_metal_kvm_public_ingress_gateway_streams_a_workload_response_ove
         );
     })
     .await;
-    // Host-global counters: unrelated sockets that were live at the baseline
-    // may close, so the legs of this exchange are gone when the counts are no
-    // higher than the baseline (never above it).
-    let after = blocking(move || settled_kernel_sample(address)).await;
-    assert!(after.tls.delta(&baseline.tls, "TlsCurrTxSw") <= 0, "no armed leg remains: {after:?}");
-    assert!(after.tls.delta(&baseline.tls, "TlsCurrRxSw") <= 0, "no armed leg remains: {after:?}");
+    // Per-namespace counters (`net/tls/tls_proc.c:41` @ v7.0): nothing else
+    // moves them, so once the legs close the counts return exactly to the
+    // baseline -- a leaked leg (+1) cannot be offset by an unrelated close.
+    let after = blocking(move || kernel_sample(address)).await;
+    assert_eq!(after.tls.delta(&baseline.tls, "TlsCurrTxSw"), 0, "no armed leg remains: {after:?}");
+    assert_eq!(after.tls.delta(&baseline.tls, "TlsCurrRxSw"), 0, "no armed leg remains: {after:?}");
 
     world.tear_down().await;
 }
@@ -527,9 +546,10 @@ async fn native_metal_kvm_public_ingress_gateway_answers_408_for_a_stalled_reque
 /// Given a serving workload and a request declaring a 1024-octet body
 /// When the client sends ten body octets and then stays silent
 /// Then the answer is 408 after 30 s of no progress (and within 2 s more), and
-///      the workload saw the request head (the gateway forwards the head while
-///      the body is in flight, R-37) but never a completed exchange: the 408 is
-///      the gateway's, not a relayed workload answer.
+///      the workload may have read the request head (the gateway forwards the
+///      head while the body is in flight, R-37) but never completed the exchange
+///      (it did not read the whole body or write an answer): the 408 is the
+///      gateway's, not a relayed workload answer.
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
@@ -556,11 +576,14 @@ async fn native_metal_kvm_public_ingress_gateway_answers_408_for_a_stalled_reque
             && waited <= BODY_NO_PROGRESS_DEADLINE + Duration::from_secs(2),
         "the 408 arrives after the no-progress deadline: {waited:?}"
     );
+    // The 408 is the gateway's: the guest never completed an exchange, so it
+    // wrote no answer for the gateway to relay. (The head may have been
+    // forwarded while the body was in flight, R-37, so the request marker is
+    // not asserted.)
     assert_eq!(
-        world.workload_request_count().await,
-        1,
-        "the guest counted the forwarded head of the stalled request exactly once; its \
-         echo never completed (the client's answer was the gateway's 408)"
+        world.workload_completed_exchange_count().await,
+        0,
+        "the guest completed no exchange: the client's 408 was not a relayed workload answer"
     );
 
     world.tear_down().await;

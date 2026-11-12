@@ -216,6 +216,16 @@ impl Node {
         }
     }
 
+    /// Take the node down with the injected clock frozen: no convergence tick
+    /// can fire during the shutdown, so the service map is exactly what the
+    /// last tick before it left programmed.
+    async fn shutdown_frozen(self) {
+        let Self { handle, .. } = self;
+        if let Err(error) = handle.shutdown(Duration::from_secs(2)).await {
+            eprintln!("diagnostic=node_shutdown_error error={error}");
+        }
+    }
+
     async fn shutdown(self) {
         let Self { handle, clock, .. } = self;
         let mut shutdown = std::pin::pin!(handle.shutdown(Duration::from_secs(2)));
@@ -307,7 +317,7 @@ async fn a_node_restart_purges_the_backend_a_stop_left_programmed_before_the_nod
 
     // WHEN the operator stops the Service and the node goes down at once.
     first.stop_service().await;
-    first.shutdown().await;
+    first.shutdown_frozen().await;
     assert!(
         dataplane.service_vip_keys().iter().any(|vip| dataplane.service_backends(*vip).is_some()),
         "the first lifetime went down with the stopped Service's backend still programmed"

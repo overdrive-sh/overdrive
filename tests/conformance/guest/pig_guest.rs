@@ -12,11 +12,13 @@
 //! octet by octet; every request body is summarised as `len=<n> fnv=<hex>` so
 //! the client can compare what the origin received with what it sent.
 //!
-//! Routes (the request-count marker counts every route except `/ready` and
-//! `/count`):
+//! Routes (the request-count marker counts every route except `/ready`,
+//! `/count` and `/completed`):
 //!
 //! * `GET /ready`: `204`.
-//! * `GET /count`: `requests=<N>`.
+//! * `GET /count`: `requests=<N>` (requests whose head the guest read).
+//! * `GET /completed`: `completed=<N>` (`POST /echo` requests whose whole body
+//!   the guest read and whose answer it wrote).
 //! * `GET /stream`: chunked, `X-Workload: api`, eight chunks 400 ms apart.
 //! * `GET /exact`: `Content-Length` `PIG-EXACT-OK`.
 //! * `GET /bytes/<n>`: `Content-Length: n`, pattern body.
@@ -264,7 +266,7 @@ fn drain(stream: &mut TcpStream) {
     }
 }
 
-fn handle(mut stream: TcpStream, requests: Arc<AtomicU64>) {
+fn handle(mut stream: TcpStream, requests: Arc<AtomicU64>, completed: Arc<AtomicU64>) {
     let Some(head) = read_head(&mut stream) else { return };
     let mut parts = head.request_line.split(' ');
     let method = parts.next().unwrap_or_default().to_owned();
@@ -275,6 +277,11 @@ fn handle(mut stream: TcpStream, requests: Arc<AtomicU64>) {
     }
     if path == "/count" {
         let body = format!("requests={}\n", requests.load(Ordering::SeqCst));
+        write_fixed(&mut stream, "200 OK", body.as_bytes());
+        return;
+    }
+    if path == "/completed" {
+        let body = format!("completed={}\n", completed.load(Ordering::SeqCst));
         write_fixed(&mut stream, "200 OK", body.as_bytes());
         return;
     }
@@ -298,6 +305,7 @@ fn handle(mut stream: TcpStream, requests: Arc<AtomicU64>) {
             Some((length, hash)) => {
                 let body = format!("len={length} fnv={hash:016x}\n");
                 write_fixed(&mut stream, "200 OK", body.as_bytes());
+                completed.fetch_add(1, Ordering::SeqCst);
             }
             None => write_fixed(&mut stream, "400 Bad Request", b"bad body\n"),
         },
@@ -320,12 +328,14 @@ fn handle(mut stream: TcpStream, requests: Arc<AtomicU64>) {
 fn main() {
     let listener = TcpListener::bind(("0.0.0.0", PORT)).expect("bind guest listener");
     let requests = Arc::new(AtomicU64::new(0));
+    let completed = Arc::new(AtomicU64::new(0));
     for incoming in listener.incoming() {
         let stream = incoming.expect("accept connection");
         let requests = Arc::clone(&requests);
+        let completed = Arc::clone(&completed);
         thread::Builder::new()
             .stack_size(256 * 1024)
-            .spawn(move || handle(stream, requests))
+            .spawn(move || handle(stream, requests, completed))
             .expect("spawn connection thread");
     }
 }

@@ -777,7 +777,11 @@ impl PublicConnection {
 // Kernel and process observations (independent of the code under test)
 // ---------------------------------------------------------------------------
 
-/// `/proc/net/tls_stat` (per network namespace, node-global).
+/// `/proc/net/tls_stat`, per network namespace.
+///
+/// `net/tls/tls_proc.c:41` reads `net->mib.tls_statistics` and `:52` registers
+/// it with `proc_create_net_single` (Linux v7.0); the native-metal wrapper
+/// runs each test in a private namespace.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TlsStat(BTreeMap<String, u64>);
 
@@ -1119,7 +1123,7 @@ pub fn live_gateway_counts() -> (usize, usize) {
     (bpf_map_entries("GATEWAY_CONNECT"), bpf_map_entries("GATEWAY_SELECT"))
 }
 
-/// Kernel TLS state at one instant: the node-global counters and the armed
+/// Kernel TLS state at one instant: the test's network-namespace counters and the armed
 /// legs of the gateway at `address`.
 #[derive(Debug, Clone)]
 pub struct KernelSample {
@@ -1138,28 +1142,6 @@ pub fn kernel_sample(address: Ipv4Addr) -> KernelSample {
         tls: TlsStat::read(),
         public_armed: public_leg_sockets(address).iter().filter(|s| s.tls_ulp).count(),
         upstream_armed: armed_upstream_sockets(address).len(),
-    }
-}
-
-/// Sample the kernel TLS state once the counters have settled.
-///
-/// Settled means the node-global current-socket counters were unchanged across
-/// consecutive reads one second apart (at most 30 s), so a socket that is still
-/// closing is not folded into a baseline.
-#[must_use]
-pub fn settled_kernel_sample(address: Ipv4Addr) -> KernelSample {
-    let deadline = Instant::now() + Duration::from_secs(30);
-    let mut previous = kernel_sample(address);
-    loop {
-        thread::sleep(Duration::from_secs(1));
-        let current = kernel_sample(address);
-        let steady = ["TlsCurrTxSw", "TlsCurrRxSw"]
-            .iter()
-            .all(|name| current.tls.delta(&previous.tls, name) == 0);
-        if steady || Instant::now() >= deadline {
-            return current;
-        }
-        previous = current;
     }
 }
 
@@ -1598,21 +1580,32 @@ impl GatewayWorld {
     }
 
     /// The workload's request-count marker, read through the public Route
-    /// (`/count`; health and count requests are not counted by the guest).
+    /// (`/count`; health, count and completed-count requests are not counted by
+    /// the guest). It moves when the guest has read a request head.
     pub async fn workload_request_count(&self) -> u64 {
+        self.workload_marker("/count", "requests=").await
+    }
+
+    /// The workload's completed-exchange marker (`/completed`): `POST /echo`
+    /// requests whose whole body the guest read and whose answer it wrote.
+    pub async fn workload_completed_exchange_count(&self) -> u64 {
+        self.workload_marker("/completed", "completed=").await
+    }
+
+    async fn workload_marker(&self, path: &'static str, prefix: &'static str) -> u64 {
         let client = self.client();
         blocking(move || {
             let response = client
                 .connect()
-                .expect("connect for /count")
-                .exchange(&Request::get("/count"))
-                .expect("GET /count");
+                .expect("connect for the marker")
+                .exchange(&Request::get(path))
+                .unwrap_or_else(|error| panic!("GET {path}: {error:?}"));
             assert_eq!(response.status(), 200, "the marker is readable through the Route");
             String::from_utf8_lossy(&response.body)
                 .trim()
-                .strip_prefix("requests=")
+                .strip_prefix(prefix)
                 .and_then(|n| n.parse().ok())
-                .expect("a requests=<N> marker")
+                .unwrap_or_else(|| panic!("a {prefix}<N> marker"))
         })
         .await
     }
