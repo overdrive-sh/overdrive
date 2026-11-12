@@ -9666,7 +9666,8 @@ the lease `Retiring` until `release`.
 > `verify-evidence`, and independent proof/source review remain mandatory;
 > roadmap validation remains pending.
 
-> **CONFALIGN-1 / -2 / -3 — RULED 2026-11-11 (user approved 2026-11-11).**
+> **CONFALIGN-1 / -2 / -3 — RULED 2026-11-11 (user approved 2026-11-11);
+> CONFALIGN-4 — RULED 2026-11-12 (user approved 2026-11-12), below.**
 > Three conformance failures exposed disagreements between the spec, this delta
 > and production. Each ruling below is the correct contract, not the least
 > change.
@@ -9831,6 +9832,36 @@ the lease `Retiring` until `release`.
 > change. No API, wire or formal state change. Named runs and hazards: none
 > added or removed; `OwnerAbortResetsBothFarEnds` uses `Abort("h")` and is
 > unaffected; the modeler re-runs `fwd_pair` checks that use `Abort("g")`.
+>
+> **CONFALIGN-4 — an `Abort { flow }` closes a flow the guest owner has accepted
+> but not attached, in every mode (RULED, user approval 2026-11-12; no new named
+> run).** The guest owner's abort entry (`Abort { flow }`, CONFALIGN-3) acts on
+> the guest pair's phase. A `live` pair is aborted (descriptors closed in a
+> dispatch of its own, CONFALIGN-3). An accepted-but-unattached flow
+> (`pr(g).ph = unattached`) has no record and no forwarder-owned pair, so the
+> abort closes it immediately, exactly as `CloseUnattached(g)` does. This holds
+> in every mode, watch mode included: the previous text discarded the
+> unattached phase in watch mode and left it in `owner_flows`, which left an
+> accepted flow open at the guest after the host had ended it. `ended` and
+> `refused` phases discard the abort. `strmHeld` never decides guest ownership.
+>
+> Change list (the spec edit goes through the quint-modeler; production and
+> driver are unchanged by this ruling because production already closes the
+> unattached flow on `Abort`; no API, wire or formal state change):
+> - R1 (spec, `fwd_pair.qnt` `GuestAbort`, 615-617): drop the
+>   `cur.mode != "watch"` guard on the unattached branch, so the branch closes
+>   the unattached flow in every mode.
+> - R2 (spec comment, `fwd_pair.qnt` 608-609): state that the unattached close
+>   applies "in every mode".
+> - R3 (this delta, applied in place): the `GuestAbort(g)` row of the
+>   driving-action table now reads "in every mode ... closes an accepted-but-
+>   unattached flow".
+> - R4 (this delta, applied in place): the statement that the accepted-but-
+>   unattached phase "remains in `owner_flows`" is deleted; the same paragraph
+>   now says it is closed in every mode.
+>
+> The modeler re-runs `fwd_pair` in full (`GuestAbort` changes) and re-records
+> evidence; any counterexample is a finding for approval, not an edit made here.
 
 ##### QPROJ-4 — VM driver beacon observation (`VmDriver`, `overdrive-worker`)
 
@@ -10826,7 +10857,7 @@ paired with V-EV-END, V-EV-CTL, V-EV-PAIR and the module's Tier-3 suite.
 | `TcpRst(s, after_fin)` (T-1) | Sim: the far TCP peer resets after or before its FIN; `SimFlowForwarder` runs the half's `sk_error_report` in the same step. `after_fin` equals the far writer's FIN in the state; a trace names it explicitly |
 | `Attach(s)` with an ended half (T-4) | the same owner dispatch as `Attach(s)`; `SimFlowForwarder::attach` / `watch` returns `HalfEnded { side, errno }` from the half's scripted state, and the owner ends the flow in that dispatch |
 | `Abort(h)` on a watch (T-5) | quiescence's first hold, teardown or session loss, selected by the ownership cut. With `strmHeld = false`, abort the watch, queue `Detached`, close the still-owner-held `V_h` (`vs(h).sent = {R,S}`, `sshut = true`, `ctl(hg)` carries `{R,S}`), keep `strmAbort = false` / `hres = none`, return the existing typed pending-dial outcome and set `guestAbortSent = vmUp`. With `strmHeld = true`, preserve EVMOD-STREAM-ABORT: abort the watch, leave holder-owned `V_h` and its queues untouched, set `strmAbort`, wake stream calls and set `guestAbortSent = vmUp` |
-| `GuestAbort(g)` (T-5) | delivery of the existing `Abort { flow }` while `vmUp` and the guest context is open; always clears `guestAbortSent`. In watch mode it aborts `pr(g).ph = live` whether or not a host stream exists, and discards for `unattached`, `ended` or `refused`. Outside watch mode the existing live-pair abort and unattached-flow close remain; ended/refused discards. `strmHeld` never decides guest ownership |
+| `GuestAbort(g)` (T-5) | delivery of the existing `Abort { flow }` while `vmUp` and the guest context is open; always clears `guestAbortSent`. In every mode it aborts `pr(g).ph = live` (whether or not a host stream exists) and closes an accepted-but-unattached flow (`pr(g).ph = unattached`; no record exists, so the close is immediate, CONFALIGN-4); `ended` and `refused` discard. `strmHeld` never decides guest ownership |
 | `HolderDrop(h)` (T-6) | enabled exactly when `strmHeld || live(h)`, in addition to the existing mode/endpoint/fault guard. With `strmHeld`, drop the actual stream: abort a live watch, close `V_h`, set `gh.dropped`, then clear `strmHeld` and `strmAbort`; an already-ended watch adds only the close. With no holder and a live watch, cancel the pending dial, abort its watch, close owner-held `V_h`, retain its `Abort { flow }` outcome and never set `gh.dropped`/`strmAbort`. With no holder and an ended watch it is disabled because disposal of a completed join handle has no protocol effect |
 | `HolderEnd(h)` (T-5, T-9) | enabled only with `strmHeld`; the driver's own `read` on its actual `GuestStream`'s `V_h` in the Sim vsock socket scripts the end fact (`Eof`, or `Err`). The host driver requires `self.stream.is_some()` before touching that socket; this is not a driving port of the owner |
 | `Reopen(s)` | the host owner's `Forwarder` recovery: `abort_all` (`Abort` in the model), the drop of the old `KernelFlowForwarder` (`CtxRelease`), `KernelFlowForwarder::open()` and `probe()` (`Reopen`) |
@@ -13827,9 +13858,8 @@ variables", by the spec's names).
     late local guest attach after host cancellation therefore cannot
     manufacture a holder call. `GuestAbort(g)` instead follows the actual
     guest pair: a live pair is aborted whether `strmHeld` is true or false;
-    watch-mode unattached/ended/refused phases discard it. Every delivery
-    clears `guestAbortSent`; the accepted-but-unattached V_g phase remains in
-    `owner_flows`, where its actual owner closes it.
+    an accepted-but-unattached flow is closed in every mode (CONFALIGN-4);
+    ended/refused phases discard it. Every delivery clears `guestAbortSent`.
   - `CtxRelease(h)` still shuts every **live** watch's `V_h` with
     `SHUT_RDWR` (the guest sees `0x3`), and the holder's read after a release
     is non-deterministically `Eof` or `Err` (F11, below). In a recovery with

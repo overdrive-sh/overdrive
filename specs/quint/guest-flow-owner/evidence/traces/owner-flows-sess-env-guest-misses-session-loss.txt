@@ -1,4 +1,4 @@
-# owner-flows-sess-env-guest-misses-session-loss: counterexample, 13 state(s) (from the TLC trace)
+# owner-flows-sess-env-guest-misses-session-loss: counterexample, 17 state(s) (from the TLC trace)
 
 State 1
   bHeldByOther = FALSE
@@ -37,42 +37,59 @@ State 2 [Provision]
   gen = 1
   alloc = "Provisioned"
 
-State 3 [Teardown]
+State 3 [VmStart]
+  vmGen = 1
+  vmUp = TRUE
+
+State 4 [step]
+  gSess = 1
+  sess = <<[st |-> "pending", gen |-> 1], [st |-> "none", gen |-> 0]>>
+
+State 5 [step]
+  sess = <<[st |-> "reading", gen |-> 1], [st |-> "none", gen |-> 0]>>
+
+State 6 [VmStop]
+  gSess = 0
+  sess = <<[st |-> "closed", gen |-> 1], [st |-> "none", gen |-> 0]>>
+  vmUp = FALSE
+
+State 7 [Teardown]
   alloc = "Retiring"
 
-State 4 [Release]
+State 8 [Release]
   alloc = "Absent"
 
-State 5 [Provision]
+State 9 [Provision]
   gen = 2
   alloc = "Provisioned"
 
-State 6 [VmStart]
+State 10 [VmStart]
   vmGen = 2
   vmUp = TRUE
 
-State 7 [step]
-  gSess = 1
-  sess = <<[st |-> "pending", gen |-> 2], [st |-> "none", gen |-> 0]>>
-
-State 8 [step]
-  sess = <<[st |-> "reading", gen |-> 2], [st |-> "none", gen |-> 0]>>
-
-State 9 [step]
-  sess = <<[st |-> "reading", gen |-> 2], [st |-> "pending", gen |-> 2]>>
-
-State 10 [step]
-  sess = <<[st |-> "live", gen |-> 2], [st |-> "pending", gen |-> 2]>>
-  claim = 1
-
 State 11 [step]
-  sess = <<[st |-> "live", gen |-> 2], [st |-> "reading", gen |-> 2]>>
+  gSess = 2
+  sess = <<[st |-> "closed", gen |-> 1], [st |-> "pending", gen |-> 2]>>
 
 State 12 [step]
-  sess = <<[st |-> "live", gen |-> 2], [st |-> "closed", gen |-> 2]>>
+  sess = <<[st |-> "closed", gen |-> 1], [st |-> "reading", gen |-> 2]>>
 
 State 13 [step]
-  sess = <<[st |-> "closed", gen |-> 2], [st |-> "closed", gen |-> 2]>>
+  sess = <<[st |-> "closed", gen |-> 1], [st |-> "live", gen |-> 2]>>
+  claim = 2
+
+State 14 [step]
+  sess = <<[st |-> "closed", gen |-> 1], [st |-> "closed", gen |-> 2]>>
   claim = 0
 
--> stutters forever in State 13
+State 15 [ActivatePending]
+  act = "ControlSessionPending"
+
+State 16 [step]
+  quiesced = TRUE
+  act = "none"
+
+State 17 [step]
+  quiesced = FALSE
+
+-> loops back to State 15

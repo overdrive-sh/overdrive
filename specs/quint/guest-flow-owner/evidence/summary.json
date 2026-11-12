@@ -1,9 +1,9 @@
 {
   "schema": 1,
   "subsystem": "guest-flow-owner",
-  "run_id": "1386913-1794428560.971",
-  "started": "2026-11-11T20:22:40.971080192Z",
-  "finished": "2026-11-11T21:16:40.214809088Z",
+  "run_id": "313702-1794496750.649",
+  "started": "2026-11-12T15:19:10.648688384Z",
+  "finished": "2026-11-12T16:13:59.554272768Z",
   "jobs": 16,
   "tools": {
     "quint": "0.32.0",
@@ -12,14 +12,14 @@
     "kernel": "7.0.0-38-generic"
   },
   "git": {
-    "head": "1c1fda2c49d179386a578ba82245e1c96a49c67d",
+    "head": "bc0ed58b4f84622d57337cc16c6d98a76338c3fa",
     "dirty": true
   },
   "inputs": {
     "checks.toml": "437b70ad1040f296d972914164ef7091389c6a6916d74ff9097c8918628e5aec",
     "cid_lease.qnt": "c0e3b2b077067ae1fff8c1e61f055bdc18c384a64af4d2f7592747e556464481",
     "flow_quota.qnt": "a12f04068bced9c64b475e4cc4192f13ba6329fdd11cc148595a7f686c24fd04",
-    "fwd_pair.qnt": "000b46e7b6a838ade6eba94c7b1fc94f80bba804eb067daae617ff6f984173d6",
+    "fwd_pair.qnt": "1a3d37f76c7bed32bee7fea1daee3f5d49c61998cc62558ec69fbcd1902163e5",
     "fwd_safe.qnt": "e6816f0345a5d777837034596597367f3c66a970866ea1efd57082e983d76884",
     "hazard/cid_lease_hazards.qnt": "ecb9b43b51088fd3b6b1dfaf0aff39c93acf97a0ee4ecbc07c2019de587f217a",
     "hazard/flow_quota_hazards.qnt": "b733d9e77903cfc4cc89de82def12ec6bd86102c262118006a0a27be3ebade05",
@@ -58,14 +58,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 2464.978,
+      "seconds": 2582.441,
       "retry_seconds": 0.0,
-      "wall_seconds": 2464.978,
+      "wall_seconds": 2582.441,
       "timeout_secs": 3600,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "5ead46c39af91cb4080c6a9a0e5021ed529143922c57bdb29ec8b349be3d18e4",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-two-safety-apalache",
@@ -79,14 +81,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 1903.745,
+      "seconds": 2050.498,
       "retry_seconds": 0.0,
-      "wall_seconds": 1903.746,
+      "wall_seconds": 2050.498,
       "timeout_secs": 3600,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "77bff5db900b89198b39a1c52e5c916a23efaa6db110d788756e71a4ce4ca7b5",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-guest-half-ends",
@@ -100,14 +104,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 292.177,
+      "seconds": 293.634,
       "retry_seconds": 0.0,
-      "wall_seconds": 292.178,
+      "wall_seconds": 293.634,
       "timeout_secs": 1800,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "83c989d2740cb83a377d13aa622ac54a1e758157bc6f0be8c716cac228c645a2",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-witness-phantom-connect",
@@ -121,14 +127,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 139.78,
+      "seconds": 139.012,
       "retry_seconds": 0.0,
-      "wall_seconds": 139.78,
+      "wall_seconds": 139.012,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/owner-flows-witness-phantom-connect.itf.json",
       "condensed": "traces/owner-flows-witness-phantom-connect.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "05f75ec881da587b7ce33ae1f52d0157d9cbe079f83c12250624fcc32d381b32",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-hazard-split-claim",
@@ -142,14 +150,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 141.708,
+      "seconds": 147.28,
       "retry_seconds": 0.0,
-      "wall_seconds": 141.708,
+      "wall_seconds": 147.281,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/owner-flows-hazard-split-claim.itf.json",
       "condensed": "traces/owner-flows-hazard-split-claim.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "ca6263f3a48b3fce9c97b9b4a3d46313cfab4f9114f11f3c9f4c7554e245ffac",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-hazard-attach-before-read",
@@ -163,14 +173,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 127.614,
+      "seconds": 126.307,
       "retry_seconds": 0.0,
-      "wall_seconds": 127.614,
+      "wall_seconds": 126.307,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/owner-flows-hazard-attach-before-read.itf.json",
       "condensed": "traces/owner-flows-hazard-attach-before-read.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "e140d58cc8cb99e3410154eaef00c461696234e6cf74cfd46ceeb4ffe492220c",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-hazard-no-abort-on-loss",
@@ -184,14 +196,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 191.635,
+      "seconds": 180.089,
       "retry_seconds": 0.0,
-      "wall_seconds": 191.635,
+      "wall_seconds": 180.089,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/owner-flows-hazard-no-abort-on-loss.itf.json",
       "condensed": "traces/owner-flows-hazard-no-abort-on-loss.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "0ca1c6a1c7a1bbfa371df72437c84a017c37423adcfda761a4c75b650556b510",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-hazard-late-paired-resurrects",
@@ -205,14 +219,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 157.942,
+      "seconds": 176.708,
       "retry_seconds": 0.0,
-      "wall_seconds": 157.942,
+      "wall_seconds": 176.708,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/owner-flows-hazard-late-paired-resurrects.itf.json",
       "condensed": "traces/owner-flows-hazard-late-paired-resurrects.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "dbae2be29bfd69b3bab2664505ad49a6d1e00585fcbc2ed6f75757431e40f35f",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-session-becomes-live",
@@ -226,14 +242,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 20.739,
+      "seconds": 24.808,
       "retry_seconds": 0.0,
-      "wall_seconds": 20.739,
+      "wall_seconds": 24.809,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "78f0ada4c836621ce7baf66421e6b55230b39c0dd99bbe668f483cb9056a12c7",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-sess-env-guest-misses-session-loss",
@@ -247,14 +265,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 21.262,
+      "seconds": 24.818,
       "retry_seconds": 0.0,
-      "wall_seconds": 21.262,
+      "wall_seconds": 24.819,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/owner-flows-sess-env-guest-misses-session-loss.tlc.txt",
       "condensed": "traces/owner-flows-sess-env-guest-misses-session-loss.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "248e7bbad7759a38d81029e203ef920e50b3ae819cfcb3a1a0adc68b62b44eb8",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-hazard-peer-cid-only-message",
@@ -268,14 +288,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 37.122,
+      "seconds": 43.017,
       "retry_seconds": 0.0,
-      "wall_seconds": 37.122,
+      "wall_seconds": 43.017,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/owner-flows-hazard-peer-cid-only-message.tlc.txt",
       "condensed": "traces/owner-flows-hazard-peer-cid-only-message.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "94423d360e9b009dc72652df413d6a17af4ec6e8924986d10ff398724ee1d7ce",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-hazard-no-claim-recheck-held",
@@ -289,14 +311,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 36.384,
+      "seconds": 41.763,
       "retry_seconds": 0.0,
-      "wall_seconds": 36.384,
+      "wall_seconds": 41.763,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/owner-flows-hazard-no-claim-recheck-held.tlc.txt",
       "condensed": "traces/owner-flows-hazard-no-claim-recheck-held.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "238f75d70351092dd239c7246bb751d6d600680b4b8a9271a03da7cba0e9b942",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-beacon-current-launch",
@@ -310,14 +334,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 19.989,
+      "seconds": 24.808,
       "retry_seconds": 0.0,
-      "wall_seconds": 19.989,
+      "wall_seconds": 24.809,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "362783c4dac95de88d5e30c9f484869d274175e38212b93e269f6f858ceb0505",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-beacon-no-cross-launch-ready",
@@ -331,14 +357,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 20.242,
+      "seconds": 24.049,
       "retry_seconds": 0.0,
-      "wall_seconds": 20.242,
+      "wall_seconds": 24.049,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "534f53c96603537e838178c5ef87302251128cc81e86cf60b88835909efbc99e",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-beacon-no-cross-launch-held",
@@ -352,14 +380,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 19.99,
+      "seconds": 23.06,
       "retry_seconds": 0.0,
-      "wall_seconds": 19.99,
+      "wall_seconds": 23.06,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "60da25b5a5baad26aeabb52b3a34f1580b8670c78e6dfa506ddcc55506cb8342",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-beacon-ready-released",
@@ -373,14 +403,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 19.479,
+      "seconds": 23.79,
       "retry_seconds": 0.0,
-      "wall_seconds": 19.479,
+      "wall_seconds": 23.79,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "fcdd4bc628c5f193f4cbb1f732ef319a682f56ccb0eacd817828438e61bd3921",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-run-ok-guest-reopens-session-only-after-observing-its-loss",
@@ -394,14 +426,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 6.07,
+      "seconds": 6.835,
       "retry_seconds": 0.0,
-      "wall_seconds": 6.071,
+      "wall_seconds": 6.835,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "8f4d54aedd1f346fef2b94e03bb79da88c007d032fd1576195f0782598a95bc1",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-run-ok-guest-observes-session-loss-then-reopens",
@@ -415,14 +449,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 5.308,
+      "seconds": 5.565,
       "retry_seconds": 0.0,
-      "wall_seconds": 5.308,
+      "wall_seconds": 5.565,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "0b2f1d1d4b024aed4dc207033bb26df0f22d6d9354c278048da93cb1e5c72d5e",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-run-ok-vm-stop-clears-the-guest-session",
@@ -436,14 +472,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 5.557,
+      "seconds": 6.33,
       "retry_seconds": 0.0,
-      "wall_seconds": 5.557,
+      "wall_seconds": 6.33,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "3013e282f3aae14a6993ea88e388532588502788fb0b7ca4fe83f9ed48a9bcaa",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-run-beacon-vm-exit-ends-launch-and-releases-beacon-claim",
@@ -457,14 +495,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 5.82,
+      "seconds": 5.568,
       "retry_seconds": 0.0,
-      "wall_seconds": 5.82,
+      "wall_seconds": 5.568,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "8d1dcdcc5089e686c43dfe2b4c99b738e510392eb79cc411dbed5ad3b2484b92",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-run-ok-control-session-opens-and-cid-activates",
@@ -478,14 +518,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 5.806,
+      "seconds": 5.562,
       "retry_seconds": 0.0,
-      "wall_seconds": 5.806,
+      "wall_seconds": 5.563,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "fe9fe36b840cd931214abc14fb22b0868e5edf25fbd3094e80992a9f31121354",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-run-ok-guest-opened-flow-is-admitted-read-attached-and-paired",
@@ -499,14 +541,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 5.84,
+      "seconds": 5.563,
       "retry_seconds": 0.0,
-      "wall_seconds": 5.841,
+      "wall_seconds": 5.564,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "4f67dde14b215d77fea5469a601418dc697bc5b8b155f479ca5a6ad1403cf83a",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-run-ok-request-read-in-pieces-attaches-only-after-full-read",
@@ -520,14 +564,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 5.556,
+      "seconds": 5.828,
       "retry_seconds": 0.0,
-      "wall_seconds": 5.556,
+      "wall_seconds": 5.828,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "d1ddc92979f7aaecff741d777b38721ff9869d5d3988ef5ea8a47c4458988d91",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-run-ok-racing-first-connects-leave-one-live-session",
@@ -541,14 +587,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 5.815,
+      "seconds": 6.077,
       "retry_seconds": 0.0,
-      "wall_seconds": 5.816,
+      "wall_seconds": 6.077,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "f138889302196e4904279fbbad7427dc1ce146b4e2711eb1ab7f900893bed959",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-run-ok-session-loss-aborts-flows-and-reconnect-restores",
@@ -562,14 +610,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 5.558,
+      "seconds": 6.844,
       "retry_seconds": 0.0,
-      "wall_seconds": 5.558,
+      "wall_seconds": 6.844,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "897cf4d60cc66b4add015e53037f495f82c065a1f50c1634f3d58f1d317bfb35",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-run-ok-quiesce-aborts-flows-and-refuses-admission-until-restore",
@@ -583,14 +633,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 5.556,
+      "seconds": 5.314,
       "retry_seconds": 0.0,
-      "wall_seconds": 5.556,
+      "wall_seconds": 5.314,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "489e3d609faeb31fa6b8334f022fd153db32e5c27e5a8e2f5bc7701d841c7f47",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-run-ok-activation-waits-for-quiescence-to-end",
@@ -604,14 +656,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 5.307,
+      "seconds": 5.566,
       "retry_seconds": 0.0,
-      "wall_seconds": 5.307,
+      "wall_seconds": 5.567,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "9643e16f73254984bf411fdd86fda79eb810faf093fa86547b56771174f3cef5",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-run-ok-in-flight-connect-of-aborted-flow-is-discarded",
@@ -625,14 +679,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 5.568,
+      "seconds": 5.315,
       "retry_seconds": 0.0,
-      "wall_seconds": 5.568,
+      "wall_seconds": 5.316,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "662401b88a51f6895fdf61a357a3eec4709692a040968ac14be4dcfec4c084ca",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-run-ok-attributed-flow-ends-and-cid-keeps-serving",
@@ -646,14 +702,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 5.309,
+      "seconds": 6.076,
       "retry_seconds": 0.0,
-      "wall_seconds": 5.31,
+      "wall_seconds": 6.076,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "72ca4da0676ea2ca6c90390873e28c04e438934cabb91e42c55370e69e85c8e2",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-run-ok-teardown-aborts-everything-then-cid-is-leased-again",
@@ -667,14 +725,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 5.564,
+      "seconds": 5.821,
       "retry_seconds": 0.0,
-      "wall_seconds": 5.564,
+      "wall_seconds": 5.821,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "a005a609d53fad2c5ac6241e91505b278dc3b887ebb18a9dc4e586c2678d8bff",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-run-ok-stale-launch-session-is-closed-at-read-and-does-not-poison-claim",
@@ -688,14 +748,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 5.821,
+      "seconds": 5.329,
       "retry_seconds": 0.0,
-      "wall_seconds": 5.821,
+      "wall_seconds": 5.329,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "30f76d227b3ae02218053670c9af6ac57543f9964268d234010a07a8de28fbca",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-run-ok-teardown-between-accept-and-read-closes-without-claim",
@@ -709,14 +771,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 5.561,
+      "seconds": 6.836,
       "retry_seconds": 0.0,
-      "wall_seconds": 5.561,
+      "wall_seconds": 6.836,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "7436bccd0f8caf642bca09f101aa16ba1c37dfeda234bf331ea915dc7382bec4",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-run-ok-stale-launch-flow-is-closed-at-request-read-with-no-message",
@@ -730,14 +794,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 5.575,
+      "seconds": 5.564,
       "retry_seconds": 0.0,
-      "wall_seconds": 5.575,
+      "wall_seconds": 5.564,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "1c45c57197a04b953a8fd92e1d8fdf8f96d6adc8be9d888535923a9cecf1f33f",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-run-ok-vm-death-makes-live-session-dead-then-loss-is-processed",
@@ -751,14 +817,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 6.092,
+      "seconds": 6.336,
       "retry_seconds": 0.0,
-      "wall_seconds": 6.092,
+      "wall_seconds": 6.336,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "3032d9b2dc67570bd773eb5ab92d29187b3301280b6281e85c421009be9751b2",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-run-ok-dial-pairs-and-returns-stream",
@@ -772,14 +840,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 6.067,
+      "seconds": 5.565,
       "retry_seconds": 0.0,
-      "wall_seconds": 6.067,
+      "wall_seconds": 5.565,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "a22d4390a169bb620413c4c3e8d0da3e8449197d6d69031707d0a15f0660c68f",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-run-ok-dial-refused-returns-typed-error",
@@ -793,14 +863,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 5.323,
+      "seconds": 5.325,
       "retry_seconds": 0.0,
-      "wall_seconds": 5.323,
+      "wall_seconds": 5.325,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "c698e55380b07106f4e9b8778cdd91c450cc869d573609a54e946ee81d88d4e9",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-run-ok-dial-aborted-before-guest-accepts-ends-by-host-close",
@@ -814,14 +886,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 6.066,
+      "seconds": 5.312,
       "retry_seconds": 0.0,
-      "wall_seconds": 6.066,
+      "wall_seconds": 5.312,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "7ab921f8c80aacc4ef00d0b2fed98a41aec61e29ff7d560ff22e6990ce19fac5",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-run-ok-dial-queued-vg-is-reset-by-host-close",
@@ -835,14 +909,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 6.074,
+      "seconds": 6.079,
       "retry_seconds": 0.0,
-      "wall_seconds": 6.074,
+      "wall_seconds": 6.079,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "b7a0ae6d7e75adfd47934d146fe2fd9cfde89a3f6de54261542a1715694fa2b1",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-run-ok-late-paired-for-closed-host-flow-is-discarded",
@@ -856,14 +932,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 6.819,
+      "seconds": 5.304,
       "retry_seconds": 0.0,
-      "wall_seconds": 6.819,
+      "wall_seconds": 5.305,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "937fe0404e6bfbca49042d5da2d5558182cee90cb97a88734c025d1040a210fa",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-run-ok-session-loss-aborts-dial-on-both-sides",
@@ -877,14 +955,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 5.312,
+      "seconds": 5.831,
       "retry_seconds": 0.0,
-      "wall_seconds": 5.312,
+      "wall_seconds": 5.831,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "59656a23e06f274e11d5fb2490e4b29bd6db6285dbed3e5ecb4eef12d5bd54f4",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-run-ok-quiesce-aborts-dial-and-sends-abort",
@@ -898,14 +978,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 5.818,
+      "seconds": 6.07,
       "retry_seconds": 0.0,
-      "wall_seconds": 5.818,
+      "wall_seconds": 6.07,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "083e5a3b1f7123dd97f54d5e0992dd4e8d8034e48d9b647909135ba7d7c64696",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-run-beacon-beacon-ready-released-then-driver-stop-releases-claim",
@@ -919,14 +1001,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 5.822,
+      "seconds": 5.813,
       "retry_seconds": 0.0,
-      "wall_seconds": 5.822,
+      "wall_seconds": 5.813,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "3dbf111951f9e3a3586ca892f45687dcae48dd5597e9fc90740f3b6df3a69a9a",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-run-beacon-beacon-after-driver-stop-is-refused-at-accept",
@@ -940,14 +1024,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 5.058,
+      "seconds": 5.574,
       "retry_seconds": 0.0,
-      "wall_seconds": 5.058,
+      "wall_seconds": 5.574,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "a0f4d2c2bd13ac9a14e27d237b6587428ab97537ef043e2259692a342de5b5f4",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-run-beacon-driver-stop-between-accept-and-ready-closes-without-claim",
@@ -961,14 +1047,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 6.069,
+      "seconds": 5.567,
       "retry_seconds": 0.0,
-      "wall_seconds": 6.069,
+      "wall_seconds": 5.567,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "2b0205b37a10a95a5209ce27e26ade7c3c28b8a443159eec855f3a4bc8110c0b",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-run-beacon-stale-launch-beacon-is-closed-at-ready-and-does-not-poison-claim",
@@ -982,14 +1070,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 5.307,
+      "seconds": 6.329,
       "retry_seconds": 0.0,
-      "wall_seconds": 5.307,
+      "wall_seconds": 6.329,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "a74d7459922d06177fd099c9b1117b48ad4b6a826f61a02a8bb810250b66c4a9",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-run-beacon-second-beacon-connection-of-same-launch-is-held",
@@ -1003,14 +1093,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 5.559,
+      "seconds": 5.82,
       "retry_seconds": 0.0,
-      "wall_seconds": 5.559,
+      "wall_seconds": 5.82,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "3a4d6c91f3893cd293bb5e00fd69b43de4e668102a714540996722c8edf7d09c",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-run-beacon-vm-death-closes-unread-beacon-connection",
@@ -1024,14 +1116,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 5.567,
+      "seconds": 5.573,
       "retry_seconds": 0.0,
-      "wall_seconds": 5.567,
+      "wall_seconds": 5.574,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "cf7d9bce61ade28f84dd6a27b6d24ae83d3632e84af8f48e2eb1049be0de90ec",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-hazard-no-accepted-watch",
@@ -1045,14 +1139,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 34.879,
+      "seconds": 41.523,
       "retry_seconds": 0.0,
-      "wall_seconds": 34.88,
+      "wall_seconds": 41.523,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/owner-flows-hazard-no-accepted-watch.tlc.txt",
       "condensed": "traces/owner-flows-hazard-no-accepted-watch.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "86dd6744b9e0010a612b8bf1a604de6c4ce8ad5d34f8d0ab2890b181a0807cc9",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-run-ok-accepted-vg-host-close-ends-flow-silently",
@@ -1066,14 +1162,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 5.57,
+      "seconds": 6.082,
       "retry_seconds": 0.0,
-      "wall_seconds": 5.57,
+      "wall_seconds": 6.082,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "ef63722f458edf6748aa2d004aa5de7eca8f2f73ef1442a642087a6e68dcecc7",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-run-ok-accepted-vg-error-aborts-with-abort",
@@ -1087,14 +1185,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 6.074,
+      "seconds": 6.067,
       "retry_seconds": 0.0,
-      "wall_seconds": 6.074,
+      "wall_seconds": 6.068,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "5977ba2cefb50b68e1a5574d7723828a825ed94f024e9c4ca12e8245cc8a266b",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-run-two-session-loss-aborts-all-flows-before-reconnect",
@@ -1108,14 +1208,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 5.574,
+      "seconds": 5.572,
       "retry_seconds": 0.0,
-      "wall_seconds": 5.574,
+      "wall_seconds": 5.572,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "c5b6ca27d2ba428186d0449276f3775c34d77af9fa3f43d7da273c98cd5c900e",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-hazard-beacon-no-live-recheck",
@@ -1129,14 +1231,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 23.548,
+      "seconds": 26.816,
       "retry_seconds": 0.0,
-      "wall_seconds": 23.548,
+      "wall_seconds": 26.816,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/owner-flows-hazard-beacon-no-live-recheck.tlc.txt",
       "condensed": "traces/owner-flows-hazard-beacon-no-live-recheck.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "cf910ab194104d22dbc6b8e6882542dab58d576a95bfccf47e3023a4d524adb3",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-hazard-beacon-peer-cid-only",
@@ -1150,14 +1254,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 24.261,
+      "seconds": 27.079,
       "retry_seconds": 0.0,
-      "wall_seconds": 24.262,
+      "wall_seconds": 27.08,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/owner-flows-hazard-beacon-peer-cid-only.tlc.txt",
       "condensed": "traces/owner-flows-hazard-beacon-peer-cid-only.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "3e9cb58c445da80ddc3fae57b7e6c6f07ce5c7e018968d190b242b4f2d264375",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-run-ok-dial-timed-out-returns-typed-error",
@@ -1171,14 +1277,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 5.568,
+      "seconds": 6.067,
       "retry_seconds": 0.0,
-      "wall_seconds": 5.568,
+      "wall_seconds": 6.067,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "9790b2000c89294387299f98b78a9de199921adf0300de1a411e672861c42684",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-run-ok-dial-not-serving-is-atyped-result-with-no-state-change",
@@ -1192,14 +1300,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 5.307,
+      "seconds": 5.558,
       "retry_seconds": 0.0,
-      "wall_seconds": 5.307,
+      "wall_seconds": 5.558,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "d0251c50aad11f4d426a7806d4e998e0ff6143d5bcd86f67de606f0c91e53a96",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-run-ok-dial-while-quiesced-is-atyped-result-with-no-state-change",
@@ -1213,14 +1323,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 5.303,
+      "seconds": 6.584,
       "retry_seconds": 0.0,
-      "wall_seconds": 5.303,
+      "wall_seconds": 6.584,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "92c42f404b99d46c2354613b0454d70b6caa6646f06eaf1c736c6366474cec86",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-run-ok-dial-without-live-session-is-atyped-result-with-no-state-change",
@@ -1234,14 +1346,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 5.314,
+      "seconds": 5.306,
       "retry_seconds": 0.0,
-      "wall_seconds": 5.314,
+      "wall_seconds": 5.306,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "977f10aa875d2ab71e13cbdff175e06670b812aed780eecba007f8b72e203fe3",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-run-ok-dial-to-agone-vm-is-unreachable",
@@ -1255,14 +1369,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 5.813,
+      "seconds": 5.314,
       "retry_seconds": 0.0,
-      "wall_seconds": 5.813,
+      "wall_seconds": 5.314,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "602f0e9c16ea1c95427d487444a767f0f2e64a3aca07ce600db3af95c34db126",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-run-ok-dial-after-observed-session-loss-with-vm-gone-returns-no-session",
@@ -1276,14 +1392,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 5.323,
+      "seconds": 5.829,
       "retry_seconds": 0.0,
-      "wall_seconds": 5.323,
+      "wall_seconds": 5.829,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "71eedef337118d8a767d6393cc15958d0daa07d2e74577e94caa8d9de859606a",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-run-ok-pairing-deadline-waits-for-the-guest-answer",
@@ -1297,14 +1415,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 5.826,
+      "seconds": 6.328,
       "retry_seconds": 0.0,
-      "wall_seconds": 5.826,
+      "wall_seconds": 6.328,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "b4c1c3881861de41924d926359a228cd42b750a24560cf6325e8f81e2481a19a",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-run-ok-pairing-deadline-fires-only-after-guest-timeout-and-late-reply-is-discarded",
@@ -1318,14 +1438,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 5.584,
+      "seconds": 5.576,
       "retry_seconds": 0.0,
-      "wall_seconds": 5.585,
+      "wall_seconds": 5.576,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "62b97ca7b12fad8bc9e9c03bdeb4c137e9a5d27115041c5aa9e6e35d353e3ded",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-run-ok-vm-exit-during-dial-returns-unreachable-reset",
@@ -1339,14 +1461,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 5.552,
+      "seconds": 5.819,
       "retry_seconds": 0.0,
-      "wall_seconds": 5.552,
+      "wall_seconds": 5.82,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "f9a6b85dff4597aa718c061132a145dd2eeda67da303d196caec3a9a0a65d365",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-run-ok-vm-exit-during-dial-leaves-no-pairing-deadline",
@@ -1360,14 +1484,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 5.559,
+      "seconds": 5.556,
       "retry_seconds": 0.0,
-      "wall_seconds": 5.559,
+      "wall_seconds": 5.557,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "e85a0523cdcd3823a701886c7ab7ee201b8e6e382ac0d6def3db84799a41837a",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-run-ok-pairing-deadline-ends-dial-to-a-live-vm-whose-guest-never-replies",
@@ -1381,14 +1507,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 5.569,
+      "seconds": 5.819,
       "retry_seconds": 0.0,
-      "wall_seconds": 5.569,
+      "wall_seconds": 5.82,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "92dbb0c34a5402d549711b69af78c063e4440f6ea7222771b3bf19f674d6e964",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-run-ok-dropped-dial-future-ends-like-the-pairing-deadline",
@@ -1402,14 +1530,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 5.568,
+      "seconds": 5.832,
       "retry_seconds": 0.0,
-      "wall_seconds": 5.569,
+      "wall_seconds": 5.832,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "d5818f86935c1265645e9de9418254c973c85f1d7b1541e36f5ee10382734378",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-run-ok-teardown-ends-pending-dial-with-not-serving",
@@ -1423,14 +1553,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 5.059,
+      "seconds": 5.823,
       "retry_seconds": 0.0,
-      "wall_seconds": 5.059,
+      "wall_seconds": 5.824,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "c42f9218bd8e141e0019d00ccff2afdb593ffc550db8f657484b3ba4b6d58411",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-run-two-dial-after-reconnect-pairs",
@@ -1444,14 +1576,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 6.583,
+      "seconds": 5.319,
       "retry_seconds": 0.0,
-      "wall_seconds": 6.583,
+      "wall_seconds": 5.319,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "434adc83ed16410298c9247d61d46d5a6da7dc7747b9d6333e09bcb30b7e87d5",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-run-ok-activation-is-impossible-while-the-session-is-pending",
@@ -1465,14 +1599,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 5.821,
+      "seconds": 6.582,
       "retry_seconds": 0.0,
-      "wall_seconds": 5.821,
+      "wall_seconds": 6.582,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "c32e3219ba7ec100eaada25bbbffcbf390a58bd9c1ed7b7136bd6c78ea87a5b2",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-run-ok-activation-with-session-pending-returns-pending-then-activates",
@@ -1486,14 +1622,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 5.81,
+      "seconds": 5.825,
       "retry_seconds": 0.0,
-      "wall_seconds": 5.811,
+      "wall_seconds": 5.825,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "2682ac5338e97740f04fe005f6aae6e1519f4e40bdd78653b2479de66356ad67",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-run-ok-activate-after-teardown-is-refused-and-changes-nothing",
@@ -1507,14 +1645,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 6.082,
+      "seconds": 5.807,
       "retry_seconds": 0.0,
-      "wall_seconds": 6.082,
+      "wall_seconds": 5.807,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "1837cc109b3acbfeb098607a0cb00207fd4cba9487f43a8fdb0d7594e55e2d6a",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-run-ok-activate-after-teardown-never-activates",
@@ -1528,14 +1668,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 5.304,
+      "seconds": 6.582,
       "retry_seconds": 0.0,
-      "wall_seconds": 5.304,
+      "wall_seconds": 6.582,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "779d5e48f7a0c6067c3c5d12b3676827ab69bc61b77c5fde0f3d33bcccfd0203",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-hazard-dial-no-admission",
@@ -1549,14 +1691,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 96.368,
+      "seconds": 98.32,
       "retry_seconds": 0.0,
-      "wall_seconds": 96.368,
+      "wall_seconds": 98.32,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/owner-flows-hazard-dial-no-admission.itf.json",
       "condensed": "traces/owner-flows-hazard-dial-no-admission.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "a056b889d84521d2f3218edb1c34c8ed83e927101701563f61ef8b763133a604",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-hazard-owner-deadline-shorter",
@@ -1570,14 +1714,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 79.797,
+      "seconds": 87.843,
       "retry_seconds": 0.0,
-      "wall_seconds": 79.797,
+      "wall_seconds": 87.843,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/owner-flows-hazard-owner-deadline-shorter.itf.json",
       "condensed": "traces/owner-flows-hazard-owner-deadline-shorter.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "ebeac02ff6336723ad56a9b80ad9374221777b0ff6edf76577b7f76c3c643d01",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-hazard-refusal-registers",
@@ -1591,14 +1737,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 47.841,
+      "seconds": 46.323,
       "retry_seconds": 0.0,
-      "wall_seconds": 47.841,
+      "wall_seconds": 46.323,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/owner-flows-hazard-refusal-registers.itf.json",
       "condensed": "traces/owner-flows-hazard-refusal-registers.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "6b2ce13cd3cf278b11fa21e8193aa8ac0cf6ba6db8e3947a0a7060433ecf378b",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-hazard-activate-no-guard",
@@ -1612,14 +1760,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 53.945,
+      "seconds": 45.557,
       "retry_seconds": 0.0,
-      "wall_seconds": 53.945,
+      "wall_seconds": 45.558,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/owner-flows-hazard-activate-no-guard.itf.json",
       "condensed": "traces/owner-flows-hazard-activate-no-guard.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "9844dc53bcf40ccf90593fd26382298023c8def1481669a6aed3fd729bb9b4cb",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-pair-safety-tlc",
@@ -1633,14 +1783,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 758.443,
+      "seconds": 728.901,
       "retry_seconds": 0.0,
-      "wall_seconds": 758.443,
+      "wall_seconds": 728.901,
       "timeout_secs": 2400,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "2dedcb88583187761f3cb92ffd227892dc74dc7899a01d1192b8aae7d3b1ceba",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-pair-watch-safety-tlc",
@@ -1654,14 +1806,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 175.05,
+      "seconds": 200.937,
       "retry_seconds": 0.0,
-      "wall_seconds": 175.05,
+      "wall_seconds": 200.937,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "bef5ccbfd98c64820b894dfb3d8535cc0e8f448ce045e51b9202e78f6f758dd6",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-pair-mid-safety-tlc",
@@ -1675,14 +1829,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 554.337,
+      "seconds": 548.184,
       "retry_seconds": 0.0,
-      "wall_seconds": 554.337,
+      "wall_seconds": 548.184,
       "timeout_secs": 1800,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "6ec0632e036d95b832cba6662ba018035a9641da720bb045bc23be38f1a19fb0",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-pair-hazard-consume-partial-frame",
@@ -1696,14 +1852,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 152.305,
+      "seconds": 148.756,
       "retry_seconds": 0.0,
-      "wall_seconds": 152.306,
+      "wall_seconds": 148.756,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/fwd-pair-hazard-consume-partial-frame.tlc.txt",
       "condensed": "traces/fwd-pair-hazard-consume-partial-frame.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "eda389fc5a85a31fd55b1990ba09c7aeeb5dd6c79fc93926cd9d3b3227c66dd4",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-pair-dgram-safety-tlc",
@@ -1717,14 +1875,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 246.553,
+      "seconds": 253.483,
       "retry_seconds": 0.0,
-      "wall_seconds": 246.554,
+      "wall_seconds": 253.483,
       "timeout_secs": 2700,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "0b6777b9dce248baada619b49e96981c82c8ba8660b22102672c99c4e829f6bc",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-pair-every-unit-delivered",
@@ -1738,14 +1898,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 870.579,
+      "seconds": 892.784,
       "retry_seconds": 0.0,
-      "wall_seconds": 870.579,
+      "wall_seconds": 892.785,
       "timeout_secs": 1800,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "e94e2211d82e74409070fbc8ff28a523d526cdc1c1402fc5b3957bca4af0b680",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-pair-every-end-resolves",
@@ -1759,14 +1921,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 888.034,
+      "seconds": 893.038,
       "retry_seconds": 0.0,
-      "wall_seconds": 888.034,
+      "wall_seconds": 893.038,
       "timeout_secs": 1800,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "69de5f4e25b3056d13901cdceabe7c9ad6a045f2cd3995fc00cac0cd4a665d36",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-pair-clean-half-close-completes",
@@ -1780,14 +1944,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 852.963,
+      "seconds": 852.735,
       "retry_seconds": 0.0,
-      "wall_seconds": 852.963,
+      "wall_seconds": 852.736,
       "timeout_secs": 1800,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "4feaba34ce1bf7fc4a4ab9af6e1e6610e470d968d06cfd67ea7319fd4a18c904",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-pair-stalled-sender-is-blocked",
@@ -1801,14 +1967,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 78.801,
+      "seconds": 60.684,
       "retry_seconds": 0.0,
-      "wall_seconds": 78.801,
+      "wall_seconds": 60.684,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "1bb1e6e7acb85f8a48de4ddcbec85c7bc913f5e10e2defebf55f92abb19e5b7c",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-pair-witness-watch-half-close",
@@ -1822,14 +1990,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 42.704,
+      "seconds": 42.487,
       "retry_seconds": 0.0,
-      "wall_seconds": 42.705,
+      "wall_seconds": 42.487,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/fwd-pair-witness-watch-half-close.tlc.txt",
       "condensed": "traces/fwd-pair-witness-watch-half-close.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "2c24438818efc764f3ce899b3b89fe96ca3c4e74dad94ed6b568bfaa910be66b",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-pair-hazard-consume-on-short-send",
@@ -1843,14 +2013,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 54.665,
+      "seconds": 46.764,
       "retry_seconds": 0.0,
-      "wall_seconds": 54.665,
+      "wall_seconds": 46.764,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/fwd-pair-hazard-consume-on-short-send.tlc.txt",
       "condensed": "traces/fwd-pair-hazard-consume-on-short-send.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "70106f483395f604b4a9467f31fa5dccd48324182a5ca1433100997938efb857",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-pair-hazard-eof-as-fin-peer-loss",
@@ -1864,14 +2036,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 62.566,
+      "seconds": 51.048,
       "retry_seconds": 0.0,
-      "wall_seconds": 62.567,
+      "wall_seconds": 51.049,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/fwd-pair-hazard-eof-as-fin-peer-loss.tlc.txt",
       "condensed": "traces/fwd-pair-hazard-eof-as-fin-peer-loss.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "ce46b0fe30972f0ebe25684148752594d3664f3356325a091857c52e75810d0b",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-pair-hazard-release-keeps-pairs",
@@ -1885,14 +2059,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 52.115,
+      "seconds": 45.764,
       "retry_seconds": 0.0,
-      "wall_seconds": 52.115,
+      "wall_seconds": 45.765,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/fwd-pair-hazard-release-keeps-pairs.tlc.txt",
       "condensed": "traces/fwd-pair-hazard-release-keeps-pairs.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "203c8a713943f0daa4bdecd6f9f2a2dabdaa8b044f115dbe093f9eaa1f76fe9c",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-pair-hazard-lossy-end-record",
@@ -1906,14 +2082,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 56.179,
+      "seconds": 50.538,
       "retry_seconds": 0.0,
-      "wall_seconds": 56.179,
+      "wall_seconds": 50.539,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/fwd-pair-hazard-lossy-end-record.tlc.txt",
       "condensed": "traces/fwd-pair-hazard-lossy-end-record.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "d0167d96e2f22ca5f2cbfc50b5eac32bcf4a3cc827858f98efc78504db2e25d1",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-pair-hazard-shutdown-on-callback-delivery",
@@ -1927,14 +2105,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 125.465,
+      "seconds": 116.626,
       "retry_seconds": 0.0,
-      "wall_seconds": 125.465,
+      "wall_seconds": 116.627,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/fwd-pair-hazard-shutdown-on-callback-delivery.tlc.txt",
       "condensed": "traces/fwd-pair-hazard-shutdown-on-callback-delivery.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "c1fee35870a82fda9aa4c66399d588757404e63caa43f6d2bce0005766d17910",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-pair-dgram-witness-vmm-exit",
@@ -1948,14 +2128,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 46.811,
+      "seconds": 41.944,
       "retry_seconds": 0.0,
-      "wall_seconds": 46.812,
+      "wall_seconds": 41.944,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/fwd-pair-dgram-witness-vmm-exit.tlc.txt",
       "condensed": "traces/fwd-pair-dgram-witness-vmm-exit.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "b26c3357b0ed1430996b1dcc4a1b7881caf18f3afbe5c8c2e79365f3ece99593",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-pair-hazard-check-then-hook",
@@ -1969,14 +2151,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 66.147,
+      "seconds": 51.841,
       "retry_seconds": 0.0,
-      "wall_seconds": 66.147,
+      "wall_seconds": 51.841,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/fwd-pair-hazard-check-then-hook.tlc.txt",
       "condensed": "traces/fwd-pair-hazard-check-then-hook.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "5a3de04a1071560cf2698b8dc0b8af364b4900cd77fad139d32d3c7647f006b7",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-pair-run-paired",
@@ -1990,14 +2174,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 7.076,
+      "seconds": 7.073,
       "retry_seconds": 0.0,
-      "wall_seconds": 7.076,
+      "wall_seconds": 7.074,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "e9337ee390e1f4c5e7f8f7cc35c3e48e2f35d0bb5b625296ad1a1798bb3ad1fe",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-pair-run-clean-both-ways-completes",
@@ -2011,14 +2197,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 8.355,
+      "seconds": 6.333,
       "retry_seconds": 0.0,
-      "wall_seconds": 8.355,
+      "wall_seconds": 6.333,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "adaa0c863a763a1eaa14cdb71d5053b7566548fc6425c4e826523ab2fbdd93d1",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-pair-run-target-stall-blocks-sender-then-resumes",
@@ -2032,14 +2220,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 8.591,
+      "seconds": 7.6,
       "retry_seconds": 0.0,
-      "wall_seconds": 8.592,
+      "wall_seconds": 7.6,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "e1a35c159597110eee41ee9bbc53a2af6afad308f71205b27947e7d3171a9867",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-pair-run-early-bytes-before-attach-delivered",
@@ -2053,14 +2243,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 7.593,
+      "seconds": 7.345,
       "retry_seconds": 0.0,
-      "wall_seconds": 7.593,
+      "wall_seconds": 7.345,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "69ba42feebdcd3117e3e7f82e8a87d35b5004b28e7f9baf64153e9139dcdb9ff",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-pair-run-early-fin-before-attach-carried-out",
@@ -2074,14 +2266,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 9.388,
+      "seconds": 6.316,
       "retry_seconds": 0.0,
-      "wall_seconds": 9.388,
+      "wall_seconds": 6.316,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "69f4b4f150e80d89cf720744aa5148b2ff98cfa3902d02fcf08b07ec91c4112a",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-pair-run-guest-app-reset-reaches-remote-as-reset",
@@ -2095,14 +2289,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 7.091,
+      "seconds": 7.357,
       "retry_seconds": 0.0,
-      "wall_seconds": 7.091,
+      "wall_seconds": 7.357,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "ab2291cfa6ec1c7070eef8108bd8d39544784690bcbe9f12a4e581d0e9682c18",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-pair-run-remote-reset-reaches-guest-app-as-reset",
@@ -2116,14 +2312,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 7.092,
+      "seconds": 6.324,
       "retry_seconds": 0.0,
-      "wall_seconds": 7.092,
+      "wall_seconds": 6.325,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "9c62c6457bdf0a071554e7c81c63f6ffe959235454933f6c6ab1c4ada1a529c7",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-pair-run-half-close-then-peer-close-is-clean",
@@ -2137,14 +2335,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 8.645,
+      "seconds": 8.102,
       "retry_seconds": 0.0,
-      "wall_seconds": 8.645,
+      "wall_seconds": 8.102,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "9f84267e082ecbe83c65f686f9c2253ccf01a75220e00ab196c120c2f945c4dd",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-pair-run-peer-close-with-direction-open-aborts",
@@ -2158,14 +2358,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 8.095,
+      "seconds": 6.831,
       "retry_seconds": 0.0,
-      "wall_seconds": 8.095,
+      "wall_seconds": 6.831,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "0049de114358069884a878af0ddcee8dcd12219c7b2b151338dad8e4bdc659ee",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-pair-run-read-shutdown-peer-stalls-like-slow-reader",
@@ -2179,14 +2381,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 9.903,
+      "seconds": 6.32,
       "retry_seconds": 0.0,
-      "wall_seconds": 9.904,
+      "wall_seconds": 6.32,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "f60532ece034966453db8ffc8453990f7ba7f533f74ee6a8409dd87f75bad61f",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-pair-run-owner-abort-resets-both-far-ends",
@@ -2200,14 +2404,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 8.622,
+      "seconds": 6.585,
       "retry_seconds": 0.0,
-      "wall_seconds": 8.622,
+      "wall_seconds": 6.585,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "196c127b5e9dd409d841a178f36881054a99b728a519d21ca825a763264f6ed6",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-pair-run-context-release-resets-every-pair",
@@ -2221,14 +2427,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 7.859,
+      "seconds": 7.096,
       "retry_seconds": 0.0,
-      "wall_seconds": 7.859,
+      "wall_seconds": 7.096,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "ccf177e643f0838fba5119d68382920830c58a91274aab9061ccddfd494509c4",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-pair-run-vmm-exit-aborts-host-half",
@@ -2242,14 +2450,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 9.149,
+      "seconds": 7.087,
       "retry_seconds": 0.0,
-      "wall_seconds": 9.149,
+      "wall_seconds": 7.087,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "88d7a8f483c0d7b7ea5587694dbe52e727ac9ad54a961f403c5e4d6fa7c0ae80",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-pair-run-trailing-rst-after-completion-is-inert",
@@ -2263,14 +2473,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 8.357,
+      "seconds": 7.594,
       "retry_seconds": 0.0,
-      "wall_seconds": 8.358,
+      "wall_seconds": 7.594,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "4e2071f7662f4ce7988cc56d195ed57206a8530a05334c823a4d6ecdf2e09ae7",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-pair-run-watched-stream-sees-guest-reset-as-abort",
@@ -2284,14 +2496,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 7.081,
+      "seconds": 6.825,
       "retry_seconds": 0.0,
-      "wall_seconds": 7.082,
+      "wall_seconds": 6.825,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "2e2211b34f4f70b13aa67705c5b1a00a08cbc87fcf8f8aa0ac4f3051092c083d",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-pair-run-dgram-paired",
@@ -2305,14 +2519,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 7.089,
+      "seconds": 7.084,
       "retry_seconds": 0.0,
-      "wall_seconds": 7.089,
+      "wall_seconds": 7.084,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "b107cd2721189a829de536ca211419aab8787f408ddd994a6790300898c20e75",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-pair-run-datagrams-in-order-with-empty",
@@ -2326,14 +2542,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 10.143,
+      "seconds": 7.082,
       "retry_seconds": 0.0,
-      "wall_seconds": 10.143,
+      "wall_seconds": 7.082,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "ef4b2e400b44eed3f05a0db0aa047a4add124aaf2444a55becf1531e68f760f9",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-pair-run-partial-frame-resumed-not-duplicated",
@@ -2347,14 +2565,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 6.829,
+      "seconds": 7.073,
       "retry_seconds": 0.0,
-      "wall_seconds": 6.829,
+      "wall_seconds": 7.073,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "c412ecb9303bdb72e305654176256a751951c621abea1feb24295958a23589b3",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-pair-run-stalled-udp-target-drops-at-source",
@@ -2368,14 +2588,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 8.107,
+      "seconds": 6.567,
       "retry_seconds": 0.0,
-      "wall_seconds": 8.107,
+      "wall_seconds": 6.567,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "de20411b9a15278f6148532103a067adba077ddefd171365383c5e76aa2f67ea",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-pair-run-host-half-close-then-abort-before-guest-attach-is-abort",
@@ -2389,14 +2611,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 7.583,
+      "seconds": 6.323,
       "retry_seconds": 0.0,
-      "wall_seconds": 7.584,
+      "wall_seconds": 6.323,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "c59097abb9361c194d4821336ea9b3178fc623240c5f8d2dbc0548b19b183b34",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-pair-run-guest-close-before-host-attach-aborts",
@@ -2410,14 +2634,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 6.581,
+      "seconds": 6.585,
       "retry_seconds": 0.0,
-      "wall_seconds": 6.581,
+      "wall_seconds": 6.585,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "96f0542727c1ecd23c638a8468f732ab84676f2b97709cda8f9169fffde8ba3a",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-pair-run-remote-fin-then-reset-aborts-pair",
@@ -2431,14 +2657,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 8.357,
+      "seconds": 6.327,
       "retry_seconds": 0.0,
-      "wall_seconds": 8.357,
+      "wall_seconds": 6.327,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "d356e3a20ef3dd8bd37101dfa34b6e205483260609e64f92f0945d59c0f7b4a9",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-pair-run-forwarder-recovery-aborts-then-reopens",
@@ -2452,14 +2680,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 7.844,
+      "seconds": 7.085,
       "retry_seconds": 0.0,
-      "wall_seconds": 7.845,
+      "wall_seconds": 7.085,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "57d097dc8b042aebd59cb8955f14c088466639ce35e0698fdbebf0ebcc8f9d84",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-pair-run-host-owner-death-is-final",
@@ -2473,14 +2703,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 8.614,
+      "seconds": 7.354,
       "retry_seconds": 0.0,
-      "wall_seconds": 8.615,
+      "wall_seconds": 7.354,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "9a7c45c401c63dae8bdecc5abe7b544aac3b9d4908763546ae6d333cdde34afe",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-pair-run-released-watch-with-no-record-reads-as-abort",
@@ -2494,14 +2726,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 7.347,
+      "seconds": 7.841,
       "retry_seconds": 0.0,
-      "wall_seconds": 7.347,
+      "wall_seconds": 7.841,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "ad0f13879a3662842d16efe5a22e56dfdd0cdc96f6bcac0c789b5831bcbc05f9",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-pair-run-vmm-exit-with-watch-record-in-flight-resolves-from-record",
@@ -2515,14 +2749,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 7.33,
+      "seconds": 6.572,
       "retry_seconds": 0.0,
-      "wall_seconds": 7.33,
+      "wall_seconds": 6.572,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "267bf421fe523fcbb0579a399dda6d3c4fb1aadd27e2585f8f353f8908d47b5e",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-pair-run-truncated-frame-at-peer-end-aborts-frame-invalid",
@@ -2536,14 +2772,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 8.369,
+      "seconds": 6.312,
       "retry_seconds": 0.0,
-      "wall_seconds": 8.369,
+      "wall_seconds": 6.312,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "80b43d8ea13861918b406ebfe7396c98dd00b3dd50ea09c238950995733282fb",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-pair-dlive-every-end-resolves",
@@ -2557,14 +2795,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 53.156,
+      "seconds": 44.25,
       "retry_seconds": 0.0,
-      "wall_seconds": 53.156,
+      "wall_seconds": 44.25,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "8d5760ac32c5a61ddb2e2c7464149f978b2d2646e6137b21ee8f1329bc7138c2",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-pair-hazard-holder-trusts-read",
@@ -2578,14 +2818,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 47.037,
+      "seconds": 44.508,
       "retry_seconds": 0.0,
-      "wall_seconds": 47.037,
+      "wall_seconds": 44.508,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/fwd-pair-hazard-holder-trusts-read.tlc.txt",
       "condensed": "traces/fwd-pair-hazard-holder-trusts-read.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "507aca233a97abc8dc0363dfd891725b6db498f1d3ca3679fa7a3b49b8cfaa5f",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-pair-ended-half-flow-resolves",
@@ -2599,14 +2841,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 809.142,
+      "seconds": 801.535,
       "retry_seconds": 0.0,
-      "wall_seconds": 809.142,
+      "wall_seconds": 801.536,
       "timeout_secs": 1800,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "d105f550111909f651540f9a453e13613547cfe6594e72632ddedd96fc0c4658",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-pair-wlive-guest-pair-ends-after-owner-abort",
@@ -2620,14 +2864,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 102.318,
+      "seconds": 93.876,
       "retry_seconds": 0.0,
-      "wall_seconds": 102.318,
+      "wall_seconds": 93.876,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "84fa3d85e8819d665167eb5b0539c42384305e754ce03f31ee07a479c2aa28f2",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-pair-wlive-guest-pair-ends-after-holder-drop",
@@ -2641,14 +2887,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 94.186,
+      "seconds": 87.28,
       "retry_seconds": 0.0,
-      "wall_seconds": 94.186,
+      "wall_seconds": 87.281,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "eb9d66cbb750ed89466904f744bd2d2c37b5fae2b3b825ce6326feb74c2697f2",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-pair-run-guest-app-fin-then-reset-aborts-pair-with-epipe",
@@ -2662,14 +2910,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 7.336,
+      "seconds": 7.585,
       "retry_seconds": 0.0,
-      "wall_seconds": 7.336,
+      "wall_seconds": 7.585,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "a0439232fc231ca08a17ba9e4fbc86f678fda91503cfbd6db3817d07f61c1a32",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-pair-run-early-vsock-half-close-before-guest-attach-completes",
@@ -2683,14 +2933,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 7.593,
+      "seconds": 7.333,
       "retry_seconds": 0.0,
-      "wall_seconds": 7.593,
+      "wall_seconds": 7.333,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "a07dbd166f102d3a83714293e22c2b7fa69b86842f799db0ccd0a5ed7b702f3c",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-pair-run-app-write-and-fin-before-paired-attaches-in-close-wait-and-completes",
@@ -2704,14 +2956,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 9.151,
+      "seconds": 7.853,
       "retry_seconds": 0.0,
-      "wall_seconds": 9.151,
+      "wall_seconds": 7.853,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "2507da1ab7e4c66101e2f18abd852a47f82c5ee395a1b337fea30667422fdfd7",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-pair-run-intake-child-reset-before-paired-is-refused-and-flow-aborts",
@@ -2725,14 +2979,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 7.844,
+      "seconds": 6.827,
       "retry_seconds": 0.0,
-      "wall_seconds": 7.844,
+      "wall_seconds": 6.827,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "2ee744c151d4ea4d6b64e1d408ef6b71ec90b0f850956ee57fbb494f979c5812",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-pair-run-destination-reset-before-host-attach-is-refused-and-flow-aborts",
@@ -2746,14 +3002,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 7.847,
+      "seconds": 7.08,
       "retry_seconds": 0.0,
-      "wall_seconds": 7.847,
+      "wall_seconds": 7.08,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "cc8c531e77918ccf981aa35bcd36464ec8b9944c22f5c10eda581fd3c8fa0314",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-pair-run-guest-close-with-empty-queue-before-host-attach-is-refused-and-flow-aborts",
@@ -2767,14 +3025,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 8.101,
+      "seconds": 7.333,
       "retry_seconds": 0.0,
-      "wall_seconds": 8.101,
+      "wall_seconds": 7.333,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "c71f8c2d8717f73e71ffa1314bdceec3898fea29ce9ab7abba243182103656e5",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-pair-run-owner-abort-of-watch-leaves-vh-and-stream-reports-aborted",
@@ -2788,14 +3048,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 7.34,
+      "seconds": 7.084,
       "retry_seconds": 0.0,
-      "wall_seconds": 7.34,
+      "wall_seconds": 7.084,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "601c0ba006eb36ce754126a2a428aace61f36542c807824b251b42de1275a16d",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-pair-run-owner-abort-sends-guest-abort-then-holder-drop-is-inert",
@@ -2809,14 +3071,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 7.348,
+      "seconds": 8.093,
       "retry_seconds": 0.0,
-      "wall_seconds": 7.348,
+      "wall_seconds": 8.093,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "9441f704e6a61c2730f4a9ce9a9f5d5ebc8fc3aa0b1005fbccd60f44410a2565",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-pair-run-context-release-shuts-watched-vh-and-holder-reads-not-connected",
@@ -2830,14 +3094,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 8.388,
+      "seconds": 7.593,
       "retry_seconds": 0.0,
-      "wall_seconds": 8.388,
+      "wall_seconds": 7.594,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "1d081350da8f9b16f797c1cbe8e28446ccd41cc22267fbde995fedf5d4c77f80",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-pair-run-dropped-stream-aborts-watch-then-guest-sees-abort",
@@ -2851,14 +3117,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 8.862,
+      "seconds": 7.082,
       "retry_seconds": 0.0,
-      "wall_seconds": 8.862,
+      "wall_seconds": 7.083,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "e2165a7d1c3974965072de8233c25d188512b948961ee223b4d80da4164952ff",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-pair-run-peer-close-racing-own-half-close-is-clean",
@@ -2872,14 +3140,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 8.099,
+      "seconds": 7.08,
       "retry_seconds": 0.0,
-      "wall_seconds": 8.1,
+      "wall_seconds": 7.08,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "af33d0d9baa4a51b31ff142261ab228689c616654d65dfa5b8c6207d693e74a0",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-pair-hazard-ended-attach-graceful-close",
@@ -2893,14 +3163,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 52.635,
+      "seconds": 45.235,
       "retry_seconds": 0.0,
-      "wall_seconds": 52.635,
+      "wall_seconds": 45.236,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/fwd-pair-hazard-ended-attach-graceful-close.tlc.txt",
       "condensed": "traces/fwd-pair-hazard-ended-attach-graceful-close.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "ba2196fc8e956b4fa3657654ba284947252c7013f35355d9b82de286ab28bf21",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-pair-hazard-watch-abort-shuts-vh",
@@ -2914,14 +3186,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 52.89,
+      "seconds": 43.46,
       "retry_seconds": 0.0,
-      "wall_seconds": 52.89,
+      "wall_seconds": 43.46,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/fwd-pair-hazard-watch-abort-shuts-vh.tlc.txt",
       "condensed": "traces/fwd-pair-hazard-watch-abort-shuts-vh.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "1e1fc3929b73f012898087aec47e4c24fdabf797c77560334ea0be3c0b8a06f3",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-pair-hazard-drop-without-abort",
@@ -2935,14 +3209,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 53.658,
+      "seconds": 44.732,
       "retry_seconds": 0.0,
-      "wall_seconds": 53.658,
+      "wall_seconds": 44.732,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/fwd-pair-hazard-drop-without-abort.tlc.txt",
       "condensed": "traces/fwd-pair-hazard-drop-without-abort.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "32dc8801684ef3c5d6d15eb0188390a5af76fc0c4c55d455ebb94597c0d85f88",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "cid-lease-safety-tlc",
@@ -2956,14 +3232,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 19.473,
+      "seconds": 21.767,
       "retry_seconds": 0.0,
-      "wall_seconds": 19.473,
+      "wall_seconds": 21.767,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "e0cfd36b1dd29a26c42f5657eb91b089376296d2a71b11caa12027678d6df69f",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "cid-lease-conf-safety-tlc",
@@ -2977,14 +3255,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 284.46,
+      "seconds": 277.105,
       "retry_seconds": 0.0,
-      "wall_seconds": 284.46,
+      "wall_seconds": 277.105,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "240027be28ae1684dc41b2c0d87f63310562e749907086c616d923c09bf36c95",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "cid-lease-live-safety-tlc",
@@ -2998,14 +3278,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 18.2,
+      "seconds": 18.452,
       "retry_seconds": 0.0,
-      "wall_seconds": 18.2,
+      "wall_seconds": 18.452,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "6ef54c396c5b96fe0ee3bd21fbb201f9a1d240720b161065580b394f227a407d",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "cid-lease-eventually-placed",
@@ -3019,14 +3301,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 39.164,
+      "seconds": 43.972,
       "retry_seconds": 0.0,
-      "wall_seconds": 39.164,
+      "wall_seconds": 43.972,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "50e5313641503465abfa6364bd515e3b669485b097f936b5e2dd83568641f8ea",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "cid-lease-hazard-release-before-vmm-outlives",
@@ -3040,14 +3324,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 17.97,
+      "seconds": 18.453,
       "retry_seconds": 0.0,
-      "wall_seconds": 17.97,
+      "wall_seconds": 18.454,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/cid-lease-hazard-release-before-vmm-outlives.tlc.txt",
       "condensed": "traces/cid-lease-hazard-release-before-vmm-outlives.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "79549d9df1057cd025fadb9c1678ea121afec3ffb07cf2a09b4c71db3df83f7a",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "cid-lease-hazard-assign-before-reclaim",
@@ -3061,14 +3347,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 17.71,
+      "seconds": 17.963,
       "retry_seconds": 0.0,
-      "wall_seconds": 17.71,
+      "wall_seconds": 17.964,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/cid-lease-hazard-assign-before-reclaim.tlc.txt",
       "condensed": "traces/cid-lease-hazard-assign-before-reclaim.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "64a192b8314f971a56f910b696ebff8f1b698693e6877d7dee298b5654f12dee",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "cid-lease-hazard-reset-reboots",
@@ -3082,14 +3370,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 18.458,
+      "seconds": 17.711,
       "retry_seconds": 0.0,
-      "wall_seconds": 18.458,
+      "wall_seconds": 17.711,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/cid-lease-hazard-reset-reboots.tlc.txt",
       "condensed": "traces/cid-lease-hazard-reset-reboots.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "75efc2a735e594085dd6788f18f97552775260e8bdc5bcc7ba04ce06320b4a94",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "cid-lease-run-conf-ok-assign-then-vmm-opens-its-own-device",
@@ -3103,14 +3393,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 3.035,
+      "seconds": 3.803,
       "retry_seconds": 0.0,
-      "wall_seconds": 3.035,
+      "wall_seconds": 3.804,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "270753a31aa1e5ae7b402f04148ec8208226de3070456fe0d3deb1069ffdd7b1",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "cid-lease-run-conf-ok-release-while-the-vmm-runs-is-refused",
@@ -3124,14 +3416,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 3.543,
+      "seconds": 3.54,
       "retry_seconds": 0.0,
-      "wall_seconds": 3.543,
+      "wall_seconds": 3.54,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "a4baf1970fc3c29026ff17a2670244e12987c271547042cd717b049cfecd575f",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "cid-lease-run-conf-ok-stop-exits-the-vmm-then-release-is-last",
@@ -3145,14 +3439,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 3.031,
+      "seconds": 3.545,
       "retry_seconds": 0.0,
-      "wall_seconds": 3.031,
+      "wall_seconds": 3.546,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "be1785523051e6e6700f76d4348e754d3bdc6e8ff3221571d2a2b3513d4059bf",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "cid-lease-run-conf-ok-next-fit-continues-from-the-cursor",
@@ -3166,14 +3462,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 3.543,
+      "seconds": 3.81,
       "retry_seconds": 0.0,
-      "wall_seconds": 3.543,
+      "wall_seconds": 3.81,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "86e78096200ca8ae94ffba701cf46834dc21cd70a6467e7bb0fe746bd84c5092",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "cid-lease-run-conf-ok-guest-reset-ends-the-vmm-and-placement-retries",
@@ -3187,14 +3485,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 3.031,
+      "seconds": 3.797,
       "retry_seconds": 0.0,
-      "wall_seconds": 3.031,
+      "wall_seconds": 3.797,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "dd5355dae12419c7fa8b74a7eab629af171d7ba1d7066392873d0ee6d521137c",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "cid-lease-run-conf-ok-vmm-crash-frees-its-cid-and-placement-retries",
@@ -3208,14 +3508,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 3.32,
+      "seconds": 4.067,
       "retry_seconds": 0.0,
-      "wall_seconds": 3.32,
+      "wall_seconds": 4.067,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "b62903a5c7637d56ac2739579b7c8f241ef0f695fe0c8f7a55e0d5de508ab325",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "cid-lease-run-conf-ok-serve-crash-orphan-is-reclaimed-before-any-assign",
@@ -3229,14 +3531,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 3.029,
+      "seconds": 3.035,
       "retry_seconds": 0.0,
-      "wall_seconds": 3.03,
+      "wall_seconds": 3.035,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "1b6d16e566c52651f464fcff00f090ab4368f408f86014ff5ed917dc3ddcf2c3",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "cid-lease-run-conf-ok-reclamation-releases-the-orphan-device-then-assign-proceeds",
@@ -3250,14 +3554,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 3.786,
+      "seconds": 3.03,
       "retry_seconds": 0.0,
-      "wall_seconds": 3.786,
+      "wall_seconds": 3.031,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "4c407c4ae18ab90e8f0d210675fa07c48f6125683637dfb47c48eb44d6321aff",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "cid-lease-run-conf-ok-orphan-exits-by-itself-before-reclamation",
@@ -3271,14 +3577,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 3.284,
+      "seconds": 3.034,
       "retry_seconds": 0.0,
-      "wall_seconds": 3.284,
+      "wall_seconds": 3.034,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "d2d7a951527d3301d151a3dcfee2739283d3c50b2e0270aa138f4742fece9ec1",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "cid-lease-run-reclamation-kills-every-orphan-before-assign",
@@ -3292,14 +3600,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 3.542,
+      "seconds": 3.286,
       "retry_seconds": 0.0,
-      "wall_seconds": 3.542,
+      "wall_seconds": 3.286,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "74c3300cfbb14d3a4ca835b4422b58704169e73dead5f73ebe71f33d2fa54107",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "cid-lease-run-conf-ok-serve-crash-with-unlaunched-lease-leaves-nothing-to-reclaim",
@@ -3313,14 +3623,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 3.534,
+      "seconds": 3.55,
       "retry_seconds": 0.0,
-      "wall_seconds": 3.535,
+      "wall_seconds": 3.55,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "6a027d4937b2cf71df528b187393346f7a504210d115e403e3f85046dcf4056a",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "cid-lease-hazard-crash-forgets-stop",
@@ -3334,14 +3646,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 18.2,
+      "seconds": 17.952,
       "retry_seconds": 0.0,
-      "wall_seconds": 18.2,
+      "wall_seconds": 17.952,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/cid-lease-hazard-crash-forgets-stop.tlc.txt",
       "condensed": "traces/cid-lease-hazard-crash-forgets-stop.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "067dea399c46b29ee3cd6fbb2e71ed2c7d19086feec036ef036353a2a753d1c1",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "cid-lease-run-conf-ok-stopped-workload-stays-stopped-across-serve-crash",
@@ -3355,14 +3669,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 3.822,
+      "seconds": 3.293,
       "retry_seconds": 0.0,
-      "wall_seconds": 3.822,
+      "wall_seconds": 3.293,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "1cad93828997311f7d35c5c219382b27503b87fae5d007bd375620bf0bc82ab3",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "cid-lease-run-conf-ok-stopped-workload-is-placed-again-only-after-redeploy",
@@ -3376,14 +3692,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 3.032,
+      "seconds": 3.288,
       "retry_seconds": 0.0,
-      "wall_seconds": 3.032,
+      "wall_seconds": 3.288,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "912f950dab0dc197aef8bd73b159e9618a3a141b7850f23310b74b87ec45f4ec",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "cid-lease-run-conf-ok-fifth-crash-at-ceiling-boundary-is-placed-again",
@@ -3397,14 +3715,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 3.3,
+      "seconds": 3.813,
       "retry_seconds": 0.0,
-      "wall_seconds": 3.3,
+      "wall_seconds": 3.814,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "5971fdc9372990cc060b864f6a151d788b94f981953de03281da0deb1c51a8fb",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "cid-lease-run-conf-ok-failure-at-ceiling-exhausts-the-budget",
@@ -3418,14 +3738,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 3.562,
+      "seconds": 3.285,
       "retry_seconds": 0.0,
-      "wall_seconds": 3.562,
+      "wall_seconds": 3.285,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "f66d233f9ab472e78e2dcc559c7cd9706fb5752e1b07d12575ed90dff7cf63a9",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "cid-lease-run-conf-ok-redeploy-places-an-exhausted-workload-again-with-its-count",
@@ -3439,14 +3761,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 3.283,
+      "seconds": 3.292,
       "retry_seconds": 0.0,
-      "wall_seconds": 3.283,
+      "wall_seconds": 3.292,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "168e90876b8114e637f63b77813c3dfc730d5e89c9bbffb0e60d370f86845315",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "cid-lease-run-conf-ok-serve-crash-places-a-workload-at-the-ceiling-again",
@@ -3460,14 +3784,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 3.547,
+      "seconds": 3.537,
       "retry_seconds": 0.0,
-      "wall_seconds": 3.547,
+      "wall_seconds": 3.537,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "f3378b2cd569e7af20abdc5100fcb284735374361d29a6211d71cb3d336e8850",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "cid-lease-run-conf-ok-reclaimed-workload-past-the-ceiling-is-placed-again",
@@ -3481,14 +3807,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 3.034,
+      "seconds": 3.286,
       "retry_seconds": 0.0,
-      "wall_seconds": 3.034,
+      "wall_seconds": 3.286,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "3ade33fd4ccd02a1913a04d388de852840c615f100ff544057ed33a4753f27a9",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "cid-lease-run-conf-ok-serve-crash-before-launch-places-the-successor-again-with-its-count",
@@ -3502,14 +3830,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 3.033,
+      "seconds": 3.3,
       "retry_seconds": 0.0,
-      "wall_seconds": 3.033,
+      "wall_seconds": 3.3,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "864f881db2281eebf6470c3f8937357a5846986e690889d863aaade02015f589",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "cid-lease-run-conf-ok-serve-crash-during-finalize-finalizes-after-restart",
@@ -3523,14 +3853,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 4.05,
+      "seconds": 3.034,
       "retry_seconds": 0.0,
-      "wall_seconds": 4.05,
+      "wall_seconds": 3.035,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "30f6bf6ef4fa466e8df60d0132c8bb53ebb9b821848cedd31666c7c37e0dfbe3",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "cid-lease-run-conf-ok-stop-of-an-ended-workload-reclaims-its-lease",
@@ -3544,40 +3876,21 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 3.289,
+      "seconds": 3.789,
       "retry_seconds": 0.0,
-      "wall_seconds": 3.289,
+      "wall_seconds": 3.789,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "0fb673f90975dbc8d89456caf646f7363385489259b9e3835b4fea9b183c2d6e",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "cid-lease-run-ok-pool-exhausted-restart-cleans-the-predecessor-then-places",
       "spec": "cid_lease.qnt",
       "main": "lease_ok",
-      "property_kind": "run",
-      "property": "PoolExhaustedRestartCleansThePredecessorThenPlaces",
-      "backend": "evaluator",
-      "bound": "run",
-      "expect": "holds",
-      "outcome": "holds",
-      "pass": true,
-      "attempts": 1,
-      "seconds": 3.033,
-      "retry_seconds": 0.0,
-      "wall_seconds": 3.033,
-      "timeout_secs": 900,
-      "cause": null,
-      "trace": null,
-      "condensed": null,
-      "failure_log": null
-    },
-    {
-      "name": "cid-lease-run-conf-three-pool-exhausted-restart-cleans-the-predecessor-then-places",
-      "spec": "cid_lease.qnt",
-      "main": "lease_conf_three",
       "property_kind": "run",
       "property": "PoolExhaustedRestartCleansThePredecessorThenPlaces",
       "backend": "evaluator",
@@ -3593,7 +3906,32 @@
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "76844137654659c5ac2c40ee4255a5aa8dd457a547d8e3cdb15fa9f235af7b08",
+      "run_id": "313702-1794496750.649"
+    },
+    {
+      "name": "cid-lease-run-conf-three-pool-exhausted-restart-cleans-the-predecessor-then-places",
+      "spec": "cid_lease.qnt",
+      "main": "lease_conf_three",
+      "property_kind": "run",
+      "property": "PoolExhaustedRestartCleansThePredecessorThenPlaces",
+      "backend": "evaluator",
+      "bound": "run",
+      "expect": "holds",
+      "outcome": "holds",
+      "pass": true,
+      "attempts": 1,
+      "seconds": 3.035,
+      "retry_seconds": 0.0,
+      "wall_seconds": 3.035,
+      "timeout_secs": 900,
+      "cause": null,
+      "trace": null,
+      "condensed": null,
+      "failure_log": null,
+      "input_key": "3f557c544458cd72400c150dfd1c9d94c9c0dce3556ec8bf60e82c8da5d4baf0",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "cid-lease-run-conf-325-redeploy-leased-at-serve-crash-is-placed-again",
@@ -3607,14 +3945,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 3.538,
+      "seconds": 3.287,
       "retry_seconds": 0.0,
-      "wall_seconds": 3.539,
+      "wall_seconds": 3.288,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "c60e2bf4c223d1264537ac65d251ce9eed1b122da8e8baf3f11e32f3db9d8057",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "cid-lease-hazard-retry-off-by-one",
@@ -3628,14 +3968,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 18.478,
+      "seconds": 17.707,
       "retry_seconds": 0.0,
-      "wall_seconds": 18.478,
+      "wall_seconds": 17.707,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/cid-lease-hazard-retry-off-by-one.tlc.txt",
       "condensed": "traces/cid-lease-hazard-retry-off-by-one.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "219852dca7a5ee6aada10d592e4e75655dc6dc49c2e7ea58b4cd1f6799ed1078",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "cid-lease-hazard-reclaim-not-exempt",
@@ -3649,14 +3991,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 19.222,
+      "seconds": 18.477,
       "retry_seconds": 0.0,
-      "wall_seconds": 19.222,
+      "wall_seconds": 18.477,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/cid-lease-hazard-reclaim-not-exempt.tlc.txt",
       "condensed": "traces/cid-lease-hazard-reclaim-not-exempt.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "3454e4b457412bf79e8c1573c01ae84bdc4d73f92b4b3c73694ae4c87003a3d8",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "cid-lease-hazard-crash-loses-placed-generation-run",
@@ -3670,14 +4014,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 3.296,
+      "seconds": 3.301,
       "retry_seconds": 0.0,
-      "wall_seconds": 3.296,
+      "wall_seconds": 3.302,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/cid-lease-hazard-crash-loses-placed-generation-run.test.txt",
       "condensed": "traces/cid-lease-hazard-crash-loses-placed-generation-run.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "2afaa9ae04c1031af6804686ca459ae73791362f140835ab764a6bf18cb0cef4",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "cid-lease-hazard-assign-split",
@@ -3691,14 +4037,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 18.729,
+      "seconds": 17.945,
       "retry_seconds": 0.0,
-      "wall_seconds": 18.729,
+      "wall_seconds": 17.945,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/cid-lease-hazard-assign-split.tlc.txt",
       "condensed": "traces/cid-lease-hazard-assign-split.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "13965d1c59c69e22a2bce8e40038659f84b46b9cd0a02bd33ac84120b3ac4f1c",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "cid-lease-run-conf-ok-crash-is-not-enabled-in-the-325-window",
@@ -3712,14 +4060,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 3.562,
+      "seconds": 3.285,
       "retry_seconds": 0.0,
-      "wall_seconds": 3.562,
+      "wall_seconds": 3.285,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "d9e5232c6782579542945bdb9355d38bdba19dcdb026a9500ce681d3139b62df",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "cid-lease-run-conf-325-crash-is-not-enabled-in-the-325-window",
@@ -3733,14 +4083,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 3.799,
+      "seconds": 3.034,
       "retry_seconds": 0.0,
-      "wall_seconds": 3.799,
+      "wall_seconds": 3.035,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/cid-lease-run-conf-325-crash-is-not-enabled-in-the-325-window.test.txt",
       "condensed": "traces/cid-lease-run-conf-325-crash-is-not-enabled-in-the-325-window.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "04911e2b89062c26ad06efba05e4c46de9dd380bc4dd396ddc7ee6a8f26da836",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "cid-lease-run-conf-325-crash-is-enabled-in-the-325-window-without-the-guard",
@@ -3754,14 +4106,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 3.289,
+      "seconds": 3.301,
       "retry_seconds": 0.0,
-      "wall_seconds": 3.289,
+      "wall_seconds": 3.301,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "a12526725ab2f11ec8856b8bcfe498f59b277aae0c0e10ab2f7e61537a5c3a99",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "cid-lease-run-conf-ok-crash-is-enabled-in-the-325-window-without-the-guard",
@@ -3775,14 +4129,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 3.04,
+      "seconds": 3.038,
       "retry_seconds": 0.0,
-      "wall_seconds": 3.04,
+      "wall_seconds": 3.038,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/cid-lease-run-conf-ok-crash-is-enabled-in-the-325-window-without-the-guard.test.txt",
       "condensed": "traces/cid-lease-run-conf-ok-crash-is-enabled-in-the-325-window-without-the-guard.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "e6a445792784ad3b6bb48e973fb8cd1dbc9c284ca5a49be4e1788bbed08e3594",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "cid-lease-hazard-refusal-keeps-predecessor-run",
@@ -3796,14 +4152,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 3.537,
+      "seconds": 3.301,
       "retry_seconds": 0.0,
-      "wall_seconds": 3.537,
+      "wall_seconds": 3.301,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/cid-lease-hazard-refusal-keeps-predecessor-run.test.txt",
       "condensed": "traces/cid-lease-hazard-refusal-keeps-predecessor-run.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "e8526c8e6535e7495598e75c661e0a9bece0e8167a927024cfbced3f8eb61f1f",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "cid-lease-hazard-terminal-before-release",
@@ -3817,14 +4175,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 19.222,
+      "seconds": 21.012,
       "retry_seconds": 0.0,
-      "wall_seconds": 19.222,
+      "wall_seconds": 21.013,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/cid-lease-hazard-terminal-before-release.tlc.txt",
       "condensed": "traces/cid-lease-hazard-terminal-before-release.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "e2dd6ea0ac0c956e2d7d5dad0d2540498f8994dad0c01a31443d41f348221be1",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "cid-lease-hazard-tick-during-predecessor-teardown",
@@ -3838,14 +4198,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 18.211,
+      "seconds": 18.205,
       "retry_seconds": 0.0,
-      "wall_seconds": 18.211,
+      "wall_seconds": 18.205,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/cid-lease-hazard-tick-during-predecessor-teardown.tlc.txt",
       "condensed": "traces/cid-lease-hazard-tick-during-predecessor-teardown.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "c3b02d8c2254c53d8fbf1dda709be7e869d8c3a2674ee56068e72eabfa4efbf6",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "quiescence-safety-tlc",
@@ -3859,14 +4221,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 9.095,
+      "seconds": 9.361,
       "retry_seconds": 0.0,
-      "wall_seconds": 9.095,
+      "wall_seconds": 9.361,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "8c2940a4ba5b93cc690606099691fce619e0219c744a504d3d9c041dd0504f19",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "quiescence-live-safety-tlc",
@@ -3880,14 +4244,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 9.091,
+      "seconds": 8.614,
       "retry_seconds": 0.0,
-      "wall_seconds": 9.092,
+      "wall_seconds": 8.615,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "1167a2fe2ffef9aa1b7cbef89822f3c2145fc0355f60452c544a3d21312f534d",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "quiescence-c1-episode-ends",
@@ -3901,14 +4267,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 9.603,
+      "seconds": 9.861,
       "retry_seconds": 0.0,
-      "wall_seconds": 9.603,
+      "wall_seconds": 9.862,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "3a5581e3f4ec729072a24365ea3dacf01fd4fb7a2a329954c5f7f24112b3986d",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "quiescence-c2-episode-ends",
@@ -3922,14 +4290,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 9.59,
+      "seconds": 9.603,
       "retry_seconds": 0.0,
-      "wall_seconds": 9.59,
+      "wall_seconds": 9.603,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "c9d4d77e32c5f911c2b2ab2c172a4a877cf6ca37580bba26d979d52a82aa8e03",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "quiescence-c1-repaired",
@@ -3943,14 +4313,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 9.599,
+      "seconds": 9.603,
       "retry_seconds": 0.0,
-      "wall_seconds": 9.599,
+      "wall_seconds": 9.603,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "3905ab97c7e43fa5551e2f1dbdfbe88599b2eb58666b59f3dc9e5d73f3312be9",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "quiescence-foreign-hold-ends-in-fail-stop",
@@ -3964,14 +4336,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 9.851,
+      "seconds": 9.622,
       "retry_seconds": 0.0,
-      "wall_seconds": 9.851,
+      "wall_seconds": 9.622,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "e677802c8fdfbd6be8a01abf8b9e6e7ac661347d223915b4d1c240f174800500",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "quiescence-leaked-hold-ends-in-fail-stop",
@@ -3985,14 +4359,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 9.599,
+      "seconds": 9.857,
       "retry_seconds": 0.0,
-      "wall_seconds": 9.599,
+      "wall_seconds": 9.857,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "eefc734a1164feadd3cbdf3f31fd27c20f8cc95ac09c537ed5d638d6145731c3",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "quiescence-ok-leaked-hold-ends-in-fail-stop",
@@ -4006,14 +4382,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 10.354,
+      "seconds": 10.116,
       "retry_seconds": 0.0,
-      "wall_seconds": 10.354,
+      "wall_seconds": 10.116,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "ebfe3423ee903d3276ccd6b1c95ee31e9ba3d5c28e4f5d970503e811cadda75a",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "quiescence-ok-c1-repaired",
@@ -4027,14 +4405,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 10.877,
+      "seconds": 11.14,
       "retry_seconds": 0.0,
-      "wall_seconds": 10.877,
+      "wall_seconds": 11.141,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "86fea2f34fc2f2ffcad1fc242798ac903ed744d3a9d711cf81abb0c83ed6c01c",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "quiescence-hazard-bool-latch",
@@ -4048,14 +4428,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 10.637,
+      "seconds": 9.868,
       "retry_seconds": 0.0,
-      "wall_seconds": 10.637,
+      "wall_seconds": 9.868,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/quiescence-hazard-bool-latch.tlc.txt",
       "condensed": "traces/quiescence-hazard-bool-latch.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "cc79e49722a4ca88910d6a6a1269b87373bb76cb18fdecb8e2d9308f0498bbb0",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "quiescence-hazard-leak-ignored",
@@ -4069,14 +4451,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 11.12,
+      "seconds": 11.906,
       "retry_seconds": 0.0,
-      "wall_seconds": 11.12,
+      "wall_seconds": 11.906,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/quiescence-hazard-leak-ignored.tlc.txt",
       "condensed": "traces/quiescence-hazard-leak-ignored.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "5cfd979e08a6016284f59e065c1ecbee538be3b7d42ce47a8bccbeb555fc028d",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "quiescence-hazard-boot-continues",
@@ -4090,14 +4474,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 10.627,
+      "seconds": 10.626,
       "retry_seconds": 0.0,
       "wall_seconds": 10.627,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/quiescence-hazard-boot-continues.tlc.txt",
       "condensed": "traces/quiescence-hazard-boot-continues.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "9981f7b20d64e3655b6fc542a7f3c988bc5e18aa4698fb6ebe75885c64ec8e1b",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "quiescence-run-ok-single-recovery-quiesces-repairs-restores",
@@ -4111,14 +4497,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 2.031,
+      "seconds": 2.275,
       "retry_seconds": 0.0,
-      "wall_seconds": 2.031,
+      "wall_seconds": 2.276,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "2af2eac071076a45d08a431e985190361312e055278e3cfc847d63a8814b6661",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "quiescence-run-ok-two-overlapping-recoveries-keep-forwarding-quiesced-until-the-last-restore",
@@ -4132,14 +4520,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 2.031,
+      "seconds": 2.029,
       "retry_seconds": 0.0,
-      "wall_seconds": 2.031,
+      "wall_seconds": 2.029,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "a3561b44b617c38430045e2ea24221d957b3ebd7671fe3d18b4d6e66190eb1d3",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "quiescence-run-ok-no-flow-opens-while-counted-hold-remains",
@@ -4153,14 +4543,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 2.023,
+      "seconds": 2.289,
       "retry_seconds": 0.0,
-      "wall_seconds": 2.023,
+      "wall_seconds": 2.289,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "416be5585f55e2d215e3f0a6075226ec7094a40e8215e1c8b3e19dfbada4909d",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "quiescence-run-ok-two-overlapping-recoveries-reopen-only-at-zero",
@@ -4174,14 +4566,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 2.031,
+      "seconds": 2.024,
       "retry_seconds": 0.0,
-      "wall_seconds": 2.031,
+      "wall_seconds": 2.024,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "eaaf08ee78d68928529073ee68cb0f4e1c2e2573faaae603ddac25612f15f719",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "quiescence-run-ok-dropped-hold-keeps-forwarding-quiesced-then-fail-stops",
@@ -4195,14 +4589,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 2.025,
+      "seconds": 2.275,
       "retry_seconds": 0.0,
-      "wall_seconds": 2.026,
+      "wall_seconds": 2.276,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "1ac9a04846946c5878c61340096f9053ad0626aaa5d8772a1b2219acffa66edc",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "quiescence-run-ok-foreign-hold-restore-changes-nothing-then-fail-stops",
@@ -4216,14 +4612,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 2.024,
+      "seconds": 2.276,
       "retry_seconds": 0.0,
-      "wall_seconds": 2.024,
+      "wall_seconds": 2.277,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "4f28c0d2019dfd328c31fa124b93a634c8c5fde787b3b6b495e86005c9582b60",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "quiescence-run-ok-repair-failure-counts-attempt-then-repairs",
@@ -4237,14 +4635,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 2.023,
+      "seconds": 2.018,
       "retry_seconds": 0.0,
-      "wall_seconds": 2.023,
+      "wall_seconds": 2.018,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "eb40b2d9e2cebbdda6e4ec6dfb177a60cfaf6d359e21be8d4be1ae6e587704bd",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "quiescence-run-ok-post-repair-audit-failure-counts-attempt",
@@ -4258,14 +4658,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 2.018,
+      "seconds": 2.028,
       "retry_seconds": 0.0,
-      "wall_seconds": 2.019,
+      "wall_seconds": 2.028,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "95447eaa60183f725ab7b6d9f21027357d2ab22f2b28bb773d6103fc44a2fc4d",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "quiescence-run-live-spent-budget-fail-stops-and-restart-converges",
@@ -4279,14 +4681,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 2.031,
+      "seconds": 2.278,
       "retry_seconds": 0.0,
-      "wall_seconds": 2.031,
+      "wall_seconds": 2.278,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "0e4ff3a5cfd40ffa3e353f7b90deab0e431e7aedc7de1f958b2fa21b2045cd6e",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "quiescence-run-ok-crash-during-recovery-then-restart-recovers",
@@ -4300,14 +4704,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 2.269,
+      "seconds": 2.276,
       "retry_seconds": 0.0,
-      "wall_seconds": 2.269,
+      "wall_seconds": 2.277,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "0197cd251d0dd70bc4fa5a7bd628862cd174dd054d70db0c1976245a6c1e9626",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "quiescence-run-ok-failed-boot-table-write-refuses-boot-then-retry-succeeds",
@@ -4321,14 +4727,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 2.021,
+      "seconds": 2.276,
       "retry_seconds": 0.0,
-      "wall_seconds": 2.021,
+      "wall_seconds": 2.276,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "b9a39d8be8224eecfbdb638f6170c0448a915c1e1f4ad90a089b55aaa5053c71",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "quiescence-hazard-quiesce-skips-flows",
@@ -4342,14 +4750,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 10.861,
+      "seconds": 10.115,
       "retry_seconds": 0.0,
-      "wall_seconds": 10.861,
+      "wall_seconds": 10.115,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/quiescence-hazard-quiesce-skips-flows.tlc.txt",
       "condensed": "traces/quiescence-hazard-quiesce-skips-flows.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "b6e0e677f0cbada73e5822bd5eddefc0046cbed91677743c1e25247d4f0dfc96",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "quiescence-hazard-drop-decrements-leaked",
@@ -4363,14 +4773,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 10.358,
+      "seconds": 10.366,
       "retry_seconds": 0.0,
-      "wall_seconds": 10.358,
+      "wall_seconds": 10.366,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/quiescence-hazard-drop-decrements-leaked.tlc.txt",
       "condensed": "traces/quiescence-hazard-drop-decrements-leaked.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "43bf3ca5566a36f75e08a33965a1fc81e37d536c38f1be43f6b9fbd43c4b6a33",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "quiescence-hazard-foreign-decrements",
@@ -4384,14 +4796,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 10.61,
+      "seconds": 10.858,
       "retry_seconds": 0.0,
-      "wall_seconds": 10.61,
+      "wall_seconds": 10.859,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/quiescence-hazard-foreign-decrements.tlc.txt",
       "condensed": "traces/quiescence-hazard-foreign-decrements.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "900561f965aa5253b51529dcffc1c9d4c908351fbfd720a183c7a5e5a1707bc5",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "quiescence-hazard-foreign-ignored",
@@ -4405,14 +4819,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 11.391,
+      "seconds": 11.398,
       "retry_seconds": 0.0,
-      "wall_seconds": 11.391,
+      "wall_seconds": 11.398,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/quiescence-hazard-foreign-ignored.tlc.txt",
       "condensed": "traces/quiescence-hazard-foreign-ignored.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "36d1cf691000bbf5ea3776a9aa739cf61255f537cf1cb09ed7a65bdb6b2f49c3",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "udp-slots-safety-tlc",
@@ -4426,14 +4842,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 60.292,
+      "seconds": 52.808,
       "retry_seconds": 0.0,
-      "wall_seconds": 60.292,
+      "wall_seconds": 52.809,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "1271a5dd57e6fa4925b0fd6221704f27bbf283133b5e4ade4ef8fea39f7521cd",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "udp-slots-safety-apalache",
@@ -4447,14 +4865,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 1412.75,
+      "seconds": 1588.293,
       "retry_seconds": 0.0,
-      "wall_seconds": 1412.75,
+      "wall_seconds": 1588.293,
       "timeout_secs": 1800,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "4ee3b1e8152a14b141eff4cc027f380292f2e3a03de552ad586bab0c0b3f8f84",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "udp-slots-release-liveness",
@@ -4468,14 +4888,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 114.361,
+      "seconds": 107.483,
       "retry_seconds": 0.0,
-      "wall_seconds": 114.362,
+      "wall_seconds": 107.484,
       "timeout_secs": 1800,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "a727eee03dc2cbbf60f67248e422ef2a4ab75217daad5cccde18f436711fb0f7",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "udp-slots-hazard-claim-split",
@@ -4489,14 +4911,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 27.888,
+      "seconds": 27.105,
       "retry_seconds": 0.0,
-      "wall_seconds": 27.888,
+      "wall_seconds": 27.105,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/udp-slots-hazard-claim-split.itf.json",
       "condensed": "traces/udp-slots-hazard-claim-split.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "dedb3d8d50487e608607c51571c126cfd965a5e32e01eec1e49370dd439e9601",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "udp-slots-hazard-keep-frames",
@@ -4510,14 +4934,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 25.799,
+      "seconds": 26.603,
       "retry_seconds": 0.0,
-      "wall_seconds": 25.799,
+      "wall_seconds": 26.603,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/udp-slots-hazard-keep-frames.itf.json",
       "condensed": "traces/udp-slots-hazard-keep-frames.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "04220f75d651af826d29c3fcd16bd32e4698a7e669d012e7690ab1ba83ddf710",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "udp-slots-hazard-late-paired-by-slot-route",
@@ -4531,14 +4957,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 322.603,
+      "seconds": 341.108,
       "retry_seconds": 0.0,
-      "wall_seconds": 322.604,
+      "wall_seconds": 341.109,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/udp-slots-hazard-late-paired-by-slot-route.itf.json",
       "condensed": "traces/udp-slots-hazard-late-paired-by-slot-route.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "fd0ccbe9e957241575b2a880030fbd599adc900d14f66cdbdd115722065ea64a",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "udp-slots-hazard-ignore-late-paired",
@@ -4552,14 +4980,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 28.646,
+      "seconds": 25.045,
       "retry_seconds": 0.0,
-      "wall_seconds": 28.647,
+      "wall_seconds": 25.045,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/udp-slots-hazard-ignore-late-paired.itf.json",
       "condensed": "traces/udp-slots-hazard-ignore-late-paired.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "33942c5222674f77a9571257fa44bfd7ac449a18060c2ceab70ff0acfc254630",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "udp-slots-hazard-keep-frames-on-end",
@@ -4573,14 +5003,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 29.669,
+      "seconds": 22.498,
       "retry_seconds": 0.0,
-      "wall_seconds": 29.67,
+      "wall_seconds": 22.498,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/udp-slots-hazard-keep-frames-on-end.itf.json",
       "condensed": "traces/udp-slots-hazard-keep-frames-on-end.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "91bef4ed8fe1a1915fa02fc0da1c9ba18926cb550d10f430415058cd09401c54",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "udp-slots-hazard-no-audit-fairness",
@@ -4594,14 +5026,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 15.176,
+      "seconds": 15.191,
       "retry_seconds": 0.0,
-      "wall_seconds": 15.176,
+      "wall_seconds": 15.191,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/udp-slots-hazard-no-audit-fairness.tlc.txt",
       "condensed": "traces/udp-slots-hazard-no-audit-fairness.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "ce498592812c8dfe5343265941232dd75cd4f775d5a81ccc2782648f05f65cfe",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "udp-slots-run-conf-datagram-association-claims-pairs-and-routes",
@@ -4615,14 +5049,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 2.785,
+      "seconds": 3.036,
       "retry_seconds": 0.0,
-      "wall_seconds": 2.785,
+      "wall_seconds": 3.036,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "de0bab8b2ef55e81a0cf456df67f0a0d6397f710eb78250dd34eaa3d64e36263",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "udp-slots-run-conf-two-sockets-claim-distinct-slots",
@@ -4636,14 +5072,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 2.781,
+      "seconds": 3.039,
       "retry_seconds": 0.0,
-      "wall_seconds": 2.781,
+      "wall_seconds": 3.039,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "d2f463a57c5d586002cecb234ee7e4c9dfb411da94cf526ed80540f33cbec1fa",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "udp-slots-run-conf-refused-discards-parked-frames-and-only-new-datagram-reassociates",
@@ -4657,14 +5095,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 3.036,
+      "seconds": 2.792,
       "retry_seconds": 0.0,
-      "wall_seconds": 3.037,
+      "wall_seconds": 2.792,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "95e7979895c74798ba24690faf91d70ddbc5a2661d6812cb034b6222a820ac80",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "udp-slots-run-conf-host-abort-of-live-association-ends-it-and-keeps-slot-owned",
@@ -4678,14 +5118,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 3.543,
+      "seconds": 3.036,
       "retry_seconds": 0.0,
-      "wall_seconds": 3.543,
+      "wall_seconds": 3.036,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "7f2763cdb665b366ef9fa9c53cfa8a5d525808fb3055abc2e034d5a0d09e1f4f",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "udp-slots-run-conf-datagram-queued-before-an-end-is-discarded-with-the-queue",
@@ -4699,14 +5141,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 2.787,
+      "seconds": 2.784,
       "retry_seconds": 0.0,
-      "wall_seconds": 2.788,
+      "wall_seconds": 2.785,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "6bccf697aaae05a0f7ad6c52d8e0d3e58a95e3b91bc6c4a10c568d0664c2d94e",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "udp-slots-run-conf-late-paired-for-released-slot-is-answered-with-abort",
@@ -4720,14 +5164,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 3.042,
+      "seconds": 3.037,
       "retry_seconds": 0.0,
-      "wall_seconds": 3.042,
+      "wall_seconds": 3.037,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "0918f5c3449ce8d1f54cb3053d0ef3fe8e9e92d4d0ae89156613259369fa1f5e",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "udp-slots-run-conf-lost-release-report-is-found-by-audit",
@@ -4741,14 +5187,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 4.546,
+      "seconds": 4.548,
       "retry_seconds": 0.0,
-      "wall_seconds": 4.546,
+      "wall_seconds": 4.548,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "4c1d003acca8f96375433dce846407ff05f3bd1d51405f737a33f0a2b471b174",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "udp-slots-run-conf-socket-close-releases-every-slot-it-owns",
@@ -4762,14 +5210,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 3.037,
+      "seconds": 2.79,
       "retry_seconds": 0.0,
-      "wall_seconds": 3.037,
+      "wall_seconds": 2.79,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "31b6c3a273e1f064749f83d1f49c04a489d69e632960189a14b81f1129038ae8",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "udp-slots-run-conf-idle-slot-release-ends-association",
@@ -4783,14 +5233,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 2.786,
+      "seconds": 2.778,
       "retry_seconds": 0.0,
-      "wall_seconds": 2.786,
+      "wall_seconds": 2.778,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "df8d2bc0e1843a72bacb5847543592bd06c7fed816804f447d667856a1f41d27",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "udp-slots-run-conf-audit-tick-releases-orphans-and-idle-slots-in-one-step",
@@ -4804,14 +5256,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 2.527,
+      "seconds": 2.783,
       "retry_seconds": 0.0,
-      "wall_seconds": 2.527,
+      "wall_seconds": 2.783,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "fd754248185035ad766c5dfb79b2832dc8a5ddd6a02e8618b1414822eb6be0aa",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "udp-slots-run-conf-pairing-deadline-aborts-and-late-paired-is-discarded",
@@ -4825,14 +5279,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 3.296,
+      "seconds": 2.525,
       "retry_seconds": 0.0,
-      "wall_seconds": 3.296,
+      "wall_seconds": 2.525,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "b5d20b1573b2996d9d5855e117992c109c473354543a40a0cdb009c0e8559c20",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "udp-slots-run-conf-recycled-slot-never-delivers-previous-owners-frames",
@@ -4846,14 +5302,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 2.776,
+      "seconds": 3.54,
       "retry_seconds": 0.0,
-      "wall_seconds": 2.776,
+      "wall_seconds": 3.54,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "612822d84e6bdc96973bd88d954aa2c5d4df0dbc6d506d309afea07ecc985de5",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "flow-quota-safety-tlc",
@@ -4867,14 +5325,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 6.582,
+      "seconds": 6.839,
       "retry_seconds": 0.0,
-      "wall_seconds": 6.582,
+      "wall_seconds": 6.839,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "53c63dd17054bc944d23208c7020a8d1abd1b56e4d5f5b9f9df22e0e3d8c5539",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "flow-quota-hazard-count-active-only-bound",
@@ -4888,14 +5348,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 6.833,
+      "seconds": 6.84,
       "retry_seconds": 0.0,
-      "wall_seconds": 6.834,
+      "wall_seconds": 6.84,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/flow-quota-hazard-count-active-only-bound.tlc.txt",
       "condensed": "traces/flow-quota-hazard-count-active-only-bound.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "2aaf628763c3cb7e07005cc955fe752ba4af40576ffe8a58cc87e9fcfde01bb0",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "flow-quota-hazard-node-wide-quota",
@@ -4909,14 +5371,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 6.813,
+      "seconds": 6.841,
       "retry_seconds": 0.0,
-      "wall_seconds": 6.813,
+      "wall_seconds": 6.841,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/flow-quota-hazard-node-wide-quota.tlc.txt",
       "condensed": "traces/flow-quota-hazard-node-wide-quota.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "10d91b388bbfda13fb093fff63a55e7f7ef302591033723788c7a56e7e820064",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "flow-quota-run-admission-stops-at-the-allocation-quota",
@@ -4930,14 +5394,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 1.263,
+      "seconds": 1.511,
       "retry_seconds": 0.0,
-      "wall_seconds": 1.263,
+      "wall_seconds": 1.512,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "45b7c75b399a37b370f4a639bfd7cbd7d4ed1946ed864e103e757776ce270a25",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "flow-quota-run-draining-flow-still-counts-against-the-quota",
@@ -4951,14 +5417,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 1.263,
+      "seconds": 1.513,
       "retry_seconds": 0.0,
-      "wall_seconds": 1.263,
+      "wall_seconds": 1.514,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "bda1a9f62df253703b9580e3e25c628cd23b9bccb79c672baa8ca1f013ecd7a2",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "flow-quota-run-withholding-guest-holds-at-most-its-own-quota",
@@ -4972,14 +5440,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 1.265,
+      "seconds": 1.524,
       "retry_seconds": 0.0,
-      "wall_seconds": 1.266,
+      "wall_seconds": 1.524,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "8192d47f8e809e5f916695d660debbab06a894dca590cfc74fa9f36a108df00a",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "flow-quota-run-completed-pair-releases-the-slot-at-its-end-record",
@@ -4993,14 +5463,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 1.281,
+      "seconds": 1.515,
       "retry_seconds": 0.0,
-      "wall_seconds": 1.281,
+      "wall_seconds": 1.516,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "421d4fc6c8b94af050c13c7d5402c7b6cdec3a86672a3bf37c62b5495064aeb4",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "flow-quota-run-abort-of-half-closed-flow-releases-the-slot-at-its-end-record",
@@ -5014,14 +5486,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 1.272,
+      "seconds": 1.524,
       "retry_seconds": 0.0,
-      "wall_seconds": 1.273,
+      "wall_seconds": 1.524,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "8b0a7512dcc0fecb4b641d195374fd462cf85f7f21f8b456554e282707bdff48",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "flow-quota-run-end-records-are-read-in-queue-order",
@@ -5035,14 +5509,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 1.269,
+      "seconds": 1.275,
       "retry_seconds": 0.0,
-      "wall_seconds": 1.269,
+      "wall_seconds": 1.276,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "170fc1651e73a2ae1a0bc16cd5fb8a502432f72f07c07c42f1e355c79cd1865f",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "flow-quota-run-end-records-are-released-in-queue-order",
@@ -5056,14 +5532,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 1.265,
+      "seconds": 1.525,
       "retry_seconds": 0.0,
-      "wall_seconds": 1.265,
+      "wall_seconds": 1.526,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "84d7a19aacd25f547fe6bbba8b711cd2045f7f53ddd3c35f6367cc62b1c0f3f6",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "cid-lease-hazard-reclaim-never-completes",
@@ -5077,14 +5555,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 20.976,
+      "seconds": 24.056,
       "retry_seconds": 0.0,
-      "wall_seconds": 20.976,
+      "wall_seconds": 24.057,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/cid-lease-hazard-reclaim-never-completes.tlc.txt",
       "condensed": "traces/cid-lease-hazard-reclaim-never-completes.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "d57380c6c96ca5057d9df02d09a7a3f92285c15b37a1f6b079eda067ab9b868d",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "owner-flows-hazard-beacon-driver-stop-keeps-claim",
@@ -5098,14 +5578,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 24.516,
+      "seconds": 28.358,
       "retry_seconds": 0.0,
-      "wall_seconds": 24.516,
+      "wall_seconds": 28.359,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/owner-flows-hazard-beacon-driver-stop-keeps-claim.tlc.txt",
       "condensed": "traces/owner-flows-hazard-beacon-driver-stop-keeps-claim.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "ad622635214e0bc9eec34ed22e77349e69e4ea9b8a74dd5a5db432897cfda104",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-safe-pair-safety-tlc",
@@ -5119,14 +5601,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 16.676,
+      "seconds": 16.461,
       "retry_seconds": 0.0,
-      "wall_seconds": 16.676,
+      "wall_seconds": 16.462,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "91c26bb5f69fd6f4aeee7cd1a30413bf716ee18db96d5c6e3a68219642d23151",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-safe-watch-safety-tlc",
@@ -5140,14 +5624,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 13.15,
+      "seconds": 12.633,
       "retry_seconds": 0.0,
-      "wall_seconds": 13.151,
+      "wall_seconds": 12.633,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "a0e36ce413bedd4497d4ea075d089f6a3f3b4753e24c3143951199640def5f4c",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-safe-hazard-no-sweep-recheck",
@@ -5161,14 +5647,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 21.993,
+      "seconds": 25.559,
       "retry_seconds": 0.0,
-      "wall_seconds": 21.993,
+      "wall_seconds": 25.56,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/fwd-safe-hazard-no-sweep-recheck.tlc.txt",
       "condensed": "traces/fwd-safe-hazard-no-sweep-recheck.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "de6ee07f9f4a089fd323a6fb394aa8e498fa21d85735d78e2c40e23a2a43a060",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-safe-plive-every-unit-delivered",
@@ -5182,14 +5670,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 14.673,
+      "seconds": 14.414,
       "retry_seconds": 0.0,
-      "wall_seconds": 14.674,
+      "wall_seconds": 14.414,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "4767594652ef4b431214395c0ca6f48e739bfe74d8fce00bb5d89f01f23bf482",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-safe-plive-stalled-pair-resumes",
@@ -5203,14 +5693,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 14.415,
+      "seconds": 14.146,
       "retry_seconds": 0.0,
-      "wall_seconds": 14.416,
+      "wall_seconds": 14.146,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "0ae91674dcb9dfbd5b603c84780a48b29466d688949c73330518de4748f24d47",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-safe-plive-end-produces-record",
@@ -5224,14 +5716,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 14.664,
+      "seconds": 14.162,
       "retry_seconds": 0.0,
-      "wall_seconds": 14.664,
+      "wall_seconds": 14.163,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "61b01ac1a5ac2e73b48fee5d99b7aeb5c5ef72ef47d041374d32b93862b60bdd",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-safe-plive-requested-abort-ends",
@@ -5245,14 +5739,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 14.437,
+      "seconds": 14.672,
       "retry_seconds": 0.0,
-      "wall_seconds": 14.437,
+      "wall_seconds": 14.672,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "6e365d893d7013396bbb47cf834a71cc86df3255ed1bc65ce24c585ccaae6330",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-safe-plive-ended-state-freed",
@@ -5266,14 +5762,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 15.182,
+      "seconds": 14.665,
       "retry_seconds": 0.0,
-      "wall_seconds": 15.183,
+      "wall_seconds": 14.665,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "8e9d3e97a103aea77d2df7da946e690e1b17728124b0894473aab709bf816c03",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-safe-plive-socket-end-yields-record",
@@ -5287,14 +5785,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 14.422,
+      "seconds": 14.933,
       "retry_seconds": 0.0,
-      "wall_seconds": 14.422,
+      "wall_seconds": 14.933,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "70459488364a63497ccc2b9ce5e4cb76883dd1d085101bb24bad9ba0958f300c",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-safe-wlive-socket-end-yields-record",
@@ -5308,14 +5808,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 12.668,
+      "seconds": 13.171,
       "retry_seconds": 0.0,
-      "wall_seconds": 12.669,
+      "wall_seconds": 13.171,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "5952dbac9353aed291914fac692ab38b1fc24add09624dcf867cbc2e156aba4d",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-safe-wlive-end-produces-record",
@@ -5329,14 +5831,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 12.384,
+      "seconds": 12.378,
       "retry_seconds": 0.0,
-      "wall_seconds": 12.384,
+      "wall_seconds": 12.378,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "b35d226c39b1e61071baaff429e39dec7d9925b2c7e8062011d9bb2b7c69d42c",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-safe-wlive-ended-state-freed",
@@ -5350,14 +5854,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 12.648,
+      "seconds": 12.629,
       "retry_seconds": 0.0,
-      "wall_seconds": 12.648,
+      "wall_seconds": 12.629,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "32f24e7619c3b48951e472067ed4db792bc6d188c51e4c5cffb94a4b6c09bef1",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-safe-hazard-remove-wait-after-free-queued",
@@ -5371,14 +5877,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 25.773,
+      "seconds": 30.895,
       "retry_seconds": 0.0,
-      "wall_seconds": 25.773,
+      "wall_seconds": 30.895,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/fwd-safe-hazard-remove-wait-after-free-queued.tlc.txt",
       "condensed": "traces/fwd-safe-hazard-remove-wait-after-free-queued.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "9dba802557574891ce6aa8f79dd92e4f8aa6665f3f734daa41350fb913104531",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-safe-hazard-rcu-assign-null",
@@ -5392,14 +5900,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 22.252,
+      "seconds": 26.078,
       "retry_seconds": 0.0,
-      "wall_seconds": 22.252,
+      "wall_seconds": 26.079,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/fwd-safe-hazard-rcu-assign-null.tlc.txt",
       "condensed": "traces/fwd-safe-hazard-rcu-assign-null.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "ac6979802f25e0bcb4b65d9c43ce65d53a63abda6029f527a75f043094a02f38",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-safe-hazard-no-grace-period",
@@ -5413,14 +5923,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 24.012,
+      "seconds": 26.052,
       "retry_seconds": 0.0,
-      "wall_seconds": 24.013,
+      "wall_seconds": 26.052,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/fwd-safe-hazard-no-grace-period.tlc.txt",
       "condensed": "traces/fwd-safe-hazard-no-grace-period.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "60c4f885b7e96f81dd9b7c33ced79c277bb11764437ac324db814bfaafbcd496",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-safe-hazard-ctl-queue-outside-rcu",
@@ -5434,14 +5946,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 23.033,
+      "seconds": 27.317,
       "retry_seconds": 0.0,
-      "wall_seconds": 23.033,
+      "wall_seconds": 27.317,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/fwd-safe-hazard-ctl-queue-outside-rcu.tlc.txt",
       "condensed": "traces/fwd-safe-hazard-ctl-queue-outside-rcu.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "4bea9568fd8c0d123566347d84101e242aa13e91aa989e01379b38c7004942e9",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-safe-hazard-watch-end-no-id-check",
@@ -5455,14 +5969,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 22.03,
+      "seconds": 26.597,
       "retry_seconds": 0.0,
-      "wall_seconds": 22.03,
+      "wall_seconds": 26.597,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/fwd-safe-hazard-watch-end-no-id-check.tlc.txt",
       "condensed": "traces/fwd-safe-hazard-watch-end-no-id-check.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "fa25b338b0a00be9dbc3a7125cd0330aaa8ad5ac67c1faed3e27ee09a2a7f8e4",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-safe-hazard-no-write-space",
@@ -5476,14 +5992,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 23.248,
+      "seconds": 27.85,
       "retry_seconds": 0.0,
-      "wall_seconds": 23.248,
+      "wall_seconds": 27.851,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/fwd-safe-hazard-no-write-space.tlc.txt",
       "condensed": "traces/fwd-safe-hazard-no-write-space.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "9715d6a2164bf859a56fd59551cd113adec4d4e4ea21030ccdb4a5983723a471",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-safe-hazard-no-data-ready",
@@ -5497,14 +6015,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 22.489,
+      "seconds": 27.35,
       "retry_seconds": 0.0,
-      "wall_seconds": 22.49,
+      "wall_seconds": 27.35,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/fwd-safe-hazard-no-data-ready.tlc.txt",
       "condensed": "traces/fwd-safe-hazard-no-data-ready.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "f1fa9a31f55c1b48b4a1392438bcf2f4a34337d24d92c6f5f362777f30073656",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-safe-hazard-no-error-report",
@@ -5518,14 +6038,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 23.25,
+      "seconds": 27.315,
       "retry_seconds": 0.0,
-      "wall_seconds": 23.25,
+      "wall_seconds": 27.315,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/fwd-safe-hazard-no-error-report.tlc.txt",
       "condensed": "traces/fwd-safe-hazard-no-error-report.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "281ca2726d1f83b49b2bc02b664fe247f69db800f7a334556736a1cde07ee71b",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-safe-hazard-late-clear-pending",
@@ -5539,14 +6061,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 23.252,
+      "seconds": 27.594,
       "retry_seconds": 0.0,
-      "wall_seconds": 23.252,
+      "wall_seconds": 27.594,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/fwd-safe-hazard-late-clear-pending.tlc.txt",
       "condensed": "traces/fwd-safe-hazard-late-clear-pending.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "594381183ee7df35971b1081dd18e0122a634354dd70d8900dc7dd18452fce54",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-safe-hazard-ctl-abort-no-queue",
@@ -5560,14 +6084,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 23.752,
+      "seconds": 28.099,
       "retry_seconds": 0.0,
-      "wall_seconds": 23.752,
+      "wall_seconds": 28.099,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/fwd-safe-hazard-ctl-abort-no-queue.tlc.txt",
       "condensed": "traces/fwd-safe-hazard-ctl-abort-no-queue.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "0d265a8d577e166460bea8ecec3933152a41d34f79ae9530948705d4a2a68fdb",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-safe-hazard-end-split-no-requeue",
@@ -5581,14 +6107,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 22.74,
+      "seconds": 27.332,
       "retry_seconds": 0.0,
-      "wall_seconds": 22.74,
+      "wall_seconds": 27.332,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/fwd-safe-hazard-end-split-no-requeue.tlc.txt",
       "condensed": "traces/fwd-safe-hazard-end-split-no-requeue.txt",
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "d63044ac0cbd6c779469269c2019c4ced204b54ef210ed012c29d2f2b2052e5a",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-safe-run-target-stall-resumes-on-write-space",
@@ -5602,14 +6130,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 2.786,
+      "seconds": 3.296,
       "retry_seconds": 0.0,
-      "wall_seconds": 2.787,
+      "wall_seconds": 3.296,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "659048a11fc517294c77d89d0970155282a6f1f028c5607e06a818970da0fe7f",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-safe-run-wakeup-during-run-is-not-lost",
@@ -5630,7 +6160,9 @@
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "a84cb32106d08454e7bbc76672f11b07537046caf7db122ea4b0883e089d52c4",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-safe-run-clean-end-produces-one-record-and-frees",
@@ -5644,14 +6176,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 2.525,
+      "seconds": 2.531,
       "retry_seconds": 0.0,
-      "wall_seconds": 2.525,
+      "wall_seconds": 2.532,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "e8653f4a5132a6a5bb1f305da50ed2f411a8e344f27b2fbcbb071c46aac9db10",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-safe-run-late-callback-after-end-calls-original",
@@ -5665,14 +6199,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 2.787,
+      "seconds": 2.783,
       "retry_seconds": 0.0,
-      "wall_seconds": 2.787,
+      "wall_seconds": 2.783,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "046fe1bf3a06e2e424dbca894119a8c978779eefbfde94e08de4a0c15360885b",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-safe-run-callback-holding-pair-delays-free",
@@ -5686,14 +6222,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 2.776,
+      "seconds": 3.036,
       "retry_seconds": 0.0,
-      "wall_seconds": 2.776,
+      "wall_seconds": 3.036,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "85d52ad0536be0e91f8afa218284c520a15e7cec87d6565b9cf82ded7aa76065",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-safe-run-control-call-after-id-removal-is-enoent",
@@ -5714,7 +6252,9 @@
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "2d0a192bc15a26992bf38c350127a6530572686a7e56ef8f1cc5cc88b6ed157d",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-safe-run-abort-racing-end-is-cancelled-by-free",
@@ -5728,14 +6268,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 2.774,
+      "seconds": 3.039,
       "retry_seconds": 0.0,
-      "wall_seconds": 2.774,
+      "wall_seconds": 3.039,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "1ae4741f4802c2bb0f56cf923842e4c4f1035111b8d98c8bfc123bd123ffed3e",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-safe-run-sweep-reported-end-aborts-socket-error",
@@ -5749,14 +6291,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 2.778,
+      "seconds": 3.042,
       "retry_seconds": 0.0,
-      "wall_seconds": 2.778,
+      "wall_seconds": 3.042,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "2469a1835f16dcb8938509b22deffa2693f84d6ee6890cfe9012e14a5899a94b",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-safe-run-sweep-stores-before-err-read-rechecks-under-table-lock",
@@ -5770,14 +6314,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 2.775,
+      "seconds": 2.785,
       "retry_seconds": 0.0,
-      "wall_seconds": 2.775,
+      "wall_seconds": 2.785,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "5212c63f810ca4286c2128313d368be51e80fe2a1a210548e44f97ae630f35df",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-safe-run-sweep-err-visible-first-rechecks-under-table-lock",
@@ -5791,14 +6337,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 3.031,
+      "seconds": 2.785,
       "retry_seconds": 0.0,
-      "wall_seconds": 3.032,
+      "wall_seconds": 2.785,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "6828969c508b595139fb10891ce2a9cd9e7a73c15b19ec4e3a53ad99919e8065",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-safe-run-release-ends-pair-without-record",
@@ -5812,14 +6360,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 3.035,
+      "seconds": 3.04,
       "retry_seconds": 0.0,
-      "wall_seconds": 3.035,
+      "wall_seconds": 3.04,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "1225bcc5bdce5043688d1a47611145eef34756d75c433b43fecbab57383e7d7b",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-safe-run-watch-override-end-then-owner-abort-is-enoent",
@@ -5833,14 +6383,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 2.536,
+      "seconds": 3.286,
       "retry_seconds": 0.0,
-      "wall_seconds": 2.536,
+      "wall_seconds": 3.286,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "c39390c82a61cbe1c9746cab29430aca62e036d0b5c2a99563b0bb114445061c",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-safe-run-watch-owner-abort-racing-sweep-one-record",
@@ -5854,14 +6406,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 2.782,
+      "seconds": 3.038,
       "retry_seconds": 0.0,
-      "wall_seconds": 2.782,
+      "wall_seconds": 3.038,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "45fdaa8375f91165def9cd7e0a5eb33b61684b53df1d8cd427aed2f67dab05ea",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-safe-run-wfree-wake-finishes-before-remove-wait",
@@ -5875,14 +6429,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 2.534,
+      "seconds": 2.783,
       "retry_seconds": 0.0,
-      "wall_seconds": 2.534,
+      "wall_seconds": 2.783,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "f2a5737c8f4eb004d8a42a1df668769195e5869782e11081ebf45a2e0f7b9a2a",
+      "run_id": "313702-1794496750.649"
     },
     {
       "name": "fwd-pair-run-recovery-ends-held-stream-whose-watch-ended",
@@ -5896,14 +6452,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 8.089,
+      "seconds": 6.583,
       "retry_seconds": 0.0,
-      "wall_seconds": 8.09,
+      "wall_seconds": 6.583,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
-      "failure_log": null
+      "failure_log": null,
+      "input_key": "b333f42d4fc62bb258fe1512031b7fbe0315e3e5c1a2c94f2a8d7f5ca5a99fe4",
+      "run_id": "313702-1794496750.649"
     }
   ]
 }

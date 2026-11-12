@@ -8,7 +8,7 @@ State 1
   cnt = 0
   foreign = FALSE
   roundState = [C1 |-> "outside", C2 |-> "outside"]
-  flowsOpen = 0
+  flowsOpen = 1
   conf_step = [InitDown |-> [tag |-> "UNIT"]]
   table = TRUE
   leaked = 0
@@ -24,6 +24,7 @@ State 3 [recStep]
   rec = [C1 |-> "held", C2 |-> "idle"]
   cnt = 1
   roundState = [C1 |-> "pending", C2 |-> "outside"]
+  flowsOpen = 0
   latch = TRUE
 
 State 4 [RecRepair]

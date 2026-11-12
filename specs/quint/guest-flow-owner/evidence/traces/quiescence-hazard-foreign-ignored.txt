@@ -23,14 +23,14 @@ State 2 [Damage]
 State 3 [Damage]
   dmg = [C1 |-> TRUE, C2 |-> TRUE]
 
-State 4 [ForeignRestore]
-  foreign = TRUE
-
-State 5 [recStep]
+State 4 [recStep]
   rec = [C1 |-> "held", C2 |-> "idle"]
   cnt = 1
   roundState = [C1 |-> "pending", C2 |-> "outside"]
   latch = TRUE
+
+State 5 [ForeignRestore]
+  foreign = TRUE
 
 State 6 [RecRepair]
   rec = [C1 |-> "repaired", C2 |-> "idle"]

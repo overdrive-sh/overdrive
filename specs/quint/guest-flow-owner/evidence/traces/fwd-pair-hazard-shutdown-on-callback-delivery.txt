@@ -26,13 +26,13 @@ State 1
 State 2 [Write]
   dir = [ gh |-> [ wr |-> 1, wfin |-> FALSE, q0 |-> <<1>>, q1 |-> <<>>, q2 |-> <<>>, srcEnd |-> "none", srcShut |-> FALSE, dstEnd |-> "none", dstShut |-> FALSE, got |-> <<>>, eof |-> FALSE, rst |-> FALSE, shutRd |-> FALSE, loss |-> FALSE, lost |-> 0 ], hg |-> [ wr |-> 0, wfin |-> FALSE, q0 |-> <<>>, q1 |-> <<>>, q2 |-> <<>>, srcEnd |-> "none", srcShut |-> FALSE, dstEnd |-> "none", dstShut |-> FALSE, got |-> <<>>, eof |-> FALSE, rst |-> FALSE, shutRd |-> FALSE, loss |-> FALSE, lost |-> 0 ] ]
 
-State 3 [Fin]
-  dir = [ gh |-> [ wr |-> 1, wfin |-> TRUE, q0 |-> <<1>>, q1 |-> <<>>, q2 |-> <<>>, srcEnd |-> "none", srcShut |-> FALSE, dstEnd |-> "none", dstShut |-> FALSE, got |-> <<>>, eof |-> FALSE, rst |-> FALSE, shutRd |-> FALSE, loss |-> FALSE, lost |-> 0 ], hg |-> [ wr |-> 0, wfin |-> FALSE, q0 |-> <<>>, q1 |-> <<>>, q2 |-> <<>>, srcEnd |-> "none", srcShut |-> FALSE, dstEnd |-> "none", dstShut |-> FALSE, got |-> <<>>, eof |-> FALSE, rst |-> FALSE, shutRd |-> FALSE, loss |-> FALSE, lost |-> 0 ] ]
-
-State 4 [Attach]
+State 3 [Attach]
   pr = [ g |-> [ ph |-> "unattached", rec |-> "none", out |-> "none", cause |-> "none", errno |-> "none", byRel |-> FALSE, closed |-> FALSE, nrec |-> 0, cgen |-> 0 ], h |-> [ ph |-> "live", rec |-> "none", out |-> "none", cause |-> "none", errno |-> "none", byRel |-> FALSE, closed |-> FALSE, nrec |-> 0, cgen |-> 0 ] ]
   attRes = [g |-> "none", h |-> "ok"]
   vs = [ g |-> [ ps |-> {}, sent |-> {}, err |-> FALSE, cls |-> "none", tcls |-> "none", ucls |-> "none", att |-> "none", clsAt |-> "none", ncls |-> 0, snap |-> {}, sshut |-> FALSE, misc |-> FALSE, st |-> "est" ], h |-> [ ps |-> {}, sent |-> {}, err |-> FALSE, cls |-> "none", tcls |-> "none", ucls |-> "none", att |-> "noend", clsAt |-> "none", ncls |-> 0, snap |-> {}, sshut |-> FALSE, misc |-> FALSE, st |-> "est" ] ]
+
+State 4 [Fin]
+  dir = [ gh |-> [ wr |-> 1, wfin |-> TRUE, q0 |-> <<1>>, q1 |-> <<>>, q2 |-> <<>>, srcEnd |-> "none", srcShut |-> FALSE, dstEnd |-> "none", dstShut |-> FALSE, got |-> <<>>, eof |-> FALSE, rst |-> FALSE, shutRd |-> FALSE, loss |-> FALSE, lost |-> 0 ], hg |-> [ wr |-> 0, wfin |-> FALSE, q0 |-> <<>>, q1 |-> <<>>, q2 |-> <<>>, srcEnd |-> "none", srcShut |-> FALSE, dstEnd |-> "none", dstShut |-> FALSE, got |-> <<>>, eof |-> FALSE, rst |-> FALSE, shutRd |-> FALSE, loss |-> FALSE, lost |-> 0 ] ]
 
 State 5 [Attach]
   pr = [ g |-> [ ph |-> "live", rec |-> "none", out |-> "none", cause |-> "none", errno |-> "none", byRel |-> FALSE, closed |-> FALSE, nrec |-> 0, cgen |-> 0 ], h |-> [ ph |-> "live", rec |-> "none", out |-> "none", cause |-> "none", errno |-> "none", byRel |-> FALSE, closed |-> FALSE, nrec |-> 0, cgen |-> 0 ] ]

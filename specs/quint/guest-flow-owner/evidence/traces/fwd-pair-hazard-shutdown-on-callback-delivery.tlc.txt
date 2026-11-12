@@ -264,7 +264,7 @@ State 2: <pair_liveShutdownOnCallback_fwd_pair_Write line 3610, col 3 to line 36
 /\ pair_liveShutdownOnCallback_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
 /\ pair_liveShutdownOnCallback_fwd_pair_ctx = [g |-> "open", h |-> "open"]
 
-State 3: <pair_liveShutdownOnCallback_fwd_pair_Fin line 1727, col 3 to line 1765, col 78 of module pair_liveShutdownOnCallback>
+State 3: <pair_liveShutdownOnCallback_fwd_pair_Attach line 4145, col 3 to line 4155, col 80 of module pair_liveShutdownOnCallback>
 /\ pair_liveShutdownOnCallback_fwd_pair_strmAbort = FALSE
 /\ pair_liveShutdownOnCallback_fwd_pair_guestAbortSent = FALSE
 /\ pair_liveShutdownOnCallback_fwd_pair_dg = [ gh |->
@@ -321,7 +321,7 @@ State 3: <pair_liveShutdownOnCallback_fwd_pair_Fin line 1727, col 3 to line 1765
         nrec |-> 0,
         cgen |-> 0 ],
   h |->
-      [ ph |-> "unattached",
+      [ ph |-> "live",
         rec |-> "none",
         out |-> "none",
         cause |-> "none",
@@ -334,7 +334,7 @@ State 3: <pair_liveShutdownOnCallback_fwd_pair_Fin line 1727, col 3 to line 1765
 /\ pair_liveShutdownOnCallback_fwd_pair_attEnded = [g |-> 0, h |-> 0]
 /\ pair_liveShutdownOnCallback_fwd_pair_dir = [ gh |->
       [ wr |-> 1,
-        wfin |-> TRUE,
+        wfin |-> FALSE,
         q0 |-> <<1>>,
         q1 |-> <<>>,
         q2 |-> <<>>,
@@ -364,7 +364,7 @@ State 3: <pair_liveShutdownOnCallback_fwd_pair_Fin line 1727, col 3 to line 1765
         shutRd |-> FALSE,
         loss |-> FALSE,
         lost |-> 0 ] ]
-/\ pair_liveShutdownOnCallback_fwd_pair_attRes = [g |-> "none", h |-> "none"]
+/\ pair_liveShutdownOnCallback_fwd_pair_attRes = [g |-> "none", h |-> "ok"]
 /\ pair_liveShutdownOnCallback_fwd_pair_hres = "none"
 /\ pair_liveShutdownOnCallback_fwd_pair_vs = [ g |->
       [ ps |-> {},
@@ -387,7 +387,7 @@ State 3: <pair_liveShutdownOnCallback_fwd_pair_Fin line 1727, col 3 to line 1765
         cls |-> "none",
         tcls |-> "none",
         ucls |-> "none",
-        att |-> "none",
+        att |-> "noend",
         clsAt |-> "none",
         ncls |-> 0,
         snap |-> {},
@@ -397,7 +397,7 @@ State 3: <pair_liveShutdownOnCallback_fwd_pair_Fin line 1727, col 3 to line 1765
 /\ pair_liveShutdownOnCallback_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
 /\ pair_liveShutdownOnCallback_fwd_pair_ctx = [g |-> "open", h |-> "open"]
 
-State 4: <pair_liveShutdownOnCallback_fwd_pair_Attach line 4146, col 3 to line 4156, col 80 of module pair_liveShutdownOnCallback>
+State 4: <pair_liveShutdownOnCallback_fwd_pair_Fin line 1727, col 3 to line 1765, col 78 of module pair_liveShutdownOnCallback>
 /\ pair_liveShutdownOnCallback_fwd_pair_strmAbort = FALSE
 /\ pair_liveShutdownOnCallback_fwd_pair_guestAbortSent = FALSE
 /\ pair_liveShutdownOnCallback_fwd_pair_dg = [ gh |->
@@ -530,7 +530,7 @@ State 4: <pair_liveShutdownOnCallback_fwd_pair_Attach line 4146, col 3 to line 4
 /\ pair_liveShutdownOnCallback_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
 /\ pair_liveShutdownOnCallback_fwd_pair_ctx = [g |-> "open", h |-> "open"]
 
-State 5: <pair_liveShutdownOnCallback_fwd_pair_Attach line 4146, col 3 to line 4156, col 80 of module pair_liveShutdownOnCallback>
+State 5: <pair_liveShutdownOnCallback_fwd_pair_Attach line 4145, col 3 to line 4155, col 80 of module pair_liveShutdownOnCallback>
 /\ pair_liveShutdownOnCallback_fwd_pair_strmAbort = FALSE
 /\ pair_liveShutdownOnCallback_fwd_pair_guestAbortSent = FALSE
 /\ pair_liveShutdownOnCallback_fwd_pair_dg = [ gh |->
@@ -929,7 +929,7 @@ State 7: <pair_liveShutdownOnCallback_fwd_pair_HopEnd0 line 3442, col 3 to line 
 /\ pair_liveShutdownOnCallback_fwd_pair_ctl = [gh |-> <<{"S"}>>, hg |-> <<>>]
 /\ pair_liveShutdownOnCallback_fwd_pair_ctx = [g |-> "open", h |-> "open"]
 
-State 8: <pair_liveShutdownOnCallback_fwd_pair_VCtl line 4178, col 3 to line 4182, col 54 of module pair_liveShutdownOnCallback>
+State 8: <pair_liveShutdownOnCallback_fwd_pair_VCtl line 4177, col 3 to line 4181, col 54 of module pair_liveShutdownOnCallback>
 /\ pair_liveShutdownOnCallback_fwd_pair_strmAbort = FALSE
 /\ pair_liveShutdownOnCallback_fwd_pair_guestAbortSent = FALSE
 /\ pair_liveShutdownOnCallback_fwd_pair_dg = [ gh |->

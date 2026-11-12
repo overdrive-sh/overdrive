@@ -37,47 +37,48 @@ State 2 [Provision]
   alloc = "Provisioned"
   gen = 1
 
-State 3 [Teardown]
-  alloc = "Retiring"
-
-State 4 [Release]
-  alloc = "Absent"
-
-State 5 [Provision]
-  alloc = "Provisioned"
-  gen = 2
-
-State 6 [VmStart]
+State 3 [VmStart]
   vmUp = TRUE
-  vmGen = 2
+  vmGen = 1
+
+State 4 [step]
+  gSess = 1
+  sess = <<[st |-> "pending", gen |-> 1], [st |-> "none", gen |-> 0]>>
+
+State 5 [step]
+  sess = <<[st |-> "reading", gen |-> 1], [st |-> "none", gen |-> 0]>>
+
+State 6 [step]
+  sess = <<[st |-> "live", gen |-> 1], [st |-> "none", gen |-> 0]>>
+  claim = 1
 
 State 7 [step]
-  gSess = 2
-  sess = <<[st |-> "none", gen |-> 0], [st |-> "pending", gen |-> 2]>>
+  flows = <<[st |-> "queued", gen |-> 1, req |-> 0, inFlight |-> FALSE]>>
 
-State 8 [step]
-  sess = <<[st |-> "none", gen |-> 0], [st |-> "reading", gen |-> 2]>>
-
-State 9 [step]
-  sess = <<[st |-> "none", gen |-> 0], [st |-> "live", gen |-> 2]>>
-  claim = 2
-
-State 10 [Activate]
+State 8 [Activate]
   act = "Activated"
   alloc = "Active"
 
-State 11 [step]
+State 9 [step]
   act = "none"
   dl = [ res |-> <<"pending">>, adm |-> {}, tout |-> {}, earlyDl |-> FALSE, lateReply |-> FALSE ]
-  hf = <<[st |-> "req", gen |-> 2]>>
+  hf = <<[st |-> "req", gen |-> 1]>>
 
-State 12 [step]
-  dl = [ res |-> <<"NoSession">>, adm |-> {}, tout |-> {}, earlyDl |-> FALSE, lateReply |-> FALSE ]
-  sess = <<[st |-> "none", gen |-> 0], [st |-> "closed", gen |-> 2]>>
+State 10 [step]
+  flows = <<[st |-> "accepted", gen |-> 1, req |-> 0, inFlight |-> FALSE]>>
+
+State 11 [step]
+  flows = <<[st |-> "read", gen |-> 1, req |-> 2, inFlight |-> FALSE]>>
+
+State 12 [Teardown]
+  alloc = "Retiring"
+  dl = [ res |-> <<"NotServing">>, adm |-> {}, tout |-> {}, earlyDl |-> FALSE, lateReply |-> FALSE ]
+  sess = <<[st |-> "closed", gen |-> 1], [st |-> "none", gen |-> 0]>>
   claim = 0
-  hf = <<[st |-> "closed", gen |-> 2]>>
+  hf = <<[st |-> "closed", gen |-> 1]>>
+  flows = <<[st |-> "closed", gen |-> 1, req |-> 2, inFlight |-> FALSE]>>
 
 State 13 [step]
-  gf = <<[st |-> "acc", gen |-> 2, c |-> 0]>>
+  gf = <<[st |-> "acc", gen |-> 1, c |-> 0]>>
 
 -> stutters forever in State 13

@@ -264,7 +264,7 @@ State 2: <pair_bugEndedAttachGracefulClose_fwd_pair_CloseUnattached line 3065, c
         nrec |-> 0,
         cgen |-> 0 ] ]
 
-State 3: <pair_bugEndedAttachGracefulClose_fwd_pair_VCtl line 4139, col 3 to line 4143, col 59 of module pair_bugEndedAttachGracefulClose>
+State 3: <pair_bugEndedAttachGracefulClose_fwd_pair_VCtl line 4138, col 3 to line 4142, col 59 of module pair_bugEndedAttachGracefulClose>
 /\ pair_bugEndedAttachGracefulClose_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
 /\ pair_bugEndedAttachGracefulClose_fwd_pair_mode = "stream"
 /\ pair_bugEndedAttachGracefulClose_fwd_pair_attRes = [g |-> "none", h |-> "none"]
@@ -397,7 +397,7 @@ State 3: <pair_bugEndedAttachGracefulClose_fwd_pair_VCtl line 4139, col 3 to lin
         nrec |-> 0,
         cgen |-> 0 ] ]
 
-State 4: <pair_bugEndedAttachGracefulClose_fwd_pair_Attach line 4106, col 3 to line 4117, col 59 of module pair_bugEndedAttachGracefulClose>
+State 4: <pair_bugEndedAttachGracefulClose_fwd_pair_Attach line 4105, col 3 to line 4116, col 59 of module pair_bugEndedAttachGracefulClose>
 /\ pair_bugEndedAttachGracefulClose_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
 /\ pair_bugEndedAttachGracefulClose_fwd_pair_mode = "stream"
 /\ pair_bugEndedAttachGracefulClose_fwd_pair_attRes = [g |-> "none", h |-> "halfEnded"]

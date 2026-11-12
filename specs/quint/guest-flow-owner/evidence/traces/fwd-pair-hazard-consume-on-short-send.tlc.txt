@@ -264,7 +264,7 @@ State 2: <pair_bugConsumeOnShortSend_fwd_pair_Write line 3575, col 3 to line 361
   hostDead |-> FALSE,
   hresCls |-> "none" ]
 
-State 3: <pair_bugConsumeOnShortSend_fwd_pair_Attach line 4064, col 3 to line 4074, col 79 of module pair_bugConsumeOnShortSend>
+State 3: <pair_bugConsumeOnShortSend_fwd_pair_Attach line 4063, col 3 to line 4073, col 79 of module pair_bugConsumeOnShortSend>
 /\ pair_bugConsumeOnShortSend_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
 /\ pair_bugConsumeOnShortSend_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
 /\ pair_bugConsumeOnShortSend_fwd_pair_mode = "stream"
@@ -397,7 +397,7 @@ State 3: <pair_bugConsumeOnShortSend_fwd_pair_Attach line 4064, col 3 to line 40
   hostDead |-> FALSE,
   hresCls |-> "none" ]
 
-State 4: <pair_bugConsumeOnShortSend_fwd_pair_Attach line 4064, col 3 to line 4074, col 79 of module pair_bugConsumeOnShortSend>
+State 4: <pair_bugConsumeOnShortSend_fwd_pair_Attach line 4063, col 3 to line 4073, col 79 of module pair_bugConsumeOnShortSend>
 /\ pair_bugConsumeOnShortSend_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
 /\ pair_bugConsumeOnShortSend_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
 /\ pair_bugConsumeOnShortSend_fwd_pair_mode = "stream"

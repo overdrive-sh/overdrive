@@ -293,7 +293,7 @@ EVMOD-ATTACH-END, T-3 / T-4: attach accepts a TCP half in `ESTABLISHED` or `CLOS
 closing` — with `HalfEnded`: no pair, no record; in the same step the owner ends the flow by its pre-`Paired` close,
 the TCP half with `SO_LINGER{1,0}` and the vsock half ({S, R}), the host also writing `Abort { flow }` while the
 session is live, and `attEnded` rises by one), `GuestAbort` (the guest owner takes `Abort { flow }`: it aborts the
-flow's pair, or closes the flow it has not attached), `CloseUnattached` (the guest owner
+flow's pair, or closes the flow it has not attached, in every mode), `CloseUnattached` (the guest owner
 closes a flow it has not attached — a pending intake child that reset, the pairing deadline, session loss — with
 `SO_LINGER{1,0}` on the TCP half, D20, and {S, R} on V_g; no record), `Abort` (Detached; for a non-watch pair on
 side h the owner queues the record and closes its owned descriptors in the same step (`closed`, vsock {S,R}); on side

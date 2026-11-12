@@ -606,14 +606,14 @@ module fwd_pair {
     commit(ownerAbort(cur, s), variant("Abort", { s: s })),
   }
   // the guest owner takes Abort { flow } (owner_flows' toGuestAbort): it aborts the flow's pair, or closes the flow it
-  // has not attached (no record)
+  // has not attached (no record), in every mode
   def canGuestAbort(t: St): bool = t.guestAbortSent and t.vmUp and t.ctx.get("g") == "open"
   action GuestAbort(s: str): bool = all {
     s == "g", canGuestAbort(cur),
     val phase = cur.pr.get(s).ph
     val t1 =
       if (phase == "live") abortSide(cur, s, "Detached", false)
-      else if (cur.mode != "watch" and phase == "unattached") abortSide(cur, s, "Detached", true)
+      else if (phase == "unattached") abortSide(cur, s, "Detached", true)
       else cur
     commit({ ...t1, guestAbortSent: false }, variant("GuestAbort", { s: s })),
   }
