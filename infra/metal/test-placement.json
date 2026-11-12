@@ -6048,10 +6048,10 @@
       "acceptance::health_check_toml_parse::readiness_success_threshold_zero_yields_named_parse_error": {
         "kind": "host-pure"
       },
-      "acceptance::health_check_toml_parse::service_with_empty_startup_array_opts_out_of_default_inference": {
+      "acceptance::health_check_toml_parse::service_with_empty_startup_array_opts_out_of_default_gate": {
         "kind": "host-pure"
       },
-      "acceptance::health_check_toml_parse::service_without_probes_with_listener_infers_default_tcp_startup_probe": {
+      "acceptance::health_check_toml_parse::service_without_startup_probe_materializes_guest_listener_gate": {
         "kind": "host-pure"
       },
       "acceptance::health_check_toml_parse::tcp_probe_missing_port_yields_named_parse_error": {
@@ -6987,19 +6987,19 @@
       "acceptance::vsock_deploy_validation::api_ingress_refuses_reserved_listener_port_with_validation": {
         "kind": "host-pure"
       },
-      "acceptance::vsock_deploy_validation::deploy_accepts_eight_probes_in_total_in_any_shape": {
+      "acceptance::vsock_deploy_validation::deploy_accepts_eight_dial_bearing_probes_in_any_shape": {
         "kind": "host-pure"
       },
       "acceptance::vsock_deploy_validation::deploy_refusal_iff_port_in_reserved_range": {
         "kind": "host-pure"
       },
-      "acceptance::vsock_deploy_validation::deploy_refusal_iff_the_probe_count_exceeds_the_cap": {
+      "acceptance::vsock_deploy_validation::deploy_refusal_iff_the_dial_probe_count_exceeds_the_cap": {
         "kind": "host-pure"
       },
       "acceptance::vsock_deploy_validation::deploy_refuses_a_reserved_port_among_ordinary_listeners": {
         "kind": "host-pure"
       },
-      "acceptance::vsock_deploy_validation::deploy_refuses_nine_probes_counting_the_default_startup_probe": {
+      "acceptance::vsock_deploy_validation::deploy_refuses_nine_dial_bearing_probes": {
         "kind": "host-pure"
       },
       "acceptance::vsock_deploy_validation::deploy_refuses_reserved_listener_port_naming_the_range": {
@@ -10629,7 +10629,7 @@
       "tests::every_sanctioned_pre_ready_failure_maps_to_the_closed_init_error_set": {
         "kind": "host-pure"
       },
-      "tests::minimal_guest_root_bootstrap_creates_proc_and_etc_preconditions": {
+      "tests::minimal_guest_root_bootstrap_creates_proc_sys_and_etc_preconditions": {
         "kind": "host-pure"
       },
       "tests::minimal_root_directory_failure_is_typed_and_suppresses_all_later_init": {

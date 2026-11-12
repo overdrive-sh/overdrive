@@ -60,7 +60,6 @@ fn is_startup_stop(terminal: Option<&TerminalCondition>) -> bool {
 /// `ServiceFailed { StartupProbeFailed }` naming it; never `Stable`.
 #[tokio::test(flavor = "current_thread")]
 /// CONTRACT_SHAPE: bounded-change.
-#[ignore = "pending DELIVER: D13/D14 a dropped listener report leaves the set partial: deadline Fail, startup stop, restart, give-up"]
 async fn a_service_whose_listener_report_never_arrives_is_stopped_at_the_deadline_restarted_and_given_up()
  {
     // Two seeds: within one seed the six instances alternate which listener is dropped

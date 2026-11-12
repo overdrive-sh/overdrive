@@ -285,12 +285,11 @@ pub enum ParseError {
         guidance: &'static str,
     },
 
-    /// The spec's startup, readiness and liveness probes together exceed
-    /// `GUEST_PROBE_SLOTS` (D-UP-12). `count` includes a synthesized default
-    /// startup probe when the parser supplies one (ADR-0058); `max` is
-    /// `GUEST_PROBE_SLOTS`.
+    /// The spec's dial-bearing startup, readiness and liveness probes together
+    /// exceed `GUEST_PROBE_SLOTS` (D-UP-12). `count` excludes the fieldless
+    /// `GuestListeners` startup gate; `max` is `GUEST_PROBE_SLOTS`.
     #[error(
-        "[[health_check.*]] declares {count} probes across startup, readiness and liveness (including a synthesized default startup probe when applicable); at most {max} probes per workload are supported"
+        "[[health_check.*]] declares {count} dial-bearing probes across startup, readiness and liveness; at most {max} dial-bearing probes per workload are supported"
     )]
     ProbeCountExceeded { count: usize, max: u32 },
 }
@@ -776,10 +775,10 @@ impl WorkloadSpecInput {
             let listeners = parse_listeners(table)?;
 
             // Step 01-02 — ADR-0057 §1 [[health_check.startup]] TCP
-            // variant + ADR-0058 default startup probe. Discover the
+            // variant + D15 default startup gate. Discover the
             // `health_check.startup` value (absent vs explicit-empty
             // vs populated) and either parse declared probes or
-            // synthesise the default TCP probe against `listeners[0]`.
+            // synthesise the sole GuestListeners descriptor.
             let (startup_probes, startup_was_explicit) = parse_startup_probes(table, &listeners)?;
             let _ = startup_was_explicit;
 
@@ -802,10 +801,11 @@ impl WorkloadSpecInput {
             // reconciler's liveness branch is a no-op for this Service).
             let liveness_probes = parse_liveness_probes(table)?;
 
-            let probe_count = startup_probes
-                .len()
-                .saturating_add(readiness_probes.len())
-                .saturating_add(liveness_probes.len());
+            let probe_count = super::dial_bearing_probe_count(
+                &startup_probes,
+                &readiness_probes,
+                &liveness_probes,
+            );
             if probe_count > GUEST_PROBE_SLOTS as usize {
                 return Err(ParseError::ProbeCountExceeded {
                     count: probe_count,
@@ -1121,8 +1121,9 @@ fn format_listener_pair(l: Listener) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// Step 01-02 — [[health_check.startup]] (TCP only) parsing + ADR-0058
-// default-inference. HTTP and TCP are the supported mechanics.
+// Step 01-02 — [[health_check.startup]] parsing + D15 default gate.
+// Operator-declared probes support HTTP and TCP; GuestListeners is
+// materialized only for an omitted Service startup section.
 // ---------------------------------------------------------------------------
 
 use crate::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
@@ -1148,14 +1149,14 @@ const STARTUP_INTERVAL_DEFAULT_S: u32 = 2;
 const STARTUP_MAX_ATTEMPTS_DEFAULT: u32 = 30;
 
 /// Discover and parse `[[health_check.startup]]` per ADR-0057 §1 +
-/// apply the ADR-0058 default-inference rule.
+/// apply the D15 default guest-listener gate.
 ///
 /// Returns `(probes, was_explicit)` where `was_explicit` is `true` iff
 /// the operator wrote `[[health_check.startup]]` (whether as an array
 /// of tables OR `health_check.startup = []` — both shapes are
 /// "explicit"). When the operator omits the section entirely AND the
-/// service has at least one listener, the parser synthesises a single
-/// default TCP probe per ADR-0058.
+/// service has at least one listener, the parser synthesises the single
+/// default `GuestListeners` descriptor per D15.
 ///
 /// Per DDD-16 the empty-array shape is the explicit opt-out: zero
 /// probes survive (preserves Phase-1 first-Running semantics).
@@ -1196,15 +1197,14 @@ fn parse_startup_probes(
         )?,
     };
 
-    // Default-probe synthesis per ADR-0058: zero probes declared AND no
-    // explicit shape AND at least one listener -> synthesise default.
+    // Default-gate synthesis per D15: zero probes declared AND no explicit
+    // shape AND at least one listener -> synthesise the platform descriptor.
     if !was_explicit && !listeners.is_empty() {
-        let first = &listeners[0];
         let default_probe = ProbeDescriptor {
-            // Sole member of the synthesised startup array (ADR-0058).
+            // Sole member of the synthesised startup array (D15).
             idx: ProbeIdx::new(0),
             role: ProbeRole::Startup,
-            mechanic: ProbeMechanic::Tcp { host: "0.0.0.0".to_string(), port: first.port.get() },
+            mechanic: ProbeMechanic::GuestListeners,
             timeout_seconds: STARTUP_TIMEOUT_DEFAULT_S,
             interval_seconds: STARTUP_INTERVAL_DEFAULT_S,
             max_attempts: STARTUP_MAX_ATTEMPTS_DEFAULT,
@@ -1313,8 +1313,8 @@ const READINESS_INTERVAL_DEFAULT_S: u32 = 2;
 /// Slice 04. Reuses the role-agnostic [`parse_probe_mechanic`] for the
 /// TCP/HTTP body.
 ///
-/// Unlike startup (which synthesises a default TCP probe per ADR-0058
-/// when absent), readiness has NO default-inference: an omitted
+/// Unlike startup (which synthesises a `GuestListeners` descriptor per
+/// D15 when absent), readiness has no default: an omitted
 /// `[[health_check.readiness]]` section means "no readiness gate", so
 /// every backend is `healthy = true` post-Stable (S-SHCP-RECON-08b).
 /// Sets `role = Readiness`, `success_threshold = Some(1)` default

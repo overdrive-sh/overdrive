@@ -420,8 +420,9 @@ impl ServiceV1 {
     /// * `port != 0` per listener.
     /// * The guest-reserved intake range is unavailable to listeners.
     /// * `protocol` parses to `Proto` (case-insensitive `tcp` / `udp`).
-    /// * The combined startup, readiness and liveness probe count does not
-    ///   exceed `GUEST_PROBE_SLOTS`.
+    /// * The combined dial-bearing startup, readiness and liveness probe
+    ///   count does not exceed `GUEST_PROBE_SLOTS`; the fieldless
+    ///   `GuestListeners` startup gate consumes no dial slot.
     pub fn from_submit(
         input: crate::api::submit::ServiceSpecInput,
     ) -> Result<Self, AggregateError> {
@@ -553,12 +554,26 @@ fn validate_service_listeners(
     Ok(validated)
 }
 
+fn dial_bearing_probe_count(
+    startup: &[ProbeDescriptor],
+    readiness: &[ProbeDescriptor],
+    liveness: &[ProbeDescriptor],
+) -> usize {
+    [startup, readiness, liveness]
+        .into_iter()
+        .flat_map(|probes| probes.iter())
+        .filter(|probe| {
+            matches!(probe.mechanic, ProbeMechanic::Tcp { .. } | ProbeMechanic::Http { .. })
+        })
+        .count()
+}
+
 fn validate_guest_probe_count(
     startup: &[ProbeDescriptor],
     readiness: &[ProbeDescriptor],
     liveness: &[ProbeDescriptor],
 ) -> Result<(), AggregateError> {
-    let count = startup.len().saturating_add(readiness.len()).saturating_add(liveness.len());
+    let count = dial_bearing_probe_count(startup, readiness, liveness);
     let max = crate::guest_transport::GUEST_PROBE_SLOTS;
     if count <= max as usize {
         return Ok(());

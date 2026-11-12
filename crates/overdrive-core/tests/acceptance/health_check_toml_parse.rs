@@ -1,6 +1,6 @@
 //! Tier 1 acceptance — `[[health_check.*]]` TOML parse rules per
-//! ADR-0057 / ADR-0058. Step 01-02 GREEN landing for the TCP
-//! variant + default inference + opt-out distinction.
+//! ADR-0057 / ADR-0270. Step 01-02 GREEN landing for the TCP
+//! variant plus D15's default guest-listener gate and explicit opt-out.
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 #![allow(
@@ -354,7 +354,7 @@ proptest! {
 }
 
 // ---------------------------------------------------------------------
-// Step 01-02 active scenarios — ADR-0057 TCP + ADR-0058 default-inference.
+// Step 01-02 active scenarios — ADR-0057 TCP + D15 default gate.
 // PBT per the standing paradigm mandate.
 // ---------------------------------------------------------------------
 
@@ -409,11 +409,12 @@ fn parse_err(toml: &str) -> ParseError {
     WorkloadSpecInput::from_toml_str(toml).expect_err("expected parse to fail")
 }
 
-// S-SHCP-INFER-01 (US-01 WS / DDD-15 / ADR-0058) — default TCP inference.
+// D15 — the default startup gate waits for guest reports of every declared listener.
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(32))]
+    /// CONTRACT_SHAPE: pure-function.
     #[test]
-    fn service_without_probes_with_listener_infers_default_tcp_startup_probe(
+    fn service_without_startup_probe_materializes_guest_listener_gate(
         id in service_id_strategy(),
         port in listener_port_strategy(),
     ) {
@@ -442,15 +443,12 @@ memory_bytes = 134217728
             .expect("parse must succeed");
         let svc = unwrap_service(input);
 
-        prop_assert_eq!(svc.startup_probes.len(), 1, "exactly one default startup probe");
+        prop_assert_eq!(svc.startup_probes.len(), 1, "exactly one default startup gate");
         let p: &ProbeDescriptor = &svc.startup_probes[0];
         prop_assert_eq!(p.role, ProbeRole::Startup);
         match &p.mechanic {
-            ProbeMechanic::Tcp { host, port: probe_port } => {
-                prop_assert_eq!(host.as_str(), "0.0.0.0");
-                prop_assert_eq!(*probe_port, port);
-            }
-            other @ (ProbeMechanic::Http { .. } | ProbeMechanic::GuestListeners) => prop_assert!(false, "expected Tcp mechanic, got {:?}", other),
+            ProbeMechanic::GuestListeners => {}
+            other @ (ProbeMechanic::Tcp { .. } | ProbeMechanic::Http { .. }) => prop_assert!(false, "expected GuestListeners mechanic, got {:?}", other),
         }
         prop_assert_eq!(p.timeout_seconds, 5);
         prop_assert_eq!(p.interval_seconds, 2);
@@ -458,11 +456,12 @@ memory_bytes = 134217728
     }
 }
 
-// S-SHCP-INFER-02 (DDD-16 / ADR-0058) — explicit empty opts out.
+// D15 — explicit empty startup list keeps the opt-out behavior.
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(32))]
+    /// CONTRACT_SHAPE: pure-function.
     #[test]
-    fn service_with_empty_startup_array_opts_out_of_default_inference(
+    fn service_with_empty_startup_array_opts_out_of_default_gate(
         id in service_id_strategy(),
         port in listener_port_strategy(),
     ) {
@@ -494,7 +493,7 @@ startup = []
             .expect("parse must succeed");
         let svc = unwrap_service(input);
         prop_assert!(svc.startup_probes.is_empty(),
-            "explicit empty array opts out of default inference; expected zero probes");
+            "explicit empty array opts out of the default gate; expected zero startup descriptors");
     }
 }
 
@@ -736,8 +735,8 @@ proptest! {
     /// three arrays.
     ///
     /// `startup` is drawn from `1..=3` because an omitted startup
-    /// section triggers ADR-0058 default inference, which is covered by
-    /// its own case below — here we want the operator-declared array.
+    /// section triggers D15's default GuestListeners gate, which is
+    /// covered by its own case below — here we want the operator-declared array.
     #[test]
     fn parser_assigns_per_role_positional_indices_that_are_globally_unique(
         startup_n in 1usize..=3,
@@ -808,14 +807,14 @@ proptest! {
     }
 }
 
-/// The ADR-0058 default-probe synthesis assigns `idx = 0` — it
+/// The D15 default-gate synthesis assigns `idx = 0` — it
 /// synthesises the sole member of the startup array.
 #[test]
 fn default_startup_probe_carries_per_role_index_zero() {
     let spec = unwrap_service(
         WorkloadSpecInput::from_toml_str(SERVICE_PRELUDE).expect("bare service parses"),
     );
-    assert_eq!(spec.startup_probes.len(), 1, "ADR-0058 supplies one default startup probe");
+    assert_eq!(spec.startup_probes.len(), 1, "D15 supplies one default startup descriptor");
     let probe = &spec.startup_probes[0];
     assert_eq!(
         probe.idx,

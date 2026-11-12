@@ -639,8 +639,8 @@ async fn deploy_streaming_service(
         .collect();
     // Probe descriptors project through unchanged — the parser
     // populates `service_spec.startup_probes` from the TOML
-    // `[[health_check.startup]]` blocks (plus default-TCP inference
-    // per ADR-0058); the wire envelope carries them through to
+    // `[[health_check.startup]]` blocks (or the D15 GuestListeners
+    // descriptor when the section is omitted); the wire envelope carries them through to
     // `Service::from_submit` server-side. Readiness / liveness
     // probe vecs are reserved for future slices (02-01 / 02-02)
     // and pass through as the empty vecs the parser populates.

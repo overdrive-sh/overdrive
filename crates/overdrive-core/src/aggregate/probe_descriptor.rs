@@ -6,12 +6,11 @@
 //! row becomes a `ProbeDescriptor` and is rkyv-archived as part of
 //! the current VM-only `ServiceSpec` aggregate.
 //!
-//! Per ADR-0058 §1 ("honest by default"): if zero startup probes are
-//! declared AND at least one `[[listener]]` is present, the parser
-//! synthesises a single `ProbeDescriptor` with
-//! `mechanic: ProbeMechanic::Tcp { host, port: listeners[0].port }`.
-//! An empty `[[health_check.startup]] = []` array is the explicit
-//! opt-out (preserves Phase 1 first-Running semantics).
+//! Per D15 (ADR-0270): if no startup probes are declared, the parser
+//! synthesises one `ProbeDescriptor` with
+//! `mechanic: ProbeMechanic::GuestListeners`, which gates `Stable` on
+//! the guest reporting every declared listener open. An empty
+//! `[[health_check.startup]] = []` array remains the explicit opt-out.
 
 use serde::{Deserialize, Serialize};
 
@@ -58,9 +57,8 @@ pub const SCHEDULE_PROBES_GUIDANCE: &str =
 )]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ProbeMechanic {
-    /// TCP-connect against `host:port`. Default startup mechanic per
-    /// ADR-0058 (host defaults to bind-side wildcard
-    /// translated to loopback at probe time).
+    /// TCP-connect against `host:port` (host defaults to bind-side
+    /// wildcard translated to loopback at probe time).
     Tcp { host: String, port: u16 },
     /// HTTP GET against `http://host:port<path>`. Phase 1 = plain
     /// HTTP only per C6. Method = GET only per US-02. 3xx → Fail

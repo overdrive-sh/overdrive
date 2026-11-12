@@ -1,7 +1,7 @@
 //! P1-S10 — deploy / API validation refuses a listener port the guest
 //! reserves for its intakes (GH #295, D25, boundary row R5-21), and a spec
-//! whose probes across startup, readiness and liveness exceed the
-//! per-allocation cap `GUEST_PROBE_SLOTS` (D-UP-12 / PD-3 / EVMOD-AB,
+//! whose dial-bearing descriptors across startup, readiness and liveness
+//! exceed the per-allocation cap `GUEST_PROBE_SLOTS` (D-UP-12 / PD-3 / EVMOD-AB,
 //! boundary row R5-60).
 //!
 //! Contract: `docs/feature/netns-density-295/feature-delta.md` § "[REF] Core
@@ -18,9 +18,9 @@
 //!
 //! The probe cap (§ "Per-allocation probe cap"): the TOML ingress returns
 //! `ParseError::ProbeCountExceeded { count, max }` after the three role
-//! arrays are parsed and ADR-0058's default startup probe is synthesized (so a
-//! synthesized probe counts); the API ingress returns `AggregateError::Validation
-//! { field: "probes", message }` with that `Display` text. Both read
+//! arrays are parsed; the D15 `GuestListeners` default does not count as a
+//! dial. The API ingress returns `AggregateError::Validation { field:
+//! "probes", message }` with that `Display` text. Both read
 //! `GUEST_PROBE_SLOTS`; neither spells 8.
 //!
 //! RED: `guest_reserved_ports()` panics and neither ingress checks the range
@@ -200,7 +200,7 @@ proptest! {
 
 /// A TOML spec with one TCP listener on 8080 and `startup` / `readiness` /
 /// `liveness` TCP probes against it. `startup == 0` omits the startup
-/// section, so ADR-0058 infers one default startup probe.
+/// section, so D15 supplies one non-dialing GuestListeners gate.
 fn service_toml_with_probes(startup: usize, readiness: usize, liveness: usize) -> String {
     let section = |role: &str, n: usize| -> String {
         format!("[[health_check.{role}]]\ntype = \"tcp\"\nport = 8080\n\n").repeat(n)
@@ -239,23 +239,26 @@ fn service_submit_with_probes(startup: u32, readiness: u32, liveness: u32) -> Se
     input
 }
 
-/// R5-60: eight probes in total deploy — spread over the three roles, or all
-/// in one role (several probes of one role stay supported) — and every probe
+/// R5-60: eight dial-bearing probes deploy — including eight readiness/liveness
+/// dials alongside the omitted-startup GuestListeners gate — and every probe
 /// survives into the intent.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-fn deploy_accepts_eight_probes_in_total_in_any_shape() {
-    for (startup, readiness, liveness) in [(3usize, 3usize, 2usize), (8, 0, 0), (1, 0, 7)] {
+fn deploy_accepts_eight_dial_bearing_probes_in_any_shape() {
+    for (startup, readiness, liveness) in
+        [(3usize, 3usize, 2usize), (8, 0, 0), (1, 0, 7), (0, 4, 4)]
+    {
         let toml = service_toml_with_probes(startup, readiness, liveness);
         match WorkloadSpecInput::from_toml_str(&toml) {
             Ok(WorkloadSpecInput::Service(spec)) => {
+                let synthesized_gate = usize::from(startup == 0);
                 assert_eq!(
                     (
                         spec.startup_probes.len(),
                         spec.readiness_probes.len(),
                         spec.liveness_probes.len()
                     ),
-                    (startup, readiness, liveness),
+                    (startup + synthesized_gate, readiness, liveness),
                     "every declared probe survives"
                 );
             }
@@ -266,13 +269,11 @@ fn deploy_accepts_eight_probes_in_total_in_any_shape() {
     }
 }
 
-/// R5-60: nine probes are refused before any intent exists — eight declared
-/// readiness and liveness probes with no startup section, whose synthesized
-/// default startup probe is the ninth, and nine declared probes.
+/// R5-60: nine dial-bearing probes are refused before any intent exists.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-fn deploy_refuses_nine_probes_counting_the_default_startup_probe() {
-    for (startup, readiness, liveness) in [(0usize, 4usize, 4usize), (9, 0, 0), (3, 3, 3)] {
+fn deploy_refuses_nine_dial_bearing_probes() {
+    for (startup, readiness, liveness) in [(0usize, 4usize, 5usize), (9, 0, 0), (3, 3, 3)] {
         let toml = service_toml_with_probes(startup, readiness, liveness);
         match WorkloadSpecInput::from_toml_str(&toml) {
             Err(ParseError::ProbeCountExceeded { count, max }) => {
@@ -312,6 +313,13 @@ fn api_ingress_refuses_nine_probes_with_validation() {
             "{startup}/{readiness}/{liveness}: eight probes are within the cap"
         );
     }
+
+    let mut default_gate_plus_eight_dials = service_submit_with_probes(1, 4, 4);
+    default_gate_plus_eight_dials.startup_probes[0].mechanic = ProbeMechanic::GuestListeners;
+    assert!(
+        Service::from_submit(default_gate_plus_eight_dials).is_ok(),
+        "GuestListeners adds no dial-bearing descriptor to the cap",
+    );
 }
 
 /// The probe-cap refusal names the count and the cap.
@@ -320,23 +328,22 @@ fn api_ingress_refuses_nine_probes_with_validation() {
 fn the_probe_cap_refusal_renders_its_pinned_message() {
     assert_eq!(
         ParseError::ProbeCountExceeded { count: 9, max: 8 }.to_string(),
-        "[[health_check.*]] declares 9 probes across startup, readiness and liveness (including a synthesized default startup probe when applicable); at most 8 probes per workload are supported"
+        "[[health_check.*]] declares 9 dial-bearing probes across startup, readiness and liveness; at most 8 dial-bearing probes per workload are supported"
     );
 }
 
 proptest! {
-    // Property (R5-60 count boundary): a spec is refused iff its probe count
-    // — the declared probes plus a synthesized default startup probe when no
-    // startup section is written — exceeds GUEST_PROBE_SLOTS.
+    // Property (R5-60 count boundary): a spec is refused iff its dial-bearing
+    // probe count exceeds GUEST_PROBE_SLOTS. The omitted-startup GuestListeners
+    // descriptor contributes no dial.
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    fn deploy_refusal_iff_the_probe_count_exceeds_the_cap(
+    fn deploy_refusal_iff_the_dial_probe_count_exceeds_the_cap(
         startup in 0usize..=6,
         readiness in 0usize..=6,
         liveness in 0usize..=6,
     ) {
-        let default_startup = usize::from(startup == 0);
-        let count = startup + readiness + liveness + default_startup;
+        let count = startup + readiness + liveness;
         let max = usize::try_from(GUEST_PROBE_SLOTS).expect("fits usize");
         let parsed = WorkloadSpecInput::from_toml_str(&service_toml_with_probes(startup, readiness, liveness));
         if count > max {
@@ -347,7 +354,7 @@ proptest! {
             );
             prop_assert!(refused_with_the_count, "{} probes: expected ProbeCountExceeded, got {:?}", count, parsed);
         } else {
-            prop_assert!(parsed.is_ok(), "{} probes are within the cap", count);
+            prop_assert!(parsed.is_ok(), "{} dial-bearing probes are within the cap", count);
         }
     }
 }

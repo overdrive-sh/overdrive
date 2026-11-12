@@ -3679,21 +3679,36 @@ async fn compose_vm_driver(
     ))
 }
 
-/// Node-setup (once, idempotent) for the platform-owned VM clone-staging root:
-/// create it, then set `root:<gid>` ownership and the `0710`
-/// ([`OVERDRIVE_VMM_STAGING_MODE`]) traverse posture so the confined identity
-/// can reach its OWN chown'd clone by name without listing the directory
-/// (ADR-0082 2026-08-18 fourth amendment (c-fix.2)). Converge-on-boot: the
-/// mkdir is `-p` and the chown/chmod are re-applied every boot, so a
-/// pre-existing staging root from a prior boot converges rather than erroring.
-/// `chown` needs root, which `overdrive serve` (and the Tier-3 harness) run as.
+/// Node-setup (once, idempotent — converge-on-boot) for the platform-owned
+/// `<data_dir>/vm` directory and VM clone-staging root: create them, then set
+/// `root:<gid>` ownership and the `0710` ([`OVERDRIVE_VMM_STAGING_MODE`])
+/// traverse posture on both. The confined identity can traverse the parent to
+/// its own chown'd clone by name without listing either platform-owned
+/// directory (ADR-0082, fourth amendment (c-fix.2)). Converge-on-boot: mkdir is
+/// `-p` and chown/chmod are re-applied every boot, so pre-existing directories
+/// converge rather than erroring. `chown` needs root, which `overdrive serve`
+/// (and the Tier-3 harness) run as.
 async fn prepare_clone_staging_root(dir: &std::path::Path, gid: u32) -> std::io::Result<()> {
+    let parent = dir.parent().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("clone-staging root {} has no parent", dir.display()),
+        )
+    })?;
+    tokio::fs::create_dir_all(parent).await?;
     tokio::fs::create_dir_all(dir).await?;
+    let parent = parent.to_path_buf();
     let dir = dir.to_path_buf();
     tokio::task::spawn_blocking(move || {
         use std::os::unix::fs::PermissionsExt;
-        std::os::unix::fs::chown(&dir, Some(0), Some(gid))?;
-        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(OVERDRIVE_VMM_STAGING_MODE))
+        for path in [&parent, &dir] {
+            std::os::unix::fs::chown(path, Some(0), Some(gid))?;
+            std::fs::set_permissions(
+                path,
+                std::fs::Permissions::from_mode(OVERDRIVE_VMM_STAGING_MODE),
+            )?;
+        }
+        Ok(())
     })
     .await
     .map_err(|join_err| {

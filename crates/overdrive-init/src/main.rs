@@ -5,7 +5,7 @@
 //! operator-command channel, plus the §D4 amendment (2026-08-14,
 //! DISTILL DWD-21) that pins the guest vsock transport's load path:
 //!
-//! 0. Create the minimal root and mount procfs.
+//! 0. Create the minimal root and mount procfs and sysfs.
 //! 1. Load the guest vsock transport modules ([`load_vsock_modules`])
 //!    — a no-op on a vsock=y appliance kernel (ADR-0068 §4), required
 //!    on the stock `CONFIG_VSOCKETS=m` kernel the Tier-3 fixture
@@ -77,6 +77,7 @@ use nix::libc;
 use nix::mount::{MsFlags, mount};
 use nix::poll::{PollFd, PollFlags, PollTimeout, poll};
 use nix::sys::reboot::{self, RebootMode};
+use nix::sys::resource::{Resource, getrlimit, rlim_t, setrlimit};
 use nix::sys::signal::{Signal, killpg};
 use nix::sys::socket::{self, AddressFamily, SockFlag, SockType, VsockAddr, setsockopt, sockopt};
 use nix::sys::wait::{WaitPidFlag, WaitStatus, waitpid};
@@ -120,9 +121,10 @@ fn main() {
 /// path ends by powering off the guest, which (on success) never
 /// returns control to this function at all.
 fn run() -> Result<(), InitError> {
+    raise_guest_transport_nofile()?;
     let pid = std::process::id();
     complete_guest_lifecycle(
-        || bootstrap_guest_root_at(Path::new("/"), mount_procfs_at),
+        || bootstrap_guest_root_at(Path::new("/"), mount_procfs_at, mount_sysfs_at),
         load_vsock_modules,
         connect_beacon,
         configure_guest_network,
@@ -147,6 +149,33 @@ fn run() -> Result<(), InitError> {
             Ok(())
         },
     )
+}
+
+/// The guest transport owns 1,024 UDP intake sockets for the lifetime of PID 1,
+/// in addition to the TCP intake, vsock channels and active flow sockets. The
+/// `GuestKit` PID-1 fixture has historically used this limit; production PID 1
+/// must establish it itself instead of relying on the rootfs service manager's
+/// ambient `RLIMIT_NOFILE`.
+const GUEST_INIT_RLIMIT_NOFILE: rlim_t = 65_536;
+
+fn raise_guest_transport_nofile() -> Result<(), InitError> {
+    let (soft_limit, hard_limit) =
+        getrlimit(Resource::RLIMIT_NOFILE).map_err(|source| InitError::GuestNetworkIo {
+            operation: "read RLIMIT_NOFILE for guest transport",
+            source: std::io::Error::from_raw_os_error(source as i32),
+        })?;
+    if soft_limit >= GUEST_INIT_RLIMIT_NOFILE && hard_limit >= GUEST_INIT_RLIMIT_NOFILE {
+        return Ok(());
+    }
+    setrlimit(
+        Resource::RLIMIT_NOFILE,
+        soft_limit.max(GUEST_INIT_RLIMIT_NOFILE),
+        hard_limit.max(GUEST_INIT_RLIMIT_NOFILE),
+    )
+    .map_err(|source| InitError::GuestNetworkIo {
+        operation: "raise RLIMIT_NOFILE for guest transport",
+        source: std::io::Error::from_raw_os_error(source as i32),
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -324,19 +353,25 @@ const fn ready_message(pid: u32, token: &GuestTransportToken) -> BeaconMessage {
 }
 
 fn ensure_guest_directories_at(root: &Path) -> Result<(), InitError> {
-    for relative in ["proc", "etc"] {
+    for relative in ["proc", "sys", "etc"] {
         let path = root.join(relative);
         fs::create_dir_all(&path).map_err(|source| InitError::GuestDirectory { path, source })?;
     }
     Ok(())
 }
 
-fn bootstrap_guest_root_at<MountProc>(root: &Path, mount_procfs: MountProc) -> Result<(), InitError>
+fn bootstrap_guest_root_at<MountProc, MountSys>(
+    root: &Path,
+    mount_procfs: MountProc,
+    mount_sysfs: MountSys,
+) -> Result<(), InitError>
 where
     MountProc: FnOnce(&Path) -> Result<(), InitError>,
+    MountSys: FnOnce(&Path) -> Result<(), InitError>,
 {
     ensure_guest_directories_at(root)?;
-    mount_procfs(&root.join("proc"))
+    mount_procfs(&root.join("proc"))?;
+    mount_sysfs(&root.join("sys"))
 }
 
 /// `overdrive-init`'s typed failure surface. Distinct failure modes get
@@ -395,6 +430,15 @@ enum InitError {
     #[error("could not mount procfs at {target}: {source}")]
     ProcMount {
         /// The procfs mountpoint.
+        target: PathBuf,
+        /// The underlying `mount(2)` failure.
+        #[source]
+        source: Errno,
+    },
+    /// Mounting sysfs for the kernel BTF used by the guest's fentry program failed.
+    #[error("could not mount sysfs at {target}: {source}")]
+    SysfsMount {
+        /// The sysfs mountpoint.
         target: PathBuf,
         /// The underlying `mount(2)` failure.
         #[source]
@@ -464,6 +508,7 @@ enum PreReadyErrorClass {
     BeaconIo,
     GuestDirectory,
     ProcMount,
+    SysfsMount,
     GuestNetworkIo,
     GuestTransportSetup,
 }
@@ -478,6 +523,7 @@ const fn pre_ready_error_class(error: &InitError) -> Option<PreReadyErrorClass> 
         InitError::Io(_) => Some(PreReadyErrorClass::BeaconIo),
         InitError::GuestDirectory { .. } => Some(PreReadyErrorClass::GuestDirectory),
         InitError::ProcMount { .. } => Some(PreReadyErrorClass::ProcMount),
+        InitError::SysfsMount { .. } => Some(PreReadyErrorClass::SysfsMount),
         InitError::GuestNetworkIo { .. } => Some(PreReadyErrorClass::GuestNetworkIo),
         InitError::GuestTransportSetup(_) => Some(PreReadyErrorClass::GuestTransportSetup),
         InitError::NoExecReceived
@@ -550,6 +596,14 @@ fn mount_procfs_at(target: &Path) -> Result<(), InitError> {
     match mount(Some("proc"), target, Some("proc"), flags, None::<&str>) {
         Ok(()) | Err(Errno::EBUSY) => Ok(()),
         Err(source) => Err(InitError::ProcMount { target: target.to_path_buf(), source }),
+    }
+}
+
+fn mount_sysfs_at(target: &Path) -> Result<(), InitError> {
+    let flags = MsFlags::MS_NOSUID | MsFlags::MS_NODEV | MsFlags::MS_NOEXEC;
+    match mount(Some("sysfs"), target, Some("sysfs"), flags, None::<&str>) {
+        Ok(()) | Err(Errno::EBUSY) => Ok(()),
+        Err(source) => Err(InitError::SysfsMount { target: target.to_path_buf(), source }),
     }
 }
 
@@ -1101,15 +1155,24 @@ mod tests {
         reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
     )]
     #[test]
-    fn minimal_guest_root_bootstrap_creates_proc_and_etc_preconditions() {
+    fn minimal_guest_root_bootstrap_creates_proc_sys_and_etc_preconditions() {
         let root = ScratchRoot::new("minimal-root");
         let mounted_procfs = Cell::new(false);
+        let mounted_sysfs = Cell::new(false);
 
-        bootstrap_guest_root_at(root.path(), |target| {
-            assert_eq!(target, root.path().join("proc"));
-            mounted_procfs.set(true);
-            Ok(())
-        })
+        bootstrap_guest_root_at(
+            root.path(),
+            |target| {
+                assert_eq!(target, root.path().join("proc"));
+                mounted_procfs.set(true);
+                Ok(())
+            },
+            |target| {
+                assert_eq!(target, root.path().join("sys"));
+                mounted_sysfs.set(true);
+                Ok(())
+            },
+        )
         .unwrap();
 
         let entries = fs::read_dir(root.path())
@@ -1118,12 +1181,18 @@ mod tests {
             .collect::<std::collections::BTreeSet<_>>();
         assert_eq!(
             entries,
-            std::collections::BTreeSet::from(["etc".to_owned(), "proc".to_owned()]),
-            "bootstrap may add exactly the declared proc and etc directories",
+            std::collections::BTreeSet::from([
+                "etc".to_owned(),
+                "proc".to_owned(),
+                "sys".to_owned(),
+            ]),
+            "bootstrap may add exactly the declared etc, proc, and sys directories",
         );
         assert!(root.path().join("proc").is_dir(), "proc must be a directory");
+        assert!(root.path().join("sys").is_dir(), "sys must be a directory");
         assert!(root.path().join("etc").is_dir(), "etc must be a directory");
         assert!(mounted_procfs.get(), "PID 1 must mount procfs after creating its mountpoint");
+        assert!(mounted_sysfs.get(), "PID 1 must mount sysfs after creating its mountpoint");
     }
 
     /// CONTRACT_SHAPE: bounded-change (directory failure prevents proc mount and all later init).
@@ -1140,10 +1209,17 @@ mod tests {
 
         let (result, trace) = lifecycle_trace(
             || {
-                bootstrap_guest_root_at(root.path(), |_| {
-                    mounted.set(true);
-                    Ok(())
-                })
+                bootstrap_guest_root_at(
+                    root.path(),
+                    |_| {
+                        mounted.set(true);
+                        Ok(())
+                    },
+                    |_| {
+                        mounted.set(true);
+                        Ok(())
+                    },
+                )
             },
             || Ok(()),
             || Ok(()),
@@ -1162,9 +1238,16 @@ mod tests {
         let root = ScratchRoot::new("proc-mount-failure");
         let (result, trace) = lifecycle_trace(
             || {
-                bootstrap_guest_root_at(root.path(), |target| {
-                    Err(InitError::ProcMount { target: target.to_path_buf(), source: Errno::EPERM })
-                })
+                bootstrap_guest_root_at(
+                    root.path(),
+                    |target| {
+                        Err(InitError::ProcMount {
+                            target: target.to_path_buf(),
+                            source: Errno::EPERM,
+                        })
+                    },
+                    |_| panic!("sysfs must not mount after procfs fails"),
+                )
             },
             || Ok(()),
             || Ok(()),
@@ -1685,6 +1768,10 @@ mod tests {
             (
                 InitError::ProcMount { target: PathBuf::from("/proc"), source: Errno::EPERM },
                 PreReadyErrorClass::ProcMount,
+            ),
+            (
+                InitError::SysfsMount { target: PathBuf::from("/sys"), source: Errno::EPERM },
+                PreReadyErrorClass::SysfsMount,
             ),
             (
                 InitError::GuestNetworkIo { operation: "read", source: io() },

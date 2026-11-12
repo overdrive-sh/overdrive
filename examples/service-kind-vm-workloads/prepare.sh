@@ -15,6 +15,7 @@ readonly KERNEL="$OUTPUT_ROOT/kernel"
 readonly ROOTFS="$OUTPUT_ROOT/rootfs.ext4"
 readonly SERVER="$OUTPUT_ROOT/e08-server"
 readonly CLIENT="$OUTPUT_ROOT/e08-client"
+readonly OVERDRIVE_INIT="$EXAMPLE_DIR/../../target/x86_64-unknown-linux-musl/release/overdrive-init"
 readonly MOUNT_DIR="$OUTPUT_ROOT/mnt"
 readonly DATA_DIR="$OUTPUT_ROOT/data"
 readonly CONFIG_DIR="$OUTPUT_ROOT/config"
@@ -261,12 +262,95 @@ verify_guest_binaries() {
   verify_static_binary "$MOUNT_DIR$GUEST_CLIENT"
 }
 
+# The native fixture kernel builds dummy and socket diagnostics as modules.
+# Install their same-release files and a static modprobe so the kernel can
+# satisfy overdrive-init's real netlink request_module path. The guest init
+# itself still creates the dummy link; preparation never loads a module.
+guest_kernel_release() {
+  local release
+  release="$(uname -r)"
+  [[ -f "/boot/vmlinuz-$release" ]] \
+    || die "running kernel image is unavailable: /boot/vmlinuz-$release"
+  cmp -s "$KERNEL" "/boot/vmlinuz-$release" \
+    || die "the example kernel differs from the host kernel whose modules are staged"
+  printf '%s\n' "$release"
+}
+
+install_guest_module() {
+  local release="$1" relative="$2" destination="$3"
+  local source="/lib/modules/$release/kernel/$relative.ko"
+  install -d -m 0755 "$(dirname "$destination")"
+  if [[ -f "$source.zst" ]]; then
+    zstd -d -f -q "$source.zst" -o "$destination" \
+      || die "could not decompress guest module: $source.zst"
+  elif [[ -f "$source" ]]; then
+    install -m 0644 "$source" "$destination"
+  else
+    die "guest kernel module is absent: $source or $source.zst"
+  fi
+  chmod 0644 "$destination"
+  local vermagic
+  vermagic="$(modinfo -F vermagic "$destination" | awk '{print $1}')"
+  [[ "$vermagic" == "$release" ]] \
+    || die "guest module ABI mismatch: $destination carries $vermagic, kernel is $release"
+}
+
+verify_guest_module_closure() {
+  local release="$1" relative path verdict
+  verify_static_binary "$MOUNT_DIR/sbin/modprobe"
+  verify_static_binary "$MOUNT_DIR/sbin/init"
+  cmp -s "$OVERDRIVE_INIT" "$MOUNT_DIR/sbin/init" \
+    || die "guest /sbin/init is not the current workspace overdrive-init binary"
+  for relative in drivers/net/dummy net/ipv4/inet_diag net/ipv4/tcp_diag \
+    net/ipv4/udp_diag; do
+    path="$MOUNT_DIR/lib/modules/$release/kernel/$relative.ko"
+    [[ -f "$path" ]] || die "guest module is absent: $path"
+    [[ "$(modinfo -F vermagic "$path" | awk '{print $1}')" == "$release" ]] \
+      || die "guest module ABI differs from $release: $path"
+  done
+  [[ -f "$MOUNT_DIR/lib/overdrive/ovd_fwd.ko" ]] \
+    || die "guest forwarder module is absent"
+  [[ "$(modinfo -F vermagic "$MOUNT_DIR/lib/overdrive/ovd_fwd.ko" | awk '{print $1}')" == "$release" ]] \
+    || die "guest forwarder module ABI differs from $release"
+  verdict="$(chroot "$MOUNT_DIR" /sbin/modprobe -D -- rtnl-link-dummy | awk '{$1=$1; print}')" \
+    || die "guest modprobe cannot resolve the dummy netlink alias"
+  [[ "$verdict" == "insmod /lib/modules/$release/kernel/drivers/net/dummy.ko" ]] \
+    || die "guest dummy netlink alias resolves unexpectedly: $verdict"
+}
+
+stage_guest_module_closure() {
+  local release="$1" forwarder="$EXAMPLE_DIR/../../target/kmod/$1/ovd_fwd.ko"
+  [[ -x "$OVERDRIVE_INIT" ]] \
+    || die "current static overdrive-init is absent: run cargo xtask guest-kit-prepare"
+  verify_static_binary "$OVERDRIVE_INIT"
+  [[ -f "$forwarder" ]] \
+    || die "workspace forwarder module is absent: $forwarder; run cargo xtask kmod-build"
+  [[ "$(modinfo -F vermagic "$forwarder" | awk '{print $1}')" == "$release" ]] \
+    || die "workspace forwarder module ABI differs from $release"
+  verify_static_binary /usr/bin/busybox
+  install -m 0755 "$OVERDRIVE_INIT" "$MOUNT_DIR/sbin/init"
+  install -d -m 0755 "$MOUNT_DIR/lib/overdrive"
+  install -m 0644 "$forwarder" "$MOUNT_DIR/lib/overdrive/ovd_fwd.ko"
+  install -m 0755 /usr/bin/busybox "$MOUNT_DIR/sbin/modprobe"
+  install_guest_module "$release" drivers/net/dummy \
+    "$MOUNT_DIR/lib/modules/$release/kernel/drivers/net/dummy.ko"
+  local module
+  for module in inet_diag tcp_diag udp_diag; do
+    install_guest_module "$release" "net/ipv4/$module" \
+      "$MOUNT_DIR/lib/modules/$release/kernel/net/ipv4/$module.ko"
+  done
+  depmod -b "$MOUNT_DIR" "$release" \
+    || die "could not generate guest module dependency and alias metadata"
+  verify_guest_module_closure "$release"
+}
+
 prepare() {
   require_native_linux
   check_source
   local command
-  for command in chmod cp dirname file grep head install losetup mount mountpoint \
-    readelf rustc setpriv stat sync timeout umount; do
+  for command in awk chmod chroot cmp cp depmod dirname file grep head install \
+    losetup modinfo mount mountpoint readelf rustc setpriv stat sync timeout \
+    umount zstd; do
     require_command "$command"
   done
   [[ -r "$BASE_KERNEL" && -f "$BASE_KERNEL" ]] \
@@ -313,6 +397,7 @@ prepare() {
   install -m 0755 "$SERVER" "$MOUNT_DIR$GUEST_SERVER"
   install -m 0755 "$CLIENT" "$MOUNT_DIR$GUEST_CLIENT"
   verify_guest_binaries
+  stage_guest_module_closure "$(guest_kernel_release)"
   sync "$MOUNT_DIR$GUEST_SERVER" "$MOUNT_DIR$GUEST_CLIENT"
   unmount_private_rootfs || die "bounded rootfs unmount/loop detach failed"
 
@@ -329,7 +414,8 @@ check() {
   require_native_linux
   check_source
   local command
-  for command in file losetup mount mountpoint readelf setpriv stat timeout umount; do
+  for command in awk chroot cmp file losetup modinfo mount mountpoint readelf \
+    setpriv stat timeout umount; do
     require_command "$command"
   done
   verify_materialization_without_mount
@@ -338,6 +424,7 @@ check() {
   trap 'exit 130' HUP INT TERM
   mount_private_rootfs
   verify_guest_binaries
+  verify_guest_module_closure "$(guest_kernel_release)"
   unmount_private_rootfs || die "bounded rootfs unmount/loop detach failed"
   PREPARE_COMMITTED=1
   trap - EXIT HUP INT TERM
