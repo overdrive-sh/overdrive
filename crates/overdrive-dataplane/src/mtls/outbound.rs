@@ -234,9 +234,8 @@ fn drive_handshake_client(
                 });
             }
             Ok(Some(record)) => {
-                super::feed_record(conn, &record).map_err(|e| {
-                    MtlsEnforcementError::PeerVerificationFailed { reason: format!("{e}") }
-                })?;
+                super::feed_record(conn, &record)
+                    .map_err(super::RecordFeedError::into_enforcement_error)?;
             }
             Err(e) if e.kind() == ErrorKind::WouldBlock => {}
             Err(e) => {
@@ -614,6 +613,9 @@ fn drive_client_handshake_raw(
     conn: &mut ClientConnection,
     tcp: &mut TcpStream,
 ) -> std::result::Result<(), String> {
+    // Whole records only (see `RecordAssembler`): the bytes after the final
+    // handshake record stay in the socket for the kernel record parser.
+    let mut records = super::RecordAssembler::new();
     loop {
         while conn.wants_write() {
             conn.write_tls(tcp).map_err(|e| format!("write_tls: {e}"))?;
@@ -621,10 +623,11 @@ fn drive_client_handshake_raw(
         if !conn.is_handshaking() {
             return Ok(());
         }
-        match conn.read_tls(tcp) {
-            Ok(0) => return Err("EOF during sentinel handshake".into()),
-            Ok(_) => {
-                conn.process_new_packets().map_err(|e| format!("process_new_packets: {e}"))?;
+        match records.next_record(tcp) {
+            Ok(None) => return Err("EOF during sentinel handshake".into()),
+            Ok(Some(record)) => {
+                super::feed_record(conn, &record)
+                    .map_err(|e| format!("process_new_packets: {e}"))?;
             }
             Err(e) if e.kind() == ErrorKind::WouldBlock => {}
             Err(e) => return Err(format!("read_tls: {e}")),
@@ -637,6 +640,9 @@ fn drive_server_handshake(
     conn: &mut rustls::ServerConnection,
     tcp: &mut TcpStream,
 ) -> std::result::Result<(), String> {
+    // Whole records only (see `RecordAssembler`): the bytes after the final
+    // handshake record stay in the socket for the kernel record parser.
+    let mut records = super::RecordAssembler::new();
     loop {
         while conn.wants_write() {
             conn.write_tls(tcp).map_err(|e| format!("write_tls: {e}"))?;
@@ -647,10 +653,11 @@ fn drive_server_handshake(
             }
             return Ok(());
         }
-        match conn.read_tls(tcp) {
-            Ok(0) => return Err("EOF during sentinel server handshake".into()),
-            Ok(_) => {
-                conn.process_new_packets().map_err(|e| format!("process_new_packets: {e}"))?;
+        match records.next_record(tcp) {
+            Ok(None) => return Err("EOF during sentinel server handshake".into()),
+            Ok(Some(record)) => {
+                super::feed_record(conn, &record)
+                    .map_err(|e| format!("process_new_packets: {e}"))?;
             }
             Err(e) if e.kind() == ErrorKind::WouldBlock => {}
             Err(e) => return Err(format!("read_tls: {e}")),

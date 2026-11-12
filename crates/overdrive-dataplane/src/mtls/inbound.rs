@@ -482,9 +482,8 @@ fn drive_handshake_server(
             }
             Ok(Some(record)) => {
                 // client-auth failures surface HERE as a rustls error → fail-closed
-                super::feed_record(conn, &record).map_err(|e| {
-                    MtlsEnforcementError::PeerVerificationFailed { reason: format!("{e}") }
-                })?;
+                super::feed_record(conn, &record)
+                    .map_err(super::RecordFeedError::into_enforcement_error)?;
             }
             Err(e) if e.kind() == ErrorKind::WouldBlock => {}
             Err(e) => {

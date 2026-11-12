@@ -223,10 +223,11 @@ impl HostMtlsEnforcement {
     /// The same connection-level trigger is installed into every pump's `PumpState` —
     /// the primary (request-carrying, `liveness`-observed: OUTBOUND forward / INBOUND
     /// deliver) AND each auxiliary (response-direction) pump. `mark_exited` fires the
-    /// trigger ONLY on a [`PumpExit::TransportDeath`](splice) (a leg error / the (C)
-    /// kernel-reaped `ETIMEDOUT`) that was NOT a deliberate `teardown`, so a clean
-    /// half-close ([`PumpExit::Graceful`](splice) — a completed response, a clean EOF
-    /// from either direction) on ANY pump does NOT reclaim, while a genuine transport
+    /// trigger on a [`PumpExit::TransportDeath`](splice) (a leg error / the (C)
+    /// kernel-reaped `ETIMEDOUT`) or a [`PumpExit::Completed`](splice) (both relay
+    /// directions ended cleanly) that was NOT a deliberate `teardown`. A single-direction
+    /// clean half-close ([`PumpExit::Graceful`](splice) — a completed response, a clean
+    /// EOF from one direction) on ANY pump does NOT reclaim, while a genuine transport
     /// death on whichever pump FIRST observes it self-tears the connection down. The
     /// `PumpExit::Graceful` gate — not a primary-only install — is what preserves the
     /// D-MTLS-16 intent that a clean half-close must NOT nuke a connection whose
@@ -240,6 +241,12 @@ impl HostMtlsEnforcement {
     /// death (RST / keepalive-`ETIMEDOUT`) leaks the connection (conns entry + both
     /// legs + kTLS state) until the workload writes or the agent shuts down.
     ///
+    /// Registration is atomic with respect to pump exit: the entry is inserted BEFORE
+    /// any trigger is installed, and a pump that already exited unexpectedly has
+    /// recorded that fact, so `install_self_teardown` delivers the trigger itself
+    /// (the entry it reclaims is already present). A pump can therefore exit at any
+    /// point during registration without leaking the entry.
+    ///
     /// The reclaim runs the same fail-closed path `teardown` runs — close both legs,
     /// stop the sibling pumps, drop the kTLS state — off a DETACHED reaper thread (so
     /// the calling pump never joins itself), re-homing the two F6 telemetry events
@@ -248,21 +255,23 @@ impl HostMtlsEnforcement {
     /// later fire finds the entry already gone and is a harmless no-op.
     fn register(&self, id: EnforcedConnectionId, state: ConnState) -> EnforcedConnection {
         let trigger = self.self_teardown_trigger(id.clone());
-        state.pump.state.install_self_teardown(trigger.clone());
-        for aux in &state.aux_pumps {
-            aux.state.install_self_teardown(trigger.clone());
-        }
+        let mut pump_states = vec![Arc::clone(&state.pump.state)];
+        pump_states.extend(state.aux_pumps.iter().map(|aux| Arc::clone(&aux.state)));
         self.conns.lock().insert(id.clone(), state);
+        for pump_state in pump_states {
+            pump_state.install_self_teardown(trigger.clone());
+        }
         EnforcedConnection::new(id)
     }
 
-    /// Build the (B) self-teardown trigger for connection `id`: emit
-    /// `mtls.pump.stalled` for the pump that observed the terminal death, then spawn a
-    /// detached reaper that idempotently reclaims the connection (drains it from the
-    /// tracking table, stops both pumps, closes both legs) and emits
-    /// `mtls.pump.teardown_on_stall`. Idempotent end-to-end: the first pump to die
-    /// wins the `remove`; the sibling's later fire finds the entry already gone and is
-    /// a harmless no-op.
+    /// Build the (B) self-teardown trigger for connection `id`. For a finished
+    /// exchange (`completed`) it only reclaims; for a transport death it first emits
+    /// `mtls.pump.stalled` for the pump that observed the terminal death. Either way a
+    /// detached reaper idempotently reclaims the connection (drains it from the
+    /// tracking table, stops both pumps, closes both legs) and a death additionally
+    /// emits `mtls.pump.teardown_on_stall`. Idempotent end-to-end: the first pump to
+    /// exit wins the `remove`; the sibling's later fire finds the entry already gone
+    /// and is a harmless no-op.
     fn self_teardown_trigger(&self, id: EnforcedConnectionId) -> SelfTeardown {
         let conns = Arc::clone(&self.conns);
         Arc::new(move || {
@@ -271,51 +280,42 @@ impl HostMtlsEnforcement {
                 .lock()
                 .get(&id)
                 .is_some_and(|state| state.pump.state.completed.load(Ordering::SeqCst));
-            if completed {
-                // A finished exchange is not a death: release the legs without the
-                // stall diagnostics. Reclaim off a detached thread (it joins the
-                // pump, whose thread is the caller).
-                let conns = Arc::clone(&conns);
-                let id = id.clone();
-                std::thread::spawn(move || {
-                    let _reclaimed = reclaim_connection(&conns, &id);
-                });
-                return;
+            if !completed {
+                trace_transport_death_diagnostics(&conns, &id, &alloc);
+                tracing::warn!(
+                    name: "mtls.pump.stalled",
+                    connection = %id,
+                    alloc = %alloc,
+                    "transparent-mTLS pump hit a transport-death exit (leg error / the (C) \
+                     kernel-reaped ETIMEDOUT); self-tearing the connection down (F6/B). A \
+                     single-direction clean EOF half-close does NOT reach here."
+                );
             }
-            trace_transport_death_diagnostics(&conns, &id, &alloc);
-            tracing::warn!(
-                name: "mtls.pump.stalled",
-                connection = %id,
-                alloc = %alloc,
-                "transparent-mTLS pump hit a transport-death exit (leg error / the (C) \
-                 kernel-reaped ETIMEDOUT); self-tearing the connection down (F6/B). A clean \
-                 EOF half-close does NOT reach here — only a connection death does."
-            );
             let conns = Arc::clone(&conns);
             let id = id.clone();
             // Reclaim off a DETACHED reaper — `reclaim_connection` joins the pump
-            // threads, and the calling thread IS one of those pumps; it must not join
-            // itself.
+            // threads, and the calling thread IS one of those pumps (or the registering
+            // thread); it must not join itself.
             std::thread::spawn(move || {
+                if completed {
+                    // A finished exchange is not a death: release the legs without
+                    // the stall diagnostics.
+                    let _reclaimed = reclaim_connection(&conns, &id);
+                    return;
+                }
                 // The outbound mesh leg's transport death is already an abortive
                 // peer outcome. Preserve its SO_LINGER{1,0} close so the workload
                 // sees Reset; inbound relay teardown keeps its existing
                 // GuestStream-derived reset decision and graceful probe cleanup.
-                let outbound_transport_death = {
-                    let guard = conns.lock();
-                    guard.get(&id).is_some_and(|state| {
-                        state.pump.state.terminal_role() == PumpRole::OutboundForward
-                            || state.pump.state.terminal_role() == PumpRole::OutboundReturn
-                            || state.aux_pumps.iter().any(|pump| {
-                                matches!(
-                                    pump.state.terminal_role(),
-                                    PumpRole::OutboundForward | PumpRole::OutboundReturn
-                                )
-                            })
-                    })
-                };
-                if outbound_transport_death && let Some(state) = conns.lock().get(&id) {
-                    state.pump.state.reset_peer_on_reclaim.store(true, Ordering::SeqCst);
+                if let Some(state) = conns.lock().get(&id) {
+                    let is_outbound = |role| {
+                        matches!(role, PumpRole::OutboundForward | PumpRole::OutboundReturn)
+                    };
+                    let outbound_transport_death = is_outbound(state.pump.state.terminal_role())
+                        || state.aux_pumps.iter().any(|pump| is_outbound(pump.state.terminal_role()));
+                    if outbound_transport_death {
+                        state.pump.state.reset_peer_on_reclaim.store(true, Ordering::SeqCst);
+                    }
                 }
                 let torn = reclaim_connection(&conns, &id);
                 tracing::warn!(
@@ -807,18 +807,27 @@ pub(super) struct RecordAssembler {
 
 impl RecordAssembler {
     const HEADER_LEN: usize = 5;
+    /// Largest TLSCiphertext fragment: 2^14 plus 256 bytes of expansion (RFC 8446 §5.2).
+    const MAX_BODY_LEN: usize = (1 << 14) + 256;
 
     pub(super) const fn new() -> Self {
         Self { buf: Vec::new() }
     }
 
-    /// Bytes still missing from the record being assembled.
-    fn missing(&self) -> usize {
-        if self.buf.len() < Self::HEADER_LEN {
-            return Self::HEADER_LEN - self.buf.len();
+    /// Bytes still missing from the record being assembled. A header announcing a
+    /// body above the TLS ciphertext ceiling is not a TLS record: `InvalidData`.
+    fn missing(&self) -> std::io::Result<usize> {
+        let Some(&[length_high, length_low]) = self.buf.get(3..Self::HEADER_LEN) else {
+            return Ok(Self::HEADER_LEN - self.buf.len());
+        };
+        let body = usize::from(u16::from_be_bytes([length_high, length_low]));
+        if body > Self::MAX_BODY_LEN {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("TLS record length {body} exceeds the {} byte ceiling", Self::MAX_BODY_LEN),
+            ));
         }
-        let body = usize::from(u16::from_be_bytes([self.buf[3], self.buf[4]]));
-        (Self::HEADER_LEN + body).saturating_sub(self.buf.len())
+        Ok((Self::HEADER_LEN + body).saturating_sub(self.buf.len()))
     }
 
     /// Assemble the next record. `Ok(None)` is a clean EOF on a record boundary;
@@ -829,7 +838,7 @@ impl RecordAssembler {
         stream: &mut dyn Read,
     ) -> std::io::Result<Option<Vec<u8>>> {
         loop {
-            let missing = self.missing();
+            let missing = self.missing()?;
             if missing == 0 {
                 return Ok(Some(std::mem::take(&mut self.buf)));
             }
@@ -856,19 +865,45 @@ impl RecordAssembler {
     }
 }
 
+/// Why a whole record could not be handed to rustls.
+#[derive(Debug, thiserror::Error)]
+pub(super) enum RecordFeedError {
+    /// rustls rejected the record contents (a protocol or peer-verification failure).
+    #[error("{0}")]
+    Tls(#[from] rustls::Error),
+    /// Reading the record into rustls failed at the I/O layer.
+    #[error("read_tls: {0}")]
+    Io(std::io::Error),
+    /// rustls accepted no bytes while part of the record remained, so the tail would
+    /// be silently dropped.
+    #[error("read_tls consumed no bytes with {remaining} byte(s) of the record unread")]
+    Unconsumed { remaining: usize },
+}
+
+impl RecordFeedError {
+    /// Classify for the handshake drivers: only a rustls rejection is a peer
+    /// verification failure; an I/O or short-consume failure is a handshake failure.
+    pub(super) fn into_enforcement_error(self) -> MtlsEnforcementError {
+        match self {
+            Self::Tls(error) => {
+                MtlsEnforcementError::PeerVerificationFailed { reason: error.to_string() }
+            }
+            other => MtlsEnforcementError::HandshakeFailed { reason: other.to_string() },
+        }
+    }
+}
+
 /// Hand one whole TLS record to rustls and process it.
 pub(super) fn feed_record<D>(
     conn: &mut rustls::ConnectionCommon<D>,
     record: &[u8],
-) -> std::result::Result<(), rustls::Error> {
+) -> std::result::Result<(), RecordFeedError> {
     let mut rest = record;
     while !rest.is_empty() {
-        let taken = conn
-            .read_tls(&mut rest)
-            .map_err(|error| rustls::Error::General(format!("read_tls: {error}")))?;
+        let taken = conn.read_tls(&mut rest).map_err(RecordFeedError::Io)?;
         conn.process_new_packets()?;
         if taken == 0 {
-            break;
+            return Err(RecordFeedError::Unconsumed { remaining: rest.len() });
         }
     }
     Ok(())

@@ -105,16 +105,17 @@ impl ListenerFactStore {
     /// A re-upsert of the same `workload_id` fully REPLACES its prior
     /// facts: any `ServiceId` from a superseded set (a changed `vip`,
     /// port, or protocol) is evicted from the primary map before the new
-    /// set is inserted, so no orphan survives a changed set. For an unchanged set this is a no-op delta (the same ids
-    /// are evicted then re-inserted), so cross-call idempotency holds.
+    /// set is inserted, so no orphan survives a changed set. For an
+    /// unchanged set this is a no-op delta (the same ids are evicted then
+    /// re-inserted), so cross-call idempotency holds.
     pub fn upsert(&mut self, workload_id: WorkloadId, vip: &ServiceVip, listeners: &[Listener]) {
         // Replace pre-pass: evict any primary entries this workload
         // registered on a prior `upsert` before inserting the new set.
         // The secondary `Vec` is overwritten wholesale below, so without
         // this the `ServiceId`s of a superseded set (changed vip / port /
-        // proto) would be unreachable orphans. Evicting up-front honours the "or replace" half of
-        // the contract; for an unchanged set the same ids are removed and
-        // re-inserted (a no-op delta), preserving idempotency.
+        // proto) would be unreachable orphans. Evicting up-front honours the
+        // "or replace" half of the contract; for an unchanged set the same ids
+        // are removed and re-inserted (a no-op delta), preserving idempotency.
         if let Some(old_ids) = self.secondary.get(&workload_id) {
             for id in old_ids {
                 self.primary.remove(id);
@@ -623,8 +624,8 @@ mod tests {
     /// fully REPLACE the prior facts, not leak orphans. Before the
     /// replace pre-pass, `upsert` overwrote the secondary `Vec` but never
     /// evicted the primary entries keyed by the OLD set's `ServiceId`s —
-    /// so the superseded entry stayed in `primary` forever. The docstring promised
-    /// "Record (or replace)"; this test pins the "replace" half.
+    /// so the superseded entry stayed in `primary` forever. The docstring
+    /// promised "Record (or replace)"; this test pins the "replace" half.
     ///
     /// Not reachable through the current submit handler (a changed spec
     /// at the same workload id is rejected with 409 before any upsert),

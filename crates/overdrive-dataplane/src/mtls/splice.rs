@@ -117,6 +117,13 @@ pub(super) struct PumpState {
     /// `OnceLock` makes installation race-free and the read lock-free; the trigger's
     /// own idempotency guards a double-fire from both pumps.
     self_teardown: OnceLock<SelfTeardown>,
+    /// Set when the pump exited in a way that must self-tear the connection down
+    /// (`TransportDeath` / `Completed`, not a deliberate `teardown`), whether or not
+    /// the trigger was installed yet. Install and exit each set their half and then
+    /// call `deliver_self_teardown`, so an exit that races registration still fires.
+    unexpected_exit: AtomicBool,
+    /// Claim: the trigger has been delivered for this pump (fires at most once).
+    self_teardown_delivered: AtomicBool,
     /// Adapter-private role used only to identify the terminal pump in a
     /// behavior-neutral transport-death diagnostic.
     role: AtomicU8,
@@ -126,13 +133,33 @@ pub(super) struct PumpState {
 
 impl PumpState {
     /// Install the (B) self-teardown trigger for this connection. Called by the
-    /// adapter exactly once, after the connection is registered. A second install is
-    /// a no-op (the first winner stands) — the trigger is connection-level, shared by
-    /// both the primary and the sibling pump's state.
+    /// adapter exactly once, after the connection is inserted into the tracking
+    /// table. A second install is a no-op (the first winner stands) — the trigger is
+    /// connection-level, shared by both the primary and the sibling pump's state.
+    ///
+    /// If the pump already exited unexpectedly before the trigger existed, the
+    /// install delivers it now: the exit and the install each publish their half
+    /// (`unexpected_exit` / the `OnceLock`) and then call
+    /// [`Self::deliver_self_teardown`], so at least one of them sees both halves.
     pub(super) fn install_self_teardown(&self, trigger: SelfTeardown) {
         // `set` returns Err if already installed; the first install wins and a
         // duplicate is harmless (both carry the same connection's teardown).
         let _ = self.self_teardown.set(trigger);
+        self.deliver_self_teardown();
+    }
+
+    /// Fire the trigger iff an unexpected exit was recorded AND the trigger is
+    /// installed, at most once per pump.
+    fn deliver_self_teardown(&self) {
+        if !self.unexpected_exit.load(Ordering::SeqCst) {
+            return;
+        }
+        let Some(trigger) = self.self_teardown.get() else {
+            return;
+        };
+        if !self.self_teardown_delivered.swap(true, Ordering::SeqCst) {
+            trigger();
+        }
     }
 
     /// Set the adapter-private diagnostic role for this pump.
@@ -164,9 +191,8 @@ impl PumpState {
         if self.stop.load(Ordering::SeqCst) {
             return; // a deliberate teardown is already in progress
         }
-        if let Some(trigger) = self.self_teardown.get() {
-            trigger();
-        }
+        self.unexpected_exit.store(true, Ordering::SeqCst);
+        self.deliver_self_teardown();
     }
 }
 
@@ -294,11 +320,13 @@ pub(super) fn record_progress(state: &PumpState, n: u64) {
 
 /// Why a pump thread reached its terminal exit — distinguishes a graceful close (a
 /// clean EOF, or a deliberate `teardown` that set `stop`) from a transport-death (an
-/// error / the (C) kernel-reaped `ETIMEDOUT` on a leg). A [`PumpExit::TransportDeath`]
+/// error / the (C) kernel-reaped `ETIMEDOUT` on a leg) — or a finished exchange
+/// ([`PumpExit::Completed`]). A [`PumpExit::TransportDeath`]
 /// on ANY pump that carries the (B) trigger fires the per-connection self-teardown;
 /// the trigger is installed into EVERY pump (primary + each aux) by
 /// [`super::HostMtlsEnforcement::register`], so whichever pump FIRST observes a
-/// transport death self-tears the connection down — notably the OUTBOUND aux return
+/// transport death self-tears the connection down (a [`PumpExit::Completed`] exit
+/// reclaims the same way, without the stall diagnostics) — notably the OUTBOUND aux return
 /// pump (`splice(legB → legF)`), the sole observer of leg-B death while the workload
 /// is idle. A [`PumpExit::Graceful`] close (a clean EOF, or a finished response
 /// direction) on ANY pump does NOT reclaim — the `PumpExit::Graceful` gate (NOT a
