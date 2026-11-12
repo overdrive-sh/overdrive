@@ -131,7 +131,7 @@ State 1: <Initial predicate>
 /\ pair_dgram_fwd_pair_ep = [g |-> "alive", h |-> "alive"]
 /\ pair_dgram_fwd_pair_conf_step = [InitWith |-> [m |-> "dgram"]]
 
-State 2: <pair_dgram_fwd_pair_VmmExit line 2255, col 3 to line 2303, col 23 of module pair_dgram>
+State 2: <pair_dgram_fwd_pair_VmmExit line 2203, col 3 to line 2251, col 23 of module pair_dgram>
 /\ pair_dgram_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
   fwdOld |-> FALSE,
   unclassified |-> FALSE,

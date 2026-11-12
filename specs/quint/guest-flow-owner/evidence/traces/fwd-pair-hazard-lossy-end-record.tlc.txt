@@ -131,9 +131,9 @@ State 1: <Initial predicate>
         lost |-> 0 ] ]
 /\ pair_bugLossyEndRecord_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
 
-State 2: <pair_bugLossyEndRecord_fwd_pair_CloseUnattached line 3009, col 3 to line 3025, col 52 of module pair_bugLossyEndRecord>
+State 2: <pair_bugLossyEndRecord_fwd_pair_CtxRelease line 3014, col 3 to line 3067, col 50 of module pair_bugLossyEndRecord>
 /\ pair_bugLossyEndRecord_fwd_pair_ctl = [gh |-> <<{"S", "R"}>>, hg |-> <<>>]
-/\ pair_bugLossyEndRecord_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+/\ pair_bugLossyEndRecord_fwd_pair_ctx = [g |-> "released", h |-> "open"]
 /\ pair_bugLossyEndRecord_fwd_pair_pr = [ g |->
       [ ph |-> "ended",
         rec |-> "none",
@@ -264,9 +264,9 @@ State 2: <pair_bugLossyEndRecord_fwd_pair_CloseUnattached line 3009, col 3 to li
         lost |-> 0 ] ]
 /\ pair_bugLossyEndRecord_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
 
-State 3: <pair_bugLossyEndRecord_fwd_pair_Attach line 4018, col 3 to line 4028, col 75 of module pair_bugLossyEndRecord>
+State 3: <pair_bugLossyEndRecord_fwd_pair_Attach line 4038, col 3 to line 4048, col 75 of module pair_bugLossyEndRecord>
 /\ pair_bugLossyEndRecord_fwd_pair_ctl = [gh |-> <<{"S", "R"}>>, hg |-> <<>>]
-/\ pair_bugLossyEndRecord_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+/\ pair_bugLossyEndRecord_fwd_pair_ctx = [g |-> "released", h |-> "open"]
 /\ pair_bugLossyEndRecord_fwd_pair_pr = [ g |->
       [ ph |-> "ended",
         rec |-> "none",
@@ -397,9 +397,9 @@ State 3: <pair_bugLossyEndRecord_fwd_pair_Attach line 4018, col 3 to line 4028, 
         lost |-> 0 ] ]
 /\ pair_bugLossyEndRecord_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
 
-State 4: <pair_bugLossyEndRecord_fwd_pair_VCtl line 4049, col 3 to line 4053, col 49 of module pair_bugLossyEndRecord>
+State 4: <pair_bugLossyEndRecord_fwd_pair_VCtl line 4028, col 3 to line 4032, col 49 of module pair_bugLossyEndRecord>
 /\ pair_bugLossyEndRecord_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<{"S", "R"}>>]
-/\ pair_bugLossyEndRecord_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+/\ pair_bugLossyEndRecord_fwd_pair_ctx = [g |-> "released", h |-> "open"]
 /\ pair_bugLossyEndRecord_fwd_pair_pr = [ g |->
       [ ph |-> "ended",
         rec |-> "none",
@@ -530,9 +530,9 @@ State 4: <pair_bugLossyEndRecord_fwd_pair_VCtl line 4049, col 3 to line 4053, co
         lost |-> 0 ] ]
 /\ pair_bugLossyEndRecord_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
 
-State 5: <pair_bugLossyEndRecord_fwd_pair_DropRecord line 1432, col 3 to line 1445, col 79 of module pair_bugLossyEndRecord>
+State 5: <pair_bugLossyEndRecord_fwd_pair_DropRecord line 1368, col 3 to line 1381, col 79 of module pair_bugLossyEndRecord>
 /\ pair_bugLossyEndRecord_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<{"S", "R"}>>]
-/\ pair_bugLossyEndRecord_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+/\ pair_bugLossyEndRecord_fwd_pair_ctx = [g |-> "released", h |-> "open"]
 /\ pair_bugLossyEndRecord_fwd_pair_pr = [ g |->
       [ ph |-> "ended",
         rec |-> "none",

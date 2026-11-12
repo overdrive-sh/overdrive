@@ -4243,6 +4243,11 @@ the holder).
 
 - **One connection.** A datagram association is one vsock STREAM (kind `2`
   `DatagramStream`, port 1240) carrying the frame of ADR-0149 both ways.
+- **The kernel pair owns V_g after attach (CONFALIGN-5).** `attach_slot`
+  hands V_g to the kernel pair; the guest owner holds no V_g afterwards. V_g
+  is shut `{S, R}` when the slot pair ends (the forwarder drops its
+  reference). The owner's deferred close after the end record only discards
+  the slot socket's queue and disconnects S.
 - **UDP half → vsock half.** Peek one datagram with `MSG_TRUNC` to learn its
   length; a datagram longer than `MAX_GUEST_DATAGRAM_PAYLOAD` is consumed and
   counted `dgram_oversize`, not sent; otherwise send the 8-byte header and
@@ -7305,7 +7310,7 @@ host-side protocol in its own image (HOST-NEUTRAL;
   | Slot release | Every slot of a released socket (not only the last); or a slot idle for `GUEST_DATAGRAM_SLOT_IDLE` (120 s) in both directions; a lost `sock_release` report is recovered by the level-triggered audit (slots whose cookie no longer exists). Release order: abort the pair (or close V_g before `Paired`) → discard the slot socket's receive queue without reading payload → disconnect the slot socket → return the slot (EVMOD-DGRAM, P-72). Never re-associated; late `Paired` → `Abort` |
   | Event dispatch | Every readiness event is dispatched by flow id or slot index, never by raw descriptor number |
   | Pool sizes | Pending TcpConnect flows `GUEST_TCP_PENDING_MAX` = 4,096 (= the per-allocation quota); UDP slots 1,024. Both count against the per-allocation quota (4,096) while in use. The guest has no per-flow slot pool: the forwarder allocates a pair's state at attach (EVMOD-AB) |
-  | Clean full end | The guest forwarder completes a pair only after both directions ended cleanly (its own `0x2` sent on V_g after the last accepted byte, and the host's `0x2` received; P-65; ADR-0180); the owner closes V_g after the end record. A close with a direction open is an abort. A SHUTDOWN or RST after a pair's end is a no-op (END-IDEMPOTENT) |
+  | Clean full end | The guest forwarder completes a pair only after both directions ended cleanly (its own `0x2` sent on V_g after the last accepted byte, and the host's `0x2` received; P-65; ADR-0180); in stream mode the owner closes V_g after the end record; in datagram mode the kernel pair owns V_g after `attach_slot` and shuts it `{S, R}` when the slot pair ends, and the owner's deferred close only discards the slot queue and disconnects S (CONFALIGN-5). A close with a direction open is an abort. A SHUTDOWN or RST after a pair's end is a no-op (END-IDEMPOTENT) |
   | Exhaustion | `GUEST_TCP_PENDING_MAX` pending → the new outbound TCP connection is reset (application sees `ECONNRESET`), counted `guest_tcp_pending_exhausted`. No free slot → the capture program refuses the application's `connect()` / `sendmsg()` to a new destination with `EPERM`, counted `guest_udp_slot_exhausted`. Existing flows are unaffected |
   | Deploy validation | A spec whose `[[listener]]` declares a port (either protocol) in `guest_reserved_ports()` is refused at deploy: `ParseError::ListenerPortReserved` at the TOML ingress, `AggregateError::Validation { field: "listeners[].port", .. }` at the API ingress (§ *Core vocabulary*). A spec whose startup, readiness and liveness probes together exceed `GUEST_PROBE_SLOTS` (8) is refused: `ParseError::ProbeCountExceeded` at the TOML ingress, `AggregateError::Validation { field: "probes", .. }` at the API ingress (D-UP-12) |
 
@@ -9667,7 +9672,7 @@ the lease `Retiring` until `release`.
 > roadmap validation remains pending.
 
 > **CONFALIGN-1 / -2 / -3 — RULED 2026-11-11 (user approved 2026-11-11);
-> CONFALIGN-4 — RULED 2026-11-12 (user approved 2026-11-12), below.**
+> CONFALIGN-4 and CONFALIGN-5 — RULED 2026-11-12 (user approved 2026-11-12), below.**
 > Three conformance failures exposed disagreements between the spec, this delta
 > and production. Each ruling below is the correct contract, not the least
 > change.
@@ -9862,6 +9867,66 @@ the lease `Retiring` until `release`.
 >
 > The modeler re-runs `fwd_pair` in full (`GuestAbort` changes) and re-records
 > evidence; any counterexample is a finding for approval, not an edit made here.
+>
+> **CONFALIGN-5 — in datagram mode the kernel pair owns V_g after `attach_slot`
+> (RULED, user approval 2026-11-12; no new named run; production unchanged).**
+> Troubleshooting `quint_fwd_pair_pair_conf_guest` (seeds `0x3c543dab`,
+> `0xa6fe6a13`, `0x35f3e2f2`) showed the spec and this delta modelling an
+> owner-held datagram V_g that production does not have. In production
+> `KernelGuestOwnerIo::attach_slot` (`kernel_io.rs` ~1089-1093) drops the
+> owner's V_g `OwnedFd` at attach (`self.sockets.remove`); the kernel pair
+> holds the only reference. The owner's deferred close
+> (`finish_slot_association`) discards the slot queue and disconnects S; it
+> shuts nothing, because it holds no V_g. The contract:
+> 1. After `attach_slot` the kernel pair owns the datagram V_g. The guest owner
+>    holds none.
+> 2. V_g is shut `{S, R}` when the slot pair ends (the forwarder drops its
+>    reference): on a completed pair, an abort, a peer abort, and the release
+>    of the context.
+> 3. `OwnerClose(g)` in datagram mode is only the slot-queue discard (and the
+>    disconnect of S). It does not shut V_g.
+> 4. The projected `pr(g).closed` for a datagram flow means the flow left the
+>    owner's table. It no longer implies a closed V_g; `vs(g)` carries V_g's
+>    own facts.
+> 5. `CtxRelease(g)` on an ended pair leaves V_g as it is, because the pair's
+>    end already shut it.
+>
+> Change list (the spec edit goes through the quint-modeler; the Sim and driver
+> edits are DELIVER work; no API, wire or formal-state change):
+> - Production: none. `attach_slot`, `finish_slot_association` and the kernel
+>   pair already behave as ruled.
+> - Spec (`fwd_pair.qnt`): `closeEff` (666-671) drops `shutAll` for
+>   `mode == "dgram" and s == "g"`: it sets `closed` and applies only the
+>   queue discard. Stream and watch are unchanged. V_g's shut moves to the
+>   actions that end the slot pair in datagram mode: `abortSide`'s non-watch
+>   branch already applies `shutAll` and therefore covers `Abort(g)`,
+>   `GuestAbort(g)` (live), `CtxRelease(g)` on a live pair and `peerAbort`;
+>   `complete` (451-452, reached from `markClean` 459 and `completeIfDone`
+>   453-454) gains `shutAll(·, s)` when `t.mode == "dgram"`, so a completed
+>   datagram pair shuts V_g at pair end. `refuseEff` already shuts V_g.
+>   `CtxRelease(g)` on an ended pair stays a no-op on V_g. Comments at
+>   `closeEff` and `abortSide` and the README action map state this.
+> - Sim (`SimGuestOwnerIo`, `overdrive-init` sim adapters): a datagram V_g is
+>   kept in the socket table for the projection, as before. The Sim shuts it
+>   `{S, R}` at slot-pair end, mirroring `kernel_io`, and no longer in the
+>   owner's close path.
+> - Driver (`quint_fwd_pair.rs`): `OwnerClose(g)` in datagram mode calls the
+>   owner's close and expects no V_g shut; `vs(g)` is read through the pinned
+>   handle as before.
+>
+> Affected checks (the modeler re-runs `fwd_pair` in full and re-records
+> evidence): `fwd-pair-dgram-safety-tlc` (`pair_dgram`, `DgramSafety`),
+> `fwd-pair-dgram-witness-vmm-exit`, the `pair_conf` randomized and
+> seeded replays in datagram mode (`flows_conf_randomized_traces`,
+> `quint_fwd_pair_pair_conf_guest`), and the named runs `DgramPaired`
+> (`fwd-pair-run-dgram-paired`) and `DatagramsInOrderWithEmpty`
+> (`fwd-pair-run-datagrams-in-order-with-empty`); the stream named run that
+> ends with `OwnerClose("g")` (`fwd_pair.qnt` 1369) is unaffected. Hazards:
+> no hazard is added or removed. Every hazard whose violating trace passes
+> through `OwnerClose(g)` or a datagram pair end is re-run, because the
+> shutting action moved; a hazard that stops violating is a finding for
+> approval, not an edit made here. `udp-slots` runs and hazards are
+> unaffected: that spec models the slot table, not V_g's shut.
 
 ##### QPROJ-4 — VM driver beacon observation (`VmDriver`, `overdrive-worker`)
 
@@ -10835,11 +10900,11 @@ paired with V-EV-END, V-EV-CTL, V-EV-PAIR and the module's Tier-3 suite.
 |---|---|
 | `ctx(s)` | O `open` while the owner holds a context; `released` after the owner's context was released (`CtxRelease`, the owner's death included) — S `SimFlowForwarder` context state, arbiter. `gone` is **stimulus-only, not projected**: the model writes it only in `VmmExit`, for side `g`, in the same step that sets the stimulus `vmUp` false (`fwd_pair.qnt:1084-1091`), and nothing sets `vmUp` true again after `Init` (`:516`) or reopens side `g` (`Reopen` requires `s == "h"`, `:667`), so in every reachable state `ctx(g) = gone ⇔ ¬vmUp`; this is a checked invariant of the spec, `CtxGoneIffVmDown` (`ctx.get("g") == "gone" iff not(vmUp)`, in `Safety` and `DgramSafety`; no witness check stands for it on the stream main because the named run `VmmExitAbortsHostHalf` reaches the state, and the datagram witness `fwd-pair-dgram-witness-vmm-exit` on `pair_dgram` is kept), rather than an argued one. **What the init driver compares after `VmmExit`.** The same model step also writes `pr(g).ph = gone` (unless the flow had already `ended` or been `refused`) and `ep(g) = gone` (`:1088-1089`). After `VmmExit` no guest kernel or guest owner exists to observe, so the init driver gates on the `VmmExit` stimulus it applied itself: from that step on it compares none of `ctx(g)`, the `pr(g)` fields, or the guest-side socket view (`vs(g)` and the guest-held halves' facts in `dir(d)`). Stimulus is driven and never projected (`vmUp` is listed as stimulus below), so the driver's own record that it applied `VmmExit` is the stimulus, not a projection from its bookkeeping (`testing.md` checklist item 5). Host-side variables (`ctx(h)`, `pr(h)`, `vs(h)`, which `VmmExit` sets `err`, and the host halves) are compared at every step as before. Before `VmmExit`, `ctx(g)` is `open` from O and `released` from the arbiter; `gone` is never projected from a driver flag (the driver keeps no `gone` flag). Side `h` never reaches `gone` |
 | `pr(s)` `.ph`, `.out`, `.cause`, `.errno` | O the flow's phase (QPROJ-3 `guest_flows[key]` / `dials[id]` / `datagrams[id]`; QPROJ-5 `flows[id]` / `accepted[id]` / `slots`), and the end record the owner consumed, read through the owner's `last_consumed_end` (host `flow_observation()`, guest `guest_observation()`; D-11): when its `id` is the flow's pair or watch id, `out` / `cause` / `errno` are its `outcome`, its `SocketError` errno included (QPROJ-8). The driver never compares a record it took from `SimGuestFlowIo` / `SimGuestOwnerIo` itself |
-| `pr(s)` `.rec`, `.nrec`, `.closed`, `.byRel` | `rec = read` ⇔ O the owner consumed the record: `last_consumed_end.id` is the flow's pair or watch id (the flow has left its table, `held_flows` dropped); `rec = queued` ⇔ S the flow's record is in the end queue of the context that attached it — the row of `SimForwarderDevice::contexts()` at the flow's `cgen` (row index `cgen − 1`; the host device has one owner per run), keyed by the flow's `ForwardId` in `SimContextState::queued_ends`, released contexts included, so a record left unread in a replaced context is compared (D-4); `rec = none` otherwise. `nrec` = 1 if the owner consumed the flow's record, plus the number of its records in that row's `queued_ends`. `closed` ⇔ O the flow left the owner's table and the S vsock half (`vsock_half`, row `vs(s)`) is closed. `byRel` ⇔ the flow left the owner's table and no record was produced for it — the owner consumed none and the row at its `cgen` holds none, or it was never attached (its context's release with the pair live, a close of a flow it never attached, or a `HalfEnded` refusal); a flow the `Forwarder` recovery dropped after an owner abort had queued its record is not `byRel` (its record is `queued` in the replaced context) — S arbiter for the record's absence |
+| `pr(s)` `.rec`, `.nrec`, `.closed`, `.byRel` | `rec = read` ⇔ O the owner consumed the record: `last_consumed_end.id` is the flow's pair or watch id (the flow has left its table, `held_flows` dropped); `rec = queued` ⇔ S the flow's record is in the end queue of the context that attached it — the row of `SimForwarderDevice::contexts()` at the flow's `cgen` (row index `cgen − 1`; the host device has one owner per run), keyed by the flow's `ForwardId` in `SimContextState::queued_ends`, released contexts included, so a record left unread in a replaced context is compared (D-4); `rec = none` otherwise. `nrec` = 1 if the owner consumed the flow's record, plus the number of its records in that row's `queued_ends`. `closed` ⇔ O the flow left the owner's table and, in stream and watch mode, the S vsock half (`vsock_half`, row `vs(s)`) is closed; for a datagram flow `closed` means only that the flow left the owner's table (the owner holds no V_g after `attach_slot`; V_g's shut is `vs(g)`'s own fact, CONFALIGN-5). `byRel` ⇔ the flow left the owner's table and no record was produced for it — the owner consumed none and the row at its `cgen` holds none, or it was never attached (its context's release with the pair live, a close of a flow it never attached, or a `HalfEnded` refusal); a flow the `Forwarder` recovery dropped after an owner abort had queued its record is not `byRel` (its record is `queued` in the replaced context) — S arbiter for the record's absence |
 | `pr(s).cgen`, `gen(s)`, `oldCtx(s)` | QPROJ-8, "Context-generation variables" |
 | `dir(d)` `.srcEnd`, `.srcShut`, `.dstEnd`, `.dstShut` | O `FlowForwarder::pair_state(pair)` of the side holding the half: `source_end`, `target_shut` (QPROJ-8) |
 | `dir(d)` `.q0`, `.q1`, `.q2`, `.got`, `.eof`, `.rst`, `.shutRd`, `.wr`, `.wfin` | S the Sim sockets' queues and the far readers' and writers' facts, arbiters |
-| `vs(s)` `.ps`, `.sent`, `.err`, `.cls`, `.st`, `.sshut` | S the per-half facts of side `s`'s vsock half, arbiter, read on the half's shared `SimSocket` (D-5): `.ps` `received_shutdown()`, `.sent` `sent_shutdown()`, `.err` `sk_err()`, `.cls` `recorded_class()`, `.st` `vsock_state()`, `.sshut` `own_send_shut()`. Host side: the half is `SimGuestFlowIo::vsock_half(flow)` (QPROJ-7), which keeps returning it after the owner closed it; guest side: the handle `SimGuestOwnerIo` issued for the flow's `V_g`, kept the same way. After the owner's close the accessors report the half's facts at its close |
+| `vs(s)` `.ps`, `.sent`, `.err`, `.cls`, `.st`, `.sshut` | S the per-half facts of side `s`'s vsock half, arbiter, read on the half's shared `SimSocket` (D-5): `.ps` `received_shutdown()`, `.sent` `sent_shutdown()`, `.err` `sk_err()`, `.cls` `recorded_class()`, `.st` `vsock_state()`, `.sshut` `own_send_shut()`. Host side: the half is `SimGuestFlowIo::vsock_half(flow)` (QPROJ-7), which keeps returning it after the owner closed it; guest side: the handle `SimGuestOwnerIo` issued for the flow's `V_g`, kept the same way. After the owner's close the accessors report the half's facts at its close. In datagram mode the guest owner drops its V_g at `attach_slot` and the kernel pair owns it: `vs(g)` reports the half's facts, and V_g reaches `sent = {S, R}` at slot-pair end (the forwarder drops its reference), not at `OwnerClose(g)` (CONFALIGN-5) |
 | `tcpErr(s)`, `attRes(s)`, `attEnded(s)`, `strmHeld`, `strmAbort`, `hres`, `guestAbortSent` | QPROJ-8, "Ended-half, watch and stream variables" |
 | `ctl(d)`, `terr(s)`, `ep(s)`, `dg(d)`, `vmUp`, `mode` | S scripted facts / stimulus |
 | `loss`, `lost`, `tcls`, `ucls`, `vs(s)` `.att`, `.clsAt`, `.ncls`, `.snap`, `.misc`, `gh` (every field except `gh.unclassified`, which is O `inventory().unclassified_eof`), `conf_step` | model-only (QPROJ-8) |
@@ -10851,7 +10916,7 @@ paired with V-EV-END, V-EV-CTL, V-EV-PAIR and the module's Tier-3 suite.
 | `Abort(s)` | side `s`'s owner aborts the id (teardown, quiescence, session loss): `FlowForwarder::abort` |
 | `CtxRelease(s)` | side not under test: the Sim context's release (`SimFlowForwarder::release`, scripted). Side under test `h`, one mapping chosen by the state, never by what follows: with no host pair or watch live, the `Forwarder` recovery's context close — the driver damages `Forwarder` with a scripted context `Io` failure, the supervisor's repair runs `abort_all` (a no-op, nothing is live) and `close_forwarder`, and its `open_forwarder` is held by the seam until `Reopen(h)`; with a pair or watch live, the host owner's death — the driver drops the host owner with its context, after which the host owner's O facts are not projected (no owner exists; production's successor is a new `serve` process whose boot reclamation ends the VM, NO-SURVIVE) and only S and C facts are. Recovery `recoveryClose` sets `strmAbort` only when `strmHeld` is true and the ended watch was not already owner-aborted; it preserves `strmHeld` and an existing `hres`. With `strmHeld = false` and an ended watch, it preserves the existing record/cause/count and applies idempotent `shutAll` to owner-held `V_h`; it keeps `strmAbort = false` / `hres = none`, and sets `guestAbortSent` only when the socket was not already closed and `vmUp` is true. Side under test `g`: the driver drops the guest owner with its context (the guest owner is PID 1; its death ends the VM, RESET-EXIT) (D-3 to D-5) |
 | `TakeEnd(s)` | the owner's dispatch on its context's readiness: `take_end` and the flow's release; on the host this one dispatch also closes the flow's descriptors (the host's `OwnerClose`, below). After the existing `rec = read` update, host watch mode with `strmHeld = false` and `ep(h) = alive` applies the same pending-dial cleanup selector as holder-free recovery: idempotent `shutAll`, `strmAbort = false`, `hres = none`, and a new guest-abort fact only when socket cleanup was pending and `vmUp`; the existing record outcome/cause/count remain. With `strmHeld = true`, watch-mode `TakeEnd` retains its current no-close effect |
-| `OwnerClose(s)` | guest: the owner closes the flow's descriptors after the record (datagram: the slot-queue discard), a dispatch of its own. Host: not a separate owner step — the host owner closes in the dispatch that reads the record, so the model takes `OwnerClose(h)` together with `TakeEnd(h)` as one step (rule 1 of the host-side projection pins below) |
+| `OwnerClose(s)` | guest: the owner closes the flow's descriptors after the record, a dispatch of its own. In datagram mode the owner holds no V_g after `attach_slot` (the kernel pair owns it, CONFALIGN-5), so `OwnerClose(g)` is only the slot-queue discard and the disconnect of S: it does not shut V_g, and it sets `closed` (the flow left the owner's table). Host: not a separate owner step — the host owner closes in the dispatch that reads the record, so the model takes `OwnerClose(h)` together with `TakeEnd(h)` as one step (rule 1 of the host-side projection pins below) |
 | `Hop0(d)`, `Hop1(d)`, `HopEnd0(d)`, `HopEnd1(d)`, `VCtl(d)`, `FwdErr(s)` | `SimFlowForwarder` runs and callbacks (scripted) |
 | `Write`, `Fin`, `Read`, `ReadEof`, `ShutRd`, `VmmExit`, `TrailingRst`, `SendDg`, `DRead`, `UdpBlock`, `UdpUnblock`, `UdpErr` | Sim socket and far-end faults (scripted); `VmmExit` is `SimVmm` exit, which sets the host half's `sk_err` and state — the first of the orphan sweep's two steps; its `sk_error_report` is the separate `FwdErr(h)` (T-9); `ReadEof` on the dialer is the stream's resolved result. The watch-mode dialer branches `Write("hg")`, `Fin("hg")`, `Read("gh")` and `ReadEof("gh")` require `strmHeld`; the ordinary pair/far-end branches are unchanged |
 | `TcpRst(s, after_fin)` (T-1) | Sim: the far TCP peer resets after or before its FIN; `SimFlowForwarder` runs the half's `sk_error_report` in the same step. `after_fin` equals the far writer's FIN in the state; a trace names it explicitly |

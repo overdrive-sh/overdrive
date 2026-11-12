@@ -448,8 +448,13 @@ module fwd_pair {
       val t3 = if (hit) setDir(t2, into(s), { ...t2.dir.get(into(s)), rst: true }) else t2
       val t4 = if (t.mode == "dgram") t3 else cutBoth(t3)
       shutAll(t4, s)
+  // CONFALIGN-5: in datagram mode the kernel pair owns V_g after attach_slot, so a completed pair's end shuts V_g
+  // {S, R} here (the forwarder drops its reference); the owner's deferred close shuts nothing (closeEff)
   def complete(t: St, s: str): St =
-    if (live(t, s)) setPr(t, s, ended(t.pr.get(s), "completed", "none", false)) else t
+    if (live(t, s))
+      val t1 = setPr(t, s, ended(t.pr.get(s), "completed", "none", false))
+      if (t.mode == "dgram") shutAll(t1, s) else t1
+    else t
   def completeIfDone(t: St, s: str): St =
     if (t.dir.get(into(s)).dstEnd == "clean" and t.dir.get(outof(s)).srcEnd == "clean") complete(t, s) else t
   // the callback recorded a clean half-close of the incoming direction at side s
@@ -663,12 +668,14 @@ module fwd_pair {
     t.pr.get(s).rec == "queued" and sideUp(t, s) and t.ctx.get(s) == "open" and t.pr.get(s).cgen == t.gen.get(s)
   // after the record, the owner closes its descriptors: a completed TCP half's linger is cleared first (D20); the
   // vsock close sends {S, R}; in datagram mode the guest owner discards the slot socket's queue without reading it
+  // CONFALIGN-5: in datagram mode the guest owner holds no V_g after attach_slot (the kernel pair owns it and shut it
+  // at the pair's end: abortSide, complete, refuseEff), so the guest's close only sets closed and discards the queue
   def closeEff(t: St, s: str): St =
-    val t1 = shutAll(setPr(t, s, { ...t.pr.get(s), closed: true }), s)
-    val x = t1.dg.get(outof(s))
-    if (t1.mode == "dgram" and s == "g")
-      setDg(t1, outof(s), { ...x, dq0: List(), foff: 0, sdrop: x.sdrop.union(lset(x.dq0)) })
-    else t1
+    val t0 = setPr(t, s, { ...t.pr.get(s), closed: true })
+    val x = t0.dg.get(outof(s))
+    if (t0.mode == "dgram" and s == "g")
+      setDg(t0, outof(s), { ...x, dq0: List(), foff: 0, sdrop: x.sdrop.union(lset(x.dq0)) })
+    else shutAll(t0, s)
   // D-4 (architect 2026-10-18): the host owner reads the record and closes the flow's descriptors in ONE dispatch,
   // so outside watch mode TakeEnd(h) performs OwnerClose(h)'s effect in the same step. In watch mode a held stream
   // keeps V_h; a holder-free alive dialer completes its existing pending-error cleanup after the record read. The

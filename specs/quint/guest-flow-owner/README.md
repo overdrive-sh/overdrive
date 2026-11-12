@@ -312,7 +312,7 @@ watch with an alive dialer, that same dispatch idempotently closes owner-held
 V_h and records the existing pending-dial guest Abort only when cleanup was
 newly required while the VM is live; held streams and dead endpoints keep the
 no-close result),
-`OwnerClose` (the vsock close's {S, R}; in datagram mode the guest discards the slot socket's queue). Environment:
+`OwnerClose` (the vsock close's {S, R}; in datagram mode the guest owner holds no V_g after `attach_slot`: the kernel pair owns it and shuts it {S, R} when the slot pair ends (completion, abort, peer abort, release), so `OwnerClose(g)` only discards the slot queue and sets `closed`; CONFALIGN-5). Environment:
 `Write`, `Fin`, `Read`, `HolderEnd(k)` (the holder's end observation on V_h, F11 corrected: `eof` (a read of 0) or
 `err` (a read error); after the release's `SHUT_RDWR` either, queued bytes or not; after a guest SHUTDOWN `eof` once the
 queue is empty; after the orphan sweep `err` (`ECONNRESET`) once the queue is empty — and before the sweep's

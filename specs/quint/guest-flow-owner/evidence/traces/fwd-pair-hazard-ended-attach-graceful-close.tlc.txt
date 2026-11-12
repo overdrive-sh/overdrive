@@ -131,7 +131,7 @@ State 1: <Initial predicate>
         nrec |-> 0,
         cgen |-> 0 ] ]
 
-State 2: <pair_bugEndedAttachGracefulClose_fwd_pair_CloseUnattached line 3065, col 3 to line 3081, col 62 of module pair_bugEndedAttachGracefulClose>
+State 2: <pair_bugEndedAttachGracefulClose_fwd_pair_CtxRelease line 3075, col 3 to line 3131, col 60 of module pair_bugEndedAttachGracefulClose>
 /\ pair_bugEndedAttachGracefulClose_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
 /\ pair_bugEndedAttachGracefulClose_fwd_pair_mode = "stream"
 /\ pair_bugEndedAttachGracefulClose_fwd_pair_attRes = [g |-> "none", h |-> "none"]
@@ -198,7 +198,7 @@ State 2: <pair_bugEndedAttachGracefulClose_fwd_pair_CloseUnattached line 3065, c
 /\ pair_bugEndedAttachGracefulClose_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
 /\ pair_bugEndedAttachGracefulClose_fwd_pair_strmHeld = FALSE
 /\ pair_bugEndedAttachGracefulClose_fwd_pair_ctl = [gh |-> <<{"S", "R"}>>, hg |-> <<>>]
-/\ pair_bugEndedAttachGracefulClose_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+/\ pair_bugEndedAttachGracefulClose_fwd_pair_ctx = [g |-> "released", h |-> "open"]
 /\ pair_bugEndedAttachGracefulClose_fwd_pair_dg = [ gh |->
       [ got |-> <<>>,
         n |-> 0,
@@ -264,7 +264,7 @@ State 2: <pair_bugEndedAttachGracefulClose_fwd_pair_CloseUnattached line 3065, c
         nrec |-> 0,
         cgen |-> 0 ] ]
 
-State 3: <pair_bugEndedAttachGracefulClose_fwd_pair_VCtl line 4138, col 3 to line 4142, col 59 of module pair_bugEndedAttachGracefulClose>
+State 3: <pair_bugEndedAttachGracefulClose_fwd_pair_VCtl line 4115, col 3 to line 4119, col 59 of module pair_bugEndedAttachGracefulClose>
 /\ pair_bugEndedAttachGracefulClose_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
 /\ pair_bugEndedAttachGracefulClose_fwd_pair_mode = "stream"
 /\ pair_bugEndedAttachGracefulClose_fwd_pair_attRes = [g |-> "none", h |-> "none"]
@@ -331,7 +331,7 @@ State 3: <pair_bugEndedAttachGracefulClose_fwd_pair_VCtl line 4138, col 3 to lin
 /\ pair_bugEndedAttachGracefulClose_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
 /\ pair_bugEndedAttachGracefulClose_fwd_pair_strmHeld = FALSE
 /\ pair_bugEndedAttachGracefulClose_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
-/\ pair_bugEndedAttachGracefulClose_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+/\ pair_bugEndedAttachGracefulClose_fwd_pair_ctx = [g |-> "released", h |-> "open"]
 /\ pair_bugEndedAttachGracefulClose_fwd_pair_dg = [ gh |->
       [ got |-> <<>>,
         n |-> 0,
@@ -397,7 +397,7 @@ State 3: <pair_bugEndedAttachGracefulClose_fwd_pair_VCtl line 4138, col 3 to lin
         nrec |-> 0,
         cgen |-> 0 ] ]
 
-State 4: <pair_bugEndedAttachGracefulClose_fwd_pair_Attach line 4105, col 3 to line 4116, col 59 of module pair_bugEndedAttachGracefulClose>
+State 4: <pair_bugEndedAttachGracefulClose_fwd_pair_Attach line 4125, col 3 to line 4136, col 59 of module pair_bugEndedAttachGracefulClose>
 /\ pair_bugEndedAttachGracefulClose_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
 /\ pair_bugEndedAttachGracefulClose_fwd_pair_mode = "stream"
 /\ pair_bugEndedAttachGracefulClose_fwd_pair_attRes = [g |-> "none", h |-> "halfEnded"]
@@ -464,7 +464,7 @@ State 4: <pair_bugEndedAttachGracefulClose_fwd_pair_Attach line 4105, col 3 to l
 /\ pair_bugEndedAttachGracefulClose_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
 /\ pair_bugEndedAttachGracefulClose_fwd_pair_strmHeld = FALSE
 /\ pair_bugEndedAttachGracefulClose_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<{"S", "R"}>>]
-/\ pair_bugEndedAttachGracefulClose_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+/\ pair_bugEndedAttachGracefulClose_fwd_pair_ctx = [g |-> "released", h |-> "open"]
 /\ pair_bugEndedAttachGracefulClose_fwd_pair_dg = [ gh |->
       [ got |-> <<>>,
         n |-> 0,
@@ -530,7 +530,7 @@ State 4: <pair_bugEndedAttachGracefulClose_fwd_pair_Attach line 4105, col 3 to l
         nrec |-> 0,
         cgen |-> 0 ] ]
 
-State 5: <pair_bugEndedAttachGracefulClose_fwd_pair_ReadEof line 3651, col 3 to line 3706, col 60 of module pair_bugEndedAttachGracefulClose>
+State 5: <pair_bugEndedAttachGracefulClose_fwd_pair_ReadEof line 3502, col 3 to line 3557, col 60 of module pair_bugEndedAttachGracefulClose>
 /\ pair_bugEndedAttachGracefulClose_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
 /\ pair_bugEndedAttachGracefulClose_fwd_pair_mode = "stream"
 /\ pair_bugEndedAttachGracefulClose_fwd_pair_attRes = [g |-> "none", h |-> "halfEnded"]
@@ -597,7 +597,7 @@ State 5: <pair_bugEndedAttachGracefulClose_fwd_pair_ReadEof line 3651, col 3 to 
 /\ pair_bugEndedAttachGracefulClose_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
 /\ pair_bugEndedAttachGracefulClose_fwd_pair_strmHeld = FALSE
 /\ pair_bugEndedAttachGracefulClose_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<{"S", "R"}>>]
-/\ pair_bugEndedAttachGracefulClose_fwd_pair_ctx = [g |-> "open", h |-> "open"]
+/\ pair_bugEndedAttachGracefulClose_fwd_pair_ctx = [g |-> "released", h |-> "open"]
 /\ pair_bugEndedAttachGracefulClose_fwd_pair_dg = [ gh |->
       [ got |-> <<>>,
         n |-> 0,
