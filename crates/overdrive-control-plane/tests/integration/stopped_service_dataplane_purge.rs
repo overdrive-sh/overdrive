@@ -13,10 +13,13 @@
 //! The listener facts the hydrator projects from survive a stop (R-76), so the
 //! `ServiceMapHydrator` sees the stopped Service's zero-backend row and emits
 //! the empty `DataplaneUpdateService` that removes the last backend. The
-//! restart arm boots a second server over the same data directory: the
-//! intent store and the observation store are the durable ones, the dataplane
-//! is a fresh one (as after a real restart), and the stopped Service must not
-//! be programmed again.
+//! restart test stops the Service and takes the node down before the purge has
+//! landed, then boots a second server over the same data directory and the same
+//! dataplane handle (the service map stands in for the kernel map that outlives
+//! the process). The intent and observation stores are the durable ones, so the
+//! second boot must rebuild the stopped Service's listener facts from them and
+//! purge the backend the first lifetime left programmed. A boot that forgot the
+//! stopped Service would leave that backend in place.
 //!
 //! Tier 1 (seeded `SimClock` advanced by the test). The convergence loop runs on
 //! the injected clock.
@@ -101,11 +104,12 @@ struct Node {
 }
 
 impl Node {
-    /// Boot over `dir`'s data and operator-config directories with a fresh
-    /// `SimDataplane`, `SimDriver` and `SimClock`; the intent and observation
-    /// stores are the ones the host bundle opens under the data directory, so
-    /// a second boot over the same `dir` reads the first lifetime's state.
-    async fn boot(dir: &TempDir) -> Self {
+    /// Boot over `dir`'s data and operator-config directories with the given
+    /// `SimDataplane` and a fresh `SimDriver` and `SimClock`; the intent and
+    /// observation stores are the ones the host bundle opens under the data
+    /// directory, so a second boot over the same `dir` reads the first
+    /// lifetime's state.
+    async fn boot(dir: &TempDir, dataplane: Arc<SimDataplane>) -> Self {
         let data_dir = dir.path().join("data");
         let operator_config_dir = dir.path().join("conf");
         std::fs::create_dir_all(&data_dir).expect("create data dir");
@@ -116,7 +120,6 @@ impl Node {
             tick_cadence: TICK,
             ..super::node_adapters::test_config(data_dir, operator_config_dir.clone())
         };
-        let dataplane = Arc::new(SimDataplane::new());
         let mut boot: BootAdapters = super::node_adapters::boot_adapters(&config);
         boot.dataplane =
             Arc::new(SimDataplaneComposer::new(Arc::clone(&dataplane), Ipv4Addr::LOCALHOST));
@@ -231,21 +234,20 @@ impl Node {
 
 /// Outcome anchor: OUT-PIG-STOPPED-SERVICE-PURGE
 /// R-76 boundary obligation — a stopped Service's last backend is purged from
-/// the service map, and a restart of the node preserves the same outcome.
+/// the service map.
 /// CONTRACT_SHAPE: bounded-change.
 ///
 /// Given a Service deployed through the public API whose one replica is Running
 ///   and programmed in the service map
 /// When the operator stops the Service
 /// Then the service map holds no backend for the Service's VIP once the
-///      replica is Terminated
-///  And after the node restarts over the same state, the stopped Service is
-///      Terminated and the service map still holds no backend for any VIP.
+///      replica is Terminated.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_stopped_services_last_backend_is_purged_from_the_service_map_and_stays_purged_after_a_node_restart()
+async fn a_stopped_services_last_backend_is_purged_from_the_service_map()
  {
     let dir = TempDir::new().expect("tempdir");
-    let first = Node::boot(&dir).await;
+    let dataplane = Arc::new(SimDataplane::new());
+    let first = Node::boot(&dir, Arc::clone(&dataplane)).await;
 
     // GIVEN the Service is Running and programmed.
     first.submit_service().await;
@@ -271,22 +273,61 @@ async fn a_stopped_services_last_backend_is_purged_from_the_service_map_and_stay
         .await;
     let stopped = first.allocs().await;
     assert!(
-        stopped.rows.iter().all(|row| row.state == AllocStateWire::Terminated),
+        !stopped.rows.is_empty()
+            && stopped.rows.iter().all(|row| row.state == AllocStateWire::Terminated),
         "the stopped Service's replica is Terminated: {stopped:?}"
     );
-    assert_eq!(
-        first.dataplane.service_backends(vip),
-        None,
-        "no backend remains for the stopped Service's VIP"
-    );
     first.shutdown().await;
+}
 
-    // AND a restart over the same state preserves the outcome.
-    let second = Node::boot(&dir).await;
+/// Outcome anchor: OUT-PIG-STOPPED-SERVICE-PURGE
+/// R-76 boundary obligation — a node that goes down after a stop but before the
+/// purge has landed is repaired by its restart.
+/// CONTRACT_SHAPE: bounded-change.
+///
+/// Given a Service deployed through the public API whose one replica is Running
+///   and programmed in the service map
+/// When the operator stops the Service and the node goes down at once, with the
+///      backend still programmed in the service map
+///  And the node restarts over the same state and the same service map
+/// Then the restarted node purges the backend the first lifetime left, and the
+///      Service stays Terminated.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_node_restart_purges_the_backend_a_stop_left_programmed_before_the_node_went_down() {
+    let dir = TempDir::new().expect("tempdir");
+    let dataplane = Arc::new(SimDataplane::new());
+    let first = Node::boot(&dir, Arc::clone(&dataplane)).await;
+
+    // GIVEN the Service is Running and programmed.
+    first.submit_service().await;
+    first
+        .tick_until("the Service is programmed in the service map", |node| {
+            node.programmed_vips().iter().any(|vip| node.dataplane.service_backends(*vip).is_some())
+        })
+        .await;
+
+    // WHEN the operator stops the Service and the node goes down at once.
+    first.stop_service().await;
+    first.shutdown().await;
+    assert!(
+        dataplane.service_vip_keys().iter().any(|vip| dataplane.service_backends(*vip).is_some()),
+        "the first lifetime went down with the stopped Service's backend still programmed"
+    );
+
+    // AND the node restarts over the same state and the same service map.
+    let second = Node::boot(&dir, Arc::clone(&dataplane)).await;
+
+    // THEN the leftover backend is purged and the Service stays Terminated.
+    second
+        .tick_until("the restarted node purges the stopped Service's leftover backend", |node| {
+            node.programmed_vips().iter().all(|vip| node.dataplane.service_backends(*vip).is_none())
+        })
+        .await;
     second.settle(RESTART_SETTLE_TICKS).await;
     let restarted = second.allocs().await;
     assert!(
-        restarted.rows.iter().all(|row| row.state == AllocStateWire::Terminated),
+        !restarted.rows.is_empty()
+            && restarted.rows.iter().all(|row| row.state == AllocStateWire::Terminated),
         "after the restart the stopped Service has no live replica: {restarted:?}"
     );
     for programmed in second.programmed_vips() {

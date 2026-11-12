@@ -1060,10 +1060,43 @@ fn bpftool_json(args: &[&str]) -> serde_json::Value {
     serde_json::from_slice(&output.stdout).expect("bpftool emits JSON")
 }
 
-/// Entries in the one loaded map whose name starts with `prefix` (kernel map
-/// names are truncated to 15 octets). Read with `bpftool`, an independent oracle.
+/// Kernel ids of the BPF maps this process holds open, from `/proc/self/fd`
+/// (`anon_inode:bpf-map`) and each descriptor's `map_id` in `/proc/self/fdinfo`.
+///
+/// BPF ids are node-global, so a node-wide listing also shows the maps of any
+/// other run on the node; the gateway runs in this process, so the maps behind
+/// this process's own descriptors are exactly this run's.
+fn own_bpf_map_ids() -> BTreeSet<u64> {
+    let mut ids = BTreeSet::new();
+    for entry in std::fs::read_dir("/proc/self/fd").expect("/proc/self/fd is readable").flatten() {
+        let Ok(target) = std::fs::read_link(entry.path()) else { continue };
+        if target.to_string_lossy() != "anon_inode:bpf-map" {
+            continue;
+        }
+        let Ok(info) = std::fs::read_to_string(
+            std::path::Path::new("/proc/self/fdinfo").join(entry.file_name()),
+        ) else {
+            continue;
+        };
+        if let Some(id) = info
+            .lines()
+            .find_map(|line| line.strip_prefix("map_id:"))
+            .and_then(|value| value.trim().parse::<u64>().ok())
+        {
+            ids.insert(id);
+        }
+    }
+    ids
+}
+
+/// Entries in the one map this process holds whose name starts with `prefix`.
+///
+/// Kernel map names are truncated to 15 octets. The map is selected by this
+/// process's own descriptors and its contents are read with `bpftool` by id, an
+/// independent oracle.
 #[must_use]
 pub fn bpf_map_entries(prefix: &str) -> usize {
+    let own = own_bpf_map_ids();
     let maps = bpftool_json(&["map", "show"]);
     let matching: Vec<u64> = maps
         .as_array()
@@ -1071,9 +1104,10 @@ pub fn bpf_map_entries(prefix: &str) -> usize {
         .iter()
         .filter(|map| map["name"].as_str().is_some_and(|name| name.starts_with(prefix)))
         .filter_map(|map| map["id"].as_u64())
+        .filter(|id| own.contains(id))
         .collect();
     let [id] = matching.as_slice() else {
-        panic!("exactly one loaded map named {prefix}*, got {matching:?}");
+        panic!("exactly one map named {prefix}* held by this process, got {matching:?}");
     };
     bpftool_json(&["map", "dump", "id", &id.to_string()]).as_array().map_or(0, Vec::len)
 }

@@ -4968,7 +4968,11 @@
         "kind": "guest-group",
         "group": "cgroup-default"
       },
-      "integration::stopped_service_dataplane_purge::a_stopped_services_last_backend_is_purged_from_the_service_map_and_stays_purged_after_a_node_restart": {
+      "integration::stopped_service_dataplane_purge::a_node_restart_purges_the_backend_a_stop_left_programmed_before_the_node_went_down": {
+        "kind": "guest-group",
+        "group": "cgroup-default"
+      },
+      "integration::stopped_service_dataplane_purge::a_stopped_services_last_backend_is_purged_from_the_service_map": {
         "kind": "guest-group",
         "group": "cgroup-default"
       },

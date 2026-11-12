@@ -831,8 +831,8 @@ async fn native_metal_kvm_public_ingress_gateway_holds_128_concurrent_exchanges_
 /// When five bursts of 128 concurrent `GET /hold` exchanges each run and drain in
 ///      the same gateway process
 /// Then every burst's peak resident growth, from that burst's own baseline, stays
-///      within the R-74 resident bound, and the post-drain resident set after the
-///      fifth burst is within 1 MB of the post-drain resident set after the second.
+///      within the R-74 resident bound, and the post-drain in-use heap after the
+///      fifth burst is within 1 MB of the post-drain in-use heap after the second.
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]

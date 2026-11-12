@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Native-metal entrypoint for the KVM conformance cases (`native_metal_kvm_*`).
-# These tests are no longer ignored; the selector runs them and only them.
+# These tests are active; the selector runs them and only them.
 # Direct-handler/API recovery tests without a real guest run under ordinary
 # nextest and are deliberately excluded from this selector.
 set -euo pipefail
