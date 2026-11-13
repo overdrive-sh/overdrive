@@ -470,10 +470,6 @@
         "kind": "guest-group",
         "group": "cgroup-default"
       },
-      "integration::cluster_and_node_commands::cluster_status_with_no_server_returns_transport_error": {
-        "kind": "guest-group",
-        "group": "cgroup-default"
-      },
       "integration::cluster_and_node_commands::node_list_against_in_process_server_returns_boot_time_row_with_no_nodes_diagnostic_message": {
         "kind": "guest-group",
         "group": "cgroup-default"
@@ -12799,6 +12795,33 @@
       "guest_peer::tests::malformed_lines_are_refused": {
         "kind": "host-pure"
       },
+      "guest_suite::tests::a_raised_nofile_attempt_runs_the_cgroup_nofile_wrapper_before_env": {
+        "kind": "host-pure"
+      },
+      "guest_suite::tests::a_test_outside_any_quint_module_is_staged_no_quint_runtime": {
+        "kind": "host-pure"
+      },
+      "guest_suite::tests::an_attempt_without_raised_nofile_starts_with_env": {
+        "kind": "host-pure"
+      },
+      "guest_suite::tests::an_undeclared_quint_module_fails_closed": {
+        "kind": "host-pure"
+      },
+      "guest_suite::tests::every_cgroup_default_attempt_stages_the_diagnostic_and_certificate_tools": {
+        "kind": "host-pure"
+      },
+      "guest_suite::tests::every_cgroup_default_attempt_stages_the_nft_binary": {
+        "kind": "host-pure"
+      },
+      "guest_suite::tests::every_cgroup_default_attempt_stages_the_shared_mtls_nft_modules": {
+        "kind": "host-pure"
+      },
+      "guest_suite::tests::every_test_of_a_declared_quint_module_resolves_its_model": {
+        "kind": "host-pure"
+      },
+      "guest_suite::tests::the_netns_compatibility_link_needs_only_group_staged_tools": {
+        "kind": "host-pure"
+      },
       "vm_fixture::tests::compute_init_signature_encodes_len_mtime_and_mtime_nsec": {
         "kind": "host-pure"
       },
@@ -12815,35 +12838,6 @@
         "kind": "host-pure"
       },
       "vm_fixture::tests::rootfs_image_is_valid_true_only_when_ext4_magic_present_at_offset": {
-        "kind": "host-pure"
-      }
-    },
-    "overdrive-testing::bin/overdrive-fwd-guest-suite": {
-      "tests::a_raised_nofile_attempt_runs_the_cgroup_nofile_wrapper_before_env": {
-        "kind": "host-pure"
-      },
-      "tests::a_test_outside_any_quint_module_is_staged_no_quint_runtime": {
-        "kind": "host-pure"
-      },
-      "tests::an_attempt_without_raised_nofile_starts_with_env": {
-        "kind": "host-pure"
-      },
-      "tests::an_undeclared_quint_module_fails_closed": {
-        "kind": "host-pure"
-      },
-      "tests::every_cgroup_default_attempt_stages_the_diagnostic_and_certificate_tools": {
-        "kind": "host-pure"
-      },
-      "tests::every_cgroup_default_attempt_stages_the_nft_binary": {
-        "kind": "host-pure"
-      },
-      "tests::every_cgroup_default_attempt_stages_the_shared_mtls_nft_modules": {
-        "kind": "host-pure"
-      },
-      "tests::every_test_of_a_declared_quint_module_resolves_its_model": {
-        "kind": "host-pure"
-      },
-      "tests::the_netns_compatibility_link_needs_only_group_staged_tools": {
         "kind": "host-pure"
       }
     },

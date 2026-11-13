@@ -324,6 +324,28 @@ fn test_function_exists(row: &Value) -> bool {
     fs::read_to_string(workspace_file(path)).is_ok_and(|text| text.contains(&format!("fn {leaf}(")))
 }
 
+/// Whether the test function carries `#[overdrive_test(guest = "<group>")]`
+/// for exactly the reviewed guest group: a test placed on itself has no table
+/// row, and the declaration must name the same group the reviewed row did.
+fn declares_the_reviewed_guest_group_on_the_test(row: &Value) -> bool {
+    let source = row["source"].as_str().expect("source");
+    let path = source.split(':').next().expect("source path");
+    let leaf = row["test_name"].as_str().expect("name").rsplit("::").next().expect("leaf");
+    let group = row["context"].as_str().expect("guest group");
+    let declaration = format!("#[overdrive_testing::overdrive_test(guest = \"{group}\")]");
+    let Ok(text) = fs::read_to_string(workspace_file(path)) else { return false };
+    let Some(function_at) = text.find(&format!("fn {leaf}(")) else { return false };
+    text[..function_at]
+        .lines()
+        .rev()
+        .skip(1)
+        .take_while(|line| {
+            let line = line.trim_start();
+            line.starts_with("#[") || line.starts_with("//")
+        })
+        .any(|line| line.trim() == declaration)
+}
+
 /// CONTRACT_SHAPE: bounded-change (read-only placement comparison and output only;
 /// data extensions are exact identities, never absence-means-host or fixed counts).
 #[test]
@@ -343,6 +365,13 @@ fn runtime_placement_preserves_the_reviewed_partition_and_declares_new_acceptanc
         // A reviewed row whose test function was deleted from the workspace has
         // no runtime placement to preserve; a row whose function still exists must.
         if actual.is_null() && !test_function_exists(row) {
+            continue;
+        }
+        // A guest test that declares its placement on itself has no table row.
+        if actual.is_null()
+            && row["placement"] == "guest-group"
+            && declares_the_reviewed_guest_group_on_the_test(row)
+        {
             continue;
         }
         // The public-ingress conformance binary boots `serve` in-process on the

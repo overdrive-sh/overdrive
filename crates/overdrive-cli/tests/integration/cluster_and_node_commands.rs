@@ -136,6 +136,7 @@ async fn node_list_against_in_process_server_returns_boot_time_row_with_no_nodes
 // (c) cluster::status with no server returns CliError::Transport
 // -------------------------------------------------------------------
 
+#[overdrive_testing::overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn cluster_status_with_no_server_returns_transport_error() {
     // Spawn-and-shutdown to get a valid trust-triple file on disk, then

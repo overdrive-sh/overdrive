@@ -55,11 +55,113 @@ case "$WORKSPACE_CANONICAL" in
   *) invalid_context source_owner ;;
 esac
 
+PLACEMENT_KIND=""
 if [ "$GUEST_SUITE_MODE" -eq 0 ]; then
   [ "$#" -gt 0 ] || test_error test_unclassified 78
   BINARY_ID="${NEXTEST_BINARY_ID:-}"
   TEST_NAME="${NEXTEST_TEST_NAME:-}"
   [ -n "$BINARY_ID" ] && [ -n "$TEST_NAME" ] || test_error test_unclassified 78
+
+  # A test that declares its placement on itself (`#[overdrive_test(...)]`)
+  # carries a record in the `overdrive_test_placement` section of its own
+  # binary: `<module path>\0<group>\0`, the module path starting at the crate
+  # segment. That record places the test with no table lookup. A test without
+  # a record is placed by the table alone, and one with neither is refused
+  # below as `test_unclassified`.
+  set +e
+  DECLARED_GROUP="$(python3 - "$1" "$TEST_NAME" <<'PY'
+import struct
+import sys
+
+GROUPS = {
+    "probe", "core", "unload", "ulp", "mtls-relay", "cgroup-default",
+    "stress", "nested-boundary",
+}
+SECTION = b"overdrive_test_placement"
+
+def section_bytes(path):
+    # 64-bit little-endian ELF only: the test binaries of the Metal host.
+    with open(path, "rb") as binary:
+        header = binary.read(64)
+        if len(header) < 64 or header[:4] != b"\x7fELF" or header[4] != 2 or header[5] != 1:
+            return None
+        (section_table, entry_size, entry_count, names_index) = (
+            struct.unpack_from("<Q", header, 40)[0],
+            struct.unpack_from("<H", header, 58)[0],
+            struct.unpack_from("<H", header, 60)[0],
+            struct.unpack_from("<H", header, 62)[0],
+        )
+        if section_table == 0 or entry_size < 64 or names_index >= entry_count:
+            return None
+        binary.seek(section_table)
+        table = binary.read(entry_size * entry_count)
+        def entry(index):
+            name, _kind, _flags, _addr, offset, size = struct.unpack_from(
+                "<IIQQQQ", table, index * entry_size
+            )
+            return name, offset, size
+        _, names_offset, names_size = entry(names_index)
+        binary.seek(names_offset)
+        names = binary.read(names_size)
+        for index in range(entry_count):
+            name, offset, size = entry(index)
+            end = names.find(b"\0", name)
+            if names[name:end] == SECTION:
+                binary.seek(offset)
+                return binary.read(size)
+    return None
+
+try:
+    data = section_bytes(sys.argv[1])
+except OSError:
+    raise SystemExit(12)
+if data is None:
+    raise SystemExit(12)
+fields = data.split(b"\0")
+if fields and fields[-1] == b"":
+    fields.pop()
+if len(fields) % 2 != 0:
+    print("record=malformed")
+    raise SystemExit(13)
+groups = set()
+for full_name, group in zip(fields[0::2], fields[1::2]):
+    try:
+        full_name = full_name.decode()
+        group = group.decode()
+    except UnicodeDecodeError:
+        print("record=malformed")
+        raise SystemExit(13)
+    test_name = full_name.split("::", 1)[1] if "::" in full_name else full_name
+    if test_name != sys.argv[2]:
+        continue
+    if group not in GROUPS:
+        print("group=" + group)
+        raise SystemExit(13)
+    groups.add(group)
+if not groups:
+    raise SystemExit(12)
+if len(groups) > 1:
+    raise SystemExit(14)
+print(groups.pop())
+PY
+)"
+  DECLARED_STATUS=$?
+  set -e
+  PLACEMENT_KIND=""
+  PLACEMENT_GROUP=""
+  PLACEMENT_FIXTURE=""
+  case "$DECLARED_STATUS" in
+    0)
+      PLACEMENT_KIND=guest-declared
+      PLACEMENT_GROUP="$DECLARED_GROUP"
+      ;;
+    12) ;;
+    14) test_error placement_ambiguous 78 ;;
+    *) test_error placement_invalid 78 "$DECLARED_GROUP" ;;
+  esac
+fi
+
+if [ "$GUEST_SUITE_MODE" -eq 0 ] && [ -z "$PLACEMENT_KIND" ]; then
   PLACEMENT_FILE="$SOURCE_ROOT/infra/metal/test-placement.json"
   [ -f "$PLACEMENT_FILE" ] && [ ! -L "$PLACEMENT_FILE" ] || test_error placement_invalid 78
 
@@ -428,6 +530,12 @@ fi
 case "$PLACEMENT_KIND" in
   host-pure)
     exec "$@"
+    ;;
+  guest-declared)
+    # The test boots its own guest through the guest kit (`run_in_guest`); its
+    # host-side half gets the same local-mode vsock namespace the dispatcher
+    # gets for a table-placed guest test.
+    run_local_vsock_namespace "$@"
     ;;
   native-launcher)
     run_node_isolated_namespace "$@"

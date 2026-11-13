@@ -2687,8 +2687,18 @@ dependencies = [
  "overdrive-core",
  "overdrive-fwd",
  "overdrive-host",
+ "overdrive-testing-macros",
  "thiserror 2.0.18",
  "tokio",
+]
+
+[[package]]
+name = "overdrive-testing-macros"
+version = "0.0.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
 ]
 
 [[package]]

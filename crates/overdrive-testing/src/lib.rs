@@ -40,6 +40,7 @@ pub mod guest_app;
 pub mod guest_kit;
 pub mod guest_lane;
 pub mod guest_peer;
+pub mod guest_suite;
 pub mod netns;
 /// GH #295 E23: force OS thread creation to fail via a cgroup v2 `pids.max` cap.
 ///
@@ -48,3 +49,8 @@ pub mod netns;
 pub mod pids_max;
 pub mod vm_fixture;
 pub mod vsock;
+
+/// Declares on a test that its body runs inside a fresh guest of the named
+/// group: `#[overdrive_test(guest = "<group>")]`. See
+/// `overdrive-testing-macros` for the expansion.
+pub use overdrive_testing_macros::overdrive_test;
