@@ -1855,42 +1855,36 @@ mod metal_qualification_tests {
     fn assert_artifact_preflight_partitions(root: &std::path::Path) {
         let mut unset_kernel = preflight_command(root);
         unset_kernel.env_remove("OVERDRIVE_METAL_KERNEL");
-        assert_preflight_failure(unset_kernel, "selected guest kernel is required");
+        assert_preflight_failure(unset_kernel, "error=preflight_failed probe=guest_kernel\n");
         let mut empty_kernel = preflight_command(root);
         empty_kernel.env("OVERDRIVE_METAL_KERNEL", "");
-        assert_preflight_failure(empty_kernel, "selected guest kernel is required");
+        assert_preflight_failure(empty_kernel, "error=preflight_failed probe=guest_kernel\n");
         let mut unset_rootfs = preflight_command(root);
         unset_rootfs.env_remove("OVERDRIVE_METAL_ROOTFS");
-        assert_preflight_failure(unset_rootfs, "selected guest rootfs is required");
+        assert_preflight_failure(unset_rootfs, "error=preflight_failed probe=guest_rootfs\n");
         let mut empty_rootfs = preflight_command(root);
         empty_rootfs.env("OVERDRIVE_METAL_ROOTFS", "");
-        assert_preflight_failure(empty_rootfs, "selected guest rootfs is required");
+        assert_preflight_failure(empty_rootfs, "error=preflight_failed probe=guest_rootfs\n");
 
         std::fs::create_dir(root.join("kernel-directory")).expect("kernel directory fixture");
         let mut kernel_directory = preflight_command(root);
         kernel_directory.env("OVERDRIVE_METAL_KERNEL", root.join("kernel-directory"));
-        assert_preflight_failure(
-            kernel_directory,
-            "selected guest kernel must be a readable regular file",
-        );
+        assert_preflight_failure(kernel_directory, "error=preflight_failed probe=guest_kernel\n");
         std::fs::create_dir(root.join("rootfs-directory")).expect("rootfs directory fixture");
         let mut rootfs_directory = preflight_command(root);
         rootfs_directory.env("OVERDRIVE_METAL_ROOTFS", root.join("rootfs-directory"));
-        assert_preflight_failure(
-            rootfs_directory,
-            "selected guest rootfs must be a readable regular file",
-        );
+        assert_preflight_failure(rootfs_directory, "error=preflight_failed probe=guest_rootfs\n");
 
         for (variable, path, diagnostic) in [
             (
                 "OVERDRIVE_METAL_KERNEL",
                 "absent-kernel",
-                "selected guest kernel must be a readable regular file",
+                "error=preflight_failed probe=guest_kernel\n",
             ),
             (
                 "OVERDRIVE_METAL_ROOTFS",
                 "absent-rootfs",
-                "selected guest rootfs must be a readable regular file",
+                "error=preflight_failed probe=guest_rootfs\n",
             ),
         ] {
             let mut missing = preflight_command(root);
@@ -1938,29 +1932,29 @@ mod metal_qualification_tests {
 
         let mut arch = preflight_command(root);
         arch.env("OVERDRIVE_PREFLIGHT_ARCH", "aarch64");
-        assert_preflight_failure(arch, "architecture must be literal x86_64");
+        assert_preflight_failure(arch, "error=preflight_failed probe=arch\n");
         let mut detector_missing = preflight_command(root);
         detector_missing.env("OVERDRIVE_PREFLIGHT_DETECT_VIRT", root.join("absent-detector"));
-        assert_preflight_failure(detector_missing, "systemd-detect-virt is required");
+        assert_preflight_failure(detector_missing, "error=preflight_failed probe=virtualization\n");
         let mut virtualized = preflight_command(root);
         virtualized.env("OVERDRIVE_PREFLIGHT_DETECT_VIRT", root.join("detect-virt"));
-        assert_preflight_failure(virtualized, "host reports virtualization");
+        assert_preflight_failure(virtualized, "error=preflight_failed probe=virtualization\n");
 
         std::fs::write(root.join("cpu-hypervisor"), "flags : vmx hypervisor\n").expect("cpu");
         let mut hypervisor_flag = preflight_command(root);
         hypervisor_flag.env("OVERDRIVE_PREFLIGHT_CPUINFO", root.join("cpu-hypervisor"));
-        assert_preflight_failure(hypervisor_flag, "CPU hypervisor flag is present");
+        assert_preflight_failure(hypervisor_flag, "error=preflight_failed probe=cpu\n");
         std::fs::write(root.join("hypervisor-present"), "kvm\n").expect("hypervisor");
         let mut hypervisor_type = preflight_command(root);
         hypervisor_type.env("OVERDRIVE_PREFLIGHT_HYPERVISOR_TYPE", root.join("hypervisor-present"));
-        assert_preflight_failure(hypervisor_type, "/sys/hypervisor/type reports a hypervisor");
+        assert_preflight_failure(hypervisor_type, "error=preflight_failed probe=virtualization\n");
         std::fs::write(root.join("cpu-no-kvm"), "flags : fpu sse\n").expect("cpu");
         let mut no_cpu_kvm = preflight_command(root);
         no_cpu_kvm.env("OVERDRIVE_PREFLIGHT_CPUINFO", root.join("cpu-no-kvm"));
-        assert_preflight_failure(no_cpu_kvm, "CPU exposes neither vmx nor svm");
+        assert_preflight_failure(no_cpu_kvm, "error=preflight_failed probe=cpu\n");
         let mut not_character = preflight_command(root);
         not_character.env_remove("OVERDRIVE_PREFLIGHT_KVM_CHARACTER");
-        assert_preflight_failure(not_character, "/dev/kvm is not a character device");
+        assert_preflight_failure(not_character, "error=preflight_failed probe=kvm_device\n");
         for (probe, diagnostic) in [
             ("kvm-permission-denied", "KVM open permission denied"),
             ("kvm-api-mismatch", "KVM API version mismatch"),
@@ -1972,15 +1966,15 @@ mod metal_qualification_tests {
         }
         let mut no_cgroup = preflight_command(root);
         no_cgroup.env("OVERDRIVE_PREFLIGHT_CGROUP_CONTROLLERS", root.join("absent-cgroup"));
-        assert_preflight_failure(no_cgroup, "cgroup v2 controllers are unavailable");
+        assert_preflight_failure(no_cgroup, "error=preflight_failed probe=cgroup_v2\n");
         let mut no_cloud_hypervisor = preflight_command(root);
         no_cloud_hypervisor.env("OVERDRIVE_PREFLIGHT_CLOUD_HYPERVISOR", root.join("absent-cloud"));
-        assert_preflight_failure(no_cloud_hypervisor, "cloud-hypervisor is unavailable");
+        assert_preflight_failure(no_cloud_hypervisor, "error=preflight_failed probe=vmm\n");
         let mut wrong_owner = preflight_command(root);
         wrong_owner.env("OVERDRIVE_EXPECTED_TOKEN", "wrong-token");
-        assert_preflight_failure(wrong_owner, "the active lease owner token changed");
+        assert_preflight_failure(wrong_owner, "error=preflight_failed probe=owner\n");
         let mut stale_source = preflight_command(root);
         stale_source.env("OVERDRIVE_EXPECTED_SOURCE", "wrong-source");
-        assert_preflight_failure(stale_source, "runtime source marker is stale or mismatched");
+        assert_preflight_failure(stale_source, "error=preflight_failed probe=source\n");
     }
 }
