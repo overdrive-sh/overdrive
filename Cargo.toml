@@ -15,6 +15,7 @@ members = [
     "crates/overdrive-sim",
     "crates/overdrive-store-local",
     "crates/overdrive-testing",
+    "crates/overdrive-testing-macros",
     "crates/overdrive-worker",
     "tests/ovd-fwd-frame-parser",
     "tests/conformance",
@@ -40,6 +41,7 @@ default-members = [
     "crates/overdrive-sim",
     "crates/overdrive-store-local",
     "crates/overdrive-testing",
+    "crates/overdrive-testing-macros",
     "crates/overdrive-worker",
     "tests/ovd-fwd-frame-parser",
     "xtask",
@@ -222,6 +224,10 @@ proptest        = "1"
 rstest          = "0.23"
 insta           = "1"
 syn             = { version = "2", features = ["full", "visit", "extra-traits"] }
+# `quote` and `proc-macro2` build the `#[overdrive_test]` attribute's expansion
+# (`overdrive-testing-macros`). Compile-time only.
+quote           = "1"
+proc-macro2     = "1"
 tempfile        = "3"
 serial_test     = "3"
 # `trybuild` is pinned for stable stderr diagnostics across rustc bumps —
@@ -269,6 +275,7 @@ overdrive-fwd         = { path = "crates/overdrive-fwd" }
 overdrive-reconcilers = { path = "crates/overdrive-reconcilers" }
 overdrive-store-local = { path = "crates/overdrive-store-local" }
 overdrive-testing     = { path = "crates/overdrive-testing" }
+overdrive-testing-macros = { path = "crates/overdrive-testing-macros" }
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn  = "deny"

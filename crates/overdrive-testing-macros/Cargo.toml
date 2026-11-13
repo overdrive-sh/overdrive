@@ -1,0 +1,38 @@
+# `overdrive-testing-macros` — the `#[overdrive_test]` placement attribute.
+#
+# `adapter-host` per ADR-0003, the class of its sibling `overdrive-testing`
+# (the crate that re-exports the attribute and owns the guest-kit entry
+# points its expansion calls). It is compile-time test tooling: nothing here
+# performs I/O or reads a clock, but the code it emits boots real guests, so
+# it is not `core` (no port-trait domain logic) and not a production crate.
+# Never a `[dependencies]` entry of a production crate.
+
+[package]
+name         = "overdrive-testing-macros"
+version      = "0.0.0"
+description  = "The #[overdrive_test] attribute that declares where a Metal integration test runs."
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+publish                = false
+
+[package.metadata.overdrive]
+crate_class = "adapter-host"
+
+[features]
+# Workspace-wide convention; see `.claude/rules/testing.md` § "Workspace
+# convention". This crate has no integration tests of its own.
+integration-tests = []
+
+[lib]
+proc-macro = true
+
+[dependencies]
+proc-macro2.workspace = true
+quote.workspace       = true
+syn.workspace         = true
+
+[lints]
+workspace = true

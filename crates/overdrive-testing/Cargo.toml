@@ -54,6 +54,9 @@ overdrive-fwd.workspace  = true
 # dev-dependency cycle, as with `overdrive-fwd`).
 overdrive-host.path       = "../overdrive-host"
 thiserror.workspace      = true
+# The `#[overdrive_test(guest = "<group>")]` attribute, re-exported from this
+# crate so test crates depend on `overdrive-testing` only.
+overdrive-testing-macros.workspace = true
 # The kit's own small runtime that drives `Vmm::create` / `Vmm::terminate`
 # and the exit watch behind the kit's synchronous surface.
 tokio.workspace          = true
