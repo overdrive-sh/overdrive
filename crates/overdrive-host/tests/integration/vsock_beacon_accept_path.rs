@@ -20,11 +20,13 @@
 //! v7.0`). The loopback transport cannot serve: its peer CID 1 is not a
 //! `GuestCid`, and the adapter closes such a connection unreturned.
 //!
-//! Lane: `integration-tests,kvm-tests`, native x86_64 metal (`cargo xtask
+//! Lane: `integration-tests,kvm-tests`, through the Metal runner (`cargo xtask
 //! metal run -- cargo nextest run -p overdrive-host --features
-//! integration-tests,kvm-tests`). The beacon port is node-global: this
-//! binary runs in `host-kernel-shared`. Pending the attachment cut's step
-//! (6), which lands `VsockBeaconIo`.
+//! integration-tests,kvm-tests`). The case runs in its own disposable
+//! `cgroup-default` guest (`infra/metal/test-placement.json`), where the
+//! beacon port is the guest's own and the scripted peer is a nested Cloud
+//! Hypervisor microVM. Pending the attachment cut's step (6), which lands
+//! `VsockBeaconIo`.
 
 #![allow(clippy::doc_markdown, reason = "kernel symbol names in prose")]
 

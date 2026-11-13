@@ -72,7 +72,8 @@ optional activity and is not a gate.
 ## Verification
 
 `runner.sh` first validates the checked-in source bundle, then invokes the
-operator-runnable v2 example through `cargo xtask metal run --`. Its remote
+operator-runnable v2 example through `cargo xtask metal run --exclusive --` (a
+`bash -lc` command is outside the ordinary `metal run` grammar). Its remote
 shell command applies `timeout --signal=TERM --kill-after=60s 600s` around the
 example process group for descendant termination and forwards
 `SVM_E09_V2_CONCURRENCY=10`. The runner

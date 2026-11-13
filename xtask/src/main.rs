@@ -160,12 +160,15 @@ enum Task {
     /// surface runs on a qualified bare-metal box reached over ssh. The target host
     /// (`user@host`) comes from `OVERDRIVE_METAL_TARGET` in the process
     /// environment or `.env` at the workspace root (see `.env.example`).
-    /// This is the metal sibling of `Lima` — `run` rsyncs the tree up,
-    /// including a standalone `.git` (via `infra/metal/bootstrap.sh
-    /// --sync-only`), and then ssh-executes
-    /// under a `bash -lc` login shell (so rustup/cargo are on PATH),
-    /// wrapping in `sudo … env "HOME=$HOME" "PATH=$PATH" …` by default so
-    /// the KVM / cgroup tests get the root permission surface they need.
+    /// This is the metal sibling of `Lima`. Each Git checkout owns one remote
+    /// source directory, selected by a SHA-256 identity key
+    /// (`infra/metal/bootstrap.sh`). `run` rsyncs the tree up, including a
+    /// standalone `.git`, and then executes the command under a durable
+    /// transient systemd service that keeps running if the ssh route is lost;
+    /// `collect` retrieves its retained log and exit status by run id. By
+    /// default the command runs as root (`sudo -n env "HOME=$HOME" "PATH=$PATH"
+    /// ...` inside a `bash -lc` login shell) so the KVM / cgroup tests get the
+    /// permission surface they need.
     Metal {
         #[command(subcommand)]
         action: MetalAction,
@@ -421,24 +424,33 @@ enum MetalAction {
     /// rsync the working tree, including a standalone `.git`, up to the metal
     /// box (bootstrap.sh --sync-only).
     ///
-    /// Writes only into this branch's private tree, so it takes the per-tree
-    /// lock rather than the box-wide lease and does not wait behind another
-    /// workspace's run.
+    /// Writes only into this checkout's own remote tree, so it takes the
+    /// per-checkout lock rather than the box-wide lease and does not wait
+    /// behind another workspace's run.
     Sync,
-    /// Open an interactive shell on the metal box in this branch's tree
-    /// (`~/overdrive-branches/<branch>`, `/` replaced by `-`).
+    /// Open an interactive shell on the metal box in this checkout's remote
+    /// directory (`~/overdrive-worktrees/<key>` or `~/overdrive-branches/<key>`,
+    /// where `<key>` is the checkout's SHA-256 identity key).
+    ///
+    /// Takes the exclusive physical-maintenance lease for the session.
     Shell,
     /// Sync, then run a command on the metal box (remaining args forwarded).
     ///
-    /// Default wraps the command in `sudo -n env "HOME=$HOME" "PATH=$PATH" ...` so it
-    /// runs as root — the permission surface the KVM / cgroup tests need
-    /// (`$PATH` is expanded on the remote host, not locally). Pass
-    /// `--no-sudo` to run as the login user, `--no-sync` to skip the
-    /// pre-run rsync (e.g. to re-run a suite against an already-synced tree).
+    /// The command runs as a durable systemd service, as root by default
+    /// (`sudo -n env "HOME=$HOME" "PATH=$PATH" ...`; `$PATH` is expanded on the
+    /// remote host, not locally). Pass `--no-sudo` to run as the login user,
+    /// `--no-sync` to skip the pre-run rsync (e.g. to re-run a suite against an
+    /// already-synced tree). Needs `OVERDRIVE_METAL_KERNEL` and
+    /// `OVERDRIVE_METAL_ROOTFS` (remote guest kernel and rootfs paths).
     ///
-    /// Ordinary commands share the physical-maintenance barrier and own their
-    /// checkout. `--exclusive` preserves the physical-maintenance boundary for
-    /// explicit administration and arbitrary commands.
+    /// Ordinary commands share the physical-maintenance barrier, own their
+    /// checkout, and must fit a closed grammar (an optional allowlisted `env`
+    /// prefix, then `cargo` build/check/clippy/fmt, `test --doc`, `nextest run`,
+    /// an approved `xtask` subcommand, or one of three `run` package/bin
+    /// pairs); anything else refuses with status 64, and `cargo nextest run`
+    /// applies the per-test placement wrapper. `--exclusive` takes exclusive
+    /// physical-maintenance ownership and accepts arbitrary commands, for
+    /// administration and native-metal verification captures, never for tests.
     Run {
         /// Retain exclusive physical-maintenance ownership for this command.
         #[arg(long)]
@@ -459,8 +471,9 @@ enum MetalAction {
     /// `specs/quint/<subsystem>/evidence` after `metal run -- cargo xtask
     /// quint check --record`. Pulls only what is named, never `target/`, and
     /// never deletes local files (no `--delete`). Rejects absolute paths and
-    /// `..`, `.` or `.git` components. Takes the branch tree's lock, so it
-    /// cannot race a sync or run, and prints each transferred entry.
+    /// `..`, `.` or `.git` components. Takes the checkout's lock, so it
+    /// cannot race a sync or run of that checkout, and prints each transferred
+    /// entry.
     Pull {
         /// Repo-relative files or directories to copy from the box.
         #[arg(required = true, num_args = 1..)]
@@ -960,9 +973,10 @@ fn metal_sync(target: &str) -> Result<()> {
 }
 
 /// `cargo xtask metal …` — the metal sibling of `lima`. Resolves the
-/// target host, then syncs / shells / runs over ssh. `run` rsyncs first
-/// (unless `--no-sync`) and wraps in `sudo -n env "HOME=$HOME" "PATH=$PATH" …` by
-/// default (unless `--no-sudo`) so the KVM / cgroup tests get root.
+/// target host, then syncs / shells / runs / pulls / collects over ssh. `run`
+/// rsyncs first (unless `--no-sync`), then executes under a durable transient
+/// service, wrapped in `sudo -n env "HOME=$HOME" "PATH=$PATH" …` by default
+/// (unless `--no-sudo`) so the KVM / cgroup tests get root.
 fn metal(action: MetalAction) -> Result<u8> {
     match action {
         MetalAction::Collect { run_id } => {

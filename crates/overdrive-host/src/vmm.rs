@@ -1397,11 +1397,11 @@ mod tests {
 ///
 /// Lanes. The launch filter exists only for x86_64, so every
 /// `#[cfg(target_arch = "x86_64")]` case builds and runs only on an x86_64
-/// host: the native metal host (`cargo xtask metal run`), never the aarch64
-/// Lima VM, which builds and runs only the `not(x86_64)` refusal case.
-/// S-ND295-40's spawn-failure case also needs a reflink-capable staging root
-/// (`create` clones the rootfs by `FICLONE`), which the metal host's XFS
-/// `/srv/vm` provides.
+/// host: the disposable guest a `cargo xtask metal run` gives each case
+/// (`infra/metal/test-placement.json`), never the aarch64 Lima VM, which
+/// builds and runs only the `not(x86_64)` refusal case. S-ND295-40's
+/// spawn-failure case also needs a reflink-capable staging root (`create`
+/// clones the rootfs by `FICLONE`).
 #[cfg(all(test, feature = "integration-tests"))]
 #[allow(unsafe_code)]
 #[allow(clippy::expect_used, clippy::unwrap_used)]

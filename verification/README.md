@@ -65,8 +65,16 @@ wins (see `docs/research/` / the EDD essay):
 Most evidence runs through `cargo xtask lima run --` (a real kernel + cgroup
 v2), never bare on the macOS host. A native KVM expectation declares
 `native-metal` in its checked-in `execution-substrate` file and runs through
-`cargo xtask metal run --`; Lima, a virtualized host, or nested KVM is not a
-substitute for that surface. The manifest records `execution_substrate` and a
+`cargo xtask metal run --exclusive --`; Lima, a virtualized host, or nested KVM
+is not a substitute for that surface. The capture drives the built product on
+the host's own network and kernel state and starts from a runner script, which
+the ordinary `metal run` grammar refuses; a capture is not a test, so the rule
+that tests never run `--exclusive` does not apply. The local environment does
+not reach the remote command, so pass runner inputs as `env KEY=VALUE` words:
+
+```bash
+cargo xtask metal run --exclusive -- env KEY=VALUE ... verification/harness/run-expectation.sh <ID>
+``` The manifest records `execution_substrate` and a
 separate `execution_status`; invoking a pending stub cannot become successful
 execution evidence.
 

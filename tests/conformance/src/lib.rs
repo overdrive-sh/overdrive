@@ -301,22 +301,17 @@ pub fn command_output(program: &str, args: &[&str]) -> Output {
         .unwrap_or_else(|error| panic!("run {program} {args:?}: {error}"))
 }
 
-/// Assert the qualified native-metal substrate without using the product CLI.
-pub fn assert_native_metal() {
-    assert_eq!(std::env::consts::OS, "linux", "native Linux required");
-    assert_eq!(std::env::consts::ARCH, "x86_64", "native x86_64 required");
-    assert!(nix::unistd::geteuid().is_root(), "native-metal conformance requires root");
+/// Assert the KVM substrate: root on Linux `x86_64` with a usable `/dev/kvm`.
+///
+/// The body runs in a disposable guest the metal runner provides
+/// (`infra/metal/test-placement.json`), which launches the Cloud Hypervisor
+/// microVMs as nested guests. No product CLI is used.
+pub fn assert_kvm_substrate() {
+    assert_eq!(std::env::consts::OS, "linux", "Linux required");
+    assert_eq!(std::env::consts::ARCH, "x86_64", "x86_64 required");
+    assert!(nix::unistd::geteuid().is_root(), "the conformance bodies require root");
     let kvm = std::fs::metadata("/dev/kvm").expect("stat /dev/kvm");
     assert!(kvm.file_type().is_char_device(), "/dev/kvm must be a character device");
-    // `systemd-detect-virt` prints `none` and exits 1 on bare metal; it
-    // completing with the verdict `none` is the probe, not its exit status.
-    let virtualization = command_output("systemd-detect-virt", &[]);
-    let verdict = String::from_utf8_lossy(&virtualization.stdout).trim().to_owned();
-    assert!(
-        verdict == "none" && matches!(virtualization.status.code(), Some(0 | 1)),
-        "virtualized substrate refused: systemd-detect-virt reported {verdict:?} ({:?})",
-        virtualization.status
-    );
 }
 
 /// Poll one public or kernel observation until it is true or its deadline expires.

@@ -141,7 +141,8 @@ S-VM-39 boots a real Cloud Hypervisor guest, which needs x86_64 + nested KVM;
 Lima on Apple Silicon provides neither.
 Per `.claude/rules/testing.md` § *"Running tests — bare-metal KVM box
 (`kvm-tests`)"*, the canonical transport for that surface is `cargo xtask metal
-run --` against the host named by `OVERDRIVE_METAL_TARGET`. The runner uses
+run --exclusive --` (the runner passes a `bash -c` command, which the ordinary
+grammar refuses) against the host named by `OVERDRIVE_METAL_TARGET`. The runner uses
 exactly that and never falls back to Lima — a Lima capture would be a different
 claim wearing this expectation's name.
 

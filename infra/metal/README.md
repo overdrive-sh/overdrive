@@ -1,11 +1,16 @@
-# Bare-metal probe box
+# Bare-metal KVM host
 
-A disposable Scaleway Elastic Metal server for the microVM work that the Lima
-dev VM **cannot** gate: Cloud Hypervisor runs nested on Apple Silicon there, so
-boots stall ~2/3 of the time and `--memory shared=on` never boots at all. See
-`docs/feature/microvm-driver-cloud-hypervisor/spike/findings.md`.
+The shared native x86_64 KVM host (a Scaleway Elastic Metal server) on which
+Overdrive's native-metal verification runs: the Cloud Hypervisor microVM
+`kvm-tests`, the guest-kit lanes, and native-metal verification captures. The
+Lima dev VM **cannot** gate that work: Cloud Hypervisor runs nested on Apple
+Silicon there, so boots stall ~2/3 of the time and `--memory shared=on` never
+boots at all. See `docs/feature/microvm-driver-cloud-hypervisor/spike/findings.md`.
 
-Bare metal removes the nesting. That is the whole reason this exists.
+Bare metal removes the nesting. That is the whole reason this exists. Several
+worktrees use the box at once, each in its own checkout directory; day-to-day
+use goes through `cargo xtask metal` (see "Durable runs and collection"), and
+`bootstrap.sh` is invoked directly only to provision the box.
 
 ## Files
 
@@ -32,13 +37,16 @@ Bare metal removes the nesting. That is the whole reason this exists.
    ```bash
    infra/metal/bootstrap.sh ubuntu@<ip> --data-disk /dev/sdb1
    ```
-4. **Iterate** on probe code afterwards:
+4. **Iterate** afterwards through `cargo xtask metal` (target from
+   `OVERDRIVE_METAL_TARGET` in the environment or `.env`):
    ```bash
-   infra/metal/bootstrap.sh ubuntu@<ip> --sync-only
+   cargo xtask metal sync
    ```
-   Every sync also lands a standalone `.git` on the box (the repo's common
-   dir plus this worktree's HEAD and index). The first sync moves the whole
-   common dir; later syncs are incremental.
+   `cargo xtask metal run` syncs as part of the run, so a separate `sync` is
+   needed only to transfer source without running anything. Every sync also
+   lands a standalone `.git` on the box (the repo's common dir plus this
+   worktree's HEAD and index). The first sync moves the whole common dir; later
+   syncs are incremental.
 
 ## Checkout-specific remote source
 
@@ -118,6 +126,10 @@ Use `--exclusive` for provisioning, physical-host maintenance, or another
 existing command that needs arbitrary privileged authority. Never use it to run
 tests: concurrent ordinary runs from different worktrees do not interfere. It takes exclusive
 physical-maintenance ownership and waits for admitted ordinary runs to finish.
+Native-metal verification captures (`verification/expectations/`) are not tests
+and start from a runner script the ordinary grammar refuses, so they run
+`--exclusive`, with their environment passed as `env KEY=VALUE` words (the local
+environment does not reach the remote command).
 For example, the host module-load step is an explicit administrative command:
 
 ```bash
@@ -133,6 +145,22 @@ terminal record; collection reports supervisor loss and never invents a
 command result. Generated files in the remote checkout still require an
 explicit retrieval before a later one-way sync, which `cargo xtask metal pull`
 performs.
+
+### Placement, phases and configuration
+
+`infra/metal/test-placement.json` maps every nextest binary id and test name to
+the isolation `test-wrapper.sh` applies (`host-pure`, `native-launcher`,
+`guest-group`, `guest-lane-operator`, `guest-lane-owner`). It is maintained by
+hand and nothing checks it is complete: a test with no entry fails on its first
+Metal run as `test_unclassified`, status 78. See `.claude/rules/testing.md`
+§ "Test placement" for the kinds, diagnostics and authoring rules.
+
+Each run record carries a phase: `waiting_for_lease` (queued for admission),
+`preparing` (source transfer and native preflight), then `running`. Admission
+waits up to `OVERDRIVE_METAL_LEASE_TIMEOUT_SECONDS` (default 120). Every run
+also requires `OVERDRIVE_METAL_KERNEL` and `OVERDRIVE_METAL_ROOTFS` (readable
+guest kernel and rootfs paths on the box); preflight fails closed with
+`preflight_failed probe=guest_kernel` or `probe=guest_rootfs` without them.
 
 ## Pulling outputs back
 

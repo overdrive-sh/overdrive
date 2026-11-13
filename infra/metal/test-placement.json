@@ -1266,10 +1266,12 @@
         "group": "cgroup-default"
       },
       "guest_network::flow_io::accept_path_tier3::a_repair_of_a_held_listener_keeps_its_socket_and_its_port": {
-        "kind": "native-launcher"
+        "kind": "guest-group",
+        "group": "cgroup-default"
       },
       "guest_network::flow_io::accept_path_tier3::the_flow_listeners_accept_path_matches_the_sim_per_connection": {
-        "kind": "native-launcher"
+        "kind": "guest-group",
+        "group": "cgroup-default"
       },
       "guest_network::flow_io::sim::tests::a_failed_route_write_leaves_the_route_as_it_was": {
         "kind": "host-pure"
@@ -9913,31 +9915,40 @@
         "kind": "host-pure"
       },
       "vmm::launch_seccomp_kernel::a_failed_close_on_exec_step_is_a_launch_error_and_the_target_never_runs": {
-        "kind": "native-launcher"
+        "kind": "guest-group",
+        "group": "cgroup-default"
       },
       "vmm::launch_seccomp_kernel::a_failed_filter_load_step_is_a_launch_error_and_the_target_never_runs": {
-        "kind": "native-launcher"
+        "kind": "guest-group",
+        "group": "cgroup-default"
       },
       "vmm::launch_seccomp_kernel::a_failed_no_new_privs_step_is_a_launch_error_and_the_target_never_runs": {
-        "kind": "native-launcher"
+        "kind": "guest-group",
+        "group": "cgroup-default"
       },
       "vmm::launch_seccomp_kernel::every_denied_request_returns_eperm_on_every_thread_under_the_production_hook": {
-        "kind": "native-launcher"
+        "kind": "guest-group",
+        "group": "cgroup-default"
       },
       "vmm::launch_seccomp_kernel::every_filtered_thread_reports_no_new_privs_and_filter_mode": {
-        "kind": "native-launcher"
+        "kind": "guest-group",
+        "group": "cgroup-default"
       },
       "vmm::launch_seccomp_kernel::foreign_syscall_abis_end_the_filtered_process": {
-        "kind": "native-launcher"
+        "kind": "guest-group",
+        "group": "cgroup-default"
       },
       "vmm::launch_seccomp_kernel::launch_seccomp_child_role": {
-        "kind": "native-launcher"
+        "kind": "guest-group",
+        "group": "cgroup-default"
       },
       "vmm::launch_seccomp_kernel::the_launched_child_inherits_exactly_descriptors_zero_to_three": {
-        "kind": "native-launcher"
+        "kind": "guest-group",
+        "group": "cgroup-default"
       },
       "vmm::launch_seccomp_kernel::the_startup_probe_installs_the_exact_launch_program": {
-        "kind": "native-launcher"
+        "kind": "guest-group",
+        "group": "cgroup-default"
       },
       "vmm::tests::each_launch_filter_probe_cause_maps_to_its_typed_error": {
         "kind": "host-pure"
@@ -10020,91 +10031,118 @@
         "group": "cgroup-default"
       },
       "integration::vmm_equivalence::vm_fixture_provision_fails_loudly_on_a_broken_cloud_hypervisor_path": {
-        "kind": "native-launcher"
+        "kind": "guest-group",
+        "group": "cgroup-default"
       },
       "integration::vmm_equivalence::vm_fixture_provision_is_idempotent_and_reuses_staged_artifacts": {
-        "kind": "native-launcher"
+        "kind": "guest-group",
+        "group": "cgroup-default"
       },
       "integration::vmm_equivalence::vmm_early_exit_preserves_code_signal_and_stderr_tail_for_both_adapters": {
-        "kind": "native-launcher"
+        "kind": "guest-group",
+        "group": "cgroup-default"
       },
       "integration::vmm_equivalence::vmm_equivalence_cloud_hypervisor_vmm": {
-        "kind": "native-launcher"
+        "kind": "guest-group",
+        "group": "cgroup-default"
       },
       "integration::vmm_equivalence::vmm_equivalence_sim_vmm": {
-        "kind": "native-launcher"
+        "kind": "guest-group",
+        "group": "cgroup-default"
       },
       "integration::vmm_equivalence::vmm_live_console_tail_is_coherent_with_final_exit_stderr_tail_for_both_adapters": {
-        "kind": "native-launcher"
+        "kind": "guest-group",
+        "group": "cgroup-default"
       },
       "integration::vmm_ficlone_per_launch::ficlone_fails_closed_on_a_real_non_reflink_target": {
         "kind": "guest-group",
         "group": "cgroup-default"
       },
       "integration::vsock_beacon_accept_path::the_beacon_listeners_accept_path_matches_the_sim_per_connection": {
-        "kind": "native-launcher"
+        "kind": "guest-group",
+        "group": "cgroup-default"
       },
       "integration::vsock_vmm_device::a_forced_guest_reboot_ends_the_vmm": {
-        "kind": "native-launcher"
+        "kind": "guest-group",
+        "group": "cgroup-default"
       },
       "integration::vsock_vmm_device::a_guest_pid1_crash_under_panic_1_ends_the_vmm": {
-        "kind": "native-launcher"
+        "kind": "guest-group",
+        "group": "cgroup-default"
       },
       "integration::vsock_vmm_device::a_guest_triple_fault_ends_the_vmm": {
-        "kind": "native-launcher"
+        "kind": "guest-group",
+        "group": "cgroup-default"
       },
       "integration::vsock_vmm_device::a_launch_on_a_held_cid_exits_before_ready_and_leaves_the_holder_running": {
-        "kind": "native-launcher"
+        "kind": "guest-group",
+        "group": "cgroup-default"
       },
       "integration::vsock_vmm_device::post_boot_resets_end_the_vmm_and_reset_live_host_flows": {
-        "kind": "native-launcher"
+        "kind": "guest-group",
+        "group": "cgroup-default"
       },
       "integration::vsock_vmm_device::the_cid_is_free_at_once_after_its_vmm_exits": {
-        "kind": "native-launcher"
+        "kind": "guest-group",
+        "group": "cgroup-default"
       },
       "integration::vsock_vmm_device::the_fork_boots_and_passes_data_under_the_production_launch_identity": {
-        "kind": "native-launcher"
+        "kind": "guest-group",
+        "group": "cgroup-default"
       },
       "integration::vsock_vmm_device::the_vmm_opens_its_own_vsock_device_and_overdrive_holds_no_copy": {
-        "kind": "native-launcher"
+        "kind": "guest-group",
+        "group": "cgroup-default"
       }
     },
     "overdrive-init::integration": {
       "integration::in_guest_lane::a_burst_of_host_aborts_resets_every_connection_in_a_real_guest": {
-        "kind": "native-launcher"
+        "kind": "guest-group",
+        "group": "cgroup-default"
       },
       "integration::in_guest_lane::a_guest_without_the_kits_module_refuses_before_ready": {
-        "kind": "native-launcher"
+        "kind": "guest-group",
+        "group": "cgroup-default"
       },
       "integration::in_guest_lane::a_host_abort_before_the_guest_accepts_ends_the_flow_in_a_real_guest": {
-        "kind": "native-launcher"
+        "kind": "guest-group",
+        "group": "cgroup-default"
       },
       "integration::in_guest_lane::a_host_close_after_the_guest_accepted_ends_the_flow_in_a_real_guest": {
-        "kind": "native-launcher"
+        "kind": "guest-group",
+        "group": "cgroup-default"
       },
       "integration::in_guest_lane::a_session_loss_abort_ends_the_flow_and_the_owner_reconnects_in_a_real_guest": {
-        "kind": "native-launcher"
+        "kind": "guest-group",
+        "group": "cgroup-default"
       },
       "integration::in_guest_lane::an_abort_for_an_unheld_flow_is_discarded_in_a_real_guest": {
-        "kind": "native-launcher"
+        "kind": "guest-group",
+        "group": "cgroup-default"
       },
       "integration::in_guest_lane::tcp_correlation_preserves_identity_and_cleanup_in_a_real_guest": {
-        "kind": "native-launcher"
+        "kind": "guest-group",
+        "group": "cgroup-default"
       },
       "integration::in_guest_lane::the_guest_accept_path_matches_the_sim_in_a_real_guest": {
-        "kind": "native-launcher"
+        "kind": "guest-group",
+        "group": "cgroup-default"
       },
       "integration::in_guest_lane::the_guest_kits_module_matches_the_running_guest_kernel": {
-        "kind": "native-launcher"
+        "kind": "guest-group",
+        "group": "cgroup-default"
       },
       "integration::in_guest_lane::the_guest_transport_is_configured_before_ready_in_a_real_guest": {
-        "kind": "native-launcher"
+        "kind": "guest-group",
+        "group": "cgroup-default"
       },
       "integration::in_guest_lane::the_reserved_intake_ports_refuse_application_binds_in_a_real_guest": {
-        "kind": "native-launcher"
+        "kind": "guest-group",
+        "group": "cgroup-default"
       },
       "integration::in_guest_lane::the_v24_kernel_shape_holds_in_a_real_guest": {
-        "kind": "native-launcher"
+        "kind": "guest-group",
+        "group": "cgroup-default"
       }
     },
     "overdrive-init::bin/overdrive-init": {
@@ -12652,40 +12690,52 @@
     },
     "overdrive-system-conformance::public_ingress_gateway_end_to_end": {
       "native_metal_kvm_public_ingress_gateway_answers_408_for_a_stalled_request_body": {
-        "kind": "native-launcher"
+        "kind": "guest-group",
+        "group": "cgroup-default"
       },
       "native_metal_kvm_public_ingress_gateway_answers_408_for_a_stalled_request_head": {
-        "kind": "native-launcher"
+        "kind": "guest-group",
+        "group": "cgroup-default"
       },
       "native_metal_kvm_public_ingress_gateway_answers_502_when_the_guest_flow_ends_mid_request": {
-        "kind": "native-launcher"
+        "kind": "guest-group",
+        "group": "cgroup-default"
       },
       "native_metal_kvm_public_ingress_gateway_answers_503_until_the_hydrator_reprograms_after_a_serve_restart": {
-        "kind": "native-launcher"
+        "kind": "guest-group",
+        "group": "cgroup-default"
       },
       "native_metal_kvm_public_ingress_gateway_holds_128_concurrent_exchanges_within_the_descriptor_and_memory_budget": {
-        "kind": "native-launcher"
+        "kind": "guest-group",
+        "group": "cgroup-default"
       },
       "native_metal_kvm_public_ingress_gateway_lets_the_client_read_the_response_before_a_clean_close": {
-        "kind": "native-launcher"
+        "kind": "guest-group",
+        "group": "cgroup-default"
       },
       "native_metal_kvm_public_ingress_gateway_never_succeeds_through_a_stopped_workloads_stale_service_entry": {
-        "kind": "native-launcher"
+        "kind": "guest-group",
+        "group": "cgroup-default"
       },
       "native_metal_kvm_public_ingress_gateway_returns_to_a_stable_in_use_heap_across_repeated_128_exchange_bursts": {
-        "kind": "native-launcher"
+        "kind": "guest-group",
+        "group": "cgroup-default"
       },
       "native_metal_kvm_public_ingress_gateway_relays_exact_length_and_chunked_bodies_octet_exact_over_keep_alive": {
-        "kind": "native-launcher"
+        "kind": "guest-group",
+        "group": "cgroup-default"
       },
       "native_metal_kvm_public_ingress_gateway_runs_its_stages_in_order_and_shuts_down_within_one_drain": {
-        "kind": "native-launcher"
+        "kind": "guest-group",
+        "group": "cgroup-default"
       },
       "native_metal_kvm_public_ingress_gateway_sends_no_key_update_across_a_sixteen_mebibyte_response": {
-        "kind": "native-launcher"
+        "kind": "guest-group",
+        "group": "cgroup-default"
       },
       "native_metal_kvm_public_ingress_gateway_streams_a_workload_response_over_kernel_tls_legs": {
-        "kind": "native-launcher"
+        "kind": "guest-group",
+        "group": "cgroup-default"
       }
     },
     "overdrive-system-conformance::shared_guest_network_fail_stop_recovery": {

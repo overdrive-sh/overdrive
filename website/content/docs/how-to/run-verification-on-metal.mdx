@@ -14,7 +14,7 @@ Use a provisioned Metal host with SSH access, noninteractive sudo, remote
 `rsync`, the pinned kernel build inputs, Cloud Hypervisor, and prepared guest
 kernel and rootfs files. Host provisioning is an exclusive administrative
 operation. Follow the repository's
-[Metal setup instructions](https://github.com/overdrive-sh/overdrive/blob/47328fb88d21d5f3f57d25a935d1a17c505cbb9b/infra/metal/README.md)
+[Metal setup instructions](https://github.com/overdrive-sh/overdrive/blob/main/infra/metal/README.md)
 for those prerequisites.
 
 From the repository root, set the target and the artifact paths on that host.
@@ -57,7 +57,7 @@ The checked-in wrapper looks up each exact nextest binary and test identity in
 | Placement | Execution boundary |
 | --- | --- |
 | Host-pure | Original host execution chain, without a guest dependency |
-| Native launcher | Physical x86_64/KVM launcher in a private local-mode vsock namespace |
+| Native launcher | Physical x86_64/KVM launcher in a private node view: a network namespace in vsock `local` mode, a mount namespace with its own bpffs and tmpfs over `/run/overdrive` and `/run/netns`, and a cgroup namespace rooted at a per-run cgroup with its own cgroup2 mount |
 | Guest group | Selected test binary in a fresh instance of its declared disposable guest group |
 | Guest-lane operator or owner | Existing first-level guest fixture and its matching host script |
 
@@ -91,8 +91,7 @@ It accepts literal `cargo` commands with a bounded optional `env` prefix.
 It does not interpret arbitrary shell chains or Cargo aliases. Raw integration
 `cargo test`, caller replacement of the test wrapper or configuration, and
 artifacts outside the bound checkout or invocation scratch directory refuse.
-The [exact command grammar](https://github.com/overdrive-sh/overdrive/blob/59a9296d1195e2516683ff7a44c72f4b042a8c2a/docs/feature/metal-run-isolation/feature-delta.md#wave-design--ref-ordinary-command-and-test-execution--p4)
-lists the supported forms and environment keys.
+The [command grammar](https://github.com/overdrive-sh/overdrive/blob/main/infra/metal/bootstrap.sh) (`validate_ordinary_command`) lists the supported forms and environment keys.
 
 Use the explicit administrative boundary when an operation requires arbitrary
 physical-host authority. For example, a native fixture that requires a loaded

@@ -54,7 +54,16 @@ are stale configuration and are rejected):
 | `PIG_E15_CERTIFICATE_CHAIN` | absolute path, leaf-first public chain |
 | `PIG_E15_PRIVATE_KEY` | absolute path, matching PKCS#8 key |
 
-Outer invocation: `cargo xtask metal run -- verification/harness/run-expectation.sh E15`
+Outer invocation (the runner script is outside the ordinary `metal run`
+grammar, and the four inputs reach the box only as `env` words; paths name files on the box):
+
+```bash
+cargo xtask metal run --exclusive -- env \
+  PIG_E15_GATEWAY_ADDRESS=<ipv4> PIG_E15_PUBLIC_HOSTNAME=<hostname> \
+  PIG_E15_CERTIFICATE_CHAIN=<abs path> PIG_E15_PRIVATE_KEY=<abs path> \
+  verification/harness/run-expectation.sh E15
+```
+
 (native x86_64 KVM host, uid 0, fail closed on the substrate probes).
 
 The checked-in `runner.sh` (see "Runner contract") does, in order:

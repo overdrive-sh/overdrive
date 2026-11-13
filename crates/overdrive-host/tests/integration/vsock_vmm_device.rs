@@ -31,9 +31,11 @@
 //! after) and the restart budget are the composed cells of
 //! `overdrive-cli`'s `vsock_fault_matrix`.
 //!
-//! Lane: `integration-tests,kvm-tests`, native x86_64 metal only
+//! Lane: `integration-tests,kvm-tests`, through the Metal runner
 //! (`cargo xtask metal run -- cargo nextest run -p overdrive-host --features
-//! integration-tests,kvm-tests`). The device cases need the pinned fork and
+//! integration-tests,kvm-tests`). Each case runs in its own disposable
+//! `cgroup-default` guest (`infra/metal/test-placement.json`) and launches the
+//! VMM as a nested Cloud Hypervisor guest. The device cases need the pinned fork and
 //! its launch argument (DELIVER step 3); the reset cases need the fork
 //! commit that carries RESET-EXIT (DELIVER step 1).
 //!
@@ -459,7 +461,7 @@ async fn the_fork_boots_and_passes_data_under_the_production_launch_identity() {
         }
     };
 
-    let passwd = std::fs::read_to_string("/etc/passwd").expect("read the metal host passwd file");
+    let passwd = std::fs::read_to_string("/etc/passwd").expect("read the passwd file");
     assert!(
         !passwd.lines().any(|line| {
             line.split(':').nth(2).and_then(|uid| uid.parse::<u32>().ok())

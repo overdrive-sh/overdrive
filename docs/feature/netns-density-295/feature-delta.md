@@ -11207,10 +11207,12 @@ The exact retained reproduction is randomized `quiesce_conf` seed
 `0x2355dc58`: C1 starts the round, C2 joins, and the old model incorrectly
 requests `RepFail(C2)` while no C2 repair is parked. RECROUND1 disables only
 that non-member result; C1 remains drivable, and the next round may include
-both held recoveries. Source-only questions about the owner's unkeyed repair
-slot and fixture-wide audit release have no failing seeded current-composition
-invariant; they remain hypotheses and authorize no API, error, fixture,
-scheduler, observation or production change.
+both held recoveries. The owner's unkeyed repair slot now has a failing seeded
+current-composition invariant (seeds `0x5cb4d08f`, `0xb427d92d` of
+`quiescence_quiesce_conf_randomized`); its proposed correction is
+REPAIRKEY1 below and authorizes nothing until the user approves it. The
+fixture-wide audit release has no failing seeded invariant; it remains a
+hypothesis and authorizes no fixture, scheduler or observation change.
 
 > **QUIESCENCEOPEN1 — APPROVED 2026-10-26.** Under the user quote “i approve
 > the rest of the decisions,” existing `canOpenFlow` is exactly `up &&
@@ -13638,12 +13640,179 @@ membership and result barrier. It prevents a result action for a recovery
 that joined after the round began and delays the model's attempt-count and
 restore effects until every member of a multi-member round has returned.
 QPROJ-6, production repair APIs, typed errors, fixtures, driver handlers,
-actions, runs, hazards, checks and observable outcomes remain unchanged. The
-source-only unkeyed-repair-slot and multi-audit questions have no failing
-seeded current-composition invariant and remain hypotheses, not requirements
-or blockers. RECROUND1 is eligible for bounded model/conformance
+actions, runs, hazards, checks and observable outcomes remain unchanged under
+RECROUND1 itself. The unkeyed-repair-slot question is superseded by the proven
+defect and the proposal REPAIRKEY1 below; the multi-audit question has no
+failing seeded current-composition invariant and remains a hypothesis, not a
+requirement or blocker. RECROUND1 is eligible for bounded model/conformance
 implementation; roadmap validation and replacement formal/conformance
 evidence remain pending.
+
+**Shared-owner repair is keyed by component (REPAIRKEY1) — PROPOSED, 2026-11-12;
+not accepted; awaits explicit user approval of decisions 1–3.** Do not carry it
+into DISTILL, amend the owner port, or dispatch implementation until the user
+approves.
+
+*Proven defect.* Seeds `0x5cb4d08f` and `0xb427d92d` of overdrive-control-plane
+`quint_quiescence::quiescence_quiesce_conf_randomized` reproduce the trace
+`Damage(C2)`, `RecQuiesce(C2)`, `Damage(C1)`, `ForeignRestore`, `RecQuiesce(C1)`,
+`RepFail(C2)`, `RepFail(C2)` (C1 = `FlowListeners`, C2 = `ControlListener`).
+After the second `RepFail` production reports `ControlListener {phase: Repaired,
+failed_attempts: 1}` with only the stream listener bound. The model's
+`RepFail(c)` and `held_repair(c)` are per component; production is not.
+`HostSharedGuestNetworkOwner::converge_shared` takes no component and repairs
+from one unkeyed slot, `OwnerState.repair_component: Option<_>`
+(`guest_network.rs:1215-1275`). Two independent defects follow from that slot:
+
+1. *Last writer wins.* `audit_shared` writes the slot through
+   `mark_shared_repair_component` (`:830-838`, called at `:1338`, `:1367`,
+   `:1411`), so the audit that finds C1 overwrites the damage the audit found
+   for C2. `audit_shared` is documented "non-repairing" yet mutates the
+   owner's repair state: a read that writes.
+2. *The call does not know which component it serves.* The supervisor spawns one
+   attempt per held recovery in a round (`lib.rs:1349`, `:1871-1909`) and each
+   attempt knows its `component` (`:1349`), but calls the port as
+   `converge_shared()` (`:1398`), discarding it. The first call takes the slot,
+   the second finds `None`, takes the boot-reconverge branch (`:1272-1275`,
+   restarts the owner) and returns `Ok`. The supervisor then marks the second
+   component `Repaired` (`:1462-1464`) with no repair performed. A repair
+   cancelled by `with_clock_bound` after the `take()` loses the damage record
+   too (`retain_failed_shared_repair` runs only on `Err`).
+
+The state is reachable through `serve`: the supervisor and owner are composed
+unconditionally by `run_server`, and a round holds two recoveries whenever two
+components are damaged in overlapping audit periods. No test seam produces it;
+the seeded trace drives the production owner and supervisor.
+
+*Decision 1 — the owner port gets a keyed repair operation and `converge_shared`
+loses its repair role.* `SharedGuestNetworkOwner` (`guest_network.rs:196`) gains
+
+    async fn repair_shared(&self, component: OwnerRepairComponent) -> Result<()>;
+
+and `converge_shared(&self) -> Result<()>` keeps its signature but means only
+boot and idempotent re-convergence of the whole owner (forwarder, listeners,
+gateway route per GW-LOCAL). The sentence "when a runtime recovery calls it as
+its repair…" moves from `converge_shared`'s contract to `repair_shared`'s.
+Contract of `repair_shared(c)`: repairs exactly `c`; never writes the gateway
+route; never reads or consumes state naming another component; for `Forwarder`
+closes the old context before it opens and probes the new one (EVMOD-CTL); for
+`FlowListeners` / `ControlListener` rebinds that listener only and restarts its
+accept task, leaving the other listener untouched. `Ok` means that component's
+repair ran and its postcondition read back; it is never returned for a component
+that was not repaired. Contract shape: **bounded-change**: declared mutation set
+is the named component's owner state only (forwarder context and generation and
+inventory read; or that listener's held socket and accept task); universe is
+`OwnerState` aggregate; assertion mechanism: the owner's own `audit_shared` read
+before and after, plus the observable accessors the quiescence driver already
+projects. Two concurrent calls for different components are independent; a call
+for a component whose repair is already in flight returns the typed error of
+decision 3.
+
+*Decision 2 — the argument is a closed narrow type, not the full component set.*
+`OwnerRepairComponent { Forwarder, FlowListeners, ControlListener }` is declared
+beside the port, with an infallible conversion into `SharedGuestNetworkComponent`
+(`overdrive-core`, `guest_network.rs:81`). The owner repairs only those three; the
+other six components (`LegF`, `LegC`, `IpRules`, `IpSets`, `Dns`, `Supervisor`)
+belong to the mTLS worker, the DNS owner and the supervisor. Today's
+`_ => Ok(())` arm at `guest_network.rs:1262` is the same defect class as the bug
+(an `Ok` with no repair); the narrow type makes it unrepresentable. The
+supervisor's existing three-way match (`lib.rs:1395-1397`) constructs it.
+
+*Decision 3 — one claim per component, atomic and typed.* The owner's in-flight
+set becomes the workspace's `ClaimSet<OwnerRepairComponent>` (`overdrive-core`
+`claim_set.rs`): `repair_shared` takes `try_claim(c)`; the RAII guard releases it
+on completion, error or cancellation; `audit_shared` reads `snapshot()` to skip
+components under repair, as it reads `repairs_in_flight` today. A second claim
+for `c` returns the new typed variant `GuestNetworkError::RepairInFlight
+{ component: SharedGuestNetworkComponent }` and changes no state. The supervisor
+cannot cause this (`begin_recovery` admits one recovery per component), so the
+variant is a fail-closed port contract, not an expected path; this is the one
+element that adds surface for a failure the current supervisor cannot produce.
+It is separable: the alternative is to document one-in-flight-per-component as a
+caller precondition and treat a violation as `unreachable!`, which saves the
+variant and makes the owner depend on an invariant owned by another component.
+I recommend the typed variant; the user decides.
+
+*Deleted state.* `OwnerState.repair_component`, `mark_shared_repair_component`,
+`retain_failed_shared_repair`, the `Option` slot reads in `converge_shared`, and
+the `_ => Ok(())` arm are removed. `audit_shared` becomes a pure read, matching
+its contract ("Non-repairing"). Retry needs no retained damage: the supervisor
+re-attempts each held recovery by component on the next round
+(`run_shared_network_recovery_attempt`), and each attempt names its component.
+Internal structure beyond this list is the crafter's.
+
+*Supervisor call site.* In `run_shared_network_recovery_attempt`
+(`lib.rs:1394-1406`) the arm for `Forwarder | FlowListeners | ControlListener`
+splits into three arms, each `ports.shared_guest_network.repair_shared(<its
+OwnerRepairComponent>)`, keeping the `guest_network.shared_owner_repair_failed`
+warning with the component. The mTLS and DNS arms are unchanged. Boot callers
+of `converge_shared` (`lib.rs:4500`, `convergence_loop_wake.rs:84`, the
+fixtures that only boot) are unchanged. The fixture that today spawns
+`converge_shared` as a forwarder repair (`quint_fwd_pair.rs:719`) calls
+`repair_shared(Forwarder)`. Test doubles implementing the port
+(`shared_network_test_ports.rs`) implement `repair_shared`; their recording
+shape is DISTILL's.
+
+*Failure projection.* An `Err` from `repair_shared` projects to the existing
+finding for that same component (`lib.rs:1455-1461`), the recovery keeps its hold,
+the attempt counts as today, and the supervisor does not set `Repaired`. A repair
+that returns `Ok` is followed by the existing bounded audit; `healthy` is decided
+by that audit as today. Cancellation by the recovery deadline drops the call;
+the guard releases its claim and no damage record is lost because none is
+stored. `Repaired` therefore means exactly that this component's repair ran.
+Typed errors are the existing `GuestNetworkError` variants plus decision 3's.
+
+*Formal model and checks.* No spec change. `quiescence.qnt` already models
+repair per component (`RepFail(c)`, `RecRepair(c)`, the pending-round membership
+of RECROUND1) and the quiescence driver already drives it per component
+(`held_repair(c)`, `decide_repair(c, ok)`); production diverges from the
+oracle, the oracle is right. QPROJ-6 and the pinned accessors are unchanged, as
+are actions, runs, hazards, `checks.toml` and the recorded evidence. No
+hazard is added: the decision restores the existing per-component rule rather
+than adding one. No named run is added; a named run for this overlap is
+a separate proposal (cost: one evaluator run in `checks.toml`, seconds) and I do
+not recommend it, because the existing overlap run and the retained seeds
+already exercise it. The driver's per-step comparison needs no handler change;
+its doc line that names the repair as `converge_shared` reads `repair_shared(c)`.
+The retained seeds are the regression witnesses; they must pass after the
+change, and the DISTILL obligation adds one default-lane owner acceptance
+scenario through the production owner: damage both listeners, repair them in
+either order and concurrently, and each repair restores only its own component;
+`audit_shared` called any number of times between damage and repair changes
+nothing a later `repair_shared` depends on.
+
+*Lifecycle Gate Ownership.* Not applicable: no gate is added, moved or reinterpreted.
+No kernel behaviour is claimed.
+
+*Alternatives considered.*
+
+- **`converge_shared(component: Option<_>)` on the existing method.** Fewer
+  methods, but `None` means "boot" and `Some` means "repair": a sentinel carrying
+  two meanings in one signature, which is the dual role that produced the bug. Rejected.
+- **A per-component held set that the unkeyed call consumes.** The call still
+  does not know which component it serves, so two concurrent calls take whichever
+  entries are present and a failure is retained against the wrong component.
+  The information already exists at the caller; dropping it at the port is the
+  defect. Rejected.
+- **Serialise the supervisor's per-round repairs and keep the slot.** Hides the
+  take/`None` race but not the audit's last-writer-wins overwrite, loses the
+  round's concurrency, and keeps a read that writes. A workaround around a fact
+  the design cannot observe. Rejected.
+- **Pass the full `SharedGuestNetworkComponent`.** Smaller type surface, but keeps
+  an arm that cannot be repaired by this owner and must answer something; a silent
+  `Ok` is the bug, and an error variant for "not my component" is a failure the
+  type can exclude. Rejected in favour of decision 2.
+
+*Cost.* No hot-path cost: repair runs only on a damaged component. Validation
+cost: no model-check or lane added; one default-lane acceptance scenario and
+the retained seeds. Adds one method, one small enum and one error variant to the
+owner contract; removes one state field, two helpers and one match arm.
+
+*Note for the DELIVER reviewer (internal structure, not a DESIGN finding).*
+Both listener repairs set the single `flow_listeners_running` flag to `true`
+(`guest_network.rs:1248`, `:1259`), so repairing one listener asserts that the
+other is running. It is not part of the proven trace, but a repair of one
+listener must not assert the other's state.
 
 **Check inventory (WITNESS-HAZARD-RULE: hazards are one per ADR-level
 decision; witnesses exist only for states no named run reaches; see

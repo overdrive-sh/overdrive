@@ -14,7 +14,7 @@
 //! ```text
 //! cargo xtask lima run -- cargo xtask kmod-build
 //! cargo xtask lima run -- cargo xtask kmod-load            # strict (CI)
-//! cargo xtask lima run -- cargo xtask kmod-load --busy-ok  # hooks
+//! cargo xtask lima run -- cargo xtask kmod-load --busy-ok  # tolerate a busy module
 //! ```
 //!
 //! **Identity (D-20).** A module's identity is its `version` modinfo field,
@@ -37,7 +37,7 @@
 //! A busy refusal names the holder class: a process with `/dev/ovd_fwd` open
 //! (pid and `comm`), or socket references still being freed / a context
 //! reference not visible in `/proc` (`refcnt` above zero with no fd holder).
-//! With `--busy-ok` (the hooks' form) a busy module prints the same message
+//! With `--busy-ok` a busy module prints the same message
 //! and exits 0, leaving the stale verdict to the `serve` fixtures; every
 //! other outcome is the strict form's. No outcome for a build from this
 //! source names a reboot.

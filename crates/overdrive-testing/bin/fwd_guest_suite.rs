@@ -141,12 +141,13 @@ const STEP13_06_NFT_MODULES: &[(&str, &str)] = &[
 ///
 /// Beyond the boot and nft tooling, bodies across the group shell out to `ss`
 /// (socket-state oracles), `strace` and `uname` (syscall evidence), `ln` (the
-/// `/var/run` compatibility link) and `openssl` (chain verification of minted
-/// certificates). Staging them for the whole group, not per selected cell, is
+/// `/var/run` compatibility link), `openssl` (chain verification of minted
+/// certificates) and `prlimit` (the VMM launch wrapper the startup probe execs
+/// under the launch seccomp filter). Staging them for the whole group, not per selected cell, is
 /// what keeps a newly placed body from failing with "command not found".
-const CGROUP_DEFAULT_TOOLS: [&str; 13] = [
-    "cat", "chmod", "ip", "ln", "mkdir", "mount", "nft", "openssl", "sh", "ss", "stat", "strace",
-    "uname",
+const CGROUP_DEFAULT_TOOLS: [&str; 14] = [
+    "cat", "chmod", "ip", "ln", "mkdir", "mount", "nft", "openssl", "prlimit", "sh", "ss", "stat",
+    "strace", "uname",
 ];
 /// `ip netns add` publishes handles under `/run/netns`, while the authored
 /// fixtures and production's `overdrive-netlink` open the traditional
@@ -180,6 +181,7 @@ const NESTED_GUEST_KIT_MODULE_SOURCES: &[&str] = &[
     "net/vmw_vsock/vsock",
     "net/vmw_vsock/vmw_vsock_virtio_transport_common",
     "net/vmw_vsock/vmw_vsock_virtio_transport",
+    "net/vmw_vsock/vsock_loopback",
 ];
 const DATAPLANE_NAT_MODULES: &[(&str, &str)] = &[
     ("net/netfilter/nf_conntrack", NF_CONNTRACK_MODULE_GUEST_PATH),
@@ -1323,6 +1325,32 @@ const VM_COHORT_CLI: &[Cell] = &[
     ),
 ];
 
+/// Existing real-kernel bodies that boot their own Cloud Hypervisor microVMs
+/// or `GuestKit` guests (and, for the gateway end-to-end bodies, the production
+/// `serve` composition). Each needs the nested-KVM outer-guest substrate that
+/// `nested_vm_test_support` stages, so the per-test `cgroup-default` attempt
+/// runs it in the nested plan. These prefixes are consumed only by
+/// `nested_resources` on the Nextest attempt path; the batched
+/// `cgroup-default` manifests above do not select them.
+const IN_GUEST_LANE_DRIVERS: &str = "integration::in_guest_lane::";
+const NESTED_GUEST_LAUNCH: &[Cell] = &[
+    (IN_GUEST_LANE_DRIVERS, 12, false),
+    ("guest_network::flow_io::accept_path_tier3::", 2, false),
+    ("integration::vmm_equivalence::", 6, false),
+    ("integration::vsock_beacon_accept_path::", 1, false),
+    ("integration::vsock_vmm_device::", 8, false),
+    ("native_metal_kvm_public_ingress_gateway_", 12, false),
+];
+
+/// The members of `NESTED_GUEST_LAUNCH` that compile a static guest program
+/// with `rustc` at run time (the gateway conformance guest and example, and the
+/// forced-reboot init). Their outer guest also carries the Rust toolchain and
+/// the linker driver they resolve on the metal host.
+const NESTED_GUEST_RUSTC: &[Cell] = &[
+    ("native_metal_kvm_public_ingress_gateway_", 12, false),
+    ("integration::vsock_vmm_device::a_forced_guest_reboot_ends_the_vmm", 1, true),
+];
+
 const CGROUP_DEFAULT_BASELINE_BODIES: usize = 57;
 const STEP13_04_NATIVE_BODIES: usize = 18;
 const STEP13_05_NATIVE_BODIES: usize = 5;
@@ -2124,6 +2152,189 @@ fn nested_vm_test_support(
         stage_module(relative, guest_path)?;
     }
     Ok((extra, module_paths))
+}
+
+/// The `PATH` of a `NESTED_GUEST_LAUNCH` attempt. These bodies resolve
+/// `cloud-hypervisor`, `which` and the image tools through `PATH` as on the
+/// metal host, where the VMM binary sits alone in its own directory; one body
+/// removes that directory from `PATH` and expects only the VMM to go missing.
+const NESTED_GUEST_LAUNCH_PATH: &str = "/usr/local/bin:/usr/bin:/bin";
+const NESTED_GUEST_LAUNCH_NODE_SETUP: &str = r#"
+set -eu
+mkdir -p /srv/vm/overdrive-testing
+chmod 0711 /srv/vm/overdrive-testing
+# The image is staged under the runner's restrictive umask; the metal host's
+# system directories are world-readable, and a body that drops to the confined
+# VMM uid executes tools and loads libraries from them.
+for directory in /usr /lib /lib64 /bin /etc; do
+  if [ -d "$directory" ]; then chmod -R go+rX "$directory"; fi
+done
+for directory in /sys/fs/cgroup/overdrive.slice /sys/fs/cgroup/overdrive.slice/workloads.slice; do
+  mkdir -p "$directory"
+  printf '%s\n' '+cpu +memory +io +pids' > "$directory/cgroup.subtree_control"
+done
+"#;
+/// The metal host's VMM directory, mirrored in the outer guest.
+const NESTED_GUEST_LAUNCH_VMM_PATH: &str = "/usr/local/bin/cloud-hypervisor";
+/// A root-only account database: the outer guest ships no `/etc/passwd`, and
+/// one body asserts the production VMM uid has no entry in it.
+const NESTED_GUEST_LAUNCH_PASSWD: &str = "root:x:0:0:root:/root:/usr/bin/sh\n";
+
+/// Stage what the bodies in `NESTED_GUEST_LAUNCH` resolve through the outer
+/// guest's own filesystem on top of `nested_vm_test_support`: the VMM binary in
+/// the directory the metal host keeps it in, `which`, `umount`, a static
+/// `busybox`, a `/bin/sh` for `which`'s interpreter line, and `/etc/passwd`. A
+/// lane driver (`IN_GUEST_LANE_DRIVERS`) also finds the prepared in-guest cell
+/// binary at its workspace path, as it does on the host.
+fn nested_guest_launch_support(
+    dir: &Path,
+    test_name: &str,
+    extra: &mut Vec<GuestFile>,
+) -> Result<(), GuestKitError> {
+    let vmm = extra
+        .iter_mut()
+        .find(|file| file.guest == Path::new("/usr/bin/cloud-hypervisor"))
+        .ok_or_else(|| GuestKitError::Staging {
+            detail: "the nested guest support stages no cloud-hypervisor".to_owned(),
+            source: std::io::Error::from(std::io::ErrorKind::NotFound),
+        })?;
+    vmm.guest = PathBuf::from(NESTED_GUEST_LAUNCH_VMM_PATH);
+    // `which` is a `#!/bin/sh` script: no shared libraries of its own.
+    let mut which = tool("which");
+    which.with_shared_libraries = false;
+    extra.push(which);
+    extra.push(tool("umount"));
+    let mut busybox = tool("busybox");
+    busybox.with_shared_libraries = false;
+    extra.push(busybox);
+    extra.push(GuestFile { guest: PathBuf::from("/bin/sh"), ..tool("sh") });
+    let passwd = dir.join("passwd");
+    fs::write(&passwd, NESTED_GUEST_LAUNCH_PASSWD).map_err(|source| GuestKitError::Staging {
+        detail: format!("creating guest account database at {}", passwd.display()),
+        source,
+    })?;
+    extra.push(GuestFile {
+        host: passwd,
+        guest: PathBuf::from("/etc/passwd"),
+        with_shared_libraries: false,
+    });
+    if selected_cell(NESTED_GUEST_RUSTC, test_name) {
+        nested_guest_build_support(extra)?;
+    }
+    if test_name.starts_with(IN_GUEST_LANE_DRIVERS) {
+        let cells = InGuestTests::prepared("overdrive-init", "overdrive-init")?;
+        extra.push(GuestFile {
+            host: cells.binary.clone(),
+            guest: cells.binary,
+            with_shared_libraries: false,
+        });
+    }
+    Ok(())
+}
+
+/// `rustc --print sysroot` on the runner: the toolchain the metal host's
+/// bodies compile with.
+fn rust_sysroot() -> Result<PathBuf, GuestKitError> {
+    let output = Command::new("rustc").args(["--print", "sysroot"]).output().map_err(|source| {
+        GuestKitError::Staging {
+            detail: "locating the runner's Rust toolchain for the outer guest".to_owned(),
+            source,
+        }
+    })?;
+    if !output.status.success() {
+        return Err(GuestKitError::Staging {
+            detail: format!("rustc --print sysroot exited {:?}", output.status.code()),
+            source: std::io::Error::other(String::from_utf8_lossy(&output.stderr).into_owned()),
+        });
+    }
+    Ok(PathBuf::from(String::from_utf8_lossy(&output.stdout).trim()))
+}
+
+/// Every regular file below `dir`, staged at its own path.
+fn stage_tree(dir: &Path, files: &mut Vec<GuestFile>) -> Result<(), GuestKitError> {
+    let staging = |source: std::io::Error| GuestKitError::Staging {
+        detail: format!("listing {} for the outer guest", dir.display()),
+        source,
+    };
+    for entry in fs::read_dir(dir).map_err(staging)? {
+        let path = entry.map_err(staging)?.path();
+        if path.is_dir() {
+            stage_tree(&path, files)?;
+        } else {
+            files.push(GuestFile { host: path.clone(), guest: path, with_shared_libraries: false });
+        }
+    }
+    Ok(())
+}
+
+/// What the bodies in `NESTED_GUEST_RUSTC` resolve through the outer guest's
+/// own filesystem on top of `nested_guest_launch_support`: the runner's
+/// `rustc` at its own sysroot path with its musl target libraries, the `cc`
+/// linker driver with `collect2`, the LTO plugin and `ld`, the tools
+/// `examples/public-ingress-gateway/prepare.sh` and the gateway kernel oracles
+/// invoke, and the checked-in sources those bodies read from the checkout.
+fn nested_guest_build_support(extra: &mut Vec<GuestFile>) -> Result<(), GuestKitError> {
+    let sysroot = rust_sysroot()?;
+    extra.push(GuestFile {
+        host: sysroot.join("bin/rustc"),
+        guest: sysroot.join("bin/rustc"),
+        with_shared_libraries: true,
+    });
+    stage_tree(&sysroot.join("lib/rustlib/x86_64-unknown-linux-musl/lib"), extra)?;
+
+    let driver = fs::canonicalize("/usr/bin/cc").map_err(|source| GuestKitError::Staging {
+        detail: "resolving the runner's cc for the outer guest".to_owned(),
+        source,
+    })?;
+    extra.push(GuestFile {
+        host: driver,
+        guest: PathBuf::from("/usr/bin/cc"),
+        with_shared_libraries: true,
+    });
+    let collect2 =
+        Command::new("cc").arg("-print-prog-name=collect2").output().map_err(|source| {
+            GuestKitError::Staging { detail: "asking cc for collect2".to_owned(), source }
+        })?;
+    let collect2 = PathBuf::from(String::from_utf8_lossy(&collect2.stdout).trim());
+    let libexec =
+        collect2.parent().map(Path::to_path_buf).ok_or_else(|| GuestKitError::Staging {
+            detail: format!("cc reported collect2 at {}", collect2.display()),
+            source: std::io::Error::from(std::io::ErrorKind::NotFound),
+        })?;
+    extra.push(GuestFile { host: collect2.clone(), guest: collect2, with_shared_libraries: true });
+    let plugin = libexec.join("liblto_plugin.so");
+    extra.push(GuestFile { host: plugin.clone(), guest: plugin, with_shared_libraries: false });
+    extra.push(tool("ld"));
+
+    for name in [
+        "bpftool",
+        "cut",
+        "dirname",
+        "file",
+        "grep",
+        "id",
+        "install",
+        "mountpoint",
+        "readelf",
+        "rm",
+        "sync",
+        "tr",
+        "test",
+        "timeout",
+        "wc",
+    ] {
+        extra.push(tool(name));
+    }
+    let magic = PathBuf::from("/usr/share/misc/magic.mgc");
+    extra.push(GuestFile { host: magic.clone(), guest: magic, with_shared_libraries: false });
+
+    let root = workspace_root();
+    for relative in ["examples/public-ingress-gateway", "tests/conformance/guest"] {
+        let mut sources = Vec::new();
+        stage_tree(&root.join(relative), &mut sources)?;
+        extra.extend(sources);
+    }
+    Ok(())
 }
 
 const fn exact(name: &str) -> [&str; 4] {
@@ -3718,6 +3929,42 @@ fn execute_nextest_attempt(
     )
 }
 
+/// The outer-guest resources of a per-test `cgroup-default` attempt that needs
+/// the nested-KVM substrate: a focused STEP 14 / cohort identity, or a body
+/// that launches its own guests (`NESTED_GUEST_LAUNCH`).
+fn nested_resources(test_name: &str) -> Option<NestedVmGuestResources> {
+    focused_selection(test_name).map(|selected| selected.resources).or_else(|| {
+        selected_cell(NESTED_GUEST_LAUNCH, test_name).then_some(NestedVmGuestResources::STANDARD)
+    })
+}
+
+/// The nested-KVM `cgroup-default` plan of a per-test attempt: the substrate
+/// `nested_vm_test_support` stages, plus the support a body in
+/// `NESTED_GUEST_LAUNCH` resolves through the outer guest's own filesystem.
+fn nested_cgroup_default_plan(
+    kit: &GuestKit,
+    support_dir: &Path,
+    test_name: &str,
+    resources: NestedVmGuestResources,
+) -> Result<NextestGuestPlan, GuestKitError> {
+    let (mut extra, module_paths) = nested_vm_test_support(kit, support_dir)?;
+    if selected_cell(NESTED_GUEST_LAUNCH, test_name) {
+        nested_guest_launch_support(support_dir, test_name, &mut extra)?;
+    }
+    Ok(NextestGuestPlan {
+        name: "cgroup-default",
+        cid: 6,
+        extra,
+        module_paths,
+        memory_mib: resources.memory_mib,
+        vcpus: resources.vcpus,
+        cgroup_flags: None,
+        mtls_native_paths: Vec::new(),
+        setup_mtls_native: false,
+        nested: true,
+    })
+}
+
 fn nextest_guest_plan(
     kit: &GuestKit,
     support_dir: &Path,
@@ -3789,20 +4036,9 @@ fn nextest_guest_plan(
                 ..standard("nested-boundary", 12, extra, module_paths, STANDARD_OUTER_GUEST_MIB, 8)
             }
         }
-        "cgroup-default" if focused_selection(test_name).is_some() => {
-            let selected = focused_selection(test_name).expect("matched focused selection");
-            let (extra, module_paths) = nested_vm_test_support(kit, support_dir)?;
-            NextestGuestPlan {
-                nested: true,
-                ..standard(
-                    "cgroup-default",
-                    6,
-                    extra,
-                    module_paths,
-                    selected.resources.memory_mib,
-                    selected.resources.vcpus,
-                )
-            }
+        "cgroup-default" if nested_resources(test_name).is_some() => {
+            let resources = nested_resources(test_name).expect("matched nested selection");
+            nested_cgroup_default_plan(kit, support_dir, test_name, resources)?
         }
         "cgroup-default" => {
             let files = cgroup_attempt_files(kit, support_dir, test_name)?;
@@ -3876,7 +4112,18 @@ fn prepare_nextest_guest(
     test_name: &str,
 ) -> Result<(), GuestKitError> {
     if plan.nested {
-        prepare_nested_attempt(guest)
+        prepare_nested_attempt(guest)?;
+        if selected_cell(NESTED_GUEST_LAUNCH, test_name) {
+            // The metal host's staging root exists before any body runs and is
+            // traversable by the confined VMM uid, and a node that has served
+            // before already holds the delegated workload subtree (the metal
+            // wrapper pre-creates it the same way, so a body's before/after
+            // cgroup observation compares like with like). The outer guest
+            // creates both here, before the body makes its own directory under
+            // the staging root and before it takes its baseline observation.
+            guest.command(&["/usr/bin/sh", "-c", NESTED_GUEST_LAUNCH_NODE_SETUP])?;
+        }
+        Ok(())
     } else if let Some(flags) = plan.cgroup_flags {
         run_cgroup_attempt_setup(guest, test_name, flags)
     } else if plan.setup_mtls_native {
@@ -3915,6 +4162,22 @@ fn execute_nextest_guest_attempt(
         Some(STEP13_06_ROUTE_CLEANUP)
     } else {
         None
+    };
+    let launch_environment;
+    let environment = if plan.nested && selected_cell(NESTED_GUEST_LAUNCH, test_name) {
+        let mut with_path = environment.to_vec();
+        let path = if selected_cell(NESTED_GUEST_RUSTC, test_name) {
+            let sysroot = rust_sysroot()
+                .map_err(|error| NextestDispatchFailure::GuestExecution(format!("{error:?}")))?;
+            format!("{}/bin:{NESTED_GUEST_LAUNCH_PATH}", sysroot.display())
+        } else {
+            NESTED_GUEST_LAUNCH_PATH.to_owned()
+        };
+        with_path.push(("PATH".to_owned(), path));
+        launch_environment = with_path;
+        launch_environment.as_slice()
+    } else {
+        environment
     };
     let attempt_result = execute_nextest_attempt(
         &mut guest,

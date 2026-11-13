@@ -31,10 +31,11 @@
 //! The records are opaque fixed-size byte patterns: the adapter reads
 //! records, it does not parse them, and the oracle is byte equality.
 //!
-//! Lane: `integration-tests,kvm-tests`, native x86_64 metal (`cargo xtask
-//! metal run --`); the listeners bind node-global ports, so the
-//! control-plane library test binary is in `host-kernel-shared`. Pending the
-//! attachment cut's step (7), which lands `HostGuestFlowIo`.
+//! Lane: `integration-tests,kvm-tests`, through the Metal runner (`cargo xtask
+//! metal run --`). Each case runs in its own disposable `cgroup-default` guest
+//! (`infra/metal/test-placement.json`), where the listeners' ports are the
+//! guest's own and the scripted peer is a nested Cloud Hypervisor microVM.
+//! Pending the attachment cut's step (7), which lands `HostGuestFlowIo`.
 
 #![allow(
     clippy::expect_used,

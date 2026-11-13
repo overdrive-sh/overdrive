@@ -169,7 +169,7 @@ async fn vm_host_state_equivalence_sim() {
     assert_eq!(sim.kind(), "overdrive_sim::SimVmHostState");
 }
 
-/// CONTRACT_SHAPE: bounded-change.
+/// `CONTRACT_SHAPE`: bounded-change.
 #[tokio::test]
 #[serial(vm_host_state_real_cgroup)]
 async fn vm_host_state_equivalence_real() {

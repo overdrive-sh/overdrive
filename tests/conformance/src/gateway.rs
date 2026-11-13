@@ -1,4 +1,4 @@
-//! Public-ingress-gateway end-to-end harness (native metal).
+//! Public-ingress-gateway end-to-end harness (a disposable guest of a Metal run).
 //!
 //! One [`GatewayWorld`] is one production composition: `run_server(config,
 //! NodeAdapters::host(..))` over the real cgroupfs, the real `EbpfDataplane`,
@@ -59,7 +59,7 @@ use rustls::pki_types::{CertificateDer, ServerName};
 use rustls::{CipherSuite, ClientConfig, ClientConnection, RootCertStore, StreamOwned};
 
 use crate::{
-    CleanupObservation, PublicApi, TraceEvent, TraceHistory, assert_native_metal, command_output,
+    CleanupObservation, PublicApi, TraceEvent, TraceHistory, assert_kvm_substrate, command_output,
     wait_until,
 };
 
@@ -780,8 +780,8 @@ impl PublicConnection {
 /// `/proc/net/tls_stat`, per network namespace.
 ///
 /// `net/tls/tls_proc.c:41` reads `net->mib.tls_statistics` and `:52` registers
-/// it with `proc_create_net_single` (Linux v7.0); the native-metal wrapper
-/// runs each test in a private namespace.
+/// it with `proc_create_net_single` (Linux v7.0); each test runs in its own
+/// disposable guest, so its namespace is private.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct TlsStat(BTreeMap<String, u64>);
 
@@ -1488,7 +1488,7 @@ impl GatewayWorld {
     /// Compose the production server over the real adapters with the gateway
     /// enabled on `127.<second_octet>.0.1:443`, staging `guest` first.
     pub async fn boot(trace: &TraceHistory, second_octet: u8, guest: GuestKind) -> Self {
-        assert_native_metal();
+        assert_kvm_substrate();
         overdrive_testing::forwarder_module::expect_forwarder_module();
         // The Metal runner's umask (0027) would create the server's `data/vm`
         // chain `0750 root:root`, closed to the confined VMM gid; the

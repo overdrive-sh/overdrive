@@ -1,5 +1,5 @@
-//! Public-ingress gateway: the production composition end to end on native
-//! metal (`AT-PIG-E2E-1` and the native arms of S-PIG-56, 60, 69, 70 (408), 71,
+//! Public-ingress gateway: the production composition end to end in a
+//! disposable guest of a Metal run (`AT-PIG-E2E-1` and the native arms of S-PIG-56, 60, 69, 70 (408), 71,
 //! 105, 109, 113 and 115).
 //!
 //! Every test starts the exported production server handler in-process
@@ -40,7 +40,7 @@
 //!
 //! The 400, 404, 421, 502, 503, 505 and 431 mappings of S-PIG-70 are asserted
 //! at the listener by the gateway relay and control-plane boot files and, on
-//! native metal, by the S-PIG-115 test (octet 114, which sends the 413, 400,
+//! the Metal run, by the S-PIG-115 test (octet 114, which sends the 413, 400,
 //! 421, 431 and 505 heads); the tests numbered 108 and 109 carry the two 408
 //! cases, which have no other owner.
 //!
@@ -54,8 +54,11 @@
 //!
 //! # Activation
 //!
-//! The native-metal selector (`kvm-tests` on a native x86_64 KVM host) runs
-//! them.
+//! `cargo xtask metal run -- cargo nextest run -p overdrive-system-conformance
+//! --features integration-tests` runs them. Each runs in its own disposable
+//! `cgroup-default` guest (`infra/metal/test-placement.json`) with nested KVM,
+//! the Rust toolchain and the checked-in example sources staged by the guest
+//! suite; the Cloud Hypervisor Service VM is a nested guest.
 
 #![cfg(feature = "integration-tests")]
 #![allow(
@@ -147,8 +150,8 @@ async fn native_metal_kvm_public_ingress_gateway_streams_a_workload_response_ove
 
     // Baseline kernel state, then the request with a loopback capture running.
     // The kernel-TLS counters are per network namespace (`net/tls/tls_proc.c:41`,
-    // `:52` @ v7.0) and the native-metal wrapper gives each test its own, so only
-    // this test's sockets move them.
+    // `:52` @ v7.0) and each test runs in its own disposable guest, so only this
+    // test's sockets move them.
     // The serving wait and its readiness traffic leave kernel-TLS legs that
     // close asynchronously; the baseline is taken once none is armed, and the
     // wait fails the test (naming the last sample) if they never close.

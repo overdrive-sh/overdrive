@@ -27,9 +27,11 @@
 //! the control session must pass.
 //!
 //! Lane: `cargo xtask metal run -- cargo nextest run -p overdrive-init
-//! --features integration-tests,kvm-tests`. The lane binds the node-global
-//! beacon and control ports, so this binary is in `host-kernel-shared`. CIDs
-//! from the [`INIT_IN_GUEST_LANE`] band, one per case.
+//! --features integration-tests,kvm-tests`. Each case runs in its own
+//! disposable `cgroup-default` guest (`infra/metal/test-placement.json`), so the
+//! beacon and control ports the lane binds are that guest's own and the cell's
+//! guest is a nested Cloud Hypervisor microVM. CIDs from the
+//! [`INIT_IN_GUEST_LANE`] band, one per case.
 
 #![allow(clippy::doc_markdown, reason = "kernel and module names in prose")]
 

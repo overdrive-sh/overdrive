@@ -1740,13 +1740,42 @@ checkout remains exclusive. The `block-bare-nextest` hook allows
 | `ssh <box> '… cargo nextest run …'` | `cargo xtask metal run -- cargo nextest run …` |
 | `cargo xtask lima run -- … --features kvm-tests` (virtualized Lima is non-signal) | `cargo xtask metal run -- cargo nextest run -p overdrive-cli --features integration-tests,kvm-tests` |
 
-Ordinary `metal run` accepts the existing Cargo build/check/clippy/fmt,
-doctest, approved xtask setup/lint/model, nextest, prepared guest-suite, and
-pure Sim command forms. Arbitrary commands, shell chains, `cargo test` bodies,
-and `cargo xtask kmod-load` refuse before START. The reviewed
-`--exclusive -- COMMAND` mode retains arbitrary privileged maintenance with
-exclusive physical-maintenance ownership; `metal shell` and provisioning
-remain exclusive too.
+Ordinary `metal run` accepts a closed command grammar
+(`infra/metal/bootstrap.sh`, `validate_ordinary_command`). Anything else
+refuses before START with a stable diagnostic and status 64.
+
+| Element | Accepted |
+|---|---|
+| Prefix | Optional `env` (or `/usr/bin/env`) followed by `KEY=VALUE` words, then a literal `cargo`. Each key appears once. |
+| `env` keys | `OVERDRIVE_BPF_NATIVE` (value `1` only); `OVERDRIVE_FWD_GUEST_GROUP` (`all`, `probe`, `core`, `unload`, `ulp`, `mtls-relay`, `cgroup-default`, `stress`, `nested-boundary`); `OVERDRIVE_FWD_GUEST_EXACT`, `RUST_BACKTRACE`, `RUST_LOG`, `NEXTEST_PROFILE`, `QUINT_SEED`, `QUINT_VERBOSE`, and the `PROPTEST_` keys `CASES`, `DISABLE_FAILURE_PERSISTENCE`, `FORK`, `MAX_DEFAULT_SIZE_RANGE`, `MAX_FLAT_MAP_REGENS`, `MAX_GLOBAL_REJECTS`, `MAX_LOCAL_REJECTS`, `MAX_SHRINK_ITERS`, `MAX_SHRINK_TIME`, `RNG_ALGORITHM`, `RNG_SEED`, `TIMEOUT`, `VERBOSE` (free-form values must be valid UTF-8). Any other key refuses. |
+| Cargo subcommand | `build`, `check`, `clippy`, `fmt`; `test` only with `--doc` before any `--`; `nextest run`; `xtask`; `run`. Cargo aliases and `+toolchain` forms are not subcommands and refuse. |
+| `xtask` subcommand | `guest-kit-prepare`, `bpf-build`, `bpf-clippy`, `bpf-unit`, `kmod-build`, `dst-lint`, `cloexec-lint`, `conformance-lint`, `yaml-free-cli`, `quint`, `mutants` |
+| `run` package and bin | `-p/--package` and `--bin` must name exactly `overdrive-sim`/`dst`, `overdrive-control-plane`/`openapi`, or `overdrive-testing`/`overdrive-fwd-guest-suite` (the last runs under the wrapper's guest-suite mode) |
+| Refused flags (before `--`) | `--config`, `--config-file`, `--tool-config-file`, `--user-config-file`, `--debugger`, `--tracer`: `execution_override_refused`. `--archive-file`, `--archive-format`, `--extract-to`, `--extract-overwrite`, `--persist-extract-tempdir`, `--cargo-metadata`, `--binaries-metadata`, `--workspace-remap`, `--target-dir-remap`, `--build-dir-remap`: `artifact_scope_mismatch`. A `--manifest-path` or `--target-dir` that resolves outside the bound checkout and the run's scratch directory: `artifact_scope_mismatch`. |
+| `nextest run` extra check | `.config/nextest.toml` must still carry the Metal wrapper, `target-runner = "within-wrapper"` and `run-wrapper = "metal"`, and no `.cargo/config*` may set a `runner`; otherwise `execution_override_refused`. |
+
+Status-64 runner diagnostics: `unsupported_ordinary_command`,
+`execution_override_refused`, `artifact_scope_mismatch`, `invalid_mode`
+(`--exclusive` without `--run`, or combined with another mode),
+`checkout_identity_invalid`, `remote_subdir_invalid`, `invalid_run_id`.
+
+An ordinary run does **not** accept `cargo xtask integration-test`,
+`verifier-regress`, `xdp-perf`, `dev-setup`, `ci`, `lima`, `hooks`, `mcp`,
+`kmod-load`, `cargo test` without `--doc`, a script path, `bash -c`, or a shell
+chain. Where an allowed equivalent exists, use it:
+
+| Not accepted | Ordinary form |
+|---|---|
+| `cargo dst ...` (alias) | `cargo run -p overdrive-sim --bin dst -- ...` |
+| `cargo openapi-gen` / `openapi-check` (aliases) | `cargo run -p overdrive-control-plane --bin openapi -- generate` / `check` |
+| `cargo test` (non-doc) | `cargo nextest run ...` |
+| `cargo xtask kmod-load` | `cargo xtask metal run --exclusive -- cargo xtask kmod-load` |
+
+`cargo xtask integration-test vm`, `verifier-regress`, `xdp-perf`, `dev-setup`
+and `ci` have no ordinary form; they are CI (LVH) or Lima commands, not Metal
+ordinary commands. `cargo xtask metal run --exclusive -- COMMAND` retains
+arbitrary privileged maintenance with exclusive physical-maintenance ownership;
+`metal shell` and provisioning remain exclusive too.
 
 **No test is ever run with `--exclusive`.** Exclusive mode is for physical
 maintenance only (module load, provisioning). A test that cannot run beside a
@@ -1754,8 +1783,27 @@ concurrent ordinary run from another worktree is a defect in the runner's
 placement, not a reason to serialise the host: the isolation belongs in the
 namespaces the wrapper gives the test body, never in a lock.
 
-A `native-launcher` test body boots `serve` in-process, and `serve` owns
-node-global state: it reclaims the VM cgroup scopes and run directories it does
+**Native-metal expectation captures run with `--exclusive`.** An EDD
+expectation capture (`.claude/rules/verification.md`) drives the built product
+on the host's own network and kernel state, and its entry point is a runner
+script, which is not `cargo` and is outside the ordinary grammar. A capture is
+not a test, so the rule above does not cover it:
+
+```bash
+cargo xtask metal run --exclusive -- env KEY=VALUE ... verification/harness/run-expectation.sh <ID>
+```
+
+Under `--exclusive` the command is not validated and no nextest wrapper
+applies. The remote command is `cd <checkout> && sudo -n env "HOME=$HOME"
+"PATH=$PATH" <run context> COMMAND...` run from a login shell (`--no-sudo`
+drops the `sudo -n env`). The local process environment does not cross ssh:
+only `OVERDRIVE_METAL_KERNEL` and `OVERDRIVE_METAL_ROOTFS` are forwarded, so
+every other variable the capture needs goes in as `env KEY=VALUE` words in the
+command, with paths that exist on the box.
+
+A `native-launcher` test body runs on the host (see § "Test placement" for when
+that is justified). When it boots `serve` in-process, `serve` owns node-global
+state: it reclaims the VM cgroup scopes and run directories it does
 not supervise and sweeps the shared nft table. The wrapper therefore runs such a
 body in its own node view, so the appliance's one-serve-per-node behaviour is
 exercised unchanged and no other run's state is visible to reclamation:
@@ -1781,15 +1829,84 @@ or programs from `bpftool`. A test oracle that enumerates loaded objects by name
 handle the run holds (a pinned path in the run's bpffs, or the map ids behind its
 own `/proc/self/fd` entries).
 
-On ordinary Metal runs, the checked-in Nextest wrapper is mandatory for every
-profile. It executes the actual selected test ELF and preserves its libtest
-arguments, Nextest helper executables, declared environment, attempt number,
-and result. Host-pure bodies keep the original runner chain; native-launcher
-bodies get a local-vsock namespace; guest-group bodies run in a fresh guest
-instance for each attempt. Unknown placement or missing dispatcher refuses
-before the test body. `cargo xtask guest-kit-prepare` incrementally prepares
-the existing guest-suite dispatcher alongside its existing artifacts. The
-explicit `overdrive-fwd-guest-suite` command keeps its existing batched groups.
+On ordinary Metal runs, the checked-in Nextest wrapper
+(`infra/metal/test-wrapper.sh`) is mandatory for every profile. It executes the
+actual selected test ELF and preserves its libtest arguments, Nextest helper
+executables, declared environment, attempt number, and result. Placement
+decides the isolation each body gets:
+
+- `host-pure` keeps the original runner chain, with no namespace.
+- `native-launcher` bodies get the full node view in the table above: a
+  network namespace in vsock `local` mode (loopback up), a private mount
+  namespace with its own bpffs and tmpfs over `/run/overdrive` and
+  `/run/netns`, and a cgroup namespace rooted at a per-run cgroup with its own
+  cgroup2 mount.
+- Guest placements run the guest-suite dispatcher in a network namespace in
+  vsock `local` mode only (no mount or cgroup namespace), and the body runs in
+  a fresh guest instance for each attempt.
+
+Unknown placement or missing dispatcher refuses before the test body.
+`cargo xtask guest-kit-prepare` incrementally prepares the existing
+guest-suite dispatcher alongside its existing artifacts. The explicit
+`overdrive-fwd-guest-suite` command keeps its existing batched groups.
+
+#### Test placement
+
+`infra/metal/test-placement.json` is the placement table the wrapper reads. It
+has exactly two top-level keys: `format`, which must be
+`overdrive-metal-test-placement-v1`, and `placements`. A placement is keyed
+first by the nextest binary id (`crate`, `crate::test-binary`, or
+`crate::bin/name`), then by the full test name nextest reports, and carries a
+descriptor:
+
+| `kind` | Extra fields | Isolation the wrapper applies |
+|---|---|---|
+| `host-pure` | none | none; `exec` of the original chain |
+| `native-launcher` | none | full node view (network, mount, cgroup namespaces; own bpffs; per-run cgroup) |
+| `guest-group` | `group`: `probe`, `core`, `unload`, `ulp`, `mtls-relay`, `cgroup-default`, `stress` or `nested-boundary` | dispatcher in a local-mode vsock namespace; body in a fresh guest of that group (exported as `OVERDRIVE_FWD_GUEST_GROUP`) |
+| `guest-lane-operator` | `fixture`: `integration::in_guest_lane::<name>` | same namespace; fresh guest running the first-level in-guest fixture (`target/guest-kit/in-guest/overdrive-init--overdrive-init` must exist) |
+| `guest-lane-owner` | `fixture`: as above | as `guest-lane-operator`, owner side |
+
+Placement applies only to ordinary Metal runs. `--exclusive` runs set
+`OVERDRIVE_METAL_EXECUTION_CLASS=exclusive` and the wrapper `exec`s the
+original chain; a run with no Metal context (Lima, CI, a developer shell)
+`exec`s it unchanged as well. Neither consults the table.
+
+Every ordinary-run failure is a wrapper diagnostic printed as
+`OVERDRIVE_METAL_TEST_ERROR error=<name>` before the test body starts:
+
+| Diagnostic | Status | Cause |
+|---|---|---|
+| `test_unclassified` | 78 | no entry for this binary id and test name |
+| `placement_ambiguous` | 78 | the file repeats a key (duplicate binary id or test name) |
+| `placement_invalid` | 78 | file missing, a symlink, not valid JSON, wrong `format`, or an unknown kind, group, field or fixture shape |
+| `invalid_run_context` (`field=...`) | 78 | the Metal run context (class, run id, source root, scratch directory) does not validate |
+| `lane_not_prepared` | 78 | dispatcher (or in-guest binary) missing, outside `target/`, or not executable |
+| `namespace_setup_failed` (`step=...`, `errno=...`) | 70 | a namespace, mount or cgroup step failed; it never falls back to the host |
+
+The file is hand-maintained, and no gate checks that it is complete. A new or
+renamed integration test with no entry first fails on a Metal run, as
+`test_unclassified`, not in review or in the default lane. Authoring rules:
+
+- Add the entry in the same commit that adds or renames the test.
+- A body that mutates node-global kernel state (nft, routes or rules, links,
+  BPF programs, maps or pins, cgroups, netns, vsock) or boots `serve` is never
+  `host-pure`.
+- **Default to a guest group.** A body that boots `serve`, mutates kernel
+  state, or needs a module or the guest-suite dispatcher runs in the matching
+  `guest-group`. Use `cgroup-default` for `serve`-booting bodies, because every
+  `cgroup-default` guest boots `serve`. Use a guest-lane kind for an in-guest
+  fixture. The guest is the isolation boundary, and the guest kit exists to
+  provide it.
+- **Neither KVM nor `serve` is a reason to run on the host.** Guest groups run
+  nested virtualization: `cgroup-default` guests boot `serve` and launch real
+  workload VMs as nested Cloud Hypervisor guests.
+- **A product test is never `native-launcher`.** `native-launcher` is only for
+  tests of the Metal runner itself, such as the wrapper's own namespace
+  fixtures, which have to run where the wrapper runs. A product test that
+  seems to need the host is a gap in the guest kit: surface it, and do not
+  place the test on the host.
+- Only a body with no node-global effect is `host-pure`.
 
 Prepare and load guest prerequisites as separate commands, preserving the
 physical-host module-load boundary:
@@ -1809,6 +1926,33 @@ login user. Source transfer is part of `run`, avoiding a separate
 sync-then-ssh step. `cargo xtask metal sync` and `cargo xtask metal shell`
 cover standalone sync and exclusive administration.
 
+#### Run records, collection and diagnostics
+
+`metal run` prints `OVERDRIVE_METAL_RUN_ID=<24 hex>` before anything runs, and
+`OVERDRIVE_METAL_RUN_STARTED` once the command is under way. The durable
+record lives under `/var/lib/overdrive-metal/runs/<run-id>/` on the box
+(`phase.v1`, the combined log, `terminal.v1`) and is not pruned. The phase is
+`waiting_for_lease` (queued for admission), `preparing` (source transfer and
+preflight), or `running`. Losing the ssh route after START does not cancel the
+command; `cargo xtask metal collect <run-id>` prints the retained log and
+returns the command's own status. See `infra/metal/README.md` for detail.
+
+Admission waits up to `OVERDRIVE_METAL_LEASE_TIMEOUT_SECONDS` (default `120`).
+Every run needs `OVERDRIVE_METAL_KERNEL` and `OVERDRIVE_METAL_ROOTFS`, readable
+guest kernel and rootfs paths on the box, in the environment or `.env`;
+`metal run` refuses without them and native preflight checks both.
+
+Runner diagnostics print as `OVERDRIVE_METAL_RUNNER_ERROR error=<name>`:
+
+| Status | Diagnostics |
+|---|---|
+| 64 | the status-64 set above; `collect` also uses `invalid_run_id` |
+| 66 | `run_not_found` (collect) |
+| 70 | `supervisor_lost` (collect) |
+| 74 | `run_artifact_io`, `cleanup_failed` |
+| 75 | `maintenance_timeout`, `checkout_timeout`, `runner_preparation_failed` (including missing remote `rsync`), and `run_not_started` (collect's report for a run recorded as `lease_timeout`, `launch_aborted`, `controller_eof_before_start` or `command_launch_failed`) |
+| 78 | `checkout_identity_conflict`, `source_mismatch`, `preflight_failed probe=<arch\|virtualization\|cpu\|kvm_device\|kvm_api\|cgroup_v2\|vmm\|guest_kernel\|guest_rootfs\|owner\|source>` |
+
 Outputs a metal run writes into the remote tree (recorded evidence, generated
 files) do not come back on their own. `cargo xtask metal pull <path>...`
 rsyncs the named repo-relative paths from the box's tree into the same paths
@@ -1816,7 +1960,7 @@ in this checkout, under the tree lock. It never deletes local files, never
 transfers `target/`, and rejects absolute, `..`, `.` and `.git` paths.
 
 Provisioning the box itself (partitions, KVM, toolchain) is a one-time
-`infra/metal/bootstrap.sh <user@host>` (without `--sync-only`); see
+`infra/metal/bootstrap.sh <user@host>` (with no mode flag); see
 `infra/metal/README.md`.
 
 ### Assertion rules

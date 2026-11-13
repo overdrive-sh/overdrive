@@ -18,7 +18,8 @@ product-driving surface.
 
 ## Verification contract
 
-The completed runner must use one `cargo xtask metal run --` invocation so the
+The completed runner must use one `cargo xtask metal run --exclusive --` invocation (a
+script path is outside the ordinary `metal run` grammar) so the
 canonical global lease spans sync, the fail-closed native/non-virtualized
 x86_64 KVM preflight, default-feature build, preparation, product commands,
 public cleanup, and final owned-fixture checks. The checked-in

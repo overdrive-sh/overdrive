@@ -83,6 +83,15 @@ well-recorded command sequence and its retained real output can be sufficient;
 do not manufacture a permanent runner merely to make an expectation look like
 a test.
 
+A native-metal capture runs with `cargo xtask metal run --exclusive -- ...`
+(`.claude/rules/testing.md` § "Running tests — native x86_64 bare-metal KVM
+host"). A capture drives the built product on the host's own network and kernel
+state, and its entry point is a runner script rather than `cargo`, so it is
+outside the ordinary `metal run` grammar. A capture is not a test, so the rule
+that no test runs `--exclusive` does not cover it. Environment the runner needs
+goes in as `env KEY=VALUE` words in the command: the local environment does not
+reach the remote command.
+
 The implementation author does not hand-write successful evidence or set an
 expectation to `satisfied`. They retain the actual commands, output, substrate,
 SHA, dirty state, and any relevant seed; a different reviewer then evaluates

@@ -64,13 +64,14 @@ These rules apply to everything under `tests/conformance/` and specialize
 
 - Use `cargo nextest run`, never `cargo test`, for the Rust conformance suite.
 - Route execution through Lima for ordinary Linux conformance and through the
-  native-metal runner for tests marked as requiring KVM or real guest/kernel
-  behavior.
-- Native-metal tests (`native_metal_kvm_*`) are active. The
-  `tests/conformance/run-native-metal.sh` entrypoint selects exactly those and
-  runs them with `--no-capture`; it requires qualified native metal and raises
-  the descriptor limit for the in-process production boot. Run them only
-  through an ordinary `cargo xtask metal run --`, never `--exclusive`: the
-  wrapper gives each such test its own node view (cgroup subtree, bpffs, run
-  directories, network namespace and vsock CID space), so concurrent runs from
-  different worktrees do not reap one another's guests.
+  Metal runner for tests that need KVM or real guest/kernel behavior.
+- The `native_metal_kvm_*` tests are active. Their name is historical: each one
+  runs in its own disposable `cgroup-default` guest with nested KVM
+  (`infra/metal/test-placement.json`), never on the host. Run them with an
+  ordinary `cargo xtask metal run -- cargo nextest run -p
+  overdrive-system-conformance --features integration-tests`, never
+  `--exclusive`. The guest suite stages the Rust toolchain, the `cc` linker
+  driver and the checked-in example sources these bodies compile and read, and
+  the production boot's descriptor budget is raised by the guest attempt, not by
+  a host script. `tests/conformance/run-native-metal.sh` runs the selector on
+  the host itself and is not the route for these tests.
