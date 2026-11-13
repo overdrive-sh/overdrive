@@ -71,7 +71,7 @@ as a listener. UDP autobind did not count either. These results favor the
 event the kernel already emits over an in-guest `/proc/net` poll, which can
 miss a socket that opens and closes between samples. A post-bind hook for TCP
 would report too early, while a pre-bind hook for UDP could report a bind that
-later fails. The [hook findings](https://github.com/overdrive-sh/overdrive/blob/dca2350aad3a9dc5994e1788605fb4903fa8c127/docs/feature/service-allocation-readiness-and-ending/spike/findings-listen-hooks.md)
+later fails. The [hook findings](https://github.com/overdrive-sh/overdrive/blob/caa51129990df031f6396eea3e9cbed670450769/docs/feature/service-allocation-readiness-and-ending/spike/findings-listen-hooks.md)
 record the cases and limits.
 
 The guest already has a beacon channel for `READY` and `EXIT`. We added
@@ -85,7 +85,7 @@ line in the corresponding run. We also saw `LISTEN` arrive after `EXIT` in
 **185 of 300** boots without a final drain. The guest therefore drains pending
 listener events before `EXIT`, and the host reads past `LISTEN` until `EXIT`
 or EOF. Attaching hooks after the workload ran missed both reports in **50 of
-50** negative-control boots. The [guest-signal findings](https://github.com/overdrive-sh/overdrive/blob/dca2350aad3a9dc5994e1788605fb4903fa8c127/docs/feature/service-allocation-readiness-and-ending/spike/findings-guest-signal.md)
+50** negative-control boots. The [guest-signal findings](https://github.com/overdrive-sh/overdrive/blob/caa51129990df031f6396eea3e9cbed670450769/docs/feature/service-allocation-readiness-and-ending/spike/findings-guest-signal.md)
 show why those ordering rules matter.
 
 Init opens its own transport sockets before the application starts. Reporting
@@ -99,8 +99,8 @@ that guest kernel. A second BPF object load added **20.4 ms at p50**, so we
 kept the hooks in the object init already loads. An earlier boot-cost probe
 found **0.36 ms at p50** for the listen additions alone against a matching
 toolchain baseline. The two numbers measure different increments. The
-[cgroup findings](https://github.com/overdrive-sh/overdrive/blob/dca2350aad3a9dc5994e1788605fb4903fa8c127/docs/feature/service-allocation-readiness-and-ending/spike/findings-workload-cgroup.md)
-and [boot-cost findings](https://github.com/overdrive-sh/overdrive/blob/dca2350aad3a9dc5994e1788605fb4903fa8c127/docs/feature/service-allocation-readiness-and-ending/spike/findings-boot-cost.md)
+[cgroup findings](https://github.com/overdrive-sh/overdrive/blob/caa51129990df031f6396eea3e9cbed670450769/docs/feature/service-allocation-readiness-and-ending/spike/findings-workload-cgroup.md)
+and [boot-cost findings](https://github.com/overdrive-sh/overdrive/blob/caa51129990df031f6396eea3e9cbed670450769/docs/feature/service-allocation-readiness-and-ending/spike/findings-boot-cost.md)
 give their separate baselines.
 
 ## One probe row, one restart authority
@@ -152,7 +152,7 @@ and the last failed. A byte-identical redeploy returned the recorded
 probe ownership, network, cgroup, run-directory, mount, loop, and preparation
 deltas. The negative capture measured zero VM, network, cgroup, run-directory,
 mount, loop, preparation, and serve deltas. It did not measure probe ownership.
-The [native verification record](https://github.com/overdrive-sh/overdrive/blob/dca2350aad3a9dc5994e1788605fb4903fa8c127/docs/feature/service-allocation-readiness-and-ending/deliver/step-05-07-verification.md)
+The [native verification record](https://github.com/overdrive-sh/overdrive/blob/caa51129990df031f6396eea3e9cbed670450769/docs/feature/service-allocation-readiness-and-ending/deliver/step-05-07-verification.md)
 separates those outcomes from the earlier spike measurements.
 
 Listener reports prove that a socket opened, not that the application can
