@@ -1,0 +1,40 @@
+BIN=/home/ubuntu/overdrive-worktrees/357ee52c8cab8252dd245471dd79a7901e00d3cd6bebcd70732eb120c34f745d/spike-scratch/metal-test-placement-module-decl/increment-a/target/release/deps/integration-19ef540ec4b3c364
+  [Nr] Name              Type            Address          Off    Size   ES Flg Lk Inf Al
+  [22] overdrive_test_placement PROGBITS        0000000000036be4 036be4 0001f6 00   A  0   0  1
+
+Hex dump of section 'overdrive_test_placement':
+  0x00036be4 696e7465 67726174 696f6e3a 3a696e74 integration::int
+  0x00036bf4 65677261 74696f6e 3a3a6265 74613a3a egration::beta::
+  0x00036c04 7265736f 6c766573 5f697473 5f6f776e resolves_its_own
+  0x00036c14 5f67726f 75700070 726f6265 00696e74 _group.probe.int
+  0x00036c24 65677261 74696f6e 3a3a696e 74656772 egration::integr
+  0x00036c34 6174696f 6e3a3a67 616d6d61 3a3a6f75 ation::gamma::ou
+  0x00036c44 7465725f 74657374 00636f72 6500696e ter_test.core.in
+  0x00036c54 74656772 6174696f 6e3a3a69 6e746567 tegration::integ
+  0x00036c64 72617469 6f6e3a3a 67616d6d 613a3a69 ration::gamma::i
+  0x00036c74 6e6e6572 5f776974 685f676c 6f623a3a nner_with_glob::
+  0x00036c84 6e657374 65645f76 69615f67 6c6f6200 nested_via_glob.
+  0x00036c94 636f7265 00696e74 65677261 74696f6e core.integration
+  0x00036ca4 3a3a696e 74656772 6174696f 6e3a3a61 ::integration::a
+  0x00036cb4 6c706861 3a3a6f75 72735f74 68656e5f lpha::ours_then_
+  0x00036cc4 74657374 00636772 6f75702d 64656661 test.cgroup-defa
+  0x00036cd4 756c7400 696e7465 67726174 696f6e3a ult.integration:
+  0x00036ce4 3a696e74 65677261 74696f6e 3a3a616c :integration::al
+  0x00036cf4 7068613a 3a746573 745f7468 656e5f6f pha::test_then_o
+  0x00036d04 75727300 6367726f 75702d64 65666175 urs.cgroup-defau
+  0x00036d14 6c740069 6e746567 72617469 6f6e3a3a lt.integration::
+  0x00036d24 696e7465 67726174 696f6e3a 3a616c70 integration::alp
+  0x00036d34 68613a3a 6f757273 5f746865 6e5f746f ha::ours_then_to
+  0x00036d44 6b696f00 6367726f 75702d64 65666175 kio.cgroup-defau
+  0x00036d54 6c740069 6e746567 72617469 6f6e3a3a lt.integration::
+  0x00036d64 696e7465 67726174 696f6e3a 3a616c70 integration::alp
+  0x00036d74 68613a3a 746f6b69 6f5f7468 656e5f6f ha::tokio_then_o
+  0x00036d84 75727300 6367726f 75702d64 65666175 urs.cgroup-defau
+  0x00036d94 6c740069 6e746567 72617469 6f6e3a3a lt.integration::
+  0x00036da4 696e7465 67726174 696f6e3a 3a616c70 integration::alp
+  0x00036db4 68613a3a 706c6169 6e5f6e6f 5f746573 ha::plain_no_tes
+  0x00036dc4 745f6174 74720063 67726f75 702d6465 t_attr.cgroup-de
+  0x00036dd4 6661756c 7400                       fault.
+
+ 21 overdrive_test_placement 000001f6  0000000000036be4  0000000000036be4  00036be4  2**0
+                  CONTENTS, ALLOC, LOAD, READONLY, DATA

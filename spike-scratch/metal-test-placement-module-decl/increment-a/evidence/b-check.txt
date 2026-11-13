@@ -1,0 +1,49 @@
+# b-check  cargo check --manifest-path spike-scratch/metal-test-placement-module-decl/increment-a/Cargo.toml --all-targets  exit: 0
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.15s
+     Running `target/debug/xtask metal run -- cargo check --manifest-path spike-scratch/metal-test-placement-module-decl/increment-a/Cargo.toml --all-targets`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+OVERDRIVE_METAL_RUN_ID=fcfc36f8bcc90a19f2a82930
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire exclusive physical-maintenance barrier (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_RUN_REGISTERED run_id=fcfc36f8bcc90a19f2a82930
+OVERDRIVE_METAL_LEASE_ACQUIRED token=fcfc36f8bcc90a19f2a82930 pid=2626426
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/amman-v2 -> ubuntu@151.115.99.251:/home/ubuntu/overdrive-worktrees/357ee52c8cab8252dd245471dd79a7901e00d3cd6bebcd70732eb120c34f745d
+
+sent 2,068,341 bytes  received 15,006 bytes  833,338.80 bytes/sec
+total size is 1,911,780,643  speedup is 917.65
+
+########## [bootstrap] materialising standalone .git (common dir 1.8G)
+
+sent 1,652,490 bytes  received 528,053 bytes  872,217.20 bytes/sec
+total size is 881,604,363  speedup is 404.30
+## marcus-sa/metal-test-placement-declare
+ M docs/feature/metal-test-placement-attribute/feature-delta.md
+ M docs/product/architecture/adr-0282-a-metal-test-placement-is-declared-on-the-test-and-recorded-in-its-binary.md
+ M docs/product/architecture/adr-0283-the-tests-of-a-module-share-one-guest-through-a-per-module-owner-process.md
+ M docs/product/architecture/adr-0284-a-shared-guest-serves-one-test-at-a-time-and-is-never-reused-after-a-failure.md
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+OVERDRIVE_METAL_RUN_STARTED run_id=fcfc36f8bcc90a19f2a82930
+    Updating crates.io index
+     Locking 8 packages to latest Rust 1.95.0 compatible versions
+      Adding syn v2.0.119 (available: v3.0.10)
+ Downloading crates ...
+  Downloaded syn v3.0.10
+   Compiling proc-macro2 v1.0.107
+   Compiling unicode-ident v1.0.27
+   Compiling quote v1.0.47
+    Checking pin-project-lite v0.2.17
+   Compiling syn v3.0.10
+   Compiling syn v2.0.119
+   Compiling probe-macros v0.0.0 (/home/ubuntu/overdrive-worktrees/357ee52c8cab8252dd245471dd79a7901e00d3cd6bebcd70732eb120c34f745d/spike-scratch/metal-test-placement-module-decl/increment-a/macros)
+   Compiling tokio-macros v2.7.2
+    Checking placement-decl-probe v0.0.0 (/home/ubuntu/overdrive-worktrees/357ee52c8cab8252dd245471dd79a7901e00d3cd6bebcd70732eb120c34f745d/spike-scratch/metal-test-placement-module-decl/increment-a)
+    Checking tokio v1.54.1
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 3.85s
+OVERDRIVE_METAL_RUN_COMPLETE run_id=fcfc36f8bcc90a19f2a82930 exit_code=0 cause=command_returned

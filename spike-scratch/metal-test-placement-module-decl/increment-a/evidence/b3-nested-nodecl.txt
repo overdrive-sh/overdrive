@@ -1,0 +1,71 @@
+# b3-nested-nodecl  cargo check --manifest-path=spike-scratch/metal-test-placement-module-decl/increment-a/Cargo.toml --features neg-nested-nodecl --test neg_nested_nodecl  exit: 101
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.21s
+     Running `target/debug/xtask metal run -- cargo check --manifest-path=spike-scratch/metal-test-placement-module-decl/increment-a/Cargo.toml --features neg-nested-nodecl --test neg_nested_nodecl`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+OVERDRIVE_METAL_RUN_ID=ca4496c10b73e1456a20b4bd
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire exclusive physical-maintenance barrier (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_RUN_REGISTERED run_id=ca4496c10b73e1456a20b4bd
+OVERDRIVE_METAL_LEASE_ACQUIRED token=ca4496c10b73e1456a20b4bd pid=2648910
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/amman-v2 -> ubuntu@151.115.99.251:/home/ubuntu/overdrive-worktrees/357ee52c8cab8252dd245471dd79a7901e00d3cd6bebcd70732eb120c34f745d
+
+sent 2,005,577 bytes  received 46,669 bytes  216,025.89 bytes/sec
+total size is 1,911,830,479  speedup is 931.58
+
+########## [bootstrap] materialising standalone .git (common dir 1.8G)
+
+sent 473,590 bytes  received 58,644 bytes  212,893.60 bytes/sec
+total size is 881,678,904  speedup is 1,656.56
+## marcus-sa/metal-test-placement-declare
+ M docs/feature/metal-test-placement-attribute/feature-delta.md
+ M docs/product/architecture/adr-0282-a-metal-test-placement-is-declared-on-the-test-and-recorded-in-its-binary.md
+ M docs/product/architecture/adr-0283-the-tests-of-a-module-share-one-guest-through-a-per-module-owner-process.md
+ M docs/product/architecture/adr-0284-a-shared-guest-serves-one-test-at-a-time-and-is-never-reused-after-a-failure.md
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+OVERDRIVE_METAL_RUN_STARTED run_id=ca4496c10b73e1456a20b4bd
+    Updating crates.io index
+     Locking 8 packages to latest Rust 1.95.0 compatible versions
+      Adding syn v2.0.119 (available: v3.0.10)
+   Compiling proc-macro2 v1.0.107
+   Compiling quote v1.0.47
+   Compiling unicode-ident v1.0.27
+   Compiling placement-decl-probe v0.0.0 (/home/ubuntu/overdrive-worktrees/357ee52c8cab8252dd245471dd79a7901e00d3cd6bebcd70732eb120c34f745d/spike-scratch/metal-test-placement-module-decl/increment-a)
+    Checking pin-project-lite v0.2.17
+warning: placement-decl-probe@0.0.0: RUSTC_VERSION rustc 1.95.0 (59807616e 2026-04-14)
+   Compiling syn v3.0.10
+   Compiling syn v2.0.119
+   Compiling probe-macros v0.0.0 (/home/ubuntu/overdrive-worktrees/357ee52c8cab8252dd245471dd79a7901e00d3cd6bebcd70732eb120c34f745d/spike-scratch/metal-test-placement-module-decl/increment-a/macros)
+   Compiling tokio-macros v2.7.2
+    Checking tokio v1.54.1
+error[E0425]: cannot find value `__OVERDRIVE_MODULE_PLACEMENT` in this scope
+ --> tests/neg_nested_nodecl/m.rs:8:5
+  |
+8 |     #[overdrive_test]
+  |     ^^^^^^^^^^^^^^^^^ not found in this scope
+  |
+  = note: this error originates in the attribute macro `overdrive_test` (in Nightly builds, run with -Z macro-backtrace for more info)
+help: consider importing this constant
+  |
+6 +     use crate::neg_nested_nodecl::m::__OVERDRIVE_MODULE_PLACEMENT;
+  |
+
+warning: unused import: `overdrive_test`
+ --> tests/neg_nested_nodecl/m.rs:1:20
+  |
+1 | use probe_macros::{overdrive_test, shared_guest};
+  |                    ^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+For more information about this error, try `rustc --explain E0425`.
+warning: `placement-decl-probe` (test "neg_nested_nodecl") generated 1 warning
+warning: placement-decl-probe@0.0.0: RUSTC_VERSION rustc 1.95.0 (59807616e 2026-04-14)
+error: could not compile `placement-decl-probe` (test "neg_nested_nodecl") due to 1 previous error; 1 warning emitted
+OVERDRIVE_METAL_RUN_COMPLETE run_id=ca4496c10b73e1456a20b4bd exit_code=101 cause=command_returned

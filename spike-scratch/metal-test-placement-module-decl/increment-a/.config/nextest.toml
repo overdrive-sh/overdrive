@@ -1,0 +1,18 @@
+# Probe-local nextest profile: the repo's Metal wrapper, applied to the probe
+# workspace (nextest reads `.config/nextest.toml` from the workspace root, which
+# for this probe is this directory, not the repo root).
+experimental = ["wrapper-scripts"]
+
+[profile.default]
+fail-fast = false
+retries = 0
+status-level = "all"
+final-status-level = "all"
+
+[scripts.wrapper.metal]
+command = { command-line = "../../../infra/metal/test-wrapper.sh", relative-to = "workspace-root" }
+target-runner = "within-wrapper"
+
+[[profile.default.scripts]]
+filter = 'all()'
+run-wrapper = "metal"
