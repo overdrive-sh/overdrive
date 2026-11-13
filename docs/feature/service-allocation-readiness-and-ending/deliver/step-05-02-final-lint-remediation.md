@@ -2,8 +2,9 @@
 
 ## Scope and approved contract
 
-This remediation closes the stale private `xtask::dst_lint` recognizer found by
-the final workspace lint after step 05-02 was approved. It does not change
+This remediation closes the stale recognition condition in the existing
+`xtask::dst_lint` scanner found by the final workspace lint after step 05-02
+was approved. It does not change
 production code, a public or cross-crate interface, the probe gate, or the
 step's accepted behavior.
 
@@ -15,7 +16,7 @@ clone to `GuestListenerReports`, and calls
 `compose_and_probe_runner_gate_with_reports`. That helper constructs
 `ProbeRunner` with the supplied reports port and awaits `runner.probe()` at
 `probe_runner_boot.rs:75-92`. The same board is passed to `compose_vm_driver`
-later in `lib.rs`.
+at `lib.rs:3322-3334`.
 
 The existing `compose_and_probe_runner_gate` helper remains a valid gate entry
 point: it delegates to the same reports helper. The required invariant is that
@@ -85,3 +86,20 @@ the unrelated, unchanged `xtask/src/metal_run_isolation_conformance.rs:519`.
 The changed scanner file passes its direct rustfmt check; the unrelated file was
 left untouched. Mutation testing was not run, consistent with the explicit
 step-level waiver.
+
+## Strict Clippy follow-up
+
+The final workspace strict Clippy rerun also found `clippy::doc_markdown` on
+the two exact `/// CONTRACT_SHAPE: pure-function.` declarations. Reproducing
+with `cargo clippy -p xtask --all-targets -- -D warnings` produced exactly
+those two diagnostics. The marker text is repository-mandated test metadata,
+so both declarations remain byte-for-byte exact. Each affected test now has
+the function-local
+`#[allow(clippy::doc_markdown, reason = "exact per-test contract declaration")]`;
+no module or file allowance was added. Scanner behavior,
+test setup, and regression assertions are unchanged.
+
+The same strict Clippy selection passed through canonical Metal from the
+isolated worktree after the two local allowances were added (run
+`263862225a837f0b81f17bb5`, terminal `exit_code=0`). The direct formatting
+check `rustfmt --edition 2024 --check xtask/src/dst_lint.rs` also passed.

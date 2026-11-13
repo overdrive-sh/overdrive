@@ -5729,6 +5729,7 @@ mod tests {
 
     /// The shared-board composition's exact helper name satisfies the gate.
     /// CONTRACT_SHAPE: pure-function.
+    #[allow(clippy::doc_markdown, reason = "exact per-test contract declaration")]
     #[test]
     fn probe_gate_helper_with_reports_qualified_path_satisfies_contract() {
         let source = r"
@@ -5750,6 +5751,7 @@ mod tests {
 
     /// A prefix/lookalike helper is not an approved gate call.
     /// CONTRACT_SHAPE: pure-function.
+    #[allow(clippy::doc_markdown, reason = "exact per-test contract declaration")]
     #[test]
     fn probe_gate_helper_lookalike_name_does_not_satisfy_contract() {
         let source = r"
