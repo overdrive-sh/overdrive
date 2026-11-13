@@ -1,6 +1,6 @@
 ---
 title: microVMs
-description: Linux microVM workloads run under Cloud Hypervisor with hardware isolation, guest-reported readiness and exit status, and vsock networking through shared node resources. Run them as jobs or services with a matching guest kernel, module, and init.
+description: Linux microVM workloads run under Cloud Hypervisor with hardware isolation, a guest boot signal, workload exit reports, and vsock networking through shared node resources.
 ---
 
 A `[vm]` workload runs as a Cloud Hypervisor microVM: its own Linux kernel, its
@@ -38,16 +38,19 @@ The failure this driver is built to avoid: a VM boots, runs a workload that
 crashes, and shuts down cleanly — while the platform reports success. The
 hypervisor exited zero. The workload did not.
 
-Overdrive reports the guest's outcome, not the hypervisor's. A small agent runs
+Overdrive reports the guest's outcome, not the hypervisor's. Init runs
 as process 1 inside the guest. It opens a channel to the host over vsock before
 the guest has any network, signals once the guest has booted, and reports the
 workload's real exit status when it ends. Two consequences follow. The allocation
 reaches `Running` only after that boot signal arrives, so a guest that never
 starts its init never reads as running. And the terminal state carries the
 workload's own exit code, so a crash inside the guest shows up as a crash in
-`overdrive workload describe`. Init writes EXIT and closes its beacon channel
-before powering off. The host drains the report before finalizing the VMM exit;
-a zero VMM exit is not evidence of a zero workload exit.
+`overdrive workload describe`. For a Service, `Running` means the guest booted,
+not that its application opened every declared listener. The startup gate
+establishes `Stable`, and readiness decides traffic eligibility. Init writes
+EXIT and closes its beacon channel before powering off. The host drains the
+report before finalizing the VMM exit. A zero VMM exit is not evidence of a
+zero workload exit.
 
 This is what makes a microVM a first-class workload rather than a black box the
 platform launches and hopes for. Restart and backoff decisions use that guest-reported exit signal.

@@ -1,0 +1,165 @@
+---
+title: When a microVM Service is ready
+description: Why Overdrive waits for every declared guest listener, keeps restart ownership separate from probe observation, and bounds deploy by progress rather than restart exhaustion.
+date: 2026-11-13
+author: The Overdrive team
+summary: A VM boot signal does not prove that a Service can accept traffic. We replaced a two-second TCP poll with guest listener reports and fixed the ownership of probe cleanup, restart, and deploy verdicts.
+---
+
+A microVM can boot before its application opens a socket. Overdrive calls that
+booted allocation `Running`. For a Service, `Stable` means its startup gate has
+passed. The distinction matters because a Service with a startup gate can
+become a backend only after its own `Stable` claim is committed.
+
+Our startup check once dialed the first declared listener every two seconds.
+That avoided calling a Service healthy merely because the VM booted, but it
+could delay a listener that opened in milliseconds until the next tick. It also
+assumed TCP. A UDP-first Service could never pass that check, and a second
+declared listener could remain closed after the Service became `Stable`.
+
+We chose a guest report for **every declared TCP and UDP listener**. The guest
+observes a TCP socket when `listen()` succeeds and a UDP socket when an explicit
+`bind()` succeeds. It sends the protocol and port to the host on the VM's beacon
+channel. The host counts only pairs the Service declared. One startup probe row
+then carries the result into the existing lifecycle decisions. This removes the
+two-second poll from the default startup path without treating VM boot as
+application readiness.
+
+We also rejected making a Service with no declared startup probe `Stable` as
+soon as it reached `Running`. A workload that exits before opening any
+listener would then look successful. A minimum healthy window after a listener
+opens could narrow a fast-crash race, but it would add a clock floor to every
+start and a new setting to the spec. We kept the startup gate event-driven and
+left sustained application health to explicit readiness and liveness checks.
+
+## The end of an attempt must release its probes
+
+The old allocation ending path exposed a separate failure. The probe runner
+kept an in-memory supervisor for each allocation, including allocations with
+no probe descriptors. A natural guest exit wrote a terminal allocation row
+through the exit observer, but that path did not cancel the supervisor. A
+restart created a fresh allocation ID and a second supervisor. The dead
+allocation could keep probing through backoff or for the rest of the control
+plane process.
+
+We put cancellation with the component that observes or authors each ending.
+The exit observer releases supervision for a natural exit even if the terminal
+row cannot be written. The action shim releases it for endings it authors.
+Probe registration happens before the guest can start its application, so a
+fast exit cannot slip between execution and supervisor registration. The
+[lifecycle rules](/docs/concepts/architecture#health-checks-close-a-second-loop)
+also keep `ServiceLifecycle` from turning a crashed allocation into a startup
+probe failure after the fact.
+
+We considered making the probe runner watch terminal rows. That would need a
+list, a watch, and a relist to cover missed events, yet a failed row write
+would still hide an ending. Cleaning only in the restart path would leave a
+crash with no successor probing a dead guest. The exit observer already owns
+the natural-exit fact and the exact driver, so we kept the release there. The
+cost is an explicit hook contract for each ending author. A future ending path
+must honor it.
+
+## A listener report needs a real guest boundary
+
+We tested kernel events before choosing the report mechanism. On a native
+Linux `7.0.0-38-generic` host, a TCP listen hook matched all **13** predicted
+cases. Two UDP post-bind hooks matched another **13**, including explicit
+`bind(0)` and a failed second bind. TCP bind without `listen()` did not count
+as a listener. UDP autobind did not count either. These results favor the
+event the kernel already emits over an in-guest `/proc/net` poll, which can
+miss a socket that opens and closes between samples. A post-bind hook for TCP
+would report too early, while a pre-bind hook for UDP could report a bind that
+later fails. The [hook findings](https://github.com/overdrive-sh/overdrive/blob/dca2350aad3a9dc5994e1788605fb4903fa8c127/docs/feature/service-allocation-readiness-and-ending/spike/findings-listen-hooks.md)
+record the cases and limits.
+
+The guest already has a beacon channel for `READY` and `EXIT`. We added
+`LISTEN <tcp|udp> <port>` to that channel instead of creating a new node
+listener and per-VM connection. A real-guest experiment carried **100,000**
+paced listener lines in order, with a **138.8 microsecond p99 round trip** from
+guest write to host acknowledgement. That is a round trip on the test
+substrate, not a one-way production latency. Under saturation, two unguarded
+writers corrupted **10 of 200,000** lines. One ordered writer preserved every
+line in the corresponding run. We also saw `LISTEN` arrive after `EXIT` in
+**185 of 300** boots without a final drain. The guest therefore drains pending
+listener events before `EXIT`, and the host reads past `LISTEN` until `EXIT`
+or EOF. Attaching hooks after the workload ran missed both reports in **50 of
+50** negative-control boots. The [guest-signal findings](https://github.com/overdrive-sh/overdrive/blob/dca2350aad3a9dc5994e1788605fb4903fa8c127/docs/feature/service-allocation-readiness-and-ending/spike/findings-guest-signal.md)
+show why those ordering rules matter.
+
+Init opens its own transport sockets before the application starts. Reporting
+those sockets would be a false startup signal. We attach the listen hooks to
+the workload's guest cgroup and create the workload directly inside it. A
+native experiment observed exact workload and child reports in **1,000 of
+1,000** boots and zero init-originated reports. The guest's existing root
+programs stayed effective through link attachment. The same-object hooks and
+workload placement added **0.88 ms at p50** across 40 interleaved boots on
+that guest kernel. A second BPF object load added **20.4 ms at p50**, so we
+kept the hooks in the object init already loads. An earlier boot-cost probe
+found **0.36 ms at p50** for the listen additions alone against a matching
+toolchain baseline. The two numbers measure different increments. The
+[cgroup findings](https://github.com/overdrive-sh/overdrive/blob/dca2350aad3a9dc5994e1788605fb4903fa8c127/docs/feature/service-allocation-readiness-and-ending/spike/findings-workload-cgroup.md)
+and [boot-cost findings](https://github.com/overdrive-sh/overdrive/blob/dca2350aad3a9dc5994e1788605fb4903fa8c127/docs/feature/service-allocation-readiness-and-ending/spike/findings-boot-cost.md)
+give their separate baselines.
+
+## One probe row, one restart authority
+
+We could have added a new listener observation row family or taught
+`ServiceLifecycle` to read the host's listener set directly. Either path would
+need new wake and deadline machinery to reach the startup decision. We kept
+the probe runner as the sole writer of startup probe rows. It writes `Pass`
+when every declared listener arrives. If one is missing, it writes the first
+`Fail` at the **60-second** default startup deadline and names the missing
+listeners. Until then, `workload describe` has no startup result for the
+attempt. We chose that sparse record over writing roughly 29 extra failure
+rows, router wakes, and evaluations for a never-ready attempt solely to show
+pre-deadline progress.
+
+`ServiceLifecycle` commits `Stable` only for a `Running` allocation whose
+startup passed. A startup-probed allocation cannot become a backend before
+that committed claim. A readiness probe can hold traffic longer. Liveness
+starts after `Stable`. If startup or liveness fails, `ServiceLifecycle` stops
+the allocation. `WorkloadLifecycle` alone decides whether to restart it and
+names the failure when the shared restart budget is spent. A stopped attempt
+that can restart is not the Service deploy verdict.
+
+The deploy stream has its own clock. It waits for `Stable` or another recorded
+verdict until `max(90 seconds, startup deadline + 30 seconds)` from stream
+open. At the default startup deadline, that is **90 seconds**. The timeout
+can precede restart give-up, so it says the Service did not become `Stable`
+within the wait and labels any observed `last attempt` as context. It does
+not claim that the restart authority has finished. A repeat deploy of the
+same spec first reads the current attempt's recorded verdict, then waits for
+new events if none exists. This also lets an unchanged deploy report a stored
+`Stable` without waiting for an event that will never be sent again.
+
+## What the native run establishes
+
+We drove the built default-feature `overdrive` binary with a checked-in
+Service spec that declares one TCP listener and no startup probe. The guest
+reported `tcp:18081`, the deploy command returned `Stable`, and
+`workload describe` showed a passing guest-listener startup probe. That one
+run settled in **1,363 ms**. It is one native outcome, not a cold-start SLO
+or a latency distribution.
+
+The paired never-listening Service named missing `tcp:18998` after each
+60-second startup window. Its first deploy returned the expected 90-second
+progress timeout while restarts continued. Public `workload describe` later
+showed **six allocation attempts**, with the first five stopped by startup
+and the last failed. A byte-identical redeploy returned the recorded
+`StartupProbeFailed` verdict. Both captures reported zero owned resource
+deltas after cleanup. The [native verification record](https://github.com/overdrive-sh/overdrive/blob/dca2350aad3a9dc5994e1788605fb4903fa8c127/docs/feature/service-allocation-readiness-and-ending/deliver/step-05-07-verification.md)
+separates those outcomes from the earlier spike measurements.
+
+Listener reports prove that a socket opened, not that the application can
+serve a request. A loopback bind or a socket created outside the workload
+cgroup does not pass the default gate. UDP autobind produces no report, and
+the hooks cannot read `IPV6_V6ONLY` from an IPv6 wildcard socket. The guest
+event ring can drop a report under saturation, so a missing report fails
+closed at the startup deadline. Operators with lazy listeners can opt out
+explicitly, and operators who need application-level health should declare
+a readiness probe. A workload can also open every listener and exit before
+the exit observer records its end. If the startup `Pass` and `Stable` commit
+win that race, deploy can report `Stable` before the crash appears. We have
+not measured the frequency of that window in production, nor a distribution
+of end-to-end Service startup times. [The deploy guide](/docs/how-to/deploy-a-workload#health-checks)
+shows both choices.

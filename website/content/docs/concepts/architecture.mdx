@@ -154,11 +154,12 @@ Eight reconcilers run today:
   places work with a first-fit walk over nodes (the same algorithm the
   `overdrive-scheduler` crate defines) and backs off restarts on repeated
   failure.
-- **ServiceLifecycle** — drives a service through its health gates. It reads the
-  latest probe results from observation and decides whether an allocation has
-  passed startup (becomes `Stable`), is ready to receive traffic, or has
-  exhausted its liveness budget and must be restarted — emitting
-  `RestartAllocation` or marking the service failed. See
+- **ServiceLifecycle** — reads startup, readiness, and liveness probe rows. It
+  commits `Stable` after startup passes or an explicit opt-out, gates a
+  startup-probed backend on committed `Stable` and readiness, and stops an
+  allocation when its startup deadline or liveness threshold fails.
+  WorkloadLifecycle owns restart and
+  give-up under one budget. See
   [Health checks close a second loop](#health-checks-close-a-second-loop).
 - **BackendDiscoveryBridge** and **ServiceMapHydrator** — together they turn live
   allocations into dataplane state, feeding the service map the eBPF programs
@@ -198,8 +199,9 @@ execution modes.
 The Cloud Hypervisor process runs non-root under seccomp, Landlock, and the
 allocation's cgroup. It shares the host network namespace. Guest capture and
 a kernel forwarder transport application flows over vsock without a per-VM
-host network namespace, veth, TAP, or bridge. The driver reports guest readiness
-and the workload's guest-reported exit status, not a successful VMM exit.
+host network namespace, veth, TAP, or bridge. The driver reports guest boot
+completion and the workload's guest-reported exit status. A successful VMM exit
+does not stand in for the workload's exit status.
 
 The host agent, VMM, and helpers are processes. They do not provide a supported
 host-process workload driver. VMM absence can leave the registry empty while
@@ -215,22 +217,33 @@ future work.
 
 ## Health checks close a second loop
 
-A service declares health-check probes — startup, readiness, and liveness — and
-the worker runs them. When an allocation reaches running, the worker spawns one
-task per declared probe; each ticks on its own interval and executes the probe
-through a port trait. TCP and HTTP probes dial through the guest-network owner. An HTTP probe
-issues a plain-HTTP GET over the guest stream. Command-execution probes are
-unbuilt. The result of every tick is written to the ObservationStore as
-a probe-result row.
+A Service has three health-check roles. Startup gates `Stable`. Readiness gates
+traffic after `Stable`. Liveness begins at `Stable` and can stop an unhealthy
+allocation. The worker's probe runner observes and writes probe-result rows. An
+explicit TCP probe connects to a port, and an HTTP probe sends a plain-HTTP GET
+through the guest-network owner. Command-execution probes are unbuilt.
 
-That write is what closes the loop. The probe runner does not decide anything —
-it only observes. The **ServiceLifecycle** reconciler reads those probe results
-on the next tick and makes the decisions: a service is not `Stable` until its
-startup probes pass, not sent traffic until readiness passes, and is restarted
-once its liveness failures exhaust the budget. The same intent/observation
-discipline applies — probing is observation, the verdict is a reconciler acting
-on it — which is why the health-check logic is a pure reconcilable function and
-not ad-hoc timers scattered through the worker.
+When the operator omits startup probes, the worker runs a platform-supplied
+guest-listener startup check. Guest kernel hooks report each declared TCP
+`listen()` and explicit UDP `bind()` over the VM's beacon channel. The host
+keeps only declared protocol-and-port pairs for that allocation. The probe
+runner writes a startup `Pass` when every declared listener has been reported,
+or a `Fail` at the 60-second deadline naming the missing listeners. The Service
+does not become `Stable` or backend-eligible while a declared listener remains
+unreported. An explicitly empty startup list opts out of this gate.
+
+The **ServiceLifecycle** reconciler reads the probe rows and commits `Stable`
+while the allocation is `Running` and startup has passed, or when the operator
+explicitly opts out of startup checks. For a startup-probed allocation,
+committed `Stable` precedes backend eligibility. ServiceLifecycle then applies
+the readiness result. On a startup deadline or terminal liveness failure, it
+stops the live allocation. **WorkloadLifecycle** alone restarts it or records
+give-up. The exit observer cancels probe supervision on
+a natural VM exit, including when a terminal row write fails. This prevents a
+dead allocation's probe tasks from persisting into its successor's lifetime.
+Broker submissions wake the convergence loop when they arrive, while its cadence
+tick remains a backstop. Probe rows stay observations, and reconciler decisions
+stay separate from the worker's measurements.
 
 ## Networking uses separate mechanisms for separate boundaries
 

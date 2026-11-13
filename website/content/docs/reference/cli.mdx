@@ -70,13 +70,25 @@ overdrive deploy <SPEC> [--detach]
 | `<SPEC>` | Path to a TOML spec file. |
 | `--detach` | Wait only for the IntentStore commit; do not stream lifecycle events. |
 
-Deploy is idempotent on the spec's content hash. A spec the cluster has not seen
-reports `Inserted`; re-deploying an identical spec reports `Unchanged` and
-commits nothing. By default the command streams lifecycle events until the
-workload converges; `--detach` consumes the commit acknowledgement and exits.
+Deploy is idempotent on the spec's content hash. A new spec reports `Inserted`.
+Re-deploying identical content reports `Unchanged` and commits nothing.
+`--detach` consumes the commit acknowledgement and exits. Streaming Service
+deploy waits for `Stable`, a recorded give-up or stop, or its progress deadline.
+On an unchanged Service, the stream reads the current allocation's recorded
+verdict before waiting for new events.
 
-The command exits `0` on an `Inserted` or `Unchanged` outcome and `2` on a
-transport failure or a server-side validation error.
+For a Service, an omitted startup section gates `Stable` on the guest reporting
+every declared TCP and UDP listener. `Running` alone does not satisfy this gate.
+`health_check.startup = []` explicitly opts out. The default startup deadline
+is 60 seconds. The Service stream's progress deadline is the greater of 90
+seconds and the startup deadline plus 30 seconds. A timeout does not end the
+restart lifecycle. Its optional `last attempt` detail is context, not the final
+give-up cause. Use `overdrive workload describe <ID>` to inspect later attempts.
+
+A streaming Service deploy exits `0` on `Stable` or an operator stop and `1`
+on a Service failure or progress timeout. A local TOML parse error also exits
+`1`. Pre-acceptance transport and server errors exit `2`. `--detach` reports
+only the intent commit, so its success does not assert Service health.
 
 ## `overdrive job`
 

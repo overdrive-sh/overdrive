@@ -1,6 +1,6 @@
 ---
 title: Deploy a workload
-description: Start a single-node Overdrive control plane, write a workload spec with health checks, and deploy it with the overdrive CLI — the end-to-end path for a Linux microVM.
+description: Start a single-node Overdrive control plane, declare service listeners and health checks, and deploy a Linux microVM with the CLI.
 ---
 
 This guide takes you from an empty machine to a deployed workload using the
@@ -95,24 +95,45 @@ port = 8080
 
 ### Health checks
 
-Health-check probes tell the platform when a service has started, when it is
-ready to receive traffic, and whether it is still alive. They attach to services
-under three roles. A run-to-completion `[job]` takes none — its exit code already
-answers "did it succeed?".
+Health checks answer three different questions for a Service. A run-to-completion
+`[job]` takes none because its exit code reports the job's outcome.
 
-- **Three roles.** `startup` gates "has it come up?", `readiness` gates "send it
-  traffic", and `liveness` gates "restart it if this fails".
+- **Three roles.** `startup` gates `Stable` and backend eligibility. `readiness`
+  decides whether a stable allocation can receive traffic. `liveness` starts
+  only after `Stable` and can stop an unhealthy allocation. WorkloadLifecycle
+  owns the subsequent restart and its shared restart budget.
 - **Two mechanics.** `type = "tcp"` connects to a `port`. `type = "http"`
   issues a plain-HTTP GET to a `path` starting with `/` on a `port`. Both dial
   through the guest-network owner. In-guest command probes are unbuilt.
-- **A startup probe is inferred by default.** Declare none and the platform
-  synthesises a single TCP probe against your first listener, so a service is
-  never reported "up" before something is actually listening. Write
-  `health_check.startup = []` to opt out.
-- **Each probe is tunable.** `timeout_seconds` (default 5), `interval_seconds`
-  (startup 2, readiness 2, liveness 10), and `max_attempts` (default 30 — a 60s
-  startup deadline), plus `failure_threshold` for liveness (default 3) and
-  `success_threshold` for readiness (default 1).
+- **Omitting startup uses the guest listener gate.** The guest reports each
+  declared TCP listener after `listen()` and each declared UDP listener after an
+  explicit `bind()`. The default gate passes when the host has received reports
+  for **every** declared listener. A `Running` VM has booted, but a Service with
+  this gate reaches `Stable` only after those reports arrive. A listener that
+  never opens prevents `Stable` and backend eligibility. The default startup
+  deadline is 60 seconds. To opt out for a workload that opens a listener lazily,
+  write `health_check.startup = []` at the top level of the TOML spec, before
+  `[service]`. The opt-out reaches `Stable` at `Running` and has no listener
+  startup gate.
+- **Explicit TCP and HTTP probes remain available.** Declare
+  `[[health_check.startup]]` to use your own startup check. TCP and HTTP probes
+  accept `timeout_seconds` (default 5), `interval_seconds` (startup 2,
+  readiness 2, liveness 10), and `max_attempts` (default 30, giving a
+  60-second startup deadline at the default startup interval). Liveness also
+  accepts `failure_threshold` (default 3), and readiness accepts
+  `success_threshold` (default 1). `guest_listeners` is a platform-only mechanic,
+  so an operator cannot select it as an explicit TOML probe.
+
+The guest listener gate observes sockets created by tasks in the workload's
+guest cgroup. A loopback bind, UDP autobind, or a socket created after a task
+moves out of that cgroup does not satisfy it. Reports identify a protocol and
+port, not whether the application can answer a request. Declare a readiness
+probe when traffic should wait for application-level health. If a guest report
+is lost, the gate does not guess that the listener opened. It fails at the
+startup deadline. A report records an opening, not continued socket health.
+The hooks cannot distinguish an IPv6 wildcard socket with `IPV6_V6ONLY` from
+one that also accepts IPv4, so that report alone does not prove IPv4
+reachability. Overdrive does not support IPv6 service traffic yet.
 
 ## Supply the guest artifacts
 
@@ -169,8 +190,12 @@ hypervisor's.
 		```
 
 		The CLI submits the spec, the control plane commits it to the IntentStore,
-		and the command streams the resulting lifecycle events until the workload
-		converges. It reports the workload id, the derived intent key
+		and the command streams lifecycle events until it receives a verdict or
+		reaches the progress deadline. A Service returns success when it reaches
+		`Stable`. A progress timeout returns exit code `1` and does not stop the
+		Service's restart lifecycle. Check `overdrive workload describe payments`
+		for the latest allocation state. The command reports the workload id and
+		the derived intent key
 		(`workloads/payments`), the canonical `spec_digest`, and an outcome of
 		`Inserted` for a spec the cluster has not seen before.
 	</Step>
@@ -181,11 +206,14 @@ hypervisor's.
 		overdrive deploy payments.toml
 		```
 
-		The outcome is now `Unchanged`. Deploy is idempotent on the spec's content
-		hash: an identical spec commits nothing new. Edit the file — change the
+		The outcome is `Unchanged`. Deploy is idempotent on the spec's content
+		hash: an identical spec commits nothing new. The Service stream reads the
+		current allocation's recorded verdict after subscribing to new events. It
+		can therefore report an existing `Stable`, give-up failure, or operator stop
+		without waiting for another event. If the Service is still starting, the
+		command waits under a fresh progress deadline. Edit the file — change the
 		args, bump the replica count, adjust a probe — and the next deploy reports
-		`Inserted` against the new digest. This is what makes deploy safe to run
-		from a script or a CI job that cannot know whether the spec already landed.
+		`Inserted` against the new digest.
 	</Step>
 	<Step>
 		**Skip the event stream.** For a script that wants the commit
@@ -202,11 +230,18 @@ hypervisor's.
 	</Step>
 </Steps>
 
-<Callout type="info" title="Exit codes are script-friendly">
-	`deploy` exits `0` on an `Inserted` or `Unchanged` outcome, `1` when the CLI
-	rejects the spec before sending it, and `2` on a transport or server-side
-	failure. A script can branch on the exit code to tell a bad spec from a
-	request that never landed.
+<Callout type="info" title="Service deploy waits for a verdict">
+	`Inserted` and `Unchanged` describe the intent commit, not service health.
+	A streaming Service deploy exits `0` on `Stable` or an operator stop, `1` on
+	a Service failure or progress timeout, and `2` for transport or server-side
+	pre-acceptance errors. A locally rejected TOML spec also exits `1`.
+	`--detach` waits only for the commit acknowledgement. The Service progress
+	deadline is `max(90 seconds, startup deadline + 30 seconds)`, counted from
+	stream open. It is 90 seconds with the default 60-second startup deadline.
+	The CLI allows another 30 seconds for its HTTP request. The stream can time
+	out before the restart budget is spent, and its optional `last attempt` block
+	is context rather than the final failure cause. A later deploy can read the
+	recorded give-up verdict.
 </Callout>
 
 ## Inspect what you deployed

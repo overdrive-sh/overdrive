@@ -237,14 +237,16 @@ the producer-push path from
 Eight reconcilers run in `overdrive serve`:
 
 - **WorkloadLifecycle** — drives allocations toward the declared replica count
-  and owns every restart. A crash and a liveness kill both draw down its one
-  `restart_counts` budget, and it backs off on repeated failure. It is the sole
-  restart authority; no other reconciler restarts anything.
+  and owns every restart. A pre-startup crash, a startup-probe stop, and a
+  liveness-probe stop draw on its one restart budget. It backs off on repeated
+  failure and records the final cause when the budget is spent.
 - **ServiceLifecycle** — drives a service through its health gates from probe
-  results: not `Stable` until startup passes, not sent traffic until readiness
-  passes. On a terminal liveness failure it emits `StopAllocation` and stops
-  there — the restart belongs to WorkloadLifecycle's single budget, not the
-  service layer.
+  results: no `Stable` before startup passes, except for the explicit opt-out.
+  A startup-probed allocation is not backend-eligible until that claim is
+  committed. Readiness then decides whether the backend receives traffic. On a
+  startup deadline or terminal liveness failure it emits
+  `StopAllocation` for the live allocation. WorkloadLifecycle makes the restart
+  decision.
 - **BackendDiscoveryBridge** — turns live allocations into `service_backends`
   observation rows.
 - **ServiceMapHydrator** — programs the eBPF service map when the backend set
