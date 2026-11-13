@@ -314,11 +314,13 @@ not describe them as present until there is:
 - **Other guest runtimes.** Non-Linux guest networking, unikernel, and WASM
   drivers are unbuilt. Linux microVMs run through Cloud Hypervisor.
 - **The policy engine, native telemetry, and the LLM self-healing agent.** Each
-  is part of the design. None is wired into `serve`. The
-  [public ingress gateway](/docs/concepts/public-ingress-gateway) is wired
-  and runs when `serve` receives the gateway flags.
-- **HTTP/2 and automated certificates at the gateway.** The gateway speaks
-  HTTP/1.1 and reads certificates from files you supply.
+  is part of the design. None is wired into `serve`.
+- **HTTP/2 and automated certificates at the
+  [public ingress gateway](/docs/concepts/public-ingress-gateway).** The gateway
+  speaks HTTP/1.1 and reads certificates from files you supply. Issue
+  [#341: HTTP/2 and gRPC on the public listener](https://github.com/overdrive-sh/overdrive/issues/341) tracks HTTP/2,
+  and issue [#57: an embedded ACME client](https://github.com/overdrive-sh/overdrive/issues/57) tracks automated
+  certificates.
 - **Presenting workload identity on every path.** The built-in certificate
   authority issues, holds, and audits a SPIFFE SVID for every running allocation,
   and the mesh dataplane presents it on the wire in both directions — a node-agent

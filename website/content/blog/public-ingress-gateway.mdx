@@ -12,7 +12,8 @@ between workloads. It says nothing about a browser on the internet that wants to
 reach one of them.
 
 The public ingress gateway closes that gap. It runs inside `overdrive serve`,
-terminates TLS 1.3 on TCP/443 for a hostname you name in a Route, and relays each
+terminates TLS 1.3 on TCP/443 for a hostname you name in a Route (the document
+that maps a public hostname to a Service), and relays each
 HTTP/1.1 request to a VM Service over the same mesh. The guest sees plaintext
 HTTP. This post explains how the data path ended up in the kernel and where the
 claims stop. The reference pages are
@@ -39,7 +40,7 @@ maps and identity, and add as little new mechanism as possible.
 
 ## The first design: hyper in userspace
 
-The issue that started this work proposed the conventional design. A hyper server
+Our original proposal was the conventional design. A hyper server
 would terminate TLS and parse HTTP, then forward each request to a backend through
 an HTTP client. Every body byte would pass through the gateway's memory twice, once
 in from the client and once out to the backend.
@@ -63,20 +64,25 @@ from a workload's cgroup (a `cgroup/connect4` program). The gateway
 needs the same selection for its own connections. The obvious move was to fold the
 gateway case into the existing hook.
 
-We measured that and rejected it. Folding the logic in raised the verified
-instruction count of the program from 28 to 246. That cost lands on
-every connect from every workload, to serve one cgroup. We kept the existing hook
-untouched and attached a separate `cgroup/connect4` program to the gateway's
-cgroup. It reuses the Service maps, so there is no new backend table and no
+We rejected that before building it. The kernel's BPF verifier checks every
+program before loading it, and we track the number of instructions it verifies. A
+test program that did the gateway's selection verified at 246 instructions,
+against 28 for the existing hook. Folding it in would have grown a program that
+runs on every connect from every workload about 8.8 times, for one cgroup's
+benefit, and we fail any hot-path program that grows more than 5%. We kept the
+existing hook untouched and attached a separate `cgroup/connect4` program to the
+gateway's cgroup. It reuses the Service maps, so there is no new backend table and no
 userspace load balancer.
 
-The separate program is not free. We measured it once at about 117 ns on a connect
-that takes about 28 µs, so treat the figure as an estimate.
+The separate program is not free. Over 30 interleaved runs on one host, it added
+a median of 117 ns to a connect that takes about 28 µs. We have not measured
+other hosts or loads.
 
 One behavior follows from reusing the maps. The gateway's program ignores the
 `healthy` flag in the backend map, so a request that arrives in the roughly one
-second between a backend starting and its listener binding gets a `502`. We chose
-to document that exposure instead of adding a health wait to the hook. A stopped
+second between a backend starting and its listener binding gets a `502`. We
+chose not to read `healthy` because it flapped in our tests for a reason we could
+not establish, and the gateway would have turned every flap into a `503`. A stopped
 Service has the same shape. Its backend stays in the kernel map of Service backends,
 and a request to it
 gets `502`, never a connection to a different peer.
@@ -124,16 +130,21 @@ private key under a key it reads from a credential file. Every test passed that 
 in directly, so nothing had exercised the file. The example did not create it, and
 `serve` refused to start the gateway until we fixed the example.
 
-One resource measurement at 128 concurrent exchanges, on one host, found:
+We measured resource use on one host, counting the whole `serve` process, so the
+mesh connection and the guest stream behind each exchange are included:
 
-- 9 descriptors per exchange, 7 at steady state, so at most 1,152 at the connection
-  limit.
-- Memory growing about 173 KiB per exchange on a base of 0.73 MB.
-- Resident-set growth at or under 24,405,456 bytes, with the heap returning to a
-  plateau.
+- 9 descriptors per exchange at peak and 7 at steady state, so at most 1,152 at
+  the 128-connection limit.
+- Resident memory fitted over five load levels, from 0 to 128 concurrent
+  exchanges, grows about 173 KiB per exchange on a base of 0.73 MB. A test
+  requires growth at 128 exchanges to stay under 24,405,456 bytes (that fit plus
+  1 MB for run-to-run variance), and it passes.
+- Across six bursts of 128 exchanges, in-use heap rose 0.44 MB in total, with no
+  trend from one burst to the next.
 
 The HTTP behavior is bounded in code: 128 connections, 32 KiB heads, 100 headers,
-100 requests per connection, 16 MiB bodies, and 5, 30, and 120 second deadlines
+100 requests per connection, 16 MiB request and response bodies, and 5, 30, and 120
+second deadlines
 for the handshake, body progress, and whole request. A stalled head or body gets
 `408`, an oversized head `431`, and an oversized declared body `413`. There is one
 attempt to the backend and no retry. Operators cannot change these limits in this
@@ -143,8 +154,8 @@ configurable.
 ## What is not proven
 
 - **No performance claim.** The kTLS and splice path has no measured CPU or
-  throughput advantage over the userspace path. The 117 ns hook cost comes from a
-  single measurement.
+  throughput advantage over the userspace path. The 117 ns hook cost comes from
+  one host.
 - **The resource figures are one measurement.** We took them on one host with one
   load profile, so they are a single sample, not a distribution.
 - **Certificate rotation is a file poll.** The gateway re-reads the certificate
@@ -156,8 +167,8 @@ configurable.
 
 The gateway speaks HTTP/1.1 only and answers anything else with `505`. Issue
 [#341: HTTP/2 and gRPC on the public listener](https://github.com/overdrive-sh/overdrive/issues/341)
-tracks HTTP/2. Certificates come from files you supply, with provenance recorded as
-`Manual`. Issue [#57: an embedded ACME client](https://github.com/overdrive-sh/overdrive/issues/57) tracks
+tracks HTTP/2. Certificates come from files you supply, and the status endpoint
+reports their source as `manual`. Issue [#57: an embedded ACME client](https://github.com/overdrive-sh/overdrive/issues/57) tracks
 automated issuance. The gateway holds one Route per node
 (issue [#352: several Routes on one listener](https://github.com/overdrive-sh/overdrive/issues/352)), and has no CLI
 verb for status or
@@ -165,5 +176,5 @@ withdrawal. Those two operations are HTTP calls on the operator listener.
 
 The useful lesson is about reuse. Every simplification here came from declining to
 build a second copy of something the mesh already had: a backend list, an identity,
-a selection hook. The two bugs we found were in the one place we had to build
-something new, the byte relay.
+a selection hook. Both kernel facts that changed the design surfaced in the one
+component we had to build from scratch, the byte relay.

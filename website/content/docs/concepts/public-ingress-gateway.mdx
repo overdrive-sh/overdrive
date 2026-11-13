@@ -24,7 +24,8 @@ walks through both.
 
 ## What a Route is
 
-A Route maps one exact hostname and path to one Service port. It also names the
+A Route maps one exact hostname and a path (matched exactly or as a segment
+prefix) to one Service port. It also names the
 certified key the gateway presents for that hostname. A certified key is the
 certificate chain and private key you give `serve`, under one id.
 
@@ -45,7 +46,8 @@ protocol = "tcp"
 `path_match` is `exact` or `segment_prefix`. The hostname is one exact name, with
 no wildcard. A node holds one Route. You declare it with
 `overdrive deploy <ROUTE_SPEC>`, which prints whether the Route was `declared`,
-`replaced`, or `unchanged`, along with its generation and the endpoint. See the
+`replaced`, or `unchanged`, along with its generation (a content hash) and the
+endpoint. See the
 [CLI reference](/docs/reference/cli#route-documents) for every field.
 
 ## What the client sees
@@ -56,12 +58,13 @@ gets `421`, and a malformed `Host` gets `400`.
 
 | Status | Cause |
 | --- | --- |
+| 400 | The request is malformed: an unparseable head, ambiguous message framing or an invalid `Host`. |
 | 404 | No Route matches the hostname and path. |
 | 408 | The request head or body stalled. |
-| 413 | The declared body exceeds 16 MiB. |
+| 413 | The request body exceeds 16 MiB. |
 | 421 | `Host` differs from the TLS server name. |
 | 431 | The request head is larger than 32 KiB or carries more than 100 headers. |
-| 502 | The backend connection or response failed. |
+| 502 | The backend connection failed, or its response broke a limit or was malformed. |
 | 503 | The Service has no backend. This is the only 503 the gateway returns. |
 | 505 | The request is not HTTP/1.1. |
 
@@ -77,9 +80,11 @@ upstream leg carries `Connection: close`.
 | Limit | Value |
 | --- | --- |
 | Concurrent connections | 128 |
-| Request head | 32 KiB, at most 100 headers |
+| Request head | 32 KiB, at most 100 headers, otherwise `431` |
 | Requests per connection | 100 |
-| Request body | 16 MiB |
+| Request body | 16 MiB, otherwise `413` |
+| Response head from the backend | 32 KiB, at most 100 headers, otherwise `502` |
+| Response body from the backend | 16 MiB, otherwise `502` for a declared length or an aborted response for a chunked or close-delimited body |
 | Handshake, head, backend connect, response head | 5 s each |
 | Body no-progress and idle | 30 s each |
 | Whole request | 120 s |
@@ -118,7 +123,7 @@ are handled through rustls's kernel connection support.
 
 The gateway reads a leaf-first PEM chain of one to eight certificates and one
 PKCS#8 private key. The leaf must carry a single DNS name, be valid now, and
-match the key. The provenance of every certificate is `Manual`. A background task
+match the key. The status endpoint reports each certificate's source as `manual`. A background task
 re-reads both files every 30 seconds. A changed, valid pair becomes a new
 generation. A missing or invalid pair leaves the last usable generation in place.
 
@@ -136,16 +141,17 @@ No CLI verb exists for status or withdrawal. When `serve` runs without the gatew
 flags, the Route endpoints return `409` with `gateway_disabled` and status reports
 `enabled: false`.
 
-Resource use per exchange is bounded. One measurement on one host with a Linux 7.0
-kernel put it
-at nine descriptors per exchange (seven at steady state), so 128 concurrent
-exchanges hold at most 1,152. Memory grew about 173 KiB per exchange on a base of
-0.73 MB, and resident-set growth stayed at or under 24,405,456 bytes at 128
-exchanges, with the heap returning to a plateau afterward.
+Resource use per exchange is bounded. Measured on one host with a Linux 7.0
+kernel and counted for the whole `serve` process, an exchange holds nine
+descriptors at peak and seven at steady state, so 128 concurrent exchanges hold at
+most 1,152. Resident memory grows about 173 KiB per exchange on a base of
+0.73 MB, and a test keeps growth at 128 exchanges under 24,405,456 bytes.
 
 ## Current limits
 
 - HTTP/1.1 only. Other protocols get `505`.
+- No WebSocket or other protocol upgrade. The gateway strips `Upgrade`, and a
+  backend's `101` response becomes `502`.
 - One Route per node. Issue
   [#352: several Routes and hostnames on one listener](https://github.com/overdrive-sh/overdrive/issues/352) tracks
   lifting this.

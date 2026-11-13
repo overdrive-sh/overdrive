@@ -30,9 +30,9 @@ explains what the gateway does with the request.
 		most 64 KiB.
 	</Step>
 	<Step>
-		**Give both files to the user that runs `serve` and lock down the key.** Both
-		must be regular files, not symlinks. Replace `root` if `serve` runs as another
-		user.
+		**Give both files to the account that runs `serve` and lock down the key.**
+		Both must be regular files, not symlinks. Replace `root` if `serve` runs under
+		another account.
 
 		```bash
 		chown root:root /etc/overdrive/api-chain.pem /etc/overdrive/api-key.pem
@@ -47,11 +47,25 @@ explains what the gateway does with the request.
 
 <Steps>
 	<Step>
+		**Add the gateway's key-encryption key.** `serve` seals the gateway's private
+		key under the credential `overdrive-public-certified-key` and refuses to start
+		the gateway without it. Put it in the same credentials directory as the
+		`overdrive-ca-root` key your node already uses. Under systemd, deliver it with
+		`LoadCredentialEncrypted=`. To run `serve` by hand from
+		`/etc/overdrive/credentials`:
+
+		```bash
+		head -c 32 /dev/urandom > /etc/overdrive/credentials/overdrive-public-certified-key
+		chmod 0400 /etc/overdrive/credentials/overdrive-public-certified-key
+		```
+
+	</Step>
+	<Step>
 		**Start `serve` with all four gateway flags.** `--gateway-address` is the host
 		IPv4 address the gateway binds. The gateway always listens on port 443.
 
 		```bash
-		overdrive serve \
+		CREDENTIALS_DIRECTORY=/etc/overdrive/credentials overdrive serve \
 		  --gateway-address 203.0.113.10 \
 		  --gateway-certified-key-id api-origin \
 		  --gateway-certificate-chain /etc/overdrive/api-chain.pem \
@@ -76,16 +90,6 @@ explains what the gateway does with the request.
 		    (out / name).write_bytes(base64.b64decode(ctx[field]))
 		(out / "client-key.pem").chmod(0o600)
 		EOF
-		```
-	</Step>
-	<Step>
-		**Check that the gateway is listening.** The response reports
-		`"listener_bound":true` once port 443 is bound.
-
-		```bash
-		cd ~/.overdrive/operator
-		curl --cacert ca.pem --cert client.pem --key client-key.pem \
-		  "$(cat endpoint)/v1/gateway/status"
 		```
 	</Step>
 </Steps>
@@ -123,8 +127,18 @@ gateway configuration error before it starts anything else.
 
 		```text
 		Route 'public-api' declared.
-		Generation: <n>
-		Endpoint: <endpoint>
+		Generation:   <content hash>
+		Endpoint:     <operator endpoint>
+		```
+	</Step>
+	<Step>
+		**Check that the gateway is listening.** The response reports
+		`"listener_bound":true` once port 443 is bound.
+
+		```bash
+		cd ~/.overdrive/operator
+		curl --cacert ca.pem --cert client.pem --key client-key.pem \
+		  "$(cat endpoint)/v1/gateway/status"
 		```
 	</Step>
 </Steps>
