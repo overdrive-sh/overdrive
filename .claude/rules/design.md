@@ -82,19 +82,55 @@ X as a possible Y", a set of "already-failed" candidates consulted on retry, a
 weaker behaviour chosen because the correct one "would need new API", or an
 accepted exposure that a different contract would remove.
 
-## Look for a kernel (BPF) mechanism before designing a userspace one
+## Choose kernel or userspace by evidence, never by default
 
-For packet and socket steering, admission, policy enforcement and forwarding,
-evaluate the in-kernel mechanisms first: `sk_lookup`, sockops and `sk_msg`,
-cgroup socket hooks, tc and XDP, and socket maps. A kernel mechanism decides at
-the point where the packet or connection exists, so it removes whole classes of
-userspace state, races and repair paths — a socket-map entry that disappears
-when its socket closes needs no revoke, retry or audit.
+For packet and socket steering, admission, policy enforcement, forwarding and
+data relay, evaluate both an in-kernel mechanism (`sk_lookup`, sockops and
+`sk_msg`, cgroup socket hooks, tc and XDP, socket maps, kTLS, `splice`) and a
+userspace one, and choose the right tool for the job. Neither side is the
+default. A kernel mechanism can remove whole classes of userspace state, races
+and repair paths (a socket-map entry that disappears when its socket closes
+needs no revoke, retry or audit). It also costs new kernel-facing code, verifier
+budget and exposure to kernel defects. Userspace code costs copies and state of
+its own.
 
-Choose a userspace mechanism only for a stated reason: it needs state the
-kernel cannot hold, a call BPF cannot make, or it exceeds a verifier limit. The
-ADR records the BPF alternative that was evaluated and why it lost. This
-applies to kernel-adjacent dataplane design, not to control-plane logic.
+Move work into the kernel only for a gain the design names and the evidence
+shows: a measured performance gain, or a correctness property userspace cannot
+provide. "It runs in the kernel" is not a gain. If the measurement shows no
+advantage, keep the simpler mechanism. Account for where the work is headed
+too: a choice that a planned follow-up (for example HTTP/2 framing) must undo
+needs a stronger reason.
+
+The ADR records both alternatives, the evidence for each, and why the losing one
+lost. This applies to kernel-adjacent dataplane design, not to control-plane
+logic.
+
+## Benchmark competing approaches with a spike before choosing one
+
+When a design weighs two or more mechanisms against each other on cost
+(userspace versus in-kernel, one library versus another, copy versus zero-copy),
+the comparison is a contract-shaping validation item (§ "Run contract-shaping
+validation before the design is accepted"). Spike every serious candidate on
+the same host and load, measure the property the choice turns on (CPU per
+request, throughput, latency, memory), and put the numbers in the decision
+request to the user before the choice is approved.
+
+A spike that only proves the chosen mechanism works is not this comparison.
+Feasibility evidence answers "can it work", not "is it better". Never approve a
+mechanism first and measure it afterwards.
+
+**Precedent** (public ingress gateway, #54): the hyper data path was replaced
+by rustls handshakes, kTLS and spliced bodies before anything was compared. The
+spike that followed found splicing no cheaper than a userspace copy, so the
+kernel path delivered no measured gain. It still added a custom HTTP/1.1 framer,
+a kTLS splice relay and a workaround for a kernel splice defect, and HTTP/2
+(#341) needs userspace framing anyway.
+
+**Symptoms during review:** a decision justified by "moves work into the
+kernel" or "zero-copy" with no measured gain; a spike that validates only the
+chosen option; "no performance claim" in the consequences of a design whose
+reason for existing was performance; an ADR alternative table with no numbers
+for the alternative that lost.
 
 ## Ground every kernel claim in the Linux source Overdrive runs
 
@@ -153,8 +189,8 @@ event; a protocol step whose only justification is a state no production path
 produces.
 
 **Symptoms during review:** a userspace listener, proxy, firewall-set
-bookkeeping or revoke/retry protocol standing between a connection and its
-destination with no BPF alternative named in the ADR.
+bookkeeping or revoke/retry protocol with no kernel alternative evaluated, or a
+kernel mechanism with no userspace alternative evaluated, in the ADR.
 
 ## No unrequested scope — agents propose, the user adds
 

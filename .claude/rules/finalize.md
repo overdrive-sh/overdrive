@@ -28,6 +28,11 @@ required completion gates, not follow-up tasks.
   Resolve blocking findings and obtain reviewer approval before finalization.
 - Check in the documentation and post, and include their paths and validation
   results, reviewer verdict, and review artifact path in the finalization record.
+- Close the GitHub issues the feature resolves. For each, verify with
+  `gh issue view <N> --comments` that the delivered feature covers its scope,
+  then close it with a comment that links the evolution record. Do not close an
+  issue the feature only partly resolves: comment on what was delivered and what
+  remains, and leave it open. Record the closed issues in the finalization record.
 
 Do not mark the feature finalized while either deliverable is missing or its
 required validation or reviewer approval remains unresolved. Deployment and
