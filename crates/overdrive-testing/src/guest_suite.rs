@@ -2384,6 +2384,7 @@ fn nested_guest_launch_support(
     });
     if selected_cell(NESTED_GUEST_RUSTC, test_name) {
         nested_guest_build_support(extra)?;
+        stage_prepare_overdrive_init(extra)?;
     }
     if test_name.starts_with(IN_GUEST_LANE_DRIVERS) {
         let cells = InGuestTests::prepared("overdrive-init", "overdrive-init")?;
@@ -2431,6 +2432,28 @@ fn stage_tree(dir: &Path, files: &mut Vec<GuestFile>) -> Result<(), GuestKitErro
     Ok(())
 }
 
+/// The static musl `overdrive-init` at the workspace path
+/// `examples/public-ingress-gateway/prepare.sh` reads it from
+/// (`target/x86_64-unknown-linux-musl/release/overdrive-init`). The guest kit's
+/// own init is already staged at `NESTED_PREBUILT_INIT`; the same binary is
+/// staged a second time at the path the script resolves.
+fn stage_prepare_overdrive_init(extra: &mut Vec<GuestFile>) -> Result<(), GuestKitError> {
+    let init = extra
+        .iter()
+        .find(|file| file.guest == Path::new(NESTED_PREBUILT_INIT))
+        .map(|file| file.host.clone())
+        .ok_or_else(|| GuestKitError::Staging {
+            detail: "the nested guest support stages no prebuilt overdrive-init".to_owned(),
+            source: std::io::Error::from(std::io::ErrorKind::NotFound),
+        })?;
+    extra.push(GuestFile {
+        host: init,
+        guest: workspace_root().join("target/x86_64-unknown-linux-musl/release/overdrive-init"),
+        with_shared_libraries: false,
+    });
+    Ok(())
+}
+
 /// What the bodies in `NESTED_GUEST_RUSTC` resolve through the outer guest's
 /// own filesystem on top of `nested_guest_launch_support`: the runner's
 /// `rustc` at its own sysroot path with its musl target libraries, the `cc`
@@ -2471,13 +2494,19 @@ fn nested_guest_build_support(extra: &mut Vec<GuestFile>) -> Result<(), GuestKit
     extra.push(tool("ld"));
 
     for name in [
+        "awk",
         "bpftool",
+        "chroot",
+        "cmp",
         "cut",
+        "depmod",
         "dirname",
         "file",
         "grep",
+        "head",
         "id",
         "install",
+        "modinfo",
         "mountpoint",
         "readelf",
         "rm",
