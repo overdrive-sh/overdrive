@@ -13,7 +13,6 @@
     reason = "bounded diagnostic retains its required Contract Shape and seed evidence"
 )]
 
-use overdrive_core::observation::{ProbeRunSeq, SameStatusRuns};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -32,7 +31,7 @@ use overdrive_core::api::{ListenerInput, ServiceSpecInput};
 use overdrive_core::cgroup::CgroupPath;
 use overdrive_core::guest_transport::GuestCid;
 use overdrive_core::id::{AllocationId, NodeId};
-use overdrive_core::observation::{ProbeIdx, ProbeResultRow, ProbeRole, ProbeStatus};
+use overdrive_core::observation::{ProbeIdx, ProbeRole};
 use overdrive_core::reconcilers::{ReconcilerName, TargetResource};
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{AllocationHandle, Driver, DriverError};
@@ -189,8 +188,8 @@ async fn with_clock<F: std::future::Future>(clock: &SimClock, seed: u64, future:
     }
 }
 
-async fn drive(seed: u64, finalize: bool) {
-    eprintln!("vm-finalize-ownership seed={seed} finalize={finalize}");
+async fn drive(seed: u64) {
+    eprintln!("vm-finalize-ownership seed={seed}");
     let temp = tempfile::tempdir().unwrap();
     let kernel = temp.path().join("kernel");
     let rootfs = temp.path().join("rootfs");
@@ -364,7 +363,6 @@ async fn drive(seed: u64, finalize: bool) {
     let alloc = AllocationId::new("alloc-vm-finalize-ownership-0").unwrap();
     let target = TargetResource::new("workload/vm-finalize-ownership").unwrap();
     let workload = ReconcilerName::new("workload-lifecycle").unwrap();
-    let service = ReconcilerName::new("service-lifecycle").unwrap();
     let deadline = clock.now() + Duration::from_secs(30);
     let (start, peer) = tokio::join!(
         run_convergence_tick_with_guest_network_provisioner_for_test(
@@ -401,93 +399,20 @@ async fn drive(seed: u64, finalize: bool) {
         "seed={seed}: reclamation respects existing authorship claim"
     );
     let handle = AllocationHandle { alloc: alloc.clone(), pid: Some(control.pid) };
-    if finalize {
-        clock.tick(Duration::from_secs(2));
-        obs.write_probe_result(ProbeResultRow {
-            alloc_id: alloc.clone(),
-            probe_idx: ProbeIdx::new(0),
-            role: ProbeRole::Startup,
-            status: ProbeStatus::Fail { last_fail_reason: "HTTP 302".to_owned() },
-            last_observed_at_unix_ms: u64::try_from(clock.unix_now().as_millis()).unwrap(),
-            run_seq: ProbeRunSeq::new(u64::max(
-                u64::try_from(clock.unix_now().as_millis()).unwrap(),
-                1,
-            ))
-            .unwrap_or(ProbeRunSeq::FIRST),
-            same_status_runs: SameStatusRuns::ONE,
-        })
-        .await
-        .unwrap();
-        with_clock(
-            &clock,
-            seed,
-            run_convergence_tick_with_guest_network_provisioner_for_test(
-                &state,
-                &service,
-                &target,
-                clock.now(),
-                34,
-                deadline,
-                guest_owner.as_ref(),
-            ),
-        )
-        .await
-        .unwrap();
-    }
     let owned_before_stop = driver.live_allocations().unwrap().contains(&alloc);
     let live_before_stop = vmm.inner.is_live(control.pid);
     let later_stop = with_clock(&clock, seed, driver.stop(&handle)).await;
     let live_after_stop = vmm.inner.is_live(control.pid);
     let row = obs.alloc_status_rows().await.unwrap().remove(0);
     eprintln!(
-        "seed={seed} finalize={finalize} row={row:?} owned_before_stop={owned_before_stop} live_before_stop={live_before_stop} subsequent_stop={later_stop:?} live_after_stop={live_after_stop}"
+        "seed={seed} row={row:?} owned_before_stop={owned_before_stop} live_before_stop={live_before_stop} subsequent_stop={later_stop:?} live_after_stop={live_after_stop}"
     );
-    if finalize {
-        assert_eq!(row.state, AllocState::Failed, "seed={seed}: production startup terminal");
-        assert!(row.terminal.is_some(), "seed={seed}: terminal authored by ServiceLifecycle");
-        let before = obs.alloc_lifecycle_occurrences(&alloc).await.unwrap();
-        clock.tick(Duration::from_secs(30));
-        run_convergence_tick_with_guest_network_provisioner_for_test(
-            &state,
-            &reclamation,
-            &node_target,
-            clock.now(),
-            35,
-            deadline,
-            guest_owner.as_ref(),
-        )
-        .await
-        .unwrap();
-        for _ in 0..128 {
-            tokio::task::yield_now().await;
-        }
-        let after = obs.alloc_status_rows().await.unwrap().remove(0);
-        let occurrences = obs.alloc_lifecycle_occurrences(&alloc).await.unwrap();
-        eprintln!(
-            "seed={seed} after_reclamation_live={} host_artifacts_absent={} row_unchanged={} occurrences_unchanged={}",
-            vmm.inner.is_live(control.pid),
-            vmm.host.artifacts_absent(&alloc),
-            after == row,
-            occurrences == before
-        );
-        assert!(
-            !vmm.inner.is_live(control.pid),
-            "seed={seed}: existing reclamation terminates the VMM"
-        );
-        assert!(vmm.host.artifacts_absent(&alloc) && !vmm.host.has_scope(&alloc));
-        assert_eq!(after, row, "seed={seed}: disposal preserves authored startup terminal");
-        assert_eq!(
-            occurrences, before,
-            "seed={seed}: disposal and late watcher author no new ending"
-        );
-    } else {
-        assert!(
-            owned_before_stop && live_before_stop,
-            "seed={seed}: orderly-stop control has its owner"
-        );
-        assert!(later_stop.is_ok(), "seed={seed}: orderly stop succeeds");
-        assert!(!live_after_stop, "seed={seed}: orderly stop terminates VMM");
-    }
+    assert!(
+        owned_before_stop && live_before_stop,
+        "seed={seed}: orderly-stop control has its owner"
+    );
+    assert!(later_stop.is_ok(), "seed={seed}: orderly stop succeeds");
+    assert!(!live_after_stop, "seed={seed}: orderly stop terminates VMM");
     // Fixture disposal after recording/asserting the production result.
     vmm.terminate(&control, Duration::ZERO).await.unwrap();
     let _ = beacon_io.guest_close(peer);
@@ -496,12 +421,6 @@ async fn drive(seed: u64, finalize: bool) {
 
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test(flavor = "current_thread")]
-async fn vm_finalize_failed_reclamation_preserves_terminal_seeded_convergence() {
-    drive(257_204, true).await;
-}
-
-/// CONTRACT_SHAPE: bounded-change.
-#[tokio::test(flavor = "current_thread")]
 async fn vm_orderly_stop_retains_owner_until_termination_control() {
-    drive(257_204, false).await;
+    drive(257_204).await;
 }

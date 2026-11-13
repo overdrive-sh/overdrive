@@ -12021,32 +12021,11 @@
         "kind": "host-pure"
       }
     },
-    "overdrive-sim::allocation_restart_write_spike": {
-      "fresh_successor_publication_without_predecessor_exit_control": {
-        "kind": "host-pure"
-      },
-      "predecessor_exit_during_cleanup_cannot_replace_fresh_successor_publication": {
-        "kind": "host-pure"
-      }
-    },
     "overdrive-sim::driver_neutral_allocation_replacement": {
       "accepted_failed_successor_publishes_at_fresh_key_with_zero_history": {
         "kind": "host-pure"
       },
       "production_owner_replacement_survives_rejected_publication_and_reopen_for_vm": {
-        "kind": "host-pure"
-      }
-    },
-    "overdrive-sim::e09_v2_failure_stream_overlap_spike": {
-      "completed_healthy_stops_control_reports_startup_failure": {
-        "kind": "host-pure"
-      },
-      "overlapping_healthy_stops_preserve_e09_startup_failure_result": {
-        "kind": "host-pure"
-      }
-    },
-    "overdrive-sim::e10_vm_early_exit_spike": {
-      "no_intervening_restart_reclamation_preserves_authored_ending_control": {
         "kind": "host-pure"
       }
     },
@@ -12300,18 +12279,12 @@
       }
     },
     "overdrive-sim::vm_finalize_failed_ownership_spike": {
-      "vm_finalize_failed_reclamation_preserves_terminal_seeded_convergence": {
-        "kind": "host-pure"
-      },
       "vm_orderly_stop_retains_owner_until_termination_control": {
         "kind": "host-pure"
       }
     },
     "overdrive-sim::vm_lifecycle_latency_283_spike": {
       "admission_close_drains_owned_starts_without_admitting_ninth": {
-        "kind": "host-pure"
-      },
-      "admission_close_drains_owned_stops_without_admitting_ninth": {
         "kind": "host-pure"
       },
       "convergence_exit_report_is_the_owner_snapshot_not_final_server_backlog": {
@@ -12327,9 +12300,6 @@
         "kind": "host-pure"
       },
       "healthy_driver_control_progresses": {
-        "kind": "host-pure"
-      },
-      "same_workload_reconcilers_share_the_complete_evaluation_lease": {
         "kind": "host-pure"
       },
       "seven_held_starts_leave_one_progress_slot": {

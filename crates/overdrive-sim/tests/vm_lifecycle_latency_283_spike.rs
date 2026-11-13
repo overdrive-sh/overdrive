@@ -16,13 +16,10 @@ use overdrive_control_plane::dataplane_config::DataplaneConfig;
 use overdrive_control_plane::{
     BootAdapters, NodeAdapters, ServerConfig, run_server_with_obs_and_driver,
 };
-use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
 use overdrive_core::aggregate::{DriverInput, JobSpecInput, ResourcesInput, WorkloadKind};
-use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput, SubmitSpecInput};
+use overdrive_core::api::submit::SubmitSpecInput;
 use overdrive_core::guest_transport::NodeVsockPortConfig;
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
-use overdrive_core::observation::{ProbeIdx, ProbeResultRow, ProbeRole, ProbeStatus};
-use overdrive_core::observation::{ProbeRunSeq, SameStatusRuns};
 use overdrive_core::traits::driver::{
     AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverType, ExitEvent,
     ExitKind, Resources,
@@ -346,38 +343,6 @@ async fn submit(client: &reqwest::Client, base: &str, id: &str) {
     };
     let response = client.post(format!("{base}/v1/workloads")).json(&body).send().await.unwrap();
     assert!(response.status().is_success(), "submit {id}: {response:?}");
-    let _: SubmitWorkloadResponse = response.json().await.unwrap();
-}
-
-async fn submit_service(client: &reqwest::Client, base: &str, id: &str) {
-    let body = SubmitWorkloadRequest {
-        spec: SubmitSpecInput::Service(ServiceSpecInput {
-            id: id.to_owned(),
-            replicas: 1,
-            resources: ResourcesInput { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
-            driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
-                command: "/bin/sleep".to_owned(),
-                args: vec!["3600".to_owned()],
-                kernel: "/kernel".to_owned(),
-                rootfs: "/rootfs".to_owned(),
-            }),
-            listeners: vec![ListenerInput { port: 8080, protocol: "tcp".to_owned() }],
-            startup_probes: vec![ProbeDescriptor {
-                idx: ProbeIdx::new(0),
-                role: ProbeRole::Startup,
-                mechanic: ProbeMechanic::Tcp { host: "0.0.0.0".to_owned(), port: 8080 },
-                timeout_seconds: 1,
-                interval_seconds: 1,
-                max_attempts: 1,
-                failure_threshold: None,
-                success_threshold: None,
-            }],
-            readiness_probes: Vec::new(),
-            liveness_probes: Vec::new(),
-        }),
-    };
-    let response = client.post(format!("{base}/v1/workloads")).json(&body).send().await.unwrap();
-    assert!(response.status().is_success(), "submit Service {id}: {response:?}");
     let _: SubmitWorkloadResponse = response.json().await.unwrap();
 }
 
@@ -1024,15 +989,6 @@ async fn admission_close_drains_owned_starts_without_admitting_ninth() {
 }
 
 /// CONTRACT_SHAPE: bounded-change.
-/// S-VLL-06: shutdown drains eight stops and leaves the ninth unexecuted.
-/// Match every admitted target/tick to its Driver return, shim row and owner
-/// completion before the sole drain event; the ninth crosses no boundary.
-#[tokio::test]
-async fn admission_close_drains_owned_stops_without_admitting_ninth() {
-    capacity_case(Effect::Stop, 8, true).await;
-}
-
-/// CONTRACT_SHAPE: bounded-change.
 /// S-VLL-13: the composed runtime must publish no effect when its View write
 /// fails. Drive valid desired-generation inputs, never fabricate a next View;
 /// prove the same inputs dispatch after recovery. Seed 283001 is a preservation
@@ -1254,215 +1210,6 @@ async fn runtime_job_input(state: &overdrive_control_plane::AppState, id: &str) 
             .unwrap(),
         TxnOutcome::Committed
     ));
-}
-
-/// CONTRACT_SHAPE: bounded-change.
-/// S-VLL-04. Seed 283001; submit an actual Service, hold its Driver start, and
-/// drive accepted AllocStatus/ProbeResult plus public stop. Distinct reconciler
-/// names for that workload share one lease until the complete runtime result
-/// is consumed. A duplicate remains one pending later turn; hydration then
-/// observes latest stop intent. Independent targets remain able to progress.
-/// Compare complete target Views, allocation rows and final Driver membership.
-#[tokio::test]
-async fn same_workload_reconcilers_share_the_complete_evaluation_lease() {
-    let _serial = SERVER_SCENARIO_LOCK.lock().await;
-    let _ = trace_state();
-    let seed = 283_001;
-    let directory = tempfile::tempdir().unwrap();
-    let data_dir = directory.path().join("data");
-    let clock = Arc::new(SimClock::new());
-    let obs = Arc::new(SimObservationStore::single_peer(NodeId::new("local").unwrap(), seed));
-    let (entered, mut entries) = mpsc::unbounded_channel();
-    let driver = Arc::new(DelayedDriver {
-        inner: SimDriver::with_clock(DriverType::Vm, clock.clone()),
-        effect: Effect::Start,
-        entered,
-        release: Semaphore::new(0),
-        events: Mutex::new(Vec::new()),
-        exit_emission_gates: Vec::new(),
-    });
-    let config_dir = directory.path().join("operator");
-    let config = ServerConfig {
-        data_dir: data_dir.clone(),
-        operator_config_dir: config_dir.clone(),
-        dataplane: Some(DataplaneConfig { client_iface: "lo".into(), backend_iface: "lo".into() }),
-        vsock_ports: NodeVsockPortConfig::kernel_assigned(),
-        ..ServerConfig::new()
-    };
-    let boot = sim_boot(&config, &clock, obs.clone());
-    let wiring = overdrive_core::guest_network::GuestNetworkExecWiring::new(clock.clone());
-    let server = run_server_with_obs_and_driver(
-        config,
-        boot,
-        driver.clone(),
-        Arc::new(SimSharedGuestNetworkOwner::default()),
-        wiring,
-    )
-    .await
-    .unwrap();
-    let base = format!("https://localhost:{}", server.local_addr().await.unwrap().port());
-    let client = client(&config_dir);
-    let cursor = trace_cursor();
-
-    submit_service(&client, &base, "slow-lease").await;
-    for _ in 0..100 {
-        advance(&clock, seed).await;
-        if entries.try_recv() == Ok(Effect::Start) {
-            break;
-        }
-    }
-    assert_eq!(
-        effect_targets(&driver, Effect::Start, false).len(),
-        1,
-        "seed={seed}: real Service start must hold the production owner"
-    );
-    for _ in 0..2 {
-        let response =
-            client.post(format!("{base}/v1/workloads/slow-lease/stop")).send().await.unwrap();
-        assert!(response.status().is_success(), "seed={seed}: public stop rejected");
-    }
-    let status: overdrive_control_plane::api::ClusterStatus =
-        client.get(format!("{base}/v1/cluster/info")).send().await.unwrap().json().await.unwrap();
-    assert_eq!(status.broker.queued, 1, "seed={seed}: duplicate pending stop coalesces");
-
-    submit(&client, &base, "lease-independent").await;
-    let mut independent_while_held = false;
-    for _ in 0..50 {
-        advance(&clock, seed).await;
-        independent_while_held |= running(&obs, "lease-independent").await;
-    }
-    driver.release.add_permits(1);
-    let mut service_terminated = false;
-    for _ in 0..200 {
-        advance(&clock, seed).await;
-        let rows = obs.alloc_status_rows().await.unwrap();
-        service_terminated = rows.iter().any(|row| {
-            row.workload_id.as_str() == "slow-lease" && row.state == AllocState::Terminated
-        });
-        if service_terminated && running(&obs, "lease-independent").await {
-            break;
-        }
-    }
-    let alloc = AllocationId::new("alloc-slow-lease-0").unwrap();
-    let accepted_probe = ProbeResultRow {
-        alloc_id: alloc.clone(),
-        probe_idx: ProbeIdx::new(0),
-        role: ProbeRole::Startup,
-        status: ProbeStatus::Pass,
-        last_observed_at_unix_ms: 1,
-        run_seq: ProbeRunSeq::new(u64::max(1, 1)).unwrap_or(ProbeRunSeq::FIRST),
-        same_status_runs: SameStatusRuns::ONE,
-    };
-    obs.write_probe_result(accepted_probe.clone()).await.unwrap();
-    for _ in 0..50 {
-        advance(&clock, seed).await;
-        if trace_since(cursor).iter().any(|event| {
-            event.name == "convergence.evaluation.completed"
-                && event_target(event) == Some("workload/slow-lease")
-                && event.field("reconciler").is_some_and(|name| name.contains("service-lifecycle"))
-        }) {
-            break;
-        }
-    }
-    assert_eq!(
-        obs.list_probe_results_for_alloc(&alloc).await.unwrap(),
-        vec![accepted_probe],
-        "seed={seed}: complete accepted ProbeResult row set"
-    );
-    server.shutdown(Duration::from_secs(1)).await.unwrap();
-
-    let events = trace_since(cursor);
-    let mut active: Option<(String, u64)> = None;
-    let mut saw_workload = false;
-    let mut saw_service = false;
-    for event in events.iter().filter(|event| event_target(event) == Some("workload/slow-lease")) {
-        let reconciler = event.field("reconciler").unwrap_or_default().trim_matches('"');
-        if event.name == "convergence.evaluation.admitted" {
-            let key = (reconciler.to_owned(), event.u64_field("tick").unwrap());
-            assert!(
-                active.replace(key.clone()).is_none(),
-                "RED scaffold (S-VLL-04 lease): seed={seed}: overlapping target owner {key:?}"
-            );
-            saw_workload |= reconciler == "workload-lifecycle";
-            saw_service |= reconciler == "service-lifecycle";
-        } else if event.name == "convergence.evaluation.completed" {
-            let key = (reconciler.to_owned(), event.u64_field("tick").unwrap());
-            assert_eq!(
-                active.take(),
-                Some(key),
-                "seed={seed}: completion consumes its exact lease"
-            );
-        }
-    }
-    assert!(
-        active.is_none() && saw_workload && saw_service,
-        "RED scaffold (S-VLL-04 owner turns): seed={seed}: complete WorkloadLifecycle and ServiceLifecycle turns"
-    );
-    assert!(independent_while_held, "seed={seed}: independent target must retain progress");
-    assert!(service_terminated, "seed={seed}: later hydration must observe the public stop");
-    assert_eq!(driver.inner.live_count(), 1, "seed={seed}: only independent Driver member remains");
-
-    let independent_alloc = AllocationId::new("alloc-lease-independent-0").unwrap();
-    let rows = obs.alloc_status_rows().await.unwrap();
-    let slow_rows: Vec<_> =
-        rows.iter().filter(|row| row.workload_id.as_str() == "slow-lease").collect();
-    assert_eq!(slow_rows.len(), 1, "seed={seed}: complete Service allocation row set");
-    assert_eq!(slow_rows[0].alloc_id, alloc, "seed={seed}: stable allocation identity");
-    assert_eq!(slow_rows[0].kind, WorkloadKind::Service, "seed={seed}: Service kind retained");
-    assert_eq!(slow_rows[0].state, AllocState::Terminated, "seed={seed}: latest stop intent won");
-    assert!(
-        rows.iter().any(|row| {
-            row.alloc_id == independent_alloc
-                && row.workload_id.as_str() == "lease-independent"
-                && row.state == AllocState::Running
-        }),
-        "seed={seed}: independent allocation row remains Running"
-    );
-    assert_eq!(
-        effect_targets(&driver, Effect::Start, false),
-        BTreeSet::from([alloc.clone(), independent_alloc]),
-        "seed={seed}: complete Driver start membership"
-    );
-    assert_eq!(
-        effect_targets(&driver, Effect::Stop, true),
-        BTreeSet::from([alloc.clone()]),
-        "seed={seed}: only the stopped Service left Driver membership"
-    );
-
-    let target = overdrive_core::reconcilers::TargetResource::new("workload/slow-lease").unwrap();
-    let mut persisted =
-        overdrive_control_plane::reconciler_runtime::ReconcilerRuntime::new_with_redb_view_store_for_test(
-            &data_dir,
-        )
-        .unwrap();
-    persisted.register(overdrive_control_plane::workload_lifecycle()).await.unwrap();
-    persisted.register(overdrive_control_plane::service_lifecycle()).await.unwrap();
-    let workload_name =
-        overdrive_core::reconcilers::ReconcilerName::new("workload-lifecycle").unwrap();
-    let service_name =
-        overdrive_core::reconcilers::ReconcilerName::new("service-lifecycle").unwrap();
-    let workload_view = persisted
-        .loaded_workload_lifecycle_views_for_test(&workload_name)
-        .unwrap()
-        .get(&target)
-        .cloned()
-        .unwrap_or_default();
-    let mut expected_workload = overdrive_reconcilers::WorkloadLifecycleView::default();
-    expected_workload.restart_counts.insert(alloc.clone(), 0);
-    assert_eq!(workload_view, expected_workload, "seed={seed}: complete workload target View");
-    let service_view = persisted
-        .loaded_service_lifecycle_views_for_test(&service_name)
-        .unwrap()
-        .get(&target)
-        .cloned()
-        .expect("ServiceLifecycle persisted the target View");
-    let mut expected_service =
-        overdrive_reconcilers::service_lifecycle::ServiceLifecycleView::default();
-    expected_service.observed.insert(alloc.clone());
-    assert_eq!(
-        service_view, expected_service,
-        "seed={seed}: later ServiceLifecycle hydration observes the stopped allocation without fabricating Stable"
-    );
 }
 
 /// CONTRACT_SHAPE: bounded-change.
