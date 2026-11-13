@@ -3547,3 +3547,37 @@ Historical minor items from DISTILL: the `BeaconParseError` variant for a reject
 ## Wave: DISTILL / [REF] Carried open items
 
 Not tested by DISTILL, by DESIGN ruling: **V39**; **P-12** (benchmark, proposal only); **F-1 (GH #335), F-2 (GH #336), F-6 (GH #340)**; the **IPv6/V6ONLY** exposure (GH #308).
+
+## Wave: DELIVER / [REF] Finalization preparation (2026-11-13)
+
+**Status: verification pending; not finalized.** The approved
+[`deliver/roadmap.json`](deliver/roadmap.json) has 17 implementation steps. Each
+step has a completed DES trace and a final `APPROVED` verdict in a
+[`deliver/review-*.md`](deliver/) artifact. Later bounded corrections
+and their independent reviews are recorded in
+[`deliver/finalization.md`](deliver/finalization.md); they do not turn the
+diagnostic full-workspace suite into a passing gate.
+
+The reviewed default-feature native `overdrive serve` and `overdrive deploy`
+capture reached `Stable` in 1,363 ms when the guest reported `tcp:18081`.
+The never-listening case recorded six allocation rows, missing `tcp:18998`,
+and a terminal `StartupProbeFailed` on identical redeploy. Both captures
+recorded zero deltas on their **respective measured** cleanup surfaces; the
+negative capture did not measure a probe-ownership delta. These are the
+point-in-time receipts in [`deliver/step-05-07-verification.md`](deliver/step-05-07-verification.md),
+not a claim about every later source commit. The historical SHA-pinned E13
+inferred-TCP receipt remains unchanged and does not prove the new default.
+
+The user's exact instruction, **“no mutation testing is required,”** is
+recorded in the roadmap final wave gate as `required: false` and
+`status: not_required_by_user`. No final-gate mutant run or kill rate is claimed. The
+D17 production wake invariant and all other approved outcomes remain in force.
+
+Finalization waits for the D11 randomized `stream_snapshot` poll/subscribe
+mapping alignment at seed `0x43d4164d`, its named and randomized passing
+results and independent review, the latest-source scoped integration rechecks,
+and an independent final evidence audit. The broad native workspace diagnostic
+reported 4,512 passed, 129 failed, two timed out and 27 skipped; it is not a
+workspace-green result. The website docs and blog are checked in and
+independently approved; the pre-existing search-ranking assertion still fails
+on untouched HEAD, and no website deployment or publication occurred.
