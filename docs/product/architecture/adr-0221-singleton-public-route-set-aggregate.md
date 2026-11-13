@@ -56,6 +56,8 @@ feature delta's Domain event and lifecycle section.
 - Public exposure can be replaced/withdrawn without mutating Service intent.
 - Multi-Route cardinality requires a later explicit decision rather than dormant
   global-index machinery now.
+- One Route per node is a limitation of this slice. [GitHub #352](https://github.com/overdrive-sh/overdrive/issues/352)
+  ("serve several Routes and hostnames on one listener") tracks lifting it.
 
 ## Links
 

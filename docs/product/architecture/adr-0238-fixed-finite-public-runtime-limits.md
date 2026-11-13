@@ -34,6 +34,9 @@ second limit source.
 - Changing one ceiling does not require revisiting HTTP routing or streaming
   architecture.
 - The values are safety policy, not claimed measured capacity or KPI.
+- The fixed values and the absence of an operator configuration surface are a
+  limitation of this slice. [GitHub #353](https://github.com/overdrive-sh/overdrive/issues/353)
+  ("configurable runtime limits with production-sized defaults") tracks lifting it.
 
 ## Links
 
