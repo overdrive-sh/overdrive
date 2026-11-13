@@ -6,17 +6,19 @@
 |---|---|
 | Feature | `service-allocation-readiness-and-ending` |
 | Step | `05-07` — Default startup gate is guest-reported listeners |
-| Iteration | 2 — final; iteration 1 is recorded below |
+| Iteration | 3 — final; iterations 1 and 2 are recorded below |
 | Implementation commit | `229edec40ad544fce501823888b49cfe2c1b92db` |
 | COMMIT audit | `bbf21a50e3a1f039f0660b74c60bf42204c45bd4` |
 | Evidence-format commit | `b11c8cdbbbc6888c51e21a0d902cf35d8fb29091` |
 | F1 remediation commit | `62917d18d2d09da9ca2ed81a83b7b6c5bf0da97b` |
+| Schema-documentation remediation | `d727375c6921d4549f58d4dd8b79e41970e652a6` |
+| Schema-evidence formatting | `d7386262215d88ada061846b8c1d8740b46ab9fc` |
 | Review scope | D15 parser default, the dial-bearing probe cap, the composed G-10 (8) scenario, typed input error contract retained from D14-E2, E08 native example support, DES evidence, and the step's production/API/test boundaries |
 | Working tree | Preserved unrelated dirty `AGENTS.md`, `netns-density-295` roadmap and feature delta, `specs/quint/guest-flow-owner/fwd_pair.qnt`, and `spike-scratch/step-05-07-sigkill/`; none were changed by this review. |
 
 ## Verdict
 
-**APPROVED — iteration 2 (final).** The D15 behavior, approved API shape, typed error mappings, test evidence, and native product proof match the accepted design. Iteration 1's blocking F1 finding is closed by comment-only updates to the two checked-in zero-probe Service specs. Their TOML inputs and behavior remain unchanged.
+**APPROVED — iteration 3 (final).** The D15 behavior, approved API shape, typed error mappings, test evidence, native product proof, schema-source descriptions, and generated OpenAPI descriptions match the accepted design. Iteration 1's F1 and iteration 3's F2 are closed. The two example-spec remediation comments and the schema documentation updates do not alter TOML inputs, API shape, or runtime behavior.
 
 ## Contract review
 
@@ -109,4 +111,37 @@ No tests or native proof were rerun because this remediation changes comments on
 | Commit attribution | **PASS** | Marcus remains author; the commit has exactly `Co-Authored-By: Codex <codex@openai.com>` and no Claude/Anthropic attribution. |
 | Tests/native/mutation | **Not rerun** | Not needed for comment-only remediation; native and test evidence remains as recorded in iteration 1. Mutation testing remains the final wave gate. |
 
-**Iteration 2 verdict: APPROVED.** The finding is resolved and no open findings remain. Step 05-07 is finally approved.
+**Iteration 2 verdict: APPROVED at that review point.** F1 was resolved and no findings were open then. A later canonical OpenAPI check exposed stale D15 schema-source descriptions; that bounded review and its resolution are recorded in iteration 3 below.
+
+## Iteration 3 — generated OpenAPI schema documentation
+
+The final canonical OpenAPI check identified stale startup-default descriptions in schema-source comments and generated `api/openapi.yaml` after the iteration 2 approval. The remediation is recorded in `deliver/step-05-07-final-schema-remediation.md`; it does not reopen the already-closed E08 example-comment finding.
+
+### F2 — stale schema-source and generated OpenAPI descriptions
+
+**Locations before remediation:** schema-source comments in `crates/overdrive-control-plane/src/api.rs:323-328`, `crates/overdrive-core/src/aggregate/probe_descriptor.rs:9-16,71-77`, `crates/overdrive-core/src/api/submit.rs:74-85`, `crates/overdrive-core/src/observation/probe_result_row.rs:40-44`, and `crates/overdrive-core/src/transition_reason.rs:628-631`; generated OpenAPI descriptions in `api/openapi.yaml:569-575,1512-1516,1525-1526,1568-1580,1582-1589,2335-2348,3022-3025,3050-3053`.
+
+**Contract reviewed:** D15 applies the default only to a Service TOML input whose startup section is omitted: synthesize one fieldless `GuestListeners` descriptor over all declared TCP and UDP listeners, with the 60-second startup window. An explicit empty TOML startup array remains the opt-out. Raw-API omission or an empty `startup_probes` vector remains the existing opt-out; this documentation does not claim otherwise or prohibit the D14-approved, correctly formed raw-API `GuestListeners` descriptor. The mechanic remains unavailable as operator TOML and valid only as the sole Service startup descriptor.
+
+**Remediation reviewed:** Commit `d727375c6921d4549f58d4dd8b79e41970e652a6` updates only Rust schema-source documentation and generated OpenAPI descriptions. The source comments distinguish TOML omission from explicit empty TOML and raw-API omission/empty-vector behavior. They state the all-declared TCP/UDP listener semantics and 60-second deadline, remove the default-TCP claim from the `Tcp` mechanic, and describe the synthesized `ProbeIdx` and `Stable` witness consistently. The `api/openapi.yaml` diff changes description text only; schema properties, required fields, data types, enum values, and wire shapes are unchanged. Commit `d7386262215d88ada061846b8c1d8740b46ab9fc` formats the remediation evidence record only.
+
+**Independent checks:** The schema-source and generated-schema paths have no remaining `ADR-0058`, default-TCP, inferred-TCP, or first-listener startup claims (`rg` over the changed source files and `api/openapi.yaml` returned no matches). The source comments and generated schema state the TOML-only omitted-section synthesis and retain the explicit-empty/raw-API opt-outs. The recorded canonical OpenAPI generation and check passed as Metal run `3cf9d255047d03481953fd10`; scoped formatting passed as run `2a36f17cfcc7b89f20450531`. `git diff --check` over the remediation range returns no diagnostics. The check/format run IDs and prior failed schema check are retained in `step-05-07-final-schema-remediation.md`.
+
+No tests or native proof were rerun because these changes are documentation-only. Mutation testing was not run, per the user's direction; no mutation result is claimed. The existing test and native evidence remains applicable because no behavior changed.
+
+**Iteration 3 disposition:** F2 is closed by the schema-source and generated-description remediation. No public API, wire, serialization, parsing, runtime, or test change was introduced. The existing E13 and website finalization scope remains untouched. No new findings remain.
+
+### Iteration 3 verification and disposition
+
+| Check | Result | Evidence and limit |
+|---|---|---|
+| D15 input-path distinction | **PASS** | Schema-source comments and generated OpenAPI descriptions distinguish omitted Service TOML, explicit empty TOML startup, and raw-API omission/empty vector. |
+| Listener/deadline contract | **PASS** | `GuestListeners` documentation states every declared TCP and UDP listener and the 60-second startup window. |
+| Stale default claims | **PASS** | No ADR-0058, inferred-TCP/default-TCP, or first-listener startup claims remain in the changed schema sources or `api/openapi.yaml`. |
+| API/schema shape | **PASS** | The OpenAPI diff changes descriptions only; Rust source diff changes doc comments only. No fields, types, variants, serialization, parsing, or runtime behavior changed. |
+| Canonical schema check | **PASS as recorded** | Metal run `3cf9d255047d03481953fd10`; this reviewer did not rerun the command. |
+| Scoped formatting | **PASS as recorded** | Metal run `2a36f17cfcc7b89f20450531`; this reviewer did not rerun the command. |
+| Diff hygiene | **PASS** | `git diff --check d727375c6921d4549f58d4dd8b79e41970e652a6^ d7386262215d88ada061846b8c1d8740b46ab9fc` returns no diagnostics. |
+| Tests, native proof, mutation | **Not rerun** | The changes are documentation-only. Mutation testing is not required by the user's direction. |
+
+**Iteration 3 verdict: APPROVED.** F2 is closed and the step remains approved with no open findings.
