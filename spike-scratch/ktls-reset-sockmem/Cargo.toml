@@ -1,0 +1,14 @@
+# PROBE ktls-reset-sockmem — does a kTLS-TX sender blocked in tls_sw_sendmsg, woken by a peer RST,
+# leave /proc/net/sockstat TCP mem inflated, and does it persist past close / process exit?
+# Throwaway. Self-contained; std only (extern "C" setsockopt); no overdrive-* deps.
+[workspace]
+
+[package]
+name = "ktls-reset-sockmem"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "probe"
+path = "src/main.rs"

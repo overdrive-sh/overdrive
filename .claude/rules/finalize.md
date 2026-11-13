@@ -4,6 +4,11 @@ After a feature's implementation and review are approved, update the website
 documentation and write a blog post before finalizing the feature. Both are
 required completion gates, not follow-up tasks.
 
+- Capture and review the feature's EDD expectations (`verification/expectations/`,
+  `.claude/rules/verification.md`) before writing any docs page or blog post that
+  mentions verification. Writing comes after the evidence. A post must never
+  report a feature's own expectation as pending or uncaptured: capture it first.
+  If it truly cannot be captured, stop and ask the user. Do not publish around it.
 - Update the affected pages under `website/content/docs/` to describe the
   implemented behavior, operator-facing usage, and current limitations.
 - Write a post under `website/content/blog/` explaining the feature, its

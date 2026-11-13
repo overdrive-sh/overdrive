@@ -18,8 +18,8 @@ the set of held identities against the set of running allocations.
 	— adopted at boot, the same root across restarts. A production consumer
 	**reads** a held SVID to present it on a connection:
 	[transparent mTLS](/docs/concepts/transparent-mtls) reads it through the port
-	below to run the mesh handshake in both directions. The ingress gateway and the
-	telemetry sink are still unbuilt. See
+	below to run the mesh handshake in both directions. The ingress gateway holds its own
+	SVID in a dedicated slot, and the telemetry sink is still unbuilt. See
 	[Where it stands](#where-it-stands).
 </Callout>
 
@@ -123,9 +123,10 @@ double:
 A production consumer now binds this port: the
 [transparent mTLS](/docs/concepts/transparent-mtls) proxy reads the held SVID
 through it to run the outbound mesh handshake, and takes the read port as a
-required constructor parameter, so it cannot be wired without one. The remaining
-consumers — the ingress gateway and the telemetry sink — will bind the same port
-when they are built.
+required constructor parameter, so it cannot be wired without one. The
+[public ingress gateway](/docs/concepts/public-ingress-gateway) does not read
+this port. It holds its own SVID in a dedicated slot, separate from any
+allocation's held SVID. The telemetry sink is unbuilt.
 
 ## Surviving a restart
 
@@ -202,9 +203,9 @@ honest boundary:
 - **A consumer presents it:** the [transparent mTLS](/docs/concepts/transparent-mtls)
   proxy reads a held SVID through the port and presents it on inbound and outbound
   mesh connections, encrypting them with TLS 1.3 — proven by a packet capture. The
-  ingress gateway and the telemetry sink that would also read the held SVID are
-  unbuilt, so identity is read and presented across the mesh but not yet on those
-  paths.
+  ingress gateway presents its own SVID from a dedicated slot toward backends. The
+  telemetry sink that would also read a held SVID is unbuilt, so identity is not
+  yet read on that path.
 - **One inspection verb, no issue verb:** holding and dropping identity is an
   internal mechanism with no operator command to mint one. `overdrive workload describe`
   does report the current certificate for each running allocation — serial, SPIFFE

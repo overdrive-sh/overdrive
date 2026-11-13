@@ -22,7 +22,12 @@ This applies to every new or amended decision that changes any of these:
 - persistence, retry, ordering, recovery, compatibility, or migration
   behavior;
 - an explicitly rejected alternative whose exclusion constrains the
-  implementation.
+  implementation;
+- a scope limitation: a cardinality cap, a hardcoded limit with no config
+  surface, a restricted input channel, or an excluded protocol or workload kind.
+  Each one goes to the user with a proposed tracking issue (CLAUDE.md
+  § "Deferrals require GitHub issues"). A "smallest envelope" or "first slice"
+  table is not approval of the limits it contains.
 
 The user-facing decision request names the exact proposed contract, affected
 owners and boundaries, material alternatives, and the consequence for the

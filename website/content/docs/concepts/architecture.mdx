@@ -313,14 +313,19 @@ not describe them as present until there is:
   Corrosion gossip layer is the multi-node design target.
 - **Other guest runtimes.** Non-Linux guest networking, unikernel, and WASM
   drivers are unbuilt. Linux microVMs run through Cloud Hypervisor.
-- **The ingress gateway, the policy engine, native telemetry, and the LLM
-  self-healing agent.** Each is part of the design; none is wired into `serve`.
+- **The policy engine, native telemetry, and the LLM self-healing agent.** Each
+  is part of the design. None is wired into `serve`. The
+  [public ingress gateway](/docs/concepts/public-ingress-gateway) is wired
+  and runs when `serve` receives the gateway flags.
+- **HTTP/2 and automated certificates at the gateway.** The gateway speaks
+  HTTP/1.1 and reads certificates from files you supply.
 - **Presenting workload identity on every path.** The built-in certificate
   authority issues, holds, and audits a SPIFFE SVID for every running allocation,
   and the mesh dataplane presents it on the wire in both directions — a node-agent
   L4 proxy encrypts connections between workloads with TLS 1.3 (see
-  [transparent mTLS](/docs/concepts/transparent-mtls)). The consumers still unbuilt
-  are the ingress gateway and the telemetry sink that would also read a held SVID.
+  [transparent mTLS](/docs/concepts/transparent-mtls)). The ingress
+  gateway holds its own SVID in a dedicated slot and uses it toward backends.
+  The telemetry sink that would also read a held SVID is unbuilt.
   See the [identity model](/docs/concepts/identity) and the
   [workload identity lifecycle](/docs/concepts/workload-identity-lifecycle).
 - **A deployed multi-node mesh.** The single-node control plane cannot place a

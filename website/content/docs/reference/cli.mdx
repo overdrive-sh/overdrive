@@ -33,13 +33,28 @@ Start the control plane on a TLS-bound listener. This is the one command that
 does not read an existing config; it writes one.
 
 ```bash
-overdrive serve [--bind <ADDR>] [--data-dir <PATH>]
+overdrive serve [--bind <ADDR>] [--data-dir <PATH>] \
+  [--gateway-address <IPV4> --gateway-certified-key-id <ID> \
+   --gateway-certificate-chain <PATH> --gateway-private-key <PATH>]
 ```
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
 | `--bind <ADDR>` | `127.0.0.1:7001` | Socket address to bind. Pass `127.0.0.1:0` to request an ephemeral port. |
 | `--data-dir <PATH>` | `dirs::data_dir()/overdrive` | Parent directory for the IntentStore file, the per-primitive state files, and the trust-triple config. |
+| `--gateway-address <IPV4>` | none | Host IPv4 address the public ingress gateway binds. The port is fixed at TCP/443. |
+| `--gateway-certified-key-id <ID>` | none | Identity the manual certificate source installs. A Route names it in `certified_key`. |
+| `--gateway-certificate-chain <PATH>` | none | Absolute path to the leaf-first PEM certificate chain. |
+| `--gateway-private-key <PATH>` | none | Absolute path to the PKCS#8 PEM private key. |
+
+The four `--gateway-*` flags go together. Pass all four to enable the
+[public ingress gateway](/docs/concepts/public-ingress-gateway) or none to leave
+it disabled. A partial set fails with a gateway configuration error before
+`serve` takes any startup action. The certificate files must be regular files
+(not symlinks) owned by the effective user, and the key file must carry no group
+or other permission bits. See
+[Expose a service publicly](/docs/how-to/expose-a-service-publicly) for the full
+file requirements.
 
 The recorded endpoint names the *resolved* port, not the requested one — so a
 `--bind 127.0.0.1:0` server writes the concrete port it actually got, and the
@@ -89,6 +104,49 @@ A streaming Service deploy exits `0` on `Stable` or an operator stop and `1`
 on a Service failure or progress timeout. A local TOML parse error also exits
 `1`. Pre-acceptance transport and server errors exit `2`. `--detach` reports
 only the intent commit, so its success does not assert Service health.
+
+### Route documents
+
+`deploy` also accepts a public Route document. A Route file holds exactly one
+top-level `[route]` table, and unknown fields are rejected.
+
+```toml
+[route]
+id = "public-api"
+hostname = "api.example.com"
+path = "/"
+path_match = "segment_prefix"
+certified_key = "api-origin"
+
+[route.target]
+service = "api"
+port = 8080
+protocol = "tcp"
+```
+
+| Field | Meaning |
+| --- | --- |
+| `id` | Route identifier. |
+| `hostname` | One exact DNS name. Wildcards, IP literals, and a trailing dot are rejected. |
+| `path` | Absolute raw path with no query or fragment. |
+| `path_match` | `exact` or `segment_prefix`. |
+| `certified_key` | The id passed to `serve --gateway-certified-key-id`. |
+| `[route.target]` | `service` (a deployed Service id), `port`, and `protocol`, which must be `tcp`. |
+
+Deploying a Route prints three lines:
+
+```text
+Route 'public-api' declared.
+Generation: ...
+Endpoint: ...
+```
+
+The first line reads `declared`, `replaced`, or `unchanged`. The output is the
+same with or without `--detach`. A node holds one Route. Deploying a Route with a
+different `id` returns a 409 conflict. When `serve` started without the gateway
+flags, a Route deploy is refused with `gateway_disabled`. See
+[the public ingress gateway](/docs/concepts/public-ingress-gateway) for what a
+Route does.
 
 ## `overdrive job`
 

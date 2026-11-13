@@ -1,0 +1,143 @@
+---
+title: Public ingress gateway
+description: The gateway embedded in overdrive serve terminates public HTTPS on TCP/443 and relays each request to a VM Service over the mesh, with backend selection in the kernel.
+---
+
+The public ingress gateway lets clients outside the node reach a VM Service over
+HTTPS. It runs inside `overdrive serve`. It terminates TLS 1.3 on TCP/443,
+routes each request by hostname and path to a Service you deployed, and forwards
+it to a backend over the same mutual-TLS mesh that workloads use between
+themselves. The workload speaks plaintext HTTP and holds no certificate.
+
+You enable it with four `serve` flags and declare what it serves with a Route
+document. [Expose a service publicly](/docs/how-to/expose-a-service-publicly)
+walks through both.
+
+<Callout title="Scope">
+	The gateway handles HTTP/1.1 only, for VM workloads only. It reads certificates
+	from files you provide. Automated certificate issuance (ACME) is
+	[unbuilt](https://github.com/overdrive-sh/overdrive/issues/57) and HTTP/2 is
+	[unbuilt](https://github.com/overdrive-sh/overdrive/issues/341).
+</Callout>
+
+## What a Route is
+
+A Route maps one exact hostname and path to one Service port. It names the
+certified key the gateway presents for that hostname.
+
+```toml
+[route]
+id = "public-api"
+hostname = "api.example.com"
+path = "/"
+path_match = "segment_prefix"
+certified_key = "api-origin"
+
+[route.target]
+service = "api"
+port = 8080
+protocol = "tcp"
+```
+
+`path_match` is `exact` or `segment_prefix`. The hostname is one exact name, with
+no wildcard. A node holds one Route. You declare it with
+`overdrive deploy <ROUTE_SPEC>`, which prints whether the Route was `declared`,
+`replaced`, or `unchanged`, along with its generation and the endpoint. See the
+[CLI reference](/docs/reference/cli#route-documents) for every field.
+
+## What the client sees
+
+The listener accepts TLS 1.3 only, negotiates ALPN `http/1.1`, and offers AES-GCM
+cipher suites only. The `Host` header must match the TLS server name. A mismatch
+gets `421`, and a malformed `Host` gets `400`.
+
+| Status | Cause |
+| --- | --- |
+| 404 | No Route matches the hostname and path. |
+| 408 | The request head or body stalled. |
+| 413 | The declared body exceeds 16 MiB. |
+| 421 | `Host` differs from the TLS server name. |
+| 431 | The request head is larger than 32 KiB or carries more than 100 headers. |
+| 502 | The backend connection or response failed. |
+| 503 | The Service has no backend. This is the only 503 the gateway returns. |
+| 505 | The request is not HTTP/1.1. |
+
+The gateway makes one attempt to the backend and never retries. It strips
+hop-by-hop headers, adds `Via: 1.1 overdrive`, and replaces any incoming
+`Forwarded` and `X-Forwarded-*` headers with a single `Forwarded` header. The
+upstream leg carries `Connection: close`.
+
+### Limits and deadlines
+
+| Limit | Value |
+| --- | --- |
+| Concurrent connections | 128 |
+| Request head | 32 KiB, at most 100 headers |
+| Requests per connection | 100 |
+| Request body | 16 MiB |
+| Handshake, head, backend connect, response head | 5 s each |
+| Body no-progress and idle | 30 s each |
+| Whole request | 120 s |
+
+## How a request reaches a backend
+
+Backend selection happens in the kernel. A separate `cgroup/connect4` BPF program
+attached to the gateway's cgroup picks a backend from the same Service maps the
+mesh uses, so the gateway runs no userspace load balancer and keeps no copy of the
+backend list. The program ignores the `healthy` flag in the backend map. A request
+that arrives in the roughly one second after a backend starts, before it listens,
+gets `502`.
+
+The gateway then opens a mutual-TLS connection to the backend using its own SVID.
+The SVID sits in a dedicated slot, separate from the per-allocation SVIDs the
+[identity model](/docs/concepts/identity) describes. The handshake pins the exact
+peer the BPF selection chose, so the connection reaches the backend the kernel chose
+and no other.
+
+A Service that stops keeps its backend in the kernel map. A request to it gets
+`502` and never reaches a different peer.
+
+### The data path
+
+The gateway terminates the client's TLS with rustls, then installs kernel TLS on
+both legs. It parses request and response heads itself and moves bodies between
+the two sockets with `splice(2)`, so body bytes stay in the kernel. The relay uses
+an empty pipe of at least 64 KiB for each splice. A smaller pipe loses bytes, as
+the [launch post](/blog/public-ingress-gateway) explains. Kernel TLS key updates
+are handled through rustls's kernel connection support.
+
+## Certificates
+
+The gateway reads a leaf-first PEM chain of one to eight certificates and one
+PKCS#8 private key. The leaf must carry a single DNS name, currently be valid, and
+match the key. The provenance of every certificate is `Manual`. A background task
+re-reads both files every 30 seconds. A changed, valid pair becomes a new
+generation. A missing or invalid pair leaves the last usable generation in place.
+
+## Operating it
+
+Three operator HTTP endpoints sit on the control plane's mTLS listener.
+
+| Endpoint | Purpose |
+| --- | --- |
+| `POST /v1/routes` | Declare a Route. `overdrive deploy` calls it. |
+| `DELETE /v1/routes/{id}` | Withdraw a Route. |
+| `GET /v1/gateway/status` | Report whether the gateway is enabled and whether the listener is bound. |
+
+No CLI verb exists for status or withdrawal. When `serve` runs without the gateway
+flags, the Route endpoints return `409` with `gateway_disabled` and status reports
+`enabled: false`.
+
+Resource use per exchange is bounded. A measurement on a Linux 7.0 kernel put it
+at nine descriptors per exchange (seven at steady state), so 128 concurrent
+exchanges hold at most 1,152. Memory grew about 173 KiB per exchange on a base of
+0.73 MB, and resident-set growth stayed at or under 24,405,456 bytes at 128
+exchanges, with the heap returning to a plateau afterward.
+
+## Current limits
+
+- HTTP/1.1 only. Other protocols get `505`.
+- VM workloads only.
+- One Route per node.
+- Certificates come from files. ACME is unbuilt.
+- No retry to a second backend.

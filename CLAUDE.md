@@ -485,9 +485,26 @@ Every deferral surfaced during a wave dispatch — operator-tunable knobs, futur
 
 **Clippy warnings, lint errors, and other code-quality findings are NOT deferrals — they are in-scope fixes.** Per `.claude/rules/development.md` and feedback memory: "clippy errors surfaced during a task get fixed in-scope, not classified as 'pre-existing' and left for the next person." An agent that encounters clippy `-D warnings` failures during its quality gate MUST fix them in the current commit, not create a tracking issue. The only exception is when the fix requires touching files explicitly outside the step's implementation scope AND the fix is structurally unrelated to the step's work (e.g., a lint regression in a crate the step never imported) — in that case, surface it to the user as a blocker with the specific errors and files, and let the user decide whether to expand scope or defer. Never create the issue unilaterally.
 
+**Scope limitations are deferrals too.** Any wave can bound what a feature delivers below what an operator would reasonably expect. Examples:
+
+- a cardinality cap: one Route, one hostname, one listener;
+- a hardcoded limit with no config surface: connection counts, request counts, size ceilings;
+- a restricted input channel: certificates only from files passed to `serve`;
+- an unsupported protocol or workload kind.
+
+Each such limitation needs a GitHub issue that tracks lifting it. Surface each limitation to the user as a proposed issue, naming the limitation, where it is pinned (ADR, feature-delta row, constant), and what lifting it would take. On approval, create the issue, or cite an existing one verified with `gh issue view <N> --comments` whose scope actually covers it, then record the issue number beside the limitation in the design artifact. Every limitation stated in the operator docs or blog post cites its issue. A limitation recorded only as a design envelope ("smallest quantified envelope", "first slice", "fixed finite limits") is not tracked. A reviewer who finds an untracked limitation blocks the artifact, exactly as for an untracked deferral.
+
+**Search for the planned mechanism before proposing an issue.** Many limitations are stand-ins for something the platform already plans to build. Before proposing a new issue, search the open issues (`gh issue list --state all --search …`, then `gh issue view <N> --comments`), the ADRs, and the roadmap for the mechanism that would remove the limitation. Ask what the platform intends to replace it with, not how to widen the stand-in.
+
+- **If a planned mechanism exists, cite its issue.** Name the limitation as a stand-in until that issue lands. Do not create a duplicate.
+- **Never propose widening a stand-in when a planned mechanism replaces it.** Your proposal must not point in a different direction from that mechanism.
+- **A new issue must describe lifting the limitation in the platform's intended direction.** Ground it in the issues and ADRs you found, not in the shape of the stand-in.
+
+Precedent (#54): the first gateway slice reads its certificate only from files passed as `serve` flags. An agent proposed "install certificates through the operator API" as the issue to lift this. Certificates are meant to be produced by the system itself, through the ACME producer in #57, so the limitation was already tracked there. The proposed issue would have recorded the wrong direction as planned work.
+
 The valid moves when tempted to write "deferred to a future X":
 
-- **Drop the deferral language.** Unstated knobs are "not in scope" by default; the reader doesn't need a promise of a future slot.
+- **Drop the deferral language.** Unstated knobs are "not in scope" by default; the reader doesn't need a promise of a future slot. This does not apply to a scope limitation the design itself imposes (above); that needs an issue.
 - **Fix it now.** If it's a code-quality issue (clippy, fmt, dead code, missing test) that surfaced during your step — fix it. It's not a deferral; it's your job.
 - **Surface and ask.** Present the deferral to the user with the specific scope, affected files, and your recommendation. Wait for approval. On approval run `gh issue create`. Two minutes is the price of an honest forward pointer.
 - **Cite an existing issue** verified by `gh issue view <N>` whose scope actually covers the deferred work — never invent, guess, or copy-paste an issue number.

@@ -1,0 +1,151 @@
+---
+title: A public ingress gateway that keeps the workload plaintext
+description: "Overdrive's gateway terminates public HTTPS, picks a backend in the kernel, and relays bytes with splice. The path got there by replacing a userspace data path and finding a 5-byte loss per record."
+date: 2026-11-12
+author: The Overdrive team
+summary: Clients outside the node need to reach a VM Service over HTTPS, while the workload stays identity-unaware. This post covers the alternatives we built or measured, the two kernel facts that changed the design, and what the delivered gateway does and does not prove.
+---
+
+Overdrive workloads hold no certificates. A workload opens an ordinary socket,
+and the node agent runs mutual TLS on its behalf. That model covers traffic
+between workloads. It says nothing about a browser on the internet that wants to
+reach one of them.
+
+The public ingress gateway closes that gap. It runs inside `overdrive serve`,
+terminates TLS 1.3 on TCP/443 for a hostname you name in a Route, and relays each
+HTTP/1.1 request to a VM Service over the same mesh. The guest sees plaintext
+HTTP. This post explains how the data path ended up in the kernel and where the
+claims stop. The reference pages are
+[Public ingress gateway](/docs/concepts/public-ingress-gateway) and
+[Expose a service publicly](/docs/how-to/expose-a-service-publicly).
+
+The design decisions here were ruled by the maintainer during design. The ADRs
+that record them are still marked proposed, pending independent review.
+
+## The problem: a front door that must not become a second mesh
+
+A gateway has three jobs. It presents a public certificate, decides which backend
+gets the request, and carries bytes between two sockets. Each job has a
+conventional userspace answer, and each answer adds state that Overdrive already
+keeps somewhere else.
+
+A userspace load balancer needs its own copy of the Service's backends and its own
+health opinion. Overdrive already programs backends into kernel maps for the mesh.
+A second list drifts from the first. A gateway that parses and re-emits every byte
+also pays for it on every request. And a gateway that authenticates backends with
+its own scheme would be a second identity system next to the SVIDs the node holds.
+
+The constraint that shaped everything: the gateway should reuse the mesh's backend
+maps and identity, and add as little new mechanism as possible.
+
+## The first data path: hyper in userspace
+
+The first design was the conventional one. A hyper server terminated TLS and
+parsed HTTP, then forwarded each request to a backend through a client. It worked
+as a design, and it was the version that answered the question "what is the
+simplest correct gateway."
+
+We replaced it. In the final data path rustls performs the handshakes, kernel TLS
+carries the records on both legs, and the gateway parses request and response
+heads itself. Bodies move between the two sockets with `splice(2)`, so they stay
+in the kernel. Backend selection moved into the kernel too, as the next section
+explains.
+
+The replacement does not claim a speedup. We did not measure a CPU or throughput
+gain over the hyper path, so none is stated. The reason to prefer it is that it
+fits the rest of the system.
+
+## Backend selection: a second BPF program, not a bigger one
+
+The mesh already selects a backend in a `cgroup/connect4` program. The gateway
+needs the same selection for its own connections. The obvious move was to fold the
+gateway case into the existing hook.
+
+We measured that and rejected it. Folding the logic in raised the verified
+instruction count of the program from 28 to 246 (spike V-GW-4). That cost lands on
+every connect from every workload, to serve one cgroup. We kept the existing hook
+untouched and attached a separate `cgroup/connect4` program to the gateway's
+cgroup. It reuses the Service maps, so there is no new backend table and no
+userspace load balancer.
+
+The separate program is not free. A measurement of the hook put its cost at about
+117 ns on an unregistered connect that takes about 28 µs. That figure is
+report-only. No gate depends on it.
+
+One behavior follows from reusing the maps. The gateway's program ignores the
+`healthy` flag in the backend map, so a request that arrives in the roughly one
+second between a backend starting and its listener binding gets a `502`. We chose
+to document that exposure instead of adding a health wait to the hook. A stopped
+Service has the same shape. Its backend stays in `SERVICE_MAP`, and a request to it
+gets `502`, never a connection to a different peer.
+
+The gateway presents its own SVID toward the backend, held in a dedicated slot so
+that no allocation's identity is borrowed. The mutual-TLS hop pins the exact peer
+the BPF selection chose.
+
+## Two kernel facts that changed the design
+
+Both came from a spike on a Linux 7.0.0-38 kernel, where the relay had to move
+bytes between two kTLS sockets.
+
+**Splicing into a small pipe loses bytes.** `splice(2)` moves data through a pipe.
+When the pipe is smaller than a TLS record, the splice loses 5 bytes per record,
+the length of the record header. Nothing errors. The body arrives short. The relay
+therefore always splices through an empty pipe of at least 64 KiB (R-17). The loss is silent, so
+the pipe size is a correctness setting, not a tuning knob.
+
+**KeyUpdate needs the right API.** TLS 1.3 lets either side rotate traffic keys
+mid-connection. With kTLS the kernel holds the keys, so a KeyUpdate record arrives
+at a socket the application no longer reads through a TLS library. The spike
+showed that KeyUpdate works only through rustls's `KernelConnection`. The gateway
+uses it for that reason.
+
+## What the delivered gateway proves
+
+The listener and relay run through the production path. `overdrive serve` with four
+gateway flags starts the listener, and `overdrive deploy <ROUTE_SPEC>` declares the
+Route. The checked-in operator example drives a VM Service behind a Route that way.
+A recurring in-process end-to-end test guards the behavior.
+
+A resource measurement at 128 concurrent exchanges (R-74) found:
+
+- 9 descriptors per exchange, 7 at steady state, so at most 1,152 at the connection
+  limit.
+- Memory growing about 173 KiB per exchange on a base of 0.73 MB.
+- Resident-set growth at or under 24,405,456 bytes, with the heap returning to a
+  plateau.
+
+The HTTP behavior is bounded in code: 128 connections, 32 KiB heads, 100 headers,
+100 requests per connection, 16 MiB bodies, and 5, 30, and 120 second deadlines
+for the handshake, body progress, and whole request. A stalled head or body gets
+`408`, an oversized head `431`, and an oversized declared body `413`. There is one
+attempt to the backend and no retry.
+
+## What is not proven
+
+- **No captured end-to-end verification.** The operator-journey verification
+  expectation for the example has not been captured. The example exists and runs.
+  A retained, reviewed capture of it does not.
+- **No performance claim.** The kTLS and splice path has no measured CPU or
+  throughput advantage over the userspace path. The 117 ns hook cost is a single
+  report-only measurement.
+- **The resource figures are one measurement.** R-74 came from one host and one
+  profile, not a distribution.
+- **Certificate rotation is a file poll.** The gateway re-reads the certificate
+  and key files every 30 seconds and installs a changed valid pair as a new
+  generation. A bad replacement leaves the last usable key in place. That is
+  tested behavior of a poll, not automated issuance.
+
+## Limits
+
+The gateway speaks HTTP/1.1 only and answers anything else with `505`. HTTP/2 is
+tracked in [#341](https://github.com/overdrive-sh/overdrive/issues/341). Certificates
+come from files you supply, with provenance recorded as `Manual`. ACME is tracked in
+[#57](https://github.com/overdrive-sh/overdrive/issues/57). The gateway serves VM
+workloads only, holds one Route per node, and has no CLI verb for status or
+withdrawal. Those two operations are HTTP calls on the operator listener.
+
+The useful lesson is about reuse. Every simplification here came from declining to
+build a second copy of something the mesh already had: a backend list, an identity,
+a selection hook. The two bugs we found were in the one place we had to build
+something new, the byte relay.

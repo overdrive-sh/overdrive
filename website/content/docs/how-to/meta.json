@@ -1,4 +1,4 @@
 {
 	"title": "How-to",
-	"pages": ["deploy-a-workload", "run-the-dst-harness", "run-verification-on-metal", "check-quint-models", "use-the-mcp-server", "write-a-reconciler", "write-a-workflow"]
+	"pages": ["deploy-a-workload", "expose-a-service-publicly", "run-the-dst-harness", "run-verification-on-metal", "check-quint-models", "use-the-mcp-server", "write-a-reconciler", "write-a-workflow"]
 }
