@@ -3548,9 +3548,9 @@ Historical minor items from DISTILL: the `BeaconParseError` variant for a reject
 
 Not tested by DISTILL, by DESIGN ruling: **V39**; **P-12** (benchmark, proposal only); **F-1 (GH #335), F-2 (GH #336), F-6 (GH #340)**; the **IPv6/V6ONLY** exposure (GH #308).
 
-## Wave: DELIVER / [REF] Finalization preparation (2026-11-13)
+## Wave: DELIVER / [REF] Finalization (2026-11-13)
 
-**Status: verification pending; not finalized.** The approved
+**Status: complete and finalized on 2026-11-13.** The approved
 [`deliver/roadmap.json`](deliver/roadmap.json) has 17 implementation steps. Each
 step has a completed DES trace and a final `APPROVED` verdict in a
 [`deliver/review-*.md`](deliver/) artifact. Later bounded corrections
@@ -3579,10 +3579,20 @@ The private D11 `stream_snapshot` poll/subscribe mapping was corrected in
 The original seed `0x43d4164d` passed 9/9 focused cases; a second seed passed
 9/9 and a third randomized seed passed 1/1. Formal checks passed 84/84 at the
 reviewed isolated source. Those focused results do not establish a broad
-affected-suite or later-source result. Finalization still waits for the
-latest-source scoped integration rechecks and an independent final evidence
-audit. The broad native workspace diagnostic
-reported 4,512 passed, 129 failed, two timed out and 27 skipped; it is not a
-workspace-green result. The website docs and blog are checked in and
-independently approved; the pre-existing search-ranking assertion still fails
-on untouched HEAD, and no website deployment or publication occurred.
+affected-suite or later-source result. The
+[`final integration report`](deliver/final-integration-verification.md) records
+the complete control-plane acceptance binary passing 467/467 at `6b7d26806`
+and the exact required guest-flow/beacon serial selection passing 210/210 with
+three existing skips at `c2317cbcb` after fresh same-source GuestKit
+preparation and only the three named T-5/D-22 identities excluded. The earlier
+209/210 Fast Open failure remains retained with
+undetermined cause and unchanged one-second bound. The
+[`independent final evidence audit`](deliver/review-final-evidence.md) is
+**APPROVED, iteration 2**; its F-01 closed on that exact serial replay.
+
+The broad native workspace diagnostic reported 4,512 passed, 129 failed, two
+timed out and 27 skipped; it is not a workspace-green result. Whole-workspace
+formatting and strict Clippy still fail in unchanged, unrelated files. The
+website docs and blog are checked in and independently approved; the
+pre-existing search-ranking assertion still fails on untouched HEAD. No
+website deployment or publication occurred.

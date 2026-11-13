@@ -1,12 +1,13 @@
 # Evolution — service allocation readiness and ending
 
 **Feature:** `service-allocation-readiness-and-ending` (GH #318, GH #334).
-**Record prepared:** 2026-11-13. **Status:** verification pending; **not finalized**.
+**Finalized:** 2026-11-13. **Status:** DELIVER complete.
 The [feature contract](../feature/service-allocation-readiness-and-ending/feature-delta.md),
 [approved roadmap](../feature/service-allocation-readiness-and-ending/deliver/roadmap.json)
 and [finalization record](../feature/service-allocation-readiness-and-ending/deliver/finalization.md)
-are the detailed authorities; this record will become the evolution summary
-only after the pending receipts receive independent approval.
+are the detailed authorities. The
+[independent final evidence audit](../feature/service-allocation-readiness-and-ending/deliver/review-final-evidence.md)
+approved the final scoped receipts at iteration 2.
 
 ## Delivered outcome and decisions
 
@@ -44,17 +45,25 @@ The private D11 `stream_snapshot` poll/subscribe mapping correction
 at iteration 1. Its focused isolated-source evidence passed 9/9 at the
 original `0x43d4164d` seed, 9/9 at a second seed, 1/1 at a third randomized
 seed, and 84/84 canonical formal checks. It does not establish a broad
-affected-suite or later-source result. Latest-source scoped integration
-rechecks and an independent final evidence audit remain pending.
+affected-suite or later-source result. The
+[final integration report](../feature/service-allocation-readiness-and-ending/deliver/final-integration-verification.md)
+records the complete control-plane acceptance binary passing 467/467 at
+`6b7d26806` and the exact required guest-flow/beacon serial selection passing
+210/210 with three existing skips at `c2317cbcb` after fresh same-source
+GuestKit preparation and only the three named T-5/D-22 identities excluded.
+The independent final evidence audit is **APPROVED at
+iteration 2**; its F-01 closed on this exact serial replay.
 
 The broad native workspace diagnostic at `dca2350aa` exited 100: 4,512
 passed, 129 failed, two timed out and 27 skipped across 4,643 runs. The
-serial required guest-flow/beacon controls recorded 209 passed, one Fast Open
-failure and three skipped; the exact failed cell later passed 1/1 in isolation,
-without making the serial run green. The [integration report](../feature/service-allocation-readiness-and-ending/deliver/final-integration-verification.md)
-retains the failed identities, routed current-feature work and remaining
-limits. Whole-workspace formatting and strict Clippy also have unrelated
-unchanged-file failures; feature-scoped results are recorded separately.
+first serial required guest-flow/beacon selection recorded 209 passed, one
+Fast Open failure and three skipped; the exact failed cell later passed 1/1
+in isolation. The original failure remains a failed receipt with undetermined
+cause and unchanged one-second bound. The later complete serial pass does not
+make the original or the broad diagnostic green. The integration report
+retains the failed identities and source limits. Whole-workspace formatting
+and strict Clippy also have unrelated unchanged-file failures; all 11 changed
+crates passed scoped formatting and strict Clippy at their reported sources.
 
 The user's exact **“no mutation testing is required”** instruction changed
 the roadmap's final mutation gate to `not_required_by_user`, including its
@@ -68,5 +77,5 @@ failure. The website was not deployed or published.
 
 The accepted ADRs, feature workspace, review history, product examples and
 SHA-pinned verification catalogue remain at their existing repository homes.
-No finalization migration or cleanup has been performed while verification is
-pending.
+No finalization migration or cleanup removed those canonical records. This
+finalization performed no website deployment, publication, push, or pull request.
