@@ -6,22 +6,30 @@
 |---|---|
 | Feature | `service-allocation-readiness-and-ending` |
 | Step | `03-02` — Broker submit wakes the convergence loop |
-| Iteration | 1 |
-| Reviewer | Codex, fresh isolated DELIVER reviewer |
+| Iteration | 1–3 (current final remediation re-review: 3) |
+| Reviewer | Codex, fresh isolated DELIVER reviewer; iteration 3 is the fresh final Clippy remediation reviewer |
 | Implementation commit | `97e7e5d7855b49e6456347e1454b6b47e97c2c9c` |
 | COMMIT audit commit | `b046718aee011be6333f14a9578c5dc5c0b6f9a0` |
+| F-01 documentation remediation commit | `09b052b39bf7bf543651ab81d1f8ffd987a9d539` |
+| Final Clippy remediation commit | `ff29358a80fc10e112b7b7f6ba1a86dcf0711c20` |
+| Final remediation DES audit commit | `32a60dd17e5d28d8a5fe4fceb9d978bca80335be` |
 | Comparison base | `641f546aec009cfa4a5af416ea919948d76334e` (approved step 03-01) |
 | Authoritative contract | Approved roadmap step 03-02; feature-delta D17 and D17-S1; ADR-0273; approved architecture brief |
 | Upstream prerequisite | Step 03-01 review is `APPROVED`; the D17-S1 signatures are user-approved and included in the reviewed DESIGN contract |
-| Verdict history | Iteration 1: **NEEDS_REVISION**; iteration 2: **APPROVED** |
+| Verdict history | Iteration 1: **NEEDS_REVISION**; iteration 2: **APPROVED**; iteration 3: **APPROVED** |
 
 ## Executive summary
 
-The production implementation follows D17's wake and broker ownership contract. `ReconcilerRuntime::submit_evaluation` submits under the broker lock, releases the lock, then calls `Notify::notify_one`; the convergence loop selects on `submitted()` after completion and before the existing clock timer. The runtime broker accessor returns the exact drain-only `BrokerDrain` surface, and the old `broker_mutex()` accessor is removed. The production handler, interest router, action shim, reclamation path, and runtime self-re-enqueue use the runtime submit entry. The four assigned wake scenarios are activated against the production convergence loop with `SimClock`; the cadence control remains.
+The D17 implementation and its accepted API remain unchanged. Iteration 1's F-01 documentation finding was closed in iteration 2. The final Clippy remediation commit `ff29358a8` restricts the private action-shim `EvaluationSubmission::Standalone` adapter and its `EvaluationBroker` import and match arm to `cfg(test)`; the only constructors are in source-local test modules. This removes the feature-enabled non-test-library dead-code failure while preserving the standalone test composition. The production runtime path and D17 ordering, stored-permit, wake-selection, drain-only broker, and cadence invariants are unchanged.
 
-One accepted landing obligation remains incomplete: `.claude/rules/development.md` still documents a clock-only, 100 ms steady-state tick and the pre-D17 direct `broker.submit` production surface. ADR-0273 explicitly says this section needs the wake added when D17 lands. This is the sole finding; no production correctness defect, public API divergence, error-contract gap, or test-oracle weakening was found.
+The remediation's recorded focused strict Clippy run and five D17 convergence-loop wake tests pass. The full-workspace Clippy run reached a separate scanner `doc_markdown` issue, which the 05-02 owner subsequently fixed and independently approved; it is unrelated and is not required for this bounded review. The user explicitly waived mutation testing, and the roadmap records the final mutation gate as `required: false`, `status: not_required_by_user`. No mutation run or witness is required here. No new finding remains; the current verdict is **APPROVED — iteration 3**.
 
-## D17 contract and production-path review
+## D17 contract and production-path review (iteration 1 baseline)
+
+This section preserves the initial review snapshot. Its descriptions of the
+pre-remediation Standalone cfg and the then-pending mutation gate reflect the
+state reviewed in iteration 1; the final cfg and current mutation-gate status
+are recorded in iteration 3 below.
 
 ### Exact interface contract
 
@@ -122,6 +130,137 @@ No new finding was introduced by the documentation revision. The update is consi
 
 The workspace contained only this reviewer artifact as untracked work before this re-review. No production, test, model, DES, roadmap, or commit changes were made by the reviewer.
 
-## Final verdict
+## Iteration 2 final verdict (historical)
 
 **APPROVED — iteration 2.** F-01 is closed. The step's D17 implementation, exact public API, production submission ownership, test integrity, and required runtime-mechanics documentation now match the accepted contract. The final DELIVER-wave mutation gate remains pending after all roadmap step reviews as specified.
+
+## Iteration 3 — final Clippy remediation re-review
+
+### Revision reviewed
+
+The final remediation consists of implementation commit
+`ff29358a80fc10e112b7b7f6ba1a86dcf0711c20` and DES audit commit
+`32a60dd17e5d28d8a5fe4fceb9d978bca80335be`. The implementation commit
+changes only three conditional-compilation attributes in
+`crates/overdrive-control-plane/src/action_shim/mod.rs` and adds the
+step-specific remediation record. The DES commit appends this replacement
+crafter's RED, GREEN, and COMMIT events. The review preserves the iteration 1
+finding and iteration 2 closure above; this is the current final review of the
+additional Clippy remediation.
+
+### Approved contract and implementation review
+
+The authoritative D17 interface remains the approved feature-delta contract:
+`ReconcilerRuntime::submit_evaluation(&self, eval, now, eligibility)` is the
+only production submit path; `BrokerDrain` has only its three approved
+drain/read methods; `broker_mutex()` remains removed; and `EvaluationBroker`
+remains unchanged. D17 also requires insert → unlock → signal ordering,
+`Notify::notify_one` stored-permit behavior, a `submitted()` select arm before
+the cadence timer, unchanged deferred eligibility and admission semantics, and
+the cadence timer as the level-triggered backstop.
+
+The reviewed source diff changes no runtime submission or convergence-loop
+code. In `action_shim/mod.rs:25–26`, the `EvaluationBroker` import is now
+under `#[cfg(test)]`. At `:73–95`, the crate-internal
+`EvaluationSubmission::Standalone` variant and its `submit` match arm use
+the same `cfg(test)` gate. The production `Runtime` variant and its
+`submit_evaluation` call remain unconditional. This is a private compilation
+correction; it adds no public or cross-crate API.
+
+The constructor audit found all `Standalone` uses within test-only owners:
+
+| Constructor owner | Gate | Result |
+|---|---|---|
+| `action_shim/reclamation.rs` test module (`:343–345`, constructors at `:513`, `:667`, `:746`, `:811`, and `:848`) | `#[cfg(test)]` | Available in the source-local unit-test build. |
+| `action_shim/replacement_acceptance.rs` (constructor at `:427`) | Included from `action_shim/mod.rs:3329–3330` under `#[cfg(all(test, feature = "integration-tests"))]` | Available when the integration-tests feature participates in the source-local unit-test build. |
+
+Repository search found no other `EvaluationSubmission::Standalone`
+constructors or call sites. Therefore the library built with
+`integration-tests` but without `cfg(test)` has only the `Runtime` variant
+and a complete one-arm match, while the unit-test composition keeps the
+standalone adapter and its broker import. This matches the precise compiler
+failure recorded in the remediation report: the prior
+`cfg(any(test, feature = "integration-tests"))` exposed an unconstructed
+variant in the feature-enabled non-test library.
+
+The focused all-target Clippy command includes
+`integration-tests,kvm-tests`, and the recorded `--lib --features
+integration-tests` nextest command compiles and executes the source-local
+test composition. Both are relevant evidence that the gated import, enum
+variant, match arm, and test constructors remain buildable in their required
+configurations.
+
+The production D17 invariants remain intact. The remediation diff does not
+touch `ReconcilerRuntime::submit_evaluation` (insert, release the lock, then
+signal), `BrokerDrain`, the runtime's `Notify`, the convergence loop's
+`submitted()` select arm or its position relative to completion and the
+cadence timer, resync routing, `NotBefore`, FIFO/same-key collapse, or
+shutdown drain behavior. The current runtime mechanics documentation still
+matches the iteration 2 F-01 closure. No design premise or accepted invariant
+is weakened.
+
+### Test integrity and Contract Shape
+
+No acceptance or unit test source changed in the final remediation commit, and
+no test was added, removed, skipped, or weakened. The standalone constructors
+remain in their existing source-local test compositions. The existing five
+D17 convergence-loop wake tests pass in the recorded run. The prior review's
+acceptance behavior coverage and per-test Contract Shape declarations remain
+unchanged; this remediation introduces no new or transitioned test requiring
+a declaration. The test budget is unchanged.
+
+No D17 semantic error path or error representation changed. The remediation
+adds no error type, variant, payload, mapping, or string-carried distinction;
+the prior typed-error review remains valid.
+
+### TDD, DES, commit, and verification evidence
+
+The execution log contains the replacement crafter's own ordered
+`03-02` events, distinct from earlier step events:
+
+| Phase | Recorded outcome | Timestamp |
+|---|---|---|
+| RED | Executed; expected strict Clippy failure reproduced | `2026-11-13T02:05:18Z` |
+| GREEN | Executed; remediation checks passed | `2026-11-13T02:05:22Z` |
+| COMMIT | Executed; pass | `2026-11-13T02:06:59Z` |
+
+The review treats only these recorded events as the replacement remediation's
+phases and makes no claim that this reviewer or crafter inherited or reran
+earlier step phases. The remediation record names the reproducing RED failure
+(`Standalone` dead-code lint in the non-test library) and the focused GREEN
+evidence.
+
+| Check | Result |
+|---|---|
+| Focused strict Clippy: `cargo clippy -p overdrive-control-plane --all-targets --features integration-tests,kvm-tests -- -D warnings` via canonical Metal foreground | **PASS**, recorded Metal run `b3116b9963afeb5071cfbc4a`. |
+| Five D17 convergence-loop wake tests via `cargo nextest run -p overdrive-control-plane --lib --features integration-tests -E 'test(/convergence_loop_wake::/)'` and canonical Metal foreground | **PASS**, recorded Metal run `42302d54ea1a3dca6b4d5f79`. |
+| Full-workspace strict Clippy | Reached a separate `clippy::doc_markdown` report in `xtask/src/dst_lint.rs`; the 05-02 owner subsequently fixed and independently approved that issue. It is unrelated to this cfg-only remediation and is not a blocking requirement here. |
+| Commit scope and attribution | **PASS** — `ff29358a8` changes the action-shim cfg gates and its remediation record; `32a60dd17` changes the step execution log. Both preserve Marcus as Git author and contain exactly `Co-Authored-By: Codex <codex@openai.com>`, plus the expected `Step-Id: 03-02` and task trailer. |
+| Commit whitespace | **PASS** — `git show --check` for both commits reported no whitespace errors. |
+| Mutation testing | **Not required** — the user's explicit instruction “no mutation testing is required” is recorded in the roadmap as `required: false`, `status: not_required_by_user`, including the D17 mutation-witness requirements. No mutation test or witness is requested by this review. |
+
+The recorded focused checks were not rerun; their Metal run identities and
+results are documented, and the source diff is limited to the three cfg
+attributes. The full-workspace Clippy result is not promoted into a blocker
+because the only reported issue is an unrelated scanner lint already fixed
+and independently approved.
+
+### Finding and remediation disposition
+
+| Review item | Current disposition |
+|---|---|
+| F-01 — `.claude/rules/development.md` described the pre-D17 clock-only tick and direct production submit surface | **Closed in iteration 2; remains closed.** |
+| Final Clippy failure — feature-enabled non-test library exposed an unconstructed private `Standalone` variant | **Remediated and verified.** Its enum variant, import, and match arm are now gated by `cfg(test)`; source-local test constructors remain available. |
+
+No new blocking or advisory finding was found in this final remediation review.
+The user-waived mutation gate creates no outstanding step requirement.
+Reviewer write scope is this review artifact only; no implementation, test,
+model, roadmap, evidence, DES, or commit changes were made by the reviewer.
+
+## Final verdict
+
+**APPROVED — iteration 3.** The private standalone broker adapter is present
+only in test builds, all existing constructor owners remain test-gated, and
+the strict Clippy failure is resolved without changing D17 runtime behavior
+or API. F-01 remains closed. The user-waived final mutation gate is recorded
+as not required.
