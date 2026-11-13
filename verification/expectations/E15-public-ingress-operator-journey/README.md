@@ -101,7 +101,7 @@ A capture that is narrated rather than executed, or whose runner was not the che
 
 ## Runner contract
 
-`runner.sh` is checked in; it has never been run and no evidence exists, so the status stays `pending`. Exit 75
+`runner.sh` is checked in, and its run at `b0f880439` is the evidence under `evidence/`. Exit 75
 (inputs unset) is reported by the harness as pending. The runner samples `ss -tni` and `/proc/net/tls_stat` by
 polling for the life of the example (the example takes no pause hook), so the samples are observations of a polled
 system, not a complete history. It must not import or link any `overdrive-*` crate, must not hand-program a map, rule, Route, snapshot or identity, and must
