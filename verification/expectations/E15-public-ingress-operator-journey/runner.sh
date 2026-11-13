@@ -256,9 +256,9 @@ PY
 # Samples are observations of a polled system, not a complete history.
 sample_once() {
   printf '=== sample %s ===\n' "$(date -u +%Y-%m-%dT%H:%M:%S.%NZ)"
-  printf '--- ss -tni ---\n'
+  printf -- '--- ss -tni ---\n'
   ss -tni 2>&1 || true
-  printf '--- /proc/net/tls_stat ---\n'
+  printf -- '--- /proc/net/tls_stat ---\n'
   cat /proc/net/tls_stat 2>&1 || true
 }
 sample_once >>"$samples/pre-run.txt"
