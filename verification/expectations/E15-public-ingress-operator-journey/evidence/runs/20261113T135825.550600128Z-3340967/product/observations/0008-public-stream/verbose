@@ -1,0 +1,58 @@
+* Added 151-115-99-251.sslip.io:443:151.115.99.251 to DNS cache
+* Hostname 151-115-99-251.sslip.io was found in DNS cache
+*   Trying 151.115.99.251:443...
+* ALPN: curl offers http/1.1
+} [5 bytes data]
+* TLSv1.3 (OUT), TLS handshake, Client hello (1):
+} [1502 bytes data]
+* SSL Trust Anchors:
+*   CAfile: /etc/ssl/certs/ca-certificates.crt
+*   CApath: /etc/ssl/certs
+{ [5 bytes data]
+* TLSv1.3 (IN), TLS handshake, Server hello (2):
+{ [122 bytes data]
+* TLSv1.3 (IN), TLS change cipher, Change cipher spec (1):
+{ [1 bytes data]
+* TLSv1.3 (IN), TLS handshake, Encrypted Extensions (8):
+{ [25 bytes data]
+* TLSv1.3 (IN), TLS handshake, Certificate (11):
+{ [3432 bytes data]
+* TLSv1.3 (IN), TLS handshake, CERT verify (15):
+{ [80 bytes data]
+* TLSv1.3 (IN), TLS handshake, Finished (20):
+{ [52 bytes data]
+* TLSv1.3 (OUT), TLS change cipher, Change cipher spec (1):
+} [1 bytes data]
+* TLSv1.3 (OUT), TLS handshake, Finished (20):
+} [52 bytes data]
+* SSL connection using TLSv1.3 / TLS_AES_256_GCM_SHA384 / x25519 / id-ecPublicKey
+* ALPN: server accepted http/1.1
+* Server certificate:
+*   subject: CN=151-115-99-251.sslip.io
+*   start date: Nov 12 22:17:04 2026 GMT
+*   expire date: Feb 10 22:17:03 2027 GMT
+*   issuer: C=US; O=Let's Encrypt; CN=YE2
+*   Certificate level 0: Public key type EC/prime256v1 (256/128 Bits/secBits), signed using ecdsa-with-SHA384
+*   Certificate level 1: Public key type EC/secp384r1 (384/192 Bits/secBits), signed using ecdsa-with-SHA384
+*   Certificate level 2: Public key type EC/secp384r1 (384/192 Bits/secBits), signed using ecdsa-with-SHA384
+*   Certificate level 3: Public key type EC/secp384r1 (384/192 Bits/secBits), signed using ecdsa-with-SHA384
+*   subjectAltName: "151-115-99-251.sslip.io" matches cert's "151-115-99-251.sslip.io"
+* SSL certificate verified via OpenSSL.
+* Established connection to 151-115-99-251.sslip.io (151.115.99.251 port 443) from 151.115.99.251 port 35928 
+* using HTTP/1.x
+} [5 bytes data]
+> GET /stream HTTP/1.1
+> Host: 151-115-99-251.sslip.io
+> User-Agent: curl/8.18.0
+> Accept: */*
+> 
+* Request completely sent off
+{ [5 bytes data]
+< HTTP/1.1 200 OK
+< x-workload: api
+< content-type: text/plain
+< via: 1.1 overdrive
+< transfer-encoding: chunked
+< 
+{ [5 bytes data]
+* Connection #0 to host 151-115-99-251.sslip.io:443 left intact

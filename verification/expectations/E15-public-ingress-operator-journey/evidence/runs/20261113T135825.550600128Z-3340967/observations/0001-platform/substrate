@@ -1,0 +1,8 @@
+os=Linux
+arch=x86_64
+kernel=7.0.0-38-generic
+uid=0
+kvm_char_device=true
+systemd_detect_virt=none
+cgroup_v2=true
+bpffs=true

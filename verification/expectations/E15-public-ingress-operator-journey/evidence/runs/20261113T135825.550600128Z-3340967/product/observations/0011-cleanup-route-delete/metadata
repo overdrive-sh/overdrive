@@ -1,0 +1,4 @@
+command=operator-mTLS DELETE /v1/routes/public-api
+status=0
+started_at=2026-11-13T14:00:28Z
+ended_at=2026-11-13T14:00:28Z

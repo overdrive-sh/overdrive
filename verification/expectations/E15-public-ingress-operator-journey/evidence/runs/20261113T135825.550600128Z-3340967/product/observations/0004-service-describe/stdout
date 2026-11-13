@@ -1,0 +1,11 @@
+0 allocations for workload api — the spec is committed, but no allocation has converged to a Running instance yet. If it stays at 0, check that a node is eligible to place it and the control plane's convergence loop is running.
+Service 'api' (kind: Service)
+Spec digest: 4e6657a7d4f12e0b078d29da1834c3259690258060107a09bdb5ab5b85b32d37
+Replicas (desired/running): 1/0
+Alloc                    State        Restarts   Since               
+VIP:           10.96.0.2
+Listeners:
+  8080/tcp
+Probes:
+  startup probe[0] tcp 0.0.0.0:8080 last=pending last_observed_at=—
+  readiness probe[0] http GET http://0.0.0.0:8080/ready last=pending last_observed_at=—

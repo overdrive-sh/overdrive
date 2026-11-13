@@ -1,0 +1,7 @@
+Accepted.
+Workload ID:   api
+Intent key:    workloads/api
+Spec digest:   4e6657a7d4f12e0b078d29da1834c3259690258060107a09bdb5ab5b85b32d37
+Outcome:       created
+Endpoint:      https://127.0.0.1:43107/
+Next: overdrive workload describe api

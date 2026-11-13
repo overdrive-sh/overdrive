@@ -1,0 +1,20 @@
+Service 'api' (kind: Service)
+Spec digest: 4e6657a7d4f12e0b078d29da1834c3259690258060107a09bdb5ab5b85b32d37
+Replicas (desired/running): 1/1
+Alloc                    State        Restarts   Since               
+alloc-api-0              Running      0          (c=1,w=local)       
+    reason: driver started
+Memory:        134217728
+Addresses:
+  alloc-api-0: 100.95.0.2
+VIP:           10.96.0.2
+Listeners:
+  8080/tcp
+Issued certificates:
+  serial:        3687356c7915d704c80d6c8cee9fd5d3
+    spiffe_id:     spiffe://overdrive.local/workload/api/alloc/alloc-api-0
+    issuer_serial: cd9bda9183f025a66ed91afc626b8fb7
+    not_after:     1794581963.121431261
+Probes:
+  startup probe[0] tcp 0.0.0.0:8080 last=pending last_observed_at=—
+  readiness probe[0] http GET http://0.0.0.0:8080/ready last=pending last_observed_at=—

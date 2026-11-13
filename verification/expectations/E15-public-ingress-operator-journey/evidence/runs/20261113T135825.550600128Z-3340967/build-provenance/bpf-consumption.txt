@@ -1,0 +1,5 @@
+object_path=/home/ubuntu/overdrive-worktrees/42eb0530ea7060ec208638d98fd744ee251bd4d48943e87080a1d216ff4da3de/target/bpf/overdrive_bpf.o
+object_sha256=bd0ced3b05ef3bd40a548db6394d244687cc3fa75db2b009da0fffdd61e4356e
+binary_path=/srv/vm/overdrive-testing/overdrive-e15.od4jhf/build/target/debug/overdrive
+embedded_exactly_once=true
+embedded_offset=9272385

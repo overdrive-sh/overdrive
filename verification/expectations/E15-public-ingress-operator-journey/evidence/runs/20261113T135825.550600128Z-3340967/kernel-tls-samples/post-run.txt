@@ -1,0 +1,35 @@
+=== sample 2026-11-13T14:00:33.227017987Z ===
+--- ss -tni ---
+State      Recv-Q Send-Q  Local Address:Port    Peer Address:Port                                                                                                                                                                                                                                                                                                                                                                                                                                                                        
+SYN-RECV   0      0      151.115.99.251:22   194.116.154.145:56327
+	                                                                                                                                                                                                                                                                                                                                                                                                                                                                     
+FIN-WAIT-1 0      1      151.115.99.251:22    61.184.128.210:59833
+	 cubic wscale:5,10 rto:51648 backoff:6 rtt:268.728/101.02 mss:1448 pmtu:1500 rcvmss:536 advmss:1448 cwnd:1 ssthresh:7 bytes_sent:84 bytes_retrans:42 bytes_acked:42 segs_out:9 segs_in:3 data_segs_out:2 send 43107bps lastsnd:208906 lastrcv:209695 lastack:208638 pacing_rate 862128bps delivery_rate 11024bps delivered:2 app_limited busy:87345ms unacked:1 retrans:1/7 lost:1 rcv_space:14480 rcv_ssthresh:64088 minrtt:268 snd_wnd:14624 rcv_wnd:65536 rehash:6
+SYN-RECV   0      0      151.115.99.251:22     193.35.155.66:56589
+	                                                                                                                                                                                                                                                                                                                                                                                                                                                                     
+SYN-RECV   0      0      151.115.99.251:22   194.113.248.219:49736
+	                                                                                                                                                                                                                                                                                                                                                                                                                                                                     
+SYN-RECV   0      0      151.115.99.251:22     91.223.250.42:57775
+	                                                                                                                                                                                                                                                                                                                                                                                                                                                                     
+ESTAB      0      0      151.115.99.251:22     45.134.212.84:55937
+	 cubic wscale:6,10 rto:209 rtt:8.344/0.564 ato:40 mss:1268 pmtu:1500 rcvmss:1268 advmss:1448 cwnd:10 bytes_sent:3970 bytes_acked:3970 bytes_received:122098 segs_out:79 segs_in:129 data_segs_out:17 data_segs_in:110 send 12157239bps lastsnd:23804 lastrcv:23804 lastack:23795 pacing_rate 24311920bps delivery_rate 2825096bps delivered:18 app_limited busy:126ms rcv_rtt:11.496 rcv_space:39400 rcv_ssthresh:109167 minrtt:7.609 snd_wnd:131072 rcv_wnd:109568  
+ESTAB      0      0      151.115.99.251:22     45.134.212.75:52688
+	 cubic wscale:6,10 rto:209 rtt:8.458/0.837 ato:40 mss:1268 pmtu:1500 rcvmss:1268 advmss:1448 cwnd:10 bytes_sent:3734 bytes_acked:3734 bytes_received:4798 segs_out:23 segs_in:26 data_segs_out:12 data_segs_in:12 send 11993379bps lastsnd:7494648 lastrcv:7494696 lastack:7494640 pacing_rate 23986048bps delivery_rate 3008296bps delivered:13 app_limited busy:85ms rcv_space:14480 rcv_ssthresh:32768 minrtt:7.526 snd_wnd:131008 rcv_wnd:63488                  
+--- /proc/net/tls_stat ---
+TlsCurrTxSw                     	0
+TlsCurrRxSw                     	0
+TlsCurrTxDevice                 	0
+TlsCurrRxDevice                 	0
+TlsTxSw                         	91946
+TlsRxSw                         	91946
+TlsTxDevice                     	0
+TlsRxDevice                     	0
+TlsDecryptError                 	0
+TlsRxDeviceResync               	0
+TlsDecryptRetry                 	0
+TlsRxNoPadViolation             	0
+TlsRxRekeyOk                    	1309
+TlsRxRekeyError                 	0
+TlsTxRekeyOk                    	1367
+TlsTxRekeyError                 	0
+TlsRxRekeyReceived              	1339

@@ -1,0 +1,25 @@
+prepared public-ingress example materialization at /srv/vm/overdrive-testing/pig-example
+verified public-ingress example materialization at /srv/vm/overdrive-testing/pig-example
+public-ingress example PASS: 151-115-99-251.sslip.io/stream returned 200, X-Workload: api and the guest's streamed body over TLS 1.3
+Route 'public-api' declared.
+Generation:   0339f5c39aafbb940c42557079c957011e473f653b89401932730083674f43c3
+Endpoint:     https://127.0.0.1:43107/
+{"enabled":true,"configured_address":"151.115.99.251:443","listener_bound":true,"application":{"listener":{"state":"bound","address":"151.115.99.251:443"},"staged":null,"current":{"application_generation":"ae88edbfaf588dc4ea3f0e239f73c2653c69a0274b7da41a2f8b9998be0203a0","route_id":"public-api","route_generation":"0339f5c39aafbb940c42557079c957011e473f653b89401932730083674f43c3","service_vip":"10.96.0.2","service_port":8080,"service_protocol":"tcp"},"draining":[],"unavailable":null,"gateway_identity":{"state":"current","epoch":1,"spiffe_id":"spiffe://overdrive.local/gateway/local","serial":"7ef34a9a6fede5d5947a66ec316fcf44","not_after":"1794581965.014888170"},"issue_failures":0,"last_issue_failure":null,"connect_path":"ready"},"certified_key":{"id":"api-origin","state":{"state":"usable","generation":"c3ad1d46a31d2eed615de20d72b9a12f016f7597cb1d0f9b261b86773ec485ba","certificate_fingerprint":"2f956ea7f0d28f9c2fca5f314355da5b399f03d3172db9de9c2428666b01d0b2","hostname":"151-115-99-251.sslip.io","not_before":"1794521824.000000000","not_after":"1802297823.000000000","provenance":{"producer":"manual"}},"last_install_failure":null}}HTTP/1.1 200 OK
+x-workload: api
+content-type: text/plain
+via: 1.1 overdrive
+transfer-encoding: chunked
+
+PIG-STREAM-CHUNK-00
+PIG-STREAM-CHUNK-01
+PIG-STREAM-CHUNK-02
+PIG-STREAM-CHUNK-03
+PIG-STREAM-CHUNK-04
+PIG-STREAM-CHUNK-05
+PIG-STREAM-CHUNK-06
+PIG-STREAM-CHUNK-07
+http_code=200 ssl_verify_result=0 time_starttransfer=0.057424 time_total=3.259934
+PIG-EXACT-OK
+requests=2
+removed public-ingress example-owned materialization from /srv/vm/overdrive-testing/pig-example
+public-ingress teardown deltas: vm=0 network=0 cgroup=0 run-directory=0 mount=0 loop=0 public-443-sockets=0 ktls-sockets=0

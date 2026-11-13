@@ -1,0 +1,16 @@
+expectation_id: "E15"
+date_utc: "2026-11-13T13:58:25Z"
+overdrive_sha: "b0f880439304166a9dc8dfc2d629731cb4d40c72"
+working_tree_dirty: false
+dst_seed: 1
+harness_sha: "8311ae38596be8526e6b77dbbb84bbff885e8c01"
+harness_invocation: "verification/harness/run-expectation.sh E15"
+runner_invoked: true
+execution_status: "succeeded"
+execution_substrate: "native-metal"
+executed_in_lima: false
+runner_exit_code: "0"
+anchors: ["S-PIG-01 / `AT-PIG-E2E-1` in `docs/feature/public-ingress-gateway/feature-delta.md` (DISTILL "Scenario list and tags").","`OUT-PIG-PUBLIC-REQUEST` (registered outcome; DESIGN "Application outcomes").","ADR-0244 (kernel TLS after a userspace handshake) and ADR-0239 (bodies move kernel-side) in `docs/product/architecture/`.","DESIGN "Artifact-boundary handoff to DISTILL" (operator input set, provenance and argv contract) in `docs/feature/public-ingress-gateway/feature-delta.md`."]
+anchor_status: "present"
+# NOTE: 'satisfied' is a HUMAN/auditor verdict written into README.md after
+# adversarial review of the captured evidence below — never auto-stamped here.

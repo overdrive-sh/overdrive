@@ -1,0 +1,3 @@
+depmod: WARNING: could not open modules.order at /srv/vm/overdrive-testing/pig-example/mnt/lib/modules/7.0.0-38-generic: No such file or directory
+depmod: WARNING: could not open modules.builtin at /srv/vm/overdrive-testing/pig-example/mnt/lib/modules/7.0.0-38-generic: No such file or directory
+depmod: WARNING: could not open modules.builtin.modinfo at /srv/vm/overdrive-testing/pig-example/mnt/lib/modules/7.0.0-38-generic: No such file or directory

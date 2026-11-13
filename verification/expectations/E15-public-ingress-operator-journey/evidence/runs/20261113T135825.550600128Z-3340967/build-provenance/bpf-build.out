@@ -1,0 +1,27 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.16s
+     Running `target/debug/xtask bpf-build`
+/home/ubuntu/.cargo/bin/bpf-linker
+xtask: running rustup run nightly-2026-08-05 cargo build (overdrive-bpf, bpfel-unknown-none)
+    Finished `release` profile [optimized + debuginfo] target(s) in 0.19s
+/usr/sbin/bpftool
+In file included from /home/ubuntu/overdrive-worktrees/42eb0530ea7060ec208638d98fd744ee251bd4d48943e87080a1d216ff4da3de/crates/overdrive-bpf/src/tcp_correlation_candidate.bpf.c:3:
+/home/ubuntu/overdrive-worktrees/42eb0530ea7060ec208638d98fd744ee251bd4d48943e87080a1d216ff4da3de/target/bpf/vmlinux.h:42399:2: warning: declaration does not declare anything [-Wmissing-declarations]
+ 42399 |         struct aes_enckey;
+       |         ^~~~~~~~~~~~~~~~~
+/home/ubuntu/overdrive-worktrees/42eb0530ea7060ec208638d98fd744ee251bd4d48943e87080a1d216ff4da3de/target/bpf/vmlinux.h:58058:3: warning: declaration does not declare anything [-Wmissing-declarations]
+ 58058 |                 struct ns_tree;
+       |                 ^~~~~~~~~~~~~~
+/home/ubuntu/overdrive-worktrees/42eb0530ea7060ec208638d98fd744ee251bd4d48943e87080a1d216ff4da3de/target/bpf/vmlinux.h:80527:2: warning: declaration does not declare anything [-Wmissing-declarations]
+ 80527 |         struct __filename_head;
+       |         ^~~~~~~~~~~~~~~~~~~~~~
+/home/ubuntu/overdrive-worktrees/42eb0530ea7060ec208638d98fd744ee251bd4d48943e87080a1d216ff4da3de/target/bpf/vmlinux.h:121327:2: warning: declaration does not declare anything [-Wmissing-declarations]
+ 121327 |         union pipe_index;
+        |         ^~~~~~~~~~~~~~~~
+/home/ubuntu/overdrive-worktrees/42eb0530ea7060ec208638d98fd744ee251bd4d48943e87080a1d216ff4da3de/target/bpf/vmlinux.h:134848:4: warning: declaration does not declare anything [-Wmissing-declarations]
+ 134848 |                         struct freelist_counters;
+        |                         ^~~~~~~~~~~~~~~~~~~~~~~~
+5 warnings generated.
+xtask: bpf-build wrote /home/ubuntu/overdrive-worktrees/42eb0530ea7060ec208638d98fd744ee251bd4d48943e87080a1d216ff4da3de/target/bpf/overdrive_bpf.o
+xtask: bpf-build wrote /home/ubuntu/overdrive-worktrees/42eb0530ea7060ec208638d98fd744ee251bd4d48943e87080a1d216ff4da3de/target/bpf/overdrive_guest_bpf.o
+xtask: bpf-build wrote /home/ubuntu/overdrive-worktrees/42eb0530ea7060ec208638d98fd744ee251bd4d48943e87080a1d216ff4da3de/target/bpf/overdrive_guest_tcp_correlation_candidate_bpf.o
+exit=0

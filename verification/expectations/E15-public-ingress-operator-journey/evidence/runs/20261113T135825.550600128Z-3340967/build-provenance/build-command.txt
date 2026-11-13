@@ -1,0 +1,1 @@
+cargo build --locked --package overdrive-cli --bin overdrive --target-dir /srv/vm/overdrive-testing/overdrive-e15.od4jhf/build/target
