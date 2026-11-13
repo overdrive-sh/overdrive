@@ -1,0 +1,60 @@
+# PROBE V-2 / V-6 (throwaway, isolated): does the placement attribute stack over
+# tokio::test, proptest!, quint_test/quint_run, serial and trybuild tests; does
+# ScriptedBootExtra.cmdline reach the guest's /proc/cmdline. Not a member of the
+# repo workspace. See
+# docs/feature/metal-test-placement-attribute/spike/findings-validation.md
+[package]
+name = "placement-validation-probe"
+version = "0.0.0"
+edition = "2024"
+publish = false
+autotests = false
+
+[workspace]
+members = ["macros"]
+
+[features]
+# negative demonstrations, each enabled alone
+neg-quint-above = []
+neg-result-return = []
+
+[dependencies]
+probe-macros = { path = "macros" }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }
+proptest = "1"
+quint-connect = "=0.1.2"
+itf = "0.4"
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serial_test = "3"
+trybuild = "=1.0.101"
+libc = "0.2"
+overdrive-testing = { path = "../../../crates/overdrive-testing" }
+
+[[test]]
+name = "stacking"
+path = "tests/stacking.rs"
+
+[[test]]
+name = "order_matrix"
+path = "tests/order_matrix.rs"
+
+[[test]]
+name = "order_matrix_wrap"
+path = "tests/order_matrix_wrap.rs"
+
+[[test]]
+name = "neg_quint_above"
+path = "tests/neg_quint_above.rs"
+required-features = ["neg-quint-above"]
+
+[[test]]
+name = "neg_result_return"
+path = "tests/neg_result_return.rs"
+required-features = ["neg-result-return"]
+
+[[test]]
+name = "v6_cmdline"
+path = "tests/v6_cmdline.rs"

@@ -1,0 +1,4 @@
+# v9 conformance-lint BASELINE (repo checkout, no edge) exit: 1
+./crates/overdrive-testing/src/guest_suite.rs:183:5: conformance-lint [spec-without-quint-connect]: references the Quint spec "../../specs/quint/public-ingress-gateway/gateway_application.qnt" but does not use quint-connect
+   0: [91mconformance-driver gate found 1 violation(s)[0m
+OVERDRIVE_METAL_RUN_COMPLETE run_id=2b8a5126245317f4fd1ae765 exit_code=1 cause=command_returned

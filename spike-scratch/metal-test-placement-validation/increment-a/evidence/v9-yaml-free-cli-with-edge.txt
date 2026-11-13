@@ -1,0 +1,13 @@
+# v9 yaml-free-cli WITH EDGE (/tmp/ovd-v9) exit: 0
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.24s
+     Running `target/debug/xtask metal run -- cargo xtask yaml-free-cli`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+OVERDRIVE_METAL_RUN_ID=d0e860f42bfe25b104ad750e
+OVERDRIVE_METAL_RUN_REGISTERED run_id=d0e860f42bfe25b104ad750e
+OVERDRIVE_METAL_LEASE_ACQUIRED token=d0e860f42bfe25b104ad750e pid=3003391
+OVERDRIVE_METAL_RUN_STARTED run_id=d0e860f42bfe25b104ad750e
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.12s
+     Running `target/debug/xtask yaml-free-cli`
+yaml-free-cli: `overdrive-cli` dependency graph is clean (no ["serde_yaml", "serde_yml"])
+OVERDRIVE_METAL_RUN_COMPLETE run_id=d0e860f42bfe25b104ad750e exit_code=0 cause=command_returned

@@ -1,0 +1,22 @@
+$ cargo tree -p overdrive-testing -e normal,build | rg "overdrive-"   (what an xtask dev-dep on overdrive-testing would pull)
+overdrive-testing v0.0.0 (/private/tmp/ovd-v9/crates/overdrive-testing)
+├── overdrive-core v0.0.0 (/private/tmp/ovd-v9/crates/overdrive-core)
+├── overdrive-fwd v0.0.0 (/private/tmp/ovd-v9/crates/overdrive-fwd)
+│   ├── overdrive-core v0.0.0 (/private/tmp/ovd-v9/crates/overdrive-core) (*)
+├── overdrive-host v0.0.0 (/private/tmp/ovd-v9/crates/overdrive-host)
+│   ├── overdrive-core v0.0.0 (/private/tmp/ovd-v9/crates/overdrive-core) (*)
+├── overdrive-testing-macros v0.0.0 (proc-macro) (/private/tmp/ovd-v9/crates/overdrive-testing-macros)
+
+$ build.rs among those crates
+crates/overdrive-dataplane/build.rs
+(none listed above = no build.rs)
+
+$ cargo tree -i overdrive-dataplane -e normal,build | head   (does overdrive-testing reach overdrive-dataplane?)
+overdrive-dataplane v0.0.0 (/private/tmp/ovd-v9/crates/overdrive-dataplane)
+├── overdrive-control-plane v0.0.0 (/private/tmp/ovd-v9/crates/overdrive-control-plane)
+│   ├── overdrive-cli v0.0.0 (/private/tmp/ovd-v9/crates/overdrive-cli)
+│   └── overdrive-sim v0.0.0 (/private/tmp/ovd-v9/crates/overdrive-sim)
+└── overdrive-worker v0.0.0 (/private/tmp/ovd-v9/crates/overdrive-worker)
+    ├── overdrive-cli v0.0.0 (/private/tmp/ovd-v9/crates/overdrive-cli)
+    ├── overdrive-control-plane v0.0.0 (/private/tmp/ovd-v9/crates/overdrive-control-plane) (*)
+    └── overdrive-sim v0.0.0 (/private/tmp/ovd-v9/crates/overdrive-sim)

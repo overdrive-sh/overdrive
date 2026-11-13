@@ -1,0 +1,19 @@
+# v9 cloexec-lint WITH EDGE (/tmp/ovd-v9) exit: 1
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.29s
+     Running `target/debug/xtask metal run -- cargo xtask cloexec-lint`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+OVERDRIVE_METAL_RUN_ID=123cf12a8c957418efdf637c
+OVERDRIVE_METAL_RUN_REGISTERED run_id=123cf12a8c957418efdf637c
+OVERDRIVE_METAL_LEASE_ACQUIRED token=123cf12a8c957418efdf637c pid=3000651
+OVERDRIVE_METAL_RUN_STARTED run_id=123cf12a8c957418efdf637c
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.12s
+     Running `target/debug/xtask cloexec-lint`
+/home/ubuntu/overdrive-worktrees/e74e8a7287fdf67269278c4047f8054389d673e31fc5d9ff80dcc01d55ee42be/crates/overdrive-dataplane/src/gateway_relay/sys.rs:87:31: libc::recvmsg: UnresolvedFlag
+xtask failed: 
+   0: [91mclose-on-exec source gate found 1 violation(s)[0m
+Location:
+   [35mxtask/src/cloexec_lint.rs[0m:[35m179[0m
+Backtrace omitted. Run with RUST_BACKTRACE=1 environment variable to display it.
+Run with RUST_BACKTRACE=full to include source snippets.
+OVERDRIVE_METAL_RUN_COMPLETE run_id=123cf12a8c957418efdf637c exit_code=1 cause=command_returned

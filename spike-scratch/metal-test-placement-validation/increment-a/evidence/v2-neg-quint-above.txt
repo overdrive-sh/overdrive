@@ -1,0 +1,249 @@
+# v2-neg-quint-above  cargo check --manifest-path=spike-scratch/metal-test-placement-validation/increment-a/Cargo.toml --test neg_quint_above --features neg-quint-above  exit: 101
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.19s
+     Running `target/debug/xtask metal run -- cargo check --manifest-path=spike-scratch/metal-test-placement-validation/increment-a/Cargo.toml --test neg_quint_above --features neg-quint-above`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+OVERDRIVE_METAL_RUN_ID=22c4ba4a975300310e12de7d
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire exclusive physical-maintenance barrier (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_RUN_REGISTERED run_id=22c4ba4a975300310e12de7d
+OVERDRIVE_METAL_LEASE_ACQUIRED token=22c4ba4a975300310e12de7d pid=2792973
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/amman-v2 -> ubuntu@151.115.99.251:/home/ubuntu/overdrive-worktrees/357ee52c8cab8252dd245471dd79a7901e00d3cd6bebcd70732eb120c34f745d
+
+sent 2,012,925 bytes  received 388,883 bytes  686,230.86 bytes/sec
+total size is 1,912,263,141  speedup is 796.18
+
+########## [bootstrap] materialising standalone .git (common dir 2.3G)
+
+sent 401,922 bytes  received 19,195 bytes  280,744.67 bytes/sec
+total size is 882,213,126  speedup is 2,094.94
+## marcus-sa/metal-test-placement-declare
+ M spike-scratch/metal-test-placement-module-guest/increment-a/Cargo.lock
+?? spike-scratch/metal-test-placement-owner/
+?? spike-scratch/metal-test-placement-validation/
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+OVERDRIVE_METAL_RUN_STARTED run_id=22c4ba4a975300310e12de7d
+    Updating crates.io index
+     Locking 251 packages to latest Rust 1.95.0 compatible versions
+      Adding generic-array v0.14.7 (available: v0.14.9)
+      Adding serial_test v3.5.0 (available: v4.0.1)
+      Adding syn v2.0.119 (available: v3.0.10)
+      Adding trybuild v1.0.101 (available: v1.0.122)
+   Compiling proc-macro2 v1.0.107
+   Compiling unicode-ident v1.0.27
+   Compiling quote v1.0.47
+    Checking cfg-if v1.0.5
+   Compiling libc v0.2.191
+   Compiling serde_core v1.0.229
+   Compiling serde v1.0.229
+   Compiling zerocopy v0.8.63
+   Compiling version_check v0.9.5
+    Checking memchr v2.8.3
+    Checking rand_core v0.10.1
+   Compiling getrandom v0.4.3
+   Compiling shlex v2.0.1
+   Compiling find-msvc-tools v0.1.15
+    Checking once_cell v1.21.4
+    Checking hashbrown v0.17.1
+   Compiling autocfg v1.5.1
+   Compiling zmij v1.0.23
+    Checking bitflags v2.13.2
+   Compiling cc v1.11.2
+   Compiling serde_json v1.0.154
+    Checking pin-project-lite v0.2.17
+    Checking equivalent v1.0.3
+    Checking itoa v1.0.19
+    Checking futures-sink v0.3.34
+    Checking typenum v1.20.1
+   Compiling parking_lot_core v0.9.12
+    Checking futures-core v0.3.34
+   Compiling generic-array v0.14.7
+   Compiling time-core v0.1.9
+    Checking futures-io v0.3.34
+    Checking slab v0.4.12
+    Checking futures-channel v0.3.34
+   Compiling regex-syntax v0.8.11
+    Checking smallvec v1.16.5
+    Checking futures-task v0.3.34
+   Compiling rustix v1.1.6
+    Checking scopeguard v1.2.0
+   Compiling num-conv v0.2.2
+    Checking lock_api v0.4.14
+    Checking powerfmt v0.2.1
+   Compiling strsim v0.11.1
+    Checking toml_write v0.1.2
+    Checking linux-raw-sys v0.12.1
+    Checking winnow v0.7.15
+   Compiling time-macros v0.2.32
+    Checking simdutf8 v0.1.5
+   Compiling ident_case v1.0.1
+    Checking cpufeatures v0.3.1
+   Compiling aho-corasick v1.1.5
+   Compiling memoffset v0.9.1
+    Checking ciborium-io v0.2.2
+   Compiling cfg_aliases v0.2.2
+   Compiling getrandom v0.3.4
+    Checking unsafe-libyaml-norway v0.2.15
+    Checking ryu v1.0.23
+   Compiling thiserror v2.0.21
+   Compiling syn v3.0.10
+   Compiling syn v2.0.119
+   Compiling nix v0.30.1
+    Checking tracing-core v0.1.36
+    Checking constant_time_eq v0.4.2
+    Checking bytes v1.12.1
+    Checking cpufeatures v0.2.17
+   Compiling rustversion v1.0.23
+    Checking arrayvec v0.7.8
+    Checking fastrand v2.5.0
+    Checking untrusted v0.9.0
+    Checking num-modular v0.6.5
+   Compiling dashu-int v0.4.3
+    Checking block-buffer v0.10.4
+    Checking crypto-common v0.1.7
+    Checking hex v0.4.3
+    Checking zeroize v1.9.1
+    Checking base64 v0.23.1
+   Compiling num-traits v0.2.19
+    Checking digest v0.10.7
+    Checking rustls-pki-types v1.16.0
+    Checking static_assertions v1.1.0
+   Compiling target-triple v0.1.4
+    Checking sha2 v0.10.9
+   Compiling anyhow v1.0.104
+    Checking pem v4.0.0
+    Checking dashu-base v0.4.3
+    Checking getrandom v0.2.17
+   Compiling blake3 v1.8.7
+    Checking errno v0.3.15
+   Compiling ring v0.17.14
+    Checking mio v1.2.5
+    Checking socket2 v0.6.5
+    Checking rand_core v0.6.4
+    Checking indexmap v2.14.2
+    Checking deranged v0.5.9
+    Checking parking_lot v0.12.5
+   Compiling regex-automata v0.4.18
+    Checking signal-hook-registry v1.4.8
+    Checking uuid v1.29.2
+    Checking rand_core v0.9.5
+    Checking num-order v1.2.0
+    Checking linux-keyutils v0.2.5
+    Checking wait-timeout v0.2.1
+   Compiling quint-connect v0.1.2
+   Compiling placement-validation-probe v0.0.0 (/home/ubuntu/overdrive-worktrees/357ee52c8cab8252dd245471dd79a7901e00d3cd6bebcd70732eb120c34f745d/spike-scratch/metal-test-placement-validation/increment-a)
+    Checking fnv v1.0.7
+    Checking quick-error v1.2.3
+    Checking bit-vec v0.10.2
+    Checking rand v0.10.3
+    Checking chacha20 v0.10.2
+    Checking bit-set v0.11.1
+    Checking rand_xorshift v0.5.0
+    Checking unarray v0.1.4
+    Checking similar v2.7.0
+    Checking glob v0.3.4
+    Checking core_detect v1.0.0
+    Checking termcolor v1.4.1
+warning: placement-validation-probe@0.0.0: RUSTC_VERSION rustc 1.95.0 (59807616e 2026-04-14)
+    Checking log v0.4.35
+    Checking colored v3.1.1
+    Checking time v0.3.55
+   Compiling darling_core v0.24.1
+    Checking yasna v0.6.0
+   Compiling regex v1.13.1
+    Checking tempfile v3.27.0
+   Compiling serde_derive v1.0.229
+   Compiling ptr_meta_derive v0.3.2
+   Compiling futures-macro v0.3.34
+   Compiling bytecheck_derive v0.8.3
+   Compiling thiserror-impl v2.0.21
+   Compiling rkyv_derive v0.8.18
+   Compiling tokio-macros v2.7.2
+   Compiling async-trait v0.1.92
+    Checking rusty-fork v0.3.1
+    Checking proptest v1.12.0
+    Checking ptr_meta v0.3.2
+    Checking rancor v0.1.3
+   Compiling zerocopy-derive v0.8.63
+   Compiling munge_macro v0.4.7
+   Compiling utoipa-gen v5.5.0
+   Compiling tracing-attributes v0.1.31
+   Compiling probe-macros v0.0.0 (/home/ubuntu/overdrive-worktrees/357ee52c8cab8252dd245471dd79a7901e00d3cd6bebcd70732eb120c34f745d/spike-scratch/metal-test-placement-validation/increment-a/macros)
+   Compiling overdrive-testing-macros v0.0.0 (/home/ubuntu/overdrive-worktrees/357ee52c8cab8252dd245471dd79a7901e00d3cd6bebcd70732eb120c34f745d/crates/overdrive-testing-macros)
+    Checking bytecheck v0.8.3
+    Checking tokio v1.54.1
+    Checking rend v0.5.4
+    Checking futures-util v0.3.34
+    Checking munge v0.4.7
+   Compiling serial_test_derive v3.5.0
+   Compiling quint-connect-macros v0.1.2
+    Checking rcgen v0.14.10
+    Checking tracing v0.1.44
+   Compiling darling_macro v0.24.1
+   Compiling darling v0.24.1
+   Compiling serde_with_macros v3.24.0
+    Checking serde_with v3.24.0
+    Checking serde_spanned v0.6.9
+    Checking toml_datetime v0.6.11
+    Checking serde_norway v0.9.42
+    Checking ipnet v2.12.2
+    Checking toml_edit v0.22.27
+    Checking futures-executor v0.3.34
+    Checking futures v0.3.34
+    Checking serial_test v3.5.0
+    Checking rkyv v0.8.18
+    Checking toml v0.8.23
+    Checking utoipa v5.5.0
+    Checking itf v0.4.0
+    Checking trybuild v1.0.101
+    Checking ppv-lite86 v0.2.21
+    Checking half v2.7.1
+    Checking ciborium-ll v0.2.2
+    Checking rand_chacha v0.3.1
+    Checking rand_chacha v0.9.0
+    Checking ciborium v0.2.2
+    Checking rand v0.9.5
+    Checking rand v0.8.8
+    Checking overdrive-core v0.0.0 (/home/ubuntu/overdrive-worktrees/357ee52c8cab8252dd245471dd79a7901e00d3cd6bebcd70732eb120c34f745d/crates/overdrive-core)
+    Checking overdrive-host v0.0.0 (/home/ubuntu/overdrive-worktrees/357ee52c8cab8252dd245471dd79a7901e00d3cd6bebcd70732eb120c34f745d/crates/overdrive-host)
+    Checking overdrive-fwd v0.0.0 (/home/ubuntu/overdrive-worktrees/357ee52c8cab8252dd245471dd79a7901e00d3cd6bebcd70732eb120c34f745d/crates/overdrive-fwd)
+warning: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::new`: unsound due to lack of I/O safety; use `AsyncFd::register` instead (see https://github.com/tokio-rs/tokio/pull/8587)
+   --> /home/ubuntu/overdrive-worktrees/357ee52c8cab8252dd245471dd79a7901e00d3cd6bebcd70732eb120c34f745d/crates/overdrive-host/src/beacon_io.rs:127:42
+    |
+127 |         let listener = Arc::new(AsyncFd::new(listener)?);
+    |                                          ^^^
+    |
+    = note: `#[warn(deprecated)]` on by default
+
+warning: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::new`: unsound due to lack of I/O safety; use `AsyncFd::register` instead (see https://github.com/tokio-rs/tokio/pull/8587)
+   --> /home/ubuntu/overdrive-worktrees/357ee52c8cab8252dd245471dd79a7901e00d3cd6bebcd70732eb120c34f745d/crates/overdrive-host/src/beacon_io.rs:158:46
+    |
+158 | ...                   socket: AsyncFd::new(socket)?,
+    |                                        ^^^
+
+warning: `overdrive-host` (lib) generated 2 warnings
+    Checking overdrive-testing v0.0.0 (/home/ubuntu/overdrive-worktrees/357ee52c8cab8252dd245471dd79a7901e00d3cd6bebcd70732eb120c34f745d/crates/overdrive-testing)
+error: tests must return `()`
+  --> tests/neg_quint_above.rs:23:18
+   |
+23 | fn quint_above() -> impl Driver { D }
+   |                  ^
+
+warning: unused import: `quint_test`
+ --> tests/neg_quint_above.rs:4:43
+  |
+4 | use quint_connect::{Config, Driver, Step, quint_test};
+  |                                           ^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `placement-validation-probe` (test "neg_quint_above") generated 1 warning
+warning: placement-validation-probe@0.0.0: RUSTC_VERSION rustc 1.95.0 (59807616e 2026-04-14)
+error: could not compile `placement-validation-probe` (test "neg_quint_above") due to 1 previous error; 1 warning emitted
+OVERDRIVE_METAL_RUN_COMPLETE run_id=22c4ba4a975300310e12de7d exit_code=101 cause=command_returned

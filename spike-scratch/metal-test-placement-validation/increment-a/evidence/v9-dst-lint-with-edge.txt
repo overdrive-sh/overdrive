@@ -1,0 +1,22 @@
+# v9 dst-lint WITH EDGE (/tmp/ovd-v9) exit: 0
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 15.47s
+     Running `target/debug/xtask metal run -- cargo xtask dst-lint`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+OVERDRIVE_METAL_RUN_ID=fa7c719d0a1e7d4b1ffa057a
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+########## [bootstrap] acquire exclusive physical-maintenance barrier (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_RUN_REGISTERED run_id=fa7c719d0a1e7d4b1ffa057a
+OVERDRIVE_METAL_LEASE_ACQUIRED token=fa7c719d0a1e7d4b1ffa057a pid=2991037
+########## [bootstrap] sync /private/tmp/ovd-v9 -> ubuntu@151.115.99.251:/home/ubuntu/overdrive-worktrees/e74e8a7287fdf67269278c4047f8054389d673e31fc5d9ff80dcc01d55ee42be
+########## [bootstrap] materialising standalone .git (common dir 2.3G)
+## HEAD (no branch)
+ M Cargo.lock
+ M crates/overdrive-core/Cargo.toml
+ M xtask/Cargo.toml
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+OVERDRIVE_METAL_RUN_STARTED run_id=fa7c719d0a1e7d4b1ffa057a
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 25.92s
+     Running `target/debug/xtask dst-lint`
+OVERDRIVE_METAL_RUN_COMPLETE run_id=fa7c719d0a1e7d4b1ffa057a exit_code=0 cause=command_returned
