@@ -323,6 +323,7 @@ fn failed_block_omits_last_event_when_stderr_tail_empty() {
 /// distinct, variant-specific substring. Parametrised across every
 /// non-exhaustive variant so a deleted match arm (which would fall
 /// through to a sibling or the catch-all) flips at least one assertion.
+/// CONTRACT_SHAPE: pure-function.
 #[test]
 fn failed_block_reason_text_is_variant_specific() {
     let cases: Vec<(ServiceFailureReason, &str)> = vec![
@@ -371,7 +372,7 @@ fn failed_block_reason_text_is_variant_specific() {
         ),
         (
             ServiceFailureReason::Timeout { after_seconds: 90 },
-            "workload did not converge within 90s",
+            "workload did not become Stable within 90s; the platform may still be restarting it (see `overdrive workload describe`)",
         ),
         (
             ServiceFailureReason::StreamInterrupted,
