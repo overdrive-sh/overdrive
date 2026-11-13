@@ -1,0 +1,20 @@
+# v9 conformance-lint WITH EDGE (/tmp/ovd-v9) exit: 1
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.23s
+     Running `target/debug/xtask metal run -- cargo xtask conformance-lint`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+OVERDRIVE_METAL_RUN_ID=02b46d981606582d90afc362
+OVERDRIVE_METAL_RUN_REGISTERED run_id=02b46d981606582d90afc362
+OVERDRIVE_METAL_LEASE_ACQUIRED token=02b46d981606582d90afc362 pid=3006219
+OVERDRIVE_METAL_RUN_STARTED run_id=02b46d981606582d90afc362
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.12s
+     Running `target/debug/xtask conformance-lint`
+./crates/overdrive-testing/src/guest_suite.rs:183:5: conformance-lint [spec-without-quint-connect]: references the Quint spec "../../specs/quint/public-ingress-gateway/gateway_application.qnt" but does not use quint-connect
+    fix: the only conformance mechanism is quint-connect trace replay of a stateful spec; drive the production owner from a quint-connect driver, and model a stateless definition as a state machine of the production-reachable transitions (.claude/rules/testing.md § "Quint conformance")
+xtask failed: 
+   0: [91mconformance-driver gate found 1 violation(s)[0m
+Location:
+   [35mxtask/src/conformance_lint.rs[0m:[35m890[0m
+Backtrace omitted. Run with RUST_BACKTRACE=1 environment variable to display it.
+Run with RUST_BACKTRACE=full to include source snippets.
+OVERDRIVE_METAL_RUN_COMPLETE run_id=02b46d981606582d90afc362 exit_code=1 cause=command_returned

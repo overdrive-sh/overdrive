@@ -1,0 +1,18 @@
+## WITH EDGE (/tmp/ovd-v9, xtask + overdrive-core dev-dep on overdrive-testing-macros)
+$ cargo tree -p xtask | rg overdrive-   (the rule's "lint of last resort": default edges = normal + build + dev of the root)
+├── overdrive-testing-macros v0.0.0 (proc-macro) (/private/tmp/ovd-v9/crates/overdrive-testing-macros)
+(rg exit 0)
+
+$ cargo tree -p xtask -e normal,build | rg overdrive-
+(rg exit 1)
+
+$ cargo tree -p overdrive-core -e normal,build | rg overdrive-testing-macros   (core class: production graph)
+(rg exit 1)
+
+$ cargo tree -p overdrive-core -e dev | rg overdrive-testing-macros
+├── overdrive-testing-macros v0.0.0 (proc-macro) (/private/tmp/ovd-v9/crates/overdrive-testing-macros)
+(rg exit 0)
+
+$ cargo tree -i overdrive-testing-macros -e normal,build   (who reaches the macro crate through production edges)
+overdrive-testing-macros v0.0.0 (proc-macro) (/private/tmp/ovd-v9/crates/overdrive-testing-macros)
+└── overdrive-testing v0.0.0 (/private/tmp/ovd-v9/crates/overdrive-testing)

@@ -1,0 +1,261 @@
+# v6-cmdline  cargo nextest run --manifest-path=spike-scratch/metal-test-placement-validation/increment-a/Cargo.toml --no-fail-fast --success-output immediate --failure-output immediate -E binary(v6_cmdline)  exit: 0
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.07s
+     Running `target/debug/xtask metal run -- cargo nextest run --manifest-path=spike-scratch/metal-test-placement-validation/increment-a/Cargo.toml --no-fail-fast --success-output immediate --failure-output immediate -E 'binary(v6_cmdline)'`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+OVERDRIVE_METAL_RUN_ID=6b40f716fb94c4839f42ef9c
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire exclusive physical-maintenance barrier (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_RUN_REGISTERED run_id=6b40f716fb94c4839f42ef9c
+OVERDRIVE_METAL_LEASE_ACQUIRED token=6b40f716fb94c4839f42ef9c pid=2833475
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/amman-v2 -> ubuntu@151.115.99.251:/home/ubuntu/overdrive-worktrees/357ee52c8cab8252dd245471dd79a7901e00d3cd6bebcd70732eb120c34f745d
+
+sent 2,010,788 bytes  received 391,320 bytes  686,316.57 bytes/sec
+total size is 1,912,305,686  speedup is 796.09
+
+########## [bootstrap] materialising standalone .git (common dir 2.3G)
+
+sent 401,918 bytes  received 19,199 bytes  280,744.67 bytes/sec
+total size is 882,213,126  speedup is 2,094.94
+## marcus-sa/metal-test-placement-declare
+ M spike-scratch/metal-test-placement-module-guest/increment-a/Cargo.lock
+?? spike-scratch/metal-test-placement-owner/
+?? spike-scratch/metal-test-placement-validation/
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+OVERDRIVE_METAL_RUN_STARTED run_id=6b40f716fb94c4839f42ef9c
+    Updating crates.io index
+     Locking 251 packages to latest Rust 1.95.0 compatible versions
+      Adding generic-array v0.14.7 (available: v0.14.9)
+      Adding serial_test v3.5.0 (available: v4.0.1)
+      Adding syn v2.0.119 (available: v3.0.10)
+      Adding trybuild v1.0.101 (available: v1.0.122)
+info: experimental features enabled: wrapper-scripts
+   Compiling proc-macro2 v1.0.107
+   Compiling quote v1.0.47
+   Compiling unicode-ident v1.0.27
+   Compiling libc v0.2.191
+   Compiling cfg-if v1.0.5
+   Compiling serde_core v1.0.229
+   Compiling serde v1.0.229
+   Compiling zerocopy v0.8.63
+   Compiling version_check v0.9.5
+   Compiling memchr v2.8.3
+   Compiling rand_core v0.10.1
+   Compiling find-msvc-tools v0.1.15
+   Compiling shlex v2.0.1
+   Compiling getrandom v0.4.3
+   Compiling autocfg v1.5.1
+   Compiling once_cell v1.21.4
+   Compiling hashbrown v0.17.1
+   Compiling zmij v1.0.23
+   Compiling pin-project-lite v0.2.17
+   Compiling cc v1.11.2
+   Compiling bitflags v2.13.2
+   Compiling serde_json v1.0.154
+   Compiling itoa v1.0.19
+   Compiling equivalent v1.0.3
+   Compiling typenum v1.20.1
+   Compiling futures-sink v0.3.34
+   Compiling generic-array v0.14.7
+   Compiling parking_lot_core v0.9.12
+   Compiling regex-syntax v0.8.11
+   Compiling futures-core v0.3.34
+   Compiling futures-io v0.3.34
+   Compiling smallvec v1.16.5
+   Compiling time-core v0.1.9
+   Compiling futures-channel v0.3.34
+   Compiling rustix v1.1.6
+   Compiling slab v0.4.12
+   Compiling futures-task v0.3.34
+   Compiling scopeguard v1.2.0
+   Compiling num-conv v0.2.2
+   Compiling lock_api v0.4.14
+   Compiling winnow v0.7.15
+   Compiling linux-raw-sys v0.12.1
+   Compiling cpufeatures v0.3.1
+   Compiling time-macros v0.2.32
+   Compiling powerfmt v0.2.1
+   Compiling aho-corasick v1.1.5
+   Compiling toml_write v0.1.2
+   Compiling simdutf8 v0.1.5
+   Compiling strsim v0.11.1
+   Compiling ident_case v1.0.1
+   Compiling memoffset v0.9.1
+   Compiling thiserror v2.0.21
+   Compiling ciborium-io v0.2.2
+   Compiling syn v3.0.10
+   Compiling syn v2.0.119
+   Compiling unsafe-libyaml-norway v0.2.15
+   Compiling getrandom v0.3.4
+   Compiling cfg_aliases v0.2.2
+   Compiling ryu v1.0.23
+   Compiling nix v0.30.1
+   Compiling tracing-core v0.1.36
+   Compiling bytes v1.12.1
+   Compiling cpufeatures v0.2.17
+   Compiling arrayvec v0.7.8
+   Compiling constant_time_eq v0.4.2
+   Compiling block-buffer v0.10.4
+   Compiling crypto-common v0.1.7
+   Compiling rustversion v1.0.23
+   Compiling dashu-int v0.4.3
+   Compiling digest v0.10.7
+   Compiling zeroize v1.9.1
+   Compiling fastrand v2.5.0
+   Compiling sha2 v0.10.9
+   Compiling base64 v0.23.1
+   Compiling untrusted v0.9.0
+   Compiling num-modular v0.6.5
+   Compiling getrandom v0.2.17
+   Compiling errno v0.3.15
+   Compiling socket2 v0.6.5
+   Compiling blake3 v1.8.7
+   Compiling regex-automata v0.4.18
+   Compiling signal-hook-registry v1.4.8
+   Compiling ring v0.17.14
+   Compiling mio v1.2.5
+   Compiling parking_lot v0.12.5
+   Compiling rand_core v0.6.4
+   Compiling indexmap v2.14.2
+   Compiling deranged v0.5.9
+   Compiling uuid v1.29.2
+   Compiling hex v0.4.3
+   Compiling rand_core v0.9.5
+   Compiling num-order v1.2.0
+   Compiling pem v4.0.0
+   Compiling rustls-pki-types v1.16.0
+   Compiling num-traits v0.2.19
+   Compiling anyhow v1.0.104
+   Compiling target-triple v0.1.4
+   Compiling static_assertions v1.1.0
+   Compiling dashu-base v0.4.3
+   Compiling linux-keyutils v0.2.5
+   Compiling wait-timeout v0.2.1
+   Compiling quint-connect v0.1.2
+   Compiling quick-error v1.2.3
+   Compiling bit-vec v0.10.2
+   Compiling fnv v1.0.7
+   Compiling placement-validation-probe v0.0.0 (/home/ubuntu/overdrive-worktrees/357ee52c8cab8252dd245471dd79a7901e00d3cd6bebcd70732eb120c34f745d/spike-scratch/metal-test-placement-validation/increment-a)
+   Compiling bit-set v0.11.1
+   Compiling rand v0.10.3
+   Compiling chacha20 v0.10.2
+   Compiling rand_xorshift v0.5.0
+   Compiling core_detect v1.0.0
+   Compiling glob v0.3.4
+   Compiling time v0.3.55
+   Compiling similar v2.7.0
+   Compiling unarray v0.1.4
+   Compiling colored v3.1.1
+warning: placement-validation-probe@0.0.0: RUSTC_VERSION rustc 1.95.0 (59807616e 2026-04-14)
+   Compiling log v0.4.35
+   Compiling termcolor v1.4.1
+   Compiling regex v1.13.1
+   Compiling darling_core v0.24.1
+   Compiling yasna v0.6.0
+   Compiling serde_derive v1.0.229
+   Compiling ptr_meta_derive v0.3.2
+   Compiling futures-macro v0.3.34
+   Compiling bytecheck_derive v0.8.3
+   Compiling rkyv_derive v0.8.18
+   Compiling thiserror-impl v2.0.21
+   Compiling tokio-macros v2.7.2
+   Compiling async-trait v0.1.92
+   Compiling zerocopy-derive v0.8.63
+   Compiling munge_macro v0.4.7
+   Compiling utoipa-gen v5.5.0
+   Compiling tracing-attributes v0.1.31
+   Compiling ptr_meta v0.3.2
+   Compiling rancor v0.1.3
+   Compiling tempfile v3.27.0
+   Compiling munge v0.4.7
+   Compiling bytecheck v0.8.3
+   Compiling tokio v1.54.1
+   Compiling overdrive-testing-macros v0.0.0 (/home/ubuntu/overdrive-worktrees/357ee52c8cab8252dd245471dd79a7901e00d3cd6bebcd70732eb120c34f745d/crates/overdrive-testing-macros)
+   Compiling rend v0.5.4
+   Compiling futures-util v0.3.34
+   Compiling rusty-fork v0.3.1
+   Compiling probe-macros v0.0.0 (/home/ubuntu/overdrive-worktrees/357ee52c8cab8252dd245471dd79a7901e00d3cd6bebcd70732eb120c34f745d/spike-scratch/metal-test-placement-validation/increment-a/macros)
+   Compiling serial_test_derive v3.5.0
+   Compiling quint-connect-macros v0.1.2
+   Compiling proptest v1.12.0
+   Compiling tracing v0.1.44
+   Compiling darling_macro v0.24.1
+   Compiling rcgen v0.14.10
+   Compiling darling v0.24.1
+   Compiling serde_with_macros v3.24.0
+   Compiling serde_spanned v0.6.9
+   Compiling toml_datetime v0.6.11
+   Compiling serde_norway v0.9.42
+   Compiling ipnet v2.12.2
+   Compiling serde_with v3.24.0
+   Compiling toml_edit v0.22.27
+   Compiling futures-executor v0.3.34
+   Compiling futures v0.3.34
+   Compiling serial_test v3.5.0
+   Compiling rkyv v0.8.18
+   Compiling utoipa v5.5.0
+   Compiling toml v0.8.23
+   Compiling itf v0.4.0
+   Compiling trybuild v1.0.101
+   Compiling ppv-lite86 v0.2.21
+   Compiling half v2.7.1
+   Compiling ciborium-ll v0.2.2
+   Compiling rand_chacha v0.3.1
+   Compiling rand_chacha v0.9.0
+   Compiling ciborium v0.2.2
+   Compiling rand v0.9.5
+   Compiling rand v0.8.8
+   Compiling overdrive-core v0.0.0 (/home/ubuntu/overdrive-worktrees/357ee52c8cab8252dd245471dd79a7901e00d3cd6bebcd70732eb120c34f745d/crates/overdrive-core)
+   Compiling overdrive-fwd v0.0.0 (/home/ubuntu/overdrive-worktrees/357ee52c8cab8252dd245471dd79a7901e00d3cd6bebcd70732eb120c34f745d/crates/overdrive-fwd)
+   Compiling overdrive-host v0.0.0 (/home/ubuntu/overdrive-worktrees/357ee52c8cab8252dd245471dd79a7901e00d3cd6bebcd70732eb120c34f745d/crates/overdrive-host)
+warning: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::new`: unsound due to lack of I/O safety; use `AsyncFd::register` instead (see https://github.com/tokio-rs/tokio/pull/8587)
+   --> /home/ubuntu/overdrive-worktrees/357ee52c8cab8252dd245471dd79a7901e00d3cd6bebcd70732eb120c34f745d/crates/overdrive-host/src/beacon_io.rs:127:42
+    |
+127 |         let listener = Arc::new(AsyncFd::new(listener)?);
+    |                                          ^^^
+    |
+    = note: `#[warn(deprecated)]` on by default
+
+warning: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::new`: unsound due to lack of I/O safety; use `AsyncFd::register` instead (see https://github.com/tokio-rs/tokio/pull/8587)
+   --> /home/ubuntu/overdrive-worktrees/357ee52c8cab8252dd245471dd79a7901e00d3cd6bebcd70732eb120c34f745d/crates/overdrive-host/src/beacon_io.rs:158:46
+    |
+158 | ...                   socket: AsyncFd::new(socket)?,
+    |                                        ^^^
+
+   Compiling overdrive-testing v0.0.0 (/home/ubuntu/overdrive-worktrees/357ee52c8cab8252dd245471dd79a7901e00d3cd6bebcd70732eb120c34f745d/crates/overdrive-testing)
+warning: `overdrive-host` (lib) generated 2 warnings
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 22.81s
+────────────
+ Nextest run ID fd6ad75c-29d9-479d-ba5a-bc0f41626a2c with nextest profile: default
+    Starting 1 test across 1 binary (1 test and 3 binaries skipped)
+        SKIP [         ] (───) placement-validation-probe::v6_cmdline inner_read_cmdline
+        PASS [   4.081s] (1/1) placement-validation-probe::v6_cmdline token_reaches_guest_and_not_host
+  stdout ───
+
+    running 1 test
+    PLACEMENT_PROBE test=v6_cmdline::token_reaches_guest_and_not_host group=cgroup-default
+    test token_reaches_guest_and_not_host ... ok
+
+    test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 4.02s
+
+  stderr ───
+    V6 HOST_CMDLINE BOOT_IMAGE=/vmlinuz-7.0.0-38-generic root=UUID=2f8c8dc6-6567-41dd-b3fc-8fed5ba2d33d ro console=tty1 console=ttyS0
+    V6 HOST_HAS_TOKEN false
+    V6 [tok] test inner_read_cmdline ... V6_GUEST_CMDLINE console=ttyS0 panic=1 root=/dev/vda rw overdrive.testpeer=802776137 overdrive.test_guest=1
+    V6 [tok] V6_GUEST_HAS_TOKEN true
+    V6 [tok] guest exit=0 expect_token=1
+    V6 [ctl] test inner_read_cmdline ... V6_GUEST_CMDLINE console=ttyS0 panic=1 root=/dev/vda rw overdrive.testpeer=802776138
+    V6 [ctl] V6_GUEST_HAS_TOKEN false
+    V6 [ctl] guest exit=0 expect_token=0
+
+────────────
+     Summary [   4.082s] 1 test run: 1 passed, 1 skipped
+        PASS [   4.081s] (1/1) placement-validation-probe::v6_cmdline token_reaches_guest_and_not_host
+        SKIP [         ] (───) placement-validation-probe::v6_cmdline inner_read_cmdline
+OVERDRIVE_METAL_RUN_COMPLETE run_id=6b40f716fb94c4839f42ef9c exit_code=0 cause=command_returned

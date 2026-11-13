@@ -1,0 +1,63 @@
+# guest-placed tests by binary and the features needed to compile them (text-level)
+  23  overdrive-bpf::integration                                     guest-group            needs: integration-tests
+  57  overdrive-cli::integration                                     guest-group            needs: integration-tests
+  78  overdrive-cli::integration                                     guest-group            needs: integration-tests,kvm-tests
+   1  overdrive-control-plane                                        guest-group            needs: integration-tests
+   2  overdrive-control-plane                                        guest-group            needs: integration-tests,kvm-tests
+   3  overdrive-control-plane::acceptance                            guest-group            needs: integration-tests
+ 194  overdrive-control-plane::integration                           guest-group            needs: integration-tests
+   5  overdrive-control-plane::integration                           guest-group            needs: integration-tests,kvm-tests
+   2  overdrive-dataplane                                            guest-group            needs: (nothing: default features)
+   1  overdrive-dataplane                                            guest-group            needs: integration-tests
+  88  overdrive-dataplane::integration                               guest-group            needs: integration-tests
+  87  overdrive-fwd::integration                                     guest-group            needs: integration-tests
+  13  overdrive-fwd::integration                                     guest-group            needs: integration-tests,kvm-tests
+   5  overdrive-gateway                                              guest-group            needs: (nothing: default features)
+  10  overdrive-gateway                                              guest-group            needs: integration-tests
+  65  overdrive-gateway::integration                                 guest-group            needs: integration-tests
+   9  overdrive-host                                                 guest-group            needs: integration-tests
+   3  overdrive-host::integration                                    guest-group            needs: integration-tests
+  19  overdrive-host::integration                                    guest-group            needs: integration-tests,kvm-tests
+   4  overdrive-init::bin/overdrive-init                             guest-lane-operator    needs: integration-tests,kvm-tests
+   7  overdrive-init::bin/overdrive-init                             guest-lane-owner       needs: integration-tests,kvm-tests
+  12  overdrive-init::integration                                    guest-group            needs: integration-tests,kvm-tests
+   6  overdrive-sim::acceptance                                      guest-group            needs: (nothing: default features)
+  12  overdrive-system-conformance::public_ingress_gateway_end_to_end guest-group            needs: integration-tests
+   1  overdrive-system-conformance::shared_guest_network_fail_stop_recovery guest-group            needs: integration-tests
+  93  overdrive-worker::integration                                  guest-group            needs: integration-tests
+   1  overdrive-worker::leg_f_repair                                 guest-group            needs: integration-tests
+   1  xtask::acceptance                                              guest-group            needs: integration-tests
+   5  xtask::acceptance                                              native-launcher        needs: integration-tests
+
+# totals by feature set
+ 654  integration-tests
+ 140  integration-tests,kvm-tests
+  13  (default features)
+matched: 807  unmatched: 27
+   unmatched ('overdrive-control-plane::integration', 'integration::mtls_install_fail_closed::restart_abort_detail_names_every_failed_handle_teardown_cause', 'guest-group')
+   unmatched ('overdrive-control-plane::integration', 'integration::mtls_install_fail_closed::restart_abort_detail_names_the_element_removal_cause', 'guest-group')
+   unmatched ('overdrive-control-plane::integration', 'integration::mtls_install_fail_closed::restart_running_write_rejection_tears_down_network_and_releases_slot', 'guest-group')
+   unmatched ('overdrive-control-plane::integration', 'integration::mtls_install_fail_closed::start_running_write_rejection_tears_down_network_and_releases_slot', 'guest-group')
+   unmatched ('overdrive-control-plane::integration', 'integration::net_slots::tests::registered_bands_are_pairwise_disjoint_and_within_domain', 'guest-group')
+   unmatched ('overdrive-control-plane::integration', 'integration::public_ingress_gateway_boot_shutdown::an_absent_sentinel_receipt_keeps_the_public_port_unbound', 'guest-group')
+   unmatched ('overdrive-dataplane::integration', 'integration::gateway_relay_equivalence::host_and_sim_agree_on_a_close_delimited_body', 'guest-group')
+   unmatched ('overdrive-dataplane::integration', 'integration::gateway_relay_equivalence::host_and_sim_agree_on_a_close_delimited_body_over_the_ceiling', 'guest-group')
+   unmatched ('overdrive-dataplane::integration', 'integration::gateway_relay_equivalence::host_and_sim_agree_on_a_discard_ended_by_close_notify', 'guest-group')
+   unmatched ('overdrive-dataplane::integration', 'integration::gateway_relay_equivalence::host_and_sim_agree_on_a_discard_ended_by_max', 'guest-group')
+   unmatched ('overdrive-dataplane::integration', 'integration::gateway_relay_equivalence::host_and_sim_agree_on_a_discard_ended_by_the_deadline', 'guest-group')
+   unmatched ('overdrive-dataplane::integration', 'integration::gateway_relay_equivalence::host_and_sim_agree_on_a_head_then_an_exact_body', 'guest-group')
+   unmatched ('overdrive-dataplane::integration', 'integration::gateway_relay_equivalence::host_and_sim_agree_on_a_non_requesting_key_update_inside_the_body', 'guest-group')
+   unmatched ('overdrive-dataplane::integration', 'integration::gateway_relay_equivalence::host_and_sim_agree_on_a_requesting_key_update_inside_the_head', 'guest-group')
+   unmatched ('overdrive-dataplane::integration', 'integration::gateway_relay_equivalence::host_and_sim_agree_on_a_source_that_ends_mid_body', 'guest-group')
+   unmatched ('overdrive-dataplane::integration', 'integration::gateway_relay_equivalence::host_and_sim_agree_on_a_stalled_body', 'guest-group')
+   unmatched ('overdrive-dataplane::integration', 'integration::gateway_relay_equivalence::host_and_sim_agree_on_a_stalled_destination', 'guest-group')
+   unmatched ('overdrive-dataplane::integration', 'integration::gateway_relay_equivalence::host_and_sim_agree_on_an_alert_inside_a_head', 'guest-group')
+   unmatched ('overdrive-dataplane::integration', 'integration::gateway_relay_equivalence::host_and_sim_agree_on_an_unexpected_record_type', 'guest-group')
+   unmatched ('overdrive-dataplane::integration', 'integration::gateway_relay_equivalence::host_and_sim_agree_on_the_first_octet_deadline', 'guest-group')
+   unmatched ('overdrive-dataplane::integration', 'integration::gateway_relay_equivalence::host_and_sim_agree_on_the_head_limit', 'guest-group')
+   unmatched ('overdrive-dataplane::integration', 'integration::gateway_relay_equivalence::host_and_sim_agree_that_close_notify_before_the_first_octet_is_a_clean_end', 'guest-group')
+   unmatched ('overdrive-dataplane::integration', 'integration::gateway_relay_equivalence::host_and_sim_agree_that_close_notify_inside_a_head_is_truncated', 'guest-group')
+   unmatched ('overdrive-dataplane::integration', 'integration::gateway_relay_equivalence::host_and_sim_agree_that_close_write_sends_close_notify', 'guest-group')
+   unmatched ('metal-run-isolation-attempt-fixture::attempt', 'selected_environment_and_status', 'guest-group')
+   unmatched ('metal-run-isolation-attempt-fixture::attempt', 'selected_attempt_waits_for_its_timeout', 'guest-group')
+   unmatched ('metal-run-isolation-attempt-fixture::attempt', 'selected_attempt_resets_its_guest', 'guest-group')

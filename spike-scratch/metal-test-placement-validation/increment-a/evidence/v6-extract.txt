@@ -1,0 +1,14 @@
+# v6 token reaches guest, absent on host (metal ordinary run)
+5:OVERDRIVE_METAL_RUN_ID=6b40f716fb94c4839f42ef9c
+154:warning: placement-validation-probe@0.0.0: RUSTC_VERSION rustc 1.95.0 (59807616e 2026-04-14)
+237:        PASS [   4.081s] (1/1) placement-validation-probe::v6_cmdline token_reaches_guest_and_not_host
+247:    V6 HOST_CMDLINE BOOT_IMAGE=/vmlinuz-7.0.0-38-generic root=UUID=2f8c8dc6-6567-41dd-b3fc-8fed5ba2d33d ro console=tty1 console=ttyS0
+248:    V6 HOST_HAS_TOKEN false
+249:    V6 [tok] test inner_read_cmdline ... V6_GUEST_CMDLINE console=ttyS0 panic=1 root=/dev/vda rw overdrive.testpeer=802776137 overdrive.test_guest=1
+250:    V6 [tok] V6_GUEST_HAS_TOKEN true
+251:    V6 [tok] guest exit=0 expect_token=1
+252:    V6 [ctl] test inner_read_cmdline ... V6_GUEST_CMDLINE console=ttyS0 panic=1 root=/dev/vda rw overdrive.testpeer=802776138
+253:    V6 [ctl] V6_GUEST_HAS_TOKEN false
+254:    V6 [ctl] guest exit=0 expect_token=0
+257:     Summary [   4.082s] 1 test run: 1 passed, 1 skipped
+258:        PASS [   4.081s] (1/1) placement-validation-probe::v6_cmdline token_reaches_guest_and_not_host

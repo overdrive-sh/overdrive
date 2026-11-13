@@ -1,0 +1,9 @@
+# v2 negative: quint-above
+219:    |                                          ^^^
+227:    |                                        ^^^
+231:error: tests must return `()`
+232:  --> tests/neg_quint_above.rs:23:18
+235:   |                  ^
+238: --> tests/neg_quint_above.rs:4:43
+241:  |                                           ^^^^^^^^^^
+247:error: could not compile `placement-validation-probe` (test "neg_quint_above") due to 1 previous error; 1 warning emitted

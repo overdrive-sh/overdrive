@@ -1,0 +1,5 @@
+## BASELINE (repo HEAD, no new edge): cargo tree -p xtask | rg overdrive-
+(rg exit 1)
+
+## BASELINE: cargo tree -p overdrive-core -e dev | rg overdrive-testing-macros
+(rg exit 1)

@@ -1,0 +1,51 @@
+total test-introducing sites: 4672
+   2360  test
+   1560  tokio::test
+    400  proptest-inner
+    328  quint_test
+     24  quint_run
+sites in */tests/* or tests/*: 2875
+sites under tests/integration/: 890
+
+# sites that need more than the plain attribute position (candidates for "cannot take")
+non-unit return: 8
+    crates/overdrive-dataplane/tests/integration/build_rs_artifact_check.rs:29  fn build_rs_emits_diagnostic_when_artifact_missing  attrs=['test'] ret=Result<(), Box<dyn std::error::Error>> ctx=item
+    crates/overdrive-worker/src/probe_runner/tcp_prober.rs:210  fn non_loopback_tcp_probe_socket_has_the_agent_mark_before_connect  attrs=['test'] ret=io::Result<()> ctx=item
+    crates/overdrive-worker/src/probe_runner/tcp_prober.rs:219  fn loopback_tcp_probe_socket_remains_unmarked_before_connect  attrs=['test'] ret=io::Result<()> ctx=item
+    crates/overdrive-worker/src/probe_runner/http_prober.rs:528  fn non_loopback_probe_socket_has_the_agent_mark_before_connect  attrs=['test'] ret=io::Result<()> ctx=item
+    crates/overdrive-worker/src/probe_runner/http_prober.rs:537  fn loopback_probe_socket_remains_unmarked_before_connect  attrs=['test'] ret=io::Result<()> ctx=item
+    crates/overdrive-netlink/src/nft.rs:4639  fn dumped_counter_program  attrs=[] ret=Vec<u8> ctx=proptest
+    crates/overdrive-netlink/src/nft.rs:4657  fn rule_dump  attrs=[] ret=Vec<u8> ctx=proptest
+    xtask/src/metal_run_isolation_conformance.rs:1410  fn protocol_illegal_controls_preserve_each_actual_owner_state_boundary  attrs=['test'] ret=Result ctx=item
+
+# macro_rules! templates that carry a test attribute
+  crates/overdrive-dataplane/tests/integration/gateway_relay_equivalence.rs: macro equivalence_cases: 1 template site(s), generates 18 tests
+
+# non-host-pure table entries: 834; source form of their fn (by fn name)
+   481  tokio::test
+   315  test
+     5  proptest
+     4  quint_test
+     1  proptest|test
+     1  quint_run
+  unmatched by fn name (27): macro-generated or defined in a binary built from a bin/ source:
+     overdrive-control-plane::integration  integration::mtls_install_fail_closed::restart_abort_detail_names_every_failed_handle_teardown_cause
+     overdrive-control-plane::integration  integration::mtls_install_fail_closed::restart_abort_detail_names_the_element_removal_cause
+     overdrive-control-plane::integration  integration::mtls_install_fail_closed::restart_running_write_rejection_tears_down_network_and_releases_slot
+     overdrive-control-plane::integration  integration::mtls_install_fail_closed::start_running_write_rejection_tears_down_network_and_releases_slot
+     overdrive-control-plane::integration  integration::net_slots::tests::registered_bands_are_pairwise_disjoint_and_within_domain
+     overdrive-control-plane::integration  integration::public_ingress_gateway_boot_shutdown::an_absent_sentinel_receipt_keeps_the_public_port_unbound
+     overdrive-dataplane::integration  integration::gateway_relay_equivalence::host_and_sim_agree_on_a_close_delimited_body
+     overdrive-dataplane::integration  integration::gateway_relay_equivalence::host_and_sim_agree_on_a_close_delimited_body_over_the_ceiling
+     overdrive-dataplane::integration  integration::gateway_relay_equivalence::host_and_sim_agree_on_a_discard_ended_by_close_notify
+     overdrive-dataplane::integration  integration::gateway_relay_equivalence::host_and_sim_agree_on_a_discard_ended_by_max
+     overdrive-dataplane::integration  integration::gateway_relay_equivalence::host_and_sim_agree_on_a_discard_ended_by_the_deadline
+     overdrive-dataplane::integration  integration::gateway_relay_equivalence::host_and_sim_agree_on_a_head_then_an_exact_body
+     overdrive-dataplane::integration  integration::gateway_relay_equivalence::host_and_sim_agree_on_a_non_requesting_key_update_inside_the_body
+     overdrive-dataplane::integration  integration::gateway_relay_equivalence::host_and_sim_agree_on_a_requesting_key_update_inside_the_head
+     overdrive-dataplane::integration  integration::gateway_relay_equivalence::host_and_sim_agree_on_a_source_that_ends_mid_body
+     overdrive-dataplane::integration  integration::gateway_relay_equivalence::host_and_sim_agree_on_a_stalled_body
+     overdrive-dataplane::integration  integration::gateway_relay_equivalence::host_and_sim_agree_on_a_stalled_destination
+     overdrive-dataplane::integration  integration::gateway_relay_equivalence::host_and_sim_agree_on_an_alert_inside_a_head
+     overdrive-dataplane::integration  integration::gateway_relay_equivalence::host_and_sim_agree_on_an_unexpected_record_type
+     overdrive-dataplane::integration  integration::gateway_relay_equivalence::host_and_sim_agree_on_the_first_octet_deadline

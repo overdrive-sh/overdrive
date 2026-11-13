@@ -1,0 +1,83 @@
+# cell tables (name: entries, bodies)
+STEP13_04_CONTROL_PLANE: entries=6 bodies=6 exact=6 prefix=0
+STEP13_04_WORKER: entries=8 bodies=8 exact=8 prefix=0
+STEP13_04_HOST_LOCAL_FIREWALL: entries=2 bodies=2 exact=2 prefix=0
+STEP13_04_REMOTE_FIREWALL: entries=2 bodies=2 exact=2 prefix=0
+STEP13_05_CONTROL_PLANE: entries=2 bodies=2 exact=2 prefix=0
+STEP13_05_WORKER: entries=3 bodies=3 exact=3 prefix=0
+STEP13_06_WORKER: entries=10 bodies=10 exact=10 prefix=0
+STEP13_06_ROUTED_WORKER: entries=3 bodies=3 exact=3 prefix=0
+CONTROL_PLANE_NORMAL_NATIVE: entries=18 bodies=18 exact=18 prefix=0
+STEP14_01_CONTROL_PLANE: entries=5 bodies=5 exact=5 prefix=0
+STEP14_01_CLI: entries=1 bodies=1 exact=1 prefix=0
+STEP14_02_CLI: entries=5 bodies=5 exact=5 prefix=0
+STEP14_02_WORKER: entries=1 bodies=1 exact=1 prefix=0
+VM_COHORT_CLI: entries=2 bodies=2 exact=2 prefix=0
+NESTED_GUEST_LAUNCH: entries=6 bodies=41 exact=0 prefix=6
+NESTED_GUEST_RUSTC: entries=2 bodies=13 exact=1 prefix=1
+
+# guest-group tests per derived environment (total 818)
+ 484  cgroup-default   binaries: overdrive-cli::integration=127, overdrive-control-plane=1, overdrive-control-plane::acceptance=3, overdrive-control-plane::integration=176, overdrive-gateway=15, overdrive-gateway::integration=65, overdrive-host=9, overdrive-host::integration=7, overdrive-sim::acceptance=6, overdrive-system-conformance::shared_guest_network_fail_stop_recovery=1, overdrive-worker::integration=74
+   1  cgroup-default/declared-listener-diagnostic   binaries: overdrive-worker::integration=1
+  16  cgroup-default/dummy-module   binaries: overdrive-control-plane::integration=6, overdrive-worker::integration=10
+   2  cgroup-default/dummy-module+host-route   binaries: overdrive-worker::integration=2
+   2  cgroup-default/legb-tools   binaries: overdrive-control-plane::integration=2
+   3  cgroup-default/legb-tools+legb-setup-audit   binaries: overdrive-worker::integration=3
+  12  cgroup-default/nested   binaries: overdrive-cli::integration=6, overdrive-control-plane::integration=5, overdrive-worker::leg_f_repair=1
+   2  cgroup-default/nested-cohort   binaries: overdrive-cli::integration=2
+  16  cgroup-default/nested-launch   binaries: overdrive-control-plane=2, overdrive-host::integration=14
+  12  cgroup-default/nested-launch-lane   binaries: overdrive-init::integration=12
+  13  cgroup-default/nested-launch-rustc   binaries: overdrive-host::integration=1, overdrive-system-conformance::public_ingress_gateway_end_to_end=12
+  16  cgroup-default/normal-gate   binaries: overdrive-control-plane::integration=16
+   3  cgroup-default/routed-route   binaries: overdrive-worker::integration=3
+  85  core   binaries: metal-run-isolation-attempt-fixture::attempt=3, overdrive-fwd::integration=81, xtask::acceptance=1
+ 124  mtls-relay/native   binaries: overdrive-bpf::integration=23, overdrive-dataplane=3, overdrive-dataplane::integration=98
+   8  mtls-relay/relay   binaries: overdrive-dataplane::integration=8
+   7  nested-boundary   binaries: overdrive-fwd::integration=7
+   6  probe   binaries: overdrive-fwd::integration=6
+   1  stress   binaries: overdrive-fwd::integration=1
+   1  ulp   binaries: overdrive-fwd::integration=1
+   4  unload   binaries: overdrive-fwd::integration=4
+
+# cell entries that match NO placed guest-group test (dead variant rows):
+  CONTROL_PLANE_NORMAL_NATIVE: integration::workload_netns_provision::provision_creates_and_idempotently_converges_per_workload_netns  (exact)
+  CONTROL_PLANE_NORMAL_NATIVE: integration::workload_netns_provision::provision_injects_node_local_responder_into_netns_resolv_conf  (exact)
+
+# derived environments with listed tests (cgroup-default variants other than the base)
+  cgroup-default/declared-listener-diagnostic	overdrive-worker::integration	integration::inbound_rules_only_for_tcp_declared_listeners::a_udp_declared_listener_gets_no_inbound_capture_and_a_tcp_one_does
+  cgroup-default/dummy-module+host-route	overdrive-worker::integration	integration::vsock_constant_guest_prefix_rules::a_host_local_connection_to_a_guest_prefix_address_is_rejected_at_once
+  cgroup-default/dummy-module+host-route	overdrive-worker::integration	integration::vsock_constant_guest_prefix_rules::a_host_local_datagram_to_a_guest_prefix_address_fails_eperm
+  cgroup-default/legb-tools	overdrive-control-plane::integration	integration::shared_guest_network_startup::a_node_address_inside_the_guest_prefix_refuses_boot_naming_the_interface
+  cgroup-default/legb-tools	overdrive-control-plane::integration	integration::shared_guest_network_startup::a_vip_range_overlapping_the_guest_prefix_refuses_boot_before_any_effect
+  cgroup-default/legb-tools+legb-setup-audit	overdrive-worker::integration	integration::vsock_legb_dial::a_dial_to_a_peer_outside_the_guest_prefix_is_neither_marked_nor_bound
+  cgroup-default/legb-tools+legb-setup-audit	overdrive-worker::integration	integration::vsock_legb_dial::a_marked_dial_to_an_unregistered_tuple_is_refused_and_reaches_no_host_socket
+  cgroup-default/legb-tools+legb-setup-audit	overdrive-worker::integration	integration::vsock_legb_dial::a_same_node_mesh_dial_is_marked_source_bound_and_reaches_leg_c
+  cgroup-default/nested	overdrive-cli::integration	integration::vsock_fault_matrix::a_far_reader_that_stops_blocks_the_sender_and_the_flow_resumes_in_order
+  cgroup-default/nested	overdrive-cli::integration	integration::vsock_fault_matrix::a_guest_reset_ends_the_vmm_and_resets_every_far_end
+  cgroup-default/nested	overdrive-cli::integration	integration::vsock_fault_matrix::a_killed_vmm_resets_the_far_end_of_its_flow
+  cgroup-default/nested	overdrive-cli::integration	integration::vsock_fault_matrix::closed_udp_sockets_release_their_slots_before_and_after_pairing
+  cgroup-default/nested	overdrive-cli::integration	integration::vsock_fault_matrix::the_serve_owners_death_resets_every_far_end_and_the_next_boot_reclaims_the_vm
+  cgroup-default/nested	overdrive-cli::integration	integration::vsock_walking_skeleton::a_vm_workload_round_trips_tcp_and_udp_through_serve_and_deploy
+  cgroup-default/nested	overdrive-control-plane::integration	integration::guest_flow_through_serve::a_dropped_probe_stream_is_an_abort_at_the_guest_through_serve
+  cgroup-default/nested	overdrive-control-plane::integration	integration::guest_flow_through_serve::a_killed_launchs_attachment_leaves_the_owner_and_the_next_launch_is_accepted
+  cgroup-default/nested	overdrive-control-plane::integration	integration::guest_flow_through_serve::a_vmm_exit_under_a_held_relay_stream_resets_the_client_through_serve
+  cgroup-default/nested	overdrive-control-plane::integration	integration::guest_flow_through_serve::the_forwarder_inventory_counts_every_held_guest_flow_through_serve
+  cgroup-default/nested	overdrive-control-plane::integration	integration::guest_flow_through_serve::the_forwarder_inventory_counts_probe_and_relay_watches_through_serve
+  cgroup-default/nested	overdrive-worker::leg_f_repair	leg_f_repair_rebinds_transparent_listener
+  cgroup-default/nested-cohort	overdrive-cli::integration	integration::vsock_density::every_vm_at_density_round_trips_through_its_own_attachment
+  cgroup-default/nested-cohort	overdrive-cli::integration	integration::vsock_density::serve_down_at_density_is_fail_closed_and_the_next_boot_reclaims_every_vm
+  cgroup-default/nested-launch-lane	overdrive-init::integration	integration::in_guest_lane::a_burst_of_host_aborts_resets_every_connection_in_a_real_guest
+  cgroup-default/nested-launch-lane	overdrive-init::integration	integration::in_guest_lane::a_guest_without_the_kits_module_refuses_before_ready
+  cgroup-default/nested-launch-lane	overdrive-init::integration	integration::in_guest_lane::a_host_abort_before_the_guest_accepts_ends_the_flow_in_a_real_guest
+  cgroup-default/nested-launch-lane	overdrive-init::integration	integration::in_guest_lane::a_host_close_after_the_guest_accepted_ends_the_flow_in_a_real_guest
+  cgroup-default/nested-launch-lane	overdrive-init::integration	integration::in_guest_lane::a_session_loss_abort_ends_the_flow_and_the_owner_reconnects_in_a_real_guest
+  cgroup-default/nested-launch-lane	overdrive-init::integration	integration::in_guest_lane::an_abort_for_an_unheld_flow_is_discarded_in_a_real_guest
+  cgroup-default/nested-launch-lane	overdrive-init::integration	integration::in_guest_lane::tcp_correlation_preserves_identity_and_cleanup_in_a_real_guest
+  cgroup-default/nested-launch-lane	overdrive-init::integration	integration::in_guest_lane::the_guest_accept_path_matches_the_sim_in_a_real_guest
+  cgroup-default/nested-launch-lane	overdrive-init::integration	integration::in_guest_lane::the_guest_kits_module_matches_the_running_guest_kernel
+  cgroup-default/nested-launch-lane	overdrive-init::integration	integration::in_guest_lane::the_guest_transport_is_configured_before_ready_in_a_real_guest
+  cgroup-default/nested-launch-lane	overdrive-init::integration	integration::in_guest_lane::the_reserved_intake_ports_refuse_application_binds_in_a_real_guest
+  cgroup-default/nested-launch-lane	overdrive-init::integration	integration::in_guest_lane::the_v24_kernel_shape_holds_in_a_real_guest
+  cgroup-default/routed-route	overdrive-worker::integration	integration::vsock_host_internal_enforce::a_marked_udp_transmit_to_an_off_host_address_is_not_rejected
+  cgroup-default/routed-route	overdrive-worker::integration	integration::vsock_host_internal_enforce::a_marked_udp_transmit_to_the_all_hosts_multicast_group_is_rejected_eperm
+  cgroup-default/routed-route	overdrive-worker::integration	integration::vsock_host_internal_enforce::a_marked_udp_transmit_to_the_limited_broadcast_reaches_no_service

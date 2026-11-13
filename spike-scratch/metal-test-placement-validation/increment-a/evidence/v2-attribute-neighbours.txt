@@ -1,0 +1,19 @@
+attribute names that appear on a test-introducing fn (count of sites):
+   2758 test
+   1560 tokio::test
+    328 quint_test
+    147 serial
+    125 allow
+     29 serial_test::serial
+     28 ignore
+     24 quint_run
+     23 cfg
+     10 expect
+      7 should_panic
+      1 overdrive_testing::overdrive_test
+
+proptest-inner sites: 400  with explicit #[test] inside the block: 398
+sites combining a test attr with #[serial]: 176
+sites with #[should_panic]: 7
+sites with #[ignore]: 28
+sites with #[cfg(...)] on the fn: 23

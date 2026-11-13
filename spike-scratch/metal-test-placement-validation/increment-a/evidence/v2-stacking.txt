@@ -1,0 +1,739 @@
+# v2-stacking  cargo nextest run --manifest-path=spike-scratch/metal-test-placement-validation/increment-a/Cargo.toml --no-fail-fast --success-output immediate --failure-output immediate -E binary(stacking)  exit: 100
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.13s
+     Running `target/debug/xtask metal run -- cargo nextest run --manifest-path=spike-scratch/metal-test-placement-validation/increment-a/Cargo.toml --no-fail-fast --success-output immediate --failure-output immediate -E 'binary(stacking)'`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+OVERDRIVE_METAL_RUN_ID=3d0361b754bf2d64e896601f
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire exclusive physical-maintenance barrier (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_RUN_REGISTERED run_id=3d0361b754bf2d64e896601f
+OVERDRIVE_METAL_LEASE_ACQUIRED token=3d0361b754bf2d64e896601f pid=2715477
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/amman-v2 -> ubuntu@151.115.99.251:/home/ubuntu/overdrive-worktrees/357ee52c8cab8252dd245471dd79a7901e00d3cd6bebcd70732eb120c34f745d
+
+sent 2,036,335 bytes  received 29,499 bytes  826,333.60 bytes/sec
+total size is 1,911,948,610  speedup is 925.51
+
+########## [bootstrap] materialising standalone .git (common dir 2.3G)
+
+sent 938,678 bytes  received 21,022 bytes  639,800.00 bytes/sec
+total size is 882,213,126  speedup is 919.26
+## marcus-sa/metal-test-placement-declare
+ M spike-scratch/metal-test-placement-module-guest/increment-a/Cargo.lock
+?? spike-scratch/metal-test-placement-owner/
+?? spike-scratch/metal-test-placement-validation/
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+OVERDRIVE_METAL_RUN_STARTED run_id=3d0361b754bf2d64e896601f
+    Updating crates.io index
+     Locking 251 packages to latest Rust 1.95.0 compatible versions
+      Adding generic-array v0.14.7 (available: v0.14.9)
+      Adding serial_test v3.5.0 (available: v4.0.1)
+      Adding syn v2.0.119 (available: v3.0.10)
+      Adding trybuild v1.0.101 (available: v1.0.122)
+ Downloading crates ...
+  Downloaded bit-vec v0.10.2
+  Downloaded borsh-derive v1.8.1
+  Downloaded errno v0.3.15
+  Downloaded bit-set v0.11.1
+  Downloaded rand_xorshift v0.5.0
+  Downloaded serial_test_derive v3.5.0
+  Downloaded core_detect v1.0.0
+  Downloaded itoa v1.0.19
+  Downloaded bs58 v0.5.1
+  Downloaded toml_datetime v1.1.3+spec-1.1.0
+  Downloaded serial_test v3.5.0
+  Downloaded toml_parser v1.1.5+spec-1.1.0
+  Downloaded smallvec v1.16.5
+  Downloaded num-modular v0.6.5
+  Downloaded rustls-pki-types v1.16.0
+  Downloaded uuid v1.29.2
+  Downloaded toml_edit v0.25.19+spec-1.1.0
+  Downloaded schemars v1.2.3
+  Downloaded mio v1.2.5
+  Downloaded jiff-core v0.1.5
+  Downloaded cc v1.11.2
+  Downloaded rand v0.9.5
+  Downloaded winnow v1.0.5
+  Downloaded proptest v1.12.0
+  Downloaded jiff v0.2.43
+info: experimental features enabled: wrapper-scripts
+    Blocking waiting for file lock on package cache
+   Compiling proc-macro2 v1.0.107
+   Compiling quote v1.0.47
+   Compiling unicode-ident v1.0.27
+   Compiling libc v0.2.191
+   Compiling cfg-if v1.0.5
+   Compiling serde_core v1.0.229
+   Compiling serde v1.0.229
+   Compiling zerocopy v0.8.63
+   Compiling version_check v0.9.5
+   Compiling rand_core v0.10.1
+   Compiling memchr v2.8.3
+   Compiling shlex v2.0.1
+   Compiling getrandom v0.4.3
+   Compiling find-msvc-tools v0.1.15
+   Compiling zmij v1.0.23
+   Compiling once_cell v1.21.4
+   Compiling hashbrown v0.17.1
+   Compiling autocfg v1.5.1
+   Compiling pin-project-lite v0.2.17
+   Compiling equivalent v1.0.3
+   Compiling serde_json v1.0.154
+   Compiling bitflags v2.13.2
+   Compiling cc v1.11.2
+   Compiling itoa v1.0.19
+   Compiling regex-syntax v0.8.11
+   Compiling typenum v1.20.1
+   Compiling generic-array v0.14.7
+   Compiling futures-core v0.3.34
+   Compiling futures-sink v0.3.34
+   Compiling parking_lot_core v0.9.12
+   Compiling futures-channel v0.3.34
+   Compiling num-conv v0.2.2
+   Compiling rustix v1.1.6
+   Compiling slab v0.4.12
+   Compiling futures-task v0.3.34
+   Compiling scopeguard v1.2.0
+   Compiling smallvec v1.16.5
+   Compiling futures-io v0.3.34
+   Compiling time-core v0.1.9
+   Compiling lock_api v0.4.14
+   Compiling winnow v0.7.15
+   Compiling simdutf8 v0.1.5
+   Compiling toml_write v0.1.2
+   Compiling ident_case v1.0.1
+   Compiling strsim v0.11.1
+   Compiling powerfmt v0.2.1
+   Compiling cpufeatures v0.3.1
+   Compiling time-macros v0.2.32
+   Compiling linux-raw-sys v0.12.1
+   Compiling memoffset v0.9.1
+   Compiling cfg_aliases v0.2.2
+   Compiling aho-corasick v1.1.5
+   Compiling unsafe-libyaml-norway v0.2.15
+   Compiling ciborium-io v0.2.2
+   Compiling getrandom v0.3.4
+   Compiling syn v3.0.10
+   Compiling syn v2.0.119
+   Compiling ryu v1.0.23
+   Compiling thiserror v2.0.21
+   Compiling nix v0.30.1
+   Compiling tracing-core v0.1.36
+   Compiling arrayvec v0.7.8
+   Compiling cpufeatures v0.2.17
+   Compiling rustversion v1.0.23
+   Compiling constant_time_eq v0.4.2
+   Compiling bytes v1.12.1
+   Compiling num-modular v0.6.5
+   Compiling dashu-int v0.4.3
+   Compiling untrusted v0.9.0
+   Compiling crypto-common v0.1.7
+   Compiling block-buffer v0.10.4
+   Compiling hex v0.4.3
+   Compiling digest v0.10.7
+   Compiling base64 v0.23.1
+   Compiling getrandom v0.2.17
+   Compiling errno v0.3.15
+   Compiling regex-automata v0.4.18
+   Compiling blake3 v1.8.7
+   Compiling parking_lot v0.12.5
+   Compiling signal-hook-registry v1.4.8
+   Compiling ring v0.17.14
+   Compiling mio v1.2.5
+   Compiling socket2 v0.6.5
+   Compiling rand_core v0.6.4
+   Compiling sha2 v0.10.9
+   Compiling zeroize v1.9.1
+   Compiling fastrand v2.5.0
+   Compiling rustls-pki-types v1.16.0
+   Compiling indexmap v2.14.2
+   Compiling deranged v0.5.9
+   Compiling uuid v1.29.2
+   Compiling rand_core v0.9.5
+   Compiling pem v4.0.0
+   Compiling num-order v1.2.0
+   Compiling num-traits v0.2.19
+   Compiling anyhow v1.0.104
+   Compiling static_assertions v1.1.0
+   Compiling dashu-base v0.4.3
+   Compiling target-triple v0.1.4
+   Compiling wait-timeout v0.2.1
+   Compiling linux-keyutils v0.2.5
+   Compiling quint-connect v0.1.2
+   Compiling bit-vec v0.10.2
+   Compiling quick-error v1.2.3
+   Compiling fnv v1.0.7
+   Compiling placement-validation-probe v0.0.0 (/home/ubuntu/overdrive-worktrees/357ee52c8cab8252dd245471dd79a7901e00d3cd6bebcd70732eb120c34f745d/spike-scratch/metal-test-placement-validation/increment-a)
+   Compiling darling_core v0.24.1
+   Compiling rand v0.10.3
+   Compiling chacha20 v0.10.2
+   Compiling bit-set v0.11.1
+   Compiling rand_xorshift v0.5.0
+   Compiling unarray v0.1.4
+   Compiling colored v3.1.1
+   Compiling core_detect v1.0.0
+   Compiling termcolor v1.4.1
+warning: placement-validation-probe@0.0.0: RUSTC_VERSION rustc 1.95.0 (59807616e 2026-04-14)
+   Compiling log v0.4.35
+   Compiling similar v2.7.0
+   Compiling glob v0.3.4
+   Compiling time v0.3.55
+   Compiling regex v1.13.1
+   Compiling serde_derive v1.0.229
+   Compiling ptr_meta_derive v0.3.2
+   Compiling futures-macro v0.3.34
+   Compiling bytecheck_derive v0.8.3
+   Compiling tokio-macros v2.7.2
+   Compiling rkyv_derive v0.8.18
+   Compiling thiserror-impl v2.0.21
+   Compiling async-trait v0.1.92
+   Compiling yasna v0.6.0
+   Compiling ptr_meta v0.3.2
+   Compiling rancor v0.1.3
+   Compiling bytecheck v0.8.3
+   Compiling tokio v1.54.1
+   Compiling tempfile v3.27.0
+   Compiling futures-util v0.3.34
+   Compiling rend v0.5.4
+   Compiling rusty-fork v0.3.1
+   Compiling zerocopy-derive v0.8.63
+   Compiling munge_macro v0.4.7
+   Compiling utoipa-gen v5.5.0
+   Compiling tracing-attributes v0.1.31
+   Compiling probe-macros v0.0.0 (/home/ubuntu/overdrive-worktrees/357ee52c8cab8252dd245471dd79a7901e00d3cd6bebcd70732eb120c34f745d/spike-scratch/metal-test-placement-validation/increment-a/macros)
+   Compiling overdrive-testing-macros v0.0.0 (/home/ubuntu/overdrive-worktrees/357ee52c8cab8252dd245471dd79a7901e00d3cd6bebcd70732eb120c34f745d/crates/overdrive-testing-macros)
+   Compiling quint-connect-macros v0.1.2
+   Compiling darling_macro v0.24.1
+   Compiling serial_test_derive v3.5.0
+   Compiling proptest v1.12.0
+   Compiling darling v0.24.1
+   Compiling serde_with_macros v3.24.0
+   Compiling rcgen v0.14.10
+   Compiling munge v0.4.7
+   Compiling serde_with v3.24.0
+   Compiling tracing v0.1.44
+   Compiling serde_spanned v0.6.9
+   Compiling toml_datetime v0.6.11
+   Compiling serde_norway v0.9.42
+   Compiling ipnet v2.12.2
+   Compiling futures-executor v0.3.34
+   Compiling toml_edit v0.22.27
+   Compiling futures v0.3.34
+   Compiling serial_test v3.5.0
+   Compiling rkyv v0.8.18
+   Compiling utoipa v5.5.0
+   Compiling itf v0.4.0
+   Compiling toml v0.8.23
+   Compiling trybuild v1.0.101
+   Compiling ppv-lite86 v0.2.21
+   Compiling half v2.7.1
+   Compiling ciborium-ll v0.2.2
+   Compiling rand_chacha v0.3.1
+   Compiling rand_chacha v0.9.0
+   Compiling ciborium v0.2.2
+   Compiling rand v0.9.5
+   Compiling rand v0.8.8
+   Compiling overdrive-core v0.0.0 (/home/ubuntu/overdrive-worktrees/357ee52c8cab8252dd245471dd79a7901e00d3cd6bebcd70732eb120c34f745d/crates/overdrive-core)
+   Compiling overdrive-host v0.0.0 (/home/ubuntu/overdrive-worktrees/357ee52c8cab8252dd245471dd79a7901e00d3cd6bebcd70732eb120c34f745d/crates/overdrive-host)
+   Compiling overdrive-fwd v0.0.0 (/home/ubuntu/overdrive-worktrees/357ee52c8cab8252dd245471dd79a7901e00d3cd6bebcd70732eb120c34f745d/crates/overdrive-fwd)
+warning: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::new`: unsound due to lack of I/O safety; use `AsyncFd::register` instead (see https://github.com/tokio-rs/tokio/pull/8587)
+   --> /home/ubuntu/overdrive-worktrees/357ee52c8cab8252dd245471dd79a7901e00d3cd6bebcd70732eb120c34f745d/crates/overdrive-host/src/beacon_io.rs:127:42
+    |
+127 |         let listener = Arc::new(AsyncFd::new(listener)?);
+    |                                          ^^^
+    |
+    = note: `#[warn(deprecated)]` on by default
+
+warning: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::new`: unsound due to lack of I/O safety; use `AsyncFd::register` instead (see https://github.com/tokio-rs/tokio/pull/8587)
+   --> /home/ubuntu/overdrive-worktrees/357ee52c8cab8252dd245471dd79a7901e00d3cd6bebcd70732eb120c34f745d/crates/overdrive-host/src/beacon_io.rs:158:46
+    |
+158 | ...                   socket: AsyncFd::new(socket)?,
+    |                                        ^^^
+
+   Compiling overdrive-testing v0.0.0 (/home/ubuntu/overdrive-worktrees/357ee52c8cab8252dd245471dd79a7901e00d3cd6bebcd70732eb120c34f745d/crates/overdrive-testing)
+warning: `overdrive-host` (lib) generated 2 warnings
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 26.65s
+────────────
+ Nextest run ID fd9693f0-8e49-4ca5-b801-af761ee4b6b1 with nextest profile: default
+    Starting 16 tests across 1 binary (1 test and 2 binaries skipped)
+        SKIP [         ] (─────) placement-validation-probe::stacking tokio_stack::ignore_and_should_panic
+        PASS [   0.075s] ( 1/16) placement-validation-probe::stacking explicit_stack::explicit_form_plain
+  stdout ───
+
+    running 1 test
+    PLACEMENT_PROBE test=stacking::explicit_stack::explicit_form_plain group=core
+    test explicit_stack::explicit_form_plain ... ok
+
+    test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 21 filtered out; finished in 0.00s
+
+
+        PASS [   0.083s] ( 2/16) placement-validation-probe::stacking tokio_stack::tokio_first_then_ours
+  stdout ───
+
+    running 1 test
+    PLACEMENT_PROBE test=stacking::tokio_stack::tokio_first_then_ours group=cgroup-default
+    test tokio_stack::tokio_first_then_ours ... ok
+
+    test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 21 filtered out; finished in 0.00s
+
+
+        PASS [   0.101s] ( 3/16) placement-validation-probe::stacking proptest_stack::p_ours_only
+  stdout ───
+
+    running 1 test
+    PLACEMENT_PROBE test=stacking::proptest_stack::p_ours_only group=cgroup-default
+    test proptest_stack::p_ours_only ... ok
+
+    test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 21 filtered out; finished in 0.02s
+
+  stderr ───
+    proptest: FileFailurePersistence::SourceParallel set, but failed to find lib.rs or main.rs
+
+        PASS [   0.102s] ( 4/16) placement-validation-probe::stacking tokio_stack::ours_then_tokio_default
+  stdout ───
+
+    running 1 test
+    PLACEMENT_PROBE test=stacking::tokio_stack::ours_then_tokio_default group=cgroup-default
+    test tokio_stack::ours_then_tokio_default ... ok
+
+    test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 21 filtered out; finished in 0.00s
+
+
+        PASS [   0.102s] ( 5/16) placement-validation-probe::stacking tokio_stack::multi_thread_flavor
+  stdout ───
+
+    running 1 test
+    PLACEMENT_PROBE test=stacking::tokio_stack::multi_thread_flavor group=cgroup-default
+    test tokio_stack::multi_thread_flavor ... ok
+
+    test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 21 filtered out; finished in 0.00s
+
+
+        PASS [   0.102s] ( 6/16) placement-validation-probe::stacking serial_stack::serial_then_tokio
+  stdout ───
+
+    running 1 test
+    PLACEMENT_PROBE test=stacking::serial_stack::serial_then_tokio group=cgroup-default
+    test serial_stack::serial_then_tokio ... ok
+
+    test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 21 filtered out; finished in 0.00s
+
+
+        PASS [   0.105s] ( 7/16) placement-validation-probe::stacking explicit_stack::explicit_over_tokio
+  stdout ───
+
+    running 1 test
+    PLACEMENT_PROBE test=stacking::explicit_stack::explicit_over_tokio group=core
+    test explicit_stack::explicit_over_tokio ... ok
+
+    test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 21 filtered out; finished in 0.00s
+
+
+        PASS [   0.106s] ( 8/16) placement-validation-probe::stacking proptest_stack::p_closure_form_in_fn
+  stdout ───
+
+    running 1 test
+    PLACEMENT_PROBE test=stacking::proptest_stack::p_closure_form_in_fn group=cgroup-default
+    test proptest_stack::p_closure_form_in_fn ... ok
+
+    test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 21 filtered out; finished in 0.01s
+
+  stderr ───
+    proptest: FileFailurePersistence::SourceParallel set, but failed to find lib.rs or main.rs
+
+        PASS [   0.111s] ( 9/16) placement-validation-probe::stacking tokio_stack::should_panic_expected
+  stdout ───
+
+    running 2 tests
+    PLACEMENT_PROBE test=stacking::tokio_stack::should_panic_expected group=cgroup-default
+    test tokio_stack::should_panic_expected - should panic ... ok
+    PLACEMENT_PROBE test=stacking::tokio_stack::should_panic_expected group=cgroup-default
+    test tokio_stack::should_panic_expected - should panic ... ok
+
+    test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 20 filtered out; finished in 0.00s
+
+  stderr ───
+
+    thread 'tokio_stack::should_panic_expected' (2726690) panicked at tests/stacking.rs:63:9:
+    deliberate
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+    thread 'tokio_stack::should_panic_expected' (2726691) panicked at tests/stacking.rs:63:9:
+    deliberate
+
+        PASS [   0.113s] (10/16) placement-validation-probe::stacking proptest_stack::p_test_then_ours
+  stdout ───
+
+    running 2 tests
+    PLACEMENT_PROBE test=stacking::proptest_stack::p_test_then_ours group=cgroup-default
+    PLACEMENT_PROBE test=stacking::proptest_stack::p_test_then_ours group=cgroup-default
+    test proptest_stack::p_test_then_ours ... ok
+    test proptest_stack::p_test_then_ours ... ok
+
+    test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 20 filtered out; finished in 0.01s
+
+  stderr ───
+    proptest: FileFailurePersistence::SourceParallel set, but failed to find lib.rs or main.rs
+    proptest: FileFailurePersistence::SourceParallel set, but failed to find lib.rs or main.rs
+
+        PASS [   0.125s] (11/16) placement-validation-probe::stacking serial_stack::ours_then_serial
+  stdout ───
+
+    running 1 test
+    PLACEMENT_PROBE test=stacking::serial_stack::ours_then_serial group=cgroup-default
+    test serial_stack::ours_then_serial ... ok
+
+    test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 21 filtered out; finished in 0.00s
+
+
+        PASS [   0.134s] (12/16) placement-validation-probe::stacking proptest_stack::p_with_config
+  stdout ───
+
+    running 1 test
+    PLACEMENT_PROBE test=stacking::proptest_stack::p_with_config group=cgroup-default
+    test proptest_stack::p_with_config ... ok
+
+    test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 21 filtered out; finished in 0.00s
+
+  stderr ───
+    proptest: FileFailurePersistence::SourceParallel set, but failed to find lib.rs or main.rs
+
+        PASS [   0.217s] (13/16) placement-validation-probe::stacking records::section_matches_the_test_list
+  stdout ───
+
+    running 1 test
+    PLACEMENT_PROBE test=stacking::records::section_matches_the_test_list group=core
+    SECTION_DUMP stacking records=17
+    SECTION_RECORD name=stacking::explicit_stack::explicit_form_plain group=core
+    SECTION_RECORD name=stacking::explicit_stack::explicit_over_tokio group=core
+    SECTION_RECORD name=stacking::trybuild_stack::trybuild_pass_fixture group=cgroup-default
+    SECTION_RECORD name=stacking::tokio_stack::multi_thread_flavor group=cgroup-default
+    SECTION_RECORD name=stacking::tokio_stack::should_panic_expected group=cgroup-default
+    SECTION_RECORD name=stacking::tokio_stack::tokio_first_then_ours group=cgroup-default
+    SECTION_RECORD name=stacking::tokio_stack::ignore_and_should_panic group=cgroup-default
+    SECTION_RECORD name=stacking::tokio_stack::ours_then_tokio_default group=cgroup-default
+    SECTION_RECORD name=stacking::proptest_stack::p_ours_only group=cgroup-default
+    SECTION_RECORD name=stacking::proptest_stack::p_with_config group=cgroup-default
+    SECTION_RECORD name=stacking::proptest_stack::p_test_then_ours group=cgroup-default
+    SECTION_RECORD name=stacking::proptest_stack::p_closure_form_in_fn group=cgroup-default
+    SECTION_RECORD name=stacking::records::section_matches_the_test_list group=core
+    SECTION_RECORD name=stacking::serial_stack::ours_then_serial group=cgroup-default
+    SECTION_RECORD name=stacking::serial_stack::serial_then_tokio group=cgroup-default
+    SECTION_RECORD name=stacking::quint_stack::quint_run_then_ours group=cgroup-default
+    SECTION_RECORD name=stacking::quint_stack::quint_test_then_ours group=cgroup-default
+    test records::section_matches_the_test_list ... ok
+
+    test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 21 filtered out; finished in 0.11s
+
+
+        FAIL [   0.746s] (14/16) placement-validation-probe::stacking quint_stack::quint_test_then_ours
+  stdout ───
+
+    running 2 tests
+    PLACEMENT_PROBE test=stacking::quint_stack::quint_test_then_ours group=cgroup-default
+    PLACEMENT_PROBE test=stacking::quint_stack::quint_test_then_ours group=cgroup-default
+    test quint_stack::quint_test_then_ours ... FAILED
+    test quint_stack::quint_test_then_ours ... FAILED
+
+    failures:
+
+    failures:
+        quint_stack::quint_test_then_ours
+        quint_stack::quint_test_then_ours
+
+    test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 20 filtered out; finished in 0.65s
+
+  stderr ───
+    == == Running model based tests for quint_test_then_ours
+    Running model based tests for quint_test_then_ours
+       Generating 1 traces using `0x49fbc37a` as random seed ...
+       Generating 1 traces using `0xe71b09e5` as random seed ...
+       Replaying traces ...
+       [FAIL] quint_test_then_ours 
+       Reproduce this error with `QUINT_SEED=0x49fbc37a`
+
+
+    thread 'quint_stack::quint_test_then_ours' (2726661) panicked at tests/stacking.rs:156:5:
+    Missing `mbt::actionTaken` variable in the trace
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+       Replaying traces ...
+       [FAIL] quint_test_then_ours 
+       Reproduce this error with `QUINT_SEED=0xe71b09e5`
+
+
+    thread 'quint_stack::quint_test_then_ours' (2726660) panicked at tests/stacking.rs:156:5:
+    Missing `mbt::actionTaken` variable in the trace
+
+        PASS [   0.767s] (15/16) placement-validation-probe::stacking quint_stack::quint_run_then_ours
+  stdout ───
+
+    running 2 tests
+    PLACEMENT_PROBE test=stacking::quint_stack::quint_run_then_ours group=cgroup-default
+    PLACEMENT_PROBE test=stacking::quint_stack::quint_run_then_ours group=cgroup-default
+    test quint_stack::quint_run_then_ours ... ok
+    test quint_stack::quint_run_then_ours ... ok
+
+    test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 20 filtered out; finished in 0.69s
+
+  stderr ───
+    == Running model based tests for quint_run_then_ours
+    == Running model based tests for quint_run_then_ours
+       Generating 2 traces using `0xc424eb45` as random seed ...
+       Generating 2 traces using `0x714db269` as random seed ...
+       Replaying traces ...
+       [OK] quint_run_then_ours
+       Replaying traces ...
+       [OK] quint_run_then_ours
+
+        PASS [  25.724s] (16/16) placement-validation-probe::stacking trybuild_stack::trybuild_pass_fixture
+  stdout ───
+
+    running 1 test
+    PLACEMENT_PROBE test=stacking::trybuild_stack::trybuild_pass_fixture group=cgroup-default
+    test trybuild_stack::trybuild_pass_fixture ... ok
+
+    test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 21 filtered out; finished in 25.61s
+
+  stderr ───
+       Compiling proc-macro2 v1.0.107
+       Compiling unicode-ident v1.0.27
+       Compiling quote v1.0.47
+       Compiling libc v0.2.191
+       Compiling cfg-if v1.0.5
+       Compiling serde_core v1.0.229
+       Compiling serde v1.0.229
+       Compiling zerocopy v0.8.63
+       Compiling version_check v0.9.5
+       Compiling rand_core v0.10.1
+       Compiling find-msvc-tools v0.1.15
+       Compiling getrandom v0.4.3
+       Compiling shlex v2.0.1
+       Compiling memchr v2.8.3
+       Compiling once_cell v1.21.4
+       Compiling autocfg v1.5.1
+       Compiling pin-project-lite v0.2.17
+       Compiling hashbrown v0.17.1
+       Compiling bitflags v2.13.2
+       Compiling zmij v1.0.23
+       Compiling typenum v1.20.1
+       Compiling equivalent v1.0.3
+       Compiling cc v1.11.2
+       Compiling futures-core v0.3.34
+       Compiling itoa v1.0.19
+       Compiling serde_json v1.0.154
+       Compiling futures-sink v0.3.34
+       Compiling parking_lot_core v0.9.12
+       Compiling futures-channel v0.3.34
+       Compiling generic-array v0.14.7
+       Compiling smallvec v1.16.5
+       Compiling futures-io v0.3.34
+       Compiling slab v0.4.12
+       Compiling regex-syntax v0.8.11
+       Compiling time-core v0.1.9
+       Compiling futures-task v0.3.34
+       Compiling num-conv v0.2.2
+       Compiling aho-corasick v1.1.5
+       Compiling scopeguard v1.2.0
+       Compiling rustix v1.1.6
+       Compiling lock_api v0.4.14
+       Compiling linux-raw-sys v0.12.1
+       Compiling cpufeatures v0.3.1
+       Compiling strsim v0.11.1
+       Compiling time-macros v0.2.32
+       Compiling syn v3.0.10
+       Compiling syn v2.0.119
+       Compiling powerfmt v0.2.1
+       Compiling ident_case v1.0.1
+       Compiling simdutf8 v0.1.5
+       Compiling memoffset v0.9.1
+       Compiling thiserror v2.0.21
+       Compiling ciborium-io v0.2.2
+       Compiling winnow v0.7.15
+       Compiling getrandom v0.3.4
+       Compiling toml_write v0.1.2
+       Compiling cfg_aliases v0.2.2
+       Compiling unsafe-libyaml-norway v0.2.15
+       Compiling ryu v1.0.23
+       Compiling nix v0.30.1
+       Compiling block-buffer v0.10.4
+       Compiling crypto-common v0.1.7
+       Compiling digest v0.10.7
+       Compiling tracing-core v0.1.36
+       Compiling rustversion v1.0.23
+       Compiling constant_time_eq v0.4.2
+       Compiling cpufeatures v0.2.17
+       Compiling arrayvec v0.7.8
+       Compiling bytes v1.12.1
+       Compiling sha2 v0.10.9
+       Compiling dashu-int v0.4.3
+       Compiling getrandom v0.2.17
+       Compiling errno v0.3.15
+       Compiling mio v1.2.5
+       Compiling socket2 v0.6.5
+       Compiling rand_core v0.6.4
+       Compiling signal-hook-registry v1.4.8
+       Compiling regex-automata v0.4.18
+       Compiling parking_lot v0.12.5
+       Compiling base64 v0.23.1
+       Compiling num-modular v0.6.5
+       Compiling hex v0.4.3
+       Compiling untrusted v0.9.0
+       Compiling fastrand v2.5.0
+       Compiling indexmap v2.14.2
+       Compiling deranged v0.5.9
+       Compiling uuid v1.29.2
+       Compiling zeroize v1.9.1
+       Compiling pem v4.0.0
+       Compiling rand_core v0.9.5
+       Compiling blake3 v1.8.7
+       Compiling ring v0.17.14
+       Compiling rustls-pki-types v1.16.0
+       Compiling num-order v1.2.0
+       Compiling num-traits v0.2.19
+       Compiling anyhow v1.0.104
+       Compiling static_assertions v1.1.0
+       Compiling dashu-base v0.4.3
+       Compiling linux-keyutils v0.2.5
+       Compiling wait-timeout v0.2.1
+       Compiling quint-connect v0.1.2
+       Compiling placement-validation-probe v0.0.0 (/home/ubuntu/overdrive-worktrees/357ee52c8cab8252dd245471dd79a7901e00d3cd6bebcd70732eb120c34f745d/spike-scratch/metal-test-placement-validation/increment-a)
+       Compiling fnv v1.0.7
+       Compiling bit-vec v0.10.2
+       Compiling quick-error v1.2.3
+       Compiling rand v0.10.3
+       Compiling chacha20 v0.10.2
+       Compiling darling_core v0.24.1
+       Compiling regex v1.13.1
+       Compiling bit-set v0.11.1
+       Compiling time v0.3.55
+    warning: placement-validation-probe@0.0.0: RUSTC_VERSION rustc 1.95.0 (59807616e 2026-04-14)
+       Compiling rand_xorshift v0.5.0
+       Compiling core_detect v1.0.0
+       Compiling unarray v0.1.4
+       Compiling similar v2.7.0
+       Compiling colored v3.1.1
+       Compiling log v0.4.35
+       Compiling yasna v0.6.0
+       Compiling tempfile v3.27.0
+       Compiling rusty-fork v0.3.1
+       Compiling serde_derive v1.0.229
+       Compiling ptr_meta_derive v0.3.2
+       Compiling futures-macro v0.3.34
+       Compiling bytecheck_derive v0.8.3
+       Compiling tokio-macros v2.7.2
+       Compiling thiserror-impl v2.0.21
+       Compiling rkyv_derive v0.8.18
+       Compiling async-trait v0.1.92
+       Compiling zerocopy-derive v0.8.63
+       Compiling munge_macro v0.4.7
+       Compiling utoipa-gen v5.5.0
+       Compiling ptr_meta v0.3.2
+       Compiling rancor v0.1.3
+       Compiling tracing-attributes v0.1.31
+       Compiling probe-macros v0.0.0 (/home/ubuntu/overdrive-worktrees/357ee52c8cab8252dd245471dd79a7901e00d3cd6bebcd70732eb120c34f745d/spike-scratch/metal-test-placement-validation/increment-a/macros)
+       Compiling munge v0.4.7
+       Compiling bytecheck v0.8.3
+       Compiling quint-connect-macros v0.1.2
+       Compiling tokio v1.54.1
+       Compiling overdrive-testing-macros v0.0.0 (/home/ubuntu/overdrive-worktrees/357ee52c8cab8252dd245471dd79a7901e00d3cd6bebcd70732eb120c34f745d/crates/overdrive-testing-macros)
+       Compiling rend v0.5.4
+       Compiling serial_test_derive v3.5.0
+       Compiling futures-util v0.3.34
+       Compiling proptest v1.12.0
+       Compiling darling_macro v0.24.1
+       Compiling darling v0.24.1
+       Compiling serde_with_macros v3.24.0
+       Compiling tracing v0.1.44
+       Compiling rcgen v0.14.10
+       Compiling serde_with v3.24.0
+       Compiling toml_datetime v0.6.11
+       Compiling serde_spanned v0.6.9
+       Compiling serde_norway v0.9.42
+       Compiling ipnet v2.12.2
+       Compiling futures-executor v0.3.34
+       Compiling toml_edit v0.22.27
+       Compiling futures v0.3.34
+       Compiling serial_test v3.5.0
+       Compiling rkyv v0.8.18
+       Compiling toml v0.8.23
+       Compiling utoipa v5.5.0
+       Compiling itf v0.4.0
+       Compiling ppv-lite86 v0.2.21
+       Compiling half v2.7.1
+       Compiling ciborium-ll v0.2.2
+       Compiling rand_chacha v0.3.1
+       Compiling rand_chacha v0.9.0
+       Compiling ciborium v0.2.2
+       Compiling rand v0.9.5
+       Compiling rand v0.8.8
+       Compiling overdrive-core v0.0.0 (/home/ubuntu/overdrive-worktrees/357ee52c8cab8252dd245471dd79a7901e00d3cd6bebcd70732eb120c34f745d/crates/overdrive-core)
+       Compiling overdrive-host v0.0.0 (/home/ubuntu/overdrive-worktrees/357ee52c8cab8252dd245471dd79a7901e00d3cd6bebcd70732eb120c34f745d/crates/overdrive-host)
+       Compiling overdrive-fwd v0.0.0 (/home/ubuntu/overdrive-worktrees/357ee52c8cab8252dd245471dd79a7901e00d3cd6bebcd70732eb120c34f745d/crates/overdrive-fwd)
+    warning: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::new`: unsound due to lack of I/O safety; use `AsyncFd::register` instead (see https://github.com/tokio-rs/tokio/pull/8587)
+       --> /home/ubuntu/overdrive-worktrees/357ee52c8cab8252dd245471dd79a7901e00d3cd6bebcd70732eb120c34f745d/crates/overdrive-host/src/beacon_io.rs:127:42
+        |
+    127 |         let listener = Arc::new(AsyncFd::new(listener)?);
+        |                                          ^^^
+        |
+        = note: `#[warn(deprecated)]` on by default
+
+    warning: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::new`: unsound due to lack of I/O safety; use `AsyncFd::register` instead (see https://github.com/tokio-rs/tokio/pull/8587)
+       --> /home/ubuntu/overdrive-worktrees/357ee52c8cab8252dd245471dd79a7901e00d3cd6bebcd70732eb120c34f745d/crates/overdrive-host/src/beacon_io.rs:158:46
+        |
+    158 | ...                   socket: AsyncFd::new(socket)?,
+        |                                        ^^^
+
+       Compiling overdrive-testing v0.0.0 (/home/ubuntu/overdrive-worktrees/357ee52c8cab8252dd245471dd79a7901e00d3cd6bebcd70732eb120c34f745d/crates/overdrive-testing)
+    warning: `overdrive-host` (lib) generated 2 warnings
+       Compiling placement-validation-probe-tests v0.0.0 (/home/ubuntu/overdrive-worktrees/357ee52c8cab8252dd245471dd79a7901e00d3cd6bebcd70732eb120c34f745d/spike-scratch/metal-test-placement-validation/increment-a/target/tests/trybuild/placement-validation-probe)
+        Finished `dev` profile [unoptimized + debuginfo] target(s) in 24.91s
+
+
+    test tests/ui/pass_fixture.rs ... ok
+
+    STDERR:
+    ┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈
+    warning: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::new`: unsound due to lack of I/O safety; use `AsyncFd::register` instead (see https://github.com/tokio-rs/tokio/pull/8587)
+       --> /home/ubuntu/overdrive-worktrees/357ee52c8cab8252dd245471dd79a7901e00d3cd6bebcd70732eb120c34f745d/crates/overdrive-host/src/beacon_io.rs:127:42
+        |
+    127 |         let listener = Arc::new(AsyncFd::new(listener)?);
+        |                                          ^^^
+        |
+        = note: `#[warn(deprecated)]` on by default
+
+    warning: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::new`: unsound due to lack of I/O safety; use `AsyncFd::register` instead (see https://github.com/tokio-rs/tokio/pull/8587)
+       --> /home/ubuntu/overdrive-worktrees/357ee52c8cab8252dd245471dd79a7901e00d3cd6bebcd70732eb120c34f745d/crates/overdrive-host/src/beacon_io.rs:158:46
+        |
+    158 | ...                   socket: AsyncFd::new(socket)?,
+        |                                        ^^^
+    ┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈
+
+
+
+
+────────────
+     Summary [  25.734s] 16 tests run: 15 passed, 1 failed, 1 skipped
+        PASS [   0.075s] ( 1/16) placement-validation-probe::stacking explicit_stack::explicit_form_plain
+        PASS [   0.083s] ( 2/16) placement-validation-probe::stacking tokio_stack::tokio_first_then_ours
+        PASS [   0.101s] ( 3/16) placement-validation-probe::stacking proptest_stack::p_ours_only
+        PASS [   0.102s] ( 4/16) placement-validation-probe::stacking tokio_stack::ours_then_tokio_default
+        PASS [   0.102s] ( 5/16) placement-validation-probe::stacking tokio_stack::multi_thread_flavor
+        PASS [   0.102s] ( 6/16) placement-validation-probe::stacking serial_stack::serial_then_tokio
+        PASS [   0.105s] ( 7/16) placement-validation-probe::stacking explicit_stack::explicit_over_tokio
+        PASS [   0.106s] ( 8/16) placement-validation-probe::stacking proptest_stack::p_closure_form_in_fn
+        PASS [   0.111s] ( 9/16) placement-validation-probe::stacking tokio_stack::should_panic_expected
+        PASS [   0.113s] (10/16) placement-validation-probe::stacking proptest_stack::p_test_then_ours
+        PASS [   0.125s] (11/16) placement-validation-probe::stacking serial_stack::ours_then_serial
+        PASS [   0.134s] (12/16) placement-validation-probe::stacking proptest_stack::p_with_config
+        PASS [   0.217s] (13/16) placement-validation-probe::stacking records::section_matches_the_test_list
+        PASS [   0.767s] (15/16) placement-validation-probe::stacking quint_stack::quint_run_then_ours
+        PASS [  25.724s] (16/16) placement-validation-probe::stacking trybuild_stack::trybuild_pass_fixture
+        SKIP [         ] (─────) placement-validation-probe::stacking tokio_stack::ignore_and_should_panic
+        FAIL [   0.746s] (14/16) placement-validation-probe::stacking quint_stack::quint_test_then_ours
+error: test run failed
+OVERDRIVE_METAL_RUN_COMPLETE run_id=3d0361b754bf2d64e896601f exit_code=100 cause=command_returned

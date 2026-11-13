@@ -1,0 +1,7 @@
+# v2 negative: result-return
+219:    |                                          ^^^
+227:    |                                        ^^^
+231:error: tests must return `()`
+232: --> tests/neg_result_return.rs:7:21
+235:  |                     ^
+238:error: could not compile `placement-validation-probe` (test "neg_result_return") due to 1 previous error

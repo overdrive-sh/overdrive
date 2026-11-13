@@ -1,0 +1,4 @@
+# v9 cloexec-lint BASELINE (repo checkout, no edge) exit: 1
+/home/ubuntu/overdrive-worktrees/357ee52c8cab8252dd245471dd79a7901e00d3cd6bebcd70732eb120c34f745d/crates/overdrive-dataplane/src/gateway_relay/sys.rs:87:31: libc::recvmsg: UnresolvedFlag
+   0: [91mclose-on-exec source gate found 1 violation(s)[0m
+OVERDRIVE_METAL_RUN_COMPLETE run_id=e5009413e6921e92cf9acbe7 exit_code=1 cause=command_returned
