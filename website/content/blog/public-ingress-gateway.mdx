@@ -29,32 +29,37 @@ keeps somewhere else.
 A userspace load balancer needs its own copy of the Service's backends and its own
 health opinion. Overdrive already programs backends into kernel maps for the mesh.
 A second list drifts from the first. A gateway that parses and re-emits every byte
-also pays for it on every request. And a gateway that authenticates backends with
-its own scheme would be a second identity system next to the SVIDs the node holds.
+also holds every request and response body in its own memory. And a gateway that
+authenticates backends with
+its own scheme would be a second identity system next to the SPIFFE identity
+certificates (SVIDs) the node already issues to workloads.
 
 The constraint that shaped everything: the gateway should reuse the mesh's backend
 maps and identity, and add as little new mechanism as possible.
 
-## The first data path: hyper in userspace
+## The first design: hyper in userspace
 
-The first design was the conventional one. A hyper server terminated TLS and
-parsed HTTP, then forwarded each request to a backend through a client. It worked
-as a design, and it was the version that answered the question "what is the
-simplest correct gateway."
+The issue that started this work proposed the conventional design. A hyper server
+would terminate TLS and parse HTTP, then forward each request to a backend through
+an HTTP client. Every body byte would pass through the gateway's memory twice, once
+in from the client and once out to the backend.
 
-We replaced it. In the final data path rustls performs the handshakes, kernel TLS
-carries the records on both legs, and the gateway parses request and response
-heads itself. Bodies move between the two sockets with `splice(2)`, so they stay
-in the kernel. Backend selection moved into the kernel too, as the next section
-explains.
+We replaced that design before building it. In the gateway we built, rustls
+performs each TLS handshake and then hands the session keys to the kernel, so
+kernel TLS (kTLS) encrypts and decrypts the records on both connections. The
+gateway parses only the request and response heads. Bodies move between the two
+sockets with `splice(2)` and never enter the gateway's memory. Backend selection
+moved into the kernel too, as the next section explains.
 
-The replacement does not claim a speedup. We did not measure a CPU or throughput
-gain over the hyper path, so none is stated. The reason to prefer it is that it
-fits the rest of the system.
+We chose this to keep bodies out of the gateway process, not to make it faster. A
+test program showed that splicing is no cheaper than copying in userspace, and we
+have not measured CPU or throughput against the hyper design. The cost is code we
+own: the gateway frames HTTP/1.1 messages itself instead of using hyper.
 
 ## Backend selection: a second BPF program, not a bigger one
 
-The mesh already selects a backend in a `cgroup/connect4` program. The gateway
+The mesh already selects a backend in a BPF program that runs on every `connect()`
+from a workload's cgroup (a `cgroup/connect4` program). The gateway
 needs the same selection for its own connections. The obvious move was to fold the
 gateway case into the existing hook.
 
@@ -65,15 +70,15 @@ untouched and attached a separate `cgroup/connect4` program to the gateway's
 cgroup. It reuses the Service maps, so there is no new backend table and no
 userspace load balancer.
 
-The separate program is not free. A measurement of the hook put its cost at about
-117 ns on an unregistered connect that takes about 28 µs. That figure is
-report-only. No gate depends on it.
+The separate program is not free. We measured it once at about 117 ns on a connect
+that takes about 28 µs, so treat the figure as an estimate.
 
 One behavior follows from reusing the maps. The gateway's program ignores the
 `healthy` flag in the backend map, so a request that arrives in the roughly one
 second between a backend starting and its listener binding gets a `502`. We chose
 to document that exposure instead of adding a health wait to the hook. A stopped
-Service has the same shape. Its backend stays in `SERVICE_MAP`, and a request to it
+Service has the same shape. Its backend stays in the kernel map of Service backends,
+and a request to it
 gets `502`, never a connection to a different peer.
 
 The gateway presents its own SVID toward the backend, held in a dedicated slot so
@@ -82,18 +87,18 @@ the BPF selection chose.
 
 ## Two kernel facts that changed the design
 
-Both came from a spike on a Linux 7.0.0-38 kernel, where the relay had to move
-bytes between two kTLS sockets.
+Both came from a test program on a Linux 7.0.0-38 kernel that moved bytes between
+two kTLS sockets.
 
 **Splicing into a small pipe loses bytes.** `splice(2)` moves data through a pipe.
 When the pipe is smaller than a TLS record, the splice loses 5 bytes per record,
 the length of the record header. Nothing errors. The body arrives short. The relay
-therefore always splices through an empty pipe of at least 64 KiB. The loss is silent, so
-the pipe size is a correctness setting, not a tuning knob.
+therefore always splices through an empty pipe of at least 64 KiB. Because the loss
+is silent, the pipe size is a correctness setting, not a tuning knob.
 
 **KeyUpdate needs the right API.** TLS 1.3 lets either side rotate traffic keys
 mid-connection. With kTLS the kernel holds the keys, so a KeyUpdate record arrives
-at a socket the application no longer reads through a TLS library. The spike
+at a socket the application no longer reads through a TLS library. The test program
 showed that KeyUpdate works only through rustls's `KernelConnection`. The gateway
 uses it for that reason.
 
@@ -104,20 +109,22 @@ gateway flags starts the listener, and `overdrive deploy <ROUTE_SPEC>` declares 
 Route. The checked-in operator example drives a VM Service behind a Route that way.
 A recurring in-process end-to-end test guards the behavior.
 
-We ran that example once on a bare-metal x86_64 server, with a Let's Encrypt
-certificate for a public hostname. `curl`, trusting only the system certificate
-store, negotiated TLS 1.3, got `200`, and received the guest's streamed body. While
-the body streamed, `ss` showed kernel TLS handling both directions on the public
+We recorded one complete run of that example on a bare-metal x86_64 server with
+Linux 7.0.0-38 and a Let's Encrypt certificate for a public hostname. `curl`,
+trusting only the system certificate store, negotiated TLS 1.3, got `200`, and
+received the guest's eight-chunk body. `ss`, sampled while the request was in
+flight, showed kernel TLS configured for transmit and receive on the public
 connection and on the gateway's connection to the backend. After the example
-stopped, no gateway socket, VM, cgroup or network state remained. We ran it once,
-so this shows the path works end to end, not how often it does.
+stopped, no gateway socket, VM, cgroup or network state remained. One run shows
+that the path works end to end, not how often it does. It also does not show
+whether the gateway relayed the body as it arrived or buffered it.
 
-That run found a bug our tests had missed. `serve` reads the gateway's key-encryption
-key from a credential file, but every test passed the key in directly, so nothing had
-exercised the file. The example did not create it, and `serve` refused to start the
-gateway until we fixed the example.
+Running the example found a bug our tests had missed. `serve` seals the gateway's
+private key under a key it reads from a credential file. Every test passed that key
+in directly, so nothing had exercised the file. The example did not create it, and
+`serve` refused to start the gateway until we fixed the example.
 
-A resource measurement at 128 concurrent exchanges found:
+One resource measurement at 128 concurrent exchanges, on one host, found:
 
 - 9 descriptors per exchange, 7 at steady state, so at most 1,152 at the connection
   limit.
@@ -127,17 +134,17 @@ A resource measurement at 128 concurrent exchanges found:
 
 The HTTP behavior is bounded in code: 128 connections, 32 KiB heads, 100 headers,
 100 requests per connection, 16 MiB bodies, and 5, 30, and 120 second deadlines
-for the handshake, body progress, and whole request. Operators cannot
-change these limits yet. [#353: configurable gateway limits](https://github.com/overdrive-sh/overdrive/issues/353)
-tracks that. A stalled head or body gets
+for the handshake, body progress, and whole request. A stalled head or body gets
 `408`, an oversized head `431`, and an oversized declared body `413`. There is one
-attempt to the backend and no retry.
+attempt to the backend and no retry. Operators cannot change these limits in this
+version. Issue [#353: configurable gateway limits](https://github.com/overdrive-sh/overdrive/issues/353) tracks making them
+configurable.
 
 ## What is not proven
 
 - **No performance claim.** The kTLS and splice path has no measured CPU or
-  throughput advantage over the userspace path. The 117 ns hook cost is a single
-  report-only measurement.
+  throughput advantage over the userspace path. The 117 ns hook cost comes from a
+  single measurement.
 - **The resource figures are one measurement.** We took them on one host with one
   load profile, so they are a single sample, not a distribution.
 - **Certificate rotation is a file poll.** The gateway re-reads the certificate
@@ -147,12 +154,14 @@ attempt to the backend and no retry.
 
 ## Limits
 
-The gateway speaks HTTP/1.1 only and answers anything else with `505`. HTTP/2 is
-tracked in [#341](https://github.com/overdrive-sh/overdrive/issues/341). Certificates
-come from files you supply, with provenance recorded as `Manual`. ACME is tracked in
-[#57](https://github.com/overdrive-sh/overdrive/issues/57). The gateway serves VM
+The gateway speaks HTTP/1.1 only and answers anything else with `505`. Issue
+[#341: HTTP/2 and gRPC on the public listener](https://github.com/overdrive-sh/overdrive/issues/341)
+tracks HTTP/2. Certificates come from files you supply, with provenance recorded as
+`Manual`. Issue [#57: an embedded ACME client](https://github.com/overdrive-sh/overdrive/issues/57) tracks
+automated issuance. The gateway serves VM
 workloads only, holds one Route per node
-([#352: several Routes on one listener](https://github.com/overdrive-sh/overdrive/issues/352)), and has no CLI verb for status or
+(issue [#352: several Routes on one listener](https://github.com/overdrive-sh/overdrive/issues/352)), and has no CLI
+verb for status or
 withdrawal. Those two operations are HTTP calls on the operator listener.
 
 The useful lesson is about reuse. Every simplification here came from declining to

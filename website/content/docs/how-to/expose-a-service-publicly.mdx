@@ -3,42 +3,52 @@ title: Expose a service publicly
 description: Start overdrive serve with the gateway flags, write a Route document, and deploy it so a VM Service answers HTTPS requests on a public hostname.
 ---
 
-This guide exposes a VM Service you already deployed at
+This guide makes a VM Service you already deployed answer at
 `https://<hostname>/`. You give `serve` a certificate and a listen address,
 deploy a Route that points the hostname at the Service, and request it with
 `curl`. The [public ingress gateway](/docs/concepts/public-ingress-gateway) page
 explains what the gateway does with the request.
 
 <Callout title="Prerequisites">
-	A running Service from [Deploy a workload](/docs/how-to/deploy-a-workload) with
-	a TCP listener, a certificate chain and private key valid for your hostname, and
-	a DNS A record from the hostname to the gateway address. Overdrive does not
-	create DNS records. The checked-in example at
-	`examples/public-ingress-gateway/` runs `serve` as root on a native x86_64
-	host. This guide does not establish whether a non-root process can bind port
-	443 on your node.
+	You need a running Service with a TCP listener (see
+	[Deploy a workload](/docs/how-to/deploy-a-workload)), a certificate chain and
+	private key valid for your hostname, and a DNS A record from the hostname to the
+	gateway address. Overdrive does not create DNS records. The checked-in example at
+	`examples/public-ingress-gateway/` runs `serve` as root on an x86_64 host.
 </Callout>
 
 ## Prepare the certificate files
 
-The gateway reads two files. Both paths must be absolute.
+<Steps>
+	<Step>
+		**Save the certificate chain to an absolute path.** Use leaf-first PEM with one
+		to eight certificates, at most 1 MiB. The leaf needs exactly one DNS name, must
+		be valid now, and must match the key.
+	</Step>
+	<Step>
+		**Save the private key to an absolute path.** Use a single PKCS#8 PEM key, at
+		most 64 KiB.
+	</Step>
+	<Step>
+		**Give both files to the user that runs `serve` and lock down the key.** Both
+		must be regular files, not symlinks. Replace `root` if `serve` runs as another
+		user.
 
-- The chain is leaf-first PEM with one to eight certificates, at most 1 MiB.
-- The key is a single PKCS#8 PEM, at most 64 KiB.
-- Each file must be a regular file, not a symlink, owned by the user that runs
-  `serve`. The key file must have no group or other permission bits, so use mode
-  `0600`.
-- The leaf certificate needs exactly one DNS name, must be valid now, and must
-  match the key.
+		```bash
+		chown root:root /etc/overdrive/api-chain.pem /etc/overdrive/api-key.pem
+		chmod 0600 /etc/overdrive/api-key.pem
+		```
+	</Step>
+</Steps>
 
-A bad file fails `serve` at startup.
+`serve` refuses to start if either file breaks these rules.
 
 ## Start the control plane with the gateway
 
 <Steps>
 	<Step>
-		**Pass all four gateway flags.** The listener address is the host IPv4 the
-		gateway binds. The port is always 443.
+		**Start `serve` with all four gateway flags.** `--gateway-address` is the host
+		IPv4 address the gateway binds. The gateway always listens on port 443.
 
 		```bash
 		overdrive serve \
@@ -47,70 +57,110 @@ A bad file fails `serve` at startup.
 		  --gateway-certificate-chain /etc/overdrive/api-chain.pem \
 		  --gateway-private-key /etc/overdrive/api-key.pem
 		```
-
-		Pass all four or none. A partial set fails with a gateway configuration
-		error before `serve` does anything else.
 	</Step>
 	<Step>
-		**Confirm the gateway is enabled.** `GET /v1/gateway/status` on the operator
-		mTLS listener reports `enabled`, and `listener_bound` once port 443 is bound.
-		The operator listener requires the client certificate and CA pin that `serve`
-		wrote to `~/.overdrive/config`. No CLI verb wraps this endpoint, so call it
-		with `curl` and those credentials.
+		**Write the operator credentials to files.** `serve` stores the operator
+		endpoint and the base64-encoded CA, client certificate and client key in the
+		current context of `~/.overdrive/config`. No CLI verb calls the gateway
+		endpoints, so `curl` needs them as files.
+
+		```bash
+		mkdir -p ~/.overdrive/operator && python3 - <<'EOF'
+		import base64, pathlib, tomllib
+		home = pathlib.Path.home()
+		data = tomllib.loads((home / ".overdrive/config").read_text())
+		ctx = next(c for c in data["contexts"] if c["name"] == data["current-context"])
+		out = home / ".overdrive/operator"
+		(out / "endpoint").write_text(ctx["endpoint"])
+		for field, name in (("ca", "ca.pem"), ("crt", "client.pem"), ("key", "client-key.pem")):
+		    (out / name).write_bytes(base64.b64decode(ctx[field]))
+		(out / "client-key.pem").chmod(0o600)
+		EOF
+		```
+	</Step>
+	<Step>
+		**Check that the gateway is listening.** The response reports
+		`"listener_bound":true` once port 443 is bound.
+
+		```bash
+		cd ~/.overdrive/operator
+		curl --cacert ca.pem --cert client.pem --key client-key.pem \
+		  "$(cat endpoint)/v1/gateway/status"
+		```
 	</Step>
 </Steps>
 
+Pass all four gateway flags or none. With only some of them, `serve` fails with a
+gateway configuration error before it starts anything else.
+
 ## Write and deploy the Route
 
-The Route names the hostname, the path, the certified key id from the flag above,
-and the Service port.
+<Steps>
+	<Step>
+		**Write the Route to `route.toml`.** Set `certified_key` to the value of
+		`--gateway-certified-key-id`, and `service` to the id of your deployed Service.
 
-```toml
-[route]
-id = "public-api"
-hostname = "api.example.com"
-path = "/"
-path_match = "segment_prefix"
-certified_key = "api-origin"
+		```toml
+		[route]
+		id = "public-api"
+		hostname = "api.example.com"
+		path = "/"
+		path_match = "segment_prefix"
+		certified_key = "api-origin"
 
-[route.target]
-service = "api"
-port = 8080
-protocol = "tcp"
-```
+		[route.target]
+		service = "api"
+		port = 8080
+		protocol = "tcp"
+		```
+	</Step>
+	<Step>
+		**Deploy the Route.**
 
-`certified_key` must equal `--gateway-certified-key-id`. `service` must equal the
-id of your deployed Service. Deploy the file:
+		```bash
+		overdrive deploy route.toml
+		```
+
+		```text
+		Route 'public-api' declared.
+		Generation: <n>
+		Endpoint: <endpoint>
+		```
+	</Step>
+</Steps>
+
+The first line reads `replaced` when you change an existing Route, and `unchanged`
+when the file matches what the node holds. A node holds one Route, so a Route with
+a different `id` returns `409`. To replace it with a new `id`, withdraw the current
+Route first:
 
 ```bash
-overdrive deploy route.toml
+cd ~/.overdrive/operator
+curl --cacert ca.pem --cert client.pem --key client-key.pem \
+  --request DELETE "$(cat endpoint)/v1/routes/public-api"
 ```
-
-```text
-Route 'public-api' declared.
-Generation: <n>
-Endpoint: <endpoint>
-```
-
-The first line reads `replaced` when you change an existing Route and `unchanged`
-when the file matches what the node holds. A node holds one Route. A Route with a
-different `id` returns `409`. Withdraw the current one first with
-`DELETE /v1/routes/public-api` on the operator listener.
 
 ## Make a request
 
-```bash
-curl --tlsv1.3 --http1.1 https://api.example.com/
-```
+<Steps>
+	<Step>
+		**Request the hostname.**
 
-To test before DNS exists, pin the address for this one request:
+		```bash
+		curl --tlsv1.3 --http1.1 https://api.example.com/
+		```
+	</Step>
+</Steps>
+
+To test before the DNS record exists, pin the address for one request:
 
 ```bash
 curl --tlsv1.3 --http1.1 \
   --resolve api.example.com:443:203.0.113.10 https://api.example.com/
 ```
 
-The URL host, TLS server name, and `Host` header must all be the Route's hostname.
+The URL host, the TLS server name and the `Host` header must all be the Route's
+hostname.
 
 ## When it fails
 

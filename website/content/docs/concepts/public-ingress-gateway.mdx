@@ -15,15 +15,18 @@ walks through both.
 
 <Callout title="Scope">
 	The gateway handles HTTP/1.1 only, for VM workloads only. It reads certificates
-	from files you provide. Automated certificate issuance (ACME) is
-	[unbuilt](https://github.com/overdrive-sh/overdrive/issues/57) and HTTP/2 is
-	[unbuilt](https://github.com/overdrive-sh/overdrive/issues/341).
+	from files you provide. Issue
+	[#57: an embedded ACME client](https://github.com/overdrive-sh/overdrive/issues/57) tracks
+	automated certificate issuance, and issue
+	[#341: HTTP/2 and gRPC on the public listener](https://github.com/overdrive-sh/overdrive/issues/341)
+	tracks HTTP/2.
 </Callout>
 
 ## What a Route is
 
-A Route maps one exact hostname and path to one Service port. It names the
-certified key the gateway presents for that hostname.
+A Route maps one exact hostname and path to one Service port. It also names the
+certified key the gateway presents for that hostname. A certified key is the
+certificate chain and private key you give `serve`, under one id.
 
 ```toml
 [route]
@@ -62,7 +65,9 @@ gets `421`, and a malformed `Host` gets `400`.
 | 503 | The Service has no backend. This is the only 503 the gateway returns. |
 | 505 | The request is not HTTP/1.1. |
 
-The gateway makes one attempt to the backend and never retries. It strips
+The gateway makes one attempt to the backend and never retries. A retry could
+repeat a request that is not safe to send twice, and its new connection could reach
+a different backend. It strips
 hop-by-hop headers, adds `Via: 1.1 overdrive`, and replaces any incoming
 `Forwarded` and `X-Forwarded-*` headers with a single `Forwarded` header. The
 upstream leg carries `Connection: close`.
@@ -84,15 +89,15 @@ You cannot change these limits in this version. Issue
 
 ## How a request reaches a backend
 
-Backend selection happens in the kernel. A separate `cgroup/connect4` BPF program
-attached to the gateway's cgroup picks a backend from the same Service maps the
-mesh uses, so the gateway runs no userspace load balancer and keeps no copy of the
-backend list. The program ignores the `healthy` flag in the backend map. A request
+Backend selection happens in the kernel. A BPF program runs on every `connect()`
+the gateway makes (a `cgroup/connect4` program attached to the gateway's cgroup).
+It picks a backend from the same Service maps the mesh uses. The gateway therefore
+runs no userspace load balancer and keeps no copy of the backend list. The program ignores the `healthy` flag in the backend map. A request
 that arrives in the roughly one second after a backend starts, before it listens,
 gets `502`.
 
-The gateway then opens a mutual-TLS connection to the backend using its own SVID.
-The SVID sits in a dedicated slot, separate from the per-allocation SVIDs the
+The gateway then opens a mutual-TLS connection to the backend using its own SVID,
+the SPIFFE identity certificate the node issues. That SVID sits in a dedicated slot, separate from the per-allocation SVIDs the
 [identity model](/docs/concepts/identity) describes. The handshake pins the exact
 peer the BPF selection chose, so the connection reaches the backend the kernel chose
 and no other.
@@ -112,7 +117,7 @@ are handled through rustls's kernel connection support.
 ## Certificates
 
 The gateway reads a leaf-first PEM chain of one to eight certificates and one
-PKCS#8 private key. The leaf must carry a single DNS name, currently be valid, and
+PKCS#8 private key. The leaf must carry a single DNS name, be valid now, and
 match the key. The provenance of every certificate is `Manual`. A background task
 re-reads both files every 30 seconds. A changed, valid pair becomes a new
 generation. A missing or invalid pair leaves the last usable generation in place.
@@ -131,7 +136,8 @@ No CLI verb exists for status or withdrawal. When `serve` runs without the gatew
 flags, the Route endpoints return `409` with `gateway_disabled` and status reports
 `enabled: false`.
 
-Resource use per exchange is bounded. A measurement on a Linux 7.0 kernel put it
+Resource use per exchange is bounded. One measurement on one host with a Linux 7.0
+kernel put it
 at nine descriptors per exchange (seven at steady state), so 128 concurrent
 exchanges hold at most 1,152. Memory grew about 173 KiB per exchange on a base of
 0.73 MB, and resident-set growth stayed at or under 24,405,456 bytes at 128
@@ -144,5 +150,6 @@ exchanges, with the heap returning to a plateau afterward.
 - One Route per node. Issue
   [#352: several Routes and hostnames on one listener](https://github.com/overdrive-sh/overdrive/issues/352) tracks
   lifting this.
-- Certificates come from files. ACME is unbuilt.
-- No retry to a second backend.
+- Certificates come from files. Issue
+  [#57: an embedded ACME client](https://github.com/overdrive-sh/overdrive/issues/57) tracks
+  automated issuance.
