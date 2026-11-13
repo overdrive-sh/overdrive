@@ -29,6 +29,13 @@ required completion gates, not follow-up tasks.
 - Check in the documentation and post, and include their paths and validation
   results, reviewer verdict, and review artifact path in the finalization record.
 
+- Clean up the feature's working directory on the Metal box: the remote
+  checkout and the build and scratch output its runs left there. The box's disk
+  is shared by every workspace, and a finalized feature's leftovers fill it
+  until other runs fail on `No space left on device`. Do this only after any
+  evidence the finalization record needs has been pulled back
+  (`cargo xtask metal pull`), and record the cleanup in the finalization record.
+
 Do not mark the feature finalized while either deliverable is missing or its
 required validation or reviewer approval remains unresolved. Deployment and
 publication are separate from this gate; completing the content does not
