@@ -41,7 +41,9 @@
           ],
           "test_file": "crates/overdrive-control-plane/tests/acceptance/terminal_hook_ownership.rs",
           "scenario_name": "a_start_registers_probe_supervision_before_it_releases_the_exit_gate",
-          "deps": ["01-01"],
+          "deps": [
+            "01-01"
+          ],
           "agent": "nw-software-crafter",
           "estimated_hours": 5,
           "files_to_modify": [
@@ -68,7 +70,9 @@
           ],
           "test_file": "crates/overdrive-control-plane/tests/acceptance/crash_ending_authority.rs",
           "scenario_name": "pre_startup_crash_loop_ends_the_stream_with_early_exit_at_give_up",
-          "deps": ["01-02"],
+          "deps": [
+            "01-02"
+          ],
           "agent": "nw-software-crafter",
           "estimated_hours": 8,
           "files_to_modify": [
@@ -89,7 +93,9 @@
           ],
           "test_file": "crates/overdrive-core/tests/acceptance/service_lifecycle_startup_stop.rs",
           "scenario_name": "startup_probe_failure_stops_only_a_live_allocation",
-          "deps": ["02-01"],
+          "deps": [
+            "02-01"
+          ],
           "agent": "nw-software-crafter",
           "estimated_hours": 8,
           "files_to_modify": [
@@ -113,7 +119,9 @@
           ],
           "test_file": "crates/overdrive-control-plane/tests/acceptance/startup_stop_authority.rs",
           "scenario_name": "failed_startup_stop_is_retried_once_per_new_startup_row",
-          "deps": ["02-02"],
+          "deps": [
+            "02-02"
+          ],
           "agent": "nw-software-crafter",
           "estimated_hours": 5,
           "files_to_modify": [
@@ -132,7 +140,9 @@
           ],
           "test_file": "crates/overdrive-control-plane/tests/acceptance/startup_gated_backend_eligibility.rs",
           "scenario_name": "startup_probed_allocation_is_a_backend_only_after_its_stable_is_committed",
-          "deps": ["02-02"],
+          "deps": [
+            "02-02"
+          ],
           "agent": "nw-software-crafter",
           "estimated_hours": 6,
           "files_to_modify": [
@@ -158,7 +168,9 @@
           ],
           "test_file": "crates/overdrive-control-plane/tests/acceptance/liveness_begins_at_stable.rs",
           "scenario_name": "liveness_supervision_begins_when_the_allocation_becomes_stable",
-          "deps": ["02-04"],
+          "deps": [
+            "02-04"
+          ],
           "agent": "nw-software-crafter",
           "estimated_hours": 7,
           "files_to_modify": [
@@ -179,7 +191,9 @@
           ],
           "test_file": "crates/overdrive-control-plane/src/convergence_loop_wake.rs",
           "scenario_name": "a_submit_while_the_loop_is_parked_is_admitted_without_waiting_for_the_tick",
-          "deps": ["03-01"],
+          "deps": [
+            "03-01"
+          ],
           "agent": "nw-software-crafter",
           "estimated_hours": 8,
           "files_to_modify": [
@@ -214,7 +228,9 @@
           ],
           "test_file": "crates/overdrive-control-plane/tests/acceptance/service_stream_progress_deadline.rs",
           "scenario_name": "a_service_that_becomes_stable_after_ninety_seconds_ends_stable_not_timeout",
-          "deps": ["02-03"],
+          "deps": [
+            "02-03"
+          ],
           "agent": "nw-software-crafter",
           "estimated_hours": 8,
           "files_to_modify": [
@@ -237,7 +253,9 @@
           ],
           "test_file": "crates/overdrive-control-plane/tests/acceptance/service_stream_recorded_verdict.rs",
           "scenario_name": "a_redeploy_of_a_stable_service_ends_stable_at_once",
-          "deps": ["04-01"],
+          "deps": [
+            "04-01"
+          ],
           "agent": "nw-software-crafter",
           "estimated_hours": 6,
           "files_to_modify": [
@@ -263,7 +281,9 @@
           ],
           "test_file": "crates/overdrive-core/tests/acceptance/declared_listeners_tcp_view.rs",
           "scenario_name": "the_tcp_view_is_the_tcp_filter_of_the_declared_listeners_in_declaration_order",
-          "deps": ["02-04"],
+          "deps": [
+            "02-04"
+          ],
           "agent": "nw-software-crafter",
           "estimated_hours": 5,
           "files_to_modify": [
@@ -299,7 +319,9 @@
           ],
           "test_file": "crates/overdrive-worker/tests/acceptance/guest_listener_board.rs",
           "scenario_name": "the_reported_set_only_grows_within_the_declared_set_and_ends_with_the_entry",
-          "deps": ["05-01"],
+          "deps": [
+            "05-01"
+          ],
           "agent": "nw-software-crafter",
           "estimated_hours": 9,
           "files_to_modify": [
@@ -324,7 +346,11 @@
           ],
           "test_file": "crates/overdrive-worker/tests/acceptance/guest_listener_probe_rows.rs",
           "scenario_name": "completing_the_declared_set_writes_one_pass_row_with_no_earlier_row",
-          "deps": ["05-02", "03-01", "02-03"],
+          "deps": [
+            "05-02",
+            "03-01",
+            "02-03"
+          ],
           "agent": "nw-software-crafter",
           "estimated_hours": 9,
           "files_to_modify": [
@@ -347,7 +373,10 @@
           ],
           "test_file": "crates/overdrive-core/tests/schema_evolution/workload_intent.rs",
           "scenario_name": "current-layout intent and spec envelope archive and roundtrip evidence with a GuestListeners descriptor",
-          "deps": ["05-03", "04-01"],
+          "deps": [
+            "05-03",
+            "04-01"
+          ],
           "agent": "nw-software-crafter",
           "estimated_hours": 8,
           "files_to_modify": [
@@ -375,7 +404,9 @@
           ],
           "test_file": "crates/overdrive-core/tests/schema_evolution/probe_result_row.rs",
           "scenario_name": "probe result row and Stable witness current-layout golden fixtures under existing envelope tags",
-          "deps": ["05-04"],
+          "deps": [
+            "05-04"
+          ],
           "agent": "nw-software-crafter",
           "estimated_hours": 8,
           "files_to_modify": [
@@ -403,7 +434,10 @@
           ],
           "test_file": "crates/overdrive-control-plane/tests/integration/guest_listener_real_boot.rs",
           "scenario_name": "every_declared_listener_a_real_workload_binds_is_reported_before_it_exits",
-          "deps": ["05-02", "05-03"],
+          "deps": [
+            "05-02",
+            "05-03"
+          ],
           "agent": "nw-software-crafter",
           "estimated_hours": 24,
           "files_to_modify": [
@@ -424,7 +458,13 @@
           ],
           "test_file": "crates/overdrive-control-plane/src/reconciler_runtime/guest_listener_gate_composed.rs",
           "scenario_name": "a_service_whose_listener_report_never_arrives_is_stopped_at_the_deadline_restarted_and_given_up",
-          "deps": ["05-03", "05-05", "05-06", "03-02", "04-01"],
+          "deps": [
+            "05-03",
+            "05-05",
+            "05-06",
+            "03-02",
+            "04-01"
+          ],
           "agent": "nw-software-crafter",
           "estimated_hours": 8,
           "files_to_modify": [
@@ -587,6 +627,13 @@
       }
     ],
     "d17_waiver_evidence": "The single final gate must kill the D17 mutants that move the signal before the broker insert, drop the signal, replace the stored permit with a waiter-only wake, remove the submitted select arm, or remove the cadence arm. This is the accepted S-48(b) waiver evidence (DG-9); do not drop the signal-position or stored-permit targets.",
-    "production_only": "Every --file list names production files. Test/fixture mechanical fallout is verified by the suite run, and async scheduling logic and aya-rs eBPF/unsafe exclusions remain as captured in the source notes below."
+    "production_only": "Every --file list names production files. Test/fixture mechanical fallout is verified by the suite run, and async scheduling logic and aya-rs eBPF/unsafe exclusions remain as captured in the source notes below.",
+    "required": false,
+    "status": "not_required_by_user",
+    "user_override": {
+      "instruction": "no mutation testing is required",
+      "recorded_at": "2026-11-13T00:37:32.957702+00:00",
+      "scope": "Entire final DELIVER-wave mutation gate, including its minimum kill rate and D17 mutation-witness requirements. Production invariants and non-mutation validation remain unchanged."
+    }
   }
 }
