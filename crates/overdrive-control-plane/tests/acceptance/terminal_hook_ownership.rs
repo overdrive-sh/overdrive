@@ -8,8 +8,8 @@
 //! dispatching `StartAllocation`, `RestartAllocation`, `StopAllocation` and
 //! `FinalizeFailed`, a real `ProbeRunner` over `SimClock`, `SimTcpProber` and
 //! `SimObservationStore`, and a `SimDriver`-backed VM-typed driver whose probe
-//! hooks forward to that runner exactly as `VmDriver`'s do (a three-line
-//! override: `start_alloc` / `stop_alloc` / `stop_role`).
+//! hooks forward to that runner exactly as `VmDriver`'s do (`start_alloc`,
+//! `stop_alloc`, and `stop_role` followed by `start_liveness` at Stable).
 //!
 //! The only hand-written double is [`HookDriver`], a `Driver` at the observer's
 //! and the shim's driven port. It records the order of the lifecycle hooks and
@@ -55,7 +55,9 @@ use overdrive_core::traits::driver::{
 use overdrive_core::traits::observation_store::{
     AllocState, ObservationStore, ObservationStoreError,
 };
-use overdrive_core::transition_reason::{StoppedBy, TerminalCondition, TransitionReason};
+use overdrive_core::transition_reason::{
+    ProbeWitness, StoppedBy, TerminalCondition, TransitionReason,
+};
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::driver::SimDriver;
 use overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial;
@@ -230,6 +232,25 @@ impl Fixture {
         .expect("StartAllocation dispatches");
     }
 
+    /// Commit the Service's Stable row through the shim before liveness is live.
+    async fn stable(&self, id: &AllocationId) {
+        self.dispatch(Action::FinalizeFailed {
+            alloc_id: id.clone(),
+            terminal: Some(TerminalCondition::Stable {
+                settled_in_ms: 0,
+                witness: ProbeWitness {
+                    probe_idx: 0,
+                    role: "startup".to_owned(),
+                    mechanic_summary: "tcp 127.0.0.1:8080".to_owned(),
+                },
+            }),
+        })
+        .await
+        .expect("Stable row commits and its driver hook starts liveness");
+        let row = self.obs.alloc_status_row(id).await.expect("read Stable row").expect("row");
+        assert!(matches!(row.terminal, Some(TerminalCondition::Stable { .. })));
+    }
+
     /// The guest of `id` dies: the exit is available to the observer now.
     async fn crash(&self, id: &AllocationId) {
         self.driver.deliver_exit(crash_event(id)).await;
@@ -316,8 +337,9 @@ impl Observed {
     }
 
     fn with_row(mut self, id: &AllocationId, state: AllocState) -> Self {
-        let terminal = self.rows.get(&id.to_string()).cloned().flatten().and_then(|(_, t)| t);
-        self.rows.insert(id.to_string(), Some((state, terminal)));
+        // The natural-exit observer writes its Failed row without carrying a
+        // previous Stable success claim into the new exit observation.
+        self.rows.insert(id.to_string(), Some((state, None)));
         self
     }
 }
@@ -336,8 +358,9 @@ fn yields_of(seed: u64) -> u32 {
 
 // ----- D1, G-1: the exit observer ends the supervision of an exited allocation ---------
 
-/// S-1 (D1, G-1; GH #334): a `Running` Service allocation with a registered supervisor
-/// crashes and its restart budget is not due. The observer handles the `ExitEvent`;
+/// S-1 (D1, G-1; GH #334): a `Running` Service allocation whose Stable row
+/// committed and whose liveness supervision began crashes before its restart
+/// budget is due. The observer handles the `ExitEvent`;
 /// the supervisor is gone and every role is dead, and the row is `Failed`. No
 /// reconciler runs and the `SimClock` is never advanced, so no restart backoff elapses.
 /// CONTRACT_SHAPE: bounded-change.
@@ -348,6 +371,7 @@ async fn a_crashed_allocation_stops_probing_as_soon_as_the_observer_consumes_the
         let _observer = f.spawn_observer();
         let a = alloc("alloc-crash-0");
         f.start(&a).await;
+        f.stable(&a).await;
         for _ in 0..yields_of(seed) {
             tokio::task::yield_now().await;
         }
@@ -409,6 +433,7 @@ async fn a_restart_leaves_only_the_successor_supervised_without_a_second_hook_ca
         })
         .await
         .expect("RestartAllocation dispatches");
+        f.stable(&succ).await;
 
         let after = f.observe(&[&pred, &succ]).await;
         assert_eq!(after.supervised, 1, "seed {seed}: the successor only is supervised");
@@ -691,6 +716,7 @@ async fn a_crash_then_a_finalize_fire_the_hook_twice_with_one_effect() {
     let sibling = alloc("alloc-double-1");
     f.start(&a).await;
     f.start(&sibling).await;
+    f.stable(&sibling).await;
 
     f.crash(&a).await;
     f.wait_for_terminal_row(&a).await;

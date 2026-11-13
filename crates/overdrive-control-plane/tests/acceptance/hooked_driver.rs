@@ -225,6 +225,7 @@ impl Driver for HookedDriver {
 
     fn on_alloc_stable(&self, alloc_id: &AllocationId) {
         self.runner.stop_role(alloc_id, ProbeRole::Startup);
+        self.runner.start_liveness(alloc_id);
     }
 
     fn live_allocations(&self) -> Option<Vec<AllocationId>> {

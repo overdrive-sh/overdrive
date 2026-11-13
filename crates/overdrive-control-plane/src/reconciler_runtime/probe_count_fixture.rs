@@ -60,7 +60,8 @@ use overdrive_core::observation::{ProbeIdx, ProbeResultRow, ProbeRole, ProbeRunS
 use overdrive_core::reconcilers::{ReconcilerName, TargetResource};
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{
-    AllocationSpec, Driver, DriverPayload, DriverType, Resources, VmPayload,
+    AllocationHandle, AllocationSpec, Driver, DriverError, DriverPayload, DriverType, Resources,
+    VmPayload,
 };
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{
@@ -170,7 +171,7 @@ pub(super) struct ProbeWorld {
     pub(super) clock: Arc<SimClock>,
     pub(super) dial: Arc<SimGuestStreamDial>,
     pub(super) driver: Arc<SimDriver>,
-    pub(super) runner: ProbeRunner,
+    pub(super) runner: Arc<ProbeRunner>,
     pub(super) probes: ProbeSet,
     pub(super) workload: WorkloadId,
     pub(super) alloc: AllocationId,
@@ -181,6 +182,48 @@ pub(super) struct ProbeWorld {
     tick_n: u64,
     row_counter: u64,
     _tmp: TempDir,
+}
+
+/// The fixture's VM driver forwards the Stable hook to the real probe runner,
+/// as the production VM driver does after the Stable row commits.
+struct ProbeRunnerDriver {
+    sim: Arc<SimDriver>,
+    runner: Arc<ProbeRunner>,
+}
+
+#[async_trait::async_trait]
+impl Driver for ProbeRunnerDriver {
+    fn r#type(&self) -> DriverType {
+        self.sim.r#type()
+    }
+
+    async fn start(&self, spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
+        self.sim.start(spec).await
+    }
+
+    async fn stop(&self, handle: &AllocationHandle) -> Result<(), DriverError> {
+        self.sim.stop(handle).await
+    }
+
+    async fn status(
+        &self,
+        handle: &AllocationHandle,
+    ) -> Result<overdrive_core::traits::driver::AllocationState, DriverError> {
+        self.sim.status(handle).await
+    }
+
+    async fn resize(
+        &self,
+        handle: &AllocationHandle,
+        resources: Resources,
+    ) -> Result<(), DriverError> {
+        self.sim.resize(handle, resources).await
+    }
+
+    fn on_alloc_stable(&self, alloc_id: &AllocationId) {
+        self.runner.stop_role(alloc_id, ProbeRole::Startup);
+        self.runner.start_liveness(alloc_id);
+    }
 }
 
 pub(super) fn tcp(role: ProbeRole, port: u16) -> ProbeDescriptor {
@@ -319,6 +362,16 @@ impl ProbeWorld {
         let clock = Arc::new(SimClock::new());
         let driver = Arc::new(SimDriver::with_clock(DriverType::Vm, clock.clone()));
         let dial = Arc::new(SimGuestStreamDial::new());
+        let runner = Arc::new(ProbeRunner::new(
+            Arc::new(SimTcpProber::new()),
+            Arc::new(SimHttpProber::new()),
+            Arc::clone(&clock) as Arc<dyn Clock>,
+            Arc::clone(&obs) as Arc<dyn ObservationStore>,
+            Arc::clone(&dial) as Arc<dyn overdrive_core::guest_transport::dial::GuestStreamDial>,
+            Arc::new(overdrive_worker::GuestListenerBoard::new()),
+        ));
+        let hooked_driver: Arc<dyn Driver> =
+            Arc::new(ProbeRunnerDriver { sim: Arc::clone(&driver), runner: Arc::clone(&runner) });
         let allocator = crate::test_default_allocator(Arc::clone(&store) as Arc<dyn IntentStore>);
         let mtls_worker = crate::shared_network_test_ports::mtls_worker();
         mtls_worker
@@ -341,7 +394,7 @@ impl ProbeWorld {
             store_path,
             Arc::clone(&obs) as Arc<dyn ObservationStore>,
             Arc::new(runtime),
-            Arc::clone(&driver) as Arc<dyn Driver>,
+            hooked_driver,
             Arc::clone(&clock) as Arc<dyn Clock>,
             Arc::new(SimDataplane::new()),
             Arc::new(SimCa::new(Arc::new(SimEntropy::new(0)))),
@@ -370,15 +423,6 @@ impl ProbeWorld {
                 "service-map",
             )
         };
-
-        let runner = ProbeRunner::new(
-            Arc::new(SimTcpProber::new()),
-            Arc::new(SimHttpProber::new()),
-            Arc::clone(&clock) as Arc<dyn Clock>,
-            Arc::clone(&obs) as Arc<dyn ObservationStore>,
-            Arc::clone(&dial) as Arc<dyn overdrive_core::guest_transport::dial::GuestStreamDial>,
-            Arc::new(overdrive_worker::GuestListenerBoard::new()),
-        );
 
         let alloc = AllocationId::new(&format!("{WORKLOAD}-0")).expect("alloc id");
         let mut world = Self {

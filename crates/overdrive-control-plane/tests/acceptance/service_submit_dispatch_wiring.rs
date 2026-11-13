@@ -452,20 +452,23 @@ async fn s_shcp_wire_13_cap_timer_synthesises_service_failed_timeout() {
     let sim_clock = Arc::new(SimClock::new());
     let mut state = build_app_state(&tmp, sim_clock.clone());
     state.streaming_cap = Duration::from_secs(1);
+    let spec = payments_service_spec();
+    let deadline = overdrive_control_plane::streaming::progress_deadline(
+        &spec.startup_probes,
+        state.streaming_cap,
+    );
     let clock_for_advance = sim_clock.clone();
     let router = build_router(state.clone());
 
-    let response = router
-        .oneshot(build_service_submit_request(&payments_service_spec()))
-        .await
-        .expect("router oneshot");
+    let response =
+        router.oneshot(build_service_submit_request(&spec)).await.expect("router oneshot");
     let (mut line_rx, handle) = spawn_response_consumer(response);
 
     let _accepted = wait_for_accepted(&mut line_rx).await;
 
-    // Advance SimClock past the cap; the handler's `clock.sleep(cap)`
-    // future wakes and fires the cap-timer arm.
-    clock_for_advance.tick(Duration::from_secs(2));
+    // D10 derives the Service deadline from the startup window and the
+    // construction floor; advancing past only `streaming_cap` cannot time out.
+    clock_for_advance.tick(deadline + Duration::from_secs(1));
 
     let lines = tokio::time::timeout(Duration::from_secs(5), handle)
         .await
@@ -484,9 +487,10 @@ async fn s_shcp_wire_13_cap_timer_synthesises_service_failed_timeout() {
         data["reason"]["reason"], "timeout",
         "cap-timer must synthesise `ServiceFailureReason::Timeout`; got {data}"
     );
-    assert!(
-        data["reason"]["data"]["after_seconds"].is_number(),
-        "Timeout must carry after_seconds; got {data}"
+    assert_eq!(
+        data["reason"]["data"]["after_seconds"],
+        deadline.as_secs(),
+        "Timeout must carry the derived Service deadline; got {data}"
     );
 }
 
