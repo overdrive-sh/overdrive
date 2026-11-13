@@ -20,7 +20,9 @@ binary and be placed by the wrapper without a table lookup.
 
 ## Decision
 
-A test declares its placement on itself. The declaration is written into the
+A test declares its placement on itself, or, for the tests of a module that
+share a guest, through one declaration in that module which the tests read by
+name (user-approved shape, 2026-11-13; see ADR-0283). The placement is written into the
 test binary as a versioned record in the `overdrive_test_placement` ELF
 section, and the Metal wrapper reads that record to place the test. A test
 with no record, and no accepted default, is refused before its body runs. An

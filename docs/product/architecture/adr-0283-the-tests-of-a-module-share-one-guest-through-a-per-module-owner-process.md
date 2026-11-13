@@ -3,6 +3,9 @@
 ## Status
 
 **Proposed — awaiting user approval (DDD-7, DDD-8 in the feature delta).**
+The declaration shape (one `shared_guest!` per module, read by the tests of
+that module) was approved by the user on 2026-11-13; the owner design remains
+proposed.
 If accepted, it reverses the "a broker is beyond this adaptation" alternative
 recorded in ADR-0280, for the shared-guest case only.
 
@@ -19,8 +22,12 @@ owner left its VMM running until the run ended.
 
 ## Decision
 
-A test that opts in shares one guest with the other opted-in tests of the same
-module, group and profile in the same test binary. The first arrival elects
+A module opts in once, with a plain function-like declaration inside the module
+that names the guest group and profile. The tests of that module that carry the
+placement attribute without arguments read the declaration by ordinary name
+resolution and share one guest with each other, within one test binary; a test
+with an explicit placement of its own is not part of the shared guest. The first
+arrival elects
 one owner process under an exclusive lock and the owner boots the guest. Later
 tests attach to that owner over a unix socket in the run's own runtime
 directory. The owner runs as the init of its own PID namespace, so the VMM
@@ -38,6 +45,14 @@ is gone. Run teardown stays the backstop.
   when that test ends; rejected.
 - **A parent-death signal on the VMM**: needs a change in the production
   launcher, which a test need must not shape; rejected.
+- **A per-test `shared` flag**: sharing is a property of the module, and a flag
+  repeated on every test lets one test omit it or name another profile, which
+  splits the module across several guests; rejected by the user, 2026-11-13.
+- **A placement attribute on the module** (`mod x;` or an inline module holding
+  file modules): stable Rust refuses a proc-macro attribute there (E0658,
+  `proc_macro_hygiene`, nightly only; an inner custom attribute needs
+  `custom_inner_attributes`), and the workspace stays on stable; rejected,
+  2026-11-13.
 
 ## Consequences
 

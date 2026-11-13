@@ -41,7 +41,7 @@ guest after a failure.
 A failure costs one extra boot (about 3 s) for the next test. A module whose
 tests are not in a single-writer nextest group queues waiting tests, and the
 wait counts toward nextest's per-test timeout. State left by a passing test is
-visible to the next one; sharing is an explicit opt-in per test.
+visible to the next one; sharing is an explicit opt-in per module.
 
 ## Links
 

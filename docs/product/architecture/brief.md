@@ -2183,8 +2183,9 @@ query exists, so Event Sourcing and CQRS add nothing.
 decisions"). Test tooling only. A Metal test declares its placement on itself
 (`#[overdrive_test(...)]`), recorded in its own binary; the wrapper reads the
 record; the placement table, its lookup and the batched guest dispatcher are
-retired; tests of a module may opt in to one shared guest served by a
-per-module owner process. Decisions:
+retired; a module may opt in once (`shared_guest!`, shape approved by the user
+2026-11-13) to one shared guest, served by a per-module owner process, for the
+tests that carry the attribute without arguments. Decisions:
 [ADR-0282](adr-0282-a-metal-test-placement-is-declared-on-the-test-and-recorded-in-its-binary.md),
 [ADR-0283](adr-0283-the-tests-of-a-module-share-one-guest-through-a-per-module-owner-process.md),
 [ADR-0284](adr-0284-a-shared-guest-serves-one-test-at-a-time-and-is-never-reused-after-a-failure.md),
