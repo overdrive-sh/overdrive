@@ -93,9 +93,10 @@ fn client_trusting(ca_pem: &str) -> reqwest::Client {
         .expect("reqwest client")
 }
 
-fn read_ca(operator_config_dir: &std::path::Path) -> String {
+async fn read_ca(operator_config_dir: &std::path::Path) -> String {
     use base64::Engine as _;
-    let text = std::fs::read_to_string(operator_config_dir.join(".overdrive/config"))
+    let text = tokio::fs::read_to_string(operator_config_dir.join(".overdrive/config"))
+        .await
         .expect("the trust triple run_server wrote");
     let doc: toml::Value = toml::from_str(&text).expect("trust triple TOML");
     let encoded = doc["contexts"]
@@ -123,15 +124,17 @@ impl Node {
         // The node's data directory sits on the staging root: the VM driver
         // FICLONEs each rootfs into it, and a clone is intra-filesystem.
         let staging_root = default_staging_root();
-        std::fs::create_dir_all(&staging_root).expect("create the guest's VM fixture staging root");
+        tokio::fs::create_dir_all(&staging_root)
+            .await
+            .expect("create the guest's VM fixture staging root");
         let tmp = tempfile::Builder::new()
             .prefix("guest-listener-board-")
             .tempdir_in(&staging_root)
             .expect("server tempdir on the reflink-capable staging root");
         let data_dir = tmp.path().join("data");
         let operator_config_dir = tmp.path().join("conf");
-        std::fs::create_dir_all(&data_dir).expect("data dir");
-        std::fs::create_dir_all(&operator_config_dir).expect("operator config dir");
+        tokio::fs::create_dir_all(&data_dir).await.expect("data dir");
+        tokio::fs::create_dir_all(&operator_config_dir).await.expect("operator config dir");
         let config = ServerConfig {
             bind: "127.0.0.1:0".parse::<SocketAddr>().expect("loopback API bind"),
             data_dir,
@@ -171,10 +174,11 @@ impl Node {
             .expect("run_server boot completes within the bound")
             .expect("serve boots on metal");
         let bound = handle.local_addr().await.expect("the API listener is bound");
+        let ca_pem = read_ca(&operator_config_dir).await;
         Self {
             handle,
             tmp,
-            client: client_trusting(&read_ca(&operator_config_dir)),
+            client: client_trusting(&ca_pem),
             base: format!("https://localhost:{}", bound.port()),
             vmm,
             beacon,
@@ -192,8 +196,8 @@ impl Node {
         let mut image = vec![0_u8; 4096];
         image[510..512].copy_from_slice(&[0x55, 0xAA]);
         image[514..518].copy_from_slice(b"HdrS");
-        std::fs::write(&kernel, image).expect("kernel stand-in");
-        std::fs::write(&rootfs, vec![0_u8; 1 << 20]).expect("rootfs stand-in");
+        tokio::fs::write(&kernel, image).await.expect("kernel stand-in");
+        tokio::fs::write(&rootfs, vec![0_u8; 1 << 20]).await.expect("rootfs stand-in");
         let spec = ServiceSpecInput {
             id: id.to_owned(),
             replicas: 1,
