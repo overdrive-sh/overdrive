@@ -13,11 +13,13 @@ persona:
     - Maintains separate Git worktrees with potentially different uncommitted source changes
     - Uses coding agents that invoke the same developer commands
     - Requires exact command results and honest native evidence before trusting a change
+    - Authors integration tests and expects placement to be declared on the test and checked before the Metal box
   context:
     surface: cargo xtask metal run, sync, pull and collect
     triggers:
       - Another worktree's ordinary verification holds the box-wide execution lease
       - The same suite needs to run independently for two changes
+      - Adding, renaming or moving an integration test that must run in a specific Metal isolation (metal-test-placement-attribute, 2026-11-13)
   motivations:
     functional: Verify changes concurrently without source, resource or evidence interference
     emotional: Trust each result without waiting on an unrelated invocation
@@ -26,4 +28,4 @@ persona:
     start: Frustrated by unrelated serialization and uncertain result ownership
     middle: Focused on each invocation's source, run id and guest output
     end: Confident to continue or revise each change from its own retained result
-  related_jobs: [J-PLAT-006]
+  related_jobs: [J-PLAT-006, J-PLAT-007]

@@ -706,7 +706,37 @@ jobs:
       anxiety: Removing serialization could mix source, guest resources or cleanup ownership
       habit: Existing metal run, guest preparation and collect commands must remain meaningful
 
+  - id: J-PLAT-007
+    title: Declare where a Metal integration test runs once, on the test, and learn of a miss before the Metal box
+    situation: >
+      When I add, rename or move an integration test that must run in a
+      particular Metal isolation (a guest group, the host, a lane fixture),
+    motivation: >
+      I want that placement declared once on the test itself and checked
+      before the Metal box,
+    outcome: >
+      so I can trust the test runs where I meant, without hand-editing a
+      placement table and a guest dispatcher or discovering on a Metal run
+      that the test was unplaced or mis-placed.
+    source: metal-test-placement-attribute DISCUSS (2026-11-13), user directions and repository inspection of infra/metal/test-placement.json, infra/metal/test-wrapper.sh, fwd_guest_suite.rs
+    served_by_phase: metal-test-placement-attribute
+    status: active
+    dimensions:
+      functional: One declaration site per test, enforced before Metal
+      emotional: Confidence that a new test cannot silently run on the wrong surface
+      social: Reviewable placement in the test diff itself
+    four_forces:
+      push: Placement is recorded in three places that drift; a miss first fails on Metal as test_unclassified
+      pull: Declare placement on the test; the default lane flags a miss
+      anxiety: A plain test could silently run on the host; per-test guests could cost more run time than batched groups
+      habit: Existing metal run commands and the five placement kinds must keep meaning the same
+
 changelog:
+  - date: 2026-11-13
+    change: >
+      Added J-PLAT-007 for metal-test-placement-attribute, a developer-tooling
+      authoring outcome grounded in user directions and repository evidence,
+      not external customer research. No existing job contract changed.
   - date: 2026-11-07
     change: >
       Added J-PLAT-006 for metal-run-isolation, a developer-tooling
