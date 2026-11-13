@@ -28,6 +28,7 @@ The later, bounded final-gate corrections remain linked to their owners:
 | 05-02 lint and test support | Async fixture `493e450d`; exact scanner `b23de5ca` plus audit `9b387cb`; function-local Contract Shape lint allowances `45086aec`/`b0881ff6`. [Review 05-02](review-05-02.md) iteration 3 **APPROVED** in `db959912c`; full DST lint and scoped strict Clippy passed. |
 | 03-02 private broker adapter | Private `cfg` correction `ff29358a8`/`32a60dd17`. [Review 03-02](review-03-02.md) iteration 3 **APPROVED** in `fdcb73a64`; D17 runtime behavior is unchanged and five wake controls passed. |
 | D7/D9/D10/D12 test oracles | Deadline text `530b64ae`; fixture corrections `e4635dd3`; backend 12/12 and CLI scoped lint allowance `5cce053c`; handler Contract Shape `6b7d2680`. [DISTILL oracle review](../distill/review-final-oracle-alignment.md) iteration 2 **APPROVED**. This verdict excludes the separate D11 mapping. |
+| D11 private conformance mapping | Model and test driver correction `a793389a4`; [DISTILL record](../distill/final-d11-mapping-alignment.md) and [independent review](../distill/review-final-d11-mapping-alignment.md) iteration 1 **APPROVED** in `ac6c57d14`. Focused Metal: original seed `0x43d4164d` 9/9, second seed `0xd1acbdab` 9/9, randomized seed `0x94ef88cb` 1/1. Canonical formal 84/84 and typed error oracle passed at the reviewed isolated source. The broad affected selection was not green or claimed green; latest-source scoped integration remains pending. |
 
 ## Product, website and verification evidence
 
@@ -79,14 +80,10 @@ gate only; D17 and the other production invariants remain binding.
 
 ## Pending closeout receipts
 
-1. Resolve the private D11 randomized `stream_snapshot` model/test-driver
-   poll/subscribe mapping at seed `0x43d4164d`, retain the named and randomized
-   green results, and obtain its independent DISTILL review. No public contract
-   defect has been established by the current failure.
-2. Record the latest committed-source scoped integration rechecks and their
+1. Record the latest committed-source scoped integration rechecks and their
    exact selected identities, results and source SHA. The earlier broad
-   diagnostic and focused historical passes do not stand in for this receipt.
-3. Obtain an independent final evidence audit of the exact claims and limits,
+   diagnostic and D11 focused isolated-source passes do not stand in for this receipt.
+2. Obtain an independent final evidence audit of the exact claims and limits,
    then record its verdict here and in the evolution record.
 
 Until these receipts exist and are approved, the feature remains

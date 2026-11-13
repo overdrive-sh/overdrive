@@ -39,10 +39,13 @@ All 17 DES traces verified and all 17 step reviews end `APPROVED`. Bounded
 final-gate corrections to 05-07, 05-02, 03-02 and D7/D9/D10/D12 test oracles
 have their separate approved review iterations and commits in the
 [finalization record](../feature/service-allocation-readiness-and-ending/deliver/finalization.md).
-The D11 randomized `stream_snapshot` mapping at seed `0x43d4164d` is still
-being aligned and requires named/randomized results plus independent review.
-Latest-source scoped integration rechecks and an independent final evidence
-audit are also pending.
+The private D11 `stream_snapshot` poll/subscribe mapping correction
+`a793389a4` is [independently approved](../feature/service-allocation-readiness-and-ending/distill/review-final-d11-mapping-alignment.md)
+at iteration 1. Its focused isolated-source evidence passed 9/9 at the
+original `0x43d4164d` seed, 9/9 at a second seed, 1/1 at a third randomized
+seed, and 84/84 canonical formal checks. It does not establish a broad
+affected-suite or later-source result. Latest-source scoped integration
+rechecks and an independent final evidence audit remain pending.
 
 The broad native workspace diagnostic at `dca2350aa` exited 100: 4,512
 passed, 129 failed, two timed out and 27 skipped across 4,643 runs. The

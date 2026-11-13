@@ -1631,7 +1631,7 @@ host-input projection, all declared reported, a garbage line dropped, EOF with a
   | liveness stop enabled (D9) | `Action::StopAllocation { terminal: Some(Stopped { by: LivenessProbe }) }` in the `Vec<Action>` returned by `ServiceLifecycleReconciler::reconcile` |
   | stream closed and kind, deadline (D10) | first terminal line yielded by `build_service_stream` under `SimClock` (`Failed { Timeout }`, `Stable`, a give-up `Failed`), and the value returned by `progress_deadline` |
   | last attempt observation (D10) | the `last_attempt` field of that `Failed` line |
-  | recorded verdict read, subscribe/read/commit/publish order (D11) | first terminal line yielded by `build_service_stream` under `SimClock`, with `AllocStatusRow`s written through `SimObservationStore` and `LifecycleEvent`s sent on the bus at scripted points relative to the stream's first poll (the `Accepted` line marks the subscribe point); the current attempt is the one `current_alloc` selects. Commit-before-publish is the shim's own order, proven by S-41 |
+  | recorded verdict read, subscribe/read/commit/publish order (D11) | first terminal line yielded by `build_service_stream` under `SimClock`, with `AllocStatusRow`s written through `SimObservationStore` and `LifecycleEvent`s sent on the bus at scripted points relative to the stream's first poll. The private driver consumes `Accepted`, polls until its test-local recorded-read gate is entered after the real bus subscription, then `Read` releases that gate; the current attempt is the one `current_alloc` selects. Commit-before-publish is the shim's own order, proven by S-41 |
   | per-id supervisor presence, gate, queued event (`hook_ownership`) | model-only ghosts. Supervisor presence is observed through `active_alloc_count()` and `is_role_live`; gate and queued event only as the recorded call order of `on_alloc_running` and `release_for_exit_emission` (S-4) |
   | `stable` and `ann` (`restart_authority`, D8) | `stable`: `Action::FinalizeFailed { terminal: Some(Stable { .. }) }` in the `Vec<Action>` returned by `ServiceLifecycleReconciler::reconcile`, and the committed claim on the row (`ServiceAllocFact.stable_committed`, an input written through `SimObservationStore`). `ann`: the pub `terminal_announced` set of the returned `ServiceLifecycleView` (`service_lifecycle.rs:330`) |
   | `committed` (`liveness_gate`, B1) | the committed `Stable` claim read through `ObservationStore::alloc_status_row(alloc)` (`terminal` is `Stable`); `swr` (the `Stable` write outcome) is an input scripted on `SimObservationStore`. **DG-3:** compared only while the row is `Running` (the spec's `rw`). After `Crash` the exit observer's `Failed` row replaces the row and `committed` is model-only |
@@ -3573,10 +3573,15 @@ recorded in the roadmap final wave gate as `required: false` and
 `status: not_required_by_user`. No final-gate mutant run or kill rate is claimed. The
 D17 production wake invariant and all other approved outcomes remain in force.
 
-Finalization waits for the D11 randomized `stream_snapshot` poll/subscribe
-mapping alignment at seed `0x43d4164d`, its named and randomized passing
-results and independent review, the latest-source scoped integration rechecks,
-and an independent final evidence audit. The broad native workspace diagnostic
+The private D11 `stream_snapshot` poll/subscribe mapping was corrected in
+`a793389a4` and independently
+[`APPROVED`](distill/review-final-d11-mapping-alignment.md) at iteration 1.
+The original seed `0x43d4164d` passed 9/9 focused cases; a second seed passed
+9/9 and a third randomized seed passed 1/1. Formal checks passed 84/84 at the
+reviewed isolated source. Those focused results do not establish a broad
+affected-suite or later-source result. Finalization still waits for the
+latest-source scoped integration rechecks and an independent final evidence
+audit. The broad native workspace diagnostic
 reported 4,512 passed, 129 failed, two timed out and 27 skipped; it is not a
 workspace-green result. The website docs and blog are checked in and
 independently approved; the pre-existing search-ranking assertion still fails
