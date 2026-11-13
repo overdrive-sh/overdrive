@@ -1,0 +1,18 @@
+# Probe-local profile: the repo's Metal wrapper, reached through an observing
+# shim (wrap-observe.sh) that records the wrapper's own parent (V-10), then
+# `exec`s the repo wrapper unchanged.
+experimental = ["wrapper-scripts"]
+
+[profile.default]
+fail-fast = false
+retries = 0
+status-level = "all"
+final-status-level = "all"
+
+[scripts.wrapper.metal]
+command = { command-line = "wrap-observe.sh", relative-to = "workspace-root" }
+target-runner = "within-wrapper"
+
+[[profile.default.scripts]]
+filter = 'all()'
+run-wrapper = "metal"

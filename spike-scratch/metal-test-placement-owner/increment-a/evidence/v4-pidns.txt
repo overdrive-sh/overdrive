@@ -1,0 +1,40 @@
+# v4-pidns  filter: test(/^v4_/) & not test(=v4_real_anchor_hold)  exit: 0
+OVERDRIVE_METAL_RUN_ID=ae48e5bab315714f6afea58f
+        PASS [   0.104s] (1/4) ownerprobe::probe v4_dead_anchor_refuses_to_start
+    OWNERPROBE_WRAPPER test=v4_dead_anchor_refuses_to_start wrapper_pid=2821046 wrapper_ppid=2816358 parent_comm=cargo-nextest parent_exe=/home/ubuntu/.cargo/bin/cargo-nextest grandparent_pid=2816356 grandparent_comm=sudo uid=0
+    OWNERPROBE_V4 v4e dead anchor 2821133: ensure_owner = Err("owner process exited exit status: 2; log:\nOWNER t=1794612280736 start argv_anchor=2821133 pidns=true vm=false cid=0 startup_ms=0\nOWNER t=1794612280736 REFUSE: pidfd_open(anchor=2821133) failed errno=3\n")
+        PASS [   2.058s] (2/4) ownerprobe::probe v4_anchor_pidfd_fires_and_namespace_takes_the_vmm
+    OWNERPROBE_WRAPPER test=v4_anchor_pidfd_fires_and_namespace_takes_the_vmm wrapper_pid=2821047 wrapper_ppid=2816358 parent_comm=cargo-nextest parent_exe=/home/ubuntu/.cargo/bin/cargo-nextest grandparent_pid=2816356 grandparent_comm=sudo uid=0
+    OWNERPROBE_V4 v4d elected=true elect_to_exec_ms=1937 hello=Hello { ns_pid: 1, host_pid: 2821137, netns: "net:[4026533130]", pidns: "pid:[4026533310]", started_ms: 1794612282651 } exec="EXIT\t0" sock_len=52
+    OWNERPROBE_V4 v4d anchor killed pid=2821389 zombie_or_gone_us=Some(1143) gone_us=Some(36851)
+    OWNERPROBE_V4 v4d anchor killed pid=2821137 zombie_or_gone_us=Some(36865) gone_us=Some(37930)
+    OWNERPROBE_V4 v4d anchor_kill_wall_ms=1794612282671 owner_line=OWNER t=1794612282672 ANCHOR FIRED: exiting WITHOUT killing the guest (the PID namespace must)
+    OWNERPROBE_V4 v4d owner_log:
+        PASS [   5.184s] (3/4) ownerprobe::probe v4_owner_pidns_sigkill_leaves_no_vmm
+    OWNERPROBE_WRAPPER test=v4_owner_pidns_sigkill_leaves_no_vmm wrapper_pid=2821048 wrapper_ppid=2816358 parent_comm=cargo-nextest parent_exe=/home/ubuntu/.cargo/bin/cargo-nextest grandparent_pid=2816356 grandparent_comm=sudo uid=0
+    OWNERPROBE_V4 v4a elected=true elect_to_exec_ms=2040 hello=Hello { ns_pid: 1, host_pid: 2821138, netns: "net:[4026533224]", pidns: "pid:[4026533311]", started_ms: 1794612282740 } exec="EXIT\t0" sock_len=52
+    OWNERPROBE_V4 v4a member host_pid=2821462 nspid=2821462/85 comm=cloud-hyperviso
+    OWNERPROBE_V4 v4a owner_log:
+    OWNERPROBE_V4 v4a killing owner 2821138 while a 40 s exec runs in the guest
+    OWNERPROBE_V4 v4a SIGKILL owner pid=2821462 zombie_or_gone_us=Some(20633) gone_us=Some(36898)
+    OWNERPROBE_V4 v4a SIGKILL owner pid=2821138 zombie_or_gone_us=Some(36902) gone_us=Some(36902)
+    OWNERPROBE_V4 v4a all_gone_us=Some(36902) still_alive=[]
+    OWNERPROBE_V4 v4a client of the killed owner saw: Ok("")
+    OWNERPROBE_V4 v4a elected=true elect_to_exec_ms=1498 hello=Hello { ns_pid: 1, host_pid: 2821613, netns: "net:[4026533224]", pidns: "pid:[4026532815]", started_ms: 1794612285767 } exec="EXIT\t0" sock_len=52
+    OWNERPROBE_V4 v4a replacement owner host_pid=2821613 (old 2821138)
+    OWNERPROBE_V4 v4a QUIT owner (normal exit, guest NOT killed by owner) pid=2821735 zombie_or_gone_us=Some(6770) gone_us=Some(23250)
+    OWNERPROBE_V4 v4a QUIT owner (normal exit, guest NOT killed by owner) pid=2821613 zombie_or_gone_us=Some(23275) gone_us=Some(24347)
+        PASS [  11.307s] (4/4) ownerprobe::probe v4_control_without_pidns_orphans_the_vmm
+    OWNERPROBE_WRAPPER test=v4_control_without_pidns_orphans_the_vmm wrapper_pid=2821049 wrapper_ppid=2816358 parent_comm=cargo-nextest parent_exe=/home/ubuntu/.cargo/bin/cargo-nextest grandparent_pid=2816356 grandparent_comm=sudo uid=0
+    OWNERPROBE_V4 v4c elected=true elect_to_exec_ms=1687 hello=Hello { ns_pid: 2821128, host_pid: 2821128, netns: "net:[4026533096]", pidns: "pid:[4026531836]", started_ms: 1794612282395 } exec="EXIT\t0" sock_len=52
+    OWNERPROBE_V4 v4c owner_host_pid=2821128 members=[(2821301, "2821301", "cloud-hyperviso")]
+    OWNERPROBE_V4 v4c client of the killed owner saw: Ok("")
+    OWNERPROBE_V4 v4c SIGKILL owner (no pidns) pid=2821128 zombie_or_gone_us=Some(109) gone_us=None
+    OWNERPROBE_V4 v4c vmm state 3s+ after owner death: [(2821301, Some('S'))]
+    OWNERPROBE_V4 v4c cleanup (test killed its own orphan VMM) pid=2821301 zombie_or_gone_us=Some(1133) gone_us=Some(36458)
+     Summary [  11.307s] 4 tests run: 4 passed, 18 skipped
+        PASS [   0.104s] (1/4) ownerprobe::probe v4_dead_anchor_refuses_to_start
+        PASS [   2.058s] (2/4) ownerprobe::probe v4_anchor_pidfd_fires_and_namespace_takes_the_vmm
+        PASS [   5.184s] (3/4) ownerprobe::probe v4_owner_pidns_sigkill_leaves_no_vmm
+        PASS [  11.307s] (4/4) ownerprobe::probe v4_control_without_pidns_orphans_the_vmm
+OVERDRIVE_METAL_RUN_COMPLETE run_id=ae48e5bab315714f6afea58f exit_code=0 cause=command_returned

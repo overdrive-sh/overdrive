@@ -1,0 +1,39 @@
+=== c8c47302d62319ed426365b0
+--- processes (broker / cloud-hypervisor, any run):
+--- cloud-hypervisor processes naming run c8c47302d62319ed426365b0:
+0
+--- /tmp leftovers of the probe:
+ls: cannot access '/tmp/ownerprobe*': No such file or directory
+--- /srv/vm/metal/c8c47302d62319ed426365b0:
+ls: cannot access '/srv/vm/metal/c8c47302d62319ed426365b0': No such file or directory
+--- /run/ovd-gk/c8c47302d62319ed426365b0:
+ls: cannot access '/run/ovd-gk/c8c47302d62319ed426365b0': No such file or directory
+--- per-run cgroups naming c8c47302d62319ed426365b0:
+0
+--- vhost-vsock holders (fd count by pid):
+=== ae48e5bab315714f6afea58f
+--- processes (broker / cloud-hypervisor, any run):
+--- cloud-hypervisor processes naming run ae48e5bab315714f6afea58f:
+0
+--- /tmp leftovers of the probe:
+ls: cannot access '/tmp/ownerprobe*': No such file or directory
+--- /srv/vm/metal/ae48e5bab315714f6afea58f:
+ls: cannot access '/srv/vm/metal/ae48e5bab315714f6afea58f': No such file or directory
+--- /run/ovd-gk/ae48e5bab315714f6afea58f:
+ls: cannot access '/run/ovd-gk/ae48e5bab315714f6afea58f': No such file or directory
+--- per-run cgroups naming ae48e5bab315714f6afea58f:
+0
+--- vhost-vsock holders (fd count by pid):
+=== e244aee7f76be76e3b155da1
+--- processes (broker / cloud-hypervisor, any run):
+--- cloud-hypervisor processes naming run e244aee7f76be76e3b155da1:
+0
+--- /tmp leftovers of the probe:
+ls: cannot access '/tmp/ownerprobe*': No such file or directory
+--- /srv/vm/metal/e244aee7f76be76e3b155da1:
+ls: cannot access '/srv/vm/metal/e244aee7f76be76e3b155da1': No such file or directory
+--- /run/ovd-gk/e244aee7f76be76e3b155da1:
+ls: cannot access '/run/ovd-gk/e244aee7f76be76e3b155da1': No such file or directory
+--- per-run cgroups naming e244aee7f76be76e3b155da1:
+0
+--- vhost-vsock holders (fd count by pid):

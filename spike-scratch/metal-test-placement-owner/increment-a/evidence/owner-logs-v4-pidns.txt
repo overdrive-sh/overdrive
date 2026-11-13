@@ -1,0 +1,20 @@
+OWNER t=1794612280735 anchor pidfd open in host pidns (pid:[4026531836])
+OWNER t=1794612280735 inherited anchor pidfd readable now: false
+OWNER t=1794612280735 late pidfd_open(anchor) from inside the owner: errno=3 (anchor NOT visible by host pid)
+OWNER t=1794612280735 outer forked owner proper, host_pid=2821137; outer exits
+OWNER t=1794612280735 owner proper getpid=1 host_pid=2821137 nspid=2821137/1 pidns=pid:[4026533310] netns=net:[4026533130]
+OWNER t=1794612280735 start argv_anchor=2816358 pidns=true vm=true cid=16785409 startup_ms=0
+OWNER t=1794612280735 start argv_anchor=2821129 pidns=true vm=true cid=16785411 startup_ms=0
+OWNER t=1794612280736 inherited anchor pidfd readable now: false
+OWNER t=1794612280736 late pidfd_open(anchor) from inside the owner: errno=3 (anchor NOT visible by host pid)
+OWNER t=1794612280736 outer forked owner proper, host_pid=2821138; outer exits
+OWNER t=1794612280736 owner proper getpid=1 host_pid=2821138 nspid=2821138/1 pidns=pid:[4026533311] netns=net:[4026533224]
+OWNER t=1794612282637 guest booted staging_ms=887 boot_ms=1014
+OWNER t=1794612282651 members=1
+OWNER t=1794612282651 serving /run/ovd-gk/ae48e5bab315714f6afea58f/shared/v4d.sock (path len 52)
+OWNER t=1794612282672 ANCHOR FIRED: exiting WITHOUT killing the guest (the PID namespace must)
+OWNER t=1794612282726 guest booted staging_ms=1085 boot_ms=904
+OWNER t=1794612282740 members=1
+OWNER t=1794612282740 serving /run/ovd-gk/ae48e5bab315714f6afea58f/shared/v4a.sock (path len 52)
+OWNERPROBE_V4 v4d anchor_kill_wall_ms=1794612282671 owner_line=OWNER t=1794612282672 ANCHOR FIRED: exiting WITHOUT killing the guest (the PID namespace must)
+OWNERPROBE_V4 v4e dead anchor 2821133: ensure_owner = Err("owner process exited exit status: 2; log:\nOWNER t=1794612280736 start argv_anchor=2821133 pidns=true vm=false cid=0 startup_ms=0\nOWNER t=1794612280736 REFUSE: pidfd_open(anchor=2821133) failed errno=3\n")

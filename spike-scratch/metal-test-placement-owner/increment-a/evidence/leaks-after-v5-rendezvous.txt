@@ -1,0 +1,17 @@
+--- processes (broker / cloud-hypervisor, any run):
+2737097 cloud-hyperviso /usr/local/bin/cloud-hypervisor --cpus boot=8 --memory size=4294967296 --kernel /run/ovd-gk/907adb2ab3c2048c5e2a7693/ovd
+--- cloud-hypervisor processes naming run fb5ffa5864dcb0a020039a96:
+bash: line 1: /proc/2753567/cmdline: No such file or directory
+bash: line 1: /proc/2753652/cmdline: No such file or directory
+bash: line 1: /proc/2753673/cmdline: No such file or directory
+0
+--- /tmp leftovers of the probe:
+ls: cannot access '/tmp/ownerprobe*': No such file or directory
+--- /srv/vm/metal/fb5ffa5864dcb0a020039a96:
+ls: cannot access '/srv/vm/metal/fb5ffa5864dcb0a020039a96': No such file or directory
+--- /run/ovd-gk/fb5ffa5864dcb0a020039a96:
+ls: cannot access '/run/ovd-gk/fb5ffa5864dcb0a020039a96': No such file or directory
+--- per-run cgroups naming fb5ffa5864dcb0a020039a96:
+0
+--- vhost-vsock holders (fd count by pid):
+2737097 1 /usr/local/bin/cloud-hypervisor --cpus boot=8 --memory size=

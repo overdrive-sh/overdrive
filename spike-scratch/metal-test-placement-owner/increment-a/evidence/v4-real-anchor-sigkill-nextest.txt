@@ -1,0 +1,2 @@
+# v4-real-anchor-sigkill-nextest  run: c8c47302d62319ed426365b0
+OVERDRIVE_METAL_RUN_COMPLETE run_id=c8c47302d62319ed426365b0 exit_code=137 cause=command_returned

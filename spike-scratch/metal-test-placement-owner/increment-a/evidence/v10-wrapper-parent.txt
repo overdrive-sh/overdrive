@@ -1,0 +1,14 @@
+# v10-wrapper-parent  filter: test(=v10_wrapper_parent_is_nextest)  exit: 0
+OVERDRIVE_METAL_RUN_ID=6f05e9d519f9fb8d124fba1e
+        PASS [   0.077s] (1/1) ownerprobe::probe v10_wrapper_parent_is_nextest
+    OWNERPROBE_WRAPPER test=v10_wrapper_parent_is_nextest wrapper_pid=2743514 wrapper_ppid=2739216 parent_comm=cargo-nextest parent_exe=/home/ubuntu/.cargo/bin/cargo-nextest grandparent_pid=2739213 grandparent_comm=sudo uid=0
+    OWNERPROBE_V10 test_pid=2743514 ppid=2739216 parent_comm=cargo-nextest parent_exe=/home/ubuntu/.cargo/bin/cargo-nextest grandparent=2739213/sudo
+    OWNERPROBE_V10 parent_cmdline=/home/ubuntu/.cargo/bin/cargo-nextest nextest run --manifest-path spike-scratch/metal-test-placement-owner/increment-a/Cargo.toml --no-fail-fast --success-output immediate --failure-output immediate -E test(=v10_wrapper_parent_is_nextest) 
+    OWNERPROBE_V10 Uid:0000 CapEff:000001ffffffffff pidns=pid:[4026531836] netns=net:[4026532993] env_anchor=None
+    OWNERPROBE_V10 shim_line=OWNERPROBE_WRAPPER test=v10_wrapper_parent_is_nextest wrapper_pid=2743514 wrapper_ppid=2739216 parent_comm=cargo-nextest parent_exe=/home/ubuntu/.cargo/bin/cargo-nextest grandparent_pid=2739213 grandparent_comm=sudo uid=0
+    OWNERPROBE_V10 pidfd_open(2739216) OK fd=3
+    OWNERPROBE_V10 pidfd readable now (anchor exited?) = false
+    OWNERPROBE_V10 pidfd_send_signal(sig 0) = Ok(())
+     Summary [   0.077s] 1 test run: 1 passed, 21 skipped
+        PASS [   0.077s] (1/1) ownerprobe::probe v10_wrapper_parent_is_nextest
+OVERDRIVE_METAL_RUN_COMPLETE run_id=6f05e9d519f9fb8d124fba1e exit_code=0 cause=command_returned
