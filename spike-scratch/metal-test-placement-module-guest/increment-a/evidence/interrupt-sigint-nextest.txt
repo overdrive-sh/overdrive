@@ -1,0 +1,6 @@
+# interrupt-sigint-nextest  signal: INT -> nextest  run: f22d9ab808a2a535b59a6765
+  Cancelling due to interrupt: 1 test still running
+      SIGINT [  10.775s] (1/1) modguest-probe::probe shared::t_slow
+     Summary [  10.776s] 1 test run: 0 passed, 1 failed, 16 skipped
+error: test run failed
+OVERDRIVE_METAL_RUN_COMPLETE run_id=f22d9ab808a2a535b59a6765 exit_code=100 cause=command_returned

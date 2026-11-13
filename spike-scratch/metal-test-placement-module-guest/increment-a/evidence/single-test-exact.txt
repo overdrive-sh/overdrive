@@ -1,0 +1,10 @@
+# single-test-exact  filter: test(=shared::t_pass_2)  exit: 0
+OVERDRIVE_METAL_RUN_ID=d81574575ecbb0533efed67a
+        PASS [   2.260s] (1/1) modguest-probe::probe shared::t_pass_2
+    MODGUEST_HOST test=t_pass_2 netns=net:[4026532992]
+    MODGUEST_HOST started broker pid=1215642 anchor_nextest_pid=1206107
+    MODGUEST_BODY test=probe::shared::t_pass_2 boot_id=acccf8f4-1c5a-4789-bded-758844f21b04 kernel=7.0.0-38-generic pid=83 uptime=0.56 0.34
+    MODGUEST_HOST test=t_pass_2 exit=0 runs_served=1 broker_pid=1215642 broker_netns=net:[4026532992] exec_ms=331 wall_ms=2203
+     Summary [   2.260s] 1 test run: 1 passed, 15 skipped
+        PASS [   2.260s] (1/1) modguest-probe::probe shared::t_pass_2
+OVERDRIVE_METAL_RUN_COMPLETE run_id=d81574575ecbb0533efed67a exit_code=0 cause=command_returned

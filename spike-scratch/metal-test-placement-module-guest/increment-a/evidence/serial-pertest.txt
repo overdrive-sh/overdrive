@@ -1,0 +1,26 @@
+# serial-pertest  filter: test(~pertest::)  exit: 100
+OVERDRIVE_METAL_RUN_ID=f260f5fb891ea7b856e835b5
+        FAIL [   2.972s] (1/4) modguest-probe::probe pertest::t_fail
+    MODGUEST_BODY test=probe::pertest::t_fail boot_id=e008ba36-2591-49fc-9874-b737b4a7d193 kernel=7.0.0-38-generic pid=154 uptime=0.90 5.34
+    MODGUEST_BODY deliberate failure in probe::pertest::t_fail
+    OVERDRIVE_GUEST_KIT_TIMING group=cgroup-default test=pertest::t_fail staging_ms=429 boot_ms=1884 total_ms=2914
+    MODGUEST_HOST test=t_fail wall_ms=2915 result=Err(BodyFailed { group: "cgroup-default", test: "pertest::t_fail", status: 101 })
+        PASS [   2.959s] (2/4) modguest-probe::probe pertest::t_pass_1
+    MODGUEST_BODY test=probe::pertest::t_pass_1 boot_id=bd79b019-666a-454d-bc11-4a9c040d7aa8 kernel=7.0.0-38-generic pid=154 uptime=0.88 5.28
+    OVERDRIVE_GUEST_KIT_TIMING group=cgroup-default test=pertest::t_pass_1 staging_ms=427 boot_ms=1865 total_ms=2898
+    MODGUEST_HOST test=t_pass_1 wall_ms=2899 result=Ok(())
+        PASS [   2.912s] (3/4) modguest-probe::probe pertest::t_pass_2
+    MODGUEST_BODY test=probe::pertest::t_pass_2 boot_id=dc77f4ec-5774-4a13-8ae3-295c95260254 kernel=7.0.0-38-generic pid=154 uptime=0.91 5.45
+    OVERDRIVE_GUEST_KIT_TIMING group=cgroup-default test=pertest::t_pass_2 staging_ms=407 boot_ms=1851 total_ms=2850
+    MODGUEST_HOST test=t_pass_2 wall_ms=2851 result=Ok(())
+        PASS [   2.909s] (4/4) modguest-probe::probe pertest::t_pass_3
+    MODGUEST_BODY test=probe::pertest::t_pass_3 boot_id=ea73ec8a-1228-44c6-8f05-5c540bffbb6d kernel=7.0.0-38-generic pid=153 uptime=0.87 5.20
+    OVERDRIVE_GUEST_KIT_TIMING group=cgroup-default test=pertest::t_pass_3 staging_ms=404 boot_ms=1828 total_ms=2850
+    MODGUEST_HOST test=t_pass_3 wall_ms=2851 result=Ok(())
+     Summary [  11.757s] 4 tests run: 3 passed, 1 failed, 13 skipped
+        PASS [   2.959s] (2/4) modguest-probe::probe pertest::t_pass_1
+        PASS [   2.912s] (3/4) modguest-probe::probe pertest::t_pass_2
+        PASS [   2.909s] (4/4) modguest-probe::probe pertest::t_pass_3
+        FAIL [   2.972s] (1/4) modguest-probe::probe pertest::t_fail
+error: test run failed
+OVERDRIVE_METAL_RUN_COMPLETE run_id=f260f5fb891ea7b856e835b5 exit_code=100 cause=command_returned

@@ -1,0 +1,18 @@
+# PROBE (throwaway, isolated): can a guest booted once serve several nextest
+# test processes? Not a member of the repo workspace. See
+# docs/feature/metal-test-placement-attribute/spike/findings-module-shared-guest.md
+[package]
+name = "modguest-probe"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+libc = "0.2"
+overdrive-testing = { path = "../../../crates/overdrive-testing" }
+
+[[bin]]
+name = "modguest-broker"
+path = "src/bin/broker.rs"
