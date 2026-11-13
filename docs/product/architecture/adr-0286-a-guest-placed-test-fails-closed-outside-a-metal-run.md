@@ -31,7 +31,15 @@ body and does not report PASS.
 ## Consequences
 
 Every lane that runs a guest-placed test must run it on Metal, or exclude it.
-The lanes that run these binaries today are listed in the feature delta.
+Under this decision five lanes turn red until moved: the CI default nextest job
+(13 guest-placed tests compile without any feature), the CI integration job
+(about 614), the CI `bpf-unit` job (23), `cargo xtask ci` (13) and the nightly
+workspace mutation run (about 685); the pre-commit, pre-push and Lima inner-loop
+lanes turn red only when they fall back to Lima. The 13 feature-free tests can
+be re-placed or filtered; the integration lanes cannot be filtered, because
+guest-placed and host-pure tests share binaries. The feature delta holds the
+inventory and the alternative of running in place, which keeps every lane green
+and reports PASS for tests that never ran in a guest.
 
 ## Links
 

@@ -32,7 +32,9 @@ one owner process under an exclusive lock and the owner boots the guest. Later
 tests attach to that owner over a unix socket in the run's own runtime
 directory. The owner runs as the init of its own PID namespace, so the VMM
 dies with the owner, and it exits when the nextest process that anchors the run
-is gone. Run teardown stays the backstop.
+is gone. The owner opens its handle on the anchor process before it creates its
+PID namespace, because a process id resolves in the caller's namespace and the
+anchor does not exist inside the new one. Run teardown stays the backstop.
 
 ## Alternatives
 
@@ -57,13 +59,18 @@ is gone. Run teardown stays the backstop.
 ## Consequences
 
 One extra process kind (the owner), prepared by `guest-kit-prepare`. The
-owner-death guarantee rests on a kernel behaviour that is read in the vendored
-Linux source and proven on Metal before acceptance. If it fails, this decision
-returns to DESIGN. The protocol is specified in `specs/quint/shared-guest-owner/`.
+owner-death guarantee rests on a kernel behaviour: when the init of a PID
+namespace exits, the kernel kills every other task in it and waits for them
+(`kernel/pid_namespace.c:225-274 @ v7.0`). It was read in the vendored Linux
+source and exercised on Metal, where the VMM was gone within 38.6 ms of the
+owner's death. A client attached to a killed owner sees end of stream, which the
+client maps to an owner-loss failure. The protocol is specified in
+`specs/quint/shared-guest-owner/`.
 
 ## Links
 
 - [Interface contract](../../feature/metal-test-placement-attribute/feature-delta.md#wave-design--ref-interface-contracts)
 - [Formal protocol model](../../../specs/quint/shared-guest-owner/README.md)
 - [Shared-guest probe findings](../../feature/metal-test-placement-attribute/spike/findings-module-shared-guest.md)
+- [Owner lifetime findings](../../feature/metal-test-placement-attribute/spike/findings-owner-lifetime.md)
 - [ADR-0280](adr-0280-metal-nextest-execution-uses-explicit-test-placement.md)

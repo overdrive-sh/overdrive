@@ -29,7 +29,8 @@ environment.
 
 ## Consequences
 
-One kernel parameter is part of the guest boot contract, and the guest must
+Booted through the production guest launcher, a guest carried the parameter in
+its `/proc/cmdline` and the host did not. One kernel parameter is part of the guest boot contract, and the guest must
 pass the parameter through to its tests' view of the command line. A guest
 launched from inside a guest (a nested group) sets the parameter for its own
 kernel only.
