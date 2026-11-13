@@ -107,6 +107,20 @@ gateway flags starts the listener, and `overdrive deploy <ROUTE_SPEC>` declares 
 Route. The checked-in operator example drives a VM Service behind a Route that way.
 A recurring in-process end-to-end test guards the behavior.
 
+We ran that example once on native x86_64 metal, built from a clean checkout, with
+a Let's Encrypt certificate for a public hostname. A `curl` client using only the
+system trust store negotiated TLS 1.3, got `200`, and received the guest's streamed
+body. While the body streamed, `ss` showed the kernel TLS record layer configured
+for transmit and receive on both the public TCP/443 connection and the gateway's
+connection to the backend. After the example stopped, no gateway socket, VM, cgroup
+or network state remained. A reviewer who had not run the capture checked each of
+those claims against the raw output and found that all of them held.
+
+The capture also found a gap the tests could not. Every test supplied the gateway's
+key-encryption key in-process, so no test had ever loaded it from a credential file
+the way `serve` does. The example omitted that file, and `serve` refused to start
+the gateway until we added it.
+
 A resource measurement at 128 concurrent exchanges (R-74) found:
 
 - 9 descriptors per exchange, 7 at steady state, so at most 1,152 at the connection
@@ -123,9 +137,6 @@ attempt to the backend and no retry.
 
 ## What is not proven
 
-- **No captured end-to-end verification.** The operator-journey verification
-  expectation for the example has not been captured. The example exists and runs.
-  A retained, reviewed capture of it does not.
 - **No performance claim.** The kTLS and splice path has no measured CPU or
   throughput advantage over the userspace path. The 117 ns hook cost is a single
   report-only measurement.
