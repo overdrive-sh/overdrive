@@ -180,8 +180,8 @@ pub enum BannedKind {
     /// gate silently becomes a lie.
     ProbeGateInvocationMissing,
     /// The binary composition root at
-    /// `crates/overdrive-control-plane/src/lib.rs` does not invoke
-    /// [`probe_runner_boot::compose_and_probe_runner_gate`] outside
+    /// `crates/overdrive-control-plane/src/lib.rs` does not invoke either
+    /// approved `probe_runner_boot` Earned-Trust gate helper outside
     /// `#[cfg(test)]` context — the gate helper is shipped but never
     /// reached from production. Banned per GAP-3 from
     /// `.context/01-03-structural-gap-audit.md` + ADR-0054 § 7.
@@ -1314,8 +1314,9 @@ fn underscore_binding_probe_runner_path_in_scope(rel_path: &Path) -> bool {
 //
 //   - [`scan_source_probe_gate_helper_invoked`] — walks
 //     `crates/overdrive-control-plane/src/lib.rs` and asserts that
-//     at least one call expression (function or method) names
-//     `compose_and_probe_runner_gate` outside `#[cfg(test)]` context.
+//     at least one call expression (function or method) names one of
+//     the exact approved helpers `compose_and_probe_runner_gate` or
+//     `compose_and_probe_runner_gate_with_reports` outside `#[cfg(test)]`.
 //     Defends against someone deleting the helper's call site from
 //     the binary composition root, which would mean the binary
 //     never reaches the gate at all — even if the helper body
@@ -1425,14 +1426,13 @@ pub fn scan_source_probe_gate_invocation_present(
 }
 
 /// Visitor that walks an AST and records whether a call expression
-/// (function-call or method-call) resolves to a path whose last
-/// segment is the literal `compose_and_probe_runner_gate`, outside
-/// `#[cfg(test)]` context.
+/// (function-call or method-call) resolves to one of the exact approved
+/// gate-helper names outside `#[cfg(test)]` context.
 ///
 /// `found_in_production` flips to `true` on the first such match.
-/// Matching is by trailing-segment identity: both
-/// `compose_and_probe_runner_gate(...)` (after `use ...::*;`) and
-/// `probe_runner_boot::compose_and_probe_runner_gate(...)` qualify.
+/// Matching is by trailing-segment identity, so both approved names
+/// qualify unqualified (after `use ...::*;`) or as
+/// `probe_runner_boot::<name>(...)`.
 struct ProbeGateHelperCallCollector {
     found_in_production: bool,
     cfg_test_depth: usize,
@@ -1472,11 +1472,10 @@ impl<'ast> Visit<'ast> for ProbeGateHelperCallCollector {
     fn visit_expr_call(&mut self, node: &'ast syn::ExprCall) {
         if self.cfg_test_depth == 0
             && let syn::Expr::Path(path_expr) = &*node.func
-            && path_expr
-                .path
-                .segments
-                .last()
-                .is_some_and(|seg| seg.ident == "compose_and_probe_runner_gate")
+            && path_expr.path.segments.last().is_some_and(|seg| {
+                seg.ident == "compose_and_probe_runner_gate"
+                    || seg.ident == "compose_and_probe_runner_gate_with_reports"
+            })
         {
             self.found_in_production = true;
         }
@@ -1489,22 +1488,24 @@ impl<'ast> Visit<'ast> for ProbeGateHelperCallCollector {
         // future. Accept that shape too — the rule is "the literal
         // identifier appears as the called function name outside
         // `#[cfg(test)]`".
-        if self.cfg_test_depth == 0 && node.method == "compose_and_probe_runner_gate" {
+        if self.cfg_test_depth == 0
+            && (node.method == "compose_and_probe_runner_gate"
+                || node.method == "compose_and_probe_runner_gate_with_reports")
+        {
             self.found_in_production = true;
         }
         visit::visit_expr_method_call(self, node);
     }
 }
 
-/// Walk `source` and produce a violation iff no call to
-/// `compose_and_probe_runner_gate` exists outside `#[cfg(test)]`
-/// context.
+/// Walk `source` and produce a violation iff neither approved
+/// Earned-Trust gate helper is called outside `#[cfg(test)]` context.
 ///
-/// Matches both unqualified (`compose_and_probe_runner_gate(...)`)
-/// and qualified (`probe_runner_boot::compose_and_probe_runner_gate(...)`)
-/// shapes — the contract is "the binary composition root reaches the
-/// helper from production." A test-only call inside `#[cfg(test)]`
-/// does not count.
+/// Matches only the exact helper names `compose_and_probe_runner_gate` and
+/// `compose_and_probe_runner_gate_with_reports`, both unqualified and
+/// qualified by `probe_runner_boot::`. A test-only call inside `#[cfg(test)]`
+/// does not count. The production composition uses the latter to pass its
+/// shared `GuestListenerReports` port while retaining the Earned-Trust gate.
 ///
 /// Returns at most one [`Violation`]. Source files that cannot be
 /// parsed by `syn::parse_file` produce an `Err`.
@@ -1529,7 +1530,7 @@ pub fn scan_source_probe_gate_helper_invoked(
         file,
         line: 1,
         column: 1,
-        banned_path: "missing call: compose_and_probe_runner_gate".to_string(),
+        banned_path: "missing call: approved ProbeRunner Earned-Trust gate helper".to_string(),
         replacement_trait:
             "ADR-0054 § 7 — binary composition root must invoke the Earned-Trust gate helper"
                 .to_string(),
@@ -1582,8 +1583,8 @@ fn scan_probe_gate_absence_checks(
         });
     }
 
-    // Outer: lib.rs MUST contain at least one call to
-    // `compose_and_probe_runner_gate` outside `#[cfg(test)]`.
+    // Outer: lib.rs MUST call one of the approved Earned-Trust gate
+    // helpers outside `#[cfg(test)]`.
     let outer_path = root.join("src").join("lib.rs");
     if outer_path.is_file() {
         let source = std::fs::read_to_string(&outer_path)
@@ -4071,8 +4072,9 @@ fn violation_message(v: &Violation) -> (&'static str, String, &'static str) {
             "error: ProbeRunner Earned-Trust gate helper is unreachable from production",
             format!(
                 "{} — `compose_production_driver` (or another non-test \
-                 composition site) must call \
-                 `probe_runner_boot::compose_and_probe_runner_gate(...)`. \
+                 composition site) must call either approved \
+                 `probe_runner_boot::compose_and_probe_runner_gate(...)` or \
+                 `probe_runner_boot::compose_and_probe_runner_gate_with_reports(...)`. \
                  Without that call the binary boots without running the \
                  Earned-Trust probe even if the helper itself is correct.",
                 v.replacement_trait,
@@ -5636,9 +5638,9 @@ mod tests {
 
     // ---------------- ProbeGateHelperUnused tests ----------------
 
-    /// (e) The real `lib.rs` contains a production call to
-    /// `compose_and_probe_runner_gate(...)` — scanner MUST produce zero
-    /// violations.
+    /// (e) The real `lib.rs` production composition calls
+    /// `compose_and_probe_runner_gate_with_reports(...)` — scanner MUST
+    /// produce zero violations.
     #[test]
     fn probe_gate_helper_real_lib_rs_is_clean() {
         let path = control_plane_lib_rs_source_path();
@@ -5648,7 +5650,7 @@ mod tests {
             scan_source_probe_gate_helper_invoked(&source, &path).expect("source must scan");
         assert!(
             violations.is_empty(),
-            "real lib.rs must invoke `compose_and_probe_runner_gate` outside #[cfg(test)]; \
+            "real lib.rs must invoke an approved Earned-Trust gate helper outside #[cfg(test)]; \
              got {violations:?}"
         );
     }
@@ -5723,6 +5725,50 @@ mod tests {
             violations.is_empty(),
             "qualified path call must satisfy the contract; got {violations:?}"
         );
+    }
+
+    /// The shared-board composition's exact helper name satisfies the gate.
+    /// CONTRACT_SHAPE: pure-function.
+    #[test]
+    fn probe_gate_helper_with_reports_qualified_path_satisfies_contract() {
+        let source = r"
+            pub async fn compose_production_driver() -> Result<Driver, Error> {
+                let _runner = probe_runner_boot::compose_and_probe_runner_gate_with_reports(
+                    tcp_prober, http_prober, clock, observations, guest_dial, reports,
+                ).await?;
+                Ok(driver)
+            }
+        ";
+        let violations =
+            scan_source_probe_gate_helper_invoked(source, std::path::Path::new("synthetic.rs"))
+                .expect("source must scan");
+        assert!(
+            violations.is_empty(),
+            "exact shared-report gate helper must satisfy the contract; got {violations:?}"
+        );
+    }
+
+    /// A prefix/lookalike helper is not an approved gate call.
+    /// CONTRACT_SHAPE: pure-function.
+    #[test]
+    fn probe_gate_helper_lookalike_name_does_not_satisfy_contract() {
+        let source = r"
+            pub async fn compose_production_driver() -> Result<Driver, Error> {
+                let _runner = probe_runner_boot::compose_and_probe_runner_gate_with_reports_disabled(
+                    tcp_prober, http_prober, clock, observations, guest_dial, reports,
+                ).await?;
+                Ok(driver)
+            }
+        ";
+        let violations =
+            scan_source_probe_gate_helper_invoked(source, std::path::Path::new("synthetic.rs"))
+                .expect("source must scan");
+        assert_eq!(
+            violations.len(),
+            1,
+            "lookalike helper names must not satisfy the exact contract; got {violations:?}"
+        );
+        assert_eq!(violations[0].kind, BannedKind::ProbeGateHelperUnused);
     }
 
     // ------- ADR-0077 § D7 Layer 2: LogicalTimestamp struct literal -------
