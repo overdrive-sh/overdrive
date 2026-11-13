@@ -82,9 +82,26 @@ pub(super) fn recv_record(fd: RawFd, buf: &mut [u8], peek: bool) -> io::Result<R
     msg.msg_iovlen = 1;
     msg.msg_control = (&raw mut control).cast();
     msg.msg_controllen = control.0.len() as _;
-    let flags = libc::MSG_DONTWAIT | if peek { libc::MSG_PEEK } else { 0 };
-    // SAFETY: `msg` points at live iov/control buffers of the stated lengths.
-    let n = retry(|| unsafe { libc::recvmsg(fd, &raw mut msg, flags) }, to_usize)?;
+    // MSG_CMSG_CLOEXEC: any descriptor the control buffer could carry is created
+    // close-on-exec, like every other descriptor the serve closure creates. The
+    // flag word is spelled at the call so the cloexec lint can resolve it.
+    let n = if peek {
+        // SAFETY: `msg` points at live iov/control buffers of the stated lengths.
+        let call = || unsafe {
+            libc::recvmsg(
+                fd,
+                &raw mut msg,
+                libc::MSG_DONTWAIT | libc::MSG_PEEK | libc::MSG_CMSG_CLOEXEC,
+            )
+        };
+        retry(call, to_usize)?
+    } else {
+        // SAFETY: `msg` points at live iov/control buffers of the stated lengths.
+        let call = || unsafe {
+            libc::recvmsg(fd, &raw mut msg, libc::MSG_DONTWAIT | libc::MSG_CMSG_CLOEXEC)
+        };
+        retry(call, to_usize)?
+    };
     let mut record = RECORD_DATA;
     // SAFETY: CMSG_* walk the control buffer the kernel just filled; `ControlBuf` is
     // 8-aligned, satisfying the `cmsghdr` alignment `CMSG_FIRSTHDR` relies on.
