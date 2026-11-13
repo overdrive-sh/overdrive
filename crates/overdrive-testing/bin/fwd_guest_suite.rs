@@ -486,6 +486,46 @@ test -z "$(/usr/bin/ip -4 route show table local exact 192.0.2.1/32)"
 echo "STEP13-06 route cleanup readback: unroutable destination_not_local=true"
 "#;
 
+// The XDP_FIB_HIT cells resolve their client/backend addresses through a
+// test-owned veth next hop with a permanent neighbour entry, and need IPv4
+// forwarding because `bpf_fib_lookup` refuses a lookup from an ingress device
+// without it (`bpf_ipv4_fib_lookup`, net/core/filter.c @ v7.0). 198.18.0.0/24
+// (RFC 2544) is disjoint from every address the cells or the guest use.
+const XDP_FIB_HIT_SETUP: &str = r#"
+set -eu
+test "$(/usr/bin/cat /proc/sys/net/ipv4/ip_forward)" = 0
+if /usr/bin/ip -4 route get 10.0.0.100 >/dev/null 2>&1; then
+  echo "XDP-FIB-HIT route precondition unexpectedly already resolves 10.0.0.100" >&2
+  exit 1
+fi
+/usr/bin/ip link add ovd-gk-fib type veth peer name ovd-gk-fibp
+/usr/bin/ip link set ovd-gk-fib address 02:00:5e:12:00:01
+/usr/bin/ip addr add 198.18.0.1/24 dev ovd-gk-fib
+/usr/bin/ip link set ovd-gk-fibp up
+/usr/bin/ip link set ovd-gk-fib up
+/usr/bin/ip neigh replace 198.18.0.2 lladdr 02:00:5e:12:00:02 dev ovd-gk-fib nud permanent
+/usr/bin/ip route add default via 198.18.0.2 dev ovd-gk-fib metric 42762
+echo 1 > /proc/sys/net/ipv4/ip_forward
+for destination in 10.0.0.100 10.1.0.5; do
+  route="$(/usr/bin/ip -4 route get "$destination")"
+  case "$route" in
+    *"via 198.18.0.2 dev ovd-gk-fib"*) ;;
+    *) echo "XDP-FIB-HIT route precondition mismatch: $route" >&2; exit 1 ;;
+  esac
+done
+echo "XDP-FIB-HIT precondition readback: $(/usr/bin/ip neigh show 198.18.0.2 dev ovd-gk-fib) forwarding=$(/usr/bin/cat /proc/sys/net/ipv4/ip_forward)"
+"#;
+const XDP_FIB_HIT_CLEANUP: &str = r#"
+set -eu
+echo 0 > /proc/sys/net/ipv4/ip_forward
+/usr/bin/ip link del ovd-gk-fib
+if /usr/bin/ip -4 route get 10.0.0.100 >/dev/null 2>&1; then
+  echo "XDP-FIB-HIT test-owned route survived cleanup" >&2
+  exit 1
+fi
+echo "XDP-FIB-HIT cleanup readback: unroutable forwarding=$(/usr/bin/cat /proc/sys/net/ipv4/ip_forward)"
+"#;
+
 // V-LEGB-MARK's appliance-faithful namespace has route_localnet disabled, the
 // gateway as its only unmarked route into the guest prefix, no node default
 // route and no uplink. The existing leg-B bodies install and observe the
@@ -1014,6 +1054,28 @@ const STEP13_04_WORKER: &[Cell] = &[
     ),
 ];
 
+/// The XDP redirect cells assert the `bpf_fib_lookup` success branch, which
+/// needs what a qualified node has and `GuestKit` lacks (no NIC, no default
+/// route, forwarding off): forwarding on the loopback ingress device and a
+/// routed next hop with a valid neighbour entry. The runner owns that
+/// disposable route only around these exact cells.
+const XDP_FIB_HIT: &[Cell] = &[
+    (
+        "integration::xdp_reverse_nat_redirect_neigh::reverse_path_redirects_via_neigh_on_fib_hit",
+        1,
+        true,
+    ),
+    (
+        "integration::xdp_reverse_nat_udp::udp_response_source_rewritten_to_vip_on_reverse_nat_hit",
+        1,
+        true,
+    ),
+    (
+        "integration::xdp_service_map_redirect_neigh::forward_path_redirects_via_neigh_on_fib_hit",
+        1,
+        true,
+    ),
+];
 /// The two host-local constant-prefix cells require a real main-table default
 /// route so local output reaches the nft output hook. The runner owns that
 /// disposable route only around these exact cells.
@@ -4160,6 +4222,11 @@ fn execute_nextest_guest_attempt(
             .command(&["/usr/bin/sh", "-c", STEP13_06_ROUTE_SETUP])
             .map_err(|error| NextestDispatchFailure::GuestExecution(format!("{error:?}")))?;
         Some(STEP13_06_ROUTE_CLEANUP)
+    } else if plan.name == "mtls-relay" && selected_cell(XDP_FIB_HIT, test_name) {
+        guest
+            .command(&["/usr/bin/sh", "-c", XDP_FIB_HIT_SETUP])
+            .map_err(|error| NextestDispatchFailure::GuestExecution(format!("{error:?}")))?;
+        Some(XDP_FIB_HIT_CLEANUP)
     } else {
         None
     };
