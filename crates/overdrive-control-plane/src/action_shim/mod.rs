@@ -22,7 +22,7 @@ use std::sync::Arc;
 
 use overdrive_core::TransitionReason;
 use overdrive_core::eval_broker::Evaluation;
-#[cfg(any(test, feature = "integration-tests"))]
+#[cfg(test)]
 use overdrive_core::eval_broker::EvaluationBroker;
 use overdrive_core::eval_broker::EvaluationEligibility;
 use overdrive_core::id::{AllocationId, ContentHash, CorrelationKey, NodeId, SpiffeId, WorkloadId};
@@ -75,7 +75,7 @@ type GuestNetworkProvisionerAndPool<'a> = Option<(
 /// standalone broker variant exists for the action-shim's isolated tests.
 pub(super) enum EvaluationSubmission<'a> {
     Runtime(&'a ReconcilerRuntime),
-    #[cfg(any(test, feature = "integration-tests"))]
+    #[cfg(test)]
     Standalone(&'a parking_lot::Mutex<EvaluationBroker>),
 }
 
@@ -90,7 +90,7 @@ impl EvaluationSubmission<'_> {
             Self::Runtime(runtime) => {
                 runtime.submit_evaluation(evaluation, now, eligibility);
             }
-            #[cfg(any(test, feature = "integration-tests"))]
+            #[cfg(test)]
             Self::Standalone(broker) => broker.lock().submit(evaluation, now, eligibility),
         }
     }
