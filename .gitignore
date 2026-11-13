@@ -50,3 +50,7 @@ lefthook-local.yml
 # nWave activation marker (keep .nwave/local-config.json trackable)
 .nwave/*
 !.nwave/local-config.json
+
+# Markers the metal runner writes into each remote checkout
+# (infra/metal/bootstrap.sh); never part of the source.
+/.overdrive-metal-*

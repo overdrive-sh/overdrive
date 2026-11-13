@@ -1036,9 +1036,13 @@ log "materialising standalone .git (common dir $(du -sh "${GIT_COMMON}" | cut -f
   "${GIT_WT}/HEAD" "${GIT_WT}/index" \
   "${TARGET}:${REMOTE_DIR}/.git/"
 
+# The excluded vendors/linux submodule gets an empty directory, which git
+# treats as a submodule that is not checked out. Without it the gitlink reads
+# as deleted and the remote tree is never clean.
 # shellcheck disable=SC2029
 ssh "${SSH_OPTS[@]}" "${TARGET}" \
-  "git -C ${REMOTE_DIR} config core.bare false && \
+  "mkdir -p ${REMOTE_DIR}/vendors/linux && \
+   git -C ${REMOTE_DIR} config core.bare false && \
    git -C ${REMOTE_DIR} config --unset core.worktree 2>/dev/null; \
    git -C ${REMOTE_DIR} status --short --branch | head -5" || true
 
