@@ -3,13 +3,13 @@
 //! backend, fingerprint, or consumer-cache row is fabricated. The original
 //! seed-257_209 diagnostic remains unchanged in its separate test binary.
 //!
-//! State model: submitted/no allocation -> Running/no startup decision ->
-//! Stable OR terminal startup failure. Readiness independently follows
-//! unobserved -> Pass threshold -> Fail -> Pass recovery. WorkloadLifecycle may
-//! replace a Failed predecessor with a fresh allocation identity;
-//! ServiceLifecycle's terminal veto remains scoped to that predecessor. A
-//! rejected row write leaves observation unchanged, although dispatch drains
-//! terminal publication and persists the policy View.
+//! State model: submitted/no allocation -> Running without a committed Stable
+//! (ineligible when startup is declared) -> Stable or a restartable startup
+//! stop. Readiness independently follows unobserved -> Pass threshold -> Fail
+//! -> Pass recovery. WorkloadLifecycle may replace a stopped predecessor with
+//! a fresh allocation identity; that successor needs its own Stable. A
+//! rejected backend-row write leaves that row unchanged, although dispatch
+//! drains the independent terminal action and persists the policy View.
 //! Subsequent reconciliation repairs observation; consumer convergence follows
 //! asynchronously. Repeated ticks are self-loops except readiness Pass counting.
 
@@ -125,6 +125,7 @@ impl Driver for ProbedDriver {
     }
     fn on_alloc_stable(&self, alloc: &AllocationId) {
         self.probes.stop_role(alloc, ProbeRole::Startup);
+        self.probes.start_liveness(alloc);
     }
 }
 
@@ -197,6 +198,10 @@ fn readiness(threshold: u32) -> ProbeDescriptor {
         success_threshold: Some(threshold),
         ..startup()
     }
+}
+
+fn liveness() -> ProbeDescriptor {
+    ProbeDescriptor { role: ProbeRole::Liveness, failure_threshold: Some(1), ..startup() }
 }
 
 impl World {
@@ -452,6 +457,24 @@ impl World {
         self.settle().await;
     }
 
+    /// Drive producer Pass rows and the production Stable write before
+    /// asserting eligibility or causing a post-Stable liveness failure.
+    async fn reach_stable_with_readiness(&mut self) {
+        self.advance_probes().await;
+        self.run("service-lifecycle").await;
+        let allocation = self.obs.alloc_status_rows().await.unwrap().remove(0);
+        assert!(
+            matches!(
+                allocation.terminal,
+                Some(overdrive_core::transition_reason::TerminalCondition::Stable { .. })
+            ),
+            "seed={}: Stable must be committed before backend eligibility or liveness",
+            self.seed
+        );
+        self.run("service-lifecycle").await;
+        self.assert_shape(&self.rows().await, 1, true);
+    }
+
     fn script_guest_probe_pass(&self) {
         self.guest_dial.script_default(
             overdrive_sim::adapters::guest_stream_dial::SimDialScript::Accept {
@@ -568,8 +591,9 @@ async fn registered_runtime(
 }
 
 /// CONTRACT_SHAPE: bounded-change.
-/// Existing green control, separately reported from the multi-listener RED:
-/// no readiness means eligible before startup passes; equal rows do not churn.
+/// Historical control identity: with a declared startup probe and no committed
+/// Stable, no readiness gate does not make the backend eligible. Equal rows
+/// still do not churn.
 #[tokio::test(flavor = "current_thread")]
 async fn single_listener_preterminal_control_is_healthy_and_stable() {
     let mut spec = input(&[(18081, "tcp")], 1);
@@ -578,7 +602,11 @@ async fn single_listener_preterminal_control_is_healthy_and_stable() {
     world.run("workload-lifecycle").await;
     world.run("service-lifecycle").await;
     let rows = world.rows().await;
-    world.assert_shape(&rows, 1, true);
+    world.assert_shape(&rows, 1, false);
+    assert!(
+        world.obs.alloc_status_rows().await.unwrap().iter().all(|row| row.terminal.is_none()),
+        "the allocation has no committed Stable claim"
+    );
     for _ in 0..3 {
         world.run("service-lifecycle").await;
     }
@@ -668,6 +696,9 @@ async fn liveness_restart_budget_and_finalization_keep_projection_handoffs() {
     let mut current = original.clone();
     let mut restarts = 0;
     for _ in 0..12 {
+        // D9: a fresh successor must commit its own Stable row before the
+        // runner begins liveness sampling for that physical allocation.
+        world.run("service-lifecycle").await;
         world.advance_probes().await;
         world.run("service-lifecycle").await;
         world.state.runtime.broker().drain_pending(
@@ -689,7 +720,7 @@ async fn liveness_restart_budget_and_finalization_keep_projection_handoffs() {
             })
             .expect("at least the accepted predecessor row remains")
             .clone();
-        if row.state == AllocState::Running {
+        if row.state == AllocState::Running && row.alloc_id != current {
             assert_ne!(
                 row.alloc_id, current,
                 "every liveness replacement receives a fresh physical allocation identity"
@@ -701,6 +732,12 @@ async fn liveness_restart_budget_and_finalization_keep_projection_handoffs() {
             current = row.alloc_id.clone();
             restarts += 1;
             assert_service_and_svid_wakes(&world);
+        } else if row.state == AllocState::Running {
+            assert!(
+                matches!(row.terminal, Some(TerminalCondition::Stable { .. })),
+                "D9 permits an unchanged Running attempt only after its Stable row commits"
+            );
+            assert!(world.driver.probes.is_role_live(&current, ProbeRole::Liveness));
         } else if matches!(
             row.terminal,
             Some(TerminalCondition::ServiceFailed {
@@ -720,9 +757,10 @@ async fn liveness_restart_budget_and_finalization_keep_projection_handoffs() {
 
 /// CONTRACT_SHAPE: bounded-change.
 /// Structural complement over facts hydrated from the composed owner path:
-/// full changed-listener write/handoff pairs are ordered by ServiceId and precede
-/// the first deciding terminal action. Exact stamps cover first publication,
-/// tick-ahead readback, and prior-ahead readback after normal runtime/tick reload.
+/// after committed Stable, readiness withdrawal produces full changed-listener
+/// write/handoff pairs ordered by ServiceId before the liveness stop. Exact
+/// stamps cover first publication, tick-ahead readback, and prior-ahead
+/// readback after normal runtime/tick reload.
 /// Correlation identity is content-derived from the allocator-issued VIP.
 #[tokio::test(flavor = "current_thread")]
 async fn deciding_tick_orders_complete_row_handoffs_before_failure() {
@@ -730,20 +768,22 @@ async fn deciding_tick_orders_complete_row_handoffs_before_failure() {
     use overdrive_core::id::{ContentHash, CorrelationKey};
     let mut spec = input(&[(18082, "udp"), (18081, "tcp")], 1);
     spec.startup_probes = vec![startup()];
+    spec.readiness_probes = vec![readiness(1)];
+    spec.liveness_probes = vec![liveness()];
     let mut world = World::new(257_225, spec, true).await;
-    for _ in 0..32 {
-        world.tcp.enqueue_outcome(ProbeOutcome::Fail { reason: "seeded refusal".into() });
-    }
-    world.script_guest_tcp_refused();
     world.run("workload-lifecycle").await;
     let initial = world.rows().await;
     assert!(initial.is_empty());
     world.assert_planned_stamps(&world.planned_service_actions().await, &initial);
     world.run("service-lifecycle").await;
-    for _ in 0..2 {
-        world.advance_probes().await;
-        world.run("service-lifecycle").await;
-    }
+    world.assert_shape(&world.rows().await, 1, false);
+    world.reach_stable_with_readiness().await;
+    let healthy = world.rows().await;
+    world.run("service-lifecycle").await;
+    assert_eq!(world.rows().await, healthy, "an equal healthy row does not churn its stamp");
+    // D9 starts liveness only after Stable; a later readiness failure changes
+    // the backend row in the same tick that liveness requests its stop.
+    world.script_guest_tcp_refused();
     world.advance_probes().await;
     let prior = world.rows().await;
     assert!(!prior.is_empty(), "baseline must contain production-authored rows");
@@ -762,13 +802,23 @@ async fn deciding_tick_orders_complete_row_handoffs_before_failure() {
     world.assert_planned_stamps(&actions, &prior);
     let terminal = actions
         .iter()
-        .position(|action| matches!(action, Action::FinalizeFailed { .. }))
-        .expect("real deciding startup action");
+        .position(|action| {
+            matches!(
+                action,
+                Action::StopAllocation {
+                    terminal: Some(overdrive_core::transition_reason::TerminalCondition::Stopped {
+                        by: overdrive_core::transition_reason::StoppedBy::LivenessProbe
+                    }),
+                    ..
+                }
+            )
+        })
+        .expect("real deciding post-Stable liveness stop");
     let pairs = &actions[..terminal];
     assert_eq!(
         pairs.len(),
         world.listeners.len() * 2,
-        "seed=257_225: complete withdrawal/handoff group before failure: {actions:?}"
+        "seed=257_225: complete withdrawal/handoff group before liveness stop: {actions:?}"
     );
     for (pair, (id, port, _)) in pairs.chunks_exact(2).zip(&world.listeners) {
         let Action::WriteServiceBackendRow { row, correlation } = &pair[0] else {
@@ -795,8 +845,8 @@ async fn deciding_tick_orders_complete_row_handoffs_before_failure() {
     let start = world.history.len();
     world.run("service-lifecycle").await;
     let events = &world.history[start..];
-    let failed = events.iter().position(|row| matches!(row, ObservationRow::AllocStatus(row) if row.state == AllocState::Failed)).unwrap();
-    let withdrawals: Vec<_> = events[..failed]
+    let stopped = events.iter().position(|row| matches!(row, ObservationRow::AllocStatus(row) if row.state == AllocState::Terminated && matches!(row.terminal, Some(overdrive_core::transition_reason::TerminalCondition::Stopped { by: overdrive_core::transition_reason::StoppedBy::LivenessProbe })))).unwrap();
+    let withdrawals: Vec<_> = events[..stopped]
         .iter()
         .filter_map(|row| match row {
             ObservationRow::ServiceBackend(row) => Some(row),
@@ -811,27 +861,23 @@ async fn deciding_tick_orders_complete_row_handoffs_before_failure() {
 }
 
 /// CONTRACT_SHAPE: bounded-change.
-/// A failed deciding withdrawal does not prevent terminal publication, and the
-/// normally reloaded policy View retains the predecessor-scoped veto without
-/// attaching it to a fresh successor. A subsequent reconciliation repairs the
-/// rejected row from observation, not emit memory.
+/// A failed post-Stable readiness withdrawal does not prevent the separately
+/// dispatched liveness stop. The normally reloaded policy View retains the
+/// acted liveness run; a fresh startup-probed successor stays ineligible until
+/// its own Stable commits. Reconciliation repairs the rejected backend row.
 #[tokio::test(flavor = "current_thread")]
 async fn failed_withdrawal_drains_terminal_and_repairs_after_view_reload() {
     let mut spec = input(&[(18081, "tcp")], 1);
     spec.startup_probes = vec![startup()];
+    spec.readiness_probes = vec![readiness(1)];
+    spec.liveness_probes = vec![liveness()];
     let mut world = World::new(257_224, spec, true).await;
-    for _ in 0..32 {
-        world.tcp.enqueue_outcome(ProbeOutcome::Fail { reason: "seeded refusal".into() });
-    }
-    world.script_guest_tcp_refused();
     world.run("workload-lifecycle").await;
     world.run("service-lifecycle").await;
-    world.assert_shape(&world.rows().await, 1, true);
-    for _ in 0..2 {
-        world.advance_probes().await;
-        world.run("service-lifecycle").await;
-    }
+    world.assert_shape(&world.rows().await, 1, false);
+    world.reach_stable_with_readiness().await;
     assert_eq!(world.obs.alloc_status_rows().await.unwrap()[0].state, AllocState::Running);
+    world.script_guest_tcp_refused();
     world.advance_probes().await;
     world.obs.inject_write_failure(ObservationStoreError::Unreachable {
         peer: "deciding-withdrawal-fault".into(),
@@ -855,16 +901,27 @@ async fn failed_withdrawal_drains_terminal_and_repairs_after_view_reload() {
     let ended = world.obs.alloc_status_rows().await.unwrap().remove(0);
     assert_eq!(
         ended.state,
-        AllocState::Failed,
-        "per-action isolation must drain FinalizeFailed despite rejected withdrawal"
+        AllocState::Terminated,
+        "per-action isolation must drain the liveness stop despite rejected withdrawal"
     );
+    assert!(matches!(
+        ended.terminal,
+        Some(overdrive_core::transition_reason::TerminalCondition::Stopped {
+            by: overdrive_core::transition_reason::StoppedBy::LivenessProbe
+        })
+    ));
     world.assert_shape(&world.rows().await, 1, true);
     let before = world
         .state
         .runtime
         .loaded_service_lifecycle_views_for_test(&ReconcilerName::new("service-lifecycle").unwrap())
         .unwrap();
-    assert!(before[&world.target].terminal_announced.contains(&ended.alloc_id));
+    assert!(
+        before[&world.target]
+            .liveness_last_acted_run
+            .contains_key(&(ended.alloc_id.clone(), ProbeIdx::new(0))),
+        "the acted liveness row is persisted even when a backend write fails"
+    );
     world.reload_runtime().await;
     assert_eq!(
         world
@@ -876,6 +933,7 @@ async fn failed_withdrawal_drains_terminal_and_repairs_after_view_reload() {
             .unwrap(),
         before
     );
+    world.clock.tick(Duration::from_secs(60));
     world.run("workload-lifecycle").await;
     let allocations = world.obs.alloc_status_rows().await.unwrap();
     let restarted = allocations
@@ -895,13 +953,23 @@ async fn failed_withdrawal_drains_terminal_and_repairs_after_view_reload() {
         .runtime
         .loaded_service_lifecycle_views_for_test(&ReconcilerName::new("service-lifecycle").unwrap())
         .unwrap();
-    assert!(service_views[&world.target].terminal_announced.contains(&ended.alloc_id));
-    assert!(!service_views[&world.target].terminal_announced.contains(&restarted.alloc_id));
+    assert!(
+        service_views[&world.target]
+            .liveness_last_acted_run
+            .contains_key(&(ended.alloc_id.clone(), ProbeIdx::new(0)))
+    );
     let publication_start = world.history.len();
     for _ in 0..3 {
         world.run("service-lifecycle").await;
     }
     world.assert_shape(&world.rows().await, 1, false);
+    let repaired_views = world
+        .state
+        .runtime
+        .loaded_service_lifecycle_views_for_test(&ReconcilerName::new("service-lifecycle").unwrap())
+        .unwrap();
+    assert!(repaired_views[&world.target].terminal_announced.contains(&ended.alloc_id));
+    assert!(!repaired_views[&world.target].terminal_announced.contains(&restarted.alloc_id));
     assert!(
         world.history[publication_start..]
             .iter()
@@ -910,7 +978,7 @@ async fn failed_withdrawal_drains_terminal_and_repairs_after_view_reload() {
                 _ => None,
             })
             .all(|row| row.backends.iter().all(|backend| !backend.healthy)),
-        "no newly eligible publication while retained terminal veto applies"
+        "no newly eligible publication before the successor's Stable commits"
     );
 }
 
@@ -1026,14 +1094,18 @@ async fn rejected_first_publication_is_repaired_from_observed_state() {
     for _ in 0..3 {
         world.run("service-lifecycle").await;
     }
-    world.assert_shape(&world.rows().await, 1, true);
+    world.assert_shape(&world.rows().await, 1, false);
+    assert!(
+        world.obs.alloc_status_rows().await.unwrap().iter().all(|row| row.terminal.is_none()),
+        "the repaired row stays ineligible before Stable"
+    );
 }
 
 /// CONTRACT_SHAPE: bounded-change.
-/// Startup exhaustion is caused by ProbeRunner. Failure publication is not a
-/// consumer acknowledgement; empty membership and a fresh successor with no
-/// startup decision preserve the policy owner's predecessor-scoped veto
-/// through bounded reconciliation.
+/// Startup exhaustion is caused by ProbeRunner. D7 stops the attempt without
+/// a failure verdict; WorkloadLifecycle places a fresh successor. The
+/// successor stays ineligible until its own Stable is committed, independent
+/// of the predecessor's terminal-announced bookkeeping.
 #[tokio::test(flavor = "current_thread")]
 async fn startup_failure_withdraws_then_fresh_successor_starts_unobserved() {
     for seed in [257_209, 257_216] {
@@ -1048,7 +1120,7 @@ async fn startup_failure_withdraws_then_fresh_successor_starts_unobserved() {
         world.script_guest_tcp_refused();
         world.run("workload-lifecycle").await;
         world.run("service-lifecycle").await;
-        world.assert_shape(&world.rows().await, 1, true);
+        world.assert_shape(&world.rows().await, 1, false);
         let original = world.obs.alloc_status_rows().await.unwrap().remove(0);
         for _ in 0..4 {
             world.advance_probes().await;
@@ -1057,9 +1129,15 @@ async fn startup_failure_withdraws_then_fresh_successor_starts_unobserved() {
         let ended = world.obs.alloc_status_rows().await.unwrap().remove(0);
         assert_eq!(
             ended.state,
-            AllocState::Failed,
-            "seed={seed}: real startup failure precondition"
+            AllocState::Terminated,
+            "seed={seed}: D7 stops the failed startup attempt"
         );
+        assert!(matches!(
+            ended.terminal,
+            Some(overdrive_core::transition_reason::TerminalCondition::Stopped {
+                by: overdrive_core::transition_reason::StoppedBy::StartupProbe
+            })
+        ));
         assert_eq!(ended.alloc_id, original.alloc_id);
         world.run("service-lifecycle").await;
         world.assert_shape(&world.rows().await, 0, false);

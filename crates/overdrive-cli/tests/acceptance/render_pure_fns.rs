@@ -324,6 +324,10 @@ fn failed_block_omits_last_event_when_stderr_tail_empty() {
 /// non-exhaustive variant so a deleted match arm (which would fall
 /// through to a sibling or the catch-all) flips at least one assertion.
 /// CONTRACT_SHAPE: pure-function.
+#[allow(
+    clippy::doc_markdown,
+    reason = "the required per-test CONTRACT_SHAPE line is an exact machine-read marker"
+)]
 #[test]
 fn failed_block_reason_text_is_variant_specific() {
     let cases: Vec<(ServiceFailureReason, &str)> = vec![
