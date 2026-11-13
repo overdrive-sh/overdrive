@@ -535,7 +535,9 @@ while [[ "$SECONDS" -lt "$deadline" ]]; do
   sleep 0.5
 done
 [[ "$stream_ok" -eq 1 ]] || die "external HTTPS request to /stream did not complete"
-grep -Eiq '^X-Workload: api\r?$' "$scratch_dir/stream-headers.out" \
+# curl writes CRLF header lines; GNU grep -E has no \r escape, so the CR is
+# a literal byte in the pattern.
+grep -Eiq "^X-Workload: api"$'\r'"?\$" "$scratch_dir/stream-headers.out" \
   || die "/stream response lacks X-Workload: api"
 cmp -s "$scratch_dir/stream-body.out" "$scratch_dir/expected-stream-body" \
   || die "/stream body differs from the guest's published stream"
