@@ -79,6 +79,9 @@ upstream leg carries `Connection: close`.
 | Body no-progress and idle | 30 s each |
 | Whole request | 120 s |
 
+You cannot change these limits in this version. Issue
+[#353: configurable gateway limits](https://github.com/overdrive-sh/overdrive/issues/353) tracks making them configurable.
+
 ## How a request reaches a backend
 
 Backend selection happens in the kernel. A separate `cgroup/connect4` BPF program
@@ -138,6 +141,8 @@ exchanges, with the heap returning to a plateau afterward.
 
 - HTTP/1.1 only. Other protocols get `505`.
 - VM workloads only.
-- One Route per node.
+- One Route per node. Issue
+  [#352: several Routes and hostnames on one listener](https://github.com/overdrive-sh/overdrive/issues/352) tracks
+  lifting this.
 - Certificates come from files. ACME is unbuilt.
 - No retry to a second backend.

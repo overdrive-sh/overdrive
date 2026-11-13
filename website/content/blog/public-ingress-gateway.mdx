@@ -19,9 +19,6 @@ claims stop. The reference pages are
 [Public ingress gateway](/docs/concepts/public-ingress-gateway) and
 [Expose a service publicly](/docs/how-to/expose-a-service-publicly).
 
-The design decisions here were ruled by the maintainer during design. The ADRs
-that record them are still marked proposed, pending independent review.
-
 ## The problem: a front door that must not become a second mesh
 
 A gateway has three jobs. It presents a public certificate, decides which backend
@@ -62,7 +59,7 @@ needs the same selection for its own connections. The obvious move was to fold t
 gateway case into the existing hook.
 
 We measured that and rejected it. Folding the logic in raised the verified
-instruction count of the program from 28 to 246 (spike V-GW-4). That cost lands on
+instruction count of the program from 28 to 246. That cost lands on
 every connect from every workload, to serve one cgroup. We kept the existing hook
 untouched and attached a separate `cgroup/connect4` program to the gateway's
 cgroup. It reuses the Service maps, so there is no new backend table and no
@@ -91,7 +88,7 @@ bytes between two kTLS sockets.
 **Splicing into a small pipe loses bytes.** `splice(2)` moves data through a pipe.
 When the pipe is smaller than a TLS record, the splice loses 5 bytes per record,
 the length of the record header. Nothing errors. The body arrives short. The relay
-therefore always splices through an empty pipe of at least 64 KiB (R-17). The loss is silent, so
+therefore always splices through an empty pipe of at least 64 KiB. The loss is silent, so
 the pipe size is a correctness setting, not a tuning knob.
 
 **KeyUpdate needs the right API.** TLS 1.3 lets either side rotate traffic keys
@@ -107,21 +104,20 @@ gateway flags starts the listener, and `overdrive deploy <ROUTE_SPEC>` declares 
 Route. The checked-in operator example drives a VM Service behind a Route that way.
 A recurring in-process end-to-end test guards the behavior.
 
-We ran that example once on native x86_64 metal, built from a clean checkout, with
-a Let's Encrypt certificate for a public hostname. A `curl` client using only the
-system trust store negotiated TLS 1.3, got `200`, and received the guest's streamed
-body. While the body streamed, `ss` showed the kernel TLS record layer configured
-for transmit and receive on both the public TCP/443 connection and the gateway's
-connection to the backend. After the example stopped, no gateway socket, VM, cgroup
-or network state remained. A reviewer who had not run the capture checked each of
-those claims against the raw output and found that all of them held.
+We ran that example once on a bare-metal x86_64 server, with a Let's Encrypt
+certificate for a public hostname. `curl`, trusting only the system certificate
+store, negotiated TLS 1.3, got `200`, and received the guest's streamed body. While
+the body streamed, `ss` showed kernel TLS handling both directions on the public
+connection and on the gateway's connection to the backend. After the example
+stopped, no gateway socket, VM, cgroup or network state remained. We ran it once,
+so this shows the path works end to end, not how often it does.
 
-The capture also found a gap the tests could not. Every test supplied the gateway's
-key-encryption key in-process, so no test had ever loaded it from a credential file
-the way `serve` does. The example omitted that file, and `serve` refused to start
-the gateway until we added it.
+That run found a bug our tests had missed. `serve` reads the gateway's key-encryption
+key from a credential file, but every test passed the key in directly, so nothing had
+exercised the file. The example did not create it, and `serve` refused to start the
+gateway until we fixed the example.
 
-A resource measurement at 128 concurrent exchanges (R-74) found:
+A resource measurement at 128 concurrent exchanges found:
 
 - 9 descriptors per exchange, 7 at steady state, so at most 1,152 at the connection
   limit.
@@ -131,7 +127,9 @@ A resource measurement at 128 concurrent exchanges (R-74) found:
 
 The HTTP behavior is bounded in code: 128 connections, 32 KiB heads, 100 headers,
 100 requests per connection, 16 MiB bodies, and 5, 30, and 120 second deadlines
-for the handshake, body progress, and whole request. A stalled head or body gets
+for the handshake, body progress, and whole request. Operators cannot
+change these limits yet. [#353: configurable gateway limits](https://github.com/overdrive-sh/overdrive/issues/353)
+tracks that. A stalled head or body gets
 `408`, an oversized head `431`, and an oversized declared body `413`. There is one
 attempt to the backend and no retry.
 
@@ -140,8 +138,8 @@ attempt to the backend and no retry.
 - **No performance claim.** The kTLS and splice path has no measured CPU or
   throughput advantage over the userspace path. The 117 ns hook cost is a single
   report-only measurement.
-- **The resource figures are one measurement.** R-74 came from one host and one
-  profile, not a distribution.
+- **The resource figures are one measurement.** We took them on one host with one
+  load profile, so they are a single sample, not a distribution.
 - **Certificate rotation is a file poll.** The gateway re-reads the certificate
   and key files every 30 seconds and installs a changed valid pair as a new
   generation. A bad replacement leaves the last usable key in place. That is
@@ -153,7 +151,8 @@ The gateway speaks HTTP/1.1 only and answers anything else with `505`. HTTP/2 is
 tracked in [#341](https://github.com/overdrive-sh/overdrive/issues/341). Certificates
 come from files you supply, with provenance recorded as `Manual`. ACME is tracked in
 [#57](https://github.com/overdrive-sh/overdrive/issues/57). The gateway serves VM
-workloads only, holds one Route per node, and has no CLI verb for status or
+workloads only, holds one Route per node
+([#352: several Routes on one listener](https://github.com/overdrive-sh/overdrive/issues/352)), and has no CLI verb for status or
 withdrawal. Those two operations are HTTP calls on the operator listener.
 
 The useful lesson is about reuse. Every simplification here came from declining to
