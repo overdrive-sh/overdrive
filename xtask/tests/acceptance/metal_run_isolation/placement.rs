@@ -7,8 +7,8 @@ use std::process::Command;
 
 const PURE_BINARY: &str = "overdrive-cli";
 const PURE_TEST: &str = "http_client::tests::category_strings_are_leak_free_by_construction";
-const NATIVE_BINARY: &str = "overdrive-control-plane";
-const NATIVE_TEST: &str = "guest_network::flow_io::accept_path_tier3::a_repair_of_a_held_listener_keeps_its_socket_and_its_port";
+const NATIVE_BINARY: &str = "xtask::acceptance";
+const NATIVE_TEST: &str = "acceptance::metal_run_isolation::namespace_trace::fixture_exhausts_only_a_real_owned_child_namespace_verification_read";
 const GUEST_BINARY: &str = "overdrive-bpf::integration";
 const GUEST_TEST: &str =
     "integration::xdp_pass_test_run::bpf_unit_runs_xdp_pass_triptych_via_bpf_prog_test_run";
@@ -315,9 +315,6 @@ fn sad_namespace_permission_denial_never_falls_back_to_the_host() {
     assert!(!fixture.temp.path().join("body.args").exists());
 }
 
-const NATIVE_SERVE_CONFORMANCE_BINARY: &str =
-    "overdrive-system-conformance::public_ingress_gateway_end_to_end";
-
 fn test_function_exists(row: &Value) -> bool {
     let source = row["source"].as_str().expect("source");
     let path = source.split(':').next().expect("source path");
@@ -373,13 +370,6 @@ fn runtime_placement_preserves_the_reviewed_partition_and_declares_new_acceptanc
             && row["placement"] == "guest-group"
             && declares_the_reviewed_guest_group_on_the_test(row)
         {
-            continue;
-        }
-        // The public-ingress conformance binary boots `serve` in-process on the
-        // node's KVM, so it was reclassified from the reviewed guest group to the
-        // native launcher (per-run node view). That boundary is asserted exactly.
-        if binary == NATIVE_SERVE_CONFORMANCE_BINARY && row["placement"] == "guest-group" {
-            assert_eq!(actual["kind"], "native-launcher", "changed boundary for {binary}::{name}");
             continue;
         }
         assert_eq!(actual["kind"], row["placement"], "changed boundary for {binary}::{name}");
