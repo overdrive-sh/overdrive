@@ -5,6 +5,57 @@ This file collects per-phase / per-feature C4 diagrams referenced from
 snapshot of the system at the close of a feature; superseded sections
 remain for traceability.
 
+## Metal test placement declared on the test (proposed)
+
+**PROPOSED — not accepted.** Decisions DDD-1..DDD-12 in
+[the feature delta](../../feature/metal-test-placement-attribute/feature-delta.md#wave-design--ref-decisions)
+await user approval. Test tooling only; no production runtime component
+changes.
+
+### C4 Level 1 — System Context
+
+```mermaid
+C4Context
+    title Metal test placement — system context (proposed)
+    Person(engineer, "Verification engineer or coding agent", "Adds, renames and runs integration tests")
+    System(placement, "Metal test placement tooling", "Declares where each test runs and runs it there")
+    System_Ext(nextest, "cargo-nextest", "Selects, retries and reports tests")
+    System_Ext(metal, "Metal box", "Native x86_64 KVM host that executes ordinary runs")
+    Rel(engineer, placement, "Declares placement on a test and checks it with")
+    Rel(engineer, nextest, "Runs tests through the Metal runner with")
+    Rel(nextest, placement, "Launches every test attempt through")
+    Rel(placement, metal, "Boots guests and namespaces on")
+```
+
+### C4 Level 2 — Container
+
+```mermaid
+C4Container
+    title Metal test placement — containers (proposed)
+    Person(engineer, "Verification engineer or coding agent")
+    System_Ext(nextest, "cargo-nextest", "Per-test process model")
+    Container_Boundary(repo, "Overdrive repository tooling") {
+        Container(macros, "overdrive-testing-macros", "Rust proc-macro", "Expands the placement attribute and writes the placement record")
+        Container(testing, "overdrive-testing", "Rust library", "Guest groups and profiles, run_in_guest, lane entry points, shared-guest client and owner core")
+        Container(owner, "Shared-guest owner", "Rust binary, one per module per run", "Boots one guest and runs attached tests one at a time")
+        Container(wrapper, "test-wrapper.sh", "bash and python3", "Reads the record and applies the isolation profile")
+        Container(lint, "placement-lint", "xtask subcommand", "Lists tests and refuses any without a placement")
+        Container(prepare, "guest-kit-prepare", "xtask subcommand", "Builds the kernel module, guest peer and owner binary")
+        Container(tests, "Test binaries", "Rust", "Carry one placement record per declared test")
+    }
+    System_Ext(guest, "Cloud Hypervisor guest", "Disposable microVM of a named group")
+    Rel(engineer, macros, "Declares placement with")
+    Rel(macros, tests, "Writes the placement record into")
+    Rel(tests, testing, "Calls run_in_guest and inside_guest in")
+    Rel(nextest, wrapper, "Launches each test attempt through")
+    Rel(wrapper, tests, "Reads the record from and execs")
+    Rel(testing, owner, "Elects and attaches to")
+    Rel(owner, guest, "Boots, execs in and discards")
+    Rel(testing, guest, "Boots one per isolated test")
+    Rel(lint, tests, "Reads the records of every listed test in")
+    Rel(prepare, owner, "Builds")
+```
+
 ## VM lifecycle responsiveness (#283/#260)
 
 **APPROVED, 2026-09-10; independent DESIGN review APPROVED; user ratification APPROVED.**

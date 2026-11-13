@@ -2177,6 +2177,24 @@ query exists, so Event Sourcing and CQRS add nothing.
 
 ## Application Architecture
 
+### Metal test placement declared on the test (feature `metal-test-placement-attribute`, 2026-11-13) — PROPOSED
+
+**PROPOSED, not accepted** (`.claude/rules/design.md` § "Surface material design
+decisions"). Test tooling only. A Metal test declares its placement on itself
+(`#[overdrive_test(...)]`), recorded in its own binary; the wrapper reads the
+record; the placement table, its lookup and the batched guest dispatcher are
+retired; tests of a module may opt in to one shared guest served by a
+per-module owner process. Decisions:
+[ADR-0282](adr-0282-a-metal-test-placement-is-declared-on-the-test-and-recorded-in-its-binary.md),
+[ADR-0283](adr-0283-the-tests-of-a-module-share-one-guest-through-a-per-module-owner-process.md),
+[ADR-0284](adr-0284-a-shared-guest-serves-one-test-at-a-time-and-is-never-reused-after-a-failure.md),
+[ADR-0285](adr-0285-a-test-knows-it-is-inside-a-guest-from-the-guest-kernel-command-line.md),
+[ADR-0286](adr-0286-a-guest-placed-test-fails-closed-outside-a-metal-run.md).
+Interface contracts and open user decisions:
+[feature delta](../../feature/metal-test-placement-attribute/feature-delta.md#wave-design--ref-decisions).
+Diagrams: [c4-diagrams.md](c4-diagrams.md). Protocol model:
+`specs/quint/shared-guest-owner/`.
+
 ### Approved VM lifecycle responsiveness amendment (#283 / #260, 2026-09-10)
 
 **APPROVED; independent DESIGN review APPROVED; user ratification APPROVED, 2026-09-10.**
