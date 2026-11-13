@@ -1,8 +1,8 @@
 # Step 05-07 final schema documentation remediation
 
-Date: 2026-11-13  
-Crafter: Codex replacement  
-Feature: service-allocation-readiness-and-ending  
+Date: 2026-11-13
+Crafter: Codex replacement
+Feature: service-allocation-readiness-and-ending
 Step: 05-07 — Default startup gate is guest-reported listeners
 
 ## Contract and scope
@@ -33,4 +33,3 @@ The generated schema no longer describes an inferred TCP default. Its ProbeMecha
 | Tests, native proof, and mutation tests | Not rerun; the changes are documentation-only |
 
 No DES events were added or rewritten for this schema-only remediation.
-
