@@ -1,0 +1,8 @@
+# DISCARDED as a pid-ns result, KEPT as a control observation (run f1edb50eb05de14c0c0360e2).
+# First attempt: the pid-ns owner computed its host pid from /proc/<getpid()> (= host init inside the namespace), so the pid-ns rows of that run are invalid.
+# The no-pid-ns v4c rows below are valid: with the guest IDLE, the VMM was gone within 3 s of SIGKILL of the owner (guest peer EOF), so the control was redone with the guest BUSY (evidence/v4-pidns.txt).
+OWNERPROBE_V4 v4e dead anchor 2798438: ensure_owner = Err("owner process exited exit status: 2; log:\nOWNER t=1794612146030 start argv_anchor=2798438 pidns=true vm=false cid=0 startup_ms=0\nOWNER t=1794612146030 REFUSE: pidfd_open(anchor=2798438) failed errno=3\n")
+OWNERPROBE_V4 v4c elected=true elect_to_exec_ms=2177 hello=Hello { ns_pid: 2798444, host_pid: 2798444, netns: "net:[4026533253]", pidns: "pid:[4026531836]", started_ms: 1794612148179 } exec="EXIT\t0" sock_len=52
+OWNERPROBE_V4 v4c owner_host_pid=2798444 members=[(2798751, "2798751", "cloud-hyperviso")]
+OWNERPROBE_V4 v4c SIGKILL owner (no pidns) pid=2798444 zombie_or_gone_us=Some(1144) gone_us=None
+OWNERPROBE_V4 v4c vmm state 3s+ after owner death: [(2798751, None)]

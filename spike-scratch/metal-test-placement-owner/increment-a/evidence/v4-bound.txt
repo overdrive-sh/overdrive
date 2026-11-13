@@ -1,0 +1,32 @@
+# v4-bound  filter: test(/^v4_bound/)  exit: 0
+OVERDRIVE_METAL_RUN_ID=e244aee7f76be76e3b155da1
+        PASS [   4.338s] (1/2) ownerprobe::probe v4_bound_simultaneous
+    OWNERPROBE_WRAPPER test=v4_bound_simultaneous wrapper_pid=2837284 wrapper_ppid=2832386 parent_comm=cargo-nextest parent_exe=/home/ubuntu/.cargo/bin/cargo-nextest grandparent_pid=2832383 grandparent_comm=sudo uid=0
+    OWNERPROBE_V4 v4p12 elected=true elect_to_exec_ms=1973 hello=Hello { ns_pid: 1, host_pid: 2837338, netns: "net:[4026533045]", pidns: "pid:[4026533099]", started_ms: 1794612374800 } exec="EXIT\t0" sock_len=54
+    OWNERPROBE_V4 v4p13 elected=true elect_to_exec_ms=2504 hello=Hello { ns_pid: 1, host_pid: 2837340, netns: "net:[4026533045]", pidns: "pid:[4026533101]", started_ms: 1794612375326 } exec="EXIT\t0" sock_len=54
+    OWNERPROBE_V4 v4p11 elected=true elect_to_exec_ms=2607 hello=Hello { ns_pid: 1, host_pid: 2837339, netns: "net:[4026533045]", pidns: "pid:[4026533100]", started_ms: 1794612375422 } exec="EXIT\t0" sock_len=54
+    OWNERPROBE_V4 v4p15 elected=true elect_to_exec_ms=2725 hello=Hello { ns_pid: 1, host_pid: 2837341, netns: "net:[4026533045]", pidns: "pid:[4026533102]", started_ms: 1794612375555 } exec="EXIT\t0" sock_len=54
+    OWNERPROBE_V4 bound v4p12 members=2 all_gone_us=33324
+    OWNERPROBE_V4 bound v4p13 members=2 all_gone_us=34676
+    OWNERPROBE_V4 bound v4p11 members=2 all_gone_us=36054
+    OWNERPROBE_V4 bound v4p15 members=2 all_gone_us=30909
+    OWNERPROBE_V4 bound simultaneous n=4 all_gone_us=[36054, 33324, 34676, 30909] max_ms=36
+        PASS [  18.930s] (2/2) ownerprobe::probe v4_bound_sequential
+    OWNERPROBE_WRAPPER test=v4_bound_sequential wrapper_pid=2837283 wrapper_ppid=2832386 parent_comm=cargo-nextest parent_exe=/home/ubuntu/.cargo/bin/cargo-nextest grandparent_pid=2832383 grandparent_comm=sudo uid=0
+    OWNERPROBE_V4 v4s5 elected=true elect_to_exec_ms=1771 hello=Hello { ns_pid: 1, host_pid: 2837327, netns: "net:[4026532940]", pidns: "pid:[4026533098]", started_ms: 1794612374588 } exec="EXIT\t0" sock_len=53
+    OWNERPROBE_V4 bound v4s5 members=2 all_gone_us=38647
+    OWNERPROBE_V4 v4s6 elected=true elect_to_exec_ms=1531 hello=Hello { ns_pid: 1, host_pid: 2837976, netns: "net:[4026532940]", pidns: "pid:[4026532815]", started_ms: 1794612377662 } exec="EXIT\t0" sock_len=53
+    OWNERPROBE_V4 bound v4s6 members=2 all_gone_us=25790
+    OWNERPROBE_V4 v4s7 elected=true elect_to_exec_ms=1593 hello=Hello { ns_pid: 1, host_pid: 2838249, netns: "net:[4026532940]", pidns: "pid:[4026532820]", started_ms: 1794612380779 } exec="EXIT\t0" sock_len=53
+    OWNERPROBE_V4 bound v4s7 members=2 all_gone_us=23675
+    OWNERPROBE_V4 v4s8 elected=true elect_to_exec_ms=1631 hello=Hello { ns_pid: 1, host_pid: 2838492, netns: "net:[4026532940]", pidns: "pid:[4026532815]", started_ms: 1794612383931 } exec="EXIT\t0" sock_len=53
+    OWNERPROBE_V4 bound v4s8 members=2 all_gone_us=36368
+    OWNERPROBE_V4 v4s9 elected=true elect_to_exec_ms=1576 hello=Hello { ns_pid: 1, host_pid: 2838714, netns: "net:[4026532940]", pidns: "pid:[4026532820]", started_ms: 1794612387044 } exec="EXIT\t0" sock_len=53
+    OWNERPROBE_V4 bound v4s9 members=2 all_gone_us=33299
+    OWNERPROBE_V4 v4s10 elected=true elect_to_exec_ms=1551 hello=Hello { ns_pid: 1, host_pid: 2838932, netns: "net:[4026532940]", pidns: "pid:[4026532815]", started_ms: 1794612390134 } exec="EXIT\t0" sock_len=54
+    OWNERPROBE_V4 bound v4s10 members=2 all_gone_us=35831
+    OWNERPROBE_V4 bound sequential n=6 all_gone_us=[38647, 25790, 23675, 36368, 33299, 35831] max_ms=38
+     Summary [  18.931s] 2 tests run: 2 passed, 22 skipped
+        PASS [   4.338s] (1/2) ownerprobe::probe v4_bound_simultaneous
+        PASS [  18.930s] (2/2) ownerprobe::probe v4_bound_sequential
+OVERDRIVE_METAL_RUN_COMPLETE run_id=e244aee7f76be76e3b155da1 exit_code=0 cause=command_returned

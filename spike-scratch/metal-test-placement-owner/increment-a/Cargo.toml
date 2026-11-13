@@ -1,0 +1,18 @@
+# PROBE (throwaway, isolated): the shared-guest owner as init of its own PID
+# namespace, the pidfd anchor, and the rendezvous socket (V-4, V-5, V-10 of
+# docs/feature/metal-test-placement-attribute). Not a member of the repo workspace.
+[package]
+name = "ownerprobe"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+libc = "0.2"
+overdrive-testing = { path = "../../../crates/overdrive-testing" }
+
+[[bin]]
+name = "ownerprobe"
+path = "src/bin/owner.rs"

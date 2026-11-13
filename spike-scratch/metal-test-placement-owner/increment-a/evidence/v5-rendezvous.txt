@@ -1,0 +1,84 @@
+# v5-rendezvous  filter: test(/^v5_/)  exit: 0
+OVERDRIVE_METAL_RUN_ID=fb5ffa5864dcb0a020039a96
+        PASS [   1.759s] ( 1/16) ownerprobe::probe v5_elect_4
+    OWNERPROBE_WRAPPER test=v5_elect_4 wrapper_pid=2751988 wrapper_ppid=2746316 parent_comm=cargo-nextest parent_exe=/home/ubuntu/.cargo/bin/cargo-nextest grandparent_pid=2746313 grandparent_comm=sudo uid=0
+    OWNERPROBE_V5 fam=v5e lock=true clients=8 distinct_owner_pids=1 elected_by_client=1 owner_start_lines=1 distinct_client_netns=8 clients_in_other_netns_than_owner=7
+    OWNERPROBE_V5 fam=v5e sock=/run/ovd-gk/fb5ffa5864dcb0a020039a96/shared/v5e-owner.sock len=58 mode=Ok(16832)
+        PASS [   1.761s] ( 2/16) ownerprobe::probe v5_elect_6
+    OWNERPROBE_WRAPPER test=v5_elect_6 wrapper_pid=2751981 wrapper_ppid=2746316 parent_comm=cargo-nextest parent_exe=/home/ubuntu/.cargo/bin/cargo-nextest grandparent_pid=2746313 grandparent_comm=sudo uid=0
+    OWNERPROBE_V5 fam=v5e lock=true clients=8 distinct_owner_pids=1 elected_by_client=1 owner_start_lines=1 distinct_client_netns=8 clients_in_other_netns_than_owner=7
+    OWNERPROBE_V5 fam=v5e sock=/run/ovd-gk/fb5ffa5864dcb0a020039a96/shared/v5e-owner.sock len=58 mode=Ok(16832)
+        PASS [   1.761s] ( 3/16) ownerprobe::probe v5_elect_1
+    OWNERPROBE_WRAPPER test=v5_elect_1 wrapper_pid=2751984 wrapper_ppid=2746316 parent_comm=cargo-nextest parent_exe=/home/ubuntu/.cargo/bin/cargo-nextest grandparent_pid=2746313 grandparent_comm=sudo uid=0
+    OWNERPROBE_V5 fam=v5e lock=true clients=8 distinct_owner_pids=1 elected_by_client=1 owner_start_lines=1 distinct_client_netns=8 clients_in_other_netns_than_owner=7
+    OWNERPROBE_V5 fam=v5e sock=/run/ovd-gk/fb5ffa5864dcb0a020039a96/shared/v5e-owner.sock len=58 mode=Ok(16832)
+        PASS [   1.761s] ( 4/16) ownerprobe::probe v5_elect_2
+    OWNERPROBE_WRAPPER test=v5_elect_2 wrapper_pid=2751978 wrapper_ppid=2746316 parent_comm=cargo-nextest parent_exe=/home/ubuntu/.cargo/bin/cargo-nextest grandparent_pid=2746313 grandparent_comm=sudo uid=0
+    OWNERPROBE_V5 fam=v5e lock=true clients=8 distinct_owner_pids=1 elected_by_client=1 owner_start_lines=1 distinct_client_netns=8 clients_in_other_netns_than_owner=7
+    OWNERPROBE_V5 fam=v5e sock=/run/ovd-gk/fb5ffa5864dcb0a020039a96/shared/v5e-owner.sock len=58 mode=Ok(16832)
+        PASS [   1.761s] ( 5/16) ownerprobe::probe v5_elect_7
+    OWNERPROBE_WRAPPER test=v5_elect_7 wrapper_pid=2751991 wrapper_ppid=2746316 parent_comm=cargo-nextest parent_exe=/home/ubuntu/.cargo/bin/cargo-nextest grandparent_pid=2746313 grandparent_comm=sudo uid=0
+    OWNERPROBE_V5 fam=v5e lock=true clients=8 distinct_owner_pids=1 elected_by_client=1 owner_start_lines=1 distinct_client_netns=8 clients_in_other_netns_than_owner=7
+    OWNERPROBE_V5 fam=v5e sock=/run/ovd-gk/fb5ffa5864dcb0a020039a96/shared/v5e-owner.sock len=58 mode=Ok(16832)
+        PASS [   1.762s] ( 6/16) ownerprobe::probe v5_elect_5
+    OWNERPROBE_WRAPPER test=v5_elect_5 wrapper_pid=2751982 wrapper_ppid=2746316 parent_comm=cargo-nextest parent_exe=/home/ubuntu/.cargo/bin/cargo-nextest grandparent_pid=2746313 grandparent_comm=sudo uid=0
+    OWNERPROBE_V5 fam=v5e lock=true clients=8 distinct_owner_pids=1 elected_by_client=1 owner_start_lines=1 distinct_client_netns=8 clients_in_other_netns_than_owner=7
+    OWNERPROBE_V5 fam=v5e sock=/run/ovd-gk/fb5ffa5864dcb0a020039a96/shared/v5e-owner.sock len=58 mode=Ok(16832)
+        PASS [   1.763s] ( 7/16) ownerprobe::probe v5_elect_3
+    OWNERPROBE_WRAPPER test=v5_elect_3 wrapper_pid=2751979 wrapper_ppid=2746316 parent_comm=cargo-nextest parent_exe=/home/ubuntu/.cargo/bin/cargo-nextest grandparent_pid=2746313 grandparent_comm=sudo uid=0
+    OWNERPROBE_V5 fam=v5e lock=true clients=8 distinct_owner_pids=1 elected_by_client=1 owner_start_lines=1 distinct_client_netns=8 clients_in_other_netns_than_owner=7
+    OWNERPROBE_V5 fam=v5e sock=/run/ovd-gk/fb5ffa5864dcb0a020039a96/shared/v5e-owner.sock len=58 mode=Ok(16832)
+        PASS [   1.763s] ( 8/16) ownerprobe::probe v5_elect_0
+    OWNERPROBE_WRAPPER test=v5_elect_0 wrapper_pid=2751980 wrapper_ppid=2746316 parent_comm=cargo-nextest parent_exe=/home/ubuntu/.cargo/bin/cargo-nextest grandparent_pid=2746313 grandparent_comm=sudo uid=0
+    OWNERPROBE_V5 fam=v5e lock=true clients=8 distinct_owner_pids=1 elected_by_client=1 owner_start_lines=1 distinct_client_netns=8 clients_in_other_netns_than_owner=7
+    OWNERPROBE_V5 fam=v5e sock=/run/ovd-gk/fb5ffa5864dcb0a020039a96/shared/v5e-owner.sock len=58 mode=Ok(16832)
+        PASS [   1.769s] ( 9/16) ownerprobe::probe v5_nolock_0
+    OWNERPROBE_WRAPPER test=v5_nolock_0 wrapper_pid=2751992 wrapper_ppid=2746316 parent_comm=cargo-nextest parent_exe=/home/ubuntu/.cargo/bin/cargo-nextest grandparent_pid=2746313 grandparent_comm=sudo uid=0
+    OWNERPROBE_V5 fam=v5c lock=false clients=8 distinct_owner_pids=1 elected_by_client=8 owner_start_lines=8 distinct_client_netns=8 clients_in_other_netns_than_owner=7
+    OWNERPROBE_V5 fam=v5c sock=/run/ovd-gk/fb5ffa5864dcb0a020039a96/shared/v5c-owner.sock len=58 mode=Ok(16832)
+        PASS [   1.769s] (10/16) ownerprobe::probe v5_nolock_1
+    OWNERPROBE_WRAPPER test=v5_nolock_1 wrapper_pid=2751989 wrapper_ppid=2746316 parent_comm=cargo-nextest parent_exe=/home/ubuntu/.cargo/bin/cargo-nextest grandparent_pid=2746313 grandparent_comm=sudo uid=0
+    OWNERPROBE_V5 fam=v5c lock=false clients=8 distinct_owner_pids=1 elected_by_client=8 owner_start_lines=8 distinct_client_netns=8 clients_in_other_netns_than_owner=7
+    OWNERPROBE_V5 fam=v5c sock=/run/ovd-gk/fb5ffa5864dcb0a020039a96/shared/v5c-owner.sock len=58 mode=Ok(16832)
+        PASS [   1.769s] (11/16) ownerprobe::probe v5_nolock_4
+    OWNERPROBE_WRAPPER test=v5_nolock_4 wrapper_pid=2751986 wrapper_ppid=2746316 parent_comm=cargo-nextest parent_exe=/home/ubuntu/.cargo/bin/cargo-nextest grandparent_pid=2746313 grandparent_comm=sudo uid=0
+    OWNERPROBE_V5 fam=v5c lock=false clients=8 distinct_owner_pids=1 elected_by_client=8 owner_start_lines=8 distinct_client_netns=8 clients_in_other_netns_than_owner=7
+    OWNERPROBE_V5 fam=v5c sock=/run/ovd-gk/fb5ffa5864dcb0a020039a96/shared/v5c-owner.sock len=58 mode=Ok(16832)
+        PASS [   1.770s] (12/16) ownerprobe::probe v5_nolock_3
+    OWNERPROBE_WRAPPER test=v5_nolock_3 wrapper_pid=2751985 wrapper_ppid=2746316 parent_comm=cargo-nextest parent_exe=/home/ubuntu/.cargo/bin/cargo-nextest grandparent_pid=2746313 grandparent_comm=sudo uid=0
+    OWNERPROBE_V5 fam=v5c lock=false clients=8 distinct_owner_pids=1 elected_by_client=8 owner_start_lines=8 distinct_client_netns=8 clients_in_other_netns_than_owner=7
+    OWNERPROBE_V5 fam=v5c sock=/run/ovd-gk/fb5ffa5864dcb0a020039a96/shared/v5c-owner.sock len=58 mode=Ok(16832)
+        PASS [   1.770s] (13/16) ownerprobe::probe v5_nolock_2
+    OWNERPROBE_WRAPPER test=v5_nolock_2 wrapper_pid=2751993 wrapper_ppid=2746316 parent_comm=cargo-nextest parent_exe=/home/ubuntu/.cargo/bin/cargo-nextest grandparent_pid=2746313 grandparent_comm=sudo uid=0
+    OWNERPROBE_V5 fam=v5c lock=false clients=8 distinct_owner_pids=1 elected_by_client=8 owner_start_lines=8 distinct_client_netns=8 clients_in_other_netns_than_owner=7
+    OWNERPROBE_V5 fam=v5c sock=/run/ovd-gk/fb5ffa5864dcb0a020039a96/shared/v5c-owner.sock len=58 mode=Ok(16832)
+        PASS [   1.770s] (14/16) ownerprobe::probe v5_nolock_5
+    OWNERPROBE_WRAPPER test=v5_nolock_5 wrapper_pid=2751990 wrapper_ppid=2746316 parent_comm=cargo-nextest parent_exe=/home/ubuntu/.cargo/bin/cargo-nextest grandparent_pid=2746313 grandparent_comm=sudo uid=0
+    OWNERPROBE_V5 fam=v5c lock=false clients=8 distinct_owner_pids=1 elected_by_client=8 owner_start_lines=8 distinct_client_netns=8 clients_in_other_netns_than_owner=7
+    OWNERPROBE_V5 fam=v5c sock=/run/ovd-gk/fb5ffa5864dcb0a020039a96/shared/v5c-owner.sock len=58 mode=Ok(16832)
+        PASS [   1.771s] (15/16) ownerprobe::probe v5_nolock_7
+    OWNERPROBE_WRAPPER test=v5_nolock_7 wrapper_pid=2751987 wrapper_ppid=2746316 parent_comm=cargo-nextest parent_exe=/home/ubuntu/.cargo/bin/cargo-nextest grandparent_pid=2746313 grandparent_comm=sudo uid=0
+    OWNERPROBE_V5 fam=v5c lock=false clients=8 distinct_owner_pids=1 elected_by_client=8 owner_start_lines=8 distinct_client_netns=8 clients_in_other_netns_than_owner=7
+    OWNERPROBE_V5 fam=v5c sock=/run/ovd-gk/fb5ffa5864dcb0a020039a96/shared/v5c-owner.sock len=58 mode=Ok(16832)
+        PASS [   1.771s] (16/16) ownerprobe::probe v5_nolock_6
+    OWNERPROBE_WRAPPER test=v5_nolock_6 wrapper_pid=2751983 wrapper_ppid=2746316 parent_comm=cargo-nextest parent_exe=/home/ubuntu/.cargo/bin/cargo-nextest grandparent_pid=2746313 grandparent_comm=sudo uid=0
+    OWNERPROBE_V5 fam=v5c lock=false clients=8 distinct_owner_pids=1 elected_by_client=8 owner_start_lines=8 distinct_client_netns=8 clients_in_other_netns_than_owner=7
+    OWNERPROBE_V5 fam=v5c sock=/run/ovd-gk/fb5ffa5864dcb0a020039a96/shared/v5c-owner.sock len=58 mode=Ok(16832)
+     Summary [   1.772s] 16 tests run: 16 passed, 6 skipped
+        PASS [   1.759s] ( 1/16) ownerprobe::probe v5_elect_4
+        PASS [   1.761s] ( 2/16) ownerprobe::probe v5_elect_6
+        PASS [   1.761s] ( 3/16) ownerprobe::probe v5_elect_1
+        PASS [   1.761s] ( 4/16) ownerprobe::probe v5_elect_2
+        PASS [   1.761s] ( 5/16) ownerprobe::probe v5_elect_7
+        PASS [   1.762s] ( 6/16) ownerprobe::probe v5_elect_5
+        PASS [   1.763s] ( 7/16) ownerprobe::probe v5_elect_3
+        PASS [   1.763s] ( 8/16) ownerprobe::probe v5_elect_0
+        PASS [   1.769s] ( 9/16) ownerprobe::probe v5_nolock_0
+        PASS [   1.769s] (10/16) ownerprobe::probe v5_nolock_1
+        PASS [   1.769s] (11/16) ownerprobe::probe v5_nolock_4
+        PASS [   1.770s] (12/16) ownerprobe::probe v5_nolock_3
+        PASS [   1.770s] (13/16) ownerprobe::probe v5_nolock_2
+        PASS [   1.770s] (14/16) ownerprobe::probe v5_nolock_5
+        PASS [   1.771s] (15/16) ownerprobe::probe v5_nolock_7
+        PASS [   1.771s] (16/16) ownerprobe::probe v5_nolock_6
+OVERDRIVE_METAL_RUN_COMPLETE run_id=fb5ffa5864dcb0a020039a96 exit_code=0 cause=command_returned
