@@ -2,18 +2,6 @@
   "format": "overdrive-metal-test-placement-v1",
   "placements": {
     "overdrive-bpf::integration": {
-      "integration::guest_tcx_classifier_test_run::classifier_partitions_return_one_verdict_and_advance_one_exact_counter": {
-        "kind": "guest-group",
-        "group": "mtls-relay"
-      },
-      "integration::guest_tcx_classifier_test_run::egress_classifier_delivers_only_registered_unicast_and_every_group_frame": {
-        "kind": "guest-group",
-        "group": "mtls-relay"
-      },
-      "integration::guest_tcx_classifier_test_run::ingress_partitions_leave_the_ninth_egress_slot_untouched": {
-        "kind": "guest-group",
-        "group": "mtls-relay"
-      },
       "integration::sanity_prologue_drops::ipv4_with_options_ihl6_returns_xdp_pass_no_drop_counter_increment": {
         "kind": "guest-group",
         "group": "mtls-relay"

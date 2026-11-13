@@ -10,7 +10,8 @@ const PURE_TEST: &str = "http_client::tests::category_strings_are_leak_free_by_c
 const NATIVE_BINARY: &str = "overdrive-control-plane";
 const NATIVE_TEST: &str = "guest_network::flow_io::accept_path_tier3::a_repair_of_a_held_listener_keeps_its_socket_and_its_port";
 const GUEST_BINARY: &str = "overdrive-bpf::integration";
-const GUEST_TEST: &str = "integration::guest_tcx_classifier_test_run::classifier_partitions_return_one_verdict_and_advance_one_exact_counter";
+const GUEST_TEST: &str =
+    "integration::xdp_pass_test_run::bpf_unit_runs_xdp_pass_triptych_via_bpf_prog_test_run";
 
 #[expect(
     clippy::literal_string_with_formatting_args,
