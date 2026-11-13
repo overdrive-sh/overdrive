@@ -5,7 +5,7 @@
 //! # The production owner under test
 //!
 //! `build_service_stream`, the Service submit stream. The driver holds the stream and
-//! polls it by hand (`now_or_never`), so the stream's own steps happen exactly when
+//! polls it by hand (`now_or_never`), so the stream's own steps happen when
 //! the model's `Subscribe`, `Read`, `Deliver` and `Relist` steps do; the environment
 //! (the shim's row commit and event publish, a lagging bus, a fresh-id restart) acts
 //! on the `SimObservationStore` and the lifecycle bus at scripted points relative to
@@ -16,11 +16,11 @@
 //! | Action | Driver |
 //! |---|---|
 //! | `init` | a fresh node; the stream is built (nothing polled) |
-//! | `Subscribe` | the stream is polled to its `Accepted` line, the subscribe point: the stream subscribes and reads on its next poll, so a row committed or event published from here until the `Read` step is exactly what the model's subscribed-but-not-yet-read window holds |
-//! | `Read(ok)` | the stream is polled: it subscribes, reads the recorded verdict and ends with it, waits, or (for `ok = false`, the `SimObservationStore`'s injected `alloc_status_rows` fault) ends with a stream error |
+//! | `Subscribe` | the stream yields `Accepted`, then its next poll creates the real bus receiver and waits at the test-local observation-port gate before scanning rows |
+//! | `Read(ok)` | the observation-port gate releases; the stream reads the recorded verdict and ends with it, waits, or (for `ok = false`, the `SimObservationStore`'s injected `alloc_status_rows` fault) ends with a stream error |
 //! | `Commit(a, t)` | the shim's row commit for attempt `a` (`stable`: `Running` + `Stable`; `startup_stop` / `liveness_stop`: `Terminated` + the probe stop; `giveup`: `Failed` + `BackoffExhausted`; `operator_stop`: `Terminated` + `Stopped { Operator }`) |
 //! | `Publish(a)` | the shim's event for the committed write on the lifecycle bus |
-//! | `Deliver(a)` | the stream is polled: it consumes its channel (the model's channel is unordered; the bus is FIFO, so the driver requires `a` to be the oldest undelivered event and fails with a typed error otherwise) |
+//! | `Deliver(a)` | the stream is polled: it drains its ready FIFO from the oldest event `a` until a verdict or Pending, as the model's one Deliver step does |
 //! | `Lag` | the bus is overflowed with other workloads' events, so the subscription's undelivered events are dropped and its next receive is `Lagged` |
 //! | `Relist(ok)` | the stream is polled: its `Lagged` receive repeats the read (`ok = false`: the injected fault) |
 //! | `Restart` | the shim's commit of the fresh-id successor attempt `Running` (the predecessor's event was published first, SS-6) |
@@ -36,7 +36,8 @@
 //! allocation id. The line `build_service_stream` yields is an input and an oracle, not a
 //! projected variable: it names which allocation's row closed the stream, and `from_driver`
 //! fails when the yielded kind disagrees with the row's. A stream error closes without a
-//! row (`kind == error`, `closeAtt == -1`). `closes` is `1` once a closing outcome is
+//! row (`kind == error`, `closeAtt == -1`); the driver accepts only the injected
+//! typed `ObservationRead` cause for this projection. `closes` is `1` once a closing outcome is
 //! known; a second closing outcome is rejected at the poll (the stream must end after its
 //! one verdict). Model-only: the world (`w`), the channel and lag flags (the subscription's
 //! internals), `armed` (only observable as D10's later timeout), `src` and `closeTerm` (a
@@ -44,19 +45,37 @@
 //! (carried by `kind == error`), and `conf_step`.
 
 use std::pin::Pin;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
+use async_trait::async_trait;
 use axum::body::Bytes;
 use futures::{FutureExt as _, Stream, StreamExt as _};
 use itf::Value;
 use overdrive_core::TransitionReason;
+use overdrive_core::ca::issue_failure::SvidIssueFailure;
+use overdrive_core::ca::issued_certificate_row::IssuedCertificateRow;
 use overdrive_core::id::WorkloadId;
+use overdrive_core::id::{AllocationId, CorrelationKey, IssuanceOrdinal, NodeId, ServiceId};
+use overdrive_core::observation::ProbeResultRow;
+use overdrive_core::public_ingress::{
+    GatewayApplicationStatusRowV1, PublicCertifiedKeyId, PublicCertifiedKeyStatusRowV1,
+};
+use overdrive_core::traits::observation_store::WorkloadSvidIssueStatusRowV1;
+use overdrive_core::traits::observation_store::{
+    AllocLifecycleOccurrenceRow, AllocStatusRow, LagAwareSubscription, NodeHealthRow,
+    ObservationWrite, ReconcileConflictRow, ServiceBackendRow, ServiceHydrationResultRow,
+    TransitionSource,
+};
 use overdrive_core::traits::observation_store::{
     AllocState, ObservationStore, ObservationStoreError,
 };
 use overdrive_core::transition_reason::{ProbeWitness, StoppedBy, TerminalCondition};
+use overdrive_core::workflow::{SignalKey, SignalValue, WorkflowStatus};
 use quint_connect::{Config, Driver, Result, State, Step, quint_run, quint_test, switch};
 use serde::Deserialize;
 use tokio::runtime::Runtime;
+use tokio::sync::Semaphore;
 
 use super::{Composition, alloc_row, commit, compose, publish};
 use crate::api::IdempotencyOutcome;
@@ -79,6 +98,195 @@ enum Polled {
     Error,
 }
 
+// The existing ObservationStore port supplies the test's poll boundary. Holding
+// its first snapshot read leaves build_service_stream suspended only after the
+// production bus receiver exists. All other calls delegate unchanged.
+type StoreResult<T, E> = std::result::Result<T, E>;
+
+struct SnapshotReadGate {
+    inner: Arc<overdrive_sim::adapters::observation_store::SimObservationStore>,
+    // 0 = no gate, 1 = before snapshot, 2 = after snapshot.
+    pause_next: AtomicU8,
+    entered: AtomicBool,
+    release: Semaphore,
+}
+
+impl SnapshotReadGate {
+    fn new(inner: Arc<overdrive_sim::adapters::observation_store::SimObservationStore>) -> Self {
+        Self {
+            inner,
+            pause_next: AtomicU8::new(0),
+            entered: AtomicBool::new(false),
+            release: Semaphore::new(0),
+        }
+    }
+
+    fn hold_next_read(&self) {
+        self.entered.store(false, Ordering::SeqCst);
+        self.pause_next.store(1, Ordering::SeqCst);
+    }
+
+    fn hold_after_snapshot(&self) {
+        self.entered.store(false, Ordering::SeqCst);
+        self.pause_next.store(2, Ordering::SeqCst);
+    }
+
+    fn entered(&self) -> bool {
+        self.entered.load(Ordering::SeqCst)
+    }
+
+    fn release(&self) {
+        self.release.add_permits(1);
+    }
+}
+
+#[async_trait]
+impl ObservationStore for SnapshotReadGate {
+    async fn public_certified_key_status_row(
+        &self,
+        id: &PublicCertifiedKeyId,
+    ) -> StoreResult<Option<PublicCertifiedKeyStatusRowV1>, ObservationStoreError> {
+        self.inner.public_certified_key_status_row(id).await
+    }
+
+    async fn gateway_application_status_row(
+        &self,
+        node_id: &NodeId,
+    ) -> StoreResult<Option<GatewayApplicationStatusRowV1>, ObservationStoreError> {
+        self.inner.gateway_application_status_row(node_id).await
+    }
+
+    async fn record_workload_svid_issue_failure(
+        &self,
+        alloc_id: &AllocationId,
+        node_id: &NodeId,
+        failure: SvidIssueFailure,
+    ) -> StoreResult<(), ObservationStoreError> {
+        self.inner.record_workload_svid_issue_failure(alloc_id, node_id, failure).await
+    }
+
+    async fn workload_svid_issue_status_row(
+        &self,
+        alloc_id: &AllocationId,
+    ) -> StoreResult<Option<WorkloadSvidIssueStatusRowV1>, ObservationStoreError> {
+        self.inner.workload_svid_issue_status_row(alloc_id).await
+    }
+
+    async fn write(&self, row: ObservationWrite) -> StoreResult<(), ObservationStoreError> {
+        self.inner.write(row).await
+    }
+
+    async fn write_alloc_lifecycle(
+        &self,
+        current: AllocStatusRow,
+        source: TransitionSource,
+    ) -> StoreResult<Option<AllocLifecycleOccurrenceRow>, ObservationStoreError> {
+        self.inner.write_alloc_lifecycle(current, source).await
+    }
+
+    async fn alloc_lifecycle_occurrences(
+        &self,
+        alloc_id: &AllocationId,
+    ) -> StoreResult<Vec<AllocLifecycleOccurrenceRow>, ObservationStoreError> {
+        self.inner.alloc_lifecycle_occurrences(alloc_id).await
+    }
+
+    async fn subscribe_all_events(
+        &self,
+    ) -> StoreResult<LagAwareSubscription, ObservationStoreError> {
+        self.inner.subscribe_all_events().await
+    }
+
+    async fn alloc_status_rows(&self) -> StoreResult<Vec<AllocStatusRow>, ObservationStoreError> {
+        let pause = self.pause_next.swap(0, Ordering::SeqCst);
+        if pause == 1 {
+            self.entered.store(true, Ordering::SeqCst);
+            self.release.acquire().await.expect("read gate stays open").forget();
+        }
+        let snapshot = self.inner.alloc_status_rows().await;
+        if pause == 2 {
+            self.entered.store(true, Ordering::SeqCst);
+            self.release.acquire().await.expect("read gate stays open").forget();
+        }
+        snapshot
+    }
+
+    async fn alloc_status_row(
+        &self,
+        alloc_id: &AllocationId,
+    ) -> StoreResult<Option<AllocStatusRow>, ObservationStoreError> {
+        self.inner.alloc_status_row(alloc_id).await
+    }
+
+    async fn node_health_rows(&self) -> StoreResult<Vec<NodeHealthRow>, ObservationStoreError> {
+        self.inner.node_health_rows().await
+    }
+
+    async fn issued_certificate_rows(
+        &self,
+    ) -> StoreResult<Vec<IssuedCertificateRow>, ObservationStoreError> {
+        self.inner.issued_certificate_rows().await
+    }
+
+    async fn next_issuance_ordinal(&self) -> StoreResult<IssuanceOrdinal, ObservationStoreError> {
+        self.inner.next_issuance_ordinal().await
+    }
+
+    async fn service_hydration_results_rows(
+        &self,
+        service_id: &ServiceId,
+    ) -> StoreResult<Vec<ServiceHydrationResultRow>, ObservationStoreError> {
+        self.inner.service_hydration_results_rows(service_id).await
+    }
+
+    async fn service_backends_rows(
+        &self,
+        service_id: &ServiceId,
+    ) -> StoreResult<Vec<ServiceBackendRow>, ObservationStoreError> {
+        self.inner.service_backends_rows(service_id).await
+    }
+
+    async fn all_service_backends_rows(
+        &self,
+    ) -> StoreResult<Vec<ServiceBackendRow>, ObservationStoreError> {
+        self.inner.all_service_backends_rows().await
+    }
+
+    async fn reconcile_conflict_rows(
+        &self,
+        service_id: &ServiceId,
+    ) -> StoreResult<Vec<ReconcileConflictRow>, ObservationStoreError> {
+        self.inner.reconcile_conflict_rows(service_id).await
+    }
+
+    async fn write_probe_result(
+        &self,
+        row: ProbeResultRow,
+    ) -> StoreResult<(), ObservationStoreError> {
+        self.inner.write_probe_result(row).await
+    }
+
+    async fn list_probe_results_for_alloc(
+        &self,
+        alloc_id: &AllocationId,
+    ) -> StoreResult<Vec<ProbeResultRow>, ObservationStoreError> {
+        self.inner.list_probe_results_for_alloc(alloc_id).await
+    }
+
+    async fn workflow_terminal_rows(
+        &self,
+    ) -> StoreResult<Vec<(CorrelationKey, WorkflowStatus)>, ObservationStoreError> {
+        self.inner.workflow_terminal_rows().await
+    }
+
+    async fn workflow_signal(
+        &self,
+        key: &SignalKey,
+    ) -> StoreResult<Option<SignalValue>, ObservationStoreError> {
+        self.inner.workflow_signal(key).await
+    }
+}
+
 struct StreamSnapshotDriver {
     rt: Runtime,
     /// The composed node, held directly: the projection reads the closing row through
@@ -90,13 +298,13 @@ struct StreamSnapshotDriver {
     /// Events published and not yet delivered to the stream, oldest first (the order
     /// the bus will deliver them in).
     undelivered: std::collections::VecDeque<u32>,
-    /// Whether the stream has subscribed (its second poll, the `Read` step).
+    /// The stream's first read is held at the existing observation port after
+    /// production has subscribed, so the model's Subscribe is a real boundary.
+    read_gate: Arc<SnapshotReadGate>,
+    /// Whether the stream has subscribed (the held poll after `Accepted`).
     subscribed: bool,
     /// The model's `lagged` flag: set by `Lag`, cleared by the `Relist` poll.
     lagged: bool,
-    /// Events published between the model's `Subscribe` (the `Accepted` line) and the
-    /// stream's real subscription: the model's channel holds them, the bus does not.
-    window: Vec<u32>,
     cur: u32,
     counter: u64,
 }
@@ -107,16 +315,18 @@ impl StreamSnapshotDriver {
             .enable_all()
             .build()
             .expect("current-thread runtime");
-        let node = rt.block_on(compose(2911));
+        let mut node = rt.block_on(compose(2911));
+        let read_gate = Arc::new(SnapshotReadGate::new(Arc::clone(&node.obs)));
+        node.state.obs = Arc::clone(&read_gate) as Arc<dyn ObservationStore>;
         Self {
             rt,
             node,
             stream: None,
             yielded: Vec::new(),
             undelivered: std::collections::VecDeque::new(),
+            read_gate,
             subscribed: false,
             lagged: false,
-            window: Vec::new(),
             cur: 0,
             counter: 0,
         }
@@ -129,6 +339,8 @@ impl StreamSnapshotDriver {
     fn init(&mut self) {
         eprintln!("quint-conformance stream_snapshot seed=2911");
         self.node = self.rt.block_on(compose(2911));
+        self.read_gate = Arc::new(SnapshotReadGate::new(Arc::clone(&self.node.obs)));
+        self.node.state.obs = Arc::clone(&self.read_gate) as Arc<dyn ObservationStore>;
         let accepted = build_service_accepted(
             "0".repeat(64),
             format!("workloads/{WORKLOAD}"),
@@ -145,43 +357,64 @@ impl StreamSnapshotDriver {
         self.undelivered.clear();
         self.subscribed = false;
         self.lagged = false;
-        self.window.clear();
         self.cur = 0;
         self.counter = 0;
     }
 
-    /// Poll the stream until it is pending, ended, or has produced its closing
-    /// outcome; record the closing outcome.
+    /// Drive a logical stream step through ready work. Tokio may return a
+    /// cooperative Pending while draining a full broadcast buffer, so one
+    /// external model step can require more than one physical poll.
     fn poll(&mut self) -> Result {
         let stream = self.stream.as_mut().expect("init built the stream");
-        let produced = self.rt.block_on(async {
-            loop {
-                let polled = match stream.next().now_or_never() {
-                    None => Polled::Pending,
-                    Some(None) => Polled::Ended,
-                    Some(Some(Ok(bytes))) => Polled::Line(serde_json::from_slice(&bytes)?),
-                    Some(Some(Err(_))) => Polled::Error,
-                };
-                match polled {
-                    Polled::Pending | Polled::Ended => return Ok::<_, anyhow::Error>(None),
-                    // The `Accepted` line is not a closing outcome: keep polling.
-                    Polled::Line(ServiceSubmitEvent::Accepted { .. }) => {}
-                    outcome => return Ok(Some(outcome)),
+        // The fixture can leave at most one full broadcast buffer plus eight
+        // noise events ready. A stable Pending after this bound is a true wait.
+        for _ in 0..=(crate::DEFAULT_LIFECYCLE_BROADCAST_CAPACITY + 8) {
+            let produced = self.rt.block_on(async {
+                loop {
+                    let polled = match stream.next().now_or_never() {
+                        None => Polled::Pending,
+                        Some(None) => Polled::Ended,
+                        Some(Some(Ok(bytes))) => Polled::Line(serde_json::from_slice(&bytes)?),
+                        Some(Some(Err(ServiceStreamError::ObservationRead {
+                            source: ObservationStoreError::Unreachable { peer },
+                        }))) if peer == "peer-b" => Polled::Error,
+                        Some(Some(Err(error))) => {
+                            anyhow::bail!(
+                                "unexpected stream error instead of typed read cause: {error:?}"
+                            )
+                        }
+                    };
+                    match polled {
+                        // The `Accepted` line is not a closing outcome: keep polling.
+                        Polled::Line(ServiceSubmitEvent::Accepted { .. }) => {}
+                        outcome => return Ok::<_, anyhow::Error>(outcome),
+                    }
+                }
+            })?;
+            match produced {
+                Polled::Pending => {}
+                Polled::Ended => return Ok(()),
+                outcome => {
+                    anyhow::ensure!(
+                        self.yielded.is_empty(),
+                        "the stream yielded a second closing outcome after its verdict",
+                    );
+                    self.yielded.push(outcome);
+                    return Ok(());
                 }
             }
-        })?;
-        if let Some(outcome) = produced {
-            anyhow::ensure!(
-                self.yielded.is_empty(),
-                "the stream yielded a second closing outcome after its verdict",
-            );
-            self.yielded.push(outcome);
         }
         Ok(())
     }
 
-    /// Poll exactly to the `Accepted` line and no further (the subscribe point).
+    /// Poll past `Accepted` into the real `bus.subscribe`, then hold the
+    /// observation read. The next environment action is inside the actual
+    /// subscribe-before-read window.
     fn subscribe(&mut self) -> Result {
+        self.subscribe_at_snapshot(false)
+    }
+
+    fn subscribe_at_snapshot(&mut self, after_snapshot: bool) -> Result {
         let stream = self.stream.as_mut().expect("init built the stream");
         let first = self
             .rt
@@ -193,6 +426,20 @@ impl StreamSnapshotDriver {
             matches!(line, ServiceSubmitEvent::Accepted { .. }),
             "the first line is Accepted; got {line:?}"
         );
+        if after_snapshot {
+            self.read_gate.hold_after_snapshot();
+        } else {
+            self.read_gate.hold_next_read();
+        }
+        anyhow::ensure!(
+            self.rt.block_on(async { stream.next().now_or_never() }).is_none(),
+            "the stream waits at its first recorded-verdict read"
+        );
+        anyhow::ensure!(
+            self.read_gate.entered(),
+            "the stream reached the observation read after subscribing"
+        );
+        self.subscribed = true;
         Ok(())
     }
 
@@ -200,8 +447,10 @@ impl StreamSnapshotDriver {
         if !ok {
             self.fail_next_read();
         }
-        self.subscribed = true;
-        self.poll()
+        self.read_gate.release();
+        self.poll()?;
+        self.undelivered.clear();
+        Ok(())
     }
 
     fn fail_next_read(&self) {
@@ -268,22 +517,14 @@ impl StreamSnapshotDriver {
         if self.subscribed {
             // Retained behind the lag when lagged, as the model's `Publish` appends.
             self.undelivered.push_back(attempt);
-        } else {
-            self.window.push(attempt);
         }
         Ok(())
     }
 
     fn deliver(&mut self, a: i64) -> Result {
         let attempt = u32::try_from(a)?;
-        if let Some(at) = self.window.iter().position(|w| *w == attempt) {
-            // Published before the stream subscribed: the model's channel holds it, the
-            // bus never carried it to this stream; consuming it changes nothing.
-            self.window.remove(at);
-            return self.poll();
-        }
         // The model's channel is an ordered list; `Deliver` is disabled while lagged and
-        // takes the oldest event (DG-5). The bus delivers in publication order.
+        // starts at the oldest event (DG-5). The bus delivers in publication order.
         anyhow::ensure!(!self.lagged, "ModelAbstraction: Deliver is disabled while lagged");
         anyhow::ensure!(
             self.undelivered.front() == Some(&attempt),
@@ -291,8 +532,9 @@ impl StreamSnapshotDriver {
              undelivered event is {:?}",
             self.undelivered.front(),
         );
-        self.undelivered.pop_front();
-        self.poll()
+        self.poll()?;
+        self.undelivered.clear();
+        Ok(())
     }
 
     fn lag(&mut self) {
@@ -303,7 +545,6 @@ impl StreamSnapshotDriver {
             publish(self.node(), &noise);
         }
         self.undelivered.clear();
-        self.window.clear();
         self.lagged = true;
     }
 
@@ -312,7 +553,9 @@ impl StreamSnapshotDriver {
             self.fail_next_read();
         }
         self.lagged = false;
-        self.poll()
+        self.poll()?;
+        self.undelivered.clear();
+        Ok(())
     }
 
     fn restart(&mut self) {
@@ -486,8 +729,32 @@ fn attempt_of(alloc_id: &str) -> Result<i64> {
 // ----- the runs ----------------------------------------------------------------
 //
 // One `#[quint_test]` per named run of `ss_conf` (README § "Named runs"), plus
-// `#[quint_run]` randomized traces (seed printed on failure). Each is ignored until
-// D11 lands: the stream does not yet subscribe, read the recorded verdict or relist.
+// `#[quint_run]` randomized traces (seed printed on failure).
+
+/// D11 S-40 counterfactual: the first snapshot has already returned no verdict,
+/// then a terminal is committed and published before the stream resumes. Only
+/// subscribe-before-read can deliver that event after the empty snapshot.
+/// CONTRACT_SHAPE: bounded-change.
+#[test]
+fn a_terminal_published_after_the_empty_snapshot_reaches_the_subscribed_stream() {
+    let mut driver = StreamSnapshotDriver::new();
+    driver.init();
+    driver.subscribe_at_snapshot(true).expect("the stream subscribes and scans empty rows");
+
+    driver.commit(0, "stable").expect("the terminal commits after the empty snapshot");
+    driver.publish(0).expect("the terminal publishes before the snapshot returns");
+    driver.read_gate.release();
+    driver.poll().expect("the live event closes the stream");
+
+    assert!(matches!(
+        driver.yielded.as_slice(),
+        [Polled::Line(ServiceSubmitEvent::Stable { alloc_id, .. })] if alloc_id == "alloc-ss-0"
+    ));
+    assert!(matches!(
+        driver.rt.block_on(async { driver.stream.as_mut().unwrap().next().now_or_never() }),
+        Some(None)
+    ));
+}
 
 /// Named run `redeploy_unchanged_of_stable_ends_stable` (D11).
 #[quint_test(

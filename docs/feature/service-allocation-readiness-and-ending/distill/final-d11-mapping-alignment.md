@@ -1,0 +1,34 @@
+# Final D11 stream-snapshot conformance mapping alignment
+
+## Authority and reproduced mismatch
+
+D11 and ADR-0263 require `Accepted`, then lifecycle-bus subscription, then one read of the current attempt's recorded verdict, followed by waiting only when that read has no verdict. The accepted R-4 residual permits a live event published while attempt 0 was current to be consumed after attempt 1 exists; it reports the publication-time verdict. The invariants `StreamEndsOnceHonestly`, `RestartableStopNeverEndsStream`, `FailedReadNeverWaits` and `NoMissedTerminal`, the read-before-subscribe hazard, the typed `ServiceStreamError` set, and the public API remain unchanged.
+
+The prior driver called the first `Accepted` line its `Subscribe` step. In production, `build_service_stream` yields that line before `bus.subscribe()` (`streaming.rs:1090–1110`); the next poll subscribes and enters `ObservationStore::alloc_status_rows`. The local production adapter's scan awaits `spawn_blocking` (`observation_backend.rs:938–968`), so the actual subscription-to-snapshot interval is observable through that existing port. The old driver also assumed one queued lifecycle event per external poll. Production's stream loop continues through restartable events until it yields a verdict or becomes pending (`streaming.rs:1123–1196`).
+
+The retained `QUINT_SEED=0x43d4164d` failure was reproduced against `build_service_stream` after installing a test-local read gate but before correcting the model's poll granularity: at `Deliver(0)`, the model remained open after consuming attempt 0's restartable stop, while the production poll also consumed attempt 1's queued give-up and yielded `Failed`. Metal run `c0ff97c755d6bdf04674cec6` failed at this exact state comparison. A second independent seed, `0x94ef88cb`, exposed Tokio's cooperative `Pending` while the stream drained the full lagged broadcast buffer: the first physical poll after `Deliver(1)` was still open even though the queued attempt 1 give-up was ready (run `0a9662e89578ad3664433bac`, retained verbose log `/private/tmp/d11-seed94-verbose.log`).
+
+## Test-side correction
+
+`SnapshotReadGate` delegates the existing `ObservationStore` methods to `SimObservationStore`. For the conformance `Subscribe` action, it holds the first `alloc_status_rows` call before the scan, after `build_service_stream` has created its real bus receiver. `Read` releases that call. The gate adds no production seam or public surface. A focused S-40 test instead holds after an empty snapshot has been captured, commits and publishes a `Stable` terminal, then releases the read. It requires the same stream to yield the live `Stable` line and end. Reading before subscribing would miss that event. The driver requires the exact injected `ServiceStreamError::ObservationRead { source: ObservationStoreError::Unreachable { peer: "peer-b" } }` for modelled read faults; S-42 separately exercises all three approved typed observation-read causes at both read sites.
+
+The model's `Read` and `Deliver` now drain the ready FIFO through the first projecting terminal, matching one logical stream step. This includes R-4's publication-time live verdict after a successor exists. The named `publish_after_relist_reaches_channel` run now publishes attempt 1 **after** the relist it names. The driver gives a logical step a bounded number of physical polls to clear Tokio cooperative `Pending` from the fixture's at-most-one-full-buffer-plus-eight noise events. It still fails if the expected terminal is absent after that bound, and its projected verdict remains the closing `AllocStatusRow` read through `ObservationStore::alloc_status_row`.
+
+## Verification
+
+Verification used an isolated sparse worktree at source HEAD `e4635dd3fb536ba71d3034ce180ee7e4f3475f5b`, with only the D11 edits copied in. The main worktree's Metal sync was refused by a pre-existing root-owned `.context/step-05-07-native` directory. Later main-worktree commits through `db959912c` changed none of the D11 production, driver, model, or placement paths. All test commands used ordinary `cargo xtask metal run --` and the built `overdrive-control-plane` library; the isolated Metal BPF object was built in run `f24fbf8f082df828d5e04da6`.
+
+| Check | Result |
+|---|---|
+| `QUINT_SEED=0x43d4164d cargo nextest run -p overdrive-control-plane --features integration-tests --lib -E 'test(quint_stream_conformance::stream_snapshot::)'` | 9/9 passed, Metal run `6b6bdfa02d0cf43163830368`; seven named traces, randomized 100 traces, and the focused subscription test. |
+| Same selection with `QUINT_SEED=0xd1acbdab` | 9/9 passed, run `2d7a4fe728f861e7b7012442`. |
+| Randomized 100 traces with `QUINT_SEED=0x94ef88cb` | 1/1 passed, run `2582db1ad456c062611651a1`. |
+| `cargo xtask quint check --subsystem service-allocation-readiness-and-ending --record` | 84/84 matched expectations, including all 12 `ss-` checks and the read-before-subscribe hazard, run `2f8d4a7a197a7ec2df816788`. The prior summary had no per-check input keys, so the canonical recorder reran all 84; only `stream_snapshot.qnt` changed among model inputs, check names and outcomes did not change, and no other model's trace was copied. |
+| `cargo xtask quint verify-evidence --subsystem service-allocation-readiness-and-ending` | Passed, run `911a46a24446d8b73ea50907`. |
+| `cargo xtask quint typecheck`; `cargo xtask conformance-lint` | 53/53 files typechecked, run `fc2faefa87f772aaa957f28e`; conformance lint passed, run `fe963d394d1070d3aa619bc3`. |
+| `cargo clippy -p overdrive-control-plane --all-targets --all-features --tests -- -D warnings`; `cargo test --doc -p overdrive-control-plane` | Passed via Metal runs `55b4c437c7d71bf1b2fd927c` and `40d25acdd8729d4250815253`, after the already committed control-plane cfg correction (`ff29358a8`) was copied into the isolated checkout for source parity. |
+| `rustfmt --edition 2024 --check` on the D11 driver; `git diff --check` | Passed. |
+
+The generated subsystem summary is shared by all 84 checks, so its run metadata and timing rows changed when the canonical recorder replaced the legacy unkeyed record. The only changed hazard trace is `ss-hazard-read-before-subscribe`; no guest-flow model, guest-flow evidence, production source, DES phase event, or mutation setting was changed by this alignment.
+
+The generic pre-commit affected-test hook was attempted on the main checkout. Its `kmod-load --busy-ok` call is rejected as an unsupported ordinary Metal command before Nextest starts. A direct `rdeps(overdrive-control-plane)` run from the isolated checkout was also attempted; without the hook's guest-lane preparation it produced `OVERDRIVE_METAL_TEST_ERROR error=lane_not_prepared` in unrelated tests, so that broad run is not recorded as a pass. It was stopped after the environment failure was established. The D11 selection and formal checks above ran through their declared host-pure lane and passed.

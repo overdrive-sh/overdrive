@@ -2258,6 +2258,9 @@
       "quint_stream_conformance::progress_deadline::quint_progress_deadline_slow_start_reaches_stable_not_timeout": {
         "kind": "host-pure"
       },
+      "quint_stream_conformance::stream_snapshot::a_terminal_published_after_the_empty_snapshot_reaches_the_subscribed_stream": {
+        "kind": "host-pure"
+      },
       "quint_stream_conformance::stream_snapshot::quint_stream_snapshot_failed_read_ends_with_error": {
         "kind": "host-pure"
       },

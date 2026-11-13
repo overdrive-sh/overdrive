@@ -16,8 +16,9 @@
  * attempts delivered to the subscription and not yet consumed; lagged: the receiver lagged, a relist is due; armed;
  * kind (stable | giveup | operator_stop | error), src (live | read | err), closeTerm / closeAtt / readCur (the terminal and
  * the attempt that closed it, and the attempt current at the read); closes: verdict lines yielded; readFail.
- * Steps of the stream (D11 item 1): Subscribe, Read (each once, in that order), then wait: Deliver (a channel event), Relist
- * (after Lag; Deliver is disabled while lagged and takes only the oldest event). Environment: Commit, Publish, Lag, Restart.
+ * Steps of the stream (D11 item 1): Subscribe, Read (each once, in that order), then wait: Deliver (one external poll
+ * drains the queued FIFO until a projecting terminal or Pending), Relist (after Lag; Deliver is disabled while lagged).
+ * Environment: Commit, Publish, Lag, Restart.
  *
  * OFF names the rules switched off (hazards): readBeforeSubscribe (D11: the stream reads the recorded verdict and then
  * subscribes).
@@ -36,8 +37,9 @@
  *         so the live path never sees a superseded attempt's publication. Discharged by: V29 (feature-delta R-4).
  *
  * D-UP-1: `conf_step`. Conformance projection: the first terminal line yielded by build_service_stream under SimClock (the
- * closing kind); Commit is a write through SimObservationStore, Publish a LifecycleEvent sent on the bus, Subscribe / Read
- * the stream's own steps (the `Accepted` line marks the subscribe point); no new accessor.
+ * closing kind); Commit is a write through SimObservationStore, Publish a LifecycleEvent sent on the bus. Subscribe
+ * consumes `Accepted` and polls into the existing ObservationStore read, held by a test-local port adapter after the real
+ * bus subscription; Read releases that read. No production accessor is added.
  */
 module stream_snapshot_conf {
   type ConfStep =
@@ -90,6 +92,20 @@ module stream_snapshot {
     conf_step' = if (REC) variant("Subscribe", ()) else conf_step,
   }
 
+  // A production stream poll drains all immediately ready events until a projecting terminal or Pending. One terminal
+  // may be published for each of the model's two attempts. The FIFO is consumed in the same poll as Read or Deliver.
+  def deliverOne(x: Strm, eventAtt: int): Strm = {
+    val t = w.com.get(eventAtt)
+    val v = proj(t)
+    if (x.st == "closed" or v == "") x
+    else { ...x, st: "closed", kind: v, src: "live", closeTerm: t,
+           closeAtt: eventAtt, closes: x.closes + 1 }
+  }
+  def drainQueued(x: Strm): Strm = {
+    val first = deliverOne({ ...x, chan: List() }, x.chan[0])
+    if (first.st == "open" and x.chan.length() > 1) deliverOne(first, x.chan[1]) else first
+  }
+
   // The recorded-verdict read: the current attempt's committed terminal projected through service_event_from_terminal. A
   // verdict closes the stream (no timer); none arms the deadline once; a failed read closes with an error.
   def doRead(x: Strm, ok: bool): Strm = {
@@ -98,7 +114,10 @@ module stream_snapshot {
     if (not(ok)) { ...x, st: "closed", kind: "error", src: "err", closes: x.closes + 1, readFail: true }
     else if (v != "") { ...x, st: "closed", kind: v, src: "read", closeTerm: t, closeAtt: w.cur, readCur: w.cur,
                         closes: x.closes + 1 }
-    else { ...x, lagged: false, armed: true }
+    else {
+      val waiting = { ...x, lagged: false, armed: true }
+      if (waiting.chan.length() > 0) drainQueued(waiting) else waiting
+    }
   }
   action Read(ok: bool): bool = all {
     s.st == "open", s.phase == (if (BUG_READFIRST) "unsub" else "sub"),
@@ -123,16 +142,11 @@ module stream_snapshot {
     conf_step' = if (REC) variant("Publish", { a: a }) else conf_step,
   }
 
-  // the stream consumes the OLDEST channel event (after its read; the broadcast channel is FIFO per receiver; disabled while
-  // lagged: the relist comes first): a projecting terminal closes it, a restartable stop closes nothing
+  // `Deliver(a)` starts at the oldest queued event `a`.
   action Deliver(a: int): bool = {
-    val t = w.com.get(a)
-    val v = proj(t)
     all {
       s.st == "open", s.phase == "rd", not(s.lagged), s.chan.length() > 0, s.chan[0] == a,
-      s' = if (v != "") { ...s, chan: s.chan.tail(), st: "closed", kind: v, src: "live", closeTerm: t,
-                          closeAtt: a, closes: s.closes + 1 }
-           else { ...s, chan: s.chan.tail() },
+      s' = drainQueued(s),
       w' = w,
       conf_step' = if (REC) variant("Deliver", { a: a }) else conf_step,
     }
@@ -245,10 +259,11 @@ module stream_snapshot {
     .then(Subscribe).then(Read(true))
     .then(Commit(0, "startup_stop")).then(Publish(0)).then(Lag)
     .expect(s.lagged and s.chan == List())
-    .then(Restart).then(Commit(1, "liveness_stop")).then(Publish(1))
-    .expect(s.chan == List(1) and s.lagged)
+    .then(Restart)
     .then(Relist(true))
-    .expect(s.st == "open" and not(s.lagged) and s.chan == List(1))
+    .expect(s.st == "open" and not(s.lagged) and s.chan == List())
+    .then(Commit(1, "liveness_stop")).then(Publish(1))
+    .expect(s.chan == List(1))
     .then(Deliver(1))
     .expect(s.st == "open" and s.chan == List() and s.closes == 0 and Safety)
 
