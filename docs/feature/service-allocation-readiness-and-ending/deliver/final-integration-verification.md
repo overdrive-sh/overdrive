@@ -4,8 +4,9 @@ Date: 2026-11-13
 
 Feature: `service-allocation-readiness-and-ending`
 
-Status: scoped feature evidence complete with the nonpassing diagnostic and
-serial guest-control results retained. No workspace-green claim is made.
+Status: the exact required guest-flow/beacon closure replay passed; independent
+final evidence re-review remains pending. The earlier failed serial and broad
+diagnostic results remain retained. No workspace-green claim is made.
 
 ## Source and evidence boundary
 
@@ -69,8 +70,10 @@ behavior.
 | BPF object build | `dca2350aa`: PASS; dataplane and guest objects built. | `/private/tmp/service-readiness-final-bpf-build.log`, Metal `dc79462f73d0c8566d506d34` |
 | Forwarder module build and load | `dca2350aa`: PASS; module version `e2b939e45cb106448fa4d8f8ca11e52f990bf1127c8af80ed09b2e3c6299f3bc` already loaded. | `/private/tmp/service-readiness-final-kmod-build.log` and `/private/tmp/service-readiness-final-kmod-load.log`, Metal `fbb9458291b5933f888b2bdc` and `d9d360ba1ad64d58d87b4b81` |
 | Guest kit preparation | `dca2350aa`: PASS; 4,437 runtime inputs staged for kernel `7.0.0-38-generic`. | `/private/tmp/service-readiness-final-guest-kit.log`, Metal `dc0288c390169b4006e11a3a` |
+| Closure GuestKit preparation | Latest relevant committed source `c2317cbcb4abc633de648f1c856a273e24a96fff`: PASS; prepared the same isolated checkout's `overdrive-init--overdrive-init` guest binary and 4,437 runtime inputs for kernel `7.0.0-38-generic`, target `x86_64-unknown-linux-musl`. | `/private/tmp/service-readiness-final-guest-kit-closure.log`, Metal `2b68628bba6e7102be6ab169` |
 | Current-source GuestKit preparation and control-plane acceptance | `6b7d26806`: GuestKit PASS, 4,437 inputs; the complete control-plane acceptance binary then passed **467/467**, with 3 existing skipped cases. Its earlier 464/467 run failed only because three Job-stop test placements returned `lane_not_prepared` before their bodies; preparation resolved the lane precondition. | `/private/tmp/service-readiness-final-guest-kit-current.log`, Metal `0afa621aefbc0b59374c8bba`; `/private/tmp/service-readiness-final-acceptance-prepared.log`, Metal `638b98c82b81f81d50e4407f`, Nextest `d11595d4-c907-4c08-9ff5-ecb6c7a11285` |
 | Other required guest-flow and beacon controls, serial native lane | `dca2350aa`: **209 passed, 1 failed, 3 skipped** of 210 after excluding only the exact user-authorized T-5 and D-22 identities. The sole additional failure was the direct Fast Open correlation cell's one-second row bound. An exact isolated replay then passed 1/1; the serial suite is still recorded as failed. | `/private/tmp/service-readiness-final-guest-controls.log`, Metal `623b9cf022d67db8c20cbe99`, Nextest `a012615c-d52f-45ea-a8d1-30940afee717`; focused `/private/tmp/service-readiness-final-tcp-correlation-focused.log`, Metal `011530b271c2abac7245b6f8` |
+| Exact required serial closure replay | `c2317cbcb`: **210 passed, 0 failed, 3 skipped** in 607.180 s, with the identical CI profile, one worker, unchanged one-second Fast Open assertion and only the same three T-5/D-22 identities excluded. The `overdrive-init::bin/overdrive-init` and `overdrive-init::integration` test binaries were selected. The prior 209/210 run remains failed evidence. | `/private/tmp/service-readiness-final-guest-controls-closure-durable.log` (complete durable output), Metal `bf34c3e577b5b52adf0cebef`, Nextest `6e93601c-55c2-4006-b15b-0767c5725164` |
 | Quint typecheck | Pre-D11 `f13990f43`: PASS, 53 files. D11's reviewed isolated source-parity run: 53/53 PASS. | `/private/tmp/service-readiness-final-quint-typecheck.log`, Metal `35a3c8a4a46cedcaec431a38`; D11 Metal `fc2faefa87f772aaa957f28e` |
 | Feature Quint model checks | Pre-D11 `f13990f43`: PASS, 84/84. D11's reviewed canonical recorder: **84/84 PASS**, including all 12 stream-snapshot checks and the read-before-subscribe hazard. | `/private/tmp/service-readiness-final-quint-check.log`, Metal `478b1de09c9a5bb185d9021a`; D11 Metal `2f8d4a7a197a7ec2df816788` |
 | Recorded Quint evidence | Pre-D11 `f13990f43`: PASS. D11's reviewed regenerated evidence: PASS against current model inputs. | `/private/tmp/service-readiness-final-quint-evidence.log`, Metal `0e9064f5fc6375d7e6c393bb`; D11 Metal `911a46a24446d8b73ea50907` |
@@ -215,11 +218,23 @@ Service-backend projection failures above are a current-feature DISTILL
 obligation because the accepted design named that file. No production or
 test-support change was made by this final integration verifier.
 
-The serial guest-flow/beacon rerun above establishes 209 required controls in
-one run, while the remaining Fast Open control failed there and passed in an
-exact focused replay. Its intermittent one-second correlation-row result is
-not one of the two authorized external exceptions; a separate focused pass
-does not turn the failed serial suite green.
+The earlier serial guest-flow/beacon run established 209 required controls in
+one run, while the Fast Open control failed there and passed in an exact
+focused replay. The final closure replay ran the **same complete serial
+selection once** at `c2317cbcb` and passed all 210 selected controls. The
+previous 209/210 result remains a failed receipt; its intermittent
+one-second correlation-row result is outside the two authorized external
+exceptions and is a residual timing-sensitivity limit, not a newly waived
+identity or a proven production defect. The closure run used the GuestKit
+prepared at Metal run `2b68628bba6e7102be6ab169` in the same remote
+checkout (`/home/ubuntu/overdrive-worktrees/443c2bdfbaf607d874200260200298410f520678e5569c02718636c9bf78fc9a`), which staged the
+`target/guest-kit/in-guest/overdrive-init--overdrive-init` binary. Its Nextest
+run ID and two selected test-binary names are recorded in the table above;
+the full durable output was collected after the foreground controller exited
+0. The `overdrive-init` production and test sources, the Fast Open assertion
+bound, the serial selection policy, and the forwarder module code were
+unchanged between the two serial receipts; the later checkout includes the
+separately reviewed control-plane test/model and documentation commits.
 
 ## Remediation review and source limits
 
@@ -240,7 +255,8 @@ worktree at `e4635dd3f` with the D11 edits overlaid and the already committed
 for the D11 paths, and the reviewer verified they are byte-identical in the
 commit. The checks do not establish a clean all-workspace run at `a793389a4`
 or a result for unrelated later source. The full historical workspace
-diagnostic and the failed serial guest-control run remain failed records.
+diagnostic and the earlier failed serial guest-control run remain failed
+records alongside the later exact 210/210 closure replay.
 
 No expectation runner was invoked for E13, no Rust integration test launched
 the built production binary, and no verification expectation imported an
