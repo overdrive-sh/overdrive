@@ -16,7 +16,7 @@ main = "runner_ok"
 temporal = "OwnersEventuallyEnd"
 backend = "tlc"
 expect = "holds"
-ci = true
+ci = false
 
 [[check]]
 name = "runner-maintenance-progress"

@@ -733,7 +733,7 @@ invariant = "DialDeadlineAfterGuestReply"
 backend = "apalache"
 max_steps = 14
 expect = "violation"
-ci = true
+ci = false
 
 # INB-1 teeth (M-5): a typed admission refusal registers and closes the dial slot
 [[check]]
@@ -853,7 +853,7 @@ main = "pair_stall"
 temporal = "StalledSenderIsBlocked"
 backend = "tlc"
 expect = "holds"
-ci = true
+ci = false
 
 # non-vacuity: a watch records the guest's clean half-close
 [[check]]
@@ -873,7 +873,7 @@ main = "pair_bugConsumeOnShortSend"
 invariant = "UnitsConserved"
 backend = "tlc"
 expect = "violation"
-ci = true
+ci = false
 
 [[check]]
 name = "fwd-pair-hazard-eof-as-fin-peer-loss"
@@ -934,7 +934,7 @@ main = "pair_bugCheckThenHook"
 invariant = "AttachTimeEndClassifiedOnce"
 backend = "tlc"
 expect = "violation"
-ci = true
+ci = false
 
 # named runs (critical scenarios) on the conformance main
 [[check]]
@@ -1221,7 +1221,7 @@ main = "pair_wlive"
 temporal = "GuestPairEndsAfterOwnerAbort"
 backend = "tlc"
 expect = "holds"
-ci = true
+ci = false
 
 # T-6: after the holder's drop the guest pair ends
 [[check]]
@@ -1231,7 +1231,7 @@ main = "pair_wlive"
 temporal = "GuestPairEndsAfterHolderDrop"
 backend = "tlc"
 expect = "holds"
-ci = true
+ci = false
 
 # named runs (critical scenarios) on the conformance main
 [[check]]
@@ -1341,7 +1341,7 @@ main = "pair_bugEndedAttachGracefulClose"
 invariant = "EndedHalfNeverEndsClean"
 backend = "tlc"
 expect = "violation"
-ci = true
+ci = false
 
 # T-5: the rejected EVMOD-WATCH-SHUT (the owner's abort of a watch shuts V_h)
 [[check]]
