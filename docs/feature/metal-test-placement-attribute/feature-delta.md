@@ -435,3 +435,305 @@ Evidence is in each story's section. Columns: 01-04 as numbered; M = each of the
 | 9 Outcome KPIs numeric | PASS (K1,K4) | PASS (K1) | PASS (K5) | PASS (K1) | PASS (K3,K5) | PASS (K2) | PASS (K5) |
 
 US-01 has 7 scenarios, the upper bound of 3-7. Elevator Pitch is present on every story; every "After" names a runnable command with an observable result (US-07's exact failure text and lint command are DESIGN-pinned and marked as such). `job_id: J-PLAT-007` on all. Verdict: PASSED, with O1 as a DESIGN blocker on US-01's general shape, not a DoR failure. Peer review: iteration 1 returned `rejected_pending_revisions` (unsized migration stories, non-runnable lint command, non-observable pitches, missing error scenarios, a technical AC); this revision addresses each.
+
+## Wave: DESIGN / [REF] Inputs read
+
+PROPOSE mode, scope Application/components, OOP paradigm, all priorities (P1 and P2: O1-O5 and every question the dispatch listed). Every decision below is **PROPOSED**; none is accepted until the user approves it by number (`.claude/rules/design.md` § "Surface material design decisions").
+
+| Input | Read |
+|---|---|
+| This file (DISCUSS D1-D8, US-PLACE-01..09, O1-O5) | ✓ |
+| `slices/slice-09-module-tests-share-one-guest.md` | ✓ |
+| `slices/slice-01..08` | ⊘ not opened: their content is carried by the stories above |
+| `spike/findings.md`, `spike/wave-decisions.md`, `spike/findings-module-shared-guest.md` | ✓ |
+| Probe code `spike-scratch/metal-test-placement-module-guest/increment-a/` (`lib.rs`, `bin/broker.rs`) | ✓ (`tests/probe.rs` ⊘) |
+| `crates/overdrive-testing-macros/` (`lib.rs`, `Cargo.toml`) | ✓ |
+| `crates/overdrive-testing/src/guest_suite.rs` | ✓ partial: header, per-test path (`run_in_guest`, plans, attempt, lane dispatch, `run_dispatcher`); the batched `run_*` bodies and the 9 unit tests ⊘ |
+| `guest_kit.rs` | ✓ header, errors, `runtime_staging_root`; `bin/fwd_guest_suite.rs` ⊘ (3-line `main` per findings) |
+| `infra/metal/test-wrapper.sh` | ✓ whole |
+| `infra/metal/test-placement.json` | ✓ binary-id keys and every lane/native entry shape; the 4,642 entries not read |
+| `infra/metal/README.md`, `bootstrap.sh`, `xtask guest_kit_prepare.rs` | ⊘ grepped for references only |
+| `xtask/tests/acceptance/metal_run_isolation/placement.rs` | ✓ outline |
+| `.config/nextest.toml` | ✓ whole |
+| GitHub issue #354 body and comments | ⊘ no shell in this dispatch; the DISCUSS summary stands in. The orchestrator must read `gh issue view 354 --comments` before relaying the proposed issues below |
+| `brief.md`, ADR-0280 and the ADR index | ✓ headings, ADR-0280 whole; highest ADR number is 0281, new ones start at 0282 |
+| `docs/product/journeys/declare-where-a-metal-test-runs.yaml` | ⊘ |
+| `vendors/linux` | ⊘ the submodule is not checked out in this worktree, so no kernel claim below carries a `path:line @ v7.0` citation; each is a hypothesis, listed in validation items V-4 and V-5 |
+| Rules: CLAUDE.md, `design.md`, `testing.md`, `rust.md`, `development.md`, `domain-naming.md` | ✓ |
+
+## Wave: DESIGN / [REF] Findings that reshape the DISCUSS premise
+
+| ID | Finding | Evidence | Consequence |
+|---|---|---|---|
+| F-1 | **Placement has a fourth source: per-test guest requirements keyed by test name inside the dispatcher.** `nextest_guest_plan` and `cgroup_attempt_files`/`mtls_attempt_files`/`nested_resources` choose staged files, loaded modules, setup and cleanup scripts, memory and vCPUs from about a dozen hand-kept `Cell` tables and one literal test name (`DECLARED_LISTENER_TCP_CAPTURE_TEST`), matched by exact name or prefix. | `guest_suite.rs:3788-3794` (`selected_cell`), `:3829-3905`, `:4043-4074`, `:3961` | A rename of such a test silently drops its variant (the guest then lacks a tool or setup and the test fails by name, not silently, but a rename "with zero edits" no longer holds for them). DDD-5 moves each variant into a named profile on the attribute. The DISCUSS count of "three sources" is four. |
+| F-2 | **Off Metal, guest-placed tests run their body on the host today** (no Metal context: the wrapper `exec "$@"`). The CI `integration` job (`cargo nextest run --workspace --features integration-tests`, profile `ci`, on Lima) and the pre-push `nextest` hook run these binaries. | `test-wrapper.sh:25-31`; `.github/workflows/ci.yml:442-464`; `lefthook.yml:267-268` | Declaring placement on the test makes those tests fail closed in those lanes (DDD-11). User decision. |
+| F-3 | **The table covers every test the Metal run executes, including default-lane unit and acceptance binaries** (`overdrive-core::acceptance`, proptest binaries, `compile_fail`, `xtask`). US-07's "unit-lane tests are not flagged" has no meaning once the table is gone unless something supplies the unit lane's placement. | binary-id keys in `test-placement.json` | DDD-4: user decision between declaring every test and a per-binary host-pure default. |
+| F-4 | **An attribute proc-macro cannot be applied to a file module (`mod x;`) on stable Rust, nor to an inline module that contains one** ("non-inline modules in proc macro input are unstable"). The integration entrypoints use exactly `mod integration { mod a; mod b; }`. Recalled, not run here. | Rust `proc_macro_hygiene` tracking; validation V-1 | A module-level attribute is unusable for the repository's layout; DDD-7 puts the sharing opt-in on each test. |
+| F-5 | **Lane placements are not "re-run this test in a guest".** The placed test (`guest_flow::real_kernel::…` in `overdrive-init`) is the in-guest body, run from a prepared in-guest binary (`target/guest-kit/in-guest/overdrive-init--overdrive-init`); an owner lane also runs a host-side script chosen by fixture name (six scripts in the dispatcher); the fixture (`integration::in_guest_lane::…`) is the host driver test. | `guest_suite.rs:4614-4747`, `INIT_GUEST_LANE_PLACEMENTS` | The lane scripts and the closed slot table move into `guest_lane` with the dispatcher's removal (DDD-13). |
+| F-6 | **The dispatcher carries body-count assertions** (`CGROUP_DEFAULT_COMPLETE_BODIES`, `MTLS_RELAY_COMPLETE_BODIES`, …) that guard "every authored body was credited". They disappear with the batched path. | `guest_suite.rs:1462-1478` | The eager listing check (DDD-3) and the migration parity check (DDD-15) replace them. |
+| F-7 | **`xtask` may not depend on an `overdrive-*` crate**, and the macro crate is one; `core` crates would also take a dev-dependency on an `adapter-host` proc-macro crate to declare host-pure tests. | `development.md` § "xtask is build / test / dev orchestration"; `Cargo.toml` of the macro crate | DDD-12: user decision on the rule's scope. |
+| F-8 | **`host-kernel-shared` already serialises whole guest-placed binaries** (`overdrive-cli`, `control-plane`, `worker`, `dataplane`, `init`, `fwd`, `netlink` integration binaries run with `max-threads = 1`). | `.config/nextest.toml` | A shared guest serving one test at a time (DDD-9) costs nothing in those binaries; queuing only arises in binaries outside a single-writer group. |
+
+## Wave: DESIGN / [REF] Reuse Analysis
+
+Contract shape per `.claude/rules/design.md` principle: **pure** = value in, value out; **bounded** = declared effect set; **plan-only** = returns a plan, never mutates.
+
+| Component | Existing | Verdict | Justification, contract shape, universe, assertion mechanism |
+|---|---|---|---|
+| `#[overdrive_test]` expansion | `overdrive-testing-macros` (skeleton, guest case only) | **EXTEND** | Grammar grows to six forms. Pure: tokens in, tokens out; universe = the annotated fn. Checked by trybuild-style fixtures if DISTILL chooses them (their call). |
+| Group registry, profiles, per-group artifacts | `guest_suite.rs` plans, wrapper lists, dispatcher `main` | **EXTEND** into new module `placement::groups` | Replaces three group lists and about a dozen name-keyed tables with one closed registry. Pure data plus one `const fn` validator. |
+| Per-test guest path (`run_in_guest`, attempt, `GuestRun`, plans) | `guest_suite.rs` lines 3423-4403 and helpers | **EXTEND** by moving to `placement::guest_run` | Bounded: boots one guest, copies in, execs, tears down; universe = its work dir and one VMM. Same implementation the dispatcher wrapper path uses today. |
+| Guest kit (`GuestKit`, `GuestPeer`, `WorkDir`) | `guest_kit.rs`, `guest_peer.rs` | **EXTEND** | One new boot parameter (DDD-10); `GuestPeer::exec(&mut self)` already enforces one exec at a time. |
+| Lane entry points and owner scripts | `guest_lane.rs`, dispatcher `guest_lane_dispatch` | **EXTEND** `guest_lane` | The six owner scripts and the closed slot table move in (DDD-13). |
+| Wrapper | `infra/metal/test-wrapper.sh` | **EXTEND** then shrink | Reads records; loses the table, group lists, `--guest-suite` mode and dispatcher branches. Pure resolver (record bytes and test name to a placement or a typed refusal) plus the existing namespace effects, unchanged. |
+| Shared-guest owner | none (ADR-0280 rejected a broker as out of its scope) | **CREATE NEW**: `OwnerCore` (pure) + owner binary (shell) | No existing alternative: nextest runs a process per test, so a guest shared by several tests needs a process that outlives any one of them. Probe evidence. `OwnerCore` is plan-only (events in, effects as data); the shell is bounded (one VMM, one socket, one lock, inside the run's runtime dir). |
+| Eager listing check | the wrapper's per-test refusal | **CREATE NEW** xtask subcommand `placement-lint` (user approval needed, DDD-3) | The wrapper refuses only at run time on Metal, per test. Read-only: plan-only, never writes; universe = nextest's list output and the binaries' ELF sections. |
+| Binary default declaration | none | **CREATE NEW only if DDD-4 option B is chosen** | Otherwise 3,855 per-test sites. |
+| Table, lookup, dispatcher binary, `--guest-suite` mode, `OVERDRIVE_METAL_TEST_DISPATCHER`, body-count constants | present | **DELETE** (US-08) | Replaced as above. |
+| `overdrive-guest-peer`, `guest-kit-prepare`, `bootstrap.sh` grammar | present | **EXTEND** | Prepare builds the owner binary where it built the dispatcher; the ordinary grammar swaps the dispatcher bin for `placement-lint`. |
+
+## Wave: DESIGN / [REF] Components and ports
+
+Style: modular, functional core and imperative shell, ports and adapters where a port has two implementers. Paradigm OOP per CLAUDE.md. Technology: Rust, existing crates, `syn`/`quote`/`proc-macro2` (already workspace deps, MIT/Apache-2.0), `python3` in the wrapper (already required), `libc` for `pidfd_open`/`unshare`/`flock` (already a workspace dependency of the testing crates). No new third-party crate.
+
+| Component | Responsibility | Crate or path | Driving port | Driven ports |
+|---|---|---|---|---|
+| Placement attribute | declare placement, emit record, gate guest forms | `overdrive-testing-macros` | the attribute grammar (DDD-1) | none |
+| Placement registry | closed group and profile set, recipes | `overdrive-testing::placement::groups` | `GuestPlacement::declare` (const) | none |
+| Guest run | one isolated guest per test | `overdrive-testing::placement::guest_run` | `run_in_guest`, `inside_guest` | `GuestKit` |
+| Shared-guest client | elect or attach, send the attach request | `overdrive-testing::placement::shared` | `run_in_guest` with `Sharing::Module` | `OwnerElection`, socket |
+| Owner core | queue, one in flight, discard after failure, generations | `overdrive-testing::placement::owner_core` | `OwnerCore::handle(Event)` | none (effects are data) |
+| Owner shell | executes effects against the guest, serves the socket | `overdrive-shared-guest-owner` bin in `overdrive-testing` | process entry | `GuestKit`, anchor `pidfd`, socket |
+| Lane run | in-guest body plus owner scripts | `overdrive-testing::guest_lane` | `run_lane` | `GuestKit` |
+| Wrapper | resolve placement, apply isolation | `infra/metal/test-wrapper.sh` | nextest per-test wrapper call | namespaces, exec |
+| Placement check | list, resolve, refuse unplaced, emit resolved table | `xtask placement-lint` | CLI | `cargo nextest list`, ELF sections |
+
+Principle 13 (Earned Trust). Each dependency and the lie it can tell: (a) the **linker** can drop the record section: the test then has no record and is refused (`test_unclassified`), and `placement-lint` names it before any guest boots; the macro keeps the record referenced, and an xtask acceptance fixture reads a real linked test binary with both readers. (b) The **host kernel's PID namespace teardown** is what makes the VMM die with the owner: V-4 proves it on the Metal kernel, and the owner's startup fails closed if `unshare(CLONE_NEWPID)` is refused. (c) The **run runtime directory** can be absent or not owned: the client refuses to elect without a valid `OVERDRIVE_METAL_RUN_ID` (the existing `runtime_staging_root` rule). (d) The **guest** can lie about readiness: `GuestKit::provision` and the existing boot-bound checks are the probe; a guest that cannot run its profile's setup fails the attach with the stage named.
+
+## Wave: DESIGN / [REF] Decisions
+
+All rows PROPOSED. "User" means the decision needs an explicit answer; "relay" means the recommendation is within the user-approved DISCUSS contract, but design.md still requires approval before DISTILL.
+
+| ID | Decision (one sentence) | Status | Needs |
+|---|---|---|---|
+| DDD-1 | The attribute has six forms covering every placement kind, with `shared` and `profile` as optional arguments of the guest form (grammar in § Interface contracts). | PROPOSED | relay |
+| DDD-2 | The placement record is a versioned, NUL-terminated field sequence in the `overdrive_test_placement` ELF section; the wrapper is its only run-time reader; a test with a record and a table entry is refused as ambiguous. | PROPOSED (ADR-0282) | relay |
+| DDD-3 | The unplaced-test guard stays in the wrapper and is also run eagerly over every listed test by a new `xtask placement-lint`, landing right after the host-pure form and counting a test as placed when it has a record, an accepted default or a table entry. | PROPOSED | **user** (new subcommand and its wiring) |
+| DDD-4 | How the 3,855 host-pure and unit-lane tests are placed once the table is gone: A every test declares; B1 a per-binary host-pure default that is refused in any binary that also declares a non-host-pure test; B2 the same default, mixing allowed. Recommendation: B1. | PROPOSED | **user** |
+| DDD-5 | The guest group set lives once in the guest kit as a closed registry with named profiles; the attribute is checked at compile time by const evaluation against it; the wrapper holds no group list; test-name-keyed tables become profiles. | PROPOSED | relay |
+| DDD-6 | The guest kit is split into `placement::{groups, guest_run, shared, owner_core}` plus the existing `guest_kit`/`guest_lane`; the public surface is the contract in § Interface contracts. | PROPOSED | relay |
+| DDD-7 | Sharing is opt-in per test (`shared`); the sharing scope is the test's own module, group and profile within one test binary. | PROPOSED | relay |
+| DDD-8 | One owner process per sharing scope per run, elected by an exclusive lock, run as init of its own PID namespace, anchored to the nextest process by a pidfd, reached through a socket under the run's runtime directory. | PROPOSED (ADR-0283) | relay; V-4, V-5, V-10 first |
+| DDD-9 | The owner serves one test at a time in arrival order, never cancels a running test, and discards a guest after a failed test or a loss. | PROPOSED (ADR-0284) | relay |
+| DDD-10 | `inside_guest()` is true exactly when the process's kernel command line carries `overdrive.test_guest=1`. | PROPOSED (ADR-0285) | relay; V-6 first |
+| DDD-11 | A guest-placed test fails with a typed error when there is no Metal run context. | PROPOSED (ADR-0286) | **user** (CI integration job and pre-push hook affected) |
+| DDD-12 | Placement declarations may take a dev-dependency on `overdrive-testing-macros` from `xtask` and from `core`-class crates; the xtask lint reads normal and build edges only. | PROPOSED | **user** (amends a `development.md` rule) |
+| DDD-13 | Lane kinds self-dispatch through `guest_lane` the way guest placements do; the owner scripts and slot table move out of the dispatcher. | PROPOSED | relay |
+| DDD-14 | Retirement removes the table, wrapper lookup, `--guest-suite` mode, dispatcher binary, `OVERDRIVE_METAL_TEST_DISPATCHER`, the explicit batched command and the body-count constants, and rewrites the docs that cite them. | PROPOSED | relay |
+| DDD-15 | Migration is a scripted rewrite per batch with a parity check against the table snapshot; slice order puts the listing check before the migrations. | PROPOSED | relay |
+
+### DDD-1 — Attribute surface (question 1)
+
+Options: **(A, recommended) one attribute, six forms**, `shared` and `profile` as arguments of `guest`; **(B) a separate attribute per kind** (`#[host_pure]`, `#[guest(...)]`): five macros to re-export and five error surfaces for one concept; **(C) an attribute on the `mod`** for the shared case: unusable for file modules (F-4, V-1) and it must rewrite every child test. Mapping of the five table kinds: `host-pure` → `host_pure`; `native-launcher` → `native_launcher`; `guest-group` → `guest = "<group>"`; `guest-lane-operator` → `lane_operator = "<fixture>"`; `guest-lane-owner` → `lane_owner = "<fixture>"`. Module-level sharing (D8) → `guest = "<group>", shared` on each test; tests in one module that name the same group and profile and carry `shared` share one guest, and a test without `shared` boots its own, so the two forms compose per test. Consequence: a module-wide "share all" is a convention, not a single declaration. If V-1 shows an attribute on an inline module compiles in this layout, option C becomes available and returns here.
+
+### DDD-2 and DDD-3 — Marker, ambiguity, guard (question 2, O1, O3)
+
+O1 resolved: **keep the ELF-section record** (ratified, with a version field and an explicit ambiguity rule). Alternatives in ADR-0282. Ambiguity: a test with both a record and a table entry is `placement_ambiguous` (status 78); the skeleton's "record wins" is removed. The migration commit adds the attribute and deletes the entry together, so a state with both never lands.
+
+Replacement for `test_unclassified` once the table is gone: the wrapper's refusal stays the exact, last line of defence at run time; it is the same function over the record (and the accepted default of DDD-4). The early check is `placement-lint`. Options: **(L-A, recommended) xtask subcommand over `cargo nextest list --message-format json` plus the ELF records**: exact (no guess about macro-generated tests) and runs in the lane that already compiles the test binaries; **(L-B) an xtask acceptance test that shells nextest**: nested cargo inside a test, which the guest-kit rules forbid for lock contention; **(L-C) a syntactic scan of test sources**: misses tests generated by `proptest!`, `quint_test` and similar, and cannot see the linker dropping a record. The reader of the record exists once: the wrapper's Python reader, which `placement-lint` invokes through `test-wrapper.sh --check-placement` with the list on stdin, so there is one parser for the format. The subcommand is new tooling: **it needs the user's approval**, the grammar addition in `bootstrap.sh`, and wiring beside `dst-lint` and `conformance-lint` in CI and pre-push (the repository's precedent for lints).
+
+O3 resolved: the check needs no per-binary scope. Its rule, "a listed test is placed when it has a record, an accepted default, or (until retirement) a table entry", is true at every migration stage, so it can land before any migration and the table clause is deleted in the retirement slice. Suggested order: 01 (done) → 02 → 03 → **07** → 04 → 09 → 05 and 06 → 08.
+
+### DDD-4 — Host-pure and unit-lane scale (F-3)
+
+Options: **A. every test declares** (about 4,640 sites: 3,855 host-pure including every unit test in every crate, plus the guest and lane placements). Safest and most uniform; most churn; every new unit test needs the attribute; US-07's "unit-lane tests are not flagged" scenario is dropped. **B1. a per-binary default**, written once in a test binary's root (`overdrive_test_default!(host_pure)`, only `host_pure` is allowed as a default), applying to every test without its own record; a binary that has the default **and** any non-host-pure record is refused by the wrapper and the check as `placement_conflict`. About 80 one-line declarations replace 3,855 per-test ones; adding the first guest test to a pure binary forces the author to drop the default and declare every test, which is the intended friction. **B2.** as B1 but mixing allowed: a forgotten declaration in a mixed binary silently runs on the host, which is the failure the guard exists to prevent. **Recommendation: B1.** It prevents no failure that A does not, but A's cost is a rewrite of every test and every future unit test for no reachable gain; B1 keeps the exact refusal for the only binaries where a misplaced test is plausible (mixed ones). This is a scope-shaping choice, so it is the user's.
+
+### DDD-5 — Group registry, profiles, per-group artifacts (questions 1 and 4, F-1)
+
+SSOT: `overdrive_testing::placement::groups::GuestGroup` (closed enum of the eight groups) and, per group, a table of **profiles**. Compile-time validation without a second list: the macro emits a `const` that calls `GuestPlacement::declare(group, profile, shared)`, a `const fn` that panics at constant evaluation with a message naming the unknown value and the known set, so a typo is a build error and the macro crate holds no group list (a proc-macro crate cannot export types, and `overdrive-testing` depends on it, so the registry cannot live there). The wrapper does not validate groups. Per-group artifacts (US-04): each (group, profile) has one `GuestRecipe` (tools, modules, boot-time setup, per-test setup and cleanup, memory, vCPUs, CID slot); that table is the single place a copy list is declared. F-1's name-keyed variants become profiles selected on the attribute (`profile = "<name>"`; omitted means the group's base profile). Alternatives: **(a) keep test-name-keyed tables as library data**: a renamed test silently loses its variant; **(b) make each variant a new group**: changes the group vocabulary the out-of-scope list protects and multiplies CID slots. The profile names are derived from the inventory in V-3, not invented here. A shared guest's key includes the profile, because profiles differ in loaded modules and setup.
+
+### DDD-6 — Guest-kit library structure (question 5, O2)
+
+O2 resolved: keep `overdrive-testing` as the home (same crate class, already holds `guest_kit`, `guest_lane`, the peer binary); split `guest_suite.rs`, delete its batched half, and re-home the per-test path under `placement`. A new crate for the owner would force a third crate to share `GuestKit`; rejected. The macro re-export stays `overdrive_testing::overdrive_test`. Public surface is pinned below.
+
+### DDD-7 — Sharing opt-in (D8)
+
+Per-test `shared`. Options: C (attribute on `mod`) rejected by F-4; **(D) one `overdrive_test_share!("<group>")` declaration per module** that tests inherit when they carry a bare placement: lets a plain `#[test]` inherit a guest placement without naming it, which weakens the per-test explicitness the feature exists for. Scope key = `(binary id, module path of the test, group, profile)`; the module path is the test's name without its last segment. Nothing is shared across modules or binaries.
+
+### DDD-8 — The owner (question 3)
+
+Who owns the guest: the **owner process**, one per scope per run, started by the first arrival. Election: an exclusive `flock` on `<runtime>/shared/<scope>.lock`, released by the kernel when the holder dies; the elector starts the owner, waits until the socket is connectable (bounded by the existing `SCRIPTED_BOOT_BOUND`), then releases the lock. A later arrival finds the socket and attaches; if the connect is refused it takes the lock and elects. Lifetime: the owner calls `unshare(CLONE_NEWPID)` and forks; the child is the owner proper and so is init of its namespace, and the kernel kills every process of a PID namespace when its init dies. That makes "the VMM never outlives its owner" structural and keeps the production launcher unchanged. Anchor: the wrapper exports `OVERDRIVE_TEST_RUN_ANCHOR_PID` (its own parent, which nextest spawns directly: V-10); the owner opens `pidfd_open` on it at start and exits when the fd becomes readable; if `pidfd_open` fails (the anchor is already gone) the owner refuses to start. Teardown: run teardown (ADR-0279) remains the backstop. Rendezvous: `/run/ovd-gk/<run id>/shared/`, the run-owned VMM runtime root the guest kit already uses (`runtime_staging_root`), mode 0700; the socket path is about 70 bytes, under the 108-byte `sun_path` limit that broke the run `TMPDIR` path in the probe. Owner crash: attached tests get a typed failure naming the owner stage; the lock is free and the next arrival elects a new owner; the old VMM died with it (V-4). Interrupt: nextest dies, the anchor pidfd fires, the owner exits. Nothing is left in `/tmp`. Exposure if V-4 fails: an orphan VMM until run teardown, and a replacement boot would collide on the CID; the decision then returns to DESIGN, no heuristic recovery is designed. A pid-reuse race between the wrapper reading its parent and the owner opening the pidfd is bounded by the run teardown.
+
+### DDD-9 — One at a time, no cancel, discard after failure (question 3)
+
+Details in ADR-0284 and the model. Options considered for retries: reuse the guest (cheap, residue) versus a fresh guest after a failure (about 3 s). Recommended: fresh after failure, because a retry exists precisely because a test failed, and the failed test is the one most likely to have left state. A guest lost while idle is replaced at the next attach. A boot failure answers only the test at the head of the queue and the next attach boots again (no automatic retry). Guest kernel crash mid-test: the test gets a typed failure, the guest is discarded. Isolation statement for the docs: tests that share a guest share its kernel, cgroup tree, nft tables and `/tmp`; the owner runs each profile's per-test setup and cleanup before and after every test and resets nothing else.
+
+### DDD-10 — `inside_guest()` (question 6)
+
+Options: keep the environment variable (spoofable, DISCUSS finding); strip it in the wrapper (Metal only); **kernel command line parameter `overdrive.test_guest=1` (recommended)**: the guest kit's boot already accepts command-line parameters (`ScriptedBootExtra.cmdline`), and a host's command line cannot be changed by a process. Cost: one `/proc/cmdline` read per call. Falsified if the parameter does not reach the guest's `/proc/cmdline` (V-6).
+
+### DDD-11 — Off Metal (question 7, F-2)
+
+Today's behaviour off Metal is "run the body on the host". Options: **(A, recommended) fail closed** with `RunInGuestError::NoMetalContext`: the DISCUSS scenario ("never reports a body-less PASS") and `GuestKit::provision`'s own refusal point there, and the user's standing rule is that guest-kit surfaces are non-signal off Metal. Effect: the CI `integration` job and the pre-push `nextest` hook, which run `--features integration-tests` over these binaries, will fail the guest-placed tests that compile without `kvm-tests`; those lanes must either run on Metal (matches the standing directive to run everything on Metal) or exclude those binaries. **(B)** run in place off Metal: restores today's lanes but reports PASS for placed tests that never ran in a guest, so it cannot satisfy the approved scenario. **(C)** skip with a visible reason: nextest has no runtime skip, so a skip is a PASS. The lane inventory is validation V-7; relay it to the user with the decision.
+
+### DDD-13 to DDD-15
+
+DDD-13: `lane_operator` and `lane_owner` tests are the in-guest body; their host half calls `guest_lane::run_lane`, which boots the lane guest from the prepared in-guest binary and, for the owner kind, runs the host script chosen by the fixture; an unknown fixture fails naming the fixture and the test. The six scripts and the placement slot table move into `guest_lane` and are matched by exact fixture name. The slot per placement is internal; a guest in its own local-mode vsock namespace does not collide with another run's. DDD-14: the retirement list is the Reuse Analysis DELETE row plus `OVERDRIVE_FWD_GUEST_GROUP`, `OVERDRIVE_FWD_GUEST_EXACT`, the `bootstrap.sh` grammar entry for the dispatcher, `guest_kit_prepare`'s dispatcher build, and the nine dispatcher unit tests (deleted, not rewritten, per the deletion rule); documents to update in the same slice: `.claude/rules/testing.md` § "Test placement" (through the rules process), `infra/metal/README.md`, `website/content/docs/how-to/run-verification-on-metal.mdx`, `tests/conformance/CLAUDE.md` and `src/lib.rs` comments, the `metal-run-isolation` and `declare-where-a-metal-test-runs` journeys, and the xtask placement acceptance tests. DDD-15: per batch, a script under `docs/feature/metal-test-placement-attribute/deliver/` (temporary, deleted at retirement) reads the table by parsing the JSON, finds each test's function by module path and name, adds the attribute, deletes the entry, and **stops on any ambiguity** (two functions, a macro-generated test, a missing function); parity = `placement-lint --emit` over the migrated binaries, diffed against the table snapshot at the batch's start commit, equal on (binary, test, kind, group, fixture, profile); pass-set parity is the Metal run. Where a test cannot take an attribute (V-2), the batch reports it and the user rules.
+
+## Wave: DESIGN / [REF] Interface contracts
+
+These are the pinned cross-crate, cross-process contracts. Private structure is the crafter's.
+
+### Attribute grammar (`overdrive_testing::overdrive_test`, re-exported from `overdrive-testing-macros`)
+
+```text
+#[overdrive_test(host_pure)]
+#[overdrive_test(native_launcher)]
+#[overdrive_test(guest = "<group>" [, profile = "<profile>"] [, shared])]
+#[overdrive_test(lane_operator = "<fixture>")]
+#[overdrive_test(lane_owner = "<fixture>")]
+```
+
+- Applies to a `fn` returning `()`. If the fn carries no test-introducing attribute the macro adds `#[test]`; stacked above `#[tokio::test]` and the other test attributes it leaves them intact (V-2 fixes the exact set).
+- `host_pure` and `native_launcher` emit the record and leave the body untouched, and reference no runtime crate.
+- `guest` and the lane forms replace the body with: run the original body where `inside_guest()` holds; elsewhere hand the test to `run_in_guest` / `run_lane` on a plain OS thread and panic with the typed error. The body never runs on the host.
+- Errors at build time: an unknown `group` or `profile` (message names the value and the known set), an unknown argument, a repeated argument, `shared` on a non-guest form, a lane fixture not of the form `integration::in_guest_lane::<ident>`. A lane fixture's existence is checked at run time (the failure names fixture and test).
+
+### Placement record (ELF section `overdrive_test_placement`, version 1)
+
+A sequence of records; each record is a sequence of NUL-terminated fields: `"1"`, `<kind>`, `<test>`, `<argc>`, then `argc` arguments. `<kind>` is one of `host_pure`, `native_launcher`, `guest`, `lane_operator`, `lane_owner`; `<test>` is `module_path!()` of the fn plus `::<fn name>` (crate segment included; the reader drops it to compare with nextest's test name). Arguments: `guest`: `<group>`, `<profile or empty>`, `<"0" or "1" for shared>`; lane kinds: `<fixture>`; the others: none. Under DDD-4 B a default record has `<kind>` `default_host_pure` and an empty `<test>`. Readers reject an unknown version, an unknown kind, a wrong `argc`, or a non-UTF-8 field as `placement_invalid`; two records for one test as `placement_ambiguous`.
+
+### Wrapper diagnostics (stderr line `OVERDRIVE_METAL_TEST_ERROR error=<name> [detail]`)
+
+| Name | Status | Cause |
+|---|---|---|
+| `test_unclassified` | 78 | no record, no accepted default (and, until retirement, no table entry) |
+| `placement_ambiguous` | 78 | two records, or a record and a table entry, for one test |
+| `placement_invalid` | 78 | unreadable section, bad version, unknown kind, wrong `argc`, unreadable table |
+| `placement_conflict` | 78 | only under DDD-4 B1: a default and a non-host-pure record in one binary |
+| `invalid_run_context`, `namespace_setup_failed` | 78, 70 | unchanged |
+
+`lane_not_prepared` and `guest_execution_failed` leave the wrapper with the dispatcher; the same conditions are typed errors of the test's own host half. The wrapper maps kinds to isolation as today: `host_pure` → original chain; `native_launcher` → node view; `guest`, `lane_operator`, `lane_owner` → local-mode vsock network namespace, with `OVERDRIVE_TEST_RUN_ANCHOR_PID` exported. `test-wrapper.sh --check-placement` reads nextest list JSON on stdin and prints one `unplaced <binary-id> <test>` line per unplaced test, exiting non-zero if any.
+
+### `placement-lint` (xtask)
+
+`cargo xtask placement-lint [--emit]`: lists tests with the lane's features, prints `placement-lint: unplaced <binary-id> <test>` per unplaced test and exits 1; with `--emit` prints `{"format":"overdrive-metal-placement-resolved-v1","placements":{"<binary id>":{"<test>":{"kind":"…","args":[…]}}}}` for migration parity. Writes nothing.
+
+### Guest kit public surface (`overdrive_testing::placement`)
+
+```rust
+pub enum GuestGroup { Probe, Core, Unload, Ulp, MtlsRelay, CgroupDefault, Stress, NestedBoundary }
+impl GuestGroup { pub const ALL: [GuestGroup; 8]; pub const fn as_str(self) -> &'static str; }
+
+pub enum Sharing { Isolated, Module }
+
+/// Built in constant context by the macro; panics at constant evaluation
+/// naming the unknown group or profile and the known set.
+pub struct GuestPlacement { /* group, profile, sharing */ }
+impl GuestPlacement { pub const fn declare(group: &str, profile: &str, shared: bool) -> GuestPlacement; }
+
+pub struct LanePlacement { /* kind, fixture */ }
+impl LanePlacement {
+    pub const fn operator(fixture: &str) -> LanePlacement;
+    pub const fn owner(fixture: &str) -> LanePlacement;
+}
+
+pub fn inside_guest() -> bool;
+pub fn run_in_guest(placement: &GuestPlacement, exe: &Path, test_name: &str) -> Result<(), RunInGuestError>;
+pub fn run_lane(placement: &LanePlacement, test_name: &str) -> Result<(), RunInGuestError>;
+
+pub enum RunInGuestError {
+    NoMetalContext   { group: String, test: String },
+    LaneNotPrepared  { group: String, test: String, detail: String },
+    GuestExecution   { group: String, test: String, detail: String },
+    BodyFailed       { group: String, test: String, status: i32 },
+}
+```
+
+`inside_guest`, `run_in_guest` and `RunInGuestError` keep the names the skeleton approved; `run_in_guest`'s first parameter changes from `&str` to the typed placement, and `NoMetalContext` is new (DDD-11). Per-test mode prints one `OVERDRIVE_GUEST_KIT_TIMING group=<g> test=<t> staging_ms=<n> boot_ms=<n> total_ms=<n>` line per guest booted (unchanged); a shared attach prints `OVERDRIVE_GUEST_KIT_TIMING group=<g> test=<t> shared=1 generation=<n> queue_ms=<n> exec_ms=<n>`, and the owner prints the boot's staging and boot times with the same `generation`. One boot per module is counted as the distinct `generation` values per scope. The guest's console output of the test is returned to the host test's output. Preconditions of `run_in_guest`: a Metal run context (`OVERDRIVE_METAL_RUN_ID`), the guest kit prepared; failure maps to the variants above with the stage in `detail`.
+
+### Shared-guest scope, socket and wire (version 1)
+
+Scope key: SHA-256 of `"1" NUL binary-id NUL module NUL group NUL profile`, first 16 hex characters. Files: `/run/ovd-gk/<run id>/shared/<key>.lock` and `.sock`. Owner command: `overdrive-shared-guest-owner --socket <path> --lock-fd <n> --anchor-pid <pid> --exe <path> --binary-id <id> --group <g> --profile <p>`, prepared by `guest-kit-prepare` at a documented contract path and refused as `LaneNotPrepared` naming it when absent. Request, line oriented, fields hex-encoded: `ATTACH 1`, `TEST <hex>`, `CWD <hex>`, `ENV <n>` then `n` lines `<hex key> <hex value>`, `GO`. Reply: `RESULT 1 <verdict> <generation> <queue_ms> <exec_ms> <console_len>` then `console_len` bytes, verdict `exit:<i32>`, `boot_failed` or `guest_lost`. End of stream before a reply is the owner's loss. Client mapping: `exit:0` → `Ok`; other exit → `BodyFailed`; `boot_failed`, `guest_lost` and owner loss → `GuestExecution` with the stage named.
+
+### Owner core (conformance accessors)
+
+```rust
+pub struct OwnerCore { /* private */ }
+pub struct AttachId(/* opaque */);
+pub enum Event { Attached(AttachId), ClientGone(AttachId), BootFinished(Result<(), BootFailure>),
+                 ExecFinished(AttachId, ExecVerdict), GuestLost }
+pub enum Effect { StartBoot, StartExec(AttachId), Reply(AttachId, Verdict), DiscardGuest }
+pub enum GuestView { NoGuest, Booting, Ready }
+pub struct OwnerObservation { pub guest: GuestView, pub generation: u32,
+                              pub in_flight: Option<AttachId>, pub queue: Vec<AttachId> }
+impl OwnerCore { pub fn handle(&mut self, event: Event) -> Vec<Effect>; pub fn observe(&self) -> OwnerObservation; }
+
+pub trait OwnerElection { fn try_elect(&self, scope: &ScopeKey) -> Elected; fn live_owners(&self, scope: &ScopeKey) -> usize; }
+```
+
+Model variable to accessor: `guest`, `gen`, `inflight`, `queue` → `OwnerObservation`; `owners` → `OwnerElection::live_owners` (the kernel lock is the authentic arbiter; a `Sim` election may feed the projection only with the Tier-3 scenario "two test processes arrive at once, one owner" paired with it); `lock`, `anchor`, `torn` and the ghost variables are model-only; a client's outcome is read from the `Reply` effect or the client call that returns it. Actions map: `arrive`/`elect_and_start_owner`/`connect` → `OwnerElection::try_elect` plus `Event::Attached`; `begin_boot`/`boot_ok`/`boot_fail` → `Effect::StartBoot`, `Event::BootFinished`; `begin_exec`/`exec_done_*` → `Effect::StartExec`, `Event::ExecFinished`; `guest_lost` → `Event::GuestLost`; `client_disconnect` → `Event::ClientGone`; owner crash, anchor gone and run teardown → the driver drops the core and clears the election.
+
+## Wave: DESIGN / [REF] Lifecycle Gate Ownership
+
+| Signal or state | Owning component | Promise | Inputs that may gate it | Must not gate |
+|---|---|---|---|---|
+| nextest test result (PASS/FAIL/TIMEOUT) | nextest | the attempt's process exited with that status | the wrapper's refusal, the test's own panic | guest readiness of other tests |
+| a test's placement | the test (record) | which isolation its body needs | the record (and DDD-4 default) | the test's result |
+| guest generation `Ready` | owner core | a booted guest of the scope's profile with its setup done, idle, never used by a failed test | boot result, previous exec verdict | any test outside the scope, any `Isolated` test |
+
+Gates:
+
+- **G-1 Placement guard.** Existing evidence: `test-wrapper.sh:58-247` (table lookup then `test_unclassified`), skeleton marker read `:71-161`; no state-write path beyond exit status. Owner: the wrapper. Promise: the test has exactly one resolvable placement. Affected state: whether the body is launched. Failure projection: status 78 with `test_unclassified`, `placement_ambiguous`, `placement_invalid` or `placement_conflict`. Explicitly unaffected: the test's kind semantics, run-context checks (still first). Ordering: after run-context validation, before the isolation profile; no timeout. Counterexample: a plain `#[test]` that mutates nft would run on the host if absent placement defaulted to host-pure in a mixed binary. Evidence lane: xtask acceptance with fixture ELFs, plus the Metal ordinary run.
+- **G-2 Metal context for a guest placement.** Existing evidence: `run_in_guest` and `GuestKit::provision` refuse when unprepared. Owner: `run_in_guest`. Promise: a guest-placed body runs only inside a guest booted under a Metal run. Affected state: the test's result only. Failure projection: `NoMetalContext` (FAIL). Unaffected: `host_pure` and `native_launcher` tests, other lanes' unrelated tests. Ordering: before any boot. Counterexample: pre-push on Lima, where today the body runs on the host and passes. Evidence lane: unit test with the context unset; the lane inventory V-7.
+- **G-3 Shared-guest admission.** Owner: owner core. Promise: a test is served only on a `Ready` generation that never ran a failed test, one at a time, in arrival order. Affected state: that attach's reply. Failure projection: `exit:<n>`, `boot_failed`, `guest_lost`, owner loss (each a typed host failure). Unaffected: nextest's retry policy, `Isolated` tests, other scopes. Ordering: queue wait plus exec consume the one existing nextest slow-timeout budget; the owner adds no deadline of its own (exec uses the existing attempt bound, election uses `SCRIPTED_BOOT_BOUND`). Counterexample: a test that fails and leaves a nft rule must not be followed by a pass or fail that depends on it. Evidence lane: the Quint model, a seeded run of `OwnerCore`, and the Tier-3 module scenarios.
+- **G-4 Eager placement check.** Owner: `placement-lint`. Promise: every listed test resolves a placement before any guest boots. Affected state: the command's exit status. Unaffected: Metal runs. Late success/disconnect do not apply. Evidence lane: negative fixture binary (one unplaced test) plus no `test_unclassified` in later Metal runs.
+
+Boundary scenarios for DISTILL: (1) gate available: a declared test passes in a guest; (2) unavailable or timed out: guest cannot boot, owner cannot start, anchor gone → typed failure naming group and stage; (3) unrelated state: a `host_pure` test in the same binary and a non-`shared` test in the same module are unchanged; (4) late success: an exec whose client was killed returns after the next client attached, and its result reaches nobody; (5) disconnect and reconnect: owner killed mid-module, a new owner is elected and boots a new generation; (6) feature disabled: an undeclared binary with a default behaves as before. Seeded invariant: `OwnerCore` under `overdrive-sim`-style seeded schedules of attach, gone and failure events (the model's invariants as `assert_always!`); real-kernel proof: the two-process election, owner death, interrupt and per-test results on Metal.
+
+## Wave: DESIGN / [REF] Formal protocol model
+
+**Applicable.** The shared-guest owner protocol is concurrent (several test processes), ordered (FIFO, one in flight) and crash-sensitive (owner crash, anchor loss). Spec: `specs/quint/shared-guest-owner/` (`shared_guest.qnt`, `hazard/guest_hazards.qnt`, `checks.toml`, `README.md`, `evidence/`), produced by the `quint-modeler` and run on Metal (Quint 0.32.0, Apalache 0.56.1, Java 21; 19 checks).
+
+Verdicts: **no counterexample against any decision.** D-OWNER (`I_OWNER_UNIQUE`), D-LIFE (`I_NO_ORPHAN`, `I_TEARDOWN_CLEAN`), D-SERIAL (`I_SERIAL`, `I_FIFO`), D-DETACH (`I_DETACH_NO_CANCEL`, `I_DELIVER_ONLY_ATTACHED`) and D-TAINT (`I_NO_REUSE`) hold; the progress property `EveryClientTerminates` holds under weak fairness of non-fault actions, an anchor that stays alive, and at most two faults. Five hazard variants (one per decision) each produce the predicted counterexample: no election lock gives two owners, no in-flight guard gives two concurrent execs, reuse after failure runs on a failed generation, an owner crash that leaves the guest gives an orphan, and a disconnect that frees the slot lets the next exec start while the first still runs. `I_FIFO` and `I_DELIVER_ONLY_ATTACHED` are largely structural in the model and have no hazard of their own.
+
+Named runs for `#[quint_test]` (all `main = guest_conf`, module `shared_guest.qnt`): `happy_path_three_clients_share_one_guest`, `concurrent_first_arrival_one_owner`, `failure_then_replacement_guest`, `guest_lost_mid_exec_then_replacement`, `owner_crash_then_new_owner_elected`, `disconnect_while_running_next_waits`, `disconnect_while_queued_is_removed`, `boot_failure_then_retry_boot_on_next_attach`, `anchor_gone_ends_owner_and_guest`, `run_teardown_removes_leftovers`, `retry_of_failed_client_gets_fresh_guest`, `elector_killed_before_owner_starts`. The spec reaches the pinned accessors as mapped in § Interface contracts.
+
+Underspecified points the modeler raised, and how this design pins them: owner reported present only once it serves (A-6); an elector killed holding the lock frees the lock and leaves no owner (the run `elector_killed_before_owner_starts`); no owner exits on its own while the anchor lives; owner death gives attached queued and running tests an owner-loss failure, and a detached test is simply gone; a boot failure fails only the head of the queue and nothing retries it automatically; a guest lost while idle is replaced at the next boot; a retry is a new client; the model's "clients die with the anchor" assumption (A-2) is replaced by a structural rule (an owner whose `pidfd_open` on the anchor fails refuses to start), so no client assumption remains. Assumptions with a discharging item: A-1 (owner is init of its PID namespace, so the VMM dies with it) → **V-4**; pidfd on the wrapper's parent being nextest → **V-10**; the lock being the election arbiter and the socket surviving across network namespaces → **V-5**. The spec files are modeler output; evidence is recorded and `verify-evidence` passed.
+
+## Wave: DESIGN / [REF] Validation items
+
+**Contract-shaping (run before the design is approved; none needs more than one Metal ordinary run or a host compile):**
+
+| ID | Question | Falsification changes | Where |
+|---|---|---|---|
+| V-1 | Does an attribute proc-macro on `mod x;`, or on an inline `mod` containing `mod y;`, compile on the pinned stable toolchain? | DDD-1/DDD-7 (a module-level form becomes available) | host compile probe in `spike-scratch/`, no Metal |
+| V-2 | Does `#[overdrive_test(...)]` stack correctly over `#[tokio::test]`, a `proptest!` block's tests, `#[quint_test]`, `#[quint_run]` and trybuild-style tests, leaving one record per test and no duplicate `#[test]`? Count the tests in the workspace that cannot take an attribute. | the grammar and the migration stop rule | host compile probe plus reading the records |
+| V-3 | Inventory the dispatcher's per-test variants (the `Cell` tables, `NESTED_GUEST_LAUNCH`, `focused_selection`, the mtls native/relay split, the literal test name): how many distinct (group, variant) environments, and do they reduce to a closed named set? | DDD-5 (profiles versus groups; the `profile` argument) | parse `guest_suite.rs`, no Metal |
+| V-4 | With the owner as init of a fresh PID namespace, does `SIGKILL` of the owner leave no VMM within a bound (and does the production launcher work inside the namespace)? Read `kernel/pid_namespace.c` (`zap_pid_ns_processes`) and `kernel/exit.c` in `vendors/linux` at `v7.0` first (`git submodule update --init vendors/linux`), cite `path:line`, then run it. | DDD-8 / ADR-0283 | Metal ordinary run |
+| V-5 | Does a socket under `/run/ovd-gk/<run id>/shared/` connect from a test process in a different local-mode vsock network namespace, is the directory reclaimed at run end, and do two simultaneous arrivals elect exactly one owner through `flock`? | the rendezvous location and election | Metal ordinary run |
+| V-6 | Does `ScriptedBootExtra.cmdline` put `overdrive.test_guest=1` in the guest's `/proc/cmdline`, and is it absent on the host? | DDD-10 | Metal ordinary run |
+| V-7 | Which lanes run guest-placed tests off Metal today (CI `integration` job, pre-push hook, `infra/hooks/linux-run.sh`, others) and which of the guest-placed tests compile without `kvm-tests`? | DDD-11 (the user's choice needs the list) | grep and reading |
+| V-9 | Do `dst-lint`, `cargo tree -p xtask`, `cargo deny` or crate-class rules reject a dev-dependency from a `core` crate or `xtask` onto `overdrive-testing-macros`? | DDD-12 | repository gates, no Metal |
+| V-10 | Is the wrapper's parent the nextest process (not an intermediate shell), and is `pidfd_open` on it permitted for root in the wrapper's namespace? | the anchor contract | Metal ordinary run |
+
+**Not contract-shaping (may stay open; each blocks only its DELIVER step):** console completeness for a failing shared test (the probe used a 300 ms flush sleep, which is an upper bound and not a design); boot-time distribution per profile (the skeleton has two samples); whether a profile's per-test setup scripts are idempotent across consecutive tests in one guest (checked per migrated module at DELIVER).
+
+## Wave: DESIGN / [REF] Scope limitations proposed for tracking
+
+No issue is created. Each is proposed to the user, with the file that pins it. I could not run `gh` in this dispatch, so none of these was searched against open issues or the ADRs for a planned mechanism; the orchestrator must run `gh issue list --state all --search …` and `gh issue view <N> --comments` first (CLAUDE.md § "Deferrals require GitHub issues").
+
+| Proposal | Where pinned | What lifting needs |
+|---|---|---|
+| Sharing is per module of one test binary; no sharing across modules or binaries | DDD-7 | a wider scope key; not requested, probably no issue wanted |
+| A default declaration can only be `host_pure` | DDD-4 B1 | only relevant if the user picks B |
+| A lane fixture's existence is checked at run time, not at build time (the fixture lives in another crate's test binary) | DDD-1 | a cross-crate registry; not requested |
+| Guest groups are a closed set of eight; adding one is a code change in the registry | DDD-5 | already the case today |
+
+Not a limitation, so no issue proposed: serialising execs within a shared guest (DDD-9). Concurrency inside one guest would reintroduce the node-global races the guest isolates.
+
+## Wave: DESIGN / [REF] Open questions and blockers
+
+Blocking before DISTILL: user answers to DDD-3, DDD-4, DDD-11, DDD-12; V-1 to V-7, V-9 and V-10 run and recorded (V-4 and V-6 first: they decide DDD-8 and DDD-10); `vendors/linux` initialised so V-4's kernel claim can be cited. Not blocking: the exact names of the profiles (V-3's output), the final wording of diagnostics.
+
+Handoff notes. External integrations: none (no third-party API); no consumer-driven contract tests apply. The record format is a three-reader contract (macro writes, wrapper and `placement-lint` read): one fixture test binary read by both readers is the drift guard. Enforcement tooling: `placement-lint` (new, DDD-3), the wrapper refusal, the owner Quint conformance driver under `conformance-lint`, and the existing dst-lint, which does not scan these `adapter-host` crates. Recommended DISTILL scenarios per Lifecycle Gate Ownership above and per `.claude/rules/testing.md` § "DISTILL": each gate with a healthy control and one deliberate fault. No roadmap is created in DESIGN.
