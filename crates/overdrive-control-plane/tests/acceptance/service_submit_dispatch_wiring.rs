@@ -446,6 +446,11 @@ async fn s_shcp_wire_12_terminal_stopped_projects_to_service_submit_event_stoppe
 // S-SHCP-WIRE-13 — Cap timer synthesises Timeout
 // ===========================================================================
 
+/// CONTRACT_SHAPE: bounded-change.
+#[allow(
+    clippy::doc_markdown,
+    reason = "the required per-test CONTRACT_SHAPE line is an exact machine-read marker"
+)]
 #[tokio::test]
 async fn s_shcp_wire_13_cap_timer_synthesises_service_failed_timeout() {
     let tmp = TempDir::new().expect("tmpdir");
