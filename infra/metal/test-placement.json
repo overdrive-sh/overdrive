@@ -14072,6 +14072,9 @@
       "dst_lint::tests::memory_plan_literal_real_workspace_is_clean": {
         "kind": "host-pure"
       },
+      "dst_lint::tests::probe_gate_helper_lookalike_name_does_not_satisfy_contract": {
+        "kind": "host-pure"
+      },
       "dst_lint::tests::probe_gate_helper_missing_call_is_flagged": {
         "kind": "host-pure"
       },
@@ -14082,6 +14085,9 @@
         "kind": "host-pure"
       },
       "dst_lint::tests::probe_gate_helper_real_lib_rs_is_clean": {
+        "kind": "host-pure"
+      },
+      "dst_lint::tests::probe_gate_helper_with_reports_qualified_path_satisfies_contract": {
         "kind": "host-pure"
       },
       "dst_lint::tests::probe_gate_invocation_distinct_method_name_is_flagged": {
