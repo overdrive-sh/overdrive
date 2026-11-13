@@ -376,8 +376,12 @@ snapshot_before
 trap cleanup EXIT
 trap 'exit 130' HUP INT TERM
 
-head -c 32 /dev/urandom >"$credentials_dir/overdrive-ca-root"
-chmod 0400 "$credentials_dir/overdrive-ca-root"
+# Two operator KEKs: the workload CA root and the gateway's public
+# certified-key custody (overdrive-host ca::public_certified_key).
+for kek in overdrive-ca-root overdrive-public-certified-key; do
+  head -c 32 /dev/urandom >"$credentials_dir/$kek"
+  chmod 0400 "$credentials_dir/$kek"
+done
 
 public_trust_args=()
 if [[ "$production_trust" -eq 0 ]]; then
