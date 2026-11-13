@@ -45,7 +45,11 @@ use std::time::Duration;
 
 use overdrive_core::guest_transport::dial::{DialPurpose, GuestDialError};
 use overdrive_core::guest_transport::wire::KernelErrno;
-use overdrive_core::observation::{ProbeIdx, ProbeResultRow, ProbeRole, ProbeRunSeq, ProbeStatus};
+use overdrive_core::observation::{
+    ProbeIdx, ProbeResultRow, ProbeRole, ProbeRunSeq, ProbeStatus, SameStatusRuns,
+};
+use overdrive_core::traits::clock::Clock;
+use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_core::transition_reason::{StoppedBy, TerminalCondition};
 use overdrive_sim::adapters::guest_stream_dial::SimDialScript;
 
@@ -53,6 +57,31 @@ use super::probe_count_fixture::{
     CapturedEvent, EventCapture, LIVENESS_PORT, ProbeSet, ProbeWorld, RunOutcome, WORKLOAD_ADDR,
     settle,
 };
+
+/// ADR-0261: liveness supervision begins when the Service is `Stable`. A
+/// Service that declares a startup probe reaches `Stable` once that probe has
+/// passed; the first look then announces it and the Stable hook starts the
+/// liveness tasks. The startup pass is written as the one startup row of the
+/// allocation (no probe period elapses, so no readiness or liveness row, and
+/// no run number, is consumed before the scenario's own runs).
+async fn reach_stable_after_startup_pass(world: &mut ProbeWorld) {
+    let observed_at = u64::try_from(world.clock.unix_now().as_millis()).expect("unix ms");
+    world
+        .obs
+        .write_probe_result(ProbeResultRow {
+            alloc_id: world.alloc.clone(),
+            probe_idx: ProbeIdx::new(0),
+            role: ProbeRole::Startup,
+            status: ProbeStatus::Pass,
+            last_observed_at_unix_ms: observed_at,
+            run_seq: ProbeRunSeq::FIRST,
+            same_status_runs: SameStatusRuns::ONE,
+        })
+        .await
+        .expect("write the startup pass");
+    world.look(true).await.expect("the look that announces Stable");
+    settle().await;
+}
 
 /// The stored row's `(run_seq, status is Fail, same_status_runs)`.
 fn counts(row: Option<&ProbeResultRow>) -> Option<(u64, bool, u32)> {
@@ -92,6 +121,7 @@ fn is_not_sampled(
 #[tokio::test]
 async fn liveness_probe_failing_three_runs_stops_the_allocation_once() {
     let mut world = ProbeWorld::compose(ProbeSet::AllTcp).await;
+    reach_stable_after_startup_pass(&mut world).await;
 
     for run in 1..=3_u32 {
         world.run_with(&RunOutcome::Fail, &[(ProbeRole::Startup, RunOutcome::Pass)]).await;
@@ -153,6 +183,7 @@ async fn http_probe_whose_path_is_not_a_request_target_records_no_sample() {
     let capture = EventCapture::default();
     let _guard = capture.install();
     let mut world = ProbeWorld::compose(ProbeSet::HttpLiveness { path: "/health check" }).await;
+    reach_stable_after_startup_pass(&mut world).await;
 
     for run in 1..=3_u32 {
         world.run_with(&RunOutcome::Pass, &[(ProbeRole::Readiness, RunOutcome::Fail)]).await;
@@ -333,8 +364,12 @@ async fn resubmitted_workload_counts_its_probe_runs_afresh() {
     let fresh_spec = fresh.expect("the resubmitted workload starts a fresh allocation");
     assert_ne!(fresh_spec.alloc, earlier, "a fresh AllocationId is minted");
 
-    // The VM driver starts the fresh allocation's probes on Running.
+    // The VM driver starts the fresh allocation's probes on Running; the
+    // opt-out Service is Stable at its first look, which starts its liveness
+    // tasks (ADR-0261).
     let _token = world.runner.start_alloc(&fresh_spec);
+    settle().await;
+    world.look(true).await.expect("the look that announces the fresh allocation Stable");
     settle().await;
     world.dial.script_default(SimDialScript::Refuse(GuestDialError::Refused {
         errno: KernelErrno::ECONNREFUSED,
@@ -470,6 +505,7 @@ async fn readiness_eligibility_follows_the_latest_rows_streak() {
 #[tokio::test]
 async fn vm_probes_run_through_the_guest_stream_dial() {
     let mut world = ProbeWorld::compose(ProbeSet::HttpLiveness { path: "/healthz" }).await;
+    reach_stable_after_startup_pass(&mut world).await;
 
     world.run(RunOutcome::Pass).await;
     assert_eq!(world.row(ProbeRole::Readiness).await.map(|r| r.status), Some(ProbeStatus::Pass));
