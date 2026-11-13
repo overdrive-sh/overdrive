@@ -1,6 +1,6 @@
 # E15 — public hostname served through the gateway, kernel TLS on both legs
 
-Status: `pending` — authored at DISTILL; no evidence exists, nothing has been captured or reviewed
+Status: `satisfied` — captured at `b0f880439` on native metal (2026-11-13) and independently audited in [E15 different-fox review](../../../docs/feature/public-ingress-gateway/deliver/review-e15-evidence.md)
 Surface: E — built-product end to end (with D observations of kernel TLS state)
 Execution substrate: `native-metal`
 Walking skeleton: yes; the operator-visible half of the public-ingress-gateway journey
