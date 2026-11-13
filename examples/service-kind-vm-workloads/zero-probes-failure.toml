@@ -16,5 +16,7 @@ rootfs = "/srv/vm/overdrive-testing/svm-e08/rootfs.ext4"
 cpu_milli = 500
 memory_bytes = 134217728
 
-# No health_check table. The inferred TCP startup probe targets listener port
-# 18998, which the guest does not bind, and must surface StartupProbeFailed.
+# No health_check table: D15 materializes one GuestListeners startup gate over
+# every declared TCP and UDP listener. This guest never reports its declared
+# TCP/18998 listener open within 60 seconds, so it must stop, restart, and give
+# up with StartupProbeFailed naming the missing listener.

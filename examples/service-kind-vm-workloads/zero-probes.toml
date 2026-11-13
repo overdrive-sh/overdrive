@@ -16,6 +16,6 @@ rootfs = "/srv/vm/overdrive-testing/svm-e08/rootfs.ext4"
 cpu_milli = 500
 memory_bytes = 134217728
 
-# No health_check table: the existing Service contract infers one TCP startup
-# probe from the first listener. For a VM allocation its wildcard target must
-# resolve to the provisioned workload_addr.
+# No health_check table: D15 materializes one GuestListeners startup gate over
+# every declared TCP and UDP listener, with a 60-second deadline. The Service
+# becomes Stable when the guest reports its declared TCP/18081 listener open.
