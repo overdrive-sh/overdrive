@@ -55,3 +55,17 @@
   CI lanes running the whole `overdrive-cli` integration binary are affected.
 - The Metal box ran out of disk during the skeleton runs; more timing samples
   need space freed first.
+
+## Shared-guest probe (module-level placement, D8)
+
+- Assumption tested: a guest booted once per module can serve separate
+  nextest test processes with per-test results, filtering and run-scoped
+  cleanup.
+- Probe verdict: WORKS, with two gaps: a crashed guest owner orphans its VMM
+  until the run ends, and tests sharing a guest are not isolated from each
+  other (`findings-module-shared-guest.md`, probe commit `2d32a12cc`).
+- Promotion decision: PROMOTE, user decision 2026-11-13. The shared-guest
+  shape (an owner that boots one guest per module and serves each test's host
+  half over a pathname unix socket) goes to DESIGN. DESIGN pins the guest
+  owner and its lifetime, the rendezvous location, isolation and retry
+  semantics, and whether a guest serves one test at a time.
