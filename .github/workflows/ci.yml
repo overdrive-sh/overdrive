@@ -564,6 +564,13 @@ jobs:
         if: steps.sccache-setup.outcome != 'success'
         run: echo "::warning::sccache setup failed; building without compiler cache. Expected during GHA cache backend outages."
 
+      # The gateway invariants compose the production public listener, whose
+      # port is fixed at 443 by `GatewayConfig`. The runner user is not
+      # root, so allow it to bind that port as the root-run metal and Lima
+      # lanes already can.
+      - name: Allow unprivileged binds from port 443
+        run: sudo sysctl -w net.ipv4.ip_unprivileged_port_start=443
+
       - name: cargo dst
         # The xtask wrapper writes:
         #   target/dst/output.log   — full stdout/stderr
