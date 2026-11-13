@@ -1,0 +1,2 @@
+# interrupt-sigkill-nextest  signal: KILL -> nextest  run: 99315b38b6c346a027f7ea70
+OVERDRIVE_METAL_RUN_COMPLETE run_id=99315b38b6c346a027f7ea70 exit_code=137 cause=command_returned

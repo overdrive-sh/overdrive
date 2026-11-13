@@ -1,0 +1,38 @@
+# shared-two-modules  filter: test(~shared::) & not test(=shared::t_slow) | test(~shared_b::)  exit: 100
+OVERDRIVE_METAL_RUN_ID=a8551045337679ba58d66014
+        PASS [   2.438s] (1/6) modguest-probe::probe shared::t_pass_3
+    MODGUEST_HOST test=t_pass_3 netns=net:[4026532991]
+    MODGUEST_HOST started broker pid=1193677 anchor_nextest_pid=1184895
+    MODGUEST_BODY test=probe::shared::t_pass_3 boot_id=ea9e90f2-8e1a-4bc5-bba2-794c2af6d879 kernel=7.0.0-38-generic pid=83 uptime=0.68 0.42
+    MODGUEST_HOST test=t_pass_3 exit=0 runs_served=1 broker_pid=1193677 broker_netns=net:[4026532991] exec_ms=336 wall_ms=2378
+        PASS [   2.656s] (2/6) modguest-probe::probe shared_b::u_pass_1
+    MODGUEST_HOST test=u_pass_1 netns=net:[4026533202]
+    MODGUEST_HOST started broker pid=1193681 anchor_nextest_pid=1184895
+    MODGUEST_BODY test=probe::shared_b::u_pass_1 boot_id=86438501-6b3d-4eab-8b02-69acec34b787 kernel=7.0.0-38-generic pid=83 uptime=0.64 0.33
+    MODGUEST_HOST test=u_pass_1 exit=0 runs_served=1 broker_pid=1193681 broker_netns=net:[4026533202] exec_ms=341 wall_ms=2592
+        PASS [   2.751s] (3/6) modguest-probe::probe shared::t_pass_2
+    MODGUEST_HOST test=t_pass_2 netns=net:[4026533096]
+    MODGUEST_BODY test=probe::shared::t_pass_2 boot_id=ea9e90f2-8e1a-4bc5-bba2-794c2af6d879 kernel=7.0.0-38-generic pid=85 uptime=0.99 1.03
+    MODGUEST_HOST test=t_pass_2 exit=0 runs_served=2 broker_pid=1193677 broker_netns=net:[4026532991] exec_ms=313 wall_ms=2691
+        PASS [   2.974s] (4/6) modguest-probe::probe shared_b::u_pass_2
+    MODGUEST_HOST test=u_pass_2 netns=net:[4026533520]
+    MODGUEST_BODY test=probe::shared_b::u_pass_2 boot_id=86438501-6b3d-4eab-8b02-69acec34b787 kernel=7.0.0-38-generic pid=85 uptime=0.96 0.95
+    MODGUEST_HOST test=u_pass_2 exit=0 runs_served=2 broker_pid=1193681 broker_netns=net:[4026533202] exec_ms=318 wall_ms=2907
+        PASS [   3.062s] (5/6) modguest-probe::probe shared::t_pass_1
+    MODGUEST_HOST test=t_pass_1 netns=net:[4026533308]
+    MODGUEST_BODY test=probe::shared::t_pass_1 boot_id=ea9e90f2-8e1a-4bc5-bba2-794c2af6d879 kernel=7.0.0-38-generic pid=87 uptime=1.30 1.64
+    MODGUEST_HOST test=t_pass_1 exit=0 runs_served=3 broker_pid=1193677 broker_netns=net:[4026532991] exec_ms=310 wall_ms=2998
+        FAIL [   3.381s] (6/6) modguest-probe::probe shared::t_fail
+    MODGUEST_HOST test=t_fail netns=net:[4026533414]
+    MODGUEST_BODY test=probe::shared::t_fail boot_id=ea9e90f2-8e1a-4bc5-bba2-794c2af6d879 kernel=7.0.0-38-generic pid=89 uptime=1.61 2.25
+    MODGUEST_BODY deliberate failure in probe::shared::t_fail
+    MODGUEST_HOST test=t_fail exit=101 runs_served=4 broker_pid=1193677 broker_netns=net:[4026532991] exec_ms=319 wall_ms=3316
+     Summary [   3.382s] 6 tests run: 5 passed, 1 failed, 10 skipped
+        PASS [   2.438s] (1/6) modguest-probe::probe shared::t_pass_3
+        PASS [   2.656s] (2/6) modguest-probe::probe shared_b::u_pass_1
+        PASS [   2.751s] (3/6) modguest-probe::probe shared::t_pass_2
+        PASS [   2.974s] (4/6) modguest-probe::probe shared_b::u_pass_2
+        PASS [   3.062s] (5/6) modguest-probe::probe shared::t_pass_1
+        FAIL [   3.381s] (6/6) modguest-probe::probe shared::t_fail
+error: test run failed
+OVERDRIVE_METAL_RUN_COMPLETE run_id=a8551045337679ba58d66014 exit_code=100 cause=command_returned

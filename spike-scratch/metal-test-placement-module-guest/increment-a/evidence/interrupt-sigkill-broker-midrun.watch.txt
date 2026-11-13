@@ -1,0 +1,28 @@
+run id: 46dd027975248b53daea68bc
+--- before kill (expect 2 brokers + >=2 cloud-hypervisor)
+1707081 modguest-broker modguest-broker /tmp/modguest-46dd027975248b53daea68bc/probe-shared.sock deps/probe-a9689779e765af32 1683803 243950107 
+1707195 modguest-broker modguest-broker /tmp/modguest-46dd027975248b53daea68bc/probe-shared-b.sock deps/probe-a9689779e765af32 1683803 243950107 
+1707677 cloud-hyperviso /usr/local/bin/cloud-hypervisor     panic=1 root=/dev/vda rw overdrive.testpeer=4008229537       --landlock  
+1707822 cloud-hyperviso /usr/local/bin/cloud-hypervisor     panic=1 root=/dev/vda rw overdrive.testpeer=1634717523       --landlock  
+killing -9 the first of the two brokers (which module it served is in the client lines below): pid 1707081
+--- 3s after kill
+1707195 modguest-broker modguest-broker /tmp/modguest-46dd027975248b53daea68bc/probe-shared-b.sock deps/probe-a9689779e765af32 1683803 243950107 
+1707677 cloud-hyperviso /usr/local/bin/cloud-hypervisor     panic=1 root=/dev/vda rw overdrive.testpeer=4008229537       --landlock  
+1707822 cloud-hyperviso /usr/local/bin/cloud-hypervisor     panic=1 root=/dev/vda rw overdrive.testpeer=1634717523       --landlock  
+--- 8s after kill
+1707195 modguest-broker modguest-broker /tmp/modguest-46dd027975248b53daea68bc/probe-shared-b.sock deps/probe-a9689779e765af32 1683803 243950107 
+1707677 cloud-hyperviso /usr/local/bin/cloud-hypervisor     panic=1 root=/dev/vda rw overdrive.testpeer=4008229537       --landlock  
+1707822 cloud-hyperviso /usr/local/bin/cloud-hypervisor     panic=1 root=/dev/vda rw overdrive.testpeer=1634717523       --landlock  
+local metal run exit: 100
+# interrupt-sigkill-broker-midrun run: 46dd027975248b53daea68bc
+        FAIL [  20.704s] (1/2) modguest-probe::probe shared::t_slow
+    MODGUEST_HOST test=t_slow netns=net:[4026532888]
+    MODGUEST_HOST started broker pid=1707081 anchor_nextest_pid=1683803
+        PASS [  50.002s] (2/2) modguest-probe::probe shared_b::u_slow
+    MODGUEST_HOST test=u_slow netns=net:[4026532991]
+    MODGUEST_HOST started broker pid=1707195 anchor_nextest_pid=1683803
+    MODGUEST_HOST test=u_slow exit=0 runs_served=1 broker_pid=1707195 broker_netns=net:[4026532991] exec_ms=45355 wall_ms=49472
+     Summary [  50.003s] 2 tests run: 1 passed, 1 failed, 15 skipped
+        PASS [  50.002s] (2/2) modguest-probe::probe shared_b::u_slow
+        FAIL [  20.704s] (1/2) modguest-probe::probe shared::t_slow
+OVERDRIVE_METAL_RUN_COMPLETE run_id=46dd027975248b53daea68bc exit_code=100 cause=command_returned

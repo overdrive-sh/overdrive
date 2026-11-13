@@ -1,0 +1,14 @@
+# control-b-one-guest  filter: test(=control::module_in_one_guest)  exit: 100
+OVERDRIVE_METAL_RUN_ID=f69aae3091ad06d5ae1a389e
+        FAIL [   2.156s] (1/1) modguest-probe::probe control::module_in_one_guest
+    test control_inner::t_fail ... MODGUEST_BODY test=probe::control_inner::t_fail boot_id=ae33d307-4822-4d81-b881-e0b49fc13ff9 kernel=7.0.0-38-generic pid=82 uptime=0.41 0.09
+    MODGUEST_BODY deliberate failure in probe::control_inner::t_fail
+    FAILED
+    test control_inner::t_pass_1 ... MODGUEST_BODY test=probe::control_inner::t_pass_1 boot_id=ae33d307-4822-4d81-b881-e0b49fc13ff9 kernel=7.0.0-38-generic pid=82 uptime=0.42 0.10
+    test control_inner::t_pass_2 ... MODGUEST_BODY test=probe::control_inner::t_pass_2 boot_id=ae33d307-4822-4d81-b881-e0b49fc13ff9 kernel=7.0.0-38-generic pid=82 uptime=0.42 0.10
+    test control_inner::t_pass_3 ... MODGUEST_BODY test=probe::control_inner::t_pass_3 boot_id=ae33d307-4822-4d81-b881-e0b49fc13ff9 kernel=7.0.0-38-generic pid=82 uptime=0.43 0.10
+    MODGUEST_TIMING control boots=1 staging_ms=784 boot_ms=918 total_ms=2052 exit=101
+     Summary [   2.157s] 1 test run: 0 passed, 1 failed, 15 skipped
+        FAIL [   2.156s] (1/1) modguest-probe::probe control::module_in_one_guest
+error: test run failed
+OVERDRIVE_METAL_RUN_COMPLETE run_id=f69aae3091ad06d5ae1a389e exit_code=100 cause=command_returned

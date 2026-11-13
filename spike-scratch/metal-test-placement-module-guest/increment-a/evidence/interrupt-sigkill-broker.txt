@@ -1,0 +1,8 @@
+# interrupt-sigkill-broker  signal: KILL -> broker  run: 893a42268381eadcd9bff31f
+        FAIL [  10.895s] (1/1) modguest-probe::probe shared::t_slow
+    MODGUEST_HOST test=t_slow netns=net:[4026532888]
+    MODGUEST_HOST started broker pid=1621531 anchor_nextest_pid=1612696
+     Summary [  10.896s] 1 test run: 0 passed, 1 failed, 16 skipped
+        FAIL [  10.895s] (1/1) modguest-probe::probe shared::t_slow
+error: test run failed
+OVERDRIVE_METAL_RUN_COMPLETE run_id=893a42268381eadcd9bff31f exit_code=100 cause=command_returned

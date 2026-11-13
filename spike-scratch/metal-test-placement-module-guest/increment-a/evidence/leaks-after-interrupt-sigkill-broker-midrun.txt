@@ -1,0 +1,19 @@
+--- processes (broker / cloud-hypervisor, any run):
+--- cloud-hypervisor processes naming run adf77ca79d01b4756faa2b88:
+0
+--- /tmp/modguest-adf77ca79d01b4756faa2b88:
+total 8
+drwxr-x---   2 root root  140 Nov 13 21:03 .
+drwxrwxrwt 404 root root 9380 Nov 13 21:03 ..
+-rw-r-----   1 root root  282 Nov 13 21:03 probe-shared-b.broker.log
+-rw-r-----   1 root root    0 Nov 13 21:02 probe-shared-b.lock
+-rw-r-----   1 root root  138 Nov 13 21:02 probe-shared.broker.log
+-rw-r-----   1 root root    0 Nov 13 21:02 probe-shared.lock
+srwxr-x---   1 root root    0 Nov 13 21:02 probe-shared.sock
+--- /srv/vm/metal/adf77ca79d01b4756faa2b88:
+ls: cannot access '/srv/vm/metal/adf77ca79d01b4756faa2b88': No such file or directory
+--- /run/ovd-gk/adf77ca79d01b4756faa2b88:
+ls: cannot access '/run/ovd-gk/adf77ca79d01b4756faa2b88': No such file or directory
+--- per-run cgroups naming adf77ca79d01b4756faa2b88:
+0
+--- vhost-vsock holders (fd count by pid):
