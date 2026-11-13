@@ -186,7 +186,11 @@ Public prose uses words a reader outside the team can understand. Internal
 vocabulary is jargon with no definition the reader can find: ticket IDs, ruling
 IDs (`R-17`, `D-3`), spike and experiment IDs (`V-GW-4`), roadmap step IDs,
 codenames, and the names of internal processes and artifacts ("the capture", "the
-expectation", "satisfied", "review round", "slice", "lane", "wave"). Abstract
+expectation", "satisfied", "review round", "slice", "lane", "wave"). The people
+and roles of the workflow that produced the work are internal too: never write
+"the user", "the agent", "the reviewer", "the architect" or "the crafter", or a
+phase name such as DISCUSS, DESIGN, DISTILL or DELIVER. The person who approved a
+decision is part of the team, so the decision is "ours". Abstract
 nouns that stand in for a concrete fact belong in the same bin: "configuration
 surface", "envelope", "posture", "story". Name the concrete thing instead: the
 flag, the file, the command, the number.
@@ -199,7 +203,7 @@ are not.
 |---|---|
 | These limits have no configuration surface. | You cannot change these limits in this version. |
 | We measured 128 exchanges (R-74). | We measured 128 concurrent exchanges on one host. |
-| Per ruling D-3, we dropped the window design. | We dropped the windowed design because it let a stale record outlive its owner. |
+| The user approved D-3 on 2026-11-02, dropping the window design. | We dropped the windowed design because it let a stale record outlive its owner. |
 | The capture found a gap. | Running the example found a bug our tests had missed. |
 
 Also delete words that tell the reader how to feel or that go stale: *simply,
@@ -239,9 +243,23 @@ Each page is one type, and the type sets its structure and voice (Diátaxis):
   Route, run …"). Link to background instead of explaining it.
 - **Concept page.** What the thing is and why it works that way. No procedures.
   Present tense, the product or the reader as subject.
-- **Engineering blog post.** The story of a decision: the concrete problem, the
-  serious alternatives and why each lost, the evidence, the cost of the choice,
-  and what is not done. "We" is the team that decided, and it owns the mistakes.
+- **Engineering blog post.** The story of a decision, written by the team that
+  made it. Build it from the design records, experiments and evidence, not from
+  memory, and do not describe only the final implementation. It explains:
+  - the concrete problem, including the observed failure or measured constraint
+    and why it blocked the intended outcome.
+  - the serious alternatives, what each experiment established, and why each
+    lost or was deferred.
+  - why the chosen approach fits the original constraint, what it costs, and the
+    discoveries that changed the design.
+  - what the delivered work proves, what remains unmeasured, and its limitations.
+
+  Lead with the problem and the decision, then use implementation details to
+  explain how you got there. Pick the consequential experiments instead of
+  recounting every task. Scope each claim to its evidence: a limit observed on
+  one component is not a system-wide limit, and an alternative that worked in its
+  experiment is not "nonfunctional" because you chose something else. Say what
+  you actually selected on.
 
 Keep sentences under about 25 words and paragraphs under five sentences unless a
 longer one carries a single thought that splitting would break.
@@ -256,6 +274,8 @@ The research behind principles 9 to 12, with sources, is in
 Principle 4 covers the three modes (bare declarative, first-person staked, impersonal). Two additional notes:
 
 **"We" is the team, in company writing.** A company blog post or an organization's documentation speaks for the team, so "we" owns its decisions and mistakes: "we chose", "we dropped it because", "we have not measured". Avoid the editorial "we" only in genuinely single-author writing, where it sounds royal or implies co-authors who don't exist.
+
+**Name who acted. No agentless passive for decisions.** "It was chosen", "it was superseded", "was left unselected", "were not credited" and "has been measured" hide who decided. Write "we chose", "we dropped it because", "we did not count", "we have not measured". The passive is fine for things no one decided ("the device is released when the VMM exits"). It is wrong for choices.
 
 **Not "we" as the reader-and-writer in docs.** `In this page, we create a Route` leaves the reader unsure whether they are part of the "we". In how-to and concept pages, address the reader as "you" and make the product the subject of what it does.
 
