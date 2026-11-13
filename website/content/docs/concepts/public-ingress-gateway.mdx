@@ -14,7 +14,7 @@ document. [Expose a service publicly](/docs/how-to/expose-a-service-publicly)
 walks through both.
 
 <Callout title="Scope">
-	The gateway handles HTTP/1.1 only, for VM workloads only. It reads certificates
+	The gateway handles HTTP/1.1 only. It reads certificates
 	from files you provide. Issue
 	[#57: an embedded ACME client](https://github.com/overdrive-sh/overdrive/issues/57) tracks
 	automated certificate issuance, and issue
@@ -146,7 +146,6 @@ exchanges, with the heap returning to a plateau afterward.
 ## Current limits
 
 - HTTP/1.1 only. Other protocols get `505`.
-- VM workloads only.
 - One Route per node. Issue
   [#352: several Routes and hostnames on one listener](https://github.com/overdrive-sh/overdrive/issues/352) tracks
   lifting this.

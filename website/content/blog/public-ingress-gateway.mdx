@@ -158,8 +158,7 @@ The gateway speaks HTTP/1.1 only and answers anything else with `505`. Issue
 [#341: HTTP/2 and gRPC on the public listener](https://github.com/overdrive-sh/overdrive/issues/341)
 tracks HTTP/2. Certificates come from files you supply, with provenance recorded as
 `Manual`. Issue [#57: an embedded ACME client](https://github.com/overdrive-sh/overdrive/issues/57) tracks
-automated issuance. The gateway serves VM
-workloads only, holds one Route per node
+automated issuance. The gateway holds one Route per node
 (issue [#352: several Routes on one listener](https://github.com/overdrive-sh/overdrive/issues/352)), and has no CLI
 verb for status or
 withdrawal. Those two operations are HTTP calls on the operator listener.
