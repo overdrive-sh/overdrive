@@ -6,11 +6,13 @@
 |---|---|
 | Feature | `service-allocation-readiness-and-ending` |
 | Step | `05-02` — Host reads guest listener reports into one shared board |
-| Iterations recorded | 1 and 2 |
+| Iterations recorded | 1 and 2 (original review); 3 (final lint remediation) |
 | Implementation commit | `18de456664707320f328177ea23bae76446c4aea` |
 | COMMIT audit commit | `730f6c5bd64cbe9a081a7c02cd6beb6bb180f3c7` |
-| Reviewer | Codex, fresh isolated DELIVER review |
-| Final verdict | **APPROVED** — F-01, F-02, and F-03 closed in iteration 2 |
+| Final-remediation commits | `493e450d900e37095813b46752c1038118dfcfbb`, `b23de5ca765193b614cf868d6dcbe98e58d13e46`, `45086aece00bfed7cdef09d3dc47d8c66789ee29` |
+| Final-remediation audit commits | `9b387cb26880e3d41581a57063c53ea151f70bce`, `b0881ff6844f044622f75c8d0bb540b5227d7201` |
+| Reviewer | Codex, fresh isolated replacement for final-remediation review |
+| Final verdict | **APPROVED** — final lint remediation closed in iteration 3 |
 
 ## Scope and authoritative contract
 
@@ -187,6 +189,60 @@ The changes close only the findings: the remediation commit changes the three so
 
 The crafter reports the focused parser tests **3/3**, board acceptance tests **6/6**, host conformance runs **5/5**, strict worker Clippy, formatting, and `git diff --check` passed. I did not rerun those tests or broad gates; this re-review was limited to the three documented findings, their production paths, the two commit scopes, and mechanical whitespace checks.
 
-## Final verdict
+## Final verdict at original review approval (iteration 2)
 
 **APPROVED — iteration 2.** F-01, F-02, and F-03 are closed. The implementation retains the accepted D13 API and behavior, the owned scaffold gate is satisfied, and the public contract documentation matches the approved wire form and constructor signature. No implementation, acceptance-test, or DES phase changes were made by this reviewer; this review artifact is the only reviewer change.
+
+## Iteration 3 — final integration lint remediation review
+
+### Review scope and provenance
+
+This fresh replacement review reopens only the final integration lint remediation recorded in `distill/final-dst-lint-fixture-remediation.md` and `deliver/step-05-02-final-lint-remediation.md`. It preserves the original 05-02 review and its iteration 1/2 findings and dispositions above. The reviewed commits are `493e450d` (async fixture I/O; its commit carries `Step-Id: 05-03`, matching the step that activates this wiring test), `b23de5ca` (private scanner recognition), `9b387cb` (the scanner remediation COMMIT audit), `45086aec` (narrow Clippy allowances), and `b0881ff` (the allowance remediation COMMIT audit).
+
+The current worktree also contains unrelated edits and parallel DISTILL test/model alignment work, including the guest-flow `fwd_pair` model and the `step-05-07-sigkill` spike. I did not modify or commit those files. This review artifact is the only reviewer-owned file.
+
+### Findings and dispositions
+
+| Item | Review evidence | Disposition |
+|---|---|---|
+| Async shared-board fixture filesystem calls | `493e450d` changes the five `std::fs` sites called out by the canonical DST lint to awaited `tokio::fs` operations: staging/data/operator-config directory creation and the two stand-in file writes. It also makes the fixture's private `read_ca` read async. The patch changes setup sequencing only where needed to await I/O; it leaves the wiring test's identity, inputs, expected-failure behavior, exact startup `Pass` oracle, and `CONTRACT_SHAPE: bounded-change.` declaration intact. | **Resolved** |
+| Earned-Trust helper recognition | The feature-delta D13/DG-6 contract requires one shared `GuestListenerBoard` in production composition. `run_server` constructs one board, gives a clone as `GuestListenerReports` to `compose_and_probe_runner_gate_with_reports`, and passes the same board through `compose_vm_driver` to `VmDriver::new` (`lib.rs:3299-3334, 3530-3545, 3686-3693`). The reports helper builds `ProbeRunner` with that port and awaits `runner.probe()` (`probe_runner_boot.rs:75-92`). Thus the original `ProbeGateHelperUnused` failure was a stale private scanner name after the approved composition changed, not a missing runtime gate. The scanner now compares against the two exact helper identifiers; the pre-existing `#[cfg(test)]` exclusion and separate `.probe()` body check remain. The regression suite exercises the actual `lib.rs`, the exact `with_reports` call, a missing call, test-only calls, and a `_disabled` lookalike that must remain a violation. | **Resolved** |
+| Contract Shape and scoped lint allowance | The two new source-local scanner properties retain the exact `/// CONTRACT_SHAPE: pure-function.` line. `45086aec` adds `#[allow(clippy::doc_markdown, reason = "exact per-test contract declaration")]` only to those two test functions. It adds no module/file-wide allowance and changes no scanner assertion or behavior. | **Resolved** |
+
+### Accepted contract and test-integrity checks
+
+- The reviewed changes add no production API, test fixture API, wire field, error variant, or public configuration. `BeaconMessage::Listen { protocol: Proto, port: NonZeroU16 }` and `BeaconParseError::MalformedListen { raw: String, detail: String }` remain the approved D13/DG-M surface; the changed commits do not touch their implementation or mappings.
+- The shared-board production composition remains one board passed to the probe runner and VM driver. The test fixture still proves the externally observable startup `Pass` through `run_server`, its beacon input, and the allocation snapshot; it does not hand-install the expected board state.
+- The fixture commit's diff contains no assertion edits or test removal/skip. The scanner tests add observable scanner-result assertions, including the negative lookalike case. No testing-theater or weakened-oracle issue was found.
+- The `doc_markdown` exception is bounded to the two mandated exact contract-marker declarations. No broader lint suppression, unrelated formatting cleanup, or API adjustment is required.
+
+### Verification evidence and DES audit
+
+I reviewed the retained evidence and commit history rather than rerunning the native Metal lane:
+
+- Fixture evidence records the five DST-lint diagnostics removed and the selected `a_listen_line_on_the_drivers_beacon_completes_the_probe_tasks_declared_set` run passing 1/1 (`17727855873b17020af8ca15`) after lane preparation. The earlier `lane_not_prepared` attempt did not reach the test body.
+- The fixture-only canonical lint attempt `2efb5fe2c8c0b64453015293` is correctly recorded as still failing on the one feature-caused stale `ProbeGateHelperUnused` recognition, after the five async filesystem diagnostics were gone. The evidence does not claim that this intermediate run passed.
+- The scanner regression was reproduced RED on the real production `lib.rs` (`0/1`, expected `ProbeGateHelperUnused`), then the focused `probe_gate_` suite passed 10/10. The full canonical Metal `dst-lint` passed as run `dbf2700f5458905e4584797e` after the scanner fix.
+- Strict Clippy first reported exactly the two `doc_markdown` diagnostics on the required marker lines. The function-local allowances were followed by the recorded strict xtask Clippy pass `263862225a837f0b81f17bb5`; direct rustfmt for `xtask/src/dst_lint.rs` passed.
+- `execution-log.json` retains separate 05-02 RED FAIL / GREEN PASS / COMMIT PASS sequences for the scanner correction and the Clippy follow-up. The scanner COMMIT audit is `9b387cb`; the Clippy COMMIT audit is `b0881ff`. The DISTILL fixture note accurately records that fixture remediation had no DELIVER DES phase event. No event claims the failed intermediate lint passed.
+- The full-package xtask format check still reports the documented pre-existing difference in unchanged `xtask/src/metal_run_isolation_conformance.rs:519`; the edited scanner file passes its direct format check. This unrelated cleanup is outside the approved bounded remediation.
+- Mutation testing was not run. The user explicitly waived mutation testing for this remediation/step, so no mutation or D17 mutant evidence is a remaining gate.
+
+All five commits preserve Marcus as Git author and carry exactly `Co-Authored-By: Codex <codex@openai.com>`; none adds Claude/Anthropic attribution. The commits and `git show --check` evidence show no whitespace errors. I did not alter the acceptance fixture, scanner, DES log, implementation, or any unrelated dirty work.
+
+### Iteration 3 review dimensions
+
+| Dimension | Result |
+|---|---|
+| Exact D13 API and typed-error contract | Pass — the remediation adds no interface surface and preserves `Listen` / `MalformedListen` unchanged |
+| Shared-board composition and Earned-Trust gate | Pass — the production composition still passes the same board to both consumers and reaches the helper that awaits `ProbeRunner::probe()` |
+| Scanner recognition and regression quality | Pass — exact approved names accepted; absent/test-only calls and a lookalike rejected; prior internal `.probe()` gate remains |
+| Fixture test integrity and Contract Shape | Pass — five blocking calls are awaited; the extra CA read is awaited; assertions and exact startup `Pass` oracle are unchanged; required marker remains |
+| Clippy allowance scope | Pass — two function-local allowances only |
+| Verification and DES honesty | Pass — intermediate failures, final passes, and audit commits are distinguished accurately |
+| Commit attribution and scope | Pass — author retained, exact Codex trailer, no unrelated files included in the reviewed commit scopes |
+| Mutation gate | Not run — explicitly waived by the user for this step |
+
+### Final remediation verdict
+
+**APPROVED — iteration 3.** The async fixture change preserves every assertion and its bounded startup-`Pass` outcome. The scanner now recognizes the two approved Earned-Trust helper names while retaining the separate helper-body check and rejecting lookalikes. The two required Contract Shape declarations remain exact with only function-local `doc_markdown` allowances. The final canonical lint and strict Clippy evidence pass, DES records accurately distinguish RED, GREEN, and COMMIT, and the approved D13 API, shared-board wiring, and typed error contract remain intact. No further remediation is required for this bounded scope.
