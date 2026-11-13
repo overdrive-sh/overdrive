@@ -1,0 +1,73 @@
+# guest-hazard-taint: counterexample, 11 state(s) (from the TLC trace)
+
+State 1
+  execs = 0
+  torn = FALSE
+  owners = 0
+  fifobad = FALSE
+  nseq = 1
+  lastb = 0
+  faults = 2
+  queue = <<>>
+  guest = 0
+  execgen = 0
+  lock = 0
+  gen = 0
+  bad = {}
+  seq = <<0, 0, 0>>
+  phase = <<0, 0, 0>>
+  anchor = TRUE
+  conf_step = [Init |-> [tag |-> "UNIT"]]
+  inflight = 0
+
+State 2 [Arrive]
+  phase = <<1, 0, 0>>
+
+State 3 [ElectBegin]
+  lock = 1
+  phase = <<2, 0, 0>>
+
+State 4 [OwnerStarted]
+  owners = 1
+  nseq = 2
+  queue = <<1>>
+  lock = 0
+  seq = <<1, 0, 0>>
+  phase = <<3, 0, 0>>
+
+State 5 [BeginBoot]
+  guest = 1
+  gen = 1
+
+State 6 [BootOk]
+  guest = 2
+
+State 7 [BeginExec]
+  execs = 1
+  lastb = 1
+  queue = <<>>
+  execgen = 1
+  phase = <<4, 0, 0>>
+  inflight = 1
+
+State 8 [ExecDoneFail]
+  execs = 0
+  bad = {1}
+  phase = <<11, 0, 0>>
+  inflight = 0
+
+State 9 [Arrive]
+  phase = <<11, 1, 0>>
+
+State 10 [Connect]
+  nseq = 3
+  queue = <<2>>
+  seq = <<1, 2, 0>>
+  phase = <<11, 3, 0>>
+
+State 11 [BeginExec]
+  execs = 1
+  lastb = 2
+  queue = <<>>
+  phase = <<11, 4, 0>>
+  inflight = 2

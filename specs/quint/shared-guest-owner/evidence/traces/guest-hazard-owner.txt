@@ -1,0 +1,47 @@
+# guest-hazard-owner: counterexample, 7 state(s) (from the TLC trace)
+
+State 1
+  inflight = 0
+  nseq = 1
+  conf_step = [Init |-> [tag |-> "UNIT"]]
+  lastb = 0
+  faults = 2
+  lock = 0
+  queue = <<>>
+  guest = 0
+  fifobad = FALSE
+  phase = <<0, 0, 0>>
+  anchor = TRUE
+  execgen = 0
+  gen = 0
+  torn = FALSE
+  execs = 0
+  bad = {}
+  seq = <<0, 0, 0>>
+  owners = 0
+
+State 2 [Arrive]
+  phase = <<1, 0, 0>>
+
+State 3 [ElectBegin]
+  phase = <<2, 0, 0>>
+
+State 4 [Arrive]
+  phase = <<2, 1, 0>>
+
+State 5 [ElectBegin]
+  phase = <<2, 2, 0>>
+
+State 6 [OwnerStarted]
+  nseq = 2
+  queue = <<2>>
+  phase = <<2, 3, 0>>
+  seq = <<0, 1, 0>>
+  owners = 1
+
+State 7 [OwnerStarted]
+  nseq = 3
+  queue = <<2, 1>>
+  phase = <<3, 3, 0>>
+  seq = <<2, 1, 0>>
+  owners = 2

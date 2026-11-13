@@ -1,0 +1,119 @@
+State 1: <Initial predicate>
+/\ guest_bugOrphan_shared_guest_torn = FALSE
+/\ guest_bugOrphan_shared_guest_owners = 0
+/\ guest_bugOrphan_shared_guest_gen = 0
+/\ guest_bugOrphan_shared_guest_execgen = 0
+/\ guest_bugOrphan_shared_guest_nseq = 1
+/\ guest_bugOrphan_shared_guest_faults = 2
+/\ guest_bugOrphan_shared_guest_lastb = 0
+/\ guest_bugOrphan_shared_guest_bad = {}
+/\ guest_bugOrphan_shared_guest_queue = <<>>
+/\ guest_bugOrphan_shared_guest_seq = <<0, 0, 0>>
+/\ guest_bugOrphan_shared_guest_guest = 0
+/\ guest_bugOrphan_shared_guest_lock = 0
+/\ guest_bugOrphan_shared_guest_inflight = 0
+/\ guest_bugOrphan_shared_guest_phase = <<0, 0, 0>>
+/\ guest_bugOrphan_shared_guest_anchor = TRUE
+/\ guest_bugOrphan_shared_guest_conf_step = [Init |-> [tag |-> "UNIT"]]
+/\ guest_bugOrphan_shared_guest_execs = 0
+/\ guest_bugOrphan_shared_guest_fifobad = FALSE
+
+State 2: <guest_bugOrphan_shared_guest_Arrive line 483, col 3 to line 490, col 66 of module guest_bugOrphan>
+/\ guest_bugOrphan_shared_guest_torn = FALSE
+/\ guest_bugOrphan_shared_guest_owners = 0
+/\ guest_bugOrphan_shared_guest_gen = 0
+/\ guest_bugOrphan_shared_guest_execgen = 0
+/\ guest_bugOrphan_shared_guest_nseq = 1
+/\ guest_bugOrphan_shared_guest_faults = 2
+/\ guest_bugOrphan_shared_guest_lastb = 0
+/\ guest_bugOrphan_shared_guest_bad = {}
+/\ guest_bugOrphan_shared_guest_queue = <<>>
+/\ guest_bugOrphan_shared_guest_seq = <<0, 0, 0>>
+/\ guest_bugOrphan_shared_guest_guest = 0
+/\ guest_bugOrphan_shared_guest_lock = 0
+/\ guest_bugOrphan_shared_guest_inflight = 0
+/\ guest_bugOrphan_shared_guest_phase = <<1, 0, 0>>
+/\ guest_bugOrphan_shared_guest_anchor = TRUE
+/\ guest_bugOrphan_shared_guest_conf_step = [Init |-> [tag |-> "UNIT"]]
+/\ guest_bugOrphan_shared_guest_execs = 0
+/\ guest_bugOrphan_shared_guest_fifobad = FALSE
+
+State 3: <guest_bugOrphan_shared_guest_ElectBegin line 775, col 3 to line 783, col 73 of module guest_bugOrphan>
+/\ guest_bugOrphan_shared_guest_torn = FALSE
+/\ guest_bugOrphan_shared_guest_owners = 0
+/\ guest_bugOrphan_shared_guest_gen = 0
+/\ guest_bugOrphan_shared_guest_execgen = 0
+/\ guest_bugOrphan_shared_guest_nseq = 1
+/\ guest_bugOrphan_shared_guest_faults = 2
+/\ guest_bugOrphan_shared_guest_lastb = 0
+/\ guest_bugOrphan_shared_guest_bad = {}
+/\ guest_bugOrphan_shared_guest_queue = <<>>
+/\ guest_bugOrphan_shared_guest_seq = <<0, 0, 0>>
+/\ guest_bugOrphan_shared_guest_guest = 0
+/\ guest_bugOrphan_shared_guest_lock = 1
+/\ guest_bugOrphan_shared_guest_inflight = 0
+/\ guest_bugOrphan_shared_guest_phase = <<2, 0, 0>>
+/\ guest_bugOrphan_shared_guest_anchor = TRUE
+/\ guest_bugOrphan_shared_guest_conf_step = [Init |-> [tag |-> "UNIT"]]
+/\ guest_bugOrphan_shared_guest_execs = 0
+/\ guest_bugOrphan_shared_guest_fifobad = FALSE
+
+State 4: <guest_bugOrphan_shared_guest_OwnerStarted line 509, col 3 to line 525, col 45 of module guest_bugOrphan>
+/\ guest_bugOrphan_shared_guest_torn = FALSE
+/\ guest_bugOrphan_shared_guest_owners = 1
+/\ guest_bugOrphan_shared_guest_gen = 0
+/\ guest_bugOrphan_shared_guest_execgen = 0
+/\ guest_bugOrphan_shared_guest_nseq = 2
+/\ guest_bugOrphan_shared_guest_faults = 2
+/\ guest_bugOrphan_shared_guest_lastb = 0
+/\ guest_bugOrphan_shared_guest_bad = {}
+/\ guest_bugOrphan_shared_guest_queue = <<1>>
+/\ guest_bugOrphan_shared_guest_seq = <<1, 0, 0>>
+/\ guest_bugOrphan_shared_guest_guest = 0
+/\ guest_bugOrphan_shared_guest_lock = 0
+/\ guest_bugOrphan_shared_guest_inflight = 0
+/\ guest_bugOrphan_shared_guest_phase = <<3, 0, 0>>
+/\ guest_bugOrphan_shared_guest_anchor = TRUE
+/\ guest_bugOrphan_shared_guest_conf_step = [Init |-> [tag |-> "UNIT"]]
+/\ guest_bugOrphan_shared_guest_execs = 0
+/\ guest_bugOrphan_shared_guest_fifobad = FALSE
+
+State 5: <guest_bugOrphan_shared_guest_BeginBoot line 611, col 3 to line 617, col 46 of module guest_bugOrphan>
+/\ guest_bugOrphan_shared_guest_torn = FALSE
+/\ guest_bugOrphan_shared_guest_owners = 1
+/\ guest_bugOrphan_shared_guest_gen = 1
+/\ guest_bugOrphan_shared_guest_execgen = 0
+/\ guest_bugOrphan_shared_guest_nseq = 2
+/\ guest_bugOrphan_shared_guest_faults = 2
+/\ guest_bugOrphan_shared_guest_lastb = 0
+/\ guest_bugOrphan_shared_guest_bad = {}
+/\ guest_bugOrphan_shared_guest_queue = <<1>>
+/\ guest_bugOrphan_shared_guest_seq = <<1, 0, 0>>
+/\ guest_bugOrphan_shared_guest_guest = 1
+/\ guest_bugOrphan_shared_guest_lock = 0
+/\ guest_bugOrphan_shared_guest_inflight = 0
+/\ guest_bugOrphan_shared_guest_phase = <<3, 0, 0>>
+/\ guest_bugOrphan_shared_guest_anchor = TRUE
+/\ guest_bugOrphan_shared_guest_conf_step = [Init |-> [tag |-> "UNIT"]]
+/\ guest_bugOrphan_shared_guest_execs = 0
+/\ guest_bugOrphan_shared_guest_fifobad = FALSE
+
+State 6: <guest_bugOrphan_shared_guest_OwnerCrash line 716, col 3 to line 722, col 47 of module guest_bugOrphan>
+/\ guest_bugOrphan_shared_guest_torn = FALSE
+/\ guest_bugOrphan_shared_guest_owners = 0
+/\ guest_bugOrphan_shared_guest_gen = 1
+/\ guest_bugOrphan_shared_guest_execgen = 0
+/\ guest_bugOrphan_shared_guest_nseq = 2
+/\ guest_bugOrphan_shared_guest_faults = 1
+/\ guest_bugOrphan_shared_guest_lastb = 0
+/\ guest_bugOrphan_shared_guest_bad = {}
+/\ guest_bugOrphan_shared_guest_queue = <<>>
+/\ guest_bugOrphan_shared_guest_seq = <<1, 0, 0>>
+/\ guest_bugOrphan_shared_guest_guest = 1
+/\ guest_bugOrphan_shared_guest_lock = 0
+/\ guest_bugOrphan_shared_guest_inflight = 0
+/\ guest_bugOrphan_shared_guest_phase = <<14, 0, 0>>
+/\ guest_bugOrphan_shared_guest_anchor = TRUE
+/\ guest_bugOrphan_shared_guest_conf_step = [Init |-> [tag |-> "UNIT"]]
+/\ guest_bugOrphan_shared_guest_execs = 0
+/\ guest_bugOrphan_shared_guest_fifobad = FALSE
