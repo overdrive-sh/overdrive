@@ -180,13 +180,84 @@ The first version states the limitation as fact. The second performs humility wh
 
 ---
 
+### 9. Write in the reader's vocabulary, never the project's
+
+Public prose uses words a reader outside the team can understand. Internal
+vocabulary is jargon with no definition the reader can find: ticket IDs, ruling
+IDs (`R-17`, `D-3`), spike and experiment IDs (`V-GW-4`), roadmap step IDs,
+codenames, and the names of internal processes and artifacts ("the capture", "the
+expectation", "satisfied", "review round", "slice", "lane", "wave"). Abstract
+nouns that stand in for a concrete fact belong in the same bin: "configuration
+surface", "envelope", "posture", "story". Name the concrete thing instead: the
+flag, the file, the command, the number.
+
+Define a genuine term of art once, where it first appears, then use it
+consistently. Specialist terms are fine for a specialist audience. Private terms
+are not.
+
+| Don't | Do |
+|---|---|
+| These limits have no configuration surface. | You cannot change these limits in this version. |
+| We measured 128 exchanges (R-74). | We measured 128 concurrent exchanges on one host. |
+| Per ruling D-3, we dropped the window design. | We dropped the windowed design because it let a stale record outlive its owner. |
+| The capture found a gap. | Running the example found a bug our tests had missed. |
+
+Also delete words that tell the reader how to feel or that go stale: *simply,
+just, easy, easily, currently, new, soon, under the hood, please*.
+
+### 10. Report evidence as what happened, not as process
+
+A measurement or verification claim says what ran, on what, how many times, what
+was observed, and what was not measured. Scope the claim to that. A single run
+shows that something works, not how often it works.
+
+Never report the state of the team's process in place of the observation.
+"The expectation was satisfied", "approved in review", "the ADRs are pending
+review" and "a reviewer checked the claims" tell the reader about the workflow,
+not about the system. Replace each with the thing observed, or delete it.
+
+**Do this:** We ran the example once on a bare-metal x86_64 server. `curl` got `200` over TLS 1.3, and `ss` showed kernel TLS on both connections.
+**Not this:** The operator-journey expectation was captured and independently reviewed as satisfied.
+
+### 11. State limitations as present-tense facts, with descriptive links
+
+Write a limitation as a fact about the current version: "The gateway serves one
+Route per node." Do not promise, date or hint at future work ("soon", "in a
+future release", "planned"). When an issue tracks lifting the limitation, link
+the issue itself with link text that says what it covers.
+
+**Do this:** One Route per node. Issue [#352: several Routes and hostnames on one listener](…) tracks lifting this.
+**Not this:** One Route per node (see #352). Support for more Routes is coming.
+
+### 12. Match the document type
+
+Each page is one type, and the type sets its structure and voice (Diátaxis):
+
+- **How-to guide.** Steps the reader performs, and nothing else. Address the
+  reader as "you", use present tense, start each step with an imperative verb,
+  one action per step, and state the goal before the action ("To declare the
+  Route, run …"). Link to background instead of explaining it.
+- **Concept page.** What the thing is and why it works that way. No procedures.
+  Present tense, the product or the reader as subject.
+- **Engineering blog post.** The story of a decision: the concrete problem, the
+  serious alternatives and why each lost, the evidence, the cost of the choice,
+  and what is not done. "We" is the team that decided, and it owns the mistakes.
+
+Keep sentences under about 25 words and paragraphs under five sentences unless a
+longer one carries a single thought that splitting would break.
+
+The research behind principles 9 to 12, with sources, is in
+`docs/research/writing/technical-blog-and-docs-writing-practices-research.md`.
+
+---
+
 ## Voice: a few edge cases
 
 Principle 4 covers the three modes (bare declarative, first-person staked, impersonal). Two additional notes:
 
-**Avoid the editorial "we" in single-author writing.** It either sounds royal or implies co-authors who don't exist. First-person singular is more honest. The exception is genuinely co-authored work, where "we" refers to the actual authors.
+**"We" is the team, in company writing.** A company blog post or an organization's documentation speaks for the team, so "we" owns its decisions and mistakes: "we chose", "we dropped it because", "we have not measured". Avoid the editorial "we" only in genuinely single-author writing, where it sounds royal or implies co-authors who don't exist.
 
-**"We" as the reader-and-writer.** A different "we" sometimes appears in tutorials and explanations: `We start by defining the lease table.` This one is fine in instructional writing where the writer is walking alongside the reader. Don't use it for claims or positions — those are the writer's alone.
+**Not "we" as the reader-and-writer in docs.** `In this page, we create a Route` leaves the reader unsure whether they are part of the "we". In how-to and concept pages, address the reader as "you" and make the product the subject of what it does.
 
 ---
 
@@ -250,5 +321,10 @@ Before submitting any technical prose, run through this list:
 - [ ] Is the filler cut?
 - [ ] Is authored prose free of semicolons, including metadata and examples?
 - [ ] Are limitations stated as facts rather than performed as humility?
+- [ ] Is every internal ID, codename, process name and abstract stand-in noun ("surface", "capture", "satisfied", `R-17`) replaced by the concrete thing or defined at first use?
+- [ ] Does every measurement or verification claim say what ran, on what, how many times and what was not measured, with no process labels in its place?
+- [ ] Is each limitation a present-tense fact, with a descriptive link to the issue that tracks it and no promise about the future?
+- [ ] Does the page keep to one document type, with "you" and imperative steps in docs and "we" for decisions in blog posts?
+- [ ] Are *simply, just, easy, currently, new, soon, under the hood* and *please* gone?
 
 If any answer is no, revise before submitting.
