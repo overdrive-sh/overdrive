@@ -264,7 +264,7 @@ State 2: <pair_bugEofAsFin_fwd_pair_CloseUnattached line 2608, col 3 to line 261
 /\ pair_bugEofAsFin_fwd_pair_ctx = [g |-> "open", h |-> "open"]
 /\ pair_bugEofAsFin_fwd_pair_attEnded = [g |-> 0, h |-> 0]
 
-State 3: <pair_bugEofAsFin_fwd_pair_Attach line 3605, col 3 to line 3612, col 69 of module pair_bugEofAsFin>
+State 3: <pair_bugEofAsFin_fwd_pair_Attach line 3607, col 3 to line 3614, col 69 of module pair_bugEofAsFin>
 /\ pair_bugEofAsFin_fwd_pair_ep = [g |-> "reset", h |-> "alive"]
 /\ pair_bugEofAsFin_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
 /\ pair_bugEofAsFin_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
@@ -397,7 +397,7 @@ State 3: <pair_bugEofAsFin_fwd_pair_Attach line 3605, col 3 to line 3612, col 69
 /\ pair_bugEofAsFin_fwd_pair_ctx = [g |-> "open", h |-> "open"]
 /\ pair_bugEofAsFin_fwd_pair_attEnded = [g |-> 0, h |-> 0]
 
-State 4: <pair_bugEofAsFin_fwd_pair_VCtl line 3596, col 3 to line 3599, col 43 of module pair_bugEofAsFin>
+State 4: <pair_bugEofAsFin_fwd_pair_VCtl line 3598, col 3 to line 3601, col 43 of module pair_bugEofAsFin>
 /\ pair_bugEofAsFin_fwd_pair_ep = [g |-> "reset", h |-> "alive"]
 /\ pair_bugEofAsFin_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
 /\ pair_bugEofAsFin_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
@@ -530,7 +530,7 @@ State 4: <pair_bugEofAsFin_fwd_pair_VCtl line 3596, col 3 to line 3599, col 43 o
 /\ pair_bugEofAsFin_fwd_pair_ctx = [g |-> "open", h |-> "open"]
 /\ pair_bugEofAsFin_fwd_pair_attEnded = [g |-> 0, h |-> 0]
 
-State 5: <pair_bugEofAsFin_fwd_pair_HopEnd1 line 3348, col 3 to line 3397, col 44 of module pair_bugEofAsFin>
+State 5: <pair_bugEofAsFin_fwd_pair_HopEnd1 line 3350, col 3 to line 3399, col 44 of module pair_bugEofAsFin>
 /\ pair_bugEofAsFin_fwd_pair_ep = [g |-> "reset", h |-> "alive"]
 /\ pair_bugEofAsFin_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
 /\ pair_bugEofAsFin_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
@@ -663,7 +663,7 @@ State 5: <pair_bugEofAsFin_fwd_pair_HopEnd1 line 3348, col 3 to line 3397, col 4
 /\ pair_bugEofAsFin_fwd_pair_ctx = [g |-> "open", h |-> "open"]
 /\ pair_bugEofAsFin_fwd_pair_attEnded = [g |-> 0, h |-> 0]
 
-State 6: <pair_bugEofAsFin_fwd_pair_ReadEof line 3056, col 3 to line 3101, col 44 of module pair_bugEofAsFin>
+State 6: <pair_bugEofAsFin_fwd_pair_ReadEof line 3058, col 3 to line 3103, col 44 of module pair_bugEofAsFin>
 /\ pair_bugEofAsFin_fwd_pair_ep = [g |-> "reset", h |-> "alive"]
 /\ pair_bugEofAsFin_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
 /\ pair_bugEofAsFin_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,

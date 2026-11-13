@@ -131,7 +131,7 @@ State 1: <Initial predicate>
         loss |-> FALSE,
         lost |-> 0 ] ]
 
-State 2: <pair_bugHolderTrustsRead_fwd_pair_Attach line 4055, col 3 to line 4065, col 77 of module pair_bugHolderTrustsRead>
+State 2: <pair_bugHolderTrustsRead_fwd_pair_Attach line 4057, col 3 to line 4067, col 77 of module pair_bugHolderTrustsRead>
 /\ pair_bugHolderTrustsRead_fwd_pair_conf_step = [InitWith |-> [m |-> "watch"]]
 /\ pair_bugHolderTrustsRead_fwd_pair_strmAbort = FALSE
 /\ pair_bugHolderTrustsRead_fwd_pair_pr = [ g |->
@@ -264,7 +264,7 @@ State 2: <pair_bugHolderTrustsRead_fwd_pair_Attach line 4055, col 3 to line 4065
         loss |-> FALSE,
         lost |-> 0 ] ]
 
-State 3: <pair_bugHolderTrustsRead_fwd_pair_Abort line 3711, col 3 to line 3718, col 51 of module pair_bugHolderTrustsRead>
+State 3: <pair_bugHolderTrustsRead_fwd_pair_Abort line 3713, col 3 to line 3720, col 51 of module pair_bugHolderTrustsRead>
 /\ pair_bugHolderTrustsRead_fwd_pair_conf_step = [InitWith |-> [m |-> "watch"]]
 /\ pair_bugHolderTrustsRead_fwd_pair_strmAbort = FALSE
 /\ pair_bugHolderTrustsRead_fwd_pair_pr = [ g |->
@@ -397,7 +397,7 @@ State 3: <pair_bugHolderTrustsRead_fwd_pair_Abort line 3711, col 3 to line 3718,
         loss |-> TRUE,
         lost |-> 0 ] ]
 
-State 4: <pair_bugHolderTrustsRead_fwd_pair_VCtl line 4045, col 3 to line 4049, col 51 of module pair_bugHolderTrustsRead>
+State 4: <pair_bugHolderTrustsRead_fwd_pair_VCtl line 4047, col 3 to line 4051, col 51 of module pair_bugHolderTrustsRead>
 /\ pair_bugHolderTrustsRead_fwd_pair_conf_step = [InitWith |-> [m |-> "watch"]]
 /\ pair_bugHolderTrustsRead_fwd_pair_strmAbort = FALSE
 /\ pair_bugHolderTrustsRead_fwd_pair_pr = [ g |->
@@ -663,7 +663,7 @@ State 5: <pair_bugHolderTrustsRead_fwd_pair_HolderEnd line 1917, col 3 to line 1
         loss |-> TRUE,
         lost |-> 0 ] ]
 
-State 6: <pair_bugHolderTrustsRead_fwd_pair_ReadEof line 3449, col 3 to line 3498, col 52 of module pair_bugHolderTrustsRead>
+State 6: <pair_bugHolderTrustsRead_fwd_pair_ReadEof line 3451, col 3 to line 3500, col 52 of module pair_bugHolderTrustsRead>
 /\ pair_bugHolderTrustsRead_fwd_pair_conf_step = [InitWith |-> [m |-> "watch"]]
 /\ pair_bugHolderTrustsRead_fwd_pair_strmAbort = FALSE
 /\ pair_bugHolderTrustsRead_fwd_pair_pr = [ g |->
