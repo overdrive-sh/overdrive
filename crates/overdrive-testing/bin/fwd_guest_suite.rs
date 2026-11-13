@@ -82,6 +82,8 @@ const GUEST_LANE_ELF_ENV: &str = "OVERDRIVE_FWD_GUEST_NEXTTEST_ELF";
 const TEST_THREADS: &str = "--test-threads=1";
 const NO_CAPTURE: &str = "--nocapture";
 const ABSENT_LOOPBACK: &str = "integration::probe_gold::an_absent_vsock_loopback_transport_is_refused_naming_stream_round_trip";
+const PROBE_PEER_RESET: &str =
+    "integration::probe_gold::a_peer_reset_where_a_clean_end_is_expected_is_refused";
 const HEALTHY_PROBE: &str = "integration::probe_gold::the_probe_passes_and_leaves_no_residue_on_a_correctly_provisioned_node";
 const ULP: &str =
     "integration::unload_in_guest::a_ulp_socket_keeps_the_module_for_the_boot_in_a_real_guest";
@@ -4046,6 +4048,13 @@ fn nextest_guest_plan(
         nested: false,
     };
     let plan = match group {
+        // The peer-reset cell installs an nft reject rule; the guest has no
+        // /lib/modules, so stage the module closure the reviewed `core` batch
+        // ran it under. The other probe cells keep the bare probe guest.
+        "probe" if test_name == PROBE_PEER_RESET => {
+            let (extra, module_paths) = core_attempt_files(kit, support_dir)?;
+            standard("probe", 7, extra, module_paths, STANDARD_OUTER_GUEST_MIB, 2)
+        }
         "probe" => standard("probe", 7, base_tools(), Vec::new(), STANDARD_OUTER_GUEST_MIB, 2),
         "core" => {
             let (extra, module_paths) = core_attempt_files(kit, support_dir)?;
