@@ -1,0 +1,67 @@
+# guest-hazard-serial: counterexample, 10 state(s) (from the TLC trace)
+
+State 1
+  owners = 0
+  conf_step = [Init |-> [tag |-> "UNIT"]]
+  fifobad = FALSE
+  phase = <<0, 0, 0>>
+  nseq = 1
+  execs = 0
+  faults = 2
+  execgen = 0
+  lock = 0
+  gen = 0
+  bad = {}
+  seq = <<0, 0, 0>>
+  lastb = 0
+  anchor = TRUE
+  queue = <<>>
+  guest = 0
+  torn = FALSE
+  inflight = 0
+
+State 2 [Arrive]
+  phase = <<1, 0, 0>>
+
+State 3 [ElectBegin]
+  phase = <<2, 0, 0>>
+  lock = 1
+
+State 4 [Arrive]
+  phase = <<2, 1, 0>>
+
+State 5 [OwnerStarted]
+  owners = 1
+  phase = <<3, 1, 0>>
+  nseq = 2
+  lock = 0
+  seq = <<1, 0, 0>>
+  queue = <<1>>
+
+State 6 [BeginBoot]
+  gen = 1
+  guest = 1
+
+State 7 [BootOk]
+  guest = 2
+
+State 8 [BeginExec]
+  phase = <<4, 1, 0>>
+  execs = 1
+  execgen = 1
+  lastb = 1
+  queue = <<>>
+  inflight = 1
+
+State 9 [Connect]
+  phase = <<4, 3, 0>>
+  nseq = 3
+  seq = <<1, 2, 0>>
+  queue = <<2>>
+
+State 10 [BeginExec]
+  phase = <<4, 4, 0>>
+  execs = 2
+  lastb = 2
+  queue = <<>>
+  inflight = 2

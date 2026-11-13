@@ -1,0 +1,199 @@
+State 1: <Initial predicate>
+/\ guest_bugNoSerial_shared_guest_owners = 0
+/\ guest_bugNoSerial_shared_guest_conf_step = [Init |-> [tag |-> "UNIT"]]
+/\ guest_bugNoSerial_shared_guest_fifobad = FALSE
+/\ guest_bugNoSerial_shared_guest_phase = <<0, 0, 0>>
+/\ guest_bugNoSerial_shared_guest_nseq = 1
+/\ guest_bugNoSerial_shared_guest_execs = 0
+/\ guest_bugNoSerial_shared_guest_faults = 2
+/\ guest_bugNoSerial_shared_guest_execgen = 0
+/\ guest_bugNoSerial_shared_guest_lock = 0
+/\ guest_bugNoSerial_shared_guest_gen = 0
+/\ guest_bugNoSerial_shared_guest_bad = {}
+/\ guest_bugNoSerial_shared_guest_seq = <<0, 0, 0>>
+/\ guest_bugNoSerial_shared_guest_lastb = 0
+/\ guest_bugNoSerial_shared_guest_anchor = TRUE
+/\ guest_bugNoSerial_shared_guest_queue = <<>>
+/\ guest_bugNoSerial_shared_guest_guest = 0
+/\ guest_bugNoSerial_shared_guest_torn = FALSE
+/\ guest_bugNoSerial_shared_guest_inflight = 0
+
+State 2: <guest_bugNoSerial_shared_guest_Arrive line 485, col 3 to line 492, col 68 of module guest_bugNoSerial>
+/\ guest_bugNoSerial_shared_guest_owners = 0
+/\ guest_bugNoSerial_shared_guest_conf_step = [Init |-> [tag |-> "UNIT"]]
+/\ guest_bugNoSerial_shared_guest_fifobad = FALSE
+/\ guest_bugNoSerial_shared_guest_phase = <<1, 0, 0>>
+/\ guest_bugNoSerial_shared_guest_nseq = 1
+/\ guest_bugNoSerial_shared_guest_execs = 0
+/\ guest_bugNoSerial_shared_guest_faults = 2
+/\ guest_bugNoSerial_shared_guest_execgen = 0
+/\ guest_bugNoSerial_shared_guest_lock = 0
+/\ guest_bugNoSerial_shared_guest_gen = 0
+/\ guest_bugNoSerial_shared_guest_bad = {}
+/\ guest_bugNoSerial_shared_guest_seq = <<0, 0, 0>>
+/\ guest_bugNoSerial_shared_guest_lastb = 0
+/\ guest_bugNoSerial_shared_guest_anchor = TRUE
+/\ guest_bugNoSerial_shared_guest_queue = <<>>
+/\ guest_bugNoSerial_shared_guest_guest = 0
+/\ guest_bugNoSerial_shared_guest_torn = FALSE
+/\ guest_bugNoSerial_shared_guest_inflight = 0
+
+State 3: <guest_bugNoSerial_shared_guest_ElectBegin line 777, col 3 to line 785, col 75 of module guest_bugNoSerial>
+/\ guest_bugNoSerial_shared_guest_owners = 0
+/\ guest_bugNoSerial_shared_guest_conf_step = [Init |-> [tag |-> "UNIT"]]
+/\ guest_bugNoSerial_shared_guest_fifobad = FALSE
+/\ guest_bugNoSerial_shared_guest_phase = <<2, 0, 0>>
+/\ guest_bugNoSerial_shared_guest_nseq = 1
+/\ guest_bugNoSerial_shared_guest_execs = 0
+/\ guest_bugNoSerial_shared_guest_faults = 2
+/\ guest_bugNoSerial_shared_guest_execgen = 0
+/\ guest_bugNoSerial_shared_guest_lock = 1
+/\ guest_bugNoSerial_shared_guest_gen = 0
+/\ guest_bugNoSerial_shared_guest_bad = {}
+/\ guest_bugNoSerial_shared_guest_seq = <<0, 0, 0>>
+/\ guest_bugNoSerial_shared_guest_lastb = 0
+/\ guest_bugNoSerial_shared_guest_anchor = TRUE
+/\ guest_bugNoSerial_shared_guest_queue = <<>>
+/\ guest_bugNoSerial_shared_guest_guest = 0
+/\ guest_bugNoSerial_shared_guest_torn = FALSE
+/\ guest_bugNoSerial_shared_guest_inflight = 0
+
+State 4: <guest_bugNoSerial_shared_guest_Arrive line 485, col 3 to line 492, col 68 of module guest_bugNoSerial>
+/\ guest_bugNoSerial_shared_guest_owners = 0
+/\ guest_bugNoSerial_shared_guest_conf_step = [Init |-> [tag |-> "UNIT"]]
+/\ guest_bugNoSerial_shared_guest_fifobad = FALSE
+/\ guest_bugNoSerial_shared_guest_phase = <<2, 1, 0>>
+/\ guest_bugNoSerial_shared_guest_nseq = 1
+/\ guest_bugNoSerial_shared_guest_execs = 0
+/\ guest_bugNoSerial_shared_guest_faults = 2
+/\ guest_bugNoSerial_shared_guest_execgen = 0
+/\ guest_bugNoSerial_shared_guest_lock = 1
+/\ guest_bugNoSerial_shared_guest_gen = 0
+/\ guest_bugNoSerial_shared_guest_bad = {}
+/\ guest_bugNoSerial_shared_guest_seq = <<0, 0, 0>>
+/\ guest_bugNoSerial_shared_guest_lastb = 0
+/\ guest_bugNoSerial_shared_guest_anchor = TRUE
+/\ guest_bugNoSerial_shared_guest_queue = <<>>
+/\ guest_bugNoSerial_shared_guest_guest = 0
+/\ guest_bugNoSerial_shared_guest_torn = FALSE
+/\ guest_bugNoSerial_shared_guest_inflight = 0
+
+State 5: <guest_bugNoSerial_shared_guest_OwnerStarted line 511, col 3 to line 527, col 47 of module guest_bugNoSerial>
+/\ guest_bugNoSerial_shared_guest_owners = 1
+/\ guest_bugNoSerial_shared_guest_conf_step = [Init |-> [tag |-> "UNIT"]]
+/\ guest_bugNoSerial_shared_guest_fifobad = FALSE
+/\ guest_bugNoSerial_shared_guest_phase = <<3, 1, 0>>
+/\ guest_bugNoSerial_shared_guest_nseq = 2
+/\ guest_bugNoSerial_shared_guest_execs = 0
+/\ guest_bugNoSerial_shared_guest_faults = 2
+/\ guest_bugNoSerial_shared_guest_execgen = 0
+/\ guest_bugNoSerial_shared_guest_lock = 0
+/\ guest_bugNoSerial_shared_guest_gen = 0
+/\ guest_bugNoSerial_shared_guest_bad = {}
+/\ guest_bugNoSerial_shared_guest_seq = <<1, 0, 0>>
+/\ guest_bugNoSerial_shared_guest_lastb = 0
+/\ guest_bugNoSerial_shared_guest_anchor = TRUE
+/\ guest_bugNoSerial_shared_guest_queue = <<1>>
+/\ guest_bugNoSerial_shared_guest_guest = 0
+/\ guest_bugNoSerial_shared_guest_torn = FALSE
+/\ guest_bugNoSerial_shared_guest_inflight = 0
+
+State 6: <guest_bugNoSerial_shared_guest_BeginBoot line 613, col 3 to line 619, col 46 of module guest_bugNoSerial>
+/\ guest_bugNoSerial_shared_guest_owners = 1
+/\ guest_bugNoSerial_shared_guest_conf_step = [Init |-> [tag |-> "UNIT"]]
+/\ guest_bugNoSerial_shared_guest_fifobad = FALSE
+/\ guest_bugNoSerial_shared_guest_phase = <<3, 1, 0>>
+/\ guest_bugNoSerial_shared_guest_nseq = 2
+/\ guest_bugNoSerial_shared_guest_execs = 0
+/\ guest_bugNoSerial_shared_guest_faults = 2
+/\ guest_bugNoSerial_shared_guest_execgen = 0
+/\ guest_bugNoSerial_shared_guest_lock = 0
+/\ guest_bugNoSerial_shared_guest_gen = 1
+/\ guest_bugNoSerial_shared_guest_bad = {}
+/\ guest_bugNoSerial_shared_guest_seq = <<1, 0, 0>>
+/\ guest_bugNoSerial_shared_guest_lastb = 0
+/\ guest_bugNoSerial_shared_guest_anchor = TRUE
+/\ guest_bugNoSerial_shared_guest_queue = <<1>>
+/\ guest_bugNoSerial_shared_guest_guest = 1
+/\ guest_bugNoSerial_shared_guest_torn = FALSE
+/\ guest_bugNoSerial_shared_guest_inflight = 0
+
+State 7: <guest_bugNoSerial_shared_guest_BootOk line 625, col 3 to line 629, col 43 of module guest_bugNoSerial>
+/\ guest_bugNoSerial_shared_guest_owners = 1
+/\ guest_bugNoSerial_shared_guest_conf_step = [Init |-> [tag |-> "UNIT"]]
+/\ guest_bugNoSerial_shared_guest_fifobad = FALSE
+/\ guest_bugNoSerial_shared_guest_phase = <<3, 1, 0>>
+/\ guest_bugNoSerial_shared_guest_nseq = 2
+/\ guest_bugNoSerial_shared_guest_execs = 0
+/\ guest_bugNoSerial_shared_guest_faults = 2
+/\ guest_bugNoSerial_shared_guest_execgen = 0
+/\ guest_bugNoSerial_shared_guest_lock = 0
+/\ guest_bugNoSerial_shared_guest_gen = 1
+/\ guest_bugNoSerial_shared_guest_bad = {}
+/\ guest_bugNoSerial_shared_guest_seq = <<1, 0, 0>>
+/\ guest_bugNoSerial_shared_guest_lastb = 0
+/\ guest_bugNoSerial_shared_guest_anchor = TRUE
+/\ guest_bugNoSerial_shared_guest_queue = <<1>>
+/\ guest_bugNoSerial_shared_guest_guest = 2
+/\ guest_bugNoSerial_shared_guest_torn = FALSE
+/\ guest_bugNoSerial_shared_guest_inflight = 0
+
+State 8: <guest_bugNoSerial_shared_guest_BeginExec line 791, col 3 to line 832, col 47 of module guest_bugNoSerial>
+/\ guest_bugNoSerial_shared_guest_owners = 1
+/\ guest_bugNoSerial_shared_guest_conf_step = [Init |-> [tag |-> "UNIT"]]
+/\ guest_bugNoSerial_shared_guest_fifobad = FALSE
+/\ guest_bugNoSerial_shared_guest_phase = <<4, 1, 0>>
+/\ guest_bugNoSerial_shared_guest_nseq = 2
+/\ guest_bugNoSerial_shared_guest_execs = 1
+/\ guest_bugNoSerial_shared_guest_faults = 2
+/\ guest_bugNoSerial_shared_guest_execgen = 1
+/\ guest_bugNoSerial_shared_guest_lock = 0
+/\ guest_bugNoSerial_shared_guest_gen = 1
+/\ guest_bugNoSerial_shared_guest_bad = {}
+/\ guest_bugNoSerial_shared_guest_seq = <<1, 0, 0>>
+/\ guest_bugNoSerial_shared_guest_lastb = 1
+/\ guest_bugNoSerial_shared_guest_anchor = TRUE
+/\ guest_bugNoSerial_shared_guest_queue = <<>>
+/\ guest_bugNoSerial_shared_guest_guest = 2
+/\ guest_bugNoSerial_shared_guest_torn = FALSE
+/\ guest_bugNoSerial_shared_guest_inflight = 1
+
+State 9: <guest_bugNoSerial_shared_guest_Connect line 552, col 3 to line 560, col 47 of module guest_bugNoSerial>
+/\ guest_bugNoSerial_shared_guest_owners = 1
+/\ guest_bugNoSerial_shared_guest_conf_step = [Init |-> [tag |-> "UNIT"]]
+/\ guest_bugNoSerial_shared_guest_fifobad = FALSE
+/\ guest_bugNoSerial_shared_guest_phase = <<4, 3, 0>>
+/\ guest_bugNoSerial_shared_guest_nseq = 3
+/\ guest_bugNoSerial_shared_guest_execs = 1
+/\ guest_bugNoSerial_shared_guest_faults = 2
+/\ guest_bugNoSerial_shared_guest_execgen = 1
+/\ guest_bugNoSerial_shared_guest_lock = 0
+/\ guest_bugNoSerial_shared_guest_gen = 1
+/\ guest_bugNoSerial_shared_guest_bad = {}
+/\ guest_bugNoSerial_shared_guest_seq = <<1, 2, 0>>
+/\ guest_bugNoSerial_shared_guest_lastb = 1
+/\ guest_bugNoSerial_shared_guest_anchor = TRUE
+/\ guest_bugNoSerial_shared_guest_queue = <<2>>
+/\ guest_bugNoSerial_shared_guest_guest = 2
+/\ guest_bugNoSerial_shared_guest_torn = FALSE
+/\ guest_bugNoSerial_shared_guest_inflight = 1
+
+State 10: <guest_bugNoSerial_shared_guest_BeginExec line 791, col 3 to line 832, col 47 of module guest_bugNoSerial>
+/\ guest_bugNoSerial_shared_guest_owners = 1
+/\ guest_bugNoSerial_shared_guest_conf_step = [Init |-> [tag |-> "UNIT"]]
+/\ guest_bugNoSerial_shared_guest_fifobad = FALSE
+/\ guest_bugNoSerial_shared_guest_phase = <<4, 4, 0>>
+/\ guest_bugNoSerial_shared_guest_nseq = 3
+/\ guest_bugNoSerial_shared_guest_execs = 2
+/\ guest_bugNoSerial_shared_guest_faults = 2
+/\ guest_bugNoSerial_shared_guest_execgen = 1
+/\ guest_bugNoSerial_shared_guest_lock = 0
+/\ guest_bugNoSerial_shared_guest_gen = 1
+/\ guest_bugNoSerial_shared_guest_bad = {}
+/\ guest_bugNoSerial_shared_guest_seq = <<1, 2, 0>>
+/\ guest_bugNoSerial_shared_guest_lastb = 2
+/\ guest_bugNoSerial_shared_guest_anchor = TRUE
+/\ guest_bugNoSerial_shared_guest_queue = <<>>
+/\ guest_bugNoSerial_shared_guest_guest = 2
+/\ guest_bugNoSerial_shared_guest_torn = FALSE
+/\ guest_bugNoSerial_shared_guest_inflight = 2

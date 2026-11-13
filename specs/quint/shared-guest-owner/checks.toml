@@ -1,0 +1,175 @@
+# Checks for specs/quint/shared-guest-owner/ (shared-guest owner protocol, DDD-8/9/10).
+# ci = true iff the check took under 60 s in the latest record (guest-every-client-terminates took 115 s).
+# Decisions: D-OWNER, D-LIFE, D-SERIAL, D-DETACH, D-TAINT. One hazard per decision.
+
+[[check]]
+name = "guest-safety-tlc"
+spec = "shared_guest.qnt"
+main = "guest_ok"
+invariant = "Safety"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "guest-every-client-terminates"
+spec = "shared_guest.qnt"
+main = "guest_ok"
+temporal = "EveryClientTerminates"
+backend = "tlc"
+expect = "holds"
+ci = false
+
+[[check]]
+name = "guest-hazard-owner"
+spec = "hazard/guest_hazards.qnt"
+main = "guest_bugNoLock"
+invariant = "I_OWNER_UNIQUE"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "guest-hazard-serial"
+spec = "hazard/guest_hazards.qnt"
+main = "guest_bugNoSerial"
+invariant = "I_SERIAL"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "guest-hazard-taint"
+spec = "hazard/guest_hazards.qnt"
+main = "guest_bugNoTaint"
+invariant = "I_NO_REUSE"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "guest-hazard-orphan"
+spec = "hazard/guest_hazards.qnt"
+main = "guest_bugOrphan"
+invariant = "I_NO_ORPHAN"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "guest-hazard-detach"
+spec = "hazard/guest_hazards.qnt"
+main = "guest_bugCancelOnDisconnect"
+invariant = "I_SERIAL"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "guest-run-happy-path-three-clients-share-one-guest"
+spec = "shared_guest.qnt"
+main = "guest_conf"
+run = "happy_path_three_clients_share_one_guest"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "guest-run-concurrent-first-arrival-one-owner"
+spec = "shared_guest.qnt"
+main = "guest_conf"
+run = "concurrent_first_arrival_one_owner"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "guest-run-failure-then-replacement-guest"
+spec = "shared_guest.qnt"
+main = "guest_conf"
+run = "failure_then_replacement_guest"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "guest-run-guest-lost-mid-exec-then-replacement"
+spec = "shared_guest.qnt"
+main = "guest_conf"
+run = "guest_lost_mid_exec_then_replacement"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "guest-run-owner-crash-then-new-owner-elected"
+spec = "shared_guest.qnt"
+main = "guest_conf"
+run = "owner_crash_then_new_owner_elected"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "guest-run-disconnect-while-running-next-waits"
+spec = "shared_guest.qnt"
+main = "guest_conf"
+run = "disconnect_while_running_next_waits"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "guest-run-disconnect-while-queued-is-removed"
+spec = "shared_guest.qnt"
+main = "guest_conf"
+run = "disconnect_while_queued_is_removed"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "guest-run-boot-failure-then-retry-boot-on-next-attach"
+spec = "shared_guest.qnt"
+main = "guest_conf"
+run = "boot_failure_then_retry_boot_on_next_attach"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "guest-run-anchor-gone-ends-owner-and-guest"
+spec = "shared_guest.qnt"
+main = "guest_conf"
+run = "anchor_gone_ends_owner_and_guest"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "guest-run-run-teardown-removes-leftovers"
+spec = "shared_guest.qnt"
+main = "guest_conf"
+run = "run_teardown_removes_leftovers"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "guest-run-retry-of-failed-client-gets-fresh-guest"
+spec = "shared_guest.qnt"
+main = "guest_conf"
+run = "retry_of_failed_client_gets_fresh_guest"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "guest-run-elector-killed-before-owner-starts"
+spec = "shared_guest.qnt"
+main = "guest_conf"
+run = "elector_killed_before_owner_starts"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
