@@ -1700,7 +1700,7 @@
     ]
   },
   "validation": {
-    "status": "approved",
+    "status": "pending",
     "reviewer": "Exact user approval on 2026-10-30 — ‘yeah, let's not do that now. add all the relevant info to the github issue, and then we keep it deferred to #310 and correct the contradictory acceptance checklist.’ The bounded option-D correction was independently APPROVED in `deliver/review-design-14-01-udp-deferral.md`; the exact executable acceptance alignment was independently APPROVED with no open finding in `deliver/review-distill-14-01-udp-deferral-alignment.md`. That approval released implementation remediation. Delivery subsequently reached GREEN and was independently APPROVED in `deliver/review-14-01.md`, including the retained 117-pass native receipt. The later canonical non-regression evidence is recorded in `deliver/review-14-04.md` (119 cgroup-default bodies and 46 mtls-relay bodies); final 64-VM correctness and the queued-end audit regression are APPROVED in `deliver/review-14-05.md`. These are implementation evidence updates; the accepted design and UDP deferral are unchanged. Service-VIP UDP delivery to a VM backend remains deferred to #310; D12, D24/D24a, guest-prefix refusal, every other STEP 14-01 outcome, the same six identities/117 inventory, and every earlier approval remain intact.",
     "approved_at": "2026-10-31T03:02:08Z",
     "prior_approval": {
@@ -1715,6 +1715,9 @@
         "review_artifact": "deliver/review-design-13-01-postfin-reset-observation.md"
       }
     },
-    "pending_scope": []
+    "pending_scope": [
+      "Only D-22/R5-31's claim that the native in-guest 1,000-flow owner-burst cell discharges the required one-second all-flow bound: the completed preimplementation Metal baseline at 0e8ae265c2d80d98c345b342a396057940837e3a consumed 78 of 1,000 forwarder ends by the deadline and host EOF followed (2026-11-09). The one-second requirement, D-22 lane shape and unrelated cells remain accepted."
+    ],
+    "status_note": "The former fwd_pair T-5 watch-mode discard premise has the user-approved CONFALIGN-4 replacement recorded in the feature delta and applied upstream in 88c1721da; CONFALIGN-5 is recorded in 80a104e9f. The remaining pending scope is only the D-22/R5-31 native owner-burst one-second discharge claim. The reviewer and approved_at fields retain prior approval provenance, not current validation of that failed scope. The one-second requirement and all unrelated approvals remain unchanged. The current service-allocation verification disposition is recorded separately in its reviewed guest-flow-abort-contract-adjudication.md."
   }
 }

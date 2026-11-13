@@ -52,6 +52,32 @@ DELIVER deletes it, as listed under *Bridge-era code for DELIVER to delete*.
 
 ### Status
 
+- **Historical `fwd_pair` T-5 falsification, 2026-11-11 — replacement recorded.**
+  Seed `0x9ab8de37`, Trace 38 Step 2 disproved the former watch-mode
+  accepted-but-unattached `GuestAbort(g)` discard premise. The user-approved
+  CONFALIGN-4 ruling of 2026-11-12 replaces it with the immediate close of an
+  accepted-but-unattached flow in every mode; upstream commit `88c1721da`
+  applies that ruling. CONFALIGN-5 (`80a104e9f`) separately records the kernel
+  pair's datagram V_g ownership after attachment. Both current rulings and
+  their exact scope appear below. The old T-5 discard premise is no longer a
+  pending replacement decision. The separate D-22/R5-31 evidence gap remains
+  pending; no one-second bound or unrelated contract is relaxed.
+  Historical failure evidence and the current-feature dependency disposition:
+  [`service-allocation-readiness-and-ending/design/guest-flow-abort-contract-adjudication.md`](../service-allocation-readiness-and-ending/design/guest-flow-abort-contract-adjudication.md).
+- **Independent retained native D-22/R5-31 failure, 2026-11-11 — owner-burst discharge pending.**
+  The completed preimplementation Metal baseline at `0e8ae265c2d80d98c345b342a396057940837e3a`
+  failed the existing in-guest owner-burst cell's one-second all-flow assertion:
+  78 of 1,000 forwarder ends consumed by the deadline, then host EOF while
+  waiting for `DONE`. At the recorded comparison, the in-guest-lane and
+  owner-cell source blobs matched the preimplementation baseline; that completed
+  branch comparison failed
+  the same bound. This invalidates the claim that this D-22 cell discharged
+  R5-31's required one-second bound on the accepted native lane. **The bound
+  remains required; the D-22 lane composition and other cells are not
+  invalidated.** Roadmap validation remains pending for this exact evidence
+  gap. No production cause or replacement policy is inferred from
+  the 78/1,000 observation. Raw receipts and current-feature dependency limits
+  are linked from the adjudication above.
 - Every accepted decision keeps its own approval date in § *Approval record*,
   one row per user ruling. `TCP-CORRELATION`'s required outcome remains
   accepted. Its prior Fast Open callback premise is invalid; Linux 7.0 source,
@@ -633,6 +659,10 @@ What DISTILL takes from this DESIGN:
   `kvm-tests`, native metal, the guest-kit fixture of the T-1 ruling), not
   through `serve`. No in-guest observation surface is added to production
   `overdrive-init`.
+  **Validation status, 2026-11-11:** the R5-31 1,000-flow burst cell does not
+  presently discharge its one-second all-flow oracle; see the retained native
+  baseline and adjudication linked in the status section. The oracle and lane
+  contract below remain the accepted requirements pending bounded remediation.
   - **Roles.** The guest side is the production guest owner
     (`GuestFlowOwner` over `KernelGuestOwnerIo`, the real `ovd_fwd` and a
     Linux 7.0 guest on the Cloud Hypervisor fork), driven by an in-guest

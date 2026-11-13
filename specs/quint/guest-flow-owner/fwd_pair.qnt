@@ -595,10 +595,12 @@ module fwd_pair {
   // Abort { flow } written while the session is live
   def ownerAbort(t: St, s: str): St =
     val t1 = abortSide(fault(t), s, "Detached", false)
-    if (not(watchSide(t, s)))
-      // host owner: the close is in the same dispatch as the abort. Guest owner: the close is a separate dispatch
-      // after the record is read (CONFALIGN-3, hold_close_until_end), so the abort alone is applied here
-      if (s == "h") shutAll(setPr(t1, s, { ...t1.pr.get(s), closed: true }), s) else t1
+    // The host closes in its abort dispatch. The guest retains its descriptors
+    // until TakeEnd(g) reads the queued record, then OwnerClose(g) closes them.
+    if (not(watchSide(t, s)) and s == "h")
+      shutAll(setPr(t1, s, { ...t1.pr.get(s), closed: true }), s)
+    else if (not(watchSide(t, s)))
+      t1
     else if (not(t.strmHeld))
       { ...shutAll(t1, "h"), strmAbort: false, hres: "none", guestAbortSent: t1.vmUp }
     else
