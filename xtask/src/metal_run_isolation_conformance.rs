@@ -519,9 +519,10 @@ impl World {
         // within one second is still transferred.
         let sequence = self.transfers.get() + 1;
         self.transfers.set(sequence);
-        fs::File::options().write(true).open(&marker)?.set_modified(
-            std::time::UNIX_EPOCH + Duration::from_secs(1_000_000_000 + sequence),
-        )?;
+        fs::File::options()
+            .write(true)
+            .open(&marker)?
+            .set_modified(std::time::UNIX_EPOCH + Duration::from_secs(1_000_000_000 + sequence))?;
         let mut command = self.fixture.bootstrap(&self.locals[index], &["--sync-only"]);
         // The same trusted controller already owns the durable checkout lock.
         // Invoke the real transfer adapter, not a second source implementation;
