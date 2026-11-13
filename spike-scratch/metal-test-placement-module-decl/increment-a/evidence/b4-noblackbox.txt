@@ -1,0 +1,88 @@
+# b4-noblackbox  cargo nextest run --manifest-path=spike-scratch/metal-test-placement-module-decl/increment-a/Cargo.toml --features no-blackbox --no-fail-fast --success-output immediate --failure-output immediate -E binary(integration) and test(=integration::beta::resolves_its_own_group)  exit: 0
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.09s
+     Running `target/debug/xtask metal run -- cargo nextest run --manifest-path=spike-scratch/metal-test-placement-module-decl/increment-a/Cargo.toml --features no-blackbox --no-fail-fast --success-output immediate --failure-output immediate -E 'binary(integration) and test(=integration::beta::resolves_its_own_group)'`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+OVERDRIVE_METAL_RUN_ID=2fbe5064a7c6637be8599b39
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire exclusive physical-maintenance barrier (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_RUN_REGISTERED run_id=2fbe5064a7c6637be8599b39
+OVERDRIVE_METAL_LEASE_ACQUIRED token=2fbe5064a7c6637be8599b39 pid=2664350
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/amman-v2 -> ubuntu@151.115.99.251:/home/ubuntu/overdrive-worktrees/357ee52c8cab8252dd245471dd79a7901e00d3cd6bebcd70732eb120c34f745d
+
+sent 2,005,704 bytes  received 72,307 bytes  593,717.43 bytes/sec
+total size is 1,911,866,210  speedup is 920.05
+
+########## [bootstrap] materialising standalone .git (common dir 1.8G)
+
+sent 397,917 bytes  received 19,227 bytes  278,096.00 bytes/sec
+total size is 881,678,904  speedup is 2,113.61
+## marcus-sa/metal-test-placement-declare
+ M docs/feature/metal-test-placement-attribute/feature-delta.md
+ M docs/product/architecture/adr-0282-a-metal-test-placement-is-declared-on-the-test-and-recorded-in-its-binary.md
+ M docs/product/architecture/adr-0283-the-tests-of-a-module-share-one-guest-through-a-per-module-owner-process.md
+ M docs/product/architecture/adr-0284-a-shared-guest-serves-one-test-at-a-time-and-is-never-reused-after-a-failure.md
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+OVERDRIVE_METAL_RUN_STARTED run_id=2fbe5064a7c6637be8599b39
+    Updating crates.io index
+     Locking 8 packages to latest Rust 1.95.0 compatible versions
+      Adding syn v2.0.119 (available: v3.0.10)
+info: experimental features enabled: wrapper-scripts
+   Compiling proc-macro2 v1.0.107
+   Compiling unicode-ident v1.0.27
+   Compiling quote v1.0.47
+   Compiling placement-decl-probe v0.0.0 (/home/ubuntu/overdrive-worktrees/357ee52c8cab8252dd245471dd79a7901e00d3cd6bebcd70732eb120c34f745d/spike-scratch/metal-test-placement-module-decl/increment-a)
+   Compiling pin-project-lite v0.2.17
+warning: placement-decl-probe@0.0.0: RUSTC_VERSION rustc 1.95.0 (59807616e 2026-04-14)
+   Compiling syn v3.0.10
+   Compiling syn v2.0.119
+   Compiling probe-macros v0.0.0 (/home/ubuntu/overdrive-worktrees/357ee52c8cab8252dd245471dd79a7901e00d3cd6bebcd70732eb120c34f745d/spike-scratch/metal-test-placement-module-decl/increment-a/macros)
+   Compiling tokio-macros v2.7.2
+   Compiling tokio v1.54.1
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.95s
+────────────
+ Nextest run ID dd8d4d3e-9cc8-4617-a7b2-6c88489d741c with nextest profile: default
+    Starting 1 test across 1 binary (7 tests and 2 binaries skipped)
+        SKIP [         ] (───) placement-decl-probe::integration integration::alpha::ours_then_test
+        SKIP [         ] (───) placement-decl-probe::integration integration::alpha::ours_then_tokio
+        SKIP [         ] (───) placement-decl-probe::integration integration::alpha::plain_no_test_attr
+        SKIP [         ] (───) placement-decl-probe::integration integration::alpha::test_then_ours
+        SKIP [         ] (───) placement-decl-probe::integration integration::alpha::tokio_then_ours
+        SKIP [         ] (───) placement-decl-probe::integration integration::gamma::inner_with_glob::nested_via_glob
+        SKIP [         ] (───) placement-decl-probe::integration integration::gamma::outer_test
+        PASS [   0.064s] (1/1) placement-decl-probe::integration integration::beta::resolves_its_own_group
+  stdout ───
+
+    running 1 test
+    PLACEMENT_PROBE test=integration::integration::beta::resolves_its_own_group group=probe
+    SECTION_DUMP beta records=8
+    SECTION_RECORD name=integration::integration::gamma::inner_with_glob::nested_via_glob group=core
+    SECTION_RECORD name=integration::integration::gamma::outer_test group=core
+    SECTION_RECORD name=integration::integration::alpha::ours_then_test group=cgroup-default
+    SECTION_RECORD name=integration::integration::alpha::test_then_ours group=cgroup-default
+    SECTION_RECORD name=integration::integration::alpha::ours_then_tokio group=cgroup-default
+    SECTION_RECORD name=integration::integration::alpha::tokio_then_ours group=cgroup-default
+    SECTION_RECORD name=integration::integration::alpha::plain_no_test_attr group=cgroup-default
+    SECTION_RECORD name=integration::integration::beta::resolves_its_own_group group=probe
+    test integration::beta::resolves_its_own_group ... ok
+
+    test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.01s
+
+
+────────────
+     Summary [   0.064s] 1 test run: 1 passed, 7 skipped
+        PASS [   0.064s] (1/1) placement-decl-probe::integration integration::beta::resolves_its_own_group
+        SKIP [         ] (───) placement-decl-probe::integration integration::alpha::ours_then_test
+        SKIP [         ] (───) placement-decl-probe::integration integration::alpha::ours_then_tokio
+        SKIP [         ] (───) placement-decl-probe::integration integration::alpha::plain_no_test_attr
+        SKIP [         ] (───) placement-decl-probe::integration integration::alpha::test_then_ours
+        SKIP [         ] (───) placement-decl-probe::integration integration::alpha::tokio_then_ours
+        SKIP [         ] (───) placement-decl-probe::integration integration::gamma::inner_with_glob::nested_via_glob
+        SKIP [         ] (───) placement-decl-probe::integration integration::gamma::outer_test
+OVERDRIVE_METAL_RUN_COMPLETE run_id=2fbe5064a7c6637be8599b39 exit_code=0 cause=command_returned

@@ -1,0 +1,62 @@
+# c-control-unplaced  cargo nextest run --manifest-path=spike-scratch/metal-test-placement-module-decl/increment-a/Cargo.toml --no-fail-fast --success-output immediate --failure-output immediate -E binary(attr_inline_mod)  exit: 100
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.24s
+     Running `target/debug/xtask metal run -- cargo nextest run --manifest-path=spike-scratch/metal-test-placement-module-decl/increment-a/Cargo.toml --no-fail-fast --success-output immediate --failure-output immediate -E 'binary(attr_inline_mod)'`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+OVERDRIVE_METAL_RUN_ID=14527fa9efe4f2b5fbad1568
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire exclusive physical-maintenance barrier (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_RUN_REGISTERED run_id=14527fa9efe4f2b5fbad1568
+OVERDRIVE_METAL_LEASE_ACQUIRED token=14527fa9efe4f2b5fbad1568 pid=2660891
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/amman-v2 -> ubuntu@151.115.99.251:/home/ubuntu/overdrive-worktrees/357ee52c8cab8252dd245471dd79a7901e00d3cd6bebcd70732eb120c34f745d
+
+sent 2,006,596 bytes  received 74,503 bytes  832,439.60 bytes/sec
+total size is 1,911,858,737  speedup is 918.68
+
+########## [bootstrap] materialising standalone .git (common dir 1.8G)
+
+sent 397,913 bytes  received 19,219 bytes  278,088.00 bytes/sec
+total size is 881,678,904  speedup is 2,113.67
+## marcus-sa/metal-test-placement-declare
+ M docs/feature/metal-test-placement-attribute/feature-delta.md
+ M docs/product/architecture/adr-0282-a-metal-test-placement-is-declared-on-the-test-and-recorded-in-its-binary.md
+ M docs/product/architecture/adr-0283-the-tests-of-a-module-share-one-guest-through-a-per-module-owner-process.md
+ M docs/product/architecture/adr-0284-a-shared-guest-serves-one-test-at-a-time-and-is-never-reused-after-a-failure.md
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+OVERDRIVE_METAL_RUN_STARTED run_id=14527fa9efe4f2b5fbad1568
+    Updating crates.io index
+     Locking 8 packages to latest Rust 1.95.0 compatible versions
+      Adding syn v2.0.119 (available: v3.0.10)
+info: experimental features enabled: wrapper-scripts
+   Compiling proc-macro2 v1.0.107
+   Compiling quote v1.0.47
+   Compiling unicode-ident v1.0.27
+   Compiling placement-decl-probe v0.0.0 (/home/ubuntu/overdrive-worktrees/357ee52c8cab8252dd245471dd79a7901e00d3cd6bebcd70732eb120c34f745d/spike-scratch/metal-test-placement-module-decl/increment-a)
+   Compiling pin-project-lite v0.2.17
+warning: placement-decl-probe@0.0.0: RUSTC_VERSION rustc 1.95.0 (59807616e 2026-04-14)
+   Compiling syn v3.0.10
+   Compiling syn v2.0.119
+   Compiling tokio-macros v2.7.2
+   Compiling probe-macros v0.0.0 (/home/ubuntu/overdrive-worktrees/357ee52c8cab8252dd245471dd79a7901e00d3cd6bebcd70732eb120c34f745d/spike-scratch/metal-test-placement-module-decl/increment-a/macros)
+   Compiling tokio v1.54.1
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.82s
+────────────
+ Nextest run ID c1827f11-84c3-48a5-87f5-9316cf31eb2a with nextest profile: default
+    Starting 1 test across 1 binary (2 binaries skipped)
+        FAIL [   0.062s] (1/1) placement-decl-probe::attr_inline_mod inline_only::t
+  stderr ───
+    OVERDRIVE_METAL_TEST_ERROR error=test_unclassified
+
+    (test failed with exit code 78)
+
+────────────
+     Summary [   0.063s] 1 test run: 0 passed, 1 failed, 0 skipped
+        FAIL [   0.062s] (1/1) placement-decl-probe::attr_inline_mod inline_only::t
+error: test run failed
+OVERDRIVE_METAL_RUN_COMPLETE run_id=14527fa9efe4f2b5fbad1568 exit_code=100 cause=command_returned

@@ -1,0 +1,162 @@
+# b1-run  cargo nextest run --manifest-path=spike-scratch/metal-test-placement-module-decl/increment-a/Cargo.toml --no-fail-fast --success-output immediate --failure-output immediate -E binary(integration)  exit: 0
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.10s
+     Running `target/debug/xtask metal run -- cargo nextest run --manifest-path=spike-scratch/metal-test-placement-module-decl/increment-a/Cargo.toml --no-fail-fast --success-output immediate --failure-output immediate -E 'binary(integration)'`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+OVERDRIVE_METAL_RUN_ID=92c59af8f7a59af37ab4c56c
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire exclusive physical-maintenance barrier (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_RUN_REGISTERED run_id=92c59af8f7a59af37ab4c56c
+OVERDRIVE_METAL_LEASE_ACQUIRED token=92c59af8f7a59af37ab4c56c pid=2652747
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/amman-v2 -> ubuntu@151.115.99.251:/home/ubuntu/overdrive-worktrees/357ee52c8cab8252dd245471dd79a7901e00d3cd6bebcd70732eb120c34f745d
+
+sent 2,006,212 bytes  received 48,855 bytes  456,681.56 bytes/sec
+total size is 1,911,839,580  speedup is 930.31
+
+########## [bootstrap] materialising standalone .git (common dir 1.8G)
+
+sent 397,913 bytes  received 19,215 bytes  278,085.33 bytes/sec
+total size is 881,678,904  speedup is 2,113.69
+## marcus-sa/metal-test-placement-declare
+ M docs/feature/metal-test-placement-attribute/feature-delta.md
+ M docs/product/architecture/adr-0282-a-metal-test-placement-is-declared-on-the-test-and-recorded-in-its-binary.md
+ M docs/product/architecture/adr-0283-the-tests-of-a-module-share-one-guest-through-a-per-module-owner-process.md
+ M docs/product/architecture/adr-0284-a-shared-guest-serves-one-test-at-a-time-and-is-never-reused-after-a-failure.md
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+OVERDRIVE_METAL_RUN_STARTED run_id=92c59af8f7a59af37ab4c56c
+    Updating crates.io index
+     Locking 8 packages to latest Rust 1.95.0 compatible versions
+      Adding syn v2.0.119 (available: v3.0.10)
+info: experimental features enabled: wrapper-scripts
+   Compiling proc-macro2 v1.0.107
+   Compiling unicode-ident v1.0.27
+   Compiling quote v1.0.47
+   Compiling placement-decl-probe v0.0.0 (/home/ubuntu/overdrive-worktrees/357ee52c8cab8252dd245471dd79a7901e00d3cd6bebcd70732eb120c34f745d/spike-scratch/metal-test-placement-module-decl/increment-a)
+   Compiling pin-project-lite v0.2.17
+warning: placement-decl-probe@0.0.0: RUSTC_VERSION rustc 1.95.0 (59807616e 2026-04-14)
+   Compiling syn v3.0.10
+   Compiling syn v2.0.119
+   Compiling probe-macros v0.0.0 (/home/ubuntu/overdrive-worktrees/357ee52c8cab8252dd245471dd79a7901e00d3cd6bebcd70732eb120c34f745d/spike-scratch/metal-test-placement-module-decl/increment-a/macros)
+   Compiling tokio-macros v2.7.2
+   Compiling tokio v1.54.1
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.74s
+────────────
+ Nextest run ID 8377193c-3c11-41a6-88e3-4e34688696a8 with nextest profile: default
+    Starting 8 tests across 1 binary (2 binaries skipped)
+        PASS [   0.107s] (1/8) placement-decl-probe::integration integration::alpha::ours_then_tokio
+  stdout ───
+
+    running 1 test
+    PLACEMENT_PROBE test=integration::integration::alpha::ours_then_tokio group=cgroup-default
+    test integration::alpha::ours_then_tokio ... ok
+
+    test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.00s
+
+
+        PASS [   0.109s] (2/8) placement-decl-probe::integration integration::alpha::tokio_then_ours
+  stdout ───
+
+    running 1 test
+    PLACEMENT_PROBE test=integration::integration::alpha::tokio_then_ours group=cgroup-default
+    test integration::alpha::tokio_then_ours ... ok
+
+    test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.00s
+
+
+        PASS [   0.114s] (3/8) placement-decl-probe::integration integration::alpha::ours_then_test
+  stdout ───
+
+    running 1 test
+    PLACEMENT_PROBE test=integration::integration::alpha::ours_then_test group=cgroup-default
+    test integration::alpha::ours_then_test ... ok
+
+    test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.00s
+
+
+        PASS [   0.115s] (4/8) placement-decl-probe::integration integration::gamma::inner_with_glob::nested_via_glob
+  stdout ───
+
+    running 1 test
+    PLACEMENT_PROBE test=integration::integration::gamma::inner_with_glob::nested_via_glob group=core
+    test integration::gamma::inner_with_glob::nested_via_glob ... ok
+
+    test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.00s
+
+
+        PASS [   0.129s] (5/8) placement-decl-probe::integration integration::alpha::test_then_ours
+  stdout ───
+
+    running 2 tests
+    PLACEMENT_PROBE test=integration::integration::alpha::test_then_ours group=cgroup-default
+    PLACEMENT_PROBE test=integration::integration::alpha::test_then_ours group=cgroup-default
+    test integration::alpha::test_then_ours ... ok
+    test integration::alpha::test_then_ours ... ok
+
+    test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 7 filtered out; finished in 0.00s
+
+
+        PASS [   0.130s] (6/8) placement-decl-probe::integration integration::alpha::plain_no_test_attr
+  stdout ───
+
+    running 1 test
+    PLACEMENT_PROBE test=integration::integration::alpha::plain_no_test_attr group=cgroup-default
+    SECTION_DUMP alpha records=8
+    SECTION_RECORD name=integration::integration::alpha::ours_then_test group=cgroup-default
+    SECTION_RECORD name=integration::integration::alpha::test_then_ours group=cgroup-default
+    SECTION_RECORD name=integration::integration::alpha::ours_then_tokio group=cgroup-default
+    SECTION_RECORD name=integration::integration::alpha::tokio_then_ours group=cgroup-default
+    SECTION_RECORD name=integration::integration::alpha::plain_no_test_attr group=cgroup-default
+    SECTION_RECORD name=integration::integration::gamma::inner_with_glob::nested_via_glob group=core
+    SECTION_RECORD name=integration::integration::gamma::outer_test group=core
+    SECTION_RECORD name=integration::integration::beta::resolves_its_own_group group=probe
+    test integration::alpha::plain_no_test_attr ... ok
+
+    test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.01s
+
+
+        PASS [   0.134s] (7/8) placement-decl-probe::integration integration::beta::resolves_its_own_group
+  stdout ───
+
+    running 1 test
+    PLACEMENT_PROBE test=integration::integration::beta::resolves_its_own_group group=probe
+    SECTION_DUMP beta records=8
+    SECTION_RECORD name=integration::integration::alpha::ours_then_test group=cgroup-default
+    SECTION_RECORD name=integration::integration::alpha::test_then_ours group=cgroup-default
+    SECTION_RECORD name=integration::integration::alpha::ours_then_tokio group=cgroup-default
+    SECTION_RECORD name=integration::integration::alpha::tokio_then_ours group=cgroup-default
+    SECTION_RECORD name=integration::integration::alpha::plain_no_test_attr group=cgroup-default
+    SECTION_RECORD name=integration::integration::gamma::inner_with_glob::nested_via_glob group=core
+    SECTION_RECORD name=integration::integration::gamma::outer_test group=core
+    SECTION_RECORD name=integration::integration::beta::resolves_its_own_group group=probe
+    test integration::beta::resolves_its_own_group ... ok
+
+    test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.01s
+
+
+        PASS [   0.145s] (8/8) placement-decl-probe::integration integration::gamma::outer_test
+  stdout ───
+
+    running 1 test
+    PLACEMENT_PROBE test=integration::integration::gamma::outer_test group=core
+    test integration::gamma::outer_test ... ok
+
+    test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.00s
+
+
+────────────
+     Summary [   0.146s] 8 tests run: 8 passed, 0 skipped
+        PASS [   0.107s] (1/8) placement-decl-probe::integration integration::alpha::ours_then_tokio
+        PASS [   0.109s] (2/8) placement-decl-probe::integration integration::alpha::tokio_then_ours
+        PASS [   0.114s] (3/8) placement-decl-probe::integration integration::alpha::ours_then_test
+        PASS [   0.115s] (4/8) placement-decl-probe::integration integration::gamma::inner_with_glob::nested_via_glob
+        PASS [   0.129s] (5/8) placement-decl-probe::integration integration::alpha::test_then_ours
+        PASS [   0.130s] (6/8) placement-decl-probe::integration integration::alpha::plain_no_test_attr
+        PASS [   0.134s] (7/8) placement-decl-probe::integration integration::beta::resolves_its_own_group
+        PASS [   0.145s] (8/8) placement-decl-probe::integration integration::gamma::outer_test
+OVERDRIVE_METAL_RUN_COMPLETE run_id=92c59af8f7a59af37ab4c56c exit_code=0 cause=command_returned

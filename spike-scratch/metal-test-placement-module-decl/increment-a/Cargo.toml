@@ -1,0 +1,61 @@
+# PROBE V-1 (throwaway, isolated): can a per-module placement declaration be
+# written on stable Rust? Not a member of the repo workspace. See
+# docs/feature/metal-test-placement-attribute/spike/findings-module-declaration.md
+[package]
+name = "placement-decl-probe"
+version = "0.0.0"
+edition = "2024"
+publish = false
+autotests = false
+
+[workspace]
+members = ["macros"]
+
+[features]
+# negative / variant demonstrations, each enabled alone
+neg-nodecl = []
+neg-dup = []
+neg-nested-nodecl = []
+neg-attr-file-mod = []
+neg-attr-nested-file-mod = []
+neg-inner-attr-file-mod = []
+no-blackbox = ["probe-macros/no-blackbox"]
+descriptive-name = ["probe-macros/descriptive-name"]
+
+[dependencies]
+probe-macros = { path = "macros" }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt", "macros"] }
+
+[[test]]
+name = "integration"
+path = "tests/integration.rs"
+
+[[test]]
+name = "attr_inline_mod"
+path = "tests/attr_inline_mod.rs"
+
+[[test]]
+name = "neg_nodecl"
+required-features = ["neg-nodecl"]
+
+[[test]]
+name = "neg_dup"
+required-features = ["neg-dup"]
+
+[[test]]
+name = "neg_nested_nodecl"
+required-features = ["neg-nested-nodecl"]
+
+[[test]]
+name = "neg_attr_file_mod"
+required-features = ["neg-attr-file-mod"]
+
+[[test]]
+name = "neg_attr_nested_file_mod"
+required-features = ["neg-attr-nested-file-mod"]
+
+[[test]]
+name = "neg_inner_attr_file_mod"
+required-features = ["neg-inner-attr-file-mod"]
