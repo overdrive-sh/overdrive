@@ -37,7 +37,7 @@ Feature `metal-test-placement-attribute`; decisions DDD-8 (owner uniqueness and 
 
 | Assumption | Discharged by |
 |---|---|
-| A-1 the owner is init of its PID namespace, so the kernel kills the VMM when the owner dies (rule of `OwnerCrash` and `OwnerExit`) | Tier-3 validation V-4; NOT proven by the model |
+| A-1 the owner is init of its PID namespace, so the kernel kills the VMM when the owner dies (rule of `OwnerCrash` and `OwnerExit`) | Discharged by Tier-3 validation V-4 (HOLDS on Metal kernel 7.0.0-38: no VMM survives the owner, gone within 38.6 ms; `docs/feature/metal-test-placement-attribute/spike/findings-owner-lifetime.md`, kernel basis `kernel/pid_namespace.c:225-274 @ v7.0`); an assumption of the model, not proven by it |
 | A-2 client processes are children of the anchor and take no action once it is gone | nextest process-group kill semantics; Tier-3 run teardown scenario |
 | A-3 exec pass/fail, boot ok/fail and guest loss are environment choices | `ExecDonePass`/`ExecDoneFail`, `BootOk`/`BootFail`, `GuestLost` are nondeterministic actions |
 | A-4 a nextest retry is a new client id | modelled as a fresh client arriving |
