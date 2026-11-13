@@ -566,12 +566,13 @@ components:
           items:
             $ref: '#/components/schemas/ProbeDescriptor'
           description: |-
-            Probe DECLARATIONS carried by the persisted `WorkloadIntent::
-            Service` aggregate — the operator's `[[health_check.*]]` rows
-            plus any ADR-0058-synthesised default-TCP startup probe. Empty
-            for `Job` / `Schedule` reads (probes are Service-only per US-07)
-            and for a Service whose operator wrote the explicit
-            `[[health_check.startup]] = []` opt-out.
+            Probe declarations carried by the persisted `WorkloadIntent::
+            Service` aggregate. A TOML-parsed Service whose startup section
+            is omitted carries D15's synthesized `GuestListeners` startup
+            descriptor; raw-API omission, an empty raw-API vector, and an
+            explicit empty TOML startup array remain opt-outs. Empty for
+            `Job` / `Schedule` reads because probes are Service-only per
+            US-07.
 
             Same convention as [`Self::listeners`]: an INTENT property
             projected verbatim from the typed core aggregate (the type
@@ -1508,8 +1509,10 @@ components:
       type: integer
       format: int32
       description: |-
-        0-indexed position of a probe within its role's TOML array (or
-        `0` for the synthesized default probe per ADR-0058 / C4).
+        0-indexed position of a probe within its role's descriptor array.
+        For Service TOML whose startup section is omitted, D15 assigns `0`
+        to the synthesized `GuestListeners` descriptor. Raw-API omission
+        and empty startup vectors remain opt-outs and create no descriptor.
 
         `ProbeIdx` is the load-bearing cross-step variable per
         `discuss/shared-artifacts-registry.md`: it MUST match across
@@ -1519,9 +1522,8 @@ components:
       oneOf:
       - type: object
         description: |-
-          TCP-connect against `host:port`. Default startup mechanic per
-          ADR-0058 (host defaults to bind-side wildcard
-          translated to loopback at probe time).
+          TCP-connect against `host:port` (host defaults to bind-side
+          wildcard translated to loopback at probe time).
         required:
         - host
         - port
@@ -1563,10 +1565,13 @@ components:
             - http
       - type: object
         description: |
-          The platform's default startup gate for a Service: every declared
-          listener has been reported open by the guest (D14 item 1, ADR-0269).
-          Fieldless; valid only as the sole startup descriptor of a Service;
-          cannot be written in TOML.
+          The platform-managed startup gate for a Service: every declared
+          TCP and UDP listener has been reported open by the guest. D15's
+          TOML parser materializes it only when the startup section is
+          omitted (ADR-0270); raw-API omission and explicit empty lists
+          remain opt-outs. The startup deadline remains 60 seconds.
+          Fieldless; valid only as the sole startup descriptor of a
+          Service; cannot be written in TOML.
         required:
         - type
         properties:
@@ -1578,7 +1583,8 @@ components:
         Concrete mechanic for a probe attempt.
 
         Per ADR-0054, each mechanic is backed by a distinct port trait. The
-        supported mechanics are TCP-connect and plain HTTP GET.
+        supported mechanics are TCP-connect, plain HTTP GET, and the
+        platform-managed `GuestListeners` startup gate.
     ProbeResultRowJson:
       type: object
       description: |-
@@ -2326,18 +2332,19 @@ components:
             items:
               $ref: '#/components/schemas/ProbeDescriptor'
             description: |-
-              Operator-declared startup probes, projected from the parser-
-              side `[[health_check.startup]]` blocks. Per ADR-0057. May
-              include a platform-synthesised default-TCP probe per ADR-0058
-              when zero startup probes were declared and at least one
-              listener is present.
+              Startup descriptors projected from Service TOML
+              `[[health_check.startup]]` blocks. Per D15 (ADR-0270), when a
+              Service TOML input omits that section, the parser synthesizes
+              one `GuestListeners` descriptor over every declared TCP and UDP
+              listener. An explicit empty TOML array remains the opt-out.
 
-              Defaults to an empty `Vec` on the wire when the client omits
-              the field — `#[serde(default)]` preserves the legacy
+              Defaults to an empty `Vec` on the raw API wire when the client
+              omits the field — `#[serde(default)]` preserves the legacy
               `ServiceSpecInput { id, replicas, resources, driver, listeners
-              }` shape for callers that have not yet been updated to thread
-              probes. Once an operator declares probes in TOML, the CLI's
-              `submit_streaming_service` populates this field.
+              }` shape. Raw-API omission and an empty vector remain opt-outs;
+              only the TOML parser synthesizes the D15 default descriptor.
+              The CLI's `submit_streaming_service` populates this field from
+              the parsed Service input.
       description: |-
         HTTP/JSON wire-shape for a Service submission per ADR-0051 § 3.
 
@@ -3012,8 +3019,9 @@ components:
         description: |-
           `ServiceLifecycle`: the Service alloc has converged to a
           stable, fully-probed Running state per ADR-0055 / ADR-0056.
-          All declared startup probes (or the synthesized default per
-          ADR-0058) reported Pass; the alloc is considered Stable
+          All declared startup probes reported Pass; this includes D15's
+          TOML-synthesized `GuestListeners` descriptor when the Service
+          startup section was omitted. The alloc is considered Stable
           from the publication boundary onward.
 
           `settled_in_ms` is the elapsed wall-clock duration (in
@@ -3039,8 +3047,9 @@ components:
             description: |-
               `ServiceLifecycle`: the Service alloc has converged to a
               stable, fully-probed Running state per ADR-0055 / ADR-0056.
-              All declared startup probes (or the synthesized default per
-              ADR-0058) reported Pass; the alloc is considered Stable
+              All declared startup probes reported Pass; this includes D15's
+              TOML-synthesized `GuestListeners` descriptor when the Service
+              startup section was omitted. The alloc is considered Stable
               from the publication boundary onward.
 
               `settled_in_ms` is the elapsed wall-clock duration (in

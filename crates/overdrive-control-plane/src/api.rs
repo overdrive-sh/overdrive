@@ -320,12 +320,13 @@ pub struct AllocStatusResponse {
     /// NO key. Additive + skip-if-empty: existing consumers see no change.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub issued_certificates: Vec<IssuedCertSummary>,
-    /// Probe DECLARATIONS carried by the persisted `WorkloadIntent::
-    /// Service` aggregate — the operator's `[[health_check.*]]` rows
-    /// plus any ADR-0058-synthesised default-TCP startup probe. Empty
-    /// for `Job` / `Schedule` reads (probes are Service-only per US-07)
-    /// and for a Service whose operator wrote the explicit
-    /// `[[health_check.startup]] = []` opt-out.
+    /// Probe declarations carried by the persisted `WorkloadIntent::
+    /// Service` aggregate. A TOML-parsed Service whose startup section
+    /// is omitted carries D15's synthesized `GuestListeners` startup
+    /// descriptor; raw-API omission, an empty raw-API vector, and an
+    /// explicit empty TOML startup array remain opt-outs. Empty for
+    /// `Job` / `Schedule` reads because probes are Service-only per
+    /// US-07.
     ///
     /// Same convention as [`Self::listeners`]: an INTENT property
     /// projected verbatim from the typed core aggregate (the type

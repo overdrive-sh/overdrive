@@ -625,8 +625,9 @@ pub enum TerminalCondition {
     Failed { exit_code: Option<i32> },
     /// `ServiceLifecycle`: the Service alloc has converged to a
     /// stable, fully-probed Running state per ADR-0055 / ADR-0056.
-    /// All declared startup probes (or the synthesized default per
-    /// ADR-0058) reported Pass; the alloc is considered Stable
+    /// All declared startup probes reported Pass; this includes D15's
+    /// TOML-synthesized `GuestListeners` descriptor when the Service
+    /// startup section was omitted. The alloc is considered Stable
     /// from the publication boundary onward.
     ///
     /// `settled_in_ms` is the elapsed wall-clock duration (in

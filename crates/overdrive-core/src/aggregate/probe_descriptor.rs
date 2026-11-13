@@ -6,11 +6,14 @@
 //! row becomes a `ProbeDescriptor` and is rkyv-archived as part of
 //! the current VM-only `ServiceSpec` aggregate.
 //!
-//! Per D15 (ADR-0270): if no startup probes are declared, the parser
-//! synthesises one `ProbeDescriptor` with
-//! `mechanic: ProbeMechanic::GuestListeners`, which gates `Stable` on
-//! the guest reporting every declared listener open. An empty
-//! `[[health_check.startup]] = []` array remains the explicit opt-out.
+//! Per D15 (ADR-0270): when Service TOML omits
+//! `[[health_check.startup]]`, the parser synthesises one
+//! `ProbeDescriptor` with `mechanic: ProbeMechanic::GuestListeners`.
+//! It gates `Stable` on the guest reporting every declared TCP and UDP
+//! listener open, with the existing 60-second startup window. This
+//! TOML default does not apply to raw-API inputs: an omitted or empty
+//! startup vector remains the opt-out. An explicit TOML
+//! `[[health_check.startup]] = []` remains the opt-out too.
 
 use serde::{Deserialize, Serialize};
 
@@ -42,7 +45,8 @@ pub const SCHEDULE_PROBES_GUIDANCE: &str =
 /// Concrete mechanic for a probe attempt.
 ///
 /// Per ADR-0054, each mechanic is backed by a distinct port trait. The
-/// supported mechanics are TCP-connect and plain HTTP GET.
+/// supported mechanics are TCP-connect, plain HTTP GET, and the
+/// platform-managed `GuestListeners` startup gate.
 #[derive(
     Debug,
     Clone,
@@ -64,10 +68,13 @@ pub enum ProbeMechanic {
     /// HTTP only per C6. Method = GET only per US-02. 3xx → Fail
     /// per US-02 AC (no redirect-follow).
     Http { path: String, port: u16, host: Option<String> },
-    /// The platform's default startup gate for a Service: every declared
-    /// listener has been reported open by the guest (D14 item 1, ADR-0269).
-    /// Fieldless; valid only as the sole startup descriptor of a Service;
-    /// cannot be written in TOML.
+    /// The platform-managed startup gate for a Service: every declared
+    /// TCP and UDP listener has been reported open by the guest. D15's
+    /// TOML parser materializes it only when the startup section is
+    /// omitted (ADR-0270); raw-API omission and explicit empty lists
+    /// remain opt-outs. The startup deadline remains 60 seconds.
+    /// Fieldless; valid only as the sole startup descriptor of a
+    /// Service; cannot be written in TOML.
     ///
     GuestListeners,
 }

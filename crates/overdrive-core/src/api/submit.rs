@@ -71,18 +71,19 @@ pub struct ServiceSpecInput {
     /// at least one element; no two share `(port, protocol)`; protocol
     /// is `tcp` / `udp` only.
     pub listeners: Vec<ListenerInput>,
-    /// Operator-declared startup probes, projected from the parser-
-    /// side `[[health_check.startup]]` blocks. Per ADR-0057. May
-    /// include a platform-synthesised default-TCP probe per ADR-0058
-    /// when zero startup probes were declared and at least one
-    /// listener is present.
+    /// Startup descriptors projected from Service TOML
+    /// `[[health_check.startup]]` blocks. Per D15 (ADR-0270), when a
+    /// Service TOML input omits that section, the parser synthesizes
+    /// one `GuestListeners` descriptor over every declared TCP and UDP
+    /// listener. An explicit empty TOML array remains the opt-out.
     ///
-    /// Defaults to an empty `Vec` on the wire when the client omits
-    /// the field — `#[serde(default)]` preserves the legacy
+    /// Defaults to an empty `Vec` on the raw API wire when the client
+    /// omits the field — `#[serde(default)]` preserves the legacy
     /// `ServiceSpecInput { id, replicas, resources, driver, listeners
-    /// }` shape for callers that have not yet been updated to thread
-    /// probes. Once an operator declares probes in TOML, the CLI's
-    /// `submit_streaming_service` populates this field.
+    /// }` shape. Raw-API omission and an empty vector remain opt-outs;
+    /// only the TOML parser synthesizes the D15 default descriptor.
+    /// The CLI's `submit_streaming_service` populates this field from
+    /// the parsed Service input.
     #[serde(default)]
     pub startup_probes: Vec<ProbeDescriptor>,
     /// Operator-declared readiness probes, projected from the parser-

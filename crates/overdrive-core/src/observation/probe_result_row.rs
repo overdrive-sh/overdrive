@@ -37,8 +37,10 @@ use serde::{Deserialize, Serialize};
 use crate::codec::{EnvelopeError, VersionedEnvelope};
 use crate::id::AllocationId;
 
-/// 0-indexed position of a probe within its role's TOML array (or
-/// `0` for the synthesized default probe per ADR-0058 / C4).
+/// 0-indexed position of a probe within its role's descriptor array.
+/// For Service TOML whose startup section is omitted, D15 assigns `0`
+/// to the synthesized `GuestListeners` descriptor. Raw-API omission
+/// and empty startup vectors remain opt-outs and create no descriptor.
 ///
 /// `ProbeIdx` is the load-bearing cross-step variable per
 /// `discuss/shared-artifacts-registry.md`: it MUST match across
