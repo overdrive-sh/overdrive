@@ -1,0 +1,104 @@
+schema_version: 1
+
+journey:
+  name: Declare where a Metal integration test runs
+  feature: metal-test-placement-attribute
+  status: requirements-ready-design-pending
+  goal: >
+    Declare an integration test's Metal placement once, on the test, run it
+    on the Metal box with the declared isolation, and learn of a missing
+    placement before the Metal box.
+  persona: marcus-platform-verification-engineer
+  jobs: [J-PLAT-007]
+  emotional_arc:
+    start: Uneasy that a new test might be unplaced or silently run on the host
+    middle: Focused on one declaration and one run result
+    end: Confident the test runs where intended and a miss would have been caught early
+
+steps:
+  - id: 1
+    name: Write the test and declare its placement
+    command: edit the test source (attribute declaring guest group, host-pure, lane or native-launcher; spelling is DESIGN's)
+    shared_artifacts:
+      - name: placement_declaration
+        source: The attribute on the test (single source of truth)
+        consumers: [guest-kit dispatch at run time, the placement lint, the Metal wrapper]
+    integration_checkpoint: >
+      The declaration is the only place placement is stated; nothing else
+      must be edited to place the test.
+    failure_modes:
+      - Plain test with no declaration (caught by the lint, step 3)
+      - Declaration names an unknown group
+    gherkin: |
+      Scenario: One declaration places the test
+        Given Marcus writes a new integration test with a guest declaration
+        Then no other file needs an edit for it to run in that guest
+
+  - id: 2
+    name: Run it on the Metal box
+    command: cargo xtask metal run -- cargo nextest run -p ${crate} --features integration-tests,kvm-tests -E 'test(${test_name})'
+    tui_mockup: |
+      OVERDRIVE_METAL_RUN_ID=${run_id}
+      PASS [ ${seconds}s] ${binary_id} ${test_name}
+    shared_artifacts:
+      - name: run_id
+        source: Existing durable Metal invocation registration
+        consumers: [live output, retained log, collection]
+      - name: crate
+        source: The developer's -p selection; owning crate of the test
+        consumers: [command line]
+      - name: binary_id
+        source: nextest binary id of the integration binary containing the test
+        consumers: [PASS or FAIL line, placement lint failure]
+      - name: test_name
+        source: Full test name as nextest reports it (same name the old table keyed on)
+        consumers: [-E filter, PASS or FAIL line, lint failure, guest --exact run]
+      - name: seconds
+        source: nextest per-test duration
+        consumers: [PASS line]
+      - name: guest_boot_time
+        source: Skeleton-recorded per-test guest boot record (retained with the run output; format chosen by the spike)
+        consumers: [DESIGN decision on batched group runs]
+    integration_checkpoint: >
+      A guest-declared test boots its group's guest and runs its body there;
+      a failing body fails the host test.
+    failure_modes:
+      - Guest artifact missing for the group (failure names group and artifact)
+      - Guest run fails (host test FAIL with guest output)
+    gherkin: |
+      Scenario: A guest-declared test runs in its guest
+        When Marcus runs it through metal run
+        Then its body executes in a fresh guest of the declared group
+        And a failing body shows as a host FAIL
+
+  - id: 3
+    name: Forget a declaration and find out early
+    command: cargo xtask metal run -- cargo check --all-targets --features integration-tests   # candidate; DESIGN names the final command
+    emotional_note: Main anxiety point; the arc turns from uneasy to confident when the miss is caught in seconds, before any guest boots.
+    shared_artifacts:
+      - name: binary_id
+        source: nextest binary id (as step 2)
+        consumers: [lint failure]
+      - name: test_name
+        source: Full test name (as step 2)
+        consumers: [lint failure]
+    tui_mockup: |
+      FAIL  ${binary_id} ${test_name}: no placement declared   (exact text DESIGN's)
+    integration_checkpoint: >
+      An unplaced integration test fails before any Metal run; no
+      test_unclassified is first seen on Metal.
+    failure_modes:
+      - Lint not wired into a lane Marcus runs
+      - Lint flags non-integration tests
+    gherkin: |
+      Scenario: An unplaced test is flagged before Metal
+        Given an integration test has no placement declaration
+        When Marcus runs the default lane
+        Then the failure names the binary and the test
+
+acceptance_reference: docs/feature/metal-test-placement-attribute/feature-delta.md
+
+changelog:
+  - date: 2026-11-13
+    feature: metal-test-placement-attribute
+    change: Requirements journey for declaring Metal test placement on the test; design and implementation pending.
