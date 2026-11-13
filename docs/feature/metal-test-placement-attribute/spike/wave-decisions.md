@@ -26,9 +26,12 @@
 
 ## Design implications
 - **Batching (O4):** one guest per test costs about 0.45 s staging plus 2.4 s
-  boot (two samples). DESIGN decides whether that is acceptable at 771 guest
-  placements under nextest parallelism, or whether a module-level batch
-  declaration is needed.
+  boot (two samples). That is not a new cost: ordinary Metal runs already boot
+  a fresh guest per guest-placed test attempt under the table. Declaring
+  placement on the test changes how the test is dispatched, not how many
+  guests boot. O4 is resolved by D8 (user, 2026-11-13): batching moves onto
+  the test as a module-level declaration (US-PLACE-09), replacing the explicit
+  batched `overdrive-fwd-guest-suite` command.
 - **Marker mechanism (O1):** the macro writes a record into the
   `overdrive_test_placement` ELF section; the wrapper reads it before the table
   lookup. DESIGN either ratifies this or replaces it; when the table is

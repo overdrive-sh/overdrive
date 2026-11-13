@@ -36,6 +36,7 @@ Production entry point: this is test tooling, so there is no `overdrive serve` /
 | D5 | Sequencing: DISCUSS, then the walking skeleton (nw-spike walking-skeleton mode, no probe), then DESIGN answers the open questions using skeleton evidence, then DISTILL/DELIVER for the remaining slices. | User, 2026-11-13 |
 | D6 | Attribute variants, the lint mechanism and every public shape beyond D4 are DESIGN's. This wave does not name them. | Scope rule |
 | D7 | Slice and identifier names describe behaviour, never roadmap steps or issue numbers (`.claude/rules/domain-naming.md`). | Project rule |
+| D8 | Module-level batching is IN scope: the tests of a module can declare that they share one guest of a group (US-PLACE-09). It replaces the explicit batched `overdrive-fwd-guest-suite` command, so the dispatcher can be retired entirely in US-PLACE-08. The attribute's shape (on the `mod`, or a `group = …` argument on each test) and how per-test results survive a shared guest are DESIGN's. | User, 2026-11-13 |
 
 D4 does not authorise public surface beyond the named attribute, `inside_guest` and `run_in_guest`; the "inside the guest" marker and the boot-time record's format are DESIGN's or the spike's.
 
@@ -319,6 +320,39 @@ Scenario: The rule text and references match the model
 
 AC: with the table and lookup absent, a renamed test and a new test pass and the full pass set matches; dispatcher deleted or reduced exactly as DESIGN decided; no stale reference to removed names (`test-placement.json`, the removed diagnostics, a deleted binary); testing.md updated through the normal rules-change process. Technical notes (structural, not AC): unreachable wrapper code and its tests are deleted together; other documents cite `overdrive-fwd-guest-suite` (for example the `metal-run-isolation` journey) and are updated in the same slice.
 
+### US-PLACE-09 — Run a module's tests in one shared guest
+
+Slice: [module tests share one guest](slices/slice-09-module-tests-share-one-guest.md). Must-have (D8).
+
+Today every guest-placed test boots its own guest on an ordinary run (about 0.45 s staging plus 2.4 s boot each); only the explicit batched dispatcher command shares a guest across a group, and it lives in the table-driven dispatcher this feature retires. A module-level declaration keeps the speed-up on the test, so the batched path survives the dispatcher's removal.
+
+### Elevator Pitch
+Before: sharing one guest across tests needs the separate `overdrive-fwd-guest-suite` command and its hand-kept group lists; ordinary nextest runs boot one guest per test.
+After: run `cargo xtask metal run -- cargo nextest run -p overdrive-cli --features integration-tests,kvm-tests -E 'test(/^integration::cluster_and_node_commands::/)'` on a module declared as one shared `cgroup-default` guest → sees one result per test and one guest boot for the module in the `OVERDRIVE_GUEST_KIT_TIMING` output.
+Decision enabled: Marcus chooses per module between isolation (a guest per test) and speed (one guest per module) on the test code itself, and drops the separate batched command.
+
+```gherkin
+Scenario: A declared module boots one guest
+  Given a module whose tests declare that they share one cgroup-default guest
+  When Marcus runs the module's tests on Metal
+  Then one guest boots for the module and every test reports its own result
+
+Scenario: One failing test does not hide the others
+  Given one test in a shared-guest module fails
+  When the module runs on Metal
+  Then that test is reported FAIL and the other tests report their own results
+
+Scenario: Filtering to one test still works
+  When Marcus runs a single test of a shared-guest module with -E 'test(=…)'
+  Then only that test runs and it reports its result
+
+Scenario: Undeclared tests keep one guest each
+  Given a guest-placed test outside any shared-guest module
+  Then it still boots its own guest
+```
+
+AC: a shared-guest module boots one guest per run (counted from the timing output); per-test results, failures and `-E` filtering behave as for per-test guests; tests outside a declared module are unchanged; the explicit batched dispatcher command's users can be moved to the declaration, so US-PLACE-08 deletes the dispatcher. Technical notes (DESIGN's): the attribute shape; how nextest's one-process-per-test model reaches a shared guest (one generated test per module versus a guest shared across test processes) and who starts and stops it; what state tests in a shared guest can leak to each other.
+
 ## Wave: DISCUSS / [REF] Story map and scope assessment
 
 Backbone (Marcus's journey): Write the test, declare its placement, run it on Metal, provide guest needs, move existing tests, catch a miss, retire the old path.
@@ -342,7 +376,7 @@ Objective: Marcus declares a Metal test's placement once and learns of a miss be
 | K1 (primary) | Marcus places one new integration test | 1 edit site (the test), 0 table or dispatcher edits | 2-3 edit sites (test, JSON, dispatcher for new group behaviour) | Diff of the skeleton commit and of one later new-test commit |
 | K2 | Marcus finds a missing placement | 100% of unplaced integration tests flagged before any Metal guest boots, within one run of the check | 0% flagged before Metal; first signal is `test_unclassified` on Metal | Negative-fixture test (one deliberately unplaced test) plus no `test_unclassified` in later Metal runs |
 | K3 (guardrail) | Marcus's results stay correct through migration | 0 pass-set differences per migrated batch; 0 placements changing kind or group | Table-driven pass set | Per-batch before/after pass sets and per-test kind and group identity, recounted by parsing the JSON |
-| K4 (guardrail) | Marcus pays a bounded guest cost | Per-test guest boot time recorded for the skeleton test; DESIGN compares it with the batched group cost before deciding. No numeric ceiling is promised here | Batched groups boot once per group | Skeleton evidence record |
+| K4 (guardrail) | Marcus pays a bounded guest cost | Per-test guest boot time unchanged from the table-driven path (ordinary runs already boot one guest per guest-placed test attempt); measured about 0.45 s staging plus 2.4 s boot on the skeleton test | One guest per test attempt on ordinary runs; only the explicit batched dispatcher command boots once per group | Skeleton evidence record |
 | K5 | The repository sheds placement sources | Placement sources 3 to 1; table entries 4,642 to 0 | 3 sources, 4,642 entries | File presence and parsed entry count at US-08 |
 
 Owner: implementer captures, independent reviewer evaluates; no new dashboard. K4 is one recorded measurement used as design evidence, not a performance claim or benchmark.
@@ -380,7 +414,7 @@ DESIGN's questions from the issue stand (lane and native mapping, per-group arti
 - O1 (blocks US-01's general shape): while the table coexists, the wrapper cannot skip the table lookup for every test without silently running unplaced plain tests on the host. DESIGN must pin how a self-declared test is told apart from an unplaced one, and which side supplies the local-mode vsock namespace to the host-side body. The skeleton uses the thinnest form that works; if the spike cannot find one, it returns to the user rather than weakening the `test_unclassified` guard.
 - O2: whether the guest-kit extraction reuses `crates/overdrive-testing/src/guest_kit.rs`; D4 names a library, DESIGN picks its home.
 - O3: how the lint can land before 100% migration (per-binary scope, or last). US-07's order depends on it.
-- O4: US-08's deletion of the dispatcher depends on the batched-run decision; the explicit `overdrive-fwd-guest-suite` command is cited by `metal-run-isolation` and testing.md.
+- O4: resolved by D8: batching moves onto the test as a module-level declaration (US-09), so US-08 deletes the dispatcher. Per-test guest cost is unchanged by this feature (ordinary runs already boot one guest per test attempt). The explicit `overdrive-fwd-guest-suite` command is cited by `metal-run-isolation` and testing.md, which US-08 updates.
 - O5: migration batch sizing (1-3 days each) is a hypothesis; the split rule above applies if DESIGN's estimate disagrees.
 - Deferrals: no deferral language is used and no GitHub issue is created or proposed; every limitation above is an in-feature story. If the user wants any story removed from this feature, that becomes a deferral needing an approved issue.
 

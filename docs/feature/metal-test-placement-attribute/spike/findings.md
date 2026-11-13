@@ -63,6 +63,10 @@ Two samples only. Later runs failed with
 distribution was taken. Treat these as a point estimate: about 0.45 s staging
 and 2.4 s boot per test, before the body runs.
 
+This matches the cost before the change. Under the table, ordinary Metal runs
+already boot a fresh guest for each guest-placed test attempt; the attribute
+changes how the test reaches its guest, not how many guests boot.
+
 ## How the wrapper recognises a declared test
 
 - The macro emits a `<module path>\0<group>\0` record into the ELF section
