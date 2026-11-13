@@ -58,9 +58,24 @@ baseline copy was deleted after the comparison. The changed content does not
 cause the ranking failure. The tests do not reach their later assertions after
 that common failure, so those later assertions are not recorded as passing.
 
+## Review remediation
+
+The [independent website review](review-website.md) returned `NEEDS_REVISION`
+with two bounded blog wording findings. The post now distinguishes an omitted
+startup section, which selects the guest-listener gate, from the explicit empty
+startup list, which opts out. It also lists the cleanup surfaces in the positive
+and negative native captures separately. Only the positive capture measured a
+probe-ownership delta. No docs page, route, link, metadata, product code, or
+test changed in this remediation.
+
+The wording revision passed `git diff --check` and a focused source audit for
+both distinctions. `bun run typecheck` regenerated and checked the MDX content,
+and `bun run lint` passed.
+The earlier full website checks remain recorded above. The site has not been
+deployed or published.
+
 ## Review status
 
-The content and evidence are ready for independent documentation review. The
-review verdict is pending. Final mutation and integration evidence are separate
-feature gates and are not claimed here. The website has not been deployed or
-published.
+The revised content is ready for independent re-review. Its verdict is pending.
+Final mutation and integration evidence are separate feature gates and are not
+claimed here.

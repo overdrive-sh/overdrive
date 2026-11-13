@@ -25,12 +25,14 @@ then carries the result into the existing lifecycle decisions. This removes the
 two-second poll from the default startup path without treating VM boot as
 application readiness.
 
-We also rejected making a Service with no declared startup probe `Stable` as
-soon as it reached `Running`. A workload that exits before opening any
-listener would then look successful. A minimum healthy window after a listener
-opens could narrow a fast-crash race, but it would add a clock floor to every
-start and a new setting to the spec. We kept the startup gate event-driven and
-left sustained application health to explicit readiness and liveness checks.
+We rejected treating an omitted `health_check.startup` section as an opt-out
+that makes a Service `Stable` as soon as it reaches `Running`. The explicit
+`health_check.startup = []` remains the opt-out. A workload that exits before
+opening any listener would otherwise look successful. A minimum healthy window
+after a listener opens could narrow a fast-crash race, but it would add a clock
+floor to every start and a new setting to the spec. We kept the startup gate
+event-driven and left sustained application health to explicit readiness and
+liveness checks.
 
 ## The end of an attempt must release its probes
 
@@ -146,8 +148,11 @@ The paired never-listening Service named missing `tcp:18998` after each
 progress timeout while restarts continued. Public `workload describe` later
 showed **six allocation attempts**, with the first five stopped by startup
 and the last failed. A byte-identical redeploy returned the recorded
-`StartupProbeFailed` verdict. Both captures reported zero owned resource
-deltas after cleanup. The [native verification record](https://github.com/overdrive-sh/overdrive/blob/dca2350aad3a9dc5994e1788605fb4903fa8c127/docs/feature/service-allocation-readiness-and-ending/deliver/step-05-07-verification.md)
+`StartupProbeFailed` verdict. The positive cleanup capture measured zero VM,
+probe ownership, network, cgroup, run-directory, mount, loop, and preparation
+deltas. The negative capture measured zero VM, network, cgroup, run-directory,
+mount, loop, preparation, and serve deltas. It did not measure probe ownership.
+The [native verification record](https://github.com/overdrive-sh/overdrive/blob/dca2350aad3a9dc5994e1788605fb4903fa8c127/docs/feature/service-allocation-readiness-and-ending/deliver/step-05-07-verification.md)
 separates those outcomes from the earlier spike measurements.
 
 Listener reports prove that a socket opened, not that the application can
