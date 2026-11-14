@@ -651,8 +651,11 @@ mod shared_listener_task_owner_acceptance {
     fn pending_listener_task(
         drops: Arc<AtomicUsize>,
     ) -> tokio::task::JoinHandle<SharedListenerTaskResult> {
+        // The witness is owned by the future from construction, so aborting
+        // the task before its first poll still drops it.
+        let witness = TaskDropWitness(drops);
         tokio::spawn(async move {
-            let _witness = TaskDropWitness(drops);
+            let _witness = witness;
             std::future::pending::<()>().await;
             Ok(())
         })
@@ -751,9 +754,13 @@ mod shared_listener_task_owner_acceptance {
         })
         .await
         .is_ok();
+        // An observer drops its sender and aborts its listener in one
+        // cancellation, but the listener is dropped on another worker, so the
+        // listener witness can precede the last sender drop. Wait for the
+        // closure itself.
         let channel_closed = {
             let mut events = owner.event_rx.lock().await;
-            matches!(events.try_recv(), Err(mpsc::error::TryRecvError::Disconnected))
+            matches!(tokio::time::timeout(Duration::from_secs(2), events.recv()).await, Ok(None))
         };
 
         consume_disconnected_task_owner(owner).await;
