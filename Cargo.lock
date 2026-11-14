@@ -2683,13 +2683,20 @@ dependencies = [
 name = "overdrive-testing"
 version = "0.0.0"
 dependencies = [
+ "anyhow",
+ "itf",
  "libc",
  "overdrive-core",
  "overdrive-fwd",
  "overdrive-host",
  "overdrive-testing-macros",
+ "proptest",
+ "quint-connect",
+ "serde",
+ "serial_test",
  "thiserror 2.0.18",
  "tokio",
+ "trybuild",
 ]
 
 [[package]]
@@ -4989,6 +4996,7 @@ dependencies = [
  "hex",
  "itf",
  "libc",
+ "overdrive-testing-macros",
  "proc-macro2",
  "proptest",
  "quint-connect",

@@ -12797,6 +12797,105 @@
       },
       "vm_fixture::tests::rootfs_image_is_valid_true_only_when_ext4_magic_present_at_offset": {
         "kind": "host-pure"
+      },
+      "placement::owner_core::tests::a_new_owner_has_no_guest_no_clients_and_has_not_stopped": {
+        "kind": "host-pure"
+      },
+      "placement::owner_core::tests::three_clients_share_one_guest_and_are_served_in_arrival_order": {
+        "kind": "host-pure"
+      },
+      "placement::owner_core::tests::a_failed_test_discards_its_guest_and_the_next_test_gets_a_replacement": {
+        "kind": "host-pure"
+      },
+      "placement::owner_core::tests::a_guest_lost_during_a_test_answers_it_and_is_replaced_for_the_next": {
+        "kind": "host-pure"
+      },
+      "placement::owner_core::tests::a_guest_lost_while_idle_is_replaced_at_the_next_attach": {
+        "kind": "host-pure"
+      },
+      "placement::owner_core::tests::a_client_that_goes_away_while_its_test_runs_taints_the_guest_and_is_never_answered": {
+        "kind": "host-pure"
+      },
+      "placement::owner_core::tests::a_queued_client_that_goes_away_is_removed_and_never_served": {
+        "kind": "host-pure"
+      },
+      "placement::owner_core::tests::a_boot_failure_answers_only_the_head_and_starts_a_new_boot_for_the_next": {
+        "kind": "host-pure"
+      },
+      "placement::owner_core::tests::a_boot_that_fails_with_nobody_waiting_leaves_no_guest_and_notifies_nobody": {
+        "kind": "host-pure"
+      },
+      "placement::owner_core::tests::an_exec_that_reaches_its_bound_is_answered_exec_bound_and_its_guest_discarded": {
+        "kind": "host-pure"
+      },
+      "placement::owner_core::tests::the_late_result_of_an_exec_that_reached_its_bound_changes_nothing": {
+        "kind": "host-pure"
+      },
+      "placement::owner_core::tests::a_late_result_from_a_detached_exec_reaches_nobody_not_even_the_next_client": {
+        "kind": "host-pure"
+      },
+      "placement::owner_core::tests::an_owner_exits_when_idle_and_never_while_work_is_queued_or_running": {
+        "kind": "host-pure"
+      },
+      "placement::owner_core::tests::a_detached_exec_still_counts_as_running_for_the_idle_exit": {
+        "kind": "host-pure"
+      },
+      "placement::owner_core::tests::after_the_owner_exits_every_event_is_ignored": {
+        "kind": "host-pure"
+      },
+      "placement::owner_core::tests::seeded_event_schedules_keep_the_owner_invariants": {
+        "kind": "host-pure"
+      },
+      "placement::owner_core::tests::every_attached_client_that_stays_is_answered_once_when_the_environment_answers_everything": {
+        "kind": "host-pure"
+      },
+      "placement::owner_core::tests::events_that_are_not_enabled_change_nothing": {
+        "kind": "host-pure"
+      },
+      "placement::tests::the_registry_accepts_exactly_the_twenty_one_named_environments": {
+        "kind": "host-pure"
+      },
+      "placement::tests::an_omitted_profile_selects_each_groups_base_profile": {
+        "kind": "host-pure"
+      },
+      "placement::tests::an_unknown_group_is_rejected_by_name_at_declaration": {
+        "kind": "host-pure"
+      },
+      "placement::tests::an_unknown_profile_or_one_of_another_group_is_rejected": {
+        "kind": "host-pure"
+      },
+      "placement::tests::a_metal_run_is_present_when_any_one_of_the_three_variables_is_set_and_non_empty": {
+        "kind": "host-pure"
+      },
+      "placement::tests::no_metal_run_is_present_when_no_variable_is_set_or_every_set_one_is_empty": {
+        "kind": "host-pure"
+      },
+      "placement::owner_core::conformance::quint_shared_guest_happy_path_three_clients_share_one_guest": {
+        "kind": "host-pure"
+      },
+      "placement::owner_core::conformance::quint_shared_guest_failure_then_replacement_guest": {
+        "kind": "host-pure"
+      },
+      "placement::owner_core::conformance::quint_shared_guest_guest_lost_mid_exec_then_replacement": {
+        "kind": "host-pure"
+      },
+      "placement::owner_core::conformance::quint_shared_guest_disconnect_while_running_next_waits": {
+        "kind": "host-pure"
+      },
+      "placement::owner_core::conformance::quint_shared_guest_disconnect_while_queued_is_removed": {
+        "kind": "host-pure"
+      },
+      "placement::owner_core::conformance::quint_shared_guest_boot_failure_then_retry_boot_on_next_attach": {
+        "kind": "host-pure"
+      },
+      "placement::owner_core::conformance::quint_shared_guest_exec_bound_discards_guest_and_replies_bound": {
+        "kind": "host-pure"
+      },
+      "placement::owner_core::conformance::quint_shared_guest_idle_exit_only_when_empty": {
+        "kind": "host-pure"
+      },
+      "placement::owner_core::conformance::quint_shared_guest_randomized_traces": {
+        "kind": "host-pure"
       }
     },
     "overdrive-worker": {

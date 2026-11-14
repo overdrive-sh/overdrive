@@ -47,6 +47,7 @@ pub mod netns;
 /// Exercises the no-panic contract (user decision 2 of 2026-09-30). Linux-only
 /// (the file carries its own `#![cfg(target_os = "linux")]`).
 pub mod pids_max;
+pub mod placement;
 pub mod vm_fixture;
 pub mod vsock;
 
@@ -54,3 +55,31 @@ pub mod vsock;
 /// group: `#[overdrive_test(guest = "<group>")]`. See
 /// `overdrive-testing-macros` for the expansion.
 pub use overdrive_testing_macros::overdrive_test;
+
+/// Declares a test binary's default placement as host-pure:
+/// `overdrive_test_default!(host_pure)`.
+pub use overdrive_testing_macros::overdrive_test_default;
+/// Declares a module's placement as host-pure: `placement!(host_pure)`.
+pub use overdrive_testing_macros::placement;
+
+/// Declares once per module that its `#[overdrive_test]` tests share one guest:
+/// `shared_guest!(guest = "<group>"[, profile = "<profile>"])`.
+///
+/// Expands to the module-private declaration the argument-free
+/// `#[overdrive_test]` reads by plain name.
+#[cfg(target_os = "linux")]
+#[macro_export]
+macro_rules! shared_guest {
+    (guest = $group:literal $(, profile = $profile:literal)? $(,)?) => {
+        #[allow(dead_code, non_upper_case_globals)]
+        const OVERDRIVE_TEST_NEEDS_shared_guest_DECLARATION_IN_THIS_MODULE:
+            $crate::placement::GuestPlacement = $crate::placement::GuestPlacement::declare(
+            $group,
+            $crate::shared_guest!(@profile $($profile)?),
+            $crate::placement::Sharing::Module,
+            ::core::module_path!(),
+        );
+    };
+    (@profile) => { "" };
+    (@profile $profile:literal) => { $profile };
+}

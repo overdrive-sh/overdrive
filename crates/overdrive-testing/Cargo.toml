@@ -34,6 +34,11 @@ crate_class = "adapter-host"
 # `tests/integration/*.rs`. See `.claude/rules/testing.md` § "Workspace
 # convention".
 integration-tests = []
+# Real-guest scenarios of the placement attribute and the shared-guest owner,
+# which boot guests on the native Metal host (the convention `overdrive-cli`,
+# `overdrive-host`, `overdrive-fwd`, `overdrive-control-plane` and
+# `overdrive-init` already follow).
+kvm-tests = []
 
 [dependencies]
 # `cidr_lease` uses the Linux `flock(2)` and process identity syscalls for
@@ -73,6 +78,17 @@ path = "bin/guest_peer.rs"
 [[bin]]
 name = "overdrive-fwd-guest-suite"
 path = "bin/fwd_guest_suite.rs"
+
+[dev-dependencies]
+# Placement tests: the owner core's seeded schedules, the Quint conformance
+# driver and the compile-fail fixtures of the attribute's diagnostics.
+anyhow.workspace        = true
+proptest.workspace      = true
+quint-connect.workspace = true
+itf.workspace           = true
+serde.workspace         = true
+serial_test.workspace   = true
+trybuild.workspace      = true
 
 [lints]
 workspace = true

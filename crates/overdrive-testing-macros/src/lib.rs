@@ -35,15 +35,41 @@ use quote::quote;
 use syn::spanned::Spanned as _;
 use syn::{Attribute, Expr, ExprLit, ItemFn, Lit, Meta, ReturnType, parse_macro_input};
 
-/// Declares where a Metal integration test runs. The only supported form is
-/// `#[overdrive_test(guest = "<group>")]`.
+/// Declares where a Metal integration test runs.
+///
+/// The expansion is implemented for `#[overdrive_test(guest = "<group>")]`; the
+/// other forms of the approved grammar are accepted and leave the test
+/// untouched until they are built.
 #[proc_macro_attribute]
 pub fn overdrive_test(attribute: TokenStream, item: TokenStream) -> TokenStream {
+    // SCAFFOLD: true. The approved grammar's other forms (`host_pure`,
+    // `native_launcher`, `lane_operator`, `lane_owner`, the argument-free
+    // module form and `guest = .., profile = ..`) return the item unchanged
+    // until their expansion is built, so tests that name them compile and fail
+    // for the missing record or hand-off, never for a grammar error.
+    let attribute: TokenStream2 = attribute.into();
+    if guest_group(&attribute).is_err() {
+        return item;
+    }
     let function = parse_macro_input!(item as ItemFn);
-    match expand(&attribute.into(), function) {
+    match expand(&attribute, function) {
         Ok(tokens) => tokens.into(),
         Err(error) => error.to_compile_error().into(),
     }
+}
+
+/// `placement!(host_pure)`: the module-scoped host-pure declaration.
+// SCAFFOLD: true. Expands to nothing until the module record is built.
+#[proc_macro]
+pub fn placement(_declaration: TokenStream) -> TokenStream {
+    TokenStream::new()
+}
+
+/// `overdrive_test_default!(host_pure)`: the per-binary host-pure default.
+// SCAFFOLD: true. Expands to nothing until the binary default record is built.
+#[proc_macro]
+pub fn overdrive_test_default(_declaration: TokenStream) -> TokenStream {
+    TokenStream::new()
 }
 
 fn expand(attribute: &TokenStream2, mut function: ItemFn) -> syn::Result<TokenStream2> {

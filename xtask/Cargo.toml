@@ -73,3 +73,7 @@ serial_test.workspace = true
 quint-connect.workspace = true
 itf.workspace = true
 anyhow.workspace = true
+# Placement declarations on xtask's own fixture tests (design DDD-12: a
+# dev-dependency enters no build-time chain, so the bootstrap rule that bars
+# `overdrive-*` from `[dependencies]` is unaffected).
+overdrive-testing-macros.workspace = true
