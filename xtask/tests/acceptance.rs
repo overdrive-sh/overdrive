@@ -26,4 +26,6 @@ mod acceptance {
     mod dst_lint_catches_reconciler_violation;
     #[cfg(target_os = "linux")]
     mod metal_run_isolation;
+    #[cfg(target_os = "linux")]
+    mod placement_attribute;
 }
