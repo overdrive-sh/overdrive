@@ -1,0 +1,55 @@
+# q3_attr_fixed_spanned  cargo check --manifest-path spike-scratch/metal-test-placement-const-diag/increment-a/Cargo.toml --features q3-attr-fixed-spanned --test q3_attr_fixed_spanned  exit: 101
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.12s
+     Running `target/debug/xtask metal run -- cargo check --manifest-path spike-scratch/metal-test-placement-const-diag/increment-a/Cargo.toml --features q3-attr-fixed-spanned --test q3_attr_fixed_spanned`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+OVERDRIVE_METAL_RUN_ID=20907701d2fe38f29929861a
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire exclusive physical-maintenance barrier (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_RUN_REGISTERED run_id=20907701d2fe38f29929861a
+OVERDRIVE_METAL_LEASE_ACQUIRED token=20907701d2fe38f29929861a pid=568088
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/amman-v2 -> ubuntu@151.115.99.251:/home/ubuntu/overdrive-worktrees/357ee52c8cab8252dd245471dd79a7901e00d3cd6bebcd70732eb120c34f745d
+
+sent 2,011,735 bytes  received 25,832 bytes  370,466.73 bytes/sec
+total size is 1,913,034,543  speedup is 938.88
+
+########## [bootstrap] materialising standalone .git (common dir 2.4G)
+
+sent 425,279 bytes  received 19,250 bytes  177,811.60 bytes/sec
+total size is 884,683,948  speedup is 1,990.16
+## marcus-sa/metal-test-placement-declare...origin/marcus-sa/metal-test-placement-declare [ahead 36, behind 19]
+?? spike-scratch/metal-test-placement-const-diag/
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+OVERDRIVE_METAL_RUN_STARTED run_id=20907701d2fe38f29929861a
+   Compiling proc-macro2 v1.0.107
+   Compiling quote v1.0.47
+   Compiling unicode-ident v1.0.27
+   Compiling syn v2.0.119
+   Compiling probe-macros v0.0.0 (/home/ubuntu/overdrive-worktrees/357ee52c8cab8252dd245471dd79a7901e00d3cd6bebcd70732eb120c34f745d/spike-scratch/metal-test-placement-const-diag/increment-a/macros)
+    Checking const-diag-probe v0.0.0 (/home/ubuntu/overdrive-worktrees/357ee52c8cab8252dd245471dd79a7901e00d3cd6bebcd70732eb120c34f745d/spike-scratch/metal-test-placement-const-diag/increment-a)
+error[E0080]: evaluation panicked: unknown guest group; the known groups are listed in overdrive_testing::placement::groups
+  --> tests/q3_attr_fixed_spanned.rs:2:40
+   |
+ 2 | #[overdrive_test_fixed_spanned(guest = "no-such-group")]
+   |                                        ^^^^^^^^^^^^^^^ evaluation of `it_runs::_` failed inside this call
+   |
+note: inside `GuestPlacement::declare`
+  --> /home/ubuntu/.rustup/toolchains/1.95.0-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/panic.rs:62:9
+   |
+62 |         $crate::panicking::panic_fmt($crate::const_format_args!($($t)+));
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the failure occurred here
+   |
+  ::: src/lib.rs:67:13
+   |
+67 |             panic!("unknown guest group; the known groups are listed in overdrive_testing::placement::groups");
+   |             -------------------------------------------------------------------------------------------------- in this macro invocation
+
+For more information about this error, try `rustc --explain E0080`.
+error: could not compile `const-diag-probe` (test "q3_attr_fixed_spanned") due to 1 previous error
+OVERDRIVE_METAL_RUN_COMPLETE run_id=20907701d2fe38f29929861a exit_code=101 cause=command_returned

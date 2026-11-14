@@ -1,0 +1,78 @@
+# PROBE V-11 (throwaway, isolated): what does a const-evaluation panic show for an
+# unknown guest group? Not a member of the repo workspace. See
+# docs/feature/metal-test-placement-attribute/spike/findings-const-diagnostic.md
+[package]
+name = "const-diag-probe"
+version = "0.0.0"
+edition = "2024"
+publish = false
+autotests = false
+
+[workspace]
+members = ["macros"]
+
+[features]
+q1-fmt-panic = []
+q2-literal-const = []
+q2-requoted-macro-rules = []
+q3-attr-fixed = []
+q3-shared-fixed = []
+q3-attr-profile-fixed = []
+q3-attr-embed = []
+q3-shared-embed = []
+q3-attr-embed-known = []
+q3-shared-embed-known = []
+ok-control = []
+q3-attr-spanned = []
+q3-shared-spanned = []
+q3-attr-fixed-spanned = []
+q3-shared-fixed-spanned = []
+
+[dependencies]
+probe-macros = { path = "macros" }
+
+[[test]]
+name = "q1_fmt_panic"
+required-features = ["q1-fmt-panic"]
+[[test]]
+name = "q2_literal_const"
+required-features = ["q2-literal-const"]
+[[test]]
+name = "q2_requoted_macro_rules"
+required-features = ["q2-requoted-macro-rules"]
+[[test]]
+name = "q3_attr_fixed"
+required-features = ["q3-attr-fixed"]
+[[test]]
+name = "q3_shared_fixed"
+required-features = ["q3-shared-fixed"]
+[[test]]
+name = "q3_attr_profile_fixed"
+required-features = ["q3-attr-profile-fixed"]
+[[test]]
+name = "q3_attr_embed"
+required-features = ["q3-attr-embed"]
+[[test]]
+name = "q3_shared_embed"
+required-features = ["q3-shared-embed"]
+[[test]]
+name = "q3_attr_embed_known"
+required-features = ["q3-attr-embed-known"]
+[[test]]
+name = "q3_shared_embed_known"
+required-features = ["q3-shared-embed-known"]
+[[test]]
+name = "ok_control"
+required-features = ["ok-control"]
+[[test]]
+name = "q3_attr_spanned"
+required-features = ["q3-attr-spanned"]
+[[test]]
+name = "q3_shared_spanned"
+required-features = ["q3-shared-spanned"]
+[[test]]
+name = "q3_attr_fixed_spanned"
+required-features = ["q3-attr-fixed-spanned"]
+[[test]]
+name = "q3_shared_fixed_spanned"
+required-features = ["q3-shared-fixed-spanned"]
