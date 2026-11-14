@@ -2,28 +2,26 @@
 
 ## Status
 
-**Proposed — awaiting user approval (DDD-17, user decision N-2 in the feature
-delta).**
+**Accepted — approved by the user, 2026-11-14 (DDD-17, user decision N-2 in the
+feature delta).**
 
 ## Context
 
-A shared guest otherwise lives until the run ends: a `cgroup-default` guest
-reserves 8 vCPU and 4,096 MiB and `nested-cohort` 12,821 MiB on the shared Metal
-box, every module that ran keeps its VMM, and one `cargo xtask mutants` run
-starts a nextest process per mutant inside one Metal run, each electing its own
-owners. Run teardown fires only when the whole command ends. The number of
-declared modules is unmeasured and no budget or cap exists. An owner elected for
-one build of a test binary must also never serve a later build.
+A shared guest otherwise lives until the end of the Metal run, so every module
+that ran keeps its VMM for the rest of the command. A `cgroup-default` guest is
+configured with 8 vCPU and 4,096 MiB and `nested-cohort` with 12,821 MiB; these
+are the guest's configured limits, not its measured consumption. Run teardown
+fires only when the whole command ends. The number of declared modules is
+unmeasured and no budget or cap exists.
 
 ## Decision
 
 The owner exits when it has had nothing queued, nothing running and no attached
-client for a fixed idle period (a single constant in the shared-guest client
-module, proposed 30 s). `OwnerCore` decides: it answers the idle event with an
+client for a fixed idle period (`SHARED_GUEST_IDLE`, a single constant in the
+shared-guest client module, 30 s). `OwnerCore` decides: it answers the idle event with an
 exit effect only when no test is queued and no exec is in flight (a detached
 exec counts as in flight). The owner's guest dies with it (ADR-0290). The
-owner holds no handle on the nextest process. The sharing scope carries the test
-binary's file identity, so a rebuilt binary elects its own owner. A client
+owner holds no handle on the nextest process. A client
 whose connection ends before the owner acknowledged its request has run nothing
 and re-attaches once through the election.
 
@@ -36,8 +34,7 @@ and re-attaches once through the election.
 - **An anchor on the nextest process** (a pidfd on the wrapper's parent, opened
   before the PID namespace exists, because a pid resolves in the caller's
   namespace): ends owners when nextest exits but not during a long nextest, and
-  needs a wrapper-exported variable and an ordering constraint; the fallback if
-  this decision is rejected.
+  needs a wrapper-exported variable and an ordering constraint; rejected.
 - **A cap on live shared guests**: a new admission mechanism with its own queue;
   rejected.
 
@@ -51,7 +48,7 @@ Tier-3 scenario proves the arrival passes.
 
 ## Links
 
-- [Decision DDD-17](../../feature/metal-test-placement-attribute/feature-delta.md#ddd-17--a-shared-owner-exits-when-it-is-idle-proposed-user-decision-n-2)
+- [Decision DDD-17](../../feature/metal-test-placement-attribute/feature-delta.md#ddd-17--a-shared-owner-exits-when-it-is-idle-approved-user-decision-n-2-2026-11-14)
 - [Formal protocol model](../../../specs/quint/shared-guest-owner/README.md)
 - [ADR-0283](adr-0283-the-tests-of-a-module-share-one-guest-through-a-per-module-owner-process.md)
 - [ADR-0290](adr-0290-the-shared-guest-owner-is-init-of-its-own-pid-namespace-so-its-guest-dies-with-it.md)
