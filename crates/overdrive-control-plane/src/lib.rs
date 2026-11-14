@@ -2231,6 +2231,24 @@ impl DnsServeTaskOwner {
     }
 }
 
+/// An owner dropped without [`DnsServeTaskOwner::shutdown`] — the server
+/// handle lost to a panic, or a boot abandoned mid-way — still stops its
+/// responder. The responder's sockets are served on blocking threads that
+/// return only once its stop flag is set; without this the runtime that
+/// owns them waits on those threads forever when it is dropped. `stop` only
+/// sets the flag, so it is safe in `drop`; `abort` stops the serve task
+/// being polled again.
+impl Drop for DnsServeTaskOwner {
+    fn drop(&mut self) {
+        if let Some(responder) = self.responder.take() {
+            responder.stop();
+        }
+        if let Some(task) = self.task.take() {
+            task.abort();
+        }
+    }
+}
+
 // GH #295 — the source-local supervisor task-owner and DNS task-owner bodies
 // that survive the vsock attachment replacement (S-ND295-32 exit matrix,
 // S-ND295-34 DNS task owner). The bridge / TAP / drain-era cells of this
