@@ -20,6 +20,7 @@ mod integration {
 
     mod lane_placement;
     mod placement_off_metal;
+    mod shared_client_protocol;
     mod shared_guest_fixtures;
     mod shared_guest_scenarios;
     mod shared_owner_lifetime;

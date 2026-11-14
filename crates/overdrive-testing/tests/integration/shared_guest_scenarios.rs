@@ -5,6 +5,11 @@
 //!
 //! Each scenario names the fixture it drives (`shared_guest_fixtures`), the
 //! fault it injects and the oracle it reads. Real guests, example-only.
+//!
+//! Placement on activation: every scenario here takes
+//! `#[overdrive_test(native_launcher)]` (each reads the host half's timing
+//! lines from outside any guest); the form is given when the scenario
+//! activates and no placement-table entry is ever added.
 
 use std::collections::BTreeSet;
 
@@ -83,7 +88,7 @@ fn filtering_to_one_test_of_a_shared_module_runs_only_that_test() {
 /// declared module, and an explicit form inside one, keep one guest each.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER: guest-placement-on-the-test (placement unresolved: the scenario drives guest boots from outside any guest, see design gap D-10)"]
+#[ignore = "pending DELIVER: lane-and-launcher-placement-on-the-test"]
 fn guest_placed_tests_outside_a_shared_module_boot_one_guest_each() {
     for (module, name) in [
         (ISOLATED, "first_isolated_guest_test"),
@@ -101,7 +106,7 @@ fn guest_placed_tests_outside_a_shared_module_boot_one_guest_each() {
 /// US-PLACE-01 AC f: the boot time of a per-test guest is retained in the run
 /// output. CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER: guest-placement-on-the-test (placement unresolved: the scenario drives guest boots from outside any guest, see design gap D-10)"]
+#[ignore = "pending DELIVER: lane-and-launcher-placement-on-the-test"]
 fn the_boot_time_of_a_guest_per_test_is_recorded_in_the_run_output() {
     let run = run_test(&test_path(ISOLATED, "first_isolated_guest_test"), &[], &[]);
     assert!(run.success, "{}", run.output);

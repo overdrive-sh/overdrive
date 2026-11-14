@@ -4,7 +4,8 @@
 use overdrive_testing::placement::{LanePlacement, RunInGuestError, run_lane};
 
 /// CONTRACT_SHAPE: pure-function (a placement in, a typed failure out; no guest
-/// is left behind).
+/// is left behind). Placement on activation: `#[overdrive_test(native_launcher)]`
+/// (it calls `run_lane` on the host).
 #[test]
 #[ignore = "pending DELIVER: lane-and-launcher-placement-on-the-test"]
 fn a_lane_test_naming_a_missing_fixture_fails_naming_the_fixture_and_the_test() {

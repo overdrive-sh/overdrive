@@ -23,7 +23,7 @@
     reason = "scaffold bodies are `todo!()` until their delivery slice builds them"
 )]
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub mod groups;
 pub mod owner_core;
@@ -60,6 +60,33 @@ pub fn run_in_guest(
 ) -> Result<(), RunInGuestError> {
     let _ = (placement, exe, test_name);
     todo!("run_in_guest: typed placement, isolated or shared")
+}
+
+/// The rendezvous and owner binary of one shared scope.
+///
+/// On a `Sharing::Module` placement `run_in_guest` computes it (scope key, the run's runtime directory,
+/// the kit's owner-binary contract path) and passes it to `attach_shared`; that
+/// is its only production producer.
+pub struct SharedEndpoint {
+    /// The owner's unix socket.
+    pub socket: PathBuf,
+    /// The election lock file.
+    pub lock: PathBuf,
+    /// The owner binary the electing client starts.
+    pub owner_binary: PathBuf,
+}
+
+/// The client half of the shared-guest protocol: attaches to the owner at
+/// `endpoint` (electing one when none serves) and runs `test_name` in the shared
+/// guest.
+// SCAFFOLD: true
+pub fn attach_shared(
+    endpoint: &SharedEndpoint,
+    placement: &GuestPlacement,
+    test_name: &str,
+) -> Result<(), RunInGuestError> {
+    let _ = (endpoint, placement, test_name);
+    todo!("attach_shared: owner binary check, election, attach, acknowledgement, verdict mapping")
 }
 
 /// Runs the lane placement of `test_name` in a lane guest.

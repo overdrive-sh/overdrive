@@ -24,6 +24,7 @@ impl AttachId {
 }
 
 /// An event the shell delivers to the core.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Event {
     /// A client connected.
     Attached(AttachId),
@@ -42,6 +43,7 @@ pub enum Event {
 }
 
 /// An effect the shell executes.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Effect {
     /// Start booting a guest.
     StartBoot,
@@ -56,6 +58,7 @@ pub enum Effect {
 }
 
 /// The verdict a client's request ends with.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Verdict {
     /// The test ran and exited with this status.
     Exit(i32),
@@ -68,6 +71,7 @@ pub enum Verdict {
 }
 
 /// The guest as the core observes it.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum GuestView {
     /// No guest.
     NoGuest,
@@ -78,6 +82,7 @@ pub enum GuestView {
 }
 
 /// The pinned observation the conformance driver projects.
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OwnerObservation {
     /// The guest's state.
     pub guest: GuestView,

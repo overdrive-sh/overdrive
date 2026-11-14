@@ -1,6 +1,6 @@
 //! The closed registry of guest groups and profiles, and the Metal-run
-//! predicate, through their pinned surface: `GuestPlacement::declare` and the
-//! pure core of `in_metal_run`.
+//! predicate, through their pinned surface: `GuestPlacement::declare` and
+//! `in_metal_run()`.
 
 #![allow(
     clippy::expect_used,
@@ -11,7 +11,9 @@
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-use super::{GuestPlacement, Sharing, metal_run_context_present};
+use serial_test::serial;
+
+use super::{GuestPlacement, Sharing, in_metal_run};
 
 /// The 21 environments over 8 groups the registry is closed over: each group's
 /// profiles, the base profile spelled as the empty string.
@@ -128,38 +130,85 @@ fn an_unknown_profile_or_one_of_another_group_is_rejected() {
 
 // ----- the Metal-run predicate ----------------------------------------------
 
+const METAL_VARIABLES: [&str; 3] =
+    ["OVERDRIVE_METAL_RUN_ID", "OVERDRIVE_METAL_EXECUTION_CLASS", "OVERDRIVE_METAL_SOURCE_ROOT"];
+
+/// Sets the three Metal variables for the length of a test and restores the
+/// prior values on drop, panic included. Every test that holds one is
+/// `#[serial(env)]`.
+struct MetalEnvGuard {
+    saved: Vec<(&'static str, Option<std::ffi::OsString>)>,
+}
+
+impl MetalEnvGuard {
+    fn scoped(values: [Option<&str>; 3]) -> Self {
+        let mut saved = Vec::with_capacity(METAL_VARIABLES.len());
+        for (name, value) in METAL_VARIABLES.into_iter().zip(values) {
+            saved.push((name, std::env::var_os(name)));
+            // SAFETY: `#[serial(env)]` gives this test exclusive access to the
+            // process environment for its whole duration.
+            unsafe {
+                match value {
+                    Some(value) => std::env::set_var(name, value),
+                    None => std::env::remove_var(name),
+                }
+            }
+        }
+        Self { saved }
+    }
+}
+
+impl Drop for MetalEnvGuard {
+    fn drop(&mut self) {
+        for (name, prior) in self.saved.drain(..) {
+            // SAFETY: as in `scoped`; the test that holds the guard is still
+            // `#[serial(env)]` while it drops.
+            unsafe {
+                match prior {
+                    Some(value) => std::env::set_var(name, value),
+                    None => std::env::remove_var(name),
+                }
+            }
+        }
+    }
+}
+
 /// A Metal run context is present when any of the three variables is set and
 /// non-empty, whatever its value: an `exclusive` class counts, so a guest-placed
 /// body is never run in place on the shared host.
-/// CONTRACT_SHAPE: pure-function.
+/// CONTRACT_SHAPE: pure-function (the process environment in, a verdict out).
 #[test]
+#[serial(env)]
 #[ignore = "pending DELIVER: guest-placement-on-the-test"]
 fn a_metal_run_is_present_when_any_one_of_the_three_variables_is_set_and_non_empty() {
-    let cases: [(Option<&str>, Option<&str>, Option<&str>); 6] = [
-        (Some("0123456789abcdef01234567"), None, None),
-        (None, Some("ordinary"), None),
-        (None, Some("exclusive"), None),
-        (None, None, Some("/home/ubuntu/overdrive-worktrees/x")),
-        (Some("x"), Some("ordinary"), Some("/y")),
-        (Some(""), Some("exclusive"), Some("")),
+    let cases: [[Option<&str>; 3]; 6] = [
+        [Some("0123456789abcdef01234567"), None, None],
+        [None, Some("ordinary"), None],
+        [None, Some("exclusive"), None],
+        [None, None, Some("/home/ubuntu/overdrive-worktrees/x")],
+        [Some("x"), Some("ordinary"), Some("/y")],
+        [Some(""), Some("exclusive"), Some("")],
     ];
-    for (run_id, class, root) in cases {
-        assert!(metal_run_context_present(run_id, class, root), "{run_id:?} {class:?} {root:?}");
+    for values in cases {
+        let _environment = MetalEnvGuard::scoped(values);
+        assert!(in_metal_run(), "{values:?}");
     }
 }
 
 /// No variable, or only empty ones, is no Metal run.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
+#[serial(env)]
 #[ignore = "pending DELIVER: guest-placement-on-the-test"]
 fn no_metal_run_is_present_when_no_variable_is_set_or_every_set_one_is_empty() {
-    let cases: [(Option<&str>, Option<&str>, Option<&str>); 4] = [
-        (None, None, None),
-        (Some(""), None, None),
-        (Some(""), Some(""), Some("")),
-        (None, Some(""), None),
+    let cases: [[Option<&str>; 3]; 4] = [
+        [None, None, None],
+        [Some(""), None, None],
+        [Some(""), Some(""), Some("")],
+        [None, Some(""), None],
     ];
-    for (run_id, class, root) in cases {
-        assert!(!metal_run_context_present(run_id, class, root), "{run_id:?} {class:?} {root:?}");
+    for values in cases {
+        let _environment = MetalEnvGuard::scoped(values);
+        assert!(!in_metal_run(), "{values:?}");
     }
 }

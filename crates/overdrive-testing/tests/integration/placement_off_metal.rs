@@ -17,6 +17,8 @@ fn marker_path(name: &str) -> std::path::PathBuf {
 
 /// Off a Metal run the machine is private: the body runs in the current
 /// process, as it does today. CONTRACT_SHAPE: bounded-change (one marker file).
+/// Placement on activation: `#[overdrive_test(host_pure)]` (it observes nothing
+/// outside its own process).
 #[test]
 #[ignore = "pending DELIVER: guest-placement-on-the-test"]
 fn a_guest_placed_test_runs_its_body_in_place_when_no_metal_run_is_present() {
@@ -32,8 +34,10 @@ fn a_guest_placed_test_runs_its_body_in_place_when_no_metal_run_is_present() {
 
 /// On a Metal run the body runs in a guest, never on the host (true of the
 /// per-test guest today, kept true). CONTRACT_SHAPE: bounded-change.
+/// Placement on activation: `#[overdrive_test(native_launcher)]` (it observes
+/// the host from outside any guest).
 #[test]
-#[ignore = "pending DELIVER: guest-placement-on-the-test (placement unresolved: the scenario drives guest boots from outside any guest, see design gap D-10)"]
+#[ignore = "pending DELIVER: lane-and-launcher-placement-on-the-test"]
 fn a_guest_placed_test_never_runs_its_body_on_the_host_on_a_metal_run() {
     let marker = marker_path("on-metal");
     let run = run_test(
@@ -47,12 +51,13 @@ fn a_guest_placed_test_never_runs_its_body_on_the_host_on_a_metal_run() {
 
 /// A Metal context of any class counts as a Metal run: with the maintenance
 /// class and an invalid run id the guest cannot start, and the test fails
-/// naming its group and the stage, never running the body on the host (the
-/// run-runtime rule refuses a set but malformed id; an absent id is not refused,
-/// see the design-gap note in `distill/test-scenarios.md`).
+/// naming its group and the stage, never running the body on the host. The
+/// run-runtime rule refuses a set but malformed run id; an absent run id with
+/// another variable set is still handed to the guest, never run in place.
 /// CONTRACT_SHAPE: bounded-change.
+/// Placement on activation: `#[overdrive_test(native_launcher)]`.
 #[test]
-#[ignore = "pending DELIVER: guest-placement-on-the-test (placement unresolved: the scenario drives guest boots from outside any guest, see design gap D-10)"]
+#[ignore = "pending DELIVER: lane-and-launcher-placement-on-the-test"]
 fn a_guest_placed_test_with_an_invalid_run_id_fails_naming_its_group_and_never_runs_on_the_host() {
     let marker = marker_path("exclusive");
     let run = run_test(

@@ -8,8 +8,8 @@
 //! from the events fed and the effects returned (never from the core's own
 //! bookkeeping); the examples pin the effect lists of the named scenarios.
 //!
-//! The core has no pinned `Debug` or `PartialEq`, so the tests compare through
-//! their own mirror types.
+//! The core's types derive `Clone, Debug, PartialEq, Eq` (the pinned shape), so
+//! the tests compare the core's own values.
 
 #![allow(
     clippy::expect_used,
@@ -24,91 +24,24 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use proptest::prelude::*;
 
-use super::{AttachId, Effect, Event, GuestView, OwnerCore, Verdict};
-
-// ----- mirror types: the core's enums carry no derives ----------------------
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum V {
-    Exit(i32),
-    BootFailed,
-    GuestLost,
-    ExecBound,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Fx {
-    StartBoot,
-    StartExec(u32),
-    Reply(u32, V),
-    DiscardGuest,
-    Exit,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum G {
-    NoGuest,
-    Booting,
-    Ready,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct Snap {
-    guest: G,
-    generation: u32,
-    in_flight: Option<u32>,
-    queue: Vec<u32>,
-    stopped: bool,
-}
-
-/// The model's client numbers are 1..=3 in the conformance driver; the tests
-/// use a wider range, so they keep their own number for each `AttachId`.
-fn number(id: AttachId) -> u32 {
-    (0..=64_u32).find(|n| AttachId::new(*n) == id).expect("test ids are below 64")
-}
+use super::{AttachId, Effect, Event, GuestView, OwnerCore, OwnerObservation, Verdict};
 
 fn id(n: u32) -> AttachId {
     AttachId::new(n)
 }
 
-fn snap(core: &OwnerCore) -> Snap {
-    let observed = core.observe();
-    Snap {
-        guest: match observed.guest {
-            GuestView::NoGuest => G::NoGuest,
-            GuestView::Booting => G::Booting,
-            GuestView::Ready => G::Ready,
-        },
-        generation: observed.generation,
-        in_flight: observed.in_flight.map(number),
-        queue: observed.queue.into_iter().map(number).collect(),
-        stopped: observed.stopped,
-    }
+fn feed(core: &mut OwnerCore, event: Event) -> Vec<Effect> {
+    core.handle(event)
 }
 
-fn mirror(effects: Vec<Effect>) -> Vec<Fx> {
-    effects
-        .into_iter()
-        .map(|effect| match effect {
-            Effect::StartBoot => Fx::StartBoot,
-            Effect::StartExec(c) => Fx::StartExec(number(c)),
-            Effect::Reply(c, verdict) => Fx::Reply(
-                number(c),
-                match verdict {
-                    Verdict::Exit(status) => V::Exit(status),
-                    Verdict::BootFailed => V::BootFailed,
-                    Verdict::GuestLost => V::GuestLost,
-                    Verdict::ExecBound => V::ExecBound,
-                },
-            ),
-            Effect::DiscardGuest => Fx::DiscardGuest,
-            Effect::Exit => Fx::Exit,
-        })
-        .collect()
+/// True when `effects` answer `client` with any verdict.
+fn answers(effects: &[Effect], client: u32) -> bool {
+    effects.iter().any(|fx| matches!(fx, Effect::Reply(c, _) if *c == id(client)))
 }
 
-fn feed(core: &mut OwnerCore, event: Event) -> Vec<Fx> {
-    mirror(core.handle(event))
+/// True when `effects` start `client`'s exec.
+fn starts(effects: &[Effect], client: u32) -> bool {
+    effects.iter().any(|fx| matches!(fx, Effect::StartExec(c) if *c == id(client)))
 }
 
 /// An owner core with `clients` attached, the boot finished and the first exec
@@ -122,8 +55,19 @@ fn serving(clients: &[u32]) -> OwnerCore {
     core
 }
 
-fn blank(generation: u32, guest: G, in_flight: Option<u32>, queue: &[u32]) -> Snap {
-    Snap { guest, generation, in_flight, queue: queue.to_vec(), stopped: false }
+fn blank(
+    generation: u32,
+    guest: GuestView,
+    in_flight: Option<u32>,
+    queue: &[u32],
+) -> OwnerObservation {
+    OwnerObservation {
+        guest,
+        generation,
+        in_flight: in_flight.map(id),
+        queue: queue.iter().copied().map(id).collect(),
+        stopped: false,
+    }
 }
 
 // ----- a fresh owner ---------------------------------------------------------
@@ -133,7 +77,7 @@ fn blank(generation: u32, guest: G, in_flight: Option<u32>, queue: &[u32]) -> Sn
 #[ignore = "pending DELIVER: module-tests-share-one-guest"]
 fn a_new_owner_has_no_guest_no_clients_and_has_not_stopped() {
     let core = OwnerCore::new();
-    assert_eq!(snap(&core), blank(0, G::NoGuest, None, &[]));
+    assert_eq!(core.observe(), blank(0, GuestView::NoGuest, None, &[]));
 }
 
 // ----- examples: the named scenarios ----------------------------------------
@@ -145,26 +89,26 @@ fn a_new_owner_has_no_guest_no_clients_and_has_not_stopped() {
 #[ignore = "pending DELIVER: module-tests-share-one-guest"]
 fn three_clients_share_one_guest_and_are_served_in_arrival_order() {
     let mut core = OwnerCore::new();
-    assert_eq!(feed(&mut core, Event::Attached(id(1))), vec![Fx::StartBoot]);
+    assert_eq!(feed(&mut core, Event::Attached(id(1))), vec![Effect::StartBoot]);
     assert_eq!(feed(&mut core, Event::Attached(id(2))), vec![]);
     assert_eq!(feed(&mut core, Event::Attached(id(3))), vec![]);
-    assert_eq!(snap(&core), blank(1, G::Booting, None, &[1, 2, 3]));
+    assert_eq!(core.observe(), blank(1, GuestView::Booting, None, &[1, 2, 3]));
 
-    assert_eq!(feed(&mut core, Event::BootFinished(true)), vec![Fx::StartExec(1)]);
-    assert_eq!(snap(&core), blank(1, G::Ready, Some(1), &[2, 3]));
+    assert_eq!(feed(&mut core, Event::BootFinished(true)), vec![Effect::StartExec(id(1))]);
+    assert_eq!(core.observe(), blank(1, GuestView::Ready, Some(1), &[2, 3]));
 
     let after_first = feed(&mut core, Event::ExecFinished(id(1), 0));
-    assert!(after_first.contains(&Fx::Reply(1, V::Exit(0))), "{after_first:?}");
-    assert!(after_first.contains(&Fx::StartExec(2)), "{after_first:?}");
-    assert!(!after_first.contains(&Fx::DiscardGuest), "a passing test leaves the guest");
+    assert!(after_first.contains(&Effect::Reply(id(1), Verdict::Exit(0))), "{after_first:?}");
+    assert!(after_first.contains(&Effect::StartExec(id(2))), "{after_first:?}");
+    assert!(!after_first.contains(&Effect::DiscardGuest), "a passing test leaves the guest");
     let after_second = feed(&mut core, Event::ExecFinished(id(2), 0));
     assert!(
-        after_second.contains(&Fx::Reply(2, V::Exit(0)))
-            && after_second.contains(&Fx::StartExec(3))
+        after_second.contains(&Effect::Reply(id(2), Verdict::Exit(0)))
+            && after_second.contains(&Effect::StartExec(id(3)))
     );
     let after_third = feed(&mut core, Event::ExecFinished(id(3), 0));
-    assert_eq!(after_third, vec![Fx::Reply(3, V::Exit(0))]);
-    assert_eq!(snap(&core), blank(1, G::Ready, None, &[]));
+    assert_eq!(after_third, vec![Effect::Reply(id(3), Verdict::Exit(0))]);
+    assert_eq!(core.observe(), blank(1, GuestView::Ready, None, &[]));
 }
 
 /// A failed test is answered with its status, its guest is discarded and the
@@ -175,14 +119,14 @@ fn three_clients_share_one_guest_and_are_served_in_arrival_order() {
 fn a_failed_test_discards_its_guest_and_the_next_test_gets_a_replacement() {
     let mut core = serving(&[1, 2, 3]);
     let effects = feed(&mut core, Event::ExecFinished(id(1), 1));
-    assert!(effects.contains(&Fx::Reply(1, V::Exit(1))), "{effects:?}");
-    assert!(effects.contains(&Fx::DiscardGuest), "{effects:?}");
+    assert!(effects.contains(&Effect::Reply(id(1), Verdict::Exit(1))), "{effects:?}");
+    assert!(effects.contains(&Effect::DiscardGuest), "{effects:?}");
     assert!(
-        effects.contains(&Fx::StartBoot),
+        effects.contains(&Effect::StartBoot),
         "the replacement boots in the same event: {effects:?}"
     );
-    assert_eq!(snap(&core), blank(2, G::Booting, None, &[2, 3]));
-    assert_eq!(feed(&mut core, Event::BootFinished(true)), vec![Fx::StartExec(2)]);
+    assert_eq!(core.observe(), blank(2, GuestView::Booting, None, &[2, 3]));
+    assert_eq!(feed(&mut core, Event::BootFinished(true)), vec![Effect::StartExec(id(2))]);
 }
 
 /// A lost guest answers the running test and is replaced for the waiting one.
@@ -192,9 +136,9 @@ fn a_failed_test_discards_its_guest_and_the_next_test_gets_a_replacement() {
 fn a_guest_lost_during_a_test_answers_it_and_is_replaced_for_the_next() {
     let mut core = serving(&[1, 2]);
     let effects = feed(&mut core, Event::GuestLost);
-    assert!(effects.contains(&Fx::Reply(1, V::GuestLost)), "{effects:?}");
-    assert!(effects.contains(&Fx::StartBoot), "{effects:?}");
-    assert_eq!(snap(&core), blank(2, G::Booting, None, &[2]));
+    assert!(effects.contains(&Effect::Reply(id(1), Verdict::GuestLost)), "{effects:?}");
+    assert!(effects.contains(&Effect::StartBoot), "{effects:?}");
+    assert_eq!(core.observe(), blank(2, GuestView::Booting, None, &[2]));
 }
 
 /// A guest lost while idle is observed as no guest and replaced at the next
@@ -205,12 +149,15 @@ fn a_guest_lost_during_a_test_answers_it_and_is_replaced_for_the_next() {
 fn a_guest_lost_while_idle_is_replaced_at_the_next_attach() {
     let mut core = serving(&[1]);
     let _ = feed(&mut core, Event::ExecFinished(id(1), 0));
-    assert_eq!(snap(&core), blank(1, G::Ready, None, &[]));
+    assert_eq!(core.observe(), blank(1, GuestView::Ready, None, &[]));
     let lost = feed(&mut core, Event::GuestLost);
-    assert!(!lost.iter().any(|fx| matches!(fx, Fx::Reply(..))), "nobody is owed a reply: {lost:?}");
-    assert_eq!(snap(&core), blank(1, G::NoGuest, None, &[]));
-    assert_eq!(feed(&mut core, Event::Attached(id(2))), vec![Fx::StartBoot]);
-    assert_eq!(snap(&core), blank(2, G::Booting, None, &[2]));
+    assert!(
+        !lost.iter().any(|fx| matches!(fx, Effect::Reply(..))),
+        "nobody is owed a reply: {lost:?}"
+    );
+    assert_eq!(core.observe(), blank(1, GuestView::NoGuest, None, &[]));
+    assert_eq!(feed(&mut core, Event::Attached(id(2))), vec![Effect::StartBoot]);
+    assert_eq!(core.observe(), blank(2, GuestView::Booting, None, &[2]));
 }
 
 /// A client that goes away while its test runs does not free the slot; the
@@ -222,17 +169,17 @@ fn a_guest_lost_while_idle_is_replaced_at_the_next_attach() {
 fn a_client_that_goes_away_while_its_test_runs_taints_the_guest_and_is_never_answered() {
     let mut core = serving(&[1]);
     assert_eq!(feed(&mut core, Event::ClientGone(id(1))), vec![], "the exec is never cancelled");
-    assert_eq!(snap(&core), blank(1, G::Ready, Some(1), &[]));
+    assert_eq!(core.observe(), blank(1, GuestView::Ready, Some(1), &[]));
     assert_eq!(feed(&mut core, Event::Attached(id(2))), vec![], "the next test waits for the slot");
-    assert_eq!(snap(&core), blank(1, G::Ready, Some(1), &[2]));
+    assert_eq!(core.observe(), blank(1, GuestView::Ready, Some(1), &[2]));
     let ended = feed(&mut core, Event::ExecFinished(id(1), 0));
+    assert!(!answers(&ended, 1), "a detached result reaches nobody: {ended:?}");
     assert!(
-        !ended.iter().any(|fx| matches!(fx, Fx::Reply(1, _))),
-        "a detached result reaches nobody: {ended:?}"
+        ended.contains(&Effect::DiscardGuest),
+        "a passing detached exec still taints: {ended:?}"
     );
-    assert!(ended.contains(&Fx::DiscardGuest), "a passing detached exec still taints: {ended:?}");
-    assert!(ended.contains(&Fx::StartBoot), "{ended:?}");
-    assert_eq!(snap(&core), blank(2, G::Booting, None, &[2]));
+    assert!(ended.contains(&Effect::StartBoot), "{ended:?}");
+    assert_eq!(core.observe(), blank(2, GuestView::Booting, None, &[2]));
 }
 
 /// A queued client that goes away is removed and is never served or answered.
@@ -242,11 +189,12 @@ fn a_client_that_goes_away_while_its_test_runs_taints_the_guest_and_is_never_ans
 fn a_queued_client_that_goes_away_is_removed_and_never_served() {
     let mut core = serving(&[1, 2, 3]);
     assert_eq!(feed(&mut core, Event::ClientGone(id(2))), vec![]);
-    assert_eq!(snap(&core), blank(1, G::Ready, Some(1), &[3]));
+    assert_eq!(core.observe(), blank(1, GuestView::Ready, Some(1), &[3]));
     let effects = feed(&mut core, Event::ExecFinished(id(1), 0));
     assert!(
-        effects.contains(&Fx::StartExec(3))
-            && !effects.iter().any(|fx| matches!(fx, Fx::StartExec(2) | Fx::Reply(2, _)))
+        effects.contains(&Effect::StartExec(id(3)))
+            && !starts(&effects, 2)
+            && !answers(&effects, 2)
     );
 }
 
@@ -260,10 +208,10 @@ fn a_boot_failure_answers_only_the_head_and_starts_a_new_boot_for_the_next() {
     let _ = core.handle(Event::Attached(id(1)));
     let _ = core.handle(Event::Attached(id(2)));
     let effects = feed(&mut core, Event::BootFinished(false));
-    assert!(effects.contains(&Fx::Reply(1, V::BootFailed)), "{effects:?}");
-    assert!(effects.contains(&Fx::StartBoot), "{effects:?}");
-    assert!(!effects.iter().any(|fx| matches!(fx, Fx::Reply(2, _))), "{effects:?}");
-    assert_eq!(snap(&core), blank(2, G::Booting, None, &[2]));
+    assert!(effects.contains(&Effect::Reply(id(1), Verdict::BootFailed)), "{effects:?}");
+    assert!(effects.contains(&Effect::StartBoot), "{effects:?}");
+    assert!(!answers(&effects, 2), "{effects:?}");
+    assert_eq!(core.observe(), blank(2, GuestView::Booting, None, &[2]));
 }
 
 /// With nobody waiting a failed boot leaves no guest and notifies nobody; the
@@ -276,9 +224,9 @@ fn a_boot_that_fails_with_nobody_waiting_leaves_no_guest_and_notifies_nobody() {
     let _ = core.handle(Event::Attached(id(1)));
     assert_eq!(feed(&mut core, Event::ClientGone(id(1))), vec![]);
     assert_eq!(feed(&mut core, Event::BootFinished(false)), vec![]);
-    assert_eq!(snap(&core), blank(1, G::NoGuest, None, &[]));
-    assert_eq!(feed(&mut core, Event::Attached(id(2))), vec![Fx::StartBoot]);
-    assert_eq!(snap(&core), blank(2, G::Booting, None, &[2]));
+    assert_eq!(core.observe(), blank(1, GuestView::NoGuest, None, &[]));
+    assert_eq!(feed(&mut core, Event::Attached(id(2))), vec![Effect::StartBoot]);
+    assert_eq!(core.observe(), blank(2, GuestView::Booting, None, &[2]));
 }
 
 /// A hung exec ends at its bound: the client is answered `ExecBound`, the
@@ -289,10 +237,10 @@ fn a_boot_that_fails_with_nobody_waiting_leaves_no_guest_and_notifies_nobody() {
 fn an_exec_that_reaches_its_bound_is_answered_exec_bound_and_its_guest_discarded() {
     let mut core = serving(&[1, 2]);
     let effects = feed(&mut core, Event::ExecBoundElapsed(id(1)));
-    assert!(effects.contains(&Fx::Reply(1, V::ExecBound)), "{effects:?}");
-    assert!(effects.contains(&Fx::DiscardGuest), "{effects:?}");
-    assert!(effects.contains(&Fx::StartBoot), "{effects:?}");
-    assert_eq!(snap(&core), blank(2, G::Booting, None, &[2]));
+    assert!(effects.contains(&Effect::Reply(id(1), Verdict::ExecBound)), "{effects:?}");
+    assert!(effects.contains(&Effect::DiscardGuest), "{effects:?}");
+    assert!(effects.contains(&Effect::StartBoot), "{effects:?}");
+    assert_eq!(core.observe(), blank(2, GuestView::Booting, None, &[2]));
 }
 
 /// The late result of the exec that reached its bound reaches nobody.
@@ -302,9 +250,9 @@ fn an_exec_that_reaches_its_bound_is_answered_exec_bound_and_its_guest_discarded
 fn the_late_result_of_an_exec_that_reached_its_bound_changes_nothing() {
     let mut core = serving(&[1, 2]);
     let _ = core.handle(Event::ExecBoundElapsed(id(1)));
-    let before = snap(&core);
+    let before = core.observe();
     assert_eq!(feed(&mut core, Event::ExecFinished(id(1), 0)), vec![]);
-    assert_eq!(snap(&core), before);
+    assert_eq!(core.observe(), before);
 }
 
 /// An exec whose client was killed returns after the next client attached: its
@@ -317,7 +265,7 @@ fn a_late_result_from_a_detached_exec_reaches_nobody_not_even_the_next_client() 
     let _ = core.handle(Event::ClientGone(id(1)));
     let _ = core.handle(Event::Attached(id(2)));
     let ended = feed(&mut core, Event::ExecFinished(id(1), 0));
-    assert!(!ended.iter().any(|fx| matches!(fx, Fx::Reply(..))), "{ended:?}");
+    assert!(!ended.iter().any(|fx| matches!(fx, Effect::Reply(..))), "{ended:?}");
 }
 
 /// The owner exits only when nothing is queued, nothing runs and nobody is
@@ -334,9 +282,12 @@ fn an_owner_exits_when_idle_and_never_while_work_is_queued_or_running() {
     assert_eq!(feed(&mut core, Event::IdleElapsed), vec![], "a test is running and one waits");
     let _ = core.handle(Event::ExecFinished(id(1), 0));
     let _ = core.handle(Event::ExecFinished(id(2), 0));
-    assert_eq!(snap(&core), blank(1, G::Ready, None, &[]));
-    assert_eq!(feed(&mut core, Event::IdleElapsed), vec![Fx::Exit]);
-    assert_eq!(snap(&core), Snap { stopped: true, ..blank(1, G::NoGuest, None, &[]) });
+    assert_eq!(core.observe(), blank(1, GuestView::Ready, None, &[]));
+    assert_eq!(feed(&mut core, Event::IdleElapsed), vec![Effect::Exit]);
+    assert_eq!(
+        core.observe(),
+        OwnerObservation { stopped: true, ..blank(1, GuestView::NoGuest, None, &[]) }
+    );
 }
 
 /// A detached exec is still in flight for the idle exit.
@@ -347,7 +298,7 @@ fn a_detached_exec_still_counts_as_running_for_the_idle_exit() {
     let mut core = serving(&[1]);
     let _ = core.handle(Event::ClientGone(id(1)));
     assert_eq!(feed(&mut core, Event::IdleElapsed), vec![]);
-    assert!(!snap(&core).stopped);
+    assert!(!core.observe().stopped);
 }
 
 /// After the owner exits every event is ignored.
@@ -356,8 +307,8 @@ fn a_detached_exec_still_counts_as_running_for_the_idle_exit() {
 #[ignore = "pending DELIVER: module-tests-share-one-guest"]
 fn after_the_owner_exits_every_event_is_ignored() {
     let mut core = OwnerCore::new();
-    assert_eq!(feed(&mut core, Event::IdleElapsed), vec![Fx::Exit]);
-    let stopped = snap(&core);
+    assert_eq!(feed(&mut core, Event::IdleElapsed), vec![Effect::Exit]);
+    let stopped = core.observe();
     for event in [
         Event::Attached(id(1)),
         Event::ClientGone(id(1)),
@@ -368,7 +319,7 @@ fn after_the_owner_exits_every_event_is_ignored() {
         Event::IdleElapsed,
     ] {
         assert_eq!(feed(&mut core, event), vec![]);
-        assert_eq!(snap(&core), stopped);
+        assert_eq!(core.observe(), stopped);
     }
 }
 
@@ -399,26 +350,28 @@ fn op() -> impl Strategy<Value = Op> {
     ]
 }
 
-const UNSEEN: u32 = 999;
+fn unseen() -> AttachId {
+    id(999)
+}
 
 /// The oracle: what the events fed and the effects returned imply, kept
 /// without reading the core's own state.
 #[derive(Default)]
 struct Oracle {
     next_id: u32,
-    seen: Vec<u32>,
-    gone: BTreeSet<u32>,
-    replied: BTreeMap<u32, u32>,
-    arrival: VecDeque<u32>,
-    running: Option<u32>,
+    seen: Vec<AttachId>,
+    gone: BTreeSet<AttachId>,
+    replied: BTreeMap<AttachId, u32>,
+    arrival: VecDeque<AttachId>,
+    running: Option<AttachId>,
     bad_generations: BTreeSet<u32>,
     stopped: bool,
 }
 
 impl Oracle {
-    fn pick(&self, selector: usize) -> u32 {
+    fn pick(&self, selector: usize) -> AttachId {
         let slots = self.seen.len() + 1;
-        self.seen.get(selector % slots).copied().unwrap_or(UNSEEN)
+        self.seen.get(selector % slots).copied().unwrap_or_else(unseen)
     }
 }
 
@@ -428,11 +381,11 @@ fn event_of(oracle: &mut Oracle, op: &Op) -> Event {
             oracle.next_id += 1;
             Event::Attached(id(oracle.next_id))
         }
-        Op::Gone(c) => Event::ClientGone(id(oracle.pick(*c))),
+        Op::Gone(c) => Event::ClientGone(oracle.pick(*c)),
         Op::Boot(ok) => Event::BootFinished(*ok),
-        Op::Done(c, pass) => Event::ExecFinished(id(oracle.pick(*c)), i32::from(!*pass)),
+        Op::Done(c, pass) => Event::ExecFinished(oracle.pick(*c), i32::from(!*pass)),
         Op::Lost => Event::GuestLost,
-        Op::Bound(c) => Event::ExecBoundElapsed(id(oracle.pick(*c))),
+        Op::Bound(c) => Event::ExecBoundElapsed(oracle.pick(*c)),
         Op::Idle => Event::IdleElapsed,
     }
 }
@@ -440,10 +393,10 @@ fn event_of(oracle: &mut Oracle, op: &Op) -> Event {
 /// Applies the event, checks every invariant of the model against the oracle
 /// and updates the oracle. Panics with the invariant's name.
 fn step(core: &mut OwnerCore, oracle: &mut Oracle, event: Event) {
-    let before = snap(core);
+    let before = core.observe();
     if oracle.stopped {
-        assert!(mirror(core.handle(event)).is_empty(), "an event after Exit returned effects");
-        assert_eq!(snap(core), before, "an event after Exit changed the observation");
+        assert!(core.handle(event).is_empty(), "an event after Exit returned effects");
+        assert_eq!(core.observe(), before, "an event after Exit changed the observation");
         return;
     }
     // What this event means to the oracle, decided from the oracle alone.
@@ -451,36 +404,34 @@ fn step(core: &mut OwnerCore, oracle: &mut Oracle, event: Event) {
     let mut ends_running = false;
     match &event {
         Event::Attached(c) => {
-            let c = number(*c);
-            oracle.seen.push(c);
-            oracle.arrival.push_back(c);
+            oracle.seen.push(*c);
+            oracle.arrival.push_back(*c);
         }
         Event::ClientGone(c) => {
-            let c = number(*c);
-            let queued = oracle.arrival.contains(&c);
-            if queued || oracle.running == Some(c) {
+            let queued = oracle.arrival.contains(c);
+            if queued || oracle.running == Some(*c) {
                 if queued {
-                    oracle.arrival.retain(|x| *x != c);
+                    oracle.arrival.retain(|x| x != c);
                 } else {
                     taints = true;
                 }
-                oracle.gone.insert(c);
+                oracle.gone.insert(*c);
             }
         }
         Event::ExecFinished(c, status) => {
-            if oracle.running == Some(number(*c)) {
+            if oracle.running == Some(*c) {
                 taints = *status != 0;
                 ends_running = true;
             }
         }
         Event::ExecBoundElapsed(c) => {
-            if oracle.running == Some(number(*c)) {
+            if oracle.running == Some(*c) {
                 taints = true;
                 ends_running = true;
             }
         }
         Event::GuestLost => {
-            if before.guest == G::Ready {
+            if before.guest == GuestView::Ready {
                 taints = true;
                 ends_running = oracle.running.is_some();
             }
@@ -497,11 +448,11 @@ fn step(core: &mut OwnerCore, oracle: &mut Oracle, event: Event) {
     let idle_now = before.queue.is_empty() && before.in_flight.is_none();
     let is_idle_event = matches!(event, Event::IdleElapsed);
 
-    let effects = mirror(core.handle(event));
-    let after = snap(core);
+    let effects = core.handle(event);
+    let after = core.observe();
 
     // generation: monotone, one more per StartBoot
-    let boots = u32::try_from(effects.iter().filter(|fx| matches!(fx, Fx::StartBoot)).count())
+    let boots = u32::try_from(effects.iter().filter(|fx| matches!(fx, Effect::StartBoot)).count())
         .expect("a handful of effects");
     assert_eq!(
         after.generation,
@@ -510,30 +461,30 @@ fn step(core: &mut OwnerCore, oracle: &mut Oracle, event: Event) {
     );
 
     for fx in &effects {
-        match *fx {
-            Fx::StartExec(c) => {
+        match fx {
+            Effect::StartExec(c) => {
                 // I_SERIAL: never a second exec while one is in flight
                 assert!(
                     oracle.running.is_none(),
-                    "I_SERIAL: StartExec({c}) while {was_running:?} runs"
+                    "I_SERIAL: StartExec({c:?}) while {was_running:?} runs"
                 );
                 // arrival order, and never a client that went away
                 let head = oracle.arrival.pop_front();
-                assert_eq!(head, Some(c), "serving order is arrival order");
-                oracle.running = Some(c);
+                assert_eq!(head, Some(*c), "serving order is arrival order");
+                oracle.running = Some(*c);
             }
-            Fx::Reply(c, _) => {
+            Effect::Reply(c, _) => {
                 // I_DELIVER_ONLY_ATTACHED: not to a client that went away, once each
-                assert!(!oracle.gone.contains(&c), "a reply reached client {c} who went away");
-                assert!(oracle.seen.contains(&c), "a reply reached a client never attached");
-                *oracle.replied.entry(c).or_insert(0) += 1;
-                assert_eq!(oracle.replied[&c], 1, "client {c} was answered twice");
+                assert!(!oracle.gone.contains(c), "a reply reached client {c:?} who went away");
+                assert!(oracle.seen.contains(c), "a reply reached a client never attached");
+                *oracle.replied.entry(*c).or_insert(0) += 1;
+                assert_eq!(oracle.replied[c], 1, "client {c:?} was answered twice");
             }
-            Fx::Exit => {
+            Effect::Exit => {
                 assert!(is_idle_event && idle_now, "Exit while work remained: before={before:?}");
                 oracle.stopped = true;
             }
-            Fx::StartBoot | Fx::DiscardGuest => {}
+            Effect::StartBoot | Effect::DiscardGuest => {}
         }
     }
 
@@ -551,14 +502,14 @@ fn step(core: &mut OwnerCore, oracle: &mut Oracle, event: Event) {
         after.queue.len(),
         "the queue holds a client once"
     );
-    let expected_queue: Vec<u32> = oracle.arrival.iter().copied().collect();
     // queued = arrived, not removed, not yet started
+    let expected_queue: Vec<AttachId> = oracle.arrival.iter().copied().collect();
     assert_eq!(
         after.queue, expected_queue,
         "the queue is the arrival order minus removed and started clients"
     );
     // I_NO_REUSE: a ready, idle guest is never a bad generation
-    if after.guest == G::Ready && after.in_flight.is_none() {
+    if after.guest == GuestView::Ready && after.in_flight.is_none() {
         assert!(
             !oracle.bad_generations.contains(&after.generation),
             "I_NO_REUSE: generation {} is bad",
@@ -566,7 +517,11 @@ fn step(core: &mut OwnerCore, oracle: &mut Oracle, event: Event) {
         );
     }
     if after.stopped {
-        assert!(after.guest == G::NoGuest && after.in_flight.is_none() && after.queue.is_empty());
+        assert!(
+            after.guest == GuestView::NoGuest
+                && after.in_flight.is_none()
+                && after.queue.is_empty()
+        );
     }
 }
 
@@ -604,11 +559,11 @@ proptest! {
     ) {
         let (mut core, mut oracle) = run_schedule(&ops);
         for _ in 0..200 {
-            let now = snap(&core);
-            let event = match (now.stopped, now.guest, now.in_flight) {
+            let now = core.observe();
+            let event = match (now.stopped, &now.guest, now.in_flight) {
                 (true, ..) => break,
-                (_, G::Booting, _) => Event::BootFinished(true),
-                (_, _, Some(c)) => Event::ExecFinished(id(c), 0),
+                (_, GuestView::Booting, _) => Event::BootFinished(true),
+                (_, _, Some(c)) => Event::ExecFinished(c, 0),
                 _ => break,
             };
             step(&mut core, &mut oracle, event);
@@ -620,7 +575,7 @@ proptest! {
             prop_assert_eq!(
                 oracle.replied.get(&client).copied(),
                 Some(1),
-                "client {} was not answered exactly once",
+                "client {:?} was not answered exactly once",
                 client
             );
         }
@@ -634,7 +589,7 @@ proptest! {
     #[ignore = "pending DELIVER: module-tests-share-one-guest"]
     fn events_that_are_not_enabled_change_nothing(ops in proptest::collection::vec(op(), 0..60)) {
         let (mut core, oracle) = run_schedule(&ops);
-        let now = snap(&core);
+        let now = core.observe();
         let mut stale: Vec<Event> = Vec::new();
         if now.stopped {
             stale.extend([
@@ -647,28 +602,29 @@ proptest! {
                 Event::IdleElapsed,
             ]);
         } else {
-            let known: BTreeSet<u32> = now.queue.iter().copied().chain(now.in_flight).collect();
+            let known: BTreeSet<AttachId> =
+                now.queue.iter().copied().chain(now.in_flight).collect();
             // a client that is neither queued nor running: never seen, or already answered
-            let outside: Vec<u32> = std::iter::once(UNSEEN)
+            let outside: Vec<AttachId> = std::iter::once(unseen())
                 .chain(oracle.replied.keys().copied())
                 .filter(|c| !known.contains(c))
                 .collect();
             for c in &outside {
-                stale.push(Event::ClientGone(id(*c)));
-                stale.push(Event::ExecFinished(id(*c), 0));
-                stale.push(Event::ExecBoundElapsed(id(*c)));
+                stale.push(Event::ClientGone(*c));
+                stale.push(Event::ExecFinished(*c, 0));
+                stale.push(Event::ExecBoundElapsed(*c));
             }
             for c in &known {
-                stale.push(Event::Attached(id(*c)));
+                stale.push(Event::Attached(*c));
                 if now.in_flight != Some(*c) {
-                    stale.push(Event::ExecFinished(id(*c), 0));
-                    stale.push(Event::ExecBoundElapsed(id(*c)));
+                    stale.push(Event::ExecFinished(*c, 0));
+                    stale.push(Event::ExecBoundElapsed(*c));
                 }
             }
-            if now.guest != G::Ready {
+            if now.guest != GuestView::Ready {
                 stale.push(Event::GuestLost);
             }
-            if now.guest != G::Booting {
+            if now.guest != GuestView::Booting {
                 stale.push(Event::BootFinished(true));
                 stale.push(Event::BootFinished(false));
             }
@@ -677,9 +633,9 @@ proptest! {
             }
         }
         for event in stale {
-            let effects = mirror(core.handle(event));
+            let effects = core.handle(event);
             prop_assert!(effects.is_empty(), "a stale event returned {:?} in {:?}", effects, now);
-            prop_assert_eq!(snap(&core), now.clone());
+            prop_assert_eq!(core.observe(), now.clone());
         }
     }
 }

@@ -4,6 +4,10 @@
 //! (`shared_guest_fixtures::scenario_clients`) as child processes, each in its
 //! own scope, and reads the owner's processes and the guest kit's timing lines.
 //!
+//! Placement on activation: every scenario here takes
+//! `#[overdrive_test(native_launcher)]` (each observes the owner and VMM
+//! processes from outside any guest); no placement-table entry is ever added.
+//!
 //! Replayed-by-exemption invariants: `I_OWNER_UNIQUE` is proved by
 //! `eight_simultaneous_first_arrivals_elect_exactly_one_owner`; `I_NO_ORPHAN` by
 //! `killing_the_owner_during_a_guest_exec_leaves_no_vmm`.
