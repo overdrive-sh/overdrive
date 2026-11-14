@@ -494,6 +494,15 @@ Every deferral surfaced during a wave dispatch — operator-tunable knobs, futur
 
 Each such limitation needs a GitHub issue that tracks lifting it. Surface each limitation to the user as a proposed issue, naming the limitation, where it is pinned (ADR, feature-delta row, constant), and what lifting it would take. On approval, create the issue, or cite an existing one verified with `gh issue view <N> --comments` whose scope actually covers it, then record the issue number beside the limitation in the design artifact. Every limitation stated in the operator docs or blog post cites its issue. A limitation recorded only as a design envelope ("smallest quantified envelope", "first slice", "fixed finite limits") is not tracked. A reviewer who finds an untracked limitation blocks the artifact, exactly as for an untracked deferral.
 
+**A property of the chosen mechanism is not a scope limitation.** A limitation withholds something a user of the feature would reasonably expect it to do. These are not limitations, and get no issue:
+
+- an error caught at run time rather than build time because the compiler cannot see the fact (for example, one crate's build cannot see another crate's tests);
+- the scope a mechanism is defined over (a guest shared within one module is the sharing contract, not a cap on sharing);
+- a closed set that grows by adding an entry in the code (a registry of named groups);
+- a choice made for correctness (serialising work that would race if run concurrently).
+
+Ask: did the design leave out something the feature was asked to deliver, or that its user would expect to configure or extend? If not, there is nothing to track.
+
 **Search for the planned mechanism before proposing an issue.** Many limitations are stand-ins for something the platform already plans to build. Before proposing a new issue, search the open issues (`gh issue list --state all --search …`, then `gh issue view <N> --comments`), the ADRs, and the roadmap for the mechanism that would remove the limitation. Ask what the platform intends to replace it with, not how to widen the stand-in.
 
 - **If a planned mechanism exists, cite its issue.** Name the limitation as a stand-in until that issue lands. Do not create a duplicate.
