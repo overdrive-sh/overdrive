@@ -91,6 +91,7 @@ const SERVICE_PORT: u16 = 8080;
 const GRACE: Duration = Duration::from_secs(5);
 const WAIT: Duration = Duration::from_secs(20);
 const CASES: u64 = 48;
+const SETTLE_YIELDS: usize = 64;
 
 // ---------------------------------------------------------------------------
 // One production composition over the Sim relay
@@ -286,6 +287,7 @@ impl Rig {
                 std::time::Instant::now() < deadline,
                 "timed out waiting for the exchange to end with every leg closed: {legs:?}"
             );
+            settle().await;
             self.clock.tick(Duration::from_millis(100));
             tokio::time::sleep(Duration::from_millis(3)).await;
         }
@@ -309,12 +311,33 @@ impl Rig {
     }
 }
 
+/// Let every task that is ready to run, and every task those wake, run before
+/// the injected clock moves. The runtime has one thread, so a task runs only
+/// while this future is parked at `yield_now`. Without this, a harness thread
+/// that was descheduled for longer than its real-time tick period advanced the
+/// injected clock past a deadline while the gateway's owner tasks were still
+/// queued behind it, and a shutdown join timed out on logical time that the
+/// system under test never had a chance to use.
+async fn settle() {
+    for _ in 0..SETTLE_YIELDS {
+        tokio::task::yield_now().await;
+    }
+}
+
+/// Run `future`, advancing the injected clock by `step` each time the system
+/// under test has settled and a real-time period has passed. `biased` polls
+/// `future` first: when both it and the tick are ready, the progress comes
+/// first, never a runtime-random choice.
 async fn drive_clock<T>(clock: &SimClock, step: Duration, future: impl Future<Output = T>) -> T {
     tokio::pin!(future);
     loop {
         tokio::select! {
+            biased;
             result = &mut future => return result,
-            () = tokio::time::sleep(Duration::from_millis(3)) => clock.tick(step),
+            () = async {
+                tokio::time::sleep(Duration::from_millis(3)).await;
+                settle().await;
+            } => clock.tick(step),
         }
     }
 }
