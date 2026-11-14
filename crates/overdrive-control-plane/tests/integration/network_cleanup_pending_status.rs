@@ -491,11 +491,15 @@ async fn a_stuck_stop_is_reported_cleanup_pending_and_is_not_a_running_replica()
     // WHEN the stop cannot remove the replica's protection members.
     node.intercept.arm(true);
     node.stop("cleanup-svc").await;
-    let stuck = node
-        .tick_until("cleanup-svc", "the stop attempts member removal", |_| {
-            node.intercept.removal_calls() > 0
-        })
-        .await;
+    node.tick_until("cleanup-svc", "the stop attempts member removal", |_| {
+        node.intercept.removal_calls() > 0
+    })
+    .await;
+    // The listing `tick_until` returns was read before the removal call it
+    // waited for was observed: the loop wakes on the stop's submission and
+    // may attempt the removal between that read and the predicate. Read the
+    // projection again now that the attempt is known to have happened.
+    let stuck = node.allocs("cleanup-svc").await;
 
     // THEN the allocation is reported pending, keeps its Running row, and is
     // not a running replica.
@@ -597,11 +601,12 @@ async fn crashed_and_reclaiming_allocations_are_reported_cleanup_pending() {
     // Retiring.
     node.intercept.arm(true);
     node.stop("cleanup-job").await;
-    let reclaiming = node
-        .tick_until("cleanup-job", "the reclaim attempts member removal", |_| {
-            node.intercept.removal_calls() > 0
-        })
-        .await;
+    node.tick_until("cleanup-job", "the reclaim attempts member removal", |_| {
+        node.intercept.removal_calls() > 0
+    })
+    .await;
+    // Re-read: the listing `tick_until` returns predates the observed attempt.
+    let reclaiming = node.allocs("cleanup-job").await;
     let reclaiming_row = row(&reclaiming, &alloc).expect("the reclaiming row");
     assert_eq!(
         reclaiming_row.state,
