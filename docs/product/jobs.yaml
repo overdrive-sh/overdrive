@@ -712,8 +712,9 @@ jobs:
       When I add, rename or move an integration test that must run in a
       particular Metal isolation (a guest group, the host, a lane fixture),
     motivation: >
-      I want that placement declared once on the test itself and checked
-      before the Metal box,
+      I want that placement declared once in the test source (on the test,
+      or, for host-pure, on its module or as its binary's default) and
+      checked before the Metal box,
     outcome: >
       so I can trust the test runs where I meant, without hand-editing a
       placement table and a guest dispatcher or discovering on a Metal run
@@ -722,13 +723,13 @@ jobs:
     served_by_phase: metal-test-placement-attribute
     status: active
     dimensions:
-      functional: One declaration site per test, enforced before Metal
+      functional: One declaration site in the test source per test (test, module or binary default), enforced before Metal
       emotional: Confidence that a new test cannot silently run on the wrong surface
       social: Reviewable placement in the test diff itself
     four_forces:
       push: Placement is recorded in three places that drift; a miss first fails on Metal as test_unclassified
-      pull: Declare placement on the test; the default lane flags a miss
-      anxiety: A plain test could silently run on the host; per-test guests could cost more run time than batched groups
+      pull: Declare placement in the test source; `cargo xtask placement-lint` flags a miss before Metal
+      anxiety: A plain test could silently run on the host; per-test guests could cost more run time than batched groups (a module can share one guest)
       habit: Existing metal run commands and the five placement kinds must keep meaning the same
 
 changelog:

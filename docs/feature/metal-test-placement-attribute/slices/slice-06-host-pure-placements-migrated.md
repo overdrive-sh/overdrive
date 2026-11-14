@@ -1,6 +1,6 @@
 # Slice 06 — Host-pure placements migrated
 
-Stories: US-PLACE-06a, 06b, 06c. Job: J-PLAT-007. Depends on: slice 02.
+Stories: US-PLACE-06a, 06b, 06c. Job: J-PLAT-007. Depends on: slices 02, 07.
 
 ## Outcome
 
@@ -18,8 +18,8 @@ A batch estimated over 3 days is split by binary id with the same acceptance.
 
 ## In each batch
 
-- Move each declaration onto the test and delete its JSON entry.
-- Compare per-test kind before and after by parsing the JSON.
+- Declare in the test source per DDD-4 and delete the JSON entries: a host-only binary takes one `overdrive_test_default!(host_pure)`; a mixed binary takes `placement!(host_pure)` in each host-pure module (a child module declares its own; none inherits); a test may instead carry its own attribute.
+- Compare per-test kind before and after by parsing the JSON (the parity check of DDD-15).
 - A test found to mutate node-global kernel state (nft, routes, links, BPF, cgroups, netns, vsock) while declared host-pure is reported as a finding, not carried forward.
 - Run the migrated binaries on Metal and compare pass sets.
 
@@ -36,4 +36,6 @@ Guest placements (slice 05); changing any test's kind.
 - [ ] Batch entries removed; kind identical per test.
 - [ ] Pass sets equal pre-migration.
 - [ ] Mis-placements reported, not carried over.
+- [ ] A binary with a default and a non-host-pure record is refused as `placement_conflict`; mixed binaries are placed per module.
+- [ ] A child module declares its own `placement!(host_pure)`; it does not inherit its parent's.
 - [ ] After 06a-c: `host-pure` entries are 3,855 to 0.

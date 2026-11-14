@@ -8,7 +8,7 @@ Guest-lane operator and owner fixtures and native-launcher runner self-tests dec
 
 ## In the slice
 
-- Mapping of the 16 non-guest-group, non-host-pure table entries onto the declaration (how is DESIGN's open question; the issue lists it as undecided).
+- The 16 non-guest-group, non-host-pure table entries map onto `lane_operator = "<fixture>"`, `lane_owner = "<fixture>"` and `native_launcher` (DDD-1, DDD-13).
 - Lane fixtures keep running their first-level in-guest fixture in a fresh guest.
 - Native-launcher tests keep the node view: private network (vsock local mode), mount and cgroup namespaces, own bpffs and per-run cgroup.
 
@@ -25,8 +25,9 @@ Re-deciding which tests are native-launcher (only runner self-tests qualify per 
 - [ ] Operator and owner lane tests pass with the fixture named on the test and no table entry.
 - [ ] A lane test naming a missing fixture fails naming the fixture.
 - [ ] A native-launcher self-test passes and still observes its own namespaces and cgroup.
-- [ ] If a kind cannot be expressed, DESIGN records why and the story returns to DISCUSS rather than leaving a table remnant.
+- [ ] Off a Metal run a lane-placed test runs its body in place, as today (U-2, DDD-11).
+- [ ] Every one of the 16 entries is expressible; none is left as a table remnant.
 
 ## Estimate
 
-2 to 3 days (depends on DESIGN's mapping).
+2 to 3 days.

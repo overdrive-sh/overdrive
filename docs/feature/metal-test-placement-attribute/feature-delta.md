@@ -36,7 +36,7 @@ Production entry point: this is test tooling, so there is no `overdrive serve` /
 | D5 | Sequencing: DISCUSS, then the walking skeleton (nw-spike walking-skeleton mode, no probe), then DESIGN answers the open questions using skeleton evidence, then DISTILL/DELIVER for the remaining slices. | User, 2026-11-13 |
 | D6 | Attribute variants, the lint mechanism and every public shape beyond D4 are DESIGN's. This wave does not name them. | Scope rule |
 | D7 | Slice and identifier names describe behaviour, never roadmap steps or issue numbers (`.claude/rules/domain-naming.md`). | Project rule |
-| D8 | Module-level batching is IN scope: the tests of a module can declare that they share one guest of a group (US-PLACE-09). It replaces the explicit batched `overdrive-fwd-guest-suite` command, so the dispatcher can be retired entirely in US-PLACE-08. The attribute's shape (on the `mod`, or a `group = …` argument on each test) and how per-test results survive a shared guest are DESIGN's. | User, 2026-11-13 |
+| D8 | Module-level batching is IN scope: the tests of a module can declare that they share one guest of a group (US-PLACE-09). It replaces the explicit batched `overdrive-fwd-guest-suite` command, so the dispatcher can be retired entirely in US-PLACE-08. Resolved: the module declares `shared_guest!` and its tests carry a bare `#[overdrive_test]` (DDD-1, DDD-7); per-test results survive through one owner process per declaration (DDD-8, ADR-0283). | User, 2026-11-13 |
 
 D4 does not authorise public surface beyond the named attribute, `inside_guest` and `run_in_guest`; the "inside the guest" marker and the boot-time record's format are DESIGN's or the spike's.
 
@@ -57,7 +57,7 @@ Decision enabled: Marcus decides the placement by writing one attribute and trus
 
 Domain examples:
 1. Marcus migrates `cluster_status_with_no_server_returns_transport_error` (`cgroup-default` today), deletes its JSON entry, and the Metal run passes with the body executing inside a fresh guest.
-2. Marcus makes the in-guest body assert a false condition; the host test is FAIL with the guest's failure output, and the run exits nonzero.
+2. Marcus makes one in-guest body of a shared-guest module assert a false condition; that host test is FAIL with the guest's failure status, the other tests of the module report their own results, and the run exits nonzero.
 3. Marcus runs the migrated test outside any Metal run (a laptop shell, Lima, CI); its body runs in the current process, as it does today (user ruling 2026-11-14, DDD-11).
 4. Marcus typos the group (`"cgroup-defualt"`); the failure names the unknown group instead of silently picking one.
 
@@ -68,16 +68,17 @@ Scenario: A self-placed guest test passes on Metal
   Then the test body executes inside a fresh cgroup-default guest
   And nextest reports one ordinary PASS for it
 
-Scenario: A failing in-guest body fails the host test
-  Given the same test's body asserts a false condition
-  When Marcus runs it on Metal
-  Then the host-side test is FAIL and the guest's failure output is visible
+Scenario: A failing in-guest body fails the host test (shared-guest path)
+  Given a test in a shared-guest module (US-PLACE-09) asserts a false condition
+  When Marcus runs the module on Metal
+  Then that host-side test is FAIL with the guest's failure status visible
   And the metal run exits nonzero with the command's own status
 
-Scenario: A guest that cannot boot fails the test, never passes it
-  Given the declared group's guest cannot start or exceeds its bound
-  When Marcus runs the test on Metal
+Scenario: A guest that cannot start fails the test, never passes it
+  Given a Metal run whose run id is malformed
+  When Marcus runs the migrated test
   Then the host test is FAIL and the failure names the group and the stage that failed
+  And the body never runs on the host
 
 Scenario: An unknown group is rejected by name
   Given a test declares guest "cgroup-defualt"
@@ -100,43 +101,61 @@ Scenario: Tests still in the table are unaffected
   Then it runs through the dispatcher exactly as before and passes
 ```
 
-AC: (a) migrated test PASSes on Metal with its JSON entry deleted; (b) in-guest failure surfaces as host FAIL with the run exiting nonzero; (c) boot failure or timeout is a FAIL naming group and stage; (d) an unknown group is rejected by name; (e) outside a Metal run the test runs its body in place, and on a Metal run it never runs on the host; (f) per-test boot time retained; (g) unmigrated guest tests still pass through the dispatcher after the extraction. Technical notes: the host-side body needs the local-mode vsock namespace it has today; telling a self-declared test from an unplaced one while the table coexists is O1.
+AC: (a) migrated test PASSes on Metal with its JSON entry deleted; (b) on the shared-guest path an in-guest failure surfaces as a host FAIL with the run exiting nonzero (the per-test path has no scenario of its own; DISTILL D-7); (c) a guest that cannot start is a FAIL naming group and stage, covered by the malformed-run-id scenario; (d) an unknown group is rejected by name; (e) outside a Metal run the test runs its body in place, and on a Metal run it never runs on the host; (f) per-test boot time retained; (g) unmigrated guest tests still pass through the dispatcher after the extraction (until the table is retired). Technical notes: the host-side body runs in the local-mode vsock namespace it has today; a self-declared test is told apart from an unplaced one by its ELF-section record (O1, resolved by DDD-2).
 
 ### US-PLACE-02 — Declare a host-pure placement on the test
 
 Slice: [host-pure placement on the test](slices/slice-02-host-pure-placement-on-the-test.md). Must-have.
 
-Marcus adds a pure integration test with no kernel effects. Today it still needs a table entry (3,855 of 4,642 entries are this case).
+Marcus adds a pure integration test with no kernel effects. Today it still needs a table entry (3,855 of 4,642 entries are this case). Host-pure is declared on the test (`#[overdrive_test(host_pure)]`), on its module (`placement!(host_pure)`) or as its binary's default (`overdrive_test_default!(host_pure)`); the test's own declaration wins over its module's, which wins over the binary default (DDD-4).
 
 ### Elevator Pitch
 Before: a host-pure test needs a table entry or it is `test_unclassified` on Metal.
-After: run `cargo xtask metal run -- cargo nextest run -p overdrive-store-local --features integration-tests -E 'test(malformed_intent_bytes_cause_refuse_to_start)'` → sees `PASS` for a test declared host-pure on itself, with no table entry and no guest boot.
-Decision enabled: Marcus decides "no isolation needed" in the test, in one line, and gets the behaviour the table gave.
+After: run `cargo xtask metal run -- cargo nextest run -p overdrive-store-local --features integration-tests -E 'test(malformed_intent_bytes_cause_refuse_to_start)'` → sees `PASS` for a test placed host-pure by a declaration in the test source (on the test, its module or its binary), with no table entry and no guest boot.
+Decision enabled: Marcus decides "no isolation needed" in the test source, in one line, and gets the behaviour the table gave.
 
-Domain examples: (1) `integration::envelope_intent_refuse::malformed_intent_bytes_cause_refuse_to_start` in `overdrive-store-local::integration` is declared host-pure, its entry deleted, and it passes without a guest; (2) the sibling `unknown_future_variant_tag_causes_refuse_to_start` stays in the table and still passes (coexistence); (3) Marcus declares host-pure on a test whose Metal context is invalid (stale source marker); the existing `invalid_run_context` diagnostic still fires, so the declaration cannot bypass the run-context checks.
+Domain examples: (1) `integration::envelope_intent_refuse::malformed_intent_bytes_cause_refuse_to_start` in `overdrive-store-local::integration` is declared host-pure, its entry deleted, and it passes without a guest; (2) the module holding it declares `placement!(host_pure)`, so its sibling `unknown_future_variant_tag_causes_refuse_to_start` is host-pure with no per-test attribute, while a test in a child module needs the child's own declaration; (3) a host-only binary (one of the 66, picked at slice start) carries `overdrive_test_default!(host_pure)` and every test without its own or a module declaration is host-pure; (4) a test in a `placement!(host_pure)` module declares `guest = "cgroup-default"` and keeps the guest (test over module); (5) Marcus adds `overdrive_test_default!(host_pure)` to `overdrive-cli::integration`, which holds the guest-placed `cluster_status_with_no_server_returns_transport_error`, and the binary is refused as `placement_conflict`; (6) Marcus declares host-pure on a test whose Metal context is invalid (stale source marker); the existing `invalid_run_context` diagnostic still fires, so the declaration cannot bypass the run-context checks.
 
 ```gherkin
 Scenario: A host-pure declared test runs without a guest
   Given the malformed_intent_bytes test declares host-pure placement and has no table entry
   When Marcus runs it through metal run
   Then it passes without a guest being booted
+  And the declaration appears in the test source, not in a separate file
+
+Scenario: A module declaration places the tests of exactly that module
+  Given a module declares placement!(host_pure) and holds tests with no attribute of their own
+  When Marcus runs them through metal run
+  Then they pass as host-pure tests
+  And a test in a child module is not placed by the parent's declaration
+
+Scenario: A binary default places the remaining tests of a host-only binary
+  Given a host-only binary declares overdrive_test_default!(host_pure)
+  When Marcus runs a test that has neither its own nor a module declaration
+  Then it passes as a host-pure test
+
+Scenario: The most specific declaration wins
+  Given a module declares placement!(host_pure) and one of its tests declares a guest group
+  When Marcus runs the module through metal run
+  Then that test runs in its guest and the others run host-pure
+
+Scenario: A binary mixing a default with a non-host-pure test is refused
+  Given a binary declares overdrive_test_default!(host_pure) and holds a guest-placed test
+  When the wrapper or the placement check reads the binary
+  Then it is refused as placement_conflict, naming the binary
 
 Scenario: Host-pure tests keep the original runner chain
-  Given the test declares host-pure placement
+  Given the test is placed host-pure
   When it runs on Metal
-  Then it runs under the same chain as a table host-pure test today, with no namespace
+  Then it runs under the same runner chain and isolation host-pure tests have today, with no namespace
 
 Scenario: Run-context checks still apply to declared tests
   Given the Metal run context is invalid
   When a host-pure declared test is launched
   Then the existing invalid_run_context diagnostic fires before the body
-
-Scenario: A host-pure declaration is visible in the test source
-  Given Marcus reviews the diff of a new integration test
-  Then the host-pure declaration appears on the test, not in a separate file
 ```
 
-AC: declared host-pure test passes on Metal with no table entry and no guest; chain and isolation equal today's host-pure; existing run-context diagnostics remain; the declaration is on the test. Notes: depends on US-PLACE-01's resolution of O1.
+AC: a test placed host-pure by its own declaration, its module's `placement!(host_pure)` or its binary's `overdrive_test_default!(host_pure)` passes on Metal with no table entry and no guest; precedence is test, then module, then binary default; a child module does not inherit a parent's declaration; a binary with a default and a non-host-pure record is refused as `placement_conflict`; chain and isolation equal today's host-pure; existing run-context diagnostics remain; every declaration is in the test source. Notes: the record mechanism is resolved by DDD-2 (O1).
 
 ### US-PLACE-03 — Declare lane-fixture and native-launcher placements on the test
 
@@ -172,47 +191,46 @@ Scenario: A missing fixture is reported by name
   Then the failure names the missing fixture and the test
 ```
 
-AC: all 16 non-guest-group, non-host-pure placements are expressible and pass with entries deleted; node-view isolation unchanged; a missing fixture is named. Notes: the mapping is DESIGN's open question; "not expressible by the attribute" is a valid DESIGN finding that returns to this wave.
+AC: all 16 non-guest-group, non-host-pure placements are expressible (`lane_operator = "<fixture>"`, `lane_owner = "<fixture>"`, `native_launcher`) and pass with entries deleted; node-view isolation unchanged; a missing fixture is named; off a Metal run a lane-placed test runs its body in place, as today (U-2, DDD-11). Notes: the mapping is resolved by DDD-1 and DDD-13.
 
-### US-PLACE-04 — Declare guest artifacts per group, once
+### US-PLACE-04 — Choose a guest environment from a closed registry
 
 Slice: [guest artifacts declared per group](slices/slice-04-guest-artifacts-declared-per-group.md). Must-have.
 
-Marcus needs a new tool inside `cgroup-default` guests. Today that is a hand-grown copy list inside the dispatcher (it already stages `rustc`, a C linker toolchain, `bpftool` and busybox).
+Marcus needs a test to run in a `cgroup-default` guest staged for a particular need (a dummy link, the Quint runtime, a nested-KVM substrate). Today those variants are hand-kept tables keyed by test name, so a rename silently drops the variant.
 
 ### Elevator Pitch
-Before: per-group guest staging lives as copy lists inside `fwd_guest_suite.rs`, reachable only by editing the dispatcher.
-After: run `cargo xtask metal run -- cargo nextest run -p overdrive-cli --features integration-tests,kvm-tests -E 'test(cluster_status_with_no_server_returns_transport_error)'` after adding a tool in the one declared `cgroup-default` location → sees `PASS` and a guest that contains the tool; removing it makes the run FAIL naming the group and artifact.
-Decision enabled: Marcus adds or removes a guest dependency in one named place and knows which groups it affects.
+Before: per-test guest staging is chosen by hand-kept tables keyed by test name inside `fwd_guest_suite.rs`; a rename drops the variant and a typo is found on a Metal run.
+After: run `cargo xtask metal run -- cargo nextest run -p overdrive-gateway -E 'test(/^application::quint_gateway_application::/)'` for the five tests declaring `profile = "quint"` → sees `PASS` in guests staged with the Quint runtime and the `specs/quint` tree; a test declaring `profile = "quint-x"` fails the build naming the profile.
+Decision enabled: Marcus picks a guest environment by name on the test, from a closed list of 21 environments over 8 groups, and learns of a typo at build time.
 
-Domain examples: (1) add `tcpdump` to `cgroup-default`; only that group's guests contain it; (2) remove a required tool and the dependent test fails naming `cgroup-default` and the tool; (3) `mtls-relay` and `cgroup-default` keep distinct artifact sets.
+Domain examples: (1) the five `application::quint_gateway_application::` tests select the `cgroup-default` profile `quint` and keep it when renamed; (2) `profile = "relay"` is valid for group `mtls-relay` and is rejected for `cgroup-default` with ``unknown guest profile `relay` for group `cgroup-default` ``; (3) a test naming no profile gets the group's base profile (`native` for `mtls-relay`).
 
 ```gherkin
-Scenario: A group's artifacts are declared in one place
-  Given cgroup-default's artifact set is declared once
-  When Marcus adds a tool to it
-  Then every cgroup-default test sees the tool and other groups do not
+Scenario: The registry holds exactly the named environments
+  Given the closed registry of 21 environments over 8 groups
+  Then each named group and profile is accepted and nothing else is
 
-Scenario: A missing artifact names the group
-  Given a required artifact is absent from the group's declaration
-  When a migrated test needing it runs
-  Then the failure names the group and the artifact
+Scenario: An omitted profile selects the group's base profile
+  Given a test declares guest "cgroup-default" and no profile
+  Then it is staged for the base profile; for mtls-relay the base profile is native
 
-Scenario: A declared artifact that does not exist on the box is reported
-  Given a group declares an artifact path that is absent on the Metal box
-  When a guest of that group starts
-  Then the run fails naming the group and the path before the test body
+Scenario: An unknown profile is rejected at build
+  Given a test declares profile "quint-x" for cgroup-default
+  When Marcus builds it
+  Then the build fails with the message "unknown guest profile `quint-x` for group `cgroup-default`", pointing at the profile argument
 
-Scenario: Existing staging is unchanged for unmigrated tests
-  Given dispatcher paths still exist
-  Then they stage the same artifacts as before
+Scenario: A profile of another group is rejected at build
+  Given a test declares guest "cgroup-default" with profile "relay"
+  When Marcus builds it
+  Then the build fails naming the profile and the group
 ```
 
-AC: one declaration per group (shape DESIGN's); the dispatcher's copy lists for declared groups read from it; missing and absent artifacts fail by name; existing tests' results unchanged.
+AC: the group and profile names are a closed registry checked when the test is built; omitted profile selects the base profile; an unknown profile or a profile of another group is rejected at build with the pinned diagnostic; a renamed test keeps its profile; pass parity for existing tests per migration batch (DDD-15). Notes: the registry and its names are DDD-5; artifact presence is checked per batch by the migration parity check, not by a scenario of this story (DISTILL D-8).
 
 ### Migration stories (US-PLACE-05a to 06c)
 
-Pre-split into six stories of one batch each, scripted and mechanical by hypothesis; each is 1-3 days and each has 3-4 scenarios. Rule: a batch that exceeds 3 days at DESIGN's estimate is split further by binary id with the same AC. Each story deletes its batch's JSON entries and moves the tests' declarations onto the tests.
+Pre-split into six stories of one batch each, scripted and mechanical by hypothesis; each is 1-3 days and each has 3-4 scenarios. Rule: a batch that exceeds 3 days at DESIGN's estimate is split further by binary id with the same AC. Each story deletes its batch's JSON entries and moves each test's placement into the test source as the DDD-4 forms allow: a per-test attribute, a module declaration (`placement!(host_pure)`) or a binary default (`overdrive_test_default!(host_pure)`).
 
 | Story | Batch |
 |---|---|
@@ -223,20 +241,29 @@ Pre-split into six stories of one batch each, scripted and mechanical by hypothe
 | US-PLACE-06b | Host-pure placements in `overdrive-control-plane*`, `overdrive-worker*`, `overdrive-cli*`, `overdrive-host*`, `overdrive-gateway`, `overdrive-reconcilers*`, `overdrive-store-local*` |
 | US-PLACE-06c | Host-pure placements in all remaining binary ids (`overdrive-dataplane*`, `overdrive-fwd*`, `overdrive-init*`, `overdrive-netlink`, `overdrive-system-conformance*`, `overdrive-testing*`, `xtask*`, fixtures) |
 
-Slices: [guest placements migrated](slices/slice-05-guest-placements-migrated.md) (05a-c), [host-pure placements migrated](slices/slice-06-host-pure-placements-migrated.md) (06a-c). Must-have. Depends: 05a-c on 01, 04; 06a-c on 02; 05c and 06 batches also need 03 where a batch contains lane or native-launcher entries.
+Slices: [guest placements migrated](slices/slice-05-guest-placements-migrated.md) (05a-c), [host-pure placements migrated](slices/slice-06-host-pure-placements-migrated.md) (06a-c). Must-have. Depends: 05a-c on 01, 04, 07; 06a-c on 02, 07; 05c and 06 batches also need 03 where a batch contains lane or native-launcher entries.
 
 ### Elevator Pitch (shared by each migration story, with its batch)
 Before: renaming or adding a test in this batch needs a JSON edit, or the Metal run fails `test_unclassified`.
 After: run `cargo xtask metal run -- cargo nextest run --features integration-tests,kvm-tests -E 'test(<a test of the batch>)'` after renaming that test (batch-specific names: 05b `tcp_syn_plus_rst_flags_drops_with_malformed_header_counter`; 05c `cluster_status_with_no_server_returns_transport_error`; 06b `malformed_intent_bytes_cause_refuse_to_start`; 05a/06a/06c pick at slice start from the batch) → sees `PASS` for the renamed test with zero JSON edits, and the batch's pass set equals the pre-migration pass set.
 Decision enabled: Marcus can rename or add tests in this batch without a placement edit and trusts that no test changed where it runs.
 
-Domain examples (05b, representative): (1) the `overdrive-bpf::integration` classifier tests move together and pass; (2) a batch that would change `tcp_syn_plus_rst_flags_drops_with_malformed_header_counter` from `mtls-relay` to another group is rejected by the count check; (3) a renamed test in the batch needs no JSON edit. 06 batches: (1) store-local tests migrate together; (2) a test found to mutate node-global kernel state while declared host-pure is reported as a finding and not carried over; (3) a renamed test needs no JSON edit.
+Domain examples (05b, representative): (1) the `overdrive-bpf::integration` classifier tests move together and pass; (2) a batch that would change `tcp_syn_plus_rst_flags_drops_with_malformed_header_counter` from `mtls-relay` to another group is rejected by the count check; (3) a renamed test in the batch needs no JSON edit. 06 batches: (1) a host-only store-local binary migrates with one `overdrive_test_default!(host_pure)`; (2) a mixed binary such as `overdrive-cli::integration` migrates with `placement!(host_pure)` in each host-pure module while its guest-placed tests keep their own attributes; (3) a test found to mutate node-global kernel state while declared host-pure is reported as a finding and not carried over; (4) a renamed test needs no JSON edit.
 
 ```gherkin
 Scenario: Every placement in the batch is preserved
   Given the table lists N tests with kind and group per test in the batch
   When the batch is migrated
-  Then the same N tests carry the same kind and group on the tests, and none remains in the table
+  Then the same N tests carry the same kind and group in the test source, and none is placed by the table
+
+Scenario: A mixed binary is placed per module
+  Given a binary holds host-pure modules and guest-placed tests
+  When the batch is migrated
+  Then each host-pure module declares placement!(host_pure), a child module declares its own, and the binary carries no default
+
+Scenario: A default and a non-host-pure test in one binary are refused
+  Given a migrated binary carries overdrive_test_default!(host_pure) and a guest-placed test
+  Then the binary is refused as placement_conflict and the batch is rejected
 
 Scenario: A batch passes on Metal with the same pass set
   When Marcus runs the migrated binaries through metal run
@@ -251,7 +278,7 @@ Scenario: Unmigrated batches keep working mid-migration
   Then they run as before
 ```
 
-AC: batch entries removed from the table; kind and group preserved per test (count and identity check, recounted by parsing the JSON); pass-set parity on Metal; mis-placed tests surfaced; end state across the six stories: guest-group entries 771 to 0 and host-pure 3,855 to 0.
+AC: batch entries removed from the table; kind and group (and profile and fixture) preserved per test (parity check of DDD-15, recounted by parsing the JSON); pass-set parity on Metal; mis-placed tests surfaced; a binary default appears only in a binary with no non-host-pure test, and a binary with both is `placement_conflict`; a mixed binary is migrated with a `placement!(host_pure)` in each host-pure module; a child module does not inherit its parent's declaration and declares its own; end state across the six stories: guest-group entries 771 to 0 and host-pure 3,855 to 0.
 
 ### US-PLACE-07 — An unplaced integration test fails before the Metal box
 
@@ -261,7 +288,7 @@ Marcus adds an integration test as a plain `#[test]`. Today it first fails on Me
 
 ### Elevator Pitch
 Before: a missing placement is discovered on the Metal box, or not at all.
-After: run `cargo xtask metal run -- cargo check --all-targets --features integration-tests` (the compile-check the rules already prescribe for integration binaries; if DESIGN makes the lint a different command, that command replaces it here) → sees a failure naming the binary and the test with no placement declared; exact text is DESIGN's.
+After: run `cargo xtask placement-lint` (wired into CI and pre-push beside `dst-lint` and `conformance-lint`; DDD-3) → sees a failure naming the binary and the test with no placement declared, before any guest boots.
 Decision enabled: Marcus fixes a missing placement in seconds, before pushing, instead of after a Metal run.
 
 Domain examples: (1) a new plain `#[test]` `integration::new_mesh_case::dials_by_name` in an integration binary fails the check naming binary and test; (2) the same test with a declaration passes; (3) a test in the unit lane with no attribute, no module declaration and no binary default is flagged, and passes once its module declares host-pure; (4) a declared test inside a binary that still has a table entry for another test does not trip the check.
@@ -281,12 +308,17 @@ Scenario: Unit-lane tests are placed by a module or binary declaration
   When its module declares `placement!(host_pure)` or its binary declares `overdrive_test_default!(host_pure)`
   Then the check passes; with neither declaration it flags the test (DDD-4, user ruling 2026-11-14)
 
+Scenario: A binary mixing a default with a non-host-pure record is flagged
+  Given a binary declares overdrive_test_default!(host_pure) and holds a guest-placed test
+  When Marcus runs the check
+  Then it fails with placement_conflict naming the binary
+
 Scenario: The check is wired where Marcus already runs it
   Given Marcus pushes a branch that adds an unplaced integration test
-  Then the check fails in the step the repository already runs for that surface
+  Then cargo xtask placement-lint fails in CI and in pre-push, beside dst-lint and conformance-lint
 ```
 
-AC: unplaced integration test fails before Metal naming binary and test; declared tests pass; a unit-lane test passes when its module or binary declares host-pure and is flagged otherwise; check runs in a command already in Marcus's loop (adding a new lane or tool requires user approval first). Notes: mechanism and how it lands before full migration are O3.
+AC: unplaced integration test fails before Metal naming binary and test; declared tests pass; a unit-lane test passes when its module or binary declares host-pure and is flagged otherwise; a binary with a default and a non-host-pure record is flagged `placement_conflict`; `cargo xtask placement-lint` runs in CI and pre-push (DDD-3, approved U-1). Notes: US-07 lands after slice 03 (the lane and launcher forms its fixture check reads) and before the migrations; its rule holds at every migration stage, so O3 needs no per-binary scope (resolved by DDD-3).
 
 ### US-PLACE-08 — Retire the placement table, the lookup and the stale rule text
 
@@ -299,7 +331,7 @@ Before: three places define placement and `testing.md` documents the table.
 After: run `cargo xtask metal run -- cargo nextest run -p overdrive-cli --features integration-tests,kvm-tests -E 'test(cluster_status_with_no_server_returns_transport_error)'` after renaming that test to a new name and changing nothing else → sees `PASS`, and `git ls-files infra/metal/test-placement.json` prints nothing because there is no file left to edit.
 Decision enabled: Marcus relies on the attribute as the only placement source and reads one rule section for it.
 
-Domain examples: (1) the JSON file is gone and the renamed test passes; (2) a brand-new test with a declaration passes with no table and no dispatcher edit; (3) `.claude/rules/testing.md` § "Test placement" describes the attribute and the lint, and no longer the JSON.
+Domain examples: (1) the JSON file is gone and the renamed test passes; (2) a brand-new test with a declaration passes with no table and no dispatcher edit; (3) `.claude/rules/testing.md` § "Test placement" describes the attribute and the lint, and no longer the JSON; (4) `overdrive-fwd-guest-suite` no longer exists as a binary or a command, and `shared_guest!` modules replace its batched runs.
 
 ```gherkin
 Scenario: A renamed or new test needs no placement file
@@ -311,16 +343,16 @@ Scenario: The full Metal pass set is unchanged
   When Marcus runs the full integration lane on Metal after retirement
   Then the pass set equals the pre-retirement pass set
 
-Scenario: The dispatcher is retired or reduced as DESIGN decided
-  Given DESIGN decided whether batched group runs remain
-  Then the dispatcher binary is deleted, or only the retained batched path remains
+Scenario: The dispatcher is gone
+  Given shared-guest modules replace the explicit batched command
+  Then the dispatcher binary, its --guest-suite wrapper mode, OVERDRIVE_METAL_TEST_DISPATCHER, the explicit batched command and the body-count constants are deleted (DDD-14)
 
 Scenario: The rule text and references match the model
   Then testing.md § "Test placement" documents the attribute and the lint
   And a search for the removed names finds no stale reference
 ```
 
-AC: with the table and lookup absent, a renamed test and a new test pass and the full pass set matches; dispatcher deleted or reduced exactly as DESIGN decided; no stale reference to removed names (`test-placement.json`, the removed diagnostics, a deleted binary); testing.md updated through the normal rules-change process. Technical notes (structural, not AC): unreachable wrapper code and its tests are deleted together; other documents cite `overdrive-fwd-guest-suite` (for example the `metal-run-isolation` journey) and are updated in the same slice.
+AC: with the table and lookup absent, a renamed test and a new test pass and the full pass set matches; the dispatcher is deleted entirely, with the nine dispatcher unit tests (deleted, not rewritten); testing.md updated through the normal rules-change process; these searches over the repository (excluding immutable history and recorded evidence) come back clean: `test-placement.json`, `fwd_guest_suite`, `overdrive-fwd-guest-suite`, `--guest-suite`, `OVERDRIVE_METAL_TEST_DISPATCHER`, `OVERDRIVE_FWD_GUEST_GROUP`, `OVERDRIVE_FWD_GUEST_EXACT`, `_COMPLETE_BODIES`. Technical notes (structural, not AC): unreachable wrapper code and its tests are deleted together; documents that cite the removed names (`infra/metal/README.md`, `website/content/docs/how-to/run-verification-on-metal.mdx`, `tests/conformance/CLAUDE.md`, the `metal-run-isolation` journey) are updated in the same slice.
 
 ### US-PLACE-09 — Run a module's tests in one shared guest
 
@@ -333,6 +365,8 @@ Before: sharing one guest across tests needs the separate `overdrive-fwd-guest-s
 After: run `cargo xtask metal run -- cargo nextest run -p overdrive-cli --features integration-tests,kvm-tests -E 'test(/^integration::cluster_and_node_commands::/)'` on a module declared as one shared `cgroup-default` guest → sees one result per test and one guest boot for the module in the `OVERDRIVE_GUEST_KIT_TIMING` output.
 Decision enabled: Marcus chooses per module between isolation (a guest per test) and speed (one guest per module) on the test code itself, and drops the separate batched command.
 
+Domain examples: (1) the `integration::cluster_and_node_commands` module of `overdrive-cli` declares one shared `cgroup-default` guest; its tests each report a result and the timing output shows one boot; (2) one test of that module fails; it is FAIL, its siblings report their own results and the next test runs in a replacement guest; (3) Marcus writes `guest = "cgroup-default"` on one test of the module to keep it isolated, and it boots its own guest; (4) a test that hangs reaches its profile's 300 s exec bound and fails with stage `exec_bound`.
+
 ```gherkin
 Scenario: A declared module boots one guest
   Given a module whose tests declare that they share one cgroup-default guest
@@ -343,6 +377,18 @@ Scenario: One failing test does not hide the others
   Given one test in a shared-guest module fails
   When the module runs on Metal
   Then that test is reported FAIL and the other tests report their own results
+  And the next test runs in a replacement guest, not in the guest that ran the failed test
+
+Scenario: A hung test fails at its exec bound
+  Given a test in a shared-guest module never finishes
+  When it reaches its profile's exec bound
+  Then it fails as a guest execution failure with stage exec_bound
+  And the guest is replaced and the queued tests still run
+
+Scenario: Losing the owner fails the attached tests only
+  Given the shared guest's owner process is killed while a test runs
+  Then the attached tests fail naming the owner stage, no VMM is left running
+  And the next test starts a new owner and passes
 
 Scenario: Filtering to one test still works
   When Marcus runs a single test of a shared-guest module with -E 'test(=…)'
@@ -353,7 +399,7 @@ Scenario: Undeclared tests keep one guest each
   Then it still boots its own guest
 ```
 
-AC: a shared-guest module boots one guest per run (counted from the timing output); per-test results, failures and `-E` filtering behave as for per-test guests; tests outside a declared module are unchanged; the explicit batched dispatcher command's users can be moved to the declaration, so US-PLACE-08 deletes the dispatcher. Technical notes (DESIGN's): the attribute shape; how nextest's one-process-per-test model reaches a shared guest (one generated test per module versus a guest shared across test processes) and who starts and stops it; what state tests in a shared guest can leak to each other.
+AC: a shared-guest module boots one guest per run as long as no test fails, is cut off or exceeds its exec bound and the owner's idle period does not elapse (counted from the timing output), and boots a replacement guest after a failure (N-3, DDD-9); a hung test fails at its exec bound with stage `exec_bound` (DDD-16); an owner lost mid-test fails the attached tests naming the owner stage; per-test results, failures and `-E` filtering behave as for per-test guests; tests outside a declared module are unchanged; off a Metal run the body runs in place, as today (U-2, DDD-11); the explicit batched dispatcher command's users are moved to the declaration, so US-PLACE-08 deletes the dispatcher. Notes: the shape is resolved by DDD-1, DDD-7 and DDD-8 (ADR-0283, ADR-0290); tests in a shared guest share its kernel, cgroup tree, nft tables and `/tmp` (DDD-9); a test that legitimately outlasts its profile's bound takes an explicit `guest = "<group>"` form (DDD-16).
 
 ## Wave: DISCUSS / [REF] Story map and scope assessment
 
@@ -365,9 +411,9 @@ Backbone (Marcus's journey): Write the test, declare its placement, run it on Me
 | host-pure (US-02) | | per-group artifacts (US-04) | guest batches (US-05a-c) | unplaced test fails before Metal (US-07) | table, lookup, dispatcher, rule text (US-08) |
 | lane and launcher (US-03) | | | host-pure batches (US-06a-c) | | |
 
-Walking skeleton = US-01 (guest case, one test, boot time recorded). Priority rationale: US-01 first because it retires the riskiest assumption (a self-dispatching test binary reproduces dispatcher results and the wrapper can run it without a lookup) and yields the boot-time evidence DESIGN needs. US-02 and US-03 follow: they complete the set of declarable placements, US-03 carrying the most mapping risk. US-04 follows because guest batches need declared artifacts. The migrations follow, guest batches before host-pure because guest placement is where the dispatcher and artifacts drift hurts. US-07 follows the migrations because a lint on a half-migrated tree is noise unless DESIGN scopes it per binary (O3). US-08 closes the loop.
+Walking skeleton = US-01 (guest case, one test, boot time recorded). Priority rationale: US-01 first because it retires the riskiest assumption (a self-dispatching test binary reproduces dispatcher results and the wrapper can run it without a lookup) and yields the boot-time evidence DESIGN needs. US-02 and US-03 follow: they complete the set of declarable placements, US-03 carrying the most mapping risk. US-07 follows slice 03 and precedes the migrations: its rule ("placed by a record, an applicable module or binary declaration, or, until retirement, a table entry") is true at every migration stage, so the lint needs no per-binary scope and guards every batch (DDD-3, O3). US-04 follows because the profile registry must exist before guest batches select profiles. US-09 follows, then the migrations, guest batches before host-pure because guest placement is where the dispatcher and artifacts drift hurts. US-08 closes the loop. Delivery order: 01, 02, 03, 07, 04, 09, 05 and 06, 08.
 
-Scope assessment: **PASS (sliced)** — 12 stories, 1 bounded context (Metal test tooling), 4 integration surfaces (proc-macro crate, guest-kit library, wrapper script, dispatcher and nextest config). Only the effort signal is borderline (migration volume, 4,642 entries, plausibly more than two weeks in total); it is mitigated by eight independently shippable slices, six scripted migration batches of 1-3 days, and the user-approved skeleton-first sequencing. Story count exceeds ten only through the pre-split migration batches, which share one acceptance shape.
+Scope assessment: **PASS (sliced)** — 13 stories, 1 bounded context (Metal test tooling), 4 integration surfaces (proc-macro crate, guest-kit library, wrapper script, dispatcher and nextest config). Only the effort signal is borderline (migration volume, 4,642 entries, plausibly more than two weeks in total); it is mitigated by nine independently shippable slices, six scripted migration batches of 1-3 days, and the user-approved skeleton-first sequencing. Story count exceeds ten only through the pre-split migration batches, which share one acceptance shape.
 
 ## Wave: DISCUSS / [REF] Outcome KPIs
 
@@ -375,7 +421,7 @@ Objective: Marcus declares a Metal test's placement once and learns of a miss be
 
 | KPI | Who does what | Target | Baseline | Measured by |
 |---|---|---|---|---|
-| K1 (primary) | Marcus places one new integration test | 1 edit site (the test), 0 table or dispatcher edits | 2-3 edit sites (test, JSON, dispatcher for new group behaviour) | Diff of the skeleton commit and of one later new-test commit |
+| K1 (primary) | Marcus places one new integration test | 1 edit site in the test source (the test, its module or its binary root), 0 table or dispatcher edits | 2-3 edit sites (test, JSON, dispatcher for new group behaviour) | Diff of the skeleton commit and of one later new-test commit |
 | K2 | Marcus finds a missing placement | 100% of unplaced integration tests flagged before any Metal guest boots, within one run of the check | 0% flagged before Metal; first signal is `test_unclassified` on Metal | Negative-fixture test (one deliberately unplaced test) plus no `test_unclassified` in later Metal runs |
 | K3 (guardrail) | Marcus's results stay correct through migration | 0 pass-set differences per migrated batch; 0 placements changing kind or group | Table-driven pass set | Per-batch before/after pass sets and per-test kind and group identity, recounted by parsing the JSON |
 | K4 (guardrail) | Marcus pays a bounded guest cost | Per-test guest boot time unchanged from the table-driven path (ordinary runs already boot one guest per guest-placed test attempt); measured about 0.45 s staging plus 2.4 s boot on the skeleton test | One guest per test attempt on ordinary runs; only the explicit batched dispatcher command boots once per group | Skeleton evidence record |
@@ -386,16 +432,17 @@ Owner: implementer captures, independent reviewer evaluates; no new dashboard. K
 ## Wave: DISCUSS / [REF] Definition of Done
 
 - [ ] US-01 skeleton: attribute, guest-kit entry points and the wrapper's no-lookup path on the real Metal path; boot time recorded; promotion gate decided.
-- [ ] US-02, US-03: every placement kind declarable on the test with a passing Metal run.
-- [ ] US-04: one declaration location per group.
+- [ ] US-02, US-03: every placement kind declarable in the test source (test, module or binary default for host-pure) with a passing Metal run.
+- [ ] US-04: closed registry of 21 environments over 8 groups; unknown profile rejected at build.
 - [ ] US-05a-c, US-06a-c: zero table entries; pass parity per batch.
-- [ ] US-07: unplaced test fails before Metal.
-- [ ] US-08: table, lookup and dispatcher (or its reduced remainder) retired; testing.md updated.
+- [ ] US-07: `cargo xtask placement-lint` fails an unplaced test before Metal, in CI and pre-push.
+- [ ] US-08: table, lookup and dispatcher retired; the listed searches come back clean; testing.md updated.
+- [ ] US-09: a shared-guest module boots one guest per run (a replacement after a failure); a hung test fails at its exec bound; the explicit batched command has no user.
 - [ ] No GitHub issue number or roadmap-step id in any new name.
 
 ## Wave: DISCUSS / [REF] Out of scope
 
-Changing which placement any existing test has; changing guest group semantics or the node-view isolation; the Metal run lease and worktree identity (see `metal-run-isolation`); new test tiers. Whether to keep batched group runs is not deferred: it is a DESIGN decision with skeleton evidence.
+Changing which placement any existing test has; changing guest group semantics or the node-view isolation; the Metal run lease and worktree identity (see `metal-run-isolation`); new test tiers.
 
 ## Wave: DISCUSS / [REF] Walking skeleton strategy
 
@@ -403,40 +450,40 @@ Real, promoted, not a mock. Spike in walking-skeleton mode with no probe (the di
 
 ## Wave: DISCUSS / [REF] Driving ports
 
-Developer-facing only: (1) writing the placement attribute on a test; (2) `cargo xtask metal run -- cargo nextest run …`; (3) the placement lint (US-07). `inside_guest` and `run_in_guest` are skeleton-approved library entry points used by the attribute's expansion, not operator surfaces.
+Developer-facing only: (1) writing the placement attribute on a test; (2) `cargo xtask metal run -- cargo nextest run …`; (3) `cargo xtask placement-lint` (US-07). `inside_guest` and `run_in_guest` are skeleton-approved library entry points used by the attribute's expansion, not operator surfaces.
 
 ## Wave: DISCUSS / [REF] Pre-requisites
 
 Metal box with KVM provisioned; guest kit prepared (`cargo xtask metal run -- cargo xtask guest-kit-prepare`) and module loaded (`--exclusive … kmod-load`); `OVERDRIVE_METAL_TARGET`, `OVERDRIVE_METAL_KERNEL`, `OVERDRIVE_METAL_ROOTFS` set; the existing per-test dispatcher path (present).
 
-## Wave: DISCUSS / [REF] Open points for DESIGN and blockers for the user
+## Wave: DISCUSS / [REF] Open points and their resolution
 
-DESIGN's questions from the issue stand (lane and native mapping, per-group artifacts, batched runs, local-mode vsock namespace). Added by this wave, none resolved here:
+DESIGN's questions from the issue (lane and native mapping, per-group artifacts, batched runs, local-mode vsock namespace) are answered in the DESIGN decisions. The points this wave raised:
 
-- O1 (blocks US-01's general shape): while the table coexists, the wrapper cannot skip the table lookup for every test without silently running unplaced plain tests on the host. DESIGN must pin how a self-declared test is told apart from an unplaced one, and which side supplies the local-mode vsock namespace to the host-side body. The skeleton uses the thinnest form that works; if the spike cannot find one, it returns to the user rather than weakening the `test_unclassified` guard.
-- O2: whether the guest-kit extraction reuses `crates/overdrive-testing/src/guest_kit.rs`; D4 names a library, DESIGN picks its home.
-- O3: how the lint can land before 100% migration (per-binary scope, or last). US-07's order depends on it.
-- O4: resolved by D8: batching moves onto the test as a module-level declaration (US-09), so US-08 deletes the dispatcher. Per-test guest cost is unchanged by this feature (ordinary runs already boot one guest per test attempt). The explicit `overdrive-fwd-guest-suite` command is cited by `metal-run-isolation` and testing.md, which US-08 updates.
-- O5: migration batch sizing (1-3 days each) is a hypothesis; the split rule above applies if DESIGN's estimate disagrees.
-- Deferrals: no deferral language is used and no GitHub issue is created or proposed; every limitation above is an in-feature story. If the user wants any story removed from this feature, that becomes a deferral needing an approved issue.
+- O1: how a self-declared test is told apart from an unplaced one while the table coexists. Resolved by DDD-2: the placement is an ELF-section record the wrapper reads; a record wins over a table entry, and the wrapper's `test_unclassified` refusal stays for a test with no record, module or binary declaration and no entry. The host-side body runs in the wrapper's local-mode vsock namespace, as in the skeleton.
+- O2: the guest-kit library's home. Resolved by DDD-6: `overdrive-testing` stays the home, split into `placement::{groups, guest_run, shared, owner_core}` beside `guest_kit` and `guest_lane`.
+- O3: how the lint lands before full migration. Resolved by DDD-3: its rule is true at every migration stage, so it needs no per-binary scope and lands after slice 03, before the migrations.
+- O4: batched runs. Resolved by D8 and DDD-7 to DDD-9: batching is a module-level `shared_guest!` declaration (US-09), so US-08 deletes the dispatcher (DDD-14). Per-test guest cost is unchanged by this feature (ordinary runs already boot one guest per test attempt).
+- O5: migration batch sizing (1-3 days each). Resolved by DDD-15: batches are scripted rewrites with a parity check; a batch estimated over 3 days is split by binary id with the same acceptance.
+- Deferrals: no deferral language is used and no GitHub issue is created or proposed (user ruling U-6); every limitation above is an in-feature story.
 
 ## Wave: DISCUSS / [REF] DoR validation
 
-Evidence is in each story's section. Columns: 01-04 as numbered; M = each of the six migration stories; 07; 08.
+Evidence is in each story's section. Columns: 01-04 as numbered; M = each of the six migration stories; 07; 08; 09.
 
-| Item | 01 | 02 | 03 | 04 | M (05a-06c) | 07 | 08 |
-|---|---|---|---|---|---|---|---|
-| 1 Problem in domain language | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| 2 Persona specific (Marcus, extended) | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| 3 3+ domain examples, real names | PASS (4) | PASS (3) | PASS (3) | PASS (3) | PASS (3 per batch family) | PASS (4) | PASS (3) |
-| 4 UAT 3-7 scenarios incl. error path | PASS (7) | PASS (4) | PASS (4) | PASS (4) | PASS (4) | PASS (4) | PASS (4) |
-| 5 AC derived from UAT, observable | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| 6 Right-sized (1-3 days) | PASS | PASS | PASS (2-3 d) | PASS | PASS (pre-split, rule for further split) | PASS | PASS |
-| 7 Technical notes | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
-| 8 Dependencies tracked | PASS | PASS (01) | PASS (01) | PASS (01) | PASS (01-04) | PASS (O3) | PASS (all) |
-| 9 Outcome KPIs numeric | PASS (K1,K4) | PASS (K1) | PASS (K5) | PASS (K1) | PASS (K3,K5) | PASS (K2) | PASS (K5) |
+| Item | 01 | 02 | 03 | 04 | M (05a-06c) | 07 | 08 | 09 |
+|---|---|---|---|---|---|---|---|---|
+| 1 Problem in domain language | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| 2 Persona specific (Marcus, extended) | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| 3 3+ domain examples, real names | PASS (4) | PASS (6) | PASS (3) | PASS (3) | PASS (3-4 per batch family) | PASS (4) | PASS (4) | PASS (4) |
+| 4 UAT 3-7 scenarios incl. error path | PASS (7) | PASS (7) | PASS (4) | PASS (4) | PASS (6) | PASS (5) | PASS (4) | PASS (6) |
+| 5 AC derived from UAT, observable | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| 6 Right-sized (1-3 days) | PASS | PASS | PASS (2-3 d) | PASS | PASS (pre-split, rule for further split) | PASS | PASS | PASS (2-3 d) |
+| 7 Technical notes | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+| 8 Dependencies tracked | PASS | PASS (01) | PASS (01) | PASS (01) | PASS (01-04, 07) | PASS (02, 03) | PASS (all) | PASS (01, 04) |
+| 9 Outcome KPIs numeric | PASS (K1,K4) | PASS (K1) | PASS (K5) | PASS (K1) | PASS (K3,K5) | PASS (K2) | PASS (K5) | PASS (K4) |
 
-US-01 has 7 scenarios, the upper bound of 3-7. Elevator Pitch is present on every story; every "After" names a runnable command with an observable result (US-07's exact failure text and lint command are DESIGN-pinned and marked as such). `job_id: J-PLAT-007` on all. Verdict: PASSED, with O1 as a DESIGN blocker on US-01's general shape, not a DoR failure. Peer review: iteration 1 returned `rejected_pending_revisions` (unsized migration stories, non-runnable lint command, non-observable pitches, missing error scenarios, a technical AC); this revision addresses each.
+US-01 and US-02 have 7 scenarios, the upper bound of 3-7. Elevator Pitch is present on every story; every "After" names a runnable command with an observable result. `job_id: J-PLAT-007` on all. Verdict: PASSED. Peer review: iteration 1 returned `rejected_pending_revisions` (unsized migration stories, non-runnable lint command, non-observable pitches, missing error scenarios, a technical AC); the revision addressed each, and the final-gate review is applied against the approved DESIGN and DISTILL.
 
 ## Wave: DESIGN / [REF] Inputs read
 

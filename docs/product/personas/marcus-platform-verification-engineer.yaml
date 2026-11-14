@@ -13,7 +13,8 @@ persona:
     - Maintains separate Git worktrees with potentially different uncommitted source changes
     - Uses coding agents that invoke the same developer commands
     - Requires exact command results and honest native evidence before trusting a change
-    - Authors integration tests and expects placement to be declared on the test and checked before the Metal box
+    - Authors integration tests and expects placement to be declared in the test source and checked before the Metal box
+    - Chooses per module between isolation (a guest per test) and speed (one shared guest per module) on the test code itself
   context:
     surface: cargo xtask metal run, sync, pull and collect
     triggers:

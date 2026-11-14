@@ -26,4 +26,5 @@ Choosing which placement a test should have; adding a new CI lane or tool (propo
 - [ ] Unplaced integration test fails before any guest boots, naming binary and test.
 - [ ] Fully declared binaries pass; a declared test beside table-listed tests does not trip it.
 - [ ] A unit-lane test with a module or binary declaration passes; one without is flagged.
-- [ ] The check runs in a step the repository already runs for that surface.
+- [ ] A binary with `overdrive_test_default!(host_pure)` and a non-host-pure record is flagged `placement_conflict`.
+- [ ] `cargo xtask placement-lint` runs in CI and pre-push beside `dst-lint` and `conformance-lint`.

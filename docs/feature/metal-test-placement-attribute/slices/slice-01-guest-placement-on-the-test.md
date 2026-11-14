@@ -19,23 +19,23 @@ One existing `cgroup-default` integration test declares its placement with `#[ov
 
 ## Entry point and evidence
 
-`cargo xtask metal run -- cargo nextest run -p <crate> --features integration-tests,kvm-tests -E 'test(<name>)'` on the native Metal box (Lima is no signal). Evidence: the PASS line, a deliberate in-guest failure producing a host FAIL, and the boot-time record. No test-only wiring may stand in for the wrapper or guest kit.
+`cargo xtask metal run -- cargo nextest run -p <crate> --features integration-tests,kvm-tests -E 'test(<name>)'` on the native Metal box (Lima is no signal). Evidence: the PASS line, the malformed-run-id host FAIL, and the boot-time record. No test-only wiring may stand in for the wrapper or guest kit.
 
 ## Acceptance
 
 - [ ] Migrated test PASSes on Metal with no table entry.
-- [ ] Making the in-guest body fail yields a host FAIL with the guest output visible and a nonzero run status.
-- [ ] A guest that cannot boot or exceeds its bound is a host FAIL naming the group and stage.
+- [ ] On the shared-guest path (slice 09) a failing in-guest body yields a host FAIL for that test and a nonzero run status.
+- [ ] A guest that cannot start (a Metal run with a malformed run id) is a host FAIL naming the group and stage; the body never runs on the host.
 - [ ] An unknown group is rejected by name.
 - [ ] Outside a Metal run the test runs its body in place, as it does today; on a Metal run its body never runs on the host (user ruling, 2026-11-14).
 - [ ] An unmigrated guest test still passes through the dispatcher after the extraction.
 - [ ] Boot time for the migrated test is retained.
 - [ ] No GitHub issue number or roadmap-step id appears in any new identifier.
 
-## Risks for the spike to resolve and record
+## Points the spike resolved
 
-- O1: how the wrapper treats a self-declared test versus an unplaced one while the table coexists, and who provides the local-mode vsock namespace to the host-side body.
-- The in-guest marker mechanism and how the host test binary reaches the guest are DESIGN's to generalise; the skeleton may choose the thinnest working form.
+- O1: a self-declared test is told apart from an unplaced one by its ELF-section record (DDD-2); the host-side body runs in the wrapper's local-mode vsock namespace.
+- The in-guest marker is `OVERDRIVE_TEST_IN_GUEST` (DDD-10); the general shape is DESIGN's.
 
 ## Estimate and gate
 

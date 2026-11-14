@@ -3,11 +3,11 @@ schema_version: 1
 journey:
   name: Declare where a Metal integration test runs
   feature: metal-test-placement-attribute
-  status: requirements-ready-design-pending
+  status: design-and-distill-approved
   goal: >
-    Declare an integration test's Metal placement once, on the test, run it
-    on the Metal box with the declared isolation, and learn of a missing
-    placement before the Metal box.
+    Declare an integration test's Metal placement once, in the test source,
+    run it on the Metal box with the declared isolation, and learn of a
+    missing placement before the Metal box.
   persona: marcus-platform-verification-engineer
   jobs: [J-PLAT-007]
   emotional_arc:
@@ -18,21 +18,33 @@ journey:
 steps:
   - id: 1
     name: Write the test and declare its placement
-    command: edit the test source (attribute declaring guest group, host-pure, lane or native-launcher; spelling is DESIGN's)
+    command: >
+      edit the test source: #[overdrive_test(guest = "<group>")], a bare #[overdrive_test] beside shared_guest!,
+      #[overdrive_test(host_pure)], placement!(host_pure) in its module,
+      overdrive_test_default!(host_pure) at its binary root, or a lane or native-launcher form
     shared_artifacts:
       - name: placement_declaration
-        source: The attribute on the test (single source of truth)
-        consumers: [guest-kit dispatch at run time, the placement lint, the Metal wrapper]
+        source: The declaration in the test source (single source of truth); precedence is the test's own attribute, then its module's, then the binary default
+        consumers: [guest-kit dispatch at run time, cargo xtask placement-lint, the Metal wrapper]
     integration_checkpoint: >
       The declaration is the only place placement is stated; nothing else
       must be edited to place the test.
     failure_modes:
-      - Plain test with no declaration (caught by the lint, step 3)
-      - Declaration names an unknown group
+      - Plain test with no declaration (caught by cargo xtask placement-lint, step 3)
+      - Declaration names an unknown group or profile (build error naming the value)
+      - Binary default beside a non-host-pure test (refused as placement_conflict)
     gherkin: |
       Scenario: One declaration places the test
         Given Marcus writes a new integration test with a guest declaration
         Then no other file needs an edit for it to run in that guest
+
+      Scenario: A module declaration places host-pure tests
+        Given a module declares placement!(host_pure)
+        Then its tests with no attribute of their own run host-pure
+
+      Scenario: The most specific declaration wins
+        Given a module declares placement!(host_pure) and one of its tests declares a guest group
+        Then that test runs in its guest
 
   - id: 2
     name: Run it on the Metal box
@@ -51,20 +63,21 @@ steps:
         source: nextest binary id of the integration binary containing the test
         consumers: [PASS or FAIL line, placement lint failure]
       - name: test_name
-        source: Full test name as nextest reports it (same name the old table keyed on)
+        source: Full test name as nextest reports it
         consumers: [-E filter, PASS or FAIL line, lint failure, guest --exact run]
       - name: seconds
         source: nextest per-test duration
         consumers: [PASS line]
       - name: guest_boot_time
-        source: Skeleton-recorded per-test guest boot record (retained with the run output; format chosen by the spike)
-        consumers: [DESIGN decision on batched group runs]
+        source: Per-test guest boot record retained with the run output (OVERDRIVE_GUEST_KIT_TIMING)
+        consumers: [boot count of a shared-guest module]
     integration_checkpoint: >
       A guest-declared test boots its group's guest and runs its body there;
-      a failing body fails the host test.
+      a failing body fails the host test. Off a Metal run the body runs in
+      place, as today.
     failure_modes:
-      - Guest artifact missing for the group (failure names group and artifact)
-      - Guest run fails (host test FAIL with guest output)
+      - Guest cannot start (host test FAIL naming group and stage)
+      - Shared test hangs (FAIL at its exec bound)
     gherkin: |
       Scenario: A guest-declared test runs in its guest
         When Marcus runs it through metal run
@@ -73,7 +86,7 @@ steps:
 
   - id: 3
     name: Forget a declaration and find out early
-    command: cargo xtask metal run -- cargo check --all-targets --features integration-tests   # candidate; DESIGN names the final command
+    command: cargo xtask placement-lint   # wired into CI and pre-push beside dst-lint and conformance-lint
     emotional_note: Main anxiety point; the arc turns from uneasy to confident when the miss is caught in seconds, before any guest boots.
     shared_artifacts:
       - name: binary_id
@@ -83,17 +96,18 @@ steps:
         source: Full test name (as step 2)
         consumers: [lint failure]
     tui_mockup: |
-      FAIL  ${binary_id} ${test_name}: no placement declared   (exact text DESIGN's)
+      FAIL  ${binary_id} ${test_name}: no placement declared
     integration_checkpoint: >
-      An unplaced integration test fails before any Metal run; no
-      test_unclassified is first seen on Metal.
+      An unplaced test fails before any Metal run; no test_unclassified is
+      first seen on Metal. The lint lands after the lane and launcher forms
+      and before the migrations.
     failure_modes:
       - Lint not wired into a lane Marcus runs
-      - Lint flags non-integration tests
+      - Unit-lane test with no module or binary declaration (flagged)
     gherkin: |
       Scenario: An unplaced test is flagged before Metal
         Given an integration test has no placement declaration
-        When Marcus runs the default lane
+        When Marcus runs cargo xtask placement-lint
         Then the failure names the binary and the test
 
 acceptance_reference: docs/feature/metal-test-placement-attribute/feature-delta.md
@@ -101,4 +115,7 @@ acceptance_reference: docs/feature/metal-test-placement-attribute/feature-delta.
 changelog:
   - date: 2026-11-13
     feature: metal-test-placement-attribute
-    change: Requirements journey for declaring Metal test placement on the test; design and implementation pending.
+    change: Requirements journey for declaring Metal test placement on the test.
+  - date: 2026-11-14
+    feature: metal-test-placement-attribute
+    change: Aligned with the approved DESIGN and DISTILL (module and binary host-pure declarations, placement-lint command, shared-guest modules).
