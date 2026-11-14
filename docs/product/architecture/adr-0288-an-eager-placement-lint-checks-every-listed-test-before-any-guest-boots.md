@@ -2,7 +2,7 @@
 
 ## Status
 
-**Approved by the user, 2026-11-14 (U-1), including the fixture-existence
+**Accepted — approved by the user, 2026-11-14 (U-1), including the fixture-existence
 extension.** DDD-3 in the feature delta.
 
 ## Context

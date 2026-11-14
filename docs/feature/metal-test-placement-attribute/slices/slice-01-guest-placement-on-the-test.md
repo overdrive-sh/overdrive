@@ -1,6 +1,6 @@
 # Slice 01 — Guest placement on the test (walking skeleton)
 
-Story: US-PLACE-01. Job: J-PLAT-007. Status: production code, promotion pending the spike's gate decision (user-approved skeleton contract, 2026-11-13).
+Story: US-PLACE-01. Job: J-PLAT-007. Status: production code, promoted (spike gate PROMOTE, user decision 2026-11-13); DESIGN approved by the user, 2026-11-14.
 
 ## Outcome
 
@@ -39,4 +39,4 @@ One existing `cgroup-default` integration test declares its placement with `#[ov
 
 ## Estimate and gate
 
-1 to 3 days. Promotion gate decided by the spike in `docs/feature/metal-test-placement-attribute/spike/`; findings feed DESIGN.
+1 to 3 days. Promotion gate decided (PROMOTE) by the spike in `docs/feature/metal-test-placement-attribute/spike/`; findings feed DESIGN.

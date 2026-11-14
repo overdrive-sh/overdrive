@@ -2,7 +2,7 @@
 
 ## Status
 
-**Approved by the user, 2026-11-14 (U-3); independent DESIGN review pending.**
+**Accepted — approved by the user, 2026-11-14 (U-3).**
 DDD-12 in the feature delta.
 
 ## Context

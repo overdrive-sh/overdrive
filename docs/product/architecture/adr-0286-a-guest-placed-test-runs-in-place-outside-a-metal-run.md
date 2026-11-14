@@ -3,7 +3,7 @@
 ## Status
 
 **Accepted — approved by the user, 2026-11-14 (U-2, DDD-11 in the feature
-delta).** Independent DESIGN review is pending.
+delta).**
 
 ## Context
 

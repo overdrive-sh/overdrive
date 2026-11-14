@@ -5,20 +5,19 @@ This file collects per-phase / per-feature C4 diagrams referenced from
 snapshot of the system at the close of a feature; superseded sections
 remain for traceability.
 
-## Metal test placement declared on the test (proposed)
+## Metal test placement declared on the test
 
-**PROPOSED — not accepted.** The decisions of feature
+**ACCEPTED — approved by the user, 2026-11-14.** The decisions of feature
 `metal-test-placement-attribute` (DDD-1..DDD-18) in
 [the feature delta](../../feature/metal-test-placement-attribute/feature-delta.md#wave-design--ref-decisions)
-are partly approved by the user and partly await independent DESIGN review (the
-feature delta lists which). Test tooling only; no production runtime component
+are all approved. Test tooling only; no production runtime component
 changes.
 
 ### C4 Level 1 — System Context
 
 ```mermaid
 C4Context
-    title Metal test placement — system context (proposed)
+    title Metal test placement — system context
     Person(engineer, "Verification engineer or coding agent", "Adds, renames and runs integration tests")
     System(placement, "Metal test placement tooling", "Declares where each test runs and runs it there")
     System_Ext(nextest, "cargo-nextest", "Selects, retries and reports tests")
@@ -33,7 +32,7 @@ C4Context
 
 ```mermaid
 C4Container
-    title Metal test placement — containers (proposed)
+    title Metal test placement — containers
     Person(engineer, "Verification engineer or coding agent")
     System_Ext(nextest, "cargo-nextest", "Per-test process model")
     Container_Boundary(repo, "Overdrive repository tooling") {

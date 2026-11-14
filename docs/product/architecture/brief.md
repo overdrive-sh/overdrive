@@ -2177,9 +2177,9 @@ query exists, so Event Sourcing and CQRS add nothing.
 
 ## Application Architecture
 
-### Metal test placement declared on the test (feature `metal-test-placement-attribute`, 2026-11-13) — PROPOSED
+### Metal test placement declared on the test (feature `metal-test-placement-attribute`, 2026-11-13) — ACCEPTED
 
-**PROPOSED, not accepted** (`.claude/rules/design.md` § "Surface material design
+**ACCEPTED — approved by the user, 2026-11-14** (`.claude/rules/design.md` § "Surface material design
 decisions"). Test tooling only. A Metal test declares its placement on itself
 (`#[overdrive_test(...)]`), recorded in its own binary; the wrapper reads the
 record; the placement table, its lookup and the batched guest dispatcher are
@@ -2190,11 +2190,8 @@ declared per module (`placement!(host_pure)`) or per binary
 (`overdrive_test_default!(host_pure)`, only in a binary with no guest-placed,
 lane-placed or native-launcher test); `cargo xtask placement-lint` checks every
 listed test before any guest boots; off a Metal run a guest-placed test runs its
-body in place. The user approved the lint, the host-pure declarations, the
-in-place rule, the dev-dependency rule, the template handling, an exec bound, an
-owner idle exit and discarding a guest whose client left while its test ran on
-2026-11-14; the remaining decisions are proposed pending independent DESIGN
-review. Decisions:
+body in place. The user approved every decision of the feature on
+2026-11-14, after three rounds of independent DESIGN review. Decisions:
 [ADR-0282](adr-0282-a-metal-test-placement-is-declared-on-the-test-and-recorded-in-its-binary.md),
 [ADR-0283](adr-0283-the-tests-of-a-module-share-one-guest-through-a-per-module-owner-process.md),
 [ADR-0284](adr-0284-a-shared-guest-serves-one-test-at-a-time-and-never-cancels-a-running-test.md),
@@ -2208,7 +2205,7 @@ review. Decisions:
 [ADR-0293](adr-0293-a-shared-guest-owner-exits-when-it-is-idle.md),
 [ADR-0294](adr-0294-guest-groups-and-environments-are-a-closed-registry-of-named-profiles.md),
 [ADR-0295](adr-0295-xtask-and-core-crates-may-take-a-dev-dependency-on-the-placement-macros.md).
-Interface contracts and open user decisions:
+Interface contracts and decisions:
 [feature delta](../../feature/metal-test-placement-attribute/feature-delta.md#wave-design--ref-decisions).
 Diagrams: [c4-diagrams.md](c4-diagrams.md). Protocol model:
 `specs/quint/shared-guest-owner/`.

@@ -2,7 +2,7 @@
 
 ## Status
 
-**Proposed — awaiting user approval (DDD-5 in the feature delta).**
+**Accepted — approved by the user, 2026-11-14 (DDD-5 in the feature delta).**
 
 ## Context
 

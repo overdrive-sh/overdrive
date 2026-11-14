@@ -2,7 +2,7 @@
 
 ## Status
 
-**Proposed — pending independent DESIGN review (DDD-9 in the feature delta).**
+**Accepted — approved by the user, 2026-11-14 (DDD-9 in the feature delta).**
 The clause for a test whose client went away while it ran (DDD-18) was approved
 by the user on 2026-11-14 (N-3); the rest follows DDD-9.
 

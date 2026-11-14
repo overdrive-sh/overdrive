@@ -2,8 +2,8 @@
 
 ## Status
 
-**Proposed — awaiting user approval (DDD-1, DDD-2 in the feature delta).**
-If accepted, it supersedes in part ADR-0280: the placement *source* (a
+**Accepted — approved by the user, 2026-11-14 (DDD-1, DDD-2 in the feature delta).**
+It supersedes in part ADR-0280: the placement *source* (a
 hand-kept table keyed by binary id and test name) is replaced; ADR-0280's
 decision that nextest stays the selection, retry, report and result owner and
 places each exact body through its per-test wrapper is kept.

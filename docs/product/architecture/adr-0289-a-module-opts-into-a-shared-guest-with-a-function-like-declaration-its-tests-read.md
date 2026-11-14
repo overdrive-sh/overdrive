@@ -2,9 +2,9 @@
 
 ## Status
 
-**Shape approved by the user, 2026-11-13; independent DESIGN review pending.**
-DDD-1 and DDD-7 in the feature delta. The hidden item's name and the conflict
-rule are proposed.
+**Accepted — approved by the user, 2026-11-14** (shape approved 2026-11-13).
+DDD-1 and DDD-7 in the feature delta, including the hidden item's name and the
+conflict rule.
 
 ## Context
 

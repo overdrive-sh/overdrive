@@ -2,11 +2,10 @@
 
 ## Status
 
-**Proposed — awaiting user approval (DDD-8 in the feature delta).**
+**Accepted — approved by the user, 2026-11-14 (DDD-8 in the feature delta).**
 The declaration shape the tests read (ADR-0289) was approved by the user on
-2026-11-13; the owner remains proposed. If accepted, it reverses the "a broker
-is beyond this adaptation" alternative recorded in ADR-0280, for the
-shared-guest case only.
+2026-11-13. This decision reverses the "a broker is beyond this adaptation"
+alternative recorded in ADR-0280, for the shared-guest case only.
 
 ## Context
 
