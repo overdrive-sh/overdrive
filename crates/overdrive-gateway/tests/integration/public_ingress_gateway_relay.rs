@@ -1079,11 +1079,18 @@ async fn wait_promoted(status: &GatewayStatusReads) -> GatewayApplicationStatusR
 async fn wait_for<T>(what: &str, mut probe: impl FnMut() -> Option<T>) -> T {
     let deadline = std::time::Instant::now() + WAIT;
     loop {
+        let probed_at = std::time::Instant::now();
         if let Some(found) = probe() {
             return found;
         }
-        assert!(std::time::Instant::now() < deadline, "timed out waiting for {what}");
-        tokio::time::sleep(Duration::from_millis(5)).await;
+        assert!(probed_at < deadline, "timed out waiting for {what}");
+        // The gateway tasks share this single-threaded runtime with the
+        // probe. A probe that clones ceiling-sized leg transcripts takes tens
+        // of milliseconds, so sleeping a fixed 5 ms would leave the gateway
+        // under a tenth of the thread and the exchange it is waited on slow
+        // in proportion. Sleep at least four times the probe's own cost.
+        let cost = probed_at.elapsed();
+        tokio::time::sleep(Duration::from_millis(5).max(cost * 4)).await;
     }
 }
 
