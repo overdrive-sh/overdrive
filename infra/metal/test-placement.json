@@ -15133,6 +15133,95 @@
         "kind": "guest-group",
         "group": "core"
       }
+    },
+    "overdrive-testing::compile_fail": {
+      "placement_diagnostics_name_the_offending_value_and_the_missing_declaration": {
+        "kind": "host-pure"
+      }
+    },
+    "overdrive-testing::integration": {
+      "integration::shared_guest_fixtures::shared_module::first_test_of_the_shared_module": {
+        "kind": "guest-group",
+        "group": "cgroup-default"
+      },
+      "integration::shared_guest_fixtures::shared_module::second_test_of_the_shared_module": {
+        "kind": "guest-group",
+        "group": "cgroup-default"
+      },
+      "integration::shared_guest_fixtures::shared_module::third_test_of_the_shared_module": {
+        "kind": "guest-group",
+        "group": "cgroup-default"
+      },
+      "integration::shared_guest_fixtures::shared_module::test_of_the_shared_module_that_fails_when_told_to": {
+        "kind": "guest-group",
+        "group": "cgroup-default"
+      },
+      "integration::shared_guest_fixtures::scenario_clients::election_client": {
+        "kind": "host-pure"
+      },
+      "integration::shared_guest_fixtures::scenario_clients::orphan_client": {
+        "kind": "host-pure"
+      },
+      "integration::shared_guest_fixtures::scenario_clients::signal_client": {
+        "kind": "host-pure"
+      },
+      "integration::shared_guest_fixtures::scenario_clients::crash_client": {
+        "kind": "host-pure"
+      },
+      "integration::shared_guest_fixtures::scenario_clients::taint_client": {
+        "kind": "host-pure"
+      },
+      "integration::shared_guest_fixtures::scenario_clients::failure_client": {
+        "kind": "host-pure"
+      },
+      "integration::shared_guest_fixtures::scenario_clients::scenario_body_inside_the_guest": {
+        "kind": "host-pure"
+      },
+      "integration::shared_guest_scenarios::a_declared_module_boots_one_guest_and_every_test_reports_its_own_result": {
+        "kind": "native-launcher"
+      },
+      "integration::shared_guest_scenarios::one_failing_test_in_a_shared_module_does_not_hide_the_others": {
+        "kind": "native-launcher"
+      },
+      "integration::shared_guest_scenarios::filtering_to_one_test_of_a_shared_module_runs_only_that_test": {
+        "kind": "native-launcher"
+      },
+      "integration::shared_guest_scenarios::guest_placed_tests_outside_a_shared_module_boot_one_guest_each": {
+        "kind": "native-launcher"
+      },
+      "integration::shared_guest_scenarios::the_boot_time_of_a_guest_per_test_is_recorded_in_the_run_output": {
+        "kind": "native-launcher"
+      },
+      "integration::placement_off_metal::a_guest_placed_test_runs_its_body_in_place_when_no_metal_run_is_present": {
+        "kind": "native-launcher"
+      },
+      "integration::placement_off_metal::a_guest_placed_test_never_runs_its_body_on_the_host_on_a_metal_run": {
+        "kind": "native-launcher"
+      },
+      "integration::shared_owner_lifetime::eight_simultaneous_first_arrivals_elect_exactly_one_owner": {
+        "kind": "native-launcher"
+      },
+      "integration::shared_owner_lifetime::killing_the_owner_during_a_guest_exec_leaves_no_vmm": {
+        "kind": "native-launcher"
+      },
+      "integration::shared_owner_lifetime::the_electing_client_killed_by_a_group_signal_leaves_the_owner_serving": {
+        "kind": "native-launcher"
+      },
+      "integration::shared_owner_lifetime::an_owner_killed_midway_fails_its_attached_test_and_the_next_client_elects_a_new_owner": {
+        "kind": "native-launcher"
+      },
+      "integration::shared_owner_lifetime::a_client_killed_while_its_test_runs_taints_the_guest_for_the_next_client": {
+        "kind": "native-launcher"
+      },
+      "integration::shared_owner_lifetime::a_failed_shared_test_is_reported_with_its_status_and_its_guest_is_replaced": {
+        "kind": "native-launcher"
+      },
+      "integration::placement_off_metal::a_guest_placed_test_with_an_invalid_run_id_fails_naming_its_group_and_never_runs_on_the_host": {
+        "kind": "native-launcher"
+      },
+      "integration::lane_placement::a_lane_test_naming_a_missing_fixture_fails_naming_the_fixture_and_the_test": {
+        "kind": "native-launcher"
+      }
     }
   }
 }

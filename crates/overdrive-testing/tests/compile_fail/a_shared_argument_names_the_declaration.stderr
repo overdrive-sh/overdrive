@@ -1,0 +1,5 @@
+error: sharing is declared by `shared_guest!`
+ --> tests/compile_fail/a_shared_argument_names_the_declaration.rs:4:44
+  |
+4 | #[overdrive_test(guest = "cgroup-default", shared)]
+  |                                            ^^^^^^

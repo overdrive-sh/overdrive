@@ -216,6 +216,15 @@ test-group = 'trybuild'
 [test-groups.host-kernel-shared]
 max-threads = 1
 
+# The placement attribute's Metal scenarios boot real guests and shared-guest
+# owner processes of the run, and kill them: node-global kernel state, so the
+# whole `overdrive-testing` integration binary joins the single-writer group.
+# The scenarios hold a guest for up to a minute, hence the wider budget.
+[[profile.default.overrides]]
+filter = 'package(overdrive-testing) & binary(integration)'
+test-group = 'host-kernel-shared'
+slow-timeout = { period = "120s", terminate-after = 6 }
+
 # The guest-listener native real-boot bodies compose the production server,
 # root-cgroup dataplane and Cloud Hypervisor on the host. Keep the module in
 # the same single-writer group as the other native `run_server` boots.

@@ -1,0 +1,7 @@
+error[E0425]: cannot find value `OVERDRIVE_TEST_NEEDS_shared_guest_DECLARATION_IN_THIS_MODULE` in this scope
+ --> tests/compile_fail/module_form_without_a_declaration.rs:4:1
+  |
+4 | #[overdrive_test]
+  | ^^^^^^^^^^^^^^^^^ not found in this scope
+
+For more information about this error, try `rustc --explain E0425`.

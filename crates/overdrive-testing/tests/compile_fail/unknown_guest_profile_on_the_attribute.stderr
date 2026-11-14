@@ -1,0 +1,7 @@
+error[E0080]: evaluation panicked: unknown guest profile `no-such-profile` for group `cgroup-default`
+ --> tests/compile_fail/unknown_guest_profile_on_the_attribute.rs:4:54
+  |
+4 | #[overdrive_test(guest = "cgroup-default", profile = "no-such-profile")]
+  |                                                      ^^^^^^^^^^^^^^^^^ evaluation of `a_test::_` failed here
+
+For more information about this error, try `rustc --explain E0080`.
