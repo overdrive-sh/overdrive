@@ -499,11 +499,19 @@ comment is the active enforcement surface, and the lint of last
 resort is:
 
 ```bash
-cargo tree -p xtask | rg overdrive-
+cargo tree -p xtask -e normal,build | rg overdrive-
 ```
 
 This must return empty. If it doesn't, the dep graph has regressed
 and the bootstrap chain is at risk.
+
+The rule covers normal and build dependencies, which are what compile
+before an xtask subcommand can run. `[dev-dependencies]` compile only
+for xtask's own tests, so xtask may dev-depend on test tooling such as
+`overdrive-testing-macros` and `overdrive-testing`. A dev-dependency
+whose crate has a `build.rs` that needs an artifact an xtask subcommand
+produces would reintroduce the deadlock for `cargo test -p xtask`, so
+check that before adding one.
 
 The artifact-path rename that landed alongside this rule
 (`target/xtask/dst-*` → `target/dst/*`,
