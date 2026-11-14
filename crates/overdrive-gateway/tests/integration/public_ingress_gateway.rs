@@ -3106,8 +3106,15 @@ async fn applying_the_identical_route_twice_has_an_empty_second_delta() {
 /// the status is sampled by polling, so a design that clears the gap faster
 /// than the poll would be a testability boundary to raise, not to weaken here.
 ///
+/// The runtime is current-thread so the overflow is deterministic. The store
+/// publishes the burst's change events in one synchronous loop with no await
+/// point, so on a single thread the gateway's owner task cannot receive
+/// concurrently and the channel necessarily overflows for it. On a
+/// multi-thread runtime the owner could drain on another worker while the
+/// loop was still sending and never lag (about 1 run in 16 on metal).
+///
 /// CONTRACT_SHAPE: bounded-change.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[tokio::test]
 async fn a_watch_lag_is_reported_and_the_gateway_relists_instead_of_reading_an_empty_store() {
     const BURST: usize = 3_000;
     let site = Site::new();
