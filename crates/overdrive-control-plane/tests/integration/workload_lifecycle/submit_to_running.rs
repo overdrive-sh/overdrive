@@ -16,7 +16,6 @@ use overdrive_core::aggregate::{DriverInput, IntentKey, Job, JobSpecInput, Resou
 use overdrive_core::id::NodeId;
 use overdrive_core::reconcilers::TargetResource;
 use overdrive_core::traits::driver::{Driver, DriverType};
-use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{AllocState, ObservationStore};
 
 use overdrive_sim::adapters::driver::SimDriver;

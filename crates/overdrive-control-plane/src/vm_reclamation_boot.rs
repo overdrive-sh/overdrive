@@ -176,7 +176,6 @@ mod tests {
 
     use overdrive_core::id::NodeId;
     use overdrive_core::traits::driver::{Driver, DriverType};
-    use overdrive_core::traits::intent_store::IntentStore;
     use overdrive_core::traits::observation_store::ObservationStore;
     use overdrive_core::traits::vm_host_state::VmHostState;
     use overdrive_sim::adapters::vm_host_state::SimVmHostState;

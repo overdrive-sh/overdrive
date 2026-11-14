@@ -34,7 +34,6 @@ use overdrive_core::guest_network::GuestNetworkExecSupervisor;
 use overdrive_core::id::NodeId;
 use overdrive_core::reconcilers::TargetResource;
 use overdrive_core::traits::driver::{Driver, DriverType};
-use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{AllocState, ObservationStore};
 use overdrive_core::transition_reason::{StoppedBy, TerminalCondition};
 use overdrive_sim::adapters::driver::SimDriver;

@@ -837,7 +837,7 @@ impl Harness {
             .await
             .expect("the fixture's shared guest-network owner is converged before EXEC opens");
         let state = overdrive_control_plane::AppState::new(
-            Arc::clone(&store),
+            Arc::clone(&store) as Arc<dyn overdrive_core::traits::intent_store::IntentStore>,
             store_path,
             Arc::clone(&obs) as Arc<dyn ObservationStore>,
             Arc::new(runtime),

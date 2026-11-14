@@ -356,7 +356,7 @@ impl ProbeWorld {
         let store = Arc::new(LocalIntentStore::open(&store_path).expect("open intent store"));
         let workload = WorkloadId::new(WORKLOAD).expect("workload id");
         let intent = service_intent(probes);
-        persist_intent(&store, &workload, &intent).await;
+        persist_intent(store.as_ref(), &workload, &intent).await;
 
         let obs = Arc::new(SimObservationStore::single_peer(node.clone(), 0));
         let clock = Arc::new(SimClock::new());
@@ -679,7 +679,8 @@ impl ProbeWorld {
 
     /// Persist the workload's intent again (the operator resubmits it).
     pub(super) async fn resubmit_intent(&self) {
-        persist_intent(&self.state.store, &self.workload, &service_intent(self.probes)).await;
+        persist_intent(self.state.store.as_ref(), &self.workload, &service_intent(self.probes))
+            .await;
     }
 
     /// The Service intent this world declares.
@@ -689,7 +690,7 @@ impl ProbeWorld {
 }
 
 pub(super) async fn persist_intent(
-    store: &LocalIntentStore,
+    store: &dyn IntentStore,
     workload: &WorkloadId,
     intent: &WorkloadIntent,
 ) {

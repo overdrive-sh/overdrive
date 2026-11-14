@@ -211,7 +211,6 @@ use overdrive_core::traits::driver::{Driver, DriverRegistry};
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_dataplane::allocators::{PersistentServiceVipAllocator, VipRange};
-use overdrive_store_local::LocalIntentStore;
 use tokio_util::sync::CancellationToken;
 
 use crate::identity_mgr::IdentityMgr;
@@ -239,7 +238,7 @@ use overdrive_reconcilers::AnyReconciler;
 #[derive(Clone)]
 pub struct AppState {
     /// Authoritative intent store — every write lands here.
-    pub store: Arc<LocalIntentStore>,
+    pub store: Arc<dyn IntentStore>,
     /// Filesystem path of the intent redb file. Used by handlers that
     /// decode persisted bytes via `Job::from_store_bytes(bytes, path, key)`
     /// to produce operator-facing remediation messages naming the file
@@ -618,7 +617,7 @@ impl AppState {
         reason = "Port-trait dependencies (Clock, Driver, Dataplane, ObservationStore, IntentStore) plus the boot-rebuilt allocator + listener-fact projections are required at construction per .claude/rules/development.md § Port-trait dependencies; bundling them into a builder would make individual deps optional and defeat the explicit-injection invariant."
     )]
     pub fn new(
-        store: Arc<LocalIntentStore>,
+        store: Arc<dyn IntentStore>,
         intent_redb_path: PathBuf,
         obs: Arc<dyn ObservationStore>,
         runtime: Arc<reconciler_runtime::ReconcilerRuntime>,
@@ -722,7 +721,7 @@ impl AppState {
         reason = "Every port-trait dependency plus the workflow engine is required at construction per .claude/rules/development.md § Port-trait dependencies; bundling into a builder would make individual deps optional."
     )]
     pub fn new_with_workflow_engine(
-        store: Arc<LocalIntentStore>,
+        store: Arc<dyn IntentStore>,
         intent_redb_path: PathBuf,
         obs: Arc<dyn ObservationStore>,
         runtime: Arc<reconciler_runtime::ReconcilerRuntime>,
@@ -3254,9 +3253,9 @@ impl FailedBootTasks {
 /// otherwise a single logical step.
 async fn bulk_load_service_vip_allocator(
     vip_range: &VipRange,
-    store: &Arc<LocalIntentStore>,
+    store: &Arc<dyn IntentStore>,
 ) -> Result<Arc<tokio::sync::Mutex<PersistentServiceVipAllocator>>, error::ControlPlaneError> {
-    let intent_store: Arc<dyn IntentStore> = Arc::clone(store) as Arc<dyn IntentStore>;
+    let intent_store: Arc<dyn IntentStore> = Arc::clone(store);
     let allocator = PersistentServiceVipAllocator::bulk_load(vip_range.clone(), intent_store)
         .await
         .map_err(|err| {
@@ -4184,7 +4183,7 @@ async fn boot_server(
     // `boot_ca` and `bootstrap_node_intermediate` take `&dyn Kek`.
     let codec = root_key_codec;
     let kek_id = ca_boot::root_kek_id();
-    let intent_store: Arc<dyn IntentStore> = Arc::clone(&store) as Arc<dyn IntentStore>;
+    let intent_store: Arc<dyn IntentStore> = Arc::clone(&store);
 
     let _root = ca_boot::boot_ca(
         ca.as_ref(),

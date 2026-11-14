@@ -285,7 +285,7 @@ impl LivenessWorld {
                 probed_intent(probes, liveness_threshold, &kernel_path, &rootfs_path)
             }
         };
-        persist_intent(&store, &workload, &intent).await;
+        persist_intent(store.as_ref(), &workload, &intent).await;
 
         let obs = Arc::new(SimObservationStore::single_peer(node.clone(), 0));
         let clock = Arc::new(SimClock::new());

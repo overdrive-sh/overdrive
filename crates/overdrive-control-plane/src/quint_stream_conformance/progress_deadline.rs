@@ -54,7 +54,6 @@ use overdrive_core::aggregate::{DriverInput, IntentKey, ResourcesInput, Workload
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput, SubmitSpecInput};
 use overdrive_core::id::WorkloadId;
 use overdrive_core::observation::{ProbeIdx, ProbeRole};
-use overdrive_core::traits::intent_store::IntentStore as _;
 use overdrive_core::traits::observation_store::AllocState;
 use overdrive_core::transition_reason::{ServiceFailureReason, StoppedBy, TerminalCondition};
 use quint_connect::{Config, Driver, Result, State, Step, quint_run, quint_test, switch};

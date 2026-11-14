@@ -77,12 +77,15 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
+use bytes::Bytes;
+use futures::Stream;
 use overdrive_control_plane::api::{
     AllocStateWire, AllocStatusResponse, ClusterStatus, GatewayApplicationUnavailableCauseBody,
     GatewayConnectPathStatusBody, GatewayIdentityStatusBody, GatewayListenerStatusBody,
     GatewayStatusResponse, SubmitRouteResponse, SubmitWorkloadRequest,
 };
 use overdrive_control_plane::error::ControlPlaneError;
+use overdrive_control_plane::node_adapters::IntentStoreAdapter;
 use overdrive_control_plane::{
     BootAdapters, ComposedDataplane, DataplaneComposer, DataplanePlan, GatewayAdapters,
     ServerHandle, run_server_with_obs_and_driver,
@@ -107,7 +110,10 @@ use overdrive_core::traits::ca::{
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{Driver, DriverType};
 use overdrive_core::traits::entropy::Entropy;
-use overdrive_core::traits::intent_store::IntentStore;
+use overdrive_core::traits::intent_store::{
+    IntentStore, IntentStoreError, IntentSubscriptionEvent, PutOutcome, StateSnapshot, TxnOp,
+    TxnOutcome,
+};
 use overdrive_dataplane::allocators::VipRange;
 use overdrive_gateway::ports::{
     GatewayClientMtls, GatewayClientMtlsDeps, GatewayClientMtlsError, GatewayClientMtlsFactory,
@@ -118,6 +124,7 @@ use overdrive_gateway::ports::{
 use overdrive_gateway::{GatewayConfig, ManualCertifiedKeyConfig};
 use overdrive_host::ca::PublicCertifiedKeyAeadCodec;
 use overdrive_reconcilers::GatewaySvidLifecycle;
+use overdrive_reconcilers::vm_reclamation::VM_RECLAMATION_SWEEP_INTERVAL;
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::dataplane::SimDataplane;
 use overdrive_sim::adapters::driver::SimDriver;
@@ -127,7 +134,6 @@ use overdrive_sim::adapters::gateway::{
 };
 use overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner;
 use overdrive_sim::adapters::kek::SimKek;
-use overdrive_store_local::LocalIntentStore;
 use serial_test::serial;
 use tempfile::TempDir;
 use tracing::field::{Field, Visit};
@@ -179,6 +185,14 @@ impl EventCollector {
             .filter(|row| row.name == "health.startup.refused")
             .filter_map(|row| row.fields.get("reason").cloned())
             .collect()
+    }
+
+    /// Whether the graceful shutdown has completed `stage`.
+    fn shutdown_stage_completed(&self, stage: &str) -> bool {
+        self.0.lock().expect("event collector lock").iter().any(|row| {
+            row.name == "serve.shutdown.stage_complete"
+                && row.fields.get("stage").is_some_and(|completed| completed == stage)
+        })
     }
 
     /// The `stage` field of every shutdown stage event, in emission order.
@@ -628,6 +642,105 @@ impl Spec {
     }
 }
 
+/// Parks one `scan_prefix` of the node's intent store until released. The
+/// scan is parked inside the caller's turn, so whatever task made it cannot
+/// finish while the gate holds.
+struct ScanGate {
+    armed: AtomicBool,
+    parked: tokio::sync::Notify,
+    released: tokio::sync::watch::Sender<bool>,
+}
+
+impl ScanGate {
+    fn new() -> Self {
+        let (released, _) = tokio::sync::watch::channel(false);
+        Self { armed: AtomicBool::new(false), parked: tokio::sync::Notify::new(), released }
+    }
+
+    /// The next `scan_prefix` parks.
+    fn arm(&self) {
+        self.armed.store(true, Ordering::SeqCst);
+    }
+
+    /// Resolves once a scan is parked.
+    async fn parked(&self) {
+        self.parked.notified().await;
+    }
+
+    /// Lets the parked scan, and every later one, proceed.
+    fn release(&self) {
+        self.released.send_replace(true);
+    }
+
+    async fn pass(&self) {
+        if self.armed.swap(false, Ordering::SeqCst) {
+            self.parked.notify_one();
+            let mut released = self.released.subscribe();
+            drop(
+                released
+                    .wait_for(|released| *released)
+                    .await
+                    .expect("the gate owns its release channel"),
+            );
+        }
+    }
+}
+
+/// The node's intent store behind the `IntentStore` port: every call goes to
+/// the real store, and `scan_prefix` first passes the [`ScanGate`].
+struct GatedIntentStore {
+    inner: Arc<dyn IntentStore>,
+    gate: Arc<ScanGate>,
+}
+
+#[async_trait]
+impl IntentStore for GatedIntentStore {
+    async fn get(&self, key: &[u8]) -> Result<Option<Bytes>, IntentStoreError> {
+        self.inner.get(key).await
+    }
+
+    async fn put(&self, key: &[u8], value: &[u8]) -> Result<(), IntentStoreError> {
+        self.inner.put(key, value).await
+    }
+
+    async fn put_if_absent(
+        &self,
+        key: &[u8],
+        value: &[u8],
+    ) -> Result<PutOutcome, IntentStoreError> {
+        self.inner.put_if_absent(key, value).await
+    }
+
+    async fn delete(&self, key: &[u8]) -> Result<(), IntentStoreError> {
+        self.inner.delete(key).await
+    }
+
+    async fn txn(&self, ops: Vec<TxnOp>) -> Result<TxnOutcome, IntentStoreError> {
+        self.inner.txn(ops).await
+    }
+
+    async fn watch(
+        &self,
+        prefix: &[u8],
+    ) -> Result<Box<dyn Stream<Item = IntentSubscriptionEvent> + Send + Unpin>, IntentStoreError>
+    {
+        self.inner.watch(prefix).await
+    }
+
+    async fn scan_prefix(&self, prefix: &[u8]) -> Result<Vec<(Bytes, Bytes)>, IntentStoreError> {
+        self.gate.pass().await;
+        self.inner.scan_prefix(prefix).await
+    }
+
+    async fn export_snapshot(&self) -> Result<StateSnapshot, IntentStoreError> {
+        self.inner.export_snapshot().await
+    }
+
+    async fn bootstrap_from(&self, snapshot: StateSnapshot) -> Result<(), IntentStoreError> {
+        self.inner.bootstrap_from(snapshot).await
+    }
+}
+
 /// One production boot of the node, plus the doubles it was composed over.
 struct World {
     _tmp: TempDir,
@@ -646,7 +759,9 @@ struct World {
     handle: Option<ServerHandle>,
     /// The node's intent store, the same instance the boot composes: the
     /// driven port a Route-set fault is delivered through (S-PIG-140).
-    intent: Arc<LocalIntentStore>,
+    intent: Arc<dyn IntentStore>,
+    /// Parks one `scan_prefix` of `intent` (S-PIG-141).
+    scan_gate: Arc<ScanGate>,
     client: reqwest::Client,
     base: String,
 }
@@ -708,7 +823,13 @@ impl World {
         };
 
         let mut boot: BootAdapters = super::node_adapters::boot_adapters(&config);
-        let intent = Arc::clone(boot.stores.intent.store());
+        let scan_gate = Arc::new(ScanGate::new());
+        let intent: Arc<dyn IntentStore> = Arc::new(GatedIntentStore {
+            inner: Arc::clone(boot.stores.intent.store()),
+            gate: Arc::clone(&scan_gate),
+        });
+        boot.stores.intent =
+            IntentStoreAdapter::new(Arc::clone(&intent), boot.stores.intent.path().to_path_buf());
         boot.clock = Arc::clone(&clock_port);
         boot.dataplane =
             Arc::new(FixtureComposer { dataplane: Arc::clone(&dataplane), connect: capability });
@@ -758,6 +879,7 @@ impl World {
             authenticate_calls,
             handle: Some(handle),
             intent,
+            scan_gate,
             client,
             base: format!("https://localhost:{}", bound.port()),
         }
@@ -1924,52 +2046,22 @@ async fn a_well_formed_envelope_holding_an_invalid_route_is_a_typed_500_route_de
     world.shutdown().await;
 }
 
-/// A client that issues one Route command after another against the operator
-/// listener until told to stop, so a command is always queued or awaiting its
-/// reply while the node shuts down. `post` selects `POST /v1/routes` (a
-/// declare of the stored Route, which never conflicts) or `DELETE` of another
-/// Route's ID (which never writes). It returns every answer it received;
-/// transport errors (the listener already closed) are not answers.
-fn keep_a_route_command_in_flight(
-    client: reqwest::Client,
-    base: String,
-    post: bool,
-    answered: Arc<AtomicU32>,
-    stop: Arc<AtomicBool>,
-) -> tokio::task::JoinHandle<Vec<RouteReply>> {
-    tokio::spawn(async move {
-        let mut answers = Vec::new();
-        while !stop.load(Ordering::SeqCst) {
-            let sent = if post {
-                client.post(format!("{base}/v1/routes")).json(&route_input("/")).send().await
-            } else {
-                client.delete(format!("{base}/v1/routes/{OTHER_ROUTE_ID}")).send().await
-            };
-            match sent {
-                Ok(response) => {
-                    answers.push(World::reply(response).await.expect("read the reply"));
-                    answered.fetch_add(1, Ordering::SeqCst);
-                }
-                Err(_) => tokio::time::sleep(Duration::from_millis(1)).await,
-            }
-        }
-        answers
-    })
-}
-
-/// S-PIG-141 (R-67), shutdown arm: a Route command queued, awaiting its reply,
-/// or sent after the gateway stage of the graceful shutdown ended the Route
-/// owner, while the operator listener still drains, answers the typed 503
-/// `gateway_owner_unavailable`; the Route set in the store is unchanged.
+/// S-PIG-141 (R-67), shutdown arm: a Route command sent after the gateway
+/// stage of the graceful shutdown ended the Route owner, while the operator
+/// listener still serves, answers the typed 503 `gateway_owner_unavailable`;
+/// the Route set in the store is unchanged.
 ///
-/// One command of each method is kept in flight continuously across the
-/// shutdown (R-67 (5)): the window between the end of the Route owner and the
-/// close of the operator listener is not bounded in width, so sampling it
-/// would be a race, whereas a command that is queued or awaiting its reply
-/// when the owner is cancelled is answered `OwnerUnavailable` by construction.
-/// Every answer before the owner ends is a success or a Route conflict (the
-/// DELETE names another Route, so it never writes); the first other answer of
-/// each method must be the 503, and each method must have received it.
+/// The window between the end of the Route owner and the close of the operator
+/// listener is the join time of the convergence, emit-drain and
+/// interest-router stages (R-67 (5)); the ordering does not bound its width,
+/// so a command sampled inside it would race the listener. The test holds the
+/// window open through the `IntentStore` port: the `vm-reclamation` resync due
+/// after `VM_RECLAMATION_SWEEP_INTERVAL` scans the workloads prefix inside a
+/// convergence tick, the gate parks that scan, and the convergence stage of the
+/// shutdown, which joins the active tick, cannot finish until the test releases
+/// it. The gateway stage completes first, so with the Route owner ended and the
+/// listener open, one command of each method is answered 503. The release then
+/// lets the shutdown complete cleanly.
 ///
 /// The refused-boot arm of S-PIG-141 takes a no-obligation ruling (R-67 (5)):
 /// every refusal after G1 precedes the spawn of the operator listener's
@@ -1985,63 +2077,50 @@ async fn a_route_owner_that_ended_in_shutdown_answers_503_gateway_owner_unavaila
     let before = world.stored_route_set().await;
     assert!(before.is_some(), "the declared Route is stored");
 
-    let stop = Arc::new(AtomicBool::new(false));
-    let (posts_answered, deletes_answered) =
-        (Arc::new(AtomicU32::new(0)), Arc::new(AtomicU32::new(0)));
-    let poster = keep_a_route_command_in_flight(
-        world.client.clone(),
-        world.base.clone(),
-        true,
-        Arc::clone(&posts_answered),
-        Arc::clone(&stop),
-    );
-    let deleter = keep_a_route_command_in_flight(
-        world.client.clone(),
-        world.base.clone(),
-        false,
-        Arc::clone(&deletes_answered),
-        Arc::clone(&stop),
-    );
-    // Both clients are live (each has been answered once) before the shutdown
-    // starts, so each has a command in flight from then on.
-    let live_deadline = Instant::now() + WAIT;
-    while posts_answered.load(Ordering::SeqCst) == 0 || deletes_answered.load(Ordering::SeqCst) == 0
-    {
-        assert!(Instant::now() < live_deadline, "the Route command clients never got an answer");
-        tokio::time::sleep(Duration::from_millis(1)).await;
-    }
+    world.scan_gate.arm();
+    world.clock.tick(VM_RECLAMATION_SWEEP_INTERVAL + TICK);
+    tokio::time::timeout(WAIT, world.scan_gate.parked())
+        .await
+        .expect("the vm-reclamation resync parked its workloads scan inside a convergence tick");
 
     let handle = world.handle.take().expect("the server handle");
     let clock = Arc::clone(&world.clock);
     let mut shutdown = std::pin::pin!(handle.shutdown(Duration::from_secs(5)));
     let shutdown_deadline = Instant::now() + WAIT;
+    let mut window_answered = false;
     loop {
         assert!(Instant::now() < shutdown_deadline, "the graceful shutdown never completed");
+        if !window_answered && events().shutdown_stage_completed("gateway") {
+            let message = "public Route owner is unavailable";
+            world.route_post("/").await.assert_typed(
+                503,
+                "gateway_owner_unavailable",
+                message,
+                "POST",
+            );
+            world.route_delete(OTHER_ROUTE_ID).await.assert_typed(
+                503,
+                "gateway_owner_unavailable",
+                message,
+                "DELETE",
+            );
+            world.scan_gate.release();
+            window_answered = true;
+        }
         tokio::select! {
             biased;
-            result = &mut shutdown => { result.expect("graceful shutdown"); break; }
+            result = &mut shutdown => {
+                assert!(
+                    window_answered,
+                    "the shutdown ended before the Route owner's window was answered"
+                );
+                result.expect("graceful shutdown");
+                break;
+            }
             () = tokio::time::sleep(Duration::from_millis(5)) => clock.tick(TICK),
         }
     }
-    stop.store(true, Ordering::SeqCst);
-    let posts = poster.await.expect("the declare client");
-    let deletes = deleter.await.expect("the delete client");
 
-    let message = "public Route owner is unavailable";
-    for (what, answers) in [("POST", &posts), ("DELETE", &deletes)] {
-        let first_refusal = answers
-            .iter()
-            .find(|reply| !(reply.status < 300 || reply.status == 409))
-            .unwrap_or_else(|| panic!("{what}: no command was refused by the shutdown window"));
-        first_refusal.assert_typed(503, "gateway_owner_unavailable", message, what);
-        assert!(
-            answers
-                .iter()
-                .skip_while(|reply| reply.status < 300 || reply.status == 409)
-                .all(|reply| reply.status == 503),
-            "{what}: after the first refusal every answer is the 503; {answers:?}"
-        );
-    }
     assert_eq!(
         world.stored_route_set().await,
         before,

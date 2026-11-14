@@ -13,7 +13,6 @@ use overdrive_control_plane::handlers::submit_workload;
 use overdrive_core::aggregate::{AggregateError, ProbeDescriptor, ProbeMechanic, Service};
 use overdrive_core::api::submit::SubmitSpecInput;
 use overdrive_core::observation::{ProbeIdx, ProbeRole};
-use overdrive_core::traits::intent_store::IntentStore;
 use tower::ServiceExt as _;
 
 use super::service_stream_support::{Node, service_spec};

@@ -204,7 +204,7 @@ async fn production_owner_replacement_case(driver_type: DriverType) {
     let clock = Arc::new(SimClock::new());
     let vm = VmComposition::boot().await;
     let mut state = AppState::new(
-        Arc::clone(&intent),
+        Arc::clone(&intent) as Arc<dyn overdrive_core::traits::intent_store::IntentStore>,
         intent_path,
         Arc::clone(&observations) as Arc<dyn ObservationStore>,
         Arc::new(runtime),

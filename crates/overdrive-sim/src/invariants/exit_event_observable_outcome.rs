@@ -106,7 +106,6 @@ use overdrive_core::aggregate::{
 use overdrive_core::id::{AllocationId, NodeId};
 use overdrive_core::reconcilers::{ReconcilerName, TargetResource};
 use overdrive_core::traits::driver::{Driver, DriverType, ExitKind};
-use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{
     AllocState, ObservationStore, ObservationStoreError,
 };

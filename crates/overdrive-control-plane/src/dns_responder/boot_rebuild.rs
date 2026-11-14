@@ -43,7 +43,7 @@ use std::sync::Arc;
 
 use overdrive_core::aggregate::{WorkloadIntent, scan_workload_intents};
 use overdrive_core::id::MeshServiceName;
-use overdrive_store_local::LocalIntentStore;
+use overdrive_core::traits::intent_store::IntentStore;
 use thiserror::Error;
 
 use super::frontend_addr_allocator::{FrontendAddrAllocator, FrontendAddrExhausted};
@@ -120,7 +120,7 @@ pub enum FrontendRebuildError {
 /// [`FrontendRebuildError::Exhausted`] when a declared `<workload>` cannot be
 /// assigned because the frontend block is full.
 pub async fn rebuild_frontend_addrs_from_intent(
-    store: &Arc<LocalIntentStore>,
+    store: &Arc<dyn IntentStore>,
     intent_redb_path: &Path,
     allocator: &FrontendAddrAllocator,
 ) -> Result<(), FrontendRebuildError> {

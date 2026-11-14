@@ -24,7 +24,6 @@ use overdrive_core::id::{NodeId, ServiceId, ServiceVip};
 use overdrive_core::reconcilers::TargetResource;
 use overdrive_core::traits::dataplane::Backend;
 use overdrive_core::traits::driver::{Driver, DriverType};
-use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{
     LogicalTimestamp, ObservationStore, ServiceBackendRow,
 };

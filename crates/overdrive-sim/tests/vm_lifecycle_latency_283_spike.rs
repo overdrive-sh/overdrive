@@ -1180,7 +1180,7 @@ async fn view_fsync_failure_prevents_dispatch_and_recovers() {
 /// and resulting allocation; no stored/hot View or allocation row is seeded.
 async fn runtime_job_input(state: &overdrive_control_plane::AppState, id: &str) {
     use overdrive_core::aggregate::{IntentKey, Job, WorkloadIntent};
-    use overdrive_core::traits::intent_store::{IntentStore, TxnOp, TxnOutcome};
+    use overdrive_core::traits::intent_store::{TxnOp, TxnOutcome};
     let job = Job::from_submit(JobSpecInput {
         id: id.to_owned(),
         replicas: 1,

@@ -28,7 +28,6 @@ use overdrive_core::aggregate::{DriverInput, IntentKey, Job, JobSpecInput, Resou
 use overdrive_core::id::{AllocationId, NodeId};
 use overdrive_core::reconcilers::TargetResource;
 use overdrive_core::traits::driver::{Driver, DriverType, ExitKind};
-use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, ObservationStore};
 use overdrive_core::transition_reason::TransitionReason;
 use overdrive_sim::adapters::clock::SimClock;

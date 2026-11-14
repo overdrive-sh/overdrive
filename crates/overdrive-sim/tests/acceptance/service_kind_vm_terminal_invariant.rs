@@ -580,7 +580,7 @@ async fn seeded_probe_result_wake_converges_vm_readiness_without_restart() {
         .await
         .expect("the fixture starts the shared intercept owner before allocation dispatch");
     let state = AppState::new(
-        Arc::clone(&store),
+        Arc::clone(&store) as Arc<dyn overdrive_core::traits::intent_store::IntentStore>,
         temp.path().join("intent.redb"),
         obs.clone(),
         runtime.clone(),

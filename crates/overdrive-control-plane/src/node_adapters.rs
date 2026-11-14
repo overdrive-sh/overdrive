@@ -19,6 +19,7 @@ use overdrive_core::traits::cgroup_fs::CgroupFs;
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::dataplane::Dataplane;
 use overdrive_core::traits::entropy::Entropy;
+use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::mtls_enforcement::MtlsEnforcementFactory;
 use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_core::traits::prober::{HttpProber, TcpProber};
@@ -208,14 +209,14 @@ impl StoreAdapters {
     }
 }
 
-/// The node's intent store (Phase-1 single mode: `LocalIntentStore` over
-/// redb) and the path of its file. The path travels with the store, so the
-/// CA boot's refuse-to-start remediations, the listener-fact rebuild and
+/// The node's intent store, held behind the `IntentStore` port (Phase-1
+/// single mode: `LocalIntentStore` over redb), and the path of its file. The
+/// path travels with the store, so the CA boot's refuse-to-start remediations, the listener-fact rebuild and
 /// `HydrationContext::intent_redb_path` name the file that was opened. Not
 /// `Clone`, for the reason `StoreAdapters` is not; the boot shares the store
 /// through `store().clone()` of the `Arc`.
 pub struct IntentStoreAdapter {
-    store: Arc<LocalIntentStore>,
+    store: Arc<dyn IntentStore>,
     path: PathBuf,
 }
 
@@ -228,16 +229,25 @@ impl IntentStoreAdapter {
     /// `ControlPlaneError::Internal` ("open LocalIntentStore").
     pub fn open(data_dir: &Path) -> Result<Self, ControlPlaneError> {
         let path = data_dir.join("intent.redb");
-        let store = Arc::new(
+        let store: Arc<dyn IntentStore> = Arc::new(
             LocalIntentStore::open(&path)
                 .map_err(|e| ControlPlaneError::internal("open LocalIntentStore", e))?,
         );
-        Ok(Self { store, path })
+        Ok(Self::new(store, path))
     }
 
-    /// The opened store.
+    /// An adapter over an intent store already opened at `path`. The boot
+    /// holds the store only behind the `IntentStore` port, so a composition
+    /// that interposes on the port (a test wrapping the opened store) builds
+    /// the adapter here.
     #[must_use]
-    pub const fn store(&self) -> &Arc<LocalIntentStore> {
+    pub const fn new(store: Arc<dyn IntentStore>, path: PathBuf) -> Self {
+        Self { store, path }
+    }
+
+    /// The opened store, behind the `IntentStore` port.
+    #[must_use]
+    pub const fn store(&self) -> &Arc<dyn IntentStore> {
         &self.store
     }
 

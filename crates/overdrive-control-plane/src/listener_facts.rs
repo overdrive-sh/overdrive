@@ -46,9 +46,9 @@ use async_trait::async_trait;
 use overdrive_core::aggregate::{Listener, WorkloadIntent, scan_workload_intents};
 use overdrive_core::id::{ServiceId, ServiceVip, WorkloadId};
 use overdrive_core::traits::ListenerFacts;
+use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::ListenerRow;
 use overdrive_dataplane::allocators::PersistentServiceVipAllocator;
-use overdrive_store_local::LocalIntentStore;
 
 use crate::reconciler_runtime::ConvergenceError;
 
@@ -251,7 +251,7 @@ impl ListenerFactStore {
     /// fails. A per-record decode failure or a UTF-8-invalid key is
     /// skipped (not fatal) — it is not a listener fact.
     pub async fn rebuild_from_intent(
-        store: &Arc<LocalIntentStore>,
+        store: &Arc<dyn IntentStore>,
         intent_redb_path: &Path,
         allocator: &Arc<tokio::sync::Mutex<PersistentServiceVipAllocator>>,
     ) -> Result<Self, ConvergenceError> {

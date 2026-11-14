@@ -45,7 +45,6 @@ use overdrive_core::observation::probe_result_row::{
     ProbeIdx, ProbeResultRow, ProbeRole, ProbeStatus,
 };
 use overdrive_core::traits::driver::{Driver, DriverType};
-use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRow, LogicalTimestamp, ObservationStore,
 };

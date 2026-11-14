@@ -82,16 +82,16 @@ use tempfile::TempDir;
 /// `frontend_addr_allocator` field is default-constructed (empty) inside the
 /// `AppState` constructor. Returns `(state, store, redb_path)` so the boot
 /// rebuild tests can drive the same store the state carries.
-fn build_app_state(tmp: &TempDir) -> (AppState, Arc<LocalIntentStore>, std::path::PathBuf) {
+fn build_app_state(tmp: &TempDir) -> (AppState, Arc<dyn IntentStore>, std::path::PathBuf) {
     let runtime =
         ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime");
     let store_path = tmp.path().join("intent.redb");
-    let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
+    let store: Arc<dyn IntentStore> =
+        Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(NodeId::from_str("local").expect("NodeId"), 0));
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Vm));
-    let allocator =
-        overdrive_control_plane::test_default_allocator(Arc::clone(&store) as Arc<dyn IntentStore>);
+    let allocator = overdrive_control_plane::test_default_allocator(Arc::clone(&store));
     let state = AppState::new(
         Arc::clone(&store),
         store_path.clone(),
@@ -172,7 +172,7 @@ fn job_name(id: &str) -> MeshServiceName {
 /// `submit_workload` left it): write the `WorkloadIntent::Service` envelope at
 /// `IntentKey::for_workload(<id>)`. Does NOT touch the allocator — that is the
 /// rebuild's job.
-async fn seed_declared_service(store: &Arc<LocalIntentStore>, id: &str) {
+async fn seed_declared_service(store: &Arc<dyn IntentStore>, id: &str) {
     let service =
         Service::from_submit(service_spec(id, vec![(8080, "tcp")])).expect("valid service spec");
     let intent = WorkloadIntent::Service(service);
@@ -197,7 +197,7 @@ fn workload_id(id: &str) -> overdrive_core::id::WorkloadId {
 /// two disjuncts of that `||` to differ observably, so this sub-key-with-Service
 /// payload is what kills the `||`→`&&` mutant.
 async fn seed_service_payload_at_sub_key(
-    store: &Arc<LocalIntentStore>,
+    store: &Arc<dyn IntentStore>,
     sub_key: &str,
     payload_id: &str,
 ) {

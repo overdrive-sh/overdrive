@@ -31,7 +31,6 @@ use overdrive_core::aggregate::{
 };
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::traits::driver::{Driver, DriverType};
-use overdrive_core::traits::intent_store::IntentStore as _;
 use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRow, LogicalTimestamp, ObservationStore,
 };
