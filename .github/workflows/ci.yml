@@ -779,21 +779,84 @@ jobs:
       - name: cargo xtask quint typecheck
         run: cargo xtask quint typecheck
 
-      - name: cargo xtask quint check --ci
-        run: cargo xtask quint check --ci
-
       # Each subsystem's evidence/ must be the recorded run of the specs as
       # committed (`cargo xtask quint check --subsystem <dir> --record`):
       # fails on a stale summary.json or a recorded outcome that missed its
-      # `expect`. Reads files only.
+      # `expect`. Reads files only. The per-subsystem checks run in
+      # `quint-check` below.
       - name: cargo xtask quint verify-evidence
         run: cargo xtask quint verify-evidence
+
+  # Discovery: one shard per directory under specs/quint/, so a new
+  # subsystem is checked without editing this file. A directory without a
+  # checks.toml still gets a shard, and `quint check --subsystem` fails on
+  # it, rather than the directory being skipped.
+  quint-subsystems:
+    name: quint subsystems
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.list.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: List specs/quint subsystems
+        id: list
+        run: |
+          set -euo pipefail
+          subsystems=$(find specs/quint -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort)
+          [ -n "$subsystems" ] || { echo "::error::no subsystem under specs/quint"; exit 1; }
+          matrix=$(printf '%s\n' "$subsystems" | jq -R . | jq -sc '{subsystem: .}')
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          echo "$matrix"
+
+  # The `ci = true` entries of each subsystem's checks.toml, one runner per
+  # subsystem (Apalache / TLC via `quint verify`); a check passes only when
+  # its outcome matches its `expect`, and a tool error always fails.
+  # `--tlc-workers 2`: a TLC check reserves its worker count as CPUs, and
+  # ubuntu-latest has 4, so the default of 4 ran one TLC check at a time
+  # although memory admits two.
+  quint-check:
+    name: cargo xtask quint check (${{ matrix.subsystem }})
+    needs: quint-subsystems
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.quint-subsystems.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # mold is the linker per .cargo/config.toml; ubuntu-latest does
+      # not ship it.
+      - name: Install mold linker
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends mold
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "quint"
+
+      - name: Cache Quint toolchain
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/quint-toolchain
+          key: quint-toolchain-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('infra/provision/install-quint.sh') }}
+
+      - name: Install Quint toolchain
+        run: |
+          bash infra/provision/install-quint.sh "$HOME/.cache/quint-toolchain"
+          echo "$HOME/.cache/quint-toolchain/bin" >> "$GITHUB_PATH"
+
+      - name: cargo xtask quint check --ci
+        run: cargo xtask quint check --ci --subsystem "${{ matrix.subsystem }}" --tlc-workers 2
 
       - name: Upload Quint logs and traces
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: quint-results
+          name: quint-results-${{ matrix.subsystem }}
           path: target/quint/
           if-no-files-found: ignore
 
