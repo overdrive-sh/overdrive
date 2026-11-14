@@ -540,7 +540,7 @@ Contract shape per `.claude/rules/design.md` principle: **pure-function** = valu
 | Module and binary host-pure declarations (`placement!`, `overdrive_test_default!`) | none | **CREATE NEW** (approved 2026-11-14, DDD-4) | Otherwise 3,855 per-test sites. pure-function: tokens in, one named item holding one record `static` out; universe = the declaration's own item; they reference no runtime crate. |
 | Table, lookup, dispatcher binary, `--guest-suite` mode, `OVERDRIVE_METAL_TEST_DISPATCHER`, body-count constants | present | **DELETE** (US-08) | Replaced as above. |
 | `overdrive-guest-peer`, `guest-kit-prepare`, `bootstrap.sh` grammar | present | **EXTEND** | Prepare builds the owner binary where it built the dispatcher; the ordinary grammar swaps the dispatcher bin for `placement-lint`. `guest-kit-prepare`: bounded-change, delta = the owner binary under `target/guest-kit/` beside the artifacts it already builds. |
-| Ambient reads: `inside_guest()`, `in_metal_run()`, `NEXTTEST_BINARY_ID` | partly present (`inside_guest`) | **EXTEND** | pure-function cores `metal_run_context_present(run_id, execution_class, source_root)` and the scope-key function (§ Shared-guest scope); the zero-argument `inside_guest()` and `in_metal_run()` and the binary-id read are read-only shell edges feeding them, so tests inject the inputs to the cores and never mutate process environment. |
+| Ambient reads: `inside_guest()`, `in_metal_run()`, `NEXTTEST_BINARY_ID` | partly present (`inside_guest`) | **EXTEND** | a pure-function core for the run-context predicate (its shape is the crafter's, D-4) and the scope-key function (§ Shared-guest scope); the zero-argument `inside_guest()` and `in_metal_run()` and the binary-id read are read-only shell edges feeding them, so tests inject the inputs to the cores and never mutate process environment. |
 
 ## Wave: DESIGN / [REF] Components and ports
 
@@ -957,7 +957,7 @@ State fields and their accessor: `guest` → `OwnerObservation::guest`; `gen` �
 | `I_OWNER_UNIQUE` | the election lock is the kernel's, and the conformance instance starts with the owner present | Tier-3: eight simultaneous first arrivals elect exactly one owner (V-5), on the production lock path |
 | `I_NO_ORPHAN` | an owner crash leaves no process to receive an event | Tier-3: SIGKILL of the owner during a guest exec leaves no VMM (V-4) |
 
-Every other invariant (`I_SERIAL`, `I_NO_REUSE`, `I_DETACH_NO_CANCEL`, `I_DELIVER_ONLY_ATTACHED`, `I_IDLE_NO_LOSS`, `EveryClientTerminates`) is constrained by actions `guest_conf` replays. DISTILL records one exemption row per invariant in the table, naming the Tier-3 scenario.
+`I_SERIAL`, `I_NO_REUSE`, `I_DETACH_NO_CANCEL` and `I_IDLE_NO_LOSS` are constrained by actions `guest_conf` replays. `I_DELIVER_ONLY_ATTACHED` and `EveryClientTerminates` concern replies, which replay does not observe; the `OwnerCore` oracle properties (Section A of `distill/test-scenarios.md`) discharge them. DISTILL records one exemption row per invariant in the table, naming the Tier-3 scenario.
 
 ## Wave: DESIGN / [REF] Lifecycle Gate Ownership
 
