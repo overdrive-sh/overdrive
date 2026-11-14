@@ -11,7 +11,7 @@ Run on the native Metal box (`cargo xtask metal run -- cargo nextest run -p over
 
 ## Correction: no table entries
 
-The run above was taken with 88 transitional entries in `infra/metal/test-placement.json`. DISTILL adds no such entry; they are removed. The 64 pending tests above keep their classification. The tests that were active (GREEN) when this run was taken, with the fixtures they drive, are now pending too, because no placement form exists for them yet (host-pure, native-launcher) or none can place them (design gap D-10): their RED classification is taken when their slice activates them, and they were not re-run with `--run-ignored`.
+The run above was taken with 88 transitional entries in `infra/metal/test-placement.json`. DISTILL adds no such entry; they are removed. The 64 pending tests above keep their classification. The tests that were active (GREEN) when this run was taken, with the fixtures they drive, are now pending too, because no placement form exists for them yet (host-pure, native-launcher; the Metal scenarios that observe the host take `native_launcher`, design gap D-10): their RED classification is taken when their slice activates them, and they were not re-run with `--run-ignored`.
 
 ## Pending tests
 
