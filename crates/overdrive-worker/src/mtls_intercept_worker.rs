@@ -941,7 +941,10 @@ struct CapabilityDrain {
 
 enum PublishDisposition {
     Published,
-    Retired(EnforcedConnection),
+    /// The capability is no longer Active, so the handle was not published.
+    /// The claim comes back still counted in flight: retirement stays parked
+    /// until the caller has torn the late handle down and dropped the claim.
+    Retired(EnforcedConnection, CapabilityClaim),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1272,27 +1275,25 @@ impl CapabilityClaim {
     }
 
     fn publish(mut self, handle: EnforcedConnection) -> PublishDisposition {
-        let disposition = {
+        let late = {
             let mut state = self.inner.state.lock();
             match state.records.get_mut(&self.key) {
-                Some(record) => {
+                Some(record) if record.lifecycle == CapabilityLifecycle::Active => {
                     record.in_flight = record.in_flight.saturating_sub(1);
-                    match record.lifecycle {
-                        CapabilityLifecycle::Active => {
-                            record.handles.push(handle);
-                            PublishDisposition::Published
-                        }
-                        CapabilityLifecycle::Pending | CapabilityLifecycle::Retiring => {
-                            PublishDisposition::Retired(handle)
-                        }
-                    }
+                    record.handles.push(handle);
+                    None
                 }
-                None => PublishDisposition::Retired(handle),
+                _ => Some(handle),
             }
         };
-        self.completed = true;
-        self.inner.wake.notify_waiters();
-        disposition
+        match late {
+            None => {
+                self.completed = true;
+                self.inner.wake.notify_waiters();
+                PublishDisposition::Published
+            }
+            Some(handle) => PublishDisposition::Retired(handle, self),
+        }
     }
 
     fn release(mut self) {
@@ -1861,10 +1862,16 @@ mod capability_registry_acceptance {
         assert!(!waiting.is_finished(), "one remaining claim keeps retirement parked");
         let late = handle(&allocation, 1);
         let disposition = claim_b.publish(late);
-        assert!(matches!(disposition, PublishDisposition::Retired(_)));
-        let PublishDisposition::Retired(late) = disposition else {
+        assert!(matches!(disposition, PublishDisposition::Retired(..)));
+        let PublishDisposition::Retired(late, claim_b) = disposition else {
             unreachable!();
         };
+        tokio::task::yield_now().await;
+        assert!(
+            !waiting.is_finished(),
+            "retirement stays parked until the late handle is released"
+        );
+        drop(claim_b);
         assert_eq!(late.id().alloc(), &allocation);
         let mut drain = waiting.await.expect("last claim wakes retirement");
         assert!(drain.take_handles().is_empty(), "late handle is never published");
@@ -1944,7 +1951,7 @@ mod capability_registry_acceptance {
         let retirement = registry.begin_retire(&predecessor).expect("retire generation A");
         let waiter = tokio::spawn(async move { retirement.wait_for_claims().await });
         let late = handle(&predecessor, 21);
-        assert!(matches!(stale.publish(late), PublishDisposition::Retired(_)));
+        assert!(matches!(stale.publish(late), PublishDisposition::Retired(..)));
         let mut predecessor_drain = waiter.await.expect("generation A drain wakes");
         assert!(predecessor_drain.take_handles().is_empty());
         predecessor_drain.complete();
@@ -3145,8 +3152,9 @@ impl MtlsInterceptWorker {
             match enforcement.enforce(connection).await {
                 Ok(handle) => match claim.publish(handle) {
                     PublishDisposition::Published => {}
-                    PublishDisposition::Retired(handle) => {
+                    PublishDisposition::Retired(handle, claim) => {
                         let _ = enforcement.teardown(handle).await;
+                        drop(claim);
                     }
                 },
                 Err(source) => {
@@ -3187,8 +3195,9 @@ impl MtlsInterceptWorker {
                     }
                     match claim.publish(handle) {
                         PublishDisposition::Published => {}
-                        PublishDisposition::Retired(handle) => {
+                        PublishDisposition::Retired(handle, claim) => {
                             let _ = enforcement.teardown(handle).await;
+                            drop(claim);
                             registration.close();
                         }
                     }
