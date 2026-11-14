@@ -36,8 +36,10 @@
 //!   (c) trust-triple config remains on disk after serve shutdown
 
 use std::net::SocketAddr;
+use std::panic::{AssertUnwindSafe, resume_unwind};
 use std::path::{Path, PathBuf};
 
+use futures::FutureExt as _;
 use overdrive_cli::commands::cluster::StatusArgs as ClusterStatusArgs;
 use overdrive_cli::commands::deploy::DeployArgs;
 use overdrive_cli::commands::serve::ServeHandle;
@@ -139,7 +141,6 @@ fn local_spec_digest(spec_toml: &str) -> String {
 // -------------------------------------------------------------------
 
 #[tokio::test]
-#[allow(clippy::too_many_lines)] // The WS gate exercises three scenarios in one body.
 async fn walking_skeleton_ws1_ws2_ws3_post_adr_0020_wire_shape() {
     // Phase 1: serve — in-process axum+rustls on ephemeral port.
     // `run_server` writes the resolved-port trust triple to disk, so
@@ -150,13 +151,38 @@ async fn walking_skeleton_ws1_ws2_ws3_post_adr_0020_wire_shape() {
     let (handle, server_tmp) = spawn_server().await;
     let server_cfg = config_path(server_tmp.path());
 
+    // The WS-1..WS-3 sequence runs under `catch_unwind` so the server is shut
+    // down on a failing assertion too. Dropping the handle on unwind leaves the
+    // DNS responder's blocking `recvmsg` workers running (only `shutdown`
+    // stops them), and the test runtime's drop then waits on those workers
+    // until Nextest kills the test at its timeout instead of reporting the
+    // assertion.
+    let sequence =
+        AssertUnwindSafe(exercise_ws1_ws2_ws3(server_tmp.path(), &server_cfg)).catch_unwind().await;
+
+    // Phase 6: clean shutdown; trust-triple config persists on disk.
+    handle.shutdown().await.expect("clean shutdown");
+    if let Err(payload) = sequence {
+        resume_unwind(payload);
+    }
+    let post_shutdown_cfg = config_path(server_tmp.path());
+    assert!(
+        post_shutdown_cfg.exists(),
+        "trust-triple config must survive serve shutdown: {}",
+        post_shutdown_cfg.display(),
+    );
+}
+
+/// WS-1 / WS-2 / WS-3 against a running server (phases 2-5).
+#[allow(clippy::too_many_lines)] // The WS gate exercises three scenarios in one body.
+async fn exercise_ws1_ws2_ws3(server_dir: &Path, server_cfg: &Path) {
     // Phase 2 — WS-1: write the job spec, then submit via handler.
     // Post-ADR-0020 the submit response carries
     // `{workload_id, spec_digest, outcome}` — no `commit_index`.
-    let spec_path = write_toml(server_tmp.path(), "payments.toml", payments_toml_spec_str());
+    let spec_path = write_toml(server_dir, "payments.toml", payments_toml_spec_str());
     let submit_output = overdrive_cli::commands::deploy::deploy(DeployArgs {
         spec: spec_path.clone(),
-        config_path: server_cfg.clone(),
+        config_path: server_cfg.to_path_buf(),
     })
     .await
     .expect("deploy::deploy");
@@ -189,7 +215,7 @@ async fn walking_skeleton_ws1_ws2_ws3_post_adr_0020_wire_shape() {
     let status_output: WorkloadDescribeOutput =
         overdrive_cli::commands::workload::describe(DescribeArgs {
             id: "payments".to_string(),
-            config_path: server_cfg.clone(),
+            config_path: server_cfg.to_path_buf(),
         })
         .await
         .expect("workload::describe");
@@ -264,7 +290,7 @@ async fn walking_skeleton_ws1_ws2_ws3_post_adr_0020_wire_shape() {
     // auto-drain it (see `EvaluationBroker::drain_pending` — no
     // caller in Phase 1 production code).
     let cluster_status = overdrive_cli::commands::cluster::status(ClusterStatusArgs {
-        config_path: server_cfg.clone(),
+        config_path: server_cfg.to_path_buf(),
     })
     .await
     .expect("cluster::status");
@@ -295,7 +321,7 @@ async fn walking_skeleton_ws1_ws2_ws3_post_adr_0020_wire_shape() {
     // does NOT leak a raw Rust panic / reqwest format.
     let resubmit_output = overdrive_cli::commands::deploy::deploy(DeployArgs {
         spec: spec_path,
-        config_path: server_cfg.clone(),
+        config_path: server_cfg.to_path_buf(),
     })
     .await
     .expect("deploy::deploy (resubmit)");
@@ -314,10 +340,10 @@ async fn walking_skeleton_ws1_ws2_ws3_post_adr_0020_wire_shape() {
     );
 
     let altered_path =
-        write_toml(server_tmp.path(), "payments-altered.toml", payments_altered_toml_spec_str());
+        write_toml(server_dir, "payments-altered.toml", payments_altered_toml_spec_str());
     let conflict_err = overdrive_cli::commands::deploy::deploy(DeployArgs {
         spec: altered_path,
-        config_path: server_cfg,
+        config_path: server_cfg.to_path_buf(),
     })
     .await
     .expect_err("WS-3: a different spec at the same intent key must conflict");
@@ -337,15 +363,6 @@ async fn walking_skeleton_ws1_ws2_ws3_post_adr_0020_wire_shape() {
         }
         other => panic!("WS-3: expected CliError::HttpStatus {{ status: 409, .. }}; got {other:?}"),
     }
-
-    // Phase 6: clean shutdown; trust-triple config persists on disk.
-    handle.shutdown().await.expect("clean shutdown");
-    let post_shutdown_cfg = config_path(server_tmp.path());
-    assert!(
-        post_shutdown_cfg.exists(),
-        "trust-triple config must survive serve shutdown: {}",
-        post_shutdown_cfg.display(),
-    );
 }
 
 // -------------------------------------------------------------------
