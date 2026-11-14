@@ -22,11 +22,11 @@ at v7.0: the first child becomes the namespace's init (`kernel/fork.c:2239,
 SIGKILLs every other task (`kernel/pid_namespace.c:225-234`) and waits until
 all are freed (`:270-275`). Measured on the Metal kernel: no VMM survived the
 owner (gone within 38.6 ms over 13 cycles), and the production launcher worked
-inside the namespace. An owner that cannot create the namespace fails closed:
-the electing test gets a typed owner-start failure (the reachable case is a
-missing owner binary; the run is root, so a privilege refusal is not designed
-for). The owner calls `setsid` before it serves, so a group signal to the
-electing test's process group does not kill it.
+inside the namespace. The run is root, so a refusal of the namespace is not
+designed for; an absent owner binary is an unprepared kit, refused by the
+electing client as `LaneNotPrepared` before it takes the election lock. The
+owner calls `setsid` before it serves, so a group signal to the electing test's
+process group does not kill it.
 
 ## Alternatives
 
@@ -37,9 +37,9 @@ electing test's process group does not kill it.
 
 ## Consequences
 
-Inside the namespace `getpid()` is 1: the owner reads its host pid from
-`/proc/self` and never calls `waitpid(-1)` (it would steal the launcher's VMM
-wait status). When the owner exits is ADR-0293.
+The owner is a separate process kind with its own lifetime; when it exits is
+ADR-0293. Crafter notes for running inside the namespace are in the feature
+delta (DDD-8).
 
 ## Links
 

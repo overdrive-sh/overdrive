@@ -43,9 +43,7 @@ end of the command (ADR-0281).
 
 One extra process kind (the owner), prepared by `guest-kit-prepare`. Election
 is the kernel's lock, released when the holder dies, so a crashed elector or
-owner leaves no stale claim; after taking the lock a client connects once more
-and attaches if an owner already serves; a stale socket path is unlinked by the
-next owner.
+owner leaves no stale claim (election detail is in the feature delta, DDD-8).
 A client attached to a killed owner sees end of stream, which maps to an
 owner-loss failure. The protocol is specified in
 `specs/quint/shared-guest-owner/`.

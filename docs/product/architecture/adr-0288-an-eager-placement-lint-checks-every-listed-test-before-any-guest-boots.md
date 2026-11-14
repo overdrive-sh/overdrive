@@ -3,7 +3,7 @@
 ## Status
 
 **Approved by the user, 2026-11-14 (U-1), including the fixture-existence
-extension; independent DESIGN review pending.** DDD-3 in the feature delta.
+extension.** DDD-3 in the feature delta.
 
 ## Context
 
@@ -14,7 +14,8 @@ engineer already runs, before any guest boots.
 ## Decision
 
 A new `cargo xtask placement-lint` lists the workspace's tests with
-`--features integration-tests,kvm-tests` and applies the wrapper's own
+`integration-tests` and `kvm-tests` enabled (`kvm-tests` per package, for the
+members that declare it) and applies the wrapper's own
 resolution to every one (through `test-wrapper.sh --check-placement`, so one
 parser reads the record). It reports an unplaced test, a binary that mixes the
 binary default with a non-host-pure record, and a lane fixture that is not a
@@ -33,8 +34,11 @@ refusal stays as the last line of defence at run time.
 ## Consequences
 
 A second reader of the record exists only as the wrapper's reader invoked by
-the lint. The lint needs the test binaries built with both features, which the
-CI `integration` job already does.
+the lint. The lint needs the test binaries built with `kvm-tests`, a build no
+CI or pre-push lane makes today (the lanes build with `integration-tests`
+only), so it adds one test-binary compile to each lane that runs it; the
+estimate is in the feature delta (G-4). The lint reads ELF sections, so it runs
+on Linux, through the routing the nextest steps use.
 
 ## Links
 

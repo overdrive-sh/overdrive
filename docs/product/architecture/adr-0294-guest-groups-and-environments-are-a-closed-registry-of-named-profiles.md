@@ -41,7 +41,7 @@ the Quint runtime and the `specs/quint` tree (3.9 MB measured, of which the
 Adding a group or profile is one registry entry. The registry cannot live in the
 macro crate (a proc-macro crate cannot export types and `overdrive-testing`
 depends on it), which is why validation is by constant evaluation. The
-build-error text names the offending value and the known set (V-11).
+build-error text names the offending value (V-11).
 
 ## Links
 

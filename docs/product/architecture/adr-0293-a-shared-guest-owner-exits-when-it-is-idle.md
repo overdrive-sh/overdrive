@@ -25,7 +25,7 @@ closes its listener, so a successor that binds after the close never has its
 socket removed. The owner's guest dies with it (ADR-0290). The
 owner holds no handle on the nextest process. A client
 whose connection ends before the owner acknowledged its request has run nothing
-and re-attaches once through the election.
+and re-attaches once through the election (contract in the feature delta).
 
 ## Alternatives
 
@@ -45,10 +45,7 @@ and re-attaches once through the election.
 The period changes only the boot count, never a result. Closing a listening unix
 socket resets every connection still queued for `accept`
 (`net/unix/af_unix.c:721-723`, `:708-709` @ v7.0), so an attach racing the exit
-can be cut before acknowledgement; the one-time re-attach covers it, and a
-deterministic client-side test proves it (a listener that accepts and closes
-before the acknowledgement: one re-attach through the election, a second cut
-is a `GuestExecution` failure at stage `owner`).
+can be cut before acknowledgement; the one-time re-attach covers it.
 
 ## Links
 
