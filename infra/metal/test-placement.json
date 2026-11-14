@@ -10421,38 +10421,6 @@
       "guest_flow::quint_udp_slots::quint_udp_slots_two_sockets_claim_distinct_slots": {
         "kind": "host-pure"
       },
-      "guest_flow::real_kernel::a_burst_of_host_aborts_resets_every_application_connection": {
-        "kind": "guest-lane-owner",
-        "fixture": "integration::in_guest_lane::a_burst_of_host_aborts_resets_every_connection_in_a_real_guest"
-      },
-      "guest_flow::real_kernel::a_flow_aborted_before_its_v_g_is_accepted_ends_with_no_application_connection": {
-        "kind": "guest-lane-owner",
-        "fixture": "integration::in_guest_lane::a_host_abort_before_the_guest_accepts_ends_the_flow_in_a_real_guest"
-      },
-      "guest_flow::real_kernel::a_flow_aborted_by_session_loss_ends_and_the_session_is_held_again": {
-        "kind": "guest-lane-owner",
-        "fixture": "integration::in_guest_lane::a_session_loss_abort_ends_the_flow_and_the_owner_reconnects_in_a_real_guest"
-      },
-      "guest_flow::real_kernel::a_flow_the_host_closes_after_the_guest_accepted_it_ends_on_the_guest": {
-        "kind": "guest-lane-owner",
-        "fixture": "integration::in_guest_lane::a_host_close_after_the_guest_accepted_ends_the_flow_in_a_real_guest"
-      },
-      "guest_flow::real_kernel::an_abort_for_a_flow_the_guest_does_not_hold_changes_nothing_and_the_flow_ends_on_the_close": {
-        "kind": "guest-lane-owner",
-        "fixture": "integration::in_guest_lane::an_abort_for_an_unheld_flow_is_discarded_in_a_real_guest"
-      },
-      "guest_flow::real_kernel::tcp_correlation_preserves_exact_identity_and_cleans_transients_for_every_handshake_path": {
-        "kind": "guest-lane-owner",
-        "fixture": "integration::in_guest_lane::tcp_correlation_preserves_identity_and_cleanup_in_a_real_guest"
-      },
-      "guest_flow::real_kernel::the_accept_path_matches_the_sim_per_connection": {
-        "kind": "guest-lane-operator",
-        "fixture": "integration::in_guest_lane::the_guest_accept_path_matches_the_sim_in_a_real_guest"
-      },
-      "guest_flow::real_kernel::the_v24_kernel_shape_holds_in_both_accept_orders": {
-        "kind": "guest-lane-owner",
-        "fixture": "integration::in_guest_lane::the_v24_kernel_shape_holds_in_a_real_guest"
-      },
       "guest_flow::tests::flow_end::a_clean_end_both_ways_completes_on_the_record_then_closes_next": {
         "kind": "host-pure"
       },
@@ -10689,18 +10657,6 @@
       },
       "tests::the_guest_flow_owner_runs_on_its_own_thread_before_ready": {
         "kind": "host-pure"
-      },
-      "transport::real_kernel::the_guest_kits_module_release_matches_the_running_kernel": {
-        "kind": "guest-lane-operator",
-        "fixture": "integration::in_guest_lane::the_guest_kits_module_matches_the_running_guest_kernel"
-      },
-      "transport::real_kernel::the_guest_transport_is_configured_on_the_real_guest_kernel": {
-        "kind": "guest-lane-operator",
-        "fixture": "integration::in_guest_lane::the_guest_transport_is_configured_before_ready_in_a_real_guest"
-      },
-      "transport::real_kernel::the_reserved_intake_ports_refuse_application_binds_of_their_protocol_only": {
-        "kind": "guest-lane-operator",
-        "fixture": "integration::in_guest_lane::the_reserved_intake_ports_refuse_application_binds_in_a_real_guest"
       },
       "transport::tests::a_kernel_release_roundtrips": {
         "kind": "host-pure"
@@ -14828,12 +14784,6 @@
       "acceptance::metal_run_isolation::identity::sad_exclusive_is_only_a_run_mode_at_both_existing_entrypoints": {
         "kind": "host-pure"
       },
-      "acceptance::metal_run_isolation::namespace_trace::fixture_exhausts_only_a_real_owned_child_namespace_verification_read": {
-        "kind": "native-launcher"
-      },
-      "acceptance::metal_run_isolation::namespace_trace::fixture_causes_real_child_mode_and_namespace_capacity_refusals_in_owned_contexts": {
-        "kind": "native-launcher"
-      },
       "acceptance::metal_run_isolation::placement::host_pure_attempt_preserves_exact_arguments_environment_and_255_without_a_guest": {
         "kind": "host-pure"
       },
@@ -14846,17 +14796,8 @@
       "acceptance::metal_run_isolation::placement::sad_invalid_duplicate_and_ambiguous_placement_is_fail_closed": {
         "kind": "host-pure"
       },
-      "acceptance::metal_run_isolation::placement::native_launcher_gets_a_local_vsock_namespace_without_changing_the_initial_mode": {
-        "kind": "native-launcher"
-      },
-      "acceptance::metal_run_isolation::placement::sad_namespace_permission_denial_never_falls_back_to_the_host": {
-        "kind": "native-launcher"
-      },
       "acceptance::metal_run_isolation::placement::runtime_placement_preserves_the_reviewed_partition_and_declares_new_acceptance_identities": {
         "kind": "host-pure"
-      },
-      "acceptance::metal_run_isolation::placement::sad_each_later_namespace_operation_keeps_its_exact_step_and_errno": {
-        "kind": "native-launcher"
       },
       "acceptance::metal_run_isolation::placement::sad_actual_verification_read_failure_preserves_its_step_and_errno": {
         "kind": "host-pure"

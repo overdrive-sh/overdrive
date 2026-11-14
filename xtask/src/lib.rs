@@ -15,6 +15,7 @@ pub mod kmod_build;
 pub mod kmod_load;
 pub mod metal_pull;
 pub mod mutants;
+pub mod placement_lint;
 pub mod quint;
 pub mod yaml_free_cli;
 

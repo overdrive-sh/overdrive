@@ -99,15 +99,30 @@ pub fn attach_shared(
     todo!("attach_shared: owner binary check, election, attach, acknowledgement, verdict mapping")
 }
 
-/// Runs the lane placement of `test_name` in a lane guest.
-// SCAFFOLD: true
+/// Runs `test_name` of the test binary `exe` in a lane guest of `placement`.
+///
+/// The lane guest runs the in-guest body (the test binary itself) as the
+/// guest's operator command. For an owner-side placement the host also plays
+/// the scripted peer the placement's fixture names.
+///
+/// Preconditions: the caller has found [`in_metal_run`] true and
+/// [`inside_guest`] false, and the guest kit and the in-guest lane binary are
+/// prepared.
+///
+/// # Errors
+///
+/// [`RunInGuestError::LaneNotPrepared`] when the fixture is not one the guest
+/// kit knows (the detail names it, and nothing is started), when the placement
+/// does not match the test, or when the lane's artifacts are not prepared;
+/// [`RunInGuestError::GuestExecution`] when the guest cannot run to completion
+/// or its host script fails; [`RunInGuestError::BodyFailed`] when the body
+/// exits unsuccessfully inside the guest.
 pub fn run_lane(
     placement: &LanePlacement,
     exe: &Path,
     test_name: &str,
 ) -> Result<(), RunInGuestError> {
-    let _ = (placement, exe, test_name);
-    todo!("run_lane: lane guest, in-guest body plus owner scripts")
+    crate::guest_suite::run_lane_guest(placement, exe, test_name)
 }
 
 #[cfg(test)]

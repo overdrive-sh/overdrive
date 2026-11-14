@@ -51,6 +51,7 @@ use overdrive_core::guest_transport::{
 };
 use overdrive_core::net::ListenPort;
 use overdrive_testing::guest_kit::TC_GUEST_PATH;
+use overdrive_testing::overdrive_test;
 
 use super::test_support::{ACCEPT_PATH_CASES, AcceptPathCase};
 use crate::transport::{GuestTransportToken, parse_transport_token};
@@ -106,6 +107,9 @@ enum Outcome {
 /// first record.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
+#[overdrive_test(
+    lane_operator = "integration::in_guest_lane::the_guest_accept_path_matches_the_sim_in_a_real_guest"
+)]
 fn the_accept_path_matches_the_sim_per_connection() {
     let token = in_guest();
     let mut listeners: BTreeMap<u16, TcpListener> = BTreeMap::new();
@@ -1341,6 +1345,9 @@ fn run_correlation_case(
 /// object during service.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
+#[overdrive_test(
+    lane_owner = "integration::in_guest_lane::tcp_correlation_preserves_identity_and_cleanup_in_a_real_guest"
+)]
 fn tcp_correlation_preserves_exact_identity_and_cleans_transients_for_every_handshake_path() {
     let token = in_guest();
     let script = LaneScript::connect_from_guest();
@@ -1743,6 +1750,9 @@ fn assert_v24_shape(v_g: &mut File) {
 /// rest on this kernel fact, observed here on the lane's own kernel.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
+#[overdrive_test(
+    lane_owner = "integration::in_guest_lane::the_v24_kernel_shape_holds_in_a_real_guest"
+)]
 fn the_v24_kernel_shape_holds_in_both_accept_orders() {
     let _token = in_guest();
     let mut script = LaneScript::connect_from_guest();
@@ -1774,6 +1784,9 @@ fn the_v24_kernel_shape_holds_in_both_accept_orders() {
 /// positive control flow is then served end to end.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
+#[overdrive_test(
+    lane_owner = "integration::in_guest_lane::a_host_abort_before_the_guest_accepts_ends_the_flow_in_a_real_guest"
+)]
 fn a_flow_aborted_before_its_v_g_is_accepted_ends_with_no_application_connection() {
     let mut cell = OwnerCell::start();
     let attached = cell.observe().forwarder_attached;
@@ -1790,6 +1803,9 @@ fn a_flow_aborted_before_its_v_g_is_accepted_ends_with_no_application_connection
 /// positive control flow is then served on the new session.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
+#[overdrive_test(
+    lane_owner = "integration::in_guest_lane::a_session_loss_abort_ends_the_flow_and_the_owner_reconnects_in_a_real_guest"
+)]
 fn a_flow_aborted_by_session_loss_ends_and_the_session_is_held_again() {
     let mut cell = OwnerCell::start();
     let attached = cell.observe().forwarder_attached;
@@ -1810,6 +1826,9 @@ fn a_flow_aborted_by_session_loss_ends_and_the_session_is_held_again() {
 /// nothing.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
+#[overdrive_test(
+    lane_owner = "integration::in_guest_lane::a_host_close_after_the_guest_accepted_ends_the_flow_in_a_real_guest"
+)]
 fn a_flow_the_host_closes_after_the_guest_accepted_it_ends_on_the_guest() {
     let mut cell = OwnerCell::start();
     let flow = host_flow(owner_lane::ABORTED_FLOW);
@@ -1871,6 +1890,9 @@ fn a_flow_the_host_closes_after_the_guest_accepted_it_ends_on_the_guest() {
 /// the `Abort` and no message for the flow.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
+#[overdrive_test(
+    lane_owner = "integration::in_guest_lane::an_abort_for_an_unheld_flow_is_discarded_in_a_real_guest"
+)]
 fn an_abort_for_a_flow_the_guest_does_not_hold_changes_nothing_and_the_flow_ends_on_the_close() {
     let mut cell = OwnerCell::start();
     let attached = cell.observe().forwarder_attached;
@@ -1896,6 +1918,9 @@ fn an_abort_for_a_flow_the_guest_does_not_hold_changes_nothing_and_the_flow_ends
 /// scheduling).
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
+#[overdrive_test(
+    lane_owner = "integration::in_guest_lane::a_burst_of_host_aborts_resets_every_connection_in_a_real_guest"
+)]
 #[expect(clippy::print_stdout, reason = "R5-31's abort-to-reset latency is reported, not asserted")]
 fn a_burst_of_host_aborts_resets_every_application_connection() {
     let mut cell = OwnerCell::start();

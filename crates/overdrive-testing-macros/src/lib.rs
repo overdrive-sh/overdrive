@@ -1,5 +1,7 @@
 //! The placement declarations of a Metal integration test:
-//! `#[overdrive_test(host_pure)]`, `#[overdrive_test(guest = "<group>")]`,
+//! `#[overdrive_test(host_pure)]`, `#[overdrive_test(native_launcher)]`,
+//! `#[overdrive_test(guest = "<group>")]`, `#[overdrive_test(lane_operator =
+//! "<fixture>")]`, `#[overdrive_test(lane_owner = "<fixture>")]`,
 //! `placement!(host_pure)` and `overdrive_test_default!(host_pure)`.
 //!
 //! The macros are re-exported as `overdrive_testing::{overdrive_test,
@@ -12,18 +14,21 @@
 //! signature and its own test attribute (`#[test]`, `#[tokio::test]`, ...), and
 //! a function without one is not registered as a test.
 //!
-//! `host_pure` leaves the function untouched, so it applies to any test
-//! function, including one that returns a `Result`, and references no runtime
-//! crate.
+//! `host_pure` and `native_launcher` leave the function untouched, so they apply
+//! to any test function, including one that returns a `Result`, and reference
+//! no runtime crate. `native_launcher` is the placement of a test of the Metal
+//! runner's own machinery, which must observe the host from outside any guest.
 //!
-//! `guest = "<group>"` wraps the body so that:
+//! `guest = "<group>"`, `lane_operator = "<fixture>"` and `lane_owner =
+//! "<fixture>"` wrap the body so that:
 //!
 //! - where `overdrive_testing::placement::inside_guest()` holds, or
 //!   `overdrive_testing::placement::in_metal_run()` does not, the original body
 //!   runs in place (off a Metal run the machine is private to the process);
 //! - on a Metal run, outside a guest, the host-side half hands the running test
 //!   binary to `overdrive_testing::placement::run_in_guest(&placement, exe,
-//!   test_name)` with a typed `GuestPlacement` on a plain OS thread (the guest
+//!   test_name)` (a typed `GuestPlacement`; for a lane form,
+//!   `run_lane(&LanePlacement, exe, test_name)`) on a plain OS thread (the guest
 //!   kit drives its own runtime, which must not start inside an async test's
 //!   runtime) and panics with the typed error when the in-guest run fails. The
 //!   body never runs on the host.
@@ -39,10 +44,13 @@
 //! then `argc` arguments. `<test>` is the function's `module_path!()` plus
 //! `::<fn name>`. The kinds this crate writes are `host_pure`, `guest`
 //! (arguments: group, profile, `"0"` for an explicit guest form),
+//! `native_launcher`, `lane_operator` and `lane_owner`,
 //! `module_host_pure` (`placement!`; `<test>` is the declaring module's path)
 //! and `default_host_pure` (`overdrive_test_default!`; `<test>` is empty).
 //! `infra/metal/test-wrapper.sh` reads the section to place a test that has no
-//! table entry, so a test is placed only by an explicit declaration.
+//! table entry, so a test is placed only by an explicit declaration. The lane
+//! kinds `lane_operator` and `lane_owner` carry the fixture as their one
+//! argument; `native_launcher` carries none.
 
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
@@ -56,16 +64,17 @@ const SECTION: &str = "overdrive_test_placement";
 
 /// Declares where a Metal integration test runs.
 ///
-/// Implemented for `#[overdrive_test(host_pure)]` and
-/// `#[overdrive_test(guest = "<group>")]`; the other forms of the approved
+/// Implemented for `#[overdrive_test(host_pure)]`,
+/// `#[overdrive_test(native_launcher)]`, `#[overdrive_test(guest = "<group>")]`,
+/// `#[overdrive_test(lane_operator = "<fixture>")]` and
+/// `#[overdrive_test(lane_owner = "<fixture>")]`; the other forms of the approved
 /// grammar are accepted and leave the test untouched until they are built.
 #[proc_macro_attribute]
 pub fn overdrive_test(attribute: TokenStream, item: TokenStream) -> TokenStream {
-    // SCAFFOLD: true. The approved grammar's other forms (`native_launcher`,
-    // `lane_operator`, `lane_owner`, the argument-free module form and
-    // `guest = .., profile = ..`) return the item unchanged until their
-    // expansion is built, so tests that name them compile and fail for the
-    // missing record or hand-off, never for a grammar error.
+    // SCAFFOLD: true. The approved grammar's other forms (the argument-free
+    // module form and `guest = .., profile = ..`) return the item unchanged
+    // until their expansion is built, so tests that name them compile and fail
+    // for the missing record or hand-off, never for a grammar error.
     let attribute: TokenStream2 = attribute.into();
     let Some(declaration) = Declaration::parse(&attribute) else { return item };
     let function = parse_macro_input!(item as ItemFn);
@@ -126,7 +135,9 @@ fn declare_host_pure(
 /// The forms of `#[overdrive_test(...)]` that are built.
 enum Declaration {
     HostPure,
+    NativeLauncher,
     Guest(LitStr),
+    Lane { owner: bool, fixture: LitStr },
 }
 
 impl Declaration {
@@ -134,10 +145,21 @@ impl Declaration {
         let meta: Meta = syn::parse2(attribute.clone()).ok()?;
         match meta {
             Meta::Path(path) if path.is_ident("host_pure") => Some(Self::HostPure),
-            Meta::NameValue(pair) if pair.path.is_ident("guest") => match pair.value {
-                Expr::Lit(ExprLit { lit: Lit::Str(group), .. }) => Some(Self::Guest(group)),
-                _ => None,
-            },
+            Meta::Path(path) if path.is_ident("native_launcher") => Some(Self::NativeLauncher),
+            Meta::NameValue(pair) => {
+                let Expr::Lit(ExprLit { lit: Lit::Str(value), .. }) = pair.value else {
+                    return None;
+                };
+                if pair.path.is_ident("guest") {
+                    Some(Self::Guest(value))
+                } else if pair.path.is_ident("lane_operator") {
+                    Some(Self::Lane { owner: false, fixture: value })
+                } else if pair.path.is_ident("lane_owner") {
+                    Some(Self::Lane { owner: true, fixture: value })
+                } else {
+                    None
+                }
+            }
             _ => None,
         }
     }
@@ -147,17 +169,14 @@ impl Declaration {
         let item = record_name(&name);
         let test = test_name(&name);
         match self {
-            Self::HostPure => {
-                let record = record_item(&item, &quote!("host_pure"), &test, &[]);
+            Self::HostPure | Self::NativeLauncher => {
+                let kind =
+                    if matches!(self, Self::HostPure) { "host_pure" } else { "native_launcher" };
+                let record = record_item(&item, &quote!(#kind), &test, &[]);
                 Ok(quote!(#function #record))
             }
             Self::Guest(group) => {
-                if !matches!(function.sig.output, ReturnType::Default) {
-                    return Err(syn::Error::new(
-                        function.sig.output.span(),
-                        "#[overdrive_test] supports tests that return `()`",
-                    ));
-                }
+                require_unit_return(&function)?;
                 let record = record_item(
                     &item,
                     &quote!("guest"),
@@ -165,16 +184,75 @@ impl Declaration {
                     &[quote!(#group), quote!(""), quote!("0")],
                 );
                 let known_group = known_group_check(group);
-                let gate = gate(group, &name.to_string());
-                let original = &function.block;
-                function.block = syn::parse_quote!({
-                    #gate
-                    #original
-                });
+                let hand_off = quote! {
+                    ::overdrive_testing::placement::run_in_guest(
+                        &::overdrive_testing::placement::GuestPlacement::declare(
+                            #group,
+                            "",
+                            ::overdrive_testing::placement::Sharing::Isolated,
+                            "",
+                        ),
+                        &exe,
+                        test_name,
+                    )
+                };
+                guard_body(&mut function, &name.to_string(), &hand_off);
                 Ok(quote!(#function #record #known_group))
+            }
+            Self::Lane { owner, fixture } => {
+                require_unit_return(&function)?;
+                require_lane_fixture(fixture)?;
+                let kind = if *owner { "lane_owner" } else { "lane_operator" };
+                let record = record_item(&item, &quote!(#kind), &test, &[quote!(#fixture)]);
+                let constructor = format_ident!("{}", if *owner { "owner" } else { "operator" });
+                let hand_off = quote! {
+                    ::overdrive_testing::placement::run_lane(
+                        &::overdrive_testing::placement::LanePlacement::#constructor(#fixture),
+                        &exe,
+                        test_name,
+                    )
+                };
+                guard_body(&mut function, &name.to_string(), &hand_off);
+                Ok(quote!(#function #record))
             }
         }
     }
+}
+
+/// The guest forms apply to a test that returns `()`.
+fn require_unit_return(function: &ItemFn) -> syn::Result<()> {
+    if matches!(function.sig.output, ReturnType::Default) {
+        return Ok(());
+    }
+    Err(syn::Error::new(
+        function.sig.output.span(),
+        "#[overdrive_test] supports tests that return `()`",
+    ))
+}
+
+/// The grammar of a lane fixture: `integration::in_guest_lane::<ident>`.
+fn require_lane_fixture(fixture: &LitStr) -> syn::Result<()> {
+    let value = fixture.value();
+    let well_formed = value.strip_prefix("integration::in_guest_lane::").is_some_and(|name| {
+        !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+    });
+    if well_formed {
+        return Ok(());
+    }
+    Err(syn::Error::new(
+        fixture.span(),
+        "a lane fixture is named `integration::in_guest_lane::<name>`",
+    ))
+}
+
+/// Prepends the guest gate to the body of `function`.
+fn guard_body(function: &mut ItemFn, name: &str, hand_off: &TokenStream2) {
+    let gate = gate(name, hand_off);
+    let original = &function.block;
+    function.block = syn::parse_quote!({
+        #gate
+        #original
+    });
 }
 
 fn record_name(function: &Ident) -> Ident {
@@ -256,20 +334,15 @@ fn known_group_check(group: &LitStr) -> TokenStream2 {
     }
 }
 
-/// The statements prepended to a guest-placed test body: the guest hand-off for
-/// the host-side half.
-fn gate(group: &LitStr, name: &str) -> TokenStream2 {
+/// The statements prepended to a guest- or lane-placed test body: the hand-off
+/// for the host-side half. `hand_off` evaluates to `Result<(), RunInGuestError>`
+/// over the test binary `exe` and the libtest name `test_name` in scope.
+fn gate(name: &str, hand_off: &TokenStream2) -> TokenStream2 {
     quote! {
         const __OVERDRIVE_TEST_FULL_NAME: &str = ::core::concat!(::core::module_path!(), "::", #name);
         if !::overdrive_testing::placement::inside_guest()
             && ::overdrive_testing::placement::in_metal_run()
         {
-            let placement = ::overdrive_testing::placement::GuestPlacement::declare(
-                #group,
-                "",
-                ::overdrive_testing::placement::Sharing::Isolated,
-                "",
-            );
             let test_name = match __OVERDRIVE_TEST_FULL_NAME.split_once("::") {
                 ::core::option::Option::Some((_crate_name, rest)) => rest,
                 ::core::option::Option::None => __OVERDRIVE_TEST_FULL_NAME,
@@ -277,11 +350,7 @@ fn gate(group: &LitStr, name: &str) -> TokenStream2 {
             let exe = ::std::env::current_exe()
                 .unwrap_or_else(|error| ::core::panic!("reading the test binary path: {error}"));
             let outcome = ::std::thread::scope(|scope| {
-                scope
-                    .spawn(|| {
-                        ::overdrive_testing::placement::run_in_guest(&placement, &exe, test_name)
-                    })
-                    .join()
+                scope.spawn(|| #hand_off).join()
             });
             match outcome {
                 ::core::result::Result::Ok(::core::result::Result::Ok(())) => {}

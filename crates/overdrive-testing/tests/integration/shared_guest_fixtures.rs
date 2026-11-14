@@ -73,7 +73,6 @@ pub mod shared_module {
     /// that drives it (`guest_placed_tests_outside_a_shared_module_boot_one_guest_each`).
     #[overdrive_test(guest = "cgroup-default")]
     #[test]
-    #[ignore = "pending DELIVER: lane-and-launcher-placement-on-the-test"]
     fn explicit_guest_test_in_the_shared_module() {
         scenario_body();
     }

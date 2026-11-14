@@ -1,6 +1,7 @@
 //! P3/P4 adapter boundary. The fixture executable is an external attempted body,
 //! not a guest substitute. No test here credits fabricated GuestKit execution.
 use super::support::*;
+use overdrive_testing_macros::overdrive_test;
 use serde_json::Value;
 use std::fs;
 use std::process::Command;
@@ -39,6 +40,15 @@ fn wrapper(fixture: &Fixture, binary: &str, name: &str) -> Command {
     let tmp = fixture.source.join("target/metal-run-tmp").join(&context_id);
     fs::create_dir_all(&tmp).expect("already-prepared command context input");
     let dispatcher = if binary == NATIVE_BINARY {
+        // The fixture's body is a script that carries no placement record, so
+        // its native-launcher placement comes from the fixture's own table.
+        fs::write(
+            fixture.source.join("infra/metal/test-placement.json"),
+            format!(
+                r#"{{"format":"overdrive-metal-test-placement-v1","placements":{{"{binary}":{{"{name}":{{"kind":"native-launcher"}}}}}}}}"#
+            ),
+        )
+        .expect("native-launcher placement input");
         let target = std::env::var_os("CARGO_TARGET_DIR")
             .map_or_else(|| workspace_file("target"), std::path::PathBuf::from);
         let original = target.join("debug/overdrive-fwd-guest-suite");
@@ -265,6 +275,7 @@ fn sad_invalid_duplicate_and_ambiguous_placement_is_fail_closed() {
 /// CONTRACT_SHAPE: bounded-change (launcher anonymous local-vsock namespace and
 /// child process only; initial namespace modes and physical kernel complement stay unchanged).
 #[test]
+#[overdrive_test(native_launcher)]
 fn native_launcher_gets_a_local_vsock_namespace_without_changing_the_initial_mode() {
     let fixture = Fixture::new_accessible();
     let executable_path = body(&fixture);
@@ -291,6 +302,7 @@ fn native_launcher_gets_a_local_vsock_namespace_without_changing_the_initial_mod
 /// CONTRACT_SHAPE: bounded-change (capability-denied parent namespace produces
 /// exact typed failure before a body; no global CID or raw-host fallback).
 #[test]
+#[overdrive_test(native_launcher)]
 fn sad_namespace_permission_denial_never_falls_back_to_the_host() {
     let fixture = Fixture::new_accessible();
     let executable_path = body(&fixture);
@@ -342,6 +354,52 @@ fn declares_the_reviewed_guest_group_on_the_test(row: &Value) -> bool {
             line.starts_with("#[") || line.starts_with("//")
         })
         .any(|line| line.trim() == declaration)
+}
+
+/// Whether a lane or native-launcher test carries the declaration that places
+/// it for exactly the reviewed row: `#[overdrive_test(lane_owner = "<fixture>")]`
+/// or `lane_operator` for the reviewed fixture, `#[overdrive_test(native_launcher)]`
+/// for a native launcher. A test placed on itself has no table row.
+fn declares_the_reviewed_lane_or_launcher_on_the_test(row: &Value) -> bool {
+    let declaration = match row["placement"].as_str().expect("kind") {
+        "guest-lane-owner" => format!(
+            "#[overdrive_test(lane_owner = \"integration::in_guest_lane::{}\")]",
+            row["context"].as_str().expect("fixture")
+        ),
+        "guest-lane-operator" => format!(
+            "#[overdrive_test(lane_operator = \"integration::in_guest_lane::{}\")]",
+            row["context"].as_str().expect("fixture")
+        ),
+        "native-launcher" => "#[overdrive_test(native_launcher)]".to_owned(),
+        _ => return false,
+    };
+    declares_on_the_test(row, &declaration)
+}
+
+/// Whether the test function of `row` carries `declaration` among the
+/// attributes directly above it, however rustfmt wrapped it.
+fn declares_on_the_test(row: &Value, declaration: &str) -> bool {
+    let source = row["source"].as_str().expect("source");
+    let path = source.split(':').next().expect("source path");
+    let leaf = row["test_name"].as_str().expect("name").rsplit("::").next().expect("leaf");
+    let Ok(text) = fs::read_to_string(workspace_file(path)) else { return false };
+    let Some(function_at) = text.find(&format!("fn {leaf}(")) else { return false };
+    let squeezed = |text: &str| text.split_whitespace().collect::<String>();
+    let mut attributes: Vec<&str> = text[..function_at]
+        .trim_end_matches([' ', '\t'])
+        .lines()
+        .rev()
+        .take_while(|line| {
+            let line = line.trim_start();
+            line.starts_with("#[")
+                || line.starts_with("//")
+                || line.starts_with(')')
+                || line.starts_with("lane_")
+        })
+        .collect();
+    attributes.reverse();
+    let above = squeezed(&attributes.join("\n"));
+    above.contains(&squeezed(declaration))
 }
 
 /// Whether a host-pure test is placed by a declaration in its own source: the
@@ -398,6 +456,11 @@ fn runtime_placement_preserves_the_reviewed_partition_and_declares_new_acceptanc
         {
             continue;
         }
+        // A lane or native-launcher test that declares its placement on itself
+        // has no table row; the declaration must name the reviewed fixture.
+        if actual.is_null() && declares_the_reviewed_lane_or_launcher_on_the_test(row) {
+            continue;
+        }
         // A host-pure test that declares its placement in its source has no table row.
         if actual.is_null()
             && row["placement"] == "host-pure"
@@ -423,6 +486,15 @@ fn runtime_placement_preserves_the_reviewed_partition_and_declares_new_acceptanc
     )))
     .expect("DISTILL placement additions");
     for row in additions["rows"].as_array().expect("new rows") {
+        // A native launcher that declares its placement on itself has no table row.
+        if runtime["placements"][row["binary_id"].as_str().expect("binary")]
+            [row["test_name"].as_str().expect("name")]
+        .is_null()
+            && row["descriptor"]["kind"] == "native-launcher"
+            && declares_on_the_test(row, "#[overdrive_test(native_launcher)]")
+        {
+            continue;
+        }
         assert_eq!(
             runtime["placements"][row["binary_id"].as_str().expect("binary")]
                 [row["test_name"].as_str().expect("name")],
@@ -434,6 +506,7 @@ fn runtime_placement_preserves_the_reviewed_partition_and_declares_new_acceptanc
 /// CONTRACT_SHAPE: bounded-change (fresh fixture mount/user namespaces and actual
 /// syscall refusals only; physical namespace modes and selected body remain unchanged).
 #[test]
+#[overdrive_test(native_launcher)]
 fn sad_each_later_namespace_operation_keeps_its_exact_step_and_errno() {
     for (step, errno) in [("child_mode", "30"), ("local", "28")] {
         let fixture = Fixture::new_accessible();

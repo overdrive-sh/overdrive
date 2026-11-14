@@ -248,7 +248,10 @@ fn read_line(stream: &VsockStream, bound: Duration) -> io::Result<Option<String>
     }
 }
 
-struct NextestLaneAttempt {
+/// The selected nextest invocation a lane guest re-runs: the test binary at its
+/// host path, the arguments, the working directory, the forwarded environment
+/// and the files the guest image carries.
+pub(crate) struct NextestLaneAttempt {
     guest_binary: PathBuf,
     working_directory: PathBuf,
     args: Vec<String>,
@@ -356,18 +359,29 @@ fn nextest_lane_attempt(tests: &InGuestTests) -> Result<Option<NextestLaneAttemp
     let Some(args) = decode_nextest_argv()? else {
         return Ok(None);
     };
-    let working_directory = std::env::current_dir()
-        .map_err(|error| lane_error(format!("reading nextest working directory: {error}")))?;
-    let binary = tests
-        .binary
-        .canonicalize()
-        .map_err(|_| nextest_lane_not_prepared("selected nextest ELF", tests.binary.clone()))?;
     let selected_elf = std::env::var_os(NEXTTEST_LANE_ELF).ok_or_else(|| {
         nextest_lane_not_prepared("selected nextest ELF argument", PathBuf::from(NEXTTEST_LANE_ELF))
     })?;
     let selected_elf = selected_elf.into_string().map_err(|_| {
         nextest_lane_not_prepared("selected nextest ELF argument", PathBuf::from(NEXTTEST_LANE_ELF))
     })?;
+    lane_attempt(tests, &selected_elf, args).map(Some)
+}
+
+/// The attempt that re-runs `selected_elf` (the test binary at `tests.binary`
+/// on the host) with `args` in a lane guest, with the process environment's
+/// nextest selection forwarded.
+pub(crate) fn lane_attempt(
+    tests: &InGuestTests,
+    selected_elf: &str,
+    args: Vec<String>,
+) -> Result<NextestLaneAttempt, GuestKitError> {
+    let working_directory = std::env::current_dir()
+        .map_err(|error| lane_error(format!("reading nextest working directory: {error}")))?;
+    let binary = tests
+        .binary
+        .canonicalize()
+        .map_err(|_| nextest_lane_not_prepared("selected nextest ELF", tests.binary.clone()))?;
     let selected_elf = PathBuf::from(selected_elf);
     let guest_binary = if selected_elf.is_absolute() {
         selected_elf
@@ -435,7 +449,7 @@ fn nextest_lane_attempt(tests: &InGuestTests) -> Result<Option<NextestLaneAttemp
         .collect::<Result<Vec<_>, _>>()?;
     environment.sort_by(|left, right| left.0.cmp(&right.0));
     environment.push(("PWD".to_owned(), working_directory.display().to_string()));
-    Ok(Some(NextestLaneAttempt { guest_binary, working_directory, args, environment, files }))
+    Ok(NextestLaneAttempt { guest_binary, working_directory, args, environment, files })
 }
 
 fn guest_lane_exec_argv(attempt: &NextestLaneAttempt) -> Vec<String> {
@@ -514,15 +528,27 @@ pub fn run_in_guest_cell(
     cid: u32,
     work: &Path,
 ) -> Result<CellRun, GuestKitError> {
+    run_in_guest_cell_attempt(kit, tests, cell, cid, work, nextest_lane_attempt(tests)?.as_ref())
+}
+
+/// [`run_in_guest_cell`] with the nextest invocation to re-run given, rather
+/// than read from the process environment.
+pub(crate) fn run_in_guest_cell_attempt(
+    kit: &GuestKit,
+    tests: &InGuestTests,
+    cell: &str,
+    cid: u32,
+    work: &Path,
+    attempt: Option<&NextestLaneAttempt>,
+) -> Result<CellRun, GuestKitError> {
     let name = cell.replace("::", "-");
-    let attempt = nextest_lane_attempt(tests)?;
     let spec = GuestImageSpec {
         init: GuestInit::OverdriveInit,
         forwarder_module: true,
         loopback_module: true,
-        extra: guest_lane_image_files(tests, attempt.as_ref()),
+        extra: guest_lane_image_files(tests, attempt),
     };
-    let image = build_guest_lane_image(kit, work, &name, &spec, attempt.as_ref())?;
+    let image = build_guest_lane_image(kit, work, &name, &spec, attempt)?;
     let listeners = HostListeners::bind()?;
     let token = listeners.transport_token(cid);
     let HostListeners { beacon, stream: _stream, control } = listeners;
@@ -570,7 +596,7 @@ pub fn run_in_guest_cell(
             .iter()
             .map(|s| (*s).to_owned())
             .collect();
-    if let Some(attempt) = &attempt {
+    if let Some(attempt) = attempt {
         argv.extend(guest_lane_exec_argv(attempt));
     } else {
         argv.extend(
@@ -1139,15 +1165,34 @@ pub fn run_in_guest_owner_cell<R>(
     memory_mib: u32,
     host: impl FnOnce(&mut OwnerLaneHost) -> R,
 ) -> Result<(CellRun, R), GuestKitError> {
-    let name = cell.replace("::", "-");
     let attempt = nextest_lane_attempt(tests)?;
+    run_in_guest_owner_cell_attempt(kit, tests, cell, cid, work, memory_mib, attempt.as_ref(), host)
+}
+
+/// [`run_in_guest_owner_cell`] with the nextest invocation to re-run given,
+/// rather than read from the process environment.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the owner cell's existing parameters plus the attempt"
+)]
+pub(crate) fn run_in_guest_owner_cell_attempt<R>(
+    kit: &GuestKit,
+    tests: &InGuestTests,
+    cell: &str,
+    cid: u32,
+    work: &Path,
+    memory_mib: u32,
+    attempt: Option<&NextestLaneAttempt>,
+    host: impl FnOnce(&mut OwnerLaneHost) -> R,
+) -> Result<(CellRun, R), GuestKitError> {
+    let name = cell.replace("::", "-");
     let spec = GuestImageSpec {
         init: GuestInit::ScriptedPeer,
         forwarder_module: true,
         loopback_module: true,
-        extra: guest_lane_image_files(tests, attempt.as_ref()),
+        extra: guest_lane_image_files(tests, attempt),
     };
-    let image = build_guest_lane_image(kit, work, &name, &spec, attempt.as_ref())?;
+    let image = build_guest_lane_image(kit, work, &name, &spec, attempt)?;
     let listeners = HostListeners::bind()?;
     let token = listeners.transport_token(cid);
     let HostListeners { beacon: _beacon, stream: _stream, control } = listeners;
@@ -1163,7 +1208,7 @@ pub fn run_in_guest_owner_cell<R>(
             vcpus: Some(2),
         },
     )?;
-    let argv = attempt.as_ref().map_or_else(
+    let argv = attempt.map_or_else(
         || cell_argv(cell, &[]),
         |attempt| {
             let mut argv: Vec<String> = [

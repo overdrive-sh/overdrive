@@ -1,13 +1,14 @@
 //! US-PLACE-03 at the library's driving port: a lane placement that names a
 //! fixture its provider does not have fails naming the fixture and the test.
 
+use overdrive_testing::overdrive_test;
 use overdrive_testing::placement::{LanePlacement, RunInGuestError, run_lane};
 
 /// CONTRACT_SHAPE: pure-function (a placement in, a typed failure out; no guest
 /// is left behind). Placement on activation: `#[overdrive_test(native_launcher)]`
 /// (it calls `run_lane` on the host).
 #[test]
-#[ignore = "pending DELIVER: lane-and-launcher-placement-on-the-test"]
+#[overdrive_test(native_launcher)]
 fn a_lane_test_naming_a_missing_fixture_fails_naming_the_fixture_and_the_test() {
     let exe = std::env::current_exe().expect("this test binary");
     let fixture = "integration::in_guest_lane::a_fixture_nobody_wrote";

@@ -41,7 +41,7 @@ fn a_guest_placed_test_runs_its_body_in_place_when_no_metal_run_is_present() {
 /// Placement on activation: `#[overdrive_test(native_launcher)]` (it observes
 /// the host from outside any guest).
 #[test]
-#[ignore = "pending DELIVER: lane-and-launcher-placement-on-the-test"]
+#[overdrive_test(native_launcher)]
 fn a_guest_placed_test_never_runs_its_body_on_the_host_on_a_metal_run() {
     let marker = marker_path("on-metal");
     let run = run_test(
@@ -65,7 +65,7 @@ fn a_guest_placed_test_never_runs_its_body_on_the_host_on_a_metal_run() {
 /// CONTRACT_SHAPE: bounded-change.
 /// Placement on activation: `#[overdrive_test(native_launcher)]`.
 #[test]
-#[ignore = "pending DELIVER: lane-and-launcher-placement-on-the-test"]
+#[overdrive_test(native_launcher)]
 fn a_guest_placed_test_with_an_invalid_run_id_fails_naming_its_group_and_never_runs_on_the_host() {
     let marker = marker_path("exclusive");
     let run = run_test(

@@ -69,8 +69,10 @@ use crate::guest_kit::{
 };
 use crate::guest_lane::{
     CELL_BOUND, IN_GUEST_TESTS_PATH, InGuestTests, OwnerLaneHost, control_messages_within,
-    owner_lane, run_in_guest_cell, run_in_guest_owner_cell, send_control,
+    lane_attempt, owner_lane, run_in_guest_cell_attempt, run_in_guest_owner_cell_attempt,
+    send_control,
 };
+use crate::placement::LanePlacement;
 use crate::vm_fixture::default_staging_root;
 use crate::vsock::VsockStream;
 use overdrive_core::guest_transport::wire::{ControlMessage, FlowId, FlowOrigin};
@@ -4773,18 +4775,6 @@ fn guest_lane_dispatch(
 ) -> Result<i32, NextestDispatchFailure> {
     let lane_kind = std::env::var(GUEST_LANE_KIND_ENV).unwrap_or_default();
     let fixture = std::env::var(GUEST_LANE_FIXTURE_ENV).unwrap_or_default();
-    if binary_id != "overdrive-init::bin/overdrive-init" {
-        return Err(NextestDispatchFailure::LaneNotPrepared(format!(
-            "guest-lane placement is bound to overdrive-init::bin/overdrive-init, got {binary_id:?}"
-        )));
-    }
-    let Some(placement) = INIT_GUEST_LANE_PLACEMENTS.iter().find(|placement| {
-        placement.kind == lane_kind && placement.fixture == fixture && placement.test == test_name
-    }) else {
-        return Err(NextestDispatchFailure::LaneNotPrepared(format!(
-            "no closed guest-lane placement maps {lane_kind:?}/{fixture:?} to {test_name:?}"
-        )));
-    };
     if std::env::var(GUEST_LANE_ARGV_ENV).ok().as_deref() != Some(&encode_nextest_argv(args))
         || !args.iter().any(|argument| argument == test_name)
         || std::env::var(GUEST_LANE_ELF_ENV).ok().as_deref() != Some(program)
@@ -4794,6 +4784,42 @@ fn guest_lane_dispatch(
                 .to_owned(),
         ));
     }
+    run_guest_lane(&lane_kind, &fixture, program, args, binary_id, test_name)
+}
+
+/// Runs the lane guest of `fixture` for `test_name` of the test binary `program`
+/// (the nextest ELF, re-run in the guest with `args`) and returns the body's
+/// exit status; for an owner-side lane the fixture's host script also runs.
+///
+/// The fixture is looked up first, so an unknown fixture is refused by name
+/// before anything is staged or started.
+fn run_guest_lane(
+    lane_kind: &str,
+    fixture: &str,
+    program: &str,
+    args: &[String],
+    binary_id: &str,
+    test_name: &str,
+) -> Result<i32, NextestDispatchFailure> {
+    let Some(placement) =
+        INIT_GUEST_LANE_PLACEMENTS.iter().find(|placement| placement.fixture == fixture)
+    else {
+        return Err(NextestDispatchFailure::LaneNotPrepared(format!(
+            "no guest-lane fixture {fixture:?} is known to the guest kit"
+        )));
+    };
+    if placement.kind != lane_kind || placement.test != test_name {
+        return Err(NextestDispatchFailure::LaneNotPrepared(format!(
+            "the guest-lane fixture {fixture:?} is {kind:?} for {expected:?}, not {lane_kind:?} for {test_name:?}",
+            kind = placement.kind,
+            expected = placement.test,
+        )));
+    }
+    if binary_id != "overdrive-init::bin/overdrive-init" {
+        return Err(NextestDispatchFailure::LaneNotPrepared(format!(
+            "guest-lane placement is bound to overdrive-init::bin/overdrive-init, got {binary_id:?}"
+        )));
+    }
     let environment = nextest_environment()?;
     let (attempt_files, _) = nextest_attempt_files(program, &environment)?;
     let binary = attempt_files.first().map(|file| file.host.clone()).ok_or_else(|| {
@@ -4802,46 +4828,32 @@ fn guest_lane_dispatch(
         )
     })?;
     let staging = default_staging_root();
-    let kit = GuestKit::provision(&staging).map_err(|error| {
-        if matches!(error, GuestKitError::LaneNotPrepared { .. }) {
-            NextestDispatchFailure::LaneNotPrepared(format!("{error:?}"))
-        } else {
-            NextestDispatchFailure::GuestExecution(format!("{error:?}"))
-        }
-    })?;
+    let kit = GuestKit::provision(&staging).map_err(|error| lane_failure(&error))?;
     let work = WorkDir::create(&staging, &format!("nextest-init-lane-{}", placement.slot))
         .map_err(|error| NextestDispatchFailure::GuestExecution(format!("{error:?}")))?;
     let tests = InGuestTests { binary };
-    let result = if placement.kind == "guest-lane-operator" {
-        run_in_guest_cell(
-            &kit,
-            &tests,
-            test_name,
-            INIT_IN_GUEST_LANE.raw(placement.slot),
-            work.path(),
-        )
-        .map(|run| (run.exit_status, run.console, None))
+    let attempt =
+        lane_attempt(&tests, program, args.to_vec()).map_err(|error| lane_failure(&error))?;
+    let cid = INIT_IN_GUEST_LANE.raw(placement.slot);
+    let (status, console, host_result) = if placement.kind == "guest-lane-operator" {
+        run_in_guest_cell_attempt(&kit, &tests, test_name, cid, work.path(), Some(&attempt))
+            .map(|run| (run.exit_status, run.console, None))
     } else {
-        run_in_guest_owner_cell(
+        run_in_guest_owner_cell_attempt(
             &kit,
             &tests,
             test_name,
-            INIT_IN_GUEST_LANE.raw(placement.slot),
+            cid,
             work.path(),
             512,
-            |host| run_guest_lane_owner_script(fixture.as_str(), host),
+            Some(&attempt),
+            |host| run_guest_lane_owner_script(fixture, host),
         )
         .map(|(run, host_result)| (run.exit_status, run.console, Some(host_result)))
     }
-    .map_err(|error| {
-        if matches!(error, GuestKitError::LaneNotPrepared { .. }) {
-            NextestDispatchFailure::LaneNotPrepared(format!("{error:?}"))
-        } else {
-            NextestDispatchFailure::GuestExecution(format!("{error:?}"))
-        }
-    })?;
-    let (status, console, host_result) = result;
+    .map_err(|error| lane_failure(&error))?;
     if status != 0 {
+        eprintln!("{console}");
         return Ok(status);
     }
     if !console.contains("test result: ok. 1 passed") {
@@ -4855,6 +4867,51 @@ fn guest_lane_dispatch(
         )));
     }
     Ok(0)
+}
+
+/// How a guest-kit failure of a lane run is reported: an unprepared artifact
+/// is a refusal, anything else a failed run.
+fn lane_failure(error: &GuestKitError) -> NextestDispatchFailure {
+    if matches!(error, GuestKitError::LaneNotPrepared { .. }) {
+        NextestDispatchFailure::LaneNotPrepared(format!("{error:?}"))
+    } else {
+        NextestDispatchFailure::GuestExecution(format!("{error:?}"))
+    }
+}
+
+/// The lane run of a test that declares a lane placement on itself: the
+/// host-side half of `placement::run_lane`.
+pub(crate) fn run_lane_guest(
+    placement: &LanePlacement,
+    exe: &Path,
+    test_name: &str,
+) -> Result<(), RunInGuestError> {
+    let lane_kind = if placement.is_owner() { "guest-lane-owner" } else { "guest-lane-operator" };
+    let program = exe.to_string_lossy().into_owned();
+    let args = ["--exact".to_owned(), test_name.to_owned(), NO_CAPTURE.to_owned()];
+    let binary_id = std::env::var("NEXTEST_BINARY_ID").unwrap_or_default();
+    match run_guest_lane(lane_kind, placement.fixture(), &program, &args, &binary_id, test_name) {
+        Ok(0) => Ok(()),
+        Ok(status) => Err(RunInGuestError::BodyFailed {
+            group: lane_kind.to_owned(),
+            test: test_name.to_owned(),
+            status,
+        }),
+        Err(NextestDispatchFailure::LaneNotPrepared(detail)) => {
+            Err(RunInGuestError::LaneNotPrepared {
+                group: lane_kind.to_owned(),
+                test: test_name.to_owned(),
+                detail,
+            })
+        }
+        Err(NextestDispatchFailure::GuestExecution(detail)) => {
+            Err(RunInGuestError::GuestExecution {
+                group: lane_kind.to_owned(),
+                test: test_name.to_owned(),
+                detail,
+            })
+        }
+    }
 }
 
 fn nextest_wrapper_entry(

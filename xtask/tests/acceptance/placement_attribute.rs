@@ -74,7 +74,6 @@ pub(super) mod fixtures {
 
     #[overdrive_test(native_launcher)]
     #[test]
-    #[ignore = "pending DELIVER: lane-and-launcher-placement-on-the-test"]
     fn native_launcher_fixture() {
         if let Some(path) = std::env::var_os(REPORT_ENV) {
             let view: Vec<String> = ["net", "mnt", "cgroup"]
@@ -267,7 +266,7 @@ fn all_output(output: &Output) -> String {
 /// Metal run context.
 /// CONTRACT_SHAPE: pure-function (a list and records in, a report out).
 #[test]
-#[ignore = "pending DELIVER: lane-and-launcher-placement-on-the-test"]
+#[overdrive_test(host_pure)]
 fn every_placement_a_test_declares_on_itself_is_placed() {
     let work = Workdir::new();
     let binary = work.binary(
@@ -425,7 +424,7 @@ fn the_records_the_attribute_wrote_into_this_binary_are_read_by_the_checker() {
 /// drift guard for the form the lane and launcher slice delivers.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER: lane-and-launcher-placement-on-the-test"]
+#[overdrive_test(host_pure)]
 fn the_native_launcher_record_the_attribute_wrote_is_read_by_the_checker() {
     let this_binary = std::env::current_exe().expect("this test binary");
     let name = fixture_test(NATIVE_LAUNCHER_FIXTURE_TEST);
@@ -589,7 +588,7 @@ fn a_test_that_declares_itself_host_pure_runs_without_a_namespace() {
 /// own network (vsock local mode), mount and cgroup namespaces.
 /// CONTRACT_SHAPE: bounded-change (one report file the fixture writes).
 #[test]
-#[ignore = "pending DELIVER: lane-and-launcher-placement-on-the-test"]
+#[overdrive_test(host_pure)]
 fn a_test_that_declares_itself_a_native_launcher_runs_in_the_full_node_view() {
     let this_binary = std::env::current_exe().expect("this test binary");
     let name = fixture_test(NATIVE_LAUNCHER_FIXTURE_TEST);
@@ -746,7 +745,7 @@ fn placement_lint_reports_a_binary_that_mixes_a_default_with_a_guest_test() {
 /// before any run, naming binary, test and fixture; a fixture that exists does
 /// not. CONTRACT_SHAPE: unbounded-preservation.
 #[test]
-#[ignore = "pending DELIVER: lane-and-launcher-placement-on-the-test"]
+#[overdrive_test(host_pure)]
 fn placement_lint_reports_a_lane_test_whose_fixture_does_not_exist() {
     let lint = LintRun::new();
     let lanes = lint.work.binary(

@@ -6,6 +6,7 @@
     reason = "all ptrace/prlimit calls target this fixture's TRACEME descendant set"
 )]
 use super::support::Fixture;
+use overdrive_testing_macros::overdrive_test;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io;
@@ -276,6 +277,7 @@ pub(super) fn deny_verification_open(fixture: &Fixture, inner: &Command) -> io::
 
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
+#[overdrive_test(native_launcher)]
 fn fixture_exhausts_only_a_real_owned_child_namespace_verification_read() {
     let fixture = Fixture::new_accessible();
     let before = ["/proc/sys/net/vsock/ns_mode", "/proc/sys/net/vsock/child_ns_mode"]
@@ -295,6 +297,7 @@ fn fixture_exhausts_only_a_real_owned_child_namespace_verification_read() {
 
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
+#[overdrive_test(native_launcher)]
 fn fixture_causes_real_child_mode_and_namespace_capacity_refusals_in_owned_contexts() {
     use super::support::workspace_file;
     let fixture = Fixture::new_accessible();

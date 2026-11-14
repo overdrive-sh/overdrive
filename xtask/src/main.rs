@@ -56,6 +56,11 @@ enum Task {
         manifest_path: std::path::PathBuf,
     },
 
+    /// Eager check of the placement records tests declare on themselves —
+    /// reports a lane test whose fixture is not a listed test. See
+    /// `xtask/src/placement_lint.rs`.
+    PlacementLint,
+
     /// ADR-0019 gate — assert no `serde_yaml` / `serde_yml` appears in
     /// the `overdrive-cli` resolved dependency graph. Scoped to
     /// non-dev dependencies; test-only YAML is out of scope.
@@ -516,6 +521,7 @@ fn run() -> Result<()> {
         Task::DstLint { manifest_path } => xtask::dst_lint::run(&manifest_path),
         Task::CloexecLint { manifest_path } => xtask::cloexec_lint::run(&manifest_path),
         Task::ConformanceLint { manifest_path } => xtask::conformance_lint::run(&manifest_path),
+        Task::PlacementLint => xtask::placement_lint::run(),
         Task::YamlFreeCli { manifest_path } => xtask::yaml_free_cli::run(&manifest_path),
         Task::BpfBuild => bpf_build(),
         Task::BpfClippy => bpf_clippy(),

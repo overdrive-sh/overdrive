@@ -13,6 +13,8 @@
 
 use std::collections::BTreeSet;
 
+use overdrive_testing::overdrive_test;
+
 use super::scenario_support::{
     FAIL_ENV, OwnerSampler, owners_in_this_run, run_test, shared_generations, test_path, timings,
 };
@@ -101,7 +103,7 @@ fn filtering_to_one_test_of_a_shared_module_runs_only_that_test() {
 /// needs only the per-test guest form, so it is pending with this scenario.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER: lane-and-launcher-placement-on-the-test"]
+#[overdrive_test(native_launcher)]
 fn guest_placed_tests_outside_a_shared_module_boot_one_guest_each() {
     for (module, name) in [
         (ISOLATED, "first_isolated_guest_test"),
@@ -119,7 +121,7 @@ fn guest_placed_tests_outside_a_shared_module_boot_one_guest_each() {
 /// US-PLACE-01 AC f: the boot time of a per-test guest is retained in the run
 /// output. CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER: lane-and-launcher-placement-on-the-test"]
+#[overdrive_test(native_launcher)]
 fn the_boot_time_of_a_guest_per_test_is_recorded_in_the_run_output() {
     let run = run_test(&test_path(ISOLATED, "first_isolated_guest_test"), &[], &[]);
     assert!(run.success, "{}", run.output);

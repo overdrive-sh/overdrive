@@ -122,4 +122,15 @@ impl LanePlacement {
     pub const fn owner(fixture: &'static str) -> Self {
         Self { fixture, owner: true }
     }
+
+    /// The in-guest fixture this placement names.
+    pub(crate) const fn fixture(&self) -> &'static str {
+        self.fixture
+    }
+
+    /// Whether this is the owner-side placement (the host runs the fixture's
+    /// script against the cell) rather than the operator-side one.
+    pub(crate) const fn is_owner(&self) -> bool {
+        self.owner
+    }
 }

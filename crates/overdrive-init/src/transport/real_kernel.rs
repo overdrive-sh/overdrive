@@ -41,6 +41,7 @@ use overdrive_core::guest_transport::{
     GUEST_FORWARDER_MODULE_PATH, GUEST_INBOUND_PORT, GUEST_TCP_INTAKE_PORT, GUEST_UDP_SLOT_BASE,
     GUEST_UDP_SLOTS, guest_reserved_ports,
 };
+use overdrive_testing::overdrive_test;
 
 use super::{GuestTransportToken, KernelRelease, parse_transport_token};
 
@@ -188,6 +189,9 @@ fn assert_guest_transparent_route() {
 /// inbound vsock listener holds (`VMADDR_CID_ANY`, `GUEST_INBOUND_PORT`).
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
+#[overdrive_test(
+    lane_operator = "integration::in_guest_lane::the_guest_transport_is_configured_before_ready_in_a_real_guest"
+)]
 fn the_guest_transport_is_configured_on_the_real_guest_kernel() {
     let token = in_guest();
     // the workload address is assigned to a local device
@@ -247,6 +251,9 @@ fn the_guest_transport_is_configured_on_the_real_guest_kernel() {
 /// kernel assigns falls in the reserved range.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
+#[overdrive_test(
+    lane_operator = "integration::in_guest_lane::the_reserved_intake_ports_refuse_application_binds_in_a_real_guest"
+)]
 fn the_reserved_intake_ports_refuse_application_binds_of_their_protocol_only() {
     let token = in_guest();
     let last_slot = GUEST_UDP_SLOT_BASE + GUEST_UDP_SLOTS - 1;
@@ -303,6 +310,9 @@ fn the_reserved_intake_ports_refuse_application_binds_of_their_protocol_only() {
 /// is `ForwarderModuleRelease`, on every kernel configuration).
 /// CONTRACT_SHAPE: pure-function.
 #[test]
+#[overdrive_test(
+    lane_operator = "integration::in_guest_lane::the_guest_kits_module_matches_the_running_guest_kernel"
+)]
 fn the_guest_kits_module_release_matches_the_running_kernel() {
     in_guest();
     let module = fs::read(GUEST_FORWARDER_MODULE_PATH).expect("the guest kit's module is present");
