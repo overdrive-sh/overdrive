@@ -37,4 +37,4 @@ Host-pure entries (slice 06); re-placing any test (a changed placement is report
 - [ ] A migration that would change a group is rejected and reported.
 - [ ] A binary that holds a guest-placed test carries no `overdrive_test_default!` (`placement_conflict`); host-pure modules of a mixed binary are placed by slice 06.
 - [ ] Unmigrated batches still run as before.
-- [ ] After 05a-c: `guest-group` entries are 771 to 0.
+- [ ] After 05a-c: `guest-group` entries are 771 to 0, as counted by parsing the JSON.

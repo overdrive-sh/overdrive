@@ -38,4 +38,4 @@ Guest placements (slice 05); changing any test's kind.
 - [ ] Mis-placements reported, not carried over.
 - [ ] A binary with a default and a non-host-pure record is refused as `placement_conflict`; mixed binaries are placed per module.
 - [ ] A child module declares its own `placement!(host_pure)`; it does not inherit its parent's.
-- [ ] After 06a-c: `host-pure` entries are 3,855 to 0.
+- [ ] After 06a-c: `host-pure` entries are 3,855 to 0, as counted by parsing the JSON.

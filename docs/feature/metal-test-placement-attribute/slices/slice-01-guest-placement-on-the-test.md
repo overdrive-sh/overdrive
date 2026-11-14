@@ -24,7 +24,7 @@ One existing `cgroup-default` integration test declares its placement with `#[ov
 ## Acceptance
 
 - [ ] Migrated test PASSes on Metal with no table entry.
-- [ ] On the shared-guest path (slice 09) a failing in-guest body yields a host FAIL for that test and a nonzero run status.
+- [ ] On the shared-guest path a failing in-guest body yields a host FAIL for that test and a nonzero run status. This criterion is verified when slice 09 lands; the per-test path's failure mapping has no scenario of its own (DISTILL D-7).
 - [ ] A guest that cannot start (a Metal run with a malformed run id) is a host FAIL naming the group and stage; the body never runs on the host.
 - [ ] An unknown group is rejected by name.
 - [ ] Outside a Metal run the test runs its body in place, as it does today; on a Metal run its body never runs on the host (user ruling, 2026-11-14).

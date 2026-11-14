@@ -1,6 +1,6 @@
 # Slice 09 — Module tests share one guest
 
-Story: US-PLACE-09. Job: J-PLAT-007. Decision: D8. Depends on: slice 01 (per-test guest path), slice 04 (per-group artifacts, so a shared guest stages the same things).
+Story: US-PLACE-09. Job: J-PLAT-007. Decision: D8. Depends on: slice 01 (per-test guest path), slice 03 (the native-launcher form its Metal scenarios take), slice 04 (per-group artifacts, so a shared guest stages the same things).
 
 ## Outcome
 

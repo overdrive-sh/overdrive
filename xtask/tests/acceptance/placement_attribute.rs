@@ -111,14 +111,18 @@ pub(super) mod fixtures {
     }
 }
 
-const FIXTURE_TESTS: [&str; 6] = [
+/// The fixtures that take a host-pure form: placed by the host-pure slice.
+const HOST_PURE_FIXTURE_TESTS: [&str; 5] = [
     "per_test_host_pure_fixture",
     "host_pure_fixture_may_return_a_result",
     "host_pure_fixture_reports_its_namespace",
-    "native_launcher_fixture",
     "module_declared::first_test_of_the_declared_module",
     "module_declared::second_test_of_the_declared_module",
 ];
+
+/// The fixture that takes the native-launcher form: placed by the lane and
+/// launcher slice, which delivers that form.
+const NATIVE_LAUNCHER_FIXTURE_TEST: &str = "native_launcher_fixture";
 
 fn fixture_test(name: &str) -> String {
     format!("acceptance::placement_attribute::fixtures::{name}")
@@ -403,18 +407,37 @@ fn a_section_that_cannot_be_read_is_refused_as_an_invalid_placement() {
 }
 
 /// The record the attribute writes is read by the wrapper's checker: every
-/// fixture of this binary, one of each form, is placed. This is the drift guard
-/// between the writer and the readers. CONTRACT_SHAPE: pure-function.
+/// host-pure fixture of this binary, one of each form, is placed. This is the
+/// drift guard between the writer and the readers for the host-pure forms.
+/// CONTRACT_SHAPE: pure-function.
 #[test]
 #[ignore = "pending DELIVER: host-pure-placement-on-the-test"]
 fn the_records_the_attribute_wrote_into_this_binary_are_read_by_the_checker() {
     let this_binary = std::env::current_exe().expect("this test binary");
-    let names: Vec<String> = FIXTURE_TESTS.iter().map(|t| fixture_test(t)).collect();
+    let names: Vec<String> = HOST_PURE_FIXTURE_TESTS.iter().map(|t| fixture_test(t)).collect();
     let tests: Vec<&str> = names.iter().map(String::as_str).collect();
     let output = check_placement(&list(vec![suite("xtask::acceptance", &this_binary, &tests)]));
     assert!(
         output.status.success() && stdout(&output).is_empty(),
-        "every fixture the attribute declared is placed:\n{}",
+        "every host-pure fixture the attribute declared is placed:\n{}",
+        all_output(&output)
+    );
+}
+
+/// The native-launcher record the attribute writes is read by the same checker:
+/// the fixture that declares itself a native launcher is placed. The writer-reader
+/// drift guard for the form the lane and launcher slice delivers.
+/// CONTRACT_SHAPE: pure-function.
+#[test]
+#[ignore = "pending DELIVER: lane-and-launcher-placement-on-the-test"]
+fn the_native_launcher_record_the_attribute_wrote_is_read_by_the_checker() {
+    let this_binary = std::env::current_exe().expect("this test binary");
+    let name = fixture_test(NATIVE_LAUNCHER_FIXTURE_TEST);
+    let output =
+        check_placement(&list(vec![suite("xtask::acceptance", &this_binary, &[name.as_str()])]));
+    assert!(
+        output.status.success() && stdout(&output).is_empty(),
+        "the native-launcher fixture the attribute declared is placed:\n{}",
         all_output(&output)
     );
 }
@@ -573,7 +596,7 @@ fn a_test_that_declares_itself_host_pure_runs_without_a_namespace() {
 #[ignore = "pending DELIVER: lane-and-launcher-placement-on-the-test"]
 fn a_test_that_declares_itself_a_native_launcher_runs_in_the_full_node_view() {
     let this_binary = std::env::current_exe().expect("this test binary");
-    let name = fixture_test("native_launcher_fixture");
+    let name = fixture_test(NATIVE_LAUNCHER_FIXTURE_TEST);
     let work = Workdir::new();
     let report = work.path("view-report");
     let initial: Vec<String> = ["net", "mnt", "cgroup"]
