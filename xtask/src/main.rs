@@ -1770,6 +1770,12 @@ mod metal_qualification_tests {
             .arg("1")
             .arg(token)
             .args([action, "C-GTI-METAL-LEASE", "/workspace", "deadbeef"]);
+        // An exclusive holder waits for admitted ordinary runs under the runs
+        // root. Without this it scans the real `/var/lib/overdrive-metal/runs`,
+        // so under `metal run` it sees the outer run as admitted, waits for it
+        // and times out. Point it at the fixture's run directory, which sits
+        // beside the fixture lock (`Fixture::new`).
+        command.env("OVERDRIVE_METAL_RUNS_ROOT", lock.with_file_name("runs"));
         command
     }
 
