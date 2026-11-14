@@ -1,13 +1,12 @@
-# ADR-0283 — The tests of a module share one guest through a per-module owner process
+# ADR-0283 — The tests of a module share one guest through a per-declaration owner process
 
 ## Status
 
-**Proposed — awaiting user approval (DDD-7, DDD-8 in the feature delta).**
-The declaration shape (one `shared_guest!` per module, read by the tests of
-that module) was approved by the user on 2026-11-13; the owner design remains
-proposed.
-If accepted, it reverses the "a broker is beyond this adaptation" alternative
-recorded in ADR-0280, for the shared-guest case only.
+**Proposed — awaiting user approval (DDD-8 in the feature delta).**
+The declaration shape the tests read (ADR-0289) was approved by the user on
+2026-11-13; the owner remains proposed. If accepted, it reverses the "a broker
+is beyond this adaptation" alternative recorded in ADR-0280, for the
+shared-guest case only.
 
 ## Context
 
@@ -17,24 +16,17 @@ a group, and it is being retired. nextest runs every test in its own process,
 so a guest shared by several tests must outlive any one test process. The
 shared-guest probe showed a detached owner, started by the first test to
 arrive and reached over a unix socket, keeps per-test results, retries and
-`-E` filtering, and costs about one boot per module. It also showed a crashed
-owner left its VMM running until the run ended.
+`-E` filtering, and costs about one boot per module.
 
 ## Decision
 
-A module opts in once, with a plain function-like declaration inside the module
-that names the guest group and profile. The tests of that module that carry the
-placement attribute without arguments read the declaration by ordinary name
-resolution and share one guest with each other, within one test binary; a test
-with an explicit placement of its own is not part of the shared guest. The first
-arrival elects
-one owner process under an exclusive lock and the owner boots the guest. Later
-tests attach to that owner over a unix socket in the run's own runtime
-directory. The owner runs as the init of its own PID namespace, so the VMM
-dies with the owner, and it exits when the nextest process that anchors the run
-is gone. The owner opens its handle on the anchor process before it creates its
-PID namespace, because a process id resolves in the caller's namespace and the
-anchor does not exist inside the new one. Run teardown stays the backstop.
+The tests that read one shared-guest declaration share one guest, within one
+build of one test binary. The first arrival elects one owner process under an
+exclusive lock on a per-scope file; the owner boots the guest. Later tests
+attach to that owner over a unix socket in the run's own runtime directory. A
+test that cannot elect or attach fails with a typed host failure naming the
+stage. The owner's lifetime is ADR-0290 (its guest dies with it), ADR-0293 (it
+exits when idle) and run teardown (ADR-0279), the backstop.
 
 ## Alternatives
 
@@ -45,26 +37,14 @@ anchor does not exist inside the new one. Run teardown stays the backstop.
   results, `-E` filtering and retries; rejected (probe control).
 - **The first test process owns the guest while it runs**: the guest dies
   when that test ends; rejected.
-- **A parent-death signal on the VMM**: needs a change in the production
-  launcher, which a test need must not shape; rejected.
-- **A per-test `shared` flag**: sharing is a property of the module, and a flag
-  repeated on every test lets one test omit it or name another profile, which
-  splits the module across several guests; rejected by the user, 2026-11-13.
-- **A placement attribute on the module** (`mod x;` or an inline module holding
-  file modules): stable Rust refuses a proc-macro attribute there (E0658,
-  `proc_macro_hygiene`, nightly only; an inner custom attribute needs
-  `custom_inner_attributes`), and the workspace stays on stable; rejected,
-  2026-11-13.
 
 ## Consequences
 
-One extra process kind (the owner), prepared by `guest-kit-prepare`. The
-owner-death guarantee rests on a kernel behaviour: when the init of a PID
-namespace exits, the kernel kills every other task in it and waits for them
-(`kernel/pid_namespace.c:225-274 @ v7.0`). It was read in the vendored Linux
-source and exercised on Metal, where the VMM was gone within 38.6 ms of the
-owner's death. A client attached to a killed owner sees end of stream, which the
-client maps to an owner-loss failure. The protocol is specified in
+One extra process kind (the owner), prepared by `guest-kit-prepare`. Election
+is the kernel's lock, released when the holder dies, so a crashed elector or
+owner leaves no stale claim; a stale socket path is unlinked by the next owner.
+A client attached to a killed owner sees end of stream, which maps to an
+owner-loss failure. The protocol is specified in
 `specs/quint/shared-guest-owner/`.
 
 ## Links
@@ -72,5 +52,7 @@ client maps to an owner-loss failure. The protocol is specified in
 - [Interface contract](../../feature/metal-test-placement-attribute/feature-delta.md#wave-design--ref-interface-contracts)
 - [Formal protocol model](../../../specs/quint/shared-guest-owner/README.md)
 - [Shared-guest probe findings](../../feature/metal-test-placement-attribute/spike/findings-module-shared-guest.md)
-- [Owner lifetime findings](../../feature/metal-test-placement-attribute/spike/findings-owner-lifetime.md)
 - [ADR-0280](adr-0280-metal-nextest-execution-uses-explicit-test-placement.md)
+- [ADR-0289](adr-0289-a-module-opts-into-a-shared-guest-with-a-function-like-declaration-its-tests-read.md)
+- [ADR-0290](adr-0290-the-shared-guest-owner-is-init-of-its-own-pid-namespace-so-its-guest-dies-with-it.md)
+- [ADR-0293](adr-0293-a-shared-guest-owner-exits-when-it-is-idle.md)

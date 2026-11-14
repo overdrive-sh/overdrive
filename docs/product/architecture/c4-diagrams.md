@@ -7,9 +7,10 @@ remain for traceability.
 
 ## Metal test placement declared on the test (proposed)
 
-**PROPOSED — not accepted.** Decisions DDD-1..DDD-12 in
+**PROPOSED — not accepted.** The decisions of feature
+`metal-test-placement-attribute` (DDD-1..DDD-18) in
 [the feature delta](../../feature/metal-test-placement-attribute/feature-delta.md#wave-design--ref-decisions)
-await user approval. Test tooling only; no production runtime component
+are partly approved and partly await the user (the feature delta lists which). Test tooling only; no production runtime component
 changes.
 
 ### C4 Level 1 — System Context
@@ -37,7 +38,7 @@ C4Container
     Container_Boundary(repo, "Overdrive repository tooling") {
         Container(macros, "overdrive-testing-macros", "Rust proc-macro", "Expands the placement attribute and writes the placement record")
         Container(testing, "overdrive-testing", "Rust library", "Guest groups and profiles, run_in_guest, lane entry points, shared-guest client and owner core")
-        Container(owner, "Shared-guest owner", "Rust binary, one per module per run", "Boots one guest and runs attached tests one at a time")
+        Container(owner, "Shared-guest owner", "Rust binary, one per shared-guest declaration per run", "Boots one guest, runs attached tests one at a time under an exec bound, exits when idle")
         Container(wrapper, "test-wrapper.sh", "bash and python3", "Reads the record and applies the isolation profile")
         Container(lint, "placement-lint", "xtask subcommand", "Lists tests and refuses any without a placement")
         Container(prepare, "guest-kit-prepare", "xtask subcommand", "Builds the kernel module, guest peer and owner binary")
@@ -52,6 +53,7 @@ C4Container
     Rel(testing, owner, "Elects and attaches to")
     Rel(owner, guest, "Boots, execs in and discards")
     Rel(testing, guest, "Boots one per isolated test")
+    Rel(lint, wrapper, "Asks to resolve every listed test through")
     Rel(lint, tests, "Reads the records of every listed test in")
     Rel(prepare, owner, "Builds")
 ```

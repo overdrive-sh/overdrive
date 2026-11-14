@@ -2192,12 +2192,23 @@ lane-placed or native-launcher test); `cargo xtask placement-lint` checks every
 listed test before any guest boots; off a Metal run a guest-placed test runs its
 body in place. The user approved the lint, the host-pure declarations, the
 in-place rule, the dev-dependency rule and the template handling on 2026-11-14;
-the remaining decisions are proposed. Decisions:
+the remaining decisions are proposed, among them three new ones for the user
+(an exec bound, an owner idle exit, and discarding a guest whose client left
+while its test ran). Decisions:
 [ADR-0282](adr-0282-a-metal-test-placement-is-declared-on-the-test-and-recorded-in-its-binary.md),
 [ADR-0283](adr-0283-the-tests-of-a-module-share-one-guest-through-a-per-module-owner-process.md),
-[ADR-0284](adr-0284-a-shared-guest-serves-one-test-at-a-time-and-is-never-reused-after-a-failure.md),
+[ADR-0284](adr-0284-a-shared-guest-serves-one-test-at-a-time-and-never-cancels-a-running-test.md),
 [ADR-0285](adr-0285-a-test-knows-it-is-inside-a-guest-from-the-guest-kernel-command-line.md),
-[ADR-0286](adr-0286-a-guest-placed-test-runs-in-place-outside-a-metal-run.md).
+[ADR-0286](adr-0286-a-guest-placed-test-runs-in-place-outside-a-metal-run.md),
+[ADR-0287](adr-0287-host-pure-placement-is-declared-once-per-module-or-per-binary.md),
+[ADR-0288](adr-0288-an-eager-placement-lint-checks-every-listed-test-before-any-guest-boots.md),
+[ADR-0289](adr-0289-a-module-opts-into-a-shared-guest-with-a-function-like-declaration-its-tests-read.md),
+[ADR-0290](adr-0290-the-shared-guest-owner-is-init-of-its-own-pid-namespace-so-its-guest-dies-with-it.md),
+[ADR-0291](adr-0291-a-shared-guest-is-discarded-after-a-failed-lost-bounded-or-detached-test.md),
+[ADR-0292](adr-0292-every-shared-exec-has-a-bound.md),
+[ADR-0293](adr-0293-a-shared-guest-owner-exits-when-it-is-idle.md),
+[ADR-0294](adr-0294-guest-groups-and-environments-are-a-closed-registry-of-named-profiles.md),
+[ADR-0295](adr-0295-xtask-and-core-crates-may-take-a-dev-dependency-on-the-placement-macros.md).
 Interface contracts and open user decisions:
 [feature delta](../../feature/metal-test-placement-attribute/feature-delta.md#wave-design--ref-decisions).
 Diagrams: [c4-diagrams.md](c4-diagrams.md). Protocol model:
