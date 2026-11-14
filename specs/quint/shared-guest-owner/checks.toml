@@ -1,6 +1,9 @@
 # Checks for specs/quint/shared-guest-owner/ (shared-guest owner protocol, DDD-8/9/10).
-# ci = true iff the check took under 60 s in the latest record (guest-every-client-terminates took 115 s).
-# Decisions: D-OWNER, D-LIFE, D-SERIAL, D-DETACH, D-TAINT. One hazard per decision.
+# ci = true iff the check took under 60 s in the latest record (guest-every-client-terminates 81 s and
+# guest-hazard-bound 67 s are ci = false).
+# Decisions: D-OWNER, D-LIFE, D-SERIAL, D-DETACH, D-TAINT, D-BOUND, D-IDLE. One hazard per decision.
+# Runs on guest_conf (ENV=false, owner-driven) are the #[quint_test] pins; runs on guest_env (ENV=true) are
+# checked by the evaluator and not pinned by conformance.
 
 [[check]]
 name = "guest-safety-tlc"
@@ -66,19 +69,28 @@ expect = "violation"
 ci = true
 
 [[check]]
+name = "guest-hazard-bound"
+spec = "hazard/guest_hazards.qnt"
+main = "guest_bugNoBound"
+temporal = "EveryClientTerminates"
+backend = "tlc"
+expect = "violation"
+ci = false
+
+[[check]]
+name = "guest-hazard-idle"
+spec = "hazard/guest_hazards.qnt"
+main = "guest_bugIdleAnyTime"
+invariant = "I_IDLE_NO_LOSS"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
 name = "guest-run-happy-path-three-clients-share-one-guest"
 spec = "shared_guest.qnt"
 main = "guest_conf"
 run = "happy_path_three_clients_share_one_guest"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "guest-run-concurrent-first-arrival-one-owner"
-spec = "shared_guest.qnt"
-main = "guest_conf"
-run = "concurrent_first_arrival_one_owner"
 backend = "evaluator"
 expect = "holds"
 ci = true
@@ -97,15 +109,6 @@ name = "guest-run-guest-lost-mid-exec-then-replacement"
 spec = "shared_guest.qnt"
 main = "guest_conf"
 run = "guest_lost_mid_exec_then_replacement"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "guest-run-owner-crash-then-new-owner-elected"
-spec = "shared_guest.qnt"
-main = "guest_conf"
-run = "owner_crash_then_new_owner_elected"
 backend = "evaluator"
 expect = "holds"
 ci = true
@@ -138,28 +141,37 @@ expect = "holds"
 ci = true
 
 [[check]]
-name = "guest-run-anchor-gone-ends-owner-and-guest"
+name = "guest-run-exec-bound-discards-guest-and-replies-bound"
 spec = "shared_guest.qnt"
 main = "guest_conf"
-run = "anchor_gone_ends_owner_and_guest"
+run = "exec_bound_discards_guest_and_replies_bound"
 backend = "evaluator"
 expect = "holds"
 ci = true
 
 [[check]]
-name = "guest-run-run-teardown-removes-leftovers"
+name = "guest-run-idle-exit-only-when-empty"
 spec = "shared_guest.qnt"
 main = "guest_conf"
-run = "run_teardown_removes_leftovers"
+run = "idle_exit_only_when_empty"
 backend = "evaluator"
 expect = "holds"
 ci = true
 
 [[check]]
-name = "guest-run-retry-of-failed-client-gets-fresh-guest"
+name = "guest-run-concurrent-first-arrival-one-owner"
 spec = "shared_guest.qnt"
-main = "guest_conf"
-run = "retry_of_failed_client_gets_fresh_guest"
+main = "guest_env"
+run = "concurrent_first_arrival_one_owner"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "guest-run-owner-crash-then-new-owner-elected"
+spec = "shared_guest.qnt"
+main = "guest_env"
+run = "owner_crash_then_new_owner_elected"
 backend = "evaluator"
 expect = "holds"
 ci = true
@@ -167,9 +179,26 @@ ci = true
 [[check]]
 name = "guest-run-elector-killed-before-owner-starts"
 spec = "shared_guest.qnt"
-main = "guest_conf"
+main = "guest_env"
 run = "elector_killed_before_owner_starts"
 backend = "evaluator"
 expect = "holds"
 ci = true
 
+[[check]]
+name = "guest-run-owner-start-fails-then-next-elects"
+spec = "shared_guest.qnt"
+main = "guest_env"
+run = "owner_start_fails_then_next_elects"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "guest-run-run-teardown-removes-leftovers"
+spec = "shared_guest.qnt"
+main = "guest_env"
+run = "run_teardown_removes_leftovers"
+backend = "evaluator"
+expect = "holds"
+ci = true

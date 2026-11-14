@@ -1,4 +1,4 @@
-# guest-hazard-serial: counterexample, 10 state(s) (from the TLC trace)
+# guest-hazard-serial: counterexample, 7 state(s) (from the TLC trace)
 
 State 1
   owners = 0
@@ -10,11 +10,11 @@ State 1
   faults = 2
   execgen = 0
   lock = 0
+  idleLoss = FALSE
   gen = 0
   bad = {}
   seq = <<0, 0, 0>>
   lastb = 0
-  anchor = TRUE
   queue = <<>>
   guest = 0
   torn = FALSE
@@ -27,41 +27,32 @@ State 3 [ElectBegin]
   phase = <<2, 0, 0>>
   lock = 1
 
-State 4 [Arrive]
-  phase = <<2, 1, 0>>
-
-State 5 [OwnerStarted]
+State 4 [OwnerStarted]
   owners = 1
-  phase = <<3, 1, 0>>
+  phase = <<3, 0, 0>>
   nseq = 2
   lock = 0
+  gen = 1
   seq = <<1, 0, 0>>
   queue = <<1>>
-
-State 6 [BeginBoot]
-  gen = 1
   guest = 1
 
-State 7 [BootOk]
-  guest = 2
+State 5 [Arrive]
+  phase = <<3, 1, 0>>
 
-State 8 [BeginExec]
+State 6 [BootFinished]
   phase = <<4, 1, 0>>
   execs = 1
   execgen = 1
   lastb = 1
   queue = <<>>
+  guest = 2
   inflight = 1
 
-State 9 [Connect]
-  phase = <<4, 3, 0>>
-  nseq = 3
-  seq = <<1, 2, 0>>
-  queue = <<2>>
-
-State 10 [BeginExec]
+State 7 [Attached]
   phase = <<4, 4, 0>>
+  nseq = 3
   execs = 2
+  seq = <<1, 2, 0>>
   lastb = 2
-  queue = <<>>
   inflight = 2

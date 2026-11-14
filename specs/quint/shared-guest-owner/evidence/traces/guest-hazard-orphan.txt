@@ -1,8 +1,9 @@
-# guest-hazard-orphan: counterexample, 6 state(s) (from the TLC trace)
+# guest-hazard-orphan: counterexample, 5 state(s) (from the TLC trace)
 
 State 1
   torn = FALSE
   owners = 0
+  idleLoss = FALSE
   gen = 0
   execgen = 0
   nseq = 1
@@ -15,7 +16,6 @@ State 1
   lock = 0
   inflight = 0
   phase = <<0, 0, 0>>
-  anchor = TRUE
   conf_step = [Init |-> [tag |-> "UNIT"]]
   execs = 0
   fifobad = FALSE
@@ -29,17 +29,15 @@ State 3 [ElectBegin]
 
 State 4 [OwnerStarted]
   owners = 1
+  gen = 1
   nseq = 2
   queue = <<1>>
   seq = <<1, 0, 0>>
+  guest = 1
   lock = 0
   phase = <<3, 0, 0>>
 
-State 5 [BeginBoot]
-  gen = 1
-  guest = 1
-
-State 6 [OwnerCrash]
+State 5 [OwnerCrash]
   owners = 0
   faults = 1
   queue = <<>>

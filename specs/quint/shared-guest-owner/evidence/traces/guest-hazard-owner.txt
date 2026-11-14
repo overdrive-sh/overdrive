@@ -10,8 +10,8 @@ State 1
   queue = <<>>
   guest = 0
   fifobad = FALSE
+  idleLoss = FALSE
   phase = <<0, 0, 0>>
-  anchor = TRUE
   execgen = 0
   gen = 0
   torn = FALSE
@@ -35,7 +35,9 @@ State 5 [ElectBegin]
 State 6 [OwnerStarted]
   nseq = 2
   queue = <<2>>
+  guest = 1
   phase = <<2, 3, 0>>
+  gen = 1
   seq = <<0, 1, 0>>
   owners = 1
 

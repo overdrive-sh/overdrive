@@ -1,4 +1,4 @@
-# guest-hazard-detach: counterexample, 11 state(s) (from the TLC trace)
+# guest-hazard-detach: counterexample, 8 state(s) (from the TLC trace)
 
 State 1
   queue = <<>>
@@ -6,13 +6,13 @@ State 1
   inflight = 0
   gen = 0
   torn = FALSE
-  anchor = TRUE
   phase = <<0, 0, 0>>
   bad = {}
   seq = <<0, 0, 0>>
   conf_step = [Init |-> [tag |-> "UNIT"]]
   execs = 0
   owners = 0
+  idleLoss = FALSE
   nseq = 1
   fifobad = FALSE
   lock = 0
@@ -29,43 +29,34 @@ State 3 [ElectBegin]
 
 State 4 [OwnerStarted]
   queue = <<1>>
+  guest = 1
+  gen = 1
   phase = <<3, 0, 0>>
   seq = <<1, 0, 0>>
   owners = 1
   nseq = 2
   lock = 0
 
-State 5 [BeginBoot]
-  guest = 1
-  gen = 1
-
-State 6 [BootOk]
-  guest = 2
-
-State 7 [BeginExec]
+State 5 [BootFinished]
   queue = <<>>
+  guest = 2
   inflight = 1
   phase = <<4, 0, 0>>
   execs = 1
   execgen = 1
   lastb = 1
 
-State 8 [ClientDisconnect]
+State 6 [ClientGone]
   inflight = 0
   phase = <<6, 0, 0>>
 
-State 9 [Arrive]
+State 7 [Arrive]
   phase = <<6, 1, 0>>
 
-State 10 [Connect]
-  queue = <<2>>
-  phase = <<6, 3, 0>>
-  seq = <<1, 2, 0>>
-  nseq = 3
-
-State 11 [BeginExec]
-  queue = <<>>
+State 8 [Attached]
   inflight = 2
   phase = <<6, 4, 0>>
+  seq = <<1, 2, 0>>
   execs = 2
+  nseq = 3
   lastb = 2
