@@ -32,14 +32,18 @@
 //!
 //! # Per-test entry points
 //!
-//! [`run_in_guest`] and [`inside_guest`] are the two entry points the
-//! `#[overdrive_test(guest = "<group>")]` attribute expands to. The attribute
-//! runs the test body only where [`inside_guest`] holds; everywhere else it
-//! hands the test binary to [`run_in_guest`], which boots one fresh guest of
-//! the named group, runs that one test inside it and reports the result. The
-//! Metal test wrapper's table-driven path goes through the same attempt
-//! function (`run_nextest_group_attempt`), so the dispatcher and the attribute
-//! share one boot, copy-in and exec implementation.
+//! [`inside_guest`] and `placement::run_in_guest` are the two entry points the
+//! `#[overdrive_test(guest = "<group>")]` attribute expands to; the attribute
+//! never inserts `#[test]`. The body runs in place where [`inside_guest`]
+//! holds or `placement::in_metal_run` does not (a machine that is private to
+//! the process). On a Metal run, outside a guest, the expansion hands the test
+//! binary to the typed `placement::run_in_guest`, which boots one fresh guest
+//! of the declared group (through `run_isolated_guest` for an isolated
+//! placement), runs that one test inside it and reports the result; the body
+//! never runs on the host. The Metal test wrapper's table-driven path goes
+//! through the same attempt function (`run_nextest_group_attempt`), so the
+//! dispatcher and the attribute share one boot, copy-in and exec
+//! implementation.
 
 #![cfg(target_os = "linux")]
 #![allow(
@@ -80,11 +84,9 @@ const IN_GUEST_ENV: &str = "OVERDRIVE_TEST_IN_GUEST";
 #[derive(Debug, thiserror::Error)]
 pub enum RunInGuestError {
     /// The group's guest context is not prepared on this host, or the group
-    /// is unknown (outside Metal this is the fail-closed outcome).
-    ///
-    /// Transitional: slice `guest-placement-on-the-test` rewrites this: off a
-    /// Metal run the placement expansion runs the body in place and never calls
-    /// `run_in_guest`, so "fail-closed outside Metal" no longer applies.
+    /// is unknown. Off a Metal run the placement expansion runs the body in
+    /// place and never reaches the guest hand-off, so this is only reported on
+    /// a Metal run.
     #[error("guest group {group:?} is not prepared for {test}: {detail}")]
     LaneNotPrepared {
         /// The declared guest group.
@@ -121,15 +123,16 @@ pub enum RunInGuestError {
 
 /// Whether the current process is the test process of a guest attempt.
 ///
-/// True only in the process [`run_in_guest`] (or the Metal dispatcher) starts
-/// inside a guest; the host-side half of a guest-placed test sees `false`.
+/// True only in the process `placement::run_in_guest` (or the Metal dispatcher)
+/// starts inside a guest; the host-side half of a guest-placed test sees `false`.
 #[must_use]
 pub fn inside_guest() -> bool {
     std::env::var_os(IN_GUEST_ENV).is_some_and(|value| value == "1")
 }
 
 /// Runs `test_name` of the test binary `exe` inside one fresh guest of
-/// `group` and reports the outcome.
+/// `group` and reports the outcome; the isolated-placement path of
+/// `placement::run_in_guest`.
 ///
 /// `test_name` is the full libtest name (module path without the crate
 /// segment). One guest is booted per call; the guest boot, copy-in and exec
@@ -138,8 +141,8 @@ pub fn inside_guest() -> bool {
 ///
 /// # Preconditions
 ///
-/// The guest kit is prepared (`cargo xtask guest-kit-prepare`) and the
-/// process runs on the native Metal host; otherwise the call fails closed.
+/// The guest kit is prepared (`cargo xtask guest-kit-prepare`) and the caller
+/// has found `placement::in_metal_run()` true and [`inside_guest`] false.
 ///
 /// # Errors
 ///
@@ -147,12 +150,11 @@ pub fn inside_guest() -> bool {
 /// group (named in the detail), [`RunInGuestError::GuestExecution`] when the
 /// guest cannot boot or does not return, [`RunInGuestError::BodyFailed`] when
 /// the test exits unsuccessfully inside the guest.
-///
-/// Transitional: slice `guest-placement-on-the-test` removes this skeleton
-/// entry point when the typed `placement::run_in_guest` lands; the precondition
-/// above ("otherwise the call fails closed") is then the caller's `in_metal_run()`
-/// check, not this function's.
-pub fn run_in_guest(group: &str, exe: &Path, test_name: &str) -> Result<(), RunInGuestError> {
+pub(crate) fn run_isolated_guest(
+    group: &str,
+    exe: &Path,
+    test_name: &str,
+) -> Result<(), RunInGuestError> {
     let program = exe.to_string_lossy().into_owned();
     let args = ["--exact".to_owned(), test_name.to_owned(), NO_CAPTURE.to_owned()];
     let binary_id = std::env::var("NEXTEST_BINARY_ID").unwrap_or_default();

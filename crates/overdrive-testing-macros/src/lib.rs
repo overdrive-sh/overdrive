@@ -6,24 +6,23 @@
 //!
 //! # Expansion
 //!
-//! The test function keeps its signature and its other attributes (for
-//! example `#[tokio::test]`). Its body is wrapped so that:
+//! The attribute never inserts `#[test]`: the test function keeps its
+//! signature and its own test attribute (`#[test]`, `#[tokio::test]`, ...), and
+//! a function without one is not registered as a test. Its body is wrapped so
+//! that:
 //!
-//! - where `overdrive_testing::guest_suite::inside_guest()` holds, the
-//!   original body runs;
-//! - everywhere else the host-side half hands the running test binary to
-//!   `overdrive_testing::guest_suite::run_in_guest(group, exe, test_name)` on
-//!   a plain OS thread (the guest kit drives its own runtime, which must not
-//!   start inside an async test's runtime) and panics with the typed error
-//!   when the in-guest run fails. The body never runs on the host.
+//! - where `overdrive_testing::placement::inside_guest()` holds, or
+//!   `overdrive_testing::placement::in_metal_run()` does not, the original body
+//!   runs in place (off a Metal run the machine is private to the process);
+//! - on a Metal run, outside a guest, the host-side half hands the running test
+//!   binary to `overdrive_testing::placement::run_in_guest(&placement, exe,
+//!   test_name)` with a typed `GuestPlacement` on a plain OS thread (the guest
+//!   kit drives its own runtime, which must not start inside an async test's
+//!   runtime) and panics with the typed error when the in-guest run fails. The
+//!   body never runs on the host.
 //!
-//! A test with no test attribute of its own gets `#[test]`.
-//!
-//! Transitional: slice `guest-placement-on-the-test` rewrites this expansion:
-//! the macro never inserts `#[test]` (design DDD-1), the body runs in place
-//! where `inside_guest()` holds or `in_metal_run()` does not, and the host half
-//! calls the typed `placement::run_in_guest`, which replaces the skeleton's
-//! `guest_suite::run_in_guest(&str, ..)`.
+//! Where `#[quint_test]` or `#[quint_run]` is present, `#[overdrive_test]` goes
+//! below it.
 //!
 //! # Placement marker
 //!
@@ -39,7 +38,7 @@ use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
 use syn::spanned::Spanned as _;
-use syn::{Attribute, Expr, ExprLit, ItemFn, Lit, Meta, ReturnType, parse_macro_input};
+use syn::{Expr, ExprLit, ItemFn, Lit, Meta, ReturnType, parse_macro_input};
 
 /// Declares where a Metal integration test runs.
 ///
@@ -86,16 +85,6 @@ fn expand(attribute: &TokenStream2, mut function: ItemFn) -> syn::Result<TokenSt
             "#[overdrive_test] supports tests that return `()`",
         ));
     }
-    let declares_test = function.attrs.iter().any(is_test_attribute);
-    if !declares_test {
-        if function.sig.asyncness.is_some() {
-            return Err(syn::Error::new(
-                function.sig.asyncness.span(),
-                "an async #[overdrive_test] needs its runtime's test attribute, e.g. #[tokio::test]",
-            ));
-        }
-        function.attrs.push(syn::parse_quote!(#[test]));
-    }
     let name = &function.sig.ident;
     let gate = gate(&group, &name.to_string());
     let original = &function.block;
@@ -122,10 +111,6 @@ fn expected_form(attribute: &TokenStream2) -> syn::Error {
         attribute.span(),
         "expected #[overdrive_test(guest = \"<group>\")]; the guest case is the only supported placement",
     )
-}
-
-fn is_test_attribute(attribute: &Attribute) -> bool {
-    attribute.path().segments.last().is_some_and(|segment| segment.ident == "test")
 }
 
 /// The statements prepended to the test body: the placement record, then the
@@ -157,7 +142,16 @@ fn gate(group: &str, name: &str) -> TokenStream2 {
         // The record lives only as long as the linker keeps this function's
         // section; reading it keeps the record's section referenced.
         ::core::hint::black_box(&__OVERDRIVE_TEST_RECORD);
-        if !::overdrive_testing::guest_suite::inside_guest() {
+        if !::overdrive_testing::placement::inside_guest()
+            && ::overdrive_testing::placement::in_metal_run()
+        {
+            const __OVERDRIVE_TEST_PLACEMENT: ::overdrive_testing::placement::GuestPlacement =
+                ::overdrive_testing::placement::GuestPlacement::declare(
+                    #group,
+                    "",
+                    ::overdrive_testing::placement::Sharing::Isolated,
+                    "",
+                );
             let test_name = match __OVERDRIVE_TEST_FULL_NAME.split_once("::") {
                 ::core::option::Option::Some((_crate_name, rest)) => rest,
                 ::core::option::Option::None => __OVERDRIVE_TEST_FULL_NAME,
@@ -167,8 +161,8 @@ fn gate(group: &str, name: &str) -> TokenStream2 {
             let outcome = ::std::thread::scope(|scope| {
                 scope
                     .spawn(|| {
-                        ::overdrive_testing::guest_suite::run_in_guest(
-                            __OVERDRIVE_TEST_GROUP,
+                        ::overdrive_testing::placement::run_in_guest(
+                            &__OVERDRIVE_TEST_PLACEMENT,
                             &exe,
                             test_name,
                         )

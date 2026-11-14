@@ -38,20 +38,38 @@ pub use groups::{GuestGroup, GuestPlacement, LanePlacement, Sharing};
 /// True when any of `OVERDRIVE_METAL_RUN_ID`, `OVERDRIVE_METAL_EXECUTION_CLASS`,
 /// `OVERDRIVE_METAL_SOURCE_ROOT` is set and non-empty: the wrapper's own
 /// predicate for "a Metal run context is present".
-// SCAFFOLD: true
 pub fn in_metal_run() -> bool {
-    todo!("in_metal_run: true iff any of the three Metal variables is set and non-empty")
+    METAL_RUN_VARIABLES
+        .iter()
+        .any(|variable| std::env::var_os(variable).is_some_and(|value| !value.is_empty()))
 }
 
+/// The environment variables the Metal wrapper sets for a run it places.
+const METAL_RUN_VARIABLES: [&str; 3] =
+    ["OVERDRIVE_METAL_RUN_ID", "OVERDRIVE_METAL_EXECUTION_CLASS", "OVERDRIVE_METAL_SOURCE_ROOT"];
+
 /// Runs `test_name` of the test binary `exe` in a guest of `placement`.
-// SCAFFOLD: true
+///
+/// Preconditions: the caller has found [`in_metal_run`] true and
+/// [`inside_guest`] false, and the guest kit is prepared. An isolated
+/// placement boots one fresh guest of the placement's group for this test.
+///
+/// # Panics
+///
+/// A `Sharing::Module` placement reaches the shared-guest hand-off, which the
+/// slice `module-tests-share-one-guest` builds.
+// SCAFFOLD: true for the `Sharing::Module` arm only.
 pub fn run_in_guest(
     placement: &GuestPlacement,
     exe: &Path,
     test_name: &str,
 ) -> Result<(), RunInGuestError> {
-    let _ = (placement, exe, test_name);
-    todo!("run_in_guest: typed placement, isolated or shared")
+    match placement.sharing {
+        Sharing::Isolated => {
+            crate::guest_suite::run_isolated_guest(placement.group, exe, test_name)
+        }
+        Sharing::Module => todo!("run_in_guest: shared-guest hand-off"),
+    }
 }
 
 /// The rendezvous and owner binary of one shared scope.

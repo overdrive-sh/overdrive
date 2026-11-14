@@ -46,10 +46,10 @@ pub enum Sharing {
 /// `shared_guest!`.
 #[derive(Debug, Clone, Copy)]
 pub struct GuestPlacement {
-    group: &'static str,
-    profile: &'static str,
-    sharing: Sharing,
-    declaring_module: &'static str,
+    pub(super) group: &'static str,
+    pub(super) profile: &'static str,
+    pub(super) sharing: Sharing,
+    pub(super) declaring_module: &'static str,
 }
 
 impl GuestPlacement {
