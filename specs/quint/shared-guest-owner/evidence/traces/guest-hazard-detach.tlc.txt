@@ -13,7 +13,7 @@ State 1: <Initial predicate>
 /\ guest_bugCancelOnDisconnect_shared_guest_faults = 2
 /\ guest_bugCancelOnDisconnect_shared_guest_execgen = 0
 
-State 2: <guest_bugCancelOnDisconnect_shared_guest_Arrive line 461, col 3 to line 468, col 78 of module guest_bugCancelOnDisconnect>
+State 2: <guest_bugCancelOnDisconnect_shared_guest_Arrive line 456, col 3 to line 463, col 78 of module guest_bugCancelOnDisconnect>
 /\ guest_bugCancelOnDisconnect_shared_guest_queue = <<>>
 /\ guest_bugCancelOnDisconnect_shared_guest_guest = 0
 /\ guest_bugCancelOnDisconnect_shared_guest_inflight = 0
@@ -28,7 +28,7 @@ State 2: <guest_bugCancelOnDisconnect_shared_guest_Arrive line 461, col 3 to lin
 /\ guest_bugCancelOnDisconnect_shared_guest_faults = 2
 /\ guest_bugCancelOnDisconnect_shared_guest_execgen = 0
 
-State 3: <guest_bugCancelOnDisconnect_shared_guest_ElectBegin line 565, col 3 to line 575, col 57 of module guest_bugCancelOnDisconnect>
+State 3: <guest_bugCancelOnDisconnect_shared_guest_ElectBegin line 539, col 3 to line 549, col 57 of module guest_bugCancelOnDisconnect>
 /\ guest_bugCancelOnDisconnect_shared_guest_queue = <<>>
 /\ guest_bugCancelOnDisconnect_shared_guest_guest = 0
 /\ guest_bugCancelOnDisconnect_shared_guest_inflight = 0
@@ -43,7 +43,7 @@ State 3: <guest_bugCancelOnDisconnect_shared_guest_ElectBegin line 565, col 3 to
 /\ guest_bugCancelOnDisconnect_shared_guest_faults = 2
 /\ guest_bugCancelOnDisconnect_shared_guest_execgen = 0
 
-State 4: <guest_bugCancelOnDisconnect_shared_guest_OwnerStarted line 581, col 3 to line 598, col 60 of module guest_bugCancelOnDisconnect>
+State 4: <guest_bugCancelOnDisconnect_shared_guest_OwnerStarted line 555, col 3 to line 572, col 60 of module guest_bugCancelOnDisconnect>
 /\ guest_bugCancelOnDisconnect_shared_guest_queue = <<1>>
 /\ guest_bugCancelOnDisconnect_shared_guest_guest = 1
 /\ guest_bugCancelOnDisconnect_shared_guest_inflight = 0
@@ -58,7 +58,7 @@ State 4: <guest_bugCancelOnDisconnect_shared_guest_OwnerStarted line 581, col 3 
 /\ guest_bugCancelOnDisconnect_shared_guest_faults = 2
 /\ guest_bugCancelOnDisconnect_shared_guest_execgen = 0
 
-State 5: <guest_bugCancelOnDisconnect_shared_guest_BootFinished line 679, col 3 to line 703, col 60 of module guest_bugCancelOnDisconnect>
+State 5: <guest_bugCancelOnDisconnect_shared_guest_BootFinished line 653, col 3 to line 677, col 60 of module guest_bugCancelOnDisconnect>
 /\ guest_bugCancelOnDisconnect_shared_guest_queue = <<>>
 /\ guest_bugCancelOnDisconnect_shared_guest_guest = 2
 /\ guest_bugCancelOnDisconnect_shared_guest_inflight = 1
@@ -73,7 +73,7 @@ State 5: <guest_bugCancelOnDisconnect_shared_guest_BootFinished line 679, col 3 
 /\ guest_bugCancelOnDisconnect_shared_guest_faults = 2
 /\ guest_bugCancelOnDisconnect_shared_guest_execgen = 1
 
-State 6: <guest_bugCancelOnDisconnect_shared_guest_ClientGone line 622, col 3 to line 673, col 59 of module guest_bugCancelOnDisconnect>
+State 6: <guest_bugCancelOnDisconnect_shared_guest_ClientGone line 596, col 3 to line 647, col 58 of module guest_bugCancelOnDisconnect>
 /\ guest_bugCancelOnDisconnect_shared_guest_queue = <<>>
 /\ guest_bugCancelOnDisconnect_shared_guest_guest = 2
 /\ guest_bugCancelOnDisconnect_shared_guest_inflight = 0
@@ -88,7 +88,7 @@ State 6: <guest_bugCancelOnDisconnect_shared_guest_ClientGone line 622, col 3 to
 /\ guest_bugCancelOnDisconnect_shared_guest_faults = 2
 /\ guest_bugCancelOnDisconnect_shared_guest_execgen = 1
 
-State 7: <guest_bugCancelOnDisconnect_shared_guest_Arrive line 461, col 3 to line 468, col 78 of module guest_bugCancelOnDisconnect>
+State 7: <guest_bugCancelOnDisconnect_shared_guest_Arrive line 456, col 3 to line 463, col 78 of module guest_bugCancelOnDisconnect>
 /\ guest_bugCancelOnDisconnect_shared_guest_queue = <<>>
 /\ guest_bugCancelOnDisconnect_shared_guest_guest = 2
 /\ guest_bugCancelOnDisconnect_shared_guest_inflight = 0
@@ -103,7 +103,7 @@ State 7: <guest_bugCancelOnDisconnect_shared_guest_Arrive line 461, col 3 to lin
 /\ guest_bugCancelOnDisconnect_shared_guest_faults = 2
 /\ guest_bugCancelOnDisconnect_shared_guest_execgen = 1
 
-State 8: <guest_bugCancelOnDisconnect_shared_guest_Attached line 604, col 3 to line 616, col 57 of module guest_bugCancelOnDisconnect>
+State 8: <guest_bugCancelOnDisconnect_shared_guest_Attached line 578, col 3 to line 590, col 57 of module guest_bugCancelOnDisconnect>
 /\ guest_bugCancelOnDisconnect_shared_guest_queue = <<>>
 /\ guest_bugCancelOnDisconnect_shared_guest_guest = 2
 /\ guest_bugCancelOnDisconnect_shared_guest_inflight = 2

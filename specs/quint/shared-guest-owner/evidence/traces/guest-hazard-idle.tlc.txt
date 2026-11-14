@@ -13,7 +13,7 @@ State 1: <Initial predicate>
 /\ guest_bugIdleAnyTime_shared_guest_inflight = 0
 /\ guest_bugIdleAnyTime_shared_guest_queue = <<>>
 
-State 2: <guest_bugIdleAnyTime_shared_guest_Arrive line 453, col 3 to line 460, col 71 of module guest_bugIdleAnyTime>
+State 2: <guest_bugIdleAnyTime_shared_guest_Arrive line 448, col 3 to line 455, col 71 of module guest_bugIdleAnyTime>
 /\ guest_bugIdleAnyTime_shared_guest_guest = 0
 /\ guest_bugIdleAnyTime_shared_guest_execgen = 0
 /\ guest_bugIdleAnyTime_shared_guest_gen = 0
@@ -28,7 +28,7 @@ State 2: <guest_bugIdleAnyTime_shared_guest_Arrive line 453, col 3 to line 460, 
 /\ guest_bugIdleAnyTime_shared_guest_inflight = 0
 /\ guest_bugIdleAnyTime_shared_guest_queue = <<>>
 
-State 3: <guest_bugIdleAnyTime_shared_guest_ElectBegin line 555, col 3 to line 564, col 78 of module guest_bugIdleAnyTime>
+State 3: <guest_bugIdleAnyTime_shared_guest_ElectBegin line 530, col 3 to line 539, col 78 of module guest_bugIdleAnyTime>
 /\ guest_bugIdleAnyTime_shared_guest_guest = 0
 /\ guest_bugIdleAnyTime_shared_guest_execgen = 0
 /\ guest_bugIdleAnyTime_shared_guest_gen = 0
@@ -43,7 +43,7 @@ State 3: <guest_bugIdleAnyTime_shared_guest_ElectBegin line 555, col 3 to line 5
 /\ guest_bugIdleAnyTime_shared_guest_inflight = 0
 /\ guest_bugIdleAnyTime_shared_guest_queue = <<>>
 
-State 4: <guest_bugIdleAnyTime_shared_guest_OwnerStarted line 570, col 3 to line 586, col 50 of module guest_bugIdleAnyTime>
+State 4: <guest_bugIdleAnyTime_shared_guest_OwnerStarted line 545, col 3 to line 561, col 50 of module guest_bugIdleAnyTime>
 /\ guest_bugIdleAnyTime_shared_guest_guest = 1
 /\ guest_bugIdleAnyTime_shared_guest_execgen = 0
 /\ guest_bugIdleAnyTime_shared_guest_gen = 1
@@ -58,7 +58,7 @@ State 4: <guest_bugIdleAnyTime_shared_guest_OwnerStarted line 570, col 3 to line
 /\ guest_bugIdleAnyTime_shared_guest_inflight = 0
 /\ guest_bugIdleAnyTime_shared_guest_queue = <<1>>
 
-State 5: <guest_bugIdleAnyTime_shared_guest_IdleElapsed line 787, col 3 to line 807, col 49 of module guest_bugIdleAnyTime>
+State 5: <guest_bugIdleAnyTime_shared_guest_IdleElapsed line 762, col 3 to line 782, col 49 of module guest_bugIdleAnyTime>
 /\ guest_bugIdleAnyTime_shared_guest_guest = 0
 /\ guest_bugIdleAnyTime_shared_guest_execgen = 0
 /\ guest_bugIdleAnyTime_shared_guest_gen = 1

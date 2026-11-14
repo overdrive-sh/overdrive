@@ -26,26 +26,30 @@
  *   Owner events (the conformance instance, ENV=false), each one OwnerCore event:
  *     Attached{c} ClientGone{c} BootFinished{ok} ExecFinished{pass} GuestLost ExecBound IdleElapsed
  *   Environment actions (ENV=true only; performed by the environment, not by OwnerCore):
- *     Arrive{c} ElectBegin{c} OwnerStarted{c} OwnerStartFails{c} OwnerCrash
+ *     Arrive{c} ElectBegin{c} OwnerStarted{c} OwnerCrash
  *   OwnerStarted also enqueues the elector (as Attached does) and drives.
  *
- * Instances: guest_ok (ENV=true, REC=false) exhaustive checks; guest_env (ENV=true, REC=true) environment
- * named runs; guest_conf (ENV=false, REC=true) owner-driven named runs, the `#[quint_test]` pins. In
+ * Instances: guest_ok (ENV=true, REC=false) exhaustive checks and the environment named runs; guest_conf
+ * (ENV=false, REC=true) owner-driven named runs, the `#[quint_test]` pins. In
  * guest_conf the owner is already started (owners = 1, lock free, clients IDLE) and no environment action is
  * enabled; `owners` is then 1 or 0 and equals not(OwnerObservation.stopped).
  *
  * Assumptions (README maps each to its discharging validation item):
  *   A-1 owner death kills the guest (owner is init of its PID namespace). Modelled as a rule of OwnerCrash
  *       and IdleElapsed; hazard `orphan` removes it.
- *   A-3 the exec/boot/lost outcomes are environment choices; a test exec that fails is a nonzero exit.
- *   A-4 a nextest retry is a NEW client (a fresh client id), not a re-run of a finished one.
- *   A-5 Fault budget: OwnerCrash and GuestLost together occur at most FAULTS times (finite faults are the
+ *   A-2 the exec/boot/lost outcomes are environment choices; a test exec that fails is a nonzero exit.
+ *   A-3 a nextest retry is a NEW client (a fresh client id), not a re-run of a finished one.
+ *   A-4 Fault budget: OwnerCrash and GuestLost together occur at most FAULTS times (finite faults are the
  *       fairness precondition of the progress property).
- *   A-6 election, owner start and attach are atomic w.r.t. the owner's own state (OwnerStarted registers the
+ *   A-5 election, owner start and attach are atomic w.r.t. the owner's own state (OwnerStarted registers the
  *       owner and enqueues the electing client in one step).
- *   A-8 a client connecting at the instant the owner exits idle sees the connection fail and re-arrives once
+ *   A-6 a client connecting at the instant the owner exits idle sees the connection fail and re-arrives once
  *       through the election (a second cut is a GuestExecution failure at stage owner); the model makes
  *       Attached and IdleElapsed atomic. Discharged by a deterministic client-side test (design DDD-17).
+ *
+ *   A-7 the kernel's flock arbitrates the election (released when the holder dies) and the owner's unix
+ *       socket under the run runtime directory is reachable from test processes in other network
+ *       namespaces. Discharged by Tier-3 validation V-5.
  *
  * Projectable from OwnerCore::observe(): guest (NoGuest/Booting/Ready), gen (generation), inflight, queue,
  * and, in the ENV=false instance, owners via `stopped`.
@@ -57,7 +61,7 @@ module shared_guest_conf {
   type ConfStep =
     | Init
     | Arrive({ c: int }) | ElectBegin({ c: int }) | OwnerStarted({ c: int })
-    | OwnerStartFails({ c: int }) | OwnerCrash
+    | OwnerCrash
     | Attached({ c: int }) | ClientGone({ c: int }) | BootFinished({ ok: bool })
     | ExecFinished({ pass: bool }) | GuestLost | ExecBound | IdleElapsed
 }
@@ -83,7 +87,6 @@ module shared_guest {
   val LOST = 12      // GuestLost
   val BOOTFAIL = 13
   val OWNERLOST = 14
-  val STARTFAIL = 15 // the elector got a typed owner-start failure (owner binary missing)
   val BOUND = 16     // the exec bound ended the exec
 
   type S = {
@@ -195,12 +198,6 @@ module shared_guest {
     commit(drive(enq({ ...cur, owners: cur.owners + 1, lock: if (cur.lock == c) 0 else cur.lock }, c)),
       variant("OwnerStarted", { c: c })),
   }
-  // the electing client holding the lock fails (owner binary missing: typed LaneNotPrepared) or is killed
-  // before the owner exists: lock released, no owner, nothing left running
-  action OwnerStartFails(c: int): bool = all {
-    ENV, cur.phase.get(c) == STARTING,
-    commit({ ...ph(cur, c, STARTFAIL), lock: if (cur.lock == c) 0 else cur.lock }, variant("OwnerStartFails", { c: c })),
-  }
 
   // ---------------------------------------------------------------- owner events (one OwnerCore event each)
   // a client connects to the live owner (ENV=false: the client is IDLE, it is just attached)
@@ -280,7 +277,7 @@ module shared_guest {
   action step = {
     nondet c = CL.oneOf()
     nondet b = Set(true, false).oneOf()
-    any { Arrive(c), ElectBegin(c), OwnerStarted(c), OwnerStartFails(c), Attached(c),
+    any { Arrive(c), ElectBegin(c), OwnerStarted(c), Attached(c),
           ClientGone(c), BootFinished(b), ExecFinished(b), GuestLost, ExecBound, IdleElapsed,
           OwnerCrash }
   }
@@ -300,7 +297,7 @@ module shared_guest {
                      I_IDLE_NO_LOSS, I_DELIVER_ONLY_ATTACHED }
 
   // progress (D-BOUND): every attached client gets a terminal outcome
-  // (A-5 bounds the faults)
+  // (A-4 bounds the faults)
   temporal FairProgress = weakFair(Progress, (lock, owners, guest, gen, inflight, execgen, execs,
     queue, phase, bad, faults, idleLoss, conf_step))
   temporal EveryClientTerminates = FairProgress.implies(CL.forall(c =>
@@ -374,7 +371,7 @@ module shared_guest {
     .then(IdleElapsed)
     .expect(owners == 0 and guest == 0 and not(idleLoss) and Safety)
 
-  // guest_env runs (ENV=true, REC=true): the environment actions
+  // guest_ok runs (ENV=true): the environment actions
   run concurrent_first_arrival_one_owner = init.then(Arrive(1)).then(Arrive(2)).then(ElectBegin(1))
     .expect(lock == 1 and not(canElect(2)) and Safety)
     .then(OwnerStarted(1)).expect(owners == 1 and lock == 0 and queue == List(1) and guest == 1 and not(canElect(2)) and Safety)
@@ -389,14 +386,7 @@ module shared_guest {
     .expect(gen == 2 and guest == 1 and owners == 1 and Safety)
     .then(BootFinished(true)).then(ExecFinished(true))
     .expect(phase.get(3) == PASS and Safety)
-
-  run owner_start_fails_then_next_elects = init.then(Arrive(1)).then(Arrive(2)).then(ElectBegin(1))
-    .then(OwnerStartFails(1))
-    .expect(lock == 0 and owners == 0 and phase.get(1) == STARTFAIL and canElect(2) and Safety)
-    .then(ElectBegin(2)).then(OwnerStarted(2)).then(BootFinished(true)).then(ExecFinished(true))
-    .expect(owners == 1 and phase.get(2) == PASS and Safety)
 }
 
 module guest_ok { import shared_guest(OFF = Set(), REC = false, ENV = true).* from "./shared_guest" }
-module guest_env { import shared_guest(OFF = Set(), REC = true, ENV = true).* from "./shared_guest" }
 module guest_conf { import shared_guest(OFF = Set(), REC = true, ENV = false).* from "./shared_guest" }

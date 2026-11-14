@@ -1,4 +1,4 @@
-# guest-hazard-bound: counterexample, 12 state(s) (from the TLC trace)
+# guest-hazard-bound: counterexample, 14 state(s) (from the TLC trace)
 
 State 1
   execs = 0
@@ -16,52 +16,76 @@ State 1
   phase = <<0, 0, 0>>
 
 State 2 [Arrive]
-  phase = <<1, 0, 0>>
+  phase = <<0, 0, 1>>
 
-State 3 [ElectBegin]
-  lock = 1
-  phase = <<2, 0, 0>>
+State 3 [Arrive]
+  phase = <<0, 1, 1>>
 
 State 4 [Arrive]
-  phase = <<2, 0, 1>>
+  phase = <<1, 1, 1>>
 
-State 5 [Arrive]
-  phase = <<2, 1, 1>>
+State 5 [ElectBegin]
+  lock = 2
+  phase = <<1, 2, 1>>
 
 State 6 [OwnerStarted]
   owners = 1
   lock = 0
-  queue = <<1>>
+  queue = <<2>>
   guest = 1
   gen = 1
-  phase = <<3, 1, 1>>
+  phase = <<1, 3, 1>>
 
 State 7 [Attached]
-  queue = <<1, 2>>
-  phase = <<3, 3, 1>>
+  queue = <<2, 3>>
+  phase = <<1, 3, 3>>
 
-State 8 [Attached]
-  queue = <<1, 2, 3>>
-  phase = <<3, 3, 3>>
-
-State 9 [ClientGone]
-  queue = <<1, 2>>
-  phase = <<3, 3, 6>>
-
-State 10 [ClientGone]
-  queue = <<2>>
-  phase = <<6, 3, 6>>
-
-State 11 [BootFinished]
+State 8 [BootFinished]
   execs = 1
-  queue = <<>>
+  queue = <<3>>
   guest = 2
   inflight = 2
   execgen = 1
-  phase = <<6, 4, 6>>
+  phase = <<1, 4, 3>>
 
-State 12 [ClientGone]
+State 9 [GuestLost]
+  execs = 0
+  guest = 1
+  inflight = 0
+  faults = 1
+  gen = 2
   bad = {1}
-  phase = <<6, 5, 6>>
+  phase = <<1, 12, 3>>
 
--> stutters forever in State 12
+State 10 [OwnerCrash]
+  owners = 0
+  queue = <<>>
+  guest = 0
+  faults = 0
+  phase = <<1, 12, 14>>
+
+State 11 [ElectBegin]
+  lock = 1
+  phase = <<2, 12, 14>>
+
+State 12 [OwnerStarted]
+  owners = 1
+  lock = 0
+  queue = <<1>>
+  guest = 1
+  gen = 3
+  phase = <<3, 12, 14>>
+
+State 13 [BootFinished]
+  execs = 1
+  queue = <<>>
+  guest = 2
+  inflight = 1
+  execgen = 3
+  phase = <<4, 12, 14>>
+
+State 14 [ClientGone]
+  bad = {1, 3}
+  phase = <<5, 12, 14>>
+
+-> stutters forever in State 14

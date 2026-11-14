@@ -8,23 +8,22 @@ Feature `metal-test-placement-attribute`; decisions are numbered in the feature 
 
 | Instance | ENV | REC | Use |
 |---|---|---|---|
-| `guest_ok` | true | false | exhaustive checks (`Safety`, `EveryClientTerminates`); hazards use the same shape with one `OFF` rule |
-| `guest_env` | true | true | environment named runs (evaluator; NOT pinned by conformance) |
+| `guest_ok` | true | false | exhaustive checks (`Safety`, `EveryClientTerminates`) and the environment named runs (evaluator; NOT pinned by conformance); hazards use the same shape with one `OFF` rule |
 | `guest_conf` | false | true | owner-driven named runs: the `#[quint_test]` pins |
 
 With `ENV = false` every environment action is disabled, `init` has the owner already started (`owners = 1`, lock free, clients `IDLE`), and `owners` is 1 or 0 and equals `not(OwnerObservation.stopped)`. `REC = true` makes `conf_step` record the action taken (variant named after the action, parameters by name).
 
-The `guest_env` runs and the environment actions `Arrive`, `ElectBegin`, `OwnerStarted`, `OwnerStartFails` and `OwnerCrash` are outside `OwnerCore` conformance replay, under an exemption approved by the user (design decision N-4, 2026-11-14): the OS or the client shell performs them (an owner crash leaves no process to receive an event). Each invariant they touch is discharged as follows: `I_OWNER_UNIQUE` by the Tier-3 scenario of eight simultaneous first arrivals electing exactly one owner (V-5); `I_NO_ORPHAN` by the Tier-3 scenario in which SIGKILL of the owner during a guest exec leaves no VMM (V-4); an owner-start failure (missing owner binary, `LaneNotPrepared`) by a Tier-3 scenario. Every other invariant is constrained by the actions `guest_conf` replays.
+The environment actions `Arrive`, `ElectBegin`, `OwnerStarted` and `OwnerCrash` (live in `guest_ok`) are outside `OwnerCore` conformance replay, under an exemption approved by the user (design decision N-4, 2026-11-14): the OS or the client shell performs them (an owner crash leaves no process to receive an event). Each invariant they touch is discharged as follows: `I_OWNER_UNIQUE` by the Tier-3 scenario of eight simultaneous first arrivals electing exactly one owner (V-5); `I_NO_ORPHAN` by the Tier-3 scenario in which SIGKILL of the owner during a guest exec leaves no VMM (V-4); a missing owner binary is checked before the electing client takes the lock (typed `LaneNotPrepared`: no owner, no lock held), so there is nothing to model. Every other invariant is constrained by the actions `guest_conf` replays.
 
 ## Validation budget
 
-20 checks; wall time and per-check seconds are in `evidence/summary.md`; the two `ci = false` checks are `guest-every-client-terminates` and `guest-hazard-bound`.
+19 checks (2 exhaustive, 7 hazards, 10 named runs), all `ci = true`; 128.7 s wall clock on Metal (slowest check 80.5 s); per-check seconds are in `evidence/summary.md`.
 
 ## Actions
 
 Owner events, each one `OwnerCore` event (the whole `step` of `guest_conf`): `Attached{c}`, `ClientGone{c}`, `BootFinished{ok}`, `ExecFinished{pass}`, `GuestLost`, `ExecBound`, `IdleElapsed`.
 
-Environment actions (`ENV` only; not an `OwnerCore` event): `Arrive{c}`, `ElectBegin{c}`, `OwnerStarted{c}` (also enqueues the elector as `Attached` does, then drives), `OwnerStartFails{c}` (the electing client holding the lock fails with the typed `LaneNotPrepared` outcome, phase `STARTFAIL`; lock released, no owner, nothing left running), `OwnerCrash`.
+Environment actions (`ENV` only; not an `OwnerCore` event): `Arrive{c}`, `ElectBegin{c}`, `OwnerStarted{c}` (also enqueues the elector as `Attached` does, then drives), `OwnerCrash`.
 
 ## Decisions and their checks
 
@@ -55,13 +54,12 @@ Environment actions (`ENV` only; not an `OwnerCore` event): `Arrive{c}`, `ElectB
 | hung exec ended by the bound | `exec_bound_discards_guest_and_replies_bound` |
 | idle exit only when empty | `idle_exit_only_when_empty` |
 
-`guest_env` (evaluator only):
+`guest_ok` (evaluator only):
 
 | Scenario | Run |
 |---|---|
 | concurrent first arrival, one owner | `concurrent_first_arrival_one_owner` |
 | owner crash then a new arrival elects a new owner | `owner_crash_then_new_owner_elected` |
-| owner start fails (electing client gets `LaneNotPrepared`, lock released), next client elects | `owner_start_fails_then_next_elects` |
 
 ## Projection for the conformance driver
 
@@ -72,10 +70,11 @@ Projectable from `OwnerCore::observe()`: `guest` (NoGuest/Booting/Ready), `gen` 
 | Assumption | Discharged by |
 |---|---|
 | A-1 the owner is init of its PID namespace, so the kernel kills the VMM when the owner dies (rule of `OwnerCrash` and `IdleElapsed`) | Discharged by Tier-3 validation V-4 (HOLDS on Metal kernel 7.0.0-38: no VMM survives the owner, gone within 38.6 ms; `docs/feature/metal-test-placement-attribute/spike/findings-owner-lifetime.md`, kernel basis `kernel/pid_namespace.c:225-274 @ v7.0`); an assumption of the model, not proven by it |
-| A-3 exec pass/fail, boot ok/fail and guest loss are environment choices | `ExecFinished`, `BootFinished`, `GuestLost` are nondeterministic actions |
-| A-4 a nextest retry is a new client id | modelled as a fresh client arriving |
-| A-5 owner crashes and guest losses are finite (budget 2); without it a perpetual crash defeats any progress property | fairness precondition of `EveryClientTerminates` |
-| A-6 election, owner start and attach are atomic w.r.t. the owner's own state (`OwnerStarted` registers the owner and enqueues the electing client in one step) | design pin: `OwnerCore::observe()` shows the owner only once it serves |
-| A-8 a client connecting at the instant the owner exits idle sees the connection fail and re-arrives (stays `ARRIVING`); the model makes `Attached` and `IdleElapsed` atomic | discharged by the client rule "a connection that ends before the owner acknowledged the request has run nothing, so the client re-attaches once through the election" (feature delta DDD-17; kernel basis `net/unix/af_unix.c:721-723` and `708-709 @ v7.0`: closing a listening unix socket resets queued unaccepted connections) and by a deterministic client-side test: a unix listener that accepts and closes before it acknowledges produces exactly one re-attach through the election, and a second cut is a `GuestExecution` failure at stage `owner` (design DDD-17); the model keeps `Attached` and `IdleElapsed` atomic |
+| A-2 exec pass/fail, boot ok/fail and guest loss are environment choices | `ExecFinished`, `BootFinished`, `GuestLost` are nondeterministic actions |
+| A-3 a nextest retry is a new client id | modelled as a fresh client arriving |
+| A-4 owner crashes and guest losses are finite (budget 2); without it a perpetual crash defeats any progress property | fairness precondition of `EveryClientTerminates` |
+| A-5 election, owner start and attach are atomic w.r.t. the owner's own state (`OwnerStarted` registers the owner and enqueues the electing client in one step) | design pin: `OwnerCore::observe()` shows the owner only once it serves |
+| A-6 a client connecting at the instant the owner exits idle sees the connection fail and re-arrives (stays `ARRIVING`); the model makes `Attached` and `IdleElapsed` atomic | discharged by the client rule "a connection that ends before the owner acknowledged the request has run nothing, so the client re-attaches once through the election" (feature delta DDD-17; kernel basis `net/unix/af_unix.c:721-723` and `708-709 @ v7.0`: closing a listening unix socket resets queued unaccepted connections) and by a deterministic client-side test: a unix listener that accepts and closes before it acknowledges produces exactly one re-attach through the election, and a second cut is a `GuestExecution` failure at stage `owner` (design DDD-17); the model keeps `Attached` and `IdleElapsed` atomic |
+| A-7 the kernel's flock arbitrates the election (released when the holder dies) and the owner's unix socket under the run runtime directory is reachable from test processes in other network namespaces | Discharged by Tier-3 validation V-5 (HOLDS on Metal kernel 7.0.0-38; `docs/feature/metal-test-placement-attribute/spike/findings-owner-lifetime.md`) |
 
 Commands: `cargo xtask metal run -- cargo xtask quint check --subsystem shared-guest-owner --record`, then `verify-evidence`.

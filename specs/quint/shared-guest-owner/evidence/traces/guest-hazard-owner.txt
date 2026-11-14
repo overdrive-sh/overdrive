@@ -16,25 +16,25 @@ State 1
   owners = 0
 
 State 2 [Arrive]
-  phase = <<1, 0, 0>>
+  phase = <<0, 1, 0>>
 
-State 3 [ElectBegin]
-  phase = <<2, 0, 0>>
+State 3 [Arrive]
+  phase = <<1, 1, 0>>
 
-State 4 [Arrive]
+State 4 [ElectBegin]
   phase = <<2, 1, 0>>
 
 State 5 [ElectBegin]
   phase = <<2, 2, 0>>
 
 State 6 [OwnerStarted]
-  queue = <<2>>
+  queue = <<1>>
   guest = 1
-  phase = <<2, 3, 0>>
+  phase = <<3, 2, 0>>
   gen = 1
   owners = 1
 
 State 7 [OwnerStarted]
-  queue = <<2, 1>>
+  queue = <<1, 2>>
   phase = <<3, 3, 0>>
   owners = 2

@@ -13,7 +13,7 @@ State 1: <Initial predicate>
 /\ guest_bugNoTaint_shared_guest_conf_step = [Init |-> [tag |-> "UNIT"]]
 /\ guest_bugNoTaint_shared_guest_inflight = 0
 
-State 2: <guest_bugNoTaint_shared_guest_Arrive line 450, col 3 to line 457, col 67 of module guest_bugNoTaint>
+State 2: <guest_bugNoTaint_shared_guest_Arrive line 445, col 3 to line 452, col 67 of module guest_bugNoTaint>
 /\ guest_bugNoTaint_shared_guest_execs = 0
 /\ guest_bugNoTaint_shared_guest_owners = 0
 /\ guest_bugNoTaint_shared_guest_faults = 2
@@ -28,7 +28,7 @@ State 2: <guest_bugNoTaint_shared_guest_Arrive line 450, col 3 to line 457, col 
 /\ guest_bugNoTaint_shared_guest_conf_step = [Init |-> [tag |-> "UNIT"]]
 /\ guest_bugNoTaint_shared_guest_inflight = 0
 
-State 3: <guest_bugNoTaint_shared_guest_ElectBegin line 551, col 3 to line 559, col 74 of module guest_bugNoTaint>
+State 3: <guest_bugNoTaint_shared_guest_ElectBegin line 527, col 3 to line 535, col 74 of module guest_bugNoTaint>
 /\ guest_bugNoTaint_shared_guest_execs = 0
 /\ guest_bugNoTaint_shared_guest_owners = 0
 /\ guest_bugNoTaint_shared_guest_faults = 2
@@ -43,7 +43,7 @@ State 3: <guest_bugNoTaint_shared_guest_ElectBegin line 551, col 3 to line 559, 
 /\ guest_bugNoTaint_shared_guest_conf_step = [Init |-> [tag |-> "UNIT"]]
 /\ guest_bugNoTaint_shared_guest_inflight = 0
 
-State 4: <guest_bugNoTaint_shared_guest_OwnerStarted line 565, col 3 to line 581, col 46 of module guest_bugNoTaint>
+State 4: <guest_bugNoTaint_shared_guest_OwnerStarted line 541, col 3 to line 557, col 46 of module guest_bugNoTaint>
 /\ guest_bugNoTaint_shared_guest_execs = 0
 /\ guest_bugNoTaint_shared_guest_owners = 1
 /\ guest_bugNoTaint_shared_guest_faults = 2
@@ -58,7 +58,7 @@ State 4: <guest_bugNoTaint_shared_guest_OwnerStarted line 565, col 3 to line 581
 /\ guest_bugNoTaint_shared_guest_conf_step = [Init |-> [tag |-> "UNIT"]]
 /\ guest_bugNoTaint_shared_guest_inflight = 0
 
-State 5: <guest_bugNoTaint_shared_guest_BootFinished line 655, col 3 to line 675, col 80 of module guest_bugNoTaint>
+State 5: <guest_bugNoTaint_shared_guest_BootFinished line 631, col 3 to line 651, col 80 of module guest_bugNoTaint>
 /\ guest_bugNoTaint_shared_guest_execs = 1
 /\ guest_bugNoTaint_shared_guest_owners = 1
 /\ guest_bugNoTaint_shared_guest_faults = 2
@@ -73,7 +73,7 @@ State 5: <guest_bugNoTaint_shared_guest_BootFinished line 655, col 3 to line 675
 /\ guest_bugNoTaint_shared_guest_conf_step = [Init |-> [tag |-> "UNIT"]]
 /\ guest_bugNoTaint_shared_guest_inflight = 1
 
-State 6: <guest_bugNoTaint_shared_guest_ExecFinished line 681, col 3 to line 717, col 51 of module guest_bugNoTaint>
+State 6: <guest_bugNoTaint_shared_guest_ExecFinished line 657, col 3 to line 693, col 51 of module guest_bugNoTaint>
 /\ guest_bugNoTaint_shared_guest_execs = 0
 /\ guest_bugNoTaint_shared_guest_owners = 1
 /\ guest_bugNoTaint_shared_guest_faults = 2

@@ -13,7 +13,7 @@ State 1: <Initial predicate>
 /\ guest_bugNoLock_shared_guest_bad = {}
 /\ guest_bugNoLock_shared_guest_owners = 0
 
-State 2: <guest_bugNoLock_shared_guest_Arrive line 445, col 3 to line 452, col 66 of module guest_bugNoLock>
+State 2: <guest_bugNoLock_shared_guest_Arrive line 440, col 3 to line 447, col 66 of module guest_bugNoLock>
 /\ guest_bugNoLock_shared_guest_inflight = 0
 /\ guest_bugNoLock_shared_guest_conf_step = [Init |-> [tag |-> "UNIT"]]
 /\ guest_bugNoLock_shared_guest_faults = 2
@@ -21,14 +21,14 @@ State 2: <guest_bugNoLock_shared_guest_Arrive line 445, col 3 to line 452, col 6
 /\ guest_bugNoLock_shared_guest_queue = <<>>
 /\ guest_bugNoLock_shared_guest_guest = 0
 /\ guest_bugNoLock_shared_guest_idleLoss = FALSE
-/\ guest_bugNoLock_shared_guest_phase = <<1, 0, 0>>
+/\ guest_bugNoLock_shared_guest_phase = <<0, 1, 0>>
 /\ guest_bugNoLock_shared_guest_execgen = 0
 /\ guest_bugNoLock_shared_guest_gen = 0
 /\ guest_bugNoLock_shared_guest_execs = 0
 /\ guest_bugNoLock_shared_guest_bad = {}
 /\ guest_bugNoLock_shared_guest_owners = 0
 
-State 3: <guest_bugNoLock_shared_guest_ElectBegin line 546, col 3 to line 554, col 73 of module guest_bugNoLock>
+State 3: <guest_bugNoLock_shared_guest_Arrive line 440, col 3 to line 447, col 66 of module guest_bugNoLock>
 /\ guest_bugNoLock_shared_guest_inflight = 0
 /\ guest_bugNoLock_shared_guest_conf_step = [Init |-> [tag |-> "UNIT"]]
 /\ guest_bugNoLock_shared_guest_faults = 2
@@ -36,14 +36,14 @@ State 3: <guest_bugNoLock_shared_guest_ElectBegin line 546, col 3 to line 554, c
 /\ guest_bugNoLock_shared_guest_queue = <<>>
 /\ guest_bugNoLock_shared_guest_guest = 0
 /\ guest_bugNoLock_shared_guest_idleLoss = FALSE
-/\ guest_bugNoLock_shared_guest_phase = <<2, 0, 0>>
+/\ guest_bugNoLock_shared_guest_phase = <<1, 1, 0>>
 /\ guest_bugNoLock_shared_guest_execgen = 0
 /\ guest_bugNoLock_shared_guest_gen = 0
 /\ guest_bugNoLock_shared_guest_execs = 0
 /\ guest_bugNoLock_shared_guest_bad = {}
 /\ guest_bugNoLock_shared_guest_owners = 0
 
-State 4: <guest_bugNoLock_shared_guest_Arrive line 445, col 3 to line 452, col 66 of module guest_bugNoLock>
+State 4: <guest_bugNoLock_shared_guest_ElectBegin line 522, col 3 to line 530, col 73 of module guest_bugNoLock>
 /\ guest_bugNoLock_shared_guest_inflight = 0
 /\ guest_bugNoLock_shared_guest_conf_step = [Init |-> [tag |-> "UNIT"]]
 /\ guest_bugNoLock_shared_guest_faults = 2
@@ -58,7 +58,7 @@ State 4: <guest_bugNoLock_shared_guest_Arrive line 445, col 3 to line 452, col 6
 /\ guest_bugNoLock_shared_guest_bad = {}
 /\ guest_bugNoLock_shared_guest_owners = 0
 
-State 5: <guest_bugNoLock_shared_guest_ElectBegin line 546, col 3 to line 554, col 73 of module guest_bugNoLock>
+State 5: <guest_bugNoLock_shared_guest_ElectBegin line 522, col 3 to line 530, col 73 of module guest_bugNoLock>
 /\ guest_bugNoLock_shared_guest_inflight = 0
 /\ guest_bugNoLock_shared_guest_conf_step = [Init |-> [tag |-> "UNIT"]]
 /\ guest_bugNoLock_shared_guest_faults = 2
@@ -73,27 +73,27 @@ State 5: <guest_bugNoLock_shared_guest_ElectBegin line 546, col 3 to line 554, c
 /\ guest_bugNoLock_shared_guest_bad = {}
 /\ guest_bugNoLock_shared_guest_owners = 0
 
-State 6: <guest_bugNoLock_shared_guest_OwnerStarted line 560, col 3 to line 576, col 45 of module guest_bugNoLock>
+State 6: <guest_bugNoLock_shared_guest_OwnerStarted line 536, col 3 to line 552, col 45 of module guest_bugNoLock>
 /\ guest_bugNoLock_shared_guest_inflight = 0
 /\ guest_bugNoLock_shared_guest_conf_step = [Init |-> [tag |-> "UNIT"]]
 /\ guest_bugNoLock_shared_guest_faults = 2
 /\ guest_bugNoLock_shared_guest_lock = 0
-/\ guest_bugNoLock_shared_guest_queue = <<2>>
+/\ guest_bugNoLock_shared_guest_queue = <<1>>
 /\ guest_bugNoLock_shared_guest_guest = 1
 /\ guest_bugNoLock_shared_guest_idleLoss = FALSE
-/\ guest_bugNoLock_shared_guest_phase = <<2, 3, 0>>
+/\ guest_bugNoLock_shared_guest_phase = <<3, 2, 0>>
 /\ guest_bugNoLock_shared_guest_execgen = 0
 /\ guest_bugNoLock_shared_guest_gen = 1
 /\ guest_bugNoLock_shared_guest_execs = 0
 /\ guest_bugNoLock_shared_guest_bad = {}
 /\ guest_bugNoLock_shared_guest_owners = 1
 
-State 7: <guest_bugNoLock_shared_guest_OwnerStarted line 560, col 3 to line 576, col 45 of module guest_bugNoLock>
+State 7: <guest_bugNoLock_shared_guest_OwnerStarted line 536, col 3 to line 552, col 45 of module guest_bugNoLock>
 /\ guest_bugNoLock_shared_guest_inflight = 0
 /\ guest_bugNoLock_shared_guest_conf_step = [Init |-> [tag |-> "UNIT"]]
 /\ guest_bugNoLock_shared_guest_faults = 2
 /\ guest_bugNoLock_shared_guest_lock = 0
-/\ guest_bugNoLock_shared_guest_queue = <<2, 1>>
+/\ guest_bugNoLock_shared_guest_queue = <<1, 2>>
 /\ guest_bugNoLock_shared_guest_guest = 1
 /\ guest_bugNoLock_shared_guest_idleLoss = FALSE
 /\ guest_bugNoLock_shared_guest_phase = <<3, 3, 0>>
