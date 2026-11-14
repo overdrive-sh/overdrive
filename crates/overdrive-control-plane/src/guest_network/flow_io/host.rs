@@ -1076,8 +1076,14 @@ impl GuestStreamIo for HostGuestStream {
             return Ok(0);
         }
         loop {
-            if let Some(end) = self.read_end() {
-                return end;
+            // Only the owner's own end of the stream pre-empts a read. A watch
+            // record (`GuestHalfClose`, `Aborted`) classifies an end that this
+            // read has observed on `V_h` (a read of 0, or an error); it never
+            // stands in for that observation. The record can already be queued
+            // while the guest's last bytes still sit unread in `V_h`'s receive
+            // queue, and returning `Ok(0)` then drops them.
+            if matches!(self.resolution(), StreamResolution::OwnerAbort) {
+                return Err(connection_aborted());
             }
             let mut ready = self.socket.readable().await?;
             match ready.try_io(|socket| {
