@@ -2185,12 +2185,19 @@ decisions"). Test tooling only. A Metal test declares its placement on itself
 record; the placement table, its lookup and the batched guest dispatcher are
 retired; a module may opt in once (`shared_guest!`, shape approved by the user
 2026-11-13) to one shared guest, served by a per-module owner process, for the
-tests that carry the attribute without arguments. Decisions:
+tests that carry the attribute without arguments. A host-pure placement is
+declared per module (`placement!(host_pure)`) or per binary
+(`overdrive_test_default!(host_pure)`, only in a binary with no guest-placed,
+lane-placed or native-launcher test); `cargo xtask placement-lint` checks every
+listed test before any guest boots; off a Metal run a guest-placed test runs its
+body in place. The user approved the lint, the host-pure declarations, the
+in-place rule, the dev-dependency rule and the template handling on 2026-11-14;
+the remaining decisions are proposed. Decisions:
 [ADR-0282](adr-0282-a-metal-test-placement-is-declared-on-the-test-and-recorded-in-its-binary.md),
 [ADR-0283](adr-0283-the-tests-of-a-module-share-one-guest-through-a-per-module-owner-process.md),
 [ADR-0284](adr-0284-a-shared-guest-serves-one-test-at-a-time-and-is-never-reused-after-a-failure.md),
 [ADR-0285](adr-0285-a-test-knows-it-is-inside-a-guest-from-the-guest-kernel-command-line.md),
-[ADR-0286](adr-0286-a-guest-placed-test-fails-closed-outside-a-metal-run.md).
+[ADR-0286](adr-0286-a-guest-placed-test-runs-in-place-outside-a-metal-run.md).
 Interface contracts and open user decisions:
 [feature delta](../../feature/metal-test-placement-attribute/feature-delta.md#wave-design--ref-decisions).
 Diagrams: [c4-diagrams.md](c4-diagrams.md). Protocol model:

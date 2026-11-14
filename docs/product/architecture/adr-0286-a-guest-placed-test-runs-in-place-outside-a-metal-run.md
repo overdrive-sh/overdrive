@@ -1,46 +1,56 @@
-# ADR-0286 — A guest-placed test fails closed outside a Metal run
+# ADR-0286 — A guest-placed test runs in place outside a Metal run
 
 ## Status
 
-**Proposed — awaiting user approval (DDD-11 in the feature delta).** It
-changes what the off-Metal lanes do with guest-placed tests; see the feature
-delta for the lanes affected.
+**Accepted — approved by the user, 2026-11-14 (U-2, DDD-11 in the feature
+delta).** Independent DESIGN review is pending.
 
 ## Context
 
-With no Metal run context the wrapper hands the test binary to the configured
-runner unchanged, so today a guest-placed test run in Lima, in the CI
-integration job or in the pre-push hook runs its body on that host. After a
-test declares its guest placement on itself, running its body in place would
-report a PASS that never ran in a guest. nextest has no runtime skip: a test
-either passes, fails or is ignored at compile time.
+Guest placement exists to isolate tests from each other on the shared Metal
+box. Outside a Metal run the machine is private (CI runners, Lima, the
+pre-commit and pre-push hooks on Lima, `cargo xtask ci`, mutation runs), so
+there is nothing to isolate from. Today the wrapper hands the test binary to the
+configured runner unchanged when there is no Metal run context, so a
+guest-placed test's body runs in the current process and passes. This feature
+changes where placement is declared, not where tests run. Tests that need
+bare-metal KVM stay gated by the `kvm-tests` feature, which no off-Metal lane
+enables.
 
 ## Decision
 
-Outside a Metal run context a guest-placed test fails with a typed error that
-names the test, its group and the missing Metal context. It does not run its
-body and does not report PASS.
+A test's placement is applied only inside a Metal run. A Metal run context is
+present when any of `OVERDRIVE_METAL_RUN_ID`, `OVERDRIVE_METAL_EXECUTION_CLASS`
+or `OVERDRIVE_METAL_SOURCE_ROOT` is non-empty in the test process's
+environment: the predicate the wrapper already uses to decide it has nothing to
+do. With no Metal run context, a guest-placed or lane-placed test runs its body
+directly in the current process, exactly as it does today. Inside a guest
+(`overdrive.test_guest=1`, ADR-0285) the body runs as before. On a Metal run a
+guest-placed test never runs its body on the host: the wrapper places it, and
+the test hands itself to the guest, or fails with a typed error.
 
 ## Alternatives
 
-- **Run the body in place outside Metal** (today's behaviour): reports a
-  placed test as passing without its isolation; rejected for guest placements.
+- **Fail closed outside Metal** (a typed `NoMetalContext` failure, the body
+  never runs): turns every off-Metal lane that runs a guest-placed test red.
+  The test counts, from the lane inventory in the feature delta, are the CI
+  default nextest job (13), the CI integration job (about 614), the CI
+  `bpf-unit` job (23), `cargo xtask ci` (13) and the nightly workspace
+  mutation run (about 685); about 685 guest-placed tests pass in CI today and
+  would fail. It also needs a Metal runner path for CI that nobody has asked
+  for, to protect against a failure (cross-test interference) that cannot occur
+  on a private machine; rejected.
 - **Skip with a visible reason**: nextest cannot report a runtime skip, so a
   skip is a PASS; rejected.
 
 ## Consequences
 
-Every lane that runs a guest-placed test must run it on Metal, or exclude it.
-Under this decision five lanes turn red until moved: the CI default nextest job
-(13 guest-placed tests compile without any feature), the CI integration job
-(about 614), the CI `bpf-unit` job (23), `cargo xtask ci` (13) and the nightly
-workspace mutation run (about 685); the pre-commit, pre-push and Lima inner-loop
-lanes turn red only when they fall back to Lima. The 13 feature-free tests can
-be re-placed or filtered; the integration lanes cannot be filtered, because
-guest-placed and host-pure tests share binaries. The feature delta holds the
-inventory and the alternative of running in place, which keeps every lane green
-and reports PASS for tests that never ran in a guest.
+No off-Metal lane changes. A PASS off Metal means the body ran in the current
+process on a private machine, which is what it means today; only a Metal run
+proves the guest isolation. The expansion of a guest-placed test and the lane
+inventory are pinned in the feature delta.
 
 ## Links
 
 - [Interface contract and lane inventory](../../feature/metal-test-placement-attribute/feature-delta.md#wave-design--ref-lifecycle-gate-ownership)
+- [ADR-0285](adr-0285-a-test-knows-it-is-inside-a-guest-from-the-guest-kernel-command-line.md)

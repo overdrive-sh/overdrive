@@ -27,7 +27,7 @@ One existing `cgroup-default` integration test declares its placement with `#[ov
 - [ ] Making the in-guest body fail yields a host FAIL with the guest output visible and a nonzero run status.
 - [ ] A guest that cannot boot or exceeds its bound is a host FAIL naming the group and stage.
 - [ ] An unknown group is rejected by name.
-- [ ] Outside Metal the test never reports PASS without its body having run in a guest.
+- [ ] Outside a Metal run the test runs its body in place, as it does today; on a Metal run its body never runs on the host (user ruling, 2026-11-14).
 - [ ] An unmigrated guest test still passes through the dispatcher after the extraction.
 - [ ] Boot time for the migrated test is retained.
 - [ ] No GitHub issue number or roadmap-step id appears in any new identifier.
