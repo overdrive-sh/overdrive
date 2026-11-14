@@ -37,6 +37,16 @@ or feature artifact, but must not label them accepted, amend an accepted SSOT
 as if ratified, or dispatch implementation from them until the user explicitly
 approves them.
 
+**Ask once per decision, not once per detail.** Approval of a decision covers
+the details that work it out within its scope: its exact grammar, names,
+signatures, module split, error text, record layout, and the fixes review
+rounds make inside it. Do not re-present those details for a second approval,
+and do not hold them as "proposed pending review" after the user has approved
+the decision they belong to. Surface a detail only when it changes what the
+user approved, adds scope, or is itself one of the material choices listed
+above that the user has not yet ruled on. A design ready for DISTILL has no
+decision list left for the user to re-confirm.
+
 After approval, record the approval in the canonical design artifact with the
 decision identifier and date, then proceed to independent design review and
 downstream waves. If the user rejects or changes a proposal, revise the
