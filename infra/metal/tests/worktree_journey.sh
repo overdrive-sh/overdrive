@@ -31,10 +31,11 @@ done
 git -C "$first" status --porcelain=v1 > "$out/first-source.status"
 git -C "$second" status --porcelain=v1 > "$out/second-source.status"
 observe > "$out/before.json"
-# Existing explicit suite keeps its real batched core group and actual bodies.
-(cd "$first" && exec cargo xtask metal run -- env OVERDRIVE_FWD_GUEST_GROUP=core cargo run -p overdrive-testing --bin overdrive-fwd-guest-suite --features integration-tests) > "$out/first.stdout" 2> "$out/first.stderr" &
+# A module that declares `shared_guest!` boots one real guest for its tests; the
+# owner keeps that guest up through its idle period, which is the overlap window.
+(cd "$first" && exec cargo xtask metal run -- cargo nextest run -p overdrive-testing --features integration-tests,kvm-tests -E 'test(/^integration::shared_guest_fixtures::shared_module::/)') > "$out/first.stdout" 2> "$out/first.stderr" &
 first_controller=$!
-(cd "$second" && exec cargo xtask metal run -- env OVERDRIVE_FWD_GUEST_GROUP=core cargo run -p overdrive-testing --bin overdrive-fwd-guest-suite --features integration-tests) > "$out/second.stdout" 2> "$out/second.stderr" &
+(cd "$second" && exec cargo xtask metal run -- cargo nextest run -p overdrive-testing --features integration-tests,kvm-tests -E 'test(/^integration::shared_guest_fixtures::shared_module::/)') > "$out/second.stdout" 2> "$out/second.stderr" &
 second_controller=$!
 run_id() { sed -n 's/^OVERDRIVE_METAL_RUN_ID=\([0-9a-f]\{24\}\)$/\1/p' "$1" | head -1; }
 for ((attempt=0; attempt<1200; attempt++)); do
@@ -155,6 +156,6 @@ for run_id in (a,b):
  else:
   assert o['terminal.v1']['kind']=='command' and o['terminal.v1']['exit_code']=='0' and o['terminal.v1']['cause']=='command_returned'
 log=(out/'second.collect.stdout').read_text()
-assert 'disposable guest core' in log and '86 passed; 0 failed' in log
+assert 'shared guest cgroup-default' in log and '5 tests run: 5 passed' in log
 print('METAL-ISOLATION-JOURNEY overlapping_ordinary_commands=true attributable_results=true physical_complement_unchanged=true owned_roots_absent=true')
 PY

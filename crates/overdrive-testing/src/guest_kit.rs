@@ -437,6 +437,17 @@ fn runtime_staging_root() -> Result<PathBuf, GuestKitError> {
     Ok(PathBuf::from("/run/ovd-gk").join(run_id.as_ref()))
 }
 
+/// The directory holding the rendezvous (election lock, owner socket, owner
+/// log) of every shared guest of this run: `shared/` under the run's VMM
+/// runtime root.
+///
+/// # Errors
+///
+/// [`GuestKitError::Staging`] when the run id is present but malformed.
+pub(crate) fn shared_rendezvous_dir() -> Result<PathBuf, GuestKitError> {
+    Ok(runtime_staging_root()?.join("shared"))
+}
+
 impl GuestKit {
     /// Provisions (or re-verifies) the kit under `staging_root`: the shared
     /// VM fixture's preflight and kernel, the static `overdrive-init`, and —

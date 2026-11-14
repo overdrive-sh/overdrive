@@ -1,5 +1,6 @@
 //! The placement declarations of a Metal integration test:
-//! `#[overdrive_test(host_pure)]`, `#[overdrive_test(native_launcher)]`,
+//! `#[overdrive_test]` (the module form, reading the module's `shared_guest!`
+//! declaration), `#[overdrive_test(host_pure)]`, `#[overdrive_test(native_launcher)]`,
 //! `#[overdrive_test(guest = "<group>" [, profile = "<profile>"])]`,
 //! `#[overdrive_test(lane_operator =
 //! "<fixture>")]`, `#[overdrive_test(lane_owner = "<fixture>")]`,
@@ -20,8 +21,8 @@
 //! no runtime crate. `native_launcher` is the placement of a test of the Metal
 //! runner's own machinery, which must observe the host from outside any guest.
 //!
-//! `guest = "<group>" [, profile = "<profile>"]`, `lane_operator = "<fixture>"` and `lane_owner =
-//! "<fixture>"` wrap the body so that:
+//! The module form, `guest = "<group>" [, profile = "<profile>"]`, `lane_operator =
+//! "<fixture>"` and `lane_owner = "<fixture>"` wrap the body so that:
 //!
 //! - where `overdrive_testing::placement::inside_guest()` holds, or
 //!   `overdrive_testing::placement::in_metal_run()` does not, the original body
@@ -44,7 +45,8 @@
 //! E0428): a sequence of NUL-terminated fields `<kind>`, `<test>`, `<argc>`,
 //! then `argc` arguments. `<test>` is the function's `module_path!()` plus
 //! `::<fn name>`. The kinds this crate writes are `host_pure`, `guest`
-//! (arguments: group, profile, `"0"` for an explicit guest form),
+//! (arguments: group, profile, `"1"` when the placement came from the module's
+//! `shared_guest!` declaration and `"0"` for an explicit guest form),
 //! `native_launcher`, `lane_operator` and `lane_owner`,
 //! `module_host_pure` (`placement!`; `<test>` is the declaring module's path)
 //! and `default_host_pure` (`overdrive_test_default!`; `<test>` is empty).
@@ -54,7 +56,7 @@
 //! argument; `native_launcher` carries none.
 
 use proc_macro::TokenStream;
-use proc_macro2::TokenStream as TokenStream2;
+use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::{format_ident, quote, quote_spanned};
 use syn::ext::IdentExt as _;
 use syn::parse::Parser as _;
@@ -68,26 +70,92 @@ use syn::{
 /// The ELF section the placement records are written to.
 const SECTION: &str = "overdrive_test_placement";
 
+/// The module-private item `shared_guest!` declares and the argument-free
+/// `#[overdrive_test]` names by plain path (rustc's E0425 prints this name when
+/// a module has no declaration).
+const SHARED_GUEST_DECLARATION: &str =
+    "OVERDRIVE_TEST_NEEDS_shared_guest_DECLARATION_IN_THIS_MODULE";
+
 /// Declares where a Metal integration test runs.
 ///
-/// Implemented for `#[overdrive_test(host_pure)]`,
+/// Implemented for `#[overdrive_test]` (the module form, which reads the
+/// module's `shared_guest!` declaration), `#[overdrive_test(host_pure)]`,
 /// `#[overdrive_test(native_launcher)]`,
 /// `#[overdrive_test(guest = "<group>" [, profile = "<profile>"])]`,
 /// `#[overdrive_test(lane_operator = "<fixture>")]` and
-/// `#[overdrive_test(lane_owner = "<fixture>")]`; the other forms of the approved
-/// grammar are accepted and leave the test untouched until they are built.
+/// `#[overdrive_test(lane_owner = "<fixture>")]`. Any other argument is a build
+/// error.
 #[proc_macro_attribute]
 pub fn overdrive_test(attribute: TokenStream, item: TokenStream) -> TokenStream {
-    // SCAFFOLD: true. The approved grammar's other form (the argument-free
-    // module form) returns the item unchanged
-    // until their expansion is built, so tests that name them compile and fail
-    // for the missing record or hand-off, never for a grammar error.
     let attribute: TokenStream2 = attribute.into();
-    let Some(declaration) = Declaration::parse(&attribute) else { return item };
+    let Some(declaration) = Declaration::parse(&attribute) else {
+        let error = unrecognised_argument(&attribute, "#[overdrive_test]").to_compile_error();
+        let item: TokenStream2 = item.into();
+        return quote!(#error #item).into();
+    };
     let function = parse_macro_input!(item as ItemFn);
     match declaration.expand(function) {
         Ok(tokens) => tokens.into(),
         Err(error) => error.to_compile_error().into(),
+    }
+}
+
+/// The build error for an argument list no form of `macro_name` accepts.
+/// `shared` names the declaration that owns sharing; anything else is reported
+/// as unrecognised.
+fn unrecognised_argument(attribute: &TokenStream2, macro_name: &str) -> syn::Error {
+    let shared = attribute.clone().into_iter().find_map(|token| match token {
+        proc_macro2::TokenTree::Ident(ident) if ident == "shared" => Some(ident.span()),
+        _ => None,
+    });
+    shared.map_or_else(
+        || syn::Error::new(attribute.span(), format!("unrecognised argument to {macro_name}")),
+        |span| syn::Error::new(span, "sharing is declared by `shared_guest!`"),
+    )
+}
+
+/// `shared_guest!(guest = "<group>" [, profile = "<profile>"] [,])`: the
+/// module's shared-guest declaration.
+///
+/// Expands to one module-private item,
+/// `OVERDRIVE_TEST_NEEDS_shared_guest_DECLARATION_IN_THIS_MODULE`, that the
+/// argument-free `#[overdrive_test]` of the module names by plain path.
+///
+/// An unknown group or profile is a build error at the offending literal; so is
+/// an unknown, repeated or `shared` argument and a missing `guest`. A second
+/// declaration in one module is rustc's E0428.
+#[proc_macro]
+pub fn shared_guest(declaration: TokenStream) -> TokenStream {
+    let declaration: TokenStream2 = declaration.into();
+    let Some((group, profile)) = parse_shared_guest(&declaration) else {
+        return unrecognised_argument(&declaration, "shared_guest!").to_compile_error().into();
+    };
+    let profile = profile.unwrap_or_else(|| LitStr::new("", group.span()));
+    let name = Ident::new(SHARED_GUEST_DECLARATION, Span::call_site());
+    let known_group = known_group_statement(&group);
+    let known_profile = known_profile_statement(&group, &profile);
+    quote! {
+        #[allow(dead_code, non_upper_case_globals)]
+        const #name: ::overdrive_testing::placement::GuestPlacement = {
+            #known_group
+            #known_profile
+            ::overdrive_testing::placement::GuestPlacement::declare(
+                #group,
+                #profile,
+                ::overdrive_testing::placement::Sharing::Module,
+                ::core::module_path!(),
+            )
+        };
+    }
+    .into()
+}
+
+/// `guest = "<group>"` with an optional `profile = "<profile>"` in either
+/// order, each at most once and `guest` required.
+fn parse_shared_guest(declaration: &TokenStream2) -> Option<(LitStr, Option<LitStr>)> {
+    match Declaration::parse_guest(declaration)? {
+        Declaration::Guest { group, profile } => Some((group, profile)),
+        _ => None,
     }
 }
 
@@ -141,14 +209,25 @@ fn declare_host_pure(
 
 /// The forms of `#[overdrive_test(...)]` that are built.
 enum Declaration {
+    /// The argument-free form: the module's `shared_guest!` declaration.
+    Module,
     HostPure,
     NativeLauncher,
-    Guest { group: LitStr, profile: Option<LitStr> },
-    Lane { owner: bool, fixture: LitStr },
+    Guest {
+        group: LitStr,
+        profile: Option<LitStr>,
+    },
+    Lane {
+        owner: bool,
+        fixture: LitStr,
+    },
 }
 
 impl Declaration {
     fn parse(attribute: &TokenStream2) -> Option<Self> {
+        if attribute.is_empty() {
+            return Some(Self::Module);
+        }
         if let Some(guest) = Self::parse_guest(attribute) {
             return Some(guest);
         }
@@ -234,6 +313,25 @@ impl Declaration {
                 };
                 guard_body(&mut function, &name.to_string(), &hand_off);
                 Ok(quote!(#function #record #known_group #known_profile))
+            }
+            Self::Module => {
+                require_unit_return(&function)?;
+                let declaration = Ident::new(SHARED_GUEST_DECLARATION, Span::call_site());
+                let record = record_item(
+                    &item,
+                    &quote!("guest"),
+                    &test,
+                    &[
+                        quote!(#declaration.declared_group()),
+                        quote!(#declaration.declared_profile()),
+                        quote!("1"),
+                    ],
+                );
+                let hand_off = quote! {
+                    ::overdrive_testing::placement::run_in_guest(&#declaration, &exe, test_name)
+                };
+                guard_body(&mut function, &name.to_string(), &hand_off);
+                Ok(quote!(#function #record))
             }
             Self::Lane { owner, fixture } => {
                 require_unit_return(&function)?;
@@ -351,29 +449,25 @@ fn record_item(
     }
 }
 
-/// The build-time check that the group is one of the registry's. A sibling of
-/// the test function, so it is evaluated whatever test attribute decides the
-/// function's fate.
-fn known_group_check(group: &LitStr) -> TokenStream2 {
+/// The build-time check that the group is one of the registry's, as a statement
+/// spanned on the user's literal so rustc's E0080 points at the offending
+/// argument, with the value named in the message.
+fn known_group_statement(group: &LitStr) -> TokenStream2 {
     let message = LitStr::new(
         &format!("unknown guest group `{}`", group.value().replace('{', "{{").replace('}', "}}")),
         group.span(),
     );
-    // Spanned on the user's literal so rustc's E0080 points at the offending
-    // argument, with the value named in the message.
     quote_spanned! {group.span()=>
-        const _: () = {
-            if !::overdrive_testing::placement::groups::is_known_group(#group) {
-                ::core::panic!(#message);
-            }
-        };
+        if !::overdrive_testing::placement::groups::is_known_group(#group) {
+            ::core::panic!(#message);
+        }
     }
 }
 
-/// The build-time check that the profile is one of the group's. Skipped for an
-/// unknown group, which `known_group_check` already reports. Spanned on the
-/// user's profile literal, so rustc's E0080 points at the offending argument.
-fn known_profile_check(group: &LitStr, profile: &LitStr) -> TokenStream2 {
+/// The build-time check that the profile is one of the group's, as a statement
+/// spanned on the user's profile literal. Skipped for an unknown group, which
+/// `known_group_statement` already reports.
+fn known_profile_statement(group: &LitStr, profile: &LitStr) -> TokenStream2 {
     let escape = |value: String| value.replace('{', "{{").replace('}', "}}");
     let message = LitStr::new(
         &format!(
@@ -384,14 +478,25 @@ fn known_profile_check(group: &LitStr, profile: &LitStr) -> TokenStream2 {
         profile.span(),
     );
     quote_spanned! {profile.span()=>
-        const _: () = {
-            if ::overdrive_testing::placement::groups::is_known_group(#group)
-                && !::overdrive_testing::placement::groups::is_known_profile(#group, #profile)
-            {
-                ::core::panic!(#message);
-            }
-        };
+        if ::overdrive_testing::placement::groups::is_known_group(#group)
+            && !::overdrive_testing::placement::groups::is_known_profile(#group, #profile)
+        {
+            ::core::panic!(#message);
+        }
     }
+}
+
+/// The group check as a sibling of the test function, so it is evaluated
+/// whatever test attribute decides the function's fate.
+fn known_group_check(group: &LitStr) -> TokenStream2 {
+    let statement = known_group_statement(group);
+    quote!(const _: () = { #statement };)
+}
+
+/// The profile check as a sibling of the test function.
+fn known_profile_check(group: &LitStr, profile: &LitStr) -> TokenStream2 {
+    let statement = known_profile_statement(group, profile);
+    quote!(const _: () = { #statement };)
 }
 
 /// The statements prepended to a guest- or lane-placed test body: the hand-off

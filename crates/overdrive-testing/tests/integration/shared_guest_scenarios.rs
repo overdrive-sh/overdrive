@@ -28,7 +28,7 @@ const ISOLATED: &str = "shared_guest_fixtures::isolated_guest";
 /// back to back, far inside the owner's 30 s idle period (design DDD-17).
 /// CONTRACT_SHAPE: bounded-change (guests booted per run).
 #[test]
-#[ignore = "pending DELIVER: module-tests-share-one-guest"]
+#[overdrive_test(native_launcher)]
 fn a_declared_module_boots_one_guest_and_every_test_reports_its_own_result() {
     let before = owners_in_this_run();
     let sampler = OwnerSampler::start();
@@ -56,7 +56,7 @@ fn a_declared_module_boots_one_guest_and_every_test_reports_its_own_result() {
 /// US-PLACE-09 s2: a failing test is reported alone, its guest is discarded and
 /// the tests after it still pass on a replacement. CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER: module-tests-share-one-guest"]
+#[overdrive_test(native_launcher)]
 fn one_failing_test_in_a_shared_module_does_not_hide_the_others() {
     let before = run_test(&test_path(SHARED, "first_test_of_the_shared_module"), &[], &[]);
     assert!(before.success, "{}", before.output);
@@ -85,7 +85,7 @@ fn one_failing_test_in_a_shared_module_does_not_hide_the_others() {
 
 /// US-PLACE-09 s3. CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER: module-tests-share-one-guest"]
+#[overdrive_test(native_launcher)]
 fn filtering_to_one_test_of_a_shared_module_runs_only_that_test() {
     let run = run_test(&test_path(SHARED, "second_test_of_the_shared_module"), &[], &[]);
     assert!(run.success, "{}", run.output);

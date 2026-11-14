@@ -41,28 +41,24 @@ pub mod shared_module {
 
     #[overdrive_test]
     #[test]
-    #[ignore = "pending DELIVER: module-tests-share-one-guest"]
     fn first_test_of_the_shared_module() {
         scenario_body();
     }
 
     #[overdrive_test]
     #[test]
-    #[ignore = "pending DELIVER: module-tests-share-one-guest"]
     fn second_test_of_the_shared_module() {
         scenario_body();
     }
 
     #[overdrive_test]
     #[test]
-    #[ignore = "pending DELIVER: module-tests-share-one-guest"]
     fn third_test_of_the_shared_module() {
         scenario_body();
     }
 
     #[overdrive_test]
     #[test]
-    #[ignore = "pending DELIVER: module-tests-share-one-guest"]
     fn test_of_the_shared_module_that_fails_when_told_to() {
         scenario_body();
     }
@@ -111,7 +107,8 @@ pub mod scenario_clients {
     //! as a child process, which hands the body to its shared guest.
 
     use super::{
-        CLIENT_BODY_ENV, GuestPlacement, Sharing, inside_guest, run_in_guest, scenario_body,
+        CLIENT_BODY_ENV, GuestPlacement, Sharing, inside_guest, overdrive_test, run_in_guest,
+        scenario_body,
     };
 
     const ELECTION: GuestPlacement =
@@ -135,45 +132,45 @@ pub mod scenario_clients {
         }
     }
 
+    #[overdrive_test(host_pure)]
     #[test]
-    #[ignore = "pending DELIVER: module-tests-share-one-guest"]
     fn election_client() {
         hand_to_the_shared_guest(&ELECTION);
     }
 
+    #[overdrive_test(host_pure)]
     #[test]
-    #[ignore = "pending DELIVER: module-tests-share-one-guest"]
     fn orphan_client() {
         hand_to_the_shared_guest(&ORPHAN);
     }
 
+    #[overdrive_test(host_pure)]
     #[test]
-    #[ignore = "pending DELIVER: module-tests-share-one-guest"]
     fn signal_client() {
         hand_to_the_shared_guest(&SIGNAL);
     }
 
+    #[overdrive_test(host_pure)]
     #[test]
-    #[ignore = "pending DELIVER: module-tests-share-one-guest"]
     fn crash_client() {
         hand_to_the_shared_guest(&CRASH);
     }
 
+    #[overdrive_test(host_pure)]
     #[test]
-    #[ignore = "pending DELIVER: module-tests-share-one-guest"]
     fn taint_client() {
         hand_to_the_shared_guest(&TAINT);
     }
 
+    #[overdrive_test(host_pure)]
     #[test]
-    #[ignore = "pending DELIVER: module-tests-share-one-guest"]
     fn failure_client() {
         hand_to_the_shared_guest(&FAILURE);
     }
 
     /// The body the clients hand to the guest; outside a guest it does nothing.
+    #[overdrive_test(host_pure)]
     #[test]
-    #[ignore = "pending DELIVER: module-tests-share-one-guest"]
     fn scenario_body_inside_the_guest() {
         if inside_guest() {
             scenario_body();

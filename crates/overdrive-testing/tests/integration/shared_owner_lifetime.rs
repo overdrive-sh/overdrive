@@ -20,6 +20,8 @@
 
 use std::time::Duration;
 
+use overdrive_testing::overdrive_test;
+
 use super::scenario_support::{
     CLIENT_BODY_ENV, FAIL_ENV, HOLD_SECONDS_ENV, OwnerSampler, alive, descendants_of, kill,
     owners_in_this_run, run_test, shared_generations, spawn_test, test_path, timings, wait_until,
@@ -38,7 +40,7 @@ fn client(name: &str) -> String {
 /// owner; exactly one owner process starts and all eight pass on one guest.
 /// CONTRACT_SHAPE: bounded-change (owner processes of one scope).
 #[test]
-#[ignore = "pending DELIVER: module-tests-share-one-guest"]
+#[overdrive_test(native_launcher)]
 fn eight_simultaneous_first_arrivals_elect_exactly_one_owner() {
     let before = owners_in_this_run();
     let sampler = OwnerSampler::start();
@@ -66,7 +68,7 @@ fn eight_simultaneous_first_arrivals_elect_exactly_one_owner() {
 /// owner is init of its own PID namespace, so the kernel ends everything under
 /// it. CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER: module-tests-share-one-guest"]
+#[overdrive_test(native_launcher)]
 fn killing_the_owner_during_a_guest_exec_leaves_no_vmm() {
     let before = owners_in_this_run();
     let mut client_run = spawn_test(
@@ -99,7 +101,7 @@ fn killing_the_owner_during_a_guest_exec_leaves_no_vmm() {
 /// the owner (it called `setsid`): the owner keeps serving the next client.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER: module-tests-share-one-guest"]
+#[overdrive_test(native_launcher)]
 fn the_electing_client_killed_by_a_group_signal_leaves_the_owner_serving() {
     let before = owners_in_this_run();
     let sampler = OwnerSampler::start();
@@ -125,7 +127,7 @@ fn the_electing_client_killed_by_a_group_signal_leaves_the_owner_serving() {
 /// An owner that dies mid-module fails its attached tests with the owner stage
 /// and the next client elects a new owner. CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER: module-tests-share-one-guest"]
+#[overdrive_test(native_launcher)]
 fn an_owner_killed_midway_fails_its_attached_test_and_the_next_client_elects_a_new_owner() {
     let before = owners_in_this_run();
     let mut attached = spawn_test(
@@ -155,7 +157,7 @@ fn an_owner_killed_midway_fails_its_attached_test_and_the_next_client_elects_a_n
 /// client waits for that exec to end and runs on a replacement guest.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER: module-tests-share-one-guest"]
+#[overdrive_test(native_launcher)]
 fn a_client_killed_while_its_test_runs_taints_the_guest_for_the_next_client() {
     let mut first = spawn_test(
         &client("taint_client"),
@@ -179,7 +181,7 @@ fn a_client_killed_while_its_test_runs_taints_the_guest_for_the_next_client() {
 /// verdict reaches the client and the next one boots again. Companion of the
 /// seeded `OwnerCore` run on the real kernel. CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER: module-tests-share-one-guest"]
+#[overdrive_test(native_launcher)]
 fn a_failed_shared_test_is_reported_with_its_status_and_its_guest_is_replaced() {
     let failed =
         run_test(&client("failure_client"), &[(CLIENT_BODY_ENV, BODY), (FAIL_ENV, "1")], &[]);

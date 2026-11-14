@@ -79,6 +79,13 @@ path = "bin/guest_peer.rs"
 name = "overdrive-fwd-guest-suite"
 path = "bin/fwd_guest_suite.rs"
 
+# The shared-guest owner (`overdrive_testing::placement::owner`): the process
+# the first test of a `shared_guest!` declaration starts and the later tests
+# attach to.
+[[bin]]
+name = "overdrive-shared-guest-owner"
+path = "bin/shared_guest_owner.rs"
+
 [dev-dependencies]
 # Placement tests: the owner core's seeded schedules, the Quint conformance
 # driver and the compile-fail fixtures of the attribute's diagnostics.

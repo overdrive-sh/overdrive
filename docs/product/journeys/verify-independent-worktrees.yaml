@@ -27,10 +27,10 @@ steps:
       - Remote worktree identity aliases another checkout
   - id: 2
     name: Run existing guest verification from both worktrees
-    command: cargo xtask metal run -- cargo run -p overdrive-testing --bin overdrive-fwd-guest-suite --features integration-tests
+    command: cargo xtask metal run -- cargo nextest run -p overdrive-testing --features integration-tests,kvm-tests -E 'test(/^integration::shared_guest_fixtures::shared_module::/)'
     tui_mockup: |
       OVERDRIVE_METAL_RUN_ID=${run_id}
-      ===== disposable guest core =====
+      ===== shared guest cgroup-default generation 1 =====
       [actual guest console output]
     shared_artifacts:
       - name: run_id

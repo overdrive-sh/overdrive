@@ -6,9 +6,7 @@
 //!
 //! Every item here is the contract pinned in the feature's design
 //! (`docs/feature/metal-test-placement-attribute/feature-delta.md`, "Guest kit
-//! public surface" and "Owner core"). Bodies marked `SCAFFOLD: true` are
-//! scaffolds: the exact signature is authorised by the design and the body is
-//! built by the slice named beside it.
+//! public surface" and "Owner core").
 
 // Stays: the module re-exports `RunInGuestError` and `inside_guest` from
 // `guest_suite`, which carries its own `#![cfg(target_os = "linux")]` like every
@@ -16,7 +14,6 @@
 // compile off Linux.
 #![cfg(target_os = "linux")]
 #![allow(
-    clippy::todo,
     clippy::missing_const_for_fn,
     clippy::unused_self,
     clippy::needless_pass_by_value,
@@ -24,13 +21,19 @@
     clippy::missing_panics_doc,
     clippy::missing_errors_doc,
     dead_code,
-    reason = "scaffold bodies are `todo!()` until their delivery slice builds them"
+    reason = "the placement surface keeps the design's signatures"
 )]
 
 use std::path::{Path, PathBuf};
 
 pub mod groups;
+/// The owner process's shell. Internal plumbing of the
+/// `overdrive-shared-guest-owner` binary, which runs it; not part of the
+/// placement contract.
+#[doc(hidden)]
+pub mod owner;
 pub mod owner_core;
+mod shared;
 
 pub use crate::guest_suite::{RunInGuestError, inside_guest};
 pub use groups::{GuestGroup, GuestPlacement, LanePlacement, Sharing};
@@ -52,13 +55,17 @@ const METAL_RUN_VARIABLES: [&str; 3] =
 ///
 /// Preconditions: the caller has found [`in_metal_run`] true and
 /// [`inside_guest`] false, and the guest kit is prepared. An isolated
-/// placement boots one fresh guest of the placement's group for this test.
+/// placement boots one fresh guest of the placement's group for this test; a
+/// `Sharing::Module` placement attaches to the shared guest of its scope,
+/// electing the scope's owner first when none serves.
 ///
-/// # Panics
+/// # Errors
 ///
-/// A `Sharing::Module` placement reaches the shared-guest hand-off, which the
-/// slice `module-tests-share-one-guest` builds.
-// SCAFFOLD: true for the `Sharing::Module` arm only.
+/// [`RunInGuestError::LaneNotPrepared`] when the guest kit (or the shared-guest
+/// owner binary) is not prepared, [`RunInGuestError::GuestExecution`] when the
+/// guest cannot run the test to completion (the detail names the stage), and
+/// [`RunInGuestError::BodyFailed`] when the test exits unsuccessfully inside
+/// the guest.
 pub fn run_in_guest(
     placement: &GuestPlacement,
     exe: &Path,
@@ -71,7 +78,16 @@ pub fn run_in_guest(
             exe,
             test_name,
         ),
-        Sharing::Module => todo!("run_in_guest: shared-guest hand-off"),
+        Sharing::Module => {
+            let endpoint = shared::endpoint_for(placement).map_err(|detail| {
+                RunInGuestError::GuestExecution {
+                    group: placement.group.to_owned(),
+                    test: test_name.to_owned(),
+                    detail: format!("stage owner: {detail}"),
+                }
+            })?;
+            attach_shared(&endpoint, placement, test_name)
+        }
     }
 }
 
@@ -92,14 +108,22 @@ pub struct SharedEndpoint {
 /// The client half of the shared-guest protocol: attaches to the owner at
 /// `endpoint` (electing one when none serves) and runs `test_name` in the shared
 /// guest.
-// SCAFFOLD: true
+///
+/// # Errors
+///
+/// [`RunInGuestError::LaneNotPrepared`] naming `endpoint.owner_binary` when it
+/// is absent (returned before the election lock is taken);
+/// [`RunInGuestError::GuestExecution`] at stage `owner` when the connection
+/// ends twice before the owner acknowledges the request or ends after it, and
+/// at stage `boot`, `guest_lost` or `exec_bound` for the owner's verdicts of
+/// those names; [`RunInGuestError::BodyFailed`] when the test exits
+/// unsuccessfully inside the guest.
 pub fn attach_shared(
     endpoint: &SharedEndpoint,
     placement: &GuestPlacement,
     test_name: &str,
 ) -> Result<(), RunInGuestError> {
-    let _ = (endpoint, placement, test_name);
-    todo!("attach_shared: owner binary check, election, attach, acknowledgement, verdict mapping")
+    shared::attach(endpoint, placement, test_name)
 }
 
 /// Runs `test_name` of the test binary `exe` in a lane guest of `placement`.

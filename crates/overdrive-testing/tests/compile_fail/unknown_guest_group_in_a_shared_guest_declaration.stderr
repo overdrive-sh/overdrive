@@ -3,5 +3,3 @@ error[E0080]: evaluation panicked: unknown guest group `no-such-group`
   |
 1 | overdrive_testing::shared_guest!(guest = "no-such-group");
   |                                          ^^^^^^^^^^^^^^^ evaluation of `OVERDRIVE_TEST_NEEDS_shared_guest_DECLARATION_IN_THIS_MODULE` failed here
-
-For more information about this error, try `rustc --explain E0080`.

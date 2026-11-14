@@ -3,11 +3,10 @@
 //! Also the typed placement the attribute builds from it in constant context.
 
 #![allow(
-    clippy::todo,
     clippy::missing_const_for_fn,
     clippy::must_use_candidate,
     dead_code,
-    reason = "scaffold bodies are built by their delivery slice"
+    reason = "the placement surface keeps the design's signatures"
 )]
 
 /// The eight guest groups. Informative: the contract is the group name
@@ -160,6 +159,20 @@ impl GuestPlacement {
     pub(crate) fn profile(&self) -> &'static str {
         resolved_profile(self.group, self.profile)
             .unwrap_or_else(|| unreachable!("`declare` admits only registry environments"))
+    }
+
+    /// The declared group, for the placement record the attribute writes from
+    /// the module's declaration by constant evaluation.
+    #[doc(hidden)]
+    pub const fn declared_group(&self) -> &'static str {
+        self.group
+    }
+
+    /// The declared profile (empty when none was declared), for the placement
+    /// record the attribute writes from the module's declaration.
+    #[doc(hidden)]
+    pub const fn declared_profile(&self) -> &'static str {
+        self.profile
     }
 
     /// Declares a placement. Panics at constant evaluation on an unknown group

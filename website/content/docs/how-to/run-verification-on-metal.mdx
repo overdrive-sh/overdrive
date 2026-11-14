@@ -74,14 +74,18 @@ environment, and nextest attempt metadata. Every guest retry gets a fresh
 instance of the same declared group. A selected body returning 255 fails its
 attempt, and nextest returns its own aggregate failure status, 100.
 
-For the existing batched suite, use its explicit entry point instead:
+A module can share one guest between its tests by declaring
+`shared_guest!(guest = "<group>")` and marking its tests with a bare
+`#[overdrive_test]`. An ordinary nextest run of that module boots one guest, and
+each test still reports its own result:
 
 ```bash
-cargo xtask metal run -- env OVERDRIVE_FWD_GUEST_GROUP=core cargo run -p overdrive-testing --bin overdrive-fwd-guest-suite --features integration-tests
+cargo xtask metal run -- cargo nextest run -p overdrive-testing --features integration-tests,kvm-tests -E 'test(/^integration::shared_guest_fixtures::shared_module::/)'
 ```
 
-That command retains the suite's group batching. A focused nextest attempt does
-not count as a completed batched group.
+A failed test, a test cut off by nextest, and a test that exceeds its exec bound
+each get a replacement guest for the tests after it. The shared guest ends with
+its owner after 30 seconds without a test.
 
 ## Keep host administration explicitly exclusive
 

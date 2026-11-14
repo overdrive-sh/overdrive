@@ -32,6 +32,7 @@
 //! | the static production init binary | `<target>/<musl-triple>/release/overdrive-init` | `vm_fixture::build_overdrive_init_static` |
 //! | an in-guest libtest binary | `guest-kit/in-guest/<package>--<bin>` | `guest_lane::InGuestTests::prepared` |
 //! | the nextest guest dispatcher | `<target>/debug/overdrive-fwd-guest-suite` | `OVERDRIVE_METAL_TEST_DISPATCHER` |
+//! | the shared-guest owner | `<target>/debug/overdrive-shared-guest-owner` | `placement::attach_shared` (refused as `LaneNotPrepared` naming this path when absent) |
 //! | the existing Quint CLI runtime closure | `<target>/guest-kit/quint-test-runtime` | the exact active Gateway conformance-test placement |
 
 use std::os::unix::fs::PermissionsExt as _;
@@ -44,6 +45,8 @@ use color_eyre::eyre::{Result, WrapErr, bail, eyre};
 pub const GUEST_PEER_BIN: &str = "overdrive-guest-peer";
 /// The prepared host-side dispatcher used by the nextest run-wrapper.
 const GUEST_SUITE_BIN: &str = "overdrive-fwd-guest-suite";
+/// The prepared shared-guest owner a `shared_guest!` module's first test starts.
+const SHARED_GUEST_OWNER_BIN: &str = "overdrive-shared-guest-owner";
 
 /// Which cargo target of a package an in-guest lane's libtest binary is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -216,6 +219,12 @@ pub fn guest_peer_path(target_dir: &Path, triple: &str) -> PathBuf {
 #[must_use]
 fn guest_suite_path(target_dir: &Path) -> PathBuf {
     target_dir.join("debug").join(GUEST_SUITE_BIN)
+}
+
+/// Where the prepared shared-guest owner is written.
+#[must_use]
+fn shared_guest_owner_path(target_dir: &Path) -> PathBuf {
+    target_dir.join("debug").join(SHARED_GUEST_OWNER_BIN)
 }
 
 /// Where the existing Quint test runtime closure is prepared for the one
@@ -645,12 +654,18 @@ pub fn run(workspace_root: &Path, target_dir: &Path) -> Result<()> {
             "overdrive-testing",
             "--bin",
             GUEST_SUITE_BIN,
+            "--bin",
+            SHARED_GUEST_OWNER_BIN,
             "--features",
             "integration-tests",
         ])
         .current_dir(workspace_root);
-    run_step(&mut guest_suite_build, "building the prepared guest dispatcher")?;
+    run_step(
+        &mut guest_suite_build,
+        "building the prepared guest dispatcher and shared-guest owner",
+    )?;
     require(&guest_suite_path(target_dir), GUEST_SUITE_BIN)?;
+    require(&shared_guest_owner_path(target_dir), SHARED_GUEST_OWNER_BIN)?;
     if let Some((quint_version, node_version, evaluator_version, files)) = quint_runtime {
         eprintln!(
             "guest-kit-prepare: Quint {quint_version}, Node {node_version}, Rust evaluator {evaluator_version}: staged {files} runtime inputs"

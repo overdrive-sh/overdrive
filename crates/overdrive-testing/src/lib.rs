@@ -68,18 +68,4 @@ pub use overdrive_testing_macros::placement;
 /// Expands to the module-private declaration the argument-free
 /// `#[overdrive_test]` reads by plain name.
 #[cfg(target_os = "linux")]
-#[macro_export]
-macro_rules! shared_guest {
-    (guest = $group:literal $(, profile = $profile:literal)? $(,)?) => {
-        #[allow(dead_code, non_upper_case_globals)]
-        const OVERDRIVE_TEST_NEEDS_shared_guest_DECLARATION_IN_THIS_MODULE:
-            $crate::placement::GuestPlacement = $crate::placement::GuestPlacement::declare(
-            $group,
-            $crate::shared_guest!(@profile $($profile)?),
-            $crate::placement::Sharing::Module,
-            ::core::module_path!(),
-        );
-    };
-    (@profile) => { "" };
-    (@profile $profile:literal) => { $profile };
-}
+pub use overdrive_testing_macros::shared_guest;

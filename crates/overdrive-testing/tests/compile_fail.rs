@@ -47,7 +47,7 @@ fn an_unknown_guest_profile_on_the_attribute_fails_the_build_naming_profile_and_
 /// CONTRACT_SHAPE: pure-function.
 #[test]
 #[serial(trybuild)]
-#[ignore = "pending DELIVER: module-tests-share-one-guest"]
+#[overdrive_test(host_pure)]
 fn the_shared_guest_forms_fail_the_build_naming_the_value_or_the_missing_declaration() {
     let cases = trybuild::TestCases::new();
     cases.compile_fail("tests/compile_fail/unknown_guest_group_in_a_shared_guest_declaration.rs");

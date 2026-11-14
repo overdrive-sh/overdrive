@@ -14,6 +14,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::Duration;
 
+use overdrive_testing::overdrive_test;
 use overdrive_testing::placement::{
     GuestPlacement, RunInGuestError, SharedEndpoint, Sharing, attach_shared,
 };
@@ -75,7 +76,7 @@ fn endpoint_in(scratch: &Scratch, owner_binary: &Path) -> SharedEndpoint {
 /// election lock is taken. CONTRACT_SHAPE: bounded-change (the attach result
 /// and the lock file are the whole observable change).
 #[test]
-#[ignore = "pending DELIVER: module-tests-share-one-guest"]
+#[overdrive_test(host_pure)]
 fn a_missing_owner_binary_is_refused_as_an_unprepared_kit_before_the_election_lock_is_taken() {
     let scratch = Scratch::new("missing-owner");
     let absent = scratch.path("overdrive-shared-guest-owner-that-is-not-built");
@@ -99,7 +100,7 @@ fn a_missing_owner_binary_is_refused_as_an_unprepared_kit_before_the_election_lo
 /// re-attaches once through the election; a second cut is owner loss.
 /// CONTRACT_SHAPE: bounded-change (connections accepted and the failure).
 #[test]
-#[ignore = "pending DELIVER: module-tests-share-one-guest"]
+#[overdrive_test(host_pure)]
 fn a_connection_cut_before_the_acknowledgement_re_attaches_once_and_a_second_cut_is_owner_loss() {
     let scratch = Scratch::new("cut-connection");
     let owner_binary = scratch.executable("overdrive-shared-guest-owner");

@@ -4157,6 +4157,7 @@ fn execute_nextest_attempt(
     args: &[String],
     environment: &[(String, String)],
     working_directory: &Path,
+    bound: Duration,
 ) -> Result<i32, GuestKitError> {
     let mut attempt_environment = environment.to_vec();
     attempt_environment.push(("PWD".to_owned(), working_directory.display().to_string()));
@@ -4166,7 +4167,7 @@ fn execute_nextest_attempt(
         &attempt_environment,
         working_directory,
         raise_nofile,
-        NEXTTEST_ATTEMPT_RESPONSE_BOUND,
+        bound,
     )
 }
 
@@ -4384,15 +4385,39 @@ fn prepare_nextest_guest(
     }
 }
 
+/// Runs one attempt in `guest` and then powers the guest off: the per-test
+/// path, where the guest ends with its attempt.
 fn execute_nextest_guest_attempt(
     mut guest: GuestRun,
     plan: &NextestGuestPlan,
-    program: &str,
-    args: &[String],
-    environment: &[(String, String)],
-    working_directory: &Path,
-    test_name: &str,
+    attempt: &AttemptInvocation<'_>,
 ) -> Result<i32, NextestDispatchFailure> {
+    let result =
+        execute_attempt_phases(&mut guest, plan, attempt, NEXTTEST_ATTEMPT_RESPONSE_BOUND)?;
+    guest
+        .finish("nextest-attempt")
+        .map_err(|error| NextestDispatchFailure::GuestExecution(format!("{error:?}")))?;
+    Ok(result)
+}
+
+/// What one attempt runs inside an already-booted guest.
+struct AttemptInvocation<'a> {
+    program: &'a str,
+    args: &'a [String],
+    environment: &'a [(String, String)],
+    working_directory: &'a Path,
+    test_name: &'a str,
+}
+
+/// The profile's per-test setup, the test body under `body_bound`, and the
+/// profile's per-test cleanup, in a guest that stays up afterwards.
+fn execute_attempt_phases(
+    guest: &mut GuestRun,
+    plan: &NextestGuestPlan,
+    attempt: &AttemptInvocation<'_>,
+    body_bound: Duration,
+) -> Result<i32, NextestDispatchFailure> {
+    let AttemptInvocation { program, args, environment, working_directory, test_name } = *attempt;
     let route_cleanup = if plan.cgroup_flags.is_some_and(|flags| {
         flags.step13_04 && selected_cell(STEP13_04_HOST_LOCAL_FIREWALL, test_name)
     }) {
@@ -4433,12 +4458,13 @@ fn execute_nextest_guest_attempt(
         environment
     };
     let attempt_result = execute_nextest_attempt(
-        &mut guest,
+        guest,
         plan.name == CGROUP_DEFAULT_GROUP,
         program,
         args,
         environment,
         working_directory,
+        body_bound,
     );
     if plan
         .cgroup_flags
@@ -4465,12 +4491,7 @@ fn execute_nextest_guest_attempt(
                 .map_err(|error| NextestDispatchFailure::GuestExecution(format!("{error:?}")))?;
         }
     }
-    let result = attempt_result
-        .map_err(|error| NextestDispatchFailure::GuestExecution(format!("{error:?}")))?;
-    guest
-        .finish("nextest-attempt")
-        .map_err(|error| NextestDispatchFailure::GuestExecution(format!("{error:?}")))?;
-    Ok(result)
+    attempt_result.map_err(|error| NextestDispatchFailure::GuestExecution(format!("{error:?}")))
 }
 
 /// What one per-test guest attempt runs: the test binary and its arguments in a
@@ -4489,11 +4510,49 @@ fn run_nextest_group_attempt(
     attempt: &GroupAttempt<'_>,
     test_name: &str,
 ) -> Result<i32, NextestDispatchFailure> {
-    let GroupAttempt { group, profile, program, args, binary_id } = *attempt;
-    let started = Instant::now();
+    let GroupAttempt { group, program, args, .. } = *attempt;
     let mut environment = nextest_environment()?;
     environment.push((IN_GUEST_ENV.to_owned(), "1".to_owned()));
-    let (mut attempt_files, current_dir) = nextest_attempt_files(program, &environment)?;
+    let BootedGroupGuest { guest, plan, current_dir, started, staged, booted } =
+        boot_group_guest(quint_modules, attempt, &environment, test_name)?;
+    let invocation = AttemptInvocation {
+        program,
+        args,
+        environment: &environment,
+        working_directory: &current_dir,
+        test_name,
+    };
+    let outcome = execute_nextest_guest_attempt(guest, &plan, &invocation);
+    eprintln!(
+        "OVERDRIVE_GUEST_KIT_TIMING group={group} test={test_name} staging_ms={} boot_ms={} total_ms={}",
+        staged.as_millis(),
+        booted.saturating_sub(staged).as_millis(),
+        started.elapsed().as_millis(),
+    );
+    outcome
+}
+
+/// A group guest that is booted, set up for its first test and ready to exec.
+struct BootedGroupGuest {
+    guest: GuestRun,
+    plan: NextestGuestPlan,
+    current_dir: PathBuf,
+    started: Instant,
+    staged: Duration,
+    booted: Duration,
+}
+
+/// Stages the selected binary and the group's files, boots a guest of the
+/// group and runs the group's boot-time setup for `test_name`.
+fn boot_group_guest(
+    quint_modules: &[QuintGuestModule<'_>],
+    attempt: &GroupAttempt<'_>,
+    environment: &[(String, String)],
+    test_name: &str,
+) -> Result<BootedGroupGuest, NextestDispatchFailure> {
+    let GroupAttempt { group, profile, program, binary_id, .. } = *attempt;
+    let started = Instant::now();
+    let (mut attempt_files, current_dir) = nextest_attempt_files(program, environment)?;
     if profile == QUINT_PROFILE {
         attempt_files.extend(quint_profile_guest_files(&current_dir)?);
     } else if let Some(model) = quint_guest_model(quint_modules, binary_id, test_name)? {
@@ -4541,22 +4600,150 @@ fn run_nextest_group_attempt(
     guest
         .command(&["/usr/bin/mkdir", "-p", "--", &guest_working_directory])
         .map_err(|error| NextestDispatchFailure::GuestExecution(format!("{error:?}")))?;
-    let outcome = execute_nextest_guest_attempt(
-        guest,
-        &plan,
-        program,
-        args,
-        &environment,
-        &current_dir,
-        test_name,
-    );
-    eprintln!(
-        "OVERDRIVE_GUEST_KIT_TIMING group={group} test={test_name} staging_ms={} boot_ms={} total_ms={}",
-        staged.as_millis(),
-        booted.saturating_sub(staged).as_millis(),
-        started.elapsed().as_millis(),
-    );
-    outcome
+    Ok(BootedGroupGuest { guest, plan, current_dir, started, staged, booted })
+}
+
+/// The environment a client hands to a shared guest for one test: the
+/// selection an isolated attempt runs under, the in-guest marker, and every
+/// `OVERDRIVE_` variable of the attaching test (the test's own configuration,
+/// including the Metal run variables).
+pub(crate) fn shared_request_environment() -> Result<Vec<(String, String)>, String> {
+    let mut environment = nextest_environment().map_err(|failure| match failure {
+        NextestDispatchFailure::LaneNotPrepared(detail)
+        | NextestDispatchFailure::GuestExecution(detail) => detail,
+    })?;
+    environment.push((IN_GUEST_ENV.to_owned(), "1".to_owned()));
+    for (key, value) in std::env::vars_os() {
+        let (Ok(key), Ok(value)) = (key.into_string(), value.into_string()) else { continue };
+        if key.starts_with("OVERDRIVE_") && !environment.iter().any(|(known, _)| *known == key) {
+            environment.push((key, value));
+        }
+    }
+    environment.sort_by(|left, right| left.0.cmp(&right.0));
+    Ok(environment)
+}
+
+/// What a shared owner needs to boot the guest of one scope.
+pub(crate) struct SharedBootRequest<'a> {
+    pub(crate) group: &'a str,
+    pub(crate) profile: &'a str,
+    pub(crate) program: &'a str,
+    pub(crate) binary_id: &'a str,
+    pub(crate) environment: &'a [(String, String)],
+    /// The test the boot is started for; the group's staging may depend on it.
+    pub(crate) test_name: &'a str,
+}
+
+/// What one test of a shared guest runs.
+pub(crate) struct SharedExecRequest<'a> {
+    pub(crate) program: &'a str,
+    pub(crate) environment: &'a [(String, String)],
+    pub(crate) working_directory: &'a Path,
+    pub(crate) test_name: &'a str,
+}
+
+/// How one exec in a shared guest ended; the console is the guest console from
+/// the exec's start.
+pub(crate) enum SharedExecOutcome {
+    /// The test process exited with this status.
+    Exited { status: i32, console: String },
+    /// The exec did not return within its bound.
+    BoundElapsed { console: String },
+    /// The guest went away under the exec.
+    Lost { console: String, detail: String },
+}
+
+/// A booted guest that serves one test after another: the shared-guest owner's
+/// handle on its guest.
+pub(crate) struct SharedGuest {
+    guest: GuestRun,
+    plan: NextestGuestPlan,
+}
+
+impl SharedGuest {
+    /// Stages and boots a guest of `request.group`, returning it with the
+    /// staging and boot durations.
+    ///
+    /// # Errors
+    ///
+    /// The detail of the stage that failed.
+    pub(crate) fn boot(
+        request: &SharedBootRequest<'_>,
+    ) -> Result<(Self, Duration, Duration), String> {
+        let args = [];
+        let attempt = GroupAttempt {
+            group: request.group,
+            profile: request.profile,
+            program: request.program,
+            args: &args,
+            binary_id: request.binary_id,
+        };
+        let BootedGroupGuest { guest, plan, staged, booted, .. } =
+            boot_group_guest(&[], &attempt, request.environment, request.test_name).map_err(
+                |failure| match failure {
+                    NextestDispatchFailure::LaneNotPrepared(detail) => {
+                        format!("not prepared: {detail}")
+                    }
+                    NextestDispatchFailure::GuestExecution(detail) => detail,
+                },
+            )?;
+        Ok((Self { guest, plan }, staged, booted.saturating_sub(staged)))
+    }
+
+    /// Runs one test in the guest: the profile's setup, the body under
+    /// `bound`, the profile's cleanup.
+    pub(crate) fn exec(
+        &mut self,
+        request: &SharedExecRequest<'_>,
+        bound: Duration,
+    ) -> SharedExecOutcome {
+        let started = Instant::now();
+        let console_before = self.guest.guest.vm.console().len();
+        let console_since = |guest: &GuestRun| {
+            let console = guest.guest.vm.console();
+            console.get(console_before..).unwrap_or(&console).to_owned()
+        };
+        let args = ["--exact".to_owned(), request.test_name.to_owned(), NO_CAPTURE.to_owned()];
+        let working_directory = request.working_directory.display().to_string();
+        let result = self
+            .guest
+            .command(&["/usr/bin/mkdir", "-p", "--", &working_directory])
+            .map_err(|error| NextestDispatchFailure::GuestExecution(format!("{error:?}")))
+            .and_then(|()| {
+                let invocation = AttemptInvocation {
+                    program: request.program,
+                    args: &args,
+                    environment: request.environment,
+                    working_directory: request.working_directory,
+                    test_name: request.test_name,
+                };
+                let remaining = bound.saturating_sub(started.elapsed()).max(Duration::from_secs(1));
+                execute_attempt_phases(&mut self.guest, &self.plan, &invocation, remaining)
+            });
+        let console = console_since(&self.guest);
+        match result {
+            Ok(status) => SharedExecOutcome::Exited { status, console },
+            Err(_) if started.elapsed() >= bound => SharedExecOutcome::BoundElapsed { console },
+            Err(failure) => {
+                let detail = match failure {
+                    NextestDispatchFailure::LaneNotPrepared(detail)
+                    | NextestDispatchFailure::GuestExecution(detail) => detail,
+                };
+                if self.has_exited(Duration::from_secs(2)) {
+                    SharedExecOutcome::Lost { console, detail }
+                } else {
+                    // A setup or cleanup command that fails in a live guest is
+                    // a failed test, like any nonzero exit.
+                    SharedExecOutcome::Exited { status: 1, console: format!("{console}\n{detail}") }
+                }
+            }
+        }
+    }
+
+    /// True when the guest's VMM has exited, waiting up to `bound` for it to.
+    pub(crate) fn has_exited(&self, bound: Duration) -> bool {
+        self.guest.guest.vm.wait_exit(bound).ok().flatten().is_some()
+    }
 }
 
 fn owner_lane_flow(sequence: u32) -> FlowId {
