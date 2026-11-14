@@ -76,9 +76,15 @@ The verdict rests on a real exercise on the real kernel, not "it compiled":
 
 - Findings → `docs/feature/{id}/spike/findings{,-<name>}.md`: binary verdict
   (WORKS / DOESN'T-WORK), predicted-vs-actual evidence (paste real output, never
-  narrate), edge cases, design implications, one-line gate recommendation.
+  narrate), edge cases, design implications, one-line gate recommendation. A
+  WORKS verdict is feasibility evidence only: it shows a candidate can work, not
+  that it beats another. When the probe exists to choose between mechanisms,
+  spike every serious candidate on the same host and load and record the
+  measured property the choice turns on (`design.md` § "Benchmark competing
+  approaches with a spike before choosing one").
 - Record the promotion-gate decision (PROMOTE / DISCARD / PIVOT) in
-  `docs/feature/{id}/spike/wave-decisions.md`.
+  `docs/feature/{id}/spike/wave-decisions.md`. PROMOTE of one candidate over
+  another rests on the measured comparison, not on that candidate's WORKS verdict.
 - **Report DOESN'T-WORK honestly.** A negative result that kills a candidate (or
   pivots to a better one) is the spike succeeding — never contort a probe into
   green. Cross-check a surprising verdict against a production precedent (e.g. the
