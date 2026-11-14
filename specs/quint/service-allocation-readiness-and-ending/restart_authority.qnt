@@ -241,6 +241,7 @@ module restart_authority {
   action SLStable(i: int): bool = {
     val a = at.get(i)
     all {
+      IDS.forall(j => not(startupStopEnabled(at.get(j)))),   // the tick scans every allocation and takes a pending startup stop in the same tick
       a.row == "running", not(a.stable),
       if (decl) a.srow == "pass" else true,
       (a.ann implies (a.srow == "pass")),
@@ -294,6 +295,7 @@ module restart_authority {
   action SLLivenessStop(i: int, stage: str): bool = {
     val a = at.get(i)
     all {
+      IDS.forall(j => not(startupStopEnabled(at.get(j)))),   // the tick scans every allocation and takes a pending startup stop in the same tick
       a.row == "running", a.stable,
       at' = serviceLifecycleFacts(at, decl).set(i, afterStop(a, stage, "t_liveness", BUG_HOOKFIRST)),
       deployed' = deployed, decl' = decl, gl' = gl, cur' = cur, used' = used, done' = done, g' = g,
@@ -306,6 +308,7 @@ module restart_authority {
   action SLAnnounceTerminal(i: int): bool = {
     val a = at.get(i)
     all {
+      IDS.forall(j => not(startupStopEnabled(at.get(j)))),   // the tick scans every allocation and takes a pending startup stop in the same tick
       a.row != "none", a.row != "running", not(a.ann),
       at' = serviceLifecycleFacts(at, decl),
       deployed' = deployed, decl' = decl, gl' = gl, cur' = cur, used' = used, done' = done, g' = g,

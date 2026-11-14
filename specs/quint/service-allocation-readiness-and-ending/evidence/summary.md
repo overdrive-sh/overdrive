@@ -5,9 +5,10 @@ Written by `cargo xtask quint check --subsystem service-allocation-readiness-and
 | | |
 |---|---|
 | Result | 84 of 84 check(s) matched `expect` |
-| Run | `2701863-1794536983.789`, 2026-11-13T02:29:43.788714752Z → 2026-11-13T02:31:42.755789824Z |
+| Run | `2720108-1794699012.753`, 2026-11-14T23:30:12.75343616Z → 2026-11-14T23:31:44.935767808Z |
 | Jobs | 16 |
-| Git | `e4635dd3fb536ba71d3034ce180ee7e4f3475f5b` (dirty worktree) |
+| Carried over | 50 check(s) were not re-run by this run: their inputs are unchanged since the run named in their `run_id` in summary.json |
+| Git | `3cef9fb4b907a43ecb38ab9efd2af6a3bb650aa3` (dirty worktree) |
 | Quint | 0.32.0 |
 | Apalache | 0.56.1 \| build: 70cdaf4 |
 | Java | openjdk version "21.0.12.1" 2026-08-18 LTS |
@@ -25,32 +26,32 @@ Written by `cargo xtask quint check --subsystem service-allocation-readiness-and
 | hooks-run-operator-or-liveness-stop-emits-no-exit-event | hook_ownership.qnt | hooks_conf | run `operator_or_liveness_stop_emits_no_exit_event` | evaluator | run | holds | holds | PASS | 1 | 1.8 | 0.0 | 1.8 |  |
 | hooks-run-finalize-on-live-vm-stops-probes | hook_ownership.qnt | hooks_conf | run `finalize_on_live_vm_stops_probes` | evaluator | run | holds | holds | PASS | 1 | 1.8 | 0.0 | 1.8 |  |
 | hooks-run-double-fire-is-idempotent | hook_ownership.qnt | hooks_conf | run `double_fire_is_idempotent` | evaluator | run | holds | holds | PASS | 1 | 1.8 | 0.0 | 1.8 |  |
-| ra-no-startup-verdict-over-crash | restart_authority.qnt | ra_ok | invariant `NoStartupVerdictOverCrash` | tlc | exhaustive | holds | holds | PASS | 1 | 28.1 | 0.0 | 28.1 |  |
-| ra-one-author-per-ending | restart_authority.qnt | ra_ok | invariant `OneAuthorPerEnding` | tlc | exhaustive | holds | holds | PASS | 1 | 28.1 | 0.0 | 28.1 |  |
-| ra-startup-failure-named-only-at-give-up | restart_authority.qnt | ra_ok | invariant `StartupFailureNamedOnlyAtGiveUp` | tlc | exhaustive | holds | holds | PASS | 1 | 28.6 | 0.0 | 28.6 |  |
-| ra-no-stable-over-pending-stop | restart_authority.qnt | ra_ok | invariant `NoStableOverPendingStop` | tlc | exhaustive | holds | holds | PASS | 1 | 24.6 | 0.0 | 24.6 |  |
-| ra-crashed-alloc-eventually-decided-by-restart-authority | restart_authority.qnt | ra_ok | temporal `CrashedAllocEventuallyDecidedByRestartAuthority` | tlc | exhaustive | holds | holds | PASS | 1 | 33.5 | 0.0 | 33.5 |  |
-| ra-failed-startup-stop-is-retried | restart_authority.qnt | ra_ok | temporal `FailedStartupStopIsRetried` | tlc | exhaustive | holds | holds | PASS | 1 | 28.2 | 0.0 | 28.2 |  |
-| ra-late-pass-unstrands-the-instance | restart_authority.qnt | ra_ok | temporal `LatePassUnstrandsTheInstance` | tlc | exhaustive | holds | holds | PASS | 1 | 26.9 | 0.0 | 26.9 |  |
-| ra-hazard-guard-accepts-failed | hazard/restart_authority_hazards.qnt | ra_bugGuardAcceptsFailed | invariant `NoStartupVerdictOverCrash` | tlc | exhaustive | violation | violation | PASS | 1 | 12.6 | 0.0 | 12.6 | [traces/ra-hazard-guard-accepts-failed.txt](traces/ra-hazard-guard-accepts-failed.txt) [traces/ra-hazard-guard-accepts-failed.tlc.txt](traces/ra-hazard-guard-accepts-failed.tlc.txt) |
-| ra-hazard-sl-finalises-crash | hazard/restart_authority_hazards.qnt | ra_bugSlFinalisesCrash | invariant `OneAuthorPerEnding` | tlc | exhaustive | violation | violation | PASS | 1 | 11.1 | 0.0 | 11.1 | [traces/ra-hazard-sl-finalises-crash.txt](traces/ra-hazard-sl-finalises-crash.txt) [traces/ra-hazard-sl-finalises-crash.tlc.txt](traces/ra-hazard-sl-finalises-crash.tlc.txt) |
-| ra-hazard-sl-finalises-startup | hazard/restart_authority_hazards.qnt | ra_bugSlFinalisesStartup | invariant `StartupFailureNamedOnlyAtGiveUp` | tlc | exhaustive | violation | violation | PASS | 1 | 11.6 | 0.0 | 11.6 | [traces/ra-hazard-sl-finalises-startup.txt](traces/ra-hazard-sl-finalises-startup.txt) [traces/ra-hazard-sl-finalises-startup.tlc.txt](traces/ra-hazard-sl-finalises-startup.tlc.txt) |
-| ra-hazard-stamp-at-emission | hazard/restart_authority_hazards.qnt | ra_bugStampAtEmission | temporal `FailedStartupStopIsRetried` | tlc | exhaustive | violation | violation | PASS | 1 | 13.9 | 0.0 | 13.9 | [traces/ra-hazard-stamp-at-emission.txt](traces/ra-hazard-stamp-at-emission.txt) [traces/ra-hazard-stamp-at-emission.tlc.txt](traces/ra-hazard-stamp-at-emission.tlc.txt) |
-| ra-run-crash-after-attempts-exhausted-then-deadline-passes | restart_authority.qnt | ra_conf | run `crash_after_attempts_exhausted_then_deadline_passes` | evaluator | run | holds | holds | PASS | 1 | 3.1 | 0.0 | 3.1 |  |
-| ra-run-running-alloc-with-exhausted-probes-past-deadline-is-stopped | restart_authority.qnt | ra_conf | run `running_alloc_with_exhausted_probes_past_deadline_is_stopped` | evaluator | run | holds | holds | PASS | 1 | 3.1 | 0.0 | 3.1 |  |
-| ra-run-pre-startup-crash-loop-gives-up-early-exit | restart_authority.qnt | ra_conf | run `pre_startup_crash_loop_gives_up_early_exit` | evaluator | run | holds | holds | PASS | 1 | 2.5 | 0.0 | 2.5 |  |
-| ra-run-pre-startup-crash-then-successor-passes | restart_authority.qnt | ra_conf | run `pre_startup_crash_then_successor_passes` | evaluator | run | holds | holds | PASS | 1 | 2.5 | 0.0 | 2.5 |  |
+| ra-no-startup-verdict-over-crash | restart_authority.qnt | ra_ok | invariant `NoStartupVerdictOverCrash` | tlc | exhaustive | holds | holds | PASS | 1 | 30.2 | 0.0 | 30.2 |  |
+| ra-one-author-per-ending | restart_authority.qnt | ra_ok | invariant `OneAuthorPerEnding` | tlc | exhaustive | holds | holds | PASS | 1 | 30.8 | 0.0 | 30.8 |  |
+| ra-startup-failure-named-only-at-give-up | restart_authority.qnt | ra_ok | invariant `StartupFailureNamedOnlyAtGiveUp` | tlc | exhaustive | holds | holds | PASS | 1 | 30.0 | 0.0 | 30.0 |  |
+| ra-no-stable-over-pending-stop | restart_authority.qnt | ra_ok | invariant `NoStableOverPendingStop` | tlc | exhaustive | holds | holds | PASS | 1 | 30.8 | 0.0 | 30.8 |  |
+| ra-crashed-alloc-eventually-decided-by-restart-authority | restart_authority.qnt | ra_ok | temporal `CrashedAllocEventuallyDecidedByRestartAuthority` | tlc | exhaustive | holds | holds | PASS | 1 | 36.0 | 0.0 | 36.0 |  |
+| ra-failed-startup-stop-is-retried | restart_authority.qnt | ra_ok | temporal `FailedStartupStopIsRetried` | tlc | exhaustive | holds | holds | PASS | 1 | 29.9 | 0.0 | 29.9 |  |
+| ra-late-pass-unstrands-the-instance | restart_authority.qnt | ra_ok | temporal `LatePassUnstrandsTheInstance` | tlc | exhaustive | holds | holds | PASS | 1 | 28.9 | 0.0 | 28.9 |  |
+| ra-hazard-guard-accepts-failed | hazard/restart_authority_hazards.qnt | ra_bugGuardAcceptsFailed | invariant `NoStartupVerdictOverCrash` | tlc | exhaustive | violation | violation | PASS | 1 | 13.2 | 0.0 | 13.2 | [traces/ra-hazard-guard-accepts-failed.txt](traces/ra-hazard-guard-accepts-failed.txt) [traces/ra-hazard-guard-accepts-failed.tlc.txt](traces/ra-hazard-guard-accepts-failed.tlc.txt) |
+| ra-hazard-sl-finalises-crash | hazard/restart_authority_hazards.qnt | ra_bugSlFinalisesCrash | invariant `OneAuthorPerEnding` | tlc | exhaustive | violation | violation | PASS | 1 | 13.2 | 0.0 | 13.2 | [traces/ra-hazard-sl-finalises-crash.txt](traces/ra-hazard-sl-finalises-crash.txt) [traces/ra-hazard-sl-finalises-crash.tlc.txt](traces/ra-hazard-sl-finalises-crash.tlc.txt) |
+| ra-hazard-sl-finalises-startup | hazard/restart_authority_hazards.qnt | ra_bugSlFinalisesStartup | invariant `StartupFailureNamedOnlyAtGiveUp` | tlc | exhaustive | violation | violation | PASS | 1 | 14.2 | 0.0 | 14.2 | [traces/ra-hazard-sl-finalises-startup.txt](traces/ra-hazard-sl-finalises-startup.txt) [traces/ra-hazard-sl-finalises-startup.tlc.txt](traces/ra-hazard-sl-finalises-startup.tlc.txt) |
+| ra-hazard-stamp-at-emission | hazard/restart_authority_hazards.qnt | ra_bugStampAtEmission | temporal `FailedStartupStopIsRetried` | tlc | exhaustive | violation | violation | PASS | 1 | 16.7 | 0.0 | 16.7 | [traces/ra-hazard-stamp-at-emission.txt](traces/ra-hazard-stamp-at-emission.txt) [traces/ra-hazard-stamp-at-emission.tlc.txt](traces/ra-hazard-stamp-at-emission.tlc.txt) |
+| ra-run-crash-after-attempts-exhausted-then-deadline-passes | restart_authority.qnt | ra_conf | run `crash_after_attempts_exhausted_then_deadline_passes` | evaluator | run | holds | holds | PASS | 1 | 3.0 | 0.0 | 3.0 |  |
+| ra-run-running-alloc-with-exhausted-probes-past-deadline-is-stopped | restart_authority.qnt | ra_conf | run `running_alloc_with_exhausted_probes_past_deadline_is_stopped` | evaluator | run | holds | holds | PASS | 1 | 2.8 | 0.0 | 2.8 |  |
+| ra-run-pre-startup-crash-loop-gives-up-early-exit | restart_authority.qnt | ra_conf | run `pre_startup_crash_loop_gives_up_early_exit` | evaluator | run | holds | holds | PASS | 1 | 3.0 | 0.0 | 3.0 |  |
+| ra-run-pre-startup-crash-then-successor-passes | restart_authority.qnt | ra_conf | run `pre_startup_crash_then_successor_passes` | evaluator | run | holds | holds | PASS | 1 | 2.8 | 0.0 | 2.8 |  |
 | ra-run-crash-after-startup-pass-gives-up-backoff-exhausted | restart_authority.qnt | ra_conf | run `crash_after_startup_pass_gives_up_backoff_exhausted` | evaluator | run | holds | holds | PASS | 1 | 2.8 | 0.0 | 2.8 |  |
 | ra-run-opt-out-service-crash-loop-gives-up-backoff-exhausted | restart_authority.qnt | ra_conf | run `opt_out_service_crash_loop_gives_up_backoff_exhausted` | evaluator | run | holds | holds | PASS | 1 | 2.8 | 0.0 | 2.8 |  |
-| ra-run-non-crash-failed-row-gives-up-backoff-exhausted | restart_authority.qnt | ra_conf | run `non_crash_failed_row_gives_up_backoff_exhausted` | evaluator | run | holds | holds | PASS | 1 | 2.8 | 0.0 | 2.8 |  |
-| ra-run-liveness-kill-loop-gives-up-liveness-probe-failed | restart_authority.qnt | ra_conf | run `liveness_kill_loop_gives_up_liveness_probe_failed` | evaluator | run | holds | holds | PASS | 1 | 2.5 | 0.0 | 2.5 |  |
-| ra-run-startup-never-passes-loop-gives-up-startup-probe-failed | restart_authority.qnt | ra_conf | run `startup_never_passes_loop_gives_up_startup_probe_failed` | evaluator | run | holds | holds | PASS | 1 | 2.5 | 0.0 | 2.5 |  |
-| ra-run-startup-stop-then-successor-passes-is-stable | restart_authority.qnt | ra_conf | run `startup_stop_then_successor_passes_is_stable` | evaluator | run | holds | holds | PASS | 1 | 2.5 | 0.0 | 2.5 |  |
-| ra-run-startup-stop-then-crash-names-last-cause | restart_authority.qnt | ra_conf | run `startup_stop_then_crash_names_last_cause` | evaluator | run | holds | holds | PASS | 1 | 2.5 | 0.0 | 2.5 |  |
-| ra-run-crash-then-startup-stop-names-last-cause | restart_authority.qnt | ra_conf | run `crash_then_startup_stop_names_last_cause` | evaluator | run | holds | holds | PASS | 1 | 2.8 | 0.0 | 2.8 |  |
-| ra-run-startup-stop-is-not-intentional-stop | restart_authority.qnt | ra_conf | run `startup_stop_is_not_intentional_stop` | evaluator | run | holds | holds | PASS | 1 | 3.3 | 0.0 | 3.3 |  |
-| ra-run-failed-startup-stop-is-retried-on-next-row | restart_authority.qnt | ra_conf | run `failed_startup_stop_is_retried_on_next_row` | evaluator | run | holds | holds | PASS | 1 | 3.3 | 0.0 | 3.3 |  |
-| ra-run-late-pass-after-failed-stop-reaches-stable | restart_authority.qnt | ra_conf | run `late_pass_after_failed_stop_reaches_stable` | evaluator | run | holds | holds | PASS | 1 | 3.3 | 0.0 | 3.3 |  |
+| ra-run-non-crash-failed-row-gives-up-backoff-exhausted | restart_authority.qnt | ra_conf | run `non_crash_failed_row_gives_up_backoff_exhausted` | evaluator | run | holds | holds | PASS | 1 | 2.5 | 0.0 | 2.5 |  |
+| ra-run-liveness-kill-loop-gives-up-liveness-probe-failed | restart_authority.qnt | ra_conf | run `liveness_kill_loop_gives_up_liveness_probe_failed` | evaluator | run | holds | holds | PASS | 1 | 2.8 | 0.0 | 2.8 |  |
+| ra-run-startup-never-passes-loop-gives-up-startup-probe-failed | restart_authority.qnt | ra_conf | run `startup_never_passes_loop_gives_up_startup_probe_failed` | evaluator | run | holds | holds | PASS | 1 | 3.6 | 0.0 | 3.6 |  |
+| ra-run-startup-stop-then-successor-passes-is-stable | restart_authority.qnt | ra_conf | run `startup_stop_then_successor_passes_is_stable` | evaluator | run | holds | holds | PASS | 1 | 3.6 | 0.0 | 3.6 |  |
+| ra-run-startup-stop-then-crash-names-last-cause | restart_authority.qnt | ra_conf | run `startup_stop_then_crash_names_last_cause` | evaluator | run | holds | holds | PASS | 1 | 3.6 | 0.0 | 3.6 |  |
+| ra-run-crash-then-startup-stop-names-last-cause | restart_authority.qnt | ra_conf | run `crash_then_startup_stop_names_last_cause` | evaluator | run | holds | holds | PASS | 1 | 3.6 | 0.0 | 3.6 |  |
+| ra-run-startup-stop-is-not-intentional-stop | restart_authority.qnt | ra_conf | run `startup_stop_is_not_intentional_stop` | evaluator | run | holds | holds | PASS | 1 | 3.6 | 0.0 | 3.6 |  |
+| ra-run-failed-startup-stop-is-retried-on-next-row | restart_authority.qnt | ra_conf | run `failed_startup_stop_is_retried_on_next_row` | evaluator | run | holds | holds | PASS | 1 | 3.6 | 0.0 | 3.6 |  |
+| ra-run-late-pass-after-failed-stop-reaches-stable | restart_authority.qnt | ra_conf | run `late_pass_after_failed_stop_reaches_stable` | evaluator | run | holds | holds | PASS | 1 | 3.8 | 0.0 | 3.8 |  |
 | ra-run-control-plane-restart-keeps-acted-run | restart_authority.qnt | ra_conf | run `control_plane_restart_keeps_acted_run` | evaluator | run | holds | holds | PASS | 1 | 3.6 | 0.0 | 3.6 |  |
 | lg-liveness-only-after-stable | liveness_gate.qnt | lg_ok | invariant `LivenessOnlyAfterStable` | tlc | exhaustive | holds | holds | PASS | 1 | 6.1 | 0.0 | 6.1 |  |
 | lg-no-liveness-stop-before-stable | liveness_gate.qnt | lg_ok | invariant `NoLivenessStopBeforeStable` | tlc | exhaustive | holds | holds | PASS | 1 | 6.3 | 0.0 | 6.3 |  |
@@ -78,13 +79,13 @@ Written by `cargo xtask quint check --subsystem service-allocation-readiness-and
 | ss-run-superseded-attempt-terminal-is-not-reported | stream_snapshot.qnt | ss_conf | run `superseded_attempt_terminal_is_not_reported` | evaluator | run | holds | holds | PASS | 1 | 2.0 | 0.0 | 2.0 |  |
 | ss-run-lagged-relist-recovers-terminal | stream_snapshot.qnt | ss_conf | run `lagged_relist_recovers_terminal` | evaluator | run | holds | holds | PASS | 1 | 2.0 | 0.0 | 2.0 |  |
 | ss-run-failed-read-ends-with-error | stream_snapshot.qnt | ss_conf | run `failed_read_ends_with_error` | evaluator | run | holds | holds | PASS | 1 | 2.0 | 0.0 | 2.0 |  |
-| ra-run-pass-then-fails-before-stable-is-stopped | restart_authority.qnt | ra_conf | run `pass_then_fails_before_stable_is_stopped` | evaluator | run | holds | holds | PASS | 1 | 4.1 | 0.0 | 4.1 |  |
+| ra-run-pass-then-fails-before-stable-is-stopped | restart_authority.qnt | ra_conf | run `pass_then_fails_before_stable_is_stopped` | evaluator | run | holds | holds | PASS | 1 | 3.0 | 0.0 | 3.0 |  |
 | lg-stable-eventually-committed | liveness_gate.qnt | lg_ok | temporal `StableEventuallyCommitted` | tlc | exhaustive | holds | holds | PASS | 1 | 6.3 | 0.0 | 6.3 |  |
 | lg-hazard-stamp-at-emission | hazard/liveness_gate_hazards.qnt | lg_bugStampAtEmission | temporal `StableEventuallyCommitted` | tlc | exhaustive | violation | violation | PASS | 1 | 6.3 | 0.0 | 6.3 | [traces/lg-hazard-stamp-at-emission.txt](traces/lg-hazard-stamp-at-emission.txt) [traces/lg-hazard-stamp-at-emission.tlc.txt](traces/lg-hazard-stamp-at-emission.tlc.txt) |
 | lg-run-lost-stable-write-is-reannounced | liveness_gate.qnt | lg_conf | run `lost_stable_write_is_reannounced` | evaluator | run | holds | holds | PASS | 1 | 1.5 | 0.0 | 1.5 |  |
-| ra-no-stranded-stop | restart_authority.qnt | ra_ok | invariant `NoStrandedStop` | tlc | exhaustive | holds | holds | PASS | 1 | 20.5 | 0.0 | 20.5 |  |
-| ra-hazard-hook-before-row-write | hazard/restart_authority_hazards.qnt | ra_bugHookBeforeRowWrite | invariant `NoStrandedStop` | tlc | exhaustive | violation | violation | PASS | 1 | 11.6 | 0.0 | 11.6 | [traces/ra-hazard-hook-before-row-write.txt](traces/ra-hazard-hook-before-row-write.txt) [traces/ra-hazard-hook-before-row-write.tlc.txt](traces/ra-hazard-hook-before-row-write.tlc.txt) |
-| ra-run-stop-row-write-failure-is-retried | restart_authority.qnt | ra_conf | run `stop_row_write_failure_is_retried` | evaluator | run | holds | holds | PASS | 1 | 4.1 | 0.0 | 4.1 |  |
+| ra-no-stranded-stop | restart_authority.qnt | ra_ok | invariant `NoStrandedStop` | tlc | exhaustive | holds | holds | PASS | 1 | 22.2 | 0.0 | 22.2 |  |
+| ra-hazard-hook-before-row-write | hazard/restart_authority_hazards.qnt | ra_bugHookBeforeRowWrite | invariant `NoStrandedStop` | tlc | exhaustive | violation | violation | PASS | 1 | 11.4 | 0.0 | 11.4 | [traces/ra-hazard-hook-before-row-write.txt](traces/ra-hazard-hook-before-row-write.txt) [traces/ra-hazard-hook-before-row-write.tlc.txt](traces/ra-hazard-hook-before-row-write.tlc.txt) |
+| ra-run-stop-row-write-failure-is-retried | restart_authority.qnt | ra_conf | run `stop_row_write_failure_is_retried` | evaluator | run | holds | holds | PASS | 1 | 3.0 | 0.0 | 3.0 |  |
 | gr-listen-before-exit | guest_report.qnt | gr_ok | invariant `ListenBeforeExit` | tlc | exhaustive | holds | holds | PASS | 1 | 7.3 | 0.0 | 7.3 |  |
 | gr-delivered-before-exit | guest_report.qnt | gr_ok | invariant `DeliveredBeforeExit` | tlc | exhaustive | holds | holds | PASS | 1 | 7.8 | 0.0 | 7.9 |  |
 | gr-exit-eventually-reported | guest_report.qnt | gr_ok | temporal `ExitEventuallyReported` | tlc | exhaustive | holds | holds | PASS | 1 | 8.1 | 0.0 | 8.1 |  |
@@ -113,5 +114,5 @@ Written by `cargo xtask quint check --subsystem service-allocation-readiness-and
 - `hook_ownership.qnt` `c6e990eaf29adfc8b698d07a568c01408af0e77f19721e9a626142b0c5662864`
 - `liveness_gate.qnt` `fd5c89476df752c9b1e87fabedaab9c1897702f3c98f9ab668eaaa5d1cf08b38`
 - `progress_deadline.qnt` `051add9635ecd632a1b68bba01b6131958a36b8b8408956977177e37867f859a`
-- `restart_authority.qnt` `6d666e2eddbc973ff41aa7cac1ec015eea23bbcd4fbd1bca5c6b7732be9e9769`
+- `restart_authority.qnt` `a5cbe7be9b3a37c2abdc905f9421f8df3afa295c97d5806d5df363a27f234e37`
 - `stream_snapshot.qnt` `221f32fb71d5b87ddca703316c269f24bfa0c02fd652723bc3952ce3508f41d6`
