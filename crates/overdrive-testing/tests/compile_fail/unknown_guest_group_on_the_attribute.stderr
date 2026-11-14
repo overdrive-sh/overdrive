@@ -1,7 +1,5 @@
 error[E0080]: evaluation panicked: unknown guest group `no-such-group`
- --> tests/compile_fail/unknown_guest_group_on_the_attribute.rs:4:26
+ --> tests/compile_fail/unknown_guest_group_on_the_attribute.rs:3:26
   |
-4 | #[overdrive_test(guest = "no-such-group")]
-  |                          ^^^^^^^^^^^^^^^ evaluation of `a_test::_` failed here
-
-For more information about this error, try `rustc --explain E0080`.
+3 | #[overdrive_test(guest = "no-such-group")]
+  |                          ^^^^^^^^^^^^^^^ evaluation of `_` failed here

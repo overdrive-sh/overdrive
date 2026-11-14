@@ -21,12 +21,15 @@ use overdrive_core::aggregate::{Job, JobSpecInput, WorkloadIntentEnvelope};
 use overdrive_core::codec::{EnvelopeError, VersionedEnvelope};
 use overdrive_core::traits::intent_store::IntentStoreError;
 use overdrive_store_local::LocalIntentStore;
+use overdrive_testing_macros::placement;
 use tempfile::TempDir;
 use tracing::subscriber::set_default;
 use tracing::{Event, Subscriber};
 use tracing_subscriber::layer::{Context, SubscriberExt};
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::{Layer, Registry};
+
+placement!(host_pure);
 
 use super::envelope_helpers::{
     synthesise_unknown_job_envelope_variant_tag, write_raw_bytes_to_entries_table,

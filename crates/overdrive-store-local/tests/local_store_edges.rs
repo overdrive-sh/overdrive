@@ -27,8 +27,11 @@ use overdrive_core::traits::intent_store::{
     IntentStore, IntentSubscriptionEvent, TxnOp, TxnOutcome,
 };
 use overdrive_store_local::LocalIntentStore;
+use overdrive_testing_macros::overdrive_test_default;
 use tempfile::TempDir;
 use tokio::time::timeout;
+
+overdrive_test_default!(host_pure);
 
 #[tokio::test]
 async fn watch_fires_on_delete_with_no_value() {

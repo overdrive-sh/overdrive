@@ -68,6 +68,9 @@ trybuild.workspace = true
 # `SimObservationStore` beside `LocalObservationStore` and asserts both merge
 # on the run sequence identically.
 overdrive-sim.path = "../overdrive-sim"
+# The placement declarations of the host-pure test modules and binaries
+# (`placement!`, `overdrive_test_default!`). Compile-time only.
+overdrive-testing-macros.workspace = true
 
 [lints]
 workspace = true

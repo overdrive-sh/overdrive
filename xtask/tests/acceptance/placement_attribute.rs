@@ -30,6 +30,7 @@ use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
+use overdrive_testing_macros::overdrive_test;
 use serde_json::{Value, json};
 
 fn workspace_file(relative: &str) -> PathBuf {
@@ -49,7 +50,6 @@ pub(super) mod fixtures {
 
     #[overdrive_test(host_pure)]
     #[test]
-    #[ignore = "pending DELIVER: host-pure-placement-on-the-test"]
     fn per_test_host_pure_fixture() {}
 
     #[overdrive_test(host_pure)]
@@ -58,14 +58,12 @@ pub(super) mod fixtures {
         clippy::unnecessary_wraps,
         reason = "the fixture proves a host-pure test may return a Result"
     )]
-    #[ignore = "pending DELIVER: host-pure-placement-on-the-test"]
     fn host_pure_fixture_may_return_a_result() -> Result<(), String> {
         Ok(())
     }
 
     #[overdrive_test(host_pure)]
     #[test]
-    #[ignore = "pending DELIVER: host-pure-placement-on-the-test"]
     fn host_pure_fixture_reports_its_namespace() {
         if let Some(path) = std::env::var_os(REPORT_ENV) {
             let link =
@@ -102,11 +100,9 @@ pub(super) mod fixtures {
         placement!(host_pure);
 
         #[test]
-        #[ignore = "pending DELIVER: host-pure-placement-on-the-test"]
         fn first_test_of_the_declared_module() {}
 
         #[test]
-        #[ignore = "pending DELIVER: host-pure-placement-on-the-test"]
         fn second_test_of_the_declared_module() {}
     }
 }
@@ -298,7 +294,7 @@ fn every_placement_a_test_declares_on_itself_is_placed() {
 /// is reported with its binary and its name, so the author learns before Metal.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER: host-pure-placement-on-the-test"]
+#[overdrive_test(host_pure)]
 fn a_listed_test_with_no_placement_is_reported_naming_its_binary_and_itself() {
     let work = Workdir::new();
     let binary =
@@ -313,7 +309,7 @@ fn a_listed_test_with_no_placement_is_reported_naming_its_binary_and_itself() {
 /// A module declaration places the tests of exactly its module: a child module
 /// does not inherit it, and a sibling is not covered. CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER: host-pure-placement-on-the-test"]
+#[overdrive_test(host_pure)]
 fn a_module_declaration_places_exactly_the_tests_of_that_module() {
     let work = Workdir::new();
     let binary = work.binary("module", &[record("module_host_pure", "crate::declared", &[])]);
@@ -338,7 +334,7 @@ fn a_module_declaration_places_exactly_the_tests_of_that_module() {
 /// A binary default places every test that has no record, with no conflict when
 /// the records beside it are host-pure. CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER: host-pure-placement-on-the-test"]
+#[overdrive_test(host_pure)]
 fn a_binary_default_places_every_test_of_a_host_only_binary() {
     let work = Workdir::new();
     let binary = work.binary(
@@ -357,7 +353,7 @@ fn a_binary_default_places_every_test_of_a_host_only_binary() {
 /// refused: a forgotten declaration in a mixed binary would silently run on the
 /// host. A module declaration is not a default. CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER: host-pure-placement-on-the-test"]
+#[overdrive_test(host_pure)]
 fn a_binary_default_beside_a_non_host_pure_record_is_a_conflict_and_a_module_declaration_is_not() {
     let work = Workdir::new();
     for (kind, args) in [
@@ -397,7 +393,7 @@ fn a_binary_default_beside_a_non_host_pure_record_is_a_conflict_and_a_module_dec
 /// A section the reader cannot parse is refused as invalid, never read as "no
 /// findings". CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER: host-pure-placement-on-the-test"]
+#[overdrive_test(host_pure)]
 fn a_section_that_cannot_be_read_is_refused_as_an_invalid_placement() {
     let work = Workdir::new();
     let truncated = work.raw_binary("truncated", b"host_pure\0crate::m::t\0");
@@ -411,7 +407,7 @@ fn a_section_that_cannot_be_read_is_refused_as_an_invalid_placement() {
 /// drift guard between the writer and the readers for the host-pure forms.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER: host-pure-placement-on-the-test"]
+#[overdrive_test(host_pure)]
 fn the_records_the_attribute_wrote_into_this_binary_are_read_by_the_checker() {
     let this_binary = std::env::current_exe().expect("this test binary");
     let names: Vec<String> = HOST_PURE_FIXTURE_TESTS.iter().map(|t| fixture_test(t)).collect();
@@ -501,7 +497,7 @@ fn stderr_has(output: &Output, error: &str) -> bool {
 /// An unplaced test is refused before its body runs. CONTRACT_SHAPE: bounded-change
 /// (the wrapper's exit status and diagnostic; nothing else is written).
 #[test]
-#[ignore = "pending DELIVER: host-pure-placement-on-the-test"]
+#[overdrive_test(host_pure)]
 fn an_unplaced_test_is_refused_on_a_metal_run_before_its_body_runs() {
     let work = Workdir::new();
     let binary = work.binary("none", &[record("host_pure", "crate::other", &[])]);
@@ -517,7 +513,7 @@ fn an_unplaced_test_is_refused_on_a_metal_run_before_its_body_runs() {
 /// A binary that mixes a default with a guest record is refused on a Metal run.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER: host-pure-placement-on-the-test"]
+#[overdrive_test(host_pure)]
 fn a_binary_that_mixes_a_default_with_a_guest_record_is_refused_on_a_metal_run() {
     let work = Workdir::new();
     let binary = work.binary(
@@ -534,7 +530,7 @@ fn a_binary_that_mixes_a_default_with_a_guest_record_is_refused_on_a_metal_run()
 /// An unreadable section is refused on a Metal run as an invalid placement.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER: host-pure-placement-on-the-test"]
+#[overdrive_test(host_pure)]
 fn an_unreadable_section_is_refused_on_a_metal_run_as_an_invalid_placement() {
     let work = Workdir::new();
     let binary = work.raw_binary("garbled", b"host_pure\0crate::m::t\0");
@@ -548,7 +544,7 @@ fn an_unreadable_section_is_refused_on_a_metal_run_as_an_invalid_placement() {
 /// The existing run-context checks still come first: a declaration cannot
 /// bypass them (true today, kept true). CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER: host-pure-placement-on-the-test"]
+#[overdrive_test(host_pure)]
 fn a_declared_test_with_an_invalid_run_context_is_refused_by_the_run_context_check() {
     let this_binary = std::env::current_exe().expect("this test binary");
     let run = OrdinaryRun::new(&empty_table());
@@ -568,7 +564,7 @@ fn a_declared_test_with_an_invalid_run_context_is_refused_by_the_run_context_che
 /// exact argument, no namespace, and the body runs. CONTRACT_SHAPE:
 /// bounded-change (one report file the fixture writes).
 #[test]
-#[ignore = "pending DELIVER: host-pure-placement-on-the-test"]
+#[overdrive_test(host_pure)]
 fn a_test_that_declares_itself_host_pure_runs_without_a_namespace() {
     let this_binary = std::env::current_exe().expect("this test binary");
     let name = fixture_test("host_pure_fixture_reports_its_namespace");
@@ -630,7 +626,7 @@ fn a_test_that_declares_itself_a_native_launcher_runs_in_the_full_node_view() {
 /// the entry says guest and would need the dispatcher, which is absent, so only
 /// the record can place this run. CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER: host-pure-placement-on-the-test"]
+#[overdrive_test(host_pure)]
 fn a_record_wins_over_a_table_entry_for_the_same_test() {
     let this_binary = std::env::current_exe().expect("this test binary");
     let name = fixture_test("per_test_host_pure_fixture");

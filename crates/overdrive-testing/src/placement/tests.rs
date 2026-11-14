@@ -11,9 +11,12 @@
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
+use overdrive_testing_macros::placement;
 use serial_test::serial;
 
 use super::{GuestPlacement, Sharing, in_metal_run};
+
+placement!(host_pure);
 
 /// The 21 environments over 8 groups the registry is closed over: each group's
 /// profiles, the base profile spelled as the empty string.
@@ -108,7 +111,6 @@ fn an_omitted_profile_selects_each_groups_base_profile() {
 /// `placement!(host_pure)` on the module.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER: host-pure-placement-on-the-test"]
 fn an_unknown_group_is_rejected_by_name_at_declaration() {
     for group in ["cgroup-defualt", "", "CGROUP-DEFAULT", "host"] {
         let message = panic_message(|| GuestPlacement::declare(group, "", Sharing::Isolated, ""))
@@ -191,7 +193,6 @@ impl Drop for MetalEnvGuard {
 /// CONTRACT_SHAPE: pure-function (the process environment in, a verdict out).
 #[test]
 #[serial(env)]
-#[ignore = "pending DELIVER: host-pure-placement-on-the-test"]
 fn a_metal_run_is_present_when_any_one_of_the_three_variables_is_set_and_non_empty() {
     let cases: [[Option<&str>; 3]; 6] = [
         [Some("0123456789abcdef01234567"), None, None],
@@ -213,7 +214,6 @@ fn a_metal_run_is_present_when_any_one_of_the_three_variables_is_set_and_non_emp
 /// CONTRACT_SHAPE: pure-function.
 #[test]
 #[serial(env)]
-#[ignore = "pending DELIVER: host-pure-placement-on-the-test"]
 fn no_metal_run_is_present_when_no_variable_is_set_or_every_set_one_is_empty() {
     let cases: [[Option<&str>; 3]; 4] = [
         [None, None, None],

@@ -32,6 +32,42 @@ pub enum GuestGroup {
     NestedBoundary,
 }
 
+/// The group names, the registry's single list.
+const GROUP_NAMES: [&str; 8] =
+    ["probe", "core", "unload", "ulp", "mtls-relay", "cgroup-default", "stress", "nested-boundary"];
+
+/// True when `name` is one of the eight group names. Exact, case-sensitive.
+///
+/// The placement macros call it in constant context to name an unknown group in
+/// the build error, so the macro crate holds no list of its own.
+#[doc(hidden)]
+pub const fn is_known_group(name: &str) -> bool {
+    let wanted = name.as_bytes();
+    let mut group = 0;
+    while group < GROUP_NAMES.len() {
+        let known = GROUP_NAMES[group].as_bytes();
+        if bytes_equal(known, wanted) {
+            return true;
+        }
+        group += 1;
+    }
+    false
+}
+
+const fn bytes_equal(left: &[u8], right: &[u8]) -> bool {
+    if left.len() != right.len() {
+        return false;
+    }
+    let mut index = 0;
+    while index < left.len() {
+        if left[index] != right[index] {
+            return false;
+        }
+        index += 1;
+    }
+    true
+}
+
 /// Whether a placement's guest is private to the test or shared by the tests
 /// of one module.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,16 +90,17 @@ pub struct GuestPlacement {
 
 impl GuestPlacement {
     /// Declares a placement. Panics at constant evaluation on an unknown group
-    /// or profile; `declaring_module` is the `module_path!()` of the module
+    /// (and, once the profiles are built, an unknown profile); `declaring_module` is the `module_path!()` of the module
     /// holding the declaration (empty for `Sharing::Isolated`).
-    // SCAFFOLD: true. Stores its arguments; the closed-registry validation is
-    // built with the registry.
+    // SCAFFOLD: true for the profile: the group is validated against the closed
+    // registry, the per-group profile check is built with the profiles.
     pub const fn declare(
         group: &'static str,
         profile: &'static str,
         sharing: Sharing,
         declaring_module: &'static str,
     ) -> Self {
+        assert!(is_known_group(group), "unknown guest group");
         Self { group, profile, sharing, declaring_module }
     }
 }

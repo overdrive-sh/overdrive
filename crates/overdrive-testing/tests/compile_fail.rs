@@ -18,13 +18,14 @@
 #![cfg(target_os = "linux")]
 #![allow(clippy::doc_markdown, reason = "Contract Shape declarations keep their literal spelling")]
 
+use overdrive_testing::overdrive_test;
 use serial_test::serial;
 
 /// An unknown group on the attribute is a build error naming the group.
 /// CONTRACT_SHAPE: pure-function (source text in, diagnostic out).
 #[test]
 #[serial(trybuild)]
-#[ignore = "pending DELIVER: host-pure-placement-on-the-test"]
+#[overdrive_test(host_pure)]
 fn an_unknown_guest_group_on_the_attribute_fails_the_build_naming_the_group() {
     let cases = trybuild::TestCases::new();
     cases.compile_fail("tests/compile_fail/unknown_guest_group_on_the_attribute.rs");

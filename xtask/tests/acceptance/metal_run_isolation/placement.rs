@@ -344,6 +344,32 @@ fn declares_the_reviewed_guest_group_on_the_test(row: &Value) -> bool {
         .any(|line| line.trim() == declaration)
 }
 
+/// Whether a host-pure test is placed by a declaration in its own source: the
+/// attribute on the function, or a `placement!(host_pure)` or
+/// `overdrive_test_default!(host_pure)` in the file that holds it. A test placed
+/// that way has no table row.
+fn declares_host_pure_in_its_source(row: &Value) -> bool {
+    let source = row["source"].as_str().expect("source");
+    let path = source.split(':').next().expect("source path");
+    let leaf = row["test_name"].as_str().expect("name").rsplit("::").next().expect("leaf");
+    let Ok(text) = fs::read_to_string(workspace_file(path)) else { return false };
+    if text.contains("placement!(host_pure);")
+        || text.contains("overdrive_test_default!(host_pure);")
+    {
+        return true;
+    }
+    let Some(function_at) = text.find(&format!("fn {leaf}(")) else { return false };
+    text[..function_at]
+        .lines()
+        .rev()
+        .skip(1)
+        .take_while(|line| {
+            let line = line.trim_start();
+            line.starts_with("#[") || line.starts_with("//")
+        })
+        .any(|line| line.trim() == "#[overdrive_test(host_pure)]")
+}
+
 /// CONTRACT_SHAPE: bounded-change (read-only placement comparison and output only;
 /// data extensions are exact identities, never absence-means-host or fixed counts).
 #[test]
@@ -369,6 +395,13 @@ fn runtime_placement_preserves_the_reviewed_partition_and_declares_new_acceptanc
         if actual.is_null()
             && row["placement"] == "guest-group"
             && declares_the_reviewed_guest_group_on_the_test(row)
+        {
+            continue;
+        }
+        // A host-pure test that declares its placement in its source has no table row.
+        if actual.is_null()
+            && row["placement"] == "host-pure"
+            && declares_host_pure_in_its_source(row)
         {
             continue;
         }

@@ -22,6 +22,278 @@ if [ "${1:-}" = --guest-suite ]; then
   shift
 fi
 
+# The placement resolver, shared by an ordinary run (`run`) and the eager check
+# (`check`). A test is placed by, first match wins: its own record; a
+# `module_host_pure` record for exactly its module; the binary's
+# `default_host_pure`; until the table retires, its table entry; otherwise it
+# is unplaced. A record is a sequence of NUL-terminated fields `<kind>`,
+# `<test>`, `<argc>`, then `argc` arguments, in the `overdrive_test_placement`
+# section of the test binary; `<test>` and a module record's path start at the
+# crate segment, which is dropped to compare with nextest's names.
+#
+# Exit status of `run`: 0 placed (prints `kind US group US fixture`), 11 the
+# table repeats a key, 12 unplaced, 13 invalid (prints the detail), 15 conflict.
+read -r -d '' PLACEMENT_PY <<'PY' || true
+import json
+import os
+import re
+import struct
+import sys
+
+GROUPS = {
+    "probe", "core", "unload", "ulp", "mtls-relay", "cgroup-default",
+    "stress", "nested-boundary",
+}
+SECTION = b"overdrive_test_placement"
+ARGUMENT_COUNT = {
+    "host_pure": 0, "native_launcher": 0, "module_host_pure": 0,
+    "default_host_pure": 0, "guest": 3, "lane_operator": 1, "lane_owner": 1,
+}
+PER_TEST = {"host_pure", "native_launcher", "guest", "lane_operator", "lane_owner"}
+NOT_HOST_PURE = {"native_launcher", "guest", "lane_operator", "lane_owner"}
+# What the wrapper does for a record: the host-pure kinds run the original
+# chain; a guest or lane test boots its own guest from its host half, in the
+# local-mode vsock namespace.
+RECORD_KIND = {
+    "host_pure": "host-pure", "module_host_pure": "host-pure",
+    "default_host_pure": "host-pure", "native_launcher": "native-launcher",
+    "guest": "guest-declared", "lane_operator": "guest-declared",
+    "lane_owner": "guest-declared",
+}
+
+class Invalid(Exception):
+    pass
+
+class DuplicateKey(Exception):
+    pass
+
+class Unclassified(Exception):
+    pass
+
+def section_bytes(path):
+    # 64-bit little-endian ELF only: the test binaries of the Metal host.
+    try:
+        binary = open(path, "rb")
+    except OSError:
+        return None
+    with binary:
+        header = binary.read(64)
+        if len(header) < 64 or header[:4] != b"\x7fELF" or header[4] != 2 or header[5] != 1:
+            return None
+        (section_table, entry_size, entry_count, names_index) = (
+            struct.unpack_from("<Q", header, 40)[0],
+            struct.unpack_from("<H", header, 58)[0],
+            struct.unpack_from("<H", header, 60)[0],
+            struct.unpack_from("<H", header, 62)[0],
+        )
+        if section_table == 0 or entry_size < 64 or names_index >= entry_count:
+            return None
+        binary.seek(section_table)
+        table = binary.read(entry_size * entry_count)
+        def entry(index):
+            name, _kind, _flags, _addr, offset, size = struct.unpack_from(
+                "<IIQQQQ", table, index * entry_size
+            )
+            return name, offset, size
+        _, names_offset, names_size = entry(names_index)
+        binary.seek(names_offset)
+        names = binary.read(names_size)
+        for index in range(entry_count):
+            name, offset, size = entry(index)
+            end = names.find(b"\0", name)
+            if names[name:end] == SECTION:
+                binary.seek(offset)
+                return binary.read(size)
+    return None
+
+def read_records(path):
+    data = section_bytes(path)
+    if not data:
+        return []
+    fields = data.split(b"\0")
+    if fields.pop() != b"":
+        raise Invalid("record=malformed")
+    try:
+        fields = [field.decode() for field in fields]
+    except UnicodeDecodeError:
+        raise Invalid("record=malformed")
+    records = []
+    index = 0
+    while index < len(fields):
+        if index + 3 > len(fields):
+            raise Invalid("record=malformed")
+        kind, test, argc = fields[index:index + 3]
+        if kind not in ARGUMENT_COUNT:
+            raise Invalid("kind=" + kind)
+        if argc != str(ARGUMENT_COUNT[kind]):
+            raise Invalid("record=malformed")
+        count = ARGUMENT_COUNT[kind]
+        arguments = fields[index + 3:index + 3 + count]
+        if len(arguments) != count or (test == "") != (kind == "default_host_pure"):
+            raise Invalid("record=malformed")
+        if kind == "guest":
+            if arguments[0] not in GROUPS:
+                raise Invalid("group=" + arguments[0])
+            if arguments[2] not in {"0", "1"}:
+                raise Invalid("record=malformed")
+        records.append((kind, test, arguments))
+        index += 3 + count
+    return records
+
+def drop_crate(path):
+    return path.split("::", 1)[1] if "::" in path else ""
+
+def has_conflict(records):
+    kinds = {kind for kind, _test, _arguments in records}
+    return "default_host_pure" in kinds and bool(kinds & NOT_HOST_PURE)
+
+def resolve_record(records, test_name):
+    for kind, test, arguments in records:
+        if kind in PER_TEST and drop_crate(test) == test_name:
+            return kind, arguments
+    module = test_name.rpartition("::")[0]
+    for kind, test, _arguments in records:
+        if kind == "module_host_pure" and drop_crate(test) == module:
+            return kind, []
+    for kind, _test, _arguments in records:
+        if kind == "default_host_pure":
+            return kind, []
+    return None
+
+def record_placement(kind, arguments):
+    group = arguments[0] if kind == "guest" else ""
+    fixture = arguments[0] if kind in {"lane_operator", "lane_owner"} else ""
+    return RECORD_KIND[kind], group, fixture
+
+def unique_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise DuplicateKey(key)
+        result[key] = value
+    return result
+
+def valid_descriptor(value):
+    if not isinstance(value, dict) or not isinstance(value.get("kind"), str):
+        return False
+    kind = value["kind"]
+    if kind in {"host-pure", "native-launcher"}:
+        return set(value) == {"kind"}
+    if kind == "guest-group":
+        return set(value) == {"kind", "group"} and value.get("group") in GROUPS
+    if kind in {"guest-lane-operator", "guest-lane-owner"}:
+        fixture = value.get("fixture")
+        return (
+            set(value) == {"kind", "fixture"}
+            and isinstance(fixture, str)
+            and re.fullmatch(r"integration::in_guest_lane::[A-Za-z0-9_]+", fixture) is not None
+        )
+    return False
+
+def load_table(path):
+    if not os.path.isfile(path) or os.path.islink(path):
+        raise Invalid("")
+    try:
+        with open(path, encoding="utf-8") as source:
+            policy = json.load(source, object_pairs_hook=unique_object)
+    except DuplicateKey:
+        raise
+    except Exception:
+        raise Invalid("")
+    if (
+        not isinstance(policy, dict)
+        or set(policy) != {"format", "placements"}
+        or policy.get("format") != "overdrive-metal-test-placement-v1"
+        or not isinstance(policy.get("placements"), dict)
+    ):
+        raise Invalid("")
+    for binary_id, tests in policy["placements"].items():
+        if not isinstance(binary_id, str) or not binary_id or not isinstance(tests, dict):
+            raise Invalid("")
+        for test_name, descriptor in tests.items():
+            if not isinstance(test_name, str) or not test_name or not valid_descriptor(descriptor):
+                raise Invalid("")
+    return policy["placements"]
+
+def table_placement(table, binary_id, test_name):
+    descriptor = table.get(binary_id, {}).get(test_name)
+    if descriptor is None:
+        raise Unclassified()
+    return descriptor["kind"], descriptor.get("group", ""), descriptor.get("fixture", "")
+
+def run(binary_path, binary_id, test_name, table_path):
+    try:
+        records = read_records(binary_path)
+        if has_conflict(records):
+            raise SystemExit(15)
+        found = resolve_record(records, test_name)
+        if found is not None:
+            placement = record_placement(*found)
+        else:
+            placement = table_placement(load_table(table_path), binary_id, test_name)
+    except DuplicateKey:
+        raise SystemExit(11)
+    except Unclassified:
+        raise SystemExit(12)
+    except Invalid as problem:
+        print(problem)
+        raise SystemExit(13)
+    print("\x1f".join(placement))
+
+def check(table_path):
+    listing = json.load(sys.stdin)
+    table = None
+    table_unreadable = False
+    findings = False
+    invalid = False
+    for suite in listing.get("rust-suites", {}).values():
+        binary_id = suite["binary-id"]
+        try:
+            records = read_records(suite["binary-path"])
+        except Invalid as problem:
+            print("placement_invalid", binary_id, problem, file=sys.stderr)
+            invalid = True
+            continue
+        if has_conflict(records):
+            print("conflict", binary_id)
+            findings = True
+            continue
+        for test_name, case in suite.get("testcases", {}).items():
+            # An ignored test never reaches the wrapper; it is placed when its
+            # pending marker is removed.
+            if (
+                case.get("ignored")
+                or table_unreadable
+                or resolve_record(records, test_name) is not None
+            ):
+                continue
+            try:
+                if table is None:
+                    table = load_table(table_path)
+                table_placement(table, binary_id, test_name)
+            except Unclassified:
+                print("unplaced", binary_id, test_name)
+                findings = True
+            except (Invalid, DuplicateKey):
+                print("placement_invalid", "table", file=sys.stderr)
+                invalid = True
+                table_unreadable = True
+    raise SystemExit(78 if invalid else 1 if findings else 0)
+
+if sys.argv[1] == "run":
+    run(*sys.argv[2:6])
+else:
+    check(sys.argv[2])
+PY
+
+# `--check-placement` reads `nextest list --message-format json` on stdin and
+# reports the tests no record or table entry places (`unplaced <binary-id>
+# <test>`) and the binaries with a default beside a non-host-pure record
+# (`conflict <binary-id>`). It needs no Metal run context.
+if [ "${1:-}" = --check-placement ]; then
+  exec python3 -c "$PLACEMENT_PY" check "$(dirname -- "${BASH_SOURCE[0]}")/test-placement.json"
+fi
+
 # No Metal context means nextest has no reason to alter the configured runner.
 if [ -z "${OVERDRIVE_METAL_RUN_ID:-}" ] && \
   [ -z "${OVERDRIVE_METAL_EXECUTION_CLASS:-}" ] && \
@@ -56,192 +328,27 @@ case "$WORKSPACE_CANONICAL" in
 esac
 
 PLACEMENT_KIND=""
+PLACEMENT_GROUP=""
+PLACEMENT_FIXTURE=""
 if [ "$GUEST_SUITE_MODE" -eq 0 ]; then
   [ "$#" -gt 0 ] || test_error test_unclassified 78
   BINARY_ID="${NEXTEST_BINARY_ID:-}"
   TEST_NAME="${NEXTEST_TEST_NAME:-}"
   [ -n "$BINARY_ID" ] && [ -n "$TEST_NAME" ] || test_error test_unclassified 78
 
-  # A test that declares its placement on itself (`#[overdrive_test(...)]`)
-  # carries a record in the `overdrive_test_placement` section of its own
-  # binary: `<module path>\0<group>\0`, the module path starting at the crate
-  # segment. That record places the test with no table lookup. A test without
-  # a record is placed by the table alone, and one with neither is refused
-  # below as `test_unclassified`.
+  # The test binary carries the placement records its declarations wrote; the
+  # table is consulted only for a test no record places.
   set +e
-  DECLARED_GROUP="$(python3 - "$1" "$TEST_NAME" <<'PY'
-import struct
-import sys
-
-GROUPS = {
-    "probe", "core", "unload", "ulp", "mtls-relay", "cgroup-default",
-    "stress", "nested-boundary",
-}
-SECTION = b"overdrive_test_placement"
-
-def section_bytes(path):
-    # 64-bit little-endian ELF only: the test binaries of the Metal host.
-    with open(path, "rb") as binary:
-        header = binary.read(64)
-        if len(header) < 64 or header[:4] != b"\x7fELF" or header[4] != 2 or header[5] != 1:
-            return None
-        (section_table, entry_size, entry_count, names_index) = (
-            struct.unpack_from("<Q", header, 40)[0],
-            struct.unpack_from("<H", header, 58)[0],
-            struct.unpack_from("<H", header, 60)[0],
-            struct.unpack_from("<H", header, 62)[0],
-        )
-        if section_table == 0 or entry_size < 64 or names_index >= entry_count:
-            return None
-        binary.seek(section_table)
-        table = binary.read(entry_size * entry_count)
-        def entry(index):
-            name, _kind, _flags, _addr, offset, size = struct.unpack_from(
-                "<IIQQQQ", table, index * entry_size
-            )
-            return name, offset, size
-        _, names_offset, names_size = entry(names_index)
-        binary.seek(names_offset)
-        names = binary.read(names_size)
-        for index in range(entry_count):
-            name, offset, size = entry(index)
-            end = names.find(b"\0", name)
-            if names[name:end] == SECTION:
-                binary.seek(offset)
-                return binary.read(size)
-    return None
-
-try:
-    data = section_bytes(sys.argv[1])
-except OSError:
-    raise SystemExit(12)
-if data is None:
-    raise SystemExit(12)
-fields = data.split(b"\0")
-if fields and fields[-1] == b"":
-    fields.pop()
-if len(fields) % 2 != 0:
-    print("record=malformed")
-    raise SystemExit(13)
-groups = set()
-for full_name, group in zip(fields[0::2], fields[1::2]):
-    try:
-        full_name = full_name.decode()
-        group = group.decode()
-    except UnicodeDecodeError:
-        print("record=malformed")
-        raise SystemExit(13)
-    test_name = full_name.split("::", 1)[1] if "::" in full_name else full_name
-    if test_name != sys.argv[2]:
-        continue
-    if group not in GROUPS:
-        print("group=" + group)
-        raise SystemExit(13)
-    groups.add(group)
-if not groups:
-    raise SystemExit(12)
-if len(groups) > 1:
-    raise SystemExit(14)
-print(groups.pop())
-PY
-)"
-  DECLARED_STATUS=$?
-  set -e
-  PLACEMENT_KIND=""
-  PLACEMENT_GROUP=""
-  PLACEMENT_FIXTURE=""
-  case "$DECLARED_STATUS" in
-    0)
-      PLACEMENT_KIND=guest-declared
-      PLACEMENT_GROUP="$DECLARED_GROUP"
-      ;;
-    12) ;;
-    14) test_error placement_ambiguous 78 ;;
-    *) test_error placement_invalid 78 "$DECLARED_GROUP" ;;
-  esac
-fi
-
-if [ "$GUEST_SUITE_MODE" -eq 0 ] && [ -z "$PLACEMENT_KIND" ]; then
-  PLACEMENT_FILE="$SOURCE_ROOT/infra/metal/test-placement.json"
-  [ -f "$PLACEMENT_FILE" ] && [ ! -L "$PLACEMENT_FILE" ] || test_error placement_invalid 78
-
-  set +e
-  PLACEMENT="$(python3 - "$PLACEMENT_FILE" "$BINARY_ID" "$TEST_NAME" <<'PY'
-import json
-import re
-import sys
-
-class DuplicateKey(Exception):
-    pass
-
-def unique_object(pairs):
-    result = {}
-    for key, value in pairs:
-        if key in result:
-            raise DuplicateKey(key)
-        result[key] = value
-    return result
-
-def valid_descriptor(value):
-    if not isinstance(value, dict) or not isinstance(value.get("kind"), str):
-        return False
-    kind = value["kind"]
-    if kind in {"host-pure", "native-launcher"}:
-        return set(value) == {"kind"}
-    if kind == "guest-group":
-        return set(value) == {"kind", "group"} and value.get("group") in {
-            "probe", "core", "unload", "ulp", "mtls-relay", "cgroup-default",
-            "stress", "nested-boundary",
-        }
-    if kind in {"guest-lane-operator", "guest-lane-owner"}:
-        fixture = value.get("fixture")
-        return (
-            set(value) == {"kind", "fixture"}
-            and isinstance(fixture, str)
-            and re.fullmatch(r"integration::in_guest_lane::[A-Za-z0-9_]+", fixture) is not None
-        )
-    return False
-
-try:
-    with open(sys.argv[1], encoding="utf-8") as source:
-        policy = json.load(source, object_pairs_hook=unique_object)
-except DuplicateKey:
-    raise SystemExit(11)
-except Exception:
-    raise SystemExit(13)
-
-if (
-    not isinstance(policy, dict)
-    or set(policy) != {"format", "placements"}
-    or policy.get("format") != "overdrive-metal-test-placement-v1"
-    or not isinstance(policy.get("placements"), dict)
-):
-    raise SystemExit(13)
-
-for binary_id, tests in policy["placements"].items():
-    if not isinstance(binary_id, str) or not binary_id or not isinstance(tests, dict):
-        raise SystemExit(13)
-    for test_name, descriptor in tests.items():
-        if not isinstance(test_name, str) or not test_name or not valid_descriptor(descriptor):
-            raise SystemExit(13)
-
-descriptor = policy["placements"].get(sys.argv[2], {}).get(sys.argv[3])
-if descriptor is None:
-    raise SystemExit(12)
-print("{}\x1f{}\x1f{}".format(
-    descriptor["kind"],
-    descriptor.get("group", ""),
-    descriptor.get("fixture", ""),
-))
-PY
-)"
+  PLACEMENT="$(python3 -c "$PLACEMENT_PY" run "$1" "$BINARY_ID" "$TEST_NAME" \
+    "$SOURCE_ROOT/infra/metal/test-placement.json")"
   PARSER_STATUS=$?
   set -e
   case "$PARSER_STATUS" in
     0) ;;
     11) test_error placement_ambiguous 78 ;;
     12) test_error test_unclassified 78 ;;
-    *) test_error placement_invalid 78 ;;
+    15) test_error placement_conflict 78 "binary=$BINARY_ID" ;;
+    *) test_error placement_invalid 78 "$PLACEMENT" ;;
   esac
   IFS=$'\x1f' read -r PLACEMENT_KIND PLACEMENT_GROUP PLACEMENT_FIXTURE <<<"$PLACEMENT"
 fi

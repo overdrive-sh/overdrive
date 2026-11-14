@@ -2643,6 +2643,7 @@ dependencies = [
  "hex",
  "overdrive-core",
  "overdrive-sim",
+ "overdrive-testing-macros",
  "proptest",
  "redb",
  "rkyv",

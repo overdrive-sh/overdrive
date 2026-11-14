@@ -4,6 +4,8 @@
 //! fixture writes only when its body runs in that process, plus exit status and
 //! output.
 
+use overdrive_testing::overdrive_test;
+
 use super::scenario_support::{MARKER_ENV, METAL_VARIABLES, run_test, test_path, timings};
 
 const MARKER_TEST: &str = "isolated_guest_test_that_marks_where_it_ran";
@@ -22,7 +24,7 @@ fn marker_path(name: &str) -> std::path::PathBuf {
 /// slice (with its `isolated_guest` fixture); the test needs the host-pure form
 /// to be placed on a Metal run, so it activates with `host-pure-placement-on-the-test`.
 #[test]
-#[ignore = "pending DELIVER: host-pure-placement-on-the-test"]
+#[overdrive_test(host_pure)]
 fn a_guest_placed_test_runs_its_body_in_place_when_no_metal_run_is_present() {
     let marker = marker_path("off-metal");
     let run = run_test(
