@@ -86,14 +86,12 @@ pub mod isolated_guest {
 
     #[overdrive_test(guest = "cgroup-default")]
     #[test]
-    #[ignore = "pending DELIVER: guest-placement-on-the-test"]
     fn first_isolated_guest_test() {
         scenario_body();
     }
 
     #[overdrive_test(guest = "cgroup-default")]
     #[test]
-    #[ignore = "pending DELIVER: guest-placement-on-the-test"]
     fn second_isolated_guest_test() {
         scenario_body();
     }
@@ -101,7 +99,6 @@ pub mod isolated_guest {
     /// Writes a host marker file only when its body runs in this process.
     #[overdrive_test(guest = "cgroup-default")]
     #[test]
-    #[ignore = "pending DELIVER: guest-placement-on-the-test"]
     fn isolated_guest_test_that_marks_where_it_ran() {
         if let Some(path) = std::env::var_os(MARKER_ENV) {
             std::fs::write(path, b"ran").expect("writing the marker");
