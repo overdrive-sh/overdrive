@@ -997,3 +997,127 @@ No contract-shaping validation item is Open: V-1 to V-5, V-7, V-9 and V-11 are r
 **Out-of-feature findings for the user (not design scope).** V-9 found two lints failing on this branch's base before any edge was added: `cloexec-lint` (`overdrive-dataplane/src/gateway_relay/sys.rs:87:31`) and `conformance-lint` (`overdrive-testing/src/guest_suite.rs:183:5 [spec-without-quint-connect]`). `cargo deny check bans sources` also fails at baseline (17 wildcard errors, `anyhow` banned) and runs in no lane. The `conformance-lint` hit is in a file this feature rewrites (`guest_suite.rs` splits and its batched half is deleted, DDD-6, DDD-14); whether it disappears with the deletion is for the crafter to observe, not a design claim.
 
 Handoff notes. External integrations: none (no third-party API); no consumer-driven contract tests apply. The record format is a three-reader contract (macro writes, wrapper and `placement-lint` read): one fixture test binary read by both readers is the drift guard. Enforcement tooling: `placement-lint` (new, DDD-3), the wrapper refusal, the owner Quint conformance driver under `conformance-lint`, and the existing dst-lint, which does not scan these `adapter-host` crates. Recommended DISTILL scenarios per Lifecycle Gate Ownership above and per `.claude/rules/testing.md` § "DISTILL": each gate with a healthy control and one deliberate fault. No roadmap is created in DESIGN.
+
+## Wave: DISTILL / [REF] Inputs read and reconciliation
+
+Run 2026-11-14 by the acceptance designer, on the branch that carries the promoted walking skeleton. Mode: DISTILL for the whole feature, with project rules overriding the generic nWave skill (`.claude/rules/testing.md`: Rust `#[test]`, no `.feature` files, pending-marked complete bodies; `design.md`: implement to the design; `domain-naming.md`).
+
+| Input | Read |
+|---|---|
+| This file (DISCUSS, DESIGN, interface contracts, G-1..G-6, boundary scenarios, formal model, N-4, validation items, profile registry) | ✓ |
+| `slices/slice-01..09` | ✓ 01, 02, 03, 04, 07, 09 in full; 05, 06, 08 by their stories here |
+| `spike/` (`findings*.md`, `wave-decisions.md`) | ✓ `wave-decisions.md`, `findings-const-diagnostic.md`, `findings-module-declaration.md` (pinned diagnostics); the others by their summaries here |
+| Walking skeleton (`crates/overdrive-testing-macros/`, `guest_suite.rs`, `test-wrapper.sh`, the migrated `overdrive-cli` test) | ✓ built on, not rewritten; the migrated test still passes on Metal |
+| ADRs 0282-0295, `brief.md`, `c4-diagrams.md`, journey, `jobs.yaml` | ⊘ not re-read: the feature delta carries the contracts they record (DESIGN review approved the set) |
+| `specs/quint/shared-guest-owner/` (`shared_guest.qnt`, `checks.toml`, README) | ✓ |
+| DEVOPS delta | - missing: WARN, project defaults used (the Metal box, `integration-tests,kvm-tests`, the Metal run grammar) |
+| `docs/architecture/atdd-infrastructure-policy.md` | ✓ exists; rows appended for the ports this feature adds (`--policy=inherit`) |
+
+Wave-decision reconciliation: DISCUSS and DESIGN decisions read (no separate `wave-decisions.md` exists for either; the decision tables above are the record); **0 contradictions**. The one place DESIGN's text and the code disagree is a premise, not a decision, and is recorded under "Design gaps and proposals" (G-2's run-id claim).
+
+## Wave: DISTILL / [REF] Scenario list with tags
+
+The scenario specification is `distill/test-scenarios.md` (Given/When/Then, Contract Shape, owner path, fault stimulus, oracle, evidence tier, the Quint spec/run/invariant each conformance test replays, and the N-4 exemption rows). Every scenario is a Rust test with a complete executable body.
+
+| Crate (binary) | Tests | Active | Pending | Tags |
+|---|---|---|---|---|
+| `overdrive-testing` (lib) `placement::owner_core::tests` | 18 | 0 | 18 | `@in-memory @property @error @boundary` |
+| `overdrive-testing` (lib, `integration-tests`) `placement::owner_core::conformance` | 9 | 0 | 9 | `@conformance @in-memory` |
+| `overdrive-testing` (lib) `placement::tests` | 6 | 2 | 4 | `@in-memory @error` |
+| `overdrive-testing::compile_fail` | 1 (5 fixtures) | 0 | 1 | `@error` |
+| `overdrive-testing::integration` (`integration-tests,kvm-tests`) | 15 scenarios (+15 fixtures) | 4 | 11 | `@real-io @error @boundary` |
+| `xtask::acceptance` `placement_attribute` | 28 (22 scenarios + 6 fixtures) | 7 (1 scenario + 6 fixtures) | 21 | `@real-io @error @boundary` |
+| **Total** | **77** | **13** | **64** | |
+
+Per story: US-PLACE-01 (A skeleton delivered; typed registry, in-place and run-id scenarios here), 02 (E), 03 (E, F), 04 (C; see gaps), 05a-c and 06a-c (no acceptance test: the migration parity check of DDD-15 is the batch's procedure, see gaps), 07 (E), 08 (E, two repository-state tests), 09 (A, B, F). Most pending scenarios are error, fault or boundary paths (tagged `@error` and `@boundary` in `test-scenarios.md`); the happy paths are the skeleton's active tests and the first example of each area.
+
+## Wave: DISTILL / [REF] WS strategy
+
+The walking skeleton (slice 01) is promoted production code and green; DISTILL adds scenarios on top of it and does not rewrite it. Port classes (Architecture of Reference, project policy file): driving = the wrapper (`--check-placement`, an ordinary run), `xtask placement-lint`, `run_in_guest`, `OwnerCore::handle`; driven internal (real) = the guest kit and Cloud Hypervisor guests, the election `flock`, the owner's socket, the wrapper's ELF reader; driven external (faked) = `cargo nextest list` only. No Strategy A to D selection applies (retired in the skill); `@walking_skeleton` scenarios exist as the delivered migrated test and the active timing and isolation tests of section F.
+
+## Wave: DISTILL / [REF] Adapter coverage
+
+| Adapter | Real-I/O scenario | Covered by |
+|---|---|---|
+| Guest kit and Cloud Hypervisor guest | YES | `guest_placed_tests_outside_a_shared_module_boot_one_guest_each`, `the_boot_time_of_a_guest_per_test_is_recorded_in_the_run_output` (active); the shared-guest scenarios (pending) |
+| Election `flock` and owner socket | YES (pending) | `eight_simultaneous_first_arrivals_elect_exactly_one_owner` and the four owner-fault scenarios |
+| Owner PID namespace (VMM dies with the owner) | YES (pending) | `killing_the_owner_during_a_guest_exec_leaves_no_vmm` |
+| Wrapper placement reader (ELF section) | YES (pending) | section E, hand-built binaries and this binary's own records |
+| Wrapper isolation (namespaces) | YES | existing `metal_run_isolation` tests; `a_test_that_declares_itself_host_pure_runs_without_a_namespace` and the native-launcher view test (pending) |
+| `cargo nextest list` (lint input) | stub only | `placement_lint_*` fake it, because a nested `cargo` inside a test is forbidden; the real path is the CI and pre-push step itself (see gaps) |
+| `quint` CLI (conformance replay) | YES (pending) | section B, driven by `quint-connect` under `integration-tests` |
+
+## Wave: DISTILL / [REF] Driving Adapter coverage
+
+| Driving adapter (DESIGN) | Scenario that invokes it by its protocol |
+|---|---|
+| `#[overdrive_test(...)]` and the declaration macros on a test | the fixtures of `xtask::acceptance` and `overdrive-testing::integration`, read back through the wrapper and the checker; `compile_fail` for the diagnostics |
+| `cargo xtask metal run -- cargo nextest run ...` | every Metal run of the suite; the drivers of section F run the fixture binary as nextest does |
+| `test-wrapper.sh --check-placement` and an ordinary wrapper run | section E (`std::process::Command`, exit status, stderr diagnostics) |
+| `cargo xtask placement-lint` | section E lint tests (subprocess of the built `xtask`, exit status, output lines) |
+| `OwnerCore::handle` / `observe` | sections A and B |
+
+## Wave: DISTILL / [REF] Scaffolds
+
+Production scaffolds, only where the design pins the exact shape; every body is marked `SCAFFOLD: true` and built by the named slice.
+
+| File | Scaffold | Built by |
+|---|---|---|
+| `crates/overdrive-testing-macros/src/lib.rs` | the grammar's other forms are accepted and return the item unchanged; `placement!` and `overdrive_test_default!` expand to nothing; the existing `guest = "<group>"` expansion is untouched | `host-pure-placement-on-the-test`, `lane-and-launcher-placement-on-the-test`, `guest-placement-on-the-test` |
+| `crates/overdrive-testing/src/lib.rs` | re-exports of the two macros; `shared_guest!` (`macro_rules!`, the pinned const name, stores its arguments) | `module-tests-share-one-guest` |
+| `src/placement/mod.rs` | `in_metal_run`, `metal_run_context_present`, `run_in_guest` (typed placement), `run_lane`: `todo!()`; `inside_guest` and `RunInGuestError` are the skeleton's | `guest-placement-on-the-test`, `lane-and-launcher-placement-on-the-test` |
+| `src/placement/groups.rs` | `GuestGroup`, `Sharing`, `GuestPlacement::declare` (stores, validates nothing), `LanePlacement` | `guest-placement-on-the-test`, `guest-artifacts-declared-per-group` |
+| `src/placement/owner_core.rs` | `AttachId` (real), `Event`, `Effect`, `Verdict`, `GuestView`, `OwnerObservation`, `OwnerCore::{new, handle, observe}`: `todo!()` | `module-tests-share-one-guest` |
+| `crates/overdrive-testing/Cargo.toml` | dev-dependencies for the tests; the `kvm-tests` feature (the convention of the five guest-booting crates) | - |
+| `xtask/Cargo.toml` | dev-dependency on `overdrive-testing-macros` (DDD-12, approved) | - |
+
+## Wave: DISTILL / [REF] Test placement
+
+Tests sit with their owning crate (`testing.md`): the owner core and registry in `overdrive-testing/src/placement/**` (default lane, fast); the conformance driver in the owning crate's `src/` behind `#[cfg(all(test, feature = "integration-tests"))]`; Metal scenarios in `overdrive-testing/tests/integration/` behind `integration-tests` and `kvm-tests` (no off-Metal lane enables `kvm-tests`, so none of them runs in CI on Lima); the wrapper and lint tests in `xtask/tests/acceptance/` beside the existing `metal_run_isolation` tests. Precedent: `crates/overdrive-cli/tests/integration.rs` (inline `mod integration`), `xtask/tests/acceptance.rs`.
+
+Placement of the new tests while the table exists: the skeleton supports only the `guest` form on the test, so 88 transitional entries were added to `infra/metal/test-placement.json` (33 `overdrive-testing` lib, 26 + 2 `xtask::acceptance`, 15 + 7 + 4 `overdrive-testing::integration`, 1 `overdrive-testing::compile_fail`): host-pure for in-memory tests and the plain fixtures, `native-launcher` for the drivers that need the local-mode vsock namespace their children inherit (the placement machinery is Metal-runner tooling) and for the native-launcher fixture, `guest-group` for the four bare `#[overdrive_test]` module fixtures. The explicit `guest = ..` fixtures carry records and need no entry. Each entry is deleted by the slice that migrates its test. `.config/nextest.toml` gains one override putting the `overdrive-testing` integration binary in `host-kernel-shared` with a wider slow-timeout (the scenarios boot guests and kill owner processes).
+
+## Wave: DISTILL / [REF] Pending tests and the slice that activates each
+
+The `#[ignore]` reason is `pending DELIVER: <slice>` (the slice file stem; no roadmap exists yet, so no step identifier is used).
+
+| Slice | Pending tests | Test names (see `red-classification.md` for the per-test evidence) |
+|---|---|---|
+| `host-pure-placement-on-the-test` | 11 | the wrapper and checker tests of section E that read `host_pure`, `module_host_pure`, `default_host_pure` and invalid or unplaced sections |
+| `guest-placement-on-the-test` | 5 | `an_unknown_group_is_rejected_by_name_at_declaration`, the two `in_metal_run` predicate tests, the diagnostics fixtures, `a_guest_placed_test_runs_its_body_in_place_when_no_metal_run_is_present` |
+| `lane-and-launcher-placement-on-the-test` | 4 | `every_placement_a_test_declares_on_itself_is_placed`, the native-launcher node-view test, the lint missing-fixture test, `a_lane_test_naming_a_missing_fixture_fails_naming_the_fixture_and_the_test` |
+| `unplaced-test-fails-in-the-default-lane` | 5 | the `placement_lint_*` tests except the missing-fixture one |
+| `guest-artifacts-declared-per-group` | 1 | `an_unknown_profile_or_one_of_another_group_is_rejected` |
+| `module-tests-share-one-guest` | 36 | 18 owner-core tests, 9 conformance tests, 9 Metal scenarios of sections F |
+| `placement-table-and-dispatcher-retired` | 2 | the two repository-state tests |
+| `guest-placements-migrated`, `host-pure-placements-migrated` | 0 | the batch parity check of DDD-15 |
+
+## Wave: DISTILL / [REF] Pre-requisites
+
+The Metal box with KVM, the prepared guest kit and the loaded module (`OVERDRIVE_METAL_TARGET`, `OVERDRIVE_METAL_KERNEL`, `OVERDRIVE_METAL_ROOTFS`); `python3` and `bash` for the wrapper tests; the pinned Quint toolchain on the box for the conformance replay. Run commands: `cargo xtask metal run -- cargo nextest run -p overdrive-testing -p xtask --features overdrive-testing/integration-tests,overdrive-testing/kvm-tests,xtask/integration-tests -E 'package(overdrive-testing) | test(placement_attribute)'` (add `--run-ignored only` to see the pending set).
+
+## Wave: DISTILL / [REF] Design gaps and proposals
+
+None of these blocks DELIVER. The first, G-2's premise, is a finding for the user's ruling; the rest are surfaces the design leaves unpinned, listed because a test needs them or cannot be written without them. Nothing below was added to production code.
+
+| # | Finding | Evidence | Effect on the tests |
+|---|---|---|---|
+| D-1 | **G-2's claim about an absent run id is false in the code.** The design says a Metal run context without a valid ordinary run id is refused by `run_in_guest`'s existing run-runtime rule. `runtime_staging_root()` returns `/run` when `OVERDRIVE_METAL_RUN_ID` is absent and refuses only a set but malformed id (`guest_kit.rs:423-438`). The safety property still holds (the expansion hands off to `run_in_guest`, so the body never runs on the host), but an exclusive-class run with no run id would boot a guest under `/run` instead of failing naming the group. | observed while classifying `a_guest_placed_test_without_a_valid_run_id...`, which passed | The scenario was restated to the malformed-id case (active). The absent-id case needs a ruling: tighten the rule, or restate G-2. |
+| D-2 | `GuestPlacement::declare(group: &str, ...)` cannot store `declaring_module` in a `const` with an elided lifetime; the scaffold takes `&'static str`, which accepts every literal. | scaffold | none |
+| D-3 | The derives on `Event`, `Effect`, `Verdict`, `GuestView` and `OwnerObservation` are not pinned (only `AttachId`). The tests compare through test-local mirror types instead of asking for `Debug` and `PartialEq`. Proposal: pin `Debug` on all five and `PartialEq` on the three enums. | `owner_core/tests.rs` | none |
+| D-4 | The pure core `metal_run_context_present(run_id, execution_class, source_root)` is named without parameter types; the scaffold is `pub(crate)` and takes `Option<&str>` three times. If the crafter chooses other types, the two predicate tests change with the signature. | `placement/mod.rs` | two pending tests |
+| D-5 | The skeleton inserts `#[test]` when absent; stacking `#[test]` above `#[overdrive_test(guest = ..)]` therefore registers the test twice and both host halves boot a guest with the same CID (`Address in use`, found in the first run of this wave). DDD-1 removes the insertion. Until then the fixtures write `#[overdrive_test]` above `#[test]`; the removal must keep both orders producing one test. | first Metal run | fixtures order |
+| D-6 | No pinned seam exists for: a missing owner binary (`LaneNotPrepared` before the lock), a guest that cannot boot (US-01 AC c), the client-side re-attach after a cut before acknowledgement (DDD-17's deterministic test needs the socket path or listener injected), a per-profile exec-bound accessor, and the durations of the bound and the idle period (by design no override). | design text | no test for those; seeded `OwnerCore` covers the bound and idle events, not their durations |
+| D-7 | The per-test guest path forwards no pinned environment (only the shared request does), so a per-test failing-body scenario (US-01 AC b) has no in-guest toggle; the shared-module failure scenario covers the propagation. | design text | one scenario less |
+| D-8 | US-PLACE-04's scenarios (a tool added to one group only, a missing artifact naming group and artifact, an absent artifact path) need a way to alter a group's declaration under test; the design leaves the recipe's shape to the crafter. | design text | only the registry's names are tested; the existing `guest_suite` staging tests stay |
+| D-9 | The real `cargo nextest list` path and the CI and pre-push wiring of `placement-lint` are not covered by an acceptance test (a nested `cargo` inside a test is forbidden; a test that reads `lefthook.yml` for a command name would be theatre). The CI step is the evidence. | testing.md | stubbed port |
+
+Proposals the user may adopt (none added): pin the derives (D-3); pin a client entry point that takes the rendezvous path and the owner binary path, which would unlock the DDD-17 re-attach test and the `LaneNotPrepared` test (D-6); pin an environment passthrough for the per-test path (D-7). Items added to the tree that the user may want to rule on: the `kvm-tests` feature on `overdrive-testing` and the `host-kernel-shared` override (without them the guest scenarios would run in the Lima CI lane and fail there), and the transitional table entries.
+
+## Wave: DISTILL / [REF] AT completeness audit and mandate evidence
+
+15-item checklist (`nw-at-completeness-check`): **12 of 15 pass**, verdict ACCEPTABLE_WITH_DOCUMENTED_GAPS. Passing: C1a (empty queue, empty profile, no variables), C1b (no numeric partition; not applicable), C2a (state machine in the module and spec), C2b (`events_that_are_not_enabled_change_nothing`), C3 (zero, one, three, eight clients; zero, one, two findings), C4a, C4b, C5a (placement forms by sharing), C5b (the explicit form overriding a module declaration), C6a (unknown group, profile, truncated section), C7b (killed client, killed owner, killed elector), C7c (eight simultaneous arrivals). Failing, each documented: C6b (the owner-binary-missing and boot-failure errors have no seam, D-6), C6c (the closed error set of the wrapper is not asserted as a set), C7a (no degraded-resource scenario; no DEVOPS environment matrix exists, so this is a specification gap routed to DEVOPS, not a delivery gap). No `SPECIFICATION_AMBIGUITY` blocker.
+
+Mandate evidence for a Rust project: CM-A (every test enters a driving port: wrapper, lint, `run_in_guest`, `OwnerCore::handle`; no internal component is imported; the one in-crate predicate core is the design-named pure function, D-4); CM-B (names are domain statements, no step identifiers or issue numbers in any name, helper or message); CM-D (pure cores are tested directly, adapters through real subprocesses); CM-E (universe-bound assertions are observation-level, see the note in `test-scenarios.md`); CM-F (property machinery only at layer 1-2: the owner core; layer 3 scenarios are example-only); CM-G (no Tier B state-machine file: the conformance replay and the seeded schedules already explore the state space); CM-H (every Tier-3 sad path is a named example test). The Python-specific Mandate-12 criteria (`domain_types.py`, step decorators) do not apply: there are no step files.
+
+Conformance checklist for the `OwnerCore` driver (`testing.md` § "Per-driver checklist"): (1) in `src/` behind `#[cfg(all(test, feature = "integration-tests"))]`, only gate `integration-tests`, no always-false cfg, pending-marked; (2) the driver struct holds the owner core; (3) every `switch!` arm calls `handle`, no `_` arm, the four environment actions are exempt under N-4 with one row per invariant; (4) every `State` field maps to a spec variable through `observe()`; (5) no `Sim*` and no driver bookkeeping in the projection; (6) all eight named `guest_conf` runs have a `#[quint_test]` and a `#[quint_run]` exists; (7) the target module has a `step` relation and nothing spawns the `quint` CLI. `cargo xtask conformance-lint` exits 0 with the driver present.
