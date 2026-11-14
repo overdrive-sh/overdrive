@@ -278,6 +278,7 @@ fn assert_equivalent(steps: &[Step]) {
 }
 
 #[test]
+#[overdrive_testing::overdrive_test(guest = "core")]
 fn every_end_class_drives_both_adapters_to_the_same_facts() {
     use Step::{
         AbortAll, Attach, DestinationFin, DestinationReset, GuestClose, GuestHalfClose, OwnerAbort,
@@ -315,6 +316,7 @@ fn every_end_class_drives_both_adapters_to_the_same_facts() {
 }
 
 #[test]
+#[overdrive_testing::overdrive_test(guest = "core")]
 fn sixty_four_flows_and_their_teardown_count_the_same_on_both_adapters() {
     let mut steps = Vec::new();
     for i in 0..64 {

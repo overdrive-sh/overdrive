@@ -55,26 +55,31 @@ fn clean_both_ways(flow: StreamFlow, ab: &[u8], ba: &[u8]) {
 }
 
 #[test]
+#[overdrive_testing::overdrive_test(guest = "core")]
 fn eof_a_flow_that_carries_no_byte_completes_cleanly() {
     clean_both_ways(StreamFlow::new(), &[], &[]);
 }
 
 #[test]
+#[overdrive_testing::overdrive_test(guest = "core")]
 fn tiny_one_byte_each_way_completes_cleanly() {
     clean_both_ways(StreamFlow::new(), b"a", b"b");
 }
 
 #[test]
+#[overdrive_testing::overdrive_test(guest = "core")]
 fn bidir_64_mib_each_way_is_byte_exact() {
     clean_both_ways(StreamFlow::new(), &pattern(1, 64 << 20), &pattern(2, 64 << 20));
 }
 
 #[test]
+#[overdrive_testing::overdrive_test(guest = "core")]
 fn long_512_mib_in_one_direction_is_byte_exact() {
     clean_both_ways(StreamFlow::new(), &pattern(3, 512 << 20), &[]);
 }
 
 #[test]
+#[overdrive_testing::overdrive_test(guest = "core")]
 fn tight_buffers_of_64_kib_are_byte_exact_both_ways() {
     let flow = StreamFlow::with(|v, v_far, t, t_far| {
         v.set_buffer_size(64 * 1024);
@@ -86,6 +91,7 @@ fn tight_buffers_of_64_kib_are_byte_exact_both_ways() {
 }
 
 #[test]
+#[overdrive_testing::overdrive_test(guest = "core")]
 fn burst_ten_thousand_small_writes_arrive_in_order() {
     let flow = StreamFlow::new();
     let data = pattern(6, 10_000 * 33);
@@ -111,6 +117,7 @@ fn burst_ten_thousand_small_writes_arrive_in_order() {
 }
 
 #[test]
+#[overdrive_testing::overdrive_test(guest = "core")]
 fn slow_a_reader_taking_4_kib_per_millisecond_receives_every_byte() {
     let flow = StreamFlow::new();
     let data = pattern(7, 8 << 20);
@@ -131,6 +138,7 @@ fn slow_a_reader_taking_4_kib_per_millisecond_receives_every_byte() {
 }
 
 #[test]
+#[overdrive_testing::overdrive_test(guest = "core")]
 fn stall_a_reader_that_stops_blocks_the_sender_and_resumes_byte_exact() {
     let flow = StreamFlow::new();
     let data = pattern(8, 64 << 20);
@@ -168,6 +176,7 @@ fn stall_a_reader_that_stops_blocks_the_sender_and_resumes_byte_exact() {
 }
 
 #[test]
+#[overdrive_testing::overdrive_test(guest = "core")]
 fn cycles_a_thousand_flows_each_end_with_one_record_and_leave_nothing_live() {
     let fwd = open_context();
     let mut last = 0u64;
@@ -191,6 +200,7 @@ fn cycles_a_thousand_flows_each_end_with_one_record_and_leave_nothing_live() {
 }
 
 #[test]
+#[overdrive_testing::overdrive_test(guest = "core")]
 fn cut_a_tcp_far_end_closed_with_unread_bytes_aborts_and_resets_the_guest_side() {
     let flow = StreamFlow::new();
     (&mut &flow.v_far).write_all(&pattern(9, 1 << 20)).expect("bytes the far reader never reads");
@@ -214,6 +224,7 @@ fn cut_a_tcp_far_end_closed_with_unread_bytes_aborts_and_resets_the_guest_side()
 }
 
 #[test]
+#[overdrive_testing::overdrive_test(guest = "core")]
 fn rst_a_tcp_far_end_reset_while_idle_aborts_with_econnreset() {
     let flow = StreamFlow::new();
     let StreamFlow { fwd, peer, id, far_watch, v, v_far, t, t_far } = flow;
@@ -230,6 +241,7 @@ fn rst_a_tcp_far_end_reset_while_idle_aborts_with_econnreset() {
 }
 
 #[test]
+#[overdrive_testing::overdrive_test(guest = "core")]
 fn kill_the_process_holding_the_vsock_far_end_aborts_and_resets_the_tcp_far_end() {
     let fwd = open_context();
     let (v, v_far) = vsock_pair();

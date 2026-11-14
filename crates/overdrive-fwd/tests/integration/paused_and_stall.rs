@@ -61,6 +61,7 @@ fn fill_until_blocked(mut w: impl Write, data: &[u8]) -> usize {
 }
 
 #[test]
+#[overdrive_testing::overdrive_test(guest = "core")]
 fn a_paused_tcp_reader_never_sees_the_half_close_before_its_last_byte() {
     // vsock source → TCP target.
     let flow = StreamFlow::new();
@@ -85,6 +86,7 @@ fn a_paused_tcp_reader_never_sees_the_half_close_before_its_last_byte() {
 }
 
 #[test]
+#[overdrive_testing::overdrive_test(guest = "core")]
 fn a_paused_vsock_reader_never_sees_the_half_close_before_its_last_byte() {
     // TCP source → vsock target; the guest side's watch is the oracle for
     // when the half-close arrived.
@@ -122,6 +124,7 @@ fn a_paused_vsock_reader_never_sees_the_half_close_before_its_last_byte() {
 }
 
 #[test]
+#[overdrive_testing::overdrive_test(guest = "core")]
 fn a_vsock_target_that_stops_receiving_aborts_the_pair() {
     let flow = StreamFlow::new();
     (&mut &flow.t_far).write_all(b"toward a closed receiver").expect("write");
@@ -140,6 +143,7 @@ fn a_vsock_target_that_stops_receiving_aborts_the_pair() {
 }
 
 #[test]
+#[overdrive_testing::overdrive_test(guest = "core")]
 fn a_paused_flow_holds_open_with_no_deadline_while_other_flows_proceed() {
     let paused = StreamFlow::new();
     paused.v_far.set_nonblocking(true);
@@ -165,6 +169,7 @@ fn a_paused_flow_holds_open_with_no_deadline_while_other_flows_proceed() {
 /// queue, plus the target's send queue, plus the far reader's receive
 /// buffer, plus one chunk; it does not grow with the stall's length.
 #[test]
+#[overdrive_testing::overdrive_test(guest = "core")]
 fn a_ten_second_stall_holds_at_most_the_per_flow_bound_and_kernel_memory_stays_flat() {
     let flow = StreamFlow::new();
     let data = pattern(34, 256 << 20);
@@ -207,6 +212,7 @@ fn a_ten_second_stall_holds_at_most_the_per_flow_bound_and_kernel_memory_stays_f
 }
 
 #[test]
+#[overdrive_testing::overdrive_test(guest = "core")]
 fn a_stalled_tcp_source_toward_a_paused_vsock_reader_is_bounded_too() {
     let flow = StreamFlow::new();
     let data = pattern(35, 256 << 20);
@@ -221,6 +227,7 @@ fn a_stalled_tcp_source_toward_a_paused_vsock_reader_is_bounded_too() {
 }
 
 #[test]
+#[overdrive_testing::overdrive_test(guest = "core")]
 fn a_read_shutdown_only_peer_holds_the_flow_open_until_it_closes() {
     // `shutdown(SHUT_RD)` sends nothing (net/ipv4/tcp.c:3113-3114 @ v7.0):
     // the flow looks exactly like a stalled reader and holds with no
@@ -256,6 +263,7 @@ fn a_read_shutdown_only_peer_holds_the_flow_open_until_it_closes() {
 /// resumption (P-67) is not evidence for the entry; this case is.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
+#[overdrive_testing::overdrive_test(guest = "core")]
 fn a_vsock_target_with_its_peers_credit_exhausted_resumes_byte_exact_to_eof() {
     let flow = StreamFlow::with(|_, v_far, _, _| v_far.set_buffer_size(64 * 1024));
     let data = pattern(37, 64 << 20);
@@ -292,6 +300,7 @@ fn a_vsock_target_with_its_peers_credit_exhausted_resumes_byte_exact_to_eof() {
 /// entry. The flow ends byte-exact with a clean half-close.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
+#[overdrive_testing::overdrive_test(guest = "core")]
 fn a_tcp_target_resumes_through_its_wait_queue_entry_on_every_refill() {
     let flow = StreamFlow::new();
     let data = pattern(38, 48 << 20);

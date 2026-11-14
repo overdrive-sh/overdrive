@@ -670,6 +670,7 @@ fn run_in_guest(slot: u32, cell: &str, with_tls: bool) {
 /// V-EV-UNLOAD's ULP negative control, in a guest of its own.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
+#[overdrive_testing::overdrive_test(guest = "ulp")]
 fn a_ulp_socket_keeps_the_module_for_the_boot_in_a_real_guest() {
     if in_scripted_guest() {
         in_guest_a_socket_given_a_ulp_after_attach_keeps_its_reference_for_the_boot();
@@ -685,6 +686,7 @@ fn a_ulp_socket_keeps_the_module_for_the_boot_in_a_real_guest() {
 /// V-EV-UNLOAD's unload stress, in a guest of its own.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
+#[overdrive_testing::overdrive_test(guest = "stress")]
 fn the_unload_stress_never_faults_in_a_guest() {
     if in_scripted_guest() {
         in_guest_the_unload_races_pair_ends_with_senders_on_every_half_and_never_faults();

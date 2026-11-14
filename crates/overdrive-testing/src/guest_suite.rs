@@ -2371,7 +2371,7 @@ const NESTED_GUEST_LAUNCH_PASSWD: &str = "root:x:0:0:root:/root:/usr/bin/sh\n";
 /// binary at its workspace path, as it does on the host.
 fn nested_guest_launch_support(
     dir: &Path,
-    test_name: &str,
+    environment: AttemptEnvironment,
     extra: &mut Vec<GuestFile>,
 ) -> Result<(), GuestKitError> {
     let vmm = extra
@@ -2401,11 +2401,11 @@ fn nested_guest_launch_support(
         guest: PathBuf::from("/etc/passwd"),
         with_shared_libraries: false,
     });
-    if selected_cell(NESTED_GUEST_RUSTC, test_name) {
+    if environment == AttemptEnvironment::NestedLaunchRustc {
         nested_guest_build_support(extra)?;
         stage_prepare_overdrive_init(extra)?;
     }
-    if test_name.starts_with(IN_GUEST_LANE_DRIVERS) {
+    if environment == AttemptEnvironment::NestedLaunchLane {
         let cells = InGuestTests::prepared("overdrive-init", "overdrive-init")?;
         extra.push(GuestFile {
             host: cells.binary.clone(),
@@ -3530,22 +3530,168 @@ enum NextestDispatchFailure {
     GuestExecution(String),
 }
 
-#[derive(Clone, Copy)]
-#[allow(
-    clippy::struct_excessive_bools,
-    reason = "these independent prepared-fixture switches select existing group setup scripts"
-)]
-struct CgroupAttemptFlags {
-    step13_04: bool,
-    step13_05: bool,
-    step13_06: bool,
-    normal_gate: bool,
+/// The environment a per-test attempt stages and sets up inside its group:
+/// what the closed registry's profile of the same name selects.
+///
+/// The attribute path hands the declared profile ([`Self::of_profile`]); the
+/// Metal dispatcher, which serves tests that declare nothing, derives the same
+/// profile from the test's name in the name-keyed tables ([`Self::of_test_name`]).
+/// Everything after the choice reads this value, never the test name.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AttemptEnvironment {
+    /// The group's base environment (also `cgroup-default`'s `quint`, whose
+    /// extra inputs are staged from the profile name alone).
+    Base,
+    /// `mtls-relay` `native`: the dataplane's native modules and native setup.
+    MtlsNative,
+    /// `mtls-relay` `relay`: only the tls module is loaded.
+    MtlsRelay,
+    /// `cgroup-default` `dummy-link`: `base` plus the dummy module.
+    DummyLink,
+    /// `cgroup-default` `host-route`: `dummy-link` plus the host-local route.
+    HostRoute,
+    /// `cgroup-default` `legb-tools`: `base` plus sysctl.
+    LegbTools,
+    /// `cgroup-default` `legb-audit`: `legb-tools` plus the LEGB setup and audit.
+    LegbAudit,
+    /// `cgroup-default` `routed-route`: `base` plus the routed-route lifecycle.
+    RoutedRoute,
+    /// `cgroup-default` `normal-gate`: `base` plus the control-plane native setup.
+    NormalGate,
+    /// `cgroup-default` `nested`: the nested-KVM substrate.
+    Nested,
+    /// `cgroup-default` `nested-cohort`: `nested` with the cohort's memory.
+    NestedCohort,
+    /// `cgroup-default` `nested-launch`: `nested` plus the launched VMM.
+    NestedLaunch,
+    /// `cgroup-default` `nested-launch-rustc`: `nested-launch` plus the Rust sysroot.
+    NestedLaunchRustc,
+    /// `cgroup-default` `nested-launch-lane`: `nested-launch` plus the lane test binary.
+    NestedLaunchLane,
+}
+
+impl AttemptEnvironment {
+    /// The environment a declared profile of `group` selects. An unknown
+    /// profile of a known group cannot reach here (the attribute is checked at
+    /// build time); one that does is an unprepared kit, reported by name.
+    fn of_profile(group: &str, profile: &str) -> Result<Self, NextestDispatchFailure> {
+        let environment = match (group, profile) {
+            ("mtls-relay", "native") => Self::MtlsNative,
+            ("mtls-relay", "relay") => Self::MtlsRelay,
+            ("cgroup-default", "dummy-link") => Self::DummyLink,
+            ("cgroup-default", "host-route") => Self::HostRoute,
+            ("cgroup-default", "legb-tools") => Self::LegbTools,
+            ("cgroup-default", "legb-audit") => Self::LegbAudit,
+            ("cgroup-default", "routed-route") => Self::RoutedRoute,
+            ("cgroup-default", "normal-gate") => Self::NormalGate,
+            ("cgroup-default", "nested") => Self::Nested,
+            ("cgroup-default", "nested-cohort") => Self::NestedCohort,
+            ("cgroup-default", "nested-launch") => Self::NestedLaunch,
+            ("cgroup-default", "nested-launch-rustc") => Self::NestedLaunchRustc,
+            ("cgroup-default", "nested-launch-lane") => Self::NestedLaunchLane,
+            ("cgroup-default", "base" | QUINT_PROFILE)
+            | ("probe" | "core" | "unload" | "ulp" | "stress" | "nested-boundary", "base") => {
+                Self::Base
+            }
+            _ => {
+                return Err(NextestDispatchFailure::LaneNotPrepared(format!(
+                    "guest group {group:?} has no profile {profile:?}"
+                )));
+            }
+        };
+        Ok(environment)
+    }
+
+    /// The environment the name-keyed tables give `test_name` in `group`: the
+    /// dispatcher's choice for a test that declares no profile.
+    fn of_test_name(group: &str, test_name: &str) -> Self {
+        match group {
+            "mtls-relay" if test_name.starts_with(MTLS_RELAY) => Self::MtlsRelay,
+            "mtls-relay" => Self::MtlsNative,
+            CGROUP_DEFAULT_GROUP => Self::cgroup_default_of_test_name(test_name),
+            _ => Self::Base,
+        }
+    }
+
+    fn cgroup_default_of_test_name(test_name: &str) -> Self {
+        if let Some(selected) = focused_selection(test_name) {
+            return if selected.resources.memory_mib == VM_COHORT_OUTER_GUEST_MIB {
+                Self::NestedCohort
+            } else {
+                Self::Nested
+            };
+        }
+        if selected_cell(NESTED_GUEST_RUSTC, test_name) {
+            return Self::NestedLaunchRustc;
+        }
+        if selected_cell(NESTED_GUEST_LAUNCH, test_name) {
+            return if test_name.starts_with(IN_GUEST_LANE_DRIVERS) {
+                Self::NestedLaunchLane
+            } else {
+                Self::NestedLaunch
+            };
+        }
+        if selected_cell(CONTROL_PLANE_NORMAL_NATIVE, test_name) {
+            return Self::NormalGate;
+        }
+        if selected_cell(STEP13_05_WORKER, test_name) {
+            return Self::LegbAudit;
+        }
+        if selected_cell(STEP13_05_CONTROL_PLANE, test_name) {
+            return Self::LegbTools;
+        }
+        if selected_cell(STEP13_04_HOST_LOCAL_FIREWALL, test_name) {
+            return Self::HostRoute;
+        }
+        if selected_cell(STEP13_04_CONTROL_PLANE, test_name)
+            || selected_cell(STEP13_04_WORKER, test_name)
+            || selected_cell(STEP13_04_REMOTE_FIREWALL, test_name)
+        {
+            return Self::DummyLink;
+        }
+        if selected_cell(STEP13_06_ROUTED_WORKER, test_name) {
+            return Self::RoutedRoute;
+        }
+        Self::Base
+    }
+
+    /// The dummy module is loaded at boot.
+    const fn stages_dummy_module(self) -> bool {
+        matches!(self, Self::DummyLink | Self::HostRoute)
+    }
+
+    /// sysctl is staged for the LEGB fixtures.
+    const fn stages_legb_tools(self) -> bool {
+        matches!(self, Self::LegbTools | Self::LegbAudit)
+    }
+
+    const fn stages_normal_gate(self) -> bool {
+        matches!(self, Self::NormalGate)
+    }
+
+    /// The body boots its own guests (the outer guest is the nested substrate
+    /// plus the launched VMM).
+    const fn launches_guests(self) -> bool {
+        matches!(self, Self::NestedLaunch | Self::NestedLaunchRustc | Self::NestedLaunchLane)
+    }
+
+    /// The outer guest of a `cgroup-default` profile that needs the nested-KVM
+    /// substrate; `None` for the profiles that run in the ordinary plan.
+    const fn nested_resources(self) -> Option<NestedVmGuestResources> {
+        match self {
+            Self::NestedCohort => Some(NestedVmGuestResources::VM_COHORT),
+            Self::Nested
+            | Self::NestedLaunch
+            | Self::NestedLaunchRustc
+            | Self::NestedLaunchLane => Some(NestedVmGuestResources::STANDARD),
+            _ => None,
+        }
+    }
 }
 
 struct CgroupAttemptFiles {
     extra: Vec<GuestFile>,
     module_paths: Vec<String>,
-    flags: CgroupAttemptFlags,
 }
 
 struct MtlsAttemptFiles {
@@ -3562,7 +3708,9 @@ struct NextestGuestPlan {
     module_paths: Vec<String>,
     memory_mib: u32,
     vcpus: u8,
-    cgroup_flags: Option<CgroupAttemptFlags>,
+    environment: AttemptEnvironment,
+    /// True for the ordinary (non-nested) `cgroup-default` plan.
+    cgroup: bool,
     mtls_native_paths: Vec<String>,
     setup_mtls_native: bool,
     nested: bool,
@@ -3962,39 +4110,26 @@ fn core_attempt_files(
 fn cgroup_attempt_files(
     kit: &GuestKit,
     directory: &Path,
-    test_name: &str,
+    environment: AttemptEnvironment,
 ) -> Result<CgroupAttemptFiles, GuestKitError> {
-    let stage_step13_04 = selected_cell(STEP13_04_CONTROL_PLANE, test_name)
-        || selected_cell(STEP13_04_WORKER, test_name)
-        || selected_cell(STEP13_04_HOST_LOCAL_FIREWALL, test_name)
-        || selected_cell(STEP13_04_REMOTE_FIREWALL, test_name);
-    let stage_step13_05 = selected_cell(STEP13_05_CONTROL_PLANE, test_name)
-        || selected_cell(STEP13_05_WORKER, test_name);
-    let stage_step13_06 = selected_cell(STEP13_06_WORKER, test_name)
-        || selected_cell(STEP13_06_ROUTED_WORKER, test_name);
-    let stage_normal_gate = selected_cell(CONTROL_PLANE_NORMAL_NATIVE, test_name);
-    let mut extra = cgroup_tools(kit, directory, stage_step13_05, stage_normal_gate)?;
+    let mut extra = cgroup_tools(
+        kit,
+        directory,
+        environment.stages_legb_tools(),
+        environment.stages_normal_gate(),
+    )?;
     let mut module_paths = Vec::new();
     stage_modules(kit, directory, &cgroup_default_module_specs(), &mut extra, &mut module_paths)?;
-    if stage_step13_04 {
+    if environment.stages_dummy_module() {
         module_paths.push(DUMMY_MODULE_GUEST_PATH.to_owned());
     }
-    Ok(CgroupAttemptFiles {
-        extra,
-        module_paths,
-        flags: CgroupAttemptFlags {
-            step13_04: stage_step13_04,
-            step13_05: stage_step13_05,
-            step13_06: stage_step13_06,
-            normal_gate: stage_normal_gate,
-        },
-    })
+    Ok(CgroupAttemptFiles { extra, module_paths })
 }
 
 fn mtls_attempt_files(
     kit: &GuestKit,
     directory: &Path,
-    test_name: &str,
+    environment: AttemptEnvironment,
 ) -> Result<MtlsAttemptFiles, GuestKitError> {
     let tests = InGuestTests::prepared("overdrive-dataplane", "overdrive_dataplane")?;
     let mut extra = dataplane_native_tools();
@@ -4028,7 +4163,7 @@ fn mtls_attempt_files(
     ];
     let mut native_paths = Vec::new();
     stage_modules(kit, directory, &module_specs, &mut extra, &mut native_paths)?;
-    let native = !test_name.starts_with(MTLS_RELAY);
+    let native = environment != AttemptEnvironment::MtlsRelay;
     Ok(MtlsAttemptFiles {
         extra,
         module_paths: vec![TLS_MODULE_GUEST_PATH.to_owned()],
@@ -4081,7 +4216,7 @@ fn prepare_nested_attempt(guest: &mut GuestRun) -> Result<(), GuestKitError> {
 fn run_cgroup_attempt_setup(
     guest: &mut GuestRun,
     test_name: &str,
-    flags: CgroupAttemptFlags,
+    environment: AttemptEnvironment,
 ) -> Result<(), GuestKitError> {
     let modules = guest.module_paths.clone();
     guest.command_with_modules(&modules, "/usr/bin/sh", &["-c", "true"])?;
@@ -4113,10 +4248,10 @@ fn run_cgroup_attempt_setup(
     // Every body that creates a netns through iproute2 and reopens it by its
     // `/var/run/netns` path needs the standard link, not only STEP 13-04.
     guest.command(&["/usr/bin/sh", "-c", NETNS_VAR_RUN_COMPAT])?;
-    if flags.normal_gate {
+    if environment.stages_normal_gate() {
         guest.command(&["/usr/bin/sh", "-c", CONTROL_PLANE_NORMAL_NATIVE_SETUP])?;
     }
-    if flags.step13_05 && selected_cell(STEP13_05_WORKER, test_name) {
+    if environment == AttemptEnvironment::LegbAudit {
         guest.command(&["/usr/bin/sh", "-c", STEP13_05_LEGB_SETUP])?;
         guest.command(&["/usr/bin/sh", "-c", STEP13_05_LEGB_AUDIT])?;
     }
@@ -4171,27 +4306,18 @@ fn execute_nextest_attempt(
     )
 }
 
-/// The outer-guest resources of a per-test `cgroup-default` attempt that needs
-/// the nested-KVM substrate: a focused STEP 14 / cohort identity, or a body
-/// that launches its own guests (`NESTED_GUEST_LAUNCH`).
-fn nested_resources(test_name: &str) -> Option<NestedVmGuestResources> {
-    focused_selection(test_name).map(|selected| selected.resources).or_else(|| {
-        selected_cell(NESTED_GUEST_LAUNCH, test_name).then_some(NestedVmGuestResources::STANDARD)
-    })
-}
-
 /// The nested-KVM `cgroup-default` plan of a per-test attempt: the substrate
 /// `nested_vm_test_support` stages, plus the support a body in
 /// `NESTED_GUEST_LAUNCH` resolves through the outer guest's own filesystem.
 fn nested_cgroup_default_plan(
     kit: &GuestKit,
     support_dir: &Path,
-    test_name: &str,
+    environment: AttemptEnvironment,
     resources: NestedVmGuestResources,
 ) -> Result<NextestGuestPlan, GuestKitError> {
     let (mut extra, module_paths) = nested_vm_test_support(kit, support_dir)?;
-    if selected_cell(NESTED_GUEST_LAUNCH, test_name) {
-        nested_guest_launch_support(support_dir, test_name, &mut extra)?;
+    if environment.launches_guests() {
+        nested_guest_launch_support(support_dir, environment, &mut extra)?;
     }
     Ok(NextestGuestPlan {
         name: "cgroup-default",
@@ -4200,7 +4326,8 @@ fn nested_cgroup_default_plan(
         module_paths,
         memory_mib: resources.memory_mib,
         vcpus: resources.vcpus,
-        cgroup_flags: None,
+        environment,
+        cgroup: false,
         mtls_native_paths: Vec::new(),
         setup_mtls_native: false,
         nested: true,
@@ -4211,6 +4338,7 @@ fn nextest_guest_plan(
     kit: &GuestKit,
     support_dir: &Path,
     group: &str,
+    environment: AttemptEnvironment,
     test_name: &str,
 ) -> Result<Option<NextestGuestPlan>, GuestKitError> {
     let standard = |name, cid, extra, module_paths, memory_mib, vcpus| NextestGuestPlan {
@@ -4220,7 +4348,8 @@ fn nextest_guest_plan(
         module_paths,
         memory_mib,
         vcpus,
-        cgroup_flags: None,
+        environment,
+        cgroup: false,
         mtls_native_paths: Vec::new(),
         setup_mtls_native: false,
         nested: false,
@@ -4264,7 +4393,7 @@ fn nextest_guest_plan(
         }
         "stress" => standard("stress", 11, base_tools(), Vec::new(), STANDARD_OUTER_GUEST_MIB, 16),
         "mtls-relay" => {
-            let files = mtls_attempt_files(kit, support_dir, test_name)?;
+            let files = mtls_attempt_files(kit, support_dir, environment)?;
             NextestGuestPlan {
                 name: "mtls-relay",
                 cid: 13,
@@ -4272,7 +4401,8 @@ fn nextest_guest_plan(
                 module_paths: files.module_paths,
                 memory_mib: STANDARD_OUTER_GUEST_MIB,
                 vcpus: 2,
-                cgroup_flags: None,
+                environment,
+                cgroup: false,
                 mtls_native_paths: files.native_module_paths,
                 setup_mtls_native: files.setup_native,
                 nested: false,
@@ -4285,12 +4415,12 @@ fn nextest_guest_plan(
                 ..standard("nested-boundary", 12, extra, module_paths, STANDARD_OUTER_GUEST_MIB, 8)
             }
         }
-        "cgroup-default" if nested_resources(test_name).is_some() => {
-            let resources = nested_resources(test_name).expect("matched nested selection");
-            nested_cgroup_default_plan(kit, support_dir, test_name, resources)?
+        "cgroup-default" if environment.nested_resources().is_some() => {
+            let resources = environment.nested_resources().expect("matched nested environment");
+            nested_cgroup_default_plan(kit, support_dir, environment, resources)?
         }
         "cgroup-default" => {
-            let files = cgroup_attempt_files(kit, support_dir, test_name)?;
+            let files = cgroup_attempt_files(kit, support_dir, environment)?;
             NextestGuestPlan {
                 name: "cgroup-default",
                 cid: 6,
@@ -4298,7 +4428,8 @@ fn nextest_guest_plan(
                 module_paths: files.module_paths,
                 memory_mib: STANDARD_OUTER_GUEST_MIB,
                 vcpus: 8,
-                cgroup_flags: Some(files.flags),
+                environment,
+                cgroup: true,
                 mtls_native_paths: Vec::new(),
                 setup_mtls_native: false,
                 nested: false,
@@ -4362,7 +4493,7 @@ fn prepare_nextest_guest(
 ) -> Result<(), GuestKitError> {
     if plan.nested {
         prepare_nested_attempt(guest)?;
-        if selected_cell(NESTED_GUEST_LAUNCH, test_name) {
+        if plan.environment.launches_guests() {
             // The metal host's staging root exists before any body runs and is
             // traversable by the confined VMM uid, and a node that has served
             // before already holds the delegated workload subtree (the metal
@@ -4373,8 +4504,8 @@ fn prepare_nextest_guest(
             guest.command(&["/usr/bin/sh", "-c", NESTED_GUEST_LAUNCH_NODE_SETUP])?;
         }
         Ok(())
-    } else if let Some(flags) = plan.cgroup_flags {
-        run_cgroup_attempt_setup(guest, test_name, flags)
+    } else if plan.cgroup {
+        run_cgroup_attempt_setup(guest, test_name, plan.environment)
     } else if plan.setup_mtls_native {
         guest.command_with_modules(&plan.mtls_native_paths, "/usr/bin/true", &[])?;
         setup_dataplane_native_guest(guest)?;
@@ -4418,17 +4549,12 @@ fn execute_attempt_phases(
     body_bound: Duration,
 ) -> Result<i32, NextestDispatchFailure> {
     let AttemptInvocation { program, args, environment, working_directory, test_name } = *attempt;
-    let route_cleanup = if plan.cgroup_flags.is_some_and(|flags| {
-        flags.step13_04 && selected_cell(STEP13_04_HOST_LOCAL_FIREWALL, test_name)
-    }) {
+    let route_cleanup = if plan.cgroup && plan.environment == AttemptEnvironment::HostRoute {
         guest
             .command(&["/usr/bin/sh", "-c", STEP13_04_ROUTE_SETUP])
             .map_err(|error| NextestDispatchFailure::GuestExecution(format!("{error:?}")))?;
         Some(STEP13_04_ROUTE_CLEANUP)
-    } else if plan
-        .cgroup_flags
-        .is_some_and(|flags| flags.step13_06 && selected_cell(STEP13_06_ROUTED_WORKER, test_name))
-    {
+    } else if plan.cgroup && plan.environment == AttemptEnvironment::RoutedRoute {
         guest
             .command(&["/usr/bin/sh", "-c", STEP13_06_ROUTE_SETUP])
             .map_err(|error| NextestDispatchFailure::GuestExecution(format!("{error:?}")))?;
@@ -4442,9 +4568,9 @@ fn execute_attempt_phases(
         None
     };
     let launch_environment;
-    let environment = if plan.nested && selected_cell(NESTED_GUEST_LAUNCH, test_name) {
+    let environment = if plan.nested && plan.environment.launches_guests() {
         let mut with_path = environment.to_vec();
-        let path = if selected_cell(NESTED_GUEST_RUSTC, test_name) {
+        let path = if plan.environment == AttemptEnvironment::NestedLaunchRustc {
             let sysroot = rust_sysroot()
                 .map_err(|error| NextestDispatchFailure::GuestExecution(format!("{error:?}")))?;
             format!("{}/bin:{NESTED_GUEST_LAUNCH_PATH}", sysroot.display())
@@ -4466,10 +4592,7 @@ fn execute_attempt_phases(
         working_directory,
         body_bound,
     );
-    if plan
-        .cgroup_flags
-        .is_some_and(|flags| flags.step13_05 && selected_cell(STEP13_05_WORKER, test_name))
-    {
+    if plan.cgroup && plan.environment == AttemptEnvironment::LegbAudit {
         let audit_result = guest.command(&["/usr/bin/sh", "-c", STEP13_05_LEGB_AUDIT]);
         if attempt_result.as_ref().is_ok_and(|status| *status == 0) {
             audit_result
@@ -4483,7 +4606,7 @@ fn execute_attempt_phases(
                 .map_err(|error| NextestDispatchFailure::GuestExecution(format!("{error:?}")))?;
         }
     }
-    if plan.cgroup_flags.is_some_and(|flags| flags.normal_gate) {
+    if plan.cgroup && plan.environment.stages_normal_gate() {
         let cleanup_result =
             guest.command(&["/usr/bin/sh", "-c", CONTROL_PLANE_NORMAL_NATIVE_CLEANUP]);
         if attempt_result.as_ref().is_ok_and(|status| *status == 0) {
@@ -4570,7 +4693,12 @@ fn boot_group_guest(
     })?;
     let support = WorkDir::create(&staging, &format!("nextest-{group}-support"))
         .map_err(|error| NextestDispatchFailure::GuestExecution(format!("{error:?}")))?;
-    let Some(mut plan) = nextest_guest_plan(&kit, support.path(), group, test_name)
+    let selected = if profile.is_empty() {
+        AttemptEnvironment::of_test_name(group, test_name)
+    } else {
+        AttemptEnvironment::of_profile(group, profile)?
+    };
+    let Some(mut plan) = nextest_guest_plan(&kit, support.path(), group, selected, test_name)
         .map_err(|error| NextestDispatchFailure::GuestExecution(format!("{error:?}")))?
     else {
         return Err(NextestDispatchFailure::LaneNotPrepared(format!(

@@ -38,6 +38,7 @@ fn raise_nofile(at_least: u64) {
 }
 
 #[test]
+#[overdrive_testing::overdrive_test(guest = "core")]
 fn a_released_context_aborts_every_pair_and_watch_and_resets_every_far_end() {
     raise_nofile(4096);
     let guest_view = open_context();
@@ -97,6 +98,7 @@ fn a_released_context_aborts_every_pair_and_watch_and_resets_every_far_end() {
 }
 
 #[test]
+#[overdrive_testing::overdrive_test(guest = "core")]
 fn one_context_release_leaves_another_contexts_pairs_forwarding() {
     let kept = open_context();
     let released = open_context();
@@ -115,6 +117,7 @@ fn one_context_release_leaves_another_contexts_pairs_forwarding() {
 }
 
 #[test]
+#[overdrive_testing::overdrive_test(guest = "core")]
 fn a_thousand_pair_close_storm_yields_exactly_one_record_per_id() {
     raise_nofile(8192);
     let fwd = open_context();
@@ -154,6 +157,7 @@ fn a_thousand_pair_close_storm_yields_exactly_one_record_per_id() {
 }
 
 #[test]
+#[overdrive_testing::overdrive_test(guest = "core")]
 fn a_child_spawned_while_the_context_is_open_keeps_nothing_alive() {
     // O_CLOEXEC (EV-CTL pin 4.8): `serve` spawns the VMMs; no child may hold
     // the context past the owner.
