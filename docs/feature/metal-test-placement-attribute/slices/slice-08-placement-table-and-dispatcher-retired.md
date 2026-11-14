@@ -1,6 +1,6 @@
 # Slice 08 — Placement table and dispatcher retired
 
-Story: US-PLACE-08. Job: J-PLAT-007. Depends on: slices 01-07.
+Story: US-PLACE-08. Job: J-PLAT-007. Depends on: slices 01-07 and 09.
 
 ## Outcome
 

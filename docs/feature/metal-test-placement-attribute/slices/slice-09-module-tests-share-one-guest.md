@@ -12,7 +12,8 @@ Disproves "a shared guest can keep nextest's per-test results, retries and filte
 
 ## In the slice
 
-- A module-level placement declaration (shape is DESIGN's: an attribute on the `mod`, or a `group = …` argument on each test).
+- A module-level declaration, `shared_guest!(guest = "<group>"[, profile = "<profile>"])`, read by the tests of that module that carry `#[overdrive_test]` with no arguments (shape approved by the user, 2026-11-13).
+- A shared owner per declaration with an exec bound and an idle exit, if the user approves them (DESIGN decisions N-1 and N-2).
 - One guest per run of a declared module, counted from `OVERDRIVE_GUEST_KIT_TIMING`.
 - Per-test PASS/FAIL, retries and `-E 'test(=…)'` filtering unchanged.
 - The current users of the explicit batched command moved to the declaration.
@@ -33,9 +34,9 @@ Changing which tests share a guest today beyond what the batched command already
 - [ ] Guest-placed tests outside a declared module still boot one guest each.
 - [ ] The explicit batched command has no remaining user.
 
-## Open for DESIGN
+## Shape
 
-How nextest's one-process-per-test model reaches a shared guest (one generated test per module, or a guest shared across test processes), who starts and stops it, and what state tests in one guest can leak to each other.
+A guest shared across test processes through a per-declaration owner process (ADR-0283, ADR-0290); tests in one guest share its kernel, cgroup tree, nft tables and `/tmp` (DDD-9).
 
 ## Estimate
 
