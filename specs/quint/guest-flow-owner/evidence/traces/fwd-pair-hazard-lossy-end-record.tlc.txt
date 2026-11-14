@@ -38,7 +38,8 @@ State 1: <Initial predicate>
         snap |-> {},
         sshut |-> FALSE,
         misc |-> FALSE,
-        st |-> "est" ],
+        st |-> "est",
+        done |-> FALSE ],
   h |->
       [ ps |-> {},
         sent |-> {},
@@ -52,7 +53,8 @@ State 1: <Initial predicate>
         snap |-> {},
         sshut |-> FALSE,
         misc |-> FALSE,
-        st |-> "est" ] ]
+        st |-> "est",
+        done |-> FALSE ] ]
 /\ pair_bugLossyEndRecord_fwd_pair_gen = [g |-> 0, h |-> 0]
 /\ pair_bugLossyEndRecord_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
 /\ pair_bugLossyEndRecord_fwd_pair_attEnded = [g |-> 0, h |-> 0]
@@ -131,7 +133,7 @@ State 1: <Initial predicate>
         lost |-> 0 ] ]
 /\ pair_bugLossyEndRecord_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
 
-State 2: <pair_bugLossyEndRecord_fwd_pair_CloseUnattached line 2930, col 3 to line 2946, col 52 of module pair_bugLossyEndRecord>
+State 2: <pair_bugLossyEndRecord_fwd_pair_CloseUnattached line 2938, col 3 to line 2954, col 52 of module pair_bugLossyEndRecord>
 /\ pair_bugLossyEndRecord_fwd_pair_ctl = [gh |-> <<{"S", "R"}>>, hg |-> <<>>]
 /\ pair_bugLossyEndRecord_fwd_pair_ctx = [g |-> "open", h |-> "open"]
 /\ pair_bugLossyEndRecord_fwd_pair_pr = [ g |->
@@ -171,7 +173,8 @@ State 2: <pair_bugLossyEndRecord_fwd_pair_CloseUnattached line 2930, col 3 to li
         snap |-> {},
         sshut |-> TRUE,
         misc |-> FALSE,
-        st |-> "est" ],
+        st |-> "est",
+        done |-> FALSE ],
   h |->
       [ ps |-> {},
         sent |-> {},
@@ -185,7 +188,8 @@ State 2: <pair_bugLossyEndRecord_fwd_pair_CloseUnattached line 2930, col 3 to li
         snap |-> {},
         sshut |-> FALSE,
         misc |-> FALSE,
-        st |-> "est" ] ]
+        st |-> "est",
+        done |-> FALSE ] ]
 /\ pair_bugLossyEndRecord_fwd_pair_gen = [g |-> 0, h |-> 0]
 /\ pair_bugLossyEndRecord_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
 /\ pair_bugLossyEndRecord_fwd_pair_attEnded = [g |-> 0, h |-> 0]
@@ -264,7 +268,7 @@ State 2: <pair_bugLossyEndRecord_fwd_pair_CloseUnattached line 2930, col 3 to li
         lost |-> 0 ] ]
 /\ pair_bugLossyEndRecord_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
 
-State 3: <pair_bugLossyEndRecord_fwd_pair_Attach line 4040, col 3 to line 4050, col 75 of module pair_bugLossyEndRecord>
+State 3: <pair_bugLossyEndRecord_fwd_pair_Attach line 4053, col 3 to line 4063, col 75 of module pair_bugLossyEndRecord>
 /\ pair_bugLossyEndRecord_fwd_pair_ctl = [gh |-> <<{"S", "R"}>>, hg |-> <<>>]
 /\ pair_bugLossyEndRecord_fwd_pair_ctx = [g |-> "open", h |-> "open"]
 /\ pair_bugLossyEndRecord_fwd_pair_pr = [ g |->
@@ -304,7 +308,8 @@ State 3: <pair_bugLossyEndRecord_fwd_pair_Attach line 4040, col 3 to line 4050, 
         snap |-> {},
         sshut |-> TRUE,
         misc |-> FALSE,
-        st |-> "est" ],
+        st |-> "est",
+        done |-> FALSE ],
   h |->
       [ ps |-> {},
         sent |-> {},
@@ -318,7 +323,8 @@ State 3: <pair_bugLossyEndRecord_fwd_pair_Attach line 4040, col 3 to line 4050, 
         snap |-> {},
         sshut |-> FALSE,
         misc |-> FALSE,
-        st |-> "est" ] ]
+        st |-> "est",
+        done |-> FALSE ] ]
 /\ pair_bugLossyEndRecord_fwd_pair_gen = [g |-> 0, h |-> 0]
 /\ pair_bugLossyEndRecord_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
 /\ pair_bugLossyEndRecord_fwd_pair_attEnded = [g |-> 0, h |-> 0]
@@ -397,7 +403,7 @@ State 3: <pair_bugLossyEndRecord_fwd_pair_Attach line 4040, col 3 to line 4050, 
         lost |-> 0 ] ]
 /\ pair_bugLossyEndRecord_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
 
-State 4: <pair_bugLossyEndRecord_fwd_pair_VCtl line 4030, col 3 to line 4034, col 49 of module pair_bugLossyEndRecord>
+State 4: <pair_bugLossyEndRecord_fwd_pair_VCtl line 4043, col 3 to line 4047, col 49 of module pair_bugLossyEndRecord>
 /\ pair_bugLossyEndRecord_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<{"S", "R"}>>]
 /\ pair_bugLossyEndRecord_fwd_pair_ctx = [g |-> "open", h |-> "open"]
 /\ pair_bugLossyEndRecord_fwd_pair_pr = [ g |->
@@ -437,7 +443,8 @@ State 4: <pair_bugLossyEndRecord_fwd_pair_VCtl line 4030, col 3 to line 4034, co
         snap |-> {},
         sshut |-> TRUE,
         misc |-> FALSE,
-        st |-> "est" ],
+        st |-> "est",
+        done |-> FALSE ],
   h |->
       [ ps |-> {"S", "R"},
         sent |-> {"S", "R"},
@@ -451,7 +458,8 @@ State 4: <pair_bugLossyEndRecord_fwd_pair_VCtl line 4030, col 3 to line 4034, co
         snap |-> {},
         sshut |-> TRUE,
         misc |-> FALSE,
-        st |-> "closing" ] ]
+        st |-> "closing",
+        done |-> FALSE ] ]
 /\ pair_bugLossyEndRecord_fwd_pair_gen = [g |-> 0, h |-> 0]
 /\ pair_bugLossyEndRecord_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
 /\ pair_bugLossyEndRecord_fwd_pair_attEnded = [g |-> 0, h |-> 0]
@@ -530,7 +538,7 @@ State 4: <pair_bugLossyEndRecord_fwd_pair_VCtl line 4030, col 3 to line 4034, co
         lost |-> 0 ] ]
 /\ pair_bugLossyEndRecord_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
 
-State 5: <pair_bugLossyEndRecord_fwd_pair_DropRecord line 1368, col 3 to line 1381, col 79 of module pair_bugLossyEndRecord>
+State 5: <pair_bugLossyEndRecord_fwd_pair_DropRecord line 1376, col 3 to line 1389, col 79 of module pair_bugLossyEndRecord>
 /\ pair_bugLossyEndRecord_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<{"S", "R"}>>]
 /\ pair_bugLossyEndRecord_fwd_pair_ctx = [g |-> "open", h |-> "open"]
 /\ pair_bugLossyEndRecord_fwd_pair_pr = [ g |->
@@ -570,7 +578,8 @@ State 5: <pair_bugLossyEndRecord_fwd_pair_DropRecord line 1368, col 3 to line 13
         snap |-> {},
         sshut |-> TRUE,
         misc |-> FALSE,
-        st |-> "est" ],
+        st |-> "est",
+        done |-> FALSE ],
   h |->
       [ ps |-> {"S", "R"},
         sent |-> {"S", "R"},
@@ -584,7 +593,8 @@ State 5: <pair_bugLossyEndRecord_fwd_pair_DropRecord line 1368, col 3 to line 13
         snap |-> {},
         sshut |-> TRUE,
         misc |-> FALSE,
-        st |-> "closing" ] ]
+        st |-> "closing",
+        done |-> FALSE ] ]
 /\ pair_bugLossyEndRecord_fwd_pair_gen = [g |-> 0, h |-> 0]
 /\ pair_bugLossyEndRecord_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
 /\ pair_bugLossyEndRecord_fwd_pair_attEnded = [g |-> 0, h |-> 0]

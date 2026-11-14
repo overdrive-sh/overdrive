@@ -5,7 +5,7 @@ State 1
   strmHeld = FALSE
   ctx = [g |-> "open", h |-> "open"]
   attRes = [g |-> "none", h |-> "ok"]
-  vs = [ g |-> [ ps |-> {}, sent |-> {}, err |-> FALSE, cls |-> "none", tcls |-> "none", ucls |-> "none", att |-> "none", clsAt |-> "none", ncls |-> 0, snap |-> {}, sshut |-> FALSE, misc |-> FALSE, st |-> "est" ], h |-> [ ps |-> {}, sent |-> {}, err |-> FALSE, cls |-> "none", tcls |-> "none", ucls |-> "none", att |-> "none", clsAt |-> "none", ncls |-> 0, snap |-> {}, sshut |-> FALSE, misc |-> FALSE, st |-> "est" ] ]
+  vs = [ g |-> [ ps |-> {}, sent |-> {}, err |-> FALSE, cls |-> "none", tcls |-> "none", ucls |-> "none", att |-> "none", clsAt |-> "none", ncls |-> 0, snap |-> {}, sshut |-> FALSE, misc |-> FALSE, st |-> "est", done |-> FALSE ], h |-> [ ps |-> {}, sent |-> {}, err |-> FALSE, cls |-> "none", tcls |-> "none", ucls |-> "none", att |-> "none", clsAt |-> "none", ncls |-> 0, snap |-> {}, sshut |-> FALSE, misc |-> FALSE, st |-> "est", done |-> FALSE ] ]
   tcpErr = [g |-> "0", h |-> "0"]
   guestAbortSent = FALSE
   attEnded = [g |-> 0, h |-> 0]
@@ -26,7 +26,7 @@ State 1
 State 2 [Attach]
   strmHeld = TRUE
   attRes = [g |-> "ok", h |-> "ok"]
-  vs = [ g |-> [ ps |-> {}, sent |-> {}, err |-> FALSE, cls |-> "none", tcls |-> "none", ucls |-> "none", att |-> "noend", clsAt |-> "none", ncls |-> 0, snap |-> {}, sshut |-> FALSE, misc |-> FALSE, st |-> "est" ], h |-> [ ps |-> {}, sent |-> {}, err |-> FALSE, cls |-> "none", tcls |-> "none", ucls |-> "none", att |-> "none", clsAt |-> "none", ncls |-> 0, snap |-> {}, sshut |-> FALSE, misc |-> FALSE, st |-> "est" ] ]
+  vs = [ g |-> [ ps |-> {}, sent |-> {}, err |-> FALSE, cls |-> "none", tcls |-> "none", ucls |-> "none", att |-> "noend", clsAt |-> "none", ncls |-> 0, snap |-> {}, sshut |-> FALSE, misc |-> FALSE, st |-> "est", done |-> FALSE ], h |-> [ ps |-> {}, sent |-> {}, err |-> FALSE, cls |-> "none", tcls |-> "none", ucls |-> "none", att |-> "none", clsAt |-> "none", ncls |-> 0, snap |-> {}, sshut |-> FALSE, misc |-> FALSE, st |-> "est", done |-> FALSE ] ]
   pr = [ g |-> [ ph |-> "live", rec |-> "none", out |-> "none", cause |-> "none", errno |-> "none", byRel |-> FALSE, closed |-> FALSE, nrec |-> 0, cgen |-> 0 ], h |-> [ ph |-> "live", rec |-> "none", out |-> "none", cause |-> "none", errno |-> "none", byRel |-> FALSE, closed |-> FALSE, nrec |-> 0, cgen |-> 0 ] ]
 
 State 3 [Fin]
@@ -34,11 +34,11 @@ State 3 [Fin]
 
 State 4 [HopEnd0]
   ctl = [gh |-> <<{"S"}>>, hg |-> <<>>]
-  vs = [ g |-> [ ps |-> {}, sent |-> {"S"}, err |-> FALSE, cls |-> "none", tcls |-> "none", ucls |-> "none", att |-> "noend", clsAt |-> "none", ncls |-> 0, snap |-> {}, sshut |-> TRUE, misc |-> FALSE, st |-> "est" ], h |-> [ ps |-> {}, sent |-> {}, err |-> FALSE, cls |-> "none", tcls |-> "none", ucls |-> "none", att |-> "none", clsAt |-> "none", ncls |-> 0, snap |-> {}, sshut |-> FALSE, misc |-> FALSE, st |-> "est" ] ]
+  vs = [ g |-> [ ps |-> {}, sent |-> {"S"}, err |-> FALSE, cls |-> "none", tcls |-> "none", ucls |-> "none", att |-> "noend", clsAt |-> "none", ncls |-> 0, snap |-> {}, sshut |-> TRUE, misc |-> FALSE, st |-> "est", done |-> FALSE ], h |-> [ ps |-> {}, sent |-> {}, err |-> FALSE, cls |-> "none", tcls |-> "none", ucls |-> "none", att |-> "none", clsAt |-> "none", ncls |-> 0, snap |-> {}, sshut |-> FALSE, misc |-> FALSE, st |-> "est", done |-> FALSE ] ]
   dir = [ gh |-> [ wr |-> 0, wfin |-> TRUE, q0 |-> <<>>, q1 |-> <<>>, q2 |-> <<>>, srcEnd |-> "clean", srcShut |-> TRUE, dstEnd |-> "none", dstShut |-> FALSE, got |-> <<>>, eof |-> FALSE, rst |-> FALSE, shutRd |-> FALSE, loss |-> FALSE, lost |-> 0 ], hg |-> [ wr |-> 0, wfin |-> FALSE, q0 |-> <<>>, q1 |-> <<>>, q2 |-> <<>>, srcEnd |-> "none", srcShut |-> FALSE, dstEnd |-> "none", dstShut |-> FALSE, got |-> <<>>, eof |-> FALSE, rst |-> FALSE, shutRd |-> FALSE, loss |-> FALSE, lost |-> 0 ] ]
 
 State 5 [VCtl]
   ctl = [gh |-> <<>>, hg |-> <<>>]
-  vs = [ g |-> [ ps |-> {}, sent |-> {"S"}, err |-> FALSE, cls |-> "none", tcls |-> "none", ucls |-> "none", att |-> "noend", clsAt |-> "none", ncls |-> 0, snap |-> {}, sshut |-> TRUE, misc |-> FALSE, st |-> "est" ], h |-> [ ps |-> {"S"}, sent |-> {}, err |-> FALSE, cls |-> "clean", tcls |-> "clean", ucls |-> "clean", att |-> "none", clsAt |-> "callback", ncls |-> 1, snap |-> {}, sshut |-> FALSE, misc |-> FALSE, st |-> "est" ] ]
+  vs = [ g |-> [ ps |-> {}, sent |-> {"S"}, err |-> FALSE, cls |-> "none", tcls |-> "none", ucls |-> "none", att |-> "noend", clsAt |-> "none", ncls |-> 0, snap |-> {}, sshut |-> TRUE, misc |-> FALSE, st |-> "est", done |-> FALSE ], h |-> [ ps |-> {"S"}, sent |-> {}, err |-> FALSE, cls |-> "clean", tcls |-> "clean", ucls |-> "clean", att |-> "none", clsAt |-> "callback", ncls |-> 1, snap |-> {}, sshut |-> FALSE, misc |-> FALSE, st |-> "est", done |-> FALSE ] ]
   gh = [ fwdAfterEnd |-> FALSE, fwdOld |-> FALSE, unclassified |-> FALSE, rstOpen |-> {}, holderReadAfterAbort |-> FALSE, trail |-> {}, faults |-> 0, hobs |-> "none", woken |-> TRUE, vhTouched |-> FALSE, dropped |-> FALSE, hostDead |-> FALSE, hresCls |-> "none" ]
   pr = [ g |-> [ ph |-> "live", rec |-> "none", out |-> "none", cause |-> "none", errno |-> "none", byRel |-> FALSE, closed |-> FALSE, nrec |-> 0, cgen |-> 0 ], h |-> [ ph |-> "ended", rec |-> "queued", out |-> "halfclose", cause |-> "none", errno |-> "none", byRel |-> FALSE, closed |-> FALSE, nrec |-> 1, cgen |-> 0 ] ]

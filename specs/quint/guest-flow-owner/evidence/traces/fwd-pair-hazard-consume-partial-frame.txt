@@ -15,7 +15,7 @@ State 1
   oldCtx = [g |-> "none", h |-> "none"]
   hres = "none"
   ctl = [gh |-> <<>>, hg |-> <<>>]
-  vs = [ g |-> [ ps |-> {}, sent |-> {}, err |-> FALSE, cls |-> "none", tcls |-> "none", ucls |-> "none", att |-> "none", clsAt |-> "none", ncls |-> 0, snap |-> {}, sshut |-> FALSE, misc |-> FALSE, st |-> "est" ], h |-> [ ps |-> {}, sent |-> {}, err |-> FALSE, cls |-> "none", tcls |-> "none", ucls |-> "none", att |-> "none", clsAt |-> "none", ncls |-> 0, snap |-> {}, sshut |-> FALSE, misc |-> FALSE, st |-> "est" ] ]
+  vs = [ g |-> [ ps |-> {}, sent |-> {}, err |-> FALSE, cls |-> "none", tcls |-> "none", ucls |-> "none", att |-> "none", clsAt |-> "none", ncls |-> 0, snap |-> {}, sshut |-> FALSE, misc |-> FALSE, st |-> "est", done |-> FALSE ], h |-> [ ps |-> {}, sent |-> {}, err |-> FALSE, cls |-> "none", tcls |-> "none", ucls |-> "none", att |-> "none", clsAt |-> "none", ncls |-> 0, snap |-> {}, sshut |-> FALSE, misc |-> FALSE, st |-> "est", done |-> FALSE ] ]
   ctx = [g |-> "open", h |-> "open"]
   strmHeld = FALSE
   dg = [ gh |-> [ got |-> <<>>, n |-> 0, sizes |-> <<>>, dq0 |-> <<>>, foff |-> 0, blk |-> FALSE, dq2 |-> <<>>, sdrop |-> {}, rdrop |-> {}, fdrop |-> {} ], hg |-> [ got |-> <<>>, n |-> 0, sizes |-> <<>>, dq0 |-> <<>>, foff |-> 0, blk |-> FALSE, dq2 |-> <<>>, sdrop |-> {}, rdrop |-> {}, fdrop |-> {} ] ]
@@ -29,12 +29,12 @@ State 2 [SendDg]
 State 3 [Attach]
   attRes = [g |-> "none", h |-> "ok"]
   pr = [ g |-> [ ph |-> "unattached", rec |-> "none", out |-> "none", cause |-> "none", errno |-> "none", byRel |-> FALSE, closed |-> FALSE, nrec |-> 0, cgen |-> 0 ], h |-> [ ph |-> "live", rec |-> "none", out |-> "none", cause |-> "none", errno |-> "none", byRel |-> FALSE, closed |-> FALSE, nrec |-> 0, cgen |-> 0 ] ]
-  vs = [ g |-> [ ps |-> {}, sent |-> {}, err |-> FALSE, cls |-> "none", tcls |-> "none", ucls |-> "none", att |-> "none", clsAt |-> "none", ncls |-> 0, snap |-> {}, sshut |-> FALSE, misc |-> FALSE, st |-> "est" ], h |-> [ ps |-> {}, sent |-> {}, err |-> FALSE, cls |-> "none", tcls |-> "none", ucls |-> "none", att |-> "noend", clsAt |-> "none", ncls |-> 0, snap |-> {}, sshut |-> FALSE, misc |-> FALSE, st |-> "est" ] ]
+  vs = [ g |-> [ ps |-> {}, sent |-> {}, err |-> FALSE, cls |-> "none", tcls |-> "none", ucls |-> "none", att |-> "none", clsAt |-> "none", ncls |-> 0, snap |-> {}, sshut |-> FALSE, misc |-> FALSE, st |-> "est", done |-> FALSE ], h |-> [ ps |-> {}, sent |-> {}, err |-> FALSE, cls |-> "none", tcls |-> "none", ucls |-> "none", att |-> "noend", clsAt |-> "none", ncls |-> 0, snap |-> {}, sshut |-> FALSE, misc |-> FALSE, st |-> "est", done |-> FALSE ] ]
 
 State 4 [Attach]
   attRes = [g |-> "ok", h |-> "ok"]
   pr = [ g |-> [ ph |-> "live", rec |-> "none", out |-> "none", cause |-> "none", errno |-> "none", byRel |-> FALSE, closed |-> FALSE, nrec |-> 0, cgen |-> 0 ], h |-> [ ph |-> "live", rec |-> "none", out |-> "none", cause |-> "none", errno |-> "none", byRel |-> FALSE, closed |-> FALSE, nrec |-> 0, cgen |-> 0 ] ]
-  vs = [ g |-> [ ps |-> {}, sent |-> {}, err |-> FALSE, cls |-> "none", tcls |-> "none", ucls |-> "none", att |-> "noend", clsAt |-> "none", ncls |-> 0, snap |-> {}, sshut |-> FALSE, misc |-> FALSE, st |-> "est" ], h |-> [ ps |-> {}, sent |-> {}, err |-> FALSE, cls |-> "none", tcls |-> "none", ucls |-> "none", att |-> "noend", clsAt |-> "none", ncls |-> 0, snap |-> {}, sshut |-> FALSE, misc |-> FALSE, st |-> "est" ] ]
+  vs = [ g |-> [ ps |-> {}, sent |-> {}, err |-> FALSE, cls |-> "none", tcls |-> "none", ucls |-> "none", att |-> "noend", clsAt |-> "none", ncls |-> 0, snap |-> {}, sshut |-> FALSE, misc |-> FALSE, st |-> "est", done |-> FALSE ], h |-> [ ps |-> {}, sent |-> {}, err |-> FALSE, cls |-> "none", tcls |-> "none", ucls |-> "none", att |-> "noend", clsAt |-> "none", ncls |-> 0, snap |-> {}, sshut |-> FALSE, misc |-> FALSE, st |-> "est", done |-> FALSE ] ]
 
 State 5 [Hop0]
   dir = [ gh |-> [ wr |-> 0, wfin |-> FALSE, q0 |-> <<>>, q1 |-> <<10>>, q2 |-> <<>>, srcEnd |-> "none", srcShut |-> FALSE, dstEnd |-> "none", dstShut |-> FALSE, got |-> <<>>, eof |-> FALSE, rst |-> FALSE, shutRd |-> FALSE, loss |-> FALSE, lost |-> 0 ], hg |-> [ wr |-> 0, wfin |-> FALSE, q0 |-> <<>>, q1 |-> <<>>, q2 |-> <<>>, srcEnd |-> "none", srcShut |-> FALSE, dstEnd |-> "none", dstShut |-> FALSE, got |-> <<>>, eof |-> FALSE, rst |-> FALSE, shutRd |-> FALSE, loss |-> FALSE, lost |-> 0 ] ]

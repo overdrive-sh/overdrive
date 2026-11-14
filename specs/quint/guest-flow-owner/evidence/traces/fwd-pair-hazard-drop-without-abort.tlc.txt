@@ -70,7 +70,8 @@ State 1: <Initial predicate>
         snap |-> {},
         sshut |-> FALSE,
         misc |-> FALSE,
-        st |-> "est" ],
+        st |-> "est",
+        done |-> FALSE ],
   h |->
       [ ps |-> {},
         sent |-> {},
@@ -84,7 +85,8 @@ State 1: <Initial predicate>
         snap |-> {},
         sshut |-> FALSE,
         misc |-> FALSE,
-        st |-> "est" ] ]
+        st |-> "est",
+        done |-> FALSE ] ]
 /\ pair_bugDropWithoutAbort_fwd_pair_ctx = [g |-> "open", h |-> "open"]
 /\ pair_bugDropWithoutAbort_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
 /\ pair_bugDropWithoutAbort_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
@@ -131,7 +133,7 @@ State 1: <Initial predicate>
 /\ pair_bugDropWithoutAbort_fwd_pair_strmAbort = FALSE
 /\ pair_bugDropWithoutAbort_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
 
-State 2: <pair_bugDropWithoutAbort_fwd_pair_Attach line 4057, col 3 to line 4067, col 77 of module pair_bugDropWithoutAbort>
+State 2: <pair_bugDropWithoutAbort_fwd_pair_Attach line 4070, col 3 to line 4080, col 77 of module pair_bugDropWithoutAbort>
 /\ pair_bugDropWithoutAbort_fwd_pair_vmUp = TRUE
 /\ pair_bugDropWithoutAbort_fwd_pair_pr = [ g |->
       [ ph |-> "live",
@@ -203,7 +205,8 @@ State 2: <pair_bugDropWithoutAbort_fwd_pair_Attach line 4057, col 3 to line 4067
         snap |-> {},
         sshut |-> FALSE,
         misc |-> FALSE,
-        st |-> "est" ],
+        st |-> "est",
+        done |-> FALSE ],
   h |->
       [ ps |-> {},
         sent |-> {},
@@ -217,7 +220,8 @@ State 2: <pair_bugDropWithoutAbort_fwd_pair_Attach line 4057, col 3 to line 4067
         snap |-> {},
         sshut |-> FALSE,
         misc |-> FALSE,
-        st |-> "est" ] ]
+        st |-> "est",
+        done |-> FALSE ] ]
 /\ pair_bugDropWithoutAbort_fwd_pair_ctx = [g |-> "open", h |-> "open"]
 /\ pair_bugDropWithoutAbort_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
 /\ pair_bugDropWithoutAbort_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
@@ -264,7 +268,7 @@ State 2: <pair_bugDropWithoutAbort_fwd_pair_Attach line 4057, col 3 to line 4067
 /\ pair_bugDropWithoutAbort_fwd_pair_strmAbort = FALSE
 /\ pair_bugDropWithoutAbort_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
 
-State 3: <pair_bugDropWithoutAbort_fwd_pair_HolderDrop line 2699, col 3 to line 2772, col 45 of module pair_bugDropWithoutAbort>
+State 3: <pair_bugDropWithoutAbort_fwd_pair_HolderDrop line 2707, col 3 to line 2780, col 45 of module pair_bugDropWithoutAbort>
 /\ pair_bugDropWithoutAbort_fwd_pair_vmUp = TRUE
 /\ pair_bugDropWithoutAbort_fwd_pair_pr = [ g |->
       [ ph |-> "live",
@@ -336,7 +340,8 @@ State 3: <pair_bugDropWithoutAbort_fwd_pair_HolderDrop line 2699, col 3 to line 
         snap |-> {},
         sshut |-> FALSE,
         misc |-> FALSE,
-        st |-> "est" ],
+        st |-> "est",
+        done |-> FALSE ],
   h |->
       [ ps |-> {},
         sent |-> {},
@@ -350,7 +355,8 @@ State 3: <pair_bugDropWithoutAbort_fwd_pair_HolderDrop line 2699, col 3 to line 
         snap |-> {},
         sshut |-> FALSE,
         misc |-> FALSE,
-        st |-> "est" ] ]
+        st |-> "est",
+        done |-> FALSE ] ]
 /\ pair_bugDropWithoutAbort_fwd_pair_ctx = [g |-> "open", h |-> "open"]
 /\ pair_bugDropWithoutAbort_fwd_pair_oldCtx = [g |-> "none", h |-> "none"]
 /\ pair_bugDropWithoutAbort_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]

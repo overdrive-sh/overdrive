@@ -47,7 +47,8 @@ State 1: <Initial predicate>
         snap |-> {},
         sshut |-> FALSE,
         misc |-> FALSE,
-        st |-> "est" ],
+        st |-> "est",
+        done |-> FALSE ],
   h |->
       [ ps |-> {},
         sent |-> {},
@@ -61,7 +62,8 @@ State 1: <Initial predicate>
         snap |-> {},
         sshut |-> FALSE,
         misc |-> FALSE,
-        st |-> "est" ] ]
+        st |-> "est",
+        done |-> FALSE ] ]
 /\ pair_bugWatchAbortShutsVh_fwd_pair_strmHeld = FALSE
 /\ pair_bugWatchAbortShutsVh_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
 /\ pair_bugWatchAbortShutsVh_fwd_pair_ctx = [g |-> "open", h |-> "open"]
@@ -131,7 +133,7 @@ State 1: <Initial predicate>
         cgen |-> 0 ] ]
 /\ pair_bugWatchAbortShutsVh_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
 
-State 2: <pair_bugWatchAbortShutsVh_fwd_pair_Attach line 4060, col 3 to line 4070, col 78 of module pair_bugWatchAbortShutsVh>
+State 2: <pair_bugWatchAbortShutsVh_fwd_pair_Attach line 4073, col 3 to line 4083, col 78 of module pair_bugWatchAbortShutsVh>
 /\ pair_bugWatchAbortShutsVh_fwd_pair_conf_step = [InitWith |-> [m |-> "watch"]]
 /\ pair_bugWatchAbortShutsVh_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
 /\ pair_bugWatchAbortShutsVh_fwd_pair_mode = "watch"
@@ -180,7 +182,8 @@ State 2: <pair_bugWatchAbortShutsVh_fwd_pair_Attach line 4060, col 3 to line 407
         snap |-> {},
         sshut |-> FALSE,
         misc |-> FALSE,
-        st |-> "est" ],
+        st |-> "est",
+        done |-> FALSE ],
   h |->
       [ ps |-> {},
         sent |-> {},
@@ -194,7 +197,8 @@ State 2: <pair_bugWatchAbortShutsVh_fwd_pair_Attach line 4060, col 3 to line 407
         snap |-> {},
         sshut |-> FALSE,
         misc |-> FALSE,
-        st |-> "est" ] ]
+        st |-> "est",
+        done |-> FALSE ] ]
 /\ pair_bugWatchAbortShutsVh_fwd_pair_strmHeld = TRUE
 /\ pair_bugWatchAbortShutsVh_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<>>]
 /\ pair_bugWatchAbortShutsVh_fwd_pair_ctx = [g |-> "open", h |-> "open"]
@@ -264,7 +268,7 @@ State 2: <pair_bugWatchAbortShutsVh_fwd_pair_Attach line 4060, col 3 to line 407
         cgen |-> 0 ] ]
 /\ pair_bugWatchAbortShutsVh_fwd_pair_terr = [g |-> FALSE, h |-> FALSE]
 
-State 3: <pair_bugWatchAbortShutsVh_fwd_pair_Abort line 3712, col 3 to line 3719, col 52 of module pair_bugWatchAbortShutsVh>
+State 3: <pair_bugWatchAbortShutsVh_fwd_pair_Abort line 3720, col 3 to line 3727, col 52 of module pair_bugWatchAbortShutsVh>
 /\ pair_bugWatchAbortShutsVh_fwd_pair_conf_step = [InitWith |-> [m |-> "watch"]]
 /\ pair_bugWatchAbortShutsVh_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
 /\ pair_bugWatchAbortShutsVh_fwd_pair_mode = "watch"
@@ -313,7 +317,8 @@ State 3: <pair_bugWatchAbortShutsVh_fwd_pair_Abort line 3712, col 3 to line 3719
         snap |-> {},
         sshut |-> FALSE,
         misc |-> FALSE,
-        st |-> "est" ],
+        st |-> "est",
+        done |-> FALSE ],
   h |->
       [ ps |-> {},
         sent |-> {"S", "R"},
@@ -327,7 +332,8 @@ State 3: <pair_bugWatchAbortShutsVh_fwd_pair_Abort line 3712, col 3 to line 3719
         snap |-> {},
         sshut |-> TRUE,
         misc |-> FALSE,
-        st |-> "est" ] ]
+        st |-> "est",
+        done |-> FALSE ] ]
 /\ pair_bugWatchAbortShutsVh_fwd_pair_strmHeld = TRUE
 /\ pair_bugWatchAbortShutsVh_fwd_pair_ctl = [gh |-> <<>>, hg |-> <<{"S", "R"}>>]
 /\ pair_bugWatchAbortShutsVh_fwd_pair_ctx = [g |-> "open", h |-> "open"]

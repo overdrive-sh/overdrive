@@ -52,7 +52,8 @@ State 1: <Initial predicate>
         snap |-> {},
         sshut |-> FALSE,
         misc |-> FALSE,
-        st |-> "est" ],
+        st |-> "est",
+        done |-> FALSE ],
   h |->
       [ ps |-> {},
         sent |-> {},
@@ -66,7 +67,8 @@ State 1: <Initial predicate>
         snap |-> {},
         sshut |-> FALSE,
         misc |-> FALSE,
-        st |-> "est" ] ]
+        st |-> "est",
+        done |-> FALSE ] ]
 /\ pair_dgram_fwd_pair_dir = [ gh |->
       [ wr |-> 0,
         wfin |-> FALSE,
@@ -131,7 +133,7 @@ State 1: <Initial predicate>
 /\ pair_dgram_fwd_pair_ep = [g |-> "alive", h |-> "alive"]
 /\ pair_dgram_fwd_pair_conf_step = [InitWith |-> [m |-> "dgram"]]
 
-State 2: <pair_dgram_fwd_pair_VmmExit line 2203, col 3 to line 2251, col 23 of module pair_dgram>
+State 2: <pair_dgram_fwd_pair_VmmExit line 2211, col 3 to line 2259, col 23 of module pair_dgram>
 /\ pair_dgram_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
   fwdOld |-> FALSE,
   unclassified |-> FALSE,
@@ -185,7 +187,8 @@ State 2: <pair_dgram_fwd_pair_VmmExit line 2203, col 3 to line 2251, col 23 of m
         snap |-> {},
         sshut |-> FALSE,
         misc |-> FALSE,
-        st |-> "est" ],
+        st |-> "est",
+        done |-> FALSE ],
   h |->
       [ ps |-> {},
         sent |-> {},
@@ -199,7 +202,8 @@ State 2: <pair_dgram_fwd_pair_VmmExit line 2203, col 3 to line 2251, col 23 of m
         snap |-> {},
         sshut |-> FALSE,
         misc |-> FALSE,
-        st |-> "est" ] ]
+        st |-> "est",
+        done |-> FALSE ] ]
 /\ pair_dgram_fwd_pair_dir = [ gh |->
       [ wr |-> 0,
         wfin |-> FALSE,

@@ -95,12 +95,13 @@
  *     HolderDrop cancels and closes a pending dial with no stream-drop ghost, or drops an actual stream, aborting a
  *     live watch and closing V_h; once neither holder nor watch exists it is disabled.
  *   - The holder's end observation (HolderEnd, F11 corrected): what its read returns at the end of V_h — Eof (0) or
- *     Err (a read error). After the release's SHUT_RDWR either, at once (0 while V_h is ESTABLISHED, af_vsock.c:2545-2548;
- *     ENOTCONN once it left ESTABLISHED, vsock_shutdown having cleared SOCK_DONE, :1220, :2522-2531 @ v7.0); after a
- *     guest SHUTDOWN processed by the watch's callback, Eof once the queue is empty; after the orphan sweep (VmmExit
- *     sets sk_err and SS_UNCONNECTED, which is TCP_ESTABLISHED's value, drivers/vhost/vsock.c:746-750), Err
- *     (ECONNRESET) once the queue is empty — and the sweep's state is readable BEFORE its sk_error_report (FwdErr)
- *     runs: the end is two steps, VmmExit then FwdErr (no separate sweep actions, U-EV3-7). The GuestStream's
+ *     Err (a read error). In the kernel's precedence: a V_h that left ESTABLISHED reads 0 while SOCK_DONE is
+ *     set and ENOTCONN once a local shutdown cleared it (af_vsock.c:2522-2531, vsock_shutdown :1220, do_close
+ *     virtio_transport_common.c:1249 @ v7.0); else its own receive shutdown (the release's SHUT_RDWR) reads 0 at once,
+ *     queued bytes and sk_err notwithstanding (:2545-2548); else, with the queue empty, Err (ECONNRESET) after the
+ *     orphan sweep (VmmExit sets sk_err and SS_UNCONNECTED, which is TCP_ESTABLISHED's value,
+ *     drivers/vhost/vsock.c:746-750) and Eof after a guest SHUTDOWN — and the sweep's state is readable BEFORE its
+ *     sk_error_report (FwdErr) runs: the end is two steps, VmmExit then FwdErr (no separate sweep actions, U-EV3-7). The GuestStream's
  *     reported end (ReadEof on the dialer, `hres`: HalfClose = Ok(0), GuestAbort = Err(ConnectionReset), OwnerAbort =
  *     Err(ConnectionAborted)) is resolved from the watch, never from the observation (EVMOD-STREAM-END): the owner's own end
  *     of the watch; else the watch's record; else it waits for the record in flight.
@@ -319,7 +320,7 @@ module fwd_pair {
   // receive queue empty (an RST, or a 0x3 with nothing queued); with units queued the socket stays ESTABLISHED.
   // err is vsSt's companion vsErr (the orphan sweep's sk_err). sshut is ownShut (T-8).
   type Vs = { ps: Set[str], sent: Set[str], err: bool, cls: str, tcls: str, ucls: str,
-              att: str, clsAt: str, ncls: int, snap: Set[str], sshut: bool, misc: bool, st: str }
+              att: str, clsAt: str, ncls: int, snap: Set[str], sshut: bool, misc: bool, st: str, done: bool }
   // Datagram mode, per direction: n datagrams sent, sizes[k-1] the size of datagram k, dq0 the source UDP queue,
   // foff the current frame's items already accepted, blk the target's send would block, dq2 the far receiver's
   // queue (whole frames), got the frames read. Ghosts: sdrop (dropped at a source queue: full, or discarded at a
@@ -409,7 +410,7 @@ module fwd_pair {
     val v = t.vs.get(s)
     val shutNow = pkt.contains("S")
     { ...t, ctl: t.ctl.set(outof(s), t.ctl.get(outof(s)).append(pkt)),
-      vs: t.vs.set(s, { ...v, sent: v.sent.union(pkt), sshut: v.sshut or shutNow }) }
+      vs: t.vs.set(s, { ...v, sent: v.sent.union(pkt), sshut: v.sshut or shutNow, done: false }) }
   // SHUT_RDWR / close of side s's vsock half: a {S, R} packet unless both flags were already sent
   def shutAll(t: St, s: str): St = if (t.vs.get(s).sent == both) t else send(t, s, both)
   // the stream of direction d is cut before its writer's FIN (ghost)
@@ -478,7 +479,7 @@ module fwd_pair {
   def pair0: Pair = { ph: "unattached", rec: "none", out: "none", cause: "none", errno: "none", byRel: false,
                       closed: false, nrec: 0, cgen: 0 }
   def vs0: Vs = { ps: Set(), sent: Set(), err: false, cls: "none", tcls: "none", ucls: "none",
-                  att: "none", clsAt: "none", ncls: 0, snap: Set(), sshut: false, misc: false, st: "est" }
+                  att: "none", clsAt: "none", ncls: 0, snap: Set(), sshut: false, misc: false, st: "est", done: false }
   def dg0: Dg = { n: 0, sizes: List(), dq0: List(), foff: 0, blk: false, dq2: List(), got: List(),
                   sdrop: Set(), rdrop: Set(), fdrop: Set() }
   action InitWith(m: str): bool = all {
@@ -877,7 +878,7 @@ module fwd_pair {
     val closing = v.ps.union(pkt) == both and t.dir.get(d).q1.length() == 0
     val v1 = { ...v, ps: v.ps.union(pkt), tcls: if (nw.contains("S") and v.tcls == "none") c else v.tcls,
                misc: v.misc or (live(t, s) and c != classify(nw, v.ps, trueSends)),
-               st: if (closing) "closing" else v.st }
+               st: if (closing) "closing" else v.st, done: v.done or closing }
     val t1 = setVs({ ...t, ctl: t.ctl.set(d, t.ctl.get(d).tail()) }, s, v1)
     val r =
       if (not(live(t, s))) t1                      // unattached: recorded (F9); ended: ignored (END-IDEMPOTENT)
@@ -961,14 +962,18 @@ module fwd_pair {
     val late = dial and cur.strmAbort
     commit({ ...t1, gh: { ...t1.gh, holderReadAfterAbort: t1.gh.holderReadAfterAbort or late } }, variant("Read", { d: d })),
   }
-  // The holder's end observation on V_h (F11 corrected): what its read returns at the end — Eof (0) or Err (a read
-  // error): after its own SHUT_RDWR (the watch's end by the owner) either, queued bytes or not; after a guest
-  // SHUTDOWN, Eof once the queue is empty; after the orphan sweep, Err (ECONNRESET) once the queue is empty, the sweep's
-  // callback (FwdErr) run or not
+  // The holder's end observation on V_h (F11 corrected, kernel precedence): what its read returns at the end — Eof (0)
+  // or Err. af_vsock.c:2522-2531 @ v7.0 decides first: a socket that left ESTABLISHED (st == "closing") reads 0 when
+  // SOCK_DONE is set and ENOTCONN when it is not (vsock_shutdown clears SOCK_DONE on every local shutdown,
+  // af_vsock.c:1220; virtio_transport_do_close sets it, virtio_transport_common.c:1249); then its own receive shutdown
+  // (a sent R, SHUT_RDWR) reads 0 at once, queued bytes and sk_err notwithstanding (:2545-2548); only then the queue
+  // (not an end), then sk_err (the orphan sweep leaves the state TCP_ESTABLISHED, drivers/vhost/vsock.c:746-750:
+  // ECONNRESET, :2439-2440), then the peer's SEND_SHUTDOWN (0, :2326-2328)
   def holderReadable(t: St): Set[str] =
     if (not(and { t.mode == "watch", t.strmHeld, t.ep.get("h") == "alive", t.attRes.get("g") == "ok", t.gh.hobs == "none" }))
       Set()
-    else if (t.vs.get("h").sent.contains("R")) Set("eof", "err")
+    else if (t.vs.get("h").st == "closing") (if (t.vs.get("h").done) Set("eof") else Set("err"))
+    else if (t.vs.get("h").sent.contains("R")) Set("eof")
     else if (t.dir.get("gh").q1.length() > 0) Set()
     else if (t.vs.get("h").err) Set("err")
     else if (t.vs.get("h").ps.contains("S")) Set("eof")
@@ -1644,15 +1649,18 @@ module fwd_pair {
     .then(VCtl("hg")).then(VCtl("gh"))
     .expect(Safety and pr.get("g").out == "aborted" and pr.get("g").cause == "Detached" and pr.get("g").nrec == 1
             and pr.get("h").cause == "Detached" and pr.get("h").nrec == 1)
-  // the context's release shuts the watched V_h (SHUT_RDWR, the guest sees 0x3) with no record; the holder's read
-  // fails ENOTCONN (V_h left ESTABLISHED, F11 corrected) and its GuestStream reports the owner's own end
-  run ContextReleaseShutsWatchedVhAndHolderReadsNotConnected = InitWith("watch")
+  // the guest's 0x3 reaches V_h first (V_h leaves ESTABLISHED with SOCK_DONE set: the holder reads 0), then the holder
+  // shuts V_h's send side — vsock_shutdown clears SOCK_DONE, so its next read fails ENOTCONN (af_vsock.c:1220,
+  // :2522-2531 @ v7.0). The owner's own SHUT_RDWR cannot produce it: a pair the guest's 0x3 already ended is never
+  // shut by the owner, and a live pair the owner shuts is still ESTABLISHED (the holder reads 0, :2545-2548)
+  run HolderShutdownAfterGuestResetReadsNotConnected = InitWith("watch")
     .then(Attach("g")).then(Write("gh")).then(Hop0("gh")).then(Read("gh"))
-    .then(CtxRelease("h"))
-    .expect(Safety and pr.get("h").byRel and pr.get("h").rec == "none" and vs.get("h").sent == both and ctl.get("hg") == [both])
-    .then(HolderEnd("err")).then(ReadEof("gh"))
-    .expect(Safety and gh.hobs == "err" and hres == "OwnerAbort" and dir.get("gh").rst and dir.get("gh").got == [1])
-    .then(VCtl("hg")).expect(Safety and pr.get("g").cause == "PeerAbort" and ep.get("g") == "reset")
+    .then(TcpRst("g", false)).then(VCtl("gh"))
+    .expect(Safety and vs.get("h").st == "closing" and vs.get("h").done and holderReadable(cur) == Set("eof"))
+    .then(Fin("hg"))
+    .expect(Safety and vs.get("h").sent == Set("S") and not(vs.get("h").done) and holderReadable(cur) == Set("err"))
+    .then(HolderEnd("err"))
+    .expect(Safety and gh.hobs == "err" and dir.get("gh").got == [1])
   // the context's release ends a watch with no record; the GuestStream resolves the holder's end (here its read
   // returned 0) from the owner's own end of the watch: OwnerAbort
   run ReleasedWatchWithNoRecordReadsAsAbort = InitWith("watch")

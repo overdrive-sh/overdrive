@@ -55,7 +55,8 @@ State 1: <Initial predicate>
         snap |-> {},
         sshut |-> FALSE,
         misc |-> FALSE,
-        st |-> "est" ],
+        st |-> "est",
+        done |-> FALSE ],
   h |->
       [ ps |-> {},
         sent |-> {},
@@ -69,7 +70,8 @@ State 1: <Initial predicate>
         snap |-> {},
         sshut |-> FALSE,
         misc |-> FALSE,
-        st |-> "est" ] ]
+        st |-> "est",
+        done |-> FALSE ] ]
 /\ pair_bugEofAsFin_fwd_pair_conf_step = [InitWith |-> [m |-> "stream"]]
 /\ pair_bugEofAsFin_fwd_pair_mode = "stream"
 /\ pair_bugEofAsFin_fwd_pair_dir = [ gh |->
@@ -131,7 +133,7 @@ State 1: <Initial predicate>
 /\ pair_bugEofAsFin_fwd_pair_ctx = [g |-> "open", h |-> "open"]
 /\ pair_bugEofAsFin_fwd_pair_attEnded = [g |-> 0, h |-> 0]
 
-State 2: <pair_bugEofAsFin_fwd_pair_CloseUnattached line 2608, col 3 to line 2619, col 46 of module pair_bugEofAsFin>
+State 2: <pair_bugEofAsFin_fwd_pair_CloseUnattached line 2616, col 3 to line 2627, col 46 of module pair_bugEofAsFin>
 /\ pair_bugEofAsFin_fwd_pair_ep = [g |-> "reset", h |-> "alive"]
 /\ pair_bugEofAsFin_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
 /\ pair_bugEofAsFin_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
@@ -188,7 +190,8 @@ State 2: <pair_bugEofAsFin_fwd_pair_CloseUnattached line 2608, col 3 to line 261
         snap |-> {},
         sshut |-> TRUE,
         misc |-> FALSE,
-        st |-> "est" ],
+        st |-> "est",
+        done |-> FALSE ],
   h |->
       [ ps |-> {},
         sent |-> {},
@@ -202,7 +205,8 @@ State 2: <pair_bugEofAsFin_fwd_pair_CloseUnattached line 2608, col 3 to line 261
         snap |-> {},
         sshut |-> FALSE,
         misc |-> FALSE,
-        st |-> "est" ] ]
+        st |-> "est",
+        done |-> FALSE ] ]
 /\ pair_bugEofAsFin_fwd_pair_conf_step = [InitWith |-> [m |-> "stream"]]
 /\ pair_bugEofAsFin_fwd_pair_mode = "stream"
 /\ pair_bugEofAsFin_fwd_pair_dir = [ gh |->
@@ -264,7 +268,7 @@ State 2: <pair_bugEofAsFin_fwd_pair_CloseUnattached line 2608, col 3 to line 261
 /\ pair_bugEofAsFin_fwd_pair_ctx = [g |-> "open", h |-> "open"]
 /\ pair_bugEofAsFin_fwd_pair_attEnded = [g |-> 0, h |-> 0]
 
-State 3: <pair_bugEofAsFin_fwd_pair_Attach line 3607, col 3 to line 3614, col 69 of module pair_bugEofAsFin>
+State 3: <pair_bugEofAsFin_fwd_pair_Attach line 3620, col 3 to line 3627, col 69 of module pair_bugEofAsFin>
 /\ pair_bugEofAsFin_fwd_pair_ep = [g |-> "reset", h |-> "alive"]
 /\ pair_bugEofAsFin_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
 /\ pair_bugEofAsFin_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
@@ -321,7 +325,8 @@ State 3: <pair_bugEofAsFin_fwd_pair_Attach line 3607, col 3 to line 3614, col 69
         snap |-> {},
         sshut |-> TRUE,
         misc |-> FALSE,
-        st |-> "est" ],
+        st |-> "est",
+        done |-> FALSE ],
   h |->
       [ ps |-> {},
         sent |-> {},
@@ -335,7 +340,8 @@ State 3: <pair_bugEofAsFin_fwd_pair_Attach line 3607, col 3 to line 3614, col 69
         snap |-> {},
         sshut |-> FALSE,
         misc |-> FALSE,
-        st |-> "est" ] ]
+        st |-> "est",
+        done |-> FALSE ] ]
 /\ pair_bugEofAsFin_fwd_pair_conf_step = [InitWith |-> [m |-> "stream"]]
 /\ pair_bugEofAsFin_fwd_pair_mode = "stream"
 /\ pair_bugEofAsFin_fwd_pair_dir = [ gh |->
@@ -397,7 +403,7 @@ State 3: <pair_bugEofAsFin_fwd_pair_Attach line 3607, col 3 to line 3614, col 69
 /\ pair_bugEofAsFin_fwd_pair_ctx = [g |-> "open", h |-> "open"]
 /\ pair_bugEofAsFin_fwd_pair_attEnded = [g |-> 0, h |-> 0]
 
-State 4: <pair_bugEofAsFin_fwd_pair_VCtl line 3598, col 3 to line 3601, col 43 of module pair_bugEofAsFin>
+State 4: <pair_bugEofAsFin_fwd_pair_VCtl line 3611, col 3 to line 3614, col 43 of module pair_bugEofAsFin>
 /\ pair_bugEofAsFin_fwd_pair_ep = [g |-> "reset", h |-> "alive"]
 /\ pair_bugEofAsFin_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
 /\ pair_bugEofAsFin_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
@@ -454,7 +460,8 @@ State 4: <pair_bugEofAsFin_fwd_pair_VCtl line 3598, col 3 to line 3601, col 43 o
         snap |-> {},
         sshut |-> TRUE,
         misc |-> FALSE,
-        st |-> "est" ],
+        st |-> "est",
+        done |-> FALSE ],
   h |->
       [ ps |-> {"S", "R"},
         sent |-> {},
@@ -468,7 +475,8 @@ State 4: <pair_bugEofAsFin_fwd_pair_VCtl line 3598, col 3 to line 3601, col 43 o
         snap |-> {},
         sshut |-> FALSE,
         misc |-> FALSE,
-        st |-> "closing" ] ]
+        st |-> "closing",
+        done |-> TRUE ] ]
 /\ pair_bugEofAsFin_fwd_pair_conf_step = [InitWith |-> [m |-> "stream"]]
 /\ pair_bugEofAsFin_fwd_pair_mode = "stream"
 /\ pair_bugEofAsFin_fwd_pair_dir = [ gh |->
@@ -530,7 +538,7 @@ State 4: <pair_bugEofAsFin_fwd_pair_VCtl line 3598, col 3 to line 3601, col 43 o
 /\ pair_bugEofAsFin_fwd_pair_ctx = [g |-> "open", h |-> "open"]
 /\ pair_bugEofAsFin_fwd_pair_attEnded = [g |-> 0, h |-> 0]
 
-State 5: <pair_bugEofAsFin_fwd_pair_HopEnd1 line 3350, col 3 to line 3399, col 44 of module pair_bugEofAsFin>
+State 5: <pair_bugEofAsFin_fwd_pair_HopEnd1 line 3358, col 3 to line 3407, col 44 of module pair_bugEofAsFin>
 /\ pair_bugEofAsFin_fwd_pair_ep = [g |-> "reset", h |-> "alive"]
 /\ pair_bugEofAsFin_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
 /\ pair_bugEofAsFin_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
@@ -587,7 +595,8 @@ State 5: <pair_bugEofAsFin_fwd_pair_HopEnd1 line 3350, col 3 to line 3399, col 4
         snap |-> {},
         sshut |-> TRUE,
         misc |-> FALSE,
-        st |-> "est" ],
+        st |-> "est",
+        done |-> FALSE ],
   h |->
       [ ps |-> {"S", "R"},
         sent |-> {},
@@ -601,7 +610,8 @@ State 5: <pair_bugEofAsFin_fwd_pair_HopEnd1 line 3350, col 3 to line 3399, col 4
         snap |-> {},
         sshut |-> FALSE,
         misc |-> FALSE,
-        st |-> "closing" ] ]
+        st |-> "closing",
+        done |-> TRUE ] ]
 /\ pair_bugEofAsFin_fwd_pair_conf_step = [InitWith |-> [m |-> "stream"]]
 /\ pair_bugEofAsFin_fwd_pair_mode = "stream"
 /\ pair_bugEofAsFin_fwd_pair_dir = [ gh |->
@@ -663,7 +673,7 @@ State 5: <pair_bugEofAsFin_fwd_pair_HopEnd1 line 3350, col 3 to line 3399, col 4
 /\ pair_bugEofAsFin_fwd_pair_ctx = [g |-> "open", h |-> "open"]
 /\ pair_bugEofAsFin_fwd_pair_attEnded = [g |-> 0, h |-> 0]
 
-State 6: <pair_bugEofAsFin_fwd_pair_ReadEof line 3058, col 3 to line 3103, col 44 of module pair_bugEofAsFin>
+State 6: <pair_bugEofAsFin_fwd_pair_ReadEof line 3066, col 3 to line 3111, col 44 of module pair_bugEofAsFin>
 /\ pair_bugEofAsFin_fwd_pair_ep = [g |-> "reset", h |-> "alive"]
 /\ pair_bugEofAsFin_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
 /\ pair_bugEofAsFin_fwd_pair_gh = [ fwdAfterEnd |-> FALSE,
@@ -720,7 +730,8 @@ State 6: <pair_bugEofAsFin_fwd_pair_ReadEof line 3058, col 3 to line 3103, col 4
         snap |-> {},
         sshut |-> TRUE,
         misc |-> FALSE,
-        st |-> "est" ],
+        st |-> "est",
+        done |-> FALSE ],
   h |->
       [ ps |-> {"S", "R"},
         sent |-> {},
@@ -734,7 +745,8 @@ State 6: <pair_bugEofAsFin_fwd_pair_ReadEof line 3058, col 3 to line 3103, col 4
         snap |-> {},
         sshut |-> FALSE,
         misc |-> FALSE,
-        st |-> "closing" ] ]
+        st |-> "closing",
+        done |-> TRUE ] ]
 /\ pair_bugEofAsFin_fwd_pair_conf_step = [InitWith |-> [m |-> "stream"]]
 /\ pair_bugEofAsFin_fwd_pair_mode = "stream"
 /\ pair_bugEofAsFin_fwd_pair_dir = [ gh |->

@@ -1307,10 +1307,10 @@ expect = "holds"
 ci = true
 
 [[check]]
-name = "fwd-pair-run-context-release-shuts-watched-vh-and-holder-reads-not-connected"
+name = "fwd-pair-run-holder-shutdown-after-guest-reset-reads-not-connected"
 spec = "fwd_pair.qnt"
 main = "pair_conf"
-run = "ContextReleaseShutsWatchedVhAndHolderReadsNotConnected"
+run = "HolderShutdownAfterGuestResetReadsNotConnected"
 backend = "evaluator"
 expect = "holds"
 ci = true
