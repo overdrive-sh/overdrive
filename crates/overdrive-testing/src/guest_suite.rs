@@ -148,7 +148,7 @@ pub fn run_in_guest(group: &str, exe: &Path, test_name: &str) -> Result<(), RunI
     let args = ["--exact".to_owned(), test_name.to_owned(), NO_CAPTURE.to_owned()];
     let binary_id = std::env::var("NEXTEST_BINARY_ID").unwrap_or_default();
     let named = |detail: String| (group.to_owned(), test_name.to_owned(), detail);
-    match run_nextest_group_attempt(group, &program, &args, &binary_id, test_name) {
+    match run_nextest_group_attempt(&[], group, &program, &args, &binary_id, test_name) {
         Ok(0) => Ok(()),
         Ok(status) => Err(RunInGuestError::BodyFailed {
             group: group.to_owned(),
@@ -171,17 +171,9 @@ const QUINT_RUNTIME_DIR: &str = "guest-kit/quint-test-runtime";
 const QUINT_RUNTIME_FILES_DIR: &str = "files";
 const QUINT_RUNTIME_MANIFEST: &str = "manifest.v1";
 const QUINT_RUNTIME_FORMAT: &str = "overdrive-quint-test-runtime-v1";
-/// Every guest-placed test whose module path carries a `quint_*` segment runs
-/// the Quint CLI, so it is staged the prepared runtime; the model it resolves
-/// relative to its working directory is declared once per (binary, module
-/// prefix) here. A guest-placed `quint_*` module absent from this table fails
-/// closed at staging (`quint_guest_model`) instead of surfacing later as a
-/// failed Quint command inside the guest.
-const QUINT_GUEST_MODULES: &[(&str, &str, &str)] = &[(
-    "overdrive-gateway",
-    "application::quint_gateway_application::",
-    "../../specs/quint/public-ingress-gateway/gateway_application.qnt",
-)];
+/// One Quint model a guest-placed test module needs: `(binary id, test-name
+/// prefix, model path relative to the test's working directory)`.
+type QuintGuestModule<'a> = (&'a str, &'a str, &'a str);
 const GUEST_EXACT_ENV: &str = "OVERDRIVE_FWD_GUEST_EXACT";
 const GUEST_LANE_KIND_ENV: &str = "OVERDRIVE_FWD_GUEST_LANE_KIND";
 const GUEST_LANE_FIXTURE_ENV: &str = "OVERDRIVE_FWD_GUEST_LANE_FIXTURE";
@@ -3829,22 +3821,23 @@ fn quint_test_guest_files(
 /// The Quint model a guest-placed test needs, or `None` when the test's module
 /// path has no `quint_*` segment. A `quint_*` module with no declared model is
 /// a staging failure, never a silent skip.
-fn quint_guest_model(
+fn quint_guest_model<'a>(
+    quint_modules: &'a [QuintGuestModule<'a>],
     binary_id: &str,
     test_name: &str,
-) -> Result<Option<&'static str>, NextestDispatchFailure> {
+) -> Result<Option<&'a str>, NextestDispatchFailure> {
     let mut segments = test_name.split("::").collect::<Vec<_>>();
     segments.pop();
     if !segments.iter().any(|segment| segment.starts_with("quint_")) {
         return Ok(None);
     }
-    QUINT_GUEST_MODULES
+    quint_modules
         .iter()
         .find(|(binary, prefix, _)| *binary == binary_id && test_name.starts_with(prefix))
         .map(|&(_, _, model)| Some(model))
         .ok_or_else(|| {
             NextestDispatchFailure::LaneNotPrepared(format!(
-                "guest-placed Quint test {binary_id}::{test_name} has no model declared in QUINT_GUEST_MODULES"
+                "guest-placed Quint test {binary_id}::{test_name} has no model declared by the dispatcher"
             ))
         })
 }
@@ -4405,6 +4398,7 @@ fn execute_nextest_guest_attempt(
 }
 
 fn run_nextest_group_attempt(
+    quint_modules: &[QuintGuestModule<'_>],
     group: &str,
     program: &str,
     args: &[String],
@@ -4415,7 +4409,7 @@ fn run_nextest_group_attempt(
     let mut environment = nextest_environment()?;
     environment.push((IN_GUEST_ENV.to_owned(), "1".to_owned()));
     let (mut attempt_files, current_dir) = nextest_attempt_files(program, &environment)?;
-    if let Some(model) = quint_guest_model(binary_id, test_name)? {
+    if let Some(model) = quint_guest_model(quint_modules, binary_id, test_name)? {
         attempt_files.extend(quint_test_guest_files(&current_dir, model)?);
     }
     let source_root =
@@ -4822,7 +4816,11 @@ fn guest_lane_dispatch(
     Ok(0)
 }
 
-fn nextest_wrapper_entry(program: &str, args: &[String]) -> Result<i32, NextestDispatchFailure> {
+fn nextest_wrapper_entry(
+    quint_modules: &[QuintGuestModule<'_>],
+    program: &str,
+    args: &[String],
+) -> Result<i32, NextestDispatchFailure> {
     let binary_id = std::env::var("NEXTEST_BINARY_ID").unwrap_or_default();
     let test_name = std::env::var("NEXTEST_TEST_NAME").unwrap_or_default();
     if std::env::var_os(GUEST_LANE_KIND_ENV).is_some()
@@ -4839,7 +4837,7 @@ fn nextest_wrapper_entry(program: &str, args: &[String]) -> Result<i32, NextestD
         )));
     }
     let group = std::env::var("OVERDRIVE_FWD_GUEST_GROUP").unwrap_or_default();
-    run_nextest_group_attempt(&group, program, args, &binary_id, &test_name)
+    run_nextest_group_attempt(quint_modules, &group, program, args, &binary_id, &test_name)
 }
 
 fn report_nextest_dispatch_failure(error: NextestDispatchFailure) -> ! {
@@ -4862,7 +4860,11 @@ fn report_nextest_dispatch_failure(error: NextestDispatchFailure) -> ! {
 /// Either the nextest wrapper entry (`--nextest-wrapper`) or the batched group
 /// runs selected by `OVERDRIVE_FWD_GUEST_GROUP`. The wrapper path exits the
 /// process with the attempt's status.
-pub fn run_dispatcher() {
+///
+/// `quint_modules` declares, per (binary id, test-name prefix), the Quint
+/// model a guest-placed `quint_*` test module resolves; one absent from it
+/// fails closed at staging. The dispatcher binary owns the table.
+pub fn run_dispatcher(quint_modules: &[QuintGuestModule<'_>]) {
     let mut args = std::env::args();
     let _program_name = args.next();
     if args.next().as_deref() == Some("--nextest-wrapper") {
@@ -4872,7 +4874,7 @@ pub fn run_dispatcher() {
             ));
         };
         let test_args = args.collect::<Vec<_>>();
-        let status = match nextest_wrapper_entry(&program, &test_args) {
+        let status = match nextest_wrapper_entry(quint_modules, &program, &test_args) {
             Ok(status) => status,
             Err(error) => report_nextest_dispatch_failure(error),
         };
@@ -4982,6 +4984,10 @@ mod tests {
         assert!(NETNS_VAR_RUN_COMPAT.contains("ln -s /run /var/run"));
     }
 
+    const MODEL: &str = "model-under-test";
+    const MODULES: [QuintGuestModule<'static>; 1] =
+        [("overdrive-gateway", "application::quint_gateway_application::", MODEL)];
+
     #[test]
     fn every_test_of_a_declared_quint_module_resolves_its_model() {
         for name in [
@@ -4992,10 +4998,10 @@ mod tests {
             "gateway_application_failed_candidate_not_restaged",
         ] {
             let test = format!("application::quint_gateway_application::{name}");
-            let model = quint_guest_model("overdrive-gateway", &test).expect("declared module");
+            let model = quint_guest_model(&MODULES, "overdrive-gateway", &test).expect("declared module");
             assert_eq!(
                 model,
-                Some("../../specs/quint/public-ingress-gateway/gateway_application.qnt")
+                Some(MODEL)
             );
         }
     }
@@ -5003,21 +5009,26 @@ mod tests {
     #[test]
     fn a_test_outside_any_quint_module_is_staged_no_quint_runtime() {
         let model = quint_guest_model(
+            &MODULES,
             "overdrive-gateway",
             "application::probe_completion_acceptance::a_test",
         )
         .expect("not a quint module");
         assert_eq!(model, None);
-        let named = quint_guest_model("overdrive-gateway", "application::quint_named_test")
+        let named = quint_guest_model(&MODULES, "overdrive-gateway", "application::quint_named_test")
             .expect("a quint-named test fn is not a quint module");
         assert_eq!(named, None);
     }
 
     #[test]
     fn an_undeclared_quint_module_fails_closed() {
-        assert!(quint_guest_model("overdrive-gateway", "runtime::quint_other::a_test").is_err());
+        assert!(quint_guest_model(&MODULES, "overdrive-gateway", "runtime::quint_other::a_test").is_err());
         assert!(
-            quint_guest_model("overdrive-worker", "application::quint_gateway_application::a_test")
+            quint_guest_model(
+                &MODULES,
+                "overdrive-worker",
+                "application::quint_gateway_application::a_test",
+            )
                 .is_err()
         );
     }
