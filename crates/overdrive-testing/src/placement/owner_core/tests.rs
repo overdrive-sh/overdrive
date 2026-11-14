@@ -22,9 +22,12 @@
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
+use overdrive_testing_macros::placement;
 use proptest::prelude::*;
 
 use super::{AttachId, Effect, Event, GuestView, OwnerCore, OwnerObservation, Verdict};
+
+placement!(host_pure);
 
 fn id(n: u32) -> AttachId {
     AttachId::new(n)
@@ -74,7 +77,6 @@ fn blank(
 
 /// CONTRACT_SHAPE: pure-function (a new core observes the empty state).
 #[test]
-#[ignore = "pending DELIVER: module-tests-share-one-guest"]
 fn a_new_owner_has_no_guest_no_clients_and_has_not_stopped() {
     let core = OwnerCore::new();
     assert_eq!(core.observe(), blank(0, GuestView::NoGuest, None, &[]));
@@ -86,7 +88,6 @@ fn a_new_owner_has_no_guest_no_clients_and_has_not_stopped() {
 /// and the guest stays for the next.
 /// CONTRACT_SHAPE: bounded-change (the owner's observable state and effects).
 #[test]
-#[ignore = "pending DELIVER: module-tests-share-one-guest"]
 fn three_clients_share_one_guest_and_are_served_in_arrival_order() {
     let mut core = OwnerCore::new();
     assert_eq!(feed(&mut core, Event::Attached(id(1))), vec![Effect::StartBoot]);
@@ -115,7 +116,6 @@ fn three_clients_share_one_guest_and_are_served_in_arrival_order() {
 /// waiting test is served on a replacement started in the same event.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER: module-tests-share-one-guest"]
 fn a_failed_test_discards_its_guest_and_the_next_test_gets_a_replacement() {
     let mut core = serving(&[1, 2, 3]);
     let effects = feed(&mut core, Event::ExecFinished(id(1), 1));
@@ -132,7 +132,6 @@ fn a_failed_test_discards_its_guest_and_the_next_test_gets_a_replacement() {
 /// A lost guest answers the running test and is replaced for the waiting one.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER: module-tests-share-one-guest"]
 fn a_guest_lost_during_a_test_answers_it_and_is_replaced_for_the_next() {
     let mut core = serving(&[1, 2]);
     let effects = feed(&mut core, Event::GuestLost);
@@ -145,7 +144,6 @@ fn a_guest_lost_during_a_test_answers_it_and_is_replaced_for_the_next() {
 /// attach, with generation + 1.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER: module-tests-share-one-guest"]
 fn a_guest_lost_while_idle_is_replaced_at_the_next_attach() {
     let mut core = serving(&[1]);
     let _ = feed(&mut core, Event::ExecFinished(id(1), 0));
@@ -165,7 +163,6 @@ fn a_guest_lost_while_idle_is_replaced_at_the_next_attach() {
 /// ends, whatever its verdict.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER: module-tests-share-one-guest"]
 fn a_client_that_goes_away_while_its_test_runs_taints_the_guest_and_is_never_answered() {
     let mut core = serving(&[1]);
     assert_eq!(feed(&mut core, Event::ClientGone(id(1))), vec![], "the exec is never cancelled");
@@ -185,7 +182,6 @@ fn a_client_that_goes_away_while_its_test_runs_taints_the_guest_and_is_never_ans
 /// A queued client that goes away is removed and is never served or answered.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER: module-tests-share-one-guest"]
 fn a_queued_client_that_goes_away_is_removed_and_never_served() {
     let mut core = serving(&[1, 2, 3]);
     assert_eq!(feed(&mut core, Event::ClientGone(id(2))), vec![]);
@@ -202,7 +198,6 @@ fn a_queued_client_that_goes_away_is_removed_and_never_served() {
 /// the next client at once; the failed client is not retried.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER: module-tests-share-one-guest"]
 fn a_boot_failure_answers_only_the_head_and_starts_a_new_boot_for_the_next() {
     let mut core = OwnerCore::new();
     let _ = core.handle(Event::Attached(id(1)));
@@ -218,7 +213,6 @@ fn a_boot_failure_answers_only_the_head_and_starts_a_new_boot_for_the_next() {
 /// next attach boots generation + 1.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER: module-tests-share-one-guest"]
 fn a_boot_that_fails_with_nobody_waiting_leaves_no_guest_and_notifies_nobody() {
     let mut core = OwnerCore::new();
     let _ = core.handle(Event::Attached(id(1)));
@@ -233,7 +227,6 @@ fn a_boot_that_fails_with_nobody_waiting_leaves_no_guest_and_notifies_nobody() {
 /// guest is discarded and the waiting client is served on a replacement.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER: module-tests-share-one-guest"]
 fn an_exec_that_reaches_its_bound_is_answered_exec_bound_and_its_guest_discarded() {
     let mut core = serving(&[1, 2]);
     let effects = feed(&mut core, Event::ExecBoundElapsed(id(1)));
@@ -246,7 +239,6 @@ fn an_exec_that_reaches_its_bound_is_answered_exec_bound_and_its_guest_discarded
 /// The late result of the exec that reached its bound reaches nobody.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER: module-tests-share-one-guest"]
 fn the_late_result_of_an_exec_that_reached_its_bound_changes_nothing() {
     let mut core = serving(&[1, 2]);
     let _ = core.handle(Event::ExecBoundElapsed(id(1)));
@@ -259,7 +251,6 @@ fn the_late_result_of_an_exec_that_reached_its_bound_changes_nothing() {
 /// result reaches nobody and the new client is not answered by it.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER: module-tests-share-one-guest"]
 fn a_late_result_from_a_detached_exec_reaches_nobody_not_even_the_next_client() {
     let mut core = serving(&[1]);
     let _ = core.handle(Event::ClientGone(id(1)));
@@ -272,7 +263,6 @@ fn a_late_result_from_a_detached_exec_reaches_nobody_not_even_the_next_client() 
 /// attached; a detached exec still counts as running.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER: module-tests-share-one-guest"]
 fn an_owner_exits_when_idle_and_never_while_work_is_queued_or_running() {
     let mut core = OwnerCore::new();
     let _ = core.handle(Event::Attached(id(1)));
@@ -293,7 +283,6 @@ fn an_owner_exits_when_idle_and_never_while_work_is_queued_or_running() {
 /// A detached exec is still in flight for the idle exit.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER: module-tests-share-one-guest"]
 fn a_detached_exec_still_counts_as_running_for_the_idle_exit() {
     let mut core = serving(&[1]);
     let _ = core.handle(Event::ClientGone(id(1)));
@@ -304,7 +293,6 @@ fn a_detached_exec_still_counts_as_running_for_the_idle_exit() {
 /// After the owner exits every event is ignored.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[ignore = "pending DELIVER: module-tests-share-one-guest"]
 fn after_the_owner_exits_every_event_is_ignored() {
     let mut core = OwnerCore::new();
     assert_eq!(feed(&mut core, Event::IdleElapsed), vec![Effect::Exit]);
@@ -473,7 +461,16 @@ fn step(core: &mut OwnerCore, oracle: &mut Oracle, event: Event) {
                 assert_eq!(head, Some(*c), "serving order is arrival order");
                 oracle.running = Some(*c);
             }
-            Effect::Reply(c, _) => {
+            Effect::Reply(c, verdict) => {
+                // a failed boot answers the head of the queue and takes it out of the line
+                if *verdict == Verdict::BootFailed {
+                    assert_eq!(
+                        oracle.arrival.front(),
+                        Some(c),
+                        "a boot failure answers the head of the arrival order"
+                    );
+                    oracle.arrival.pop_front();
+                }
                 // I_DELIVER_ONLY_ATTACHED: not to a client that went away, once each
                 assert!(!oracle.gone.contains(c), "a reply reached client {c:?} who went away");
                 assert!(oracle.seen.contains(c), "a reply reached a client never attached");
@@ -544,7 +541,6 @@ proptest! {
     /// never exits with work remaining.
     /// CONTRACT_SHAPE: unbounded-preservation.
     #[test]
-    #[ignore = "pending DELIVER: module-tests-share-one-guest"]
     fn seeded_event_schedules_keep_the_owner_invariants(ops in proptest::collection::vec(op(), 0..60)) {
         let _ = run_schedule(&ops);
     }
@@ -553,7 +549,6 @@ proptest! {
     /// not go away is answered exactly once (the model's `EveryClientTerminates`).
     /// CONTRACT_SHAPE: unbounded-preservation.
     #[test]
-    #[ignore = "pending DELIVER: module-tests-share-one-guest"]
     fn every_attached_client_that_stays_is_answered_once_when_the_environment_answers_everything(
         ops in proptest::collection::vec(op(), 0..40),
     ) {
@@ -586,7 +581,6 @@ proptest! {
     /// event.
     /// CONTRACT_SHAPE: unbounded-preservation.
     #[test]
-    #[ignore = "pending DELIVER: module-tests-share-one-guest"]
     fn events_that_are_not_enabled_change_nothing(ops in proptest::collection::vec(op(), 0..60)) {
         let (mut core, oracle) = run_schedule(&ops);
         let now = core.observe();

@@ -51,10 +51,13 @@
 use std::collections::BTreeMap;
 
 use itf::Value;
+use overdrive_testing_macros::placement;
 use quint_connect::{Config, Driver, Result, State, Step, quint_run, quint_test, switch};
 use serde::Deserialize;
 
 use super::{AttachId, Event, GuestView, OwnerCore};
+
+placement!(host_pure);
 
 const MAIN: &str = "guest_conf";
 const MODULE: &str = "shared_guest";
@@ -216,7 +219,6 @@ impl Driver for OwnerDriver {
     max_samples = 1,
     test = "happy_path_three_clients_share_one_guest"
 )]
-#[ignore = "pending DELIVER: module-tests-share-one-guest"]
 fn quint_shared_guest_happy_path_three_clients_share_one_guest() -> impl Driver {
     OwnerDriver::new()
 }
@@ -229,7 +231,6 @@ fn quint_shared_guest_happy_path_three_clients_share_one_guest() -> impl Driver 
     max_samples = 1,
     test = "failure_then_replacement_guest"
 )]
-#[ignore = "pending DELIVER: module-tests-share-one-guest"]
 fn quint_shared_guest_failure_then_replacement_guest() -> impl Driver {
     OwnerDriver::new()
 }
@@ -242,7 +243,6 @@ fn quint_shared_guest_failure_then_replacement_guest() -> impl Driver {
     max_samples = 1,
     test = "guest_lost_mid_exec_then_replacement"
 )]
-#[ignore = "pending DELIVER: module-tests-share-one-guest"]
 fn quint_shared_guest_guest_lost_mid_exec_then_replacement() -> impl Driver {
     OwnerDriver::new()
 }
@@ -255,7 +255,6 @@ fn quint_shared_guest_guest_lost_mid_exec_then_replacement() -> impl Driver {
     max_samples = 1,
     test = "disconnect_while_running_next_waits"
 )]
-#[ignore = "pending DELIVER: module-tests-share-one-guest"]
 fn quint_shared_guest_disconnect_while_running_next_waits() -> impl Driver {
     OwnerDriver::new()
 }
@@ -268,7 +267,6 @@ fn quint_shared_guest_disconnect_while_running_next_waits() -> impl Driver {
     max_samples = 1,
     test = "disconnect_while_queued_is_removed"
 )]
-#[ignore = "pending DELIVER: module-tests-share-one-guest"]
 fn quint_shared_guest_disconnect_while_queued_is_removed() -> impl Driver {
     OwnerDriver::new()
 }
@@ -281,7 +279,6 @@ fn quint_shared_guest_disconnect_while_queued_is_removed() -> impl Driver {
     max_samples = 1,
     test = "boot_failure_then_retry_boot_on_next_attach"
 )]
-#[ignore = "pending DELIVER: module-tests-share-one-guest"]
 fn quint_shared_guest_boot_failure_then_retry_boot_on_next_attach() -> impl Driver {
     OwnerDriver::new()
 }
@@ -294,7 +291,6 @@ fn quint_shared_guest_boot_failure_then_retry_boot_on_next_attach() -> impl Driv
     max_samples = 1,
     test = "exec_bound_discards_guest_and_replies_bound"
 )]
-#[ignore = "pending DELIVER: module-tests-share-one-guest"]
 fn quint_shared_guest_exec_bound_discards_guest_and_replies_bound() -> impl Driver {
     OwnerDriver::new()
 }
@@ -307,7 +303,6 @@ fn quint_shared_guest_exec_bound_discards_guest_and_replies_bound() -> impl Driv
     max_samples = 1,
     test = "idle_exit_only_when_empty"
 )]
-#[ignore = "pending DELIVER: module-tests-share-one-guest"]
 fn quint_shared_guest_idle_exit_only_when_empty() -> impl Driver {
     OwnerDriver::new()
 }
@@ -318,7 +313,6 @@ fn quint_shared_guest_idle_exit_only_when_empty() -> impl Driver {
     main = "guest_conf",
     max_samples = 64
 )]
-#[ignore = "pending DELIVER: module-tests-share-one-guest"]
 fn quint_shared_guest_randomized_traces() -> impl Driver {
     OwnerDriver::new()
 }
