@@ -508,6 +508,17 @@ provision:
         rm -rf "${CH_FETCH}"
       fi
       [ -f "${CH_SOURCE}/Cargo.toml" ] || { echo "FATAL: pinned source missing at ${CH_SOURCE}" >&2; exit 1; }
+      # Optional host-built seed (CI builds the fork once per pinned revision
+      # outside the VM; compiling it here takes >20 min). The host home is
+      # mounted at the same path, so the seed is read from there. It is staged
+      # as CH_ARTIFACT only when its checksum matches the pin; an absent or
+      # non-matching seed falls through to the local build below.
+      CH_SEED="{{ .Home }}/.cache/overdrive-ch-seed/${CH_REV}/${CH_TARGET}/cloud-hypervisor"
+      if [ ! -e "${CH_ARTIFACT}" ] && [ -f "${CH_SEED}" ] \
+         && printf '%s  %s\n' "${CH_EXPECTED}" "${CH_SEED}" | sha256sum --check --status; then
+        mkdir -p "$(dirname "${CH_ARTIFACT}")"
+        install -m 0755 "${CH_SEED}" "${CH_ARTIFACT}"
+      fi
       if [ -e "${CH_ARTIFACT}" ]; then
         [ -f "${CH_ARTIFACT}" ] || { echo "FATAL: staged artifact is not a file: ${CH_ARTIFACT}" >&2; exit 1; }
         if ! printf '%s  %s\n' "${CH_EXPECTED}" "${CH_ARTIFACT}" | sha256sum --check --status; then

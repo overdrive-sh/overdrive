@@ -1,0 +1,59 @@
+name: Lima VM
+description: >
+  Bring up the `overdrive` Lima dev VM (after lima-vm/lima-actions/setup).
+  Restores the VM from cache; on a miss, cold-provisions it with the pinned
+  Cloud Hypervisor fork binary seeded from the `cloud-hypervisor` job's cache
+  (so provisioning does not compile the fork), then saves the provisioned VM to
+  the cache immediately — independent of whether the calling job later passes.
+
+runs:
+  using: composite
+  steps:
+    - name: Restore Lima VM cache
+      id: lima-cache
+      uses: actions/cache/restore@v4
+      with:
+        path: ~/.lima/overdrive
+        key: lima-${{ hashFiles('infra/lima/overdrive-dev.yaml') }}-${{ runner.arch }}
+
+    - name: Resolve pinned Cloud Hypervisor identity
+      if: steps.lima-cache.outputs.cache-hit != 'true'
+      id: pins
+      shell: bash
+      run: .github/scripts/ch-pins.sh >> "$GITHUB_OUTPUT"
+
+    # Lima mounts the host home into the guest at the same path; the provision
+    # script copies the binary from here into its CH_ARTIFACT path after a
+    # sha256 check (infra/lima/overdrive-dev.yaml, user provision block).
+    - name: Restore Cloud Hypervisor seed
+      if: steps.lima-cache.outputs.cache-hit != 'true'
+      uses: actions/cache/restore@v4
+      with:
+        path: ~/.cache/overdrive-ch-seed
+        key: ${{ steps.pins.outputs.key }}
+        fail-on-cache-miss: true
+
+    - name: Provision Lima VM (cache miss)
+      if: steps.lima-cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: limactl start --timeout=30m --name=overdrive --tty=false --cpus=8 --memory=16 infra/lima/overdrive-dev.yaml
+
+    # The disk must be quiescent for the save ("file changed as we read it"),
+    # so stop the VM, save, and start it again. Saving here rather than in the
+    # job's post step means one successful provision populates the cache even
+    # if the calling job later fails or is cancelled.
+    - name: Stop provisioned Lima VM (release disk before cache save)
+      if: steps.lima-cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: limactl stop overdrive
+
+    - name: Save Lima VM cache
+      if: steps.lima-cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v4
+      with:
+        path: ~/.lima/overdrive
+        key: lima-${{ hashFiles('infra/lima/overdrive-dev.yaml') }}-${{ runner.arch }}
+
+    - name: Start Lima VM
+      shell: bash
+      run: limactl start --timeout=30m overdrive
