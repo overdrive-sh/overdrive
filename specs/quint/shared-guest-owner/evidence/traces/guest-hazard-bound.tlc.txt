@@ -1,12 +1,8 @@
 State 1: <Initial predicate>
-/\ guest_bugNoBound_shared_guest_torn = FALSE
 /\ guest_bugNoBound_shared_guest_execs = 0
 /\ guest_bugNoBound_shared_guest_idleLoss = FALSE
-/\ guest_bugNoBound_shared_guest_nseq = 1
 /\ guest_bugNoBound_shared_guest_owners = 0
 /\ guest_bugNoBound_shared_guest_lock = 0
-/\ guest_bugNoBound_shared_guest_lastb = 0
-/\ guest_bugNoBound_shared_guest_fifobad = FALSE
 /\ guest_bugNoBound_shared_guest_queue = <<>>
 /\ guest_bugNoBound_shared_guest_guest = 0
 /\ guest_bugNoBound_shared_guest_inflight = 0
@@ -14,19 +10,14 @@ State 1: <Initial predicate>
 /\ guest_bugNoBound_shared_guest_faults = 2
 /\ guest_bugNoBound_shared_guest_gen = 0
 /\ guest_bugNoBound_shared_guest_bad = {}
-/\ guest_bugNoBound_shared_guest_seq = <<0, 0, 0>>
 /\ guest_bugNoBound_shared_guest_execgen = 0
 /\ guest_bugNoBound_shared_guest_phase = <<0, 0, 0>>
 
-State 2: <guest_bugNoBound_shared_guest_Arrive line 536, col 3 to line 544, col 67 of module guest_bugNoBound>
-/\ guest_bugNoBound_shared_guest_torn = FALSE
+State 2: <guest_bugNoBound_shared_guest_Arrive line 442, col 3 to line 449, col 67 of module guest_bugNoBound>
 /\ guest_bugNoBound_shared_guest_execs = 0
 /\ guest_bugNoBound_shared_guest_idleLoss = FALSE
-/\ guest_bugNoBound_shared_guest_nseq = 1
 /\ guest_bugNoBound_shared_guest_owners = 0
 /\ guest_bugNoBound_shared_guest_lock = 0
-/\ guest_bugNoBound_shared_guest_lastb = 0
-/\ guest_bugNoBound_shared_guest_fifobad = FALSE
 /\ guest_bugNoBound_shared_guest_queue = <<>>
 /\ guest_bugNoBound_shared_guest_guest = 0
 /\ guest_bugNoBound_shared_guest_inflight = 0
@@ -34,39 +25,14 @@ State 2: <guest_bugNoBound_shared_guest_Arrive line 536, col 3 to line 544, col 
 /\ guest_bugNoBound_shared_guest_faults = 2
 /\ guest_bugNoBound_shared_guest_gen = 0
 /\ guest_bugNoBound_shared_guest_bad = {}
-/\ guest_bugNoBound_shared_guest_seq = <<0, 0, 0>>
 /\ guest_bugNoBound_shared_guest_execgen = 0
-/\ guest_bugNoBound_shared_guest_phase = <<0, 0, 1>>
+/\ guest_bugNoBound_shared_guest_phase = <<1, 0, 0>>
 
-State 3: <guest_bugNoBound_shared_guest_Arrive line 536, col 3 to line 544, col 67 of module guest_bugNoBound>
-/\ guest_bugNoBound_shared_guest_torn = FALSE
+State 3: <guest_bugNoBound_shared_guest_ElectBegin line 538, col 3 to line 546, col 74 of module guest_bugNoBound>
 /\ guest_bugNoBound_shared_guest_execs = 0
 /\ guest_bugNoBound_shared_guest_idleLoss = FALSE
-/\ guest_bugNoBound_shared_guest_nseq = 1
-/\ guest_bugNoBound_shared_guest_owners = 0
-/\ guest_bugNoBound_shared_guest_lock = 0
-/\ guest_bugNoBound_shared_guest_lastb = 0
-/\ guest_bugNoBound_shared_guest_fifobad = FALSE
-/\ guest_bugNoBound_shared_guest_queue = <<>>
-/\ guest_bugNoBound_shared_guest_guest = 0
-/\ guest_bugNoBound_shared_guest_inflight = 0
-/\ guest_bugNoBound_shared_guest_conf_step = [Init |-> [tag |-> "UNIT"]]
-/\ guest_bugNoBound_shared_guest_faults = 2
-/\ guest_bugNoBound_shared_guest_gen = 0
-/\ guest_bugNoBound_shared_guest_bad = {}
-/\ guest_bugNoBound_shared_guest_seq = <<0, 0, 0>>
-/\ guest_bugNoBound_shared_guest_execgen = 0
-/\ guest_bugNoBound_shared_guest_phase = <<1, 0, 1>>
-
-State 4: <guest_bugNoBound_shared_guest_ElectBegin line 701, col 3 to line 709, col 74 of module guest_bugNoBound>
-/\ guest_bugNoBound_shared_guest_torn = FALSE
-/\ guest_bugNoBound_shared_guest_execs = 0
-/\ guest_bugNoBound_shared_guest_idleLoss = FALSE
-/\ guest_bugNoBound_shared_guest_nseq = 1
 /\ guest_bugNoBound_shared_guest_owners = 0
 /\ guest_bugNoBound_shared_guest_lock = 1
-/\ guest_bugNoBound_shared_guest_lastb = 0
-/\ guest_bugNoBound_shared_guest_fifobad = FALSE
 /\ guest_bugNoBound_shared_guest_queue = <<>>
 /\ guest_bugNoBound_shared_guest_guest = 0
 /\ guest_bugNoBound_shared_guest_inflight = 0
@@ -74,39 +40,44 @@ State 4: <guest_bugNoBound_shared_guest_ElectBegin line 701, col 3 to line 709, 
 /\ guest_bugNoBound_shared_guest_faults = 2
 /\ guest_bugNoBound_shared_guest_gen = 0
 /\ guest_bugNoBound_shared_guest_bad = {}
-/\ guest_bugNoBound_shared_guest_seq = <<0, 0, 0>>
+/\ guest_bugNoBound_shared_guest_execgen = 0
+/\ guest_bugNoBound_shared_guest_phase = <<2, 0, 0>>
+
+State 4: <guest_bugNoBound_shared_guest_Arrive line 442, col 3 to line 449, col 67 of module guest_bugNoBound>
+/\ guest_bugNoBound_shared_guest_execs = 0
+/\ guest_bugNoBound_shared_guest_idleLoss = FALSE
+/\ guest_bugNoBound_shared_guest_owners = 0
+/\ guest_bugNoBound_shared_guest_lock = 1
+/\ guest_bugNoBound_shared_guest_queue = <<>>
+/\ guest_bugNoBound_shared_guest_guest = 0
+/\ guest_bugNoBound_shared_guest_inflight = 0
+/\ guest_bugNoBound_shared_guest_conf_step = [Init |-> [tag |-> "UNIT"]]
+/\ guest_bugNoBound_shared_guest_faults = 2
+/\ guest_bugNoBound_shared_guest_gen = 0
+/\ guest_bugNoBound_shared_guest_bad = {}
 /\ guest_bugNoBound_shared_guest_execgen = 0
 /\ guest_bugNoBound_shared_guest_phase = <<2, 0, 1>>
 
-State 5: <guest_bugNoBound_shared_guest_OwnerStarted line 715, col 3 to line 732, col 47 of module guest_bugNoBound>
-/\ guest_bugNoBound_shared_guest_torn = FALSE
+State 5: <guest_bugNoBound_shared_guest_Arrive line 442, col 3 to line 449, col 67 of module guest_bugNoBound>
 /\ guest_bugNoBound_shared_guest_execs = 0
 /\ guest_bugNoBound_shared_guest_idleLoss = FALSE
-/\ guest_bugNoBound_shared_guest_nseq = 2
-/\ guest_bugNoBound_shared_guest_owners = 1
-/\ guest_bugNoBound_shared_guest_lock = 0
-/\ guest_bugNoBound_shared_guest_lastb = 0
-/\ guest_bugNoBound_shared_guest_fifobad = FALSE
-/\ guest_bugNoBound_shared_guest_queue = <<1>>
-/\ guest_bugNoBound_shared_guest_guest = 1
+/\ guest_bugNoBound_shared_guest_owners = 0
+/\ guest_bugNoBound_shared_guest_lock = 1
+/\ guest_bugNoBound_shared_guest_queue = <<>>
+/\ guest_bugNoBound_shared_guest_guest = 0
 /\ guest_bugNoBound_shared_guest_inflight = 0
 /\ guest_bugNoBound_shared_guest_conf_step = [Init |-> [tag |-> "UNIT"]]
 /\ guest_bugNoBound_shared_guest_faults = 2
-/\ guest_bugNoBound_shared_guest_gen = 1
+/\ guest_bugNoBound_shared_guest_gen = 0
 /\ guest_bugNoBound_shared_guest_bad = {}
-/\ guest_bugNoBound_shared_guest_seq = <<1, 0, 0>>
 /\ guest_bugNoBound_shared_guest_execgen = 0
-/\ guest_bugNoBound_shared_guest_phase = <<3, 0, 1>>
+/\ guest_bugNoBound_shared_guest_phase = <<2, 1, 1>>
 
-State 6: <guest_bugNoBound_shared_guest_Arrive line 536, col 3 to line 544, col 67 of module guest_bugNoBound>
-/\ guest_bugNoBound_shared_guest_torn = FALSE
+State 6: <guest_bugNoBound_shared_guest_OwnerStarted line 552, col 3 to line 568, col 46 of module guest_bugNoBound>
 /\ guest_bugNoBound_shared_guest_execs = 0
 /\ guest_bugNoBound_shared_guest_idleLoss = FALSE
-/\ guest_bugNoBound_shared_guest_nseq = 2
 /\ guest_bugNoBound_shared_guest_owners = 1
 /\ guest_bugNoBound_shared_guest_lock = 0
-/\ guest_bugNoBound_shared_guest_lastb = 0
-/\ guest_bugNoBound_shared_guest_fifobad = FALSE
 /\ guest_bugNoBound_shared_guest_queue = <<1>>
 /\ guest_bugNoBound_shared_guest_guest = 1
 /\ guest_bugNoBound_shared_guest_inflight = 0
@@ -114,68 +85,97 @@ State 6: <guest_bugNoBound_shared_guest_Arrive line 536, col 3 to line 544, col 
 /\ guest_bugNoBound_shared_guest_faults = 2
 /\ guest_bugNoBound_shared_guest_gen = 1
 /\ guest_bugNoBound_shared_guest_bad = {}
-/\ guest_bugNoBound_shared_guest_seq = <<1, 0, 0>>
 /\ guest_bugNoBound_shared_guest_execgen = 0
 /\ guest_bugNoBound_shared_guest_phase = <<3, 1, 1>>
 
-State 7: <guest_bugNoBound_shared_guest_BootFinished line 808, col 3 to line 828, col 80 of module guest_bugNoBound>
-/\ guest_bugNoBound_shared_guest_torn = FALSE
-/\ guest_bugNoBound_shared_guest_execs = 1
+State 7: <guest_bugNoBound_shared_guest_Attached line 574, col 3 to line 586, col 46 of module guest_bugNoBound>
+/\ guest_bugNoBound_shared_guest_execs = 0
 /\ guest_bugNoBound_shared_guest_idleLoss = FALSE
-/\ guest_bugNoBound_shared_guest_nseq = 2
 /\ guest_bugNoBound_shared_guest_owners = 1
 /\ guest_bugNoBound_shared_guest_lock = 0
-/\ guest_bugNoBound_shared_guest_lastb = 1
-/\ guest_bugNoBound_shared_guest_fifobad = FALSE
+/\ guest_bugNoBound_shared_guest_queue = <<1, 2>>
+/\ guest_bugNoBound_shared_guest_guest = 1
+/\ guest_bugNoBound_shared_guest_inflight = 0
+/\ guest_bugNoBound_shared_guest_conf_step = [Init |-> [tag |-> "UNIT"]]
+/\ guest_bugNoBound_shared_guest_faults = 2
+/\ guest_bugNoBound_shared_guest_gen = 1
+/\ guest_bugNoBound_shared_guest_bad = {}
+/\ guest_bugNoBound_shared_guest_execgen = 0
+/\ guest_bugNoBound_shared_guest_phase = <<3, 3, 1>>
+
+State 8: <guest_bugNoBound_shared_guest_Attached line 574, col 3 to line 586, col 46 of module guest_bugNoBound>
+/\ guest_bugNoBound_shared_guest_execs = 0
+/\ guest_bugNoBound_shared_guest_idleLoss = FALSE
+/\ guest_bugNoBound_shared_guest_owners = 1
+/\ guest_bugNoBound_shared_guest_lock = 0
+/\ guest_bugNoBound_shared_guest_queue = <<1, 2, 3>>
+/\ guest_bugNoBound_shared_guest_guest = 1
+/\ guest_bugNoBound_shared_guest_inflight = 0
+/\ guest_bugNoBound_shared_guest_conf_step = [Init |-> [tag |-> "UNIT"]]
+/\ guest_bugNoBound_shared_guest_faults = 2
+/\ guest_bugNoBound_shared_guest_gen = 1
+/\ guest_bugNoBound_shared_guest_bad = {}
+/\ guest_bugNoBound_shared_guest_execgen = 0
+/\ guest_bugNoBound_shared_guest_phase = <<3, 3, 3>>
+
+State 9: <guest_bugNoBound_shared_guest_ClientGone line 592, col 3 to line 636, col 78 of module guest_bugNoBound>
+/\ guest_bugNoBound_shared_guest_execs = 0
+/\ guest_bugNoBound_shared_guest_idleLoss = FALSE
+/\ guest_bugNoBound_shared_guest_owners = 1
+/\ guest_bugNoBound_shared_guest_lock = 0
+/\ guest_bugNoBound_shared_guest_queue = <<1, 2>>
+/\ guest_bugNoBound_shared_guest_guest = 1
+/\ guest_bugNoBound_shared_guest_inflight = 0
+/\ guest_bugNoBound_shared_guest_conf_step = [Init |-> [tag |-> "UNIT"]]
+/\ guest_bugNoBound_shared_guest_faults = 2
+/\ guest_bugNoBound_shared_guest_gen = 1
+/\ guest_bugNoBound_shared_guest_bad = {}
+/\ guest_bugNoBound_shared_guest_execgen = 0
+/\ guest_bugNoBound_shared_guest_phase = <<3, 3, 6>>
+
+State 10: <guest_bugNoBound_shared_guest_ClientGone line 592, col 3 to line 636, col 78 of module guest_bugNoBound>
+/\ guest_bugNoBound_shared_guest_execs = 0
+/\ guest_bugNoBound_shared_guest_idleLoss = FALSE
+/\ guest_bugNoBound_shared_guest_owners = 1
+/\ guest_bugNoBound_shared_guest_lock = 0
+/\ guest_bugNoBound_shared_guest_queue = <<2>>
+/\ guest_bugNoBound_shared_guest_guest = 1
+/\ guest_bugNoBound_shared_guest_inflight = 0
+/\ guest_bugNoBound_shared_guest_conf_step = [Init |-> [tag |-> "UNIT"]]
+/\ guest_bugNoBound_shared_guest_faults = 2
+/\ guest_bugNoBound_shared_guest_gen = 1
+/\ guest_bugNoBound_shared_guest_bad = {}
+/\ guest_bugNoBound_shared_guest_execgen = 0
+/\ guest_bugNoBound_shared_guest_phase = <<6, 3, 6>>
+
+State 11: <guest_bugNoBound_shared_guest_BootFinished line 642, col 3 to line 662, col 80 of module guest_bugNoBound>
+/\ guest_bugNoBound_shared_guest_execs = 1
+/\ guest_bugNoBound_shared_guest_idleLoss = FALSE
+/\ guest_bugNoBound_shared_guest_owners = 1
+/\ guest_bugNoBound_shared_guest_lock = 0
 /\ guest_bugNoBound_shared_guest_queue = <<>>
 /\ guest_bugNoBound_shared_guest_guest = 2
-/\ guest_bugNoBound_shared_guest_inflight = 1
+/\ guest_bugNoBound_shared_guest_inflight = 2
 /\ guest_bugNoBound_shared_guest_conf_step = [Init |-> [tag |-> "UNIT"]]
 /\ guest_bugNoBound_shared_guest_faults = 2
 /\ guest_bugNoBound_shared_guest_gen = 1
 /\ guest_bugNoBound_shared_guest_bad = {}
-/\ guest_bugNoBound_shared_guest_seq = <<1, 0, 0>>
 /\ guest_bugNoBound_shared_guest_execgen = 1
-/\ guest_bugNoBound_shared_guest_phase = <<4, 1, 1>>
+/\ guest_bugNoBound_shared_guest_phase = <<6, 4, 6>>
 
-State 8: <guest_bugNoBound_shared_guest_Attached line 738, col 3 to line 751, col 47 of module guest_bugNoBound>
-/\ guest_bugNoBound_shared_guest_torn = FALSE
+State 12: <guest_bugNoBound_shared_guest_ClientGone line 592, col 3 to line 636, col 78 of module guest_bugNoBound>
 /\ guest_bugNoBound_shared_guest_execs = 1
 /\ guest_bugNoBound_shared_guest_idleLoss = FALSE
-/\ guest_bugNoBound_shared_guest_nseq = 3
 /\ guest_bugNoBound_shared_guest_owners = 1
 /\ guest_bugNoBound_shared_guest_lock = 0
-/\ guest_bugNoBound_shared_guest_lastb = 1
-/\ guest_bugNoBound_shared_guest_fifobad = FALSE
-/\ guest_bugNoBound_shared_guest_queue = <<3>>
+/\ guest_bugNoBound_shared_guest_queue = <<>>
 /\ guest_bugNoBound_shared_guest_guest = 2
-/\ guest_bugNoBound_shared_guest_inflight = 1
+/\ guest_bugNoBound_shared_guest_inflight = 2
 /\ guest_bugNoBound_shared_guest_conf_step = [Init |-> [tag |-> "UNIT"]]
 /\ guest_bugNoBound_shared_guest_faults = 2
 /\ guest_bugNoBound_shared_guest_gen = 1
-/\ guest_bugNoBound_shared_guest_bad = {}
-/\ guest_bugNoBound_shared_guest_seq = <<1, 0, 2>>
+/\ guest_bugNoBound_shared_guest_bad = {1}
 /\ guest_bugNoBound_shared_guest_execgen = 1
-/\ guest_bugNoBound_shared_guest_phase = <<4, 1, 3>>
+/\ guest_bugNoBound_shared_guest_phase = <<6, 5, 6>>
 
-State 9: <guest_bugNoBound_shared_guest_Attached line 738, col 3 to line 751, col 47 of module guest_bugNoBound>
-/\ guest_bugNoBound_shared_guest_torn = FALSE
-/\ guest_bugNoBound_shared_guest_execs = 1
-/\ guest_bugNoBound_shared_guest_idleLoss = FALSE
-/\ guest_bugNoBound_shared_guest_nseq = 4
-/\ guest_bugNoBound_shared_guest_owners = 1
-/\ guest_bugNoBound_shared_guest_lock = 0
-/\ guest_bugNoBound_shared_guest_lastb = 1
-/\ guest_bugNoBound_shared_guest_fifobad = FALSE
-/\ guest_bugNoBound_shared_guest_queue = <<3, 2>>
-/\ guest_bugNoBound_shared_guest_guest = 2
-/\ guest_bugNoBound_shared_guest_inflight = 1
-/\ guest_bugNoBound_shared_guest_conf_step = [Init |-> [tag |-> "UNIT"]]
-/\ guest_bugNoBound_shared_guest_faults = 2
-/\ guest_bugNoBound_shared_guest_gen = 1
-/\ guest_bugNoBound_shared_guest_bad = {}
-/\ guest_bugNoBound_shared_guest_seq = <<1, 3, 2>>
-/\ guest_bugNoBound_shared_guest_execgen = 1
-/\ guest_bugNoBound_shared_guest_phase = <<4, 3, 3>>
-
-State 10: Stuttering
+State 13: Stuttering

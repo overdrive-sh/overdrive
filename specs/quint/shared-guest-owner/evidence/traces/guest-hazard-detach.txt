@@ -5,20 +5,15 @@ State 1
   guest = 0
   inflight = 0
   gen = 0
-  torn = FALSE
   phase = <<0, 0, 0>>
   bad = {}
-  seq = <<0, 0, 0>>
   conf_step = [Init |-> [tag |-> "UNIT"]]
   execs = 0
   owners = 0
   idleLoss = FALSE
-  nseq = 1
-  fifobad = FALSE
   lock = 0
   faults = 2
   execgen = 0
-  lastb = 0
 
 State 2 [Arrive]
   phase = <<1, 0, 0>>
@@ -32,9 +27,7 @@ State 4 [OwnerStarted]
   guest = 1
   gen = 1
   phase = <<3, 0, 0>>
-  seq = <<1, 0, 0>>
   owners = 1
-  nseq = 2
   lock = 0
 
 State 5 [BootFinished]
@@ -44,7 +37,6 @@ State 5 [BootFinished]
   phase = <<4, 0, 0>>
   execs = 1
   execgen = 1
-  lastb = 1
 
 State 6 [ClientGone]
   inflight = 0
@@ -56,7 +48,4 @@ State 7 [Arrive]
 State 8 [Attached]
   inflight = 2
   phase = <<6, 4, 0>>
-  seq = <<1, 2, 0>>
   execs = 2
-  nseq = 3
-  lastb = 2

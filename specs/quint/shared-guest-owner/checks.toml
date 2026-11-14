@@ -1,6 +1,5 @@
 # Checks for specs/quint/shared-guest-owner/ (shared-guest owner protocol, DDD-8/9/10).
-# ci = true iff the check took under 60 s in the latest record (guest-every-client-terminates 81 s and
-# guest-hazard-bound 67 s are ci = false).
+# ci = true iff the check took under 60 s in the latest record.
 # Decisions: D-OWNER, D-LIFE, D-SERIAL, D-DETACH, D-TAINT, D-BOUND, D-IDLE. One hazard per decision.
 # Runs on guest_conf (ENV=false, owner-driven) are the #[quint_test] pins; runs on guest_env (ENV=true) are
 # checked by the evaluator and not pinned by conformance.
@@ -21,7 +20,7 @@ main = "guest_ok"
 temporal = "EveryClientTerminates"
 backend = "tlc"
 expect = "holds"
-ci = false
+ci = true
 
 [[check]]
 name = "guest-hazard-owner"
@@ -75,7 +74,7 @@ main = "guest_bugNoBound"
 temporal = "EveryClientTerminates"
 backend = "tlc"
 expect = "violation"
-ci = false
+ci = true
 
 [[check]]
 name = "guest-hazard-idle"
@@ -177,28 +176,10 @@ expect = "holds"
 ci = true
 
 [[check]]
-name = "guest-run-elector-killed-before-owner-starts"
-spec = "shared_guest.qnt"
-main = "guest_env"
-run = "elector_killed_before_owner_starts"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
 name = "guest-run-owner-start-fails-then-next-elects"
 spec = "shared_guest.qnt"
 main = "guest_env"
 run = "owner_start_fails_then_next_elects"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "guest-run-run-teardown-removes-leftovers"
-spec = "shared_guest.qnt"
-main = "guest_env"
-run = "run_teardown_removes_leftovers"
 backend = "evaluator"
 expect = "holds"
 ci = true

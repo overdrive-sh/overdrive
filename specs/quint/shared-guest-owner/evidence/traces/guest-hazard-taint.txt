@@ -2,11 +2,7 @@
 
 State 1
   execs = 0
-  torn = FALSE
   owners = 0
-  fifobad = FALSE
-  nseq = 1
-  lastb = 0
   faults = 2
   idleLoss = FALSE
   queue = <<>>
@@ -15,7 +11,6 @@ State 1
   lock = 0
   gen = 0
   bad = {}
-  seq = <<0, 0, 0>>
   phase = <<0, 0, 0>>
   conf_step = [Init |-> [tag |-> "UNIT"]]
   inflight = 0
@@ -29,17 +24,14 @@ State 3 [ElectBegin]
 
 State 4 [OwnerStarted]
   owners = 1
-  nseq = 2
   queue = <<1>>
   guest = 1
   lock = 0
   gen = 1
-  seq = <<1, 0, 0>>
   phase = <<3, 0, 0>>
 
 State 5 [BootFinished]
   execs = 1
-  lastb = 1
   queue = <<>>
   guest = 2
   execgen = 1

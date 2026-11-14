@@ -1,10 +1,6 @@
 State 1: <Initial predicate>
 /\ guest_bugNoTaint_shared_guest_execs = 0
-/\ guest_bugNoTaint_shared_guest_torn = FALSE
 /\ guest_bugNoTaint_shared_guest_owners = 0
-/\ guest_bugNoTaint_shared_guest_fifobad = FALSE
-/\ guest_bugNoTaint_shared_guest_nseq = 1
-/\ guest_bugNoTaint_shared_guest_lastb = 0
 /\ guest_bugNoTaint_shared_guest_faults = 2
 /\ guest_bugNoTaint_shared_guest_idleLoss = FALSE
 /\ guest_bugNoTaint_shared_guest_queue = <<>>
@@ -13,18 +9,13 @@ State 1: <Initial predicate>
 /\ guest_bugNoTaint_shared_guest_lock = 0
 /\ guest_bugNoTaint_shared_guest_gen = 0
 /\ guest_bugNoTaint_shared_guest_bad = {}
-/\ guest_bugNoTaint_shared_guest_seq = <<0, 0, 0>>
 /\ guest_bugNoTaint_shared_guest_phase = <<0, 0, 0>>
 /\ guest_bugNoTaint_shared_guest_conf_step = [Init |-> [tag |-> "UNIT"]]
 /\ guest_bugNoTaint_shared_guest_inflight = 0
 
-State 2: <guest_bugNoTaint_shared_guest_Arrive line 544, col 3 to line 552, col 67 of module guest_bugNoTaint>
+State 2: <guest_bugNoTaint_shared_guest_Arrive line 450, col 3 to line 457, col 67 of module guest_bugNoTaint>
 /\ guest_bugNoTaint_shared_guest_execs = 0
-/\ guest_bugNoTaint_shared_guest_torn = FALSE
 /\ guest_bugNoTaint_shared_guest_owners = 0
-/\ guest_bugNoTaint_shared_guest_fifobad = FALSE
-/\ guest_bugNoTaint_shared_guest_nseq = 1
-/\ guest_bugNoTaint_shared_guest_lastb = 0
 /\ guest_bugNoTaint_shared_guest_faults = 2
 /\ guest_bugNoTaint_shared_guest_idleLoss = FALSE
 /\ guest_bugNoTaint_shared_guest_queue = <<>>
@@ -33,18 +24,13 @@ State 2: <guest_bugNoTaint_shared_guest_Arrive line 544, col 3 to line 552, col 
 /\ guest_bugNoTaint_shared_guest_lock = 0
 /\ guest_bugNoTaint_shared_guest_gen = 0
 /\ guest_bugNoTaint_shared_guest_bad = {}
-/\ guest_bugNoTaint_shared_guest_seq = <<0, 0, 0>>
 /\ guest_bugNoTaint_shared_guest_phase = <<1, 0, 0>>
 /\ guest_bugNoTaint_shared_guest_conf_step = [Init |-> [tag |-> "UNIT"]]
 /\ guest_bugNoTaint_shared_guest_inflight = 0
 
-State 3: <guest_bugNoTaint_shared_guest_ElectBegin line 714, col 3 to line 722, col 74 of module guest_bugNoTaint>
+State 3: <guest_bugNoTaint_shared_guest_ElectBegin line 551, col 3 to line 559, col 74 of module guest_bugNoTaint>
 /\ guest_bugNoTaint_shared_guest_execs = 0
-/\ guest_bugNoTaint_shared_guest_torn = FALSE
 /\ guest_bugNoTaint_shared_guest_owners = 0
-/\ guest_bugNoTaint_shared_guest_fifobad = FALSE
-/\ guest_bugNoTaint_shared_guest_nseq = 1
-/\ guest_bugNoTaint_shared_guest_lastb = 0
 /\ guest_bugNoTaint_shared_guest_faults = 2
 /\ guest_bugNoTaint_shared_guest_idleLoss = FALSE
 /\ guest_bugNoTaint_shared_guest_queue = <<>>
@@ -53,18 +39,13 @@ State 3: <guest_bugNoTaint_shared_guest_ElectBegin line 714, col 3 to line 722, 
 /\ guest_bugNoTaint_shared_guest_lock = 1
 /\ guest_bugNoTaint_shared_guest_gen = 0
 /\ guest_bugNoTaint_shared_guest_bad = {}
-/\ guest_bugNoTaint_shared_guest_seq = <<0, 0, 0>>
 /\ guest_bugNoTaint_shared_guest_phase = <<2, 0, 0>>
 /\ guest_bugNoTaint_shared_guest_conf_step = [Init |-> [tag |-> "UNIT"]]
 /\ guest_bugNoTaint_shared_guest_inflight = 0
 
-State 4: <guest_bugNoTaint_shared_guest_OwnerStarted line 728, col 3 to line 745, col 47 of module guest_bugNoTaint>
+State 4: <guest_bugNoTaint_shared_guest_OwnerStarted line 565, col 3 to line 581, col 46 of module guest_bugNoTaint>
 /\ guest_bugNoTaint_shared_guest_execs = 0
-/\ guest_bugNoTaint_shared_guest_torn = FALSE
 /\ guest_bugNoTaint_shared_guest_owners = 1
-/\ guest_bugNoTaint_shared_guest_fifobad = FALSE
-/\ guest_bugNoTaint_shared_guest_nseq = 2
-/\ guest_bugNoTaint_shared_guest_lastb = 0
 /\ guest_bugNoTaint_shared_guest_faults = 2
 /\ guest_bugNoTaint_shared_guest_idleLoss = FALSE
 /\ guest_bugNoTaint_shared_guest_queue = <<1>>
@@ -73,18 +54,13 @@ State 4: <guest_bugNoTaint_shared_guest_OwnerStarted line 728, col 3 to line 745
 /\ guest_bugNoTaint_shared_guest_lock = 0
 /\ guest_bugNoTaint_shared_guest_gen = 1
 /\ guest_bugNoTaint_shared_guest_bad = {}
-/\ guest_bugNoTaint_shared_guest_seq = <<1, 0, 0>>
 /\ guest_bugNoTaint_shared_guest_phase = <<3, 0, 0>>
 /\ guest_bugNoTaint_shared_guest_conf_step = [Init |-> [tag |-> "UNIT"]]
 /\ guest_bugNoTaint_shared_guest_inflight = 0
 
-State 5: <guest_bugNoTaint_shared_guest_BootFinished line 821, col 3 to line 841, col 80 of module guest_bugNoTaint>
+State 5: <guest_bugNoTaint_shared_guest_BootFinished line 655, col 3 to line 675, col 80 of module guest_bugNoTaint>
 /\ guest_bugNoTaint_shared_guest_execs = 1
-/\ guest_bugNoTaint_shared_guest_torn = FALSE
 /\ guest_bugNoTaint_shared_guest_owners = 1
-/\ guest_bugNoTaint_shared_guest_fifobad = FALSE
-/\ guest_bugNoTaint_shared_guest_nseq = 2
-/\ guest_bugNoTaint_shared_guest_lastb = 1
 /\ guest_bugNoTaint_shared_guest_faults = 2
 /\ guest_bugNoTaint_shared_guest_idleLoss = FALSE
 /\ guest_bugNoTaint_shared_guest_queue = <<>>
@@ -93,18 +69,13 @@ State 5: <guest_bugNoTaint_shared_guest_BootFinished line 821, col 3 to line 841
 /\ guest_bugNoTaint_shared_guest_lock = 0
 /\ guest_bugNoTaint_shared_guest_gen = 1
 /\ guest_bugNoTaint_shared_guest_bad = {}
-/\ guest_bugNoTaint_shared_guest_seq = <<1, 0, 0>>
 /\ guest_bugNoTaint_shared_guest_phase = <<4, 0, 0>>
 /\ guest_bugNoTaint_shared_guest_conf_step = [Init |-> [tag |-> "UNIT"]]
 /\ guest_bugNoTaint_shared_guest_inflight = 1
 
-State 6: <guest_bugNoTaint_shared_guest_ExecFinished line 847, col 3 to line 883, col 51 of module guest_bugNoTaint>
+State 6: <guest_bugNoTaint_shared_guest_ExecFinished line 681, col 3 to line 717, col 51 of module guest_bugNoTaint>
 /\ guest_bugNoTaint_shared_guest_execs = 0
-/\ guest_bugNoTaint_shared_guest_torn = FALSE
 /\ guest_bugNoTaint_shared_guest_owners = 1
-/\ guest_bugNoTaint_shared_guest_fifobad = FALSE
-/\ guest_bugNoTaint_shared_guest_nseq = 2
-/\ guest_bugNoTaint_shared_guest_lastb = 1
 /\ guest_bugNoTaint_shared_guest_faults = 2
 /\ guest_bugNoTaint_shared_guest_idleLoss = FALSE
 /\ guest_bugNoTaint_shared_guest_queue = <<>>
@@ -113,7 +84,6 @@ State 6: <guest_bugNoTaint_shared_guest_ExecFinished line 847, col 3 to line 883
 /\ guest_bugNoTaint_shared_guest_lock = 0
 /\ guest_bugNoTaint_shared_guest_gen = 1
 /\ guest_bugNoTaint_shared_guest_bad = {1}
-/\ guest_bugNoTaint_shared_guest_seq = <<1, 0, 0>>
 /\ guest_bugNoTaint_shared_guest_phase = <<11, 0, 0>>
 /\ guest_bugNoTaint_shared_guest_conf_step = [Init |-> [tag |-> "UNIT"]]
 /\ guest_bugNoTaint_shared_guest_inflight = 0

@@ -3,157 +3,117 @@ State 1: <Initial predicate>
 /\ guest_bugCancelOnDisconnect_shared_guest_guest = 0
 /\ guest_bugCancelOnDisconnect_shared_guest_inflight = 0
 /\ guest_bugCancelOnDisconnect_shared_guest_gen = 0
-/\ guest_bugCancelOnDisconnect_shared_guest_torn = FALSE
 /\ guest_bugCancelOnDisconnect_shared_guest_phase = <<0, 0, 0>>
 /\ guest_bugCancelOnDisconnect_shared_guest_bad = {}
-/\ guest_bugCancelOnDisconnect_shared_guest_seq = <<0, 0, 0>>
 /\ guest_bugCancelOnDisconnect_shared_guest_conf_step = [Init |-> [tag |-> "UNIT"]]
 /\ guest_bugCancelOnDisconnect_shared_guest_execs = 0
 /\ guest_bugCancelOnDisconnect_shared_guest_owners = 0
 /\ guest_bugCancelOnDisconnect_shared_guest_idleLoss = FALSE
-/\ guest_bugCancelOnDisconnect_shared_guest_nseq = 1
-/\ guest_bugCancelOnDisconnect_shared_guest_fifobad = FALSE
 /\ guest_bugCancelOnDisconnect_shared_guest_lock = 0
 /\ guest_bugCancelOnDisconnect_shared_guest_faults = 2
 /\ guest_bugCancelOnDisconnect_shared_guest_execgen = 0
-/\ guest_bugCancelOnDisconnect_shared_guest_lastb = 0
 
-State 2: <guest_bugCancelOnDisconnect_shared_guest_Arrive line 557, col 3 to line 565, col 78 of module guest_bugCancelOnDisconnect>
+State 2: <guest_bugCancelOnDisconnect_shared_guest_Arrive line 461, col 3 to line 468, col 78 of module guest_bugCancelOnDisconnect>
 /\ guest_bugCancelOnDisconnect_shared_guest_queue = <<>>
 /\ guest_bugCancelOnDisconnect_shared_guest_guest = 0
 /\ guest_bugCancelOnDisconnect_shared_guest_inflight = 0
 /\ guest_bugCancelOnDisconnect_shared_guest_gen = 0
-/\ guest_bugCancelOnDisconnect_shared_guest_torn = FALSE
 /\ guest_bugCancelOnDisconnect_shared_guest_phase = <<1, 0, 0>>
 /\ guest_bugCancelOnDisconnect_shared_guest_bad = {}
-/\ guest_bugCancelOnDisconnect_shared_guest_seq = <<0, 0, 0>>
 /\ guest_bugCancelOnDisconnect_shared_guest_conf_step = [Init |-> [tag |-> "UNIT"]]
 /\ guest_bugCancelOnDisconnect_shared_guest_execs = 0
 /\ guest_bugCancelOnDisconnect_shared_guest_owners = 0
 /\ guest_bugCancelOnDisconnect_shared_guest_idleLoss = FALSE
-/\ guest_bugCancelOnDisconnect_shared_guest_nseq = 1
-/\ guest_bugCancelOnDisconnect_shared_guest_fifobad = FALSE
 /\ guest_bugCancelOnDisconnect_shared_guest_lock = 0
 /\ guest_bugCancelOnDisconnect_shared_guest_faults = 2
 /\ guest_bugCancelOnDisconnect_shared_guest_execgen = 0
-/\ guest_bugCancelOnDisconnect_shared_guest_lastb = 0
 
-State 3: <guest_bugCancelOnDisconnect_shared_guest_ElectBegin line 734, col 3 to line 744, col 57 of module guest_bugCancelOnDisconnect>
+State 3: <guest_bugCancelOnDisconnect_shared_guest_ElectBegin line 565, col 3 to line 575, col 57 of module guest_bugCancelOnDisconnect>
 /\ guest_bugCancelOnDisconnect_shared_guest_queue = <<>>
 /\ guest_bugCancelOnDisconnect_shared_guest_guest = 0
 /\ guest_bugCancelOnDisconnect_shared_guest_inflight = 0
 /\ guest_bugCancelOnDisconnect_shared_guest_gen = 0
-/\ guest_bugCancelOnDisconnect_shared_guest_torn = FALSE
 /\ guest_bugCancelOnDisconnect_shared_guest_phase = <<2, 0, 0>>
 /\ guest_bugCancelOnDisconnect_shared_guest_bad = {}
-/\ guest_bugCancelOnDisconnect_shared_guest_seq = <<0, 0, 0>>
 /\ guest_bugCancelOnDisconnect_shared_guest_conf_step = [Init |-> [tag |-> "UNIT"]]
 /\ guest_bugCancelOnDisconnect_shared_guest_execs = 0
 /\ guest_bugCancelOnDisconnect_shared_guest_owners = 0
 /\ guest_bugCancelOnDisconnect_shared_guest_idleLoss = FALSE
-/\ guest_bugCancelOnDisconnect_shared_guest_nseq = 1
-/\ guest_bugCancelOnDisconnect_shared_guest_fifobad = FALSE
 /\ guest_bugCancelOnDisconnect_shared_guest_lock = 1
 /\ guest_bugCancelOnDisconnect_shared_guest_faults = 2
 /\ guest_bugCancelOnDisconnect_shared_guest_execgen = 0
-/\ guest_bugCancelOnDisconnect_shared_guest_lastb = 0
 
-State 4: <guest_bugCancelOnDisconnect_shared_guest_OwnerStarted line 750, col 3 to line 768, col 61 of module guest_bugCancelOnDisconnect>
+State 4: <guest_bugCancelOnDisconnect_shared_guest_OwnerStarted line 581, col 3 to line 598, col 60 of module guest_bugCancelOnDisconnect>
 /\ guest_bugCancelOnDisconnect_shared_guest_queue = <<1>>
 /\ guest_bugCancelOnDisconnect_shared_guest_guest = 1
 /\ guest_bugCancelOnDisconnect_shared_guest_inflight = 0
 /\ guest_bugCancelOnDisconnect_shared_guest_gen = 1
-/\ guest_bugCancelOnDisconnect_shared_guest_torn = FALSE
 /\ guest_bugCancelOnDisconnect_shared_guest_phase = <<3, 0, 0>>
 /\ guest_bugCancelOnDisconnect_shared_guest_bad = {}
-/\ guest_bugCancelOnDisconnect_shared_guest_seq = <<1, 0, 0>>
 /\ guest_bugCancelOnDisconnect_shared_guest_conf_step = [Init |-> [tag |-> "UNIT"]]
 /\ guest_bugCancelOnDisconnect_shared_guest_execs = 0
 /\ guest_bugCancelOnDisconnect_shared_guest_owners = 1
 /\ guest_bugCancelOnDisconnect_shared_guest_idleLoss = FALSE
-/\ guest_bugCancelOnDisconnect_shared_guest_nseq = 2
-/\ guest_bugCancelOnDisconnect_shared_guest_fifobad = FALSE
 /\ guest_bugCancelOnDisconnect_shared_guest_lock = 0
 /\ guest_bugCancelOnDisconnect_shared_guest_faults = 2
 /\ guest_bugCancelOnDisconnect_shared_guest_execgen = 0
-/\ guest_bugCancelOnDisconnect_shared_guest_lastb = 0
 
-State 5: <guest_bugCancelOnDisconnect_shared_guest_BootFinished line 851, col 3 to line 875, col 60 of module guest_bugCancelOnDisconnect>
+State 5: <guest_bugCancelOnDisconnect_shared_guest_BootFinished line 679, col 3 to line 703, col 60 of module guest_bugCancelOnDisconnect>
 /\ guest_bugCancelOnDisconnect_shared_guest_queue = <<>>
 /\ guest_bugCancelOnDisconnect_shared_guest_guest = 2
 /\ guest_bugCancelOnDisconnect_shared_guest_inflight = 1
 /\ guest_bugCancelOnDisconnect_shared_guest_gen = 1
-/\ guest_bugCancelOnDisconnect_shared_guest_torn = FALSE
 /\ guest_bugCancelOnDisconnect_shared_guest_phase = <<4, 0, 0>>
 /\ guest_bugCancelOnDisconnect_shared_guest_bad = {}
-/\ guest_bugCancelOnDisconnect_shared_guest_seq = <<1, 0, 0>>
 /\ guest_bugCancelOnDisconnect_shared_guest_conf_step = [Init |-> [tag |-> "UNIT"]]
 /\ guest_bugCancelOnDisconnect_shared_guest_execs = 1
 /\ guest_bugCancelOnDisconnect_shared_guest_owners = 1
 /\ guest_bugCancelOnDisconnect_shared_guest_idleLoss = FALSE
-/\ guest_bugCancelOnDisconnect_shared_guest_nseq = 2
-/\ guest_bugCancelOnDisconnect_shared_guest_fifobad = FALSE
 /\ guest_bugCancelOnDisconnect_shared_guest_lock = 0
 /\ guest_bugCancelOnDisconnect_shared_guest_faults = 2
 /\ guest_bugCancelOnDisconnect_shared_guest_execgen = 1
-/\ guest_bugCancelOnDisconnect_shared_guest_lastb = 1
 
-State 6: <guest_bugCancelOnDisconnect_shared_guest_ClientGone line 793, col 3 to line 845, col 59 of module guest_bugCancelOnDisconnect>
+State 6: <guest_bugCancelOnDisconnect_shared_guest_ClientGone line 622, col 3 to line 673, col 59 of module guest_bugCancelOnDisconnect>
 /\ guest_bugCancelOnDisconnect_shared_guest_queue = <<>>
 /\ guest_bugCancelOnDisconnect_shared_guest_guest = 2
 /\ guest_bugCancelOnDisconnect_shared_guest_inflight = 0
 /\ guest_bugCancelOnDisconnect_shared_guest_gen = 1
-/\ guest_bugCancelOnDisconnect_shared_guest_torn = FALSE
 /\ guest_bugCancelOnDisconnect_shared_guest_phase = <<6, 0, 0>>
 /\ guest_bugCancelOnDisconnect_shared_guest_bad = {}
-/\ guest_bugCancelOnDisconnect_shared_guest_seq = <<1, 0, 0>>
 /\ guest_bugCancelOnDisconnect_shared_guest_conf_step = [Init |-> [tag |-> "UNIT"]]
 /\ guest_bugCancelOnDisconnect_shared_guest_execs = 1
 /\ guest_bugCancelOnDisconnect_shared_guest_owners = 1
 /\ guest_bugCancelOnDisconnect_shared_guest_idleLoss = FALSE
-/\ guest_bugCancelOnDisconnect_shared_guest_nseq = 2
-/\ guest_bugCancelOnDisconnect_shared_guest_fifobad = FALSE
 /\ guest_bugCancelOnDisconnect_shared_guest_lock = 0
 /\ guest_bugCancelOnDisconnect_shared_guest_faults = 2
 /\ guest_bugCancelOnDisconnect_shared_guest_execgen = 1
-/\ guest_bugCancelOnDisconnect_shared_guest_lastb = 1
 
-State 7: <guest_bugCancelOnDisconnect_shared_guest_Arrive line 557, col 3 to line 565, col 78 of module guest_bugCancelOnDisconnect>
+State 7: <guest_bugCancelOnDisconnect_shared_guest_Arrive line 461, col 3 to line 468, col 78 of module guest_bugCancelOnDisconnect>
 /\ guest_bugCancelOnDisconnect_shared_guest_queue = <<>>
 /\ guest_bugCancelOnDisconnect_shared_guest_guest = 2
 /\ guest_bugCancelOnDisconnect_shared_guest_inflight = 0
 /\ guest_bugCancelOnDisconnect_shared_guest_gen = 1
-/\ guest_bugCancelOnDisconnect_shared_guest_torn = FALSE
 /\ guest_bugCancelOnDisconnect_shared_guest_phase = <<6, 1, 0>>
 /\ guest_bugCancelOnDisconnect_shared_guest_bad = {}
-/\ guest_bugCancelOnDisconnect_shared_guest_seq = <<1, 0, 0>>
 /\ guest_bugCancelOnDisconnect_shared_guest_conf_step = [Init |-> [tag |-> "UNIT"]]
 /\ guest_bugCancelOnDisconnect_shared_guest_execs = 1
 /\ guest_bugCancelOnDisconnect_shared_guest_owners = 1
 /\ guest_bugCancelOnDisconnect_shared_guest_idleLoss = FALSE
-/\ guest_bugCancelOnDisconnect_shared_guest_nseq = 2
-/\ guest_bugCancelOnDisconnect_shared_guest_fifobad = FALSE
 /\ guest_bugCancelOnDisconnect_shared_guest_lock = 0
 /\ guest_bugCancelOnDisconnect_shared_guest_faults = 2
 /\ guest_bugCancelOnDisconnect_shared_guest_execgen = 1
-/\ guest_bugCancelOnDisconnect_shared_guest_lastb = 1
 
-State 8: <guest_bugCancelOnDisconnect_shared_guest_Attached line 774, col 3 to line 787, col 58 of module guest_bugCancelOnDisconnect>
+State 8: <guest_bugCancelOnDisconnect_shared_guest_Attached line 604, col 3 to line 616, col 57 of module guest_bugCancelOnDisconnect>
 /\ guest_bugCancelOnDisconnect_shared_guest_queue = <<>>
 /\ guest_bugCancelOnDisconnect_shared_guest_guest = 2
 /\ guest_bugCancelOnDisconnect_shared_guest_inflight = 2
 /\ guest_bugCancelOnDisconnect_shared_guest_gen = 1
-/\ guest_bugCancelOnDisconnect_shared_guest_torn = FALSE
 /\ guest_bugCancelOnDisconnect_shared_guest_phase = <<6, 4, 0>>
 /\ guest_bugCancelOnDisconnect_shared_guest_bad = {}
-/\ guest_bugCancelOnDisconnect_shared_guest_seq = <<1, 2, 0>>
 /\ guest_bugCancelOnDisconnect_shared_guest_conf_step = [Init |-> [tag |-> "UNIT"]]
 /\ guest_bugCancelOnDisconnect_shared_guest_execs = 2
 /\ guest_bugCancelOnDisconnect_shared_guest_owners = 1
 /\ guest_bugCancelOnDisconnect_shared_guest_idleLoss = FALSE
-/\ guest_bugCancelOnDisconnect_shared_guest_nseq = 3
-/\ guest_bugCancelOnDisconnect_shared_guest_fifobad = FALSE
 /\ guest_bugCancelOnDisconnect_shared_guest_lock = 0
 /\ guest_bugCancelOnDisconnect_shared_guest_faults = 2
 /\ guest_bugCancelOnDisconnect_shared_guest_execgen = 1
-/\ guest_bugCancelOnDisconnect_shared_guest_lastb = 2

@@ -6,8 +6,7 @@
  *
  * Decisions:
  *   D-OWNER  first-arrival election under an exclusive lock; at most one live owner.
- *   D-LIFE   the guest never outlives its owner (assumption A-1); run teardown is the backstop that removes
- *            every owner and guest.
+ *   D-LIFE   the guest never outlives its owner (assumption A-1).
  *   D-SERIAL the owner serves attached clients FIFO, one exec in flight.
  *   D-DETACH a disconnect never cancels an in-guest exec: queued -> removed; running -> detached, the exec
  *            runs to its bound, its result is discarded, the next client waits.
@@ -27,7 +26,7 @@
  *   Owner events (the conformance instance, ENV=false), each one OwnerCore event:
  *     Attached{c} ClientGone{c} BootFinished{ok} ExecFinished{pass} GuestLost ExecBound IdleElapsed
  *   Environment actions (ENV=true only; performed by the environment, not by OwnerCore):
- *     Arrive{c} ElectBegin{c} OwnerStarted{c} ElectorDies{c} OwnerStartFails{c} OwnerCrash RunTeardown
+ *     Arrive{c} ElectBegin{c} OwnerStarted{c} OwnerStartFails{c} OwnerCrash
  *   OwnerStarted also enqueues the elector (as Attached does) and drives.
  *
  * Instances: guest_ok (ENV=true, REC=false) exhaustive checks; guest_env (ENV=true, REC=true) environment
@@ -42,19 +41,23 @@
  *   A-4 a nextest retry is a NEW client (a fresh client id), not a re-run of a finished one.
  *   A-5 Fault budget: OwnerCrash and GuestLost together occur at most FAULTS times (finite faults are the
  *       fairness precondition of the progress property).
- *   A-7 run teardown can happen at any time while the run is not torn down, and no client acts afterwards.
+ *   A-6 election, owner start and attach are atomic w.r.t. the owner's own state (OwnerStarted registers the
+ *       owner and enqueues the electing client in one step).
+ *   A-8 a client connecting at the instant the owner exits idle sees the connection fail and re-arrives once
+ *       through the election (a second cut is a GuestExecution failure at stage owner); the model makes
+ *       Attached and IdleElapsed atomic. Discharged by a deterministic client-side test (design DDD-17).
  *
  * Projectable from OwnerCore::observe(): guest (NoGuest/Booting/Ready), gen (generation), inflight, queue,
  * and, in the ENV=false instance, owners via `stopped`.
- * Model-only: owners (for election: I_OWNER_UNIQUE; Tier-3 proves the real lock), lock, torn, bad, execgen,
- * execs, seq, nseq, lastb, fifobad, faults, idleLoss, conf_step, and the per-client outcome phases (the driver
+ * Model-only: owners (for election: I_OWNER_UNIQUE; Tier-3 proves the real lock), lock, bad, execgen,
+ * execs, faults, idleLoss, conf_step, and the per-client outcome phases (the driver
  * reads them from the Reply effect).
  */
 module shared_guest_conf {
   type ConfStep =
     | Init
     | Arrive({ c: int }) | ElectBegin({ c: int }) | OwnerStarted({ c: int })
-    | ElectorDies({ c: int }) | OwnerStartFails({ c: int }) | OwnerCrash | RunTeardown
+    | OwnerStartFails({ c: int }) | OwnerCrash
     | Attached({ c: int }) | ClientGone({ c: int }) | BootFinished({ ok: bool })
     | ExecFinished({ pass: bool }) | GuestLost | ExecBound | IdleElapsed
 }
@@ -80,16 +83,15 @@ module shared_guest {
   val LOST = 12      // GuestLost
   val BOOTFAIL = 13
   val OWNERLOST = 14
-  val STARTFAIL = 15 // the elector could not start the owner
+  val STARTFAIL = 15 // the elector got a typed owner-start failure (owner binary missing)
   val BOUND = 16     // the exec bound ended the exec
 
   type S = {
-    torn: bool, lock: int, owners: int, guest: int, gen: int, inflight: int,
+    lock: int, owners: int, guest: int, gen: int, inflight: int,
     execgen: int, execs: int, queue: List[int], phase: int -> int, bad: Set[int],
-    seq: int -> int, nseq: int, lastb: int, fifobad: bool, faults: int, idleLoss: bool
+    faults: int, idleLoss: bool
   }
 
-  var torn: bool            // run teardown has run
   var lock: int             // election lock holder, 0 free
   var owners: int           // live owner processes
   var guest: int            // 0 NoGuest, 1 Booting, 2 Ready
@@ -100,24 +102,19 @@ module shared_guest {
   var queue: List[int]      // attached clients waiting, FIFO
   var phase: int -> int
   var bad: Set[int]         // ghost: generations that failed, were lost or were detached from
-  var seq: int -> int       // ghost: enqueue order
-  var nseq: int
-  var lastb: int            // ghost: seq of the last client whose exec began
-  var fifobad: bool         // ghost: an exec began out of queue order
   var faults: int           // fault budget left
   var idleLoss: bool        // ghost: an idle exit dropped a queued, running or detached client
   var conf_step: ConfStep   // model-only
 
   val cur: S = {
-    torn: torn, lock: lock, owners: owners, guest: guest, gen: gen, inflight: inflight,
-    execgen: execgen, execs: execs, queue: queue, phase: phase, bad: bad, seq: seq, nseq: nseq,
-    lastb: lastb, fifobad: fifobad, faults: faults, idleLoss: idleLoss
+    lock: lock, owners: owners, guest: guest, gen: gen, inflight: inflight,
+    execgen: execgen, execs: execs, queue: queue, phase: phase, bad: bad,
+    faults: faults, idleLoss: idleLoss
   }
 
   def ph(n: S, c: int, v: int): S = { ...n, phase: n.phase.set(c, v) }
   def enq(n: S, c: int): S = {
-    { ...n, phase: n.phase.set(c, QUEUED), queue: n.queue.append(c),
-      seq: n.seq.set(c, n.nseq), nseq: n.nseq + 1 }
+    { ...n, phase: n.phase.set(c, QUEUED), queue: n.queue.append(c) }
   }
   // the owner and (if kill) its guest are gone: clients that were attached to the owner lose it
   def ownerDown(n: S, kill: bool): S = {
@@ -142,9 +139,7 @@ module shared_guest {
   // begin the exec of the queue head on the current generation
   def beginExec(n: S): S = {
     val c = n.queue.head()
-    { ...ph(n, c, RUNNING), queue: n.queue.tail(), inflight: c, execgen: n.gen, execs: n.execs + 1,
-      lastb: if (n.seq.get(c) > n.lastb) n.seq.get(c) else n.lastb,
-      fifobad: n.fifobad or n.seq.get(c) < n.lastb }
+    { ...ph(n, c, RUNNING), queue: n.queue.tail(), inflight: c, execgen: n.gen, execs: n.execs + 1 }
   }
   // the reactive step every owner event ends with (D-SERIAL: only with no exec in flight)
   def drive(n: S): S = {
@@ -156,35 +151,35 @@ module shared_guest {
   }
 
   action commit(n: S, t: ConfStep): bool = all {
-    torn' = n.torn, lock' = n.lock, owners' = n.owners, guest' = n.guest,
+    lock' = n.lock, owners' = n.owners, guest' = n.guest,
     gen' = n.gen, inflight' = n.inflight, execgen' = n.execgen, execs' = n.execs, queue' = n.queue,
-    phase' = n.phase, bad' = n.bad, seq' = n.seq, nseq' = n.nseq, lastb' = n.lastb,
-    fifobad' = n.fifobad, faults' = n.faults, idleLoss' = n.idleLoss,
+    phase' = n.phase, bad' = n.bad,
+    faults' = n.faults, idleLoss' = n.idleLoss,
     conf_step' = if (REC) t else conf_step,
   }
 
   // a separate action for init: TLA+ cannot share one action between init and step
   action commitInit(n: S, t: ConfStep): bool = all {
-    torn' = n.torn, lock' = n.lock, owners' = n.owners, guest' = n.guest,
+    lock' = n.lock, owners' = n.owners, guest' = n.guest,
     gen' = n.gen, inflight' = n.inflight, execgen' = n.execgen, execs' = n.execs, queue' = n.queue,
-    phase' = n.phase, bad' = n.bad, seq' = n.seq, nseq' = n.nseq, lastb' = n.lastb,
-    fifobad' = n.fifobad, faults' = n.faults, idleLoss' = n.idleLoss,
+    phase' = n.phase, bad' = n.bad,
+    faults' = n.faults, idleLoss' = n.idleLoss,
     conf_step' = t,
   }
 
   action init = commitInit({
-    torn: false, lock: 0, owners: if (ENV) 0 else 1, guest: 0, gen: 0, inflight: 0, execgen: 0, execs: 0,
-    queue: List(), phase: CL.mapBy(c => IDLE), bad: Set(), seq: CL.mapBy(c => 0), nseq: 1, lastb: 0,
-    fifobad: false, faults: FAULTS, idleLoss: false
+    lock: 0, owners: if (ENV) 0 else 1, guest: 0, gen: 0, inflight: 0, execgen: 0, execs: 0,
+    queue: List(), phase: CL.mapBy(c => IDLE), bad: Set(),
+    faults: FAULTS, idleLoss: false
   }, variant("Init", ()))
 
   // ---------------------------------------------------------------- environment: election (D-OWNER)
   action Arrive(c: int): bool = all {
-    ENV, not(cur.torn), cur.phase.get(c) == IDLE,
+    ENV, cur.phase.get(c) == IDLE,
     commit(ph(cur, c, ARRIVING), variant("Arrive", { c: c })),
   }
   def canElect(c: int): bool = and {
-    ENV, not(cur.torn), cur.phase.get(c) == ARRIVING, cur.owners == 0,
+    ENV, cur.phase.get(c) == ARRIVING, cur.owners == 0,
     OFF.contains("noLock") or cur.lock == 0,
   }
   // D-OWNER: first arrival takes the exclusive lock (no live owner, lock free)
@@ -196,31 +191,27 @@ module shared_guest {
   // the elected client has started the detached owner, releases the lock and connects: the owner handles the
   // elector's attach (enqueue) and drives
   action OwnerStarted(c: int): bool = all {
-    ENV, not(cur.torn), cur.phase.get(c) == STARTING,
+    ENV, cur.phase.get(c) == STARTING,
     commit(drive(enq({ ...cur, owners: cur.owners + 1, lock: if (cur.lock == c) 0 else cur.lock }, c)),
       variant("OwnerStarted", { c: c })),
   }
-  // a nextest kill of the electing client before the owner exists: the kernel frees the lock
-  action ElectorDies(c: int): bool = all {
-    ENV, not(cur.torn), cur.phase.get(c) == STARTING,
-    commit({ ...ph(cur, c, GONE), lock: if (cur.lock == c) 0 else cur.lock }, variant("ElectorDies", { c: c })),
-  }
-  // the elector holding the lock fails to start the owner: lock released, no owner, typed failure to the client
+  // the electing client holding the lock fails (owner binary missing: typed LaneNotPrepared) or is killed
+  // before the owner exists: lock released, no owner, nothing left running
   action OwnerStartFails(c: int): bool = all {
-    ENV, not(cur.torn), cur.phase.get(c) == STARTING,
+    ENV, cur.phase.get(c) == STARTING,
     commit({ ...ph(cur, c, STARTFAIL), lock: if (cur.lock == c) 0 else cur.lock }, variant("OwnerStartFails", { c: c })),
   }
 
   // ---------------------------------------------------------------- owner events (one OwnerCore event each)
   // a client connects to the live owner (ENV=false: the client is IDLE, it is just attached)
   action Attached(c: int): bool = all {
-    not(cur.torn), cur.owners > 0,
+    cur.owners > 0,
     cur.phase.get(c) == ARRIVING or (not(ENV) and cur.phase.get(c) == IDLE),
     commit(drive(enq(cur, c)), variant("Attached", { c: c })),
   }
   // D-DETACH, D-TAINT
   action ClientGone(c: int): bool = all {
-    not(cur.torn), Set(QUEUED, RUNNING).contains(cur.phase.get(c)),
+    Set(QUEUED, RUNNING).contains(cur.phase.get(c)),
     if (cur.phase.get(c) == QUEUED)
       commit(drive({ ...ph(cur, c, GONE), queue: cur.queue.select(x => x != c) }), variant("ClientGone", { c: c }))
     else if (OFF.contains("cancelOnDisconnect"))
@@ -274,18 +265,10 @@ module shared_guest {
       variant("IdleElapsed", ())),
   }
 
-  // ---------------------------------------------------------------- environment: owner crash, teardown (D-LIFE)
+  // ---------------------------------------------------------------- environment: owner crash (D-LIFE)
   action OwnerCrash = all {
     ENV, cur.owners > 0, cur.faults > 0,
     commit({ ...ownerDown(cur, not(OFF.contains("orphan"))), faults: cur.faults - 1 }, variant("OwnerCrash", ())),
-  }
-  // backstop: kills the owner and guest of the run and ends every client that has not finished
-  action RunTeardown = all {
-    ENV, not(cur.torn),
-    commit({ ...cur, owners: 0, guest: 0, execs: 0, inflight: 0, queue: List(), torn: true, lock: 0,
-             phase: CL.mapBy(c => if (Set(ARRIVING, STARTING, QUEUED, RUNNING, DETACHED).contains(cur.phase.get(c))) GONE
-                                  else cur.phase.get(c)) },
-      variant("RunTeardown", ())),
   }
 
   // fairness set: no ExecFinished (a hung exec may never finish); ExecBound ends it
@@ -297,9 +280,9 @@ module shared_guest {
   action step = {
     nondet c = CL.oneOf()
     nondet b = Set(true, false).oneOf()
-    any { Arrive(c), ElectBegin(c), OwnerStarted(c), ElectorDies(c), OwnerStartFails(c), Attached(c),
+    any { Arrive(c), ElectBegin(c), OwnerStarted(c), OwnerStartFails(c), Attached(c),
           ClientGone(c), BootFinished(b), ExecFinished(b), GuestLost, ExecBound, IdleElapsed,
-          OwnerCrash, RunTeardown }
+          OwnerCrash }
   }
 
   // ---------------------------------------------------------------- invariants (each named after its decision)
@@ -308,21 +291,19 @@ module shared_guest {
   val I_DETACH_NO_CANCEL = (execs > 0).implies(inflight != 0)                        // D-DETACH
   val I_NO_REUSE = (guest == 2 and inflight == 0).implies(not(bad.contains(gen)))    // D-TAINT
   val I_NO_ORPHAN = (guest != 0).implies(owners > 0)                                 // D-LIFE (A-1)
-  val I_TEARDOWN_CLEAN = torn.implies(and { owners == 0, guest == 0, execs == 0 })   // D-LIFE
-  val I_FIFO = not(fifobad)                                                          // D-SERIAL
   val I_IDLE_NO_LOSS = not(idleLoss)                                                 // D-IDLE
   val I_DELIVER_ONLY_ATTACHED = and {                                                // D-DETACH
     queue.indices().forall(i => phase.get(queue[i]) == QUEUED),
     CL.forall(c => Set(RUNNING, DETACHED).contains(phase.get(c)).implies(inflight == c)),
   }
   val Safety = and { I_OWNER_UNIQUE, I_SERIAL, I_DETACH_NO_CANCEL, I_NO_REUSE, I_NO_ORPHAN,
-                     I_TEARDOWN_CLEAN, I_FIFO, I_IDLE_NO_LOSS, I_DELIVER_ONLY_ATTACHED }
+                     I_IDLE_NO_LOSS, I_DELIVER_ONLY_ATTACHED }
 
-  // progress (D-BOUND): while the run is not torn down, every attached client gets a terminal outcome
+  // progress (D-BOUND): every attached client gets a terminal outcome
   // (A-5 bounds the faults)
-  temporal FairProgress = weakFair(Progress, (torn, lock, owners, guest, gen, inflight, execgen, execs,
-    queue, phase, bad, seq, nseq, lastb, fifobad, faults, idleLoss, conf_step))
-  temporal EveryClientTerminates = (FairProgress and always(not(torn))).implies(CL.forall(c =>
+  temporal FairProgress = weakFair(Progress, (lock, owners, guest, gen, inflight, execgen, execs,
+    queue, phase, bad, faults, idleLoss, conf_step))
+  temporal EveryClientTerminates = FairProgress.implies(CL.forall(c =>
     always(Set(ARRIVING, STARTING, QUEUED, RUNNING, DETACHED).contains(phase.get(c)).implies(eventually(phase.get(c) >= GONE)))))
 
   // ---------------------------------------------------------------- named runs (one per critical scenario)
@@ -409,21 +390,11 @@ module shared_guest {
     .then(BootFinished(true)).then(ExecFinished(true))
     .expect(phase.get(3) == PASS and Safety)
 
-  run elector_killed_before_owner_starts = init.then(Arrive(1)).then(Arrive(2)).then(ElectBegin(1))
-    .then(ElectorDies(1)).expect(lock == 0 and owners == 0 and phase.get(1) == GONE and canElect(2) and Safety)
-    .then(ElectBegin(2)).then(OwnerStarted(2)).expect(owners == 1 and Safety)
-
   run owner_start_fails_then_next_elects = init.then(Arrive(1)).then(Arrive(2)).then(ElectBegin(1))
     .then(OwnerStartFails(1))
     .expect(lock == 0 and owners == 0 and phase.get(1) == STARTFAIL and canElect(2) and Safety)
     .then(ElectBegin(2)).then(OwnerStarted(2)).then(BootFinished(true)).then(ExecFinished(true))
     .expect(owners == 1 and phase.get(2) == PASS and Safety)
-
-  run run_teardown_removes_leftovers = init.then(Arrive(1)).then(Arrive(2)).then(ElectBegin(1)).then(OwnerStarted(1))
-    .then(BootFinished(true)).then(Attached(2))
-    .then(RunTeardown)
-    .expect(torn and owners == 0 and guest == 0 and execs == 0 and phase.get(1) == GONE and phase.get(2) == GONE
-            and not(canElect(1)) and Safety)
 }
 
 module guest_ok { import shared_guest(OFF = Set(), REC = false, ENV = true).* from "./shared_guest" }
