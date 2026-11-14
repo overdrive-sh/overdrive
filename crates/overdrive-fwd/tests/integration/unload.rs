@@ -40,6 +40,7 @@ use nix::libc;
 use overdrive_core::guest_transport::forwarder::{FlowForwarder, PairMode, PairSide};
 use overdrive_fwd::KernelFlowForwarder;
 use overdrive_testing::forwarder_module::{built_module_path, kmod_dir, require_forwarder_module};
+use overdrive_testing::overdrive_test;
 
 use super::support::{
     END_WAIT, attach_stream, open_context, tcp_pair, udp_pair, vsock_pair, wait_end, wait_end_of,
@@ -141,7 +142,7 @@ fn precondition_idle_workspace_module() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[overdrive_testing::overdrive_test(guest = "unload")]
+#[overdrive_test(guest = "unload")]
 fn an_open_context_refuses_the_unload_and_its_close_lets_it_succeed() {
     precondition_idle_workspace_module();
 
@@ -175,7 +176,7 @@ fn an_open_context_refuses_the_unload_and_its_close_lets_it_succeed() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[overdrive_testing::overdrive_test(guest = "unload")]
+#[overdrive_test(guest = "unload")]
 fn hooked_sockets_hold_the_module_until_their_free_work_and_a_reload_then_serves() {
     precondition_idle_workspace_module();
 
@@ -223,7 +224,7 @@ fn hooked_sockets_hold_the_module_until_their_free_work_and_a_reload_then_serves
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[overdrive_testing::overdrive_test(guest = "unload")]
+#[overdrive_test(guest = "unload")]
 fn a_datagram_association_holds_one_reference_per_hooked_socket_until_its_record_is_read() {
     precondition_idle_workspace_module();
 
@@ -255,7 +256,7 @@ fn a_datagram_association_holds_one_reference_per_hooked_socket_until_its_record
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[overdrive_testing::overdrive_test(guest = "unload")]
+#[overdrive_test(guest = "unload")]
 fn an_open_context_answers_its_version_while_the_unload_is_refused() {
     precondition_idle_workspace_module();
 

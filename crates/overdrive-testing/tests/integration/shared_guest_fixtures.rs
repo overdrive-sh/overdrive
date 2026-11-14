@@ -15,8 +15,8 @@
 
 use std::time::Duration;
 
-use overdrive_testing::overdrive_test;
 use overdrive_testing::placement::{GuestPlacement, Sharing, inside_guest, run_in_guest};
+use overdrive_testing::{overdrive_test, shared_guest};
 
 use super::scenario_support::{CLIENT_BODY_ENV, FAIL_ENV, HOLD_SECONDS_ENV, MARKER_ENV};
 
@@ -35,9 +35,9 @@ pub mod shared_module {
     //! Three tests of one module that share one `cgroup-default` guest, one
     //! that fails when told to, and one that keeps an explicit isolated guest.
 
-    use super::{overdrive_test, scenario_body};
+    use super::{overdrive_test, scenario_body, shared_guest};
 
-    overdrive_testing::shared_guest!(guest = "cgroup-default");
+    shared_guest!(guest = "cgroup-default");
 
     #[overdrive_test]
     #[test]

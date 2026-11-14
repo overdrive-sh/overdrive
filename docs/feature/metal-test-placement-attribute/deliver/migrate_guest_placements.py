@@ -3,8 +3,9 @@
 tests they place (temporary migration tool; deleted at retirement).
 
 For each selected table entry the script finds the test function by binary id
-and module path, adds `#[overdrive_testing::overdrive_test(guest = "<group>")]`
-directly above the function, adds `overdrive-testing` to the owning crate's
+and module path, adds `#[overdrive_test(guest = "<group>")]`
+directly above the function (and `use overdrive_testing::overdrive_test;` to the
+file when it lacks that import), adds `overdrive-testing` to the owning crate's
 dev-dependencies when the crate lacks it, and deletes the table entry.
 
 It reads the table by parsing the JSON. It never adds a table entry, never
@@ -29,7 +30,38 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[4]
 TABLE = ROOT / "infra/metal/test-placement.json"
-ATTRIBUTE = '#[overdrive_testing::overdrive_test(guest = "{group}")]'
+ATTRIBUTE = '#[overdrive_test(guest = "{group}")]'
+IMPORT = "use overdrive_testing::overdrive_test;"
+IMPORT_PATTERN = re.compile(
+    r"^\s*use overdrive_testing::(\{[^}]*\boverdrive_test\b[^}]*\}|overdrive_test);", re.M
+)
+
+
+def with_import(text):
+    """`text` with the `overdrive_test` import added after the last
+    non-std/crate-local top-level `use`, unless the file already imports it."""
+    if IMPORT_PATTERN.search(text):
+        return text
+    lines = text.split("\n")
+    last = None
+    last_any = None
+    index = 0
+    while index < len(lines):
+        if re.match(r"use ", lines[index]):
+            end = index
+            while not lines[end].rstrip().endswith(";"):
+                end += 1
+            last_any = end
+            if not re.match(r"use (super|crate|self|std|core)\b", lines[index]):
+                last = end
+            index = end + 1
+        else:
+            index += 1
+    at = last if last is not None else last_any
+    if at is None:
+        return IMPORT + "\n\n" + text
+    lines.insert(at + 1, IMPORT)
+    return "\n".join(lines)
 
 
 def workspace_members():
@@ -195,7 +227,7 @@ def main():
             indent = re.match(r"\s*", lines[index]).group(0)
             lines.insert(index, indent + ATTRIBUTE.format(group=group))
         if not args.dry_run:
-            file.write_text("\n".join(lines))
+            file.write_text(with_import("\n".join(lines)))
     if not args.dry_run:
         for file in edits:
             owner = next(

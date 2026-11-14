@@ -16,6 +16,7 @@ use std::os::fd::AsRawFd;
 use nix::libc;
 use overdrive_core::guest_transport::forwarder::{FlowForwarder, ForwardId};
 use overdrive_fwd::KernelFlowForwarder;
+use overdrive_testing::overdrive_test;
 
 use super::support::{Vsock, attach_stream, live, open_context, tcp_pair, vsock_pair};
 
@@ -65,7 +66,7 @@ fn three_detached_records(fwd: &KernelFlowForwarder) -> (Vec<ForwardId>, Vec<Hel
 }
 
 #[test]
-#[overdrive_testing::overdrive_test(guest = "core")]
+#[overdrive_test(guest = "core")]
 fn the_module_writes_whole_32_byte_records_at_the_pinned_offsets() {
     let fwd = open_context();
     assert!(!readable(&fwd), "a fresh context has nothing queued");
@@ -106,7 +107,7 @@ fn the_module_writes_whole_32_byte_records_at_the_pinned_offsets() {
 }
 
 #[test]
-#[overdrive_testing::overdrive_test(guest = "core")]
+#[overdrive_test(guest = "core")]
 fn the_moved_counts_of_a_record_are_the_bytes_each_target_accepted() {
     use std::io::Write;
 
@@ -180,7 +181,7 @@ fn end_pair(fwd: &KernelFlowForwarder, id: ForwardId, held: &HeldPair, by: EndBy
 /// CONTRACT_SHAPE: bounded-change. Universe: the context's queued records,
 /// in read order; expected: `[A, B]`, then none.
 #[test]
-#[overdrive_testing::overdrive_test(guest = "core")]
+#[overdrive_test(guest = "core")]
 fn take_end_returns_records_in_end_order() {
     for by in [EndBy::Abort, EndBy::CleanClose] {
         let fwd = open_context();

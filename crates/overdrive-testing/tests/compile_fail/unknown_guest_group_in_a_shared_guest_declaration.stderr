@@ -1,5 +1,5 @@
 error[E0080]: evaluation panicked: unknown guest group `no-such-group`
- --> tests/compile_fail/unknown_guest_group_in_a_shared_guest_declaration.rs:1:42
+ --> tests/compile_fail/unknown_guest_group_in_a_shared_guest_declaration.rs:3:23
   |
-1 | overdrive_testing::shared_guest!(guest = "no-such-group");
-  |                                          ^^^^^^^^^^^^^^^ evaluation of `OVERDRIVE_TEST_NEEDS_shared_guest_DECLARATION_IN_THIS_MODULE` failed here
+3 | shared_guest!(guest = "no-such-group");
+  |                       ^^^^^^^^^^^^^^^ evaluation of `OVERDRIVE_TEST_NEEDS_shared_guest_DECLARATION_IN_THIS_MODULE` failed here

@@ -17,6 +17,7 @@ use overdrive_core::guest_transport::forwarder::{
     FlowForwarder, ForwarderError, ForwarderProbeObservation, ForwarderProbeStage,
 };
 use overdrive_fwd::KernelFlowForwarder;
+use overdrive_testing::overdrive_test;
 
 use super::support::{
     LoopbackTransportRemoved, clear_cloexec, in_namespaces, live, mount_raw, open_context, run,
@@ -34,7 +35,7 @@ fn refused_stage(result: Result<(), ForwarderError>) -> (ForwarderProbeStage, Fo
 }
 
 #[test]
-#[overdrive_testing::overdrive_test(guest = "probe")]
+#[overdrive_test(guest = "probe")]
 fn the_probe_passes_and_leaves_no_residue_on_a_correctly_provisioned_node() {
     let fwd = open_context();
     fwd.probe().expect("the probe passes on a correctly provisioned node");
@@ -45,7 +46,7 @@ fn the_probe_passes_and_leaves_no_residue_on_a_correctly_provisioned_node() {
 }
 
 #[test]
-#[overdrive_testing::overdrive_test(guest = "probe")]
+#[overdrive_test(guest = "probe")]
 fn an_absent_device_is_refused_naming_device_open() {
     // The module absent: `/dev/ovd_fwd` does not exist in this thread's
     // mount namespace. The `DeviceOpen` stage's refusal is the open's own
@@ -71,7 +72,7 @@ fn an_absent_device_is_refused_naming_device_open() {
 }
 
 #[test]
-#[overdrive_testing::overdrive_test(guest = "probe")]
+#[overdrive_test(guest = "probe")]
 fn a_device_that_is_not_the_forwarder_is_refused_naming_version() {
     // `/dev/null` answers no forwarder ioctl: the `Version` stage, not a later
     // one, must refuse it.
@@ -85,7 +86,7 @@ fn a_device_that_is_not_the_forwarder_is_refused_naming_version() {
 }
 
 #[test]
-#[overdrive_testing::overdrive_test(guest = "probe")]
+#[overdrive_test(guest = "probe")]
 fn an_inheritable_context_is_refused_naming_version() {
     let fwd = open_context();
     clear_cloexec(fwd.readiness_fd());
@@ -99,7 +100,7 @@ fn an_inheritable_context_is_refused_naming_version() {
 }
 
 #[test]
-#[overdrive_testing::overdrive_test(guest = "probe")]
+#[overdrive_test(guest = "probe")]
 fn an_absent_vsock_loopback_transport_is_refused_naming_stream_round_trip() {
     let fwd = open_context();
     let removed = LoopbackTransportRemoved::remove();

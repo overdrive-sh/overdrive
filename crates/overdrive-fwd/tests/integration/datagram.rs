@@ -22,6 +22,7 @@ use overdrive_core::guest_transport::wire::{
     DATAGRAM_FRAME_HEADER_LEN, DATAGRAM_FRAME_MAGIC, DatagramFrame, MAX_GUEST_DATAGRAM_PAYLOAD,
 };
 use overdrive_fwd::KernelFlowForwarder;
+use overdrive_testing::overdrive_test;
 
 use super::support::{
     END_WAIT, Vsock, live, open_context, pattern, udp_pair, vsock_pair, wait_end_of,
@@ -169,31 +170,31 @@ fn mixed_run(vsock_buffer: u64, min: usize, max: usize, count: usize) {
 }
 
 #[test]
-#[overdrive_testing::overdrive_test(guest = "core")]
+#[overdrive_test(guest = "core")]
 fn mix_64_to_59000_bytes_at_256_kib_is_delivered_once_whole_in_order() {
     mixed_run(256 * 1024, 64, 59_000, 2_000);
 }
 
 #[test]
-#[overdrive_testing::overdrive_test(guest = "core")]
+#[overdrive_test(guest = "core")]
 fn mix_64_to_59000_bytes_at_64_kib_is_delivered_once_whole_in_order() {
     mixed_run(64 * 1024, 64, 59_000, 2_000);
 }
 
 #[test]
-#[overdrive_testing::overdrive_test(guest = "core")]
+#[overdrive_test(guest = "core")]
 fn mixs_64_to_2047_bytes_at_256_kib_is_delivered_once_whole_in_order() {
     mixed_run(256 * 1024, 64, 2_047, 20_000);
 }
 
 #[test]
-#[overdrive_testing::overdrive_test(guest = "core")]
+#[overdrive_test(guest = "core")]
 fn mixs_64_to_2047_bytes_at_64_kib_is_delivered_once_whole_in_order() {
     mixed_run(64 * 1024, 64, 2_047, 20_000);
 }
 
 #[test]
-#[overdrive_testing::overdrive_test(guest = "core")]
+#[overdrive_test(guest = "core")]
 fn a_stalled_vsock_reader_fills_the_udp_source_queue_and_datagrams_drop_only_there() {
     // R5-52: datagrams wait in the source UDP socket's receive queue; once
     // it is full the kernel drops new ones (net/ipv4/udp.c:1721-1731 @
@@ -268,7 +269,7 @@ fn read_frame_or_quiet(v: &Vsock) -> Option<Vec<u8>> {
 }
 
 #[test]
-#[overdrive_testing::overdrive_test(guest = "core")]
+#[overdrive_test(guest = "core")]
 fn empty_datagrams_cross_once_and_in_order_both_ways() {
     // R5-51: an empty datagram is a zero-length frame toward the guest and a
     // zero-length datagram toward the peer, in order with its neighbours.
@@ -294,7 +295,7 @@ fn empty_datagrams_cross_once_and_in_order_both_ways() {
 }
 
 #[test]
-#[overdrive_testing::overdrive_test(guest = "core")]
+#[overdrive_test(guest = "core")]
 fn a_frame_shaped_payload_is_stripped_of_exactly_one_outer_frame() {
     let a = associate(None);
     let inner = frame(b"inner");
@@ -307,7 +308,7 @@ fn a_frame_shaped_payload_is_stripped_of_exactly_one_outer_frame() {
 }
 
 #[test]
-#[overdrive_testing::overdrive_test(guest = "core")]
+#[overdrive_test(guest = "core")]
 fn an_oversize_datagram_is_dropped_at_the_source_and_counted() {
     let a = associate(None);
     a.u_far.send(b"first").expect("send");
@@ -341,7 +342,7 @@ fn assert_frame_invalid(bytes: &[u8], then_half_close: bool) {
 }
 
 #[test]
-#[overdrive_testing::overdrive_test(guest = "core")]
+#[overdrive_test(guest = "core")]
 fn a_bad_magic_aborts_frame_invalid() {
     let mut bytes = frame(b"payload");
     bytes[0] = b'X';
@@ -349,7 +350,7 @@ fn a_bad_magic_aborts_frame_invalid() {
 }
 
 #[test]
-#[overdrive_testing::overdrive_test(guest = "core")]
+#[overdrive_test(guest = "core")]
 fn a_declared_length_above_the_bound_aborts_frame_invalid() {
     let mut header = DATAGRAM_FRAME_MAGIC.to_vec();
     header.extend_from_slice(&(MAX_GUEST_DATAGRAM_PAYLOAD + 1).to_be_bytes());
@@ -357,7 +358,7 @@ fn a_declared_length_above_the_bound_aborts_frame_invalid() {
 }
 
 #[test]
-#[overdrive_testing::overdrive_test(guest = "core")]
+#[overdrive_test(guest = "core")]
 fn a_truncated_frame_at_a_clean_peer_end_aborts_frame_invalid() {
     // EV-DGRAM D1 / U-EV-9: a clean-class end (0x2 only) that leaves a frame
     // incomplete aborts FrameInvalid, after every whole frame before it is
@@ -381,7 +382,7 @@ fn a_truncated_frame_at_a_clean_peer_end_aborts_frame_invalid() {
 }
 
 #[test]
-#[overdrive_testing::overdrive_test(guest = "core")]
+#[overdrive_test(guest = "core")]
 fn a_clean_peer_end_after_whole_frames_completes() {
     let a = associate(None);
     (&mut &a.v_far).write_all(&frame(b"last")).expect("write");
@@ -393,7 +394,7 @@ fn a_clean_peer_end_after_whole_frames_completes() {
 }
 
 #[test]
-#[overdrive_testing::overdrive_test(guest = "core")]
+#[overdrive_test(guest = "core")]
 fn an_abort_class_peer_end_with_a_partial_frame_queued_is_a_peer_abort() {
     // Every production end of a datagram vsock is abort-class: the cause is
     // PeerAbort whatever frames are queued, never FrameInvalid.
@@ -410,7 +411,7 @@ fn an_abort_class_peer_end_with_a_partial_frame_queued_is_a_peer_abort() {
 }
 
 #[test]
-#[overdrive_testing::overdrive_test(guest = "core")]
+#[overdrive_test(guest = "core")]
 fn a_refused_udp_destination_aborts_with_a_socket_error() {
     // A connected UDP socket's ICMP-reported ECONNREFUSED ends the
     // association `SocketError` (the host owner's DestinationUnreachable).
@@ -461,7 +462,7 @@ fn force_sndbuf(sock: &impl AsRawFd, bytes: libc::c_int) {
 /// of `sk_write_space` (`test-scenarios.md`, "UDP resume over loopback").
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[overdrive_testing::overdrive_test(guest = "core")]
+#[overdrive_test(guest = "core")]
 fn a_udp_target_whose_send_buffer_is_full_resumes_and_delivers_every_frame() {
     const COUNT: usize = 2_000;
     let a = associate(None);

@@ -58,6 +58,7 @@ use overdrive_testing::guest_kit::{GuestImageSpec, GuestKit, ScriptedGuest, Work
 use overdrive_testing::guest_peer::{
     DrainEnd, GuestPeerError, PeerCommand, PeerOutcome, PeerRead, PeerReply, PeerSide,
 };
+use overdrive_testing::overdrive_test;
 use overdrive_testing::vm_fixture::default_staging_root;
 use overdrive_testing::vsock::{VMADDR_CID_ANY, VMADDR_CID_HOST, VsockListener, VsockStream};
 
@@ -139,7 +140,7 @@ fn device_release_reset() -> ForwardOutcome {
 /// end reads a reset, never EOF (R5-45 (b), R5-10 guest half).
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[overdrive_testing::overdrive_test(guest = "nested-boundary")]
+#[overdrive_test(guest = "nested-boundary")]
 fn a_vmm_exit_aborts_a_live_host_pair_with_the_device_releases_reset() {
     let mut rig = Boundary::boot(0, "sweep-pair");
     let fwd = open_context();
@@ -165,7 +166,7 @@ fn a_vmm_exit_aborts_a_live_host_pair_with_the_device_releases_reset() {
 /// changes nothing and the owner ends the flow.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[overdrive_testing::overdrive_test(guest = "nested-boundary")]
+#[overdrive_test(guest = "nested-boundary")]
 fn a_vsock_half_swept_before_attach_is_refused_half_ended_with_econnreset() {
     let mut rig = Boundary::boot(1, "sweep-attach");
     let fwd = open_context();
@@ -189,7 +190,7 @@ fn a_vsock_half_swept_before_attach_is_refused_half_ended_with_econnreset() {
 /// (EVMOD-STREAM-END (d); DR2-CLOSE F-S1).
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[overdrive_testing::overdrive_test(guest = "nested-boundary")]
+#[overdrive_test(guest = "nested-boundary")]
 fn a_watched_half_records_the_sweep_before_its_holder_observes_the_reset() {
     let mut rig = Boundary::boot(2, "sweep-watch");
     let fwd = Arc::new(open_context());
@@ -279,7 +280,7 @@ impl ForwardedFlow {
 /// (R2-END, CLEAN-FULL-END; R5-10's clean-close regression).
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[overdrive_testing::overdrive_test(guest = "nested-boundary")]
+#[overdrive_test(guest = "nested-boundary")]
 fn bytes_cross_the_vm_boundary_both_ways_and_clean_ends_complete_both_pairs() {
     let mut flow = ForwardedFlow::establish(3, "battery-clean");
     let tag = "battery-clean";
@@ -341,7 +342,7 @@ fn bytes_cross_the_vm_boundary_both_ways_and_clean_ends_complete_both_pairs() {
 /// application reads a reset, never EOF (R5-45 (b)).
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[overdrive_testing::overdrive_test(guest = "nested-boundary")]
+#[overdrive_test(guest = "nested-boundary")]
 fn a_guest_application_reset_reaches_the_host_application_as_a_reset() {
     let mut flow = ForwardedFlow::establish(4, "battery-guest-rst");
     flow.rig.guest.peer().write("app", b"from-the-guest").expect("the guest app writes");
@@ -365,7 +366,7 @@ fn a_guest_application_reset_reaches_the_host_application_as_a_reset() {
 /// (R5-45 (b), the other direction).
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[overdrive_testing::overdrive_test(guest = "nested-boundary")]
+#[overdrive_test(guest = "nested-boundary")]
 fn a_host_application_reset_reaches_the_guest_application_as_a_reset() {
     let mut flow = ForwardedFlow::establish(5, "battery-host-rst");
     (&mut &flow.host_app).write_all(b"from-the-host").expect("the host app writes");
@@ -398,7 +399,7 @@ fn a_host_application_reset_reaches_the_guest_application_as_a_reset() {
 /// a reset, never EOF (the battery's `kill` shape across the boundary).
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[overdrive_testing::overdrive_test(guest = "nested-boundary")]
+#[overdrive_test(guest = "nested-boundary")]
 fn a_vmm_exit_mid_transfer_resets_the_host_application() {
     let mut flow = ForwardedFlow::establish(6, "battery-kill");
     let tag = "battery-kill";

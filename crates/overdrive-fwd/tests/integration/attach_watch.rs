@@ -18,6 +18,7 @@ use overdrive_core::guest_transport::forwarder::{
 };
 use overdrive_core::guest_transport::wire::KernelErrno;
 use overdrive_fwd::KernelFlowForwarder;
+use overdrive_testing::overdrive_test;
 
 use super::support::{
     TCP_CLOSE, TCP_CLOSE_WAIT, Vsock, VsockListener, assert_far_tcp_clean, attach_stream,
@@ -52,7 +53,7 @@ fn assert_nothing_hooked(fwd: &KernelFlowForwarder, v: &Vsock, t: &TcpStream) {
 // ---------------------------------------------------------------------------
 
 #[test]
-#[overdrive_testing::overdrive_test(guest = "core")]
+#[overdrive_test(guest = "core")]
 fn established_halves_are_accepted_and_forward_bytes_queued_before_attach() {
     let fwd = open_context();
     let (v, v_far) = vsock_pair();
@@ -67,7 +68,7 @@ fn established_halves_are_accepted_and_forward_bytes_queued_before_attach() {
 }
 
 #[test]
-#[overdrive_testing::overdrive_test(guest = "core")]
+#[overdrive_test(guest = "core")]
 fn a_tcp_half_in_close_wait_is_accepted_and_its_fin_carried_out_at_attach() {
     let fwd = open_context();
     let (v, v_far) = vsock_pair();
@@ -86,7 +87,7 @@ fn a_tcp_half_in_close_wait_is_accepted_and_its_fin_carried_out_at_attach() {
 }
 
 #[test]
-#[overdrive_testing::overdrive_test(guest = "core")]
+#[overdrive_test(guest = "core")]
 fn a_vsock_half_whose_peer_half_closed_is_accepted_and_classified_clean_at_attach() {
     let fwd = open_context();
     let (v, v_far) = vsock_pair();
@@ -101,7 +102,7 @@ fn a_vsock_half_whose_peer_half_closed_is_accepted_and_classified_clean_at_attac
 }
 
 #[test]
-#[overdrive_testing::overdrive_test(guest = "core")]
+#[overdrive_test(guest = "core")]
 fn ipv6_tcp_halves_are_accepted() {
     let fwd = open_context();
     let (v, v_far) = vsock_pair();
@@ -116,7 +117,7 @@ fn ipv6_tcp_halves_are_accepted() {
 // ---------------------------------------------------------------------------
 
 #[test]
-#[overdrive_testing::overdrive_test(guest = "core")]
+#[overdrive_test(guest = "core")]
 fn a_tcp_half_reset_before_attach_is_refused_half_ended_with_econnreset() {
     let fwd = open_context();
     let (v, _v_far) = vsock_pair();
@@ -137,7 +138,7 @@ fn a_tcp_half_reset_before_attach_is_refused_half_ended_with_econnreset() {
 }
 
 #[test]
-#[overdrive_testing::overdrive_test(guest = "core")]
+#[overdrive_test(guest = "core")]
 fn a_tcp_half_reset_in_close_wait_is_refused_half_ended_with_epipe() {
     let fwd = open_context();
     let (v, _v_far) = vsock_pair();
@@ -158,7 +159,7 @@ fn a_tcp_half_reset_in_close_wait_is_refused_half_ended_with_epipe() {
 }
 
 #[test]
-#[overdrive_testing::overdrive_test(guest = "core")]
+#[overdrive_test(guest = "core")]
 fn a_closing_vsock_half_is_refused_half_ended() {
     let fwd = open_context();
     let (v, v_far) = vsock_pair();
@@ -177,7 +178,7 @@ fn a_closing_vsock_half_is_refused_half_ended() {
 }
 
 #[test]
-#[overdrive_testing::overdrive_test(guest = "core")]
+#[overdrive_test(guest = "core")]
 fn a_vsock_half_whose_peer_closed_with_bytes_queued_is_accepted_and_aborted_in_its_first_run() {
     let fwd = open_context();
     let (v, v_far) = vsock_pair();
@@ -200,7 +201,7 @@ fn a_vsock_half_whose_peer_closed_with_bytes_queued_is_accepted_and_aborted_in_i
 // ---------------------------------------------------------------------------
 
 #[test]
-#[overdrive_testing::overdrive_test(guest = "core")]
+#[overdrive_test(guest = "core")]
 fn halves_that_never_connected_or_listen_are_refused_not_connected() {
     let fwd = open_context();
     let (v, _v_far) = vsock_pair();
@@ -225,7 +226,7 @@ fn halves_that_never_connected_or_listen_are_refused_not_connected() {
 }
 
 #[test]
-#[overdrive_testing::overdrive_test(guest = "core")]
+#[overdrive_test(guest = "core")]
 fn a_half_whose_own_send_this_side_shut_is_refused_not_connected() {
     let fwd = open_context();
     let (v, _v_far) = vsock_pair();
@@ -245,7 +246,7 @@ fn a_half_whose_own_send_this_side_shut_is_refused_not_connected() {
 }
 
 #[test]
-#[overdrive_testing::overdrive_test(guest = "core")]
+#[overdrive_test(guest = "core")]
 fn unsupported_kinds_are_refused_unsupported_socket_naming_the_side() {
     let fwd = open_context();
     let (v, _v_far) = vsock_pair();
@@ -280,7 +281,7 @@ fn unsupported_kinds_are_refused_unsupported_socket_naming_the_side() {
 }
 
 #[test]
-#[overdrive_testing::overdrive_test(guest = "core")]
+#[overdrive_test(guest = "core")]
 fn a_tcp_half_with_an_upper_layer_protocol_is_refused() {
     let fwd = open_context();
     let (v, _v_far) = vsock_pair();
@@ -293,7 +294,7 @@ fn a_tcp_half_with_an_upper_layer_protocol_is_refused() {
 }
 
 #[test]
-#[overdrive_testing::overdrive_test(guest = "core")]
+#[overdrive_test(guest = "core")]
 fn a_half_already_attached_or_watched_is_refused_already_hooked() {
     let fwd = open_context();
     let (v, _v_far) = vsock_pair();
@@ -320,7 +321,7 @@ fn a_half_already_attached_or_watched_is_refused_already_hooked() {
 }
 
 #[test]
-#[overdrive_testing::overdrive_test(guest = "core")]
+#[overdrive_test(guest = "core")]
 fn a_datagram_vsock_half_below_the_largest_frame_is_refused_buffer_too_small() {
     let fwd = open_context();
     let (v, _v_far) = vsock_pair();
@@ -341,7 +342,7 @@ fn a_datagram_vsock_half_below_the_largest_frame_is_refused_buffer_too_small() {
 // ---------------------------------------------------------------------------
 
 #[test]
-#[overdrive_testing::overdrive_test(guest = "core")]
+#[overdrive_test(guest = "core")]
 fn refusals_follow_the_pinned_precedence() {
     let fwd = open_context();
 
@@ -398,7 +399,7 @@ fn refusals_follow_the_pinned_precedence() {
 }
 
 #[test]
-#[overdrive_testing::overdrive_test(guest = "core")]
+#[overdrive_test(guest = "core")]
 fn a_refused_attach_consumes_an_id_and_ids_strictly_increase() {
     let fwd = open_context();
     let (v1, _v1_far) = vsock_pair();
@@ -456,7 +457,7 @@ fn set_int_option(fd: std::os::fd::RawFd, name: libc::c_int, value: libc::c_int)
 /// refusal is keyed on the option, not on the socket).
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[overdrive_testing::overdrive_test(guest = "core")]
+#[overdrive_test(guest = "core")]
 fn a_tcp_half_with_zerocopy_set_is_refused_unsupported_socket() {
     use std::os::fd::AsRawFd;
     let fwd = open_context();
@@ -478,7 +479,7 @@ fn a_tcp_half_with_zerocopy_set_is_refused_unsupported_socket() {
 /// refusal is the transmit mask, not any timestamping).
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[overdrive_testing::overdrive_test(guest = "core")]
+#[overdrive_test(guest = "core")]
 fn a_tcp_half_with_transmit_timestamping_is_refused_unsupported_socket() {
     use std::os::fd::AsRawFd;
     let fwd = open_context();
@@ -500,7 +501,7 @@ fn a_tcp_half_with_transmit_timestamping_is_refused_unsupported_socket() {
 /// it; cleared, the same association attaches.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[overdrive_testing::overdrive_test(guest = "core")]
+#[overdrive_test(guest = "core")]
 fn a_udp_half_with_zerocopy_set_is_refused_unsupported_socket() {
     use std::os::fd::AsRawFd;
     let fwd = open_context();
@@ -523,7 +524,7 @@ fn a_udp_half_with_zerocopy_set_is_refused_unsupported_socket() {
 /// the bit cleared the same socket is watched (negative control).
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[overdrive_testing::overdrive_test(guest = "core")]
+#[overdrive_test(guest = "core")]
 fn a_vsock_half_with_transmit_timestamping_is_refused_at_watch_and_attach() {
     let fwd = open_context();
     let (v, _v_far) = vsock_pair();

@@ -335,25 +335,27 @@ fn test_function_exists(row: &Value) -> bool {
 }
 
 /// Whether the test function carries `#[overdrive_test(guest = "<group>")]`
-/// for exactly the reviewed guest group: a test placed on itself has no table
-/// row, and the declaration must name the same group the reviewed row did.
+/// (with or without further arguments such as `profile = "..."`) for exactly
+/// the reviewed guest group: a test placed on itself has no table row, and the
+/// declaration must name the same group the reviewed row did.
 fn declares_the_reviewed_guest_group_on_the_test(row: &Value) -> bool {
     let source = row["source"].as_str().expect("source");
     let path = source.split(':').next().expect("source path");
     let leaf = row["test_name"].as_str().expect("name").rsplit("::").next().expect("leaf");
     let group = row["context"].as_str().expect("guest group");
-    let declaration = format!("#[overdrive_testing::overdrive_test(guest = \"{group}\")]");
+    let closed = format!("#[overdrive_test(guest = \"{group}\")]");
+    let with_arguments = format!("#[overdrive_test(guest = \"{group}\",");
     let Ok(text) = fs::read_to_string(workspace_file(path)) else { return false };
     let Some(function_at) = text.find(&format!("fn {leaf}(")) else { return false };
-    text[..function_at]
+    let function_line_at = text[..function_at].rfind('\n').map_or(0, |newline| newline + 1);
+    text[..function_line_at]
         .lines()
         .rev()
-        .skip(1)
         .take_while(|line| {
             let line = line.trim_start();
             line.starts_with("#[") || line.starts_with("//")
         })
-        .any(|line| line.trim() == declaration)
+        .any(|line| line.trim() == closed || line.trim().starts_with(&with_arguments))
 }
 
 /// Whether a lane or native-launcher test carries the declaration that places
