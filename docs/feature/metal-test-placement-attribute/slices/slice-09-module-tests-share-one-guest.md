@@ -13,7 +13,7 @@ Disproves "a shared guest can keep nextest's per-test results, retries and filte
 ## In the slice
 
 - A module-level declaration, `shared_guest!(guest = "<group>"[, profile = "<profile>"])`, read by the tests of that module that carry `#[overdrive_test]` with no arguments (shape approved by the user, 2026-11-13).
-- A shared owner per declaration with an exec bound (DESIGN decision N-1, pending the user) and an idle exit (DESIGN decision N-2, approved 2026-11-14).
+- A shared owner per declaration with an exec bound (DESIGN decision N-1, approved 2026-11-14) and an idle exit (DESIGN decision N-2, approved 2026-11-14).
 - One guest per run of a declared module, counted from `OVERDRIVE_GUEST_KIT_TIMING`.
 - Per-test PASS/FAIL, retries and `-E 'test(=…)'` filtering unchanged.
 - The current users of the explicit batched command moved to the declaration.

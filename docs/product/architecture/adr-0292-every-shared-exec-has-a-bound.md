@@ -2,8 +2,8 @@
 
 ## Status
 
-**Proposed — awaiting user approval (DDD-16, user decision N-1 in the feature
-delta).**
+**Accepted — approved by the user, 2026-11-14 (DDD-16, user decision N-1 in
+the feature delta).**
 
 ## Context
 
@@ -43,7 +43,7 @@ the hazard without the bound.
 
 ## Links
 
-- [Decision DDD-16](../../feature/metal-test-placement-attribute/feature-delta.md#ddd-16--every-shared-exec-has-a-bound-proposed-user-decision-n-1)
+- [Decision DDD-16](../../feature/metal-test-placement-attribute/feature-delta.md#ddd-16--every-shared-exec-has-a-bound-approved-user-decision-n-1-2026-11-14)
 - [Formal protocol model](../../../specs/quint/shared-guest-owner/README.md)
 - [ADR-0284](adr-0284-a-shared-guest-serves-one-test-at-a-time-and-never-cancels-a-running-test.md)
 - [ADR-0291](adr-0291-a-shared-guest-is-discarded-after-a-failed-lost-bounded-or-detached-test.md)
