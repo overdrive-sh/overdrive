@@ -1,6 +1,8 @@
-//! Fixtures the scenarios drive. Each is an ordinary test that passes under
-//! nextest: its body asks to fail or to hold only when a scenario sets the
-//! environment its guest request carries.
+//! Fixtures the scenarios drive. Each is pending with the scenarios that drive
+//! it and is activated in the same slice, with its placement on the test. Each
+//! is an ordinary test that passes under nextest once activated: its body asks
+//! to fail or to hold only when a scenario sets the environment its guest
+//! request carries.
 //!
 //! `shared_module` declares one shared `cgroup-default` guest for its tests.
 //! `scenario_clients` hands a named body to `run_in_guest` with a typed shared
@@ -35,24 +37,28 @@ pub mod shared_module {
 
     #[overdrive_test]
     #[test]
+    #[ignore = "pending DELIVER: module-tests-share-one-guest"]
     fn first_test_of_the_shared_module() {
         scenario_body();
     }
 
     #[overdrive_test]
     #[test]
+    #[ignore = "pending DELIVER: module-tests-share-one-guest"]
     fn second_test_of_the_shared_module() {
         scenario_body();
     }
 
     #[overdrive_test]
     #[test]
+    #[ignore = "pending DELIVER: module-tests-share-one-guest"]
     fn third_test_of_the_shared_module() {
         scenario_body();
     }
 
     #[overdrive_test]
     #[test]
+    #[ignore = "pending DELIVER: module-tests-share-one-guest"]
     fn test_of_the_shared_module_that_fails_when_told_to() {
         scenario_body();
     }
@@ -61,6 +67,7 @@ pub mod shared_module {
     /// keeps its own isolated guest.
     #[overdrive_test(guest = "cgroup-default")]
     #[test]
+    #[ignore = "pending DELIVER: module-tests-share-one-guest"]
     fn explicit_guest_test_in_the_shared_module() {
         scenario_body();
     }
@@ -73,12 +80,14 @@ pub mod isolated_guest {
 
     #[overdrive_test(guest = "cgroup-default")]
     #[test]
+    #[ignore = "pending DELIVER: guest-placement-on-the-test"]
     fn first_isolated_guest_test() {
         scenario_body();
     }
 
     #[overdrive_test(guest = "cgroup-default")]
     #[test]
+    #[ignore = "pending DELIVER: guest-placement-on-the-test"]
     fn second_isolated_guest_test() {
         scenario_body();
     }
@@ -86,6 +95,7 @@ pub mod isolated_guest {
     /// Writes a host marker file only when its body runs in this process.
     #[overdrive_test(guest = "cgroup-default")]
     #[test]
+    #[ignore = "pending DELIVER: guest-placement-on-the-test"]
     fn isolated_guest_test_that_marks_where_it_ran() {
         if let Some(path) = std::env::var_os(MARKER_ENV) {
             std::fs::write(path, b"ran").expect("writing the marker");
@@ -124,37 +134,44 @@ pub mod scenario_clients {
     }
 
     #[test]
+    #[ignore = "pending DELIVER: module-tests-share-one-guest"]
     fn election_client() {
         hand_to_the_shared_guest(&ELECTION);
     }
 
     #[test]
+    #[ignore = "pending DELIVER: module-tests-share-one-guest"]
     fn orphan_client() {
         hand_to_the_shared_guest(&ORPHAN);
     }
 
     #[test]
+    #[ignore = "pending DELIVER: module-tests-share-one-guest"]
     fn signal_client() {
         hand_to_the_shared_guest(&SIGNAL);
     }
 
     #[test]
+    #[ignore = "pending DELIVER: module-tests-share-one-guest"]
     fn crash_client() {
         hand_to_the_shared_guest(&CRASH);
     }
 
     #[test]
+    #[ignore = "pending DELIVER: module-tests-share-one-guest"]
     fn taint_client() {
         hand_to_the_shared_guest(&TAINT);
     }
 
     #[test]
+    #[ignore = "pending DELIVER: module-tests-share-one-guest"]
     fn failure_client() {
         hand_to_the_shared_guest(&FAILURE);
     }
 
     /// The body the clients hand to the guest; outside a guest it does nothing.
     #[test]
+    #[ignore = "pending DELIVER: module-tests-share-one-guest"]
     fn scenario_body_inside_the_guest() {
         if inside_guest() {
             scenario_body();

@@ -49,6 +49,7 @@ pub(super) mod fixtures {
 
     #[overdrive_test(host_pure)]
     #[test]
+    #[ignore = "pending DELIVER: host-pure-placement-on-the-test"]
     fn per_test_host_pure_fixture() {}
 
     #[overdrive_test(host_pure)]
@@ -57,12 +58,14 @@ pub(super) mod fixtures {
         clippy::unnecessary_wraps,
         reason = "the fixture proves a host-pure test may return a Result"
     )]
+    #[ignore = "pending DELIVER: host-pure-placement-on-the-test"]
     fn host_pure_fixture_may_return_a_result() -> Result<(), String> {
         Ok(())
     }
 
     #[overdrive_test(host_pure)]
     #[test]
+    #[ignore = "pending DELIVER: host-pure-placement-on-the-test"]
     fn host_pure_fixture_reports_its_namespace() {
         if let Some(path) = std::env::var_os(REPORT_ENV) {
             let link =
@@ -73,6 +76,7 @@ pub(super) mod fixtures {
 
     #[overdrive_test(native_launcher)]
     #[test]
+    #[ignore = "pending DELIVER: lane-and-launcher-placement-on-the-test"]
     fn native_launcher_fixture() {
         if let Some(path) = std::env::var_os(REPORT_ENV) {
             let view: Vec<String> = ["net", "mnt", "cgroup"]
@@ -98,9 +102,11 @@ pub(super) mod fixtures {
         placement!(host_pure);
 
         #[test]
+        #[ignore = "pending DELIVER: host-pure-placement-on-the-test"]
         fn first_test_of_the_declared_module() {}
 
         #[test]
+        #[ignore = "pending DELIVER: host-pure-placement-on-the-test"]
         fn second_test_of_the_declared_module() {}
     }
 }
@@ -519,6 +525,7 @@ fn an_unreadable_section_is_refused_on_a_metal_run_as_an_invalid_placement() {
 /// The existing run-context checks still come first: a declaration cannot
 /// bypass them (true today, kept true). CONTRACT_SHAPE: bounded-change.
 #[test]
+#[ignore = "pending DELIVER: host-pure-placement-on-the-test"]
 fn a_declared_test_with_an_invalid_run_context_is_refused_by_the_run_context_check() {
     let this_binary = std::env::current_exe().expect("this test binary");
     let run = OrdinaryRun::new(&empty_table());

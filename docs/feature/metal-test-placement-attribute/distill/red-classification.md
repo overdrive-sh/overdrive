@@ -9,6 +9,10 @@ Run on the native Metal box (`cargo xtask metal run -- cargo nextest run -p over
 - The walking skeleton stays green: `integration::cluster_and_node_commands::cluster_status_with_no_server_returns_transport_error` (`overdrive-cli`, `integration-tests,kvm-tests`) passed on Metal.
 - `cargo check --workspace --all-targets` with `integration-tests` and the six `kvm-tests` members: green. `cargo clippy -D warnings` on `overdrive-testing`, `overdrive-testing-macros` and `xtask` (all targets, all feature gates): green. `xtask conformance-lint` and `xtask dst-lint`: exit 0.
 
+## Correction: no table entries
+
+The run above was taken with 88 transitional entries in `infra/metal/test-placement.json`. DISTILL adds no such entry; they are removed. The 64 pending tests above keep their classification. The tests that were active (GREEN) when this run was taken, with the fixtures they drive, are now pending too, because no placement form exists for them yet (host-pure, native-launcher) or none can place them (design gap D-10): their RED classification is taken when their slice activates them, and they were not re-run with `--run-ignored`.
+
 ## Pending tests
 
 A first run found one BROKEN test (a `BrokenPipe` panic in the checker helper when a wrapper exits without reading its stdin); the helper now ignores the write error, because the exit status and output are what is asserted, and the second run classified it RED.

@@ -61,6 +61,7 @@ fn panic_message(declare: impl FnOnce() -> GuestPlacement) -> Option<String> {
 /// (the rejection tests below are the pending ones).
 /// CONTRACT_SHAPE: pure-function (a declaration is a value in, a value out).
 #[test]
+#[ignore = "pending DELIVER: host-pure-placement-on-the-test"]
 fn the_registry_accepts_exactly_the_twenty_one_named_environments() {
     let mut accepted = 0;
     for (group, profiles) in ENVIRONMENTS {
@@ -83,6 +84,7 @@ fn the_registry_accepts_exactly_the_twenty_one_named_environments() {
 /// The profile may be omitted: every group has a base profile.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
+#[ignore = "pending DELIVER: host-pure-placement-on-the-test"]
 fn an_omitted_profile_selects_each_groups_base_profile() {
     for (group, _) in ENVIRONMENTS {
         assert!(

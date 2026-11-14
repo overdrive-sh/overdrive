@@ -33,6 +33,7 @@ fn a_guest_placed_test_runs_its_body_in_place_when_no_metal_run_is_present() {
 /// On a Metal run the body runs in a guest, never on the host (true of the
 /// per-test guest today, kept true). CONTRACT_SHAPE: bounded-change.
 #[test]
+#[ignore = "pending DELIVER: guest-placement-on-the-test (placement unresolved: the scenario drives guest boots from outside any guest, see design gap D-10)"]
 fn a_guest_placed_test_never_runs_its_body_on_the_host_on_a_metal_run() {
     let marker = marker_path("on-metal");
     let run = run_test(
@@ -51,6 +52,7 @@ fn a_guest_placed_test_never_runs_its_body_on_the_host_on_a_metal_run() {
 /// see the design-gap note in `distill/test-scenarios.md`).
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
+#[ignore = "pending DELIVER: guest-placement-on-the-test (placement unresolved: the scenario drives guest boots from outside any guest, see design gap D-10)"]
 fn a_guest_placed_test_with_an_invalid_run_id_fails_naming_its_group_and_never_runs_on_the_host() {
     let marker = marker_path("exclusive");
     let run = run_test(

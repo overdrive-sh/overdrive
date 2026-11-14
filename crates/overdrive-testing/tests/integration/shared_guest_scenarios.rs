@@ -83,6 +83,7 @@ fn filtering_to_one_test_of_a_shared_module_runs_only_that_test() {
 /// declared module, and an explicit form inside one, keep one guest each.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
+#[ignore = "pending DELIVER: guest-placement-on-the-test (placement unresolved: the scenario drives guest boots from outside any guest, see design gap D-10)"]
 fn guest_placed_tests_outside_a_shared_module_boot_one_guest_each() {
     for (module, name) in [
         (ISOLATED, "first_isolated_guest_test"),
@@ -100,6 +101,7 @@ fn guest_placed_tests_outside_a_shared_module_boot_one_guest_each() {
 /// US-PLACE-01 AC f: the boot time of a per-test guest is retained in the run
 /// output. CONTRACT_SHAPE: bounded-change.
 #[test]
+#[ignore = "pending DELIVER: guest-placement-on-the-test (placement unresolved: the scenario drives guest boots from outside any guest, see design gap D-10)"]
 fn the_boot_time_of_a_guest_per_test_is_recorded_in_the_run_output() {
     let run = run_test(&test_path(ISOLATED, "first_isolated_guest_test"), &[], &[]);
     assert!(run.success, "{}", run.output);
