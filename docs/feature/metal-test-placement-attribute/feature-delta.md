@@ -455,7 +455,7 @@ PROPOSE mode, scope Application/components, OOP paradigm, all priorities (P1 and
 | `infra/metal/README.md`, `bootstrap.sh`, `xtask guest_kit_prepare.rs` | ⊘ grepped for references only |
 | `xtask/tests/acceptance/metal_run_isolation/placement.rs` | ✓ outline |
 | `.config/nextest.toml` | ✓ whole |
-| GitHub issue #354 body and comments | ⊘ no shell in this dispatch; the DISCUSS summary stands in. The orchestrator must read `gh issue view 354 --comments` before relaying the proposed issues below |
+| GitHub issue #354 body and comments | ⊘ no shell in this dispatch; the DISCUSS summary stands in. |
 | `brief.md`, ADR-0280 and the ADR index | ✓ headings, ADR-0280 whole; highest ADR number is 0281, new ones start at 0282 |
 | `docs/product/journeys/declare-where-a-metal-test-runs.yaml` | ⊘ |
 | `vendors/linux` | read for V-4 (`findings-owner-lifetime.md`, `028ef9c96e96`, "Linux 7.0"); DDD-8 cites `path:line` |
@@ -841,18 +841,14 @@ Original questions:
 
 **Not contract-shaping (may stay open; each blocks only its DELIVER step):** console completeness for a failing shared test (the probe used a 300 ms flush sleep, which is an upper bound and not a design); boot-time distribution per profile (the skeleton has two samples); whether a profile's per-test setup scripts are idempotent across consecutive tests in one guest (checked per migrated module at DELIVER).
 
-## Wave: DESIGN / [REF] Scope limitations proposed for tracking
+## Wave: DESIGN / [REF] Scope limitations
 
-No issue is created. Each is proposed to the user, with the file that pins it. I could not run `gh` in this dispatch, so none of these was searched against open issues or the ADRs for a planned mechanism; the orchestrator must run `gh issue list --state all --search …` and `gh issue view <N> --comments` first (CLAUDE.md § "Deferrals require GitHub issues").
+None. The design cuts nothing the feature was asked to deliver, so no tracking issue is proposed (user ruling, 2026-11-14). Properties that follow from the chosen mechanism are not scope limitations:
 
-| Proposal | Where pinned | What lifting needs |
-|---|---|---|
-| Sharing is per module of one test binary; no sharing across modules or binaries | DDD-7 | a wider scope key; not requested, probably no issue wanted |
-| A default declaration can only be `host_pure` | DDD-4 B1 | only relevant if the user picks B |
-| A lane fixture's existence is checked at run time, not at build time (the fixture lives in another crate's test binary) | DDD-1 | a cross-crate registry; not requested |
-| Guest groups are a closed set of eight; adding one is a code change in the registry | DDD-5 | already the case today |
-
-Not a limitation, so no issue proposed: serialising execs within a shared guest (DDD-9). Concurrency inside one guest would reintroduce the node-global races the guest isolates.
+- a guest is shared within one module of one test binary (DDD-7: that is the sharing contract, not a cap on it);
+- the set of guest groups is closed and grows by adding a registry entry (DDD-5);
+- a lane fixture's name is validated in form at build time, and its existence when the test runs, because one crate's build cannot see another crate's tests (DDD-1);
+- execs in a shared guest are serialised (DDD-9).
 
 ## Wave: DESIGN / [REF] Open questions and blockers
 
@@ -867,7 +863,7 @@ No contract-shaping validation item is Open: V-1 to V-7, V-9 and V-10 are run an
 | U-3 | DDD-12: amend the `development.md` command to `cargo tree -p xtask -e normal,build \| rg overdrive-`; and whether `xtask` also takes `overdrive-testing` as a dev-dependency | amend; X (yes) | the rule allows dev edges onto the macro crate; X lets xtask's one guest-group test self-place, Y leaves one table entry until a ruling |
 | U-4 | DDD-4: how the 3,855 host-pure and unit-lane tests are placed (A, B1, B2, or module-level M2) | B1 | A: ~4,640 sites; B1: ~80 one-line declarations and a `placement_conflict` rule for mixed binaries |
 | U-5 | DDD-1: the 18-test `macro_rules!` template (`gateway_relay_equivalence.rs:616`) against DDD-15's stop rule | T1: one attribute in the template; the migration script special-cases it | T1: one special case checked by the parity diff; T3 blocks the table's deletion |
-| U-6 | Scope limitation issues of § "Scope limitations proposed for tracking" (the orchestrator searches existing issues first) | surface; create none without approval | none created |
+| U-6 | Tracking issues for scope limitations | none: the design imposes no scope limitation (§ "Scope limitations") | user, 2026-11-14 |
 
 Within the design, no user answer needed (relay approval at DISTILL handoff): no `#[test]` insertion, position below `#[quint_*]`, guest-forms-only `()` rule, the hidden const's name, explicit-overrides conflict rule, the 20-environment registry, `quint_model` on the test, DDD-8's namespace-before-pidfd ordering, DDD-10, DDD-13 to DDD-15.
 
