@@ -134,4 +134,9 @@ mod integration {
     /// real-crypto byte parsing). Ports the host adapter's cert↔key
     /// correspondence proof to the sim fixture consts.
     mod sim_ca_fixture_cert_key_match;
+
+    /// The production convergence loop's eight-way admission bound under
+    /// pending Stop effects, and its close-admission drain, driven through
+    /// the real server composition with only the `Driver` port substituted.
+    mod convergence_admission_stop;
 }

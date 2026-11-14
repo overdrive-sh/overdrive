@@ -12038,6 +12038,9 @@
       }
     },
     "overdrive-sim::integration": {
+      "integration::convergence_admission_stop::closing_admission_drains_eight_pending_stops_without_admitting_a_ninth": {
+        "kind": "host-pure"
+      },
       "integration::dst_clean_clone_green::default_catalogue_is_green_within_wall_clock_budget": {
         "kind": "host-pure"
       },
