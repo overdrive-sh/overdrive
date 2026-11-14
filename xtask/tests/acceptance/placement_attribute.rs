@@ -784,7 +784,12 @@ fn placement_lint_fails_with_the_cause_when_the_test_listing_fails() {
 
 /// The listing enables `integration-tests` and, for every member whose manifest
 /// declares `kvm-tests`, that member's own feature, so no test behind it escapes
-/// the check. CONTRACT_SHAPE: unbounded-preservation.
+/// the check. The lint's own `cargo metadata` read (the real one, through the
+/// stub `cargo`'s pass-through) is the subject under test here: it is the lint's
+/// discovery port for the members. It is a read-only query that builds nothing
+/// and takes no build lock; the nested `cargo` that design gap D-9 forbids in a
+/// test is the build-bearing `cargo nextest list`, which this test stubs.
+/// CONTRACT_SHAPE: unbounded-preservation.
 #[test]
 #[ignore = "pending DELIVER: unplaced-test-fails-in-the-default-lane"]
 fn placement_lint_lists_with_integration_tests_and_each_members_own_kvm_feature() {
@@ -796,8 +801,12 @@ fn placement_lint_lists_with_integration_tests_and_each_members_own_kvm_feature(
 
     let mut declaring = BTreeSet::new();
     for entry in fs::read_dir(workspace_file("crates")).expect("crates directory").flatten() {
+        if !entry.path().is_dir() {
+            continue;
+        }
         let manifest = entry.path().join("Cargo.toml");
-        let Ok(text) = fs::read_to_string(&manifest) else { continue };
+        let text = fs::read_to_string(&manifest)
+            .unwrap_or_else(|error| panic!("{} must be readable: {error}", manifest.display()));
         let name = text
             .lines()
             .find_map(|l| l.strip_prefix("name").and_then(|r| r.split('"').nth(1)))
@@ -821,8 +830,11 @@ fn placement_lint_lists_with_integration_tests_and_each_members_own_kvm_feature(
 
 // ----- retirement -----------------------------------------------------------
 
-fn read(relative: &str) -> Option<String> {
-    fs::read_to_string(workspace_file(relative)).ok()
+/// Reads a maintained file. A file a scenario names must exist: a missing or
+/// unreadable one is a failure, never a skipped check.
+fn read(relative: &str) -> String {
+    fs::read_to_string(workspace_file(relative))
+        .unwrap_or_else(|error| panic!("{relative} must exist and be readable: {error}"))
 }
 
 /// With the table retired nothing reads or ships it: the file, its lookup in the
@@ -839,7 +851,7 @@ fn the_placement_table_the_lookup_and_the_dispatcher_are_retired() {
         !workspace_file("crates/overdrive-testing/bin/fwd_guest_suite.rs").exists(),
         "the dispatcher binary is deleted"
     );
-    let wrapper = read("infra/metal/test-wrapper.sh").expect("the wrapper");
+    let wrapper = read("infra/metal/test-wrapper.sh");
     for removed in [
         "test-placement",
         "--guest-suite",
@@ -856,7 +868,7 @@ fn the_placement_table_the_lookup_and_the_dispatcher_are_retired() {
 #[test]
 #[ignore = "pending DELIVER: placement-table-and-dispatcher-retired"]
 fn the_maintained_documents_describe_the_attribute_and_name_no_removed_path() {
-    let rules = read(".claude/rules/testing.md").expect("testing.md");
+    let rules = read(".claude/rules/testing.md");
     assert!(
         rules.contains("overdrive_test") && rules.contains("placement-lint"),
         "testing.md documents the attribute and the lint"
@@ -866,9 +878,8 @@ fn the_maintained_documents_describe_the_attribute_and_name_no_removed_path() {
         "infra/metal/README.md",
         "website/content/docs/how-to/run-verification-on-metal.mdx",
         "tests/conformance/CLAUDE.md",
-        "docs/product/journeys/metal-run-isolation.yaml",
     ] {
-        let Some(text) = read(path) else { continue };
+        let text = read(path);
         for removed in [
             "test-placement.json",
             "overdrive-fwd-guest-suite",

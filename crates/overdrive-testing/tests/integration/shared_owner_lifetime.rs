@@ -8,6 +8,12 @@
 //! `#[overdrive_test(native_launcher)]` (each observes the owner and VMM
 //! processes from outside any guest); no placement-table entry is ever added.
 //!
+//! Idle assumption: every scenario's clients follow one another within seconds,
+//! far inside the owner's 30 s idle period (`SHARED_GUEST_IDLE`, design
+//! DDD-17), so a scope has one owner unless the scenario kills it. Owners are
+//! counted from a sampler that runs for the whole scenario, not from a single
+//! look after the clients finish.
+//!
 //! Replayed-by-exemption invariants: `I_OWNER_UNIQUE` is proved by
 //! `eight_simultaneous_first_arrivals_elect_exactly_one_owner`; `I_NO_ORPHAN` by
 //! `killing_the_owner_during_a_guest_exec_leaves_no_vmm`.
@@ -15,8 +21,8 @@
 use std::time::Duration;
 
 use super::scenario_support::{
-    CLIENT_BODY_ENV, FAIL_ENV, HOLD_SECONDS_ENV, alive, descendants_of, kill, owners_in_this_run,
-    run_test, shared_generations, spawn_test, test_path, timings, wait_until,
+    CLIENT_BODY_ENV, FAIL_ENV, HOLD_SECONDS_ENV, OwnerSampler, alive, descendants_of, kill,
+    owners_in_this_run, run_test, shared_generations, spawn_test, test_path, timings, wait_until,
 };
 
 const CLIENTS: &str = "shared_guest_fixtures::scenario_clients";
@@ -35,6 +41,7 @@ fn client(name: &str) -> String {
 #[ignore = "pending DELIVER: module-tests-share-one-guest"]
 fn eight_simultaneous_first_arrivals_elect_exactly_one_owner() {
     let before = owners_in_this_run();
+    let sampler = OwnerSampler::start();
     let environment = [(CLIENT_BODY_ENV, BODY)];
     #[allow(clippy::needless_collect, reason = "all eight clients start before any is awaited")]
     let clients: Vec<_> =
@@ -44,7 +51,7 @@ fn eight_simultaneous_first_arrivals_elect_exactly_one_owner() {
     for (index, result) in results.iter().enumerate() {
         assert!(result.success, "arrival {index} passes:\n{}", result.output);
     }
-    let started: Vec<_> = owners_in_this_run().difference(&before).copied().collect();
+    let started: Vec<_> = sampler.stop().difference(&before).copied().collect();
     assert_eq!(started.len(), 1, "exactly one owner started for eight first arrivals: {started:?}");
     let generations: std::collections::BTreeSet<u32> =
         results.iter().flat_map(|r| shared_generations(&r.output)).collect();
@@ -95,6 +102,7 @@ fn killing_the_owner_during_a_guest_exec_leaves_no_vmm() {
 #[ignore = "pending DELIVER: module-tests-share-one-guest"]
 fn the_electing_client_killed_by_a_group_signal_leaves_the_owner_serving() {
     let before = owners_in_this_run();
+    let sampler = OwnerSampler::start();
     let mut elector = spawn_test(
         &client("signal_client"),
         &[(CLIENT_BODY_ENV, BODY), (HOLD_SECONDS_ENV, "10")],
@@ -108,9 +116,10 @@ fn the_electing_client_killed_by_a_group_signal_leaves_the_owner_serving() {
     assert!(alive(owner), "the owner survived its elector's process group");
     let next = run_test(&client("signal_client"), &[(CLIENT_BODY_ENV, BODY)], &[]);
     assert!(next.success, "the next client is served:\n{}", next.output);
-    let after = owners_in_this_run();
-    assert!(after.contains(&owner), "the same owner served it");
-    assert_eq!(after.difference(&before).count(), 1, "no second owner was elected: {after:?}");
+    let seen = sampler.stop();
+    assert!(seen.contains(&owner), "the same owner served it");
+    assert!(alive(owner), "the owner is still serving");
+    assert_eq!(seen.difference(&before).count(), 1, "no second owner was elected: {seen:?}");
 }
 
 /// An owner that dies mid-module fails its attached tests with the owner stage
@@ -158,6 +167,8 @@ fn a_client_killed_while_its_test_runs_taints_the_guest_for_the_next_client() {
     let second = run_test(&client("taint_client"), &[(CLIENT_BODY_ENV, BODY)], &[]);
     assert!(second.success, "the next client is served:\n{}", second.output);
     let served = shared_generations(&second.output);
+    assert!(!attached.is_empty(), "the killed client had attached to a generation");
+    assert!(!served.is_empty(), "the next client attached to a generation:\n{}", second.output);
     assert!(
         served.iter().min() > attached.iter().max(),
         "the tainted generation was discarded: {attached:?} then {served:?}"
@@ -176,6 +187,8 @@ fn a_failed_shared_test_is_reported_with_its_status_and_its_guest_is_replaced() 
     let next = run_test(&client("failure_client"), &[(CLIENT_BODY_ENV, BODY)], &[]);
     assert!(next.success, "{}", next.output);
     let (a, b) = (shared_generations(&failed.output), shared_generations(&next.output));
+    assert!(!a.is_empty(), "the failed test attached a generation:\n{}", failed.output);
+    assert!(!b.is_empty(), "the next test attached a generation:\n{}", next.output);
     assert!(b.iter().min() > a.iter().max(), "{a:?} then {b:?}");
     assert_eq!(timings(&next.output).iter().filter(|t| t.shared()).count(), 1);
 }

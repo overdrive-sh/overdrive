@@ -209,6 +209,40 @@ pub fn owners_in_this_run() -> BTreeSet<u32> {
         .collect()
 }
 
+/// Samples [`owners_in_this_run`] every 100 ms from a background thread until
+/// stopped, so a scenario sees every owner that served it even if one exits
+/// idle or is killed before the scenario looks. The scenarios assume the gap
+/// between the clients of one scenario is far below the owner's 30 s idle
+/// period (`SHARED_GUEST_IDLE`, design DDD-17), so one owner serves a scope
+/// unless the scenario itself kills it.
+pub struct OwnerSampler {
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    seen: std::thread::JoinHandle<BTreeSet<u32>>,
+}
+
+impl OwnerSampler {
+    pub fn start() -> Self {
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flag = std::sync::Arc::clone(&stop);
+        let seen = std::thread::spawn(move || {
+            let mut seen = BTreeSet::new();
+            while !flag.load(std::sync::atomic::Ordering::Relaxed) {
+                seen.extend(owners_in_this_run());
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            seen.extend(owners_in_this_run());
+            seen
+        });
+        Self { stop, seen }
+    }
+
+    /// Stops sampling and returns every owner pid seen while it ran.
+    pub fn stop(self) -> BTreeSet<u32> {
+        self.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        self.seen.join().expect("the owner sampler thread")
+    }
+}
+
 fn parent_of(pid: u32) -> Option<u32> {
     let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
     let after_name = stat.rsplit_once(')')?.1;

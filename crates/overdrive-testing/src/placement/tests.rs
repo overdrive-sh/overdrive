@@ -59,12 +59,15 @@ fn panic_message(declare: impl FnOnce() -> GuestPlacement) -> Option<String> {
         .or_else(|| Some(String::new()))
 }
 
-/// Guards against over-rejection: every named environment stays declarable
-/// (the rejection tests below are the pending ones).
+/// A regression guard, not a RED test: the scaffold's `declare` stores what it
+/// is given, so this passes today. It stays true once the registry validates:
+/// every named environment is declarable (the rejection tests below are the RED
+/// ones). Activated with the registry. Placement on activation:
+/// `placement!(host_pure)` on the module (observes nothing outside its process).
 /// CONTRACT_SHAPE: pure-function (a declaration is a value in, a value out).
 #[test]
-#[ignore = "pending DELIVER: host-pure-placement-on-the-test"]
-fn the_registry_accepts_exactly_the_twenty_one_named_environments() {
+#[ignore = "pending DELIVER: guest-artifacts-declared-per-group"]
+fn the_registry_accepts_each_named_environment() {
     let mut accepted = 0;
     for (group, profiles) in ENVIRONMENTS {
         for profile in *profiles {
@@ -83,10 +86,12 @@ fn the_registry_accepts_exactly_the_twenty_one_named_environments() {
     let _ = A_PLACEMENT_BUILT_AT_COMPILE_TIME;
 }
 
-/// The profile may be omitted: every group has a base profile.
+/// The profile may be omitted: every group has a base profile. A regression
+/// guard like the test above (the scaffold accepts it today). Placement on
+/// activation: `placement!(host_pure)` on the module.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER: host-pure-placement-on-the-test"]
+#[ignore = "pending DELIVER: guest-artifacts-declared-per-group"]
 fn an_omitted_profile_selects_each_groups_base_profile() {
     for (group, _) in ENVIRONMENTS {
         assert!(
@@ -97,10 +102,13 @@ fn an_omitted_profile_selects_each_groups_base_profile() {
 }
 
 /// An unknown group is a build-time failure: at constant evaluation the
-/// declaration panics with a fixed message.
+/// declaration panics with a fixed message. The behaviour is built by the
+/// guest-placement slice; the test needs the host-pure form to be placed on a
+/// Metal run, so it activates with that form. Placement on activation:
+/// `placement!(host_pure)` on the module.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER: guest-placement-on-the-test"]
+#[ignore = "pending DELIVER: host-pure-placement-on-the-test"]
 fn an_unknown_group_is_rejected_by_name_at_declaration() {
     for group in ["cgroup-defualt", "", "CGROUP-DEFAULT", "host"] {
         let message = panic_message(|| GuestPlacement::declare(group, "", Sharing::Isolated, ""))
@@ -110,6 +118,7 @@ fn an_unknown_group_is_rejected_by_name_at_declaration() {
 }
 
 /// An unknown profile, or a profile that belongs to another group, is rejected.
+/// Placement on activation: `placement!(host_pure)` on the module.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
 #[ignore = "pending DELIVER: guest-artifacts-declared-per-group"]
@@ -176,10 +185,13 @@ impl Drop for MetalEnvGuard {
 /// A Metal run context is present when any of the three variables is set and
 /// non-empty, whatever its value: an `exclusive` class counts, so a guest-placed
 /// body is never run in place on the shared host.
+/// `in_metal_run()` is built by the guest-placement slice; the test needs the
+/// host-pure form to be placed on a Metal run, so it activates with that form.
+/// Placement on activation: `placement!(host_pure)` on the module.
 /// CONTRACT_SHAPE: pure-function (the process environment in, a verdict out).
 #[test]
 #[serial(env)]
-#[ignore = "pending DELIVER: guest-placement-on-the-test"]
+#[ignore = "pending DELIVER: host-pure-placement-on-the-test"]
 fn a_metal_run_is_present_when_any_one_of_the_three_variables_is_set_and_non_empty() {
     let cases: [[Option<&str>; 3]; 6] = [
         [Some("0123456789abcdef01234567"), None, None],
@@ -195,11 +207,13 @@ fn a_metal_run_is_present_when_any_one_of_the_three_variables_is_set_and_non_emp
     }
 }
 
-/// No variable, or only empty ones, is no Metal run.
+/// No variable, or only empty ones, is no Metal run. Activates with the
+/// host-pure form, like the test above.
+/// Placement on activation: `placement!(host_pure)` on the module.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
 #[serial(env)]
-#[ignore = "pending DELIVER: guest-placement-on-the-test"]
+#[ignore = "pending DELIVER: host-pure-placement-on-the-test"]
 fn no_metal_run_is_present_when_no_variable_is_set_or_every_set_one_is_empty() {
     let cases: [[Option<&str>; 3]; 4] = [
         [None, None, None],

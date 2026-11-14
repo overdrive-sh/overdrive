@@ -25,6 +25,15 @@
 //! `execgen`, `execs`, `faults`, `idleLoss`, `conf_step` and the per-client
 //! phases.
 //!
+//! The replay compares the projected state after every step and keeps no record
+//! of the effects `handle` returns: replies are not a projected variable, and
+//! adding driver bookkeeping to see them would make the oracle the driver's own
+//! record. So the invariants about replies, `I_DELIVER_ONLY_ATTACHED` and
+//! `EveryClientTerminates`, are not discharged by replay; they are discharged by
+//! the property tests over the returned effects in `owner_core/tests.rs`
+//! (`seeded_event_schedules_keep_the_owner_invariants`,
+//! `every_attached_client_that_stays_is_answered_once_when_the_environment_answers_everything`).
+//!
 //! The environment actions `Arrive`, `ElectBegin`, `OwnerStarted` and
 //! `OwnerCrash` are outside conformance replay under the approved exemption
 //! (design decision N-4); each invariant they touch is proved by a Tier-3

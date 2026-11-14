@@ -25,8 +25,10 @@ struct Scratch(PathBuf);
 
 impl Scratch {
     fn new(name: &str) -> Self {
-        let dir = std::env::temp_dir()
-            .join(format!("overdrive-shared-client-{}-{name}", std::process::id()));
+        // `/tmp` directly, not `temp_dir()`: a unix socket path must be shorter
+        // than `SUN_LEN` (108 bytes), and a Metal run's temporary directory is
+        // under a long per-run path.
+        let dir = PathBuf::from("/tmp").join(format!("ovd-sc-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("creating the scratch directory");
         Self(dir)

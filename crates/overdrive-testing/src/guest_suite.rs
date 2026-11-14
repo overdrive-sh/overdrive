@@ -81,6 +81,10 @@ const IN_GUEST_ENV: &str = "OVERDRIVE_TEST_IN_GUEST";
 pub enum RunInGuestError {
     /// The group's guest context is not prepared on this host, or the group
     /// is unknown (outside Metal this is the fail-closed outcome).
+    ///
+    /// Transitional: slice `guest-placement-on-the-test` rewrites this: off a
+    /// Metal run the placement expansion runs the body in place and never calls
+    /// `run_in_guest`, so "fail-closed outside Metal" no longer applies.
     #[error("guest group {group:?} is not prepared for {test}: {detail}")]
     LaneNotPrepared {
         /// The declared guest group.
@@ -143,6 +147,11 @@ pub fn inside_guest() -> bool {
 /// group (named in the detail), [`RunInGuestError::GuestExecution`] when the
 /// guest cannot boot or does not return, [`RunInGuestError::BodyFailed`] when
 /// the test exits unsuccessfully inside the guest.
+///
+/// Transitional: slice `guest-placement-on-the-test` removes this skeleton
+/// entry point when the typed `placement::run_in_guest` lands; the precondition
+/// above ("otherwise the call fails closed") is then the caller's `in_metal_run()`
+/// check, not this function's.
 pub fn run_in_guest(group: &str, exe: &Path, test_name: &str) -> Result<(), RunInGuestError> {
     let program = exe.to_string_lossy().into_owned();
     let args = ["--exact".to_owned(), test_name.to_owned(), NO_CAPTURE.to_owned()];
@@ -5107,11 +5116,9 @@ mod tests {
             "gateway_application_failed_candidate_not_restaged",
         ] {
             let test = format!("application::quint_gateway_application::{name}");
-            let model = quint_guest_model(&MODULES, "overdrive-gateway", &test).expect("declared module");
-            assert_eq!(
-                model,
-                Some(MODEL)
-            );
+            let model =
+                quint_guest_model(&MODULES, "overdrive-gateway", &test).expect("declared module");
+            assert_eq!(model, Some(MODEL));
         }
     }
 
@@ -5124,21 +5131,25 @@ mod tests {
         )
         .expect("not a quint module");
         assert_eq!(model, None);
-        let named = quint_guest_model(&MODULES, "overdrive-gateway", "application::quint_named_test")
-            .expect("a quint-named test fn is not a quint module");
+        let named =
+            quint_guest_model(&MODULES, "overdrive-gateway", "application::quint_named_test")
+                .expect("a quint-named test fn is not a quint module");
         assert_eq!(named, None);
     }
 
     #[test]
     fn an_undeclared_quint_module_fails_closed() {
-        assert!(quint_guest_model(&MODULES, "overdrive-gateway", "runtime::quint_other::a_test").is_err());
+        assert!(
+            quint_guest_model(&MODULES, "overdrive-gateway", "runtime::quint_other::a_test")
+                .is_err()
+        );
         assert!(
             quint_guest_model(
                 &MODULES,
                 "overdrive-worker",
                 "application::quint_gateway_application::a_test",
             )
-                .is_err()
+            .is_err()
         );
     }
 }

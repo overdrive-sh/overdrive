@@ -4,7 +4,7 @@
 //! fixture writes only when its body runs in that process, plus exit status and
 //! output.
 
-use super::scenario_support::{MARKER_ENV, METAL_VARIABLES, run_test, test_path};
+use super::scenario_support::{MARKER_ENV, METAL_VARIABLES, run_test, test_path, timings};
 
 const MARKER_TEST: &str = "isolated_guest_test_that_marks_where_it_ran";
 
@@ -18,9 +18,11 @@ fn marker_path(name: &str) -> std::path::PathBuf {
 /// Off a Metal run the machine is private: the body runs in the current
 /// process, as it does today. CONTRACT_SHAPE: bounded-change (one marker file).
 /// Placement on activation: `#[overdrive_test(host_pure)]` (it observes nothing
-/// outside its own process).
+/// outside its own process). The behaviour is built by the guest-placement
+/// slice (with its `isolated_guest` fixture); the test needs the host-pure form
+/// to be placed on a Metal run, so it activates with `host-pure-placement-on-the-test`.
 #[test]
-#[ignore = "pending DELIVER: guest-placement-on-the-test"]
+#[ignore = "pending DELIVER: host-pure-placement-on-the-test"]
 fn a_guest_placed_test_runs_its_body_in_place_when_no_metal_run_is_present() {
     let marker = marker_path("off-metal");
     let run = run_test(
@@ -47,6 +49,10 @@ fn a_guest_placed_test_never_runs_its_body_on_the_host_on_a_metal_run() {
     );
     assert!(run.success, "{}", run.output);
     assert!(!marker.exists(), "the body ran on the host:\n{}", run.output);
+    let lines = timings(&run.output);
+    assert_eq!(lines.len(), 1, "exactly one guest booted for this test:\n{}", run.output);
+    assert!(!lines[0].shared(), "an isolated guest, not a shared one:\n{}", run.output);
+    assert_eq!(lines[0].field("group"), Some("cgroup-default"), "{}", run.output);
 }
 
 /// A Metal context of any class counts as a Metal run: with the maintenance
@@ -71,5 +77,10 @@ fn a_guest_placed_test_with_an_invalid_run_id_fails_naming_its_group_and_never_r
     );
     assert!(!run.success, "the guest cannot start, so the test fails:\n{}", run.output);
     assert!(run.output.contains("cgroup-default"), "the failure names the group:\n{}", run.output);
+    assert!(
+        run.output.contains("not-a-run-id") || run.output.contains("OVERDRIVE_METAL_RUN_ID"),
+        "the failure names the malformed id or the run-runtime stage that refused it:\n{}",
+        run.output
+    );
     assert!(!marker.exists(), "the body ran on the host:\n{}", run.output);
 }

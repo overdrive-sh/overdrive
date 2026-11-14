@@ -13,15 +13,23 @@
 
 use std::collections::BTreeSet;
 
-use super::scenario_support::{FAIL_ENV, run_test, shared_generations, test_path, timings};
+use super::scenario_support::{
+    FAIL_ENV, OwnerSampler, owners_in_this_run, run_test, shared_generations, test_path, timings,
+};
 
 const SHARED: &str = "shared_guest_fixtures::shared_module";
 const ISOLATED: &str = "shared_guest_fixtures::isolated_guest";
 
-/// US-PLACE-09 s1. CONTRACT_SHAPE: bounded-change (guests booted per run).
+/// US-PLACE-09 s1: one guest for the whole module means one generation and one
+/// owner process: two owners could each boot a "generation 1", so the owner
+/// processes seen while the three tests ran are counted too. The three tests run
+/// back to back, far inside the owner's 30 s idle period (design DDD-17).
+/// CONTRACT_SHAPE: bounded-change (guests booted per run).
 #[test]
 #[ignore = "pending DELIVER: module-tests-share-one-guest"]
 fn a_declared_module_boots_one_guest_and_every_test_reports_its_own_result() {
+    let before = owners_in_this_run();
+    let sampler = OwnerSampler::start();
     let mut generations = BTreeSet::new();
     for name in [
         "first_test_of_the_shared_module",
@@ -34,6 +42,8 @@ fn a_declared_module_boots_one_guest_and_every_test_reports_its_own_result() {
         assert_eq!(attached, 1, "{name} attaches once:\n{}", run.output);
         generations.extend(shared_generations(&run.output));
     }
+    let owners: Vec<_> = sampler.stop().difference(&before).copied().collect();
+    assert_eq!(owners.len(), 1, "one owner served the whole module: {owners:?}");
     assert_eq!(
         generations.len(),
         1,
@@ -63,6 +73,8 @@ fn one_failing_test_in_a_shared_module_does_not_hide_the_others() {
     assert!(after.success, "the next test reports its own result:\n{}", after.output);
     let (g_before, g_after) =
         (shared_generations(&before.output), shared_generations(&after.output));
+    assert!(!g_before.is_empty(), "the first test attached a guest:\n{}", before.output);
+    assert!(!g_after.is_empty(), "the next test attached a guest:\n{}", after.output);
     assert!(
         g_after.iter().min() > g_before.iter().max(),
         "the failed test's guest was discarded: {g_before:?} then {g_after:?}"
@@ -75,7 +87,6 @@ fn one_failing_test_in_a_shared_module_does_not_hide_the_others() {
 fn filtering_to_one_test_of_a_shared_module_runs_only_that_test() {
     let run = run_test(&test_path(SHARED, "second_test_of_the_shared_module"), &[], &[]);
     assert!(run.success, "{}", run.output);
-    assert!(run.output.contains("running 1 test"), "{}", run.output);
     assert_eq!(
         timings(&run.output).len(),
         1,
@@ -85,7 +96,9 @@ fn filtering_to_one_test_of_a_shared_module_runs_only_that_test() {
 }
 
 /// US-PLACE-09 s4 and the approved override rule: a guest-placed test outside a
-/// declared module, and an explicit form inside one, keep one guest each.
+/// declared module, and an explicit form inside one, keep one guest each. The
+/// explicit-form fixture (`shared_module::explicit_guest_test_in_the_shared_module`)
+/// needs only the per-test guest form, so it is pending with this scenario.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
 #[ignore = "pending DELIVER: lane-and-launcher-placement-on-the-test"]

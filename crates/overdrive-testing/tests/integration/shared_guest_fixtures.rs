@@ -4,6 +4,10 @@
 //! to fail or to hold only when a scenario sets the environment its guest
 //! request carries.
 //!
+//! The one exception to "pending with the slice that builds the module
+//! declaration" is `shared_module::explicit_guest_test_in_the_shared_module`: it
+//! is pending with the scenario that drives it (lane-and-launcher slice).
+//!
 //! `shared_module` declares one shared `cgroup-default` guest for its tests.
 //! `scenario_clients` hands a named body to `run_in_guest` with a typed shared
 //! placement of its own scope, so each owner scenario has a scope no other
@@ -64,10 +68,12 @@ pub mod shared_module {
     }
 
     /// An explicit per-test form overrides the module's declaration: this test
-    /// keeps its own isolated guest.
+    /// keeps its own isolated guest. It needs only the per-test guest form, not
+    /// the module declaration's behaviour, so it is pending with the scenario
+    /// that drives it (`guest_placed_tests_outside_a_shared_module_boot_one_guest_each`).
     #[overdrive_test(guest = "cgroup-default")]
     #[test]
-    #[ignore = "pending DELIVER: module-tests-share-one-guest"]
+    #[ignore = "pending DELIVER: lane-and-launcher-placement-on-the-test"]
     fn explicit_guest_test_in_the_shared_module() {
         scenario_body();
     }

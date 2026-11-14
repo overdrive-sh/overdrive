@@ -19,6 +19,12 @@
 //!
 //! A test with no test attribute of its own gets `#[test]`.
 //!
+//! Transitional: slice `guest-placement-on-the-test` rewrites this expansion:
+//! the macro never inserts `#[test]` (design DDD-1), the body runs in place
+//! where `inside_guest()` holds or `in_metal_run()` does not, and the host half
+//! calls the typed `placement::run_in_guest`, which replaces the skeleton's
+//! `guest_suite::run_in_guest(&str, ..)`.
+//!
 //! # Placement marker
 //!
 //! Each declared test also emits a record into the `overdrive_test_placement`

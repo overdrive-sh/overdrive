@@ -10,6 +10,10 @@
 //! scaffolds: the exact signature is authorised by the design and the body is
 //! built by the slice named beside it.
 
+// Stays: the module re-exports `RunInGuestError` and `inside_guest` from
+// `guest_suite`, which carries its own `#![cfg(target_os = "linux")]` like every
+// guest-kit module of this test-support crate; without it the crate would not
+// compile off Linux.
 #![cfg(target_os = "linux")]
 #![allow(
     clippy::todo,
@@ -36,19 +40,7 @@ pub use groups::{GuestGroup, GuestPlacement, LanePlacement, Sharing};
 /// predicate for "a Metal run context is present".
 // SCAFFOLD: true
 pub fn in_metal_run() -> bool {
-    todo!("in_metal_run: read the three Metal variables through metal_run_context_present")
-}
-
-/// The pure core of [`in_metal_run`]: each argument is the variable's value
-/// when it is set.
-// SCAFFOLD: true
-pub(crate) fn metal_run_context_present(
-    run_id: Option<&str>,
-    execution_class: Option<&str>,
-    source_root: Option<&str>,
-) -> bool {
-    let _ = (run_id, execution_class, source_root);
-    todo!("metal_run_context_present: true iff any argument is Some and non-empty")
+    todo!("in_metal_run: true iff any of the three Metal variables is set and non-empty")
 }
 
 /// Runs `test_name` of the test binary `exe` in a guest of `placement`.
