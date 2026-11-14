@@ -43,7 +43,7 @@ use overdrive_cli::commands::deploy::DeployArgs;
 use overdrive_cli::commands::serve::ServeHandle;
 use overdrive_cli::commands::workload::{DescribeArgs, WorkloadDescribeOutput};
 use overdrive_cli::http_client::CliError;
-use overdrive_control_plane::api::IdempotencyOutcome;
+use overdrive_control_plane::api::{AllocStateWire, IdempotencyOutcome};
 use overdrive_core::aggregate::{Job, JobSpecInput};
 use tempfile::TempDir;
 
@@ -195,21 +195,51 @@ async fn walking_skeleton_ws1_ws2_ws3_post_adr_0020_wire_shape() {
         .expect("workload::describe");
 
     assert_eq!(status_output.workload_id, "payments", "describe output must echo workload id");
+    // Phase-1 intent: the workload is committed but has not converged to a
+    // Running allocation. The convergence loop wakes on submit (ADR-0273), so
+    // by the time describe lands it may already have written the first
+    // allocation row (a `Failed` row on a node that composes no VM driver);
+    // the row count is therefore not pinned. What is pinned: no allocation is
+    // Running, and the rendering stays consistent with the rows it carries.
+    let snapshot = &status_output.snapshot;
     assert_eq!(
-        status_output.allocations_total, 0,
-        "phase-1 allocations_total must be 0 (the workload is committed but has not \
-         yet converged to a Running allocation)",
+        status_output.allocations_total,
+        snapshot.rows.len(),
+        "allocations_total must count exactly the rows in the snapshot",
     );
     assert!(
-        status_output.empty_state_message.contains("0 allocations for workload"),
-        "empty_state_message must diagnose the zero-allocation state; got: {}",
-        status_output.empty_state_message,
+        snapshot.rows.iter().all(|row| row.workload_id == "payments"),
+        "every allocation row must belong to the described workload; got: {:?}",
+        snapshot.rows,
     );
     assert!(
-        status_output.empty_state_message.contains("converged"),
-        "empty_state_message must explain the workload has not yet converged; got: {}",
-        status_output.empty_state_message,
+        snapshot.rows.iter().all(|row| row.state != AllocStateWire::Running),
+        "phase-1: no allocation may be Running (the workload is committed but has not \
+         converged to a Running allocation); got: {:?}",
+        snapshot.rows,
     );
+    assert_eq!(
+        snapshot.replicas_running, 0,
+        "phase-1: replicas_running must be 0 while no row is Running",
+    );
+    if status_output.allocations_total == 0 {
+        assert!(
+            status_output.empty_state_message.contains("0 allocations for workload"),
+            "empty_state_message must diagnose the zero-allocation state; got: {}",
+            status_output.empty_state_message,
+        );
+        assert!(
+            status_output.empty_state_message.contains("converged"),
+            "empty_state_message must explain the workload has not yet converged; got: {}",
+            status_output.empty_state_message,
+        );
+    } else {
+        assert!(
+            status_output.empty_state_message.is_empty(),
+            "empty_state_message must be empty once allocation rows exist; got: {}",
+            status_output.empty_state_message,
+        );
+    }
 
     assert_eq!(
         status_output.spec_digest, expected_digest,
