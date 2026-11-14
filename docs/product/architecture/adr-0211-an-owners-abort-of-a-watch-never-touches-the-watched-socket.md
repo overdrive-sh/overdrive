@@ -64,9 +64,13 @@ no owner remains to do either (ADR-0199).
   calls return `ConnectionAborted`, and the guest ends its pair on the
   owner's `Abort { flow }` or on the holder's close of `V_h`
   (EVMOD-STREAM-ABORT).
-- After a release the holder's `read` may return 0 or fail `ENOTCONN`; in
+- After a release's `SHUT_RDWR` on a live pair the holder's `read` returns 0
+  at once: the socket is still `ESTABLISHED` and its own receive side is shut
+  (`net/vmw_vsock/af_vsock.c:2545-2548 @ v7.0`). It fails `ENOTCONN` only
+  when the guest's `0x3` had already moved the socket out of `ESTABLISHED`
+  and the holder's own shutdown then cleared `SOCK_DONE` (`:2522-2531`). In
   production a release either ends the process that holds the streams or,
   in the `Forwarder` recovery, follows the owner's abort of every stream.
 - The Quint module `fwd_pair` checks the rule (third iteration; runs
   `OwnerAbortOfWatchLeavesVhAndStreamReportsAborted` and
-  `ContextReleaseShutsWatchedVhAndHolderReadsNotConnected`).
+  `HolderShutdownAfterGuestResetReadsNotConnected`).

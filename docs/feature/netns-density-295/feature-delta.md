@@ -599,7 +599,7 @@ What DISTILL takes from this DESIGN:
     `GuestCloseWithEmptyQueueBeforeHostAttachIsRefusedAndFlowAborts`,
     `OwnerAbortOfWatchLeavesVhAndStreamReportsAborted`,
     `OwnerAbortSendsGuestAbortThenHolderDropIsInert`,
-    `ContextReleaseShutsWatchedVhAndHolderReadsNotConnected`,
+    `HolderShutdownAfterGuestResetReadsNotConnected`,
     `DroppedStreamAbortsWatchThenGuestSeesAbort`,
     `TruncatedFrameAtPeerEndAbortsFrameInvalid`,
     `PeerCloseRacingOwnHalfCloseIsClean` and
@@ -4020,14 +4020,18 @@ of a watch behaved this way (P-70 § 3.8, § 4.3).
 remains to tell the guest or the holder, so the release shuts every live
 watch's `V_h` with `shutdown(SHUT_RDWR)` (the guest sees `0x3` with its
 direction open and classifies an abort) and queues no record. After that
-shutdown the holder's `read` returns 0 or fails `-ENOTCONN`:
-`vsock_shutdown` clears `SOCK_DONE` (`net/vmw_vsock/af_vsock.c:1220 @
-v7.0`), and once the socket has left `ESTABLISHED` without it `recvmsg`
-returns `-ENOTCONN` rather than 0 (`:2522-2531`; 0 is returned only while
-the state is `ESTABLISHED`, `:2545-2548`); a write fails `EPIPE`. Measured
-after the forwarder's `SHUT_RDWR`: `ENOTCONN` in 10 of 400 (`0x3`), 4 of
-400 (`close()`) and 1,916 of 4,096 (the parallel run), the rest 0 (P-70
-§ 3.5). **Whatever the holder's read returns after it ends — EOF or an
+shutdown the holder's `read` returns 0 at once on a live pair: `recvmsg`
+checks the state first, and a socket still `ESTABLISHED` whose own receive
+side is shut returns 0 (`net/vmw_vsock/af_vsock.c:2545-2548 @ v7.0`). It
+returns `-ENOTCONN` only when the socket had already left `ESTABLISHED` (the
+guest's `0x3` arrived first) and `vsock_shutdown` then cleared `SOCK_DONE`
+(`:1220`; `:2522-2531`: a state other than `ESTABLISHED` returns 0 while
+`SOCK_DONE` is set and `-ENOTCONN` once it is cleared); a write fails
+`EPIPE`. P-70 § 3.5 measured `ENOTCONN` after the forwarder's `SHUT_RDWR`
+in 10 of 400 (`0x3`), 4 of 400 (`close()`) and 1,916 of 4,096 (the parallel
+run), the rest 0; under the kernel's order those `ENOTCONN` reads are
+reachable only where the guest's SHUTDOWN or reset preceded the local
+shutdown (not re-measured). **Whatever the holder's read returns after it ends — EOF or an
 error — the holder takes its outcome from the watch** (EVMOD-STREAM-END). A watch
 ended by the guest's own classified end shuts nothing: the holder still
 holds an open direction (a guest half-close leaves the host's direction to
@@ -11282,7 +11286,7 @@ runs"):
 | | a trailing reset after completion changes nothing (END-IDEMPOTENT) | `TrailingRstAfterCompletionIsInert` |
 | | ends present at attach: classified once at attach, or the attach refused `HalfEnded` and the flow aborted (EVMOD-ATTACH-END) | `HostHalfCloseThenAbortBeforeGuestAttachIsAbort`, `GuestCloseBeforeHostAttachAborts`, `GuestCloseWithEmptyQueueBeforeHostAttachIsRefusedAndFlowAborts`, `DestinationResetBeforeHostAttachIsRefusedAndFlowAborts`, `IntakeChildResetBeforePairedIsRefusedAndFlowAborts` |
 | | the host's `Forwarder` recovery aborts every pair, then reopens (EVMOD-CTL) | `ForwarderRecoveryAbortsThenReopens` |
-| | a dial's watch: guest reset, owner abort, holder drop, context release, VMM exit (EVMOD-STREAM-END, EVMOD-STREAM-ABORT) | `WatchedStreamSeesGuestResetAsAbort`, `OwnerAbortOfWatchLeavesVhAndStreamReportsAborted`, `OwnerAbortSendsGuestAbortThenHolderDropIsInert`, `ContextReleaseShutsWatchedVhAndHolderReadsNotConnected`, `ReleasedWatchWithNoRecordReadsAsAbort`, `DroppedStreamAbortsWatchThenGuestSeesAbort`, `VmmExitWithWatchRecordInFlightResolvesFromRecord` |
+| | a dial's watch: guest reset, owner abort, holder drop, context release, VMM exit (EVMOD-STREAM-END, EVMOD-STREAM-ABORT) | `WatchedStreamSeesGuestResetAsAbort`, `OwnerAbortOfWatchLeavesVhAndStreamReportsAborted`, `OwnerAbortSendsGuestAbortThenHolderDropIsInert`, `HolderShutdownAfterGuestResetReadsNotConnected`, `ReleasedWatchWithNoRecordReadsAsAbort`, `DroppedStreamAbortsWatchThenGuestSeesAbort`, `VmmExitWithWatchRecordInFlightResolvesFromRecord` |
 | | datagram mode: in order with an empty datagram, partial frame resumed, a stalled target drops at the source, a truncated frame aborts `FrameInvalid` (EVMOD-DGRAM) | `DgramPaired`, `DatagramsInOrderWithEmpty`, `PartialFrameResumedNotDuplicated`, `StalledUdpTargetDropsAtSource`, `TruncatedFrameAtPeerEndAbortsFrameInvalid` |
 | `flow_quota` (`quota_conf`) | admission stops at the allocation quota | `AdmissionStopsAtTheAllocationQuota` |
 | | a draining flow still counts; a withholding guest holds at most its own quota | `DrainingFlowStillCountsAgainstTheQuota`, `WithholdingGuestHoldsAtMostItsOwnQuota` |
@@ -13573,8 +13577,10 @@ the release rule do not change.
   is resolved by the owner (EVMOD-STREAM-END, EVMOD-STREAM-ABORT), so what its
   `read` returns does not shape a contract; the kernel facts (the record
   queued before `ABORT` returns, the spike's `ABORT` leaving the socket
-  untouched; `ENOTCONN` or 0 at the holder after a release's `SHUT_RDWR`)
-  are measured (P-70 § 3.5, § 3.8). The module suite checks that `ABORT`
+  untouched; 0 at the holder after a release's `SHUT_RDWR` on a live pair,
+  `ENOTCONN` only if the guest's SHUTDOWN or reset preceded the holder's own
+  shutdown) are measured (P-70 § 3.5, § 3.8; the ordering condition follows
+  the kernel source and is not re-measured). The module suite checks that `ABORT`
   of a watch sends nothing on the vsock and changes no socket state, and
   that a release shuts every live watch.
 - **V-EV-PAIR's widened-window attach race.** The attach section's lock
@@ -13983,7 +13989,7 @@ encode is approved (EVMOD-ADOPT and the EVMOD-* ids).
 |---|---|---|
 | U-EV-1 | `ENOTCONN` refused a TCP half in `CLOSE_WAIT` and a vsock half in `CLOSING`, against EVMOD-PAIR's early end | Attach accepts a still-connected half whose peer ended its direction: TCP `ESTABLISHED` and `CLOSE_WAIT` with no `sk_err`, vsock `ESTABLISHED` with any peer bits and no `sk_err` (proven, P-71). A half that has **ended** — a pending `sk_err` (TCP reset, the vsock orphan sweep) or a vsock `CLOSING` — is refused `ECONNABORTED` and the owner aborts the flow (EVMOD-ATTACH-END; § *Control interface*, "States attach and watch accept"; T-4 below) |
 | U-EV-2 | How an end that reached a vsock half before attach is classified | The overrides are installed and the state read in one section under `lock_sock`, `sk_callback_lock` and, for vsock, `vsock_table_lock`, so no transition falls between them; the attach-time state is classified by the table with this side's send open — `SEND` only clean, any `RCV` or `RST` that left the socket connected abort; a pending `sk_err` or a vsock `CLOSING` refuses the attach (EVMOD-ATTACH-END) — and a `0x2`-then-`0x3` before attach is an abort as a direct `0x3` is (§ *Forwarding*, "Attach order"; § *End classification*, "Ends present at attach"). F9 is the design's rule; its discharge is V-EV-PAIR |
-| U-EV-3 | Whether `abort` of a watch and the context's release shut `V_h` | **The owner's abort does not; the release does** (WATCH-ABORT). `abort` / `abort_all` of a watch: record queued, callbacks restored, reference dropped, `V_h` untouched; the guest learns from `Abort { flow }` and the holder's close (EVMOD-STREAM-ABORT). The release shuts every live watched `V_h` with `SHUT_RDWR`, after which the holder's `read` returns 0 or `ENOTCONN` (P-70 § 3.5). The holder's outcome is resolved by the owner — its own end of the watch, else the record, else the in-flight record (§ *Owners' use*, "`GuestStream`"; T-5 below) |
+| U-EV-3 | Whether `abort` of a watch and the context's release shut `V_h` | **The owner's abort does not; the release does** (WATCH-ABORT). `abort` / `abort_all` of a watch: record queued, callbacks restored, reference dropped, `V_h` untouched; the guest learns from `Abort { flow }` and the holder's close (EVMOD-STREAM-ABORT). The release shuts every live watched `V_h` with `SHUT_RDWR`, after which the holder's `read` returns 0 on a live pair, and `ENOTCONN` only if the guest's `0x3` preceded the holder's own shutdown (kernel order, F11; P-70 § 3.5 not re-measured). The holder's outcome is resolved by the owner — its own end of the watch, else the record, else the in-flight record (§ *Owners' use*, "`GuestStream`"; T-5 below) |
 | U-EV-4 | The host owner's death and its effect on sessions, claims, the flow table and dial results | The host owner is never replaced in-process; its end is the end of `serve`, which ends every session, claim, flow and dial, and the restart reclaims every VM (NO-SURVIVE). The only in-process context replacement is the `Forwarder` recovery, ordered abort-all → close old → open new (§ *Context lifetime and owner failure*). `owner_flows` has no owner-death action; the recovery order is in `fwd_pair` (`Reopen`) |
 | U-EV-5 | "`Completed` for a classified half-close" of a datagram pair names an end no owner path produces | A guest datagram association always ends by the guest owner's abort or a host abort; the host never half-closes a datagram vsock. The rule holds for a clean `0x2` (no production path sends one) and no trace is required to reach it |
 | U-EV-6 | A UDP target send blocks only on its own full send buffer; a stalled far receiver drops at its own receive queue | `DropsOnlyAtSourceQueue` reads "only at a UDP receive queue — the source's or the far receiver's — never in the forwarder or the vsock", which is the design's bound (§ *Datagram mode*, "Bound") |
@@ -14162,8 +14168,8 @@ variables", by the spec's names).
     (`GuestPairEndsAfterOwnerAbort` checks it on `pair_wlive`).
   - Runs: `OwnerAbortOfWatchLeavesVhAndStreamReportsAborted`,
     `OwnerAbortSendsGuestAbortThenHolderDropIsInert`,
-    `ContextReleaseShutsWatchedVhAndHolderReadsNotConnected` (the `Err`
-    branch of F11) and `ReleasedWatchWithNoRecordReadsAsAbort` (the
+    `HolderShutdownAfterGuestResetReadsNotConnected` (the `Err`
+    branch of F11: the guest's `0x3` first, then the holder's own shutdown) and `ReleasedWatchWithNoRecordReadsAsAbort` (the
     outcome is the owner's own end).
 - **T-6 — a dropped `GuestStream` aborts its watch (EV-CTL 4.4).**
   `HolderDrop(h)` is enabled under its existing mode/endpoint/fault guard
@@ -14227,12 +14233,15 @@ variables", by the spec's names).
     `HolderOutcomeFromWatch` check it on the sweep path (the trace where the
     holder reads the sweep's end before its callback).
   - Run `VmmExitWithWatchRecordInFlightResolvesFromRecord`.
-- **F11 (P-70 § 3.5).** "A vsock socket whose own receive side is
-  shut returns 0 from `recvmsg` at once" holds only while the socket is
-  `ESTABLISHED` (`net/vmw_vsock/af_vsock.c:2545-2548 @ v7.0`); once it has
-  left `ESTABLISHED`, `vsock_shutdown` having cleared `SOCK_DONE` (`:1220`),
-  it returns `-ENOTCONN` (`:2522-2531`). Under WATCH-ABORT this applies
-  only after a context release. After the orphan sweep the state holds
+- **F11 (P-70 § 3.5).** `recvmsg` checks the state first: a socket that
+  has left `ESTABLISHED` returns 0 while `SOCK_DONE` is set and `-ENOTCONN`
+  once `vsock_shutdown` has cleared it (`net/vmw_vsock/af_vsock.c:1220`,
+  `:2522-2531 @ v7.0`); a socket still `ESTABLISHED` whose own receive side
+  is shut returns 0 at once (`:2545-2548`). Under WATCH-ABORT a release's
+  `SHUT_RDWR` on a live pair therefore reads 0; `ENOTCONN` needs the guest's
+  `0x3` first and then the holder's own shutdown
+  (`HolderShutdownAfterGuestResetReadsNotConnected`). The P-70 § 3.5
+  `ENOTCONN` counts are reachable only under that order (not re-measured). After the orphan sweep the state holds
   `SS_UNCONNECTED`, numerically `TCP_ESTABLISHED`
   (`drivers/vhost/vsock.c:748`, `include/uapi/linux/net.h:49-50`,
   `include/net/tcp_states.h:13 @ v7.0`), so the holder reads the queued
@@ -14722,7 +14731,7 @@ ruling 2026-10-15; § *DISTILL handoff*).
 | Resets and aborts reach the far ends as resets (`pair_conf`) | `GuestAppResetReachesRemoteAsReset`, `RemoteResetReachesGuestAppAsReset`, `PeerCloseWithDirectionOpenAborts`, `OwnerAbortResetsBothFarEnds`, `ContextReleaseResetsEveryPair`, `VmmExitAbortsHostHalf`, `RemoteFinThenResetAbortsPair`, `GuestAppFinThenResetAbortsPairWithEpipe` |
 | Clean full end and trailing ends (`pair_conf`) | `HalfCloseThenPeerCloseIsClean`, `PeerCloseRacingOwnHalfCloseIsClean`, `TrailingRstAfterCompletionIsInert`, `ReadShutdownPeerStallsLikeSlowReader` |
 | Ends before attach (`pair_conf`) | `HostHalfCloseThenAbortBeforeGuestAttachIsAbort`, `GuestCloseBeforeHostAttachAborts` (the in-flight branch: the guest's `0x3` still in transit at the host's attach, accepted, then aborted by the callback; U-EV3-1), `IntakeChildResetBeforePairedIsRefusedAndFlowAborts`, `DestinationResetBeforeHostAttachIsRefusedAndFlowAborts`, `GuestCloseWithEmptyQueueBeforeHostAttachIsRefusedAndFlowAborts` |
-| Watched streams (`pair_conf`) | `WatchedStreamSeesGuestResetAsAbort`, `ReleasedWatchWithNoRecordReadsAsAbort`, `OwnerAbortOfWatchLeavesVhAndStreamReportsAborted`, `OwnerAbortSendsGuestAbortThenHolderDropIsInert`, `ContextReleaseShutsWatchedVhAndHolderReadsNotConnected`, `DroppedStreamAbortsWatchThenGuestSeesAbort`, `VmmExitWithWatchRecordInFlightResolvesFromRecord` |
+| Watched streams (`pair_conf`) | `WatchedStreamSeesGuestResetAsAbort`, `ReleasedWatchWithNoRecordReadsAsAbort`, `OwnerAbortOfWatchLeavesVhAndStreamReportsAborted`, `OwnerAbortSendsGuestAbortThenHolderDropIsInert`, `HolderShutdownAfterGuestResetReadsNotConnected`, `DroppedStreamAbortsWatchThenGuestSeesAbort`, `VmmExitWithWatchRecordInFlightResolvesFromRecord` |
 | Forwarder recovery (`pair_conf`) | `ForwarderRecoveryAbortsThenReopens` |
 | Datagram mode (`pair_conf`) | `DatagramsInOrderWithEmpty`, `PartialFrameResumedNotDuplicated`, `StalledUdpTargetDropsAtSource`, `TruncatedFrameAtPeerEndAbortsFrameInvalid` |
 | Attach order prefixes (`pair_conf`) | `Paired`, `DgramPaired` |
