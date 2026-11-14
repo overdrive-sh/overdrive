@@ -825,6 +825,12 @@ impl GuestKitVm {
         self.cid
     }
 
+    /// The file the guest console is captured to.
+    #[must_use]
+    pub(crate) fn console_path(&self) -> &Path {
+        &self.console
+    }
+
     /// The guest console so far.
     #[must_use]
     pub fn console(&self) -> String {

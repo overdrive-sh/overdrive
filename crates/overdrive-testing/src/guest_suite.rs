@@ -1759,6 +1759,7 @@ impl GuestRun {
             raise_nofile,
         );
         let argv = command.iter().map(String::as_str).collect::<Vec<_>>();
+        register_attempt_console(self.guest.vm.console_path());
         self.guest.peer().exec(&argv, bound).map_err(|source| GuestKitError::Staging {
             detail: format!("selected nextest attempt {program:?} did not return within {bound:?}"),
             source: std::io::Error::other(format!(
@@ -4884,6 +4885,80 @@ fn report_nextest_dispatch_failure(error: NextestDispatchFailure) -> ! {
     }
 }
 
+/// The console file of the guest whose nextest attempt is running.
+static ATTEMPT_CONSOLE: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
+/// Write end of the self-pipe the termination-signal handler wakes.
+static TERMINATION_PIPE: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(-1);
+
+fn register_attempt_console(path: &Path) {
+    *ATTEMPT_CONSOLE.lock().unwrap_or_else(std::sync::PoisonError::into_inner) =
+        Some(path.to_owned());
+}
+
+extern "C" fn note_termination_signal(signal: libc::c_int) {
+    let fd = TERMINATION_PIPE.load(std::sync::atomic::Ordering::Relaxed);
+    let byte = u8::try_from(signal).unwrap_or(u8::MAX);
+    // SAFETY: `write(2)` is async-signal-safe; `fd` is the pipe write end
+    // opened before the handler was installed and never closed.
+    unsafe { libc::write(fd, (&raw const byte).cast(), 1) };
+}
+
+/// Prints the attempt guest's console when Nextest terminates the attempt.
+///
+/// The attempt waits on the guest with no deadline of its own, so a hung test
+/// is ended by Nextest's SIGTERM, which would otherwise discard the guest
+/// console file with the run. The handler only wakes a thread through a
+/// pipe; the thread prints what the guest has written so far and exits with
+/// the signal's conventional status.
+fn retain_console_on_termination() -> std::io::Result<()> {
+    let mut fds = [0 as libc::c_int; 2];
+    // SAFETY: `fds` is a two-element array as `pipe2(2)` requires.
+    if unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) } != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    let [read_fd, write_fd] = fds;
+    TERMINATION_PIPE.store(write_fd, std::sync::atomic::Ordering::Relaxed);
+    for signal in [libc::SIGTERM, libc::SIGINT, libc::SIGHUP, libc::SIGQUIT] {
+        // SAFETY: the handler is async-signal-safe (one `write(2)`).
+        let handler = note_termination_signal as *const () as libc::sighandler_t;
+        let previous = unsafe { libc::signal(signal, handler) };
+        if previous == libc::SIG_ERR {
+            return Err(std::io::Error::last_os_error());
+        }
+    }
+    std::thread::Builder::new().name("termination-console".to_owned()).spawn(move || {
+        let mut byte = 0_u8;
+        loop {
+            // SAFETY: `byte` is one writable byte and `read_fd` is the pipe read end.
+            let read = unsafe { libc::read(read_fd, (&raw mut byte).cast(), 1) };
+            if read == 1 {
+                break;
+            }
+            if read < 0 && std::io::Error::last_os_error().kind() != std::io::ErrorKind::Interrupted
+            {
+                return;
+            }
+        }
+        let path =
+            ATTEMPT_CONSOLE.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
+        let console = path.map_or_else(
+            || "no guest was running".to_owned(),
+            |path| match fs::read(&path) {
+                Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
+                Err(error) => format!("guest console {} unreadable: {error}", path.display()),
+            },
+        );
+        let mut stderr = std::io::stderr().lock();
+        let _ = writeln!(
+            stderr,
+            "OVERDRIVE_FWD_GUEST_TERMINATED signal={byte}; guest console at termination:\n{console}"
+        );
+        let _ = stderr.flush();
+        std::process::exit(128 + i32::from(byte));
+    })?;
+    Ok(())
+}
+
 /// Runs the host-side dispatcher.
 ///
 /// Either the nextest wrapper entry (`--nextest-wrapper`) or the batched group
@@ -4897,6 +4972,11 @@ pub fn run_dispatcher(quint_modules: &[QuintGuestModule<'_>]) {
     let mut args = std::env::args();
     let _program_name = args.next();
     if args.next().as_deref() == Some("--nextest-wrapper") {
+        if let Err(error) = retain_console_on_termination() {
+            report_nextest_dispatch_failure(NextestDispatchFailure::GuestExecution(format!(
+                "could not install the termination console handler: {error}"
+            )));
+        }
         let Some(program) = args.next() else {
             report_nextest_dispatch_failure(NextestDispatchFailure::LaneNotPrepared(
                 "the selected nextest executable argument is absent".to_owned(),
