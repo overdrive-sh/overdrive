@@ -1568,7 +1568,9 @@ impl Driver for FwdPairDriver {
                 let _ = s;
                 let cid = self.lease().cid;
                 let _abort = self.composition().io.take_outbox(cid);
-                self.guest_abort(self.mode != Mode::Watch);
+                // CONFALIGN-4: an `Abort { flow }` closes an accepted-but-unattached
+                // flow in every mode, watch mode included.
+                self.guest_abort(true);
             }
             CloseUnattached(s: String) => {
                 let _ = s;
