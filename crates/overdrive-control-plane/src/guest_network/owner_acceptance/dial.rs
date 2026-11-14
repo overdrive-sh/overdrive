@@ -672,7 +672,10 @@ async fn the_forwarder_recovery_ends_streams_then_reopens_the_context() {
     let mut buf = [0_u8; 8];
     let read = stream.read(&mut buf).await;
     assert!(matches!(read, Err(ref error) if error.kind() == io::ErrorKind::ConnectionAborted));
-    c.owner.converge_shared().await.expect("the Forwarder repair reopens the context");
+    c.owner
+        .repair_shared(crate::guest_network::OwnerRepairComponent::Forwarder)
+        .await
+        .expect("the Forwarder repair reopens the context");
     let repaired = c.observe().await;
     assert_eq!(repaired.forwarder_generation, generation.next().expect("a next generation"));
     let contexts = c.io.forwarder_contexts();
@@ -726,7 +729,10 @@ async fn a_context_release_is_reported_as_the_owners_abort() {
         damaged.component,
         overdrive_core::guest_network::SharedGuestNetworkComponent::Forwarder
     );
-    c.owner.converge_shared().await.expect("the Forwarder repair reopens the context");
+    c.owner
+        .repair_shared(crate::guest_network::OwnerRepairComponent::Forwarder)
+        .await
+        .expect("the Forwarder repair reopens the context");
     assert_eq!(
         c.io.vsock_of(flow).sent_shutdown(),
         Some(SimShutdown::Both),

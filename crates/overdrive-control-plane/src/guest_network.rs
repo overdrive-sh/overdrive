@@ -155,6 +155,30 @@ pub enum ForwardingActivation {
     ControlSessionPending,
 }
 
+/// The shared components this owner repairs. The other components
+/// (`LegF`, `LegC`, `IpRules`, `IpSets`, `Dns`, `Supervisor`) belong to the
+/// mTLS worker, the DNS owner and the supervisor.
+#[doc(hidden)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum OwnerRepairComponent {
+    /// The forwarder context and its inventory.
+    Forwarder,
+    /// The guest-flow stream listener and its accept task.
+    FlowListeners,
+    /// The per-VM control listener and its accept task.
+    ControlListener,
+}
+
+impl From<OwnerRepairComponent> for SharedGuestNetworkComponent {
+    fn from(component: OwnerRepairComponent) -> Self {
+        match component {
+            OwnerRepairComponent::Forwarder => Self::Forwarder,
+            OwnerRepairComponent::FlowListeners => Self::FlowListeners,
+            OwnerRepairComponent::ControlListener => Self::ControlListener,
+        }
+    }
+}
+
 /// One source-honest failure from the shared owner's ordered component audit.
 #[derive(Debug, thiserror::Error)]
 #[error("shared guest-network component {component:?} audit failed")]
@@ -189,11 +213,22 @@ pub trait SharedGuestNetworkOwner: GuestNetworkProvisioner + GuestStreamDial {
     /// replace a tagged one whose attributes differ, add a missing one. No
     /// other route covers the guest prefix and no other address of it is
     /// made local. Idempotent: re-running after a crash at any point reaches
-    /// the same state. Nothing removes the route. When a runtime recovery
-    /// calls it as its repair, it converges only that recovery's component
-    /// and never writes the route; for the `Forwarder` component it closes
-    /// the old context before it opens and probes the new one (EVMOD-CTL).
+    /// the same state. Nothing removes the route. It is boot and idempotent
+    /// re-convergence of the whole owner only; a runtime recovery's repair is
+    /// [`repair_shared`](Self::repair_shared).
     async fn converge_shared(&self) -> Result<()>;
+    /// A runtime recovery's repair of exactly `component`. Never writes the
+    /// gateway route and never reads or consumes state naming another
+    /// component. `Forwarder` closes the old context before it opens and
+    /// probes the new one (EVMOD-CTL); `FlowListeners` and `ControlListener`
+    /// rebind that listener only and restart its accept task, leaving the
+    /// other listener untouched. `Ok` means that component's repair ran and
+    /// its postcondition read back; it is never returned for a component that
+    /// was not repaired. Repairs of different components are independent. A
+    /// call for a component whose repair is already in flight returns
+    /// `GuestNetworkError::RepairInFlight` and changes no state. A repair
+    /// cancelled mid-flight releases its claim and leaves no record.
+    async fn repair_shared(&self, component: OwnerRepairComponent) -> Result<()>;
     /// PORTS-CONFIG (ADR-0218). `None` until this owner's first
     /// `converge_shared` returns `Ok`; from then on `Some` of the ports its
     /// stream and control listeners bound, the same value for the rest of
@@ -366,6 +401,9 @@ pub enum GuestNetworkError {
     /// The `serve` process's `RLIMIT_NOFILE` is below the owner's budget.
     #[error("file-descriptor budget {required} exceeds RLIMIT_NOFILE {available}")]
     FdBudget { required: u64, available: u64 },
+    /// A repair of this component is already in flight; nothing changed.
+    #[error("a repair of shared guest-network component {component:?} is already in flight")]
+    RepairInFlight { component: SharedGuestNetworkComponent },
     /// D24: the owner's cgroup is not at or below the `connect4` attach path.
     #[error(
         "the owner cgroup {owner:?} is not at or below the connect4 attach point {attach_point:?}"
@@ -778,6 +816,17 @@ impl Drop for HostSharedGuestNetworkOwner {
 }
 
 impl HostSharedGuestNetworkOwner {
+    /// A listener repair reports the owner's listeners as running only when
+    /// both accept tasks are, so repairing one never asserts the other's state.
+    fn refresh_flow_listeners_running(&self) {
+        let running = self.runtime.tasks.lock().as_ref().is_some_and(|tasks| {
+            [&tasks.stream_accept, &tasks.control_accept]
+                .into_iter()
+                .all(|task| task.as_ref().is_some_and(|task| !task.is_finished()))
+        });
+        self.runtime.state.lock().flow_listeners_running = running;
+    }
+
     /// Cancel and join this composed owner's listener and per-connection task
     /// tree before the serve owner releases the adapters those tasks hold.
     pub(crate) async fn shutdown_tasks(&self) {
@@ -813,37 +862,6 @@ async fn wait_for_drained_refusal_readers(
             return;
         }
         notified.await;
-    }
-}
-
-struct SharedRepairInFlight {
-    runtime: Arc<flow_owner::OwnerRuntime>,
-    component: SharedGuestNetworkComponent,
-}
-
-impl Drop for SharedRepairInFlight {
-    fn drop(&mut self) {
-        self.runtime.state.lock().repairs_in_flight.remove(&self.component);
-    }
-}
-
-fn mark_shared_repair_component(
-    runtime: &flow_owner::OwnerRuntime,
-    component: SharedGuestNetworkComponent,
-) {
-    let mut state = runtime.state.lock();
-    if !state.repairs_in_flight.contains(&component) {
-        state.repair_component = Some(component);
-    }
-}
-
-fn retain_failed_shared_repair(
-    runtime: &flow_owner::OwnerRuntime,
-    component: SharedGuestNetworkComponent,
-) {
-    let mut state = runtime.state.lock();
-    if state.repair_component.is_none() && !state.repairs_in_flight.contains(&component) {
-        state.repair_component = Some(component);
     }
 }
 
@@ -1213,62 +1231,6 @@ impl SharedGuestNetworkOwner for HostSharedGuestNetworkOwner {
     }
 
     async fn converge_shared(&self) -> Result<()> {
-        let repair = {
-            let mut state = self.runtime.state.lock();
-            let repair = state.repair_component.take();
-            if let Some(component) = repair {
-                state.repairs_in_flight.insert(component);
-            }
-            repair
-        };
-        if let Some(component) = repair {
-            let in_flight = SharedRepairInFlight { runtime: Arc::clone(&self.runtime), component };
-            let result = async {
-                match component {
-                    SharedGuestNetworkComponent::Forwarder => {
-                        self.io.close_forwarder();
-                        self.runtime.state.lock().forwarder_inventory =
-                            ForwarderInventoryRead::NoContext;
-                        let generation = self.io.open_forwarder().await?;
-                        let inventory = self.io.inventory()?;
-                        let mut state = self.runtime.state.lock();
-                        state.forwarder_generation = generation;
-                        state.forwarder_inventory = ForwarderInventoryRead::Read(inventory);
-                        drop(state);
-                        Ok(())
-                    }
-                    SharedGuestNetworkComponent::FlowListeners => {
-                        self.io
-                            .bind_listener(flow_io::FlowListener::Stream, self.ports.stream_port)
-                            .await
-                            .map_err(|error| {
-                                listener_io_error(GuestNetworkOperation::FlowListenerBind, error)
-                            })?;
-                        owner_runtime::restart_listener(self, flow_io::FlowListener::Stream);
-                        self.runtime.state.lock().flow_listeners_running = true;
-                        Ok(())
-                    }
-                    SharedGuestNetworkComponent::ControlListener => {
-                        self.io
-                            .bind_listener(flow_io::FlowListener::Control, self.ports.control_port)
-                            .await
-                            .map_err(|error| {
-                                listener_io_error(GuestNetworkOperation::ControlListenerBind, error)
-                            })?;
-                        owner_runtime::restart_listener(self, flow_io::FlowListener::Control);
-                        self.runtime.state.lock().flow_listeners_running = true;
-                        Ok(())
-                    }
-                    _ => Ok(()),
-                }
-            }
-            .await;
-            drop(in_flight);
-            if result.is_err() {
-                retain_failed_shared_repair(&self.runtime, component);
-            }
-            return result;
-        }
         if self.runtime.state.lock().flow_ports.is_some() {
             owner_runtime::start(self);
             return Ok(());
@@ -1310,6 +1272,47 @@ impl SharedGuestNetworkOwner for HostSharedGuestNetworkOwner {
         Ok(())
     }
 
+    async fn repair_shared(&self, component: OwnerRepairComponent) -> Result<()> {
+        let Some(_claim) = self.runtime.repairs.try_claim(component) else {
+            return Err(GuestNetworkError::RepairInFlight { component: component.into() });
+        };
+        match component {
+            OwnerRepairComponent::Forwarder => {
+                self.io.close_forwarder();
+                self.runtime.state.lock().forwarder_inventory = ForwarderInventoryRead::NoContext;
+                let generation = self.io.open_forwarder().await?;
+                let inventory = self.io.inventory()?;
+                let mut state = self.runtime.state.lock();
+                state.forwarder_generation = generation;
+                state.forwarder_inventory = ForwarderInventoryRead::Read(inventory);
+                drop(state);
+                Ok(())
+            }
+            OwnerRepairComponent::FlowListeners => {
+                self.io
+                    .bind_listener(flow_io::FlowListener::Stream, self.ports.stream_port)
+                    .await
+                    .map_err(|error| {
+                        listener_io_error(GuestNetworkOperation::FlowListenerBind, error)
+                    })?;
+                owner_runtime::restart_listener(self, flow_io::FlowListener::Stream);
+                self.refresh_flow_listeners_running();
+                Ok(())
+            }
+            OwnerRepairComponent::ControlListener => {
+                self.io
+                    .bind_listener(flow_io::FlowListener::Control, self.ports.control_port)
+                    .await
+                    .map_err(|error| {
+                        listener_io_error(GuestNetworkOperation::ControlListenerBind, error)
+                    })?;
+                owner_runtime::restart_listener(self, flow_io::FlowListener::Control);
+                self.refresh_flow_listeners_running();
+                Ok(())
+            }
+        }
+    }
+
     fn flow_ports(&self) -> Option<GuestFlowPorts> {
         self.runtime.state.lock().flow_ports
     }
@@ -1321,7 +1324,7 @@ impl SharedGuestNetworkOwner for HostSharedGuestNetworkOwner {
     async fn audit_shared(
         &self,
     ) -> std::result::Result<SharedGuestNetworkAudit, SharedGuestNetworkAuditError> {
-        let repairs_in_flight = self.runtime.state.lock().repairs_in_flight.clone();
+        let repairs_in_flight = self.runtime.repairs.snapshot();
         let (expected_pairs, expected_watches) = {
             let state = self.runtime.state.lock();
             let pairs = u32::try_from(state.pairs.len()).unwrap_or(u32::MAX);
@@ -1333,13 +1336,10 @@ impl SharedGuestNetworkOwner for HostSharedGuestNetworkOwner {
         let generation = self.runtime.state.lock().forwarder_generation;
         #[cfg(test)]
         self.runtime.shared_audit_checkpoint.pause_if_armed().await;
-        if !repairs_in_flight.contains(&SharedGuestNetworkComponent::Forwarder) {
-            let inventory = self.io.inventory().map_err(|source| {
-                mark_shared_repair_component(&self.runtime, SharedGuestNetworkComponent::Forwarder);
-                SharedGuestNetworkAuditError {
-                    component: SharedGuestNetworkComponent::Forwarder,
-                    source: GuestNetworkError::Forwarder { source },
-                }
+        if !repairs_in_flight.contains(&OwnerRepairComponent::Forwarder) {
+            let inventory = self.io.inventory().map_err(|source| SharedGuestNetworkAuditError {
+                component: SharedGuestNetworkComponent::Forwarder,
+                source: GuestNetworkError::Forwarder { source },
             })?;
             // End records leave the live count when queued and remain in the
             // owner's table until the consumer reads them.  Count that
@@ -1356,7 +1356,7 @@ impl SharedGuestNetworkOwner for HostSharedGuestNetworkOwner {
                 true
             } else {
                 let state = self.runtime.state.lock();
-                !state.repairs_in_flight.contains(&SharedGuestNetworkComponent::Forwarder)
+                !self.runtime.repairs.snapshot().contains(&OwnerRepairComponent::Forwarder)
                     && state.forwarder_generation == generation
                     && inventory_places
                         == u32::try_from(state.pairs.len()).unwrap_or(u32::MAX).saturating_add(
@@ -1364,7 +1364,6 @@ impl SharedGuestNetworkOwner for HostSharedGuestNetworkOwner {
                         )
             };
             if !inventory_matches_current_owner {
-                mark_shared_repair_component(&self.runtime, SharedGuestNetworkComponent::Forwarder);
                 return Err(SharedGuestNetworkAuditError {
                     component: SharedGuestNetworkComponent::Forwarder,
                     source: GuestNetworkError::PostconditionMismatch {
@@ -1387,7 +1386,7 @@ impl SharedGuestNetworkOwner for HostSharedGuestNetworkOwner {
             let tasks = self.runtime.tasks.lock();
             tasks.as_ref().and_then(|tasks| {
                 if !tasks.shutdown.is_cancelled()
-                    && !repairs_in_flight.contains(&SharedGuestNetworkComponent::FlowListeners)
+                    && !repairs_in_flight.contains(&OwnerRepairComponent::FlowListeners)
                     && tasks
                         .stream_accept
                         .as_ref()
@@ -1395,7 +1394,7 @@ impl SharedGuestNetworkOwner for HostSharedGuestNetworkOwner {
                 {
                     Some(SharedGuestNetworkComponent::FlowListeners)
                 } else if !tasks.shutdown.is_cancelled()
-                    && !repairs_in_flight.contains(&SharedGuestNetworkComponent::ControlListener)
+                    && !repairs_in_flight.contains(&OwnerRepairComponent::ControlListener)
                     && tasks
                         .control_accept
                         .as_ref()
@@ -1408,7 +1407,6 @@ impl SharedGuestNetworkOwner for HostSharedGuestNetworkOwner {
             })
         };
         if let Some(component) = task_failure {
-            mark_shared_repair_component(&self.runtime, component);
             return Err(SharedGuestNetworkAuditError {
                 component,
                 source: GuestNetworkError::PostconditionMismatch {

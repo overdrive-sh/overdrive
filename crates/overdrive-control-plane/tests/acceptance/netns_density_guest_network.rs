@@ -31,8 +31,8 @@ use overdrive_control_plane::action_shim::{
 use overdrive_control_plane::guest_network::{
     ForwardingActivation, ForwardingQuiescence, ForwardingRestore, GuestAddressPool,
     GuestNetworkError, GuestNetworkOperation, GuestNetworkPlan, GuestNetworkProvisioner,
-    QuiescenceHold, QuiescenceRestoreError, SharedGuestNetworkAudit, SharedGuestNetworkAuditError,
-    SharedGuestNetworkOwner,
+    OwnerRepairComponent, QuiescenceHold, QuiescenceRestoreError, SharedGuestNetworkAudit,
+    SharedGuestNetworkAuditError, SharedGuestNetworkOwner,
 };
 use overdrive_control_plane::{AppState, noop_heartbeat};
 use overdrive_core::aggregate::WorkloadKind;
@@ -580,6 +580,14 @@ impl SharedGuestNetworkOwner for ActivationFaultOwner {
     }
 
     async fn converge_shared(&self) -> overdrive_control_plane::guest_network::Result<()> {
+        self.inner.converge_shared().await
+    }
+
+    async fn repair_shared(
+        &self,
+        component: OwnerRepairComponent,
+    ) -> overdrive_control_plane::guest_network::Result<()> {
+        let _ = component;
         self.inner.converge_shared().await
     }
 

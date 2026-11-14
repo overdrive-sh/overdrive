@@ -51,6 +51,8 @@ pub(super) struct OwnerRuntime {
     pub(super) clock: Arc<dyn Clock>,
     pub(super) vip_range: VipRange,
     pub(super) next_dial: AtomicU32,
+    /// Components whose `repair_shared` is in flight: one claim per component.
+    pub(super) repairs: overdrive_core::claim_set::ClaimSet<super::OwnerRepairComponent>,
     #[cfg(test)]
     pub(super) shared_audit_checkpoint: super::SharedAuditCheckpoint,
 }
@@ -64,6 +66,7 @@ impl OwnerRuntime {
             clock,
             vip_range,
             next_dial: AtomicU32::new(1),
+            repairs: overdrive_core::claim_set::ClaimSet::new(),
             #[cfg(test)]
             shared_audit_checkpoint: super::SharedAuditCheckpoint::default(),
         }
@@ -94,9 +97,6 @@ pub(super) struct OwnerState {
     pub(super) last_consumed_end: Option<ForwardEnd>,
     pub(super) consumed_ends: u64,
     pub(super) gateway_converged: bool,
-    pub(super) repair_component: Option<overdrive_core::guest_network::SharedGuestNetworkComponent>,
-    pub(super) repairs_in_flight:
-        BTreeSet<overdrive_core::guest_network::SharedGuestNetworkComponent>,
     pub(super) pairs: BTreeMap<ForwardId, OwnedPair>,
     pub(super) dial_watches: BTreeMap<ForwardId, (GuestCid, FlowId)>,
     pub(super) abort_causes: BTreeMap<ForwardId, super::FlowCloseCause>,
@@ -118,8 +118,6 @@ impl OwnerState {
             last_consumed_end: None,
             consumed_ends: 0,
             gateway_converged: false,
-            repair_component: None,
-            repairs_in_flight: BTreeSet::new(),
             pairs: BTreeMap::new(),
             dial_watches: BTreeMap::new(),
             abort_causes: BTreeMap::new(),

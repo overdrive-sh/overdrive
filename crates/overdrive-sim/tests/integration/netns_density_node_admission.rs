@@ -164,9 +164,9 @@ use std::time::Duration;
 use bytes::Bytes;
 use overdrive_control_plane::guest_network::{
     ForwardingActivation, ForwardingQuiescence, ForwardingRestore, GuestAddressPool,
-    GuestNetworkPlan, GuestNetworkProvisioner, QuiescenceHold, QuiescenceRestoreError,
-    Result as GuestNetworkResult, SharedGuestNetworkAudit, SharedGuestNetworkAuditError,
-    SharedGuestNetworkOwner,
+    GuestNetworkPlan, GuestNetworkProvisioner, OwnerRepairComponent, QuiescenceHold,
+    QuiescenceRestoreError, Result as GuestNetworkResult, SharedGuestNetworkAudit,
+    SharedGuestNetworkAuditError, SharedGuestNetworkOwner,
 };
 use overdrive_control_plane::identity_mgr::IdentityMgr;
 use overdrive_control_plane::reconciler_runtime::{
@@ -595,6 +595,11 @@ impl SharedGuestNetworkOwner for LeaseLedger {
     }
 
     async fn converge_shared(&self) -> GuestNetworkResult<()> {
+        self.inner.converge_shared().await
+    }
+
+    async fn repair_shared(&self, component: OwnerRepairComponent) -> GuestNetworkResult<()> {
+        let _ = component;
         self.inner.converge_shared().await
     }
 

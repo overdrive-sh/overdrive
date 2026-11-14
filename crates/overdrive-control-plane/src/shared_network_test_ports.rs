@@ -59,8 +59,9 @@ use crate::dns_responder::{GuestDns, GuestDnsDeps, GuestDnsFactory};
 use crate::guest_network::{
     ForwardingActivation, ForwardingQuiescence, ForwardingRestore, GuestAddressPool,
     GuestNetworkError, GuestNetworkFact, GuestNetworkOperation, GuestNetworkPlan,
-    GuestNetworkProvisioner, QuiescenceHold, QuiescenceLedger, QuiescenceRestoreError, Result,
-    SharedGuestNetworkAudit, SharedGuestNetworkAuditError, SharedGuestNetworkOwner,
+    GuestNetworkProvisioner, OwnerRepairComponent, QuiescenceHold, QuiescenceLedger,
+    QuiescenceRestoreError, Result, SharedGuestNetworkAudit, SharedGuestNetworkAuditError,
+    SharedGuestNetworkOwner,
 };
 
 // ---------------------------------------------------------------------------
@@ -357,6 +358,11 @@ impl SharedGuestNetworkOwner for TestSharedOwner {
             }
         }
         Self::result(outcome, GuestNetworkOperation::ForwarderOpen)
+    }
+
+    async fn repair_shared(&self, component: OwnerRepairComponent) -> Result<()> {
+        let _ = component;
+        self.converge_shared().await
     }
 
     fn flow_ports(&self) -> Option<GuestFlowPorts> {

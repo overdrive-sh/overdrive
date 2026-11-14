@@ -30,8 +30,8 @@ use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use overdrive_control_plane::guest_network::{
     ForwardingActivation, ForwardingQuiescence, ForwardingRestore, GuestNetworkError,
     GuestNetworkFact, GuestNetworkOperation, GuestNetworkPlan, GuestNetworkProvisioner,
-    QuiescenceHold, QuiescenceLedger, QuiescenceRestoreError, Result, SharedGuestNetworkAudit,
-    SharedGuestNetworkAuditError, SharedGuestNetworkOwner,
+    OwnerRepairComponent, QuiescenceHold, QuiescenceLedger, QuiescenceRestoreError, Result,
+    SharedGuestNetworkAudit, SharedGuestNetworkAuditError, SharedGuestNetworkOwner,
 };
 use overdrive_core::guest_network::{GuestNetworkExecWiring, SharedGuestNetworkComponent};
 use overdrive_core::guest_transport::dial::{
@@ -356,6 +356,11 @@ impl SharedGuestNetworkOwner for SimSharedGuestNetworkOwner {
             self.converged.store(true, Ordering::SeqCst);
         }
         result
+    }
+
+    async fn repair_shared(&self, component: OwnerRepairComponent) -> Result<()> {
+        let _ = component;
+        self.converge_shared().await
     }
 
     /// The double binds nothing: from its first `Ok` `converge_shared` it

@@ -122,8 +122,8 @@ use overdrive_control_plane::action_shim::{
 };
 use overdrive_control_plane::guest_network::{
     ForwardingActivation, ForwardingQuiescence, ForwardingRestore, GuestAddressPool,
-    GuestNetworkOperation, GuestNetworkPlan, GuestNetworkProvisioner, QuiescenceHold,
-    SharedGuestNetworkAudit, SharedGuestNetworkAuditError, SharedGuestNetworkOwner,
+    GuestNetworkOperation, GuestNetworkPlan, GuestNetworkProvisioner, OwnerRepairComponent,
+    QuiescenceHold, SharedGuestNetworkAudit, SharedGuestNetworkAuditError, SharedGuestNetworkOwner,
 };
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::WorkloadKind;
@@ -648,6 +648,14 @@ impl SharedGuestNetworkOwner for RecordingGuestNetwork {
     }
 
     async fn converge_shared(&self) -> overdrive_control_plane::guest_network::Result<()> {
+        self.inner.converge_shared().await
+    }
+
+    async fn repair_shared(
+        &self,
+        component: OwnerRepairComponent,
+    ) -> overdrive_control_plane::guest_network::Result<()> {
+        let _ = component;
         self.inner.converge_shared().await
     }
 

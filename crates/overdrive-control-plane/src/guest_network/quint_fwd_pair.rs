@@ -26,7 +26,7 @@
 //! | `Attach("h")` | stream: release `ConnectPeer`; datagram: release `ConnectUdp`, validate the connected peer, then synchronously attach; the owner sends `Paired` |
 //! | `Attach("g")` | the guest takes `Paired` (watch: the guest's `Paired` reaches the owner and the dial returns its `GuestStream`) |
 //! | `Abort("h")` | quiescence's first hold (`quiesce`): stream / dgram abort; watch: pending-dial cancellation before handoff, held-stream abort after handoff, and `Abort { flow }` |
-//! | `CtxRelease("h")` | one mapping chosen by the state (D-5): with no host pair or watch live (S: the current context's inventory), the `Forwarder` component's repair after a context `Io` failure (`audit_shared` reports it) — `converge_shared` closes the old context and its `open()` is held; with one live, the host owner's death — the seam's process exit (`exit_process`: every handle and held effect dies, the context's release aborts every pair) and the end of the runtime the owner's tasks run on; no host owner step follows (the model makes the death final) |
+//! | `CtxRelease("h")` | one mapping chosen by the state (D-5): with no host pair or watch live (S: the current context's inventory), the `Forwarder` component's repair after a context `Io` failure (`audit_shared` reports it) — `repair_shared(Forwarder)` closes the old context and its `open()` is held; with one live, the host owner's death — the seam's process exit (`exit_process`: every handle and held effect dies, the context's release aborts every pair) and the end of the runtime the owner's tasks run on; no host owner step follows (the model makes the death final) |
 //! | `Reopen("h")` | the held `open()` is answered: the repair opens and probes the next context |
 //! | `TakeEnd("h")` | the owner's dispatch reads the pair's end record (held ends: one released) and, outside watch mode, closes the flow's descriptors in the same dispatch (the model's `TakeEnd(h)` carries `OwnerClose(h)`'s effect) |
 //! | `Hop0("hg")`, `HopEnd0("hg")` / `Hop1("gh")`, `HopEnd1("gh")` | one `SimFlowForwarder` run of the host pair, source D/H (side B) / source `V_h` (side A) |
@@ -156,7 +156,7 @@ use super::owner_acceptance::support::{Composition, Lease, paused_runtime, remot
 use super::quint_itf::{self, ItfError, Qualified};
 use super::{
     AssociationPhase, DialPhase, ForwardingQuiescence, GuestConnKey, GuestFlowPhase,
-    HostSharedGuestNetworkOwner, QuiescenceHold, SharedGuestNetworkOwner,
+    HostSharedGuestNetworkOwner, OwnerRepairComponent, QuiescenceHold, SharedGuestNetworkOwner,
 };
 
 const MAIN: &str = "pair_conf";
@@ -694,7 +694,7 @@ impl FwdPairDriver {
 
     /// The `Forwarder` recovery's close of the old context, with nothing
     /// live: a scripted context `Io` failure damages `Forwarder`; the repair
-    /// (`converge_shared`) ends every flow in the owner's table, closes the
+    /// (`repair_shared`) ends every flow in the owner's table, closes the
     /// old context and is held at its `open()` until `Reopen("h")`.
     fn forwarder_recovery_close(&mut self) -> Result {
         self.composition().io.script_failure(
@@ -716,7 +716,9 @@ impl FwdPairDriver {
         self.composition().io.hold(SimEffectKind::OpenForwarder);
         let owner = Arc::clone(&self.owner);
         let _runtime = self.rt.enter();
-        self.repair = Some(tokio::spawn(async move { owner.converge_shared().await }));
+        self.repair = Some(tokio::spawn(async move {
+            owner.repair_shared(OwnerRepairComponent::Forwarder).await
+        }));
         self.settle();
         Ok(())
     }

@@ -51,6 +51,7 @@ const fn taxonomy_name(error: &GuestNetworkError) -> &'static str {
         GuestNetworkError::GuestPrefixOverlapsVipRange { .. } => "GuestPrefixOverlapsVipRange",
         GuestNetworkError::FdBudget { .. } => "FdBudget",
         GuestNetworkError::OwnerCgroupPlacement { .. } => "OwnerCgroupPlacement",
+        GuestNetworkError::RepairInFlight { .. } => "RepairInFlight",
     }
 }
 

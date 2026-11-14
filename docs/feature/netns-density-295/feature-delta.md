@@ -13648,10 +13648,8 @@ requirement or blocker. RECROUND1 is eligible for bounded model/conformance
 implementation; roadmap validation and replacement formal/conformance
 evidence remain pending.
 
-**Shared-owner repair is keyed by component (REPAIRKEY1) — PROPOSED, 2026-11-12;
-not accepted; awaits explicit user approval of decisions 1–3.** Do not carry it
-into DISTILL, amend the owner port, or dispatch implementation until the user
-approves.
+**Shared-owner repair is keyed by component (REPAIRKEY1) — approved by the owner
+2026-11-14 (decisions 1–3).**
 
 *Proven defect.* Seeds `0x5cb4d08f` and `0xb427d92d` of overdrive-control-plane
 `quint_quiescence::quiescence_quiesce_conf_randomized` reproduce the trace

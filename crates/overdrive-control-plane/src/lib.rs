@@ -1387,18 +1387,42 @@ async fn run_shared_network_recovery_attempt(
     } else {
         with_clock_bound(&*clock, remaining, async {
             match component {
-                SharedGuestNetworkComponent::Forwarder
-                | SharedGuestNetworkComponent::FlowListeners
-                | SharedGuestNetworkComponent::ControlListener => {
-                    ports.shared_guest_network.converge_shared().await.map_err(|source| {
+                SharedGuestNetworkComponent::Forwarder => ports
+                    .shared_guest_network
+                    .repair_shared(guest_network::OwnerRepairComponent::Forwarder)
+                    .await
+                    .map_err(|source| {
                         tracing::warn!(
                             name: "guest_network.shared_owner_repair_failed",
                             component = ?component,
                             error = %source,
                             "shared guest-network component repair returned a typed failure"
                         );
-                    })
-                }
+                    }),
+                SharedGuestNetworkComponent::FlowListeners => ports
+                    .shared_guest_network
+                    .repair_shared(guest_network::OwnerRepairComponent::FlowListeners)
+                    .await
+                    .map_err(|source| {
+                        tracing::warn!(
+                            name: "guest_network.shared_owner_repair_failed",
+                            component = ?component,
+                            error = %source,
+                            "shared guest-network component repair returned a typed failure"
+                        );
+                    }),
+                SharedGuestNetworkComponent::ControlListener => ports
+                    .shared_guest_network
+                    .repair_shared(guest_network::OwnerRepairComponent::ControlListener)
+                    .await
+                    .map_err(|source| {
+                        tracing::warn!(
+                            name: "guest_network.shared_owner_repair_failed",
+                            component = ?component,
+                            error = %source,
+                            "shared guest-network component repair returned a typed failure"
+                        );
+                    }),
                 SharedGuestNetworkComponent::LegF
                 | SharedGuestNetworkComponent::LegC
                 | SharedGuestNetworkComponent::IpRules
