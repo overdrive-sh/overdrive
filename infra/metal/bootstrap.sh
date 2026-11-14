@@ -168,7 +168,7 @@ validate_ordinary_command() {
       [ "$((index + 1))" -lt "${#RUN_ARGS[@]}" ] || unsupported_ordinary_command
       case "${RUN_ARGS[$((index + 1))]}" in
         guest-kit-prepare|bpf-build|bpf-clippy|bpf-unit|kmod-build|\
-        dst-lint|cloexec-lint|conformance-lint|yaml-free-cli|quint|mutants) ;;
+        dst-lint|cloexec-lint|conformance-lint|placement-lint|yaml-free-cli|quint|mutants) ;;
         *) unsupported_ordinary_command ;;
       esac
       ;;

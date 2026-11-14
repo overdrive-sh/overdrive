@@ -57,9 +57,15 @@ enum Task {
     },
 
     /// Eager check of the placement records tests declare on themselves —
-    /// reports a lane test whose fixture is not a listed test. See
+    /// reports an unplaced test, a binary mixing a default with a non-host-pure
+    /// record, and a lane test whose fixture is not a listed test. See
     /// `xtask/src/placement_lint.rs`.
-    PlacementLint,
+    PlacementLint {
+        /// Migration only: print the placements the records resolve, as JSON,
+        /// instead of checking.
+        #[arg(long)]
+        emit: bool,
+    },
 
     /// ADR-0019 gate — assert no `serde_yaml` / `serde_yml` appears in
     /// the `overdrive-cli` resolved dependency graph. Scoped to
@@ -521,7 +527,7 @@ fn run() -> Result<()> {
         Task::DstLint { manifest_path } => xtask::dst_lint::run(&manifest_path),
         Task::CloexecLint { manifest_path } => xtask::cloexec_lint::run(&manifest_path),
         Task::ConformanceLint { manifest_path } => xtask::conformance_lint::run(&manifest_path),
-        Task::PlacementLint => xtask::placement_lint::run(),
+        Task::PlacementLint { emit } => xtask::placement_lint::run(emit),
         Task::YamlFreeCli { manifest_path } => xtask::yaml_free_cli::run(&manifest_path),
         Task::BpfBuild => bpf_build(),
         Task::BpfClippy => bpf_clippy(),

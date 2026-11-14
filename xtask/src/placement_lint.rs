@@ -5,6 +5,10 @@
 //! --message-format json`, reads the `overdrive_test_placement` section of
 //! every listed test binary and reports, one line each on stderr:
 //!
+//! - `placement-lint: unplaced <binary-id> <test>` for a test no record of its
+//!   own, of its module or of its binary places and no table entry places;
+//! - `placement-lint: conflict <binary-id>` for a binary with a default beside
+//!   a record that is not host-pure;
 //! - `placement-lint: missing-fixture <binary-id> <test> <fixture>` for a
 //!   `lane_operator` / `lane_owner` test whose fixture is not a listed test of
 //!   the package that provides it.
@@ -12,25 +16,48 @@
 //! It reads Linux test binaries (ELF) and writes nothing. A binary it cannot
 //! read is an error, never a skipped file.
 
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
+use std::io::Write;
 use std::path::Path;
 use std::process::Command;
 
 use color_eyre::eyre::{Result, WrapErr, eyre};
-use serde_json::Value;
+use serde_json::{Value, json};
 
 /// The ELF section the placement records are written to.
 const SECTION: &[u8] = b"overdrive_test_placement";
 
+/// The placement table consulted for a test no record places, until it retires.
+const TABLE: &str = "infra/metal/test-placement.json";
+
+/// The kinds of record that place one test.
+const PER_TEST: [&str; 5] =
+    ["host_pure", "native_launcher", "guest", "lane_operator", "lane_owner"];
+
+/// The kinds a binary default cannot sit beside.
+const NOT_HOST_PURE: [&str; 4] = ["guest", "native_launcher", "lane_operator", "lane_owner"];
+
+/// The feature a member declares to put its real-guest tests behind.
+const KVM_FEATURE: &str = "kvm-tests";
+
 /// Runs the lint from the workspace root; `Err` when it reported anything.
+///
+/// With `emit` it prints the placements the records resolve, as JSON, and
+/// reports nothing (migration only).
 ///
 /// # Errors
 ///
 /// The test listing fails, a listed binary cannot be read, or a finding was
 /// reported.
-pub fn run() -> Result<()> {
+pub fn run(emit: bool) -> Result<()> {
     let listing = list_tests()?;
-    let findings = findings(&listing)?;
+    let suites = suites(&listing)?;
+    if emit {
+        let json = serde_json::to_string_pretty(&emitted(&suites))?;
+        writeln!(std::io::stdout().lock(), "{json}").wrap_err("writing the placements")?;
+        return Ok(());
+    }
+    let findings = findings(&suites)?;
     for finding in &findings {
         eprintln!("placement-lint: {finding}");
     }
@@ -41,10 +68,43 @@ pub fn run() -> Result<()> {
     }
 }
 
+/// The features that put every test behind a feature in the listing: the
+/// shared `integration-tests` and each member's own `kvm-tests`.
+fn listing_features() -> Result<String> {
+    let output = Command::new("cargo")
+        .args(["metadata", "--format-version", "1", "--no-deps"])
+        .output()
+        .wrap_err("running `cargo metadata`")?;
+    if !output.status.success() {
+        return Err(eyre!(
+            "`cargo metadata` failed ({}): {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    let metadata: Value =
+        serde_json::from_slice(&output.stdout).wrap_err("`cargo metadata` printed no JSON")?;
+    let packages = metadata
+        .get("packages")
+        .and_then(Value::as_array)
+        .ok_or_else(|| eyre!("`cargo metadata` listed no packages"))?;
+    let mut features = vec!["integration-tests".to_owned()];
+    for package in packages {
+        let declares = package
+            .get("features")
+            .and_then(Value::as_object)
+            .is_some_and(|declared| declared.contains_key(KVM_FEATURE));
+        if let (true, Some(name)) = (declares, package.get("name").and_then(Value::as_str)) {
+            features.push(format!("{name}/{KVM_FEATURE}"));
+        }
+    }
+    Ok(features.join(","))
+}
+
 fn list_tests() -> Result<Value> {
     let output = Command::new("cargo")
         .args(["nextest", "list", "--message-format", "json", "--workspace"])
-        .args(["--features", "integration-tests"])
+        .args(["--features", &listing_features()?])
         .output()
         .wrap_err("running `cargo nextest list`")?;
     if !output.status.success() {
@@ -57,21 +117,59 @@ fn list_tests() -> Result<Value> {
     serde_json::from_slice(&output.stdout).wrap_err("`cargo nextest list` printed no JSON")
 }
 
-/// One listed test binary.
-struct Suite<'a> {
-    id: &'a str,
-    path: &'a str,
-    tests: BTreeSet<&'a str>,
+/// One record of a binary's placement section.
+struct Record {
+    kind: String,
+    test: String,
+    arguments: Vec<String>,
 }
 
-impl Suite<'_> {
+/// One listed test binary and the records it carries.
+struct Suite {
+    id: String,
+    /// The listed tests; an ignored test never reaches the runner.
+    tests: BTreeMap<String, bool>,
+    records: Vec<Record>,
+}
+
+impl Suite {
     /// The package a binary id (`<package>::<binary>`) belongs to.
     fn package(&self) -> &str {
-        self.id.split("::").next().unwrap_or(self.id)
+        self.id.split("::").next().unwrap_or(&self.id)
+    }
+
+    /// A default beside a record that is not host-pure.
+    fn conflicts(&self) -> bool {
+        let has = |kinds: &[&str]| self.records.iter().any(|r| kinds.contains(&r.kind.as_str()));
+        has(&["default_host_pure"]) && has(&NOT_HOST_PURE)
+    }
+
+    /// The record that places `test`: its own, else its module's, else the
+    /// binary's default.
+    fn record_for(&self, test: &str) -> Option<(&str, &[String])> {
+        let module = test.rsplit_once("::").map_or("", |(module, _)| module);
+        let own = self
+            .records
+            .iter()
+            .find(|r| PER_TEST.contains(&r.kind.as_str()) && drop_crate(&r.test) == test);
+        let of_module = || {
+            self.records
+                .iter()
+                .find(|r| r.kind == "module_host_pure" && drop_crate(&r.test) == module)
+        };
+        let default = || self.records.iter().find(|r| r.kind == "default_host_pure");
+        own.or_else(of_module)
+            .or_else(default)
+            .map(|record| (record.kind.as_str(), record.arguments.as_slice()))
     }
 }
 
-fn suites(listing: &Value) -> Result<Vec<Suite<'_>>> {
+/// A test path without its leading crate segment, as nextest names the test.
+fn drop_crate(path: &str) -> &str {
+    path.split_once("::").map_or("", |(_, rest)| rest)
+}
+
+fn suites(listing: &Value) -> Result<Vec<Suite>> {
     let listed = listing
         .get("rust-suites")
         .and_then(Value::as_object)
@@ -88,51 +186,140 @@ fn suites(listing: &Value) -> Result<Vec<Suite<'_>>> {
             let tests = suite
                 .get("testcases")
                 .and_then(Value::as_object)
-                .map(|cases| cases.keys().map(String::as_str).collect())
+                .map(|cases| {
+                    cases
+                        .iter()
+                        .map(|(name, case)| {
+                            let ignored = case.get("ignored").and_then(Value::as_bool);
+                            (name.clone(), ignored.unwrap_or(false))
+                        })
+                        .collect()
+                })
                 .unwrap_or_default();
-            Ok(Suite { id: text("binary-id")?, path: text("binary-path")?, tests })
+            Ok(Suite {
+                id: text("binary-id")?.to_owned(),
+                tests,
+                records: records(Path::new(text("binary-path")?))?,
+            })
         })
         .collect()
 }
 
-/// A `lane_operator` / `lane_owner` record: the test (crate segment dropped) and
-/// its fixture.
-struct LaneRecord {
-    test: String,
-    fixture: String,
-}
-
-fn findings(listing: &Value) -> Result<Vec<String>> {
-    let suites = suites(listing)?;
+fn findings(suites: &[Suite]) -> Result<Vec<String>> {
+    let mut table = Table::default();
     let mut findings = Vec::new();
-    for suite in &suites {
-        for lane in lane_records(suite.path)? {
-            let provided = suites
-                .iter()
-                .filter(|other| other.package() == suite.package())
-                .any(|other| other.tests.contains(lane.fixture.as_str()));
-            if !provided {
-                findings
-                    .push(format!("missing-fixture {} {} {}", suite.id, lane.test, lane.fixture));
+    for suite in suites {
+        if suite.conflicts() {
+            findings.push(format!("conflict {}", suite.id));
+            continue;
+        }
+        for (test, ignored) in &suite.tests {
+            if !ignored && suite.record_for(test).is_none() && !table.places(&suite.id, test)? {
+                findings.push(format!("unplaced {} {test}", suite.id));
             }
         }
+        findings.extend(missing_fixtures(suite, suites));
     }
     Ok(findings)
 }
 
-/// The lane records of the binary at `path`.
-fn lane_records(path: &str) -> Result<Vec<LaneRecord>> {
-    let Some(section) = placement_section(Path::new(path))? else {
+/// The lane records of `suite` whose fixture no binary of the package lists.
+fn missing_fixtures(suite: &Suite, suites: &[Suite]) -> Vec<String> {
+    let mut missing = Vec::new();
+    for record in &suite.records {
+        if !matches!(record.kind.as_str(), "lane_operator" | "lane_owner") {
+            continue;
+        }
+        let fixture = record.arguments.first().map_or("", String::as_str);
+        let provided = suites
+            .iter()
+            .filter(|other| other.package() == suite.package())
+            .any(|other| other.tests.contains_key(fixture));
+        if !provided {
+            missing.push(format!(
+                "missing-fixture {} {} {fixture}",
+                suite.id,
+                drop_crate(&record.test)
+            ));
+        }
+    }
+    missing
+}
+
+/// The placement table, read once and only when a test needs it.
+#[derive(Default)]
+struct Table {
+    placements: Option<Value>,
+}
+
+impl Table {
+    fn places(&mut self, binary_id: &str, test: &str) -> Result<bool> {
+        if self.placements.is_none() {
+            self.placements = Some(read_table()?);
+        }
+        Ok(self
+            .placements
+            .as_ref()
+            .and_then(|placements| placements.get(binary_id))
+            .and_then(|tests| tests.get(test))
+            .is_some())
+    }
+}
+
+fn read_table() -> Result<Value> {
+    let text =
+        std::fs::read_to_string(TABLE).wrap_err_with(|| format!("reading the table {TABLE}"))?;
+    let mut table: Value =
+        serde_json::from_str(&text).wrap_err_with(|| format!("{TABLE} is not JSON"))?;
+    match table.get_mut("placements").map(Value::take) {
+        Some(placements) if placements.is_object() => Ok(placements),
+        _ => Err(eyre!("{TABLE} has no `placements` object")),
+    }
+}
+
+/// The placements the records resolve, in the table's descriptor shape:
+/// binary id, then test, then descriptor. Tests no record places are absent.
+fn emitted(suites: &[Suite]) -> Value {
+    let mut placements = serde_json::Map::new();
+    for suite in suites {
+        let mut tests = serde_json::Map::new();
+        for test in suite.tests.keys() {
+            if let Some((kind, arguments)) = suite.record_for(test) {
+                tests.insert(test.clone(), descriptor(kind, arguments));
+            }
+        }
+        if !tests.is_empty() {
+            placements.insert(suite.id.clone(), Value::Object(tests));
+        }
+    }
+    json!({"format": "overdrive-metal-test-placement-v1", "placements": placements})
+}
+
+fn descriptor(kind: &str, arguments: &[String]) -> Value {
+    let first = arguments.first().cloned().unwrap_or_default();
+    match kind {
+        "native_launcher" => json!({"kind": "native-launcher"}),
+        "guest" => json!({"kind": "guest-group", "group": first}),
+        "lane_operator" => json!({"kind": "guest-lane-operator", "fixture": first}),
+        "lane_owner" => json!({"kind": "guest-lane-owner", "fixture": first}),
+        _ => json!({"kind": "host-pure"}),
+    }
+}
+
+/// The records of the binary at `path`.
+fn records(path: &Path) -> Result<Vec<Record>> {
+    let path_text = path.display();
+    let Some(section) = placement_section(path)? else {
         return Ok(Vec::new());
     };
     let mut fields: Vec<&[u8]> = section.split(|byte| *byte == 0).collect();
     if fields.pop() != Some(&[]) {
-        return Err(eyre!("{path}: the placement section is malformed"));
+        return Err(eyre!("{path_text}: the placement section is malformed"));
     }
     let utf8 = |bytes: &[u8]| {
         std::str::from_utf8(bytes)
             .map(str::to_owned)
-            .map_err(|_| eyre!("{path}: the placement section is not UTF-8"))
+            .map_err(|_| eyre!("{path_text}: the placement section is not UTF-8"))
     };
     let mut records = Vec::new();
     let mut index = 0;
@@ -140,21 +327,17 @@ fn lane_records(path: &str) -> Result<Vec<LaneRecord>> {
         let [kind, test, argc] = fields[index..]
             .first_chunk::<3>()
             .copied()
-            .ok_or_else(|| eyre!("{path}: the placement section ends inside a record"))?;
+            .ok_or_else(|| eyre!("{path_text}: the placement section ends inside a record"))?;
         let argc: usize = utf8(argc)?
             .parse()
-            .wrap_err_with(|| format!("{path}: a placement record has no argument count"))?;
+            .wrap_err_with(|| format!("{path_text}: a placement record has no argument count"))?;
         let arguments = fields
             .get(index + 3..index + 3 + argc)
-            .ok_or_else(|| eyre!("{path}: the placement section ends inside a record"))?;
-        if matches!(kind, b"lane_operator" | b"lane_owner") {
-            let [fixture] = arguments else {
-                return Err(eyre!("{path}: a lane record carries one fixture"));
-            };
-            let test = utf8(test)?;
-            let test = test.split_once("::").map_or(test.as_str(), |(_, rest)| rest).to_owned();
-            records.push(LaneRecord { test, fixture: utf8(fixture)? });
-        }
+            .ok_or_else(|| eyre!("{path_text}: the placement section ends inside a record"))?
+            .iter()
+            .map(|argument| utf8(argument))
+            .collect::<Result<Vec<_>>>()?;
+        records.push(Record { kind: utf8(kind)?, test: utf8(test)?, arguments });
         index += 3 + argc;
     }
     Ok(records)

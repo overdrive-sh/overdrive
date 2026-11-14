@@ -264,6 +264,16 @@ pre-push:
         A conformance driver is hollow (always-false cfg, empty action
         handler, or a State projection off Sim*/driver bookkeeping). See
         .claude/rules/testing.md § "Quint conformance".
+    # Every listed test is placed by a record it carries or (until the table
+    # retires) a table entry. Reads the ELF section of the Linux test binaries,
+    # so it is routed like the nextest step. See `xtask/src/placement_lint.rs`.
+    placement-lint:
+      run: infra/hooks/linux-run.sh cargo xtask placement-lint
+      fail_text: |
+        A listed test has no placement, or a binary mixes a default with a
+        non-host-pure record, or a lane test names a missing fixture. Declare
+        the placement on the test (`#[overdrive_test(...)]`). Runs on metal
+        when `.env` sets OVERDRIVE_METAL_TARGET, else in Lima.
     nextest:
       run: infra/hooks/linux-run.sh cargo nextest run --workspace --features integration-tests
       fail_text: |

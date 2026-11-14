@@ -693,7 +693,7 @@ impl LintRun {
 /// A fully placed workspace passes. CONTRACT_SHAPE: unbounded-preservation
 /// (the lint writes nothing: it reads the list and the binaries).
 #[test]
-#[ignore = "pending DELIVER: unplaced-test-fails-in-the-default-lane"]
+#[overdrive_test(host_pure)]
 fn placement_lint_passes_when_every_listed_test_is_placed() {
     let lint = LintRun::new();
     let binary = lint.work.binary("a", &[record("host_pure", "crate::m::t", &[])]);
@@ -705,7 +705,7 @@ fn placement_lint_passes_when_every_listed_test_is_placed() {
 /// An unplaced test fails the lint with a line naming the binary and the test,
 /// before any guest boots. CONTRACT_SHAPE: unbounded-preservation.
 #[test]
-#[ignore = "pending DELIVER: unplaced-test-fails-in-the-default-lane"]
+#[overdrive_test(host_pure)]
 fn placement_lint_names_the_binary_and_the_test_of_an_unplaced_integration_test() {
     let lint = LintRun::new();
     let binary = lint.work.binary("a", &[record("host_pure", "crate::m::placed", &[])]);
@@ -724,7 +724,7 @@ fn placement_lint_names_the_binary_and_the_test_of_an_unplaced_integration_test(
 /// A binary that mixes a default with a non-host-pure record fails the lint.
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[test]
-#[ignore = "pending DELIVER: unplaced-test-fails-in-the-default-lane"]
+#[overdrive_test(host_pure)]
 fn placement_lint_reports_a_binary_that_mixes_a_default_with_a_guest_test() {
     let lint = LintRun::new();
     let binary = lint.work.binary(
@@ -787,7 +787,7 @@ fn placement_lint_reports_a_lane_test_whose_fixture_does_not_exist() {
 /// A listing that fails is reported with its cause and a non-zero status, never
 /// as "no findings". CONTRACT_SHAPE: unbounded-preservation.
 #[test]
-#[ignore = "pending DELIVER: unplaced-test-fails-in-the-default-lane"]
+#[overdrive_test(host_pure)]
 fn placement_lint_fails_with_the_cause_when_the_test_listing_fails() {
     let lint = LintRun::new();
     let (output, _) =
@@ -809,7 +809,7 @@ fn placement_lint_fails_with_the_cause_when_the_test_listing_fails() {
 /// test is the build-bearing `cargo nextest list`, which this test stubs.
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[test]
-#[ignore = "pending DELIVER: unplaced-test-fails-in-the-default-lane"]
+#[overdrive_test(host_pure)]
 fn placement_lint_lists_with_integration_tests_and_each_members_own_kvm_feature() {
     let lint = LintRun::new();
     let binary = lint.work.binary("a", &[record("host_pure", "crate::m::t", &[])]);
