@@ -23,7 +23,9 @@ ADR-0291.
 
 ## Alternatives
 
-- **Concurrent execs in one guest**: reintroduces the node-global races the
+- **Concurrent execs in one guest**: `GuestPeer::exec(&mut self)` already
+  allows one exec at a time on a guest, and the owner inherits that; it also
+  reintroduces the node-global races the
   guest isolates; rejected.
 - **Refuse a second concurrent attach**: turns a nextest scheduling choice into
   a test failure; rejected.

@@ -15,14 +15,16 @@ environments over 8 groups.
 ## Decision
 
 The guest kit holds one closed registry: the eight groups and, per group, named
-profiles (20 environments). The attribute selects `guest = "<group>"` and an
+profiles (21 environments: the 20 of the inventory plus `quint`). The attribute selects `guest = "<group>"` and an
 optional `profile = "<profile>"` (omitted means the group's base profile),
 validated by constant evaluation against the registry, so a typo is a build
 error and the macro crate and the wrapper hold no group list. Each profile has
 one recipe, the single place a copy list is declared, and one exec bound
-(ADR-0292). A shared guest's scope includes the profile. A Quint model file a
-test replays is declared on the test (`quint_model`), not in the registry,
-because it is orthogonal to the environment.
+(ADR-0292). A shared guest's scope includes the profile. The five gateway
+tests that replay a Quint specification select the `quint` profile of
+`cgroup-default`, which stages
+the Quint runtime and the `specs/quint` tree (3.9 MB measured, of which the
+`.qnt` files are 856 KB).
 
 ## Alternatives
 
@@ -30,16 +32,16 @@ because it is orthogonal to the environment.
   its variant; rejected.
 - **Make each variant a new group**: changes the group vocabulary and
   multiplies CID slots; rejected.
-- **A `quint` profile per spec, or one profile staging the whole `specs/quint`
-  tree**: multiplies environments, or stages every subsystem's specs and
-  evidence for five tests; rejected.
+- **A model-file argument on each test, or a profile per spec**: a second
+  declaration surface, or an environment per spec, to avoid staging 3.9 MB;
+  rejected.
 
 ## Consequences
 
 Adding a group or profile is one registry entry. The registry cannot live in the
 macro crate (a proc-macro crate cannot export types and `overdrive-testing`
-depends on it), which is why validation is by constant evaluation; the exact
-build-error text is pending probe V-11.
+depends on it), which is why validation is by constant evaluation. The
+build-error text names the offending value and the known set (V-11).
 
 ## Links
 

@@ -10,7 +10,8 @@ remain for traceability.
 **PROPOSED — not accepted.** The decisions of feature
 `metal-test-placement-attribute` (DDD-1..DDD-18) in
 [the feature delta](../../feature/metal-test-placement-attribute/feature-delta.md#wave-design--ref-decisions)
-are partly approved and partly await the user (the feature delta lists which). Test tooling only; no production runtime component
+are partly approved by the user and partly await independent DESIGN review (the
+feature delta lists which). Test tooling only; no production runtime component
 changes.
 
 ### C4 Level 1 — System Context

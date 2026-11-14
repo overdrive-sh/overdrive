@@ -25,7 +25,8 @@ or `OVERDRIVE_METAL_SOURCE_ROOT` is non-empty in the test process's
 environment: the predicate the wrapper already uses to decide it has nothing to
 do. With no Metal run context, a guest-placed or lane-placed test runs its body
 directly in the current process, exactly as it does today. Inside a guest
-(`overdrive.test_guest=1`, ADR-0285) the body runs as before. On a Metal run a
+(`inside_guest()`, the environment marker the guest exec channel sets) the body
+runs as before. On a Metal run a
 guest-placed test never runs its body on the host: the wrapper places it, and
 the test hands itself to the guest, or fails with a typed error.
 
@@ -53,4 +54,3 @@ inventory are pinned in the feature delta.
 ## Links
 
 - [Interface contract and lane inventory](../../feature/metal-test-placement-attribute/feature-delta.md#wave-design--ref-lifecycle-gate-ownership)
-- [ADR-0285](adr-0285-a-test-knows-it-is-inside-a-guest-from-the-guest-kernel-command-line.md)

@@ -26,7 +26,8 @@ exclusive lock on a per-scope file; the owner boots the guest. Later tests
 attach to that owner over a unix socket in the run's own runtime directory. A
 test that cannot elect or attach fails with a typed host failure naming the
 stage. The owner's lifetime is ADR-0290 (its guest dies with it), ADR-0293 (it
-exits when idle) and run teardown (ADR-0279), the backstop.
+exits when idle). The run's transient unit ends any leftover descendant at the
+end of the command (ADR-0281).
 
 ## Alternatives
 
@@ -42,7 +43,9 @@ exits when idle) and run teardown (ADR-0279), the backstop.
 
 One extra process kind (the owner), prepared by `guest-kit-prepare`. Election
 is the kernel's lock, released when the holder dies, so a crashed elector or
-owner leaves no stale claim; a stale socket path is unlinked by the next owner.
+owner leaves no stale claim; after taking the lock a client connects once more
+and attaches if an owner already serves; a stale socket path is unlinked by the
+next owner.
 A client attached to a killed owner sees end of stream, which maps to an
 owner-loss failure. The protocol is specified in
 `specs/quint/shared-guest-owner/`.

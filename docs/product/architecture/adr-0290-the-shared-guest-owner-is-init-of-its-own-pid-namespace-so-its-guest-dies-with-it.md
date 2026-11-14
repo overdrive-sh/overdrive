@@ -23,7 +23,10 @@ SIGKILLs every other task (`kernel/pid_namespace.c:225-234`) and waits until
 all are freed (`:270-275`). Measured on the Metal kernel: no VMM survived the
 owner (gone within 38.6 ms over 13 cycles), and the production launcher worked
 inside the namespace. An owner that cannot create the namespace fails closed:
-the electing test gets a typed owner-start failure.
+the electing test gets a typed owner-start failure (the reachable case is a
+missing owner binary; the run is root, so a privilege refusal is not designed
+for). The owner calls `setsid` before it serves, so a group signal to the
+electing test's process group does not kill it.
 
 ## Alternatives
 

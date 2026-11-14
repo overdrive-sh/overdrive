@@ -2191,14 +2191,13 @@ declared per module (`placement!(host_pure)`) or per binary
 lane-placed or native-launcher test); `cargo xtask placement-lint` checks every
 listed test before any guest boots; off a Metal run a guest-placed test runs its
 body in place. The user approved the lint, the host-pure declarations, the
-in-place rule, the dev-dependency rule and the template handling on 2026-11-14;
-the remaining decisions are proposed, among them three new ones for the user
-(an exec bound, an owner idle exit, and discarding a guest whose client left
-while its test ran). Decisions:
+in-place rule, the dev-dependency rule, the template handling, an exec bound, an
+owner idle exit and discarding a guest whose client left while its test ran on
+2026-11-14; the remaining decisions are proposed pending independent DESIGN
+review. Decisions:
 [ADR-0282](adr-0282-a-metal-test-placement-is-declared-on-the-test-and-recorded-in-its-binary.md),
 [ADR-0283](adr-0283-the-tests-of-a-module-share-one-guest-through-a-per-module-owner-process.md),
 [ADR-0284](adr-0284-a-shared-guest-serves-one-test-at-a-time-and-never-cancels-a-running-test.md),
-[ADR-0285](adr-0285-a-test-knows-it-is-inside-a-guest-from-the-guest-kernel-command-line.md),
 [ADR-0286](adr-0286-a-guest-placed-test-runs-in-place-outside-a-metal-run.md),
 [ADR-0287](adr-0287-host-pure-placement-is-declared-once-per-module-or-per-binary.md),
 [ADR-0288](adr-0288-an-eager-placement-lint-checks-every-listed-test-before-any-guest-boots.md),
