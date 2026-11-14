@@ -46,6 +46,8 @@ redb.workspace           = true
 
 [dev-dependencies]
 overdrive-store-local.workspace = true
+# `#[overdrive_test]` placement of the guest-placed quint driver tests.
+overdrive-testing.workspace = true
 # Sims of `overdrive-core` traits (`SimClock`, `SimObservationStore`,
 # `SimServiceVipView`) and, for the integration binary only, the gateway Sim
 # adapters. The in-crate quint driver imports core-trait Sims only (DG-7).

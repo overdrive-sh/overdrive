@@ -73,7 +73,8 @@ use crate::guest_lane::{
     send_control,
 };
 use crate::placement::LanePlacement;
-use crate::vm_fixture::default_staging_root;
+use crate::placement::groups::QUINT_PROFILE;
+use crate::vm_fixture::{cargo_target_dir, default_staging_root, workspace_root as checkout_root};
 use crate::vsock::VsockStream;
 use overdrive_core::guest_transport::wire::{ControlMessage, FlowId, FlowOrigin};
 use overdrive_core::vm::config::MemoryPlan;
@@ -154,6 +155,7 @@ pub fn inside_guest() -> bool {
 /// the test exits unsuccessfully inside the guest.
 pub(crate) fn run_isolated_guest(
     group: &str,
+    profile: &str,
     exe: &Path,
     test_name: &str,
 ) -> Result<(), RunInGuestError> {
@@ -161,7 +163,9 @@ pub(crate) fn run_isolated_guest(
     let args = ["--exact".to_owned(), test_name.to_owned(), NO_CAPTURE.to_owned()];
     let binary_id = std::env::var("NEXTEST_BINARY_ID").unwrap_or_default();
     let named = |detail: String| (group.to_owned(), test_name.to_owned(), detail);
-    match run_nextest_group_attempt(&[], group, &program, &args, &binary_id, test_name) {
+    let attempt =
+        GroupAttempt { group, profile, program: &program, args: &args, binary_id: &binary_id };
+    match run_nextest_group_attempt(&[], &attempt, test_name) {
         Ok(0) => Ok(()),
         Ok(status) => Err(RunInGuestError::BodyFailed {
             group: group.to_owned(),
@@ -180,6 +184,7 @@ pub(crate) fn run_isolated_guest(
 }
 
 const STANDARD_OUTER_GUEST_MIB: u32 = 4_096;
+const QUINT_SPECS_DIR: &str = "specs/quint";
 const QUINT_RUNTIME_DIR: &str = "guest-kit/quint-test-runtime";
 const QUINT_RUNTIME_FILES_DIR: &str = "files";
 const QUINT_RUNTIME_MANIFEST: &str = "manifest.v1";
@@ -3861,6 +3866,34 @@ fn quint_test_guest_files(
     Ok(guest_files)
 }
 
+/// The `quint` profile's inputs: the prepared Quint runtime and the whole
+/// `specs/quint` tree of the selected checkout, each file at the path it has on
+/// the host so the test's relative spec path resolves in the guest as it does
+/// here.
+fn quint_profile_guest_files(current_dir: &Path) -> Result<Vec<GuestFile>, NextestDispatchFailure> {
+    let target_dir = cargo_target_dir(&checkout_root());
+    let prepared = target_dir.join(QUINT_RUNTIME_DIR);
+    let runtime = prepared_quint_runtime(&prepared)?;
+    let mut guest_files = quint_runtime_guest_files(&prepared, &runtime)?;
+    let tree = current_dir
+        .ancestors()
+        .map(|ancestor| ancestor.join(QUINT_SPECS_DIR))
+        .find(|candidate| candidate.is_dir())
+        .ok_or_else(|| {
+            NextestDispatchFailure::LaneNotPrepared(format!(
+                "no {QUINT_SPECS_DIR} tree above the selected test directory {}",
+                current_dir.display()
+            ))
+        })?;
+    stage_tree(&tree, &mut guest_files).map_err(|error| {
+        NextestDispatchFailure::LaneNotPrepared(format!(
+            "reading the {QUINT_SPECS_DIR} tree {}: {error:?}",
+            tree.display()
+        ))
+    })?;
+    Ok(guest_files)
+}
+
 /// The Quint model a guest-placed test needs, or `None` when the test's module
 /// path has no `quint_*` segment. A `quint_*` module with no declared model is
 /// a staging failure, never a silent skip.
@@ -4440,19 +4473,30 @@ fn execute_nextest_guest_attempt(
     Ok(result)
 }
 
+/// What one per-test guest attempt runs: the test binary and its arguments in a
+/// guest of `group`, staged for `profile` (empty for the dispatcher path, which
+/// stages by test name).
+struct GroupAttempt<'a> {
+    group: &'a str,
+    profile: &'a str,
+    program: &'a str,
+    args: &'a [String],
+    binary_id: &'a str,
+}
+
 fn run_nextest_group_attempt(
     quint_modules: &[QuintGuestModule<'_>],
-    group: &str,
-    program: &str,
-    args: &[String],
-    binary_id: &str,
+    attempt: &GroupAttempt<'_>,
     test_name: &str,
 ) -> Result<i32, NextestDispatchFailure> {
+    let GroupAttempt { group, profile, program, args, binary_id } = *attempt;
     let started = Instant::now();
     let mut environment = nextest_environment()?;
     environment.push((IN_GUEST_ENV.to_owned(), "1".to_owned()));
     let (mut attempt_files, current_dir) = nextest_attempt_files(program, &environment)?;
-    if let Some(model) = quint_guest_model(quint_modules, binary_id, test_name)? {
+    if profile == QUINT_PROFILE {
+        attempt_files.extend(quint_profile_guest_files(&current_dir)?);
+    } else if let Some(model) = quint_guest_model(quint_modules, binary_id, test_name)? {
         attempt_files.extend(quint_test_guest_files(&current_dir, model)?);
     }
     let source_root =
@@ -4935,7 +4979,8 @@ fn nextest_wrapper_entry(
         )));
     }
     let group = std::env::var("OVERDRIVE_FWD_GUEST_GROUP").unwrap_or_default();
-    run_nextest_group_attempt(quint_modules, &group, program, args, &binary_id, &test_name)
+    let attempt = GroupAttempt { group: &group, profile: "", program, args, binary_id: &binary_id };
+    run_nextest_group_attempt(quint_modules, &attempt, &test_name)
 }
 
 fn report_nextest_dispatch_failure(error: NextestDispatchFailure) -> ! {

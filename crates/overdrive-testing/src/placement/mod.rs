@@ -65,9 +65,12 @@ pub fn run_in_guest(
     test_name: &str,
 ) -> Result<(), RunInGuestError> {
     match placement.sharing {
-        Sharing::Isolated => {
-            crate::guest_suite::run_isolated_guest(placement.group, exe, test_name)
-        }
+        Sharing::Isolated => crate::guest_suite::run_isolated_guest(
+            placement.group,
+            placement.profile(),
+            exe,
+            test_name,
+        ),
         Sharing::Module => todo!("run_in_guest: shared-guest hand-off"),
     }
 }

@@ -9383,26 +9383,6 @@
         "kind": "guest-group",
         "group": "cgroup-default"
       },
-      "application::quint_gateway_application::gateway_application_app_conf_randomized_traces": {
-        "kind": "guest-group",
-        "group": "cgroup-default"
-      },
-      "application::quint_gateway_application::gateway_application_failed_candidate_not_restaged": {
-        "kind": "guest-group",
-        "group": "cgroup-default"
-      },
-      "application::quint_gateway_application::gateway_application_late_probe_after_supersession": {
-        "kind": "guest-group",
-        "group": "cgroup-default"
-      },
-      "application::quint_gateway_application::gateway_application_replace_valid": {
-        "kind": "guest-group",
-        "group": "cgroup-default"
-      },
-      "application::quint_gateway_application::gateway_application_route_withdraw_drain": {
-        "kind": "guest-group",
-        "group": "cgroup-default"
-      },
       "certified_key::acceptance::certificate_chain_zero_one_many_and_over_limit_have_distinct_outcomes": {
         "kind": "host-pure"
       },

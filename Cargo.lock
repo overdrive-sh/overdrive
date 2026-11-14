@@ -2498,6 +2498,7 @@ dependencies = [
  "overdrive-host",
  "overdrive-sim",
  "overdrive-store-local",
+ "overdrive-testing",
  "proptest",
  "quint-connect",
  "rcgen",

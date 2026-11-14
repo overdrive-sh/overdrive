@@ -69,7 +69,6 @@ fn panic_message(declare: impl FnOnce() -> GuestPlacement) -> Option<String> {
 /// `placement!(host_pure)` on the module (observes nothing outside its process).
 /// CONTRACT_SHAPE: pure-function (a declaration is a value in, a value out).
 #[test]
-#[ignore = "pending DELIVER: guest-artifacts-declared-per-group"]
 fn the_registry_accepts_each_named_environment() {
     let mut accepted = 0;
     for (group, profiles) in ENVIRONMENTS {
@@ -94,7 +93,6 @@ fn the_registry_accepts_each_named_environment() {
 /// activation: `placement!(host_pure)` on the module.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER: guest-artifacts-declared-per-group"]
 fn an_omitted_profile_selects_each_groups_base_profile() {
     for (group, _) in ENVIRONMENTS {
         assert!(
@@ -123,7 +121,6 @@ fn an_unknown_group_is_rejected_by_name_at_declaration() {
 /// Placement on activation: `placement!(host_pure)` on the module.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[ignore = "pending DELIVER: guest-artifacts-declared-per-group"]
 fn an_unknown_profile_or_one_of_another_group_is_rejected() {
     for (group, profile) in [
         ("core", "quint"),

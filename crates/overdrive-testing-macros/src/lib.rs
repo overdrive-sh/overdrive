@@ -1,6 +1,7 @@
 //! The placement declarations of a Metal integration test:
 //! `#[overdrive_test(host_pure)]`, `#[overdrive_test(native_launcher)]`,
-//! `#[overdrive_test(guest = "<group>")]`, `#[overdrive_test(lane_operator =
+//! `#[overdrive_test(guest = "<group>" [, profile = "<profile>"])]`,
+//! `#[overdrive_test(lane_operator =
 //! "<fixture>")]`, `#[overdrive_test(lane_owner = "<fixture>")]`,
 //! `placement!(host_pure)` and `overdrive_test_default!(host_pure)`.
 //!
@@ -19,7 +20,7 @@
 //! no runtime crate. `native_launcher` is the placement of a test of the Metal
 //! runner's own machinery, which must observe the host from outside any guest.
 //!
-//! `guest = "<group>"`, `lane_operator = "<fixture>"` and `lane_owner =
+//! `guest = "<group>" [, profile = "<profile>"]`, `lane_operator = "<fixture>"` and `lane_owner =
 //! "<fixture>"` wrap the body so that:
 //!
 //! - where `overdrive_testing::placement::inside_guest()` holds, or
@@ -56,8 +57,13 @@ use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote, quote_spanned};
 use syn::ext::IdentExt as _;
+use syn::parse::Parser as _;
+use syn::punctuated::Punctuated;
 use syn::spanned::Spanned as _;
-use syn::{Expr, ExprLit, Ident, ItemFn, Lit, LitStr, Meta, ReturnType, parse_macro_input};
+use syn::{
+    Expr, ExprLit, Ident, ItemFn, Lit, LitStr, Meta, MetaNameValue, ReturnType, Token,
+    parse_macro_input,
+};
 
 /// The ELF section the placement records are written to.
 const SECTION: &str = "overdrive_test_placement";
@@ -65,14 +71,15 @@ const SECTION: &str = "overdrive_test_placement";
 /// Declares where a Metal integration test runs.
 ///
 /// Implemented for `#[overdrive_test(host_pure)]`,
-/// `#[overdrive_test(native_launcher)]`, `#[overdrive_test(guest = "<group>")]`,
+/// `#[overdrive_test(native_launcher)]`,
+/// `#[overdrive_test(guest = "<group>" [, profile = "<profile>"])]`,
 /// `#[overdrive_test(lane_operator = "<fixture>")]` and
 /// `#[overdrive_test(lane_owner = "<fixture>")]`; the other forms of the approved
 /// grammar are accepted and leave the test untouched until they are built.
 #[proc_macro_attribute]
 pub fn overdrive_test(attribute: TokenStream, item: TokenStream) -> TokenStream {
-    // SCAFFOLD: true. The approved grammar's other forms (the argument-free
-    // module form and `guest = .., profile = ..`) return the item unchanged
+    // SCAFFOLD: true. The approved grammar's other form (the argument-free
+    // module form) returns the item unchanged
     // until their expansion is built, so tests that name them compile and fail
     // for the missing record or hand-off, never for a grammar error.
     let attribute: TokenStream2 = attribute.into();
@@ -136,12 +143,15 @@ fn declare_host_pure(
 enum Declaration {
     HostPure,
     NativeLauncher,
-    Guest(LitStr),
+    Guest { group: LitStr, profile: Option<LitStr> },
     Lane { owner: bool, fixture: LitStr },
 }
 
 impl Declaration {
     fn parse(attribute: &TokenStream2) -> Option<Self> {
+        if let Some(guest) = Self::parse_guest(attribute) {
+            return Some(guest);
+        }
         let meta: Meta = syn::parse2(attribute.clone()).ok()?;
         match meta {
             Meta::Path(path) if path.is_ident("host_pure") => Some(Self::HostPure),
@@ -150,9 +160,7 @@ impl Declaration {
                 let Expr::Lit(ExprLit { lit: Lit::Str(value), .. }) = pair.value else {
                     return None;
                 };
-                if pair.path.is_ident("guest") {
-                    Some(Self::Guest(value))
-                } else if pair.path.is_ident("lane_operator") {
+                if pair.path.is_ident("lane_operator") {
                     Some(Self::Lane { owner: false, fixture: value })
                 } else if pair.path.is_ident("lane_owner") {
                     Some(Self::Lane { owner: true, fixture: value })
@@ -162,6 +170,32 @@ impl Declaration {
             }
             _ => None,
         }
+    }
+
+    /// `guest = "<group>"` with an optional `profile = "<profile>"` in either
+    /// order, each at most once.
+    fn parse_guest(attribute: &TokenStream2) -> Option<Self> {
+        let pairs = Punctuated::<MetaNameValue, Token![,]>::parse_terminated
+            .parse2(attribute.clone())
+            .ok()?;
+        let mut group = None;
+        let mut profile = None;
+        for pair in pairs {
+            let Expr::Lit(ExprLit { lit: Lit::Str(value), .. }) = pair.value else {
+                return None;
+            };
+            let slot = if pair.path.is_ident("guest") {
+                &mut group
+            } else if pair.path.is_ident("profile") {
+                &mut profile
+            } else {
+                return None;
+            };
+            if slot.replace(value).is_some() {
+                return None;
+            }
+        }
+        group.map(|group| Self::Guest { group, profile })
     }
 
     fn expand(&self, mut function: ItemFn) -> syn::Result<TokenStream2> {
@@ -175,20 +209,22 @@ impl Declaration {
                 let record = record_item(&item, &quote!(#kind), &test, &[]);
                 Ok(quote!(#function #record))
             }
-            Self::Guest(group) => {
+            Self::Guest { group, profile } => {
                 require_unit_return(&function)?;
+                let profile = profile.clone().unwrap_or_else(|| LitStr::new("", group.span()));
                 let record = record_item(
                     &item,
                     &quote!("guest"),
                     &test,
-                    &[quote!(#group), quote!(""), quote!("0")],
+                    &[quote!(#group), quote!(#profile), quote!("0")],
                 );
                 let known_group = known_group_check(group);
+                let known_profile = known_profile_check(group, &profile);
                 let hand_off = quote! {
                     ::overdrive_testing::placement::run_in_guest(
                         &::overdrive_testing::placement::GuestPlacement::declare(
                             #group,
-                            "",
+                            #profile,
                             ::overdrive_testing::placement::Sharing::Isolated,
                             "",
                         ),
@@ -197,7 +233,7 @@ impl Declaration {
                     )
                 };
                 guard_body(&mut function, &name.to_string(), &hand_off);
-                Ok(quote!(#function #record #known_group))
+                Ok(quote!(#function #record #known_group #known_profile))
             }
             Self::Lane { owner, fixture } => {
                 require_unit_return(&function)?;
@@ -328,6 +364,30 @@ fn known_group_check(group: &LitStr) -> TokenStream2 {
     quote_spanned! {group.span()=>
         const _: () = {
             if !::overdrive_testing::placement::groups::is_known_group(#group) {
+                ::core::panic!(#message);
+            }
+        };
+    }
+}
+
+/// The build-time check that the profile is one of the group's. Skipped for an
+/// unknown group, which `known_group_check` already reports. Spanned on the
+/// user's profile literal, so rustc's E0080 points at the offending argument.
+fn known_profile_check(group: &LitStr, profile: &LitStr) -> TokenStream2 {
+    let escape = |value: String| value.replace('{', "{{").replace('}', "}}");
+    let message = LitStr::new(
+        &format!(
+            "unknown guest profile `{}` for group `{}`",
+            escape(profile.value()),
+            escape(group.value())
+        ),
+        profile.span(),
+    );
+    quote_spanned! {profile.span()=>
+        const _: () = {
+            if ::overdrive_testing::placement::groups::is_known_group(#group)
+                && !::overdrive_testing::placement::groups::is_known_profile(#group, #profile)
+            {
                 ::core::panic!(#message);
             }
         };

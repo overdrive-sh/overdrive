@@ -35,7 +35,7 @@ fn an_unknown_guest_group_on_the_attribute_fails_the_build_naming_the_group() {
 /// CONTRACT_SHAPE: pure-function.
 #[test]
 #[serial(trybuild)]
-#[ignore = "pending DELIVER: guest-artifacts-declared-per-group"]
+#[overdrive_test(host_pure)]
 fn an_unknown_guest_profile_on_the_attribute_fails_the_build_naming_profile_and_group() {
     let cases = trybuild::TestCases::new();
     cases.compile_fail("tests/compile_fail/unknown_guest_profile_on_the_attribute.rs");
