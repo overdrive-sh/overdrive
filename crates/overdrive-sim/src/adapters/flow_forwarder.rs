@@ -307,7 +307,10 @@ fn abort_pair_sockets(pair: &SimPair) {
                 state.peer_reset = true;
                 state.peer_end.get_or_insert(SimFarEnd::Reset);
             }
-            SimSocketKind::VsockStream => state.sent_shutdown = Some(SimShutdown::Both),
+            SimSocketKind::VsockStream => {
+                state.sent_shutdown = Some(SimShutdown::Both);
+                state.sock_done = false;
+            }
             SimSocketKind::Tcp | SimSocketKind::Udp => {}
         }
     }
@@ -350,7 +353,10 @@ fn finish_item(
         }
         SimItem::Watch(socket) => {
             if release {
-                socket.inner.lock().sent_shutdown = Some(SimShutdown::Both);
+                let mut state = socket.inner.lock();
+                state.sent_shutdown = Some(SimShutdown::Both);
+                state.sock_done = false;
+                drop(state);
             }
             unhook(&socket);
             if let ForwardOutcome::Aborted { cause } = outcome {
@@ -667,7 +673,10 @@ fn source_abort(socket: &SimSocket, side: PairSide) -> Option<AbortCause> {
 
 fn target_half_close(target: &SimSocket) {
     let mut state = target.inner.lock();
-    state.sent_shutdown = Some(SimShutdown::Send);
+    if state.sent_shutdown != Some(SimShutdown::Both) {
+        state.sent_shutdown = Some(SimShutdown::Send);
+    }
+    state.sock_done = false;
 }
 
 enum DirectionRun {
@@ -1260,6 +1269,10 @@ struct SocketState {
     owner_closed: bool,
     received_shutdown: Option<SimShutdown>,
     sent_shutdown: Option<SimShutdown>,
+    /// A vsock's `SOCK_DONE`: set by a peer reset or a `0x3` that left the
+    /// socket with nothing queued, cleared by every local shutdown
+    /// (`vsock_shutdown`, `af_vsock.c:1220` @ v7.0).
+    sock_done: bool,
     tcp_state: SimTcpState,
     sk_err: Option<KernelErrno>,
     ulp: bool,
@@ -1296,6 +1309,7 @@ impl SimSocket {
                 owner_closed: false,
                 received_shutdown: None,
                 sent_shutdown: None,
+                sock_done: false,
                 tcp_state: SimTcpState::Established,
                 sk_err: None,
                 ulp: false,
@@ -1380,6 +1394,7 @@ impl SimSocket {
                     };
                     if how == SimShutdown::Both && state.stream_rx.is_empty() {
                         state.vsock_state = SimVsockState::Closing;
+                        state.sock_done = true;
                     }
                     if let Some(class) = class
                         && state.hooked.is_some()
@@ -1500,7 +1515,10 @@ impl SimSocket {
     /// defect for attach (`NotConnected`).
     pub fn shutdown_send(&self) {
         let mut state = self.inner.lock();
-        state.sent_shutdown = Some(SimShutdown::Send);
+        if state.sent_shutdown != Some(SimShutdown::Both) {
+            state.sent_shutdown = Some(SimShutdown::Send);
+        }
+        state.sock_done = false;
     }
 
     /// The local owner closes this socket. TCP exposes the first terminal
@@ -1516,7 +1534,10 @@ impl SimSocket {
                 state.peer_reset |= reset;
                 state.peer_end.get_or_insert(end);
             }
-            SimSocketKind::VsockStream => state.sent_shutdown = Some(SimShutdown::Both),
+            SimSocketKind::VsockStream => {
+                state.sent_shutdown = Some(SimShutdown::Both);
+                state.sock_done = false;
+            }
             SimSocketKind::Tcp | SimSocketKind::Udp => {}
         }
     }
@@ -1533,22 +1554,34 @@ impl SimSocket {
 
     /// The socket's local holder reads up to `max` bytes (a watched vsock's
     /// holder, never the forwarder); on a UDP socket one datagram per call.
+    ///
+    /// A vsock STREAM follows `vsock_connectible_recvmsg` (`af_vsock.c:2522`
+    /// to `:2548` @ v7.0) in its order: a socket that left `ESTABLISHED` (or
+    /// never connected) returns 0 when `SOCK_DONE` is set and `ENOTCONN`
+    /// otherwise; then the socket's own receive shutdown (the owner's
+    /// `SHUT_RDWR`) returns 0 at once, before queued bytes or `sk_err`; only
+    /// then queued bytes, `sk_err` (`:2439-2440`) and a peer's SHUTDOWN
+    /// (`:2326-2328`).
     pub fn local_read(&self, max: usize) -> SimLocalRead {
         let mut state = self.inner.lock();
+        let vsock = state.kind == SimSocketKind::VsockStream;
         let result = if state.kind == SimSocketKind::Udp {
             state.datagram_rx.pop_front().map_or(SimLocalRead::WouldBlock, SimLocalRead::Bytes)
+        } else if vsock
+            && (state.vsock_state == SimVsockState::Closing
+                || state.setup != SimSocketSetup::Connected)
+        {
+            if state.sock_done { SimLocalRead::Eof } else { SimLocalRead::Err(errno(107)) }
+        } else if vsock && state.sent_shutdown == Some(SimShutdown::Both) {
+            SimLocalRead::Eof
         } else if !state.stream_rx.is_empty() {
             let n = max.min(state.stream_rx.len());
             SimLocalRead::Bytes(state.stream_rx.drain(..n).collect())
         } else if let Some(errno) = state.sk_err {
             SimLocalRead::Err(errno)
-        } else if state.kind == SimSocketKind::VsockStream && state.received_shutdown.is_some() {
-            SimLocalRead::Eof
-        } else if state.kind == SimSocketKind::VsockStream
-            && state.vsock_state == SimVsockState::Closing
+        } else if (vsock && state.received_shutdown.is_some())
+            || (state.kind == SimSocketKind::Tcp && state.tcp_state == SimTcpState::CloseWait)
         {
-            SimLocalRead::Err(errno(107))
-        } else if state.kind == SimSocketKind::Tcp && state.tcp_state == SimTcpState::CloseWait {
             SimLocalRead::Eof
         } else if state.setup != SimSocketSetup::Connected {
             SimLocalRead::Err(errno(107))

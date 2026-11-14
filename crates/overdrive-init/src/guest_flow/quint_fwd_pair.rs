@@ -1841,16 +1841,15 @@ fn quint_fwd_pair_guest_owner_abort_sends_guest_abort_then_holder_drop_is_inert(
     FwdPairGuestDriver::new()
 }
 
-/// Named run `ContextReleaseShutsWatchedVhAndHolderReadsNotConnected` (`pair_conf`), guest side.
+/// Named run `HolderShutdownAfterGuestResetReadsNotConnected` (`pair_conf`), guest side.
 /// CONTRACT_SHAPE: bounded-change.
 #[quint_test(
     spec = "../../specs/quint/guest-flow-owner/fwd_pair.qnt",
     main = "pair_conf",
     max_samples = 1,
-    test = "ContextReleaseShutsWatchedVhAndHolderReadsNotConnected"
+    test = "HolderShutdownAfterGuestResetReadsNotConnected"
 )]
-fn quint_fwd_pair_guest_context_release_shuts_watched_vh_and_holder_reads_not_connected()
--> impl Driver {
+fn quint_fwd_pair_guest_holder_shutdown_after_guest_reset_reads_not_connected() -> impl Driver {
     FwdPairGuestDriver::new()
 }
 

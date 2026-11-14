@@ -151,7 +151,7 @@ use quint_connect::{Config, Driver, Result, State, Step, quint_run, quint_test, 
 use serde::Deserialize;
 use tokio::task::JoinHandle;
 
-use super::flow_io::sim::{OwnerShutdownRead, SimEffectKind, SimFailure, SimForwarderFailure};
+use super::flow_io::sim::{SimEffectKind, SimFailure, SimForwarderFailure};
 use super::owner_acceptance::support::{Composition, Lease, paused_runtime, remote};
 use super::quint_itf::{self, ItfError, Qualified};
 use super::{
@@ -770,16 +770,10 @@ impl FwdPairDriver {
             .io
             .vsock_half(flow)
             .ok_or_else(|| not_playable("HolderEnd", "the dial has no V_h"))?;
-        let selected = match k {
-            "eof" => OwnerShutdownRead::Eof,
-            "err" => OwnerShutdownRead::NotConnected,
-            other => return Err(not_playable("HolderEnd", format!("unknown end result {other}"))),
-        };
-        let read = self
-            .composition()
-            .io
-            .owner_shutdown_read(flow, usize::MAX, selected)
-            .unwrap_or_else(|| vsock.local_read(usize::MAX));
+        if !matches!(k, "eof" | "err") {
+            return Err(not_playable("HolderEnd", format!("unknown end result {k}")));
+        }
+        let read = vsock.local_read(usize::MAX);
         let observed = match read {
             SimLocalRead::Eof => "eof",
             SimLocalRead::Err(_) => "err",
@@ -1023,8 +1017,11 @@ impl FwdPairDriver {
     }
 
     fn guest_mark_clean(&mut self) {
+        // CONFALIGN-5: a datagram pair's completion shuts `V_g` {S, R} (the
+        // spec's `complete`), so the guest's 0x3 follows the end.
         if self.mode == Mode::Dgram && self.guest.inflight == 0 {
             self.guest.phase = GuestPhase::Ended;
+            self.guest_shut_all();
         }
     }
 
@@ -2073,14 +2070,14 @@ fn quint_fwd_pair_owner_abort_sends_guest_abort_then_holder_drop_is_inert() -> i
     FwdPairDriver::new()
 }
 
-/// Named run `ContextReleaseShutsWatchedVhAndHolderReadsNotConnected` (`pair_conf`), host side.
+/// Named run `HolderShutdownAfterGuestResetReadsNotConnected` (`pair_conf`), host side.
 #[quint_test(
     spec = "../../specs/quint/guest-flow-owner/fwd_pair.qnt",
     main = "pair_conf",
     max_samples = 1,
-    test = "ContextReleaseShutsWatchedVhAndHolderReadsNotConnected"
+    test = "HolderShutdownAfterGuestResetReadsNotConnected"
 )]
-fn quint_fwd_pair_context_release_shuts_watched_vh_and_holder_reads_not_connected() -> impl Driver {
+fn quint_fwd_pair_holder_shutdown_after_guest_reset_reads_not_connected() -> impl Driver {
     FwdPairDriver::new()
 }
 

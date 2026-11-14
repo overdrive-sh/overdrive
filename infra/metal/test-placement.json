@@ -1722,7 +1722,7 @@
       "guest_network::quint_fwd_pair::quint_fwd_pair_context_release_resets_every_pair": {
         "kind": "host-pure"
       },
-      "guest_network::quint_fwd_pair::quint_fwd_pair_context_release_shuts_watched_vh_and_holder_reads_not_connected": {
+      "guest_network::quint_fwd_pair::quint_fwd_pair_holder_shutdown_after_guest_reset_reads_not_connected": {
         "kind": "host-pure"
       },
       "guest_network::quint_fwd_pair::quint_fwd_pair_datagrams_in_order_with_empty": {
@@ -10139,7 +10139,7 @@
       "guest_flow::quint_fwd_pair::quint_fwd_pair_guest_context_release_resets_every_pair": {
         "kind": "host-pure"
       },
-      "guest_flow::quint_fwd_pair::quint_fwd_pair_guest_context_release_shuts_watched_vh_and_holder_reads_not_connected": {
+      "guest_flow::quint_fwd_pair::quint_fwd_pair_guest_holder_shutdown_after_guest_reset_reads_not_connected": {
         "kind": "host-pure"
       },
       "guest_flow::quint_fwd_pair::quint_fwd_pair_guest_datagrams_in_order_with_empty": {

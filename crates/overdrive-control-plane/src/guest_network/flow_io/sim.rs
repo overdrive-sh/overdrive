@@ -110,7 +110,7 @@ const SIM_FIRST_ASSIGNED_PORT: u32 = 49_152;
 use overdrive_netlink::{FibRouteType, NetlinkError};
 use overdrive_sim::adapters::{
     SimContextState, SimFarEnd, SimFlowForwarder, SimForwarderDevice, SimLocalRead, SimShutdown,
-    SimSocket, SimSocketKind, SimVsockState,
+    SimSocket, SimVsockState,
 };
 use parking_lot::Mutex;
 use tokio::sync::{Notify, oneshot};
@@ -312,18 +312,6 @@ pub(crate) enum SimPeerEnd {
     Eof,
     /// A reset.
     Reset,
-}
-
-/// The kernel-permitted result selected for one holder read after the local
-/// owner shut a watched vsock both ways. Native V-EV-CTL observes both results
-/// from this exact state; the choice is an input to the conformance step, not
-/// persistent socket or model state.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum OwnerShutdownRead {
-    /// `recvmsg` returned zero while the socket was still established.
-    Eof,
-    /// `recvmsg` failed `ENOTCONN` after the local shutdown transition.
-    NotConnected,
 }
 
 /// What a forwarder id the sim issued carries.
@@ -1076,41 +1064,6 @@ impl SimGuestFlowIo {
     /// id the seam never saw (D-5; the `fwd_pair` row `vs(s)`).
     pub(crate) fn vsock_half(&self, flow: FlowId) -> Option<SimSocket> {
         self.state.lock().flow_sockets.get(&flow).map(|sockets| sockets.vsock.clone())
-    }
-
-    /// Select one native holder-read result from the exact state the Sim
-    /// otherwise collapses after the local owner shuts a watched V_h both
-    /// ways. Returns `None` for every other socket state so ordinary reads,
-    /// peer shutdown, queued bytes and pending errors keep using
-    /// [`SimSocket::local_read`] unchanged.
-    pub(crate) fn owner_shutdown_read(
-        &self,
-        flow: FlowId,
-        max: usize,
-        selected: OwnerShutdownRead,
-    ) -> Option<SimLocalRead> {
-        let socket = self.vsock_half(flow)?;
-        let collapsed = socket.kind() == SimSocketKind::VsockStream
-            && socket.sent_shutdown() == Some(SimShutdown::Both)
-            && socket.stream_input().is_empty()
-            && socket.received_shutdown().is_none()
-            && socket.sk_err().is_none()
-            && socket.vsock_state() == SimVsockState::Established;
-        if !collapsed {
-            return None;
-        }
-        let observed = socket.local_read(max);
-        assert_eq!(
-            observed,
-            SimLocalRead::WouldBlock,
-            "the post-owner-SHUT_RDWR read selector only replaces the Sim's collapsed WouldBlock"
-        );
-        Some(match selected {
-            OwnerShutdownRead::Eof => SimLocalRead::Eof,
-            OwnerShutdownRead::NotConnected => SimLocalRead::Err(
-                KernelErrno::new(107).unwrap_or_else(|_| unreachable!("ENOTCONN is non-zero")),
-            ),
-        })
     }
 
     /// [`Self::peer_of`], `None` before the flow's peer socket was attached.
