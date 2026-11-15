@@ -11,6 +11,12 @@ use std::process::{Command, ExitCode};
 use clap::{Parser, Subcommand};
 use color_eyre::eyre::{Result, bail};
 
+#[cfg(test)]
+use overdrive_testing::overdrive_test_default;
+
+#[cfg(test)]
+overdrive_test_default!(host_pure);
+
 #[derive(Debug, Parser)]
 #[command(about = "Overdrive developer / CI tasks", version)]
 struct Args {

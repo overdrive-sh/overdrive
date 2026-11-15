@@ -28,6 +28,10 @@
 
 use xtask::dst_lint::scan_source_async_fs;
 
+use overdrive_testing::overdrive_test_default;
+
+overdrive_test_default!(host_pure);
+
 // -----------------------------------------------------------------------------
 // Positive cases — std::fs::* inside async context must be flagged
 // -----------------------------------------------------------------------------

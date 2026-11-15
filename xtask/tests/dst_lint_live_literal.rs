@@ -22,6 +22,10 @@
 
 use xtask::dst_lint::scan_source_live_literal;
 
+use overdrive_testing::overdrive_test_default;
+
+overdrive_test_default!(host_pure);
+
 // ---------------------------------------------------------------------------
 // S-06-01 — dst-lint rejects "live" literal in render or command source
 // ---------------------------------------------------------------------------

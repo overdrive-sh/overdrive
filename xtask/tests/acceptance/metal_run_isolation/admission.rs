@@ -7,6 +7,10 @@ use std::process::{Command, Stdio};
 use std::thread;
 use std::time::Duration;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 fn waiting_body(fixture: &Fixture, name: &str) -> String {
     format!(
         "printf started > '{}'; while [ ! -e '{}' ]; do sleep 0.02; done; exit 255",

@@ -22,6 +22,10 @@ use std::process::Command;
 
 use tempfile::TempDir;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 // -----------------------------------------------------------------------------
 // Helpers
 // -----------------------------------------------------------------------------

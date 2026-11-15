@@ -20,6 +20,10 @@
 
 use xtask::dst_lint::{BANNED_APIS, Violation, scan_source};
 
+use overdrive_testing::overdrive_test_default;
+
+overdrive_test_default!(host_pure);
+
 #[test]
 fn every_banned_api_is_detected_by_the_scanner() {
     // For each entry in BANNED_APIS, construct a minimal source file

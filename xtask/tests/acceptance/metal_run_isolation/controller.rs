@@ -3,6 +3,10 @@ use super::native_controller::NativeController;
 use super::support::*;
 use std::fs;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// CONTRACT_SHAPE: bounded-change (actual controller/service/finalizer records;
 /// local dirty source is retained and mismatched remote source/body stay untouched).
 #[test]

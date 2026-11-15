@@ -227,7 +227,19 @@ def resolve_module(sources, root, segments, root_gated):
         hit = hits[0]
         attributes = source.attributes(hit.start())
         if re.search(r"\bpath\s*=", attributes):
-            return f"module {segment} carries a path attribute"
+            window = source.text[max(0, hit.start() - len(attributes) - 1):hit.start()]
+            named = re.search(r'\bpath\s*=\s*"([^"]+)"', window)
+            if hit.group(2) != ";" or named is None or segment != segments[-1]:
+                return f"module {segment} carries a path attribute this tool does not resolve"
+            target = source.path.parent / named.group(1)
+            if not target.is_file():
+                return f"module {segment} path attribute names no file"
+            gated = gated or gated_by_test(attributes)
+            source = sources.setdefault(target, Source(target))
+            lo, hi = 0, len(source.text)
+            inline, mod_start = False, None
+            gated = gated or bool(FILE_GATE.search(source.masked))
+            continue
         gated = gated or gated_by_test(attributes)
         if hit.group(2) == "{":
             lo, hi = hit.end(), source.body_end(hit.end() - 1)

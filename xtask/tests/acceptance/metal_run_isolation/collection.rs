@@ -6,6 +6,10 @@ use std::process::Stdio;
 use std::thread;
 use std::time::Duration;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// CONTRACT_SHAPE: bounded-change (collector output/status only; retained records,
 /// source, other invocation and owned ephemeral files are byte-for-byte unchanged).
 #[test]

@@ -5,6 +5,10 @@ use sha2::{Digest as _, Sha256};
 use std::fs;
 use std::path::Path;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 fn assert_binding(source: &Path, binding: &Path, kind: &str) -> String {
     let record = fields(binding);
     assert_eq!(record.len(), 4);

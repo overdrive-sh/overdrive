@@ -6,6 +6,10 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 struct OwnedRoots(Vec<PathBuf>);
 impl Drop for OwnedRoots {
     fn drop(&mut self) {

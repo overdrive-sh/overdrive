@@ -4,6 +4,10 @@ use super::support::*;
 use std::fs;
 use std::process::Command;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 fn preflight(fixture: &Fixture) -> Command {
     let root = fixture.temp.path();
     for (file, value) in [

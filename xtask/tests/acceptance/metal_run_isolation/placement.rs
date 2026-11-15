@@ -6,6 +6,10 @@ use serde_json::Value;
 use std::fs;
 use std::process::Command;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 const PURE_BINARY: &str = "overdrive-cli";
 const PURE_TEST: &str = "http_client::tests::category_strings_are_leak_free_by_construction";
 const NATIVE_BINARY: &str = "xtask::acceptance";

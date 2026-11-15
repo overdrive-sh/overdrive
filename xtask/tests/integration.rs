@@ -15,6 +15,10 @@
 #![cfg(feature = "integration-tests")]
 #![allow(clippy::expect_used)]
 
+use overdrive_testing::overdrive_test_default;
+
+overdrive_test_default!(host_pure);
+
 mod integration {
     mod cloexec_lint_workspace;
     mod crate_class_metadata;

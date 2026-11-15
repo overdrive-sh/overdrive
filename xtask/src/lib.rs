@@ -6,6 +6,12 @@
 
 #![allow(clippy::expect_used, clippy::print_stderr, clippy::unnecessary_wraps)]
 
+#[cfg(test)]
+use overdrive_testing::overdrive_test_default;
+
+#[cfg(test)]
+overdrive_test_default!(host_pure);
+
 pub mod cloexec_lint;
 pub mod conformance_lint;
 pub mod dev_setup;

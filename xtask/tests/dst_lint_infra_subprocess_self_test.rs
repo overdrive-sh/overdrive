@@ -47,6 +47,10 @@ use xtask::dst_lint::{
     BANNED_INFRA_CLIS, Violation, scan_infra_subprocess_from_manifest, scan_source_infra_subprocess,
 };
 
+use overdrive_testing::overdrive_test_default;
+
+overdrive_test_default!(host_pure);
+
 /// A scoped production `adapter-host` path used across the flag/suppress
 /// tests — NOT excluded by scope, so a literal here IS eligible to flag.
 const SCOPED_SRC: &str = "crates/overdrive-worker/src/mtls_intercept.rs";
