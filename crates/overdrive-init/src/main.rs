@@ -63,11 +63,11 @@ use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::net::Ipv4Addr;
 use std::os::fd::{AsFd, AsRawFd};
-#[cfg(test)]
+#[cfg(all(test, feature = "integration-tests"))]
 use std::os::unix::process::CommandExt;
 use std::os::unix::process::ExitStatusExt;
 use std::path::{Path, PathBuf};
-#[cfg(test)]
+#[cfg(all(test, feature = "integration-tests"))]
 use std::process::Command;
 use std::time::{Duration, Instant};
 
@@ -1330,6 +1330,7 @@ mod tests {
         (result, trace.into_inner())
     }
 
+    #[cfg(feature = "integration-tests")]
     fn exec_test_command(conn: &mut File, argv: &[String]) -> Result<i32, InitError> {
         let command =
             argv.first().unwrap_or_else(|| unreachable!("test command argv is non-empty"));

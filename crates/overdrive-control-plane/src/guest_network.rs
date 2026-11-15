@@ -758,7 +758,7 @@ struct SharedAuditCheckpointWait {
     release: tokio::sync::oneshot::Receiver<()>,
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "integration-tests"))]
 pub(crate) struct SharedAuditCheckpointControl {
     reached: tokio::sync::oneshot::Receiver<()>,
     release: Option<tokio::sync::oneshot::Sender<()>>,
@@ -766,6 +766,7 @@ pub(crate) struct SharedAuditCheckpointControl {
 
 #[cfg(test)]
 impl SharedAuditCheckpoint {
+    #[cfg(all(test, feature = "integration-tests"))]
     fn arm(&self) -> SharedAuditCheckpointControl {
         let (reached, wait_reached) = tokio::sync::oneshot::channel();
         let (release, wait_release) = tokio::sync::oneshot::channel();
@@ -784,7 +785,7 @@ impl SharedAuditCheckpoint {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "integration-tests"))]
 impl SharedAuditCheckpointControl {
     #[allow(
         clippy::expect_used,
@@ -833,7 +834,7 @@ impl HostSharedGuestNetworkOwner {
         owner_runtime::shutdown(self).await;
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, feature = "integration-tests"))]
     pub(crate) fn arm_shared_audit_post_snapshot_checkpoint(&self) -> SharedAuditCheckpointControl {
         self.runtime.shared_audit_checkpoint.arm()
     }

@@ -736,11 +736,13 @@ pub(crate) mod sim_vm_host {
         }
 
         /// The pids whose kill a `kill_scope` call is waiting for (gated).
+        #[cfg(all(test, feature = "integration-tests"))]
         pub(crate) fn kills_requested(&self) -> BTreeSet<u32> {
             self.facts.lock().requested.clone()
         }
 
         /// Release the held kill of `pid` (gated).
+        #[cfg(all(test, feature = "integration-tests"))]
         pub(crate) fn grant_kill(&self, pid: u32) {
             self.facts.lock().granted.insert(pid);
             self.wake.notify_waiters();
@@ -748,12 +750,14 @@ pub(crate) mod sim_vm_host {
 
         /// Wake a waiting `kill_scope` to re-check its processes (after a
         /// VMM exited by itself).
+        #[cfg(all(test, feature = "integration-tests"))]
         pub(crate) fn notify(&self) {
             self.wake.notify_waiters();
         }
 
         /// Forget every outstanding kill request and grant: the `serve`
         /// process whose boot reclamation made them died with them.
+        #[cfg(all(test, feature = "integration-tests"))]
         pub(crate) fn clear_requests(&self) {
             let mut facts = self.facts.lock();
             facts.requested.clear();
@@ -762,6 +766,7 @@ pub(crate) mod sim_vm_host {
 
         /// The VMM pids the host placed in `alloc`'s scope (the relabelling
         /// of a production allocation to its VMM processes).
+        #[cfg(all(test, feature = "integration-tests"))]
         pub(crate) fn pids_of(&self, alloc: &AllocationId) -> BTreeSet<u32> {
             self.facts.lock().vms.get(alloc).cloned().unwrap_or_default()
         }
