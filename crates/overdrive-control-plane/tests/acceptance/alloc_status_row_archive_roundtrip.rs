@@ -38,6 +38,10 @@ use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, Logi
 use overdrive_core::transition_reason::{CancelledBy, ResourceEnvelope, StoppedBy};
 use proptest::prelude::*;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 // ---------------------------------------------------------------------------
 // Generators
 // ---------------------------------------------------------------------------

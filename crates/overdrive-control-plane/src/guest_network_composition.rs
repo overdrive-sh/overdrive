@@ -185,6 +185,9 @@ mod tests {
     use super::{GuestNetworkCompositionPorts, OwnerDial, compose_guest_network};
     use crate::guest_network::flow_io::GuestFlowIo;
     use crate::guest_network::flow_io::sim::SimGuestFlowIo;
+    use overdrive_testing::placement;
+
+    placement!(host_pure);
 
     fn ports(dial: &Arc<OwnerDial>) -> GuestNetworkCompositionPorts {
         GuestNetworkCompositionPorts {

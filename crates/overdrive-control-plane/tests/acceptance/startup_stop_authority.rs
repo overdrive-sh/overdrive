@@ -27,6 +27,10 @@ use crate::acceptance::restart_authority_world::{
     Dial, DriverCall, RestartWorld, Shape, assert_universe_unchanged, settle,
 };
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 fn startup_stopped(row: &overdrive_core::traits::observation_store::AllocStatusRow) -> bool {
     format!("{:?}", row.state) == "Terminated"
         && format!("{:?}", row.terminal).contains("StartupProbe")

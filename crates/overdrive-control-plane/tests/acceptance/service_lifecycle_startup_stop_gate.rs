@@ -58,6 +58,10 @@ use overdrive_store_local::LocalIntentStore;
 use proptest::prelude::*;
 use tempfile::TempDir;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 const MAX_ATTEMPTS: u32 = 3;
 const INTERVAL_SECS: u32 = 20;
 /// `interval x max_attempts`.

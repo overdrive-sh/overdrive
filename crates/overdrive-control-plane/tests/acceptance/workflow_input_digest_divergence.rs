@@ -68,6 +68,10 @@ use overdrive_sim::adapters::journal::SimJournalStore;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_sim::adapters::transport::SimTransport;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// Construct a fresh engine over `Sim*` ports with `ProvisionRecord`
 /// registered under its kind name. Each instance gets its OWN journal store
 /// (returned alongside the engine) so two starts write to separate runs.

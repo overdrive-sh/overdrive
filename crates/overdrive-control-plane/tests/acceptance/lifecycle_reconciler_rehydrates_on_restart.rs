@@ -37,6 +37,10 @@ use overdrive_reconcilers::{
     WorkflowLifecycleState, WorkflowLifecycleView,
 };
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 fn fresh_tick(now: Instant) -> TickContext {
     TickContext {
         now,

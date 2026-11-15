@@ -17,6 +17,10 @@ use tower::ServiceExt as _;
 
 use super::service_stream_support::{Node, service_spec};
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 const fn guest(role: ProbeRole) -> ProbeDescriptor {
     ProbeDescriptor {
         idx: ProbeIdx::new(0),

@@ -40,6 +40,10 @@ use overdrive_reconcilers::service_lifecycle::{
     ServiceAllocFact, ServiceLifecycleReconciler, ServiceLifecycleState, ServiceLifecycleView,
 };
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 fn aid(s: &str) -> AllocationId {
     AllocationId::new(s).expect("valid AllocationId")
 }

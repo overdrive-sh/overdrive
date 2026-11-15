@@ -143,6 +143,9 @@ pub fn parse_dataplane_section(
 mod tests {
     use super::{DataplaneConfig, parse_dataplane_section};
     use crate::error::ControlPlaneError;
+    use overdrive_testing::placement;
+
+    placement!(host_pure);
 
     /// S-BDB-12 unit closure: a TOML input with no `[dataplane]`
     /// section must produce a structured `Validation` error whose

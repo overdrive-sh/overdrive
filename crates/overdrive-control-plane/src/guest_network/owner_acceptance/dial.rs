@@ -50,6 +50,10 @@ use crate::guest_network::{
     GuestConnKey, GuestNetworkProvisioner, SharedGuestNetworkOwner,
 };
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 const PORT: u16 = 8080;
 
 /// A booted owner with one Active lease declaring `PORT`, its control

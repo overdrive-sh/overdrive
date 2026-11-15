@@ -30,6 +30,10 @@ use overdrive_sim::adapters::probers::SimHttpProber;
 use overdrive_sim::{SimCgroupAccounting, SimCgroupFs};
 use overdrive_worker::{VmDriver, VmHostLayout};
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 struct CountingTcpProber {
     calls: AtomicUsize,
 }

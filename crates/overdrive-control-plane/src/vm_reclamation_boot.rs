@@ -184,6 +184,9 @@ mod tests {
 
     use super::*;
     use crate::reconciler_runtime::ReconcilerRuntime;
+    use overdrive_testing::placement;
+
+    placement!(host_pure);
 
     /// Mirrors `build_app_state` in
     /// `tests/acceptance/runtime_registers_noop_heartbeat.rs` — the
@@ -1026,6 +1029,9 @@ mod boot_reclamation_before_assign {
 
     use super::converge;
     use super::sim_vm_host::{SimVmmHost, VmComposition, compose, vm_spec};
+    use overdrive_testing::placement;
+
+    placement!(host_pure);
 
     const PREFIX: &str = "100.95.0.0/29";
 

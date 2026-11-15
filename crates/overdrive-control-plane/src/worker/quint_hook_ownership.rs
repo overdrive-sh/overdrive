@@ -130,6 +130,10 @@ use overdrive_core::guest_network::{
     GuestNetworkExecGate, GuestNetworkExecSupervisor, GuestNetworkExecWiring,
 };
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 const MAIN: &str = "hooks_conf";
 const MODULE: &str = "hook_ownership";
 /// How long a step may take to settle (real time; the owners read time only through `SimClock`).

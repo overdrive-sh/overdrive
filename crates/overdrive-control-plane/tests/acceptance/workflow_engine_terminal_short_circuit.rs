@@ -53,6 +53,10 @@ use overdrive_sim::adapters::journal::SimJournalStore;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_sim::adapters::transport::SimTransport;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// A workflow that returns `Ok(())` immediately and bumps a shared counter
 /// each time its `run` body executes. The counter is the "body-ran-once"
 /// oracle: a genuine short-circuit on resume must NOT re-run the body, so

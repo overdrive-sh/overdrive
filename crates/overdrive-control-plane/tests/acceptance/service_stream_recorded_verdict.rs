@@ -55,6 +55,10 @@ use overdrive_core::transition_reason::{
 
 use super::service_stream_support::{Node, service_spec, settle};
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 type Lines = Pin<Box<dyn Stream<Item = Result<Bytes, ServiceStreamError>> + Send>>;
 
 /// One poll of the stream: what it yields right now, if anything.

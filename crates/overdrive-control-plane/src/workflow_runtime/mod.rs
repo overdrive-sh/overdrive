@@ -1774,6 +1774,9 @@ mod tests {
     use overdrive_core::workflow::{
         RunRetryPolicy, TerminalError, TerminalErrorKind, WorkflowStatus,
     };
+    use overdrive_testing::placement;
+
+    placement!(host_pure);
 
     /// A `RetryAttempted` command for the count fixtures (no recorded window
     /// start — the non-first-attempt shape).

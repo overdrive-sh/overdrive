@@ -18,6 +18,10 @@ use overdrive_core::transition_reason::{
     BackoffCause, ProbeWitness, ServiceFailureReason, StoppedBy, TerminalCondition,
 };
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 const ALLOC: &str = "alloc-web-0";
 
 /// Every `StoppedBy` variant the platform authors, with whether it ends the stream.

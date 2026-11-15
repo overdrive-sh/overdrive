@@ -375,6 +375,9 @@ mod tests {
     use crate::AppState;
     use crate::reconciler_runtime::ReconcilerRuntime;
     use overdrive_core::traits::driver::DriverType;
+    use overdrive_testing::placement;
+
+    placement!(host_pure);
 
     // -----------------------------------------------------------------
     // Helpers

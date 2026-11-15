@@ -121,6 +121,10 @@ use crate::guest_network::{GuestAdmission, QuiescenceRestoreError};
 use crate::shared_network_test_ports::composed::{C1, C2, ComposedNode, NodeStop};
 use crate::{RecoveryPhase, SHARED_NETWORK_AUDIT_PERIOD, SHARED_NETWORK_RECOVERY_DEADLINE};
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// The conformance main (D-UP-1: the one `quiescence` main recording
 /// `conf_step`) and the module declaring its variables; the projection reads
 /// `quiesce_conf::quiescence::<var>` (spike QT1).

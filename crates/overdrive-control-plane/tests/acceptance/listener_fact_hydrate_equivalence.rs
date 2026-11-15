@@ -70,6 +70,10 @@ use overdrive_store_local::LocalIntentStore;
 use proptest::prelude::*;
 use tempfile::TempDir;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 const SERVICE_MAP_PURPOSE: &str = "service-map";
 
 fn node_id(name: &str) -> NodeId {

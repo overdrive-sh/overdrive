@@ -119,6 +119,10 @@ use super::{ControlPlaneGatewayIdentityLifecycle, gateway_svid_lifecycle_registr
 use crate::action_shim::ShimError;
 use crate::action_shim::gateway_svid::dispatch_issue;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// The conformance main this driver replays.
 const MAIN: &str = "identity_conf";
 /// The module that declares the compared variables.

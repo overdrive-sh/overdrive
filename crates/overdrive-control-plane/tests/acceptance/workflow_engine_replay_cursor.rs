@@ -43,6 +43,10 @@ use overdrive_sim::adapters::entropy::SimEntropy;
 use overdrive_sim::adapters::journal::SimJournalStore;
 use overdrive_sim::adapters::transport::{SimInbox, SimTransport};
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 const TARGET: &str = "127.0.0.1:9000";
 const PAYLOAD: &[u8] = b"provision-record";
 /// The `ctx.run` step name the provision-write durable step records under.

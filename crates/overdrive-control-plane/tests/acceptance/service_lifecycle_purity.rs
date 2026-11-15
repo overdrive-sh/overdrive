@@ -28,6 +28,10 @@ use overdrive_reconcilers::service_lifecycle::{
 };
 use overdrive_reconcilers::{AnyReconciler, AnyReconcilerView, AnyState};
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// S-SHCP-PURITY-01 — `ServiceLifecycleReconciler::reconcile` is
 /// pure sync (compile-time witness: this function calls reconcile
 /// without `.await` and without an async runtime).

@@ -21,6 +21,10 @@ use overdrive_core::id::AllocationId;
 
 use crate::acceptance::restart_authority_world::{Dial, RestartWorld, Shape};
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// The backend is not routable: no row, or a row that marks it unhealthy.
 async fn not_a_backend(world: &RestartWorld, alloc: &AllocationId) -> bool {
     world.backend_healthy(alloc).await != Some(true)

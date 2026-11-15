@@ -71,6 +71,10 @@ use tokio::runtime::Runtime;
 use super::liveness_gate_fixture::LivenessWorld;
 use super::probe_count_fixture::{ProbeSet, RunOutcome, settle};
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 const MAIN: &str = "lg_conf";
 const MODULE: &str = "liveness_gate";
 /// The model's `LT`: the liveness `failure_threshold`.

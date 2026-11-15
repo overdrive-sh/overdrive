@@ -25,6 +25,10 @@ use overdrive_control_plane::tls_bootstrap::{
 };
 use tempfile::TempDir;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 const TEST_ENDPOINT: &str = "https://127.0.0.1:7001";
 
 /// Mint a CA + write + load a trust triple from disk. Returns the

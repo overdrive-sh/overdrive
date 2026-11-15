@@ -71,6 +71,10 @@ use ipnet::Ipv4Net;
 use std::collections::BTreeSet;
 use std::net::Ipv4Addr;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------

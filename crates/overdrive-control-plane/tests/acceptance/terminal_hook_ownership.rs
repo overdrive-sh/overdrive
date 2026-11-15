@@ -82,6 +82,10 @@ const ROLES: [(ProbeRole, &str); 3] = [
 use crate::acceptance::hooked_driver::{Call, HookedDriver};
 use crate::acceptance::vm_dispatch::{VmDispatchFixture, VmDispatchPorts};
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 fn crash_event(alloc: &AllocationId) -> ExitEvent {
     ExitEvent {
         alloc: alloc.clone(),

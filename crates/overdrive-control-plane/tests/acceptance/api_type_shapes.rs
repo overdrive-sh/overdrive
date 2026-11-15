@@ -32,6 +32,10 @@ use overdrive_core::api::submit::SubmitSpecInput;
 use proptest::prelude::*;
 use utoipa::ToSchema;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 fn sample_job_spec() -> JobSpecInput {
     JobSpecInput {
         id: "payments".to_string(),

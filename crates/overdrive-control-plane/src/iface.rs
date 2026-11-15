@@ -78,6 +78,9 @@ mod tests {
     use std::net::Ipv4Addr;
 
     use super::resolve_iface_ipv4;
+    use overdrive_testing::placement;
+
+    placement!(host_pure);
 
     /// Loopback always exists on every supported test host. On Linux
     /// it is `lo`; on macOS dev hosts (the outer-loop entry point)

@@ -201,6 +201,9 @@ mod tests {
     //! the acceptance tests' coarser assertions miss it.
 
     use super::{VipAllocatorBootError, parse_vip_allocator_section};
+    use overdrive_testing::placement;
+
+    placement!(host_pure);
 
     /// ADR-0049 amendment 2026-05-15 (Alt-E): the parser now treats a
     /// missing `[dataplane.vip_allocator]` section as a non-error;

@@ -1446,6 +1446,10 @@ use tracing_subscriber::layer::{Context, SubscriberExt};
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::{Layer, Registry};
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// Records every event the subscriber sees as `"<name> | f=v …"`.
 #[derive(Clone, Default)]
 struct CapturedEvents {

@@ -59,6 +59,10 @@ use proptest::prelude::*;
 use tempfile::TempDir;
 use tokio::sync::mpsc;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 // ---------------------------------------------------------------------------
 // `ClaimTrackingDriver` — a `Driver` port-boundary test double wrapping a
 // real `SimDriver` (reused for real exit-event injection via

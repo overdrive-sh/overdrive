@@ -21,6 +21,10 @@ use overdrive_core::guest_transport::wire::{ControlMessage, FlowRefusal};
 use super::support::{Composition, Lease, remote, sent_to};
 use crate::guest_network::{GUEST_FLOW_MAX_PAIRS_PER_ALLOCATION, GuestFlowPhase};
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// Opens `count` TcpConnect flows for `lease`, flow ids from `first`; each
 /// pairs.
 async fn fill(c: &Composition, lease: &Lease, first: u32, count: u32) {

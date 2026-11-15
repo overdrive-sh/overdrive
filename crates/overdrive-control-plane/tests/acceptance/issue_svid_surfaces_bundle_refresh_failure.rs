@@ -62,6 +62,10 @@ use tracing::{Event, Subscriber};
 use tracing_subscriber::layer::{Context, Layer, SubscriberExt as _};
 use tracing_subscriber::registry::LookupSpan;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 const SVID_LIFECYCLE: &str = "svid-lifecycle";
 const WORKLOAD_NAME: &str = "payments";
 const NODE_NAME: &str = "host-0";

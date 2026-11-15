@@ -46,6 +46,10 @@ use overdrive_sim::adapters::journal::SimJournalStore;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_sim::adapters::transport::SimTransport;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 const WORKFLOW_NAME: &str = "counting-blocking-wf";
 
 /// A workflow that records that its body was ENTERED (one increment of the

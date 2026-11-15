@@ -256,8 +256,11 @@ mod tests {
     use super::{
         FrontendAddrExhausted, WORKLOAD_FRONTEND_BASE, frontend_block_capacity, smallest_free_addr,
     };
+    use overdrive_testing::placement;
     use std::collections::BTreeSet;
     use std::net::Ipv4Addr;
+
+    placement!(host_pure);
 
     /// The usable host count of `10.98.0.0/16` (`65536` block addresses minus the
     /// reserved network + broadcast endpoints). Pinned as a literal here so a

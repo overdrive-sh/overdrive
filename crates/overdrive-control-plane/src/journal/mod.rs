@@ -730,6 +730,9 @@ mod tests {
     use super::{JournalCommand, LoadedEntry, WorkflowId};
     use overdrive_core::id::{ContentHash, CorrelationKey};
     use overdrive_core::workflow::{TerminalError, TerminalErrorKind, WorkflowStatus};
+    use overdrive_testing::placement;
+
+    placement!(host_pure);
 
     /// The journal `Terminal` command now carries the FULL `WorkflowStatus`
     /// (fix-workflow-terminal-redrive, RCA Option 1; ADR-0065 §3) — not a

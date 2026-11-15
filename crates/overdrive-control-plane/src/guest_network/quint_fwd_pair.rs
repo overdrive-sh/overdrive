@@ -159,6 +159,10 @@ use super::{
     HostSharedGuestNetworkOwner, OwnerRepairComponent, QuiescenceHold, SharedGuestNetworkOwner,
 };
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 const MAIN: &str = "pair_conf";
 const MODULE: &str = "fwd_pair";
 const SEED: u64 = 0x0F7A;

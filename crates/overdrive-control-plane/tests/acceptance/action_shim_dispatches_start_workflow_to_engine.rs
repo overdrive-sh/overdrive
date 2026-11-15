@@ -50,6 +50,10 @@ use overdrive_sim::adapters::transport::SimTransport;
 
 use crate::acceptance::vm_dispatch::{VmDispatchFixture, VmDispatchPorts};
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 #[tokio::test]
 async fn start_workflow_action_is_dispatched_to_the_engine_off_the_shim_not_run_as_a_reconciler() {
     // --- Engine driven ports, all injected as Sim* adapters ----------

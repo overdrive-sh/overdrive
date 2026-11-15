@@ -35,6 +35,10 @@ use overdrive_core::traits::observation_store::{
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use proptest::prelude::*;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 // ---------------------------------------------------------------------------
 // Strategies + fixtures.
 // ---------------------------------------------------------------------------

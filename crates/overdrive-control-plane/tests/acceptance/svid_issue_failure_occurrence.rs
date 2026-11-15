@@ -75,6 +75,10 @@ use tempfile::TempDir;
 
 use crate::acceptance::issue_fault_store::{ISSUE_FAULT_MARKER, IssueFaultStore};
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 const NODE_NAME: &str = "host-0";
 const WORKLOAD_NAME: &str = "payments";
 

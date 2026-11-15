@@ -67,6 +67,10 @@ use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_core::traits::vm_host_state::VmHostState;
 use overdrive_core::traits::{HeldSvidView, ListenerFacts, ServiceVipView, WorkflowLiveSet};
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// Audit 1 — TYPE coverage. Compiles only if `HydrationContext` carries every
 /// read surface the central `hydrate_*` free fns touch, each at the expected
 /// type. Never called; its type-check IS the assertion.

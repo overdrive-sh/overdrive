@@ -16,6 +16,10 @@ use overdrive_core::transition_reason::{
     ServiceFailureReason, StoppedBy, TerminalCondition, TransitionReason,
 };
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 const fn timeout_with(last_attempt: Option<LastAttemptWire>) -> ServiceSubmitEvent {
     ServiceSubmitEvent::Failed {
         alloc_id: None,

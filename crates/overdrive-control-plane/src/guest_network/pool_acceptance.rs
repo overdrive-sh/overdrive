@@ -61,6 +61,10 @@ use super::{
     GuestAddressPool, GuestLeaseObservation, GuestLeaseView, GuestNetworkError, GuestNetworkPlan,
 };
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// The fixed admission cap as a lease count.
 const CAP: usize = MAX_GUEST_NETWORK_ATTACHMENTS as usize;
 

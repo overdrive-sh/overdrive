@@ -43,6 +43,10 @@ use overdrive_sim::adapters::{
 };
 use overdrive_store_local::LocalIntentStore;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 const LISTENER_PORT: u16 = 8080;
 
 fn running_addr(rows: &[AllocStatusRow], alloc: &AllocationId) -> Ipv4Addr {

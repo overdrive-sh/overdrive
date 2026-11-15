@@ -31,6 +31,10 @@ use overdrive_sim::adapters::probers::{SimHttpProber, SimTcpProber};
 use overdrive_worker::probe_runner::ProbeRunner;
 use overdrive_worker::{BeaconIntake, VmDriver, VmHostLayout};
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 const INTERVAL_SECS: u32 = 2;
 
 fn descriptor(role: ProbeRole) -> ProbeDescriptor {

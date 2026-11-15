@@ -26,6 +26,10 @@ use crate::acceptance::restart_authority_world::{
     Dial, DriverCall, RestartWorld, Shape, assert_universe_unchanged,
 };
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// Crash every attempt through the production exit observer, with a
 /// `service-lifecycle` look after each crash, restarting until the budget is
 /// spent; the last call is the `workload-lifecycle` tick at the ceiling.

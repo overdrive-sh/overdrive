@@ -84,6 +84,10 @@ use overdrive_store_local::{LocalIntentStore, LocalObservationStore};
 use tempfile::TempDir;
 use tokio_util::sync::CancellationToken;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// The fixture trigger reconciler (AC5). NOT an `AnyReconciler` variant —
 /// a test-scope emitter that produces the `Action::StartWorkflow` a future
 /// production producer (#206) would emit. Its single job is to hand the

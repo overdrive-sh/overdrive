@@ -47,6 +47,10 @@ use serde_json::Value;
 use tempfile::TempDir;
 use tower::ServiceExt as _;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 // ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------

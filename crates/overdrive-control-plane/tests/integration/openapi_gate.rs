@@ -24,6 +24,10 @@ use std::process::Command;
 
 use overdrive_control_plane::openapi as openapi_lib;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 // -----------------------------------------------------------------------------
 // (a) Determinism — repeat generation produces byte-identical YAML.
 // -----------------------------------------------------------------------------

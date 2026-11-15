@@ -83,6 +83,9 @@ mod tests {
     use crate::reconciler_runtime::ReconcilerRuntime;
 
     use super::dispatch;
+    use overdrive_testing::placement;
+
+    placement!(host_pure);
 
     fn runtime() -> (tempfile::TempDir, ReconcilerRuntime) {
         let tmp = tempfile::TempDir::new().expect("temporary runtime directory");

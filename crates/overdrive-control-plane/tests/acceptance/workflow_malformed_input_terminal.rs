@@ -75,6 +75,10 @@ use overdrive_sim::adapters::journal::SimJournalStore;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_sim::adapters::transport::SimTransport;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// A fixture workflow whose `Input` is a NON-unit type (`u64`), so a
 /// `spec.input` byte-string that is not valid CBOR for a `u64` fails the
 /// adapter's decode gate BEFORE the body runs. The body would succeed

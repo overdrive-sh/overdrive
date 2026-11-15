@@ -27,6 +27,10 @@ use overdrive_reconcilers::RESTART_BACKOFF_CEILING;
 
 use super::service_stream_support::{Node, Tap, service_spec, settle};
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// Advance the node one second at a time and run both reconcilers every `every`
 /// seconds. Returns the second at which the stream's terminal line appeared, if it
 /// did before `up_to`. The terminal is checked before the reconcilers run, so a

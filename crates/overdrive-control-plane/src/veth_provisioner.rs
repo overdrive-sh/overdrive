@@ -769,8 +769,11 @@ mod tests {
         errno_is_absent, errno_is_already_exists,
     };
     use ipnet::{IpAdd, Ipv4Net};
+    use overdrive_testing::placement;
     use proptest::prelude::*;
     use std::net::Ipv4Addr;
+
+    placement!(host_pure);
 
     /// Create/add and delete have opposite successful postconditions, so their
     /// typed errno classifiers must never share `ENODEV`/`EEXIST` handling.
@@ -1196,6 +1199,9 @@ mod tests {
 #[cfg(all(test, feature = "integration-tests"))]
 mod offload_read_failure_propagation {
     use super::{VethProvisionError, observe_tx_offload_on};
+    use overdrive_testing::placement;
+
+    placement!(host_pure);
 
     /// A name that cannot resolve to a real iface, so `FEATURES_GET` fails
     /// (`-ENODEV`) rather than returning a feature bitset.

@@ -13,6 +13,10 @@
 //!   breaks dyn compatibility and the runtime constructor fails to
 //!   instantiate. The fixture pins this property mechanically.
 
+use overdrive_testing::overdrive_test_default;
+
+overdrive_test_default!(host_pure);
+
 #[test]
 fn compile_pass_cases() {
     let t = trybuild::TestCases::new();

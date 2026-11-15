@@ -12,6 +12,10 @@ use overdrive_control_plane::error::{ControlPlaneError, to_response};
 use overdrive_core::traits::observation_store::ObservationStoreError;
 use overdrive_gateway::application::GatewayStatusReadError;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 const CAUSE_MARKER: &str = "status-read-cause-marker";
 
 fn a_read_failure() -> ObservationStoreError {

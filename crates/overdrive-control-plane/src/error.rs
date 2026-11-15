@@ -1235,6 +1235,9 @@ impl IntoResponse for ControlPlaneError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use overdrive_testing::placement;
+
+    placement!(host_pure);
 
     /// ADR-0064 § 4 / OQ-4: a persisted-and-describable Service ALWAYS
     /// has an allocated VIP (submit-time admission allocates before the

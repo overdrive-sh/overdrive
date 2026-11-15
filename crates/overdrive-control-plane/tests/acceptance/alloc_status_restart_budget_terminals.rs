@@ -42,6 +42,10 @@ use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_store_local::LocalIntentStore;
 use tempfile::TempDir;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 const WORKLOAD: &str = "payments-v2";
 
 fn node() -> NodeId {

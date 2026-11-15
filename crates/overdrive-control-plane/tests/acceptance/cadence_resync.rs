@@ -29,6 +29,10 @@ use overdrive_core::id::NodeId;
 use overdrive_core::reconcilers::{ReconcilerName, ResyncSchedule, ResyncScope, TargetResource};
 use proptest::prelude::*;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 // ---------------------------------------------------------------------------
 // Small helpers — these tests are the only caller site.
 // ---------------------------------------------------------------------------

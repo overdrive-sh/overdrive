@@ -675,8 +675,11 @@ mod tests {
     // invariant is violated.
     #![allow(clippy::expect_used)]
     use super::*;
+    use overdrive_testing::placement;
     use std::collections::HashSet;
     use std::io::Cursor;
+
+    placement!(host_pure);
 
     /// Test-only `HostnameSource` that always fails with a specified
     /// `io::ErrorKind`. Models the "obscure platform without a

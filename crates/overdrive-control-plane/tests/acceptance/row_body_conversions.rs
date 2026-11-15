@@ -25,6 +25,10 @@ use overdrive_core::traits::observation_store::{
 };
 use overdrive_core::transition_reason::{ProbeWitness, TerminalCondition};
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 fn sample_alloc_status_row() -> AllocStatusRow {
     AllocStatusRow {
         alloc_id: AllocationId::from_str("alloc-a1b2c3").expect("valid alloc id"),

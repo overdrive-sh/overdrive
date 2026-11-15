@@ -67,6 +67,10 @@ use crate::guest_network::quint_itf::{self, ItfError, Qualified};
 use crate::handlers::submit_workload;
 use crate::streaming::{ServiceSubmitEvent, progress_deadline};
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 const MAIN: &str = "pd_conf";
 const MODULE: &str = "progress_deadline";
 const WORKLOAD: &str = "svc";

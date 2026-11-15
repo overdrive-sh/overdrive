@@ -3123,6 +3123,9 @@ mod tests {
     use overdrive_core::workflow::{WorkflowName, WorkflowStart};
 
     use super::{Action, ShimError, persist_workflow_intents};
+    use overdrive_testing::placement;
+
+    placement!(host_pure);
 
     /// In-memory `IntentStore` that fails `put` for one configured
     /// "poison" key and otherwise stores the bytes. `get` reflects what
@@ -3333,6 +3336,9 @@ mod guest_command_release_tests {
     #![allow(clippy::doc_markdown)]
 
     use super::guest_command_release_permitted;
+    use overdrive_testing::placement;
+
+    placement!(host_pure);
 
     /// CONTRACT_SHAPE: pure-function.
     #[test]
@@ -3434,6 +3440,9 @@ mod fail_closed_mtls_tests {
         AllocStateWire, LifecycleEvent, ShimError, TransitionReason, TransitionSource,
         fail_closed_on_mtls_install_with_guest,
     };
+    use overdrive_testing::placement;
+
+    placement!(host_pure);
 
     /// What [`RecordingDriver::stop`] reports back. Absence is benign; a real
     /// cleanup failure prevents any protected resource teardown.
@@ -4158,6 +4167,9 @@ mod admission_refusal_acceptance {
     use super::{LifecycleEvent, ShimError, dispatch_with_guest_network_provisioner_for_test};
     use crate::guest_network::{GuestAddressPool, GuestNetworkError, SharedGuestNetworkOwner};
     use crate::shared_network_test_ports::{TestCallOutcome, TestOwnerCall, TestSharedOwner};
+    use overdrive_testing::placement;
+
+    placement!(host_pure);
 
     const SUCCESSOR: &str = "nd295-refused-successor";
     const PREDECESSOR: &str = "nd295-held-00001";

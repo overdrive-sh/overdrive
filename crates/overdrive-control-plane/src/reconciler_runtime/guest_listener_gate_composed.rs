@@ -45,6 +45,10 @@ use super::liveness_gate_fixture::{
 };
 use super::probe_count_fixture::LISTENER_PORT;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// The derived startup deadline of the gate descriptor: interval 2 s x 30 attempts.
 const STARTUP_DEADLINE_SECS: u64 = 60;
 

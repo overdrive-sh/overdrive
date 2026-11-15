@@ -205,6 +205,10 @@ use crate::reconciler_runtime::{
 use crate::vm_reclamation_boot::sim_vm_host::{GATEWAY, RecordingVmm, SimVmmHost};
 use crate::vm_reclamation_boot::{ConvergeError, converge};
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// The conformance main (D-UP-1), the main of the run pending GH #325
 /// (item 9) and the three-offset recording main of item 7's pool-exhaustion
 /// run; the module declaring the variables.

@@ -2287,6 +2287,9 @@ mod shared_network_task_owner_acceptance {
     use crate::shared_network_test_ports::{
         TestGuestDns, TestGuestDnsFactory, TestGuestDnsServeExit,
     };
+    use overdrive_testing::placement;
+
+    placement!(host_pure);
 
     #[derive(Clone, Copy)]
     enum SupervisorExitCase {
@@ -5886,6 +5889,9 @@ mod tests {
         use crate::error::VmmBootError;
         use crate::node_adapters::{VmAdapters, VmCapability};
         use crate::{VmComposeError, compose_vm_driver};
+        use overdrive_testing::placement;
+
+        placement!(host_pure);
 
         #[allow(clippy::expect_used)]
         fn test_probe_runner() -> (Arc<ProbeRunner>, Arc<overdrive_worker::GuestListenerBoard>) {

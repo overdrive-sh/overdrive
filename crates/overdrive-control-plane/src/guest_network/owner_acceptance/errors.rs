@@ -33,6 +33,10 @@ use crate::guest_network::{
     GuestNetworkError, GuestNetworkOperation, GuestNetworkProvisioner, SharedGuestNetworkOwner,
 };
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// The taxonomy's name for `error`; exhaustive, no wildcard (C6c).
 const fn taxonomy_name(error: &GuestNetworkError) -> &'static str {
     match error {

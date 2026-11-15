@@ -131,6 +131,10 @@ use crate::reconciler_runtime::ReconcilerRuntime;
 use crate::shared_network_test_ports::{mtls_worker, shared_guest_network_owner};
 use crate::vm_reclamation_boot::sim_vm_host::{GATEWAY, RecordingVmm, SimVmmHost};
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// The conformance main and the module declaring the variables.
 const MAIN: &str = "gr_host_conf";
 const MODULE: &str = "guest_report_host";

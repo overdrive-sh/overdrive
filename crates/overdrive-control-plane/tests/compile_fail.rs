@@ -20,6 +20,10 @@
 //!   (S-ND295-65; D-295-R16, E16), so no server is configured without
 //!   protection and DNS.
 
+use overdrive_testing::overdrive_test_default;
+
+overdrive_test_default!(host_pure);
+
 #[test]
 fn compile_fail_cases() {
     let t = trybuild::TestCases::new();

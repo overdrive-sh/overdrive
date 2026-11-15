@@ -80,6 +80,9 @@ mod acceptance {
 
     use super::*;
     use crate::gateway_composition::{GatewayIdentityActionComposition, GatewayIdentityDisabled};
+    use overdrive_testing::placement;
+
+    placement!(host_pure);
 
     /// A write-only target that records what it was offered and holds only the
     /// desired epoch, as the slot does.

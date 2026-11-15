@@ -68,6 +68,10 @@ use super::owner_acceptance::support::{Composition, Lease, guest_flow, paused_ru
 use super::quint_itf::{self, ItfError, Qualified};
 use super::{AssociationPhase, GuestConnKey, HostSharedGuestNetworkOwner};
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 const MAIN: &str = "slots_conf";
 const MODULE: &str = "udp_slots";
 /// `MAXFID` of the conformance instance (`CONF_STEP_BOUND + 1`).

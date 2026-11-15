@@ -46,6 +46,10 @@ use overdrive_sim::adapters::journal::SimJournalStore;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_sim::adapters::transport::SimTransport;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 #[tokio::test]
 async fn engine_writes_workflow_terminal_observation_row_on_run_terminal() {
     let journal: Arc<dyn JournalStore> = Arc::new(SimJournalStore::new());

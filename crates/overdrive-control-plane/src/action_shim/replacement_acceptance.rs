@@ -75,6 +75,10 @@ use tracing::{Event, Subscriber, subscriber::set_default};
 use tracing_subscriber::layer::{Context, SubscriberExt as _};
 use tracing_subscriber::{Layer, Registry};
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 const SEED: u64 = 284_105_106;
 
 #[derive(Clone, Debug, Eq, PartialEq)]

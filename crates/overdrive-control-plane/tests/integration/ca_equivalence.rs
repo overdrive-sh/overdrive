@@ -61,6 +61,10 @@ use overdrive_sim::adapters::SimCa;
 use overdrive_sim::adapters::entropy::SimEntropy;
 use x509_parser::prelude::FromDer;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// A validity window straddling the current wall-clock for the SVID requests in
 /// these equivalence tests. The window rides on the `SvidRequest` (ADR-0063
 /// rev 2 amendment); the profile-comparison tests don't read the validity bytes

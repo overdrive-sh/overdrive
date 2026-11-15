@@ -19,6 +19,10 @@ use overdrive_core::eval_broker::{Evaluation, EvaluationBroker};
 use overdrive_core::reconcilers::{ReconcilerName, TargetResource};
 use proptest::prelude::*;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 // ---------------------------------------------------------------------------
 // Small helpers — kept inline; these tests are the only caller site.
 // ---------------------------------------------------------------------------

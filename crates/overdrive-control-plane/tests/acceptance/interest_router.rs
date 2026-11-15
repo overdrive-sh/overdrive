@@ -64,6 +64,10 @@ use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use tokio_util::sync::CancellationToken;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// A sim relist period for the interest-router periodic-relist ATs. Logical
 /// (`SimClock`) time — the harness advances the clock explicitly via
 /// [`SimClock::tick`]; wall-clock never elapses it. The non-periodic scenarios

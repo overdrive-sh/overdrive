@@ -49,6 +49,10 @@ use overdrive_reconcilers::{
     RESTART_BACKOFF_CEILING, WorkloadLifecycle, WorkloadLifecycleState, WorkloadLifecycleView,
 };
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 const WORKLOAD: &str = "svc";
 const NODE: &str = "local";
 

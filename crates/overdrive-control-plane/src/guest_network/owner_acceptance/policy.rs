@@ -32,6 +32,10 @@ use crate::guest_network::GuestFlowPhase;
 use crate::guest_network::flow_io::sim::{SimEffectKind, SimEffectTarget, SimFailure};
 use crate::guest_network::flow_io::{PeerProtocol, PeerSocketSpec};
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 fn addr(a: u8, b: u8, c: u8, d: u8, port: u16) -> SocketAddrV4 {
     SocketAddrV4::new(Ipv4Addr::new(a, b, c, d), port)
 }

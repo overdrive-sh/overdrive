@@ -58,6 +58,10 @@ use super::probe_count_fixture::{
     settle,
 };
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// ADR-0261: liveness supervision begins when the Service is `Stable`. A
 /// Service that declares a startup probe reaches `Stable` once that probe has
 /// passed; the first look then announces it and the Stable hook starts the

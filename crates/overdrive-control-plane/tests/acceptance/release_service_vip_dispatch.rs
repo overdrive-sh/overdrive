@@ -35,6 +35,10 @@ use overdrive_sim::adapters::driver::SimDriver;
 
 use crate::acceptance::vm_dispatch::{VmDispatchFixture, VmDispatchPorts};
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 #[tokio::test]
 async fn release_action_dispatch_invokes_allocator_release() {
     // ---- Allocator: the fixture's real PersistentServiceVipAllocator over

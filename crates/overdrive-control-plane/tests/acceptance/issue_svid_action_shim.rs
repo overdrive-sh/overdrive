@@ -45,6 +45,10 @@ use overdrive_sim::adapters::observation_store::SimObservationStore;
 
 use crate::acceptance::vm_dispatch::{VmDispatchFixture, VmDispatchPorts};
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// The node the SVID is issued on (also the obs-store writer).
 fn issuing_node() -> NodeId {
     NodeId::new("local").expect("valid NodeId")

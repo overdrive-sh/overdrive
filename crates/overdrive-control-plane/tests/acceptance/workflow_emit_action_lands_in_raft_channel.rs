@@ -53,6 +53,10 @@ use overdrive_sim::adapters::journal::SimJournalStore;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_sim::adapters::transport::SimTransport;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// A workflow whose ONLY effect is a single `ctx.emit_action(Action::Noop)`
 /// followed by a terminal `Success`. Authored as one ordinary `async fn
 /// run` — the emit goes through `ctx`, the only sanctioned surface; `ctx`

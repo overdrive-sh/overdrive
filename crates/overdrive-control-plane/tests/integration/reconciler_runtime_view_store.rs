@@ -40,6 +40,10 @@ use overdrive_reconcilers::{
 };
 use overdrive_sim::adapters::view_store::SimViewStore;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 fn name(s: &str) -> ReconcilerName {
     ReconcilerName::new(s).expect("valid reconciler name")
 }

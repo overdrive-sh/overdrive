@@ -38,6 +38,10 @@ use overdrive_reconcilers::service_lifecycle::{
     ServiceAllocFact, ServiceLifecycleReconciler, ServiceLifecycleState, ServiceLifecycleView,
 };
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// Tick context with deterministic synthetic wall-clock.
 fn tick_at(now_unix_ms: u64) -> TickContext {
     let now = Instant::now();

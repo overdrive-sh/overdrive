@@ -22,6 +22,10 @@ use overdrive_core::observation::{ProbeIdx, ProbeRole};
 use overdrive_reconcilers::service_lifecycle::{DEFAULT_STARTUP_DEADLINE, startup_deadline};
 use proptest::prelude::*;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 fn startup_probe(idx: u32, interval_seconds: u32, max_attempts: u32) -> ProbeDescriptor {
     ProbeDescriptor {
         idx: ProbeIdx::new(idx),

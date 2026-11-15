@@ -29,6 +29,10 @@ use overdrive_control_plane::streaming::ServiceSubmitEvent;
 use overdrive_core::transition_reason::{ProbeWitness, ServiceFailureReason, TerminalCondition};
 use proptest::prelude::*;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 // ---------------------------------------------------------------------------
 // Generators
 // ---------------------------------------------------------------------------

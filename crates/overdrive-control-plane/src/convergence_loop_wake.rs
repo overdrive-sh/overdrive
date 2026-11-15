@@ -50,6 +50,10 @@ use tracing_subscriber::layer::SubscriberExt as _;
 use crate::reconciler_runtime::ReconcilerRuntime;
 use crate::{AppState, spawn_convergence_loop};
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 const CADENCE: Duration = Duration::from_millis(100);
 
 struct Loop {

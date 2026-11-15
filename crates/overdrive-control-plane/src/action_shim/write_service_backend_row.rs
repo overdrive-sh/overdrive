@@ -77,6 +77,9 @@ mod tests {
     use overdrive_sim::adapters::observation_store::SimObservationStore;
 
     use super::dispatch;
+    use overdrive_testing::placement;
+
+    placement!(host_pure);
 
     /// Build a canonical [`ServiceBackendRow`] for test fixtures.
     /// Inputs (not derived state) are pinned; the row's fields all

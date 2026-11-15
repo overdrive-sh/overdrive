@@ -25,6 +25,10 @@ use overdrive_control_plane::dns_responder::wire;
 use overdrive_core::id::{MeshServiceName, NameAnswer};
 use proptest::prelude::*;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 // ---------------------------------------------------------------------------
 // Strategies — domain-specific generators for the WIRE input space.
 // ---------------------------------------------------------------------------

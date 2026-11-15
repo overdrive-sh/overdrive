@@ -13,6 +13,10 @@ use overdrive_control_plane::{
 use std::net::Ipv4Addr;
 use tempfile::TempDir;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// The canonical publisher and consumer constructors register successfully
 /// in the production relative order, so their enqueue names resolve.
 /// CONTRACT_SHAPE: bounded-change.

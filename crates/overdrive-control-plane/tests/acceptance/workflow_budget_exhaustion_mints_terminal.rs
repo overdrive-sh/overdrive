@@ -82,6 +82,10 @@ use overdrive_sim::adapters::journal::SimJournalStore;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_sim::adapters::transport::SimTransport;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// CBOR-encode the unit `Input` the reference fixtures take.
 fn cbor_unit() -> Vec<u8> {
     let mut bytes: Vec<u8> = Vec::new();

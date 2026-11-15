@@ -44,6 +44,10 @@ use tempfile::TempDir;
 
 use crate::acceptance::issue_fault_store::IssueFaultStore;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 const WORKLOAD: &str = "payments";
 
 fn node() -> NodeId {

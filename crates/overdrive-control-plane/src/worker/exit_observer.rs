@@ -684,6 +684,9 @@ fn keep_last_n_lines(input: &str, n: usize) -> String {
 mod classify_tests {
     use super::*;
     use overdrive_core::transition_reason::StoppedBy;
+    use overdrive_testing::placement;
+
+    placement!(host_pure);
 
     #[test]
     fn clean_exit_intentional_false_terminates_with_process_stop() {
@@ -766,6 +769,9 @@ mod terminal_fence_tests {
     use overdrive_core::id::NodeId;
     use overdrive_core::transition_reason::{StoppedBy, TerminalCondition};
     use overdrive_sim::adapters::observation_store::SimObservationStore;
+    use overdrive_testing::placement;
+
+    placement!(host_pure);
 
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
@@ -834,6 +840,9 @@ mod terminal_fence_tests {
 #[cfg(test)]
 mod keep_last_n_lines_tests {
     use super::keep_last_n_lines;
+    use overdrive_testing::placement;
+
+    placement!(host_pure);
 
     #[test]
     fn input_longer_than_budget_keeps_last_n_in_order() {

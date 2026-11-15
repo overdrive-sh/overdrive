@@ -77,6 +77,10 @@ use overdrive_sim::adapters::journal::SimJournalStore;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_sim::adapters::transport::SimTransport;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// The per-step `max_attempts` this fixture sets — deliberately `1`, distinct
 /// from the engine-global `WORKFLOW_RETRY_BUDGET` (3), so the test proves the
 /// PER-STEP policy governs.

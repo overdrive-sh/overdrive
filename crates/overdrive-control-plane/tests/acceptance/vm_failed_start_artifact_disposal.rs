@@ -50,6 +50,10 @@ use tempfile::TempDir;
 
 use crate::acceptance::vm_dispatch::{VmDispatchFixture, VmDispatchPorts};
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// Leaves an allocation-indexed directory where the rootfs clone must be a
 /// file, then rejects creation. The real `VmDriver` attempts every cleanup
 /// stage; clone removal fails with `EISDIR`, so the ordered unclassified

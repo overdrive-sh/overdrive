@@ -87,6 +87,10 @@ use crate::{
     SHARED_NETWORK_RETRY_PERIOD,
 };
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 // ---------------------------------------------------------------------------
 // Observation helpers (port-exposed universe only)
 // ---------------------------------------------------------------------------

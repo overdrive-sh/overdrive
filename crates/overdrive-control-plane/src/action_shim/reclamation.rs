@@ -359,6 +359,9 @@ mod tests {
     use crate::action_shim::EvaluationSubmission;
 
     use super::*;
+    use overdrive_testing::placement;
+
+    placement!(host_pure);
 
     // -----------------------------------------------------------------
     // D2 (02-03 review) — a minimal in-memory tracing-event capture.

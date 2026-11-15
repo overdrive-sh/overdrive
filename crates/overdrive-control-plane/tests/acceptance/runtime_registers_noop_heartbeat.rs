@@ -43,6 +43,10 @@ use overdrive_sim::adapters::transport::SimTransport;
 use overdrive_store_local::LocalIntentStore;
 use tempfile::TempDir;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 // ---------------------------------------------------------------------------
 // Helpers — kept inline; these tests are the only caller site.
 // ---------------------------------------------------------------------------

@@ -53,6 +53,10 @@ use overdrive_sim::adapters::vm_host_state::SimVmHostState;
 use overdrive_store_local::LocalIntentStore;
 use tempfile::TempDir;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 fn node() -> NodeId {
     NodeId::from_str("gw-node").expect("fixture node id")
 }

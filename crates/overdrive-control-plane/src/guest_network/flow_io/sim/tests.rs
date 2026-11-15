@@ -48,6 +48,10 @@ use crate::guest_network::flow_io::{
     PeerSocketSpec,
 };
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// Every sim built here prints its seed (testing.md § "Seeding and
 /// reproducibility").
 fn sim(seed: u64) -> Arc<SimGuestFlowIo> {

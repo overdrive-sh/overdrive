@@ -173,7 +173,10 @@ mod tests {
     use overdrive_core::traits::identity_read::IdentityRead;
     use overdrive_core::wall_clock::UnixInstant;
     use overdrive_core::{AllocationId, CertSerial, SpiffeId};
+    use overdrive_testing::placement;
     use std::time::Duration;
+
+    placement!(host_pure);
 
     /// Build a `SvidMaterial` for `(spiffe, not_after_secs)` with placeholder
     /// cert/key bytes — the held-set tests assert on the `held_snapshot`

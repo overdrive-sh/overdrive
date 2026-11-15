@@ -41,6 +41,10 @@ use overdrive_sim::adapters::journal::SimJournalStore;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_sim::adapters::transport::SimTransport;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// A workflow that parks forever under `SimClock` (the harness never ticks),
 /// so the engine task never reaches terminal and the live-instance entry
 /// persists for the duration of the test.

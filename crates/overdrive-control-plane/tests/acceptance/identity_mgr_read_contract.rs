@@ -31,6 +31,10 @@ use overdrive_core::wall_clock::UnixInstant;
 use overdrive_core::{AllocationId, CertSerial, NodeId, SpiffeId};
 use std::time::Duration;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// A `Ca` whose `issue_svid` bumps an atomic counter, so a test can assert the
 /// read path NEVER issues (ADR-0067 D7 clause 1 — the O3 read-latency promise).
 ///

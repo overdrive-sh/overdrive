@@ -1318,6 +1318,9 @@ mod tests {
         JobSubmitEvent, best_effort_attempt_count, workload_event_from_terminal,
         workload_terminal_from_snapshot,
     };
+    use overdrive_testing::placement;
+
+    placement!(host_pure);
 
     fn make_lifecycle_event(alloc_id: &AllocationId, workload_id: &WorkloadId) -> LifecycleEvent {
         LifecycleEvent {

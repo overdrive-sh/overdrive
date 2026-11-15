@@ -61,6 +61,10 @@ use overdrive_sim::adapters::observation_store::SimObservationStore;
 
 use crate::acceptance::vm_dispatch::{VmDispatchFixture, VmDispatchPorts};
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// The opt-out `Stable` witness the `ServiceLifecycleReconciler` emits for an
 /// empty-startup-probes Service — mirrors the real emission shape so the
 /// dispatched terminal matches production.

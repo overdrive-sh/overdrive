@@ -11,6 +11,10 @@
 //! refactors that reorder the boot path will break this test before
 //! operators see the wrong error.
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 #[test]
 fn preflight_precedes_workloads_bootstrap_in_run_server() {
     let lib_src = include_str!("../../src/lib.rs");

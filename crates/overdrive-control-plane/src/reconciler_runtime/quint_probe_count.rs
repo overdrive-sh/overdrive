@@ -89,6 +89,10 @@ use tokio::runtime::Runtime;
 use super::ReconcilerRuntime;
 use super::probe_count_fixture::{PROBE_INTERVAL, ProbeSet, ProbeWorld, RunOutcome, settle};
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// The conformance main this driver replays (D-UP-1).
 const MAIN: &str = "probe_streak_conf";
 /// The module that declares the compared variables.

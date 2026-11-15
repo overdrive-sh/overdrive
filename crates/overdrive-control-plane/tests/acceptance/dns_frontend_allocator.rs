@@ -35,6 +35,10 @@ use overdrive_core::id::MeshServiceName;
 use overdrive_dataplane::allocators::VipRange;
 use proptest::prelude::*;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 // ---------------------------------------------------------------------------
 // Strategies — domain-specific generators for the `<workload>` key space.
 // ---------------------------------------------------------------------------

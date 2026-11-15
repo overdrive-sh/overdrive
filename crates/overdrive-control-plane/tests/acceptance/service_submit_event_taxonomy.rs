@@ -53,6 +53,10 @@ use overdrive_reconcilers::service_lifecycle::{
 };
 use proptest::prelude::*;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 // ---------------------------------------------------------------------------
 // Generators
 // ---------------------------------------------------------------------------

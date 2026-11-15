@@ -33,6 +33,10 @@ use crate::guest_network::{
     FlowCloseCause, GuestConnKey, GuestFlowPhase, SharedGuestNetworkOwner as _,
 };
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 struct Paired {
     c: Composition,
     lease: Lease,

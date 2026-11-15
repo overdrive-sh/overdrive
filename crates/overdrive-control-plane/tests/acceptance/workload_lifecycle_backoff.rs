@@ -32,6 +32,10 @@ use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_store_local::LocalIntentStore;
 use tempfile::TempDir;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// SimDriver-shaped driver that records every `Driver::start` call and
 /// rejects every one with `StartRejected`. Used by the backoff
 /// exhaustion test to count how many start attempts the convergence

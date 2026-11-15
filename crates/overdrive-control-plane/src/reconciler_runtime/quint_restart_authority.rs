@@ -111,6 +111,10 @@ use crate::action_shim::dispatch_with_workflow_intent;
 use crate::guest_network::quint_itf::{self, ItfError, Qualified};
 use crate::view_store::ViewStore;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 const MAIN: &str = "ra_conf";
 const MODULE: &str = "restart_authority";
 const SPEC: &str =

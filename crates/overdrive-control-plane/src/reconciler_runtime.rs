@@ -1895,6 +1895,9 @@ mod quint_liveness_gate;
 #[allow(clippy::expect_used, clippy::unwrap_used)]
 mod tests {
     use super::*;
+    use overdrive_testing::placement;
+
+    placement!(host_pure);
 
     /// A failed Service row of `payments` at attempt 0 (`alloc-payments-0`),
     /// crash-class unless `reason` says otherwise.
@@ -2067,7 +2070,10 @@ mod tests {
         use overdrive_sim::adapters::driver::SimDriver;
         use overdrive_sim::adapters::observation_store::SimObservationStore;
         use overdrive_store_local::LocalIntentStore;
+        use overdrive_testing::placement;
         use tempfile::TempDir;
+
+        placement!(host_pure);
 
         // -------------------------------------------------------------
         // Fixtures
@@ -2716,6 +2722,9 @@ mod tests {
 
         use crate::AppState;
         use crate::reconciler_runtime::{ReconcilerRuntime, hydrate_actual_for_test};
+        use overdrive_testing::placement;
+
+        placement!(host_pure);
 
         const WORKLOAD: &str = "readiness-gate-svc";
         const ALLOC: &str = "readiness-gate-svc-0";
@@ -3168,6 +3177,9 @@ mod tests {
         use crate::reconciler_runtime::{
             ReconcilerRuntime, hydrate_actual_for_test, hydrate_desired_for_test,
         };
+        use overdrive_testing::placement;
+
+        placement!(host_pure);
 
         fn writer_node() -> NodeId {
             NodeId::new("writer-1").expect("valid NodeId")
@@ -3322,6 +3334,9 @@ mod tests {
 
         use crate::reconciler_runtime::ReconcilerRuntime;
         use crate::view_store::{ProbeError, Result as ViewStoreResult, ViewStore};
+        use overdrive_testing::placement;
+
+        placement!(host_pure);
 
         /// Spy `ViewStore` that counts `write_through_bytes` (fsync) calls.
         /// Storage is a no-op — the test observes only whether the durable

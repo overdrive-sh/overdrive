@@ -79,6 +79,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// The production source trees scanned, relative to this crate's manifest
 /// directory. Declarations are found by name anywhere in them.
 const SOURCE_ROOTS: [&str; 2] = ["src", "../overdrive-worker/src"];

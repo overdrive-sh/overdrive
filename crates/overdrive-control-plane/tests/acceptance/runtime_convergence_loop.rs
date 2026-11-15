@@ -52,6 +52,10 @@ use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_store_local::LocalIntentStore;
 use tempfile::TempDir;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// Build an `AppState` whose runtime carries both production reconcilers
 /// (`noop-heartbeat` and `workload-lifecycle`) — matching the `run_server`
 /// boot path. The `SimClock` is held by the caller so the test can

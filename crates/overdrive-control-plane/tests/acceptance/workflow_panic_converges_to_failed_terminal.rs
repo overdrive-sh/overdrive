@@ -63,6 +63,10 @@ use overdrive_sim::adapters::journal::SimJournalStore;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_sim::adapters::transport::SimTransport;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// A workflow whose `async fn run` unconditionally panics — the untrusted
 /// author-code failure mode the engine must contain. The engine must catch
 /// the unwind, converge the instance to `Failed`, and tear down the

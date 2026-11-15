@@ -59,6 +59,10 @@ use overdrive_sim::adapters::observation_store::SimObservationStore;
 
 use crate::acceptance::vm_dispatch::{VmDispatchFixture, VmDispatchPorts};
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 fn alloc_id() -> AllocationId {
     AllocationId::new("alloc-writefail-0").expect("valid alloc id")
 }

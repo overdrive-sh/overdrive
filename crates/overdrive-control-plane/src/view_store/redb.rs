@@ -305,7 +305,10 @@ mod tests {
     use super::*;
 
     use crate::view_store::ViewStoreExt;
+    use overdrive_testing::placement;
     use serde::{Deserialize, Serialize};
+
+    placement!(host_pure);
 
     #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
     struct Counter {

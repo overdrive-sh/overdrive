@@ -15,6 +15,10 @@ use overdrive_control_plane::view_store::{ProbeError, ViewStore, ViewStoreExt};
 use overdrive_core::reconcilers::TargetResource;
 use serde::{Deserialize, Serialize};
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 struct DemoView {
     counter: u64,

@@ -287,6 +287,9 @@ mod tests {
     use super::*;
 
     use overdrive_core::id::ContentHash;
+    use overdrive_testing::placement;
+
+    placement!(host_pure);
 
     fn db() -> (tempfile::TempDir, Arc<Database>) {
         let tmp = tempfile::tempdir().expect("tempdir");

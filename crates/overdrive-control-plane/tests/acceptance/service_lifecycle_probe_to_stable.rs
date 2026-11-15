@@ -71,6 +71,10 @@ use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_sim::adapters::probers::{SimHttpProber, SimTcpProber};
 use overdrive_worker::probe_runner::ProbeRunner;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 fn alloc_id(s: &str) -> AllocationId {
     AllocationId::new(s).expect("alloc id parses")
 }

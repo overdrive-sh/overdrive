@@ -29,6 +29,10 @@ use overdrive_core::traits::ca::CaError;
 use overdrive_core::traits::intent_store::IntentStoreError;
 use overdrive_core::traits::observation_store::ObservationStoreError;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 // ---------------------------------------------------------------------------
 // Variant × response mapping — exhaustive per ADR-0015 Table §3
 // ---------------------------------------------------------------------------

@@ -121,6 +121,10 @@ use super::{
     SharedGuestNetworkOwner,
 };
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// The conformance main and the module that declares the variables.
 const MAIN: &str = "flows_conf";
 const MODULE: &str = "owner_flows";

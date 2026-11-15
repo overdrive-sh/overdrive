@@ -74,6 +74,10 @@ use crate::guest_network::flow_io::sim::{SimEffectKind, SimGuestFlowIo, VsockShu
 use crate::guest_network::{DialObservation, GuestAddressPool, GuestConnKey};
 use crate::guest_network_composition::OwnerDial;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// The VM backend's declared service port.
 const PORT: u16 = 8443;
 /// The server allocation the inbound connection is for (its SVID is held).

@@ -84,6 +84,10 @@ use crate::streaming::{
     ServiceStreamError, ServiceSubmitEvent, build_service_accepted, build_service_stream,
 };
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 const MAIN: &str = "ss_conf";
 const MODULE: &str = "stream_snapshot";
 const WORKLOAD: &str = "ss";

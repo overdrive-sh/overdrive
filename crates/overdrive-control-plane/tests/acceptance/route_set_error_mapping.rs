@@ -8,6 +8,10 @@ use overdrive_control_plane::error::{ControlPlaneError, to_response};
 use overdrive_core::codec::EnvelopeError;
 use overdrive_core::public_ingress::{PublicRouteSetV1, RouteCodecError};
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// A real envelope decode failure, produced by the codec's own public decode.
 fn an_envelope_error() -> EnvelopeError {
     match PublicRouteSetV1::from_store_bytes(&[]) {

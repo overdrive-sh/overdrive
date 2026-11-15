@@ -88,6 +88,10 @@ use super::{
     GUEST_FLOW_MAX_PAIRS_PER_ALLOCATION, GuestConnKey, GuestFlowPhase, HostSharedGuestNetworkOwner,
 };
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 const MAIN: &str = "quota_conf";
 const MODULE: &str = "flow_quota";
 /// The model's `ALLOCS` and `SLOTS`.

@@ -1005,6 +1005,9 @@ mod tests {
     // `Proto::Tcp` — their `10.0.0.x` addrs are outside `10.98.0.0/16` and never
     // in `by_frontend`, so they reach the unchanged arm-3 `by_addr` path.
     use super::*;
+    use overdrive_testing::placement;
+
+    placement!(host_pure);
 
     // ---- test fixtures -----------------------------------------------------
 

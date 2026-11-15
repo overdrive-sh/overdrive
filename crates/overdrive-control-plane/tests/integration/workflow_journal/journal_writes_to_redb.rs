@@ -25,6 +25,10 @@ use overdrive_control_plane::journal::redb::RedbJournalStore;
 use overdrive_control_plane::journal::{JournalCommand, JournalStore, LoadedEntry, WorkflowId};
 use overdrive_core::id::ContentHash;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// The shared `ProvisionRecord` fixture's spec name + start-input bytes,
 /// inlined here (byte-identical to
 /// `overdrive_core::testing::workflow::ProvisionRecord`'s `WORKFLOW_NAME` and

@@ -69,6 +69,10 @@ use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_store_local::LocalIntentStore;
 use tempfile::TempDir;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -825,6 +829,9 @@ mod backend_address {
     };
     use overdrive_core::traits::observation_store::ServiceBackendRow;
     use overdrive_reconcilers::service_lifecycle::ServiceLifecycleView;
+    use overdrive_testing::placement;
+
+    placement!(host_pure);
 
     const LISTENER_PORT: u16 = 8080;
 

@@ -44,6 +44,10 @@ use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_store_local::LocalIntentStore;
 use tempfile::TempDir;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// Probe `Clock` that wraps a `SimClock` and counts every call to
 /// `unix_now()`. Verifies the runtime construction site invokes the
 /// injected Clock's `unix_now` method (not `Instant::now()` /

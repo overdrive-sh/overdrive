@@ -31,6 +31,10 @@ use crate::guest_network::flow_io::PeerProtocol;
 use crate::guest_network::flow_io::sim::{SimEffectKind, SimEffectTarget};
 use crate::guest_network::{AssociationPhase, FlowCloseCause, GuestConnKey};
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// The D26 rule's verdict on a forwarded datagram's transmit (`EPERM`).
 fn eperm() -> KernelErrno {
     KernelErrno::new(1).expect("EPERM is non-zero")

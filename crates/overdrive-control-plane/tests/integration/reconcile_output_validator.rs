@@ -27,6 +27,10 @@ use overdrive_control_plane::action_shim::validate::{
 use overdrive_core::id::{ContentHash, CorrelationKey, ServiceId, ServiceVip};
 use overdrive_core::reconcilers::Action;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 fn correlation(purpose: &str) -> CorrelationKey {
     let hash = ContentHash::of(purpose.as_bytes());
     CorrelationKey::derive("service-map-hydrator/1", &hash, purpose)

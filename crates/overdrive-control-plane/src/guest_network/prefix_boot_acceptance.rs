@@ -70,6 +70,10 @@ use super::{
     probe_guest_flow_startup,
 };
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 // ---------------------------------------------------------------------------
 // Fixture: the production owner over the seam's sim
 // ---------------------------------------------------------------------------

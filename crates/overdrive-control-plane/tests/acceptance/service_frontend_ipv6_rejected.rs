@@ -33,6 +33,10 @@ use overdrive_core::traits::observation_store::{ObservationStore, ServiceHydrati
 use overdrive_core::wall_clock::UnixInstant;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// A dataplane that panics if `update_service` is ever called. The
 /// operator-visible IPv6 rejection MUST short-circuit before reaching
 /// the adapter (ADR-0060 D1a — not a late opaque `DataplaneError`).

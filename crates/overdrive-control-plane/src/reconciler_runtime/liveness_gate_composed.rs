@@ -28,6 +28,10 @@ use overdrive_reconcilers::RESTART_BACKOFF_CEILING;
 use super::liveness_gate_fixture::{LivenessWorld, is_stable, run_to_give_up};
 use super::probe_count_fixture::{ProbeSet, RunOutcome};
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 fn is_liveness_stop(terminal: Option<&TerminalCondition>) -> bool {
     matches!(terminal, Some(TerminalCondition::Stopped { by: StoppedBy::LivenessProbe }))
 }

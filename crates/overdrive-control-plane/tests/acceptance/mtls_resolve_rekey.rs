@@ -32,6 +32,10 @@ use overdrive_core::traits::dataplane::Backend;
 use overdrive_core::traits::mtls_resolve::{MtlsResolution, ResolvedBackend};
 use proptest::prelude::*;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 // ---------------------------------------------------------------------------
 // Strategies + fixtures.
 // ---------------------------------------------------------------------------

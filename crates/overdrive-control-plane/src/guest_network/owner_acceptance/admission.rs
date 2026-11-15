@@ -40,6 +40,10 @@ use crate::guest_network::{
     SharedGuestNetworkOwner,
 };
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 fn attaches(c: &Composition) -> usize {
     c.io.issued_count(SimEffectKind::Attach)
 }

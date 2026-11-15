@@ -554,6 +554,9 @@ fn is_addr_in_use(err: &std::io::Error) -> bool {
 #[cfg(test)]
 mod tests {
     use super::DnsResponderError;
+    use overdrive_testing::placement;
+
+    placement!(host_pure);
 
     /// Each [`DnsResponderError`] variant maps to its OWN
     /// `health.startup.refused` reason — the four reasons are distinct, so a

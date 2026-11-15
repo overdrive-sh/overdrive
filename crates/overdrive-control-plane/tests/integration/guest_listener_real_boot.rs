@@ -68,6 +68,10 @@ use overdrive_testing::guest_kit::{GuestImage, GuestImageSpec, GuestKit};
 use overdrive_testing::vm_fixture::default_staging_root;
 use tempfile::TempDir;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// Guest RAM of every lane VM.
 const LANE_VM_MEMORY_BYTES: u64 = 128 * 1024 * 1024;
 /// Bound on a VM reaching Running.

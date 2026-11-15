@@ -78,6 +78,10 @@ use crate::guest_network::{
 };
 use crate::shared_network_test_ports::worker_over;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 const LISTEN_PORT: u16 = 8080;
 const DESTINATION: SocketAddrV4 = SocketAddrV4::new(Ipv4Addr::new(198, 51, 100, 9), 443);
 /// Bounded scheduler polls for the already-observable pre-activation state.

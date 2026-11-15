@@ -77,6 +77,10 @@ use tempfile::TempDir;
 
 use crate::acceptance::vm_dispatch::{VmDispatchFixture, VmDispatchPorts};
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// A TCP descriptor at the given per-role array position (ADR-0080
 /// § D1 — `idx` is per-role, parser-assigned).
 fn tcp_descriptor(role: ProbeRole, idx: u32, port: u16) -> ProbeDescriptor {

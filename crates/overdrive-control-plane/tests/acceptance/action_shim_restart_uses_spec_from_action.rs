@@ -42,6 +42,10 @@ use overdrive_sim::adapters::observation_store::SimObservationStore;
 
 use crate::acceptance::vm_dispatch::{VmDispatchFixture, VmDispatchPorts};
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// Recording fake driver. Captures every `AllocationSpec` passed to
 /// `start()` so the test can assert on what the shim actually
 /// dispatched.

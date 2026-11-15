@@ -416,6 +416,9 @@ mod tests {
     use overdrive_core::reconcilers::Action;
 
     use super::{ReconcilerOutputViolation, WriteRoute, validate_reconcile_output};
+    use overdrive_testing::placement;
+
+    placement!(host_pure);
 
     fn correlation(purpose: &str) -> CorrelationKey {
         let hash = ContentHash::of(purpose.as_bytes());
