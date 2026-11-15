@@ -77,3 +77,6 @@ anyhow.workspace = true
 # dev-dependency enters no build-time chain, so the bootstrap rule that bars
 # `overdrive-*` from `[dependencies]` is unaffected).
 overdrive-testing-macros.workspace = true
+# The guest placement form expands to `::overdrive_testing::placement` calls; a
+# dev-dependency only, and no crate in its normal/build graph has a `build.rs`.
+overdrive-testing.workspace = true

@@ -497,6 +497,21 @@ fn runtime_placement_preserves_the_reviewed_partition_and_declares_new_acceptanc
         {
             continue;
         }
+        // A guest test that declares exactly its reviewed group on itself has no table row.
+        if runtime["placements"][row["binary_id"].as_str().expect("binary")]
+            [row["test_name"].as_str().expect("name")]
+        .is_null()
+            && row["descriptor"]["kind"] == "guest-group"
+            && declares_on_the_test(
+                row,
+                &format!(
+                    "#[overdrive_test(guest = \"{}\")]",
+                    row["descriptor"]["group"].as_str().expect("guest group")
+                ),
+            )
+        {
+            continue;
+        }
         assert_eq!(
             runtime["placements"][row["binary_id"].as_str().expect("binary")]
                 [row["test_name"].as_str().expect("name")],
@@ -573,6 +588,7 @@ fn sad_actual_verification_read_failure_preserves_its_step_and_errno() {
 /// CONTRACT_SHAPE: bounded-change (observes only the selected disposable kernel
 /// and its actual nextest profile context; a raw-host fallback fails before effects).
 #[test]
+#[overdrive_test(guest = "core")]
 #[ignore = "external Metal acceptance fixture: deliberate selected body status 255"]
 fn selected_guest_body_uses_its_own_kernel_in_existing_profiles() {
     use std::io::Write as _;

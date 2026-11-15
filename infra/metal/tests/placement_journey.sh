@@ -95,7 +95,7 @@ for owner in json.load(open(sys.argv[1]))['owners'].values():
 PY_TIMEOUT
 run_case guest-execution-failure 100 run -- env "RUST_LOG=metal_host_boot_id=$host_boot_id" cargo nextest run --manifest-path infra/metal/tests/fixtures/attempt/Cargo.toml --target-dir target/metal-run-isolation-fixture --run-ignored only -E 'test(selected_attempt_resets_its_guest)' --no-capture
 rg -q 'METAL-ISOLATION-RESET guest_boot_id=.* resetting=true' "$out/guest-execution-failure.stdout"
-rg -q 'OVERDRIVE_METAL_TEST_ERROR error=guest_execution_failed' "$out/guest-execution-failure.stdout"
+rg -q 'guest group "core" could not run selected_attempt_resets_its_guest' "$out/guest-execution-failure.stdout"
 rg -q 'guest peer.*control connection|VMM.*exited' "$out/guest-execution-failure.stdout"
 for profile in default ci; do
   run_case "profile-$profile" 100 run -- env "RUST_LOG=metal_host_boot_id=$host_boot_id" cargo nextest run -p xtask --test acceptance --features integration-tests --profile "$profile" --run-ignored only -E 'test(=acceptance::metal_run_isolation::placement::selected_guest_body_uses_its_own_kernel_in_existing_profiles)' --no-capture

@@ -1,10 +1,12 @@
 //! Exact selected ELF/helper/attempt environment and real guest-kernel oracle.
 //! The external tooling acceptance driver expects the intentional 255/timeout.
+use overdrive_testing::overdrive_test;
 use std::io::Write as _;
 
 /// CONTRACT_SHAPE: bounded-change (this fresh guest body observes only its own
 /// kernel/env/helper process; physical host and other attempts are complements).
 #[test]
+#[overdrive_test(guest = "core")]
 #[ignore = "external Metal acceptance fixture: deliberate body status 255"]
 fn selected_environment_and_status() {
     let host = std::env::var("RUST_LOG").expect("external driver supplied host boot ID");
@@ -36,6 +38,7 @@ fn selected_environment_and_status() {
 /// CONTRACT_SHAPE: bounded-change (guest process deliberately exceeds the existing
 /// nextest timeout; the owning invocation must end descendants and owned roots).
 #[test]
+#[overdrive_test(guest = "core")]
 #[ignore = "external Metal acceptance fixture: deliberate nextest timeout"]
 fn selected_attempt_waits_for_its_timeout() {
     let source = std::env::var("RUST_LOG").expect("external physical host identity");
@@ -52,6 +55,7 @@ fn selected_attempt_waits_for_its_timeout() {
 /// CONTRACT_SHAPE: bounded-change (only this positively identified disposable
 /// guest resets; its real peer/VMM error must reach the existing execution adapter).
 #[test]
+#[overdrive_test(guest = "core")]
 #[ignore = "external Metal acceptance fixture: deliberate guest reset during exec"]
 fn selected_attempt_resets_its_guest() {
     let host = std::env::var("RUST_LOG").expect("external host boot identity");

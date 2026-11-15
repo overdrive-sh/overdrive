@@ -160,7 +160,14 @@ pub(crate) fn run_isolated_guest(
     test_name: &str,
 ) -> Result<(), RunInGuestError> {
     let program = exe.to_string_lossy().into_owned();
-    let args = ["--exact".to_owned(), test_name.to_owned(), NO_CAPTURE.to_owned()];
+    // The host half runs only because nextest selected this test, so an
+    // `#[ignore]`d body it selected (`--run-ignored`) must run in the guest too.
+    let args = [
+        "--exact".to_owned(),
+        test_name.to_owned(),
+        NO_CAPTURE.to_owned(),
+        "--include-ignored".to_owned(),
+    ];
     let binary_id = std::env::var("NEXTEST_BINARY_ID").unwrap_or_default();
     let named = |detail: String| (group.to_owned(), test_name.to_owned(), detail);
     let attempt =
@@ -200,8 +207,6 @@ const GUEST_LANE_ELF_ENV: &str = "OVERDRIVE_FWD_GUEST_NEXTTEST_ELF";
 const TEST_THREADS: &str = "--test-threads=1";
 const NO_CAPTURE: &str = "--nocapture";
 const ABSENT_LOOPBACK: &str = "integration::probe_gold::an_absent_vsock_loopback_transport_is_refused_naming_stream_round_trip";
-const PROBE_PEER_RESET: &str =
-    "integration::probe_gold::a_peer_reset_where_a_clean_end_is_expected_is_refused";
 const HEALTHY_PROBE: &str = "integration::probe_gold::the_probe_passes_and_leaves_no_residue_on_a_correctly_provisioned_node";
 const ULP: &str =
     "integration::unload_in_guest::a_ulp_socket_keeps_the_module_for_the_boot_in_a_real_guest";
@@ -4339,7 +4344,6 @@ fn nextest_guest_plan(
     support_dir: &Path,
     group: &str,
     environment: AttemptEnvironment,
-    test_name: &str,
 ) -> Result<Option<NextestGuestPlan>, GuestKitError> {
     let standard = |name, cid, extra, module_paths, memory_mib, vcpus| NextestGuestPlan {
         name,
@@ -4355,13 +4359,6 @@ fn nextest_guest_plan(
         nested: false,
     };
     let plan = match group {
-        // The peer-reset cell installs an nft reject rule; the guest has no
-        // /lib/modules, so stage the module closure the reviewed `core` batch
-        // ran it under. The other probe cells keep the bare probe guest.
-        "probe" if test_name == PROBE_PEER_RESET => {
-            let (extra, module_paths) = core_attempt_files(kit, support_dir)?;
-            standard("probe", 7, extra, module_paths, STANDARD_OUTER_GUEST_MIB, 2)
-        }
         "probe" => standard("probe", 7, base_tools(), Vec::new(), STANDARD_OUTER_GUEST_MIB, 2),
         "core" => {
             let (extra, module_paths) = core_attempt_files(kit, support_dir)?;
@@ -4698,7 +4695,7 @@ fn boot_group_guest(
     } else {
         AttemptEnvironment::of_profile(group, profile)?
     };
-    let Some(mut plan) = nextest_guest_plan(&kit, support.path(), group, selected, test_name)
+    let Some(mut plan) = nextest_guest_plan(&kit, support.path(), group, selected)
         .map_err(|error| NextestDispatchFailure::GuestExecution(format!("{error:?}")))?
     else {
         return Err(NextestDispatchFailure::LaneNotPrepared(format!(
@@ -4831,7 +4828,13 @@ impl SharedGuest {
             let console = guest.guest.vm.console();
             console.get(console_before..).unwrap_or(&console).to_owned()
         };
-        let args = ["--exact".to_owned(), request.test_name.to_owned(), NO_CAPTURE.to_owned()];
+        // A selected `#[ignore]`d body (`--run-ignored`) must run in the guest too.
+        let args = [
+            "--exact".to_owned(),
+            request.test_name.to_owned(),
+            NO_CAPTURE.to_owned(),
+            "--include-ignored".to_owned(),
+        ];
         let working_directory = request.working_directory.display().to_string();
         let result = self
             .guest
@@ -5247,7 +5250,13 @@ pub(crate) fn run_lane_guest(
 ) -> Result<(), RunInGuestError> {
     let lane_kind = if placement.is_owner() { "guest-lane-owner" } else { "guest-lane-operator" };
     let program = exe.to_string_lossy().into_owned();
-    let args = ["--exact".to_owned(), test_name.to_owned(), NO_CAPTURE.to_owned()];
+    // A selected `#[ignore]`d body (`--run-ignored`) must run in the guest too.
+    let args = [
+        "--exact".to_owned(),
+        test_name.to_owned(),
+        NO_CAPTURE.to_owned(),
+        "--include-ignored".to_owned(),
+    ];
     let binary_id = std::env::var("NEXTEST_BINARY_ID").unwrap_or_default();
     match run_guest_lane(lane_kind, placement.fixture(), &program, &args, &binary_id, test_name) {
         Ok(0) => Ok(()),

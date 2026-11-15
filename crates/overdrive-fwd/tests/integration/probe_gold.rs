@@ -111,6 +111,7 @@ fn an_absent_vsock_loopback_transport_is_refused_naming_stream_round_trip() {
 }
 
 #[test]
+#[overdrive_test(guest = "core")]
 fn a_peer_reset_where_a_clean_end_is_expected_is_refused() {
     // In a private network namespace every TCP FIN on loopback is rejected
     // with a reset, so a TCP end the probe expects to be clean arrives as a

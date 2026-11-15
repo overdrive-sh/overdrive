@@ -8923,12 +8923,6 @@
         "kind": "host-pure"
       }
     },
-    "overdrive-fwd::integration": {
-      "integration::probe_gold::a_peer_reset_where_a_clean_end_is_expected_is_refused": {
-        "kind": "guest-group",
-        "group": "probe"
-      }
-    },
     "overdrive-fwd-frame-parser-test::differential": {
       "arbitrary_buffers_and_split_points_agree_with_the_rust_codec": {
         "kind": "host-pure"
@@ -14386,10 +14380,6 @@
       "acceptance::metal_run_isolation::placement::sad_actual_verification_read_failure_preserves_its_step_and_errno": {
         "kind": "host-pure"
       },
-      "acceptance::metal_run_isolation::placement::selected_guest_body_uses_its_own_kernel_in_existing_profiles": {
-        "kind": "guest-group",
-        "group": "core"
-      },
       "acceptance::metal_run_isolation::qualification::sad_each_existing_native_prerequisite_has_the_exact_probe_and_retained_cause": {
         "kind": "host-pure"
       }
@@ -14515,20 +14505,6 @@
       },
       "metal_qualification_tests::metal_run_rejects_virtualized_or_unusable_kvm_hosts": {
         "kind": "host-pure"
-      }
-    },
-    "metal-run-isolation-attempt-fixture::attempt": {
-      "selected_environment_and_status": {
-        "kind": "guest-group",
-        "group": "core"
-      },
-      "selected_attempt_waits_for_its_timeout": {
-        "kind": "guest-group",
-        "group": "core"
-      },
-      "selected_attempt_resets_its_guest": {
-        "kind": "guest-group",
-        "group": "core"
       }
     }
   }

@@ -4998,6 +4998,7 @@ dependencies = [
  "hex",
  "itf",
  "libc",
+ "overdrive-testing",
  "overdrive-testing-macros",
  "proc-macro2",
  "proptest",

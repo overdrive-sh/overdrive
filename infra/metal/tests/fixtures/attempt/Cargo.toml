@@ -10,3 +10,7 @@ publish = false
 [[bin]]
 name = "metal-run-isolation-helper"
 path = "src/main.rs"
+
+[dev-dependencies]
+# Placement declaration on the fixture bodies (`#[overdrive_test(guest = "core")]`).
+overdrive-testing = { path = "../../../../../crates/overdrive-testing" }
