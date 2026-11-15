@@ -2,8 +2,8 @@
 //! `#[overdrive_test]` (the module form, reading the module's `shared_guest!`
 //! declaration), `#[overdrive_test(host_pure)]`, `#[overdrive_test(native_launcher)]`,
 //! `#[overdrive_test(guest = "<group>" [, profile = "<profile>"])]`,
-//! `#[overdrive_test(lane_operator =
-//! "<fixture>")]`, `#[overdrive_test(lane_owner = "<fixture>")]`,
+//! `#[overdrive_test(lane_operator = "<fixture>")]`,
+//! `#[overdrive_test(lane_owner = "<fixture>", host = <path::to::fn>)]`,
 //! `placement!(host_pure)` and `overdrive_test_default!(host_pure)`.
 //!
 //! The macros are re-exported as `overdrive_testing::{overdrive_test,
@@ -70,6 +70,17 @@
 //! table entry, so a test is placed only by an explicit declaration. The lane
 //! kinds `lane_operator` and `lane_owner` carry the fixture as their one
 //! argument; `native_launcher` carries none.
+//!
+//! # The owner lane's host script
+//!
+//! `lane_owner` takes a required `host = <path::to::fn>`: the scripted host
+//! peer of the cell, a `fn(&mut OwnerLaneHost) -> Result<(), String>` (the
+//! alias `overdrive_testing::placement::OwnerHostScript`). The expansion
+//! passes it to `LanePlacement::owner`, so the host half runs that function
+//! against the cell's guest; the placement record is unchanged (the script is
+//! code, not a record field). `host` is a build error on `lane_operator` and on
+//! every other form, and `lane_owner` without it is a build error naming the
+//! argument.
 
 use proc_macro::TokenStream;
 use proc_macro2::{Span, TokenStream as TokenStream2};
@@ -99,8 +110,8 @@ const SHARED_GUEST_DECLARATION: &str =
 /// `#[overdrive_test(native_launcher)]`,
 /// `#[overdrive_test(guest = "<group>" [, profile = "<profile>"])]`,
 /// `#[overdrive_test(lane_operator = "<fixture>")]` and
-/// `#[overdrive_test(lane_owner = "<fixture>")]`. Any other argument is a build
-/// error.
+/// `#[overdrive_test(lane_owner = "<fixture>", host = <path::to::fn>)]`. Any
+/// other argument is a build error.
 #[proc_macro_attribute]
 pub fn overdrive_test(attribute: TokenStream, item: TokenStream) -> TokenStream {
     let attribute: TokenStream2 = attribute.into();
@@ -117,16 +128,21 @@ pub fn overdrive_test(attribute: TokenStream, item: TokenStream) -> TokenStream 
 }
 
 /// The build error for an argument list no form of `macro_name` accepts.
-/// `shared` names the declaration that owns sharing; anything else is reported
-/// as unrecognised.
+/// `shared` names the declaration that owns sharing, and `host` the argument
+/// that only `lane_owner` takes; anything else is reported as unrecognised.
 fn unrecognised_argument(attribute: &TokenStream2, macro_name: &str) -> syn::Error {
-    let shared = attribute.clone().into_iter().find_map(|token| match token {
-        proc_macro2::TokenTree::Ident(ident) if ident == "shared" => Some(ident.span()),
+    let named = attribute.clone().into_iter().find_map(|token| match token {
+        proc_macro2::TokenTree::Ident(ident) if ident == "shared" => {
+            Some((ident.span(), "sharing is declared by `shared_guest!`"))
+        }
+        proc_macro2::TokenTree::Ident(ident) if ident == "host" => {
+            Some((ident.span(), "`host` is an argument of `lane_owner` only"))
+        }
         _ => None,
     });
-    shared.map_or_else(
+    named.map_or_else(
         || syn::Error::new(attribute.span(), format!("unrecognised argument to {macro_name}")),
-        |span| syn::Error::new(span, "sharing is declared by `shared_guest!`"),
+        |(span, message)| syn::Error::new(span, message),
     )
 }
 
@@ -236,6 +252,8 @@ enum Declaration {
     Lane {
         owner: bool,
         fixture: LitStr,
+        /// The `host = <path>` argument, validated against `owner` on expansion.
+        host: Option<syn::Path>,
     },
 }
 
@@ -247,24 +265,52 @@ impl Declaration {
         if let Some(guest) = Self::parse_guest(attribute) {
             return Some(guest);
         }
+        if let Some(lane) = Self::parse_lane(attribute) {
+            return Some(lane);
+        }
         let meta: Meta = syn::parse2(attribute.clone()).ok()?;
         match meta {
             Meta::Path(path) if path.is_ident("host_pure") => Some(Self::HostPure),
             Meta::Path(path) if path.is_ident("native_launcher") => Some(Self::NativeLauncher),
-            Meta::NameValue(pair) => {
-                let Expr::Lit(ExprLit { lit: Lit::Str(value), .. }) = pair.value else {
-                    return None;
-                };
-                if pair.path.is_ident("lane_operator") {
-                    Some(Self::Lane { owner: false, fixture: value })
-                } else if pair.path.is_ident("lane_owner") {
-                    Some(Self::Lane { owner: true, fixture: value })
-                } else {
-                    None
-                }
-            }
             _ => None,
         }
+    }
+
+    /// `lane_operator = "<fixture>"` or `lane_owner = "<fixture>"`, with an
+    /// optional `host = <path>` in either order, each at most once and exactly
+    /// one lane key. Whether `host` fits the lane key is checked on expansion,
+    /// where the error can name the argument.
+    fn parse_lane(attribute: &TokenStream2) -> Option<Self> {
+        let pairs = Punctuated::<MetaNameValue, Token![,]>::parse_terminated
+            .parse2(attribute.clone())
+            .ok()?;
+        let mut lane: Option<(bool, LitStr)> = None;
+        let mut host = None;
+        for pair in pairs {
+            if pair.path.is_ident("host") {
+                let Expr::Path(path) = pair.value else {
+                    return None;
+                };
+                if host.replace(path.path).is_some() {
+                    return None;
+                }
+                continue;
+            }
+            let owner = if pair.path.is_ident("lane_owner") {
+                true
+            } else if pair.path.is_ident("lane_operator") {
+                false
+            } else {
+                return None;
+            };
+            let Expr::Lit(ExprLit { lit: Lit::Str(value), .. }) = pair.value else {
+                return None;
+            };
+            if lane.replace((owner, value)).is_some() {
+                return None;
+            }
+        }
+        lane.map(|(owner, fixture)| Self::Lane { owner, fixture, host })
     }
 
     /// `guest = "<group>"` with an optional `profile = "<profile>"` in either
@@ -349,23 +395,44 @@ impl Declaration {
                 guard_body(&mut function, &name.to_string(), &hand_off);
                 Ok(quote!(#function #record))
             }
-            Self::Lane { owner, fixture } => {
+            Self::Lane { owner, fixture, host } => {
                 require_unit_return(&function)?;
                 require_lane_fixture(fixture)?;
                 let kind = if *owner { "lane_owner" } else { "lane_operator" };
                 let record = record_item(&item, &quote!(#kind), &test, &[quote!(#fixture)]);
-                let constructor = format_ident!("{}", if *owner { "owner" } else { "operator" });
+                let placement = lane_placement(*owner, fixture, host.as_ref())?;
                 let hand_off = quote! {
-                    ::overdrive_testing::placement::run_lane(
-                        &::overdrive_testing::placement::LanePlacement::#constructor(#fixture),
-                        &exe,
-                        test_name,
-                    )
+                    ::overdrive_testing::placement::run_lane(&#placement, &exe, test_name)
                 };
                 guard_body(&mut function, &name.to_string(), &hand_off);
                 Ok(quote!(#function #record))
             }
         }
+    }
+}
+
+/// The `LanePlacement` expression of a lane form: the owner side names its
+/// host script, the operator side has none.
+fn lane_placement(
+    owner: bool,
+    fixture: &LitStr,
+    host: Option<&syn::Path>,
+) -> syn::Result<TokenStream2> {
+    match (owner, host) {
+        (true, Some(host)) => Ok(quote! {
+            ::overdrive_testing::placement::LanePlacement::owner(#fixture, #host)
+        }),
+        (true, None) => Err(syn::Error::new(
+            fixture.span(),
+            "`lane_owner` requires `host = <path::to::fn>`, the cell's host script",
+        )),
+        (false, Some(host)) => Err(syn::Error::new(
+            host.span(),
+            "`host` is an argument of `lane_owner`; `lane_operator` has no host script",
+        )),
+        (false, None) => Ok(quote! {
+            ::overdrive_testing::placement::LanePlacement::operator(#fixture)
+        }),
     }
 }
 

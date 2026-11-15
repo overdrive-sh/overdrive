@@ -53,6 +53,7 @@ use overdrive_core::net::ListenPort;
 use overdrive_testing::guest_kit::TC_GUEST_PATH;
 use overdrive_testing::overdrive_test;
 
+use super::lane_host;
 use super::test_support::{ACCEPT_PATH_CASES, AcceptPathCase};
 use crate::transport::{GuestTransportToken, parse_transport_token};
 
@@ -1346,7 +1347,8 @@ fn run_correlation_case(
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
 #[overdrive_test(
-    lane_owner = "integration::in_guest_lane::tcp_correlation_preserves_identity_and_cleanup_in_a_real_guest"
+    lane_owner = "integration::in_guest_lane::tcp_correlation_preserves_identity_and_cleanup_in_a_real_guest",
+    host = lane_host::tcp_correlation
 )]
 fn tcp_correlation_preserves_exact_identity_and_cleans_transients_for_every_handshake_path() {
     let token = in_guest();
@@ -1751,7 +1753,8 @@ fn assert_v24_shape(v_g: &mut File) {
 /// CONTRACT_SHAPE: pure-function.
 #[test]
 #[overdrive_test(
-    lane_owner = "integration::in_guest_lane::the_v24_kernel_shape_holds_in_a_real_guest"
+    lane_owner = "integration::in_guest_lane::the_v24_kernel_shape_holds_in_a_real_guest",
+    host = lane_host::v24_kernel_shape
 )]
 fn the_v24_kernel_shape_holds_in_both_accept_orders() {
     let _token = in_guest();
@@ -1785,7 +1788,8 @@ fn the_v24_kernel_shape_holds_in_both_accept_orders() {
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
 #[overdrive_test(
-    lane_owner = "integration::in_guest_lane::a_host_abort_before_the_guest_accepts_ends_the_flow_in_a_real_guest"
+    lane_owner = "integration::in_guest_lane::a_host_abort_before_the_guest_accepts_ends_the_flow_in_a_real_guest",
+    host = lane_host::abort_before_accept
 )]
 fn a_flow_aborted_before_its_v_g_is_accepted_ends_with_no_application_connection() {
     let mut cell = OwnerCell::start();
@@ -1804,7 +1808,8 @@ fn a_flow_aborted_before_its_v_g_is_accepted_ends_with_no_application_connection
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
 #[overdrive_test(
-    lane_owner = "integration::in_guest_lane::a_session_loss_abort_ends_the_flow_and_the_owner_reconnects_in_a_real_guest"
+    lane_owner = "integration::in_guest_lane::a_session_loss_abort_ends_the_flow_and_the_owner_reconnects_in_a_real_guest",
+    host = lane_host::session_loss
 )]
 fn a_flow_aborted_by_session_loss_ends_and_the_session_is_held_again() {
     let mut cell = OwnerCell::start();
@@ -1827,7 +1832,8 @@ fn a_flow_aborted_by_session_loss_ends_and_the_session_is_held_again() {
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
 #[overdrive_test(
-    lane_owner = "integration::in_guest_lane::a_host_close_after_the_guest_accepted_ends_the_flow_in_a_real_guest"
+    lane_owner = "integration::in_guest_lane::a_host_close_after_the_guest_accepted_ends_the_flow_in_a_real_guest",
+    host = lane_host::close_after_accept
 )]
 fn a_flow_the_host_closes_after_the_guest_accepted_it_ends_on_the_guest() {
     let mut cell = OwnerCell::start();
@@ -1891,7 +1897,8 @@ fn a_flow_the_host_closes_after_the_guest_accepted_it_ends_on_the_guest() {
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
 #[overdrive_test(
-    lane_owner = "integration::in_guest_lane::an_abort_for_an_unheld_flow_is_discarded_in_a_real_guest"
+    lane_owner = "integration::in_guest_lane::an_abort_for_an_unheld_flow_is_discarded_in_a_real_guest",
+    host = lane_host::unheld_abort
 )]
 fn an_abort_for_a_flow_the_guest_does_not_hold_changes_nothing_and_the_flow_ends_on_the_close() {
     let mut cell = OwnerCell::start();
@@ -1919,7 +1926,8 @@ fn an_abort_for_a_flow_the_guest_does_not_hold_changes_nothing_and_the_flow_ends
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
 #[overdrive_test(
-    lane_owner = "integration::in_guest_lane::a_burst_of_host_aborts_resets_every_connection_in_a_real_guest"
+    lane_owner = "integration::in_guest_lane::a_burst_of_host_aborts_resets_every_connection_in_a_real_guest",
+    host = lane_host::burst_abort
 )]
 #[expect(clippy::print_stdout, reason = "R5-31's abort-to-reset latency is reported, not asserted")]
 fn a_burst_of_host_aborts_resets_every_application_connection() {

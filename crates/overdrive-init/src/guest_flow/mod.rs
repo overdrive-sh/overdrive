@@ -35,6 +35,10 @@ mod quint_itf;
 mod quint_owner_flows;
 #[cfg(all(test, feature = "integration-tests"))]
 mod quint_udp_slots;
+// The host-side scripts of the owner-lane cells; the in-guest lane fixtures
+// include the same file by `#[path]`.
+#[cfg(all(test, feature = "integration-tests", feature = "kvm-tests"))]
+mod lane_host;
 // In-guest real-kernel cells (D-UP-18): the native metal microVM lane only.
 #[cfg(all(test, feature = "integration-tests", feature = "kvm-tests"))]
 mod real_kernel;

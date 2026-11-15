@@ -34,6 +34,7 @@
 )]
 
 use std::fs;
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -45,8 +46,7 @@ use crate::guest_kit::{
     LOOPBACK_MODULE_GUEST_PATH, ScriptedBootExtra, WorkDir, host_module_file,
 };
 use crate::guest_lane::{
-    INIT_GUEST_LANE_PLACEMENTS, InGuestTests, lane_attempt, run_guest_lane_owner_script,
-    run_in_guest_cell_attempt, run_in_guest_owner_cell_attempt,
+    InGuestTests, lane_attempt, run_in_guest_cell_attempt, run_in_guest_owner_cell_attempt,
 };
 use crate::placement::LanePlacement;
 use crate::placement::groups::QUINT_PROFILE;
@@ -2560,37 +2560,123 @@ impl SharedGuest {
     }
 }
 
-/// Runs the lane guest of `fixture` for `test_name` of the test binary `program`
-/// (the nextest ELF, re-run in the guest with `args`) and returns the body's
-/// exit status; for an owner-side lane the fixture's host script also runs.
+/// Write end of the self-pipe the termination-signal handler wakes.
+static TERMINATION_PIPE: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(-1);
+
+extern "C" fn note_termination_signal(signal: libc::c_int) {
+    let fd = TERMINATION_PIPE.load(std::sync::atomic::Ordering::Relaxed);
+    let byte = u8::try_from(signal).unwrap_or(u8::MAX);
+    // SAFETY: `write(2)` is async-signal-safe; `fd` is the pipe write end
+    // opened before the handler was installed and never closed.
+    unsafe { libc::write(fd, (&raw const byte).cast(), 1) };
+}
+
+fn install_termination_console() -> std::io::Result<()> {
+    let mut fds = [0 as libc::c_int; 2];
+    // SAFETY: `fds` is a two-element array as `pipe2(2)` requires.
+    if unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) } != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    let [read_fd, write_fd] = fds;
+    TERMINATION_PIPE.store(write_fd, std::sync::atomic::Ordering::Relaxed);
+    for signal in [libc::SIGTERM, libc::SIGINT, libc::SIGHUP, libc::SIGQUIT] {
+        // SAFETY: the handler is async-signal-safe (one `write(2)`).
+        let handler = note_termination_signal as *const () as libc::sighandler_t;
+        let previous = unsafe { libc::signal(signal, handler) };
+        if previous == libc::SIG_ERR {
+            return Err(std::io::Error::last_os_error());
+        }
+    }
+    std::thread::Builder::new().name("termination-console".to_owned()).spawn(move || {
+        let mut byte = 0_u8;
+        loop {
+            // SAFETY: `byte` is one writable byte and `read_fd` is the pipe read end.
+            let read = unsafe { libc::read(read_fd, (&raw mut byte).cast(), 1) };
+            if read == 1 {
+                break;
+            }
+            if read < 0 && std::io::Error::last_os_error().kind() != std::io::ErrorKind::Interrupted
+            {
+                return;
+            }
+        }
+        let consoles = crate::guest_kit::live_consoles();
+        let mut stderr = std::io::stderr().lock();
+        if consoles.is_empty() {
+            let _ = writeln!(
+                stderr,
+                "OVERDRIVE_GUEST_TERMINATED signal={byte}; this test process holds no guest"
+            );
+        }
+        for path in consoles {
+            let console = match fs::read(&path) {
+                Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
+                Err(error) => format!("guest console {} unreadable: {error}", path.display()),
+            };
+            let _ = writeln!(
+                stderr,
+                "OVERDRIVE_GUEST_TERMINATED signal={byte}; guest console at termination:\n{console}"
+            );
+        }
+        let _ = stderr.flush();
+        std::process::exit(128 + i32::from(byte));
+    })?;
+    Ok(())
+}
+
+/// Prints the console of every guest this process holds when Nextest ends the
+/// test with a termination signal, then exits with the signal's conventional
+/// status.
 ///
-/// The fixture is looked up first, so an unknown fixture is refused by name
-/// before anything is staged or started.
+/// A test whose host half waits on its guest has no deadline of its own, so a
+/// hung test is ended by Nextest's SIGTERM, which would otherwise discard the
+/// guest console with the run. The signal handler only wakes a thread through
+/// a pipe; that thread reads the consoles the guest kit has registered. Called
+/// by the host half of the guest, lane and shared placements; installed once
+/// per process.
+///
+/// # Errors
+///
+/// [`RunInGuestError::GuestExecution`] when the pipe or a signal handler could not be installed.
+pub(crate) fn retain_console_on_termination(
+    group: &str,
+    test_name: &str,
+) -> Result<(), RunInGuestError> {
+    static INSTALLED: std::sync::OnceLock<Result<(), String>> = std::sync::OnceLock::new();
+    INSTALLED
+        .get_or_init(|| install_termination_console().map_err(|error| error.to_string()))
+        .clone()
+        .map_err(|error| RunInGuestError::GuestExecution {
+            group: group.to_owned(),
+            test: test_name.to_owned(),
+            detail: format!("could not install the termination console handler: {error}"),
+        })
+}
+
+/// The guest-id slot every lane guest boots in. A lane test runs in its own
+/// process, and the Metal wrapper gives that process its own network namespace
+/// in vsock `local` mode, so its CID space is the test's alone: no two lane
+/// guests share a CID space, and one slot serves them all.
+const LANE_GUEST_SLOT: u32 = 0;
+
+/// Runs the lane guest of `placement` for `test_name` of the test binary
+/// `program` (the nextest ELF, re-run in the guest with `args`) and returns the
+/// body's exit status; for an owner-side lane the placement's host script also
+/// runs.
+///
+/// The binary is checked first, so a placement bound to the wrong binary is
+/// refused by fixture and test name before anything is staged or started.
 fn run_guest_lane(
-    lane_kind: &str,
-    fixture: &str,
+    placement: &LanePlacement,
     program: &str,
     args: &[String],
     binary_id: &str,
     test_name: &str,
 ) -> Result<i32, NextestDispatchFailure> {
-    let Some(placement) =
-        INIT_GUEST_LANE_PLACEMENTS.iter().find(|placement| placement.fixture == fixture)
-    else {
-        return Err(NextestDispatchFailure::LaneNotPrepared(format!(
-            "no guest-lane fixture {fixture:?} is known to the guest kit"
-        )));
-    };
-    if placement.kind != lane_kind || placement.test != test_name {
-        return Err(NextestDispatchFailure::LaneNotPrepared(format!(
-            "the guest-lane fixture {fixture:?} is {kind:?} for {expected:?}, not {lane_kind:?} for {test_name:?}",
-            kind = placement.kind,
-            expected = placement.test,
-        )));
-    }
+    let fixture = placement.fixture();
     if binary_id != "overdrive-init::bin/overdrive-init" {
         return Err(NextestDispatchFailure::LaneNotPrepared(format!(
-            "guest-lane placement is bound to overdrive-init::bin/overdrive-init, got {binary_id:?}"
+            "the guest-lane placement of {test_name:?} (fixture {fixture:?}) is bound to overdrive-init::bin/overdrive-init, got {binary_id:?}"
         )));
     }
     let environment = nextest_environment()?;
@@ -2602,29 +2688,34 @@ fn run_guest_lane(
     })?;
     let staging = default_staging_root();
     let kit = GuestKit::provision(&staging).map_err(|error| lane_failure(&error))?;
-    let work = WorkDir::create(&staging, &format!("nextest-init-lane-{}", placement.slot))
+    let work = WorkDir::create(&staging, "nextest-init-lane")
         .map_err(|error| NextestDispatchFailure::GuestExecution(format!("{error:?}")))?;
     let tests = InGuestTests { binary };
     let attempt =
         lane_attempt(&tests, program, args.to_vec()).map_err(|error| lane_failure(&error))?;
-    let cid = INIT_IN_GUEST_LANE.raw(placement.slot);
-    let (status, console, host_result) = if placement.kind == "guest-lane-operator" {
-        run_in_guest_cell_attempt(&kit, &tests, test_name, cid, work.path(), Some(&attempt))
-            .map(|run| (run.exit_status, run.console, None))
-    } else {
-        run_in_guest_owner_cell_attempt(
-            &kit,
-            &tests,
-            test_name,
-            cid,
-            work.path(),
-            512,
-            Some(&attempt),
-            |host| run_guest_lane_owner_script(fixture, host),
+    let cid = INIT_IN_GUEST_LANE.raw(LANE_GUEST_SLOT);
+    let (status, console, host_result) = placement
+        .host_script()
+        .map_or_else(
+            || {
+                run_in_guest_cell_attempt(&kit, &tests, test_name, cid, work.path(), Some(&attempt))
+                    .map(|run| (run.exit_status, run.console, None))
+            },
+            |script| {
+                run_in_guest_owner_cell_attempt(
+                    &kit,
+                    &tests,
+                    test_name,
+                    cid,
+                    work.path(),
+                    512,
+                    Some(&attempt),
+                    script,
+                )
+                .map(|(run, host_result)| (run.exit_status, run.console, Some(host_result)))
+            },
         )
-        .map(|(run, host_result)| (run.exit_status, run.console, Some(host_result)))
-    }
-    .map_err(|error| lane_failure(&error))?;
+        .map_err(|error| lane_failure(&error))?;
     if status != 0 {
         eprintln!("{console}");
         return Ok(status);
@@ -2636,7 +2727,7 @@ fn run_guest_lane(
     }
     if let Some(Err(error)) = host_result {
         return Err(NextestDispatchFailure::GuestExecution(format!(
-            "existing host script for {fixture:?} failed: {error}; guest console:\n{console}"
+            "host script of {test_name:?} (fixture {fixture:?}) failed: {error}; guest console:\n{console}"
         )));
     }
     Ok(0)
@@ -2659,7 +2750,9 @@ pub(crate) fn run_lane_guest(
     exe: &Path,
     test_name: &str,
 ) -> Result<(), RunInGuestError> {
-    let lane_kind = if placement.is_owner() { "guest-lane-owner" } else { "guest-lane-operator" };
+    let lane_kind =
+        if placement.host_script().is_some() { "guest-lane-owner" } else { "guest-lane-operator" };
+    retain_console_on_termination(lane_kind, test_name)?;
     let program = exe.to_string_lossy().into_owned();
     // A selected `#[ignore]`d body (`--run-ignored`) must run in the guest too.
     let args = [
@@ -2669,7 +2762,7 @@ pub(crate) fn run_lane_guest(
         "--include-ignored".to_owned(),
     ];
     let binary_id = std::env::var("NEXTEST_BINARY_ID").unwrap_or_default();
-    match run_guest_lane(lane_kind, placement.fixture(), &program, &args, &binary_id, test_name) {
+    match run_guest_lane(placement, &program, &args, &binary_id, test_name) {
         Ok(0) => Ok(()),
         Ok(status) => Err(RunInGuestError::BodyFailed {
             group: lane_kind.to_owned(),

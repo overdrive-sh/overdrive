@@ -699,12 +699,14 @@ impl GuestKit {
             });
             *recorded.lock().unwrap_or_else(PoisonError::into_inner) = Some(ended);
         });
+        let console_key = register_live_console(&console);
         Ok(GuestKitVm {
             vmm,
             control: Some(process.control),
             exit,
             cid: boot.cid,
             console,
+            console_key,
             _runtime: runtime,
         })
     }
@@ -809,8 +811,30 @@ pub struct GuestKitVm {
     exit: Arc<Mutex<Option<VmmExit>>>,
     cid: u32,
     console: PathBuf,
+    /// The key of this guest's entry in the process's live-console registry.
+    console_key: u64,
     /// Owns the short runtime path until the VMM has been terminated.
     _runtime: WorkDir,
+}
+
+/// The console files of the guests this process holds, by registry key.
+static LIVE_CONSOLES: Mutex<Vec<(u64, PathBuf)>> = Mutex::new(Vec::new());
+
+fn register_live_console(console: &Path) -> u64 {
+    static NEXT_KEY: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let key = NEXT_KEY.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    LIVE_CONSOLES.lock().unwrap_or_else(PoisonError::into_inner).push((key, console.to_owned()));
+    key
+}
+
+/// The console files of the guests this process holds now, in boot order.
+pub(crate) fn live_consoles() -> Vec<PathBuf> {
+    LIVE_CONSOLES
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .iter()
+        .map(|(_, console)| console.clone())
+        .collect()
 }
 
 impl std::fmt::Debug for GuestKitVm {
@@ -940,6 +964,10 @@ impl GuestKitVm {
 
 impl Drop for GuestKitVm {
     fn drop(&mut self) {
+        LIVE_CONSOLES
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .retain(|(key, _)| *key != self.console_key);
         if let Some(control) = self.control.take() {
             let vmm = self.vmm.clone();
             let _ =

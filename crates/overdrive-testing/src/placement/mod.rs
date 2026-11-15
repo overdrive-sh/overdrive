@@ -36,7 +36,7 @@ pub mod owner_core;
 mod shared;
 
 pub use crate::guest_suite::{RunInGuestError, inside_guest};
-pub use groups::{GuestGroup, GuestPlacement, LanePlacement, Sharing};
+pub use groups::{GuestGroup, GuestPlacement, LanePlacement, OwnerHostScript, Sharing};
 
 /// True when any of `OVERDRIVE_METAL_RUN_ID`, `OVERDRIVE_METAL_EXECUTION_CLASS`,
 /// `OVERDRIVE_METAL_SOURCE_ROOT` is set and non-empty: the wrapper's own
@@ -71,6 +71,7 @@ pub fn run_in_guest(
     exe: &Path,
     test_name: &str,
 ) -> Result<(), RunInGuestError> {
+    crate::guest_suite::retain_console_on_termination(placement.group, test_name)?;
     match placement.sharing {
         Sharing::Isolated => crate::guest_suite::run_isolated_guest(
             placement.group,
@@ -130,7 +131,7 @@ pub fn attach_shared(
 ///
 /// The lane guest runs the in-guest body (the test binary itself) as the
 /// guest's operator command. For an owner-side placement the host also plays
-/// the scripted peer the placement's fixture names.
+/// the placement's host script against the cell.
 ///
 /// Preconditions: the caller has found [`in_metal_run`] true and
 /// [`inside_guest`] false, and the guest kit and the in-guest lane binary are
@@ -138,9 +139,9 @@ pub fn attach_shared(
 ///
 /// # Errors
 ///
-/// [`RunInGuestError::LaneNotPrepared`] when the fixture is not one the guest
-/// kit knows (the detail names it, and nothing is started), when the placement
-/// does not match the test, or when the lane's artifacts are not prepared;
+/// [`RunInGuestError::LaneNotPrepared`] when the test binary is not the lane's
+/// binary (the detail names the fixture and the test, and nothing is started)
+/// or when the lane's artifacts are not prepared;
 /// [`RunInGuestError::GuestExecution`] when the guest cannot run to completion
 /// or its host script fails; [`RunInGuestError::BodyFailed`] when the body
 /// exits unsuccessfully inside the guest.

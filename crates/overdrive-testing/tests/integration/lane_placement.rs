@@ -1,8 +1,15 @@
 //! US-PLACE-03 at the library's driving port: a lane placement that names a
 //! fixture its provider does not have fails naming the fixture and the test.
 
+use overdrive_testing::guest_lane::OwnerLaneHost;
 use overdrive_testing::overdrive_test;
 use overdrive_testing::placement::{LanePlacement, RunInGuestError, run_lane};
+
+/// The host script of the placement under test; the refusal comes before any
+/// guest starts, so it never runs (and fails if it does).
+fn no_host_script(_host: &mut OwnerLaneHost) -> Result<(), String> {
+    Err("the refusal comes before the host script runs".to_owned())
+}
 
 /// CONTRACT_SHAPE: pure-function (a placement in, a typed failure out; no guest
 /// is left behind). Placement on activation: `#[overdrive_test(native_launcher)]`
@@ -13,7 +20,7 @@ fn a_lane_test_naming_a_missing_fixture_fails_naming_the_fixture_and_the_test() 
     let exe = std::env::current_exe().expect("this test binary");
     let fixture = "integration::in_guest_lane::a_fixture_nobody_wrote";
     let test = "integration::lane_placement::a_lane_test_that_cannot_run";
-    let outcome = run_lane(&LanePlacement::owner(fixture), &exe, test);
+    let outcome = run_lane(&LanePlacement::owner(fixture, no_host_script), &exe, test);
     let error = outcome.expect_err("a lane without its fixture does not pass");
     // An unknown fixture is refused before any guest starts: the lane's context
     // is not prepared for it, so it is `LaneNotPrepared` (not a guest that ran

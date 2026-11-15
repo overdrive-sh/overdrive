@@ -9,6 +9,8 @@
     reason = "the placement surface keeps the design's signatures"
 )]
 
+use crate::guest_lane::OwnerLaneHost;
+
 /// The eight guest groups. Informative: the contract is the group name
 /// strings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -191,22 +193,37 @@ impl GuestPlacement {
     }
 }
 
-/// A lane placement: the in-guest fixture a lane test is driven by.
+/// The scripted host peer of an owner-side lane cell: it plays the node against
+/// the cell's guest through the [`OwnerLaneHost`] and reports the first step
+/// that failed.
+pub type OwnerHostScript = fn(&mut OwnerLaneHost) -> Result<(), String>;
+
+/// Which side of the guest the host plays in a lane.
+#[derive(Debug, Clone, Copy)]
+enum LaneRole {
+    /// The host plays the node beacon only.
+    Operator,
+    /// The host also plays the cell's scripted peer.
+    Owner(OwnerHostScript),
+}
+
+/// A lane placement: the in-guest fixture a lane test is driven by, and, on the
+/// owner side, the host script the cell is played against.
 #[derive(Debug, Clone, Copy)]
 pub struct LanePlacement {
     fixture: &'static str,
-    owner: bool,
+    role: LaneRole,
 }
 
 impl LanePlacement {
     /// The operator-side lane placement of `fixture`.
     pub const fn operator(fixture: &'static str) -> Self {
-        Self { fixture, owner: false }
+        Self { fixture, role: LaneRole::Operator }
     }
 
-    /// The owner-side lane placement of `fixture`.
-    pub const fn owner(fixture: &'static str) -> Self {
-        Self { fixture, owner: true }
+    /// The owner-side lane placement of `fixture`, played against `host`.
+    pub const fn owner(fixture: &'static str, host: OwnerHostScript) -> Self {
+        Self { fixture, role: LaneRole::Owner(host) }
     }
 
     /// The in-guest fixture this placement names.
@@ -214,9 +231,12 @@ impl LanePlacement {
         self.fixture
     }
 
-    /// Whether this is the owner-side placement (the host runs the fixture's
-    /// script against the cell) rather than the operator-side one.
-    pub(crate) const fn is_owner(&self) -> bool {
-        self.owner
+    /// The host script of an owner-side placement; `None` for the operator
+    /// side.
+    pub(crate) const fn host_script(&self) -> Option<OwnerHostScript> {
+        match self.role {
+            LaneRole::Operator => None,
+            LaneRole::Owner(host) => Some(host),
+        }
     }
 }

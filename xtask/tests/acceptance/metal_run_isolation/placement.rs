@@ -342,13 +342,15 @@ fn in_attribute_block(line: &str) -> bool {
 }
 
 /// Whether a lane or native-launcher test carries the declaration that places
-/// it for exactly the reviewed row: `#[overdrive_test(lane_owner = "<fixture>")]`
+/// it for exactly the reviewed row: `#[overdrive_test(lane_owner = "<fixture>", host = <script>)]`
 /// or `lane_operator` for the reviewed fixture, `#[overdrive_test(native_launcher)]`
 /// for a native launcher. A test placed on itself has no table row.
 fn declares_the_reviewed_lane_or_launcher_on_the_test(row: &Value) -> bool {
     let declaration = match row["placement"].as_str().expect("kind") {
+        // An owner lane names its host script after the fixture
+        // (`, host = <path>)`), so the declaration is matched up to it.
         "guest-lane-owner" => format!(
-            "#[overdrive_test(lane_owner = \"integration::in_guest_lane::{}\")]",
+            "#[overdrive_test(lane_owner = \"integration::in_guest_lane::{}\", host =",
             row["context"].as_str().expect("fixture")
         ),
         "guest-lane-operator" => format!(
