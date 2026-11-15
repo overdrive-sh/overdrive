@@ -68,6 +68,10 @@ use rcgen::{
 };
 use x509_parser::prelude::FromDer;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// A validity window straddling the current wall-clock: `not_before` 60 s in
 /// the past, `not_after` ~1 h in the future. The window now rides on the
 /// `SvidRequest` (ADR-0063 rev 2 amendment) — production threads it from

@@ -143,6 +143,9 @@ mod tests {
     use proptest::prelude::*;
 
     use super::*;
+    use overdrive_testing::placement;
+
+    placement!(host_pure);
 
     // Classic-BPF opcode fields (UAPI `linux/bpf_common.h`), restated here so
     // the evaluator is an oracle independent of the builder's constants.

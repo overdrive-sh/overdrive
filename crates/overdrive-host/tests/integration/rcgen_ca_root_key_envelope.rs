@@ -29,6 +29,10 @@ use overdrive_core::traits::ca::CaError;
 use overdrive_host::ca::RootKeyAeadCodec;
 use rcgen::KeyPair;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// In-memory [`Kek`] provider for the L3 codec tests — maps `KekId` → raw
 /// 256-bit material. The production provider (`SystemdCredsKeyring` over the
 /// Linux kernel keyring) is a later slice; this fixture is NOT a production

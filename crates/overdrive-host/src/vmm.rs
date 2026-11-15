@@ -1014,6 +1014,9 @@ mod tests {
     };
 
     use super::*;
+    use overdrive_testing::placement;
+
+    placement!(host_pure);
 
     /// The probe stages in their accepted order (FD § "[REF] Driven port — VMM launch seccomp filter (D-295-R22) — ACCEPTED 2026-09-24" (the startup probe order)): R2 removes
     /// `ip`, and D-295-R22 inserts `launch-seccomp` after `setpriv`.

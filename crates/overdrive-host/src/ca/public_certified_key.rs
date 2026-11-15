@@ -199,6 +199,9 @@ mod acceptance {
     };
 
     use super::*;
+    use overdrive_testing::placement;
+
+    placement!(host_pure);
 
     struct FixedKek;
 

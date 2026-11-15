@@ -19,6 +19,10 @@ use overdrive_core::traits::cgroup_accounting::{CgroupAccounting, CgroupAccounti
 use overdrive_host::RealCgroupAccounting;
 use overdrive_sim::SimCgroupAccounting;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// Well-formed `memory.events` content carrying a non-zero `oom_kill`
 /// counter — the healthy-substrate fixture shared by both adapters'
 /// read-once assertions.
