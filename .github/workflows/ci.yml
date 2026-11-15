@@ -410,6 +410,13 @@ jobs:
         if: steps.sccache-setup.outcome != 'success'
         run: echo "::warning::sccache setup failed; building without compiler cache. Expected during GHA cache backend outages."
 
+      # `cargo xtask lima run` compiles and runs xtask on the HOST runner, and
+      # .cargo/config.toml links x86_64 Linux with `-fuse-ld=mold`; without
+      # mold the host link fails with "collect2: cannot find 'ld'". Every other
+      # step in this job runs inside the Lima VM (which ships mold).
+      - name: Install mold linker (host xtask build)
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends mold
+
       - name: Build and load forwarder module
         run: |
           cargo xtask lima run -- cargo xtask kmod-build
