@@ -25,12 +25,10 @@
 
 name: Nightly
 
+# The schedule is disabled for the same reason as ci.yml: hosted runners
+# cannot provide the kernel, KVM and vhost-vsock the suite needs. This
+# workflow can still be started by hand.
 on:
-  schedule:
-    # 03:13 UTC — off-peak for US/EU runner pools; the 13-minute offset
-    # prevents piling up against the top-of-hour cron wave that other
-    # projects tend to use.
-    - cron: '13 3 * * *'
   workflow_dispatch:
 
 permissions:

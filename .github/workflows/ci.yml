@@ -43,11 +43,11 @@
 
 name: CI
 
+# Automatic runs are disabled: GitHub's hosted runners cannot provide the
+# pinned 7.0 kernel, KVM and vhost-vsock the integration, BPF and perf lanes
+# need. Run the suite on the native metal host (`cargo xtask metal run --`);
+# this workflow can still be started by hand.
 on:
-  pull_request:
-    branches: [main]
-  push:
-    branches: [main]
   workflow_dispatch:
 
 # Kill stale runs on force-push. Every run of the critical path rebuilds
