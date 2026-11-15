@@ -94,6 +94,9 @@ mod properties {
     use proptest::prelude::*;
 
     use super::*;
+    use overdrive_testing::placement;
+
+    placement!(host_pure);
 
     const CLIENT: Ipv4Addr = Ipv4Addr::new(203, 0, 113, 9);
     const FORWARDED_VALUE: &str = "for=203.0.113.9;proto=https;host=\"api.example.com\"";

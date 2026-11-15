@@ -76,6 +76,9 @@ mod properties {
     use proptest::prelude::*;
 
     use super::*;
+    use overdrive_testing::placement;
+
+    placement!(host_pure);
 
     fn host_headers(value: &str) -> HeaderMap {
         let mut headers = HeaderMap::new();

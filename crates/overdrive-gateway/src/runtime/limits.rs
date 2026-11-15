@@ -123,6 +123,9 @@ impl GatewayLimits {
 #[cfg(test)]
 mod properties {
     use super::*;
+    use overdrive_testing::placement;
+
+    placement!(host_pure);
 
     /// S-PIG-17: `first_slice` returns exactly the DESIGN's fixed values, they
     /// are finite, the whole-request deadline exceeds every phase deadline,

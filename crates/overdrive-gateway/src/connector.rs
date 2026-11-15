@@ -309,6 +309,9 @@ mod acceptance {
         GatewayConnectCleanup, GatewayConnectCleanupSweep, GatewayConnectIntent,
         GatewaySelectionReceipt, KtlsArmError, PreparedUpstream,
     };
+    use overdrive_testing::placement;
+
+    placement!(host_pure);
 
     const SELECTED_PEER: &str = "spiffe://overdrive.local/workload/api/alloc/api-0";
     const OTHER_PEER: &str = "spiffe://overdrive.local/workload/other/alloc/other-0";

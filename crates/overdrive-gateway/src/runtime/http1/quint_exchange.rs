@@ -68,6 +68,10 @@ use super::exchange::{
     BodyFraming, Disposition, ExchangeMachine, ExchangePhase, Remaining, ResponseState, Side,
 };
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// The conformance main this driver replays.
 const MAIN: &str = "relay_conf";
 /// The module that declares the compared variables.

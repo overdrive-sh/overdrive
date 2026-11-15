@@ -876,6 +876,9 @@ mod acceptance {
     use zeroize::Zeroizing;
 
     use super::*;
+    use overdrive_testing::placement;
+
+    placement!(host_pure);
 
     /// Inside the validity interval of every generated certificate.
     const VALID_NOW_UNIX_SECONDS: u64 = 1_893_456_000;

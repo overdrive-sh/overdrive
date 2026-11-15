@@ -334,6 +334,9 @@ mod laws {
     use proptest::prelude::*;
 
     use super::*;
+    use overdrive_testing::placement;
+
+    placement!(host_pure);
 
     // -----------------------------------------------------------------
     // Generators and the reference vocabulary

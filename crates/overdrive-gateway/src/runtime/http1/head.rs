@@ -484,6 +484,9 @@ mod laws {
 
     use super::*;
     use crate::runtime::proxy_headers::rewrite_request_headers;
+    use overdrive_testing::placement;
+
+    placement!(host_pure);
 
     // -----------------------------------------------------------------
     // Wire builders and thin adapters over the pinned functions

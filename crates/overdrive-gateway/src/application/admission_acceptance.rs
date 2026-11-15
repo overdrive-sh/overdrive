@@ -14,6 +14,10 @@ use std::sync::atomic::Ordering;
 
 use super::*;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 fn budget() -> Arc<GatewayAdmissionBudget> {
     GatewayAdmissionBudget::new(Arc::new(GatewayLimits::first_slice()))
 }
