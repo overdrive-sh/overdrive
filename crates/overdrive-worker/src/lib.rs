@@ -59,6 +59,12 @@ use std::sync::Arc;
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::observation_store::ObservationStore;
 
+#[cfg(test)]
+use overdrive_testing::overdrive_test_default;
+
+#[cfg(test)]
+overdrive_test_default!(host_pure);
+
 /// Worker-startup boundary per ADR-0029.
 ///
 /// Performs every step the worker subsystem needs to "be started"

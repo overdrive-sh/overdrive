@@ -8,6 +8,10 @@
 #![allow(clippy::expect_used)]
 #![allow(clippy::unwrap_used)]
 
+use overdrive_testing::overdrive_test_default;
+
+overdrive_test_default!(host_pure);
+
 mod acceptance {
     // Shared `VmDriver` beacon-intake / guest-transport fixtures (GH #295
     // vsock attachment cut): the simulated guest side of the node beacon
