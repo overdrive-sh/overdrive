@@ -209,8 +209,9 @@ against the implementation and compares state after every step.
 - **A missing production API is a DESIGN gap. Do not gate it out.**
   Drivers compile under `integration-tests` like every other integration
   test. A driver whose activating DELIVER step has not landed stays compiled
-  and is marked `#[ignore = "pending DELIVER <step>"]`, per § "RED acceptance
-  scaffolds and activation". Never wrap a driver in `#![cfg(any())]`,
+  and is marked pending with `#[should_panic(expected = "<its semantic RED>")]`,
+  per § "RED acceptance scaffolds and activation", so it is proven RED on every
+  run. Never wrap a driver in `#![cfg(any())]`,
   `#[cfg(any())]`, `cfg(not(all()))`, `cfg(false)`, or any other always-false
   predicate. Such a gate turns the file into an empty compilation unit, so
   `cargo check` stays green while the body references types that do not exist
@@ -264,7 +265,8 @@ item, and cites the line that establishes it:
    `#[cfg(all(test, feature = "integration-tests"))]`, or in
    `tests/conformance` when it spans several owners; its only gate is
    `integration-tests`. No always-false `cfg` appears anywhere in the file. A driver that is not
-   yet active carries a reasoned `#[ignore = "pending DELIVER <step>"]`.
+   yet active is marked pending with `#[should_panic(expected = …)]` naming its
+   semantic RED.
 2. The driver struct holds the production owner, or the production
    composition that contains it, as a field. A driver whose fields are only
    `Sim*` adapters and maps has nothing to drive.
@@ -660,13 +662,15 @@ driving-port calls, assertions, state-delta universes, and paired property
 tests. A test whose body only calls `panic!("Not yet implemented ...")` is not
 an authored acceptance test and must not be handed to DELIVER.
 
-Future roadmap scenarios may remain inactive so that DELIVER can execute one
-RED → GREEN → COMMIT cycle at a time. In Rust, retain the complete executable
-body and mark it with a reasoned ignore naming the activating step:
+Future roadmap scenarios may stay pending so that DELIVER can execute one
+RED → GREEN → COMMIT cycle at a time. A pending test must still be **proven
+RED**: it runs in its lane on every run and fails for the reason it asserts.
+In Rust, retain the complete executable body and mark it `#[should_panic]`
+with an `expected` substring of the failure the body produces today:
 
 ```rust
 #[test]
-#[ignore = "pending DELIVER step 02-03"]
+#[should_panic(expected = "service map hit did not rewrite the destination")]
 fn service_map_hit_returns_xdp_tx_with_rewritten_headers() {
     let before = observe_service_map();
     drive_service_map_hit();
@@ -675,21 +679,27 @@ fn service_map_hit_returns_xdp_tx_with_rewritten_headers() {
 }
 ```
 
+**Prefer `#[should_panic]` over `#[ignore]` for pending tests.** An ignored
+test never runs, so nothing shows it is RED, or that it still compiles into a
+failure for the right reason. A `should_panic` test runs every time: while the
+behaviour is missing it passes because the body fails as expected, and once
+the behaviour exists the body stops panicking and the test fails, which flags
+the pending marker for removal. The `expected` substring is the semantic RED:
+it must name the assertion that fails, not a generic placeholder, so a body
+that panics for an unrelated reason (a fixture error, a missing setup step)
+does not count as RED.
+
 The crafter removes only the pending marker, runs the pre-authored body, and
-records a semantic RED before changing production code. The crafter must not
-write, replace, weaken, or complete the acceptance-test body. A missing body,
-fixture, oracle, or testability boundary routes back to the acceptance designer;
-it is not implementation work.
+confirms the semantic RED before changing production code. The crafter must
+not write, replace, weaken, or complete the acceptance-test body. A missing
+body, fixture, oracle, or testability boundary routes back to the acceptance
+designer; it is not implementation work. Do not commit an activated failing
+test by itself: RED and GREEN belong to the same roadmap-step delivery cycle,
+and the step commit lands only after the acceptance test is GREEN.
 
-Do not use `#[should_panic(expected = "RED scaffold")]` to make a placeholder
-test pass. `#[should_panic]` remains valid only when panic behavior itself is
-the completed contract under test. Do not commit an activated failing test by
-itself: RED and GREEN belong to the same roadmap-step delivery cycle, and the
-step commit lands only after the acceptance test is GREEN.
-
-Every `#[ignore]` carries a reason naming its DELIVER step or genuinely missing
-external resource. Discovery of unfinished acceptance work is therefore based
-on reasoned pending markers plus the roadmap, not on placeholder panics.
+Use `#[ignore]` only when the test cannot run in its lane at all, because an
+external resource it needs is genuinely missing. Every `#[ignore]` carries a
+reason naming that resource.
 
 Production scaffolds are permitted only when their exact API shape is already
 authorized by the accepted design. Never introduce a method, type, variant,
