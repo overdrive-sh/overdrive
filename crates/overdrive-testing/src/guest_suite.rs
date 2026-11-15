@@ -132,31 +132,41 @@ pub(crate) fn run_isolated_guest(
     test_name: &str,
 ) -> Result<(), RunInGuestError> {
     let program = exe.to_string_lossy().into_owned();
-    // The host half runs only because nextest selected this test, so an
-    // `#[ignore]`d body it selected (`--run-ignored`) must run in the guest too.
-    let args = [
+    let args = selected_test_args(test_name);
+    let binary_id = std::env::var("NEXTEST_BINARY_ID").unwrap_or_default();
+    let attempt =
+        GroupAttempt { group, profile, program: &program, args: &args, binary_id: &binary_id };
+    attempt_outcome(group, test_name, run_nextest_group_attempt(&attempt, test_name))
+}
+
+/// The argv that re-runs exactly `test_name` in a guest. The host half runs
+/// only because nextest selected the test, so an `#[ignore]`d body it selected
+/// (`--run-ignored`) must run in the guest too.
+fn selected_test_args(test_name: &str) -> [String; 4] {
+    [
         "--exact".to_owned(),
         test_name.to_owned(),
         NO_CAPTURE.to_owned(),
         "--include-ignored".to_owned(),
-    ];
-    let binary_id = std::env::var("NEXTEST_BINARY_ID").unwrap_or_default();
-    let named = |detail: String| (group.to_owned(), test_name.to_owned(), detail);
-    let attempt =
-        GroupAttempt { group, profile, program: &program, args: &args, binary_id: &binary_id };
-    match run_nextest_group_attempt(&attempt, test_name) {
+    ]
+}
+
+/// Projects a guest attempt's result onto the placement outcome: a zero exit is
+/// success, any other status a failed body, and a dispatch failure keeps its
+/// refusal-versus-execution split.
+fn attempt_outcome(
+    group: &str,
+    test_name: &str,
+    outcome: Result<i32, NextestDispatchFailure>,
+) -> Result<(), RunInGuestError> {
+    let (group, test) = (group.to_owned(), test_name.to_owned());
+    match outcome {
         Ok(0) => Ok(()),
-        Ok(status) => Err(RunInGuestError::BodyFailed {
-            group: group.to_owned(),
-            test: test_name.to_owned(),
-            status,
-        }),
+        Ok(status) => Err(RunInGuestError::BodyFailed { group, test, status }),
         Err(NextestDispatchFailure::LaneNotPrepared(detail)) => {
-            let (group, test, detail) = named(detail);
             Err(RunInGuestError::LaneNotPrepared { group, test, detail })
         }
         Err(NextestDispatchFailure::GuestExecution(detail)) => {
-            let (group, test, detail) = named(detail);
             Err(RunInGuestError::GuestExecution { group, test, detail })
         }
     }
@@ -211,7 +221,7 @@ const STEP13_06_NFT_MODULES: &[(&str, &str)] = &[
     ("net/netfilter/nft_fib", "/lib/overdrive-testing/modules/nft_fib.ko"),
     ("net/ipv4/netfilter/nft_fib_ipv4", "/lib/overdrive-testing/modules/nft_fib_ipv4.ko"),
 ];
-/// Host tools every `cgroup-default` guest stages, batched or per-test. The
+/// Host tools every `cgroup-default` guest stages. The
 /// guests boot `serve`, whose shared mTLS nft program is installed
 /// unconditionally, and the bodies that inspect it shell out to `nft`; this is
 /// the single definition, alongside the module closure below.
@@ -234,8 +244,8 @@ const NETNS_VAR_RUN_COMPAT: &str = "set -eu; mkdir -p /var /run/netns; test ! -e
 /// Every `cgroup-default` guest boots `serve`, whose always-installed shared
 /// mTLS nft program needs the `nf_tables` core, veth, TLS, and the complete
 /// tproxy / reject / fib expression closure. The guest has no `/lib/modules`,
-/// so nothing autoloads: this is the single definition both the batched and
-/// the per-test attempts stage, unconditionally for the group.
+/// so nothing autoloads: this is the single definition every attempt stages,
+/// unconditionally for the group.
 fn cgroup_default_module_specs() -> Vec<(&'static str, &'static str)> {
     let mut specs = NESTED_DEVICE_MODULES.to_vec();
     specs.extend([
@@ -341,9 +351,8 @@ fi
 exec "$@"
 "#;
 /// The one group whose guests run `serve`, which requires the raised
-/// `RLIMIT_NOFILE` budget. SSOT for both the batched and per-test paths.
+/// `RLIMIT_NOFILE` budget. SSOT for the attempt paths.
 const CGROUP_DEFAULT_GROUP: &str = "cgroup-default";
-const DECLARED_LISTENER_TCP_CAPTURE_TEST: &str = "integration::inbound_rules_only_for_tcp_declared_listeners::a_udp_declared_listener_gets_no_inbound_capture_and_a_tcp_one_does";
 /// Argv prefix that raises `RLIMIT_NOFILE` and then execs the remaining argv.
 const fn cgroup_nofile_prefix() -> [&'static str; 4] {
     ["/usr/bin/sh", "-c", CGROUP_NOFILE_EXEC, CGROUP_DEFAULT_GROUP]
@@ -1894,7 +1903,7 @@ fn prepare_nested_attempt(guest: &mut GuestRun) -> Result<(), GuestKitError> {
     guest.command(&["/usr/bin/sh", "-c", CGROUP_CONTROLLERS])?;
     guest.command(&["/usr/bin/sh", "-c", NETNS_VAR_RUN_COMPAT])?;
     // XFS was loaded explicitly above for losetup. Preserve it in the shared
-    // staged module list used by the batch owner, while avoiding a second
+    // staged module list used by the group, while avoiding a second
     // load in this per-test path. Load the remaining modules before changing
     // the nested device-node permissions, as `run_nested_boundary` does.
     let modules = std::mem::take(&mut guest.module_paths)
@@ -1915,7 +1924,6 @@ fn prepare_nested_attempt(guest: &mut GuestRun) -> Result<(), GuestKitError> {
 
 fn run_cgroup_attempt_setup(
     guest: &mut GuestRun,
-    test_name: &str,
     environment: AttemptEnvironment,
 ) -> Result<(), GuestKitError> {
     let modules = guest.module_paths.clone();
@@ -1926,13 +1934,7 @@ fn run_cgroup_attempt_setup(
     // node's interface set (the node-qualification readbacks require `lo`
     // only), not merely for the bodies that later create their own sink.
     guest.command(&["/usr/bin/sh", "-c", DUMMY_AUTO_DEVICE_CLEANUP])?;
-    if test_name == DECLARED_LISTENER_TCP_CAPTURE_TEST {
-        guest.command(&[
-            "/usr/bin/sh",
-            "-c",
-            "set -eu; /usr/bin/nft --version; /usr/bin/uname -r",
-        ])?;
-    }
+    guest.command(&["/usr/bin/sh", "-c", "set -eu; /usr/bin/nft --version; /usr/bin/uname -r"])?;
     guest.command(&["/usr/bin/chmod", "0660", "/dev/kvm", "/dev/vhost-vsock"])?;
     guest.command(&[
         "/usr/bin/stat",
@@ -2181,7 +2183,6 @@ fn guest_attempt_files(
 fn prepare_nextest_guest(
     guest: &mut GuestRun,
     plan: &mut NextestGuestPlan,
-    test_name: &str,
 ) -> Result<(), GuestKitError> {
     if plan.nested {
         prepare_nested_attempt(guest)?;
@@ -2197,7 +2198,7 @@ fn prepare_nextest_guest(
         }
         Ok(())
     } else if plan.cgroup {
-        run_cgroup_attempt_setup(guest, test_name, plan.environment)
+        run_cgroup_attempt_setup(guest, plan.environment)
     } else if plan.setup_mtls_native {
         guest.command_with_modules(&plan.mtls_native_paths, "/usr/bin/true", &[])?;
         setup_dataplane_native_guest(guest)?;
@@ -2354,7 +2355,8 @@ struct BootedGroupGuest {
 }
 
 /// Stages the selected binary and the group's files, boots a guest of the
-/// group and runs the group's boot-time setup for `test_name`.
+/// group and runs the group's boot-time setup; `test_name` names the test in
+/// staging errors.
 fn boot_group_guest(
     attempt: &GroupAttempt<'_>,
     environment: &[(String, String)],
@@ -2369,13 +2371,7 @@ fn boot_group_guest(
     let source_root =
         PathBuf::from(std::env::var("OVERDRIVE_METAL_SOURCE_ROOT").unwrap_or_default());
     let staging = default_staging_root();
-    let kit = GuestKit::provision(&staging).map_err(|error| {
-        if matches!(error, GuestKitError::LaneNotPrepared { .. }) {
-            NextestDispatchFailure::LaneNotPrepared(format!("{error:?}"))
-        } else {
-            NextestDispatchFailure::GuestExecution(format!("{error:?}"))
-        }
-    })?;
+    let kit = GuestKit::provision(&staging).map_err(|error| kit_failure(&error))?;
     let support = WorkDir::create(&staging, &format!("nextest-{group}-support"))
         .map_err(|error| NextestDispatchFailure::GuestExecution(format!("{error:?}")))?;
     let selected = AttemptEnvironment::of_profile(group, profile)?;
@@ -2400,7 +2396,7 @@ fn boot_group_guest(
     )
     .map_err(|error| NextestDispatchFailure::GuestExecution(format!("{error:?}")))?;
     let booted = started.elapsed();
-    prepare_nextest_guest(&mut guest, &mut plan, test_name)
+    prepare_nextest_guest(&mut guest, &mut plan)
         .map_err(|error| NextestDispatchFailure::GuestExecution(format!("{error:?}")))?;
     // The guest image contains the selected ELF and nextest helpers, not the
     // host checkout tree. Materialize only Nextest's exact selected CWD so the
@@ -2566,9 +2562,16 @@ static TERMINATION_PIPE: std::sync::atomic::AtomicI32 = std::sync::atomic::Atomi
 extern "C" fn note_termination_signal(signal: libc::c_int) {
     let fd = TERMINATION_PIPE.load(std::sync::atomic::Ordering::Relaxed);
     let byte = u8::try_from(signal).unwrap_or(u8::MAX);
-    // SAFETY: `write(2)` is async-signal-safe; `fd` is the pipe write end
-    // opened before the handler was installed and never closed.
-    unsafe { libc::write(fd, (&raw const byte).cast(), 1) };
+    // SAFETY: `__errno_location` and `write(2)` are async-signal-safe; `fd` is
+    // the pipe write end opened before the handler was installed and never
+    // closed. `errno` is restored so the interrupted code never sees the
+    // write's failure.
+    unsafe {
+        let errno = libc::__errno_location();
+        let saved = *errno;
+        libc::write(fd, (&raw const byte).cast(), 1);
+        *errno = saved;
+    }
 }
 
 fn install_termination_console() -> std::io::Result<()> {
@@ -2659,6 +2662,10 @@ pub(crate) fn retain_console_on_termination(
 /// guests share a CID space, and one slot serves them all.
 const LANE_GUEST_SLOT: u32 = 0;
 
+/// The package whose test binaries hold the in-guest lane cells; the package
+/// segment of a nextest binary id (`<package>::<binary>`).
+const LANE_PACKAGE: &str = "overdrive-init";
+
 /// Runs the lane guest of `placement` for `test_name` of the test binary
 /// `program` (the nextest ELF, re-run in the guest with `args`) and returns the
 /// body's exit status; for an owner-side lane the placement's host script also
@@ -2674,9 +2681,9 @@ fn run_guest_lane(
     test_name: &str,
 ) -> Result<i32, NextestDispatchFailure> {
     let fixture = placement.fixture();
-    if binary_id != "overdrive-init::bin/overdrive-init" {
+    if binary_id.split_once("::").map(|(package, _)| package) != Some(LANE_PACKAGE) {
         return Err(NextestDispatchFailure::LaneNotPrepared(format!(
-            "the guest-lane placement of {test_name:?} (fixture {fixture:?}) is bound to overdrive-init::bin/overdrive-init, got {binary_id:?}"
+            "the guest-lane placement of {test_name:?} (fixture {fixture:?}) is bound to package {LANE_PACKAGE}, got {binary_id:?}"
         )));
     }
     let environment = nextest_environment()?;
@@ -2687,12 +2694,12 @@ fn run_guest_lane(
         )
     })?;
     let staging = default_staging_root();
-    let kit = GuestKit::provision(&staging).map_err(|error| lane_failure(&error))?;
+    let kit = GuestKit::provision(&staging).map_err(|error| kit_failure(&error))?;
     let work = WorkDir::create(&staging, "nextest-init-lane")
         .map_err(|error| NextestDispatchFailure::GuestExecution(format!("{error:?}")))?;
     let tests = InGuestTests { binary };
     let attempt =
-        lane_attempt(&tests, program, args.to_vec()).map_err(|error| lane_failure(&error))?;
+        lane_attempt(&tests, program, args.to_vec()).map_err(|error| kit_failure(&error))?;
     let cid = INIT_IN_GUEST_LANE.raw(LANE_GUEST_SLOT);
     let (status, console, host_result) = placement
         .host_script()
@@ -2715,7 +2722,7 @@ fn run_guest_lane(
                 .map(|(run, host_result)| (run.exit_status, run.console, Some(host_result)))
             },
         )
-        .map_err(|error| lane_failure(&error))?;
+        .map_err(|error| kit_failure(&error))?;
     if status != 0 {
         eprintln!("{console}");
         return Ok(status);
@@ -2733,9 +2740,9 @@ fn run_guest_lane(
     Ok(0)
 }
 
-/// How a guest-kit failure of a lane run is reported: an unprepared artifact
-/// is a refusal, anything else a failed run.
-fn lane_failure(error: &GuestKitError) -> NextestDispatchFailure {
+/// How a guest-kit failure is reported: an unprepared artifact is a refusal,
+/// anything else a failed run.
+fn kit_failure(error: &GuestKitError) -> NextestDispatchFailure {
     if matches!(error, GuestKitError::LaneNotPrepared { .. }) {
         NextestDispatchFailure::LaneNotPrepared(format!("{error:?}"))
     } else {
@@ -2754,34 +2761,11 @@ pub(crate) fn run_lane_guest(
         if placement.host_script().is_some() { "guest-lane-owner" } else { "guest-lane-operator" };
     retain_console_on_termination(lane_kind, test_name)?;
     let program = exe.to_string_lossy().into_owned();
-    // A selected `#[ignore]`d body (`--run-ignored`) must run in the guest too.
-    let args = [
-        "--exact".to_owned(),
-        test_name.to_owned(),
-        NO_CAPTURE.to_owned(),
-        "--include-ignored".to_owned(),
-    ];
+    let args = selected_test_args(test_name);
     let binary_id = std::env::var("NEXTEST_BINARY_ID").unwrap_or_default();
-    match run_guest_lane(placement, &program, &args, &binary_id, test_name) {
-        Ok(0) => Ok(()),
-        Ok(status) => Err(RunInGuestError::BodyFailed {
-            group: lane_kind.to_owned(),
-            test: test_name.to_owned(),
-            status,
-        }),
-        Err(NextestDispatchFailure::LaneNotPrepared(detail)) => {
-            Err(RunInGuestError::LaneNotPrepared {
-                group: lane_kind.to_owned(),
-                test: test_name.to_owned(),
-                detail,
-            })
-        }
-        Err(NextestDispatchFailure::GuestExecution(detail)) => {
-            Err(RunInGuestError::GuestExecution {
-                group: lane_kind.to_owned(),
-                test: test_name.to_owned(),
-                detail,
-            })
-        }
-    }
+    attempt_outcome(
+        lane_kind,
+        test_name,
+        run_guest_lane(placement, &program, &args, &binary_id, test_name),
+    )
 }

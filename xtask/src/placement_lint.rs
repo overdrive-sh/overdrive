@@ -16,7 +16,7 @@
 //! It reads Linux test binaries (ELF) and writes nothing. A binary it cannot
 //! read is an error, never a skipped file.
 
-use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::path::Path;
 use std::process::Command;
 
@@ -115,8 +115,9 @@ struct Record {
 /// One listed test binary and the records it carries.
 struct Suite {
     id: String,
-    /// The listed tests; an ignored test never reaches the runner.
-    tests: BTreeMap<String, bool>,
+    /// The listed tests, ignored ones included: an `#[ignore]`d test selected
+    /// with `--run-ignored` reaches the runner and must be placed.
+    tests: BTreeSet<String>,
     records: Vec<Record>,
 }
 
@@ -174,15 +175,7 @@ fn suites(listing: &Value) -> Result<Vec<Suite>> {
             let tests = suite
                 .get("testcases")
                 .and_then(Value::as_object)
-                .map(|cases| {
-                    cases
-                        .iter()
-                        .map(|(name, case)| {
-                            let ignored = case.get("ignored").and_then(Value::as_bool);
-                            (name.clone(), ignored.unwrap_or(false))
-                        })
-                        .collect()
-                })
+                .map(|cases| cases.keys().cloned().collect())
                 .unwrap_or_default();
             Ok(Suite {
                 id: text("binary-id")?.to_owned(),
@@ -200,8 +193,8 @@ fn findings(suites: &[Suite]) -> Vec<String> {
             findings.push(format!("conflict {}", suite.id));
             continue;
         }
-        for (test, ignored) in &suite.tests {
-            if !ignored && suite.record_for(test).is_none() {
+        for test in &suite.tests {
+            if suite.record_for(test).is_none() {
                 findings.push(format!("unplaced {} {test}", suite.id));
             }
         }
@@ -221,7 +214,7 @@ fn missing_fixtures(suite: &Suite, suites: &[Suite]) -> Vec<String> {
         let provided = suites
             .iter()
             .filter(|other| other.package() == suite.package())
-            .any(|other| other.tests.contains_key(fixture));
+            .any(|other| other.tests.contains(fixture));
         if !provided {
             missing.push(format!(
                 "missing-fixture {} {} {fixture}",

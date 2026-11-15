@@ -672,7 +672,7 @@ fn prepare_quint_runtime(target_dir: &Path) -> Result<Option<(String, String, St
     }
     let Some(quint_command) = executable_on_path("quint") else {
         eprintln!(
-            "guest-kit-prepare: quint is absent from host PATH; the exact Quint test will refuse as lane_not_prepared"
+            "guest-kit-prepare: quint is absent from host PATH; the exact Quint test will refuse with RunInGuestError::LaneNotPrepared"
         );
         return Ok(None);
     };

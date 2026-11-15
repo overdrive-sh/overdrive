@@ -20,7 +20,6 @@
     clippy::must_use_candidate,
     clippy::missing_panics_doc,
     clippy::missing_errors_doc,
-    dead_code,
     reason = "the placement surface keeps the design's signatures"
 )]
 

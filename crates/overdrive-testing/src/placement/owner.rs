@@ -106,7 +106,6 @@ pub fn run(arguments: &[String]) -> ! {
         clients: BTreeMap::new(),
         commands,
         group: group.clone(),
-        profile: profile.clone(),
         running_generation: 0,
         pending_console: String::new(),
         idle_since: Some(Instant::now()),
@@ -137,7 +136,6 @@ struct Owner {
     clients: BTreeMap<AttachId, Client>,
     commands: Sender<GuestCommand>,
     group: String,
-    profile: String,
     /// The generation of the exec in flight, or of the last one.
     running_generation: u32,
     /// What the guest thread reported for the exec the core is about to answer.
@@ -189,7 +187,13 @@ impl Owner {
                 self.clients.insert(id, Client { request, stream });
                 self.apply(Event::Attached(id))
             }
-            Message::Gone(id) => self.apply(Event::ClientGone(id)),
+            Message::Gone(id) => {
+                let exited = self.apply(Event::ClientGone(id));
+                // The core has dropped the client from its queue; drop its
+                // stream too. A client already answered is already removed.
+                self.clients.remove(&id);
+                exited
+            }
             Message::Guest(GuestReport::Booted(Ok((staging, boot)))) => {
                 eprintln!(
                     "OVERDRIVE_GUEST_KIT_TIMING group={} shared=1 generation={} staging_ms={} boot_ms={}",

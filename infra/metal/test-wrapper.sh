@@ -63,11 +63,11 @@ def section_bytes(path):
     try:
         binary = open(path, "rb")
     except OSError:
-        return None
+        raise Invalid("binary=unreadable")
     with binary:
         header = binary.read(64)
         if len(header) < 64 or header[:4] != b"\x7fELF" or header[4] != 2 or header[5] != 1:
-            return None
+            raise Invalid("binary=not-elf")
         (section_table, entry_size, entry_count, names_index) = (
             struct.unpack_from("<Q", header, 40)[0],
             struct.unpack_from("<H", header, 58)[0],
@@ -148,10 +148,8 @@ def resolve_record(records, test_name):
             return kind, []
     return None
 
-def record_placement(kind, arguments):
-    group = arguments[0] if kind == "guest" else ""
-    fixture = arguments[0] if kind in {"lane_operator", "lane_owner"} else ""
-    return RECORD_KIND[kind], group, fixture
+def record_placement(kind):
+    return RECORD_KIND[kind]
 
 def run(binary_path, test_name):
     try:
@@ -161,13 +159,13 @@ def run(binary_path, test_name):
         found = resolve_record(records, test_name)
         if found is None:
             raise Unclassified()
-        placement = record_placement(*found)
+        placement = record_placement(found[0])
     except Unclassified:
         raise SystemExit(12)
     except Invalid as problem:
         print(problem)
         raise SystemExit(13)
-    print("\x1f".join(placement))
+    print(placement)
 
 def check():
     listing = json.load(sys.stdin)
@@ -186,9 +184,7 @@ def check():
             findings = True
             continue
         for test_name, case in suite.get("testcases", {}).items():
-            # An ignored test never reaches the wrapper; it is placed when its
-            # pending marker is removed.
-            if case.get("ignored") or resolve_record(records, test_name) is not None:
+            if resolve_record(records, test_name) is not None:
                 continue
             print("unplaced", binary_id, test_name)
             findings = True
@@ -240,9 +236,6 @@ case "$WORKSPACE_CANONICAL" in
   *) invalid_context source_owner ;;
 esac
 
-PLACEMENT_KIND=""
-PLACEMENT_GROUP=""
-PLACEMENT_FIXTURE=""
 [ "$#" -gt 0 ] || test_error test_unclassified 78
 BINARY_ID="${NEXTEST_BINARY_ID:-}"
 TEST_NAME="${NEXTEST_TEST_NAME:-}"
@@ -260,7 +253,7 @@ case "$PARSER_STATUS" in
   15) test_error placement_conflict 78 "binary=$BINARY_ID" ;;
   *) test_error placement_invalid 78 "$PLACEMENT" ;;
 esac
-IFS=$'\x1f' read -r PLACEMENT_KIND PLACEMENT_GROUP PLACEMENT_FIXTURE <<<"$PLACEMENT"
+PLACEMENT_KIND="$PLACEMENT"
 
 # Isolation profiles for the per-run namespace set.
 #   net  - a private network namespace in vsock "local" mode (own nft tables,

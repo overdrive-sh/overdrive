@@ -132,8 +132,6 @@ pub const IN_GUEST_TESTS_PATH: &str = "/opt/overdrive-testing/in-guest-tests";
 pub const READY_BOUND: Duration = Duration::from_secs(60);
 /// How long one cell may run.
 pub const CELL_BOUND: Duration = Duration::from_secs(300);
-const NEXTTEST_LANE_ARGV: &str = "OVERDRIVE_FWD_GUEST_NEXTTEST_ARGV";
-const NEXTTEST_LANE_ELF: &str = "OVERDRIVE_FWD_GUEST_NEXTTEST_ELF";
 const NEXTTEST_ENVIRONMENT_COMMAND: &str = "/usr/bin/env";
 /// The launch token every lane guest carries (32 lowercase hex, non-zero;
 /// the lane runs no owner that checks it).
@@ -263,78 +261,6 @@ fn nextest_lane_not_prepared(artifact: &str, path: PathBuf) -> GuestKitError {
     GuestKitError::LaneNotPrepared { artifact: artifact.to_owned(), path }
 }
 
-fn decode_nextest_argv() -> Result<Option<Vec<String>>, GuestKitError> {
-    let Some(encoded) = std::env::var_os(NEXTTEST_LANE_ARGV) else {
-        return Ok(None);
-    };
-    let encoded = encoded.into_string().map_err(|_| {
-        nextest_lane_not_prepared("selected nextest argv", PathBuf::from(NEXTTEST_LANE_ARGV))
-    })?;
-    let (count, values) = encoded.split_once(':').ok_or_else(|| {
-        nextest_lane_not_prepared("selected nextest argv", PathBuf::from(NEXTTEST_LANE_ARGV))
-    })?;
-    let count = count.parse::<usize>().map_err(|_| {
-        nextest_lane_not_prepared("selected nextest argv", PathBuf::from(NEXTTEST_LANE_ARGV))
-    })?;
-    if count > 4096 {
-        return Err(nextest_lane_not_prepared(
-            "selected nextest argv",
-            PathBuf::from(NEXTTEST_LANE_ARGV),
-        ));
-    }
-    let encoded_values = if count == 0 {
-        if !values.is_empty() {
-            return Err(nextest_lane_not_prepared(
-                "selected nextest argv",
-                PathBuf::from(NEXTTEST_LANE_ARGV),
-            ));
-        }
-        Vec::new()
-    } else {
-        let values = values.split(';').collect::<Vec<_>>();
-        if values.len() != count {
-            return Err(nextest_lane_not_prepared(
-                "selected nextest argv",
-                PathBuf::from(NEXTTEST_LANE_ARGV),
-            ));
-        }
-        values
-    };
-    encoded_values
-        .into_iter()
-        .map(|value| {
-            if value.len() % 2 != 0 || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-                return Err(nextest_lane_not_prepared(
-                    "selected nextest argv",
-                    PathBuf::from(NEXTTEST_LANE_ARGV),
-                ));
-            }
-            let bytes = value
-                .as_bytes()
-                .chunks_exact(2)
-                .map(|pair| {
-                    std::str::from_utf8(pair)
-                        .ok()
-                        .and_then(|pair| u8::from_str_radix(pair, 16).ok())
-                        .ok_or_else(|| {
-                            nextest_lane_not_prepared(
-                                "selected nextest argv",
-                                PathBuf::from(NEXTTEST_LANE_ARGV),
-                            )
-                        })
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            String::from_utf8(bytes).map_err(|_| {
-                nextest_lane_not_prepared(
-                    "selected nextest argv",
-                    PathBuf::from(NEXTTEST_LANE_ARGV),
-                )
-            })
-        })
-        .collect::<Result<Vec<_>, _>>()
-        .map(Some)
-}
-
 fn nextest_environment_command_file(
     seen: &mut HashMap<PathBuf, PathBuf>,
 ) -> Result<Option<GuestFile>, GuestKitError> {
@@ -353,19 +279,6 @@ fn nextest_environment_command_file(
             Ok(Some(GuestFile { host, guest, with_shared_libraries: true }))
         }
     }
-}
-
-fn nextest_lane_attempt(tests: &InGuestTests) -> Result<Option<NextestLaneAttempt>, GuestKitError> {
-    let Some(args) = decode_nextest_argv()? else {
-        return Ok(None);
-    };
-    let selected_elf = std::env::var_os(NEXTTEST_LANE_ELF).ok_or_else(|| {
-        nextest_lane_not_prepared("selected nextest ELF argument", PathBuf::from(NEXTTEST_LANE_ELF))
-    })?;
-    let selected_elf = selected_elf.into_string().map_err(|_| {
-        nextest_lane_not_prepared("selected nextest ELF argument", PathBuf::from(NEXTTEST_LANE_ELF))
-    })?;
-    lane_attempt(tests, &selected_elf, args).map(Some)
 }
 
 /// The attempt that re-runs `selected_elf` (the test binary at `tests.binary`
@@ -521,11 +434,11 @@ pub fn run_in_guest_cell(
     cid: u32,
     work: &Path,
 ) -> Result<CellRun, GuestKitError> {
-    run_in_guest_cell_attempt(kit, tests, cell, cid, work, nextest_lane_attempt(tests)?.as_ref())
+    run_in_guest_cell_attempt(kit, tests, cell, cid, work, None)
 }
 
-/// [`run_in_guest_cell`] with the nextest invocation to re-run given, rather
-/// than read from the process environment.
+/// [`run_in_guest_cell`] re-running the given nextest invocation in the guest
+/// (`None` runs the cell directly).
 pub(crate) fn run_in_guest_cell_attempt(
     kit: &GuestKit,
     tests: &InGuestTests,
@@ -1158,12 +1071,11 @@ pub fn run_in_guest_owner_cell<R>(
     memory_mib: u32,
     host: impl FnOnce(&mut OwnerLaneHost) -> R,
 ) -> Result<(CellRun, R), GuestKitError> {
-    let attempt = nextest_lane_attempt(tests)?;
-    run_in_guest_owner_cell_attempt(kit, tests, cell, cid, work, memory_mib, attempt.as_ref(), host)
+    run_in_guest_owner_cell_attempt(kit, tests, cell, cid, work, memory_mib, None, host)
 }
 
-/// [`run_in_guest_owner_cell`] with the nextest invocation to re-run given,
-/// rather than read from the process environment.
+/// [`run_in_guest_owner_cell`] re-running the given nextest invocation in the
+/// guest (`None` runs the cell directly).
 #[allow(
     clippy::too_many_arguments,
     reason = "the owner cell's existing parameters plus the attempt"

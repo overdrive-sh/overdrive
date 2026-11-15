@@ -5,7 +5,6 @@
 #![allow(
     clippy::missing_const_for_fn,
     clippy::must_use_candidate,
-    dead_code,
     reason = "the placement surface keeps the design's signatures"
 )]
 
