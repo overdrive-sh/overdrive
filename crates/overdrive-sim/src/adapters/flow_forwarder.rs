@@ -873,7 +873,15 @@ fn run_datagram_direction(
     if direction.state.source_end.is_some() {
         return DirectionRun::Blocked;
     }
-    if let Some(cause) = source_abort(&source_socket, source) {
+    // A vsock source whose callback classified a clean end and whose queue is
+    // empty completes ahead of a pending `sk_err`: the module's datagram step
+    // takes `SOURCE_CLEAN` before it reads the socket error
+    // (`ovd_fwd_datagram_step` and `ovd_fwd_vsock_end_after_recheck`,
+    // `kmod/ovd_fwd/ovd_fwd.c`). Only the socket's own error report aborts it.
+    let clean_end_ahead_of_error = source_socket.kind() == SimSocketKind::VsockStream
+        && clean_source_end(&source_socket)
+        && receive_stream(&source_socket, 1).is_empty();
+    if !clean_end_ahead_of_error && let Some(cause) = source_abort(&source_socket, source) {
         return DirectionRun::End(ForwardOutcome::Aborted { cause });
     }
     if source_socket.kind() == SimSocketKind::Udp {
