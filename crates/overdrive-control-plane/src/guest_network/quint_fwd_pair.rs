@@ -1161,12 +1161,20 @@ impl FwdPairDriver {
             .to_host
             .pop_front()
             .ok_or_else(|| not_playable("VCtl", "no guest packet in flight"))?;
-        let pair_to_run = if matches!(packet, Packet::Close | Packet::Rst) {
-            self.observed_pair("VCtl")?
-        } else {
-            None
-        };
         let flow = self.flow("VCtl")?;
+        // The spec folds the run into the callback in two cases: an abort
+        // (`0x3`, `RST`) always, and, in datagram mode, a clean end (`0x2`)
+        // that finds the vsock queue empty (`markClean` completes the pair
+        // there; with a frame still queued, `Hop1` forwards or aborts it).
+        let completes_empty_datagram_pair = matches!(packet, Packet::Shut)
+            && self.mode == Mode::Dgram
+            && self.composition().io.vsock_half(flow).is_some_and(|vsock| vsock.queued() == 0);
+        let pair_to_run =
+            if matches!(packet, Packet::Close | Packet::Rst) || completes_empty_datagram_pair {
+                self.observed_pair("VCtl")?
+            } else {
+                None
+            };
         let io = &self.composition().io;
         match packet {
             Packet::Shut => io.guest_half_closes(flow),
