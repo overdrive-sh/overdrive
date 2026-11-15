@@ -97,6 +97,12 @@ use crate::service_lifecycle::{
     ServiceLifecycleReconciler, ServiceLifecycleState, ServiceLifecycleView,
 };
 
+#[cfg(test)]
+use overdrive_testing_macros::overdrive_test_default;
+
+#[cfg(test)]
+overdrive_test_default!(host_pure);
+
 // `NodeId` / `resolve_scope` / `ResyncScope` / `TargetResource` are pulled in
 // above for the impl submodules' `super::` references (test modules resolve
 // scope-target derivations against them). Reference them here so a future

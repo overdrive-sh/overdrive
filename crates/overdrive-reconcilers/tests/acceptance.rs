@@ -8,6 +8,10 @@
 #![allow(clippy::expect_used)]
 #![allow(clippy::expect_fun_call)]
 
+use overdrive_testing_macros::overdrive_test_default;
+
+overdrive_test_default!(host_pure);
+
 mod acceptance {
     //! Step 02-02 (S2 of ADR-0086) — crate-extraction gate.
     mod crate_extraction_import_rewrite_compiles;

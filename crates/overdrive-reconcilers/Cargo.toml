@@ -52,3 +52,5 @@ tracing.workspace        = true
 proptest.workspace = true
 # netns-density-295 R5-PROBE-COUNT — the View CBOR schema-evolution body.
 ciborium.workspace = true
+# `overdrive_test_default!` and `placement!` place the host-pure tests.
+overdrive-testing-macros.workspace = true

@@ -2589,6 +2589,7 @@ dependencies = [
  "ciborium",
  "ipnet",
  "overdrive-core",
+ "overdrive-testing-macros",
  "proptest",
  "serde",
  "thiserror 2.0.18",
