@@ -205,3 +205,9 @@ pub use transition_reason::{TerminalCondition, TransitionReason};
 pub use workflow::{
     ErasedWorkflow, ErasedWorkflowAdapter, TerminalError, TerminalErrorKind, WorkflowStatus,
 };
+
+#[cfg(test)]
+use overdrive_testing_macros::overdrive_test_default;
+
+#[cfg(test)]
+overdrive_test_default!(host_pure);

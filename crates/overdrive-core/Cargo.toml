@@ -159,3 +159,6 @@ tokio              = { workspace = true }
 # `toml` is now a regular dep — see [dependencies] above for the
 # Slice 01 / ADR-0047 §2 rationale. Tests inherit the regular dep,
 # so a separate dev-dep entry would be a duplicate.
+
+# `overdrive_test_default!` places the host-pure test binaries.
+overdrive-testing-macros.workspace = true

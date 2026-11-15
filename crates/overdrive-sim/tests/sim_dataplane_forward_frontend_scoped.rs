@@ -30,6 +30,10 @@ use overdrive_core::id::ServiceVip;
 use overdrive_core::traits::dataplane::{Backend, Dataplane};
 use overdrive_sim::adapters::dataplane::SimDataplane;
 
+use overdrive_testing::overdrive_test_default;
+
+overdrive_test_default!(host_pure);
+
 const VIP: Ipv4Addr = Ipv4Addr::new(10, 96, 0, 10);
 const BACKEND_IP: Ipv4Addr = Ipv4Addr::new(10, 1, 0, 1);
 

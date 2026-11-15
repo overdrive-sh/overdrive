@@ -28,6 +28,10 @@ use overdrive_core::traits::observation_store::{
 };
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// Fixed seed — overflow detection is independent of the seed, but a pinned
 /// seed keeps the run reproducible.
 const STEP_SEED: u64 = 0x01_03_FD_FD_FD_FD_FD_FD;

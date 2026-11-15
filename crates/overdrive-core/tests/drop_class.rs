@@ -23,6 +23,10 @@ use std::str::FromStr;
 use overdrive_core::dataplane::DropClass;
 use proptest::prelude::*;
 
+use overdrive_testing_macros::overdrive_test_default;
+
+overdrive_test_default!(host_pure);
+
 /// Every variant the kernel-side `DROP_COUNTER` `PERCPU_ARRAY` indexes.
 /// Lockstep with the `#[repr(u32)]` discriminants in
 /// `crates/overdrive-core/src/dataplane/drop_class.rs`. Iteration order

@@ -10,6 +10,10 @@
 #![allow(clippy::expect_used)]
 #![allow(clippy::expect_fun_call)]
 
+use overdrive_testing_macros::overdrive_test_default;
+
+overdrive_test_default!(host_pure);
+
 mod acceptance {
     //! Phase-1-foundation + phase-1-control-plane-core acceptance
     //! scenarios.

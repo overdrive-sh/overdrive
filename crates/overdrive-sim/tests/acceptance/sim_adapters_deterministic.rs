@@ -42,6 +42,10 @@ use overdrive_sim::adapters::entropy::SimEntropy;
 use overdrive_sim::adapters::llm::SimLlm;
 use overdrive_sim::adapters::transport::SimTransport;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 const STEP_SEED: u64 = 0x05_01_AA_AA_AA_AA_AA_AA;
 
 fn spiffe(path: &str) -> SpiffeId {

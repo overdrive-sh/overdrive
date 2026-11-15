@@ -6,6 +6,10 @@ use overdrive_sim::Harness;
 use overdrive_sim::harness::InvariantStatus;
 use overdrive_sim::invariants::Invariant;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 const SEED: u64 = 424_242;
 const NAME: &str = "terminal-contention-converges";
 

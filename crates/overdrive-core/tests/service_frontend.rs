@@ -23,6 +23,10 @@ use overdrive_core::dataplane::backend_key::Proto;
 use overdrive_core::id::ServiceVip;
 use proptest::prelude::*;
 
+use overdrive_testing_macros::overdrive_test_default;
+
+overdrive_test_default!(host_pure);
+
 /// Strategy over the two L4 protocols `ServiceFrontend` admits.
 fn proto_strategy() -> impl Strategy<Value = Proto> {
     prop_oneof![Just(Proto::Tcp), Just(Proto::Udp)]

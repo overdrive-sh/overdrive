@@ -29,6 +29,10 @@ use overdrive_core::traits::driver::{
 };
 use overdrive_sim::adapters::driver::SimDriver;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 const CYCLES: usize = 8;
 
 #[tokio::test]

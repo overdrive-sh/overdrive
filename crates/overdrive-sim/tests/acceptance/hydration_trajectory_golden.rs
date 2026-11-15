@@ -83,6 +83,10 @@ use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_store_local::LocalIntentStore;
 use tempfile::TempDir;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// The fixed DST seed the trajectory is pinned to (recorded in the golden).
 const TRAJECTORY_SEED: u64 = 0x00B0_2AA5;
 /// Fixed logical `now_unix` base so the reconcile trajectory carries no

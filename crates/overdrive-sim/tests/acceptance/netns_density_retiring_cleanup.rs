@@ -159,6 +159,10 @@ use tracing_subscriber::layer::{Context, SubscriberExt};
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::{Layer, Registry};
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 const SEEDS_ENV: &str = "OVERDRIVE_ND295_RETIRING_CLEANUP_SEEDS";
 const DEFAULT_SEEDS: [u64; 4] =
     [0x0295_0007_0000_0001, 0x0295_0007_0000_0002, 0x0295_0007_0000_0003, 0x0295_0007_0000_0004];

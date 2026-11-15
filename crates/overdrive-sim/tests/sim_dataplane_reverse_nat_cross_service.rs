@@ -17,6 +17,10 @@ use overdrive_core::id::ServiceVip;
 use overdrive_core::traits::dataplane::{Backend, Dataplane};
 use overdrive_sim::adapters::dataplane::SimDataplane;
 
+use overdrive_testing::overdrive_test_default;
+
+overdrive_test_default!(host_pure);
+
 fn spiffe(path: &str) -> SpiffeId {
     SpiffeId::new(&format!("spiffe://overdrive.local{path}")).expect("valid SPIFFE URI")
 }

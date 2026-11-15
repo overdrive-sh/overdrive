@@ -22,6 +22,10 @@ use std::str::FromStr;
 use overdrive_core::id::NodeId;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// Fixed seed for this harness invocation. Mirrors the seed-style used in
 /// `lww_conformance.rs` so the run is reproducible.
 const STEP_SEED: u64 = 0x01_01_C0_17_C0_17_C0_17;

@@ -44,6 +44,10 @@ use overdrive_sim::adapters::transport::{SimInbox, SimTransport};
 use overdrive_sim::harness::{Harness, InvariantStatus};
 use overdrive_sim::invariants::Invariant;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 const TARGET: &str = "127.0.0.1:9000";
 const PAYLOAD: &[u8] = b"provision-record";
 const STEP_NAME: &str = "provision-write";

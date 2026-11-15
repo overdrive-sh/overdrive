@@ -43,6 +43,10 @@ use tracing_subscriber::layer::{Context, SubscriberExt};
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::{Layer, Registry};
 
+use overdrive_testing::overdrive_test_default;
+
+overdrive_test_default!(host_pure);
+
 static SERVER_SCENARIO_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 #[derive(Clone, Debug)]

@@ -35,6 +35,10 @@ use overdrive_sim::adapters::entropy::SimEntropy;
 use overdrive_sim::adapters::journal::SimJournalStore;
 use overdrive_sim::adapters::transport::SimTransport;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// The logical wait the workflow arms via `ctx.sleep`.
 const SLEEP: Duration = Duration::from_secs(30);
 

@@ -56,6 +56,10 @@ use overdrive_core::id::BackendId;
 use overdrive_core::maglev::permutation::{Weight, generate};
 use proptest::prelude::*;
 
+use overdrive_testing_macros::overdrive_test_default;
+
+overdrive_test_default!(host_pure);
+
 // -----------------------------------------------------------------------------
 // FNV-1a 64-bit known-vector tests
 // -----------------------------------------------------------------------------

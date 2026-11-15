@@ -27,6 +27,10 @@ use std::str::FromStr;
 use overdrive_core::id::ServiceVip;
 use proptest::prelude::*;
 
+use overdrive_testing_macros::overdrive_test_default;
+
+overdrive_test_default!(host_pure);
+
 // -----------------------------------------------------------------------------
 // Generators — every IPv4 address is a valid ServiceVip today.
 // -----------------------------------------------------------------------------

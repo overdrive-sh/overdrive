@@ -24,6 +24,10 @@ use overdrive_core::id::{
 };
 use proptest::prelude::*;
 
+use overdrive_testing_macros::overdrive_test_default;
+
+overdrive_test_default!(host_pure);
+
 // -----------------------------------------------------------------------------
 // Generators — only valid inputs.
 //

@@ -29,6 +29,10 @@
 use overdrive_sim::harness::{Harness, InvariantStatus};
 use overdrive_sim::invariants::Invariant;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 #[test]
 fn replay_equivalence_holds_across_a_signal_wait_and_an_emit_seeded_and_reproducible() {
     const SEED: u64 = 0x5eed_0302;

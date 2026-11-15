@@ -66,6 +66,10 @@ use overdrive_worker::probe_runner::ProbeRunner;
 use overdrive_worker::vm_driver::VmHostLayout;
 use parking_lot::Mutex;
 
+use overdrive_testing::overdrive_test_default;
+
+overdrive_test_default!(host_pure);
+
 /// Observe the existing Vmm port, without changing its lifetime behavior.
 struct RecordedVmm {
     inner: SimVmm,

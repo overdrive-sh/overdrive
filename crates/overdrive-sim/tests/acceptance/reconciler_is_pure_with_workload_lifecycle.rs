@@ -29,6 +29,10 @@ use overdrive_reconcilers::{
     WorkloadLifecycleView,
 };
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// Canonical `fresh_tick` signature (uniform across every acceptance
 /// suite per step 03-01): callers pass both `now` (monotonic) and
 /// `now_unix` (wall-clock) explicitly. Tests that do not exercise the

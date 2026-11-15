@@ -40,3 +40,9 @@ pub use adapters::{
 };
 pub use harness::{Failure, Harness, InvariantResult, InvariantStatus, RunReport};
 pub use invariants::Invariant;
+
+#[cfg(test)]
+use overdrive_testing::overdrive_test_default;
+
+#[cfg(test)]
+overdrive_test_default!(host_pure);

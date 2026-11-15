@@ -22,6 +22,10 @@ use proptest::prelude::*;
 
 use overdrive_sim::invariants::Invariant;
 
+use overdrive_testing::overdrive_test_default;
+
+overdrive_test_default!(host_pure);
+
 /// Every variant the enum exposes. Keep this list synchronised with
 /// the enum itself — adding a variant without adding an entry here
 /// means the round-trip property silently stops covering it.

@@ -19,6 +19,10 @@
 //! ADR-0001 row 24 and ADR-0005 authorise `trybuild` as a dev-dependency
 //! for this purpose only.
 
+use overdrive_testing_macros::overdrive_test_default;
+
+overdrive_test_default!(host_pure);
+
 #[test]
 fn compile_fail_cases() {
     let t = trybuild::TestCases::new();

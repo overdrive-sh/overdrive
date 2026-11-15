@@ -34,6 +34,10 @@ use overdrive_core::traits::observation_store::{
 };
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// Fixed seed for this step. Multi-peer / gossip determinism lives in
 /// steps 04-02 / 04-03.
 const STEP_SEED: u64 = 0x04_01_AA_AA_AA_AA_AA_AA;

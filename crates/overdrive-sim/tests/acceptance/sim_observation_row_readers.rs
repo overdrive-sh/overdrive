@@ -24,6 +24,10 @@ use overdrive_core::traits::observation_store::{
 };
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 const STEP_SEED: u64 = 0xA110_0A11_A11A_0A11;
 
 fn peer() -> NodeId {

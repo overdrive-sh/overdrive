@@ -70,6 +70,10 @@ use overdrive_worker::probe_runner::ProbeRunner;
 use tempfile::TempDir;
 use tokio_util::sync::CancellationToken;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// The one guest-network owner instance of this process: `AppState` holds it
 /// and every convergence tick dispatches through it (the post-#295 guest lane,
 /// where a VM allocation's address is the transport the pool assigns).

@@ -23,6 +23,10 @@
 //! `SimCa`. DELIVER replaces with a `SeededEntropy`-driven twin-run
 //! identity assertion (mirror `tests/acceptance/sim_adapters_deterministic.rs`).
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// A fixed validity window (`not_before`, `not_after`) for the SVID requests
 /// these determinism tests build. The window rides on the `SvidRequest`
 /// (ADR-0063 rev 2 amendment); a `const` window keeps issuance bit-identical

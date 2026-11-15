@@ -25,6 +25,10 @@
     reason = "integration scenarios retain repository-required Contract Shape metadata"
 )]
 
+use overdrive_testing::overdrive_test_default;
+
+overdrive_test_default!(host_pure);
+
 mod integration {
     #[allow(dead_code)]
     pub mod serve_ports {

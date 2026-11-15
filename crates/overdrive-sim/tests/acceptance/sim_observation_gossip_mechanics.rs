@@ -24,6 +24,10 @@ use overdrive_core::traits::observation_store::{
 };
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 const STEP_SEED: u64 = 0x04_02_BB_BB_BB_BB_BB_BB;
 const GOSSIP_WINDOW: Duration = Duration::from_millis(50);
 const PAST_CONVERGENCE: Duration = Duration::from_millis(100);

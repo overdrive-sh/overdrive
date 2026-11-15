@@ -33,6 +33,10 @@ use overdrive_core::traits::dataplane::{Backend, Dataplane};
 use overdrive_sim::adapters::dataplane::SimDataplane;
 use proptest::prelude::*;
 
+use overdrive_testing::overdrive_test_default;
+
+overdrive_test_default!(host_pure);
+
 /// TCP `ServiceFrontend` for `vip` — this test asserts VIP iteration
 /// order, so proto/port are not load-bearing; TCP/8080 is the default.
 fn tcp_frontend(vip: Ipv4Addr) -> ServiceFrontend {

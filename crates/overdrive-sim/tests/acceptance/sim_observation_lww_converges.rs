@@ -47,6 +47,10 @@ use overdrive_sim::adapters::observation_store::{
 };
 use proptest::prelude::*;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// Fixed step seed used by the hand-written witness test. The proptest
 /// draws its own scenario seed per case.
 const STEP_SEED: u64 = 0x04_03_CC_CC_CC_CC_CC_CC;

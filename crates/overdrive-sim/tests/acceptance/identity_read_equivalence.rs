@@ -31,6 +31,10 @@ use overdrive_sim::invariants::svid_running_set::{
     ExecutorDefect, drive_churn_with_executor_defect,
 };
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// A contract-proving test consumer that takes `Arc<dyn IdentityRead>` as a
 /// **MANDATORY constructor parameter** — no default, no `with_*` builder
 /// (`.claude/rules/development.md` § "Port-trait dependencies": "optional means

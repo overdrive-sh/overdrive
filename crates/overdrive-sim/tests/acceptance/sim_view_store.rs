@@ -23,6 +23,10 @@ use overdrive_control_plane::view_store::{ViewStore, ViewStoreExt};
 use overdrive_core::reconcilers::TargetResource;
 use overdrive_sim::adapters::view_store::SimViewStore;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// Fixed `&'static str` reconciler name for the proptest. The
 /// `refactor-reconciler-static-name` RCA makes reconciler names a
 /// compile-time anchor; the round-trip property is over arbitrary

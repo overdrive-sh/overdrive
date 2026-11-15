@@ -44,6 +44,10 @@ use overdrive_sim::adapters::flow_forwarder::{
 };
 use proptest::prelude::*;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// `EPIPE` (32): a TCP reset of a half in `CLOSE_WAIT`.
 fn epipe() -> KernelErrno {
     KernelErrno::new(32).expect("EPIPE is non-zero")

@@ -43,6 +43,10 @@ use overdrive_reconcilers::{
     ServiceDesired, ServiceMapHydrator, ServiceMapHydratorState, ServiceMapHydratorView,
 };
 
+use overdrive_testing_macros::overdrive_test_default;
+
+overdrive_test_default!(host_pure);
+
 /// The canonical Path-A/mesh workload subnet — the SAME `10.99.0.0/16`
 /// `WORKLOAD_SUBNET_BASE` the provisioner carves per-allocation `/30`s
 /// from (one source, D-GATE-PRED). Core constructs the literal because

@@ -32,6 +32,12 @@ use serde::Serialize;
 
 use overdrive_sim::{Harness, Invariant, InvariantStatus, RunReport};
 
+#[cfg(test)]
+use overdrive_testing::overdrive_test_default;
+
+#[cfg(test)]
+overdrive_test_default!(host_pure);
+
 #[derive(Parser, Debug)]
 #[command(about = "Run the Overdrive DST harness", version)]
 struct Args {

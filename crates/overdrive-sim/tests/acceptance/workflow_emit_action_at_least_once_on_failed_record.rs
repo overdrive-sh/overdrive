@@ -62,6 +62,10 @@ use overdrive_sim::adapters::journal::SimJournalStore;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_sim::adapters::transport::SimTransport;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 const SEED: u64 = 0x0302_e312_7a55_0009;
 
 fn build_engine(

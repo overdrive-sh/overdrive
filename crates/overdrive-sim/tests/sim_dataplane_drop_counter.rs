@@ -17,6 +17,10 @@
 use overdrive_core::dataplane::DropClass;
 use overdrive_sim::adapters::dataplane::SimDataplane;
 
+use overdrive_testing::overdrive_test_default;
+
+overdrive_test_default!(host_pure);
+
 /// Acceptance test — Slice 06 mirror works end-to-end through the
 /// public `SimDataplane` API. Records one drop per class, verifies
 /// the per-class counter is exactly 1 and the others are zero,

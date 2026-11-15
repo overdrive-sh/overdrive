@@ -30,6 +30,10 @@ use overdrive_reconcilers::service_lifecycle::{
 };
 use overdrive_reconcilers::workload_lifecycle::project_service_listen_ports;
 
+use overdrive_testing_macros::overdrive_test_default;
+
+overdrive_test_default!(host_pure);
+
 const MESH_WORKLOAD_ADDR: Ipv4Addr = Ipv4Addr::new(10, 99, 0, 6);
 const SERVICE_VIP_ADDR: Ipv4Addr = Ipv4Addr::new(10, 96, 0, 1);
 

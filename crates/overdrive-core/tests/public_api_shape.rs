@@ -52,6 +52,10 @@ use std::path::{Path, PathBuf};
 use syn::visit::Visit;
 use syn::{FnArg, ImplItem, Item, Pat, Signature, TraitItem, Type, TypeReference, Visibility};
 
+use overdrive_testing_macros::overdrive_test_default;
+
+overdrive_test_default!(host_pure);
+
 // -----------------------------------------------------------------------------
 // The identifier-name contract.
 //

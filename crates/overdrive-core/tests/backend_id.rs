@@ -22,6 +22,10 @@ use std::str::FromStr;
 use overdrive_core::id::{BackendId, IdParseError};
 use proptest::prelude::*;
 
+use overdrive_testing_macros::overdrive_test_default;
+
+overdrive_test_default!(host_pure);
+
 // -----------------------------------------------------------------------------
 // Round-trip properties.
 // -----------------------------------------------------------------------------

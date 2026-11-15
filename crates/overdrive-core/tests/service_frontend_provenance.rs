@@ -45,6 +45,10 @@ use overdrive_reconcilers::service_map_hydrator::{
 };
 use overdrive_reconcilers::{ServiceMapHydrator, ServiceMapHydratorState, ServiceMapHydratorView};
 
+use overdrive_testing_macros::overdrive_test_default;
+
+overdrive_test_default!(host_pure);
+
 fn vip_v4(o: u8) -> ServiceVip {
     ServiceVip::new(IpAddr::V4(Ipv4Addr::new(10, 96, 0, o))).expect("valid IPv4 ServiceVip")
 }

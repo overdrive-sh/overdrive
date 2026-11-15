@@ -69,6 +69,10 @@ use overdrive_sim::adapters::journal::SimJournalStore;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_sim::adapters::transport::SimTransport;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 const SEED: u64 = 0x0302_5165_a1ad_0001;
 
 fn instance() -> (CorrelationKey, WorkflowId) {

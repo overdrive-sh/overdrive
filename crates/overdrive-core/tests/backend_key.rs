@@ -34,6 +34,10 @@ use std::str::FromStr;
 use overdrive_core::dataplane::backend_key::{BackendKey, ParseError, Proto};
 use proptest::prelude::*;
 
+use overdrive_testing_macros::overdrive_test_default;
+
+overdrive_test_default!(host_pure);
+
 // -----------------------------------------------------------------------------
 // Generators.
 // -----------------------------------------------------------------------------

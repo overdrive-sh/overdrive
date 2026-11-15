@@ -8,6 +8,10 @@
 //!
 //! * The surviving prober traits are object-safe (dyn-compatible).
 
+use overdrive_testing_macros::overdrive_test_default;
+
+overdrive_test_default!(host_pure);
+
 #[test]
 fn compile_pass_cases() {
     let t = trybuild::TestCases::new();

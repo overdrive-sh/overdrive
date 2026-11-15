@@ -38,6 +38,10 @@ use overdrive_sim::adapters::entropy::SimEntropy;
 use overdrive_sim::adapters::journal::SimJournalStore;
 use overdrive_sim::adapters::transport::{SimInbox, SimTransport};
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 const PRE_TARGET: &str = "127.0.0.1:9200";
 const POST_TARGET: &str = "127.0.0.1:9201";
 /// The logical wait `ctx.sleep` arms between the two `ctx.run` effects.

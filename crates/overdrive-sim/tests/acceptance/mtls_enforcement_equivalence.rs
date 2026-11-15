@@ -53,6 +53,10 @@ use overdrive_core::wall_clock::UnixInstant;
 use overdrive_core::{AllocationId, CertSerial, SpiffeId};
 use overdrive_sim::adapters::{ScriptedTrip, SimIdentityRead, SimMtlsEnforcement};
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// Build `SvidMaterial` for `(spiffe, not_after_secs)` from fixture cert/key bytes
 /// (the sim treats the material as opaque — no real crypto). Mirrors the
 /// `identity_read_equivalence` fixture shape.

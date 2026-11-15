@@ -9,6 +9,10 @@
 
 use overdrive_sim::{Harness, Invariant};
 
+use overdrive_testing::overdrive_test_default;
+
+overdrive_test_default!(host_pure);
+
 /// Two back-to-back runs with the same seed produce equal reports
 /// (excluding wall-clock). This is the property the twin-run proptest
 /// exercises across 16 seeds; this test pins it for one specific seed

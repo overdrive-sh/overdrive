@@ -21,6 +21,10 @@
 
 use overdrive_sim::{Harness, Invariant, InvariantStatus};
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// The default harness run includes all three new invariants and they
 /// all pass — the clean-run green-bar assertion.
 ///

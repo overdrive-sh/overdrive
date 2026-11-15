@@ -30,6 +30,10 @@ use std::str::FromStr;
 use overdrive_core::id::NodeId;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// Fixed seed for this harness invocation. Mirrors the seed-style used
 /// in `sim_observation_lww_converges.rs` so the conformance run is
 /// reproducible.

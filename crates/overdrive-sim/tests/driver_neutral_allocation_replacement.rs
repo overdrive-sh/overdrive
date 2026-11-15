@@ -79,6 +79,10 @@ use overdrive_sim::adapters::view_store::SimViewStore;
 use overdrive_store_local::LocalIntentStore;
 use parking_lot::Mutex;
 
+use overdrive_testing::overdrive_test_default;
+
+overdrive_test_default!(host_pure);
+
 const SEED: u64 = 284_105_106;
 
 #[derive(Clone, Debug, Eq, PartialEq)]

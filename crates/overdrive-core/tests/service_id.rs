@@ -25,6 +25,10 @@ use overdrive_core::dataplane::backend_key::Proto;
 use overdrive_core::id::{IdParseError, ServiceId, ServiceVip};
 use proptest::prelude::*;
 
+use overdrive_testing_macros::overdrive_test_default;
+
+overdrive_test_default!(host_pure);
+
 // -----------------------------------------------------------------------------
 // Round-trip properties.
 // -----------------------------------------------------------------------------

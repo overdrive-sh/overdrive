@@ -27,6 +27,10 @@ use overdrive_sim::adapters::entropy::SimEntropy;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_sim::invariants::evaluators;
 
+use overdrive_testing::overdrive_test_default;
+
+overdrive_test_default!(host_pure);
+
 fn node(name: &str) -> NodeId {
     NodeId::from_str(name).expect("valid node id")
 }

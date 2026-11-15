@@ -54,6 +54,10 @@ use tracing_subscriber::layer::{Context, SubscriberExt};
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::{Layer, Registry};
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 const STEP_SEED: u64 = 0x1A_11_DE_AD_BE_EF_00_01;
 
 /// Records every event the subscriber sees as `"<name> | target=<t> f=v …"`.

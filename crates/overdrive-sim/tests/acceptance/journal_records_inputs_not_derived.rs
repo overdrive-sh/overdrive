@@ -27,6 +27,10 @@ use overdrive_control_plane::journal::{
 };
 use overdrive_sim::adapters::journal::SimJournalStore;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// Build the `Started` entry's `spec_digest` from the fixture's spec —
 /// the INPUT the journal records, not a derived cache. Mirrors what the
 /// engine will do (ADR-0066 §2): hash the spec's canonical identity.

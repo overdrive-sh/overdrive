@@ -29,6 +29,10 @@ use overdrive_core::dataplane::maglev_table_size::{
 };
 use proptest::prelude::*;
 
+use overdrive_testing_macros::overdrive_test_default;
+
+overdrive_test_default!(host_pure);
+
 // -----------------------------------------------------------------------------
 // Constants surface — every prime in the Cilium list is accepted; the
 // `DEFAULT` constant matches `DEFAULT_M` and is in the prime list.

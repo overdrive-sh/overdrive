@@ -34,6 +34,10 @@ use overdrive_core::traits::dataplane::{Backend, Dataplane};
 use overdrive_sim::adapters::dataplane::SimDataplane;
 use proptest::prelude::*;
 
+use overdrive_testing::overdrive_test_default;
+
+overdrive_test_default!(host_pure);
+
 fn spiffe(tag: usize) -> SpiffeId {
     SpiffeId::new(&format!("spiffe://overdrive.local/workload/svc/alloc/b-{tag}"))
         .expect("valid SPIFFE URI")

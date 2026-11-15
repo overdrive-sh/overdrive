@@ -19,6 +19,10 @@
 #![allow(clippy::expect_used)]
 #![allow(clippy::expect_fun_call)]
 
+use overdrive_testing_macros::overdrive_test_default;
+
+overdrive_test_default!(host_pure);
+
 mod schema_evolution {
     mod alloc_lifecycle_occurrence_row;
     mod alloc_status_row;

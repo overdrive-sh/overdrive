@@ -30,6 +30,10 @@ use std::str::FromStr;
 use overdrive_sim::harness::{Harness, InvariantStatus};
 use overdrive_sim::invariants::Invariant;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// The canonical name is a NAMED enum variant (no inline string literal —
 /// US-WP-4 AC1) and round-trips losslessly through `FromStr → Display`.
 #[test]
