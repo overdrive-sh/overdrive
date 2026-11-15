@@ -61,6 +61,7 @@ use std::time::{Duration, Instant};
 use overdrive_core::dataplane::backend_key::Proto;
 use overdrive_core::traits::dataplane::Dataplane;
 use overdrive_dataplane::EbpfDataplane;
+use overdrive_testing::overdrive_test;
 
 use super::helpers::veth::{VethError, VethPair};
 
@@ -185,6 +186,7 @@ fn poll_until<T>(budget: Duration, mut f: impl FnMut() -> Option<T>) -> Option<T
 /// (10.96.0.10), NOT the backend IP. It does NOT assert the wire. The
 /// round-trip must really deliver (forward sendmsg4 rewrite fires) AND
 /// the app-source rewrite must really fire (reverse recvmsg4 rewrite).
+#[overdrive_test(guest = "mtls-relay")]
 #[test]
 #[serial_test::serial(env)]
 fn unconnected_sendto_recvfrom_reads_vip_sourced_reply() {
@@ -244,6 +246,7 @@ fn unconnected_sendto_recvfrom_reads_vip_sourced_reply() {
 
 /// S-01-02 — both forward LOCAL_BACKEND_MAP and reverse REVERSE_LOCAL_MAP
 /// entries present after ONE register_local_backend (ordered reverse-first).
+#[overdrive_test(guest = "mtls-relay")]
 #[test]
 #[serial_test::serial(env)]
 fn forward_and_reverse_map_entries_present_after_one_register() {
@@ -294,6 +297,7 @@ fn forward_and_reverse_map_entries_present_after_one_register() {
 }
 
 /// S-01-03 — a second unconnected query reuses the same mapping (stateless).
+#[overdrive_test(guest = "mtls-relay")]
 #[test]
 #[serial_test::serial(env)]
 fn second_unconnected_query_reuses_same_mapping_statelessly() {
@@ -401,6 +405,7 @@ fn second_unconnected_query_reuses_same_mapping_statelessly() {
 /// rewrite + reverse-first dual-write; 02-01 Tier-1 mirror): this lands
 /// GREEN immediately rather than as a genuine RED — expected for an
 /// equivalence-pin against shipped behavior.
+#[overdrive_test(guest = "mtls-relay")]
 #[test]
 #[serial_test::serial(env)]
 fn kernel_reply_source_meets_tier1_reply_mirror_at_backend_identity() {

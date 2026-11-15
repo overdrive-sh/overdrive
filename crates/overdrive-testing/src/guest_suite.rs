@@ -1183,7 +1183,9 @@ const STEP13_04_WORKER: &[Cell] = &[
 /// needs what a qualified node has and `GuestKit` lacks (no NIC, no default
 /// route, forwarding off): forwarding on the loopback ingress device and a
 /// routed next hop with a valid neighbour entry. The runner owns that
-/// disposable route only around these exact cells.
+/// disposable route only around these exact cells. The cells declare
+/// `profile = "fib-hit"` on themselves; this list is the name-keyed
+/// dispatcher's data and retires with it.
 const XDP_FIB_HIT: &[Cell] = &[
     (
         "integration::xdp_reverse_nat_redirect_neigh::reverse_path_redirects_via_neigh_on_fib_hit",
@@ -3551,6 +3553,9 @@ enum AttemptEnvironment {
     MtlsNative,
     /// `mtls-relay` `relay`: only the tls module is loaded.
     MtlsRelay,
+    /// `mtls-relay` `fib-hit`: `native` plus the test-owned veth next hop,
+    /// route and IPv4 forwarding the `bpf_fib_lookup` success cells need.
+    MtlsFibHit,
     /// `cgroup-default` `dummy-link`: `base` plus the dummy module.
     DummyLink,
     /// `cgroup-default` `host-route`: `dummy-link` plus the host-local route.
@@ -3583,6 +3588,7 @@ impl AttemptEnvironment {
         let environment = match (group, profile) {
             ("mtls-relay", "native") => Self::MtlsNative,
             ("mtls-relay", "relay") => Self::MtlsRelay,
+            ("mtls-relay", "fib-hit") => Self::MtlsFibHit,
             ("cgroup-default", "dummy-link") => Self::DummyLink,
             ("cgroup-default", "host-route") => Self::HostRoute,
             ("cgroup-default", "legb-tools") => Self::LegbTools,
@@ -3612,6 +3618,7 @@ impl AttemptEnvironment {
     fn of_test_name(group: &str, test_name: &str) -> Self {
         match group {
             "mtls-relay" if test_name.starts_with(MTLS_RELAY) => Self::MtlsRelay,
+            "mtls-relay" if selected_cell(XDP_FIB_HIT, test_name) => Self::MtlsFibHit,
             "mtls-relay" => Self::MtlsNative,
             CGROUP_DEFAULT_GROUP => Self::cgroup_default_of_test_name(test_name),
             _ => Self::Base,
@@ -4534,7 +4541,6 @@ struct AttemptInvocation<'a> {
     args: &'a [String],
     environment: &'a [(String, String)],
     working_directory: &'a Path,
-    test_name: &'a str,
 }
 
 /// The profile's per-test setup, the test body under `body_bound`, and the
@@ -4545,7 +4551,7 @@ fn execute_attempt_phases(
     attempt: &AttemptInvocation<'_>,
     body_bound: Duration,
 ) -> Result<i32, NextestDispatchFailure> {
-    let AttemptInvocation { program, args, environment, working_directory, test_name } = *attempt;
+    let AttemptInvocation { program, args, environment, working_directory } = *attempt;
     let route_cleanup = if plan.cgroup && plan.environment == AttemptEnvironment::HostRoute {
         guest
             .command(&["/usr/bin/sh", "-c", STEP13_04_ROUTE_SETUP])
@@ -4556,7 +4562,7 @@ fn execute_attempt_phases(
             .command(&["/usr/bin/sh", "-c", STEP13_06_ROUTE_SETUP])
             .map_err(|error| NextestDispatchFailure::GuestExecution(format!("{error:?}")))?;
         Some(STEP13_06_ROUTE_CLEANUP)
-    } else if plan.name == "mtls-relay" && selected_cell(XDP_FIB_HIT, test_name) {
+    } else if plan.environment == AttemptEnvironment::MtlsFibHit {
         guest
             .command(&["/usr/bin/sh", "-c", XDP_FIB_HIT_SETUP])
             .map_err(|error| NextestDispatchFailure::GuestExecution(format!("{error:?}")))?;
@@ -4640,7 +4646,6 @@ fn run_nextest_group_attempt(
         args,
         environment: &environment,
         working_directory: &current_dir,
-        test_name,
     };
     let outcome = execute_nextest_guest_attempt(guest, &plan, &invocation);
     eprintln!(
@@ -4846,7 +4851,6 @@ impl SharedGuest {
                     args: &args,
                     environment: request.environment,
                     working_directory: request.working_directory,
-                    test_name: request.test_name,
                 };
                 let remaining = bound.saturating_sub(started.elapsed()).max(Duration::from_secs(1));
                 execute_attempt_phases(&mut self.guest, &self.plan, &invocation, remaining)

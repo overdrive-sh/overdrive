@@ -66,6 +66,7 @@ use overdrive_core::traits::mtls_enforcement::{
     InterceptedConnection, MtlsEnforcement, MtlsEnforcementError, MtlsLimits, PumpLiveness, Routed,
 };
 use overdrive_dataplane::mtls::HostMtlsEnforcement;
+use overdrive_testing::overdrive_test;
 use parking_lot::Mutex;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, DuplexStream};
 
@@ -497,6 +498,7 @@ fn join<T>(handle: std::thread::JoinHandle<T>) -> T {
 /// directions ended the relay ends and leg S ends by the stream's drop with
 /// the host direction already closed (no 0x3).
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "mtls-relay", profile = "relay")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn an_authenticated_client_is_relayed_to_the_guest_application_byte_exact() {
     let dial = ScriptedDial::new(DialScript::Pair { delay: Duration::from_millis(300) });
@@ -564,6 +566,7 @@ async fn an_authenticated_client_is_relayed_to_the_guest_application_byte_exact(
 /// takes longer than the configured handshake deadline (and well inside
 /// `GUEST_DIAL_PAIRING_DEADLINE`) still relays.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "mtls-relay", profile = "relay")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_dial_slower_than_the_handshake_deadline_still_relays() {
     let limits =
@@ -606,6 +609,7 @@ async fn a_dial_slower_than_the_handshake_deadline_still_relays() {
 /// (The seeded-sim half's `AbsentBundle` is a node with no bundle; this is a
 /// real bad client against a real bundle.)
 /// CONTRACT_SHAPE: unbounded-preservation.
+#[overdrive_test(guest = "mtls-relay", profile = "relay")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_client_failing_peer_verification_causes_no_dial() {
     let dial = ScriptedDial::new(DialScript::Pair { delay: Duration::ZERO });
@@ -649,6 +653,7 @@ async fn a_client_failing_peer_verification_causes_no_dial() {
 /// leg C — the client sees a reset, not a clean end — and `enforce` returns
 /// `MtlsEnforcementError::GuestDial` naming the dial's outcome.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "mtls-relay", profile = "relay")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_dial_error_resets_leg_c_and_is_typed() {
     let dial = ScriptedDial::new(DialScript::Refuse {
@@ -677,6 +682,7 @@ async fn a_dial_error_resets_leg_c_and_is_typed() {
 /// S with the host→guest direction open, which is the guest's 0x3 (the guest
 /// application sees its connection end; it never sees a clean 0x2).
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "mtls-relay", profile = "relay")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_client_reset_drops_leg_s_with_its_direction_open() {
     let dial = ScriptedDial::new(DialScript::Pair { delay: Duration::ZERO });
@@ -709,6 +715,7 @@ async fn a_client_reset_drops_leg_s_with_its_direction_open() {
 /// `ConnectionReset` (`end() == Abort`) and the relay resets leg C — the
 /// client sees a reset, not a clean end.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "mtls-relay", profile = "relay")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_guest_application_reset_resets_leg_c() {
     let dial = ScriptedDial::new(DialScript::Pair { delay: Duration::ZERO });
@@ -733,6 +740,7 @@ async fn a_guest_application_reset_resets_leg_c() {
 /// that returned while the drop were only queued would fail the first
 /// assertion after it.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "mtls-relay", profile = "relay")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn teardown_returns_only_after_the_relay_dropped_leg_s() {
     let dial = ScriptedDial::new(DialScript::Pair { delay: Duration::ZERO });
@@ -773,6 +781,7 @@ async fn teardown_returns_only_after_the_relay_dropped_leg_s() {
 /// argument of the enforcement. Were the identity-read wiring deleted, the
 /// agent would present no server leaf and the client's verification fails.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "mtls-relay", profile = "relay")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn agent_handshake_presents_held_svid_server_role() {
     let dial = ScriptedDial::new(DialScript::Pair { delay: Duration::ZERO });

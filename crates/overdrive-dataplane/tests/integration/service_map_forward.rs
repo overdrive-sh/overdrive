@@ -76,6 +76,7 @@ use aya::{
 };
 use overdrive_dataplane::maps::ServiceKey;
 use overdrive_dataplane::maps::hash_of_maps::HashOfMapsHandle;
+use overdrive_testing::overdrive_test;
 
 use super::helpers::packets::{
     ETH_HDR_LEN, IPV4_HDR_LEN, TCP_HDR_LEN, ipv4_header_checksum, synthesise_tcp_syn, tcp_checksum,
@@ -128,6 +129,7 @@ fn bpf_artifact_path() -> PathBuf {
 /// group puts both tests in the same serial sequence. Veth-state
 /// isolation is provided by the unique iface names `ovd-svc{0,1}`
 /// (no other test claims them) plus the `VethPair` `Drop` guard.
+#[overdrive_test(guest = "mtls-relay")]
 #[test]
 #[serial_test::serial(env)]
 fn ten_tcp_syns_to_vip_are_rewritten_and_forwarded_via_veth() {

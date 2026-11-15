@@ -45,6 +45,7 @@ use overdrive_core::dataplane::backend_key::{BackendKey, Proto};
 use overdrive_core::traits::dataplane::Dataplane;
 use overdrive_dataplane::EbpfDataplane;
 use overdrive_dataplane::maps::reverse_local_map_handle::ReverseLocalKeyPod;
+use overdrive_testing::overdrive_test;
 
 use super::helpers::veth::{VethError, VethPair};
 
@@ -120,6 +121,7 @@ fn reverse_entry_present(dataplane: &EbpfDataplane, backend: SocketAddrV4, proto
 /// 3. `deregister_local_backend(VIP, VIP_PORT, backend, UDP)` (the retry).
 /// 4. Assert `REVERSE_LOCAL_MAP` no longer holds the backend's reverse
 ///    entry.
+#[overdrive_test(guest = "mtls-relay")]
 #[test]
 fn deregister_purges_reverse_entry_when_forward_already_removed() {
     let Some((dataplane, _veth, _pin_guard)) = bring_up("ovd-drs0a", "ovd-drs0b") else {

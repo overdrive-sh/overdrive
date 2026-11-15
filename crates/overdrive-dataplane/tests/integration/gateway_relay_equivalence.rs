@@ -43,6 +43,7 @@ use overdrive_core::traits::clock::Clock;
 use overdrive_gateway::ports::{GatewayRelay, HeadTerminator, KtlsReadHalf, KtlsWriteHalf};
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::gateway::{LegScript, PublicLegScript, SimGatewayRelay};
+use overdrive_testing::overdrive_test;
 
 use super::helpers::relay_peers::{
     Drain, KtlsPeer, Offer, Received, Rig, blocking, nz64, nzu, pattern, server_config,
@@ -618,6 +619,7 @@ macro_rules! equivalence_cases {
         $(
             /// S-PIG-104: Host and Sim `GatewayRelay` agree on this script.
             /// CONTRACT_SHAPE: bounded-change.
+            #[overdrive_test(guest = "mtls-relay")]
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
             async fn $test() {
                 assert_equivalent($case).await;

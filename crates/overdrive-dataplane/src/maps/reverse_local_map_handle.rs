@@ -390,6 +390,7 @@ mod real_map_tests {
     use crate::maps::reverse_local_map_handle::{
         ReverseLocalEntryPod, ReverseLocalKeyPod, ReverseLocalMapHandle, ReverseLocalMapValue,
     };
+    use overdrive_testing::overdrive_test;
 
     /// `BPF_MAP_TYPE_HASH = 1` — stable kernel ABI (matches the
     /// production REVERSE_LOCAL_MAP shape: 8-byte key, 8-byte
@@ -432,6 +433,7 @@ mod real_map_tests {
     /// entry present and fails this test. The assertions compare against the
     /// exact `(key, vip)` set rather than a membership predicate, so there
     /// is no compound boolean for a mutator to collapse into a vacuous pass.
+    #[overdrive_test(guest = "mtls-relay")]
     #[test]
     fn remove_deletes_the_reverse_entry() {
         let handle = real_handle();

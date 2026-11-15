@@ -32,14 +32,14 @@ pub enum GuestGroup {
 }
 
 /// The closed registry: each group with its profiles. The first profile of a
-/// group is its base profile, the one an omitted profile selects. Twenty-one
+/// group is its base profile, the one an omitted profile selects. Twenty-two
 /// environments over eight groups.
 const ENVIRONMENTS: [(&str, &[&str]); 8] = [
     ("probe", &["base"]),
     ("core", &["base"]),
     ("unload", &["base"]),
     ("ulp", &["base"]),
-    ("mtls-relay", &["native", "relay"]),
+    ("mtls-relay", &["native", "relay", "fib-hit"]),
     (
         "cgroup-default",
         &[

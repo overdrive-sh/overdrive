@@ -268,6 +268,7 @@ fn script(owner: &mut dyn Owner, rt: &tokio::runtime::Runtime) -> Vec<String> {
 /// S-PIG-67. Host and Sim agree through the ports over the same call sequence.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "mtls-relay")]
 #[test]
 fn host_and_sim_agree_on_selection_identity_rejection_residue_and_restart() {
     let mut host = Host::new();
@@ -285,6 +286,7 @@ fn host_and_sim_agree_on_selection_identity_rejection_residue_and_restart() {
 // ---------------------------------------------------------------------------
 
 use overdrive_core::dataplane::{BackendKey, Proto};
+use overdrive_testing::overdrive_test;
 
 use super::helpers::gateway_connect_rig::backend_target;
 
@@ -407,6 +409,7 @@ fn conflict_script<O: Owner + Observe>(owner: &O, rt: &tokio::runtime::Runtime) 
 /// Services' map state is unchanged; Host and Sim agree.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "mtls-relay")]
 #[test]
 fn host_and_sim_reject_an_update_whose_reverse_nat_key_belongs_to_another_service() {
     let host = Host::new_tagged("h131");

@@ -47,6 +47,7 @@ use aya::{
     programs::{ProgramFd, Xdp},
 };
 use aya_obj::generated::{bpf_attr, bpf_cmd::BPF_PROG_TEST_RUN};
+use overdrive_testing::overdrive_test;
 use serial_test::serial;
 
 /// `XDP_PASS` from `<bpf.h>` (`enum xdp_action`). Hardcoded per
@@ -520,6 +521,7 @@ fn outer_map_delete(outer_fd: &OwnedFd, key: &ServiceKey) {
 /// at Tier 3 (S-2.2-17 in `crates/overdrive-dataplane/tests/
 /// integration/reverse_nat_e2e.rs`), where a deterministic 3-iface
 /// topology owns the FIB context.
+#[overdrive_test(guest = "mtls-relay")]
 #[test]
 #[serial(env)]
 fn service_map_hit_rewrites_dst_ip_port_and_checksums() {
@@ -618,6 +620,7 @@ fn service_map_hit_rewrites_dst_ip_port_and_checksums() {
 /// key missed the outer HoM. Before 02-01 the outer key ignored proto,
 /// so this same TCP packet would hit the slot and rewrite the dst IP —
 /// the falsifying difference this test pins.
+#[overdrive_test(guest = "mtls-relay")]
 #[test]
 #[serial(env)]
 fn proto_mismatched_packet_misses_service_map() {
@@ -674,6 +677,7 @@ fn proto_mismatched_packet_misses_service_map() {
 /// backend. The mirror of `proto_mismatched_packet_misses_service_map`
 /// — together they pin that proto is a load-bearing key component, not
 /// ignored padding.
+#[overdrive_test(guest = "mtls-relay")]
 #[test]
 #[serial(env)]
 fn proto_matched_packet_hits_service_map() {
@@ -722,6 +726,7 @@ fn proto_matched_packet_hits_service_map() {
 /// Slice 03 restructure: SERVICE_MAP outer HoM has no entry for
 /// the test VIP — the outer-map `lookup_inner` returns NULL → the
 /// XDP wrapper short-circuits with `XDP_PASS` per ADR-0040 § 3.
+#[overdrive_test(guest = "mtls-relay")]
 #[test]
 #[serial(env)]
 fn service_map_miss_returns_xdp_pass_no_rewrite() {
@@ -765,6 +770,7 @@ fn service_map_miss_returns_xdp_pass_no_rewrite() {
 /// FIB-fallback hit `XDP_PASS`" (the post-Slice 05-04 hit path's
 /// PROG_TEST_RUN signature, which DOES rewrite the frame). See the
 /// dst-IP-unchanged assertion below.
+#[overdrive_test(guest = "mtls-relay")]
 #[test]
 #[serial(env)]
 fn truncated_ipv4_frame_returns_xdp_pass_no_lookup_no_crash() {

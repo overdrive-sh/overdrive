@@ -72,6 +72,7 @@ use overdrive_dataplane::maps::ServiceKey;
 use overdrive_dataplane::maps::hash_of_maps::HashOfMapsHandle;
 
 use overdrive_testing::netns::{NetNsError, ThreeIfaceTopology, threeiface_ips};
+use overdrive_testing::overdrive_test;
 
 /// The DNS-resolver UDP listener port from `dns-resolver.toml` (S-04).
 const UDP_PORT: u16 = 5353;
@@ -745,6 +746,7 @@ fn parse_pcap_udp_query_witness(ns_name: &str, pcap: &std::path::Path) -> usize 
 ///      path delivers a reply to the client whose source is the VIP
 ///      (10.96.0.10:5353), NOT the backend IP — observable via the
 ///      client-veth wire capture.
+#[overdrive_test(guest = "mtls-relay")]
 #[test]
 fn single_udp_listener_round_trip_carries_vip_source() {
     if !require_root_or_skip("S-04-A") {
@@ -812,6 +814,7 @@ fn single_udp_listener_round_trip_carries_vip_source() {
 /// UDP is connectionless; the kernel rewrites EACH response packet's
 /// source 5-tuple independently. Three datagrams must each produce a
 /// reply captured with the VIP as source.
+#[overdrive_test(guest = "mtls-relay")]
 #[test]
 fn every_udp_reply_independently_source_rewritten() {
     if !require_root_or_skip("S-04-B") {
@@ -892,6 +895,7 @@ fn every_udp_reply_independently_source_rewritten() {
 /// connected-socket `replies_received == 0` assertion is kept as a
 /// secondary belt-and-suspenders check (it alone could not see a
 /// backend-sourced reply, since the connected socket silently drops it).
+#[overdrive_test(guest = "mtls-relay")]
 #[test]
 fn missing_backend_response_distinguished_from_wrong_source() {
     if !require_root_or_skip("S-04-C") {

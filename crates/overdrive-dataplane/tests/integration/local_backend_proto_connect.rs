@@ -58,6 +58,7 @@ use std::time::{Duration, Instant};
 use overdrive_core::dataplane::backend_key::Proto;
 use overdrive_core::traits::dataplane::Dataplane;
 use overdrive_dataplane::EbpfDataplane;
+use overdrive_testing::overdrive_test;
 
 use super::helpers::veth::{VethError, VethPair};
 
@@ -108,6 +109,7 @@ fn spawn_udp_echo(addr: SocketAddrV4) -> SocketAddrV4 {
 }
 
 /// S-02-02 — proto-distinct local backends co-located on one `(vip, port)`.
+#[overdrive_test(guest = "mtls-relay")]
 #[test]
 #[serial_test::serial(env)]
 fn tcp_and_udp_connect_to_same_vip_port_reach_proto_correct_backend() {

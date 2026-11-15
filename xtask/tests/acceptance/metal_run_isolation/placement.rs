@@ -58,6 +58,19 @@ fn wrapper(fixture: &Fixture, binary: &str, name: &str) -> Command {
         fs::copy(&original,&staged).unwrap_or_else(|error|panic!("prepare the existing dispatcher before activating native adapter cases: {}: {error}",original.display()));
         staged
     } else {
+        if binary == GUEST_BINARY {
+            // The fixture's body is a script that carries no placement record,
+            // and the guest test declares its placement on itself rather than
+            // in the shared table, so its guest-group placement comes from the
+            // fixture's own table.
+            fs::write(
+                fixture.source.join("infra/metal/test-placement.json"),
+                format!(
+                    r#"{{"format":"overdrive-metal-test-placement-v1","placements":{{"{binary}":{{"{name}":{{"kind":"guest-group","group":"mtls-relay"}}}}}}}}"#
+                ),
+            )
+            .expect("guest-group placement input");
+        }
         fixture.source.join("target/debug/absent-dispatcher")
     };
     executable(

@@ -54,6 +54,7 @@ use aya::{
     programs::{ProgramFd, Xdp},
 };
 use aya_obj::generated::{bpf_attr, bpf_cmd::BPF_PROG_TEST_RUN};
+use overdrive_testing::overdrive_test;
 use serial_test::serial;
 
 /// XDP verdict constants — kernel ABI from `<bpf.h>` (`enum xdp_action`).
@@ -452,6 +453,7 @@ fn populate_reverse_nat(bpf: &mut Ebpf) {
 /// On Lima the FIB resolves `ROUTABLE_CLIENT_OCTETS` via the default
 /// route's gateway with a populated neighbour cache; `bpf_fib_lookup`
 /// returns `RET_SUCCESS` and the program returns `XDP_REDIRECT`.
+#[overdrive_test(guest = "mtls-relay", profile = "fib-hit")]
 #[test]
 #[serial(env)]
 fn udp_response_source_rewritten_to_vip_on_reverse_nat_hit() {
@@ -502,6 +504,7 @@ fn udp_response_source_rewritten_to_vip_on_reverse_nat_hit() {
 /// SETUP: REVERSE_NAT_MAP cleared. PKTGEN: a UDP response from
 /// `BACKEND_OCTETS:BACKEND_PORT`. CHECK: `XDP_PASS`, output frame ==
 /// input frame.
+#[overdrive_test(guest = "mtls-relay")]
 #[test]
 #[serial(env)]
 fn udp_response_passes_unmodified_on_reverse_nat_miss() {

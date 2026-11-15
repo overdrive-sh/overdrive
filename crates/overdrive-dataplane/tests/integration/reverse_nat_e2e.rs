@@ -78,6 +78,7 @@ fn tcp_frontend(vip: Ipv4Addr, port: u16) -> ServiceFrontend {
 }
 
 use overdrive_testing::netns::{NetNsError, ThreeIfaceTopology, threeiface_ips};
+use overdrive_testing::overdrive_test;
 
 // Stable IP / port plan shared across tests in this file. Both
 // scenarios (S-2.2-17, S-2.2-18) build a `ThreeIfaceTopology` (per
@@ -210,6 +211,7 @@ fn require_root_or_skip(test_name: &str) -> bool {
 /// 7. Spawn `nc <VIP> <VIP_PORT>` in `client-ns`.
 /// 8. Assert `nc` exits 0 and the client's stdout contains the
 ///    backend's payload — proves the full forward + reverse path.
+#[overdrive_test(guest = "mtls-relay")]
 #[test]
 fn real_tcp_connection_completes_through_vip_with_payload_echo() {
     if !require_root_or_skip("S-2.2-17") {
@@ -602,6 +604,7 @@ fn load_xdp_pass_stub(iface: &str, pin_dir: &std::path::Path) -> Result<StubXdpH
 /// late response from B1, assert no rewrite. If the entry was
 /// purged, the `tc_reverse_nat` lookup misses and the packet
 /// passes through with src unchanged.
+#[overdrive_test(guest = "mtls-relay")]
 #[test]
 fn removing_backend_purges_reverse_nat_entry_no_stale_rewrite() {
     if !require_root_or_skip("S-2.2-18") {
@@ -845,6 +848,7 @@ fn removing_backend_purges_reverse_nat_entry_no_stale_rewrite() {
 /// immediately because `ServiceKey` could not be constructed without
 /// a backend to supply `vip_port`. The fix recovers the last-known
 /// `ServiceKey` from the `service_backends` tracker.
+#[overdrive_test(guest = "mtls-relay")]
 #[test]
 fn empty_backend_update_removes_service_map_and_reverse_nat_entries() {
     if !require_root_or_skip("empty-backend-cleanup") {
@@ -966,6 +970,7 @@ fn empty_backend_update_removes_service_map_and_reverse_nat_entries() {
 /// exercises that contract through the real BPF maps (the selector
 /// logic itself is unit-tested by
 /// `empty_backend_purge_is_scoped_to_frontend_not_vip_wide`).
+#[overdrive_test(guest = "mtls-relay")]
 #[test]
 fn empty_backend_purge_scoped_to_frontend_leaves_other_ports_alive() {
     if !require_root_or_skip("frontend-scoped-purge") {
@@ -1120,6 +1125,7 @@ fn empty_backend_purge_scoped_to_frontend_leaves_other_ports_alive() {
 /// stale entries after a full deregistration — the same endpoint
 /// always gets back its old id (memo hit) instead of a fresh one,
 /// and the memo grows unboundedly under endpoint churn.
+#[overdrive_test(guest = "mtls-relay")]
 #[test]
 fn empty_backend_deregistration_releases_allocator_memo_entries() {
     if !require_root_or_skip("alloc-memo-release") {

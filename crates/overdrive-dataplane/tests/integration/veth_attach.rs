@@ -19,6 +19,8 @@
 // trades clippy quiet for noisier test code.
 #![allow(clippy::expect_used, clippy::significant_drop_tightening, clippy::print_stderr)]
 
+use overdrive_testing::overdrive_test;
+
 /// S-2.2-01 — Real veth pair attach with packet count assertion.
 ///
 /// Drives [`EbpfDataplane::new`] against a freshly-created veth pair,
@@ -51,6 +53,7 @@
 /// (a) emit a `.BTF` section from `cargo xtask bpf-build` (BPF build
 /// pipeline change), or (b) reshape `EbpfDataplane::new` to use
 /// `load_file` instead of `load(slice)`. Either lands separately.
+#[overdrive_test(guest = "mtls-relay")]
 #[test]
 #[ignore = "S-2.2-01 — `EbpfDataplane::new` uses `Ebpf::load(slice)` which rejects BTF-less ELF; sibling `service_map_forward.rs` succeeds via `load_file(path)`. Unblock via emitting BTF or reshaping `new()` to use `load_file`."]
 #[serial_test::serial(net_admin)]
@@ -263,7 +266,9 @@ mod parse_tests {
     )]
 
     use super::parse_pkts_dump;
+    use overdrive_testing::overdrive_test;
 
+    #[overdrive_test(guest = "mtls-relay")]
     #[test]
     fn parses_single_entry_with_numeric_bytes() {
         // value = 100 LE = [0x64, 0, 0, 0, 0, 0, 0, 0]
@@ -271,22 +276,26 @@ mod parse_tests {
         assert_eq!(parse_pkts_dump(json).unwrap(), 100);
     }
 
+    #[overdrive_test(guest = "mtls-relay")]
     #[test]
     fn parses_single_entry_with_hex_string_bytes() {
         let json = r#"[{"key":[0,0,0,0],"value":["0x64","0x00","0x00","0x00","0x00","0x00","0x00","0x00"]}]"#;
         assert_eq!(parse_pkts_dump(json).unwrap(), 100);
     }
 
+    #[overdrive_test(guest = "mtls-relay")]
     #[test]
     fn empty_array_is_zero() {
         assert_eq!(parse_pkts_dump("[]").unwrap(), 0);
     }
 
+    #[overdrive_test(guest = "mtls-relay")]
     #[test]
     fn rejects_non_array_top_level() {
         assert!(parse_pkts_dump(r#"{"x":1}"#).is_err());
     }
 
+    #[overdrive_test(guest = "mtls-relay")]
     #[test]
     fn rejects_wrong_value_size() {
         let json = r#"[{"key":[0,0,0,0],"value":[1,2,3,4]}]"#;
@@ -319,6 +328,7 @@ mod parse_tests {
 /// itself is unit-tested in `lib.rs` (see `should_fallback_to_generic`);
 /// the end-to-end happy-fallback path unblocks once `EbpfDataplane::new`
 /// switches to `load_file(path)` or the build pipeline emits BTF.
+#[overdrive_test(guest = "mtls-relay")]
 #[test]
 #[ignore = "S-2.2-02 — `EbpfDataplane::new` uses `Ebpf::load(slice)` which rejects BTF-less ELF (same blocker as S-2.2-01). Classification covered by unit test in lib.rs; end-to-end unblock landing separately."]
 #[serial_test::serial(net_admin)]
@@ -466,6 +476,7 @@ fn native_attach_failure_logs_fallback_warning() {
 /// to this variant before any aya BPF program is loaded.
 ///
 /// Does not require root — name resolution fails before XDP attach.
+#[overdrive_test(guest = "mtls-relay")]
 #[test]
 fn missing_iface_returns_typed_iface_not_found_error() {
     use overdrive_core::traits::dataplane::DataplaneError;

@@ -45,6 +45,7 @@ use aya::{
     programs::{ProgramFd, Xdp},
 };
 use aya_obj::generated::{bpf_attr, bpf_cmd::BPF_PROG_TEST_RUN};
+use overdrive_testing::overdrive_test;
 use serial_test::serial;
 
 /// `XDP_PASS` from the Linux uapi `<bpf.h>` (`enum xdp_action`).
@@ -166,6 +167,7 @@ impl AsRawFdU32 for std::os::fd::BorrowedFd<'_> {
 /// state (per testing.md § "Tests that mutate process-global state");
 /// other tests in this binary that load the same artifact must not
 /// race with this one's load + program-attach lifecycle.
+#[overdrive_test(guest = "mtls-relay")]
 #[test]
 #[serial(env)]
 fn bpf_unit_runs_xdp_pass_triptych_via_bpf_prog_test_run() {

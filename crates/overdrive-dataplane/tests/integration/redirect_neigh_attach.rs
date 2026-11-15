@@ -46,6 +46,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use overdrive_testing::netns::{NetNsError, ThreeIfaceTopology};
+use overdrive_testing::overdrive_test;
 
 /// Kernel-observable name for the forward-path program. The kernel
 /// truncates BPF program names to `BPF_OBJ_NAME_LEN` = 16 (15 chars
@@ -90,6 +91,7 @@ impl Drop for PinDirGuard {
 ///
 /// Lima wrapper (`cargo xtask lima run --`) runs as root by default;
 /// CI runs the integration job as root.
+#[overdrive_test(guest = "mtls-relay")]
 #[test]
 #[serial_test::serial(net_admin)]
 fn loader_attaches_xdp_reverse_nat_on_backend_veth_and_retires_tc_egress() {
@@ -413,7 +415,9 @@ mod parser_tests {
     //! kernel.
 
     use super::{parse_prog_name, parse_tc_prog_ids, parse_xdp_prog_ids};
+    use overdrive_testing::overdrive_test;
 
+    #[overdrive_test(guest = "mtls-relay")]
     #[test]
     fn parses_xdp_attach_native_mode_for_target_iface() {
         // Representative bpftool 7.x shape — top-level array, one
@@ -430,6 +434,7 @@ mod parser_tests {
         assert_eq!(parse_xdp_prog_ids(json, "lb_veth_a").unwrap(), vec![42_u64]);
     }
 
+    #[overdrive_test(guest = "mtls-relay")]
     #[test]
     fn parses_xdp_attach_generic_mode_after_skb_fallback() {
         let json = r#"[{
@@ -439,6 +444,7 @@ mod parser_tests {
         assert_eq!(parse_xdp_prog_ids(json, "lb_veth_b").unwrap(), vec![99_u64]);
     }
 
+    #[overdrive_test(guest = "mtls-relay")]
     #[test]
     fn ignores_xdp_attach_on_other_iface() {
         // The netns may carry XDP attaches on unrelated ifaces (the
@@ -454,24 +460,28 @@ mod parser_tests {
         assert_eq!(parse_xdp_prog_ids(json, "lb_veth_a").unwrap(), vec![42_u64]);
     }
 
+    #[overdrive_test(guest = "mtls-relay")]
     #[test]
     fn empty_xdp_array_is_empty_vec() {
         let json = r#"[{"xdp": [], "tc": []}]"#;
         assert!(parse_xdp_prog_ids(json, "lb_veth_a").unwrap().is_empty());
     }
 
+    #[overdrive_test(guest = "mtls-relay")]
     #[test]
     fn missing_xdp_field_is_empty_vec() {
         let json = r#"[{"tc": []}]"#;
         assert!(parse_xdp_prog_ids(json, "lb_veth_a").unwrap().is_empty());
     }
 
+    #[overdrive_test(guest = "mtls-relay")]
     #[test]
     fn parses_tc_empty_array() {
         let json = r#"[{"xdp": [], "tc": []}]"#;
         assert!(parse_tc_prog_ids(json, "lb_veth_a").unwrap().is_empty());
     }
 
+    #[overdrive_test(guest = "mtls-relay")]
     #[test]
     fn parses_tc_attached_program_id() {
         // Pre-ADR-0045 shape — would have surfaced before step 09-03.
@@ -482,12 +492,14 @@ mod parser_tests {
         assert_eq!(parse_tc_prog_ids(json, "lb_veth_a").unwrap(), vec![17_u64]);
     }
 
+    #[overdrive_test(guest = "mtls-relay")]
     #[test]
     fn rejects_non_array_top_level() {
         let json = r#"{"xdp": []}"#;
         assert!(parse_xdp_prog_ids(json, "lb_veth_a").is_err());
     }
 
+    #[overdrive_test(guest = "mtls-relay")]
     #[test]
     fn parses_prog_show_name() {
         let json = r#"{"id": 42, "type": "xdp", "name": "xdp_service_map_lookup", "tag": "abc"}"#;

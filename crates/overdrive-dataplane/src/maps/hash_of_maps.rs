@@ -347,6 +347,7 @@ mod tests {
     //! syscall requires CAP_BPF or root).
 
     use super::{HashOfMapsError, HashOfMapsHandle};
+    use overdrive_testing::overdrive_test;
 
     /// Constructing a HoM with `inner_max_entries = 0` is the
     /// canonical EINVAL trigger from `bpf(BPF_MAP_CREATE)`. The
@@ -354,6 +355,7 @@ mod tests {
     /// [`HashOfMapsError::MapAllocFailed`] — never collapse to a
     /// generic `Syscall` variant, because S-2.2-11 pins the
     /// distinct-typed-variant property.
+    #[overdrive_test(guest = "mtls-relay")]
     #[test]
     fn alloc_failure_with_zero_inner_entries_yields_typed_variant() {
         // SAFETY: `geteuid` is `unsafe` because the libc binding
@@ -380,6 +382,7 @@ mod tests {
     /// the full path from `bpf(BPF_MAP_CREATE)` × 2 through
     /// `HashOfMapsHandle::set` (the load-bearing
     /// `bpf_map_update_elem` swap of step 3).
+    #[overdrive_test(guest = "mtls-relay")]
     #[test]
     fn create_outer_and_inner_then_atomic_swap() {
         let euid = unsafe { libc::geteuid() };

@@ -71,6 +71,9 @@ libc.workspace        = true
 overdrive-core.workspace = true
 serial_test.workspace = true
 
+# `#[overdrive_test]` places the guest-placed tests.
+overdrive-testing.workspace = true
+
 [[bin]]
 name = "overdrive-bpf"
 path = "src/main.rs"

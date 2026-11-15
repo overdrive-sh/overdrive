@@ -40,6 +40,7 @@
 )]
 
 use super::helpers::packets::{ETH_HDR_LEN, IPV4_HDR_LEN, synthesise_tcp_syn_with_src_port};
+use overdrive_testing::overdrive_test;
 
 /// S-2.2-15 — Maglev real-distribution under realistic 5-tuple traffic.
 ///
@@ -56,6 +57,7 @@ use super::helpers::packets::{ETH_HDR_LEN, IPV4_HDR_LEN, synthesise_tcp_syn_with
 /// content. The bound is the architect-pinned ±5 % from
 /// `docs/feature/phase-2-xdp-service-map/design/architecture.md` § 5
 /// Q-Sig D2 / ASR-2.2-15.
+#[overdrive_test(guest = "mtls-relay")]
 #[test]
 fn maglev_real_distribution_under_xdp_trafficgen() {
     use std::collections::BTreeMap;

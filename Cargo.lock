@@ -2275,6 +2275,7 @@ dependencies = [
  "aya-obj",
  "libc",
  "overdrive-core",
+ "overdrive-testing",
  "serial_test",
 ]
 

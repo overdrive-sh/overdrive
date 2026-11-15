@@ -40,6 +40,7 @@ use aya::{
     programs::{ProgramFd, Xdp},
 };
 use aya_obj::generated::{bpf_attr, bpf_cmd::BPF_PROG_TEST_RUN};
+use overdrive_testing::overdrive_test;
 use serial_test::serial;
 
 // XDP verdict constants — kernel ABI; will not change.
@@ -431,6 +432,7 @@ fn synthesise_ipv6_ethertype() -> Vec<u8> {
 // surface as XDP_PASS after a HoM miss path; the drop verdict
 // distinguishes "sanity short-circuited" from "lookup-then-miss").
 
+#[overdrive_test(guest = "mtls-relay")]
 #[test]
 #[serial(env)]
 fn truncated_ipv4_header_drops_with_malformed_header_counter() {
@@ -463,6 +465,7 @@ fn truncated_ipv4_header_drops_with_malformed_header_counter() {
 
 // ---------- S-2.2-20 — XDP: pathological TCP flags drop ----------
 
+#[overdrive_test(guest = "mtls-relay")]
 #[test]
 #[serial(env)]
 fn tcp_syn_plus_rst_flags_drops_with_malformed_header_counter() {
@@ -501,6 +504,7 @@ fn tcp_syn_plus_rst_flags_drops_with_malformed_header_counter() {
 // correct for IHL = 5. The guard at check 2 now rejects IHL != 5 as
 // PassToKernel before any L4-offset computation runs.
 
+#[overdrive_test(guest = "mtls-relay")]
 #[test]
 #[serial(env)]
 fn ipv4_with_options_ihl6_returns_xdp_pass_no_drop_counter_increment() {
@@ -532,6 +536,7 @@ fn ipv4_with_options_ihl6_returns_xdp_pass_no_drop_counter_increment() {
 
 // ---------- S-2.2-21 — XDP: IPv6 ethertype passes through ----------
 
+#[overdrive_test(guest = "mtls-relay")]
 #[test]
 #[serial(env)]
 fn ipv6_ethertype_returns_xdp_pass_no_drop_counter_increment() {
@@ -563,6 +568,7 @@ fn ipv6_ethertype_returns_xdp_pass_no_drop_counter_increment() {
 // truncated L4 payload must be dropped before downstream code reads
 // dst_port from frame-padding bytes past the claimed IP payload.
 
+#[overdrive_test(guest = "mtls-relay")]
 #[test]
 #[serial(env)]
 fn tcp_total_len_20_zero_l4_payload_drops_with_malformed_header_counter() {
@@ -592,6 +598,7 @@ fn tcp_total_len_20_zero_l4_payload_drops_with_malformed_header_counter() {
     );
 }
 
+#[overdrive_test(guest = "mtls-relay")]
 #[test]
 #[serial(env)]
 fn tcp_total_len_39_one_byte_short_drops_with_malformed_header_counter() {
@@ -620,6 +627,7 @@ fn tcp_total_len_39_one_byte_short_drops_with_malformed_header_counter() {
     );
 }
 
+#[overdrive_test(guest = "mtls-relay")]
 #[test]
 #[serial(env)]
 fn udp_total_len_27_one_byte_short_drops_with_malformed_header_counter() {

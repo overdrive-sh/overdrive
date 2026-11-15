@@ -35,6 +35,7 @@
 // file-scope helper fns below. Test-body-only imports stay inside
 // the fn.
 use super::helpers::packets::{ETH_HDR_LEN, IPV4_HDR_LEN, synthesise_tcp_syn_with_src_port};
+use overdrive_testing::overdrive_test;
 
 /// GREEN-path companion to S-2.2-09 — exercises the full 5-step
 /// atomic backend-set swap end-to-end through the kernel-side XDP
@@ -81,6 +82,7 @@ use super::helpers::packets::{ETH_HDR_LEN, IPV4_HDR_LEN, synthesise_tcp_syn_with
 /// same artifact via `EbpfLoader::load_file`, so the two MUST NOT
 /// race — sharing the `env` group puts both tests in the same
 /// serial sequence (per `service_map_forward.rs`'s precedent).
+#[overdrive_test(guest = "mtls-relay")]
 #[test]
 #[serial_test::serial(env)]
 fn swap_inner_map_distributes_traffic_across_new_backend_set() {
@@ -351,6 +353,7 @@ fn swap_inner_map_distributes_traffic_across_new_backend_set() {
 /// gate. Asserts the count is within ASR-2.2-03's 20% delta of the
 /// 02-05 baseline (401 → ≤ 481), and well within the 50% /
 /// 1M-instruction CAP_BPF ceilings (architecture.md § 7 D3).
+#[overdrive_test(guest = "mtls-relay")]
 #[test]
 #[serial_test::serial(env)]
 fn verifier_budget_xdp_service_map_lookup_within_20pct_of_baseline() {
@@ -487,6 +490,7 @@ fn verifier_budget_xdp_service_map_lookup_within_20pct_of_baseline() {
 /// becomes load-bearing on the SECOND baseline run; this run gates
 /// only on the absolute ceilings (≤ 600,000 per ASR-2.2-03; ≤ 500,000
 /// for the L1-cache-fits target).
+#[overdrive_test(guest = "mtls-relay")]
 #[test]
 #[serial_test::serial(env)]
 fn verifier_budget_xdp_reverse_nat_lookup_within_absolute_ceiling() {
@@ -715,6 +719,7 @@ fn inject_tcp_syns_with_src_ports(
 /// end-to-end against real kernel BPF maps. The kernel-side
 /// SERVICE_MAP ELF migration (which would let 50 kpps real traffic
 /// flow through the XDP path) is sequenced into 03-03.
+#[overdrive_test(guest = "mtls-relay")]
 #[test]
 fn hash_of_maps_handle_create_swap_delete_round_trip() {
     use overdrive_dataplane::maps::hash_of_maps::HashOfMapsHandle;
@@ -831,6 +836,7 @@ fn hash_of_maps_handle_create_swap_delete_round_trip() {
 ///   3. Run `sweep_orphan_backends` with `live_ids = {1, 2}`.
 ///   4. Assert BACKEND_MAP holds {1, 2}; removed list = [3].
 ///   5. Idempotent re-sweep removes nothing; map unchanged.
+#[overdrive_test(guest = "mtls-relay")]
 #[test]
 #[serial_test::serial(env)]
 fn removing_backend_purges_orphaned_backend_map_entries() {
@@ -997,6 +1003,7 @@ fn removing_backend_purges_orphaned_backend_map_entries() {
 /// Per `serial_test::serial(env)` — shares the env group with the
 /// other Tier 3 tests in this file because all four read the same
 /// on-disk BPF artifact.
+#[overdrive_test(guest = "mtls-relay")]
 #[test]
 #[serial_test::serial(env)]
 fn atomic_swap_under_50kpps_traffic_drops_zero_packets() {
@@ -1358,6 +1365,7 @@ fn atomic_swap_under_50kpps_traffic_drops_zero_packets() {
 /// limits) and is the failure mode operators must see surfaced as
 /// the typed `MapAllocFailed` variant rather than a generic
 /// `LoadFailed(string)`.
+#[overdrive_test(guest = "mtls-relay")]
 #[test]
 fn kernel_rejects_inner_map_alloc_existing_mapping_preserved() {
     use overdrive_core::traits::dataplane::DataplaneError;

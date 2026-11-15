@@ -74,6 +74,7 @@ use std::time::{Duration, Instant};
 use overdrive_core::dataplane::backend_key::Proto;
 use overdrive_core::traits::dataplane::{Dataplane, DataplaneError};
 use overdrive_dataplane::EbpfDataplane;
+use overdrive_testing::overdrive_test;
 
 use super::helpers::veth::{VethError, VethPair};
 
@@ -217,6 +218,7 @@ fn non_service_exchange(payload: &[u8]) -> Option<([u8; 64], usize, SocketAddrV4
 /// Tier-3 green). This hardening test lands GREEN immediately — it pins the
 /// three corrected assertions against already-shipped production rather
 /// than driving a RED→GREEN transition.
+#[overdrive_test(guest = "mtls-relay")]
 #[test]
 #[serial_test::serial(env)]
 fn non_service_unconnected_udp_reads_real_source_recvmsg4_noop_on_miss() {
@@ -381,6 +383,7 @@ fn non_service_unconnected_udp_reads_real_source_recvmsg4_noop_on_miss() {
 ///     `CgroupSendRecvAttach` inside `EbpfDataplane::new`, which the
 ///     composition root surfaces as `health.startup.refused` via the
 ///     `#[from] DataplaneBootError` chain (ADR-0028/ADR-0034 precedent).
+#[overdrive_test(guest = "mtls-relay")]
 #[test]
 #[serial_test::serial(env)]
 fn below_floor_kernel_refuses_at_attach_preflight_observably() {
@@ -455,6 +458,7 @@ fn below_floor_kernel_refuses_at_attach_preflight_observably() {
 /// (port 0 → kernel-assigned, guaranteed off :53/:5353) and the bind
 /// `Result` is asserted LOUDLY — an `EADDRINUSE` (or any bind error) fails
 /// the test with the failing port named, never swallowed.
+#[overdrive_test(guest = "mtls-relay")]
 #[test]
 #[serial_test::serial(env)]
 fn stub_resolver_binds_off_5353_and_asserts_clean_bind() {

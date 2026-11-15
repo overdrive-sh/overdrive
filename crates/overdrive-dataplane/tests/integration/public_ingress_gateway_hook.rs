@@ -49,6 +49,7 @@ use overdrive_gateway::ports::{
     GatewayConnectCleanup, GatewayConnectDataplane, GatewayConnectDataplaneError,
     GatewaySelectionReceipt,
 };
+use overdrive_testing::overdrive_test;
 
 use super::helpers::gateway_connect_rig::{
     HostRig, alloc, backend, backend_target, dial, frontend, frontend_target, routing_snapshot,
@@ -98,6 +99,7 @@ fn live_counts(rig: &HostRig) -> (u32, usize) {
 /// touches a gateway scaffold.
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
+#[overdrive_test(guest = "mtls-relay")]
 #[test]
 fn unregistered_cgroup_socket_keeps_non_service_behaviour() {
     let rig = HostRig::new("h41");
@@ -171,6 +173,7 @@ fn unregistered_cgroup_socket_keeps_non_service_behaviour() {
 /// counts at zero, and the test installs no nft rule or route (snapshots equal).
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "mtls-relay")]
 #[test]
 fn registered_socket_is_selected_and_its_dial_reaches_the_backend_from_the_loopback_source() {
     let rig = HostRig::new("h63");
@@ -228,6 +231,7 @@ fn registered_socket_is_selected_and_its_dial_reaches_the_backend_from_the_loopb
 /// is gone is the native lane's.)
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "mtls-relay")]
 #[test]
 fn a_stale_service_entry_with_a_dead_backend_selects_it_and_the_dial_fails() {
     let rig = HostRig::new("h56");
@@ -258,6 +262,7 @@ fn a_stale_service_entry_with_a_dead_backend_selects_it_and_the_dial_fails() {
 /// `gateway.connect_probe` is the control-plane integration binary's.)
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "mtls-relay")]
 #[test]
 fn the_sentinel_probe_passes_on_the_real_hook_and_an_elapsed_deadline_times_out() {
     let rig = HostRig::new("h57");
@@ -286,6 +291,7 @@ fn the_sentinel_probe_passes_on_the_real_hook_and_an_elapsed_deadline_times_out(
 /// allocation's identity.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "mtls-relay")]
 #[test]
 fn after_an_instance_restart_old_identities_and_receipts_are_gone_until_reprogrammed() {
     let rig = HostRig::new("h71");
@@ -369,6 +375,7 @@ fn after_an_instance_restart_old_identities_and_receipts_are_gone_until_reprogra
 /// of the interleaving jitter and the rounds run are printed.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "mtls-relay")]
 #[test]
 fn updates_racing_identity_reads_never_return_a_missing_identity_for_a_selected_id() {
     const ROUNDS: u16 = 2_000;
@@ -462,6 +469,7 @@ fn updates_racing_identity_reads_never_return_a_missing_identity_for_a_selected_
 /// `user_ip4`/`user_port` inside the program.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "mtls-relay")]
 #[test]
 fn a_registered_connect_lands_on_the_programmed_backend_with_the_port_in_network_order() {
     let rig = HostRig::new("h124");
@@ -501,6 +509,7 @@ fn a_registered_connect_lands_on_the_programmed_backend_with_the_port_in_network
 /// `PermissionDenied`), and creates no receipt.
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
+#[overdrive_test(guest = "mtls-relay")]
 #[test]
 fn a_socket_whose_intent_was_cleaned_up_is_not_selected_and_leaves_no_receipt() {
     let rig = HostRig::new("h125b");
@@ -552,6 +561,7 @@ fn a_socket_whose_intent_was_cleaned_up_is_not_selected_and_leaves_no_receipt() 
 /// and creates no receipt: the outstanding intent is untouched.
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
+#[overdrive_test(guest = "mtls-relay")]
 #[test]
 fn a_plain_socket_dialing_the_frontend_is_not_rewritten_while_an_intent_is_outstanding() {
     let rig = HostRig::new("h125c");

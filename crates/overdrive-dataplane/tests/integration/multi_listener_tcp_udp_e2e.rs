@@ -79,6 +79,7 @@ use overdrive_dataplane::maps::ServiceKey;
 use overdrive_dataplane::maps::hash_of_maps::HashOfMapsHandle;
 
 use overdrive_testing::netns::{NetNsError, ThreeIfaceTopology, threeiface_ips};
+use overdrive_testing::overdrive_test;
 
 /// The `edge.toml` TCP listener port (S-05). The backend binds the same
 /// port (production `update_service` derives the SERVICE_MAP key port
@@ -651,6 +652,7 @@ fn assert_reverse_nat_key_present_proto_distinguished(
 /// the opposite-proto lookup MISSES (the proto byte is load-bearing).
 /// Then a real tcp round-trip and a real udp round-trip each deliver a
 /// reply sourced from the VIP.
+#[overdrive_test(guest = "mtls-relay")]
 #[test]
 fn two_listener_service_installs_both_protocol_paths() {
     if !require_root_or_skip("S-05-A") {
@@ -717,6 +719,7 @@ fn two_listener_service_installs_both_protocol_paths() {
 /// VIP-sourced in isolation (the proto byte in each REVERSE_NAT key keeps
 /// the kernel `xdp_reverse_nat_lookup` matching the right path per
 /// response proto).
+#[overdrive_test(guest = "mtls-relay")]
 #[test]
 fn each_listener_reverse_path_independently_vip_sourced() {
     if !require_root_or_skip("S-05-B") {
@@ -767,6 +770,7 @@ fn each_listener_reverse_path_independently_vip_sourced() {
 /// keys — `(backend, 8080, tcp)`, `(backend, 8081, udp)`, `(backend,
 /// 8082, udp)` — and the new udp/8082 round-trip is VIP-sourced AND both
 /// pre-existing listeners still deliver VIP-sourced replies.
+#[overdrive_test(guest = "mtls-relay")]
 #[test]
 fn adding_listener_on_resubmit_converges_without_breaking_existing() {
     if !require_root_or_skip("S-05-C") {
@@ -892,6 +896,7 @@ fn adding_listener_on_resubmit_converges_without_breaking_existing() {
 /// (2) a udp round-trip STILL delivers a VIP-sourced reply — proof the
 ///     udp SERVICE_MAP outer slot survived (a deleted slot → XDP_PASS →
 ///     `nc -u` drops the non-VIP-sourced reply).
+#[overdrive_test(guest = "mtls-relay")]
 #[test]
 fn empty_backend_purge_of_one_listener_preserves_co_resident_proto() {
     if !require_root_or_skip("S-05-D") {

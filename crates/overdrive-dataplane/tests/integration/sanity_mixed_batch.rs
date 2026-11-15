@@ -77,6 +77,7 @@ use super::helpers::packets::{
     ETH_HDR_LEN, IPV4_HDR_LEN, TCP_HDR_LEN, ipv4_header_checksum, tcp_checksum,
 };
 use overdrive_testing::netns::{NetNsError, ThreeIfaceTopology};
+use overdrive_testing::overdrive_test;
 
 const PKT_LEN: usize = ETH_HDR_LEN + IPV4_HDR_LEN + TCP_HDR_LEN;
 
@@ -222,6 +223,7 @@ fn inject_frames_into_ns(
 
 /// S-2.2-22 — Mixed batch (50 valid + 10 truncated + 10 SYN+RST +
 /// 10 IPv6) increments per-class counters correctly.
+#[overdrive_test(guest = "mtls-relay")]
 #[test]
 #[serial_test::serial(env)]
 fn mixed_batch_increments_per_class_counters_correctly() {

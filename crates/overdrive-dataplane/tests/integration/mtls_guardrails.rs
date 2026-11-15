@@ -85,6 +85,7 @@ use overdrive_core::traits::mtls_enforcement::{
     InterceptedConnection, MtlsEnforcement, MtlsEnforcementError, MtlsLimits, PumpLiveness, Routed,
 };
 use overdrive_dataplane::mtls::HostMtlsEnforcement;
+use overdrive_testing::overdrive_test;
 
 use super::helpers::guest_dial::CountingNotServing;
 use super::helpers::mtls_pki::{Leaf, TestPki};
@@ -119,6 +120,7 @@ fn pick_free_port() -> u16 {
 }
 
 /// The composed 04-01 guardrails acceptance gate.
+#[overdrive_test(guest = "mtls-relay")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn guardrails_fail_closed_limits_supervision_exemption_authn_boundary() {
     // The dev-dependency on `overdrive-sim` unifies the `aws-lc-rs` rustls feature into
@@ -700,6 +702,7 @@ fn outbound_peer_serve(
 /// `PeerIdentityMismatch` is NEVER produced. This case wires the moment #242 supplies
 /// `expected_peer` (east-west SPIFFE-ID resolution). Until then NOTHING calls the
 /// wrong-but-valid-peer case 'protected' — this gate stays ignored.
+#[overdrive_test(guest = "mtls-relay")]
 #[tokio::test]
 #[ignore = "gated on #242 supplying expected_peer (v1 is authn-only; expected_peer stays None)"]
 async fn wrong_but_valid_peer_is_peer_identity_mismatch() {

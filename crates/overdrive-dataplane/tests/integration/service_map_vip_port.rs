@@ -53,6 +53,7 @@ use overdrive_core::id::ServiceVip;
 use overdrive_core::traits::dataplane::{Backend, Dataplane};
 use overdrive_dataplane::EbpfDataplane;
 use overdrive_testing::netns::{NetNsError, ThreeIfaceTopology};
+use overdrive_testing::overdrive_test;
 
 /// The declared service VIP. The frontend port (53) differs from the
 /// backend listener port (5353) — this divergence is the whole point of
@@ -100,6 +101,7 @@ fn require_root_or_skip(test_name: &str) -> bool {
 /// the exact misplacement. After the fix (`vip_port = frontend.port()`)
 /// the slot lands under 53 and both assertions flip to the correct
 /// values.
+#[overdrive_test(guest = "mtls-relay")]
 #[test]
 fn service_map_keyed_on_vip_port_not_backend_port() {
     if !require_root_or_skip("service-map-vip-port-keying") {

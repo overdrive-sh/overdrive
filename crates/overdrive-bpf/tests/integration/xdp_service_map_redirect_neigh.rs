@@ -74,6 +74,7 @@ use aya::{
     programs::{ProgramFd, Xdp},
 };
 use aya_obj::generated::{bpf_attr, bpf_cmd::BPF_PROG_TEST_RUN};
+use overdrive_testing::overdrive_test;
 use serial_test::serial;
 
 /// XDP verdict constants — kernel ABI from `<bpf.h>` (`enum xdp_action`).
@@ -645,6 +646,7 @@ fn populate_service_map(
 /// default route's gateway with a populated neighbour cache;
 /// `bpf_fib_lookup` returns `RET_SUCCESS` and the cross-iface
 /// branch fires (egress iface ≠ default ingress=0).
+#[overdrive_test(guest = "mtls-relay", profile = "fib-hit")]
 #[test]
 #[serial(env)]
 fn forward_path_redirects_via_neigh_on_fib_hit() {
@@ -694,6 +696,7 @@ fn forward_path_redirects_via_neigh_on_fib_hit() {
 /// miss, so this test alone is not a RED-flipper for the pivot —
 /// its value is preventing regression of the fallback semantics
 /// during the post-pivot rewrite of `fib_resolve_and_rewrite_mac`.
+#[overdrive_test(guest = "mtls-relay")]
 #[test]
 #[serial(env)]
 fn forward_path_passes_to_kernel_on_fib_miss() {

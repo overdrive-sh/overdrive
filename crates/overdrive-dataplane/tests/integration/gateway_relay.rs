@@ -55,6 +55,7 @@ use overdrive_gateway::ports::{
     GatewayRelay, HeadTerminator, KtlsReadHalf, KtlsWriteHalf, LegReadError, PublicHandshakeError,
     RelayError, ThroughBytes,
 };
+use overdrive_testing::overdrive_test;
 
 use super::helpers::relay_peers::{
     ALL_AES, Drain, Lcg, Offer, PIPE_CAPACITY, Received, Rig, TlsStat, accept_leg, accept_leg_with,
@@ -258,6 +259,7 @@ async fn exchange(rig: &mut Rig, request: Vec<u8>, response: Vec<u8>) {
 /// sizes straddling heads and chunk-size lines, under both AES suites (P-12).
 /// Peer-side receive sizes are logged; every descriptor is released afterwards.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "mtls-relay")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn body_octets_are_exact_at_both_peers_across_keep_alive_exchanges_around_the_pipe_capacity()
 {
@@ -423,6 +425,7 @@ fn key_update_script(position: Position, requested: bool) -> (Vec<Segment>, Vec<
 /// the answer) and `TlsTxRekeyOk` by 1 + r (the sender's own re-arm, plus the
 /// relay's after answering).
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "mtls-relay")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn peer_key_update_leaves_octets_exact_and_is_never_forwarded_or_originated() {
     let positions =
@@ -547,6 +550,7 @@ async fn wait_until(mut condition: impl FnMut() -> bool, secs: u64) {
 /// in order and `TlsDecryptError` is unchanged. The answer is sent after the
 /// in-flight write step, never inside it (the transmit lock, assumption A-K5).
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "mtls-relay")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn key_update_request_during_a_large_splice_out_never_tears_the_record_stream() {
     const TOTAL: usize = 64 * 1024 * 1024;
@@ -778,6 +782,7 @@ async fn key_update_answer_survives_cancelled_reads(blocked: Blocked) {
 /// DATA record decrypts at the peer, `TlsDecryptError` is unchanged, and a
 /// KeyUpdate that did not ask for one is never answered. Both AES suites.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "mtls-relay")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_key_update_answer_survives_a_read_dropped_while_the_transmit_lock_is_held() {
     key_update_answer_survives_cancelled_reads(Blocked::TransmitLockHeld).await;
@@ -788,6 +793,7 @@ async fn a_key_update_answer_survives_a_read_dropped_while_the_transmit_lock_is_
 /// read is dropped repeatedly (three times) before the peer reads. Both AES
 /// suites.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "mtls-relay")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_key_update_answer_survives_reads_dropped_while_the_send_buffer_is_full() {
     key_update_answer_survives_cancelled_reads(Blocked::SendBufferFull).await;
@@ -803,6 +809,7 @@ async fn a_key_update_answer_survives_reads_dropped_while_the_send_buffer_is_ful
 /// ends cleanly only where the framing says the message is complete. The
 /// NewSessionTicket arm needs a client-role leg (see the module documentation).
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "mtls-relay")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn close_notify_is_typed_by_where_it_falls_in_the_message() {
     // Mid-head.
@@ -885,6 +892,7 @@ async fn close_notify_is_typed_by_where_it_falls_in_the_message() {
 /// client receives none. The 16 MiB production leg-C run (`TlsRxRekeyReceived`
 /// from leg-C asserted equal to 0, assumption A-K7) is the conformance arm.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "mtls-relay")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn upstream_half_answers_injected_key_updates_and_originates_none() {
     const BODY: usize = 2 * 1024 * 1024;
@@ -949,6 +957,7 @@ async fn upstream_half_answers_injected_key_updates_and_originates_none() {
 /// `Content-Length` body and for a chunked body (P-16 not adopted: no pipe is
 /// held until close).
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "mtls-relay")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_connection_waiting_for_its_next_request_holds_no_pipe_descriptor() {
     for chunked in [false, true] {
@@ -1012,6 +1021,7 @@ async fn a_connection_waiting_for_its_next_request_holds_no_pipe_descriptor() {
 /// 2 x the pipe capacity) and resident memory grows by at most 4 MiB; after the
 /// reader resumes the whole 256 MiB stream arrives octet-exact.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "mtls-relay")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_stalled_reader_freezes_the_sender_within_the_socket_buffers_and_memory_stays_flat() {
     const TOTAL: usize = 256 * 1024 * 1024;
@@ -1066,6 +1076,7 @@ async fn a_stalled_reader_freezes_the_sender_within_the_socket_buffers_and_memor
 /// `SPLICE_F_MORE`: each splice-out call ends its record); each piece arrives
 /// before the next is sent.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "mtls-relay")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_trickled_response_reaches_the_client_piece_by_piece() {
     const PIECES: usize = 20;
@@ -1129,6 +1140,7 @@ async fn a_trickled_response_reaches_the_client_piece_by_piece() {
 /// into a non-empty pipe would lose octets, which exactness over repeated bodies
 /// observes (A-K6).
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "mtls-relay")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn mixed_record_sizes_straddling_heads_and_chunk_lines_arrive_octet_exact() {
     const SEED: u64 = 0x5eed_0112;
@@ -1172,6 +1184,7 @@ async fn mixed_record_sizes_straddling_heads_and_chunk_lines_arrive_octet_exact(
 /// is the only real-kernel arm; the typed ULP refusals are exercised by the Sim
 /// substrate lies (S-PIG-99) and the arm-failure typing by S-PIG-98.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "mtls-relay")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn honest_kernel_probe_passes_and_releases_its_descriptors() {
     let relay = host_relay();
@@ -1212,6 +1225,7 @@ fn rejection(status: &str) -> Vec<u8> {
 /// never a reset, for each rejection the gateway or an origin can send before the
 /// request body is read; the discard ends at the peer's close_notify.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "mtls-relay")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn lingering_close_lets_the_client_read_the_response_then_close_notify_not_a_reset() {
     for (status, why) in REJECTIONS {
@@ -1271,6 +1285,7 @@ async fn lingering_close_lets_the_client_read_the_response_then_close_notify_not
 /// leg is still open to the peer (the lingering close, not the discard, closes
 /// the socket).
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "mtls-relay")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn the_discard_ends_at_max_octets_at_the_deadline_and_at_the_no_progress_window() {
     const PIECE: usize = 64 * 1024;
@@ -1407,6 +1422,7 @@ async fn the_discard_ends_at_max_octets_at_the_deadline_and_at_the_no_progress_w
 /// the count of octets moved; one over the ceiling fails `LimitExceeded` and
 /// never ends cleanly (R-12).
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "mtls-relay")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_close_delimited_response_ends_cleanly_on_close_notify_and_is_bounded() {
     const BODY: usize = 1024 * 1024;
@@ -1464,6 +1480,7 @@ async fn a_close_delimited_response_ends_cleanly_on_close_notify_and_is_bounded(
 /// configuration listing exactly the two suites is the unit arm in
 /// `overdrive-gateway`.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "mtls-relay")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn both_aes_suites_relay_exact_and_a_chacha_only_client_is_refused_before_arming() {
     for offer in ALL_AES {
@@ -1528,6 +1545,7 @@ fn plain_client_handshake(
 /// variant per stimulus by observing the production adapter, and the assertion here
 /// is that exact variant, never "any error".
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "mtls-relay")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn public_handshake_refusals_are_typed_and_leave_nothing_armed() {
     let relay = host_relay();
