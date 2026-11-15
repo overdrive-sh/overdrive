@@ -2575,6 +2575,7 @@ dependencies = [
  "futures",
  "libc",
  "overdrive-core",
+ "overdrive-testing-macros",
  "proptest",
  "rtnetlink",
  "thiserror 2.0.18",

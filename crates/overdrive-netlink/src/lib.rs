@@ -26,3 +26,9 @@ pub mod runtime;
 pub use client::{Client, FibRouteType};
 pub use error::{NetlinkError, errno_is_idempotent};
 pub use runtime::{block_on_host_netlink, block_on_netlink};
+
+#[cfg(test)]
+use overdrive_testing_macros::overdrive_test_default;
+
+#[cfg(test)]
+overdrive_test_default!(host_pure);

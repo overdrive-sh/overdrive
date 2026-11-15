@@ -54,6 +54,8 @@ thiserror.workspace   = true
 
 [dev-dependencies]
 proptest.workspace = true
+# `overdrive_test_default!` and `placement!` place the host-pure tests.
+overdrive-testing-macros.workspace = true
 
 [lints]
 workspace = true
