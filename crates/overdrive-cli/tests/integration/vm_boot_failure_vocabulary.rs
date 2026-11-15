@@ -1790,6 +1790,7 @@ async fn job_plus_vm_spec_is_accepted_and_its_allocation_reaches_running() {
 /// (`grep -rn 'should_panic.*RED scaffold' crates/`) pending a scope ruling.
 /// VM Service admission is covered by the Service-kind VM walking skeleton;
 /// this scenario remains the Schedule scaffold until its execution path exists.
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 #[should_panic(expected = "RED scaffold")]
 fn scheduled_vm_workload_reaches_running_when_its_first_firing_becomes_due() {

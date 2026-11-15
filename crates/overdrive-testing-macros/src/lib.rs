@@ -38,6 +38,22 @@
 //! Where `#[quint_test]` or `#[quint_run]` is present, `#[overdrive_test]` goes
 //! below it.
 //!
+//! # `#[should_panic]`
+//!
+//! A guest form composes with `#[should_panic]` (with or without `expected =
+//! "..."`): the host-side half reproduces the in-guest outcome for libtest. The
+//! in-guest run passes exactly when the body panicked as the attribute expects,
+//! so a passing run makes the host half panic with the `expected` text (a fixed
+//! message when there is none), which satisfies the host's `should_panic`; a
+//! failing run (no panic, or the wrong message) makes the host half print the
+//! failure and return, so the host's `should_panic` reports the test failed.
+//! Where the body runs in place the attribute applies to it unchanged, and
+//! `host_pure` / `native_launcher` leave the function untouched.
+//!
+//! The macro reads the function's other attributes, so `#[overdrive_test]` is
+//! the first attribute of the function, above `#[test]` / `#[tokio::test]` and
+//! `#[should_panic]`; an attribute above it is not visible to it.
+//!
 //! # Placement record
 //!
 //! Every declaration emits one record into the `overdrive_test_placement` ELF
@@ -381,7 +397,7 @@ fn require_lane_fixture(fixture: &LitStr) -> syn::Result<()> {
 
 /// Prepends the guest gate to the body of `function`.
 fn guard_body(function: &mut ItemFn, name: &str, hand_off: &TokenStream2) {
-    let gate = gate(name, hand_off);
+    let gate = gate(name, hand_off, should_panic_message(function).as_deref());
     let original = &function.block;
     function.block = syn::parse_quote!({
         #gate
@@ -499,10 +515,68 @@ fn known_profile_check(group: &LitStr, profile: &LitStr) -> TokenStream2 {
     quote!(const _: () = { #statement };)
 }
 
+/// The panic message the host half raises when the function carries
+/// `#[should_panic]`: the attribute's `expected` text, or a fixed message when
+/// it names none. `None` when the function has no `#[should_panic]`.
+fn should_panic_message(function: &ItemFn) -> Option<String> {
+    let attribute =
+        function.attrs.iter().find(|attribute| attribute.path().is_ident("should_panic"))?;
+    let expected = match &attribute.meta {
+        Meta::Path(_) => None,
+        Meta::NameValue(pair) => string_value(&pair.value),
+        Meta::List(_) => {
+            let mut expected = None;
+            // A malformed list is rustc's own `should_panic` error.
+            let _ = attribute.parse_nested_meta(|nested| {
+                if nested.path.is_ident("expected") {
+                    expected = string_value(&nested.value()?.parse::<Expr>()?);
+                }
+                Ok(())
+            });
+            expected
+        }
+    };
+    Some(
+        expected
+            .unwrap_or_else(|| "the guest body panicked, as #[should_panic] expects".to_owned()),
+    )
+}
+
+fn string_value(expression: &Expr) -> Option<String> {
+    match expression {
+        Expr::Lit(ExprLit { lit: Lit::Str(value), .. }) => Some(value.value()),
+        _ => None,
+    }
+}
+
 /// The statements prepended to a guest- or lane-placed test body: the hand-off
 /// for the host-side half. `hand_off` evaluates to `Result<(), RunInGuestError>`
 /// over the test binary `exe` and the libtest name `test_name` in scope.
-fn gate(name: &str, hand_off: &TokenStream2) -> TokenStream2 {
+///
+/// With `should_panic` the outcome of the in-guest run maps to the host's
+/// `#[should_panic]`: a passing run (the guest body panicked as expected) panics
+/// with the message, anything else is printed and returns so the host reports
+/// that no panic occurred.
+fn gate(name: &str, hand_off: &TokenStream2, should_panic: Option<&str>) -> TokenStream2 {
+    let (passed, failed, hand_off_panicked) = should_panic.map_or_else(
+        || {
+            (
+                quote!(),
+                quote!(::core::panic!("{error}")),
+                quote!(::std::panic::resume_unwind(panic)),
+            )
+        },
+        |message| {
+            (
+                quote!(::core::panic!("{}", #message)),
+                quote!(::std::eprintln!("the in-guest run did not panic as expected: {error}")),
+                quote! {{
+                    drop(panic);
+                    ::std::eprintln!("the in-guest hand-off panicked");
+                }},
+            )
+        },
+    );
     quote! {
         const __OVERDRIVE_TEST_FULL_NAME: &str = ::core::concat!(::core::module_path!(), "::", #name);
         if !::overdrive_testing::placement::inside_guest()
@@ -518,11 +592,9 @@ fn gate(name: &str, hand_off: &TokenStream2) -> TokenStream2 {
                 scope.spawn(|| #hand_off).join()
             });
             match outcome {
-                ::core::result::Result::Ok(::core::result::Result::Ok(())) => {}
-                ::core::result::Result::Ok(::core::result::Result::Err(error)) => {
-                    ::core::panic!("{error}")
-                }
-                ::core::result::Result::Err(panic) => ::std::panic::resume_unwind(panic),
+                ::core::result::Result::Ok(::core::result::Result::Ok(())) => { #passed }
+                ::core::result::Result::Ok(::core::result::Result::Err(error)) => { #failed }
+                ::core::result::Result::Err(panic) => #hand_off_panicked,
             }
             return;
         }

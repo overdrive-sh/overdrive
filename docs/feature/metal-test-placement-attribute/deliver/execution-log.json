@@ -1,0 +1,286 @@
+{
+  "schema_version": "3.0",
+  "feature_id": "metal-test-placement-attribute",
+  "events": [
+    {
+      "sid": "01-01",
+      "p": "RED",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: slice activates no acceptance test; regression evidence is the walking-skeleton test",
+      "t": "2026-11-14T20:23:31Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-14T20:27:22Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-14T20:27:34Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-14T20:29:44Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-14T20:36:43Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-14T20:36:50Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-11-14T20:45:33Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-14T20:55:18Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-14T20:55:26Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-11-14T21:05:45Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-14T21:32:47Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-14T21:33:07Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-11-14T21:37:42Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-14T21:44:44Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-14T21:44:55Z"
+    },
+    {
+      "sid": "05-01",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-11-14T21:58:20Z"
+    },
+    {
+      "sid": "05-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-14T21:58:20Z"
+    },
+    {
+      "sid": "05-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-14T21:58:30Z"
+    },
+    {
+      "sid": "06-01",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-11-14T22:01:16Z"
+    },
+    {
+      "sid": "06-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-11-14T22:06:03Z"
+    },
+    {
+      "sid": "06-01",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: test oracle never dequeues a BootFailed head; 3 of 18 owner-core unit tests cannot pass until the acceptance designer fixes it",
+      "t": "2026-11-14T22:06:03Z"
+    },
+    {
+      "sid": "06-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-14T22:11:33Z"
+    },
+    {
+      "sid": "06-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-14T22:11:40Z"
+    },
+    {
+      "sid": "06-02",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-11-14T22:42:06Z"
+    },
+    {
+      "sid": "06-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-14T22:48:28Z"
+    },
+    {
+      "sid": "06-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-14T22:48:48Z"
+    },
+    {
+      "sid": "07-01",
+      "p": "RED",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: migration batch; acceptance is the scripted parity check",
+      "t": "2026-11-14T22:55:31Z"
+    },
+    {
+      "sid": "07-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-14T23:26:10Z"
+    },
+    {
+      "sid": "07-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-14T23:26:34Z"
+    },
+    {
+      "sid": "07-01",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-15T00:12:22Z"
+    },
+    {
+      "sid": "07-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-15T00:12:22Z"
+    },
+    {
+      "sid": "07-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-15T00:12:45Z"
+    },
+    {
+      "sid": "07-02",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-15T00:38:39Z"
+    },
+    {
+      "sid": "07-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-15T01:24:58Z"
+    },
+    {
+      "sid": "07-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-15T01:25:21Z"
+    },
+    {
+      "sid": "07-03",
+      "p": "RED",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: migration batch; acceptance is the scripted parity check",
+      "t": "2026-11-15T05:49:10Z"
+    },
+    {
+      "sid": "07-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-15T05:49:10Z"
+    },
+    {
+      "sid": "07-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-15T05:49:32Z"
+    },
+    {
+      "sid": "07-03",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-11-15T12:28:37Z"
+    },
+    {
+      "sid": "07-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-15T12:36:29Z"
+    }
+  ]
+}

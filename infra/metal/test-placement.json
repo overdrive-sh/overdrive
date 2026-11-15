@@ -410,10 +410,6 @@
       },
       "integration::submit_jq_pipeline::pipe_redirected_submit_emits_64_char_hex_spec_digest_via_json_lane": {
         "kind": "host-pure"
-      },
-      "integration::vm_boot_failure_vocabulary::scheduled_vm_workload_reaches_running_when_its_first_firing_becomes_due": {
-        "kind": "guest-group",
-        "group": "cgroup-default"
       }
     },
     "overdrive-control-plane": {
@@ -3614,26 +3610,6 @@
       "integration::guest_listener_real_boot::every_declared_listener_a_real_workload_binds_is_reported_before_it_exits": {
         "kind": "host-pure"
       },
-      "integration::mtls_install_fail_closed::restart_abort_detail_names_every_failed_handle_teardown_cause": {
-        "kind": "guest-group",
-        "group": "cgroup-default"
-      },
-      "integration::mtls_install_fail_closed::restart_abort_detail_names_the_element_removal_cause": {
-        "kind": "guest-group",
-        "group": "cgroup-default"
-      },
-      "integration::mtls_install_fail_closed::restart_running_write_rejection_tears_down_network_and_releases_slot": {
-        "kind": "guest-group",
-        "group": "cgroup-default"
-      },
-      "integration::mtls_install_fail_closed::start_running_write_rejection_tears_down_network_and_releases_slot": {
-        "kind": "guest-group",
-        "group": "cgroup-default"
-      },
-      "integration::net_slots::tests::registered_bands_are_pairwise_disjoint_and_within_domain": {
-        "kind": "guest-group",
-        "group": "cgroup-default"
-      },
       "integration::openapi_gate::openapi_check_exits_0_when_yaml_matches_disk": {
         "kind": "host-pure"
       },
@@ -3651,10 +3627,6 @@
       },
       "integration::openapi_gate::openapi_gen_writes_deterministic_yaml_in_repeat_runs": {
         "kind": "host-pure"
-      },
-      "integration::public_ingress_gateway_boot_shutdown::an_absent_sentinel_receipt_keeps_the_public_port_unbound": {
-        "kind": "guest-group",
-        "group": "cgroup-default"
       },
       "integration::reconcile_output_validator::cgroup_and_xdp_on_same_vip_accepted": {
         "kind": "host-pure"
