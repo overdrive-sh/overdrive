@@ -6,7 +6,7 @@
 outside the `connect4` attach point approved by user 2026-10-06; decision
 D24a — TCP to a VIP is resolved as mesh, so D24's rewrite applies to
 datagrams — approved by user 2026-10-06.** **Datagram clause and its startup check superseded by
-[ADR-0283](adr-0283-the-same-host-local-backend-path-is-removed.md) (2026-11-15).**
+[ADR-0284](adr-0284-guest-udp-to-a-service-vip-is-refused-until-gh-310.md) (2026-11-15).**
 GH #295. Recorded in the #295 feature delta,
 § *[REF] vsock Attachment Replacement DESIGN*. Depends on ADR-0151 (the
 owner), ADR-0153 (mesh flows) and ADR-0162 (direct non-mesh forwarding).

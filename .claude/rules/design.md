@@ -31,7 +31,17 @@ This applies to every new or amended decision that changes any of these:
 
 The user-facing decision request names the exact proposed contract, affected
 owners and boundaries, material alternatives, and the consequence for the
-next wave. Use numbered decisions so the user's approval or rejection is
+next wave. Write each decision so it can be understood without the agent
+report or artifact it came from; a decision ID, reviewer finding or component
+name alone is not a decision request. For each decision, state:
+
+- **Context:** what the component does and where it sits.
+- **Problem:** what goes wrong today, or what the choice is about, in
+  observable terms (what an operator or a request sees).
+- **Options:** what each option changes and what it costs.
+- **Recommendation:** which option you recommend and why.
+
+Use numbered decisions so the user's approval or rejection is
 unambiguous. An architect may write those decisions as **proposed** in an ADR
 or feature artifact, but must not label them accepted, amend an accepted SSOT
 as if ratified, or dispatch implementation from them until the user explicitly

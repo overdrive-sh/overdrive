@@ -1185,7 +1185,7 @@ the guest gateway (ADR-0174).
 (ADR-0153, ADR-0164); non-mesh destinations are kernel-forwarded directly
 (ADR-0162); guest TCP to a VIP is mesh-resolved (ADR-0164 D24a); guest UDP
 to a VIP is unsupported until
-[#310](https://github.com/overdrive-sh/overdrive/issues/310) (ADR-0283
+[#310](https://github.com/overdrive-sh/overdrive/issues/310) (ADR-0284
 supersedes ADR-0164's datagram clause and its owner-cgroup startup check).
 Host-internal destinations are refused
 `HostInternal`, checked by the owner and enforced by a constant output rule
@@ -1246,7 +1246,7 @@ connection-pump scaling ([#300](https://github.com/overdrive-sh/overdrive/issues
 [ADR-0161](adr-0161-vendored-cloud-hypervisor-fork-is-built-pinned-and-provisioned-as-a-checksummed-release.md),
 [ADR-0162](adr-0162-non-mesh-guest-egress-is-kernel-forwarded-to-its-destination.md),
 [ADR-0164](adr-0164-guest-vip-tcp-resolves-as-mesh-and-datagrams-use-the-connect4-rewrite.md)
-(TCP-as-mesh decision D24a stands; its datagram clause and startup check are superseded by ADR-0283),
+(TCP-as-mesh decision D24a stands; its datagram clause and startup check are superseded by ADR-0284),
 [ADR-0166](adr-0166-flow-control-messages-travel-on-a-dedicated-per-vm-control-session.md),
 [ADR-0167](adr-0167-guest-flows-to-host-internal-destinations-are-refused.md),
 [ADR-0169](adr-0169-forwarding-quiescence-is-a-counted-move-only-hold.md),
@@ -11580,17 +11580,20 @@ subsystem and the hydration boundary (see `c4-diagrams.md`, L3, proposed).
 - [ADR-0283](adr-0283-the-same-host-local-backend-path-is-removed.md):
   the same-host local-backend path (ADR-0053) is removed; it has no production producer.
   Supersedes ADR-0053.
+- [ADR-0284](adr-0284-guest-udp-to-a-service-vip-is-refused-until-gh-310.md):
+  guest UDP to a service VIP is refused `Policy` until GH #310. Supersedes ADR-0164's
+  datagram clause and startup check.
 - Proposed rule (D9): a View decides when to act, never whether an effect is in place.
 - Finding recorded in the feature delta: no production path deletes a workload, so the
-  VIP-release latch is not reachable through `serve` + `deploy` today; that slice is
-  proposed as held.
+  VIP-release latch is not reachable through `serve` + `deploy` today; that work moved to
+  GH #211.
 
 ## Changelog
 
 | Date | Change |
 |---|---|
-| 2026-11-15 | **reconciler-convergence-guarantees: ADR-0283 rewritten as "The same-host local-backend path is removed" (supersedes ADR-0053).** The user approved the deletion (D-9). D-4 and D-4b (local-backend readback, status row) are withdrawn: the path has no production producer. — Morgan. |
-| 2026-11-13 | **reconciler-convergence-guarantees DESIGN proposals (ADR-0282, ADR-0283, status Proposed).** Nothing accepted; D-1 to D-8 await the user. Quint models required for the evaluation-wake protocol and recommended for local-backend convergence; no reviewer, modeler or spike has run. — Morgan. |
+| 2026-11-15 | **reconciler-convergence-guarantees: ADR-0283 (the same-host local-backend path is removed, supersedes ADR-0053) and ADR-0284 (guest UDP to a VIP is refused until #310, supersedes ADR-0164's datagram clause).** Both status Proposed; the user approved the decisions (D-9, D-10, D-11). — Morgan. |
+| 2026-11-13 | **reconciler-convergence-guarantees DESIGN proposals (ADR-0282, status Proposed).** User approved D-1 to D-8 on 2026-11-13; independent design review pending. — Morgan. |
 | 2026-11-09 | **service-allocation-readiness-and-ending full DESIGN review iteration 4 APPROVED:** D13-S1/D17-S1 exact signatures user-approved (“rest is fine”); historical D16-S1 migration withdrawn under the user's explicit greenfield byte waiver. D16-G1 rebaselines only the five affected current envelopes in place, with no historical read promise; this is the bounded direct consequence of the waiver. D15 exit-0 remains `BackoffExhausted` under D6/P-5. ADR-0268–0272 are accepted; DISTILL and roadmap independent reviews remain pending before DELIVER. — Independent reviewer. |
 | 2026-11-09 | **service-allocation-readiness-and-ending: exact D11-E1, D14-A1 and D14-E2 contract amendments user-approved** (“Approve all three exact contracts”). Bounded technical review iteration 2 approved the shapes; the full independent D1–D17 DESIGN review remains pending. ADR-0263 and ADR-0269 link the authoritative feature-delta interface and error mappings. — Morgan. |
 | 2026-11-04 | **service-allocation-readiness-and-ending: round-4 rulings P1, A1, A3 accepted ("proceed with recommendations").** P1: the startup stop gate's attempts threshold comes from the startup descriptor (`max_attempts` for `Tcp`/`Http`, 1 for `GuestListeners`); `ServiceAllocFact.max_attempts` becomes `startup_attempts_required`; guest-listener rows carry honest streaks; explicit probes unchanged (ADR-0269). A1: the board entry is removed at close; "frozen at the end of the wait" is the host reader's rule (ADR-0268). A3: a host-input projection module of `guest_report` is the conformance target. Remaining: `quint-modeler` run (M-3, M-6), review round 4. — Morgan. |

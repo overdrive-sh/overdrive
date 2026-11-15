@@ -1,19 +1,22 @@
 # Slice 04 — convergence-property-and-view-rule
 
-Stories: US-05, US-06 (@infrastructure, shares this slice). Persona: Devon. Job: J-PLAT-004. Order: 4.
+Stories: US-05, US-06 (@infrastructure, shares this slice) and the executor doc fix (D-5). Persona: Devon. Jobs: J-PLAT-004. Order: last.
+
+The VIP-release story moved out of this feature to GH #211 (user ruling D-5, 2026-11-13). This feature does not wait on #211. `service-lifecycle` is unchanged (D-6, ADR-0191 decision 5).
 
 ## Goal
 
-Every registered reconciler runs under one shared multi-tick property from arbitrary state, and the rule in `.claude/rules/reconcilers.md` states what a View may decide, so a record-on-emit latch fails mechanically instead of in review.
+Every registered reconciler runs under one shared multi-tick property from arbitrary state, and the rule in `.claude/rules/reconcilers.md` states what a View may decide, so a record-on-emit latch fails mechanically instead of in review. The `release_service_vip` executor doc says what the executor does.
 
 ## IN
 
-- Shared default-lane property for each reconciler registered in `run_server` (8): arbitrary independent `(desired, actual, view)`, multiple ticks, random dropped actions; assert progress (`actual == desired` within N ticks) and stability (no further non-`Noop` actions).
-- Companion properties: forgotten View (`View::default()` still converges); executor idempotency (apply twice equals apply once on observable state).
-- A generic sim executor over action kinds, reusing the `vm_reclamation` `apply_actions` pattern (`overdrive-sim/src/invariants/vm_reclamation.rs:93-105`).
-- Correct the false hydrator DST claim ("any combination of BPF map state", `invariants/service_map_hydrator.rs:9`, `invariants/mod.rs:453`) or make it true.
-- US-06 rule text per D9 in `reconcilers.md`, replacing the fingerprint-shaped symptom, naming the one known exception (O7).
-- DISTILL authors full test bodies; later-slice scenarios stay as reasoned `#[ignore = "pending DELIVER ..."]`.
+- Shared default-lane property for each reconciler registered in `run_server` (7, or 8 with the gateway): arbitrary independent `(desired, actual, view)`, multiple ticks, random dropped actions; assert progress (`actual == desired` within N ticks) and stability (no further non-`Noop` actions).
+- Companion properties: forgotten View (`View::default()` still converges); executor idempotency (apply twice equals apply once on observable state; US-05 S5, from issue #351).
+- The property drives the production `run_convergence_tick` over a sim-composed `AppState` (D-7); no new sim executor.
+- Correct the false hydrator DST claim ("any combination of BPF map state", `invariants/service_map_hydrator.rs:9`, `invariants/mod.rs:453`).
+- US-06 rule text per D9 in `reconcilers.md`, replacing the fingerprint-shaped symptom. The rule names no exception.
+- Correct the `release_service_vip.rs` doc comment that says errors are absorbed; the executor returns `ShimError::AllocatorRelease`.
+- DISTILL authors full test bodies; scenarios for later steps stay as reasoned `#[ignore = "pending DELIVER ..."]`.
 
 ## OUT
 
@@ -21,29 +24,31 @@ Every registered reconciler runs under one shared multi-tick property from arbit
 - A monotonicity checklist for LWW reads (#344).
 - Real-kernel stress or soak tests.
 - Reconcilers' own scripted scenario tests (unchanged).
+- Replacing the `released_for_deletion` gate and the seeded reproduction of the possible VIP leak: GH #211.
+- `observed_generation` (#325); `service-lifecycle`'s `terminal_announced` and act-once markers (not changed, D5, D-6).
+- Editing stale test fixtures.
 
 ## Learning hypothesis
 
-Disproves if: arbitrary `(actual, view)` generation produces unreachable states that make the property fail on compliant reconcilers (too many false positives). Confirms if: reintroducing either removed latch fails the property with reconciler name, seed and tick.
+Disproves if: arbitrary `(actual, view)` generation produces unreachable states that make the property fail on compliant reconcilers (too many false positives). Confirms if: reintroducing a record-on-emit latch fails the property with reconciler name, seed and tick.
 
 ## Acceptance criteria
 
-From US-05 and US-06:
-
-- AC1 All 8 registered reconcilers covered, or a reasoned no-obligation ruling per exempt one.
-- AC2 Default lane, no real I/O, seed printed, failure reproducible from seed.
+- AC1 Every registered reconciler covered (7, or 8 with the gateway; `gateway-svid-lifecycle` is registered only when `config.gateway` is `Some`), or a reasoned no-obligation ruling per exempt one.
+- AC2 Default lane, no real I/O, seed printed, failure reproducible from seed (lane feasibility is V-5).
 - AC3 Fault stimulus = dropped actions and View/actual skew in both directions; oracle = convergence within N ticks, then zero actions.
-- AC4 Mutation check: removing each fix from slices 02 and 03 turns the property red.
+- AC4 Mutation check: DISTILL names the mutants from the live reconcilers; each turns the property red.
 - AC5 Rule text merged with the "actual wins" test and the "make it observable first" clause.
 - AC6 Rule is timeless discipline (no ADR-as-status, no DELIVER notes).
+- AC7 The executor doc comment matches behaviour (it propagates `ShimError::AllocatorRelease`; it does not absorb the error).
 
 ## Dependencies
 
-Green status depends on slices 02 and 03; the bodies are authored up front. Reachable-state bound for generators follows the appliance threat model (prefixes of Overdrive's own action sequences, skew, restarts), not foreign mutation.
+Green status depends on slice 02; the bodies are authored up front. Reachable-state bound for generators follows the appliance threat model (prefixes of Overdrive's own action sequences, including crash-partial ones, and View/actual skew), not foreign mutation.
 
 ## Effort
 
-About 3 days.
+About 3 to 4 days (the doc fix is minutes).
 
 ## Spike
 
@@ -51,4 +56,4 @@ No.
 
 ## Production-drivable fault
 
-The property drives each reconciler's real `reconcile` and hydration through `Sim*` ports. The tie to `serve` + `deploy` comes from slices 02 and 03, whose faults the property reintroduces as regressions. This slice has no operator-visible surface of its own (stated in US-05's DoR gap).
+The property drives each reconciler's real `reconcile` and hydration through `Sim*` ports. The tie to `serve` + `deploy` comes from slice 01's faults, which the property reintroduces as regressions. The doc fix has no runtime behaviour. This slice has no operator-visible surface of its own (stated in US-05's DoR gap).

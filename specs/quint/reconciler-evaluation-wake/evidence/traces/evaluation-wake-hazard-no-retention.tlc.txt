@@ -12,9 +12,8 @@ State 1: <Initial predicate>
 /\ wake_noRetention_evaluation_wake_need = {}
 /\ wake_noRetention_evaluation_wake_has = {}
 /\ wake_noRetention_evaluation_wake_inWin = {}
-/\ wake_noRetention_evaluation_wake_snap = {}
 
-State 2: <wake_noRetention_evaluation_wake_DivergeDrop line 341, col 3 to line 377, col 54 of module wake_noRetention>
+State 2: <wake_noRetention_evaluation_wake_DivergeWake line 690, col 3 to line 730, col 54 of module wake_noRetention>
 /\ wake_noRetention_evaluation_wake_active = {}
 /\ wake_noRetention_evaluation_wake_passPos = 0
 /\ wake_noRetention_evaluation_wake_drifts = 1
@@ -24,32 +23,15 @@ State 2: <wake_noRetention_evaluation_wake_DivergeDrop line 341, col 3 to line 3
 /\ wake_noRetention_evaluation_wake_cancelled = 0
 /\ wake_noRetention_evaluation_wake_elig = [k1 |-> "imm", k2 |-> "imm", k3 |-> "imm"]
 /\ wake_noRetention_evaluation_wake_dispatched = 0
-/\ wake_noRetention_evaluation_wake_pending = <<>>
-/\ wake_noRetention_evaluation_wake_need = {"k1"}
-/\ wake_noRetention_evaluation_wake_has = {"k1"}
-/\ wake_noRetention_evaluation_wake_inWin = {}
-/\ wake_noRetention_evaluation_wake_snap = {}
-
-State 3: <wake_noRetention_evaluation_wake_DivergeWake line 717, col 3 to line 759, col 54 of module wake_noRetention>
-/\ wake_noRetention_evaluation_wake_active = {}
-/\ wake_noRetention_evaluation_wake_passPos = 0
-/\ wake_noRetention_evaluation_wake_drifts = 2
-/\ wake_noRetention_evaluation_wake_conf_step = [init |-> [tag |-> "UNIT"]]
-/\ wake_noRetention_evaluation_wake_faults = 0
-/\ wake_noRetention_evaluation_wake_due = TRUE
-/\ wake_noRetention_evaluation_wake_cancelled = 0
-/\ wake_noRetention_evaluation_wake_elig = [k1 |-> "imm", k2 |-> "imm", k3 |-> "imm"]
-/\ wake_noRetention_evaluation_wake_dispatched = 0
 /\ wake_noRetention_evaluation_wake_pending = <<"k2">>
-/\ wake_noRetention_evaluation_wake_need = {"k1", "k2"}
-/\ wake_noRetention_evaluation_wake_has = {"k1", "k2"}
+/\ wake_noRetention_evaluation_wake_need = {"k2"}
+/\ wake_noRetention_evaluation_wake_has = {"k2"}
 /\ wake_noRetention_evaluation_wake_inWin = {}
-/\ wake_noRetention_evaluation_wake_snap = {}
 
-State 4: <wake_noRetention_evaluation_wake_Drain line 523, col 3 to line 588, col 54 of module wake_noRetention>
+State 3: <wake_noRetention_evaluation_wake_Drain line 508, col 3 to line 564, col 54 of module wake_noRetention>
 /\ wake_noRetention_evaluation_wake_active = {"k2"}
 /\ wake_noRetention_evaluation_wake_passPos = 0
-/\ wake_noRetention_evaluation_wake_drifts = 2
+/\ wake_noRetention_evaluation_wake_drifts = 1
 /\ wake_noRetention_evaluation_wake_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ wake_noRetention_evaluation_wake_faults = 0
 /\ wake_noRetention_evaluation_wake_due = TRUE
@@ -57,15 +39,14 @@ State 4: <wake_noRetention_evaluation_wake_Drain line 523, col 3 to line 588, co
 /\ wake_noRetention_evaluation_wake_elig = [k1 |-> "imm", k2 |-> "imm", k3 |-> "imm"]
 /\ wake_noRetention_evaluation_wake_dispatched = 0
 /\ wake_noRetention_evaluation_wake_pending = <<>>
-/\ wake_noRetention_evaluation_wake_need = {"k1", "k2"}
-/\ wake_noRetention_evaluation_wake_has = {"k1", "k2"}
+/\ wake_noRetention_evaluation_wake_need = {"k2"}
+/\ wake_noRetention_evaluation_wake_has = {"k2"}
 /\ wake_noRetention_evaluation_wake_inWin = {}
-/\ wake_noRetention_evaluation_wake_snap = {"k2"}
 
-State 5: <wake_noRetention_evaluation_wake_Finish line 655, col 3 to line 711, col 54 of module wake_noRetention>
+State 4: <wake_noRetention_evaluation_wake_Finish line 631, col 3 to line 684, col 54 of module wake_noRetention>
 /\ wake_noRetention_evaluation_wake_active = {}
 /\ wake_noRetention_evaluation_wake_passPos = 0
-/\ wake_noRetention_evaluation_wake_drifts = 2
+/\ wake_noRetention_evaluation_wake_drifts = 1
 /\ wake_noRetention_evaluation_wake_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ wake_noRetention_evaluation_wake_faults = 1
 /\ wake_noRetention_evaluation_wake_due = TRUE
@@ -73,15 +54,14 @@ State 5: <wake_noRetention_evaluation_wake_Finish line 655, col 3 to line 711, c
 /\ wake_noRetention_evaluation_wake_elig = [k1 |-> "imm", k2 |-> "imm", k3 |-> "imm"]
 /\ wake_noRetention_evaluation_wake_dispatched = 0
 /\ wake_noRetention_evaluation_wake_pending = <<"k2">>
-/\ wake_noRetention_evaluation_wake_need = {"k1", "k2"}
-/\ wake_noRetention_evaluation_wake_has = {"k1", "k2"}
+/\ wake_noRetention_evaluation_wake_need = {"k2"}
+/\ wake_noRetention_evaluation_wake_has = {"k2"}
 /\ wake_noRetention_evaluation_wake_inWin = {"k2"}
-/\ wake_noRetention_evaluation_wake_snap = {}
 
-State 6: <wake_noRetention_evaluation_wake_Drain line 523, col 3 to line 588, col 54 of module wake_noRetention>
+State 5: <wake_noRetention_evaluation_wake_Drain line 508, col 3 to line 564, col 54 of module wake_noRetention>
 /\ wake_noRetention_evaluation_wake_active = {"k2"}
 /\ wake_noRetention_evaluation_wake_passPos = 0
-/\ wake_noRetention_evaluation_wake_drifts = 2
+/\ wake_noRetention_evaluation_wake_drifts = 1
 /\ wake_noRetention_evaluation_wake_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ wake_noRetention_evaluation_wake_faults = 1
 /\ wake_noRetention_evaluation_wake_due = TRUE
@@ -89,15 +69,14 @@ State 6: <wake_noRetention_evaluation_wake_Drain line 523, col 3 to line 588, co
 /\ wake_noRetention_evaluation_wake_elig = [k1 |-> "imm", k2 |-> "imm", k3 |-> "imm"]
 /\ wake_noRetention_evaluation_wake_dispatched = 0
 /\ wake_noRetention_evaluation_wake_pending = <<>>
-/\ wake_noRetention_evaluation_wake_need = {"k1", "k2"}
-/\ wake_noRetention_evaluation_wake_has = {"k1", "k2"}
+/\ wake_noRetention_evaluation_wake_need = {"k2"}
+/\ wake_noRetention_evaluation_wake_has = {"k2"}
 /\ wake_noRetention_evaluation_wake_inWin = {"k2"}
-/\ wake_noRetention_evaluation_wake_snap = {"k2"}
 
-State 7: <wake_noRetention_evaluation_wake_Finish line 655, col 3 to line 711, col 54 of module wake_noRetention>
+State 6: <wake_noRetention_evaluation_wake_Finish line 631, col 3 to line 684, col 54 of module wake_noRetention>
 /\ wake_noRetention_evaluation_wake_active = {}
 /\ wake_noRetention_evaluation_wake_passPos = 0
-/\ wake_noRetention_evaluation_wake_drifts = 2
+/\ wake_noRetention_evaluation_wake_drifts = 1
 /\ wake_noRetention_evaluation_wake_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ wake_noRetention_evaluation_wake_faults = 1
 /\ wake_noRetention_evaluation_wake_due = TRUE
@@ -105,7 +84,6 @@ State 7: <wake_noRetention_evaluation_wake_Finish line 655, col 3 to line 711, c
 /\ wake_noRetention_evaluation_wake_elig = [k1 |-> "imm", k2 |-> "imm", k3 |-> "imm"]
 /\ wake_noRetention_evaluation_wake_dispatched = 0
 /\ wake_noRetention_evaluation_wake_pending = <<>>
-/\ wake_noRetention_evaluation_wake_need = {"k1", "k2"}
-/\ wake_noRetention_evaluation_wake_has = {"k1", "k2"}
+/\ wake_noRetention_evaluation_wake_need = {"k2"}
+/\ wake_noRetention_evaluation_wake_has = {"k2"}
 /\ wake_noRetention_evaluation_wake_inWin = {"k2"}
-/\ wake_noRetention_evaluation_wake_snap = {}

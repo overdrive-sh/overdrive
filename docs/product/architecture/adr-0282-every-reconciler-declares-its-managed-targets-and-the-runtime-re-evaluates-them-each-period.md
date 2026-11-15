@@ -30,8 +30,10 @@ gaps, each reachable in a real deploy:
 - The router's periodic relist enumerates `alloc_status` rows only. A fresh deploy whose
   first hydrate failed has intent and no `alloc_status` row, so no relist reaches it.
   `ProbeResult` has no list leg at all.
-- `register` submits no boot evaluation, so existing intents are only woken through the
-  router's `alloc_status` list.
+- `ReconcilerRuntime::register` submits no evaluation. The only reconciler factory that
+  returns one is `gateway-svid-lifecycle`'s (`gateway_svid_lifecycle_registration`, enabled
+  gateway only), so existing intents are woken only through the router's `alloc_status`
+  list.
 
 ADR-0084 split the backstop by reconciler partition: row-backed reconcilers rely on the
 router relist, host-backed ones declare `resync_schedule`. The split exists because the
@@ -53,9 +55,13 @@ appliance threat model.
    for its managed targets and submits one `Immediate` evaluation per target through
    `ReconcilerRuntime::submit_evaluation`. The first pass runs at boot. Passes are
    anchored (no drift) and run at most once per period.
-3. An evaluation that ends in a hydrate error, a View persist error or a dispatch error
-   is not requeued locally. The next resync pass is its retry. The runtime logs the
-   failure with the reconciler, target and typed error.
+3. An evaluation that ends in a hydrate error or a View persist error is not requeued
+   locally; this decision adds no local requeue for any error. The next resync pass is its
+   retry. A dispatch error keeps the tick's existing requeue: the tick decides its requeue
+   before dispatch (`Immediate` if `reconcile` emitted an action, else the reconciler's
+   `next_evaluation_at`) and submits it on every path after dispatch, so a dispatch error
+   after an emitted action is requeued by that existing mechanism, with the pass as
+   backstop. The runtime logs each failure with the reconciler, target and typed error.
 4. `resync_schedule`, `ResyncSchedule`, `ResyncScope`, the cadence table and the router's
    periodic relist are deleted in the same cut. `interests()` and the router's
    List-then-Watch and `Lagged` relist remain as edge wakes.
@@ -79,7 +85,8 @@ limitation, tracked by GH #356 ("Make the reconciler resync period operator-conf
 | Option | Why it loses |
 |---|---|
 | Per-reconciler `resync_schedule` for every reconciler | The schedule resolves to targets through `ResyncScope`, which has one variant (`LocalNode`). Per-workload targets need a scope that enumerates managed resources. That is this ADR's enumeration under another name, kept as a second periodic mechanism beside the router relist. |
-| Fix each gap locally: requeue on hydrate and persist errors, `next_evaluation_at` on the hydrator, seed existing intents at boot | Four mechanisms for one class. A local requeue on a persistent error (an undecodable intent, a refused hydrate) loops without a backoff memory. Each new reconciler must remember to add its own. The fresh-deploy-without-row and `ProbeResult` gaps are not closed by any of them. |
+| Fix each gap locally: requeue on hydrate and persist errors, `next_evaluation_at` on the hydrator, seed existing intents at boot | Four mechanisms for one class. A local requeue on a persistent hydrate or persist error (an undecodable intent, a refused hydrate) loops without a backoff memory: a hydrate error writes no View and a persist error fails the View write, so there is nowhere to keep one. Each new reconciler must remember to add its own. The fresh-deploy-without-row and `ProbeResult` gaps are not closed by any of them. |
+| Remove the router's boot LIST and `Lagged` relist along with the periodic relist (the pass subsumes them) | The `Lagged` relist is required by the `ObservationStore` subscription contract: every consumer "MUST handle" `Lagged` by relisting or failing loudly, and none may discard it (`observation_store.rs:1795-1799`). The boot LIST is the router's List-then-Watch boot wake (ADR-0084 §5 and its 2026-08-23 amendment). Both stay as edge wakes (user ruling 2026-11-15); this ADR removes only the periodic arm. |
 | Keep ADR-0084 and extend the router relist to intent and more row families | The router keys on observation rows and derives workload targets inline from them. Extending it to every target shape moves per-reconciler target knowledge into the router, which does not own the reconciler's hydration (ADR-0086). |
 | Additive: keep `resync_schedule`, add the pass only for row-backed reconcilers | Leaves three overlapping periodic mechanisms and the "never both" discipline in `reconcilers.md`. Both current `resync_schedule` users (`vm-reclamation`, `gateway-svid-lifecycle`) declare 30 s, equal to the new period, so removing it loses no behaviour. |
 
@@ -93,6 +100,16 @@ Positive:
   gap close with one mechanism and no per-error requeue.
 - `build_cadence_table` and its stale comment disappear.
 
+What the pass guarantees: **re-evaluation** of every managed target at least once per
+period, whatever dropped its earlier wake. It does not guarantee that `reconcile`
+converges `actual` to `desired`, and it does not make a View-gated action re-emit. The
+model-checked statement, its abstraction and bound are in the feature delta
+(`Formal protocol model`, `Quality attributes`). No reconciler's View decides whether an
+effect is in place. `service-lifecycle`'s act-once stop markers (ADR-0191 decision 5) are
+pacing keyed to the probe row's `run_seq`: they decide when a stop is emitted again, on
+the next crossed row, so the pass re-evaluates it and changes no verdict (ADR-0191
+decision 6; feature delta D-6).
+
 Negative and bounds:
 
 - Evaluations per period equal the sum over reconcilers of their managed-target counts.
@@ -103,11 +120,16 @@ Negative and bounds:
   submits (`cancelled` counts them) and merges a pending `NotBefore` to `Immediate`; a
   reconciler's own backoff gate makes an early evaluation a no-op.
 - Worst-case recovery from a hydrate or persist error is one period plus queue time.
+- The pass costs no more than today's router relist plus `resync_schedule` (measured, not above the baseline at any N) and grows faster than linearly in the evaluation count until #270 removes the per-evaluation `alloc_status` scans. Edge-wake latency during a pass equals today's and is tracked by #357. Figures: feature delta V-3 and G1.
+- The dispatch-error requeue that stays is `Immediate` and has no backoff of its own: the
+  tick requeues `Immediate` after any emitted action, so a persistent dispatch error against
+  a reconciler whose View does not gate re-emission re-evaluates at the convergence loop's
+  drain rate. That is existing behaviour and this ADR leaves it unchanged. The bound is the
+  reconciler's own View pacing (for example the hydrator's `retries` window), not the
+  runtime's. The local requeue rejected above is for hydrate and persist errors, where no
+  View is written and so no pacing exists.
 - Host-drift latency is bounded by the period (30 s) until #275 adds host edge wakes. The
   two `resync_schedule` users declare 30 s today, so no current behaviour slows down.
-- The broker gains a read-only accessor for its pending keys so the formal protocol
-  model's conformance driver has a projection. Its signature is pinned in the feature
-  delta and approved with D-1.
 - `workflow-lifecycle` is included by the uniform method and enumerates no targets in
   production today (empty registry); no dedicated wake is added for it.
 

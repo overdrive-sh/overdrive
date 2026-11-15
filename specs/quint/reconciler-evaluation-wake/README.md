@@ -3,8 +3,7 @@
 Model-checked specification of decision D-1 (ADR-0282: every reconciler declares its managed targets; the runtime
 re-evaluates all of them each period; no local requeue on a hydrate or persist error) and D-3
 (`ServiceMapHydrator::next_evaluation_at`). `.claude/rules/design.md` § "Concurrent protocols carry a model-checked
-Quint specification"; oracle for DISTILL `quint-connect` drivers (`.claude/rules/testing.md` § "Quint conformance").
-The same-host local-backend convergence model is withdrawn with D-4 (D-9); there is one specification.
+Quint specification"; oracle for the DISTILL `quint-connect` driver (`.claude/rules/testing.md` § "Quint conformance").
 
 Run: `cargo xtask metal run -- cargo xtask quint typecheck`, then
 `cargo xtask metal run -- cargo xtask quint check --subsystem reconciler-evaluation-wake [--name <check>] [--ci]`.
@@ -22,7 +21,7 @@ backoff window and `next_evaluation_at`). `k1` and `k2` share the target `t1`, s
 |---|---|---|
 | Broker | `pending` FIFO list of unique keys, `elig` `imm` / `nb`; same-key submit collapses and keeps its slot; Immediate merges a pending NotBefore to Immediate | `eval_broker.rs` `submit`, `merge_eligibility` |
 | Admission | `Drain`: oldest first, up to CAP - active, skip a blocked target, skip a non-Immediate key, atomic batch | `eval_broker.rs` `drain_pending`; `lib.rs:5165-5260` |
-| Evaluation | `Drain` hydrates (`snap`), `Finish(k, outcome)` ends it; outcomes `ok`, `dpFail`, `hydrateErr`, `persistErr`, `dispatchErr`; a tick that emitted an action self-requeues Immediate on every path including `dispatchErr`; an in-window Noop requeues NotBefore when `next_evaluation_at` is `Some` | `reconciler_runtime.rs:1580-1750` |
+| Evaluation | `Drain` admits only; `Finish(k, outcome)` is `run_convergence_tick`, which hydrates at its start (the world is read at `Finish`, so a change between `Drain` and `Finish` is seen); outcomes `ok`, `dpFail`, `hydrateErr`, `persistErr`, `dispatchErr`; a tick that emitted an action self-requeues Immediate on every path including `dispatchErr`; an in-window Noop requeues NotBefore when `next_evaluation_at` is `Some` | `reconciler_runtime.rs:1580-1750` |
 | Resync pass (D-1b) | `Tick` (period timer, weak fairness) sets `due`; `PassStep` walks `rA`, `rH` in order, each either submitting the reconciler's whole managed set Immediate or (enumeration fault) nothing; the first pass is due at boot and after a crash | feature-delta D-1a, D-1b |
 | Faults | hydrate / persist / dispatch error, dataplane failure, enumeration failure, crash (broker and in-flight lost; View, intent, observation survive), dropped edge wake, drift; budgeted by `MAXF = 2`, `MAXD = 2` | feature-delta "Formal protocol model" |
 
@@ -32,7 +31,6 @@ backoff window and `next_evaluation_at`). `k1` and `k2` share the target `t1`, s
 |---|---|---|---|
 | `Safety` = `ActiveWithinCap`, `OneActivePerTarget`, `PendingUnique`, `EligCanonical`, `NeedImpliesManaged`, `WindowOnlyForNeedy` | invariant, `wake_full` | D-1 admission bounds and broker rules the pass relies on | none (see Limits) |
 | `ProgressByPass` | temporal, `wake_full` | D-1: every needy key is evaluated to convergence again after any error outcome, dropped wake or crash | `wake_noPass` (D-1) |
-| `PendingIsAdmitted` | temporal, `wake_full` | D-1: a pass burst or an edge wake queued behind it is eventually admitted (FIFO, no starvation) | none |
 | `RetentionSchedulesBackedOffKey` | invariant, `wake_retention` (only fault: the dataplane fails) | D-3: a key inside its backoff window is always scheduled (in flight or retained), so its retry needs neither a row write nor a pass | `wake_noRetention` (D-3) |
 
 Hazards (one per decision): `wake_noPass` removes the pass (dropped wakes disabled, so the wedge is the one ADR-0282
@@ -53,22 +51,23 @@ unscheduled).
 | enumeration failure of one reconciler | `enumeration_failure_of_one_reconciler_does_not_starve_others` |
 | edge wake during a pass burst (also target exclusion) | `edge_wake_during_burst_is_admitted_after_burst` |
 | V-4: pass submit merges a retained NotBefore | `pass_submit_merges_retained_not_before_to_immediate` |
+| D-12 d: world changes between `Drain` and `Finish`; `Finish` acts on the world as read at `Finish` | `world_changes_between_drain_and_finish` |
 
 ## Conformance step record and projection
 
 `conf_step` records the action that produced each state (variant tagged by action name, value = record of its
-parameters; D-UP-1 pattern of `probe-count`); it changes only on `wake_conf` (`REC = true`), which also counts
+parameters); it changes only on `wake_conf` (`REC = true`), which also counts
 `dispatched` (Drain admissions) and `cancelled` (same-key collapses). Driver ITF name:
 `wake_conf::evaluation_wake::conf_step`.
 
 | Spec variable | Owner accessor | Status |
 |---|---|---|
-| `pending` (keys; order = FIFO) | `BrokerDrain::pending_keys() -> Vec<(ReconcilerName, TargetResource)>` | pinned; the delta does not say the Vec is in admission (first-pending) order, which the model compares |
+| `pending` (keys; order = admission order) | `BrokerDrain::pending_keys() -> Vec<(ReconcilerName, TargetResource)>`, first-pending (admission) order, no eligibility filter (D-12 b) | pinned; a same-key resubmit keeps its slot (D-12 e) |
 | `dispatched`, `cancelled` | `BrokerDrain::counters()` | pinned (`wake_conf` only) |
-| `inWin` | `get_view` of the hydrator, with the pure backoff function on `SimClock` | pinned view; the boolean is derived |
+| `inWin` | none | model-only, not projected (D-12 g); a retained key is compared as `pending` |
 | `elig` | none | model-only (ruling: broker unit tests) |
-| `active`, `snap` | none | model-only (ruling: loop-local) |
-| `has`, `need` | the world the driver builds through the intent and observation driven ports; `has` is also `managed_targets` | stimulus; `need` has no pinned accessor |
+| `active` | none | model-only (ruling: loop-local); the driver's in-flight set is its stimulus for `Drain` |
+| `has`, `need` | none | model-only stimulus: the world the driver builds through the intent and observation driven ports (D-12 f). The driver does not set `has` from `managed_targets`; containment of targets is a separate DISTILL obligation |
 | `due`, `passPos`, `faults`, `drifts` | none | model-only (timer and budgets) |
 
 ## Assumptions and what discharges them

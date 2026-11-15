@@ -2,7 +2,6 @@
 
 State 1
   due = TRUE
-  snap = {}
   dispatched = 0
   active = {}
   inWin = {}
@@ -17,18 +16,16 @@ State 1
   passPos = 0
 
 State 2 [DivergeWake]
-  pending = <<"k2">>
+  pending = <<"k3">>
   drifts = 1
-  has = {"k2"}
-  need = {"k2"}
+  has = {"k3"}
+  need = {"k3"}
 
 State 3 [Drain]
-  snap = {"k2"}
-  active = {"k2"}
+  active = {"k3"}
   pending = <<>>
 
 State 4 [Finish]
-  snap = {}
   active = {}
   faults = 1
 

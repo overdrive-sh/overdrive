@@ -18,9 +18,10 @@
  * active (or taken earlier in the same drain) and keys that are not Immediate-eligible; the whole batch is atomic
  * (the drain holds the broker lock). CAP = 2 stands for CONVERGENCE_MAX_IN_FLIGHT = 8.
  *
- * Evaluation = Drain (hydrate: `snap` records whether the key was needy at admission) then Finish(k, outcome),
- * run_convergence_tick (reconciler_runtime.rs:1580-1750):
- *   ok          reconcile emitted an action iff snap and the key is not inside its backoff window: the effect
+ * Evaluation = Drain (admission only: drain_pending, no hydration) then Finish(k, outcome) = run_convergence_tick
+ * (reconciler_runtime.rs:1580-1750), which hydrates at its start, so the world is read at Finish, not at Drain
+ * (D-12 d: a world change between Drain and Finish is seen by the tick):
+ *   ok          reconcile emitted an action iff the key is needy now and the key is not inside its backoff window: the effect
  *               lands (need cleared) and the runtime self-requeues ONE Immediate evaluation (has_action). Inside the
  *               window (hydrator only) the tick emits Noop and consults next_evaluation_at: Some -> a NotBefore
  *               requeue (D-3, switched off by OFF "noRetention"). Otherwise Noop, no requeue.
@@ -31,7 +32,7 @@
  *   persistErr  `?` on persist_view: no dispatch, no requeue (View not written).
  *   dispatchErr the shim returned Err: the View was persisted, the effect did not land; the has_action self-requeue
  *               runs on all paths (reconciler_runtime.rs:1739), so it is Immediate.
- * Error outcomes are only offered for a key that was needy at admission (an error on a key with nothing to do
+ * Error outcomes are only offered for a key that was needy when the tick hydrates (an error on a key with nothing to do
  * changes nothing the model observes).
  *
  * Resync pass (D-1b): `due` is the period timer (Tick sets it; the first pass runs at boot, so init has due). A pass
@@ -127,7 +128,6 @@ module evaluation_wake {
   var inWin: Set[str]     // hydrator View: key is inside its backoff window after a failed dataplane result
   // loop
   var active: Set[str]    // in-flight evaluations
-  var snap: Set[str]      // active keys that were needy when hydrated
   // broker
   var pending: List[str]  // FIFO, unique
   var elig: str -> str    // "imm" | "nb"; "imm" for a key that is not pending
@@ -144,7 +144,7 @@ module evaluation_wake {
   def canFault(f: str): bool = FAULTS.contains(f) and faults < MAXF
 
   action init = all {
-    has' = Set(), need' = Set(), inWin' = Set(), active' = Set(), snap' = Set(),
+    has' = Set(), need' = Set(), inWin' = Set(), active' = Set(),
     pending' = List(), elig' = ALLIMM, due' = true, passPos' = 0, faults' = 0, drifts' = 0,
     dispatched' = 0, cancelled' = 0, conf_step' = variant("init", ()),
   }
@@ -153,7 +153,7 @@ module evaluation_wake {
   action Tick = all {
     not(due),
     due' = true,
-    has' = has, need' = need, inWin' = inWin, active' = active, snap' = snap, pending' = pending, elig' = elig,
+    has' = has, need' = need, inWin' = inWin, active' = active, pending' = pending, elig' = elig,
     passPos' = passPos, faults' = faults, drifts' = drifts, dispatched' = dispatched, cancelled' = cancelled,
     conf_step' = if (REC) variant("Tick", ()) else conf_step,
   }
@@ -174,7 +174,7 @@ module evaluation_wake {
       faults' = if (enumOk) faults else faults + 1,
       passPos' = if (passPos + 1 == NREC) 0 else passPos + 1,
       due' = if (passPos == 0) false else due,
-      has' = has, need' = need, inWin' = inWin, active' = active, snap' = snap, drifts' = drifts,
+      has' = has, need' = need, inWin' = inWin, active' = active, drifts' = drifts,
       dispatched' = dispatched,
       conf_step' = if (REC) variant("PassStep", { enumOk: enumOk }) else conf_step,
     }
@@ -196,7 +196,6 @@ module evaluation_wake {
       pending' = pending.select(k => not(s.contains(k))),
       elig' = KEYSET.mapBy(k => if (s.contains(k)) "imm" else elig.get(k)),
       active' = active.union(s),
-      snap' = snap.exclude(s).union(s.filter(k => need.contains(k))),
       dispatched' = if (REC) dispatched + sel.length() else dispatched,
       has' = has, need' = need, inWin' = inWin, due' = due, passPos' = passPos, faults' = faults,
       drifts' = drifts, cancelled' = cancelled,
@@ -206,7 +205,7 @@ module evaluation_wake {
 
   // the end of one evaluation (run_convergence_tick)
   action Finish(k: str, o: str): bool = {
-    val sn = snap.contains(k)
+    val sn = need.contains(k)   // hydrated now: the world at the start of run_convergence_tick
     val win = inWin.contains(k)
     val acts = sn and not(win)
     val retain = sn and win and isH(k) and not(NO_RET)
@@ -226,7 +225,6 @@ module evaluation_wake {
       need' = if (o == "ok" and acts) need.exclude(Set(k)) else need,
       inWin' = if (o == "dpFail") inWin.union(Set(k)) else inWin,
       active' = active.exclude(Set(k)),
-      snap' = snap.exclude(Set(k)),
       pending' = if (kind == "none") pending else subP(pending, k),
       elig' = if (kind == "none") elig else subE(pending, elig, k, kind),
       cancelled' = if (REC and kind != "none" and inP(pending, k)) cancelled + 1 else cancelled,
@@ -246,7 +244,7 @@ module evaluation_wake {
     elig' = subE(pending, elig, k, "imm"),
     drifts' = drifts + 1,
     cancelled' = if (REC and inP(pending, k)) cancelled + 1 else cancelled,
-    inWin' = inWin, active' = active, snap' = snap, due' = due, passPos' = passPos, faults' = faults,
+    inWin' = inWin, active' = active, due' = due, passPos' = passPos, faults' = faults,
     dispatched' = dispatched,
     conf_step' = if (REC) variant("DivergeWake", { k: k }) else conf_step,
   }
@@ -260,7 +258,7 @@ module evaluation_wake {
     has' = has.union(Set(k)),
     need' = need.union(Set(k)),
     drifts' = drifts + 1,
-    inWin' = inWin, active' = active, snap' = snap, pending' = pending, elig' = elig, due' = due,
+    inWin' = inWin, active' = active, pending' = pending, elig' = elig, due' = due,
     passPos' = passPos, faults' = faults, dispatched' = dispatched, cancelled' = cancelled,
     conf_step' = if (REC) variant("DivergeDrop", { k: k }) else conf_step,
   }
@@ -270,7 +268,7 @@ module evaluation_wake {
     pending' = subP(pending, k),
     elig' = subE(pending, elig, k, "imm"),
     cancelled' = if (REC and inP(pending, k)) cancelled + 1 else cancelled,
-    has' = has, need' = need, inWin' = inWin, active' = active, snap' = snap, due' = due, passPos' = passPos,
+    has' = has, need' = need, inWin' = inWin, active' = active, due' = due, passPos' = passPos,
     faults' = faults, drifts' = drifts, dispatched' = dispatched,
     conf_step' = if (REC) variant("EdgeWake", { k: k }) else conf_step,
   }
@@ -279,7 +277,7 @@ module evaluation_wake {
   action WindowEnds(k: str): bool = all {
     inWin.contains(k),
     inWin' = inWin.exclude(Set(k)),
-    has' = has, need' = need, active' = active, snap' = snap, pending' = pending, elig' = elig, due' = due,
+    has' = has, need' = need, active' = active, pending' = pending, elig' = elig, due' = due,
     passPos' = passPos, faults' = faults, drifts' = drifts, dispatched' = dispatched, cancelled' = cancelled,
     conf_step' = if (REC) variant("WindowEnds", { k: k }) else conf_step,
   }
@@ -290,7 +288,7 @@ module evaluation_wake {
     elig.get(k) == "nb",
     not(inWin.contains(k)),
     elig' = elig.set(k, "imm"),
-    has' = has, need' = need, inWin' = inWin, active' = active, snap' = snap, pending' = pending, due' = due,
+    has' = has, need' = need, inWin' = inWin, active' = active, pending' = pending, due' = due,
     passPos' = passPos, faults' = faults, drifts' = drifts, dispatched' = dispatched, cancelled' = cancelled,
     conf_step' = if (REC) variant("Due", { k: k }) else conf_step,
   }
@@ -298,7 +296,7 @@ module evaluation_wake {
   // environment fault: process restart between View fsync and dispatch; the boot pass is due again
   action Crash = all {
     canFault("crash"),
-    pending' = List(), elig' = ALLIMM, active' = Set(), snap' = Set(),
+    pending' = List(), elig' = ALLIMM, active' = Set(),
     passPos' = 0, due' = true, faults' = faults + 1,
     has' = has, need' = need, inWin' = inWin, drifts' = drifts, dispatched' = dispatched, cancelled' = cancelled,
     conf_step' = if (REC) variant("Crash", ()) else conf_step,
@@ -312,7 +310,7 @@ module evaluation_wake {
           Due(k), Crash }
   }
 
-  val allVars = (has, need, inWin, active, snap, pending, elig, due, passPos, faults, drifts, dispatched,
+  val allVars = (has, need, inWin, active, pending, elig, due, passPos, faults, drifts, dispatched,
                  cancelled, conf_step)
 
   // ------------------------------------------------------------------ safety
@@ -344,14 +342,12 @@ module evaluation_wake {
   }
   // D-1: every needy key is eventually evaluated to convergence, from every error outcome, dropped wake and crash
   temporal ProgressByPass = Fair.implies(KEYSET.forall(k => always(need.contains(k).implies(eventually(not(need.contains(k)))))))
-  // D-1: a submitted evaluation (a pass burst, an edge wake) is eventually admitted (FIFO, no starvation)
-  temporal PendingIsAdmitted = Fair.implies(KEYSET.forall(k => always(inP(pending, k).implies(eventually(not(inP(pending, k)))))))
 
   // ------------------------------------------------------------------ named runs (critical scenarios)
   // happy path: an edge wake alone converges the key; the confirming requeue is a Noop
   run healthy_edge_converges = init
     .then(DivergeWake("k1")).expect(need == Set("k1") and pending == ["k1"])
-    .then(Drain).expect(active == Set("k1") and pending == List() and snap == Set("k1"))
+    .then(Drain).expect(active == Set("k1") and pending == List())
     .then(Finish("k1", "ok")).expect(need == Set() and pending == ["k1"] and active == Set())
     .then(Drain).then(Finish("k1", "ok"))
     .expect(need == Set() and pending == List() and active == Set() and Safety)
@@ -428,6 +424,17 @@ module evaluation_wake {
     .then(Drain).then(Finish("k2", "ok")).expect(elig.get("k2") == "nb" and pending == ["k2"])
     .then(PassStep(true)).then(PassStep(true))
     .expect(elig.get("k2") == "imm" and pending == ["k2"] and inWin == Set("k2"))
+
+  // D-12 d: the world is read at Finish (run_convergence_tick hydrates at its start), not at Drain. k1 is admitted
+  // while it does not need work; its divergence arrives (edge wake dropped) while it is in flight; Finish acts on
+  // the world as read then (the effect lands, one confirming requeue), and that confirming evaluation is a Noop
+  run world_changes_between_drain_and_finish = init
+    .then(EdgeWake("k1")).then(Drain)
+    .expect(active == Set("k1") and need == Set() and pending == List())
+    .then(DivergeDrop("k1")).expect(need == Set("k1") and active == Set("k1") and pending == List())
+    .then(Finish("k1", "ok")).expect(need == Set() and pending == ["k1"] and active == Set())
+    .then(Drain).then(Finish("k1", "ok"))
+    .expect(need == Set() and pending == List() and active == Set() and Safety)
 }
 
 // Main: every decision on, every fault kind, dropped wakes. Safety and progress hold.

@@ -16,15 +16,15 @@ A deploy recovers by itself after a transient hydrate error, a View-write error,
 
 ## OUT
 
-- Removing any View latch (slices 02, 03).
-- Waking `workflow-lifecycle` for its own sake (not production-reachable, D6; O3).
+- Removing any View latch (slice 02 removes the hydrator's by deletion).
+- Waking `workflow-lifecycle` for its own sake (not production-reachable, D6, D-8).
 - Migrating `EnqueueEvaluation` wakes to `interests()` (#271); warm reflector cache (#270).
 - A separate retry-with-backoff for failed ticks (the issue considered and dropped it; the periodic pass supersedes it).
 - Boot-only host infra (#197, #198, #199, #234).
 
 ## Learning hypothesis
 
-Disproves if: a periodic whole-set pass cannot meet the 3% duty-cycle guardrail at 1000 targets, or it cannot be reconciled with the row-backed/host-backed partition in ADR-0084 without user-approved amendment. Confirms if: seeded runs recover from all three fault stimuli within one period with zero non-`Noop` actions at the fixed point.
+Disproves if: a periodic whole-set pass costs more than today's router relist at the same workload count (G1; V-3 measured it not above the baseline), or it cannot be reconciled with the row-backed/host-backed partition in ADR-0084 without user-approved amendment. Confirms if: seeded runs recover from all three fault stimuli within one period with zero non-`Noop` actions at the fixed point.
 
 ## Acceptance criteria
 
@@ -34,12 +34,12 @@ From US-01:
 - AC2 `persist_view` error: same oracle; no action dispatched on the failing tick.
 - AC3 `Failed` dataplane update inside backoff: retried after backoff with no backend-row write.
 - AC4 Target enumeration covers intent ∪ observation, including a target with no `alloc_status` row.
-- AC5 Converged state: zero non-`Noop` actions; at most 3% duty cycle at 1000 targets.
+- AC5 Converged state: zero non-`Noop` actions; per-pass cost no greater than today's relist (G1). The scan cost that makes both quadratic is tracked by #270, deploy latency during a pass by #357.
 - AC6 Tier-1 seeded `overdrive-sim` invariant for the three stimuli; seed printed on failure.
 
 ## Dependencies
 
-None. Interacts with #271 and #270 (cited). DESIGN requires an ADR-0084 amendment, surfaced to the user first (`design.md`). Resolve O1 and O5 before DESIGN.
+None. Interacts with #271 and #270 (cited). The wakeup-model change is ADR-0282 (D-1, approved).
 
 ## Effort
 
@@ -47,7 +47,7 @@ About 3 days after the design decision. Highest design risk of the four slices.
 
 ## Spike
 
-None required up front. DESIGN decides whether the duty-cycle guardrail needs a measurement spike before the period and enumeration approach are approved (`design.md` § "Run contract-shaping validation").
+V-3 measured cost on native metal (feature delta).
 
 ## Production-drivable fault
 

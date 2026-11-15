@@ -1,0 +1,4 @@
+[N=10] seeded in 0.0s; settled after 3 rounds (25 evals in last); alloc rows 10 (running 10), service_backends rows 2
+[N=10] M1 done (settled, 25 evals)
+[N=10] sample 0: evals 43 pass_wall 10 ms duty 0.03% cpu 0.01s edge(job) admission Some(4.300644999999999) ms handler 0.6 ms; lock wait p50 1656 us max 1900 us
+[N=10] sample 1: evals 45 pass_wall 10 ms duty 0.03% cpu 0.02s edge(svc) admission Some(1.807641) ms handler 2.6 ms; lock wait p50 1416 us max 1723 us

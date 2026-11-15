@@ -1,0 +1,163 @@
+=== N=10  warmup baseline: [(49, 9)]
+  baseline             n=6
+    E             67 [52..82]  by reconciler: {'service-lifecycle': 17, 'svid-lifecycle': 17, 'vm-reclamation': 1, 'workload-lifecycle': 17}
+    never-completed keys [0, 0, 0, 0, 0, 0]  extra evals [4, 7, 4, 7, 4, 7]
+    wall ms       13 [10..16]
+    cpu s         0.02 [0.02..0.02]
+    duty wall %   0.04 [0.03..0.05] cpu % 0.06 [0.05..0.08]
+    list->first submit ms 0.14 [0.08..0.15]
+    edge admission ms job 5 [4..8]  svc 4 [1..6]
+    svc handler ms 2.5 [1.9..3.0]  job handler ms 0.7 [0.5..0.9]
+    lock wait us p50 1206 [741..1677]  max 1537 [1098..1770]
+    sum tick ms   80 [60..101]  drain_pending total ms 1 [0..1]
+    tick mean ms by reconciler (first sample) {'service-lifecycle': 1.03, 'svid-lifecycle': 0.95, 'vm-reclamation': 0.72, 'workload-lifecycle': 1.47}
+  proposed(same run)   n=6
+    E             64 [49..79]  by reconciler: {'service-lifecycle': 6, 'service-map-hydrator': 6, 'svid-lifecycle': 18, 'vm-reclamation': 1, 'workload-lifecycle': 18}
+    never-completed keys [0, 0, 0, 0, 0, 0]  extra evals [3, 7, 3, 7, 3, 7]
+    wall ms       12 [9..16]
+    cpu s         0.02 [0.01..0.03]
+    duty wall %   0.04 [0.03..0.05] cpu % 0.07 [0.05..0.08]
+    list->first submit ms 0.00 [0.00..0.00]
+    edge admission ms job 6 [4..8]  svc 6 [3..9]
+    svc handler ms 1.6 [1.3..1.7]  job handler ms 0.6 [0.6..0.7]
+    lock wait us p50 1221 [787..1585]  max 1811 [1656..1995]
+    sum tick ms   82 [60..109]  drain_pending total ms 0 [0..1]
+    tick mean ms by reconciler (first sample) {'service-lifecycle': 0.99, 'service-map-hydrator': 1.18, 'svid-lifecycle': 0.88, 'vm-reclamation': 0.96, 'workload-lifecycle': 1.66}
+  proposed(prior run)  n=5
+    E             49 [43..55]  by reconciler: None
+    never-completed keys [None, None, None, None, None]  extra evals [3, 7, 3, 7, 3]
+    wall ms       10 [8..12]
+    cpu s         0.02 [0.01..0.02]
+    duty wall %   0.03 [0.03..0.04] cpu % 0.05 [0.05..0.06]
+    list->first submit ms 0.00 [0.00..0.00]
+    edge admission ms job 4 [2..5]  svc 2 [1..4]
+    svc handler ms 2.4 [1.9..2.8]  job handler ms 0.6 [0.6..0.7]
+    lock wait us p50 1184 [831..1664]  max 1835 [1678..2003]
+    sum tick ms   65 [52..79]  drain_pending total ms 0 [0..0]
+    tick mean ms by reconciler (first sample) {'service-lifecycle': 0.85, 'service-map-hydrator': 1.31, 'svid-lifecycle': 0.89, 'vm-reclamation': 0.93, 'workload-lifecycle': 1.65}
+=== N=100  warmup baseline: [(319, 90)]
+  baseline             n=6
+    E             337 [322..352]  by reconciler: {'service-lifecycle': 107, 'svid-lifecycle': 107, 'vm-reclamation': 1, 'workload-lifecycle': 107}
+    never-completed keys [0, 0, 0, 0, 0, 0]  extra evals [4, 7, 4, 7, 4, 7]
+    wall ms       94 [89..99]
+    cpu s         0.12 [0.12..0.13]
+    duty wall %   0.31 [0.30..0.33] cpu % 0.41 [0.38..0.43]
+    list->first submit ms 0.18 [0.13..0.21]
+    edge admission ms job 83 [80..89]  svc 82 [78..86]
+    svc handler ms 3.5 [3.3..3.9]  job handler ms 0.6 [0.6..0.8]
+    lock wait us p50 2235 [2089..2359]  max 3032 [2760..3324]
+    sum tick ms   707 [667..746]  drain_pending total ms 11 [11..12]
+    tick mean ms by reconciler (first sample) {'service-lifecycle': 1.69, 'svid-lifecycle': 1.89, 'vm-reclamation': 0.89, 'workload-lifecycle': 2.64}
+  proposed(same run)   n=6
+    E             280 [265..295]  by reconciler: {'service-lifecycle': 24, 'service-map-hydrator': 24, 'svid-lifecycle': 108, 'vm-reclamation': 1, 'workload-lifecycle': 108}
+    never-completed keys [0, 0, 0, 0, 0, 0]  extra evals [3, 7, 3, 7, 3, 7]
+    wall ms       87 [81..98]
+    cpu s         0.11 [0.11..0.13]
+    duty wall %   0.29 [0.27..0.33] cpu % 0.38 [0.36..0.43]
+    list->first submit ms 0.00 [0.00..0.00]
+    edge admission ms job 77 [75..80]  svc 78 [72..88]
+    svc handler ms 3.4 [3.0..4.0]  job handler ms 0.7 [0.5..0.9]
+    lock wait us p50 2359 [2289..2516]  max 2883 [2634..3687]
+    sum tick ms   666 [623..759]  drain_pending total ms 7 [6..8]
+    tick mean ms by reconciler (first sample) {'service-lifecycle': 2.34, 'service-map-hydrator': 0.92, 'svid-lifecycle': 2.42, 'vm-reclamation': 2.48, 'workload-lifecycle': 2.69}
+  proposed(prior run)  n=5
+    E             265 [259..271]  by reconciler: None
+    never-completed keys [None, None, None, None, None]  extra evals [3, 7, 3, 7, 3]
+    wall ms       86 [84..90]
+    cpu s         0.11 [0.11..0.12]
+    duty wall %   0.29 [0.28..0.30] cpu % 0.38 [0.36..0.39]
+    list->first submit ms 0.00 [0.00..0.00]
+    edge admission ms job 79 [77..82]  svc 75 [73..78]
+    svc handler ms 3.4 [3.3..3.5]  job handler ms 0.7 [0.6..0.7]
+    lock wait us p50 2503 [2429..2550]  max 2940 [2863..3068]
+    sum tick ms   664 [644..689]  drain_pending total ms 7 [6..7]
+    tick mean ms by reconciler (first sample) {'service-lifecycle': 2.4, 'service-map-hydrator': 0.98, 'svid-lifecycle': 2.58, 'vm-reclamation': 2.83, 'workload-lifecycle': 2.78}
+=== N=500  warmup baseline: [(1519, 1374)]
+  baseline             n=6
+    E             1537 [1522..1552]  by reconciler: {'service-lifecycle': 507, 'svid-lifecycle': 507, 'vm-reclamation': 1, 'workload-lifecycle': 507}
+    never-completed keys [0, 0, 0, 0, 0, 0]  extra evals [4, 7, 4, 7, 4, 7]
+    wall ms       1352 [1304..1387]
+    cpu s         1.56 [1.51..1.60]
+    duty wall %   4.51 [4.35..4.62] cpu % 5.20 [5.03..5.33]
+    list->first submit ms 0.50 [0.40..0.62]
+    edge admission ms job 1334 [1277..1369]  svc 1321 [1303..1332]
+    svc handler ms 7.6 [7.2..8.1]  job handler ms 0.8 [0.7..0.9]
+    lock wait us p50 7091 [6917..7334]  max 10738 [9936..11678]
+    sum tick ms   10526 [10149..10810]  drain_pending total ms 212 [203..216]
+    tick mean ms by reconciler (first sample) {'service-lifecycle': 4.93, 'svid-lifecycle': 7.22, 'vm-reclamation': 2.93, 'workload-lifecycle': 8.98}
+  proposed(same run)   n=6
+    E             1240 [1225..1255]  by reconciler: {'service-lifecycle': 104, 'service-map-hydrator': 104, 'svid-lifecycle': 508, 'vm-reclamation': 1, 'workload-lifecycle': 508}
+    never-completed keys [0, 0, 0, 0, 0, 0]  extra evals [3, 7, 3, 7, 3, 7]
+    wall ms       1266 [1177..1349]
+    cpu s         1.47 [1.36..1.56]
+    duty wall %   4.22 [3.92..4.50] cpu % 4.88 [4.55..5.19]
+    list->first submit ms 0.00 [0.00..0.00]
+    edge admission ms job 1261 [1167..1337]  svc 1240 [1163..1292]
+    svc handler ms 8.3 [6.9..10.0]  job handler ms 0.8 [0.6..0.9]
+    lock wait us p50 7048 [6674..7576]  max 11086 [10390..11425]
+    sum tick ms   9951 [9246..10614]  drain_pending total ms 135 [131..139]
+    tick mean ms by reconciler (first sample) {'service-lifecycle': 6.18, 'service-map-hydrator': 1.81, 'svid-lifecycle': 11.45, 'vm-reclamation': 12.41, 'workload-lifecycle': 6.89}
+  proposed(prior run)  n=5
+    E             1225 [1219..1231]  by reconciler: None
+    never-completed keys [None, None, None, None, None]  extra evals [3, 7, 3, 7, 3]
+    wall ms       1256 [1233..1294]
+    cpu s         1.46 [1.43..1.50]
+    duty wall %   4.19 [4.11..4.31] cpu % 4.85 [4.75..4.99]
+    list->first submit ms 0.00 [0.00..0.00]
+    edge admission ms job 1250 [1223..1282]  svc 1225 [1214..1237]
+    svc handler ms 8.4 [7.9..9.0]  job handler ms 0.9 [0.8..0.9]
+    lock wait us p50 7212 [6816..7668]  max 10784 [10550..10994]
+    sum tick ms   9874 [9696..10173]  drain_pending total ms 132 [128..138]
+    tick mean ms by reconciler (first sample) {'service-lifecycle': 7.71, 'service-map-hydrator': 1.83, 'svid-lifecycle': 10.51, 'vm-reclamation': 10.93, 'workload-lifecycle': 6.71}
+=== N=1000  warmup baseline: [(3019, 4591)]
+  baseline             n=6
+    E             3037 [3022..3052]  by reconciler: {'service-lifecycle': 1007, 'svid-lifecycle': 1007, 'vm-reclamation': 1, 'workload-lifecycle': 1007}
+    never-completed keys [0, 0, 0, 0, 0, 0]  extra evals [4, 7, 4, 7, 4, 7]
+    wall ms       4636 [4480..4760]
+    cpu s         5.27 [5.09..5.42]
+    duty wall %   15.45 [14.93..15.87] cpu % 17.57 [16.96..18.07]
+    list->first submit ms 1.06 [0.83..1.23]
+    edge admission ms job 4607 [4451..4717]  svc 4589 [4518..4664]
+    svc handler ms 12.7 [11.9..14.1]  job handler ms 0.9 [0.9..0.9]
+    lock wait us p50 12195 [11861..13153]  max 19248 [18571..19827]
+    sum tick ms   36121 [34917..37115]  drain_pending total ms 838 [788..864]
+    tick mean ms by reconciler (first sample) {'service-lifecycle': 8.23, 'svid-lifecycle': 12.81, 'vm-reclamation': 5.89, 'workload-lifecycle': 15.81}
+  proposed(same run)   n=6
+    E             2440 [2425..2455]  by reconciler: {'service-lifecycle': 204, 'service-map-hydrator': 204, 'svid-lifecycle': 1008, 'vm-reclamation': 1, 'workload-lifecycle': 1008}
+    never-completed keys [0, 0, 0, 0, 0, 0]  extra evals [3, 7, 3, 7, 3, 7]
+    wall ms       4325 [4139..4508]
+    cpu s         4.95 [4.76..5.13]
+    duty wall %   14.42 [13.80..15.03] cpu % 16.49 [15.87..17.10]
+    list->first submit ms 0.00 [0.00..0.00]
+    edge admission ms job 4350 [4120..4489]  svc 4250 [4232..4276]
+    svc handler ms 14.1 [12.0..15.6]  job handler ms 0.7 [0.6..0.9]
+    lock wait us p50 11146 [10250..11510]  max 20528 [19186..21293]
+    sum tick ms   34010 [32521..35489]  drain_pending total ms 526 [507..549]
+    tick mean ms by reconciler (first sample) {'service-lifecycle': 11.16, 'service-map-hydrator': 3.04, 'svid-lifecycle': 20.11, 'vm-reclamation': 21.53, 'workload-lifecycle': 11.81}
+  proposed(prior run)  n=5
+    E             2425 [2419..2431]  by reconciler: None
+    never-completed keys [None, None, None, None, None]  extra evals [3, 7, 3, 7, 3]
+    wall ms       4554 [4202..4941]
+    cpu s         5.16 [4.81..5.55]
+    duty wall %   15.18 [14.01..16.47] cpu % 17.21 [16.03..18.52]
+    list->first submit ms 0.00 [0.00..0.00]
+    edge admission ms job 4541 [4185..4922]  svc 4515 [4493..4538]
+    svc handler ms 14.2 [12.7..15.6]  job handler ms 0.9 [0.6..1.1]
+    lock wait us p50 12479 [11338..14151]  max 21675 [20357..22157]
+    sum tick ms   35844 [33016..38927]  drain_pending total ms 525 [510..541]
+    tick mean ms by reconciler (first sample) {'service-lifecycle': 15.34, 'service-map-hydrator': 3.18, 'svid-lifecycle': 22.4, 'vm-reclamation': 23.36, 'workload-lifecycle': 12.53}
+
+| N | pass | E | wall ms | CPU s | duty % (wall/30s) | edge admit ms (Job) | edge admit ms (Svc) | Svc handler ms | lock wait p50 ms |
+|---|---|---|---|---|---|---|---|---|---|
+| 10 | baseline | 67 | 13 | 0.02 | 0.04 | 5 | 4 | 2.5 | 1.2 |
+| 10 | proposed same-run | 64 | 12 | 0.02 | 0.04 | 6 | 6 | 1.6 | 1.2 |
+| 10 | proposed prior | 49 | 10 | 0.02 | 0.03 | 4 | 2 | 2.4 | 1.2 |
+| 100 | baseline | 337 | 94 | 0.12 | 0.31 | 83 | 82 | 3.5 | 2.2 |
+| 100 | proposed same-run | 280 | 87 | 0.11 | 0.29 | 77 | 78 | 3.4 | 2.4 |
+| 100 | proposed prior | 265 | 86 | 0.11 | 0.29 | 79 | 75 | 3.4 | 2.5 |
+| 500 | baseline | 1537 | 1352 | 1.56 | 4.51 | 1334 | 1321 | 7.6 | 7.1 |
+| 500 | proposed same-run | 1240 | 1266 | 1.47 | 4.22 | 1261 | 1240 | 8.3 | 7.0 |
+| 500 | proposed prior | 1225 | 1256 | 1.46 | 4.19 | 1250 | 1225 | 8.4 | 7.2 |
+| 1000 | baseline | 3037 | 4636 | 5.27 | 15.45 | 4607 | 4589 | 12.7 | 12.2 |
+| 1000 | proposed same-run | 2440 | 4325 | 4.95 | 14.42 | 4350 | 4250 | 14.1 | 11.1 |
+| 1000 | proposed prior | 2425 | 4554 | 5.16 | 15.18 | 4541 | 4515 | 14.2 | 12.5 |

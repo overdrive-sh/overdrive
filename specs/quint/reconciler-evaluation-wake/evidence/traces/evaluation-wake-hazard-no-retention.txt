@@ -1,4 +1,4 @@
-# evaluation-wake-hazard-no-retention: counterexample, 7 state(s) (from the TLC trace)
+# evaluation-wake-hazard-no-retention: counterexample, 6 state(s) (from the TLC trace)
 
 State 1
   active = {}
@@ -14,36 +14,26 @@ State 1
   need = {}
   has = {}
   inWin = {}
-  snap = {}
 
-State 2 [DivergeDrop]
+State 2 [DivergeWake]
   drifts = 1
-  need = {"k1"}
-  has = {"k1"}
-
-State 3 [DivergeWake]
-  drifts = 2
   pending = <<"k2">>
-  need = {"k1", "k2"}
-  has = {"k1", "k2"}
+  need = {"k2"}
+  has = {"k2"}
 
-State 4 [Drain]
+State 3 [Drain]
   active = {"k2"}
   pending = <<>>
-  snap = {"k2"}
 
-State 5 [Finish]
+State 4 [Finish]
   active = {}
   faults = 1
   pending = <<"k2">>
   inWin = {"k2"}
-  snap = {}
 
-State 6 [Drain]
+State 5 [Drain]
   active = {"k2"}
   pending = <<>>
-  snap = {"k2"}
 
-State 7 [Finish]
+State 6 [Finish]
   active = {}
-  snap = {}

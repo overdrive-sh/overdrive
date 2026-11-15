@@ -1,0 +1,1736 @@
+{
+  "alloc_rows": 10,
+  "enumeration_proxy_ms": {
+    "max": 0.15233,
+    "mean": 0.11749590000000001,
+    "min": 0.096765,
+    "n": 10,
+    "p50": 0.12131299999999999,
+    "p95": 0.15233,
+    "p99": 0.15233,
+    "sd": 0.015455968674125718
+  },
+  "idle_edge_wake": {
+    "allocator_lock_wait_us_idle": {
+      "max": 0.5810000000000001,
+      "mean": 0.1056540284360189,
+      "min": 0.04,
+      "n": 211,
+      "p50": 0.09999999999999999,
+      "p95": 0.221,
+      "p99": 0.48100000000000004,
+      "sd": 0.06713482327078242
+    },
+    "job_admission_delay_ms": {
+      "max": 1.728072,
+      "mean": 1.3475356666666667,
+      "min": 0.7611859999999999,
+      "n": 3,
+      "p50": 1.553349,
+      "p95": 1.728072,
+      "p99": 1.728072,
+      "sd": 0.5152538019096351
+    },
+    "job_deploy_handler_ms": {
+      "max": 0.48464,
+      "mean": 0.3700476666666666,
+      "min": 0.293242,
+      "n": 3,
+      "p50": 0.332261,
+      "p95": 0.48464,
+      "p99": 0.48464,
+      "sd": 0.10113937281955696
+    },
+    "service_admission_delay_ms": {
+      "max": 0.650259,
+      "mean": 0.5238386666666667,
+      "min": 0.393963,
+      "n": 3,
+      "p50": 0.5272939999999999,
+      "p95": 0.650259,
+      "p99": 0.650259,
+      "sd": 0.12818293334267764
+    },
+    "service_deploy_handler_ms": {
+      "max": 0.666123,
+      "mean": 0.536221,
+      "min": 0.41085900000000003,
+      "n": 3,
+      "p50": 0.531681,
+      "p95": 0.666123,
+      "p99": 0.666123,
+      "sd": 0.12769254529533036
+    }
+  },
+  "n": 10,
+  "pass_samples": [
+    {
+      "allocator_lock_wait_us_in_pass": {
+        "max": 1106.846,
+        "mean": 770.0596,
+        "min": 0.451,
+        "n": 5,
+        "p50": 955.849,
+        "p95": 1106.846,
+        "p99": 1106.846,
+        "sd": 457.8199288495423
+      },
+      "cpu_s_during_window": 0.015367999999999993,
+      "drain_pending_calls": 48,
+      "drain_pending_max_ms": 0.019249,
+      "drain_pending_total_ms": 0.316867,
+      "duty_cycle_cpu_pct_of_30s_one_core": 0.05122666666666665,
+      "duty_cycle_wall_pct_of_30s": 0.03031137666666647,
+      "edge": {
+        "admission_delay_ms": 0.462296,
+        "completed_after_burst_start_ms": 9.696191000000113,
+        "deploy_handler_wall_ms": 2.418703,
+        "edge_offset_base_ms": 0.119029,
+        "edge_submitted_approx_ms_after_t0": 6.407939000000056,
+        "kind": "service",
+        "tick_elapsed_ms": 2.825956
+      },
+      "evals_by_reconciler": {
+        "service-lifecycle": 16,
+        "svid-lifecycle": 16,
+        "vm-reclamation": 1,
+        "workload-lifecycle": 16
+      },
+      "evals_submitted": 49,
+      "evals_total_incl_requeue_and_edge": 56,
+      "extra_evals_beyond_pass": 7,
+      "keys_never_completed": 0,
+      "list_to_first_submit_ms": 0.119029,
+      "mode": "baseline",
+      "pass_wall_ms": 9.093412999999941,
+      "queued_ms_all_pass_evals": {
+        "max": 6.810456,
+        "mean": 3.3979538979591837,
+        "min": 1.0321550000000002,
+        "n": 49,
+        "p50": 3.087519,
+        "p95": 6.378024000000001,
+        "p99": 6.810456,
+        "sd": 1.8993767849470413
+      },
+      "sample": 0,
+      "sum_tick_elapsed_ms": 52.470493000000005,
+      "tick_elapsed_ms_all_pass_evals": {
+        "max": 2.113663,
+        "mean": 1.070826387755102,
+        "min": 0.07292,
+        "n": 49,
+        "p50": 1.051544,
+        "p95": 1.670646,
+        "p99": 2.113663,
+        "sd": 0.3887508896077075
+      },
+      "tick_elapsed_ms_by_reconciler": {
+        "service-lifecycle": {
+          "max": 1.43493,
+          "mean": 0.884455625,
+          "min": 0.07292,
+          "n": 16,
+          "p50": 0.971833,
+          "p95": 1.3585559999999999,
+          "p99": 1.43493,
+          "sd": 0.39225358810151967
+        },
+        "svid-lifecycle": {
+          "max": 1.2030109999999998,
+          "mean": 0.9572039374999999,
+          "min": 0.731922,
+          "n": 16,
+          "p50": 0.980126,
+          "p95": 1.120517,
+          "p99": 1.2030109999999998,
+          "sd": 0.13274027327452598
+        },
+        "vm-reclamation": {
+          "max": 0.21889,
+          "mean": 0.21889,
+          "min": 0.21889,
+          "n": 1,
+          "p50": 0.21889,
+          "p95": 0.21889,
+          "p99": 0.21889,
+          "sd": 0.0
+        },
+        "workload-lifecycle": {
+          "max": 2.113663,
+          "mean": 1.424065625,
+          "min": 0.9396950000000001,
+          "n": 16,
+          "p50": 1.456663,
+          "p95": 1.6936,
+          "p99": 2.113663,
+          "sd": 0.28252627373322875
+        }
+      },
+      "wall_incl_edge_tail_ms": 19.241795,
+      "warmup": true
+    },
+    {
+      "allocator_lock_wait_us_in_pass": {
+        "max": 1769.955,
+        "mean": 1106.301,
+        "min": 0.311,
+        "n": 4,
+        "p50": 1677.2759999999998,
+        "p95": 1769.955,
+        "p99": 1769.955,
+        "sd": 817.7634039993882
+      },
+      "cpu_s_during_window": 0.015017999999999976,
+      "drain_pending_calls": 49,
+      "drain_pending_max_ms": 0.019489,
+      "drain_pending_total_ms": 0.36473999999999995,
+      "duty_cycle_cpu_pct_of_30s_one_core": 0.05005999999999992,
+      "duty_cycle_wall_pct_of_30s": 0.034262960000000175,
+      "edge": {
+        "admission_delay_ms": 3.5509370000000002,
+        "completed_after_burst_start_ms": 10.709806999999955,
+        "deploy_handler_wall_ms": 0.914137,
+        "edge_offset_base_ms": 0.14761200000000002,
+        "edge_submitted_approx_ms_after_t0": 4.196528999999941,
+        "kind": "job",
+        "tick_elapsed_ms": 2.962341
+      },
+      "evals_by_reconciler": {
+        "service-lifecycle": 17,
+        "svid-lifecycle": 17,
+        "vm-reclamation": 1,
+        "workload-lifecycle": 17
+      },
+      "evals_submitted": 52,
+      "evals_total_incl_requeue_and_edge": 56,
+      "extra_evals_beyond_pass": 4,
+      "keys_never_completed": 0,
+      "list_to_first_submit_ms": 0.14761200000000002,
+      "mode": "baseline",
+      "pass_wall_ms": 10.278888000000052,
+      "queued_ms_all_pass_evals": {
+        "max": 9.792416,
+        "mean": 4.172806846153847,
+        "min": 1.0308419999999998,
+        "n": 52,
+        "p50": 4.201937999999999,
+        "p95": 7.191038000000001,
+        "p99": 8.963277,
+        "sd": 2.291655849438442
+      },
+      "sample": 0,
+      "sum_tick_elapsed_ms": 59.512071,
+      "tick_elapsed_ms_all_pass_evals": {
+        "max": 1.914433,
+        "mean": 1.1444629038461538,
+        "min": 0.283767,
+        "n": 52,
+        "p50": 1.1161210000000001,
+        "p95": 1.780532,
+        "p99": 1.891829,
+        "sd": 0.4151270011319362
+      },
+      "tick_elapsed_ms_by_reconciler": {
+        "service-lifecycle": {
+          "max": 1.7690029999999999,
+          "mean": 1.0292804117647059,
+          "min": 0.419712,
+          "n": 17,
+          "p50": 0.913065,
+          "p95": 1.650816,
+          "p99": 1.7690029999999999,
+          "sd": 0.4177836010207705
+        },
+        "svid-lifecycle": {
+          "max": 1.2419600000000002,
+          "mean": 0.9549602352941174,
+          "min": 0.562737,
+          "n": 17,
+          "p50": 0.987948,
+          "p95": 1.161219,
+          "p99": 1.2419600000000002,
+          "sd": 0.19740347422523033
+        },
+        "vm-reclamation": {
+          "max": 0.7240000000000001,
+          "mean": 0.7240000000000001,
+          "min": 0.7240000000000001,
+          "n": 1,
+          "p50": 0.7240000000000001,
+          "p95": 0.7240000000000001,
+          "p99": 0.7240000000000001,
+          "sd": 0.0
+        },
+        "workload-lifecycle": {
+          "max": 1.914433,
+          "mean": 1.4738811764705884,
+          "min": 0.283767,
+          "n": 17,
+          "p50": 1.5786470000000001,
+          "p95": 1.891829,
+          "p99": 1.914433,
+          "sd": 0.39647454984135416
+        }
+      },
+      "wall_incl_edge_tail_ms": 21.878745000000002
+    },
+    {
+      "allocator_lock_wait_us_in_pass": {
+        "max": 1673.97,
+        "mean": 723.32925,
+        "min": 0.221,
+        "n": 4,
+        "p50": 961.839,
+        "p95": 1673.97,
+        "p99": 1673.97,
+        "sd": 752.924444285691
+      },
+      "cpu_s_during_window": 0.014415000000000011,
+      "drain_pending_calls": 45,
+      "drain_pending_max_ms": 0.027752,
+      "drain_pending_total_ms": 0.2787129999999999,
+      "duty_cycle_cpu_pct_of_30s_one_core": 0.04805000000000004,
+      "duty_cycle_wall_pct_of_30s": 0.03143670666666708,
+      "edge": {
+        "admission_delay_ms": 3.803187,
+        "completed_after_burst_start_ms": 10.755486000000133,
+        "deploy_handler_wall_ms": 0.564981,
+        "edge_offset_base_ms": 0.0,
+        "edge_submitted_approx_ms_after_t0": 3.977590000000191,
+        "kind": "job",
+        "tick_elapsed_ms": 2.974709
+      },
+      "evals_by_reconciler": {
+        "service-lifecycle": 6,
+        "service-map-hydrator": 6,
+        "svid-lifecycle": 18,
+        "vm-reclamation": 1,
+        "workload-lifecycle": 18
+      },
+      "evals_submitted": 49,
+      "evals_total_incl_requeue_and_edge": 52,
+      "extra_evals_beyond_pass": 3,
+      "keys_never_completed": 0,
+      "list_to_first_submit_ms": 0.0,
+      "mode": "proposed",
+      "pass_wall_ms": 9.431012000000123,
+      "queued_ms_all_pass_evals": {
+        "max": 7.540815,
+        "mean": 3.7219258775510218,
+        "min": 1.046576,
+        "n": 49,
+        "p50": 3.5924799999999997,
+        "p95": 7.095865,
+        "p99": 7.540815,
+        "sd": 1.9107286769894516
+      },
+      "sample": 0,
+      "sum_tick_elapsed_ms": 59.70423099999999,
+      "tick_elapsed_ms_all_pass_evals": {
+        "max": 1.858519,
+        "mean": 1.2184536938775512,
+        "min": 0.417008,
+        "n": 49,
+        "p50": 1.0220690000000001,
+        "p95": 1.820061,
+        "p99": 1.858519,
+        "sd": 0.42361537558596934
+      },
+      "tick_elapsed_ms_by_reconciler": {
+        "service-lifecycle": {
+          "max": 1.487901,
+          "mean": 0.989849,
+          "min": 0.417008,
+          "n": 6,
+          "p50": 1.118715,
+          "p95": 1.487901,
+          "p99": 1.487901,
+          "sd": 0.3974217514082489
+        },
+        "service-map-hydrator": {
+          "max": 1.619168,
+          "mean": 1.1756268333333333,
+          "min": 0.722638,
+          "n": 6,
+          "p50": 1.2472379999999998,
+          "p95": 1.619168,
+          "p99": 1.619168,
+          "sd": 0.36252063738298634
+        },
+        "svid-lifecycle": {
+          "max": 0.992254,
+          "mean": 0.8795256111111112,
+          "min": 0.580594,
+          "n": 18,
+          "p50": 0.9393039999999999,
+          "p95": 0.989029,
+          "p99": 0.992254,
+          "sd": 0.12411445937385132
+        },
+        "vm-reclamation": {
+          "max": 0.96223,
+          "mean": 0.96223,
+          "min": 0.96223,
+          "n": 1,
+          "p50": 0.96223,
+          "p95": 0.96223,
+          "p99": 0.96223,
+          "sd": 0.0
+        },
+        "workload-lifecycle": {
+          "max": 1.858519,
+          "mean": 1.6620936111111113,
+          "min": 1.099787,
+          "n": 18,
+          "p50": 1.770026,
+          "p95": 1.857958,
+          "p99": 1.858519,
+          "sd": 0.23063684422463532
+        }
+      },
+      "wall_incl_edge_tail_ms": 21.358242
+    },
+    {
+      "allocator_lock_wait_us_in_pass": {
+        "max": 1206.937,
+        "mean": 758.3036,
+        "min": 0.53,
+        "n": 5,
+        "p50": 981.4780000000001,
+        "p95": 1206.937,
+        "p99": 1206.937,
+        "sd": 473.7752269149369
+      },
+      "cpu_s_during_window": 0.01647399999999999,
+      "drain_pending_calls": 57,
+      "drain_pending_max_ms": 0.03317,
+      "drain_pending_total_ms": 0.42390800000000006,
+      "duty_cycle_cpu_pct_of_30s_one_core": 0.0549133333333333,
+      "duty_cycle_wall_pct_of_30s": 0.03435082666666669,
+      "edge": {
+        "admission_delay_ms": 1.399728,
+        "completed_after_burst_start_ms": 10.172557999999981,
+        "deploy_handler_wall_ms": 1.856225,
+        "edge_offset_base_ms": 0.13342099999999998,
+        "edge_submitted_approx_ms_after_t0": 6.19843400000002,
+        "kind": "service",
+        "tick_elapsed_ms": 2.574396
+      },
+      "evals_by_reconciler": {
+        "service-lifecycle": 19,
+        "svid-lifecycle": 19,
+        "vm-reclamation": 1,
+        "workload-lifecycle": 19
+      },
+      "evals_submitted": 58,
+      "evals_total_incl_requeue_and_edge": 65,
+      "extra_evals_beyond_pass": 7,
+      "keys_never_completed": 0,
+      "list_to_first_submit_ms": 0.13342099999999998,
+      "mode": "baseline",
+      "pass_wall_ms": 10.305248000000006,
+      "queued_ms_all_pass_evals": {
+        "max": 9.434116,
+        "mean": 4.282797120689656,
+        "min": 1.0606369999999998,
+        "n": 58,
+        "p50": 4.327787,
+        "p95": 8.642444000000001,
+        "p99": 9.349318,
+        "sd": 2.4780015654643974
+      },
+      "sample": 1,
+      "sum_tick_elapsed_ms": 59.931988999999994,
+      "tick_elapsed_ms_all_pass_evals": {
+        "max": 1.6331589999999998,
+        "mean": 1.033310155172414,
+        "min": 0.121352,
+        "n": 58,
+        "p50": 1.025134,
+        "p95": 1.544276,
+        "p99": 1.614311,
+        "sd": 0.33220839693575577
+      },
+      "tick_elapsed_ms_by_reconciler": {
+        "service-lifecycle": {
+          "max": 1.544276,
+          "mean": 0.9771062105263157,
+          "min": 0.121352,
+          "n": 19,
+          "p50": 0.9614779999999999,
+          "p95": 1.4309349999999998,
+          "p99": 1.544276,
+          "sd": 0.3692573612149089
+        },
+        "svid-lifecycle": {
+          "max": 1.1565919999999998,
+          "mean": 0.9317756842105264,
+          "min": 0.762778,
+          "n": 19,
+          "p50": 0.90338,
+          "p95": 1.1115140000000001,
+          "p99": 1.1565919999999998,
+          "sd": 0.12922986041118648
+        },
+        "vm-reclamation": {
+          "max": 0.33827999999999997,
+          "mean": 0.33827999999999997,
+          "min": 0.33827999999999997,
+          "n": 1,
+          "p50": 0.33827999999999997,
+          "p95": 0.33827999999999997,
+          "p99": 0.33827999999999997,
+          "sd": 0.0
+        },
+        "workload-lifecycle": {
+          "max": 1.6331589999999998,
+          "mean": 1.227629105263158,
+          "min": 0.464249,
+          "n": 19,
+          "p50": 1.256442,
+          "p95": 1.614311,
+          "p99": 1.6331589999999998,
+          "sd": 0.3398802746894681
+        }
+      },
+      "wall_incl_edge_tail_ms": 21.175457
+    },
+    {
+      "allocator_lock_wait_us_in_pass": {
+        "max": 1767.631,
+        "mean": 820.9078000000002,
+        "min": 0.28,
+        "n": 5,
+        "p50": 786.895,
+        "p95": 1767.631,
+        "p99": 1767.631,
+        "sd": 627.6647764194674
+      },
+      "cpu_s_during_window": 0.017203000000000024,
+      "drain_pending_calls": 54,
+      "drain_pending_max_ms": 0.021422,
+      "drain_pending_total_ms": 0.3080740000000002,
+      "duty_cycle_cpu_pct_of_30s_one_core": 0.05734333333333342,
+      "duty_cycle_wall_pct_of_30s": 0.03499713333333299,
+      "edge": {
+        "admission_delay_ms": 3.169743,
+        "completed_after_burst_start_ms": 11.732516999999916,
+        "deploy_handler_wall_ms": 1.7079820000000001,
+        "edge_offset_base_ms": 0.0,
+        "edge_submitted_approx_ms_after_t0": 5.703157999999917,
+        "kind": "service",
+        "tick_elapsed_ms": 2.859616
+      },
+      "evals_by_reconciler": {
+        "service-lifecycle": 7,
+        "service-map-hydrator": 7,
+        "svid-lifecycle": 20,
+        "vm-reclamation": 1,
+        "workload-lifecycle": 20
+      },
+      "evals_submitted": 55,
+      "evals_total_incl_requeue_and_edge": 62,
+      "extra_evals_beyond_pass": 7,
+      "keys_never_completed": 0,
+      "list_to_first_submit_ms": 0.0,
+      "mode": "proposed",
+      "pass_wall_ms": 10.499139999999898,
+      "queued_ms_all_pass_evals": {
+        "max": 8.52631,
+        "mean": 4.037852490909092,
+        "min": 1.035239,
+        "n": 55,
+        "p50": 3.732611,
+        "p95": 7.880167,
+        "p99": 8.312878,
+        "sd": 2.202028802300429
+      },
+      "sample": 1,
+      "sum_tick_elapsed_ms": 68.43362100000002,
+      "tick_elapsed_ms_all_pass_evals": {
+        "max": 1.911338,
+        "mean": 1.244247654545455,
+        "min": 0.39791000000000004,
+        "n": 55,
+        "p50": 1.2201479999999998,
+        "p95": 1.8573769999999998,
+        "p99": 1.890887,
+        "sd": 0.45948902865998553
+      },
+      "tick_elapsed_ms_by_reconciler": {
+        "service-lifecycle": {
+          "max": 1.549604,
+          "mean": 0.9858948571428573,
+          "min": 0.39791000000000004,
+          "n": 7,
+          "p50": 0.9986140000000001,
+          "p95": 1.549604,
+          "p99": 1.549604,
+          "sd": 0.4139765980633964
+        },
+        "service-map-hydrator": {
+          "max": 1.626249,
+          "mean": 1.0282782857142858,
+          "min": 0.599272,
+          "n": 7,
+          "p50": 1.00938,
+          "p95": 1.626249,
+          "p99": 1.626249,
+          "sd": 0.3519605017501795
+        },
+        "svid-lifecycle": {
+          "max": 1.262902,
+          "mean": 0.8955772,
+          "min": 0.552332,
+          "n": 20,
+          "p50": 0.888467,
+          "p95": 1.2544089999999999,
+          "p99": 1.262902,
+          "sd": 0.20803082722206034
+        },
+        "vm-reclamation": {
+          "max": 1.3147199999999999,
+          "mean": 1.3147199999999999,
+          "min": 1.3147199999999999,
+          "n": 1,
+          "p50": 1.3147199999999999,
+          "p95": 1.3147199999999999,
+          "p99": 1.3147199999999999,
+          "sd": 0.0
+        },
+        "workload-lifecycle": {
+          "max": 1.911338,
+          "mean": 1.75540725,
+          "min": 1.463444,
+          "n": 20,
+          "p50": 1.801062,
+          "p95": 1.890887,
+          "p99": 1.911338,
+          "sd": 0.1360068094873717
+        }
+      },
+      "wall_incl_edge_tail_ms": 20.713621
+    },
+    {
+      "allocator_lock_wait_us_in_pass": {
+        "max": 1097.512,
+        "mean": 701.9572000000001,
+        "min": 0.26,
+        "n": 5,
+        "p50": 741.167,
+        "p95": 1097.512,
+        "p99": 1097.512,
+        "sd": 440.8171497862804
+      },
+      "cpu_s_during_window": 0.017336000000000018,
+      "drain_pending_calls": 61,
+      "drain_pending_max_ms": 0.030256,
+      "drain_pending_total_ms": 0.5562779999999999,
+      "duty_cycle_cpu_pct_of_30s_one_core": 0.05778666666666673,
+      "duty_cycle_wall_pct_of_30s": 0.040067069999999684,
+      "edge": {
+        "admission_delay_ms": 4.025441,
+        "completed_after_burst_start_ms": 11.00650399999995,
+        "deploy_handler_wall_ms": 0.594986,
+        "edge_offset_base_ms": 0.149565,
+        "edge_submitted_approx_ms_after_t0": 4.62519599999996,
+        "kind": "job",
+        "tick_elapsed_ms": 2.3558670000000004
+      },
+      "evals_by_reconciler": {
+        "service-lifecycle": 21,
+        "svid-lifecycle": 21,
+        "vm-reclamation": 1,
+        "workload-lifecycle": 21
+      },
+      "evals_submitted": 64,
+      "evals_total_incl_requeue_and_edge": 68,
+      "extra_evals_beyond_pass": 4,
+      "keys_never_completed": 0,
+      "list_to_first_submit_ms": 0.149565,
+      "mode": "baseline",
+      "pass_wall_ms": 12.020120999999904,
+      "queued_ms_all_pass_evals": {
+        "max": 10.59173,
+        "mean": 4.98384640625,
+        "min": 1.046335,
+        "n": 64,
+        "p50": 5.281453,
+        "p95": 10.188733000000001,
+        "p99": 10.450527,
+        "sd": 2.9304078020113473
+      },
+      "sample": 2,
+      "sum_tick_elapsed_ms": 73.59861900000001,
+      "tick_elapsed_ms_all_pass_evals": {
+        "max": 1.874342,
+        "mean": 1.1499784218750002,
+        "min": 0.10975499999999999,
+        "n": 64,
+        "p50": 1.137893,
+        "p95": 1.801803,
+        "p99": 1.848544,
+        "sd": 0.3910936015829672
+      },
+      "tick_elapsed_ms_by_reconciler": {
+        "service-lifecycle": {
+          "max": 1.8165550000000001,
+          "mean": 1.1041098095238095,
+          "min": 0.10975499999999999,
+          "n": 21,
+          "p50": 1.100117,
+          "p95": 1.801803,
+          "p99": 1.8165550000000001,
+          "sd": 0.453445975995335
+        },
+        "svid-lifecycle": {
+          "max": 1.4726780000000002,
+          "mean": 0.9941599523809523,
+          "min": 0.506022,
+          "n": 21,
+          "p50": 0.926044,
+          "p95": 1.338817,
+          "p99": 1.4726780000000002,
+          "sd": 0.27122801277070857
+        },
+        "vm-reclamation": {
+          "max": 0.55139,
+          "mean": 0.55139,
+          "min": 0.55139,
+          "n": 1,
+          "p50": 0.55139,
+          "p95": 0.55139,
+          "p99": 0.55139,
+          "sd": 0.0
+        },
+        "workload-lifecycle": {
+          "max": 1.874342,
+          "mean": 1.3801697142857143,
+          "min": 0.826846,
+          "n": 21,
+          "p50": 1.3999380000000001,
+          "p95": 1.848544,
+          "p99": 1.874342,
+          "sd": 0.31839052975271465
+        }
+      },
+      "wall_incl_edge_tail_ms": 22.074961000000002
+    },
+    {
+      "allocator_lock_wait_us_in_pass": {
+        "max": 1995.3750000000002,
+        "mean": 1194.9676,
+        "min": 0.09999999999999999,
+        "n": 5,
+        "p50": 1322.632,
+        "p95": 1995.3750000000002,
+        "p99": 1995.3750000000002,
+        "sd": 786.2664642621482
+      },
+      "cpu_s_during_window": 0.018262999999999974,
+      "drain_pending_calls": 57,
+      "drain_pending_max_ms": 0.022374,
+      "drain_pending_total_ms": 0.4102210000000001,
+      "duty_cycle_cpu_pct_of_30s_one_core": 0.060876666666666586,
+      "duty_cycle_wall_pct_of_30s": 0.04349122333333374,
+      "edge": {
+        "admission_delay_ms": 7.512533,
+        "completed_after_burst_start_ms": 14.451551999999992,
+        "deploy_handler_wall_ms": 0.672994,
+        "edge_offset_base_ms": 0.0,
+        "edge_submitted_approx_ms_after_t0": 3.8371579999998175,
+        "kind": "job",
+        "tick_elapsed_ms": 3.101861
+      },
+      "evals_by_reconciler": {
+        "service-lifecycle": 8,
+        "service-map-hydrator": 8,
+        "svid-lifecycle": 22,
+        "vm-reclamation": 1,
+        "workload-lifecycle": 22
+      },
+      "evals_submitted": 61,
+      "evals_total_incl_requeue_and_edge": 64,
+      "extra_evals_beyond_pass": 3,
+      "keys_never_completed": 0,
+      "list_to_first_submit_ms": 0.0,
+      "mode": "proposed",
+      "pass_wall_ms": 13.047367000000122,
+      "queued_ms_all_pass_evals": {
+        "max": 11.038332,
+        "mean": 5.8208890655737715,
+        "min": 2.060583,
+        "n": 61,
+        "p50": 5.620654,
+        "p95": 10.351938,
+        "p99": 10.821706,
+        "sd": 2.582927035069961
+      },
+      "sample": 2,
+      "sum_tick_elapsed_ms": 80.03807800000003,
+      "tick_elapsed_ms_all_pass_evals": {
+        "max": 1.997709,
+        "mean": 1.3120996393442628,
+        "min": 0.38323799999999997,
+        "n": 61,
+        "p50": 1.106927,
+        "p95": 1.9407230000000002,
+        "p99": 1.968545,
+        "sd": 0.47475813461698696
+      },
+      "tick_elapsed_ms_by_reconciler": {
+        "service-lifecycle": {
+          "max": 1.997709,
+          "mean": 1.2557361249999999,
+          "min": 0.38323799999999997,
+          "n": 8,
+          "p50": 1.417674,
+          "p95": 1.997709,
+          "p99": 1.997709,
+          "sd": 0.5637315450725099
+        },
+        "service-map-hydrator": {
+          "max": 1.725408,
+          "mean": 1.074536625,
+          "min": 0.549868,
+          "n": 8,
+          "p50": 1.106927,
+          "p95": 1.725408,
+          "p99": 1.725408,
+          "sd": 0.4085992464428886
+        },
+        "svid-lifecycle": {
+          "max": 1.086886,
+          "mean": 0.948224318181818,
+          "min": 0.635217,
+          "n": 22,
+          "p50": 0.993636,
+          "p95": 1.039175,
+          "p99": 1.086886,
+          "sd": 0.11619811455211039
+        },
+        "vm-reclamation": {
+          "max": 0.991393,
+          "mean": 0.991393,
+          "min": 0.991393,
+          "n": 1,
+          "p50": 0.991393,
+          "p95": 0.991393,
+          "p99": 0.991393,
+          "sd": 0.0
+        },
+        "workload-lifecycle": {
+          "max": 1.968545,
+          "mean": 1.7974349090909088,
+          "min": 1.1460050000000002,
+          "n": 22,
+          "p50": 1.911378,
+          "p95": 1.9530109999999998,
+          "p99": 1.968545,
+          "sd": 0.2362574599686716
+        }
+      },
+      "wall_incl_edge_tail_ms": 25.604336
+    },
+    {
+      "allocator_lock_wait_us_in_pass": {
+        "max": 1665.758,
+        "mean": 1188.4515999999999,
+        "min": 653.9449999999999,
+        "n": 5,
+        "p50": 1166.727,
+        "p95": 1665.758,
+        "p99": 1665.758,
+        "sd": 398.22419727999954
+      },
+      "cpu_s_during_window": 0.021101000000000036,
+      "drain_pending_calls": 69,
+      "drain_pending_max_ms": 0.031417,
+      "drain_pending_total_ms": 0.6054269999999999,
+      "duty_cycle_cpu_pct_of_30s_one_core": 0.0703366666666668,
+      "duty_cycle_wall_pct_of_30s": 0.04528723000000051,
+      "edge": {
+        "admission_delay_ms": 3.2588169999999996,
+        "completed_after_burst_start_ms": 11.898758000000043,
+        "deploy_handler_wall_ms": 2.990113,
+        "edge_offset_base_ms": 0.08424699999999999,
+        "edge_submitted_approx_ms_after_t0": 6.364174000000048,
+        "kind": "service",
+        "tick_elapsed_ms": 2.275767
+      },
+      "evals_by_reconciler": {
+        "service-lifecycle": 23,
+        "svid-lifecycle": 23,
+        "vm-reclamation": 1,
+        "workload-lifecycle": 23
+      },
+      "evals_submitted": 70,
+      "evals_total_incl_requeue_and_edge": 77,
+      "extra_evals_beyond_pass": 7,
+      "keys_never_completed": 0,
+      "list_to_first_submit_ms": 0.08424699999999999,
+      "mode": "baseline",
+      "pass_wall_ms": 13.586169000000154,
+      "queued_ms_all_pass_evals": {
+        "max": 11.740169,
+        "mean": 5.569163214285713,
+        "min": 1.0428810000000002,
+        "n": 70,
+        "p50": 5.820996,
+        "p95": 11.319326,
+        "p99": 11.610142999999999,
+        "sd": 3.389986973995661
+      },
+      "sample": 3,
+      "sum_tick_elapsed_ms": 89.27998500000001,
+      "tick_elapsed_ms_all_pass_evals": {
+        "max": 2.148806,
+        "mean": 1.2754283571428566,
+        "min": 0.064377,
+        "n": 70,
+        "p50": 1.318976,
+        "p95": 1.923967,
+        "p99": 1.9435360000000002,
+        "sd": 0.4623000015488731
+      },
+      "tick_elapsed_ms_by_reconciler": {
+        "service-lifecycle": {
+          "max": 1.9435360000000002,
+          "mean": 1.150667043478261,
+          "min": 0.064377,
+          "n": 23,
+          "p50": 1.033707,
+          "p95": 1.921173,
+          "p99": 1.9435360000000002,
+          "sd": 0.506752888454205
+        },
+        "svid-lifecycle": {
+          "max": 1.928754,
+          "mean": 1.1542618695652174,
+          "min": 0.67714,
+          "n": 23,
+          "p50": 1.0297800000000001,
+          "p95": 1.867172,
+          "p99": 1.928754,
+          "sd": 0.4109142556857269
+        },
+        "vm-reclamation": {
+          "max": 0.28069299999999997,
+          "mean": 0.28069299999999997,
+          "min": 0.28069299999999997,
+          "n": 1,
+          "p50": 0.28069299999999997,
+          "p95": 0.28069299999999997,
+          "p99": 0.28069299999999997,
+          "sd": 0.0
+        },
+        "workload-lifecycle": {
+          "max": 2.148806,
+          "mean": 1.5646055217391304,
+          "min": 1.002539,
+          "n": 23,
+          "p50": 1.5719670000000001,
+          "p95": 1.923967,
+          "p99": 2.148806,
+          "sd": 0.2839637635427305
+        }
+      },
+      "wall_incl_edge_tail_ms": 24.989711
+    },
+    {
+      "allocator_lock_wait_us_in_pass": {
+        "max": 1656.284,
+        "mean": 1508.9247500000001,
+        "min": 1311.555,
+        "n": 4,
+        "p50": 1585.167,
+        "p95": 1656.284,
+        "p99": 1656.284,
+        "sd": 149.6334991111616
+      },
+      "cpu_s_during_window": 0.021259999999999946,
+      "drain_pending_calls": 66,
+      "drain_pending_max_ms": 0.035403,
+      "drain_pending_total_ms": 0.5166320000000001,
+      "duty_cycle_cpu_pct_of_30s_one_core": 0.07086666666666648,
+      "duty_cycle_wall_pct_of_30s": 0.041454226666667184,
+      "edge": {
+        "admission_delay_ms": 5.168192,
+        "completed_after_burst_start_ms": 14.10173500000019,
+        "deploy_handler_wall_ms": 1.678517,
+        "edge_offset_base_ms": 0.0,
+        "edge_submitted_approx_ms_after_t0": 5.572522000000163,
+        "kind": "service",
+        "tick_elapsed_ms": 3.361021
+      },
+      "evals_by_reconciler": {
+        "service-lifecycle": 9,
+        "service-map-hydrator": 9,
+        "svid-lifecycle": 24,
+        "vm-reclamation": 1,
+        "workload-lifecycle": 24
+      },
+      "evals_submitted": 67,
+      "evals_total_incl_requeue_and_edge": 74,
+      "extra_evals_beyond_pass": 7,
+      "keys_never_completed": 0,
+      "list_to_first_submit_ms": 0.0,
+      "mode": "proposed",
+      "pass_wall_ms": 12.436268000000155,
+      "queued_ms_all_pass_evals": {
+        "max": 10.446591,
+        "mean": 4.961594611940299,
+        "min": 1.046016,
+        "n": 67,
+        "p50": 4.468189,
+        "p95": 9.823243,
+        "p99": 10.249935,
+        "sd": 2.7662192567873
+      },
+      "sample": 3,
+      "sum_tick_elapsed_ms": 83.03820999999999,
+      "tick_elapsed_ms_all_pass_evals": {
+        "max": 1.9025050000000001,
+        "mean": 1.2393762686567167,
+        "min": 0.330047,
+        "n": 67,
+        "p50": 1.271494,
+        "p95": 1.796145,
+        "p99": 1.857978,
+        "sd": 0.4278048972797446
+      },
+      "tick_elapsed_ms_by_reconciler": {
+        "service-lifecycle": {
+          "max": 1.730206,
+          "mean": 1.1271174444444445,
+          "min": 0.330047,
+          "n": 9,
+          "p50": 1.199947,
+          "p95": 1.730206,
+          "p99": 1.730206,
+          "sd": 0.47322538567872474
+        },
+        "service-map-hydrator": {
+          "max": 1.307469,
+          "mean": 0.8226944444444445,
+          "min": 0.42512,
+          "n": 9,
+          "p50": 0.796089,
+          "p95": 1.307469,
+          "p99": 1.307469,
+          "sd": 0.32214288552368775
+        },
+        "svid-lifecycle": {
+          "max": 1.431275,
+          "mean": 1.0246902916666667,
+          "min": 0.535246,
+          "n": 24,
+          "p50": 0.9945069999999999,
+          "p95": 1.3726260000000001,
+          "p99": 1.431275,
+          "sd": 0.2596302452729197
+        },
+        "vm-reclamation": {
+          "max": 1.0498809999999998,
+          "mean": 1.0498809999999998,
+          "min": 1.0498809999999998,
+          "n": 1,
+          "p50": 1.0498809999999998,
+          "p95": 1.0498809999999998,
+          "p99": 1.0498809999999998,
+          "sd": 0.0
+        },
+        "workload-lifecycle": {
+          "max": 1.9025050000000001,
+          "mean": 1.6603106250000004,
+          "min": 1.12877,
+          "n": 24,
+          "p50": 1.724356,
+          "p95": 1.857978,
+          "p99": 1.9025050000000001,
+          "sd": 0.19070087180321288
+        }
+      },
+      "wall_incl_edge_tail_ms": 25.151605
+    },
+    {
+      "allocator_lock_wait_us_in_pass": {
+        "max": 1755.183,
+        "mean": 1045.0262857142857,
+        "min": 0.24,
+        "n": 7,
+        "p50": 1151.604,
+        "p95": 1755.183,
+        "p99": 1755.183,
+        "sd": 604.9765723848911
+      },
+      "cpu_s_during_window": 0.0215209999999999,
+      "drain_pending_calls": 73,
+      "drain_pending_max_ms": 0.039389,
+      "drain_pending_total_ms": 0.7149309999999997,
+      "duty_cycle_cpu_pct_of_30s_one_core": 0.07173666666666634,
+      "duty_cycle_wall_pct_of_30s": 0.04912243666666654,
+      "edge": {
+        "admission_delay_ms": 7.677922000000001,
+        "completed_after_burst_start_ms": 15.215141999999787,
+        "deploy_handler_wall_ms": 0.545241,
+        "edge_offset_base_ms": 0.152049,
+        "edge_submitted_approx_ms_after_t0": 4.440796999999748,
+        "kind": "job",
+        "tick_elapsed_ms": 3.096423
+      },
+      "evals_by_reconciler": {
+        "service-lifecycle": 25,
+        "svid-lifecycle": 25,
+        "vm-reclamation": 1,
+        "workload-lifecycle": 25
+      },
+      "evals_submitted": 76,
+      "evals_total_incl_requeue_and_edge": 80,
+      "extra_evals_beyond_pass": 4,
+      "keys_never_completed": 0,
+      "list_to_first_submit_ms": 0.152049,
+      "mode": "baseline",
+      "pass_wall_ms": 14.736730999999963,
+      "queued_ms_all_pass_evals": {
+        "max": 14.208145,
+        "mean": 6.3958018947368425,
+        "min": 1.043231,
+        "n": 76,
+        "p50": 6.610385,
+        "p95": 11.219313999999999,
+        "p99": 13.278135,
+        "sd": 3.5671198108473363
+      },
+      "sample": 4,
+      "sum_tick_elapsed_ms": 93.65046600000001,
+      "tick_elapsed_ms_all_pass_evals": {
+        "max": 1.981263,
+        "mean": 1.2322429736842102,
+        "min": 0.11989000000000001,
+        "n": 76,
+        "p50": 1.219536,
+        "p95": 1.8786289999999999,
+        "p99": 1.9562659999999998,
+        "sd": 0.43026120466773743
+      },
+      "tick_elapsed_ms_by_reconciler": {
+        "service-lifecycle": {
+          "max": 1.8780780000000001,
+          "mean": 1.16159684,
+          "min": 0.11989000000000001,
+          "n": 25,
+          "p50": 1.215681,
+          "p95": 1.793841,
+          "p99": 1.8780780000000001,
+          "sd": 0.4570929421759393
+        },
+        "svid-lifecycle": {
+          "max": 1.6370149999999999,
+          "mean": 1.0197952399999999,
+          "min": 0.533333,
+          "n": 25,
+          "p50": 1.025965,
+          "p95": 1.2717150000000002,
+          "p99": 1.6370149999999999,
+          "sd": 0.2272572080491031
+        },
+        "vm-reclamation": {
+          "max": 0.371971,
+          "mean": 0.371971,
+          "min": 0.371971,
+          "n": 1,
+          "p50": 0.371971,
+          "p95": 0.371971,
+          "p99": 0.371971,
+          "sd": 0.0
+        },
+        "workload-lifecycle": {
+          "max": 1.981263,
+          "mean": 1.5497477199999998,
+          "min": 0.29228000000000004,
+          "n": 25,
+          "p50": 1.602293,
+          "p95": 1.9562659999999998,
+          "p99": 1.981263,
+          "sd": 0.3603826290549301
+        }
+      },
+      "wall_incl_edge_tail_ms": 26.453725000000002
+    },
+    {
+      "allocator_lock_wait_us_in_pass": {
+        "max": 1896.696,
+        "mean": 1227.8686666666665,
+        "min": 0.09,
+        "n": 6,
+        "p50": 1554.14,
+        "p95": 1896.696,
+        "p99": 1896.696,
+        "sd": 692.6866553903479
+      },
+      "cpu_s_during_window": 0.02063999999999999,
+      "drain_pending_calls": 69,
+      "drain_pending_max_ms": 0.024757,
+      "drain_pending_total_ms": 0.56437,
+      "duty_cycle_cpu_pct_of_30s_one_core": 0.06879999999999997,
+      "duty_cycle_wall_pct_of_30s": 0.04613704000000022,
+      "edge": {
+        "admission_delay_ms": 7.646545000000001,
+        "completed_after_burst_start_ms": 15.350515000000087,
+        "deploy_handler_wall_ms": 0.55167,
+        "edge_offset_base_ms": 0.0,
+        "edge_submitted_approx_ms_after_t0": 4.413665999999921,
+        "kind": "job",
+        "tick_elapsed_ms": 3.290304
+      },
+      "evals_by_reconciler": {
+        "service-lifecycle": 10,
+        "service-map-hydrator": 10,
+        "svid-lifecycle": 26,
+        "vm-reclamation": 1,
+        "workload-lifecycle": 26
+      },
+      "evals_submitted": 73,
+      "evals_total_incl_requeue_and_edge": 76,
+      "extra_evals_beyond_pass": 3,
+      "keys_never_completed": 0,
+      "list_to_first_submit_ms": 0.0,
+      "mode": "proposed",
+      "pass_wall_ms": 13.841112000000066,
+      "queued_ms_all_pass_evals": {
+        "max": 11.7808,
+        "mean": 5.588849821917808,
+        "min": 1.037041,
+        "n": 73,
+        "p50": 5.3069809999999995,
+        "p95": 10.858761,
+        "p99": 11.536862,
+        "sd": 3.0572309511228015
+      },
+      "sample": 4,
+      "sum_tick_elapsed_ms": 93.94817400000002,
+      "tick_elapsed_ms_all_pass_evals": {
+        "max": 2.0135919999999996,
+        "mean": 1.286961287671233,
+        "min": 0.426642,
+        "n": 73,
+        "p50": 1.127828,
+        "p95": 1.9278629999999999,
+        "p99": 1.97912,
+        "sd": 0.46557400076188743
+      },
+      "tick_elapsed_ms_by_reconciler": {
+        "service-lifecycle": {
+          "max": 1.97912,
+          "mean": 1.3440348000000002,
+          "min": 0.426642,
+          "n": 10,
+          "p50": 1.581291,
+          "p95": 1.97912,
+          "p99": 1.97912,
+          "sd": 0.49969424462004763
+        },
+        "service-map-hydrator": {
+          "max": 1.4409399999999999,
+          "mean": 0.8446689,
+          "min": 0.448916,
+          "n": 10,
+          "p50": 0.8618779999999999,
+          "p95": 1.4409399999999999,
+          "p99": 1.4409399999999999,
+          "sd": 0.3612483514215209
+        },
+        "svid-lifecycle": {
+          "max": 1.127828,
+          "mean": 0.9665719230769232,
+          "min": 0.5638489999999999,
+          "n": 26,
+          "p50": 1.0057040000000002,
+          "p95": 1.095389,
+          "p99": 1.127828,
+          "sd": 0.13126631760201796
+        },
+        "vm-reclamation": {
+          "max": 1.06242,
+          "mean": 1.06242,
+          "min": 1.06242,
+          "n": 1,
+          "p50": 1.06242,
+          "p95": 1.06242,
+          "p99": 1.06242,
+          "sd": 0.0
+        },
+        "workload-lifecycle": {
+          "max": 2.0135919999999996,
+          "mean": 1.7641479615384614,
+          "min": 1.171444,
+          "n": 26,
+          "p50": 1.837006,
+          "p95": 1.947552,
+          "p99": 2.0135919999999996,
+          "sd": 0.21219320736017552
+        }
+      },
+      "wall_incl_edge_tail_ms": 25.163482000000002
+    },
+    {
+      "allocator_lock_wait_us_in_pass": {
+        "max": 1725.969,
+        "mean": 973.314,
+        "min": 0.25,
+        "n": 6,
+        "p50": 1517.976,
+        "p95": 1725.969,
+        "p99": 1725.969,
+        "sd": 745.5701411381763
+      },
+      "cpu_s_during_window": 0.02499499999999999,
+      "drain_pending_calls": 81,
+      "drain_pending_max_ms": 0.041202,
+      "drain_pending_total_ms": 0.8525349999999997,
+      "duty_cycle_cpu_pct_of_30s_one_core": 0.08331666666666664,
+      "duty_cycle_wall_pct_of_30s": 0.053305736666666985,
+      "edge": {
+        "admission_delay_ms": 6.4105229999999995,
+        "completed_after_burst_start_ms": 15.590748000000076,
+        "deploy_handler_wall_ms": 2.605344,
+        "edge_offset_base_ms": 0.14885500000000002,
+        "edge_submitted_approx_ms_after_t0": 6.237734000000046,
+        "kind": "service",
+        "tick_elapsed_ms": 2.9424910000000004
+      },
+      "evals_by_reconciler": {
+        "service-lifecycle": 27,
+        "svid-lifecycle": 27,
+        "vm-reclamation": 1,
+        "workload-lifecycle": 27
+      },
+      "evals_submitted": 82,
+      "evals_total_incl_requeue_and_edge": 89,
+      "extra_evals_beyond_pass": 7,
+      "keys_never_completed": 0,
+      "list_to_first_submit_ms": 0.14885500000000002,
+      "mode": "baseline",
+      "pass_wall_ms": 15.991721000000098,
+      "queued_ms_all_pass_evals": {
+        "max": 14.92196,
+        "mean": 6.7465907439024395,
+        "min": 1.0445529999999998,
+        "n": 82,
+        "p50": 6.7099839999999995,
+        "p95": 13.621812,
+        "p99": 14.708248,
+        "sd": 4.032447279197409
+      },
+      "sample": 5,
+      "sum_tick_elapsed_ms": 101.49690299999999,
+      "tick_elapsed_ms_all_pass_evals": {
+        "max": 2.12513,
+        "mean": 1.2377671097560974,
+        "min": 0.09086699999999999,
+        "n": 82,
+        "p50": 1.187428,
+        "p95": 1.9646389999999998,
+        "p99": 2.075316,
+        "sd": 0.4705796545671555
+      },
+      "tick_elapsed_ms_by_reconciler": {
+        "service-lifecycle": {
+          "max": 2.075316,
+          "mean": 1.2076871481481481,
+          "min": 0.09086699999999999,
+          "n": 27,
+          "p50": 1.1231710000000001,
+          "p95": 2.052871,
+          "p99": 2.075316,
+          "sd": 0.5271632606705662
+        },
+        "svid-lifecycle": {
+          "max": 1.350434,
+          "mean": 0.9812817777777779,
+          "min": 0.456247,
+          "n": 27,
+          "p50": 0.981878,
+          "p95": 1.347389,
+          "p99": 1.350434,
+          "sd": 0.2382659669920172
+        },
+        "vm-reclamation": {
+          "max": 0.265229,
+          "mean": 0.265229,
+          "min": 0.265229,
+          "n": 1,
+          "p50": 0.265229,
+          "p95": 0.265229,
+          "p99": 0.265229,
+          "sd": 0.0
+        },
+        "workload-lifecycle": {
+          "max": 2.12513,
+          "mean": 1.5603523333333331,
+          "min": 0.6995439999999999,
+          "n": 27,
+          "p50": 1.634131,
+          "p95": 1.967513,
+          "p99": 2.12513,
+          "sd": 0.3761901723695896
+        }
+      },
+      "wall_incl_edge_tail_ms": 25.421341
+    },
+    {
+      "allocator_lock_wait_us_in_pass": {
+        "max": 1877.648,
+        "mean": 1009.2255714285714,
+        "min": 0.501,
+        "n": 7,
+        "p50": 1117.743,
+        "p95": 1877.648,
+        "p99": 1877.648,
+        "sd": 654.3911479010743
+      },
+      "cpu_s_during_window": 0.025424000000000002,
+      "drain_pending_calls": 78,
+      "drain_pending_max_ms": 0.029405,
+      "drain_pending_total_ms": 0.6218169999999998,
+      "duty_cycle_cpu_pct_of_30s_one_core": 0.08474666666666666,
+      "duty_cycle_wall_pct_of_30s": 0.052414026666667723,
+      "edge": {
+        "admission_delay_ms": 9.384151000000001,
+        "completed_after_burst_start_ms": 17.219289000000117,
+        "deploy_handler_wall_ms": 1.267419,
+        "edge_offset_base_ms": 0.0,
+        "edge_submitted_approx_ms_after_t0": 4.553587000000107,
+        "kind": "service",
+        "tick_elapsed_ms": 3.2815510000000003
+      },
+      "evals_by_reconciler": {
+        "service-lifecycle": 11,
+        "service-map-hydrator": 11,
+        "svid-lifecycle": 28,
+        "vm-reclamation": 1,
+        "workload-lifecycle": 28
+      },
+      "evals_submitted": 79,
+      "evals_total_incl_requeue_and_edge": 86,
+      "extra_evals_beyond_pass": 7,
+      "keys_never_completed": 0,
+      "list_to_first_submit_ms": 0.0,
+      "mode": "proposed",
+      "pass_wall_ms": 15.724208000000317,
+      "queued_ms_all_pass_evals": {
+        "max": 13.597655999999999,
+        "mean": 6.192555974683544,
+        "min": 1.032294,
+        "n": 79,
+        "p50": 5.748516,
+        "p95": 12.618131,
+        "p99": 13.360129,
+        "sd": 3.651706030392644
+      },
+      "sample": 5,
+      "sum_tick_elapsed_ms": 109.07927099999999,
+      "tick_elapsed_ms_all_pass_evals": {
+        "max": 2.0954450000000002,
+        "mean": 1.3807502658227848,
+        "min": 0.380783,
+        "n": 79,
+        "p50": 1.213727,
+        "p95": 2.021013,
+        "p99": 2.055425,
+        "sd": 0.47035840087750513
+      },
+      "tick_elapsed_ms_by_reconciler": {
+        "service-lifecycle": {
+          "max": 1.726069,
+          "mean": 1.190467909090909,
+          "min": 0.380783,
+          "n": 11,
+          "p50": 1.369783,
+          "p95": 1.726069,
+          "p99": 1.726069,
+          "sd": 0.42204953606974965
+        },
+        "service-map-hydrator": {
+          "max": 1.300709,
+          "mean": 0.8082259999999999,
+          "min": 0.515356,
+          "n": 11,
+          "p50": 0.653804,
+          "p95": 1.300709,
+          "p99": 1.300709,
+          "sd": 0.26713275349945387
+        },
+        "svid-lifecycle": {
+          "max": 1.34787,
+          "mean": 1.1526065714285711,
+          "min": 0.754216,
+          "n": 28,
+          "p50": 1.165054,
+          "p95": 1.285936,
+          "p99": 1.34787,
+          "sd": 0.10998708536962788
+        },
+        "vm-reclamation": {
+          "max": 1.1752399999999998,
+          "mean": 1.1752399999999998,
+          "min": 1.1752399999999998,
+          "n": 1,
+          "p50": 1.1752399999999998,
+          "p95": 1.1752399999999998,
+          "p99": 1.1752399999999998,
+          "sd": 0.0
+        },
+        "workload-lifecycle": {
+          "max": 2.0954450000000002,
+          "mean": 1.9159076428571427,
+          "min": 1.3067980000000001,
+          "n": 28,
+          "p50": 1.9824450000000002,
+          "p95": 2.055425,
+          "p99": 2.0954450000000002,
+          "sd": 0.18383411719792872
+        }
+      },
+      "wall_incl_edge_tail_ms": 28.518314
+    }
+  ],
+  "per_evaluation_serial_uncontended": {
+    "service-lifecycle": {
+      "full_tick_cpu_ms_per_tick_incl_warmup": 0.1491400000000001,
+      "full_tick_ms": {
+        "max": 0.156967,
+        "mean": 0.14089737500000002,
+        "min": 0.130296,
+        "n": 40,
+        "p50": 0.14020100000000002,
+        "p95": 0.15295,
+        "p99": 0.156967,
+        "sd": 0.006219628609109744
+      },
+      "hydrate_actual_ms": {
+        "max": 0.166761,
+        "mean": 0.14344455,
+        "min": 0.127803,
+        "n": 40,
+        "p50": 0.142735,
+        "p95": 0.15709700000000001,
+        "p99": 0.166761,
+        "sd": 0.009054245823553353
+      },
+      "hydrate_desired_ms": {
+        "max": 0.000911,
+        "mean": 0.00066745,
+        "min": 0.0005600000000000001,
+        "n": 40,
+        "p50": 0.000661,
+        "p95": 0.000821,
+        "p99": 0.000911,
+        "sd": 0.00008450214683966805
+      },
+      "hydrate_desired_plus_actual_ms": {
+        "max": 0.167352,
+        "mean": 0.14411200000000002,
+        "min": 0.128403,
+        "n": 40,
+        "p50": 0.143396,
+        "p95": 0.15765700000000002,
+        "p99": 0.167352,
+        "sd": 0.009054717611590163
+      },
+      "targets": 2
+    },
+    "service-map-hydrator": {
+      "full_tick_cpu_ms_per_tick_incl_warmup": 0.05722000000000005,
+      "full_tick_ms": {
+        "max": 0.068993,
+        "mean": 0.05398857499999998,
+        "min": 0.04638,
+        "n": 40,
+        "p50": 0.053701,
+        "p95": 0.062795,
+        "p99": 0.068993,
+        "sd": 0.005451537533706455
+      },
+      "hydrate_actual_ms": {
+        "max": 0.028352,
+        "mean": 0.0241282,
+        "min": 0.020481,
+        "n": 40,
+        "p50": 0.024076,
+        "p95": 0.027281,
+        "p99": 0.028352,
+        "sd": 0.0020325485101600517
+      },
+      "hydrate_desired_ms": {
+        "max": 0.036655,
+        "mean": 0.027167750000000008,
+        "min": 0.021202000000000002,
+        "n": 40,
+        "p50": 0.02675,
+        "p95": 0.032038000000000004,
+        "p99": 0.036655,
+        "sd": 0.0034300637338027283
+      },
+      "hydrate_desired_plus_actual_ms": {
+        "max": 0.060331,
+        "mean": 0.05129595,
+        "min": 0.045438,
+        "n": 40,
+        "p50": 0.051227,
+        "p95": 0.059068999999999997,
+        "p99": 0.060331,
+        "sd": 0.004198830135913622
+      },
+      "targets": 2
+    },
+    "svid-lifecycle": {
+      "full_tick_cpu_ms_per_tick_incl_warmup": 0.0828799999999999,
+      "full_tick_ms": {
+        "max": 0.094773,
+        "mean": 0.07918125,
+        "min": 0.069244,
+        "n": 40,
+        "p50": 0.078959,
+        "p95": 0.090717,
+        "p99": 0.094773,
+        "sd": 0.0077979600611560364
+      },
+      "hydrate_actual_ms": {
+        "max": 0.051116999999999996,
+        "mean": 0.03828732500000001,
+        "min": 0.032830000000000005,
+        "n": 40,
+        "p50": 0.037295999999999996,
+        "p95": 0.044527000000000004,
+        "p99": 0.051116999999999996,
+        "sd": 0.0035980170421019975
+      },
+      "hydrate_desired_ms": {
+        "max": 0.052369,
+        "mean": 0.04070377500000001,
+        "min": 0.034001,
+        "n": 40,
+        "p50": 0.041282,
+        "p95": 0.048072000000000004,
+        "p99": 0.052369,
+        "sd": 0.004901340478536301
+      },
+      "hydrate_desired_plus_actual_ms": {
+        "max": 0.096896,
+        "mean": 0.07899110000000001,
+        "min": 0.068363,
+        "n": 40,
+        "p50": 0.079069,
+        "p95": 0.091988,
+        "p99": 0.096896,
+        "sd": 0.007156636764892808
+      },
+      "targets": 10
+    },
+    "vm-reclamation": {
+      "full_tick_cpu_ms_per_tick_incl_warmup": 0.08073999999999998,
+      "full_tick_ms": {
+        "max": 0.09315999999999999,
+        "mean": 0.07759685,
+        "min": 0.072699,
+        "n": 40,
+        "p50": 0.077076,
+        "p95": 0.082524,
+        "p99": 0.09315999999999999,
+        "sd": 0.0034664111312377854
+      },
+      "hydrate_actual_ms": {
+        "max": 0.0017620000000000001,
+        "mean": 0.001646025,
+        "min": 0.001562,
+        "n": 40,
+        "p50": 0.001642,
+        "p95": 0.0017230000000000001,
+        "p99": 0.0017620000000000001,
+        "sd": 0.00004788687925860492
+      },
+      "hydrate_desired_ms": {
+        "max": 0.12666000000000002,
+        "mean": 0.08359972499999999,
+        "min": 0.069385,
+        "n": 40,
+        "p50": 0.078438,
+        "p95": 0.11304,
+        "p99": 0.12666000000000002,
+        "sd": 0.013636666691713832
+      },
+      "hydrate_desired_plus_actual_ms": {
+        "max": 0.128303,
+        "mean": 0.08524575000000001,
+        "min": 0.07102699999999999,
+        "n": 40,
+        "p50": 0.08012,
+        "p95": 0.114703,
+        "p99": 0.128303,
+        "sd": 0.013629685888643103
+      },
+      "targets": 1
+    },
+    "workload-lifecycle": {
+      "full_tick_cpu_ms_per_tick_incl_warmup": 0.19596000000000002,
+      "full_tick_ms": {
+        "max": 0.235956,
+        "mean": 0.18572572499999998,
+        "min": 0.171027,
+        "n": 40,
+        "p50": 0.184238,
+        "p95": 0.201424,
+        "p99": 0.235956,
+        "sd": 0.01201516823188026
+      },
+      "hydrate_actual_ms": {
+        "max": 0.099509,
+        "mean": 0.0829599,
+        "min": 0.075974,
+        "n": 40,
+        "p50": 0.082134,
+        "p95": 0.092759,
+        "p99": 0.099509,
+        "sd": 0.005732185969570736
+      },
+      "hydrate_desired_ms": {
+        "max": 0.095814,
+        "mean": 0.08571835000000001,
+        "min": 0.076174,
+        "n": 40,
+        "p50": 0.084978,
+        "p95": 0.092749,
+        "p99": 0.095814,
+        "sd": 0.004407090025146253
+      },
+      "hydrate_desired_plus_actual_ms": {
+        "max": 0.190086,
+        "mean": 0.16867824999999997,
+        "min": 0.15893,
+        "n": 40,
+        "p50": 0.16569,
+        "p95": 0.184648,
+        "p99": 0.190086,
+        "sd": 0.007814293897428267
+      },
+      "targets": 10
+    }
+  },
+  "running_rows": 10,
+  "seed_s": 0.00355978,
+  "service_backends_rows": 2,
+  "settle_rounds": 3,
+  "targets_per_reconciler": {
+    "noop-heartbeat": 0,
+    "service-lifecycle": 2,
+    "service-map-hydrator": 2,
+    "svid-lifecycle": 10,
+    "vm-reclamation": 1,
+    "workflow-lifecycle": 0,
+    "workload-lifecycle": 10
+  },
+  "targets_total": 25
+}
