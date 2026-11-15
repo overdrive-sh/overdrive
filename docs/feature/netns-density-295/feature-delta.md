@@ -9936,8 +9936,12 @@ the lease `Retiring` until `release`.
 >   branch already applies `shutAll` and therefore covers `Abort(g)`,
 >   `GuestAbort(g)` (live), `CtxRelease(g)` on a live pair and `peerAbort`;
 >   `complete` (451-452, reached from `markClean` 459 and `completeIfDone`
->   453-454) gains `shutAll(·, s)` when `t.mode == "dgram"`, so a completed
->   datagram pair shuts V_g at pair end. `refuseEff` already shuts V_g.
+>   453-454) applies `shutAll(·, s)` under the guard
+>   `t.mode == "dgram" and s == "g"`, so a completed datagram pair shuts V_g at
+>   pair end. The host side shuts nothing at completion: the kernel pair owns
+>   V_g only (CONFALIGN-5; `finish_pair`, `kmod/ovd_fwd/ovd_fwd.c:1816-1846`,
+>   shuts no socket), and the host owner keeps V_h until `TakeEnd(h)`, whose
+>   `closeEff` shuts it. `refuseEff` already shuts V_g.
 >   `CtxRelease(g)` on an ended pair stays a no-op on V_g. Comments at
 >   `closeEff` and `abortSide` and the README action map state this.
 > - Sim (`SimGuestOwnerIo`, `overdrive-init` sim adapters): a datagram V_g is
