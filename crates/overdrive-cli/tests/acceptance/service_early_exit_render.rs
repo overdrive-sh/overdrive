@@ -41,6 +41,10 @@ use overdrive_core::transition_reason::{
 };
 use proptest::prelude::*;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// The latest attempt-ending observation a stream saw: a startup stop of
 /// `alloc-payments-0` carrying a driver detail tail.
 fn startup_stop_attempt() -> LastAttemptWire {

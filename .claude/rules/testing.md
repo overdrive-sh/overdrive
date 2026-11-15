@@ -206,19 +206,22 @@ against the implementation and compares state after every step.
   (`// conformance-lint: sim-arbiter-ok <reason>`, see below), and a Tier-3
   test proves the real adapter reports the same fact. Without that pairing,
   the conformance test only shows that the owner agrees with the simulator.
-- **A missing production API is a DESIGN gap. Do not gate it out.**
+- **A pending driver is proven RED; a gated-out driver names what it waits for.**
   Drivers compile under `integration-tests` like every other integration
-  test. A driver whose activating DELIVER step has not landed stays compiled
-  and is marked pending with `#[should_panic(expected = "<its semantic RED>")]`,
-  per § "RED acceptance scaffolds and activation", so it is proven RED on every
-  run. Never wrap a driver in `#![cfg(any())]`,
-  `#[cfg(any())]`, `cfg(not(all()))`, `cfg(false)`, or any other always-false
-  predicate. Such a gate turns the file into an empty compilation unit, so
-  `cargo check` stays green while the body references types that do not exist
-  and handlers that do nothing. If the driver cannot compile because the
-  owner's driving port or pinned accessor does not exist, that is a design gap.
-  Surface it for design approval. It is not something to hide from the
-  compiler.
+  test. A driver whose owner API exists but whose activating DELIVER step has
+  not landed stays compiled and is marked pending with
+  `#[should_panic(expected = "<its semantic RED>")]`, per § "RED acceptance
+  scaffolds and activation", so it is proven RED on every run.
+  A driver written ahead of the owner's driving port or pinned accessor cannot
+  compile, so it cannot be pending that way. Only then may the file be gated
+  out with `#![cfg(any())]`, and the gate carries the marker
+  `// conformance-lint: pending-owner-api <the missing port or accessor, and the step that adds it>`
+  on the line above it. Any other always-false predicate (`#[cfg(any())]` on an
+  item, `cfg(not(all()))`, `cfg(false)`), or a `#![cfg(any())]` without the
+  marker, is rejected: it turns the file into an empty compilation unit, so
+  `cargo check` stays green while the handlers do nothing. Remove the gate in
+  the step that lands the port; a gated driver whose port already exists is a
+  hollow driver, not a pending one.
 - **One spec, one oracle.** Tests reference the spec in place
   (`specs/quint/<subsystem>/…`). Never copy or fork the spec into a crate; a
   divergence between the spec and the test oracle is the drift this lane exists
@@ -264,8 +267,10 @@ item, and cites the line that establishes it:
 1. The driver sits in the owning crate's `src/` behind
    `#[cfg(all(test, feature = "integration-tests"))]`, or in
    `tests/conformance` when it spans several owners; its only gate is
-   `integration-tests`. No always-false `cfg` appears anywhere in the file. A driver that is not
-   yet active is marked pending with `#[should_panic(expected = …)]` naming its
+   `integration-tests`. No always-false `cfg` appears in the file, except a
+   `#![cfg(any())]` carrying the `pending-owner-api` marker while the owner's
+   port does not exist yet. A driver whose port exists but which is not yet
+   active is marked pending with `#[should_panic(expected = …)]` naming its
    semantic RED.
 2. The driver struct holds the production owner, or the production
    composition that contains it, as a field. A driver whose fields are only
@@ -312,8 +317,9 @@ It cannot judge whether a non-empty handler calls the right port, whether a
 method named like an accessor is pinned by the design, or whether the pinned
 runs cover every critical scenario. Those judgements belong to the critic.
 
-**Symptoms during review:** `#![cfg(any())]` or `#[cfg(any())] mod pending_…`
-on a driver; a header comment explaining that the body is "complete against
+**Symptoms during review:** `#[cfg(any())] mod pending_…` on a driver, or a
+`#![cfg(any())]` with no `pending-owner-api` marker, or with one whose port
+already exists; a header comment explaining that the body is "complete against
 the pinned shapes" while the handlers are `{}`; an `observe_*` helper on the
 driver that returns the driver's own map or a literal `0`; a `Sim*` adapter
 field on the driver read inside `from_driver`; a driver struct with no field
@@ -1872,7 +1878,8 @@ reads the records of the binary it is asked to run.
 | `#[overdrive_test(host_pure)]` | a test function | that test, on the original runner chain |
 | `#[overdrive_test(native_launcher)]` | a test function | that test, in the full node view (network, mount and cgroup namespaces; own bpffs; per-run cgroup) |
 | `#[overdrive_test(guest = "<group>"[, profile = "<profile>"])]` | a test function | that test, in a fresh guest of the group (and profile) |
-| `#[overdrive_test(lane_operator = "<fixture>")]`, `#[overdrive_test(lane_owner = "<fixture>")]` | a test function | that test, as the in-guest cell of the first-level fixture `integration::in_guest_lane::<name>`, operator or owner side |
+| `#[overdrive_test(lane_operator = "<fixture>")]` | a test function | that test, as the in-guest cell of the first-level fixture `integration::in_guest_lane::<name>`, operator side |
+| `#[overdrive_test(lane_owner = "<fixture>", host = <path::to::script>)]` | a test function | that test, as the in-guest cell of the fixture, owner side; `host` names the one host-side script (`OwnerHostScript`) that drives the cell, and the fixture calls the same function |
 | `#[overdrive_test]` (no argument) | a test function inside a module that holds `shared_guest!(guest = "<group>"[, profile = "<profile>"])` | that test, in the one guest the tests of the module share |
 | `placement!(host_pure)` | a module | every test of exactly that module; a child module does not inherit it |
 | `overdrive_test_default!(host_pure)` | a host-only test binary, once | every test of the binary no narrower declaration places |

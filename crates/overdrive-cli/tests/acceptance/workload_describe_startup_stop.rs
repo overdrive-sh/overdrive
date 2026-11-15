@@ -23,6 +23,10 @@ use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic
 use overdrive_core::observation::{ProbeIdx, ProbeRole};
 use overdrive_core::transition_reason::{StoppedBy, TerminalCondition};
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 const DIGEST: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
 fn row(

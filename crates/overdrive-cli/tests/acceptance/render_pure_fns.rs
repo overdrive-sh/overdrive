@@ -257,6 +257,10 @@ fn conjunction_both_branches_matter() {
 use overdrive_cli::render::{format_service_failed_block, format_service_stable_summary};
 use overdrive_core::transition_reason::{BackoffCause, ProbeWitness, ServiceFailureReason};
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 #[test]
 fn stable_summary_names_settled_ms_and_witness_role_idx_mechanic() {
     let witness = ProbeWitness {

@@ -29,6 +29,10 @@ use overdrive_control_plane::tls_bootstrap::{
 };
 use tempfile::TempDir;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 // -----------------------------------------------------------------------
 // Part A — `--insecure` rejection
 // -----------------------------------------------------------------------

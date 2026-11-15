@@ -260,6 +260,10 @@ fn given_job_kind_when_format_json_then_probes_field_omitted() {
 
 use proptest::prelude::*;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// Strategy over the FULL `WorkloadKind` enum universe (Service / Job /
 /// Schedule). Exhaustive — every variant is generated.
 fn arb_workload_kind() -> impl Strategy<Value = WorkloadKind> {

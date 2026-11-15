@@ -30,9 +30,7 @@ use overdrive_cli::commands::serve::ServeHandle;
 use overdrive_control_plane::api::IdempotencyOutcome;
 use tempfile::TempDir;
 
-use overdrive_testing::placement;
-
-placement!(host_pure);
+use overdrive_testing::overdrive_test;
 
 /// Spin up a real in-process control-plane server on `127.0.0.1:0`.
 /// Returns the handle and the backing `TempDir`; the `TempDir` must be
@@ -91,6 +89,7 @@ rootfs = "/rootfs"
 /// short-circuited the config-file fallback. Removing the override
 /// surface means the handler can only reach the endpoint the config
 /// names; if that endpoint is wrong, this test fails.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn job_submit_reads_endpoint_from_config_when_no_override_is_provided() {
     let (handle, tmp) = spawn_server().await;

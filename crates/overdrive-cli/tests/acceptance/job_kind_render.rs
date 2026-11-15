@@ -16,6 +16,10 @@ use overdrive_cli::render::{
     format_job_succeeded_summary,
 };
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// S-02-01 unit — `format_job_succeeded_summary` renders the canonical
 /// `Job '<name>' succeeded.` line with exit code and duration.
 #[test]

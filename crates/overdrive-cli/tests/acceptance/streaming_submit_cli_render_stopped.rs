@@ -14,6 +14,10 @@
 use overdrive_core::aggregate::WorkloadKind;
 use overdrive_core::transition_reason::StoppedBy;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 #[test]
 fn format_stopped_summary_for_operator_names_initiator_and_workload() {
     // Slice 04 — kind-aware. Service kind reuses the rendered Service

@@ -45,6 +45,10 @@ use overdrive_core::wall_clock::UnixInstant;
 use std::num::NonZeroU16;
 use std::time::Duration;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 const EMPTY_STATE_DIGEST: &str = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
 const NONEMPTY_DIGEST: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 

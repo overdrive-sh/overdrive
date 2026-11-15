@@ -39,9 +39,7 @@ use overdrive_cli::http_client::CliError;
 use serial_test::serial;
 use tempfile::TempDir;
 
-use overdrive_testing::placement;
-
-placement!(host_pure);
+use overdrive_testing::overdrive_test;
 
 async fn spawn_server() -> (ServeHandle, TempDir) {
     let tmp = TempDir::new().expect("tempdir");
@@ -100,6 +98,7 @@ memory_bytes = 67108864
 /// `deploy_streaming_service` (the `ServiceSubmitEvent` consumer
 /// surface). The call MUST NOT return `CliError::InvalidSpec`
 /// synchronously; the dispatch must reach the server.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(workload_cgroup)]
 async fn cli_submit_streaming_service_routes_to_service_submit_event_consumer() {

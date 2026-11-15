@@ -22,6 +22,10 @@ use overdrive_cli::commands::serve::ServeArgs;
 use overdrive_core::guest_transport::NodeVsockPortConfig;
 use overdrive_gateway::{GatewayConfig, GatewayConfigError, GatewayConfigField};
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 const ADDRESS_FLAG: &str = "--gateway-address";
 const KEY_ID_FLAG: &str = "--gateway-certified-key-id";
 const CHAIN_FLAG: &str = "--gateway-certificate-chain";

@@ -36,6 +36,10 @@ use overdrive_core::aggregate::{
 use overdrive_core::observation::ProbeRole;
 use tempfile::TempDir;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// Write `body` to a `*.toml` fixture in a fresh tempdir and return the
 /// path plus the `TempDir` guard (kept alive by the caller).
 fn write_fixture(body: &str) -> (PathBuf, TempDir) {

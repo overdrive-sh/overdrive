@@ -55,9 +55,7 @@ use overdrive_cli::commands::serve::ServeHandle;
 use overdrive_control_plane::api::IdempotencyOutcome;
 use tempfile::TempDir;
 
-use overdrive_testing::placement;
-
-placement!(host_pure);
+use overdrive_testing::overdrive_test;
 
 async fn spawn_server() -> (ServeHandle, TempDir) {
     let tmp = TempDir::new().expect("tempdir");
@@ -104,6 +102,7 @@ rootfs = "/rootfs"
 "#
 }
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn pipe_redirected_submit_emits_64_char_hex_spec_digest_via_json_lane() {
     let (handle, tmp) = spawn_server().await;

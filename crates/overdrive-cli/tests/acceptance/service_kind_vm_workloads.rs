@@ -38,6 +38,12 @@ use serial_test::serial;
 use tempfile::TempDir;
 use tokio::sync::Mutex;
 
+#[cfg(feature = "integration-tests")]
+use overdrive_testing::overdrive_test;
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 const VM_SERVICE_TOML: &str = r#"
 [service]
 id = "vm-service"
@@ -291,6 +297,7 @@ async fn spawn_stable_stream_server(
 /// Service request and preserves every field in its selected VM driver arm.
 /// CONTRACT_SHAPE: bounded-change.
 #[cfg(feature = "integration-tests")]
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 #[serial(workload_cgroup)]
 async fn detached_service_deploy_forwards_vm_driver_without_parallel_request_shape() {

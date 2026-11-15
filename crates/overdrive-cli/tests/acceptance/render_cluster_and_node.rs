@@ -26,6 +26,10 @@ use overdrive_cli::commands::cluster::ClusterStatusOutput;
 use overdrive_cli::commands::node::NodeListOutput;
 use overdrive_control_plane::api::{BrokerCountersBody, NodeRowBody};
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 fn fixture_cluster_status_output() -> ClusterStatusOutput {
     ClusterStatusOutput {
         mode: "single".to_string(),

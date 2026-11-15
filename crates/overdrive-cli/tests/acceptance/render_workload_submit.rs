@@ -23,6 +23,10 @@ use overdrive_cli::http_client::CliError;
 use overdrive_control_plane::api::IdempotencyOutcome;
 use url::Url;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 const FIXTURE_DIGEST: &str = "deadbeefcafebabe0123456789abcdefdeadbeefcafebabe0123456789abcdef";
 
 fn fixture_submit_output() -> DeployOutput {

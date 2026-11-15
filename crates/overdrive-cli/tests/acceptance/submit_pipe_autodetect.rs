@@ -32,6 +32,10 @@
 
 use overdrive_cli::commands::deploy::{StdoutTerminalProbe, should_stream};
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 // ---------------------------------------------------------------------
 // Fakes — the IsTerminal probe seam.
 // ---------------------------------------------------------------------

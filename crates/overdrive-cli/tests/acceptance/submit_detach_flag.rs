@@ -30,6 +30,10 @@
 use clap::Parser as _;
 use overdrive_cli::cli::{Cli, Command};
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 // ---------------------------------------------------------------------
 // (A) `--detach` is recognised by clap and lands as `true`
 // ---------------------------------------------------------------------

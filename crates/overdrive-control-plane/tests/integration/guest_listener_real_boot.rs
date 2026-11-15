@@ -68,9 +68,7 @@ use overdrive_testing::guest_kit::{GuestImage, GuestImageSpec, GuestKit};
 use overdrive_testing::vm_fixture::default_staging_root;
 use tempfile::TempDir;
 
-use overdrive_testing::placement;
-
-placement!(host_pure);
+use overdrive_testing::overdrive_test;
 
 /// Guest RAM of every lane VM.
 const LANE_VM_MEMORY_BYTES: u64 = 128 * 1024 * 1024;
@@ -331,6 +329,7 @@ fn console_of(alloc: &str) -> String {
 /// the exit report's terminal row. A report missing for either declared
 /// listener would hold the `Pass` back (the set is not complete) and the
 /// scenario would fail.
+#[overdrive_test(guest = "cgroup-default", profile = "nested")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 /// CONTRACT_SHAPE: bounded-change.
 async fn every_declared_listener_a_real_workload_binds_is_reported_before_it_exits() {
@@ -400,6 +399,7 @@ async fn report_before_exit(node: &Node) {
 /// bound on the wildcard address is reported and is not named. No row exists
 /// before the deadline, and `Running` is unaffected (D14 item 3, G-10
 /// "Explicitly unaffected").
+#[overdrive_test(guest = "cgroup-default", profile = "nested")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 /// CONTRACT_SHAPE: bounded-change.
 async fn a_loopback_only_bind_never_satisfies_a_declared_listener() {

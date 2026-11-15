@@ -18,6 +18,10 @@ use overdrive_cli::commands::deploy::StopOutput;
 use overdrive_control_plane::api::StopOutcome;
 use url::Url;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 fn fixture_stop_output(outcome: StopOutcome) -> StopOutput {
     StopOutput {
         workload_id: "payments".to_string(),

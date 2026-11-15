@@ -72,12 +72,16 @@ use syn::parse::{Parse, ParseStream};
 use syn::spanned::Spanned;
 use syn::visit::Visit;
 use syn::{
-    Attribute, Block, Expr, Fields, FnArg, Ident, ImplItem, ImplItemFn, ItemImpl, ItemStruct,
+    AttrStyle, Attribute, Block, Expr, Fields, FnArg, Ident, ImplItem, ImplItemFn, ItemImpl, ItemStruct,
     ItemUse, LitBool, Meta, Pat, Stmt, Token, Type, UseTree, braced, parenthesized,
 };
 
 /// The marker that exempts a justified `Sim*` arbiter read.
 pub const SIM_ARBITER_MARKER: &str = "conformance-lint: sim-arbiter-ok";
+
+/// The marker that exempts a file-level `#![cfg(any())]` on a driver written
+/// ahead of the owner API it drives.
+pub const PENDING_OWNER_API_MARKER: &str = "conformance-lint: pending-owner-api";
 
 /// Why a construct is rejected.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -122,8 +126,10 @@ impl ConformanceRule {
             Self::AlwaysFalseCfg => {
                 "gate the driver on `integration-tests` (in a crate: \
                  `#[cfg(all(test, feature = \"integration-tests\"))]`) and mark an inactive driver \
-                 `#[ignore = \"pending DELIVER <step>\"]`; an absent production API is a \
-                 DESIGN gap to surface, not something to gate out"
+                 `#[should_panic(expected = \"<its semantic RED>\")]`; only a driver written ahead \
+                 of its owner's port may carry `#![cfg(any())]`, with \
+                 `// conformance-lint: pending-owner-api <port or accessor and the step that adds \
+                 it>` on the line above"
             }
             Self::EmptyActionHandler => {
                 "every mapped Quint action must call the production owner through a driving \
@@ -189,7 +195,7 @@ pub fn scan_source(source: &str, file: impl AsRef<Path>) -> Result<Vec<Conforman
     let mut report = Reporter { file, out: Vec::new() };
 
     // (a) always-false cfg anywhere in the file.
-    let mut cfgs = CfgScanner::default();
+    let mut cfgs = CfgScanner { source, hits: Vec::new() };
     cfgs.visit_file(&parsed);
     for (span, text) in cfgs.hits {
         report.push(
@@ -895,16 +901,32 @@ pub fn run(manifest_path: &Path) -> Result<()> {
 // (a) cfg evaluation
 // ---------------------------------------------------------------------------
 
-#[derive(Default)]
-struct CfgScanner {
+struct CfgScanner<'src> {
+    source: &'src str,
     hits: Vec<(Span, String)>,
 }
 
-impl<'ast> Visit<'ast> for CfgScanner {
+impl CfgScanner<'_> {
+    /// A file-level `#![cfg(any())]` whose directly preceding line carries
+    /// the `pending-owner-api` marker with a non-empty reason.
+    fn is_marked_pending_gate(&self, attr: &Attribute, list_tokens: &TokenStream) -> bool {
+        let is_empty_any = list_tokens.to_string().replace(' ', "") == "any()";
+        let line = attr.span().start().line;
+        matches!(attr.style, AttrStyle::Inner(_))
+            && is_empty_any
+            && line > 1
+            && self.source.lines().nth(line - 2).is_some_and(|text| {
+                has_reasoned_marker(text, PENDING_OWNER_API_MARKER)
+            })
+    }
+}
+
+impl<'ast> Visit<'ast> for CfgScanner<'_> {
     fn visit_attribute(&mut self, attr: &'ast Attribute) {
         if attr.path().is_ident("cfg")
             && let Meta::List(list) = &attr.meta
             && eval_cfg(&list.tokens) == Some(false)
+            && !self.is_marked_pending_gate(attr, &list.tokens)
         {
             let text = format!("cfg({})", list.tokens).replace(" (", "(").replace("( ", "(");
             self.hits.push((attr.span(), text));
@@ -1492,12 +1514,14 @@ impl<'ast> Visit<'ast> for ProjectionVisitor<'_, '_, '_> {
     }
 }
 
+fn has_reasoned_marker(text: &str, marker: &str) -> bool {
+    text.split_once("//")
+        .and_then(|(_, comment)| comment.trim_start().strip_prefix(marker))
+        .is_some_and(|reason| !reason.trim().is_empty())
+}
+
 fn has_arbiter_marker(source: &str, line: usize) -> bool {
-    let has_reason = |text: &str| {
-        text.split_once("//")
-            .and_then(|(_, comment)| comment.trim_start().strip_prefix(SIM_ARBITER_MARKER))
-            .is_some_and(|reason| !reason.trim().is_empty())
-    };
+    let has_reason = |text: &str| has_reasoned_marker(text, SIM_ARBITER_MARKER);
     source.lines().nth(line.saturating_sub(1)).is_some_and(has_reason)
         || line > 1 && source.lines().nth(line - 2).is_some_and(has_reason)
 }
@@ -1640,6 +1664,29 @@ fn lease_conformance() -> impl Driver { LeaseDriver::new() }
     fn healthy_driver_passes() {
         let found = scan_source(HEALTHY, "fixture.rs").expect("fixture parses");
         assert!(found.is_empty(), "{found:#?}");
+    }
+
+    #[test]
+    fn a_file_gate_with_a_pending_owner_api_marker_is_accepted_and_nothing_else_is() {
+        let marked = "// conformance-lint: pending-owner-api Owner::cursor, added by the owner step\n#![cfg(any())]\nfn a() {}\n";
+        assert!(rules(marked).is_empty(), "{:?}", rules(marked));
+
+        let no_reason = "// conformance-lint: pending-owner-api\n#![cfg(any())]\nfn a() {}\n";
+        assert_eq!(count(&rules(no_reason), ConformanceRule::AlwaysFalseCfg), 1);
+
+        let unmarked = "#![cfg(any())]\nfn a() {}\n";
+        assert_eq!(count(&rules(unmarked), ConformanceRule::AlwaysFalseCfg), 1);
+
+        let not_adjacent =
+            "// conformance-lint: pending-owner-api Owner::cursor\n\n#![cfg(any())]\nfn a() {}\n";
+        assert_eq!(count(&rules(not_adjacent), ConformanceRule::AlwaysFalseCfg), 1);
+
+        let item_level = "// conformance-lint: pending-owner-api Owner::cursor\n#[cfg(any())]\nmod m {}\n";
+        assert_eq!(count(&rules(item_level), ConformanceRule::AlwaysFalseCfg), 1);
+
+        let other_predicate =
+            "// conformance-lint: pending-owner-api Owner::cursor\n#![cfg(not(all()))]\nfn a() {}\n";
+        assert_eq!(count(&rules(other_predicate), ConformanceRule::AlwaysFalseCfg), 1);
     }
 
     #[test]
