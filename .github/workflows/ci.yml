@@ -217,7 +217,7 @@ jobs:
     # Workspace nextest + `cargo test --doc --workspace` compile
     # overdrive-dataplane, whose build.rs requires the BPF artifact on
     # Linux per ADR-0038 §3.2.
-    needs: [bpf-build, cloud-hypervisor]
+    needs: [bpf-build]
     steps:
       - uses: actions/checkout@v4
 
@@ -358,7 +358,7 @@ jobs:
   integration:
     name: nextest (integration-tests)
     runs-on: ubuntu-latest
-    needs: [bpf-build, cloud-hypervisor]
+    needs: [bpf-build]
     steps:
       - uses: actions/checkout@v4
 
@@ -1238,7 +1238,7 @@ jobs:
   bpf-unit:
     name: bpf-unit
     runs-on: ubuntu-latest
-    needs: [bpf-build, cloud-hypervisor]
+    needs: [bpf-build]
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -1362,7 +1362,7 @@ jobs:
   verifier-regress:
     name: cargo verifier-regress
     runs-on: ubuntu-latest
-    needs: [bpf-build, cloud-hypervisor]
+    needs: [bpf-build]
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -1461,7 +1461,7 @@ jobs:
   xdp-perf:
     name: cargo xdp-perf
     runs-on: ubuntu-latest
-    needs: [bpf-build, cloud-hypervisor]
+    needs: [bpf-build]
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -1544,57 +1544,3 @@ jobs:
         if: always()
         timeout-minutes: 1
         run: limactl stop --force overdrive || true
-
-  # -------------------------------------------------------------------
-  # Cloud Hypervisor fork — build once per pinned revision, outside the VM.
-  #
-  # Cold Lima provisioning used to compile the fork from source inside the
-  # guest (`cargo build --all --release --target x86_64-unknown-linux-musl
-  # --locked`, > 23 min), so `limactl start --timeout=30m` died mid-provision,
-  # the 10/15-minute Lima jobs were cancelled while provisioning, and the VM
-  # cache (saved only after a green job) was never populated. This job builds
-  # the same binary with the same recipe, verifies the pinned sha256, and
-  # caches it keyed on the pin; the `.github/actions/lima-vm` action seeds it
-  # into provisioning through the yaml's staged-artifact path. The cache is
-  # saved right after the build, independent of any later test result.
-  # See .github/scripts/ch-build-seed.sh for why the build paths are fixed.
-  # -------------------------------------------------------------------
-  cloud-hypervisor:
-    name: build Cloud Hypervisor fork (Lima seed)
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-
-      - id: pins
-        name: Resolve pinned identity
-        run: .github/scripts/ch-pins.sh >> "$GITHUB_OUTPUT"
-
-      - id: seed-cache
-        name: Restore Cloud Hypervisor seed
-        uses: actions/cache/restore@v4
-        with:
-          path: ~/.cache/overdrive-ch-seed
-          key: ${{ steps.pins.outputs.key }}
-
-      - name: Install musl toolchain
-        if: steps.seed-cache.outputs.cache-hit != 'true'
-        run: sudo apt-get install -y --no-install-recommends musl-tools
-
-      - name: Build Cloud Hypervisor fork
-        if: steps.seed-cache.outputs.cache-hit != 'true'
-        env:
-          CH_REPO: ${{ steps.pins.outputs.repo }}
-          CH_REV: ${{ steps.pins.outputs.rev }}
-          CH_TOOLCHAIN: ${{ steps.pins.outputs.toolchain }}
-          CH_EXPECTED: ${{ steps.pins.outputs.sha256 }}
-        run: |
-          SEED_OUT="${HOME}/.cache/overdrive-ch-seed/${CH_REV}/x86_64-unknown-linux-musl/cloud-hypervisor" \
-            .github/scripts/ch-build-seed.sh
-
-      - name: Save Cloud Hypervisor seed
-        if: steps.seed-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: ~/.cache/overdrive-ch-seed
-          key: ${{ steps.pins.outputs.key }}

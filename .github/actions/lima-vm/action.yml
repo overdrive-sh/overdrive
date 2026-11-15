@@ -1,10 +1,10 @@
 name: Lima VM
 description: >
   Bring up the `overdrive` Lima dev VM (after lima-vm/lima-actions/setup).
-  Restores the VM from cache; on a miss, cold-provisions it with the pinned
-  Cloud Hypervisor fork binary seeded from the `cloud-hypervisor` job's cache
-  (so provisioning does not compile the fork), then saves the provisioned VM to
-  the cache immediately — independent of whether the calling job later passes.
+  Restores the VM from cache; on a miss, cold-provisions it (provisioning
+  downloads and checksum-verifies the pinned Cloud Hypervisor fork release
+  asset), then saves the provisioned VM to the cache immediately —
+  independent of whether the calling job later passes.
 
 runs:
   using: composite
@@ -15,23 +15,6 @@ runs:
       with:
         path: ~/.lima/overdrive
         key: lima-${{ hashFiles('infra/lima/overdrive-dev.yaml') }}-${{ runner.arch }}
-
-    - name: Resolve pinned Cloud Hypervisor identity
-      if: steps.lima-cache.outputs.cache-hit != 'true'
-      id: pins
-      shell: bash
-      run: .github/scripts/ch-pins.sh >> "$GITHUB_OUTPUT"
-
-    # Lima mounts the host home into the guest at the same path; the provision
-    # script copies the binary from here into its CH_ARTIFACT path after a
-    # sha256 check (infra/lima/overdrive-dev.yaml, user provision block).
-    - name: Restore Cloud Hypervisor seed
-      if: steps.lima-cache.outputs.cache-hit != 'true'
-      uses: actions/cache/restore@v4
-      with:
-        path: ~/.cache/overdrive-ch-seed
-        key: ${{ steps.pins.outputs.key }}
-        fail-on-cache-miss: true
 
     - name: Provision Lima VM (cache miss)
       if: steps.lima-cache.outputs.cache-hit != 'true'
