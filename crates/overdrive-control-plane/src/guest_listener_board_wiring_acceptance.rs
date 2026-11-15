@@ -64,6 +64,7 @@ use overdrive_core::vm::beacon::BeaconConnKey;
 use overdrive_core::vm::config::VsockPort;
 use overdrive_host::RealCgroupFs;
 use overdrive_sim::adapters::{SimBeaconIo, SimKek, SimMtlsIntercept, SimVmm};
+use overdrive_testing::overdrive_test;
 use overdrive_testing::vm_fixture::default_staging_root;
 use tempfile::TempDir;
 
@@ -318,6 +319,7 @@ impl Node {
 /// production-written startup row. A report for an undeclared port and a
 /// partial set change nothing; the report that completes the declared set
 /// writes the one `Pass` row.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 /// CONTRACT_SHAPE: bounded-change.
 async fn a_listen_line_on_the_drivers_beacon_completes_the_probe_tasks_declared_set() {

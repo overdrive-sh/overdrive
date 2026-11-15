@@ -52,6 +52,7 @@ use overdrive_cli::commands::workload::{DescribeArgs, describe};
 use overdrive_control_plane::api::AllocStateWire;
 use overdrive_core::id::AllocationId;
 use overdrive_testing::guest_app::{RemotePeer, subcommand};
+use overdrive_testing::overdrive_test;
 use serial_test::serial;
 use tokio::task::JoinSet;
 
@@ -185,6 +186,7 @@ fn assert_dial_reaches_no_host_socket(
 /// trip through their own attachment; the remote peer serves each tag once,
 /// from the node's address; every VM holds its own workload address.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default", profile = "nested-cohort")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
 async fn every_vm_at_density_round_trips_through_its_own_attachment() {
@@ -261,6 +263,7 @@ async fn every_vm_at_density_round_trips_through_its_own_attachment() {
 /// The next boot ends every VMM it does not supervise before serving, then
 /// places every persisted Job again, on the reclaimed CIDs.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default", profile = "nested-cohort")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
 async fn serve_down_at_density_is_fail_closed_and_the_next_boot_reclaims_every_vm() {

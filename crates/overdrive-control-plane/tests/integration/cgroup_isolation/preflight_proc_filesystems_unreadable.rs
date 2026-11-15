@@ -41,8 +41,10 @@
 //! failing commits".
 
 use overdrive_control_plane::cgroup_preflight::{CgroupPreflightError, run_preflight_at};
+use overdrive_testing::overdrive_test;
 use tempfile::TempDir;
 
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn preflight_surfaces_procfs_io_error_not_no_cgroup_v2() {
     let tmp = TempDir::new().expect("tempdir");

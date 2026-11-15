@@ -45,6 +45,7 @@ use overdrive_cli::commands::workload::{DescribeArgs, WorkloadDescribeOutput};
 use overdrive_cli::http_client::CliError;
 use overdrive_control_plane::api::{AllocStateWire, IdempotencyOutcome};
 use overdrive_core::aggregate::{Job, JobSpecInput};
+use overdrive_testing::overdrive_test;
 use tempfile::TempDir;
 
 /// Spin up a real in-process control-plane server on `127.0.0.1:0`. Returns
@@ -138,6 +139,7 @@ fn local_spec_digest(spec_toml: &str) -> String {
 // handler calls under the post-ADR-0020 wire shape.
 // -------------------------------------------------------------------
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 #[allow(clippy::too_many_lines)] // The WS gate exercises three scenarios in one body.
 async fn walking_skeleton_ws1_ws2_ws3_post_adr_0020_wire_shape() {
@@ -352,6 +354,7 @@ async fn walking_skeleton_ws1_ws2_ws3_post_adr_0020_wire_shape() {
 // (b) workload::describe for unknown workload → typed 404 with actionable message
 // -------------------------------------------------------------------
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn describe_for_unknown_workload_returns_typed_http_status_404_with_actionable_message() {
     let (handle, server_tmp) = spawn_server().await;
@@ -387,6 +390,7 @@ async fn describe_for_unknown_workload_returns_typed_http_status_404_with_action
 // (c) config file remains on disk after serve shutdown
 // -------------------------------------------------------------------
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn config_file_remains_on_disk_after_serve_shutdown() {
     let (handle, server_tmp) = spawn_server().await;

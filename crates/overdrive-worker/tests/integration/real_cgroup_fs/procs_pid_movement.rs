@@ -19,11 +19,13 @@ use std::sync::Arc;
 use overdrive_core::id::AllocationId;
 use overdrive_core::traits::CgroupFs;
 use overdrive_host::RealCgroupFs;
+use overdrive_testing::overdrive_test;
 use overdrive_worker::cgroup_manager::CgroupManager;
 use serial_test::serial;
 
 use super::super::cgroup_cleanup::{AllocCleanup, delegate_overdrive_slice};
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 #[serial(cgroup)]
 async fn writing_pid_to_cgroup_procs_moves_the_process_into_scope() {

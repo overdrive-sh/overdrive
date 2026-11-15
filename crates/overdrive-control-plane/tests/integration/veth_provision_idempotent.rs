@@ -29,6 +29,7 @@ use overdrive_control_plane::iface::resolve_iface_ipv4;
 use overdrive_control_plane::veth_provisioner::{
     VethProvisionError, VethProvisionPlan, derive_veth_plan, provision,
 };
+use overdrive_testing::overdrive_test;
 use std::process::Command;
 
 /// Per-test iface names — suffixed with the PID (so two parallel test
@@ -100,6 +101,7 @@ fn plan_for(client: &str, backend: &str, cidr: &str) -> VethProvisionPlan {
 
 /// `provision` CREATES the veth pair when it is ABSENT — after a clean
 /// provision both ends of the pair exist in the host netns.
+#[overdrive_test(guest = "cgroup-default", profile = "normal-gate")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn provision_creates_pair_when_absent() {
     let (client, backend) = iface_names('c');
@@ -125,6 +127,7 @@ async fn provision_creates_pair_when_absent() {
 /// gateway IPv4, and no step errors (the route `File exists` collision is
 /// swallowed). Guards against the converge falsely erroring on, or
 /// destructively re-doing work over, a good pair (ADR-0061 § 3.1).
+#[overdrive_test(guest = "cgroup-default", profile = "normal-gate")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn provision_complete_pair_converges_to_silent_success() {
     let (client, backend) = iface_names('a');
@@ -164,6 +167,7 @@ async fn provision_complete_pair_converges_to_silent_success() {
 /// The old adopt-untouched branch returned `Ok(())` here and left the
 /// pair address-less, surfacing two layers downstream as an
 /// `IfaceAddrResolution` error.
+#[overdrive_test(guest = "cgroup-default", profile = "normal-gate")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn provision_completes_half_provisioned_pair() {
     let (client, backend) = iface_names('h');
@@ -217,6 +221,7 @@ async fn provision_completes_half_provisioned_pair() {
 /// ABSENT (the peer was separately deleted). `provision` must RECREATE
 /// the pair from scratch and converge it — afterwards both ends exist and
 /// the client resolves its gateway IPv4.
+#[overdrive_test(guest = "cgroup-default", profile = "normal-gate")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn provision_recreates_pair_when_peer_absent() {
     let (client, backend) = iface_names('p');
@@ -282,6 +287,7 @@ async fn provision_recreates_pair_when_peer_absent() {
 /// boot refusal. `provision` must now RECREATE — dropping the surviving
 /// peer (`RecreatePair` dels BOTH ends) before recreate — so afterwards
 /// both ends exist and the client resolves its gateway IPv4.
+#[overdrive_test(guest = "cgroup-default", profile = "normal-gate")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn provision_recreates_pair_when_client_absent_but_peer_present() {
     let (client, backend) = iface_names('i');
@@ -350,6 +356,7 @@ async fn provision_recreates_pair_when_client_absent_but_peer_present() {
 /// § 3.1): a SECOND `provision` over the now-offload-off pair re-observes
 /// offload off, emits no disable step, and converges to a silent success
 /// — offload stays off, no error.
+#[overdrive_test(guest = "cgroup-default", profile = "normal-gate")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn provision_disables_tx_offload_on_both_ends_and_is_idempotent() {
     let (client, backend) = iface_names('t');
@@ -414,6 +421,7 @@ async fn provision_disables_tx_offload_on_both_ends_and_is_idempotent() {
 /// (commit 62fa6be2). Guards the observer reporting the TRUE per-iface
 /// offload bit (not a constant), so converge emits the disable exactly
 /// when it is actually needed.
+#[overdrive_test(guest = "cgroup-default", profile = "normal-gate")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn provision_repairs_tx_offload_drifted_back_on() {
     let (client, backend) = iface_names('d');

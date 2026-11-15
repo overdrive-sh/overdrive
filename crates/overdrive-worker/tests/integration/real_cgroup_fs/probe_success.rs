@@ -14,6 +14,7 @@ use std::sync::Arc;
 
 use overdrive_core::traits::CgroupFs;
 use overdrive_host::RealCgroupFs;
+use overdrive_testing::overdrive_test;
 use serial_test::serial;
 
 async fn snapshot_top_level(root: &Path) -> BTreeSet<OsString> {
@@ -25,6 +26,7 @@ async fn snapshot_top_level(root: &Path) -> BTreeSet<OsString> {
     entries
 }
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 #[serial(cgroup)]
 async fn probe_succeeds_against_real_cgroupfs() {

@@ -24,8 +24,10 @@ use std::sync::Arc;
 
 use overdrive_core::traits::CgroupFs;
 use overdrive_host::RealCgroupFs;
+use overdrive_testing::overdrive_test;
 use overdrive_worker::cgroup_manager::{CgroupManager, CgroupPath};
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn cgroup_kill_propagates_real_io_error_when_scope_is_a_regular_file() {
     // Real tempdir as the cgroup-root substrate; the test never

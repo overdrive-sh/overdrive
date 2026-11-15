@@ -42,6 +42,7 @@ use overdrive_sim::SimVmm;
 use overdrive_sim::adapters::beacon_io::SimBeaconIo;
 use overdrive_testing::guest_kit::cid_bands::HOST_BEACON_ACCEPT_PATH;
 use overdrive_testing::guest_kit::{GuestImageSpec, GuestKit, WorkDir};
+use overdrive_testing::overdrive_test;
 use overdrive_testing::vm_fixture::default_staging_root;
 use overdrive_testing::vsock::VMADDR_CID_HOST;
 
@@ -100,6 +101,7 @@ async fn drive(
 /// leased CID to the real listener and queued into the sim, are accepted
 /// with the same identities and first lines.
 /// CONTRACT_SHAPE: pure-function.
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn the_beacon_listeners_accept_path_matches_the_sim_per_connection() {
     let staging = default_staging_root();

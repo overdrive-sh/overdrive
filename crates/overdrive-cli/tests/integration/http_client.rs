@@ -37,6 +37,7 @@ use overdrive_core::guest_transport::NodeVsockPortConfig;
 use overdrive_host::RealCgroupFs;
 use overdrive_sim::adapters::dataplane::SimDataplane;
 use overdrive_sim::adapters::{SimDataplaneComposer, SimGuestDnsFactory, SimKek, SimMtlsIntercept};
+use overdrive_testing::overdrive_test;
 use tempfile::TempDir;
 
 /// Spawn a server on an ephemeral port and return (handle, bound addr,
@@ -93,6 +94,7 @@ fn build_client_for(config_path: &Path) -> ApiClient {
 // (a) from_config loads the trust triple and builds a client
 // -------------------------------------------------------------------
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn from_config_loads_trust_triple_and_builds_client() {
     let (handle, _bound, _tmp, config_path) = spawn_server().await;
@@ -144,6 +146,7 @@ async fn from_config_loads_trust_triple_and_builds_client() {
 // `?job=<id>` coverage lives in the CLI's `alloc_status_for_workload`
 // integration tests and the control-plane's `acceptance::alloc_status_snapshot`.
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn node_list_against_in_process_server_returns_ok() {
     let (handle, _bound, _tmp, config_path) = spawn_server().await;
@@ -165,6 +168,7 @@ async fn node_list_against_in_process_server_returns_ok() {
 // (c) submit_workload + describe_workload round-trip
 // -------------------------------------------------------------------
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn submit_job_then_describe_round_trips_via_http_client() {
     let (handle, _bound, _tmp, config_path) = spawn_server().await;
@@ -223,6 +227,7 @@ async fn submit_job_then_describe_round_trips_via_http_client() {
 // (d) no server → CliError::Transport with actionable, non-leaky Display
 // -------------------------------------------------------------------
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn cluster_status_with_no_server_returns_transport_error_with_actionable_message() {
     // Spawn a server to write a valid trust triple, then immediately
@@ -270,6 +275,7 @@ async fn cluster_status_with_no_server_returns_transport_error_with_actionable_m
 // (e) invalid spec → HTTP 400 mapped to CliError::HttpStatus
 // -------------------------------------------------------------------
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn submit_with_invalid_spec_returns_http_status_400_with_error_body() {
     let (handle, _bound, _tmp, config_path) = spawn_server().await;
@@ -321,6 +327,7 @@ async fn submit_with_invalid_spec_returns_http_status_400_with_error_body() {
 // (f) malformed base64 CA → CliError::ConfigLoad
 // -------------------------------------------------------------------
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn from_config_with_malformed_base64_ca_returns_config_load_error() {
     let tmp = TempDir::new().expect("tempdir");
@@ -389,6 +396,7 @@ contexts:
 // "check the network".
 // -------------------------------------------------------------------
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn stringify_reqwest_error_reports_tls_handshake_distinctly_from_tcp_refused() {
     // Server side: spawn the real control plane on an ephemeral port.

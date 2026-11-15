@@ -26,6 +26,7 @@ use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::driver::SimDriver;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
+use overdrive_testing::overdrive_test;
 use tempfile::TempDir;
 
 /// GIVEN the runtime booted through its production composition entry
@@ -34,6 +35,7 @@ use tempfile::TempDir;
 /// THEN the entry spawned `spawn_interest_router` and the router task is live
 /// (`interest_router_running()` is `true`), driven by the production boot and
 /// not by any hand-installed spawn.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn production_boot_spawns_the_interest_router() {
     let tmp = TempDir::new().expect("tempdir");

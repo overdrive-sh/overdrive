@@ -128,6 +128,7 @@ use overdrive_sim::adapters::kek::SimKek;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_sim::adapters::read_ports::SimServiceVipView;
 use overdrive_store_local::{LocalIntentStore, LocalObservationStore};
+use overdrive_testing::overdrive_test;
 use tempfile::TempDir;
 use tokio::sync::{Barrier, Notify, watch};
 
@@ -1296,6 +1297,7 @@ fn is_usable(row: &PublicCertifiedKeyStatusRowV1) -> bool {
 /// an empty intent delta and no command touches the custody records.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn route_declare_replay_replace_and_withdraw_return_exact_outcomes_over_real_redb() {
     let site = Site::new();
@@ -1364,6 +1366,7 @@ async fn route_declare_replay_replace_and_withdraw_return_exact_outcomes_over_re
 /// `Unchanged`.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn a_different_route_id_is_rejected_with_the_typed_conflict_and_an_unchanged_universe() {
     let site = Site::new();
@@ -1407,6 +1410,7 @@ async fn a_different_route_id_is_rejected_with_the_typed_conflict_and_an_unchang
 /// and has an empty delta over the whole universe; the occupant is untouched.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn withdrawal_by_a_different_route_id_has_an_empty_delta() {
     let site = Site::new();
@@ -1533,6 +1537,7 @@ async fn claim_round(round: u16, seed: u64, rng: &mut SplitMix64) {
 /// reproduces; each round is capped at 5 s.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn two_simultaneous_route_claims_have_exactly_one_winner_in_every_round() {
     let seed = std::env::var("PIG_S24_SEED")
@@ -1557,6 +1562,7 @@ async fn two_simultaneous_route_claims_have_exactly_one_winner_in_every_round() 
 /// Current moment after promotion.
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn operator_status_carries_no_manual_path_or_credential_material() {
     let site = Site::new();
@@ -1600,6 +1606,7 @@ async fn operator_status_carries_no_manual_path_or_credential_material() {
 /// and `elapsed` is the injected clock's advance (3 s), not wall time.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn identity_slot_clears_only_after_the_admitted_connection_user_joined() {
     let site = Site::new();
@@ -1695,6 +1702,7 @@ impl KeyFault {
 /// reads a mode-000 file.
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn unreadable_and_malformed_manual_keys_refuse_boot_with_distinct_causes_and_no_mutation() {
     let mut causes = BTreeSet::new();
@@ -1771,6 +1779,7 @@ async fn unreadable_and_malformed_manual_keys_refuse_boot_with_distinct_causes_a
 /// empty delta, and the empty set survives reopen.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn withdraw_from_empty_is_unchanged_and_the_empty_set_survives_reopen() {
     let site = Site::new();
@@ -1807,6 +1816,7 @@ async fn withdraw_from_empty_is_unchanged_and_the_empty_set_survives_reopen() {
 /// occupant still replays.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn route_set_cardinality_zero_one_and_many_is_closed_at_one() {
     let site = Site::new();
@@ -1850,6 +1860,7 @@ async fn route_set_cardinality_zero_one_and_many_is_closed_at_one() {
 /// reopen yields that same current generation with an unchanged record.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn certified_key_install_replay_and_valid_replacement_move_the_generation_exactly() {
     let site = Site::new();
@@ -1906,6 +1917,7 @@ async fn certified_key_install_replay_and_valid_replacement_move_the_generation_
 /// the cause-distinct redacted failure category, no key byte.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn a_mismatched_replacement_key_preserves_the_current_generation_and_records_its_cause() {
     let site = Site::new();
@@ -1935,6 +1947,7 @@ async fn a_mismatched_replacement_key_preserves_the_current_generation_and_recor
 /// and it is distinct from the key-mismatch category.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn an_expired_replacement_preserves_the_current_generation_and_records_a_distinct_cause() {
     let site = Site::new();
@@ -1971,6 +1984,7 @@ async fn an_expired_replacement_preserves_the_current_generation_and_records_a_d
 /// the same simulated time keeps it Unusable instead of replacing it.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn expiry_publishes_unusable_retains_the_record_and_survives_reopen() {
     let site = Site::new();
@@ -2135,6 +2149,7 @@ async fn settle_gate(world: &World) {
 /// the shutdown report.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn every_dataplane_error_crosses_its_real_owner_operation() {
     for (index, (op, error)) in gate_driven_cases().into_iter().enumerate() {
@@ -2187,6 +2202,7 @@ async fn every_dataplane_error_crosses_its_real_owner_operation() {
 /// into the status; the post-gate sweep variants leave the status redacted too.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn every_dataplane_error_collapses_to_the_redacted_connect_path_cause() {
     for (index, (op, error)) in gate_driven_cases().into_iter().enumerate() {
@@ -2256,6 +2272,7 @@ async fn every_dataplane_error_collapses_to_the_redacted_connect_path_cause() {
 /// identity lookup is never driven by the gate.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn a_selected_backend_with_no_applied_identity_does_not_stop_the_gate() {
     let error = GatewayConnectDataplaneError::BackendIdentityMissing {
@@ -2298,6 +2315,7 @@ async fn a_selected_backend_with_no_applied_identity_does_not_stop_the_gate() {
 /// armed error was never delivered to the owner.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn request_path_dataplane_errors_are_not_gate_inputs() {
     let request_path = [DataplaneOp::OpenUpstream, DataplaneOp::TakeReceipt];
@@ -2365,6 +2383,7 @@ fn identity_errors() -> Vec<GatewayIdentityLifecycleError> {
 /// stays unbound.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn every_identity_lifecycle_error_reaches_the_owner_cause_distinct() {
     for (index, error) in identity_errors().into_iter().enumerate() {
@@ -2399,6 +2418,7 @@ async fn every_identity_lifecycle_error_reaches_the_owner_cause_distinct() {
 /// or path in the rendered row.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn every_identity_lifecycle_error_collapses_to_gateway_identity_unusable() {
     for (index, error) in identity_errors().into_iter().enumerate() {
@@ -2472,6 +2492,7 @@ fn absent_identity() -> Fixtures {
 /// failure retained.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn a_gateway_whose_identity_never_issues_reads_absent_with_the_failure_count_and_cause() {
     let site = Site::new();
@@ -2538,6 +2559,7 @@ async fn a_gateway_whose_identity_never_issues_reads_absent_with_the_failure_cou
 /// recorded, never decreases, and `last` is the latest failure.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn the_failure_count_never_decreases_across_failures_successes_and_restarts() {
     const SEED: u64 = 0x5A1F_0A11;
@@ -2611,6 +2633,7 @@ async fn the_failure_count_never_decreases_across_failures_successes_and_restart
 /// last failure, and one more failure makes it `base + 1` with the new `last`.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn a_restarted_gateway_continues_the_failure_count_from_the_prior_row() {
     let site = Site::new();
@@ -2658,6 +2681,7 @@ async fn a_restarted_gateway_continues_the_failure_count_from_the_prior_row() {
 /// the row carries `base + process` (the facts stayed in the slot).
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn a_prior_row_read_error_is_retried_and_never_defaulted_to_zero() {
     let site = Site::new();
@@ -2720,6 +2744,7 @@ async fn a_prior_row_read_error_is_retried_and_never_defaulted_to_zero() {
 /// at the store by the store-local test, not here.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn a_restarted_gateway_over_an_undecodable_prior_status_row_counts_from_zero() {
     let site = Site::new();
@@ -2795,6 +2820,7 @@ fn identity_and_failures_before_any_route(world: &World) -> SvidIssueFailure {
 /// arrive. The status of an unconfigured gateway is the absence of a row.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn no_gateway_status_row_is_written_before_a_route_exists() {
     let site = Site::new();
@@ -2812,6 +2838,7 @@ async fn no_gateway_status_row_is_written_before_a_route_exists() {
 /// Route existed reach the first row, which is written when a Route is declared.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn the_first_gateway_status_row_after_a_route_carries_what_was_held_before_it() {
     let site = Site::new();
@@ -2846,6 +2873,7 @@ async fn the_first_gateway_status_row_after_a_route_carries_what_was_held_before
 /// cause `RouteAbsent`.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn a_status_row_from_an_earlier_boot_is_still_carried_when_no_route_exists() {
     let clock = Arc::new(SimClock::new());
@@ -2894,6 +2922,7 @@ async fn a_status_row_from_an_earlier_boot_is_still_carried_when_no_route_exists
 /// `Current`.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn held_identity_past_its_expiry_projects_unusable_at_the_failure_wake() {
     // Both the expiry instant itself (`not_after == now`, not after the clock)
@@ -2934,6 +2963,7 @@ async fn held_identity_past_its_expiry_projects_unusable_at_the_failure_wake() {
 /// failure recorded.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn a_boot_identity_timeout_sets_the_application_cause_and_leaves_the_identity_as_the_slot_says()
  {
@@ -2971,6 +3001,7 @@ async fn a_boot_identity_timeout_sets_the_application_cause_and_leaves_the_ident
 /// failure.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn a_failing_status_write_loses_nothing_the_next_write_carries_the_full_count() {
     let site = Site::new();
@@ -3022,6 +3053,7 @@ async fn a_failing_status_write_loses_nothing_the_next_write_carries_the_full_co
 /// file: no public client socket exists in this batch.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn custody_replay_across_a_restart_keeps_the_generation_and_the_application_identity() {
     let site = Site::new();
@@ -3062,6 +3094,7 @@ async fn custody_replay_across_a_restart_keeps_the_generation_and_the_applicatio
 /// intent or receipt, and the injected clock unmoved.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn applying_the_identical_route_twice_has_an_empty_second_delta() {
     let site = Site::new();
@@ -3114,6 +3147,7 @@ async fn applying_the_identical_route_twice_has_an_empty_second_delta() {
 /// loop was still sending and never lag (about 1 run in 16 on metal).
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn a_watch_lag_is_reported_and_the_gateway_relists_instead_of_reading_an_empty_store() {
     const BURST: usize = 3_000;
@@ -3238,6 +3272,7 @@ async fn a_watch_lag_is_reported_and_the_gateway_relists_instead_of_reading_an_e
 /// appears nowhere in it, and the connect path holds no intent or receipt.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn a_late_probe_result_after_supersession_is_never_delivered() {
     let site = Site::new();

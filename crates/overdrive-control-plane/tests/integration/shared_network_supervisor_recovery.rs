@@ -62,6 +62,7 @@ use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::driver::SimDriver;
 use overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
+use overdrive_testing::overdrive_test;
 use tempfile::TempDir;
 
 /// ADR-0124's audit period.
@@ -136,6 +137,7 @@ impl Node {
 /// S-ND295-29B (C0) — A healthy owner keeps admission open: no recovery, no
 /// quiescence, no restore, no activation, no shutdown request.
 /// CONTRACT_SHAPE: unbounded-preservation.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "current_thread")]
 async fn a_healthy_owner_keeps_admission_open_without_recovery_effects() {
     let mut node = Node::boot().await;
@@ -168,6 +170,7 @@ async fn a_healthy_owner_keeps_admission_open_without_recovery_effects() {
 /// S-ND295-29B (C1) — On a healthy node the supervisor audits the shared
 /// owner once per one-second period.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "current_thread")]
 async fn a_healthy_node_audits_the_shared_owner_every_second() {
     let node = Node::boot().await;

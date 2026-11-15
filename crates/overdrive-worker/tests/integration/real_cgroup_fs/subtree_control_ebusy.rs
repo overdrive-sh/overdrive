@@ -51,6 +51,7 @@ use std::sync::Arc;
 use overdrive_core::id::AllocationId;
 use overdrive_core::traits::CgroupFs;
 use overdrive_host::RealCgroupFs;
+use overdrive_testing::overdrive_test;
 use overdrive_worker::cgroup_manager::{CgroupManager, WorkloadsBootstrapError};
 use serial_test::serial;
 
@@ -81,6 +82,7 @@ impl Drop for KillOnDrop {
     }
 }
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 #[serial(cgroup)]
 async fn no_internal_process_rule_returns_ebusy_dispatches_to_typed_variant() {

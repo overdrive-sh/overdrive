@@ -17,8 +17,10 @@
 use overdrive_control_plane::cgroup_manager::{
     CONTROL_PLANE_SLICE, create_and_enrol_control_plane_slice_at,
 };
+use overdrive_testing::overdrive_test;
 use tempfile::TempDir;
 
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn server_enrols_pid_in_control_plane_slice() {
     let tmp = TempDir::new().expect("tempdir");

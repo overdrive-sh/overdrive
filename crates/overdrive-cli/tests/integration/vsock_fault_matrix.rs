@@ -59,6 +59,7 @@ use overdrive_testing::guest_app::{
     FLOOD_REPORT_PERIOD_MS, FLOWING_LINE, HOLD_FLOWING_BYTES, RemotePeer, TerminalEvent,
     flood_written_in_console, subcommand, terminal_event_in_console,
 };
+use overdrive_testing::overdrive_test;
 use serial_test::serial;
 
 use super::vm_walking_skeleton::TeardownBound;
@@ -165,6 +166,7 @@ const fn crashed(reason: Option<&TransitionReason>) -> bool {
 /// it before its first placement, and the persisted Job is placed again on
 /// the reclaimed CID with a fresh flow.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default", profile = "nested")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
 async fn the_serve_owners_death_resets_every_far_end_and_the_next_boot_reclaims_the_vm() {
@@ -224,6 +226,7 @@ async fn the_serve_owners_death_resets_every_far_end_and_the_next_boot_reclaims_
 /// `WorkloadCrashedImmediately` and a successor follows. A Job is not the
 /// fixture for this restart outcome: RESTART-SSOT finalizes its natural crash.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default", profile = "nested")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
 async fn a_guest_reset_ends_the_vmm_and_resets_every_far_end() {
@@ -264,6 +267,7 @@ async fn a_guest_reset_ends_the_vmm_and_resets_every_far_end() {
 /// release resets the remote peer, never EOF; the allocation fails as a
 /// crash.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default", profile = "nested")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
 async fn a_killed_vmm_resets_the_far_end_of_its_flow() {
@@ -305,6 +309,7 @@ async fn a_killed_vmm_resets_the_far_end_of_its_flow() {
 /// writes block (its written count stops growing), nothing is lost or
 /// reordered, and the flow resumes in order once the reader reads again.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default", profile = "nested")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
 async fn a_far_reader_that_stops_blocks_the_sender_and_the_flow_resumes_in_order() {
@@ -353,6 +358,7 @@ async fn a_far_reader_that_stops_blocks_the_sender_and_the_flow_resumes_in_order
 /// succeeds — a slot is released with its socket, so the guest's 1,024 slots
 /// are never exhausted — and a later datagram round trip succeeds.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default", profile = "nested")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
 async fn closed_udp_sockets_release_their_slots_before_and_after_pairing() {

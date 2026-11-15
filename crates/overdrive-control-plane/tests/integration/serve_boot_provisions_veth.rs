@@ -70,6 +70,7 @@ use overdrive_control_plane::veth_provisioner::{
 };
 use overdrive_core::traits::dataplane::DataplaneError;
 use overdrive_dataplane::EbpfDataplane;
+use overdrive_testing::overdrive_test;
 
 /// Per-test iface names — suffixed with the PID (so two parallel test
 /// binaries do not collide on the global host-netns iface namespace)
@@ -184,6 +185,7 @@ fn make_pin_dir(tag: char) -> (PathBuf, PinDirGuard) {
 /// Asserted via observable kernel state: each of the two distinct ifaces
 /// carries an attached XDP program (`ip link show` `prog/xdp id`), and
 /// the two program ids are distinct (two distinct programs, not one).
+#[overdrive_test(guest = "cgroup-default", profile = "normal-gate")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn serve_boot_attaches_two_distinct_xdp_programs_to_two_distinct_veths() {
     let (client, backend) = iface_names('h');
@@ -269,6 +271,7 @@ async fn serve_boot_attaches_two_distinct_xdp_programs_to_two_distinct_veths() {
 ///
 /// This proves 01-01's `classify_iface_xdp_slot_busy` fires on a REAL
 /// `EBUSY` (its unit tests used synthetic `SyscallError` values).
+#[overdrive_test(guest = "cgroup-default", profile = "normal-gate")]
 #[test]
 fn single_iface_collision_surfaces_typed_iface_xdp_slot_busy() {
     let (single, _unused_backend) = iface_names('d');

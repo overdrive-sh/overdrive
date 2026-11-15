@@ -40,6 +40,7 @@ use overdrive_sim::adapters::driver::SimDriver;
 use overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_store_local::LocalIntentStore;
+use overdrive_testing::overdrive_test;
 use tempfile::TempDir;
 use tokio::sync::broadcast;
 
@@ -144,6 +145,7 @@ fn drain(rx: &mut broadcast::Receiver<LifecycleEvent>) -> Vec<LifecycleEvent> {
 // AC #7 — terminal_backoff_exhausted_appears_on_alloc_status_and_streaming
 // ---------------------------------------------------------------------------
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn terminal_backoff_exhausted_appears_on_alloc_status_and_streaming() {
     let tmp = TempDir::new().expect("tempdir");
@@ -247,6 +249,7 @@ async fn terminal_backoff_exhausted_appears_on_alloc_status_and_streaming() {
 // AC #8 — terminal_stopped_appears_on_both_surfaces
 // ---------------------------------------------------------------------------
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn terminal_stopped_appears_on_both_surfaces() {
     let tmp = TempDir::new().expect("tempdir");
@@ -366,6 +369,7 @@ async fn terminal_stopped_appears_on_both_surfaces() {
 // AC #9 — non_terminal_transitions_emit_none
 // ---------------------------------------------------------------------------
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn non_terminal_transitions_emit_none() {
     let tmp = TempDir::new().expect("tempdir");

@@ -45,6 +45,7 @@ use overdrive_cli::commands::serve::ServeHandle;
 use overdrive_cli::commands::workload::{RestartArgs, RestartOutput};
 use overdrive_cli::http_client::CliError;
 use overdrive_control_plane::api::RestartOutcome;
+use overdrive_testing::overdrive_test;
 use tempfile::TempDir;
 
 /// Spin up a real in-process control-plane server on `127.0.0.1:0`.
@@ -103,6 +104,7 @@ rootfs = "/rootfs"
 // in-process LocalIntentStore.
 // -------------------------------------------------------------------
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn workload_restart_for_declared_workload_returns_restart_output() {
     let (handle, tmp) = spawn_server().await;
@@ -164,6 +166,7 @@ async fn workload_restart_for_declared_workload_returns_restart_output() {
 // that the success scenario alone cannot kill.
 // -------------------------------------------------------------------
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn workload_restart_of_stopped_workload_returns_resumed() {
     let (handle, tmp) = spawn_server().await;
@@ -217,6 +220,7 @@ async fn workload_restart_of_stopped_workload_returns_resumed() {
 // typed 404 → a non-zero exit code, never a silent success.
 // -------------------------------------------------------------------
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn workload_restart_for_unknown_workload_returns_typed_404_and_nonzero_exit() {
     let (handle, tmp) = spawn_server().await;

@@ -278,6 +278,7 @@ fn bind_specific_resolver_stand_in() -> std::io::Result<UdpSocket> {
 /// The source-pin is the litmus: a client that addressed `127.0.0.2:53` must
 /// receive the reply FROM `127.0.0.2:53`, not the host's primary addr — that is
 /// exactly what `getaddrinfo`/`getent` validates and `dig` does not.
+#[overdrive_test(guest = "cgroup-default", profile = "normal-gate")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn wildcard_bind_answers_frontend_and_source_pins_reply() {
     if !is_root() {
@@ -365,6 +366,7 @@ async fn wildcard_bind_answers_frontend_and_source_pins_reply() {
 /// S-DBN-BIND-02 — a specific loopback resolver stand-in forces the wildcard
 /// path to `EADDRINUSE`; `probe` falls back to the exact configured shared
 /// gateway `:53` socket without the stand-in occupying that address too.
+#[overdrive_test(guest = "cgroup-default", profile = "normal-gate")]
 #[tokio::test]
 async fn per_gateway_addr_fallback_binds_when_wildcard_is_held() {
     if !is_root() {
@@ -409,6 +411,7 @@ async fn per_gateway_addr_fallback_binds_when_wildcard_is_held() {
 /// The composition root maps this to `health.startup.refused`
 /// (reason `dns.responder.bind`) and refuses boot — mirroring the
 /// `MtlsResolve.probe()` → `MtlsBoot` block.
+#[overdrive_test(guest = "cgroup-default", profile = "normal-gate")]
 #[tokio::test]
 async fn probe_refuses_when_no_bindable_port() {
     if !is_root() {
@@ -460,6 +463,7 @@ async fn probe_refuses_when_no_bindable_port() {
 ///
 /// The composition root maps this to `health.startup.refused`
 /// (reason `dns.responder.listseed`) and refuses boot.
+#[overdrive_test(guest = "cgroup-default", profile = "normal-gate")]
 #[tokio::test]
 async fn probe_refuses_when_store_unreadable_at_listseed() {
     if !is_root() {
@@ -487,6 +491,7 @@ async fn probe_refuses_when_store_unreadable_at_listseed() {
 }
 
 /// The shared-gateway fallback remains live when wildcard `:53` is occupied.
+#[overdrive_test(guest = "cgroup-default", profile = "normal-gate")]
 #[tokio::test]
 async fn empty_fallback_binds_zero_sockets_and_warns_it_is_deaf() {
     if !is_root() {
@@ -630,6 +635,7 @@ fn lose_socket_out_of_band(inode: u64) -> usize {
 /// socket is then lost out of band, from outside the responder: every
 /// descriptor that refers to it is replaced, and the kernel is read until it
 /// lists the socket no more. The audit then fails.
+#[overdrive_test(guest = "cgroup-default", profile = "normal-gate")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn the_responder_audit_reads_back_its_socket_and_fails_after_loss() {
     assert!(is_root(), "S-ND295-34 binds the real :53 socket and must run as root");
@@ -749,6 +755,7 @@ use overdrive_core::traits::observation_store::{
     LagAwareSubscription, NodeHealthRow, ObservationStoreError, ReconcileConflictRow,
     ServiceHydrationResultRow,
 };
+use overdrive_testing::overdrive_test;
 
 #[async_trait::async_trait]
 impl ObservationStore for FailingListStore {
@@ -952,6 +959,7 @@ where
 /// with reason `dns.responder.probe`, and admits nothing: the EXEC gate stays
 /// BootClosed, the owner made no guest attachment, and the factory built
 /// exactly the one responder whose probe refused.
+#[overdrive_test(guest = "cgroup-default", profile = "normal-gate")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn run_server_refuses_boot_when_the_guest_dns_probe_fails_through_the_required_port() {
     use overdrive_control_plane::guest_network::{GuestNetworkOperation, SharedGuestNetworkOwner};

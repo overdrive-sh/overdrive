@@ -151,6 +151,7 @@ use overdrive_sim::adapters::mtls_enforcement::SimMtlsEnforcement;
 use overdrive_sim::adapters::mtls_intercept::SimMtlsIntercept;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_store_local::LocalIntentStore;
+use overdrive_testing::overdrive_test;
 use overdrive_worker::mtls_intercept::{
     InterceptElementKey, InterceptElementOperation, InterceptError, InterceptPostcondition,
     InterceptSet,
@@ -1235,6 +1236,7 @@ async fn prove_fallible_element_cleanup(fault: LowerCleanupFault) {
     clippy::doc_markdown,
     reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
 )]
+#[overdrive_test(guest = "cgroup-default", profile = "dummy-link")]
 #[tokio::test]
 async fn shared_element_cleanup_failure_deletion_rejected_retains_retirement_and_address() {
     Box::pin(prove_fallible_element_cleanup(LowerCleanupFault::DeletionRejected)).await;
@@ -1249,6 +1251,7 @@ async fn shared_element_cleanup_failure_deletion_rejected_retains_retirement_and
     clippy::doc_markdown,
     reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
 )]
+#[overdrive_test(guest = "cgroup-default", profile = "dummy-link")]
 #[tokio::test]
 async fn shared_element_cleanup_failure_readback_failed_retains_retirement_and_address() {
     Box::pin(prove_fallible_element_cleanup(LowerCleanupFault::ReadBackFailed)).await;

@@ -33,6 +33,7 @@ use overdrive_core::traits::observation_store::{
     LogicalTimestamp, NodeHealthRow, ObservationStore,
 };
 use overdrive_sim::adapters::driver::SimDriver;
+use overdrive_testing::overdrive_test;
 use tempfile::TempDir;
 
 // -----------------------------------------------------------------------
@@ -136,6 +137,7 @@ fn canary_node_health_row() -> NodeHealthRow {
 // node's row.
 // -----------------------------------------------------------------------
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn get_v1_nodes_returns_boot_time_node_health_row_on_fresh_store() {
     let (handle, bound, _tmp, ca_pem, _obs) = spawn_server_with_obs_handle().await;
@@ -164,6 +166,7 @@ async fn get_v1_nodes_returns_boot_time_node_health_row_on_fresh_store() {
 // `vec![]`, this test flips red.
 // -----------------------------------------------------------------------
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn get_v1_nodes_returns_injected_canary_node_health_row() {
     let (handle, bound, _tmp, ca_pem, obs) = spawn_server_with_obs_handle().await;
@@ -219,6 +222,7 @@ async fn get_v1_nodes_returns_injected_canary_node_health_row() {
 // no-query empty body.
 // -----------------------------------------------------------------------
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn response_body_nodes_field_rows_is_explicit_array_not_omitted() {
     let (handle, bound, _tmp, ca_pem, _obs) = spawn_server_with_obs_handle().await;

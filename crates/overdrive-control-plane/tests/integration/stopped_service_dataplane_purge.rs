@@ -47,6 +47,7 @@ use overdrive_sim::adapters::dataplane::SimDataplane;
 use overdrive_sim::adapters::driver::SimDriver;
 use overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner;
 use overdrive_sim::adapters::{SimDataplaneComposer, SimGuestDnsFactory};
+use overdrive_testing::overdrive_test;
 use tempfile::TempDir;
 
 use super::workload_lifecycle::wait::advance_and_settle;
@@ -252,6 +253,7 @@ impl Node {
 /// When the operator stops the Service
 /// Then the service map holds no backend for the Service's VIP once the
 ///      replica is Terminated.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_stopped_services_last_backend_is_purged_from_the_service_map() {
     let dir = TempDir::new().expect("tempdir");
@@ -301,6 +303,7 @@ async fn a_stopped_services_last_backend_is_purged_from_the_service_map() {
 ///  And the node restarts over the same state and the same service map
 /// Then the restarted node purges the backend the first lifetime left, and the
 ///      Service stays Terminated.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_node_restart_purges_the_backend_a_stop_left_programmed_before_the_node_went_down() {
     let dir = TempDir::new().expect("tempdir");

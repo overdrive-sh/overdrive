@@ -35,6 +35,7 @@ use overdrive_cli::commands::deploy::{DeployArgs, DeployOutput};
 use overdrive_cli::commands::serve::ServeHandle;
 use overdrive_cli::http_client::CliError;
 use overdrive_control_plane::api::IdempotencyOutcome;
+use overdrive_testing::overdrive_test;
 use tempfile::TempDir;
 
 /// Spin up a real in-process control-plane server on `127.0.0.1:0` and
@@ -121,6 +122,7 @@ rootfs = "/rootfs"
 // (a) submit with valid TOML against in-process server → DeployOutput
 // -------------------------------------------------------------------
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn submit_with_valid_toml_against_in_process_server_returns_submit_output_with_intent_key_and_next_command()
  {
@@ -167,6 +169,7 @@ async fn submit_with_valid_toml_against_in_process_server_returns_submit_output_
 // (b) replicas = 0 returns InvalidSpec BEFORE any HTTP call
 // -------------------------------------------------------------------
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn submit_with_zero_replicas_returns_invalid_spec_before_any_http_call() {
     // No server spawned — point the on-disk config at a dead port. If
@@ -229,6 +232,7 @@ rootfs = "/rootfs"
 // (c) malformed TOML syntax returns InvalidSpec
 // -------------------------------------------------------------------
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn submit_with_malformed_toml_syntax_returns_invalid_spec() {
     let tmp = TempDir::new().expect("tempdir");
@@ -259,6 +263,7 @@ cpu_milli = 500
 // (d) connection-refused endpoint → Transport with two suggestions
 // -------------------------------------------------------------------
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn submit_against_unreachable_endpoint_returns_transport_error_naming_endpoint_with_actionable_suggestions()
  {
@@ -317,6 +322,7 @@ async fn submit_against_unreachable_endpoint_returns_transport_error_naming_endp
 // (e) rendered Transport error does NOT leak raw reqwest token
 // -------------------------------------------------------------------
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn submit_transport_error_display_does_not_contain_raw_reqwest_token() {
     let tmp = TempDir::new().expect("tempdir");
@@ -349,6 +355,7 @@ async fn submit_transport_error_display_does_not_contain_raw_reqwest_token() {
 //     fix-detach-submit-workload-kind
 // -------------------------------------------------------------------
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn submit_accepts_job_section_toml_and_persists_job_discriminator() {
     let (handle, tmp) = spawn_server().await;

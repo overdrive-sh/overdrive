@@ -55,6 +55,7 @@ use overdrive_core::dataplane::backend_key::Proto;
 use overdrive_core::id::WorkloadId;
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_store_local::LocalIntentStore;
+use overdrive_testing::overdrive_test;
 use tempfile::TempDir;
 
 async fn spawn_server() -> (ServeHandle, TempDir) {
@@ -111,6 +112,7 @@ fn write_toml(dir: &Path, name: &str, body: &str) -> PathBuf {
     path
 }
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn deploy_udp_service_is_accepted_and_persisted_intent_carries_proto_udp() {
     let (handle, server_tmp) = spawn_server().await;

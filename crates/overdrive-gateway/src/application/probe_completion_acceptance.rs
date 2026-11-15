@@ -12,6 +12,7 @@
 use super::held_probe_doubles::{
     Composition, ProbeOutcome, ReleaseOutcome, route, settle, wait_until,
 };
+use overdrive_testing::overdrive_test;
 
 /// Second octet reserved for this scenario in the bind-address table.
 const PROBE_COMPLETION_OCTET: u8 = 64;
@@ -25,6 +26,7 @@ const PROBE_COMPLETION_OCTET: u8 = 64;
 /// nothing is staged or draining.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(start_paused = true)]
 async fn a_probe_result_completed_twice_is_ignored_the_second_time() {
     let world = Composition::start(PROBE_COMPLETION_OCTET, 0).await;

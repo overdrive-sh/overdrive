@@ -14,6 +14,7 @@ use std::time::Duration;
 
 use overdrive_control_plane::ServerHandle;
 use overdrive_control_plane::api::ErrorBody;
+use overdrive_testing::overdrive_test;
 use tempfile::TempDir;
 
 fn client_trusting(ca_pem: &str) -> reqwest::Client {
@@ -60,6 +61,7 @@ async fn spawn_server() -> (ServerHandle, SocketAddr, TempDir, String) {
     (handle, bound, tmp, ca_pem)
 }
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn stop_on_unknown_job_returns_404() {
     let (handle, bound, _tmp, ca_pem) = spawn_server().await;

@@ -9,8 +9,10 @@
 //! delegation see actionable next steps, not a silent panic.
 
 use overdrive_control_plane::cgroup_preflight::{CgroupPreflightError, run_preflight_at};
+use overdrive_testing::overdrive_test;
 use tempfile::TempDir;
 
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn preflight_refuses_without_delegation() {
     let tmp = TempDir::new().expect("tempdir");

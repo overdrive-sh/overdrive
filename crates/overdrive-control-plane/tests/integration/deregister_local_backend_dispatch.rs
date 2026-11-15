@@ -30,7 +30,9 @@ use overdrive_core::id::{ContentHash, CorrelationKey, ServiceId};
 use overdrive_core::reconcilers::Action;
 use overdrive_core::traits::dataplane::Dataplane;
 use overdrive_sim::adapters::dataplane::SimDataplane;
+use overdrive_testing::overdrive_test;
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn deregister_local_backend_dispatch_removes_entry_from_dataplane() {
     let dataplane = SimDataplane::new();

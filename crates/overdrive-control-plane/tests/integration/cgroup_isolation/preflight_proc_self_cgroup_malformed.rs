@@ -19,8 +19,10 @@
 //! and the docs URL.
 
 use overdrive_control_plane::cgroup_preflight::{CgroupPreflightError, run_preflight_at};
+use overdrive_testing::overdrive_test;
 use tempfile::TempDir;
 
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn preflight_rejects_v1_only_proc_self_cgroup() {
     let tmp = TempDir::new().expect("tempdir");
@@ -61,6 +63,7 @@ fn preflight_rejects_v1_only_proc_self_cgroup() {
     assert!(msg.contains("docs.overdrive.sh"), "must mention docs URL: {msg}");
 }
 
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn preflight_rejects_empty_proc_self_cgroup() {
     let tmp = TempDir::new().expect("tempdir");

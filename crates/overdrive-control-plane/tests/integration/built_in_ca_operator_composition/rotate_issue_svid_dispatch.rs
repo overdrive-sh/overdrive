@@ -40,6 +40,7 @@ use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_host::OsEntropy;
 use overdrive_host::ca::RcgenCa;
 use overdrive_store_local::LocalObservationStore;
+use overdrive_testing::overdrive_test;
 use tempfile::TempDir;
 
 const WORKLOAD_NAME: &str = "ws-rotate";
@@ -124,6 +125,7 @@ fn rotate_issue_svid_action(alloc: &AllocationId, identity: &SpiffeId, node: &No
 // leave that sub-claim vacuous. Universe: the action-shim result, the
 // `IdentityMgr` held snapshot (post-replace), the ObservationStore audit row
 // (serial + validity window).
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn rotate_correlation_issue_svid_mints_replaces_hold_and_audits() {
     // GIVEN a real CA + a real observation store + a fixed clock + an

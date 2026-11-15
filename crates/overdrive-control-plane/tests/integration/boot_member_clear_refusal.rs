@@ -40,6 +40,7 @@ use overdrive_sim::adapters::driver::SimDriver;
 use overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner;
 use overdrive_sim::adapters::mtls_intercept::SimMtlsIntercept;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
+use overdrive_testing::overdrive_test;
 use overdrive_worker::mtls_intercept::{
     InterceptElementKey, InterceptElementOperation, InterceptError, InterceptPostcondition,
     InterceptSet, NetlinkError,
@@ -461,6 +462,7 @@ fn assert_refused_without_publication(
 /// G-295-1 row 2, composed: the boot clear's batch is rejected. The boot
 /// refuses with `BootMemberClear` whose source is the clear's own error, and
 /// the rejected clear left the prior process's members unchanged.
+#[overdrive_test(guest = "cgroup-default", profile = "dummy-link")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_rejected_boot_member_clear_refuses_the_composed_boot_with_its_own_cause() {
     assert!(
@@ -493,6 +495,7 @@ async fn a_rejected_boot_member_clear_refuses_the_composed_boot_with_its_own_cau
 /// read-back still holds members. The boot refuses with `BootMemberClear`
 /// whose source is `InterceptError::MembersRemain` naming exactly those
 /// members.
+#[overdrive_test(guest = "cgroup-default", profile = "dummy-link")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_boot_member_clear_that_leaves_members_refuses_with_the_members_it_observed() {
     assert!(
@@ -527,6 +530,7 @@ async fn a_boot_member_clear_that_leaves_members_refuses_with_the_members_it_obs
 /// the double's model only after `run_server_with_obs_and_driver` has
 /// returned. The late success resurrects nothing: the gate stays BootClosed
 /// and no further intercept call is made.
+#[overdrive_test(guest = "cgroup-default", profile = "dummy-link")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_boot_member_clear_that_commits_after_the_refusal_publishes_nothing() {
     assert!(

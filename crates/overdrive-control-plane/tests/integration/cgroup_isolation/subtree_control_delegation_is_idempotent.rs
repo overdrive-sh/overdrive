@@ -32,6 +32,7 @@ use std::sync::Arc;
 use overdrive_control_plane::cgroup_manager::create_and_enrol_control_plane_slice_at;
 use overdrive_core::traits::CgroupFs;
 use overdrive_host::RealCgroupFs;
+use overdrive_testing::overdrive_test;
 use overdrive_worker::cgroup_manager::CgroupManager;
 use serial_test::serial;
 
@@ -40,6 +41,7 @@ use serial_test::serial;
 /// observable side effects beyond the first call's. The kernel-level
 /// contract: re-writing `+cpu +memory +io +pids` to an already-enabled
 /// `cgroup.subtree_control` is a no-op.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 #[serial(cgroup)]
 async fn subtree_control_delegation_is_idempotent_across_boots() {

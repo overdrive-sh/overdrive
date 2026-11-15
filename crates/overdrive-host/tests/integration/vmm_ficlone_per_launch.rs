@@ -23,6 +23,7 @@ use overdrive_core::vm::config::{
     VmConfig, VmConfinement, VmRunDir, VmmIdentity,
 };
 use overdrive_host::CloudHypervisorVmm;
+use overdrive_testing::overdrive_test;
 use overdrive_testing::vm_fixture::{VmFixture, default_staging_root};
 
 /// The leased guest CID `GUEST_CID_BASE + offset` of one launch (CID-NOCLAIM):
@@ -60,6 +61,7 @@ fn confirm_non_reflink(dir: &Path) -> bool {
     write_ok && reflink_result.is_err()
 }
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn ficlone_fails_closed_on_a_real_non_reflink_target() {
     // /dev/shm is unambiguously tmpfs on every Linux distro (unlike

@@ -45,6 +45,7 @@ use overdrive_sim::adapters::observation_store::SimObservationStore;
 
 use crate::integration::vm_dispatch::{VmDispatchFixture, VmDispatchPorts};
 use overdrive_control_plane::worker::exit_observer;
+use overdrive_testing::overdrive_test;
 
 /// A workload that exits non-zero after a short delay. The delay gives
 /// the action shim's `Running` write and the observer's Running-gate
@@ -106,6 +107,7 @@ async fn await_row(
 }
 
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 #[allow(clippy::too_many_lines)]
 async fn two_crash_cycles_use_fresh_successors_and_preserve_each_terminal() {

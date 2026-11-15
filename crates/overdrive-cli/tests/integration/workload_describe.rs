@@ -37,6 +37,7 @@ use overdrive_core::dataplane::Proto;
 use overdrive_core::id::{CertSerial, SpiffeId};
 use overdrive_core::observation::probe_result_row::{ProbeIdx, ProbeRole};
 use overdrive_core::wall_clock::UnixInstant;
+use overdrive_testing::overdrive_test;
 use proptest::prelude::*;
 use std::num::NonZeroU16;
 use std::time::Duration;
@@ -136,6 +137,7 @@ fn render_live(response: AllocStatusResponse) -> String {
 // S-03-01 — Service alloc status: replicas + Restarts; no Exit column
 // ---------------------------------------------------------------------------
 
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn s_03_01_service_alloc_status_replicas_no_exit_column() {
     let rows =
@@ -201,6 +203,7 @@ fn fixture_response_with_listeners(
 /// canonical protocol via `Proto::as_str`). This is the black-box
 /// surface that makes a UDP service's `Proto::Udp` observable —
 /// O03 verification sub-claim 3.
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn service_alloc_status_renders_each_listener_as_port_slash_protocol() {
     let response = fixture_response_with_listeners(
@@ -226,6 +229,7 @@ fn service_alloc_status_renders_each_listener_as_port_slash_protocol() {
 
 /// A Job response (no listeners) renders NO Listeners section — the
 /// section is Service-only and listener-presence-guarded.
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn job_alloc_status_renders_no_listeners_section() {
     let response = fixture_response(
@@ -259,6 +263,7 @@ fn job_alloc_status_renders_no_listeners_section() {
 
 /// A Service whose response carries a VIP renders a `VIP:` line with the
 /// platform-issued address on the kind-aware path.
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn service_alloc_status_renders_vip_when_present() {
     let mut response = fixture_response(
@@ -285,6 +290,7 @@ fn service_alloc_status_renders_vip_when_present() {
 /// A Service with no VIP (`vip: None`) renders NO `VIP:` line — the line
 /// is presence-guarded, never rendered as `VIP: None`. (`fixture_response`
 /// defaults `vip: None`.)
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn service_alloc_status_renders_no_vip_line_when_absent() {
     let response = fixture_response(
@@ -311,6 +317,7 @@ fn service_alloc_status_renders_no_vip_line_when_absent() {
 proptest! {
     #![proptest_config(ProptestConfig { cases: 256, ..ProptestConfig::default() })]
 
+    #[overdrive_test(guest = "cgroup-default")]
     #[test]
     fn service_render_surfaces_every_listener_port_and_proto(
         listeners in proptest::collection::vec(
@@ -338,6 +345,7 @@ proptest! {
 // S-03-02 — Job alloc status (Failed) — KPI K3 framing journey
 // ---------------------------------------------------------------------------
 
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn s_03_02_job_alloc_status_failed_verdict_attempts_exit_codes_stderr() {
     let rows = vec![
@@ -395,6 +403,7 @@ fn s_03_02_job_alloc_status_failed_verdict_attempts_exit_codes_stderr() {
 // S-03-03 — Job alloc status (Succeeded): Verdict Succeeded with Exit 0
 // ---------------------------------------------------------------------------
 
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn s_03_03_job_alloc_status_succeeded_verdict_exit_zero() {
     let rows = vec![fixture_row(
@@ -434,6 +443,7 @@ fn s_03_03_job_alloc_status_succeeded_verdict_exit_zero() {
 // S-03-04 — Job alloc status (in progress): Verdict In progress, Exit em-dash
 // ---------------------------------------------------------------------------
 
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn s_03_04_job_alloc_status_in_progress_em_dash() {
     let rows =
@@ -464,6 +474,7 @@ fn s_03_04_job_alloc_status_in_progress_em_dash() {
 // S-03-05 — Anti-scenario: Job alloc status NEVER renders Service phrasing
 // ---------------------------------------------------------------------------
 
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn s_03_05_anti_scenario_job_never_renders_service_phrasing() {
     // Test all three Job verdict states.
@@ -507,6 +518,7 @@ fn s_03_05_anti_scenario_job_never_renders_service_phrasing() {
 // the offending workload id. This is a statelessly testable contract on the
 // error type itself.
 
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn s_03_06_alloc_status_unknown_job_typed_error() {
     use overdrive_cli::http_client::CliError;
@@ -545,6 +557,7 @@ fn s_03_06_alloc_status_unknown_job_typed_error() {
 // shape exists and the operator-visible rendering does NOT fabricate
 // an "Unknown" or empty row.
 
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn s_03_07_alloc_status_corrupt_observation_row_honest_error() {
     use overdrive_cli::http_client::CliError;
@@ -581,6 +594,7 @@ proptest! {
     /// status rendered with arbitrary per-attempt exit codes drawn from
     /// {0, 1, 2, 127, 137, 255}, the rendered Exit column byte-equals
     /// the persisted exit_code for every attempt row.
+    #[overdrive_test(guest = "cgroup-default")]
     #[test]
     fn s_03_08_k3_property_rendered_exit_matches_persisted(
         exit_codes in proptest::collection::vec(
@@ -635,24 +649,28 @@ proptest! {
 // Render fn unit coverage — header / verdict / table fns are pure
 // ---------------------------------------------------------------------------
 
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn job_verdict_completed_zero_renders_succeeded() {
     let rendered = format_job_verdict(JobVerdict::Succeeded);
     assert_eq!(rendered.trim_end(), "Verdict: Succeeded");
 }
 
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn job_verdict_failed_renders_backoff_exhausted() {
     let rendered = format_job_verdict(JobVerdict::Failed);
     assert_eq!(rendered.trim_end(), "Verdict: Failed (backoff exhausted)");
 }
 
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn job_verdict_in_progress_renders_no_terminal_yet() {
     let rendered = format_job_verdict(JobVerdict::InProgress);
     assert_eq!(rendered.trim_end(), "Verdict: In progress (no terminal yet)");
 }
 
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn format_job_alloc_status_header_includes_name_kind_digest() {
     let rendered = format_job_alloc_status_header("coinflip", "abc123def456", JobVerdict::Failed);
@@ -710,6 +728,7 @@ fn issued_cert_summary(
 /// so the kind under test MUST match the namespace. The server projects
 /// `issued_certificates` per running alloc with NO `WorkloadKind` filter,
 /// so a Job legitimately carries this summary; the render must surface it.
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn alloc_status_surfaces_current_issued_certificate_summary() {
     let summary = issued_cert_summary(
@@ -760,6 +779,7 @@ fn alloc_status_surfaces_current_issued_certificate_summary() {
 /// the rendered section contains NO certificate PEM/DER bytes and NO private
 /// key, and a changed serial reads as the current cert. Guards the ADR-0067
 /// #215-boundary no-leak invariant.
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn issued_certificate_summary_omits_cert_bytes_and_key_max_issuance_ordinal() {
     // The server projects ONE summary per running alloc (max-issuance_ordinal).
@@ -821,6 +841,7 @@ fn issued_certificate_summary_omits_cert_bytes_and_key_max_issuance_ordinal() {
 /// workload kind: the issued-certificates render is kind-agnostic, so the
 /// presence-guard must keep the no-cert output clean for Service, Job, AND
 /// Schedule alike.
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn alloc_status_omits_issued_certificate_section_when_empty() {
     for kind in [WorkloadKind::Service, WorkloadKind::Job, WorkloadKind::Schedule] {
@@ -852,6 +873,7 @@ fn alloc_status_omits_issued_certificate_section_when_empty() {
 /// audit-row facts (`serial` / `spiffe_id` / `issuer_serial` / `not_after`)
 /// are each surfaced via their `Display`, with no cert PEM/DER bytes or
 /// private key.
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn job_alloc_status_surfaces_issued_certificate_summary() {
     let summary = issued_cert_summary(
@@ -951,6 +973,7 @@ fn fixture_probe_result(
 /// declaration side alone. This is the state an operator sees in the
 /// first seconds after a deploy, and the one most likely to be silently
 /// dropped by a join written observation-first.
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn declared_probe_with_no_observed_row_renders_pending() {
     let mut response = fixture_response(
@@ -998,6 +1021,7 @@ fn declared_probe_with_no_observed_row_renders_pending() {
 /// (the Phase-1 first-Running semantics preserved per ADR-0058). The
 /// kind-guard covers Job/Schedule; this covers the third empty case,
 /// which is a Service.
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn service_declaring_no_probes_renders_no_probes_section() {
     let response = fixture_response(
@@ -1029,6 +1053,7 @@ fn service_declaring_no_probes_renders_no_probes_section() {
 /// join that keyed on `(role, probe_idx)` alone would report the first
 /// replica's Pass as though every replica were healthy — the exact
 /// class of lie this surface exists to prevent.
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn probe_rows_do_not_bleed_across_allocations() {
     let mut response = fixture_response(
@@ -1088,6 +1113,7 @@ fn probe_rows_do_not_bleed_across_allocations() {
 /// restart. The test exists so that when a counter DOES get an honest
 /// source, whoever wires it is forced to come here and say so, rather
 /// than the ratio silently reappearing as `(0/N)`.
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn failing_probe_renders_no_fabricated_failure_ratio() {
     let mut response = fixture_response(

@@ -35,6 +35,7 @@ use overdrive_core::traits::observation_store::{ObservationStore, ServiceHydrati
 use overdrive_core::wall_clock::UnixInstant;
 use overdrive_sim::adapters::dataplane::SimDataplane;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
+use overdrive_testing::overdrive_test;
 
 /// Minimal failing-on-update dataplane wrapper for the `Err(...)`
 /// branch. The sim dataplane always succeeds — composing a thin wrapper
@@ -112,6 +113,7 @@ fn sample_action() -> (ServiceId, ServiceVip, Vec<Backend>, CorrelationKey) {
     (service_id, vip, backends, correlation)
 }
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn dispatch_writes_completed_row_on_dataplane_ok() {
     let (service_id, vip, backends, correlation) = sample_action();
@@ -156,6 +158,7 @@ async fn dispatch_writes_completed_row_on_dataplane_ok() {
     }
 }
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn dispatch_writes_failed_row_on_dataplane_err() {
     let (service_id, vip, backends, correlation) = sample_action();
@@ -209,6 +212,7 @@ async fn dispatch_writes_failed_row_on_dataplane_err() {
 /// short-circuit with a `Failed` observation row whose `reason`
 /// names the unsupported address family, and never call the
 /// dataplane at all.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn dispatch_rejects_ipv6_vip_with_failed_row() {
     let service_id = ServiceId::new(99).expect("ServiceId");

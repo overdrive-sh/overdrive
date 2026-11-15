@@ -34,6 +34,7 @@ use overdrive_core::{SpiffeId, WorkloadId};
 use overdrive_testing::guest_app::{
     RemotePeer, V6_APP_PORT, V6_HTTP_PROBE_PORT, V6_POPULATION_MAX, V6_TCP_PROBE_PORT, subcommand,
 };
+use overdrive_testing::overdrive_test;
 use serial_test::serial;
 
 use super::guest_stack_mtls_egress::assert_exact_operator_stopped_service_lifecycle_delta;
@@ -47,6 +48,7 @@ use super::vsock_support::{
 /// real `overdrive serve` completes a TCP round trip and a UDP datagram
 /// round trip with a remote peer, and its attachment is gone with it.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default", profile = "nested")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
 async fn a_vm_workload_round_trips_tcp_and_udp_through_serve_and_deploy() {

@@ -45,6 +45,7 @@ use overdrive_core::traits::observation_store::{
 use overdrive_core::transition_reason::TransitionReason;
 use overdrive_sim::adapters::driver::SimDriver;
 use overdrive_store_local::LocalObservationStore;
+use overdrive_testing::overdrive_test;
 use tempfile::TempDir;
 
 use crate::integration::vm_dispatch::{VmDispatchFixture, VmDispatchPorts};
@@ -122,6 +123,7 @@ async fn dispatch_one_at_tick(
 // THE regression test.
 // ---------------------------------------------------------------------------
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn stop_after_restart_wins_the_lww_merge_at_tick_zero() {
     let tmp = TempDir::new().expect("tempdir");
@@ -196,6 +198,7 @@ async fn stop_after_restart_wins_the_lww_merge_at_tick_zero() {
 // load-bearing.
 // ---------------------------------------------------------------------------
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn a_tick_derived_stamp_at_tick_zero_is_still_silently_dropped() {
     let tmp = TempDir::new().expect("tempdir");

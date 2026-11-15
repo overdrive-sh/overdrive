@@ -16,12 +16,14 @@ use std::time::Duration;
 
 use overdrive_core::traits::prober::{ProbeOutcome, TcpProber};
 use overdrive_testing::cidr_lease::TestCidrLease;
+use overdrive_testing::overdrive_test;
 use overdrive_worker::probe_runner::TokioTcpProber;
 use tokio::net::TcpListener;
 
 /// S-SHCP-INT-01-01 (US-01 WS / K1) — happy path: bind a real
 /// loopback listener on `127.0.0.1:0` (kernel-assigned port; no
 /// race per ADR-0054 §7), probe it, assert Pass.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn given_real_loopback_listener_when_tokio_tcp_prober_probes_then_returns_pass() {
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind loopback listener");
@@ -45,6 +47,7 @@ async fn given_real_loopback_listener_when_tokio_tcp_prober_probes_then_returns_
 /// S-SHCP-INT-01-02 (US-01 WS / K1 sad path) — connection refused
 /// against an unbound port surfaces as
 /// `Fail { reason: "connection refused" }`.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn given_unbound_port_when_tokio_tcp_prober_probes_then_returns_fail_connection_refused() {
     // Bind a listener to discover an ephemeral port the kernel has
@@ -182,6 +185,7 @@ fn install_syn_drop() -> (DropRuleGuard, Ipv4Addr) {
 /// SYN-ACKs every destination. A leased, route-disjoint address with a
 /// `/32` route on `lo` plus the silent SYN drop makes the timeout
 /// deterministic across networking backends.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn given_blackhole_address_when_tokio_tcp_prober_probes_then_returns_fail_timeout() {
     // Install the silent-SYN-drop rule and bind its RAII teardown BEFORE

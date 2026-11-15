@@ -53,6 +53,7 @@ use overdrive_sim::adapters::driver::SimDriver;
 use overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_sim::adapters::{SimGuestDnsFactory, SimMtlsIntercept};
+use overdrive_testing::overdrive_test;
 use overdrive_worker::mtls_intercept::{
     InterceptElementKey, InterceptElementOperation, InterceptError, InterceptPostcondition,
     InterceptSet, NetlinkError, Result as InterceptResult,
@@ -471,6 +472,7 @@ fn vm_job(id: &str) -> SubmitSpecInput {
 /// `Running` row (R10), is reported `network_cleanup_pending: true`, and is
 /// excluded from `replicas_running`; once the removal succeeds on a retry the
 /// allocation is `Terminated` and no longer pending.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_stuck_stop_is_reported_cleanup_pending_and_is_not_a_running_replica() {
     let node = Node::boot().await;
@@ -552,6 +554,7 @@ async fn a_stuck_stop_is_reported_cleanup_pending_and_is_not_a_running_replica()
 /// while the row reports pending. Whether a retry's `retire` of an
 /// already-Retiring lease emits `lease_retired` again is not pinned, so the
 /// retired events are not counted exactly; the release is.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn crashed_and_reclaiming_allocations_are_reported_cleanup_pending() {
     // Installed before boot so no lease event is missed.

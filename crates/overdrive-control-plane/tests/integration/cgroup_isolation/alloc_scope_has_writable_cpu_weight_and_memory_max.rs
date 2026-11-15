@@ -38,6 +38,7 @@ use overdrive_control_plane::cgroup_manager::create_and_enrol_control_plane_slic
 use overdrive_core::id::AllocationId;
 use overdrive_core::traits::CgroupFs;
 use overdrive_core::traits::driver::Resources;
+use overdrive_testing::overdrive_test;
 use overdrive_worker::cgroup_manager::{CgroupManager, CgroupPath};
 use serial_test::serial;
 use tracing::Subscriber;
@@ -141,6 +142,7 @@ impl Drop for ScopeCleanup {
 /// 134217728`. With the production fix in place, the per-alloc
 /// resource-limit writes succeed because `overdrive.slice` and
 /// `workloads.slice` both have the relevant controllers delegated.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 #[serial(cgroup)]
 async fn alloc_scope_has_writable_cpu_weight_and_memory_max() {
@@ -193,6 +195,7 @@ async fn alloc_scope_has_writable_cpu_weight_and_memory_max() {
 /// Captures `tracing` events via a `CaptureLayer` scoped to this test
 /// only (per the RCA implementation note, the custom-`Layer` shape
 /// rather than `tracing-test`).
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 #[serial(cgroup)]
 async fn alloc_start_does_not_emit_resource_limit_warning() {

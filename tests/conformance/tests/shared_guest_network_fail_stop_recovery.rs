@@ -33,6 +33,7 @@ use overdrive_system_conformance::accepted_cadence::{
 use overdrive_system_conformance::{
     Admission, DirectHandlerHarness, DirectHandlerInstance, TraceEvent, TraceHistory, Trajectory,
 };
+use overdrive_testing::overdrive_test;
 use serde_json::{Value, json};
 
 fn service_request(id: &str) -> Value {
@@ -177,6 +178,7 @@ fn assert_detected_then_closed_until_request(trajectory: &Trajectory) -> (Durati
 /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
 /// S-ND295-33 — A failed handler shuts down before a fresh handler admits work
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 #[allow(
     clippy::too_many_lines,

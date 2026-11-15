@@ -49,6 +49,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use overdrive_control_plane::{
     HostDataplaneComposer, ServerConfig, ServerHandle, dataplane_config::DataplaneConfig,
 };
+use overdrive_testing::overdrive_test;
 use tempfile::TempDir;
 
 /// Boots `run_server` over the host bundle with the production
@@ -293,6 +294,7 @@ fn require_cap_net_admin() {
 /// in-process service-map hydrator dispatch, and the walking-skeleton
 /// TCP-round-trip (S-BDB-01) — those are tested separately by their
 /// owning steps.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial_test::serial(env)]
 async fn boot_composes_ebpf_dataplane_and_attaches_xdp_to_both_ifaces() {
@@ -335,6 +337,7 @@ async fn boot_composes_ebpf_dataplane_and_attaches_xdp_to_both_ifaces() {
 /// the boot succeeds when client_iface has an IPv4 (the contract per
 /// architecture.md § 5.1 says missing-IPv4 refuses boot — see S-BDB-17),
 /// so a successful boot here proves the resolution path returned Ok.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial_test::serial(env)]
 async fn boot_resolves_host_ipv4_via_getifaddrs_on_client_iface() {
@@ -385,6 +388,7 @@ async fn boot_resolves_host_ipv4_via_getifaddrs_on_client_iface() {
 /// exercises the same property at the walking-skeleton scope; this
 /// variant lives in the boot-composition module so the cleanup
 /// guarantee is asserted by a test that owns the boot fixture.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial_test::serial(env)]
 async fn graceful_shutdown_detaches_xdp_and_removes_bpffs_pin() {
@@ -438,6 +442,7 @@ async fn graceful_shutdown_detaches_xdp_and_removes_bpffs_pin() {
 // Error-path boot
 // ----------------------------------------------------------------------------
 
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn boot_refuses_when_dataplane_config_section_missing() {
     // S-BDB-12 — missing config section closure (step 02-01):
@@ -476,6 +481,7 @@ fn boot_refuses_when_dataplane_config_section_missing() {
     }
 }
 
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn dataplane_boot_error_iface_addr_resolution_display_contains_remediation() {
     // Step 02-01 unit test (d): the IfaceAddrResolution variant's
@@ -512,6 +518,7 @@ fn dataplane_boot_error_iface_addr_resolution_display_contains_remediation() {
 ///          either typed variant satisfies the "refuses to boot with
 ///          a typed DataplaneBoot error naming the iface" contract).
 ///         AND no XDP attached to the (non-existent) backend_iface
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial_test::serial(env)]
 async fn boot_refuses_when_client_iface_does_not_exist() {
@@ -575,6 +582,7 @@ async fn boot_refuses_when_client_iface_does_not_exist() {
 /// no IPv4 binding refuses boot with the typed `IfaceAddrResolution`
 /// variant. Display names the iface and the `ip -4 addr show <iface>`
 /// remediation.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial_test::serial(env)]
 async fn boot_refuses_when_iface_has_no_ipv4_address() {
@@ -727,6 +735,7 @@ mod event_capture {
 ///   - at least one `xdp.attach.fallback_generic` event names a
 ///     test-managed iface
 ///   - the post-boot iface reports `xdpgeneric` attachment
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial_test::serial(env)]
 async fn attach_mode_fallback_emits_structured_event_on_dummy_iface() {
@@ -810,6 +819,7 @@ async fn attach_mode_fallback_emits_structured_event_on_dummy_iface() {
 /// `ControlPlaneError::DataplaneBoot(DataplaneBootError::Probe { source })`
 /// and emits a structured `health.startup.refused` event with
 /// `reason = "dataplane.probe"` per architecture.md § 5.4.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial_test::serial(env)]
 async fn boot_refuses_when_earned_trust_probe_fails() {
@@ -904,6 +914,7 @@ async fn boot_refuses_when_earned_trust_probe_fails() {
 /// `crates/overdrive-dataplane/src/lib.rs`. At this Tier 3 scope, the
 /// observable signal is "boot succeeds end-to-end with the live probe
 /// path engaged" — anything else duplicates the unit assertion.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial_test::serial(env)]
 async fn boot_succeeds_when_earned_trust_probe_round_trips_backend_map() {

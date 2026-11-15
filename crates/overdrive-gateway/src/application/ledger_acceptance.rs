@@ -17,6 +17,7 @@ use overdrive_core::dataplane::{Proto, ServiceFrontend};
 use overdrive_core::id::{BackendId, ServiceVip, SpiffeId};
 use overdrive_core::public_ingress::{ServiceKey, SocketCookie};
 use overdrive_core::traits::clock::Clock;
+use overdrive_testing::overdrive_test;
 
 use super::*;
 use crate::ports::{
@@ -133,6 +134,7 @@ fn refused_capacity(ledger: &Arc<GatewayCleanupLedger>) -> NonZeroU32 {
 /// slot, and the 129th is refused with the ledger capacity.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn ledger_accepts_zero_one_and_128_reservations_and_refuses_the_129th() {
     let dataplane = RecordingDataplane::new();
@@ -160,6 +162,7 @@ fn ledger_accepts_zero_one_and_128_reservations_and_refuses_the_129th() {
 /// preceded it stays recorded as saturation.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn released_slot_is_reusable_at_capacity() {
     let ledger = GatewayCleanupLedger::new(capacity(128));
@@ -178,6 +181,7 @@ fn released_slot_is_reusable_at_capacity() {
 /// reservation removes the record.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn bound_reservation_holds_its_slot_until_complete_removes_the_record() {
     let ledger = GatewayCleanupLedger::new(capacity(128));
@@ -196,6 +200,7 @@ fn bound_reservation_holds_its_slot_until_complete_removes_the_record() {
 /// `retry_all` reports as `LedgerSaturated` even after later cleanup succeeds.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn saturation_stays_reported_after_the_ledger_drains() {
     let ledger = GatewayCleanupLedger::new(capacity(128));
@@ -217,6 +222,7 @@ fn saturation_stays_reported_after_the_ledger_drains() {
 /// cleanup keeps the record for the next sweep.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn retry_all_cleans_exact_intents_and_keeps_records_whose_cleanup_fails() {
     let ledger = GatewayCleanupLedger::new(capacity(128));

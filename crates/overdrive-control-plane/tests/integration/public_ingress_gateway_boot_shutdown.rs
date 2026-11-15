@@ -134,6 +134,7 @@ use overdrive_sim::adapters::gateway::{
 };
 use overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner;
 use overdrive_sim::adapters::kek::SimKek;
+use overdrive_testing::overdrive_test;
 use serial_test::serial;
 use tempfile::TempDir;
 use tracing::field::{Field, Visit};
@@ -317,6 +318,7 @@ fn own_listeners_on_443() -> std::collections::BTreeSet<String> {
 /// when the gateway lands.
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 #[serial(cgroup)]
 async fn a_disabled_gateway_boots_and_shuts_down_exactly_as_before() {
@@ -373,6 +375,7 @@ async fn a_disabled_gateway_boots_and_shuts_down_exactly_as_before() {
 /// Sim relay records zero probe calls across the whole boot and shutdown.
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 #[serial(cgroup)]
 async fn a_disabled_gateway_never_probes_the_relay() {
@@ -1241,6 +1244,7 @@ async fn assert_unbound_and_serve_unaffected(world: &World) {
 /// dataplane.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
 async fn a_service_with_no_backend_is_answered_503_twice_with_an_empty_second_delta() {
@@ -1312,6 +1316,7 @@ async fn a_service_with_no_backend_is_answered_503_twice_with_an_empty_second_de
 /// not fire). This is the S-PIG-74 (a) stimulus.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
 async fn a_failing_sentinel_probe_keeps_the_public_port_unbound_and_serve_unaffected() {
@@ -1352,6 +1357,7 @@ async fn a_failing_sentinel_probe_keeps_the_public_port_unbound_and_serve_unaffe
 /// unavailable cause is reported, and the bound listener serves 503.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
 async fn a_frontend_with_no_backend_is_bind_valid_and_the_listener_serves_503() {
@@ -1403,6 +1409,7 @@ async fn a_frontend_with_no_backend_is_bind_valid_and_the_listener_serves_503() 
 /// receipt.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
 async fn a_selected_backend_that_refuses_mtls_is_bind_valid_and_its_first_request_is_one_502() {
@@ -1474,6 +1481,7 @@ async fn a_selected_backend_that_refuses_mtls_is_bind_valid_and_its_first_reques
 /// hydration advance as on an unrefused node.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
 async fn a_route_replacement_behind_a_backend_that_refuses_mtls_is_promoted_and_drains_the_prior_generation()
@@ -1531,6 +1539,7 @@ async fn a_route_replacement_behind_a_backend_that_refuses_mtls_is_promoted_and_
 /// releases the bound address.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
 async fn enabled_boot_probes_the_relay_before_the_connect_path_and_the_gateway_stage_runs_first() {
@@ -1576,6 +1585,7 @@ async fn enabled_boot_probes_the_relay_before_the_connect_path_and_the_gateway_s
 /// bound with the gateway stage in the same 5 s drain.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
 async fn a_gated_gateway_never_requests_serve_shutdown() {
@@ -1618,6 +1628,7 @@ async fn a_gated_gateway_never_requests_serve_shutdown() {
 /// gateway disabled, enabled or gated (boundary 3).
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
 async fn the_workload_surface_advances_identically_disabled_enabled_and_gated() {
@@ -1680,6 +1691,7 @@ async fn assert_gate_unavailable(
 /// elapses on the injected clock.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
 async fn a_gateway_identity_that_never_becomes_current_keeps_the_public_port_unbound() {
@@ -1715,6 +1727,7 @@ async fn a_gateway_identity_that_never_becomes_current_keeps_the_public_port_unb
 /// `probe`, whose typed result already reaches the gate outcome.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
 async fn a_probe_that_times_out_keeps_the_public_port_unbound() {
@@ -1739,6 +1752,7 @@ async fn a_probe_that_times_out_keeps_the_public_port_unbound() {
 /// listener advance as on an honest node.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
 async fn a_refused_relay_probe_keeps_the_public_port_unbound_and_the_connect_probe_unrun() {
@@ -1779,6 +1793,7 @@ async fn a_refused_relay_probe_keeps_the_public_port_unbound_and_the_connect_pro
 /// another relay probe or another connect probe.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
 async fn the_relay_probe_runs_once_per_boot_across_a_route_replacement() {
@@ -1980,6 +1995,7 @@ impl World {
 /// production port, so no scenario drives it (R-67 no-obligation ruling).
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
 async fn an_undecodable_stored_route_is_a_typed_500_route_decode_on_post_and_delete() {
@@ -2033,6 +2049,7 @@ fn envelope_holding_an_invalid_route() -> Vec<u8> {
 /// validated by the decode itself (R-67 (4)).
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
 async fn a_well_formed_envelope_holding_an_invalid_route_is_a_typed_500_route_decode() {
@@ -2068,6 +2085,7 @@ async fn a_well_formed_envelope_holding_an_invalid_route_is_a_typed_500_route_de
 /// server task, so no HTTP request can observe the dropped receiver.
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
 async fn a_route_owner_that_ended_in_shutdown_answers_503_gateway_owner_unavailable_on_both_methods()

@@ -364,11 +364,17 @@ fn declares_the_reviewed_guest_group_on_the_test(row: &Value) -> bool {
     text[..function_line_at]
         .lines()
         .rev()
-        .take_while(|line| {
-            let line = line.trim_start();
-            line.starts_with("#[") || line.starts_with("//")
-        })
+        .take_while(|line| in_attribute_block(line))
         .any(|line| line.trim() == closed || line.trim().starts_with(&with_arguments))
+}
+
+/// Whether `line`, read upward from a function, still belongs to the attributes
+/// and comments directly above it, however many lines rustfmt gave a multi-line
+/// attribute: the walk ends at a blank line or at the previous item's end.
+fn in_attribute_block(line: &str) -> bool {
+    let line = line.trim();
+    line.starts_with("//")
+        || !(line.is_empty() || line.ends_with(';') || line.ends_with('{') || line.ends_with('}'))
 }
 
 /// Whether a lane or native-launcher test carries the declaration that places
@@ -404,13 +410,7 @@ fn declares_on_the_test(row: &Value, declaration: &str) -> bool {
         .trim_end_matches([' ', '\t'])
         .lines()
         .rev()
-        .take_while(|line| {
-            let line = line.trim_start();
-            line.starts_with("#[")
-                || line.starts_with("//")
-                || line.starts_with(')')
-                || line.starts_with("lane_")
-        })
+        .take_while(|line| in_attribute_block(line))
         .collect();
     attributes.reverse();
     let above = squeezed(&attributes.join("\n"));

@@ -21,6 +21,7 @@ use overdrive_core::traits::observation_store::{AllocState, ObservationStore};
 use overdrive_sim::adapters::driver::SimDriver;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_store_local::LocalIntentStore;
+use overdrive_testing::overdrive_test;
 use tempfile::TempDir;
 
 // `too_many_lines`: the 01-06 required-field AppState change (adds `ca` +
@@ -28,6 +29,7 @@ use tempfile::TempDir;
 // mechanical wiring args; the body is a single linear submit→converge→stop
 // scenario with no decomposition to extract.
 #[allow(clippy::too_many_lines)]
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn job_stop_drives_running_to_terminated() {
     let tmp = TempDir::new().expect("tempdir");

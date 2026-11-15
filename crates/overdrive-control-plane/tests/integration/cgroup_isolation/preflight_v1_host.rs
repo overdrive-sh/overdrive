@@ -9,8 +9,10 @@
 //! support cgroup v1.
 
 use overdrive_control_plane::cgroup_preflight::{CgroupPreflightError, run_preflight_at};
+use overdrive_testing::overdrive_test;
 use tempfile::TempDir;
 
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn preflight_refuses_on_cgroup_v1_host() {
     let tmp = TempDir::new().expect("tempdir");
@@ -71,6 +73,7 @@ fn preflight_refuses_on_cgroup_v1_host() {
 /// path that does not exist forces `read_to_string` to return
 /// `Err(NotFound)` and proves the match arm `Err(err) if err.kind() ==
 /// ErrorKind::NotFound => String::new()` is wired correctly.
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn preflight_treats_missing_proc_filesystems_as_v1_host() {
     let tmp = TempDir::new().expect("tempdir");

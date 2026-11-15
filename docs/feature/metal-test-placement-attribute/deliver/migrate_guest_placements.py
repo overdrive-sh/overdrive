@@ -190,14 +190,27 @@ def locate(members, binary, test):
     above = index - 1
     attributes = []
     test_at = None
-    while above >= 0 and (
-        lines[above].lstrip().startswith("#[") or lines[above].lstrip().startswith(")")
-        or lines[above].lstrip().startswith("//")
-    ):
-        attributes.append(lines[above])
-        if re.match(r"\s*#\[(tokio::)?test\b", lines[above]):
-            test_at = above
-        above -= 1
+    while above >= 0:
+        stripped = lines[above].strip()
+        if stripped.endswith(")]") and not stripped.startswith("#["):
+            # The end of a multi-line attribute: take its lines up to the `#[`.
+            top = above
+            while top >= 0 and not lines[top].lstrip().startswith("#["):
+                top -= 1
+            if top < 0:
+                break
+            block = lines[top : above + 1]
+            attributes.extend(block)
+            if re.match(r"\s*#\[(tokio::)?test\b", lines[top]):
+                test_at = top
+            above = top - 1
+        elif stripped.startswith("#[") or stripped.startswith("//"):
+            attributes.append(lines[above])
+            if re.match(r"\s*#\[(tokio::)?test\b", lines[above]):
+                test_at = above
+            above -= 1
+        else:
+            break
     if test_at is None:
         return f"fn {leaf} in {file.relative_to(ROOT)} carries no #[test]"
     if any("overdrive_test" in line for line in attributes):

@@ -260,6 +260,7 @@ use overdrive_core::id::AllocationId;
 use overdrive_core::vm::config::{MemoryPlan, RootfsPlan, VmRunDir};
 use overdrive_host::CloudHypervisorVmm;
 use overdrive_sim::{SimVmm, SimVmmProbeFault};
+use overdrive_testing::overdrive_test;
 use overdrive_testing::vm_fixture::VmFixture;
 use serial_test::serial;
 use tempfile::TempDir;
@@ -797,6 +798,7 @@ fn tap_admin_up(name: &str) -> std::io::Result<Option<bool>> {
 
 /// S-VM-01 — A VM workload runs to completion and its exit code reaches
 /// the operator.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 #[serial(cgroup)]
 async fn vm_workload_runs_to_completion_and_exit_code_reaches_operator() {
@@ -845,6 +847,7 @@ async fn vm_workload_runs_to_completion_and_exit_code_reaches_operator() {
 /// hypervisor's own exit code (cloud-hypervisor itself always exits 0 on
 /// a clean guest poweroff, regardless of what the SUPERVISED workload
 /// inside the guest returned).
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 #[serial(cgroup)]
 async fn vm_non_zero_guest_exit_code_is_reported_not_the_hypervisors() {
@@ -902,6 +905,7 @@ async fn vm_non_zero_guest_exit_code_is_reported_not_the_hypervisors() {
 /// Running. `VM_BOOT_DEADLINE` (30s) elapses; the allocation goes
 /// Pending directly to Failed, and every polled snapshot along the way
 /// observes a state OTHER than Running (K2 guardrail).
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 #[serial(cgroup)]
 async fn vm_guest_that_never_starts_is_never_reported_running() {
@@ -961,6 +965,7 @@ async fn vm_guest_that_never_starts_is_never_reported_running() {
 /// `overdrive_cli::commands::deploy::deploy` handler as any other workload
 /// spec — no new verb, no new flag. Proven at deploy-acceptance time
 /// (no full boot-to-completion needed; that is S-VM-01/02's claim).
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 #[serial(cgroup)]
 async fn vm_workload_deploys_through_the_same_verb_as_a_process_workload() {
@@ -1043,6 +1048,7 @@ pub(super) fn find_cloud_hypervisor_pid() -> u32 {
 /// confined to the allocation's own cgroup scope, verified on the
 /// mTLS-composed production boot (the GH #248 / ADR-0074 trap this
 /// feature deliberately re-proves closed).
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 #[serial(cgroup)]
 async fn vm_platform_contains_the_hypervisor_it_started() {
@@ -1378,6 +1384,7 @@ fn send_host_broadcast_arp_probes(tap: &str, guest: Ipv4Addr, count: usize) {
     clippy::doc_markdown,
     reason = "CONTRACT_SHAPE is an exact repository-mandated machine-read declaration"
 )]
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 #[serial(cgroup)]
 async fn every_cloud_hypervisor_thread_carries_the_launch_filter_under_its_own_filters() {
@@ -1754,6 +1761,7 @@ pub(super) fn no_cloud_hypervisor_process_running() -> bool {
 /// release without inventing new API surface (CLAUDE.md § "Implement to
 /// the design" -- mirrors the explicit-boundary-statement precedent
 /// DISTILL set for S-VM-67).
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 #[serial(cgroup)]
 async fn vm_deadline_arm_leaks_nothing() {
@@ -1864,6 +1872,7 @@ async fn vm_deadline_arm_leaks_nothing() {
 /// guest's real `7` -- distinct evidence from S-VM-02's own claim (the
 /// operator sees the GUEST's code, never the VMM's), which this
 /// scenario's internal drain-then-classify ordering is what makes true.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 #[serial(cgroup)]
 async fn vm_guest_exit_report_is_never_overwritten_by_vmm_teardown_exit() {
@@ -1931,6 +1940,7 @@ async fn vm_guest_exit_report_is_never_overwritten_by_vmm_teardown_exit() {
 /// had the composition gate NOT composed a `Vm` entry, this exact deploy
 /// would instead reach S-VM-12's dispatch-time-fallback classification
 /// (`DriverError::StartRejected` → `Failed`), never `Inserted`.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 #[serial(cgroup)]
 async fn vm_registry_reports_vm_supported_when_cloud_hypervisor_present_and_healthy() {
@@ -2022,6 +2032,7 @@ fn path_without_cloud_hypervisor() -> String {
 /// widening to carry the `DriverRegistry`), which sits outside this
 /// step's declared `implementation_scope`. See this step's final report
 /// for the explicit gap flag.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 #[serial(cgroup, env)]
 async fn vm_absent_boots_node_with_no_vm_entry_and_classifies_deploy_naming_capability() {
@@ -2140,6 +2151,7 @@ async fn spawn_vm_server_with_vmm_override(
 /// S-VM-12's path). Per S-VM-13's own crafter note, this fault class has
 /// no genuinely-lying real host in the Lima/metal test envelope — the
 /// injection is the sanctioned mechanism (ADR-0083 §D8's own ruling).
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 #[serial(cgroup)]
 async fn vm_capability_flag_probe_failure_injected_via_vmm_override_refuses_boot() {
@@ -2192,6 +2204,7 @@ async fn vm_capability_flag_probe_failure_injected_via_vmm_override_refuses_boot
 /// S-VM-13 uses — the seam is `Arc<dyn Vmm>`, adapter-agnostic, and a
 /// REAL differently-configured adapter satisfies it exactly as a
 /// fault-injecting `SimVmm` does.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 #[serial(cgroup)]
 async fn vm_non_reflink_staging_directory_refuses_boot_via_executed_ficlone() {
@@ -2326,6 +2339,7 @@ fn build_memory_hog_binary(tmp: &Path) -> PathBuf {
 /// (the ORIGINALLY-COMPUTED ceiling `VmDriver` captured at `start` — per
 /// ADR-0082 §D8, "costs no I/O", never a live re-read of the
 /// artificially-tightened value this test wrote afterward).
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 #[serial(cgroup)]
 async fn vm_that_exceeds_declared_memory_is_diagnosed_as_oom_not_bare_signal_9() {
@@ -2519,6 +2533,7 @@ async fn vm_that_exceeds_declared_memory_is_diagnosed_as_oom_not_bare_signal_9()
 /// guest is orphaned by server teardown alone and contaminates the next
 /// serialized test's `/proc` scan — the lesson S-VM-05 learned on the metal
 /// box (commit `28dbefdc`), doubled here because there are two of them.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 #[serial(cgroup)]
 async fn two_vm_jobs_on_one_serve_each_boot_from_the_rootfs_their_own_spec_named() {

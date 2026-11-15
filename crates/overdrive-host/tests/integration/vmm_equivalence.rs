@@ -35,6 +35,7 @@ use overdrive_core::vm::config::{
 };
 use overdrive_host::CloudHypervisorVmm;
 use overdrive_sim::SimVmm;
+use overdrive_testing::overdrive_test;
 use overdrive_testing::vm_fixture::{VmFixture, VmFixtureError, default_staging_root};
 use serial_test::serial;
 
@@ -175,6 +176,7 @@ async fn drive_shared_sequence(vmm: &dyn Vmm, fixture: &VmFixture, run_root: &Pa
 }
 
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch")]
 #[tokio::test]
 async fn vmm_equivalence_sim_vmm() {
     let staging_root = default_staging_root();
@@ -200,6 +202,7 @@ async fn vmm_equivalence_sim_vmm() {
 }
 
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch")]
 #[tokio::test]
 async fn vmm_equivalence_cloud_hypervisor_vmm() {
     let staging_root = default_staging_root();
@@ -259,6 +262,7 @@ fn path_without_cloud_hypervisor() -> String {
         .join(":")
 }
 
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch")]
 #[tokio::test]
 #[serial(env)]
 async fn vm_fixture_provision_fails_loudly_on_a_broken_cloud_hypervisor_path() {
@@ -293,6 +297,7 @@ async fn vm_fixture_provision_fails_loudly_on_a_broken_cloud_hypervisor_path() {
     );
 }
 
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch")]
 #[tokio::test]
 async fn vm_fixture_provision_is_idempotent_and_reuses_staged_artifacts() {
     let staging_root = default_staging_root();
@@ -337,6 +342,7 @@ async fn vm_fixture_provision_is_idempotent_and_reuses_staged_artifacts() {
 /// snapshot and the terminal projection were assembled separately, an
 /// operator reading a deadline failure and an operator reading the
 /// eventual exit row would be told different things about one process.
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch")]
 #[tokio::test]
 async fn vmm_live_console_tail_is_coherent_with_final_exit_stderr_tail_for_both_adapters() {
     let staging_root = default_staging_root();
@@ -392,6 +398,7 @@ async fn vmm_live_console_tail_is_coherent_with_final_exit_stderr_tail_for_both_
 /// An early process exit retains its exact exit code, terminating signal, and
 /// final stderr tail through both the `SimVmm` and real Cloud Hypervisor
 /// adapters.
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch")]
 #[tokio::test]
 async fn vmm_early_exit_preserves_code_signal_and_stderr_tail_for_both_adapters() {
     let staging_root = default_staging_root();

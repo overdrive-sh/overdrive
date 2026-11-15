@@ -25,8 +25,10 @@ use std::sync::Arc;
 
 use overdrive_core::traits::CgroupFs;
 use overdrive_host::RealCgroupFs;
+use overdrive_testing::overdrive_test;
 use overdrive_worker::cgroup_manager::{CgroupManager, CgroupPath};
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn remove_workload_scope_propagates_real_io_error_when_path_is_a_regular_file() {
     let tmp = tempfile::TempDir::new().expect("tempdir");

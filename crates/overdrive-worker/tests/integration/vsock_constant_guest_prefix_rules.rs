@@ -48,6 +48,7 @@ use std::time::{Duration, Instant};
 
 use super::vsock_legb_dial::node::{Node, PeerNetns, established_sockets};
 use super::vsock_mesh_egress_mtls::PEER_SNI;
+use overdrive_testing::overdrive_test;
 
 /// A guest-prefix address no allocation holds.
 const UNASSIGNED: Ipv4Addr = Ipv4Addr::new(100, 95, 255, 201);
@@ -77,6 +78,7 @@ fn assert_no_accept(listener: &TcpListener, what: &str) {
 /// CONTRACT_SHAPE: bounded-change. Universe: the connect's result and
 /// latency, the wildcard listener; expected: `ConnectionRefused` within the
 /// bound, no accept.
+#[overdrive_test(guest = "cgroup-default", profile = "host-route")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_host_local_connection_to_a_guest_prefix_address_is_rejected_at_once() {
     let node = Node::start("rules-host-tcp").await;
@@ -101,6 +103,7 @@ async fn a_host_local_connection_to_a_guest_prefix_address_is_rejected_at_once()
 ///
 /// CONTRACT_SHAPE: bounded-change. Universe: the send's result, a wildcard
 /// UDP socket on the port; expected: `PermissionDenied`, nothing received.
+#[overdrive_test(guest = "cgroup-default", profile = "host-route")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_host_local_datagram_to_a_guest_prefix_address_fails_eperm() {
     let node = Node::start("rules-host-udp").await;
@@ -131,6 +134,7 @@ async fn a_host_local_datagram_to_a_guest_prefix_address_fails_eperm() {
 ///
 /// CONTRACT_SHAPE: bounded-change. Universe: the remote's connect result,
 /// the wildcard listener; expected: `TimedOut`, no accept.
+#[overdrive_test(guest = "cgroup-default", profile = "dummy-link")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_remote_connection_to_an_unassigned_guest_prefix_address_is_dropped() {
     let node = Node::start("rules-remote-drop").await;
@@ -158,6 +162,7 @@ async fn a_remote_connection_to_an_unassigned_guest_prefix_address_is_dropped() 
 /// CONTRACT_SHAPE: bounded-change. Universe: the remote's handshake, the
 /// established sockets on the port; expected: a completed handshake against
 /// the node's trust root, one leg-C socket `VM_ADDR:PORT` ↔ remote.
+#[overdrive_test(guest = "cgroup-default", profile = "dummy-link")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn a_leg_c_diverted_remote_connection_reaches_leg_c_both_ways() {
     let node = Node::start("rules-leg-c-remote").await;

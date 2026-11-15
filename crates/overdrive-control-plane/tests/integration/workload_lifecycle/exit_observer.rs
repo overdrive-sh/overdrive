@@ -52,6 +52,7 @@ use tempfile::TempDir;
 // `ExitEvent`s from the driver and writes `Failed`/`Terminated` rows
 // into obs. Step 01-02 will publish it under this exact path.
 use overdrive_control_plane::worker::exit_observer;
+use overdrive_testing::overdrive_test;
 
 // -----------------------------------------------------------------------
 // Helpers — duplicated per the convention in `submit_to_running.rs` /
@@ -249,6 +250,7 @@ async fn drive_ticks(h: &Harness, start: Instant, range: std::ops::Range<u64>) {
 // Test 1 — simulated crash writes Failed within budget.
 // -----------------------------------------------------------------------
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn simulated_crash_writes_failed_to_obs_within_budget() {
     let tmp = TempDir::new().expect("tempdir");
@@ -341,6 +343,7 @@ async fn simulated_crash_writes_failed_to_obs_within_budget() {
 // Test 2 — intentional stop classifies as Terminated, NOT Failed.
 // -----------------------------------------------------------------------
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn simulated_intentional_stop_writes_terminated_to_obs() {
     let tmp = TempDir::new().expect("tempdir");
@@ -384,6 +387,7 @@ async fn simulated_intentional_stop_writes_terminated_to_obs() {
 // Test 3 — DST-shaped invariant: crashed alloc eventually leaves Running.
 // -----------------------------------------------------------------------
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn crashed_alloc_eventually_reaches_non_running() {
     let tmp = TempDir::new().expect("tempdir");
@@ -441,6 +445,7 @@ async fn crashed_alloc_eventually_reaches_non_running() {
 // Test 4 — deterministic stop-vs-natural-exit race serialisation.
 // -----------------------------------------------------------------------
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn intentional_stop_flag_serialises_with_natural_exit_race() {
     // Subcase A: stop FIRST, then natural exit. The watcher reads
@@ -563,6 +568,7 @@ async fn intentional_stop_flag_serialises_with_natural_exit_race() {
 // `action_shim::build_lifecycle_event` pattern.
 // -----------------------------------------------------------------------
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn exit_observer_lifecycle_from_reflects_prior_running_state() {
     let tmp = TempDir::new().expect("tempdir");
@@ -640,6 +646,7 @@ async fn exit_observer_lifecycle_from_reflects_prior_running_state() {
 // to the broker on the observed exit.
 // -----------------------------------------------------------------------
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 #[allow(clippy::too_many_lines)] // self-contained harness (runtime wired into the observer,
 // exercising the SAME production path) + drive-to-Running + inject-exit + broadcast/broker

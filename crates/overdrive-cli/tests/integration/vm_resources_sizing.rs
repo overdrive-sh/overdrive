@@ -55,6 +55,7 @@ use overdrive_cli::commands::serve::ServeHandle;
 use overdrive_cli::commands::workload::{DescribeArgs, WorkloadDescribeOutput, describe};
 use overdrive_control_plane::api::AllocStateWire;
 use overdrive_core::TransitionReason;
+use overdrive_testing::overdrive_test;
 use overdrive_testing::vm_fixture::VmFixture;
 use serial_test::serial;
 use tempfile::TempDir;
@@ -358,6 +359,7 @@ fn guest_reported_mem_units_16mib(out: &WorkloadDescribeOutput) -> i32 {
 /// S-VM-69 — A VM declaring `cpu_milli = 2000` boots a guest that reports
 /// exactly TWO online CPUs, observed from inside the guest (never against
 /// the constructed hypervisor config). `round_up(2000 / 1000) = 2`.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 #[serial(cgroup)]
 async fn declared_cpu_milli_2000_yields_two_guest_online_cpus() {
@@ -403,6 +405,7 @@ async fn declared_cpu_milli_2000_yields_two_guest_online_cpus() {
 /// `exit_code = 1` proves BOTH: it observed exactly one online CPU, AND it
 /// reached Running and executed (a 0-vCPU VM would be unbootable and would
 /// fail the boot deadline with no exit code — S-VM-03's shape).
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 #[serial(cgroup)]
 async fn sub_core_cpu_milli_250_yields_one_guest_online_cpu_and_reaches_running() {
@@ -482,6 +485,7 @@ async fn sub_core_cpu_milli_250_yields_one_guest_online_cpu_and_reaches_running(
 /// describe-parity half stays RED (the declared figure never reaches the
 /// operator surface), while the guest-observed half still passes — the two
 /// halves fail independently.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 #[serial(cgroup)]
 async fn declared_memory_2gib_is_guest_observed_and_reported_by_describe() {
@@ -601,6 +605,7 @@ async fn declared_memory_2gib_is_guest_observed_and_reported_by_describe() {
 /// Revert either the `cpu_milli -> vcpus` wiring or the `MemoryPlan`
 /// guest-RAM sizing in `VmDriver::start` and exactly one dimension goes
 /// RED while the other stays GREEN — the two halves fail independently.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 #[serial(cgroup)]
 async fn declared_cpu_and_memory_match_guest_observed_on_single_private_backing() {

@@ -48,6 +48,7 @@ use overdrive_host::OsEntropy;
 use overdrive_host::ca::{RcgenCa, RootKeyAeadCodec, SystemdCredsKeyring};
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_store_local::LocalObservationStore;
+use overdrive_testing::overdrive_test;
 use serial_test::serial;
 use tempfile::TempDir;
 
@@ -94,6 +95,7 @@ fn intent_store(dir: &TempDir) -> Arc<dyn IntentStore> {
 /// generates + envelope-encrypts + persists the root to the `IntentStore`;
 /// second boot (same KEK) decrypts and REUSES the same root identity (same
 /// public key / same cert). This is what supersedes ADR-0010's ephemerality.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn root_ca_is_reused_across_control_plane_restart() {
     // GIVEN a persisted intent store, a staged KEK credential, and the codec.
@@ -163,6 +165,7 @@ async fn root_ca_is_reused_across_control_plane_restart() {
 /// `adopt_persisted_root` fix the restart intermediate is signed by an ephemeral
 /// root and `openssl verify` against the persisted root FAILS (non-zero); with
 /// the fix it PASSES (exit 0).
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn issued_chain_anchors_on_persisted_root_after_restart() {
     // GIVEN a first boot that generates + persists the root, then bootstraps the
@@ -272,6 +275,7 @@ async fn issued_chain_anchors_on_persisted_root_after_restart() {
 /// sealed + persisted on boot 1, and the restart bootstraps by decrypting +
 /// adopting it before any issuance — the restart bundle carries the SAME
 /// intermediate the boot-1 SVID was signed under and verification PASSES.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn pre_restart_svid_verifies_against_post_restart_trust_bundle() {
     // GIVEN a first boot that generates + persists the root, bootstraps the
@@ -373,6 +377,7 @@ async fn pre_restart_svid_verifies_against_post_restart_trust_bundle() {
 /// boot seam: the plaintext recovered from a freshly-persisted envelope MUST
 /// be PEM-armored, not DER. Swap the seal to DER and this goes RED — binary
 /// DER is not valid UTF-8 and carries no PEM armor.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn persisted_root_key_envelope_seals_pem_not_der() {
     // GIVEN a first boot that generates + envelope-encrypts + persists the root.
@@ -422,6 +427,7 @@ async fn persisted_root_key_envelope_seals_pem_not_der() {
 /// the boot-time Earned-Trust probe FAIL; the control plane REFUSES to
 /// start with a typed `CaError` + `health.startup.refused`, and does NOT
 /// silently re-mint a new root (which would orphan every issued identity).
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn boot_refuses_to_start_on_envelope_decrypt_failure_without_remint() {
     // GIVEN a control plane that persisted its root under the correct KEK.
@@ -494,6 +500,7 @@ async fn boot_refuses_to_start_on_envelope_decrypt_failure_without_remint() {
 /// on-disk redb path (`<store>/intent.redb`), never the placeholder. The KEK
 /// probe PASSES (correct KEK), so execution reaches `from_store_bytes` and the
 /// failure is the envelope DECODE — not a KEK decrypt.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn boot_envelope_decode_failure_surfaces_real_redb_path() {
     // GIVEN a first boot that generates + persists the root under the correct
@@ -554,6 +561,7 @@ async fn boot_envelope_decode_failure_surfaces_real_redb_path() {
 /// opt-in) refuses startup BEFORE any issuance, rather than panicking
 /// mid-issuance or silently generating a throwaway KEK (which would make
 /// at-rest encryption meaningless).
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 #[serial(env)]
 async fn boot_refuses_to_start_when_kek_absent_from_keyring() {
@@ -629,6 +637,7 @@ impl Ca for RootKeyUnavailableCa {
 /// (decrypt failed upstream), `issue_intermediate` surfaces a typed
 /// `CaError`; node bootstrap fails loudly rather than running workloads it
 /// cannot issue identities for (no half-provisioned state).
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn intermediate_signing_failure_fails_node_bootstrap_loudly() {
     // GIVEN a persisted intent store and a `Ca` whose root key is unavailable
@@ -751,6 +760,7 @@ fn workload_request() -> SvidRequest {
 /// reads an `alloc_status` row — and asserts serial + `spiffe_id` +
 /// `issuer_serial` match the minted cert (the internal-CT-equivalent audit
 /// surface).
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn issuance_writes_issued_certificates_row_matching_the_minted_cert() {
     // GIVEN a host CA, a real observation-store binding (the PORT), and a fixed
@@ -818,6 +828,7 @@ async fn issuance_writes_issued_certificates_row_matching_the_minted_cert() {
 /// claimed the leaf was invalid for the first 60 s of its real validity — a
 /// systematic, drift-prone discrepancy. This test pins the back-off; it fails
 /// RED against the pre-fix `not_before = issued_at` computation.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn audit_window_mirrors_the_issued_leaf_window_with_skew_backoff() {
     // GIVEN a host CA, a real observation-store binding (the PORT), and a clock
@@ -876,6 +887,7 @@ async fn audit_window_mirrors_the_issued_leaf_window_with_skew_backoff() {
 /// DST sim adapter IS the audit path, so the no-silent-issuance bind is
 /// exercised against the same port the production `LocalObservationStore`
 /// implements.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn issuance_that_cannot_write_audit_row_surfaces_an_error() {
     // GIVEN a host CA but an observation store (the PORT) whose NEXT write fails
@@ -916,6 +928,7 @@ async fn issuance_that_cannot_write_audit_row_surfaces_an_error() {
 /// (distinct serial, new validity window) is produced and the control plane
 /// is NOT restarted — the re-issue mechanism the #40 rotation workflow will
 /// later drive on a schedule.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn svid_is_reissued_on_demand_without_control_plane_restart() {
     // GIVEN a single host CA + audit store composed ONCE (the running control

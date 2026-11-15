@@ -22,8 +22,10 @@
 //! `docs/feature/fix-cgroup-preflight-wrong-slice/bugfix-rca.md`.
 
 use overdrive_control_plane::cgroup_preflight::{CgroupPreflightError, run_preflight_at};
+use overdrive_testing::overdrive_test;
 use tempfile::TempDir;
 
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn preflight_reads_enclosing_slice_via_proc_self_cgroup() {
     let tmp = TempDir::new().expect("tempdir");

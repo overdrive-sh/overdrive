@@ -25,6 +25,7 @@ use overdrive_core::api::submit::SubmitSpecInput;
 use overdrive_core::id::WorkloadId;
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_store_local::LocalIntentStore;
+use overdrive_testing::overdrive_test;
 use tempfile::TempDir;
 
 fn client_trusting(ca_pem: &str) -> reqwest::Client {
@@ -85,6 +86,7 @@ fn payments_spec() -> JobSpecInput {
     }
 }
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn stop_writes_separate_intent_key_preserving_spec() {
     let (handle, bound, tmp, ca_pem) = spawn_server().await;

@@ -21,8 +21,10 @@ use overdrive_core::traits::observation_store::{AllocState, ObservationStore};
 use overdrive_sim::adapters::driver::SimDriver;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_store_local::LocalIntentStore;
+use overdrive_testing::overdrive_test;
 use tempfile::TempDir;
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn submitted_job_reaches_running_via_simulated_vm_driver() {
     let tmp = TempDir::new().expect("tempdir");

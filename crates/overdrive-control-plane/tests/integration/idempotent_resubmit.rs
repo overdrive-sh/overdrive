@@ -48,6 +48,7 @@ use overdrive_core::api::submit::SubmitSpecInput;
 use overdrive_core::id::WorkloadId;
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_store_local::LocalIntentStore;
+use overdrive_testing::overdrive_test;
 use tempfile::TempDir;
 
 // -----------------------------------------------------------------------
@@ -169,6 +170,7 @@ fn payments_spec_alt_replicas() -> JobSpecInput {
 // ADR-0015 §4 amended by ADR-0020).
 // -----------------------------------------------------------------------
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn byte_identical_resubmit_returns_outcome_unchanged_and_same_digest() {
     let (handle, bound, tmp, ca_pem) = spawn_server().await;
@@ -255,6 +257,7 @@ async fn byte_identical_resubmit_returns_outcome_unchanged_and_same_digest() {
 // `ErrorBody.error = "conflict"` (test-scenarios §4.10).
 // -----------------------------------------------------------------------
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn different_spec_at_existing_key_returns_409_conflict_with_error_body() {
     let (handle, bound, _tmp, ca_pem) = spawn_server().await;
@@ -300,6 +303,7 @@ async fn different_spec_at_existing_key_returns_409_conflict_with_error_body() {
 // (test-scenarios §4.10 "IntentStore still carries the original spec")
 // -----------------------------------------------------------------------
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn intent_store_unchanged_after_conflict_attempt() {
     let (handle, bound, _tmp, ca_pem) = spawn_server().await;
@@ -370,6 +374,7 @@ async fn intent_store_unchanged_after_conflict_attempt() {
 // not `commit_index`.)
 // -----------------------------------------------------------------------
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn triple_resubmit_byte_identical_all_return_same_digest_with_unchanged_outcome() {
     let (handle, bound, _tmp, ca_pem) = spawn_server().await;
@@ -436,6 +441,7 @@ async fn triple_resubmit_byte_identical_all_return_same_digest_with_unchanged_ou
 // without reading server logs.
 // -----------------------------------------------------------------------
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn conflict_message_names_intent_key_path() {
     let (handle, bound, _tmp, ca_pem) = spawn_server().await;

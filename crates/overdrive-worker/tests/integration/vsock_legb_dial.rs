@@ -61,6 +61,7 @@ use overdrive_core::guest_transport::GUEST_NODE_PREFIX;
 use overdrive_core::traits::mtls_enforcement::{
     InterceptedConnection, MtlsEnforcement, MtlsEnforcementError, Routed,
 };
+use overdrive_testing::overdrive_test;
 
 use self::node::{Node, PeerNetns, established_sockets};
 
@@ -105,6 +106,7 @@ fn outbound(leg: OwnedFd, client: &AllocationId, peer: SocketAddrV4) -> Intercep
 /// established sockets on the service port; expected: `Ok`, leg-C's accepted
 /// socket has local `VM_ADDR:SERVICE_PORT` and a `127.0.0.1` peer, leg-B's
 /// socket has `fwmark:0x1`.
+#[overdrive_test(guest = "cgroup-default", profile = "legb-audit")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn a_same_node_mesh_dial_is_marked_source_bound_and_reaches_leg_c() {
     let node = Node::start("legb-same-node").await;
@@ -148,6 +150,7 @@ async fn a_same_node_mesh_dial_is_marked_source_bound_and_reaches_leg_c() {
 ///
 /// CONTRACT_SHAPE: bounded-change. Universe: the far peer's accepted
 /// connections; expected: exactly one, from the host's link address.
+#[overdrive_test(guest = "cgroup-default", profile = "legb-audit")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn a_dial_to_a_peer_outside_the_guest_prefix_is_neither_marked_nor_bound() {
     let node = Node::start("legb-outside").await;
@@ -183,6 +186,7 @@ async fn a_dial_to_a_peer_outside_the_guest_prefix_is_neither_marked_nor_bound()
 /// CONTRACT_SHAPE: bounded-change. Universe: `enforce`'s result and its
 /// latency, the wildcard listener's accepts; expected: `Io(ConnectionRefused)`
 /// within the bound, no accept.
+#[overdrive_test(guest = "cgroup-default", profile = "legb-audit")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn a_marked_dial_to_an_unregistered_tuple_is_refused_and_reaches_no_host_socket() {
     let node = Node::start("legb-unregistered").await;

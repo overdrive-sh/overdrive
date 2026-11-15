@@ -33,6 +33,7 @@
 
 use overdrive_sim::harness::{Harness, InvariantResult, InvariantStatus, RunReport};
 use overdrive_sim::invariants::Invariant;
+use overdrive_testing::overdrive_test;
 
 /// Seeds covering every seed-selected legal tail of the lifecycle case and every
 /// permutation of the shutdown case.
@@ -69,6 +70,7 @@ fn assert_holds(invariant: Invariant, seed: u64) -> InvariantResult {
 /// connection and restart preserve generation safety at every seed.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn stale_completion_withdrawal_restart_and_retained_generation_are_safe() {
     for seed in SEEDS {
@@ -82,6 +84,7 @@ fn stale_completion_withdrawal_restart_and_retained_generation_are_safe() {
 /// shutdown begin.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn shutdown_joins_users_before_gateway_identity_retire() {
     for seed in SEEDS {
@@ -93,6 +96,7 @@ fn shutdown_joins_users_before_gateway_identity_retire() {
 /// observation trace.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn twin_generation_runs_at_one_seed_have_identical_ordered_observation_traces() {
     let invariant = Invariant::GatewayApplicationGenerationLifecycleIsSafe;
@@ -106,6 +110,7 @@ fn twin_generation_runs_at_one_seed_have_identical_ordered_observation_traces() 
 /// ordered observation trace.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn twin_shutdown_runs_at_one_seed_have_identical_ordered_observation_traces() {
     let invariant = Invariant::GatewayApplicationShutdownConverges;

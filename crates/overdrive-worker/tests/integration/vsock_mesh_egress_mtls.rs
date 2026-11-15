@@ -111,6 +111,7 @@ use overdrive_core::{AllocationId, CertSerial, SpiffeId};
 use overdrive_dataplane::mtls::HostMtlsEnforcement;
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_testing::cidr_lease::TestCidrLease;
+use overdrive_testing::overdrive_test;
 use overdrive_worker::mtls_intercept_port::HostMtlsIntercept;
 use overdrive_worker::mtls_intercept_worker::{
     ForwardedOutbound, MtlsInterceptInstallError, MtlsInterceptWorker, MtlsSharedOwnerError,
@@ -1287,6 +1288,7 @@ fn splice_fd(body: &str, index: usize) -> Option<i32> {
 
 /// P5-S10 happy path. `@contract-shape:unbounded-preservation`.
 /// CONTRACT_SHAPE: unbounded-preservation.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn registered_mesh_flow_reaches_its_registered_backend_over_mtls_without_leg_f_resolving_again()
  {
@@ -1361,6 +1363,7 @@ async fn registered_mesh_flow_reaches_its_registered_backend_over_mtls_without_l
 /// P5-S10 sad paths. `@contract-shape:bounded-change` — universe: peer
 /// sessions, resolve calls, the forwarder connections' outcome.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn a_replayed_peer_and_an_unregistered_peer_are_closed_by_leg_f_without_resolution() {
     let rig = Rig::start("claim").await;
@@ -1415,6 +1418,7 @@ async fn a_replayed_peer_and_an_unregistered_peer_are_closed_by_leg_f_without_re
 /// `@contract-shape:bounded-change` — universe: the registration set (observed
 /// through the first registration still carrying its flow), peer sessions.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn a_second_registration_for_the_same_forwarder_address_is_refused() {
     let rig = Rig::start("duplicate").await;
@@ -1462,6 +1466,7 @@ async fn a_second_registration_for_the_same_forwarder_address_is_refused() {
 /// allocation; the live allocation and the stopped one differ only in their
 /// capability.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn an_allocation_without_a_live_intercept_cannot_register_a_forwarded_flow() {
     let rig = Rig::start("not-live").await;
@@ -1520,6 +1525,7 @@ fn assert_not_intercept_live(
 
 /// Unclaimed: the registration is dropped before leg-F ever accepted the flow.
 /// CONTRACT_SHAPE: unbounded-preservation.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn dropping_an_unclaimed_registration_closes_the_flow_before_it_reaches_the_backend() {
     let rig = Rig::start("drop-unclaimed").await;
@@ -1551,6 +1557,7 @@ async fn dropping_an_unclaimed_registration_closes_the_flow_before_it_reaches_th
 /// so leg-F aborts both of the flow's sockets (`SO_LINGER{1,0}`): the
 /// forwarder side and the remote peer each see a reset, never a clean FIN.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn dropping_a_claimed_registration_with_the_loopback_leg_open_resets_both_sides() {
     let rig = Rig::start("drop-claimed").await;
@@ -1595,6 +1602,7 @@ async fn dropping_a_claimed_registration_with_the_loopback_leg_open_resets_both_
 /// cleared the remote socket's linger and closed it cleanly; dropping the
 /// registration afterwards releases it without resetting the finished peer.
 /// CONTRACT_SHAPE: unbounded-preservation.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn dropping_a_claimed_registration_after_a_clean_close_keeps_the_remote_fin() {
     let rig = Rig::start("drop-after-clean").await;
@@ -1638,6 +1646,7 @@ async fn dropping_a_claimed_registration_after_a_clean_close_keeps_the_remote_fi
 /// registration then is not a clean close: leg-F aborts both sockets and the
 /// remote peer sees a reset after the FIN it already received.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn dropping_a_claimed_registration_with_the_loopback_leg_half_ended_resets_the_remote_peer() {
     let rig = Rig::start_with("drop-half-ended", PeerMode::HoldOpen).await;
@@ -1691,6 +1700,7 @@ async fn dropping_a_claimed_registration_with_the_loopback_leg_half_ended_resets
 /// forwarder address registers again afterwards (no
 /// `DuplicateForwardedRegistration`), and the new registration carries a flow.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn an_unclaimed_drop_removes_the_registration_so_the_address_registers_again() {
     let rig = Rig::start("drop-unclaimed-reregister").await;
@@ -1741,6 +1751,7 @@ async fn an_unclaimed_drop_removes_the_registration_so_the_address_registers_aga
 /// Cell 2 cannot carry a duplicate: a worker that never published its shared
 /// owner refuses every registration, so it never holds one.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn forwarded_registration_refusals_follow_the_pinned_precedence() {
     let rig = Rig::start("precedence").await;
@@ -1835,6 +1846,7 @@ async fn forwarded_registration_refusals_follow_the_pinned_precedence() {
 /// A clean close of both directions ends the remote stream with FIN, never a
 /// reset. `@contract-shape:unbounded-preservation`.
 /// CONTRACT_SHAPE: unbounded-preservation.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn a_clean_close_of_both_directions_ends_the_remote_stream_with_fin() {
     let rig = Rig::start("clean-close").await;
@@ -1876,6 +1888,7 @@ async fn a_clean_close_of_both_directions_ends_the_remote_stream_with_fin() {
 /// [`SERVE_CHILD_ENV`]) that is `SIGKILL`ed mid-flow, so the kernel closes
 /// every descriptor the worker held exactly as on a serve exit.
 /// CONTRACT_SHAPE: unbounded-preservation.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn a_serve_exit_mid_flow_resets_the_remote_peer() {
     if let Some(dir) = std::env::var_os(SERVE_CHILD_ENV) {

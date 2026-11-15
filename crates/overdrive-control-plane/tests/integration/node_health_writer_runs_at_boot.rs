@@ -33,11 +33,13 @@ use overdrive_control_plane::run_server_with_obs_and_driver;
 use overdrive_core::traits::driver::{Driver, DriverType};
 use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_sim::adapters::driver::SimDriver;
+use overdrive_testing::overdrive_test;
 use tempfile::TempDir;
 
 /// Boot the server through the public `run_server_with_obs_and_driver`
 /// driving port and assert the `ObservationStore` carries exactly one
 /// `NodeHealthRow` after startup completes.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn boot_writes_exactly_one_node_health_row_to_observation_store() {
     let tmp = TempDir::new().expect("tempdir");
@@ -113,6 +115,7 @@ async fn boot_writes_exactly_one_node_health_row_to_observation_store() {
 /// Gated by `--features integration-tests` at the
 /// `tests/integration.rs` entrypoint; runs under Lima per
 /// `.claude/rules/testing.md` § "Running tests — Lima VM".
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn boot_writes_node_health_row_visible_via_get_v1_nodes() {
     use base64::Engine as _;

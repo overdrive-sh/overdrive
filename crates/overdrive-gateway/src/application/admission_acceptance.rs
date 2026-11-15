@@ -132,6 +132,7 @@ mod over_leases {
         Composition, ProbeOutcome, next_ordinal, route, wait_until,
     };
     use super::*;
+    use overdrive_testing::overdrive_test;
 
     /// Second octets of this module's bind addresses, one per test (nextest
     /// runs each test in its own process; table in `held_probe_doubles`).
@@ -187,6 +188,7 @@ mod over_leases {
     /// generation's retention; dropping every lease returns both to zero.
     ///
     /// CONTRACT_SHAPE: bounded-change.
+    #[overdrive_test(guest = "cgroup-default")]
     #[tokio::test(start_paused = true)]
     async fn the_connection_beyond_the_ceiling_is_refused_by_admission_and_leaks_nothing() {
         let world = promoted_world(CONNECTION_CEILING_OCTET).await;
@@ -219,6 +221,7 @@ mod over_leases {
     /// the connection serves the next.
     ///
     /// CONTRACT_SHAPE: bounded-change.
+    #[overdrive_test(guest = "cgroup-default")]
     #[tokio::test(start_paused = true)]
     async fn a_second_request_on_a_connection_with_one_in_flight_is_refused() {
         let world = promoted_world(IN_FLIGHT_REQUEST_OCTET).await;
@@ -256,6 +259,7 @@ mod over_leases {
     /// no slot, no retention and no started-request count.
     ///
     /// CONTRACT_SHAPE: bounded-change.
+    #[overdrive_test(guest = "cgroup-default")]
     #[tokio::test(start_paused = true)]
     async fn the_request_beyond_the_per_connection_ceiling_is_refused() {
         let world = promoted_world(PER_CONNECTION_CEILING_OCTET).await;
@@ -296,6 +300,7 @@ mod over_leases {
     /// generation; once one global slot returns, the connection serves it.
     ///
     /// CONTRACT_SHAPE: bounded-change.
+    #[overdrive_test(guest = "cgroup-default")]
     #[tokio::test(start_paused = true)]
     async fn a_request_beyond_the_global_request_ceiling_is_refused_and_leaks_nothing() {
         let world = promoted_world(GLOBAL_REQUEST_CEILING_OCTET).await;

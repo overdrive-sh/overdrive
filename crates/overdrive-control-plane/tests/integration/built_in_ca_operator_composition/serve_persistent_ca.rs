@@ -62,6 +62,7 @@ use overdrive_core::ca::root_key_envelope::KekId;
 use overdrive_core::codec::EnvelopeError;
 use overdrive_core::traits::ca::CaError;
 use overdrive_sim::adapters::SimKek;
+use overdrive_testing::overdrive_test;
 use tempfile::TempDir;
 
 /// The canonical single-node boot KEK identity the persistent CA seals under.
@@ -200,6 +201,7 @@ async fn assert_serving_then_shutdown(handle: ServerHandle) {
 // a serving state. EDD D01 sub-claims 1+2: the on-disk file carries the sealed
 // envelope (non-empty) and ZERO plaintext root-key PEM (byte-scan). Universe:
 // the serve startup outcome + the on-disk IntentStore file contents.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn serve_first_boot_generates_seals_and_persists_root() {
     let dirs = ServeDirs::new();
@@ -238,6 +240,7 @@ async fn serve_first_boot_generates_seals_and_persists_root() {
 // EDD D01 sub-claim 3: the on-disk file STILL contains no plaintext key bytes.
 // Universe: the persisted root cert material (byte-identical across restart,
 // proving adopt-not-remint) + the on-disk byte-scan after restart.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn serve_restart_adopts_same_root_no_remint() {
     let dirs = ServeDirs::new();
@@ -281,6 +284,7 @@ async fn serve_restart_adopts_same_root_no_remint() {
 // possibilities (wrong material OR tamper, indistinguishable under AEAD) + the
 // IntentStore path. EDD O04 sub-claim 1. Universe: the boot Err outcome + its
 // cause CLASS + the rendered cause string.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn serve_refuses_on_wrong_kek_material() {
     let dirs = ServeDirs::new();
@@ -334,6 +338,7 @@ async fn serve_refuses_on_wrong_kek_material() {
 // class from S-OC-08a's auth-failure) and the rendered stderr names the decode
 // failure + the IntentStore path. EDD O04 sub-claim 2. Universe: the boot Err
 // outcome + its cause CLASS + the rendered cause string.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn serve_refuses_on_corrupted_envelope() {
     let dirs = ServeDirs::new();
@@ -381,6 +386,7 @@ async fn serve_refuses_on_corrupted_envelope() {
 // persisted). The control plane does NOT begin serving; the error names the
 // absent-KEK cause. EDD O04 sub-claim 3. Universe: the boot Err outcome + the
 // absent-KEK cause string + the absence of a persisted envelope.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn serve_refuses_on_absent_kek() {
     let dirs = ServeDirs::new();
@@ -421,6 +427,7 @@ async fn serve_refuses_on_absent_kek() {
 // cause CLASS). EDD O04 sub-claims 1–3 (cross-cause contract). Universe: the
 // three refusal cause classes { EnvelopeAuthFailed, DecodeFailure,
 // KekUnavailable }, compared for pairwise distinctness.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn serve_refusal_causes_are_pairwise_distinct() {
     // Capture the auth-failure cause (wrong KEK material under the matching id).
@@ -498,6 +505,7 @@ async fn serve_refusal_causes_are_pairwise_distinct() {
 // refused boot. EDD O04 sub-claim 4 — the load-bearing guardrail. Universe: the
 // persisted root cert material before the refused boot, after it, and after the
 // recovery boot (all identical).
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn refuse_to_start_does_not_remint_the_root() {
     let dirs = ServeDirs::new();

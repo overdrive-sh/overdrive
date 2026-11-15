@@ -32,6 +32,7 @@ use std::num::NonZeroU16;
 
 use overdrive_core::AllocationId;
 use overdrive_netlink::nft;
+use overdrive_testing::overdrive_test;
 
 use super::inbound_tproxy_harness::{
     KernelStateLock, build_inbound_spec, build_worker, clean_shared_infra, is_root, nft_list_chain,
@@ -48,6 +49,7 @@ const PORT_A: u16 = 18555;
 const PORT_B: u16 = 18666;
 
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn two_declared_listeners_install_exactly_two_inbound_captures() {
     if !is_root() {

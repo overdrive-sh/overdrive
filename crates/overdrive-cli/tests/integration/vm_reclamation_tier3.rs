@@ -93,6 +93,7 @@ use overdrive_cli::commands::serve::ServeHandle;
 use overdrive_cli::commands::workload::{DescribeArgs, WorkloadDescribeOutput, describe};
 use overdrive_control_plane::api::{AllocStateWire, AllocStatusRowBody};
 use overdrive_core::transition_reason::StoppedBy;
+use overdrive_testing::overdrive_test;
 use overdrive_testing::vm_fixture::VmFixture;
 use serial_test::serial;
 use tempfile::TempDir;
@@ -640,6 +641,7 @@ async fn poll_until_reclaimed(
 /// `VmHostState` composes unconditionally and `Observed(∅)` (no
 /// registry entry) authorises reclamation rather than blocking it
 /// (brief.md §105a.3's composition table).
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 // `env` alongside `cgroup`: [`spawn_server_no_vm_driver`] hides
 // `cloud-hypervisor` from `PATH` for the duration of the boot, which is
@@ -712,6 +714,7 @@ async fn vm_survivor_with_no_vm_registry_entry_is_reclaimed_via_observed_empty()
 /// complete the boot rather than refuse it. Reclamation has finished before
 /// the second boot returns: the scope and run dir are gone. (S-VM-30 covers
 /// the same reclamation on a node with no `[vm]` driver composed.)
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 #[serial(cgroup)]
 async fn restart_under_the_production_composition_reclaims_a_surviving_vm_before_serving() {
@@ -788,6 +791,7 @@ async fn restart_under_the_production_composition_reclaims_a_surviving_vm_before
 /// boot), then strands a scope WHILE ALREADY RUNNING, and the periodic
 /// `VM_RECLAMATION_SWEEP_INTERVAL` tick -- with NO manual nudge --
 /// reclaims it. Proves the WAKE mechanism (§105a.8) actually fires.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 #[serial(cgroup)]
 async fn steady_state_sweep_reclaims_a_stranded_scope_without_restarting_serve() {
@@ -880,6 +884,7 @@ async fn steady_state_sweep_reclaims_a_stranded_scope_without_restarting_serve()
 /// clone are all gone after the sweep" -- by capturing the real PID
 /// BEFORE the stop (proving a real VMM existed) and asserting it is
 /// gone AFTER the sweep, alongside the scope/run-dir/clone.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 #[serial(cgroup)]
 async fn steady_state_sweep_kills_a_surviving_vmm_at_a_later_tick() {
@@ -948,6 +953,7 @@ async fn steady_state_sweep_kills_a_surviving_vmm_at_a_later_tick() {
 /// reclamation drive discards the stranded artifacts (`DiscardStranded
 /// Artifacts` — no row write, no evaluation, structurally per DD-5) and
 /// the row is BYTE-UNCHANGED at every field this wire surface exposes.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 #[serial(cgroup)]
 async fn restart_orphan_terminal_row_is_byte_unchanged_after_reclamation() {
@@ -1040,6 +1046,7 @@ async fn restart_orphan_terminal_row_is_byte_unchanged_after_reclamation() {
 /// reclaims the artifacts and writes NO row -- the row is byte-unchanged
 /// at every field this wire surface exposes, same shape as S-VM-25
 /// shape (a).
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 #[serial(cgroup)]
 async fn failed_stop_orphan_terminal_row_is_byte_unchanged_after_reclamation() {
@@ -1206,6 +1213,7 @@ async fn failed_stop_orphan_terminal_row_is_byte_unchanged_after_reclamation() {
 /// (including `svid_lifecycle`) is Tier-1-proven, executor-direct, at
 /// the site named above.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 #[serial(cgroup)]
 #[expect(
@@ -1338,6 +1346,7 @@ async fn reclaiming_an_svid_holding_allocation_submits_the_fourth_evaluation() {
 /// branch). Deliberately one scenario asserts both the predecessor occurrence
 /// and the new physical attempt's empty restart/failure history.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 #[serial(cgroup)]
 #[expect(
@@ -1524,6 +1533,7 @@ async fn reclaim_then_fresh_start_retains_predecessor_and_resets_history() {
 /// `poll_until_terminal`, then drive the idempotent boot-epoch reclamation
 /// pass and assert every cleanup complement. MUST NOT call `stop`.
 /// Activate as `#[tokio::test]` `#[serial(cgroup)]`.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 #[serial(cgroup)]
 async fn guest_self_exit_without_stop_leaves_no_rootfs_clone_in_operator_dir() {
@@ -1603,6 +1613,7 @@ async fn guest_self_exit_without_stop_leaves_no_rootfs_clone_in_operator_dir() {
 /// every cleanup complement. `pid_is_alive` confirms the VMM is genuinely
 /// gone first. MUST NOT call `stop`.
 /// Activate as `#[tokio::test]` `#[serial(cgroup)]`.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 #[serial(cgroup)]
 async fn hypervisor_death_without_stop_leaves_no_rootfs_clone_in_operator_dir() {
@@ -1689,6 +1700,7 @@ async fn hypervisor_death_without_stop_leaves_no_rootfs_clone_in_operator_dir() 
 /// clone-index entry are both gone after boot #2, scope/run-dir
 /// reclaimed. MUST NOT call `stop`. Activate as `#[tokio::test]`
 /// `#[serial(cgroup)]`.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 #[serial(cgroup)]
 async fn serve_restart_losing_in_memory_rootfs_plan_leaves_no_rootfs_clone() {

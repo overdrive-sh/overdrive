@@ -19,6 +19,7 @@ use overdrive_control_plane::api::{
 };
 use overdrive_core::aggregate::{DriverInput, JobSpecInput, ResourcesInput};
 use overdrive_core::api::submit::SubmitSpecInput;
+use overdrive_testing::overdrive_test;
 use serde::Deserialize;
 use tempfile::TempDir;
 
@@ -89,6 +90,7 @@ struct StopWorkloadResponseBody {
     outcome: String,
 }
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn stop_on_already_stopped_job_returns_already_stopped_outcome() {
     let (handle, bound, _tmp, ca_pem) = spawn_server().await;

@@ -30,6 +30,7 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use overdrive_control_plane::tls_bootstrap::{
     CaMaterial, load_trust_triple, mint_ephemeral_ca, write_trust_triple,
 };
+use overdrive_testing::overdrive_test;
 use serde::Deserialize;
 use tempfile::TempDir;
 use x509_parser::prelude::*;
@@ -81,6 +82,7 @@ fn assert_parseable_key(label: &str, pem: &str) {
     assert!(key.is_some(), "{label} did not contain a recognisable private key");
 }
 
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn mint_ephemeral_ca_returns_material_with_all_five_pems() {
     let material: CaMaterial =
@@ -93,6 +95,7 @@ fn mint_ephemeral_ca_returns_material_with_all_five_pems() {
     assert_parseable_key("client_leaf_key_pem", &material.client_leaf_key_pem);
 }
 
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn server_leaf_cert_has_exactly_four_san_entries_per_adr_0010_r3() {
     let material = mint_ephemeral_ca().expect("mint_ephemeral_ca must succeed");
@@ -172,6 +175,7 @@ fn server_leaf_cert_has_exactly_four_san_entries_per_adr_0010_r3() {
     );
 }
 
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn write_trust_triple_creates_config_in_adr_0019_toml_shape() {
     let tmp = TempDir::new().expect("TempDir");
@@ -208,6 +212,7 @@ fn write_trust_triple_creates_config_in_adr_0019_toml_shape() {
     assert!(!ctx.key.is_empty(), "key field must be populated");
 }
 
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn trust_triple_base64_fields_decode_to_original_pem_bytes() {
     let tmp = TempDir::new().expect("TempDir");
@@ -243,6 +248,7 @@ fn trust_triple_base64_fields_decode_to_original_pem_bytes() {
     );
 }
 
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn re_minting_produces_different_ca_material_without_prompting() {
     // The function signature takes no input — the "no prompt" property
@@ -266,6 +272,7 @@ fn re_minting_produces_different_ca_material_without_prompting() {
     );
 }
 
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn write_trust_triple_is_idempotent_overwrite() {
     let tmp = TempDir::new().expect("TempDir");
@@ -299,6 +306,7 @@ fn write_trust_triple_is_idempotent_overwrite() {
     );
 }
 
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn load_trust_triple_rejects_unknown_fields() {
     // ADR-0019 §Consequences → Enforcement: the serde `deny_unknown_fields`
@@ -336,6 +344,7 @@ fn load_trust_triple_rejects_unknown_fields() {
     );
 }
 
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn load_trust_triple_rejects_unknown_field_inside_context() {
     // Same posture as above but at the per-context level:

@@ -27,6 +27,7 @@ use hyper::{Response, StatusCode};
 use hyper_util::rt::TokioIo;
 use overdrive_core::traits::prober::HttpProber;
 use overdrive_core::traits::prober::ProbeOutcome;
+use overdrive_testing::overdrive_test;
 use overdrive_worker::probe_runner::HyperHttpProber;
 use tokio::net::TcpListener;
 
@@ -62,6 +63,7 @@ async fn spawn_single_shot_server(status: StatusCode, location: Option<&'static 
 
 /// S-SHCP-INT-02-01 (US-02 / K1) — real HTTP server returns 200 OK;
 /// `HyperHttpProber` returns Pass.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn given_real_http_server_200_when_hyper_http_prober_probes_then_returns_pass() {
     let base = spawn_single_shot_server(StatusCode::OK, None).await;
@@ -81,6 +83,7 @@ async fn given_real_http_server_200_when_hyper_http_prober_probes_then_returns_p
 
 /// S-SHCP-INT-02-02 (US-02 / K1) — real HTTP server returns 503;
 /// `HyperHttpProber` returns `Fail { reason: "HTTP 503" }`.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn given_real_http_server_503_when_hyper_http_prober_probes_then_returns_fail_named() {
     let base = spawn_single_shot_server(StatusCode::SERVICE_UNAVAILABLE, None).await;
@@ -103,6 +106,7 @@ async fn given_real_http_server_503_when_hyper_http_prober_probes_then_returns_f
 /// S-SHCP-INT-02-03 (US-02 AC / research § 6.1 Pitfall 5) — real HTTP
 /// server returns 302 with a `Location` header; `HyperHttpProber`
 /// returns Fail (NOT Pass; the redirect is NOT followed).
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn given_real_http_server_302_when_hyper_http_prober_probes_then_returns_fail_no_follow() {
     let base =
@@ -135,6 +139,7 @@ async fn given_real_http_server_302_when_hyper_http_prober_probes_then_returns_f
 /// `client_error_to_reason` (the transport-error mapping the Tier-1
 /// queue-driven acceptance test cannot reach — the sim adapter carries
 /// the reason verbatim rather than deriving it from a real error).
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn given_unbound_port_when_hyper_http_prober_probes_then_returns_fail_connection_refused() {
     // Bind to discover a kernel-assigned ephemeral port, then drop the

@@ -27,6 +27,7 @@ use linux_keyutils::{KeyError, KeyRing, KeyRingIdentifier};
 use overdrive_core::ca::kek::{KEK_LEN, Kek, KekError};
 use overdrive_core::ca::root_key_envelope::KekId;
 use overdrive_host::ca::SystemdCredsKeyring;
+use overdrive_testing::overdrive_test;
 use serial_test::serial;
 use tempfile::TempDir;
 
@@ -95,6 +96,7 @@ fn independent_keyring_read(description: &str) -> Option<Vec<u8>> {
 /// finds the `user`-type key the adapter added — so the KEK is genuinely held
 /// in kernel space, not merely returned from a heap copy. The keyctl round-trip
 /// IS the D8 "KEK present in keyring" boot probe.
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn resolved_kek_is_held_in_kernel_keyring_and_read_back_identically() {
     // GIVEN a staged systemd-creds credential and an adapter pinned to a
@@ -144,6 +146,7 @@ fn resolved_kek_is_held_in_kernel_keyring_and_read_back_identically() {
 /// installs the KEK, the systemd-creds delivery directory is removed entirely;
 /// a subsequent resolve STILL returns the same KEK because it is read back out
 /// of the kernel keyring, never re-read from the now-absent delivery source.
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn resolve_reads_kek_from_kernel_keyring_after_delivery_source_removed() {
     // GIVEN a staged credential the first resolve consumes.
@@ -183,6 +186,7 @@ fn resolve_reads_kek_from_kernel_keyring_after_delivery_source_removed() {
 /// `KekError::NotFound`, never a zero/default KEK (which would make the at-rest
 /// encryption meaningless). The env-mutating dev-fallback vars are cleared
 /// under `#[serial(env)]`.
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 #[serial(env)]
 fn absent_kek_with_no_delivery_and_no_dev_opt_in_is_not_found() {

@@ -87,6 +87,7 @@ use overdrive_core::dataplane::mtls_mark::{
     MTLS_LEG_S_DIAL_MARK, MTLS_SHARED_NFT_TABLE, MTLS_TPROXY_MARK, OWNER_EGRESS_MARK,
 };
 use overdrive_testing::cidr_lease::TestCidrLease;
+use overdrive_testing::overdrive_test;
 use overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker;
 
 use super::inbound_tproxy_harness::{KernelStateLock, build_worker, is_root, record_uname};
@@ -624,6 +625,7 @@ fn assert_udp_rejected(cell: &str, result: &io::Result<OwnedFd>) {
 // ---------------------------------------------------------------------------
 
 /// CONTRACT_SHAPE: unbounded-preservation.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn a_marked_tcp_connect_to_a_loopback_service_is_refused_econnrefused_without_hang() {
     let evidence = Evidence::begin("F-3-tcp-loopback");
@@ -647,6 +649,7 @@ async fn a_marked_tcp_connect_to_a_loopback_service_is_refused_econnrefused_with
 // ---------------------------------------------------------------------------
 
 /// CONTRACT_SHAPE: unbounded-preservation.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn a_marked_tcp_connect_to_a_host_interface_address_is_refused() {
     let evidence = Evidence::begin("local-host-address");
@@ -668,6 +671,7 @@ async fn a_marked_tcp_connect_to_a_host_interface_address_is_refused() {
 // ---------------------------------------------------------------------------
 
 /// CONTRACT_SHAPE: unbounded-preservation.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn a_marked_udp_first_transmit_to_a_local_service_fails_eperm() {
     let evidence = Evidence::begin("F-3-udp-local");
@@ -695,6 +699,7 @@ async fn a_marked_udp_first_transmit_to_a_local_service_fails_eperm() {
 // ---------------------------------------------------------------------------
 
 /// CONTRACT_SHAPE: unbounded-preservation.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn a_marked_udp_socket_reusing_an_unmarked_flows_source_port_is_still_rejected() {
     let evidence = Evidence::begin("F-1-reuse");
@@ -800,18 +805,21 @@ async fn non_unicast_reaches_no_service(
 }
 
 /// CONTRACT_SHAPE: unbounded-preservation.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn a_marked_udp_transmit_to_a_subnet_directed_broadcast_reaches_no_service() {
     non_unicast_reaches_no_service("F-5-subnet-broadcast", EnforceSandbox::subnet_broadcast).await;
 }
 
 /// CONTRACT_SHAPE: unbounded-preservation.
+#[overdrive_test(guest = "cgroup-default", profile = "routed-route")]
 #[tokio::test]
 async fn a_marked_udp_transmit_to_the_limited_broadcast_reaches_no_service() {
     non_unicast_reaches_no_service("F-5-limited-broadcast", |_| Ipv4Addr::BROADCAST).await;
 }
 
 /// CONTRACT_SHAPE: unbounded-preservation.
+#[overdrive_test(guest = "cgroup-default", profile = "routed-route")]
 #[tokio::test]
 async fn a_marked_udp_transmit_to_the_all_hosts_multicast_group_is_rejected_eperm() {
     let evidence = Evidence::begin("F-5-multicast");
@@ -838,6 +846,7 @@ async fn a_marked_udp_transmit_to_the_all_hosts_multicast_group_is_rejected_eper
 // ---------------------------------------------------------------------------
 
 /// CONTRACT_SHAPE: unbounded-preservation.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn a_marked_tcp_connect_to_a_link_local_service_is_refused() {
     let evidence = Evidence::begin("link-local");
@@ -870,6 +879,7 @@ async fn a_marked_tcp_connect_to_a_link_local_service_is_refused() {
 // ---------------------------------------------------------------------------
 
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn a_marked_tcp_connect_to_a_neighbour_stays_reachable() {
     let evidence = Evidence::begin("F-5-neighbour");
@@ -899,6 +909,7 @@ async fn a_marked_tcp_connect_to_a_neighbour_stays_reachable() {
 }
 
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default", profile = "routed-route")]
 #[tokio::test]
 async fn a_marked_udp_transmit_to_an_off_host_address_is_not_rejected() {
     let evidence = Evidence::begin("F-5-off-host");
@@ -920,6 +931,7 @@ async fn a_marked_udp_transmit_to_an_off_host_address_is_not_rejected() {
 // ---------------------------------------------------------------------------
 
 /// CONTRACT_SHAPE: unbounded-preservation.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn a_packet_carrying_the_owner_bit_among_other_bits_is_refused() {
     let evidence = Evidence::begin("F-6-masked");
@@ -941,6 +953,7 @@ async fn a_packet_carrying_the_owner_bit_among_other_bits_is_refused() {
 }
 
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn a_packet_carrying_only_the_leg_s_or_tproxy_mark_reaches_a_local_service() {
     let evidence = Evidence::begin("F-6-other-marks");
@@ -1006,6 +1019,7 @@ impl Storm {
 }
 
 /// CONTRACT_SHAPE: unbounded-preservation.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn a_marked_connect_storm_across_repeated_table_replacements_reaches_no_local_service() {
     const RESTARTS: usize = 12;

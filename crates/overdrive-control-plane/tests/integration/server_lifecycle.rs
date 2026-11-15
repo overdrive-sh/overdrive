@@ -44,6 +44,7 @@ use overdrive_sim::adapters::driver::SimDriver;
 use overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_sim::adapters::{SimGuestDnsFactory, SimMtlsIntercept};
+use overdrive_testing::overdrive_test;
 use overdrive_worker::mtls_intercept::{
     InterceptElementKey, InterceptElementOperation, InterceptError, InterceptPostcondition,
     InterceptSet, NetlinkError, Result as InterceptResult,
@@ -236,6 +237,7 @@ fn chain_carries_errno(error: &(dyn std::error::Error + 'static), errno: i32) ->
     reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line; \
               the body is one boot-deploy-fault-shutdown narrative"
 )]
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn graceful_shutdown_propagates_worker_failure_without_a_retry_capability() {
     const TICK: Duration = Duration::from_millis(100);
@@ -370,6 +372,7 @@ async fn graceful_shutdown_propagates_worker_failure_without_a_retry_capability(
 // AC (a) — ephemeral-port bind reported back to the caller
 // -------------------------------------------------------------------
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn run_server_binds_on_ephemeral_port_and_reports_bound_address() {
     let (handle, bound, _tmp, ca_pem) = spawn_server().await;
@@ -403,6 +406,7 @@ async fn run_server_binds_on_ephemeral_port_and_reports_bound_address() {
 // AC (b) — reqwest client with minted CA receives 200 on /v1/cluster/info
 // -------------------------------------------------------------------
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn reqwest_client_with_minted_ca_gets_200_on_v1_cluster_info() {
     let (handle, bound, _tmp, ca_pem) = spawn_server().await;
@@ -420,6 +424,7 @@ async fn reqwest_client_with_minted_ca_gets_200_on_v1_cluster_info() {
 // AC (c) — ALPN negotiates HTTP/2
 // -------------------------------------------------------------------
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn response_alpn_negotiation_is_http_2() {
     let (handle, bound, _tmp, ca_pem) = spawn_server().await;
@@ -442,6 +447,7 @@ async fn response_alpn_negotiation_is_http_2() {
 // AC (d) — graceful shutdown drains in-flight request
 // -------------------------------------------------------------------
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn cancellation_token_shutdown_drains_in_flight_request() {
     let (handle, bound, _tmp, ca_pem) = spawn_server().await;
@@ -484,6 +490,7 @@ async fn cancellation_token_shutdown_drains_in_flight_request() {
 // AC (e) — every ADR-0008 path returns 200 through stub router
 // -------------------------------------------------------------------
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn all_adr_0008_paths_return_200_on_stub_router() {
     let (handle, bound, _tmp, ca_pem) = spawn_server().await;
@@ -747,6 +754,7 @@ async fn listener_refuses_connections(addr: SocketAddr, within: Duration) -> boo
     reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line; \
               the body is one boot-hold-shutdown-observe-reboot narrative"
 )]
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn shutdown_ends_every_connection_including_stalled_handshakes_by_the_drain_deadline() {
     const DRAIN_DEADLINE: Duration = Duration::from_millis(400);

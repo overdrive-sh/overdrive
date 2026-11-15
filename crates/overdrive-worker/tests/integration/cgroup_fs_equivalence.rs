@@ -52,6 +52,7 @@ use std::sync::Arc;
 use overdrive_core::traits::CgroupFs;
 use overdrive_host::RealCgroupFs;
 use overdrive_sim::{SimCgroupFs, SimEntry};
+use overdrive_testing::overdrive_test;
 use proptest::collection::vec;
 use proptest::prelude::*;
 
@@ -141,6 +142,7 @@ proptest! {
     /// Post-sequence: for every File entry in SimCgroupFs's snapshot,
     /// the corresponding real-side path exists and its bytes match.
     /// For every Dir entry, the real-side path exists as a directory.
+    #[overdrive_test(guest = "cgroup-default")]
     #[test]
     fn real_and_sim_byte_store_equivalence(ops in vec(op_strategy(), 0..32)) {
         let real_root = tempfile::TempDir::new().expect("tempdir");

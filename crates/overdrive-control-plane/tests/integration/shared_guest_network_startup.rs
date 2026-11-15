@@ -41,6 +41,7 @@ use overdrive_dataplane::allocators::VipRange;
 use overdrive_sim::adapters::{
     SimBeaconIo, SimInterceptFault, SimMtlsIntercept, SimSharedTable, SimVmm,
 };
+use overdrive_testing::overdrive_test;
 use overdrive_worker::BeaconIntakeError;
 use serial_test::serial;
 use tempfile::TempDir;
@@ -282,6 +283,7 @@ impl Drop for NofileGuard {
 /// Given a fresh node. When `run_server` boots with the VM override, then the
 /// boot completes, the shared table is complete (step 8), the stale sweep
 /// ran after boot reclamation, and no refusal was emitted.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 #[serial(cgroup)]
 async fn serve_boots_through_the_pinned_order_with_the_guest_network_composed() {
@@ -320,6 +322,7 @@ async fn serve_boots_through_the_pinned_order_with_the_guest_network_composed() 
 /// guest prefix refuses boot at `probe_startup`, before the dataplane's veth
 /// step and before anything is written.
 /// CONTRACT_SHAPE: unbounded-preservation.
+#[overdrive_test(guest = "cgroup-default", profile = "legb-tools")]
 #[tokio::test]
 #[serial(cgroup)]
 async fn a_vip_range_overlapping_the_guest_prefix_refuses_boot_before_any_effect() {
@@ -361,6 +364,7 @@ async fn a_vip_range_overlapping_the_guest_prefix_refuses_boot_before_any_effect
 /// guest prefix refuses boot at `probe_startup`, naming the interface and the
 /// address.
 /// CONTRACT_SHAPE: unbounded-preservation.
+#[overdrive_test(guest = "cgroup-default", profile = "legb-tools")]
 #[tokio::test]
 #[serial(cgroup)]
 async fn a_node_address_inside_the_guest_prefix_refuses_boot_naming_the_interface() {
@@ -387,6 +391,7 @@ async fn a_node_address_inside_the_guest_prefix_refuses_boot_naming_the_interfac
 /// P4-S13 — A soft `RLIMIT_NOFILE` below the owner's fd budget refuses boot
 /// at `probe_startup`.
 /// CONTRACT_SHAPE: unbounded-preservation.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 #[serial(cgroup, rlimit)]
 async fn an_rlimit_nofile_below_the_owner_budget_refuses_boot() {
@@ -410,6 +415,7 @@ async fn an_rlimit_nofile_below_the_owner_budget_refuses_boot() {
 /// refuses boot before forwarding opens and leaves the table as it was; the
 /// supervised restart's boot converges.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default", profile = "dummy-link")]
 #[tokio::test]
 #[serial(cgroup)]
 async fn a_failed_step8_table_write_refuses_boot_and_the_restart_converges() {
@@ -440,6 +446,7 @@ async fn a_failed_step8_table_write_refuses_boot_and_the_restart_converges() {
 /// P4-S13 / DG-4 — A failed bind of the node beacon intake refuses boot at
 /// `compose_vm_driver` with reason `vm_driver.beacon_bind`.
 /// CONTRACT_SHAPE: unbounded-preservation.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 #[serial(cgroup)]
 async fn a_failed_beacon_bind_refuses_boot() {

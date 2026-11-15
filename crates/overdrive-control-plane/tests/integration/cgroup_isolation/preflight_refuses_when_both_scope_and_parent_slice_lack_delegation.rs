@@ -40,8 +40,10 @@
 //! both `cpu` and `memory`.
 
 use overdrive_control_plane::cgroup_preflight::{CgroupPreflightError, run_preflight_at};
+use overdrive_testing::overdrive_test;
 use tempfile::TempDir;
 
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn preflight_refuses_when_both_scope_and_parent_slice_lack_delegation() {
     let tmp = TempDir::new().expect("tempdir");

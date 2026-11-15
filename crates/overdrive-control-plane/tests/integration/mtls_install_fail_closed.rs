@@ -133,6 +133,7 @@ use overdrive_sim::adapters::mtls_enforcement::SimMtlsEnforcement;
 use overdrive_sim::adapters::mtls_intercept::SimMtlsIntercept;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_store_local::LocalIntentStore;
+use overdrive_testing::overdrive_test;
 use overdrive_worker::mtls_intercept::InterceptPostcondition;
 use overdrive_worker::mtls_intercept_port::{InterceptGuard, InterceptListener, MtlsIntercept};
 use overdrive_worker::mtls_intercept_worker::MtlsInterceptWorker;
@@ -983,6 +984,7 @@ fn assert_running_write_rejection_retires_then_releases(
 /// A rejected fresh-start Running write over the shared guest-network owner
 /// retires the lease before its attachment's teardown and releases it last.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn start_running_write_rejection_retires_the_lease_before_teardown_and_releases_it_last() {
     let outcome = drive_running_write_rejection_over_the_seam(Arm::Start).await;
@@ -994,6 +996,7 @@ async fn start_running_write_rejection_retires_the_lease_before_teardown_and_rel
 /// A rejected restarted Running write over the shared guest-network owner
 /// follows the same retire-then-release unwind for the successor.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn restart_running_write_rejection_retires_the_lease_before_teardown_and_releases_it_last() {
     let outcome = drive_running_write_rejection_over_the_seam(Arm::Restart).await;
@@ -1056,6 +1059,7 @@ async fn assert_activation_failure_projection(
 /// D3, ADR-0256). It holds with or without the EXEC
 /// gate wait; the wait itself is the sibling body pending 12-01. The seam
 /// fixture is all sim ports and needs no privilege.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn tap_activation_occurs_after_intercept_success_and_before_exec_release() {
     let (fixture, journal, _trace_guard) =
@@ -1107,6 +1111,7 @@ fn journal_has(journal: &Journal, alloc: &AllocationId, step: Step) -> bool {
 /// Recovering, the start parks after the protection-live event and reaches no
 /// `activate`, no EXEC release, and no running hook; the reopen lets it
 /// activate exactly once, release the command, and keep its Running row.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn tap_activation_waits_on_a_recovering_exec_gate_and_runs_once_after_reopen() {
     let (fixture, journal, _trace_guard) =
@@ -1277,6 +1282,7 @@ impl Driver for HoldingReleaseDriver {
 /// cancelling the dispatch while that release is held drops the same release
 /// future, and the release never completes afterwards. The running hook already
 /// ran before the release began and is not undone.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn cancelling_dispatch_while_the_exec_release_is_held_drops_that_release() {
     let journal: Journal = Arc::new(parking_lot::Mutex::new(Vec::new()));
@@ -1380,6 +1386,7 @@ async fn drive_refused_activation(
 /// never released and the running hook never fires; protection is stopped
 /// once; and a dominating Failed row names the activation stage. The lease
 /// events and the EXEC-gate claim are the sibling body pending 12-01.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn tap_activation_failure_stops_vmm_cleans_mtls_and_network_and_dominates_running() {
     let (fixture, journal, _trace_guard, alloc) =
@@ -1451,6 +1458,7 @@ async fn tap_activation_failure_stops_vmm_cleans_mtls_and_network_and_dominates_
 /// lease events: `driver.stop`, the lease retired, protection stopped, the
 /// teardown, and the lease released last, then a dominating Failed row
 /// carrying the typed refusal the owner port returned.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn tap_activation_failure_retires_the_lease_and_releases_it_last() {
     let (fixture, journal, _trace_guard, alloc) =
@@ -1719,6 +1727,7 @@ fn assert_restart_abort_identities(outcome: &RestartAbortOutcome) {
 /// Provision failure unwinds the fresh successor structural owner before
 /// exact-old predecessor cleanup, releasing both leases.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn restart_provision_failure_tears_down_old_and_replacement_networks_and_releases_the_slot() {
     let outcome = drive_restart_abort(RestartAbortScenario::Provision).await;
@@ -1745,6 +1754,7 @@ async fn restart_provision_failure_tears_down_old_and_replacement_networks_and_r
 /// Identity issuance failure preserves its primary typed error after fresh
 /// successor unwind, then completes exact-old predecessor cleanup.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn restart_identity_failure_stops_prior_intercept_before_network_release() {
     let outcome = drive_restart_abort(RestartAbortScenario::Identity).await;
@@ -1765,6 +1775,7 @@ async fn restart_identity_failure_stops_prior_intercept_before_network_release()
 /// Driver-start rejection records a fresh Failed successor after its unwind,
 /// then completes exact-old predecessor cleanup.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn restart_driver_start_failure_stops_prior_intercept_before_network_release() {
     let outcome = drive_restart_abort(RestartAbortScenario::DriverStart).await;
@@ -1791,6 +1802,7 @@ async fn restart_driver_start_failure_stops_prior_intercept_before_network_relea
 /// A predecessor driver-stop failure occurs only after the fresh successor is
 /// accepted Running, and retains both distinct owners for later convergence.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn restart_driver_stop_failure_retains_mtls_and_network_protection() {
     let outcome = drive_restart_abort(RestartAbortScenario::DriverStop).await;

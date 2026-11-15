@@ -25,6 +25,7 @@ use overdrive_core::AllocationId;
 use overdrive_core::aggregate::Listener;
 use overdrive_core::dataplane::backend_key::Proto;
 use overdrive_netlink::nft;
+use overdrive_testing::overdrive_test;
 
 use super::inbound_tproxy_harness::{
     KernelStateLock, build_inbound_spec, build_worker, clean_shared_infra, is_root, record_uname,
@@ -34,6 +35,7 @@ const WORKLOAD_ADDR: &str = "10.99.0.2";
 const TCP_PORT: u16 = 18777;
 const UDP_PORT: u16 = 18778;
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 /// CONTRACT_SHAPE: bounded-change.
 async fn a_udp_declared_listener_gets_no_inbound_capture_and_a_tcp_one_does() {

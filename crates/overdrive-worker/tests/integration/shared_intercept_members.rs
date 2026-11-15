@@ -69,6 +69,7 @@ use overdrive_netlink::{Client, block_on_host_netlink};
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::mtls_enforcement::SimMtlsEnforcement;
 use overdrive_sim::adapters::{SimIdentityRead, SimMtlsResolve};
+use overdrive_testing::overdrive_test;
 use overdrive_worker::mtls_intercept::InterceptError;
 use overdrive_worker::mtls_intercept_port::{
     HostMtlsIntercept, InterceptMembers, InterceptState, MtlsIntercept,
@@ -376,6 +377,7 @@ const REMOVAL_SURVIVING_DESTINATION: SocketAddrV4 =
 /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
 /// S-ND295-54 — Protection removal is convergent and its failures are typed.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn convergent_removal_with_a_pre_absent_member_and_batch_rejection_preserves_state() {
     assert!(is_root(), "S-ND295-54 Lima evidence requires root and CAP_NET_ADMIN");
@@ -540,6 +542,7 @@ fn convergent_removal_with_a_pre_absent_member_and_batch_rejection_preserves_sta
 /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
 /// S-ND295-54 — Protection removal is convergent and its failures are typed.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn removal_is_refused_when_the_recorded_program_was_replaced_out_of_band() {
     assert!(is_root(), "S-ND295-54 Lima evidence requires root and CAP_NET_ADMIN");
@@ -940,6 +943,7 @@ async fn lose_and_repair(evidence: Evidence, loss: InterceptLoss) {
 /// S-ND295-61 — Lost members or policy route are detected within a second and
 /// repaired with live workloads.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default", profile = "dummy-link")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn each_deleted_intercept_object_is_restored_exactly_with_live_allocations() {
     assert!(is_root(), "S-ND295-61 Lima evidence requires root and CAP_NET_ADMIN");

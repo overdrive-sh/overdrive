@@ -26,6 +26,7 @@ use std::time::Duration;
 use overdrive_core::guest_transport::{GUEST_FLOW_CONTROL_PORT, GUEST_FLOW_STREAM_PORT};
 use overdrive_core::vm::beacon::BEACON_VSOCK_PORT;
 use overdrive_core::vm::config::VsockPort;
+use overdrive_testing::overdrive_test;
 use overdrive_testing::vsock::{VMADDR_CID_ANY, VsockListener};
 use tempfile::TempDir;
 
@@ -53,6 +54,7 @@ fn held(port: VsockPort, what: &str) {
 /// `Vm` driver composed (the host VMM probe is not required) `beacon` is
 /// `None`; when one is, it is a kernel-assigned port too.
 /// `CONTRACT_SHAPE`: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn kernel_assigned_listener_ports_are_reported_held_and_distinct_across_two_serves() {
     let (first_tmp, second_tmp) = (TempDir::new().expect("tmp"), TempDir::new().expect("tmp"));

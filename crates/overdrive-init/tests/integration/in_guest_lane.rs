@@ -62,6 +62,7 @@ fn run_cell(slot: u32, cell: &str) {
 /// intake bound, the module loaded and referenced, the inbound vsock
 /// listener held.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch-lane")]
 #[test]
 fn the_guest_transport_is_configured_before_ready_in_a_real_guest() {
     run_cell(
@@ -73,6 +74,7 @@ fn the_guest_transport_is_configured_before_ready_in_a_real_guest() {
 /// R5-15 (D25-BIND): the intake ports refuse application binds of their own
 /// protocol only, and no ephemeral port is reserved.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch-lane")]
 #[test]
 fn the_reserved_intake_ports_refuse_application_binds_in_a_real_guest() {
     run_cell(
@@ -84,6 +86,7 @@ fn the_reserved_intake_ports_refuse_application_binds_in_a_real_guest() {
 /// EVMOD-GUEST-KIT: the module the guest loaded was built for the running
 /// guest kernel.
 /// CONTRACT_SHAPE: pure-function.
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch-lane")]
 #[test]
 fn the_guest_kits_module_matches_the_running_guest_kernel() {
     run_cell(2, "transport::real_kernel::the_guest_kits_module_release_matches_the_running_kernel");
@@ -92,6 +95,7 @@ fn the_guest_kits_module_matches_the_running_guest_kernel() {
 /// R5-59 (b), real half: the production guest owner serves the accept-path
 /// table with the sim half's per-connection outcome.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch-lane")]
 #[test]
 fn the_guest_accept_path_matches_the_sim_in_a_real_guest() {
     run_cell(3, "guest_flow::real_kernel::the_accept_path_matches_the_sim_per_connection");
@@ -103,6 +107,7 @@ fn the_guest_accept_path_matches_the_sim_in_a_real_guest() {
 /// `ForwarderModuleMissing`, names the path on the console, and the guest
 /// powers off (the VMM exits).
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch-lane")]
 #[test]
 fn a_guest_without_the_kits_module_refuses_before_ready() {
     let staging = default_staging_root();
@@ -143,6 +148,7 @@ use overdrive_core::guest_transport::wire::{ControlMessage, FlowId, FlowOrigin};
 use overdrive_testing::guest_lane::{
     OwnerLaneHost, control_messages_within, owner_lane, run_in_guest_owner_cell, send_control,
 };
+use overdrive_testing::overdrive_test;
 use overdrive_testing::vsock::VsockStream;
 
 /// Every host-side wait's bound.
@@ -259,6 +265,7 @@ fn run_owner_cell(
 /// accept orders (V_g still queued; V_g accepted before the host writes and
 /// closes).
 /// CONTRACT_SHAPE: pure-function.
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch-lane")]
 #[test]
 fn the_v24_kernel_shape_holds_in_a_real_guest() {
     run_owner_cell(
@@ -294,6 +301,7 @@ fn the_v24_kernel_shape_holds_in_a_real_guest() {
 /// write the request, close V_h (V_g still queued); then the positive
 /// control flow. The guest writes no message for the aborted flow.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch-lane")]
 #[test]
 fn a_host_abort_before_the_guest_accepts_ends_the_flow_in_a_real_guest() {
     run_owner_cell(
@@ -320,6 +328,7 @@ fn a_host_abort_before_the_guest_accepts_ends_the_flow_in_a_real_guest() {
 /// owner's reconnect. Neither session carries a message for the aborted
 /// flow; the positive control flow pairs on the new session.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch-lane")]
 #[test]
 fn a_session_loss_abort_ends_the_flow_and_the_owner_reconnects_in_a_real_guest() {
     run_owner_cell(
@@ -350,6 +359,7 @@ fn a_session_loss_abort_ends_the_flow_and_the_owner_reconnects_in_a_real_guest()
 /// before opening the positive control, so the two application connections
 /// cannot be mistaken for one another.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch-lane")]
 #[test]
 fn a_host_close_after_the_guest_accepted_ends_the_flow_in_a_real_guest() {
     run_owner_cell(
@@ -393,6 +403,7 @@ fn a_host_close_after_the_guest_accepted_ends_the_flow_in_a_real_guest() {
 /// that flow's V_h. The guest replies nothing to the `Abort` and writes no
 /// message for the flow.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch-lane")]
 #[test]
 fn an_abort_for_an_unheld_flow_is_discarded_in_a_real_guest() {
     run_owner_cell(
@@ -423,6 +434,7 @@ fn an_abort_for_an_unheld_flow_is_discarded_in_a_real_guest() {
 /// the cell reports every one paired, then close every V_h at once with no
 /// write. The cell reports the abort-to-reset p50 / p99 (not asserted).
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch-lane")]
 #[test]
 fn a_burst_of_host_aborts_resets_every_connection_in_a_real_guest() {
     run_owner_cell(
@@ -459,6 +471,7 @@ fn a_burst_of_host_aborts_resets_every_connection_in_a_real_guest() {
 /// one-time-take, direct-refusal and transient-cleanup oracle; this wrapper
 /// proves that exact cell on the supported Cloud Hypervisor guest.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch-lane")]
 #[test]
 fn tcp_correlation_preserves_identity_and_cleanup_in_a_real_guest() {
     run_owner_cell(

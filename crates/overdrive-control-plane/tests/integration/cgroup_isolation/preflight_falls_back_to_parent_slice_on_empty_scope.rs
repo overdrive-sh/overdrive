@@ -30,8 +30,10 @@
 //! `.claude/rules/testing.md` §RED scaffolds.
 
 use overdrive_control_plane::cgroup_preflight::run_preflight_at;
+use overdrive_testing::overdrive_test;
 use tempfile::TempDir;
 
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn preflight_falls_back_to_parent_slice_on_empty_scope() {
     let tmp = TempDir::new().expect("tempdir");

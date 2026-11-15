@@ -53,6 +53,7 @@ use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::driver::SimDriver;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
+use overdrive_testing::overdrive_test;
 use tempfile::TempDir;
 
 use super::wait::advance_and_settle;
@@ -101,6 +102,7 @@ fn read_ca_from_trust_triple(operator_config_dir: &std::path::Path) -> String {
 // loop and dispatch broker-enqueued evaluations.
 // -----------------------------------------------------------------------
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 #[allow(clippy::too_many_lines)]
 async fn submitted_job_reaches_running_via_real_server_boot() {

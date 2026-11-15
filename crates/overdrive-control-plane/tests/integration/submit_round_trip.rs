@@ -33,6 +33,7 @@ use overdrive_core::api::submit::SubmitSpecInput;
 use overdrive_core::id::WorkloadId;
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_store_local::LocalIntentStore;
+use overdrive_testing::overdrive_test;
 use tempfile::TempDir;
 
 // -----------------------------------------------------------------------
@@ -163,6 +164,7 @@ fn payments_spec_alt() -> JobSpecInput {
 // `outcome` + `spec_digest`, not `commit_index`.
 // -----------------------------------------------------------------------
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn post_v1_jobs_with_valid_spec_returns_200_inserted_with_canonical_digest() {
     let (handle, bound, _tmp, ca_pem) = spawn_server().await;
@@ -212,6 +214,7 @@ async fn post_v1_jobs_with_valid_spec_returns_200_inserted_with_canonical_digest
 // AC — the archived Job is persisted at the canonical intent key
 // -----------------------------------------------------------------------
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn post_v1_jobs_persists_archived_job_under_jobs_prefix_in_local_store() {
     let (handle, bound, tmp, ca_pem) = spawn_server().await;
@@ -260,6 +263,7 @@ async fn post_v1_jobs_persists_archived_job_under_jobs_prefix_in_local_store() {
 
 /// CONTRACT_SHAPE: bounded-change.
 #[allow(clippy::doc_markdown, reason = "repository-required Contract Shape declaration")]
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn post_v1_jobs_with_invalid_spec_returns_400_with_error_body_naming_field() {
     let (handle, bound, tmp, ca_pem) = spawn_server().await;
@@ -311,6 +315,7 @@ async fn post_v1_jobs_with_invalid_spec_returns_400_with_error_body_naming_field
 // and `outcome = Unchanged` (ADR-0015 §4 amended by ADR-0020).
 // -----------------------------------------------------------------------
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn post_v1_jobs_idempotent_byte_identical_spec_returns_unchanged_with_same_digest() {
     let (handle, bound, _tmp, ca_pem) = spawn_server().await;
@@ -370,6 +375,7 @@ async fn post_v1_jobs_idempotent_byte_identical_spec_returns_unchanged_with_same
 // AC — different spec at same WorkloadId -> HTTP 409 Conflict
 // -----------------------------------------------------------------------
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn post_v1_jobs_with_different_spec_at_existing_key_returns_409_conflict() {
     let (handle, bound, _tmp, ca_pem) = spawn_server().await;

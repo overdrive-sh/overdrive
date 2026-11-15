@@ -72,6 +72,7 @@ use overdrive_sim::adapters::kek::SimKek;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_sim::adapters::read_ports::SimServiceVipView;
 use overdrive_store_local::LocalIntentStore;
+use overdrive_testing::overdrive_test;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer};
 use rustls::server::WebPkiClientVerifier;
 use rustls::{RootCertStore, ServerConfig, ServerConnection, StreamOwned};
@@ -501,6 +502,7 @@ fn assert_nothing_reached_the_peer(seen: &PeerObservation, context: &str) {
 /// TLS ULP afterwards.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_valid_peer_that_is_not_the_selected_peer_is_rejected_before_any_body_and_nothing_is_armed()
  {
@@ -544,6 +546,7 @@ async fn a_valid_peer_that_is_not_the_selected_peer_is_rejected_before_any_body_
 /// the client unchanged; a malformed key never authenticates.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn an_unusable_gateway_identity_fails_the_dial_before_any_body() {
     enum Held {
@@ -604,6 +607,7 @@ async fn an_unusable_gateway_identity_fails_the_dial_before_any_body() {
 /// no peer address; the dial fails with `PeerAddress` and never handshakes.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_descriptor_that_is_not_a_connected_socket_has_no_peer_address() {
     let pki = Arc::new(TestPki::mint());
@@ -632,6 +636,7 @@ async fn a_descriptor_that_is_not_a_connected_socket_has_no_peer_address() {
 /// it, and arms nothing.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_peer_that_never_answers_the_handshake_times_out_before_the_deadline_passes() {
     const BUDGET: Duration = Duration::from_millis(400);
@@ -755,6 +760,7 @@ impl GatewayPki {
 /// `PeerSpiffeShape` before any body octet, and arms nothing.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_peer_certificate_without_a_spiffe_uri_san_is_rejected_by_shape() {
     let shape = Arc::new(GatewayPki::mint("https://peer.example.test/not-a-spiffe-id"));
@@ -801,6 +807,7 @@ async fn a_peer_certificate_without_a_spiffe_uri_san_is_rejected_by_shape() {
 /// not repeated on the wire.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn the_matching_peer_is_dialed_over_tls_13_records_with_no_cleartext_and_the_leg_is_armed() {
     let pki = Arc::new(GatewayPki::mint(SELECTED_PEER_SPIFFE));

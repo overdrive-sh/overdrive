@@ -32,6 +32,7 @@ use overdrive_core::vm::config::{
 };
 use overdrive_host::{CloudHypervisorVmm, RealVmHostState};
 use overdrive_sim::SimVmHostState;
+use overdrive_testing::overdrive_test;
 use overdrive_testing::vm_fixture::{VmFixture, default_staging_root};
 use serial_test::serial;
 
@@ -140,6 +141,7 @@ async fn assert_observe_then_kill_then_discard(host: &dyn VmHostState, alloc: &A
     host.discard_artifacts(alloc).await.expect("discard_artifacts is idempotent");
 }
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn vm_host_state_equivalence_sim() {
     let sim = SimVmHostState::new();
@@ -170,6 +172,7 @@ async fn vm_host_state_equivalence_sim() {
 }
 
 /// `CONTRACT_SHAPE`: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 #[serial(vm_host_state_real_cgroup)]
 async fn vm_host_state_equivalence_real() {
@@ -316,6 +319,7 @@ async fn vm_host_state_equivalence_real() {
 /// `SimVmHostState` through its in-memory clone map. Needs no guest boot
 /// and no cgroup: it exercises only the clone indirection, over real
 /// tempdirs and a real symlink.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn index_backed_clone_surface_stays_equivalent_across_adapters() {
     let tmp = tempfile::TempDir::new().expect("tempdir");

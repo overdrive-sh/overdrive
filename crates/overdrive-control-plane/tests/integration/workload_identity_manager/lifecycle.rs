@@ -45,6 +45,7 @@ use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::dataplane::SimDataplane;
 use overdrive_sim::adapters::driver::SimDriver;
 use overdrive_store_local::{LocalIntentStore, LocalObservationStore};
+use overdrive_testing::overdrive_test;
 use tempfile::TempDir;
 
 const WORKLOAD_NAME: &str = "ws-payments";
@@ -95,6 +96,7 @@ fn trust_domain_subject() -> SpiffeId {
 /// intermediate from `state.ca`, leaf minted by `state.ca.issue_svid` for the
 /// SAME `SpiffeId::for_allocation` the executor held. This is the
 /// `ca_boot_and_audit` shape (mint-then-verify the chain the live CA produces).
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn walking_skeleton_running_alloc_issues_holds_audits_and_verifies_svid() {
     // GIVEN a control-plane convergence harness with a REAL RcgenCa (the `Ca`
@@ -239,6 +241,7 @@ async fn walking_skeleton_running_alloc_issues_holds_audits_and_verifies_svid() 
 /// exit code (the re-issued chain still verifies — exit 0), and the absence of
 /// any recovered old leaf key (it was never persisted — `svid_for` on the fresh
 /// `IdentityMgr` reads `None` before the re-issue tick).
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn restart_reissues_each_still_running_alloc_with_audit_row() {
     // GIVEN a control-plane harness with a REAL RcgenCa + REAL
@@ -421,6 +424,7 @@ async fn restart_reissues_each_still_running_alloc_with_audit_row() {
 /// always `ever_issued`), and cannot synthesise a never-issued-but-retry-pending
 /// alloc without a fault-injecting CA double — which is exactly what the pure
 /// layer exercises directly.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn restart_after_successful_issue_reissues_immediately_via_ever_issued_audit_row() {
     use overdrive_reconcilers::svid_lifecycle::SvidLifecycle;

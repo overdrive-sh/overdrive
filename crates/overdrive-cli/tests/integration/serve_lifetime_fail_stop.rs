@@ -118,6 +118,7 @@ use overdrive_core::guest_network::{
     ServeShutdownRequest, SharedGuestNetworkComponent, SharedGuestNetworkFailStopCause,
 };
 use overdrive_netlink::nft::{self, SharedIpInterceptIdentity};
+use overdrive_testing::overdrive_test;
 use serde_json::Value;
 use serial_test::serial;
 use tokio::sync::Notify;
@@ -572,6 +573,7 @@ fn describe_event(event: Option<&Captured>, since: Duration) -> String {
 /// Outcome anchor: OUT-ND295-SHARED-SWITCH.
 /// S-ND295-68 — The operator's serve process exits with status 1 on shared-network fail-stop
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 #[serial(cgroup)]
 fn an_operator_interrupt_stops_a_healthy_serve_with_status_zero() {
@@ -621,6 +623,7 @@ fn an_operator_interrupt_stops_a_healthy_serve_with_status_zero() {
 /// Outcome anchor: OUT-ND295-SHARED-SWITCH.
 /// S-ND295-68 — The operator's serve process exits with status 1 on shared-network fail-stop
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 #[serial(cgroup)]
 fn a_shared_network_fail_stop_wins_over_a_ready_interrupt_and_exits_status_one() {
@@ -711,6 +714,7 @@ fn a_shared_network_fail_stop_wins_over_a_ready_interrupt_and_exits_status_one()
 /// Outcome anchor: OUT-ND295-SHARED-SWITCH.
 /// S-ND295-68 — The operator's serve process exits with status 1 on shared-network fail-stop
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 #[serial(cgroup)]
 fn a_shared_network_fail_stop_shutdown_is_abandoned_when_the_ten_second_bound_elapses() {
@@ -807,6 +811,7 @@ fn a_shared_network_fail_stop_shutdown_is_abandoned_when_the_ten_second_bound_el
 /// Outcome anchor: OUT-ND295-SHARED-SWITCH.
 /// S-ND295-68 — The operator's serve process exits with status 1 on shared-network fail-stop
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 #[serial(cgroup)]
 fn a_repaired_shared_network_loss_never_ends_serve() {

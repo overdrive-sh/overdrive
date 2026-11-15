@@ -2614,6 +2614,7 @@ dependencies = [
  "overdrive-host",
  "overdrive-reconcilers",
  "overdrive-store-local",
+ "overdrive-testing",
  "overdrive-worker",
  "parking_lot",
  "proptest",

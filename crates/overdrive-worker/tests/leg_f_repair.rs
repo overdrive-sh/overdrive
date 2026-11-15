@@ -101,6 +101,7 @@ use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial;
 use overdrive_sim::adapters::{SimIdentityRead, SimMtlsResolve};
 use overdrive_testing::cidr_lease::TestCidrLease;
+use overdrive_testing::overdrive_test;
 use overdrive_worker::mtls_intercept::InterceptLeg;
 use overdrive_worker::mtls_intercept_port::HostMtlsIntercept;
 use overdrive_worker::mtls_intercept_worker::{MtlsInterceptWorker, MtlsSharedOwnerError};
@@ -563,6 +564,7 @@ fn ss_shows_listen(addr: SocketAddrV4) -> (bool, String) {
 /// { leg: F }`, the listener still `LISTEN` at the failure, repair `Ok`, the
 /// same address, a new listening socket with the old descriptor gone, a
 /// TPROXY-captured connection accepted and closed fail-closed, the audit `Ok`.
+#[overdrive_test(guest = "cgroup-default", profile = "nested")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn leg_f_repair_rebinds_transparent_listener() {
     // SAFETY: getuid is always safe.

@@ -43,8 +43,10 @@
 //! intentionally-failing commits".
 
 use overdrive_control_plane::cgroup_preflight::{CgroupPreflightError, run_preflight_at};
+use overdrive_testing::overdrive_test;
 use tempfile::TempDir;
 
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn preflight_treats_missing_subtree_control_as_io_error() {
     let tmp = TempDir::new().expect("tempdir");

@@ -35,6 +35,7 @@ use std::num::NonZeroU16;
 
 use overdrive_core::AllocationId;
 use overdrive_netlink::nft;
+use overdrive_testing::overdrive_test;
 
 use super::inbound_tproxy_harness::{
     KernelStateLock, build_inbound_spec, build_worker, clean_shared_infra, is_root, nft_list_chain,
@@ -47,6 +48,7 @@ const WORKLOAD_ADDR: &str = "10.99.1.2";
 const SERVICE_PORT: u16 = 18777;
 
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn inbound_capture_key_matches_declared_service_port_not_ephemeral_leg_c_port() {
     if !is_root() {

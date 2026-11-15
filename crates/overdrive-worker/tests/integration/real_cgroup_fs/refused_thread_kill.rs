@@ -27,6 +27,7 @@ use overdrive_core::cgroup::CgroupPath;
 use overdrive_core::id::AllocationId;
 use overdrive_core::traits::CgroupFs;
 use overdrive_host::RealCgroupFs;
+use overdrive_testing::overdrive_test;
 use overdrive_worker::cgroup_manager::CgroupManager;
 use serial_test::serial;
 
@@ -35,6 +36,7 @@ use super::super::cgroup_cleanup::AllocCleanup;
 /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
 /// E23 — A refused OS thread is a typed failure, never a panic.
 /// CONTRACT_SHAPE: unbounded-preservation.
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 #[serial(cgroup)]
 fn a_kill_write_under_thread_refusal_returns_an_io_error_and_never_aborts() {

@@ -1443,6 +1443,7 @@ mod launch_seccomp_kernel {
     use super::io;
     #[cfg(not(target_arch = "x86_64"))]
     use super::{CloudHypervisorVmm, VmConfig};
+    use overdrive_testing::overdrive_test;
 
     /// The descriptor the cases hand the scratch TAP queue to in the
     /// launched child (the hook's `first_closed` is one past it).
@@ -2425,6 +2426,7 @@ mod launch_seccomp_kernel {
     /// set; it then observes itself and prints `OVERDRIVE_LAUNCH_SECCOMP_REPORT`
     /// records for the parent's oracle.
     #[cfg(target_arch = "x86_64")]
+    #[overdrive_test(guest = "cgroup-default")]
     #[test]
     #[ignore = "re-exec child role: needs the queue and launch hook a launch_seccomp_kernel parent case sets up"]
     fn launch_seccomp_child_role() {
@@ -2454,6 +2456,7 @@ mod launch_seccomp_kernel {
     /// S-ND295-41 — The launched child inherits exactly descriptors 0 to 3.
     /// CONTRACT_SHAPE: bounded-change.
     #[cfg(target_arch = "x86_64")]
+    #[overdrive_test(guest = "cgroup-default")]
     #[test]
     fn the_launched_child_inherits_exactly_descriptors_zero_to_three() {
         let tap = ScratchTap::create();
@@ -2591,6 +2594,7 @@ mod launch_seccomp_kernel {
     /// seccomp filter refusing `close_range` with `EPERM`; no root and no TAP
     /// are needed.
     #[cfg(target_arch = "x86_64")]
+    #[overdrive_test(guest = "cgroup-default")]
     #[test]
     fn a_failed_close_on_exec_step_is_a_launch_error_and_the_target_never_runs() {
         assert_a_failed_hook_step_is_a_launch_error(HookStep::CloseRange);
@@ -2605,6 +2609,7 @@ mod launch_seccomp_kernel {
     /// Lane: native x86_64 metal. The stimulus is the intermediate's own
     /// seccomp filter refusing `prctl(PR_SET_NO_NEW_PRIVS)` with `EPERM`.
     #[cfg(target_arch = "x86_64")]
+    #[overdrive_test(guest = "cgroup-default")]
     #[test]
     fn a_failed_no_new_privs_step_is_a_launch_error_and_the_target_never_runs() {
         assert_a_failed_hook_step_is_a_launch_error(HookStep::NoNewPrivs);
@@ -2619,6 +2624,7 @@ mod launch_seccomp_kernel {
     /// Lane: native x86_64 metal. The stimulus is the intermediate's own
     /// seccomp filter refusing `seccomp(2)` with `EPERM`.
     #[cfg(target_arch = "x86_64")]
+    #[overdrive_test(guest = "cgroup-default")]
     #[test]
     fn a_failed_filter_load_step_is_a_launch_error_and_the_target_never_runs() {
         assert_a_failed_hook_step_is_a_launch_error(HookStep::LoadFilter);
@@ -2629,6 +2635,7 @@ mod launch_seccomp_kernel {
     /// every thread.
     /// CONTRACT_SHAPE: bounded-change.
     #[cfg(target_arch = "x86_64")]
+    #[overdrive_test(guest = "cgroup-default")]
     #[test]
     fn every_denied_request_returns_eperm_on_every_thread_under_the_production_hook() {
         let tap = ScratchTap::create();
@@ -2692,6 +2699,7 @@ mod launch_seccomp_kernel {
     /// every thread (per-thread no-new-privileges and filter mode).
     /// CONTRACT_SHAPE: bounded-change.
     #[cfg(target_arch = "x86_64")]
+    #[overdrive_test(guest = "cgroup-default")]
     #[test]
     fn every_filtered_thread_reports_no_new_privs_and_filter_mode() {
         let tap = ScratchTap::create();
@@ -2726,6 +2734,7 @@ mod launch_seccomp_kernel {
     /// every thread (the startup probe installs the launch program).
     /// CONTRACT_SHAPE: bounded-change.
     #[cfg(target_arch = "x86_64")]
+    #[overdrive_test(guest = "cgroup-default")]
     #[tokio::test]
     async fn the_startup_probe_installs_the_exact_launch_program() {
         use super::VmmProbeSubstrate;
@@ -2743,6 +2752,7 @@ mod launch_seccomp_kernel {
     /// every thread (foreign syscall ABIs end the process).
     /// CONTRACT_SHAPE: bounded-change.
     #[cfg(target_arch = "x86_64")]
+    #[overdrive_test(guest = "cgroup-default")]
     #[test]
     fn foreign_syscall_abis_end_the_filtered_process() {
         let tap = ScratchTap::create();

@@ -86,6 +86,7 @@ use overdrive_system_conformance::gateway::{
     run_load_child_if_requested, service_map_entries, shutdown_stage_events,
     startup_refusal_reasons, tls_record_types,
 };
+use overdrive_testing::overdrive_test;
 use rustls::CipherSuite;
 
 /// The streamed body the example guest writes for `GET /stream`.
@@ -113,6 +114,7 @@ fn stream_body() -> Vec<u8> {
 ///  And Route, Service, gateway intent, receipt and identity state converge.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch-rustc")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn native_metal_kvm_public_ingress_gateway_streams_a_workload_response_over_kernel_tls_legs()
 {
@@ -292,6 +294,7 @@ async fn native_metal_kvm_public_ingress_gateway_streams_a_workload_response_ove
 ///      answers are 503.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch-rustc")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn native_metal_kvm_public_ingress_gateway_never_succeeds_through_a_stopped_workloads_stale_service_entry()
  {
@@ -372,6 +375,7 @@ async fn native_metal_kvm_public_ingress_gateway_never_succeeds_through_a_stoppe
 ///      exactly one drain is begun with a 5 s deadline, and the shutdown fits it.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch-rustc")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn native_metal_kvm_public_ingress_gateway_runs_its_stages_in_order_and_shuts_down_within_one_drain()
  {
@@ -467,6 +471,7 @@ async fn native_metal_kvm_public_ingress_gateway_runs_its_stages_in_order_and_sh
 ///      the live intent and receipt counts are 0.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch-rustc")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn native_metal_kvm_public_ingress_gateway_answers_502_when_the_guest_flow_ends_mid_request()
 {
@@ -516,6 +521,7 @@ async fn native_metal_kvm_public_ingress_gateway_answers_502_when_the_guest_flow
 ///      after it.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch-rustc")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn native_metal_kvm_public_ingress_gateway_answers_408_for_a_stalled_request_head() {
     let trace = TraceHistory::install_global();
@@ -555,6 +561,7 @@ async fn native_metal_kvm_public_ingress_gateway_answers_408_for_a_stalled_reque
 ///      gateway's, not a relayed workload answer.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch-rustc")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn native_metal_kvm_public_ingress_gateway_answers_408_for_a_stalled_request_body() {
     let trace = TraceHistory::install_global();
@@ -609,6 +616,7 @@ async fn native_metal_kvm_public_ingress_gateway_answers_408_for_a_stalled_reque
 ///      and a backend response arrives within the window.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch-rustc")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn native_metal_kvm_public_ingress_gateway_answers_503_until_the_hydrator_reprograms_after_a_serve_restart()
  {
@@ -820,6 +828,7 @@ fn assert_burst_within_budget(burst: &Burst) {
 ///      to the baseline.
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch-rustc")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn native_metal_kvm_public_ingress_gateway_holds_128_concurrent_exchanges_within_the_descriptor_and_memory_budget()
  {
@@ -861,6 +870,7 @@ async fn native_metal_kvm_public_ingress_gateway_holds_128_concurrent_exchanges_
 ///      fifth burst is within 1 MB of the post-drain in-use heap after the second.
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch-rustc")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn native_metal_kvm_public_ingress_gateway_returns_to_a_stable_in_use_heap_across_repeated_128_exchange_bursts()
  {
@@ -920,6 +930,7 @@ async fn native_metal_kvm_public_ingress_gateway_returns_to_a_stable_in_use_heap
 ///      the connection is intact.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch-rustc")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn native_metal_kvm_public_ingress_gateway_relays_exact_length_and_chunked_bodies_octet_exact_over_keep_alive()
  {
@@ -1027,6 +1038,7 @@ async fn native_metal_kvm_public_ingress_gateway_relays_exact_length_and_chunked
 ///      `TlsDecryptError` is unchanged.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch-rustc")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn native_metal_kvm_public_ingress_gateway_sends_no_key_update_across_a_sixteen_mebibyte_response()
  {
@@ -1079,6 +1091,7 @@ async fn native_metal_kvm_public_ingress_gateway_sends_no_key_update_across_a_si
 ///      request deadline; one that sends past the ceiling has it closed there.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch-rustc")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn native_metal_kvm_public_ingress_gateway_lets_the_client_read_the_response_before_a_clean_close()
  {

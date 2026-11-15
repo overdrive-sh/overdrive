@@ -70,6 +70,7 @@ use overdrive_sim::adapters::dataplane::SimDataplane;
 use overdrive_sim::adapters::gateway::SimGatewayAdapters;
 use overdrive_sim::adapters::kek::SimKek;
 use overdrive_store_local::{IntentStore, LocalIntentStore};
+use overdrive_testing::overdrive_test;
 use tempfile::TempDir;
 
 /// A grammar-valid Route document.
@@ -149,6 +150,7 @@ async fn intent_keys(data_dir: &Path) -> Vec<String> {
 /// Route key.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn route_deploy_on_a_gateway_disabled_node_is_rejected_before_the_spec_is_parsed() {
     let (handle, tmp) = spawn_gateway_disabled_server().await;
@@ -202,6 +204,7 @@ async fn route_deploy_on_a_gateway_disabled_node_is_rejected_before_the_spec_is_
 /// would answer 400), and the intent store gains no Route or gateway key.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn route_withdraw_on_a_gateway_disabled_node_is_rejected_before_the_id_is_parsed() {
     let (handle, tmp) = spawn_gateway_disabled_server().await;
@@ -390,6 +393,7 @@ fn route_input(id: &str, path: &str) -> PublicRouteInput {
 /// holds the Route after the server stops.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn route_deploy_is_one_shot_with_the_same_outcome_in_both_stream_modes() {
     let mut first_outcomes = Vec::new();
@@ -465,6 +469,7 @@ async fn route_deploy_is_one_shot_with_the_same_outcome_in_both_stream_modes() {
 /// byte-identical once the node's own endpoint is factored out.
 ///
 /// CONTRACT_SHAPE: pure-function.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn route_deploy_operator_text_is_the_pinned_three_lines_in_both_stream_modes() {
     let mut declared_by_mode = Vec::new();
@@ -522,6 +527,7 @@ async fn route_deploy_operator_text_is_the_pinned_three_lines_in_both_stream_mod
 /// intent store holds a Route key only after that deploy.
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn a_route_document_that_is_not_exactly_one_route_table_is_rejected_and_deploys_nothing() {
     let rejected: [(&str, String, &str, &str); 3] = [
@@ -599,6 +605,7 @@ async fn a_route_document_that_is_not_exactly_one_route_table_is_rejected_and_de
 /// apart from the typed client errors.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn the_operator_client_declares_conflicts_and_rejects_withdraws_and_reads_status() {
     let node = spawn_gateway_enabled_server(172).await;
@@ -654,6 +661,7 @@ async fn the_operator_client_declares_conflicts_and_rejects_withdraws_and_reads_
 /// typed `CliError::HttpStatus` carrying the server's `ErrorBody`.
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn a_status_point_read_failure_is_a_redacted_500_and_the_next_read_recovers() {
     let node = spawn_gateway_enabled_server(173).await;
@@ -820,6 +828,7 @@ impl Node {
 /// projection through `serve`.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn a_gateway_whose_issuance_keeps_failing_reports_the_count_and_cause_on_the_status_body() {
     let root = TempDir::new().expect("tempdir");
@@ -861,6 +870,7 @@ async fn a_gateway_whose_issuance_keeps_failing_reports_the_count_and_cause_on_t
 /// gateway status row of its own.
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn a_disabled_node_answers_the_fixed_body_without_reading_a_stale_row() {
     let root = TempDir::new().expect("tempdir");

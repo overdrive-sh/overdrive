@@ -31,6 +31,7 @@ use overdrive_control_plane::action_shim::LifecycleEvent;
 use overdrive_control_plane::api::{AllocStateWire, TransitionSource};
 use overdrive_control_plane::reconciler_runtime::ReconcilerRuntime;
 use overdrive_control_plane::streaming::{JobSubmitEvent, workload_event_from_lifecycle};
+use overdrive_testing::overdrive_test;
 
 async fn runtime_with_view(
     tmp: &tempfile::TempDir,
@@ -70,6 +71,7 @@ fn failed_lifecycle_event(
 }
 
 /// Contract shape: pure-function.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn attempt_failed_first_attempt_of_a_job_will_not_restart() {
     let tmp = tempfile::tempdir().expect("tmpdir");
@@ -106,6 +108,7 @@ async fn attempt_failed_first_attempt_of_a_job_will_not_restart() {
 }
 
 /// Contract shape: pure-function.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn attempt_failed_mid_budget_reports_correct_index() {
     let tmp = tempfile::tempdir().expect("tmpdir");
@@ -139,6 +142,7 @@ async fn attempt_failed_mid_budget_reports_correct_index() {
     }
 }
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn attempt_failed_at_ceiling_will_not_restart() {
     let tmp = tempfile::tempdir().expect("tmpdir");
@@ -180,6 +184,7 @@ async fn attempt_failed_at_ceiling_will_not_restart() {
 }
 
 /// Contract shape: pure-function.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn attempt_failed_empty_view_reports_the_first_attempt_that_will_not_restart() {
     let tmp = tempfile::tempdir().expect("tmpdir");

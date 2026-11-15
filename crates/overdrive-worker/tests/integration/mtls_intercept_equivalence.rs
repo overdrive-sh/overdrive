@@ -115,6 +115,7 @@
 use std::net::{Ipv4Addr, SocketAddrV4};
 
 use overdrive_sim::adapters::SimMtlsIntercept;
+use overdrive_testing::overdrive_test;
 use overdrive_worker::mtls_intercept::{InterceptError, InterceptLeg};
 use overdrive_worker::mtls_intercept_port::{HostMtlsIntercept, InterceptMembers, MtlsIntercept};
 
@@ -257,6 +258,7 @@ fn bound_ipv4_port(listener: &impl LegListener, scenario: &str, adapter: &str) -
 /// (so a port-0 request reports port 0), which would silently corrupt the
 /// TPROXY redirect target — exactly what the `LegFLocalAddr` / `LegCLocalAddr`
 /// fail-closed stages exist for.
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn bound_leg_reports_a_non_zero_kernel_assigned_port() {
     // S-ND295-70 evidence needs root: a silent skip would pass off root
@@ -300,6 +302,7 @@ fn bound_leg_reports_a_non_zero_kernel_assigned_port() {
 /// Both listeners are held ALIVE across the comparison: that is what makes this
 /// "two distinct listeners" rather than a port the kernel merely re-issued
 /// after the first was closed.
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn two_bound_legs_never_share_a_port() {
     // S-ND295-70 evidence needs root: a silent skip would pass off root
@@ -354,6 +357,7 @@ fn two_bound_legs_never_share_a_port() {
 /// S-ND295-70 — The node's protection listeners belong to the protection port: a
 /// simulated node opens no socket, and a listener stops when its wait is cancelled.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn a_held_address_is_refused_with_eaddrinuse_until_its_last_holder_drops() {
     assert!(
@@ -437,6 +441,7 @@ fn a_held_address_is_refused_with_eaddrinuse_until_its_last_holder_drops() {
 /// S-ND295-70 — The node's protection listeners belong to the protection port: a
 /// simulated node opens no socket, and a listener stops when its wait is cancelled.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn the_inbound_install_hands_back_a_guard_that_releases_cleanly() {
     assert!(
@@ -484,6 +489,7 @@ fn the_inbound_install_hands_back_a_guard_that_releases_cleanly() {
 /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
 /// S-ND295-71 — Protection is installed only against the node's own converged program.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn an_install_before_convergence_is_refused_and_changes_nothing() {
     assert!(is_root(), "S-ND295-71 host evidence requires root and CAP_NET_ADMIN");
@@ -533,6 +539,7 @@ fn an_install_before_convergence_is_refused_and_changes_nothing() {
 /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
 /// S-ND295-71 — Protection is installed only against the node's own converged program.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn an_install_at_a_port_other_than_the_recorded_target_is_refused() {
     assert!(is_root(), "S-ND295-71 host evidence requires root and CAP_NET_ADMIN");
@@ -580,6 +587,7 @@ fn an_install_at_a_port_other_than_the_recorded_target_is_refused() {
 /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
 /// S-ND295-71 — Protection is installed only against the node's own converged program.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn a_node_guard_dropped_with_no_members_leaves_no_program() {
     assert!(is_root(), "S-ND295-71 host evidence requires root and CAP_NET_ADMIN");
@@ -620,6 +628,7 @@ fn a_node_guard_dropped_with_no_members_leaves_no_program() {
 /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
 /// S-ND295-71 — Protection is installed only against the node's own converged program.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn a_convergence_from_a_stale_prior_is_refused_and_changes_nothing() {
     assert!(is_root(), "S-ND295-71 host evidence requires root and CAP_NET_ADMIN");
@@ -677,6 +686,7 @@ fn a_convergence_from_a_stale_prior_is_refused_and_changes_nothing() {
 /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
 /// S-ND295-71 — Protection is installed only against the node's own converged program.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn a_zero_listener_port_is_refused_before_any_program_change() {
     assert!(is_root(), "S-ND295-71 host evidence requires root and CAP_NET_ADMIN");
@@ -723,6 +733,7 @@ fn a_zero_listener_port_is_refused_before_any_program_change() {
 /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
 /// S-ND295-71 — Protection is installed only against the node's own converged program.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn a_node_guard_dropped_with_no_members_leaves_no_member_state() {
     assert!(is_root(), "S-ND295-71 host evidence requires root and CAP_NET_ADMIN");
@@ -763,6 +774,7 @@ fn a_node_guard_dropped_with_no_members_leaves_no_member_state() {
 /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
 /// S-ND295-71 — Protection is installed only against the node's own converged program.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn a_node_guard_dropped_while_members_exist_keeps_the_program() {
     assert!(is_root(), "S-ND295-71 host evidence requires root and CAP_NET_ADMIN");

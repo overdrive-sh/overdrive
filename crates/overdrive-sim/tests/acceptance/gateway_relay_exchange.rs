@@ -82,6 +82,7 @@ use overdrive_sim::adapters::kek::SimKek;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_sim::adapters::read_ports::SimServiceVipView;
 use overdrive_store_local::LocalIntentStore;
+use overdrive_testing::overdrive_test;
 use rand::rngs::StdRng;
 use rand::{Rng as _, SeedableRng};
 use tempfile::TempDir;
@@ -534,6 +535,7 @@ fn pick_ending(rng: &mut StdRng) -> Ending {
 /// every case is printed before it runs.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn seeded_peer_events_never_move_an_octet_past_a_message_boundary_and_leave_no_residue() {
     for seed in 0..CASES {
@@ -871,6 +873,7 @@ async fn drain_case(seed: u64) -> Vec<String> {
 /// ordered trace. The seed of every case is printed before it runs.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn drain_at_a_seeded_point_completes_or_force_aborts_and_twin_runs_agree() {
     for seed in 0..CASES {

@@ -54,6 +54,7 @@ use overdrive_core::guest_transport::{GuestCid, VsockListenPort};
 use overdrive_core::vm::config::VsockPort;
 use overdrive_testing::guest_kit::cid_bands::HOST_FLOW_ACCEPT_PATH;
 use overdrive_testing::guest_kit::{GuestImageSpec, GuestKit, WorkDir};
+use overdrive_testing::overdrive_test;
 use overdrive_testing::vm_fixture::default_staging_root;
 use overdrive_testing::vsock::VMADDR_CID_HOST;
 
@@ -201,6 +202,7 @@ async fn drive(
 /// CID to the real listeners and queued into the sim, are accepted with the
 /// same identities and records.
 /// CONTRACT_SHAPE: pure-function.
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn the_flow_listeners_accept_path_matches_the_sim_per_connection() {
     let staging = default_staging_root();
@@ -281,6 +283,7 @@ async fn the_flow_listeners_accept_path_matches_the_sim_per_connection() {
 /// accepting the guest's connections at that same port. Here the second
 /// call asks for a different fixed port: the answer is still the first.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_repair_of_a_held_listener_keeps_its_socket_and_its_port() {
     let staging = default_staging_root();

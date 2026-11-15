@@ -83,6 +83,7 @@ use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
 use overdrive_netlink::nft::{self, SharedIpInterceptIdentity};
+use overdrive_testing::overdrive_test;
 use overdrive_worker::mtls_intercept::{InterceptPostcondition, make_transparent_listener};
 use overdrive_worker::mtls_intercept_port::{
     HostMtlsIntercept, InterceptAcceptError, MtlsIntercept,
@@ -332,6 +333,7 @@ fn assert_only_listener_targets_changed(
 }
 
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default", profile = "dummy-link")]
 #[test]
 fn shared_program_absence_create_readback_idempotence_and_guard_drop() {
     assert!(is_root(), "D15 Lima evidence requires root and CAP_NET_ADMIN");
@@ -394,6 +396,7 @@ fn shared_program_absence_create_readback_idempotence_and_guard_drop() {
 }
 
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default", profile = "dummy-link")]
 #[test]
 fn shared_program_replaces_only_listener_targets_and_preserves_foreign_complement() {
     assert!(is_root(), "D15 Lima evidence requires root and CAP_NET_ADMIN");
@@ -443,6 +446,7 @@ fn shared_program_replaces_only_listener_targets_and_preserves_foreign_complemen
 }
 
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default", profile = "dummy-link")]
 #[test]
 fn shared_program_valid_wrong_target_observation_is_non_mutating() {
     assert!(is_root(), "D15 Lima evidence requires root and CAP_NET_ADMIN");
@@ -506,6 +510,7 @@ fn dial(addr: SocketAddrV4, timeout: Duration) -> std::io::Result<TcpStream> {
 }
 
 /// AC1: `make_transparent_listener` sets IP_TRANSPARENT on the real socket.
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn worker_make_transparent_listener_sets_ip_transparent() {
     if !is_root() {
@@ -568,6 +573,7 @@ impl Drop for HostListenerSandbox {
 /// S-ND295-70 — The node's protection listeners belong to the protection port: a
 /// simulated node opens no socket, and a listener stops when its wait is cancelled.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn the_host_listener_reports_a_redirected_inbound_virtual_address_as_local() {
     assert!(is_root(), "S-ND295-70 host-listener evidence requires root and CAP_NET_ADMIN");
@@ -642,6 +648,7 @@ fn the_host_listener_reports_a_redirected_inbound_virtual_address_as_local() {
 /// S-ND295-70 — The node's protection listeners belong to the protection port: a
 /// simulated node opens no socket, and a listener stops when its wait is cancelled.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn a_destroyed_host_listener_ends_its_pending_accept_with_an_accept_failure() {
     assert!(is_root(), "S-ND295-70 host-listener evidence requires root and CAP_NET_ADMIN");
@@ -698,6 +705,7 @@ fn a_destroyed_host_listener_ends_its_pending_accept_with_an_accept_failure() {
 /// S-ND295-70 — The node's protection listeners belong to the protection port: a
 /// simulated node opens no socket, and a listener stops when its wait is cancelled.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn an_accepted_connection_is_blocking_and_close_on_exec() {
     assert!(is_root(), "S-ND295-70 host-listener evidence requires root and CAP_NET_ADMIN");

@@ -9,8 +9,10 @@
 //! the both-missing case.
 
 use overdrive_control_plane::cgroup_preflight::{CgroupPreflightError, run_preflight_at};
+use overdrive_testing::overdrive_test;
 use tempfile::TempDir;
 
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn preflight_names_missing_cpu_controller_specifically() {
     let tmp = TempDir::new().expect("tempdir");
@@ -54,6 +56,7 @@ fn preflight_names_missing_cpu_controller_specifically() {
     );
 }
 
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn preflight_names_missing_memory_controller_specifically() {
     let tmp = TempDir::new().expect("tempdir");

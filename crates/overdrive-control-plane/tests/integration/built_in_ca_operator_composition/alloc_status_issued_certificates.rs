@@ -52,6 +52,7 @@ use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::driver::SimDriver;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_store_local::LocalIntentStore;
+use overdrive_testing::overdrive_test;
 use tempfile::TempDir;
 
 const JOB_ID: &str = "ws-current-cert";
@@ -194,6 +195,7 @@ async fn write_issued_cert(state: &AppState, serial: &str, spiffe: &SpiffeId, or
 /// ordinal-keyed projection selects the newer (smaller) serial. Asserting the
 /// newer serial is present exactly once AND the older absent makes this test
 /// FAIL against the old behaviour and PASS only with the ordinal.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn alloc_status_projects_current_cert_by_ordinal_not_issued_at() {
     let tmp = TempDir::new().expect("tmpdir");

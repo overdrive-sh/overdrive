@@ -87,6 +87,7 @@ use overdrive_sim::adapters::driver::SimDriver;
 use overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_store_local::LocalIntentStore;
+use overdrive_testing::overdrive_test;
 use tempfile::TempDir;
 
 // -----------------------------------------------------------------------
@@ -224,6 +225,7 @@ async fn build_harness(tmp: &TempDir) -> Harness {
 // and the observer writes Failed/Terminated as expected.
 // -----------------------------------------------------------------------
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn watcher_cannot_emit_exit_before_running_row_committed() {
     let tmp = TempDir::new().expect("tempdir");
@@ -370,6 +372,7 @@ async fn watcher_cannot_emit_exit_before_running_row_committed() {
 // would time out.
 // -----------------------------------------------------------------------
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn degraded_escalation_still_fires_running_gate() {
     let tmp = TempDir::new().expect("tempdir");

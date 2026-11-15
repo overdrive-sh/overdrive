@@ -40,6 +40,7 @@ use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::driver::SimDriver;
 use overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
+use overdrive_testing::overdrive_test;
 use tempfile::TempDir;
 
 use super::workload_lifecycle::wait::advance_and_settle;
@@ -189,6 +190,7 @@ fn first_address(started: &[AllocationSpec]) -> Option<Ipv4Addr> {
 /// A server holding the node's first lease is killed; the next server booted on
 /// the same roots starts with an empty pool, so the first guest-network
 /// assignment it makes is again the smallest free address, `100.95.0.2`.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_killed_restart_starts_with_an_empty_pool() {
     let roots = TempDir::new().expect("tempdir");

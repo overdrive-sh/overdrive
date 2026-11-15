@@ -64,6 +64,7 @@ fn config_path(tmp: &Path) -> std::path::PathBuf {
 // (a) cluster::status returns typed output with reconciler registry
 // -------------------------------------------------------------------
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn cluster_status_against_in_process_server_returns_typed_output_with_reconciler_registry() {
     let (handle, tmp) = spawn_server().await;
@@ -105,6 +106,7 @@ async fn cluster_status_against_in_process_server_returns_typed_output_with_reco
 // emptiness. The assertion shape here pins both: the data is correct
 // AND the message-field plumbing is still wired.
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn node_list_against_in_process_server_returns_boot_time_row_with_no_nodes_diagnostic_message()
  {

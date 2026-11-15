@@ -42,6 +42,7 @@ use overdrive_core::api::submit::SubmitSpecInput;
 use overdrive_core::id::WorkloadId;
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_store_local::LocalIntentStore;
+use overdrive_testing::overdrive_test;
 use tempfile::TempDir;
 
 // -----------------------------------------------------------------------
@@ -146,6 +147,7 @@ fn spec_with_replicas(replicas: u32) -> JobSpecInput {
 // whichever write committed last.
 // -----------------------------------------------------------------------
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn concurrent_distinct_specs_same_key_commit_exactly_once() {
     // N distinct specs, same WorkloadId = "payments". Each spec produces
@@ -291,6 +293,7 @@ async fn concurrent_distinct_specs_same_key_commit_exactly_once() {
 // same `spec_digest` (per ADR-0020 the per-write witness).
 // -----------------------------------------------------------------------
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn concurrent_byte_identical_submits_return_single_spec_digest() {
     const CONCURRENCY: usize = 8;

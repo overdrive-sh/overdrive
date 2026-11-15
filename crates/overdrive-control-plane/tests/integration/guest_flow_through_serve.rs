@@ -79,6 +79,7 @@ use overdrive_testing::guest_app::{
     listen_conn_ends_in_console, subcommand, terminal_event_in_console,
 };
 use overdrive_testing::guest_kit::{GuestImage, GuestImageSpec, GuestKit};
+use overdrive_testing::overdrive_test;
 use overdrive_testing::vm_fixture::default_staging_root;
 use tempfile::TempDir;
 use tracing_subscriber::EnvFilter;
@@ -827,6 +828,7 @@ fn inventory(obs: &GuestOwnerObservation) -> (u32, u32) {
 /// zero.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default", profile = "nested")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn the_forwarder_inventory_counts_every_held_guest_flow_through_serve() {
     const N: u32 = 3;
@@ -883,6 +885,7 @@ async fn the_forwarder_inventory_counts_every_held_guest_flow_through_serve() {
 /// pair the inventory counts belongs to the live launch.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default", profile = "nested")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_killed_launchs_attachment_leaves_the_owner_and_the_next_launch_is_accepted() {
     let peer = RemotePeer::start("d17-kill", 0).expect("precondition: the remote peer starts");
@@ -1056,6 +1059,7 @@ fn served_connections(alloc: &AllocationId) -> (Vec<TerminalEvent>, Vec<Terminal
 /// released.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default", profile = "nested")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn the_forwarder_inventory_counts_probe_and_relay_watches_through_serve() {
     let node = Node::boot("d17-dial").await;
@@ -1154,6 +1158,7 @@ async fn the_forwarder_inventory_counts_probe_and_relay_watches_through_serve() 
 /// reaches Running) and none is counted against the quota.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default", profile = "nested")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_dropped_probe_stream_is_an_abort_at_the_guest_through_serve() {
     let node = Node::boot("d17-probe").await;
@@ -1193,6 +1198,7 @@ async fn a_dropped_probe_stream_is_an_abort_at_the_guest_through_serve() {
 /// throughout.
 ///
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default", profile = "nested")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_vmm_exit_under_a_held_relay_stream_resets_the_client_through_serve() {
     let node = Node::boot("d17-relay-kill").await;

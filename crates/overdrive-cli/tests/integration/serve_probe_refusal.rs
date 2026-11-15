@@ -34,6 +34,7 @@ use std::sync::{Arc, Mutex};
 use overdrive_cli::commands::serve;
 use overdrive_cli::http_client::CliError;
 use overdrive_host::RealCgroupFs;
+use overdrive_testing::overdrive_test;
 use tempfile::TempDir;
 use tracing::field::{Field, Visit};
 use tracing::{Event, Subscriber};
@@ -100,6 +101,7 @@ where
 /// `health.startup.refused` event MUST fire with the typed cause,
 /// `run_with_adapters` MUST return `Err(CliError::ProbeRefused { .. })`, and
 /// the adapters builder MUST NOT have been called.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "current_thread")]
 #[expect(
     clippy::result_large_err,

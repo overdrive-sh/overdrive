@@ -73,6 +73,7 @@ use overdrive_testing::guest_kit::{
     GuestFile, GuestImageSpec, GuestKit, SCRIPTED_BOOT_BOUND, WorkDir,
 };
 use overdrive_testing::guest_peer::{CONTROL_PORT_PARAM, GuestPeerControl};
+use overdrive_testing::overdrive_test;
 use overdrive_testing::vm_fixture::{VmFixture, default_staging_root};
 use overdrive_testing::vsock::{VMADDR_CID_HOST, VMADDR_PORT_ANY, VsockStream};
 use serial_test::serial;
@@ -322,6 +323,7 @@ fn main() {
 /// holder. Before `create`, during the run and after `create` returned, this
 /// process holds no vhost-vsock descriptor; the VMM holds exactly one.
 /// CONTRACT_SHAPE: unbounded-preservation.
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch")]
 #[tokio::test]
 #[serial(vhost_vsock)]
 async fn the_vmm_opens_its_own_vsock_device_and_overdrive_holds_no_copy() {
@@ -346,6 +348,7 @@ async fn the_vmm_opens_its_own_vsock_device_and_overdrive_holds_no_copy() {
 /// free at once — the next launch on the same CID opens the device and keeps
 /// running.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch")]
 #[tokio::test]
 #[serial(vhost_vsock)]
 async fn the_cid_is_free_at_once_after_its_vmm_exits() {
@@ -375,6 +378,7 @@ async fn the_cid_is_free_at_once_after_its_vmm_exits() {
 /// and its VMM exits before READY (the driver's existing pre-READY VMM-exit
 /// start failure); the first holder keeps running and keeps its device.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch")]
 #[tokio::test]
 #[serial(vhost_vsock)]
 async fn a_launch_on_a_held_cid_exits_before_ready_and_leaves_the_holder_running() {
@@ -408,6 +412,7 @@ async fn a_launch_on_a_held_cid_exits_before_ready_and_leaves_the_holder_running
 /// Hypervisor Landlock. Successful data after the device open is the oracle
 /// that neither Landlock nor the filter ended the VMM.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[serial(vhost_vsock)]
 #[allow(
@@ -538,6 +543,7 @@ async fn the_fork_boots_and_passes_data_under_the_production_launch_identity() {
 /// their first reset. The VMM's last device close resets a live host flow, the
 /// guest kernel booted once, and the CID is reusable at once.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[serial(vhost_vsock)]
 async fn post_boot_resets_end_the_vmm_and_reset_live_host_flows() {
@@ -622,6 +628,7 @@ async fn post_boot_resets_end_the_vmm_and_reset_live_host_flows() {
 /// and the device is released with it (the CID is free for the next
 /// launch).
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch")]
 #[tokio::test]
 #[serial(vhost_vsock)]
 async fn a_guest_pid1_crash_under_panic_1_ends_the_vmm() {
@@ -652,6 +659,7 @@ async fn a_guest_pid1_crash_under_panic_1_ends_the_vmm() {
 /// RESET-EXIT (ADR-0182): a triple fault — the reset `reboot=t` performs —
 /// ends the VMM as well, after one guest boot.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch")]
 #[tokio::test]
 #[serial(vhost_vsock)]
 async fn a_guest_triple_fault_ends_the_vmm() {
@@ -677,6 +685,7 @@ async fn a_guest_triple_fault_ends_the_vmm() {
 /// calls `reboot(2)` with the restart command, the `reboot -f` path — ends
 /// the VMM instead of booting the guest again under the same CID and launch.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch-rustc")]
 #[tokio::test]
 #[serial(vhost_vsock)]
 async fn a_forced_guest_reboot_ends_the_vmm() {

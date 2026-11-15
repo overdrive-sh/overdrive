@@ -37,11 +37,13 @@ use std::sync::Arc;
 use overdrive_core::id::AllocationId;
 use overdrive_core::traits::CgroupFs;
 use overdrive_host::RealCgroupFs;
+use overdrive_testing::overdrive_test;
 use overdrive_worker::cgroup_manager::CgroupManager;
 use serial_test::serial;
 
 use super::super::cgroup_cleanup::{AllocCleanup, delegate_overdrive_slice};
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 #[serial(cgroup)]
 async fn write_to_readonly_cgroup_events_propagates_real_eacces() {

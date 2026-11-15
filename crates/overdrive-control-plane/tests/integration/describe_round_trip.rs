@@ -44,6 +44,7 @@ use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::driver::SimDriver;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_store_local::LocalIntentStore;
+use overdrive_testing::overdrive_test;
 use proptest::prelude::*;
 use tempfile::TempDir;
 
@@ -136,6 +137,7 @@ fn expected_spec_digest(spec: &JobSpecInput) -> String {
 // AC — §4.1: Submit then Describe round-trips byte-identical
 // -----------------------------------------------------------------------
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn get_v1_jobs_id_returns_described_job_after_submit() {
     let (handle, bound, _tmp, ca_pem) = spawn_server().await;
@@ -201,6 +203,7 @@ async fn get_v1_jobs_id_returns_described_job_after_submit() {
 // must attach it explicitly.
 // -----------------------------------------------------------------------
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn get_v1_jobs_malformed_id_returns_400_with_field_id() {
     let (handle, bound, _tmp, ca_pem) = spawn_server().await;
@@ -244,6 +247,7 @@ async fn get_v1_jobs_malformed_id_returns_400_with_field_id() {
 // AC — §4.4: Describe unknown id returns 404 with `not_found` error body
 // -----------------------------------------------------------------------
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn get_v1_jobs_unknown_id_returns_404_with_error_body() {
     let (handle, bound, _tmp, ca_pem) = spawn_server().await;
@@ -276,6 +280,7 @@ async fn get_v1_jobs_unknown_id_returns_404_with_error_body() {
 // AC — spec_digest equals ContentHash::of(<archived bytes>) exactly
 // -----------------------------------------------------------------------
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn describe_spec_digest_equals_content_hash_of_archived_bytes() {
     let (handle, bound, _tmp, ca_pem) = spawn_server().await;
@@ -330,6 +335,7 @@ async fn describe_spec_digest_equals_content_hash_of_archived_bytes() {
 // not `commit_index`).
 // -----------------------------------------------------------------------
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn describe_returns_spec_digest_matching_submit_response() {
     let (handle, bound, _tmp, ca_pem) = spawn_server().await;
@@ -437,6 +443,7 @@ fn service_spec(id: &str, port: u16) -> ServiceSpecInput {
     }
 }
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn describe_service_returns_discriminated_shape_with_vip() {
     let tmp = TempDir::new().expect("tempdir");
@@ -547,6 +554,7 @@ proptest! {
     /// `Job::from_submit` → `rkyv::to_bytes` → `IntentStore::put` →
     /// (new request) `IntentStore::get` → `rkyv::access` → `rkyv::deserialize`
     /// → `JobSpecInput::from(&Job)` → wire. Every step is exercised.
+    #[overdrive_test(guest = "cgroup-default")]
     #[test]
     fn submit_then_describe_round_trips_spec_and_digest(spec in arb_valid_job_spec()) {
         // `proptest!` test bodies are synchronous; we spin up a

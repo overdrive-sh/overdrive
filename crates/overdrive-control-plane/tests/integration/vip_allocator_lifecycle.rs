@@ -89,6 +89,7 @@ use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::driver::SimDriver;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_store_local::LocalIntentStore;
+use overdrive_testing::overdrive_test;
 
 // ---------------------------------------------------------------------------
 // Fixture builders
@@ -289,6 +290,7 @@ async fn dispatch_release(state: &AppState, workload_id: &str, digest_bytes: [u8
 /// isolation; this test adds the upstream `submit_workload` seam so the
 /// digest comes from the handler's content-addressed derivation rather
 /// than a hand-rolled fixture.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn submit_then_release_dispatch_frees_vip_end_to_end() {
     let tmp = TempDir::new().expect("tempdir");
@@ -357,6 +359,7 @@ async fn submit_then_release_dispatch_frees_vip_end_to_end() {
 /// test (`overdrive-cli` `alloc_status.rs`) proves the section renders
 /// `5353/udp`; this test proves the handler actually threads the
 /// listener protocol from the intent onto the wire response.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn alloc_status_projects_service_udp_listener_protocol() {
     use overdrive_core::dataplane::Proto;
@@ -408,6 +411,7 @@ async fn alloc_status_projects_service_udp_listener_protocol() {
 /// property test — that one verifies the allocator's `release` /
 /// `allocate` contract in isolation; this one verifies the same
 /// invariant END-TO-END through the production driving ports.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn released_vip_reusable_on_next_allocation() {
     let tmp = TempDir::new().expect("tempdir");
@@ -479,6 +483,7 @@ async fn released_vip_reusable_on_next_allocation() {
 /// but failed to return the address to the pool would let the first
 /// re-submit of B still fail with exhaustion; the post-recovery submit
 /// here would fire that regression.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn vip_allocator_pool_exhaustion_and_recovery() {
     let tmp = TempDir::new().expect("tempdir");
@@ -670,6 +675,7 @@ async fn drive_convergence_ticks(state: &AppState, workload_id: &str, ticks: u64
 /// `hydrate_bridge_desired_listeners` depends on and broke the
 /// name-retraction (#251). Retaining the VIP keeps the memo present so
 /// the bridge can collapse the name to NXDOMAIN while identity survives.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn convergence_tick_retains_vip_on_stopped_but_declared_service() {
     let tmp = TempDir::new().expect("tempdir");

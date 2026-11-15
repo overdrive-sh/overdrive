@@ -43,6 +43,7 @@ use overdrive_netlink::nft::SharedIpInterceptIdentity;
 use overdrive_sim::adapters::SimIdentityRead;
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::mtls_enforcement::SimMtlsEnforcement;
+use overdrive_testing::overdrive_test;
 use overdrive_worker::mtls_intercept::{InterceptError, InterceptLeg, InterceptPostcondition};
 use overdrive_worker::mtls_intercept_port::{
     InterceptAcceptError, InterceptAccepted, InterceptGuard, InterceptListener, InterceptMembers,
@@ -84,6 +85,7 @@ const fn shared_backend() -> ResolvedBackend {
 
 /// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn shared_owner_starts_once_audits_and_shutdown_drains_the_owner_tree() {
     let intercept = Arc::new(RecordingSharedIntercept::new());
@@ -135,6 +137,7 @@ async fn shared_owner_starts_once_audits_and_shutdown_drains_the_owner_tree() {
 
 /// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn initial_leg_f_bind_refusal_returns_to_absent_without_partial_publication() {
     for errno in [libc::EADDRINUSE, libc::EPERM, libc::EMFILE] {
@@ -795,6 +798,7 @@ impl MtlsIntercept for RecordingSharedIntercept {
 
 /// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn leg_c_bind_refusal_closes_the_already_bound_leg_f_and_publishes_no_owner() {
     let intercept = Arc::new(RecordingSharedIntercept::failing_bind(2));
@@ -817,6 +821,7 @@ async fn leg_c_bind_refusal_closes_the_already_bound_leg_f_and_publishes_no_owne
 
 /// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn shared_rule_convergence_refusal_closes_both_sockets_and_publishes_no_tasks_or_guard() {
     let intercept = Arc::new(RecordingSharedIntercept::failing_converge());
@@ -842,6 +847,7 @@ async fn shared_rule_convergence_refusal_closes_both_sockets_and_publishes_no_ta
 
 /// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn lost_leg_f_rebinds_the_recorded_nonzero_address_before_audit_succeeds() {
     let intercept = Arc::new(RecordingSharedIntercept::new());
@@ -870,6 +876,7 @@ async fn lost_leg_f_rebinds_the_recorded_nonzero_address_before_audit_succeeds()
 
 /// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn occupied_original_leg_f_address_refuses_recovery_without_selecting_another_port() {
     let intercept = Arc::new(RecordingSharedIntercept::new());
@@ -904,6 +911,7 @@ async fn occupied_original_leg_f_address_refuses_recovery_without_selecting_anot
 
 /// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[allow(
     clippy::too_many_lines,
@@ -1186,6 +1194,7 @@ fn allocation_spec(name: &str) -> AllocationSpec {
 
 /// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn stop_and_owner_shutdown_during_pending_registration_return_registration_retired_and_drain_once()
  {
@@ -1391,6 +1400,7 @@ async fn wait_listener_closed(address: SocketAddrV4) {
 
 /// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default", profile = "dummy-link")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn stopping_one_shared_allocation_preserves_the_unrelated_handle_and_complete_listener_owner()
 {
@@ -1457,6 +1467,7 @@ async fn stopping_one_shared_allocation_preserves_the_unrelated_handle_and_compl
 
 /// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn owner_shutdown_waits_the_active_claim_then_drains_every_shared_capability_and_listener() {
     let intercept = Arc::new(RecordingSharedIntercept::new());
@@ -1677,6 +1688,7 @@ fn prior_process_state() -> (InterceptPostcondition, BTreeSet<SharedElement>) {
 /// Outcome anchor: OUT-ND295-SHARED-SWITCH.
 /// S-ND295-13D — The fresh intercept owner refuses to start when stale members cannot be cleared.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_fresh_owner_clears_stale_members_before_reading_the_program() {
     let (stale_program, stale_members) = prior_process_state();
@@ -1738,6 +1750,7 @@ async fn a_fresh_owner_clears_stale_members_before_reading_the_program() {
 /// Outcome anchor: OUT-ND295-SHARED-SWITCH.
 /// S-ND295-13D — The fresh intercept owner refuses to start when stale members cannot be cleared.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_failed_member_clear_refuses_startup_without_publication() {
     for script in [
@@ -1855,6 +1868,7 @@ fn member_convergences(calls: &[InterceptCall]) -> Vec<InterceptMembers> {
 /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
 /// S-ND295-61 — Lost members, policy route, or guard are detected within a second and repaired with live workloads.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default", profile = "dummy-link")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn member_loss_is_an_ipsets_failure_and_repair_restores_exactly_the_member() {
     let intercept = Arc::new(RecordingSharedIntercept::new());
@@ -1924,6 +1938,7 @@ impl ProtectionLoss {
 /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
 /// S-ND295-61 — Lost members, policy route, or guard are detected within a second and repaired with live workloads.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default", profile = "dummy-link")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[allow(
     clippy::too_many_lines,
@@ -2033,6 +2048,7 @@ async fn policy_route_loss_is_repaired_with_live_members_and_the_prior_guard_is_
 /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
 /// S-ND295-61 — Lost members, policy route, or guard are detected within a second and repaired with live workloads.
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default", profile = "dummy-link")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[allow(
     clippy::too_many_lines,

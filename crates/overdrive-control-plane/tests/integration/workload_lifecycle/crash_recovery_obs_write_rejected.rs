@@ -53,6 +53,7 @@ use overdrive_sim::adapters::driver::SimDriver;
 use overdrive_sim::adapters::guest_network::SimSharedGuestNetworkOwner;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_store_local::LocalIntentStore;
+use overdrive_testing::overdrive_test;
 use tempfile::TempDir;
 
 // -----------------------------------------------------------------------
@@ -210,6 +211,7 @@ async fn drive_to_first_running(h: &Harness, start: Instant) {
 // `Running` row, and no Failed event is broadcast.
 // -----------------------------------------------------------------------
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn transient_obs_write_recovers_on_retry() {
     let tmp = TempDir::new().expect("tempdir");
@@ -284,6 +286,7 @@ async fn transient_obs_write_recovers_on_retry() {
 // is ever broadcast.
 // -----------------------------------------------------------------------
 
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn terminal_obs_write_escalates_via_lifecycle_event() {
     let tmp = TempDir::new().expect("tempdir");

@@ -57,6 +57,7 @@ use overdrive_core::transition_reason::{StoppedBy, TerminalCondition};
 use overdrive_core::vm::config::VmConfig;
 use overdrive_core::{SpiffeId, TransitionReason, aggregate::WorkloadKind};
 use overdrive_store_local::LocalObservationStore;
+use overdrive_testing::overdrive_test;
 use overdrive_testing::vm_fixture::VmFixture;
 use proptest::prelude::*;
 use serial_test::serial;
@@ -1661,6 +1662,7 @@ async fn durable_alloc_snapshot(
 ///
 /// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 #[serial(cgroup)]
 async fn the_same_guest_reaches_a_non_mesh_destination_in_the_clear() {
@@ -1755,6 +1757,7 @@ async fn the_same_guest_reaches_a_non_mesh_destination_in_the_clear() {
 ///
 /// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 #[serial(cgroup)]
 async fn the_operator_sees_the_microvm_workloads_own_mesh_address_not_its_transit_hop() {
@@ -1851,6 +1854,7 @@ async fn the_operator_sees_the_microvm_workloads_own_mesh_address_not_its_transi
 
 /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
 /// CONTRACT_SHAPE: pure-function.
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn synthetic_d7_accounting_rejects_competing_capture_counts() {
     let segments = [40_usize, 60, 50];
@@ -1898,6 +1902,7 @@ fn synthetic_guest_tcp_frame() -> CapturedFrame {
 
 /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
 /// CONTRACT_SHAPE: pure-function.
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn tcp_offload_ambiguity_is_scoped_to_eligible_ipv4_tcp_frames() {
     let mut reported_dns = synthetic_guest_tcp_frame();
@@ -2009,6 +2014,7 @@ fn synthetic_peer_tcp_frame_on(
 }
 
 /// CONTRACT_SHAPE: pure-function.
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn peer_wire_reassembly_uses_sequence_space_and_deduplicates_loopback_copies() {
     let exact_peer = FlowTuple {
@@ -2253,6 +2259,7 @@ fn peer_wire_reassembly_uses_sequence_space_and_deduplicates_loopback_copies() {
 }
 
 /// CONTRACT_SHAPE: pure-function.
+#[overdrive_test(guest = "cgroup-default")]
 #[test]
 fn peer_wire_reassembly_rejects_gaps_conflicts_and_unknown_copy_directions() {
     let tuple = FlowTuple {
@@ -2294,6 +2301,7 @@ fn peer_wire_reassembly_rejects_gaps_conflicts_and_unknown_copy_directions() {
 proptest! {
     /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
     /// CONTRACT_SHAPE: pure-function.
+    #[overdrive_test(guest = "cgroup-default")]
     #[test]
     fn every_d7_decoder_and_oracle_error_fails_closed(
         capture_corruption in 0_u8..8,
@@ -2371,6 +2379,7 @@ where
 /// refused VMM spawn at the `Vmm` driven port: the capture-ready cut is
 /// abandoned without acknowledgement, so the production driver's spawn fails.
 /// CONTRACT_SHAPE: bounded-change (an early observation failure still awaits every fixture owner).
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
 async fn early_observation_failure_awaits_every_cleanup_owner_before_reporting() {
@@ -2453,6 +2462,7 @@ async fn early_observation_failure_awaits_every_cleanup_owner_before_reporting()
 /// S-GTI-08b — status 78 after READY and EXEC is an ordinary Job result.
 /// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
 async fn operator_exit_78_after_ready_is_an_ordinary_result() {

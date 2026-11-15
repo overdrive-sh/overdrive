@@ -160,5 +160,8 @@ tracing-subscriber.workspace = true
 # `VipRange` to `ServiceBackendsResolve::new` (netns-density-295 DG-2 row 14).
 overdrive-dataplane.path = "../overdrive-dataplane"
 
+# `#[overdrive_test]` places the guest-placed tests.
+overdrive-testing.workspace = true
+
 [lints]
 workspace = true
