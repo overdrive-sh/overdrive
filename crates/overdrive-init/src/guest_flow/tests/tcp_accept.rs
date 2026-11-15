@@ -21,6 +21,10 @@ use super::super::sim::{FarEndEvent, SimConnectTarget, SimGuestEffect};
 use super::super::test_support::ACCEPT_PATH_CASES;
 use super::*;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// INB-1 steps 2–4, the pinned order: the owner reads the 32-byte request,
 /// compares the launch token, checks the end of V_g (TCPACCEPT-END), creates C
 /// bound to the request's peer (`gateway:0`) and connects it to

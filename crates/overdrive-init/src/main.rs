@@ -1125,6 +1125,9 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
     use super::*;
+    use overdrive_testing::placement;
+
+    placement!(host_pure);
 
     struct ScratchRoot(std::path::PathBuf);
 

@@ -16,6 +16,10 @@ use super::super::HostChannel;
 use super::super::sim::{FarEndEvent, SimGuestEffect};
 use super::*;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// Steps 2 and 7: a captured `connect()` makes the owner connect V_g to the
 /// host stream port and write the TcpConnect request — guest origin, the original
 /// destination, the guest's own launch token — exactly once; the flow is in

@@ -19,6 +19,10 @@ use super::super::sim::{FarEndEvent, SimGuestEffect, SimGuestOp, SimSessionEnd};
 use super::super::{GuestListener, GuestOwnerFatal, HostChannel};
 use super::*;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// Plain data (real now): the three fatal variants render their pinned texts.
 /// CONTRACT_SHAPE: pure-function.
 #[test]

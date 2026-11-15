@@ -9,6 +9,10 @@ use proptest::prelude::*;
 
 use super::super::{SocketCookie, SocketCookieError};
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 proptest! {
     /// Every non-zero cookie round-trips through `new` / `get` and decimal
     /// `Display` / `FromStr`.

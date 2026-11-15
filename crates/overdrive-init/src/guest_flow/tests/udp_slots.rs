@@ -22,6 +22,10 @@ use overdrive_sim::adapters::{SimForwarderDevice, SimShutdown, SimSocket};
 use super::super::sim::SimGuestEffect;
 use super::*;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// The effects of the end-of-association order on `slot`, in log order.
 fn end_order(
     effects: &[SimGuestEffect],

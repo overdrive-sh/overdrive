@@ -94,6 +94,10 @@ use super::test_support::{GuestProcess, settle, start};
 use super::{GuestClock, GuestFlowOwner, HostChannel, SocketCookie};
 use crate::transport::{GuestHostPorts, GuestTransportToken};
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// The host listener ports the launch's `overdrive.transport=` token names
 /// (GUEST-PORTS, ADR-0217: `beacon=`, `stream=`, `control=`, read by the
 /// guest from its command line; it holds no host-port constant). The seam's

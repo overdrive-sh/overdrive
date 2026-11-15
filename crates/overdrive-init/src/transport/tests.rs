@@ -40,6 +40,10 @@ use proptest::prelude::*;
 
 use super::*;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 const WL: Ipv4Addr = Ipv4Addr::new(100, 95, 0, 7);
 const GW: Ipv4Addr = Ipv4Addr::new(100, 95, 0, 1);
 const LAUNCH_HEX: &str = "0123456789abcdef0123456789abcdef";

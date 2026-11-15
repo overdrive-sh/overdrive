@@ -16,6 +16,10 @@ use overdrive_sim::adapters::{SimFarEnd, SimShutdown};
 use super::super::sim::SimGuestEffect;
 use super::*;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// A paired TcpConnect flow (I half A, V_g half B) on a live session.
 fn paired(g: &mut Guest, n: u16) -> FlowId {
     g.open_session();

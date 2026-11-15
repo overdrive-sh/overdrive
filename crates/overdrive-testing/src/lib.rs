@@ -69,3 +69,6 @@ pub use overdrive_testing_macros::placement;
 /// `#[overdrive_test]` reads by plain name.
 #[cfg(target_os = "linux")]
 pub use overdrive_testing_macros::shared_guest;
+
+#[cfg(test)]
+overdrive_testing_macros::overdrive_test_default!(host_pure);
