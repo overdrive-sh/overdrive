@@ -2,7 +2,7 @@
 
 ## Status
 
-**Accepted — approved by the user, 2026-11-14 (DDD-5 in the feature delta).**
+**Accepted — approved by the user, 2026-11-14 (DDD-5 in the feature delta). The `mtls-relay` `fib-hit` profile (22 environments) was approved by the user, 2026-11-15.**
 
 ## Context
 
@@ -10,12 +10,15 @@ The guest group set is listed in the wrapper and in the dispatcher, and about a
 dozen hand-kept tables keyed by test name (plus one literal test name) choose
 staged files, loaded modules, setup scripts, memory and vCPUs per test. A
 renamed test silently drops its variant. The inventory (V-3) reduces them to 20
-environments over 8 groups.
+environments over 8 groups; two further variants (the Quint-replaying gateway
+tests, and the three XDP `fib-hit` tests whose veth and route setup was selected
+by test name) are named profiles too.
 
 ## Decision
 
 The guest kit holds one closed registry: the eight groups and, per group, named
-profiles (21 environments: the 20 of the inventory plus `quint`). The attribute selects `guest = "<group>"` and an
+profiles (22 environments: the 20 of the inventory plus `quint` and the
+`mtls-relay` profile `fib-hit`). The attribute selects `guest = "<group>"` and an
 optional `profile = "<profile>"` (omitted means the group's base profile),
 validated by constant evaluation against the registry, so a typo is a build
 error and the macro crate and the wrapper hold no group list. Each profile has
