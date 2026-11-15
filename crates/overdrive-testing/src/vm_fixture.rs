@@ -1086,7 +1086,7 @@ pub(crate) fn build_overdrive_init_static() -> Result<PathBuf, VmFixtureError> {
 pub(crate) fn workspace_root() -> PathBuf {
     // The ordinary Metal run-wrapper already validates this canonical source
     // owner. A selected Nextest manifest may be a standalone fixture workspace,
-    // so Cargo discovery from the dispatcher's inherited working directory can
+    // so Cargo discovery from the guest attempt's inherited working directory can
     // name that fixture instead of the checkout that owns prepared artifacts.
     if matches!(
         std::env::var("OVERDRIVE_METAL_EXECUTION_CLASS"),

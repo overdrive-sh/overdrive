@@ -56,7 +56,7 @@
 //!
 //! `cargo xtask metal run -- cargo nextest run -p overdrive-system-conformance
 //! --features integration-tests` runs them. Each runs in its own disposable
-//! `cgroup-default` guest (`infra/metal/test-placement.json`) with nested KVM,
+//! `cgroup-default` guest (declared on the test) with nested KVM,
 //! the Rust toolchain and the checked-in example sources staged by the guest
 //! suite; the Cloud Hypervisor Service VM is a nested guest.
 

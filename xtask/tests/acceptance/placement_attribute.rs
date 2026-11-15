@@ -13,8 +13,7 @@
 //!
 //! Contract of the resolver, first match wins: the test's own record; a
 //! `module_host_pure` record for exactly its module; the binary's
-//! `default_host_pure`; until retirement a table entry; otherwise
-//! `test_unclassified`. A binary with a default and a `guest`, `native_launcher`
+//! `default_host_pure`; otherwise `test_unclassified`. A binary with a default and a `guest`, `native_launcher`
 //! or lane record is a `placement_conflict`.
 
 #![allow(
@@ -262,8 +261,7 @@ fn all_output(output: &Output) -> String {
     format!("{}{}", stdout(output), String::from_utf8_lossy(&output.stderr))
 }
 
-/// Every kind a test declares on itself is placed, with no table entry and no
-/// Metal run context.
+/// Every kind a test declares on itself is placed, with no Metal run context.
 /// CONTRACT_SHAPE: pure-function (a list and records in, a report out).
 #[test]
 #[overdrive_test(host_pure)]
@@ -289,8 +287,7 @@ fn every_placement_a_test_declares_on_itself_is_placed() {
     );
 }
 
-/// A listed test with no record, no applicable declaration and no table entry
-/// is reported with its binary and its name, so the author learns before Metal.
+/// A listed test with no record and no applicable declaration is reported with its binary and its name, so the author learns before Metal.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
 #[overdrive_test(host_pure)]
@@ -446,16 +443,13 @@ struct OrdinaryRun {
 const RUN_ID: &str = "0123456789abcdef01234567";
 
 impl OrdinaryRun {
-    /// A source tree the wrapper accepts as a Metal checkout, with `table` as
-    /// its placement file.
-    fn new(table: &Value) -> Self {
+    /// A source tree the wrapper accepts as a Metal checkout.
+    fn new() -> Self {
         let source = tempfile::tempdir().expect("a scratch source tree");
         let root = fs::canonicalize(source.path()).expect("canonical source root");
         for marker in [".overdrive-metal-checkout.v1", ".overdrive-metal-source"] {
             fs::write(root.join(marker), b"fixture\n").expect("marker file");
         }
-        fs::create_dir_all(root.join("infra/metal")).expect("placement directory");
-        fs::write(root.join("infra/metal/test-placement.json"), table.to_string()).expect("table");
         fs::create_dir_all(root.join("target/metal-run-tmp").join(RUN_ID)).expect("run tmp");
         Self { source }
     }
@@ -485,10 +479,6 @@ impl OrdinaryRun {
     }
 }
 
-fn empty_table() -> Value {
-    json!({"format": "overdrive-metal-test-placement-v1", "placements": {}})
-}
-
 fn stderr_has(output: &Output, error: &str) -> bool {
     String::from_utf8_lossy(&output.stderr).contains(&format!("error={error}"))
 }
@@ -500,7 +490,7 @@ fn stderr_has(output: &Output, error: &str) -> bool {
 fn an_unplaced_test_is_refused_on_a_metal_run_before_its_body_runs() {
     let work = Workdir::new();
     let binary = work.binary("none", &[record("host_pure", "crate::other", &[])]);
-    let run = OrdinaryRun::new(&empty_table());
+    let run = OrdinaryRun::new();
     let output = run
         .wrapper("some-crate::integration", "m::plain_test", &binary, &[])
         .output()
@@ -519,7 +509,7 @@ fn a_binary_that_mixes_a_default_with_a_guest_record_is_refused_on_a_metal_run()
         "mixed",
         &[record("default_host_pure", "", &[]), record("guest", "crate::m::g", &["core", "", "0"])],
     );
-    let run = OrdinaryRun::new(&empty_table());
+    let run = OrdinaryRun::new();
     let output =
         run.wrapper("mixed::integration", "m::any", &binary, &[]).output().expect("wrapper");
     assert_eq!(output.status.code(), Some(78), "{}", all_output(&output));
@@ -533,7 +523,7 @@ fn a_binary_that_mixes_a_default_with_a_guest_record_is_refused_on_a_metal_run()
 fn an_unreadable_section_is_refused_on_a_metal_run_as_an_invalid_placement() {
     let work = Workdir::new();
     let binary = work.raw_binary("garbled", b"host_pure\0crate::m::t\0");
-    let run = OrdinaryRun::new(&empty_table());
+    let run = OrdinaryRun::new();
     let output =
         run.wrapper("some-crate::integration", "m::t", &binary, &[]).output().expect("wrapper");
     assert_eq!(output.status.code(), Some(78), "{}", all_output(&output));
@@ -546,7 +536,7 @@ fn an_unreadable_section_is_refused_on_a_metal_run_as_an_invalid_placement() {
 #[overdrive_test(host_pure)]
 fn a_declared_test_with_an_invalid_run_context_is_refused_by_the_run_context_check() {
     let this_binary = std::env::current_exe().expect("this test binary");
-    let run = OrdinaryRun::new(&empty_table());
+    let run = OrdinaryRun::new();
     let mut command = run.wrapper(
         "xtask::acceptance",
         &fixture_test("per_test_host_pure_fixture"),
@@ -570,7 +560,7 @@ fn a_test_that_declares_itself_host_pure_runs_without_a_namespace() {
     let work = Workdir::new();
     let report = work.path("namespace-report");
     let initial = fs::read_link("/proc/self/ns/net").expect("initial namespace");
-    let run = OrdinaryRun::new(&empty_table());
+    let run = OrdinaryRun::new();
     let output = run
         .wrapper("xtask::acceptance", &name, &this_binary, &["--exact", &name])
         .env("OVERDRIVE_PLACEMENT_FIXTURE_REPORT", &report)
@@ -603,7 +593,7 @@ fn a_test_that_declares_itself_a_native_launcher_runs_in_the_full_node_view() {
                 .into_owned()
         })
         .collect();
-    let run = OrdinaryRun::new(&empty_table());
+    let run = OrdinaryRun::new();
     let output = run
         .wrapper("xtask::acceptance", &name, &this_binary, &["--exact", &name])
         .env("OVERDRIVE_PLACEMENT_FIXTURE_REPORT", &report)
@@ -619,26 +609,6 @@ fn a_test_that_declares_itself_a_native_launcher_runs_in_the_full_node_view() {
         assert_ne!(inside, outside, "the {kind} namespace is private to a native launcher");
     }
     assert_eq!(lines[3], "local", "the network namespace is in vsock local mode");
-}
-
-/// While the table coexists a record wins over a table entry for the same test:
-/// the entry says guest and would need the dispatcher, which is absent, so only
-/// the record can place this run. CONTRACT_SHAPE: bounded-change.
-#[test]
-#[overdrive_test(host_pure)]
-fn a_record_wins_over_a_table_entry_for_the_same_test() {
-    let this_binary = std::env::current_exe().expect("this test binary");
-    let name = fixture_test("per_test_host_pure_fixture");
-    let table = json!({
-        "format": "overdrive-metal-test-placement-v1",
-        "placements": {"xtask::acceptance": {(name.clone()): {"kind": "guest-group", "group": "core"}}},
-    });
-    let run = OrdinaryRun::new(&table);
-    let output = run
-        .wrapper("xtask::acceptance", &name, &this_binary, &["--exact", &name])
-        .output()
-        .expect("wrapper");
-    assert!(output.status.success(), "{}", all_output(&output));
 }
 
 // ----- placement-lint -------------------------------------------------------
@@ -859,7 +829,7 @@ fn read(relative: &str) -> String {
 /// wrapper, the dispatcher binary and its environment variables are gone.
 /// CONTRACT_SHAPE: unbounded-preservation (reads the tree, writes nothing).
 #[test]
-#[ignore = "pending DELIVER: placement-table-and-dispatcher-retired"]
+#[overdrive_test(host_pure)]
 fn the_placement_table_the_lookup_and_the_dispatcher_are_retired() {
     assert!(
         !workspace_file("infra/metal/test-placement.json").exists(),
@@ -884,7 +854,7 @@ fn the_placement_table_the_lookup_and_the_dispatcher_are_retired() {
 /// and no longer the table or the explicit batched command.
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[test]
-#[ignore = "pending DELIVER: placement-table-and-dispatcher-retired"]
+#[overdrive_test(host_pure)]
 fn the_maintained_documents_describe_the_attribute_and_name_no_removed_path() {
     let rules = read(".claude/rules/testing.md");
     assert!(

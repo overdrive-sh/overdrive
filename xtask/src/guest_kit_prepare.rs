@@ -2,10 +2,10 @@
 //! native-metal lanes (GH #295, T-1; EVMOD-GUEST-KIT, ADR-0206).
 //!
 //! The guest-kit fixture (`overdrive_testing::guest_kit`, `guest_lane`)
-//! prepares the artifacts the guest-kit fixture and ordinary Metal nextest
-//! dispatcher consume: the forwarder module built for the running kernel, the
-//! static scripted peer, the static production init binary, the in-guest
-//! libtest binaries, and the host-side dispatcher. Building these before a
+//! prepares the artifacts the guest-kit fixture and the declared guest tests
+//! consume: the forwarder module built for the running kernel, the static
+//! scripted peer, the static production init binary, the in-guest libtest
+//! binaries, and the shared-guest owner. Building these before a
 //! selected attempt is not the test body's job: an on-demand `cargo` build
 //! inside nextest's per-attempt timeout can expire before the guest starts.
 //! The lane runs this step first, as its declared setup, and the fixture
@@ -31,7 +31,6 @@
 //! | the static scripted peer | `<musl-triple>/release/overdrive-guest-peer` | `guest_kit::GuestKit::provision` |
 //! | the static production init binary | `<target>/<musl-triple>/release/overdrive-init` | `vm_fixture::build_overdrive_init_static` |
 //! | an in-guest libtest binary | `guest-kit/in-guest/<package>--<bin>` | `guest_lane::InGuestTests::prepared` |
-//! | the nextest guest dispatcher | `<target>/debug/overdrive-fwd-guest-suite` | `OVERDRIVE_METAL_TEST_DISPATCHER` |
 //! | the shared-guest owner | `<target>/debug/overdrive-shared-guest-owner` | `placement::attach_shared` (refused as `LaneNotPrepared` naming this path when absent) |
 //! | the existing Quint CLI runtime closure | `<target>/guest-kit/quint-test-runtime` | the exact active Gateway conformance-test placement |
 
@@ -43,8 +42,6 @@ use color_eyre::eyre::{Result, WrapErr, bail, eyre};
 
 /// The name of the scripted peer's binary target in `overdrive-testing`.
 pub const GUEST_PEER_BIN: &str = "overdrive-guest-peer";
-/// The prepared host-side dispatcher used by the nextest run-wrapper.
-const GUEST_SUITE_BIN: &str = "overdrive-fwd-guest-suite";
 /// The prepared shared-guest owner a `shared_guest!` module's first test starts.
 const SHARED_GUEST_OWNER_BIN: &str = "overdrive-shared-guest-owner";
 
@@ -108,7 +105,7 @@ pub struct InGuestLane {
 ///   forwarded-outbound mTLS cell) plus the 18 already-authored STEP 13-04 and five
 ///   already-authored STEP 13-05 native cells, followed by the 20 existing
 ///   control-plane native bodies discovered by the normal package gate;
-///   executed by the existing guest-suite runner inside the same three fresh
+///   executed by the declared guest placement inside the same three fresh
 ///   disposable guests with a private cgroup-v2 mount. The two kvm-gated
 ///   integration binaries also stage STEP 14-01's and STEP 14-02's
 ///   already-authored production serve + deploy cells for nested execution
@@ -213,12 +210,6 @@ pub fn musl_target_triple() -> Result<&'static str> {
 #[must_use]
 pub fn guest_peer_path(target_dir: &Path, triple: &str) -> PathBuf {
     target_dir.join(triple).join("release").join(GUEST_PEER_BIN)
-}
-
-/// Where the prepared host-side guest dispatcher is written.
-#[must_use]
-fn guest_suite_path(target_dir: &Path) -> PathBuf {
-    target_dir.join("debug").join(GUEST_SUITE_BIN)
 }
 
 /// Where the prepared shared-guest owner is written.
@@ -626,7 +617,7 @@ pub fn run(workspace_root: &Path, target_dir: &Path) -> Result<()> {
 
     // GuestKit::provision uses this exact package/target/profile when it
     // re-verifies the fixture's production init. Prepare it before a nextest
-    // per-attempt timeout starts so dispatcher provisioning does not compile
+    // per-attempt timeout starts so guest provisioning does not compile
     // overdrive-init on the attempt's timed execution path.
     let mut overdrive_init_build = Command::new("cargo");
     overdrive_init_build
@@ -646,25 +637,19 @@ pub fn run(workspace_root: &Path, target_dir: &Path) -> Result<()> {
         eprintln!("guest-kit-prepare: {} {} -> {}", lane.package, lane.bin, staged.display());
     }
     let quint_runtime = prepare_quint_runtime(target_dir)?;
-    let mut guest_suite_build = Command::new("cargo");
-    guest_suite_build
+    let mut shared_guest_owner_build = Command::new("cargo");
+    shared_guest_owner_build
         .args([
             "build",
             "--package",
             "overdrive-testing",
-            "--bin",
-            GUEST_SUITE_BIN,
             "--bin",
             SHARED_GUEST_OWNER_BIN,
             "--features",
             "integration-tests",
         ])
         .current_dir(workspace_root);
-    run_step(
-        &mut guest_suite_build,
-        "building the prepared guest dispatcher and shared-guest owner",
-    )?;
-    require(&guest_suite_path(target_dir), GUEST_SUITE_BIN)?;
+    run_step(&mut shared_guest_owner_build, "building the prepared shared-guest owner")?;
     require(&shared_guest_owner_path(target_dir), SHARED_GUEST_OWNER_BIN)?;
     if let Some((quint_version, node_version, evaluator_version, files)) = quint_runtime {
         eprintln!(

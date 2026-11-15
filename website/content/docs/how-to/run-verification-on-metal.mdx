@@ -34,9 +34,9 @@ cargo xtask metal run -- cargo xtask guest-kit-prepare
 ```
 
 `guest-kit-prepare` builds the module, scripted guest peer, guest test binaries,
-and host guest-suite dispatcher. It builds artifacts without loading the
-physical host's module. A test wrapper refuses a missing dispatcher with
-`lane_not_prepared` and does not build it on demand.
+and shared-guest owner. It builds artifacts without loading the physical host's
+module. A guest test refuses a missing artifact with `LaneNotPrepared`, naming
+the path, and nothing builds it on demand.
 
 Each run syncs the checkout before starting its command. Use `--no-sync` only
 when the remote binding and source marker match the current checkout's exact
@@ -51,8 +51,9 @@ Run nextest through the ordinary entry point:
 cargo xtask metal run -- cargo nextest run -p overdrive-cli --features integration-tests,kvm-tests
 ```
 
-The checked-in wrapper looks up each exact nextest binary and test identity in
-`infra/metal/test-placement.json`:
+Each test declares its own placement with `#[overdrive_test(...)]`, which is
+recorded in the test binary. The checked-in wrapper reads the record of each
+exact nextest test identity:
 
 | Placement | Execution boundary |
 | --- | --- |
@@ -61,8 +62,9 @@ The checked-in wrapper looks up each exact nextest binary and test identity in
 | Guest group | Selected test binary in a fresh instance of its declared disposable guest group |
 | Guest-lane operator or owner | Existing first-level guest fixture and its matching host script |
 
-Missing, duplicate, or malformed placement refuses before the selected body
-runs. There is no default host placement for an unknown test.
+A missing, conflicting, or malformed placement refuses before the selected body
+runs, and `cargo xtask placement-lint` reports an unplaced test before any run.
+There is no default host placement for an unknown test.
 Native and guest launcher placement also requires kernel support and
 permission for local-mode vsock namespaces. Failed setup refuses before the
 selected body runs.

@@ -1757,10 +1757,10 @@ refuses before START with a stable diagnostic and status 64.
 | Element | Accepted |
 |---|---|
 | Prefix | Optional `env` (or `/usr/bin/env`) followed by `KEY=VALUE` words, then a literal `cargo`. Each key appears once. |
-| `env` keys | `OVERDRIVE_BPF_NATIVE` (value `1` only); `OVERDRIVE_FWD_GUEST_GROUP` (`all`, `probe`, `core`, `unload`, `ulp`, `mtls-relay`, `cgroup-default`, `stress`, `nested-boundary`); `OVERDRIVE_FWD_GUEST_EXACT`, `RUST_BACKTRACE`, `RUST_LOG`, `NEXTEST_PROFILE`, `QUINT_SEED`, `QUINT_VERBOSE`, and the `PROPTEST_` keys `CASES`, `DISABLE_FAILURE_PERSISTENCE`, `FORK`, `MAX_DEFAULT_SIZE_RANGE`, `MAX_FLAT_MAP_REGENS`, `MAX_GLOBAL_REJECTS`, `MAX_LOCAL_REJECTS`, `MAX_SHRINK_ITERS`, `MAX_SHRINK_TIME`, `RNG_ALGORITHM`, `RNG_SEED`, `TIMEOUT`, `VERBOSE` (free-form values must be valid UTF-8). Any other key refuses. |
+| `env` keys | `OVERDRIVE_BPF_NATIVE` (value `1` only); `RUST_BACKTRACE`, `RUST_LOG`, `NEXTEST_PROFILE`, `QUINT_SEED`, `QUINT_VERBOSE`, and the `PROPTEST_` keys `CASES`, `DISABLE_FAILURE_PERSISTENCE`, `FORK`, `MAX_DEFAULT_SIZE_RANGE`, `MAX_FLAT_MAP_REGENS`, `MAX_GLOBAL_REJECTS`, `MAX_LOCAL_REJECTS`, `MAX_SHRINK_ITERS`, `MAX_SHRINK_TIME`, `RNG_ALGORITHM`, `RNG_SEED`, `TIMEOUT`, `VERBOSE` (free-form values must be valid UTF-8). Any other key refuses. |
 | Cargo subcommand | `build`, `check`, `clippy`, `fmt`; `test` only with `--doc` before any `--`; `nextest run`; `xtask`; `run`. Cargo aliases and `+toolchain` forms are not subcommands and refuse. |
-| `xtask` subcommand | `guest-kit-prepare`, `bpf-build`, `bpf-clippy`, `bpf-unit`, `kmod-build`, `dst-lint`, `cloexec-lint`, `conformance-lint`, `yaml-free-cli`, `quint`, `mutants` |
-| `run` package and bin | `-p/--package` and `--bin` must name exactly `overdrive-sim`/`dst`, `overdrive-control-plane`/`openapi`, or `overdrive-testing`/`overdrive-fwd-guest-suite` (the last runs under the wrapper's guest-suite mode) |
+| `xtask` subcommand | `guest-kit-prepare`, `bpf-build`, `bpf-clippy`, `bpf-unit`, `kmod-build`, `dst-lint`, `cloexec-lint`, `conformance-lint`, `placement-lint`, `yaml-free-cli`, `quint`, `mutants` |
+| `run` package and bin | `-p/--package` and `--bin` must name exactly `overdrive-sim`/`dst` or `overdrive-control-plane`/`openapi` |
 | Refused flags (before `--`) | `--config`, `--config-file`, `--tool-config-file`, `--user-config-file`, `--debugger`, `--tracer`: `execution_override_refused`. `--archive-file`, `--archive-format`, `--extract-to`, `--extract-overwrite`, `--persist-extract-tempdir`, `--cargo-metadata`, `--binaries-metadata`, `--workspace-remap`, `--target-dir-remap`, `--build-dir-remap`: `artifact_scope_mismatch`. A `--manifest-path` or `--target-dir` that resolves outside the bound checkout and the run's scratch directory: `artifact_scope_mismatch`. |
 | `nextest run` extra check | `.config/nextest.toml` must still carry the Metal wrapper, `target-runner = "within-wrapper"` and `run-wrapper = "metal"`, and no `.cargo/config*` may set a `runner`; otherwise `execution_override_refused`. |
 
@@ -1851,72 +1851,107 @@ decides the isolation each body gets:
   namespace with its own bpffs and tmpfs over `/run/overdrive` and
   `/run/netns`, and a cgroup namespace rooted at a per-run cgroup with its own
   cgroup2 mount.
-- Guest placements run the guest-suite dispatcher in a network namespace in
-  vsock `local` mode only (no mount or cgroup namespace), and the body runs in
-  a fresh guest instance for each attempt.
+- Guest placements run the test's host half in a network namespace in
+  vsock `local` mode only (no mount or cgroup namespace); that half boots a
+  fresh guest of the declared group for each attempt and runs the one selected
+  test inside it.
 
-Unknown placement or missing dispatcher refuses before the test body.
-`cargo xtask guest-kit-prepare` incrementally prepares the existing
-guest-suite dispatcher alongside its existing artifacts. The explicit
-`overdrive-fwd-guest-suite` command keeps its existing batched groups.
+A test no placement record places refuses before the test body.
+`cargo xtask guest-kit-prepare` incrementally prepares the guest kit's
+artifacts; a guest test whose artifact is absent fails naming its path, and
+nothing builds it on demand.
 
 #### Test placement
 
-`infra/metal/test-placement.json` is the placement table the wrapper reads. It
-has exactly two top-level keys: `format`, which must be
-`overdrive-metal-test-placement-v1`, and `placements`. A placement is keyed
-first by the nextest binary id (`crate`, `crate::test-binary`, or
-`crate::bin/name`), then by the full test name nextest reports, and carries a
-descriptor:
+A test declares where it runs on itself, and the declaration is written into the
+test binary. There is no placement table and no name-keyed lookup; the wrapper
+reads the records of the binary it is asked to run.
 
-| `kind` | Extra fields | Isolation the wrapper applies |
+| Declaration | Where it goes | Places |
 |---|---|---|
-| `host-pure` | none | none; `exec` of the original chain |
-| `native-launcher` | none | full node view (network, mount, cgroup namespaces; own bpffs; per-run cgroup) |
-| `guest-group` | `group`: `probe`, `core`, `unload`, `ulp`, `mtls-relay`, `cgroup-default`, `stress` or `nested-boundary` | dispatcher in a local-mode vsock namespace; body in a fresh guest of that group (exported as `OVERDRIVE_FWD_GUEST_GROUP`) |
-| `guest-lane-operator` | `fixture`: `integration::in_guest_lane::<name>` | same namespace; fresh guest running the first-level in-guest fixture (`target/guest-kit/in-guest/overdrive-init--overdrive-init` must exist) |
-| `guest-lane-owner` | `fixture`: as above | as `guest-lane-operator`, owner side |
+| `#[overdrive_test(host_pure)]` | a test function | that test, on the original runner chain |
+| `#[overdrive_test(native_launcher)]` | a test function | that test, in the full node view (network, mount and cgroup namespaces; own bpffs; per-run cgroup) |
+| `#[overdrive_test(guest = "<group>"[, profile = "<profile>"])]` | a test function | that test, in a fresh guest of the group (and profile) |
+| `#[overdrive_test(lane_operator = "<fixture>")]`, `#[overdrive_test(lane_owner = "<fixture>")]` | a test function | that test, as the in-guest cell of the first-level fixture `integration::in_guest_lane::<name>`, operator or owner side |
+| `#[overdrive_test]` (no argument) | a test function inside a module that holds `shared_guest!(guest = "<group>"[, profile = "<profile>"])` | that test, in the one guest the tests of the module share |
+| `placement!(host_pure)` | a module | every test of exactly that module; a child module does not inherit it |
+| `overdrive_test_default!(host_pure)` | a host-only test binary, once | every test of the binary no narrower declaration places |
+
+Precedence is test, then module, then binary default. A binary with a
+`overdrive_test_default!` beside any record that is not host-pure (a guest,
+native-launcher or lane record) is refused as `placement_conflict`; a module
+declaration beside such a record is not a conflict.
+
+The groups and profiles are a closed registry: 22 environments over eight
+groups (`probe`, `core`, `unload`, `ulp`, `mtls-relay`, `cgroup-default`,
+`stress`, `nested-boundary`), defined in
+`crates/overdrive-testing/src/placement/groups.rs`. A group or profile outside it
+does not compile. A guest placement boots one fresh guest for each test, or
+shares one guest across the tests of a `shared_guest!` module.
+
+Attribute order. `#[overdrive_test]` is the first attribute of the function
+among those it reads: above `#[test]` / `#[tokio::test]` and `#[should_panic]`,
+because an attribute above it is not visible to it. `#[quint_test]` and
+`#[quint_run]` expand to the test attribute and are not read, so they stay above
+`#[overdrive_test]`. `#[should_panic]` composes with a guest placement: the
+host half reproduces the in-guest outcome for libtest. A body marked `#[ignore]`
+that is selected with `--run-ignored` runs in its guest like any other.
+Off a Metal run, or already inside a guest, a guest-placed body runs in place.
+
+The declaration is written as a record into the `overdrive_test_placement`
+section of the test binary. The wrapper reads that section from the selected
+test ELF and resolves the running test's record. `placement-lint` and the
+wrapper read the same records.
+
+`cargo xtask placement-lint` lists the workspace's tests with the
+`integration-tests` feature and each member's own `kvm-tests` feature, reads the
+records of every listed binary and reports, one line each, a test no record
+places (`unplaced <binary-id> <test>`), a binary with a default beside a
+non-host-pure record (`conflict <binary-id>`) and a lane test whose fixture is
+not a listed test of its package (`missing-fixture <binary-id> <test>
+<fixture>`). A listing that fails, or a binary it cannot read, is an error. It
+runs in pre-push and in CI, so an unplaced test is found before any Metal run.
 
 Placement applies only to ordinary Metal runs. `--exclusive` runs set
 `OVERDRIVE_METAL_EXECUTION_CLASS=exclusive` and the wrapper `exec`s the
 original chain; a run with no Metal context (Lima, CI, a developer shell)
-`exec`s it unchanged as well. Neither consults the table.
+`exec`s it unchanged as well. Neither consults the records.
 
-Every ordinary-run failure is a wrapper diagnostic printed as
+Every ordinary-run failure the wrapper reports is a diagnostic printed as
 `OVERDRIVE_METAL_TEST_ERROR error=<name>` before the test body starts:
 
 | Diagnostic | Status | Cause |
 |---|---|---|
-| `test_unclassified` | 78 | no entry for this binary id and test name |
-| `placement_ambiguous` | 78 | the file repeats a key (duplicate binary id or test name) |
-| `placement_invalid` | 78 | file missing, a symlink, not valid JSON, wrong `format`, or an unknown kind, group, field or fixture shape |
+| `test_unclassified` | 78 | no record or declaration places this test |
+| `placement_conflict` | 78 | the binary has a default beside a non-host-pure record |
+| `placement_invalid` | 78 | a record of the binary is malformed, or names an unknown kind or group |
 | `invalid_run_context` (`field=...`) | 78 | the Metal run context (class, run id, source root, scratch directory) does not validate |
-| `lane_not_prepared` | 78 | dispatcher (or in-guest binary) missing, outside `target/`, or not executable |
 | `namespace_setup_failed` (`step=...`, `errno=...`) | 70 | a namespace, mount or cgroup step failed; it never falls back to the host |
 
-The file is hand-maintained, and no gate checks that it is complete. A new or
-renamed integration test with no entry first fails on a Metal run, as
-`test_unclassified`, not in review or in the default lane. Authoring rules:
+A guest test whose guest kit is not prepared, or whose guest fails to boot or
+return, fails inside the test itself with a typed error naming the group, the
+test and the stage; the wrapper does not report it.
 
-- Add the entry in the same commit that adds or renames the test.
+Authoring rules:
+
+- Add the declaration in the same commit that adds or renames the test.
 - A body that mutates node-global kernel state (nft, routes or rules, links,
   BPF programs, maps or pins, cgroups, netns, vsock) or boots `serve` is never
-  `host-pure`.
+  host-pure.
 - **Default to a guest group.** A body that boots `serve`, mutates kernel
-  state, or needs a module or the guest-suite dispatcher runs in the matching
-  `guest-group`. Use `cgroup-default` for `serve`-booting bodies, because every
-  `cgroup-default` guest boots `serve`. Use a guest-lane kind for an in-guest
-  fixture. The guest is the isolation boundary, and the guest kit exists to
-  provide it.
+  state, or needs a module runs in the matching guest group. Use
+  `cgroup-default` for `serve`-booting bodies, because every `cgroup-default`
+  guest boots `serve`. Use a lane form for an in-guest fixture. The guest is the
+  isolation boundary, and the guest kit exists to provide it.
 - **Neither KVM nor `serve` is a reason to run on the host.** Guest groups run
   nested virtualization: `cgroup-default` guests boot `serve` and launch real
   workload VMs as nested Cloud Hypervisor guests.
-- **A product test is never `native-launcher`.** `native-launcher` is only for
+- **A product test is never `native_launcher`.** `native_launcher` is only for
   tests of the Metal runner itself, such as the wrapper's own namespace
   fixtures, which have to run where the wrapper runs. A product test that
   seems to need the host is a gap in the guest kit: surface it, and do not
   place the test on the host.
-- Only a body with no node-global effect is `host-pure`.
+- Only a body with no node-global effect is host-pure.
 
 Prepare and load guest prerequisites as separate commands, preserving the
 physical-host module-load boundary:

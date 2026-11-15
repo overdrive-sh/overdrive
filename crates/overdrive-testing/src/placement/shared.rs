@@ -39,8 +39,7 @@ pub const OWNER_BINARY: &str = "overdrive-shared-guest-owner";
 pub const SHARED_GUEST_IDLE: Duration = Duration::from_secs(30);
 
 /// The bound on one shared exec (the profile's per-test setup, the test body
-/// and the profile's cleanup together): the cell bound the same bodies ran
-/// under in the batched dispatcher.
+/// and the profile's cleanup together): the cell bound of the groups' bodies.
 pub fn exec_bound(group: &str, profile: &str) -> Duration {
     if profile == "nested-cohort" {
         Duration::from_secs(1_200)

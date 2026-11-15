@@ -6,7 +6,7 @@
 //! every listed test binary and reports, one line each on stderr:
 //!
 //! - `placement-lint: unplaced <binary-id> <test>` for a test no record of its
-//!   own, of its module or of its binary places and no table entry places;
+//!   own, of its module or of its binary places;
 //! - `placement-lint: conflict <binary-id>` for a binary with a default beside
 //!   a record that is not host-pure;
 //! - `placement-lint: missing-fixture <binary-id> <test> <fixture>` for a
@@ -17,18 +17,14 @@
 //! read is an error, never a skipped file.
 
 use std::collections::BTreeMap;
-use std::io::Write;
 use std::path::Path;
 use std::process::Command;
 
 use color_eyre::eyre::{Result, WrapErr, eyre};
-use serde_json::{Value, json};
+use serde_json::Value;
 
 /// The ELF section the placement records are written to.
 const SECTION: &[u8] = b"overdrive_test_placement";
-
-/// The placement table consulted for a test no record places, until it retires.
-const TABLE: &str = "infra/metal/test-placement.json";
 
 /// The kinds of record that place one test.
 const PER_TEST: [&str; 5] =
@@ -42,22 +38,14 @@ const KVM_FEATURE: &str = "kvm-tests";
 
 /// Runs the lint from the workspace root; `Err` when it reported anything.
 ///
-/// With `emit` it prints the placements the records resolve, as JSON, and
-/// reports nothing (migration only).
-///
 /// # Errors
 ///
 /// The test listing fails, a listed binary cannot be read, or a finding was
 /// reported.
-pub fn run(emit: bool) -> Result<()> {
+pub fn run() -> Result<()> {
     let listing = list_tests()?;
     let suites = suites(&listing)?;
-    if emit {
-        let json = serde_json::to_string_pretty(&emitted(&suites))?;
-        writeln!(std::io::stdout().lock(), "{json}").wrap_err("writing the placements")?;
-        return Ok(());
-    }
-    let findings = findings(&suites)?;
+    let findings = findings(&suites);
     for finding in &findings {
         eprintln!("placement-lint: {finding}");
     }
@@ -205,8 +193,7 @@ fn suites(listing: &Value) -> Result<Vec<Suite>> {
         .collect()
 }
 
-fn findings(suites: &[Suite]) -> Result<Vec<String>> {
-    let mut table = Table::default();
+fn findings(suites: &[Suite]) -> Vec<String> {
     let mut findings = Vec::new();
     for suite in suites {
         if suite.conflicts() {
@@ -214,13 +201,13 @@ fn findings(suites: &[Suite]) -> Result<Vec<String>> {
             continue;
         }
         for (test, ignored) in &suite.tests {
-            if !ignored && suite.record_for(test).is_none() && !table.places(&suite.id, test)? {
+            if !ignored && suite.record_for(test).is_none() {
                 findings.push(format!("unplaced {} {test}", suite.id));
             }
         }
         findings.extend(missing_fixtures(suite, suites));
     }
-    Ok(findings)
+    findings
 }
 
 /// The lane records of `suite` whose fixture no binary of the package lists.
@@ -244,66 +231,6 @@ fn missing_fixtures(suite: &Suite, suites: &[Suite]) -> Vec<String> {
         }
     }
     missing
-}
-
-/// The placement table, read once and only when a test needs it.
-#[derive(Default)]
-struct Table {
-    placements: Option<Value>,
-}
-
-impl Table {
-    fn places(&mut self, binary_id: &str, test: &str) -> Result<bool> {
-        if self.placements.is_none() {
-            self.placements = Some(read_table()?);
-        }
-        Ok(self
-            .placements
-            .as_ref()
-            .and_then(|placements| placements.get(binary_id))
-            .and_then(|tests| tests.get(test))
-            .is_some())
-    }
-}
-
-fn read_table() -> Result<Value> {
-    let text =
-        std::fs::read_to_string(TABLE).wrap_err_with(|| format!("reading the table {TABLE}"))?;
-    let mut table: Value =
-        serde_json::from_str(&text).wrap_err_with(|| format!("{TABLE} is not JSON"))?;
-    match table.get_mut("placements").map(Value::take) {
-        Some(placements) if placements.is_object() => Ok(placements),
-        _ => Err(eyre!("{TABLE} has no `placements` object")),
-    }
-}
-
-/// The placements the records resolve, in the table's descriptor shape:
-/// binary id, then test, then descriptor. Tests no record places are absent.
-fn emitted(suites: &[Suite]) -> Value {
-    let mut placements = serde_json::Map::new();
-    for suite in suites {
-        let mut tests = serde_json::Map::new();
-        for test in suite.tests.keys() {
-            if let Some((kind, arguments)) = suite.record_for(test) {
-                tests.insert(test.clone(), descriptor(kind, arguments));
-            }
-        }
-        if !tests.is_empty() {
-            placements.insert(suite.id.clone(), Value::Object(tests));
-        }
-    }
-    json!({"format": "overdrive-metal-test-placement-v1", "placements": placements})
-}
-
-fn descriptor(kind: &str, arguments: &[String]) -> Value {
-    let first = arguments.first().cloned().unwrap_or_default();
-    match kind {
-        "native_launcher" => json!({"kind": "native-launcher"}),
-        "guest" => json!({"kind": "guest-group", "group": first}),
-        "lane_operator" => json!({"kind": "guest-lane-operator", "fixture": first}),
-        "lane_owner" => json!({"kind": "guest-lane-owner", "fixture": first}),
-        _ => json!({"kind": "host-pure"}),
-    }
 }
 
 /// The records of the binary at `path`.

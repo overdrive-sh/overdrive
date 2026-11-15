@@ -28,7 +28,7 @@
 //!
 //! Lane: `cargo xtask metal run -- cargo nextest run -p overdrive-init
 //! --features integration-tests,kvm-tests`. Each case runs in its own
-//! disposable `cgroup-default` guest (`infra/metal/test-placement.json`), so the
+//! disposable `cgroup-default` guest (declared on the test), so the
 //! beacon and control ports the lane binds are that guest's own and the cell's
 //! guest is a nested Cloud Hypervisor microVM. CIDs from the
 //! [`INIT_IN_GUEST_LANE`] band, one per case.

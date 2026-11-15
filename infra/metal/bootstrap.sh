@@ -100,7 +100,6 @@ validate_ordinary_command() {
   local position
   local -a seen_environment=()
   ORDINARY_NEXTTEST=0
-  ORDINARY_SUITE_RUN=0
   if [ "${#RUN_ARGS[@]}" -eq 0 ]; then
     unsupported_ordinary_command
   fi
@@ -119,13 +118,7 @@ validate_ordinary_command() {
         OVERDRIVE_BPF_NATIVE)
           [ "$value" = 1 ] || unsupported_ordinary_command
           ;;
-        OVERDRIVE_FWD_GUEST_GROUP)
-          case "$value" in
-            all|probe|core|unload|ulp|mtls-relay|cgroup-default|stress|nested-boundary) ;;
-            *) unsupported_ordinary_command ;;
-          esac
-          ;;
-        OVERDRIVE_FWD_GUEST_EXACT|RUST_BACKTRACE|RUST_LOG|NEXTEST_PROFILE|\
+        RUST_BACKTRACE|RUST_LOG|NEXTEST_PROFILE|\
         PROPTEST_CASES|PROPTEST_DISABLE_FAILURE_PERSISTENCE|PROPTEST_FORK|\
         PROPTEST_MAX_DEFAULT_SIZE_RANGE|PROPTEST_MAX_FLAT_MAP_REGENS|\
         PROPTEST_MAX_GLOBAL_REJECTS|PROPTEST_MAX_LOCAL_REJECTS|\
@@ -202,9 +195,6 @@ validate_ordinary_command() {
         position=$((position + 1))
       done
       case "$package/$binary" in
-        overdrive-testing/overdrive-fwd-guest-suite)
-          ORDINARY_SUITE_RUN=1
-          ;;
         overdrive-sim/dst|overdrive-control-plane/openapi) ;;
         *) unsupported_ordinary_command ;;
       esac
@@ -668,10 +658,8 @@ if [ "${COLLECT_MODE}" -eq 0 ]; then
   METAL_TREE_OWNER_PATH="${OVERDRIVE_METAL_TREE_OWNER_PATH:-/run/lock/overdrive-metal-tree-${TREE_HASH}.owner}"
 fi
 METAL_RUN_TMP=""
-METAL_TEST_DISPATCHER=""
 if [ "${RUN_MODE}" -eq 1 ]; then
   METAL_RUN_TMP="${REMOTE_DIR}/target/metal-run-tmp/${RUN_ID}"
-  METAL_TEST_DISPATCHER="${REMOTE_DIR}/target/debug/overdrive-fwd-guest-suite"
   if [ "${EXCLUSIVE_MODE}" -eq 0 ]; then
     validate_remote_artifact_paths
   fi
@@ -786,15 +774,11 @@ if [ "${RUN_MODE}" -eq 1 ]; then
     JOINED+="${QUOTED} "
   done
   RUN_EXEC="${JOINED}"
-  if [ "${EXCLUSIVE_MODE}" -eq 0 ] && [ "${ORDINARY_SUITE_RUN}" -eq 1 ]; then
-    printf -v RUN_EXEC 'bash %q --guest-suite %s' \
-      "${REMOTE_DIR}/infra/metal/test-wrapper.sh" "${JOINED}"
-  fi
   printf -v REMOTE_CWD 'cd %q' "${REMOTE_DIR}"
   printf -v METAL_RUN_ENV \
-    'TMPDIR=%q OVERDRIVE_METAL_RUN_ID=%q OVERDRIVE_METAL_EXECUTION_CLASS=%q OVERDRIVE_METAL_SOURCE_ROOT=%q OVERDRIVE_METAL_TEST_DISPATCHER=%q OVERDRIVE_METAL_KERNEL=%q OVERDRIVE_METAL_ROOTFS=%q' \
+    'TMPDIR=%q OVERDRIVE_METAL_RUN_ID=%q OVERDRIVE_METAL_EXECUTION_CLASS=%q OVERDRIVE_METAL_SOURCE_ROOT=%q OVERDRIVE_METAL_KERNEL=%q OVERDRIVE_METAL_ROOTFS=%q' \
     "${METAL_RUN_TMP}" "${RUN_ID}" "${EXECUTION_CLASS}" "${REMOTE_DIR}" \
-    "${METAL_TEST_DISPATCHER}" "${OVERDRIVE_METAL_KERNEL:-}" "${OVERDRIVE_METAL_ROOTFS:-}"
+    "${OVERDRIVE_METAL_KERNEL:-}" "${OVERDRIVE_METAL_ROOTFS:-}"
   if [ "${NO_SUDO}" -eq 1 ]; then
     INNER="${REMOTE_CWD} && env ${METAL_RUN_ENV} ${RUN_EXEC}; rc=\$?; exit \"\$rc\""
     EXECUTION_MODE="login"

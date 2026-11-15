@@ -72,13 +72,6 @@ tokio.workspace          = true
 name = "overdrive-guest-peer"
 path = "bin/guest_peer.rs"
 
-# Host-side runner for the overdrive-fwd module suite. It runs the staged
-# integration binary only inside disposable GuestKit Cloud Hypervisor guests;
-# the physical metal kernel is launch substrate, never the module SUT.
-[[bin]]
-name = "overdrive-fwd-guest-suite"
-path = "bin/fwd_guest_suite.rs"
-
 # The shared-guest owner (`overdrive_testing::placement::owner`): the process
 # the first test of a `shared_guest!` declaration starts and the later tests
 # attach to.

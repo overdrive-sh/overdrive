@@ -67,7 +67,8 @@ These rules apply to everything under `tests/conformance/` and specialize
   Metal runner for tests that need KVM or real guest/kernel behavior.
 - The `native_metal_kvm_*` tests are active. Their name is historical: each one
   runs in its own disposable `cgroup-default` guest with nested KVM
-  (`infra/metal/test-placement.json`), never on the host. Run them with an
+  (declared on each test with `#[overdrive_test(guest = "cgroup-default")]`),
+  never on the host. Run them with an
   ordinary `cargo xtask metal run -- cargo nextest run -p
   overdrive-system-conformance --features integration-tests`, never
   `--exclusive`. The guest suite stages the Rust toolchain, the `cc` linker

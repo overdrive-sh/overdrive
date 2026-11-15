@@ -34,7 +34,7 @@
 //! Lane: `integration-tests,kvm-tests`, through the Metal runner
 //! (`cargo xtask metal run -- cargo nextest run -p overdrive-host --features
 //! integration-tests,kvm-tests`). Each case runs in its own disposable
-//! `cgroup-default` guest (`infra/metal/test-placement.json`) and launches the
+//! `cgroup-default` guest (declared on the test) and launches the
 //! VMM as a nested Cloud Hypervisor guest. The device cases need the pinned fork and
 //! its launch argument (DELIVER step 3); the reset cases need the fork
 //! commit that carries RESET-EXIT (DELIVER step 1).

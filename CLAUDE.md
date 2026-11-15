@@ -396,6 +396,15 @@ When dispatching `@nw-solution-architect` (or any DESIGN-wave agent) for a featu
 
 `des.cli.roadmap validate` flags length-limit warnings (`STEP_NAME_TOO_LONG`, `CRITERIA_TOO_LONG`, `DESCRIPTION_TOO_LONG`) that are cosmetic and non-blocking — the validator exits 0 anyway. Overdrive roadmap ACs deliberately carry scenario-level specificity (test names, invariant names, proptest targets, kill-rate thresholds), and tightening them to the defaults would lose traceability. Ignore these warnings; do not ask the crafter to trim them.
 
+## Declare where a Metal test runs on the test
+
+Every new or renamed integration test carries its placement declaration
+(`#[overdrive_test(...)]`, `placement!(host_pure)` or
+`overdrive_test_default!(host_pure)`) in the same commit. There is no placement
+table. `cargo xtask placement-lint` reports an unplaced test before any Metal
+run. The forms, precedence and authoring rules are in
+`.claude/rules/testing.md` § "Test placement".
+
 ## Build vertical slices through production entry points — never isolated mechanisms
 
 Every feature must be **driven end-to-end through the production entry

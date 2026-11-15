@@ -168,13 +168,7 @@ impl Fixture {
             fs::create_dir_all(path).expect("fixture directory");
         }
         fs::create_dir_all(source.join("infra/metal")).expect("script directory");
-        for name in [
-            "bootstrap.sh",
-            "lease-holder.sh",
-            "native-preflight.sh",
-            "test-wrapper.sh",
-            "test-placement.json",
-        ] {
+        for name in ["bootstrap.sh", "lease-holder.sh", "native-preflight.sh", "test-wrapper.sh"] {
             let original = workspace_file(&format!("infra/metal/{name}"));
             if original.is_file() {
                 fs::copy(original, source.join("infra/metal").join(name))
@@ -266,7 +260,6 @@ impl Fixture {
             "OVERDRIVE_METAL_RUN_ID",
             "OVERDRIVE_METAL_EXECUTION_CLASS",
             "OVERDRIVE_METAL_SOURCE_ROOT",
-            "OVERDRIVE_METAL_TEST_DISPATCHER",
         ] {
             command.env_remove(key);
         }
@@ -549,4 +542,65 @@ impl Drop for Durable {
             let _ = fs::write(self.output.with_extension("fixture-cleanup"), evidence);
         }
     }
+}
+
+/// One record of the `overdrive_test_placement` section a test declares on
+/// itself: `<kind> NUL <test> NUL <argc> NUL <args...>`.
+pub fn record(kind: &str, test: &str, args: &[&str]) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    for field in [kind, test, &args.len().to_string()].into_iter().chain(args.iter().copied()) {
+        bytes.extend_from_slice(field.as_bytes());
+        bytes.push(0);
+    }
+    bytes
+}
+
+/// `original`, a 64-bit little-endian ELF executable, with `section` appended as
+/// its `overdrive_test_placement` section. The program segments are untouched,
+/// so the file still runs exactly as `original` does.
+pub fn elf_with_appended_placement(original: &[u8], section: &[u8]) -> Vec<u8> {
+    const NAME: &[u8] = b"overdrive_test_placement";
+    let word = |at: usize, width: usize| {
+        original[at..at + width]
+            .iter()
+            .rev()
+            .fold(0_usize, |value, byte| value << 8 | usize::from(*byte))
+    };
+    let (table, entry_size, count, names_index) =
+        (word(40, 8), word(58, 2), word(60, 2), word(62, 2));
+    let names_entry = table + names_index * entry_size;
+    let (names_offset, names_size) = (word(names_entry + 24, 8), word(names_entry + 32, 8));
+    let mut names = original[names_offset..names_offset + names_size].to_vec();
+    let section_name = u32::try_from(names.len()).expect("a small offset");
+    names.extend_from_slice(NAME);
+    names.push(0);
+
+    let mut file = original.to_vec();
+    file.resize(file.len().next_multiple_of(8), 0);
+    let data_offset = file.len();
+    file.extend_from_slice(section);
+    file.resize(file.len().next_multiple_of(8), 0);
+    let new_names_offset = file.len();
+    file.extend_from_slice(&names);
+    file.resize(file.len().next_multiple_of(8), 0);
+    let new_table = file.len();
+
+    let mut entries = original[table..table + count * entry_size].to_vec();
+    let names_header = names_index * entry_size;
+    entries[names_header + 24..names_header + 32]
+        .copy_from_slice(&(new_names_offset as u64).to_le_bytes());
+    entries[names_header + 32..names_header + 40]
+        .copy_from_slice(&(names.len() as u64).to_le_bytes());
+    let mut added = vec![0_u8; entry_size];
+    added[..4].copy_from_slice(&section_name.to_le_bytes());
+    added[4..8].copy_from_slice(&1_u32.to_le_bytes());
+    added[24..32].copy_from_slice(&(data_offset as u64).to_le_bytes());
+    added[32..40].copy_from_slice(&(section.len() as u64).to_le_bytes());
+    added[48..56].copy_from_slice(&1_u64.to_le_bytes());
+    entries.extend_from_slice(&added);
+    file.extend_from_slice(&entries);
+
+    file[40..48].copy_from_slice(&(new_table as u64).to_le_bytes());
+    file[60..62].copy_from_slice(&u16::try_from(count + 1).expect("a small count").to_le_bytes());
+    file
 }

@@ -16,27 +16,18 @@ invalid_context() {
   test_error invalid_run_context 78 "field=$1"
 }
 
-GUEST_SUITE_MODE=0
-if [ "${1:-}" = --guest-suite ]; then
-  GUEST_SUITE_MODE=1
-  shift
-fi
-
 # The placement resolver, shared by an ordinary run (`run`) and the eager check
 # (`check`). A test is placed by, first match wins: its own record; a
 # `module_host_pure` record for exactly its module; the binary's
-# `default_host_pure`; until the table retires, its table entry; otherwise it
-# is unplaced. A record is a sequence of NUL-terminated fields `<kind>`,
+# `default_host_pure`; otherwise it is unplaced. A record is a sequence of NUL-terminated fields `<kind>`,
 # `<test>`, `<argc>`, then `argc` arguments, in the `overdrive_test_placement`
 # section of the test binary; `<test>` and a module record's path start at the
 # crate segment, which is dropped to compare with nextest's names.
 #
-# Exit status of `run`: 0 placed (prints `kind US group US fixture`), 11 the
-# table repeats a key, 12 unplaced, 13 invalid (prints the detail), 15 conflict.
+# Exit status of `run`: 0 placed (prints `kind US group US fixture`), 12
+# unplaced, 13 invalid (prints the detail), 15 conflict.
 read -r -d '' PLACEMENT_PY <<'PY' || true
 import json
-import os
-import re
 import struct
 import sys
 
@@ -62,9 +53,6 @@ RECORD_KIND = {
 }
 
 class Invalid(Exception):
-    pass
-
-class DuplicateKey(Exception):
     pass
 
 class Unclassified(Exception):
@@ -165,74 +153,15 @@ def record_placement(kind, arguments):
     fixture = arguments[0] if kind in {"lane_operator", "lane_owner"} else ""
     return RECORD_KIND[kind], group, fixture
 
-def unique_object(pairs):
-    result = {}
-    for key, value in pairs:
-        if key in result:
-            raise DuplicateKey(key)
-        result[key] = value
-    return result
-
-def valid_descriptor(value):
-    if not isinstance(value, dict) or not isinstance(value.get("kind"), str):
-        return False
-    kind = value["kind"]
-    if kind in {"host-pure", "native-launcher"}:
-        return set(value) == {"kind"}
-    if kind == "guest-group":
-        return set(value) == {"kind", "group"} and value.get("group") in GROUPS
-    if kind in {"guest-lane-operator", "guest-lane-owner"}:
-        fixture = value.get("fixture")
-        return (
-            set(value) == {"kind", "fixture"}
-            and isinstance(fixture, str)
-            and re.fullmatch(r"integration::in_guest_lane::[A-Za-z0-9_]+", fixture) is not None
-        )
-    return False
-
-def load_table(path):
-    if not os.path.isfile(path) or os.path.islink(path):
-        raise Invalid("")
-    try:
-        with open(path, encoding="utf-8") as source:
-            policy = json.load(source, object_pairs_hook=unique_object)
-    except DuplicateKey:
-        raise
-    except Exception:
-        raise Invalid("")
-    if (
-        not isinstance(policy, dict)
-        or set(policy) != {"format", "placements"}
-        or policy.get("format") != "overdrive-metal-test-placement-v1"
-        or not isinstance(policy.get("placements"), dict)
-    ):
-        raise Invalid("")
-    for binary_id, tests in policy["placements"].items():
-        if not isinstance(binary_id, str) or not binary_id or not isinstance(tests, dict):
-            raise Invalid("")
-        for test_name, descriptor in tests.items():
-            if not isinstance(test_name, str) or not test_name or not valid_descriptor(descriptor):
-                raise Invalid("")
-    return policy["placements"]
-
-def table_placement(table, binary_id, test_name):
-    descriptor = table.get(binary_id, {}).get(test_name)
-    if descriptor is None:
-        raise Unclassified()
-    return descriptor["kind"], descriptor.get("group", ""), descriptor.get("fixture", "")
-
-def run(binary_path, binary_id, test_name, table_path):
+def run(binary_path, test_name):
     try:
         records = read_records(binary_path)
         if has_conflict(records):
             raise SystemExit(15)
         found = resolve_record(records, test_name)
-        if found is not None:
-            placement = record_placement(*found)
-        else:
-            placement = table_placement(load_table(table_path), binary_id, test_name)
-    except DuplicateKey:
-        raise SystemExit(11)
+        if found is None:
+            raise Unclassified()
+        placement = record_placement(*found)
     except Unclassified:
         raise SystemExit(12)
     except Invalid as problem:
@@ -240,10 +169,8 @@ def run(binary_path, binary_id, test_name, table_path):
         raise SystemExit(13)
     print("\x1f".join(placement))
 
-def check(table_path):
+def check():
     listing = json.load(sys.stdin)
-    table = None
-    table_unreadable = False
     findings = False
     invalid = False
     for suite in listing.get("rust-suites", {}).values():
@@ -261,44 +188,30 @@ def check(table_path):
         for test_name, case in suite.get("testcases", {}).items():
             # An ignored test never reaches the wrapper; it is placed when its
             # pending marker is removed.
-            if (
-                case.get("ignored")
-                or table_unreadable
-                or resolve_record(records, test_name) is not None
-            ):
+            if case.get("ignored") or resolve_record(records, test_name) is not None:
                 continue
-            try:
-                if table is None:
-                    table = load_table(table_path)
-                table_placement(table, binary_id, test_name)
-            except Unclassified:
-                print("unplaced", binary_id, test_name)
-                findings = True
-            except (Invalid, DuplicateKey):
-                print("placement_invalid", "table", file=sys.stderr)
-                invalid = True
-                table_unreadable = True
+            print("unplaced", binary_id, test_name)
+            findings = True
     raise SystemExit(78 if invalid else 1 if findings else 0)
 
 if sys.argv[1] == "run":
-    run(*sys.argv[2:6])
+    run(*sys.argv[2:4])
 else:
-    check(sys.argv[2])
+    check()
 PY
 
 # `--check-placement` reads `nextest list --message-format json` on stdin and
-# reports the tests no record or table entry places (`unplaced <binary-id>
+# reports the tests no record places (`unplaced <binary-id>
 # <test>`) and the binaries with a default beside a non-host-pure record
 # (`conflict <binary-id>`). It needs no Metal run context.
 if [ "${1:-}" = --check-placement ]; then
-  exec python3 -c "$PLACEMENT_PY" check "$(dirname -- "${BASH_SOURCE[0]}")/test-placement.json"
+  exec python3 -c "$PLACEMENT_PY" check
 fi
 
 # No Metal context means nextest has no reason to alter the configured runner.
 if [ -z "${OVERDRIVE_METAL_RUN_ID:-}" ] && \
   [ -z "${OVERDRIVE_METAL_EXECUTION_CLASS:-}" ] && \
-  [ -z "${OVERDRIVE_METAL_SOURCE_ROOT:-}" ] && \
-  [ -z "${OVERDRIVE_METAL_TEST_DISPATCHER:-}" ]; then
+  [ -z "${OVERDRIVE_METAL_SOURCE_ROOT:-}" ]; then
   exec "$@"
 fi
 
@@ -330,28 +243,24 @@ esac
 PLACEMENT_KIND=""
 PLACEMENT_GROUP=""
 PLACEMENT_FIXTURE=""
-if [ "$GUEST_SUITE_MODE" -eq 0 ]; then
-  [ "$#" -gt 0 ] || test_error test_unclassified 78
-  BINARY_ID="${NEXTEST_BINARY_ID:-}"
-  TEST_NAME="${NEXTEST_TEST_NAME:-}"
-  [ -n "$BINARY_ID" ] && [ -n "$TEST_NAME" ] || test_error test_unclassified 78
+[ "$#" -gt 0 ] || test_error test_unclassified 78
+BINARY_ID="${NEXTEST_BINARY_ID:-}"
+TEST_NAME="${NEXTEST_TEST_NAME:-}"
+[ -n "$BINARY_ID" ] && [ -n "$TEST_NAME" ] || test_error test_unclassified 78
 
-  # The test binary carries the placement records its declarations wrote; the
-  # table is consulted only for a test no record places.
-  set +e
-  PLACEMENT="$(python3 -c "$PLACEMENT_PY" run "$1" "$BINARY_ID" "$TEST_NAME" \
-    "$SOURCE_ROOT/infra/metal/test-placement.json")"
-  PARSER_STATUS=$?
-  set -e
-  case "$PARSER_STATUS" in
-    0) ;;
-    11) test_error placement_ambiguous 78 ;;
-    12) test_error test_unclassified 78 ;;
-    15) test_error placement_conflict 78 "binary=$BINARY_ID" ;;
-    *) test_error placement_invalid 78 "$PLACEMENT" ;;
-  esac
-  IFS=$'\x1f' read -r PLACEMENT_KIND PLACEMENT_GROUP PLACEMENT_FIXTURE <<<"$PLACEMENT"
-fi
+# The test binary carries the placement records its declarations wrote; a test
+# no record places is refused.
+set +e
+PLACEMENT="$(python3 -c "$PLACEMENT_PY" run "$1" "$TEST_NAME")"
+PARSER_STATUS=$?
+set -e
+case "$PARSER_STATUS" in
+  0) ;;
+  12) test_error test_unclassified 78 ;;
+  15) test_error placement_conflict 78 "binary=$BINARY_ID" ;;
+  *) test_error placement_invalid 78 "$PLACEMENT" ;;
+esac
+IFS=$'\x1f' read -r PLACEMENT_KIND PLACEMENT_GROUP PLACEMENT_FIXTURE <<<"$PLACEMENT"
 
 # Isolation profiles for the per-run namespace set.
 #   net  - a private network namespace in vsock "local" mode (own nft tables,
@@ -630,55 +539,17 @@ run_node_isolated_namespace() {
   run_isolated_namespace node "$@"
 }
 
-if [ "$GUEST_SUITE_MODE" -eq 1 ]; then
-  run_local_vsock_namespace "$@"
-fi
-
 case "$PLACEMENT_KIND" in
   host-pure)
     exec "$@"
     ;;
   guest-declared)
     # The test boots its own guest through the guest kit (`run_in_guest`); its
-    # host-side half gets the same local-mode vsock namespace the dispatcher
-    # gets for a table-placed guest test.
+    # host-side half gets the local-mode vsock namespace.
     run_local_vsock_namespace "$@"
     ;;
   native-launcher)
     run_node_isolated_namespace "$@"
-    ;;
-  guest-group|guest-lane-operator|guest-lane-owner)
-    DISPATCHER="${OVERDRIVE_METAL_TEST_DISPATCHER:-}"
-    [ -n "$DISPATCHER" ] || test_error lane_not_prepared 78
-    DISPATCHER_CANONICAL="$(realpath -e -- "$DISPATCHER" 2>/dev/null)" || test_error lane_not_prepared 78
-    case "$DISPATCHER_CANONICAL" in
-      "$SOURCE_ROOT"/target/*) ;;
-      *) test_error lane_not_prepared 78 ;;
-    esac
-    [ -f "$DISPATCHER_CANONICAL" ] && [ -x "$DISPATCHER_CANONICAL" ] || test_error lane_not_prepared 78
-    case "$PLACEMENT_KIND" in
-      guest-lane-operator|guest-lane-owner)
-        IN_GUEST_LANE_BINARY="$SOURCE_ROOT/target/guest-kit/in-guest/overdrive-init--overdrive-init"
-        [ -f "$IN_GUEST_LANE_BINARY" ] && [ -x "$IN_GUEST_LANE_BINARY" ] || test_error lane_not_prepared 78
-        ;;
-    esac
-    if [ "$PLACEMENT_KIND" = guest-group ]; then
-      export OVERDRIVE_FWD_GUEST_GROUP="$PLACEMENT_GROUP"
-    elif [ "$PLACEMENT_KIND" = guest-lane-operator ] || [ "$PLACEMENT_KIND" = guest-lane-owner ]; then
-      export OVERDRIVE_FWD_GUEST_LANE_KIND="$PLACEMENT_KIND"
-      export OVERDRIVE_FWD_GUEST_LANE_FIXTURE="$PLACEMENT_FIXTURE"
-      export OVERDRIVE_FWD_GUEST_NEXTTEST_ELF="$1"
-      GUEST_ARGUMENTS="$(python3 - "$@" <<'PY'
-import sys
-
-arguments = sys.argv[2:]
-print(f"{len(arguments)}:" + ";".join(argument.encode().hex() for argument in arguments))
-PY
-)" || test_error test_unclassified 78
-      export OVERDRIVE_FWD_GUEST_NEXTTEST_ARGV="$GUEST_ARGUMENTS"
-    fi
-    export OVERDRIVE_FWD_GUEST_EXACT="$TEST_NAME"
-    run_local_vsock_namespace "$DISPATCHER_CANONICAL" --nextest-wrapper "$@"
     ;;
   *)
     test_error placement_invalid 78

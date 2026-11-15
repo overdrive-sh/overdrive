@@ -23,7 +23,7 @@
 //! Lane: `integration-tests,kvm-tests`, through the Metal runner (`cargo xtask
 //! metal run -- cargo nextest run -p overdrive-host --features
 //! integration-tests,kvm-tests`). The case runs in its own disposable
-//! `cgroup-default` guest (`infra/metal/test-placement.json`), where the
+//! `cgroup-default` guest (declared on the test), where the
 //! beacon port is the guest's own and the scripted peer is a nested Cloud
 //! Hypervisor microVM. Pending the attachment cut's step (6), which lands
 //! `VsockBeaconIo`.

@@ -123,10 +123,10 @@ run_case foreign-manifest 64 run -- cargo nextest run -p xtask --test acceptance
 run_case duplicate-env 64 run -- env RUST_LOG=info RUST_LOG=debug cargo check -p xtask
 run_case context-env 64 run -- env OVERDRIVE_METAL_RUN_ID=0123456789abcdef01234567 cargo check -p xtask
 run_case invalid-bpf-selector 64 run -- env OVERDRIVE_BPF_NATIVE=0 cargo check -p xtask
-run_case invalid-group 64 run -- env OVERDRIVE_FWD_GUEST_GROUP=unknown cargo check -p xtask
+run_case unlisted-env-key 64 run -- env OVERDRIVE_UNLISTED_KEY=1 cargo check -p xtask
 run_case env-option 64 run -- env -i cargo check -p xtask
 run_case conflicting-package 64 run -- cargo run -p overdrive-sim --package overdrive-testing --bin dst
-for label in raw-test shell-chain host-module duplicate-env context-env invalid-bpf-selector invalid-group env-option conflicting-package; do
+for label in raw-test shell-chain host-module duplicate-env context-env invalid-bpf-selector unlisted-env-key env-option conflicting-package; do
   rg -q 'OVERDRIVE_METAL_RUNNER_ERROR error=unsupported_ordinary_command' "$out/$label.stderr"
 done
 for label in config-replacement debugger-replacement; do

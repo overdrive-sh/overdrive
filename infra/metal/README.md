@@ -108,19 +108,17 @@ automatic pruning.
 
 Ordinary commands use a closed existing-command grammar: Cargo
 build/check/clippy/fmt, doctests, approved xtask build/setup/lint/model
-commands, nextest, the prepared guest-suite executable, and the declared pure
-Sim programs. Other commands refuse before execution. `cargo nextest run`
+commands, nextest, and the declared pure Sim programs. Other commands refuse before execution. `cargo nextest run`
 always uses the checked-in placement wrapper: host-pure tests keep the original
 exec chain, native-launcher tests get a private node view (network namespace
 in vsock `local` mode, a per-run cgroup namespace and cgroup2 mount, its own
 bpffs, and private `/run/overdrive` and `/run/netns`, so a `serve` boot reclaims
 only that run's state), and
-guest tests run the selected Cargo-built test binary in a fresh instance of
-its declared guest group. The wrapper preserves the selected binary, libtest
+guest tests boot a fresh instance of their declared guest group from the test
+binary's own host half. The wrapper preserves the selected binary, libtest
 arguments, Nextest helper executables, test environment, retry number, and
-actual attempt status. `guest-kit-prepare` prepares the dispatcher; the
-wrapper does not build it on demand. The explicit guest-suite command keeps
-its existing batched group behavior.
+actual attempt status. `guest-kit-prepare` prepares the guest kit; nothing
+builds it on demand.
 
 Use `--exclusive` for provisioning, physical-host maintenance, or another
 existing command that needs arbitrary privileged authority. Never use it to run
@@ -148,12 +146,15 @@ performs.
 
 ### Placement, phases and configuration
 
-`infra/metal/test-placement.json` maps every nextest binary id and test name to
-the isolation `test-wrapper.sh` applies (`host-pure`, `native-launcher`,
-`guest-group`, `guest-lane-operator`, `guest-lane-owner`). It is maintained by
-hand and nothing checks it is complete: a test with no entry fails on its first
-Metal run as `test_unclassified`, status 78. See `.claude/rules/testing.md`
-§ "Test placement" for the kinds, diagnostics and authoring rules.
+A test declares the isolation `test-wrapper.sh` applies on the test itself, with
+`#[overdrive_test(...)]` (`host_pure`, `native_launcher`, `guest = "<group>"`,
+`lane_operator`, `lane_owner`), `placement!(host_pure)` per module or
+`overdrive_test_default!(host_pure)` per host-only binary. The declaration is
+written to the test binary as a placement record that the wrapper reads, and
+`cargo xtask placement-lint` reports an unplaced test before any run; a test no
+record places fails its Metal run as `test_unclassified`, status 78. See
+`.claude/rules/testing.md` § "Test placement" for the forms, diagnostics and
+authoring rules.
 
 Each run record carries a phase: `waiting_for_lease` (queued for admission),
 `preparing` (source transfer and native preflight), then `running`. Admission
@@ -190,8 +191,7 @@ their declared group, and retries start a fresh guest attempt. Do not run
 `kmod-load` as part of an ordinary test command.
 
 `guest-kit-prepare` builds `ovd_fwd.ko` for the running kernel, the static
-scripted guest peer, the in-guest test binaries, and the host-side guest-suite
-dispatcher, and stages each at the path its existing fixture reads
+scripted guest peer, the in-guest test binaries, and the shared-guest owner, and stages each at the path its existing fixture reads
 (`xtask/src/guest_kit_prepare.rs`). A missing
 artefact makes the fixture refuse with `LaneNotPrepared`, naming the path.
 It also requires the running kernel's build tree and `sparse`, installed by

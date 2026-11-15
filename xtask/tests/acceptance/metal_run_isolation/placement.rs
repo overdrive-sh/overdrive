@@ -14,9 +14,6 @@ const PURE_BINARY: &str = "overdrive-cli";
 const PURE_TEST: &str = "http_client::tests::category_strings_are_leak_free_by_construction";
 const NATIVE_BINARY: &str = "xtask::acceptance";
 const NATIVE_TEST: &str = "acceptance::metal_run_isolation::namespace_trace::fixture_exhausts_only_a_real_owned_child_namespace_verification_read";
-const GUEST_BINARY: &str = "overdrive-bpf::integration";
-const GUEST_TEST: &str =
-    "integration::xdp_pass_test_run::bpf_unit_runs_xdp_pass_triptych_via_bpf_prog_test_run";
 
 #[expect(
     clippy::literal_string_with_formatting_args,
@@ -38,45 +35,28 @@ exit 255
     path
 }
 
-fn wrapper(fixture: &Fixture, binary: &str, name: &str) -> Command {
+/// The wrapper run for one attempted test. With `placement` the attempt's
+/// executable is a copy of `env(1)` carrying that placement section (a fixture
+/// body is a script, which carries no record), run with the body script as its
+/// first argument; without it the body script is the executable itself.
+fn wrapper(fixture: &Fixture, binary: &str, name: &str, placement: Option<Vec<u8>>) -> Command {
     fixture.bound_context_inputs();
     let context_id = fixture.context_id();
     let tmp = fixture.source.join("target/metal-run-tmp").join(&context_id);
     fs::create_dir_all(&tmp).expect("already-prepared command context input");
-    let dispatcher = if binary == NATIVE_BINARY {
-        // The fixture's body is a script that carries no placement record, so
-        // its native-launcher placement comes from the fixture's own table.
-        fs::write(
-            fixture.source.join("infra/metal/test-placement.json"),
-            format!(
-                r#"{{"format":"overdrive-metal-test-placement-v1","placements":{{"{binary}":{{"{name}":{{"kind":"native-launcher"}}}}}}}}"#
-            ),
-        )
-        .expect("native-launcher placement input");
-        let target = std::env::var_os("CARGO_TARGET_DIR")
-            .map_or_else(|| workspace_file("target"), std::path::PathBuf::from);
-        let original = target.join("debug/overdrive-fwd-guest-suite");
-        let staged = fixture.source.join("target/prepared/overdrive-fwd-guest-suite");
-        fs::create_dir_all(staged.parent().expect("prepared executable parent"))
-            .expect("native helper input directory");
-        fs::copy(&original,&staged).unwrap_or_else(|error|panic!("prepare the existing dispatcher before activating native adapter cases: {}: {error}",original.display()));
-        staged
-    } else {
-        if binary == GUEST_BINARY {
-            // The fixture's body is a script that carries no placement record,
-            // and the guest test declares its placement on itself rather than
-            // in the shared table, so its guest-group placement comes from the
-            // fixture's own table.
-            fs::write(
-                fixture.source.join("infra/metal/test-placement.json"),
-                format!(
-                    r#"{{"format":"overdrive-metal-test-placement-v1","placements":{{"{binary}":{{"{name}":{{"kind":"guest-group","group":"mtls-relay"}}}}}}}}"#
-                ),
-            )
-            .expect("guest-group placement input");
-        }
-        fixture.source.join("target/debug/absent-dispatcher")
-    };
+    let script = body(fixture);
+    let attempted: Vec<std::path::PathBuf> = placement.map_or_else(
+        || vec![script.clone()],
+        |section| {
+            let launcher = fixture.source.join("placed-env");
+            let original = fs::read("/usr/bin/env").expect("the system env executable");
+            fs::write(&launcher, elf_with_appended_placement(&original, &section))
+                .expect("placed attempt executable");
+            fs::set_permissions(&launcher, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+                .expect("executable placed attempt");
+            vec![launcher, script.clone()]
+        },
+    );
     executable(
         &fixture.bin.join("cargo"),
         &format!(
@@ -93,7 +73,6 @@ fn wrapper(fixture: &Fixture, binary: &str, name: &str) -> Command {
         .env("OVERDRIVE_METAL_RUN_ID", &context_id)
         .env("OVERDRIVE_METAL_EXECUTION_CLASS", "ordinary")
         .env("OVERDRIVE_METAL_SOURCE_ROOT", &fixture.source)
-        .env("OVERDRIVE_METAL_TEST_DISPATCHER", dispatcher)
         .env("NEXTEST_WORKSPACE_ROOT", &fixture.source)
         .env("CARGO_MANIFEST_DIR", &fixture.source)
         .env("CARGO_TARGET_DIR", fixture.source.join("target"))
@@ -107,12 +86,17 @@ fn wrapper(fixture: &Fixture, binary: &str, name: &str) -> Command {
         .env("METAL_FIXTURE_BODY_ARGS", fixture.temp.path().join("body.args"))
         .env("METAL_FIXTURE_BODY_ENV", fixture.temp.path().join("body.env"))
         .env("METAL_FIXTURE_BODY_NETNS", fixture.temp.path().join("body.netns"))
-        .env("METAL_FIXTURE_BODY_MODE", fixture.temp.path().join("body.mode"));
+        .env("METAL_FIXTURE_BODY_MODE", fixture.temp.path().join("body.mode"))
+        .args(attempted);
     command
 }
 
+fn placement_of(kind: &str, test: &str, args: &[&str]) -> Vec<u8> {
+    record(kind, &format!("some-crate::{test}"), args)
+}
+
 /// CONTRACT_SHAPE: bounded-change (host-pure attempt changes only its output and
-/// fixture files, preserving exact argv/env/status with no dispatcher dependency).
+/// fixture files, preserving exact argv/env/status with no guest dependency).
 #[test]
 fn host_pure_attempt_preserves_exact_arguments_environment_and_255_without_a_guest() {
     let fixture = Fixture::new();
@@ -121,11 +105,11 @@ fn host_pure_attempt_preserves_exact_arguments_environment_and_255_without_a_gue
         [PURE_TEST, "--exact", "--nocapture", "argument with spaces", "literal;$not-a-shell"];
     let initial_netns = fs::read_link("/proc/self/ns/net").expect("initial namespace");
     let before = snapshot(&fixture.runs);
-    let output = wrapper(&fixture, PURE_BINARY, PURE_TEST)
-        .arg(&executable_path)
-        .args(argv)
-        .output()
-        .expect("selected host-pure attempt");
+    let output =
+        wrapper(&fixture, PURE_BINARY, PURE_TEST, Some(placement_of("host_pure", PURE_TEST, &[])))
+            .args(argv)
+            .output()
+            .expect("selected host-pure attempt");
     assert_eq!(output.status.code(), Some(255), "{}", String::from_utf8_lossy(&output.stderr));
     let observed_arguments =
         fs::read(fixture.temp.path().join("body.args")).expect("actual attempted argv");
@@ -144,29 +128,25 @@ fn host_pure_attempt_preserves_exact_arguments_environment_and_255_without_a_gue
         text(&fixture.temp.path().join("body.netns")).trim(),
         initial_netns.to_str().expect("namespace string")
     );
-    assert!(!fixture.source.join("target/debug/absent-dispatcher").exists());
     assert_eq!(snapshot(&fixture.runs), before);
 }
 
 /// CONTRACT_SHAPE: bounded-change (outside ordinary Metal context execs the exact
-/// original runner chain; placement/dispatcher cannot block non-Metal/exclusive).
+/// original runner chain; placement cannot block non-Metal/exclusive).
 #[test]
 fn non_metal_and_explicit_exclusive_attempts_preserve_the_original_exec_chain() {
     for context in ["non-metal", "exclusive"] {
         let fixture = Fixture::new();
-        let executable_path = body(&fixture);
-        let mut command = wrapper(&fixture, "unknown", "unclassified");
+        let mut command = wrapper(&fixture, "unknown", "unclassified", None);
         if context == "non-metal" {
             command
                 .env_remove("OVERDRIVE_METAL_RUN_ID")
                 .env_remove("OVERDRIVE_METAL_EXECUTION_CLASS")
-                .env_remove("OVERDRIVE_METAL_SOURCE_ROOT")
-                .env_remove("OVERDRIVE_METAL_TEST_DISPATCHER");
+                .env_remove("OVERDRIVE_METAL_SOURCE_ROOT");
         } else {
             command.env("OVERDRIVE_METAL_EXECUTION_CLASS", "exclusive");
         }
         let output = command
-            .arg(&executable_path)
             .args(["configured-runner-token", "selected-argument"])
             .output()
             .expect("original exec chain");
@@ -179,23 +159,17 @@ fn non_metal_and_explicit_exclusive_attempts_preserve_the_original_exec_chain() 
 /// CONTRACT_SHAPE: bounded-change (malformed ordinary context/placement may emit
 /// only typed refusal; no selected body, guest preparation or remote mutation).
 #[test]
-fn sad_invalid_context_missing_identity_and_missing_guest_dispatcher_never_run_the_body() {
-    for state in [
-        "short-id",
-        "uppercase-id",
-        "bad-class",
-        "foreign-source",
-        "missing-identity",
-        "missing-name",
-        "guest-not-prepared",
-    ] {
+fn sad_invalid_context_and_missing_identity_never_run_the_body() {
+    for state in
+        ["short-id", "uppercase-id", "bad-class", "foreign-source", "unplaced-test", "missing-name"]
+    {
         let fixture = Fixture::new();
-        let executable_path = body(&fixture);
-        let mut command = if state == "guest-not-prepared" {
-            wrapper(&fixture, GUEST_BINARY, GUEST_TEST)
-        } else {
-            wrapper(&fixture, PURE_BINARY, PURE_TEST)
-        };
+        let mut command = wrapper(
+            &fixture,
+            PURE_BINARY,
+            PURE_TEST,
+            Some(placement_of("host_pure", PURE_TEST, &[])),
+        );
         let (code, field) = match state {
             "short-id" => {
                 command.env("OVERDRIVE_METAL_RUN_ID", "0");
@@ -213,18 +187,17 @@ fn sad_invalid_context_missing_identity_and_missing_guest_dispatcher_never_run_t
                 command.env("OVERDRIVE_METAL_SOURCE_ROOT", fixture.remote.join("foreign"));
                 ("invalid_run_context", Some("source_owner"))
             }
-            "missing-identity" => {
-                command.env("NEXTEST_BINARY_ID", "unknown-binary");
+            "unplaced-test" => {
+                command.env("NEXTEST_TEST_NAME", "http_client::tests::no_record_places_this");
                 ("test_unclassified", None)
             }
             "missing-name" => {
                 command.env_remove("NEXTEST_TEST_NAME");
                 ("test_unclassified", None)
             }
-            _ => ("lane_not_prepared", None),
+            _ => unreachable!("every state is matched above"),
         };
-        let output =
-            command.arg(&executable_path).arg("--exact").output().expect("refused attempt");
+        let output = command.arg("--exact").output().expect("refused attempt");
         test_error(&output, code, 78);
         if let Some(field) = field {
             assert!(String::from_utf8_lossy(&output.stderr).contains(&format!("field={field}")));
@@ -235,50 +208,31 @@ fn sad_invalid_context_missing_identity_and_missing_guest_dispatcher_never_run_t
         );
         assert!(
             !fixture.temp.path().join("on-demand-cargo").exists(),
-            "wrapper cannot build missing dispatcher on demand"
+            "wrapper cannot build anything on demand"
         );
     }
 }
 
-/// CONTRACT_SHAPE: bounded-change (closed exact-identity placement refuses malformed
-/// or duplicate data; source/retained evidence and attempted-body complement unchanged).
+/// CONTRACT_SHAPE: bounded-change (a placement record that names no known kind or
+/// group, or that no record supplies, is refused; source/retained evidence and
+/// attempted-body complement unchanged).
 #[test]
-fn sad_invalid_duplicate_and_ambiguous_placement_is_fail_closed() {
-    for state in [
-        "empty",
-        "unknown-kind",
-        "unknown-field",
-        "unknown-group",
-        "duplicate",
-        "missing",
-        "operator-fixture",
-    ] {
+fn sad_invalid_and_missing_placement_is_fail_closed() {
+    for state in ["unknown-kind", "unknown-group", "missing"] {
         let fixture = Fixture::new();
-        let executable_path = body(&fixture);
-        let descriptor = match state {
-            "empty" => "{}",
-            "unknown-kind" => r#"{"kind":"guess-host"}"#,
-            "unknown-field" => r#"{"kind":"host-pure","fallback":true}"#,
-            "unknown-group" => r#"{"kind":"guest-group","group":"new-group"}"#,
-            "operator-fixture" => r#"{"kind":"guest-lane-operator","fixture":"unqualified-leaf"}"#,
-            _ => r#"{"kind":"host-pure"}"#,
+        let owned = format!("some-crate::{PURE_TEST}");
+        let placement = match state {
+            "unknown-kind" => record("guess_host", &owned, &[]),
+            "unknown-group" => record("guest", &owned, &["new-group", "", "0"]),
+            _ => record("host_pure", "some-crate::another_module::another_test", &[]),
         };
-        let entry = format!("\"{PURE_TEST}\":{descriptor}");
-        let entries = match state {
-            "duplicate" => format!("{entry},{entry}"),
-            "missing" => String::new(),
-            _ => entry,
-        };
-        fs::write(fixture.source.join("infra/metal/test-placement.json"), format!(r#"{{"format":"overdrive-metal-test-placement-v1","placements":{{"{PURE_BINARY}":{{{entries}}}}}}}"#)).expect("placement input");
         let before = snapshot(&fixture.runs);
-        let output = wrapper(&fixture, PURE_BINARY, PURE_TEST)
-            .arg(executable_path)
+        let output = wrapper(&fixture, PURE_BINARY, PURE_TEST, Some(placement))
             .output()
             .expect("invalid placement attempt");
         test_error(
             &output,
             match state {
-                "duplicate" => "placement_ambiguous",
                 "missing" => "test_unclassified",
                 _ => "placement_invalid",
             },
@@ -295,14 +249,17 @@ fn sad_invalid_duplicate_and_ambiguous_placement_is_fail_closed() {
 #[overdrive_test(native_launcher)]
 fn native_launcher_gets_a_local_vsock_namespace_without_changing_the_initial_mode() {
     let fixture = Fixture::new_accessible();
-    let executable_path = body(&fixture);
     let initial_namespace = fs::read_link("/proc/self/ns/net").expect("initial namespace");
     let initial_modes = ["/proc/sys/net/vsock/ns_mode", "/proc/sys/net/vsock/child_ns_mode"]
         .map(|path| fs::read(path).expect("Linux 7 vsock modes"));
-    let output = wrapper(&fixture, NATIVE_BINARY, NATIVE_TEST)
-        .arg(executable_path)
-        .output()
-        .expect("native launcher attempt");
+    let output = wrapper(
+        &fixture,
+        NATIVE_BINARY,
+        NATIVE_TEST,
+        Some(placement_of("native_launcher", NATIVE_TEST, &[])),
+    )
+    .output()
+    .expect("native launcher attempt");
     assert_eq!(output.status.code(), Some(255), "{}", String::from_utf8_lossy(&output.stderr));
     assert_ne!(
         text(&fixture.temp.path().join("body.netns")).trim(),
@@ -322,9 +279,12 @@ fn native_launcher_gets_a_local_vsock_namespace_without_changing_the_initial_mod
 #[overdrive_test(native_launcher)]
 fn sad_namespace_permission_denial_never_falls_back_to_the_host() {
     let fixture = Fixture::new_accessible();
-    let executable_path = body(&fixture);
-    let mut inner = wrapper(&fixture, NATIVE_BINARY, NATIVE_TEST);
-    inner.arg(executable_path);
+    let inner = wrapper(
+        &fixture,
+        NATIVE_BINARY,
+        NATIVE_TEST,
+        Some(placement_of("native_launcher", NATIVE_TEST, &[])),
+    );
     let mut command = Command::new("setpriv");
     command
         .args(["--bounding-set=-sys_admin", "--inh-caps=-all", "--ambient-caps=-all"])
@@ -422,9 +382,9 @@ fn declares_on_the_test(row: &Value, declaration: &str) -> bool {
 }
 
 /// Whether a host-pure test is placed by a declaration in its own source: the
-/// attribute on the function, or a `placement!(host_pure)` or
-/// `overdrive_test_default!(host_pure)` in the file that holds it. A test placed
-/// that way has no table row.
+/// attribute on the function, a `placement!(host_pure)` or
+/// `overdrive_test_default!(host_pure)` in the file that holds it, or the binary
+/// default in the root of the test binary it belongs to.
 fn declares_host_pure_in_its_source(row: &Value) -> bool {
     let source = row["source"].as_str().expect("source");
     let path = source.split(':').next().expect("source path");
@@ -435,104 +395,119 @@ fn declares_host_pure_in_its_source(row: &Value) -> bool {
     {
         return true;
     }
-    let Some(function_at) = text.find(&format!("fn {leaf}(")) else { return false };
-    text[..function_at]
-        .lines()
-        .rev()
-        .skip(1)
-        .take_while(|line| {
-            let line = line.trim_start();
-            line.starts_with("#[") || line.starts_with("//")
-        })
-        .any(|line| line.trim() == "#[overdrive_test(host_pure)]")
+    if let Some(function_at) = text.find(&format!("fn {leaf}(")) {
+        let on_the_function = text[..function_at]
+            .lines()
+            .rev()
+            .skip(1)
+            .take_while(|line| {
+                let line = line.trim_start();
+                line.starts_with("#[") || line.starts_with("//")
+            })
+            .any(|line| line.trim() == "#[overdrive_test(host_pure)]");
+        if on_the_function {
+            return true;
+        }
+    }
+    binary_default_is_host_pure(row)
+}
+
+/// Whether the root of the test binary `row` names declares
+/// `overdrive_test_default!(host_pure)`: a library's `src/lib.rs`, a binary's
+/// `src/main.rs`, `src/bin/<name>.rs` or `bin/<name>.rs`, or an integration
+/// target's `tests/<name>.rs`.
+fn binary_default_is_host_pure(row: &Value) -> bool {
+    let source = row["source"].as_str().expect("source");
+    let path = source.split(':').next().expect("source path");
+    let mut parts = path.split('/');
+    let first = parts.next().expect("source root");
+    let package_dir = if first == "crates" {
+        format!("crates/{}", parts.next().expect("crate directory"))
+    } else {
+        first.to_owned()
+    };
+    let binary_id = row["binary_id"].as_str().expect("binary identity");
+    let roots = match binary_id.split_once("::") {
+        None => vec![format!("{package_dir}/src/lib.rs")],
+        Some((_, target)) => target.strip_prefix("bin/").map_or_else(
+            || vec![format!("{package_dir}/tests/{target}.rs")],
+            |name| {
+                vec![
+                    format!("{package_dir}/src/main.rs"),
+                    format!("{package_dir}/src/bin/{name}.rs"),
+                    format!("{package_dir}/bin/{name}.rs"),
+                ]
+            },
+        ),
+    };
+    roots.iter().any(|root| {
+        fs::read_to_string(workspace_file(root))
+            .is_ok_and(|text| text.contains("overdrive_test_default!(host_pure)"))
+    })
+}
+
+/// Whether the placement of a reviewed or added row is declared in the source of
+/// the test it names: the declaration the row's kind needs, naming exactly the
+/// reviewed group or fixture. `kind` is the row's placement kind and `context`
+/// its group (guest group) or fixture leaf (lane kinds).
+fn declares_the_placement(row: &Value, kind: &str, context: &Value) -> bool {
+    match kind {
+        "guest-group" => declares_the_reviewed_guest_group_on_the_test(&serde_json::json!({
+            "source": row["source"], "test_name": row["test_name"], "context": context,
+        })),
+        "guest-lane-owner" | "guest-lane-operator" | "native-launcher" => {
+            declares_the_reviewed_lane_or_launcher_on_the_test(&serde_json::json!({
+                "source": row["source"], "test_name": row["test_name"],
+                "placement": kind, "context": context,
+            }))
+        }
+        "host-pure" => declares_host_pure_in_its_source(row),
+        _ => false,
+    }
 }
 
 /// CONTRACT_SHAPE: bounded-change (read-only placement comparison and output only;
 /// data extensions are exact identities, never absence-means-host or fixed counts).
+///
+/// Placement has one source, the declaration in the test's own source, so the
+/// reviewed partition and the added acceptance identities are compared against
+/// those declarations. A row whose test function no longer exists in the
+/// workspace has nothing to place and is skipped; every row whose function exists
+/// must declare exactly its reviewed placement.
 #[test]
-fn runtime_placement_preserves_the_reviewed_partition_and_declares_new_acceptance_identities() {
+fn declared_placement_preserves_the_reviewed_partition_and_declares_new_acceptance_identities() {
     let design: Value = serde_json::from_str(&text(&workspace_file(
         "docs/feature/metal-run-isolation/design/test-placement-inventory.json",
     )))
     .expect("reviewed inventory");
-    let runtime: Value =
-        serde_json::from_str(&text(&workspace_file("infra/metal/test-placement.json")))
-            .expect("runtime placement");
-    assert_eq!(runtime["format"], "overdrive-metal-test-placement-v1");
     for row in design["rows"].as_array().expect("reviewed rows") {
-        let binary = row["binary_id"].as_str().expect("binary identity");
-        let name = row["test_name"].as_str().expect("exact identity");
-        let actual = &runtime["placements"][binary][name];
-        // A reviewed row whose test function was deleted from the workspace has
-        // no runtime placement to preserve; a row whose function still exists must.
-        if actual.is_null() && !test_function_exists(row) {
+        if !test_function_exists(row) {
             continue;
         }
-        // A guest test that declares its placement on itself has no table row.
-        if actual.is_null()
-            && row["placement"] == "guest-group"
-            && declares_the_reviewed_guest_group_on_the_test(row)
-        {
-            continue;
-        }
-        // A lane or native-launcher test that declares its placement on itself
-        // has no table row; the declaration must name the reviewed fixture.
-        if actual.is_null() && declares_the_reviewed_lane_or_launcher_on_the_test(row) {
-            continue;
-        }
-        // A host-pure test that declares its placement in its source has no table row.
-        if actual.is_null()
-            && row["placement"] == "host-pure"
-            && declares_host_pure_in_its_source(row)
-        {
-            continue;
-        }
-        assert_eq!(actual["kind"], row["placement"], "changed boundary for {binary}::{name}");
-        match row["placement"].as_str().expect("kind") {
-            "guest-group" => assert_eq!(actual["group"], row["context"]),
-            "guest-lane-owner" | "guest-lane-operator" => assert_eq!(
-                actual["fixture"],
-                format!(
-                    "integration::in_guest_lane::{}",
-                    row["context"].as_str().expect("fixture")
-                )
-            ),
-            _ => {}
-        }
+        let kind = row["placement"].as_str().expect("kind");
+        assert!(
+            declares_the_placement(row, kind, &row["context"]),
+            "changed boundary for {}::{}",
+            row["binary_id"],
+            row["test_name"]
+        );
     }
     let additions: Value = serde_json::from_str(&text(&workspace_file(
         "docs/feature/metal-run-isolation/distill/test-placement-additions.json",
     )))
     .expect("DISTILL placement additions");
     for row in additions["rows"].as_array().expect("new rows") {
-        // A native launcher that declares its placement on itself has no table row.
-        if runtime["placements"][row["binary_id"].as_str().expect("binary")]
-            [row["test_name"].as_str().expect("name")]
-        .is_null()
-            && row["descriptor"]["kind"] == "native-launcher"
-            && declares_on_the_test(row, "#[overdrive_test(native_launcher)]")
-        {
+        if !test_function_exists(row) {
             continue;
         }
-        // A guest test that declares exactly its reviewed group on itself has no table row.
-        if runtime["placements"][row["binary_id"].as_str().expect("binary")]
-            [row["test_name"].as_str().expect("name")]
-        .is_null()
-            && row["descriptor"]["kind"] == "guest-group"
-            && declares_on_the_test(
-                row,
-                &format!(
-                    "#[overdrive_test(guest = \"{}\")]",
-                    row["descriptor"]["group"].as_str().expect("guest group")
-                ),
-            )
-        {
-            continue;
-        }
-        assert_eq!(
-            runtime["placements"][row["binary_id"].as_str().expect("binary")]
-                [row["test_name"].as_str().expect("name")],
-            row["descriptor"]
+        let descriptor = &row["descriptor"];
+        let kind = descriptor["kind"].as_str().expect("kind");
+        let context = if kind == "guest-group" { &descriptor["group"] } else { &Value::Null };
+        assert!(
+            declares_the_placement(row, kind, context),
+            "undeclared identity {}::{}",
+            row["binary_id"],
+            row["test_name"]
         );
     }
 }
@@ -544,10 +519,13 @@ fn runtime_placement_preserves_the_reviewed_partition_and_declares_new_acceptanc
 fn sad_each_later_namespace_operation_keeps_its_exact_step_and_errno() {
     for (step, errno) in [("child_mode", "30"), ("local", "28")] {
         let fixture = Fixture::new_accessible();
-        let executable_path = body(&fixture);
         let inaccessible = fixture.temp.path().join("namespace-fixture-input");
-        let mut inner = wrapper(&fixture, NATIVE_BINARY, NATIVE_TEST);
-        inner.arg(&executable_path);
+        let inner = wrapper(
+            &fixture,
+            NATIVE_BINARY,
+            NATIVE_TEST,
+            Some(placement_of("native_launcher", NATIVE_TEST, &[])),
+        );
         let before = ["/proc/sys/net/vsock/ns_mode", "/proc/sys/net/vsock/child_ns_mode"]
             .map(|path| fs::read(path).expect("caller namespace observation"));
         let mut command = Command::new("unshare");
@@ -591,9 +569,12 @@ fn sad_each_later_namespace_operation_keeps_its_exact_step_and_errno() {
 #[cfg(target_arch = "x86_64")]
 fn sad_actual_verification_read_failure_preserves_its_step_and_errno() {
     let fixture = Fixture::new_accessible();
-    let executable_path = body(&fixture);
-    let mut command = wrapper(&fixture, NATIVE_BINARY, NATIVE_TEST);
-    command.arg(executable_path);
+    let command = wrapper(
+        &fixture,
+        NATIVE_BINARY,
+        NATIVE_TEST,
+        Some(placement_of("native_launcher", NATIVE_TEST, &[])),
+    );
     let output = super::namespace_trace::deny_verification_open(&fixture, &command)
         .expect("real owned descriptor exhaustion at verification");
     test_error(&output, "namespace_setup_failed", 70);

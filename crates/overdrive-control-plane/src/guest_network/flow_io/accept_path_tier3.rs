@@ -33,7 +33,7 @@
 //!
 //! Lane: `integration-tests,kvm-tests`, through the Metal runner (`cargo xtask
 //! metal run --`). Each case runs in its own disposable `cgroup-default` guest
-//! (`infra/metal/test-placement.json`), where the listeners' ports are the
+//! (declared on the test), where the listeners' ports are the
 //! guest's own and the scripted peer is a nested Cloud Hypervisor microVM.
 //! Pending the attachment cut's step (7), which lands `HostGuestFlowIo`.
 

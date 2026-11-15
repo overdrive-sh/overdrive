@@ -1,6 +1,13 @@
 <!-- markdownlint-disable MD024 -->
 # Feature delta — `metal-run-isolation`
 
+> The placement model below (a JSON table keyed by binary id and test name, and the
+> `overdrive-fwd-guest-suite` dispatcher with its `OVERDRIVE_FWD_GUEST_*` selectors) is
+> replaced by placement declared on the test and recorded in its binary; see
+> [ADR-0282](../../product/architecture/adr-0282-a-metal-test-placement-is-declared-on-the-test-and-recorded-in-its-binary.md)
+> and the [`metal-test-placement-attribute` feature delta](../metal-test-placement-attribute/feature-delta.md).
+> The admission, identity and namespace-isolation decisions here are unchanged.
+
 DISCUSS, 2026-11-07. Requirements ready for DESIGN; implementation is not authorised by this document. Developer tooling with a developer-visible verification outcome. Density: `lean`, `ask-intelligent`, `explicit_override` from the installed density resolver. One job, one story, one release slice. No product-runtime behaviour changes.
 
 ## Wave: DISCUSS / [REF] Persona ID

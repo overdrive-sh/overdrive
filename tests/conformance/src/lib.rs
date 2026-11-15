@@ -304,7 +304,7 @@ pub fn command_output(program: &str, args: &[&str]) -> Output {
 /// Assert the KVM substrate: root on Linux `x86_64` with a usable `/dev/kvm`.
 ///
 /// The body runs in a disposable guest the metal runner provides
-/// (`infra/metal/test-placement.json`), which launches the Cloud Hypervisor
+/// (declared on the test), which launches the Cloud Hypervisor
 /// microVMs as nested guests. No product CLI is used.
 pub fn assert_kvm_substrate() {
     assert_eq!(std::env::consts::OS, "linux", "Linux required");
