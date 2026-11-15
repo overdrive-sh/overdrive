@@ -171,6 +171,9 @@ mod tests {
     use proptest::prelude::*;
 
     use crate::maps::LocalServiceKey;
+    use overdrive_testing::placement;
+
+    placement!(host_pure);
 
     /// 8-byte key layout is the byte-for-byte contract the kernel-side
     /// `LocalServiceKey` mirrors. A drift off 8 bytes silently

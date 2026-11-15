@@ -1397,6 +1397,9 @@ mod tests {
     use overdrive_core::traits::IdentityRead;
     use overdrive_core::traits::ca::{SvidMaterial, TrustBundle};
     use overdrive_core::traits::mtls_enforcement::MtlsLimits;
+    use overdrive_testing::placement;
+
+    placement!(host_pure);
 
     /// Yields one byte per `read` and counts the calls.
     struct Trickle<'a> {

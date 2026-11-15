@@ -231,6 +231,9 @@ mod tests {
     use overdrive_core::traits::dataplane::DataplaneError;
 
     use super::AtomicSwapError;
+    use overdrive_testing::placement;
+
+    placement!(host_pure);
 
     #[test]
     fn atomic_swap_error_converts_to_dataplane_error_map_alloc_failed() {

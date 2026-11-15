@@ -351,6 +351,9 @@ mod tests {
     use rustls::pki_types::{ServerName, UnixTime};
 
     use super::*;
+    use overdrive_testing::placement;
+
+    placement!(host_pure);
 
     struct TestChain {
         root: CertificateDer<'static>,

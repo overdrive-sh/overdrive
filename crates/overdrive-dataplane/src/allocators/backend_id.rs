@@ -98,7 +98,10 @@ impl BackendIdAllocator {
 #[allow(clippy::expect_used, clippy::unwrap_used)]
 mod tests {
     use super::*;
+    use overdrive_testing::placement;
     use proptest::prelude::*;
+
+    placement!(host_pure);
 
     // ---- Test A: proptest — no duplicate BackendIds ----
 

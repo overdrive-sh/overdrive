@@ -254,6 +254,9 @@ mod tests {
     use crate::maps::reverse_local_map_handle::{
         ReverseLocalEntryPod, ReverseLocalKeyPod, ReverseLocalMapValue,
     };
+    use overdrive_testing::placement;
+
+    placement!(host_pure);
 
     /// 8-byte key layout is the byte-for-byte contract the kernel-side
     /// `ReverseLocalKey` mirrors (byte-parity with the three shipped

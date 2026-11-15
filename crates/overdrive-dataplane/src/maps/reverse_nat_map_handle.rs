@@ -176,6 +176,9 @@ mod tests {
     use proptest::prelude::*;
 
     use super::{BackendKeyPod, ReverseNatMapHandle, VipPod};
+    use overdrive_testing::placement;
+
+    placement!(host_pure);
 
     /// Generator for an arbitrary `Proto`. Phase 2.2 supports
     /// exactly TCP and UDP — IPv6 / ICMP / SCTP are GH #155 / future

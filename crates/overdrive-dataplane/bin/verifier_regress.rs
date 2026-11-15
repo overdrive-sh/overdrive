@@ -50,6 +50,12 @@ use verifier_budget::{
     render_failure, render_measured,
 };
 
+#[cfg(test)]
+use overdrive_testing::overdrive_test_default;
+
+#[cfg(test)]
+overdrive_test_default!(host_pure);
+
 const DATAPLANE_BPF_OBJECT: &str = "target/bpf/overdrive_bpf.o";
 const GUEST_BPF_OBJECT: &str = "target/bpf/overdrive_guest_bpf.o";
 const GUEST_PROGRAM_LIMIT: u64 = 500_000;

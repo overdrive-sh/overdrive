@@ -2599,6 +2599,9 @@ mod tests {
     //! helper (S-2.2-02) and the `classify_attach_result` dispatcher.
 
     use super::DataplaneError;
+    use overdrive_testing::placement;
+
+    placement!(host_pure);
 
     /// Regression — empty-backend purge must be scoped to the single
     /// frontend identity `(vip, port, proto)`, NOT VIP-wide.

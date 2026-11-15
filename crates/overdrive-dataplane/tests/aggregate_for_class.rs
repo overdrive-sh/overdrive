@@ -15,6 +15,10 @@
 use overdrive_core::dataplane::DropClass;
 use overdrive_dataplane::maps::drop_counter_handle::aggregate_for_class;
 
+use overdrive_testing::overdrive_test_default;
+
+overdrive_test_default!(host_pure);
+
 #[test]
 fn aggregate_for_class_sums_per_cpu_slots_above_unity() {
     // Construct a per-CPU slice with non-trivial non-zero values.

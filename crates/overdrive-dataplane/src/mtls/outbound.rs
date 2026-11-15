@@ -704,6 +704,9 @@ mod tests {
     )]
 
     use super::*;
+    use overdrive_testing::placement;
+
+    placement!(host_pure);
 
     /// A sentinel peer that accepts and then goes silent makes each probe handshake
     /// driver fail with a timeout error instead of waiting forever.

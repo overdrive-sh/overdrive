@@ -24,6 +24,10 @@ use std::process::Command;
 
 use serial_test::serial;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 #[test]
 #[serial(env)]
 fn build_rs_emits_diagnostic_when_artifact_missing() -> Result<(), Box<dyn std::error::Error>> {

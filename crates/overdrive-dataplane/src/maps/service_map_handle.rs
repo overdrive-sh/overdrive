@@ -267,6 +267,9 @@ mod tests {
     use proptest::prelude::*;
 
     use super::{BackendEntry, ServiceKey, ServiceMapHandle};
+    use overdrive_testing::placement;
+
+    placement!(host_pure);
 
     /// Generator over the two recognised L4 protocols. Step 02-01
     /// widened the SERVICE_MAP key with a proto byte; every key-shape

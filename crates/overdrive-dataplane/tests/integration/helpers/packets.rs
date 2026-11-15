@@ -156,6 +156,9 @@ mod tests {
     //! at the assertion, regardless of the kernel-side path.
 
     use super::*;
+    use overdrive_testing::placement;
+
+    placement!(host_pure);
 
     #[test]
     fn synthesised_frame_has_valid_ipv4_checksum() {

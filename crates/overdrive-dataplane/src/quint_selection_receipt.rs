@@ -117,6 +117,10 @@ const FRONTEND_PORT: u16 = 8080;
 /// The test-owned veth fixture. A `#[cfg(test)]` module: the fixture builds
 /// kernel state for a Tier-3 test over netlink (`overdrive-netlink`, no
 /// subprocess) and ships in no binary.
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 #[cfg(test)]
 mod veth_fixture {
     use std::future::Future;

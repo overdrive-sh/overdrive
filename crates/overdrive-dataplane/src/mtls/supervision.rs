@@ -82,6 +82,9 @@ mod tests {
     //! mutation-killed.
 
     use super::*;
+    use overdrive_testing::placement;
+
+    placement!(host_pure);
 
     const DEADLINE: Duration = Duration::from_secs(30);
     const DEADLINE_NANOS: u64 = 30 * 1_000_000_000;

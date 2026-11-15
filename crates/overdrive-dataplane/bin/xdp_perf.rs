@@ -61,6 +61,12 @@ use xdp_perf_gate::{
     render_failure, render_measured,
 };
 
+#[cfg(test)]
+use overdrive_testing::overdrive_test_default;
+
+#[cfg(test)]
+overdrive_test_default!(host_pure);
+
 #[derive(Parser, Debug, Clone, Copy)]
 #[command(about = "Tier 4 XDP throughput / mean-latency regression gate")]
 struct Args {

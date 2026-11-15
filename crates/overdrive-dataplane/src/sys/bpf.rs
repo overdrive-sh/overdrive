@@ -310,6 +310,10 @@ mod tests {
     //! exercise lives in the userspace `HashOfMapsHandle` integration
     //! tests under `tests/integration/`.
 
+    use overdrive_testing::placement;
+
+    placement!(host_pure);
+
     #[test]
     fn bpf_attr_layout_is_repr_c() {
         // `BpfMapCreateAttr` is at least 64 bytes — the kernel reads

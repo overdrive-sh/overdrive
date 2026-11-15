@@ -1466,6 +1466,9 @@ mod pipe_floor_laws {
     use proptest::prelude::*;
 
     use super::*;
+    use overdrive_testing::placement;
+
+    placement!(host_pure);
 
     /// S-PIG-86 (the constant): the pipe floor is 65 536 octets, the capacity
     /// the relay's record-boundary and backpressure rules are sized for

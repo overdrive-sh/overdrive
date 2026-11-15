@@ -40,6 +40,10 @@ use overdrive_dataplane::allocators::{
 };
 use proptest::prelude::*;
 
+use overdrive_testing::overdrive_test_default;
+
+overdrive_test_default!(host_pure);
+
 /// Build a `ServiceSpecDigest` from a `u64` for proptest convenience.
 /// The 8-byte big-endian representation of `n` lives in the first 8
 /// bytes; the rest is zero. Distinct `n` produce distinct digests.

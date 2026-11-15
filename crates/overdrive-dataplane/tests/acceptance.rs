@@ -24,6 +24,10 @@ use overdrive_dataplane::allocators::{
 };
 use overdrive_store_local::{IntentStore, LocalIntentStore};
 
+use overdrive_testing::overdrive_test_default;
+
+overdrive_test_default!(host_pure);
+
 /// Build a fresh redb-backed `LocalIntentStore` rooted in a tempdir.
 /// The returned `(Arc<dyn IntentStore>, TempDir)` pair keeps the
 /// tempdir alive for the test's lifetime.

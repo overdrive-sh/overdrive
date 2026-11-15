@@ -47,6 +47,10 @@ use crate::gateway_connect::BackendIdentityState;
 use crate::maps::wire::ServiceKey;
 use crate::maps::{BackendEntryPod, BackendKeyPod};
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// Port of the Service frontend.
 const FRONTEND_PORT: u16 = 8080;
 

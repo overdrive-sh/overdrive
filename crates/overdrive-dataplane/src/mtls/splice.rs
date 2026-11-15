@@ -847,9 +847,12 @@ mod tests {
     //! `Gone` on EVERY exit; and the trigger fires at most once across both pumps.
 
     use super::*;
+    use overdrive_testing::placement;
     use std::io::Read;
     use std::os::fd::AsRawFd;
     use std::sync::atomic::AtomicU32;
+
+    placement!(host_pure);
 
     fn fire_counter() -> (Arc<AtomicU32>, SelfTeardown) {
         let fired = Arc::new(AtomicU32::new(0));

@@ -353,6 +353,11 @@ def plan_inline(source, resolved, macro_crate, macro, gate):
     indent = re.match(r"[ \t]*", text[source.line_start(resolved.mod_start):]).group(0) + "    "
     cursor = source.line_end(lo)
     last_end = None
+    documented = False
+    while text.startswith("//!", cursor) or re.match(r"[ \t]*//!", text[cursor:source.line_end(cursor)]):
+        last_end = source.line_end(cursor) - 1
+        cursor = source.line_end(cursor)
+        documented = True
     while True:
         m = re.compile(r"\s*").match(masked, cursor)
         cursor = m.end()
@@ -392,7 +397,7 @@ def plan_inline(source, resolved, macro_crate, macro, gate):
     block = declaration_lines(macro_crate, macro, gate, import_needed, indent)
     following = text[offset:source.line_end(offset)] if offset < len(text) else ""
     preceded_by_use = last_end is not None
-    prefix = ["", ] if (preceded_by_use and not import_needed) else []
+    prefix = ["", ] if ((preceded_by_use and not import_needed) or documented) else []
     block = prefix + block
     block_text = "\n".join(block) + "\n"
     if following.strip() and not following.strip().startswith("}"):

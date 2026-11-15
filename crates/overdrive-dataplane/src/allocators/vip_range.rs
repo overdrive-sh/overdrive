@@ -260,6 +260,9 @@ impl Default for VipRange {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use overdrive_testing::placement;
+
+    placement!(host_pure);
 
     /// ADR-0049 amendment 2026-05-15 (Alt-E): the Phase 1 default
     /// `VipRange` covers `10.96.0.0/16` with reserved set

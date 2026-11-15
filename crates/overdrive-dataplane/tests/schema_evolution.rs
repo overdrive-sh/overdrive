@@ -18,6 +18,10 @@
 
 #![allow(clippy::expect_used, clippy::expect_fun_call)]
 
+use overdrive_testing::overdrive_test_default;
+
+overdrive_test_default!(host_pure);
+
 mod schema_evolution {
     mod service_vip_allocator_entry;
 }

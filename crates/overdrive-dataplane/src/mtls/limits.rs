@@ -153,6 +153,9 @@ mod tests {
     //! so a `> → ==` / `>= → >` / fn-body→`false` mutation dies.
 
     use super::*;
+    use overdrive_testing::placement;
+
+    placement!(host_pure);
 
     fn alloc() -> AllocationId {
         AllocationId::new("alloc-limits-test").expect("valid alloc")
