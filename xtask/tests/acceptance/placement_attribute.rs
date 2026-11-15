@@ -276,9 +276,20 @@ fn every_placement_a_test_declares_on_itself_is_placed() {
             record("guest", "crate::m::shared", &["cgroup-default", "quint", "1"]),
             record("lane_operator", "crate::m::operator", &["integration::in_guest_lane::x"]),
             record("lane_owner", "crate::m::owner", &["integration::in_guest_lane::y"]),
+            record("host_pure", "crate::integration::in_guest_lane::x", &[]),
+            record("host_pure", "crate::integration::in_guest_lane::y", &[]),
         ],
     );
-    let tests = ["m::pure", "m::launcher", "m::guest", "m::shared", "m::operator", "m::owner"];
+    let tests = [
+        "m::pure",
+        "m::launcher",
+        "m::guest",
+        "m::shared",
+        "m::operator",
+        "m::owner",
+        "integration::in_guest_lane::x",
+        "integration::in_guest_lane::y",
+    ];
     let output = check_placement(&list(vec![suite("some-crate::integration", &binary, &tests)]));
     assert!(
         output.status.success() && stdout(&output).trim().is_empty(),

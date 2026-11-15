@@ -167,27 +167,47 @@ def run(binary_path, test_name):
         raise SystemExit(13)
     print(placement)
 
+def package_of(binary_id):
+    return binary_id.split("::", 1)[0]
+
 def check():
     listing = json.load(sys.stdin)
+    suites = list(listing.get("rust-suites", {}).values())
     findings = False
     invalid = False
-    for suite in listing.get("rust-suites", {}).values():
+    read = []
+    for suite in suites:
         binary_id = suite["binary-id"]
         try:
-            records = read_records(suite["binary-path"])
+            read.append((suite, read_records(suite["binary-path"])))
         except Invalid as problem:
             print("placement_invalid", binary_id, problem, file=sys.stderr)
             invalid = True
-            continue
+    for suite, records in read:
+        binary_id = suite["binary-id"]
         if has_conflict(records):
             print("conflict", binary_id)
             findings = True
             continue
-        for test_name, case in suite.get("testcases", {}).items():
+        for test_name in suite.get("testcases", {}):
             if resolve_record(records, test_name) is not None:
                 continue
             print("unplaced", binary_id, test_name)
             findings = True
+        # A lane record names a fixture that must be a listed test of the lane
+        # test's package, in any of the package's binaries.
+        for kind, test, arguments in records:
+            if kind not in ("lane_operator", "lane_owner"):
+                continue
+            fixture = arguments[0]
+            provided = any(
+                fixture in other.get("testcases", {})
+                for other in suites
+                if package_of(other["binary-id"]) == package_of(binary_id)
+            )
+            if not provided:
+                print("missing-fixture", binary_id, drop_crate(test), fixture)
+                findings = True
     raise SystemExit(78 if invalid else 1 if findings else 0)
 
 if sys.argv[1] == "run":
@@ -197,9 +217,12 @@ else:
 PY
 
 # `--check-placement` reads `nextest list --message-format json` on stdin and
-# reports the tests no record places (`unplaced <binary-id>
-# <test>`) and the binaries with a default beside a non-host-pure record
-# (`conflict <binary-id>`). It needs no Metal run context.
+# reports the tests no record places (`unplaced <binary-id> <test>`), the
+# binaries with a default beside a non-host-pure record (`conflict <binary-id>`)
+# and the lane records whose fixture no binary of the test's package lists
+# (`missing-fixture <binary-id> <test> <fixture>`), on stdout; exit 1 when any.
+# A binary it cannot read is `placement_invalid <binary-id> <detail>` on stderr,
+# exit 78. It needs no Metal run context.
 if [ "${1:-}" = --check-placement ]; then
   exec python3 -c "$PLACEMENT_PY" check
 fi

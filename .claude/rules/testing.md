@@ -1907,8 +1907,9 @@ Off a Metal run, or already inside a guest, a guest-placed body runs in place.
 
 The declaration is written as a record into the `overdrive_test_placement`
 section of the test binary. The wrapper reads that section from the selected
-test ELF and resolves the running test's record. `placement-lint` and the
-wrapper read the same records.
+test ELF and resolves the running test's record. `placement-lint` runs the
+wrapper's reader (`test-wrapper.sh --check-placement`) over the listing, so the
+lint and a Metal run read the records with the same code.
 
 `cargo xtask placement-lint` lists the workspace's tests with the
 `integration-tests` feature and each member's own `kvm-tests` feature, reads the
