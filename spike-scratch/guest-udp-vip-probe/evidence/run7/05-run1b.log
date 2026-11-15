@@ -1,0 +1,14 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.12s
+     Running `target/debug/xtask metal run --exclusive -- env RUST_LOG=info spike-scratch/guest-udp-vip-probe/run.sh run1`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+OVERDRIVE_METAL_RUN_ID=416df65c373ea462750275a5
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire exclusive physical-maintenance barrier (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_RUN_REGISTERED run_id=416df65c373ea462750275a5
+FATAL: timed out after 1700s acquiring /run/lock/overdrive-metal-shared.lock
+OVERDRIVE_METAL_RUNNER_ERROR error=maintenance_timeout

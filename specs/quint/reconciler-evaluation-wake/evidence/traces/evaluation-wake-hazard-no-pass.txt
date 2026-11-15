@@ -1,0 +1,35 @@
+# evaluation-wake-hazard-no-pass: counterexample, 4 state(s) (from the TLC trace)
+
+State 1
+  due = TRUE
+  snap = {}
+  dispatched = 0
+  active = {}
+  inWin = {}
+  pending = <<>>
+  conf_step = [init |-> [tag |-> "UNIT"]]
+  cancelled = 0
+  drifts = 0
+  has = {}
+  faults = 0
+  elig = [k1 |-> "imm", k2 |-> "imm", k3 |-> "imm"]
+  need = {}
+  passPos = 0
+
+State 2 [DivergeWake]
+  pending = <<"k2">>
+  drifts = 1
+  has = {"k2"}
+  need = {"k2"}
+
+State 3 [Drain]
+  snap = {"k2"}
+  active = {"k2"}
+  pending = <<>>
+
+State 4 [Finish]
+  snap = {}
+  active = {}
+  faults = 1
+
+-> stutters forever in State 4

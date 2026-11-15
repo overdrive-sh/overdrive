@@ -738,6 +738,17 @@ changelog:
       Added J-PLAT-007 for metal-test-placement-attribute, a developer-tooling
       authoring outcome grounded in user directions and repository evidence,
       not external customer research. No existing job contract changed.
+  - date: 2026-11-13
+    change: >
+      EXTENDED J-PLAT-004 and J-OPS-003 for reconciler-convergence-guarantees
+      (GH #351), authored by the DISCUSS wave. No new job: J-PLAT-004's outcome
+      ("reconciler correctness is mechanically checked") now also covers
+      arbitrary-state, multi-tick convergence under dropped actions and a
+      forgotten View, and J-OPS-003's "converge" outcome now also covers
+      recovery from a failed hydrate or a failed View write without the operator
+      re-submitting.
+      Contract text of both jobs is unchanged; stories trace to them through
+      docs/feature/reconciler-convergence-guarantees/feature-delta.md.
   - date: 2026-11-07
     change: >
       Added J-PLAT-006 for metal-run-isolation, a developer-tooling

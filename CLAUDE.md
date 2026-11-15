@@ -520,6 +520,8 @@ Ask: did the design leave out something the feature was asked to deliver, or tha
 
 Precedent (#54): the first gateway slice reads its certificate only from files passed as `serve` flags. An agent proposed "install certificates through the operator API" as the issue to lift this. Certificates are meant to be produced by the system itself, through the ACME producer in #57, so the limitation was already tracked there. The proposed issue would have recorded the wrong direction as planned work.
 
+**Search issues and ADRs before you claim a defect or dead code.** Before calling behaviour a bug or a regression, calling code dead, or starting a diagnosis or spike to prove either, search the open and closed issues and the ADRs for the mechanism. Use `gh issue list --state all --search …`, then `gh issue view <N> --comments`, and grep `docs/product/architecture/`. A known, deferred gap is not a new finding. Cite its issue instead of rediscovering it.
+
 The valid moves when tempted to write "deferred to a future X":
 
 - **Drop the deferral language.** Unstated knobs are "not in scope" by default; the reader doesn't need a promise of a future slot. This does not apply to a scope limitation the design itself imposes (above); that needs an issue.

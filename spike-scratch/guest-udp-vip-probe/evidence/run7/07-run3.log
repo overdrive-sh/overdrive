@@ -1,0 +1,31 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.07s
+     Running `target/debug/xtask metal run --exclusive -- env RUST_LOG=info spike-scratch/guest-udp-vip-probe/run.sh run3`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+OVERDRIVE_METAL_RUN_ID=72ce1d24241ffe672477cb8c
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire exclusive physical-maintenance barrier (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_RUN_REGISTERED run_id=72ce1d24241ffe672477cb8c
+OVERDRIVE_METAL_LEASE_ACQUIRED token=72ce1d24241ffe672477cb8c pid=409240
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/naypyidaw -> ubuntu@151.115.99.251:/home/ubuntu/overdrive-worktrees/660521a593c38a2566153770c50637ae7fd28de3c5ddf392ed243288c2e248a9
+
+sent 1,993,138 bytes  received 5,756 bytes  1,332,596.00 bytes/sec
+total size is 1,911,379,065  speedup is 956.22
+
+########## [bootstrap] materialising standalone .git (common dir 2.3G)
+
+sent 517,900 bytes  received 19,265 bytes  358,110.00 bytes/sec
+total size is 895,753,901  speedup is 1,667.56
+## marcus-sa/reconciler-convergence-gaps
+ M docs/product/architecture/adr-0053-same-host-backend-delivery-via-cgroup-sock-addr.md
+ M docs/product/architecture/brief.md
+ M docs/product/architecture/c4-diagrams.md
+ M docs/product/jobs.yaml
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+OVERDRIVE_METAL_RUN_STARTED run_id=72ce1d24241ffe672477cb8c

@@ -56,6 +56,35 @@ C4Container
     Rel(lint, wrapper, "Asks to resolve every listed test through")
     Rel(lint, tests, "Reads the records of every listed test in")
     Rel(prepare, owner, "Builds")
+
+## Reconciler convergence guarantees (GH #351, PROPOSED, ADR-0282)
+
+**Proposed; not accepted.** L1 and L2 are unchanged. This L3 shows the control-plane
+convergence subsystem with the proposed resync pass.
+
+```mermaid
+C4Component
+    title Convergence subsystem — proposed resync pass (L3)
+    Container_Boundary(serve, "Overdrive serve (control plane)") {
+        Component(pass, "Resync pass", "Tokio task", "Asks every reconciler for its managed targets each period and submits them")
+        Component(router, "Interest router", "Tokio task", "Submits an evaluation when an accepted observation row changes")
+        Component(broker, "Evaluation broker", "BTreeMap, LWW by key", "Collapses submits per reconciler and target; holds eligibility")
+        Component(loop, "Convergence loop", "Tokio task, 8 in flight", "Admits evaluations; one per target at a time")
+        Component(tick, "Convergence tick", "Rust", "Hydrates, reconciles, persists the View, dispatches actions")
+        Component(rec, "Reconcilers", "overdrive-reconcilers", "Declare managed targets; hydrate and reconcile")
+        Component(shim, "Action shim", "Rust", "Executes actions against driven ports")
+    }
+    ComponentDb(stores, "Intent, observation and View stores", "redb", "Hold intent, rows and Views")
+    Component(dp, "Dataplane adapter", "aya", "Owns the service maps")
+    Rel(pass, rec, "Enumerates managed targets from")
+    Rel(rec, stores, "Reads intent and observation through the hydration context")
+    Rel(pass, broker, "Submits level evaluations to")
+    Rel(router, broker, "Submits edge evaluations to")
+    Rel(loop, broker, "Drains eligible evaluations from")
+    Rel(loop, tick, "Runs")
+    Rel(tick, rec, "Hydrates and reconciles through")
+    Rel(tick, shim, "Dispatches actions to")
+    Rel(shim, dp, "Programs service backends in")
 ```
 
 ## VM lifecycle responsiveness (#283/#260)
@@ -921,6 +950,11 @@ Five properties the diagram makes explicit:
 
 ## Unconnected-UDP sendmsg4 + recvmsg4 (GH #200, ADR-0053 rev 2026-06-05)
 
+> **Superseded (ADR-0283, 2026-11-15).** The same-host local-backend path
+> shown in this section (connect4/sendmsg4/recvmsg4 service hooks,
+> `LOCAL_BACKEND_MAP`, `REVERSE_LOCAL_MAP`) is removed. The diagram below is
+> historical.
+
 **Source:** `docs/feature/unconnected-udp-sendmsg4/`. **ADR:** ADR-0053
 revision 2026-06-05. Adds two cgroup hooks + the `REVERSE_LOCAL_MAP`
 reply store to the same-host cgroup path; the XDP SERVICE_MAP/REVERSE_NAT
@@ -1654,7 +1688,6 @@ C4Container
   Container(probe, "VM probe runner", "Rust, overdrive-worker", "TCP and HTTP probes of VM services")
   Container(drv, "VmDriver", "Rust, overdrive-worker", "Beacon listener on the node beacon port (default 1234); VMM lifecycle")
   Container(resolve, "Mesh resolution", "Rust, ServiceBackendsResolve", "Classifies TCP destinations by frontend, VIP and backend")
-  Container(svc, "Service connect4", "Aya eBPF, ADR-0053", "Rewrites service VIPs at connect")
   Container(dns, "DnsResponder", "Rust", "Node DNS, wildcard bind on port 53")
   Container(nft, "Host firewall", "nftables, constant rules", "Diverts to leg-C; refuses other guest-prefix traffic; rejects marked owner sockets to host-internal destinations")
   Container(vmm, "Cloud Hypervisor fork", "VMM, backend=vhost-kernel", "Opens its own vhost-vsock device; exits on guest reset with the fork change of ADR-0182")
@@ -1683,7 +1716,6 @@ C4Container
   Rel(mtls, cp, "Dials VM backends for leg-S through", "GuestStreamDial")
   Rel(probe, cp, "Dials VM service ports through", "GuestStreamDial")
   Rel(fwd, ext, "Forwards non-mesh guest traffic to", "owner TCP / UDP socket")
-  Rel(svc, cp, "Rewrites VIP destinations of owner datagram sockets for", "cgroup connect4")
   Rel(fwd, dns, "Delivers guest DNS datagrams to", "UDP to gateway:53 on lo, GW-LOCAL")
 ```
 
@@ -2050,7 +2082,7 @@ C4Component
 
   Container_Boundary(dp, "dataplane / mTLS owners") {
     Component(prep, "Upstream socket preparation", "EbpfDataplane", "Creates the socket in the serve task, marks it, binds 127.0.0.1, reads SO_COOKIE and registers (cookie, ServiceKey)")
-    Component(registry, "Gateway Connect Registry + gateway selection cgroup/connect4 program", "EbpfDataplane + BPF (separate program beside cgroup_connect4_service)", "Registered sockets select via Maglev (BACKEND_MAP.healthy is not read) and record Selected BackendId or NoBackend")
+    Component(registry, "Gateway Connect Registry + gateway selection cgroup/connect4 program", "EbpfDataplane + BPF (separate gateway program; the cgroup_connect4_service it sat beside is removed, ADR-0283)", "Registered sockets select via Maglev (BACKEND_MAP.healthy is not read) and record Selected BackendId or NoBackend")
     Component(assoc, "Service-map commit guard + Applied Backend Identity", "EbpfDataplane", "Outer-map commit publishes selection before the immutable BackendId-to-applied-Backend.alloc becomes readable")
     Component(slot, "Gateway Identity Slot + ClientIdentityAccess", "dedicated holder/capability", "Owns desired epoch + audited SVID + the process-local issuance-failure record the owner projects onto the status row (ADR-0274); only crate-private clock-checked client use may borrow material")
     Component(gmtls, "HostGatewayClientMtls", "rustls client", "Presents leaf+intermediate, roots at the bundle anchor, pins the exact selected SPIFFE peer, then arms kernel TLS through the relay")

@@ -1,0 +1,419 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.08s
+     Running `target/debug/xtask metal run --exclusive -- env RUST_LOG=info spike-scratch/guest-udp-vip-probe/run.sh run6`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+OVERDRIVE_METAL_RUN_ID=73f51cd8b82995e756743135
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire exclusive physical-maintenance barrier (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_RUN_REGISTERED run_id=73f51cd8b82995e756743135
+OVERDRIVE_METAL_LEASE_ACQUIRED token=73f51cd8b82995e756743135 pid=736032
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/naypyidaw -> ubuntu@151.115.99.251:/home/ubuntu/overdrive-worktrees/660521a593c38a2566153770c50637ae7fd28de3c5ddf392ed243288c2e248a9
+
+sent 1,994,108 bytes  received 5,728 bytes  799,934.40 bytes/sec
+total size is 1,911,385,705  speedup is 955.77
+
+########## [bootstrap] materialising standalone .git (common dir 2.3G)
+
+sent 517,896 bytes  received 19,253 bytes  358,099.33 bytes/sec
+total size is 895,753,901  speedup is 1,667.61
+## marcus-sa/reconciler-convergence-gaps
+ M docs/product/architecture/adr-0053-same-host-backend-delivery-via-cgroup-sock-addr.md
+ M docs/product/architecture/brief.md
+ M docs/product/architecture/c4-diagrams.md
+ M docs/product/jobs.yaml
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+OVERDRIVE_METAL_RUN_STARTED run_id=73f51cd8b82995e756743135
+uname: 7.0.0-38-generic  sha: fb71b400fa42cbf2c0252e0e2697d6fac93f69db  dirty:
+ M ../../docs/product/architecture/adr-0053-same-host-backend-delivery-via-cgroup-sock-addr.md
+ M ../../docs/product/architecture/brief.md
+ M ../../docs/product/architecture/c4-diagrams.md
+ M ../../docs/product/jobs.yaml
+?? ../../docs/feature/reconciler-convergence-guarantees/
+?? ../../docs/product/architecture/adr-0282-every-reconciler-declares-its-managed-targets-and-the-runtime-re-evaluates-them-each-period.md
+?? ../../docs/product/architecture/adr-0283-the-same-host-local-backend-path-is-removed.md
+?? ./
+?? ../reconciler-convergence-v1/
+    Updating crates.io index
+     Locking 373 packages to latest Rust 1.95.0 compatible versions
+      Adding generic-array v0.14.7 (available: v0.14.9)
+warning: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::new`: unsound due to lack of I/O safety; use `AsyncFd::register` instead (see https://github.com/tokio-rs/tokio/pull/8587)
+   --> /home/ubuntu/overdrive-worktrees/660521a593c38a2566153770c50637ae7fd28de3c5ddf392ed243288c2e248a9/crates/overdrive-host/src/beacon_io.rs:127:42
+    |
+127 |         let listener = Arc::new(AsyncFd::new(listener)?);
+    |                                          ^^^
+    |
+    = note: `#[warn(deprecated)]` on by default
+
+warning: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::new`: unsound due to lack of I/O safety; use `AsyncFd::register` instead (see https://github.com/tokio-rs/tokio/pull/8587)
+   --> /home/ubuntu/overdrive-worktrees/660521a593c38a2566153770c50637ae7fd28de3c5ddf392ed243288c2e248a9/crates/overdrive-host/src/beacon_io.rs:158:46
+    |
+158 | ...                   socket: AsyncFd::new(socket)?,
+    |                                        ^^^
+
+warning: `overdrive-host` (lib) generated 2 warnings
+warning: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::new`: unsound due to lack of I/O safety; use `AsyncFd::register` instead (see https://github.com/tokio-rs/tokio/pull/8587)
+    --> /home/ubuntu/overdrive-worktrees/660521a593c38a2566153770c50637ae7fd28de3c5ddf392ed243288c2e248a9/crates/overdrive-dataplane/src/gateway_relay/mod.rs:1238:27
+     |
+1238 |         let fd = AsyncFd::new(connected).map_err(|_| GatewayClientMtlsError::Handshake)?;
+     |                           ^^^
+     |
+     = note: `#[warn(deprecated)]` on by default
+
+warning: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::new`: unsound due to lack of I/O safety; use `AsyncFd::register` instead (see https://github.com/tokio-rs/tokio/pull/8587)
+    --> /home/ubuntu/overdrive-worktrees/660521a593c38a2566153770c50637ae7fd28de3c5ddf392ed243288c2e248a9/crates/overdrive-dataplane/src/gateway_relay/mod.rs:1262:27
+     |
+1262 |         let fd = AsyncFd::new(accepted).map_err(|err| handshake_io(&err))?;
+     |                           ^^^
+
+warning: `overdrive-dataplane` (lib) generated 2 warnings
+warning: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::new`: unsound due to lack of I/O safety; use `AsyncFd::register` instead (see https://github.com/tokio-rs/tokio/pull/8587)
+   --> /home/ubuntu/overdrive-worktrees/660521a593c38a2566153770c50637ae7fd28de3c5ddf392ed243288c2e248a9/crates/overdrive-control-plane/src/guest_network/flow_io/host.rs:209:14
+    |
+209 |     AsyncFd::new(socket).map(Arc::new)
+    |              ^^^
+    |
+    = note: `#[warn(deprecated)]` on by default
+
+warning: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::new`: unsound due to lack of I/O safety; use `AsyncFd::register` instead (see https://github.com/tokio-rs/tokio/pull/8587)
+   --> /home/ubuntu/overdrive-worktrees/660521a593c38a2566153770c50637ae7fd28de3c5ddf392ed243288c2e248a9/crates/overdrive-control-plane/src/guest_network/flow_io/host.rs:367:34
+    |
+367 |         let readiness = AsyncFd::new(ForwarderReadiness(Arc::clone(&context)))
+    |                                  ^^^
+
+warning: `overdrive-control-plane` (lib) generated 2 warnings
+   Compiling guest-udp-vip-probe v0.0.0 (/home/ubuntu/overdrive-worktrees/660521a593c38a2566153770c50637ae7fd28de3c5ddf392ed243288c2e248a9/spike-scratch/guest-udp-vip-probe)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 7.82s
+     Running `target/debug/harness /home/ubuntu/overdrive-worktrees/660521a593c38a2566153770c50637ae7fd28de3c5ddf392ed243288c2e248a9/spike-scratch/guest-udp-vip-probe/out/run6/udp-probe /home/ubuntu/overdrive-worktrees/660521a593c38a2566153770c50637ae7fd28de3c5ddf392ed243288c2e248a9/spike-scratch/guest-udp-vip-probe/out/run6`
+===== env =====
+$ uname -a; cd /home/ubuntu/overdrive-worktrees/660521a593c38a2566153770c50637ae7fd28de3c5ddf392ed243288c2e248a9/spike-scratch/guest-udp-vip-probe && git rev-parse HEAD && git status --short | head; date -u
+(exit Some(0))
+Linux em-determined-roentgen 7.0.0-38-generic #38-Ubuntu SMP PREEMPT_DYNAMIC Fri Sep  4 09:10:14 UTC 2026 x86_64 GNU/Linux
+fb71b400fa42cbf2c0252e0e2697d6fac93f69db
+ M ../../docs/product/architecture/adr-0053-same-host-backend-delivery-via-cgroup-sock-addr.md
+ M ../../docs/product/architecture/brief.md
+ M ../../docs/product/architecture/c4-diagrams.md
+ M ../../docs/product/jobs.yaml
+?? ../../docs/feature/reconciler-convergence-guarantees/
+?? ../../docs/product/architecture/adr-0282-every-reconciler-declares-its-managed-targets-and-the-runtime-re-evaluates-them-each-period.md
+?? ../../docs/product/architecture/adr-0283-the-same-host-local-backend-path-is-removed.md
+?? ./
+?? ../reconciler-convergence-v1/
+Sun Nov 15 04:50:44 UTC 2026
+
+===== peer spec =====
+[service]
+id = "udp-peer"
+replicas = 1
+
+[vm]
+command = "/usr/local/bin/udp-probe"
+args = ["echo", "9000"]
+kernel = "/srv/vm/metal/73f51cd8b82995e756743135/kernel"
+rootfs = "/srv/vm/metal/73f51cd8b82995e756743135/vm-serve-xYOcBr/udp-vip.ext4"
+
+[resources]
+cpu_milli = 500
+memory_bytes = 134217728
+
+[[listener]]
+port = 9000
+protocol = "tcp"
+
+[[listener]]
+port = 9000
+protocol = "udp"
+
+
+thread 'main' (737205) panicked at src/main.rs:62:9:
+udp-peer not Running: [
+    AllocStatusRowBody {
+        alloc_id: "alloc-udp-peer-0",
+        workload_id: "udp-peer",
+        node_id: "local",
+        state: Failed,
+        reason: Some(
+            VmGuestExitUnreported {
+                vmm_exit_code: Some(
+                    1,
+                ),
+                vmm_signal: None,
+            },
+        ),
+        resources: ResourcesBody {
+            cpu_milli: 500,
+            memory_bytes: 134217728,
+        },
+        workload_addr: None,
+        started_at: Some(
+            "(c=1,w=local)",
+        ),
+        exit_code: None,
+        last_transition: Some(
+            TransitionRecord {
+                from: None,
+                to: Failed,
+                reason: VmGuestExitUnreported {
+                    vmm_exit_code: Some(
+                        1,
+                    ),
+                    vmm_signal: None,
+                },
+                source: Reconciler,
+                at: "(c=1,w=local)",
+            },
+        ),
+        error: Some(
+            "  1: The VM could not boot\n  2: Error from device manager\n  3: Cannot open disk path\n  4: I/O error (path=/srv/vm/metal/73f51cd8b82995e756743135/vm-serve-xYOcBr/data/vm/clone-staging/.overdrive-vm-rootfs-alloc-udp-peer-0.img op=open)\n  5: Permission denied (os error 13)",
+        ),
+        restart_count: 0,
+        last_terminated: None,
+        terminal: None,
+        network_cleanup_pending: false,
+        svid_issue_failures: 0,
+        last_svid_issue_failure: None,
+    },
+    AllocStatusRowBody {
+        alloc_id: "alloc-udp-peer-1",
+        workload_id: "udp-peer",
+        node_id: "local",
+        state: Failed,
+        reason: Some(
+            VmGuestExitUnreported {
+                vmm_exit_code: Some(
+                    1,
+                ),
+                vmm_signal: None,
+            },
+        ),
+        resources: ResourcesBody {
+            cpu_milli: 500,
+            memory_bytes: 134217728,
+        },
+        workload_addr: None,
+        started_at: Some(
+            "(c=7,w=local)",
+        ),
+        exit_code: None,
+        last_transition: Some(
+            TransitionRecord {
+                from: None,
+                to: Failed,
+                reason: VmGuestExitUnreported {
+                    vmm_exit_code: Some(
+                        1,
+                    ),
+                    vmm_signal: None,
+                },
+                source: Reconciler,
+                at: "(c=7,w=local)",
+            },
+        ),
+        error: Some(
+            "  1: The VM could not boot\n  2: Error from device manager\n  3: Cannot open disk path\n  4: I/O error (path=/srv/vm/metal/73f51cd8b82995e756743135/vm-serve-xYOcBr/data/vm/clone-staging/.overdrive-vm-rootfs-alloc-udp-peer-1.img op=open)\n  5: Permission denied (os error 13)",
+        ),
+        restart_count: 0,
+        last_terminated: None,
+        terminal: None,
+        network_cleanup_pending: false,
+        svid_issue_failures: 0,
+        last_svid_issue_failure: None,
+    },
+    AllocStatusRowBody {
+        alloc_id: "alloc-udp-peer-2",
+        workload_id: "udp-peer",
+        node_id: "local",
+        state: Failed,
+        reason: Some(
+            VmGuestExitUnreported {
+                vmm_exit_code: Some(
+                    1,
+                ),
+                vmm_signal: None,
+            },
+        ),
+        resources: ResourcesBody {
+            cpu_milli: 500,
+            memory_bytes: 134217728,
+        },
+        workload_addr: None,
+        started_at: Some(
+            "(c=13,w=local)",
+        ),
+        exit_code: None,
+        last_transition: Some(
+            TransitionRecord {
+                from: None,
+                to: Failed,
+                reason: VmGuestExitUnreported {
+                    vmm_exit_code: Some(
+                        1,
+                    ),
+                    vmm_signal: None,
+                },
+                source: Reconciler,
+                at: "(c=13,w=local)",
+            },
+        ),
+        error: Some(
+            "  1: The VM could not boot\n  2: Error from device manager\n  3: Cannot open disk path\n  4: I/O error (path=/srv/vm/metal/73f51cd8b82995e756743135/vm-serve-xYOcBr/data/vm/clone-staging/.overdrive-vm-rootfs-alloc-udp-peer-2.img op=open)\n  5: Permission denied (os error 13)",
+        ),
+        restart_count: 0,
+        last_terminated: None,
+        terminal: None,
+        network_cleanup_pending: false,
+        svid_issue_failures: 0,
+        last_svid_issue_failure: None,
+    },
+    AllocStatusRowBody {
+        alloc_id: "alloc-udp-peer-3",
+        workload_id: "udp-peer",
+        node_id: "local",
+        state: Failed,
+        reason: Some(
+            VmGuestExitUnreported {
+                vmm_exit_code: Some(
+                    1,
+                ),
+                vmm_signal: None,
+            },
+        ),
+        resources: ResourcesBody {
+            cpu_milli: 500,
+            memory_bytes: 134217728,
+        },
+        workload_addr: None,
+        started_at: Some(
+            "(c=18,w=local)",
+        ),
+        exit_code: None,
+        last_transition: Some(
+            TransitionRecord {
+                from: None,
+                to: Failed,
+                reason: VmGuestExitUnreported {
+                    vmm_exit_code: Some(
+                        1,
+                    ),
+                    vmm_signal: None,
+                },
+                source: Reconciler,
+                at: "(c=18,w=local)",
+            },
+        ),
+        error: Some(
+            "  1: The VM could not boot\n  2: Error from device manager\n  3: Cannot open disk path\n  4: I/O error (path=/srv/vm/metal/73f51cd8b82995e756743135/vm-serve-xYOcBr/data/vm/clone-staging/.overdrive-vm-rootfs-alloc-udp-peer-3.img op=open)\n  5: Permission denied (os error 13)",
+        ),
+        restart_count: 0,
+        last_terminated: None,
+        terminal: None,
+        network_cleanup_pending: false,
+        svid_issue_failures: 0,
+        last_svid_issue_failure: None,
+    },
+    AllocStatusRowBody {
+        alloc_id: "alloc-udp-peer-4",
+        workload_id: "udp-peer",
+        node_id: "local",
+        state: Failed,
+        reason: Some(
+            VmGuestExitUnreported {
+                vmm_exit_code: Some(
+                    1,
+                ),
+                vmm_signal: None,
+            },
+        ),
+        resources: ResourcesBody {
+            cpu_milli: 500,
+            memory_bytes: 134217728,
+        },
+        workload_addr: None,
+        started_at: Some(
+            "(c=23,w=local)",
+        ),
+        exit_code: None,
+        last_transition: Some(
+            TransitionRecord {
+                from: None,
+                to: Failed,
+                reason: VmGuestExitUnreported {
+                    vmm_exit_code: Some(
+                        1,
+                    ),
+                    vmm_signal: None,
+                },
+                source: Reconciler,
+                at: "(c=23,w=local)",
+            },
+        ),
+        error: Some(
+            "  1: The VM could not boot\n  2: Error from device manager\n  3: Cannot open disk path\n  4: I/O error (path=/srv/vm/metal/73f51cd8b82995e756743135/vm-serve-xYOcBr/data/vm/clone-staging/.overdrive-vm-rootfs-alloc-udp-peer-4.img op=open)\n  5: Permission denied (os error 13)",
+        ),
+        restart_count: 0,
+        last_terminated: None,
+        terminal: None,
+        network_cleanup_pending: false,
+        svid_issue_failures: 0,
+        last_svid_issue_failure: None,
+    },
+    AllocStatusRowBody {
+        alloc_id: "alloc-udp-peer-5",
+        workload_id: "udp-peer",
+        node_id: "local",
+        state: Failed,
+        reason: Some(
+            VmGuestExitUnreported {
+                vmm_exit_code: Some(
+                    1,
+                ),
+                vmm_signal: None,
+            },
+        ),
+        resources: ResourcesBody {
+            cpu_milli: 500,
+            memory_bytes: 134217728,
+        },
+        workload_addr: None,
+        started_at: Some(
+            "(c=31,w=local)",
+        ),
+        exit_code: None,
+        last_transition: Some(
+            TransitionRecord {
+                from: None,
+                to: Failed,
+                reason: VmGuestExitUnreported {
+                    vmm_exit_code: Some(
+                        1,
+                    ),
+                    vmm_signal: None,
+                },
+                source: Reconciler,
+                at: "(c=31,w=local)",
+            },
+        ),
+        error: Some(
+            "  1: The VM could not boot\n  2: Error from device manager\n  3: Cannot open disk path\n  4: I/O error (path=/srv/vm/metal/73f51cd8b82995e756743135/vm-serve-xYOcBr/data/vm/clone-staging/.overdrive-vm-rootfs-alloc-udp-peer-5.img op=open)\n  5: Permission denied (os error 13)",
+        ),
+        restart_count: 0,
+        last_terminated: None,
+        terminal: Some(
+            BackoffExhausted {
+                attempts: 5,
+            },
+        ),
+        network_cleanup_pending: false,
+        svid_issue_failures: 0,
+        last_svid_issue_failure: None,
+    },
+]
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+harness: panic -> exiting process so the exclusive lease is released
+harness exit=101
+OVERDRIVE_METAL_RUN_COMPLETE run_id=73f51cd8b82995e756743135 exit_code=0 cause=command_returned

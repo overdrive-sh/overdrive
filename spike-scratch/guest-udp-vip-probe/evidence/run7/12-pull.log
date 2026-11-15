@@ -1,0 +1,20 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.07s
+     Running `target/debug/xtask metal pull spike-scratch/guest-udp-vip-probe/out/run7`
+/usr/bin/ssh
+xtask: running metal pull (tree-locked rsync from the box)
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire metal tree lock (/run/lock/overdrive-metal-tree-9ff198469bb164556234cf4ed1d14631b03cc0f712723bcd54339c9ec8ce85f4.lock)
+OVERDRIVE_METAL_LEASE_ACQUIRED token=5fbe14035db0d4ac4166eec8 pid=741445
+
+########## [bootstrap] pull ubuntu@151.115.99.251:/home/ubuntu/overdrive-worktrees/660521a593c38a2566153770c50637ae7fd28de3c5ddf392ed243288c2e248a9/spike-scratch/guest-udp-vip-probe/out/run7 -> spike-scratch/guest-udp-vip-probe/out/run7
+.d..t...... ./
+>f+++++++++ evidence.log
+>f+++++++++ run.log
+>f+++++++++ strace-serve.txt
+>f+++++++++ udp-probe
+
+########## [bootstrap] pull complete (1 path(s); nothing deleted locally)

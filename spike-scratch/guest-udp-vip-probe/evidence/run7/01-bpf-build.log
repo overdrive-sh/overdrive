@@ -1,0 +1,58 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.15s
+     Running `target/debug/xtask metal run -- env OVERDRIVE_BPF_NATIVE=1 cargo xtask bpf-build`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+OVERDRIVE_METAL_RUN_ID=c62716d009e67e678503d125
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire exclusive physical-maintenance barrier (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_RUN_REGISTERED run_id=c62716d009e67e678503d125
+OVERDRIVE_METAL_LEASE_ACQUIRED token=c62716d009e67e678503d125 pid=4033641
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/naypyidaw -> ubuntu@151.115.99.251:/home/ubuntu/overdrive-worktrees/660521a593c38a2566153770c50637ae7fd28de3c5ddf392ed243288c2e248a9
+
+sent 2,055,673 bytes  received 16,017 bytes  591,911.43 bytes/sec
+total size is 1,911,368,493  speedup is 922.61
+
+########## [bootstrap] materialising standalone .git (common dir 2.3G)
+
+sent 12,312,736 bytes  received 581,631 bytes  5,157,746.80 bytes/sec
+total size is 895,190,718  speedup is 69.42
+## marcus-sa/reconciler-convergence-gaps
+ M docs/product/architecture/adr-0053-same-host-backend-delivery-via-cgroup-sock-addr.md
+ M docs/product/architecture/brief.md
+ M docs/product/architecture/c4-diagrams.md
+ M docs/product/jobs.yaml
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+OVERDRIVE_METAL_RUN_STARTED run_id=c62716d009e67e678503d125
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.20s
+     Running `target/debug/xtask bpf-build`
+/home/ubuntu/.cargo/bin/bpf-linker
+xtask: running rustup run nightly-2026-08-05 cargo build (overdrive-bpf, bpfel-unknown-none)
+    Finished `release` profile [optimized + debuginfo] target(s) in 0.19s
+/usr/sbin/bpftool
+In file included from /home/ubuntu/overdrive-worktrees/660521a593c38a2566153770c50637ae7fd28de3c5ddf392ed243288c2e248a9/crates/overdrive-bpf/src/tcp_correlation_candidate.bpf.c:3:
+/home/ubuntu/overdrive-worktrees/660521a593c38a2566153770c50637ae7fd28de3c5ddf392ed243288c2e248a9/target/bpf/vmlinux.h:42399:2: warning: declaration does not declare anything [-Wmissing-declarations]
+ 42399 |         struct aes_enckey;
+       |         ^~~~~~~~~~~~~~~~~
+/home/ubuntu/overdrive-worktrees/660521a593c38a2566153770c50637ae7fd28de3c5ddf392ed243288c2e248a9/target/bpf/vmlinux.h:58058:3: warning: declaration does not declare anything [-Wmissing-declarations]
+ 58058 |                 struct ns_tree;
+       |                 ^~~~~~~~~~~~~~
+/home/ubuntu/overdrive-worktrees/660521a593c38a2566153770c50637ae7fd28de3c5ddf392ed243288c2e248a9/target/bpf/vmlinux.h:80527:2: warning: declaration does not declare anything [-Wmissing-declarations]
+ 80527 |         struct __filename_head;
+       |         ^~~~~~~~~~~~~~~~~~~~~~
+/home/ubuntu/overdrive-worktrees/660521a593c38a2566153770c50637ae7fd28de3c5ddf392ed243288c2e248a9/target/bpf/vmlinux.h:121327:2: warning: declaration does not declare anything [-Wmissing-declarations]
+ 121327 |         union pipe_index;
+        |         ^~~~~~~~~~~~~~~~
+/home/ubuntu/overdrive-worktrees/660521a593c38a2566153770c50637ae7fd28de3c5ddf392ed243288c2e248a9/target/bpf/vmlinux.h:134848:4: warning: declaration does not declare anything [-Wmissing-declarations]
+ 134848 |                         struct freelist_counters;
+        |                         ^~~~~~~~~~~~~~~~~~~~~~~~
+5 warnings generated.
+xtask: bpf-build wrote /home/ubuntu/overdrive-worktrees/660521a593c38a2566153770c50637ae7fd28de3c5ddf392ed243288c2e248a9/target/bpf/overdrive_bpf.o
+xtask: bpf-build wrote /home/ubuntu/overdrive-worktrees/660521a593c38a2566153770c50637ae7fd28de3c5ddf392ed243288c2e248a9/target/bpf/overdrive_guest_bpf.o
+xtask: bpf-build wrote /home/ubuntu/overdrive-worktrees/660521a593c38a2566153770c50637ae7fd28de3c5ddf392ed243288c2e248a9/target/bpf/overdrive_guest_tcp_correlation_candidate_bpf.o
+OVERDRIVE_METAL_RUN_COMPLETE run_id=c62716d009e67e678503d125 exit_code=0 cause=command_returned

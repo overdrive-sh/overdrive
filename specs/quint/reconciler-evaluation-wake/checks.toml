@@ -1,0 +1,146 @@
+# Checks the `cargo xtask quint` runner executes for specs/quint/reconciler-evaluation-wake/.
+# wake_full is the main (every decision on, every fault kind); wake_retention restricts the faults to the dataplane failing (D-3);
+# wake_conf is the conformance main (records conf_step, the broker counters); hazard/ instances switch one decision off.
+
+# ---- main instance: safety and progress hold
+
+[[check]]
+name = "evaluation-wake-safety"
+spec = "evaluation_wake.qnt"
+main = "wake_full"
+invariant = "Safety"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "evaluation-wake-progress-by-pass"
+spec = "evaluation_wake.qnt"
+main = "wake_full"
+temporal = "ProgressByPass"
+backend = "tlc"
+expect = "holds"
+ci = false
+timeout_secs = 1200
+
+[[check]]
+name = "evaluation-wake-pending-is-admitted"
+spec = "evaluation_wake.qnt"
+main = "wake_full"
+temporal = "PendingIsAdmitted"
+backend = "tlc"
+expect = "holds"
+ci = false
+timeout_secs = 1800
+
+[[check]]
+name = "evaluation-wake-retention-schedules-backed-off-key"
+spec = "evaluation_wake.qnt"
+main = "wake_retention"
+invariant = "RetentionSchedulesBackedOffKey"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+# ---- hazards (one per decision)
+
+[[check]]
+name = "evaluation-wake-hazard-no-pass"
+spec = "hazard/evaluation_wake_hazards.qnt"
+main = "wake_noPass"
+temporal = "ProgressByPass"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "evaluation-wake-hazard-no-retention"
+spec = "hazard/evaluation_wake_hazards.qnt"
+main = "wake_noRetention"
+invariant = "RetentionSchedulesBackedOffKey"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+# ---- named runs (critical scenarios), executed by `quint test` on the conformance main
+
+[[check]]
+name = "evaluation-wake-run-healthy-edge-converges"
+spec = "evaluation_wake.qnt"
+main = "wake_conf"
+run = "healthy_edge_converges"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "evaluation-wake-run-hydrate-error-recovers-by-pass"
+spec = "evaluation_wake.qnt"
+main = "wake_conf"
+run = "hydrate_error_recovers_by_pass"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "evaluation-wake-run-persist-error-recovers-by-pass"
+spec = "evaluation_wake.qnt"
+main = "wake_conf"
+run = "persist_error_recovers_by_pass"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "evaluation-wake-run-crash-between-fsync-and-dispatch-recovers-by-boot-pass"
+spec = "evaluation_wake.qnt"
+main = "wake_conf"
+run = "crash_between_fsync_and_dispatch_recovers_by_boot_pass"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "evaluation-wake-run-failed-dataplane-inside-backoff-recovers-without-row-write"
+spec = "evaluation_wake.qnt"
+main = "wake_conf"
+run = "failed_dataplane_inside_backoff_recovers_without_row_write"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "evaluation-wake-run-fresh-deploy-without-row-is-evaluated"
+spec = "evaluation_wake.qnt"
+main = "wake_conf"
+run = "fresh_deploy_without_row_is_evaluated"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "evaluation-wake-run-enumeration-failure-of-one-reconciler-does-not-starve-others"
+spec = "evaluation_wake.qnt"
+main = "wake_conf"
+run = "enumeration_failure_of_one_reconciler_does_not_starve_others"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "evaluation-wake-run-edge-wake-during-burst-is-admitted-after-burst"
+spec = "evaluation_wake.qnt"
+main = "wake_conf"
+run = "edge_wake_during_burst_is_admitted_after_burst"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "evaluation-wake-run-pass-submit-merges-retained-not-before-to-immediate"
+spec = "evaluation_wake.qnt"
+main = "wake_conf"
+run = "pass_submit_merges_retained_not_before_to_immediate"
+backend = "evaluator"
+expect = "holds"
+ci = true

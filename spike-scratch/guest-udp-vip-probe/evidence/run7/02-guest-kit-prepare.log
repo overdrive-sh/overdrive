@@ -1,0 +1,45 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.07s
+     Running `target/debug/xtask metal run -- cargo xtask guest-kit-prepare`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+OVERDRIVE_METAL_RUN_ID=67ddc8200eef3b6df5507b28
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire exclusive physical-maintenance barrier (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_RUN_REGISTERED run_id=67ddc8200eef3b6df5507b28
+OVERDRIVE_METAL_LEASE_ACQUIRED token=67ddc8200eef3b6df5507b28 pid=4045986
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/naypyidaw -> ubuntu@151.115.99.251:/home/ubuntu/overdrive-worktrees/660521a593c38a2566153770c50637ae7fd28de3c5ddf392ed243288c2e248a9
+
+sent 1,992,479 bytes  received 5,550 bytes  1,332,019.33 bytes/sec
+total size is 1,911,369,041  speedup is 956.63
+
+########## [bootstrap] materialising standalone .git (common dir 2.3G)
+
+sent 513,666 bytes  received 19,257 bytes  1,065,846.00 bytes/sec
+total size is 895,190,718  speedup is 1,679.77
+## marcus-sa/reconciler-convergence-gaps
+ M docs/product/architecture/adr-0053-same-host-backend-delivery-via-cgroup-sock-addr.md
+ M docs/product/architecture/brief.md
+ M docs/product/architecture/c4-diagrams.md
+ M docs/product/jobs.yaml
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+OVERDRIVE_METAL_RUN_STARTED run_id=67ddc8200eef3b6df5507b28
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.15s
+     Running `target/debug/xtask guest-kit-prepare`
+guest-kit-prepare: overdrive-init overdrive-init -> /home/ubuntu/overdrive-worktrees/660521a593c38a2566153770c50637ae7fd28de3c5ddf392ed243288c2e248a9/target/guest-kit/in-guest/overdrive-init--overdrive-init
+guest-kit-prepare: overdrive-fwd integration -> /home/ubuntu/overdrive-worktrees/660521a593c38a2566153770c50637ae7fd28de3c5ddf392ed243288c2e248a9/target/guest-kit/in-guest/overdrive-fwd--integration
+guest-kit-prepare: overdrive-dataplane integration -> /home/ubuntu/overdrive-worktrees/660521a593c38a2566153770c50637ae7fd28de3c5ddf392ed243288c2e248a9/target/guest-kit/in-guest/overdrive-dataplane--integration
+guest-kit-prepare: overdrive-dataplane overdrive_dataplane -> /home/ubuntu/overdrive-worktrees/660521a593c38a2566153770c50637ae7fd28de3c5ddf392ed243288c2e248a9/target/guest-kit/in-guest/overdrive-dataplane--overdrive_dataplane
+guest-kit-prepare: overdrive-control-plane acceptance -> /home/ubuntu/overdrive-worktrees/660521a593c38a2566153770c50637ae7fd28de3c5ddf392ed243288c2e248a9/target/guest-kit/in-guest/overdrive-control-plane--acceptance
+guest-kit-prepare: overdrive-control-plane integration -> /home/ubuntu/overdrive-worktrees/660521a593c38a2566153770c50637ae7fd28de3c5ddf392ed243288c2e248a9/target/guest-kit/in-guest/overdrive-control-plane--integration
+guest-kit-prepare: overdrive-cli integration -> /home/ubuntu/overdrive-worktrees/660521a593c38a2566153770c50637ae7fd28de3c5ddf392ed243288c2e248a9/target/guest-kit/in-guest/overdrive-cli--integration
+guest-kit-prepare: overdrive-worker integration -> /home/ubuntu/overdrive-worktrees/660521a593c38a2566153770c50637ae7fd28de3c5ddf392ed243288c2e248a9/target/guest-kit/in-guest/overdrive-worker--integration
+guest-kit-prepare: overdrive-worker leg_f_repair -> /home/ubuntu/overdrive-worktrees/660521a593c38a2566153770c50637ae7fd28de3c5ddf392ed243288c2e248a9/target/guest-kit/in-guest/overdrive-worker--leg_f_repair
+guest-kit-prepare: Quint 0.32.0, Node v24.21.0, Rust evaluator v0.6.0: staged 4437 runtime inputs
+guest-kit-prepare: kernel 7.0.0-38-generic, target x86_64-unknown-linux-musl: the lane is prepared
+OVERDRIVE_METAL_RUN_COMPLETE run_id=67ddc8200eef3b6df5507b28 exit_code=0 cause=command_returned
