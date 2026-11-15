@@ -281,6 +281,76 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-11-15T12:36:29Z"
+    },
+    {
+      "sid": "07-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-15T12:36:48Z"
+    },
+    {
+      "sid": "08-01",
+      "p": "RED",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: migration batch; acceptance is the scripted parity check",
+      "t": "2026-11-15T13:56:18Z"
+    },
+    {
+      "sid": "08-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-15T13:56:18Z"
+    },
+    {
+      "sid": "08-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-15T13:56:46Z"
+    },
+    {
+      "sid": "08-02",
+      "p": "RED",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: migration batch; acceptance is the scripted parity check",
+      "t": "2026-11-15T14:09:39Z"
+    },
+    {
+      "sid": "08-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-15T15:53:23Z"
+    },
+    {
+      "sid": "08-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-15T15:53:23Z"
+    },
+    {
+      "sid": "08-03",
+      "p": "RED",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: migration batch; acceptance is the scripted parity check",
+      "t": "2026-11-15T18:00:28Z"
+    },
+    {
+      "sid": "08-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-15T18:00:28Z"
+    },
+    {
+      "sid": "08-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-15T18:00:28Z"
     }
   ]
 }

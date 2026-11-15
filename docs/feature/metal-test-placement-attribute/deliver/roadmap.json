@@ -1,0 +1,452 @@
+{
+  "roadmap": {
+    "project_id": "metal-test-placement-attribute",
+    "created_at": "2026-11-14T20:17:37Z",
+    "total_steps": 15
+  },
+  "phases": [
+    {
+      "id": "01",
+      "name": "Guest placement on the test (slice guest-placement-on-the-test)",
+      "steps": [
+        {
+          "id": "01-01",
+          "name": "Typed guest-kit surface replaces the string-keyed skeleton and the macro stops inserting #[test]",
+          "description": "Land placement::run_in_guest(&GuestPlacement, ..), inside_guest() and in_metal_run() as pinned in feature-delta Interface contracts; remove guest_suite::run_in_guest(&str, ..). Rewrite the 'Transitional' doc comments in guest_suite.rs and crates/overdrive-testing-macros/src/lib.rs. The attribute macro no longer inserts #[test]; fix every existing #[overdrive_test] site so each test still runs exactly once.",
+          "criteria": [
+            "run_in_guest takes a typed GuestPlacement; the string-keyed guest_suite::run_in_guest no longer exists and no caller references it",
+            "inside_guest() and in_metal_run() exist with the pinned semantics: in_metal_run() is true when any one of the three Metal run variables is set and non-empty",
+            "#[overdrive_test] never inserts #[test]; with #[test] above or below the attribute each existing site registers exactly one test, not two (DDD-1, V-2)",
+            "The Transitional doc comments in guest_suite.rs and overdrive-testing-macros/src/lib.rs are rewritten to describe the real behaviour (no #[test] insertion, run in place where inside_guest() holds or in_metal_run() is false, typed hand-off)",
+            "An unmigrated guest test still passes through the dispatcher after the change",
+            "No GitHub issue number or roadmap-step id appears in any new identifier, filename or log message"
+          ],
+          "test_file": "crates/overdrive-testing/tests/integration/shared_guest_fixtures.rs",
+          "scenario_name": "No acceptance test of its own: slice guest-placement-on-the-test activates 0 tests; the tests whose behaviour it builds activate in the slice that delivers the form they take (phase 02 onward). Regression evidence: existing #[overdrive_test] sites run exactly once.",
+          "implementation_notes": "Never add an entry to infra/metal/test-placement.json; this feature only deletes entries. `git diff 3cec35ba8 -- infra/metal/test-placement.json` must show only deletions (empty until migrations). To RED-check a pending test before its form exists, add a temporary entry and restore the file afterwards. #[overdrive_test] never inserts #[test] after this step; it goes below #[quint_test]/#[quint_run]. Run everything on Metal: `cargo xtask metal run -- ...` (never Lima). Commit with LEFTHOOK_EXCLUDE=nextest-affected. Mutation testing is skipped for this feature (user ruling). Rust project: property tests are proptest. Tests are pre-authored by DISTILL; crafters activate them and must not write or weaken bodies. The #![cfg(target_os = \"linux\")] on placement/mod.rs and shared_guest! stays. No roadmap step ids or issue numbers in new identifiers, filenames or log messages (.claude/rules/domain-naming.md). Implement to the design: never invent public API; surface gaps as blockers.",
+          "files_to_modify": [
+            "crates/overdrive-testing/src/guest_suite.rs",
+            "crates/overdrive-testing/src/placement/",
+            "crates/overdrive-testing-macros/src/lib.rs"
+          ]
+        },
+        {
+          "id": "01-02",
+          "name": "Guest placement record in an ELF section, read by the wrapper without a table lookup",
+          "description": "The attribute writes the guest placement into the overdrive_test_placement ELF section; test-wrapper.sh reads it and runs a declared test with no table lookup. The three isolated_guest fixtures activate. The walking-skeleton test (cluster_and_node_commands::cluster_status_with_no_server_returns_transport_error) stays green with its table entry deleted; per-test guest boot time is recorded.",
+          "criteria": [
+            "The migrated walking-skeleton test passes on Metal with its body running in a fresh guest and no table entry",
+            "A guest that cannot start (Metal run with a malformed run id) is a host FAIL naming the group and stage; the body never runs on the host",
+            "An unknown group is rejected by name",
+            "Outside a Metal run the test runs its body in place; on a Metal run its body never runs on the host",
+            "Boot time for the migrated test is retained in the run output",
+            "The three isolated_guest fixtures run one guest each; the dispatcher still serves unmigrated guest tests"
+          ],
+          "test_file": "crates/overdrive-testing/tests/integration/shared_guest_fixtures.rs",
+          "scenario_name": "Fixtures activated: first_isolated_guest_test, second_isolated_guest_test, isolated_guest_test_that_marks_where_it_ran (keep #[overdrive_test(guest = \"cgroup-default\")]). Their consuming scenarios activate in phase 03.",
+          "implementation_notes": "Never add an entry to infra/metal/test-placement.json; this feature only deletes entries (the walking-skeleton entry is deleted here). `git diff 3cec35ba8 -- infra/metal/test-placement.json` must show only deletions. Activating a test includes giving it its placement on the test itself. native_launcher is only for Metal-runner machinery tests (D-10 list in distill/test-scenarios.md); every other test is a guest group or host_pure. #[overdrive_test] never inserts #[test]. Run everything on Metal: `cargo xtask metal run -- ...` (never Lima). Commit with LEFTHOOK_EXCLUDE=nextest-affected. Mutation testing is skipped (user ruling). No roadmap step ids or issue numbers in new identifiers. Implement to the design: never invent public API; surface gaps as blockers.",
+          "files_to_modify": [
+            "infra/metal/test-wrapper.sh",
+            "infra/metal/test-placement.json",
+            "crates/overdrive-testing-macros/src/lib.rs",
+            "crates/overdrive-cli/tests/integration/cluster_and_node_commands.rs"
+          ],
+          "dependencies": [
+            "01-01"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "02",
+      "name": "Host-pure placement on the test (slice host-pure-placement-on-the-test)",
+      "steps": [
+        {
+          "id": "02-01",
+          "name": "Host-pure declarations (test, module, binary default) with precedence and conflict detection",
+          "description": "Deliver #[overdrive_test(host_pure)], placement!(host_pure) and overdrive_test_default!(host_pure), precedence test then module then binary default, no child-module inheritance, placement_conflict for a default beside a non-host-pure record, and the wrapper behaviour for host-pure tests (original runner chain, no namespace, no table lookup). Activates 17 tests plus 5 fixtures. Migrate one module and one host-only binary with their entries deleted.",
+          "criteria": [
+            "A test placed host-pure by its own declaration, its module's placement!(host_pure) or its binary's overdrive_test_default!(host_pure) passes on Metal with no table entry",
+            "Precedence is test, then module, then binary default; a module declaration with a guest-declared test in it leaves that test in its guest",
+            "A child module is not placed by its parent's declaration",
+            "A binary with a default and a non-host-pure record is refused as placement_conflict",
+            "No guest is booted and no namespace is created for a host-pure test; runner chain equals today's host-pure behaviour",
+            "The existing invalid_run_context diagnostics still fire for a declared test",
+            "An unplaced test is refused on a Metal run before its body runs; an unreadable section is refused as an invalid placement; a record wins over a table entry for the same test"
+          ],
+          "test_file": "xtask/tests/acceptance/placement_attribute.rs",
+          "scenario_name": "xtask (12): a_listed_test_with_no_placement_is_reported_naming_its_binary_and_itself, a_module_declaration_places_exactly_the_tests_of_that_module, a_binary_default_places_every_test_of_a_host_only_binary, a_binary_default_beside_a_non_host_pure_record_is_a_conflict_and_a_module_declaration_is_not, a_section_that_cannot_be_read_is_refused_as_an_invalid_placement, the_records_the_attribute_wrote_into_this_binary_are_read_by_the_checker, an_unplaced_test_is_refused_on_a_metal_run_before_its_body_runs, a_binary_that_mixes_a_default_with_a_guest_record_is_refused_on_a_metal_run, an_unreadable_section_is_refused_on_a_metal_run_as_an_invalid_placement, a_declared_test_with_an_invalid_run_context_is_refused_by_the_run_context_check, a_test_that_declares_itself_host_pure_runs_without_a_namespace, a_record_wins_over_a_table_entry_for_the_same_test. overdrive-testing lib (3, crates/overdrive-testing/src/placement/tests.rs): an_unknown_group_is_rejected_by_name_at_declaration, a_metal_run_is_present_when_any_one_of_the_three_variables_is_set_and_non_empty, no_metal_run_is_present_when_no_variable_is_set_or_every_set_one_is_empty. trybuild (1, crates/overdrive-testing/tests/compile_fail.rs): an_unknown_guest_group_on_the_attribute_fails_the_build_naming_the_group. integration (1, crates/overdrive-testing/tests/integration/placement_off_metal.rs): a_guest_placed_test_runs_its_body_in_place_when_no_metal_run_is_present. Fixtures (5, xtask placement_attribute.rs): per_test_host_pure_fixture, host_pure_fixture_may_return_a_result, host_pure_fixture_reports_its_namespace, first_test_of_the_declared_module, second_test_of_the_declared_module.",
+          "implementation_notes": "Never add an entry to infra/metal/test-placement.json; this feature only deletes entries. Activating a test includes giving it its placement on the test itself (attribute, placement!, or overdrive_test_default! where the binary has no guest tests); the lib unit tests take placement!(host_pure) on their module; the trybuild tests and placement_off_metal in-place test are host_pure. Ignored tests need no placement. To RED-check a pending test before its form exists, add a temporary entry and restore the file afterwards; `git diff 3cec35ba8 -- infra/metal/test-placement.json` must show only deletions. Migrated representative: overdrive-store-local malformed_intent_bytes_cause_refuse_to_start (entry deleted; must not fail test_unclassified). #[overdrive_test] never inserts #[test]; it goes below #[quint_test]/#[quint_run]. Run everything on Metal: `cargo xtask metal run -- ...` (never Lima). Commit with LEFTHOOK_EXCLUDE=nextest-affected. Mutation testing is skipped (user ruling). Rust project: proptest, not Hypothesis. Tests are pre-authored by DISTILL; remove the #[ignore = \"pending DELIVER: ...\"] marker only, do not write or weaken bodies. The five trybuild .stderr files came from the spike; regenerate if rustc's rendering differs. No roadmap step ids or issue numbers in new identifiers. Implement to the design: never invent public API; surface gaps as blockers. A mislabelled node-global mutator is not made safe by host_pure; review item.",
+          "files_to_modify": [
+            "crates/overdrive-testing-macros/src/lib.rs",
+            "crates/overdrive-testing/src/placement/",
+            "infra/metal/test-wrapper.sh",
+            "infra/metal/test-placement.json"
+          ],
+          "dependencies": [
+            "01-02"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "03",
+      "name": "Lane and launcher placement on the test (slice lane-and-launcher-placement-on-the-test)",
+      "steps": [
+        {
+          "id": "03-01",
+          "name": "Lane operator/owner and native_launcher forms; Metal-runner machinery scenarios placed native_launcher",
+          "description": "Deliver lane_operator, lane_owner and native_launcher on the attribute (the 16 non-guest-group, non-host-pure table entries become expressible and their entries are deleted), the missing-fixture check, and activate 9 tests plus 2 fixtures. The four runner-machinery scenarios take #[overdrive_test(native_launcher)] per D-10.",
+          "criteria": [
+            "Operator and owner lane tests pass with the fixture named on the test and no table entry",
+            "A lane test naming a missing fixture fails naming the fixture and the test",
+            "A native-launcher self-test passes and still observes its own namespaces and cgroup (full node view)",
+            "Off a Metal run a lane-placed test runs its body in place",
+            "Every one of the 16 entries is expressible; none is left as a table remnant",
+            "Guest-placed tests outside a shared module boot one guest each, boot time is recorded in the run output, and a guest-placed test never runs its body on the host on a Metal run"
+          ],
+          "test_file": "xtask/tests/acceptance/placement_attribute.rs",
+          "scenario_name": "xtask (5): every_placement_a_test_declares_on_itself_is_placed, a_test_that_declares_itself_a_native_launcher_runs_in_the_full_node_view, the_native_launcher_record_the_attribute_wrote_is_read_by_the_checker, placement_lint_reports_a_lane_test_whose_fixture_does_not_exist. overdrive-testing integration (4, native_launcher per D-10): lane_placement.rs a_lane_test_naming_a_missing_fixture_fails_naming_the_fixture_and_the_test; shared_guest_scenarios.rs guest_placed_tests_outside_a_shared_module_boot_one_guest_each and the_boot_time_of_a_guest_per_test_is_recorded_in_the_run_output; placement_off_metal.rs a_guest_placed_test_never_runs_its_body_on_the_host_on_a_metal_run and a_guest_placed_test_with_an_invalid_run_id_fails_naming_its_group_and_never_runs_on_the_host (these two are the regression guards; counted with the slice's 9 per the activation map). Fixtures (2): native_launcher_fixture (placement_attribute.rs), explicit_guest_test_in_the_shared_module (shared_guest_fixtures.rs).",
+          "implementation_notes": "Never add an entry to infra/metal/test-placement.json; this feature only deletes entries (the 16 lane/launcher entries are deleted here). `git diff 3cec35ba8 -- infra/metal/test-placement.json` must show only deletions. To RED-check a pending test before its form exists, add a temporary entry and restore the file afterwards. native_launcher is only for Metal-runner machinery tests (D-10 list in distill/test-scenarios.md); every other test is a guest group or host_pure. The shared-module fixtures keep the argument-free #[overdrive_test] form beside shared_guest!, except explicit_guest_test_in_the_shared_module which carries an explicit guest. .config/nextest.toml gains one override putting the overdrive-testing integration binary in host-kernel-shared with a wider slow-timeout (scenarios boot guests and kill owner processes); verify with `cargo xtask metal run -- cargo nextest show-config test-groups --profile default` and `--profile ci`. #[overdrive_test] never inserts #[test]. Run everything on Metal: `cargo xtask metal run -- ...` (never Lima). Commit with LEFTHOOK_EXCLUDE=nextest-affected. Mutation testing is skipped (user ruling). Tests are pre-authored by DISTILL; remove the pending marker only, do not write or weaken bodies. No roadmap step ids or issue numbers in new identifiers. Implement to the design: never invent public API; surface gaps as blockers.",
+          "files_to_modify": [
+            "crates/overdrive-testing-macros/src/lib.rs",
+            "crates/overdrive-testing/src/placement/",
+            "infra/metal/test-wrapper.sh",
+            "infra/metal/test-placement.json",
+            ".config/nextest.toml"
+          ],
+          "dependencies": [
+            "02-01"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "04",
+      "name": "Unplaced test fails in the default lane (slice unplaced-test-fails-in-the-default-lane)",
+      "steps": [
+        {
+          "id": "04-01",
+          "name": "cargo xtask placement-lint gates unplaced tests before any guest boots",
+          "description": "Add `cargo xtask placement-lint`: every listed test has its own record, an applicable module or binary declaration, or (until retirement) a table entry; it reports a binary mixing a default with a non-host-pure record (placement_conflict). Failure names the binary and the test. Wired into CI and pre-push beside dst-lint and conformance-lint. Includes a negative fixture. The lint lists tests with integration-tests and each member's own kvm-tests feature.",
+          "criteria": [
+            "An unplaced integration test fails before any guest boots, naming binary and test",
+            "Fully declared binaries pass; a declared test beside table-listed tests does not trip it",
+            "A unit-lane test with a module or binary declaration passes; one without is flagged",
+            "A binary with overdrive_test_default!(host_pure) and a non-host-pure record is flagged placement_conflict",
+            "A failing `cargo nextest list` is reported with its cause",
+            "`cargo xtask placement-lint` runs in CI and pre-push beside dst-lint and conformance-lint"
+          ],
+          "test_file": "xtask/tests/acceptance/placement_attribute.rs",
+          "scenario_name": "placement_lint_passes_when_every_listed_test_is_placed, placement_lint_names_the_binary_and_the_test_of_an_unplaced_integration_test, placement_lint_reports_a_binary_that_mixes_a_default_with_a_guest_test, placement_lint_fails_with_the_cause_when_the_test_listing_fails, placement_lint_lists_with_integration_tests_and_each_members_own_kvm_feature (the missing-fixture lint test activated in phase 03)",
+          "implementation_notes": "Never add an entry to infra/metal/test-placement.json; this feature only deletes entries. Activation includes the test's own placement on the test (the xtask acceptance tests are host_pure via the binary's declaration). The acceptance tests stub only `nextest list`; the lint's own CI/pre-push step is the coverage of the real path (D-9), no test reads lefthook.yml. xtask [dependencies] must not contain any overdrive-* crate; xtask may dev-depend on overdrive-testing-macros. Agents propose, the user adds: do not add CI lanes or tools beyond the placement-lint wiring. Run everything on Metal: `cargo xtask metal run -- ...` (never Lima). Commit with LEFTHOOK_EXCLUDE=nextest-affected. Mutation testing is skipped (user ruling; xtask is excluded anyway). Tests are pre-authored by DISTILL; remove the pending marker only. No roadmap step ids or issue numbers in new identifiers. Implement to the design: never invent public API; surface gaps as blockers.",
+          "files_to_modify": [
+            "xtask/src/",
+            "xtask/Cargo.toml",
+            "lefthook.yml",
+            ".github/workflows/"
+          ],
+          "dependencies": [
+            "03-01"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "05",
+      "name": "Guest artifacts declared per group (slice guest-artifacts-declared-per-group)",
+      "steps": [
+        {
+          "id": "05-01",
+          "name": "Closed 21-environment guest registry with build-time profile rejection",
+          "description": "One closed registry of 21 environments over 8 groups; an omitted profile selects the group's base profile (native for mtls-relay); an unknown profile or a profile of another group fails the build with the pinned diagnostic pointing at the profile argument. The five Quint gateway tests (overdrive-gateway application::quint_gateway_application::*) select profile quint of cgroup-default. Activates 4 tests.",
+          "criteria": [
+            "The registry holds exactly the 21 named environments over 8 groups; an omitted profile selects the base profile",
+            "An unknown profile and a profile of another group are rejected at build with: unknown guest profile `<value>` for group `<group>`, pointing at the profile argument",
+            "A renamed test keeps its profile",
+            "The five Quint gateway tests pass in guests staged for the quint profile on Metal",
+            "Pass parity for existing tests of the declared groups (checked per migration batch by the parity check)"
+          ],
+          "test_file": "crates/overdrive-testing/src/placement/tests.rs",
+          "scenario_name": "the_registry_accepts_each_named_environment, an_omitted_profile_selects_each_groups_base_profile, an_unknown_profile_or_one_of_another_group_is_rejected; trybuild an_unknown_guest_profile_on_the_attribute_fails_the_build_naming_profile_and_group (crates/overdrive-testing/tests/compile_fail.rs)",
+          "implementation_notes": "Never add an entry to infra/metal/test-placement.json; this feature only deletes entries (the gateway quint tests' entries are deleted when they declare their profile). The lib tests take placement!(host_pure) on their module; the trybuild test is host_pure. Do not change what any group stages and add no groups or profiles beyond the 21. Artifact-presence scenarios are dropped (D-8), checked per migration batch. The trybuild .stderr files came from the spike; regenerate if rustc's rendering differs. Run everything on Metal: `cargo xtask metal run -- ...` (never Lima). Commit with LEFTHOOK_EXCLUDE=nextest-affected. Mutation testing is skipped (user ruling). Tests are pre-authored by DISTILL; remove the pending marker only. No roadmap step ids or issue numbers in new identifiers. Implement to the design: never invent public API; surface gaps as blockers.",
+          "files_to_modify": [
+            "crates/overdrive-testing/src/placement/",
+            "crates/overdrive-testing-macros/src/lib.rs",
+            "crates/overdrive-testing/src/guest_suite.rs",
+            "crates/overdrive-gateway/tests/"
+          ],
+          "dependencies": [
+            "04-01"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "06",
+      "name": "Module tests share one guest (slice module-tests-share-one-guest)",
+      "steps": [
+        {
+          "id": "06-01",
+          "name": "Shared-guest owner core with unit tests and Quint conformance replay",
+          "description": "Build the owner core (crates/overdrive-testing/src/placement/owner_core/...) per the pinned contract (Event, Effect, Verdict, GuestView, OwnerObservation deriving Clone, Debug, PartialEq, Eq) with its 18 unit tests, and the quint-connect conformance driver (crates/overdrive-testing/src/placement/owner_core/conformance.rs) over specs/quint/shared-guest-owner/ with its 9 conformance tests (8 named runs plus the randomized trace).",
+          "criteria": [
+            "A new owner has no guest, no clients and has not stopped; three clients share one guest and are served in arrival order",
+            "A failed test, a lost guest or an exec-bound hit replaces the guest; a boot failure answers only the head and a new boot starts for the next attach",
+            "A disconnect while running makes the next client wait; a disconnect while queued is removed; the idle exit happens only when empty",
+            "Every action in the spec's step relation is mapped to OwnerCore::handle; State is projected only through the pinned accessor observe(); no Sim* adapter or driver bookkeeping is read; no always-false cfg",
+            "Each of the eight named runs has a #[quint_test] and #[quint_run] randomized traces run with the seed printed; `cargo xtask conformance-lint` exits 0",
+            "The 18 owner-core unit tests pass in the default lane"
+          ],
+          "test_file": "crates/overdrive-testing/src/placement/owner_core/tests.rs",
+          "scenario_name": "18 owner-core tests in owner_core/tests.rs (including a_new_owner_has_no_guest_no_clients_and_has_not_stopped, three_clients_share_one_guest_and_are_served_in_arrival_order); 9 conformance tests in owner_core/conformance.rs: quint_shared_guest_happy_path_three_clients_share_one_guest, quint_shared_guest_failure_then_replacement_guest, quint_shared_guest_guest_lost_mid_exec_then_replacement, quint_shared_guest_disconnect_while_running_next_waits, quint_shared_guest_disconnect_while_queued_is_removed, quint_shared_guest_boot_failure_then_retry_boot_on_next_attach, quint_shared_guest_exec_bound_discards_guest_and_replies_bound, quint_shared_guest_idle_exit_only_when_empty, quint_shared_guest_randomized_traces",
+          "implementation_notes": "Never add an entry to infra/metal/test-placement.json; this feature only deletes entries. Activation includes the placement on the test: the owner-core unit tests and the conformance module take placement!(host_pure) on their module. Scope the shared-guest key by the declaring module (captured module_path!()). The spec is referenced in place at specs/quint/shared-guest-owner/; never copy or fork it; never spawn the quint CLI from tests. The conformance driver stays compiled under integration-tests (#[cfg(all(test, feature = \"integration-tests\"))]); remove only the pending marker. The mirror types in owner_core/tests.rs and conformance.rs are removed (D-3): assertions compare the core's own values. #[overdrive_test] never inserts #[test]; it goes below #[quint_test]/#[quint_run]. Run everything on Metal: `cargo xtask metal run -- ...` (never Lima); the pinned Quint toolchain is on the box. Commit with LEFTHOOK_EXCLUDE=nextest-affected. Mutation testing is skipped (user ruling). Rust project: proptest, not Hypothesis. Tests are pre-authored by DISTILL; do not write or weaken bodies. No roadmap step ids or issue numbers in new identifiers. Implement to the design: never invent public API; surface gaps as blockers.",
+          "files_to_modify": [
+            "crates/overdrive-testing/src/placement/owner_core/",
+            "specs/quint/shared-guest-owner/"
+          ],
+          "dependencies": [
+            "05-01"
+          ]
+        },
+        {
+          "id": "06-02",
+          "name": "shared_guest! declaration, owner process, client protocol and Metal scenarios; batched-command users moved",
+          "description": "Deliver shared_guest!(guest = \"<group>\"[, profile = ..]) read by argument-free #[overdrive_test] tests of the module, the per-declaration owner process (exec bound, idle exit, replacement on failure/loss/bound), the client protocol (SharedEndpoint, attach_shared; run_in_guest its only production caller), and activate the 9 section-F Metal scenarios, 2 attach_shared scenarios, the shared_guest! trybuild test and the 11 fixtures. Move the current users of the batched overdrive-fwd-guest-suite command to the declaration.",
+          "criteria": [
+            "A declared module boots one guest per run while no test fails or is cut off, and a replacement guest after a failure (counted from OVERDRIVE_GUEST_KIT_TIMING)",
+            "Each test reports its own result; one failure does not hide the others; on the shared path a failing in-guest body yields a host FAIL and a nonzero run status",
+            "A hung test fails at its exec bound with stage exec_bound and the queued tests still run",
+            "A lost owner fails the attached tests naming the owner stage; the next test starts a new owner; killing the owner leaves no VMM",
+            "Off a Metal run the body runs in place; filtering to a single test runs only that test",
+            "Guest-placed tests outside a declared module still boot one guest each",
+            "A missing owner binary is refused as an unprepared kit naming the path before the election lock is taken; a cut before acknowledgement re-attaches once and a second cut is a GuestExecution error at stage owner",
+            "The shared_guest! forms fail the build naming the value or the missing declaration",
+            "The explicit batched command has no remaining user"
+          ],
+          "test_file": "crates/overdrive-testing/tests/integration/shared_guest_scenarios.rs",
+          "scenario_name": "shared_guest_scenarios.rs (3): a_declared_module_boots_one_guest_and_every_test_reports_its_own_result, one_failing_test_in_a_shared_module_does_not_hide_the_others, filtering_to_one_test_of_a_shared_module_runs_only_that_test. shared_owner_lifetime.rs (6): eight_simultaneous_first_arrivals_elect_exactly_one_owner, killing_the_owner_during_a_guest_exec_leaves_no_vmm, the_electing_client_killed_by_a_group_signal_leaves_the_owner_serving, an_owner_killed_midway_fails_its_attached_test_and_the_next_client_elects_a_new_owner, a_client_killed_while_its_test_runs_taints_the_guest_for_the_next_client, a_failed_shared_test_is_reported_with_its_status_and_its_guest_is_replaced (all 9 native_launcher per D-10). shared_client_protocol.rs (2, host_pure): a_missing_owner_binary_is_refused_as_an_unprepared_kit_before_the_election_lock_is_taken, a_connection_cut_before_the_acknowledgement_re_attaches_once_and_a_second_cut_is_owner_loss. trybuild: the_shared_guest_forms_fail_the_build_naming_the_value_or_the_missing_declaration. Fixtures (11, shared_guest_fixtures.rs): shared_module (first_test_of_the_shared_module, second_test_of_the_shared_module, third_test_of_the_shared_module, test_of_the_shared_module_that_fails_when_told_to) and scenario_clients (election_client, orphan_client, signal_client, crash_client, taint_client, failure_client, scenario_body_inside_the_guest).",
+          "implementation_notes": "Never add an entry to infra/metal/test-placement.json; this feature only deletes entries. Activating a test includes its placement on the test itself: the nine section-F scenarios are #[overdrive_test(native_launcher)] (D-10); the two attach_shared scenarios and the trybuild test are host_pure; the shared-module fixtures keep the argument-free #[overdrive_test] beside shared_guest! (an explicit guest would defeat the sharing). Scope the shared-guest key by the declaring module (captured module_path!()). The owner shell computes rendezvous paths and the owner binary path and passes them to the client protocol; the client mapping of boot_failed, guest_lost and exec_bound to GuestExecution is a total match on Verdict with no test (D-6). No seam is added for a per-test failing-body toggle (D-7). The five trybuild .stderr files came from the spike; regenerate if rustc's rendering differs. The #![cfg(target_os = \"linux\")] on shared_guest! stays. Moving batched-command users does not delete the dispatcher (phase 09). #[overdrive_test] never inserts #[test]. Run everything on Metal: `cargo xtask metal run -- ...` (never Lima). Commit with LEFTHOOK_EXCLUDE=nextest-affected. Mutation testing is skipped (user ruling). Tests are pre-authored by DISTILL; remove the pending marker only. No roadmap step ids or issue numbers in new identifiers. Implement to the design: never invent public API (agents propose, the user adds: no extra test lanes, sanitizer builds or tools); surface gaps as blockers.",
+          "files_to_modify": [
+            "crates/overdrive-testing/src/placement/",
+            "crates/overdrive-testing-macros/src/lib.rs",
+            "crates/overdrive-testing/tests/",
+            "infra/metal/test-placement.json"
+          ],
+          "dependencies": [
+            "06-01"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "07",
+      "name": "Guest placements migrated (slice guest-placements-migrated)",
+      "steps": [
+        {
+          "id": "07-01",
+          "name": "Batch 05a: guest groups core, probe, unload, ulp, stress, nested-boundary",
+          "description": "Move each test's guest declaration onto the test (per-test attribute; the 18-test equivalence_cases! template takes one attribute inside the template) and delete its JSON entry, scripted. Split by binary id if the batch exceeds 3 days with the same acceptance.",
+          "criteria": [
+            "Batch entries removed from the table; per-test kind, group, profile and fixture identical before and after (parsed from the JSON, no grep -c)",
+            "Pass set per migrated binary on Metal equals the pre-migration pass set",
+            "A migration that would change a group is rejected and reported, not carried over",
+            "A binary holding a guest-placed test carries no overdrive_test_default! (placement_conflict)",
+            "Unmigrated batches still run as before; renaming one batch test and re-running needs zero JSON edits"
+          ],
+          "test_file": "infra/metal/test-placement.json",
+          "scenario_name": "No pending acceptance test: acceptance is the DDD-15 batch parity check (kind, group, profile, fixture per test before/after, from parsed JSON) plus the equal Metal pass set per migrated binary.",
+          "implementation_notes": "Never add an entry to infra/metal/test-placement.json; this feature only deletes entries; `git diff 3cec35ba8 -- infra/metal/test-placement.json` must show only deletions. native_launcher is only for Metal-runner machinery tests; every other test is a guest group or host_pure; re-placing a test is a reported finding, not a change. #[overdrive_test] never inserts #[test]; it goes below #[quint_test]/#[quint_run]. Run everything on Metal: `cargo xtask metal run -- cargo nextest run --features integration-tests,kvm-tests` over the batch's binaries (never Lima). Commit with LEFTHOOK_EXCLUDE=nextest-affected. Mutation testing is skipped (user ruling). The parity check is scripted and parses the JSON. No roadmap step ids or issue numbers in any new identifier, filename or log message. Implement to the design: never invent public API; surface gaps as blockers.",
+          "files_to_modify": [
+            "infra/metal/test-placement.json",
+            "crates/*/tests/integration/"
+          ],
+          "dependencies": [
+            "06-02"
+          ]
+        },
+        {
+          "id": "07-02",
+          "name": "Batch 05b: guest group mtls-relay, including overdrive-bpf::integration",
+          "description": "Move each mtls-relay test's declaration onto the test and delete its JSON entry, scripted, including overdrive-bpf::integration. Split by binary id if over 3 days.",
+          "criteria": [
+            "Batch entries removed; per-test kind, group, profile and fixture identical before and after (parsed JSON)",
+            "Pass set per migrated binary on Metal equals the pre-migration pass set",
+            "A migration that would change a group is rejected and reported",
+            "A binary holding a guest-placed test carries no overdrive_test_default!",
+            "Renaming tcp_syn_plus_rst_flags_drops_with_malformed_header_counter and re-running needs zero JSON edits"
+          ],
+          "test_file": "infra/metal/test-placement.json",
+          "scenario_name": "No pending acceptance test: acceptance is the DDD-15 batch parity check plus the equal Metal pass set for the mtls-relay binaries (including overdrive-bpf::integration).",
+          "implementation_notes": "Never add an entry to infra/metal/test-placement.json; this feature only deletes entries; `git diff 3cec35ba8 -- infra/metal/test-placement.json` must show only deletions. native_launcher is only for Metal-runner machinery tests; every other test is a guest group or host_pure. Omitted profile selects mtls-relay's base profile native. #[overdrive_test] never inserts #[test]. Run everything on Metal: `cargo xtask metal run -- cargo nextest run --features integration-tests,kvm-tests` (never Lima). Commit with LEFTHOOK_EXCLUDE=nextest-affected. Mutation testing is skipped (user ruling). No roadmap step ids or issue numbers in new identifiers. Implement to the design: never invent public API; surface gaps as blockers.",
+          "files_to_modify": [
+            "infra/metal/test-placement.json",
+            "crates/overdrive-bpf/tests/",
+            "crates/*/tests/integration/"
+          ],
+          "dependencies": [
+            "07-01"
+          ]
+        },
+        {
+          "id": "07-03",
+          "name": "Batch 05c: guest group cgroup-default; guest-group entries reach zero",
+          "description": "Move each cgroup-default test's declaration onto the test (quint profile for the gateway tests already declared) and delete its JSON entry, scripted. After this step no guest-group entry remains in the table. Split by binary id if over 3 days.",
+          "criteria": [
+            "Batch entries removed; per-test kind, group, profile and fixture identical before and after (parsed JSON)",
+            "Pass set per migrated binary on Metal equals the pre-migration pass set",
+            "A migration that would change a group is rejected and reported",
+            "A binary holding a guest-placed test carries no overdrive_test_default!; host-pure modules of a mixed binary are left for the host-pure batches",
+            "After 05a-c, guest-group entries go from 771 to 0 as counted by parsing the JSON"
+          ],
+          "test_file": "infra/metal/test-placement.json",
+          "scenario_name": "No pending acceptance test: acceptance is the DDD-15 batch parity check plus the equal Metal pass set, and the parsed-JSON count of guest-group entries equal to 0.",
+          "implementation_notes": "Never add an entry to infra/metal/test-placement.json; this feature only deletes entries; `git diff 3cec35ba8 -- infra/metal/test-placement.json` must show only deletions. native_launcher is only for Metal-runner machinery tests; every other test is a guest group or host_pure. Every cgroup-default guest boots serve. #[overdrive_test] never inserts #[test]. Run everything on Metal: `cargo xtask metal run -- cargo nextest run --features integration-tests,kvm-tests` (never Lima). Commit with LEFTHOOK_EXCLUDE=nextest-affected. Mutation testing is skipped (user ruling). No roadmap step ids or issue numbers in new identifiers. Implement to the design: never invent public API; surface gaps as blockers.",
+          "files_to_modify": [
+            "infra/metal/test-placement.json",
+            "crates/*/tests/integration/"
+          ],
+          "dependencies": [
+            "07-02"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "08",
+      "name": "Host-pure placements migrated (slice host-pure-placements-migrated)",
+      "steps": [
+        {
+          "id": "08-01",
+          "name": "Batch 06a: overdrive-core* and overdrive-sim* binary ids",
+          "description": "Declare host-pure in test source per DDD-4 (overdrive_test_default!(host_pure) for host-only binaries, placement!(host_pure) in each host-pure module of a mixed binary, or a per-test attribute) and delete the JSON entries, scripted.",
+          "criteria": [
+            "Batch entries removed; per-test kind identical before and after (parsed JSON)",
+            "Pass sets on Metal equal pre-migration",
+            "A test found to mutate node-global kernel state while declared host-pure is reported as a finding, not carried forward",
+            "A binary with a default and a non-host-pure record is refused as placement_conflict; mixed binaries are placed per module",
+            "A child module declares its own placement!(host_pure); it does not inherit its parent's"
+          ],
+          "test_file": "infra/metal/test-placement.json",
+          "scenario_name": "No pending acceptance test: acceptance is the DDD-15 batch parity check (per-test kind, parsed JSON) plus the equal Metal pass set for overdrive-core* and overdrive-sim*.",
+          "implementation_notes": "Never add an entry to infra/metal/test-placement.json; this feature only deletes entries; `git diff 3cec35ba8 -- infra/metal/test-placement.json` must show only deletions. A body that mutates node-global kernel state (nft, routes, links, BPF, cgroups, netns, vsock) or boots serve is never host_pure: report it, do not carry it. Run everything on Metal: `cargo xtask metal run -- cargo nextest run --features integration-tests` (never Lima). Commit with LEFTHOOK_EXCLUDE=nextest-affected. Mutation testing is skipped (user ruling). No roadmap step ids or issue numbers in new identifiers. Implement to the design: never invent public API; surface gaps as blockers.",
+          "files_to_modify": [
+            "infra/metal/test-placement.json",
+            "crates/overdrive-core/tests/",
+            "crates/overdrive-sim/tests/"
+          ],
+          "dependencies": [
+            "07-03"
+          ]
+        },
+        {
+          "id": "08-02",
+          "name": "Batch 06b: control-plane, worker, cli, host, gateway, reconcilers, store-local binary ids",
+          "description": "Declare host-pure in test source and delete the JSON entries for overdrive-control-plane*, overdrive-worker*, overdrive-cli*, overdrive-host*, overdrive-gateway, overdrive-reconcilers*, overdrive-store-local*, scripted. Split by binary id if over 3 days.",
+          "criteria": [
+            "Batch entries removed; per-test kind identical before and after (parsed JSON)",
+            "Pass sets on Metal equal pre-migration",
+            "Mis-placements are reported, not carried over",
+            "A binary with a default and a non-host-pure record is refused as placement_conflict; mixed binaries are placed per module",
+            "Renaming malformed_intent_bytes_cause_refuse_to_start and re-running needs zero JSON edits"
+          ],
+          "test_file": "infra/metal/test-placement.json",
+          "scenario_name": "No pending acceptance test: acceptance is the DDD-15 batch parity check (per-test kind, parsed JSON) plus the equal Metal pass set for the batch's binaries.",
+          "implementation_notes": "Never add an entry to infra/metal/test-placement.json; this feature only deletes entries; `git diff 3cec35ba8 -- infra/metal/test-placement.json` must show only deletions. A body that mutates node-global kernel state or boots serve is never host_pure: report it. A child module declares its own placement!(host_pure). Run everything on Metal: `cargo xtask metal run -- cargo nextest run --features integration-tests` (never Lima). Commit with LEFTHOOK_EXCLUDE=nextest-affected. Mutation testing is skipped (user ruling). No roadmap step ids or issue numbers in new identifiers. Implement to the design: never invent public API; surface gaps as blockers.",
+          "files_to_modify": [
+            "infra/metal/test-placement.json",
+            "crates/*/tests/"
+          ],
+          "dependencies": [
+            "08-01"
+          ]
+        },
+        {
+          "id": "08-03",
+          "name": "Batch 06c: all remaining binary ids; host-pure entries reach zero",
+          "description": "Declare host-pure in test source and delete the JSON entries for the remaining binary ids (overdrive-dataplane*, overdrive-fwd*, overdrive-init*, overdrive-netlink, overdrive-system-conformance*, overdrive-testing*, xtask*, fixtures), scripted. After this step no host-pure entry remains. Split by binary id if over 3 days.",
+          "criteria": [
+            "Batch entries removed; per-test kind identical before and after (parsed JSON)",
+            "Pass sets on Metal equal pre-migration",
+            "Mis-placements are reported, not carried over",
+            "A child module declares its own placement!(host_pure); it does not inherit its parent's",
+            "After 06a-c, host-pure entries go from 3,855 to 0 as counted by parsing the JSON"
+          ],
+          "test_file": "infra/metal/test-placement.json",
+          "scenario_name": "No pending acceptance test: acceptance is the DDD-15 batch parity check (per-test kind, parsed JSON), the equal Metal pass set, and the parsed-JSON count of host-pure entries equal to 0.",
+          "implementation_notes": "Never add an entry to infra/metal/test-placement.json; this feature only deletes entries; `git diff 3cec35ba8 -- infra/metal/test-placement.json` must show only deletions. native_launcher is only for Metal-runner machinery tests (D-10 list); a node-global mutator is never host_pure: report it. Run everything on Metal: `cargo xtask metal run -- cargo nextest run --features integration-tests` (never Lima). Commit with LEFTHOOK_EXCLUDE=nextest-affected. Mutation testing is skipped (user ruling). No roadmap step ids or issue numbers in new identifiers. Implement to the design: never invent public API; surface gaps as blockers.",
+          "files_to_modify": [
+            "infra/metal/test-placement.json",
+            "crates/*/tests/",
+            "xtask/tests/"
+          ],
+          "dependencies": [
+            "08-02"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "09",
+      "name": "Placement table and dispatcher retired (slice placement-table-and-dispatcher-retired)",
+      "steps": [
+        {
+          "id": "09-01",
+          "name": "Delete the placement table, its lookup, the fwd guest-suite dispatcher and its env vars; update references and testing.md",
+          "description": "Delete infra/metal/test-placement.json, the wrapper's table lookup, parser and unreachable table diagnostics, the placement lint's table-entry clause, the dispatcher binary (fwd_guest_suite.rs), the wrapper's --guest-suite mode, OVERDRIVE_METAL_TEST_DISPATCHER, the explicit batched command, OVERDRIVE_FWD_GUEST_GROUP, OVERDRIVE_FWD_GUEST_EXACT, the body-count constants and the nine dispatcher unit tests (deleted with their code, not rewritten). Update every reference and .claude/rules/testing.md \u00a7 Test placement.",
+          "criteria": [
+            "A renamed test and a brand-new declared test pass on Metal with no table or dispatcher edit; `git ls-files infra/metal/test-placement.json` prints nothing",
+            "Full Metal pass set equals the pre-retirement set",
+            "The dispatcher is deleted entirely; the lint's table-entry clause and the table diagnostics are deleted; the wrapper's unplaced refusal rests on records only",
+            "Searches over the repository (excluding immutable history and recorded evidence) for test-placement.json, fwd_guest_suite, overdrive-fwd-guest-suite, --guest-suite, OVERDRIVE_METAL_TEST_DISPATCHER, OVERDRIVE_FWD_GUEST_GROUP, OVERDRIVE_FWD_GUEST_EXACT and _COMPLETE_BODIES come back clean",
+            "References are updated in the same change: docs/product/journeys/verify-independent-worktrees.yaml, docs/feature/metal-run-isolation, infra/metal/README.md, website/content/docs/how-to/run-verification-on-metal.mdx, tests/conformance/CLAUDE.md",
+            "testing.md \u00a7 Test placement describes the attribute, the records and the lint and matches the shipped model"
+          ],
+          "test_file": "xtask/tests/acceptance/placement_attribute.rs",
+          "scenario_name": "the_placement_table_the_lookup_and_the_dispatcher_are_retired, the_maintained_documents_describe_the_attribute_and_name_no_removed_path",
+          "implementation_notes": "This feature only deletes table entries; by this step the table is empty of entries and the file itself is deleted. Both repository-state tests activate here and take their placement on the test (host_pure). Delete production code and its tests in the same commit (deletion discipline); no stubs, re-export shims or removed-in markers. The testing.md rules change goes through the normal rules-change process and describes timeless discipline, not delivery status. Run everything on Metal: `cargo xtask metal run -- ...` (never Lima). Commit with LEFTHOOK_EXCLUDE=nextest-affected. Mutation testing is skipped (user ruling). Tests are pre-authored by DISTILL; remove the pending marker only. No roadmap step ids or issue numbers in new identifiers. Implement to the design: never invent public API; surface gaps as blockers. Website prose, if touched, follows website/CLAUDE.md and the technical-writer skill.",
+          "files_to_modify": [
+            "infra/metal/test-placement.json",
+            "infra/metal/test-wrapper.sh",
+            "infra/metal/bootstrap.sh",
+            "infra/metal/README.md",
+            "crates/overdrive-testing/src/guest_suite.rs",
+            "crates/overdrive-testing/bin/fwd_guest_suite.rs",
+            "xtask/src/",
+            ".claude/rules/testing.md",
+            "docs/product/journeys/verify-independent-worktrees.yaml",
+            "website/content/docs/how-to/run-verification-on-metal.mdx",
+            "tests/conformance/CLAUDE.md"
+          ],
+          "dependencies": [
+            "08-03"
+          ]
+        }
+      ]
+    }
+  ],
+  "implementation_scope": {
+    "source_directories": [
+      "crates/overdrive-testing/src/",
+      "crates/overdrive-testing-macros/src/",
+      "xtask/src/",
+      "infra/metal/",
+      "specs/quint/shared-guest-owner/"
+    ],
+    "test_directories": [
+      "xtask/tests/acceptance/",
+      "crates/overdrive-testing/tests/",
+      "crates/overdrive-testing/src/placement/"
+    ],
+    "excluded_patterns": [
+      "target/**",
+      "vendors/**",
+      "spike-scratch/**"
+    ]
+  },
+  "validation": {
+    "status": "approved",
+    "reviewer": "nw-acceptance-designer-reviewer",
+    "approved_at": "2026-11-14"
+  }
+}
