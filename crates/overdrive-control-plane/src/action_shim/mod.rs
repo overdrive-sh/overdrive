@@ -1118,7 +1118,6 @@ async fn dispatch_with_network_owner(
 ///
 /// Returns the same typed [`ShimError`] values as production dispatch.
 #[doc(hidden)]
-#[cfg(any(test, feature = "integration-tests"))]
 pub async fn dispatch_with_guest_network_provisioner_for_test(
     actions: Vec<Action>,
     state: &crate::AppState,

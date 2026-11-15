@@ -1510,7 +1510,6 @@ pub async fn run_convergence_tick(
 ///
 /// Returns the same errors as [`run_convergence_tick`].
 #[doc(hidden)]
-#[cfg(any(test, feature = "integration-tests"))]
 pub async fn run_convergence_tick_with_guest_network_provisioner_for_test(
     state: &AppState,
     reconciler_name: &ReconcilerName,
@@ -1691,7 +1690,6 @@ async fn run_convergence_tick_inner(
             // below. A recoverable shim error must still re-enqueue (self-heal) so
             // the persisted retry memory actually re-drives on a later tick.
             match guest_provisioner {
-                #[cfg(any(test, feature = "integration-tests"))]
                 Some(guest_provisioner) => {
                     action_shim::dispatch_with_guest_network_provisioner_for_test(
                         actions,
@@ -1702,11 +1700,6 @@ async fn run_convergence_tick_inner(
                     .await
                     .map_err(ConvergenceError::Shim)
                 }
-                #[cfg(not(any(test, feature = "integration-tests")))]
-                Some(_) | None => action_shim::dispatch_with_workflow_intent(actions, state, &tick)
-                    .await
-                    .map_err(ConvergenceError::Shim),
-                #[cfg(any(test, feature = "integration-tests"))]
                 None => action_shim::dispatch_with_workflow_intent(actions, state, &tick)
                     .await
                     .map_err(ConvergenceError::Shim),

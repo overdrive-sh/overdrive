@@ -12,7 +12,7 @@ publish = false
 crate_class = "adapter-host"
 
 [features]
-integration-tests = []
+integration-tests = ["overdrive-control-plane/integration-tests", "overdrive-sim/integration-tests"]
 
 [dependencies]
 base64.workspace = true
@@ -20,14 +20,14 @@ base64.workspace = true
 # descriptor/memory observations, `signal` delivers the host-side VMM kill;
 # `user` is the root check.
 nix = { workspace = true, features = ["user", "fs", "resource", "signal"] }
-overdrive-control-plane = { path = "../../crates/overdrive-control-plane", features = ["integration-tests"] }
+overdrive-control-plane = { path = "../../crates/overdrive-control-plane" }
 overdrive-core = { path = "../../crates/overdrive-core" }
 # The public-ingress gateway composition: `GatewayConfig` /
 # `ManualCertifiedKeyConfig` are the operator inputs of `ServerConfig.gateway`.
 overdrive-gateway = { path = "../../crates/overdrive-gateway" }
 # Production host bindings the CLI's `serve` composes (real cgroupfs).
 overdrive-host = { path = "../../crates/overdrive-host" }
-overdrive-sim = { path = "../../crates/overdrive-sim", features = ["integration-tests"] }
+overdrive-sim = { path = "../../crates/overdrive-sim" }
 # The server composition's required `vm_cgroups: CgroupManager` argument
 # (GH #295, D-295-R14) names the worker's cgroup manager.
 overdrive-worker = { path = "../../crates/overdrive-worker" }

@@ -111,7 +111,6 @@ mod acceptance {
 
     // VM-path dispatch fixture: the action shim driven through the
     // production guest-network seam over a booted `AppState`.
-    #[cfg(feature = "integration-tests")]
     #[path = "../common/vm_dispatch.rs"]
     pub mod vm_dispatch;
 
