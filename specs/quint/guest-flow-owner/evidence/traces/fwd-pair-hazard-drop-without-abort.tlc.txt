@@ -133,7 +133,7 @@ State 1: <Initial predicate>
 /\ pair_bugDropWithoutAbort_fwd_pair_strmAbort = FALSE
 /\ pair_bugDropWithoutAbort_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
 
-State 2: <pair_bugDropWithoutAbort_fwd_pair_Attach line 4070, col 3 to line 4080, col 77 of module pair_bugDropWithoutAbort>
+State 2: <pair_bugDropWithoutAbort_fwd_pair_Attach line 4071, col 3 to line 4081, col 77 of module pair_bugDropWithoutAbort>
 /\ pair_bugDropWithoutAbort_fwd_pair_vmUp = TRUE
 /\ pair_bugDropWithoutAbort_fwd_pair_pr = [ g |->
       [ ph |-> "live",
@@ -268,7 +268,7 @@ State 2: <pair_bugDropWithoutAbort_fwd_pair_Attach line 4070, col 3 to line 4080
 /\ pair_bugDropWithoutAbort_fwd_pair_strmAbort = FALSE
 /\ pair_bugDropWithoutAbort_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
 
-State 3: <pair_bugDropWithoutAbort_fwd_pair_HolderDrop line 2707, col 3 to line 2780, col 45 of module pair_bugDropWithoutAbort>
+State 3: <pair_bugDropWithoutAbort_fwd_pair_HolderDrop line 2708, col 3 to line 2781, col 45 of module pair_bugDropWithoutAbort>
 /\ pair_bugDropWithoutAbort_fwd_pair_vmUp = TRUE
 /\ pair_bugDropWithoutAbort_fwd_pair_pr = [ g |->
       [ ph |-> "live",

@@ -450,11 +450,12 @@ module fwd_pair {
       val t4 = if (t.mode == "dgram") t3 else cutBoth(t3)
       shutAll(t4, s)
   // CONFALIGN-5: in datagram mode the kernel pair owns V_g after attach_slot, so a completed pair's end shuts V_g
-  // {S, R} here (the forwarder drops its reference); the owner's deferred close shuts nothing (closeEff)
+  // {S, R} here (the forwarder drops its reference); the owner's deferred close shuts nothing (closeEff). The host
+  // side shuts nothing at completion: the host owner keeps V_h until TakeEnd, whose closeEff shuts it.
   def complete(t: St, s: str): St =
     if (live(t, s))
       val t1 = setPr(t, s, ended(t.pr.get(s), "completed", "none", false))
-      if (t.mode == "dgram") shutAll(t1, s) else t1
+      if (t.mode == "dgram" and s == "g") shutAll(t1, s) else t1
     else t
   def completeIfDone(t: St, s: str): St =
     if (t.dir.get(into(s)).dstEnd == "clean" and t.dir.get(outof(s)).srcEnd == "clean") complete(t, s) else t

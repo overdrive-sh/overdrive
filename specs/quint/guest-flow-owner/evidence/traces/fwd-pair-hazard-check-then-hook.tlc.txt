@@ -268,7 +268,7 @@ State 2: <pair_bugCheckThenHook_fwd_pair_AttachRead line 1298, col 3 to line 131
   hresCls |-> "none" ]
 /\ pair_bugCheckThenHook_fwd_pair_strmHeld = FALSE
 
-State 3: <pair_bugCheckThenHook_fwd_pair_AttachHook line 4029, col 3 to line 4038, col 78 of module pair_bugCheckThenHook>
+State 3: <pair_bugCheckThenHook_fwd_pair_AttachHook line 4030, col 3 to line 4039, col 78 of module pair_bugCheckThenHook>
 /\ pair_bugCheckThenHook_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
 /\ pair_bugCheckThenHook_fwd_pair_dir = [ gh |->
       [ wr |-> 0,
@@ -673,7 +673,7 @@ State 5: <pair_bugCheckThenHook_fwd_pair_Fin line 1599, col 3 to line 1637, col 
   hresCls |-> "none" ]
 /\ pair_bugCheckThenHook_fwd_pair_strmHeld = FALSE
 
-State 6: <pair_bugCheckThenHook_fwd_pair_HopEnd0 line 3700, col 3 to line 3725, col 49 of module pair_bugCheckThenHook>
+State 6: <pair_bugCheckThenHook_fwd_pair_HopEnd0 line 3701, col 3 to line 3726, col 49 of module pair_bugCheckThenHook>
 /\ pair_bugCheckThenHook_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
 /\ pair_bugCheckThenHook_fwd_pair_dir = [ gh |->
       [ wr |-> 0,
@@ -808,7 +808,7 @@ State 6: <pair_bugCheckThenHook_fwd_pair_HopEnd0 line 3700, col 3 to line 3725, 
   hresCls |-> "none" ]
 /\ pair_bugCheckThenHook_fwd_pair_strmHeld = FALSE
 
-State 7: <pair_bugCheckThenHook_fwd_pair_VCtl line 4004, col 3 to line 4007, col 48 of module pair_bugCheckThenHook>
+State 7: <pair_bugCheckThenHook_fwd_pair_VCtl line 4005, col 3 to line 4008, col 48 of module pair_bugCheckThenHook>
 /\ pair_bugCheckThenHook_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
 /\ pair_bugCheckThenHook_fwd_pair_dir = [ gh |->
       [ wr |-> 0,
@@ -943,7 +943,7 @@ State 7: <pair_bugCheckThenHook_fwd_pair_VCtl line 4004, col 3 to line 4007, col
   hresCls |-> "none" ]
 /\ pair_bugCheckThenHook_fwd_pair_strmHeld = FALSE
 
-State 8: <pair_bugCheckThenHook_fwd_pair_AttachHook line 4029, col 3 to line 4038, col 78 of module pair_bugCheckThenHook>
+State 8: <pair_bugCheckThenHook_fwd_pair_AttachHook line 4030, col 3 to line 4039, col 78 of module pair_bugCheckThenHook>
 /\ pair_bugCheckThenHook_fwd_pair_tcpErr = [g |-> "0", h |-> "0"]
 /\ pair_bugCheckThenHook_fwd_pair_dir = [ gh |->
       [ wr |-> 0,
