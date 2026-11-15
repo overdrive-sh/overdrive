@@ -17,6 +17,10 @@
 #![allow(clippy::expect_fun_call)]
 #![allow(clippy::unwrap_used)]
 
+use overdrive_testing::overdrive_test_default;
+
+overdrive_test_default!(host_pure);
+
 mod acceptance {
     mod insecure_rejected;
     mod render_cluster_and_node;

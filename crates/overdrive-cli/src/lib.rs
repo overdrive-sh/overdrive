@@ -13,6 +13,12 @@
 
 #![forbid(unsafe_code)]
 
+#[cfg(test)]
+use overdrive_testing::overdrive_test_default;
+
+#[cfg(test)]
+overdrive_test_default!(host_pure);
+
 pub mod cli;
 pub mod commands;
 pub mod http_client;

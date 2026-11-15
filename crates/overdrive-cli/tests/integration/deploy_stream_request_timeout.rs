@@ -37,6 +37,10 @@ use overdrive_core::aggregate::{DriverInput, ResourcesInput};
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput, SubmitSpecInput};
 use tempfile::TempDir;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// A control plane that answers the submit, yields one NDJSON line and then stalls.
 fn stalled_stream_endpoint() -> (ApiClient, TempDir) {
     let _ = rustls::crypto::ring::default_provider().install_default();

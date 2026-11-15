@@ -35,6 +35,10 @@ use overdrive_cli::render::schedule::{
 use overdrive_core::aggregate::{IntentKey, ScheduleSpec, WorkloadSpec, WorkloadSpecInput};
 use overdrive_store_local::{IntentStore, LocalIntentStore};
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// Parse the canonical `NIGHTLY_BACKUP_TOML` body and unwrap the
 /// Schedule arm — every scenario starts from the same parsed
 /// `ScheduleSpec`. A non-Schedule outcome is a fixture bug, not a

@@ -37,6 +37,10 @@
 use overdrive_cli::commands::deploy::parse_response_job_id;
 use overdrive_cli::http_client::CliError;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 /// A `workload_id` value that is JSON-decodable (it is just a `String`) but
 /// fails [`WorkloadId::new`](overdrive_core::id::WorkloadId::new) — empty string is
 /// rejected by `validate_label` with `IdParseError::Empty { kind: "WorkloadId" }`.

@@ -26,6 +26,10 @@ use clap::Parser as _;
 use clap::error::ErrorKind;
 use overdrive_cli::cli::Cli;
 
+use overdrive_testing::placement;
+
+placement!(host_pure);
+
 #[test]
 fn cluster_init_subcommand_is_not_registered() {
     let result = Cli::try_parse_from(["overdrive", "cluster", "init"]);
