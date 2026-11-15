@@ -16,6 +16,10 @@
 #![allow(clippy::expect_used)]
 #![allow(clippy::expect_fun_call)]
 
+use overdrive_testing_macros::overdrive_test_default;
+
+overdrive_test_default!(host_pure);
+
 // The inline `mod integration { ... }` mirrors the `tests/acceptance.rs`
 // pattern: an integration-test crate root resolves `mod foo;` against
 // `tests/foo.rs`, not `tests/integration/foo.rs`. Wrapping the

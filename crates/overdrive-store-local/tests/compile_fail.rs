@@ -19,6 +19,10 @@
 //! root; the per-fixture `.stderr` files are committed verbatim and
 //! regenerated only when the diagnostic shifts deliberately.
 
+use overdrive_testing_macros::overdrive_test_default;
+
+overdrive_test_default!(host_pure);
+
 #[test]
 fn compile_fail() {
     let t = trybuild::TestCases::new();

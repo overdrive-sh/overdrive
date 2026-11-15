@@ -35,3 +35,9 @@ pub use overdrive_core::traits::intent_store::{
 pub use overdrive_core::traits::observation_store::{
     ObservationRow, ObservationStore, ObservationStoreError,
 };
+
+#[cfg(test)]
+use overdrive_testing_macros::overdrive_test_default;
+
+#[cfg(test)]
+overdrive_test_default!(host_pure);
