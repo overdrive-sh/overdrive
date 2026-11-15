@@ -1,25 +1,6 @@
 {
   "format": "overdrive-metal-test-placement-v1",
   "placements": {
-    "overdrive-fwd": {
-      "uapi::tests::a_record_outside_its_pinned_values_names_the_field": {
-        "kind": "host-pure"
-      },
-      "uapi::tests::every_pinned_record_shape_decodes_to_its_forward_end": {
-        "kind": "host-pure"
-      },
-      "uapi::tests::the_version_stage_accepts_only_this_abi": {
-        "kind": "host-pure"
-      }
-    },
-    "overdrive-fwd-frame-parser-test::differential": {
-      "arbitrary_buffers_and_split_points_agree_with_the_rust_codec": {
-        "kind": "host-pure"
-      },
-      "encoded_datagram_sequences_keep_every_boundary_under_arbitrary_chunks": {
-        "kind": "host-pure"
-      }
-    },
     "overdrive-init::bin/overdrive-init": {
       "guest_flow::quint_fwd_pair::quint_fwd_pair_guest_app_write_and_fin_before_paired_attaches_in_close_wait_and_completes": {
         "kind": "host-pure"

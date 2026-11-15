@@ -13,6 +13,10 @@ use overdrive_core::guest_transport::wire::{
 use overdrive_fwd_frame_parser_test::{FrameParse, parse};
 use proptest::prelude::*;
 
+use overdrive_testing_macros::overdrive_test_default;
+
+overdrive_test_default!(host_pure);
+
 const MAX: usize = MAX_GUEST_DATAGRAM_PAYLOAD as usize;
 
 fn payload() -> BoxedStrategy<Vec<u8>> {

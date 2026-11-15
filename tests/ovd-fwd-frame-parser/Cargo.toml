@@ -27,6 +27,8 @@ c-sanitizers = []
 [dev-dependencies]
 overdrive-core.workspace = true
 proptest.workspace = true
+# `overdrive_test_default!` and `placement!` place the host-pure tests.
+overdrive-testing-macros.workspace = true
 
 [build-dependencies]
 cc.workspace = true

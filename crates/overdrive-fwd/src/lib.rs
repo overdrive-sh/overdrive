@@ -69,6 +69,12 @@ use crate::uapi::{
     pair_state_ioctl, version_ioctl, version_verdict, watch_ioctl,
 };
 
+#[cfg(test)]
+use overdrive_testing::overdrive_test_default;
+
+#[cfg(test)]
+overdrive_test_default!(host_pure);
+
 /// One forwarder context: an open `/dev/ovd_fwd` (EVMOD-CTL, ADR-0199).
 ///
 /// Not `Clone`, never duplicated, sent or inherited (`O_CLOEXEC`). Dropping
