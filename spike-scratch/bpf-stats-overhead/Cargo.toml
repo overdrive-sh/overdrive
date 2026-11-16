@@ -1,0 +1,16 @@
+# Throwaway spike: cost of kernel.bpf_stats_enabled=1 (native-benchmark-program).
+# Not a test, not a gate. Self-contained workspace; links the production
+# dataplane by path only to load the real object. Derived from
+# ../pig-connect-cost (left untouched; it is evidence for another feature).
+[package]
+name = "bpf-stats-overhead"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+overdrive-dataplane = { path = "../../crates/overdrive-dataplane" }
+aya = "0.13"
+libc = "0.2"
+
+[workspace]
