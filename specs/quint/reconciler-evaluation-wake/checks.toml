@@ -2,16 +2,7 @@
 # wake_full is the main (every decision on, every fault kind); wake_retention restricts the faults to the dataplane failing (D-3);
 # wake_conf is the conformance main (records conf_step, the broker counters); hazard/ instances switch one decision off.
 
-# ---- main instance: safety and progress hold
-
-[[check]]
-name = "evaluation-wake-safety"
-spec = "evaluation_wake.qnt"
-main = "wake_full"
-invariant = "Safety"
-backend = "tlc"
-expect = "holds"
-ci = true
+# ---- main instance: progress holds
 
 [[check]]
 name = "evaluation-wake-progress-by-pass"

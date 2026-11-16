@@ -30,8 +30,8 @@ Disproves if: a periodic whole-set pass costs more than today's router relist at
 
 From US-01:
 
-- AC1 Hydrate error (`ObservationRead`, `IntentRead`, `RunningAllocationWithoutWorkloadAddr`): through `serve` + `deploy`, `workload describe` shows Running and the service map is programmed within one period of the fault clearing, no second `deploy`.
-- AC2 `persist_view` error: same oracle; no action dispatched on the failing tick.
+- AC1 Hydrate error (`ObservationRead`, `IntentRead`; `RunningAllocationWithoutWorkloadAddr` at Tier 1 only): `workload describe` shows Running and the service map is programmed within one period of the fault clearing, no second `deploy`.
+- AC2 `persist_view` error: same oracle; no action dispatched on the failing tick. Tier 1, fault injected through `SimViewStore::inject_fsync_failure`.
 - AC3 `Failed` dataplane update inside backoff: retried after backoff with no backend-row write.
 - AC4 Target enumeration covers intent ∪ observation, including a target with no `alloc_status` row.
 - AC5 Converged state: zero non-`Noop` actions; per-pass cost no greater than today's relist (G1). The scan cost that makes both quadratic is tracked by #270, deploy latency during a pass by #357.
@@ -49,6 +49,8 @@ About 3 days after the design decision. Highest design risk of the four slices.
 
 V-3 measured cost on native metal (feature delta).
 
-## Production-drivable fault
+## Production-drivability
 
-A store read error or `persist_view` failure injected at the existing driven port while `serve` runs and `deploy payments.toml` is submitted; `RunningAllocationWithoutWorkloadAddr` is reachable from data alone. Tier 3 stimulus named in DISTILL.
+The periodic pass runs in the real `run_server` composition. Faults are injected at existing `Sim*` port seams at Tier 1 (user ruling 2026-11-16): store read errors, a `persist_view` failure (`SimViewStore::inject_fsync_failure`), a `Failed` dataplane result, and `RunningAllocationWithoutWorkloadAddr`, which no production path produces (the shim writes `workload_addr` on every `Running` row).
+
+Scope limitation, tracked: the Tier-1 `persist_view` recovery assumes the store can write again. With redb a transient disk error is permanent until restart (the `Database` is poisoned and `RedbViewStore` never reopens). Tracked by #360.

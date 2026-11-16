@@ -43,11 +43,11 @@ Only decisions grounded in the verification or ruled by the user in the dispatch
 | D2 | `workload-lifecycle.observed_generation` stays in #325. Not in this feature. | User |
 | D3 | Boot-only host-infra convergence (#197 veth, #198 cgroup, #199 XDP/cgroup-sock attach, #234 TPROXY routing) is out of scope. | User |
 | D4 | P1 enumerates targets from intent AND observation, not `alloc_status` rows alone. | User |
-| D5 | The service-lifecycle `stable_announced`/`terminal_announced` latch claim is refuted: `stable_announced` is deleted, and `terminal_announced` does gate liveness supervision of an allocation whose startup stop was emitted, but it does not decide whether a stop is in place (D-6). `startup_last_acted_run` and `liveness_last_acted_run` stay as ADR-0191 decision 5 decides (D-6). None is in scope. | Verification finding 3; user ruling D-6 |
+| D5 | The service-lifecycle `stable_announced`/`terminal_announced` latch claim is refuted (`stable_announced` is deleted). None of the `service-lifecycle` View markers is in scope; see D-6. | Verification finding 3; user ruling D-6 |
 | D6 | `workflow-lifecycle` being un-woken is NOT a production defect: `serve` builds an empty `WorkflowRegistry` and nothing writes `workflows/` intent in production. Not scope. | Verification finding 5, `development.md` § "Ground the premise" |
 | D9 | The View may decide WHEN to act (backoff, budgets, rate limits, a marker keyed to an observed input). It never decides WHETHER the effect is in place; only `actual` decides that. | Issue rule text; user chose the rule change |
 | D10 | Every new `actual` read introduced by P2 carries a DESIGN note naming the guard that makes it safe under LWW convergence (cross-reference #344). | User |
-| D11 | Each slice is production-drivable through `overdrive serve` + `overdrive deploy` with a fault a real deploy can reach. A test that hand-installs what production does not is not acceptance. | CLAUDE.md § "Build vertical slices" |
+| D11 | Each slice is production-drivable: the behaviour runs in the real `run_server` composition reached by `overdrive serve` + `overdrive deploy`, with faults injected at existing `Sim*` port seams (allowed by CLAUDE.md). A test that hand-installs what production does not is not acceptance. | CLAUDE.md § "Build vertical slices" |
 | D13 | The new View rule carries no exception. `ServiceLifecycleView::last_emitted_backend_fingerprint`, which the 2026-11-13 ruling would have named as the single exception, no longer exists: ADR-0101 deleted it (no match in `crates/`). | Verified in code, 2026-11-15 |
 | D15 | The `development.md` "log-and-skip" text is corrected and `next_evaluation_at` is documented in the rules, in the same commit as slice 01's behaviour change. | User, 2026-11-13 |
 | D12 | One feature with three slices (01, 02, 04). Periodic re-evaluation (slice 01) is not split into its own feature; the slices ship independently. | User, 2026-11-13 |
@@ -58,7 +58,7 @@ Only decisions grounded in the verification or ruled by the user in the dispatch
 |---|---|---|
 | Hydrator local-backend latch | **No; deleted by D-9.** | The hydrator emits `RegisterLocalBackend` only for a backend whose address equals `host_ipv4` (`service_map_hydrator.rs:356-370`). Since ADR-0276 every Service backend address is the Running allocation's `workload_addr`, taken from the guest network plan (`action_shim/mod.rs:1991`, `:2458`) and allocated from `GUEST_NODE_PREFIX` 100.95.0.0/16 (`guest_network.rs:561`, `guest_transport/mod.rs:594`), never `host_ipv4`. Non-VM provisioning was deleted (`fc3bc7d04`). The local set is always empty in a real deploy. |
 | Hydrator un-woken after `Failed` result | Yes | `DataplaneUpdateService` `Err` writes a `Failed` row; next tick inside backoff yields `Noop` with no `next_evaluation_at`; a steady service gets no further backend-row write to wake it. |
-| Hydrate error skips requeue | Yes, rare | `RunningAllocationWithoutWorkloadAddr` raised by `service-lifecycle` hydrate (data-dependent), or store read errors; early `?` at `rt:1589-1590`. |
+| Hydrate error skips requeue | Yes, rare (store read errors only) | A store read error (`ObservationRead` / `IntentRead`); early `?` at `rt:1589-1590`. `RunningAllocationWithoutWorkloadAddr` (`service_lifecycle.rs:940`) is NOT production-reachable: the shim writes `workload_addr` on every `Running` write from `spec.transport` (`action_shim/mod.rs:1991-1992`, `:2458-2460`), and every production allocation carries a guest transport assignment (ADR-0276; non-VM provisioning deleted, `fc3bc7d04`). It arises only when a test seeds a `Running` row without an address, so it is a Tier 1 stimulus and not a `serve` + `deploy` fault (`development.md` § "Ground the premise"). |
 | View write error skips dispatch and requeue | Yes, rare | `persist_view` redb write failure, early `?` at `rt:1638-1642`. |
 | Fresh deploy with no `alloc_status` row never relisted | Yes, rare | First `workload-lifecycle` hydrate fails; `handlers.rs:521` submitted once; relist routes only `alloc_status` rows; no boot seeding of existing intents. |
 | `workflow-lifecycle` un-woken | No | Empty registry in `serve`. |
@@ -67,7 +67,7 @@ Only decisions grounded in the verification or ruled by the user in the dispatch
 
 Result: **OVERSIZED SIGNALS PRESENT; split considered and rejected by the user (D12). One feature, three independently shippable slices (01, 02, 04).**
 
-- Stories: 4 (US-01, US-05, US-06, and US-04 resolved with no change). Under the 10-story signal.
+- Stories: 3 (US-01, US-05, US-06). Under the 10-story signal.
 - Bounded contexts touched: 4 (control-plane runtime, reconcilers crate, dataplane/allocator adapters, sim + core test surface). Over the 3-context signal. (signal 1)
 - Independent outcomes that could ship separately: yes, P1 is independent of P2/P3. (signal 2)
 - Effort: about 8 days across 3 slices, under the 2-week signal.
@@ -79,7 +79,7 @@ Brownfield. The skeleton is the existing `overdrive serve` + `overdrive deploy` 
 
 ## Wave: DISCUSS / [REF] Driving ports and pre-requisites
 
-Driving ports: `overdrive serve` (`run_server` composition root, convergence loop); `overdrive deploy <SPEC>`; `overdrive workload describe`; `overdrive job stop`. Workload deletion (#211) is not a driving port of this feature: the VIP-release story moved to #211 (D-5). Fault injection goes through existing driven ports only (`IntentStore`, `ObservationStore`, ViewStore, `Dataplane`, VIP allocator), as `Sim*` adapters at Tier 1 and a named real-kernel stimulus at Tier 3 (DISTILL names it for slice 01).
+Driving ports: `overdrive serve` (`run_server` composition root, convergence loop); `overdrive deploy <SPEC>`; `overdrive workload describe`; `overdrive job stop`. Workload deletion (#211) is not a driving port of this feature: the VIP-release story moved to #211 (D-5). Fault injection goes through existing driven ports only (`IntentStore`, `ObservationStore`, ViewStore, `Dataplane`, VIP allocator), as `Sim*` adapters at Tier 1. All three slice 01 faults (hydrate store-read error, `persist_view` failure, `Failed` dataplane result) are injected at Tier 1 through the existing `Sim*` port seams (`SimViewStore::inject_fsync_failure` and the equivalents for `ObservationStore` / `IntentStore` reads and `SimDataplane`). The pass itself runs in the real `run_server` composition (the production convergence loop, `managed_targets` and broker), so production-drivability holds; only the fault is injected at a port boundary, which CLAUDE.md allows. There is no Tier-3 stimulus for slice 01 (user ruling 2026-11-16).
 
 Pre-requisites: none blocking. #325 (`observed_generation`) is adjacent and independent. #271 (migrate `EnqueueEvaluation` wakes to `interests()`) and #270 (warm reflector cache) overlap with P1 target enumeration and are cited, not consumed.
 
@@ -111,8 +111,8 @@ Ana Moreno deploys `payments` (Service, VIP 10.96.0.14). The convergence tick fo
 - S6 A target that has left both desired and actual is no longer re-evaluated (bounded cost).
 
 #### Acceptance criteria
-- [ ] AC1: Fault = hydrate error (`ObservationRead`, `IntentRead`, `RunningAllocationWithoutWorkloadAddr`); owner path = `run_server` convergence loop + `workload-lifecycle` and `service-lifecycle`; oracle = `workload describe` shows Running and the service map is programmed within one re-evaluation period after the fault clears, with no second `deploy`.
-- [ ] AC2: Fault = `persist_view` error; oracle = same, and no action is dispatched on the failing tick (View is not claimed).
+- [ ] AC1: Fault = hydrate error (`ObservationRead`, `IntentRead`; `RunningAllocationWithoutWorkloadAddr` is a Tier 1 stimulus only, not production-reachable); owner path = `run_server` convergence loop + `workload-lifecycle` and `service-lifecycle`; oracle = `workload describe` shows Running and the service map is programmed within one re-evaluation period after the fault clears, with no second `deploy`.
+- [ ] AC2: Fault = `persist_view` error (Tier 1, `SimViewStore::inject_fsync_failure`); oracle = same, and no action is dispatched on the failing tick (View is not claimed).
 - [ ] AC3: Fault = `Failed` dataplane update result inside backoff; oracle = retried once backoff elapses with no backend-row write.
 - [ ] AC4: Every registered reconciler is re-evaluated for every target in desired ∪ actual, enumerated from intent and observation. A target with intent and no `alloc_status` row is included.
 - [ ] AC5: At a converged state, re-evaluation emits zero non-`Noop` actions, and evaluation cost per period is bounded by target count and no greater than today's relist (G1).
@@ -122,10 +122,6 @@ Ana Moreno deploys `payments` (Service, VIP 10.96.0.14). The convergence tick fo
 - The runtime-wide periodic pass changes `reconcilers.md` § "The wakeup model" (a reconciler declares row-backed OR host-backed, "never both") and ADR-0084; reconciled by ADR-0282 (D-1, approved).
 - The no-busy-loop rule holds: re-evaluation writes no observation row.
 - Period: 30 s constant (D-2). Enumeration: `managed_targets` (D-1a). Interacts with #270 and #271.
-
-### US-04: The probe-driven stop markers stay (no change)
-
-DISCUSS assessed `service-lifecycle`'s `startup_last_acted_run` / `liveness_last_acted_run` as a record-on-emit shape. They are not changed: each is a marker keyed to an observed input (the probe row's `run_seq`) that paces a stop, and ADR-0191 decision 5 (user ruling D-1 option (a), #295, 2026-10-13) requires it. No story, no acceptance criterion, no code change. See D-6.
 
 ### US-05: Reconciler authors get a shared multi-tick convergence check
 
@@ -145,21 +141,20 @@ Devon adds a reconciler with a "done" flag in its View. Every existing check is 
 3. `View::default()` start for `workload-lifecycle` converges.
 
 #### UAT scenarios
-- S1 Arbitrary independent `(desired, actual, view)` converges within N ticks for every registered reconciler (progress).
+- S1 Arbitrary independent `(desired, actual, view)` (the View generator includes `View::default()`, the forgotten View) converges within N ticks for every registered reconciler (progress), subject to the `service-lifecycle` scoping in D-6.
 - S2 Once converged, no further non-`Noop` actions (stability).
-- S3 With random dropped actions the reconciler still converges.
-- S4 With a forgotten View (`View::default()`) it still converges.
-- S5 Applying any emitted action twice through the sim executor leaves the same observable state.
-- S6 A View field that overrules `actual` makes the property fail.
+- S3 With random dropped actions the reconciler still converges (same scoping).
+- S4 Applying any emitted action twice through the production shim leaves the same observable state.
+- S5 A View field that overrules `actual` makes the property fail.
 
 #### Acceptance criteria
 - [ ] AC1: Every reconciler registered in `run_server` is covered, or a reasoned no-obligation ruling is recorded per exempt one: 7 always (`noop-heartbeat`, `workload-lifecycle`, `workflow-lifecycle`, `svid-lifecycle`, `vm-reclamation`, `service-map-hydrator`, `service-lifecycle`), plus `gateway-svid-lifecycle` when `config.gateway` is `Some`, so 7, or 8 with the gateway.
 - [ ] AC2: Runs in the default lane (no real I/O); seed printed on failure; failing run reproducible from the seed.
-- [ ] AC3: Fault stimulus = dropped actions and View/actual skew in both directions; oracle = `actual == desired` within N ticks, then zero actions.
+- [ ] AC3: Fault stimulus = dropped actions and View/actual skew in both directions; oracle = `actual == desired` within N ticks, then zero actions. For `service-lifecycle` the probe-driven stop obligation is scoped out of this oracle (D-6).
 - [ ] AC4: Mutation check on the property: DISTILL names the mutants from the live reconcilers (for example removing the resync pass, or a View field that overrules `actual`); each turns the property red. The local-backend latch is not a mutant (the path is deleted, D-9), and the VIP-release latch moved to #211.
 
 #### Technical notes
-- The sim executor must be generic over action kinds. Existing `vm_reclamation` DST has a real sim executor (`apply_actions`); the hydrator DST fabricates a `Completed` row and its "any combination of BPF state" claim is false. Reuse, do not duplicate.
+- No new sim executor (D-7). The property drives the production `run_convergence_tick` over a sim-composed `AppState`, so hydration, View persist and the real action shim run against `Sim*` ports. The existing `vm_reclamation` `apply_actions` executor is not reused: a hand-written executor re-implements the shim. The hydrator DST fabricates a `Completed` row and its "any combination of BPF state" claim is false; that is the shape D-7 avoids.
 - DISTILL authors the full bodies; scenarios for later slices stay as reasoned `#[ignore = "pending DELIVER ..."]`.
 - Boundary with #344: this property does not decide read monotonicity.
 
@@ -168,7 +163,7 @@ Devon adds a reconciler with a "done" flag in its View. Every existing check is 
 `job_id: J-PLAT-004` · Persona: Devon · No elevator pitch (documentation of a rule; merged into the slice of US-05 so the slice has a user-visible story).
 
 #### Acceptance criteria
-- [ ] AC1: `.claude/rules/reconcilers.md` replaces the fingerprint-shaped symptom with the general prohibition in D9 (see "Proposed rule text"), including the test "if the View says done and `actual` says not done, `actual` wins" and "if the effect cannot be observed, make it observable first".
+- [ ] AC1: `.claude/rules/reconcilers.md` replaces the fingerprint-shaped symptom with the general prohibition in D9 (see "Proposed rule text"), including the test "a pacing input decides only when to act again; a marker keyed to an observed input suppresses re-emission only for that same input" and "if the effect cannot be observed, make it observable first".
 - [ ] AC2: The rule is timeless discipline (principle plus symptoms); no ADR numbers as status, no DELIVER-phase notes.
 - [ ] AC3: The rule names no exception (D13: `last_emitted_backend_fingerprint` no longer exists).
 
@@ -181,13 +176,15 @@ Backbone (operator path): Deploy → Reconcile tick → Dispatch effect → Obse
 | 01 periodic-reevaluation | US-01 | Reconcile tick → Converged | 5 | 5 | 3 | 1 |
 | 04 convergence-property-and-view-rule | US-05, US-06, executor doc fix (D-5) | Write reconciler → Check | 4 | 3 | 3 to 4 | 4 |
 
+US-04 (the `service-lifecycle` probe-driven stop markers) has no change, no AC and no code: see D-6.
+
 Priority rationale: slice 01 first because it fixes the broadest class (any hydrate or View-write error wedges a deploy) with the least dependency, and it is the riskiest assumption (ADR-0084 tension). Slice 02 is the deletion of the unreachable local-backend path (its latch was the one DISCUSS thought was production-reachable); it depends on nothing and runs first in DELIVER so later slices do not touch the code. The convergence-property slice is last so the property is green on the fixed reconcilers and red on any reintroduced latch; DISTILL still authors it early.
 
 ## Wave: DISCUSS / [REF] Outcome KPIs
 
 | # | Who | Does what | By how much | Baseline | Measured by |
 |---|---|---|---|---|---|
-| K1 | Ana | A workload hit by a transient hydrate or View-write error reaches Running without re-submit | 100% of seeded runs within one re-evaluation period of the fault clearing | never (wedged until re-POST) | Tier-1 seeded sim invariant, plus `serve` + `deploy` run with fault injected |
+| K1 | Ana | A workload hit by a transient hydrate or View-write error reaches Running without re-submit | 100% of seeded runs within one re-evaluation period of the fault clearing | never (wedged until re-POST) | Tier-1 seeded sim invariant, faults injected at the `Sim*` port seams |
 | K4 | Devon | View fields that decide effect presence in registered reconcilers, in this feature's scope | 0 | 1: the hydrator's `last_applied_local_fingerprint`, removed by deleting the unreachable local path (D-9). `released_for_deletion` is #211's and `observed_generation` is #325's; the act-once markers are pacing keyed to an observed input (D-6). | latch audit at feature close |
 | K5 | Devon | Registered reconcilers covered by the shared property | all registered (7, or 8 with the gateway) or ruled exempt | 0 | test inventory |
 | K6 | Devon | Injected latch mutants caught by the property | all mutants DISTILL names (see US-05 AC4) | 0 | mutation check on the property |
@@ -195,8 +192,8 @@ Priority rationale: slice 01 first because it fixes the broadest class (any hydr
 
 ## Wave: DISCUSS / [REF] Definition of Done
 
-- All slice ACs green; each oracle observed through the production composition (`serve` + `deploy`), not hand-installed wiring.
-- Tier-1 seeded invariants print the seed; Tier-3 stimulus recorded for slice 01.
+- All slice ACs green; each oracle observed through the production composition (`run_server` convergence loop), not hand-installed wiring; faults are injected only at `Sim*` port seams.
+- Tier-1 seeded invariants print the seed.
 - Mutation gate ≥80% on changed reconciler and runtime code (per-feature gate).
 - `reconcilers.md` rule merged; stale executor doc comment corrected.
 - No new deferral language without an issue number; limitations introduced (e.g. the chosen period) cite an issue or are dropped.
@@ -212,7 +209,7 @@ Priority rationale: slice 01 first because it fixes the broadest class (any hydr
 | Migrating `EnqueueEvaluation` wakes to `interests()` | #271 |
 | Warm reflector cache for hydration | #270 |
 | `workflow-lifecycle` wake | not a production defect (D6, D-8) |
-| `service-lifecycle` `terminal_announced` and act-once stop markers | not changed (D5, D-6; ADR-0191 decision 5) |
+| `service-lifecycle` `terminal_announced` and act-once stop markers | not changed (D-6) |
 | VIP release retried from allocator state; `released_for_deletion` replaced; the seeded reproduction of the possible VIP leak; same retry rule for dial-by-name frontend `F` | #211 (user ruling D-5, 2026-11-13); this feature does not wait on it |
 
 ## Wave: DISCUSS / [REF] DoR validation (9 items)
@@ -269,10 +266,10 @@ The ADRs stay `Proposed` and independent design review has not run. The Quint sp
 |---|---|---|
 | D-1 | APPROVED 2026-11-13 | ADR-0282 as proposed, plus: cite #275 (host-edge wakeup, open; a future host watcher submits through the same `submit_evaluation`, the pass is its level-triggered backstop); state that no reconciler can ask for a faster sweep than the global period. Includes the read-only accessor `pending_keys` on `BrokerDrain`. |
 | D-2 | APPROVED 2026-11-13 | 30 s stays a compile-time constant; the limitation is tracked by #356 ("Make the reconciler resync period operator-configurable", created by the user). |
-| D-3 | APPROVED 2026-11-13; KEPT 2026-11-15 | The hydrator's `next_evaluation_at` retry deadline stays. The user rejected a simplifier's proposal to remove it: without it a failed dataplane write is retried up to 30 s later (the next pass) instead of at its ~1 s backoff expiry. |
+| D-3 | APPROVED 2026-11-13; KEPT 2026-11-15 | The hydrator's `next_evaluation_at` retry deadline stays (removal rejected by the user). |
 | D-5 | APPROVED 2026-11-13 | The `release_service_vip` executor doc fix stays (slice 04). Replacing `released_for_deletion` and the seeded reproduction of the possible VIP leak move to #211. This feature does not wait on #211. |
 | D-7, D-8 | APPROVED 2026-11-13 | D-7: the slice 04 property drives the production tick over sim-composed ports; no new sim executor. D-8: `workflow-lifecycle` gets no dedicated wake; the uniform pass covers it at zero cost. Target confirmed 2026-11-15 (row below). |
-| D-6 | option (a) stands; option (b) WITHDRAWN 2026-11-15 | Option (a) (approved 2026-11-13) is the design: `service-lifecycle` keeps `startup_last_acted_run` / `liveness_last_acted_run` as ADR-0191 decision 5 decides; no change to `service-lifecycle`. Option (b) (the 2026-11-15 re-ruling: emit from `actual`, `StopPacing` View inputs, reuse `backoff_for_attempt`, a `next_evaluation_at` pacing leg) and its pacing ruling are WITHDRAWN: they reversed ADR-0191 decision 5 (user ruling D-1 option (a), #295, 2026-10-13) and widened the terminal-overwrite race (#359). See "D-6". |
+| D-6 | option (a) APPROVED 2026-11-13 | No change to `service-lifecycle` (see "D-6"). |
 | D-1a-i | APPROVED 2026-11-15, option A | See "D-1a-i" under the interface contract. |
 | D-8 (target) | CONFIRMED 2026-11-15 | `workflow-lifecycle`'s managed target is the single target `workflow/all`, returned only when a workflow instance exists (empty in production today). |
 | D-11 (wording) | RULED 2026-11-15 | ADR-0284's Context states the actual fact about the existing route check (GH #358 records the colliding VIP); the `Policy` refusal stays for all VIP-range destinations. |
@@ -282,7 +279,8 @@ The ADRs stay `Proposed` and independent design review has not run. The Quint sp
 | D-11 | APPROVED 2026-11-15 (option B) | A guest UDP datagram to a VIP-range destination is refused with the existing `FlowRefusal::Policy` until GH #310 (ADR-0284). No new refusal variant, port or wire surface. The user did not ask for a Tier-3 observable for it. |
 | D-12 | APPROVED 2026-11-15 | The Quint modeler's gaps in the spec, pinned as interface contracts: see "Conformance pins (D-12)". Two items change surface: a per-reconciler resync step as a crate-private driving port, and an ordering clause on `pending_keys`. |
 | Router wakes | RULED 2026-11-15 | The interest router's boot LIST and `Lagged` relist stay (already ADR-0282 decision 4). ADR-0282's alternatives table records the rejection of removing them. |
-| V-3 | RUN 2026-11-15 (proven fact) | See V-3. This feature changes neither the scan cost (#270) nor the deploy latency (#357). |
+| V-3 | RUN 2026-11-15 (proven fact) | See V-3. |
+| Slice 01 Tier-3 `persist_view` scenario | DROPPED 2026-11-16 (user ruling) | All three slice 01 faults are covered at Tier 1 through the existing `Sim*` port seams. Reasons: it was agent-added, not user-requested; redb 2.6.3 poisons a `Database` permanently after a failed commit (`StorageError::PreviousIo` until reopen) and `RedbViewStore` never reopens, so a real disk error never recovers and the scenario's oracle cannot hold (tracked by #360); and the feature changes only the runtime's response to a persist error, which the Sim seam exercises. |
 | D-13 | APPROVED 2026-11-15 (option A) | See "D-13". |
 
 Decision records: D-1, D-2 → ADR-0282; D-9 → ADR-0283; D-10, D-11 → ADR-0284; D-3, D-5 to D-8, D-12, D-13 → this delta.
@@ -308,7 +306,7 @@ No new aggregates, bounded contexts, events or read-ports.
 | Eight reconciler impls of `managed_targets` | `overdrive-reconcilers` | EXTEND | their own target sets |
 | Resync pass and loop | `overdrive-control-plane` (`reconciler_runtime`, `lib.rs`) | CREATE NEW, replaces cadence phase and router periodic relist | the level wake |
 | Interest router | `overdrive-control-plane` | EXTEND by deletion: periodic arm and its two parameters go | edge wakes from rows |
-| `ServiceLifecycle` | `overdrive-reconcilers` | EXTEND: `managed_targets` only; stop emission and the act-once markers unchanged (D-6) | the probe-driven stop decision |
+| `ServiceLifecycle` | `overdrive-reconcilers` | EXTEND: `managed_targets` only (D-6) | the probe-driven stop decision |
 | `ServiceMapHydrator` | `overdrive-reconcilers` | EXTEND: `managed_targets`, `next_evaluation_at` over the remote `retries` map; local partition and fingerprint DELETED (D-9) | the remote service-map effect |
 | The same-host local-backend path (inventory in slice 02) | `overdrive-bpf`, `overdrive-dataplane`, `overdrive-core`, `overdrive-control-plane`, `overdrive-reconcilers`, `overdrive-sim` | DELETE | none (no production producer, ADR-0283). Also deletes, in `overdrive-control-plane` and `overdrive-sim`, the guest-flow owner's `OwnerCgroupPlacement` startup check and datagram-to-VIP handling (D-10, ADR-0284); inventory in slice 02 |
 | Convergence property harness | `overdrive-control-plane` tests | CREATE NEW (test support, DISTILL shapes it) | none |
@@ -461,7 +459,7 @@ Consequence for `has`: if the driver set `has` equal to what `managed_targets` r
 | Existing | Verdict | Justification and contract shape |
 |---|---|---|
 | `Reconciler` trait, `AnyReconciler` | EXTEND | One required method; the `hydrate_*` precedent. |
-| `ServiceLifecycleView` act-once markers and the stop emission | UNCHANGED | D-6 (ADR-0191 decision 5). Contract shape: bounded-change; universe = the markers and `StopAllocation` actions of Running allocations; assertion = the existing `probe-count` model checks and unit tests, and the slice 04 property for every other obligation. The View decides WHEN only. |
+| `ServiceLifecycleView` act-once markers and the stop emission | UNCHANGED | D-6. Contract shape: bounded-change; universe = the markers and `StopAllocation` actions of Running allocations; assertion = the existing `probe-count` model checks and unit tests for the probe-driven stop obligation, which is scoped out of the slice 04 drop/skew progress oracle (D-6); the slice 04 property covers every other `service-lifecycle` obligation. |
 | `HydrationContext`, `HydrateError` | UNCHANGED | `managed_targets` reads through the existing bundle. |
 | `ReconcilerRuntime::submit_evaluation`, broker LWW | EXTEND (unchanged) | Pass submits through it (C-A1 holds). Contract shape: bounded-change; universe = pending map keys; assertion = `pending_keys` and `counters`. |
 | `resync_schedule` family, cadence table | DELETE | Superseded; same 30 s as both users. |
@@ -487,15 +485,24 @@ Alternative: replace `released_for_deletion` now against a hand-built deletion f
 
 ### D-6. The probe-driven stop markers stay (ADR-0191 decision 5; no change)
 
-`service-lifecycle` keeps `startup_last_acted_run` and `liveness_last_acted_run` (`service_lifecycle.rs`, View fields). A probe-driven `StopAllocation` is emitted at most once per crossed probe row, and a failed stop is retried on the next crossed row. This is ADR-0191 decision 5 (user ruling D-1 option (a), #295, 2026-10-13), defended by the `specs/quint/probe-count/` hazards `streak_bugOncePerStreak` (a failed stop is never retried while failures continue) and `streak_bugOnceEver` (never retried at all). "No new row changes nothing" stays as ADR-0191 decision 6 decided; the not-sampled event (ADR-0192) makes a run that writes no row visible.
+`service-lifecycle` keeps two probe-driven stop markers and is otherwise unchanged by this feature. This is the one place the ruling is stated; other sections point here.
 
-**Why the markers exist, and why that reason holds.** Without them a re-read of the same crossed row would emit the stop again on every reconcile pass; the runtime persists the View before dispatch, so the marker is the reconciler's memory of the row it acted on. Each marker is keyed to an observed input, the probe row's `run_seq`, and is written only when a stop is emitted.
+**Provenance (two decisions, two sources).**
 
-**Why they pass the View rule.** The rule (see "Proposed rule text") lets a View hold pacing inputs, including a marker keyed to an observed input, and forbids a View field from deciding whether an effect is in place. The stop decision reads `actual`: the allocation is `Running` and the latest probe row is past its threshold. The marker decides only when the stop is emitted again (on a newer row). If the View says "acted at run N" and the allocation is still `Running` on a newer crossed row, `actual` wins and the stop is emitted.
+- `liveness_last_acted_run`: ADR-0191 decision 5 (user ruling D-1 option (a), #295, 2026-10-13), which decides only "the liveness terminate" marker (ADR-0191 `:109-121`). Defended by the `specs/quint/probe-count/` hazards `streak_bugOncePerStreak` and `streak_bugOnceEver`. "No new row changes nothing" is ADR-0191 decision 6; the not-sampled event (ADR-0192) makes a run that writes no row visible.
+- `startup_last_acted_run`: decided by `service-allocation-readiness-and-ending` D8 (approved 2026-11-02, ADR-0260): "a mirror of the liveness retry", an additive `#[serde(default)]` View field, key `(alloc, ProbeIdx::new(0))`, written only when a startup stop is emitted, so a startup stop is retried once per new startup row (`docs/feature/service-allocation-readiness-and-ending/feature-delta.md:95`, contract `:576-604`, field `:593-599`, emission rule `:600-604`). ADR-0191 `:119-121` ("The startup failure is already announced once per allocation ... neither needs this memory") predates D8 and does not cover the startup marker.
 
-**`terminal_announced`.** It is stamped when a terminal row is observed (`:548-550`) and when a startup stop is emitted (`:654`); `stable_announced` is gone. It is consulted to (1) skip re-evaluation of a non-Running allocation (`:563`), (2) retain the evaluation until the startup window ends (`next_evaluation_at`, `:710`), and (3) exclude the allocation from `collect_liveness_actions` (`:1029`) after its startup stop was emitted. ADR-0191 decision 5 states the startup failure "is already announced once per allocation" (`:119-121`); this field is that announcement. It is pacing keyed to observed lifecycle: (1) concerns an allocation whose stop is already in place, (2) is a schedule, and for (3) the effect (the stop) is still decided by `actual` through the startup marker, which re-emits on the next crossed startup row; liveness supervision begins only at Stable (`start_liveness` at the Stable hook, `liveness_begins_at_stable.rs`), and an allocation that received a startup stop never committed Stable, so there is no liveness row for the exclusion to suppress. The field does not decide whether an effect is in place, and the rule does not condemn it. The one dependency is that liveness never runs before Stable.
+A probe-driven `StopAllocation` is emitted at most once per crossed probe row; a failed stop is retried on the next crossed row.
 
-**Withdrawn design.** The 2026-11-15 re-ruling (option (b)) designed a `StopPacing` View, a stop emitted on every evaluation from `actual`, reuse of `backoff_for_attempt`, a `next_evaluation_at` pacing leg, deletion of the two markers and their tests, and a quiescent-probe-runner expectation. It existed to close the loss case in which no newer probe row arrives after a failed stop. That case is the one ADR-0191 decision 6 accepts ("no new row changes nothing"); the design reversed decision 5 and widened the terminal-overwrite race (#359). It is withdrawn (approvals table).
+**Why the markers exist, and why that reason holds.** Without a marker a re-read of the same crossed row would emit the stop again on every reconcile pass. The runtime persists the View before dispatch, so the marker is the reconciler's memory of the row it acted on. Each is keyed to an observed input, the probe row's `run_seq`, and written only when a stop is emitted.
+
+**Why they pass the View rule.** The stop decision reads `actual`: the allocation is `Running` and the latest probe row is past its threshold. The marker decides only when to act again. For the same row, a stop already emitted is not re-emitted, even if it was dropped; for a newer crossed row, the decision reopens from `actual` and the stop is emitted.
+
+**Scope in the slice 04 property.** With a dropped probe-driven stop, or a View whose marker equals the latest crossed row's `run_seq`, `service-lifecycle` emits nothing until a newer probe row arrives (ADR-0191 decisions 5 and 6). A drop/skew progress oracle (`actual == desired`, then zero actions) would go red on that by design, so for `service-lifecycle` only, the probe-driven stop obligation is excluded from that oracle; it is bounded by ADR-0191 decisions 5 and 6 and the `specs/quint/probe-count` checks. Its generators draw markers only from rows present (a marker never exceeds the run_seq of a row in the world). Every other `service-lifecycle` obligation (backend membership, readiness, `managed_targets` containment) stays under the oracle.
+
+**`terminal_announced`.** Stamped on a terminal row (`service_lifecycle.rs:549`) and on a startup stop (`:654`); removed at Stable (`:626`); consulted to skip a non-Running allocation (`:563`), to retain the evaluation (`:710`) and to exclude the allocation from liveness actions (`:1029`). It is pacing keyed to observed lifecycle, not a decision on whether a stop is in place. The one dependency is that liveness never runs before Stable: `liveness_begins_at_stable.rs` pins it at the runner (no liveness role or row before the Stable hook), so an allocation holding a startup stop has no liveness row for the exclusion to suppress.
+
+Rejected: emit the stop from `actual` with retry pacing; it reverses ADR-0191 decision 5 and widens #359.
 
 ### D-7. Slice 04 property shape
 
@@ -516,9 +523,9 @@ Not applied now. Timeless discipline only, per the memory ruling on rules docs.
 
 ### `reconcilers.md` — replaces the fingerprint-shaped symptom and the "never both" wakeup paragraph
 
-> **A View decides when to act, never whether an effect is in place.** A View field may carry pacing inputs: attempts, last attempt time, a retry budget, a rate limit, or a marker keyed to an observed input (for example the `run_seq` of the probe row a stop was last emitted for) that decides only when to act again. A View field never decides whether an effect is in place. That is decided from `actual`, read from the resource the reconciler manages. If the View says done and `actual` says not done, `actual` wins. If the effect cannot be observed, make it observable first; a result row of the last attempt is a receipt, not the resource.
+> **A View decides when to act, never whether an effect is in place.** A View field may carry pacing inputs: attempts, last attempt time, a retry budget, a rate limit, or a marker keyed to an observed input (for example the `run_seq` of the probe row a stop was last emitted for) that decides only when to act again. A View field never decides whether an effect is in place. That is decided from `actual`, read from the resource the reconciler manages. A marker keyed to an observed input suppresses re-emission only for that same input: an action already emitted for that input is not emitted again for it, and a newer input reopens the decision from `actual`. If the effect cannot be observed, make it observable first; a result row of the last attempt is a receipt, not the resource.
 >
-> **Every reconciler declares its managed targets.** The runtime re-evaluates all of them every period, from intent and observation, whatever woke them before. `interests()` and `EnqueueEvaluation` are latency; the pass guarantees re-evaluation, not that a View-gated action is re-emitted. An evaluation that fails to hydrate or persist its View is not requeued locally; the next pass retries it. A dispatch error keeps the tick's requeue (decided before dispatch: immediate after an emitted action, else `next_evaluation_at`), and the pass is its backstop. `next_evaluation_at` supplies a precise retry deadline when the reconciler has one.
+> **Every reconciler declares its managed targets.** The runtime re-evaluates all of them every period, from intent and observation, whatever woke them before. `interests()` and `EnqueueEvaluation` are latency; the pass guarantees re-evaluation, not that a View-gated action is re-emitted. An evaluation that fails to hydrate or persist its View is not requeued locally; the next pass retries it. A dispatch error keeps the tick's requeue; the pass is its backstop. `next_evaluation_at` supplies a precise retry deadline when the reconciler has one.
 
 Symptoms to list: a View field consulted as the diff; a field stamped on emit and consulted to decide whether the effect is in place; a reconciler whose only wake is an edge; a managed-target method that enumerates one observation family only; a test or simulation invariant that seeds the View to represent "converged" instead of asserting on `actual`.
 
@@ -539,12 +546,12 @@ The feature adds and moves no gate. It removes one boot refusal: the owner's `Ow
 
 ## Wave: DESIGN / [REF] Formal protocol model
 
-**Required** (changes an ordered, concurrent and crash-sensitive protocol). Written and model-checked by the `quint-modeler`. Directory: `specs/quint/reconciler-evaluation-wake/` (permanent, referenced by DISTILL conformance; its `README.md` states the abstraction). Evidence is recorded only by `cargo xtask quint check --record`. The recorded run (`specs/quint/reconciler-evaluation-wake/evidence/summary.md`) shows 15 of 15 checks matching `expect` (3 properties: `Safety`, `ProgressByPass`, `RetentionSchedulesBackedOffKey`; 2 hazards; 10 named runs; Quint 0.32.0, Apalache 0.56.1, kernel 7.0.0-38-generic), and `cargo xtask quint verify-evidence` passes. `PendingIsAdmitted` (dropped by the 2026-11-15 ruling) is not in the recorded run.
+**Required** (changes an ordered, concurrent and crash-sensitive protocol). Written and model-checked by the `quint-modeler`. Directory: `specs/quint/reconciler-evaluation-wake/` (permanent, referenced by DISTILL conformance; its `README.md` states the abstraction). Evidence is recorded only by `cargo xtask quint check --record`. The recorded run (`specs/quint/reconciler-evaluation-wake/evidence/summary.md`) shows 14 of 14 checks matching `expect` (2 properties: `ProgressByPass`, `RetentionSchedulesBackedOffKey`; 2 hazards; 10 named runs; Quint 0.32.0, Apalache 0.56.1, kernel 7.0.0-38-generic), and `cargo xtask quint verify-evidence` passes.
 
 The specification models evaluation wake (decisions D-1 and D-3), module `evaluation_wake`. Owners: broker (pending FIFO of unique `(reconciler, target)` keys, eligibility `Immediate` or `NotBefore`), convergence loop (cap 8, one in-flight per target), resync pass (stepped one reconciler at a time, D-12), edge wakes, tick outcomes (`ok`, `dpFail`, `hydrateErr`, `persistErr`, `dispatchErr`). World per key: `has` (managed) and `need` (desired != actual). Environment faults as actions: each error outcome, enumeration failure for one reconciler, crash between View fsync and dispatch, dropped edge wake, drift.
 
-- Safety (`Safety` invariant, `wake_full`): active within cap; one active per target; pending keys unique; eligibility canonical; need implies managed; backoff window only for needy keys.
-- Progress (`ProgressByPass`, under fairness of the pass timer): every needy key is evaluated again after any error outcome, dropped wake or crash, and an `ok` evaluation clears its need. The bound: progress holds once faults stop (faults are budgeted, `MAXF = 2`; drift, `MAXD = 2`) and an admitted evaluation's dispatch completes. The model abstracts the reconciler: it proves re-evaluation, not that `reconcile` converges `actual` to `desired` (the slice 04 property and each reconciler's tests do). Starvation of a key queued behind a pass burst is covered by the named run `edge_wake_during_burst_is_admitted_after_burst` and the broker's FIFO unit tests (V-4); the `PendingIsAdmitted` check was dropped by the user's ruling of 2026-11-15.
+- Safety (`Safety`, `wake_full`): active within cap; one active per target; pending keys unique; eligibility canonical; need implies managed; backoff window only for needy keys. Every conjunct holds by construction of the model and defends no D-1 or D-3 rule, so there is no standalone check; `Safety` is asserted as an `expect` clause in nine of the ten named runs (all but `pass_submit_merges_retained_not_before_to_immediate`). The broker rules' teeth are the `eval_broker` unit tests (V-4) and the conformance driver.
+- Progress (`ProgressByPass`, under fairness of the pass timer): every needy key is evaluated again after any error outcome, dropped wake or crash, and an `ok` evaluation clears its need. The bound: progress holds once faults stop (faults are budgeted, `MAXF = 2`; drift, `MAXD = 2`) and an admitted evaluation's dispatch completes. The model abstracts the reconciler: it proves re-evaluation, not that `reconcile` converges `actual` to `desired` (the slice 04 property and each reconciler's tests do). Starvation of a key queued behind a pass burst is covered by the named run `edge_wake_during_burst_is_admitted_after_burst` and the broker's FIFO unit tests (V-4).
 - Retention (`RetentionSchedulesBackedOffKey`, `wake_retention`): a key inside its hydrator backoff window is always scheduled, so its retry needs neither a row write nor a pass (D-3).
 - Hazard variants, one per decision, 2 in total: D-1 → `wake_noPass` (remove the pass; dropped wakes disabled; progress is violated, the wedge ADR-0282 names); D-3 → `wake_noRetention` (`next_evaluation_at` returns `None`; retention is violated).
 - Broker rules (pending uniqueness, one active per target, cap, canonical eligibility) are existing behaviour, not decisions of this feature, so they carry no hazard; their teeth are the `eval_broker` unit tests (V-4).
@@ -570,8 +577,8 @@ Assumptions (the `ASSUMPTIONS` block of `evaluation_wake.qnt`) and what discharg
 |---|---|---|
 | WK-1 | Broker rules: same-key collapse keeping its slot, `Immediate` merge, oldest-first admission | V-4: `eval_broker` unit tests and the runs above |
 | WK-2 | `submit_evaluation` wakes the convergence loop | ADR-0273 acceptance tests |
-| WK-3 | Abstract time: the 30 s period, anchored re-arming and "one period plus queue time" as a duration | V-3: seeded sim on `SimClock` |
-| WK-4 | `managed_targets` returns the whole set or `Err`, from intent and observation | The per-reconciler containment obligation (Conformance pins, f): every target with a non-empty hydrate projection is in the returned set. The conformance driver cannot discharge it, because it sets `has` from the same set |
+| WK-3 | Abstract time: the 30 s period, anchored re-arming and "one period plus queue time" as a duration | A DISTILL obligation on the existing default-lane seeded `overdrive-sim` / `SimClock` harness, driven through the production composition (`run_server` and the convergence loop it spawns) with `BootAdapters.clock` set to the `Arc<SimClock>` the loop already reads (the boot's one clock, which the pass and the interest router also read); no new API. There is no `config.clock` on `ServerConfig`; `BootAdapters.clock` is the injection point and `AppState.clock` is the same instance. The obligation: the resync loop runs a pass at boot and then at `previous + period` with no drift, at most one pass per period, and a fault clearing recovers within one period plus queue time. No new lane. (V-3 was a native-metal cost measurement and does not discharge this.) |
+| WK-4 | `managed_targets` returns the whole set or `Err`, from intent and observation | The per-reconciler containment obligation (Conformance pins, f), a DISTILL obligation: every target with a non-empty hydrate projection is in the returned set (`Err` returns no partial set). The conformance driver cannot discharge it, because it sets `has` from the same set. V-5 is a lane-feasibility item and does not discharge it |
 | WK-5 | A crash loses exactly the in-memory broker and in-flight set; View, intent and observation survive | the `WriteThroughOrdering` DST invariant and a DST crash scenario |
 | WK-6 | Another reconciler's View pacing never blocks a due re-evaluation | the slice 04 property |
 
@@ -584,12 +591,12 @@ Pinned observable projections for the conformance drivers (`testing.md` § "Quin
 | `pending` (keys; order = FIFO) | `BrokerDrain` | `pending_keys(&self) -> Vec<(ReconcilerName, TargetResource)>`, first-pending (admission) order (D-12 b) | NEW, read-only (approved with D-1, 2026-11-13; ordering clause is D-12, approved 2026-11-15) |
 | `dispatched`, `cancelled` | `BrokerDrain` | `counters()` | existing (`wake_conf` only) |
 | `inWin` (inside the hydrator backoff window) | none | model-only (D-12 g): the retained key shows as `pending`; the window arithmetic is covered by the D-3 hook's unit tests | ruling |
-| `elig` | broker | model-only | ruling: verified by broker unit tests |
+| `elig` | broker | model-only | ruling: verified by broker unit tests; the merge run observes eligibility through admission (`pending_keys` and `counters` after `Drain`), the modeler appends that step to `pass_submit_merges_retained_not_before_to_immediate` |
 | `active` | convergence loop | model-only (not projected) | ruling: the loop's `active_targets` is local to the task; not exposed. The driver's in-flight set is its stimulus (D-12 d) |
 | `has`, `need` | the driver's world | stimulus, not projected (D-12 f); containment of `has` in `managed_targets` is a DISTILL obligation, not a conformance comparison | no accessor |
 | `due`, `passPos`, `faults`, `drifts` | none | model-only (timer and budgets) | ruling |
 
-Action mapping (D-12 c, d): `PassStep` → `resync_reconciler`; edge wake → `ReconcilerRuntime::submit_evaluation`; `Drain` → `BrokerDrain::drain_pending`; `Finish(k, outcome)` → `run_convergence_tick` with the outcome's fault injected at its driven port; crash → rebuild the runtime over the same stores; `Tick` is the period timer and is model-only (the driver calls `resync_reconciler` directly). `Sim*` adapters inject faults at driven ports and are the arbiter for no variable. The step record `conf_step` (variant per action name) is the spec's, not production's.
+Action mapping (D-12 c, d): `PassStep` → `resync_reconciler`; edge wake → `ReconcilerRuntime::submit_evaluation`; `Drain` → `BrokerDrain::drain_pending`; `Finish(k, outcome)` → `run_convergence_tick` with the outcome's fault injected at its driven port; crash → rebuild the runtime over the same stores; `Tick` is the period timer and is model-only (the driver calls `resync_reconciler` directly). `WindowEnds(k)` and `Due(k)` are time passing: the driver advances the injected `SimClock` (the boot's one clock, `BootAdapters.clock`, which the convergence loop and the hydrator's `TickContext` read) past the hydrator's backoff deadline `last_failure_seen_at + backoff`, which is also the retained `NotBefore` of `next_evaluation_at` (D-3). The advance is visible through the existing `drain_pending(.., now, ..)` argument: a retained `NotBefore` key is admitted once `now` reaches its deadline. No new surface. Design gap in the spec, not in the surface: production has one instant for both events, so the spec's separate `WindowEnds` then `Due` has no production counterpart for a trace that runs `Drain` between them (the model does not admit the key, production does). The modeler folds `Due` into `WindowEnds` (list below). `Sim*` adapters inject faults at driven ports and are the arbiter for no variable. The step record `conf_step` (variant per action name) is the spec's, not production's.
 
 ## Wave: DESIGN / [REF] Validation items
 
@@ -597,7 +604,7 @@ Contract-shaping items run before approval; I have not run them and mark none pr
 
 | ID | Item | Class | Probe to run | Falsification changes |
 |---|---|---|---|---|
-| V-3 | Cost: per-evaluation hydrate time and admission delay of an edge wake queued behind a burst at 1000 workloads | not contract-shaping (pacing is internal) | RUN 2026-11-15. Native metal, AMD EPYC 8024P (16 threads), Linux 7.0.0-38, commit `97a417fcb`; real runtime, broker, reconcilers and handler over `LocalIntentStore` / `LocalObservationStore` / `RedbViewStore`, Sim adapters only at driven ports; 80% Job / 20% Service, converged. Evidence: `spike-scratch/reconciler-resync-cost/evidence/full-20261115T180650Z/` (`results.json`, the proposed pass) and `baseline-20261115T211313Z/` (`results.json`, the baseline; `analysis.txt` exists only here and tabulates the baseline, the same-run proposed pass and the prior-run proposed pass). | Held as a proven fact; no contract changes. Measured (proposed pass, prior run of `analysis.txt`; baseline in brackets): W=10: E 49 [67], 10 ms wall [13]; W=100: E 265 [337], 86 ms [94], 0.29% duty [0.31%]; W=500: E 1225 [1537], 1256 ms [1352], 4.19% [4.51%]; W=1000: E 2425 [3037], 4554 ms [4636], 15.2% [15.5%] (~5 s CPU per 30 s). The pass is not above the baseline (today's router periodic relist plus `resync_schedule`, E = 3W+1) at any N; it submits fewer evaluations (no `service-lifecycle` on Job targets) and adds `service-map-hydrator` per service and intent-only workloads. Cost grows faster than linearly in E because `workload-`, `svid-` and `service-lifecycle` scan the whole `alloc_status` table per evaluation, and `vm-reclamation` per row. Edge-wake (deploy) admission delay during a burst ~ burst wall (4.3 to 4.6 s at 1000), identical for baseline and pass; idle at most 2 ms. Causes: FIFO admission with no priority lane (ADR-0102 :71), the VIP allocator and `listener_facts` mutexes held across both hydrates (`reconciler_runtime.rs:1586-1587`) serialising the 8 slots, and the full-table scans. Tracked outside this feature: scan cost by #270, deploy latency by #357. |
+| V-3 | Cost: per-evaluation hydrate time and admission delay of an edge wake queued behind a burst at 1000 workloads | not contract-shaping (pacing is internal) | RUN 2026-11-15, native metal, commit `97a417fcb`. Evidence: `spike-scratch/reconciler-resync-cost/evidence/full-20261115T180650Z/results.json` (proposed pass) and `baseline-20261115T211313Z/results.json` (baseline). | Held as a proven fact; no contract changes. G1 figures (pass; baseline in brackets): W=100: E 265 [337], 0.29% duty [0.31%]; W=500: E 1225 [1537], 4.19% [4.51%]; W=1000: E 2425 [3037], 15.2% [15.5%]. Not above the baseline at any N. Scan cost is tracked by #270, deploy latency during a pass by #357. |
 | V-4 | Same-key collapse and `NotBefore`→`Immediate` merge under pass plus edge submits | not contract-shaping | existing `eval_broker` tests plus the new run `edge_wake_during_burst_is_admitted_after_burst` | a test |
 | V-5 | Default-lane feasibility of the composed property (in-memory redb) | not contract-shaping | DISTILL builds one composed tick in the default lane | the lane of one test |
 
@@ -605,14 +612,14 @@ No contract-shaping validation item is open; D-1 stands on source reading. The d
 
 ### Validation budget
 
-- Model checks: 15 (5 exhaustive TLC on `wake_full` / `wake_retention` / hazards, 10 evaluator runs), recorded in `specs/quint/reconciler-evaluation-wake/evidence/summary.md` (Linux 7.0.0-38, 16 jobs): 65.3 s wall for the whole run in parallel; 160.7 s of check time in total (TLC 133.5 s, evaluator runs 27.2 s). Per check: `ProgressByPass` 63.9 s (the longest), `Safety` 25.9 s, retention 18.3 s, each hazard 12.7 s, each evaluator run 2.3 to 3.1 s.
-- CI lane (`ci = true` in `checks.toml`): 14 of 15, which excludes the one slow temporal check (`ProgressByPass`); 96.8 s of check time (TLC 69.6 s, runs 27.2 s). Growth beyond these numbers needs user approval.
-- Test lanes added by the design: none beyond the existing default lane (slice 04's property: its lane is V-5), one Tier-1 acceptance scenario for D-11, and one Quint conformance driver (one specification) under `integration-tests` per `testing.md`. No new CI job, tool, or xtask subcommand.
+- Model checks: 14 (4 exhaustive TLC on `wake_full` / `wake_retention` / hazards, 10 evaluator runs), recorded in `specs/quint/reconciler-evaluation-wake/evidence/summary.md` (Linux 7.0.0-38): 72 s wall for the whole run in parallel; `ProgressByPass` is the longest check.
+- CI lane (`ci = true` in `checks.toml`): 13 of 14, excluding `ProgressByPass`. Growth beyond these numbers needs user approval.
+- Test lanes added by the design: none. Slice 01 has no Tier-3 scenario (user ruling 2026-11-16); slice 04's property uses the existing default lane (its lane is V-5); one Tier-1 acceptance scenario for D-11; one Quint conformance driver (one specification) under `integration-tests` per `testing.md`. No new CI job, tool, or xtask subcommand.
 - Runtime budget: one evaluation per managed target per 30 s; measured per-pass cost is in V-3, the guardrail in G1.
 
 ## Wave: DESIGN / [REF] Quality attributes and enforcement
 
-- Reliability: every wake gap in the verification closes by the pass re-evaluating the target; recovery bound = period plus queue time. The pass guarantees re-evaluation, not convergence: the model proves the former (an `ok` evaluation clears need, by abstraction); that `reconcile` converges is the slice 04 property. The probe-driven stop keeps ADR-0191's act-once-per-crossing rule and is not re-emitted without a new row (D-6).
+- Reliability: every wake gap in the verification closes by the pass re-evaluating the target; recovery bound = period plus queue time. The pass guarantees re-evaluation, not convergence: the model proves the former (an `ok` evaluation clears need, by abstraction); that `reconcile` converges is the slice 04 property. The probe-driven stop is unchanged (D-6).
 - Maintainability: one backstop instead of three; a required method makes omission a compile error.
 - Testability: managed-target sets and the diff are pure or sim-drivable; the composed property reuses production code.
 - Enforcement: the existing dst-lint purity scan over `overdrive-reconcilers/src/**` covers the new method (no clock, no wall time); the compile-guard that `hydrate_*` carry no `&dyn Clock` extends to `managed_targets`; `cargo xtask conformance-lint` covers the conformance driver; the boundary test (S-ROH-B-09) is updated for the field set. No new tool.
@@ -640,6 +647,7 @@ No contract-shaping validation item is open; D-1 stands on source reading. The d
 
 - Scope limitation, tracked: the 30 s resync period is a compile-time constant with no configuration surface (D-2). Tracked by #356.
 - Scope limitation, tracked: guest UDP to a VIP is refused until GH #310 (D-10, D-11; ADR-0284). #310 is cited as the user's ruling names it; not re-fetched. A comment on #310 records the removal.
+- Scope limitation, tracked: the Tier-1 `persist_view` recovery (slice 01) assumes the store can write again after the fault clears. With redb a transient disk error is permanent until restart (the `Database` is poisoned and `RedbViewStore` never reopens). Tracked by #360.
 - Lane for the slice 04 property (V-5).
 - Independent design review has not run; the ADRs stay `Proposed`.
 - DELIVER follow-ups outside `crates/` (rules docs, living docs, website): slice 02 § "DELIVER follow-ups outside `crates/`" only.
@@ -648,6 +656,6 @@ No contract-shaping validation item is open; D-1 stands on source reading. The d
 
 User approvals are recorded above. DISTILL starts when independent design review is done.
 
-Scenario obligations: the slice 01 invariants (three faults plus fresh deploy, enumeration failure, burst admission); slice 02 (the deletion: AC1 to AC7 of the slice file, unchanged behaviour of the remote service path and the gateway; plus the one added behaviour, D-11, Tier 1 only, through the owner's driving port with the sim flow I/O); slice 04 (the composed property, mutation check per injected latch mutant, and the executor doc fix, which has no scenario; `service-lifecycle` is covered by the property like every reconciler, with its act-once markers unchanged, D-6). The Quint conformance driver per the pinned projections. The per-reconciler containment obligation for `managed_targets` (Conformance pins, f). Each slice stays production-drivable through `serve` + `deploy` with a real reachable fault (D11). The VIP-release scenarios belong to #211 and are not in this feature.
+Scenario obligations: the slice 01 invariants (three faults plus fresh deploy, enumeration failure, burst admission); slice 02 (the deletion: AC1 to AC7 of the slice file, unchanged behaviour of the remote service path and the gateway; plus the one added behaviour, D-11, Tier 1 only, through the owner's driving port with the sim flow I/O); slice 04 (the composed property, mutation check per injected latch mutant, and the executor doc fix, which has no scenario; `service-lifecycle` is covered by the property like every reconciler, except that its probe-driven stop obligation is scoped out of the drop/skew progress oracle and its generators are constrained as D-6 states). The Quint conformance driver per the pinned projections. The liveness-before-Stable dependency of `terminal_announced` (D-6) is pinned by `crates/overdrive-control-plane/tests/acceptance/liveness_begins_at_stable.rs` (`liveness_supervision_begins_when_the_allocation_becomes_stable`, `first_liveness_row_lands_one_interval_after_stable_with_streak_one`). It asserts at the probe runner that no liveness role is live and no liveness row exists before the Stable hook; it does not run `ServiceLifecycle`. Gap: no test runs `ServiceLifecycle` against a non-Stable allocation and asserts it emits no liveness stop; the dependency rests on the runner never writing a liveness row before Stable. The per-reconciler containment obligation for `managed_targets` (Conformance pins, f). Each slice stays production-drivable through the real `run_server` composition, with faults injected at `Sim*` port seams (D11). The VIP-release scenarios belong to #211 and are not in this feature.
 
 Proposals for the user (not adopted; each adds scope, per `design.md` § "No unrequested scope"): none.

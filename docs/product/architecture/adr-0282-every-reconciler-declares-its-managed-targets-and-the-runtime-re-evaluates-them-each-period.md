@@ -105,10 +105,9 @@ period, whatever dropped its earlier wake. It does not guarantee that `reconcile
 converges `actual` to `desired`, and it does not make a View-gated action re-emit. The
 model-checked statement, its abstraction and bound are in the feature delta
 (`Formal protocol model`, `Quality attributes`). No reconciler's View decides whether an
-effect is in place. `service-lifecycle`'s act-once stop markers (ADR-0191 decision 5) are
-pacing keyed to the probe row's `run_seq`: they decide when a stop is emitted again, on
-the next crossed row, so the pass re-evaluates it and changes no verdict (ADR-0191
-decision 6; feature delta D-6).
+effect is in place. `service-lifecycle`'s probe-driven stop markers are pacing keyed to
+the probe row's `run_seq`: the pass re-evaluates the allocation and changes no verdict
+(feature delta D-6, which names the decisions behind each marker).
 
 Negative and bounds:
 

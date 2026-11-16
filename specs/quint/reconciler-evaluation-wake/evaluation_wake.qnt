@@ -52,7 +52,7 @@
  *   noPass       D-1  the resync pass is removed (PassStep disabled, so no boot pass either)
  *   noRetention  D-3  next_evaluation_at returns None (an in-window Noop is not requeued)
  *
- * Model-only (conformance): see README (pinned projection table); `conf_step` records the action (D-UP-1).
+ * Model-only (conformance): see README (pinned projection table); `conf_step` records the action that produced this state (model-only).
  * dispatched / cancelled count Drain admissions and same-key collapses only when REC (the conformance main);
  * the checking instances keep them 0 so TLC's state space is finite.
  *
@@ -60,18 +60,23 @@
  *   WK-1  The broker's LWW collapse, eligibility merge, first-pending FIFO order and per-target blocking are as
  *         eval_broker.rs `submit` / `drain_pending` / `merge_eligibility` (read at HEAD fb71b400f).
  *         Discharged by: V-4 (existing eval_broker tests + run edge_wake_during_burst_is_admitted_after_burst and
- *         pass_submit_merges_retained_not_before_to_immediate under the quint-connect driver).
+ *         pass_submit_merges_retained_not_before_to_immediate under the quint-connect driver; the latter discharges the
+ *         NotBefore to Immediate merge through admission: the following Drain admits the key and pending empties).
  *   WK-2  ReconcilerRuntime::submit_evaluation wakes the loop (ADR-0273), so a submitted key is drained without a
  *         separate sleep-until wake; the loop's cadence timer backstops it.
  *         Discharged by: the existing ADR-0273 submit-wakes-loop acceptance tests.
  *   WK-3  Time is abstract: the period is a timer event (Tick) with weak fairness, a backoff window ends by a
- *         WindowEnds event with weak fairness, and a retained NotBefore becomes eligible exactly when its window
- *         ends (the deadline IS last_failure_seen_at + backoff_for_attempt, D-3). The 30 s value, "within one
+ *         WindowEnds event with weak fairness (one clock advance past the shared instant), which also makes a retained
+ *         NotBefore eligible, exactly when its window ends (the deadline IS last_failure_seen_at + backoff_for_attempt, D-3). The 30 s value, "within one
  *         period plus queue time" as a duration, and anchored re-arming at previous + period on the injected clock
- *         are NOT checked here; they are checked by the seeded overdrive-sim scenario on SimClock (V-3).
+ *         are NOT checked here. Discharged by: a DISTILL obligation on the default-lane seeded overdrive-sim / SimClock
+ *         harness covering the pass's boot run, anchoring at previous + period with no drift, at most one pass
+ *         per period, and recovery within one period plus queue time. (V-3 was a native-metal cost measurement
+ *         and does not discharge WK-3.)
  *   WK-4  managed_targets returns the complete set or Err for the whole call, from intent and from observation
- *         (D-1a postcondition); `has` is that set. Discharged by: the managed_targets contract tests per
- *         reconciler (DISTILL) and V-5.
+ *         (D-1a postcondition); `has` is that set. Discharged by: the per-reconciler containment obligation, a DISTILL
+ *         obligation (every target with a non-empty hydrate projection is in the returned managed_targets set;
+ *         Err returns no partial set).
  *   WK-5  A crash loses exactly the in-memory broker queue and in-flight evaluations; the View store, intent and
  *         observation rows survive (redb fsync, ADR-0035 step 7 -> 8). Discharged by: the existing WriteThrough
  *         ordering invariant and a DST crash scenario.
@@ -90,7 +95,6 @@ module reconciler_wake_conf {
     | DivergeDrop({ k: str })
     | EdgeWake({ k: str })
     | WindowEnds({ k: str })
-    | Due({ k: str })
     | Crash
 }
 
@@ -139,7 +143,7 @@ module evaluation_wake {
   var drifts: int
   var dispatched: int     // REC only
   var cancelled: int      // REC only
-  var conf_step: ConfStep // D-UP-1: the action that produced this state (model-only)
+  var conf_step: ConfStep // the action that produced this state (model-only)
 
   def canFault(f: str): bool = FAULTS.contains(f) and faults < MAXF
 
@@ -273,24 +277,16 @@ module evaluation_wake {
     conf_step' = if (REC) variant("EdgeWake", { k: k }) else conf_step,
   }
 
-  // time passes: the hydrator's backoff window of k ends
+  // time passes: the injected clock passes the instant that ends k's backoff window. In production that one
+  // instant is both the hydrator's window end and the retained NotBefore deadline (D-3: last_failure_seen_at +
+  // backoff_for_attempt), so one step does both: a pending "nb" becomes eligible ("imm")
   action WindowEnds(k: str): bool = all {
     inWin.contains(k),
     inWin' = inWin.exclude(Set(k)),
-    has' = has, need' = need, active' = active, pending' = pending, elig' = elig, due' = due,
+    elig' = if (inP(pending, k) and elig.get(k) == "nb") elig.set(k, "imm") else elig,
+    has' = has, need' = need, active' = active, pending' = pending, due' = due,
     passPos' = passPos, faults' = faults, drifts' = drifts, dispatched' = dispatched, cancelled' = cancelled,
     conf_step' = if (REC) variant("WindowEnds", { k: k }) else conf_step,
-  }
-
-  // time passes: a retained NotBefore evaluation reaches its deadline (= the end of its window, WK-3)
-  action Due(k: str): bool = all {
-    inP(pending, k),
-    elig.get(k) == "nb",
-    not(inWin.contains(k)),
-    elig' = elig.set(k, "imm"),
-    has' = has, need' = need, inWin' = inWin, active' = active, pending' = pending, due' = due,
-    passPos' = passPos, faults' = faults, drifts' = drifts, dispatched' = dispatched, cancelled' = cancelled,
-    conf_step' = if (REC) variant("Due", { k: k }) else conf_step,
   }
 
   // environment fault: process restart between View fsync and dispatch; the boot pass is due again
@@ -306,8 +302,7 @@ module evaluation_wake {
     nondet k = KEYSET.oneOf()
     nondet o = Set("ok", "dpFail", "hydrateErr", "persistErr", "dispatchErr").oneOf()
     nondet b = Set(true, false).oneOf()
-    any { Tick, PassStep(b), Drain, Finish(k, o), DivergeWake(k), DivergeDrop(k), EdgeWake(k), WindowEnds(k),
-          Due(k), Crash }
+    any { Tick, PassStep(b), Drain, Finish(k, o), DivergeWake(k), DivergeDrop(k), EdgeWake(k), WindowEnds(k), Crash }
   }
 
   val allVars = (has, need, inWin, active, pending, elig, due, passPos, faults, drifts, dispatched,
@@ -338,7 +333,6 @@ module evaluation_wake {
     weakFair(Tick, allVars), weakFair(PassStep(true), allVars), weakFair(Drain, allVars),
     weakFair(Finish("k1", "ok"), allVars), weakFair(Finish("k2", "ok"), allVars), weakFair(Finish("k3", "ok"), allVars),
     weakFair(WindowEnds("k1"), allVars), weakFair(WindowEnds("k2"), allVars), weakFair(WindowEnds("k3"), allVars),
-    weakFair(Due("k1"), allVars), weakFair(Due("k2"), allVars), weakFair(Due("k3"), allVars),
   }
   // D-1: every needy key is eventually evaluated to convergence, from every error outcome, dropped wake and crash
   temporal ProgressByPass = Fair.implies(KEYSET.forall(k => always(need.contains(k).implies(eventually(not(need.contains(k)))))))
@@ -383,7 +377,7 @@ module evaluation_wake {
     .then(Finish("k2", "dpFail")).expect(inWin == Set("k2") and need == Set("k2") and pending == ["k2"] and elig.get("k2") == "imm")
     .then(Drain).then(Finish("k2", "ok"))
     .expect(need == Set("k2") and pending == ["k2"] and elig.get("k2") == "nb" and RetentionSchedulesBackedOffKey)
-    .then(WindowEnds("k2")).then(Due("k2")).expect(elig.get("k2") == "imm")
+    .then(WindowEnds("k2")).expect(elig.get("k2") == "imm")
     .then(Drain).then(Finish("k2", "ok"))
     .expect(need == Set() and due == true and passPos == 0 and Safety)
 
@@ -424,6 +418,7 @@ module evaluation_wake {
     .then(Drain).then(Finish("k2", "ok")).expect(elig.get("k2") == "nb" and pending == ["k2"])
     .then(PassStep(true)).then(PassStep(true))
     .expect(elig.get("k2") == "imm" and pending == ["k2"] and inWin == Set("k2"))
+    .then(Drain).expect(pending == List() and active == Set("k2"))
 
   // D-12 d: the world is read at Finish (run_convergence_tick hydrates at its start), not at Drain. k1 is admitted
   // while it does not need work; its divergence arrives (edge wake dropped) while it is in flight; Finish acts on

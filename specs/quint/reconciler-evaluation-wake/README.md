@@ -29,7 +29,7 @@ backoff window and `next_evaluation_at`). `k1` and `k2` share the target `t1`, s
 
 | Property | Kind | Defends | Hazard that breaks it |
 |---|---|---|---|
-| `Safety` = `ActiveWithinCap`, `OneActivePerTarget`, `PendingUnique`, `EligCanonical`, `NeedImpliesManaged`, `WindowOnlyForNeedy` | invariant, `wake_full` | D-1 admission bounds and broker rules the pass relies on | none (see Limits) |
+| `Safety` = `ActiveWithinCap`, `OneActivePerTarget`, `PendingUnique`, `EligCanonical`, `NeedImpliesManaged`, `WindowOnlyForNeedy` | `expect` clause in the named runs only | model well-formedness; every conjunct holds by construction of the transition relation, so there is no standalone check | none (see Limits) |
 | `ProgressByPass` | temporal, `wake_full` | D-1: every needy key is evaluated to convergence again after any error outcome, dropped wake or crash | `wake_noPass` (D-1) |
 | `RetentionSchedulesBackedOffKey` | invariant, `wake_retention` (only fault: the dataplane fails) | D-3: a key inside its backoff window is always scheduled (in flight or retained), so its retry needs neither a row write nor a pass | `wake_noRetention` (D-3) |
 
@@ -50,7 +50,7 @@ unscheduled).
 | fresh deploy: intent, no row, no edge wake | `fresh_deploy_without_row_is_evaluated` |
 | enumeration failure of one reconciler | `enumeration_failure_of_one_reconciler_does_not_starve_others` |
 | edge wake during a pass burst (also target exclusion) | `edge_wake_during_burst_is_admitted_after_burst` |
-| V-4: pass submit merges a retained NotBefore | `pass_submit_merges_retained_not_before_to_immediate` |
+| V-4: pass submit merges a retained NotBefore (discharged through admission: the next `Drain` admits the key) | `pass_submit_merges_retained_not_before_to_immediate` |
 | D-12 d: world changes between `Drain` and `Finish`; `Finish` acts on the world as read at `Finish` | `world_changes_between_drain_and_finish` |
 
 ## Conformance step record and projection
@@ -60,29 +60,19 @@ parameters); it changes only on `wake_conf` (`REC = true`), which also counts
 `dispatched` (Drain admissions) and `cancelled` (same-key collapses). Driver ITF name:
 `wake_conf::evaluation_wake::conf_step`.
 
-| Spec variable | Owner accessor | Status |
-|---|---|---|
-| `pending` (keys; order = admission order) | `BrokerDrain::pending_keys() -> Vec<(ReconcilerName, TargetResource)>`, first-pending (admission) order, no eligibility filter (D-12 b) | pinned; a same-key resubmit keeps its slot (D-12 e) |
-| `dispatched`, `cancelled` | `BrokerDrain::counters()` | pinned (`wake_conf` only) |
-| `inWin` | none | model-only, not projected (D-12 g); a retained key is compared as `pending` |
-| `elig` | none | model-only (ruling: broker unit tests) |
-| `active` | none | model-only (ruling: loop-local); the driver's in-flight set is its stimulus for `Drain` |
-| `has`, `need` | none | model-only stimulus: the world the driver builds through the intent and observation driven ports (D-12 f). The driver does not set `has` from `managed_targets`; containment of targets is a separate DISTILL obligation |
-| `due`, `passPos`, `faults`, `drifts` | none | model-only (timer and budgets) |
+The pinned observable projections (accessors, signatures, model-only variables) and the action-to-driving-port mapping are
+in the feature-delta, "Formal protocol model", "Pinned observable projections for the conformance drivers"
+(`docs/feature/reconciler-convergence-guarantees/feature-delta.md`). Not copied here.
 
-## Assumptions and what discharges them
+## Assumptions
 
-See the `ASSUMPTIONS` block of `evaluation_wake.qnt`: WK-1 broker rules (V-4: `eval_broker` tests and the runs above),
-WK-2 `submit_evaluation` wakes the loop (ADR-0273 acceptance tests), WK-3 abstract time (V-3: seeded sim on `SimClock`
-carries the 30 s period, anchoring and "one period plus queue time" as a duration), WK-4 `managed_targets` is whole or
-`Err` from intent and observation (D-1a contract tests, V-5), WK-5 crash loses exactly the in-memory broker and
-in-flight set (WriteThrough ordering invariant, DST crash scenario), WK-6 other reconcilers' View pacing never blocks a
-due re-evaluation (slice 04 property).
+WK-1 to WK-6 are the `ASSUMPTIONS` block of `evaluation_wake.qnt`, each with its discharging item; the feature-delta
+carries the same table.
 
 ## Limits
 
 The model checks the pass and edge-wake protocol, not the duration bound: the period, anchored re-arming and "within one
-period plus queue time" are fairness assumptions here (WK-3). `PendingUnique`, `OneActivePerTarget`, `ActiveWithinCap`
-and `EligCanonical` are structural in this model (broker rules are existing behaviour, not D-1 decisions, so no
-hazard); their teeth are the broker unit tests (V-4). A pass never submits a partial set because `managed_targets`
+period plus queue time" are fairness assumptions here (WK-3). All six `Safety` conjuncts are true by construction of the transition relation (broker rules are existing
+behaviour, not D-1 or D-3 decisions, so no hazard and no standalone check); their teeth are the broker unit tests
+(V-4). `Safety` stays as an `expect` clause in the named runs. A pass never submits a partial set because `managed_targets`
 returns the whole set or `Err` (D-1a), assumption WK-4.
