@@ -1234,3 +1234,30 @@ Changes DELIVER made to the DESIGN contracts. Each is incorporated in present te
 | 12 | Fixture existence is checked by placement-lint only; the run-time lane check refuses a lane placement outside the lane package. | orchestrator, 2026-11-15 (delegated by the user), implementing review finding H1 | `placement-lint` section, Interface contracts (build errors of the attribute), Lane contract | the lane hand-off and `placement-lint` `missing-fixture` clause |
 
 No change adds a deferral or a scope limitation, so no tracking issue is proposed.
+
+## Wave: DELIVER / [REF] Implementation summary
+
+Placement of every Metal integration test is declared on the test: `#[overdrive_test(...)]` (host_pure, native_launcher, guest with an optional profile, lane_operator, lane_owner with its host script, and the argument-free form inside a `shared_guest!` module), `placement!(host_pure)` per module and `overdrive_test_default!(host_pure)` per host-only binary. The declarations are written as records into the `overdrive_test_placement` ELF section; the Metal wrapper reads them, and `cargo xtask placement-lint` runs the wrapper's reader over the workspace listing in pre-push. All 4,642 table entries moved onto their tests in six scripted batches with per-test parity checks. `infra/metal/test-placement.json`, the wrapper's table lookup, the fwd guest-suite dispatcher, its environment keys and the name-keyed lane slot table are deleted. The decisions taken during delivery are listed in `## Wave: DELIVER / [WHY] Upstream Issues` above.
+
+## Wave: DELIVER / [REF] Quality gates
+
+| Gate | Outcome |
+|---|---|
+| DES integrity (`des-verify-integrity`) | all 15 steps have complete traces |
+| Implementation review | first pass rejected (2 HIGH, 3 MEDIUM, 6 LOW, plus subtractive findings); all resolved in `c19201c49`, `9519e3e37`, `80fb2fa6c`, `0bac89aa7`; re-review's remaining finding (two record readers) resolved by `0bac89aa7` |
+| Mutation testing | not run for this feature (user ruling: mutation testing is not a design driver for this feature and is skipped in delivery) |
+| `placement-lint`, `conformance-lint`, workspace clippy `-D warnings` | clean on the rebased branch |
+| Full-workspace Metal comparison against `main` | see below |
+
+**Full-workspace comparison (2026-11-16).** `cargo xtask metal run -- cargo nextest run --workspace --features integration-tests,kvm-tests --no-fail-fast` on this branch at `06e50caf1` (Metal run `c389d468c90cab793d1591e5`) and on its merge base with `main` at `52268fd5c`, plus `-p overdrive-bpf --features overdrive-bpf/integration-tests` on both, compared by test name.
+
+| Side | Tests | Passed | Failed | Skipped |
+|---|---|---|---|---|
+| branch `06e50caf1` | 4,726 | 4,654 | 72 | 27 |
+| main `52268fd5c` | 4,733 | 4,662 | 71 | 29 |
+
+- 69 tests fail on both sides; 63 of them are `overdrive-cli` VM integration tests, and 59 of the failures carry `SystemdDetectVirtUnavailable { NotFound }` on both sides.
+- 3 tests failed only on the branch; each passed on rerun in isolation on the branch and on `main` (`vsock_fault_matrix::a_guest_reset_ends_the_vmm_and_resets_every_far_end`, `guest_flow_through_serve::a_dropped_probe_stream_is_an_abort_at_the_guest_through_serve`, and `vsock_walking_skeleton::a_vm_workload_round_trips_tcp_and_udp_through_serve_and_deploy`, which passes about half the time on both sides).
+- 2 tests failed only on `main` and passed on the branch.
+- The tests present on one side only are the retired dispatcher and table tests (main) and their replacements (branch).
+- `overdrive-bpf` integration: 20 of 20 on both sides.
