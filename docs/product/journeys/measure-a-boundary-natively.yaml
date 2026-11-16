@@ -1,0 +1,87 @@
+schema_version: 1
+
+journey:
+  name: Measure a boundary or compare two mechanisms natively
+  feature: native-benchmark-program
+  status: discuss
+  goal: >
+    Declare a benchmark (one boundary, its arms and its workload) once, run it
+    on the exclusive native host under the fixed methodology, and read retained
+    raw samples plus a report that says what was measured and in which host state.
+  persona: marcus-platform-verification-engineer
+  jobs: [J-PLAT-008]
+  emotional_arc:
+    start: Doubtful that a number taken ad hoc could be trusted or compared with the last one
+    middle: Focused on one declaration, one run id and one report
+    end: Confident the number means what the report says and another engineer can reproduce it
+
+steps:
+  - id: 1
+    name: Declare the benchmark
+    command: >
+      write a benchmark function with the benchmark attribute (family, substrate,
+      arms, replicates) in a bench target, or in a spike-scratch crate that depends
+      on the benchmark crate by path
+    shared_artifacts:
+      - name: benchmark_declaration
+        source: The attribute on the benchmark function (single source of truth for family, substrate, arms, replicates)
+        consumers: [runner, record, report, smoke test]
+    integration_checkpoint: The declaration is the only place family, substrate and arms are stated.
+    failure_modes:
+      - Unknown substrate or family spelling (rejected naming the value)
+    gherkin: |
+      Scenario: One declaration defines the benchmark
+        Given Marcus writes a benchmark function with its arms
+        Then no runner, recorder or report code is needed to run it
+
+  - id: 2
+    name: Run it on the exclusive native host
+    command: the benchmark form of cargo xtask metal run, naming the family (exact spelling is DESIGN's)
+    tui_mockup: |
+      OVERDRIVE_METAL_RUN_ID=${run_id}
+      eligibility: ${host_settings_check}
+      replicate ${n}/${replicates}: arm order ${arm_order}
+      result: ${result_path}
+    shared_artifacts:
+      - name: run_id
+        source: Existing durable Metal invocation registration
+        consumers: [live output, retained log, collection]
+      - name: host_settings
+        source: The host as read before the first sample, compared with the methodology's production settings
+        consumers: [eligibility check, record provenance, report]
+    integration_checkpoint: A host that differs from the production settings is refused before any sample.
+    failure_modes:
+      - Host setting drifted (refused, names the setting and both values)
+      - A replicate fails (counted and reported, never dropped)
+    gherkin: |
+      Scenario: A drifted host is refused
+        Given a host setting differs from the production settings
+        When Marcus starts a benchmark
+        Then the run refuses before any sample and names the setting
+
+  - id: 3
+    name: Read the record and the report
+    command: cargo xtask metal pull the retained result, then read the report
+    tui_mockup: |
+      ${family}  methodology ${methodology_version}  substrate ${substrate}
+      ${arm}: median ${median} ${unit}  IQR ${iqr}  n=${n}
+      ${arm_b} - ${arm_a}: ${delta} ${unit}  CI95 ${ci}  noise floor (A/A) ${aa_ci}
+      host: ${host_summary}  bpf stats: ${bpf_stats}  commit: ${commit} dirty=${dirty}
+    shared_artifacts:
+      - name: raw_samples
+        source: The retained machine-readable record (every sample, every failure)
+        consumers: [report, later comparison, reviewer]
+    integration_checkpoint: The report is derived only from the retained raw samples.
+    failure_modes:
+      - Record from another substrate (never compared)
+    gherkin: |
+      Scenario: The report is derived from the raw record
+        Given a retained record
+        Then the report's distributions and delta can be recomputed from its samples
+
+acceptance_reference: docs/feature/native-benchmark-program/feature-delta.md
+
+changelog:
+  - date: 2026-11-16
+    feature: native-benchmark-program
+    change: Requirements journey for declaring, running and reading a native benchmark.

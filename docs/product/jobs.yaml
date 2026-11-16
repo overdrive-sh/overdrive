@@ -732,7 +732,39 @@ jobs:
       anxiety: A plain test could silently run on the host; per-test guests could cost more run time than batched groups (a module can share one guest)
       habit: Existing metal run commands and the five placement kinds must keep meaning the same
 
+  - id: J-PLAT-008
+    title: Get comparable, reproducible native numbers for a boundary or a mechanism choice
+    situation: >
+      When I must choose between two mechanisms (userspace or in-kernel,
+      one VMM or another) or check what a primitive costs end to end
+      (a cgroup connect hook, a VM lifecycle stage, a DNS answer, an mTLS hop),
+    motivation: >
+      I want to declare the boundary and its arms once, run it on the shared
+      native host under one fixed method, and get retained raw samples and a
+      report with distributions and the host's recorded state,
+    outcome: >
+      so I can decide from numbers that another engineer (or I, next month)
+      can reproduce and compare, without hand-writing a sampler, recorder and
+      report for each spike or arguing about how the number was taken.
+    source: native-benchmark-program DISCUSS (2026-11-16), GH #287, user rulings in intake.md, and the existing spikes (pig-connect-cost, bpf-stats-overhead, netns-density-295)
+    served_by_phase: native-benchmark-program
+    status: active
+    dimensions:
+      functional: One declared benchmark yields raw samples, a distribution report, an A/B comparison against a noise floor, and the environment it ran in
+      emotional: Confidence that a number means what its report says it means
+      social: Evidence a reviewer can re-derive from retained raw rows
+    four_forces:
+      push: Each spike re-implements its sampler, recorder and report; numbers from different spikes are not comparable
+      pull: Declare the benchmark on a function; the runner owns interleaving, the A/A control, provenance and the report
+      anxiety: A benchmark could be mistaken for a correctness gate, or taken on a host whose state differs from production
+      habit: Spikes live in spike-scratch and are read by hand; the metal run grammar must keep meaning the same for tests
+
 changelog:
+  - date: 2026-11-16
+    change: >
+      Added J-PLAT-008 for native-benchmark-program, a developer-tooling
+      measurement outcome grounded in user rulings and existing spikes, not
+      external customer research. No existing job contract changed.
   - date: 2026-11-13
     change: >
       Added J-PLAT-007 for metal-test-placement-attribute, a developer-tooling
