@@ -1,14 +1,14 @@
 ---
 title: Declaring where a test runs
-description: "A 15,039-line JSON table told the Metal runner where each test runs, and a missed entry showed up only on the Metal box. We moved the declaration onto the test, and shared guests needed a model-checked owner."
+description: "A 15,039-line JSON table told our test runner where each test runs, and a missed entry only showed up in the remote developer environment. We moved the declaration onto the test, and shared guests needed a model-checked owner."
 date: 2026-11-16
 author: The Overdrive team
-summary: Placement lives on the test as an attribute, is written into the test binary, and is checked by a lint before any Metal run. Sharing one guest across a module's tests required an owner process whose protocol we model-checked.
+summary: Placement lives on the test as an attribute, is written into the test binary, and is checked by a lint before any test reaches the remote developer environment. Sharing one guest across a module's tests required an owner process whose protocol we model-checked.
 ---
 
-Overdrive runs its integration tests on a shared Metal host, a physical x86_64 machine with KVM that `cargo xtask metal run` sends test runs to. The Metal runner is the wrapper that executes each test there. Each test must say where it runs. Some run on the host. Some need a fresh guest of a named kind, a microVM run by Cloud Hypervisor, whose process is the virtual machine monitor (VMM). A few, the tests of the Metal runner's own machinery, use the native launcher kind. Those get a node view: a private network namespace, mount namespace and cgroup namespace, so the test sees its own node and not the shared host's. We run tests with cargo-nextest, which starts each test in its own process, selects tests with its `-E` filter expressions, and drives the standard Rust test harness, libtest. We kept the placement choice in `infra/metal/test-placement.json`, a table keyed by test binary and test name. At the start of this work it held about 4,700 tests, exactly 4,680 entries, in 15,039 lines.
+Overdrive runs its integration tests in a shared remote developer environment: a physical x86_64 machine with KVM that `cargo xtask metal run` sends test runs to. A wrapper on that machine executes each test. Each test must say where it runs. Some run on the host. Some need a fresh guest of a named kind, a microVM run by Cloud Hypervisor, whose process is the virtual machine monitor (VMM). A few, the tests of that wrapper's own machinery, use the native launcher kind. Those get a node view: a private network namespace, mount namespace and cgroup namespace, so the test sees its own node and not the shared host's. We run tests with cargo-nextest, which starts each test in its own process, selects tests with its `-E` filter expressions, and drives the standard Rust test harness, libtest. We kept the placement choice in `infra/metal/test-placement.json`, a table keyed by test binary and test name. At the start of this work it held about 4,700 tests, exactly 4,680 entries, in 15,039 lines.
 
-We deleted the table. A test declares its own placement with an attribute, the declaration travels inside the test binary, and `cargo xtask placement-lint` fails before any Metal run if a test is unplaced. This post covers why the table failed, what else we considered, what the design costs, and why sharing a guest between tests needed a protocol we model-checked.
+We deleted the table. A test declares its own placement with an attribute, the declaration travels inside the test binary, and `cargo xtask placement-lint` fails before anything is sent to the remote environment if a test is unplaced. This post covers why the table failed, what else we considered, what the design costs, and why sharing a guest between tests needed a protocol we model-checked.
 
 ## The table had four owners and one gate
 
@@ -16,11 +16,11 @@ The table was the visible source of truth, but it was not the only one. The gues
 
 Every rename was a hazard. Rename a test and its table entry no longer matched. If the test was in the table, the wrapper refused it as unclassified. If it was one of the name-keyed variants, the test lost its staged tool and failed inside the guest for a reason that pointed nowhere near the rename.
 
-The only gate was the Metal wrapper, which refuses an unplaced test with status 78 before its body runs. That gate runs on the Metal box. A developer on a laptop or in CI learned about a missing entry only after queuing for a physical host.
+The only gate was the wrapper in the remote environment, which refuses an unplaced test with status 78 before its body runs. A developer on a laptop or in CI learned about a missing entry only after queuing for that remote machine.
 
 ## Why the declaration lives on the test
 
-We wanted one edit site and a check that runs before the Metal host. Four designs fit that goal. Each lost.
+We wanted one edit site and a check that runs before a test reaches the remote environment. Four designs fit that goal. Each lost.
 
 **A generated table.** A build step would derive the table from the tests. That leaves a second artifact that can go stale and needs a build hook in every crate. We would have kept the file and added a generator.
 
@@ -30,7 +30,7 @@ We wanted one edit site and a check that runs before the Metal host. Four design
 
 **Encoding placement in the test name.** This changes every name, breaks `-E` selection in nextest, and discards test history.
 
-The design that survived is an attribute, `#[overdrive_test(...)]`, that writes a record into the test binary. The macro emits a record into an ELF section named `overdrive_test_placement`. The Metal wrapper reads the section of the binary nextest hands it, finds the record for the exact test, and places the test. No table lookup exists. A test with no record is refused before its body runs, as before.
+The design that survived is an attribute, `#[overdrive_test(...)]`, that writes a record into the test binary. The macro emits a record into an ELF section named `overdrive_test_placement`. The wrapper reads the section of the binary nextest hands it, finds the record for the exact test, and places the test. No table lookup exists. A test with no record is refused before its body runs, as before.
 
 The attribute covers the five kinds the table held: `host_pure`, `native_launcher`, `guest = "<group>"` with an optional `profile` (a named variant of a group that stages extra files, modules or memory), and `lane_operator` and `lane_owner` for the two sides of a fixture that runs inside a guest. Writing the attribute on each of about 4,700 tests would be churn, so two function-like macros place tests in bulk. `placement!(host_pure)` covers every test of one module. `overdrive_test_default!(host_pure)` covers a host-only binary. A test's own declaration wins over its module's, which wins over the binary default.
 
@@ -44,13 +44,13 @@ A module can declare a shared guest once, and its tests read the declaration by 
 
 The lint reads ELF sections, so it runs on Linux. The pre-push hook routes it through the Linux environment on a Mac. The CI workflow also runs it beside the nextest step, but that workflow runs only when someone starts it by hand. It lists tests with `integration-tests` and each member's own `kvm-tests` feature. Without `kvm-tests`, 140 tests would have escaped the check.
 
-One more choice has a visible cost. Off a Metal run, a guest-placed test runs its body in the current process. Guest placement exists to isolate tests on the shared Metal host, and CI runners and Lima machines are private. The alternative was to fail closed off Metal. Failing closed would have turned every guest-placed test red in the pre-push hook and in the CI workflow when someone starts it. Hundreds of tests run in those places, and they would fail to protect against interference that cannot happen on a private machine. It would also have needed a Metal runner for CI. The price is that a laptop run does not exercise guest isolation. Only a Metal run does.
+One more choice has a visible cost. Outside the remote environment, a guest-placed test runs its body in the current process. Guest placement exists to isolate tests from each other on the shared remote machine, and CI runners and local Linux VMs are private. The alternative was to fail closed everywhere else. Failing closed would have turned every guest-placed test red in the pre-push hook and in the CI workflow when someone starts it. Hundreds of tests run in those places, and they would fail to protect against interference that cannot happen on a private machine. It would also have needed CI to run on the remote machine. The price is that a laptop run does not exercise guest isolation. Only a run in the remote environment does.
 
 The guest groups and profiles are a closed registry of 22 environments over eight groups. A typo is a build error at the offending literal, naming the value. Adding an environment is a code change. Moving the name-keyed variants into profiles means a rename can no longer drop one silently. Two dispatcher rows matched no test, and six table entries in the control-plane binary named tests that no longer exist. We deleted them.
 
 ## Sharing a guest needed an owner
 
-Before this work, ordinary Metal runs already booted a fresh guest for each guest-placed test attempt. In a probe we measured about 0.45 seconds of staging and 2.4 seconds of boot per test, from two samples. The dispatcher had shared a guest across a group, and deleting it would have dropped that sharing. So we required a replacement that kept per-test results, retries and `-E` selection.
+Before this work, runs in the remote environment already booted a fresh guest for each guest-placed test attempt. In a probe we measured about 0.45 seconds of staging and 2.4 seconds of boot per test, from two samples. The dispatcher had shared a guest across a group, and deleting it would have dropped that sharing. So we required a replacement that kept per-test results, retries and `-E` selection.
 
 Three shortcuts lose them. Running a whole module as one nextest test in one guest folded three passes and a failure into one result in our probe, and it lost per-test retries. A nextest setup script has no teardown hook and does not know the test binary, so it would need the same socket and cleanup process we build below. Letting the first test own the guest kills the guest when that test ends, and the other tests lose it.
 
@@ -70,7 +70,7 @@ Every shared exec has a bound. When nextest kills a test at its slow timeout, an
 
 We model-checked the owner because its failure modes are interleavings we could not enumerate by reading. Several processes race for election, a queue orders them, a guest can fail mid-test, and a client can vanish while its test runs. [Quint](/docs/concepts/quint-modeling) is a language for executable models of protocols. You describe states and actions, and a checker explores orderings to find one that breaks a stated property. We wrote the owner's protocol in Quint and checked it before building the owner.
 
-The specification has 19 checks. Two check invariants over every reachable state. Seven are hazard variants, copies of the model with one rule removed that must produce a counterexample. Ten are named runs, scripted sequences of actions that the checker replays and asserts on. A full recorded run takes 128.7 seconds on Metal. The decisions held under model checking: both invariants hold and the ten runs pass. Each of the seven hazard variants failed as intended, producing the counterexample we predicted:
+The specification has 19 checks. Two check invariants over every reachable state. Seven are hazard variants, copies of the model with one rule removed that must produce a counterexample. Ten are named runs, scripted sequences of actions that the checker replays and asserts on. A full recorded run takes 128.7 seconds on the remote machine. The decisions held under model checking: both invariants hold and the ten runs pass. Each of the seven hazard variants failed as intended, producing the counterexample we predicted:
 
 - With no election lock, two owners start.
 - With no in-flight guard, two tests run at once.
@@ -82,13 +82,13 @@ The specification has 19 checks. Two check invariants over every reachable state
 
 That is the evidence that each rule is load-bearing and that the invariants can fail.
 
-The model assumes some behavior it cannot prove. Election, owner crash and the owner's kernel lifetime belong to the operating system, so replaying model traces against the code does not drive them. We checked them directly on the Metal host, kernel 7.0.0-38. Eight simultaneous first arrivals elected exactly one owner under `flock`, and without the lock they started eight. Clients in seven other per-test network namespaces reached the socket, and the run directory was gone afterwards.
+The model assumes some behavior it cannot prove. Election, owner crash and the owner's kernel lifetime belong to the operating system, so replaying model traces against the code does not drive them. We checked them directly on the remote machine, running Linux 7.0.0-38. Eight simultaneous first arrivals elected exactly one owner under `flock`, and without the lock they started eight. Clients in seven other per-test network namespaces reached the socket, and the run directory was gone afterwards.
 
 ## What the comparison shows and what it leaves open
 
 We moved the table's entries onto their tests and deleted the entries that named tests which no longer exist. We deleted `test-placement.json` and the dispatcher, and put `placement-lint` into the pre-push hook and the manually started CI workflow. A rename needs no JSON edit.
 
-We ran the full workspace on Metal for this branch and for its merge base with `main`, then compared the results by test name. The branch run predates our last review fix, which made `placement-lint` run the wrapper's reader. After that change the xtask suite passed 428 of 428. On the branch, 4,726 tests ran: 4,654 passed and 72 failed. 27 more were skipped. On `main`, 4,733 ran: 4,662 passed and 71 failed, and 29 more were skipped. 69 tests fail on both sides. 63 of them are `overdrive-cli` VM integration tests. 59 of the 69 report that `systemd-detect-virt` was not found. We did not investigate the other 10. Three tests failed only on the branch, and each passed when we reran it in isolation on the branch and on `main`. One of them, the VM workload TCP and UDP round trip through `serve` and `deploy`, passes about half the time on both sides. Two tests failed only on `main` and passed on the branch. The tests present on one side only are the retired dispatcher and table tests on `main` and their replacements on the branch. The `overdrive-bpf` integration tests passed 20 of 20 on both sides.
+We ran the full workspace in the remote environment for this branch and for its merge base with `main`, then compared the results by test name. The branch run predates our last review fix, which made `placement-lint` run the wrapper's reader. After that change the xtask suite passed 428 of 428. On the branch, 4,726 tests ran: 4,654 passed and 72 failed. 27 more were skipped. On `main`, 4,733 ran: 4,662 passed and 71 failed, and 29 more were skipped. 69 tests fail on both sides. 63 of them are `overdrive-cli` VM integration tests. 59 of the 69 report that `systemd-detect-virt` was not found. We did not investigate the other 10. Three tests failed only on the branch, and each passed when we reran it in isolation on the branch and on `main`. One of them, the VM workload TCP and UDP round trip through `serve` and `deploy`, passes about half the time on both sides. Two tests failed only on `main` and passed on the branch. The tests present on one side only are the retired dispatcher and table tests on `main` and their replacements on the branch. The `overdrive-bpf` integration tests passed 20 of 20 on both sides.
 
 We chose not to run mutation testing for this change, so we have no kill rate for it. We did not measure full-workspace wall time before and after. Our shared-guest timings come from a probe with four tests per module: 11.8 seconds serial with a guest per test, against 3.6 seconds with one shared guest. Part of the shared figure is a 300-millisecond console-flush sleep the probe added, so it is an upper bound. The boot time we quote rests on two samples of `cgroup-default`.
 
