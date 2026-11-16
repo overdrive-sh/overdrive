@@ -195,6 +195,16 @@ nouns that stand in for a concrete fact belong in the same bin: "configuration
 surface", "envelope", "posture", "story". Name the concrete thing instead: the
 flag, the file, the command, the number.
 
+Our own infrastructure has private names too. "Metal", "the Metal box", "the
+Metal host", "Lima" and similar names for our development and test machines mean
+nothing to a reader. Call the shared machine that runs our integration tests "the test
+machine", introduced once as "a shared test machine (a physical x86_64 server
+with KVM)"; call a developer's Lima VM "a local Linux VM". A command that contains the name, such as
+`cargo xtask metal run`, may appear in code formatting, but the prose around it
+still says "the test machine". The exception is a page whose subject is that
+machine, such as the how-to for running tests on it; there, define the name at
+first use.
+
 Define a genuine term of art once, where it first appears, then use it
 consistently. Specialist terms are fine for a specialist audience. Private terms
 are not.
@@ -205,6 +215,7 @@ are not.
 | We measured 128 exchanges (R-74). | We measured 128 concurrent exchanges on one host. |
 | The user approved D-3 on 2026-11-02, dropping the window design. | We dropped the windowed design because it let a stale record outlive its owner. |
 | The capture found a gap. | Running the example found a bug our tests had missed. |
+| A missed entry showed up only on the Metal box. | A missed entry only showed up on the test machine. |
 
 Also delete words that tell the reader how to feel or that go stale: *simply,
 just, easy, easily, currently, new, soon, under the hood, please*.
@@ -342,6 +353,7 @@ Before submitting any technical prose, run through this list:
 - [ ] Is authored prose free of semicolons, including metadata and examples?
 - [ ] Are limitations stated as facts rather than performed as humility?
 - [ ] Is every internal ID, codename, process name and abstract stand-in noun ("surface", "capture", "satisfied", `R-17`) replaced by the concrete thing or defined at first use?
+- [ ] Is every private name for our own machines and environments ("Metal", "the Metal box", "Lima") replaced by a description of what the machine is, outside code formatting?
 - [ ] Does every measurement or verification claim say what ran, on what, how many times and what was not measured, with no process labels in its place?
 - [ ] Is each limitation a present-tense fact, with a descriptive link to the issue that tracks it and no promise about the future?
 - [ ] Does the page keep to one document type, with "you" and imperative steps in docs and "we" for decisions in blog posts?
