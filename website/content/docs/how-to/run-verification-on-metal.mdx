@@ -43,6 +43,63 @@ when the remote binding and source marker match the current checkout's exact
 commit, workspace, and source digest. A mismatch refuses before START.
 Source transfer preserves this checkout's `target/` directory.
 
+## Declare where a test runs
+
+To place a test, declare its placement in the same commit that adds or renames
+it.
+
+1. Import the macro you use from `overdrive_testing`:
+   `use overdrive_testing::overdrive_test;` for the per-test attribute,
+   and `placement`, `shared_guest` or `overdrive_test_default` for the
+   module and binary forms.
+2. Choose a form from [the placement forms](#reference-placement-forms) and write the
+   attribute above `#[test]`, `#[tokio::test]` and `#[should_panic]`.
+3. To confirm every test is placed, run `cargo xtask placement-lint`. The
+   pre-push hook runs it for you, on Metal when `.env` sets
+   `OVERDRIVE_METAL_TARGET` and in Lima otherwise. To run it yourself on Metal,
+   use:
+
+   ```bash
+   cargo xtask metal run -- cargo xtask placement-lint
+   ```
+
+   On Linux, run `cargo xtask placement-lint` directly.
+
+The lint lists tests with `integration-tests` and each member's own `kvm-tests`
+feature. It reports each unplaced test, each conflicting binary, and each lane
+test (a test that runs as one side of an in-guest fixture) whose fixture does
+not exist. It reads ELF binaries, so it runs on Linux or
+through Metal. The CI workflow runs it too when someone starts that workflow by
+hand.
+
+## Reference: placement forms
+
+A group is one of the guest environments the repository defines. A profile is a
+named variant of a group that stages extra files, modules or memory. A test that
+names no profile gets its group's base profile. A lane is a two-sided in-guest
+fixture: the in-guest test, and its operator- or owner-side host driver.
+
+| Declaration | Places |
+| --- | --- |
+| `#[overdrive_test(host_pure)]` | That test, on the host chain, with no guest |
+| `#[overdrive_test(native_launcher)]` | That test, in a node view: a private network, mount and cgroup namespace set. Use it only for tests of the Metal runner itself |
+| `#[overdrive_test(guest = "cgroup-default")]` | That test, in its own fresh guest. Add `profile = "<profile>"` to select a variant of the group |
+| `#[overdrive_test(lane_operator = "<fixture>")]` | That test, as the operator side of an in-guest lane fixture |
+| `#[overdrive_test(lane_owner = "<fixture>", host = <path::to::fn>)]` | That test, as the owner side of a lane fixture. `host` names the scripted host peer: a function that plays the node against the guest and returns the first step that failed |
+| `placement!(host_pure)` | Every test of exactly that module. A child module does not inherit it |
+| `overdrive_test_default!(host_pure)` | Every unplaced test of a host-only test binary |
+
+A test's own declaration wins over its module's, which wins over the binary
+default. A binary with `overdrive_test_default!` and any guest, lane, or native
+placement refuses as `placement_conflict`. An unknown group or profile is a
+build error that names the value. Guest groups and profiles come from a closed
+registry of 22 environments over eight groups, defined in
+`crates/overdrive-testing/src/placement/groups.rs`. Adding one is a code change.
+
+The macro writes the placement into the `overdrive_test_placement` section of
+the test binary, and the Metal wrapper reads it. Off a Metal run, a guest-placed
+test runs its body in the current process.
+
 ## Let nextest own test selection and results
 
 Run nextest through the ordinary entry point:
@@ -57,10 +114,10 @@ exact nextest test identity:
 
 | Placement | Execution boundary |
 | --- | --- |
-| Host-pure | Original host execution chain, without a guest dependency |
+| Host-pure | The host chain, with no guest |
 | Native launcher | Physical x86_64/KVM launcher in a private node view: a network namespace in vsock `local` mode, a mount namespace with its own bpffs and tmpfs over `/run/overdrive` and `/run/netns`, and a cgroup namespace rooted at a per-run cgroup with its own cgroup2 mount |
-| Guest group | Selected test binary in a fresh instance of its declared disposable guest group |
-| Guest-lane operator or owner | Existing first-level guest fixture and its matching host script |
+| Guest group | Selected test binary in a fresh instance of its declared disposable guest group, booted for each attempt unless the module shares a guest |
+| Guest-lane operator or owner | The named in-guest fixture, and for an owner its declared host script |
 
 A missing, conflicting, or malformed placement refuses before the selected body
 runs, and `cargo xtask placement-lint` reports an unplaced test before any run.
@@ -72,14 +129,21 @@ selected body runs.
 Nextest keeps control of filters, profiles, ignored policy, retries, reports,
 and aggregate status. The guest adapter stages the actual selected binary and
 reported helper executables. It forwards libtest arguments, the supported test
-environment, and nextest attempt metadata. Every guest retry gets a fresh
+environment, and nextest attempt metadata. Every guest retry boots a fresh
 instance of the same declared group. A selected body returning 255 fails its
 attempt, and nextest returns its own aggregate failure status, 100.
 
 A module can share one guest between its tests by declaring
-`shared_guest!(guest = "<group>")` and marking its tests with a bare
-`#[overdrive_test]`. An ordinary nextest run of that module boots one guest, and
-each test still reports its own result:
+`shared_guest!(guest = "<group>")` once and marking its tests with a bare
+`#[overdrive_test]`. A test in that module that names its own placement keeps
+that placement. An ordinary nextest run of that module boots one guest, and
+each test still reports its own result. Tests that share a guest share its
+kernel, cgroup tree, nft tables, and `/tmp`, and the guest runs one test at a
+time.
+Each test in a shared guest must finish within its profile's exec bound: 300
+seconds, 600 seconds for profiles whose name starts with `nested` and for the
+`nested-boundary` group, and 1,200 seconds for `nested-cohort`. A test that can
+run longer cannot live in a shared module and takes an explicit `guest = "<group>"`.
 
 ```bash
 cargo xtask metal run -- cargo nextest run -p overdrive-testing --features integration-tests,kvm-tests -E 'test(/^integration::shared_guest_fixtures::shared_module::/)'

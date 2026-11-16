@@ -1237,7 +1237,7 @@ No change adds a deferral or a scope limitation, so no tracking issue is propose
 
 ## Wave: DELIVER / [REF] Implementation summary
 
-Placement of every Metal integration test is declared on the test: `#[overdrive_test(...)]` (host_pure, native_launcher, guest with an optional profile, lane_operator, lane_owner with its host script, and the argument-free form inside a `shared_guest!` module), `placement!(host_pure)` per module and `overdrive_test_default!(host_pure)` per host-only binary. The declarations are written as records into the `overdrive_test_placement` ELF section; the Metal wrapper reads them, and `cargo xtask placement-lint` runs the wrapper's reader over the workspace listing in pre-push. All 4,642 table entries moved onto their tests in six scripted batches with per-test parity checks. `infra/metal/test-placement.json`, the wrapper's table lookup, the fwd guest-suite dispatcher, its environment keys and the name-keyed lane slot table are deleted. The decisions taken during delivery are listed in `## Wave: DELIVER / [WHY] Upstream Issues` above.
+Placement of every Metal integration test is declared on the test: `#[overdrive_test(...)]` (host_pure, native_launcher, guest with an optional profile, lane_operator, lane_owner with its host script, and the argument-free form inside a `shared_guest!` module), `placement!(host_pure)` per module and `overdrive_test_default!(host_pure)` per host-only binary. The declarations are written as records into the `overdrive_test_placement` ELF section; the Metal wrapper reads them, and `cargo xtask placement-lint` runs the wrapper's reader over the workspace listing in pre-push. The table's 4,680 entries at the start of the change were moved onto their tests in six scripted batches with per-test parity checks, apart from the entries naming tests that no longer existed, which were deleted. `infra/metal/test-placement.json`, the wrapper's table lookup, the fwd guest-suite dispatcher, its environment keys and the name-keyed lane slot table are deleted. The decisions taken during delivery are listed in `## Wave: DELIVER / [WHY] Upstream Issues` above.
 
 ## Wave: DELIVER / [REF] Quality gates
 
@@ -1249,7 +1249,7 @@ Placement of every Metal integration test is declared on the test: `#[overdrive_
 | `placement-lint`, `conformance-lint`, workspace clippy `-D warnings` | clean on the rebased branch |
 | Full-workspace Metal comparison against `main` | see below |
 
-**Full-workspace comparison (2026-11-16).** `cargo xtask metal run -- cargo nextest run --workspace --features integration-tests,kvm-tests --no-fail-fast` on this branch at `06e50caf1` (Metal run `c389d468c90cab793d1591e5`) and on its merge base with `main` at `52268fd5c`, plus `-p overdrive-bpf --features overdrive-bpf/integration-tests` on both, compared by test name.
+**Full-workspace comparison (2026-11-16).** Taken at `06e50caf1`, before the last review fix (`placement-lint` running the wrapper's reader, whose xtask suite passed 428 of 428 afterwards). `cargo xtask metal run -- cargo nextest run --workspace --features integration-tests,kvm-tests --no-fail-fast` on this branch at `06e50caf1` (Metal run `c389d468c90cab793d1591e5`) and on its merge base with `main` at `52268fd5c`, plus `-p overdrive-bpf --features overdrive-bpf/integration-tests` on both, compared by test name.
 
 | Side | Tests | Passed | Failed | Skipped |
 |---|---|---|---|---|

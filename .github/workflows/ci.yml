@@ -449,9 +449,9 @@ jobs:
                         -E "binary(integration) | (package(overdrive-host) & kind(lib) & test(/launch_seccomp_kernel/)) | (package(overdrive-control-plane) & kind(lib) & test(/offload_read_failure_propagation/))"'
 
       - name: cargo xtask placement-lint
-        # Every listed test is placed by its own record, its module's, its
-        # binary's or (until the table retires) a table entry. Reads the ELF
-        # section of the test binaries, so it runs where the nextest step does.
+        # Every listed test is placed by its own record, its module's or its
+        # binary's. Reads the ELF section of the test binaries through the
+        # Metal wrapper's reader, so it runs where the nextest step does.
         run: |
           limactl shell overdrive env \
             "RUSTC_WRAPPER=${RUSTC_WRAPPER:-}" \
