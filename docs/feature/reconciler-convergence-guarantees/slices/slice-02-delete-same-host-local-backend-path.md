@@ -1,10 +1,10 @@
 # Slice 02 — delete-same-host-local-backend-path
 
-Decisions: D-9 (ADR-0283), D-10 and D-11 (ADR-0284), D-13 (persisted route tag). Persona: Ana. Job: J-OPS-003. Order: first in DELIVER (it depends on nothing).
+Decisions: D-9 (ADR-0297), D-10 and D-11 (ADR-0298), D-13 (persisted route tag). Persona: Ana. Job: J-OPS-003. Order: first in DELIVER (it depends on nothing).
 
 ## Goal
 
-The ADR-0053 same-host local-backend path is deleted. It has no production producer (ADR-0283), so
+The ADR-0053 same-host local-backend path is deleted. It has no production producer (ADR-0297), so
 its latch (`last_applied_local_fingerprint`) goes with it. The remote service path and the public
 ingress gateway are unchanged.
 
@@ -46,11 +46,26 @@ ingress gateway are unchanged.
   unconnected_udp_reply_hardening,deregister_retry_safety,local_backend_proto_connect}.rs` and
   `overdrive-control-plane/tests/integration/deregister_local_backend_dispatch.rs`, with their entries in
   `tests/integration.rs`.
-- The verifier baselines of the three deleted programs and every test, tooling and placement
-  entry that names a deleted item (`perf-baseline/`, `.config/nextest.toml`, `.cargo/mutants.toml`,
-  `crates/overdrive-testing/bin/fwd_guest_suite.rs`, `infra/metal/test-placement.json`, comments in
-  `overdrive-dataplane/bin/verifier_budget.rs`): found by the AC5 grep. `test-placement.json` is
-  hand-maintained and no gate flags a stale entry, so the grep is the only check.
+- The verifier baselines of the three deleted programs and every test and tooling entry that names a
+  deleted item (`perf-baseline/`, `.config/nextest.toml`, `.cargo/mutants.toml`, comments in
+  `overdrive-dataplane/bin/verifier_budget.rs`): found by the AC5 grep. In `.config/nextest.toml` the
+  `host-kernel-shared` override filter (~:408-421) names four deleted dataplane tests
+  (`unconnected_udp_roundtrip`, `unconnected_udp_reply_hardening`, `deregister_retry_safety`,
+  `local_backend_proto_connect`): remove those four `test(...)` terms and keep the rest of the filter.
+- Placement: a test declares its placement on itself (`#[overdrive_test(...)]`, `placement!(...)`,
+  `shared_guest!(...)`), so deleting a test file deletes its placement declaration. There is no
+  placement inventory (`infra/metal/test-placement.json` and `fwd_guest_suite.rs` no longer exist), and
+  `cargo xtask placement-lint` (pre-push and CI) covers completeness of what remains. Checked by grep at
+  design time: the deleted files place their tests with per-test `#[overdrive_test(guest = "mtls-relay")]`
+  (the four dataplane files) and `#[overdrive_test(guest = "cgroup-default")]`
+  (`deregister_local_backend_dispatch.rs`), and none uses `shared_guest!`, `placement!` or
+  `overdrive_test_default!`. No guest group is therefore left without a user in the group registry
+  (`crates/overdrive-testing/src/placement/groups.rs`, a closed registry that names no test): `mtls-relay`
+  stays used by `public_ingress_gateway_hook.rs` and `cgroup-default` by
+  `overdrive-testing/tests/integration/shared_guest_fixtures.rs`, and the registry does not change.
+  `reconcile_output_validator.rs` and `reconcile_conflict_observation.rs` carry `placement!(host_pure)`
+  and `mesh_backend_lb_gate.rs` carries `overdrive_test_default!(host_pure)`; those edits keep their
+  declarations.
 
 ### Mixed: edit, do not delete (cover both a deleted and a kept path)
 
@@ -72,7 +87,7 @@ the AC5 grep.
 - `overdrive-sim/src/invariants/service_map_hydrator.rs` and `invariants/mod.rs`: remove the local-arm
   handling and the `reply_source_rewrite_lockstep` registration; the remote-path hydrator invariants stay.
 
-### ADR-0164 datagram clause and startup check (D-10, ADR-0284)
+### ADR-0164 datagram clause and startup check (D-10, ADR-0298)
 
 - The owner's cgroup-placement startup check, in `overdrive-control-plane`: the
   `OwnerCgroupPlacement` error and the startup probe branch that raises it (`guest_network.rs`), the
@@ -83,7 +98,7 @@ the AC5 grep.
   the VIP branch that skips the route-type check and sends through an unmarked socket, the VIP term of
   the egress-mark decision (it reduces to the `gateway:53` exemption alone), and the kernel-peer check
   after the connect, which only caught a `connect4` rewrite into the guest prefix, so it is redundant
-  with the static destination policy once nothing rewrites (ADR-0284 records why no remaining program
+  with the static destination policy once nothing rewrites (ADR-0298 records why no remaining program
   can rewrite an owner socket), with the `GuestFlowIo::peer_addr` port method and its impls if no other
   caller exists. `OwnerRuntime.vip_range` and its constructor parameter STAY: the refusal below reads
   them. The ports' `vip_range` stays too: the boot overlap check and the TCP VIP branch (D24a) read it.
@@ -92,7 +107,7 @@ the AC5 grep.
 - Stale comments to correct, not delete: the UDP-skips-VIP-branch wording in
   `mtls_resolve_adapter.rs`. UDP still skips that arm; the reason is no longer a `connect4` rewrite.
 
-### The one added behaviour (D-11, ADR-0284)
+### The one added behaviour (D-11, ADR-0298)
 
 A guest UDP datagram whose destination is in the configured VIP ranges is refused with the existing
 `FlowRefusal::Policy` before any host socket is created or connected, until GH #310 delivers guest UDP
@@ -120,7 +135,7 @@ coverage must not be lost with the deleted probes: a failed gateway attach still
 
 The owner's placement check is not part of this dependency. It only reads the owner's cgroup path
 and returns an error; it opens, attaches and probes nothing, and the gateway's attach does not consult
-it (ADR-0284).
+it (ADR-0298).
 
 ## Acceptance criteria
 
@@ -133,7 +148,7 @@ it (ADR-0284).
 - AC4 The hydrator's remaining behaviour (remote partition, retry memory) is unchanged. The mutation
   gate applies to the touched hydrator logic only; pure deletions have nothing to mutate.
 - AC5 No reference to the deleted names remains in `crates/`, `.config/nextest.toml`,
-  `.cargo/mutants.toml`, `infra/metal/test-placement.json` or `perf-baseline/`, except history in Git.
+  `.cargo/mutants.toml` or `perf-baseline/`, except history in Git.
   The existing `reconcile_conflict_row` V1 golden fixture
   (`crates/overdrive-core/tests/schema_evolution/reconcile_conflict_row.rs`, which uses `Xdp`) still
   decodes unchanged, unedited; that proves removing `Cgroup` (D-13) did not shift `Xdp`'s archived
@@ -150,7 +165,7 @@ it (ADR-0284).
 
 ## Evidence (not coverage)
 
-Metal observation of the never-working datagram clause: ADR-0284 § Context. It covers no property;
+Metal observation of the never-working datagram clause: ADR-0298 § Context. It covers no property;
 the deleted tests are not replaced by it.
 
 ## Dependencies
@@ -180,5 +195,5 @@ behaviour of the paths that are reached (AC1), not by exercising the removed pat
   `Service connect4` container), and the journeys
   `docs/product/journeys/reach-an-unconnected-udp-service.yaml` and `submit-a-udp-service.yaml`
   (they describe the unconnected-UDP path through `sendmsg4` / `recvmsg4`). Accepted ADRs are
-  immutable and are not edited; ADR-0283 lists the ones that mention the path and supersedes it.
+  immutable and are not edited; ADR-0297 lists the ones that mention the path and supersedes it.
 - Website: `website/content/blog/what-is-ebpf.mdx` mentions the path (2 hits); review at FINALIZE.

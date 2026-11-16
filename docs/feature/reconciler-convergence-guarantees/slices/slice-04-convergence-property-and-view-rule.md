@@ -17,7 +17,7 @@ Every registered reconciler runs under one shared multi-tick property from arbit
 - Correct the false hydrator DST claim ("any combination of BPF map state", `invariants/service_map_hydrator.rs:9`, `invariants/mod.rs:453`).
 - US-06 rule text per D9 in `reconcilers.md`, replacing the fingerprint-shaped symptom. The rule names no exception.
 - Correct the `release_service_vip.rs` doc comment that says errors are absorbed; the executor returns `ShimError::AllocatorRelease`.
-- DISTILL authors full test bodies; scenarios for later steps stay as reasoned `#[ignore = "pending DELIVER ..."]`.
+- DISTILL authors full test bodies; a scenario for a later step is marked pending with `#[should_panic(expected = "<its semantic RED>")]` (`testing.md` § "RED acceptance scaffolds and activation"); DISTILL names the semantic RED per scenario. `#[ignore]` is only for a genuinely missing external resource.
 
 ## OUT
 

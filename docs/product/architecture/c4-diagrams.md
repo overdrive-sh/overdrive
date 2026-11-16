@@ -57,7 +57,7 @@ C4Container
     Rel(lint, tests, "Reads the records of every listed test in")
     Rel(prepare, owner, "Builds")
 
-## Reconciler convergence guarantees (GH #351, PROPOSED, ADR-0282)
+## Reconciler convergence guarantees (GH #351, PROPOSED, ADR-0296)
 
 **Proposed; not accepted.** L1 and L2 are unchanged. This L3 shows the control-plane
 convergence subsystem with the proposed resync pass.
@@ -950,7 +950,7 @@ Five properties the diagram makes explicit:
 
 ## Unconnected-UDP sendmsg4 + recvmsg4 (GH #200, ADR-0053 rev 2026-06-05)
 
-> **Superseded (ADR-0283, 2026-11-15).** The same-host local-backend path
+> **Superseded (ADR-0297, 2026-11-15).** The same-host local-backend path
 > shown in this section (connect4/sendmsg4/recvmsg4 service hooks,
 > `LOCAL_BACKEND_MAP`, `REVERSE_LOCAL_MAP`) is removed. The diagram below is
 > historical.
@@ -2082,7 +2082,7 @@ C4Component
 
   Container_Boundary(dp, "dataplane / mTLS owners") {
     Component(prep, "Upstream socket preparation", "EbpfDataplane", "Creates the socket in the serve task, marks it, binds 127.0.0.1, reads SO_COOKIE and registers (cookie, ServiceKey)")
-    Component(registry, "Gateway Connect Registry + gateway selection cgroup/connect4 program", "EbpfDataplane + BPF (separate gateway program; the cgroup_connect4_service it sat beside is removed, ADR-0283)", "Registered sockets select via Maglev (BACKEND_MAP.healthy is not read) and record Selected BackendId or NoBackend")
+    Component(registry, "Gateway Connect Registry + gateway selection cgroup/connect4 program", "EbpfDataplane + BPF (separate gateway program; the cgroup_connect4_service it sat beside is removed, ADR-0297)", "Registered sockets select via Maglev (BACKEND_MAP.healthy is not read) and record Selected BackendId or NoBackend")
     Component(assoc, "Service-map commit guard + Applied Backend Identity", "EbpfDataplane", "Outer-map commit publishes selection before the immutable BackendId-to-applied-Backend.alloc becomes readable")
     Component(slot, "Gateway Identity Slot + ClientIdentityAccess", "dedicated holder/capability", "Owns desired epoch + audited SVID + the process-local issuance-failure record the owner projects onto the status row (ADR-0274); only crate-private clock-checked client use may borrow material")
     Component(gmtls, "HostGatewayClientMtls", "rustls client", "Presents leaf+intermediate, roots at the bundle anchor, pins the exact selected SPIFFE peer, then arms kernel TLS through the relay")

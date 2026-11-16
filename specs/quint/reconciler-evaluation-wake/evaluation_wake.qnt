@@ -1,6 +1,6 @@
 // -*- mode: Bluespec; -*-
 /**
- * Reconciler evaluation wake (reconciler-convergence-guarantees): D-1 / ADR-0282 (every reconciler declares its
+ * Reconciler evaluation wake (reconciler-convergence-guarantees): D-1 / ADR-0296 (every reconciler declares its
  * managed targets; the runtime re-evaluates them every period) and D-3 (ServiceMapHydrator::next_evaluation_at).
  *
  * ABSTRACTION. Three evaluation keys (reconciler, target):

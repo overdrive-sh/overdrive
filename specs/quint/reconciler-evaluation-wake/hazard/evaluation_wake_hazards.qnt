@@ -2,7 +2,7 @@
 // Teeth for ../evaluation_wake.qnt: each instance is the approved rule with ONE decision switched off (OFF).
 // Expected verdicts are in ../checks.toml.
 
-// D-1: the resync pass is removed. Dropped wakes are disabled so the wedge is the one ADR-0282 names: a hydrate
+// D-1: the resync pass is removed. Dropped wakes are disabled so the wedge is the one ADR-0296 names: a hydrate
 // error, a persist error, a dispatch error or a crash ends an evaluation and nothing else re-submits the key.
 module wake_noPass {
   import evaluation_wake(OFF = Set("noPass"), FAULTS = Set("hydrateErr", "persistErr", "dispatchErr"), DROPS = false, REC = false).* from "../evaluation_wake"

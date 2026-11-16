@@ -1185,7 +1185,7 @@ the guest gateway (ADR-0174).
 (ADR-0153, ADR-0164); non-mesh destinations are kernel-forwarded directly
 (ADR-0162); guest TCP to a VIP is mesh-resolved (ADR-0164 D24a); guest UDP
 to a VIP is unsupported until
-[#310](https://github.com/overdrive-sh/overdrive/issues/310) (ADR-0284
+[#310](https://github.com/overdrive-sh/overdrive/issues/310) (ADR-0298
 supersedes ADR-0164's datagram clause and its owner-cgroup startup check).
 Host-internal destinations are refused
 `HostInternal`, checked by the owner and enforced by a constant output rule
@@ -1246,7 +1246,7 @@ connection-pump scaling ([#300](https://github.com/overdrive-sh/overdrive/issues
 [ADR-0161](adr-0161-vendored-cloud-hypervisor-fork-is-built-pinned-and-provisioned-as-a-checksummed-release.md),
 [ADR-0162](adr-0162-non-mesh-guest-egress-is-kernel-forwarded-to-its-destination.md),
 [ADR-0164](adr-0164-guest-vip-tcp-resolves-as-mesh-and-datagrams-use-the-connect4-rewrite.md)
-(TCP-as-mesh decision D24a stands; its datagram clause and startup check are superseded by ADR-0284),
+(TCP-as-mesh decision D24a stands; its datagram clause and startup check are superseded by ADR-0298),
 [ADR-0166](adr-0166-flow-control-messages-travel-on-a-dedicated-per-vm-control-session.md),
 [ADR-0167](adr-0167-guest-flows-to-host-internal-destinations-are-refused.md),
 [ADR-0169](adr-0169-forwarding-quiescence-is-a-counted-move-only-hold.md),
@@ -3543,7 +3543,7 @@ flowchart LR
 
 ### 35a. Canonical-workload-address inbound TPROXY production install (#241, ADR-0071 + ADR-0053 amendments 2026-06-22)
 
-> **Superseded in part (ADR-0283, 2026-11-15).** ADR-0053 and its same-host
+> **Superseded in part (ADR-0297, 2026-11-15).** ADR-0053 and its same-host
 > local-backend path (`cgroup_connect4_service`, `LOCAL_BACKEND_MAP`, the GATE
 > arm below) are removed: no production path produces a local backend. The
 > text below is the historical record of the 2026-06-22 design.
@@ -3906,7 +3906,7 @@ alternatives: **ADR-0072**; `docs/feature/dial-by-name-responder/feature-delta.m
 > returned WORKS.** The user ratified shifting the answered address from a
 > *volatile per-instance backend addr* (the headless-v1 contract described below)
 > to a **stable per-`<job>` frontend addr** while the already-live dataplane
-> (nft-TPROXY + per-connection `MtlsResolve`, ADR-0071; ADR-0053 since superseded by ADR-0283) owns backend
+> (nft-TPROXY + per-connection `MtlsResolve`, ADR-0071; ADR-0053 since superseded by ADR-0297) owns backend
 > churn — the **ClusterIP split**. DNS answers a stable address; the dataplane
 > translates frontend → current live backend and enforces SPIFFE mTLS. This
 > **supersedes the "headless / answer-the-backend-addr / NO VIP" contract below**
@@ -6753,7 +6753,7 @@ ip/port only).
 
 ## Unconnected-UDP sendmsg4 extension (GH #200, ADR-0053 rev 2026-06-05)
 
-> **Superseded (ADR-0283, 2026-11-15).** The whole same-host local-backend
+> **Superseded (ADR-0297, 2026-11-15).** The whole same-host local-backend
 > path is removed, including `cgroup_sendmsg4_service`,
 > `cgroup_recvmsg4_service`, `LOCAL_BACKEND_MAP` and `REVERSE_LOCAL_MAP`.
 > Same-host UDP service delivery to VM workloads is
@@ -11333,7 +11333,7 @@ verified on native metal kernel 7.0 by
 The dataplane adapter prepares each gateway upstream socket in the `serve`
 task (mark `0x1`, `127.0.0.1` bind per ADR-0190, cookie registered as a
 `(cookie, ServiceKey)` intent). A separate `cgroup/connect4` selection program
-(ruling P-10 / R-1 attached it beside `cgroup_connect4_service`, which ADR-0283 removes; the gateway program is unaffected) selects
+(ruling P-10 / R-1 attached it beside `cgroup_connect4_service`, which ADR-0297 removes; the gateway program is unaffected) selects
 through the Maglev inner map, rewrites the
 destination and records `Selected(BackendId)` or `NoBackend`. The dial leaves
 via table 100, is TPROXY-diverted to leg-C, which terminates mTLS, arms kTLS
@@ -11565,7 +11565,7 @@ poll of `listeners[0]` passes. On acceptance it supersedes the operative
 
 Contract: [feature delta](../../feature/service-allocation-readiness-and-ending/feature-delta.md).
 
-## Reconciler convergence guarantees extension (GH #351; ADR-0282/0283, PROPOSED)
+## Reconciler convergence guarantees extension (GH #351; ADR-0296/0283, PROPOSED)
 
 Application Architecture addendum. Status: **proposed**; the user approved decisions D-1
 and D-9 of the feature delta, independent design review is pending. See the
@@ -11573,14 +11573,14 @@ and D-9 of the feature delta, independent design review is pending. See the
 Topology (L1, L2) is unchanged; the change is inside the control-plane convergence
 subsystem and the hydration boundary (see `c4-diagrams.md`, L3, proposed).
 
-- [ADR-0282](adr-0282-every-reconciler-declares-its-managed-targets-and-the-runtime-re-evaluates-them-each-period.md):
+- [ADR-0296](adr-0296-every-reconciler-declares-its-managed-targets-and-the-runtime-re-evaluates-them-each-period.md):
   every reconciler declares its managed targets; the runtime re-evaluates them every
   period. Supersedes in part ADR-0084 (`resync_schedule`, router periodic relist) once
   accepted. `interests()` stays as the edge wake.
-- [ADR-0283](adr-0283-the-same-host-local-backend-path-is-removed.md):
+- [ADR-0297](adr-0297-the-same-host-local-backend-path-is-removed.md):
   the same-host local-backend path (ADR-0053) is removed; it has no production producer.
   Supersedes ADR-0053.
-- [ADR-0284](adr-0284-guest-udp-to-a-service-vip-is-refused-until-gh-310.md):
+- [ADR-0298](adr-0298-guest-udp-to-a-service-vip-is-refused-until-gh-310.md):
   guest UDP to a service VIP is refused `Policy` until GH #310. Supersedes ADR-0164's
   datagram clause and startup check.
 - Proposed rule (D9): a View decides when to act, never whether an effect is in place.
@@ -11592,8 +11592,8 @@ subsystem and the hydration boundary (see `c4-diagrams.md`, L3, proposed).
 
 | Date | Change |
 |---|---|
-| 2026-11-15 | **reconciler-convergence-guarantees: ADR-0283 (the same-host local-backend path is removed, supersedes ADR-0053) and ADR-0284 (guest UDP to a VIP is refused until #310, supersedes ADR-0164's datagram clause).** Both status Proposed; the user approved the decisions (D-9, D-10, D-11). — Morgan. |
-| 2026-11-13 | **reconciler-convergence-guarantees DESIGN proposals (ADR-0282, status Proposed).** User approved D-1 to D-8 on 2026-11-13; independent design review pending. — Morgan. |
+| 2026-11-15 | **reconciler-convergence-guarantees: ADR-0297 (the same-host local-backend path is removed, supersedes ADR-0053) and ADR-0298 (guest UDP to a VIP is refused until #310, supersedes ADR-0164's datagram clause).** Both status Proposed; the user approved the decisions (D-9, D-10, D-11). — Morgan. |
+| 2026-11-13 | **reconciler-convergence-guarantees DESIGN proposals (ADR-0296, status Proposed).** User approved D-1 to D-8 on 2026-11-13; independent design review pending. — Morgan. |
 | 2026-11-09 | **service-allocation-readiness-and-ending full DESIGN review iteration 4 APPROVED:** D13-S1/D17-S1 exact signatures user-approved (“rest is fine”); historical D16-S1 migration withdrawn under the user's explicit greenfield byte waiver. D16-G1 rebaselines only the five affected current envelopes in place, with no historical read promise; this is the bounded direct consequence of the waiver. D15 exit-0 remains `BackoffExhausted` under D6/P-5. ADR-0268–0272 are accepted; DISTILL and roadmap independent reviews remain pending before DELIVER. — Independent reviewer. |
 | 2026-11-09 | **service-allocation-readiness-and-ending: exact D11-E1, D14-A1 and D14-E2 contract amendments user-approved** (“Approve all three exact contracts”). Bounded technical review iteration 2 approved the shapes; the full independent D1–D17 DESIGN review remains pending. ADR-0263 and ADR-0269 link the authoritative feature-delta interface and error mappings. — Morgan. |
 | 2026-11-04 | **service-allocation-readiness-and-ending: round-4 rulings P1, A1, A3 accepted ("proceed with recommendations").** P1: the startup stop gate's attempts threshold comes from the startup descriptor (`max_attempts` for `Tcp`/`Http`, 1 for `GuestListeners`); `ServiceAllocFact.max_attempts` becomes `startup_attempts_required`; guest-listener rows carry honest streaks; explicit probes unchanged (ADR-0269). A1: the board entry is removed at close; "frozen at the end of the wait" is the host reader's rule (ADR-0268). A3: a host-input projection module of `guest_report` is the conformance target. Remaining: `quint-modeler` run (M-3, M-6), review round 4. — Morgan. |

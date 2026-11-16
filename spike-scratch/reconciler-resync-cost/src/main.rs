@@ -885,7 +885,7 @@ async fn run_n(n: usize, samples: usize, data_root: &Path, evidence: &Path) -> V
     let idle_lock: Vec<f64> = probe_out.lock().unwrap().iter().map(|s| s.wait_us).collect();
     settle(&state, &ctl).await;
 
-    // M2 + M3: pass samples. Mode::Baseline = today's router relist + resync_schedule; Mode::Proposed = the ADR-0282 pass
+    // M2 + M3: pass samples. Mode::Baseline = today's router relist + resync_schedule; Mode::Proposed = the ADR-0296 pass
     // (same code as the prior run), interleaved sample by sample as a same-run control.
     let mut pass_json = vec![];
     let mut raw = String::new();

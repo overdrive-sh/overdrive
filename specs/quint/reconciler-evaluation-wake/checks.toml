@@ -11,7 +11,7 @@ main = "wake_full"
 temporal = "ProgressByPass"
 backend = "tlc"
 expect = "holds"
-ci = false
+ci = true
 timeout_secs = 1200
 
 [[check]]

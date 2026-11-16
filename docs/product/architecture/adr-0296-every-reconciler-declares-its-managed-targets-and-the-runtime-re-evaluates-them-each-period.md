@@ -1,4 +1,4 @@
-# ADR-0282 — Every reconciler declares its managed targets and the runtime re-evaluates them each period
+# ADR-0296 — Every reconciler declares its managed targets and the runtime re-evaluates them each period
 
 ## Status
 

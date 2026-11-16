@@ -15,7 +15,7 @@ a separate issue and is cross-referenced, not absorbed.
 - ✓ `docs/product/personas/` (ana-platform-engineer, devon-platform-engineer; marcus persona read, not used)
 - ⊘ `docs/product/vision.md`, `docs/product/architecture/brief.md`, ADR-0035/0036/0079/0084/0086/0087: not re-read in full; consulted through `.claude/rules/reconcilers.md`, `development.md` § "Reconciler I/O" and the verification doc, which cite them. DESIGN reads the ADRs.
 - ✓ Precedent layout: `docs/feature/reconciler-framework-improvements/feature-delta.md`
-- ✓ Live code spot-checked: `reconciler_runtime.rs:1585-1751` (hydrate `?` at 1589-1590 and view persist `?` at 1638-1642 both return before the requeue at 1739; dispatch errors do requeue), `service_map_hydrator.rs:456-488` (fingerprint stored on emit), `workload_lifecycle.rs` (`released_for_deletion` stamped at :247, gate :1531).
+- ✓ Live code spot-checked: `reconciler_runtime.rs:1584-1744` (hydrate `?` at 1588-1589 and view persist `?` at 1638-1641 both return before the requeue at 1732; dispatch errors do requeue), `service_map_hydrator.rs:456-488` (fingerprint stored on emit), `workload_lifecycle.rs` (`released_for_deletion` stamped at :247, gate :1531).
 - ⊘ No journey artifacts (lightweight UX; no new operator surface). No DIVERGE artifacts: recorded as a risk in `wave-decisions` below.
 
 ## Wave: DISCUSS / [REF] Persona
@@ -56,10 +56,10 @@ Only decisions grounded in the verification or ruled by the user in the dispatch
 
 | Defect | Reachable in a real deploy? | Production path |
 |---|---|---|
-| Hydrator local-backend latch | **No; deleted by D-9.** | The hydrator emits `RegisterLocalBackend` only for a backend whose address equals `host_ipv4` (`service_map_hydrator.rs:356-370`). Since ADR-0276 every Service backend address is the Running allocation's `workload_addr`, taken from the guest network plan (`action_shim/mod.rs:1991`, `:2458`) and allocated from `GUEST_NODE_PREFIX` 100.95.0.0/16 (`guest_network.rs:561`, `guest_transport/mod.rs:594`), never `host_ipv4`. Non-VM provisioning was deleted (`fc3bc7d04`). The local set is always empty in a real deploy. |
+| Hydrator local-backend latch | **No; deleted by D-9.** | The hydrator emits `RegisterLocalBackend` only for a backend whose address equals `host_ipv4` (`service_map_hydrator.rs:356-370`). Since ADR-0276 every Service backend address is the Running allocation's `workload_addr`, taken from the guest network plan (`action_shim/mod.rs:1991`, `:2459`) and allocated from `GUEST_NODE_PREFIX` 100.95.0.0/16 (`guest_network.rs:561`, `guest_transport/mod.rs:594`), never `host_ipv4`. Non-VM provisioning was deleted (`fc3bc7d04`). The local set is always empty in a real deploy. |
 | Hydrator un-woken after `Failed` result | Yes | `DataplaneUpdateService` `Err` writes a `Failed` row; next tick inside backoff yields `Noop` with no `next_evaluation_at`; a steady service gets no further backend-row write to wake it. |
-| Hydrate error skips requeue | Yes, rare (store read errors only) | A store read error (`ObservationRead` / `IntentRead`); early `?` at `rt:1589-1590`. `RunningAllocationWithoutWorkloadAddr` (`service_lifecycle.rs:940`) is NOT production-reachable: the shim writes `workload_addr` on every `Running` write from `spec.transport` (`action_shim/mod.rs:1991-1992`, `:2458-2460`), and every production allocation carries a guest transport assignment (ADR-0276; non-VM provisioning deleted, `fc3bc7d04`). It arises only when a test seeds a `Running` row without an address, so it is a Tier 1 stimulus and not a `serve` + `deploy` fault (`development.md` § "Ground the premise"). |
-| View write error skips dispatch and requeue | Yes, rare | `persist_view` redb write failure, early `?` at `rt:1638-1642`. |
+| Hydrate error skips requeue | Yes, rare (store read errors only) | A store read error (`ObservationRead` / `IntentRead`); early `?` at `rt:1588-1589`. `RunningAllocationWithoutWorkloadAddr` (`service_lifecycle.rs:940`) is NOT production-reachable: the shim writes `workload_addr` on every `Running` write from `spec.transport` (`action_shim/mod.rs:1991-1992`, `:2457-2461`), and every production allocation carries a guest transport assignment (ADR-0276; non-VM provisioning deleted, `fc3bc7d04`). It arises only when a test seeds a `Running` row without an address, so it is a Tier 1 stimulus and not a `serve` + `deploy` fault (`development.md` § "Ground the premise"). |
+| View write error skips dispatch and requeue | Yes, rare | `persist_view` redb write failure, early `?` at `rt:1638-1641`. |
 | Fresh deploy with no `alloc_status` row never relisted | Yes, rare | First `workload-lifecycle` hydrate fails; `handlers.rs:521` submitted once; relist routes only `alloc_status` rows; no boot seeding of existing intents. |
 | `workflow-lifecycle` un-woken | No | Empty registry in `serve`. |
 
@@ -119,7 +119,7 @@ Ana Moreno deploys `payments` (Service, VIP 10.96.0.14). The convergence tick fo
 - [ ] AC6: Tier-1 seeded `overdrive-sim` invariant, seed printed on failure, covers the three fault stimuli and the recovery bound.
 
 #### Technical notes
-- The runtime-wide periodic pass changes `reconcilers.md` § "The wakeup model" (a reconciler declares row-backed OR host-backed, "never both") and ADR-0084; reconciled by ADR-0282 (D-1, approved).
+- The runtime-wide periodic pass changes `reconcilers.md` § "The wakeup model" (a reconciler declares row-backed OR host-backed, "never both") and ADR-0084; reconciled by ADR-0296 (D-1, approved).
 - The no-busy-loop rule holds: re-evaluation writes no observation row.
 - Period: 30 s constant (D-2). Enumeration: `managed_targets` (D-1a). Interacts with #270 and #271.
 
@@ -155,7 +155,7 @@ Devon adds a reconciler with a "done" flag in its View. Every existing check is 
 
 #### Technical notes
 - No new sim executor (D-7). The property drives the production `run_convergence_tick` over a sim-composed `AppState`, so hydration, View persist and the real action shim run against `Sim*` ports. The existing `vm_reclamation` `apply_actions` executor is not reused: a hand-written executor re-implements the shim. The hydrator DST fabricates a `Completed` row and its "any combination of BPF state" claim is false; that is the shape D-7 avoids.
-- DISTILL authors the full bodies; scenarios for later slices stay as reasoned `#[ignore = "pending DELIVER ..."]`.
+- DISTILL authors the full bodies; a scenario for a later slice is marked pending with `#[should_panic(expected = "<its semantic RED>")]`, per `testing.md` § "RED acceptance scaffolds and activation". DISTILL names the semantic RED per scenario. `#[ignore]` is only for a genuinely missing external resource.
 - Boundary with #344: this property does not decide read monotonicity.
 
 ### US-06: The rule says what a View may and may not decide @infrastructure
@@ -264,7 +264,7 @@ The ADRs stay `Proposed` and independent design review has not run. The Quint sp
 
 | ID | Verdict | Conditions and changes |
 |---|---|---|
-| D-1 | APPROVED 2026-11-13 | ADR-0282 as proposed, plus: cite #275 (host-edge wakeup, open; a future host watcher submits through the same `submit_evaluation`, the pass is its level-triggered backstop); state that no reconciler can ask for a faster sweep than the global period. Includes the read-only accessor `pending_keys` on `BrokerDrain`. |
+| D-1 | APPROVED 2026-11-13 | ADR-0296 as proposed, plus: cite #275 (host-edge wakeup, open; a future host watcher submits through the same `submit_evaluation`, the pass is its level-triggered backstop); state that no reconciler can ask for a faster sweep than the global period. Includes the read-only accessor `pending_keys` on `BrokerDrain`. |
 | D-2 | APPROVED 2026-11-13 | 30 s stays a compile-time constant; the limitation is tracked by #356 ("Make the reconciler resync period operator-configurable", created by the user). |
 | D-3 | APPROVED 2026-11-13; KEPT 2026-11-15 | The hydrator's `next_evaluation_at` retry deadline stays (removal rejected by the user). |
 | D-5 | APPROVED 2026-11-13 | The `release_service_vip` executor doc fix stays (slice 04). Replacing `released_for_deletion` and the seeded reproduction of the possible VIP leak move to #211. This feature does not wait on #211. |
@@ -272,18 +272,18 @@ The ADRs stay `Proposed` and independent design review has not run. The Quint sp
 | D-6 | option (a) APPROVED 2026-11-13 | No change to `service-lifecycle` (see "D-6"). |
 | D-1a-i | APPROVED 2026-11-15, option A | See "D-1a-i" under the interface contract. |
 | D-8 (target) | CONFIRMED 2026-11-15 | `workflow-lifecycle`'s managed target is the single target `workflow/all`, returned only when a workflow instance exists (empty in production today). |
-| D-11 (wording) | RULED 2026-11-15 | ADR-0284's Context states the actual fact about the existing route check (GH #358 records the colliding VIP); the `Policy` refusal stays for all VIP-range destinations. |
+| D-11 (wording) | RULED 2026-11-15 | ADR-0298's Context states the actual fact about the existing route check (GH #358 records the colliding VIP); the `Policy` refusal stays for all VIP-range destinations. |
 | Model check `PendingIsAdmitted` | DROPPED 2026-11-15 (user ruling) | Removed from the Formal protocol model and the validation budget; the modeler removes it from the spec. `edge_wake_during_burst_is_admitted_after_burst` stays. |
-| D-9 | APPROVED 2026-11-15 | Delete the ADR-0053 same-host local-backend path (ADR-0283, which supersedes ADR-0053). It becomes slice 02, scheduled first in DELIVER. The user delegated the placement. Re-confirmed the same day for the whole path, including `cgroup_connect4_service`, `LOCAL_BACKEND_MAP`, ADR-0164's datagram clause and the owner's cgroup-placement check, after weighing the alternative of keeping the connect4/datagram pieces for #310. Reason: `ovd_fwd` forwarding between a connected host UDP socket and a vsock stream is independent of the connect4 rewrite; with `LOCAL_BACKEND_MAP` always empty the hook is a pass-through for every owner connect today; #310 designs its own destination selection. |
-| D-10 | APPROVED 2026-11-15 | ADR-0164's datagram clause and its startup check are superseded (ADR-0284). ADR-0164's TCP-as-mesh decision (D24a) stays. Guest UDP to a VIP is unsupported until GH #310. |
-| D-11 | APPROVED 2026-11-15 (option B) | A guest UDP datagram to a VIP-range destination is refused with the existing `FlowRefusal::Policy` until GH #310 (ADR-0284). No new refusal variant, port or wire surface. The user did not ask for a Tier-3 observable for it. |
+| D-9 | APPROVED 2026-11-15 | Delete the ADR-0053 same-host local-backend path (ADR-0297, which supersedes ADR-0053). It becomes slice 02, scheduled first in DELIVER. The user delegated the placement. Re-confirmed the same day for the whole path, including `cgroup_connect4_service`, `LOCAL_BACKEND_MAP`, ADR-0164's datagram clause and the owner's cgroup-placement check, after weighing the alternative of keeping the connect4/datagram pieces for #310. Reason: `ovd_fwd` forwarding between a connected host UDP socket and a vsock stream is independent of the connect4 rewrite; with `LOCAL_BACKEND_MAP` always empty the hook is a pass-through for every owner connect today; #310 designs its own destination selection. |
+| D-10 | APPROVED 2026-11-15 | ADR-0164's datagram clause and its startup check are superseded (ADR-0298). ADR-0164's TCP-as-mesh decision (D24a) stays. Guest UDP to a VIP is unsupported until GH #310. |
+| D-11 | APPROVED 2026-11-15 (option B) | A guest UDP datagram to a VIP-range destination is refused with the existing `FlowRefusal::Policy` until GH #310 (ADR-0298). No new refusal variant, port or wire surface. The user did not ask for a Tier-3 observable for it. |
 | D-12 | APPROVED 2026-11-15 | The Quint modeler's gaps in the spec, pinned as interface contracts: see "Conformance pins (D-12)". Two items change surface: a per-reconciler resync step as a crate-private driving port, and an ordering clause on `pending_keys`. |
-| Router wakes | RULED 2026-11-15 | The interest router's boot LIST and `Lagged` relist stay (already ADR-0282 decision 4). ADR-0282's alternatives table records the rejection of removing them. |
-| V-3 | RUN 2026-11-15 (proven fact) | See V-3. |
+| Router wakes | RULED 2026-11-15 | The interest router's boot LIST and `Lagged` relist stay (already ADR-0296 decision 4). ADR-0296's alternatives table records the rejection of removing them. |
+| V-3 | RUN 2026-11-15 | A cost measurement against the baseline; it records a measured property and does not choose a mechanism. See V-3. |
 | Slice 01 Tier-3 `persist_view` scenario | DROPPED 2026-11-16 (user ruling) | All three slice 01 faults are covered at Tier 1 through the existing `Sim*` port seams. Reasons: it was agent-added, not user-requested; redb 2.6.3 poisons a `Database` permanently after a failed commit (`StorageError::PreviousIo` until reopen) and `RedbViewStore` never reopens, so a real disk error never recovers and the scenario's oracle cannot hold (tracked by #360); and the feature changes only the runtime's response to a persist error, which the Sim seam exercises. |
 | D-13 | APPROVED 2026-11-15 (option A) | See "D-13". |
 
-Decision records: D-1, D-2 → ADR-0282; D-9 → ADR-0283; D-10, D-11 → ADR-0284; D-3, D-5 to D-8, D-12, D-13 → this delta.
+Decision records: D-1, D-2 → ADR-0296; D-9 → ADR-0297; D-10, D-11 → ADR-0298; D-3, D-5 to D-8, D-12, D-13 → this delta.
 
 ## Wave: DESIGN / [REF] Domain model (DDD list)
 
@@ -292,7 +292,7 @@ Decision records: D-1, D-2 → ADR-0282; D-9 → ADR-0283; D-10, D-11 → ADR-02
 | Managed target set | The targets for which one reconciler has desired or actual state, in its own target shape, enumerated from intent and observation. |
 | Resync pass | One runtime sweep that submits an `Immediate` evaluation for every managed target of every registered reconciler. It is a level wake. |
 | Edge wake | A submit caused by a change: an accepted observation row (`interests()`), `EnqueueEvaluation`, a client request, a self-requeue. |
-| Evaluation outcome | `ok`, or an error ending the evaluation at hydrate, persist or dispatch. Retry rule: ADR-0282 decision 3. |
+| Evaluation outcome | `ok`, or an error ending the evaluation at hydrate, persist or dispatch. Retry rule: ADR-0296 decision 3. |
 | Pacing input | A View field that decides only when to act again: attempts and last attempt time, or a marker keyed to an observed input (the probe row's `run_seq`). It never decides whether an effect is in place. |
 
 No new aggregates, bounded contexts, events or read-ports.
@@ -308,7 +308,7 @@ No new aggregates, bounded contexts, events or read-ports.
 | Interest router | `overdrive-control-plane` | EXTEND by deletion: periodic arm and its two parameters go | edge wakes from rows |
 | `ServiceLifecycle` | `overdrive-reconcilers` | EXTEND: `managed_targets` only (D-6) | the probe-driven stop decision |
 | `ServiceMapHydrator` | `overdrive-reconcilers` | EXTEND: `managed_targets`, `next_evaluation_at` over the remote `retries` map; local partition and fingerprint DELETED (D-9) | the remote service-map effect |
-| The same-host local-backend path (inventory in slice 02) | `overdrive-bpf`, `overdrive-dataplane`, `overdrive-core`, `overdrive-control-plane`, `overdrive-reconcilers`, `overdrive-sim` | DELETE | none (no production producer, ADR-0283). Also deletes, in `overdrive-control-plane` and `overdrive-sim`, the guest-flow owner's `OwnerCgroupPlacement` startup check and datagram-to-VIP handling (D-10, ADR-0284); inventory in slice 02 |
+| The same-host local-backend path (inventory in slice 02) | `overdrive-bpf`, `overdrive-dataplane`, `overdrive-core`, `overdrive-control-plane`, `overdrive-reconcilers`, `overdrive-sim` | DELETE | none (no production producer, ADR-0297). Also deletes, in `overdrive-control-plane` and `overdrive-sim`, the guest-flow owner's `OwnerCgroupPlacement` startup check and datagram-to-VIP handling (D-10, ADR-0298); inventory in slice 02 |
 | Convergence property harness | `overdrive-control-plane` tests | CREATE NEW (test support, DISTILL shapes it) | none |
 
 Dependency direction is unchanged. `overdrive-core` gains no I/O dependency.
@@ -380,7 +380,7 @@ The resync period is 30 s (D-2); its name and visibility are the crafter's. The 
 - Contract shape: bounded-change. Its whole effect universe is `submit_evaluation` calls.
 - The loop runs a pass at boot, then anchors the next pass at `previous + period` on the injected clock (re-armed at most once per period, no drift, inheriting ADR-0084's rule). The clock is the same instance the convergence loop reads.
 
-Retry rule: ADR-0282 decision 3 (`run_convergence_tick_inner` is unchanged in control flow). The `development.md` § "Reconciler I/O" text (D15) and the proposed rule text cite that decision.
+Retry rule: ADR-0296 decision 3 (`run_convergence_tick_inner` is unchanged in control flow). The `development.md` § "Reconciler I/O" text (D15) and the proposed rule text cite that decision.
 
 ### D-1c. Removals (same commit as D-1a and D-1b)
 
@@ -411,7 +411,7 @@ No new type, variant, port method or wire field. Behaviour of the existing `data
 - Edge cases: a destination outside the VIP ranges follows the generic path unchanged (the `gateway:53` mark exemption remains). A guest-prefix UDP destination keeps its existing refusal. TCP to a VIP is unchanged (D24a).
 - Duration: until GH #310 delivers guest UDP to a VIP. When #310 lands it replaces this refusal.
 - Contract shape: pure refusal (return-only); universe of effects = none (no socket, no route lookup).
-- Premise and provenance (code, observation, kernel citations): ADR-0284 § Context.
+- Premise and provenance (code, observation, kernel citations): ADR-0298 § Context.
 - Kernel and VMM assumptions: none. The refusal needs no kernel behaviour; it removes a socket the kernel would otherwise route.
 - Test obligation: Tier 1 only, through the owner's driving port with the sim flow I/O (slice 02 AC7).
 
@@ -419,7 +419,7 @@ No new type, variant, port method or wire field. Behaviour of the existing `data
 
 Answers to the spec's gaps. Each pins an interface contract or states a model-only ruling; test-support shaping is DISTILL's.
 
-**a. Dispatch error.** Settled by ADR-0282 decision 3 (the retry rule). The model follows the code: a tick that emitted an action requeues `Immediate` on every path including `dispatchErr`.
+**a. Dispatch error.** Settled by ADR-0296 decision 3 (the retry rule). The model follows the code: a tick that emitted an action requeues `Immediate` on every path including `dispatchErr`.
 
 **b. `pending_keys` order.** `BrokerDrain::pending_keys(&self) -> Vec<(ReconcilerName, TargetResource)>` returns the pending keys in first-pending order: ascending by the broker's admission sequence, the order `drain_pending` admits eligible keys. A same-key resubmit does not change a key's position (below). The accessor is read-only, takes no limit or blocked set, and does not filter by eligibility.
 
@@ -467,7 +467,7 @@ Consequence for `has`: if the driver set `has` equal to what `managed_targets` r
 | `spawn_convergence_loop` | EXTEND by deletion of the cadence phase | Admission, cap and drain unchanged. |
 | `ServiceHydrationResultRow` + executor row | REUSE (remote path only) | Unchanged. |
 | `Dataplane` trait | EXTEND by deletion | Loses `register_local_backend` and `deregister_local_backend` and the error variants only they use (D-9). Contract shape of the remaining operations unchanged. |
-| Same-host local-backend path (programs, maps, handles, actions, executors, hydrator partition, sim state) | DELETE | No production producer (ADR-0283). Inventory in slice 02. `cgroup_connect4_gateway` and its maps are kept. |
+| Same-host local-backend path (programs, maps, handles, actions, executors, hydrator partition, sim state) | DELETE | No production producer (ADR-0297). Inventory in slice 02. `cgroup_connect4_gateway` and its maps are kept. |
 | `ServiceVipView`, allocator | UNCHANGED | The VIP-release work moved to #211 (D-5). |
 | `vm_reclamation` `apply_actions` | REJECT for reuse | Pure-core DST executor; slice 04 uses the production shim (D-7). |
 | `resync loop` | CREATE NEW | No existing component enumerates managed targets across reconcilers; justified by the verification's four wake gaps. |
@@ -510,7 +510,7 @@ Rejected: emit the stop from `actual` with retry pacing; it reverses ADR-0191 de
 - Faults ("dropped actions") are injected through existing or small driven-port seams: service-map update failure, allocator release failure, `SimViewStore::inject_fsync_failure`, observation read failure, `SimDriver` stop failure. That is `testing.md`'s "drive causes, not fabricated consequences". Starting worlds and Views are arbitrary (including a View that says done while the effect is absent); crash-partial worlds are reachable states.
 - Oracle: `actual == desired` through the reconciler's own read-port within N passes, then zero non-`Noop` actions (progress, stability); executor idempotency by dispatching each action twice.
 - Production surface the property requires: the resync step between ticks (`resync_reconciler`, D-12) and, for the seams, sim-side injectors DISTILL names. Fixture internals are DISTILL's.
-- Lane: DISCUSS AC2 says default lane. A composed `AppState` needs an intent store; `lib.rs:522` builds redb with `InMemoryBackend`, which may make a no-file default-lane build possible. If not, the property sits under `integration-tests` and AC2 changes. DISTILL decides (validation item V-5; not contract-shaping).
+- Lane: DISCUSS AC2 says default lane. A composed `AppState` needs an intent store. `AppState.store` is `Arc<dyn IntentStore>` (`lib.rs:241`, commit `3cef9fb4b`), so a sim-composed `AppState` can take any `IntentStore`, and `lib.rs:521` builds redb with `InMemoryBackend`, which may make a no-file default-lane build possible. If not, the property sits under `integration-tests` and AC2 changes. DISTILL decides (validation item V-5; not contract-shaping).
 - Reconcilers.md rule change: see "Proposed rule text".
 
 ### D-8. `workflow-lifecycle`
@@ -553,7 +553,7 @@ The specification models evaluation wake (decisions D-1 and D-3), module `evalua
 - Safety (`Safety`, `wake_full`): active within cap; one active per target; pending keys unique; eligibility canonical; need implies managed; backoff window only for needy keys. Every conjunct holds by construction of the model and defends no D-1 or D-3 rule, so there is no standalone check; `Safety` is asserted as an `expect` clause in nine of the ten named runs (all but `pass_submit_merges_retained_not_before_to_immediate`). The broker rules' teeth are the `eval_broker` unit tests (V-4) and the conformance driver.
 - Progress (`ProgressByPass`, under fairness of the pass timer): every needy key is evaluated again after any error outcome, dropped wake or crash, and an `ok` evaluation clears its need. The bound: progress holds once faults stop (faults are budgeted, `MAXF = 2`; drift, `MAXD = 2`) and an admitted evaluation's dispatch completes. The model abstracts the reconciler: it proves re-evaluation, not that `reconcile` converges `actual` to `desired` (the slice 04 property and each reconciler's tests do). Starvation of a key queued behind a pass burst is covered by the named run `edge_wake_during_burst_is_admitted_after_burst` and the broker's FIFO unit tests (V-4).
 - Retention (`RetentionSchedulesBackedOffKey`, `wake_retention`): a key inside its hydrator backoff window is always scheduled, so its retry needs neither a row write nor a pass (D-3).
-- Hazard variants, one per decision, 2 in total: D-1 → `wake_noPass` (remove the pass; dropped wakes disabled; progress is violated, the wedge ADR-0282 names); D-3 → `wake_noRetention` (`next_evaluation_at` returns `None`; retention is violated).
+- Hazard variants, one per decision, 2 in total: D-1 → `wake_noPass` (remove the pass; dropped wakes disabled; progress is violated, the wedge ADR-0296 names); D-3 → `wake_noRetention` (`next_evaluation_at` returns `None`; retention is violated).
 - Broker rules (pending uniqueness, one active per target, cap, canonical eligibility) are existing behaviour, not decisions of this feature, so they carry no hazard; their teeth are the `eval_broker` unit tests (V-4).
 
 Named runs (all on `wake_conf`, each a `[[check]]` in `checks.toml`), one per critical scenario; these are the runs DISTILL pins with `#[quint_test]`:
@@ -604,16 +604,16 @@ Contract-shaping items run before approval; I have not run them and mark none pr
 
 | ID | Item | Class | Probe to run | Falsification changes |
 |---|---|---|---|---|
-| V-3 | Cost: per-evaluation hydrate time and admission delay of an edge wake queued behind a burst at 1000 workloads | not contract-shaping (pacing is internal) | RUN 2026-11-15, native metal, commit `97a417fcb`. Evidence: `spike-scratch/reconciler-resync-cost/evidence/full-20261115T180650Z/results.json` (proposed pass) and `baseline-20261115T211313Z/results.json` (baseline). | Held as a proven fact; no contract changes. G1 figures (pass; baseline in brackets): W=100: E 265 [337], 0.29% duty [0.31%]; W=500: E 1225 [1537], 4.19% [4.51%]; W=1000: E 2425 [3037], 15.2% [15.5%]. Not above the baseline at any N. Scan cost is tracked by #270, deploy latency during a pass by #357. |
+| V-3 | Cost: per-evaluation hydrate time and admission delay of an edge wake queued behind a burst at 1000 workloads | not contract-shaping (pacing is internal) | RUN 2026-11-15, native metal, commit `97a417fcb`. Evidence: `spike-scratch/reconciler-resync-cost/evidence/full-20261115T180650Z/results.json` (proposed pass) and `baseline-20261115T211313Z/results.json` (baseline). | No contract changes. The measurement is the cost of the pass against today's baseline on the same host and load; it does not choose the mechanism (D-1 rests on source reading and ADR-0296's rejected alternatives). G1 figures (pass; baseline in brackets): W=100: E 265 [337], 0.29% duty [0.31%]; W=500: E 1225 [1537], 4.19% [4.51%]; W=1000: E 2425 [3037], 15.2% [15.5%]. Not above the baseline at any N. Scan cost is tracked by #270, deploy latency during a pass by #357. |
 | V-4 | Same-key collapse and `NotBefore`→`Immediate` merge under pass plus edge submits | not contract-shaping | existing `eval_broker` tests plus the new run `edge_wake_during_burst_is_admitted_after_burst` | a test |
-| V-5 | Default-lane feasibility of the composed property (in-memory redb) | not contract-shaping | DISTILL builds one composed tick in the default lane | the lane of one test |
+| V-5 | Default-lane feasibility of the composed property (in-memory redb) | not contract-shaping | DISTILL builds one composed tick in the default lane. `AppState.store` is `Arc<dyn IntentStore>` (`lib.rs:241`), so a sim-composed `AppState` can take any `IntentStore`. | the lane of one test |
 
 No contract-shaping validation item is open; D-1 stands on source reading. The deletion (D-9) adds no kernel assumption.
 
 ### Validation budget
 
-- Model checks: 14 (4 exhaustive TLC on `wake_full` / `wake_retention` / hazards, 10 evaluator runs), recorded in `specs/quint/reconciler-evaluation-wake/evidence/summary.md` (Linux 7.0.0-38): 72 s wall for the whole run in parallel; `ProgressByPass` is the longest check.
-- CI lane (`ci = true` in `checks.toml`): 13 of 14, excluding `ProgressByPass`. Growth beyond these numbers needs user approval.
+- Model checks: 14 (4 exhaustive TLC on `wake_full` / `wake_retention` / hazards, 10 evaluator runs), recorded in `specs/quint/reconciler-evaluation-wake/evidence/summary.md` (Linux 7.0.0-38): 57 s wall for the whole run in parallel; `ProgressByPass` is the longest check at 56.8 s.
+- CI lane (`ci = true` in `checks.toml`): 14 of 14 (every check runs under the 60 s CI threshold; `ProgressByPass` at 56.8 s is closest to it). Growth beyond these numbers needs user approval.
 - Test lanes added by the design: none. Slice 01 has no Tier-3 scenario (user ruling 2026-11-16); slice 04's property uses the existing default lane (its lane is V-5); one Tier-1 acceptance scenario for D-11; one Quint conformance driver (one specification) under `integration-tests` per `testing.md`. No new CI job, tool, or xtask subcommand.
 - Runtime budget: one evaluation per managed target per 30 s; measured per-pass cost is in V-3, the guardrail in G1.
 
@@ -632,8 +632,8 @@ No contract-shaping validation item is open; D-1 stands on source reading. The d
 |---|---|
 | ADR-0084 amendment 2026-08-23: "The level-triggered backstop for the row-backed partition ... is the interest-router's unconditional periodic relist — NOT a per-reconciler `resync_schedule`" | The backstop for every reconciler is the runtime resync pass over `managed_targets`. |
 | `reconcilers.md`: "A reconciler declares one model or the other, never both" | Every reconciler is resynced; `interests()` is edge-only. |
-| ADR-0053 (Accepted 2026-05-23): same-host backend delivery via `cgroup_sock_addr` | Superseded by ADR-0283 (D-9): the path has no production producer and is removed. |
-| ADR-0164: "Datagrams to a VIP use `connect4`. The owner always connects its host datagram socket, so the existing ADR-0053 `connect4` rewrite resolves a VIP to a platform-chosen backend." and "The owner refuses to start unless its own cgroup is the `connect4` attach path or below it." | Superseded by ADR-0284 (D-10, D-11). Guest UDP to a VIP is refused until GH #310. ADR-0164's TCP decision (D24a) is unchanged. |
+| ADR-0053 (Accepted 2026-05-23): same-host backend delivery via `cgroup_sock_addr` | Superseded by ADR-0297 (D-9): the path has no production producer and is removed. |
+| ADR-0164: "Datagrams to a VIP use `connect4`. The owner always connects its host datagram socket, so the existing ADR-0053 `connect4` rewrite resolves a VIP to a platform-chosen backend." and "The owner refuses to start unless its own cgroup is the `connect4` attach path or below it." | Superseded by ADR-0298 (D-10, D-11). Guest UDP to a VIP is refused until GH #310. ADR-0164's TCP decision (D24a) is unchanged. |
 | `development.md`: "an unreadable observation is the runtime's to log-and-skip" | A hydrate error ends the evaluation; the next pass retries (D15). |
 
 ## Wave: DESIGN / [REF] D-13. The persisted `ConflictRoute` tag after the cgroup route is deleted (APPROVED 2026-11-15, option A)
@@ -646,16 +646,22 @@ No contract-shaping validation item is open; D-1 stands on source reading. The d
 ## Wave: DESIGN / [REF] Scope limitations and pending items
 
 - Scope limitation, tracked: the 30 s resync period is a compile-time constant with no configuration surface (D-2). Tracked by #356.
-- Scope limitation, tracked: guest UDP to a VIP is refused until GH #310 (D-10, D-11; ADR-0284). #310 is cited as the user's ruling names it; not re-fetched. A comment on #310 records the removal.
+- Scope limitation, tracked: guest UDP to a VIP is refused until GH #310 (D-10, D-11; ADR-0298). #310 is cited as the user's ruling names it; not re-fetched. A comment on #310 records the removal.
 - Scope limitation, tracked: the Tier-1 `persist_view` recovery (slice 01) assumes the store can write again after the fault clears. With redb a transient disk error is permanent until restart (the `Database` is poisoned and `RedbViewStore` never reopens). Tracked by #360.
 - Lane for the slice 04 property (V-5).
 - Independent design review has not run; the ADRs stay `Proposed`.
 - DELIVER follow-ups outside `crates/` (rules docs, living docs, website): slice 02 § "DELIVER follow-ups outside `crates/`" only.
+- Finalization obligation (`finalize.md`): this design used native-metal runs (V-3, the guest UDP probe, the Quint evidence records), and DELIVER and DISTILL runs will add more. After the evidence the finalization record needs has been pulled back (`cargo xtask metal pull`; the Quint evidence under `specs/quint/reconciler-evaluation-wake/evidence` and the `spike-scratch` evidence directories are the known cases), FINALIZE cleans up this feature's working directory on the Metal box (the remote checkout and the build and scratch output its runs left) and records the cleanup in the finalization record.
 
 ## Wave: DESIGN / [REF] Handoff to DISTILL (after the Quint dispatch and independent design review)
 
 User approvals are recorded above. DISTILL starts when independent design review is done.
 
 Scenario obligations: the slice 01 invariants (three faults plus fresh deploy, enumeration failure, burst admission); slice 02 (the deletion: AC1 to AC7 of the slice file, unchanged behaviour of the remote service path and the gateway; plus the one added behaviour, D-11, Tier 1 only, through the owner's driving port with the sim flow I/O); slice 04 (the composed property, mutation check per injected latch mutant, and the executor doc fix, which has no scenario; `service-lifecycle` is covered by the property like every reconciler, except that its probe-driven stop obligation is scoped out of the drop/skew progress oracle and its generators are constrained as D-6 states). The Quint conformance driver per the pinned projections. The liveness-before-Stable dependency of `terminal_announced` (D-6) is pinned by `crates/overdrive-control-plane/tests/acceptance/liveness_begins_at_stable.rs` (`liveness_supervision_begins_when_the_allocation_becomes_stable`, `first_liveness_row_lands_one_interval_after_stable_with_streak_one`). It asserts at the probe runner that no liveness role is live and no liveness row exists before the Stable hook; it does not run `ServiceLifecycle`. Gap: no test runs `ServiceLifecycle` against a non-Stable allocation and asserts it emits no liveness stop; the dependency rests on the runner never writing a liveness row before Stable. The per-reconciler containment obligation for `managed_targets` (Conformance pins, f). Each slice stays production-drivable through the real `run_server` composition, with faults injected at `Sim*` port seams (D11). The VIP-release scenarios belong to #211 and are not in this feature.
+
+Test conventions DISTILL applies (current `testing.md`; DISTILL picks per test):
+
+- Pending tests: a scenario whose owner API exists but whose DELIVER step has not landed is `#[should_panic(expected = "<semantic RED>")]`, with DISTILL naming the semantic RED per scenario. `#[ignore]` only for a missing external resource. The Quint conformance driver follows the same rule: if the owner's driving port or pinned accessor (`resync_reconciler`, `BrokerDrain::pending_keys`) does not exist when the driver is written, the file may be gated out only with `#![cfg(any())]` carrying `// conformance-lint: pending-owner-api <the missing port or accessor, and the step that adds it>`, removed in the step that lands the port; otherwise the driver stays compiled and pending by `should_panic`. No other always-false `cfg`.
+- Placement: every new test declares its placement on itself (`#[overdrive_test(...)]`, `placement!(...)`, `shared_guest!(...)`, `overdrive_test_default!(...)`), checked by `cargo xtask placement-lint`. Pure sim or core tests are `host_pure`. A test that boots `run_server` / `serve`, or composes `AppState` with real kernel effects, is never host-pure: it takes the guest group `testing.md` names for such a body. The slice 04 property over a sim-composed `AppState` with no real kernel effect is `host_pure` if V-5 puts it in the default lane. The D-11 Tier-1 scenario and the Quint driver run over `Sim*` ports and are `host_pure`.
 
 Proposals for the user (not adopted; each adds scope, per `design.md` § "No unrequested scope"): none.

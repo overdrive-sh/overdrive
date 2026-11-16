@@ -9,7 +9,7 @@ A deploy recovers by itself after a transient hydrate error, a View-write error,
 ## IN
 
 - Periodic re-evaluation for every registered reconciler, over targets enumerated from intent AND observation (D4), not `alloc_status` rows alone.
-- The hydrate-error and View-write-error paths no longer leave a target without a future evaluation (`reconciler_runtime.rs:1589-1590`, `:1638-1642`).
+- The hydrate-error and View-write-error paths no longer leave a target without a future evaluation (`reconciler_runtime.rs:1588-1589`, `:1638-1641`).
 - `service-map-hydrator` (no wake hooks today) is re-evaluated without waiting for an unrelated backend-row write.
 - A target with intent and no `alloc_status` row is covered.
 - Bounded cost: a target that has left desired and actual stops being evaluated.
@@ -39,7 +39,7 @@ From US-01:
 
 ## Dependencies
 
-None. Interacts with #271 and #270 (cited). The wakeup-model change is ADR-0282 (D-1, approved).
+None. Interacts with #271 and #270 (cited). The wakeup-model change is ADR-0296 (D-1, approved).
 
 ## Effort
 

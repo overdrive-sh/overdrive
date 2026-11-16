@@ -16,13 +16,13 @@ State 1
   passPos = 0
 
 State 2 [DivergeWake]
-  pending = <<"k1">>
+  pending = <<"k3">>
   drifts = 1
-  has = {"k1"}
-  need = {"k1"}
+  has = {"k3"}
+  need = {"k3"}
 
 State 3 [Drain]
-  active = {"k1"}
+  active = {"k3"}
   pending = <<>>
 
 State 4 [Finish]

@@ -18,29 +18,29 @@ State 2: <wake_noPass_evaluation_wake_DivergeWake line 600, col 3 to line 631, c
 /\ wake_noPass_evaluation_wake_dispatched = 0
 /\ wake_noPass_evaluation_wake_active = {}
 /\ wake_noPass_evaluation_wake_inWin = {}
-/\ wake_noPass_evaluation_wake_pending = <<"k1">>
+/\ wake_noPass_evaluation_wake_pending = <<"k3">>
 /\ wake_noPass_evaluation_wake_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ wake_noPass_evaluation_wake_cancelled = 0
 /\ wake_noPass_evaluation_wake_drifts = 1
-/\ wake_noPass_evaluation_wake_has = {"k1"}
+/\ wake_noPass_evaluation_wake_has = {"k3"}
 /\ wake_noPass_evaluation_wake_faults = 0
 /\ wake_noPass_evaluation_wake_elig = [k1 |-> "imm", k2 |-> "imm", k3 |-> "imm"]
-/\ wake_noPass_evaluation_wake_need = {"k1"}
+/\ wake_noPass_evaluation_wake_need = {"k3"}
 /\ wake_noPass_evaluation_wake_passPos = 0
 
 State 3: <wake_noPass_evaluation_wake_Drain line 436, col 3 to line 483, col 49 of module wake_noPass>
 /\ wake_noPass_evaluation_wake_due = TRUE
 /\ wake_noPass_evaluation_wake_dispatched = 0
-/\ wake_noPass_evaluation_wake_active = {"k1"}
+/\ wake_noPass_evaluation_wake_active = {"k3"}
 /\ wake_noPass_evaluation_wake_inWin = {}
 /\ wake_noPass_evaluation_wake_pending = <<>>
 /\ wake_noPass_evaluation_wake_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ wake_noPass_evaluation_wake_cancelled = 0
 /\ wake_noPass_evaluation_wake_drifts = 1
-/\ wake_noPass_evaluation_wake_has = {"k1"}
+/\ wake_noPass_evaluation_wake_has = {"k3"}
 /\ wake_noPass_evaluation_wake_faults = 0
 /\ wake_noPass_evaluation_wake_elig = [k1 |-> "imm", k2 |-> "imm", k3 |-> "imm"]
-/\ wake_noPass_evaluation_wake_need = {"k1"}
+/\ wake_noPass_evaluation_wake_need = {"k3"}
 /\ wake_noPass_evaluation_wake_passPos = 0
 
 State 4: <wake_noPass_evaluation_wake_Finish line 547, col 3 to line 594, col 49 of module wake_noPass>
@@ -52,10 +52,10 @@ State 4: <wake_noPass_evaluation_wake_Finish line 547, col 3 to line 594, col 49
 /\ wake_noPass_evaluation_wake_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ wake_noPass_evaluation_wake_cancelled = 0
 /\ wake_noPass_evaluation_wake_drifts = 1
-/\ wake_noPass_evaluation_wake_has = {"k1"}
+/\ wake_noPass_evaluation_wake_has = {"k3"}
 /\ wake_noPass_evaluation_wake_faults = 1
 /\ wake_noPass_evaluation_wake_elig = [k1 |-> "imm", k2 |-> "imm", k3 |-> "imm"]
-/\ wake_noPass_evaluation_wake_need = {"k1"}
+/\ wake_noPass_evaluation_wake_need = {"k3"}
 /\ wake_noPass_evaluation_wake_passPos = 0
 
 State 5: Stuttering
