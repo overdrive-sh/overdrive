@@ -1,0 +1,61 @@
+From 3c8b8eb6f896d6d06a6864afa7bb233422c10c51 Mon Sep 17 00:00:00 2001
+From: Marcus Schack Abildskov <work@marcus-sa.dev>
+Date: Tue, 17 Nov 2026 04:59:07 +0100
+Subject: [PATCH 3/3] spike(F2): open a block-device volume with O_EXCL
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+CH never claims a block device. Its OFD lock is keyed on the inode of the path
+it opened, so a second device node for the same device (same major:minor) is
+not seen as a conflict and a second VMM boots on a disk the first is writing.
+O_EXCL makes the kernel arbitrate per block device (bd_prepare_to_claim,
+block/bdev.c) whatever node or path names it.
+
+Prototype for the DESIGN spikes of GH #348: typechecked, not built or run.
+
+🤖 Generated with Claude Code
+
+Co-Authored-By: Claude <noreply@anthropic.com>
+Co-Authored-By: nWave <nwave@nwave.ai>
+---
+ block/src/factory.rs | 15 +++++++++++++--
+ 1 file changed, 13 insertions(+), 2 deletions(-)
+
+diff --git a/block/src/factory.rs b/block/src/factory.rs
+index 346ce22c1..c88c51c79 100644
+--- a/block/src/factory.rs
++++ b/block/src/factory.rs
+@@ -9,7 +9,7 @@
+ //! support, and constructs the appropriate backend. Callers receive
+ //! a trait object that is ready for use by virtio queue workers.
+ 
+-use std::os::unix::fs::OpenOptionsExt;
++use std::os::unix::fs::{FileTypeExt, OpenOptionsExt};
+ use std::path::Path;
+ use std::sync::OnceLock;
+ use std::{fmt, fs};
+@@ -90,8 +90,19 @@ pub fn open_disk(options: &DiskOpenOptions<'_>) -> BlockResult<OpenedDisk> {
+     let mut fs_options = fs::OpenOptions::new();
+     fs_options.read(true);
+     fs_options.write(!options.readonly);
++    let mut flags = 0;
+     if options.direct {
+-        fs_options.custom_flags(libc::O_DIRECT);
++        flags |= libc::O_DIRECT;
++    }
++    // Claim a block device exclusively: the kernel arbitrates by device, so a second
++    // node or path naming the same device cannot be claimed by another O_EXCL opener.
++    if !options.readonly
++        && fs::metadata(options.path).is_ok_and(|m| m.file_type().is_block_device())
++    {
++        flags |= libc::O_EXCL;
++    }
++    if flags != 0 {
++        fs_options.custom_flags(flags);
+     }
+ 
+     let mut file = open_disk_image(options.path, &fs_options)?;
+-- 
+2.52.0
+

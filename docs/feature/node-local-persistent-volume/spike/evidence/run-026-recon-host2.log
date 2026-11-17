@@ -1,0 +1,755 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.13s
+     Running `target/debug/xtask metal run -- cargo nextest run --manifest-path spike-scratch/node-local-persistent-volume-a/Cargo.toml --features integration-tests,kvm-tests -E 'binary(recon) & test(recon_host)' --no-fail-fast`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+OVERDRIVE_METAL_RUN_ID=d5c34abbf2eb8191b39b445b
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire exclusive physical-maintenance barrier (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_RUN_REGISTERED run_id=d5c34abbf2eb8191b39b445b
+OVERDRIVE_METAL_LEASE_ACQUIRED token=d5c34abbf2eb8191b39b445b pid=1106831
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/antananarivo -> ubuntu@151.115.99.251:/home/ubuntu/nlpv-spike-348
+
+sent 2,092,252 bytes  received 6,994 bytes  839,698.40 bytes/sec
+total size is 2,110,492,166  speedup is 1,005.36
+
+########## [bootstrap] materialising standalone .git (common dir 7.6G)
+
+sent 298,179 bytes  received 19,165 bytes  211,562.67 bytes/sec
+total size is 879,308,342  speedup is 2,770.84
+fatal: not a git repository: vendors/cloud-hypervisor/../../../../../../Git/helios/.git/worktrees/antananarivo/modules/vendors/cloud-hypervisor
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+OVERDRIVE_METAL_RUN_STARTED run_id=d5c34abbf2eb8191b39b445b
+info: experimental features enabled: wrapper-scripts
+   Compiling nlpv-probe v0.0.0 (/home/ubuntu/nlpv-spike-348/spike-scratch/node-local-persistent-volume-a)
+warning: unused import: `PathBuf`
+  --> src/lib.rs:14:23
+   |
+14 | use std::path::{Path, PathBuf};
+   |                       ^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `nlpv-probe` (lib test) generated 1 warning (run `cargo fix --lib -p nlpv-probe --tests` to apply 1 suggestion)
+warning: `nlpv-probe` (lib) generated 1 warning (1 duplicate)
+warning: unused doc comment
+  --> tests/probe_b.rs:31:1
+   |
+31 | / /// B1b: the lock is taken at boot, not at open: a second VMM that is merely *created* (not booted) and
+32 | | /// a plain `open()` do not conflict. Evidence: lock state before the first boot vs after.
+   | |_-----------------------------------------------------------------------------------------^
+   |   |
+   |   rustdoc does not generate documentation for macro invocations
+   |
+   = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+   = note: `#[warn(unused_doc_comments)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused doc comment
+   --> tests/probe_b.rs:112:1
+    |
+112 | /// B3: ways around the lock.
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ rustdoc does not generate documentation for macro invocations
+    |
+    = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+
+warning: unused doc comment
+   --> tests/probe_b.rs:147:1
+    |
+147 | /// Kernel semantics of the claim CH never takes (probe-level, no CH): O_EXCL on a block device.
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ rustdoc does not generate documentation for macro invocations
+    |
+    = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+
+warning: unused doc comment
+   --> tests/probe_b.rs:165:1
+    |
+165 | /// B4: does hot-remove release the lock?
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ rustdoc does not generate documentation for macro invocations
+    |
+    = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+
+warning: unused doc comment
+   --> tests/probe_b.rs:183:1
+    |
+183 | /// B2c: a replacement started the instant the predecessor's guest ends: does it race the lock release?
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ rustdoc does not generate documentation for macro invocations
+    |
+    = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+
+warning: unused doc comment
+  --> tests/probe_c.rs:50:1
+   |
+50 | /// C1b: the same file volume with RLIMIT_FSIZE >= volume works (control), and growth by resize-disk past the limit.
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ rustdoc does not generate documentation for macro invocations
+   |
+   = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+   = note: `#[warn(unused_doc_comments)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused doc comment
+  --> tests/probe_c.rs:66:1
+   |
+66 | /// C3: a second writable disk under uid 4200 + landlock + seccomp; and the negative permission cases.
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ rustdoc does not generate documentation for macro invocations
+   |
+   = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+
+warning: `nlpv-probe` (test "probe_b") generated 5 warnings
+warning: `nlpv-probe` (test "probe_c") generated 2 warnings
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.81s
+────────────
+ Nextest run ID 083f1d26-065c-42ed-80c2-7f2957e3745a with nextest profile: default
+    Starting 1 test across 1 binary (7 binaries skipped)
+        PASS [   1.144s] (1/1) nlpv-probe::recon recon_host
+  stdout ───
+
+    running 1 test
+    test recon_host ... ok
+
+    test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.07s
+
+  stderr ───
+    NLPV[uname] $ uname -a; cat /proc/cmdline
+    --stdout--
+    Linux em-determined-roentgen 7.0.0-38-generic #38-Ubuntu SMP PREEMPT_DYNAMIC Fri Sep  4 09:10:14 UTC 2026 x86_64 GNU/Linux
+    BOOT_IMAGE=/vmlinuz-7.0.0-38-generic root=UUID=2f8c8dc6-6567-41dd-b3fc-8fed5ba2d33d ro console=tty1 console=ttyS0
+    --stderr--
+    --exit=0--
+    NLPV[cpu] $ lscpu | head -30; free -m; nproc
+    --stdout--
+    Architecture:                            x86_64
+    CPU op-mode(s):                          32-bit, 64-bit
+    Address sizes:                           52 bits physical, 57 bits virtual
+    Byte Order:                              Little Endian
+    CPU(s):                                  16
+    On-line CPU(s) list:                     0-15
+    Vendor ID:                               AuthenticAMD
+    Model name:                              AMD EPYC 8024P 8-Core Processor
+    CPU family:                              25
+    Model:                                   160
+    Thread(s) per core:                      2
+    Core(s) per socket:                      8
+    Socket(s):                               1
+    Stepping:                                2
+    Frequency boost:                         enabled
+    CPU(s) scaling MHz:                      96%
+    CPU max MHz:                             3001.2500
+    CPU min MHz:                             1500.0000
+    BogoMIPS:                                4792.43
+    Flags:                                   fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm constant_tsc rep_good amd_lbr_v2 nopl xtopology nonstop_tsc cpuid extd_apicid aperfmperf rapl pni pclmulqdq monitor ssse3 fma cx16 pcid sse4_1 sse4_2 x2apic movbe popcnt aes xsave avx f16c rdrand lahf_lm cmp_legacy svm extapic cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw ibs skinit wdt tce topoext perfctr_core perfctr_nb bpext perfctr_llc mwaitx cpuid_fault cpb cat_l3 cdp_l3 hw_pstate ssbd mba perfmon_v2 ibrs ibpb stibp ibrs_enhanced vmmcall fsgsbase bmi1 avx2 smep bmi2 erms invpcid cqm rdt_a avx512f avx512dq rdseed adx smap avx512ifma clflushopt clwb avx512cd sha_ni avx512bw avx512vl xsaveopt xsavec xgetbv1 xsaves cqm_llc cqm_occup_llc cqm_mbm_total cqm_mbm_local user_shstk avx512_bf16 clzero irperf xsaveerptr rdpru wbnoinvd amd_ppin cppc arat npt lbrv svm_lock nrip_save tsc_scale vmcb_clean flushbyasid decodeassists pausefilter pfthreshold avic v_vmsave_vmload vgif x2avic v_spec_ctrl vnmi avx512vbmi umip pku ospke avx512_vbmi2 gfni vaes vpclmulqdq avx512_vnni avx512_bitalg avx512_vpopcntdq la57 rdpid overflow_recov succor smca fsrm flush_l1d debug_swap
+    Virtualization:                          AMD-V
+    L1d cache:                               256 KiB (8 instances)
+    L1i cache:                               256 KiB (8 instances)
+    L2 cache:                                8 MiB (8 instances)
+    L3 cache:                                32 MiB (2 instances)
+    NUMA node(s):                            1
+    NUMA node0 CPU(s):                       0-15
+    Vulnerability Gather data sampling:      Not affected
+    Vulnerability Ghostwrite:                Not affected
+    Vulnerability Indirect target selection: Not affected
+                   total        used        free      shared  buff/cache   available
+    Mem:           63868       34226        3047       20572       47864       29642
+    Swap:              0           0           0
+    16
+    --stderr--
+    --exit=0--
+    NLPV[virt] $ systemd-detect-virt; ls -l /dev/kvm
+    --stdout--
+    none
+    crw-rw---- 1 root kvm 10, 232 Nov 17 04:22 /dev/kvm
+    --stderr--
+    --exit=0--
+    NLPV[tools] $ for t in fio dmsetup mkfs.xfs mkfs.ext4 losetup xfs_io blkdiscard strace cloud-hypervisor busybox setpriv prlimit lvm fallocate; do printf '%s=' $t; command -v $t || echo MISSING; done
+    --stdout--
+    fio=MISSING
+    dmsetup=/usr/sbin/dmsetup
+    mkfs.xfs=/usr/sbin/mkfs.xfs
+    mkfs.ext4=/usr/sbin/mkfs.ext4
+    losetup=/usr/sbin/losetup
+    xfs_io=/usr/sbin/xfs_io
+    blkdiscard=/usr/sbin/blkdiscard
+    strace=/usr/bin/strace
+    cloud-hypervisor=/usr/local/bin/cloud-hypervisor
+    busybox=/usr/bin/busybox
+    setpriv=/usr/bin/setpriv
+    prlimit=/usr/bin/prlimit
+    lvm=/usr/sbin/lvm
+    fallocate=/usr/bin/fallocate
+    --stderr--
+    --exit=0--
+    NLPV[ch] $ cloud-hypervisor --version; ls -l $(command -v cloud-hypervisor)
+    --stdout--
+    cloud-hypervisor v53.0.0
+    Migration Protocol Versions: 0
+    -rwxr-xr-x 1 root root 7107304 Oct 22 15:22 /usr/local/bin/cloud-hypervisor
+    --stderr--
+    --exit=0--
+    NLPV[mounts] $ findmnt -o TARGET,SOURCE,FSTYPE,OPTIONS | head -40; df -h /srv/vm /tmp /home; lsblk -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT,ROTA,MODEL
+    --stdout--
+    TARGET                                          SOURCE         FSTYPE      OPTIONS
+    /                                               /dev/md1       ext4        rw,relatime,errors=remount-ro,stripe=32
+    ├─/sys                                          sysfs          sysfs       rw,nosuid,nodev,noexec,relatime
+    │ ├─/sys/firmware/efi/efivars                   efivarfs       efivarfs    rw,nosuid,nodev,noexec,relatime
+    │ ├─/sys/kernel/security                        securityfs     securityfs  rw,nosuid,nodev,noexec,relatime
+    │ ├─/sys/fs/cgroup                              cgroup2        cgroup2     rw,nosuid,nodev,noexec,relatime,nsdelegate,memory_recursiveprot,memory_hugetlb_accounting
+    │ ├─/sys/fs/pstore                              none           pstore      rw,nosuid,nodev,noexec,relatime
+    │ ├─/sys/fs/bpf                                 bpf            bpf         rw,nosuid,nodev,noexec,relatime,mode=700
+    │ │ └─/sys/fs/bpf                               bpf            bpf         rw,relatime
+    │ │   └─/sys/fs/bpf                             bpf            bpf         rw,relatime
+    │ │     └─/sys/fs/bpf                           bpf            bpf         rw,relatime
+    │ │       └─/sys/fs/bpf                         bpf            bpf         rw,relatime
+    │ ├─/sys/kernel/debug                           debugfs        debugfs     rw,nosuid,nodev,noexec,relatime
+    │ │ └─/sys/kernel/debug/tracing                 tracefs        tracefs     rw,nosuid,nodev,noexec,relatime
+    │ ├─/sys/kernel/tracing                         tracefs        tracefs     rw,nosuid,nodev,noexec,relatime
+    │ ├─/sys/kernel/config                          configfs       configfs    rw,nosuid,nodev,noexec,relatime
+    │ └─/sys/fs/fuse/connections                    fusectl        fusectl     rw,nosuid,nodev,noexec,relatime
+    ├─/proc                                         proc           proc        rw,nosuid,nodev,noexec,relatime
+    │ └─/proc/sys/fs/binfmt_misc                    systemd-1      autofs      rw,relatime,fd=36,pgrp=1,timeout=0,minproto=5,maxproto=5,direct,pipe_ino=12435
+    │   └─/proc/sys/fs/binfmt_misc                  binfmt_misc    binfmt_misc rw,nosuid,nodev,noexec,relatime
+    ├─/dev                                          udev           devtmpfs    rw,nosuid,relatime,size=30048376k,nr_inodes=7512094,mode=755,inode64
+    │ ├─/dev/pts                                    devpts         devpts      rw,nosuid,noexec,relatime,gid=5,mode=600,ptmxmode=000
+    │ ├─/dev/shm                                    tmpfs          tmpfs       rw,nosuid,nodev,inode64,usrquota
+    │ ├─/dev/hugepages                              hugetlbfs      hugetlbfs   rw,nosuid,nodev,relatime,pagesize=2M
+    │ └─/dev/mqueue                                 mqueue         mqueue      rw,nosuid,nodev,noexec,relatime
+    ├─/run                                          tmpfs          tmpfs       rw,nosuid,nodev,noexec,relatime,size=6540176k,mode=755,inode64
+    │ ├─/run/user/1000                              tmpfs          tmpfs       rw,nosuid,nodev,relatime,size=6540172k,nr_inodes=1635043,mode=700,uid=1000,gid=1000,inode64
+    │ ├─/run/credentials/systemd-journald.service   none           tmpfs       ro,nosuid,nodev,noexec,relatime,nosymfollow,size=1024k,nr_inodes=1024,mode=700,inode64,noswap
+    │ ├─/run/credentials/systemd-resolved.service   none           tmpfs       ro,nosuid,nodev,noexec,relatime,nosymfollow,size=1024k,nr_inodes=1024,mode=700,inode64,noswap
+    │ ├─/run/credentials/systemd-networkd.service   none           tmpfs       ro,nosuid,nodev,noexec,relatime,nosymfollow,size=1024k,nr_inodes=1024,mode=700,inode64,noswap
+    │ ├─/run/credentials/serial-getty@ttyS0.service none           tmpfs       ro,nosuid,nodev,noexec,relatime,nosymfollow,size=1024k,nr_inodes=1024,mode=700,inode64,noswap
+    │ ├─/run/credentials/getty@tty1.service         none           tmpfs       ro,nosuid,nodev,noexec,relatime,nosymfollow,size=1024k,nr_inodes=1024,mode=700,inode64,noswap
+    │ └─/run/netns                                  tmpfs[/netns]  tmpfs       rw,nosuid,nodev,noexec,relatime,size=6540176k,mode=755,inode64
+    ├─/tmp                                          tmpfs          tmpfs       rw,nosuid,nodev,size=32700868k,nr_inodes=1048576,inode64,usrquota
+    ├─/srv/vm                                       /dev/nvme1n1   xfs         rw,noatime,inode64,logbufs=8,logbsize=32k,sunit=256,swidth=256,noquota
+    ├─/boot                                         /dev/md0       ext4        rw,relatime,stripe=128
+    │ └─/boot/efi                                   /dev/nvme0n1p1 vfat        rw,relatime,fmask=0077,dmask=0077,codepage=437,iocharset=iso8859-1,shortname=mixed,errors=remount-ro
+    ├─/snap/snapd/28332                             /dev/loop0     squashfs    ro,nodev,relatime,errors=continue,threads=single
+    ├─/snap/certbot/5940                            /dev/loop2     squashfs    ro,nodev,relatime,errors=continue,threads=single
+    └─/snap/core24/2307                             /dev/loop1     squashfs    ro,nodev,relatime,errors=continue,threads=single
+    Filesystem      Size  Used Avail Use% Mounted on
+    /dev/nvme1n1    894G   21G  874G   3% /srv/vm
+    tmpfs            32G  1.7G   30G   6% /tmp
+    /dev/md1        847G  793G   11G  99% /
+    NAME          SIZE TYPE  FSTYPE            MOUNTPOINT         ROTA MODEL
+    loop0        32.5M loop  squashfs          /snap/snapd/28332     0 
+    loop1        66.8M loop  squashfs          /snap/core24/2307     0 
+    loop2        67.6M loop  squashfs          /snap/certbot/5940    0 
+    nvme0n1     894.3G disk                                          0 Dell DC NVMe PM9A3 RI U.2 960GB
+    ├─nvme0n1p1   512M part  vfat              /boot/efi             0 
+    ├─nvme0n1p2     4G part  swap                                    0 
+    ├─nvme0n1p3   512M part  linux_raid_member                       0 
+    │ └─md0       511M raid1 ext4              /boot                 0 
+    └─nvme0n1p4 860.9G part  linux_raid_member                       0 
+      └─md1     860.7G raid1 ext4              /                     0 
+    nvme1n1     894.3G disk  xfs               /srv/vm               0 Dell DC NVMe PM9A3 RI U.2 960GB
+    --stderr--
+    --exit=0--
+    NLPV[kcfg] $ ls /boot | head; for o in BLK_DEV_LOOP BLK_DEV_DM DM_LOG_WRITES DM_FLAKEY DM_ERROR DM_THIN_PROVISIONING XFS_FS EXT4_FS BTRFS_FS VIRTIO_BLK BLK_DEV_WRITE_MOUNTED IO_URING MEMCG BLK_CGROUP DM_DUST DM_ZERO DM_LINEAR FAULT_INJECTION FAIL_MAKE_REQUEST; do grep -h "CONFIG_$o=\|CONFIG_$o is" /boot/config-$(uname -r) || echo "CONFIG_$o not set/absent"; done
+    --stdout--
+    System.map-7.0.0-38-generic
+    System.map-7.0.0-43-generic
+    config-7.0.0-38-generic
+    config-7.0.0-43-generic
+    efi
+    grub
+    initrd.img
+    initrd.img-7.0.0-38-generic
+    initrd.img-7.0.0-43-generic
+    initrd.img.old
+    CONFIG_BLK_DEV_LOOP=y
+    CONFIG_BLK_DEV_DM=y
+    CONFIG_DM_LOG_WRITES=m
+    CONFIG_DM_FLAKEY=m
+    CONFIG_DM_ERROR not set/absent
+    CONFIG_DM_THIN_PROVISIONING=m
+    CONFIG_XFS_FS=m
+    CONFIG_EXT4_FS=y
+    CONFIG_BTRFS_FS=m
+    CONFIG_VIRTIO_BLK=y
+    CONFIG_BLK_DEV_WRITE_MOUNTED=y
+    CONFIG_IO_URING=y
+    CONFIG_MEMCG=y
+    CONFIG_BLK_CGROUP=y
+    # CONFIG_DM_DUST is not set
+    CONFIG_DM_ZERO=m
+    CONFIG_DM_LINEAR not set/absent
+    # CONFIG_FAULT_INJECTION is not set
+    CONFIG_FAIL_MAKE_REQUEST not set/absent
+    --stderr--
+    --exit=0--
+    NLPV[mods] $ R=$(uname -r); for m in loop dm-mod dm-log-writes dm-flakey dm-linear dm-bufio dm-thin-pool dm-persistent-data dm-dust xfs ext4 virtio_blk raid0 libcrc32c crc32c_generic; do echo "== $m"; find /lib/modules/$R -name "$m.ko*" ; grep -h "/$m.ko" /lib/modules/$R/modules.builtin 2>/dev/null; modinfo -F depends $m 2>/dev/null; done
+    --stdout--
+    == loop
+    kernel/drivers/block/loop.ko
+    == dm-mod
+    kernel/drivers/md/dm-mod.ko
+    == dm-log-writes
+    /lib/modules/7.0.0-38-generic/kernel/drivers/md/dm-log-writes.ko.zst
+
+    == dm-flakey
+    /lib/modules/7.0.0-38-generic/kernel/drivers/md/dm-flakey.ko.zst
+
+    == dm-linear
+    == dm-bufio
+    /lib/modules/7.0.0-38-generic/kernel/drivers/md/dm-bufio.ko.zst
+
+    == dm-thin-pool
+    /lib/modules/7.0.0-38-generic/kernel/drivers/md/dm-thin-pool.ko.zst
+    dm-persistent-data,dm-bio-prison
+    == dm-persistent-data
+    /lib/modules/7.0.0-38-generic/kernel/drivers/md/persistent-data/dm-persistent-data.ko.zst
+    dm-bufio
+    == dm-dust
+    == xfs
+    /lib/modules/7.0.0-38-generic/kernel/fs/xfs/xfs.ko.zst
+
+    == ext4
+    kernel/fs/ext4/ext4.ko
+    == virtio_blk
+    kernel/drivers/block/virtio_blk.ko
+    == raid0
+    /lib/modules/7.0.0-38-generic/kernel/drivers/md/raid0.ko.zst
+
+    == libcrc32c
+    == crc32c_generic
+    --stderr--
+    --exit=1--
+    NLPV[vmdir] $ ls -la /srv/vm/overdrive-testing /srv/vm | head -40; file /srv/vm/overdrive-testing/kernel | head -3
+    --stdout--
+    /srv/vm:
+    total 16
+    drwxr-xr-x 10 ubuntu root  111 Nov 17 00:15 .
+    drwxr-xr-x  3 root   root 4096 Aug 10 14:16 ..
+    drwxr-xr-x  3 root   root  105 Aug 14 12:20 diag
+    drwx--x---  6 root   4200  134 Nov 17 04:22 metal
+    drwx--x--- 85 root   4200 8192 Nov 14 19:45 overdrive-testing
+    drwxr-xr-x  3 root   root   18 Aug 10 18:27 p12j
+    drwxr-xr-x  5 root   root   56 Aug 10 18:10 p6
+    drwxr-xr-x  4 root   root   66 Aug 10 18:21 p6f
+    drwxr-xr-x  4 root   root   34 Aug 10 17:43 p6g
+    drwxr-xr-x  3 root   root   34 Aug 10 17:54 p6h
+
+    /srv/vm/overdrive-testing:
+    total 44480
+    drwx--x--- 85 root   4200      8192 Nov 14 19:45 .
+    drwxr-xr-x 10 ubuntu root       111 Nov 17 00:15 ..
+    -rw-r--r--  1 root   root         0 Oct 19 07:10 .guest-kit-lock
+    -rw-r--r--  1 root   root        16 Oct 19 07:10 .kernel-staged-from
+    -rw-r--r--  1 root   root  67108864 Aug 17 22:36 .overdrive-vm-rootfs-vmmeq-a.img
+    -rw-r--r--  1 ubuntu input 67108864 Aug 17 22:36 .overdrive-vm-rootfs-vmmeq-early-ch.img
+    -rw-r--r--  1 root   root  67108864 Aug 17 22:36 .overdrive-vm-rootfs-vmmeq-early-sim.img
+    -rw-r--r--  1 ubuntu input 67108864 Aug 17 22:37 .overdrive-vm-rootfs-vmmeq-tail-ch.img
+    -rw-r--r--  1 root   root  67108864 Aug 17 22:37 .overdrive-vm-rootfs-vmmeq-tail-sim.img
+    -rw-r--r--  1 root   root         0 Aug 13 23:26 .provision-lock
+    -rw-r-----  1 root   root        45 Nov 14 13:34 .rootfs-built-from
+    drwxr-x---  5 root   root       184 Nov  5 19:45 d17-d17-inv-0SFCqq
+    drwxr-x---  5 root   root       184 Nov  5 19:47 d17-d17-inv-OHdUAY
+    drwxr-x---  5 root   root       184 Nov  5 19:50 d17-d17-inv-TOPStY
+    drwxr-x---  5 root   root      4096 Nov  5 19:31 gl-loopback-binds-D48XRI
+    drwxr-x---  5 root   root      4096 Nov  5 19:33 gl-report-before-exit-hJJnYJ
+    drwxr-xr-x  4 root   root        95 Sep 22 22:36 gti-failure-serve-BxF37V
+    drwxr-xr-x  4 root   root        95 Sep 22 22:31 gti-failure-serve-iGHl3d
+    drwxr-xr-x  3 root   root       125 Aug 29 17:42 gti-mesh-rNMmre
+    drwxr-xr-x  3 root   root        33 Aug 28 20:30 gti-net-apply-failure-K9y6OS
+    drwxr-xr-x  3 root   root        20 Aug 30 01:17 gti-resolver-refusal-7IqZMm
+    drwxr-xr-x  4 root   root        35 Sep 22 22:29 gti-resolver-refusal-WArgHG
+    drwxr-xr-x  4 root   root        35 Sep 22 22:35 gti-resolver-refusal-eoGBYv
+    drwxr-xr-x  5 root   root       188 Sep 23 04:58 gti-restart-reinstall-failure-6jWnm8
+    drwxr-xr-x  5 root   root       188 Sep 23 07:50 gti-restart-reinstall-failure-AGn9Kh
+    /srv/vm/overdrive-testing/kernel: Linux kernel x86 boot executable, bzImage, version 7.0.0-38-generic (buildd@lcy02-amd64-070) #38-Ubuntu SMP PREEMPT_DYNAMIC Fri Sep  4 09:10:14 UTC 2026, RO-rootFS, Normal VGA, setup size 512*39, syssize 0x107f20, jump 0x26c 0x8cd88ec0fc8cd239 instruction, protocol 2.15, from protected-mode code at offset 0x2cc 0x10456ea bytes ZST compressed, relocatable, handover offset 0x1072530, legacy 64-bit entry point, can be above 4G, 32-bit EFI handoff entry point, 64-bit EFI handoff entry point, EFI kexec boot support, xloadflags bit 5, max cmdline size 2047, init_size 0x44c1000
+    --stderr--
+    --exit=0--
+    NLPV[fs] $ xfs_info /srv/vm 2>&1 | head -20; mount | grep -E ' /srv| xfs'
+    --stdout--
+    meta-data=/dev/nvme1n1           isize=512    agcount=32, agsize=7325728 blks
+             =                       sectsz=4096  attr=2, projid32bit=1
+             =                       crc=1        finobt=1, sparse=1, rmapbt=1
+             =                       reflink=1    bigtime=1 inobtcount=1 nrext64=1
+             =                       exchange=0   metadir=0
+    data     =                       bsize=4096   blocks=234423126, imaxpct=25
+             =                       sunit=32     swidth=32 blks
+    naming   =version 2              bsize=4096   ascii-ci=0, ftype=1, parent=0
+    log      =internal log           bsize=4096   blocks=114464, version=2
+             =                       sectsz=4096  sunit=1 blks, lazy-count=1
+    realtime =none                   extsz=4096   blocks=0, rtextents=0
+             =                       rgcount=0    rgsize=0 extents
+             =                       zoned=0      start=0 reserved=0
+    /dev/nvme1n1 on /srv/vm type xfs (rw,noatime,inode64,logbufs=8,logbsize=32k,sunit=256,swidth=256,noquota)
+    --stderr--
+    --exit=0--
+    NLPV[chsha] $ sha256sum /usr/local/bin/cloud-hypervisor; file /usr/local/bin/cloud-hypervisor | cut -c1-200; sysctl kernel.io_uring_disabled; cat /sys/block/nvme1n1/queue/write_cache /sys/block/nvme1n1/queue/rotational
+    --stdout--
+    6d54fbd2611e692fda00e476fc0723e9502bfd8acd53c8bc46edd96e84f3e842  /usr/local/bin/cloud-hypervisor
+    /usr/local/bin/cloud-hypervisor: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), static-pie linked, BuildID[sha1]=59822e464d5b332a78c753fbb20024e08f4a4527, stripped
+    kernel.io_uring_disabled = 0
+    write through
+    0
+    --stderr--
+    --exit=0--
+    NLPV[cgroup] $ cat /proc/self/cgroup; stat -fc %T /sys/fs/cgroup; ls /sys/fs/cgroup | head -30
+    --stdout--
+    0::/system.slice/overdrive-metal-run-d5c34abbf2eb8191b39b445b.service
+    cgroup2fs
+    cgroup.controllers
+    cgroup.max.depth
+    cgroup.max.descendants
+    cgroup.pressure
+    cgroup.procs
+    cgroup.stat
+    cgroup.subtree_control
+    cgroup.threads
+    cpu.pressure
+    cpu.stat
+    cpu.stat.local
+    cpuset.cpus.effective
+    cpuset.cpus.isolated
+    cpuset.mems.effective
+    dev-hugepages.mount
+    dev-mqueue.mount
+    dmem.capacity
+    dmem.current
+    init.scope
+    io.cost.model
+    io.cost.qos
+    io.pressure
+    io.prio.class
+    io.stat
+    memory.numa_stat
+    memory.pressure
+    memory.reclaim
+    memory.stat
+    memory.zswap.writeback
+    misc.capacity
+    --stderr--
+    --exit=0--
+
+────────────
+     Summary [   1.145s] 1 test run: 1 passed, 0 skipped
+        PASS [   1.144s] (1/1) nlpv-probe::recon recon_host
+  stdout ───
+
+    running 1 test
+    test recon_host ... ok
+
+    test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.07s
+
+  stderr ───
+    NLPV[uname] $ uname -a; cat /proc/cmdline
+    --stdout--
+    Linux em-determined-roentgen 7.0.0-38-generic #38-Ubuntu SMP PREEMPT_DYNAMIC Fri Sep  4 09:10:14 UTC 2026 x86_64 GNU/Linux
+    BOOT_IMAGE=/vmlinuz-7.0.0-38-generic root=UUID=2f8c8dc6-6567-41dd-b3fc-8fed5ba2d33d ro console=tty1 console=ttyS0
+    --stderr--
+    --exit=0--
+    NLPV[cpu] $ lscpu | head -30; free -m; nproc
+    --stdout--
+    Architecture:                            x86_64
+    CPU op-mode(s):                          32-bit, 64-bit
+    Address sizes:                           52 bits physical, 57 bits virtual
+    Byte Order:                              Little Endian
+    CPU(s):                                  16
+    On-line CPU(s) list:                     0-15
+    Vendor ID:                               AuthenticAMD
+    Model name:                              AMD EPYC 8024P 8-Core Processor
+    CPU family:                              25
+    Model:                                   160
+    Thread(s) per core:                      2
+    Core(s) per socket:                      8
+    Socket(s):                               1
+    Stepping:                                2
+    Frequency boost:                         enabled
+    CPU(s) scaling MHz:                      96%
+    CPU max MHz:                             3001.2500
+    CPU min MHz:                             1500.0000
+    BogoMIPS:                                4792.43
+    Flags:                                   fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm constant_tsc rep_good amd_lbr_v2 nopl xtopology nonstop_tsc cpuid extd_apicid aperfmperf rapl pni pclmulqdq monitor ssse3 fma cx16 pcid sse4_1 sse4_2 x2apic movbe popcnt aes xsave avx f16c rdrand lahf_lm cmp_legacy svm extapic cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw ibs skinit wdt tce topoext perfctr_core perfctr_nb bpext perfctr_llc mwaitx cpuid_fault cpb cat_l3 cdp_l3 hw_pstate ssbd mba perfmon_v2 ibrs ibpb stibp ibrs_enhanced vmmcall fsgsbase bmi1 avx2 smep bmi2 erms invpcid cqm rdt_a avx512f avx512dq rdseed adx smap avx512ifma clflushopt clwb avx512cd sha_ni avx512bw avx512vl xsaveopt xsavec xgetbv1 xsaves cqm_llc cqm_occup_llc cqm_mbm_total cqm_mbm_local user_shstk avx512_bf16 clzero irperf xsaveerptr rdpru wbnoinvd amd_ppin cppc arat npt lbrv svm_lock nrip_save tsc_scale vmcb_clean flushbyasid decodeassists pausefilter pfthreshold avic v_vmsave_vmload vgif x2avic v_spec_ctrl vnmi avx512vbmi umip pku ospke avx512_vbmi2 gfni vaes vpclmulqdq avx512_vnni avx512_bitalg avx512_vpopcntdq la57 rdpid overflow_recov succor smca fsrm flush_l1d debug_swap
+    Virtualization:                          AMD-V
+    L1d cache:                               256 KiB (8 instances)
+    L1i cache:                               256 KiB (8 instances)
+    L2 cache:                                8 MiB (8 instances)
+    L3 cache:                                32 MiB (2 instances)
+    NUMA node(s):                            1
+    NUMA node0 CPU(s):                       0-15
+    Vulnerability Gather data sampling:      Not affected
+    Vulnerability Ghostwrite:                Not affected
+    Vulnerability Indirect target selection: Not affected
+                   total        used        free      shared  buff/cache   available
+    Mem:           63868       34226        3047       20572       47864       29642
+    Swap:              0           0           0
+    16
+    --stderr--
+    --exit=0--
+    NLPV[virt] $ systemd-detect-virt; ls -l /dev/kvm
+    --stdout--
+    none
+    crw-rw---- 1 root kvm 10, 232 Nov 17 04:22 /dev/kvm
+    --stderr--
+    --exit=0--
+    NLPV[tools] $ for t in fio dmsetup mkfs.xfs mkfs.ext4 losetup xfs_io blkdiscard strace cloud-hypervisor busybox setpriv prlimit lvm fallocate; do printf '%s=' $t; command -v $t || echo MISSING; done
+    --stdout--
+    fio=MISSING
+    dmsetup=/usr/sbin/dmsetup
+    mkfs.xfs=/usr/sbin/mkfs.xfs
+    mkfs.ext4=/usr/sbin/mkfs.ext4
+    losetup=/usr/sbin/losetup
+    xfs_io=/usr/sbin/xfs_io
+    blkdiscard=/usr/sbin/blkdiscard
+    strace=/usr/bin/strace
+    cloud-hypervisor=/usr/local/bin/cloud-hypervisor
+    busybox=/usr/bin/busybox
+    setpriv=/usr/bin/setpriv
+    prlimit=/usr/bin/prlimit
+    lvm=/usr/sbin/lvm
+    fallocate=/usr/bin/fallocate
+    --stderr--
+    --exit=0--
+    NLPV[ch] $ cloud-hypervisor --version; ls -l $(command -v cloud-hypervisor)
+    --stdout--
+    cloud-hypervisor v53.0.0
+    Migration Protocol Versions: 0
+    -rwxr-xr-x 1 root root 7107304 Oct 22 15:22 /usr/local/bin/cloud-hypervisor
+    --stderr--
+    --exit=0--
+    NLPV[mounts] $ findmnt -o TARGET,SOURCE,FSTYPE,OPTIONS | head -40; df -h /srv/vm /tmp /home; lsblk -o NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT,ROTA,MODEL
+    --stdout--
+    TARGET                                          SOURCE         FSTYPE      OPTIONS
+    /                                               /dev/md1       ext4        rw,relatime,errors=remount-ro,stripe=32
+    ├─/sys                                          sysfs          sysfs       rw,nosuid,nodev,noexec,relatime
+    │ ├─/sys/firmware/efi/efivars                   efivarfs       efivarfs    rw,nosuid,nodev,noexec,relatime
+    │ ├─/sys/kernel/security                        securityfs     securityfs  rw,nosuid,nodev,noexec,relatime
+    │ ├─/sys/fs/cgroup                              cgroup2        cgroup2     rw,nosuid,nodev,noexec,relatime,nsdelegate,memory_recursiveprot,memory_hugetlb_accounting
+    │ ├─/sys/fs/pstore                              none           pstore      rw,nosuid,nodev,noexec,relatime
+    │ ├─/sys/fs/bpf                                 bpf            bpf         rw,nosuid,nodev,noexec,relatime,mode=700
+    │ │ └─/sys/fs/bpf                               bpf            bpf         rw,relatime
+    │ │   └─/sys/fs/bpf                             bpf            bpf         rw,relatime
+    │ │     └─/sys/fs/bpf                           bpf            bpf         rw,relatime
+    │ │       └─/sys/fs/bpf                         bpf            bpf         rw,relatime
+    │ ├─/sys/kernel/debug                           debugfs        debugfs     rw,nosuid,nodev,noexec,relatime
+    │ │ └─/sys/kernel/debug/tracing                 tracefs        tracefs     rw,nosuid,nodev,noexec,relatime
+    │ ├─/sys/kernel/tracing                         tracefs        tracefs     rw,nosuid,nodev,noexec,relatime
+    │ ├─/sys/kernel/config                          configfs       configfs    rw,nosuid,nodev,noexec,relatime
+    │ └─/sys/fs/fuse/connections                    fusectl        fusectl     rw,nosuid,nodev,noexec,relatime
+    ├─/proc                                         proc           proc        rw,nosuid,nodev,noexec,relatime
+    │ └─/proc/sys/fs/binfmt_misc                    systemd-1      autofs      rw,relatime,fd=36,pgrp=1,timeout=0,minproto=5,maxproto=5,direct,pipe_ino=12435
+    │   └─/proc/sys/fs/binfmt_misc                  binfmt_misc    binfmt_misc rw,nosuid,nodev,noexec,relatime
+    ├─/dev                                          udev           devtmpfs    rw,nosuid,relatime,size=30048376k,nr_inodes=7512094,mode=755,inode64
+    │ ├─/dev/pts                                    devpts         devpts      rw,nosuid,noexec,relatime,gid=5,mode=600,ptmxmode=000
+    │ ├─/dev/shm                                    tmpfs          tmpfs       rw,nosuid,nodev,inode64,usrquota
+    │ ├─/dev/hugepages                              hugetlbfs      hugetlbfs   rw,nosuid,nodev,relatime,pagesize=2M
+    │ └─/dev/mqueue                                 mqueue         mqueue      rw,nosuid,nodev,noexec,relatime
+    ├─/run                                          tmpfs          tmpfs       rw,nosuid,nodev,noexec,relatime,size=6540176k,mode=755,inode64
+    │ ├─/run/user/1000                              tmpfs          tmpfs       rw,nosuid,nodev,relatime,size=6540172k,nr_inodes=1635043,mode=700,uid=1000,gid=1000,inode64
+    │ ├─/run/credentials/systemd-journald.service   none           tmpfs       ro,nosuid,nodev,noexec,relatime,nosymfollow,size=1024k,nr_inodes=1024,mode=700,inode64,noswap
+    │ ├─/run/credentials/systemd-resolved.service   none           tmpfs       ro,nosuid,nodev,noexec,relatime,nosymfollow,size=1024k,nr_inodes=1024,mode=700,inode64,noswap
+    │ ├─/run/credentials/systemd-networkd.service   none           tmpfs       ro,nosuid,nodev,noexec,relatime,nosymfollow,size=1024k,nr_inodes=1024,mode=700,inode64,noswap
+    │ ├─/run/credentials/serial-getty@ttyS0.service none           tmpfs       ro,nosuid,nodev,noexec,relatime,nosymfollow,size=1024k,nr_inodes=1024,mode=700,inode64,noswap
+    │ ├─/run/credentials/getty@tty1.service         none           tmpfs       ro,nosuid,nodev,noexec,relatime,nosymfollow,size=1024k,nr_inodes=1024,mode=700,inode64,noswap
+    │ └─/run/netns                                  tmpfs[/netns]  tmpfs       rw,nosuid,nodev,noexec,relatime,size=6540176k,mode=755,inode64
+    ├─/tmp                                          tmpfs          tmpfs       rw,nosuid,nodev,size=32700868k,nr_inodes=1048576,inode64,usrquota
+    ├─/srv/vm                                       /dev/nvme1n1   xfs         rw,noatime,inode64,logbufs=8,logbsize=32k,sunit=256,swidth=256,noquota
+    ├─/boot                                         /dev/md0       ext4        rw,relatime,stripe=128
+    │ └─/boot/efi                                   /dev/nvme0n1p1 vfat        rw,relatime,fmask=0077,dmask=0077,codepage=437,iocharset=iso8859-1,shortname=mixed,errors=remount-ro
+    ├─/snap/snapd/28332                             /dev/loop0     squashfs    ro,nodev,relatime,errors=continue,threads=single
+    ├─/snap/certbot/5940                            /dev/loop2     squashfs    ro,nodev,relatime,errors=continue,threads=single
+    └─/snap/core24/2307                             /dev/loop1     squashfs    ro,nodev,relatime,errors=continue,threads=single
+    Filesystem      Size  Used Avail Use% Mounted on
+    /dev/nvme1n1    894G   21G  874G   3% /srv/vm
+    tmpfs            32G  1.7G   30G   6% /tmp
+    /dev/md1        847G  793G   11G  99% /
+    NAME          SIZE TYPE  FSTYPE            MOUNTPOINT         ROTA MODEL
+    loop0        32.5M loop  squashfs          /snap/snapd/28332     0 
+    loop1        66.8M loop  squashfs          /snap/core24/2307     0 
+    loop2        67.6M loop  squashfs          /snap/certbot/5940    0 
+    nvme0n1     894.3G disk                                          0 Dell DC NVMe PM9A3 RI U.2 960GB
+    ├─nvme0n1p1   512M part  vfat              /boot/efi             0 
+    ├─nvme0n1p2     4G part  swap                                    0 
+    ├─nvme0n1p3   512M part  linux_raid_member                       0 
+    │ └─md0       511M raid1 ext4              /boot                 0 
+    └─nvme0n1p4 860.9G part  linux_raid_member                       0 
+      └─md1     860.7G raid1 ext4              /                     0 
+    nvme1n1     894.3G disk  xfs               /srv/vm               0 Dell DC NVMe PM9A3 RI U.2 960GB
+    --stderr--
+    --exit=0--
+    NLPV[kcfg] $ ls /boot | head; for o in BLK_DEV_LOOP BLK_DEV_DM DM_LOG_WRITES DM_FLAKEY DM_ERROR DM_THIN_PROVISIONING XFS_FS EXT4_FS BTRFS_FS VIRTIO_BLK BLK_DEV_WRITE_MOUNTED IO_URING MEMCG BLK_CGROUP DM_DUST DM_ZERO DM_LINEAR FAULT_INJECTION FAIL_MAKE_REQUEST; do grep -h "CONFIG_$o=\|CONFIG_$o is" /boot/config-$(uname -r) || echo "CONFIG_$o not set/absent"; done
+    --stdout--
+    System.map-7.0.0-38-generic
+    System.map-7.0.0-43-generic
+    config-7.0.0-38-generic
+    config-7.0.0-43-generic
+    efi
+    grub
+    initrd.img
+    initrd.img-7.0.0-38-generic
+    initrd.img-7.0.0-43-generic
+    initrd.img.old
+    CONFIG_BLK_DEV_LOOP=y
+    CONFIG_BLK_DEV_DM=y
+    CONFIG_DM_LOG_WRITES=m
+    CONFIG_DM_FLAKEY=m
+    CONFIG_DM_ERROR not set/absent
+    CONFIG_DM_THIN_PROVISIONING=m
+    CONFIG_XFS_FS=m
+    CONFIG_EXT4_FS=y
+    CONFIG_BTRFS_FS=m
+    CONFIG_VIRTIO_BLK=y
+    CONFIG_BLK_DEV_WRITE_MOUNTED=y
+    CONFIG_IO_URING=y
+    CONFIG_MEMCG=y
+    CONFIG_BLK_CGROUP=y
+    # CONFIG_DM_DUST is not set
+    CONFIG_DM_ZERO=m
+    CONFIG_DM_LINEAR not set/absent
+    # CONFIG_FAULT_INJECTION is not set
+    CONFIG_FAIL_MAKE_REQUEST not set/absent
+    --stderr--
+    --exit=0--
+    NLPV[mods] $ R=$(uname -r); for m in loop dm-mod dm-log-writes dm-flakey dm-linear dm-bufio dm-thin-pool dm-persistent-data dm-dust xfs ext4 virtio_blk raid0 libcrc32c crc32c_generic; do echo "== $m"; find /lib/modules/$R -name "$m.ko*" ; grep -h "/$m.ko" /lib/modules/$R/modules.builtin 2>/dev/null; modinfo -F depends $m 2>/dev/null; done
+    --stdout--
+    == loop
+    kernel/drivers/block/loop.ko
+    == dm-mod
+    kernel/drivers/md/dm-mod.ko
+    == dm-log-writes
+    /lib/modules/7.0.0-38-generic/kernel/drivers/md/dm-log-writes.ko.zst
+
+    == dm-flakey
+    /lib/modules/7.0.0-38-generic/kernel/drivers/md/dm-flakey.ko.zst
+
+    == dm-linear
+    == dm-bufio
+    /lib/modules/7.0.0-38-generic/kernel/drivers/md/dm-bufio.ko.zst
+
+    == dm-thin-pool
+    /lib/modules/7.0.0-38-generic/kernel/drivers/md/dm-thin-pool.ko.zst
+    dm-persistent-data,dm-bio-prison
+    == dm-persistent-data
+    /lib/modules/7.0.0-38-generic/kernel/drivers/md/persistent-data/dm-persistent-data.ko.zst
+    dm-bufio
+    == dm-dust
+    == xfs
+    /lib/modules/7.0.0-38-generic/kernel/fs/xfs/xfs.ko.zst
+
+    == ext4
+    kernel/fs/ext4/ext4.ko
+    == virtio_blk
+    kernel/drivers/block/virtio_blk.ko
+    == raid0
+    /lib/modules/7.0.0-38-generic/kernel/drivers/md/raid0.ko.zst
+
+    == libcrc32c
+    == crc32c_generic
+    --stderr--
+    --exit=1--
+    NLPV[vmdir] $ ls -la /srv/vm/overdrive-testing /srv/vm | head -40; file /srv/vm/overdrive-testing/kernel | head -3
+    --stdout--
+    /srv/vm:
+    total 16
+    drwxr-xr-x 10 ubuntu root  111 Nov 17 00:15 .
+    drwxr-xr-x  3 root   root 4096 Aug 10 14:16 ..
+    drwxr-xr-x  3 root   root  105 Aug 14 12:20 diag
+    drwx--x---  6 root   4200  134 Nov 17 04:22 metal
+    drwx--x--- 85 root   4200 8192 Nov 14 19:45 overdrive-testing
+    drwxr-xr-x  3 root   root   18 Aug 10 18:27 p12j
+    drwxr-xr-x  5 root   root   56 Aug 10 18:10 p6
+    drwxr-xr-x  4 root   root   66 Aug 10 18:21 p6f
+    drwxr-xr-x  4 root   root   34 Aug 10 17:43 p6g
+    drwxr-xr-x  3 root   root   34 Aug 10 17:54 p6h
+
+    /srv/vm/overdrive-testing:
+    total 44480
+    drwx--x--- 85 root   4200      8192 Nov 14 19:45 .
+    drwxr-xr-x 10 ubuntu root       111 Nov 17 00:15 ..
+    -rw-r--r--  1 root   root         0 Oct 19 07:10 .guest-kit-lock
+    -rw-r--r--  1 root   root        16 Oct 19 07:10 .kernel-staged-from
+    -rw-r--r--  1 root   root  67108864 Aug 17 22:36 .overdrive-vm-rootfs-vmmeq-a.img
+    -rw-r--r--  1 ubuntu input 67108864 Aug 17 22:36 .overdrive-vm-rootfs-vmmeq-early-ch.img
+    -rw-r--r--  1 root   root  67108864 Aug 17 22:36 .overdrive-vm-rootfs-vmmeq-early-sim.img
+    -rw-r--r--  1 ubuntu input 67108864 Aug 17 22:37 .overdrive-vm-rootfs-vmmeq-tail-ch.img
+    -rw-r--r--  1 root   root  67108864 Aug 17 22:37 .overdrive-vm-rootfs-vmmeq-tail-sim.img
+    -rw-r--r--  1 root   root         0 Aug 13 23:26 .provision-lock
+    -rw-r-----  1 root   root        45 Nov 14 13:34 .rootfs-built-from
+    drwxr-x---  5 root   root       184 Nov  5 19:45 d17-d17-inv-0SFCqq
+    drwxr-x---  5 root   root       184 Nov  5 19:47 d17-d17-inv-OHdUAY
+    drwxr-x---  5 root   root       184 Nov  5 19:50 d17-d17-inv-TOPStY
+    drwxr-x---  5 root   root      4096 Nov  5 19:31 gl-loopback-binds-D48XRI
+    drwxr-x---  5 root   root      4096 Nov  5 19:33 gl-report-before-exit-hJJnYJ
+    drwxr-xr-x  4 root   root        95 Sep 22 22:36 gti-failure-serve-BxF37V
+    drwxr-xr-x  4 root   root        95 Sep 22 22:31 gti-failure-serve-iGHl3d
+    drwxr-xr-x  3 root   root       125 Aug 29 17:42 gti-mesh-rNMmre
+    drwxr-xr-x  3 root   root        33 Aug 28 20:30 gti-net-apply-failure-K9y6OS
+    drwxr-xr-x  3 root   root        20 Aug 30 01:17 gti-resolver-refusal-7IqZMm
+    drwxr-xr-x  4 root   root        35 Sep 22 22:29 gti-resolver-refusal-WArgHG
+    drwxr-xr-x  4 root   root        35 Sep 22 22:35 gti-resolver-refusal-eoGBYv
+    drwxr-xr-x  5 root   root       188 Sep 23 04:58 gti-restart-reinstall-failure-6jWnm8
+    drwxr-xr-x  5 root   root       188 Sep 23 07:50 gti-restart-reinstall-failure-AGn9Kh
+    /srv/vm/overdrive-testing/kernel: Linux kernel x86 boot executable, bzImage, version 7.0.0-38-generic (buildd@lcy02-amd64-070) #38-Ubuntu SMP PREEMPT_DYNAMIC Fri Sep  4 09:10:14 UTC 2026, RO-rootFS, Normal VGA, setup size 512*39, syssize 0x107f20, jump 0x26c 0x8cd88ec0fc8cd239 instruction, protocol 2.15, from protected-mode code at offset 0x2cc 0x10456ea bytes ZST compressed, relocatable, handover offset 0x1072530, legacy 64-bit entry point, can be above 4G, 32-bit EFI handoff entry point, 64-bit EFI handoff entry point, EFI kexec boot support, xloadflags bit 5, max cmdline size 2047, init_size 0x44c1000
+    --stderr--
+    --exit=0--
+    NLPV[fs] $ xfs_info /srv/vm 2>&1 | head -20; mount | grep -E ' /srv| xfs'
+    --stdout--
+    meta-data=/dev/nvme1n1           isize=512    agcount=32, agsize=7325728 blks
+             =                       sectsz=4096  attr=2, projid32bit=1
+             =                       crc=1        finobt=1, sparse=1, rmapbt=1
+             =                       reflink=1    bigtime=1 inobtcount=1 nrext64=1
+             =                       exchange=0   metadir=0
+    data     =                       bsize=4096   blocks=234423126, imaxpct=25
+             =                       sunit=32     swidth=32 blks
+    naming   =version 2              bsize=4096   ascii-ci=0, ftype=1, parent=0
+    log      =internal log           bsize=4096   blocks=114464, version=2
+             =                       sectsz=4096  sunit=1 blks, lazy-count=1
+    realtime =none                   extsz=4096   blocks=0, rtextents=0
+             =                       rgcount=0    rgsize=0 extents
+             =                       zoned=0      start=0 reserved=0
+    /dev/nvme1n1 on /srv/vm type xfs (rw,noatime,inode64,logbufs=8,logbsize=32k,sunit=256,swidth=256,noquota)
+    --stderr--
+    --exit=0--
+    NLPV[chsha] $ sha256sum /usr/local/bin/cloud-hypervisor; file /usr/local/bin/cloud-hypervisor | cut -c1-200; sysctl kernel.io_uring_disabled; cat /sys/block/nvme1n1/queue/write_cache /sys/block/nvme1n1/queue/rotational
+    --stdout--
+    6d54fbd2611e692fda00e476fc0723e9502bfd8acd53c8bc46edd96e84f3e842  /usr/local/bin/cloud-hypervisor
+    /usr/local/bin/cloud-hypervisor: ELF 64-bit LSB pie executable, x86-64, version 1 (SYSV), static-pie linked, BuildID[sha1]=59822e464d5b332a78c753fbb20024e08f4a4527, stripped
+    kernel.io_uring_disabled = 0
+    write through
+    0
+    --stderr--
+    --exit=0--
+    NLPV[cgroup] $ cat /proc/self/cgroup; stat -fc %T /sys/fs/cgroup; ls /sys/fs/cgroup | head -30
+    --stdout--
+    0::/system.slice/overdrive-metal-run-d5c34abbf2eb8191b39b445b.service
+    cgroup2fs
+    cgroup.controllers
+    cgroup.max.depth
+    cgroup.max.descendants
+    cgroup.pressure
+    cgroup.procs
+    cgroup.stat
+    cgroup.subtree_control
+    cgroup.threads
+    cpu.pressure
+    cpu.stat
+    cpu.stat.local
+    cpuset.cpus.effective
+    cpuset.cpus.isolated
+    cpuset.mems.effective
+    dev-hugepages.mount
+    dev-mqueue.mount
+    dmem.capacity
+    dmem.current
+    init.scope
+    io.cost.model
+    io.cost.qos
+    io.pressure
+    io.prio.class
+    io.stat
+    memory.numa_stat
+    memory.pressure
+    memory.reclaim
+    memory.stat
+    memory.zswap.writeback
+    misc.capacity
+    --stderr--
+    --exit=0--
+
+OVERDRIVE_METAL_RUN_COMPLETE run_id=d5c34abbf2eb8191b39b445b exit_code=0 cause=command_returned

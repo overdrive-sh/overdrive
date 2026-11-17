@@ -1,0 +1,13 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.13s
+     Running `target/debug/xtask metal run -- cargo nextest run --manifest-path spike-scratch/node-local-persistent-volume-a/Cargo.toml --features integration-tests,kvm-tests -E 'binary(probe_a) & test(a1_diag_wt_sync_strace)' --no-fail-fast`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+OVERDRIVE_METAL_RUN_ID=f720eabb13ad7fe7efab1736
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire exclusive physical-maintenance barrier (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_RUN_REGISTERED run_id=f720eabb13ad7fe7efab1736
+OVERDRIVE_METAL_RUNNER_ERROR error=checkout_timeout

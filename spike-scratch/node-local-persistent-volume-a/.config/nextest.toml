@@ -1,0 +1,32 @@
+# Same wrapper wiring as the repository's .config/nextest.toml; the path is
+# relative to THIS crate's workspace root.
+experimental = ["wrapper-scripts"]
+
+[profile.default]
+fail-fast = false
+retries = 0
+slow-timeout = { period = "300s", terminate-after = 3 }
+status-level = "all"
+final-status-level = "all"
+failure-output = "immediate-final"
+success-output = "immediate-final"
+
+[scripts.wrapper.metal]
+command = { command-line = "../../infra/metal/test-wrapper.sh", relative-to = "workspace-root" }
+target-runner = "within-wrapper"
+
+[[profile.default.scripts]]
+filter = 'all()'
+run-wrapper = "metal"
+
+# Guests of one group share a fixed CID: never run two at once.
+[test-groups.serial]
+max-threads = 1
+
+[[profile.default.overrides]]
+filter = 'all()'
+test-group = 'serial'
+
+[[profile.default.overrides]]
+filter = 'binary(probe_d)'
+slow-timeout = { period = "300s", terminate-after = 4 }

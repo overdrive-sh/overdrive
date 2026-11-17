@@ -1,0 +1,77 @@
+From 56299d314b1ba97e1092d5db99595facb30c0930 Mon Sep 17 00:00:00 2001
+From: Marcus Schack Abildskov <work@marcus-sa.dev>
+Date: Tue, 17 Nov 2026 04:57:49 +0100
+Subject: [PATCH 2/3] spike(F3): trust an explicit image_type; do not sniff
+ guest-writable header bytes
+
+open_disk always read the first sector and the trailing 512 bytes to detect the
+image type, then device_manager failed the boot with DiskImageTypeMismatch (or
+a parse error) when they disagreed with the configured type. With an explicit
+type the bytes a guest writes to its own data disk can brick the next boot.
+DiskOpenOptions gains image_type; Unknown still detects.
+
+Prototype for the DESIGN spikes of GH #348: typechecked, not built or run.
+---
+ block/src/factory.rs      | 12 +++++++++++-
+ vmm/src/device_manager.rs |  1 +
+ 2 files changed, 12 insertions(+), 1 deletion(-)
+
+diff --git a/block/src/factory.rs b/block/src/factory.rs
+index d029952b7..346ce22c1 100644
+--- a/block/src/factory.rs
++++ b/block/src/factory.rs
+@@ -37,6 +37,10 @@ pub struct DiskOpenOptions<'a> {
+     pub backing_files: bool,
+     pub disable_io_uring: bool,
+     pub disable_aio: bool,
++    /// The image type the configuration states. `ImageType::Unknown` asks for
++    /// detection from the file header; any other value is trusted and the
++    /// guest-writable header bytes are not read.
++    pub image_type: ImageType,
+ }
+ 
+ /// Result of [`open_disk`], carrying the detected image type alongside
+@@ -91,7 +95,11 @@ pub fn open_disk(options: &DiskOpenOptions<'_>) -> BlockResult<OpenedDisk> {
+     }
+ 
+     let mut file = open_disk_image(options.path, &fs_options)?;
+-    let image_type = detect_image_type(&mut file)?;
++    let image_type = if options.image_type == ImageType::Unknown {
++        detect_image_type(&mut file)?
++    } else {
++        options.image_type
++    };
+ 
+     let disk: Box<dyn AsyncFullDiskFile> = match image_type {
+         ImageType::FixedVhd => open_fixed_vhd(file, options)?,
+@@ -233,6 +241,7 @@ mod unit_tests {
+             backing_files: false,
+             disable_io_uring: true,
+             disable_aio: true,
++            image_type: ImageType::Unknown,
+         }
+     }
+ 
+@@ -292,6 +301,7 @@ mod unit_tests {
+             backing_files: false,
+             disable_io_uring: true,
+             disable_aio: true,
++            image_type: ImageType::Unknown,
+         };
+         let opened = open_disk(&options).unwrap();
+         assert_eq!(opened.image_type, ImageType::Raw);
+diff --git a/vmm/src/device_manager.rs b/vmm/src/device_manager.rs
+index 9907f2be0..a18155001 100644
+--- a/vmm/src/device_manager.rs
++++ b/vmm/src/device_manager.rs
+@@ -2754,6 +2754,7 @@ impl DeviceManager {
+                 backing_files: disk_cfg.backing_files,
+                 disable_io_uring: disk_cfg.disable_io_uring,
+                 disable_aio: disk_cfg.disable_aio,
++                image_type: disk_cfg.image_type,
+             })
+             .map_err(DeviceManagerError::Disk)?;
+ 
+-- 
+2.52.0
+

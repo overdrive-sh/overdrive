@@ -1,0 +1,80 @@
+From 4f45f59b331b8e4c12e32956c79b10b87355296c Mon Sep 17 00:00:00 2001
+From: Marcus Schack Abildskov <work@marcus-sa.dev>
+Date: Tue, 17 Nov 2026 04:56:08 +0100
+Subject: [PATCH 1/3] spike(F1): propagate a failed write-through fsync to the
+ guest
+
+Write-through mode runs fsync(None) after every completed guest write. The
+io_uring and AIO raw engines discarded its result, so the guest saw success for
+a write whose flush failed; the sync engine returned the error, which
+process_queue_complete forwarded with ? and so left the request uncompleted
+(the guest wedged). Return the error from the io_uring and AIO engines and
+complete the request with VIRTIO_BLK_S_IOERR in the caller.
+
+Prototype for the DESIGN spikes of GH #348: typechecked, not built or run.
+---
+ block/src/formats/raw/engine_aio.rs   |  4 +++-
+ block/src/formats/raw/engine_uring.rs |  4 +++-
+ virtio-devices/src/block.rs           | 16 +++++++++++++++-
+ 3 files changed, 21 insertions(+), 3 deletions(-)
+
+diff --git a/block/src/formats/raw/engine_aio.rs b/block/src/formats/raw/engine_aio.rs
+index ba7385f27..3dcb415c2 100644
+--- a/block/src/formats/raw/engine_aio.rs
++++ b/block/src/formats/raw/engine_aio.rs
+@@ -80,7 +80,9 @@ impl AsyncIo for RawAio {
+                 .map_err(AsyncIoError::Fsync)?;
+         } else {
+             // SAFETY: FFI call with a valid fd
+-            unsafe { libc::fsync(fd) };
++            if unsafe { libc::fsync(fd) } < 0 {
++                return Err(AsyncIoError::Fsync(std::io::Error::last_os_error()));
++            }
+         }
+ 
+         Ok(())
+diff --git a/block/src/formats/raw/engine_uring.rs b/block/src/formats/raw/engine_uring.rs
+index 68a58530f..024262853 100644
+--- a/block/src/formats/raw/engine_uring.rs
++++ b/block/src/formats/raw/engine_uring.rs
+@@ -78,7 +78,9 @@ impl AsyncIo for RawAsync {
+                 .map_err(AsyncIoError::Fsync)?;
+         } else {
+             // SAFETY: FFI call with a valid fd
+-            unsafe { libc::fsync(fd) };
++            if unsafe { libc::fsync(fd) } < 0 {
++                return Err(AsyncIoError::Fsync(std::io::Error::last_os_error()));
++            }
+         }
+ 
+         Ok(())
+diff --git a/virtio-devices/src/block.rs b/virtio-devices/src/block.rs
+index 135b43934..09493efd5 100644
+--- a/virtio-devices/src/block.rs
++++ b/virtio-devices/src/block.rs
+@@ -553,7 +553,21 @@ impl BlockEpollHandler {
+                     }
+                     RequestType::Out => {
+                         if !request.writeback {
+-                            self.disk_image.fsync(None).map_err(Error::Fsync)?;
++                            if let Err(e) = self.disk_image.fsync(None) {
++                                // Write-through: the guest was promised the data is on the
++                                // device when the write completes. Complete this request with
++                                // IOERR instead of abandoning it or reporting success.
++                                warn!("Write-through fsync failed: {request:x?} {e:?}");
++                                mem.write_obj(VIRTIO_BLK_S_IOERR as u8, request.status_addr())
++                                    .map_err(Error::RequestStatus)?;
++                                self.queue
++                                    .add_used(mem.deref(), desc_index, 1)
++                                    .map_err(Error::QueueAddUsed)?;
++                                self.queue
++                                    .enable_notification(mem.deref())
++                                    .map_err(Error::QueueEnableNotification)?;
++                                continue;
++                            }
+                         }
+                         for (_, data_len) in request.data_descriptors() {
+                             write_bytes += Wrapping(*data_len as u64);
+-- 
+2.52.0
+

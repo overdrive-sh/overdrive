@@ -1,0 +1,508 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.22s
+     Running `target/debug/xtask metal run -- cargo nextest run --manifest-path spike-scratch/node-local-persistent-volume-a/Cargo.toml --features integration-tests,kvm-tests -E 'binary(probe_a) & test(a3_fault_) | binary(probe_spike) & (test(a3_fault_) | test(spike_a1_))' --no-fail-fast --no-capture`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+OVERDRIVE_METAL_RUN_ID=9378e42303e5231ecb66e230
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire exclusive physical-maintenance barrier (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_RUN_REGISTERED run_id=9378e42303e5231ecb66e230
+OVERDRIVE_METAL_LEASE_ACQUIRED token=9378e42303e5231ecb66e230 pid=3104461
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/antananarivo -> ubuntu@151.115.99.251:/home/ubuntu/nlpv-spike
+
+sent 2,093,600 bytes  received 7,732 bytes  840,532.80 bytes/sec
+total size is 2,130,931,449  speedup is 1,014.09
+
+########## [bootstrap] materialising standalone .git (common dir 7.6G)
+
+sent 446,623 bytes  received 520,272 bytes  386,758.00 bytes/sec
+total size is 905,368,384  speedup is 936.37
+fatal: not a git repository: vendors/cloud-hypervisor/../../../../../../Git/helios/.git/worktrees/antananarivo/modules/vendors/cloud-hypervisor
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+OVERDRIVE_METAL_RUN_STARTED run_id=9378e42303e5231ecb66e230
+info: experimental features enabled: wrapper-scripts
+   Compiling cfg-if v1.0.4
+   Compiling hashbrown v0.17.0
+   Compiling pin-project-lite v0.2.17
+   Compiling equivalent v1.0.2
+   Compiling memchr v2.8.0
+   Compiling typenum v1.20.0
+   Compiling libc v0.2.190
+   Compiling serde_core v1.0.228
+   Compiling futures-sink v0.3.32
+   Compiling num-conv v0.1.0
+   Compiling powerfmt v0.2.0
+   Compiling time-core v0.1.7
+   Compiling futures-core v0.3.32
+   Compiling zerocopy v0.8.48
+   Compiling ptr_meta v0.3.1
+   Compiling slab v0.4.12
+   Compiling scopeguard v1.2.0
+   Compiling itoa v1.0.18
+   Compiling futures-io v0.3.32
+   Compiling simdutf8 v0.1.5
+   Compiling futures-task v0.3.32
+   Compiling rancor v0.1.1
+   Compiling smallvec v1.15.1
+   Compiling time-macros v0.2.25
+   Compiling lock_api v0.4.14
+   Compiling zmij v1.0.21
+   Compiling winnow v0.7.15
+   Compiling once_cell v1.21.4
+   Compiling bytecheck v0.8.2
+   Compiling futures-channel v0.3.32
+   Compiling unsafe-libyaml-norway v0.2.15
+   Compiling ryu v1.0.23
+   Compiling bitflags v2.11.1
+   Compiling ciborium-io v0.2.2
+   Compiling toml_write v0.1.2
+   Compiling tracing-core v0.1.36
+   Compiling munge v0.4.7
+   Compiling cpufeatures v0.2.17
+   Compiling arrayref v0.3.9
+   Compiling hashbrown v0.16.1
+   Compiling constant_time_eq v0.4.2
+   Compiling arrayvec v0.7.6
+   Compiling futures-util v0.3.32
+   Compiling cpufeatures v0.3.0
+   Compiling rend v0.5.3
+   Compiling bytes v1.11.1
+   Compiling thiserror v2.0.18
+   Compiling blake3 v1.8.5
+   Compiling memoffset v0.9.1
+   Compiling untrusted v0.9.0
+   Compiling hex v0.4.3
+   Compiling generic-array v0.14.7
+   Compiling base64 v0.22.1
+   Compiling tracing v0.1.44
+   Compiling zeroize v1.8.2
+   Compiling pem v3.0.6
+   Compiling rustls-pki-types v1.14.0
+   Compiling linux-raw-sys v0.12.1
+   Compiling crypto-common v0.1.7
+   Compiling block-buffer v0.10.4
+   Compiling digest v0.10.7
+   Compiling getrandom v0.2.17
+   Compiling errno v0.3.14
+   Compiling parking_lot_core v0.9.12
+   Compiling getrandom v0.4.2
+   Compiling socket2 v0.6.3
+   Compiling mio v1.2.0
+   Compiling nix v0.30.1
+   Compiling linux-keyutils v0.2.5
+   Compiling signal-hook-registry v1.4.8
+   Compiling nlpv-probe v0.0.0 (/home/ubuntu/nlpv-spike/spike-scratch/node-local-persistent-volume-a)
+   Compiling rand_core v0.6.4
+   Compiling sha2 v0.10.9
+   Compiling ring v0.17.14
+warning: unused import: `PathBuf`
+  --> src/lib.rs:14:23
+   |
+14 | use std::path::{Path, PathBuf};
+   |                       ^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+   Compiling parking_lot v0.12.5
+   Compiling tokio v1.52.1
+   Compiling rustix v1.1.4
+   Compiling serde v1.0.228
+   Compiling indexmap v2.14.0
+   Compiling deranged v0.5.8
+   Compiling serde_json v1.0.149
+   Compiling uuid v1.23.1
+   Compiling toml_datetime v0.6.11
+   Compiling serde_spanned v0.6.9
+   Compiling serde_norway v0.9.42
+   Compiling ipnet v2.12.0
+   Compiling toml_edit v0.22.27
+   Compiling futures-executor v0.3.32
+   Compiling time v0.3.45
+   Compiling futures v0.3.32
+   Compiling utoipa v5.4.0
+   Compiling half v2.7.1
+   Compiling ppv-lite86 v0.2.21
+warning: `nlpv-probe` (lib) generated 1 warning (run `cargo fix --lib -p nlpv-probe` to apply 1 suggestion)
+   Compiling rkyv v0.8.15
+   Compiling yasna v0.6.0
+   Compiling ciborium-ll v0.2.2
+   Compiling rand_chacha v0.3.1
+   Compiling ciborium v0.2.2
+   Compiling rand v0.8.6
+   Compiling rcgen v0.14.8
+   Compiling toml v0.8.23
+   Compiling overdrive-core v0.0.0 (/home/ubuntu/nlpv-spike/crates/overdrive-core)
+   Compiling overdrive-fwd v0.0.0 (/home/ubuntu/nlpv-spike/crates/overdrive-fwd)
+   Compiling overdrive-host v0.0.0 (/home/ubuntu/nlpv-spike/crates/overdrive-host)
+   Compiling overdrive-testing v0.0.0 (/home/ubuntu/nlpv-spike/crates/overdrive-testing)
+warning: unused doc comment
+  --> tests/probe_c.rs:50:1
+   |
+50 | /// C1b: the same file volume with RLIMIT_FSIZE >= volume works (control), and growth by resize-disk past the limit.
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ rustdoc does not generate documentation for macro invocations
+   |
+   = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+   = note: `#[warn(unused_doc_comments)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused doc comment
+  --> tests/probe_c.rs:66:1
+   |
+66 | /// C3: a second writable disk under uid 4200 + landlock + seccomp; and the negative permission cases.
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ rustdoc does not generate documentation for macro invocations
+   |
+   = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+
+warning: unused doc comment
+  --> tests/probe_b.rs:31:1
+   |
+31 | / /// B1b: the lock is taken at boot, not at open: a second VMM that is merely *created* (not booted) and
+32 | | /// a plain `open()` do not conflict. Evidence: lock state before the first boot vs after.
+   | |_-----------------------------------------------------------------------------------------^
+   |   |
+   |   rustdoc does not generate documentation for macro invocations
+   |
+   = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+   = note: `#[warn(unused_doc_comments)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused doc comment
+   --> tests/probe_b.rs:112:1
+    |
+112 | /// B3: ways around the lock.
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ rustdoc does not generate documentation for macro invocations
+    |
+    = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+
+warning: unused doc comment
+   --> tests/probe_b.rs:147:1
+    |
+147 | /// Kernel semantics of the claim CH never takes (probe-level, no CH): O_EXCL on a block device.
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ rustdoc does not generate documentation for macro invocations
+    |
+    = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+
+warning: unused doc comment
+   --> tests/probe_b.rs:165:1
+    |
+165 | /// B4: does hot-remove release the lock?
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ rustdoc does not generate documentation for macro invocations
+    |
+    = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+
+warning: unused doc comment
+   --> tests/probe_b.rs:183:1
+    |
+183 | /// B2c: a replacement started the instant the predecessor's guest ends: does it race the lock release?
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ rustdoc does not generate documentation for macro invocations
+    |
+    = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+
+warning: unused doc comment
+   --> tests/probe_spike.rs:191:1
+    |
+191 | /// A never-written raw volume with no image_type: stock detection says Raw on both binaries.
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ rustdoc does not generate documentation for macro invocations
+    |
+    = help: to document an item produced by a macro, the macro must produce the documentation as part of its expansion
+    = note: `#[warn(unused_doc_comments)]` (part of `#[warn(unused)]`) on by default
+
+warning: `nlpv-probe` (lib test) generated 1 warning (1 duplicate)
+warning: `nlpv-probe` (test "probe_c") generated 2 warnings
+warning: `nlpv-probe` (test "probe_b") generated 5 warnings
+warning: `nlpv-probe` (test "probe_spike") generated 1 warning
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 22.27s
+────────────
+ Nextest run ID eebbc60a-b908-435b-8029-9faa2dbce925 with nextest profile: default
+    Starting 12 tests across 2 binaries (34 tests and 7 binaries skipped)
+        SKIP [         ] (─────) nlpv-probe::probe_a a1_diag_wt_sync_strace
+        SKIP [         ] (─────) nlpv-probe::probe_a a1_guest_odirect_wb_uring
+        SKIP [         ] (─────) nlpv-probe::probe_a a1_kill9_wb_buffered_uring
+        SKIP [         ] (─────) nlpv-probe::probe_a a1_kill9_wb_direct_uring
+        SKIP [         ] (─────) nlpv-probe::probe_a a1_negctl_no_flush_must_violate
+        SKIP [         ] (─────) nlpv-probe::probe_a a1_wb_buffered_aio
+        SKIP [         ] (─────) nlpv-probe::probe_a a1_wb_buffered_sync
+        SKIP [         ] (─────) nlpv-probe::probe_a a1_wb_buffered_uring
+        SKIP [         ] (─────) nlpv-probe::probe_a a1_wb_direct_sync
+        SKIP [         ] (─────) nlpv-probe::probe_a a1_wb_direct_uring
+        SKIP [         ] (─────) nlpv-probe::probe_a a1_wt_buffered_sync
+        SKIP [         ] (─────) nlpv-probe::probe_a a1_wt_buffered_uring
+        SKIP [         ] (─────) nlpv-probe::probe_a a1_wt_direct_uring
+        SKIP [         ] (─────) nlpv-probe::probe_a a2_xfs_prealloc_wb_buffered_uring
+        SKIP [         ] (─────) nlpv-probe::probe_a a2_xfs_prealloc_wb_direct_uring
+        SKIP [         ] (─────) nlpv-probe::probe_a a2_xfs_sparse_kill9_wb_buffered
+        SKIP [         ] (─────) nlpv-probe::probe_a a2_xfs_sparse_wb_buffered_uring
+        SKIP [         ] (─────) nlpv-probe::probe_a a2_xfs_sparse_wt_buffered_uring
+       START [         ] ( 1/12) nlpv-probe::probe_a a3_fault_wb_explicit_flush_sync
+
+running 1 test
+
+thread 'a3_fault_wb_explicit_flush_sync' (3108189) panicked at tests/probe_a.rs:82:1:
+guest group "cgroup-default" could not run a3_fault_wb_explicit_flush_sync: Fixture(OverdriveInitBuildFailed { target: "x86_64-unknown-linux-musl", status: Some(101), stderr: "   Compiling proc-macro2 v1.0.106\n   Compiling unicode-ident v1.0.24\n   Compiling quote v1.0.45\n   Compiling serde_core v1.0.228\n   Compiling cfg-if v1.0.4\n   Compiling libc v0.2.190\n   Compiling version_check v0.9.5\n   Compiling serde v1.0.228\n   Compiling equivalent v1.0.2\n   Compiling memchr v2.8.0\n   Compiling hashbrown v0.17.0\n   Compiling zerocopy v0.8.48\n   Compiling pin-project-lite v0.2.17\n   Compiling typenum v1.20.0\n   Compiling regex-syntax v0.8.10\n   Compiling find-msvc-tools v0.1.9\n   Compiling futures-sink v0.3.32\n   Compiling zmij v1.0.21\n   Compiling shlex v1.3.0\n   Compiling futures-core v0.3.32\n   Compiling parking_lot_core v0.9.12\n   Compiling cc v1.2.60\n   Compiling itoa v1.0.18\n   Compiling futures-channel v0.3.32\n   Compiling futures-io v0.3.32\n   Compiling smallvec v1.15.1\n   Compiling futures-task v0.3.32\n   Compiling generic-array v0.14.7\n   Compiling getrandom v0.4.2\n   Compiling slab v0.4.12\n   Compiling aho-corasick v1.1.4\n   Compiling once_cell v1.21.4\n   Compiling simdutf8 v0.1.5\n   Compiling scopeguard v1.2.0\n   Compiling autocfg v1.5.0\n   Compiling crc32fast v1.5.0\n   Compiling serde_json v1.0.149\n   Compiling bytes v1.11.1\n   Compiling lock_api v0.4.14\n   Compiling core-error v0.0.0\n   Compiling ciborium-io v0.2.2\n   Compiling powerfmt v0.2.0\n   Compiling winnow v0.7.15\n   Compiling object v0.36.7\n   Compiling toml_write v0.1.2\n   Compiling memoffset v0.9.1\n   Compiling syn v2.0.117\n   Compiling unsafe-libyaml-norway v0.2.15\n   Compiling foldhash v0.1.5\n   Compiling time-core v0.1.7\n   Compiling allocator-api2 v0.2.21\n   Compiling thiserror v1.0.69\n   Compiling ryu v1.0.23\n   Compiling cfg_aliases v0.2.1\n   Compiling num-conv v0.1.0\n   Compiling thiserror v2.0.18\n   Compiling nix v0.30.1\n   Compiling time-macros v0.2.25\n   Compiling hashbrown v0.15.5\n   Compiling tracing-core v0.1.36\n   Compiling arrayvec v0.7.6\n   Compiling hashbrown v0.16.1\n   Compiling crypto-common v0.1.7\n   Compiling block-buffer v0.10.4\n   Compiling bitflags v2.11.1\n   Compiling cpufeatures v0.3.0\n   Compiling constant_time_eq v0.4.2\n   Compiling digest v0.10.7\n   Compiling arrayref v0.3.9\n   Compiling cpufeatures v0.2.17\n   Compiling log v0.4.29\n   Compiling sha2 v0.10.9\n   Compiling hex v0.4.3\n   Compiling regex-automata v0.4.14\n   Compiling assert_matches v1.5.0\n   Compiling errno v0.3.14\n   Compiling mio v1.2.0\n   Compiling signal-hook-registry v1.4.8\n   Compiling parking_lot v0.12.5\n   Compiling socket2 v0.6.3\n   Compiling blake3 v1.8.5\n   Compiling overdrive-init v0.0.0 (/home/ubuntu/nlpv-spike/crates/overdrive-init)\nerror: failed to run custom build command for `overdrive-init v0.0.0 (/home/ubuntu/nlpv-spike/crates/overdrive-init)`\n\nCaused by:\n  process didn't exit successfully: `/home/ubuntu/nlpv-spike/target/release/build/overdrive-init-bcff6fbbb3144a8c/build-script-build` (exit status: 101)\n  --- stdout\n  cargo:rerun-if-changed=build.rs\n  cargo:rerun-if-changed=/home/ubuntu/nlpv-spike/target/bpf/overdrive_guest_bpf.o\n  cargo:rerun-if-changed=/home/ubuntu/nlpv-spike/target/bpf/overdrive_guest_tcp_correlation_candidate_bpf.o\n\n  --- stderr\n\n  thread 'main' (3109553) panicked at crates/overdrive-init/build.rs:16:5:\n  error: BPF object not found at /home/ubuntu/nlpv-spike/target/bpf/overdrive_guest_bpf.o; run `cargo xtask bpf-build` first\n  note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\nwarning: build failed, waiting for other jobs to finish...\n" })
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test a3_fault_wb_explicit_flush_sync ... FAILED
+
+failures:
+
+failures:
+    a3_fault_wb_explicit_flush_sync
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 22 filtered out; finished in 7.20s
+
+        FAIL [   7.277s] ( 1/12) nlpv-probe::probe_a a3_fault_wb_explicit_flush_sync
+       START [         ] ( 2/12) nlpv-probe::probe_a a3_fault_wb_explicit_flush_uring
+
+running 1 test
+
+thread 'a3_fault_wb_explicit_flush_uring' (3109660) panicked at tests/probe_a.rs:81:1:
+guest group "cgroup-default" could not run a3_fault_wb_explicit_flush_uring: Fixture(OverdriveInitBuildFailed { target: "x86_64-unknown-linux-musl", status: Some(101), stderr: "   Compiling indexmap v2.14.0\n   Compiling regex v1.12.3\n   Compiling serde_derive v1.0.228\n   Compiling ptr_meta_derive v0.3.1\n   Compiling zerocopy-derive v0.8.48\n   Compiling futures-macro v0.3.32\n   Compiling bytecheck_derive v0.8.2\n   Compiling munge_macro v0.4.7\n   Compiling deranged v0.5.8\n   Compiling serde_json v1.0.149\n   Compiling tokio-macros v2.7.0\n   Compiling thiserror-impl v1.0.69\n   Compiling rkyv_derive v0.8.15\n   Compiling tracing-attributes v0.1.31\n   Compiling thiserror-impl v2.0.18\n   Compiling blake3 v1.8.5\n   Compiling utoipa-gen v5.4.0\n   Compiling ptr_meta v0.3.1\n   Compiling rancor v0.1.1\n   Compiling uuid v1.23.1\n   Compiling async-trait v0.1.89\n   Compiling munge v0.4.7\n   Compiling bytecheck v0.8.2\n   Compiling tokio v1.52.1\n   Compiling overdrive-init v0.0.0 (/home/ubuntu/nlpv-spike/crates/overdrive-init)\nerror: failed to run custom build command for `overdrive-init v0.0.0 (/home/ubuntu/nlpv-spike/crates/overdrive-init)`\n\nCaused by:\n  process didn't exit successfully: `/home/ubuntu/nlpv-spike/target/release/build/overdrive-init-bcff6fbbb3144a8c/build-script-build` (exit status: 101)\n  --- stdout\n  cargo:rerun-if-changed=build.rs\n  cargo:rerun-if-changed=/home/ubuntu/nlpv-spike/target/bpf/overdrive_guest_bpf.o\n  cargo:rerun-if-changed=/home/ubuntu/nlpv-spike/target/bpf/overdrive_guest_tcp_correlation_candidate_bpf.o\n\n  --- stderr\n\n  thread 'main' (3109948) panicked at crates/overdrive-init/build.rs:16:5:\n  error: BPF object not found at /home/ubuntu/nlpv-spike/target/bpf/overdrive_guest_bpf.o; run `cargo xtask bpf-build` first\n  note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\nwarning: build failed, waiting for other jobs to finish...\n" })
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test a3_fault_wb_explicit_flush_uring ... FAILED
+
+failures:
+
+failures:
+    a3_fault_wb_explicit_flush_uring
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 22 filtered out; finished in 9.20s
+
+        FAIL [   9.287s] ( 2/12) nlpv-probe::probe_a a3_fault_wb_explicit_flush_uring
+       START [         ] ( 3/12) nlpv-probe::probe_a a3_fault_wt_post_write_fsync_aio
+
+running 1 test
+
+thread 'a3_fault_wt_post_write_fsync_aio' (3110258) panicked at tests/probe_a.rs:84:1:
+guest group "cgroup-default" could not run a3_fault_wt_post_write_fsync_aio: Fixture(OverdriveInitBuildFailed { target: "x86_64-unknown-linux-musl", status: Some(101), stderr: "   Compiling serde v1.0.228\n   Compiling zerocopy v0.8.48\n   Compiling futures-util v0.3.32\n   Compiling rend v0.5.3\n   Compiling thiserror v1.0.69\n   Compiling object v0.36.7\n   Compiling tracing v0.1.44\n   Compiling thiserror v2.0.18\n   Compiling time v0.3.45\n   Compiling overdrive-init v0.0.0 (/home/ubuntu/nlpv-spike/crates/overdrive-init)\nerror: failed to run custom build command for `overdrive-init v0.0.0 (/home/ubuntu/nlpv-spike/crates/overdrive-init)`\n\nCaused by:\n  process didn't exit successfully: `/home/ubuntu/nlpv-spike/target/release/build/overdrive-init-bcff6fbbb3144a8c/build-script-build` (exit status: 101)\n  --- stdout\n  cargo:rerun-if-changed=build.rs\n  cargo:rerun-if-changed=/home/ubuntu/nlpv-spike/target/bpf/overdrive_guest_bpf.o\n  cargo:rerun-if-changed=/home/ubuntu/nlpv-spike/target/bpf/overdrive_guest_tcp_correlation_candidate_bpf.o\n\n  --- stderr\n\n  thread 'main' (3110318) panicked at crates/overdrive-init/build.rs:16:5:\n  error: BPF object not found at /home/ubuntu/nlpv-spike/target/bpf/overdrive_guest_bpf.o; run `cargo xtask bpf-build` first\n  note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\nwarning: build failed, waiting for other jobs to finish...\n" })
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test a3_fault_wt_post_write_fsync_aio ... FAILED
+
+failures:
+
+failures:
+    a3_fault_wt_post_write_fsync_aio
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 22 filtered out; finished in 5.47s
+
+        FAIL [   5.558s] ( 3/12) nlpv-probe::probe_a a3_fault_wt_post_write_fsync_aio
+       START [         ] ( 4/12) nlpv-probe::probe_a a3_fault_wt_post_write_fsync_sync
+
+running 1 test
+
+thread 'a3_fault_wt_post_write_fsync_sync' (3110361) panicked at tests/probe_a.rs:85:1:
+guest group "cgroup-default" could not run a3_fault_wt_post_write_fsync_sync: Fixture(OverdriveInitBuildFailed { target: "x86_64-unknown-linux-musl", status: Some(101), stderr: "   Compiling half v2.7.1\n   Compiling toml_datetime v0.6.11\n   Compiling serde_spanned v0.6.9\n   Compiling serde_norway v0.9.42\n   Compiling futures-executor v0.3.32\n   Compiling rkyv v0.8.15\n   Compiling ipnet v2.12.0\n   Compiling aya-obj v0.2.1\n   Compiling overdrive-init v0.0.0 (/home/ubuntu/nlpv-spike/crates/overdrive-init)\nerror: failed to run custom build command for `overdrive-init v0.0.0 (/home/ubuntu/nlpv-spike/crates/overdrive-init)`\n\nCaused by:\n  process didn't exit successfully: `/home/ubuntu/nlpv-spike/target/release/build/overdrive-init-bcff6fbbb3144a8c/build-script-build` (exit status: 101)\n  --- stdout\n  cargo:rerun-if-changed=build.rs\n  cargo:rerun-if-changed=/home/ubuntu/nlpv-spike/target/bpf/overdrive_guest_bpf.o\n  cargo:rerun-if-changed=/home/ubuntu/nlpv-spike/target/bpf/overdrive_guest_tcp_correlation_candidate_bpf.o\n\n  --- stderr\n\n  thread 'main' (3110412) panicked at crates/overdrive-init/build.rs:16:5:\n  error: BPF object not found at /home/ubuntu/nlpv-spike/target/bpf/overdrive_guest_bpf.o; run `cargo xtask bpf-build` first\n  note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\nwarning: build failed, waiting for other jobs to finish...\n" })
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test a3_fault_wt_post_write_fsync_sync ... FAILED
+
+failures:
+
+failures:
+    a3_fault_wt_post_write_fsync_sync
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 22 filtered out; finished in 4.80s
+
+        FAIL [   4.876s] ( 4/12) nlpv-probe::probe_a a3_fault_wt_post_write_fsync_sync
+       START [         ] ( 5/12) nlpv-probe::probe_a a3_fault_wt_post_write_fsync_uring
+
+running 1 test
+
+thread 'a3_fault_wt_post_write_fsync_uring' (3110461) panicked at tests/probe_a.rs:83:1:
+guest group "cgroup-default" could not run a3_fault_wt_post_write_fsync_uring: Fixture(OverdriveInitBuildFailed { target: "x86_64-unknown-linux-musl", status: Some(101), stderr: "   Compiling ciborium-ll v0.2.2\n   Compiling toml_edit v0.22.27\n   Compiling utoipa v5.4.0\n   Compiling futures v0.3.32\n   Compiling overdrive-init v0.0.0 (/home/ubuntu/nlpv-spike/crates/overdrive-init)\n   Compiling aya v0.13.1\nerror: failed to run custom build command for `overdrive-init v0.0.0 (/home/ubuntu/nlpv-spike/crates/overdrive-init)`\n\nCaused by:\n  process didn't exit successfully: `/home/ubuntu/nlpv-spike/target/release/build/overdrive-init-bcff6fbbb3144a8c/build-script-build` (exit status: 101)\n  --- stdout\n  cargo:rerun-if-changed=build.rs\n  cargo:rerun-if-changed=/home/ubuntu/nlpv-spike/target/bpf/overdrive_guest_bpf.o\n  cargo:rerun-if-changed=/home/ubuntu/nlpv-spike/target/bpf/overdrive_guest_tcp_correlation_candidate_bpf.o\n\n  --- stderr\n\n  thread 'main' (3110508) panicked at crates/overdrive-init/build.rs:16:5:\n  error: BPF object not found at /home/ubuntu/nlpv-spike/target/bpf/overdrive_guest_bpf.o; run `cargo xtask bpf-build` first\n  note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\nwarning: build failed, waiting for other jobs to finish...\n" })
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test a3_fault_wt_post_write_fsync_uring ... FAILED
+
+failures:
+
+failures:
+    a3_fault_wt_post_write_fsync_uring
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 22 filtered out; finished in 10.30s
+
+        FAIL [  10.369s] ( 5/12) nlpv-probe::probe_a a3_fault_wt_post_write_fsync_uring
+       START [         ] ( 6/12) nlpv-probe::probe_spike spike_a1_wb_buffered_uring
+
+running 1 test
+
+thread 'spike_a1_wb_buffered_uring' (3110541) panicked at tests/probe_spike.rs:37:1:
+guest group "cgroup-default" could not run spike_a1_wb_buffered_uring: Fixture(OverdriveInitBuildFailed { target: "x86_64-unknown-linux-musl", status: Some(101), stderr: "   Compiling ciborium v0.2.2\n   Compiling toml v0.8.23\n   Compiling overdrive-init v0.0.0 (/home/ubuntu/nlpv-spike/crates/overdrive-init)\nerror: failed to run custom build command for `overdrive-init v0.0.0 (/home/ubuntu/nlpv-spike/crates/overdrive-init)`\n\nCaused by:\n  process didn't exit successfully: `/home/ubuntu/nlpv-spike/target/release/build/overdrive-init-bcff6fbbb3144a8c/build-script-build` (exit status: 101)\n  --- stdout\n  cargo:rerun-if-changed=build.rs\n  cargo:rerun-if-changed=/home/ubuntu/nlpv-spike/target/bpf/overdrive_guest_bpf.o\n  cargo:rerun-if-changed=/home/ubuntu/nlpv-spike/target/bpf/overdrive_guest_tcp_correlation_candidate_bpf.o\n\n  --- stderr\n\n  thread 'main' (3110569) panicked at crates/overdrive-init/build.rs:16:5:\n  error: BPF object not found at /home/ubuntu/nlpv-spike/target/bpf/overdrive_guest_bpf.o; run `cargo xtask bpf-build` first\n  note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\nwarning: build failed, waiting for other jobs to finish...\n" })
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test spike_a1_wb_buffered_uring ... FAILED
+
+failures:
+
+failures:
+    spike_a1_wb_buffered_uring
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 22 filtered out; finished in 1.52s
+
+        FAIL [   1.615s] ( 6/12) nlpv-probe::probe_spike spike_a1_wb_buffered_uring
+       START [         ] ( 7/12) nlpv-probe::probe_spike spike_a1_wt_buffered_uring
+
+running 1 test
+
+thread 'spike_a1_wt_buffered_uring' (3110587) panicked at tests/probe_spike.rs:46:1:
+guest group "cgroup-default" could not run spike_a1_wt_buffered_uring: Fixture(OverdriveInitBuildFailed { target: "x86_64-unknown-linux-musl", status: Some(101), stderr: "   Compiling overdrive-core v0.0.0 (/home/ubuntu/nlpv-spike/crates/overdrive-core)\n   Compiling overdrive-init v0.0.0 (/home/ubuntu/nlpv-spike/crates/overdrive-init)\nerror: failed to run custom build command for `overdrive-init v0.0.0 (/home/ubuntu/nlpv-spike/crates/overdrive-init)`\n\nCaused by:\n  process didn't exit successfully: `/home/ubuntu/nlpv-spike/target/release/build/overdrive-init-bcff6fbbb3144a8c/build-script-build` (exit status: 101)\n  --- stdout\n  cargo:rerun-if-changed=build.rs\n  cargo:rerun-if-changed=/home/ubuntu/nlpv-spike/target/bpf/overdrive_guest_bpf.o\n  cargo:rerun-if-changed=/home/ubuntu/nlpv-spike/target/bpf/overdrive_guest_tcp_correlation_candidate_bpf.o\n\n  --- stderr\n\n  thread 'main' (3110610) panicked at crates/overdrive-init/build.rs:16:5:\n  error: BPF object not found at /home/ubuntu/nlpv-spike/target/bpf/overdrive_guest_bpf.o; run `cargo xtask bpf-build` first\n  note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\nwarning: build failed, waiting for other jobs to finish...\n" })
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test spike_a1_wt_buffered_uring ... FAILED
+
+failures:
+
+failures:
+    spike_a1_wt_buffered_uring
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 22 filtered out; finished in 12.74s
+
+        FAIL [  12.812s] ( 7/12) nlpv-probe::probe_spike spike_a1_wt_buffered_uring
+       START [         ] ( 8/12) nlpv-probe::probe_spike spike_a3_fault_wb_explicit_flush_sync
+
+running 1 test
+
+thread 'spike_a3_fault_wb_explicit_flush_sync' (3110634) panicked at tests/probe_spike.rs:28:1:
+guest group "cgroup-default" could not run spike_a3_fault_wb_explicit_flush_sync: Fixture(OverdriveInitBuildFailed { target: "x86_64-unknown-linux-musl", status: Some(101), stderr: "   Compiling overdrive-init v0.0.0 (/home/ubuntu/nlpv-spike/crates/overdrive-init)\n   Compiling overdrive-fwd v0.0.0 (/home/ubuntu/nlpv-spike/crates/overdrive-fwd)\nerror: failed to run custom build command for `overdrive-init v0.0.0 (/home/ubuntu/nlpv-spike/crates/overdrive-init)`\n\nCaused by:\n  process didn't exit successfully: `/home/ubuntu/nlpv-spike/target/release/build/overdrive-init-bcff6fbbb3144a8c/build-script-build` (exit status: 101)\n  --- stdout\n  cargo:rerun-if-changed=build.rs\n  cargo:rerun-if-changed=/home/ubuntu/nlpv-spike/target/bpf/overdrive_guest_bpf.o\n  cargo:rerun-if-changed=/home/ubuntu/nlpv-spike/target/bpf/overdrive_guest_tcp_correlation_candidate_bpf.o\n\n  --- stderr\n\n  thread 'main' (3110657) panicked at crates/overdrive-init/build.rs:16:5:\n  error: BPF object not found at /home/ubuntu/nlpv-spike/target/bpf/overdrive_guest_bpf.o; run `cargo xtask bpf-build` first\n  note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\nwarning: build failed, waiting for other jobs to finish...\n" })
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test spike_a3_fault_wb_explicit_flush_sync ... FAILED
+
+failures:
+
+failures:
+    spike_a3_fault_wb_explicit_flush_sync
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 22 filtered out; finished in 0.82s
+
+        FAIL [   0.891s] ( 8/12) nlpv-probe::probe_spike spike_a3_fault_wb_explicit_flush_sync
+       START [         ] ( 9/12) nlpv-probe::probe_spike spike_a3_fault_wb_explicit_flush_uring
+
+running 1 test
+
+thread 'spike_a3_fault_wb_explicit_flush_uring' (3110672) panicked at tests/probe_spike.rs:27:1:
+guest group "cgroup-default" could not run spike_a3_fault_wb_explicit_flush_uring: Fixture(OverdriveInitBuildFailed { target: "x86_64-unknown-linux-musl", status: Some(101), stderr: "   Compiling overdrive-init v0.0.0 (/home/ubuntu/nlpv-spike/crates/overdrive-init)\nerror: failed to run custom build command for `overdrive-init v0.0.0 (/home/ubuntu/nlpv-spike/crates/overdrive-init)`\n\nCaused by:\n  process didn't exit successfully: `/home/ubuntu/nlpv-spike/target/release/build/overdrive-init-bcff6fbbb3144a8c/build-script-build` (exit status: 101)\n  --- stdout\n  cargo:rerun-if-changed=build.rs\n  cargo:rerun-if-changed=/home/ubuntu/nlpv-spike/target/bpf/overdrive_guest_bpf.o\n  cargo:rerun-if-changed=/home/ubuntu/nlpv-spike/target/bpf/overdrive_guest_tcp_correlation_candidate_bpf.o\n\n  --- stderr\n\n  thread 'main' (3110693) panicked at crates/overdrive-init/build.rs:16:5:\n  error: BPF object not found at /home/ubuntu/nlpv-spike/target/bpf/overdrive_guest_bpf.o; run `cargo xtask bpf-build` first\n  note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n" })
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test spike_a3_fault_wb_explicit_flush_uring ... FAILED
+
+failures:
+
+failures:
+    spike_a3_fault_wb_explicit_flush_uring
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 22 filtered out; finished in 0.27s
+
+        FAIL [   0.346s] ( 9/12) nlpv-probe::probe_spike spike_a3_fault_wb_explicit_flush_uring
+       START [         ] (10/12) nlpv-probe::probe_spike spike_a3_fault_wt_post_write_fsync_aio
+
+running 1 test
+
+thread 'spike_a3_fault_wt_post_write_fsync_aio' (3110702) panicked at tests/probe_spike.rs:30:1:
+guest group "cgroup-default" could not run spike_a3_fault_wt_post_write_fsync_aio: Fixture(OverdriveInitBuildFailed { target: "x86_64-unknown-linux-musl", status: Some(101), stderr: "   Compiling overdrive-init v0.0.0 (/home/ubuntu/nlpv-spike/crates/overdrive-init)\nerror: failed to run custom build command for `overdrive-init v0.0.0 (/home/ubuntu/nlpv-spike/crates/overdrive-init)`\n\nCaused by:\n  process didn't exit successfully: `/home/ubuntu/nlpv-spike/target/release/build/overdrive-init-bcff6fbbb3144a8c/build-script-build` (exit status: 101)\n  --- stdout\n  cargo:rerun-if-changed=build.rs\n  cargo:rerun-if-changed=/home/ubuntu/nlpv-spike/target/bpf/overdrive_guest_bpf.o\n  cargo:rerun-if-changed=/home/ubuntu/nlpv-spike/target/bpf/overdrive_guest_tcp_correlation_candidate_bpf.o\n\n  --- stderr\n\n  thread 'main' (3110723) panicked at crates/overdrive-init/build.rs:16:5:\n  error: BPF object not found at /home/ubuntu/nlpv-spike/target/bpf/overdrive_guest_bpf.o; run `cargo xtask bpf-build` first\n  note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n" })
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test spike_a3_fault_wt_post_write_fsync_aio ... FAILED
+
+failures:
+
+failures:
+    spike_a3_fault_wt_post_write_fsync_aio
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 22 filtered out; finished in 0.25s
+
+        FAIL [   0.328s] (10/12) nlpv-probe::probe_spike spike_a3_fault_wt_post_write_fsync_aio
+       START [         ] (11/12) nlpv-probe::probe_spike spike_a3_fault_wt_post_write_fsync_sync
+
+running 1 test
+
+thread 'spike_a3_fault_wt_post_write_fsync_sync' (3110732) panicked at tests/probe_spike.rs:31:1:
+guest group "cgroup-default" could not run spike_a3_fault_wt_post_write_fsync_sync: Fixture(OverdriveInitBuildFailed { target: "x86_64-unknown-linux-musl", status: Some(101), stderr: "   Compiling overdrive-init v0.0.0 (/home/ubuntu/nlpv-spike/crates/overdrive-init)\nerror: failed to run custom build command for `overdrive-init v0.0.0 (/home/ubuntu/nlpv-spike/crates/overdrive-init)`\n\nCaused by:\n  process didn't exit successfully: `/home/ubuntu/nlpv-spike/target/release/build/overdrive-init-bcff6fbbb3144a8c/build-script-build` (exit status: 101)\n  --- stdout\n  cargo:rerun-if-changed=build.rs\n  cargo:rerun-if-changed=/home/ubuntu/nlpv-spike/target/bpf/overdrive_guest_bpf.o\n  cargo:rerun-if-changed=/home/ubuntu/nlpv-spike/target/bpf/overdrive_guest_tcp_correlation_candidate_bpf.o\n\n  --- stderr\n\n  thread 'main' (3110753) panicked at crates/overdrive-init/build.rs:16:5:\n  error: BPF object not found at /home/ubuntu/nlpv-spike/target/bpf/overdrive_guest_bpf.o; run `cargo xtask bpf-build` first\n  note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n" })
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test spike_a3_fault_wt_post_write_fsync_sync ... FAILED
+
+failures:
+
+failures:
+    spike_a3_fault_wt_post_write_fsync_sync
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 22 filtered out; finished in 0.26s
+
+        FAIL [   0.342s] (11/12) nlpv-probe::probe_spike spike_a3_fault_wt_post_write_fsync_sync
+        SKIP [         ] (─────) nlpv-probe::probe_spike spike_b1_bdev_default_lock
+        SKIP [         ] (─────) nlpv-probe::probe_spike spike_b1_bdev_full_lock
+        SKIP [         ] (─────) nlpv-probe::probe_spike spike_b1_file_default_lock
+        SKIP [         ] (─────) nlpv-probe::probe_spike spike_b2_clean_exit_bdev
+        SKIP [         ] (─────) nlpv-probe::probe_spike spike_b2_clean_exit_file
+        SKIP [         ] (─────) nlpv-probe::probe_spike spike_b2_inflight_kill_sync
+        SKIP [         ] (─────) nlpv-probe::probe_spike spike_b2_inflight_kill_uring
+        SKIP [         ] (─────) nlpv-probe::probe_spike spike_b2_sigkill_bdev
+        SKIP [         ] (─────) nlpv-probe::probe_spike spike_b2_sigkill_file
+        SKIP [         ] (─────) nlpv-probe::probe_spike spike_b3_alias_second_vmm
+        SKIP [         ] (─────) nlpv-probe::probe_spike spike_e3_qcow2_magic_bdev
+        SKIP [         ] (─────) nlpv-probe::probe_spike spike_e3_qcow2_magic_file
+        SKIP [         ] (─────) nlpv-probe::probe_spike spike_e3_untyped_clean_raw
+        SKIP [         ] (─────) nlpv-probe::probe_spike spike_e3_vhd_footer_bdev
+        SKIP [         ] (─────) nlpv-probe::probe_spike spike_e3_vhd_footer_file
+        SKIP [         ] (─────) nlpv-probe::probe_spike spike_e3_vhdx_magic_file
+       START [         ] (12/12) nlpv-probe::probe_spike spike_a3_fault_wt_post_write_fsync_uring
+
+running 1 test
+
+thread 'spike_a3_fault_wt_post_write_fsync_uring' (3110762) panicked at tests/probe_spike.rs:29:1:
+guest group "cgroup-default" could not run spike_a3_fault_wt_post_write_fsync_uring: Fixture(OverdriveInitBuildFailed { target: "x86_64-unknown-linux-musl", status: Some(101), stderr: "   Compiling overdrive-init v0.0.0 (/home/ubuntu/nlpv-spike/crates/overdrive-init)\nerror: failed to run custom build command for `overdrive-init v0.0.0 (/home/ubuntu/nlpv-spike/crates/overdrive-init)`\n\nCaused by:\n  process didn't exit successfully: `/home/ubuntu/nlpv-spike/target/release/build/overdrive-init-bcff6fbbb3144a8c/build-script-build` (exit status: 101)\n  --- stdout\n  cargo:rerun-if-changed=build.rs\n  cargo:rerun-if-changed=/home/ubuntu/nlpv-spike/target/bpf/overdrive_guest_bpf.o\n  cargo:rerun-if-changed=/home/ubuntu/nlpv-spike/target/bpf/overdrive_guest_tcp_correlation_candidate_bpf.o\n\n  --- stderr\n\n  thread 'main' (3110783) panicked at crates/overdrive-init/build.rs:16:5:\n  error: BPF object not found at /home/ubuntu/nlpv-spike/target/bpf/overdrive_guest_bpf.o; run `cargo xtask bpf-build` first\n  note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n" })
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test spike_a3_fault_wt_post_write_fsync_uring ... FAILED
+
+failures:
+
+failures:
+    spike_a3_fault_wt_post_write_fsync_uring
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 22 filtered out; finished in 0.28s
+
+        FAIL [   0.352s] (12/12) nlpv-probe::probe_spike spike_a3_fault_wt_post_write_fsync_uring
+────────────
+     Summary [  54.054s] 12 tests run: 0 passed, 12 failed, 34 skipped
+        SKIP [         ] (─────) nlpv-probe::probe_a a1_diag_wt_sync_strace
+        SKIP [         ] (─────) nlpv-probe::probe_a a1_guest_odirect_wb_uring
+        SKIP [         ] (─────) nlpv-probe::probe_a a1_kill9_wb_buffered_uring
+        SKIP [         ] (─────) nlpv-probe::probe_a a1_kill9_wb_direct_uring
+        SKIP [         ] (─────) nlpv-probe::probe_a a1_negctl_no_flush_must_violate
+        SKIP [         ] (─────) nlpv-probe::probe_a a1_wb_buffered_aio
+        SKIP [         ] (─────) nlpv-probe::probe_a a1_wb_buffered_sync
+        SKIP [         ] (─────) nlpv-probe::probe_a a1_wb_buffered_uring
+        SKIP [         ] (─────) nlpv-probe::probe_a a1_wb_direct_sync
+        SKIP [         ] (─────) nlpv-probe::probe_a a1_wb_direct_uring
+        SKIP [         ] (─────) nlpv-probe::probe_a a1_wt_buffered_sync
+        SKIP [         ] (─────) nlpv-probe::probe_a a1_wt_buffered_uring
+        SKIP [         ] (─────) nlpv-probe::probe_a a1_wt_direct_uring
+        SKIP [         ] (─────) nlpv-probe::probe_a a2_xfs_prealloc_wb_buffered_uring
+        SKIP [         ] (─────) nlpv-probe::probe_a a2_xfs_prealloc_wb_direct_uring
+        SKIP [         ] (─────) nlpv-probe::probe_a a2_xfs_sparse_kill9_wb_buffered
+        SKIP [         ] (─────) nlpv-probe::probe_a a2_xfs_sparse_wb_buffered_uring
+        SKIP [         ] (─────) nlpv-probe::probe_a a2_xfs_sparse_wt_buffered_uring
+        SKIP [         ] (─────) nlpv-probe::probe_spike spike_b1_bdev_default_lock
+        SKIP [         ] (─────) nlpv-probe::probe_spike spike_b1_bdev_full_lock
+        SKIP [         ] (─────) nlpv-probe::probe_spike spike_b1_file_default_lock
+        SKIP [         ] (─────) nlpv-probe::probe_spike spike_b2_clean_exit_bdev
+        SKIP [         ] (─────) nlpv-probe::probe_spike spike_b2_clean_exit_file
+        SKIP [         ] (─────) nlpv-probe::probe_spike spike_b2_inflight_kill_sync
+        SKIP [         ] (─────) nlpv-probe::probe_spike spike_b2_inflight_kill_uring
+        SKIP [         ] (─────) nlpv-probe::probe_spike spike_b2_sigkill_bdev
+        SKIP [         ] (─────) nlpv-probe::probe_spike spike_b2_sigkill_file
+        SKIP [         ] (─────) nlpv-probe::probe_spike spike_b3_alias_second_vmm
+        SKIP [         ] (─────) nlpv-probe::probe_spike spike_e3_qcow2_magic_bdev
+        SKIP [         ] (─────) nlpv-probe::probe_spike spike_e3_qcow2_magic_file
+        SKIP [         ] (─────) nlpv-probe::probe_spike spike_e3_untyped_clean_raw
+        SKIP [         ] (─────) nlpv-probe::probe_spike spike_e3_vhd_footer_bdev
+        SKIP [         ] (─────) nlpv-probe::probe_spike spike_e3_vhd_footer_file
+        SKIP [         ] (─────) nlpv-probe::probe_spike spike_e3_vhdx_magic_file
+        FAIL [   7.277s] ( 1/12) nlpv-probe::probe_a a3_fault_wb_explicit_flush_sync
+        FAIL [   9.287s] ( 2/12) nlpv-probe::probe_a a3_fault_wb_explicit_flush_uring
+        FAIL [   5.558s] ( 3/12) nlpv-probe::probe_a a3_fault_wt_post_write_fsync_aio
+        FAIL [   4.876s] ( 4/12) nlpv-probe::probe_a a3_fault_wt_post_write_fsync_sync
+        FAIL [  10.369s] ( 5/12) nlpv-probe::probe_a a3_fault_wt_post_write_fsync_uring
+        FAIL [   1.615s] ( 6/12) nlpv-probe::probe_spike spike_a1_wb_buffered_uring
+        FAIL [  12.812s] ( 7/12) nlpv-probe::probe_spike spike_a1_wt_buffered_uring
+        FAIL [   0.891s] ( 8/12) nlpv-probe::probe_spike spike_a3_fault_wb_explicit_flush_sync
+        FAIL [   0.346s] ( 9/12) nlpv-probe::probe_spike spike_a3_fault_wb_explicit_flush_uring
+        FAIL [   0.328s] (10/12) nlpv-probe::probe_spike spike_a3_fault_wt_post_write_fsync_aio
+        FAIL [   0.342s] (11/12) nlpv-probe::probe_spike spike_a3_fault_wt_post_write_fsync_sync
+        FAIL [   0.352s] (12/12) nlpv-probe::probe_spike spike_a3_fault_wt_post_write_fsync_uring
+error: test run failed
+OVERDRIVE_METAL_RUN_COMPLETE run_id=9378e42303e5231ecb66e230 exit_code=100 cause=command_returned
