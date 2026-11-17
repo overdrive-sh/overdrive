@@ -10,10 +10,10 @@ State 2 [Declare]
 State 3 [WlStart]
   st = [ declared |-> TRUE, stopped |-> FALSE, storeUp |-> TRUE, spaceFree |-> TRUE, lv |-> FALSE, active |-> FALSE, vid |-> 0, dv |-> 0, maxDv |-> 0, nCreated |-> 0, claim |-> 0, as |-> <<1, 0>>, alive |-> <<FALSE, FALSE>>, orphan |-> <<FALSE, FALSE>>, why |-> <<0, 0>>, ran |-> <<FALSE, FALSE>>, ph |-> <<1, 0>>, waited |-> <<0, 0>>, charged |-> 0, faults |-> 0, slow |-> FALSE, drainFail |-> FALSE ]
 
-State 4 [OpStop]
-  st = [ declared |-> TRUE, stopped |-> TRUE, storeUp |-> TRUE, spaceFree |-> TRUE, lv |-> FALSE, active |-> FALSE, vid |-> 0, dv |-> 0, maxDv |-> 0, nCreated |-> 0, claim |-> 0, as |-> <<1, 0>>, alive |-> <<FALSE, FALSE>>, orphan |-> <<FALSE, FALSE>>, why |-> <<0, 0>>, ran |-> <<FALSE, FALSE>>, ph |-> <<1, 0>>, waited |-> <<0, 0>>, charged |-> 0, faults |-> 0, slow |-> FALSE, drainFail |-> FALSE ]
+State 4 [LaunchEnsureCreate]
+  st = [ declared |-> TRUE, stopped |-> FALSE, storeUp |-> TRUE, spaceFree |-> TRUE, lv |-> TRUE, active |-> FALSE, vid |-> 1, dv |-> 0, maxDv |-> 0, nCreated |-> 1, claim |-> 0, as |-> <<1, 0>>, alive |-> <<FALSE, FALSE>>, orphan |-> <<FALSE, FALSE>>, why |-> <<0, 0>>, ran |-> <<FALSE, FALSE>>, ph |-> <<2, 0>>, waited |-> <<0, 0>>, charged |-> 0, faults |-> 0, slow |-> FALSE, drainFail |-> FALSE ]
 
-State 5 [LaunchEnsureCreate]
+State 5 [OpStop]
   st = [ declared |-> TRUE, stopped |-> TRUE, storeUp |-> TRUE, spaceFree |-> TRUE, lv |-> TRUE, active |-> FALSE, vid |-> 1, dv |-> 0, maxDv |-> 0, nCreated |-> 1, claim |-> 0, as |-> <<1, 0>>, alive |-> <<FALSE, FALSE>>, orphan |-> <<FALSE, FALSE>>, why |-> <<0, 0>>, ran |-> <<FALSE, FALSE>>, ph |-> <<2, 0>>, waited |-> <<0, 0>>, charged |-> 0, faults |-> 0, slow |-> FALSE, drainFail |-> FALSE ]
 
 State 6 [StopAlloc]

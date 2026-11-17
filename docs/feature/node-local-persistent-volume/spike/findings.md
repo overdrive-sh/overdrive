@@ -635,7 +635,7 @@ A probe flaw worth recording (`v1-007`, run 2): without the per-iteration cleanu
 - **Power loss and media.** The backing file lives on tmpfs under the outer guest and the VMM kill leaves the host page cache intact. This shows LVM's metadata survives a node crash with the guest's unflushed writes discarded; it does not show behaviour under torn media writes or a lost write cache. Flush ordering end to end on the real NVMe is not shown (probe A1 covers the VMM's flush path, not LVM on the real partition).
 - **Sample sizes and load.** Latencies are 3 to 7 samples per operation in one run on a shared box in a nested guest; the crash iterations are 20 plus 15, with random but wall-clock-seeded delays (not reproducible bit for bit). Concurrent `lvm` invocations (the lock in `/run/lock/lvm`), many LVs (hundreds), and a larger or fuller volume group were not exercised.
 - **Names.** The probe used `ovd-test`, `lat`, `kc<i>`, `kr<i>`, `e<k>x<i>`, `clean-final`, `final`; the real `ovd-<32 hex>` (36 characters) was not created, nor was the "first 4 KiB zeroed, rest not" claim checked.
-- **Node permissions.** The `/dev/mapper` node's owner and mode were not recorded; the chown for the confined VMM (ADR-0301/VD-6) is untested here (spike C3 covers a dm node under uid 4200).
+- **Node permissions.** The `/dev/mapper` node's owner and mode were not recorded; the chown for the confined VMM (ADR-0315/VD-6) is untested here (spike C3 covers a dm node under uid 4200).
 - **Step 4 variants.** The fresh guest reused the same inner kernel and rootfs; a re-imaged root with a different LVM build was not tried.
 
 ### V-1.9 Evidence index

@@ -47,7 +47,7 @@ rule, chown and Landlock statement, the `lvm` single-site lint removed, probe
 scenarios cut to four, `VolumeHeld` folded into one cause enum, `VolumeDevice` removed, entry contract cut to E1 to E3, L6 and
 L7 folded.
 
-Considered and rejected (recorded in ADR-0302 and ADR-0305 with the evidence):
+Considered and rejected (recorded in ADR-0316 and ADR-0319 with the evidence):
 
 - The subtractive reviewer proposed **dropping fork change F2** (the kernel claim; the alias hole is reachable only through an
   Overdrive path bug) and using the OFD lock alone. Rejected: the lock is keyed on the node's inode, so a second device node
@@ -57,14 +57,14 @@ Considered and rejected (recorded in ADR-0302 and ADR-0305 with the evidence):
   without F1 a failed write-through fsync is swallowed (20 of 20 on io_uring and AIO, spike A3).
 
 Iteration 3 (final round, after V-1 and the Quint evidence): the architect review (13 findings, none critical, two high) and the
-subtractive review (8 findings, none high) requested changes. Applied: ADR-0302 split into one ADR per fork change (VD-7a to 7c);
+subtractive review (8 findings, none high) requested changes. Applied: ADR-0316 split into one ADR per fork change (VD-7a to 7c);
 untracked "limitations" ruled in § Not limitations of the feature delta (for the user to confirm); one `ensure` deadline instead of one
 per `lvm` spawn, with the lane worst case stated (about 90 s); the killed-`lvremove` inactive volume moved from `ensure`'s reasons to
 E2 (nothing removes a workload volume here); the OFD-lock attempt in `claim_state` and validation item V-2 removed (a free claim implies
 a free lock for one open file description, `fs/file_table.c:461,468 @ v7.0`; a lost race is an ordinary typed failure); the former
 VD-11 to VD-13 turned into answers; `ByteCount` pinned as a new newtype; the `budget[w]` projection pinned to counting the workload's
 `Failed` rows (not `restart_count`); `InsufficientSpace` source and the "already exists" re-observe pinned; probe enforcement reduced to
-the subtype layer plus ADR-0082 D5; ambiguous partition label mapped to a probe scenario; the chown moved into ADR-0301; the
+the subtype layer plus ADR-0082 D5; ambiguous partition label mapped to a probe scenario; the chown moved into ADR-0315; the
 `LVM_SYSTEM_DIR` rule moved from the image ADR into the adapter contract; four duplicated exposures removed; the poll interval and the
 claim-bound constants left to the crafter.
 
@@ -78,9 +78,9 @@ Considered and not applied:
 ## Validation status
 
 - **V-1 PASSED** (contract-shaping; native metal host, Linux 7.0.0-38): five steps pass on the pinned `--config`, plus
-  `LVM_SYSTEM_DIR=/run/lvm` on every spawn (chosen over an empty `/etc/lvm` in the image; ADR-0299). Evidence:
+  `LVM_SYSTEM_DIR=/run/lvm` on every spawn (chosen over an empty `/etc/lvm` in the image; ADR-0313). Evidence:
   `spike/findings.md` § "V-1", `spike/evidence/v1-001` to `v1-011`. Absorbed: the pinned invocation and command surface in the
-  feature delta § Port; `CONFIG_EFI_PARTITION=y` and `CONFIG_DEVTMPFS=y` in the image requirements (ADR-0299); `ensure` activates a
+  feature delta § Port; `CONFIG_EFI_PARTITION=y` and `CONFIG_DEVTMPFS=y` in the image requirements (ADR-0313); `ensure` activates a
   present-but-inactive volume (every reboot leaves one); the probe's measured cost (about 95 ms).
 - **Quint evidence recorded and verified**: 14 of 14 checks met `expect`; `verify-evidence` passes for all eight subsystems. The
   earlier recording failure was a metal-runner defect, fixed in `infra/metal/bootstrap.sh`, unrelated to this design. The spec

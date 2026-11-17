@@ -1,6 +1,6 @@
 /**
- * Node-local persistent volume protocol (GH #348; decisions VD-2 (ADR-0297), VD-3 (ADR-0298, backing choice: no
- * protocol rule), VD-8 (ADR-0303), VD-9 (ADR-0304)).
+ * Node-local persistent volume protocol (GH #348; decisions VD-2 (ADR-0311), VD-3 (ADR-0312, backing choice: no
+ * protocol rule), VD-8 (ADR-0317), VD-9 (ADR-0318)).
  *
  * ONE node, ONE workload (`replicas = 1`) with one declared volume, NA allocation ids (each minted once).
  * The volume size is abstracted away: "free >= size" is the boolean `spaceFree`.

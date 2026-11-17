@@ -99,7 +99,7 @@ All through `overdrive serve` and `overdrive deploy`; no test-only wiring.
    mounts it.
 4. **Crash, `workload restart`.** The old VMM dies (terminal row); the successor is minted
    (ADR-0104/0109); its launch runs `ensure` (activates the existing volume), waits up to 30 s for the claim
-   to clear (ADR-0303), then attaches the same volume with its data.
+   to clear (ADR-0317), then attaches the same volume with its data.
 5. **Stop.** `workload stop` ends the allocation; the volume stays; a resumed or restarted workload attaches
    it again.
 6. **Node reboot.** Volumes are inactive after boot; the next launch's `ensure` activates the volume.
@@ -152,7 +152,7 @@ Behavioural contract (the trait docstrings pin these):
 - `ensure` (bounded-change: creates or activates only `ovd-<hash(workload)>` in VG `overdrive`; returns the
   activated device path). An existing volume: activated, returned; its size is not compared. A missing volume with
   enough free extents: created with exactly `size` reserved (nothing is written and it is never formatted; LVM's
-  default of zeroing the first 4 KiB is not relied on, the image wipe is, ADR-0299), activated, returned. A volume
+  default of zeroing the first 4 KiB is not relied on, the image wipe is, ADR-0313), activated, returned. A volume
   that exists but is inactive (the state after every node reboot, V-1) is activated: creation and activation are
   separate observations, never assumed from each other. An `lvcreate` that reports the volume already exists (an earlier
   attempt's command outlived its deadline and finished) is treated as an existing volume. Not enough free extents: `InsufficientSpace { needed, free }`, nothing created; `free` comes from
@@ -165,7 +165,7 @@ Behavioural contract (the trait docstrings pin these):
   exclusive claim (an `O_EXCL` open) and releases it; `Free` iff it took it. An unknown volume: `NotFound`. It is the
   authentic arbiter of the kernel's claim for the conformance projection. It does not take the OFD lock: for one open
   file description the kernel removes the lock before it releases the device, so a free claim implies a free lock
-  (ADR-0303).
+  (ADR-0317).
 - Nothing else is a method: the launch path owns the bounded wait (below).
 
 `VolumeBackingError` is `#[non_exhaustive]`: `StoreAbsent`, `NotFound { workload }`, `InsufficientSpace { needed:
@@ -178,7 +178,7 @@ with `LVM_SYSTEM_DIR=/run/lvm` in the spawn's environment (V-1). The pinned `--c
 monitoring=0} devices{filter=["a|^<labelled partition node>$|","r|.*|"] use_devicesfile=0} backup{backup=0 archive=0}
 global{use_lvmpolld=0 locking_dir="/run/lock/lvm"}`, the filter built from the node discovered by `PARTNAME`. LVM insists on a
 system directory that no `--config` key can move. The variable is chosen over an empty `/etc/lvm` in the image (both passed in
-V-1; ADR-0299): it keeps LVM's writes to `/run` and the physical volume, is quiet (an empty-string value prints backup warnings
+V-1; ADR-0313): it keeps LVM's writes to `/run` and the physical volume, is quiet (an empty-string value prints backup warnings
 on a read command), and is set at the one spawn site. Command surface: exit 0 is success
 and stderr `WARNING: This metadata update is NOT backed up.` accompanies every metadata write, so stderr is never read as
 failure; exit 5 is a filter refusal or `insufficient free space` (the `InsufficientSpace` source); exit 4 is a missing
@@ -212,8 +212,8 @@ device: PathBuf, serial: DiskSerial }>`. The volume `--disk` follows the rootfs 
 `prepare_confined_paths` also chowns the symlink-resolved device node to `root:<VMM gid>` mode `0660` (a block device node
 is refused to the dropped uid otherwise, spike C3); a failure is the existing `ConfinementUnavailable { control: UidDrop }`.
 The owner and mode are not restored at teardown; no other VMM can open another workload's node because each VMM's Landlock
-allow-list is derived from its own launch arguments (ADR-0301). `rlimit_fsize` is unchanged. Fork: F1 to F3 (ADR-0302, ADR-0305,
-ADR-0306) and the pinned revision and checksums bump.
+allow-list is derived from its own launch arguments (ADR-0315). `rlimit_fsize` is unchanged. Fork: F1 to F3 (ADR-0316, ADR-0319,
+ADR-0320) and the pinned revision and checksums bump.
 
 ### Launch path and driver failures (VD-8, VD-9)
 
@@ -273,7 +273,7 @@ claim) plus the Tier-3 pairing test; the model encodes the kernel verdict, it do
 
 ### Gate G-1 — `VolumeEnsure`
 
-- **Existing evidence:** ADR-0104, ADR-0304; production path `submit_workload` -> `WorkloadLifecycle::reconcile` -> `schedule` ->
+- **Existing evidence:** ADR-0104, ADR-0318; production path `submit_workload` -> `WorkloadLifecycle::reconcile` -> `schedule` ->
   `StartAllocation`/`RestartAllocation` -> shim -> `VmDriver::start`.
 - **Owner:** the launch path of `VmDriver`, through `VolumeBacking::ensure`.
 - **Promise:** the volume exists, is activated and its device path is returned.
@@ -285,13 +285,13 @@ claim) plus the Tier-3 pairing test; the model encodes the kernel verdict, it do
 - **Ordering:** after supervision claim; before the claim wait and `Vmm::create`; consumes the one `ensure` deadline (30 s, covering all
   its `lvm` spawns), additional to the 30 s claim wait and the 30 s boot wait.
 - **Counterexample:** gating placement on volume existence (a `WorkloadLifecycle` gate with a status row) adds a row family, an
-  interest and a gate for a create that is already convergent at the point of use (ADR-0304).
+  interest and a gate for a create that is already convergent at the point of use (ADR-0318).
 - **Evidence lane:** unit with `SimVolumeBacking`; seeded sim; Tier 3 through `serve` + `deploy`.
 
 ### Gate G-2 — `VolumeClaim`
 
 - **Existing evidence:** ADR-0109 (terminal predecessor precedes successor), ADR-0106 (cleanup does not gate the successor),
-  ADR-0303; production path shim `RestartAllocation` -> `VmDriver::start`.
+  ADR-0317; production path shim `RestartAllocation` -> `VmDriver::start`.
 - **Owner:** the launch path of `VmDriver`, through `VolumeBacking::claim_state`.
 - **Promise:** at the instant of the attempt the volume's kernel claim was free.
 - **Affected state:** the result of this launch.
@@ -337,7 +337,7 @@ Assumptions and what discharges each:
 |---|---|
 | A1 a held `O_EXCL` claim refuses a second claimant on a dm-linear device, through any node | spike run-031 (F2); Tier-3 pairing test |
 | A2 dm refuses to remove an open device (`drivers/md/dm.c:357-372 @ v7.0`) | not relied on in this slice (nothing removes a volume); entry contract for #211 |
-| A3 the claim and lock outlive the VMM process while in-flight I/O drains | spike B2b; for one open file description the kernel removes the lock before the bdev `release` frees the claim (`fs/file_table.c:461,468 @ v7.0`), so a free claim implies a free lock; a lost race otherwise is an ordinary typed start failure (ADR-0303) |
+| A3 the claim and lock outlive the VMM process while in-flight I/O drains | spike B2b; for one open file description the kernel removes the lock before the bdev `release` frees the claim (`fs/file_table.c:461,468 @ v7.0`), so a free claim implies a free lock; a lost race otherwise is an ordinary typed start failure (ADR-0317) |
 | A4 LVM metadata operations are crash-atomic | V-1 (passed): 20 iterations of SIGKILLed `lvcreate` and `lvremove` and 15 whole-VMM SIGKILLs left a volume either absent or present, never half-built, no leaked extent, no orphan dm device, no manual repair (`v1-008`, `v1-011`) |
 | A5 a control-plane crash after `ensure` and before VMM spawn leaves the volume intact for the next launch | A4 |
 | A6 the device persists what it acknowledges after a flush | reasoned no-obligation: a media guarantee outside the appliance's control that only a power-loss test could probe |
@@ -372,14 +372,14 @@ Not shown, bounded and not contract-shaping: behaviour under power loss or a tor
 (LVM serialises through `/run/lock/lvm`; Tier-3 in DELIVER observes `ensure` for two workloads at once); the real `ovd-<32 hex>` name and the first-4-KiB
 claim; the confined uid's access to a dm node (spike C3 covers it); the appliance image itself (L5).
 
-**Image requirements the result adds (ADR-0299):** `CONFIG_BLK_DEV_DM=y`, `CONFIG_EFI_PARTITION=y` (without it the kernel does not export `PARTNAME`),
+**Image requirements the result adds (ADR-0313):** `CONFIG_BLK_DEV_DM=y`, `CONFIG_EFI_PARTITION=y` (without it the kernel does not export `PARTNAME`),
 `CONFIG_DEVTMPFS=y` mounted on `/dev`, a writable tmpfs on `/run`, the `lvm` binary with its library closure (no static `lvm` exists on the host: the
 image carries the distro libraries, about 7.3 MB, or builds a static LVM2). No `lvm.conf`, udev rules, `dmeventd` or `lvm2-monitor` are needed.
 
 ## [REF] Entry contract for the workload-deletion slice (GH #211)
 
 Not this slice's mechanism; the constraints the slice that makes deletion reachable must meet, from review and from model-checking a larger design
-(a host-backed `volume-lifecycle` reconciler, a `VolumeStatus` row and a start gate, removed from this slice by ADR-0304). Proposed as part of VD-10;
+(a host-backed `volume-lifecycle` reconciler, a `VolumeStatus` row and a start gate, removed from this slice by ADR-0318). Proposed as part of VD-10;
 the full text goes in the proposed comment on #211.
 
 - E1. Deletion removes the workload intent only after the node reports the volume removed, and refuses a same-id resubmit meanwhile (otherwise a
@@ -393,24 +393,24 @@ the full text goes in the proposed comment on #211.
 
 | # | Limitation | Pinned in | Lifting it | Issue |
 |---|---|---|---|---|
-| L1 | One volume per workload; no named volumes | ADR-0296 | `[vm.volume.<name>]`, serial `ovd-<name>`, per-volume identity | **propose new**: "Several named volumes per VM workload" |
+| L1 | One volume per workload; no named volumes | ADR-0310 | `[vm.volume.<name>]`, serial `ovd-<name>`, per-volume identity | **propose new**: "Several named volumes per VM workload" |
 | L2 | Size fixed at creation; no grow, no shrink | Answers, 7 | a size that can change after admission (the spec is immutable per id), offline `lvextend` under the claim, relaunch; the guest grows its filesystem | **propose new**: "Grow a node-local volume while detached" |
 | L3 | Pinned to one node only implicitly (Phase 1 has one node `local`); no multi-node pin, no volume-space-aware placement | Answers, 6 | an intent binding `workloads/<id>/volume` holding the `NodeId`, written once by an atomic put-if-absent at first placement, a hard scheduler constraint, volume space in capacity | **propose new**: "Pin a workload with a node-local volume to its volume's node" (verified: #134 taints, #261 CPU/memory capacity and #282 replicas do not cover it) |
-| L4 | Nothing deletes or erases a volume until workload deletion exists; freed space never returns; a volume's state is visible only through allocation rows | ADR-0297, ADR-0304 | the #211 slice per § Entry contract, which also decides a status row, describe surface and start gate | existing **#211** (verified: no volume, finalizer or node-local-state mention); propose a comment carrying E1 to E3 |
-| L5 | The image does not yet define the labelled, wiped partition, LVM tools, built-in dm or the provisioned VG | ADR-0299 | the image build | existing **#75** (verified: it owns the node OS image build, nothing on disk layout or LVM); propose a comment listing the image requirements |
+| L4 | Nothing deletes or erases a volume until workload deletion exists; freed space never returns; a volume's state is visible only through allocation rows | ADR-0311, ADR-0318 | the #211 slice per § Entry contract, which also decides a status row, describe surface and start gate | existing **#211** (verified: no volume, finalizer or node-local-state mention); propose a comment carrying E1 to E3 |
+| L5 | The image does not yet define the labelled, wiped partition, LVM tools, built-in dm or the provisioned VG | ADR-0313 | the image build | existing **#75** (verified: it owns the node OS image build, nothing on disk layout or LVM); propose a comment listing the image requirements |
 
 Not limitations (properties of the mechanism or of #348's stated scope; each is a ruling for the user to confirm): single writer, so `replicas = 1`; the
 data is lost with the node; the guest owns the filesystem on a raw device; no snapshots, backups, replication or sharing (#97, #43, #96, #348 out of
 scope); `[vm.volume]` is a property of VM workloads by definition (VD-1), so other driver kinds carry none, and a Schedule is rejected at submit
 today independently of this feature; the volume group name, 4 MiB extent size, partition label and serial are the image and attachment contract
-(ADR-0299, ADR-0301), a closed set chosen for correctness, not an operator knob; the 30 s claim bound and 30 s `ensure` deadline are derived from the
+(ADR-0313, ADR-0315), a closed set chosen for correctness, not an operator knob; the 30 s claim bound and 30 s `ensure` deadline are derived from the
 measured drain (2.4 s) and the existing boot wait, not an expectation to configure.
 
 Exposures with a stated bound:
 
 - The single-cut greenfield upgrade (deleting the data directory) removes the intent store while the volume group keeps its volumes: a redeploy of
   the same workload id then attaches the old volume with its old data and its old size, and the pool keeps the old reservation. The upgrade
-  re-provisions the volume partition with the data directory (ADR-0299).
+  re-provisions the volume partition with the data directory (ADR-0313).
 - A full volume pool fails each launch as `VolumeUnavailable { InsufficientSpace }` and ends as `BackoffExhausted` with that cause as the last reason
   (L4 explains why the pool only shrinks); admission does not check pool space.
 
