@@ -13,7 +13,6 @@ fn benchmarks_dir() -> PathBuf {
 /// the sample and percentile method, the raw-result format and failure accounting.
 /// CONTRACT_SHAPE: pure-function (document text in, verdict out).
 #[test]
-#[should_panic(expected = "benchmarks/methodology.md must exist")]
 fn the_methodology_document_states_its_version_and_every_required_topic() {
     let path = benchmarks_dir().join("methodology.md");
     let text = std::fs::read_to_string(&path)
@@ -42,7 +41,6 @@ fn the_methodology_document_states_its_version_and_every_required_topic() {
 /// ships has a row (the connect-hook benchmark is the first).
 /// CONTRACT_SHAPE: pure-function (document text in, verdict out).
 #[test]
-#[should_panic(expected = "benchmarks/catalogue.md must exist")]
 fn the_catalogue_has_a_row_per_benchmark_with_its_workload_clock_and_owner() {
     let path = benchmarks_dir().join("catalogue.md");
     let text = std::fs::read_to_string(&path)

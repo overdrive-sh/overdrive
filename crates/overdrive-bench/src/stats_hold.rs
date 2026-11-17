@@ -87,7 +87,7 @@ pub fn ineffective_program(reads: &[(u32, RunStats)]) -> Option<u32> {
     reads.iter().find_map(|(program, _)| {
         let mut of_program = reads.iter().filter(|(other, _)| other == program).map(|(_, stats)| stats);
         let first = of_program.next()?;
-        let last = of_program.last()?;
+        let last = of_program.next_back()?;
         (last.run_count == first.run_count).then_some(*program)
     })
 }

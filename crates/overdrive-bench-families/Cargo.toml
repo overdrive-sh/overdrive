@@ -24,7 +24,10 @@ crate_class = "adapter-host"
 integration-tests = []
 
 [dependencies]
+aya.workspace            = true
+libc.workspace           = true
 overdrive-bench          = { path = "../overdrive-bench" }
+overdrive-dataplane      = { path = "../overdrive-dataplane" }
 overdrive-testing        = { path = "../overdrive-testing" }
 overdrive-testing-macros = { path = "../overdrive-testing-macros" }
 

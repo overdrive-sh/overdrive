@@ -2310,7 +2310,10 @@ dependencies = [
 name = "overdrive-bench-families"
 version = "0.0.0"
 dependencies = [
+ "aya",
+ "libc",
  "overdrive-bench",
+ "overdrive-dataplane",
  "overdrive-testing",
  "overdrive-testing-macros",
 ]
