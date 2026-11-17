@@ -127,7 +127,8 @@ async fn vm_reclamation_hydrate_actual_projects_host_observation_and_supervision
             BTreeMap::new(),
         ),
         gateway_identity: gateway.identity_view(),
-        // DISTILL scaffold (D-20): unread by `hydrate_actual` here.
+        // This cell hydrates a reconciler other than the service-map hydrator,
+        // so it supplies a `SimDataplane` that is not read.
         programmed_services: &overdrive_sim::adapters::dataplane::SimDataplane::new(),
         node_id: &node,
         intent_redb_path: &intent_path,

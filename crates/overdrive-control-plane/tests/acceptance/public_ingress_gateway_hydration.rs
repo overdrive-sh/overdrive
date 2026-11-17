@@ -99,7 +99,8 @@ struct World {
     workflows: SimWorkflowLiveSet,
     held_svids: SimHeldSvidView,
     guest_attachments: SimGuestAttachmentView,
-    // DISTILL scaffold (D-20): this world does not read the programmed map.
+    // This cell hydrates a reconciler other than the service-map hydrator,
+    // so it supplies a `SimDataplane` that is not read.
     programmed: overdrive_sim::adapters::dataplane::SimDataplane,
     node_id: NodeId,
     /// One CA for the whole world, so successive issuances draw successive

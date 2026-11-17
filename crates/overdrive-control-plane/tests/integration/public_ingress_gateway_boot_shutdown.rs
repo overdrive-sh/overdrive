@@ -87,8 +87,8 @@ use overdrive_control_plane::api::{
 use overdrive_control_plane::error::ControlPlaneError;
 use overdrive_control_plane::node_adapters::IntentStoreAdapter;
 use overdrive_control_plane::{
-    BootAdapters, ComposedDataplane, DataplaneComposer, DataplanePlan, GatewayAdapters,
-    ServerHandle, run_server_with_obs_and_driver,
+    BootAdapters, ComposedDataplane, DataplaneComposer, DataplanePlan, DataplanePorts,
+    GatewayAdapters, ServerHandle, run_server_with_obs_and_driver,
 };
 use overdrive_core::aggregate::{DriverInput, IntentKey, ResourcesInput, VmInput};
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput, SubmitSpecInput};
@@ -440,7 +440,7 @@ impl DataplaneComposer for FixtureComposer {
         _plan: DataplanePlan<'_>,
     ) -> Result<ComposedDataplane, ControlPlaneError> {
         Ok(ComposedDataplane {
-            dataplane: Arc::clone(&self.dataplane) as _,
+            dataplane: DataplanePorts::new(Arc::clone(&self.dataplane)),
             host_ipv4: Ipv4Addr::LOCALHOST,
             gateway_connect: Arc::clone(&self.connect),
         })

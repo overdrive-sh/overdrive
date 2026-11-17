@@ -152,9 +152,9 @@ pub use gateway_composition::{
     GatewayAppStateComposition, GatewayIdentityActionComposition, GatewayIdentityDisabled,
 };
 pub use node_adapters::{
-    BootAdapters, CaAdapters, ComposedDataplane, DataplaneComposer, DataplanePlan, GatewayAdapters,
-    GuestFlowAdapter, HostDataplaneComposer, IntentStoreAdapter, MtlsAdapters, NodeAdapters,
-    ProbeAdapters, StoreAdapters, VmAdapters, VmCapability,
+    BootAdapters, CaAdapters, ComposedDataplane, DataplaneComposer, DataplanePlan, DataplanePorts,
+    GatewayAdapters, GuestFlowAdapter, HostDataplaneComposer, IntentStoreAdapter, MtlsAdapters,
+    NodeAdapters, ProbeAdapters, StoreAdapters, VmAdapters, VmCapability,
 };
 
 // GH #295 (DISTILL gap B-4): crate-private test-local implementations of the
@@ -212,7 +212,6 @@ use overdrive_core::guest_network::SharedGuestNetworkComponent;
 use overdrive_core::id::NodeId;
 use overdrive_core::traits::ca::Ca;
 use overdrive_core::traits::clock::Clock;
-use overdrive_core::traits::dataplane::Dataplane;
 use overdrive_core::traits::driver::{Driver, DriverRegistry};
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::ObservationStore;
@@ -320,7 +319,7 @@ pub struct AppState {
     /// § "Port-trait dependencies", the dependency is mandatory at
     /// construction so tests cannot silently inherit production
     /// kernel I/O behaviour by forgetting to override.
-    pub dataplane: Arc<dyn overdrive_core::traits::dataplane::Dataplane>,
+    pub dataplane: DataplanePorts,
     /// Identity of the node writing observation rows. The action
     /// shim populates `LogicalTimestamp.writer` from this value so
     /// LWW resolution across peers is deterministic per
@@ -635,7 +634,7 @@ impl AppState {
         // directly with a caller-built `Arc<DriverRegistry>`.
         driver: Arc<dyn Driver>,
         clock: Arc<dyn Clock>,
-        dataplane: Arc<dyn Dataplane>,
+        dataplane: impl Into<DataplanePorts>,
         ca: Arc<dyn Ca>,
         identity: Arc<IdentityMgr>,
         node_id: NodeId,
@@ -738,7 +737,7 @@ impl AppState {
         // VM-aware tests build a registry with the VM capability composed.
         drivers: Arc<DriverRegistry>,
         clock: Arc<dyn Clock>,
-        dataplane: Arc<dyn Dataplane>,
+        dataplane: impl Into<DataplanePorts>,
         ca: Arc<dyn Ca>,
         identity: Arc<IdentityMgr>,
         node_id: NodeId,
@@ -778,7 +777,7 @@ impl AppState {
             lifecycle_events: tx,
             streaming_cap: DEFAULT_STREAMING_CAP,
             clock,
-            dataplane,
+            dataplane: dataplane.into(),
             node_id,
             allocator,
             listener_facts,

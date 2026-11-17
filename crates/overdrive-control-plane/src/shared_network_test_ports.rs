@@ -667,7 +667,7 @@ impl crate::DataplaneComposer for TestDataplaneComposer {
                     &dataplane,
                 )),
             ),
-            dataplane,
+            dataplane: crate::DataplanePorts::new(dataplane),
             host_ipv4: self.host_ipv4,
         })
     }

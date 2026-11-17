@@ -19,7 +19,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use overdrive_control_plane::error::ControlPlaneError;
-use overdrive_control_plane::{ComposedDataplane, DataplaneComposer, DataplanePlan};
+use overdrive_control_plane::{
+    ComposedDataplane, DataplaneComposer, DataplanePlan, DataplanePorts,
+};
 use parking_lot::Mutex;
 
 use super::dataplane::SimDataplane;
@@ -58,7 +60,7 @@ impl DataplaneComposer for SimDataplaneComposer {
             return Err(refusal);
         }
         Ok(ComposedDataplane {
-            dataplane: Arc::clone(&self.dataplane) as _,
+            dataplane: DataplanePorts::new(Arc::clone(&self.dataplane)),
             host_ipv4: self.host_ipv4,
             // The Sim gateway selection capability shares the `SimDataplane`
             // state the dataplane above serves.

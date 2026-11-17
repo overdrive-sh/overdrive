@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use overdrive_core::ca::kek::Kek;
+use overdrive_core::traits::ProgrammedServiceView;
 use overdrive_core::traits::ca::CaFactory;
 use overdrive_core::traits::cgroup_accounting::CgroupAccounting;
 use overdrive_core::traits::cgroup_fs::CgroupFs;
@@ -470,10 +471,56 @@ pub struct DataplanePlan<'a> {
     pub cgroup_attach_path: &'a Path,
 }
 
+/// One dataplane instance behind both the write port ([`Dataplane`]) and the
+/// read port ([`ProgrammedServiceView`]).
+///
+/// The fields are private and the only constructor takes one concrete
+/// `Arc<D>` implementing both traits, coercing that same `Arc` to both trait
+/// objects. A write port and a read port over different instances cannot be
+/// built, which is the precondition of
+/// [`ProgrammedServiceView::programmed_fingerprint`]: a view over another
+/// instance reads a different resource.
+#[derive(Clone)]
+pub struct DataplanePorts {
+    write_port: Arc<dyn Dataplane>,
+    read_port: Arc<dyn ProgrammedServiceView>,
+}
+
+impl DataplanePorts {
+    /// Build both ports from one dataplane instance.
+    pub fn new<D>(instance: Arc<D>) -> Self
+    where
+        D: Dataplane + ProgrammedServiceView + 'static,
+    {
+        Self { write_port: Arc::clone(&instance) as Arc<dyn Dataplane>, read_port: instance }
+    }
+
+    /// The write port.
+    #[must_use]
+    pub const fn dataplane(&self) -> &Arc<dyn Dataplane> {
+        &self.write_port
+    }
+
+    /// The read port over the programmed service map.
+    #[must_use]
+    pub const fn programmed_services(&self) -> &Arc<dyn ProgrammedServiceView> {
+        &self.read_port
+    }
+}
+
+impl<D> From<Arc<D>> for DataplanePorts
+where
+    D: Dataplane + ProgrammedServiceView + 'static,
+{
+    fn from(instance: Arc<D>) -> Self {
+        Self::new(instance)
+    }
+}
+
 /// What the composer returns.
 pub struct ComposedDataplane {
-    /// A dataplane that passed its probe.
-    pub dataplane: Arc<dyn Dataplane>,
+    /// A dataplane that passed its probe, behind its write and read ports.
+    pub dataplane: DataplanePorts,
     /// The node's address on the client interface.
     pub host_ipv4: Ipv4Addr,
     /// The dataplane-side gateway selection capability of the SAME instance:
@@ -610,7 +657,7 @@ impl DataplaneComposer for HostDataplaneComposer {
             })?;
         let ebpf_dataplane = Arc::new(ebpf_dataplane);
         Ok(ComposedDataplane {
-            dataplane: Arc::clone(&ebpf_dataplane) as Arc<dyn Dataplane>,
+            dataplane: DataplanePorts::new(Arc::clone(&ebpf_dataplane)),
             host_ipv4,
             gateway_connect: ebpf_dataplane,
         })

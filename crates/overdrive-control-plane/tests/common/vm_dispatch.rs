@@ -36,7 +36,6 @@ use overdrive_core::id::NodeId;
 use overdrive_core::reconcilers::{Action, TickContext};
 use overdrive_core::traits::ca::Ca;
 use overdrive_core::traits::clock::Clock;
-use overdrive_core::traits::dataplane::Dataplane;
 use overdrive_core::traits::driver::{Driver, DriverRegistry};
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::ObservationStore;
@@ -57,7 +56,7 @@ pub struct VmDispatchPorts {
     pub driver: Arc<dyn Driver>,
     pub obs: Arc<dyn ObservationStore>,
     pub clock: Arc<dyn Clock>,
-    pub dataplane: Arc<dyn Dataplane>,
+    pub dataplane: overdrive_control_plane::DataplanePorts,
     pub ca: Arc<dyn Ca>,
     pub identity: Arc<IdentityMgr>,
     pub node_id: NodeId,
@@ -76,7 +75,7 @@ impl VmDispatchPorts {
             driver,
             obs: Arc::new(SimObservationStore::single_peer(node_id.clone(), 0)),
             clock: Arc::new(SimClock::new()),
-            dataplane: Arc::new(SimDataplane::new()),
+            dataplane: overdrive_control_plane::DataplanePorts::new(Arc::new(SimDataplane::new())),
             ca: Arc::new(SimCa::new(Arc::new(SimEntropy::new(0)))),
             identity: Arc::new(IdentityMgr::new(None)),
             node_id,

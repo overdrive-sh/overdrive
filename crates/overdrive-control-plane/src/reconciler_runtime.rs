@@ -1777,24 +1777,6 @@ async fn run_convergence_tick_inner(
     dispatch_outcome
 }
 
-/// DISTILL scaffold (D-20): the programmed-map read-port until DELIVER wires the
-/// dataplane instance the composition root builds. Reads every frontend as
-/// unprogrammed.
-struct InertProgrammedServices;
-
-#[async_trait::async_trait]
-impl overdrive_core::traits::ProgrammedServiceView for InertProgrammedServices {
-    async fn programmed_fingerprint(
-        &self,
-        _frontend: &overdrive_core::dataplane::ServiceFrontend,
-    ) -> Result<
-        Option<overdrive_core::dataplane::fingerprint::BackendSetFingerprint>,
-        overdrive_core::traits::dataplane::DataplaneError,
-    > {
-        Ok(None)
-    }
-}
-
 /// Build the per-tick [`HydrationContext`](overdrive_core::reconcilers::HydrationContext)
 /// borrow-bundle from `AppState` (ADR-0086 D5/S3).
 ///
@@ -1825,7 +1807,7 @@ pub(crate) fn build_hydration_context<'a>(
         held_svid_view: state.identity.as_ref(),
         guest_attachments: &state.guest_attachment_view,
         gateway_identity: state.gateway.identity_view(),
-        programmed_services: &InertProgrammedServices,
+        programmed_services: state.dataplane.programmed_services().as_ref(),
         node_id: &state.node_id,
         intent_redb_path: &state.intent_redb_path,
     }

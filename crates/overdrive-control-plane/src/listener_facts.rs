@@ -951,7 +951,7 @@ mod tests {
                     unreachable!("test fixture always composes a single Exec driver")
                 }),
             Arc::clone(&state.clock),
-            Arc::clone(&state.dataplane),
+            state.dataplane.clone(),
             Arc::clone(&state.ca),
             Arc::clone(&state.identity),
             state.node_id.clone(),

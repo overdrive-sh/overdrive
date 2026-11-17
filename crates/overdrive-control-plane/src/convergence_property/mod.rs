@@ -184,7 +184,7 @@ impl Composed {
             Arc::new(runtime),
             Arc::clone(&driver) as Arc<dyn Driver>,
             Arc::clone(&clock) as Arc<dyn Clock>,
-            Arc::clone(&dataplane) as _,
+            Arc::clone(&dataplane),
             Arc::clone(&ca) as Arc<dyn Ca>,
             Arc::new(crate::identity_mgr::IdentityMgr::new(None)),
             node("writer-1"),

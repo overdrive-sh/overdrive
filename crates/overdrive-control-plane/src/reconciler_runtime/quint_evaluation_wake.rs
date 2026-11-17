@@ -404,7 +404,7 @@ impl WakeWorld {
             Arc::new(runtime),
             Arc::clone(&driver) as Arc<dyn DriverPort>,
             Arc::clone(&clock) as Arc<dyn Clock>,
-            Arc::clone(&dataplane) as _,
+            Arc::clone(&dataplane),
             Arc::new(SimCa::new(Arc::new(SimEntropy::new(0)))),
             Arc::new(crate::identity_mgr::IdentityMgr::new(None)),
             node("writer-1"),

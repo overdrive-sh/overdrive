@@ -176,7 +176,8 @@ fn build_ctx<'a>(
             overdrive_core::guest_network::GuestAttachmentOccupancy { held: 0, retiring: 0 },
             std::collections::BTreeMap::new(),
         );
-    // DISTILL scaffold (D-20): this cell does not read the programmed map.
+    // This cell hydrates a reconciler other than the service-map hydrator,
+    // so it supplies a `SimDataplane` that is not read.
     static PROGRAMMED: std::sync::LazyLock<SimDataplane> =
         std::sync::LazyLock::new(SimDataplane::new);
     HydrationContext {
