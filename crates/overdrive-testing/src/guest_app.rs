@@ -81,6 +81,11 @@ pub mod subcommand {
     /// [`super::LISTEN_CONN_TERMINAL_PREFIX`] line naming its read side's
     /// first terminal event. It never exits.
     pub const LISTEN: &str = "listen";
+    /// `listen-ignoring-stop <port> <tag>`: [`LISTEN`] with `SIGTERM`
+    /// ignored, so the production guest init's stop signal does not end it and
+    /// it exits only when the guest stop grace ends and the group is killed.
+    /// The workload of the stop-grace-deadline benchmark profile.
+    pub const LISTEN_IGNORING_STOP: &str = "listen-ignoring-stop";
     /// `bind <hold-seconds> <exit-code> <spec>...`: binds each `<spec>`, which is
     /// `tcp:<socket-addr>` (a listening socket) or `udp:<socket-addr>` (an
     /// explicit bind), prints one [`super::BOUND_PREFIX`] line per bound spec,

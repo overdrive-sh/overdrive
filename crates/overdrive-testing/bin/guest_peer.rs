@@ -170,6 +170,17 @@ mod linux {
                         _ => usage("listen <port> <tag>"),
                     }
                 }
+                [cmd, port, tag] if *cmd == subcommand::LISTEN_IGNORING_STOP => {
+                    match (port.parse::<u16>(), tag_is_valid(tag)) {
+                        (Ok(port), true) if port != 0 => {
+                            // SAFETY: setting a signal disposition to `SIG_IGN` has no
+                            // preconditions; no handler code runs.
+                            unsafe { libc::signal(libc::SIGTERM, libc::SIG_IGN) };
+                            listen(port)
+                        }
+                        _ => usage("listen-ignoring-stop <port> <tag>"),
+                    }
+                }
                 [cmd, population] if *cmd == subcommand::V6_PEER => {
                     match population.parse::<u16>() {
                         Ok(population) if (1..=V6_POPULATION_MAX).contains(&population) => {
@@ -200,7 +211,9 @@ mod linux {
                     }
                 }
                 [cmd, rest @ ..] if *cmd == subcommand::RUN_WITH_MODULES => run_with_modules(rest),
-                _ => usage("<round-trip|hold|flood|udp-churn|idle|bind|listen|run-with-modules> …"),
+                _ => usage(
+                    "<round-trip|hold|flood|udp-churn|idle|bind|listen|listen-ignoring-stop|run-with-modules> …",
+                ),
             }
         }
 

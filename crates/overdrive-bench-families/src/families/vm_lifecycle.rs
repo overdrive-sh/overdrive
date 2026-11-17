@@ -4,7 +4,8 @@
 //! One replicate boots one in-process `serve` (the operator driving port of `overdrive-cli`)
 //! over the production adapters, with three instruments at existing public seams: a
 //! timestamping `BeaconIo` decorator (the guest's `READY` line), a `Vmm`
-//! decorator (the process id to guest CID join), and a `tracing` layer for the named
+//! decorator (the process id to guest CID join, and the guest console log read when the
+//! exit watch fires), and a `tracing` layer for the named
 //! lifecycle events; the observation store's subscription supplies the `Stable` row. Every
 //! stamp is taken on the host's `CLOCK_MONOTONIC_RAW` (DDD-10). A stage that does not
 //! complete is a recorded failure and the stages after it are absent, never zero.
@@ -28,7 +29,7 @@ use overdrive_core::traits::observation_store::{
     ObservationRow, ObservationStore, SubscriptionEvent,
 };
 use overdrive_core::traits::vmm::{
-    Result as VmmResult, VmControl, VmProcess, VmTermination, Vmm, VmmProbeError,
+    Result as VmmResult, VmControl, VmExitWatch, VmProcess, VmTermination, Vmm, VmmProbeError,
 };
 use overdrive_core::transition_reason::TerminalCondition;
 use overdrive_core::vm::beacon::{BeaconConnKey, BeaconIo, BeaconSocket};
@@ -52,6 +53,8 @@ const STABLE_BOUND: Duration = Duration::from_secs(90);
 const CLEANUP_BOUND: Duration = Duration::from_secs(40);
 const POLL: Duration = Duration::from_millis(20);
 const STOP_GRACE_PROFILE: &str = "stop-grace-deadline";
+const GUEST_RECEIVED_STAGE: &str = "shutdown-received";
+const GUEST_COMPLETE_STAGE: &str = "group-complete";
 const GUEST_SHUTDOWN_METRIC: &str = "guest_shutdown_handling_ns";
 
 /// The eight host-stage metrics in stage order; the stage's start boundary is the previous
@@ -66,8 +69,6 @@ const STAGE_METRICS: [&str; 8] = [
     "guest_exit_ns",
     "cleanup_calls_ns",
 ];
-/// Stages 5 to 8 begin at the stop call.
-const FIRST_STOP_STAGE: usize = 4;
 
 #[overdrive_bench(
     family = "vm-lifecycle",
@@ -78,7 +79,7 @@ const FIRST_STOP_STAGE: usize = 4;
     profile(name = "healthy-concurrency-4", preparation = "four workloads are deployed together and stopped together per replicate"),
     profile(name = "cold-cache", preparation = "page cache dropped before each replicate"),
     profile(name = "warm-cache", preparation = "image pre-read"),
-    profile(name = "stop-grace-deadline", preparation = "workload deployed, then stopped; the stop stages are not measured until the stop-ignoring guest fixture exists"),
+    profile(name = "stop-grace-deadline", preparation = "workload ignores the stop signal and exits only when the guest stop grace ends"),
     metric(name = "admission_ns", unit = ns, table = "host-stages", series),
     metric(name = "vmm_launch_ns", unit = ns, table = "host-stages", series),
     metric(name = "guest_ready_ns", unit = ns, table = "host-stages", series),
@@ -113,7 +114,7 @@ fn fail(message: &str) -> ReplicateFailure {
 struct Shape {
     concurrency: usize,
     cache: Cache,
-    measures_stop: bool,
+    ignores_stop: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -125,18 +126,14 @@ enum Cache {
 
 impl Shape {
     fn of(profile: &str) -> Option<Self> {
-        let (concurrency, cache, measures_stop) = match profile {
-            "healthy-concurrency-1" | STOP_GRACE_PROFILE => (1, Cache::Unprepared, true),
-            "healthy-concurrency-4" => (4, Cache::Unprepared, true),
-            "cold-cache" => (1, Cache::Cold, true),
-            "warm-cache" => (1, Cache::Warm, true),
+        let (concurrency, cache) = match profile {
+            "healthy-concurrency-1" | STOP_GRACE_PROFILE => (1, Cache::Unprepared),
+            "healthy-concurrency-4" => (4, Cache::Unprepared),
+            "cold-cache" => (1, Cache::Cold),
+            "warm-cache" => (1, Cache::Warm),
             _ => return None,
         };
-        Some(Self {
-            concurrency,
-            cache,
-            measures_stop: measures_stop && profile != STOP_GRACE_PROFILE,
-        })
+        Some(Self { concurrency, cache, ignores_stop: profile == STOP_GRACE_PROFILE })
     }
 
     const fn cache_state(self) -> &'static str {
@@ -221,6 +218,7 @@ struct TraceData {
     ready: BTreeMap<u32, HostInstant>,
     workload_of_alloc: BTreeMap<String, String>,
     stable: BTreeMap<String, HostInstant>,
+    guest_shutdown: BTreeMap<u32, Result<f64, String>>,
     lagged: bool,
 }
 
@@ -416,14 +414,58 @@ impl Vmm for JoiningVmm {
     }
 
     async fn create(&self, config: &VmConfig, cid: GuestCid) -> VmmResult<VmProcess> {
-        let process = self.inner.create(config, cid).await?;
-        self.trace.lock().cid_of_pid.insert(process.control.pid, cid.get());
+        let mut process = self.inner.create(config, cid).await?;
+        let pid = process.control.pid;
+        self.trace.lock().cid_of_pid.insert(pid, cid.get());
+        let (sender, receiver) = tokio::sync::oneshot::channel();
+        let mut inner_exit = std::mem::replace(&mut process.exit, VmExitWatch::new(receiver));
+        let console = config.run_dir.console_log();
+        let trace = Arc::clone(&self.trace);
+        // The run directory is removed after the exit is forwarded, so the console log is read
+        // first; the exit is then forwarded unchanged.
+        tokio::spawn(async move {
+            let exit = inner_exit.recv().await;
+            let reading = read_guest_shutdown(&console).await;
+            trace.lock().guest_shutdown.insert(pid, reading);
+            if let Some(exit) = exit
+                && sender.send(exit).is_err()
+            {
+                tracing::debug!("the exit watch receiver was dropped before the exit");
+            }
+        });
         Ok(process)
     }
 
     async fn terminate(&self, control: &VmControl, grace: Duration) -> VmmResult<VmTermination> {
         self.inner.terminate(control, grace).await
     }
+}
+
+/// The guest's shutdown-handling duration from the console log: `group-complete` minus
+/// `shutdown-received`, each a 1 ms-resolution guest-clock reading, so the result is a guest
+/// duration and is never combined with a host instant.
+async fn read_guest_shutdown(console: &Path) -> Result<f64, String> {
+    let text = tokio::fs::read_to_string(console)
+        .await
+        .map_err(|error| format!("the guest console log could not be read: {error}"))?;
+    let received = guest_elapsed_ms(&text, GUEST_RECEIVED_STAGE)
+        .ok_or_else(|| format!("the console log has no `{GUEST_RECEIVED_STAGE}` line"))?;
+    let complete = guest_elapsed_ms(&text, GUEST_COMPLETE_STAGE)
+        .ok_or_else(|| format!("the console log has no `{GUEST_COMPLETE_STAGE}` line"))?;
+    match complete.checked_sub(received) {
+        Some(milliseconds) if milliseconds > 0 =>
+        {
+            #[allow(clippy::cast_precision_loss, reason = "a guest duration is far below 2^52 ms")]
+            Ok(milliseconds as f64 * 1_000_000.0)
+        }
+        _ => Err("the guest reported no shutdown handling time at 1 ms resolution".to_owned()),
+    }
+}
+
+fn guest_elapsed_ms(text: &str, stage: &str) -> Option<u64> {
+    let marker = format!("overdrive-init: {stage} elapsed_ms=");
+    let at = text.find(&marker)? + marker.len();
+    text[at..].split(|character: char| !character.is_ascii_digit()).next()?.parse().ok()
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -443,7 +485,7 @@ fn replicate(
     shape: Shape,
     fixture: &Fixture,
     trace: &Arc<Trace>,
-) -> Result<Vec<StageOutcome>, ReplicateFailure> {
+) -> Result<Vec<CycleOutcome>, ReplicateFailure> {
     prepare_cache(shape, fixture)?;
     rep.note("cache_state", shape.cache_state());
     rep.note(
@@ -488,7 +530,7 @@ async fn drive(
     shape: Shape,
     fixture: &Fixture,
     trace: &Arc<Trace>,
-) -> Result<Vec<StageOutcome>, ReplicateFailure> {
+) -> Result<Vec<CycleOutcome>, ReplicateFailure> {
     let staging = default_staging_root();
     let directory = tempfile::Builder::new()
         .prefix("nbp-vm-lifecycle-")
@@ -564,16 +606,15 @@ async fn drive(
     outcome
 }
 
-fn service_toml(id: &str, kernel: &Path, rootfs: &Path) -> String {
+fn service_toml(id: &str, kernel: &Path, rootfs: &Path, command: &str) -> String {
     format!(
         "[service]\nid = \"{id}\"\nreplicas = 1\n\n[[listener]]\nport = {LISTEN_PORT}\nprotocol = \"tcp\"\n\n\
-         [vm]\ncommand = \"{GUEST_PEER_GUEST_PATH}\"\nargs = [\"{listen}\", \"{LISTEN_PORT}\", \"bench\"]\n\
+         [vm]\ncommand = \"{GUEST_PEER_GUEST_PATH}\"\nargs = [\"{command}\", \"{LISTEN_PORT}\", \"bench\"]\n\
          kernel = \"{}\"\nrootfs = \"{}\"\n\n[resources]\ncpu_milli = {VM_CPU_MILLI}\nmemory_bytes = {VM_MEMORY_BYTES}\n\n\
          [[health_check.startup]]\ntype = \"tcp\"\nhost = \"0.0.0.0\"\nport = {LISTEN_PORT}\n\
          interval_seconds = 1\ntimeout_seconds = 1\nmax_attempts = 30\n",
         kernel.display(),
         rootfs.display(),
-        listen = subcommand::LISTEN,
     )
 }
 
@@ -583,13 +624,18 @@ async fn cycles(
     trace: &Arc<Trace>,
     directory: &Path,
     config_path: &Path,
-) -> Result<Vec<StageOutcome>, ReplicateFailure> {
+) -> Result<Vec<CycleOutcome>, ReplicateFailure> {
+    let command =
+        if shape.ignores_stop { subcommand::LISTEN_IGNORING_STOP } else { subcommand::LISTEN };
     let mut specs: Vec<(String, PathBuf)> = Vec::with_capacity(shape.concurrency);
     for index in 0..shape.concurrency {
         let id = format!("nbp-vl-{index}");
         let spec = directory.join(format!("{id}.toml"));
-        std::fs::write(&spec, service_toml(&id, &fixture.kit.kernel_path, &fixture.image.rootfs))
-            .map_err(|error| fail(&format!("writing {}: {error}", spec.display())))?;
+        std::fs::write(
+            &spec,
+            service_toml(&id, &fixture.kit.kernel_path, &fixture.image.rootfs, command),
+        )
+        .map_err(|error| fail(&format!("writing {}: {error}", spec.display())))?;
         specs.push((id, spec));
     }
     let mut deployed = join_all(specs.into_iter().map(|(id, spec)| async move {
@@ -642,7 +688,7 @@ async fn cycles(
     })
     .await;
 
-    Ok(deployed.iter().map(|cycle| stage_outcome(trace, cycle, shape)).collect())
+    Ok(deployed.iter().map(|cycle| cycle_outcome(trace, cycle)).collect())
 }
 
 async fn wait_until(bound: Duration, mut done: impl FnMut() -> bool) {
@@ -666,6 +712,25 @@ enum Stage {
 
 /// The eight host stages of one workload, in stage order.
 type StageOutcome = [Stage; 8];
+
+/// What one workload produced: its eight host stages and, apart, the guest's own duration.
+struct CycleOutcome {
+    stages: StageOutcome,
+    guest_shutdown: Result<f64, String>,
+}
+
+fn cycle_outcome(trace: &Trace, cycle: &Cycle) -> CycleOutcome {
+    let guest_shutdown =
+        trace.alloc_of(&cycle.workload).and_then(|alloc| trace.pid_of(&alloc)).map_or_else(
+            || Err("the allocation's VMM process was not observed".to_owned()),
+            |pid| {
+                trace.lock().guest_shutdown.get(&pid).cloned().unwrap_or_else(|| {
+                    Err("the VMM exit was not observed, so the console log was not read".to_owned())
+                })
+            },
+        );
+    CycleOutcome { stages: stage_outcome(trace, cycle), guest_shutdown }
+}
 
 /// The stamps of one workload's boundaries, in stage-table order: deploy entry, admitted,
 /// created-enter, created, READY, Stable, stop entry, `stop_enter`, `writer_finished`,
@@ -733,18 +798,12 @@ fn boundaries(trace: &Trace, cycle: &Cycle) -> [Result<HostInstant, String>; 11]
 const STAGE_BOUNDARIES: [(usize, usize); 8] =
     [(0, 1), (2, 3), (3, 4), (4, 5), (6, 7), (7, 8), (8, 9), (9, 10)];
 
-fn stage_outcome(trace: &Trace, cycle: &Cycle, shape: Shape) -> StageOutcome {
+fn stage_outcome(trace: &Trace, cycle: &Cycle) -> StageOutcome {
     let stamps = boundaries(trace, cycle);
     let mut broken: Option<String> =
         cycle.deploy_error.as_ref().map(|error| format!("deploy or stop failed: {error}"));
     let mut outcome: Vec<Stage> = Vec::with_capacity(STAGE_METRICS.len());
     for (index, (start, end)) in STAGE_BOUNDARIES.iter().copied().enumerate() {
-        if !shape.measures_stop && index >= FIRST_STOP_STAGE {
-            outcome.push(Stage::Absent(
-                "the stop-ignoring guest fixture does not exist yet, so the stop stages are not measured in this profile".to_owned(),
-            ));
-            continue;
-        }
         if let Some(reason) = &broken {
             outcome.push(Stage::Absent(format!("an earlier stage did not complete: {reason}")));
             continue;
@@ -773,9 +832,9 @@ fn stage_outcome(trace: &Trace, cycle: &Cycle, shape: Shape) -> StageOutcome {
 
 /// Records each metric of the replicate: the measured values as a series, or, when any
 /// workload's stage failed, each failure; a metric no workload reached is absent.
-fn record_cycles(rep: &mut Replicate, cycles: &[StageOutcome]) -> Result<(), ReplicateFailure> {
+fn record_cycles(rep: &mut Replicate, cycles: &[CycleOutcome]) -> Result<(), ReplicateFailure> {
     for (index, metric) in STAGE_METRICS.iter().enumerate() {
-        let stages: Vec<&Stage> = cycles.iter().map(|cycle| &cycle[index]).collect();
+        let stages: Vec<&Stage> = cycles.iter().map(|cycle| &cycle.stages[index]).collect();
         let failures: Vec<&String> = stages
             .iter()
             .filter_map(|stage| if let Stage::Failed(reason) = stage { Some(reason) } else { None })
@@ -801,8 +860,15 @@ fn record_cycles(rep: &mut Replicate, cycles: &[StageOutcome]) -> Result<(), Rep
             rep.record_series(metric, &values)?;
         }
     }
-    rep.record_absent(
-        GUEST_SHUTDOWN_METRIC,
-        "the guest shutdown lines are read from the console log in the guest-shutdown step",
-    )
+    let guest: Vec<f64> =
+        cycles.iter().filter_map(|cycle| cycle.guest_shutdown.as_ref().ok().copied()).collect();
+    if guest.is_empty() {
+        let reason = cycles.iter().find_map(|cycle| cycle.guest_shutdown.as_ref().err());
+        rep.record_absent(
+            GUEST_SHUTDOWN_METRIC,
+            reason.map_or("no workload reached the guest shutdown", String::as_str),
+        )
+    } else {
+        rep.record_series(GUEST_SHUTDOWN_METRIC, &guest)
+    }
 }
