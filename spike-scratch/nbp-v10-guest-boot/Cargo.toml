@@ -1,0 +1,21 @@
+# Throwaway V-10 probe (native-benchmark-program): does the guest-kit workload image boot under production overdrive-init and expose READY, EXIT and the shutdown lines?
+# Self-contained workspace; links production crates by path only; edits none.
+[package]
+name = "nbp-v10-guest-boot"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+overdrive-cli = { path = "../../crates/overdrive-cli" }
+overdrive-control-plane = { path = "../../crates/overdrive-control-plane" }
+overdrive-core = { path = "../../crates/overdrive-core" }
+overdrive-host = { path = "../../crates/overdrive-host" }
+overdrive-sim = { path = "../../crates/overdrive-sim" }
+overdrive-testing = { path = "../../crates/overdrive-testing" }
+tokio = { version = "1", features = ["full"] }
+tempfile = "3"
+async-trait = "0.1"
+libc = "0.2"
+
+[workspace]

@@ -1,0 +1,885 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.11s
+     Running `target/debug/xtask metal run --exclusive -- cargo run --release --manifest-path spike-scratch/nbp-v10-guest-boot/Cargo.toml -- 60`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+OVERDRIVE_METAL_RUN_ID=9cc37052192c7320b5aa7e85
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire exclusive physical-maintenance barrier (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_RUN_REGISTERED run_id=9cc37052192c7320b5aa7e85
+OVERDRIVE_METAL_LEASE_ACQUIRED token=9cc37052192c7320b5aa7e85 pid=1551630
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/islamabad-v1 -> ubuntu@151.115.99.251:/home/ubuntu/overdrive-worktrees/d6e116fa0e342e06ad0b58474ab66e6f68a1cc611c87fc78ba4451a071a928c7
+
+sent 2,132,858 bytes  received 10,611 bytes  612,419.71 bytes/sec
+total size is 1,981,408,196  speedup is 924.39
+
+########## [bootstrap] materialising standalone .git (common dir 7.7G)
+
+sent 492,876 bytes  received 41,377 bytes  356,168.67 bytes/sec
+total size is 915,601,508  speedup is 1,713.80
+## marcus-sa/native-benchmark-program
+ M Cargo.lock
+ M crates/overdrive-bench-families/Cargo.toml
+ M crates/overdrive-bench-families/src/lib.rs
+?? crates/overdrive-bench-families/src/families/vm_lifecycle.rs
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+OVERDRIVE_METAL_RUN_STARTED run_id=9cc37052192c7320b5aa7e85
+   Compiling proc-macro2 v1.0.107
+   Compiling quote v1.0.47
+   Compiling unicode-ident v1.0.27
+   Compiling serde_core v1.0.229
+   Compiling cfg-if v1.0.5
+   Compiling libc v0.2.191
+   Compiling serde v1.0.229
+   Compiling memchr v2.8.3
+   Compiling pin-project-lite v0.2.17
+   Compiling smallvec v1.16.5
+   Compiling futures-core v0.3.34
+   Compiling shlex v2.0.1
+   Compiling portable-atomic v1.15.0
+   Compiling find-msvc-tools v0.1.15
+   Compiling parking_lot_core v0.9.12
+   Compiling futures-sink v0.3.34
+   Compiling scopeguard v1.2.0
+   Compiling futures-io v0.3.34
+   Compiling slab v0.4.12
+   Compiling critical-section v1.2.0
+   Compiling futures-channel v0.3.34
+   Compiling futures-task v0.3.34
+   Compiling lock_api v0.4.14
+   Compiling autocfg v1.5.1
+   Compiling itoa v1.0.19
+   Compiling hashbrown v0.17.1
+   Compiling equivalent v1.0.3
+   Compiling version_check v0.9.5
+   Compiling thiserror v2.0.21
+   Compiling regex-syntax v0.8.11
+   Compiling zerocopy v0.8.63
+   Compiling log v0.4.35
+   Compiling time-core v0.1.9
+   Compiling num-conv v0.2.2
+   Compiling powerfmt v0.2.1
+   Compiling time-macros v0.2.32
+   Compiling bitflags v2.13.2
+   Compiling zmij v1.0.23
+   Compiling generic-array v0.14.7
+   Compiling zeroize v1.9.1
+   Compiling serde_json v1.0.154
+   Compiling once_cell v1.21.4
+   Compiling aho-corasick v1.1.5
+   Compiling stable_deref_trait v1.2.1
+   Compiling ryu v1.0.23
+   Compiling dunce v1.0.5
+   Compiling syn v3.0.10
+   Compiling syn v2.0.119
+   Compiling tracing-core v0.1.36
+   Compiling pkg-config v0.3.34
+   Compiling typenum v1.20.1
+   Compiling fs_extra v1.3.0
+   Compiling rustls-pki-types v1.16.0
+   Compiling cpufeatures v0.3.1
+   Compiling getrandom v0.4.3
+   Compiling base64 v0.23.1
+   Compiling untrusted v0.9.0
+   Compiling simdutf8 v0.1.5
+   Compiling unsafe-libyaml-norway v0.2.15
+   Compiling aws-lc-rs v1.19.0
+   Compiling jobserver v0.1.35
+   Compiling winnow v0.7.15
+   Compiling percent-encoding v2.3.2
+   Compiling httparse v1.10.1
+   Compiling cc v1.11.2
+   Compiling toml_write v0.1.2
+   Compiling ciborium-io v0.2.2
+   Compiling num-traits v0.2.19
+   Compiling memoffset v0.9.1
+   Compiling arrayvec v0.7.8
+   Compiling cfg_aliases v0.2.2
+   Compiling constant_time_eq v0.4.2
+   Compiling cpufeatures v0.2.17
+   Compiling errno v0.3.15
+   Compiling socket2 v0.6.5
+   Compiling mio v1.2.5
+   Compiling regex-automata v0.4.18
+   Compiling signal-hook-registry v1.4.8
+   Compiling getrandom v0.2.17
+   Compiling parking_lot v0.12.5
+   Compiling block-buffer v0.10.4
+   Compiling crypto-common v0.1.7
+   Compiling digest v0.10.7
+   Compiling nix v0.30.1
+   Compiling sha2 v0.10.9
+   Compiling glob v0.3.4
+   Compiling indexmap v2.14.2
+   Compiling deranged v0.5.9
+   Compiling cmake v0.1.58
+   Compiling uuid v1.29.2
+   Compiling litemap v0.8.3
+   Compiling tower-service v0.3.3
+   Compiling rustversion v1.0.23
+   Compiling utf_types v1.0.0
+   Compiling paste v1.0.15
+   Compiling tower-layer v0.3.3
+   Compiling hex v0.4.3
+   Compiling writeable v0.6.4
+   Compiling thiserror v1.0.69
+   Compiling utf8_iter v1.1.0
+   Compiling clang-sys v1.9.1
+   Compiling fnv v1.0.7
+   Compiling atomic-waker v1.1.2
+   Compiling minimal-lexical v0.2.1
+   Compiling prettyplease v0.2.37
+   Compiling rustls v0.23.46
+   Compiling ring v0.17.14
+   Compiling aws-lc-sys v0.47.0
+   Compiling blake3 v1.8.7
+   Compiling icu_normalizer_data v2.4.0
+   Compiling lazy_static v1.5.1
+   Compiling try-lock v0.2.5
+   Compiling rustix v0.38.44
+   Compiling icu_properties_data v2.4.0
+   Compiling want v0.3.2
+   Compiling nom v7.1.3
+   Compiling rustix v1.1.6
+   Compiling time v0.3.55
+   Compiling synstructure v0.13.2
+   Compiling regex v1.13.1
+   Compiling httpdate v1.0.3
+   Compiling linux-raw-sys v0.4.15
+   Compiling synstructure v0.14.0
+   Compiling subtle v2.6.1
+   Compiling libloading v0.8.9
+   Compiling rand_core v0.6.4
+   Compiling form_urlencoded v1.2.2
+   Compiling home v0.5.12
+   Compiling either v1.19.0
+   Compiling linux-raw-sys v0.12.1
+   Compiling bindgen v0.66.1
+   Compiling crc32fast v1.5.5
+   Compiling netlink-packet-core v0.8.2
+   Compiling num-integer v0.1.47
+   Compiling tracing-attributes v0.1.31
+   Compiling zerocopy-derive v0.8.63
+   Compiling munge_macro v0.4.7
+   Compiling utoipa-gen v5.5.0
+   Compiling serde_derive v1.0.229
+   Compiling futures-macro v0.3.34
+   Compiling tokio-macros v2.7.2
+   Compiling thiserror-impl v2.0.21
+   Compiling displaydoc v0.2.7
+   Compiling zerofrom-derive v0.1.8
+   Compiling futures-util v0.3.34
+   Compiling yoke-derive v0.8.4
+   Compiling ptr_meta_derive v0.3.2
+   Compiling tracing v0.1.44
+   Compiling zerovec-derive v0.11.7
+   Compiling ptr_meta v0.3.2
+   Compiling async-trait v0.1.92
+   Compiling rancor v0.1.3
+   Compiling bytecheck_derive v0.8.3
+   Compiling munge v0.4.7
+   Compiling rkyv_derive v0.8.18
+   Compiling thiserror-impl v1.0.69
+   Compiling zerofrom v0.1.8
+   Compiling asn1-rs-derive v0.6.0
+   Compiling yoke v0.8.4
+   Compiling bytecheck v0.8.3
+   Compiling asn1-rs-impl v0.2.0
+   Compiling zerotrie v0.2.5
+   Compiling zerovec v0.11.9
+   Compiling rend v0.5.4
+   Compiling rusticata-macros v4.1.0
+   Compiling asn1-rs v0.7.2
+   Compiling tinystr v0.8.5
+   Compiling potential_utf v0.1.6
+   Compiling icu_collections v2.4.0
+   Compiling yasna v0.6.0
+   Compiling which v4.4.2
+   Compiling icu_locale_core v2.4.0
+   Compiling cexpr v0.6.0
+   Compiling sharded-slab v0.1.7
+   Compiling bytes v1.12.1
+   Compiling ipnet v2.12.2
+   Compiling futures-executor v0.3.34
+   Compiling toml_datetime v0.6.11
+   Compiling serde_norway v0.9.42
+   Compiling futures v0.3.34
+   Compiling serde_spanned v0.6.9
+   Compiling tokio v1.54.1
+   Compiling http v1.5.0
+   Compiling toml_edit v0.22.27
+   Compiling icu_provider v2.4.0
+   Compiling icu_properties v2.4.0
+   Compiling http-body v1.1.0
+   Compiling icu_normalizer v2.4.0
+   Compiling matchers v0.2.0
+   Compiling pem v4.0.0
+   Compiling half v2.7.1
+   Compiling rkyv v0.8.18
+   Compiling utoipa v5.5.0
+   Compiling ciborium-ll v0.2.2
+   Compiling ppv-lite86 v0.2.21
+   Compiling tracing-log v0.2.0
+   Compiling core-error v0.0.0
+   Compiling ciborium v0.2.2
+   Compiling sync_wrapper v1.0.2
+   Compiling thread_local v1.1.10
+   Compiling nu-ansi-term v0.50.3
+   Compiling rand_chacha v0.3.1
+   Compiling toml v0.8.23
+   Compiling foldhash v0.1.5
+   Compiling rustc-hash v1.1.0
+   Compiling utf8parse v0.2.2
+   Compiling shlex v1.3.0
+   Compiling redb v2.6.4
+   Compiling object v0.36.7
+   Compiling peeking_take_while v0.1.2
+   Compiling lazycell v1.3.0
+   Compiling allocator-api2 v0.2.21
+   Compiling oid-registry v0.8.1
+   Compiling anstyle-parse v1.0.0
+   Compiling rand v0.8.8
+   Compiling tracing-subscriber v0.3.23
+   Compiling idna_adapter v1.2.2
+   Compiling http-body-util v0.1.5
+   Compiling hashbrown v0.15.5
+   Compiling num-bigint v0.4.8
+   Compiling linux-keyutils v0.2.5
+   Compiling eyre v0.6.14
+   Compiling data-encoding v2.11.1
+   Compiling gimli v0.34.0
+   Compiling color-spantrace v0.3.0
+   Compiling rcgen v0.14.10
+   Compiling anstyle-query v1.1.5
+   Compiling is_terminal_polyfill v1.70.2
+   Compiling colorchoice v1.0.5
+   Compiling anstyle v1.0.14
+   Compiling netlink-packet-core v0.9.0
+   Compiling adler2 v2.0.1
+   Compiling miniz_oxide v0.9.1
+   Compiling anstream v1.0.0
+   Compiling tokio-util v0.7.20
+   Compiling overdrive-core v0.0.0 (/home/ubuntu/overdrive-worktrees/d6e116fa0e342e06ad0b58474ab66e6f68a1cc611c87fc78ba4451a071a928c7/crates/overdrive-core)
+   Compiling netlink-sys v0.8.8
+   Compiling netlink-proto v0.12.2
+   Compiling tower v0.5.3
+   Compiling netlink-sys v0.9.0
+   Compiling h2 v0.4.20
+   Compiling der-parser v10.0.0
+   Compiling addr2line v0.27.1
+   Compiling tracing-error v0.2.1
+   Compiling idna v1.1.0
+   Compiling netlink-packet-generic v0.4.0
+   Compiling arc-swap v1.9.5
+   Compiling object v0.40.0
+   Compiling libsql-ffi v0.4.1
+   Compiling heck v0.5.0
+   Compiling rustc-demangle v0.1.28
+   Compiling owo-colors v4.4.0
+   Compiling clap_lex v1.1.1
+   Compiling strsim v0.11.1
+   Compiling indenter v0.3.4
+   Compiling clap_builder v4.6.7
+   Compiling clap_derive v4.6.7
+   Compiling genetlink v0.2.7
+   Compiling hyper v1.12.0
+   Compiling url v2.5.8
+   Compiling x509-parser v0.18.1
+   Compiling netlink-proto v0.13.0
+   Compiling netlink-packet-route v0.33.0
+   Compiling serde_urlencoded v0.7.1
+   Compiling zerocopy-derive v0.7.35
+   Compiling rustls-pemfile v2.2.0
+   Compiling hyper-util v0.1.21
+   Compiling fs-err v3.3.2
+   Compiling aya-obj v0.2.1
+   Compiling overdrive-dataplane v0.0.0 (/home/ubuntu/overdrive-worktrees/d6e116fa0e342e06ad0b58474ab66e6f68a1cc611c87fc78ba4451a071a928c7/crates/overdrive-dataplane)
+   Compiling assert_matches v1.5.0
+   Compiling byteorder v1.5.0
+   Compiling rand_core v0.10.1
+   Compiling mime v0.3.18
+   Compiling aya v0.13.1
+   Compiling backtrace v0.3.77
+   Compiling axum-core v0.4.5
+   Compiling color-eyre v0.6.5
+   Compiling overdrive-host v0.0.0 (/home/ubuntu/overdrive-worktrees/d6e116fa0e342e06ad0b58474ab66e6f68a1cc611c87fc78ba4451a071a928c7/crates/overdrive-host)
+   Compiling chacha20 v0.10.2
+   Compiling zerocopy v0.7.35
+warning: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::new`: unsound due to lack of I/O safety; use `AsyncFd::register` instead (see https://github.com/tokio-rs/tokio/pull/8587)
+   --> /home/ubuntu/overdrive-worktrees/d6e116fa0e342e06ad0b58474ab66e6f68a1cc611c87fc78ba4451a071a928c7/crates/overdrive-host/src/beacon_io.rs:127:42
+    |
+127 |         let listener = Arc::new(AsyncFd::new(listener)?);
+    |                                          ^^^
+    |
+    = note: `#[warn(deprecated)]` on by default
+
+warning: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::new`: unsound due to lack of I/O safety; use `AsyncFd::register` instead (see https://github.com/tokio-rs/tokio/pull/8587)
+   --> /home/ubuntu/overdrive-worktrees/d6e116fa0e342e06ad0b58474ab66e6f68a1cc611c87fc78ba4451a071a928c7/crates/overdrive-host/src/beacon_io.rs:158:46
+    |
+158 | ...                   socket: AsyncFd::new(socket)?,
+    |                                        ^^^
+
+   Compiling clap v4.6.7
+   Compiling ethtool v0.2.9
+   Compiling serde_path_to_error v0.1.20
+   Compiling matchit v0.7.3
+   Compiling axum v0.7.9
+   Compiling rand v0.10.4
+   Compiling overdrive-fwd v0.0.0 (/home/ubuntu/overdrive-worktrees/d6e116fa0e342e06ad0b58474ab66e6f68a1cc611c87fc78ba4451a071a928c7/crates/overdrive-fwd)
+   Compiling tokio-stream v0.1.19
+   Compiling async-stream-impl v0.3.6
+   Compiling hostname v0.4.2
+   Compiling base64 v0.22.1
+   Compiling tinyvec v1.13.3
+   Compiling async-stream v0.3.6
+   Compiling overdrive-reconcilers v0.0.0 (/home/ubuntu/overdrive-worktrees/d6e116fa0e342e06ad0b58474ab66e6f68a1cc611c87fc78ba4451a071a928c7/crates/overdrive-reconcilers)
+   Compiling socket2 v0.5.10
+   Compiling hickory-proto v0.26.3
+   Compiling webpki-roots v1.0.12
+   Compiling tower-http v0.6.11
+   Compiling fastrand v2.5.0
+   Compiling overdrive-testing-macros v0.0.0 (/home/ubuntu/overdrive-worktrees/d6e116fa0e342e06ad0b58474ab66e6f68a1cc611c87fc78ba4451a071a928c7/crates/overdrive-testing-macros)
+   Compiling tempfile v3.27.0
+   Compiling overdrive-testing v0.0.0 (/home/ubuntu/overdrive-worktrees/d6e116fa0e342e06ad0b58474ab66e6f68a1cc611c87fc78ba4451a071a928c7/crates/overdrive-testing)
+   Compiling rtnetlink v0.23.0
+   Compiling utoipa-axum v0.1.3
+   Compiling overdrive-netlink v0.0.0 (/home/ubuntu/overdrive-worktrees/d6e116fa0e342e06ad0b58474ab66e6f68a1cc611c87fc78ba4451a071a928c7/crates/overdrive-netlink)
+   Compiling overdrive-store-local v0.0.0 (/home/ubuntu/overdrive-worktrees/d6e116fa0e342e06ad0b58474ab66e6f68a1cc611c87fc78ba4451a071a928c7/crates/overdrive-store-local)
+warning: `overdrive-host` (lib) generated 2 warnings
+   Compiling rustls-webpki v0.103.17
+   Compiling tokio-rustls v0.26.6
+   Compiling overdrive-gateway v0.0.0 (/home/ubuntu/overdrive-worktrees/d6e116fa0e342e06ad0b58474ab66e6f68a1cc611c87fc78ba4451a071a928c7/crates/overdrive-gateway)
+   Compiling axum-server v0.7.3
+   Compiling hyper-rustls v0.27.10
+   Compiling reqwest v0.12.28
+warning: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::new`: unsound due to lack of I/O safety; use `AsyncFd::register` instead (see https://github.com/tokio-rs/tokio/pull/8587)
+    --> /home/ubuntu/overdrive-worktrees/d6e116fa0e342e06ad0b58474ab66e6f68a1cc611c87fc78ba4451a071a928c7/crates/overdrive-dataplane/src/gateway_relay/mod.rs:1238:27
+     |
+1238 |         let fd = AsyncFd::new(connected).map_err(|_| GatewayClientMtlsError::Handshake)?;
+     |                           ^^^
+     |
+     = note: `#[warn(deprecated)]` on by default
+
+warning: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::new`: unsound due to lack of I/O safety; use `AsyncFd::register` instead (see https://github.com/tokio-rs/tokio/pull/8587)
+    --> /home/ubuntu/overdrive-worktrees/d6e116fa0e342e06ad0b58474ab66e6f68a1cc611c87fc78ba4451a071a928c7/crates/overdrive-dataplane/src/gateway_relay/mod.rs:1262:27
+     |
+1262 |         let fd = AsyncFd::new(accepted).map_err(|err| handshake_io(&err))?;
+     |                           ^^^
+
+   Compiling overdrive-worker v0.0.0 (/home/ubuntu/overdrive-worktrees/d6e116fa0e342e06ad0b58474ab66e6f68a1cc611c87fc78ba4451a071a928c7/crates/overdrive-worker)
+warning: `overdrive-dataplane` (lib) generated 2 warnings
+   Compiling libsql-sys v0.7.0
+   Compiling libsql v0.5.0
+   Compiling overdrive-control-plane v0.0.0 (/home/ubuntu/overdrive-worktrees/d6e116fa0e342e06ad0b58474ab66e6f68a1cc611c87fc78ba4451a071a928c7/crates/overdrive-control-plane)
+warning: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::new`: unsound due to lack of I/O safety; use `AsyncFd::register` instead (see https://github.com/tokio-rs/tokio/pull/8587)
+   --> /home/ubuntu/overdrive-worktrees/d6e116fa0e342e06ad0b58474ab66e6f68a1cc611c87fc78ba4451a071a928c7/crates/overdrive-control-plane/src/guest_network/flow_io/host.rs:209:14
+    |
+209 |     AsyncFd::new(socket).map(Arc::new)
+    |              ^^^
+    |
+    = note: `#[warn(deprecated)]` on by default
+
+warning: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::new`: unsound due to lack of I/O safety; use `AsyncFd::register` instead (see https://github.com/tokio-rs/tokio/pull/8587)
+   --> /home/ubuntu/overdrive-worktrees/d6e116fa0e342e06ad0b58474ab66e6f68a1cc611c87fc78ba4451a071a928c7/crates/overdrive-control-plane/src/guest_network/flow_io/host.rs:367:34
+    |
+367 |         let readiness = AsyncFd::new(ForwarderReadiness(Arc::clone(&context)))
+    |                                  ^^^
+
+   Compiling overdrive-cli v0.0.0 (/home/ubuntu/overdrive-worktrees/d6e116fa0e342e06ad0b58474ab66e6f68a1cc611c87fc78ba4451a071a928c7/crates/overdrive-cli)
+   Compiling overdrive-sim v0.0.0 (/home/ubuntu/overdrive-worktrees/d6e116fa0e342e06ad0b58474ab66e6f68a1cc611c87fc78ba4451a071a928c7/crates/overdrive-sim)
+warning: `overdrive-control-plane` (lib) generated 2 warnings
+   Compiling nbp-v10-guest-boot v0.0.0 (/home/ubuntu/overdrive-worktrees/d6e116fa0e342e06ad0b58474ab66e6f68a1cc611c87fc78ba4451a071a928c7/spike-scratch/nbp-v10-guest-boot)
+    Finished `release` profile [optimized] target(s) in 2m 00s
+     Running `spike-scratch/nbp-v10-guest-boot/target/release/nbp-v10-guest-boot 60`
+# uname -r: 7.0.0-38-generic
+# kernel=/srv/vm/metal/9cc37052192c7320b5aa7e85/kernel rootfs=/srv/vm/metal/9cc37052192c7320b5aa7e85/nbp-v10-img-U4pSIJ/workload.ext4
+CYCLE nbp-v10-000: running=Some(Running) terminal=Some(Terminated) READY=true EXIT=false sr=Some(457) gc=Some(470) beacon_lines=["READY pid=1 port=1053098523 launch=477d2b9b96e651b17025627d546a1fbd"]
+----- RAW console (nbp-v10-000) -----
+[    0.000000] Linux version 7.0.0-38-generic (buildd@lcy02-amd64-070) (x86_64-linux-gnu-gcc (Ubuntu 15.2.0-16ubuntu1) 15.2.0, GNU ld (GNU Binutils for Ubuntu) 2.46) #38-Ubuntu SMP PREEMPT_DYNAMIC Fri Sep  4 09:10:14 UTC 2026 (Ubuntu 7.0.0-38.38-generic 7.0.14)
+[    0.000000] Command line: console=ttyS0 panic=1 root=/dev/vda rw overdrive.transport=vsock2,addr=100.95.0.2,dns=100.95.0.1,launch=477d2b9b96e651b17025627d546a1fbd,beacon=1053098523,stream=1053098540,control=1053098541
+[    0.000000] KERNEL supported cpus:
+[    0.000000]   Intel GenuineIntel
+[    0.000000]   AMD AuthenticAMD
+[    0.000000]   Hygon HygonGenuine
+[    0.000000]   Centaur CentaurHauls
+[    0.000000]   zhaoxin   Shanghai  
+[    0.000000] [Firmware Bug]: TSC doesn't count with P0 frequency!
+[    0.000000] BIOS-provided physical RAM map:
+[    0.000000] BIOS-e820: [mem 0x0000000000000000-0x000000000009ffff]  System RAM
+[    0.000000] BIOS-e820: [gap 0x00000000000a0000-0x00000000000fffff]
+[    0.000000] BIOS-e820: [mem 0x0000000000100000-0x0000000007ffffff]  System RAM
+[    0.000000] BIOS-e820: [gap 0x0000000008000000-0x00000000e7ffffff]
+[    0.000000] BIOS-e820: [mem 0x00000000e8000000-0x00000000f7ffffff]  device reserved
+[    0.000000] NX (Execute Disable) protection: active
+[    0.000000] APIC: Static calls initialized
+[    0.000000] SMBIOS 3.2.0 present.
+[    0.000000] DMI: Cloud Hypervisor cloud-hypervisor, BIOS 0 
+[    0.000000] DMI: Memory slots populated: 0/0
+[    0.000000] Hypervisor detected: KVM
+[    0.000000] last_pfn = 0x8000 max_arch_pfn = 0x10000000000
+[    0.000000] kvm-clock: Using msrs 4b564d01 and 4b564d00
+[    0.000001] kvm-clock: using sched offset of 202047991 cycles
+[    0.000003] clocksource: kvm-clock: mask: 0xffffffffffffffff max_cycles: 0x1cd42e4dffb, max_idle_ns: 881590591483 ns
+[    0.000006] tsc: Detected 2396.400 MHz processor
+[    0.000024] last_pfn = 0x8000 max_arch_pfn = 0x10000000000
+[    0.000073] MTRR map: 0 entries (0 fixed + 0 variable; max 16), built from 8 variable MTRRs
+[    0.000076] x86/PAT: Configuration [0-7]: WB  WC  UC- UC  WB  WP  UC- WT  
+[    0.000196] found SMP MP-table at [mem 0x000f0090-0x000f009f]
+[    0.000215] Using GB pages for direct mapping
+[    0.000336] ACPI: Early table checksum verification disabled
+[    0.000339] ACPI: RSDP 0x00000000000A0000 000024 (v02 CLOUDH)
+[    0.000343] ACPI: XSDT 0x00000000000A13F5 00003C (v01 CLOUDH CHXSDT   00000001 RVAT 01000000)
+[    0.000349] ACPI: FACP 0x00000000000A1253 000114 (v06 CLOUDH CHFACP   00000001 RVAT 01000000)
+[    0.000353] ACPI: DSDT 0x00000000000A0024 00122F (v06 CLOUDH CHDSDT   00000001 RVAT 01000000)
+[    0.000356] ACPI: APIC 0x00000000000A1367 000052 (v05 CLOUDH CHMADT   00000001 RVAT 01000000)
+[    0.000358] ACPI: MCFG 0x00000000000A13B9 00003C (v01 CLOUDH CHMCFG   00000001 RVAT 01000000)
+[    0.000360] ACPI: Reserving FACP table memory at [mem 0xa1253-0xa1366]
+[    0.000361] ACPI: Reserving DSDT table memory at [mem 0xa0024-0xa1252]
+[    0.000362] ACPI: Reserving APIC table memory at [mem 0xa1367-0xa13b8]
+[    0.000363] ACPI: Reserving MCFG table memory at [mem 0xa13b9-0xa13f4]
+[    0.001104] No NUMA configuration found
+[    0.001106] Faking a node at [mem 0x0000000000000000-0x0000000007ffffff]
+[    0.001119] NODE_DATA(0) allocated [mem 0x07fd5280-0x07ffffff]
+[    0.003638] ACPI: PM-Timer IO Port: 0x608
+[    0.003843] IOAPIC[0]: apic_id 0, version 17, address 0xfec00000, GSI 0-23
+[    0.003850] ACPI: INT_SRC_OVR (bus 0 bus_irq 4 global_irq 4 dfl dfl)
+[    0.003853] ACPI: Using ACPI (MADT) for SMP configuration information
+[    0.003855] TSC deadline timer available
+[    0.003858] CPU topo: Max. logical packages:   1
+[    0.003859] CPU topo: Max. logical nodes:      1
+[    0.003859] CPU topo: Num. nodes per package:  1
+[    0.003862] CPU topo: Max. logical dies:       1
+[    0.003862] CPU topo: Max. dies per package:   1
+[    0.003866] CPU topo: Max. threads per core:   1
+[    0.003867] CPU topo: Num. cores per package:     1
+[    0.003867] CPU topo: Num. threads per package:   1
+[    0.003868] CPU topo: Allowing 1 present CPUs plus 0 hotplug CPUs
+[    0.003887] kvm-guest: APIC: eoi() replaced with kvm_guest_apic_eoi_write()
+[    0.003910] PM: hibernation: Registered nosave memory: [mem 0x00000000-0x00000fff]
+[    0.003911] PM: hibernation: Registered nosave memory: [mem 0x000a0000-0x000fffff]
+[    0.003913] [gap 0x08000000-0xe7ffffff] available for PCI devices
+[    0.003914] Booting paravirtualized kernel on KVM
+[    0.003916] clocksource: refined-jiffies: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 1910969940391419 ns
+[    0.003957] Zone ranges:
+[    0.003958]   DMA      [mem 0x0000000000001000-0x0000000000ffffff]
+[    0.003960]   DMA32    [mem 0x0000000001000000-0x0000000007ffffff]
+[    0.003962]   Normal   empty
+[    0.003963]   Device   empty
+[    0.003963] Movable zone start for each node
+[    0.003965] Early memory node ranges
+[    0.003966]   node   0: [mem 0x0000000000001000-0x000000000009ffff]
+[    0.003967]   node   0: [mem 0x0000000000100000-0x0000000007ffffff]
+[    0.003968] Initmem setup node 0 [mem 0x0000000000001000-0x0000000007ffffff]
+[    0.006403] On node 0, zone DMA: 1 pages in unavailable ranges
+[    0.006419] On node 0, zone DMA: 96 pages in unavailable ranges
+[    0.006520] setup_percpu: NR_CPUS:8192 nr_cpumask_bits:1 nr_cpu_ids:1 nr_node_ids:1
+[    0.007382] percpu: Embedded 85 pages/cpu s225280 r8192 d114688 u2097152
+[    0.007417] kvm-guest: PV spinlocks disabled, single CPU
+[    0.007419] Kernel command line: console=ttyS0 panic=1 root=/dev/vda rw overdrive.transport=vsock2,addr=100.95.0.2,dns=100.95.0.1,launch=477d2b9b96e651b17025627d546a1fbd,beacon=1053098523,stream=1053098540,control=1053098541
+[    0.007480] random: crng init done
+[    0.007481] printk: log buffer data + meta data: 262144 + 1114112 = 1376256 bytes
+[    0.007488] Dentry cache hash table entries: 16384 (order: 5, 131072 bytes, linear)
+[    0.007492] Inode-cache hash table entries: 8192 (order: 4, 65536 bytes, linear)
+[    0.007522] Fallback order for Node 0: 0 
+[    0.007525] Built 1 zonelists, mobility grouping on.  Total pages: 32671
+[    0.007526] Policy zone: DMA32
+[    0.007533] mem auto-init: stack:all(zero), heap alloc:on, heap free:off
+[    0.007537] KHO: Failed to reserve lowmem scratch buffer
+[    0.007537] KHO: Failed to reserve scratch area, disabling kexec handover
+[    0.008841] SLUB: HWalign=64, Order=0-3, MinObjects=0, CPUs=1, Nodes=1
+[    0.022745] ftrace: allocating 63997 entries in 252 pages
+[    0.022747] ftrace: allocated 252 pages with 6 groups
+[    0.023501] Dynamic Preempt: lazy
+[    0.023546] rcu: Preemptible hierarchical RCU implementation.
+[    0.023547] rcu: 	RCU restricting CPUs from NR_CPUS=8192 to nr_cpu_ids=1.
+[    0.023548] 	Trampoline variant of Tasks RCU enabled.
+[    0.023549] 	Rude variant of Tasks RCU enabled.
+[    0.023549] 	Tracing variant of Tasks RCU enabled.
+[    0.023550] rcu: RCU calculated value of scheduler-enlistment delay is 100 jiffies.
+[    0.023551] rcu: Adjusting geometry for rcu_fanout_leaf=16, nr_cpu_ids=1
+[    0.023559] RCU Tasks: Setting shift to 0 and lim to 1 rcu_task_cb_adjust=1 rcu_task_cpu_ids=1.
+[    0.023561] RCU Tasks Rude: Setting shift to 0 and lim to 1 rcu_task_cb_adjust=1 rcu_task_cpu_ids=1.
+[    0.028661] NR_IRQS: 524544, nr_irqs: 256, preallocated irqs: 0
+[    0.028725] rcu: srcu_init: Setting srcu_struct sizes based on contention.
+[    0.028732] clocksource: jiffies: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 1911260446275000 ns
+[    0.028801] Console: colour dummy device 80x25
+[    0.028890] printk: console [ttyS0] enabled
+[    0.202309] ACPI: Core revision 20251212
+[    0.203397] APIC: Switch to symmetric I/O mode setup
+[    0.205871] x2apic enabled
+[    0.207796] APIC: Switched APIC routing to: physical x2apic
+[    0.209298] clocksource: tsc-early: mask: 0xffffffffffffffff max_cycles: 0x228aeee0e7a, max_idle_ns: 440795314296 ns
+[    0.211983] Calibrating delay loop (skipped) preset value.. 4792.80 BogoMIPS (lpj=2396400)
+[    0.212977] x86/cpu: User Mode Instruction Prevention (UMIP) activated
+[    0.212977] Last level iTLB entries: 4KB 512, 2MB 512, 4MB 256
+[    0.212977] Last level dTLB entries: 4KB 3072, 2MB 3072, 4MB 1536, 1GB 0
+[    0.212977] mitigations: Enabled attack vectors: user_kernel, user_user, guest_host, guest_guest, SMT mitigations: auto
+[    0.212977] Speculative Store Bypass: Mitigation: Speculative Store Bypass disabled via prctl
+[    0.212977] Transient Scheduler Attacks: Vulnerable: No microcode
+[    0.212977] Spectre V2 : Mitigation: Enhanced / Automatic IBRS
+[    0.212977] Speculative Return Stack Overflow: Mitigation: Safe RET
+[    0.212977] Spectre V1 : Mitigation: usercopy/swapgs barriers and __user pointer sanitization
+[    0.212977] Spectre V2 : Enabling IBPB for BPF
+[    0.212977] Spectre V2 : mitigation: Enabling conditional Indirect Branch Prediction Barrier
+[    0.212977] active return thunk: srso_alias_return_thunk
+[    0.212977] x86/fpu: Supporting XSAVE feature 0x001: 'x87 floating point registers'
+[    0.212977] x86/fpu: Supporting XSAVE feature 0x002: 'SSE registers'
+[    0.212977] x86/fpu: Supporting XSAVE feature 0x004: 'AVX registers'
+[    0.212977] x86/fpu: Supporting XSAVE feature 0x020: 'AVX-512 opmask'
+[    0.212977] x86/fpu: Supporting XSAVE feature 0x040: 'AVX-512 Hi256'
+[    0.212977] x86/fpu: Supporting XSAVE feature 0x080: 'AVX-512 ZMM_Hi256'
+[    0.212977] x86/fpu: Supporting XSAVE feature 0x200: 'Protection Keys User registers'
+[    0.212977] x86/fpu: Supporting XSAVE feature 0x800: 'Control-flow User registers'
+[    0.212977] x86/fpu: Supporting XSAVE feature 0x1000: 'Control-flow Kernel registers (KVM only)'
+[    0.212977] x86/fpu: xstate_offset[2]:  576, xstate_sizes[2]:  256
+[    0.212977] x86/fpu: xstate_offset[5]:  832, xstate_sizes[5]:   64
+[    0.212977] x86/fpu: xstate_offset[6]:  896, xstate_sizes[6]:  512
+[    0.212977] x86/fpu: xstate_offset[7]: 1408, xstate_sizes[7]: 1024
+[    0.212977] x86/fpu: xstate_offset[9]: 2432, xstate_sizes[9]:    8
+[    0.212977] x86/fpu: xstate_offset[11]: 2440, xstate_sizes[11]:   16
+[    0.212977] x86/fpu: xstate_offset[12]: 2456, xstate_sizes[12]:   24
+[    0.212977] x86/fpu: Enabled xstate features 0x1ae7, context size is 2480 bytes, using 'compacted' format.
+[    0.212977] Freeing SMP alternatives memory: 56K
+[    0.212977] pid_max: default: 32768 minimum: 301
+[    0.212977] landlock: Up and running.
+[    0.212977] Yama: becoming mindful.
+[    0.212977] AppArmor: AppArmor initialized
+[    0.212977] AppArmor: AppArmor secmark mediation reserved: ready to be enabled
+[    0.212977] Mount-cache hash table entries: 512 (order: 0, 4096 bytes, linear)
+[    0.212977] Mountpoint-cache hash table entries: 512 (order: 0, 4096 bytes, linear)
+[    0.212977] VFS: Finished mounting rootfs on nullfs
+[    0.212977] smpboot: CPU0: AMD EPYC 8024P 8-Core Processor (family: 0x19, model: 0xa0, stepping: 0x2)
+[    0.213248] Performance Events: Fam17h+ core perfctr, AMD PMU driver.
+[    0.213986] ... version:                   2
+[    0.214991] ... bit width:                 48
+[    0.215982] ... generic counters:          6
+[    0.216982] ... generic bitmap:            000000000000003f
+[    0.217983] ... fixed-purpose counters:    0
+[    0.218982] ... fixed-purpose bitmap:      0000000000000000
+[    0.219983] ... value mask:                0000ffffffffffff
+[    0.220982] ... max period:                00007fffffffffff
+[    0.221982] ... global_ctrl mask:          000000000000003f
+[    0.223103] signal: max sigframe size: 3376
+[    0.224065] rcu: Hierarchical SRCU implementation.
+[    0.224067] rcu: 	Max phase no-delay instances is 400.
+[    0.233917] smp: Bringing up secondary CPUs ...
+[    0.233928] smp: Brought up 1 node, 1 CPU
+[    0.233931] smpboot: Total of 1 processors activated (4792.80 BogoMIPS)
+[    0.236058] Memory: 61360K/130684K available (23836K kernel code, 4957K rwdata, 16776K rodata, 5304K init, 5840K bss, 63856K reserved, 0K cma-reserved)
+[    0.238074] devtmpfs: initialized
+[    0.238169] x86/mm: Memory block size: 128MB
+[    0.240197] posixtimers hash table entries: 512 (order: 1, 8192 bytes, linear)
+[    0.240205] futex hash table entries: 256 (16384 bytes on 1 NUMA nodes, total 16 KiB, linear).
+[    0.240648] PM: RTC time: 18:32:37, date: 2026-11-17
+[    0.244236] NET: Registered PF_NETLINK/PF_ROUTE protocol family
+[    0.244355] DMA: preallocated 128 KiB GFP_KERNEL|GFP_DMA pool for atomic allocations
+[    0.244365] DMA: preallocated 128 KiB GFP_KERNEL|GFP_DMA32 pool for atomic allocations
+[    0.244379] audit: initializing netlink subsys (disabled)
+[    0.248986] audit: type=2000 audit(1794940357.573:1): state=initialized audit_enabled=0 res=1
+[    0.250015] thermal_sys: Registered thermal governor 'fair_share'
+[    0.250020] thermal_sys: Registered thermal governor 'bang_bang'
+[    0.250023] thermal_sys: Registered thermal governor 'step_wise'
+[    0.250024] thermal_sys: Registered thermal governor 'user_space'
+[    0.250026] thermal_sys: Registered thermal governor 'power_allocator'
+[    0.253993] cpuidle: using governor ladder
+[    0.255992] cpuidle: using governor menu
+[    0.258564] acpiphp: ACPI Hot Plug PCI Controller Driver version: 0.5
+[    0.258882] PCI: ECAM [mem 0xe8000000-0xe80fffff] (base 0xe8000000) for domain 0000 [bus 00-00]
+[    0.258890] PCI: ECAM [mem 0xe8000000-0xe80fffff] reserved as E820 entry
+[    0.258901] PCI: Using configuration type 1 for base access
+[    0.263090] kprobes: kprobe jump-optimization is enabled. All kprobes are optimized if possible.
+[    0.269001] HugeTLB: registered 1.00 GiB page size, pre-allocated 0 pages
+[    0.269006] HugeTLB: 16380 KiB vmemmap can be freed for a 1.00 GiB page
+[    0.269010] HugeTLB: registered 2.00 MiB page size, pre-allocated 0 pages
+[    0.269011] HugeTLB: 28 KiB vmemmap can be freed for a 2.00 MiB page
+[    0.280388] ACPI: Added _OSI(Module Device)
+[    0.280395] ACPI: Added _OSI(Processor Device)
+[    0.280397] ACPI: Added _OSI(Processor Aggregator Device)
+[    0.288336] ACPI: 1 ACPI AML tables successfully acquired and loaded
+[    0.289014] ACPI: \_SB_: platform _OSC: OS support mask [006e7eff]
+[    0.289550] ACPI: Interpreter enabled
+[    0.289565] ACPI: PM: (supports S0 S5)
+[    0.289568] ACPI: Using IOAPIC for interrupt routing
+[    0.289738] PCI: Using host bridge windows from ACPI; if necessary, use "pci=nocrs" and report a bug
+[    0.289741] PCI: Using E820 reservations for host bridge windows
+[    0.306056] ACPI: PCI Root Bridge [PC00] (domain 0000 [bus 00])
+[    0.306068] acpi PNP0A08:00: _OSC: OS supports [ExtendedConfig ASPM ClockPM Segments MSI EDR HPX-Type3]
+[    0.306078] acpi PNP0A08:00: _OSC: OS requested [PCIeHotplug SHPCHotplug PME AER PCIeCapability LTR DPC]
+[    0.306082] acpi PNP0A08:00: _OSC: platform willing to grant [PCIeHotplug SHPCHotplug PME AER PCIeCapability LTR DPC]
+[    0.306084] acpi PNP0A08:00: _OSC: platform retains control of PCIe features (AE_ERROR)
+[    0.306607] acpiphp: Slot [0] registered
+[    0.306650] acpiphp: Slot [1] registered
+[    0.306692] acpiphp: Slot [2] registered
+[    0.306732] acpiphp: Slot [3] registered
+[    0.306773] acpiphp: Slot [4] registered
+[    0.306814] acpiphp: Slot [5] registered
+[    0.306854] acpiphp: Slot [6] registered
+[    0.306894] acpiphp: Slot [7] registered
+[    0.306934] acpiphp: Slot [8] registered
+[    0.306975] acpiphp: Slot [9] registered
+[    0.326031] acpiphp: Slot [10] registered
+[    0.326076] acpiphp: Slot [11] registered
+[    0.326116] acpiphp: Slot [12] registered
+[    0.326170] acpiphp: Slot [13] registered
+[    0.326211] acpiphp: Slot [14] registered
+[    0.326251] acpiphp: Slot [15] registered
+[    0.326292] acpiphp: Slot [16] registered
+[    0.326332] acpiphp: Slot [17] registered
+[    0.326373] acpiphp: Slot [18] registered
+[    0.326414] acpiphp: Slot [19] registered
+[    0.326454] acpiphp: Slot [20] registered
+[    0.326495] acpiphp: Slot [21] registered
+[    0.326535] acpiphp: Slot [22] registered
+[    0.326576] acpiphp: Slot [23] registered
+[    0.326616] acpiphp: Slot [24] registered
+[    0.326656] acpiphp: Slot [25] registered
+[    0.326697] acpiphp: Slot [26] registered
+[    0.326737] acpiphp: Slot [27] registered
+[    0.326780] acpiphp: Slot [28] registered
+[    0.326823] acpiphp: Slot [29] registered
+[    0.326864] acpiphp: Slot [30] registered
+[    0.326904] acpiphp: Slot [31] registered
+[    0.326982] PCI host bridge to bus 0000:00
+[    0.327021] pci_bus 0000:00: root bus resource [mem 0xe8000000-0xe80fffff]
+[    0.327026] pci_bus 0000:00: root bus resource [mem 0xc0000000-0xe7ffffff window]
+[    0.327029] pci_bus 0000:00: root bus resource [mem 0x100000000-0x3fffffeeffff window]
+[    0.327031] pci_bus 0000:00: root bus resource [io  0x0000-0x0cf7 window]
+[    0.327034] pci_bus 0000:00: root bus resource [io  0x0d00-0xffff window]
+[    0.327037] pci_bus 0000:00: root bus resource [bus 00]
+[    0.327209] pci 0000:00:00.0: [8086:0d57] type 00 class 0x060000 conventional PCI endpoint
+[    0.362971] pci 0000:00:01.0: [1af4:1042] type 00 class 0x018000 conventional PCI endpoint
+[    0.363657] pci 0000:00:01.0: BAR 0 [mem 0xe7f80000-0xe7ffffff]
+[    0.370523] pci 0000:00:02.0: [1af4:1044] type 00 class 0xffff00 conventional PCI endpoint
+[    0.374210] pci 0000:00:02.0: BAR 0 [mem 0x3fffff800000-0x3fffff87ffff 64bit]
+[    0.376964] pci 0000:00:03.0: [1af4:1053] type 00 class 0xffff00 conventional PCI endpoint
+[    0.380652] pci 0000:00:03.0: BAR 0 [mem 0x3fffff000000-0x3fffff07ffff 64bit]
+[    0.406463] iommu: Default domain type: Translated
+[    0.406469] iommu: DMA domain TLB invalidation policy: lazy mode
+[    0.408273] SCSI subsystem initialized
+[    0.411042] ACPI: bus type USB registered
+[    0.411069] usbcore: registered new interface driver usbfs
+[    0.411080] usbcore: registered new interface driver hub
+[    0.411092] usbcore: registered new device driver usb
+[    0.411122] pps_core: LinuxPPS API ver. 1 registered
+[    0.411124] pps_core: Software ver. 5.3.6 - Copyright 2005-2007 Rodolfo Giometti <giometti@linux.it>
+[    0.411129] PTP clock support registered
+[    0.418073] EDAC MC: Ver: 3.0.0
+[    0.419438] NetLabel: Initializing
+[    0.419443] NetLabel:  domain hash size = 128
+[    0.419446] NetLabel:  protocols = UNLABELED CIPSOv4 CALIPSO
+[    0.419470] NetLabel:  unlabeled traffic allowed by default
+[    0.424098] mctp: management component transport protocol core
+[    0.424103] NET: Registered PF_MCTP protocol family
+[    0.424118] PCI: Using ACPI for IRQ routing
+[    0.427011] vgaarb: loaded
+[    0.427873] clocksource: Switched to clocksource kvm-clock
+[    0.429936] VFS: Disk quotas dquot_6.6.0
+[    0.429955] VFS: Dquot-cache hash table entries: 512 (order 0, 4096 bytes)
+[    0.434037] AppArmor: AppArmor Filesystem Enabled
+[    0.434060] acpi PNP0C02:00: Reserved [mem 0xe8000000-0xe80fffff]
+[    0.434080] pnp: PnP ACPI init
+[    0.437940] pnp: PnP ACPI: found 1 devices
+[    0.445738] clocksource: acpi_pm: mask: 0xffffff max_cycles: 0xffffff, max_idle_ns: 2085701024 ns
+[    0.445835] NET: Registered PF_INET protocol family
+[    0.445863] IP idents hash table entries: 2048 (order: 2, 16384 bytes, linear)
+[    0.472172] tcp_listen_portaddr_hash hash table entries: 256 (order: 0, 4096 bytes, linear)
+[    0.472194] Table-perturb hash table entries: 65536 (order: 6, 262144 bytes, linear)
+[    0.472208] TCP established hash table entries: 1024 (order: 1, 8192 bytes, linear)
+[    0.472214] TCP bind hash table entries: 1024 (order: 3, 32768 bytes, linear)
+[    0.472218] TCP: Hash tables configured (established 1024 bind 1024)
+[    0.481819] MPTCP token hash table entries: 256 (order: 1, 6144 bytes, linear)
+[    0.481841] UDP hash table entries: 256 (order: 2, 16384 bytes, linear)
+[    0.481847] UDP-Lite hash table entries: 256 (order: 2, 16384 bytes, linear)
+[    0.481902] NET: Registered PF_UNIX/PF_LOCAL protocol family
+[    0.481911] NET: Registered PF_XDP protocol family
+[    0.481923] pci_bus 0000:00: resource 4 [mem 0xe8000000-0xe80fffff]
+[    0.481928] pci_bus 0000:00: resource 5 [mem 0xc0000000-0xe7ffffff window]
+[    0.481931] pci_bus 0000:00: resource 6 [mem 0x100000000-0x3fffffeeffff window]
+[    0.481934] pci_bus 0000:00: resource 7 [io  0x0000-0x0cf7 window]
+[    0.481937] pci_bus 0000:00: resource 8 [io  0x0d00-0xffff window]
+[    0.482071] PCI: CLS 0 bytes, default 64
+[    0.482236] clocksource: tsc: mask: 0xffffffffffffffff max_cycles: 0x228aeee0e7a, max_idle_ns: 440795314296 ns
+[    0.502652] clocksource: Switched to clocksource tsc
+[    0.502702] platform rtc_cmos: registered platform RTC device (no PNP device found)
+[    0.506591] Initialise system trusted keyrings
+[    0.506605] Key type blacklist registered
+[    0.508899] workingset: timestamp_bits=36 max_order=15 bucket_order=0
+[    0.511023] squashfs: version 4.0 (2009/01/31) Phillip Lougher
+[    0.512696] fuse: init (API version 7.45)
+[    0.513903] integrity: Platform Keyring initialized
+[    0.513912] integrity: Machine keyring initialized
+[    0.529095] Key type asymmetric registered
+[    0.529101] Asymmetric key parser 'x509' registered
+[    0.529137] Block layer SCSI generic (bsg) driver version 0.4 loaded (major 242)
+[    0.533468] io scheduler mq-deadline registered
+[    0.534758] ledtrig-cpu: registered to indicate activity on CPUs
+[    0.536987] input: Power Button as /devices/platform/PNP0C0C:00/input/input0
+[    0.537025] ACPI: button: Power Button [PWRB]
+[    0.540330] virtio-pci 0000:00:01.0: enabling device (0000 -> 0002)
+[    0.543350] virtio-pci 0000:00:02.0: enabling device (0000 -> 0002)
+[    0.546346] virtio-pci 0000:00:03.0: enabling device (0000 -> 0002)
+[    0.549419] Serial: 8250/16550 driver, 32 ports, IRQ sharing enabled
+[    0.575437] 00:00: ttyS0 at I/O 0x3f8 (irq = 24, base_baud = 115200) is a U6_16550A
+[    0.580737] Linux agpgart interface v0.103
+[    0.583414] loop: module loaded
+[    0.583694] virtio_blk virtio0: 1/0/0 default/read/poll queues
+[    0.587319] virtio_blk virtio0: [vda] 155648 512-byte logical blocks (79.7 MB/76.0 MiB)
+[    0.591595] ACPI: bus type drm_connector registered
+[    0.591863] tun: Universal TUN/TAP device driver, 1.6
+[    0.594519] PPP generic driver version 2.4.2
+[    0.595824] i8042: PNP: No PS/2 controller found.
+[    0.597157] mousedev: PS/2 mouse device common for all mice
+[    0.598955] rtc_cmos rtc_cmos: only 24-hr supported
+[    0.598983] i2c_dev: i2c /dev entries driver
+[    0.599010] device-mapper: core: CONFIG_IMA_DISABLE_HTABLE is disabled. Duplicate IMA measurements will not be recorded in the IMA log.
+[    0.599029] device-mapper: uevent: version 1.0.3
+[    0.605764] device-mapper: ioctl: 4.50.0-ioctl (2025-04-28) initialised: dm-devel@lists.linux.dev
+[    0.605772] amd_pstate: The CPPC feature is supported but currently disabled by the BIOS.
+[    0.605772] Please enable it if your BIOS has the CPPC option.
+[    0.605774] amd_pstate: the _CPC object is not present in SBIOS or ACPI disabled
+[    0.605838] drop_monitor: Initializing network drop monitor service
+[    0.605970] NET: Registered PF_INET6 protocol family
+[    0.616864] Segment Routing with IPv6
+[    0.616878] In-situ OAM (IOAM) with IPv6
+[    0.616903] NET: Registered PF_PACKET protocol family
+[    0.620257] Key type dns_resolver registered
+[    0.621675] IPI shorthand broadcast: enabled
+[    0.626123] sched_clock: Marking stable (442002160, 183245579)->(802674482, -177426743)
+[    0.628520] registered taskstats version 1
+[    0.629906] Loading compiled-in X.509 certificates
+[    0.631786] Loaded X.509 cert 'Build time autogenerated kernel key: 6b2b0d62fc3a1216c49fda2b061b13d4dbf474bd'
+[    0.632220] Loaded X.509 cert 'Canonical Ltd. Live Patch Signing 2025 Kmod: d541cef61dc7e793b7eb7e899970a2eef0b5dc8c'
+[    0.637888] Loaded X.509 cert 'Canonical Ltd. Live Patch Signing: 14df34d1a87cf37625abec039ef2bf521249b969'
+[    0.640832] Loaded X.509 cert 'Canonical Ltd. Kernel Module Signing 2025 Kmod: 4627603d2357a2a3f81006370894c221175893e9'
+[    0.644049] Loaded X.509 cert 'Canonical Ltd. Kernel Module Signing: 88f752e560a1e0737e31163a466ad7b70a850c19'
+[    0.644054] blacklist: Loading compiled-in revocation X.509 certificates
+[    0.644072] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing: 61482aa2830d0ab2ad5af10b7250da9033ddcef0'
+[    0.644087] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (2017): 242ade75ac4a15e50d50c84b0d45ff3eae707a03'
+[    0.644100] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (ESM 2018): 365188c1d374d6b07c3c8f240f8ef722433d6a8b'
+[    0.644113] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (2019): c0746fd6c5da3ae827864651ad66ae47fe24b3e8'
+[    0.644128] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (2021 v1): a8d54bbb3825cfb94fa13c9f8a594a195c107b8d'
+[    0.644141] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (2021 v2): 4cf046892d6fd3c9a5b03f98d845f90851dc6a8c'
+[    0.644157] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (2021 v3): 100437bb6de6e469b581e61cd66bce3ef4ed53af'
+[    0.644169] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (Ubuntu Core 2019): c1d57b8f6b743f23ee41f4f7ee292f06eecadfb9'
+[    0.678316] Demotion targets for Node 0: null
+[    0.679584] Key type .fscrypt registered
+[    0.679588] Key type fscrypt-provisioning registered
+[    0.679681] Key type big_key registered
+[    0.683449] Key type encrypted registered
+[    0.683455] AppArmor: AppArmor sha256 policy hashing enabled
+[    0.683460] ima: No TPM chip found, activating TPM-bypass!
+[    0.683464] Loading compiled-in module X.509 certificates
+[    0.683916] Loaded X.509 cert 'Build time autogenerated kernel key: 6b2b0d62fc3a1216c49fda2b061b13d4dbf474bd'
+[    0.683919] ima: Allocated hash algorithm: sha256
+[    0.683931] ima: No architecture policies found
+[    0.683954] evm: Initialising EVM extended attributes:
+[    0.683955] evm: security.selinux
+[    0.683958] evm: security.SMACK64
+[    0.683959] evm: security.SMACK64EXEC
+[    0.683961] evm: security.SMACK64TRANSMUTE
+[    0.683962] evm: security.SMACK64MMAP
+[    0.683964] evm: security.apparmor
+[    0.683965] evm: security.ima
+[    0.683967] evm: security.capability
+[    0.683969] evm: HMAC attrs: 0x1
+[    0.704033] PM:   Magic number: 2:696:544
+[    0.704048] tty ttyS20: hash matches
+[    0.706297] RAS: Correctable Errors collector initialized.
+[    0.706594] clk: Disabling unused clocks
+[    0.706597] PM: genpd: Disabling unused power domains
+[    0.711076] md: Waiting for all devices to be available before autodetect
+[    0.711082] md: If you don't use raid, use raid=noautodetect
+[    0.711084] md: Autodetecting RAID arrays.
+[    0.711086] md: autorun ...
+[    0.711088] md: ... autorun DONE.
+[    0.719681] EXT4-fs (vda): mounted filesystem a6b0e82e-c8fa-440b-b45d-d6ab456ccedf r/w with ordered data mode. Quota mode: none.
+[    0.719698] VFS: Mounted root (ext4 filesystem) on device 253:0.
+[    0.722387] devtmpfs: mounted
+[    0.722886] VFS: Pivoted into new rootfs
+[    0.724706] Freeing unused decrypted memory: 2028K
+[    0.726054] Freeing unused kernel image (initmem) memory: 5304K
+[    0.726072] Write protecting the kernel read-only data: 43008k
+[    0.728325] Freeing unused kernel image (text/rodata gap) memory: 736K
+[    0.728614] Freeing unused kernel image (rodata/data gap) memory: 1656K
+[    0.793626] x86/mm: Checked W+X mappings: passed, no W+X pages found.
+[    0.793639] Run /sbin/init as init process
+[    0.799617] NET: Registered PF_VSOCK protocol family
+[    0.954724] ovd_fwd: loading out-of-tree module taints kernel.
+[    0.954735] ovd_fwd: module verification failed: signature and/or required key missing - tainting kernel
+overdrive-init: beacon boundary tx READY
+overdrive-init: beacon boundary rx EXEC
+overdrive-init: shutdown-received elapsed_ms=457
+overdrive-init: group-complete elapsed_ms=470
+overdrive-init: poweroff-requested elapsed_ms=472
+overdrive-init: fatal: beacon connection I/O failed: Broken pipe (os error 32)
+[    1.440617] ACPI: PM: Preparing to enter system sleep state S5
+[    1.441569] reboot: Power down
+
+-----
+CYCLE nbp-v10-001: running=Some(Running) terminal=Some(Terminated) READY=true EXIT=false sr=Some(487) gc=Some(499) beacon_lines=["READY pid=1 port=1053098523 launch=a882e157d9db2e8e4fdbbadd80cf48cc"]
+CYCLE nbp-v10-002: running=Some(Running) terminal=Some(Terminated) READY=true EXIT=false sr=Some(467) gc=Some(479) beacon_lines=["READY pid=1 port=1053098523 launch=82c754800e785988f09cab6a48e24262"]
+CYCLE nbp-v10-003: running=Some(Running) terminal=Some(Terminated) READY=true EXIT=false sr=Some(445) gc=Some(458) beacon_lines=["READY pid=1 port=1053098523 launch=0ee0d2a7ab4a11f75665b8a29fd33111"]
+CYCLE nbp-v10-004: running=Some(Running) terminal=Some(Terminated) READY=true EXIT=false sr=Some(420) gc=Some(433) beacon_lines=["READY pid=1 port=1053098523 launch=a4bdb7d0c9ba44473fed4de25c8b8e38"]
+CYCLE nbp-v10-005: running=Some(Running) terminal=Some(Terminated) READY=true EXIT=false sr=Some(364) gc=Some(377) beacon_lines=["READY pid=1 port=1053098523 launch=1ea10ea650156cd64dce8940433e08c9"]
+CYCLE nbp-v10-006: running=Some(Running) terminal=Some(Terminated) READY=true EXIT=false sr=Some(303) gc=Some(316) beacon_lines=["READY pid=1 port=1053098523 launch=aa9b0abfc04277a8a9fdd3fd1cc56f81"]
+CYCLE nbp-v10-007: running=Some(Running) terminal=Some(Terminated) READY=true EXIT=false sr=Some(440) gc=Some(453) beacon_lines=["READY pid=1 port=1053098523 launch=ef92cb2706b48169f48a76f560aa7bfc"]
+CYCLE nbp-v10-008: running=Some(Running) terminal=Some(Terminated) READY=true EXIT=false sr=Some(302) gc=Some(315) beacon_lines=["READY pid=1 port=1053098523 launch=c8d7f9c397ebbea283938511bcd0e56e"]
+CYCLE nbp-v10-009: running=Some(Running) terminal=Some(Terminated) READY=true EXIT=false sr=Some(366) gc=Some(377) beacon_lines=["READY pid=1 port=1053098523 launch=47f0702d4c5008a77c03e7649ac08641"]
+CYCLE nbp-v10-010: running=Some(Running) terminal=Some(Terminated) READY=true EXIT=false sr=Some(425) gc=Some(438) beacon_lines=["READY pid=1 port=1053098523 launch=ac701f5d88169a2543bfc5d3294c2a4f"]
+CYCLE nbp-v10-011: running=Some(Running) terminal=Some(Terminated) READY=true EXIT=false sr=Some(342) gc=Some(354) beacon_lines=["READY pid=1 port=1053098523 launch=3e0ff948da087b68463f711d488e9aae"]
+CYCLE nbp-v10-012: running=Some(Running) terminal=Some(Terminated) READY=true EXIT=false sr=Some(396) gc=Some(409) beacon_lines=["READY pid=1 port=1053098523 launch=7716dd62bddd7c85720855daea8c7f93"]
+CYCLE nbp-v10-013: running=Some(Running) terminal=Some(Terminated) READY=true EXIT=false sr=Some(449) gc=Some(463) beacon_lines=["READY pid=1 port=1053098523 launch=b66a3bcd248f454c6d6e97d7e84fe993"]
+CYCLE nbp-v10-014: running=Some(Running) terminal=Some(Terminated) READY=true EXIT=false sr=Some(438) gc=Some(450) beacon_lines=["READY pid=1 port=1053098523 launch=b20d343198ecbf204f51bf0e60141911"]
+CYCLE nbp-v10-015: running=Some(Running) terminal=Some(Terminated) READY=true EXIT=false sr=Some(377) gc=Some(390) beacon_lines=["READY pid=1 port=1053098523 launch=7ebe41b8e27ea8b07af138791e422406"]
+CYCLE nbp-v10-016: running=Some(Running) terminal=Some(Terminated) READY=true EXIT=false sr=Some(402) gc=Some(413) beacon_lines=["READY pid=1 port=1053098523 launch=6a66d3ad2fd1ec6a7000cc4b6a9ef721"]
+CYCLE nbp-v10-017: running=Some(Running) terminal=Some(Terminated) READY=true EXIT=false sr=Some(365) gc=Some(378) beacon_lines=["READY pid=1 port=1053098523 launch=cfec8aa759142b91dbe4be29e0d3201a"]
+CYCLE nbp-v10-018: running=Some(Running) terminal=Some(Terminated) READY=true EXIT=false sr=Some(375) gc=Some(387) beacon_lines=["READY pid=1 port=1053098523 launch=f08566aab9825098a997cf62e7fe30f2"]
+CYCLE nbp-v10-019: running=Some(Running) terminal=Some(Terminated) READY=true EXIT=false sr=Some(432) gc=Some(445) beacon_lines=["READY pid=1 port=1053098523 launch=108e7212b1adbfeab217a17970f6f039"]
+CYCLE nbp-v10-020: running=Some(Running) terminal=Some(Terminated) READY=true EXIT=false sr=Some(482) gc=Some(495) beacon_lines=["READY pid=1 port=1053098523 launch=5c57ce8d4eede7f7f091215e370cf986"]
+CYCLE nbp-v10-021: running=Some(Running) terminal=Some(Terminated) READY=true EXIT=false sr=Some(436) gc=Some(449) beacon_lines=["READY pid=1 port=1053098523 launch=a4b04d45124148eb3a8d4475b556d802"]
+CYCLE nbp-v10-022: running=Some(Running) terminal=Some(Terminated) READY=true EXIT=false sr=Some(398) gc=Some(410) beacon_lines=["READY pid=1 port=1053098523 launch=ce50183685b30041686bb5ef707edd52"]
+CYCLE nbp-v10-023: running=Some(Running) terminal=Some(Terminated) READY=true EXIT=false sr=Some(466) gc=Some(478) beacon_lines=["READY pid=1 port=1053098523 launch=8f1bb8aebc6817006c0b712aad6437d6"]
+CYCLE nbp-v10-024: running=Some(Running) terminal=Some(Terminated) READY=true EXIT=false sr=Some(445) gc=Some(457) beacon_lines=["READY pid=1 port=1053098523 launch=6a1f843b605907853b0b98277fd0a3f9"]
+CYCLE nbp-v10-025: running=Some(Running) terminal=Some(Terminated) READY=true EXIT=false sr=Some(373) gc=Some(386) beacon_lines=["READY pid=1 port=1053098523 launch=3c0578196b56aefa1e0a175f286e91d2"]
+CYCLE nbp-v10-026: running=Some(Running) terminal=Some(Terminated) READY=true EXIT=false sr=Some(400) gc=Some(412) beacon_lines=["READY pid=1 port=1053098523 launch=9bae96db7e1eff8be400e6007011f599"]
+CYCLE nbp-v10-027: running=Some(Running) terminal=Some(Terminated) READY=true EXIT=false sr=Some(409) gc=Some(422) beacon_lines=["READY pid=1 port=1053098523 launch=ba369a3eaa2af289c377a7917572d7ee"]
+CYCLE nbp-v10-028: running=Some(Running) terminal=Some(Terminated) READY=true EXIT=false sr=Some(399) gc=Some(411) beacon_lines=["READY pid=1 port=1053098523 launch=51effd28d68dd930b29c0eb8af5111d4"]
+CYCLE nbp-v10-029: running=Some(Running) terminal=Some(Terminated) READY=true EXIT=false sr=Some(371) gc=Some(383) beacon_lines=["READY pid=1 port=1053098523 launch=e4074926886a2f7e0668bd7c5777fbcd"]
+CYCLE nbp-v10-030: running=Some(Running) terminal=Some(Terminated) READY=true EXIT=false sr=Some(358) gc=Some(371) beacon_lines=["READY pid=1 port=1053098523 launch=724cbb02717a9c34725579cb56dd18ac"]
+CYCLE nbp-v10-031: running=Some(Running) terminal=Some(Terminated) READY=true EXIT=false sr=Some(395) gc=Some(408) beacon_lines=["READY pid=1 port=1053098523 launch=b5a40a16bfc33ed9f1890a60c9073380"]
+CYCLE nbp-v10-032: running=Some(Running) terminal=Some(Terminated) READY=true EXIT=false sr=Some(361) gc=Some(374) beacon_lines=["READY pid=1 port=1053098523 launch=40c4c9409adf27c474b82ca2dea7fd9d"]
+CYCLE nbp-v10-033: running=Some(Running) terminal=Some(Terminated) READY=true EXIT=false sr=Some(480) gc=Some(493) beacon_lines=["READY pid=1 port=1053098523 launch=411ede77215fb06373fba3100e88728c"]
+CYCLE nbp-v10-034: running=Some(Running) terminal=Some(Terminated) READY=true EXIT=false sr=Some(433) gc=Some(446) beacon_lines=["READY pid=1 port=1053098523 launch=cd9a7630432ddecc20a66c538a43888a"]
+CYCLE nbp-v10-035: running=Some(Running) terminal=Some(Terminated) READY=true EXIT=false sr=Some(436) gc=Some(449) beacon_lines=["READY pid=1 port=1053098523 launch=f58d0523e70c1b244a9a92f239c045cd"]
+CYCLE nbp-v10-036: running=Some(Running) terminal=Some(Terminated) READY=true EXIT=false sr=Some(476) gc=Some(488) beacon_lines=["READY pid=1 port=1053098523 launch=a055fc85693c910c1719c488f9e00055"]
+CYCLE nbp-v10-037: running=Some(Running) terminal=Some(Terminated) READY=true EXIT=false sr=Some(392) gc=Some(404) beacon_lines=["READY pid=1 port=1053098523 launch=0b3d59dd1528f56ccc2b05d4a828a032"]
+CYCLE nbp-v10-038: running=Some(Running) terminal=Some(Terminated) READY=true EXIT=false sr=Some(321) gc=Some(333) beacon_lines=["READY pid=1 port=1053098523 launch=b66aece8ca9189c754f1a398fe097aaa"]
+CYCLE nbp-v10-039: running=Some(Running) terminal=Some(Terminated) READY=true EXIT=false sr=Some(441) gc=Some(454) beacon_lines=["READY pid=1 port=1053098523 launch=ccbc59068374976b0464a2607a2b4438"]
+CYCLE nbp-v10-040: running=Some(Running) terminal=Some(Terminated) READY=true EXIT=false sr=Some(438) gc=Some(450) beacon_lines=["READY pid=1 port=1053098523 launch=6928158d106e9691d8e05f230308ce19"]
+CYCLE nbp-v10-041: running=Some(Running) terminal=Some(Terminated) READY=true EXIT=false sr=Some(385) gc=Some(396) beacon_lines=["READY pid=1 port=1053098523 launch=cd30e22e9b747b21f2de700a38a85c97"]
+CYCLE nbp-v10-042: running=Some(Running) terminal=Some(Terminated) READY=true EXIT=false sr=Some(475) gc=Some(487) beacon_lines=["READY pid=1 port=1053098523 launch=9b309dfd19850f4c186cbc9738adb5f6"]
+CYCLE nbp-v10-043: running=Some(Running) terminal=Some(Terminated) READY=true EXIT=false sr=Some(442) gc=Some(455) beacon_lines=["READY pid=1 port=1053098523 launch=044391c0c4d02e6e190f2d10942460b2"]
+CYCLE nbp-v10-044: running=Some(Running) terminal=Some(Terminated) READY=true EXIT=false sr=Some(445) gc=Some(457) beacon_lines=["READY pid=1 port=1053098523 launch=e50ec6c3d1adeb6ba8485eb9a1217390"]
+CYCLE nbp-v10-045: running=Some(Running) terminal=Some(Terminated) READY=true EXIT=false sr=Some(437) gc=Some(449) beacon_lines=["READY pid=1 port=1053098523 launch=2a25064be80504048ad01db79ba3ae1e"]
+CYCLE nbp-v10-046: running=Some(Running) terminal=Some(Terminated) READY=true EXIT=false sr=Some(401) gc=Some(412) beacon_lines=["READY pid=1 port=1053098523 launch=14589b6418c6ab494a4837772b4d0d8d"]
+CYCLE nbp-v10-047: running=Some(Running) terminal=Some(Terminated) READY=true EXIT=false sr=Some(461) gc=Some(473) beacon_lines=["READY pid=1 port=1053098523 launch=b9bb4f28a0f2cae29ff8130951519df3"]
+CYCLE nbp-v10-048: running=Some(Running) terminal=Some(Terminated) READY=true EXIT=false sr=Some(368) gc=Some(380) beacon_lines=["READY pid=1 port=1053098523 launch=015001f0765ee7ffac4395338ce1e839"]
+CYCLE nbp-v10-049: running=Some(Running) terminal=Some(Terminated) READY=true EXIT=false sr=Some(483) gc=Some(496) beacon_lines=["READY pid=1 port=1053098523 launch=c850ec4ca1c4ec5d669c64a03f42b9fa"]
+CYCLE nbp-v10-050: running=Some(Running) terminal=Some(Terminated) READY=true EXIT=false sr=Some(385) gc=Some(398) beacon_lines=["READY pid=1 port=1053098523 launch=1f6f4a5b570799094fc0d82a37e1fd8b"]
+CYCLE nbp-v10-051: running=Some(Running) terminal=Some(Terminated) READY=true EXIT=false sr=Some(438) gc=Some(451) beacon_lines=["READY pid=1 port=1053098523 launch=2e441834916f72a5b6021b8399480a08"]
+CYCLE nbp-v10-052: running=Some(Running) terminal=Some(Terminated) READY=true EXIT=false sr=Some(444) gc=Some(456) beacon_lines=["READY pid=1 port=1053098523 launch=a5ae94522e89b74d6d9ba1ae4e67ec76"]
+CYCLE nbp-v10-053: running=Some(Running) terminal=Some(Terminated) READY=true EXIT=false sr=Some(374) gc=Some(387) beacon_lines=["READY pid=1 port=1053098523 launch=83fe9a5793b4731a296107259fb4ac0d"]
+CYCLE nbp-v10-054: running=Some(Running) terminal=Some(Terminated) READY=true EXIT=false sr=Some(392) gc=Some(405) beacon_lines=["READY pid=1 port=1053098523 launch=0f198539ecc726f3cf5282b9e7fd237a"]
+CYCLE nbp-v10-055: running=Some(Running) terminal=Some(Terminated) READY=true EXIT=false sr=Some(475) gc=Some(487) beacon_lines=["READY pid=1 port=1053098523 launch=a153b678632f3e0615a8c5afd67b69a5"]
+CYCLE nbp-v10-056: running=Some(Running) terminal=Some(Terminated) READY=true EXIT=false sr=Some(416) gc=Some(429) beacon_lines=["READY pid=1 port=1053098523 launch=5932c887bc3501c8e4eea22c252f4e6c"]
+CYCLE nbp-v10-057: running=Some(Running) terminal=Some(Terminated) READY=true EXIT=false sr=Some(342) gc=Some(359) beacon_lines=["READY pid=1 port=1053098523 launch=c0f9b39cab5842ac5c1b773fd7da44c0"]
+CYCLE nbp-v10-058: running=Some(Running) terminal=Some(Terminated) READY=true EXIT=false sr=Some(406) gc=Some(419) beacon_lines=["READY pid=1 port=1053098523 launch=1b66d4b6a609e7af09ad41647bff0e4b"]
+CYCLE nbp-v10-059: running=Some(Running) terminal=Some(Terminated) READY=true EXIT=false sr=Some(434) gc=Some(447) beacon_lines=["READY pid=1 port=1053098523 launch=232ce2c375021187704942129dc1ca81"]
+--- SUMMARY ---
+cycles=60 running=60 READY=60 EXIT=0 both_shutdown_lines=60 durations_ms(value:count)={11: 4, 12: 22, 13: 32, 14: 1, 17: 1}
+OVERDRIVE_METAL_RUN_COMPLETE run_id=9cc37052192c7320b5aa7e85 exit_code=0 cause=command_returned
