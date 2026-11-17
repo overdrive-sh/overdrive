@@ -1037,6 +1037,7 @@ ssh "${SSH_OPTS[@]}" "${TARGET}" "mkdir -p ${REMOTE_DIR}"
   --exclude='spike-scratch/*/out/' \
   --exclude='node_modules/' \
   --exclude='/vendors/linux/' \
+  --exclude='/vendors/cloud-hypervisor/.git' \
   --exclude='/.overdrive-metal-checkout.v1' \
   --exclude='.DS_Store' \
   --exclude='/.git' \
@@ -1086,9 +1087,15 @@ log "materialising standalone .git (common dir $(du -sh "${GIT_COMMON}" | cut -f
 # The excluded vendors/linux submodule gets an empty directory, which git
 # treats as a submodule that is not checked out. Without it the gitlink reads
 # as deleted and the remote tree is never clean.
+# A checked-out vendors/cloud-hypervisor carries a `.git` pointer FILE to a
+# laptop path; the main rsync excludes it, and an earlier sync's copy is
+# removed here (rsync never deletes excluded files). Without its `.git` the
+# remote treats the submodule as not checked out, so `git status` there no
+# longer fails with "not a git repository".
 # shellcheck disable=SC2029
 ssh "${SSH_OPTS[@]}" "${TARGET}" \
-  "mkdir -p ${REMOTE_DIR}/vendors/linux && \
+  "rm -f ${REMOTE_DIR}/vendors/cloud-hypervisor/.git && \
+   mkdir -p ${REMOTE_DIR}/vendors/linux && \
    git -C ${REMOTE_DIR} config core.bare false && \
    git -C ${REMOTE_DIR} config --unset core.worktree 2>/dev/null; \
    git -C ${REMOTE_DIR} status --short --branch | head -5" || true
