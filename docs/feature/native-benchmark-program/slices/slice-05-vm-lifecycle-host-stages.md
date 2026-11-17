@@ -3,7 +3,7 @@
 Story: US-BENCH-05. Job: J-PLAT-008. Family: `vm-lifecycle`, native substrate.
 
 ## Goal
-One report row per host-observable stage (admission/queue, VMM launch, guest READY as received, Stable, stop submission, workload exit, reaper exit, cleanup), none merged.
+One report row per host-observable stage (admission/queue, VMM launch, guest READY as received, Stable, stop submission, shutdown delivery, guest exit, cleanup), none merged.
 
 ## In scope
 - Stage timestamps taken by one host process on one host clock, driving the production composition in-process.

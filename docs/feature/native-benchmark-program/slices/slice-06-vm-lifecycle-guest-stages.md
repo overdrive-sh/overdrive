@@ -3,7 +3,7 @@
 Story: US-BENCH-06. Job: J-PLAT-008. Family: `vm-lifecycle`.
 
 ## Goal
-One guest-measured duration (`guest.shutdown-handling`) is reported next to the host-stamped receipt, workload-exit, poweroff and reaper-exit stage intervals, and cold and warm image cache are separate, named profiles.
+One guest-measured duration (`guest.shutdown-handling`) is reported next to the host-stamped shutdown-delivery and guest-exit stage intervals, and cold and warm image cache are separate, named profiles.
 
 ## In scope
 - One guest-clock duration, `guest.shutdown-handling`; guest receipt and poweroff appear only as host-stamped stage intervals; never a guest instant subtracted from a host instant.

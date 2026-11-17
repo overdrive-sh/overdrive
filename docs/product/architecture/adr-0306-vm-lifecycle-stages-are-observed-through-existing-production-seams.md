@@ -23,7 +23,8 @@ are never in `console_tail()` (spike V-4: empty in 60 of 60 cycles).
 
 No production interface is added for the VM-lifecycle family. The family observes
 the stages through the existing seams: a timestamping `BeaconIo` decorator (exact
-receipt of `READY` and `EXIT`), a `Vmm` decorator, a tracing layer for the named
+receipt of `READY`; the `EXIT` line is not a boundary on an operator stop, because
+the host never receives it there, spike V-10: 0 of 60 cycles), a `Vmm` decorator, a tracing layer for the named
 events, and a subscription to the observation store for the Stable row. The stage
 table in the feature delta names, for each stage, its start and end boundary and
 its instrument. Guest-measured durations (the `overdrive-init: <stage>
