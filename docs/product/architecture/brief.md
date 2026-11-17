@@ -6439,18 +6439,19 @@ policy.
 
 ---
 
-## Node-local persistent volume extension (GH #348) — PROPOSED
+## Node-local persistent volume extension (GH #348)
 
-**PROPOSED, not accepted.** Decisions VD-1 to VD-10 (VD-7a to VD-7c) await user approval
+**Accepted.** Decisions VD-1 to VD-10 (VD-7a to VD-7c) were approved by the user on 2026-11-17
 (`docs/feature/node-local-persistent-volume/design/wave-decisions.md`; exact contracts in
 `docs/feature/node-local-persistent-volume/feature-delta.md`). Diagrams: `c4-diagrams.md` § "Node-local persistent volume".
 
 A VM workload may declare `[vm.volume] size = "<n>GiB"` (ADR-0310). The volume belongs to the workload and
-outlives stop, crash and restart (ADR-0311). It is a raw `dm-linear` logical volume in VG `overdrive` on a dedicated
-partition the image provisions (ADR-0312, ADR-0313), attached as the second `--disk` with write-back, `direct=on`
+outlives stop, crash and restart (ADR-0311). It is a raw `dm-linear` logical volume carved from the node's
+**volume pool**: VG `overdrive` on a dedicated partition that node provisioning supplies, with the `lvm` tools and
+device-mapper (ADR-0312, ADR-0313), attached as the second `--disk` with write-back, `direct=on`
 and `serial=ovd-volume` (ADR-0315) under three Cloud Hypervisor fork changes (ADR-0316, ADR-0319, ADR-0320). `VmDriver::start` ensures
 (create if absent, activate) the volume and waits for the previous VMM's claim to clear, up to 30 s, before launching
-(ADR-0317, ADR-0318). A boot probe verifies the store and refuses startup when it is broken (ADR-0314). The slice adds a
+(ADR-0317, ADR-0318). A boot probe verifies the volume pool and refuses startup when it is broken (ADR-0314). The slice adds a
 `VolumeBacking` port in `overdrive-core`, `LvmVolumeBacking` in `overdrive-host`, `SimVolumeBacking` in `overdrive-sim`,
 and no new reconciler or observation row; reclamation, erasure and a status row wait for workload deletion (GH #211).
 

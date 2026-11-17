@@ -2,7 +2,7 @@
 
 ## Status
 
-**Proposed** (decision VD-9, GH #348). Not accepted until the user approves it.
+**Accepted** (decision VD-9, GH #348). Approved by the user on 2026-11-17.
 
 ## Context
 
@@ -18,7 +18,7 @@ feature that cannot be driven through `serve` + `deploy` is reduced until what r
 
 **Before each launch of an allocation that declares a volume, the launch path calls an
 idempotent `ensure`: observe whether the volume exists, create it if it does not, and activate
-it. A failure (no volume store, no free space, a command failure) is a typed start failure
+it. A failure (no volume pool, no free space, a command failure) is a typed start failure
 recorded in the allocation's `Failed` row and charged to the restart budget. This slice adds no
 volume reconciler, no volume observation row and no gate on `WorkloadLifecycle`; reclamation,
 erasure, a volume status row and a start gate belong to the workload-deletion slice (GH #211).**

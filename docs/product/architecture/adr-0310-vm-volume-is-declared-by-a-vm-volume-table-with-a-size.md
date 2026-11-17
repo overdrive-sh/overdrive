@@ -2,9 +2,8 @@
 
 ## Status
 
-**Proposed** (decision VD-1 of feature `node-local-persistent-volume`, GH #348).
-Not accepted until the user approves it in the conversation. Nothing here is
-implementation authority.
+**Accepted** (decision VD-1 of feature `node-local-persistent-volume`, GH #348).
+Approved by the user on 2026-11-17.
 
 ## Context
 
@@ -45,8 +44,8 @@ least 1 followed by `GiB` or `TiB`. A workload that declares a volume must have
   work.
 - Negative: the first field added to `Vm` bumps the workload-intent rkyv envelope
   (ADR-0048 discipline) and the parser-side `ServiceSpec` envelope.
-- Scope limitations (one volume per workload; size fixed at creation) are tracked in
-  the feature delta § "Scope limitations".
+- Scope limitations: one volume per workload is tracked by GH #364, size fixed at creation by GH #365
+  (feature delta § "Scope limitations and exposures").
 
 ## Links
 

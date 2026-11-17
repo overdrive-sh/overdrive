@@ -7,7 +7,7 @@ remain for traceability.
 
 ## Node-local persistent volume
 
-**PROPOSED** (GH #348; decisions VD-1 to VD-10 (VD-7a to VD-7c) await user approval,
+**ACCEPTED** (GH #348; decisions VD-1 to VD-10 (VD-7a to VD-7c) approved by the user on 2026-11-17,
 [feature delta](../../feature/node-local-persistent-volume/feature-delta.md)). Level 1 and level 2 only.
 
 ```mermaid
@@ -29,7 +29,7 @@ C4Container
   Container(lc, "WorkloadLifecycle", "Reconciler", "Mints and replaces allocations")
   Container(drv, "VmDriver", "Rust", "ensure, claim wait, launch")
   Container(vmm, "Cloud Hypervisor fork", "Rust", "Opens the volume O_EXCL, second virtio-blk disk")
-  ContainerDb(vg, "VG overdrive", "LVM2 on labelled partition", "One linear logical volume per workload")
+  ContainerDb(vg, "Volume pool (VG overdrive)", "LVM2 on labelled partition", "One linear logical volume per workload")
   ContainerDb(intent, "IntentStore", "redb", "Workload intent with the volume size")
   Rel(operator, cli, "Runs")
   Rel(cli, cp, "Submits the spec to")

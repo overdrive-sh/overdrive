@@ -2,7 +2,7 @@
 
 ## Status
 
-**Proposed** (decision VD-3, GH #348). Not accepted until the user approves it.
+**Accepted** (decision VD-3, GH #348). Approved by the user on 2026-11-17.
 Validation item V-1 passed (feature delta § Validation).
 
 ## Context
@@ -38,7 +38,7 @@ sparse-versus-reserved choice.
   fsync-bound work, needs a derived `RLIMIT_FSIZE` at least the largest volume, and
   ENOSPC arrives mid-flight when sparse.
 - **A thin-provisioned logical volume.** Rejected: needs `dm-thin` (a module in the spike
-  kernel; the image is built with module unload off), a pool and metadata-device
+  kernel; the image is built with module unload off), a thin pool and metadata-device
   lifecycle, and over-commit reintroduces ENOSPC-mid-flight.
 - **A loop device over a file.** Rejected: an extra layer that keeps the file's
   `RLIMIT_FSIZE` and sparse behaviour, and direct I/O can silently fall back.
@@ -52,8 +52,8 @@ sparse-versus-reserved choice.
 
 - Positive: space is reserved by construction; no ENOSPC mid-flight; no `RLIMIT_FSIZE`
   interaction; removal of an in-use volume is refused by the kernel.
-- Negative: the image must provide device-mapper, LVM tooling and a provisioned volume
-  group (ADR-0313); a volume needs a node made accessible to the confined VMM uid.
+- Negative: the node's provisioning must provide device-mapper, LVM tooling and a provisioned
+  volume pool (ADR-0313); a volume needs a node made accessible to the confined VMM uid.
   A 128-bit name collision would alias two workloads; at 2^-64 per pair this is accepted.
 
 ## Links

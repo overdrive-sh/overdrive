@@ -2,7 +2,7 @@
 
 ## Status
 
-**Proposed** (decision VD-2, GH #348). Not accepted until the user approves it.
+**Accepted** (decision VD-2, GH #348). Approved by the user on 2026-11-17.
 
 ## Context
 

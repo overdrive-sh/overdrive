@@ -2,7 +2,7 @@
 
 ## Status
 
-**Proposed** (decision VD-6, GH #348). Not accepted until the user approves it.
+**Accepted** (decision VD-6, GH #348). Approved by the user on 2026-11-17.
 
 ## Context
 
@@ -18,7 +18,7 @@ the inode and the host. A guest can switch the virtio-blk cache mode itself.
 
 **The volume is the second `--disk` of the VMM: `image_type=raw` always, `direct=on`,
 writable, the default cache mode (write-back with guest flush), the default `sparse=true`,
-and `serial=ovd-volume`. Overdrive never formats it: the guest sees the volume as created (the image wipes the
+and `serial=ovd-volume`. Overdrive never formats it: the guest sees the volume as created (provisioning wipes the
 partition, ADR-0313) and owns its filesystem. The guest finds it as
 `/dev/disk/by-id/virtio-ovd-volume` where it runs udev, otherwise as the second virtio-blk
 disk (`/dev/vdb`). Write-through is not offered. Before launch the platform makes the volume's
