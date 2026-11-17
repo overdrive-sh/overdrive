@@ -7,13 +7,14 @@
 //! [`Action::IssueGatewaySvid`] only; there is no gateway drop action (R-4):
 //! disabling the gateway clears the volatile slot synchronously in the process.
 //!
+use std::collections::BTreeSet;
 use std::time::Duration;
 
 use overdrive_core::gateway_identity::{GatewayIdentityDesired, GatewayIdentityFacts};
 use overdrive_core::id::{ContentHash, CorrelationKey, NodeId, SpiffeId};
 use overdrive_core::reconcilers::{
     Action, HydrateError, HydrationContext, Reconciler, ReconcilerName, ResyncSchedule,
-    ResyncScope, TargetResource, TickContext,
+    ResyncScope, TargetResource, TickContext, resolve_scope,
 };
 use overdrive_core::traits::observation_store::ObservationRowKind;
 use overdrive_core::wall_clock::UnixInstant;
@@ -124,12 +125,13 @@ impl Reconciler for GatewaySvidLifecycle {
         &self.name
     }
 
-    // DISTILL scaffold: an empty target set, replaced by this reconciler's real enumeration.
+    /// Its single `node/<local-node-id>` target, always (D-1a): its hydrate
+    /// ignores the target, so the one conventional target is always managed.
     async fn managed_targets(
         &self,
-        _ctx: &HydrationContext<'_>,
-    ) -> Result<std::collections::BTreeSet<TargetResource>, HydrateError> {
-        Ok(std::collections::BTreeSet::new())
+        ctx: &HydrationContext<'_>,
+    ) -> Result<BTreeSet<TargetResource>, HydrateError> {
+        Ok(resolve_scope(ResyncScope::LocalNode, ctx.node_id).into_iter().collect())
     }
 
     /// Pure transition. Disabled emits nothing (disable is the synchronous slot

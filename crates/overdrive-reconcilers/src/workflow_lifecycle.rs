@@ -32,7 +32,7 @@
 //! the SAME key (`development.md` Reconciler I/O rule 2 — correlation, not
 //! request ID, links cause to response).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
@@ -127,12 +127,22 @@ impl Reconciler for WorkflowLifecycle {
         &self.name
     }
 
-    // DISTILL scaffold: an empty target set, replaced by this reconciler's real enumeration.
+    /// The one conventional `workflow/all` target, present only once a workflow
+    /// instance exists (D-1a): `hydrate_actual` projects every instance
+    /// whatever the target, so the set is one target or none. Empty in
+    /// production until a first-party workflow ships.
     async fn managed_targets(
         &self,
-        _ctx: &HydrationContext<'_>,
-    ) -> Result<std::collections::BTreeSet<TargetResource>, HydrateError> {
-        Ok(std::collections::BTreeSet::new())
+        ctx: &HydrationContext<'_>,
+    ) -> Result<BTreeSet<TargetResource>, HydrateError> {
+        let instances = hydrate_workflow_actual_instances(ctx).await?;
+        if instances.is_empty() {
+            return Ok(BTreeSet::new());
+        }
+        let target = TargetResource::new("workflow/all").unwrap_or_else(|_| {
+            unreachable!("workflow/all carries the workflow/ prefix and a non-empty id")
+        });
+        Ok(BTreeSet::from([target]))
     }
 
     /// Pure-sync `reconcile` (ADR-0035 shape). For each instance:

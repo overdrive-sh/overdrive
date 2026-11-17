@@ -38,6 +38,7 @@ use overdrive_core::traits::vm_host_state::VmHostObservation;
 
 use super::{
     Action, Reconciler, ReconcilerName, ResyncSchedule, ResyncScope, TargetResource, TickContext,
+    resolve_scope,
 };
 
 // ---------------------------------------------------------------------------
@@ -252,12 +253,13 @@ impl Reconciler for VmReclamation {
         &self.name
     }
 
-    // DISTILL scaffold: an empty target set, replaced by this reconciler's real enumeration.
+    /// Its single `node/<local-node-id>` target, always (D-1a): its hydrate
+    /// ignores the target, so the one conventional target is always managed.
     async fn managed_targets(
         &self,
-        _ctx: &HydrationContext<'_>,
-    ) -> Result<std::collections::BTreeSet<TargetResource>, HydrateError> {
-        Ok(std::collections::BTreeSet::new())
+        ctx: &HydrationContext<'_>,
+    ) -> Result<BTreeSet<TargetResource>, HydrateError> {
+        Ok(resolve_scope(ResyncScope::LocalNode, ctx.node_id).into_iter().collect())
     }
 
     fn reconcile(

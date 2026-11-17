@@ -11,9 +11,7 @@
 //! conformance driver cannot discharge this (it sets `has` from the same set),
 //! so this is the obligation that detects an omitted target.
 //!
-//! Pending until each reconciler's enumeration lands: the scaffold returns the
-//! empty set, so each test fails at the containment assertion its
-//! `should_panic` text names. CONTRACT_SHAPE: pure-function.
+//! CONTRACT_SHAPE: pure-function.
 
 use std::collections::BTreeSet;
 
@@ -93,7 +91,6 @@ async fn assert_non_empty_projections_are_managed(
 }
 
 #[test]
-#[should_panic(expected = "workload-lifecycle managed_targets omitted")]
 fn workload_lifecycle_manages_every_workload_with_intent_or_an_allocation_row() {
     let rt = runtime();
     rt.block_on(async {
@@ -144,7 +141,6 @@ fn workload_lifecycle_manages_every_workload_with_intent_or_an_allocation_row() 
 }
 
 #[test]
-#[should_panic(expected = "workload-lifecycle managed_targets returned a set instead of Err")]
 fn workload_lifecycle_enumeration_returns_an_error_not_the_intent_half_when_allocation_rows_cannot_be_read()
  {
     let rt = runtime();
@@ -163,7 +159,6 @@ fn workload_lifecycle_enumeration_returns_an_error_not_the_intent_half_when_allo
 }
 
 #[test]
-#[should_panic(expected = "service-lifecycle managed_targets omitted")]
 fn service_lifecycle_manages_services_and_not_jobs() {
     let rt = runtime();
     rt.block_on(async {
@@ -210,7 +205,6 @@ async fn issue(world: &Composed, spiffe: &SpiffeId) -> overdrive_core::traits::c
 }
 
 #[test]
-#[should_panic(expected = "svid-lifecycle managed_targets omitted")]
 fn svid_lifecycle_manages_workloads_with_running_allocations_or_a_held_svid_and_nothing_else() {
     let rt = runtime();
     rt.block_on(async {
@@ -252,7 +246,6 @@ fn svid_lifecycle_manages_workloads_with_running_allocations_or_a_held_svid_and_
 }
 
 #[test]
-#[should_panic(expected = "svid-lifecycle managed_targets returned a set instead of Err")]
 fn svid_lifecycle_enumeration_returns_an_error_when_allocation_rows_cannot_be_read() {
     let rt = runtime();
     rt.block_on(async {
@@ -277,7 +270,6 @@ fn svid_lifecycle_enumeration_returns_an_error_when_allocation_rows_cannot_be_re
 /// and backend row both gone) is the deletion case, #211.
 #[cfg(test)]
 #[test]
-#[should_panic(expected = "service-map-hydrator managed_targets omitted")]
 fn service_map_hydrator_manages_services_with_an_intent_or_a_backend_row_but_not_a_result_row_alone()
  {
     let rt = runtime();
@@ -344,7 +336,6 @@ fn orphan_service_id(octet: u8) -> overdrive_core::id::ServiceId {
 }
 
 #[test]
-#[should_panic(expected = "service-map-hydrator managed_targets returned a set instead of Err")]
 fn service_map_hydrator_enumeration_returns_an_error_when_service_rows_cannot_be_read() {
     let rt = runtime();
     rt.block_on(async {
@@ -362,7 +353,6 @@ fn service_map_hydrator_enumeration_returns_an_error_when_service_rows_cannot_be
 }
 
 #[test]
-#[should_panic(expected = "workflow-lifecycle managed_targets omitted")]
 fn workflow_lifecycle_manages_its_one_conventional_target_once_an_instance_exists() {
     let rt = runtime();
     rt.block_on(async {
@@ -395,7 +385,6 @@ fn workflow_lifecycle_manages_its_one_conventional_target_once_an_instance_exist
 }
 
 #[test]
-#[should_panic(expected = "vm-reclamation managed_targets omitted")]
 fn vm_reclamation_manages_exactly_its_node_target() {
     let rt = runtime();
     rt.block_on(async {
@@ -412,7 +401,6 @@ fn vm_reclamation_manages_exactly_its_node_target() {
 }
 
 #[test]
-#[should_panic(expected = "gateway-svid-lifecycle managed_targets omitted")]
 fn gateway_svid_lifecycle_manages_exactly_its_node_target() {
     let rt = runtime();
     rt.block_on(async {

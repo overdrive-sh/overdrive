@@ -55,7 +55,8 @@ impl Reconciler for NoopHeartbeat {
         &self.name
     }
 
-    // DISTILL scaffold: an empty target set, replaced by this reconciler's real enumeration.
+    /// No targets: `NoopHeartbeat` has no projection (`State = ()`), so the
+    /// containment obligation is vacuous (no-obligation ruling).
     async fn managed_targets(
         &self,
         _ctx: &HydrationContext<'_>,

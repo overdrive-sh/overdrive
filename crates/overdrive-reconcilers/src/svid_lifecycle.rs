@@ -295,12 +295,33 @@ impl Reconciler for SvidLifecycle {
         &[ObservationRowKind::AllocStatus]
     }
 
-    // DISTILL scaffold: an empty target set, replaced by this reconciler's real enumeration.
+    /// Every workload with a Running allocation row, unioned with every workload
+    /// a held SVID's identity names (D-1a-i): `desired` plus held. `ever_issued`
+    /// makes nothing managed, and a held identity that does not invert to a
+    /// workload (a gateway identity) is not returned. A read failure is the
+    /// whole call's failure.
     async fn managed_targets(
         &self,
-        _ctx: &HydrationContext<'_>,
-    ) -> Result<std::collections::BTreeSet<TargetResource>, HydrateError> {
-        Ok(std::collections::BTreeSet::new())
+        ctx: &HydrationContext<'_>,
+    ) -> Result<BTreeSet<TargetResource>, HydrateError> {
+        let rows = ctx
+            .observation_store
+            .alloc_status_rows()
+            .await
+            .map_err(|e| HydrateError::ObservationRead(e.to_string()))?;
+        let mut targets: BTreeSet<TargetResource> = rows
+            .iter()
+            .filter(|row| row.state == AllocState::Running)
+            .map(|row| crate::workload_target(&row.workload_id))
+            .collect();
+        targets.extend(
+            ctx.held_svid_view
+                .held_snapshot()
+                .values()
+                .filter_map(|facts| workload_of_allocation_identity(&facts.spiffe_id))
+                .map(|workload_id| crate::workload_target(&workload_id)),
+        );
+        Ok(targets)
     }
 
     /// Pure-sync `reconcile` (ADR-0035 / ADR-0067 D1/D8). Converges
@@ -612,6 +633,14 @@ impl Reconciler for SvidLifecycle {
 // Hydration bodies — moved off the central `reconciler_runtime` free fns
 // (ADR-0086 S3).
 // ---------------------------------------------------------------------------
+
+/// The workload an allocation identity names: the inverse of
+/// [`SpiffeId::for_allocation`] (`/workload/<workload>/alloc/<alloc>`).
+/// `None` for any other identity shape.
+fn workload_of_allocation_identity(spiffe_id: &SpiffeId) -> Option<WorkloadId> {
+    let (workload, _alloc) = spiffe_id.path().strip_prefix("/workload/")?.split_once("/alloc/")?;
+    WorkloadId::new(workload).ok()
+}
 
 /// Project the `desired` set — the Running allocations for `workload_id`.
 async fn hydrate_svid_desired_running(

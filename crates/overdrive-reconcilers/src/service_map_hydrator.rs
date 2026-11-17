@@ -24,13 +24,14 @@
 //! `overdrive-control-plane::reconcilers::service_map_hydrator`
 //! re-exports the public surface.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::num::NonZeroU16;
 use std::time::Duration;
 
+use overdrive_core::aggregate::WorkloadIntent;
+use overdrive_core::dataplane::ServiceFrontend;
 use overdrive_core::dataplane::backend_key::Proto;
 use overdrive_core::dataplane::fingerprint::BackendSetFingerprint;
-use overdrive_core::dataplane::ServiceFrontend;
 use overdrive_core::id::{ContentHash, CorrelationKey, ServiceId, ServiceVip};
 use overdrive_core::reconcilers::{HydrateError, HydrationContext};
 use overdrive_core::traits::dataplane::Backend;
@@ -315,12 +316,35 @@ impl Reconciler for ServiceMapHydrator {
         &self.name
     }
 
-    // DISTILL scaffold: an empty target set, replaced by this reconciler's real enumeration.
+    /// Every `ServiceId` a deployed Service intent declares through an assigned
+    /// VIP (the id `hydrate_desired` derives from VIP, port and protocol),
+    /// unioned with every `ServiceId` that has a `service_backends` row (D-21).
+    /// A `service_hydration_results` row alone adds no target. A read failure
+    /// is the whole call's failure.
     async fn managed_targets(
         &self,
-        _ctx: &HydrationContext<'_>,
-    ) -> Result<std::collections::BTreeSet<TargetResource>, HydrateError> {
-        Ok(std::collections::BTreeSet::new())
+        ctx: &HydrationContext<'_>,
+    ) -> Result<BTreeSet<TargetResource>, HydrateError> {
+        let mut targets: BTreeSet<TargetResource> = ctx
+            .observation_store
+            .all_service_backends_rows()
+            .await
+            .map_err(|e| HydrateError::ObservationRead(e.to_string()))?
+            .iter()
+            .map(|row| crate::service_target(row.service_id))
+            .collect();
+        for (_workload_id, intent) in crate::workload_intents(ctx).await? {
+            let WorkloadIntent::Service(service) = &intent else { continue };
+            let digest =
+                intent.spec_digest().map_err(|e| HydrateError::IntentRead(e.to_string()))?;
+            let Some(vip) = ctx.service_vip_view.assigned_vip(&digest).await else { continue };
+            targets.extend(service.listeners.iter().map(|listener| {
+                let service_id =
+                    ServiceId::derive(&vip, listener.port, listener.protocol, "service-map");
+                crate::service_target(service_id)
+            }));
+        }
+        Ok(targets)
     }
 
     fn reconcile(

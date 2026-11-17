@@ -526,12 +526,30 @@ impl Reconciler for ServiceLifecycleReconciler {
         &[ObservationRowKind::AllocStatus, ObservationRowKind::ProbeResult]
     }
 
-    // DISTILL scaffold: an empty target set, replaced by this reconciler's real enumeration.
+    /// Every Service workload that has an `alloc_status` row or an assigned VIP
+    /// (D-1a): intent alone makes none managed, because the projection is empty
+    /// until an allocation or a dataplane identity exists. A read failure is
+    /// the whole call's failure.
     async fn managed_targets(
         &self,
-        _ctx: &HydrationContext<'_>,
-    ) -> Result<std::collections::BTreeSet<TargetResource>, HydrateError> {
-        Ok(std::collections::BTreeSet::new())
+        ctx: &HydrationContext<'_>,
+    ) -> Result<BTreeSet<TargetResource>, HydrateError> {
+        let rows = ctx
+            .observation_store
+            .alloc_status_rows()
+            .await
+            .map_err(|e| HydrateError::ObservationRead(e.to_string()))?;
+        let with_rows: BTreeSet<WorkloadId> = rows.into_iter().map(|row| row.workload_id).collect();
+        let mut targets = BTreeSet::new();
+        for (workload_id, intent) in crate::workload_intents(ctx).await? {
+            if !matches!(intent, WorkloadIntent::Service(_)) {
+                continue;
+            }
+            if with_rows.contains(&workload_id) || has_assigned_vip(ctx, &intent).await? {
+                targets.insert(crate::workload_target(&workload_id));
+            }
+        }
+        Ok(targets)
     }
 
     // ServiceLifecycle's reconcile is one cohesive transition pipeline: it
@@ -739,6 +757,15 @@ impl Reconciler for ServiceLifecycleReconciler {
 
 /// Liveness probe `failure_threshold` default per ADR-0057 §2 / DDD-14.
 const LIVENESS_FAILURE_THRESHOLD_DEFAULT: u32 = 3;
+
+/// Does the VIP allocator hold an assignment for this intent's spec digest?
+async fn has_assigned_vip(
+    ctx: &HydrationContext<'_>,
+    intent: &WorkloadIntent,
+) -> Result<bool, HydrateError> {
+    let digest = intent.spec_digest().map_err(|e| HydrateError::IntentRead(e.to_string()))?;
+    Ok(ctx.service_vip_view.assigned_vip(&digest).await.is_some())
+}
 
 /// Read `WorkloadIntent::Service(Service)` for `workload_id`; `Ok(None)` when
 /// absent or a `Job` / `Schedule` variant.

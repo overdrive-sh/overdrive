@@ -198,12 +198,26 @@ impl Reconciler for WorkloadLifecycle {
         &[ObservationRowKind::AllocStatus]
     }
 
-    // DISTILL scaffold: an empty target set, replaced by this reconciler's real enumeration.
+    /// Every workload with a canonical intent, unioned with every workload an
+    /// `alloc_status` row names (D-1a): the two halves `hydrate_desired` and
+    /// `hydrate_actual` project. A read failure of either half is the whole
+    /// call's failure, never the other half alone.
     async fn managed_targets(
         &self,
-        _ctx: &HydrationContext<'_>,
-    ) -> Result<std::collections::BTreeSet<TargetResource>, HydrateError> {
-        Ok(std::collections::BTreeSet::new())
+        ctx: &HydrationContext<'_>,
+    ) -> Result<BTreeSet<TargetResource>, HydrateError> {
+        let mut targets: BTreeSet<TargetResource> = crate::workload_intents(ctx)
+            .await?
+            .iter()
+            .map(|(id, _intent)| crate::workload_target(id))
+            .collect();
+        let rows = ctx
+            .observation_store
+            .alloc_status_rows()
+            .await
+            .map_err(|e| HydrateError::ObservationRead(e.to_string()))?;
+        targets.extend(rows.iter().map(|row| crate::workload_target(&row.workload_id)));
+        Ok(targets)
     }
 
     // Per ADR-0023 + ADR-0037 §4 the reconcile body is the single

@@ -47,6 +47,7 @@
 // impl submodules resolve `super::{Action, Reconciler, …}` unchanged and the
 // dispatch enums' public signatures name the core types. NOT re-exported from
 // this crate's root (contract-in-core; importers spell `overdrive_core::…`).
+use overdrive_core::aggregate::{IntentKey, WorkloadIntent, scan_workload_intents};
 use overdrive_core::id::{NodeId, ServiceId, WorkloadId};
 use overdrive_core::reconcilers::{
     Action, HydrateError, HydrationContext, Reconciler, ReconcilerName, ResyncSchedule,
@@ -510,6 +511,44 @@ impl AnyReconciler {
             }
         }
     }
+}
+
+/// The `workload/<id>` target for a workload.
+pub(crate) fn workload_target(id: &WorkloadId) -> TargetResource {
+    TargetResource::new(&format!("workload/{id}")).unwrap_or_else(|_| {
+        unreachable!("a WorkloadId is a non-empty label, so workload/<id> is a valid target")
+    })
+}
+
+/// The `service/<id>` target for a service.
+pub(crate) fn service_target(id: ServiceId) -> TargetResource {
+    TargetResource::new(&format!("service/{id}")).unwrap_or_else(|_| {
+        unreachable!("a ServiceId renders non-empty, so service/<id> is a valid target")
+    })
+}
+
+/// Every canonical workload intent with the id its key names, through the
+/// shared `workloads/` scan (prefix and canonical-record classifier both owned
+/// by `IntentKey`). A scan read failure is the whole call's failure.
+pub(crate) async fn workload_intents(
+    ctx: &HydrationContext<'_>,
+) -> Result<Vec<(WorkloadId, WorkloadIntent)>, HydrateError> {
+    let records = scan_workload_intents(ctx.intent_store, ctx.intent_redb_path)
+        .await
+        .map_err(|e| HydrateError::IntentRead(e.to_string()))?;
+    let prefix = IntentKey::workload_prefix();
+    // A canonical key whose id fails the label grammar names no target any
+    // hydrate body could parse, so it contributes nothing.
+    Ok(records
+        .into_iter()
+        .filter_map(|(key, intent)| {
+            let id = key
+                .as_bytes()
+                .strip_prefix(prefix)
+                .and_then(|raw| std::str::from_utf8(raw).ok())?;
+            WorkloadId::new(id).ok().map(|id| (id, intent))
+        })
+        .collect())
 }
 
 /// Extract a [`WorkloadId`] from a `TargetResource` of shape `workload/<id>`.

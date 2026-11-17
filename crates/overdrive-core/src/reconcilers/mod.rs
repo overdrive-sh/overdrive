@@ -126,7 +126,7 @@
 //!         &self.name
 //!     }
 //!
-//!     // DISTILL scaffold: an empty target set, replaced by the reconciler's real enumeration.
+//!     // A reconciler with no targets manages the empty set.
 //!     async fn managed_targets(
 //!         &self,
 //!         _ctx: &HydrationContext<'_>,
