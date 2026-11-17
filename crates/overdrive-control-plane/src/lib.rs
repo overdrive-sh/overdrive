@@ -89,7 +89,7 @@ pub(crate) use guest_network_composition::{GuestNetworkCompositionPorts, compose
 pub mod identity_mgr;
 // IPv4 resolution via `getifaddrs(3)` for the operator-supplied
 // `[dataplane] client_iface`. Production boot threads the resolved
-// `Ipv4Addr` through `AppState.host_ipv4` to the service-map hydrator.
+// `Ipv4Addr` through `AppState.host_ipv4`.
 pub mod iface;
 // workflow-primitive step 01-03 — `JournalStore` port + `LoadedEntry`
 // CBOR boundary sum (over `JournalCommand` / `JournalNotification`) +
@@ -4093,7 +4093,7 @@ async fn boot_server(
     // UI-05 — register the downstream hydrator before ServiceLifecycle's
     // authoritative backend-row publisher. ServiceLifecycle emits the
     // explicit hydrator handoff after each changed row.
-    runtime.register(service_map_hydrator(host_ipv4)).await?;
+    runtime.register(service_map_hydrator()).await?;
     // Service-health-check-probes step 01-03d — register the
     // `service-lifecycle` reconciler via the `AnyReconciler::
     // ServiceLifecycle` dispatch enum landed in step 01-03b
@@ -5843,7 +5843,7 @@ pub fn vm_reclamation() -> overdrive_reconcilers::AnyReconciler {
 /// for `cluster_status`'s deterministic registration listing; the
 /// runtime registers idempotently regardless of order.
 #[must_use]
-pub fn service_map_hydrator(host_ipv4: std::net::Ipv4Addr) -> overdrive_reconcilers::AnyReconciler {
+pub fn service_map_hydrator() -> overdrive_reconcilers::AnyReconciler {
     use overdrive_reconcilers::{AnyReconciler, ServiceMapHydrator};
 
     use crate::veth_provisioner::WORKLOAD_SUBNET_BASE;
@@ -5851,10 +5851,7 @@ pub fn service_map_hydrator(host_ipv4: std::net::Ipv4Addr) -> overdrive_reconcil
     // Thread the SAME `WORKLOAD_SUBNET_BASE` the provisioner carves
     // per-allocation `/30`s from (one source, D-GATE-PRED) so the
     // hydrator gates Path-A/mesh backends out of BOTH LB paths.
-    AnyReconciler::ServiceMapHydrator(ServiceMapHydrator::canonical(
-        host_ipv4,
-        WORKLOAD_SUBNET_BASE,
-    ))
+    AnyReconciler::ServiceMapHydrator(ServiceMapHydrator::canonical(WORKLOAD_SUBNET_BASE))
 }
 
 #[cfg(test)]

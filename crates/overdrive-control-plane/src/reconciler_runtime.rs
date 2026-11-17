@@ -1326,7 +1326,6 @@ fn svid_lifecycle_canonical_name() -> ReconcilerName {
 const fn write_route_to_conflict_route(route: action_shim::validate::WriteRoute) -> ConflictRoute {
     match route {
         action_shim::validate::WriteRoute::Xdp => ConflictRoute::Xdp,
-        action_shim::validate::WriteRoute::Cgroup => ConflictRoute::Cgroup,
     }
 }
 

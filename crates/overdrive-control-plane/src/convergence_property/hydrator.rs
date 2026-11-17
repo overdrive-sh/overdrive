@@ -168,7 +168,7 @@ fn backends_of(world: &World) -> Vec<Backend> {
 
 #[cfg(test)]
 async fn fixture(world: &World) -> Fixture {
-    let node_ = Composed::new(vec![crate::service_map_hydrator(Ipv4Addr::LOCALHOST)]).await;
+    let node_ = Composed::new(vec![crate::service_map_hydrator()]).await;
     let (sid, vip) = node_.put_service(SERVICE).await;
     let backends = backends_of(world);
     node_
@@ -245,7 +245,7 @@ async fn fixture(world: &World) -> Fixture {
         );
         node_.state.runtime.seed_service_map_hydrator_view_for_test(
             &target,
-            ServiceMapHydratorView { retries, ..Default::default() },
+            ServiceMapHydratorView { retries },
         );
     }
 
@@ -286,7 +286,7 @@ impl Fixture {
     /// drew a backend the hydrator's gate drops would need this derived from the
     /// post-gate survivors instead.
     async fn wanted(&self) -> Option<BackendSetFingerprint> {
-        let reconciler: AnyReconciler = crate::service_map_hydrator(Ipv4Addr::LOCALHOST);
+        let reconciler: AnyReconciler = crate::service_map_hydrator();
         let desired = hydrate_desired_for_test(&reconciler, &self.target, &self.node.state)
             .await
             .expect("hydrate desired");

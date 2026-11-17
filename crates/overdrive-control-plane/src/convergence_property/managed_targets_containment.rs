@@ -283,7 +283,7 @@ fn service_map_hydrator_manages_services_with_an_intent_or_a_backend_row_but_not
     let rt = runtime();
     rt.block_on(async {
         let name = name_of("service-map-hydrator");
-        let world = Composed::new(vec![crate::service_map_hydrator(Ipv4Addr::LOCALHOST)]).await;
+        let world = Composed::new(vec![crate::service_map_hydrator()]).await;
         // A deployed Service with an intent and no row of any kind.
         let (intent_only, _vip) = world.put_service("svc-intent").await;
         // A Service id with a `service_backends` row and no intent.
@@ -349,7 +349,7 @@ fn service_map_hydrator_enumeration_returns_an_error_when_service_rows_cannot_be
     let rt = runtime();
     rt.block_on(async {
         let name = name_of("service-map-hydrator");
-        let world = Composed::new(vec![crate::service_map_hydrator(Ipv4Addr::LOCALHOST)]).await;
+        let world = Composed::new(vec![crate::service_map_hydrator()]).await;
         world.put_service("svc-a").await;
         world.obs.script_service_rows_read_failure(true);
         let outcome = world.managed_targets(&name).await;

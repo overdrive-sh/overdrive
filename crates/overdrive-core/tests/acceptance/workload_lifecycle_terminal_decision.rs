@@ -656,12 +656,6 @@ fn action_terminal(action: &Action) -> Option<TerminalCondition> {
         // reconciler is the source of terminal claims, not the
         // broker dispatch surface.
         | Action::EnqueueEvaluation { .. }
-        // ADR-0053 — RegisterLocalBackend / DeregisterLocalBackend
-        // are same-host LB primitives consumed by the
-        // cgroup_sock_addr program. They make no terminal claim
-        // — same rationale as DataplaneUpdateService above.
-        | Action::RegisterLocalBackend { .. }
-        | Action::DeregisterLocalBackend { .. }
         // workload-identity-manager (ADR-0067 D2): IssueSvid / DropSvid
         // are SVID-lifecycle primitives — they make no terminal claim by
         // construction. The terminal claim for an alloc lives on

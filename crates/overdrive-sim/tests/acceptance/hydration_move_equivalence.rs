@@ -141,7 +141,7 @@ async fn any_reconciler_hydrate_forwarding_wraps_into_matching_anystate_variant(
         ),
         (
             "ServiceMapHydrator",
-            overdrive_control_plane::service_map_hydrator(std::net::Ipv4Addr::LOCALHOST),
+            overdrive_control_plane::service_map_hydrator(),
             target("service/1"),
         ),
         ("ServiceLifecycle", overdrive_control_plane::service_lifecycle(), target("workload/x")),

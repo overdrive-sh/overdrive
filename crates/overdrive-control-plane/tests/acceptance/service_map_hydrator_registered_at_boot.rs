@@ -10,7 +10,6 @@ use overdrive_control_plane::reconciler_runtime::ReconcilerRuntime;
 use overdrive_control_plane::{
     noop_heartbeat, service_lifecycle, service_map_hydrator, workload_lifecycle,
 };
-use std::net::Ipv4Addr;
 use tempfile::TempDir;
 
 use overdrive_testing::placement;
@@ -27,10 +26,7 @@ async fn service_backend_publisher_and_hydrator_register_with_canonical_names() 
         .expect("ReconcilerRuntime::new");
     runtime.register(noop_heartbeat()).await.expect("register noop-heartbeat");
     runtime.register(workload_lifecycle()).await.expect("register workload-lifecycle");
-    runtime
-        .register(service_map_hydrator(Ipv4Addr::LOCALHOST))
-        .await
-        .expect("register service-map-hydrator");
+    runtime.register(service_map_hydrator()).await.expect("register service-map-hydrator");
     runtime.register(service_lifecycle()).await.expect("register service-lifecycle");
 
     let registered_names: Vec<String> =

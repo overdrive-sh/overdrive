@@ -118,10 +118,6 @@ mod integration {
     mod ca_equivalence;
 
     mod concurrent_submit_toctou;
-    /// Action-shim `deregister_local_backend::dispatch` mutation kill
-    /// per ADR-0053 § 3 — asserts the post-dispatch observable state
-    /// on `SimDataplane::local_backend_for`.
-    mod deregister_local_backend_dispatch;
     mod describe_round_trip;
     /// native-benchmark-program (ADR-0307): the per-datagram `QueryObserver` the DNS
     /// responder reports service time to, and the byte-identical reply contract with

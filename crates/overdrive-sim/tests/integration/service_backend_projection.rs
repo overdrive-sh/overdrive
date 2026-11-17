@@ -585,7 +585,7 @@ async fn registered_runtime(
     let mut runtime = ReconcilerRuntime::new(directory, views).unwrap();
     runtime.register(workload_lifecycle()).await.unwrap();
     runtime.register(service_lifecycle()).await.unwrap();
-    runtime.register(service_map_hydrator(HOST)).await.unwrap();
+    runtime.register(service_map_hydrator()).await.unwrap();
     runtime.register(overdrive_control_plane::vm_reclamation()).await.unwrap();
     runtime
 }

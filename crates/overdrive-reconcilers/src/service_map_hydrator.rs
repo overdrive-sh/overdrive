@@ -191,22 +191,9 @@ pub struct ServiceMapHydratorView {
     /// Per-service retry inputs.
     #[serde(default)]
     pub retries: BTreeMap<ServiceId, RetryMemory>,
-    /// Fingerprint of the LOCAL backend set most recently driven via
-    /// `RegisterLocalBackend` (mechanism L-a, convergence-model.md § 8.3).
-    /// Persists the INPUT (the applied local-set fingerprint), not a derived
-    /// "needs re-drive" boolean — the re-drive decision is recomputed every
-    /// tick from this input + the freshly-computed `local_fingerprint`
-    /// (`.claude/rules/development.md` § "Persist inputs, not derived state").
-    ///
-    /// Additive CBOR schema evolution (§ "Reconciler I/O → Schema evolution"):
-    /// a V1-written View (no field) deserialises with an empty map — tolerant,
-    /// NO versioned envelope, NO migration. GC'd in lockstep with `retries`.
-    #[serde(default)]
-    pub last_applied_local_fingerprint: BTreeMap<ServiceId, BackendSetFingerprint>,
 }
 
-/// Reasons a backend address is rejected by the hydrator's
-/// `Action::RegisterLocalBackend` precondition guard.
+/// Reasons [`classify_backend_address`] rejects a backend address.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BackendAddressRejection {
     /// `127.0.0.0/8`.
@@ -262,13 +249,10 @@ pub const fn classify_backend_address(
 /// confirmed-applied fingerprint.
 pub struct ServiceMapHydrator {
     name: ReconcilerName,
-    /// Host's primary IPv4 — the classifier input per ADR-0053 § 4.
-    host_ipv4: std::net::Ipv4Addr,
     /// Per-host Path-A workload subnet (`WORKLOAD_SUBNET_BASE`,
     /// `10.99.0.0/16`). A backend whose V4 address is a member of this
-    /// subnet is a Path-A/mesh backend: it is gated out of BOTH
-    /// load-balancer paths (no `RegisterLocalBackend`, no
-    /// `DataplaneUpdateService`) because nft-TPROXY owns its delivery
+    /// subnet is a Path-A/mesh backend: it is gated out of the
+    /// load-balancer path (no `DataplaneUpdateService`) because nft-TPROXY owns its delivery
     /// (D-GATE / D-GATE-PRED; reconciles ADR-0053 ↔ ADR-0071). The
     /// SSOT is the provisioner's `WORKLOAD_SUBNET_BASE` const — the
     /// production wiring crate passes it; core takes the generic
@@ -281,9 +265,7 @@ impl ServiceMapHydrator {
     ///
     /// # Preconditions
     ///
-    /// `host_ipv4` MUST be the same value used by the Service backend
-    /// projection. `workload_subnet`
-    /// MUST be the same `WORKLOAD_SUBNET_BASE` the provisioner carves
+    /// `workload_subnet` MUST be the same `WORKLOAD_SUBNET_BASE` the provisioner carves
     /// per-allocation `/30`s from — one source (D-GATE-PRED).
     ///
     /// # Panics
@@ -291,17 +273,11 @@ impl ServiceMapHydrator {
     /// Never — `Self::NAME` is a compile-time string literal
     /// satisfying every `ReconcilerName` validation rule.
     #[must_use]
-    pub fn canonical(host_ipv4: std::net::Ipv4Addr, workload_subnet: ipnet::Ipv4Net) -> Self {
+    pub fn canonical(workload_subnet: ipnet::Ipv4Net) -> Self {
         #[allow(clippy::expect_used)]
         let name = ReconcilerName::new(<Self as Reconciler>::NAME)
             .expect("'service-map-hydrator' is a valid ReconcilerName by construction");
-        Self { name, host_ipv4, workload_subnet }
-    }
-
-    /// The host IPv4 the classifier compares backends against.
-    #[must_use]
-    pub const fn host_ipv4(&self) -> std::net::Ipv4Addr {
-        self.host_ipv4
+        Self { name, workload_subnet }
     }
 
     /// The Path-A/mesh workload subnet the gate compares backends
@@ -342,52 +318,30 @@ impl Reconciler for ServiceMapHydrator {
         let mut next_view = view.clone();
 
         for (service_id, desired_svc) in &desired.desired {
-            // D-GATE / D-GATE-PRED — three-way subnet-membership gate applied
-            // BEFORE the LOCAL/REMOTE partition AND BEFORE the VIP-family
-            // switch. A Path-A/mesh backend (V4 addr ∈ `workload_subnet`,
-            // 10.99.0.0/16) is gated out of BOTH LB paths: nft-TPROXY owns its
-            // delivery (reconciles ADR-0053 ↔ ADR-0071). The gate keys on the
-            // BACKEND's address, NOT the VIP's family, so it applies uniformly
-            // to every VIP family. Computed here (a pure fn of
-            // `desired_svc.backends`, independent of the dispatch decision) so
-            // the post-gate REMOTE survivor set is available to derive
-            // `programmed_fingerprint` BEFORE `should_dispatch` runs.
-            let host_ipv4 = self.host_ipv4;
+            // D-GATE / D-GATE-PRED — subnet-membership gate applied BEFORE
+            // the VIP-family switch. A Path-A/mesh backend (V4 addr ∈
+            // `workload_subnet`, 10.99.0.0/16) is gated out of the LB path:
+            // nft-TPROXY owns its delivery (reconciles ADR-0053 ↔ ADR-0071).
+            // The gate keys on the BACKEND's address, NOT the VIP's family, so
+            // it applies uniformly to every VIP family.
             let workload_subnet = self.workload_subnet;
-            let is_mesh_backend = |b: &&Backend| match b.addr.ip() {
-                std::net::IpAddr::V4(v4) => workload_subnet.contains(&v4),
-                std::net::IpAddr::V6(_) => false,
-            };
-            let non_mesh: Vec<&Backend> =
-                desired_svc.backends.iter().filter(|b| !is_mesh_backend(b)).collect();
+            let remote_survivors: Vec<Backend> = desired_svc
+                .backends
+                .iter()
+                .filter(|b| match b.addr.ip() {
+                    std::net::IpAddr::V4(v4) => !workload_subnet.contains(&v4),
+                    std::net::IpAddr::V6(_) => true,
+                })
+                .cloned()
+                .collect();
 
-            // Partition `non_mesh` into LOCAL (== host_ipv4) and REMOTE arms.
-            // For a V6 VIP there is no LOCAL partition — every non-mesh backend
-            // is "remote" — so `remote_survivors == non_mesh` and `local` is
-            // empty (the V4-equality predicate is never true for a V6 VIP, but
-            // the backends are V4 so this partitions correctly regardless).
-            let vip_is_v4 = matches!(desired_svc.vip.get(), std::net::IpAddr::V4(_));
-            let (local, remote): (Vec<&Backend>, Vec<&Backend>) =
-                non_mesh.iter().copied().partition(|b| {
-                    vip_is_v4
-                        && match b.addr.ip() {
-                            std::net::IpAddr::V4(v4) => v4 == host_ipv4,
-                            std::net::IpAddr::V6(_) => false,
-                        }
-                });
-            let remote_survivors: Vec<Backend> = remote.iter().map(|b| (*b).clone()).collect();
-            let local_survivors: Vec<Backend> = local.iter().map(|b| (*b).clone()).collect();
-
-            // The post-gate REMOTE survivors are the ONLY backends the
-            // dataplane (XDP/REVERSE_NAT) is driven to program. The programmed
+            // The post-gate survivors are the ONLY backends the dataplane
+            // (XDP/REVERSE_NAT) is driven to program. The programmed
             // fingerprint is `fingerprint(vip, remote_survivors)` — byte-
             // identical to what `dataplane_update_service::dispatch` writes back
             // (`fingerprint(vip, action.backends)`) because the emitted action
-            // carries exactly `remote_survivors`. This equality is the entire
-            // convergence-model realignment (convergence-model.md § 3.1):
-            // dispatch + convergence key on the PROGRAMMABLE projection, never
-            // the full backend set. Recomputed every tick from inputs
-            // (`backends`, `workload_subnet`, `host_ipv4`), NEVER persisted.
+            // carries exactly `remote_survivors`. Recomputed every tick from
+            // inputs (`backends`, `workload_subnet`), NEVER persisted.
             let programmed_fingerprint = overdrive_core::dataplane::fingerprint::fingerprint(
                 &desired_svc.vip,
                 &remote_survivors,
@@ -446,54 +400,10 @@ impl Reconciler for ServiceMapHydrator {
             {
                 next_view.retries.remove(service_id);
             }
-
-            // L-a local-churn re-drive (convergence-model.md § 8.3). The
-            // RegisterLocalBackend emission is DECOUPLED from the remote-keyed
-            // `need_dispatch` above: it runs every tick on its OWN convergence
-            // signal — a per-service `local_fingerprint` diff against the
-            // persisted `last_applied_local_fingerprint`. A local-backend churn
-            // whose REMOTE projection is unchanged (so `programmed_fingerprint`
-            // is invariant and `need_dispatch` is false once settled) still
-            // re-emits RegisterLocalBackend for the CURRENT local set. For a V6
-            // VIP `local_survivors` is empty (no LOCAL partition), so
-            // `local_fingerprint = fingerprint(vip, [])` and the seam is a no-op
-            // once recorded. `local_fingerprint` is derived, recomputed every
-            // tick from inputs, NEVER persisted — only its last-applied VALUE
-            // is (the View field). Gated SOLELY on the local diff, NOT on
-            // `need_dispatch` / `programmed_fingerprint` / the Completed row.
-            let local_fingerprint = overdrive_core::dataplane::fingerprint::fingerprint(
-                &desired_svc.vip,
-                &local_survivors,
-            );
-            if next_view.last_applied_local_fingerprint.get(service_id) != Some(&local_fingerprint)
-            {
-                if let std::net::IpAddr::V4(vip_v4) = desired_svc.vip.get() {
-                    let target_str = format!("service-map-hydrator/{service_id}");
-                    let spec_hash =
-                        ContentHash::of(desired_svc.fingerprint.to_le_bytes().as_slice());
-                    push_local_backend_actions(
-                        &mut actions,
-                        &local,
-                        &LocalBackendEmit {
-                            service_id: *service_id,
-                            vip_v4,
-                            vip_port: desired_svc.port.get(),
-                            proto: desired_svc.proto,
-                            target_str: &target_str,
-                            spec_hash: &spec_hash,
-                        },
-                    );
-                }
-                next_view.last_applied_local_fingerprint.insert(*service_id, local_fingerprint);
-            }
         }
 
-        // GC: drop retry memory AND last-applied local fingerprints for
-        // services no longer in `desired` — kept in lockstep (L-a, § 8.3).
+        // GC: drop retry memory for services no longer in `desired`.
         next_view.retries.retain(|service_id, _| desired.desired.contains_key(service_id));
-        next_view
-            .last_applied_local_fingerprint
-            .retain(|service_id, _| desired.desired.contains_key(service_id));
 
         (actions, next_view)
     }
@@ -570,90 +480,6 @@ impl Reconciler for ServiceMapHydrator {
     }
 }
 
-/// Per-service emission context for [`push_local_backend_actions`].
-/// Groups the service-scoped fields (identity, VIP, declared port +
-/// proto, correlation inputs) so the helper stays under the
-/// `clippy::too_many_arguments` bar after step 02-02 added the proto
-/// dimension. All fields are sourced from the listener-bearing
-/// `ServiceDesired` the hydrator is reconciling.
-struct LocalBackendEmit<'a> {
-    service_id: ServiceId,
-    vip_v4: std::net::Ipv4Addr,
-    vip_port: u16,
-    proto: overdrive_core::dataplane::backend_key::Proto,
-    target_str: &'a str,
-    spec_hash: &'a ContentHash,
-}
-
-/// Emit one existing local-backend action per local backend whose address
-/// passes the ADR-0053 § 4 classifier guard. A healthy backend selects
-/// `Action::RegisterLocalBackend`; an unhealthy backend selects
-/// `Action::DeregisterLocalBackend`. Backends with an IPv6 address or a
-/// guard-rejected IPv4 (loopback / link-local / multicast / broadcast /
-/// reserved) are skipped with a structured warn. Extracted from `reconcile`
-/// to keep that method under the 100-line cap.
-///
-/// `vip_port` is the service's declared VIP listener port (the port a
-/// client uses in `connect(vip:vip_port)`), NOT the backend's own
-/// listening port. `proto` is the service's declared L4 protocol,
-/// threaded from the listener-bearing fact (`desired_svc.proto`) —
-/// NEVER defaulted to `Tcp` (C3, ADR-0060 site #8). The
-/// `cgroup_connect4` hook keys `LOCAL_BACKEND_MAP` on
-/// `(vip, vip_port, proto)` and rewrites matching connects to the
-/// backend's real address (ADR-0053 § 3 rev 2026-06-03); a service
-/// co-locating tcp/53 + udp/53 emits two `RegisterLocalBackend` with
-/// distinct proto, neither overwriting the other. A service with
-/// VIP:53 → backend:5353 must register the entry under port 53 or the
-/// client's connect never hits the map. See the
-/// `Dataplane::register_local_backend` contract.
-fn push_local_backend_actions(
-    actions: &mut Vec<Action>,
-    local: &[&Backend],
-    ctx: &LocalBackendEmit<'_>,
-) {
-    for backend in local {
-        let backend_v4 = match backend.addr {
-            std::net::SocketAddr::V4(s4) => s4,
-            std::net::SocketAddr::V6(_) => continue,
-        };
-        if let Err(reason) = classify_backend_address(*backend_v4.ip()) {
-            tracing::warn!(
-                name: "service_map_hydrator.register_local_backend.rejected",
-                service_id = %ctx.service_id,
-                vip = %ctx.vip_v4,
-                vip_port = ctx.vip_port,
-                backend = %backend_v4,
-                reason = %reason,
-                "skipping RegisterLocalBackend: backend address rejected by classifier"
-            );
-            continue;
-        }
-        let purpose =
-            if backend.healthy { "register-local-backend" } else { "deregister-local-backend" };
-        let correlation = CorrelationKey::derive(ctx.target_str, ctx.spec_hash, purpose);
-        let action = if backend.healthy {
-            Action::RegisterLocalBackend {
-                service_id: ctx.service_id,
-                vip: ctx.vip_v4,
-                vip_port: ctx.vip_port,
-                proto: ctx.proto,
-                backend: backend_v4,
-                correlation,
-            }
-        } else {
-            Action::DeregisterLocalBackend {
-                service_id: ctx.service_id,
-                vip: ctx.vip_v4,
-                vip_port: ctx.vip_port,
-                proto: ctx.proto,
-                backend: backend_v4,
-                correlation,
-            }
-        };
-        actions.push(action);
-    }
-}
-
 /// Pure decision: has the attempt-budget backoff window elapsed for
 /// the recorded retry memory at `now`?
 ///
@@ -705,179 +531,6 @@ fn should_dispatch(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use overdrive_core::id::SpiffeId;
-    use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
-
-    fn spiffe(suffix: &str) -> SpiffeId {
-        let raw = format!("spiffe://overdrive.local/workload/svc/alloc/{suffix}");
-        SpiffeId::new(&raw).expect("derived SpiffeId is valid by construction")
-    }
-
-    fn backend(addr: SocketAddr) -> Backend {
-        Backend { alloc: spiffe("a"), addr, weight: 1, healthy: true }
-    }
-
-    fn service_id() -> ServiceId {
-        ServiceId::new(42).expect("ServiceId accepts any u64")
-    }
-
-    fn spec_hash() -> ContentHash {
-        ContentHash::of(b"service-map-hydrator-test-spec")
-    }
-
-    /// A valid local IPv4 backend yields exactly one
-    /// `Action::RegisterLocalBackend` carrying the service identity, VIP,
-    /// the declared VIP listener port as `vip_port`, the narrowed
-    /// `SocketAddrV4`, and the `register-local-backend` correlation.
-    /// Here the declared port (8080) and the backend's own port coincide;
-    /// the VIP≠backend-port case is pinned separately below. Default-lane proxy
-    /// for the Tier-3 reverse-NAT registration path — pins the emission
-    /// the body owns so mutating the body to a no-op is caught here, not
-    /// only behind the real-veth gate.
-    /// CONTRACT_SHAPE: pure-function.
-    #[test]
-    fn push_register_local_backend_emits_action_for_valid_local_backend() {
-        let vip_v4 = Ipv4Addr::new(10, 0, 0, 1);
-        let target = "service/42";
-        let hash = spec_hash();
-        let backend_v4 = SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 50), 8080);
-        let local = backend(SocketAddr::V4(backend_v4));
-        let local_refs: Vec<&Backend> = vec![&local];
-
-        let mut actions = Vec::new();
-        push_local_backend_actions(
-            &mut actions,
-            &local_refs,
-            &LocalBackendEmit {
-                service_id: service_id(),
-                vip_v4,
-                vip_port: 8080,
-                proto: Proto::Tcp,
-                target_str: target,
-                spec_hash: &hash,
-            },
-        );
-
-        assert_eq!(
-            actions.len(),
-            1,
-            "exactly one RegisterLocalBackend must be emitted for a valid local backend"
-        );
-        let expected_correlation = CorrelationKey::derive(target, &hash, "register-local-backend");
-        match &actions[0] {
-            Action::RegisterLocalBackend {
-                service_id: sid,
-                vip,
-                vip_port,
-                proto,
-                backend: emitted,
-                correlation,
-            } => {
-                assert_eq!(*sid, service_id(), "service_id must be threaded through");
-                assert_eq!(*vip, vip_v4, "vip must be the host VIP");
-                assert_eq!(*proto, Proto::Tcp, "proto must be threaded through (the declared L4)");
-                assert_eq!(
-                    *vip_port, 8080,
-                    "vip_port is the declared VIP listener port (here == backend port)"
-                );
-                assert_eq!(*emitted, backend_v4, "backend must be the narrowed SocketAddrV4");
-                assert_eq!(
-                    *correlation, expected_correlation,
-                    "correlation must derive from (target, spec_hash, purpose)"
-                );
-            }
-            other => panic!("expected RegisterLocalBackend, got {other:?}"),
-        }
-    }
-
-    /// Regression (bugfix): when the service's declared VIP listener
-    /// port differs from the backend's own listening port (e.g. a DNS
-    /// service VIP:53 → backend:5353), the emitted `vip_port` MUST be
-    /// the declared listener port (53), NOT the backend port (5353).
-    /// The `cgroup_connect4` hook keys `LOCAL_BACKEND_MAP` on the port
-    /// a client connects to (the declared VIP port); registering under
-    /// the backend port leaves every `connect(vip:53)` a lookup miss
-    /// with no rewrite. Pins the threading of `desired_svc.port`
-    /// through to the action so a body that reverts to
-    /// `backend.addr.port()` is caught here.
-    /// CONTRACT_SHAPE: pure-function.
-    #[test]
-    fn push_register_local_backend_uses_declared_vip_port_not_backend_port() {
-        let vip_v4 = Ipv4Addr::new(10, 0, 0, 1);
-        let declared_vip_port: u16 = 53;
-        let backend_port: u16 = 5353;
-        let target = "service/42";
-        let hash = spec_hash();
-        let backend_v4 = SocketAddrV4::new(Ipv4Addr::new(192, 168, 1, 50), backend_port);
-        let local = backend(SocketAddr::V4(backend_v4));
-        let local_refs: Vec<&Backend> = vec![&local];
-
-        let mut actions = Vec::new();
-        push_local_backend_actions(
-            &mut actions,
-            &local_refs,
-            &LocalBackendEmit {
-                service_id: service_id(),
-                vip_v4,
-                vip_port: declared_vip_port,
-                proto: Proto::Tcp,
-                target_str: target,
-                spec_hash: &hash,
-            },
-        );
-
-        assert_eq!(actions.len(), 1, "exactly one RegisterLocalBackend must be emitted");
-        match &actions[0] {
-            Action::RegisterLocalBackend { vip_port, backend: emitted, .. } => {
-                assert_eq!(
-                    *vip_port, declared_vip_port,
-                    "vip_port must be the declared VIP listener port (53), not the backend port"
-                );
-                assert_ne!(
-                    *vip_port, backend_port,
-                    "vip_port must NOT carry the backend's own port (5353)"
-                );
-                assert_eq!(
-                    emitted.port(),
-                    backend_port,
-                    "the backend address still carries the backend's own port"
-                );
-            }
-            other => panic!("expected RegisterLocalBackend, got {other:?}"),
-        }
-    }
-
-    /// IPv6 and guard-rejected (loopback) backends are skipped — the fn
-    /// emits nothing. Pins the two `continue` arms so a body that drops
-    /// the guard cannot silently register a loopback or IPv6 backend.
-    /// CONTRACT_SHAPE: pure-function.
-    #[test]
-    fn push_register_local_backend_skips_ipv6_and_guard_rejected() {
-        let vip_v4 = Ipv4Addr::new(10, 0, 0, 1);
-        let hash = spec_hash();
-        let v6 = backend(SocketAddr::V6(SocketAddrV6::new(Ipv6Addr::LOCALHOST, 8080, 0, 0)));
-        let loopback = backend(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 8080)));
-        let local_refs: Vec<&Backend> = vec![&v6, &loopback];
-
-        let mut actions = Vec::new();
-        push_local_backend_actions(
-            &mut actions,
-            &local_refs,
-            &LocalBackendEmit {
-                service_id: service_id(),
-                vip_v4,
-                vip_port: 8080,
-                proto: Proto::Tcp,
-                target_str: "service/42",
-                spec_hash: &hash,
-            },
-        );
-
-        assert!(
-            actions.is_empty(),
-            "IPv6 and guard-rejected backends must not produce RegisterLocalBackend actions"
-        );
-    }
 
     // ---- should_dispatch attempt-budget gate (RCA §Fix B) ----
     //

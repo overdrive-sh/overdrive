@@ -311,7 +311,6 @@ async fn runtime_skips_write_through_when_service_map_hydrator_view_equals_in_me
         ReconcilerRuntime::new(tmp.path(), sim.clone() as Arc<dyn ViewStore>).expect("runtime");
     runtime
         .register(AnyReconciler::ServiceMapHydrator(ServiceMapHydrator::canonical(
-            std::net::Ipv4Addr::UNSPECIFIED,
             overdrive_control_plane::veth_provisioner::WORKLOAD_SUBNET_BASE,
         )))
         .await

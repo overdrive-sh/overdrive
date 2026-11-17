@@ -1496,8 +1496,7 @@ impl EbpfDataplane {
 
     /// Returns the LOCAL_BACKEND_MAP entry for `(vip, vip_port)`,
     /// if any. Used by the walking-skeleton test to assert the
-    /// cgroup path was populated by the hydrator's
-    /// `Action::RegisterLocalBackend` dispatch.
+    /// cgroup path was populated.
     ///
     /// # Errors
     ///

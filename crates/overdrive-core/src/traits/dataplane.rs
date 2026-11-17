@@ -271,9 +271,8 @@ pub trait Dataplane: Send + Sync + 'static {
     /// - `vip` is an IPv4 service VIP issued by `ServiceVipAllocator`
     ///   (ADR-0049). The allocator produces values of the
     ///   `overdrive_core::id::ServiceVip` newtype (validated `Ipv4Addr`
-    ///   range), and `ServiceMapHydrator` extracts the inner
-    ///   `Ipv4Addr` via `ServiceVip::get()` immediately before
-    ///   emitting `Action::RegisterLocalBackend` — so every VIP
+    ///   range), and the caller extracts the inner
+    ///   `Ipv4Addr` via `ServiceVip::get()` — so every VIP
     ///   reaching this method has transited the typed allocator
     ///   surface. The signature stays `Ipv4Addr` (rather than
     ///   `ServiceVip`) for parallel with `update_service.vip` and to

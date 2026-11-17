@@ -126,11 +126,6 @@ const EXPECTED_INVARIANTS: &[&str] = &[
     // comment in `dst_clean_clone_green.rs`.
     "workload-gc-orphan-converges",
     "workload-gc-resubmit-creates-fresh",
-    // unconnected-udp-sendmsg4 Slice 02 (US-02; J-PLAT-004 / K3, GH #200) —
-    // `reply-source-rewrite-lockstep` added to `Invariant::ALL` by step 02-01;
-    // blessed here so both catalogues track `Invariant::ALL` exactly. Mirrors
-    // `dst_clean_clone_green.rs`.
-    "reply-source-rewrite-lockstep",
     // workflow-primitive step 01-07 — sibling workflow durability
     // invariants (ADR-0064 §6), appended at the tail of `Invariant::ALL`.
     "workflow-journal-write-ordering",

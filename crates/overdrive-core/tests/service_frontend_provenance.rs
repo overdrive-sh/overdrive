@@ -116,7 +116,6 @@ fn proto_sourced_from_listener_fact_not_service_backends() {
 #[test]
 fn udp_listener_protocol_reaches_dataplane_as_udp() {
     let r = ServiceMapHydrator::canonical(
-        Ipv4Addr::UNSPECIFIED,
         ipnet::Ipv4Net::new(Ipv4Addr::new(10, 99, 0, 0), 16).expect("valid /16"),
     );
     let svc = ServiceId::new(1).expect("valid ServiceId");

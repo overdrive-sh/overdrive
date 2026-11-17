@@ -467,7 +467,7 @@ async fn drive_characterization(mode: GoldenMode) {
         (
             "service_map_hydrator",
             "ServiceMapHydrator",
-            overdrive_control_plane::service_map_hydrator(std::net::Ipv4Addr::LOCALHOST),
+            overdrive_control_plane::service_map_hydrator(),
             target("service/1"),
         ),
         (

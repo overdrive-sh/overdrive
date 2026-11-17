@@ -284,10 +284,7 @@ fn service_spec(id: &str) -> ServiceSpecInput {
 async fn register_reconcilers(runtime: &mut ReconcilerRuntime) {
     runtime.register(crate::workload_lifecycle()).await.expect("register workload-lifecycle");
     runtime.register(crate::service_lifecycle()).await.expect("register service-lifecycle");
-    runtime
-        .register(crate::service_map_hydrator(Ipv4Addr::LOCALHOST))
-        .await
-        .expect("register service-map-hydrator");
+    runtime.register(crate::service_map_hydrator()).await.expect("register service-map-hydrator");
     runtime.register(crate::svid_lifecycle()).await.expect("register svid-lifecycle");
 }
 

@@ -88,7 +88,7 @@ fn make_tick(now_secs: u64) -> TickContext {
 
 #[test]
 fn dispatch_when_actual_pending_and_desired_present() {
-    let r = ServiceMapHydrator::canonical(std::net::Ipv4Addr::UNSPECIFIED, workload_subnet());
+    let r = ServiceMapHydrator::canonical(workload_subnet());
     let s_id = make_service_id(1);
     let mut desired = BTreeMap::new();
     desired.insert(s_id, make_desired_svc());
@@ -111,7 +111,7 @@ fn dispatch_when_actual_pending_and_desired_present() {
 
 #[test]
 fn no_dispatch_when_actual_completed_matches_desired_fingerprint() {
-    let r = ServiceMapHydrator::canonical(std::net::Ipv4Addr::UNSPECIFIED, workload_subnet());
+    let r = ServiceMapHydrator::canonical(workload_subnet());
     let s_id = make_service_id(1);
     let desired_svc = make_desired_svc();
     let fp = desired_svc.fingerprint;
@@ -141,7 +141,7 @@ fn no_dispatch_when_actual_completed_matches_desired_fingerprint() {
 
 #[test]
 fn dispatch_when_actual_completed_on_different_fingerprint() {
-    let r = ServiceMapHydrator::canonical(std::net::Ipv4Addr::UNSPECIFIED, workload_subnet());
+    let r = ServiceMapHydrator::canonical(workload_subnet());
     let s_id = make_service_id(1);
     let mut desired = BTreeMap::new();
     desired.insert(s_id, make_desired_svc());
@@ -162,7 +162,7 @@ fn dispatch_when_actual_completed_on_different_fingerprint() {
 
 #[test]
 fn no_dispatch_when_failed_same_fingerprint_within_backoff() {
-    let r = ServiceMapHydrator::canonical(std::net::Ipv4Addr::UNSPECIFIED, workload_subnet());
+    let r = ServiceMapHydrator::canonical(workload_subnet());
     let s_id = make_service_id(1);
     let desired_svc = make_desired_svc();
     let fp = desired_svc.fingerprint;
@@ -195,7 +195,7 @@ fn no_dispatch_when_failed_same_fingerprint_within_backoff() {
 
 #[test]
 fn dispatch_when_failed_same_fingerprint_after_backoff_elapsed() {
-    let r = ServiceMapHydrator::canonical(std::net::Ipv4Addr::UNSPECIFIED, workload_subnet());
+    let r = ServiceMapHydrator::canonical(workload_subnet());
     let s_id = make_service_id(1);
     let desired_svc = make_desired_svc();
     let fp = desired_svc.fingerprint;
@@ -228,7 +228,7 @@ fn dispatch_when_failed_same_fingerprint_after_backoff_elapsed() {
 
 #[test]
 fn dispatch_when_failed_different_fingerprint_ignores_backoff() {
-    let r = ServiceMapHydrator::canonical(std::net::Ipv4Addr::UNSPECIFIED, workload_subnet());
+    let r = ServiceMapHydrator::canonical(workload_subnet());
     let s_id = make_service_id(1);
     let mut desired = BTreeMap::new();
     desired.insert(s_id, make_desired_svc());
@@ -263,7 +263,7 @@ fn dispatch_when_failed_different_fingerprint_ignores_backoff() {
 
 #[test]
 fn gc_drops_retry_memory_for_services_no_longer_in_desired() {
-    let r = ServiceMapHydrator::canonical(std::net::Ipv4Addr::UNSPECIFIED, workload_subnet());
+    let r = ServiceMapHydrator::canonical(workload_subnet());
     let alive_id = make_service_id(1);
     let dead_id = make_service_id(2);
     let mut desired = BTreeMap::new();
@@ -287,7 +287,7 @@ fn gc_drops_retry_memory_for_services_no_longer_in_desired() {
 
 #[test]
 fn iteration_order_is_btreemap_deterministic() {
-    let r = ServiceMapHydrator::canonical(std::net::Ipv4Addr::UNSPECIFIED, workload_subnet());
+    let r = ServiceMapHydrator::canonical(workload_subnet());
     let s1 = make_service_id(1);
     let s2 = make_service_id(2);
     let mut desired = BTreeMap::new();
@@ -397,125 +397,4 @@ fn rejection_display_form_is_operator_actionable() {
     assert!(BackendAddressRejection::Multicast.to_string().contains("224.0"));
     assert!(BackendAddressRejection::Broadcast.to_string().contains("255.255"));
     assert!(BackendAddressRejection::Reserved.to_string().contains("0.0.0"));
-}
-
-#[test]
-fn hydrator_skips_register_local_backend_for_loopback() {
-    // Hydrator wired so the classifier sees every backend as
-    // "local" (`host_ipv4` matches the backend IP). A loopback
-    // backend address must NOT produce a `RegisterLocalBackend`
-    // action — D12's guard fires before emission.
-    let host_ipv4 = Ipv4Addr::LOCALHOST;
-    let r = ServiceMapHydrator::canonical(host_ipv4, workload_subnet());
-    let s_id = make_service_id(1);
-
-    let vip = ServiceVip::new(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))).expect("valid ServiceVip");
-    let backend = Backend {
-        alloc: SpiffeId::new("spiffe://overdrive.local/workload/web/alloc/web-0")
-            .expect("valid SpiffeId"),
-        addr: SocketAddr::new(IpAddr::V4(host_ipv4), 8080),
-        weight: 1,
-        healthy: true,
-    };
-    let backends = vec![backend];
-    let fp = fingerprint(&vip, &backends);
-
-    let mut desired = BTreeMap::new();
-    desired.insert(
-        s_id,
-        ServiceDesired {
-            vip,
-            port: std::num::NonZeroU16::new(8080).expect("non-zero"),
-            proto: overdrive_core::dataplane::backend_key::Proto::Tcp,
-            backends,
-            fingerprint: fp,
-        },
-    );
-    let state = ServiceMapHydratorState { desired, actual: BTreeMap::new() };
-    let view = ServiceMapHydratorView::default();
-    let (actions, _) = r.reconcile(&state, &state, &view, &make_tick(0));
-
-    let register_count =
-        actions.iter().filter(|a| matches!(a, Action::RegisterLocalBackend { .. })).count();
-    assert_eq!(
-        register_count, 0,
-        "loopback backend must be skipped by the D12 classifier guard; actions: {actions:?}",
-    );
-}
-
-/// S-02-02 / C3 (ADR-0060 site #8) — the hydrator threads each
-/// service's per-listener proto into the `RegisterLocalBackend` it
-/// emits, NEVER defaulting to `Tcp`. Two co-located services — one
-/// tcp listener, one udp listener — each with a local backend, emit
-/// TWO `RegisterLocalBackend` carrying DISTINCT proto. A regression
-/// that hard-codes `Proto::Tcp` on the cgroup emission path (the C3
-/// failure mode) would make the udp service's action carry `Tcp`,
-/// caught here.
-#[test]
-fn hydrator_threads_per_listener_proto_into_register_local_backend() {
-    use overdrive_core::dataplane::backend_key::Proto;
-
-    // Classifier sees both backends as local: distinct non-loopback,
-    // non-guard-rejected host IP equal to the configured `host_ipv4`.
-    let host_ipv4 = Ipv4Addr::new(10, 0, 0, 9);
-    let r = ServiceMapHydrator::canonical(host_ipv4, workload_subnet());
-
-    let local_backend = |suffix: &str, port: u16| Backend {
-        alloc: SpiffeId::new(&format!("spiffe://overdrive.local/workload/dns/alloc/{suffix}"))
-            .expect("valid SpiffeId"),
-        addr: SocketAddr::new(IpAddr::V4(host_ipv4), port),
-        weight: 1,
-        healthy: true,
-    };
-
-    let mut desired = BTreeMap::new();
-    let vip = ServiceVip::new(IpAddr::V4(Ipv4Addr::new(10, 96, 0, 53))).expect("valid ServiceVip");
-    // TCP service.
-    let tcp_backends = vec![local_backend("dns-tcp-0", 5353)];
-    let tcp_fp = fingerprint(&vip, &tcp_backends);
-    desired.insert(
-        make_service_id(1),
-        ServiceDesired {
-            vip,
-            port: std::num::NonZeroU16::new(53).expect("non-zero"),
-            proto: Proto::Tcp,
-            backends: tcp_backends,
-            fingerprint: tcp_fp,
-        },
-    );
-    // UDP service (distinct ServiceId; same logical VIP:port co-location).
-    let udp_backends = vec![local_backend("dns-udp-0", 5354)];
-    let udp_fp = fingerprint(&vip, &udp_backends);
-    desired.insert(
-        make_service_id(2),
-        ServiceDesired {
-            vip,
-            port: std::num::NonZeroU16::new(53).expect("non-zero"),
-            proto: Proto::Udp,
-            backends: udp_backends,
-            fingerprint: udp_fp,
-        },
-    );
-
-    let state = ServiceMapHydratorState { desired, actual: BTreeMap::new() };
-    let view = ServiceMapHydratorView::default();
-    let (actions, _) = r.reconcile(&state, &state, &view, &make_tick(0));
-
-    let protos: Vec<Proto> = actions
-        .iter()
-        .filter_map(|a| match a {
-            Action::RegisterLocalBackend { proto, .. } => Some(*proto),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(
-        protos.len(),
-        2,
-        "two co-located local services must emit two RegisterLocalBackend; actions: {actions:?}"
-    );
-    assert!(protos.contains(&Proto::Tcp), "tcp service must emit proto=Tcp; protos: {protos:?}");
-    assert!(
-        protos.contains(&Proto::Udp),
-        "udp service must emit proto=Udp — NOT defaulted to Tcp (C3); protos: {protos:?}"
-    );
 }

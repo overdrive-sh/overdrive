@@ -1667,9 +1667,6 @@ pub enum ConflictRoute {
     /// XDP `SERVICE_MAP` / Maglev path, keyed on `(vip, port, proto)`.
     /// Mirrors `WriteRoute::Xdp`.
     Xdp,
-    /// cgroup `connect4` rewrite path (`LOCAL_BACKEND_MAP`), keyed on
-    /// `(vip, vip_port, proto)`. Mirrors `WriteRoute::Cgroup`.
-    Cgroup,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]

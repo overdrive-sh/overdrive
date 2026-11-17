@@ -5,12 +5,11 @@
 //! public API as a downstream-crate consumer (the dispatch boundary
 //! caller in `reconciler_runtime::run_convergence_tick`). The detailed
 //! per-conflict-shape assertions live inline in `validate.rs` as
-//! `#[cfg(test)] mod tests`; this file mirrors the three scenarios the
+//! `#[cfg(test)] mod tests`; this file mirrors the scenarios the
 //! task contract pins:
 //!
 //! 1. Happy path — distinct writes, no conflicts.
-//! 2. Cgroup-vs-XDP conflict — same VIP touched by both routes.
-//! 3. Register-vs-Deregister conflict — same `(vip, port)` slot.
+//! 2. XDP-vs-XDP conflict — the same `(vip, port, proto)` slot.
 //!
 //! Per `.claude/rules/testing.md` § "What stays in the default lane":
 //! pure-function validator, no real I/O, runs <60s. Integration-test
@@ -19,7 +18,7 @@
 //!
 //! Phase 16 D11 — runtime defense for the inter-Action conflict gap.
 
-use std::net::{IpAddr, Ipv4Addr, SocketAddrV4};
+use std::net::{IpAddr, Ipv4Addr};
 
 use overdrive_control_plane::action_shim::validate::{
     ReconcilerOutputViolation, WriteRoute, validate_reconcile_output,
@@ -48,36 +47,6 @@ fn service_vip_for(o1: u8) -> ServiceVip {
     ServiceVip::new(IpAddr::V4(vip(o1))).expect("ServiceVip")
 }
 
-fn register(v: Ipv4Addr, port: u16) -> Action {
-    register_proto(v, port, overdrive_core::dataplane::backend_key::Proto::Tcp)
-}
-
-fn register_proto(
-    v: Ipv4Addr,
-    port: u16,
-    proto: overdrive_core::dataplane::backend_key::Proto,
-) -> Action {
-    Action::RegisterLocalBackend {
-        service_id: service_id(),
-        vip: v,
-        vip_port: port,
-        proto,
-        backend: SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 5), 9090),
-        correlation: correlation("register-local-backend"),
-    }
-}
-
-fn deregister(v: Ipv4Addr, port: u16) -> Action {
-    Action::DeregisterLocalBackend {
-        service_id: service_id(),
-        vip: v,
-        vip_port: port,
-        proto: overdrive_core::dataplane::backend_key::Proto::Tcp,
-        backend: SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 5), 9090),
-        correlation: correlation("deregister-local-backend"),
-    }
-}
-
 fn update_service(o1: u8) -> Action {
     update_service_proto_port(o1, overdrive_core::dataplane::backend_key::Proto::Tcp, 8080)
 }
@@ -103,37 +72,11 @@ fn update_service_proto_port(
 /// across distinct services in one tick.
 #[test]
 fn happy_path_distinct_vips_and_noops_pass() {
-    let actions = vec![
-        Action::Noop,
-        update_service(1),
-        register(vip(2), 8080),
-        register(vip(2), 9090), // same VIP, distinct port — ok
-        deregister(vip(3), 7000),
-        Action::Noop,
-    ];
+    let actions =
+        vec![Action::Noop, update_service(1), update_service(2), update_service(3), Action::Noop];
     assert!(
         validate_reconcile_output(&actions).is_ok(),
         "distinct VIPs + noops must validate cleanly"
-    );
-}
-
-/// ADR-0053 § 4 dual-path — an XDP `SERVICE_MAP` write AND a cgroup
-/// `LOCAL_BACKEND_MAP` write for the SAME VIP in one tick is the
-/// BLESSED mixed local+remote dual-path, NOT a conflict (RCA
-/// `fix-mixed-backend-dispatch-spin` Fix A1; ADR-0053 revision
-/// 2026-06-03). The two routes are disjoint kernel maps consumed by
-/// different hooks with no precedence race. The validator MUST accept
-/// it. (This integration-side test was flipped from a cross-route
-/// rejection to an acceptance alongside the 01-04 `service_id`
-/// threading — its unit-side sibling was flipped in step 01-01; the
-/// integration sibling was missed there and is corrected here per
-/// deletion/test discipline.)
-#[test]
-fn cgroup_and_xdp_on_same_vip_accepted() {
-    let actions = vec![update_service(1), register(vip(1), 8080)];
-    assert!(
-        validate_reconcile_output(&actions).is_ok(),
-        "XDP + cgroup writes on same VIP are the ADR-0053 § 4 dual-path, not a conflict"
     );
 }
 
@@ -200,80 +143,4 @@ fn xdp_identical_vip_port_proto_rejected() {
     assert_eq!(vip_port, Some(8080), "XDP-vs-XDP conflict now reports the shared port");
     assert_eq!(first_route, WriteRoute::Xdp);
     assert_eq!(second_route, WriteRoute::Xdp);
-}
-
-/// Register-vs-Deregister conflict — two cgroup-path writes to the
-/// same `(vip, vip_port)` slot in one tick are a bug regardless of
-/// the route match. The kernel-side `LOCAL_BACKEND_MAP` entry is
-/// overwritten by whichever action the dispatcher applies second;
-/// the reconciler's intent is undefined. The validator must reject.
-#[test]
-fn register_vs_deregister_on_same_key_rejected() {
-    let actions = vec![register(vip(7), 5000), deregister(vip(7), 5000)];
-    let err = validate_reconcile_output(&actions)
-        .expect_err("register+deregister at same (vip, port) must conflict");
-    let ReconcilerOutputViolation::ConflictingServiceWrites {
-        service_id: conflict_sid,
-        vip: conflict_vip,
-        vip_port,
-        proto: conflict_proto,
-        first_route,
-        second_route,
-    } = err
-    else {
-        panic!("expected a service-write conflict, not an allocation-reclaim conflict");
-    };
-    assert_eq!(conflict_sid, service_id());
-    assert_eq!(conflict_vip, vip(7));
-    assert_eq!(conflict_proto, overdrive_core::dataplane::backend_key::Proto::Tcp);
-    assert_eq!(vip_port, Some(5000));
-    assert_eq!(first_route, WriteRoute::Cgroup);
-    assert_eq!(second_route, WriteRoute::Cgroup);
-}
-
-/// S-02-02 — same-host DNS unlock: two cgroup `RegisterLocalBackend`
-/// writes for the SAME `(vip, port)` but DISTINCT proto (tcp/53 +
-/// udp/53) now return `Ok`. Step 02-02 widened the cgroup write-key
-/// from `(vip, port)` to `(vip, port, proto)` mirroring the
-/// `LOCAL_BACKEND_MAP` key — distinct proto → distinct slot → no
-/// conflict, the same co-location the XDP path already permits.
-#[test]
-fn cgroup_same_vip_port_different_proto_pass() {
-    use overdrive_core::dataplane::backend_key::Proto;
-    let actions =
-        vec![register_proto(vip(8), 53, Proto::Tcp), register_proto(vip(8), 53, Proto::Udp)];
-    assert!(
-        validate_reconcile_output(&actions).is_ok(),
-        "same (vip,port) different proto on the cgroup path must NOT conflict (DNS co-location)"
-    );
-}
-
-/// S-02-02 — genuine duplicate cgroup slot is STILL caught. Two
-/// `RegisterLocalBackend` for IDENTICAL `(vip, port, proto)` (tcp/53
-/// twice) remain a `ConflictingServiceWrites` error reporting the
-/// shared port.
-#[test]
-fn cgroup_identical_vip_port_proto_rejected() {
-    use overdrive_core::dataplane::backend_key::Proto;
-    let actions =
-        vec![register_proto(vip(9), 53, Proto::Tcp), register_proto(vip(9), 53, Proto::Tcp)];
-    let err = validate_reconcile_output(&actions)
-        .expect_err("identical (vip,port,proto) cgroup writes must conflict");
-    let ReconcilerOutputViolation::ConflictingServiceWrites {
-        service_id: conflict_sid,
-        vip: conflict_vip,
-        vip_port,
-        proto: conflict_proto,
-        first_route,
-        second_route,
-    } = err
-    else {
-        panic!("expected a service-write conflict, not an allocation-reclaim conflict");
-    };
-    assert_eq!(conflict_sid, service_id());
-    assert_eq!(conflict_vip, vip(9));
-    assert_eq!(conflict_proto, Proto::Tcp);
-    assert_eq!(vip_port, Some(53), "cgroup-vs-cgroup conflict reports the shared port");
-    assert_eq!(first_route, WriteRoute::Cgroup);
-    assert_eq!(second_route, WriteRoute::Cgroup);
 }

@@ -162,7 +162,7 @@ fn addr(index: u8) -> Ipv4Addr {
 fn applying_the_hydrators_dataplane_update_twice_equals_applying_it_once() {
     #[cfg(test)]
     async fn build() -> (Composed, TargetResource) {
-        let world = Composed::new(vec![crate::service_map_hydrator(Ipv4Addr::LOCALHOST)]).await;
+        let world = Composed::new(vec![crate::service_map_hydrator()]).await;
         let (sid, vip) = world.put_service("payments").await;
         world
             .obs

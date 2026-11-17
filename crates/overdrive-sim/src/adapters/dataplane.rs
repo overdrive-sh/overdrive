@@ -155,9 +155,7 @@ struct LocalState {
     local_backends: BTreeMap<(Ipv4Addr, u16, Proto), SocketAddrV4>,
     /// Reply: `BackendKey(backend_ip, backend_port, proto) → (vip,
     /// vip_port)` — the unconnected recvmsg4 reverse lookup mirror.
-    /// `reply_source_for` reads this; the Tier-1
-    /// `reply-source-rewrite-lockstep` invariant asserts "reply source ==
-    /// (VIP, `VIP_PORT`)" against it. The value is a full `SocketAddrV4`
+    /// `reply_source_for` reads this. The value is a full `SocketAddrV4`
     /// (not a bare `Ipv4Addr`) so the Sim MODELS the (IP, port) contract
     /// the production kernel must satisfy: recvmsg4 must restore BOTH
     /// `user_ip4 ← vip` AND `user_port ← vip_port` (ADR-0053 §D4) — a
@@ -237,8 +235,7 @@ impl SimDataplane {
     /// — the cross-port-service contract the production kernel must
     /// satisfy.
     ///
-    /// This is the test-only accessor the Tier-1
-    /// `reply-source-rewrite-lockstep` invariant asserts against:
+    /// This is the test-only accessor for:
     /// "reply source == (VIP, `VIP_PORT`) for the declared frontend"
     /// (US-02 / K3, the J-PLAT-004 equivalence twin). Not part of the
     /// `Dataplane` trait — a DST/test convenience, parity with

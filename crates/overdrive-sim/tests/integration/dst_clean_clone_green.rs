@@ -136,13 +136,6 @@ const EXPECTED_INVARIANTS: &[&str] = &[
     // AC §1.3.
     "workload-gc-orphan-converges",
     "workload-gc-resubmit-creates-fresh",
-    // unconnected-udp-sendmsg4 Slice 02 (US-02; J-PLAT-004 / K3, GH #200) —
-    // the `reply-source-rewrite-lockstep` DST equivalence invariant added to
-    // `Invariant::ALL` by step 02-01 (`crate::invariants::reply_source_rewrite_lockstep`).
-    // The below-Tier-3 defense for unconnected-UDP reply-path identity (no
-    // Tier-2 backstop for cgroup_sock_addr). Blessed here so the catalogue
-    // length + named-set checks track `Invariant::ALL` exactly.
-    "reply-source-rewrite-lockstep",
     // workflow-primitive step 01-07 — sibling workflow durability
     // invariants (ADR-0064 §6), appended at the tail of `Invariant::ALL`.
     "workflow-journal-write-ordering",

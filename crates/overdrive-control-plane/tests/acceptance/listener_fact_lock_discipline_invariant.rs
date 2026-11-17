@@ -65,7 +65,6 @@ fn node_id(name: &str) -> NodeId {
 
 fn hydrator_reconciler() -> AnyReconciler {
     AnyReconciler::ServiceMapHydrator(ServiceMapHydrator::canonical(
-        std::net::Ipv4Addr::UNSPECIFIED,
         overdrive_control_plane::veth_provisioner::WORKLOAD_SUBNET_BASE,
     ))
 }

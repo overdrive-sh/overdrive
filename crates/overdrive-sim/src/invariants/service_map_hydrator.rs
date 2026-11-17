@@ -27,7 +27,7 @@
     clippy::cast_precision_loss,
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
-    // The four-shape fixtures construct ids/addresses that are infallible
+    // The three-shape fixtures construct ids/addresses that are infallible
     // by construction (ServiceId::new(42), a literal valid SpiffeId, a
     // const NonZeroU16). `.expect` documents the construction contract,
     // consistent with the `#[cfg(test)]` retry-budget module below and the
@@ -56,14 +56,6 @@ use overdrive_reconcilers::{
 // Aliased (not a `fn`) to avoid naming the `ipnet` crate directly —
 // `overdrive-sim` does not depend on it.
 use overdrive_control_plane::veth_provisioner::WORKLOAD_SUBNET_BASE as MESH_SUBNET;
-
-/// Host primary IPv4 for the LOCAL-arm classifier. Distinct from every
-/// mesh and remote address used in the four-shape fixtures; itself NOT in
-/// the mesh subnet so the `local-only` shape's backend (== `host_ipv4`)
-/// is partitioned LOCAL, not gated as mesh.
-const fn host_ipv4() -> Ipv4Addr {
-    Ipv4Addr::new(10, 0, 0, 9)
-}
 
 use crate::harness::{InvariantResult, InvariantStatus};
 
@@ -107,7 +99,7 @@ const STEADY_STATE_TICKS: u32 = 5;
 pub fn evaluate_hydrator_eventually_converges() -> InvariantResult {
     const NAME: &str = "hydrator-eventually-converges";
 
-    // Exercise ALL FOUR service shapes as sub-cases (convergence-model.md
+    // Exercise ALL THREE service shapes as sub-cases (convergence-model.md
     // § 10.2). The MIXED shape is the load-bearing addition — it is the
     // face the faithless full-set echo made structurally undetectable
     // (RCA § 10.4); a regression of the fingerprint-domain mismatch
@@ -129,7 +121,7 @@ pub fn evaluate_hydrator_eventually_converges() -> InvariantResult {
 /// `actions.is_empty()` AND every desired service has a `Completed` row.
 fn drive_one_shape_to_convergence(shape: &ShapeFixture) -> Result<(), String> {
     let any_reconciler =
-        AnyReconciler::ServiceMapHydrator(ServiceMapHydrator::canonical(host_ipv4(), MESH_SUBNET));
+        AnyReconciler::ServiceMapHydrator(ServiceMapHydrator::canonical(MESH_SUBNET));
     let mut state = shape.state.clone();
     let mut view = ServiceMapHydratorView::default();
 
@@ -145,8 +137,7 @@ fn drive_one_shape_to_convergence(shape: &ShapeFixture) -> Result<(), String> {
         // Model the REAL shim (dataplane_update_service::dispatch):
         // fingerprint over the ACTION's backends (the programmed subset,
         // possibly EMPTY = the per-proto purge), NOT the desired full-set
-        // echo. RegisterLocalBackend emits NO row — the harness must NOT
-        // synthesise one (model the real cgroup path's silence).
+        // echo.
         for action in &actions {
             if let Action::DataplaneUpdateService { service_id, vip, backends, .. } = action {
                 if !state.desired.contains_key(service_id) {
@@ -175,7 +166,7 @@ fn drive_one_shape_to_convergence(shape: &ShapeFixture) -> Result<(), String> {
 
         // Shape-agnostic convergence (§ 10.1): the loop quiesced AND every
         // desired service has a confirmed Completed row. This holds for
-        // remote-only (Completed{fp(vip,[remote])}), all-mesh / local-only
+        // remote-only (Completed{fp(vip,[remote])}), all-mesh
         // (Completed{fp(vip,[])} via the empty purge), and mixed alike.
         if actions.is_empty() && every_service_has_completed_row(&state) {
             if tick_idx >= shape.max_converge_ticks {
@@ -213,9 +204,9 @@ fn drive_one_shape_to_convergence(shape: &ShapeFixture) -> Result<(), String> {
 pub fn evaluate_hydrator_idempotent_steady_state() -> InvariantResult {
     const NAME: &str = "hydrator-idempotent-steady-state";
 
-    // EACH of the four shapes must emit ZERO actions per tick once
-    // converged (convergence-model.md § 10.2) — the all-mesh and
-    // local-only shapes must NOT re-emit the empty purge once
+    // EACH of the three shapes must emit ZERO actions per tick once
+    // converged (convergence-model.md § 10.2) — the all-mesh
+    // shape must NOT re-emit the empty purge once
     // `Completed{fp(vip,[])}` is observed.
     for shape in shape_fixtures() {
         if let Err(reason) = drive_one_shape_steady_state(&shape) {
@@ -230,11 +221,11 @@ pub fn evaluate_hydrator_idempotent_steady_state() -> InvariantResult {
 /// and assert every tick emits zero actions.
 fn drive_one_shape_steady_state(shape: &ShapeFixture) -> Result<(), String> {
     let any_reconciler =
-        AnyReconciler::ServiceMapHydrator(ServiceMapHydrator::canonical(host_ipv4(), MESH_SUBNET));
+        AnyReconciler::ServiceMapHydrator(ServiceMapHydrator::canonical(MESH_SUBNET));
 
     // Build the converged `actual`: for each service, the Completed row
     // carries `fingerprint(vip, programmed_subset)` — the value the real
-    // shim writes for this shape (the empty purge for all-mesh / local-only,
+    // shim writes for this shape (the empty purge for all-mesh,
     // the remote survivor for remote-only / mixed).
     let mut state = shape.state.clone();
     for (service_id, desired) in &shape.state.desired {
@@ -249,20 +240,7 @@ fn drive_one_shape_steady_state(shape: &ShapeFixture) -> Result<(), String> {
         );
     }
 
-    // Complete the converged precondition for the DECOUPLED local seam
-    // (mechanism L-a, convergence-model.md § 8.3): a converged View must
-    // already carry the last-applied LOCAL fingerprint per service, mirroring
-    // how `actual` above carries the applied PROGRAMMED-remote fingerprint. An
-    // empty `last_applied_local_fingerprint` would (correctly) make the
-    // hydrator's local seam see `local_fingerprint != None` and emit the
-    // tick-0 `RegisterLocalBackend` install — the DESIGNED first-tick behavior,
-    // not a steady-state action. For all-mesh / remote-only shapes
-    // `local_subset` is empty, so `last_applied[sid] = fingerprint(vip, [])`.
     let mut view = ServiceMapHydratorView::default();
-    for (service_id, desired) in &shape.state.desired {
-        let local = local_subset(desired);
-        view.last_applied_local_fingerprint.insert(*service_id, fingerprint(&desired.vip, &local));
-    }
 
     for tick_idx in 0..STEADY_STATE_TICKS {
         let tick = make_tick(tick_idx);
@@ -301,44 +279,21 @@ struct ShapeFixture {
 
 /// The PROGRAMMED-remote subset of a service's backends — the exact set
 /// the emitted `DataplaneUpdateService` carries and the shim hashes back.
-/// Mirrors the hydrator's gate: drop mesh (`∈ workload_subnet`) and LOCAL
-/// (`== host_ipv4`) backends.
+/// Mirrors the hydrator's gate: drop mesh (`∈ workload_subnet`) backends.
 fn programmed_subset(desired: &ServiceDesired) -> Vec<Backend> {
     let subnet = MESH_SUBNET;
-    let host = host_ipv4();
     desired
         .backends
         .iter()
         .filter(|b| match b.addr.ip() {
-            IpAddr::V4(v4) => !subnet.contains(&v4) && v4 != host,
+            IpAddr::V4(v4) => !subnet.contains(&v4),
             IpAddr::V6(_) => true,
         })
         .cloned()
         .collect()
 }
 
-/// The LOCAL survivors of a service's backends — the exact set the
-/// hydrator's `local` arm computes and `RegisterLocalBackend` carries
-/// (mechanism L-a, convergence-model.md § 8.3). Keeps ONLY the LOCAL,
-/// non-mesh V4 backends (`addr.ip() == host_ipv4`); drops mesh
-/// (`∈ workload_subnet`), remote, and V6. For all-mesh / remote-only
-/// shapes the result is empty, so a converged View records
-/// `last_applied_local_fingerprint[sid] = fingerprint(vip, [])` and the
-/// hydrator's decoupled local seam sees no diff on tick 0.
-fn local_subset(desired: &ServiceDesired) -> Vec<Backend> {
-    let host = host_ipv4();
-    desired
-        .backends
-        .iter()
-        .filter(|b| match b.addr.ip() {
-            IpAddr::V4(v4) => v4 == host,
-            IpAddr::V6(_) => false,
-        })
-        .cloned()
-        .collect()
-}
-
-/// The four canonical shapes (convergence-model.md § 10.2). Each is a
+/// The three canonical shapes (convergence-model.md § 10.2). Each is a
 /// single V4-VIP service with one backend in the named address class.
 fn shape_fixtures() -> Vec<ShapeFixture> {
     vec![
@@ -353,8 +308,6 @@ fn shape_fixtures() -> Vec<ShapeFixture> {
             "mixed-mesh-remote",
             &[Ipv4Addr::new(10, 99, 0, 6), Ipv4Addr::new(10, 96, 0, 50)],
         ),
-        // local-only: [host_ipv4] — partitioned LOCAL; empty purge → Completed{fp(vip,[])}.
-        build_shape("local-only", &[host_ipv4()]),
     ]
 }
 
@@ -582,7 +535,6 @@ mod retry_budget_proptest {
             now_delta in 0u64..backoff_for_attempt(0).as_secs(),
         ) {
             let r = ServiceMapHydrator::canonical(
-                std::net::Ipv4Addr::UNSPECIFIED,
                 overdrive_control_plane::veth_provisioner::WORKLOAD_SUBNET_BASE,
             );
             let s_id = ServiceId::new(1).expect("valid ServiceId");
@@ -661,7 +613,6 @@ mod retry_budget_proptest {
             extra_secs in 0u64..=60u64,
         ) {
             let r = ServiceMapHydrator::canonical(
-                std::net::Ipv4Addr::UNSPECIFIED,
                 overdrive_control_plane::veth_provisioner::WORKLOAD_SUBNET_BASE,
             );
             let s_id = ServiceId::new(1).expect("valid ServiceId");

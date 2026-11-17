@@ -595,44 +595,6 @@ pub enum Action {
         target: TargetResource,
     },
 
-    /// Register the local backend for `(vip, vip_port, proto)`.
-    RegisterLocalBackend {
-        /// Identity of the service.
-        service_id: crate::id::ServiceId,
-        /// Virtual IP.
-        vip: std::net::Ipv4Addr,
-        /// VIP port the listener accepts on.
-        vip_port: u16,
-        /// L4 protocol the listener serves (ADR-0053 rev Amendment 3).
-        /// Sourced from the listener-bearing fact, NEVER defaulted to
-        /// `Tcp` (C3) — a service co-locating tcp/53 + udp/53 emits
-        /// two `RegisterLocalBackend` with distinct proto.
-        proto: crate::dataplane::backend_key::Proto,
-        /// Resolved local backend `(IPv4, port)`.
-        backend: std::net::SocketAddrV4,
-        /// Cause-to-response linkage.
-        correlation: CorrelationKey,
-    },
-
-    /// Deregister the local backend for `(vip, vip_port, proto)`.
-    DeregisterLocalBackend {
-        /// Identity of the service.
-        service_id: crate::id::ServiceId,
-        /// VIP whose entry to remove.
-        vip: std::net::Ipv4Addr,
-        /// VIP port whose entry to remove.
-        vip_port: u16,
-        /// L4 protocol whose entry to remove (ADR-0053 rev Amendment 3).
-        proto: crate::dataplane::backend_key::Proto,
-        /// Resolved local backend `(IPv4, port)` whose reverse entry to
-        /// remove. Caller-supplied so the reverse removal is retry-safe —
-        /// it does not depend on a since-removed forward entry (GH #211).
-        /// Mirrors `RegisterLocalBackend::backend`.
-        backend: std::net::SocketAddrV4,
-        /// Cause-to-response linkage.
-        correlation: CorrelationKey,
-    },
-
     /// Issue, re-issue, or ROTATE a workload SVID for a Running allocation
     /// (ADR-0067 D2; feature-delta D-OC-1). Emitted by the pure
     /// `SvidLifecycle` reconciler on two branches: `running ∧ ¬held`
