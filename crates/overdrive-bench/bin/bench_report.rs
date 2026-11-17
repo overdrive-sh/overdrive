@@ -1,14 +1,19 @@
 //! `bench-report validate|render <record>`: host-independent (DDD-1, DDD-6).
 //!
 //! Exit statuses: 0 success, 64 usage, 65 invalid record, 70 the record is unreadable.
-//! `render` validates the record; the report itself is not rendered yet.
+//! `render` validates the record, then prints the report to stdout.
 
-#![allow(clippy::print_stderr, reason = "the CLI reports its own refusals on stderr")]
+#![allow(
+    clippy::print_stderr,
+    clippy::print_stdout,
+    reason = "the CLI reports its refusals on stderr and the report on stdout"
+)]
 
 use std::path::PathBuf;
 use std::process::ExitCode;
 
 use overdrive_bench::record::validate;
+use overdrive_bench::report::render;
 use overdrive_bench::{Error, Result};
 
 const USAGE: &str = "bench-report validate <record> | bench-report render <record>";
@@ -36,7 +41,11 @@ fn run(arguments: &[String]) -> Result<()> {
     };
     let path = PathBuf::from(path);
     let text = std::fs::read_to_string(&path).map_err(|source| Error::Record { path, source })?;
-    validate(&text)
+    if subcommand == "validate" {
+        return validate(&text);
+    }
+    print!("{}", render(&text)?);
+    Ok(())
 }
 
 const fn usage(reason: String) -> Error {

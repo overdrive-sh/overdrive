@@ -28,7 +28,6 @@ fn number(cell: &str, what: &str) -> f64 {
 /// failure count in the scalar table. US-BENCH-01 AC (a).
 /// CONTRACT_SHAPE: pure-function (record in, report out).
 #[test]
-#[should_panic(expected = "the report must have a section for `Table: t`")]
 fn the_report_shows_median_iqr_and_replicate_count_per_arm() {
     let reference: Vec<f64> = (1..=9).map(|i| f64::from(i) * 1000.0).collect();
     let report = report_of(&two_arm(&reference, &shifted(&reference, 500.0), &reference));
@@ -60,7 +59,6 @@ fn the_report_shows_median_iqr_and_replicate_count_per_arm() {
 /// the replicate counts and the status.
 /// CONTRACT_SHAPE: pure-function (record in, report out).
 #[test]
-#[should_panic(expected = "the report must start with the pinned title")]
 fn the_report_header_carries_the_run_provenance_and_host_state() {
     let report = report_of(&two_arm(&tight(), &shifted(&tight(), 500.0), &tight()));
     assert!(
@@ -106,7 +104,6 @@ fn the_report_header_carries_the_run_provenance_and_host_state() {
 /// `{ "unreadable": e }`.
 /// CONTRACT_SHAPE: pure-function (record in, report out).
 #[test]
-#[should_panic(expected = "the report header must have the line `- irq_time_accounting: ...`")]
 fn an_absent_or_unreadable_host_setting_prints_its_reason_in_the_header() {
     let mut lines = two_arm(&tight(), &shifted(&tight(), 500.0), &tight());
     lines[0]["host"]["irq_time_accounting"] =
@@ -129,7 +126,6 @@ fn an_absent_or_unreadable_host_setting_prints_its_reason_in_the_header() {
 /// US-BENCH-03 AC (e).
 /// CONTRACT_SHAPE: pure-function (record in, report out).
 #[test]
-#[should_panic(expected = "the report header must have the line `- bpf stats: ...`")]
 fn a_run_without_statistics_reports_them_off() {
     let mut lines = two_arm(&tight(), &shifted(&tight(), 500.0), &tight());
     set(&mut lines, 0, "bpf_stats", json!("off"));
@@ -142,7 +138,6 @@ fn a_run_without_statistics_reports_them_off() {
 /// US-BENCH-02 AC (b). Contract: DDD-5 verdict rule, DDD-6 comparison columns.
 /// CONTRACT_SHAPE: pure-function (record in, report out).
 #[test]
-#[should_panic(expected = "the report must have a section for `Table: t`")]
 fn a_clear_difference_is_reported_with_its_intervals_and_a_distinguishable_verdict() {
     let reference = tight();
     let control: Vec<f64> = reference.iter().rev().copied().collect();
@@ -174,7 +169,6 @@ fn a_clear_difference_is_reported_with_its_intervals_and_a_distinguishable_verdi
 /// US-BENCH-02 AC (c). Fault stimulus: a +1 ns delta over a 9 ns spread.
 /// CONTRACT_SHAPE: pure-function (record in, report out).
 #[test]
-#[should_panic(expected = "the report must have a section for `Table: t`")]
 fn a_difference_inside_the_noise_floor_is_labelled_not_distinguishable_from_noise() {
     let reference = tight();
     let control: Vec<f64> = reference.iter().rev().copied().collect();
@@ -193,7 +187,6 @@ fn a_difference_inside_the_noise_floor_is_labelled_not_distinguishable_from_nois
 /// control replicate.
 /// CONTRACT_SHAPE: pure-function (record in, report out).
 #[test]
-#[should_panic(expected = "the report must have a section for `Table: t`")]
 fn an_arm_with_fewer_than_nine_successes_is_reported_as_insufficient_replicates() {
     // Lines: run_started, canary, then three per block: reference, alternative, control.
     for (what, failed_indices, alt_ok) in [
@@ -225,7 +218,6 @@ fn an_arm_with_fewer_than_nine_successes_is_reported_as_insufficient_replicates(
 /// US-BENCH-01 AC (b).
 /// CONTRACT_SHAPE: pure-function (record in, report out).
 #[test]
-#[should_panic(expected = "the report must have a section for `Failures`")]
 fn a_failed_replicate_is_listed_with_its_arm_and_the_rest_are_reported() {
     let reference: Vec<f64> = (0..10).map(|i| 1000.0 + f64::from(i)).collect();
     let mut lines = two_arm(&reference, &shifted(&reference, 500.0), &reference);
@@ -258,7 +250,6 @@ fn a_failed_replicate_is_listed_with_its_arm_and_the_rest_are_reported() {
 /// DDD-6 report items 3 and 6. Fault stimulus: a recorded metric failure.
 /// CONTRACT_SHAPE: pure-function (record in, report out).
 #[test]
-#[should_panic(expected = "the report must have a section for `Failures`")]
 fn a_failed_metric_is_listed_with_its_arm_and_metric_and_reason() {
     let mut lines = two_arm(&tight(), &shifted(&tight(), 500.0), &tight());
     set_metrics(&mut lines, 3, json!({ "m": failure_entry("connect refused") })); // block 0, position 1, the alt arm
@@ -280,7 +271,6 @@ fn a_failed_metric_is_listed_with_its_arm_and_metric_and_reason() {
 /// naming both medians; the report still carries every arm. US-BENCH-02 AC (e).
 /// CONTRACT_SHAPE: pure-function (record in, report out).
 #[test]
-#[should_panic(expected = "the report header must have the line `- canary: ...`")]
 fn a_shifting_canary_flags_the_run_unstable() {
     let mut lines = two_arm(&tight(), &shifted(&tight(), 500.0), &tight());
     let end = lines.len() - 2;
@@ -297,7 +287,6 @@ fn a_shifting_canary_flags_the_run_unstable() {
 /// A steady canary does not.
 /// CONTRACT_SHAPE: pure-function (record in, report out).
 #[test]
-#[should_panic(expected = "the report header must have the line `- canary: ...`")]
 fn a_steady_canary_does_not_flag_the_run() {
     let report = report_of(&two_arm(&tight(), &shifted(&tight(), 500.0), &tight()));
     assert_eq!(header(&report, "canary"), "steady");
@@ -309,7 +298,6 @@ fn a_steady_canary_does_not_flag_the_run() {
 /// US-BENCH-02 AC (f).
 /// CONTRACT_SHAPE: pure-function (record in, report out).
 #[test]
-#[should_panic(expected = "the report must have a section for `Table: t`")]
 fn the_spike_reference_is_shown_beside_the_measurement_labelled_as_a_different_run() {
     let mut lines = two_arm(&tight(), &shifted(&tight(), 500.0), &tight());
     lines[0]["declaration"]["references"] = json!([{
@@ -328,7 +316,6 @@ fn the_spike_reference_is_shown_beside_the_measurement_labelled_as_a_different_r
 /// US-BENCH-04 AC (a).
 /// CONTRACT_SHAPE: pure-function (record in, report out).
 #[test]
-#[should_panic(expected = "the report header must have the line `- evidence: ...`")]
 fn a_spike_record_is_labelled_spike_evidence_and_a_maintained_one_is_not() {
     let mut spike = two_arm(&tight(), &shifted(&tight(), 500.0), &tight());
     set(&mut spike, 0, "evidence", json!("spike"));
@@ -348,7 +335,6 @@ fn a_spike_record_is_labelled_spike_evidence_and_a_maintained_one_is_not() {
 /// US-BENCH-03 AC (d).
 /// CONTRACT_SHAPE: pure-function (record in, report out).
 #[test]
-#[should_panic(expected = "the report header must have the line `- status: ...`")]
 fn a_record_without_run_finished_is_reported_incomplete() {
     let mut lines = two_arm(&tight(), &shifted(&tight(), 500.0), &tight());
     lines.truncate(8); // run_started, the start canary and six replicates
@@ -382,7 +368,6 @@ fn a_record_without_run_finished_is_reported_incomplete() {
 /// unreadable). DDD-7.
 /// CONTRACT_SHAPE: pure-function (record in, report out).
 #[test]
-#[should_panic(expected = "the report header must have the line `- refused: ...`")]
 fn a_refused_run_names_the_setting_with_its_found_and_pinned_values() {
     for (line, expected) in [
         (refusal("bpf_stats_enabled", "1", "0"), "bpf_stats_enabled found 1 pinned 0"),
@@ -423,7 +408,6 @@ fn a_refused_run_names_the_setting_with_its_found_and_pinned_values() {
 /// Fault stimulus: the probe's own self-check fails before any setting is read.
 /// CONTRACT_SHAPE: pure-function (record in, report out).
 #[test]
-#[should_panic(expected = "the report header must have the line `- refused: ...`")]
 fn a_failed_host_probe_refuses_with_every_host_key_unreadable() {
     let probe_error = "cannot read /proc/self/stat: permission denied";
     let mut started = refused_start(&["ref", "alt"]);
@@ -475,7 +459,6 @@ fn a_failed_host_probe_refuses_with_every_host_key_unreadable() {
 /// absent) and an unreadable recorded-only setting.
 /// CONTRACT_SHAPE: pure-function (record in, report out).
 #[test]
-#[should_panic(expected = "the report header must have the line `- kernel: ...`")]
 fn a_refused_run_reports_the_full_host_block_no_statistics_no_canary_and_no_replicates() {
     let mut started = refused_start(&["ref", "alt"]);
     started["host"]["governor"] = json!({ "absent": "no cpufreq directory" });
@@ -507,7 +490,6 @@ fn a_refused_run_reports_the_full_host_block_no_statistics_no_canary_and_no_repl
 /// never a zero there; its `replicates` is 0. US-BENCH-06 AC (c), US-BENCH-09 AC (d).
 /// CONTRACT_SHAPE: pure-function (record in, report out).
 #[test]
-#[should_panic(expected = "the report must have a section for `Table: t`")]
 fn an_absent_metric_prints_its_reason_and_never_a_zero() {
     let mut lines = two_arm(&tight(), &shifted(&tight(), 500.0), &tight());
     for block in 0..9 {
@@ -530,7 +512,6 @@ fn an_absent_metric_prints_its_reason_and_never_a_zero() {
 /// no value.
 /// CONTRACT_SHAPE: pure-function (record in, report out).
 #[test]
-#[should_panic(expected = "the report must have a section for `Table: t`")]
 fn a_metric_with_no_stored_value_in_a_compared_arm_has_no_comparison_row() {
     let mut lines = two_arm(&tight(), &shifted(&tight(), 500.0), &tight());
     lines[0]["declaration"]["metrics"] = json!([
@@ -585,7 +566,6 @@ fn a_metric_with_no_stored_value_in_a_compared_arm_has_no_comparison_row() {
 /// histogram. DDD-5, DDD-6 item 3.
 /// CONTRACT_SHAPE: pure-function (record in, report out).
 #[test]
-#[should_panic(expected = "the report must have a section for `Table: t`")]
 fn a_series_stored_as_a_histogram_renders_percentiles_within_the_stated_error_and_says_so() {
     let above_one: Vec<f64> = (1..=2000).map(f64::from).collect();
     let below_one: Vec<f64> = (1..=2000).map(|i| f64::from(i) / 4000.0).collect();
@@ -653,7 +633,6 @@ fn a_series_stored_as_a_histogram_renders_percentiles_within_the_stated_error_an
 /// A one-arm record with a single replicate holds the pooled values exactly. DDD-5.
 /// CONTRACT_SHAPE: pure-function (record in, report out).
 #[test]
-#[should_panic(expected = "the report must have a section for `Table: t`")]
 fn series_percentiles_use_linear_interpolation_between_closest_ranks() {
     let series: Vec<f64> = (1..=10).map(f64::from).collect();
     let report = report_of(&one_arm_series_record(values_entry(&series)));
@@ -675,7 +654,6 @@ fn series_percentiles_use_linear_interpolation_between_closest_ranks() {
 /// DDD-2 (`series` marker), DDD-6 report item 3.
 /// CONTRACT_SHAPE: pure-function (record in, report out).
 #[test]
-#[should_panic(expected = "the report must have a section for `Table: t`")]
 fn the_series_marker_alone_selects_the_series_columns() {
     let mut lines = vec![run_started(&["only"]), canary("start", 1000.0)];
     lines[0]["declaration"] = declaration(
@@ -708,7 +686,6 @@ fn the_series_marker_alone_selects_the_series_columns() {
 /// separate tables and neither is a column of the other. US-BENCH-07 AC (a).
 /// CONTRACT_SHAPE: pure-function (record in, report out).
 #[test]
-#[should_panic(expected = "the report must have a section for `Table: client-observed`")]
 fn metrics_are_reported_in_separate_tables_by_their_declared_label() {
     let mut lines = two_arm(&tight(), &shifted(&tight(), 500.0), &tight());
     lines[0]["declaration"]["metrics"] = json!([
@@ -740,7 +717,6 @@ fn metrics_are_reported_in_separate_tables_by_their_declared_label() {
 /// Fault stimulus: a failed replicate holding an extreme partial value.
 /// CONTRACT_SHAPE: pure-function (record in, report out).
 #[test]
-#[should_panic(expected = "the report must have a section for `Table: t`")]
 fn only_ok_replicates_feed_the_statistics() {
     let reference: Vec<f64> = (0..10).map(|i| 1000.0 + f64::from(i)).collect();
     let mut lines = two_arm(&reference, &shifted(&reference, 500.0), &reference);
@@ -787,7 +763,6 @@ fn only_ok_replicates_feed_the_statistics() {
 /// never modifies the record. ADR-0301 (nothing derived is stored).
 /// CONTRACT_SHAPE: unbounded-preservation (the record file is unchanged).
 #[test]
-#[should_panic(expected = "must give identical, non-empty reports")]
 fn rendering_the_same_record_twice_is_byte_identical_and_leaves_the_record_untouched() {
     let d = dir();
     let path = write(d.path(), "r.jsonl", &two_arm(&tight(), &shifted(&tight(), 500.0), &tight()));
@@ -811,7 +786,6 @@ fn rendering_the_same_record_twice_is_byte_identical_and_leaves_the_record_untou
 /// Edge: arm cardinality 1. DDD-5 ("none for one arm"), DDD-6 report item 4.
 /// CONTRACT_SHAPE: pure-function (record in, report out).
 #[test]
-#[should_panic(expected = "the report must have a section for `Table: t`")]
 fn a_one_arm_benchmark_reports_a_distribution_and_no_comparison() {
     let mut lines = vec![run_started(&["lifecycle"]), canary("start", 1000.0)];
     for (block, value) in tight().iter().enumerate() {

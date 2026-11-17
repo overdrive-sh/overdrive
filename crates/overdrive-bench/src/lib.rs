@@ -26,8 +26,11 @@
 
 use std::process::ExitCode;
 
+mod canary;
 mod histogram;
 pub mod record;
+pub mod report;
+mod stats;
 
 #[cfg(test)]
 use overdrive_testing::overdrive_test_default;

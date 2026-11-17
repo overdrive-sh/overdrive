@@ -2274,6 +2274,7 @@ dependencies = [
  "overdrive-testing",
  "overdrive-testing-macros",
  "proptest",
+ "rand 0.8.6",
  "serde",
  "serde_json",
  "serial_test",

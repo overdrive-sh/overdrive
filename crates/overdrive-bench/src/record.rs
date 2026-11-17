@@ -17,7 +17,7 @@ use crate::{Error, Result};
 const SCHEMA_VERSION: u32 = 1;
 const METHODOLOGY_VERSION: u32 = 1;
 
-const HOST_KEYS: [&str; 9] = [
+pub(crate) const HOST_KEYS: [&str; 9] = [
     "kernel",
     "cpu_model",
     "cpu_count",
@@ -32,18 +32,24 @@ const HOST_KEYS: [&str; 9] = [
 /// Check a whole record: the typed schema of every line, then the semantic rules and the
 /// line order. A violation names its 1-based line and the offending field or name.
 pub fn validate(text: &str) -> Result<()> {
+    parse(text).map(drop)
+}
+
+/// The lines of a record that passed [`validate`], in order.
+pub(crate) fn parse(text: &str) -> Result<Vec<Line>> {
     let mut checker = Checker::Fresh;
-    let mut last = 0;
+    let mut lines = Vec::new();
     for (index, raw) in text.lines().enumerate() {
-        last = index + 1;
+        let number = index + 1;
         let line: Line =
-            serde_json::from_str(raw).map_err(|source| invalid(last, parse_reason(&source)))?;
-        checker.accept(&line).map_err(|reason| invalid(last, reason))?;
+            serde_json::from_str(raw).map_err(|source| invalid(number, parse_reason(&source)))?;
+        checker.accept(&line).map_err(|reason| invalid(number, reason))?;
+        lines.push(line);
     }
-    if last == 0 {
+    if lines.is_empty() {
         return Err(invalid(1, "the record is empty; it must begin with run_started".to_owned()));
     }
-    Ok(())
+    Ok(lines)
 }
 
 fn invalid(line: usize, reason: String) -> Error {
@@ -95,6 +101,14 @@ pub(crate) enum Substrate {
     Native,
 }
 
+impl Substrate {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Native => "native",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum BpfStatsMode {
@@ -106,6 +120,14 @@ pub(crate) enum BpfStatsMode {
 pub(crate) enum ClockSource {
     #[serde(rename = "CLOCK_MONOTONIC_RAW")]
     MonotonicRaw,
+}
+
+impl ClockSource {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::MonotonicRaw => "CLOCK_MONOTONIC_RAW",
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -181,6 +203,19 @@ pub(crate) enum Unit {
     Qps,
     Ratio,
     Count,
+}
+
+impl Unit {
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Ns => "ns",
+            Self::Bytes => "bytes",
+            Self::BytesPerSecond => "bytes_per_second",
+            Self::Qps => "qps",
+            Self::Ratio => "ratio",
+            Self::Count => "count",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
