@@ -42,7 +42,48 @@ pub struct BenchmarkDecl {
     #[doc(hidden)]
     pub references: &'static [ReferenceDecl],
     #[doc(hidden)]
+    pub service_clock: Option<ServiceClock>,
+    #[doc(hidden)]
+    pub guest_clock: Option<GuestClock>,
+    #[doc(hidden)]
     pub run: fn(&mut Replicate) -> Result<(), ReplicateFailure>,
+}
+
+/// The service clock source a benchmark declares (DDD-2 "Clock sources").
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ServiceClock {
+    /// Service time read on the injected `Clock::now()` (`injected_monotonic`).
+    InjectedMonotonic,
+}
+
+impl ServiceClock {
+    /// The string the record carries in `clock.service`.
+    #[doc(hidden)]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::InjectedMonotonic => "Clock::now (monotonic)",
+        }
+    }
+}
+
+/// The guest clock source a benchmark declares (DDD-2 "Clock sources").
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GuestClock {
+    /// A duration `overdrive-init` measured with `Instant::elapsed`, to the millisecond
+    /// (`init_elapsed_ms`).
+    InitElapsedMs,
+}
+
+impl GuestClock {
+    /// The string the record carries in `clock.guest`.
+    #[doc(hidden)]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::InitElapsedMs => "CLOCK_MONOTONIC (overdrive-init Instant::elapsed, 1 ms)",
+        }
+    }
 }
 
 /// A declared profile.
@@ -256,6 +297,8 @@ mod tests {
             metrics: &[],
             bpf_stats: false,
             references: &[],
+            service_clock: None,
+            guest_clock: None,
             run: ignore,
         }
     }

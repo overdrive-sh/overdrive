@@ -15,6 +15,7 @@ use crate::record::{
     BpfStatsMode, Canary, CanaryPhase, EvidenceClass, HOST_KEYS, HostValue, Line, MetricDecl,
     MetricEntry, Outcome, ProfileDecl, ReplicateLine, Role, RunRefused, RunStarted, parse,
 };
+use crate::registry::{GuestClock, ServiceClock};
 use crate::stats::{
     Comparison, Distribution, FIRST_QUARTILE, MEDIAN, Pool, THIRD_QUARTILE, compare, percentile,
     sorted,
@@ -538,13 +539,9 @@ const fn evidence_text(evidence: EvidenceClass) -> &'static str {
 }
 
 fn clock_text(started: &RunStarted) -> String {
-    let named = |source: &Option<String>| source.clone().unwrap_or_else(|| "none".to_owned());
-    format!(
-        "host {}; service {}; guest {}",
-        started.clock.host.as_str(),
-        named(&started.clock.service),
-        named(&started.clock.guest)
-    )
+    let service = started.clock.service.map_or("none", ServiceClock::as_str);
+    let guest = started.clock.guest.map_or("none", GuestClock::as_str);
+    format!("host {}; service {service}; guest {guest}", started.clock.host.as_str())
 }
 
 const fn status_text(terminal: &Terminal) -> &'static str {

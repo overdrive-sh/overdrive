@@ -24,9 +24,15 @@ const MINIMUM_REPLICATES: u32 = 9;
 /// The metric units a declaration may name.
 const UNITS: [&str; 6] = ["ns", "bytes", "bytes_per_second", "qps", "ratio", "count"];
 
+/// The service clock sources a declaration may name, with the `ServiceClock` variant each emits.
+const SERVICE_CLOCKS: [(&str, &str); 1] = [("injected_monotonic", "InjectedMonotonic")];
+
+/// The guest clock sources a declaration may name, with the `GuestClock` variant each emits.
+const GUEST_CLOCKS: [(&str, &str); 1] = [("init_elapsed_ms", "InitElapsedMs")];
+
 /// The top-level keys, in the order the unknown-key message lists them.
 const KEYS: &str =
-    "family, substrate, arms, replicates, profile, metric, bpf_stats, reference, smoke";
+    "family, substrate, arms, replicates, profile, metric, bpf_stats, reference, clock, smoke";
 
 const SMOKE_HINT: &str =
     "give smoke(host_pure), smoke(guest = \"<group>\") or, in a spike, smoke(none)";
@@ -150,6 +156,13 @@ struct Reference {
     source: LitStr,
 }
 
+/// The declared clock sources: the `ServiceClock` and `GuestClock` variant names, each `None`
+/// when its sub-key is omitted.
+struct Clock {
+    service: Option<&'static str>,
+    guest: Option<&'static str>,
+}
+
 enum Smoke {
     HostPure,
     Guest { group: LitStr, profile: Option<LitStr> },
@@ -165,6 +178,7 @@ struct Declaration {
     metrics: Vec<Metric>,
     bpf_stats: bool,
     references: Vec<Reference>,
+    clock: Clock,
     smoke: Smoke,
 }
 
@@ -182,6 +196,7 @@ impl Declaration {
         let mut metrics = Vec::new();
         let mut bpf_stats = None;
         let mut references = Vec::new();
+        let mut clock = None;
         let mut smoke = None;
         for entry in entries(attribute)? {
             match entry.name().as_str() {
@@ -198,6 +213,7 @@ impl Declaration {
                     once(&mut bpf_stats, &entry, true)?;
                 }
                 "reference" => references.push(parse_reference(&entry)?),
+                "clock" => once(&mut clock, &entry, parse_clock(&entry)?)?,
                 "smoke" => once(&mut smoke, &entry, parse_smoke(&entry)?)?,
                 _ => {
                     return Err(syn::Error::new(
@@ -222,6 +238,7 @@ impl Declaration {
             metrics,
             bpf_stats: bpf_stats.unwrap_or(false),
             references,
+            clock: clock.unwrap_or(Clock { service: None, guest: None }),
             smoke: smoke.ok_or_else(|| {
                 syn::Error::new(
                     Span::call_site(),
@@ -417,6 +434,55 @@ fn parse_reference(entry: &Entry) -> syn::Result<Reference> {
     })
 }
 
+/// The variant name of the source `entry` names, from the closed `sources` of `kind`.
+fn parse_source(
+    entry: &Entry,
+    kind: &str,
+    sources: &[(&str, &'static str)],
+) -> syn::Result<&'static str> {
+    let first = sources.first().map_or("", |(identifier, _)| identifier);
+    let what = format!("an identifier such as `{first}`");
+    let expression = entry.expression(&what)?;
+    if string_literal(expression).is_some() {
+        return Err(syn::Error::new(
+            expression.span(),
+            format!("key `clock`: expected {what}, found a string literal"),
+        ));
+    }
+    let (name, span) = match expression {
+        Expr::Path(path) if path.qself.is_none() => match path.path.get_ident() {
+            Some(ident) => (ident.unraw().to_string(), ident.span()),
+            None => return Err(expected(expression.span(), "clock", &what)),
+        },
+        _ => return Err(expected(expression.span(), "clock", &what)),
+    };
+    if let Some((_, variant)) = sources.iter().find(|(identifier, _)| *identifier == name) {
+        return Ok(variant);
+    }
+    let set: Vec<&str> = sources.iter().map(|(identifier, _)| *identifier).collect();
+    Err(syn::Error::new(
+        span,
+        format!("{kind} clock source `{name}` is not one of {}", set.join(", ")),
+    ))
+}
+
+fn parse_clock(entry: &Entry) -> syn::Result<Clock> {
+    let what = "service = <source> and/or guest = <source>";
+    let entries = group_entries(entry, what, &["service", "guest"])?;
+    if entries.is_empty() {
+        return Err(expected(entry.key.span(), "clock", what));
+    }
+    let mut service = None;
+    let mut guest = None;
+    for sub in &entries {
+        match sub.name().as_str() {
+            "service" => once(&mut service, sub, parse_source(sub, "service", &SERVICE_CLOCKS)?)?,
+            _ => once(&mut guest, sub, parse_source(sub, "guest", &GUEST_CLOCKS)?)?,
+        }
+    }
+    Ok(Clock { service, guest })
+}
+
 fn parse_smoke(entry: &Entry) -> syn::Result<Smoke> {
     let what = "host_pure, guest = \"<group>\" [, profile = \"<profile>\"] or none";
     let entries = entries(entry.group(what)?)?;
@@ -501,6 +567,20 @@ impl Declaration {
                 }
             }
         });
+        let service_clock = self.clock.service.map_or_else(
+            || quote!(::core::option::Option::None),
+            |variant| {
+                let variant = format_ident!("{variant}");
+                quote!(::core::option::Option::Some(::overdrive_bench::registry::ServiceClock::#variant))
+            },
+        );
+        let guest_clock = self.clock.guest.map_or_else(
+            || quote!(::core::option::Option::None),
+            |variant| {
+                let variant = format_ident!("{variant}");
+                quote!(::core::option::Option::Some(::overdrive_bench::registry::GuestClock::#variant))
+            },
+        );
         quote! {
             #[::overdrive_bench::registry::linkme::distributed_slice(::overdrive_bench::registry::BENCHMARKS)]
             #[linkme(crate = ::overdrive_bench::registry::linkme)]
@@ -514,6 +594,8 @@ impl Declaration {
                 metrics: &[#(#metrics),*],
                 bpf_stats: #bpf_stats,
                 references: &[#(#references),*],
+                service_clock: #service_clock,
+                guest_clock: #guest_clock,
                 run: #function,
             };
         }

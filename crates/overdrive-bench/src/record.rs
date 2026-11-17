@@ -12,6 +12,7 @@ use serde::de::Error as _;
 use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::histogram::{Histogram, NotStorable, RAW_VALUE_LIMIT, storable};
+use crate::registry::{GuestClock, ServiceClock};
 use crate::{Error, Result};
 
 pub(crate) const SCHEMA_VERSION: u32 = 1;
@@ -134,10 +135,69 @@ impl ClockSource {
 #[serde(deny_unknown_fields)]
 pub(crate) struct Clock {
     pub(crate) host: ClockSource,
-    #[serde(deserialize_with = "nullable")]
-    pub(crate) service: Option<String>,
-    #[serde(deserialize_with = "nullable")]
-    pub(crate) guest: Option<String>,
+    #[serde(deserialize_with = "service_clock", serialize_with = "serialize_service_clock")]
+    pub(crate) service: Option<ServiceClock>,
+    #[serde(deserialize_with = "guest_clock", serialize_with = "serialize_guest_clock")]
+    pub(crate) guest: Option<GuestClock>,
+}
+
+/// Read a clock source that is `null` or the one string of a closed vocabulary; any other
+/// string is refused naming the `field`.
+fn closed_clock<'de, D, T>(
+    deserializer: D,
+    field: &str,
+    vocabulary: &[(&'static str, T)],
+) -> std::result::Result<Option<T>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Copy,
+{
+    let Some(text) = nullable::<D, String>(deserializer)? else {
+        return Ok(None);
+    };
+    if let Some((_, source)) = vocabulary.iter().find(|(pinned, _)| *pinned == text) {
+        return Ok(Some(*source));
+    }
+    let pinned: Vec<String> = vocabulary.iter().map(|(pinned, _)| format!("`{pinned}`")).collect();
+    Err(D::Error::custom(format!("{field} `{text}` is not null or {}", pinned.join(" or "))))
+}
+
+fn service_clock<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> std::result::Result<Option<ServiceClock>, D::Error> {
+    let source = ServiceClock::InjectedMonotonic;
+    closed_clock(deserializer, "clock.service", &[(source.as_str(), source)])
+}
+
+fn guest_clock<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> std::result::Result<Option<GuestClock>, D::Error> {
+    let source = GuestClock::InitElapsedMs;
+    closed_clock(deserializer, "clock.guest", &[(source.as_str(), source)])
+}
+
+#[allow(
+    clippy::ref_option,
+    clippy::trivially_copy_pass_by_ref,
+    reason = "the signature serde's `serialize_with` calls"
+)]
+fn serialize_service_clock<S: serde::Serializer>(
+    source: &Option<ServiceClock>,
+    serializer: S,
+) -> std::result::Result<S::Ok, S::Error> {
+    serializer.serialize_some(&source.map(ServiceClock::as_str))
+}
+
+#[allow(
+    clippy::ref_option,
+    clippy::trivially_copy_pass_by_ref,
+    reason = "the signature serde's `serialize_with` calls"
+)]
+fn serialize_guest_clock<S: serde::Serializer>(
+    source: &Option<GuestClock>,
+    serializer: S,
+) -> std::result::Result<S::Ok, S::Error> {
+    serializer.serialize_some(&source.map(GuestClock::as_str))
 }
 
 /// One value of the `host` block: a string, an absent source, or an unreadable one.

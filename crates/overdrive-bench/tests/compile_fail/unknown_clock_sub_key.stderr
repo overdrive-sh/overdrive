@@ -1,0 +1,5 @@
+error: unknown key `turbo` in `clock(...)`; the keys are service, guest
+  --> tests/compile_fail/unknown_clock_sub_key.rs:10:11
+   |
+10 |     clock(turbo = injected_monotonic),
+   |           ^^^^^

@@ -42,6 +42,8 @@ enable held by another process.
 Every instant that crosses a boundary is stamped on the host with `CLOCK_MONOTONIC_RAW`. A
 stage that happens inside a guest is a duration the guest measured; it is never added to or
 subtracted from a host instant, and a stage the guest cannot report is recorded as absent.
+A family declares its service and guest clock sources, and the record names them in its `clock`
+block (`null` for a source the family does not use).
 Each family's catalogue row names its clock boundary: what the first and last stamp of a
 measured interval are. BPF program time is the kernel's per-program `run_time_ns` over
 `run_count`, reported as a separate metric from wall time and never mixed with it.

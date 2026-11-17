@@ -432,7 +432,11 @@ impl Start<'_> {
             seed: self.environment.seed,
             started: now(),
             host: Host(self.host.clone()),
-            clock: Clock { host: ClockSource::MonotonicRaw, service: None, guest: None },
+            clock: Clock {
+                host: ClockSource::MonotonicRaw,
+                service: self.decl.service_clock,
+                guest: self.decl.guest_clock,
+            },
             bpf_stats,
             declaration: declaration(self.decl),
         }
@@ -596,6 +600,8 @@ mod tests {
             metrics: &METRICS,
             bpf_stats,
             references: &[],
+            service_clock: None,
+            guest_clock: None,
             run: body,
         }
     }
@@ -788,6 +794,37 @@ mod tests {
         let report = outcome.sink.report.borrow().clone().expect("report written");
         assert!(report.contains("- status: finished"), "{report}");
         drop(dir);
+    }
+
+    #[test]
+    fn run_started_names_the_declared_clock_sources_and_null_for_an_omitted_one() {
+        let cases = [
+            (None, None, serde_json::Value::Null, serde_json::Value::Null),
+            (
+                Some(registry::ServiceClock::InjectedMonotonic),
+                None,
+                serde_json::json!("Clock::now (monotonic)"),
+                serde_json::Value::Null,
+            ),
+            (
+                None,
+                Some(registry::GuestClock::InitElapsedMs),
+                serde_json::Value::Null,
+                serde_json::json!("CLOCK_MONOTONIC (overdrive-init Instant::elapsed, 1 ms)"),
+            ),
+        ];
+        for (service, guest, expected_service, expected_guest) in cases {
+            let mut decl = decl(&["fast", "slow"], false);
+            decl.service_clock = service;
+            decl.guest_clock = guest;
+            let (outcome, _dir) = run(&decl, &Fixture::eligible());
+            outcome.result.expect("the run finishes");
+            validate(&outcome.sink.record()).expect("the record validates");
+            let clock = &outcome.sink.lines()[0]["clock"];
+            assert_eq!(clock["host"], "CLOCK_MONOTONIC_RAW");
+            assert_eq!(clock["service"], expected_service);
+            assert_eq!(clock["guest"], expected_guest);
+        }
     }
 
     #[test]

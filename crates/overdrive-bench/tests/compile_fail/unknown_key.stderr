@@ -1,4 +1,4 @@
-error: unknown key `turbo` in `#[overdrive_bench(...)]`; the keys are family, substrate, arms, replicates, profile, metric, bpf_stats, reference, smoke
+error: unknown key `turbo` in `#[overdrive_bench(...)]`; the keys are family, substrate, arms, replicates, profile, metric, bpf_stats, reference, clock, smoke
  --> tests/compile_fail/unknown_key.rs:6:5
   |
 6 |     turbo = true,

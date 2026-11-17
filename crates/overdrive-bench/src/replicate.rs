@@ -380,6 +380,8 @@ mod tests {
             metrics: &METRICS,
             bpf_stats: true,
             references: &[],
+            service_clock: None,
+            guest_clock: None,
             run,
         }
     }

@@ -89,6 +89,7 @@ const STAGE_METRICS: [&str; 8] = [
     metric(name = "guest_exit_ns", unit = ns, table = "host-stages", series),
     metric(name = "cleanup_calls_ns", unit = ns, table = "host-stages", series),
     metric(name = "guest_shutdown_handling_ns", unit = ns, table = "guest-stages", series),
+    clock(guest = init_elapsed_ms),
     smoke(guest = "cgroup-default", profile = "nested"),
 )]
 fn vm_lifecycle_stages(rep: &mut Replicate) -> Result<(), ReplicateFailure> {

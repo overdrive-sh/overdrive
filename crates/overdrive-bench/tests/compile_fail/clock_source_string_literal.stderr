@@ -1,0 +1,5 @@
+error: key `clock`: expected an identifier such as `injected_monotonic`, found a string literal
+  --> tests/compile_fail/clock_source_string_literal.rs:10:21
+   |
+10 |     clock(service = "injected_monotonic"),
+   |                     ^^^^^^^^^^^^^^^^^^^^

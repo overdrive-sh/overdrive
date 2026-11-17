@@ -1,0 +1,5 @@
+error: key `clock`: expected service = <source> and/or guest = <source>
+  --> tests/compile_fail/empty_clock.rs:10:5
+   |
+10 |     clock(),
+   |     ^^^^^

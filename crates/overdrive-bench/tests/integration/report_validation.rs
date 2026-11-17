@@ -466,3 +466,72 @@ fn the_tools_usage_errors_are_typed_refusals() {
         );
     }
 }
+
+/// The pinned `clock.service` string (DDD-2 "Clock sources", `ServiceClock::InjectedMonotonic`).
+const SERVICE_CLOCK: &str = "Clock::now (monotonic)";
+/// The pinned `clock.guest` string (`GuestClock::InitElapsedMs`).
+const GUEST_CLOCK: &str = "CLOCK_MONOTONIC (overdrive-init Instant::elapsed, 1 ms)";
+
+fn with_clock(service: &serde_json::Value, guest: &serde_json::Value) -> Lines {
+    let mut lines = valid();
+    set(
+        &mut lines,
+        0,
+        "clock",
+        json!({ "host": "CLOCK_MONOTONIC_RAW", "service": service, "guest": guest }),
+    );
+    lines
+}
+
+/// `clock.service` is `null` or the one pinned string; any other string, including the pinned
+/// guest string, is refused naming `clock.service` (exit 65).
+/// Pending until the closed vocabulary lands: today any string validates.
+/// CONTRACT_SHAPE: pure-function (record in, verdict out).
+#[test]
+fn a_clock_service_string_outside_the_pinned_one_is_refused() {
+    for value in ["monotonic", "Clock::now (wall)", "", GUEST_CLOCK] {
+        refused(
+            &with_clock(&json!(value), &json!(null)),
+            1,
+            "clock.service",
+            &format!("clock.service `{value}`"),
+        );
+    }
+}
+
+/// `clock.guest` is `null` or the one pinned string; any other string, including the pinned
+/// service string, is refused naming `clock.guest` (exit 65).
+/// Pending until the closed vocabulary lands: today any string validates.
+/// CONTRACT_SHAPE: pure-function (record in, verdict out).
+#[test]
+fn a_clock_guest_string_outside_the_pinned_one_is_refused() {
+    for value in ["tsc", "CLOCK_MONOTONIC", "", SERVICE_CLOCK] {
+        refused(
+            &with_clock(&json!(null), &json!(value)),
+            1,
+            "clock.guest",
+            &format!("clock.guest `{value}`"),
+        );
+    }
+}
+
+/// A record carrying each pinned clock string, alone and together, validates silently, and so does
+/// one carrying neither. GREEN guard against an over-strict closed vocabulary.
+/// CONTRACT_SHAPE: pure-function (record in, verdict out).
+#[test]
+fn a_record_carrying_each_pinned_clock_string_validates() {
+    for (service, guest) in [
+        (json!(SERVICE_CLOCK), json!(null)),
+        (json!(null), json!(GUEST_CLOCK)),
+        (json!(SERVICE_CLOCK), json!(GUEST_CLOCK)),
+        (json!(null), json!(null)),
+    ] {
+        let d = dir();
+        let (ok, stderr, code) =
+            validate(&write(d.path(), "r.jsonl", &with_clock(&service, &guest)));
+        assert!(
+            ok && code == Some(0) && stderr.is_empty(),
+            "a record with clock.service {service} and clock.guest {guest} must validate: status {code:?}: {stderr}"
+        );
+    }
+}

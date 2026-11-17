@@ -1,0 +1,5 @@
+error: key `service` is given more than once
+  --> tests/compile_fail/repeated_clock_sub_key.rs:10:41
+   |
+10 |     clock(service = injected_monotonic, service = injected_monotonic),
+   |                                         ^^^^^^^

@@ -88,3 +88,49 @@ fn malformed_declarations_fail_the_build_naming_the_offending_key_or_value() {
     cases.compile_fail("tests/compile_fail/arm_outside_the_grammar.rs");
     cases.compile_fail("tests/compile_fail/unknown_metric_unit.rs");
 }
+
+// ---- The `clock(service = ..., guest = ...)` key (DDD-2 "Clock sources", step 02-03) ----
+//
+// Pending state. Until the key lands the attribute rejects `clock` as an unknown key, so every
+// fixture below fails to compile with a message other than the pinned one; trybuild reports a
+// `mismatch` for each and ends with `<n> of <n> tests failed`, which each test pends on with its
+// own fixture count. DELIVER activation: remove the `should_panic` of a test in the step that lands
+// the key, regenerate the `.stderr` span lines with `TRYBUILD=overwrite`, and verify every pinned
+// `error:` line is unchanged except the three the designer could not pin (see the fixtures'
+// report: `clock_source_string_literal`, `empty_clock`). Landing the key also changes the key list
+// in the existing `unknown_key.stderr` (`..., reference, clock, smoke`): update it in the same step.
+
+/// A service or guest clock source outside its closed set is a build error naming the set.
+/// CONTRACT_SHAPE: pure-function (source text in, diagnostic out).
+#[test]
+#[serial(trybuild)]
+#[overdrive_test(host_pure)]
+fn an_unknown_clock_source_fails_the_build_naming_the_set() {
+    let cases = trybuild::TestCases::new();
+    cases.compile_fail("tests/compile_fail/unknown_service_clock_source.rs");
+    cases.compile_fail("tests/compile_fail/unknown_guest_clock_source.rs");
+}
+
+/// An unknown or repeated sub-key of `clock(...)`, a source written as a string literal and an
+/// empty `clock()` are build errors naming the offending key or value.
+/// CONTRACT_SHAPE: pure-function (source text in, diagnostic out).
+#[test]
+#[serial(trybuild)]
+#[overdrive_test(host_pure)]
+fn a_malformed_clock_declaration_fails_the_build_naming_the_offending_key_or_value() {
+    let cases = trybuild::TestCases::new();
+    cases.compile_fail("tests/compile_fail/unknown_clock_sub_key.rs");
+    cases.compile_fail("tests/compile_fail/repeated_clock_sub_key.rs");
+    cases.compile_fail("tests/compile_fail/clock_source_string_literal.rs");
+    cases.compile_fail("tests/compile_fail/empty_clock.rs");
+}
+
+/// The unknown-key message lists `clock` among the keys the attribute accepts.
+/// CONTRACT_SHAPE: pure-function (source text in, diagnostic out).
+#[test]
+#[serial(trybuild)]
+#[overdrive_test(host_pure)]
+fn the_unknown_key_message_lists_clock_among_the_keys() {
+    let cases = trybuild::TestCases::new();
+    cases.compile_fail("tests/compile_fail/unknown_key_lists_clock.rs");
+}

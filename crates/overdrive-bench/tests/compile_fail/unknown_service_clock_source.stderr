@@ -1,0 +1,5 @@
+error: service clock source `wall_clock` is not one of injected_monotonic
+  --> tests/compile_fail/unknown_service_clock_source.rs:10:21
+   |
+10 |     clock(service = wall_clock),
+   |                     ^^^^^^^^^^
