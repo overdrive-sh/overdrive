@@ -25,7 +25,6 @@ fn selected_argv(controller: &NativeController) -> String {
 /// `cargo bench` command with an absolute results root under the bound checkout.
 /// CONTRACT_SHAPE: bounded-change (the run record and the selected command's argv).
 #[test]
-#[should_panic(expected = "unknown arg: --benchmark")]
 fn the_benchmark_form_runs_exactly_the_closed_benchmark_command_under_exclusive_admission() {
     let controller = NativeController::new();
     success(&controller.fixture.sync(&controller.fixture.source));
@@ -59,7 +58,6 @@ fn the_benchmark_form_runs_exactly_the_closed_benchmark_command_under_exclusive_
 /// directory; the maintained results tree is untouched.
 /// CONTRACT_SHAPE: bounded-change (the selected command's argv).
 #[test]
-#[should_panic(expected = "unknown arg: --benchmark")]
 fn the_spike_form_runs_the_spike_crates_benchmark_and_results_stay_in_its_directory() {
     let controller = NativeController::new();
     let spike = controller.fixture.source.join("spike-scratch/pig-demo");
@@ -114,9 +112,6 @@ fn assert_refused_before_any_command_runs(name: &str, cases: Vec<(&str, Vec<&str
 /// CONTRACT_SHAPE: bounded-change (one refusal line per case; no selected command runs).
 /// Boundary: 63 characters is accepted, 64 is not. Fault stimulus: each malformed family below.
 #[test]
-#[should_panic(
-    expected = "a malformed benchmark request must be refused with the usage status and its pinned name `benchmark_family_invalid`"
-)]
 fn a_malformed_benchmark_family_is_refused_as_benchmark_family_invalid() {
     let long_family = "a".repeat(64);
     assert_refused_before_any_command_runs(
@@ -135,9 +130,6 @@ fn a_malformed_benchmark_family_is_refused_as_benchmark_family_invalid() {
 /// CONTRACT_SHAPE: bounded-change (one refusal line per case; no selected command runs).
 /// Fault stimulus: each malformed spike name, and a spike crate that does not exist.
 #[test]
-#[should_panic(
-    expected = "a malformed benchmark request must be refused with the usage status and its pinned name `benchmark_spike_invalid`"
-)]
 fn a_malformed_or_missing_spike_is_refused_as_benchmark_spike_invalid() {
     assert_refused_before_any_command_runs(
         "benchmark_spike_invalid",
@@ -158,9 +150,6 @@ fn a_malformed_or_missing_spike_is_refused_as_benchmark_spike_invalid() {
 /// CONTRACT_SHAPE: bounded-change (one refusal line per case; no selected command runs).
 /// Fault stimulus: each conflicting argument list.
 #[test]
-#[should_panic(
-    expected = "a malformed benchmark request must be refused with the usage status and its pinned name `invalid_mode`"
-)]
 fn a_benchmark_request_in_conflict_with_another_form_is_refused_as_invalid_mode() {
     assert_refused_before_any_command_runs(
         "invalid_mode",
@@ -179,7 +168,6 @@ fn a_benchmark_request_in_conflict_with_another_form_is_refused_as_invalid_mode(
 /// so the refusal never reaches the remote runner.
 /// CONTRACT_SHAPE: pure-function (argument list in, parse diagnostic out).
 #[test]
-#[should_panic(expected = "must conflict with")]
 fn the_xtask_command_line_names_the_conflict_between_the_benchmark_form_and_other_forms() {
     for (label, args) in [
         ("--exclusive", vec!["metal", "run", "--benchmark", "fam", "--exclusive"]),

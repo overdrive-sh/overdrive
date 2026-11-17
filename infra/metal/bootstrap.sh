@@ -77,6 +77,16 @@ invalid_mode() {
   exit 64
 }
 
+benchmark_family_invalid() {
+  printf 'OVERDRIVE_METAL_RUNNER_ERROR error=benchmark_family_invalid\n' >&2
+  exit 64
+}
+
+benchmark_spike_invalid() {
+  printf 'OVERDRIVE_METAL_RUNNER_ERROR error=benchmark_spike_invalid\n' >&2
+  exit 64
+}
+
 unsupported_ordinary_command() {
   printf 'OVERDRIVE_METAL_RUNNER_ERROR error=unsupported_ordinary_command\n' >&2
   exit 64
@@ -271,7 +281,7 @@ validate_remote_artifact_paths() {
   done
 }
 
-[ $# -ge 1 ] || { echo "usage: $0 <user@host> [--data-disk DEV] [--sync-only | --pull -- PATH... | --run [--exclusive] -- CMD... | --shell | --collect ID]" >&2; exit 1; }
+[ $# -ge 1 ] || { echo "usage: $0 <user@host> [--data-disk DEV] [--sync-only | --pull -- PATH... | --run [--exclusive] -- CMD... | --run --benchmark FAMILY [--spike NAME] | --shell | --collect ID]" >&2; exit 1; }
 TARGET="$1"; shift
 
 DATA_DISK=""
@@ -286,6 +296,10 @@ COLLECT_RUN_ID=""
 NO_SYNC=0
 NO_SUDO=0
 RUN_ARGS=()
+BENCHMARK_MODE=0
+BENCHMARK_FAMILY=""
+SPIKE_MODE=0
+SPIKE_NAME=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --data-disk) DATA_DISK="$2"; shift 2 ;;
@@ -298,6 +312,12 @@ while [ $# -gt 0 ]; do
     --collect)
       [ $# -ge 2 ] || { echo "FATAL: --collect requires a run id" >&2; exit 64; }
       COLLECT_MODE=1; COLLECT_RUN_ID="$2"; shift 2 ;;
+    --benchmark)
+      [ $# -ge 2 ] || invalid_mode
+      BENCHMARK_MODE=1; BENCHMARK_FAMILY="$2"; shift 2 ;;
+    --spike)
+      [ $# -ge 2 ] || invalid_mode
+      SPIKE_MODE=1; SPIKE_NAME="$2"; shift 2 ;;
     --no-sync) NO_SYNC=1; shift ;;
     --no-sudo) NO_SUDO=1; shift ;;
     --) shift; RUN_ARGS=("$@"); break ;;
@@ -307,6 +327,26 @@ done
 
 if [ "$EXCLUSIVE_MODE" -eq 1 ] && [ "$RUN_MODE" -eq 0 ]; then
   invalid_mode
+fi
+
+# The benchmark form (ADR-0304): `--run --benchmark FAMILY [--spike NAME]` runs one
+# closed `cargo bench` command under exclusive admission. It takes no trailing
+# command and is not combined with --exclusive; the exclusive class is implied.
+if [ "$SPIKE_MODE" -eq 1 ] && [ "$BENCHMARK_MODE" -eq 0 ]; then
+  invalid_mode
+fi
+if [ "$BENCHMARK_MODE" -eq 1 ]; then
+  if [ "$RUN_MODE" -eq 0 ] || [ "$EXCLUSIVE_MODE" -eq 1 ] || [ "${#RUN_ARGS[@]}" -gt 0 ]; then
+    invalid_mode
+  fi
+  [[ "$BENCHMARK_FAMILY" =~ ^[a-z][a-z0-9-]{0,62}$ ]] || benchmark_family_invalid
+  if [ "$SPIKE_MODE" -eq 1 ]; then
+    [[ "$SPIKE_NAME" =~ ^[a-z0-9][a-z0-9-]{0,62}$ ]] || benchmark_spike_invalid
+    # The sync mirrors this checkout, and --no-sync verifies the source identity
+    # against it, so the local manifest is the one the box will hold.
+    [ -f "${REPO}/spike-scratch/${SPIKE_NAME}/Cargo.toml" ] || benchmark_spike_invalid
+  fi
+  EXCLUSIVE_MODE=1
 fi
 if [ "$EXCLUSIVE_MODE" -eq 1 ] && \
   { [ "$SYNC_ONLY" -eq 1 ] || [ "$PULL_MODE" -eq 1 ] || \
@@ -318,7 +358,7 @@ fi
   echo "FATAL: choose only one of --sync-only, --pull, --run, --shell, or --collect" >&2
   exit 1
 }
-[ "${RUN_MODE}" -eq 0 ] || [ "${#RUN_ARGS[@]}" -gt 0 ] || {
+[ "${RUN_MODE}" -eq 0 ] || [ "${BENCHMARK_MODE}" -eq 1 ] || [ "${#RUN_ARGS[@]}" -gt 0 ] || {
   echo "FATAL: --run requires a command after --" >&2
   exit 1
 }
@@ -783,6 +823,15 @@ if [ "${RUN_MODE}" -eq 1 ]; then
   # releases and reacquires the checkout lock around START.
   REMOTE_PATH=""
   JOINED=""
+  if [ "${BENCHMARK_MODE}" -eq 1 ]; then
+    # The closed command (DDD-9). The results root is absolute under the bound
+    # checkout because cargo bench runs with the package directory as cwd.
+    if [ "${SPIKE_MODE}" -eq 1 ]; then
+      RUN_ARGS=(cargo bench --manifest-path "spike-scratch/${SPIKE_NAME}/Cargo.toml" --bench benchmarks -- run --family "${BENCHMARK_FAMILY}" --results-root "${REMOTE_DIR}/spike-scratch/${SPIKE_NAME}/results")
+    else
+      RUN_ARGS=(cargo bench -p overdrive-bench-families --bench benchmarks -- run --family "${BENCHMARK_FAMILY}" --results-root "${REMOTE_DIR}/benchmarks/results")
+    fi
+  fi
   for arg in "${RUN_ARGS[@]}"; do
     printf -v QUOTED '%q' "${arg}"
     JOINED+="${QUOTED} "

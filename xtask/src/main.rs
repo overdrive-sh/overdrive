@@ -473,6 +473,14 @@ enum MetalAction {
         /// Run as the login user instead of wrapping in `sudo -n env ...`.
         #[arg(long)]
         no_sudo: bool,
+        /// Run the closed `cargo bench` command of one benchmark family under
+        /// exclusive admission (ADR-0304). Takes no command and not `--exclusive`.
+        #[arg(long, conflicts_with_all = ["exclusive", "args"])]
+        benchmark: Option<String>,
+        /// With `--benchmark`: run the benchmark of the named spike crate
+        /// under `spike-scratch/<NAME>/`; its results stay in that directory.
+        #[arg(long, requires = "benchmark")]
+        spike: Option<String>,
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 0..)]
         args: Vec<String>,
     },
@@ -1022,8 +1030,8 @@ fn metal(action: MetalAction) -> Result<u8> {
                     )?;
                     Ok(0)
                 }
-                MetalAction::Run { exclusive, no_sync, no_sudo, args } => {
-                    if args.is_empty() {
+                MetalAction::Run { exclusive, no_sync, no_sudo, benchmark, spike, args } => {
+                    if benchmark.is_none() && args.is_empty() {
                         bail!(
                             "no command given; use `cargo xtask metal run -- cargo nextest run \
                      -p overdrive-cli --features integration-tests,kvm-tests`"
@@ -1042,7 +1050,14 @@ fn metal(action: MetalAction) -> Result<u8> {
                     if no_sudo {
                         command.arg("--no-sudo");
                     }
-                    command.arg("--").args(args);
+                    if let Some(family) = benchmark {
+                        command.args(["--benchmark", &family]);
+                        if let Some(name) = spike {
+                            command.args(["--spike", &name]);
+                        }
+                    } else {
+                        command.arg("--").args(args);
+                    }
                     sh_status("metal run (one bootstrap lease session)", &mut command)
                 }
                 MetalAction::Pull { paths } => {
