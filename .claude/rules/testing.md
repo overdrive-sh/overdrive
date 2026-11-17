@@ -23,7 +23,7 @@ artifacts separate:
 | **EDD verification expectation** | “What did this feature claim, and what did we actually observe when it was delivered?” | One point-in-time capture with one or a small number of deliberately contrasting feature cases. | Retained SHA-pinned evidence; **not** a CI regression test and not meant to be rerun. |
 | **E2E / conformance test** | “Does the assembled system continue to satisfy this deterministic contract?” | The smallest repeatable production composition and fixture matrix that proves the contract. | Automated, deterministic, and rerun in the appropriate test lane. |
 | **Stress / soak test** | “Does the system preserve a contract through a repeated cohort or fault/load matrix?” | Bounded repeated trials with a deterministic oracle, failure accounting, and cleanup. | Rerunnable test infrastructure; never an expectation capture. |
-| **Benchmark** | “How fast, how much, or how variable is this system under a declared profile?” | Repeated samples on a controlled substrate, with warm/cold state, workload/concurrency profile, raw measurements, and statistical method. | Benchmark report/baseline; distinct from correctness tests and never an expectation. |
+| **Benchmark** | “How fast, how much, or how variable is this system under a declared profile?” | Repeated samples on a controlled substrate, with warm/cold state, workload/concurrency profile, raw measurements, and statistical method. | Benchmark report/baseline under `benchmarks/`, run with `cargo xtask metal run --benchmark <family>`; distinct from correctness tests and never an expectation. |
 
 **Tests never spawn the `overdrive` binary.** The only artifact that runs the
 built CLI directly is a verification expectation whose purpose is to verify
@@ -1774,7 +1774,21 @@ refuses before START with a stable diagnostic and status 64.
 Status-64 runner diagnostics: `unsupported_ordinary_command`,
 `execution_override_refused`, `artifact_scope_mismatch`, `invalid_mode`
 (`--exclusive` without `--run`, or combined with another mode),
-`checkout_identity_invalid`, `remote_subdir_invalid`, `invalid_run_id`.
+`checkout_identity_invalid`, `remote_subdir_invalid`, `invalid_run_id`,
+`benchmark_family_invalid` (a `--benchmark` family outside
+`^[a-z][a-z0-9-]{0,62}$`), `benchmark_spike_invalid` (a `--spike` name outside
+`^[a-z0-9][a-z0-9-]{0,62}$`, or no `spike-scratch/<name>/Cargo.toml`).
+`invalid_mode` also covers `--spike` without `--benchmark`, `--exclusive`
+beside `--benchmark`, and a trailing command after `--benchmark`.
+
+**The benchmark form** is `cargo xtask metal run --benchmark <family> [--spike
+<name>]`. It takes no command: the runner builds the one closed command itself,
+`cargo bench -p overdrive-bench-families --bench benchmarks -- run --family
+<family> --results-root <checkout>/benchmarks/results`, or with `--spike`,
+`cargo bench --manifest-path spike-scratch/<name>/Cargo.toml --bench benchmarks
+-- run --family <family> --results-root <checkout>/spike-scratch/<name>/results`.
+It always runs under exclusive admission (class `exclusive`). Pull its record
+and report back with `cargo xtask metal pull <result dir>`.
 
 An ordinary run does **not** accept `cargo xtask integration-test`,
 `verifier-regress`, `xdp-perf`, `dev-setup`, `ci`, `lima`, `hooks`, `mcp`,
@@ -1798,7 +1812,10 @@ arbitrary privileged maintenance with exclusive physical-maintenance ownership;
 maintenance only (module load, provisioning). A test that cannot run beside a
 concurrent ordinary run from another worktree is a defect in the runner's
 placement, not a reason to serialise the host: the isolation belongs in the
-namespaces the wrapper gives the test body, never in a lock.
+namespaces the wrapper gives the test body, never in a lock. Benchmarks (the
+benchmark form above) are exempt beside expectation captures: a benchmark is
+not a test, and its numbers are only comparable on a host nothing else is
+loading.
 
 **Native-metal expectation captures run with `--exclusive`.** An EDD
 expectation capture (`.claude/rules/verification.md`) drives the built product
