@@ -2310,12 +2310,23 @@ dependencies = [
 name = "overdrive-bench-families"
 version = "0.0.0"
 dependencies = [
+ "async-trait",
  "aya",
+ "futures",
  "libc",
  "overdrive-bench",
+ "overdrive-cli",
+ "overdrive-control-plane",
+ "overdrive-core",
  "overdrive-dataplane",
+ "overdrive-host",
+ "overdrive-sim",
  "overdrive-testing",
  "overdrive-testing-macros",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

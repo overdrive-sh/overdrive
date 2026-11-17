@@ -2,4 +2,5 @@
 
 pub mod families {
     pub mod cgroup_connect_hook;
+    pub mod vm_lifecycle;
 }
