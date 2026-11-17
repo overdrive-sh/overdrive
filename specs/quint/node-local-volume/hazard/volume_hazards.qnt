@@ -1,0 +1,15 @@
+// One weakened rule per protocol decision: VD-8 (noWait: the launch treats the VMM process exit as the claim free),
+// VD-9 (recreate: ensure creates unconditionally instead of create-if-absent), VD-2 (stopDeletes: stop deletes the
+// volume). VD-3 (the backing choice) is not a protocol rule and has no hazard.
+module vol_bugNoWait {
+  import node_volume(OFF = Set("noWait"), REC = false, OPS = Set(), NA = 3, FB = 1, LIMIT = 3, DVMAX = 1).*
+    from "../node_volume"
+}
+module vol_bugRecreate {
+  import node_volume(OFF = Set("recreate"), REC = false, OPS = Set(), NA = 3, FB = 1, LIMIT = 3, DVMAX = 1).*
+    from "../node_volume"
+}
+module vol_bugStopDeletes {
+  import node_volume(OFF = Set("stopDeletes"), REC = false, OPS = Set("stop"), NA = 2, FB = 0, LIMIT = 3, DVMAX = 1).*
+    from "../node_volume"
+}

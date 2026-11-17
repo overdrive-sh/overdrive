@@ -5,6 +5,42 @@ This file collects per-phase / per-feature C4 diagrams referenced from
 snapshot of the system at the close of a feature; superseded sections
 remain for traceability.
 
+## Node-local persistent volume
+
+**PROPOSED** (GH #348; decisions VD-1 to VD-10 (VD-7a to VD-7c) await user approval,
+[feature delta](../../feature/node-local-persistent-volume/feature-delta.md)). Level 1 and level 2 only.
+
+```mermaid
+C4Context
+  title System Context - node-local persistent volume
+  Person(operator, "Operator", "Deploys VM workloads")
+  System(overdrive, "Overdrive node", "Runs VM workloads, owns the node's disk")
+  System_Ext(guest, "Guest workload", "Formats and mounts its volume")
+  Rel(operator, overdrive, "Declares a volume with deploy through")
+  Rel(overdrive, guest, "Attaches a raw disk to")
+```
+
+```mermaid
+C4Container
+  title Container Diagram - volume path on one node
+  Person(operator, "Operator")
+  Container(cli, "overdrive CLI", "Rust", "deploy, workload describe")
+  Container(cp, "Control plane", "Rust", "Admits the spec, places allocations")
+  Container(lc, "WorkloadLifecycle", "Reconciler", "Mints and replaces allocations")
+  Container(drv, "VmDriver", "Rust", "ensure, claim wait, launch")
+  Container(vmm, "Cloud Hypervisor fork", "Rust", "Opens the volume O_EXCL, second virtio-blk disk")
+  ContainerDb(vg, "VG overdrive", "LVM2 on labelled partition", "One linear logical volume per workload")
+  ContainerDb(intent, "IntentStore", "redb", "Workload intent with the volume size")
+  Rel(operator, cli, "Runs")
+  Rel(cli, cp, "Submits the spec to")
+  Rel(cp, intent, "Persists the spec in")
+  Rel(lc, intent, "Reads the declared volume from")
+  Rel(lc, drv, "Requests a start from")
+  Rel(drv, vg, "Creates and activates the volume in")
+  Rel(drv, vmm, "Launches with the volume disk")
+  Rel(vmm, vg, "Writes the guest's blocks to")
+```
+
 ## Metal test placement declared on the test
 
 **ACCEPTED — approved by the user, 2026-11-14.** The decisions of feature

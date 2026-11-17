@@ -1,0 +1,133 @@
+# Checks for specs/quint/node-local-volume/ (node-local persistent volume protocol, GH #348).
+# Decisions modelled: VD-2 (volume belongs to the workload, stop keeps it), VD-8 (launch waits for the claim, not the
+# process), VD-9 (the launch path ensures the volume: create-if-absent, activate). VD-3 (backing) has no protocol rule.
+# One hazard per decision. ci = true iff the check takes under two minutes (latest measured: vol-safety-tlc 262 s,
+# 4 workers, 1.7 GB peak; every other check under 10 s).
+# Runs on vol_conf (REC = true) are the #[quint_test] pins.
+
+[[check]]
+name = "vol-safety-tlc"
+spec = "node_volume.qnt"
+main = "vol_ok"
+invariant = "Safety"
+backend = "tlc"
+expect = "holds"
+ci = false
+timeout_secs = 1500
+
+[[check]]
+name = "vol-live-start"
+spec = "node_volume.qnt"
+main = "vol_live_start"
+temporal = "EveryStartLiveness"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "vol-hazard-wait"
+spec = "hazard/volume_hazards.qnt"
+main = "vol_bugNoWait"
+invariant = "I_NO_DRAIN_FAILURE_CHARGES_BUDGET"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "vol-hazard-ensure"
+spec = "hazard/volume_hazards.qnt"
+main = "vol_bugRecreate"
+invariant = "I_VD9"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "vol-hazard-stop"
+spec = "hazard/volume_hazards.qnt"
+main = "vol_bugStopDeletes"
+invariant = "I_STOP_KEEPS_VOLUME"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "vol-run-happy-path-deploy-to-running"
+spec = "node_volume.qnt"
+main = "vol_conf"
+run = "happy_path_deploy_to_running"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "vol-run-restart-waits-for-drain-then-attaches"
+spec = "node_volume.qnt"
+main = "vol_conf"
+run = "restart_waits_for_drain_then_attaches"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "vol-run-stop-keeps-volume-and-restart-reattaches"
+spec = "node_volume.qnt"
+main = "vol_conf"
+run = "stop_keeps_volume_and_restart_reattaches"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "vol-run-crash-after-create-before-attach-reuses-volume"
+spec = "node_volume.qnt"
+main = "vol_conf"
+run = "crash_after_create_before_attach_reuses_volume"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "vol-run-node-reboot-reactivates-and-data-survives"
+spec = "node_volume.qnt"
+main = "vol_conf"
+run = "node_reboot_reactivates_and_data_survives"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "vol-run-launch-bound-exceeded-fails-typed-and-charges-budget"
+spec = "node_volume.qnt"
+main = "vol_conf"
+run = "launch_bound_exceeded_fails_typed_and_charges_budget"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "vol-run-no-space-fails-typed-and-never-attaches"
+spec = "node_volume.qnt"
+main = "vol_conf"
+run = "no_space_fails_typed_and_never_attaches"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "vol-run-store-absent-fails-typed-and-never-attaches"
+spec = "node_volume.qnt"
+main = "vol_conf"
+run = "store_absent_fails_typed_and_never_attaches"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "vol-run-superseded-launch-result-discarded"
+spec = "node_volume.qnt"
+main = "vol_conf"
+run = "superseded_launch_result_discarded"
+backend = "evaluator"
+expect = "holds"
+ci = true

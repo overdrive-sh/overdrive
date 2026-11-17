@@ -6390,6 +6390,21 @@ policy.
 
 ---
 
+## Node-local persistent volume extension (GH #348) — PROPOSED
+
+**PROPOSED, not accepted.** Decisions VD-1 to VD-10 (VD-7a to VD-7c) await user approval
+(`docs/feature/node-local-persistent-volume/design/wave-decisions.md`; exact contracts in
+`docs/feature/node-local-persistent-volume/feature-delta.md`). Diagrams: `c4-diagrams.md` § "Node-local persistent volume".
+
+A VM workload may declare `[vm.volume] size = "<n>GiB"` (ADR-0296). The volume belongs to the workload and
+outlives stop, crash and restart (ADR-0297). It is a raw `dm-linear` logical volume in VG `overdrive` on a dedicated
+partition the image provisions (ADR-0298, ADR-0299), attached as the second `--disk` with write-back, `direct=on`
+and `serial=ovd-volume` (ADR-0301) under three Cloud Hypervisor fork changes (ADR-0302, ADR-0305, ADR-0306). `VmDriver::start` ensures
+(create if absent, activate) the volume and waits for the previous VMM's claim to clear, up to 30 s, before launching
+(ADR-0303, ADR-0304). A boot probe verifies the store and refuses startup when it is broken (ADR-0300). The slice adds a
+`VolumeBacking` port in `overdrive-core`, `LvmVolumeBacking` in `overdrive-host`, `SimVolumeBacking` in `overdrive-sim`,
+and no new reconciler or observation row; reclamation, erasure and a status row wait for workload deletion (GH #211).
+
 ## docs-platform website (overdrive.sh)
 
 > **This section is architecturally INDEPENDENT of the Rust platform above.** It
