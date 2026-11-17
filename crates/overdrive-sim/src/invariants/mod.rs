@@ -417,10 +417,13 @@ pub enum Invariant {
     SanityChecksFireBeforeServiceMap,
 
     /// SCAFFOLD: true — phase-2-xdp-service-map DISTILL per ADR-0042
-    /// + architecture.md § 8 *ESR pair*. Eventual: from any
-    /// combination of `service_backends` rows + starting BPF map
-    /// state, repeated reconcile ticks drive
-    /// `actual.fingerprint == desired.fingerprint` for every service.
+    /// + architecture.md § 8 *ESR pair*. Eventual: from a cold start
+    /// (nothing programmed) for each of three fixed service shapes
+    /// (remote-only, all-mesh, mixed mesh + remote), repeated reconcile
+    /// ticks drive the programmed fingerprint (the hydrator's `actual`)
+    /// to the desired survivor-set fingerprint. The invariant does not
+    /// sweep arbitrary `service_backends` rows or starting BPF map
+    /// state, and fabricates no `Completed` receipt.
     /// The evaluator body panics with a `RED scaffold` message until
     /// DELIVER ships the body per Slice 08 / S-2.2-26.
     HydratorEventuallyConverges,

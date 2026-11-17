@@ -48,11 +48,9 @@ use super::ShimError;
 /// allocator's IntentStore delete fails. The allocator's typed error
 /// is preserved end-to-end via the `#[from]` variant per
 /// `.claude/rules/development.md` § Errors → "Pass-through embedding".
-/// In Phase 1 the byte-level `IntentStore::delete` is a redb operation
-/// and failure is structurally rare (disk full, file corruption); the
-/// reconciler runtime's per-action error isolation in
-/// [`super::dispatch`] absorbs this and continues with the rest of the
-/// action batch.
+/// This executor does not absorb the error: it propagates the typed
+/// [`ShimError::AllocatorRelease`] to its caller, and any handling of
+/// that failure is the caller's decision.
 pub async fn dispatch(
     spec_digest: &ContentHash,
     correlation: &CorrelationKey,
