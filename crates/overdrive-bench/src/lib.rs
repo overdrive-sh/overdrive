@@ -26,6 +26,15 @@
 
 use std::process::ExitCode;
 
+mod histogram;
+pub mod record;
+
+#[cfg(test)]
+use overdrive_testing::overdrive_test_default;
+
+#[cfg(test)]
+overdrive_test_default!(host_pure);
+
 /// Whether a run is maintained-lane evidence or a `spike-scratch/` probe.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Evidence {
@@ -71,7 +80,7 @@ pub enum Error {
         #[source]
         source: std::io::Error,
     },
-    #[error("invalid record at line {line}: {reason}")]
+    #[error("invalid record: line {line}: {reason}")]
     InvalidRecord { line: usize, reason: String },
 }
 

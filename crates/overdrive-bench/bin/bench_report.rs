@@ -1,10 +1,59 @@
-//! `bench-report validate|render <record>` — host-independent (DDD-1, DDD-6).
+//! `bench-report validate|render <record>`: host-independent (DDD-1, DDD-6).
 //!
-//! RED scaffold created by DISTILL: accepts anything and prints nothing.
-// SCAFFOLD: true
+//! Exit statuses: 0 success, 64 usage, 65 invalid record, 70 the record is unreadable.
+//! `render` validates the record; the report itself is not rendered yet.
 
-#![allow(clippy::missing_const_for_fn, reason = "DISTILL RED scaffold")]
+#![allow(clippy::print_stderr, reason = "the CLI reports its own refusals on stderr")]
 
-fn main() -> std::process::ExitCode {
-    std::process::ExitCode::SUCCESS
+use std::path::PathBuf;
+use std::process::ExitCode;
+
+use overdrive_bench::record::validate;
+use overdrive_bench::{Error, Result};
+
+const USAGE: &str = "bench-report validate <record> | bench-report render <record>";
+
+fn main() -> ExitCode {
+    let arguments: Vec<String> = std::env::args().skip(1).collect();
+    match run(&arguments) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("bench-report: {}", describe(&error));
+            ExitCode::from(status(&error))
+        }
+    }
+}
+
+fn run(arguments: &[String]) -> Result<()> {
+    let [subcommand, rest @ ..] = arguments else {
+        return Err(usage(format!("no subcommand; {USAGE}")));
+    };
+    if !matches!(subcommand.as_str(), "validate" | "render") {
+        return Err(usage(format!("unknown subcommand `{subcommand}`; {USAGE}")));
+    }
+    let [path] = rest else {
+        return Err(usage(format!("`{subcommand}` takes exactly one record path; {USAGE}")));
+    };
+    let path = PathBuf::from(path);
+    let text = std::fs::read_to_string(&path).map_err(|source| Error::Record { path, source })?;
+    validate(&text)
+}
+
+const fn usage(reason: String) -> Error {
+    Error::Usage { reason }
+}
+
+const fn status(error: &Error) -> u8 {
+    match error {
+        Error::Usage { .. } => 64,
+        Error::InvalidRecord { .. } => 65,
+        _ => 70,
+    }
+}
+
+/// The error and, for an I/O failure, its cause: the `Display` of `Error::Record` names the
+/// path and the cause is its source.
+fn describe(error: &Error) -> String {
+    std::error::Error::source(error)
+        .map_or_else(|| error.to_string(), |source| format!("{error}: {source}"))
 }

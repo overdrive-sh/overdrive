@@ -104,7 +104,6 @@ fn a_wellformed_record_validates_in_every_terminal_state_and_evidence_class() {
 /// A line that is not JSON is refused naming its line number.
 /// CONTRACT_SHAPE: pure-function (record in, verdict out).
 #[test]
-#[should_panic(expected = "a malformed line must be refused naming line 3")]
 fn a_malformed_line_is_refused_naming_its_line_number() {
     let d = dir();
     let mut body =
@@ -121,7 +120,6 @@ fn a_malformed_line_is_refused_naming_its_line_number() {
 /// and inside a metric entry (the retired `truncated` field is unknown).
 /// CONTRACT_SHAPE: pure-function (record in, verdict out).
 #[test]
-#[should_panic(expected = "validate must refuse a record with an unknown field")]
 fn an_unknown_field_is_refused_naming_the_field() {
     let mut lines = valid();
     set(&mut lines, 3, "surprise", json!(true));
@@ -134,7 +132,6 @@ fn an_unknown_field_is_refused_naming_the_field() {
 /// A schema version other than 1 is refused.
 /// CONTRACT_SHAPE: pure-function (record in, verdict out).
 #[test]
-#[should_panic(expected = "validate must refuse a record with schema version 2")]
 fn an_unsupported_schema_version_is_refused() {
     let mut lines = valid();
     set(&mut lines, 0, "schema", json!(2));
@@ -146,7 +143,6 @@ fn an_unsupported_schema_version_is_refused() {
 /// flag, seed). No field is ever omitted to mean `null`.
 /// CONTRACT_SHAPE: pure-function (record in, verdict out).
 #[test]
-#[should_panic(expected = "a record missing its provenance must be refused")]
 fn a_record_missing_a_provenance_field_is_refused() {
     for field in [
         "commit",
@@ -173,7 +169,6 @@ fn a_record_missing_a_provenance_field_is_refused() {
 /// `host` has exactly the nine pinned keys: a missing key and an extra key are both refused.
 /// CONTRACT_SHAPE: pure-function (record in, verdict out).
 #[test]
-#[should_panic(expected = "a host object without exactly the nine keys must be refused")]
 fn a_host_object_without_exactly_the_pinned_keys_is_refused() {
     let mut missing = valid();
     missing[0]["host"].as_object_mut().expect("host").remove("irq_time_accounting");
@@ -193,7 +188,6 @@ fn a_host_object_without_exactly_the_pinned_keys_is_refused() {
 /// `absent` that is not a string and an object with another key are refused, naming the key.
 /// CONTRACT_SHAPE: pure-function (record in, verdict out).
 #[test]
-#[should_panic(expected = "a host value in none of the three forms must be refused")]
 fn a_host_value_in_none_of_the_three_forms_is_refused() {
     for (value, what) in [
         (json!(5), "a number"),
@@ -216,7 +210,6 @@ fn a_host_value_in_none_of_the_three_forms_is_refused() {
 /// never a histogram. One case each. DDD-6 (the metric entry rule).
 /// CONTRACT_SHAPE: pure-function (record in, verdict out).
 #[test]
-#[should_panic(expected = "a metric entry of the wrong shape must be refused")]
 fn a_metric_entry_that_does_not_hold_exactly_one_thing_is_refused() {
     let two_things =
         json!({ "values": [1.0], "histogram": null, "failures": ["x"], "absent": null });
@@ -245,9 +238,6 @@ fn a_metric_entry_that_does_not_hold_exactly_one_thing_is_refused() {
 /// counts of the `replicate` lines. DDD-6 (semantic rules). Fault stimulus: a count one too high.
 /// CONTRACT_SHAPE: pure-function (record in, verdict out).
 #[test]
-#[should_panic(
-    expected = "validate must refuse a record with a histogram whose buckets do not sum to its count"
-)]
 fn counts_that_do_not_add_up_are_refused() {
     let series: Vec<f64> = (1..=2000).map(f64::from).collect();
     let mut entry = histogram_entry(&series);
@@ -293,7 +283,6 @@ fn the_histogram_shape_the_malformed_cases_start_from_is_valid() {
 /// Every bucket index is at most 2048 (bucket 2049 would start at 2^64, past the clamp).
 /// CONTRACT_SHAPE: pure-function (record in, verdict out).
 #[test]
-#[should_panic(expected = "validate must refuse a record with a histogram bucket index of 2049")]
 fn a_histogram_bucket_index_above_2048_is_refused() {
     // max is 2^64, inside bucket 2049's own range, so only the index rule is broken.
     let lines =
@@ -304,7 +293,6 @@ fn a_histogram_bucket_index_above_2048_is_refused() {
 /// Bucket indices ascend and are distinct: a repeated index and a descending pair are both refused.
 /// CONTRACT_SHAPE: pure-function (record in, verdict out).
 #[test]
-#[should_panic(expected = "validate must refuse a record with a repeated histogram bucket index")]
 fn a_histogram_whose_bucket_indices_do_not_ascend_or_repeat_is_refused() {
     let repeated = histogram_record(2000, 1.0, 2000.0, json!([[1, 500], [1, 500], [351, 1000]]));
     refused(&repeated, 3, "buckets", "a repeated histogram bucket index");
@@ -315,9 +303,6 @@ fn a_histogram_whose_bucket_indices_do_not_ascend_or_repeat_is_refused() {
 /// Every bucket `count` is at least 1: a stored empty bucket is refused (the buckets still sum to `count`).
 /// CONTRACT_SHAPE: pure-function (record in, verdict out).
 #[test]
-#[should_panic(
-    expected = "validate must refuse a record with a histogram bucket holding no values"
-)]
 fn a_histogram_bucket_holding_no_values_is_refused() {
     let lines = histogram_record(2000, 1.0, 2000.0, json!([[1, 1000], [100, 0], [351, 1000]]));
     refused(&lines, 3, "buckets", "a histogram bucket holding no values");
@@ -327,7 +312,6 @@ fn a_histogram_bucket_holding_no_values_is_refused() {
 /// writer stores those raw) and a histogram of one value are refused.
 /// CONTRACT_SHAPE: pure-function (record in, verdict out).
 #[test]
-#[should_panic(expected = "validate must refuse a record with a histogram of 1000 values")]
 fn a_histogram_of_1000_or_fewer_values_is_refused() {
     let thousand = histogram_record(1000, 1.0, 2000.0, json!([[1, 500], [351, 500]]));
     refused(&thousand, 3, "histogram", "a histogram of 1000 values");
@@ -338,9 +322,6 @@ fn a_histogram_of_1000_or_fewer_values_is_refused() {
 /// `min` is at most `max`. Both lie in the one occupied bucket `[1984, 2016)`, so only this rule is broken.
 /// CONTRACT_SHAPE: pure-function (record in, verdict out).
 #[test]
-#[should_panic(
-    expected = "validate must refuse a record with a histogram whose min exceeds its max"
-)]
 fn a_histogram_whose_min_exceeds_its_max_is_refused() {
     let lines = histogram_record(2000, 2010.0, 1990.0, json!([[351, 2000]]));
     refused(&lines, 3, "min", "a histogram whose min exceeds its max");
@@ -350,9 +331,6 @@ fn a_histogram_whose_min_exceeds_its_max_is_refused() {
 /// above it (bucket 1 is `[1, 1.03125)`; a value below 1 belongs to bucket 0) are both refused.
 /// CONTRACT_SHAPE: pure-function (record in, verdict out).
 #[test]
-#[should_panic(
-    expected = "validate must refuse a record with a histogram min below its lowest bucket"
-)]
 fn a_histogram_min_outside_its_lowest_bucket_is_refused() {
     let below = histogram_record(2000, 0.5, 2000.0, json!([[1, 1000], [351, 1000]]));
     refused(&below, 3, "min", "a histogram min below its lowest bucket");
@@ -364,9 +342,6 @@ fn a_histogram_min_outside_its_lowest_bucket_is_refused() {
 /// below it (bucket 351 is `[1984, 2016)`) are both refused.
 /// CONTRACT_SHAPE: pure-function (record in, verdict out).
 #[test]
-#[should_panic(
-    expected = "validate must refuse a record with a histogram max above its highest bucket"
-)]
 fn a_histogram_max_outside_its_highest_bucket_is_refused() {
     let above = histogram_record(2000, 1.0, 3000.0, json!([[1, 1000], [351, 1000]]));
     refused(&above, 3, "max", "a histogram max above its highest bucket");
@@ -378,7 +353,6 @@ fn a_histogram_max_outside_its_highest_bucket_is_refused() {
 /// refused: the semantic rules, one case each.
 /// CONTRACT_SHAPE: pure-function (record in, verdict out).
 #[test]
-#[should_panic(expected = "a replicate naming an undeclared")]
 fn a_replicate_naming_an_undeclared_arm_profile_or_metric_is_refused() {
     let mut arm = valid();
     set(&mut arm, 2, "arm", json!("ghost-arm"));
@@ -402,7 +376,6 @@ fn a_replicate_naming_an_undeclared_arm_profile_or_metric_is_refused() {
 /// A control must carry the reference arm (the first declared) in `arm`.
 /// CONTRACT_SHAPE: pure-function (record in, verdict out).
 #[test]
-#[should_panic(expected = "validate must refuse a record with a control that names the wrong arm")]
 fn a_control_that_does_not_carry_the_reference_arm_is_refused() {
     let mut lines = valid();
     set(&mut lines, 4, "arm", json!("alt")); // block 0, position 2: the control, naming the non-reference arm
@@ -413,9 +386,6 @@ fn a_control_that_does_not_carry_the_reference_arm_is_refused() {
 /// ok replicate with one are both refused.
 /// CONTRACT_SHAPE: pure-function (record in, verdict out).
 #[test]
-#[should_panic(
-    expected = "validate must refuse a record with a failed replicate that has no reason"
-)]
 fn a_failure_reason_is_present_exactly_when_the_replicate_failed() {
     let mut no_reason = valid();
     set(&mut no_reason, 3, "outcome", json!("failed"));
@@ -429,7 +399,6 @@ fn a_failure_reason_is_present_exactly_when_the_replicate_failed() {
 /// is part of the schema.
 /// CONTRACT_SHAPE: pure-function (record in, verdict out).
 #[test]
-#[should_panic(expected = "validate must refuse a record with a line after its terminal line")]
 fn a_line_after_the_terminal_line_is_refused() {
     let mut lines = valid();
     let last = lines.len();
@@ -440,7 +409,6 @@ fn a_line_after_the_terminal_line_is_refused() {
 /// A record whose first line is not `run_started`, and an empty record, are refused.
 /// CONTRACT_SHAPE: pure-function (record in, verdict out).
 #[test]
-#[should_panic(expected = "a record must begin with run_started")]
 fn a_record_that_does_not_begin_with_run_started_is_refused() {
     let d = dir();
     let lines = valid();
@@ -458,7 +426,6 @@ fn a_record_that_does_not_begin_with_run_started_is_refused() {
 /// substrate `guest` (the registry is `native` only, DDD-4).
 /// CONTRACT_SHAPE: pure-function (record in, verdict out).
 #[test]
-#[should_panic(expected = "a closed vocabulary must refuse")]
 fn a_value_outside_a_closed_vocabulary_is_refused() {
     for (field, value) in [
         ("role", "referee"),
@@ -483,7 +450,6 @@ fn a_value_outside_a_closed_vocabulary_is_refused() {
 /// argument are usage errors (exit 64); a record that cannot be read exits 70. Never a panic.
 /// CONTRACT_SHAPE: pure-function (record in, verdict out).
 #[test]
-#[should_panic(expected = "a usage error must exit 64")]
 fn the_tools_usage_errors_are_typed_refusals() {
     let d = dir();
     let missing = d.path().join("no-such-record.jsonl");
