@@ -124,6 +124,14 @@ impl Reconciler for GatewaySvidLifecycle {
         &self.name
     }
 
+    // DISTILL scaffold: an empty target set, replaced by this reconciler's real enumeration.
+    async fn managed_targets(
+        &self,
+        _ctx: &HydrationContext<'_>,
+    ) -> Result<std::collections::BTreeSet<TargetResource>, HydrateError> {
+        Ok(std::collections::BTreeSet::new())
+    }
+
     /// Pure transition. Disabled emits nothing (disable is the synchronous slot
     /// clear). A usable identity of the desired epoch clears the retry entry.
     /// Otherwise: restart recovery (empty slot, audited subject) reissues

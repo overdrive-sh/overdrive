@@ -135,6 +135,20 @@ validate_ordinary_command() {
     done
   fi
   [ "$index" -lt "${#RUN_ARGS[@]}" ] || unsupported_ordinary_command
+  # A spike probe script: `[bash] spike-scratch/<dir>/<name>.sh [ARGS...]`,
+  # repo-relative, inside spike-scratch/, with no `..` component.
+  local script_index="$index"
+  if [ "${RUN_ARGS[$index]}" = bash ]; then
+    script_index=$((index + 1))
+  fi
+  if [ "$script_index" -lt "${#RUN_ARGS[@]}" ]; then
+    argument="${RUN_ARGS[$script_index]}"
+    if [[ "$argument" == spike-scratch/*.sh ]] && [[ "/$argument/" != */../* ]] \
+      && [ -f "${REPO}/${argument}" ]; then
+      COMMAND_INDEX="$script_index"
+      return 0
+    fi
+  fi
   [ "${RUN_ARGS[$index]}" = cargo ] || unsupported_ordinary_command
   COMMAND_INDEX="$index"
   index=$((index + 1))

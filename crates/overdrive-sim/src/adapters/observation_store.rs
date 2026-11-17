@@ -195,6 +195,13 @@ struct PeerState {
     /// [`SimObservationStore::inject_alloc_status_rows_failure`] for the
     /// public surface and queue semantics.
     pending_alloc_status_rows_failures: Mutex<VecDeque<ObservationStoreError>>,
+    /// Test-only sticky switch: while armed, `service_backends_rows` and
+    /// `all_service_backends_rows` return `Unreachable`. See
+    /// [`SimObservationStore::script_service_rows_read_failure`].
+    service_rows_read_failure: std::sync::atomic::AtomicBool,
+    /// Test-only sticky switch for [`ObservationStore::alloc_status_rows`]; see
+    /// [`SimObservationStore::script_alloc_status_rows_read_failure`].
+    alloc_status_rows_read_failure: std::sync::atomic::AtomicBool,
 }
 
 #[derive(Default)]
@@ -281,6 +288,8 @@ impl PeerState {
             pending_write_failures: Mutex::new(VecDeque::new()),
             pending_alloc_lifecycle_write_failures: Mutex::new(VecDeque::new()),
             pending_alloc_status_rows_failures: Mutex::new(VecDeque::new()),
+            service_rows_read_failure: std::sync::atomic::AtomicBool::new(false),
+            alloc_status_rows_read_failure: std::sync::atomic::AtomicBool::new(false),
         })
     }
 
@@ -757,6 +766,34 @@ impl SimObservationStore {
     pub fn inject_alloc_status_rows_failure(&self, error: ObservationStoreError) {
         self.inner.pending_alloc_status_rows_failures.lock().push_back(error);
     }
+
+    /// Test-only: arm (`true`) or clear (`false`) a sticky failure on the
+    /// service-backend row reads, `service_backends_rows` and
+    /// `all_service_backends_rows`. While armed each returns
+    /// `ObservationStoreError::Unreachable` and observes no rows;
+    /// `service_hydration_results_rows`, allocation-status reads and every
+    /// write are unaffected. Models one reconciler family's enumeration read
+    /// failing while the rest of the observation store is healthy.
+    pub fn script_service_rows_read_failure(&self, armed: bool) {
+        self.inner.service_rows_read_failure.store(armed, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// Test-only: arm (`true`) or clear (`false`) a sticky failure on
+    /// [`ObservationStore::alloc_status_rows`]. While armed every call returns
+    /// `ObservationStoreError::Unreachable` and observes no rows; clearing it
+    /// models the store recovering. Unlike the one-shot queue of
+    /// [`inject_alloc_status_rows_failure`](Self::inject_alloc_status_rows_failure)
+    /// it does not depend on which reader reaches the store first.
+    pub fn script_alloc_status_rows_read_failure(&self, armed: bool) {
+        self.inner.alloc_status_rows_read_failure.store(armed, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    fn service_rows_read_fault(&self) -> Result<(), ObservationStoreError> {
+        if self.inner.service_rows_read_failure.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(ObservationStoreError::Unreachable { peer: "sim-service-rows".to_owned() });
+        }
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -892,6 +929,11 @@ impl ObservationStore for SimObservationStore {
         if let Some(injected) = injected {
             return Err(injected);
         }
+        if self.inner.alloc_status_rows_read_failure.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(ObservationStoreError::Unreachable {
+                peer: "sim-alloc-status-rows".to_owned(),
+            });
+        }
 
         // Deterministic iteration via the BTreeMap ordering on
         // AllocationId — every call on the same state returns rows in
@@ -965,6 +1007,7 @@ impl ObservationStore for SimObservationStore {
         &self,
         service_id: &ServiceId,
     ) -> Result<Vec<ServiceBackendRow>, ObservationStoreError> {
+        self.service_rows_read_fault()?;
         // LWW winner for the given `service_id`, if any. At most one
         // row per service — keyed by `ServiceId` alone.
         let by_sb = self.inner.by_service_backends.lock();
@@ -974,6 +1017,7 @@ impl ObservationStore for SimObservationStore {
     async fn all_service_backends_rows(
         &self,
     ) -> Result<Vec<ServiceBackendRow>, ObservationStoreError> {
+        self.service_rows_read_fault()?;
         // Every LWW winner across all services — the keyless List leg
         // (C4 / D-TME-11). Deterministic iteration via the `BTreeMap`
         // ordering on `ServiceId`, mirroring `alloc_status_rows`.

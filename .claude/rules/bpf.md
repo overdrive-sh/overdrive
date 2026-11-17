@@ -255,6 +255,58 @@ smell.
 
 ---
 
+## Reading kernel maps from userspace
+
+Rules 1–5 make a program cheap for the verifier. These rules make a
+userspace *read* of a map cheap, for example a reconciler that observes
+what the dataplane programmed.
+
+- **A userspace map read costs per element, even in batch mode.**
+  `BPF_MAP_LOOKUP_BATCH` saves syscall entries, not per-element work. The
+  kernel still calls `map_get_next_key`, `bpf_map_copy_value` and
+  `copy_to_user` once per slot (`generic_map_lookup_batch`,
+  `kernel/bpf/syscall.c:2093-2108 @ v7.0`). Reading a 16,381-slot Maglev
+  table takes about 5 ms. Never design a periodic read that scans a large
+  map; size every read by the number of elements it touches.
+- **Observe a large kernel structure through a small summary stored inside
+  it.** Write a fingerprint or generation into the same map object before
+  the atomic publish (the outer-map swap), so the summary changes with the
+  content and disappears with it. Reading it is an observation of the
+  resource, not the View-marker anti-pattern in `reconcilers.md`, which is
+  a hash the reconciler keeps of what it emitted. Two extra slots in the
+  inner array took the read from 5.4 ms to 4.7 µs.
+- **A derived kernel structure cannot be read back to its inputs.** A Maglev
+  table records which backend owns each slot, not which backends exist. A
+  backend whose weight earns no slot is invisible. Never plan to recover an
+  input set by inverting a lossy or derived structure; store what you need
+  to observe explicitly.
+- **Read under the writer's commit guard.** An update that touches several
+  maps (backend records in place, a new inner map, the outer swap, cleanup)
+  is not atomic to a concurrent reader. Without the guard, most reads under
+  constant writes were torn.
+- **mmap of an array map has two traps.**
+  - `BPF_F_MMAPABLE` must be on the inner-map prototype *and* every inner
+    map, because `bpf_map_meta_equal` compares `map_flags`
+    (`kernel/bpf/map_in_map.c:90 @ v7.0`).
+  - The reader must open the map read-write, even to map it `PROT_READ`.
+    On a read-only fd, `MAP_SHARED` clears `VM_SHARED` (`mm/mmap.c:465 @ v7.0`)
+    and `bpf_map_mmap` returns `EINVAL` (`kernel/bpf/syscall.c:1095-1096 @ v7.0`).
+- **Measure CPU and memory, not only latency.** For every candidate, record
+  the latency, the CPU it burns (the thread's user plus system time,
+  `getrusage(RUSAGE_THREAD)`), and the kernel memory it holds (`memlock`
+  in `/proc/self/fdinfo/<map fd>`). Measure the write path as well as the
+  read path. A design that is fast but adds pages per map, or cheap to read
+  but expensive to write, loses on the axis that was not measured.
+
+**Precedent:** the service-map read for reconciler-convergence-guarantees
+(`docs/feature/reconciler-convergence-guarantees/spike/findings-programmed-service-map-read.md`).
+The full-table scan cost 5.41 ms per service, the mmap read 107 µs, and
+the fingerprint stored in the inner map 4.7 µs. The fingerprint cost
+16 bytes of kernel memory per service; mmap cost 3.7 KiB per service,
+because it rounds each array up to whole pages.
+
+---
+
 ## Symptoms during review
 
 - A `for`/`while` loop summing packet bytes on a NAT / header-rewrite
@@ -272,6 +324,14 @@ smell.
   entry instead of appending → collapses the audit trail.
 - A `bpf_loop` conversion (or a fastmod swap) proposed for a small loop
   / the Maglev modulo → low-leverage; see "What does NOT help".
+- A periodic userspace read that iterates or batch-reads a large map → it
+  costs per element; store a summary in the map instead ("Reading kernel
+  maps from userspace").
+- A design that recovers an input set by reading back a derived kernel
+  structure (a Maglev table, a hash ring) → lossy; store what must be
+  observed.
+- A userspace read of maps another path updates in several steps, taken
+  without the writer's guard → torn reads.
 
 ---
 

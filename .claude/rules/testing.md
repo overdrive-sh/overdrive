@@ -1763,6 +1763,7 @@ refuses before START with a stable diagnostic and status 64.
 | Element | Accepted |
 |---|---|
 | Prefix | Optional `env` (or `/usr/bin/env`) followed by `KEY=VALUE` words, then a literal `cargo`. Each key appears once. |
+| Spike script | `[bash] spike-scratch/<dir>/<name>.sh [ARGS...]`: a repo-relative script inside `spike-scratch/`, with no `..` component, that exists in the checkout. Its arguments are passed through unchecked. |
 | `env` keys | `OVERDRIVE_BPF_NATIVE` (value `1` only); `RUST_BACKTRACE`, `RUST_LOG`, `NEXTEST_PROFILE`, `QUINT_SEED`, `QUINT_VERBOSE`, and the `PROPTEST_` keys `CASES`, `DISABLE_FAILURE_PERSISTENCE`, `FORK`, `MAX_DEFAULT_SIZE_RANGE`, `MAX_FLAT_MAP_REGENS`, `MAX_GLOBAL_REJECTS`, `MAX_LOCAL_REJECTS`, `MAX_SHRINK_ITERS`, `MAX_SHRINK_TIME`, `RNG_ALGORITHM`, `RNG_SEED`, `TIMEOUT`, `VERBOSE` (free-form values must be valid UTF-8). Any other key refuses. |
 | Cargo subcommand | `build`, `check`, `clippy`, `fmt`; `test` only with `--doc` before any `--`; `nextest run`; `xtask`; `run`. Cargo aliases and `+toolchain` forms are not subcommands and refuse. |
 | `xtask` subcommand | `guest-kit-prepare`, `bpf-build`, `bpf-clippy`, `bpf-unit`, `kmod-build`, `dst-lint`, `cloexec-lint`, `conformance-lint`, `placement-lint`, `yaml-free-cli`, `quint`, `mutants` |
@@ -1777,7 +1778,7 @@ Status-64 runner diagnostics: `unsupported_ordinary_command`,
 
 An ordinary run does **not** accept `cargo xtask integration-test`,
 `verifier-regress`, `xdp-perf`, `dev-setup`, `ci`, `lima`, `hooks`, `mcp`,
-`kmod-load`, `cargo test` without `--doc`, a script path, `bash -c`, or a shell
+`kmod-load`, `cargo test` without `--doc`, a script path outside `spike-scratch/`, `bash -c`, or a shell
 chain. Where an allowed equivalent exists, use it:
 
 | Not accepted | Ordinary form |

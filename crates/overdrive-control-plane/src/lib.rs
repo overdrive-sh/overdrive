@@ -168,6 +168,12 @@ mod shared_network_test_ports;
 #[cfg(test)]
 mod convergence_loop_wake;
 
+// GH #351 slice 04: the shared convergence property and the per-reconciler
+// `managed_targets` containment obligation. Source-local because the property
+// drives the crate-private `resync_reconciler`.
+#[cfg(test)]
+mod convergence_property;
+
 // GH #295 QHOLD (ADR-0169, ADR-0184, ADR-0124): the source-local Quint
 // conformance driver of `specs/quint/guest-flow-owner/quiescence.qnt`
 // (QPROJ-1: the owner with the runtime shared-network supervisor) and the

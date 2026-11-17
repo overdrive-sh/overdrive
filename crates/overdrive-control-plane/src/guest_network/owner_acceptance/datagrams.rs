@@ -198,6 +198,50 @@ async fn a_vip_association_is_rewritten_by_connect4_and_checked_on_its_kernel_pe
     assert!(c.io.socket_observation().closed_by_owner.contains(&key));
 }
 
+/// Outcome anchor: OUT-RCG-GUEST-UDP-TO-VIP-REFUSED
+/// D-11 (ADR-0298), slice 02 AC7 — guest UDP to a VIP is unsupported until
+/// GH #310: a datagram association whose destination lies in the configured
+/// VIP range is refused `Policy` before the route-type check, before any host
+/// socket is made, connected or sent on. A destination outside the range keeps
+/// the generic path (the `gateway:53` exemption, the guest-prefix refusal).
+///
+/// Pending: the owner still connects the association through the `connect4`
+/// rewrite path until the deletion lands, so the body fails at the refusal
+/// assertion.
+///
+/// CONTRACT_SHAPE: pure refusal (return-only; no socket, no route lookup).
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+#[should_panic(expected = "a UDP association to a service VIP must be refused Policy")]
+async fn a_udp_association_to_a_service_vip_is_refused_policy_before_any_socket_is_made() {
+    let c = Composition::booted(90).await;
+    let (lease, _session) = c.active_lease("dgram-vip-refused", &[]).await;
+    let vip = SocketAddrV4::new(Ipv4Addr::new(10, 96, 0, 20), 53);
+
+    let (key, flow) = c.open_datagram(&lease, 1, vip, 6100);
+    c.settle().await;
+
+    // THEN the association is refused Policy.
+    assert!(
+        sent_to(&c, lease.cid)
+            .contains(&ControlMessage::Refused { flow, refusal: FlowRefusal::Policy }),
+        "a UDP association to a service VIP must be refused Policy until #310"
+    );
+    // AND nothing was made, looked up, connected or sent on the host side.
+    for kind in [
+        SimEffectKind::RouteType,
+        SimEffectKind::OpenPeer,
+        SimEffectKind::ConnectUdp,
+        SimEffectKind::Attach,
+    ] {
+        assert_eq!(
+            c.io.issued_count(kind),
+            0,
+            "the refusal precedes every host effect; saw {kind:?}"
+        );
+    }
+    assert!(c.io.socket_observation().closed_by_owner.contains(&key));
+}
+
 /// R5-7 owner projection (D26-PINS F-4): the forwarder's send of a forwarded
 /// datagram on H is rejected `EPERM` by the host-internal rule (an address
 /// made local after the owner's check); the pair aborts `SocketError` on its

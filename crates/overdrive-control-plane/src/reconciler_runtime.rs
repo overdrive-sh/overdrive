@@ -42,7 +42,7 @@ use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::WorkloadKind;
 use overdrive_core::id::AllocationId;
 use overdrive_core::reconcilers::{
-    Action, Reconciler, ReconcilerName, TargetResource, TickContext,
+    Action, HydrateError, Reconciler, ReconcilerName, TargetResource, TickContext,
 };
 use overdrive_core::traits::observation_store::{
     AllocStatusRow, ConflictRoute, LogicalTimestamp, ObservationWrite, ReconcileConflictRow,
@@ -193,6 +193,21 @@ impl BrokerDrain<'_> {
         blocked_targets: &BTreeSet<TargetResource>,
     ) -> Option<UnixInstant> {
         self.guard.next_eligible_at(blocked_targets)
+    }
+
+    /// The pending keys in first-pending (admission) order (D-12 b): ascending
+    /// by the broker's admission sequence, the order `drain_pending` admits
+    /// eligible keys. A same-key resubmit does not change a key's position.
+    /// Read-only; takes no limit or blocked set and does not filter by
+    /// eligibility.
+    #[must_use]
+    #[expect(
+        clippy::unused_self,
+        reason = "DISTILL scaffold: the real body reads the broker through self"
+    )]
+    pub fn pending_keys(&self) -> Vec<(ReconcilerName, TargetResource)> {
+        // DISTILL scaffold: an empty key list, replaced by the broker's real ordered read.
+        Vec::new()
     }
 
     /// Read the broker's cumulative counters.
@@ -1503,6 +1518,26 @@ pub async fn run_convergence_tick(
     run_convergence_tick_inner(state, reconciler_name, target, now, tick_n, deadline, None).await
 }
 
+/// One reconciler's step of the pass (D-12): enumerates its managed targets and
+/// submits all of them `Immediate`, or on `Err` submits none. Returns the count submitted.
+///
+/// # Errors
+///
+/// The reconciler's [`HydrateError`] from `managed_targets`; nothing is submitted.
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "DISTILL scaffold: no caller until the resync pass is wired")
+)]
+#[allow(clippy::unused_async, reason = "DISTILL scaffold: the real body awaits managed_targets")]
+pub(crate) async fn resync_reconciler(
+    state: &AppState,
+    name: &ReconcilerName,
+) -> Result<usize, HydrateError> {
+    // DISTILL scaffold: submits nothing, replaced by the enumerate-and-submit step.
+    let _ = (state, name);
+    Ok(0)
+}
+
 /// Post-#295 production-owner convergence path with only the accepted
 /// guest-network driven port substituted.
 ///
@@ -1890,6 +1925,10 @@ mod liveness_gate_fixture;
 mod guest_listener_gate_composed;
 #[cfg(all(test, feature = "integration-tests"))]
 mod quint_liveness_gate;
+// The `evaluation_wake` quint-connect conformance driver (main `wake_conf`; D-1, D-3,
+// D-12 of reconciler-convergence-guarantees).
+#[cfg(all(test, feature = "integration-tests"))]
+mod quint_evaluation_wake;
 
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::unwrap_used)]

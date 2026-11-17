@@ -451,6 +451,28 @@ impl AnyReconciler {
         }
     }
 
+    /// Target-set enumeration dispatch (D-1a) — forwards to
+    /// [`Reconciler::managed_targets`] across all variants.
+    ///
+    /// # Errors
+    ///
+    /// The inner reconciler's [`HydrateError`]; no partial set is returned.
+    pub async fn managed_targets(
+        &self,
+        ctx: &HydrationContext<'_>,
+    ) -> Result<std::collections::BTreeSet<TargetResource>, HydrateError> {
+        match self {
+            Self::NoopHeartbeat(r) => r.managed_targets(ctx).await,
+            Self::WorkloadLifecycle(r) => r.managed_targets(ctx).await,
+            Self::WorkflowLifecycle(r) => r.managed_targets(ctx).await,
+            Self::ServiceMapHydrator(r) => r.managed_targets(ctx).await,
+            Self::ServiceLifecycle(r) => r.managed_targets(ctx).await,
+            Self::SvidLifecycle(r) => r.managed_targets(ctx).await,
+            Self::GatewaySvidLifecycle(r) => r.managed_targets(ctx).await,
+            Self::VmReclamation(r) => r.managed_targets(ctx).await,
+        }
+    }
+
     /// Impure hydrate-actual dispatch (ADR-0086 D1) — the mirror of
     /// [`AnyReconciler::hydrate_desired`]. Forwards to
     /// [`Reconciler::hydrate_actual`] and wraps into the matching [`AnyState`]

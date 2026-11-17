@@ -487,6 +487,7 @@ struct NoopReconciler {
     name: ReconcilerName,
 }
 
+#[async_trait::async_trait]
 impl Reconciler for NoopReconciler {
     const NAME: &'static str = "noop-heartbeat";
 
@@ -495,6 +496,17 @@ impl Reconciler for NoopReconciler {
 
     fn name(&self) -> &ReconcilerName {
         &self.name
+    }
+
+    // DISTILL scaffold: an empty target set, replaced by the reconciler's real enumeration.
+    async fn managed_targets(
+        &self,
+        _ctx: &overdrive_core::reconcilers::HydrationContext<'_>,
+    ) -> Result<
+        std::collections::BTreeSet<overdrive_core::reconcilers::TargetResource>,
+        overdrive_core::reconcilers::HydrateError,
+    > {
+        Ok(std::collections::BTreeSet::new())
     }
 
     fn reconcile(

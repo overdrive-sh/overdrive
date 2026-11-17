@@ -55,6 +55,14 @@ impl Reconciler for NoopHeartbeat {
         &self.name
     }
 
+    // DISTILL scaffold: an empty target set, replaced by this reconciler's real enumeration.
+    async fn managed_targets(
+        &self,
+        _ctx: &HydrationContext<'_>,
+    ) -> Result<std::collections::BTreeSet<TargetResource>, HydrateError> {
+        Ok(std::collections::BTreeSet::new())
+    }
+
     fn reconcile(
         &self,
         _desired: &Self::State,

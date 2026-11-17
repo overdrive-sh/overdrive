@@ -72,6 +72,22 @@ The verdict rests on a real exercise on the real kernel, not "it compiled":
   pinned appliance kernel is Linux 7.0 — ADR-0068; a dev Lima or metal kernel
   of another version is not that signal).
 
+## Probe inputs come from production-reachable shapes
+
+Build probe inputs the way production builds them, and cite the producer:
+the weights production writes, how allocations get their addresses, how
+services own their endpoints. A probe that feeds random or hand-built
+states production cannot produce reports conditions that are not real.
+State any input the probe deliberately takes outside production's range,
+and keep its result out of the design conditions unless a production path
+produces that input (`development.md` § "Ground the premise").
+
+**Precedent:** the service-map read spike first drew backend weights from
+{0, 1, 65535, 0..999}, which made the read look inexact. Production writes
+weight 1 (`service_lifecycle.rs:1122`). The same probe programmed one
+endpoint under two services, which production cannot do. Both results were
+reported as design conditions before anyone checked them.
+
 ## Findings, gate, and honesty
 
 - Findings → `docs/feature/{id}/spike/findings{,-<name>}.md`: binary verdict

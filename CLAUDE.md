@@ -305,6 +305,8 @@ that is the conflation; the distinction above governs. (#40 / ADR-0067 /
 the workflows.md precedent still carry the conflated wording pending
 correction.)
 
+Services cannot share an endpoint.
+
 ## Workload identity model — workloads hold NOTHING; the kernel does mTLS
 
 mTLS in Overdrive is **kernel-mediated** (eBPF sockops + kTLS,

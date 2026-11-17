@@ -97,6 +97,9 @@ mod integration {
     /// single-UDP-listener forward+reverse e2e (walking skeleton).
     /// RED scaffolds.
     mod reverse_nat_udp_e2e;
+    /// reconciler-convergence-guarantees Slice 02 AC2 (ADR-0297) — the boot
+    /// attaches none of the deleted same-host cgroup socket programs.
+    mod same_host_programs_not_loaded_at_boot;
     /// phase-2-xdp-service-map Slice 06 (US-06; S-2.2-22) —
     /// sanity prologue mixed-batch counter assertions. RED scaffold.
     mod sanity_mixed_batch;

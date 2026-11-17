@@ -1,0 +1,18 @@
+# PROBE programmed-service-map-read — V-6 of reconciler-convergence-guarantees (GH #351, D-20).
+# Throwaway. Self-contained workspace root; depends on workspace crates by path; never edits crates/.
+[workspace]
+
+[package]
+name = "programmed-service-map-read"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+overdrive-core      = { path = "../../crates/overdrive-core" }
+overdrive-dataplane = { path = "../../crates/overdrive-dataplane" }
+libc  = "0.2"
+tokio = { version = "1", features = ["rt", "macros", "time"] }
+
+[profile.release]
+debug = 1

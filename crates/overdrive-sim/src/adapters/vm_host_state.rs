@@ -15,7 +15,7 @@
 //! `.claude/rules/development.md` § "Concurrency & async". The `async fn`
 //! surface exists only to satisfy the trait signature.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::io;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -51,6 +51,12 @@ struct Inner {
     run_dirs: BTreeSet<AllocationId>,
     clones: BTreeMap<AllocationId, PathBuf>,
     probe_fault: Option<io::ErrorKind>,
+    /// FIFO of failures for [`VmHostState::kill_scope`]; see
+    /// [`SimVmHostState::script_kill_scope_failure`].
+    kill_scope_failures: VecDeque<io::ErrorKind>,
+    /// FIFO of failures for [`VmHostState::discard_artifacts`]; see
+    /// [`SimVmHostState::script_discard_artifacts_failure`].
+    discard_artifacts_failures: VecDeque<io::ErrorKind>,
 }
 
 /// **TEST-HOOK-ONLY** interleaving seam for [`VmHostState::observe`]
@@ -156,6 +162,22 @@ impl SimVmHostState {
         self.inner.lock().probe_fault = Some(kind);
     }
 
+    /// Test-only: queue a failure for the next [`VmHostState::kill_scope`]
+    /// call (the sim counterpart of a cgroup kill that fails). FIFO: each call
+    /// pops the front entry BEFORE touching the scope table and returns it as
+    /// `Err(..)`, leaving the host exactly as it was; once the queue is empty
+    /// calls proceed normally. Stack several to model consecutive failures.
+    pub fn script_kill_scope_failure(&self, kind: io::ErrorKind) {
+        self.inner.lock().kill_scope_failures.push_back(kind);
+    }
+
+    /// Test-only: queue a failure for the next
+    /// [`VmHostState::discard_artifacts`] call. Same FIFO semantics as
+    /// [`Self::script_kill_scope_failure`]: the failing call changes nothing.
+    pub fn script_discard_artifacts_failure(&self, kind: io::ErrorKind) {
+        self.inner.lock().discard_artifacts_failures.push_back(kind);
+    }
+
     /// **TEST-HOOK-ONLY**. Whether `alloc`'s cgroup scope is still
     /// present in this sim's in-memory state.
     #[must_use]
@@ -210,6 +232,10 @@ impl VmHostState for SimVmHostState {
     }
 
     async fn kill_scope(&self, scope: &CgroupPath) -> std::io::Result<()> {
+        let scripted = self.inner.lock().kill_scope_failures.pop_front();
+        if let Some(kind) = scripted {
+            return Err(io::Error::from(kind));
+        }
         // Idempotent: an unknown scope (already absent) is a no-op, not
         // an error -- mirrors the real adapter's NotFound-as-Ok
         // tolerance. In-memory removal settles synchronously, so the
@@ -221,6 +247,10 @@ impl VmHostState for SimVmHostState {
     }
 
     async fn discard_artifacts(&self, alloc: &AllocationId) -> std::io::Result<()> {
+        let scripted = self.inner.lock().discard_artifacts_failures.pop_front();
+        if let Some(kind) = scripted {
+            return Err(io::Error::from(kind));
+        }
         {
             let mut inner = self.inner.lock();
             inner.run_dirs.remove(alloc);

@@ -295,6 +295,14 @@ impl Reconciler for SvidLifecycle {
         &[ObservationRowKind::AllocStatus]
     }
 
+    // DISTILL scaffold: an empty target set, replaced by this reconciler's real enumeration.
+    async fn managed_targets(
+        &self,
+        _ctx: &HydrationContext<'_>,
+    ) -> Result<std::collections::BTreeSet<TargetResource>, HydrateError> {
+        Ok(std::collections::BTreeSet::new())
+    }
+
     /// Pure-sync `reconcile` (ADR-0035 / ADR-0067 D1/D8). Converges
     /// `desired = Running allocs` (`desired.desired`) against
     /// `actual = held set` (`actual.actual`) and maintains the retry-memory View:

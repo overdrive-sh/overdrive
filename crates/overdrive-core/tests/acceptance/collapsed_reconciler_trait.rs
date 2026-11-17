@@ -69,6 +69,7 @@ struct HelloRec {
     name: ReconcilerName,
 }
 
+#[async_trait::async_trait]
 impl Reconciler for HelloRec {
     // Single compile-time anchor for the canonical name; the
     // refactor-reconciler-static-name RCA threads this through the
@@ -87,6 +88,17 @@ impl Reconciler for HelloRec {
 
     fn name(&self) -> &ReconcilerName {
         &self.name
+    }
+
+    // DISTILL scaffold: an empty target set, replaced by the reconciler's real enumeration.
+    async fn managed_targets(
+        &self,
+        _ctx: &overdrive_core::reconcilers::HydrationContext<'_>,
+    ) -> Result<
+        std::collections::BTreeSet<overdrive_core::reconcilers::TargetResource>,
+        overdrive_core::reconcilers::HydrateError,
+    > {
+        Ok(std::collections::BTreeSet::new())
     }
 
     fn reconcile(

@@ -198,6 +198,14 @@ impl Reconciler for WorkloadLifecycle {
         &[ObservationRowKind::AllocStatus]
     }
 
+    // DISTILL scaffold: an empty target set, replaced by this reconciler's real enumeration.
+    async fn managed_targets(
+        &self,
+        _ctx: &HydrationContext<'_>,
+    ) -> Result<std::collections::BTreeSet<TargetResource>, HydrateError> {
+        Ok(std::collections::BTreeSet::new())
+    }
+
     // Per ADR-0023 + ADR-0037 §4 the reconcile body is the single
     // dispatch surface for every WorkloadLifecycle decision branch (Stop,
     // Absent, Run → {Running, Operator-stopped, Job-natural-exit,

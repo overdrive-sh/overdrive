@@ -4,6 +4,7 @@ State 1
   due = TRUE
   dispatched = 0
   active = {}
+  vip = FALSE
   inWin = {}
   pending = <<>>
   conf_step = [init |-> [tag |-> "UNIT"]]
@@ -11,18 +12,21 @@ State 1
   drifts = 0
   has = {}
   faults = 0
-  elig = [k1 |-> "imm", k2 |-> "imm", k3 |-> "imm"]
+  r4 = FALSE
+  elig = [k1 |-> "imm", k2 |-> "imm", k3 |-> "imm", k4 |-> "imm"]
+  held = FALSE
   need = {}
   passPos = 0
+  v3 = FALSE
 
 State 2 [DivergeWake]
-  pending = <<"k3">>
+  pending = <<"k1">>
   drifts = 1
-  has = {"k3"}
-  need = {"k3"}
+  has = {"k1"}
+  need = {"k1"}
 
 State 3 [Drain]
-  active = {"k3"}
+  active = {"k1"}
   pending = <<>>
 
 State 4 [Finish]

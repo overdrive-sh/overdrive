@@ -87,7 +87,11 @@
 //! consume them.
 //!
 //! ```
-//! use overdrive_core::reconcilers::{Action, Reconciler, ReconcilerName, TickContext};
+//! use std::collections::BTreeSet;
+//! use overdrive_core::reconcilers::{
+//!     Action, HydrateError, HydrationContext, Reconciler, ReconcilerName, TargetResource,
+//!     TickContext,
+//! };
 //!
 //! struct HelloReconciler {
 //!     name: ReconcilerName,
@@ -102,6 +106,7 @@
 //!     }
 //! }
 //!
+//! #[async_trait::async_trait]
 //! impl Reconciler for HelloReconciler {
 //!     /// Canonical kebab-case name; single compile-time anchor.
 //!     const NAME: &'static str = "hello";
@@ -119,6 +124,14 @@
 //!
 //!     fn name(&self) -> &ReconcilerName {
 //!         &self.name
+//!     }
+//!
+//!     // DISTILL scaffold: an empty target set, replaced by the reconciler's real enumeration.
+//!     async fn managed_targets(
+//!         &self,
+//!         _ctx: &HydrationContext<'_>,
+//!     ) -> Result<BTreeSet<TargetResource>, HydrateError> {
+//!         Ok(BTreeSet::new())
 //!     }
 //!
 //!     // Pure, synchronous. No `.await`, no I/O, no direct store
@@ -153,6 +166,7 @@
 //! let _reconciler = HelloReconciler::new();
 //! ```
 
+use std::collections::BTreeSet;
 use std::fmt;
 use std::str::FromStr;
 use std::time::{Duration, Instant};
@@ -378,6 +392,35 @@ pub trait Reconciler: Send + Sync {
     ) -> Result<Self::State, HydrateError> {
         todo!("Reconciler::hydrate_actual is unimplemented; override it in the reconciler impl")
     }
+
+    /// The set of targets this reconciler manages, enumerated from intent and
+    /// observation (D-1a).
+    ///
+    /// Impure + async like [`hydrate_desired`](Reconciler::hydrate_desired): reads
+    /// through the [`HydrationContext`] borrow-bundle, carries NO `&dyn Clock`.
+    ///
+    /// - **Preconditions**: none beyond a valid `ctx`.
+    /// - **Postcondition on `Ok(set)`**: `set` contains every target `T` for
+    ///   which this reconciler's `hydrate_desired` or `hydrate_actual` would
+    ///   return a non-empty projection, built from intent and from observation.
+    ///   A target with nothing to do may be present (it evaluates to `Noop`).
+    ///   No target may be omitted for a non-empty projection.
+    /// - **Edge cases**: an empty set is valid. A read failure returns `Err` for
+    ///   the whole call; no partial set is returned. A target shape the
+    ///   reconciler does not parse is never returned.
+    /// - **Invariants**: read-only; no clock, no write, no dispatch.
+    ///   Deterministic over unchanged state. Size is bounded by the number of
+    ///   managed resources.
+    ///
+    /// Required: no default, so omitting it does not compile.
+    ///
+    /// # Errors
+    ///
+    /// [`HydrateError`] when an intent or observation read fails.
+    async fn managed_targets(
+        &self,
+        ctx: &HydrationContext<'_>,
+    ) -> Result<BTreeSet<TargetResource>, HydrateError>;
 
     /// Declarative level-triggered resync cadence — a safety net beside
     /// the edge-triggered broker (K8s `SyncPeriod` / `RequeueAfter`;

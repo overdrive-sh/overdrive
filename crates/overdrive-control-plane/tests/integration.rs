@@ -165,6 +165,10 @@ mod integration {
 
     mod node_health_writer_runs_at_boot;
     mod observation_empty_rows;
+    /// reconciler-convergence-guarantees Slice 01 — a deploy recovers by
+    /// itself after a hydrate, View-write or dataplane-update fault because
+    /// the runtime re-evaluates every managed target each period.
+    mod reconciler_resync_pass;
     /// R-76 (ADR-0062 amendment 2026-11-10) — a stopped Service's last backend
     /// is purged from the service map, and the outcome holds after a node
     /// restart.

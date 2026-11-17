@@ -133,6 +133,11 @@ pub struct SimDataplane {
     /// "Ordered-collection choice" — DST observers walk the maps and
     /// require deterministic iteration order.
     local_state: Mutex<LocalState>,
+    /// Test-only FIFO of failures for [`Dataplane::update_service`]: each call
+    /// pops the front entry BEFORE touching the service map and returns it as
+    /// `Err(..)`; the map is unchanged. Empty on the non-test path. See
+    /// [`SimDataplane::script_update_service_failure`].
+    pending_update_service_failures: Mutex<std::collections::VecDeque<DataplaneError>>,
 }
 
 /// `LOCAL_BACKEND_MAP` mirror + `REVERSE_LOCAL_MAP` reply mirror guarded
@@ -175,7 +180,17 @@ impl SimDataplane {
             flow_events: Mutex::new(Vec::new()),
             drop_counter: Mutex::new([0_u64; DropClass::VARIANT_COUNT as usize]),
             local_state: Mutex::new(LocalState::new()),
+            pending_update_service_failures: Mutex::new(std::collections::VecDeque::new()),
         }
+    }
+
+    /// Test-only: queue a failure for the next [`Dataplane::update_service`]
+    /// call (the sim counterpart of a map-update failure on the real
+    /// dataplane). FIFO: each call pops the front entry and returns it as
+    /// `Err(..)` WITHOUT mutating the service map; once the queue is empty
+    /// calls proceed normally. Stack several to model consecutive failures.
+    pub fn script_update_service_failure(&self, error: DataplaneError) {
+        self.pending_update_service_failures.lock().push_back(error);
     }
 
     /// Read the locally-registered backend for `(vip, vip_port)`, if
@@ -464,6 +479,13 @@ impl Dataplane for SimDataplane {
         frontend: ServiceFrontend,
         backends: Vec<Backend>,
     ) -> Result<(), DataplaneError> {
+        // Test-only injection (see `script_update_service_failure`): the
+        // failure precedes every mutation, so a failed update leaves the
+        // service map exactly as it was.
+        let scripted = self.pending_update_service_failures.lock().pop_front();
+        if let Some(error) = scripted {
+            return Err(error);
+        }
         // `frontend.vip` is IPv4-by-construction (ADR-0060 D1a) —
         // narrow infallibly. `proto` is the single declared protocol;
         // the reverse-NAT fan-out is per-proto (D4), never the legacy

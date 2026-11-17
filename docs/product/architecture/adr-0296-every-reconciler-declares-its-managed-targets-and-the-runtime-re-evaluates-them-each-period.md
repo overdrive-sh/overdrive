@@ -105,7 +105,9 @@ period, whatever dropped its earlier wake. It does not guarantee that `reconcile
 converges `actual` to `desired`, and it does not make a View-gated action re-emit. The
 model-checked statement, its abstraction and bound are in the feature delta
 (`Formal protocol model`, `Quality attributes`). No reconciler's View decides whether an
-effect is in place. `service-lifecycle`'s probe-driven stop markers are pacing keyed to
+effect is in place. A re-evaluation helps only when `actual` is read from the resource: the
+`service-map-hydrator` reads the programmed service map (ADR-0299), so a map lost to a
+reboot or a restart is reprogrammed by the next pass. `service-lifecycle`'s probe-driven stop markers are pacing keyed to
 the probe row's `run_seq`: the pass re-evaluates the allocation and changes no verdict
 (feature delta D-6, which names the decisions behind each marker).
 
@@ -133,4 +135,4 @@ Negative and bounds:
   production today (empty registry); no dedicated wake is added for it.
 
 Links: [feature delta](../../feature/reconciler-convergence-guarantees/feature-delta.md)
-(interface contract D-1, `Formal protocol model`), ADR-0084, ADR-0086, ADR-0102, ADR-0273, GH #275, GH #356.
+(interface contract D-1, `Formal protocol model`), ADR-0084, ADR-0086, ADR-0102, ADR-0273, ADR-0299, GH #275, GH #356.
