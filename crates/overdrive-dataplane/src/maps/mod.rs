@@ -209,84 +209,8 @@ pub mod wire {
     // SAFETY: repr(C), no padding-uninit issues (we always zero
     // `_pad`); aya needs the marker for raw map access.
     unsafe impl aya::Pod for VipPod {}
-
-    /// `LOCAL_BACKEND_MAP` outer-key POD per ADR-0053 § 1
-    /// (rev 2026-06-03).
-    ///
-    /// 8-byte host-order tuple `(vip, vip_port, proto, _pad)`. Matches
-    /// `crates/overdrive-bpf/src/maps/local_backend_map.rs`'s
-    /// kernel `LocalServiceKey` byte-for-byte. Step 02-02 widened the
-    /// key with the IANA proto byte (TCP=6, UDP=17) absorbing one
-    /// reserved pad byte; the 8-byte envelope is preserved.
-    #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-    #[repr(C)]
-    pub struct LocalServiceKey {
-        /// VIP IPv4, host-order. `u32::from(Ipv4Addr::new(a, b, c, d))`.
-        pub vip_host: u32,
-        /// VIP port, host-order.
-        pub port_host: u16,
-        /// IANA L4 protocol byte — TCP=6, UDP=17 (`Proto::as_u8()`).
-        pub proto: u8,
-        /// Padding to 8-byte alignment. Always zero.
-        pub _pad: u8,
-    }
-
-    // SAFETY: repr(C), `_pad` always 0, all fields fully
-    // byte-addressable. aya requires the marker for raw map access.
-    unsafe impl aya::Pod for LocalServiceKey {}
-
-    /// `LOCAL_BACKEND_MAP` outer-value POD per ADR-0053 § 1.
-    /// 8-byte host-order tuple `(backend_ip, backend_port, _pad)`.
-    /// Matches kernel `LocalBackendEntry` byte-for-byte.
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    #[repr(C)]
-    pub struct LocalBackendEntry {
-        /// Backend IPv4, host-order.
-        pub backend_ip_host: u32,
-        /// Backend port, host-order.
-        pub backend_port_host: u16,
-        /// Padding for 8-byte alignment. Always zero.
-        pub _pad: u16,
-    }
-
-    // SAFETY: same as LocalServiceKey.
-    unsafe impl aya::Pod for LocalBackendEntry {}
 }
 
 // Re-export at the crate-public level for `EbpfDataplane` field
 // naming and the integration tests.
-pub use wire::{
-    BackendEntryPod, BackendKeyPod, LocalBackendEntry, LocalServiceKey, ServiceKey, VipPod,
-};
-
-/// Does this `HashMap::remove` outcome signal an absent key?
-///
-/// The ADR-0053 § 2 deregister idempotency contract requires removing an
-/// absent entry to be a no-op success. aya 0.13 surfaces absent-key on a
-/// real BPF HASH map in TWO shapes: the typed `MapError::KeyNotFound`,
-/// AND a `MapError::SyscallError` wrapping the `bpf_map_delete_elem`
-/// `ENOENT` (the kernel returns ENOENT and aya does not normalise it to
-/// `KeyNotFound` on this path). Both `LocalBackendMapHandle::remove` and
-/// `ReverseLocalMapHandle::remove` swallow both — the single source of
-/// truth for "absent key is `Ok(())`" lives here so the two handles
-/// cannot drift. Without the `SyscallError(ENOENT)` arm, a deregister
-/// retry after a partial failure (forward already gone) errors on the
-/// second forward delete and never reaches the reverse removal (GH #211).
-#[must_use]
-pub(crate) fn is_absent_key(outcome: &Result<(), aya::maps::MapError>) -> bool {
-    use aya::maps::MapError;
-    match outcome {
-        Err(MapError::KeyNotFound) => true,
-        Err(MapError::SyscallError(e)) => e.io_error.raw_os_error() == Some(libc::ENOENT),
-        _ => false,
-    }
-}
-
-// Typed userspace handle for `LOCAL_BACKEND_MAP` per ADR-0053 § 1.
-pub mod local_backend_map_handle;
-
-// unconnected-udp-sendmsg4 (GH #200, ADR-0053 rev 2026-06-05) — typed
-// userspace handle for `REVERSE_LOCAL_MAP` (the cgroup reply store).
-// RED scaffold: method bodies `todo!()` until DELIVER Slice 01.
-// DISTINCT from `reverse_nat_map_handle` (the XDP wire path).
-pub mod reverse_local_map_handle;
+pub use wire::{BackendEntryPod, BackendKeyPod, ServiceKey, VipPod};

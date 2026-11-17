@@ -42,7 +42,7 @@
 //!   50`. The absolute floor exists because the relative gate's
 //!   sensitivity scales inversely with program size: for a ~150K-insn
 //!   XDP program 5% ≈ 7,500 insns of headroom, but for a 28-insn
-//!   `cgroup_connect4_service` program 5% ≈ 1.4 insns — a single
+//!   `cgroup_sock_addr` program 5% ≈ 1.4 insns — a single
 //!   correctness-preserving instruction would trip it. Requiring both
 //!   thresholds keeps the 5% relative gate fully effective on the large
 //!   XDP programs (any relative breach there is thousands of insns, far
@@ -469,7 +469,7 @@ mod tests {
 
     #[test]
     fn evaluate_passes_when_tiny_program_grows_below_absolute_floor() {
-        // The motivating case from issue #201: cgroup_connect4_service
+        // The motivating case from issue #201: a cgroup_sock_addr program
         // baseline 26 → 28 is +2 insns = 7.69% relative growth — above
         // the 5% relative threshold, but only 2 insns, far below the
         // 50-insn absolute floor. Requiring BOTH thresholds keeps tiny

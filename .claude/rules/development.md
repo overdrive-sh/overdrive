@@ -2178,8 +2178,9 @@ S-2.2-17 (Tier 2 lockstep test).
 ### `bpf_sock_addr.user_port` — low-16-NBO in a u32
 
 A specific instance of the endianness-lockstep rule above, with a
-shape that has bitten this codebase once (commit `6af32443`, ADR-0053
-walking-skeleton). `bpf_sock_addr.user_port` is declared `u32` but
+shape that has bitten this codebase once. The gateway's `cgroup/connect4`
+program (`crates/overdrive-bpf/src/programs/cgroup_connect4_gateway.rs`)
+writes `user_port` in the correct form below. `bpf_sock_addr.user_port` is declared `u32` but
 **only the low 16 bits carry the port**, in network byte order — the
 kernel copies `inet_sk->inet_dport` (already NBO) into the low half;
 the high half is undefined / zero. Same applies to `user_port` on the

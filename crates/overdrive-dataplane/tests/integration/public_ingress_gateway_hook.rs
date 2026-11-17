@@ -37,13 +37,12 @@
     reason = "CONTRACT_SHAPE metadata, long real-kernel scenario bodies and fixture preconditions"
 )]
 
-use std::io::{Read, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::os::fd::{AsRawFd, RawFd};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
-use overdrive_core::dataplane::{MTLS_TPROXY_MARK, Proto};
+use overdrive_core::dataplane::MTLS_TPROXY_MARK;
 use overdrive_core::traits::dataplane::Dataplane;
 use overdrive_gateway::ports::{
     GatewayConnectCleanup, GatewayConnectDataplane, GatewayConnectDataplaneError,
@@ -91,68 +90,19 @@ fn live_counts(rig: &HostRig) -> (u32, usize) {
     )
 }
 
-/// S-PIG-41. A socket that was never registered keeps today's behaviour under
-/// the same cgroup hooks: a connect to an existing local-backend VIP is rewritten
-/// by `LOCAL_BACKEND_MAP` exactly as on `main`, a connect to a closed port is
-/// refused by the kernel (not denied by a hook), and `LOCAL_BACKEND_MAP` and the
-/// XDP attachments are unchanged. Expected GREEN from authoring: nothing here
-/// touches a gateway scaffold.
+/// S-PIG-41. A socket that was never registered keeps non-service behaviour
+/// under the gateway hook: a connect to a closed port is refused by the kernel
+/// (not denied by a hook), and the XDP attachments are unchanged. Expected GREEN
+/// from authoring: nothing here touches a gateway scaffold.
 ///
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[overdrive_test(guest = "mtls-relay")]
 #[test]
 fn unregistered_cgroup_socket_keeps_non_service_behaviour() {
     let rig = HostRig::new("h41");
-    let rt = runtime();
 
     let xdp = |iface: &str| snapshot("ip", &["-d", "link", "show", "dev", iface]);
-    let entries = |rig: &HostRig| {
-        let mut rows: Vec<(u32, u16, u8, u32, u16)> = rig
-            .dataplane
-            .local_backend_map_entries()
-            .expect("dump LOCAL_BACKEND_MAP")
-            .iter()
-            .map(|(key, value)| {
-                (
-                    key.vip_host,
-                    key.port_host,
-                    key.proto,
-                    value.backend_ip_host,
-                    value.backend_port_host,
-                )
-            })
-            .collect();
-        rows.sort_unstable();
-        rows
-    };
-
-    // The existing local-backend path (ADR-0053): VIP:7777 -> an echo listener.
-    let local_vip = Ipv4Addr::new(198, 18, 251, 1);
-    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).expect("bind echo listener");
-    let std::net::SocketAddr::V4(backend_address) = listener.local_addr().expect("local addr")
-    else {
-        unreachable!("bound an IPv4 listener")
-    };
-    rt.block_on(rig.dataplane.register_local_backend(local_vip, 7777, backend_address, Proto::Tcp))
-        .expect("register the local backend through the existing path");
-
-    let before_map = entries(&rig);
     let before_xdp = (xdp(&rig.veth.host), xdp(&rig.veth.peer));
-    assert_eq!(before_map.len(), 1, "one local backend registered: {before_map:?}");
-
-    let echo = std::thread::spawn(move || {
-        let (mut stream, _) = listener.accept().expect("accept");
-        let mut buf = [0u8; 32];
-        let n = stream.read(&mut buf).expect("read");
-        stream.write_all(&buf[..n]).expect("echo");
-    });
-    let mut stream = TcpStream::connect((local_vip, 7777))
-        .expect("an unregistered connect to the local VIP is rewritten and completes");
-    stream.write_all(b"unregistered").expect("write");
-    let mut reply = [0u8; 12];
-    stream.read_exact(&mut reply).expect("read the echo");
-    assert_eq!(&reply, b"unregistered", "the existing rewrite reached the local backend");
-    echo.join().expect("echo thread");
 
     // A connection to a closed port is refused by the kernel itself.
     let closed = {
@@ -162,7 +112,6 @@ fn unregistered_cgroup_socket_keeps_non_service_behaviour() {
     let refused = TcpStream::connect(closed).expect_err("nothing listens on the closed port");
     assert_eq!(refused.kind(), std::io::ErrorKind::ConnectionRefused, "a hook must not deny it");
 
-    assert_eq!(entries(&rig), before_map, "LOCAL_BACKEND_MAP unchanged");
     assert_eq!((xdp(&rig.veth.host), xdp(&rig.veth.peer)), before_xdp, "XDP attachments unchanged");
 }
 

@@ -12,10 +12,5 @@
 //! **RED scaffold** — the `sanity::*` helper bodies panic via
 //! `todo!()` until DELIVER fills them per Slice 05 / 06.
 
-// unconnected-udp-sendmsg4 (GH #200, ADR-0053 rev 2026-06-05) — the
-// single shared key-build + low-16-NBO site for connect4 + sendmsg4 +
-// recvmsg4 (Option 3 / D4). Does key-build ONLY — no lookup, no
-// rewrite. GREEN as of DELIVER Slice 01; connect4 consumes it.
-pub mod build_local_service_key;
 pub mod csum;
 pub mod sanity;

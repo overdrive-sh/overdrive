@@ -1,9 +1,8 @@
 //! `cgroup_connect4_gateway` — the gateway selection `BPF_CGROUP_INET4_CONNECT`
 //! program (public-ingress-gateway; ADR-0224 / ADR-0232 / ADR-0243, R-1).
 //!
-//! Attached beside `cgroup_connect4_service` at the same cgroup ancestor. The
-//! kernel runs every attached program over the same context; any verdict other
-//! than 1 makes `connect(2)` fail with `-EPERM`
+//! Attached at the cgroup ancestor. The kernel runs every attached program over
+//! the same context; any verdict other than 1 makes `connect(2)` fail with `-EPERM`
 //! (`kernel/bpf/cgroup.c:79-89, 1664-1665, 1694-1696 @ v7.0`).
 //!
 //! The arm is keyed on the socket cookie, which `bpf_get_socket_cookie` returns

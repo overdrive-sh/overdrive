@@ -374,17 +374,13 @@ test-group = 'host-kernel-shared'
 # Real-`EbpfDataplane` root-cgroup-attach surface → `host-kernel-shared`, by MODULE.
 #
 # `EbpfDataplane::new` / `new_with_pin_dir` UNCONDITIONALLY loads and attaches
-# the three `cgroup_sock_addr` programs (`connect4` / `sendmsg4` / `recvmsg4`)
-# to the SHARED root cgroup `/sys/fs/cgroup` with `CgroupAttachMode::Single`
-# (overdrive-dataplane `lib.rs` ~710/744/764; aya `Single` → attach flag 0).
-# So EVERY test that constructs a real dataplane against that path — whether it
-# exercises UDP, XDP, or only boots one via `run_server` — is an interferer on
-# the same process-global surface. Their `LOCAL_BACKEND_MAP` / `REVERSE_LOCAL_MAP`
-# are `pinning = NONE` → a PRIVATE copy per process. Run two as separate nextest
-# processes and the loser's `sendto(VIP)` traverses the WINNER's `sendmsg4`
-# program, reads the winner's empty/foreign map, gets no VIP→backend rewrite,
-# and the round-trip never completes — the 2s poll exhausts and the test panics
-# ("did not round-trip within 2s — cgroup sendmsg4 forward rewrite regression").
+# the `cgroup_connect4_gateway` `cgroup_sock_addr` program to the SHARED root
+# cgroup `/sys/fs/cgroup` with `CgroupAttachMode::Single` (aya `Single` → attach
+# flag 0). So EVERY test that constructs a real dataplane against that path —
+# whether it exercises UDP, XDP, or only boots one via `run_server` — is an
+# interferer on the same process-global surface. The gateway's intent and
+# receipt maps are `pinning = NONE` → a PRIVATE copy per process, so concurrent
+# processes each attach their own copy of the program to the same root cgroup.
 #
 # Process-global, so in-process `serial_test` cannot guard it across separate
 # nextest processes — only this `max-threads = 1` group can. Reproduced as PR
@@ -410,13 +406,9 @@ filter = '''
     binary(integration)
     & (
         (package(overdrive-dataplane) & (
-            test(unconnected_udp_roundtrip)
-            | test(unconnected_udp_reply_hardening)
-            | test(service_map_vip_port)
+            test(service_map_vip_port)
             | test(reverse_nat_udp_e2e)
             | test(multi_listener_tcp_udp_e2e)
-            | test(deregister_retry_safety)
-            | test(local_backend_proto_connect)
             | test(redirect_neigh_attach)
         ))
         | (package(overdrive-control-plane) & (

@@ -176,6 +176,8 @@ related_journeys:
       new REVERSE_LOCAL_MAP; fires for the canonical DNS-resolver client
       that NEVER calls connect()). DIFFERENT kernel paths, DIFFERENT reverse
       maps — do NOT conflate them. GH #200 / unconnected-udp-sendmsg4.
+      The sibling's same-host path is removed (ADR-0297, 2026-11-15); this
+      journey's XDP wire path is the only service path.
 
 related_features:
   - id: udp-service-support
@@ -226,3 +228,10 @@ changelog:
       behavioural change to this journey; the cross-ref prevents a reader
       from conflating REVERSE_NAT_MAP (here) with REVERSE_LOCAL_MAP (the
       sibling's same-host cgroup reply path).
+  - date: 2026-11-17
+    feature: reconciler-convergence-guarantees
+    change: >
+      The sibling journey reach-an-unconnected-udp-service.yaml is marked
+      superseded: the same-host cgroup path it describes (ADR-0053) is
+      removed by ADR-0297. This journey's XDP REVERSE_NAT_MAP path is
+      unchanged.

@@ -41,7 +41,6 @@ fn attachments(tree: &str, attach_type: &str) -> usize {
 ///      attached at `sendmsg4` or `recvmsg4`, and neither deleted map exists.
 #[overdrive_test(guest = "mtls-relay")]
 #[test]
-#[should_panic(expected = "the boot attached the deleted same-host cgroup socket programs")]
 fn the_boot_loads_no_same_host_local_backend_program_or_map() {
     let _rig = HostRig::new("nolocal");
 

@@ -1,5 +1,12 @@
 schema_version: 1
 
+# SUPERSEDED (ADR-0297, 2026-11-15; reconciler-convergence-guarantees).
+# The same-host local-backend path this journey describes is removed: no
+# production path produces a local backend, and the boot loads none of the
+# sendmsg4/recvmsg4/connect4 service programs or the LOCAL_BACKEND_MAP and
+# REVERSE_LOCAL_MAP maps. The file is kept as the historical record of the
+# 2026-06-05 design; it does not describe the current system.
+
 # Product-level UNCONNECTED-UDP same-host reachability journey.
 #
 # SIBLING of submit-a-udp-service.yaml, NOT an extension of it. The two

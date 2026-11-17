@@ -138,10 +138,10 @@ exclude_globs = [
     "crates/overdrive-sim/src/adapters/**",
     "crates/overdrive-sim/src/invariants/**",
 
-    # Rule 1 (extended) — `EbpfDataplane` and `LocalBackendMapHandle`
-    # are the userspace adapter surface that talks to the real BPF
-    # kernel objects (`HASH_OF_MAPS`, `LOCAL_BACKEND_MAP`, XDP attach,
-    # cgroup_sock_addr attach). Structurally identical exclusion
+    # Rule 1 (extended) — `EbpfDataplane` is the userspace adapter
+    # surface that talks to the real BPF kernel objects
+    # (`HASH_OF_MAPS`, XDP attach, cgroup_sock_addr attach).
+    # Structurally identical exclusion
     # rationale to the `crates/overdrive-bpf/**` entry above:
     #
     #   - Methods are `#[cfg(target_os = "linux")]`-gated; mutation
@@ -159,14 +159,13 @@ exclude_globs = [
     #     `EbpfDataplane` is the userspace half of that aya boundary
     #     and lives behind the same Tier 3 envelope.
     #
-    # The Phase 17 mutation run flagged the entire surface of these
-    # two files under the per-PR `--diff origin/main` scope of the
-    # `overdrive-dataplane` package run; excluding them removes the
+    # The Phase 17 mutation run flagged the entire surface of this
+    # file under the per-PR `--diff origin/main` scope of the
+    # `overdrive-dataplane` package run; excluding it removes the
     # vacuous-MISSED noise and lets the default-lane kill rate reflect
     # genuine unit-level coverage of the other files in the crate
     # (allocators, GC, swap, maglev tables, the `sys::bpf` helpers).
     "crates/overdrive-dataplane/src/lib.rs",
-    "crates/overdrive-dataplane/src/maps/local_backend_map_handle.rs",
 
     # Rule 1 + Rule 4 (extended) — the `cargo verifier-regress` tool
     # binary (`crates/overdrive-dataplane/bin/verifier_regress.rs`) is

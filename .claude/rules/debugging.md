@@ -307,14 +307,15 @@ Two failure modes compound, and they did in the same investigation
 
 **A — wrong surface for the configuration.** The same logical
 operation routes to different concrete surfaces depending on config.
-A single-node *local* backend programs `LOCAL_BACKEND_MAP` (via the
-`cgroup_connect4` hook); `REVERSE_NAT_MAP` / `SERVICE_MAP` are the
-*remote*-backend XDP-redirect path and are **empty by design** on
-single-node localhost. Dumping the remote-path maps, reading `Found 0
-elements`, and concluding "the dataplane is dead" was the inversion —
-the surface this path actually writes (`LOCAL_BACKEND_MAP`) was
-non-empty. The shape generalises beyond BPF maps: a shard you didn't
-query, a partition the row didn't hash to, a cache tier the value
+A gateway upstream socket's `connect()` is steered by the
+cookie-keyed `GATEWAY_CONNECT_INTENT_MAP` (read by the `cgroup_connect4`
+gateway hook) and leaves its receipt in `GATEWAY_SELECTION_RECEIPT_MAP`;
+`REVERSE_NAT_MAP` is the *remote*-backend XDP path and is **empty by
+design** when only gateway sockets are in play. Dumping the XDP-path
+maps, reading `Found 0 elements`, and concluding "the dataplane is
+dead" was the inversion — the surface this path actually writes
+(`GATEWAY_CONNECT_INTENT_MAP`) was non-empty. The shape generalises
+beyond BPF maps: a shard you didn't query, a partition the row didn't hash to, a cache tier the value
 skipped, an index the write didn't touch. Enumerate *all* candidate
 surfaces (`bpftool map show`, not just `dump name X`; every shard, not
 the one you guessed) and confirm which one this configuration uses

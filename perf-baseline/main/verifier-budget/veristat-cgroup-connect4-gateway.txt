@@ -1,8 +1,8 @@
 # Verifier-budget baseline — cgroup_connect4_gateway
 #
 # public-ingress-gateway (ADR-0224 / ADR-0243, R-1) — FIRST baseline for the
-# separate gateway selection BPF_PROG_TYPE_CGROUP_SOCK_ADDR connect4 program,
-# attached beside `cgroup_connect4_service` at the same cgroup ancestor.
+# gateway selection BPF_PROG_TYPE_CGROUP_SOCK_ADDR connect4 program, attached
+# at the cgroup ancestor.
 #
 # Budget gates per the existing `verifier-regress` envelope:
 #   verified_insns ≤ 500,000    ← 50% of CAP_BPF ceiling

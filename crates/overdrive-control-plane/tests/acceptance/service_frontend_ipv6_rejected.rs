@@ -15,7 +15,7 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -59,24 +59,6 @@ impl Dataplane for PanicOnUpdateService {
     }
     async fn drain_flow_events(&self) -> Result<Vec<FlowEvent>, DataplaneError> {
         Ok(Vec::new())
-    }
-    async fn register_local_backend(
-        &self,
-        _vip: Ipv4Addr,
-        _vip_port: u16,
-        _backend: SocketAddrV4,
-        _proto: overdrive_core::dataplane::backend_key::Proto,
-    ) -> Result<(), DataplaneError> {
-        Ok(())
-    }
-    async fn deregister_local_backend(
-        &self,
-        _vip: Ipv4Addr,
-        _vip_port: u16,
-        _backend: SocketAddrV4,
-        _proto: overdrive_core::dataplane::backend_key::Proto,
-    ) -> Result<(), DataplaneError> {
-        Ok(())
     }
 }
 

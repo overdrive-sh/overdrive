@@ -527,8 +527,7 @@ pub enum MtlsEnforcementError {
     /// AND its steady-state blocking splice into kTLS-TX + the peer's kTLS-RX
     /// decrypt) did NOT round-trip clean on
     /// the loopback sentinels. The node MUST refuse to start
-    /// (`health.startup.refused`); the proxy is not trustworthy. Mirrors
-    /// `DataplaneError::LocalBackendProbe` / `ReverseLocalProbe`. `which` names
+    /// (`health.startup.refused`); the proxy is not trustworthy. `which` names
     /// the sentinel that failed so the refusal is diagnosable without
     /// `Display`-grepping.
     #[error("mTLS proxy probe round-trip failed [{which}]: {message}")]
@@ -667,8 +666,7 @@ pub trait MtlsEnforcement: Send + Sync + 'static {
     ///   agent's own outbound leg-B `connect()` is NOT re-intercepted by the
     ///   workload `cgroup_connect4` rewrite — via a narrowly-scoped `SO_MARK`
     ///   socket mark the program checks-and-skips, OR cgroup scoping (the program
-    ///   attaches to the *workload* subtree, not the agent's — the existing
-    ///   `cgroup_connect4_service` attach boundary). The bypass is agent-private:
+    ///   attaches to the *workload* subtree, not the agent's). The bypass is agent-private:
     ///   a workload CANNOT replicate it to self-exempt from interception (proven
     ///   by the F5 Tier-3 obligations: leg B not re-intercepted AND workload
     ///   cannot self-exempt). Without this, the agent's dial would recurse
@@ -837,7 +835,7 @@ pub trait MtlsEnforcement: Send + Sync + 'static {
     /// # Preconditions
     /// `handle` was returned by a prior `enforce`. Idempotent: tearing down an
     /// already-torn-down (or unknown) handle is `Ok(())`, NOT an error — mirrors
-    /// `Driver::stop` / `deregister_local_backend` idempotency.
+    /// `Driver::stop` idempotency.
     ///
     /// # Postconditions on `Ok(())`
     /// Both legs are closed; both pump tasks have stopped; no

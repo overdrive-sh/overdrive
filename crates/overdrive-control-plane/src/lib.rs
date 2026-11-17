@@ -901,8 +901,8 @@ pub struct ServerConfig {
     /// `serve` always reads `None` (single-cut to EbpfDataplane); the
     /// field exists only for test isolation.
     pub dataplane_pin_dir: Option<PathBuf>,
-    /// Optional override for the cgroup the `cgroup_connect4_service`
-    /// program attaches to per ADR-0053 § 7. `None` (the production
+    /// Optional override for the cgroup the `cgroup_connect4_gateway`
+    /// program attaches to. `None` (the production
     /// default) means
     /// `overdrive_dataplane::DEFAULT_CGROUP_ATTACH_PATH` =
     /// `/sys/fs/cgroup/overdrive.slice` — the slice

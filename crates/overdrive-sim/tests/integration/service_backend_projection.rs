@@ -138,7 +138,6 @@ struct World {
     _wiring: overdrive_core::guest_network::GuestNetworkExecWiring,
     obs: Arc<SimObservationStore>,
     clock: Arc<SimClock>,
-    dataplane: Arc<SimDataplane>,
     driver: Arc<ProbedDriver>,
     tcp: Arc<SimTcpProber>,
     http: Arc<SimHttpProber>,
@@ -323,7 +322,6 @@ impl World {
             _wiring: wiring,
             obs,
             clock,
-            dataplane,
             driver,
             tcp,
             http,
@@ -1245,10 +1243,8 @@ async fn consumer_trajectory(include_hydrator: bool) {
     let destination = SocketAddrV4::new(world.frontend, 18081);
     assert!(matches!(resolve.resolve(destination).await.unwrap(), MtlsResolution::Mesh(_)));
     assert_eq!(dns.frontend_for(&world.name), Some(world.frontend));
-    let vip = world.vip.as_ref().unwrap().try_as_ipv4().unwrap();
     if include_hydrator {
         world.hydrate_published().await;
-        assert_eq!(world.dataplane.local_backend_for(vip, 18081, Proto::Tcp), None);
     }
     world.http.enqueue_outcome(ProbeOutcome::Fail { reason: "seeded readiness outage".into() });
     world.script_guest_http_failure();
@@ -1262,7 +1258,6 @@ async fn consumer_trajectory(include_hydrator: bool) {
     assert_eq!(dns.frontend_for(&world.name), None);
     if include_hydrator {
         world.hydrate_published().await;
-        assert_eq!(world.dataplane.local_backend_for(vip, 18081, Proto::Tcp), None);
     }
     world.advance_probes().await;
     world.run("service-lifecycle").await;
@@ -1271,7 +1266,6 @@ async fn consumer_trajectory(include_hydrator: bool) {
     assert_eq!(dns.frontend_for(&world.name), Some(world.frontend));
     if include_hydrator {
         world.hydrate_published().await;
-        assert_eq!(world.dataplane.local_backend_for(vip, 18081, Proto::Tcp), None);
     }
     drop(dns);
     drop(resolve);
