@@ -206,7 +206,6 @@ async fn issue_163_tcp_only_for_udp_service_is_caught() {
 /// Pending until DELIVER changes the Sim to refuse: today it accepts the set
 /// and installs the IPv4 backend's key.
 #[tokio::test]
-#[should_panic(expected = "update_service accepted a set containing an IPv6 backend")]
 async fn a_set_with_an_ipv6_backend_is_refused_and_leaves_the_service_unchanged() {
     let dp = SimDataplane::new();
     let fe = frontend(10, 5353, Proto::Udp);

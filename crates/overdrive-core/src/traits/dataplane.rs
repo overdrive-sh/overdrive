@@ -143,8 +143,8 @@ pub trait Dataplane: Send + Sync + 'static {
     ///   adapters narrow `frontend.vip → Ipv4Addr` infallibly via
     ///   [`ServiceFrontend::vip_v4`]. No adapter re-validates the VIP.
     /// - `backends` MAY be empty (see edge cases). Each `Backend.addr`
-    ///   is a `SocketAddr`; non-IPv4 backend addresses are skipped from
-    ///   the `REVERSE_NAT` key set (GH #155 deferral).
+    ///   is a `SocketAddr`; a non-empty set containing an IPv6 backend
+    ///   is refused (see edge cases; IPv6 support is GH #155).
     ///
     /// # Postconditions on `Ok(())`
     ///
@@ -152,9 +152,16 @@ pub trait Dataplane: Send + Sync + 'static {
     /// `frontend.proto`** equals exactly the keys derived from
     /// `backends`: `{ BackendKey { ip, port: backend.addr.port(),
     /// proto: frontend.proto } : backend ∈ backends, backend.addr is
-    /// IPv4 }`, each mapping to `frontend.vip_v4()`. Keys for **other**
-    /// protocols of the same VIP — installed by separate per-listener
-    /// `update_service` calls — are untouched.
+    /// IPv4 }`, each mapping to `frontend.vip_v4()` (every backend is
+    /// IPv4, since a set with an IPv6 backend is refused). Keys for
+    /// **other** protocols of the same VIP — installed by separate
+    /// per-listener `update_service` calls — are untouched.
+    ///
+    /// For a non-empty `backends`, the fingerprint the adapter reports
+    /// for `frontend` through `ProgrammedServiceView` equals
+    /// `fingerprint(&frontend.vip(), &backends)` over the slice in the
+    /// order given (never sorted), written with the table in the same
+    /// atomic update. After an empty `backends` it reads `None`.
     ///
     /// # Edge cases
     ///
@@ -167,8 +174,11 @@ pub trait Dataplane: Send + Sync + 'static {
     /// - Idempotent re-apply: calling `update_service(frontend,
     ///   backends)` twice with identical arguments yields the same
     ///   post-state.
-    /// - A backend with an IPv6 `addr` contributes no `REVERSE_NAT` key
-    ///   (silently skipped).
+    /// - A non-empty `backends` containing a backend with an IPv6 `addr`
+    ///   is refused with [`DataplaneError::LoadFailed`] as the first
+    ///   validation, before any write: no `REVERSE_NAT` key is added or
+    ///   removed, the service's prior backends and its programmed
+    ///   fingerprint are unchanged. An empty set is still the withdraw.
     ///
     /// # Observable invariant (cross-adapter)
     ///

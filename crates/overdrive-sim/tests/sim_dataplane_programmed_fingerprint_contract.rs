@@ -9,9 +9,6 @@
 //! (`Ok(None)` for every frontend) fails at a named assertion instead of
 //! passing vacuously.
 //!
-//! Pending until DELIVER implements the sim read: each test is
-//! `#[should_panic(expected = ..)]` on the assertion it makes today.
-//!
 //! `CONTRACT_SHAPE`: pure-function (the read mutates nothing).
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
@@ -104,7 +101,6 @@ proptest! {
     /// the weights, health flags and order; a second read with no write between
     /// is equal to the first.
     #[test]
-    #[should_panic(expected = "programmed_fingerprint after a successful update_service")]
     fn read_after_update_equals_the_fingerprint_of_the_applied_backends(set in backend_sets()) {
         runtime().block_on(async {
             let dp = SimDataplane::new();
@@ -130,7 +126,6 @@ proptest! {
 
 /// Invariant 2: after `update_service(f, [])` the read is `None`.
 #[test]
-#[should_panic(expected = "programmed_fingerprint after the first apply (withdraw)")]
 fn a_withdrawn_frontend_reads_none() {
     runtime().block_on(async {
         let dp = SimDataplane::new();
@@ -152,7 +147,6 @@ fn a_withdrawn_frontend_reads_none() {
 /// Edge case: a frontend never programmed reads `Ok(None)`, not an error,
 /// while a neighbour on another VIP is programmed.
 #[test]
-#[should_panic(expected = "programmed_fingerprint after programming the neighbour")]
 fn a_never_programmed_frontend_reads_ok_none() {
     runtime().block_on(async {
         let dp = SimDataplane::new();
@@ -173,7 +167,6 @@ fn a_never_programmed_frontend_reads_ok_none() {
 /// Edge case: other ports and protocols on one VIP are independent keys; a
 /// withdrawal of one leaves the others readable.
 #[test]
-#[should_panic(expected = "programmed_fingerprint after programming tcp/8080")]
 fn ports_and_protocols_on_one_vip_are_independent_keys() {
     runtime().block_on(async {
         let dp = SimDataplane::new();
@@ -207,7 +200,6 @@ fn ports_and_protocols_on_one_vip_are_independent_keys() {
 
 /// Edge case: a failed `update_service` leaves the prior fingerprint in place.
 #[test]
-#[should_panic(expected = "programmed_fingerprint after the first apply (failed update)")]
 fn a_failed_update_leaves_the_prior_read_unchanged() {
     runtime().block_on(async {
         let dp = SimDataplane::new();
@@ -225,7 +217,6 @@ fn a_failed_update_leaves_the_prior_read_unchanged() {
 /// Edge case (D-20): a set with an IPv6 backend is refused before any write, so
 /// the prior fingerprint stays in place.
 #[test]
-#[should_panic(expected = "programmed_fingerprint after the first apply (refused IPv6 set)")]
 fn a_refused_ipv6_update_leaves_the_prior_read_unchanged() {
     runtime().block_on(async {
         let dp = SimDataplane::new();
