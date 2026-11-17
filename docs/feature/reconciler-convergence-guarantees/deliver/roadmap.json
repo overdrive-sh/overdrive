@@ -1,0 +1,523 @@
+{
+  "roadmap": {
+    "project_id": "reconciler-convergence-guarantees",
+    "created_at": "2026-11-17T16:30:00Z",
+    "total_steps": 12
+  },
+  "paradigm_note": "Object-oriented (CLAUDE.md). Every public/cross-crate shape is pinned in docs/feature/reconciler-convergence-guarantees/feature-delta.md (D-1a, D-1b, D-1c, D-3, D-11, D-12, D-13, D-20, D-21) and ADR-0296..0299; the crafter implements EXACTLY that contract and adds no API beyond it (a gap is a blocker returned to the orchestrator, never invented surface). Pending acceptance bodies are pre-authored by DISTILL as #[should_panic(expected = ...)]; each step removes only the pending marker of the tests it names, proves the semantic RED, then makes it GREEN; the crafter never writes or weakens an acceptance body (a missing body/fixture routes to the acceptance designer). Step order is chosen so each RED isolates one cause: slice 02 deletion first (D-9), then the D-20 programmed-map read (sim read before the hydrator diff), then the resync pass, then the Quint conformance driver, then the rule text. No mutation-testing steps; no work is planned for the carried known gaps (no reconciler-level liveness-before-Stable test; persist-error recovery assumes the store can write again, #360). Out of scope: #211, #270, #275, #310, #356, #357, #358, #359. Project-wide discipline (metal execution, placement declarations, single-cut greenfield, des-commit with explicit owned paths) is governed by .claude/rules/*.md and CLAUDE.md and is not restated per step.",
+  "phases": [
+    {
+      "id": "01",
+      "name": "Slice 02 - delete the same-host local-backend path (D-9, D-10, D-11, D-13)",
+      "description": "Removes the ADR-0053 same-host local-backend path and ADR-0164's datagram clause. No production producer exists (ADR-0297), so the hydrator's last_applied_local_fingerprint latch goes with it. The remote service path and the public ingress gateway (cgroup_connect4_gateway and its maps) are unchanged. Runs first so later slices never touch the removed code. Verified by the unchanged behaviour of the kept paths, not by exercising the removed path.",
+      "steps": [
+        {
+          "id": "01-01",
+          "name": "Guest-flow owner refuses UDP to a VIP; delete the cgroup-placement check and the connect4 datagram rewrite handling",
+          "description": "In overdrive-control-plane's guest-flow owner: delete the OwnerCgroupPlacement error and its startup probe branch, the owner-cgroup host fact with its host reader and sim default, the sim adapter's scripted refusal, the owner-acceptance error arms, the datagram_associate VIP branch (skips route-type check, unmarked socket), the VIP term of the egress-mark decision (reduces to the gateway:53 exemption), the post-connect kernel-peer check and GuestFlowIo::peer_addr plus impls if no other caller exists, the sim connect4 rewrite table and set_connect4_rewrite seam, and the owner-acceptance test a_vip_association_is_rewritten_by_connect4_and_checked_on_its_kernel_peer. Add the one new behaviour (D-11): a UDP datagram whose destination is in a configured VIP range is refused with the existing FlowRefusal::Policy before the route-type check, marked-socket creation or connect_udp. OwnerRuntime.vip_range and the ports' vip_range STAY. Correct (do not delete) the UDP-skips-VIP-branch comment in mtls_resolve_adapter.rs.",
+          "criteria": [
+            "AC7: a guest UDP datagram to a destination in the configured VIP ranges is refused FlowRefusal::Policy; the sim records zero RouteType, OpenPeer, ConnectUdp and Attach effects and the flow is in closed_by_owner (a_udp_association_to_a_service_vip_is_refused_policy_before_any_socket_is_made goes GREEN with its should_panic marker removed).",
+            "A destination outside the VIP ranges keeps the generic path (existing dns_to_the_gateway_pairs_and_other_prefix_addresses_are_policy stays GREEN); TCP to a VIP still resolves as mesh (the five mtls_resolve_adapter VIP-branch unit tests stay GREEN, AC6).",
+            "The boot has no owner cgroup-placement refusal: grep for OwnerCgroupPlacement, owner_cgroup and set_connect4_rewrite over crates/ prints nothing (AC5 subset).",
+            "No new error variant, port method, wire field or FlowRefusal variant is added; no dead_code allowance remains after deletion."
+          ],
+          "test_file": "crates/overdrive-control-plane/src/guest_network/owner_acceptance/datagrams.rs",
+          "scenario_name": "a_udp_association_to_a_service_vip_is_refused_policy_before_any_socket_is_made",
+          "effort_hours": 5,
+          "dependencies": [],
+          "implementation_scope": {
+            "files_to_modify": [
+              "crates/overdrive-control-plane/src/guest_network.rs",
+              "crates/overdrive-control-plane/src/guest_network/flow_io.rs",
+              "crates/overdrive-control-plane/src/guest_network/flow_io/sim.rs",
+              "crates/overdrive-control-plane/src/guest_network/owner_runtime.rs",
+              "crates/overdrive-control-plane/src/guest_network/owner_acceptance/datagrams.rs",
+              "crates/overdrive-control-plane/src/mtls_resolve_adapter.rs",
+              "crates/overdrive-sim/src/adapters/guest_network.rs"
+            ]
+          },
+          "review_checklist": [
+            "datagram_associate's refusal precedes route-type check, socket creation and connect (contract shape: pure refusal, universe of effects none).",
+            "GuestFlowIo::peer_addr deleted only if grep shows no other caller.",
+            "ADR-0298 is the decision record; accepted ADRs are not edited."
+          ],
+          "implementation_notes": "Contract D-11 + ADR-0298 + slice-02 'ADR-0164 datagram clause and startup check'. No API beyond the pinned contract. Tier 1, default lane, placement!(host_pure) already declared. Acceptance-designer pre-pass: none (body pre-authored); only the pending marker is removed."
+        },
+        {
+          "id": "01-02",
+          "name": "Delete the local-backend actions, executors, hydrator partition and persisted Cgroup route tag",
+          "description": "Reconciler/action layer deletion: Action::RegisterLocalBackend and DeregisterLocalBackend and their shim executors (action_shim/register_local_backend.rs, deregister_local_backend.rs) and validate.rs cgroup-route tracking; ConflictRoute::Cgroup and WriteRoute::Cgroup removed in place (D-13 option A: ConflictRoute stays a one-variant enum, both route fields stay, no new envelope version) with the Cgroup arm of write_route_to_conflict_route; the ServiceMapHydrator local partition, last_applied_local_fingerprint (View field and its GC) and the host_ipv4 field/accessor/constructor parameter if grep finds no other use; the local-arm hydrator invariant handling and the reply_source_rewrite_lockstep invariant and registration in overdrive-sim; every test that defends only these. The Dataplane trait methods and adapters are NOT touched here (no remaining caller); they go in 01-03.",
+          "criteria": [
+            "AC4: the hydrator's remote partition and RetryMemory behave exactly as before: the kept dispatch_*/no_dispatch_* fingerprint and backoff tests, gc_drops_retry_memory_for_services_no_longer_in_desired and iteration_order_is_btreemap_deterministic stay GREEN unedited in logic.",
+            "The kept coverage in the three 'Mixed: edit' files still passes: mesh_backend_lb_gate.rs (two-way mesh/remote split, local_health_selects_existing_action_preserving_remote_and_view with the host_ipv4 loop element and local expectations removed, expected ServiceMapHydratorView with retries only), service_map_hydrator_reconcile.rs (hydrator_skips_register_local_backend_for_loopback and hydrator_threads_per_listener_proto_into_register_local_backend deleted), invariants/service_map_hydrator.rs + invariants/mod.rs (remote-path invariants remain).",
+            "AC5 (D-13): the V1 golden fixture crates/overdrive-core/tests/schema_evolution/reconcile_conflict_row.rs is unedited (git diff against origin/main is empty) and its three tests still decode; if it fails the crafter STOPS and surfaces it, never minting an envelope version.",
+            "reconcile_conflict_observation.rs and reconcile_output_validator.rs no longer name Cgroup routes and keep their placement declarations; the deregister_local_backend_dispatch.rs integration test and its entry in tests/integration.rs are deleted.",
+            "No reference remains in crates/ to: RegisterLocalBackend, DeregisterLocalBackend, ConflictRoute::Cgroup, WriteRoute::Cgroup, last_applied_local_fingerprint, reply_source_rewrite_lockstep. No API is added."
+          ],
+          "test_file": "crates/overdrive-core/tests/acceptance/service_map_hydrator_reconcile.rs",
+          "scenario_name": "kept remote-path hydrator tests (dispatch_*, no_dispatch_*, gc_drops_retry_memory_for_services_no_longer_in_desired, iteration_order_is_btreemap_deterministic); mesh_backend_lb_gate two-way split and local_health_selects_existing_action_preserving_remote_and_view; reconcile_conflict_row V1 fixture (regression guards, no pending marker)",
+          "effort_hours": 6,
+          "dependencies": [],
+          "implementation_scope": {
+            "files_to_modify": [
+              "crates/overdrive-core/src/traits/observation_store.rs",
+              "crates/overdrive-core/src/reconcilers/mod.rs",
+              "crates/overdrive-reconcilers/src/service_map_hydrator.rs",
+              "crates/overdrive-reconcilers/src/lib.rs",
+              "crates/overdrive-control-plane/src/action_shim/register_local_backend.rs",
+              "crates/overdrive-control-plane/src/action_shim/deregister_local_backend.rs",
+              "crates/overdrive-control-plane/src/action_shim/validate.rs",
+              "crates/overdrive-control-plane/src/reconciler_runtime.rs",
+              "crates/overdrive-control-plane/tests/integration/deregister_local_backend_dispatch.rs",
+              "crates/overdrive-control-plane/tests/acceptance/reconcile_conflict_observation.rs",
+              "crates/overdrive-control-plane/tests/integration/reconcile_output_validator.rs",
+              "crates/overdrive-core/tests/mesh_backend_lb_gate.rs",
+              "crates/overdrive-core/tests/acceptance/service_map_hydrator_reconcile.rs",
+              "crates/overdrive-sim/src/invariants/service_map_hydrator.rs",
+              "crates/overdrive-sim/src/invariants/mod.rs",
+              "crates/overdrive-sim/src/invariants/reply_source_rewrite_lockstep.rs"
+            ]
+          },
+          "review_checklist": [
+            "Pure deletions plus forced compiler fallout only; no new Action/Error variant.",
+            "ConflictRoute remains a one-variant enum with both route fields; schema_evolution fixture file untouched.",
+            "Mutation gate is not planned; the hydrator remote logic is not changed here."
+          ],
+          "implementation_notes": "ACCEPTANCE-DESIGNER PRE-PASS REQUIRED at the start of this step: if grep shows host_ipv4 has no other use, the ServiceMapHydrator constructor drops the parameter and the acceptance designer mechanically drops the argument (no assertion changes) at the DISTILL fixture sites listed in test-scenarios.md: reconciler_runtime/quint_evaluation_wake.rs (:288,:416), convergence_property/{hydrator.rs:153,:255, executor_idempotency.rs:165, managed_targets_containment.rs:281,:321, mod.rs:193} and the SimDataplaneComposer::new(.., Ipv4Addr::LOCALHOST) host_ipv4 fixture argument in crates/overdrive-control-plane/tests/integration/reconciler_resync_pass.rs if its signature follows (named explicitly in this pre-pass scope); the acceptance designer also owns the 'Mixed: edit' re-pointing of the kept assertions in the mesh_backend_lb_gate.rs and service_map_hydrator_reconcile.rs bodies. The crafter performs the production deletion and the pure test-file deletions. Single-cut deletion discipline: production code and the tests defending it go in the same commit."
+        },
+        {
+          "id": "01-03",
+          "name": "Delete the local-backend dataplane port methods, adapters, BPF programs, maps and baselines",
+          "description": "Kernel/dataplane side: BPF programs cgroup_connect4_service, cgroup_sendmsg4_service, cgroup_recvmsg4_service and shared/build_local_service_key.rs with their programs/mod.rs entries; maps LOCAL_BACKEND_MAP, REVERSE_LOCAL_MAP, reverse_local_miss_counter; userspace handles local_backend_map_handle.rs and reverse_local_map_handle.rs; EbpfDataplane program loads/attaches/link fields, map fields and probes (LocalBackendProbe, ReverseLocalProbe) and read-back seams; Dataplane::register_local_backend/deregister_local_backend and the DataplaneError variants only they use (LocalBackendInsert, LocalBackendDelete, LocalBackendProbe, ReverseLocalProbe, CgroupSendRecvAttach) plus the cgroup_attach_error helper and its unit test; SimDataplane local-backend state; the four dataplane integration tests (unconnected_udp_roundtrip, unconnected_udp_reply_hardening, deregister_retry_safety, local_backend_proto_connect) with their tests/integration.rs entries; verifier baselines, nextest/mutants/perf-baseline entries and verifier_budget.rs comments; and the slice-02 follow-ups outside crates/. KEEP the attach-cgroup File open and cgroup_attach_path (the gateway attach reuses them), cgroup_connect4_gateway and its maps, cgroup_load_error, LoadFailed, MapAllocFailed; a failed gateway attach still refuses boot.",
+          "criteria": [
+            "AC2: after boot, bpftool cgroup tree shows cgroup_inet4_connect attachments = 1 (the gateway), cgroup_udp4_sendmsg = 0, cgroup_udp4_recvmsg = 0, and bpftool map show lists no LOCAL_BACKEND_M*, REVERSE_LOCAL_M* or reverse_local_mi* (the_boot_loads_no_same_host_local_backend_program_or_map goes GREEN with its marker removed).",
+            "AC3: cargo verifier-regress passes with perf-baseline/main/verifier-budget/veristat-cgroup-{connect4,sendmsg4,recvmsg4}-service.txt removed; the BPF object no longer contains the three programs.",
+            "AC5: the AC5 grep gate in test-scenarios.md prints nothing over crates, .config/nextest.toml, .cargo/mutants.toml and perf-baseline, and git ls-files perf-baseline matches no deleted baseline; the host-kernel-shared nextest filter loses exactly the four deleted dataplane test() terms and keeps the rest.",
+            "AC1: gateway still works: public_ingress_gateway_hook.rs tests (with unregistered_cgroup_socket_keeps_non_service_behaviour re-pointed to keep the closed-port refusal and XDP-unchanged assertions, local registration/echo/map assertions dropped) and public_ingress_gateway_boot_shutdown.rs stay GREEN; the remote service path (stopped_service_dataplane_purge.rs, service_kind_vm_workloads.rs) stays GREEN.",
+            "Rules/docs follow-ups land in this commit: .claude/rules/debugging.md section 11 example no longer uses LOCAL_BACKEND_MAP; .claude/rules/development.md bpf_sock_addr.user_port citation/example re-pointed to the gateway connect4 (rule stays valid); docs/product/architecture/brief.md and c4-diagrams.md supersession banners and the Service connect4 container; journeys reach-an-unconnected-udp-service.yaml and submit-a-udp-service.yaml updated. Accepted ADRs are not edited. website/content/blog/what-is-ebpf.mdx is left for FINALIZE review.",
+            "No guest group in crates/overdrive-testing/src/placement/groups.rs loses its last user (mtls-relay, cgroup-default stay used); placement-lint exits 0."
+          ],
+          "test_file": "crates/overdrive-dataplane/tests/integration/same_host_programs_not_loaded_at_boot.rs",
+          "scenario_name": "the_boot_loads_no_same_host_local_backend_program_or_map",
+          "effort_hours": 8,
+          "dependencies": [
+            "01-02"
+          ],
+          "implementation_scope": {
+            "files_to_modify": [
+              "crates/overdrive-bpf/src/programs/mod.rs",
+              "crates/overdrive-bpf/src/maps/mod.rs",
+              "crates/overdrive-dataplane/src/lib.rs",
+              "crates/overdrive-dataplane/bin/verifier_budget.rs",
+              "crates/overdrive-core/src/traits/dataplane.rs",
+              "crates/overdrive-sim/src/adapters/dataplane.rs",
+              "crates/overdrive-dataplane/tests/integration.rs",
+              "crates/overdrive-dataplane/tests/integration/same_host_programs_not_loaded_at_boot.rs",
+              "crates/overdrive-dataplane/tests/integration/public_ingress_gateway_hook.rs",
+              "crates/overdrive-dataplane/tests/integration/unconnected_udp_roundtrip.rs",
+              "crates/overdrive-dataplane/tests/integration/unconnected_udp_reply_hardening.rs",
+              "crates/overdrive-dataplane/tests/integration/deregister_retry_safety.rs",
+              "crates/overdrive-dataplane/tests/integration/local_backend_proto_connect.rs",
+              ".config/nextest.toml",
+              ".cargo/mutants.toml",
+              "perf-baseline/main/verifier-budget/veristat-cgroup-connect4-service.txt",
+              "perf-baseline/main/verifier-budget/veristat-cgroup-sendmsg4-service.txt",
+              "perf-baseline/main/verifier-budget/veristat-cgroup-recvmsg4-service.txt",
+              ".claude/rules/debugging.md",
+              ".claude/rules/development.md",
+              "docs/product/architecture/brief.md",
+              "docs/product/architecture/c4-diagrams.md",
+              "docs/product/journeys/reach-an-unconnected-udp-service.yaml",
+              "docs/product/journeys/submit-a-udp-service.yaml"
+            ]
+          },
+          "review_checklist": [
+            "Gateway attach cgroup File and cgroup_attach_path retained; Earned-Trust failure mode for a failed gateway attach preserved.",
+            "overdrive-bpf is aya-rs Rust only; rebuild the BPF object (cargo xtask bpf-build) before dataplane builds.",
+            "Dataplane trait loses exactly the two local-backend methods; remaining operations' contract shape unchanged."
+          ],
+          "implementation_notes": "Tier 3 guest placement mtls-relay (declared on the test). ACCEPTANCE-DESIGNER PRE-PASS REQUIRED (small): re-point unregistered_cgroup_socket_keeps_non_service_behaviour in public_ingress_gateway_hook.rs per the slice-02 'Mixed: edit' list (the crafter must not rewrite an acceptance body). Run the AC5 grep gate and verifier-regress; one Lima/metal run of the dataplane integration lane to prove the gateway path. dead_code after deletion means delete more, not #[allow]."
+        }
+      ]
+    },
+    {
+      "id": "02",
+      "name": "D-20 - the service-map hydrator reads the programmed service map (ADR-0299)",
+      "description": "Makes the hydrator's actual the resource it manages: a 64-bit applied-set fingerprint stored in two extra inner SERVICE_MAP slots and read through the new ProgrammedServiceView port. Ordered so each RED isolates one cause: the SimDataplane read lands first, then the one-instance composition wiring, then the host adapter, then the hydrator diff (whose reboot test would otherwise be RED for the inert sim read).",
+      "steps": [
+        {
+          "id": "02-01",
+          "name": "SimDataplane implements programmed_fingerprint and refuses IPv6 backend sets before any write",
+          "description": "SimDataplane records fingerprint(&frontend.vip, &backends) of the slice (in the order given) for each successful non-empty update_service, drops it on an empty update, reads it back through its ProgrammedServiceView impl (replacing the Ok(None) scaffold), and refuses a non-empty set containing an IPv6 backend with DataplaneError::LoadFailed as the FIRST validation (before the identity preflight and reverse-NAT ownership check) leaving all prior state, including the fingerprint, unchanged. Update the Dataplane::update_service rustdoc in overdrive-core/src/traits/dataplane.rs (precondition no longer says non-IPv4 is skipped; postcondition ranges over every backend; the 'IPv6 addr contributes no REVERSE_NAT key (silently skipped)' edge case becomes the refusal; add the fingerprint postcondition) and correct the reverse_nat_key_for comment in the sim ('parity with the production EbpfDataplane'). State S-02-D as the refusal in docs/scenarios/udp-service-support/test-scenarios.md; the udp-service-support feature records stay as written.",
+          "criteria": [
+            "S-02-D: a_set_with_an_ipv6_backend_is_refused_and_leaves_the_service_unchanged: Err(LoadFailed), REVERSE_NAT keys and service_backends_for equal the prior state.",
+            "Exactly the six pending sim contract tests in sim_dataplane_programmed_fingerprint_contract.rs (the only should_panic markers in that file) go GREEN with their markers removed: read_after_update_equals_the_fingerprint_of_the_applied_backends (proptest, non-canonical order, weight and health drawn), a_withdrawn_frontend_reads_none, a_never_programmed_frontend_reads_ok_none, ports_and_protocols_on_one_vip_are_independent_keys, a_failed_update_leaves_the_prior_read_unchanged, a_refused_ipv6_update_leaves_the_prior_read_unchanged. With S-02-D (sim_dataplane_reverse_nat_per_proto.rs) that is seven pending tests in this step.",
+            "SimDataplane never sorts the slice before fingerprinting and keeps no receipt/tracker as the read source; the read mutates nothing; a freshly constructed SimDataplane reads None for every frontend.",
+            "The host adapter needs no behaviour change for the IPv6 refusal (it already refuses via BackendEntryPod::from_backend); no new error variant is added."
+          ],
+          "test_file": "crates/overdrive-sim/tests/sim_dataplane_programmed_fingerprint_contract.rs",
+          "scenario_name": "read_after_update_equals_the_fingerprint_of_the_applied_backends, a_withdrawn_frontend_reads_none, a_never_programmed_frontend_reads_ok_none, ports_and_protocols_on_one_vip_are_independent_keys, a_failed_update_leaves_the_prior_read_unchanged, a_refused_ipv6_update_leaves_the_prior_read_unchanged, a_set_with_an_ipv6_backend_is_refused_and_leaves_the_service_unchanged (sim_dataplane_reverse_nat_per_proto.rs)",
+          "effort_hours": 4,
+          "dependencies": [
+            "01-03"
+          ],
+          "implementation_scope": {
+            "files_to_modify": [
+              "crates/overdrive-sim/src/adapters/dataplane.rs",
+              "crates/overdrive-core/src/traits/dataplane.rs",
+              "crates/overdrive-sim/tests/sim_dataplane_programmed_fingerprint_contract.rs",
+              "crates/overdrive-sim/tests/sim_dataplane_reverse_nat_per_proto.rs",
+              "docs/scenarios/udp-service-support/test-scenarios.md"
+            ]
+          },
+          "review_checklist": [
+            "IPv6 refusal is first validation, before any map/tracker/allocator/identity change.",
+            "Rustdoc on update_service is the SSOT for the refusal and the fingerprint postcondition; the same text is not duplicated in the ADR.",
+            "Fingerprint computed with the existing BackendSetFingerprint function over the slice as given."
+          ],
+          "implementation_notes": "Contract D-20 'The fingerprint written with the table' and 'update_service and IPv6 backends'. Tier 1 default lane, host_pure. The S-02-D body was rewritten and made pending by the acceptance designer in DISTILL; this step only removes its marker. No API beyond the pinned contract (no sim read-failure seam: ruling (b))."
+        },
+        {
+          "id": "02-02",
+          "name": "DataplanePorts: one dataplane instance behind both the write port and the read port",
+          "description": "In overdrive-control-plane/src/node_adapters.rs add DataplanePorts exactly as pinned (private fields; new<D: Dataplane + ProgrammedServiceView + 'static>(Arc<D>); dataplane(); programmed_services(); From<Arc<D>>; Clone), re-exported at the crate root beside ComposedDataplane. Retype ComposedDataplane.dataplane and AppState.dataplane as DataplanePorts; AppState::new and AppState::new_with_workflow_engine take dataplane: impl Into<DataplanePorts> in the same position; run_server passes the DataplanePorts it destructures from ComposedDataplane. Update the four composer struct-literal sites (HostDataplaneComposer::compose, SimDataplaneComposer::compose, TestDataplaneComposer::compose in shared_network_test_ports.rs, the test-local FixtureComposer in public_ingress_gateway_boot_shutdown.rs), the readers (action_shim/mod.rs two sites read state.dataplane.dataplane().as_ref(); listener_facts.rs passes state.dataplane.clone()), and the callers that hold a trait object (service_frontend_ipv6_rejected.rs, service_map_hydrator_dispatch.rs three sites, tests/common/vm_dispatch.rs dataplane field; their PanicOnUpdateService/FailingUpdateService doubles implement ProgrammedServiceView). build_hydration_context sets programmed_services from state.dataplane.programmed_services() and InertProgrammedServices is deleted. DataplanePorts::new(..) stays in node_adapters.rs (required_serve_ports_source_scan bans EbpfDataplane::new* in src/lib.rs).",
+          "criteria": [
+            "The whole control-plane, core, reconcilers and sim suites stay GREEN unchanged in behaviour: fixtures passing an Arc<SimDataplane> compile through the From impl, so only the trait-object holders (service_frontend_ipv6_rejected.rs, service_map_hydrator_dispatch.rs, vm_dispatch.rs) change.",
+            "A write port and a read port over different instances cannot be constructed: DataplanePorts has no public field and no constructor taking two instances or a bare Arc<dyn Dataplane>.",
+            "InertProgrammedServices no longer exists; build_hydration_context reads the port from AppState.dataplane.",
+            "required_serve_ports_source_scan stays GREEN (no EbpfDataplane construction added in lib.rs); hydration_context_read_surface_audit stays GREEN.",
+            "No test is added for the wiring: it is discharged by the reboot test in 02-04, which cannot go GREEN unless the view reads the instance the shim writes through."
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/acceptance/service_frontend_ipv6_rejected.rs",
+          "scenario_name": "behaviour-preserving composition change; regression guards: service_frontend_ipv6_rejected.rs, service_map_hydrator_dispatch.rs, required_serve_ports_source_scan.rs, hydration_context_read_surface_audit.rs (no pending marker)",
+          "effort_hours": 5,
+          "dependencies": [
+            "02-01"
+          ],
+          "implementation_scope": {
+            "files_to_modify": [
+              "crates/overdrive-control-plane/src/node_adapters.rs",
+              "crates/overdrive-control-plane/src/lib.rs",
+              "crates/overdrive-control-plane/src/shared_network_test_ports.rs",
+              "crates/overdrive-control-plane/src/reconciler_runtime.rs",
+              "crates/overdrive-control-plane/src/listener_facts.rs",
+              "crates/overdrive-control-plane/src/action_shim/mod.rs",
+              "crates/overdrive-control-plane/tests/integration/public_ingress_gateway_boot_shutdown.rs",
+              "crates/overdrive-control-plane/tests/acceptance/service_frontend_ipv6_rejected.rs",
+              "crates/overdrive-control-plane/tests/integration/service_map_hydrator_dispatch.rs",
+              "crates/overdrive-control-plane/tests/common/vm_dispatch.rs",
+              "crates/overdrive-control-plane/tests/acceptance/listener_fact_hydrate_equivalence.rs",
+              "crates/overdrive-control-plane/tests/acceptance/public_ingress_gateway_hydration.rs",
+              "crates/overdrive-sim/tests/acceptance/vm_reclamation_hydrate_actual_equivalence.rs"
+            ]
+          },
+          "review_checklist": [
+            "Exactly the pinned DataplanePorts surface; no additional accessor, constructor or trait.",
+            "Read port remains a separate trait from Dataplane (ADR-0299 rejects a read method on Dataplane).",
+            "spike-scratch/ AppState::new callers are throwaway and not maintained."
+          ],
+          "implementation_notes": "Contract D-20 'Composition wiring'. Comment rewording (no wiring or assertion change): the three D-20 fixture markers 'DISTILL scaffold (D-20): ... does not read the programmed map / unread by hydrate_actual here' in listener_fact_hydrate_equivalence.rs (~:180), public_ingress_gateway_hydration.rs (~:102) and vm_reclamation_hydrate_actual_equivalence.rs (~:130) are reworded to state that the cell hydrates a reconciler other than the service-map hydrator, so it legitimately supplies a SimDataplane that is not read. Verified by reading: every service-map-hydrator call in listener_fact_hydrate_equivalence.rs is hydrate_desired only (:262-:355, :595, :613), which does not read the programmed map; its hydrate_actual calls hydrate workflow-lifecycle, service-lifecycle and svid-lifecycle; so none belongs to 02-04. Pure type-wiring step; the acceptance evidence is the existing suites (compile and run), per the DISTILL ruling that no test is added. Contract shape: DataplanePorts is a pure value, universe none."
+        },
+        {
+          "id": "02-03",
+          "name": "EbpfDataplane writes the applied-set fingerprint with the table and reads it back; inner capacity 16,383",
+          "description": "In overdrive-dataplane: split the Maglev table size (16,381, the XDP modulus) from the inner capacity as two constants (SERVICE_MAP_INNER_CAPACITY = 16,381 + 2 = 16,383); the inner prototype and every inner map carry 16,383 slots (kernel array_map_meta_equal rejects a mismatch, K-4). update_service with a non-empty set computes fingerprint(&frontend.vip, &backends) and writes its low 32 bits to inner slot 16,381 and high 32 bits to slot 16,382 of the NEW inner array before the atomic outer swap; an empty update deletes the outer slot as today. The ProgrammedServiceView impl reads the real resource: under the apply-commit guard held for read for the whole sequence, outer lookup (inner map id), BPF_MAP_GET_FD_BY_ID, then the two element lookups, recombined low | high << 32; Ok(None) only when no slot is programmed; a failed kernel read returns Err(DataplaneError::LoadFailed), never Ok(None). Correct every stale lockstep comment that names one value for both constants, the verifier_regress/verifier_budget text, and any fixture that builds an inner array for the production outer map (tests under crates/overdrive-dataplane/tests/integration/ and the overdrive-bpf Tier-2 xdp_service_map_lookup fixtures) to 16,383.",
+          "criteria": [
+            "host_and_sim_read_the_same_programmed_fingerprint_after_every_call goes GREEN (Tier 3, guest mtls-relay): identical read on EbpfDataplane and SimDataplane after each step, equal to the literal fingerprint(vip, applied); after B2 and the reordered B2 the raw kernel slots 16,381 and 16,382 equal fp as u32 and (fp >> 32) as u32 and Maglev slot 0 holds a backend id present in BACKEND_MAP.",
+            "a_restarted_host_dataplane_reads_none_for_every_frontend_then_reprograms goes GREEN: a second EbpfDataplane over the same pin directory reads None for every frontend; re-programming reads the fingerprint again; the other frontend stays None.",
+            "xdp_never_selects_the_two_fingerprint_slots stays GREEN (not pending) and the existing XDP dataplane integration tests (atomic_swap, service_map_forward, reverse_nat_e2e, reverse_nat_udp_e2e, multi_listener_tcp_udp_e2e, sanity_mixed_batch, maglev_real) and the Tier-2 xdp_service_map_lookup tests pass with capacity 16,383; cargo verifier-regress baselines unchanged (the XDP program is not changed).",
+            "The 16,381 modulus constant stays the Maglev table size and the 16,383 capacity is a separate constant; no comment claims one value for both.",
+            "The fingerprint is written before the outer swap, computed over the slice in the order given, and never recomputed from service_backends or any tracker."
+          ],
+          "test_file": "crates/overdrive-dataplane/tests/integration/programmed_service_view_equivalence.rs",
+          "scenario_name": "host_and_sim_read_the_same_programmed_fingerprint_after_every_call, a_restarted_host_dataplane_reads_none_for_every_frontend_then_reprograms",
+          "effort_hours": 8,
+          "dependencies": [
+            "02-01",
+            "02-02"
+          ],
+          "implementation_scope": {
+            "files_to_modify": [
+              "crates/overdrive-dataplane/src/lib.rs",
+              "crates/overdrive-dataplane/src/maps/mod.rs",
+              "crates/overdrive-dataplane/bin/verifier_regress.rs",
+              "crates/overdrive-bpf/src/maps/service_map.rs",
+              "crates/overdrive-bpf/src/maps/maglev_map.rs",
+              "crates/overdrive-bpf/src/programs/xdp_service_map.rs",
+              "crates/overdrive-dataplane/tests/integration/programmed_service_view_equivalence.rs",
+              "crates/overdrive-dataplane/tests/integration/atomic_swap.rs",
+              "crates/overdrive-dataplane/tests/integration/service_map_forward.rs",
+              "crates/overdrive-dataplane/tests/integration/reverse_nat_e2e.rs",
+              "crates/overdrive-dataplane/tests/integration/maglev_real.rs",
+              "crates/overdrive-bpf/tests/integration/xdp_service_map_lookup.rs"
+            ]
+          },
+          "review_checklist": [
+            "Read holds the apply-commit guard for read for the whole sequence (V-6: 0 torn reads guarded vs 63% unguarded).",
+            "No probe step added (D-20 'Probe'); the 'host read returns Ok(None) on a failed read' mutant is an accepted survivor (ruling b) and has no test.",
+            "Kernel claims K-1..K-4 are cited @ v7.0 in rustdoc where the code relies on them."
+          ],
+          "implementation_notes": "Tier 3, run on the native metal host through cargo xtask metal run (guest placement already declared on the tests). Rebuild the BPF object first (cargo xtask bpf-build). Fixtures that build an inner array for the production outer map are edited only for the capacity constant (mechanical, no assertion change). No API beyond D-20 / ADR-0299."
+        },
+        {
+          "id": "02-04",
+          "name": "Hydrator diffs against the programmed fingerprint; delete the result-row arms; add D-3 retention",
+          "description": "ACCEPTANCE-DESIGNER FIRST ACTION (ruling a): author the hydrator unit tests of D-20 handoff item 4 over the new state type before any production change: in_place for an equal fingerprint, for an empty survivor set against an absent actual entry, for a differing fingerprint (including weight-only and health-only change) and for an IPv6 survivor (never in place); dispatch inside the backoff window suppressed and the key retained by next_evaluation_at; a changed desired set dispatches at once; an in-place observation removes the retry entry; no should_dispatch arm reads a result row; plus rewrite the existing service_map_hydrator_reconcile.rs and mesh_backend_lb_gate.rs receipt-shaped tests to the new state. THEN the crafter: change ServiceMapHydratorState.actual to BTreeMap<ServiceId, BackendSetFingerprint> (present when a slot is programmed, absent when programmed_fingerprint returned None), remove ServiceHydrationStatus from the hydrator state, make hydrate_actual re-project the target's frontend exactly as hydrate_desired does (service_backends row plus listener fact through project_service_desired) and read ctx.programmed_services.programmed_fingerprint (a read error ends the evaluation as HydrateError::DataplaneRead(String): no View write, no dispatch), delete the service_hydration_results read in hydrate_actual and the None/Pending/Completed/Failed arms of should_dispatch, implement the pure diff (in_place; dispatch when !in_place and pacing allows; RetryMemory keeps its three fields and decides only when to act again; in-place observation removes the retry entry; emitted DataplaneUpdateService unchanged) and implement D-3 ServiceMapHydrator::next_evaluation_at (earliest future last_failure_seen_at + backoff_for_attempt(attempts) over the remote retries map for a service not in place; None otherwise; reads only its inputs; existing hook, no trait change). Update the sim hydrator invariants and the false 'any combination of BPF map state' claim only as far as the type change forces.",
+          "criteria": [
+            "a_rebooted_node_reprograms_the_service_map_its_completed_receipt_claims goes GREEN (run_convergence_tick directly, no resync pass): after a fresh SimDataplane with a Completed receipt row persisting, the programmed fingerprint equals fingerprint(vip, survivors) within the rounds and the dataplane carries the backends; the result row is not consulted.",
+            "a_service_whose_dataplane_update_failed_is_retried_after_its_backoff_without_a_row_write (slice 01 AC3, D-3) goes GREEN: after a scripted first update failure the map carries the backend within 10 s (backoff 1 s, the pass is 30 s away) and all_service_backends_rows is identical before and after.",
+            "The acceptance-designer's D-20 item-4 hydrator unit tests are GREEN, and each D-20 item-6 mutation obligation that targets this step (in_place always true, in_place on a fingerprint omitting healthy or weight, hydrate_actual returning an empty actual, retry entry never removed, next_evaluation_at returning None) has a named test whose assertion would fail under that mutant (checked by reasoning in review; no mutation run - mutation testing is disabled for this delivery).",
+            "No should_dispatch arm reads a result row; the executor keeps writing service_hydration_results (ADR-0042 4) and its operator-visible outcome and Failed error are unchanged.",
+            "The hydrator property the_hydrator_converges_from_any_state_despite_dropped_updates_then_stays_converged remains pending (it needs the resync pass, step 03-02); its marker is NOT removed here.",
+            "No API beyond the pinned contract: no new port, trait method, state field or View field."
+          ],
+          "test_file": "crates/overdrive-control-plane/src/convergence_property/hydrator.rs",
+          "scenario_name": "a_rebooted_node_reprograms_the_service_map_its_completed_receipt_claims; a_service_whose_dataplane_update_failed_is_retried_after_its_backoff_without_a_row_write (tests/integration/reconciler_resync_pass.rs); acceptance-designer hydrator unit tests (service_map_hydrator_reconcile.rs)",
+          "effort_hours": 8,
+          "dependencies": [
+            "02-01",
+            "02-02",
+            "02-03"
+          ],
+          "implementation_scope": {
+            "files_to_modify": [
+              "crates/overdrive-reconcilers/src/service_map_hydrator.rs",
+              "crates/overdrive-reconcilers/src/lib.rs",
+              "crates/overdrive-core/src/reconcilers/hydration.rs",
+              "crates/overdrive-control-plane/src/reconciler_runtime.rs",
+              "crates/overdrive-core/tests/acceptance/service_map_hydrator_reconcile.rs",
+              "crates/overdrive-core/tests/mesh_backend_lb_gate.rs",
+              "crates/overdrive-control-plane/src/convergence_property/hydrator.rs",
+              "crates/overdrive-control-plane/tests/integration/reconciler_resync_pass.rs",
+              "crates/overdrive-sim/src/invariants/service_map_hydrator.rs"
+            ]
+          },
+          "review_checklist": [
+            "The fingerprint compared is the dataplane-written fingerprint read from the resource; the hydrator's last_attempted_fingerprint stays a pacing input detecting a changed desired set, never the diff (reconcilers.md fingerprint-as-diff symptom).",
+            "Item 2 of the D-20 diff says 'last_attempted_fingerprint != programmed fingerprint' while the same section's rationale is 'a changed desired set dispatches at once': implement it as comparison with the DESIRED survivor fingerprint (the existing hydrator fingerprint function); if the crafter reads it otherwise, STOP and surface, do not guess.",
+            "Wake rule: the hydrator authors no row it declares interest in; unchanged."
+          ],
+          "implementation_notes": "ACCEPTANCE-DESIGNER PRE-PASS REQUIRED: yes, as the FIRST action of this step (ruling a). The crafter must not author the item-4 unit tests or rewrite receipt-shaped bodies. Tier 1 default lane for the unit tests and reboot test (host_pure); the slice-01 test is Tier 1 via run_server (guest cgroup-default, already declared). The pending marker of the hydrator property stays until 03-02."
+        }
+      ]
+    },
+    {
+      "id": "03",
+      "name": "Slice 01 - every reconciler declares its managed targets; the runtime re-evaluates them each period (D-1, ADR-0296)",
+      "description": "Replaces the cadence phase and the interest router's periodic relist with one runtime resync pass over managed_targets enumerated from intent AND observation, closing the verification's wake gaps (hydrate error, View-write error, failed dataplane inside backoff, fresh deploy with no alloc_status row). interests() and EnqueueEvaluation stay as edge latency.",
+      "steps": [
+        {
+          "id": "03-01",
+          "name": "Replace the managed_targets scaffolds with the ruled per-reconciler enumeration",
+          "description": "Real Reconciler::managed_targets bodies on all eight reconcilers (AnyReconciler already forwards), exactly the D-1a/D-18/D-21 sets: workload-lifecycle = workload/<id> for each canonical workloads/ intent (IntentKey::workload_prefix + is_canonical_workload_record, via the shared scan_workload_intents helper; no prefix literal, no suffix skip list) union each distinct alloc_status workload_id; service-lifecycle = Service-kind workloads that have an alloc_status row or an assigned VIP (ServiceVipView), never intent alone; svid-lifecycle = workloads of Running allocation rows union workload ids of held SVIDs (HeldSvidView) derived by parsing the SPIFFE path internally (D-1a-i option A: no new SpiffeId accessor), ever_issued makes nothing managed, a non-inverting held entry is not returned; service-map-hydrator = service/<id> for each ServiceId of a workload intent listener (the id hydrate_desired derives from VIP, port and protocol) union each service_id in service_backends rows, a service_hydration_results row alone adds no target (D-21, deletion case is #211; no list-all method added to ObservationStore); workflow-lifecycle = single target workflow/all only when a workflow instance exists (empty in production); vm-reclamation and gateway-svid-lifecycle = their single node/<id> target always; noop-heartbeat = empty set (no-obligation ruling). A read failure returns Err for the whole call, never a partial set; no clock, no write, no dispatch. Rustdoc on the trait method already states the contract. Nothing calls it from production until 03-02 (consecutive step; the feature is not complete before it).",
+          "criteria": [
+            "All ten WK-4 containment tests in convergence_property/managed_targets_containment.rs go GREEN with their markers removed: workload_lifecycle_manages_every_workload_with_intent_or_an_allocation_row (the neither workload is absent, no id contains /), workload_lifecycle_enumeration_returns_an_error_not_the_intent_half_when_allocation_rows_cannot_be_read, service_lifecycle_manages_services_and_not_jobs, svid_lifecycle_manages_workloads_with_running_allocations_or_a_held_svid_and_nothing_else, svid_lifecycle_enumeration_returns_an_error_when_allocation_rows_cannot_be_read, service_map_hydrator_manages_services_with_an_intent_or_a_backend_row_but_not_a_result_row_alone, service_map_hydrator_enumeration_returns_an_error_when_service_rows_cannot_be_read, workflow_lifecycle_manages_its_one_conventional_target_once_an_instance_exists, vm_reclamation_manages_exactly_its_node_target, gateway_svid_lifecycle_manages_exactly_its_node_target.",
+            "Containment holds per D-1a: every target whose hydrate_desired or hydrate_actual projection is non-empty is in the returned set (for svid-lifecycle, desired plus held, excluding ever_issued); an Err returns no partial set.",
+            "managed_targets carries no &dyn Clock and passes the dst-lint purity scan and the hydrate-parameter compile-guard extension; the boundary test S-ROH-B-09 is updated for the field set if it audits the trait surface.",
+            "The enumeration sources are the existing read ports and scan helper; no new public method, port or trait is added (D-21: no ObservationStore list-all)."
+          ],
+          "test_file": "crates/overdrive-control-plane/src/convergence_property/managed_targets_containment.rs",
+          "scenario_name": "workload_lifecycle_manages_every_workload_with_intent_or_an_allocation_row (and the nine sibling containment tests listed in the criteria)",
+          "effort_hours": 8,
+          "dependencies": [
+            "02-04"
+          ],
+          "implementation_scope": {
+            "files_to_modify": [
+              "crates/overdrive-reconcilers/src/workload_lifecycle.rs",
+              "crates/overdrive-reconcilers/src/service_lifecycle.rs",
+              "crates/overdrive-reconcilers/src/svid_lifecycle.rs",
+              "crates/overdrive-reconcilers/src/service_map_hydrator.rs",
+              "crates/overdrive-reconcilers/src/workflow_lifecycle.rs",
+              "crates/overdrive-reconcilers/src/vm_reclamation.rs",
+              "crates/overdrive-reconcilers/src/gateway_svid_lifecycle.rs",
+              "crates/overdrive-reconcilers/src/noop_heartbeat.rs",
+              "crates/overdrive-control-plane/src/convergence_property/managed_targets_containment.rs",
+              "crates/overdrive-core/tests/acceptance/collapsed_reconciler_trait.rs",
+              "crates/overdrive-core/tests/acceptance/reconciler_trait_surface.rs",
+              "crates/overdrive-core/src/reconcilers/mod.rs"
+            ]
+          },
+          "review_checklist": [
+            "Per-reconciler sets match D-1a, D-18 and D-21 exactly; an intent alone makes only workload-lifecycle managed.",
+            "svid-lifecycle held leg parses the SPIFFE path internally (inverse of SpiffeId::for_allocation); no public SpiffeId accessor added.",
+            "The hydrator's result-only half is reached through deployed Service intents (intent scan, VIP read-port, listener port/protocol), not a new unkeyed enumerator."
+          ],
+          "implementation_notes": "Contract shape: pure read, universe none; assertion = the containment tests (read through the reconciler's own hydrate_*_for_test, never the world's bookkeeping). Tier 1 default lane, host_pure. Confirm each set against the live hydrate_* before coding (the delta states svid-lifecycle, vm-reclamation and gateway sets from the verification doc, not from the bodies). noop-heartbeat has no test by ruling. Comment rewording (no assertion change): the test-local reconcilers in crates/overdrive-core/tests/acceptance/collapsed_reconciler_trait.rs (~:93) and reconciler_trait_surface.rs (~:501), and the rustdoc example in crates/overdrive-core/src/reconcilers/mod.rs (~:129), carry 'DISTILL scaffold: an empty target set, replaced by the reconciler's real enumeration'. They are legitimate test doubles (an empty managed set is correct for a reconciler with no targets): reword each comment so it no longer says 'DISTILL scaffold ... replaced by the real enumeration'. reconciler_trait_surface.rs is also edited by 03-02 (resync_schedule assertions); the two edits do not overlap. @sizing-review-needed - accepted; coherent single cause."
+        },
+        {
+          "id": "03-02",
+          "name": "The resync pass: resync_reconciler, the boot-anchored pass loop and the D-1c removals",
+          "description": "Replace the resync_reconciler scaffold (pub(crate) async fn resync_reconciler(state: &AppState, name: &ReconcilerName) -> Result<usize, HydrateError>) with the real step: call managed_targets through the production HydrationContext and submit ONE Immediate Evaluation per target through ReconcilerRuntime::submit_evaluation, or on Err submit none; return the count; writes no observation row. Wire the pass into the convergence loop (crate-private; name and visibility the crafter's): a loop over resync_reconciler for each registered reconciler in BTreeMap order, adding no other effect; on Err it logs a structured event naming reconciler and error and continues with the next reconciler (never aborts, never a partial set); it runs a pass at boot, then anchors the next pass at previous + 30 s constant (D-2) on the injected clock the convergence loop already reads (BootAdapters.clock / AppState.clock), re-armed at most once per period, no drift. Same-commit D-1c removals: Reconciler::resync_schedule, ResyncSchedule, ResyncScope, AnyReconciler::resync_schedule, build_cadence_table, the cadence phase (next-wake table and scope resolution), the vm-reclamation and gateway-svid-lifecycle overrides, INTEREST_ROUTER_RELIST_PERIOD and the periodic arm of the router; spawn_interest_router reverts to the pinned five-parameter signature (obs, subscription, interest_table, broker, shutdown); the boot LIST and the Lagged relist stay; the vm-reclamation boot-time evaluation drive stays unless shown redundant with the first pass. Delete the tests and acceptance fixtures that assert the removed items (tests/acceptance/cadence_resync.rs, the interest_router.rs periodic-relist tests, the resync_schedule assertions in reconciler_trait_surface.rs and any reconciler tests of the removed overrides) in the same commit. run_convergence_tick_inner control flow is unchanged (ADR-0296 decision 3). Land the D15 doc correction in the same commit (user ruling D-15): development.md Reconciler I/O replaces 'an unreadable observation is the runtime's to log-and-skip' with the hydrate-error-ends-the-evaluation text, documents next_evaluation_at and managed_targets beside resync_schedule's removal; reconcilers.md wakeup-model section drops 'never both' and states the pass as the backstop for every reconciler (text from the feature delta 'Proposed rule text').",
+          "criteria": [
+            "All seven remaining slice-01 integration tests in tests/integration/reconciler_resync_pass.rs go GREEN with markers removed: a_service_whose_first_hydrate_failed_is_running_and_in_the_service_map_by_the_next_pass, a_service_whose_first_intent_read_failed_is_running_and_in_the_service_map_by_the_next_pass, a_service_whose_view_write_failed_is_running_and_in_the_service_map_on_a_later_pass, a_node_restarted_over_a_deployed_intent_with_no_allocation_row_evaluates_it_at_boot, an_enumeration_failure_of_one_reconciler_does_not_starve_the_others_in_the_pass, the_resync_pass_stays_anchored_one_period_apart_with_no_drift_and_at_most_one_per_period, a_clock_jump_over_several_periods_runs_the_missed_passes_and_stays_on_the_boot_grid (the 30 s period, boot pass, no drift, at most one pass per period, recovery within one period plus queue time).",
+            "All six convergence-property tests go GREEN with markers removed, each failing mechanically with reconciler name, seed and world if a record-on-emit latch or the pass is removed: hydrator::the_hydrator_converges_from_any_state_despite_dropped_updates_then_stays_converged (including the reboot world, now green only through the D-20 read), workload::the_workload_converges_from_any_state_despite_a_dropped_start_then_stays_converged, svid::svid_lifecycle_converges_the_held_set_to_the_running_set_from_any_state_then_stays_converged (including the orphaned held-SVID world), service::service_lifecycle_publishes_the_running_backends_from_any_state_then_stays_converged (D-6 scoped), gateway::gateway_svid_lifecycle_converges_the_gateway_identity_from_any_state_then_stays_converged, vm_reclaim::vm_reclamation_removes_every_reclaimable_artifact_from_any_host_then_stays_converged. The executor-idempotency companion stays GREEN.",
+            "AC5 stability: at a converged state a pass causes zero non-Noop actions (asserted by the property stability phase); a target absent from managed_targets is never evaluated.",
+            "No reference to resync_schedule, ResyncSchedule, ResyncScope, build_cadence_table or INTEREST_ROUTER_RELIST_PERIOD remains in crates/ except history; cadence_resync.rs and the periodic-relist tests are deleted, not rewritten.",
+            "crates/overdrive-reconcilers/tests/acceptance/crate_extraction_import_rewrite_compiles.rs: remove the ResyncSchedule, ResyncScope and resolve_scope imports (~:40-41) and their uses (~:82-83, and the resolve_scope use ~:86); crates/overdrive-control-plane/tests/acceptance.rs: remove `mod cadence_resync;` (~:205). Verified by grep: crates/overdrive-sim/tests/acceptance/service_kind_vm_terminal_invariant.rs and crates/overdrive-control-plane/src/guest_network/quint_cid_lease.rs reference none of the removed items, so they are not in scope.",
+            "The crafter re-runs `grep -rn 'ResyncSchedule\\|ResyncScope\\|resolve_scope\\|resync_schedule\\|INTEREST_ROUTER_RELIST_PERIOD' crates/` and the result is empty except intended survivors (each named in the commit body).",
+            "ADR-0296 decision 3 holds: a hydrate or persist error is not requeued locally (the next pass retries it), a dispatch error keeps the tick's requeue, no observation row is written by the pass; interests() declarations are unchanged and no reconciler declares a cadence.",
+            "No API beyond the pinned contract: resync_reconciler keeps its exact crate-private signature; no #[doc(hidden)] seam; the pass names no new public type."
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/integration/reconciler_resync_pass.rs",
+          "scenario_name": "a_service_whose_first_hydrate_failed_is_running_and_in_the_service_map_by_the_next_pass; a_service_whose_first_intent_read_failed_is_running_and_in_the_service_map_by_the_next_pass; a_service_whose_view_write_failed_is_running_and_in_the_service_map_on_a_later_pass; a_node_restarted_over_a_deployed_intent_with_no_allocation_row_evaluates_it_at_boot; an_enumeration_failure_of_one_reconciler_does_not_starve_the_others_in_the_pass; the_resync_pass_stays_anchored_one_period_apart_with_no_drift_and_at_most_one_per_period; a_clock_jump_over_several_periods_runs_the_missed_passes_and_stays_on_the_boot_grid; plus the six convergence_property tests",
+          "effort_hours": 10,
+          "dependencies": [
+            "03-01"
+          ],
+          "implementation_scope": {
+            "files_to_modify": [
+              "crates/overdrive-control-plane/src/reconciler_runtime.rs",
+              "crates/overdrive-control-plane/src/lib.rs",
+              "crates/overdrive-core/src/reconcilers/mod.rs",
+              "crates/overdrive-reconcilers/src/lib.rs",
+              "crates/overdrive-reconcilers/src/vm_reclamation.rs",
+              "crates/overdrive-reconcilers/src/gateway_svid_lifecycle.rs",
+              "crates/overdrive-control-plane/tests/acceptance/cadence_resync.rs",
+              "crates/overdrive-control-plane/tests/acceptance/interest_router.rs",
+              "crates/overdrive-control-plane/tests/integration/interest_router_run_server.rs",
+              "crates/overdrive-reconcilers/tests/acceptance/crate_extraction_import_rewrite_compiles.rs",
+              "crates/overdrive-control-plane/tests/acceptance.rs",
+              "crates/overdrive-core/tests/acceptance/reconciler_trait_surface.rs",
+              "crates/overdrive-control-plane/tests/integration/reconciler_resync_pass.rs",
+              "crates/overdrive-control-plane/src/convergence_property/hydrator.rs",
+              "crates/overdrive-control-plane/src/convergence_property/workload.rs",
+              "crates/overdrive-control-plane/src/convergence_property/svid.rs",
+              "crates/overdrive-control-plane/src/convergence_property/service.rs",
+              "crates/overdrive-control-plane/src/convergence_property/gateway.rs",
+              "crates/overdrive-control-plane/src/convergence_property/vm_reclaim.rs",
+              ".claude/rules/development.md",
+              ".claude/rules/reconcilers.md"
+            ]
+          },
+          "review_checklist": [
+            "The pass submits only through ReconcilerRuntime::submit_evaluation with Immediate eligibility; contract shape bounded-change, effect universe = submit_evaluation calls.",
+            "Enumeration failure of one reconciler logs and continues; a partial set is never submitted.",
+            "Pass anchoring uses the same Clock instance as the convergence loop (no tokio::time, no wall clock); re-armed at most once per period on a jump (catch-up stays on the boot grid).",
+            "Rules text is timeless discipline: principle plus symptoms, no ADR-as-status and no DELIVER notes."
+          ],
+          "implementation_notes": "Per user ruling D-15 the development.md and reconcilers.md wakeup/hydrate-error text lands in this step's commit (same commit as the behaviour change) rather than the later rule step; the View-rule text lands in 04-01. Integration tests are Tier 1 over run_server (guest cgroup-default, declared). The convergence_property tests run in the default lane (host_pure). Metal run required for the integration lane. The missed-passes semantics: the test does not pin consecutive-iteration versus collapsed catch-up, only the boot grid. @sizing-review-needed - accepted; coherent single cause."
+        },
+        {
+          "id": "03-03",
+          "name": "BrokerDrain::pending_keys real body; Quint conformance driver replays the specification",
+          "description": "Replace the pending_keys scaffold with the pinned read-only accessor: BrokerDrain::pending_keys(&self) -> Vec<(ReconcilerName, TargetResource)> returning the pending keys in first-pending order (ascending by the broker's admission sequence, the order drain_pending admits eligible keys); a same-key resubmit keeps its slot; read-only, takes no limit or blocked set, does not filter by eligibility. Remove the 11 pending markers of the quint-connect driver crates/overdrive-control-plane/src/reconciler_runtime/quint_evaluation_wake.rs (10 #[quint_test], one per named run, plus #[quint_run]) so the driver replays specs/quint/reconciler-evaluation-wake/ (wake_conf) against the production runtime, comparing pending from pending_keys and dispatched/cancelled from counters() after every step. Add no production surface other than pending_keys.",
+          "criteria": [
+            "All ten named runs replay GREEN against production: healthy_edge_converges, hydrate_error_recovers_by_pass, persist_error_recovers_by_pass, crash_between_fsync_and_dispatch_recovers_by_boot_pass, failed_dataplane_inside_backoff_recovers_without_row_write, fresh_deploy_without_row_is_evaluated, enumeration_failure_of_one_reconciler_does_not_starve_others, edge_wake_during_burst_is_admitted_after_burst, pass_submit_merges_retained_not_before_to_immediate, world_changes_between_drain_and_finish; and #[quint_run] passes with its seed printed on failure.",
+            "pending_keys order is first-pending (admission) order and a same-key resubmit does not move the key (existing eval_broker_collapse and eval_broker tests stay GREEN; one broker unit assertion on the ordering clause is added by the acceptance designer only if absent).",
+            "cargo xtask conformance-lint exits 0: no always-false cfg, no empty action handler, no Sim adapter read in from_driver, no quint CLI spawn.",
+            "The managed-set bodies from 03-01 and the hydrator next_evaluation_at from 02-04 are the ones the fidelity probe replayed with (managed_targets sets per D-18; D-3 retention); a surplus or unmapped pending key in the replay is a defect in those bodies or a spec gap to surface, not something the driver absorbs."
+          ],
+          "test_file": "crates/overdrive-control-plane/src/reconciler_runtime/quint_evaluation_wake.rs",
+          "scenario_name": "healthy_edge_converges, hydrate_error_recovers_by_pass, persist_error_recovers_by_pass, crash_between_fsync_and_dispatch_recovers_by_boot_pass, failed_dataplane_inside_backoff_recovers_without_row_write, fresh_deploy_without_row_is_evaluated, enumeration_failure_of_one_reconciler_does_not_starve_others, edge_wake_during_burst_is_admitted_after_burst, pass_submit_merges_retained_not_before_to_immediate, world_changes_between_drain_and_finish, plus #[quint_run]",
+          "effort_hours": 5,
+          "dependencies": [
+            "03-02"
+          ],
+          "implementation_scope": {
+            "files_to_modify": [
+              "crates/overdrive-control-plane/src/reconciler_runtime.rs",
+              "crates/overdrive-control-plane/src/reconciler_runtime/quint_evaluation_wake.rs"
+            ]
+          },
+          "review_checklist": [
+            "pending_keys is the only new production surface; its docstring states order, resubmit and eligibility behaviour.",
+            "Pending markers removed: the should_panic text 'the pending queue the broker reports is empty where the model's is not' no longer appears in the driver.",
+            "Driver state projection reads only BrokerDrain accessors (pending_keys, counters)."
+          ],
+          "implementation_notes": "Quint conformance per testing.md; runs under integration-tests on metal (cargo xtask metal run --). The known driver gaps B1/B2/B3 recorded in distill/conformance-driver.md are already resolved in the driver; if a replay diverges, return the divergence (spec or production defect) rather than editing the spec or loosening the projection."
+        }
+      ]
+    },
+    {
+      "id": "04",
+      "name": "Slice 04 close-out - the View rule and documentation corrections (US-06, D-5)",
+      "description": "The shared multi-tick property and the executor-idempotency companion were activated in 03-02; this phase lands the timeless rule text and the two comment corrections so a record-on-emit latch is named as a violation in the rules, and the docs match behaviour.",
+      "steps": [
+        {
+          "id": "04-01",
+          "name": "reconcilers.md: a View decides when to act, never whether an effect is in place",
+          "description": "In .claude/rules/reconcilers.md replace the fingerprint-shaped 'Symptoms during review' bullet with the general prohibition drafted in the feature delta 'Proposed rule text': the View may carry pacing inputs (attempts, last attempt time, retry budget, rate limit, a marker keyed to an observed input such as a probe row's run_seq) that decide only when to act again; it never decides whether an effect is in place, which is decided from actual read from the resource the reconciler manages; a marker keyed to an observed input suppresses re-emission only for that same input; if the effect cannot be observed, make it observable first (a result row of the last attempt is a receipt, not the resource). Add the listed symptoms (a View field consulted as the diff; a field stamped on emit and consulted to decide whether the effect is in place; a reconciler whose only wake is an edge; a managed-target method that enumerates one observation family only; a test or simulation invariant that seeds the View to represent converged instead of asserting on actual) and the 'every reconciler declares its managed targets' paragraph if 03-02 did not already land it. Correct the stale 'still live in tree' bullet about ServiceLifecycleView::last_emitted_backend_fingerprint (ADR-0101 deleted the field). The rule names no exception and is timeless: principle plus symptoms, no ADR-as-status, no 'resolved by' or DELIVER-phase notes. Edit exactly the instructed scope; do not remove neighbouring sections.",
+          "criteria": [
+            "AC5: reconcilers.md carries the pacing-input test ('a pacing input decides only when to act again; a marker keyed to an observed input suppresses re-emission only for that same input') and the 'make it observable first' clause.",
+            "AC6: the text is timeless discipline: no ADR numbers as status, no DELIVER-phase or in-flight notes, no named exception (the deleted last_emitted_backend_fingerprint bullet is corrected, not preserved).",
+            "The text does not contradict the wakeup-model text already landed in 03-02 (no remaining 'never both' sentence) and the existing neighbouring sections are intact (git diff touches only the replaced symptom bullet, the wakeup paragraph if not already updated, the new View-rule paragraph, the new symptoms list and the stale bullet).",
+            "Review obligation (no executable scenario): a reviewer checks the delta's 'Proposed rule text' items are all present."
+          ],
+          "test_file": ".claude/rules/reconcilers.md",
+          "scenario_name": "documentation change; reviewed against the feature delta Proposed rule text (no executable scenario)",
+          "effort_hours": 2,
+          "dependencies": [
+            "03-02"
+          ],
+          "implementation_scope": {
+            "files_to_modify": [
+              ".claude/rules/reconcilers.md"
+            ]
+          },
+          "review_checklist": [
+            "Timeless discipline only; no issue or ADR cited as status.",
+            "Only the instructed scope edited."
+          ],
+          "implementation_notes": "Documentation-only step; no production code. Dispatch through the architect/documentation path per the repo's rules-docs convention (rules docs carry the timeless principle plus symptoms). Skill-lint style structural verification: a golden grep that the pacing-input sentence and the make-it-observable clause are present and that 'last_emitted_backend_fingerprint' and 'never both' are absent."
+        },
+        {
+          "id": "04-02",
+          "name": "Correct the release_service_vip executor doc and the false hydrator DST claim",
+          "description": "Correct the doc comment in crates/overdrive-control-plane/src/action_shim/release_service_vip.rs that says errors are absorbed: the executor returns ShimError::AllocatorRelease (D-5, AC7). Correct the false claim 'any combination of BPF map state' in crates/overdrive-sim/src/invariants/service_map_hydrator.rs (:9) and crates/overdrive-sim/src/invariants/mod.rs (:453) to what the hydrator invariants actually cover after the D-20 read (the hydrator's actual is the programmed fingerprint; the invariant fabricates no Completed receipt). Comment-only; replacing released_for_deletion and any VIP-release behaviour is #211 and is NOT in this step.",
+          "criteria": [
+            "AC7: the release_service_vip.rs doc says the executor propagates ShimError::AllocatorRelease and does not absorb the error; release_service_vip_dispatch.rs stays GREEN.",
+            "The sim hydrator invariants' documentation no longer claims coverage of any combination of BPF map state; the invariants themselves and their registration are unchanged.",
+            "No behaviour changes: cargo xtask dst-lint and the overdrive-sim and control-plane suites stay GREEN; no code outside comments is edited."
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/acceptance/release_service_vip_dispatch.rs",
+          "scenario_name": "documentation change; regression guard release_service_vip_dispatch.rs (no pending marker)",
+          "effort_hours": 1,
+          "dependencies": [
+            "02-04"
+          ],
+          "implementation_scope": {
+            "files_to_modify": [
+              "crates/overdrive-control-plane/src/action_shim/release_service_vip.rs",
+              "crates/overdrive-sim/src/invariants/service_map_hydrator.rs",
+              "crates/overdrive-sim/src/invariants/mod.rs"
+            ]
+          },
+          "review_checklist": [
+            "Comment-only diff.",
+            "No scope added from #211."
+          ],
+          "implementation_notes": "Documentation-only; exempt from the executable-test paradigm: compensated by the existing release_service_vip_dispatch.rs and dst-lint gates."
+        }
+      ]
+    }
+  ],
+  "implementation_scope": {
+    "source_directories": [
+      "crates/overdrive-core/src/",
+      "crates/overdrive-reconcilers/src/",
+      "crates/overdrive-control-plane/src/",
+      "crates/overdrive-dataplane/src/",
+      "crates/overdrive-bpf/src/",
+      "crates/overdrive-sim/src/"
+    ],
+    "test_directories": [
+      "crates/overdrive-core/tests/",
+      "crates/overdrive-control-plane/tests/",
+      "crates/overdrive-control-plane/src/convergence_property/",
+      "crates/overdrive-dataplane/tests/integration/",
+      "crates/overdrive-sim/tests/",
+      "specs/quint/reconciler-evaluation-wake/"
+    ],
+    "excluded_patterns": [
+      "mod.rs",
+      "**/target/**",
+      "spike-scratch/**"
+    ]
+  },
+  "validation": {
+    "status": "approved",
+    "reviewer": "TODO",
+    "approved_at": "TODO"
+  }
+}
