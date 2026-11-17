@@ -177,6 +177,9 @@ fn build_ctx<'a>(
             overdrive_core::guest_network::GuestAttachmentOccupancy { held: 0, retiring: 0 },
             std::collections::BTreeMap::new(),
         );
+    // DISTILL scaffold (D-20): this cell does not read the programmed map.
+    static PROGRAMMED: std::sync::LazyLock<SimDataplane> =
+        std::sync::LazyLock::new(SimDataplane::new);
     HydrationContext {
         intent_store: state.store.as_ref(),
         observation_store: state.obs.as_ref(),
@@ -188,6 +191,7 @@ fn build_ctx<'a>(
         held_svid_view,
         guest_attachments: &GUEST_ATTACHMENTS,
         gateway_identity: state.gateway.identity_view(),
+        programmed_services: &*PROGRAMMED,
         node_id: &state.node_id,
         intent_redb_path: &state.intent_redb_path,
     }

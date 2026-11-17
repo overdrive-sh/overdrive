@@ -16,3 +16,33 @@
 - Conformance: see `distill/conformance-driver.md`. Its pending markers match a text raised by `WakeState`'s own `PartialEq` (quint-connect's `State invariant failed` is generic), so each is RED for the empty-`pending` scaffold only.
 - Slice 01 review resolution (2026-11-17): the guest-booted burst test was removed (non-discriminating; covered by the Quint run `edge_wake_during_burst_is_admitted_after_burst` and the `eval_broker` tests); AC1 gained the `IntentRead` stimulus and the programmed-service-map oracle; the `RunningAllocationWithoutWorkloadAddr` stimulus has no pass-dependent recovery (the clearing write is an edge wake), so it has no test, see `test-scenarios.md`; AC6 is discharged by the printed-seed conformance runs and the slice 04 properties.
 - Back-propagation: none. Observation for DELIVER, not a design finding: no unkeyed `service_hydration_results` enumerator exists on `ObservationStore`; the hydrator's result-only half is reachable without new surface only through the deployed Service intents (see `test-scenarios.md` § WK-4).
+- D-20 and D-21 (approved 2026-11-17) distilled: see `test-scenarios.md` § "D-20 and D-21". Inert scaffolds of exactly the D-20 surface (`ProgrammedServiceView`, `HydrationContext::programmed_services`, `HydrateError::DataplaneRead`, the sim and host impls reading `Ok(None)`), no capacity change, nothing wired into the hydrator's diff. No Sim test-support seam was added for D-20.
+  - The hydrator property's oracle reads the programmed fingerprint through the port; the reboot world is a fresh `SimDataplane`. One dedicated test drives the hydrator's own tick (no resync pass) so its RED isolates the read of `actual`; DELIVER lands the sim read before the hydrator diff for the same reason.
+  - The D-21 containment test replaces the old "a result row adds a target" test.
+  - `xdp_never_selects_the_two_fingerprint_slots` is GREEN today by design (the XDP program is unchanged) and discharges the fact V-6 could not observe. It is the one non-pending new test.
+  - Rulings for B-D20-1 (composition root signature), B-D20-2 (IPv6 refused vs skipped), B-D20-3 (hydrator unit tests need the `actual` type change) and B-D20-4 (no host failed-read injection): see "D-20 rulings" below.
+
+## D-20 rulings
+
+Details within the approved D-20 (2026-11-17). The contracts are pinned in the feature delta (D-20) and ADR-0299.
+
+- B-D20-1 (composition wiring). One value, `DataplanePorts`, built only from a single concrete `Arc<D>` where `D: Dataplane + ProgrammedServiceView`, carries both ports. `ComposedDataplane.dataplane` and `AppState.dataplane` are typed as it, `AppState::new` and `new_with_workflow_engine` take `impl Into<DataplanePorts>`, and `build_hydration_context` reads `programmed_services` from it; `InertProgrammedServices` is deleted. Construction sites: `AppState::new` 96 call sites in 85 files (unchanged through the `From` impl except the callers that hold a trait object, listed in the delta), `new_with_workflow_engine` 3, composer struct literals 4. The earlier "about 175" count is replaced by these.
+- B-D20-2 (IPv6 backend). `update_service` refuses a non-empty set containing an IPv6 backend with `LoadFailed`, before any write, as the first validation; the prior read is unchanged. The host already does; the sim and the trait rustdoc change. S-02-D (`sim_dataplane_reverse_nat_per_proto.rs`) is rewritten by the acceptance designer to assert the refusal, authored as a pending RED and activated by the DELIVER step that changes the sim. The scenario in `docs/scenarios/udp-service-support/test-scenarios.md` follows. Evidence and the full list are in the delta.
+- B-D20-3 (a). The hydrator unit tests for the fingerprint diff (`actual` as `BTreeMap<ServiceId, BackendSetFingerprint>`) are authored by the acceptance designer at the start of the DELIVER step that changes that type. The type change alters behaviour, so it is not scaffolded now.
+- B-D20-4 (b). No test obligation exists for a failed host read (`ENOENT` on a freed inner map id): the apply-commit guard prevents it and the appliance cannot produce it. The mutant "the host read returns `Ok(None)` on a failed read" is an accepted survivor, for that reason. No test covers a failed read on either adapter.
+
+## D-20 review resolution (2026-11-17)
+
+Removed, with reasons:
+
+- `service_map_fingerprint_slots.rs` and its `mod` line: duplicated the equivalence test, and no obligation required it.
+- `SimDataplane::script_programmed_read_failure`, its field and `a_failed_read_is_an_error_never_ok_none`: ruling (b) says a failed host read is unreachable, so the scripted sim failure defended a state no production path produces. `HydrateError::DataplaneRead` stays (D-20 surface).
+- The "map lost while running" world (`CompletedOverDesiredSetThenMapLost`, `a_service_map_lost_while_running_is_reprogrammed_despite_its_completed_receipt`, `SimDataplane::lose_programmed_maps`): Overdrive is the only writer of its maps, so no production path loses a map while the dataplane runs. The reboot and restart world covers the reachable case.
+- Sim contract tests `a_weight_only_change_changes_the_read`, `a_health_only_change_changes_the_read`, `a_fresh_dataplane_reads_none_for_every_frontend`, `two_reads_without_a_write_are_equal`: folded into the proptest (weight and health drawn from ranges, second read) and the restart and equivalence tests.
+
+Added or changed:
+
+- Equivalence test: raw kernel read of the pinned `SERVICE_MAP` inner slots 16,381 and 16,382 and a Maglev slot; a reordered-slice step so a sort-before-fingerprint implementation fails. The sim proptest generates non-canonical orders. The claim that a write after the outer swap is caught is dropped: a sequential read cannot observe it.
+- `xdp_never_selects_the_two_fingerprint_slots` reuses `inject_tcp_syns` (now with a `first_port`), drops the redundant final assert, and its doc no longer states a probability. Instead of a host-side precheck (the production slot hash is private to the BPF program), a one-time wrong-modulus mutant run proved the test catches a modulus that reaches the fingerprint slots: 249 of 250 flows forwarded, then GREEN after the revert (B-D20-5, test-scenarios.md).
+- Hydrator oracle: `wanted()` notes that it relies on the generator drawing remote backends only.
+- Kept: the `#[cfg(test)]` on the D-21 containment test, which dst-lint reads to mark its `LogicalTimestamp` literals as test-only (removing it fails `dst-lint`).

@@ -99,6 +99,8 @@ struct World {
     workflows: SimWorkflowLiveSet,
     held_svids: SimHeldSvidView,
     guest_attachments: SimGuestAttachmentView,
+    // DISTILL scaffold (D-20): this world does not read the programmed map.
+    programmed: overdrive_sim::adapters::dataplane::SimDataplane,
     node_id: NodeId,
     /// One CA for the whole world, so successive issuances draw successive
     /// serials from its entropy stream as production does; the audit index is
@@ -126,6 +128,7 @@ impl World {
                 GuestAttachmentOccupancy { held: 0, retiring: 0 },
                 BTreeMap::new(),
             ),
+            programmed: overdrive_sim::adapters::dataplane::SimDataplane::new(),
             node_id: node(),
             ca: SimCa::new(Arc::new(SimEntropy::new(0x61))),
         }
@@ -143,6 +146,7 @@ impl World {
             held_svid_view: &self.held_svids,
             guest_attachments: &self.guest_attachments,
             gateway_identity: identity,
+            programmed_services: &self.programmed,
             node_id: &self.node_id,
             intent_redb_path: &self.intent_path,
         }

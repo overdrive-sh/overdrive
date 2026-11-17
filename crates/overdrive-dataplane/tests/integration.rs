@@ -79,6 +79,10 @@ mod integration {
     /// udp-service-support US-05 / S-05-A..C (ADR-0060 Tier 3; K4) —
     /// multi-listener (TCP + UDP) forward+reverse e2e. RED scaffolds.
     mod multi_listener_tcp_udp_e2e;
+    /// reconciler-convergence-guarantees (D-20, ADR-0299) — `ProgrammedServiceView`
+    /// Host and Sim agree through the port over one `update_service` sequence, and a
+    /// restarted host dataplane reads no frontend.
+    mod programmed_service_view_equivalence;
     /// public-ingress-gateway (S-PIG-41, 56 T3, 57 T3, 63, 71 instance half, 72) — the
     /// gateway selection hook and `GatewayConnectDataplane` on a real kernel: the
     /// unregistered-socket preservation row, receipt and applied identity, the

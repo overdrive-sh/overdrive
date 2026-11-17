@@ -273,6 +273,7 @@ impl IdentityConfDriver {
             overdrive_core::guest_network::GuestAttachmentOccupancy { held: 0, retiring: 0 },
             BTreeMap::new(),
         );
+        let programmed = overdrive_sim::adapters::dataplane::SimDataplane::new();
         let node_id = node();
         let ctx = HydrationContext {
             intent_store: &self.intent,
@@ -285,6 +286,7 @@ impl IdentityConfDriver {
             held_svid_view: &held_svid_view,
             guest_attachments: &guest_attachments,
             gateway_identity: self.owners.slot.as_ref(),
+            programmed_services: &programmed,
             node_id: &node_id,
             intent_redb_path: &self.intent_path,
         };

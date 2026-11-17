@@ -84,6 +84,7 @@ fn audit_every_read_surface_is_represented(ctx: &HydrationContext<'_>) {
     let _workflow: &dyn WorkflowLiveSet = ctx.workflow_live_set;
     let _held: &dyn HeldSvidView = ctx.held_svid_view;
     let _gateway: &dyn GatewayIdentityView = ctx.gateway_identity;
+    let _programmed: &dyn overdrive_core::traits::ProgrammedServiceView = ctx.programmed_services;
     let _node: &NodeId = ctx.node_id;
     let _redb: &Path = ctx.intent_redb_path;
 }
@@ -104,6 +105,7 @@ fn audit_field_set_is_exactly_the_read_surfaces(ctx: HydrationContext<'_>) {
         held_svid_view: _,
         guest_attachments: _,
         gateway_identity: _,
+        programmed_services: _,
         node_id: _,
         intent_redb_path: _,
     } = ctx;

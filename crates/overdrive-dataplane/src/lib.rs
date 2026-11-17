@@ -2398,6 +2398,18 @@ impl EbpfDataplane {
 }
 
 #[async_trait]
+impl overdrive_core::traits::ProgrammedServiceView for EbpfDataplane {
+    // DISTILL scaffold (D-20): inert; DELIVER reads the fingerprint slots of the inner map.
+    async fn programmed_fingerprint(
+        &self,
+        _frontend: &overdrive_core::dataplane::ServiceFrontend,
+    ) -> Result<Option<overdrive_core::dataplane::fingerprint::BackendSetFingerprint>, DataplaneError>
+    {
+        Ok(None)
+    }
+}
+
+#[async_trait]
 #[allow(clippy::too_many_lines)]
 impl Dataplane for EbpfDataplane {
     /// see #24 (`POLICY_MAP`)

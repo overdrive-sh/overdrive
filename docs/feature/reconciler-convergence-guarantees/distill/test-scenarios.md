@@ -25,7 +25,8 @@
 | `SimObservationStore::script_service_rows_read_failure(bool)` | same | Fails `service_backends_rows` and `all_service_backends_rows` (the two reads the hydrator's enumeration and desired hydration make): one reconciler family's enumeration failing. `service_hydration_results_rows` is deliberately not faulted; no consumer needs it. |
 | `SimVmHostState::script_kill_scope_failure(io::ErrorKind)` / `script_discard_artifacts_failure(io::ErrorKind)` | `.../vm_host_state.rs` | FIFO of failures for `kill_scope` / `discard_artifacts`; a failing call changes nothing (the host refusing a reclaim). The `vm-reclamation` dropped-reclaim stimulus. |
 
-No production surface was added.
+
+No production surface was added by the slice 01, 02 and 04 work. D-20 surface is in the next section.
 
 ## Production scaffolds added (shapes exactly as the feature delta pins; inert; user ruling 2026-11-16)
 
@@ -40,6 +41,23 @@ Each carries a one-line comment naming it the DISTILL scaffold DELIVER replaces.
 | `BrokerDrain::pending_keys(&self) -> Vec<(ReconcilerName, TargetResource)>` | D-12 b | `overdrive-control-plane/src/reconciler_runtime.rs:205` | `Vec::new()`; `#[expect(clippy::unused_self, ..)]` |
 
 All shapes were unambiguous in the delta; no gap blocked a scaffold.
+
+### D-20 scaffolds (shapes exactly as D-20 and ADR-0299 pin; inert; DISTILL 2026-11-17)
+
+Each carries a one-line "DISTILL scaffold (D-20)" comment. Nothing in production reads them, so no behaviour changed (suites in "Gate results").
+
+| Scaffold | Where | Body today |
+|---|---|---|
+| `trait ProgrammedServiceView { async fn programmed_fingerprint(&self, frontend: &ServiceFrontend) -> Result<Option<BackendSetFingerprint>, DataplaneError> }` with the pinned rustdoc (preconditions, postconditions, edge cases, invariants 1 to 5); re-exported as `overdrive_core::traits::ProgrammedServiceView` | `overdrive-core/src/traits/programmed_service_view.rs:19` (method `:74`) | trait only |
+| `HydrationContext::programmed_services: &'a dyn ProgrammedServiceView` | `overdrive-core/src/reconcilers/hydration.rs:85` | field |
+| `HydrateError::DataplaneRead(String)` | `overdrive-core/src/reconcilers/hydration.rs:135` | variant; nothing produces it yet |
+| `impl ProgrammedServiceView for SimDataplane` | `overdrive-sim/src/adapters/dataplane.rs:495` | `Ok(None)` |
+| `impl ProgrammedServiceView for EbpfDataplane` | `overdrive-dataplane/src/lib.rs:2401` | `Ok(None)` |
+| `build_hydration_context` supplies `programmed_services: &InertProgrammedServices` (a private unit struct reading `Ok(None)`) | `overdrive-control-plane/src/reconciler_runtime.rs:1784`, `:1829` | inert stand-in; see blocker B-D20-1 |
+
+Mechanical construction-site changes (the field is mandatory): `hydration_context_read_surface_audit.rs` (type audit and exhaustive destructure), `listener_fact_hydrate_equivalence.rs`, `public_ingress_gateway_hydration.rs`, `quint_gateway_identity.rs`, `vm_reclamation_hydrate_actual_equivalence.rs`; each passes a `SimDataplane`.
+
+Not scaffolded (kept out by the dispatch): the inner-map capacity (`SERVICE_MAP_INNER_CAPACITY` stays 16,381), the two fingerprint slot writes, `ServiceMapHydratorState.actual`'s new type, and any change to the hydrator's diff.
 
 ## Slice 01 — periodic re-evaluation
 
@@ -182,6 +200,45 @@ DELIVER's per-feature `cargo xtask mutants` gate (>= 80% on the changed reconcil
 
 - **US-06 / AC5, AC6 (rule text) and AC7 (executor doc)**: documentation changes, no scenario. Review obligation: `reconcilers.md` carries the D9 text, the pacing-input test and the "make it observable first" clause; it names no exception and no ADR-as-status; the stale `last_emitted_backend_fingerprint` bullet is corrected; the `release_service_vip.rs` doc says it propagates `ShimError::AllocatorRelease`; the false hydrator DST claim at `invariants/service_map_hydrator.rs:9` and `invariants/mod.rs:453` is corrected.
 
+## D-20 and D-21 — the hydrator reads the programmed service map
+
+Contract: D-20 / ADR-0299 (`ProgrammedServiceView`, the fingerprint in two extra inner slots written before the atomic outer swap, inner capacity 16,383, XDP still indexing modulo 16,381) and D-21 (the hydrator's managed set). Production owner path for the hydrator scenarios: `run_convergence_tick` over the production reconciler runtime and `AppState` with `Sim*` ports. The Tier-3 scenarios drive the real `EbpfDataplane`. Every pending test is `#[should_panic(expected = "<RED>")]`; the text is the failing assertion's own message. Contract shape: the two hydrator tests `bounded-change`; the sim contract tests and the equivalence tests `pure-function` (the read mutates nothing; the writes are stimulus). The equivalence tests carry a literal oracle beside the host/sim comparison, so two adapters wrong in the same way cannot pass.
+
+World scope: the hydrator property and the dedicated test cover the node reboot or serve restart (result row persists, maps do not). No world loses the maps while the process runs: Overdrive is the only writer of its maps, so no production path does (`development.md` § "Ground the premise").
+
+| Test | Contract (clause) | Fault / stimulus | Oracle | Tier, placement | State / RED |
+|---|---|---|---|---|---|
+| `hydrator::the_hydrator_converges_from_any_state_despite_dropped_updates_then_stays_converged` (changed) | D-20 handoff 1; ADR-0296 progress | resync pass; worlds include a `Completed` receipt over the desired set with a fresh `SimDataplane` (reboot) | converged = `programmed_fingerprint(f) == Some(fingerprint(vip, survivors))` through `ProgrammedServiceView`, plus the dataplane carries the backends; the result row is not consulted | Tier 1, `host_pure` | RED. `service-map-hydrator stalled with actual != desired after 8 rounds` (the pass still submits nothing, so it stays RED until slice 01 lands) |
+| `hydrator::a_rebooted_node_reprograms_the_service_map_its_completed_receipt_claims` (new) | D-20 handoff 1, ADR-0299 | `run_convergence_tick` directly (no resync pass), so the RED isolates the hydrator's read of `actual`; node reboot: result row persists, dataplane fresh | within `ROUNDS` evaluations the programmed fingerprint equals the desired set's and the dataplane carries the backends | Tier 1, `host_pure` | RED. `service-map-hydrator did not reprogram an empty dataplane (after a reboot)`; observed: programmed `None`, receipt reads as converged |
+| `sim_dataplane_programmed_fingerprint_contract::read_after_update_equals_the_fingerprint_of_the_applied_backends` (proptest) | invariants 1 and 4 | one to four IPv4 backends, weight 1..=1000, either health flag, non-canonical order | read == `Some(fingerprint(&vip, &B))` in the order given, and a second read with no write equals it | Tier 1, `host_pure` | RED. `programmed_fingerprint after a successful update_service` |
+| `sim_dataplane_reverse_nat_per_proto::a_set_with_an_ipv6_backend_is_refused_and_leaves_the_service_unchanged` (S-02-D, rewritten) | D-20 IPv6 refusal before any write | installed IPv4 service, then a set with a different IPv4 backend plus an IPv6 backend | `Err(LoadFailed)`; `REVERSE_NAT` keys and `service_backends_for` equal the prior | Tier 1, `host_pure` | RED. `update_service accepted a set containing an IPv6 backend`; activated by the DELIVER step that changes `SimDataplane::update_service` |
+| `programmed_service_view_equivalence::host_and_sim_read_the_same_programmed_fingerprint_after_every_call` | invariant 5; D-20 handoff 3 | real `EbpfDataplane` (`HostRig`) and `SimDataplane`: apply `B1`, `B2`, `B2` in reversed order, back to `B2`, a weight-only change, withdraw, a second protocol of one VIP, a mixed IPv4/IPv6 set (refused) | identical read after each step, equal to the literal `fingerprint(vip, applied)`; after `B2` and the reordered `B2` the kernel is also read directly: the run's pinned `SERVICE_MAP` outer slot gives the inner map id, `BPF_MAP_GET_FD_BY_ID` opens it, slots 16,381 and 16,382 equal `fp as u32` and `(fp >> 32) as u32`, and Maglev slot 0 holds a backend id present in `BACKEND_MAP` | Tier 3, `#[overdrive_test(guest = "mtls-relay")]` | RED. `host programmed_fingerprint after applying B1`. The raw-slot helper was exercised against the real kernel before the RED text: outer lookup, `GET_FD_BY_ID` and the Maglev slot check work, and slot 16,381 is absent today (capacity 16,381) |
+| `programmed_service_view_equivalence::a_restarted_host_dataplane_reads_none_for_every_frontend_then_reprograms` | invariant 3; D-20 handoff 3 restart case | `HostRig::recreate()`: a second `EbpfDataplane` over the same pin directory | every frontend reads `None` on both adapters; re-programming reads the fingerprint again; the other frontend still reads `None` | Tier 3, guest `mtls-relay` | RED. `host programmed_fingerprint after programming before the restart` |
+| `service_map_forward::xdp_never_selects_the_two_fingerprint_slots` | D-20 handoff 3a | real `xdp_service_map_lookup` on a veth pair over a 16,383-slot table; slots `0..16,381` hold the one backend, slots 16,381 and 16,382 an unowned `BackendId`; 64,000 deterministic flows (one per source port), asserted per batch of 250 | every flow is rewritten to the backend on the wire | Tier 3, guest `mtls-relay` | GREEN today, not pending (the XDP program is unchanged). Limit: the slot hash is private to the `no_std` BPF program, so the test does not by itself establish that a flow in the set selects slot 16,381 or 16,382 under a wrong modulus; see Blockers |
+| `managed_targets_containment::service_map_hydrator_manages_services_with_an_intent_or_a_backend_row_but_not_a_result_row_alone` (changed) | D-21, D-20 handoff 5 | a Service with an intent and no row; one with a `service_backends` row and no intent; one with only a result row | the first two are in the set; the result-row-only id is not (the deletion case, #211) | Tier 1, `host_pure` | RED. `service-map-hydrator managed_targets omitted the service with a workload intent: {}` |
+
+The sim contract tests pin the `programmed_fingerprint` rustdoc clauses on `SimDataplane`, one test per clause. Invariants 1 and 4 and order sensitivity: the proptest. Invariant 2 (withdrawn reads `None`): `a_withdrawn_frontend_reads_none`. Never programmed is `Ok(None)`: `a_never_programmed_frontend_reads_ok_none`. Ports and protocols on one VIP are independent keys: `ports_and_protocols_on_one_vip_are_independent_keys`. A failed update leaves the prior read: `a_failed_update_leaves_the_prior_read_unchanged`. A refused IPv6 set leaves the prior read: `a_refused_ipv6_update_leaves_the_prior_read_unchanged`. Invariant 3 (a fresh dataplane reads `None`) is covered by the restart test on both adapters; a weight-only change is covered by the equivalence sequence and by the proptest's weight range.
+
+**DELIVER ordering.** The reboot test's RED comes from the inert sim read: until the sim reads the fingerprint its programmed side is `None` whatever the hydrator does. DELIVER lands the sim read before the hydrator diff, so the RED isolates the hydrator's read of `actual`.
+
+**Composition wiring obligation (D-20 "Composition wiring"; B-D20-1, ruled).** DELIVER builds `DataplanePorts` (`overdrive-control-plane/src/node_adapters.rs`: private fields, `new<D: Dataplane + ProgrammedServiceView>(Arc<D>)`, `From<Arc<D>>`, accessors `dataplane()` and `programmed_services()`), types `ComposedDataplane.dataplane` and `AppState.dataplane` as it, and deletes `InertProgrammedServices`. It is not scaffolded and no test is added for it: `a_rebooted_node_reprograms_the_service_map_its_completed_receipt_claims` discharges it once `DataplanePorts` lands, because it runs through `build_hydration_context` over a sim-composed `AppState` and cannot go GREEN unless the view reads the instance the action shim writes through. The one constraint is that `DataplanePorts::new(..)` stays in `node_adapters.rs` (`required_serve_ports_source_scan` bans `EbpfDataplane::new*` and `HostDataplaneComposer::new` constructions in `src/lib.rs`).
+
+**Not authored, owned by the DELIVER step that changes `ServiceMapHydratorState.actual` (B-D20-3).** D-20 handoff 4 (hydrator unit tests over `actual` as `BTreeMap<ServiceId, BackendSetFingerprint>`) is authored by the acceptance designer at the start of that step; the type change alters behaviour, so it is not scaffolded now. The reboot world pins the end-to-end behaviour meanwhile.
+
+**Mutation obligations for DELIVER (D-20 handoff item 6).**
+
+| Mutant | Caught by |
+|---|---|
+| `in_place` always true | `a_rebooted_node_reprograms_the_service_map_its_completed_receipt_claims` and the hydrator property |
+| `in_place` compares a fingerprint that omits `healthy` or `weight` | no live test until DELIVER's hydrator unit tests (B-D20-3) |
+| the dataplane does not write the fingerprint on an update | the sim proptest (sim) and the equivalence test, including its raw slot reads (host) |
+| the dataplane writes the fingerprint after the outer swap | no live test: a read made after `update_service` returns cannot observe the write order |
+| the dataplane sorts the slice before fingerprinting | the sim proptest (non-canonical order) and the equivalence test's reordered step |
+| the host read recombines the two words in the wrong order | the equivalence test (literal oracle and raw slot words) |
+| `hydrate_actual` returns an empty `actual` | the reboot test and the stability phase of the hydrator property |
+| the retry entry is never removed | no live test until DELIVER's hydrator unit tests (B-D20-3) |
+| the host read returns `Ok(None)` on a failed read | accepted survivor: a failed host read is unreachable (ruling (b)) |
+
 ## Known gaps carried (not fixed, no test added)
 
 1. No reconciler-level test asserts `service-lifecycle` emits no liveness stop before Stable. Only the probe-runner test `crates/overdrive-control-plane/tests/acceptance/liveness_begins_at_stable.rs` exists; the D-6 `terminal_announced` dependency rests on the runner never writing a liveness row before Stable.
@@ -201,11 +258,27 @@ DELIVER's per-feature `cargo xtask mutants` gate (>= 80% on the changed reconcil
 - `cargo xtask conformance-lint`: exit 0 (2026-11-17).
 - `cargo xtask dst-lint`, 2026-11-17: exit 0.
 
+D-20 and D-21 (metal, 2026-11-17):
+
+- `clippy --workspace --all-targets --features integration-tests -- -D warnings`: exit 0.
+- `nextest -p overdrive-control-plane` (`convergence_property::hydrator`, `managed_targets_containment`): 12 passed, each should-panic matched its own text.
+- `nextest -p overdrive-sim` (`sim_dataplane_programmed_fingerprint_contract`, `sim_dataplane_reverse_nat_per_proto`): 13 passed.
+- `nextest -p overdrive-dataplane --features integration-tests` (equivalence, `xdp_never_selects_the_two_fingerprint_slots`): 3 passed in guests (two RED matched, the XDP test GREEN).
+- `cargo xtask dst-lint`, `placement-lint`, `conformance-lint`: exit 0.
+
 ## Blockers (contract gaps; returned to the orchestrator)
 
 - **B3 (resolved 2026-11-16, ruling: put `gateway-svid-lifecycle` under the property)** — the sim gateway composition is test support built from existing production constructors and port traits; see § "`gateway-svid-lifecycle` composition" above. No production change was needed.
 - **Not blockers, resolved by the ruling**: B1 (scaffold) and B2(a) (the pass seam; the property moved in-crate) are closed. B2(b) (the other reconcilers' generators and the executor companion) is authored above.
 - **Not contradictions**: D-1b says the pass "adds no other effect"; slice 01 tests assume `Immediate` evaluations admit within a few seconds under the 8-cap, as ADR-0296 states.
+
+### D-20 contract gaps and questions (DISTILL 2026-11-17)
+
+- **B-D20-1 (composition root signature unpinned) — RULED 2026-11-17: `DataplanePorts`, see "Composition wiring obligation".** D-20 says both ports are "wired from the dataplane instance the composition root already builds", but `AppState.dataplane` is `Arc<dyn Dataplane>` and no constructor takes a `ProgrammedServiceView`. Threading the view means a new `AppState` field and a new parameter on `AppState::new` / `new_with_workflow_engine` (about 175 construction sites), or another shape. The shape is a composition-root signature, which the delta must pin. Until then `build_hydration_context` supplies a private inert stand-in, so the hydrator reads `None` for every frontend in a composed node even once its `hydrate_actual` reads the port; the two reboot tests cannot go GREEN without it.
+- **B-D20-2 (IPv6 backend: refused or skipped) — RULED 2026-11-17: refused; S-02-D rewritten above.** D-20 relies on `update_service` refusing a set with an IPv6 backend before any write. Today: the host refuses (`BackendEntryPod::from_backend` returns `LoadFailed`); the `Dataplane::update_service` rustdoc says an IPv6 backend is "silently skipped" from the reverse-NAT key set; `SimDataplane` follows the rustdoc and accepts the set; and the existing sim test S-02-D (`sim_dataplane_reverse_nat_per_proto.rs`) asserts that. The new refused-IPv6 contract and equivalence tests follow D-20 (refused, prior read unchanged); they will force the sim and its S-02-D test to change, and the rustdoc to be reconciled. DESIGN must rule which stands.
+- **B-D20-3 (hydrator unit tests).** Handoff item 4 and two mutants need `ServiceMapHydratorState.actual` as `BTreeMap<ServiceId, BackendSetFingerprint>`; the dispatch said to wire nothing into the hydrator's diff. Ruling needed: change the state type now as a scaffold (a mechanical rewrite of the receipt arms of `reconcile`, which changes behaviour) or leave item 4 to DELIVER with the type change.
+- **B-D20-4 (no host failed-read injection).** Handoff item 2 asks for "a failed read is `Err`" on the host at Tier 3. A failed host read is an `ENOENT` on a freed inner map id, which the commit guard prevents and the appliance cannot produce; no safe injection point exists and inventing one adds production surface. The clause has no test on either adapter (the sim's scripted read failure was removed with it); the mutant "host read returns `Ok(empty)` on a failed read" has no test.
+- **B-D20-5 (XDP slot test precheck), resolved by a one-time mutant run, 2026-11-17.** The production hash `fnv1a_5tuple_slot` is private to the BPF program, so there is no host-side precheck. We ran the wrong-modulus mutant on the real kernel (kernel 7.0.0-38). The program computed `h % (INNER_TABLE_SIZE + 2)`, the BPF object was rebuilt, and `xdp_never_selects_the_two_fingerprint_slots` failed: `249 of 250 flows forwarded for source ports 12274..12524 (11499 forwarded so far)`. After the revert and rebuild it passed again. With today's flow set and hash, the test catches a modulus that reaches the two fingerprint slots. If the hash or the flow set changes, the run must be repeated.
 
 ## Proposals (not adopted; `design.md` § "No unrequested scope")
 

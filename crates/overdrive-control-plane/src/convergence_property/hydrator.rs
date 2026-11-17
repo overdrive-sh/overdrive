@@ -11,22 +11,31 @@
 //!
 //! A `Completed` row over the desired set with an empty dataplane is a
 //! generated starting state: it is what a node reboot leaves, because result
-//! rows persist and the dataplane map does not. That is a prefix of Overdrive's
-//! own history (the update landed, then the node restarted), the
-//! receipt-versus-resource case. Result-row timestamps are never compared (a
-//! rewrite legitimately advances them): the comparison projects each row to its
-//! fingerprint and status kind.
+//! rows persist and the dataplane map does not (the dataplane under test is a
+//! fresh `SimDataplane`, which reads `None` for every frontend). It is a prefix
+//! of Overdrive's own history (the update landed, then the node restarted):
+//! the receipt-versus-resource case (D-20, ADR-0299). No world loses the maps
+//! while the process runs: Overdrive is the only writer of its maps, so no
+//! production path does. `actual == desired` is read from the resource through
+//! `ProgrammedServiceView`, never from the result row. Result-row timestamps
+//! are never compared (a rewrite legitimately advances them): the comparison
+//! projects each row to its fingerprint and status kind.
 
 use std::collections::BTreeMap;
 use std::net::{Ipv4Addr, SocketAddr};
+use std::num::NonZeroU16;
 use std::str::FromStr;
 use std::time::Duration;
 
 use overdrive_core::SpiffeId;
 use overdrive_core::UnixInstant;
+use overdrive_core::dataplane::ServiceFrontend;
+use overdrive_core::dataplane::backend_key::Proto;
 use overdrive_core::dataplane::fingerprint::{BackendSetFingerprint, fingerprint};
 use overdrive_core::id::{ServiceId, ServiceVip};
 use overdrive_core::reconcilers::{ReconcilerName, TargetResource};
+use overdrive_core::traits::ProgrammedServiceView;
+use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::dataplane::{Backend, DataplaneError};
 use overdrive_core::traits::observation_store::{
     LogicalTimestamp, ObservationStore, ObservationWrite, ServiceBackendRow,
@@ -37,8 +46,11 @@ use overdrive_reconcilers::{AnyReconciler, AnyState};
 use overdrive_testing::placement;
 use proptest::prelude::*;
 
-use super::{Composed, ROUNDS, STABLE_ROUNDS, name_of, node, property_config, runtime, target_of};
-use crate::reconciler_runtime::{hydrate_actual_for_test, hydrate_desired_for_test};
+use super::{
+    Composed, ROUND_ADVANCE, ROUNDS, STABLE_ROUNDS, name_of, node, property_config, runtime,
+    target_of,
+};
+use crate::reconciler_runtime::{hydrate_desired_for_test, run_convergence_tick};
 
 placement!(host_pure);
 
@@ -131,6 +143,12 @@ struct Fixture {
     name: ReconcilerName,
 }
 
+/// The frontend `put_service` declares: its one TCP listener on port 8080.
+fn frontend_of(vip: ServiceVip) -> ServiceFrontend {
+    ServiceFrontend::new(vip, NonZeroU16::new(8080).expect("non-zero port"), Proto::Tcp)
+        .expect("IPv4 service VIP")
+}
+
 fn backends_of(world: &World) -> Vec<Backend> {
     world
         .backends
@@ -185,6 +203,8 @@ async fn fixture(world: &World) -> Fixture {
             node_.obs.write(row(other_fp, completed(other_fp))).await.expect("write result");
         }
         ResultRow::CompletedOverDesiredSetAfterReboot => {
+            // The node is freshly composed: its `SimDataplane` reads `None`
+            // for every frontend, as after a serve restart or a reboot.
             node_.obs.write(row(desired_fp, completed(desired_fp))).await.expect("write result");
         }
         ResultRow::FailedOverDesiredSet => {
@@ -247,30 +267,60 @@ impl Fixture {
             .map_or(0, |backends| backends.len())
     }
 
-    /// `actual == desired`: the result row's `Completed` fingerprint equals the
-    /// desired set's programmable fingerprint (read through the reconciler's own
-    /// hydration) AND the dataplane the hydrator drives carries the desired
-    /// backends. The row alone is a receipt, not the resource.
-    async fn converged(&self, want: usize) -> bool {
+    /// The programmed fingerprint of the service's frontend, read through
+    /// `ProgrammedServiceView` from the dataplane the hydrator drives.
+    async fn programmed(&self) -> Option<BackendSetFingerprint> {
+        self.node
+            .dataplane
+            .programmed_fingerprint(&frontend_of(self.vip))
+            .await
+            .expect("read the programmed service map")
+    }
+
+    /// The fingerprint of the desired backend set (read through the
+    /// reconciler's own hydration).
+    ///
+    /// Oracle assumption: this fingerprints the hydrated desired set as is, which
+    /// equals the set the hydrator programs only because the generator draws
+    /// remote backends alone (`10.1..=95.x.y`, non-mesh, non-host). A world that
+    /// drew a backend the hydrator's gate drops would need this derived from the
+    /// post-gate survivors instead.
+    async fn wanted(&self) -> Option<BackendSetFingerprint> {
         let reconciler: AnyReconciler = crate::service_map_hydrator(Ipv4Addr::LOCALHOST);
         let desired = hydrate_desired_for_test(&reconciler, &self.target, &self.node.state)
             .await
             .expect("hydrate desired");
-        let actual = hydrate_actual_for_test(&reconciler, &self.target, &self.node.state)
-            .await
-            .expect("hydrate actual");
-        let (AnyState::ServiceMapHydrator(desired), AnyState::ServiceMapHydrator(actual)) =
-            (desired, actual)
-        else {
+        let AnyState::ServiceMapHydrator(desired) = desired else {
             panic!("hydrator state expected");
         };
-        let Some(wanted) = desired.desired.get(&self.sid) else { return false };
-        let programmed = fingerprint(&wanted.vip, &wanted.backends);
-        let receipt = matches!(
-            actual.actual.get(&self.sid),
-            Some(ServiceHydrationStatus::Completed { fingerprint, .. }) if *fingerprint == programmed
-        );
-        receipt && self.programmed_backends() == want
+        desired.desired.get(&self.sid).map(|wanted| fingerprint(&wanted.vip, &wanted.backends))
+    }
+
+    /// `actual == desired`, stated on the resource the hydrator manages: the
+    /// programmed service map carries the fingerprint of the desired set AND
+    /// the dataplane carries the desired backends. The result row is a receipt
+    /// and is never consulted.
+    async fn converged(&self, want: usize) -> bool {
+        let Some(wanted) = self.wanted().await else { return false };
+        self.programmed().await == Some(wanted) && self.programmed_backends() == want
+    }
+
+    /// One evaluation of the hydrator's target, without the resync pass: the
+    /// tick the pass would admit. Isolates the hydrator's own read of `actual`.
+    async fn evaluate_directly(&self, tick: &mut u64) {
+        self.node.clock.tick(ROUND_ADVANCE);
+        let now = Clock::now(&*self.node.clock);
+        let outcome = run_convergence_tick(
+            &self.node.state,
+            &self.name,
+            &self.target,
+            now,
+            *tick,
+            now + Duration::from_millis(100),
+        )
+        .await;
+        *tick += 1;
+        outcome.expect("no fault is armed: the tick must not error");
     }
 
     /// Everything a further action could change, as the ports show it: the
@@ -343,5 +393,62 @@ fn the_hydrator_converges_from_any_state_despite_dropped_updates_then_stays_conv
             }
             Ok(())
         })?;
+    });
+}
+
+/// The two worlds D-20 names, each driven through the hydrator's own tick (no
+/// resync pass), so the RED isolates the hydrator's read of `actual`: with the
+/// result row as `actual`, a `Completed` receipt over the desired set reads as
+/// converged and nothing reprograms the empty dataplane.
+async fn reprograms_an_empty_dataplane(world: &World, expectation: &str) {
+    let fixture = fixture(world).await;
+    let want = backends_of(world).len();
+    assert_eq!(
+        fixture.programmed().await,
+        None,
+        "precondition: the dataplane's programmed map is empty ({expectation})"
+    );
+    let mut tick = 0u64;
+    for _ in 0..ROUNDS {
+        if fixture.converged(want).await {
+            break;
+        }
+        fixture.evaluate_directly(&mut tick).await;
+    }
+    assert!(
+        fixture.converged(want).await,
+        "service-map-hydrator did not reprogram an empty dataplane ({expectation}): \
+         programmed fingerprint {:?}, world {world:?}, observable {}",
+        fixture.programmed().await,
+        fixture.observable().await
+    );
+}
+
+fn world_over(result: ResultRow, backends: Vec<(u8, u8, u8)>) -> World {
+    World { backends, result, retry: None, dropped_updates: 0 }
+}
+
+fn backend_octets() -> impl Strategy<Value = Vec<(u8, u8, u8)>> {
+    prop::collection::vec((1u8..=95, 0u8..=255, 1u8..=254), 1..=3).prop_map(|mut backends| {
+        backends.sort_unstable();
+        backends.dedup();
+        backends
+    })
+}
+
+/// Outcome anchor: OUT-RCG-HYDRATOR-READS-PROGRAMMED-MAP (D-20, ADR-0299).
+/// A node reboot leaves result rows and loses the map: a `Completed` receipt
+/// over the desired set must not stop the hydrator reprogramming the empty
+/// dataplane. Pending until `hydrate_actual` reads `ProgrammedServiceView`.
+/// CONTRACT_SHAPE: bounded-change.
+#[test]
+#[should_panic(expected = "service-map-hydrator did not reprogram an empty dataplane")]
+fn a_rebooted_node_reprograms_the_service_map_its_completed_receipt_claims() {
+    let runtime = runtime();
+    proptest!(property_config(16, 351_020), |(backends in backend_octets())| {
+        runtime.block_on(reprograms_an_empty_dataplane(
+            &world_over(ResultRow::CompletedOverDesiredSetAfterReboot, backends),
+            "after a reboot",
+        ));
     });
 }

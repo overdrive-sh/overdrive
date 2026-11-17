@@ -44,7 +44,9 @@ use parking_lot::Mutex;
 use overdrive_core::dataplane::DropClass;
 use overdrive_core::dataplane::ServiceFrontend;
 use overdrive_core::dataplane::backend_key::{BackendKey, Proto};
+use overdrive_core::dataplane::fingerprint::BackendSetFingerprint;
 use overdrive_core::id::{BackendId, SpiffeId};
+use overdrive_core::traits::ProgrammedServiceView;
 use overdrive_core::traits::dataplane::{
     Backend, Dataplane, DataplaneError, FlowEvent, PolicyKey, Verdict,
 };
@@ -465,6 +467,17 @@ const fn reverse_nat_key_for(backend: &Backend, proto: Proto) -> Option<BackendK
 fn frontend_vip(addr: Ipv4Addr) -> Result<overdrive_core::id::ServiceVip, DataplaneError> {
     overdrive_core::id::ServiceVip::new(std::net::IpAddr::V4(addr))
         .map_err(|e| DataplaneError::LoadFailed(format!("service vip {addr}: {e}")))
+}
+
+#[async_trait]
+impl ProgrammedServiceView for SimDataplane {
+    // DISTILL scaffold (D-20): inert; DELIVER reads the fingerprint the stored service carries.
+    async fn programmed_fingerprint(
+        &self,
+        _frontend: &ServiceFrontend,
+    ) -> Result<Option<BackendSetFingerprint>, DataplaneError> {
+        Ok(None)
+    }
 }
 
 #[async_trait]

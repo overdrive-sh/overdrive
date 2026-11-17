@@ -271,45 +271,76 @@ fn svid_lifecycle_enumeration_returns_an_error_when_allocation_rows_cannot_be_re
     });
 }
 
+/// D-21: the hydrator manages a Service that has a workload intent or a
+/// `service_backends` row. A `service_hydration_results` row alone adds no
+/// target: the hydrator no longer reads it (D-20), and an orphaned row (intent
+/// and backend row both gone) is the deletion case, #211.
 #[cfg(test)]
 #[test]
 #[should_panic(expected = "service-map-hydrator managed_targets omitted")]
-fn service_map_hydrator_manages_every_service_with_a_backend_row_or_a_result_row() {
+fn service_map_hydrator_manages_services_with_an_intent_or_a_backend_row_but_not_a_result_row_alone()
+ {
     let rt = runtime();
     rt.block_on(async {
         let name = name_of("service-map-hydrator");
         let world = Composed::new(vec![crate::service_map_hydrator(Ipv4Addr::LOCALHOST)]).await;
-        let (backend_only, vip_a) = world.put_service("svc-a").await;
-        let (result_only, vip_b) = world.put_service("svc-b").await;
+        // A deployed Service with an intent and no row of any kind.
+        let (intent_only, _vip) = world.put_service("svc-intent").await;
+        // A Service id with a `service_backends` row and no intent.
+        let backend_only = orphan_service_id(7);
+        let backend_vip = orphan_vip(7);
         world
             .obs
             .write(ObservationWrite::ServiceBackend(ServiceBackendRow {
                 service_id: backend_only,
-                vip: vip_a.try_as_ipv4().expect("v4"),
+                vip: backend_vip.try_as_ipv4().expect("v4"),
                 backends: vec![],
                 updated_at: LogicalTimestamp { counter: 1, writer: node("writer-1") },
             }))
             .await
             .expect("backend row");
-        let fp = fingerprint(&vip_b, &[]);
+        // A Service id with only a result row: intent and backend row both gone.
+        let result_only = orphan_service_id(8);
         world
             .obs
             .write(ObservationWrite::ServiceHydration(ServiceHydrationResultRow {
                 service_id: result_only,
-                fingerprint: fp,
+                fingerprint: fingerprint(&orphan_vip(8), &[]),
                 status: ServiceHydrationStatus::Pending,
                 updated_at: LogicalTimestamp { counter: 2, writer: node("writer-1") },
             }))
             .await
             .expect("result row");
-        let candidates = vec![
-            target_of("service", &backend_only.to_string()),
-            target_of("service", &result_only.to_string()),
-        ];
 
         let managed = world.managed_targets(&name).await.expect("managed_targets");
-        assert_non_empty_projections_are_managed(&world, &name, &candidates, &managed).await;
+        for (service, why) in [(intent_only, "a workload intent"), (backend_only, "a backend row")]
+        {
+            assert!(
+                managed.contains(&target_of("service", &service.to_string())),
+                "service-map-hydrator managed_targets omitted the service with {why}: {managed:?}"
+            );
+        }
+        assert!(
+            !managed.contains(&target_of("service", &result_only.to_string())),
+            "service-map-hydrator managed a service with only a result row, the deletion case \
+             (#211): {managed:?}"
+        );
     });
+}
+
+/// A frontend `10.96.9.<octet>:8080/tcp` no deployed Service owns.
+fn orphan_vip(octet: u8) -> overdrive_core::id::ServiceVip {
+    overdrive_core::id::ServiceVip::new(std::net::IpAddr::V4(Ipv4Addr::new(10, 96, 9, octet)))
+        .expect("IPv4 service VIP")
+}
+
+fn orphan_service_id(octet: u8) -> overdrive_core::id::ServiceId {
+    overdrive_core::id::ServiceId::derive(
+        &orphan_vip(octet),
+        std::num::NonZeroU16::new(8080).expect("non-zero port"),
+        overdrive_core::dataplane::backend_key::Proto::Tcp,
+        "service-map",
+    )
 }
 
 #[test]

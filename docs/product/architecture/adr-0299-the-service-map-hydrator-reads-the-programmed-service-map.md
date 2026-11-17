@@ -63,7 +63,22 @@ owns a Maglev slot) does not apply. It is not the View-marker anti-pattern of
 emitted, stamped before the effect; this one lives in the kernel resource, is written
 atomically with the table, and disappears with it.
 
-The port's exact contract is in the feature delta (D-20).
+The write port and the read port reach the hydrator from one dataplane instance. The control
+plane carries them as one value that can be built only from a single concrete instance
+implementing both traits, so a read over a different instance from the one the action shim
+writes through cannot be constructed. The composition root, every `DataplaneComposer` and
+`AppState` hold that value, and `build_hydration_context` reads the view from it.
+
+`update_service` refuses a backend set that contains an IPv6 backend, with `LoadFailed` and
+before any write, so the prior programmed state and its fingerprint are unchanged. The
+fingerprint covers every backend of the applied slice; a call that returned `Ok` after
+dropping a backend would store a fingerprint of a set it did not program, and the hydrator
+would judge the service converged. Production builds only IPv4 backends, so the refusal
+governs a state no production path reaches; it makes the trait contract unambiguous and the
+two adapters equal.
+
+The port's exact contract, the value's shape, its construction sites and the IPv6 contract
+are in the feature delta (D-20).
 
 Kernel facts the decision rests on, read in `vendors/linux` at `v7.0`: a userspace lookup on
 a `HASH_OF_MAPS` returns the inner map id (`kernel/bpf/syscall.c:329-330`,
@@ -83,6 +98,8 @@ inner map carry 16,383.
 | Make the inner maps `BPF_F_MMAPABLE` and read the table through `mmap` | Measured 107 µs p50 (112 ms for 1,000 frontends) before the `BACKEND_MAP` lookups, about 80 µs more at 16 backends. About 20 times the fingerprint's cost, and it keeps the slot-starvation precondition. The kernel allows it for arrays (`kernel/bpf/arraymap.c:66-68, 578-591 @ v7.0`) but the prototype and every inner map must carry the flag (`kernel/bpf/map_in_map.c:90 @ v7.0`), and the reader must open the map read-write (`mm/mmap.c:465`, `kernel/bpf/syscall.c:1095-1096 @ v7.0`). |
 | Read only whether the outer slot exists and keep the result row as the diff for content | Cheaper per read. Leaves a receipt as the diff for whether the right backends are programmed, which is the defect class `reconcilers.md` names. |
 | Add the read method to the `Dataplane` trait | `Dataplane` is the write port the executor uses. Hydration reads only through narrow read-only ports on the hydration context (ADR-0086 D5); a read method on the write port would let the hydrator reach writes through the same object. |
+| Give `AppState` and the composers a dataplane and a view as two independent values | A view over an instance other than the one the shim writes through reads a different resource, and nothing in the types prevents it. One value built from one concrete instance makes the mismatch unrepresentable. |
+| Skip an IPv6 backend in `update_service` and return `Ok` | The fingerprint would cover a backend the dataplane never programmed, so the hydrator would read equal and stop. The host adapter refuses; the sim adapter matches it. |
 | Derive `actual` from the dataplane's in-process tracker of what it last wrote | The tracker is a record of the dataplane's own writes, a receipt held in memory. It does not see a map lost while the process runs. |
 | Have the dataplane replay programming from observation at boot | Two owners of one effect, and a boot-time path that does not run for a map lost while running. The hydrator already owns the diff (`reconcilers.md` § "Not a candidate"). |
 

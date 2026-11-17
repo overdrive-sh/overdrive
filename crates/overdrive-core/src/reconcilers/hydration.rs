@@ -27,7 +27,8 @@ use crate::traits::intent_store::IntentStore;
 use crate::traits::observation_store::ObservationStore;
 use crate::traits::vm_host_state::VmHostState;
 use crate::traits::{
-    GuestAttachmentView, HeldSvidView, ListenerFacts, ServiceVipView, WorkflowLiveSet,
+    GuestAttachmentView, HeldSvidView, ListenerFacts, ProgrammedServiceView, ServiceVipView,
+    WorkflowLiveSet,
 };
 
 /// The borrow-bundle a reconciler's `hydrate_desired` / `hydrate_actual` reads
@@ -79,6 +80,9 @@ pub struct HydrationContext<'a> {
     /// serve supplies the canonical empty view (epoch one, no subject, no
     /// current facts).
     pub gateway_identity: &'a dyn GatewayIdentityView,
+    /// The programmed service map read port (D-20, ADR-0299).
+    // DISTILL scaffold (D-20): consumed by the hydrator's `hydrate_actual` in DELIVER.
+    pub programmed_services: &'a dyn ProgrammedServiceView,
     /// The local node id (plain data).
     pub node_id: &'a NodeId,
     /// Path to the intent redb file (plain data — some hydrate bodies need the
@@ -124,6 +128,11 @@ pub enum HydrateError {
     /// variant (per `.claude/rules/development.md` § "Errors").
     #[error("invalid target resource: {0}")]
     TargetShape(String),
+    /// A read of the programmed service map failed (D-20, ADR-0299): the
+    /// `Display` of the `DataplaneError` the read returned.
+    // DISTILL scaffold (D-20): produced by the hydrator's `hydrate_actual` in DELIVER.
+    #[error("programmed service map read failed: {0}")]
+    DataplaneRead(String),
     /// An observation row violates the Running => workload address contract:
     /// a Running Service allocation carries no workload address, so no backend
     /// address can be derived for it (ADR-0276). The tick for that Service

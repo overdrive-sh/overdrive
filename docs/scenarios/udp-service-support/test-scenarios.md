@@ -231,15 +231,19 @@ Proptest target. Mandate 8: universe = the key set; expected =
 
 ## US-02 / boundary — unsupported / edge inputs
 
-### S-02-D — A non-IPv4 backend address contributes no REVERSE_NAT key `@US-02` `@error` `@in-memory` Tier 1
+### S-02-D — A backend set containing an IPv6 address is refused `@US-02` `@error` `@in-memory` Tier 1
 
 ```gherkin
-Scenario: A backend with an IPv6 address is silently skipped from the REVERSE_NAT key set
-  Given a udp frontend and a backend set containing one IPv4 backend and one IPv6 backend
-  When update_service(frontend_udp, backends) is applied to the SimDataplane
-  Then the REVERSE_NAT key set contains the IPv4 backend's (ip, port, udp) key
-  And the IPv6 backend contributes no key (parity with reverse_nat_keys_for's IPv4-only filter, GH #155 deferral)
+Scenario: A backend set containing an IPv6 backend is refused and nothing is written
+  Given a udp frontend with an installed IPv4 backend
+  When update_service(frontend_udp, backends) is applied with a set containing an IPv4 backend and an IPv6 backend
+  Then the update fails with LoadFailed
+  And the REVERSE_NAT key set is unchanged: no key for the IPv6 backend, none for the IPv4 backend sent with it
+  And the frontend's prior backends are unchanged
 ```
+The refusal is the first validation, before any write (GH #155 tracks IPv6
+support; D-20 of reconciler-convergence-guarantees, ADR-0299). An empty set is
+still the withdraw. The host adapter already refuses.
 
 ### S-02-E — SCTP is rejected at the parse boundary (confirm #164 boundary) `@US-02` `@error` `@in-memory` Tier 1
 

@@ -79,7 +79,8 @@ use overdrive_dataplane::maps::hash_of_maps::HashOfMapsHandle;
 use overdrive_testing::overdrive_test;
 
 use super::helpers::packets::{
-    ETH_HDR_LEN, IPV4_HDR_LEN, TCP_HDR_LEN, ipv4_header_checksum, synthesise_tcp_syn, tcp_checksum,
+    ETH_HDR_LEN, IPV4_HDR_LEN, TCP_HDR_LEN, ipv4_header_checksum, synthesise_tcp_syn_with_src_port,
+    tcp_checksum,
 };
 use super::helpers::veth::{VethError, VethPair};
 
@@ -87,7 +88,7 @@ const VIP_OCTETS: [u8; 4] = [10, 0, 0, 1];
 const VIP_PORT: u16 = 8080;
 const BACKEND_OCTETS: [u8; 4] = [10, 1, 0, 5];
 const BACKEND_PORT: u16 = 9000;
-const FRAME_COUNT: u32 = 10;
+const FRAME_COUNT: u16 = 10;
 
 // `ServiceKey` is now imported from
 // `overdrive_dataplane::maps::ServiceKey` (the shared wire-shape POD,
@@ -322,7 +323,7 @@ fn ten_tcp_syns_to_vip_are_rewritten_and_forwarded_via_veth() {
     // veth1 -> kernel -> veth0 ingress -> xdp_service_map_lookup ->
     // XDP_TX -> veth0 egress -> kernel -> veth1 ingress (where the
     // capture socket is reading).
-    inject_tcp_syns(&veth.peer, FRAME_COUNT, VIP_OCTETS, VIP_PORT).expect("inject TCP SYNs");
+    inject_tcp_syns(&veth.peer, 12345, FRAME_COUNT, VIP_OCTETS, VIP_PORT).expect("inject TCP SYNs");
 
     // Capture rewritten frames. Wait up to 5 s total for all 10 — the
     // SKB-mode XDP path is not free, but an idle veth pair has no
@@ -499,14 +500,16 @@ fn capture_rewritten_frames(fd: i32, target: usize, budget: Duration) -> Vec<Vec
 }
 
 /// Inject `n` synthesised TCP SYN frames out of `iface` addressed to
-/// `dst_octets:dst_port`. Mirrors `veth_attach.rs::inject_frames` but
+/// `dst_octets:dst_port`, one flow per frame: frame `i` carries source port
+/// `first_port + i`. Mirrors `veth_attach.rs::inject_frames` but
 /// uses the synthesised TCP-SYN shape from
-/// `super::helpers::packets::synthesise_tcp_syn` rather than a
+/// `super::helpers::packets::synthesise_tcp_syn_with_src_port` rather than a
 /// hand-coded UDP frame.
 #[allow(clippy::cast_lossless, clippy::cast_possible_truncation)]
 fn inject_tcp_syns(
     iface: &str,
-    n: u32,
+    first_port: u16,
+    n: u16,
     dst_octets: [u8; 4],
     dst_port: u16,
 ) -> Result<(), io::Error> {
@@ -524,10 +527,9 @@ fn inject_tcp_syns(
     addr.sll_protocol = (ETH_P_ALL as u16).to_be();
     addr.sll_ifindex = i32::try_from(ifindex).expect("ifindex fits in i32");
 
-    let frame = synthesise_tcp_syn(dst_octets, dst_port);
-
     let mut send_err: Option<io::Error> = None;
-    for _ in 0..n {
+    for offset in 0..n {
+        let frame = synthesise_tcp_syn_with_src_port(dst_octets, dst_port, first_port + offset);
         // SAFETY: sendto writes from `frame` (length-bound) to the
         // bound socket; addr is fully initialised.
         let rc = unsafe {
@@ -552,4 +554,184 @@ fn inject_tcp_syns(
         return Err(e);
     }
     Ok(())
+}
+
+// ----- D-20 / ADR-0299: the two fingerprint slots XDP must never select -----
+
+/// Distinct flows injected by the slot-selection test, one per source port
+/// `1024..1024 + SLOT_FLOWS`. The flow set is deterministic (fixed source IP,
+/// destination and ports), so the test is not probabilistic: it either covers
+/// slots 16,381 and 16,382 or it does not, and that is a property of this set.
+const SLOT_FLOWS: u16 = 64_000;
+/// Flows injected before the capture is drained, so the veth backlog never
+/// overflows and a missing frame is never a congestion drop.
+const SLOT_BATCH: u16 = 250;
+
+/// D-20, ADR-0299 (DISTILL obligation 3a): with the inner capacity at 16,383,
+/// XDP still indexes the table modulo 16,381, so it never selects slots 16,381
+/// and 16,382, where the dataplane stores the applied set's fingerprint.
+///
+/// The inner array is 16,383 slots: slots `0..16,381` hold the one backend and
+/// the two extra slots hold a `BackendId` no backend owns. A flow steered to an
+/// extra slot misses `BACKEND_MAP` and is not forwarded, so every one of the
+/// injected flows must reach the wire rewritten to the backend. The observable
+/// is the rewritten frames on the peer end.
+///
+/// This characterises the existing XDP path: the program is unchanged, so the
+/// test holds today and discharges the one fact the V-6 spike could not observe
+/// (it ran no XDP program).
+///
+/// The slot hash is private to the BPF program (`no_std`, not exported), and the
+/// test does not copy it, so it does not establish by itself that some flow in
+/// the set selects slot 16,381 or 16,382 under a wrong modulus.
+#[overdrive_test(guest = "mtls-relay")]
+#[test]
+#[serial_test::serial(env)]
+fn xdp_never_selects_the_two_fingerprint_slots() {
+    use std::os::fd::AsFd;
+
+    let host = "ovd-fps0";
+    let peer = "ovd-fps1";
+    let veth = match VethPair::create(host, peer) {
+        Ok(v) => v,
+        Err(VethError::CapNetAdminRequired) => {
+            panic!("this test needs CAP_NET_ADMIN; run it via `cargo xtask metal run --`")
+        }
+        Err(e) => panic!("veth setup failed: {e}"),
+    };
+    veth.configure_for_xdp_tx_to_backend("10.1.0.1/16", std::net::Ipv4Addr::from(BACKEND_OCTETS))
+        .expect("configure FIB+ARP for backend reachability");
+    let peer_ifindex = if_nametoindex(&veth.peer).expect("if_nametoindex");
+
+    let pin_dir =
+        std::path::PathBuf::from(format!("/sys/fs/bpf/overdrive-test-fps-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&pin_dir);
+    std::fs::create_dir_all(&pin_dir).expect("create pin dir");
+    struct PinDirGuard(std::path::PathBuf);
+    impl Drop for PinDirGuard {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+    let _pin_dir_guard = PinDirGuard(pin_dir.clone());
+
+    // The production capacity: 16,381 Maglev slots + 2 fingerprint slots.
+    let inner_capacity = overdrive_core::dataplane::MaglevTableSize::DEFAULT.get() + 2;
+    let table_slots = inner_capacity - 2;
+    let service_map_handle = HashOfMapsHandle::<ServiceKey, u32>::new_pinned_with_array_inner(
+        "SERVICE_MAP",
+        4096,
+        inner_capacity,
+        &pin_dir,
+    )
+    .expect("pre-create + pre-pin SERVICE_MAP outer HoM");
+
+    let mut bpf = EbpfLoader::new()
+        .map_pin_path(&pin_dir)
+        .allow_unsupported_maps()
+        .load_file(bpf_artifact_path())
+        .expect("aya load_file");
+    let _service_link = {
+        let prog: &mut Xdp = bpf
+            .program_mut("xdp_service_map_lookup")
+            .expect("xdp_service_map_lookup program")
+            .try_into()
+            .expect("an Xdp program");
+        prog.load().expect("xdp_service_map_lookup.load");
+        prog.attach(&veth.host, XdpFlags::DRV_MODE)
+            .or_else(|_| prog.attach(&veth.host, XdpFlags::SKB_MODE))
+            .expect("xdp_service_map_lookup.attach")
+    };
+    let _pass_link = {
+        let prog: &mut Xdp = bpf
+            .program_mut("xdp_pass")
+            .expect("xdp_pass program")
+            .try_into()
+            .expect("an Xdp program");
+        prog.load().expect("xdp_pass.load");
+        prog.attach(&veth.peer, XdpFlags::DRV_MODE)
+            .or_else(|_| prog.attach(&veth.peer, XdpFlags::SKB_MODE))
+            .expect("xdp_pass.attach")
+    };
+
+    {
+        const BID_ONE: u32 = 1;
+        const BID_UNOWNED: u32 = 0xFFFF_FFFE;
+        let mut backend_map: HashMap<_, u32, BackendEntry> =
+            HashMap::try_from(bpf.map_mut("BACKEND_MAP").expect("BACKEND_MAP"))
+                .expect("BACKEND_MAP");
+        backend_map
+            .insert(
+                BID_ONE,
+                BackendEntry {
+                    ipv4_host: u32::from(std::net::Ipv4Addr::from(BACKEND_OCTETS)),
+                    port_host: BACKEND_PORT,
+                    weight: 1,
+                    healthy: 1,
+                    _pad: [0; 3],
+                },
+                0,
+            )
+            .expect("BACKEND_MAP insert");
+
+        let inner_fd = service_map_handle.create_inner(None).expect("inner ARRAY alloc");
+        for slot in 0..inner_capacity {
+            let value = if slot < table_slots { BID_ONE } else { BID_UNOWNED };
+            overdrive_dataplane::sys::bpf::bpf_map_update_elem(
+                inner_fd.as_fd(),
+                &slot.to_ne_bytes(),
+                &value.to_ne_bytes(),
+                overdrive_dataplane::sys::bpf::BPF_ANY,
+            )
+            .unwrap_or_else(|e| panic!("inner ARRAY slot {slot} populate: {e}"));
+        }
+        let service_key = ServiceKey {
+            vip_host: u32::from(std::net::Ipv4Addr::from(VIP_OCTETS)),
+            port_host: VIP_PORT,
+            proto: 6,
+            _pad: 0,
+        };
+        service_map_handle.set(&service_key, inner_fd.as_fd()).expect("SERVICE_MAP outer set");
+    }
+
+    let capture_fd = open_capture_socket(peer_ifindex).expect("open AF_PACKET capture socket");
+    // The socket sees each injected frame (egress) and its rewritten bounce
+    // (ingress): size the receive buffer for a whole batch of both so a full
+    // buffer never reads as a missing flow.
+    let rcvbuf: c_int = 16 * 1024 * 1024;
+    // SAFETY: setsockopt reads `size_of::<c_int>()` bytes from `rcvbuf`.
+    let rc = unsafe {
+        libc::setsockopt(
+            capture_fd,
+            libc::SOL_SOCKET,
+            libc::SO_RCVBUFFORCE,
+            std::ptr::addr_of!(rcvbuf).cast(),
+            u32::try_from(mem::size_of::<c_int>()).expect("c_int size fits in socklen_t"),
+        )
+    };
+    assert_eq!(rc, 0, "SO_RCVBUFFORCE: {}", io::Error::last_os_error());
+    let mut forwarded = 0usize;
+    let mut next_port = 1024u16;
+    let mut injected = 0usize;
+    while injected < usize::from(SLOT_FLOWS) {
+        let batch = SLOT_BATCH.min(SLOT_FLOWS - u16::try_from(injected).expect("fits"));
+        inject_tcp_syns(&veth.peer, next_port, batch, VIP_OCTETS, VIP_PORT)
+            .expect("inject TCP SYNs");
+        next_port += batch;
+        injected += usize::from(batch);
+        let got =
+            capture_rewritten_frames(capture_fd, usize::from(batch), Duration::from_secs(2)).len();
+        forwarded += got;
+        assert_eq!(
+            got,
+            usize::from(batch),
+            "{got} of {batch} flows forwarded for source ports {}..{} ({forwarded} forwarded so \
+             far): a missing frame means a flow was steered to one of the two fingerprint slots \
+             (or dropped)",
+            next_port - batch,
+            next_port,
+        );
+    }
+    // SAFETY: capture_fd was returned by socket(); close exactly once.
+    unsafe { libc::close(capture_fd) };
 }

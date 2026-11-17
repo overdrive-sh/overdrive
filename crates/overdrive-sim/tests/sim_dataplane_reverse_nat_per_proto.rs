@@ -10,7 +10,8 @@
 //! - S-03-D: the #163 shape (tcp-only for a udp service) is caught
 //! - S-02-A: empty backends purge only frontend.proto's keys (property)
 //! - S-02-C: idempotent re-apply (property)
-//! - S-02-D: non-IPv4 backend contributes no key (boundary)
+//! - S-02-D: a set with an IPv6 backend is refused, nothing written (boundary;
+//!   D-20, reconciler-convergence-guarantees)
 //!
 //! Mandate 8 (Universe-bound assertion). The universe is the
 //! port-observable `BTreeSet<BackendKey>` `REVERSE_NAT` key set. The
@@ -30,7 +31,7 @@ use overdrive_core::SpiffeId;
 use overdrive_core::dataplane::ServiceFrontend;
 use overdrive_core::dataplane::backend_key::{BackendKey, Proto};
 use overdrive_core::id::ServiceVip;
-use overdrive_core::traits::dataplane::{Backend, Dataplane};
+use overdrive_core::traits::dataplane::{Backend, Dataplane, DataplaneError};
 use overdrive_sim::adapters::dataplane::SimDataplane;
 use proptest::prelude::*;
 
@@ -65,13 +66,15 @@ fn reverse_nat_key_set(dp: &SimDataplane) -> BTreeSet<BackendKey> {
     dp.reverse_nat_entries().into_iter().map(|(k, _vip)| k).collect()
 }
 
-/// Expected per-proto key set for an IPv4-only backend slice.
+/// Expected per-proto key set for a backend slice. Every backend the Sim
+/// accepts is IPv4: a set with an IPv6 backend is refused whole, so it never
+/// reaches this oracle.
 fn expected_keys(backends: &[Backend], proto: Proto) -> BTreeSet<BackendKey> {
     backends
         .iter()
-        .filter_map(|b| match b.addr.ip() {
-            IpAddr::V4(v4) => Some(BackendKey::new(v4, b.addr.port(), proto)),
-            IpAddr::V6(_) => None,
+        .map(|b| match b.addr.ip() {
+            IpAddr::V4(v4) => BackendKey::new(v4, b.addr.port(), proto),
+            IpAddr::V6(_) => unreachable!("an IPv6 backend set is refused, never installed"),
         })
         .collect()
 }
@@ -194,26 +197,51 @@ async fn issue_163_tcp_only_for_udp_service_is_caught() {
     assert_eq!(actual, udp_expected, "S-03-D: a udp service installs exactly the udp keys");
 }
 
-/// S-02-D (criterion 14) — boundary: a backend set with one IPv4 and one
-/// IPv6 backend under a udp frontend yields a key set with the IPv4
-/// backend's `(ip, port, udp)` key and no key for the IPv6 backend.
+/// S-02-D (criterion 14) — boundary: `update_service` refuses a non-empty
+/// backend set that contains an IPv6 backend with `LoadFailed`, before any
+/// write. No `REVERSE_NAT` key is added (none for the IPv6 backend, none for
+/// the IPv4 backend sent with it) and the service's prior state is unchanged
+/// (D-20, ADR-0299; the host adapter already refuses).
+///
+/// Pending until DELIVER changes the Sim to refuse: today it accepts the set
+/// and installs the IPv4 backend's key.
 #[tokio::test]
-async fn ipv6_backend_contributes_no_reverse_nat_key() {
+#[should_panic(expected = "update_service accepted a set containing an IPv6 backend")]
+async fn a_set_with_an_ipv6_backend_is_refused_and_leaves_the_service_unchanged() {
     let dp = SimDataplane::new();
-    let v4 = ipv4_backend(0, Ipv4Addr::new(10, 1, 0, 1), 5353);
+    let fe = frontend(10, 5353, Proto::Udp);
+    let prior = vec![ipv4_backend(0, Ipv4Addr::new(10, 1, 0, 1), 5353)];
+    dp.update_service(fe, prior.clone()).await.unwrap();
+    let keys_before = reverse_nat_key_set(&dp);
+    let service_before = dp.service_backends_for(Ipv4Addr::new(10, 96, 0, 10), 5353, Proto::Udp);
+    assert_eq!(keys_before, expected_keys(&prior, Proto::Udp), "the prior service is installed");
+
+    // A different IPv4 backend travels with the IPv6 one, so a partial write
+    // would show as a new key.
+    let v4 = ipv4_backend(1, Ipv4Addr::new(10, 1, 0, 2), 5353);
     let v6 = Backend {
-        alloc: spiffe(1),
+        alloc: spiffe(2),
         addr: SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 5353),
         weight: 1,
         healthy: true,
     };
-    let fe = frontend(10, 5353, Proto::Udp);
-    dp.update_service(fe, vec![v4.clone(), v6]).await.unwrap();
+    let outcome = dp.update_service(fe, vec![v4, v6]).await;
 
-    let actual = reverse_nat_key_set(&dp);
-    let expected: BTreeSet<BackendKey> =
-        std::iter::once(BackendKey::new(Ipv4Addr::new(10, 1, 0, 1), 5353, Proto::Udp)).collect();
-    assert_eq!(actual, expected, "S-02-D: only the IPv4 backend's udp key is present");
+    assert!(
+        matches!(outcome, Err(DataplaneError::LoadFailed(_))),
+        "update_service accepted a set containing an IPv6 backend; it must refuse it with \
+         LoadFailed, got {outcome:?}"
+    );
+    assert_eq!(
+        reverse_nat_key_set(&dp),
+        keys_before,
+        "a refused update adds no REVERSE_NAT key and removes none"
+    );
+    assert_eq!(
+        dp.service_backends_for(Ipv4Addr::new(10, 96, 0, 10), 5353, Proto::Udp),
+        service_before,
+        "a refused update leaves the service's backends unchanged"
+    );
 }
 
 /// S-03-B (criterion 8) / S-03-C (criterion 9) — the `ReverseNatLockstep`

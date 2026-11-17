@@ -40,6 +40,7 @@ pub mod identity_read;
 pub mod intent_store;
 pub mod listener_facts;
 pub mod llm;
+pub mod programmed_service_view;
 pub mod service_vip_view;
 pub mod workflow_live_set;
 // transparent-mtls-host-socket (ADR-0069, GH #26). The per-connection
@@ -99,6 +100,7 @@ pub use mtls_enforcement::{
 };
 pub use mtls_resolve::{MtlsResolution, MtlsResolve, MtlsResolveError, ResolvedBackend};
 pub use observation_store::ObservationStore;
+pub use programmed_service_view::ProgrammedServiceView;
 pub use service_vip_view::ServiceVipView;
 pub use transport::Transport;
 pub use vm_host_state::{ScopeFacts, VmHostObservation, VmHostState, VmHostStateProbeError};
