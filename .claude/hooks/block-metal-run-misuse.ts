@@ -21,7 +21,7 @@
 // `cargo xtask metal collect`, `pull`, `sync` and `shell` are not affected.
 // See .claude/rules/testing.md § "Run records, collection and diagnostics".
 
-const METAL_RUN = /cargo\s+xtask\s+metal\s+run\b/;
+import { parse, type ParseEntry } from "shell-quote";
 
 function deny(reason: string): void {
   console.log(
@@ -35,56 +35,78 @@ function deny(reason: string): void {
   );
 }
 
-/** Split into command segments on `;`, `&&`, `||` and `|`, keeping the
- *  separator that follows each segment so a pipe can be told apart. */
-function segments(cmd: string): { text: string; next: string }[] {
-  const out: { text: string; next: string }[] = [];
-  const re = /(\|\||&&|;|\||&|\n)/g;
-  let last = 0;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(cmd)) !== null) {
-    out.push({ text: cmd.slice(last, m.index).trim(), next: m[1] });
-    last = m.index + m[1].length;
+type Command = { words: string[]; ops: string[]; next: string };
+
+/** Operators that end one command and start the next. */
+const SEPARATORS = new Set([";", "&&", "||", "&", "|", "|&", ";;"]);
+/** Redirections of a command's output to a file. `>&` followed by a digit
+ *  is an fd duplication (`2>&1`) and is handled separately. */
+const FILE_REDIRECTS = new Set([">", ">>", ">|", "&>", "&>>"]);
+const TRUNCATING = new Set([
+  "head", "tail", "grep", "egrep", "fgrep", "rg", "awk", "sed", "cut", "less", "more",
+]);
+
+/** Parse with shell-quote into commands. Quoted text stays one word (a
+ *  nextest `-E 'a | b'` filter is not a pipe); `$VAR` is kept verbatim. */
+function commands(raw: string): Command[] {
+  const tokens: ParseEntry[] = parse(raw, (key) => `$${key}`);
+  const out: Command[] = [];
+  let cur: Command = { words: [], ops: [], next: "" };
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i];
+    if (typeof t === "string") {
+      cur.words.push(t);
+    } else if ("op" in t && SEPARATORS.has(t.op)) {
+      cur.next = t.op;
+      out.push(cur);
+      cur = { words: [], ops: [], next: "" };
+    } else if ("op" in t) {
+      // `N>&M` duplicates a descriptor; `>& file` redirects to a file.
+      const target = tokens[i + 1];
+      if (t.op === ">&" && typeof target === "string" && /^\d+$/.test(target)) {
+        i++;
+        continue;
+      }
+      cur.ops.push(t.op === ">&" ? ">" : t.op);
+    }
   }
-  out.push({ text: cmd.slice(last).trim(), next: "" });
-  return out.filter((s) => s.text.length > 0);
+  out.push(cur);
+  return out.filter((c) => c.words.length > 0 || c.ops.length > 0);
+}
+
+/** Index of `cargo xtask metal run` within a command's words, or -1. */
+function metalRunAt(words: string[]): number {
+  for (let i = 0; i + 3 < words.length; i++) {
+    if (words[i] === "cargo" && words[i + 1] === "xtask" &&
+      words[i + 2] === "metal" && words[i + 3] === "run") return i;
+  }
+  return -1;
 }
 
 /** Returns the reason the command misuses `metal run`, or null. */
 export function misuse(raw: string): string | null {
-  if (!METAL_RUN.test(raw)) return null;
-  // Blank out quoted strings (a nextest `-E 'a | b'` filter is not a pipe)
-  // and fd duplications (`2>&1` is not a redirect to a file, and its `&`
-  // is not a separator).
-  const cmd = raw
-    .replace(/'[^']*'/g, "''")
-    .replace(/"(?:[^"\\]|\\.)*"/g, '""')
-    .replace(/\d?>&\d/g, " ")
-    .replace(/&>>?/g, " >");
-  const segs = segments(cmd);
-  for (let i = 0; i < segs.length; i++) {
-    const seg = segs[i];
-    if (!METAL_RUN.test(seg.text)) continue;
-    // Words before `cargo xtask metal run` in the same segment.
-    const prefix = seg.text.slice(0, seg.text.search(METAL_RUN));
-    if (/(?:^|\s)(?:g?timeout|gtimeout)\s/.test(prefix + " ")) {
+  let cmds: Command[];
+  try {
+    cmds = commands(raw);
+  } catch {
+    return null; // unparseable — let the shell report it
+  }
+  for (let i = 0; i < cmds.length; i++) {
+    const c = cmds[i];
+    const at = metalRunAt(c.words);
+    if (at < 0) continue;
+    if (c.words.slice(0, at).some((w) => w === "timeout" || w === "gtimeout")) {
       return "timeout";
     }
-    // An earlier segment of the same command that sleeps.
-    if (segs.slice(0, i).some((s) => /^sleep\s+\d/.test(s.text))) {
+    if (cmds.slice(0, i).some((p) => p.words[0] === "sleep")) {
       return "sleep";
     }
-    // Output redirected to a file (stderr-to-stdout `2>&1` alone is fine).
-    const afterRun = seg.text.slice(seg.text.search(METAL_RUN));
-    if (/(?:^|\s)(?:\d?>>?|&>)\s*\S/.test(afterRun)) {
+    if (c.ops.some((op) => FILE_REDIRECTS.has(op))) {
       return "redirect";
     }
-    // Piped into something that truncates or filters.
-    if (seg.next === "|") {
-      const consumer = segs[i + 1]?.text ?? "";
-      if (/^(?:head|tail|grep|rg|awk|sed|cut|less|more)\b/.test(consumer)) {
-        return "pipe";
-      }
+    if ((c.next === "|" || c.next === "|&") &&
+      TRUNCATING.has(cmds[i + 1]?.words[0] ?? "")) {
+      return "pipe";
     }
   }
   return null;
