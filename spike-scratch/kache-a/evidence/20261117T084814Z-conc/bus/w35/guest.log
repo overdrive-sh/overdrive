@@ -1,0 +1,8 @@
+2026-11-17T09:01:35.769Z w35 up nic=eth0 ip=10.77.0.55 role=dev kernel=7.0.0-38-generic nproc=2
+2026-11-17T09:01:36.196Z w35 seeding cargo home from host registry
+2026-11-17T09:01:38.635Z w35 step conc begin
+2026-11-17T09:01:41.891Z w35 barrier passed: all peers ready
+2026-11-17T09:19:10.518Z w35 sample 000 conc-w3 rc=0 wall=1049.272s
+2026-11-17T09:19:16.560Z w35 kache daemon drained (try 1)
+2026-11-17T09:19:16.715Z w35 step conc end rc=0
+2026-11-17T09:19:16.734Z w35 role exit=0

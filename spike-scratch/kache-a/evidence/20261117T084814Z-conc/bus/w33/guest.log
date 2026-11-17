@@ -1,0 +1,8 @@
+2026-11-17T09:01:35.465Z w33 up nic=eth0 ip=10.77.0.53 role=dev kernel=7.0.0-38-generic nproc=2
+2026-11-17T09:01:35.906Z w33 seeding cargo home from host registry
+2026-11-17T09:01:38.378Z w33 step conc begin
+2026-11-17T09:01:40.855Z w33 barrier passed: all peers ready
+2026-11-17T09:18:59.253Z w33 sample 000 conc-w3 rc=0 wall=1038.193s
+2026-11-17T09:19:05.166Z w33 kache daemon drained (try 1)
+2026-11-17T09:19:05.307Z w33 step conc end rc=0
+2026-11-17T09:19:05.330Z w33 role exit=0

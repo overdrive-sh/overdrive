@@ -1,0 +1,31 @@
+2026-11-17T08:48:14.957Z host boot cache ip=10.77.0.2 vcpus=4 mem=8G disk=200G role=cache 
+2026-11-17T08:48:21.364Z host boot w11 ip=10.77.0.31 vcpus=5 mem=12G disk=80G role=dev SPIKE_STEPS=conc WAVE=w1 PFX=s6-full SPEC=full PEERS=w11,w12,w13
+2026-11-17T08:48:21.820Z host boot w12 ip=10.77.0.32 vcpus=5 mem=12G disk=80G role=dev SPIKE_STEPS=conc WAVE=w1 PFX=s6-full SPEC=full PEERS=w11,w12,w13
+2026-11-17T08:48:21.126Z host boot w13 ip=10.77.0.33 vcpus=5 mem=12G disk=80G role=dev SPIKE_STEPS=conc WAVE=w1 PFX=s6-full SPEC=full PEERS=w11,w12,w13
+2026-11-17T08:58:47.669Z host vm w11 finished exit=0
+2026-11-17T08:58:47.677Z host vm w12 finished exit=0
+2026-11-17T08:58:49.517Z host vm w13 finished exit=0
+2026-11-17T08:58:50.371Z host boot w21 ip=10.77.0.41 vcpus=5 mem=12G disk=80G role=dev SPIKE_STEPS=conc WAVE=w2 PFX=s6-full SPEC=full PEERS=w21,w22,w23
+2026-11-17T08:58:50.417Z host boot w22 ip=10.77.0.42 vcpus=5 mem=12G disk=80G role=dev SPIKE_STEPS=conc WAVE=w2 PFX=s6-full SPEC=full PEERS=w21,w22,w23
+2026-11-17T08:58:50.461Z host boot w23 ip=10.77.0.43 vcpus=5 mem=12G disk=80G role=dev SPIKE_STEPS=conc WAVE=w2 PFX=s6-full SPEC=full PEERS=w21,w22,w23
+2026-11-17T09:01:33.158Z host vm w21 finished exit=0
+2026-11-17T09:01:33.168Z host vm w22 finished exit=0
+2026-11-17T09:01:33.177Z host vm w23 finished exit=0
+2026-11-17T09:01:33.894Z host boot w31 ip=10.77.0.51 vcpus=2 mem=4G disk=80G role=dev SPIKE_STEPS=conc WAVE=w3 PFX=s6-core SPEC=core PEERS=w31,w32,w33,w34,w35,w36,w37,w38
+2026-11-17T09:01:33.941Z host boot w32 ip=10.77.0.52 vcpus=2 mem=4G disk=80G role=dev SPIKE_STEPS=conc WAVE=w3 PFX=s6-core SPEC=core PEERS=w31,w32,w33,w34,w35,w36,w37,w38
+2026-11-17T09:01:33.987Z host boot w33 ip=10.77.0.53 vcpus=2 mem=4G disk=80G role=dev SPIKE_STEPS=conc WAVE=w3 PFX=s6-core SPEC=core PEERS=w31,w32,w33,w34,w35,w36,w37,w38
+2026-11-17T09:01:34.330Z host boot w34 ip=10.77.0.54 vcpus=2 mem=4G disk=80G role=dev SPIKE_STEPS=conc WAVE=w3 PFX=s6-core SPEC=core PEERS=w31,w32,w33,w34,w35,w36,w37,w38
+2026-11-17T09:01:34.828Z host boot w35 ip=10.77.0.55 vcpus=2 mem=4G disk=80G role=dev SPIKE_STEPS=conc WAVE=w3 PFX=s6-core SPEC=core PEERS=w31,w32,w33,w34,w35,w36,w37,w38
+2026-11-17T09:01:34.126Z host boot w36 ip=10.77.0.56 vcpus=2 mem=4G disk=80G role=dev SPIKE_STEPS=conc WAVE=w3 PFX=s6-core SPEC=core PEERS=w31,w32,w33,w34,w35,w36,w37,w38
+2026-11-17T09:01:34.171Z host boot w37 ip=10.77.0.57 vcpus=2 mem=4G disk=80G role=dev SPIKE_STEPS=conc WAVE=w3 PFX=s6-core SPEC=core PEERS=w31,w32,w33,w34,w35,w36,w37,w38
+2026-11-17T09:01:34.221Z host boot w38 ip=10.77.0.58 vcpus=2 mem=4G disk=80G role=dev SPIKE_STEPS=conc WAVE=w3 PFX=s6-core SPEC=core PEERS=w31,w32,w33,w34,w35,w36,w37,w38
+2026-11-17T09:19:16.248Z host vm w31 finished exit=0
+2026-11-17T09:19:16.259Z host vm w32 finished exit=0
+2026-11-17T09:19:16.268Z host vm w33 finished exit=0
+2026-11-17T09:19:20.858Z host vm w34 finished exit=0
+2026-11-17T09:19:20.869Z host vm w35 finished exit=0
+2026-11-17T09:19:20.878Z host vm w36 finished exit=0
+2026-11-17T09:19:20.887Z host vm w37 finished exit=0
+2026-11-17T09:19:24.861Z host vm w38 finished exit=0
+2026-11-17T09:19:28.450Z host evidence at /home/ubuntu/overdrive-worktrees/9d340a8ca57d5ca89b626cece0d62d03770aa9cd213856dc63ec27e31d3a81cc/spike-scratch/kache-a/evidence/20261117T084814Z-conc: 309 files, owner ubuntu, mount / ext4 
+2026-11-17T09:19:28.457Z host exit rc=0

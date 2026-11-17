@@ -1,0 +1,11 @@
+run=20261117T023853Z-ladder-1 plan=ladder
+metal_run_id=2e93c8ea270afdb0d12415b8
+uname=7.0.0-38-generic
+nproc=16
+mem_total_gb=62
+fs=ext4 size=847G avail=57G
+source: commit=d1953f3f7797d7e69c5a932b55305e3415888018
+source: workspace=/Users/marcus/conductor/workspaces/helios/antananarivo
+source: source_digest=76412f74afc27faec829da3d280f3a46c45757e66c0d72eab9a42ca3c95a8250
+cloud_hypervisor=cloud-hypervisor v53.0.0
+virtiofsd=virtiofsd 1.13.2

@@ -1,0 +1,48 @@
+2026-11-17T08:14:53.590Z s4-a up nic=eth0 ip=10.77.0.11 role=dev kernel=7.0.0-38-generic nproc=8
+2026-11-17T08:14:53.943Z s4-a seeding cargo home from host registry
+2026-11-17T08:14:55.561Z s4-a step s4 begin
+2026-11-17T08:19:43.777Z s4-a sample 000 s4-x-plain rc=0 wall=286.510s
+2026-11-17T08:22:25.761Z s4-a sample 001 s4-setup-plain rc=0 wall=161.069s
+2026-11-17T08:26:48.631Z s4-a sample 002 s4-edit-kache-1 rc=0 wall=263.284s
+2026-11-17T08:26:57.399Z s4-a sample 003 s4-edit-plain-1 rc=0 wall=8.556s
+2026-11-17T08:27:06.150Z s4-a sample 004 s4-edit-plain-2 rc=0 wall=8.539s
+2026-11-17T08:27:48.755Z s4-a sample 005 s4-edit-kache-2 rc=0 wall=42.367s
+2026-11-17T08:27:57.795Z s4-a sample 006 s4-edit-kache-3 rc=0 wall=8.796s
+2026-11-17T08:28:06.635Z s4-a sample 007 s4-edit-plain-3 rc=0 wall=8.608s
+2026-11-17T08:28:15.636Z s4-a sample 008 s4-edit-plain-4 rc=0 wall=8.807s
+2026-11-17T08:28:25.378Z s4-a sample 009 s4-edit-kache-4 rc=0 wall=9.491s
+2026-11-17T08:28:34.343Z s4-a sample 010 s4-edit-kache-5 rc=0 wall=8.727s
+2026-11-17T08:28:43.118Z s4-a sample 011 s4-edit-plain-5 rc=0 wall=8.535s
+2026-11-17T08:28:51.970Z s4-a sample 012 s4-edit-plain-6 rc=0 wall=8.630s
+2026-11-17T08:29:00.907Z s4-a sample 013 s4-edit-kache-6 rc=0 wall=8.702s
+2026-11-17T08:29:10.402Z s4-a sample 014 s4-edit-kache-7 rc=0 wall=9.242s
+2026-11-17T08:29:19.869Z s4-a sample 015 s4-edit-plain-7 rc=0 wall=8.459s
+2026-11-17T08:29:27.808Z s4-a sample 016 s4-edit-plain-8 rc=0 wall=8.514s
+2026-11-17T08:29:37.651Z s4-a sample 017 s4-edit-kache-8 rc=0 wall=8.999s
+2026-11-17T08:29:46.477Z s4-a sample 018 s4-edit-kache-9 rc=0 wall=8.736s
+2026-11-17T08:29:54.718Z s4-a sample 019 s4-edit-plain-9 rc=0 wall=8.462s
+2026-11-17T08:30:03.503Z s4-a sample 020 s4-edit-plain-10 rc=0 wall=8.564s
+2026-11-17T08:30:12.591Z s4-a sample 021 s4-edit-kache-10 rc=0 wall=8.841s
+2026-11-17T08:30:24.374Z s4-a sample 022 s4-edit-kache-11 rc=0 wall=11.556s
+2026-11-17T08:30:33.471Z s4-a sample 023 s4-edit-plain-11 rc=0 wall=8.451s
+2026-11-17T08:30:41.819Z s4-a sample 024 s4-edit-plain-12 rc=0 wall=8.571s
+2026-11-17T08:30:51.561Z s4-a sample 025 s4-edit-kache-12 rc=0 wall=9.493s
+2026-11-17T08:31:00.615Z s4-a sample 026 s4-edit-kache-13 rc=0 wall=8.819s
+2026-11-17T08:31:09.462Z s4-a sample 027 s4-edit-plain-13 rc=0 wall=8.624s
+2026-11-17T08:31:18.244Z s4-a sample 028 s4-edit-plain-14 rc=0 wall=8.607s
+2026-11-17T08:31:27.759Z s4-a sample 029 s4-edit-kache-14 rc=0 wall=9.262s
+2026-11-17T08:31:36.879Z s4-a sample 030 s4-edit-kache-15 rc=0 wall=8.868s
+2026-11-17T08:31:45.590Z s4-a sample 031 s4-edit-plain-15 rc=0 wall=8.513s
+2026-11-17T08:31:54.466Z s4-a sample 032 s4-edit-plain-16 rc=0 wall=8.655s
+2026-11-17T08:32:03.917Z s4-a sample 033 s4-edit-kache-16 rc=0 wall=9.214s
+2026-11-17T08:32:13.115Z s4-a sample 034 s4-edit-kache-17 rc=0 wall=8.974s
+2026-11-17T08:32:21.962Z s4-a sample 035 s4-edit-plain-17 rc=0 wall=8.643s
+2026-11-17T08:32:30.781Z s4-a sample 036 s4-edit-plain-18 rc=0 wall=8.594s
+2026-11-17T08:32:39.787Z s4-a sample 037 s4-edit-kache-18 rc=0 wall=8.755s
+2026-11-17T08:32:48.952Z s4-a sample 038 s4-edit-kache-19 rc=0 wall=8.898s
+2026-11-17T08:32:57.809Z s4-a sample 039 s4-edit-plain-19 rc=0 wall=8.664s
+2026-11-17T08:33:06.565Z s4-a sample 040 s4-edit-plain-20 rc=0 wall=8.561s
+2026-11-17T08:33:18.483Z s4-a sample 041 s4-edit-kache-20 rc=0 wall=11.690s
+2026-11-17T08:33:18.588Z s4-a kache daemon drained (try 1)
+2026-11-17T08:33:18.655Z s4-a step s4 end rc=0
+2026-11-17T08:33:18.683Z s4-a role exit=0

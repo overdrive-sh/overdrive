@@ -1,0 +1,136 @@
+{
+  "schema_version": 1,
+  "command": "stats",
+  "success": true,
+  "disk": {
+    "store_bytes": 6809454522,
+    "store_limit_bytes": 5368709120,
+    "disk_private_bytes": 5775235500,
+    "cloned_into_targets_bytes": 1034219022,
+    "snapshot_retained_bytes": 0,
+    "cloned_coverage": "partial"
+  },
+  "volume": {
+    "total_bytes": 83955703808,
+    "free_bytes": 66073268224,
+    "recovery_floor_bytes": 10737418240,
+    "below_floor": false,
+    "recovers_targets": false
+  },
+  "stores": [
+    {
+      "path": "/mnt/kache-store",
+      "bytes": 6809456527,
+      "max_size": 5368709120,
+      "entries": 583,
+      "blob_stats": {
+        "total_blobs": 1485,
+        "total_blob_size": 6809454522,
+        "total_logical_size": 6809456527,
+        "savings": 2005
+      },
+      "error": null
+    }
+  ],
+  "index_bytes": 10228272,
+  "index_wal_bytes": 4309552,
+  "index_rowid_high_water": {
+    "blobs": 1998,
+    "cc_preprocess_memos": 0,
+    "entries": 598,
+    "entry_blobs": 2004,
+    "eviction_tombstones": 15,
+    "input_predictions": 1029
+  },
+  "gc": {
+    "last_run": "2026-11-17T08:58:03.627484193+00:00",
+    "entries_evicted": 15,
+    "bytes_freed": 234984552,
+    "disk_bytes_reclaimed": 234984552,
+    "blobs_removed": 513,
+    "duration_ms": 887,
+    "source": "daemon",
+    "entries_pinned": 27,
+    "entries_unreclaimable": 355,
+    "bytes_held": 1034219022,
+    "entries_failed": 0,
+    "entries_locked": 0,
+    "entries_busy_snapshot": 0,
+    "entries_recent_prefiltered": 26,
+    "entries_import_pinned": 1,
+    "evict_write_ms": 521
+  },
+  "lifetime": {
+    "since": "2026-11-17T08:48:27.051397136Z",
+    "hits": 134,
+    "hit_compile_time_ms": 179445,
+    "zero_copy_bytes": 39005046,
+    "copied_bytes": 2243450278,
+    "pruned_automatic_bytes": 234984552,
+    "pruned_requested_bytes": 0
+  },
+  "entries": 583,
+  "hit_rate_pct": 22.40802675585284,
+  "weighted_hit_rate_pct": 7.180120614982763,
+  "time_saved_ms": 179445,
+  "hit_elapsed_ms": 40893,
+  "miss_elapsed_ms": 2901828,
+  "total_elapsed_ms": 2942721,
+  "total_flight_wait_ms": 0,
+  "total_permit_wait_ms": 347494,
+  "longest_scheduler_wait": {
+    "crate_name": "ptr_meta_derive",
+    "flight_wait_ms": 0,
+    "permit_wait_ms": 24493,
+    "decisions": [
+      {
+        "phase": "discovery",
+        "outcome": "admitted",
+        "elapsed_ms": 0
+      },
+      {
+        "phase": "flight",
+        "outcome": "admitted",
+        "elapsed_ms": 0
+      },
+      {
+        "phase": "capacity",
+        "outcome": "admitted",
+        "elapsed_ms": 24493,
+        "requested_slots": 2,
+        "available_slots": 0,
+        "pool_slots": 5,
+        "pressure": "calm",
+        "pressure_ceiling": 5,
+        "background": false,
+        "queued_ms": 24492
+      }
+    ]
+  },
+  "local_hits": 0,
+  "prefetch_hits": 0,
+  "remote_hits": 134,
+  "dups": 0,
+  "misses": 464,
+  "daemon_connected": true,
+  "daemon_version": "2.1.1",
+  "daemon_epoch": 1794905303,
+  "daemon_remote_readonly": false,
+  "hours": 24,
+  "since_secs": 86400,
+  "since": "24h",
+  "remote": "s3://kache/s6-full",
+  "next": [
+    {
+      "argv": [
+        "kache",
+        "clean",
+        "--tracked",
+        "--stale",
+        "14d",
+        "--dry-run"
+      ],
+      "why": "tracked build outputs still hold blocks; cleaning stale target directories is what frees disk"
+    }
+  ]
+}

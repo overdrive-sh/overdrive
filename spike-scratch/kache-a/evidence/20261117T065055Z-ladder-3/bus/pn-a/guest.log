@@ -1,0 +1,21 @@
+2026-11-17T07:53:13.703Z pn-a up nic=eth0 ip=10.77.0.11 role=dev kernel=7.0.0-38-generic nproc=8
+2026-11-17T07:53:13.383Z pn-a seeding cargo home from host registry
+2026-11-17T07:53:14.904Z pn-a step ladder begin
+2026-11-17T07:57:40.377Z pn-a sample 000 s1-X rc=0 wall=264.405s
+2026-11-17T07:57:55.947Z pn-a sample 001 s2-leaf-cli rc=0 wall=5.134s
+2026-11-17T07:59:08.579Z pn-a sample 002 s2b-gateway rc=0 wall=62.376s
+2026-11-17T08:00:30.905Z pn-a sample 003 s3-core rc=0 wall=71.706s
+2026-11-17T08:00:41.560Z pn-a S7: default-lane tests (overdrive-core)
+2026-11-17T08:05:03.357Z pn-a sample 004 s7-tests-core rc=0 wall=262.119s
+2026-11-17T08:05:03.373Z pn-a S4: edit loop x8
+2026-11-17T08:07:32.304Z pn-a sample 005 edit-setup rc=0 wall=148.741s
+2026-11-17T08:08:04.627Z pn-a sample 006 edit-1 rc=0 wall=32.074s
+2026-11-17T08:08:36.661Z pn-a sample 007 edit-2 rc=0 wall=31.809s
+2026-11-17T08:09:08.721Z pn-a sample 008 edit-3 rc=0 wall=31.840s
+2026-11-17T08:09:40.470Z pn-a sample 009 edit-4 rc=0 wall=31.559s
+2026-11-17T08:10:12.232Z pn-a sample 010 edit-5 rc=0 wall=31.588s
+2026-11-17T08:10:44.142Z pn-a sample 011 edit-6 rc=0 wall=31.691s
+2026-11-17T08:11:16.582Z pn-a sample 012 edit-7 rc=0 wall=32.272s
+2026-11-17T08:11:49.773Z pn-a sample 013 edit-8 rc=0 wall=33.031s
+2026-11-17T08:11:49.825Z pn-a step ladder end rc=0
+2026-11-17T08:11:49.851Z pn-a role exit=0

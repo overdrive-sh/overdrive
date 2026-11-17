@@ -1,0 +1,23 @@
+	Command being timed: "cargo build -p overdrive-control-plane --test acceptance --locked --offline"
+	User time (seconds): 49.60
+	System time (seconds): 5.30
+	Percent of CPU this job got: 174%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 0:31.55
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 1543312
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 10776
+	Minor (reclaiming a frame) page faults: 1215503
+	Voluntary context switches: 17182
+	Involuntary context switches: 155
+	Swaps: 0
+	File system inputs: 0
+	File system outputs: 655168
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0

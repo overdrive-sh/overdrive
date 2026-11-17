@@ -1,0 +1,81 @@
+2026-11-17T01:04:40.873Z dev-a up nic=eth0 ip=10.77.0.11 role=dev kernel=7.0.0-38-generic nproc=8
+2026-11-17T01:04:41.196Z dev-a seeding cargo home from host registry
+2026-11-17T01:04:44.789Z dev-a step probe begin
+uname=7.0.0-38-generic nproc=8
+Mem:              23           0          22           0           0          23
+/dev/vda        147G  275M  139G   1% /mnt
+rustc 1.95.0 (59807616e 2026-04-14)
+binary: rustc
+commit-hash: 59807616e1fa2540724bfbac14d7976d7e4a3860
+commit-date: 2026-04-14
+host: x86_64-unknown-linux-gnu
+release: 1.95.0
+LLVM version: 22.1.2
+cargo 1.95.0 (f2d3ce0bd 2026-03-21)
+/usr/bin/mold
+/mnt/kache-bin/sccache
+/mnt/kache-bin/kache
+/mnt/kache-bin/kache-engine
+kache 2.1.1
+sccache 0.18.0
+140M	/home/ubuntu/.cargo/registry/cache
+36M	/home/ubuntu/.cargo/registry/index
+overdrive_bpf.o
+overdrive_guest_bpf.o
+overdrive_guest_tcp_correlation_candidate_bpf.o
+vmlinux.h
+touch: cannot touch '/home/ubuntu/rw-test': Read-only file system
+host root read-only: ok
+doctor rc=0
+2026-11-17T01:04:48.748Z dev-a sample 000 probe-cold rc=0 wall=2.058s
+     Removed 15 files, 8.3MiB total
+2026-11-17T01:04:48.986Z dev-a waiting for bucket stats
+2026-11-17T01:04:56.834Z
+Size:            1.0 MB (992.5 KiB)
+Objects:         3
+Size:            0 B (0 B)
+Objects:         0
+1015818	/mnt/garage/data
+277838	/mnt/garage/meta
+2026-11-17T01:05:15.395Z dev-a sample 001 probe-remote-restore rc=0 wall=0.927s
+hi
+/mnt/home/.cache/kache:
+total 16
+drwxr-xr-x 3 root root 4096 Nov 17 01:04 .
+drwxr-xr-x 3 root root 4096 Nov 17 01:04 ..
+-rw-r--r-- 1 root root 3386 Nov 17 01:05 kache.log
+drwxr-xr-x 2 root root 4096 Nov 17 01:04 probes
+
+/mnt/kache-store:
+total 208
+drwx------ 4 root root   4096 Nov 17 01:05 .
+drwxr-xr-x 8 root root   4096 Nov 17 01:05 ..
+drwxr-xr-x 2 root root   4096 Nov 17 01:05 .build-sessions
+-rw------- 1 root root      0 Nov 17 01:05 daemon.ctl.bind.lock
+-rw------- 1 root root      0 Nov 17 01:05 daemon.lock
+-rw-r--r-- 1 root root   2331 Nov 17 01:05 daemon.log
+-rw------- 1 root root      0 Nov 17 01:05 daemon.run.lock
+-rw------- 1 root root      0 Nov 17 01:05 daemon.sock.bind.lock
+-rw------- 1 root root      0 Nov 17 01:05 daemon.state.json.record.lock
+-rw-r--r-- 1 root root   4779 Nov 17 01:05 events.jsonl
+-rw-r--r-- 1 root root      0 Nov 17 01:05 events.jsonl.lock
+-rw-r--r-- 1 root root    537 Nov 17 01:05 gc_stats.json
+-rw-r--r-- 1 root root 172032 Nov 17 01:05 index.db
+drwxr-xr-x 4 root root   4096 Nov 17 01:05 store
+-rw-r--r-- 1 root root    429 Nov 17 01:05 summaries.jsonl
+-rw-r--r-- 1 root root      0 Nov 17 01:05 summaries.jsonl.lock
+-rw-r--r-- 1 root root    709 Nov 17 01:05 transfers.jsonl
+-rw-r--r-- 1 root root      0 Nov 17 01:05 transfers.jsonl.lock
+2026-11-17T01:05:15.580Z dev-a step probe end rc=0
+2026-11-17T01:05:15.599Z dev-a step calib begin
+
+real	0m0.630s
+user	0m0.048s
+sys	0m0.564s
+46M	/mnt/ws
+2026-11-17T01:14:08.564Z dev-a sample 002 s0-plain-inc-cold rc=0 wall=532.002s
+9.8G	/mnt/ws/target
+542
+/dev/vda        147G   11G  129G   8% /mnt
+2026-11-17T01:14:10.739Z dev-a step calib end rc=0
+2026-11-17T01:14:10.934Z dev-a role exit=0

@@ -1,0 +1,43 @@
+error: process didn't exit successfully: `sccache /home/ubuntu/.rustup/toolchains/1.95.0-x86_64-unknown-linux-gnu/bin/rustc -vV` (exit status: 2)
+--- stderr
+sccache: error: Server startup failed: cache storage failed to read: Unexpected (temporary) at read => send http request
+
+Context:
+   url: http://10.77.0.2:3900/sccache/l1-sccache/.sccache_check
+   called: reqwest::send
+   service: s3
+   path: .sccache_check
+   range: 0-
+
+Source:
+   error sending request for url (http://10.77.0.2:3900/sccache/l1-sccache/.sccache_check): client error (Connect): tcp connect error: Host is unreachable (os error 113)
+
+Backtrace:
+   0: <unknown>
+   1: <unknown>
+   2: <unknown>
+   3: <unknown>
+   4: <unknown>
+   5: <unknown>
+   6: <unknown>
+   7: <unknown>
+   8: <unknown>
+   9: <unknown>
+  10: <unknown>
+  11: <unknown>
+  12: <unknown>
+  13: <unknown>
+  14: <unknown>
+  15: <unknown>
+  16: <unknown>
+  17: <unknown>
+  18: <unknown>
+  19: <unknown>
+  20: <unknown>
+  21: <unknown>
+  22: <unknown>
+  23: <unknown>
+
+
+Run with SCCACHE_LOG=debug SCCACHE_NO_DAEMON=1 to get more information
+

@@ -1,0 +1,208 @@
+[2m2026-11-17T01:04:45.165887Z[0m [33m WARN[0m [2mkache::remote_backend[0m[2m:[0m http://10.77.0.2:3900: plain http to another machine: request signatures and cached objects travel unencrypted, and anyone on the path can replace an object. Use https://, or keep plain http to a loopback address
+[2m2026-11-17T01:04:45.264929Z[0m [32m INFO[0m [2mkache::remote_backend::s3_credentials[0m[2m:[0m loaded S3 credentials from KACHE_S3_ACCESS_KEY and KACHE_S3_SECRET_KEY
+{
+  "schema_version": 1,
+  "command": "doctor",
+  "success": true,
+  "version": "2.1.1",
+  "rustc": "rustc 1.95.0 (59807616e 2026-04-14)",
+  "issues": 4,
+  "checks": [
+    {
+      "label": "Binary",
+      "pass": true,
+      "optional": false,
+      "detail": "/mnt/kache-bin/kache",
+      "fix": null
+    },
+    {
+      "label": "RUSTC_WRAPPER",
+      "pass": true,
+      "optional": false,
+      "detail": "kache via env",
+      "fix": null
+    },
+    {
+      "label": "cargo doc",
+      "pass": true,
+      "optional": false,
+      "detail": "not set",
+      "fix": null
+    },
+    {
+      "label": "Config file",
+      "pass": true,
+      "optional": false,
+      "detail": "/mnt/kache.toml",
+      "fix": null
+    },
+    {
+      "label": "Host config",
+      "pass": true,
+      "optional": false,
+      "detail": "off (KACHE_HOST_CONFIG is empty)",
+      "fix": null
+    },
+    {
+      "label": "Cache dir",
+      "pass": true,
+      "optional": false,
+      "detail": "/mnt/kache-store (will be created on first build)",
+      "fix": null
+    },
+    {
+      "label": "Cache FS",
+      "pass": true,
+      "optional": false,
+      "detail": "ext2/3/4 (local)",
+      "fix": null
+    },
+    {
+      "label": "Store DB",
+      "pass": true,
+      "optional": false,
+      "detail": "/mnt/kache-store/index.db",
+      "fix": null
+    },
+    {
+      "label": "Store access",
+      "pass": true,
+      "optional": false,
+      "detail": "directory create/write/remove works; read/write access to existing index/WAL/SHM files checked (1 present)",
+      "fix": null
+    },
+    {
+      "label": "Index mode",
+      "pass": true,
+      "optional": false,
+      "detail": "configured auto -> conservative (SQLite synchronous=NORMAL) for this process",
+      "fix": null
+    },
+    {
+      "label": "Store file limits",
+      "pass": true,
+      "optional": true,
+      "detail": "soft 1024, hard 4096 in this process; cargo and the daemon may inherit different limits",
+      "fix": null
+    },
+    {
+      "label": "Cache free space",
+      "pass": true,
+      "optional": false,
+      "detail": "138.8 GiB free of 146.6 GiB at /mnt/kache-store; warning floor 10.0 GiB; 9828318 inodes available of 9830400; volume unix:6c2eac81cd526f38",
+      "fix": null
+    },
+    {
+      "label": "Store temp space",
+      "pass": true,
+      "optional": false,
+      "detail": "11.7 GiB free of 11.7 GiB at /tmp; warning floor 1.0 GiB; 3075300 inodes available of 3075301; volume unix:c7d52c51e16a8b58",
+      "fix": null
+    },
+    {
+      "label": "Store build space",
+      "pass": true,
+      "optional": false,
+      "detail": "144.4 GiB free of 846.2 GiB at /; warning floor 1.0 GiB; 53847894 inodes available of 56410112",
+      "fix": null
+    },
+    {
+      "label": "Store quarantine",
+      "pass": true,
+      "optional": false,
+      "detail": "no retained corrupt index files",
+      "fix": null
+    },
+    {
+      "label": "Unit pruning",
+      "pass": true,
+      "optional": false,
+      "detail": "/ is not on a local filesystem, so its build units are never removed",
+      "fix": null
+    },
+    {
+      "label": "Store totals",
+      "pass": true,
+      "optional": false,
+      "detail": "0 unique entries, 0 B stored across 1 configured store",
+      "fix": null
+    },
+    {
+      "label": "Link layout",
+      "pass": false,
+      "optional": false,
+      "detail": "hardlink build-tree → <store>/staging failed (ReadOnlyFilesystem): creating probe file /.kache-link-probe-192-986538713: Read-only file system (os error 30) (build: /, staging: /mnt/kache-store/store/staging)",
+      "fix": "put the cache and build tree on the SAME mount for zero-copy sharing; if this layout is intentional, expect copies (see `kache report` copy reasons)"
+    },
+    {
+      "label": "Remote",
+      "pass": true,
+      "optional": false,
+      "detail": "s3://kache/probe-20261117T010431Z-calib",
+      "fix": null
+    },
+    {
+      "label": "Remote writes",
+      "pass": true,
+      "optional": false,
+      "detail": "read-write",
+      "fix": null
+    },
+    {
+      "label": "Remote access",
+      "pass": true,
+      "optional": false,
+      "detail": "reachable; credentials from KACHE_S3_ACCESS_KEY and KACHE_S3_SECRET_KEY accepted",
+      "fix": null
+    },
+    {
+      "label": "Remote endpoint",
+      "pass": false,
+      "optional": false,
+      "detail": "http://10.77.0.2:3900 uses plain http",
+      "fix": "plain http to another machine: request signatures and cached objects travel unencrypted, and anyone on the path can replace an object. Use https://, or keep plain http to a loopback address"
+    },
+    {
+      "label": "Daemon version",
+      "pass": false,
+      "optional": false,
+      "detail": "daemon not reachable",
+      "fix": "start daemon with `kache daemon start` or `kache daemon install`; if it does not start, the reason is in /mnt/kache-store/daemon.log"
+    },
+    {
+      "label": "Daemon service",
+      "pass": false,
+      "optional": false,
+      "detail": "not installed",
+      "fix": "kache daemon install"
+    },
+    {
+      "label": "Install path",
+      "pass": true,
+      "optional": true,
+      "detail": "/mnt/kache-bin/kache (standalone, user-managed): the first kache on PATH, which keeps working until that file is replaced or removed",
+      "fix": null
+    },
+    {
+      "label": "C/C++ shims",
+      "pass": false,
+      "optional": true,
+      "detail": "not installed",
+      "fix": "kache init --shims && export PATH=\"$HOME/.local/lib/kache/shims:$PATH\""
+    },
+    {
+      "label": "Compiler probe",
+      "pass": true,
+      "optional": false,
+      "detail": "cc -### resolves (cc (Ubuntu 15.2.0-16ubuntu1) 15.2.0)",
+      "fix": null
+    },
+    {
+      "label": "Native linker",
+      "pass": true,
+      "optional": false,
+      "detail": "/home/ubuntu/.rustup/toolchains/1.95.0-x86_64-unknown-linux-gnu/lib/rustlib/x86_64-unknown-linux-gnu/bin/gcc-ld/ld.lld (LLD 22.1.2 (/checkout/src/llvm-project/llvm 1cb4e3833c1919c2e6fb579a23ac0e2b22587b7e) (compatible with GNU linkers))",
+      "fix": null
+    }
+  ]
+}

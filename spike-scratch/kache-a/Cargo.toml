@@ -1,0 +1,20 @@
+# kache spike (shared Rust build cache across concurrent dev VMs).
+# Throwaway probe per .claude/rules/spike.md. Standalone workspace: never a
+# member or dependency of the Overdrive workspace.
+[workspace]
+
+[package]
+name = "kache-spike"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[[bin]]
+name = "spike-init"
+path = "src/bin/spike-init.rs"
+
+[dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+overdrive-testing-macros = { path = "../../crates/overdrive-testing-macros" }

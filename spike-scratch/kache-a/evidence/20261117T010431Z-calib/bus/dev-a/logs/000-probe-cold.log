@@ -1,0 +1,3 @@
+   Compiling probe v0.1.0 (/mnt/probe-crate)
+2026-11-17T01:04:47.871880Z  INFO kache::wrapper: build session detected, sending prefetch hint for 1 crates (shard context: fallback)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.87s

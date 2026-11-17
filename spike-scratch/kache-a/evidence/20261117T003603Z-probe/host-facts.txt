@@ -1,0 +1,11 @@
+run=20261117T003603Z-probe plan=probe
+metal_run_id=b9ecd72fef8127cf11d7b9a3
+uname=7.0.0-38-generic
+nproc=16
+mem_total_gb=62
+fs=ext4 size=847G avail=163G
+source: commit=d1953f3f7797d7e69c5a932b55305e3415888018
+source: workspace=/Users/marcus/conductor/workspaces/helios/antananarivo
+source: source_digest=7913f2df943af5b4497c329b2b4253ebd0ad184a31a43f42fa5f088ad873a39d
+cloud_hypervisor=cloud-hypervisor v53.0.0
+virtiofsd=virtiofsd 1.13.2

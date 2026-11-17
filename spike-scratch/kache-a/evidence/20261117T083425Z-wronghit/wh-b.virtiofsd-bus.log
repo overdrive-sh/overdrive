@@ -1,0 +1,3 @@
+[2026-11-17T08:36:56Z INFO  virtiofsd] Waiting for vhost-user socket connection...
+[2026-11-17T08:36:56Z INFO  virtiofsd] Client connected, servicing requests
+[2026-11-17T08:37:36Z INFO  virtiofsd] Client disconnected, shutting down

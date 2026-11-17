@@ -1,0 +1,24 @@
+2026-11-17T02:38:53.917Z host boot cache ip=10.77.0.2 vcpus=4 mem=8G disk=150G role=cache 
+2026-11-17T02:39:00.306Z host boot pn-a ip=10.77.0.11 vcpus=8 mem=24G disk=150G role=dev SPIKE_STEPS=ladder SMOKE=0 ARM=plain-noinc PFX=l1-plain-noinc ROLE=A LOOP=8 TESTS=1
+2026-11-17T03:02:41.652Z host vm pn-a finished exit=0
+2026-11-17T03:02:42.473Z host boot ka-a ip=10.77.0.11 vcpus=8 mem=24G disk=150G role=dev SPIKE_STEPS=ladder SMOKE=0 ARM=kache PFX=l1-kache ROLE=A LOOP=20
+2026-11-17T03:13:55.206Z host FATAL free disk below 40G; stopping guests
+2026-11-17T03:27:16.606Z host vm ka-a finished exit=0
+2026-11-17T03:27:17.343Z host boot ka-b ip=10.77.0.12 vcpus=8 mem=24G disk=150G role=dev SPIKE_STEPS=ladder SMOKE=0 ARM=kache PFX=l1-kache ROLE=B TESTS=1
+2026-11-17T03:53:43.113Z host vm ka-b finished exit=0
+2026-11-17T03:53:43.420Z host boot ka-d ip=10.77.0.13 vcpus=8 mem=24G disk=150G role=dev SPIKE_STEPS=ladder SMOKE=0 ARM=kache PFX=l1-kache ROLE=D WS=/mnt/alt/checkout-d FRESH=X
+2026-11-17T04:04:54.823Z host vm ka-d finished exit=0
+2026-11-17T04:04:55.558Z host boot pi-a ip=10.77.0.11 vcpus=8 mem=24G disk=150G role=dev SPIKE_STEPS=ladder SMOKE=0 ARM=plain PFX=l1-plain ROLE=A LOOP=20
+2026-11-17T04:25:32.462Z host vm pi-a finished exit=0
+2026-11-17T04:25:34.218Z host boot kp-a ip=10.77.0.11 vcpus=8 mem=24G disk=150G role=dev SPIKE_STEPS=ladder SMOKE=0 ARM=kache-noadapt PFX=l1-kachepub ROLE=A
+2026-11-17T04:41:41.512Z host vm kp-a finished exit=0
+2026-11-17T04:41:42.567Z host boot kp-b ip=10.77.0.12 vcpus=8 mem=24G disk=150G role=dev SPIKE_STEPS=ladder SMOKE=0 ARM=kache PFX=l1-kachepub ROLE=B
+2026-11-17T04:57:05.951Z host vm kp-b finished exit=0
+2026-11-17T04:57:07.691Z host boot kp-c ip=10.77.0.13 vcpus=8 mem=24G disk=150G role=dev SPIKE_STEPS=ladder SMOKE=0 ARM=kache PFX=l1-kachepub ROLE=C FRESH=Xm TESTS=1
+2026-11-17T05:13:00.617Z host vm kp-c finished exit=0
+2026-11-17T05:13:01.924Z host boot sc-a ip=10.77.0.11 vcpus=8 mem=24G disk=150G role=dev SPIKE_STEPS=ladder SMOKE=0 ARM=sccache PFX=l1-sccache ROLE=A LOOP=8
+2026-11-17T05:13:18.761Z host vm sc-a finished exit=0
+2026-11-17T05:13:18.833Z host boot sc-b ip=10.77.0.12 vcpus=8 mem=24G disk=150G role=dev SPIKE_STEPS=ladder SMOKE=0 ARM=sccache PFX=l1-sccache ROLE=B
+2026-11-17T05:13:31.406Z host vm sc-b finished exit=0
+2026-11-17T05:13:33.584Z host evidence at /home/ubuntu/overdrive-worktrees/9d340a8ca57d5ca89b626cece0d62d03770aa9cd213856dc63ec27e31d3a81cc/spike-scratch/kache-a/evidence/20261117T023853Z-ladder-1: 467 files, owner ubuntu, mount / ext4 
+2026-11-17T05:13:33.589Z host exit rc=0

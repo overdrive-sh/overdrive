@@ -1,0 +1,9 @@
+cloud-hypervisor:   0.002513s: <vmm> WARN:vmm/src/device_manager.rs:2764 -- DEPRECATION: auto-detection of disk image type is deprecated and will be removed in a future release. Please specify image type explicitly.
+cloud-hypervisor:   0.002554s: <vmm> WARN:vmm/src/device_manager.rs:2769 -- No image_type specified - detected as raw. Configuration updated to persist type across reboots and migrations.
+cloud-hypervisor:   0.002579s: <vmm> WARN:vmm/src/device_manager.rs:2777 -- Autodetected raw image type. Disabling sector 0 writes.
+cloud-hypervisor:   1.418411s: <_disk0_q0> WARN:virtio-devices/src/block.rs:226 -- Attempting to write to sector 0 on a disk without specifying image_type
+cloud-hypervisor:   1.418473s: <_disk0_q0> WARN:virtio-devices/src/block.rs:308 -- Request check failed: Request { request_type: Out, sector: 0, data_descriptors: [(GuestAddress(102167000), 1000)], status_addr: GuestAddress(1020a8b60), writeback: true, start: Instant { tv_sec: 295c8a, tv_nsec: 1a6f323e } } ReadOnly
+cloud-hypervisor:  73.860069s: <vmm> WARN:vmm/src/device_manager.rs:5970 -- Skipping resume for disconnected device /tmp/ks.KZpcJm/cache-bus.sock
+cloud-hypervisor:  73.861877s: <vmm> WARN:vmm/src/device_manager.rs:5970 -- Skipping resume for disconnected device /tmp/ks.KZpcJm/cache-root.sock
+cloud-hypervisor:  73.863045s: <vmm> WARN:vmm/src/device_manager.rs:5970 -- Skipping resume for disconnected device /tmp/ks.KZpcJm/cache-bus.sock
+cloud-hypervisor:  73.863098s: <vmm> WARN:vmm/src/device_manager.rs:5970 -- Skipping resume for disconnected device /tmp/ks.KZpcJm/cache-root.sock

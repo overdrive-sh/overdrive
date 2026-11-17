@@ -1,0 +1,4 @@
+arm=sccache role=B pfx=l0-sccache ws=/mnt/ws loop=0
+7.0.0-38-generic
+8
+Mem:              23           0          22           0           0          23

@@ -1,0 +1,25 @@
+uname=7.0.0-38-generic nproc=8
+Mem:              15           0          15           0           0          15
+/dev/vda        118G  284M  112G   1% /mnt
+rustc 1.95.0 (59807616e 2026-04-14)
+binary: rustc
+commit-hash: 59807616e1fa2540724bfbac14d7976d7e4a3860
+commit-date: 2026-04-14
+host: x86_64-unknown-linux-gnu
+release: 1.95.0
+LLVM version: 22.1.2
+cargo 1.95.0 (f2d3ce0bd 2026-03-21)
+/usr/bin/mold
+/mnt/kache-bin/sccache
+/mnt/kache-bin/kache
+/mnt/kache-bin/kache-engine
+kache 2.1.1
+140M	/home/ubuntu/.cargo/registry/cache
+36M	/home/ubuntu/.cargo/registry/index
+3.0G	/home/ubuntu/overdrive-worktrees/9d340a8ca57d5ca89b626cece0d62d03770aa9cd213856dc63ec27e31d3a81cc
+overdrive_bpf.o
+overdrive_guest_bpf.o
+overdrive_guest_tcp_correlation_candidate_bpf.o
+vmlinux.h
+touch: cannot touch '/home/ubuntu/rw-test': Read-only file system
+host root read-only: ok

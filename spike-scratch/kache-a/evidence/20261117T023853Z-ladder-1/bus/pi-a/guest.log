@@ -1,0 +1,31 @@
+2026-11-17T04:04:58.216Z pi-a up nic=eth0 ip=10.77.0.11 role=dev kernel=7.0.0-38-generic nproc=8
+2026-11-17T04:04:58.582Z pi-a seeding cargo home from host registry
+2026-11-17T04:05:01.311Z pi-a step ladder begin
+2026-11-17T04:14:07.942Z pi-a sample 000 s1-X rc=0 wall=544.336s
+2026-11-17T04:14:29.992Z pi-a sample 001 s2-leaf-cli rc=0 wall=9.147s
+2026-11-17T04:15:41.110Z pi-a sample 002 s2b-gateway rc=0 wall=59.198s
+2026-11-17T04:16:54.134Z pi-a sample 003 s3-core rc=0 wall=61.816s
+2026-11-17T04:17:05.894Z pi-a S4: edit loop x20
+2026-11-17T04:21:27.956Z pi-a sample 004 edit-setup rc=0 wall=261.795s
+2026-11-17T04:21:42.222Z pi-a sample 005 edit-1 rc=0 wall=13.961s
+2026-11-17T04:21:57.122Z pi-a sample 006 edit-2 rc=0 wall=14.681s
+2026-11-17T04:22:10.556Z pi-a sample 007 edit-3 rc=0 wall=13.195s
+2026-11-17T04:22:24.470Z pi-a sample 008 edit-4 rc=0 wall=13.677s
+2026-11-17T04:22:35.760Z pi-a sample 009 edit-5 rc=0 wall=11.080s
+2026-11-17T04:22:46.509Z pi-a sample 010 edit-6 rc=0 wall=10.570s
+2026-11-17T04:22:57.555Z pi-a sample 011 edit-7 rc=0 wall=10.870s
+2026-11-17T04:23:08.272Z pi-a sample 012 edit-8 rc=0 wall=10.558s
+2026-11-17T04:23:19.891Z pi-a sample 013 edit-9 rc=0 wall=11.342s
+2026-11-17T04:23:32.479Z pi-a sample 014 edit-10 rc=0 wall=12.311s
+2026-11-17T04:23:44.186Z pi-a sample 015 edit-11 rc=0 wall=11.513s
+2026-11-17T04:23:55.482Z pi-a sample 016 edit-12 rc=0 wall=11.104s
+2026-11-17T04:24:07.506Z pi-a sample 017 edit-13 rc=0 wall=11.828s
+2026-11-17T04:24:19.775Z pi-a sample 018 edit-14 rc=0 wall=12.072s
+2026-11-17T04:24:31.250Z pi-a sample 019 edit-15 rc=0 wall=11.297s
+2026-11-17T04:24:43.466Z pi-a sample 020 edit-16 rc=0 wall=12.023s
+2026-11-17T04:24:54.860Z pi-a sample 021 edit-17 rc=0 wall=11.184s
+2026-11-17T04:25:04.148Z pi-a sample 022 edit-18 rc=0 wall=9.123s
+2026-11-17T04:25:13.519Z pi-a sample 023 edit-19 rc=0 wall=9.200s
+2026-11-17T04:25:22.962Z pi-a sample 024 edit-20 rc=0 wall=9.233s
+2026-11-17T04:25:23.609Z pi-a step ladder end rc=0
+2026-11-17T04:25:23.966Z pi-a role exit=0

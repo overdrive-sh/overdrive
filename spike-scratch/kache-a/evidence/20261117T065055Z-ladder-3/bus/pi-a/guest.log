@@ -1,0 +1,31 @@
+2026-11-17T07:40:15.640Z pi-a up nic=eth0 ip=10.77.0.11 role=dev kernel=7.0.0-38-generic nproc=8
+2026-11-17T07:40:15.348Z pi-a seeding cargo home from host registry
+2026-11-17T07:40:16.989Z pi-a step ladder begin
+2026-11-17T07:45:26.594Z pi-a sample 000 s1-X rc=0 wall=308.567s
+2026-11-17T07:45:39.888Z pi-a sample 001 s2-leaf-cli rc=0 wall=2.987s
+2026-11-17T07:46:18.334Z pi-a sample 002 s2b-gateway rc=0 wall=28.537s
+2026-11-17T07:47:00.858Z pi-a sample 003 s3-core rc=0 wall=32.970s
+2026-11-17T07:47:10.628Z pi-a S4: edit loop x20
+2026-11-17T07:50:04.574Z pi-a sample 004 edit-setup rc=0 wall=173.760s
+2026-11-17T07:50:13.557Z pi-a sample 005 edit-1 rc=0 wall=8.779s
+2026-11-17T07:50:22.432Z pi-a sample 006 edit-2 rc=0 wall=8.692s
+2026-11-17T07:50:31.983Z pi-a sample 007 edit-3 rc=0 wall=8.480s
+2026-11-17T07:50:40.565Z pi-a sample 008 edit-4 rc=0 wall=8.754s
+2026-11-17T07:50:48.822Z pi-a sample 009 edit-5 rc=0 wall=8.576s
+2026-11-17T07:50:57.989Z pi-a sample 010 edit-6 rc=0 wall=8.961s
+2026-11-17T07:51:06.858Z pi-a sample 011 edit-7 rc=0 wall=8.659s
+2026-11-17T07:51:15.756Z pi-a sample 012 edit-8 rc=0 wall=8.683s
+2026-11-17T07:51:24.601Z pi-a sample 013 edit-9 rc=0 wall=8.625s
+2026-11-17T07:51:33.504Z pi-a sample 014 edit-10 rc=0 wall=8.674s
+2026-11-17T07:51:42.264Z pi-a sample 015 edit-11 rc=0 wall=8.523s
+2026-11-17T07:51:50.963Z pi-a sample 016 edit-12 rc=0 wall=8.471s
+2026-11-17T07:51:59.677Z pi-a sample 017 edit-13 rc=0 wall=8.514s
+2026-11-17T07:52:08.516Z pi-a sample 018 edit-14 rc=0 wall=8.635s
+2026-11-17T07:52:17.244Z pi-a sample 019 edit-15 rc=0 wall=8.503s
+2026-11-17T07:52:25.894Z pi-a sample 020 edit-16 rc=0 wall=8.447s
+2026-11-17T07:52:34.829Z pi-a sample 021 edit-17 rc=0 wall=8.704s
+2026-11-17T07:52:43.562Z pi-a sample 022 edit-18 rc=0 wall=8.530s
+2026-11-17T07:52:52.418Z pi-a sample 023 edit-19 rc=0 wall=8.625s
+2026-11-17T07:53:01.208Z pi-a sample 024 edit-20 rc=0 wall=8.569s
+2026-11-17T07:53:01.270Z pi-a step ladder end rc=0
+2026-11-17T07:53:01.291Z pi-a role exit=0

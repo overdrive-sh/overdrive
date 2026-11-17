@@ -1,0 +1,9 @@
+2026-11-17T05:13:20.926Z sc-b up nic=eth0 ip=10.77.0.12 role=dev kernel=7.0.0-38-generic nproc=8
+2026-11-17T05:13:21.192Z sc-b seeding cargo home from host registry
+2026-11-17T05:13:22.805Z sc-b step ladder begin
+2026-11-17T05:13:27.216Z sc-b sample 000 s1-X rc=101 wall=3.330s
+2026-11-17T05:13:27.997Z sc-b sample 001 s2-leaf-cli rc=101 wall=0.226s
+2026-11-17T05:13:28.696Z sc-b sample 002 s2b-gateway rc=101 wall=0.166s
+2026-11-17T05:13:29.394Z sc-b sample 003 s3-core rc=101 wall=0.141s
+2026-11-17T05:13:29.937Z sc-b step ladder end rc=0
+2026-11-17T05:13:29.962Z sc-b role exit=0

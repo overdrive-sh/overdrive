@@ -1,0 +1,7 @@
+2026-11-17T06:44:35.181Z ka-d up nic=eth0 ip=10.77.0.13 role=dev kernel=7.0.0-38-generic nproc=8
+2026-11-17T06:44:35.564Z ka-d seeding cargo home from host registry
+2026-11-17T06:44:37.739Z ka-d step ladder begin
+2026-11-17T06:48:36.668Z ka-d sample 000 fresh-X rc=0 wall=236.780s
+2026-11-17T06:48:48.676Z ka-d kache daemon drained (try 1)
+2026-11-17T06:48:48.882Z ka-d step ladder end rc=0
+2026-11-17T06:48:48.902Z ka-d role exit=0

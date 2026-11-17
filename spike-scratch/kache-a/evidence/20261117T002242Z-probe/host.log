@@ -1,0 +1,4 @@
+2026-11-17T00:22:42.565Z host building kache 2.1.1 offline from vendored sources
+2026-11-17T00:30:12.318Z host boot cache ip=10.77.0.2 vcpus=2 mem=4G disk=60G role=cache 
+2026-11-17T00:35:13.181Z host timeout waiting for /home/ubuntu/overdrive-worktrees/9d340a8ca57d5ca89b626cece0d62d03770aa9cd213856dc63ec27e31d3a81cc/spike-scratch/kache-a/target/vmstate/bus/20261117T002242Z-probe/cache/ready
+2026-11-17T00:35:15.246Z host exit rc=1

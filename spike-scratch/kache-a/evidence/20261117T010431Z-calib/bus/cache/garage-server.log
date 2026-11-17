@@ -1,0 +1,275 @@
+[2m2026-11-17T01:04:34.075060Z[0m [32m INFO[0m [2mgarage::server[0m[2m:[0m Loading configuration from /mnt/garage/garage.toml...
+[2m2026-11-17T01:04:34.082903Z[0m [32m INFO[0m [2mgarage::server[0m[2m:[0m Initializing Garage main data store...
+[2m2026-11-17T01:04:34.086592Z[0m [32m INFO[0m [2mgarage_model::garage[0m[2m:[0m Opening database...
+[2m2026-11-17T01:04:34.088985Z[0m [32m INFO[0m [2mgarage_db::lmdb_adapter[0m[2m:[0m Opening LMDB database at: /mnt/garage/meta/db.lmdb
+[2m2026-11-17T01:04:34.104548Z[0m [32m INFO[0m [2mgarage_model::garage[0m[2m:[0m Initializing RPC...
+[2m2026-11-17T01:04:34.108001Z[0m [32m INFO[0m [2mgarage_model::garage[0m[2m:[0m Initialize background variable system...
+[2m2026-11-17T01:04:34.108967Z[0m [32m INFO[0m [2mgarage_model::garage[0m[2m:[0m Initialize membership management system...
+[2m2026-11-17T01:04:34.110441Z[0m [32m INFO[0m [2mgarage_rpc::system[0m[2m:[0m Generating new node key pair.
+[2m2026-11-17T01:04:34.111660Z[0m [32m INFO[0m [2mgarage_rpc::system[0m[2m:[0m Node ID of this node: 21a71f2a51c6ab48
+[2m2026-11-17T01:04:34.113792Z[0m [32m INFO[0m [2mgarage_rpc::layout::manager[0m[2m:[0m No valid previous cluster layout stored (IO error: No such file or directory (os error 2)), starting fresh.
+[2m2026-11-17T01:04:34.116732Z[0m [32m INFO[0m [2mgarage_rpc::layout::helper[0m[2m:[0m ack_until updated to 0
+[2m2026-11-17T01:04:34.123268Z[0m [32m INFO[0m [2mgarage_model::garage[0m[2m:[0m Initialize block manager...
+[2m2026-11-17T01:04:34.131374Z[0m [32m INFO[0m [2mgarage_model::garage[0m[2m:[0m Initialize admin_token_table...
+[2m2026-11-17T01:04:34.138431Z[0m [32m INFO[0m [2mgarage_model::garage[0m[2m:[0m Initialize bucket_table...
+[2m2026-11-17T01:04:34.139202Z[0m [32m INFO[0m [2mgarage_model::garage[0m[2m:[0m Initialize bucket_alias_table...
+[2m2026-11-17T01:04:34.140849Z[0m [32m INFO[0m [2mgarage_model::garage[0m[2m:[0m Initialize key_table_table...
+[2m2026-11-17T01:04:34.141817Z[0m [32m INFO[0m [2mgarage_model::garage[0m[2m:[0m Initialize block_ref_table...
+[2m2026-11-17T01:04:34.143512Z[0m [32m INFO[0m [2mgarage_model::garage[0m[2m:[0m Initialize version_table...
+[2m2026-11-17T01:04:34.144825Z[0m [32m INFO[0m [2mgarage_model::garage[0m[2m:[0m Initialize multipart upload counter table...
+[2m2026-11-17T01:04:34.146179Z[0m [32m INFO[0m [2mgarage_model::garage[0m[2m:[0m Initialize multipart upload table...
+[2m2026-11-17T01:04:34.147482Z[0m [32m INFO[0m [2mgarage_model::garage[0m[2m:[0m Initialize object counter table...
+[2m2026-11-17T01:04:34.148983Z[0m [32m INFO[0m [2mgarage_model::garage[0m[2m:[0m Initialize object_table...
+[2m2026-11-17T01:04:34.149706Z[0m [32m INFO[0m [2mgarage_model::garage[0m[2m:[0m Load lifecycle worker state...
+[2m2026-11-17T01:04:34.149811Z[0m [32m INFO[0m [2mgarage_model::garage[0m[2m:[0m Initialize K2V counter table...
+[2m2026-11-17T01:04:34.150438Z[0m [32m INFO[0m [2mgarage_model::garage[0m[2m:[0m Initialize K2V subscription manager...
+[2m2026-11-17T01:04:34.150514Z[0m [32m INFO[0m [2mgarage_model::garage[0m[2m:[0m Initialize K2V item table...
+[2m2026-11-17T01:04:34.151094Z[0m [32m INFO[0m [2mgarage_model::garage[0m[2m:[0m Initialize K2V RPC handler...
+[2m2026-11-17T01:04:34.151681Z[0m [32m INFO[0m [2mgarage::server[0m[2m:[0m Initializing background runner...
+[2m2026-11-17T01:04:34.152603Z[0m [32m INFO[0m [2mgarage::server[0m[2m:[0m Spawning Garage workers...
+[2m2026-11-17T01:04:34.153653Z[0m [32m INFO[0m [2mgarage_model::s3::lifecycle_worker[0m[2m:[0m Starting lifecycle worker for 2026-11-17
+[2m2026-11-17T01:04:34.153943Z[0m [32m INFO[0m [2mgarage::server[0m[2m:[0m Initialize Admin API server and metrics collector...
+[2m2026-11-17T01:04:34.156457Z[0m [32m INFO[0m [2mgarage::server[0m[2m:[0m Launching internal Garage cluster communications...
+[2m2026-11-17T01:04:34.157392Z[0m [32m INFO[0m [2mgarage_model::s3::lifecycle_worker[0m[2m:[0m Lifecycle worker finished for 2026-11-17, objects expired: 0, mpu aborted: 0
+[2m2026-11-17T01:04:34.158805Z[0m [32m INFO[0m [2mgarage::server[0m[2m:[0m Initializing S3 API server...
+[2m2026-11-17T01:04:34.159354Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Listening on [::]:3901
+[2m2026-11-17T01:04:34.159764Z[0m [32m INFO[0m [2mgarage::server[0m[2m:[0m Launching Admin API server...
+[2m2026-11-17T01:04:34.160536Z[0m [32m INFO[0m [2mgarage_api_common::generic_server[0m[2m:[0m S3 API server listening on http://[::]:3900
+[2m2026-11-17T01:04:34.163096Z[0m [32m INFO[0m [2mgarage_api_common::generic_server[0m[2m:[0m Admin API server listening on http://127.0.0.1:3903
+[2m2026-11-17T01:04:35.198127Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Accepted connection from 478a89826fbe5468 at [::ffff:10.77.0.2]:51580
+[2m2026-11-17T01:04:35.243086Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: GetClusterStatus
+[2m2026-11-17T01:04:35.251404Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: GetClusterLayout
+[2m2026-11-17T01:04:35.254818Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Connection from 478a89826fbe5468 closed
+[2m2026-11-17T01:04:35.296646Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Accepted connection from 48b9d3003b725988 at [::ffff:10.77.0.2]:51584
+[2m2026-11-17T01:04:35.344626Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: GetClusterStatus
+[2m2026-11-17T01:04:35.363766Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: GetClusterLayout
+[2m2026-11-17T01:04:35.371783Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Connection from 48b9d3003b725988 closed
+[2m2026-11-17T01:04:35.431617Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Accepted connection from fb4e1ec4fcded80a at [::ffff:10.77.0.2]:51600
+[2m2026-11-17T01:04:35.497755Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: GetClusterStatus
+[2m2026-11-17T01:04:35.521035Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: GetClusterLayout
+[2m2026-11-17T01:04:35.523650Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: UpdateClusterLayout
+[2m2026-11-17T01:04:35.532890Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Connection from fb4e1ec4fcded80a closed
+[2m2026-11-17T01:04:35.563611Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Accepted connection from 8f531c1f5cbb74e9 at [::ffff:10.77.0.2]:56634
+[2m2026-11-17T01:04:35.632797Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: ApplyClusterLayout
+[2m2026-11-17T01:04:35.723999Z[0m [32m INFO[0m [2mgarage_rpc::layout::history[0m[2m:[0m Layout history: pruning old invalid version 0
+[2m2026-11-17T01:04:35.753765Z[0m [32m INFO[0m [2mgarage_table::sync[0m[2m:[0m (admin_token) Layout versions changed (SyncLayoutDigest { current: 1, ack_map_min: 1, min_stored: 1 }), adding full sync to syncer todo list
+[2m2026-11-17T01:04:35.756171Z[0m [32m INFO[0m [2mgarage_table::sync[0m[2m:[0m (bucket_v2) Layout versions changed (SyncLayoutDigest { current: 1, ack_map_min: 1, min_stored: 1 }), adding full sync to syncer todo list
+[2m2026-11-17T01:04:35.756312Z[0m [32m INFO[0m [2mgarage_table::sync[0m[2m:[0m (bucket_alias) Layout versions changed (SyncLayoutDigest { current: 1, ack_map_min: 1, min_stored: 1 }), adding full sync to syncer todo list
+[2m2026-11-17T01:04:35.756511Z[0m [32m INFO[0m [2mgarage_table::sync[0m[2m:[0m (key) Layout versions changed (SyncLayoutDigest { current: 1, ack_map_min: 1, min_stored: 1 }), adding full sync to syncer todo list
+[2m2026-11-17T01:04:35.756810Z[0m [32m INFO[0m [2mgarage_table::sync[0m[2m:[0m (object) Layout versions changed (SyncLayoutDigest { current: 1, ack_map_min: 1, min_stored: 1 }), adding full sync to syncer todo list
+[2m2026-11-17T01:04:35.762374Z[0m [32m INFO[0m [2mgarage_table::sync[0m[2m:[0m (bucket_object_counter) Layout versions changed (SyncLayoutDigest { current: 1, ack_map_min: 1, min_stored: 1 }), adding full sync to syncer todo list
+[2m2026-11-17T01:04:35.762727Z[0m [32m INFO[0m [2mgarage_table::sync[0m[2m:[0m (multipart_upload) Layout versions changed (SyncLayoutDigest { current: 1, ack_map_min: 1, min_stored: 1 }), adding full sync to syncer todo list
+[2m2026-11-17T01:04:35.762988Z[0m [32m INFO[0m [2mgarage_table::sync[0m[2m:[0m (bucket_mpu_counter) Layout versions changed (SyncLayoutDigest { current: 1, ack_map_min: 1, min_stored: 1 }), adding full sync to syncer todo list
+[2m2026-11-17T01:04:35.763139Z[0m [32m INFO[0m [2mgarage_table::sync[0m[2m:[0m (version) Layout versions changed (SyncLayoutDigest { current: 1, ack_map_min: 1, min_stored: 1 }), adding full sync to syncer todo list
+[2m2026-11-17T01:04:35.763315Z[0m [32m INFO[0m [2mgarage_table::sync[0m[2m:[0m (block_ref) Layout versions changed (SyncLayoutDigest { current: 1, ack_map_min: 1, min_stored: 1 }), adding full sync to syncer todo list
+[2m2026-11-17T01:04:35.763469Z[0m [32m INFO[0m [2mgarage_table::sync[0m[2m:[0m (k2v_item) Layout versions changed (SyncLayoutDigest { current: 1, ack_map_min: 1, min_stored: 1 }), adding full sync to syncer todo list
+[2m2026-11-17T01:04:35.818159Z[0m [32m INFO[0m [2mgarage_table::sync[0m[2m:[0m (k2v_index_counter_v2) Layout versions changed (SyncLayoutDigest { current: 1, ack_map_min: 1, min_stored: 1 }), adding full sync to syncer todo list
+[2m2026-11-17T01:04:35.820540Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Connection from 8f531c1f5cbb74e9 closed
+[2m2026-11-17T01:04:35.822475Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Accepted connection from d5a295722a364048 at [::ffff:10.77.0.2]:56650
+[2m2026-11-17T01:04:35.865571Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: CreateBucket
+[2m2026-11-17T01:04:35.886986Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Connection from d5a295722a364048 closed
+[2m2026-11-17T01:04:35.909772Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Accepted connection from 5c551dc0a4f97a2b at [::ffff:10.77.0.2]:56656
+[2m2026-11-17T01:04:35.971730Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: CreateBucket
+[2m2026-11-17T01:04:36.034508Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Connection from 5c551dc0a4f97a2b closed
+[2m2026-11-17T01:04:36.072182Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Accepted connection from d0059bf9a0c48097 at [::ffff:10.77.0.2]:56658
+[2m2026-11-17T01:04:36.115909Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: CreateKey
+[2m2026-11-17T01:04:36.127173Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Connection from d0059bf9a0c48097 closed
+[2m2026-11-17T01:04:36.223165Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Accepted connection from c07b648df65d85a1 at [::ffff:10.77.0.2]:56666
+[2m2026-11-17T01:04:36.270040Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: GetBucketInfo
+[2m2026-11-17T01:04:36.280425Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: GetKeyInfo
+[2m2026-11-17T01:04:36.282937Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: AllowBucketKey
+[2m2026-11-17T01:04:36.309593Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Connection from c07b648df65d85a1 closed
+[2m2026-11-17T01:04:36.348004Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Accepted connection from d3ce587659ca815f at [::ffff:10.77.0.2]:56674
+[2m2026-11-17T01:04:36.394353Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: GetBucketInfo
+[2m2026-11-17T01:04:36.404057Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: GetKeyInfo
+[2m2026-11-17T01:04:36.406732Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: AllowBucketKey
+[2m2026-11-17T01:04:36.419131Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Connection from d3ce587659ca815f closed
+[2m2026-11-17T01:04:45.304121Z[0m [32m INFO[0m [2mgarage_api_common::generic_server[0m[2m:[0m [::ffff:10.77.0.11]:41020 (key GKfa734ce0f47b6c007378048a) GET /kache/probe-20261117T010431Z-calib/kache-doctor-probe
+[2m2026-11-17T01:04:45.308376Z[0m [32m INFO[0m [2mgarage_api_common::generic_server[0m[2m:[0m error 404 Not Found, Key not found in response to [::ffff:10.77.0.11]:41020 (key GKfa734ce0f47b6c007378048a) GET /kache/probe-20261117T010431Z-calib/kache-doctor-probe
+[2m2026-11-17T01:04:46.111110Z[0m [32m INFO[0m [2mgarage_api_common::generic_server[0m[2m:[0m [::ffff:10.77.0.11]:41034 (key GKfa734ce0f47b6c007378048a) GET /kache/probe-20261117T010431Z-calib/kache-doctor-probe
+[2m2026-11-17T01:04:46.111578Z[0m [32m INFO[0m [2mgarage_api_common::generic_server[0m[2m:[0m error 404 Not Found, Key not found in response to [::ffff:10.77.0.11]:41034 (key GKfa734ce0f47b6c007378048a) GET /kache/probe-20261117T010431Z-calib/kache-doctor-probe
+[2m2026-11-17T01:04:47.171030Z[0m [32m INFO[0m [2mgarage_api_common::generic_server[0m[2m:[0m [::ffff:10.77.0.11]:41044 (key GKfa734ce0f47b6c007378048a) GET /kache/probe-20261117T010431Z-calib/_manifests/x86_64-unknown-linux-gnu.json
+[2m2026-11-17T01:04:47.171685Z[0m [32m INFO[0m [2mgarage_api_common::generic_server[0m[2m:[0m error 404 Not Found, Key not found in response to [::ffff:10.77.0.11]:41044 (key GKfa734ce0f47b6c007378048a) GET /kache/probe-20261117T010431Z-calib/_manifests/x86_64-unknown-linux-gnu.json
+[2m2026-11-17T01:04:47.446263Z[0m [32m INFO[0m [2mgarage_api_common::generic_server[0m[2m:[0m [::ffff:10.77.0.11]:41044 (key GKfa734ce0f47b6c007378048a) GET /kache/probe-20261117T010431Z-calib/v3/predictions/4d2fd409fde9c1ac07c1e5b9f6df7dd625b1ae9d463a4f21f3f76693f770f710.json
+[2m2026-11-17T01:04:47.446817Z[0m [32m INFO[0m [2mgarage_api_common::generic_server[0m[2m:[0m error 404 Not Found, Key not found in response to [::ffff:10.77.0.11]:41044 (key GKfa734ce0f47b6c007378048a) GET /kache/probe-20261117T010431Z-calib/v3/predictions/4d2fd409fde9c1ac07c1e5b9f6df7dd625b1ae9d463a4f21f3f76693f770f710.json
+[2m2026-11-17T01:04:47.906745Z[0m [32m INFO[0m [2mgarage_api_common::generic_server[0m[2m:[0m [::ffff:10.77.0.11]:41044 (key GKfa734ce0f47b6c007378048a) GET /kache/probe-20261117T010431Z-calib/v3/packs/probe/ce7bd20a9a656ad501522d5e740d0bb2e6eed022819717fcd156f724ece6df0f.tar.zst
+[2m2026-11-17T01:04:47.907161Z[0m [32m INFO[0m [2mgarage_api_common::generic_server[0m[2m:[0m error 404 Not Found, Key not found in response to [::ffff:10.77.0.11]:41044 (key GKfa734ce0f47b6c007378048a) GET /kache/probe-20261117T010431Z-calib/v3/packs/probe/ce7bd20a9a656ad501522d5e740d0bb2e6eed022819717fcd156f724ece6df0f.tar.zst
+[2m2026-11-17T01:04:47.915255Z[0m [32m INFO[0m [2mgarage_api_common::generic_server[0m[2m:[0m [::ffff:10.77.0.11]:41044 (key GKfa734ce0f47b6c007378048a) GET /kache/probe-20261117T010431Z-calib/_manifests/id/d225e35c08553882/x86_64-unknown-linux-gnu/debug.json
+[2m2026-11-17T01:04:47.915682Z[0m [32m INFO[0m [2mgarage_api_common::generic_server[0m[2m:[0m error 404 Not Found, Key not found in response to [::ffff:10.77.0.11]:41044 (key GKfa734ce0f47b6c007378048a) GET /kache/probe-20261117T010431Z-calib/_manifests/id/d225e35c08553882/x86_64-unknown-linux-gnu/debug.json
+[2m2026-11-17T01:04:47.916738Z[0m [32m INFO[0m [2mgarage_api_common::generic_server[0m[2m:[0m [::ffff:10.77.0.11]:41044 (key GKfa734ce0f47b6c007378048a) GET /kache/probe-20261117T010431Z-calib/_manifests/x86_64-unknown-linux-gnu.json
+[2m2026-11-17T01:04:47.917065Z[0m [32m INFO[0m [2mgarage_api_common::generic_server[0m[2m:[0m error 404 Not Found, Key not found in response to [::ffff:10.77.0.11]:41044 (key GKfa734ce0f47b6c007378048a) GET /kache/probe-20261117T010431Z-calib/_manifests/x86_64-unknown-linux-gnu.json
+[2m2026-11-17T01:04:48.485791Z[0m [32m INFO[0m [2mgarage_api_common::generic_server[0m[2m:[0m [::ffff:10.77.0.11]:41044 (key GKfa734ce0f47b6c007378048a) HEAD /kache/probe-20261117T010431Z-calib/v3/manifests/probe/ce7bd20a9a656ad501522d5e740d0bb2e6eed022819717fcd156f724ece6df0f.json
+[2m2026-11-17T01:04:48.486414Z[0m [32m INFO[0m [2mgarage_api_common::generic_server[0m[2m:[0m error 404 Not Found, Key not found in response to [::ffff:10.77.0.11]:41044 (key GKfa734ce0f47b6c007378048a) HEAD /kache/probe-20261117T010431Z-calib/v3/manifests/probe/ce7bd20a9a656ad501522d5e740d0bb2e6eed022819717fcd156f724ece6df0f.json
+[2m2026-11-17T01:04:48.488492Z[0m [32m INFO[0m [2mgarage_api_common::generic_server[0m[2m:[0m [::ffff:10.77.0.11]:41052 (key GKfa734ce0f47b6c007378048a) PUT /kache/probe-20261117T010431Z-calib/v3/predictions/4d2fd409fde9c1ac07c1e5b9f6df7dd625b1ae9d463a4f21f3f76693f770f710.json
+[2m2026-11-17T01:04:48.538036Z[0m [32m INFO[0m [2mgarage_api_common::generic_server[0m[2m:[0m [::ffff:10.77.0.11]:41052 (key GKfa734ce0f47b6c007378048a) PUT /kache/probe-20261117T010431Z-calib/v3/packs/probe/ce7bd20a9a656ad501522d5e740d0bb2e6eed022819717fcd156f724ece6df0f.tar.zst
+[2m2026-11-17T01:04:48.585497Z[0m [32m INFO[0m [2mgarage_api_common::generic_server[0m[2m:[0m [::ffff:10.77.0.11]:41052 (key GKfa734ce0f47b6c007378048a) PUT /kache/probe-20261117T010431Z-calib/v3/manifests/probe/ce7bd20a9a656ad501522d5e740d0bb2e6eed022819717fcd156f724ece6df0f.json
+[2m2026-11-17T01:04:56.858732Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Accepted connection from 50b0f45b2daaa797 at [::ffff:10.77.0.2]:38992
+[2m2026-11-17T01:04:56.901893Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: GetBucketInfo
+[2m2026-11-17T01:04:56.911335Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Connection from 50b0f45b2daaa797 closed
+[2m2026-11-17T01:04:56.932781Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Accepted connection from 9af85f7017721c60 at [::ffff:10.77.0.2]:38996
+[2m2026-11-17T01:04:56.975933Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: GetBucketInfo
+[2m2026-11-17T01:04:56.984856Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Connection from 9af85f7017721c60 closed
+[2m2026-11-17T01:05:14.789275Z[0m [32m INFO[0m [2mgarage_api_common::generic_server[0m[2m:[0m [::ffff:10.77.0.11]:35156 (key GKfa734ce0f47b6c007378048a) GET /kache/probe-20261117T010431Z-calib/_manifests/x86_64-unknown-linux-gnu.json
+[2m2026-11-17T01:05:14.809976Z[0m [32m INFO[0m [2mgarage_api_common::generic_server[0m[2m:[0m error 404 Not Found, Key not found in response to [::ffff:10.77.0.11]:35156 (key GKfa734ce0f47b6c007378048a) GET /kache/probe-20261117T010431Z-calib/_manifests/x86_64-unknown-linux-gnu.json
+[2m2026-11-17T01:05:15.037837Z[0m [32m INFO[0m [2mgarage_api_common::generic_server[0m[2m:[0m [::ffff:10.77.0.11]:35156 (key GKfa734ce0f47b6c007378048a) GET /kache/probe-20261117T010431Z-calib/v3/predictions/4d2fd409fde9c1ac07c1e5b9f6df7dd625b1ae9d463a4f21f3f76693f770f710.json
+[2m2026-11-17T01:05:15.089697Z[0m [32m INFO[0m [2mgarage_api_common::generic_server[0m[2m:[0m [::ffff:10.77.0.11]:35156 (key GKfa734ce0f47b6c007378048a) GET /kache/probe-20261117T010431Z-calib/v3/packs/probe/ce7bd20a9a656ad501522d5e740d0bb2e6eed022819717fcd156f724ece6df0f.tar.zst
+[2m2026-11-17T01:05:15.113505Z[0m [32m INFO[0m [2mgarage_api_common::generic_server[0m[2m:[0m [::ffff:10.77.0.11]:35156 (key GKfa734ce0f47b6c007378048a) GET /kache/probe-20261117T010431Z-calib/_manifests/id/d225e35c08553882/x86_64-unknown-linux-gnu/debug.json
+[2m2026-11-17T01:05:15.113995Z[0m [32m INFO[0m [2mgarage_api_common::generic_server[0m[2m:[0m error 404 Not Found, Key not found in response to [::ffff:10.77.0.11]:35156 (key GKfa734ce0f47b6c007378048a) GET /kache/probe-20261117T010431Z-calib/_manifests/id/d225e35c08553882/x86_64-unknown-linux-gnu/debug.json
+[2m2026-11-17T01:05:15.115102Z[0m [32m INFO[0m [2mgarage_api_common::generic_server[0m[2m:[0m [::ffff:10.77.0.11]:35156 (key GKfa734ce0f47b6c007378048a) GET /kache/probe-20261117T010431Z-calib/_manifests/x86_64-unknown-linux-gnu.json
+[2m2026-11-17T01:05:15.115515Z[0m [32m INFO[0m [2mgarage_api_common::generic_server[0m[2m:[0m error 404 Not Found, Key not found in response to [::ffff:10.77.0.11]:35156 (key GKfa734ce0f47b6c007378048a) GET /kache/probe-20261117T010431Z-calib/_manifests/x86_64-unknown-linux-gnu.json
+[2m2026-11-17T01:05:17.499455Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Accepted connection from fbb5c2e1d661ac7e at [::ffff:10.77.0.2]:50778
+[2m2026-11-17T01:05:17.545967Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: GetBucketInfo
+[2m2026-11-17T01:05:17.562138Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Connection from fbb5c2e1d661ac7e closed
+[2m2026-11-17T01:05:17.604514Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Accepted connection from a71098fc1f4b673c at [::ffff:10.77.0.2]:50782
+[2m2026-11-17T01:05:17.645764Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: GetBucketInfo
+[2m2026-11-17T01:05:17.659643Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Connection from a71098fc1f4b673c closed
+[2m2026-11-17T01:05:38.281741Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Accepted connection from 852fa79cd496d9f5 at [::ffff:10.77.0.2]:48872
+[2m2026-11-17T01:05:38.325148Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: GetBucketInfo
+[2m2026-11-17T01:05:38.338201Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Connection from 852fa79cd496d9f5 closed
+[2m2026-11-17T01:05:38.370310Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Accepted connection from 7983e4750ed5b6b9 at [::ffff:10.77.0.2]:48880
+[2m2026-11-17T01:05:38.417598Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: GetBucketInfo
+[2m2026-11-17T01:05:38.435026Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Connection from 7983e4750ed5b6b9 closed
+[2m2026-11-17T01:05:59.021047Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Accepted connection from bd76468fe8706a06 at [::ffff:10.77.0.2]:51216
+[2m2026-11-17T01:05:59.063178Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: GetBucketInfo
+[2m2026-11-17T01:05:59.070830Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Connection from bd76468fe8706a06 closed
+[2m2026-11-17T01:05:59.089544Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Accepted connection from 8b9cc38a472cc549 at [::ffff:10.77.0.2]:51220
+[2m2026-11-17T01:05:59.132790Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: GetBucketInfo
+[2m2026-11-17T01:05:59.155812Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Connection from 8b9cc38a472cc549 closed
+[2m2026-11-17T01:06:19.635963Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Accepted connection from 448f2a7c33f39a42 at [::ffff:10.77.0.2]:37196
+[2m2026-11-17T01:06:19.680379Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: GetBucketInfo
+[2m2026-11-17T01:06:19.691781Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Connection from 448f2a7c33f39a42 closed
+[2m2026-11-17T01:06:19.723695Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Accepted connection from 3fad591bb2a82e4c at [::ffff:10.77.0.2]:37208
+[2m2026-11-17T01:06:19.776359Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: GetBucketInfo
+[2m2026-11-17T01:06:19.860038Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Connection from 3fad591bb2a82e4c closed
+[2m2026-11-17T01:06:40.460465Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Accepted connection from 6aeaced668562a8e at [::ffff:10.77.0.2]:51424
+[2m2026-11-17T01:06:40.503612Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: GetBucketInfo
+[2m2026-11-17T01:06:40.512784Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Connection from 6aeaced668562a8e closed
+[2m2026-11-17T01:06:40.532210Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Accepted connection from 8dbea422a0e740d4 at [::ffff:10.77.0.2]:51436
+[2m2026-11-17T01:06:40.596346Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: GetBucketInfo
+[2m2026-11-17T01:06:40.624874Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Connection from 8dbea422a0e740d4 closed
+[2m2026-11-17T01:07:01.535330Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Accepted connection from 2d8e7c81bd29ef16 at [::ffff:10.77.0.2]:58222
+[2m2026-11-17T01:07:01.591166Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: GetBucketInfo
+[2m2026-11-17T01:07:01.639362Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Connection from 2d8e7c81bd29ef16 closed
+[2m2026-11-17T01:07:01.700078Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Accepted connection from 4a8cfef0f02b3dc9 at [::ffff:10.77.0.2]:58224
+[2m2026-11-17T01:07:01.746729Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: GetBucketInfo
+[2m2026-11-17T01:07:01.777644Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Connection from 4a8cfef0f02b3dc9 closed
+[2m2026-11-17T01:07:22.631921Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Accepted connection from f7ca57f21f1399ec at [::ffff:10.77.0.2]:38732
+[2m2026-11-17T01:07:22.681938Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: GetBucketInfo
+[2m2026-11-17T01:07:22.704360Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Connection from f7ca57f21f1399ec closed
+[2m2026-11-17T01:07:22.794180Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Accepted connection from 7af5bcf1a86ea896 at [::ffff:10.77.0.2]:38734
+[2m2026-11-17T01:07:22.862775Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: GetBucketInfo
+[2m2026-11-17T01:07:22.882171Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Connection from 7af5bcf1a86ea896 closed
+[2m2026-11-17T01:07:43.802704Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Accepted connection from 166d0670d7847f48 at [::ffff:10.77.0.2]:46652
+[2m2026-11-17T01:07:43.854676Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: GetBucketInfo
+[2m2026-11-17T01:07:43.900230Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Connection from 166d0670d7847f48 closed
+[2m2026-11-17T01:07:43.998655Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Accepted connection from 3b3610fafdedb4b6 at [::ffff:10.77.0.2]:46662
+[2m2026-11-17T01:07:44.045044Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: GetBucketInfo
+[2m2026-11-17T01:07:44.079586Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Connection from 3b3610fafdedb4b6 closed
+[2m2026-11-17T01:08:04.867576Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Accepted connection from f626fd58604e8fa8 at [::ffff:10.77.0.2]:36624
+[2m2026-11-17T01:08:04.912339Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: GetBucketInfo
+[2m2026-11-17T01:08:04.928029Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Connection from f626fd58604e8fa8 closed
+[2m2026-11-17T01:08:04.960348Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Accepted connection from 3c4e52ff57108c76 at [::ffff:10.77.0.2]:36640
+[2m2026-11-17T01:08:05.004303Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: GetBucketInfo
+[2m2026-11-17T01:08:05.014408Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Connection from 3c4e52ff57108c76 closed
+[2m2026-11-17T01:08:25.785408Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Accepted connection from fc8cf6c0980943b9 at [::ffff:10.77.0.2]:39986
+[2m2026-11-17T01:08:25.830408Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: GetBucketInfo
+[2m2026-11-17T01:08:25.845770Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Connection from fc8cf6c0980943b9 closed
+[2m2026-11-17T01:08:25.876563Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Accepted connection from 7dbeba98d6e57a18 at [::ffff:10.77.0.2]:39988
+[2m2026-11-17T01:08:25.938010Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: GetBucketInfo
+[2m2026-11-17T01:08:25.950864Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Connection from 7dbeba98d6e57a18 closed
+[2m2026-11-17T01:08:46.566314Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Accepted connection from 290459a9b852b3ca at [::ffff:10.77.0.2]:41424
+[2m2026-11-17T01:08:46.610778Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: GetBucketInfo
+[2m2026-11-17T01:08:46.621531Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Connection from 290459a9b852b3ca closed
+[2m2026-11-17T01:08:46.651422Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Accepted connection from 782f7ce269f0a04a at [::ffff:10.77.0.2]:41426
+[2m2026-11-17T01:08:46.700312Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: GetBucketInfo
+[2m2026-11-17T01:08:46.721405Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Connection from 782f7ce269f0a04a closed
+[2m2026-11-17T01:09:07.238353Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Accepted connection from 1c96c80ea2ebff66 at [::ffff:10.77.0.2]:49436
+[2m2026-11-17T01:09:07.280951Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: GetBucketInfo
+[2m2026-11-17T01:09:07.295456Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Connection from 1c96c80ea2ebff66 closed
+[2m2026-11-17T01:09:07.335657Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Accepted connection from 121c9683b7233f90 at [::ffff:10.77.0.2]:49442
+[2m2026-11-17T01:09:07.376851Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: GetBucketInfo
+[2m2026-11-17T01:09:07.395661Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Connection from 121c9683b7233f90 closed
+[2m2026-11-17T01:09:27.829350Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Accepted connection from 457e51d458fc002e at [::ffff:10.77.0.2]:42940
+[2m2026-11-17T01:09:27.884074Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: GetBucketInfo
+[2m2026-11-17T01:09:27.934091Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Connection from 457e51d458fc002e closed
+[2m2026-11-17T01:09:27.993568Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Accepted connection from 1bb9e4a332c0f41b at [::ffff:10.77.0.2]:42954
+[2m2026-11-17T01:09:28.038561Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: GetBucketInfo
+[2m2026-11-17T01:09:28.052307Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Connection from 1bb9e4a332c0f41b closed
+[2m2026-11-17T01:09:48.628678Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Accepted connection from 5eae2c91eb618002 at [::ffff:10.77.0.2]:53592
+[2m2026-11-17T01:09:48.681821Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: GetBucketInfo
+[2m2026-11-17T01:09:48.700803Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Connection from 5eae2c91eb618002 closed
+[2m2026-11-17T01:09:48.729400Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Accepted connection from 572acd42db71b305 at [::ffff:10.77.0.2]:53598
+[2m2026-11-17T01:09:48.774523Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: GetBucketInfo
+[2m2026-11-17T01:09:48.789173Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Connection from 572acd42db71b305 closed
+[2m2026-11-17T01:10:09.366339Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Accepted connection from 3fc37f71d8794f7e at [::ffff:10.77.0.2]:47396
+[2m2026-11-17T01:10:09.412093Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: GetBucketInfo
+[2m2026-11-17T01:10:09.435931Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Connection from 3fc37f71d8794f7e closed
+[2m2026-11-17T01:10:09.494195Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Accepted connection from dc7b96ddaf2987ba at [::ffff:10.77.0.2]:47402
+[2m2026-11-17T01:10:09.539187Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: GetBucketInfo
+[2m2026-11-17T01:10:09.555946Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Connection from dc7b96ddaf2987ba closed
+[2m2026-11-17T01:10:30.303677Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Accepted connection from 268edfbcb1c6726d at [::ffff:10.77.0.2]:50812
+[2m2026-11-17T01:10:30.346898Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: GetBucketInfo
+[2m2026-11-17T01:10:30.357076Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Connection from 268edfbcb1c6726d closed
+[2m2026-11-17T01:10:30.387076Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Accepted connection from 2dbe19be16815f10 at [::ffff:10.77.0.2]:50828
+[2m2026-11-17T01:10:30.448696Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: GetBucketInfo
+[2m2026-11-17T01:10:30.476141Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Connection from 2dbe19be16815f10 closed
+[2m2026-11-17T01:10:51.251008Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Accepted connection from a6fd94b01adf2a76 at [::ffff:10.77.0.2]:44762
+[2m2026-11-17T01:10:51.310922Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: GetBucketInfo
+[2m2026-11-17T01:10:51.360852Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Connection from a6fd94b01adf2a76 closed
+[2m2026-11-17T01:10:51.536207Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Accepted connection from 90e60a45e0e2543a at [::ffff:10.77.0.2]:44764
+[2m2026-11-17T01:10:51.591586Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: GetBucketInfo
+[2m2026-11-17T01:10:51.620176Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Connection from 90e60a45e0e2543a closed
+[2m2026-11-17T01:11:12.328788Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Accepted connection from cc293a124fe854f4 at [::ffff:10.77.0.2]:43094
+[2m2026-11-17T01:11:12.374207Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: GetBucketInfo
+[2m2026-11-17T01:11:12.390614Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Connection from cc293a124fe854f4 closed
+[2m2026-11-17T01:11:12.425113Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Accepted connection from 9b11f3135699d4ad at [::ffff:10.77.0.2]:43110
+[2m2026-11-17T01:11:12.470874Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: GetBucketInfo
+[2m2026-11-17T01:11:12.480384Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Connection from 9b11f3135699d4ad closed
+[2m2026-11-17T01:11:33.022342Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Accepted connection from 686a7e75363e5b0c at [::ffff:10.77.0.2]:55786
+[2m2026-11-17T01:11:33.065959Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: GetBucketInfo
+[2m2026-11-17T01:11:33.102432Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Connection from 686a7e75363e5b0c closed
+[2m2026-11-17T01:11:33.132538Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Accepted connection from 472a8f0fa973db94 at [::ffff:10.77.0.2]:55796
+[2m2026-11-17T01:11:33.184161Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: GetBucketInfo
+[2m2026-11-17T01:11:33.209062Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Connection from 472a8f0fa973db94 closed
+[2m2026-11-17T01:11:53.969471Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Accepted connection from 51b649dc83543ef5 at [::ffff:10.77.0.2]:39118
+[2m2026-11-17T01:11:54.016858Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: GetBucketInfo
+[2m2026-11-17T01:11:54.049136Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Connection from 51b649dc83543ef5 closed
+[2m2026-11-17T01:11:54.113506Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Accepted connection from a82595b40010f589 at [::ffff:10.77.0.2]:39126
+[2m2026-11-17T01:11:54.167246Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: GetBucketInfo
+[2m2026-11-17T01:11:54.185449Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Connection from a82595b40010f589 closed
+[2m2026-11-17T01:12:15.009909Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Accepted connection from 41a2c2fdb247b832 at [::ffff:10.77.0.2]:33032
+[2m2026-11-17T01:12:15.054604Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: GetBucketInfo
+[2m2026-11-17T01:12:15.074238Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Connection from 41a2c2fdb247b832 closed
+[2m2026-11-17T01:12:15.146874Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Accepted connection from 16fe4ea77695a1b4 at [::ffff:10.77.0.2]:33048
+[2m2026-11-17T01:12:15.190111Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: GetBucketInfo
+[2m2026-11-17T01:12:15.201550Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Connection from 16fe4ea77695a1b4 closed
+[2m2026-11-17T01:12:35.977312Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Accepted connection from d2ac952aaa43475e at [::ffff:10.77.0.2]:41236
+[2m2026-11-17T01:12:36.056738Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: GetBucketInfo
+[2m2026-11-17T01:12:36.142871Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Connection from d2ac952aaa43475e closed
+[2m2026-11-17T01:12:36.285243Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Accepted connection from 78844b9a578700f9 at [::ffff:10.77.0.2]:41246
+[2m2026-11-17T01:12:36.333271Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: GetBucketInfo
+[2m2026-11-17T01:12:36.354167Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Connection from 78844b9a578700f9 closed
+[2m2026-11-17T01:12:57.153500Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Accepted connection from 821aabb70990fe60 at [::ffff:10.77.0.2]:48716
+[2m2026-11-17T01:12:57.198135Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: GetBucketInfo
+[2m2026-11-17T01:12:57.213071Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Connection from 821aabb70990fe60 closed
+[2m2026-11-17T01:12:57.273849Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Accepted connection from fee805083e70bc47 at [::ffff:10.77.0.2]:48728
+[2m2026-11-17T01:12:57.317226Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: GetBucketInfo
+[2m2026-11-17T01:12:57.333945Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Connection from fee805083e70bc47 closed
+[2m2026-11-17T01:13:18.279459Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Accepted connection from 204b09d5347dc538 at [::ffff:10.77.0.2]:53728
+[2m2026-11-17T01:13:18.344398Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: GetBucketInfo
+[2m2026-11-17T01:13:18.387533Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Connection from 204b09d5347dc538 closed
+[2m2026-11-17T01:13:18.494111Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Accepted connection from dfab6fe638d467fc at [::ffff:10.77.0.2]:53734
+[2m2026-11-17T01:13:18.547081Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: GetBucketInfo
+[2m2026-11-17T01:13:18.616498Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Connection from dfab6fe638d467fc closed
+[2m2026-11-17T01:13:39.733193Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Accepted connection from c280905dc8fbde7e at [::ffff:10.77.0.2]:35194
+[2m2026-11-17T01:13:39.778045Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: GetBucketInfo
+[2m2026-11-17T01:13:39.794548Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Connection from c280905dc8fbde7e closed
+[2m2026-11-17T01:13:39.849692Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Accepted connection from 87212f78bb195cec at [::ffff:10.77.0.2]:35204
+[2m2026-11-17T01:13:39.898590Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: GetBucketInfo
+[2m2026-11-17T01:13:39.922018Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Connection from 87212f78bb195cec closed
+[2m2026-11-17T01:14:01.138544Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Accepted connection from 0e57f3088c4d6616 at [::ffff:10.77.0.2]:40014
+[2m2026-11-17T01:14:01.183119Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: GetBucketInfo
+[2m2026-11-17T01:14:01.199148Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Connection from 0e57f3088c4d6616 closed
+[2m2026-11-17T01:14:01.231810Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Accepted connection from 80f457ab716e09e0 at [::ffff:10.77.0.2]:40018
+[2m2026-11-17T01:14:01.276628Z[0m [32m INFO[0m [2mgarage_api_admin::api_server[0m[2m:[0m Proxied admin API request: GetBucketInfo
+[2m2026-11-17T01:14:01.298082Z[0m [32m INFO[0m [2mgarage_net::netapp[0m[2m:[0m Connection from 80f457ab716e09e0 closed

@@ -1,0 +1,5 @@
+2026-11-17T06:01:58.873266Z  INFO kache::wrapper: build session detected, sending prefetch hint for 436 crates (shard context: fallback)
+2026-11-17T06:17:11.348221Z  INFO kache::wrapper: build session detected, sending prefetch hint for 436 crates (shard context: fallback)
+   Compiling overdrive-control-plane v0.0.0 (/mnt/ws/crates/overdrive-control-plane)
+   Compiling overdrive-sim v0.0.0 (/mnt/ws/crates/overdrive-sim)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 11.89s

@@ -1,0 +1,4 @@
+2026-11-17T00:36:03.823Z host boot cache ip=10.77.0.2 vcpus=2 mem=4G disk=60G role=cache 
+2026-11-17T00:37:10.360Z host boot dev-a ip=10.77.0.11 vcpus=8 mem=16G disk=120G role=dev SPIKE_STEPS=probe
+2026-11-17T00:37:17.681Z host vm dev-a finished exit=1
+2026-11-17T00:37:19.746Z host exit rc=1

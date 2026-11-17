@@ -1,0 +1,4 @@
+wave=w1 spec=full pfx=s6-full peers=w11,w12,w13
+7.0.0-38-generic
+5
+Mem:              11           0          10           0           0          11

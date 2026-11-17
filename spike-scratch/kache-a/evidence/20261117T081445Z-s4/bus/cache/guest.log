@@ -1,0 +1,90 @@
+2026-11-17T08:14:47.681Z cache up nic=eth0 ip=10.77.0.2 role=cache kernel=7.0.0-38-generic nproc=4
+garage v2.5.0 [features: bundled-libs, consul-discovery, fjall, journald, k2v, kubernetes-discovery, lmdb, metrics, sqlite, syslog, telemetry-otlp]
+==== HEALTHY NODES ====
+ID                Hostname  Address         Tags  Zone  Capacity          DataAvail  ResyncQueue  Version
+24c0c745283ca517  (none)    10.77.0.2:3901              NO ROLE ASSIGNED             0            v2.5.0
+Role changes are staged but not yet committed.
+Use `garage layout show` to view staged role changes,
+and `garage layout apply` to enact staged changes.
+==== COMPUTATION OF A NEW PARTITION ASSIGNATION ====
+
+Partitions are replicated 1 times on at least 1 distinct zones.
+
+Optimal partition size:                     186.3 MiB
+Usable capacity / total cluster capacity:   46.6 GiB / 46.6 GiB (100.0 %)
+Effective capacity (replication factor 1):  46.6 GiB
+
+dc1                 Tags  Partitions        Capacity  Usable capacity
+  24c0c745283ca517  []    256 (256 new)     46.6 GiB  46.6 GiB (100.0%)
+  TOTAL                   256 (256 unique)  46.6 GiB  46.6 GiB (100.0%)
+
+
+New cluster layout with updated role assignment has been applied in cluster.
+Data will now be moved around between nodes accordingly.
+==== BUCKET INFORMATION ====
+Bucket:          3420a9c71e5147831aff82fdd99b79d89d70d89f121ba8e4df7caf78cb65de8a
+Created:         2026-11-17 08:14:48.907 +00:00
+
+Size:            0 B (0 B)
+Objects:         0
+
+Website access:  false
+
+Global alias:    kache
+
+==== KEYS FOR THIS BUCKET ====
+Permissions  Access key    Local aliases
+==== BUCKET INFORMATION ====
+Bucket:          c222afaa6273ada110f9a064ef9df5ff7d6a00f735951f5a2f1d234497aaaa75
+Created:         2026-11-17 08:14:49.005 +00:00
+
+Size:            0 B (0 B)
+Objects:         0
+
+Website access:  false
+
+Global alias:    sccache
+
+==== KEYS FOR THIS BUCKET ====
+Permissions  Access key    Local aliases
+==== ACCESS KEY INFORMATION ====
+Key ID:              GK891b2a93958d3191dbc7bbfb
+Key name:            kache-key
+Secret key:          cc50ad557dee17104c7ea4541ac251278181f0cc787d6ba3219cc4d14e2d9a23
+Created:             2026-11-17 08:14:49.103 +00:00
+Validity:            valid
+Expiration:          never
+
+Can create buckets:  false
+
+==== BUCKETS FOR THIS KEY ====
+Permissions  ID  Global aliases  Local aliases
+==== BUCKET INFORMATION ====
+Bucket:          3420a9c71e5147831aff82fdd99b79d89d70d89f121ba8e4df7caf78cb65de8a
+Created:         2026-11-17 08:14:48.907 +00:00
+
+Size:            0 B (0 B)
+Objects:         0
+
+Website access:  false
+
+Global alias:    kache
+
+==== KEYS FOR THIS BUCKET ====
+Permissions  Access key                             Local aliases
+RWO          GK891b2a93958d3191dbc7bbfb  kache-key  
+==== BUCKET INFORMATION ====
+Bucket:          c222afaa6273ada110f9a064ef9df5ff7d6a00f735951f5a2f1d234497aaaa75
+Created:         2026-11-17 08:14:49.005 +00:00
+
+Size:            0 B (0 B)
+Objects:         0
+
+Website access:  false
+
+Global alias:    sccache
+
+==== KEYS FOR THIS BUCKET ====
+Permissions  Access key                             Local aliases
+RWO          GK891b2a93958d3191dbc7bbfb  kache-key  
+2026-11-17T08:14:49.438Z cache garage ready

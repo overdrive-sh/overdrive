@@ -1,0 +1,11 @@
+run=20261117T084814Z-conc plan=conc
+metal_run_id=4cdafed2f62aabe89d1b0b56
+uname=7.0.0-38-generic
+nproc=16
+mem_total_gb=62
+fs=ext4 size=847G avail=96G
+source: commit=d1953f3f7797d7e69c5a932b55305e3415888018
+source: workspace=/Users/marcus/conductor/workspaces/helios/antananarivo
+source: source_digest=5324f69183afdc393914ffa31c18e7e6ac7df55ea604d40fb7943c07f4b445d8
+cloud_hypervisor=cloud-hypervisor v53.0.0
+virtiofsd=virtiofsd 1.13.2

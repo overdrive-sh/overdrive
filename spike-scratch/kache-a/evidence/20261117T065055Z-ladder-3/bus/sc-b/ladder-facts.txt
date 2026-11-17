@@ -1,0 +1,4 @@
+arm=sccache role=B pfx=l3-sccache ws=/mnt/ws fresh= loop=0 tests=0 smoke=0
+7.0.0-38-generic
+8
+Mem:              23           0          22           0           0          23

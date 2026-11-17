@@ -1,0 +1,4 @@
+1.89.0-x86_64-unknown-linux-gnu
+1.95.0-x86_64-unknown-linux-gnu
+nightly-2026-08-05-x86_64-unknown-linux-gnu
+nightly-x86_64-unknown-linux-gnu

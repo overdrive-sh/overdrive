@@ -1,0 +1,98 @@
+{
+  "schema_version": 1,
+  "command": "stats",
+  "success": true,
+  "disk": {
+    "store_bytes": 4342789,
+    "store_limit_bytes": 7516192768,
+    "disk_private_bytes": 4342789,
+    "cloned_into_targets_bytes": 0,
+    "snapshot_retained_bytes": 0,
+    "cloned_coverage": "partial"
+  },
+  "volume": {
+    "total_bytes": 157396975616,
+    "free_bytes": 149029666816,
+    "recovery_floor_bytes": 10737418240,
+    "below_floor": false,
+    "recovers_targets": false
+  },
+  "stores": [
+    {
+      "path": "/mnt/kache-store",
+      "bytes": 4342789,
+      "max_size": 7516192768,
+      "entries": 1,
+      "blob_stats": {
+        "total_blobs": 2,
+        "total_blob_size": 4342789,
+        "total_logical_size": 4342789,
+        "savings": 0
+      },
+      "error": null
+    }
+  ],
+  "index_bytes": 477928,
+  "index_wal_bytes": 473832,
+  "index_rowid_high_water": {
+    "blobs": 2,
+    "cc_preprocess_memos": 0,
+    "entries": 1,
+    "entry_blobs": 2,
+    "eviction_tombstones": 0,
+    "input_predictions": 1
+  },
+  "gc": {
+    "last_run": "2026-11-17T01:05:14.530645850+00:00",
+    "entries_evicted": 0,
+    "bytes_freed": 0,
+    "disk_bytes_reclaimed": 0,
+    "blobs_removed": 0,
+    "duration_ms": 69,
+    "source": "daemon",
+    "entries_pinned": 0,
+    "entries_unreclaimable": 0,
+    "bytes_held": 0,
+    "entries_failed": 0,
+    "entries_locked": 0,
+    "entries_busy_snapshot": 0,
+    "entries_recent_prefiltered": 0,
+    "entries_import_pinned": 0,
+    "evict_write_ms": 0,
+    "key_locks_removed": 0,
+    "key_locks_remaining": 0,
+    "predictions_pruned": 0,
+    "file_hashes_pruned": 0
+  },
+  "lifetime": {
+    "since": "2026-11-17T01:05:14.644623343Z",
+    "hits": 1,
+    "hit_compile_time_ms": 551,
+    "zero_copy_bytes": 0,
+    "copied_bytes": 4342648,
+    "pruned_automatic_bytes": 0,
+    "pruned_requested_bytes": 0
+  },
+  "entries": 1,
+  "hit_rate_pct": 100.0,
+  "weighted_hit_rate_pct": 100.0,
+  "time_saved_ms": 551,
+  "hit_elapsed_ms": 115,
+  "miss_elapsed_ms": 0,
+  "total_elapsed_ms": 115,
+  "total_flight_wait_ms": 0,
+  "total_permit_wait_ms": 0,
+  "local_hits": 0,
+  "prefetch_hits": 0,
+  "remote_hits": 1,
+  "dups": 0,
+  "misses": 0,
+  "daemon_connected": true,
+  "daemon_version": "2.1.1",
+  "daemon_epoch": 1794877481,
+  "daemon_remote_readonly": false,
+  "hours": 24,
+  "since_secs": 86400,
+  "since": "24h",
+  "remote": "s3://kache/probe-20261117T010431Z-calib"
+}

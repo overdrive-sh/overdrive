@@ -1,0 +1,10 @@
+2026-11-17T04:41:45.508Z kp-b up nic=eth0 ip=10.77.0.12 role=dev kernel=7.0.0-38-generic nproc=8
+2026-11-17T04:41:45.344Z kp-b seeding cargo home from host registry
+2026-11-17T04:41:47.233Z kp-b step ladder begin
+2026-11-17T04:51:28.247Z kp-b sample 000 s1-X rc=0 wall=579.756s
+2026-11-17T04:51:52.152Z kp-b sample 001 s2-leaf-cli rc=0 wall=12.544s
+2026-11-17T04:54:21.479Z kp-b sample 002 s2b-gateway rc=0 wall=139.310s
+2026-11-17T04:56:14.672Z kp-b sample 003 s3-core rc=0 wall=102.819s
+2026-11-17T04:56:54.579Z kp-b kache daemon drained (try 1)
+2026-11-17T04:56:55.709Z kp-b step ladder end rc=0
+2026-11-17T04:56:55.102Z kp-b role exit=0

@@ -1,0 +1,42 @@
+[2m2026-11-17T00:56:15.245705Z[0m [32m INFO[0m [2mgarage::server[0m[2m:[0m Loading configuration from /mnt/garage/garage.toml...
+[2m2026-11-17T00:56:15.249192Z[0m [32m INFO[0m [2mgarage::server[0m[2m:[0m Initializing Garage main data store...
+[2m2026-11-17T00:56:15.250759Z[0m [32m INFO[0m [2mgarage_model::garage[0m[2m:[0m Opening database...
+[2m2026-11-17T00:56:15.251308Z[0m [32m INFO[0m [2mgarage_db::lmdb_adapter[0m[2m:[0m Opening LMDB database at: /mnt/garage/meta/db.lmdb
+[2m2026-11-17T00:56:15.254071Z[0m [32m INFO[0m [2mgarage_model::garage[0m[2m:[0m Initializing RPC...
+[2m2026-11-17T00:56:15.257773Z[0m [32m INFO[0m [2mgarage_model::garage[0m[2m:[0m Initialize background variable system...
+[2m2026-11-17T00:56:15.257994Z[0m [32m INFO[0m [2mgarage_model::garage[0m[2m:[0m Initialize membership management system...
+======== PANIC (internal Garage error) ========
+panicked at src/rpc/system.rs:263:48:
+Unable to read or generate node ID: Message("Corrupt node_key file")
+
+Panics are internal errors that Garage is unable to handle on its own.
+They can be caused by bugs in Garage's code, or by corrupted data in
+the node's storage. If you feel that this error is likely to be a bug
+in Garage, please report it on our issue tracker a the following address:
+
+        https://git.deuxfleurs.fr/Deuxfleurs/garage/issues
+
+Please include the last log messages and the the full backtrace below in
+your bug report, as well as any relevant information on the context in
+which Garage was running when this error occurred.
+
+GARAGE VERSION: v2.5.0 [features: bundled-libs, consul-discovery, fjall, journald, k2v, kubernetes-discovery, lmdb, metrics, sqlite, syslog, telemetry-otlp]
+
+BACKTRACE:
+   0: garage::main::{{closure}}
+   1: std::panicking::panic_with_hook
+   2: std::panicking::panic_handler::{closure#0}
+   3: std::sys::backtrace::__rust_end_short_backtrace::<std::panicking::panic_handler::{closure#0}, !>
+   4: __rustc::rust_begin_unwind
+   5: core::panicking::panic_fmt
+   6: core::result::unwrap_failed
+   7: garage_rpc::system::System::new
+   8: garage_model::garage::Garage::new
+   9: garage::server::run_server::{{closure}}
+  10: garage::main
+  11: std::sys::backtrace::__rust_begin_short_backtrace
+  12: std::rt::lang_start::{{closure}}
+  13: std::rt::lang_start_internal
+  14: main
+
+/home/ubuntu/overdrive-worktrees/9d340a8ca57d5ca89b626cece0d62d03770aa9cd213856dc63ec27e31d3a81cc/spike-scratch/kache-a/scripts/role-cache.sh: line 23:   115 Aborted                    "$GARAGE" -c "$G/garage.toml" "$@"

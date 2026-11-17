@@ -1,0 +1,23 @@
+	Command being timed: "cargo build --all-targets --locked --offline"
+	User time (seconds): 221.21
+	System time (seconds): 55.85
+	Percent of CPU this job got: 284%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 1:37.46
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 1629252
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 183965
+	Minor (reclaiming a frame) page faults: 5599763
+	Voluntary context switches: 367292
+	Involuntary context switches: 194924
+	Swaps: 0
+	File system inputs: 0
+	File system outputs: 1133882
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0

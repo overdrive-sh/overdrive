@@ -1,0 +1,9 @@
+2026-11-17T07:07:54.194Z kp-c up nic=eth0 ip=10.77.0.13 role=dev kernel=7.0.0-38-generic nproc=8
+2026-11-17T07:07:54.455Z kp-c seeding cargo home from host registry
+2026-11-17T07:07:56.155Z kp-c step ladder begin
+2026-11-17T07:09:34.793Z kp-c sample 000 fresh-Xm rc=0 wall=97.598s
+2026-11-17T07:09:45.817Z kp-c kache daemon drained (try 1)
+2026-11-17T07:09:46.351Z kp-c S7: default-lane tests (overdrive-core)
+2026-11-17T07:16:36.886Z kp-c sample 001 s7-tests-core rc=0 wall=410.707s
+2026-11-17T07:16:36.921Z kp-c step ladder end rc=0
+2026-11-17T07:16:36.938Z kp-c role exit=0

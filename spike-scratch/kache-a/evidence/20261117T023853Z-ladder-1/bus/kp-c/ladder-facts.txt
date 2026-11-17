@@ -1,0 +1,4 @@
+arm=kache role=C pfx=l1-kachepub ws=/mnt/ws fresh=Xm loop=0 tests=1 smoke=0
+7.0.0-38-generic
+8
+Mem:              23           0          22           0           0          23

@@ -1,0 +1,7 @@
+2026-11-17T01:04:56.834Z
+Size:            1.0 MB (992.5 KiB)
+Objects:         3
+Size:            0 B (0 B)
+Objects:         0
+1015818	/mnt/garage/data
+277838	/mnt/garage/meta

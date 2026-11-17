@@ -1,0 +1,4 @@
+wave=w3 spec=core pfx=s6-core peers=w31,w32,w33,w34,w35,w36,w37,w38
+7.0.0-38-generic
+2
+Mem:               3           0           3           0           0           3

@@ -1,0 +1,3 @@
+2026-11-17T01:24:00.089050Z  INFO kache::wrapper: build session detected, sending prefetch hint for 436 crates (shard context: fallback)
+2026-11-17T01:23:59.191022Z  INFO kache::wrapper: build session detected, sending prefetch hint for 436 crates (shard context: fallback)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.22s

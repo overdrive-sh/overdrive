@@ -1,0 +1,12 @@
+cloud-hypervisor:   0.008907s: <vmm> WARN:vmm/src/device_manager.rs:2764 -- DEPRECATION: auto-detection of disk image type is deprecated and will be removed in a future release. Please specify image type explicitly.
+cloud-hypervisor:   0.008947s: <vmm> WARN:vmm/src/device_manager.rs:2769 -- No image_type specified - detected as raw. Configuration updated to persist type across reboots and migrations.
+cloud-hypervisor:   0.008972s: <vmm> WARN:vmm/src/device_manager.rs:2777 -- Autodetected raw image type. Disabling sector 0 writes.
+cloud-hypervisor:  60.009506s: <vmm> ERROR:virtio-devices/src/vhost_user/vu_common_ctrl.rs:461 -- Failed connecting the backend after trying for 1 minute for socket /home/ubuntu/overdrive-worktrees/9d340a8ca57d5ca89b626cece0d62d03770aa9cd213856dc63ec27e31d3a81cc/spike-scratch/kache-a/target/vmstate/sock/20261117T002242Z-probe/cache-root.sock: VhostUserProtocol(SocketConnect(Error { kind: InvalidInput, message: "path must be shorter than SUN_LEN" }))
+cloud-hypervisor:  60.026680s: <main> ERROR:/var/tmp/overdrive/cloud-hypervisor/f252bb20b0d141d59e4c15a9ac09c5c2dd7c350d/source/cloud-hypervisor/src/lib.rs:24 -- Fatal error: VmBoot(VmBoot(DeviceManager(CreateVirtioFs(VhostUserConnect(VhostUserProtocol(SocketConnect(Error { kind: InvalidInput, message: "path must be shorter than SUN_LEN" })))))))
+Error: Cloud Hypervisor exited with the following chain of errors:
+  0: Error booting VM
+  1: The VM could not boot
+  2: Error from device manager
+  3: Cannot create virtio-fs device
+  4: Connection to socket failed
+  5: vhost-user: can't connect to peer: path must be shorter than SUN_LEN

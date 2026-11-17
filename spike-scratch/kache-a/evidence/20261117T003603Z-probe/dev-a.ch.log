@@ -1,0 +1,5 @@
+cloud-hypervisor:   0.008679s: <vmm> WARN:vmm/src/device_manager.rs:2764 -- DEPRECATION: auto-detection of disk image type is deprecated and will be removed in a future release. Please specify image type explicitly.
+cloud-hypervisor:   0.008722s: <vmm> WARN:vmm/src/device_manager.rs:2769 -- No image_type specified - detected as raw. Configuration updated to persist type across reboots and migrations.
+cloud-hypervisor:   0.008747s: <vmm> WARN:vmm/src/device_manager.rs:2777 -- Autodetected raw image type. Disabling sector 0 writes.
+cloud-hypervisor:   1.811360s: <_disk0_q0> WARN:virtio-devices/src/block.rs:226 -- Attempting to write to sector 0 on a disk without specifying image_type
+cloud-hypervisor:   1.811412s: <_disk0_q0> WARN:virtio-devices/src/block.rs:308 -- Request check failed: Request { request_type: Out, sector: 0, data_descriptors: [(GuestAddress(101a6e000), 1000)], status_addr: GuestAddress(103252260), writeback: true, start: Instant { tv_sec: 295ccd, tv_nsec: 2e58bb5 } } ReadOnly

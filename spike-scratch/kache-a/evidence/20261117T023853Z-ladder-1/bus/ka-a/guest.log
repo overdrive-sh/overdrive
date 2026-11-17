@@ -1,0 +1,33 @@
+2026-11-17T03:02:44.554Z ka-a up nic=eth0 ip=10.77.0.11 role=dev kernel=7.0.0-38-generic nproc=8
+2026-11-17T03:02:44.878Z ka-a seeding cargo home from host registry
+2026-11-17T03:02:46.762Z ka-a step ladder begin
+2026-11-17T03:11:36.825Z ka-a sample 000 s1-X rc=0 wall=528.934s
+2026-11-17T03:12:00.470Z ka-a sample 001 s2-leaf-cli rc=0 wall=12.256s
+2026-11-17T03:14:30.102Z ka-a sample 002 s2b-gateway rc=0 wall=139.678s
+2026-11-17T03:16:11.857Z ka-a sample 003 s3-core rc=0 wall=89.757s
+2026-11-17T03:16:21.759Z ka-a kache daemon drained (try 1)
+2026-11-17T03:16:22.993Z ka-a S4: edit loop x20
+2026-11-17T03:21:24.294Z ka-a sample 004 edit-setup rc=0 wall=302.018s
+2026-11-17T03:22:24.441Z ka-a sample 005 edit-1 rc=0 wall=59.539s
+2026-11-17T03:22:41.528Z ka-a sample 006 edit-2 rc=0 wall=16.811s
+2026-11-17T03:22:56.393Z ka-a sample 007 edit-3 rc=0 wall=14.097s
+2026-11-17T03:23:11.620Z ka-a sample 008 edit-4 rc=0 wall=15.320s
+2026-11-17T03:23:23.882Z ka-a sample 009 edit-5 rc=0 wall=12.105s
+2026-11-17T03:23:35.721Z ka-a sample 010 edit-6 rc=0 wall=11.708s
+2026-11-17T03:23:47.962Z ka-a sample 011 edit-7 rc=0 wall=11.227s
+2026-11-17T03:23:59.419Z ka-a sample 012 edit-8 rc=0 wall=12.018s
+2026-11-17T03:24:15.127Z ka-a sample 013 edit-9 rc=0 wall=15.383s
+2026-11-17T03:24:33.267Z ka-a sample 014 edit-10 rc=0 wall=17.899s
+2026-11-17T03:24:44.952Z ka-a sample 015 edit-11 rc=0 wall=11.520s
+2026-11-17T03:24:55.712Z ka-a sample 016 edit-12 rc=0 wall=10.567s
+2026-11-17T03:25:05.365Z ka-a sample 017 edit-13 rc=0 wall=9.500s
+2026-11-17T03:25:16.360Z ka-a sample 018 edit-14 rc=0 wall=10.847s
+2026-11-17T03:25:29.766Z ka-a sample 019 edit-15 rc=0 wall=13.180s
+2026-11-17T03:25:42.288Z ka-a sample 020 edit-16 rc=0 wall=12.306s
+2026-11-17T03:25:54.748Z ka-a sample 021 edit-17 rc=0 wall=12.153s
+2026-11-17T03:26:07.494Z ka-a sample 022 edit-18 rc=0 wall=12.501s
+2026-11-17T03:26:25.686Z ka-a sample 023 edit-19 rc=0 wall=18.030s
+2026-11-17T03:26:36.350Z ka-a sample 024 edit-20 rc=0 wall=10.463s
+2026-11-17T03:27:06.836Z ka-a kache daemon drained (try 1)
+2026-11-17T03:27:06.916Z ka-a step ladder end rc=0
+2026-11-17T03:27:06.935Z ka-a role exit=0

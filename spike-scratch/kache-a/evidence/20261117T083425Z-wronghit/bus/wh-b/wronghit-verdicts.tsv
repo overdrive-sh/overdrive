@@ -1,0 +1,7 @@
+w1-restore-pristine	pass	target/debug/deps/liboverdrive_dataplane-56dd5e20deebed03.rlib
+w2-object-ONE	pass	target/debug/deps/liboverdrive_dataplane-56dd5e20deebed03.rlib
+w3-object-restored	pass	target/debug/deps/liboverdrive_dataplane-56dd5e20deebed03.rlib
+w4-object-TWO-same-length	pass	target/debug/deps/liboverdrive_dataplane-56dd5e20deebed03.rlib
+w5-env-override-THREE	pass	target/debug/deps/liboverdrive_dataplane-56dd5e20deebed03.rlib
+w6-env-unset-pristine	pass	target/debug/deps/liboverdrive_dataplane-56dd5e20deebed03.rlib
+w7-object-ONE-again	pass	target/debug/deps/liboverdrive_dataplane-56dd5e20deebed03.rlib

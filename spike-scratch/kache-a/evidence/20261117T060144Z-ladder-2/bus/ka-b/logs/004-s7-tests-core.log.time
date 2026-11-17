@@ -1,0 +1,23 @@
+	Command being timed: "cargo nextest run -p overdrive-core --locked --offline --no-fail-fast"
+	User time (seconds): 1694.49
+	System time (seconds): 644.07
+	Percent of CPU this job got: 437%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 8:54.64
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 1290816
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 1637313
+	Minor (reclaiming a frame) page faults: 28812222
+	Voluntary context switches: 3373066
+	Involuntary context switches: 528506
+	Swaps: 0
+	File system inputs: 71456
+	File system outputs: 7449740
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0

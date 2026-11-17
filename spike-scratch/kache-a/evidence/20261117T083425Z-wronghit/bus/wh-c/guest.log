@@ -1,0 +1,11 @@
+2026-11-17T08:37:39.981Z wh-c up nic=eth0 ip=10.77.0.13 role=dev kernel=7.0.0-38-generic nproc=8
+2026-11-17T08:37:40.267Z wh-c seeding cargo home from host registry
+2026-11-17T08:37:41.912Z wh-c step wronghit begin
+2026-11-17T08:37:57.601Z wh-c sample 000 w8-fresh-vm-object-ONE rc=0 wall=14.584s
+2026-11-17T08:37:57.841Z wh-c wronghit w8-fresh-vm-object-ONE => pass
+2026-11-17T08:37:59.881Z wh-c sample 001 w9-fresh-vm-pristine rc=0 wall=1.032s
+2026-11-17T08:37:59.305Z wh-c wronghit w9-fresh-vm-pristine => pass
+w8-fresh-vm-object-ONE	pass	target/debug/deps/liboverdrive_dataplane-56dd5e20deebed03.rlib
+w9-fresh-vm-pristine	pass	target/debug/deps/liboverdrive_dataplane-56dd5e20deebed03.rlib
+2026-11-17T08:37:59.387Z wh-c step wronghit end rc=0
+2026-11-17T08:37:59.414Z wh-c role exit=0

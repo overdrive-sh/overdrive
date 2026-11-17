@@ -1,0 +1,9 @@
+2026-11-17T08:34:34.214Z wh-a up nic=eth0 ip=10.77.0.11 role=dev kernel=7.0.0-38-generic nproc=8
+2026-11-17T08:34:34.516Z wh-a seeding cargo home from host registry
+2026-11-17T08:34:36.325Z wh-a step wronghit begin
+2026-11-17T08:36:53.215Z wh-a sample 000 w0-pristine rc=0 wall=135.788s
+2026-11-17T08:36:53.425Z wh-a wronghit w0-pristine => pass
+2026-11-17T08:36:53.554Z wh-a kache daemon drained (try 1)
+w0-pristine	pass	target/debug/deps/liboverdrive_dataplane-56dd5e20deebed03.rlib
+2026-11-17T08:36:53.630Z wh-a step wronghit end rc=0
+2026-11-17T08:36:53.661Z wh-a role exit=0

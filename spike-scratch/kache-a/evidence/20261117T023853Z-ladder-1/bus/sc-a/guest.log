@@ -1,0 +1,19 @@
+2026-11-17T05:13:04.128Z sc-a up nic=eth0 ip=10.77.0.11 role=dev kernel=7.0.0-38-generic nproc=8
+2026-11-17T05:13:04.300Z sc-a seeding cargo home from host registry
+2026-11-17T05:13:06.107Z sc-a step ladder begin
+2026-11-17T05:13:10.612Z sc-a sample 000 s1-X rc=101 wall=3.397s
+2026-11-17T05:13:11.377Z sc-a sample 001 s2-leaf-cli rc=101 wall=0.160s
+2026-11-17T05:13:11.998Z sc-a sample 002 s2b-gateway rc=101 wall=0.147s
+2026-11-17T05:13:12.725Z sc-a sample 003 s3-core rc=101 wall=0.179s
+2026-11-17T05:13:13.319Z sc-a S4: edit loop x8
+2026-11-17T05:13:13.628Z sc-a sample 004 edit-setup rc=101 wall=0.151s
+2026-11-17T05:13:13.972Z sc-a sample 005 edit-1 rc=101 wall=0.143s
+2026-11-17T05:13:14.297Z sc-a sample 006 edit-2 rc=101 wall=0.160s
+2026-11-17T05:13:14.679Z sc-a sample 007 edit-3 rc=101 wall=0.192s
+2026-11-17T05:13:15.211Z sc-a sample 008 edit-4 rc=101 wall=0.165s
+2026-11-17T05:13:15.300Z sc-a sample 009 edit-5 rc=101 wall=0.132s
+2026-11-17T05:13:15.638Z sc-a sample 010 edit-6 rc=101 wall=0.153s
+2026-11-17T05:13:15.956Z sc-a sample 011 edit-7 rc=101 wall=0.155s
+2026-11-17T05:13:16.252Z sc-a sample 012 edit-8 rc=101 wall=0.135s
+2026-11-17T05:13:16.388Z sc-a step ladder end rc=0
+2026-11-17T05:13:16.410Z sc-a role exit=0

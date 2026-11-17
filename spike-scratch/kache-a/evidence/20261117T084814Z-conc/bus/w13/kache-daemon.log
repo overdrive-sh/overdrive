@@ -1,0 +1,19 @@
+[2m2026-11-17T08:48:26.032207Z[0m [32m INFO[0m [2mkache::daemon[0m[2m:[0m raised the open-file limit from 1024 to 4096
+[2m2026-11-17T08:48:26.045298Z[0m [32m INFO[0m [2mkache::daemon[0m[2m:[0m daemon request capacity [3mpipeline_requests[0m[2m=[0m32 [3mrpc_handlers[0m[2m=[0m128 [3mblocking_threads[0m[2m=[0m544
+[2m2026-11-17T08:48:26.047921Z[0m [32m INFO[0m [2mkache::daemon[0m[2m:[0m daemon listening on /mnt/kache-store/daemon.sock
+[2m2026-11-17T08:48:26.047952Z[0m [32m INFO[0m [2mkache::daemon[0m[2m:[0m durable upload replay scan complete [3mreplay_count[0m[2m=[0m0
+[2m2026-11-17T08:48:26.047976Z[0m [32m INFO[0m [2mkache::daemon[0m[2m:[0m started 16 upload workers
+[2m2026-11-17T08:48:26.049277Z[0m [32m INFO[0m [2mkache::daemon[0m[2m:[0m periodic GC sweep starting
+[2m2026-11-17T08:48:26.083341Z[0m [32m INFO[0m [2mkache::daemon[0m[2m:[0m periodic GC: size pass not due (under the trigger or backing off)
+[2m2026-11-17T08:48:26.084110Z[0m [32m INFO[0m [2mkache::daemon[0m[2m:[0m gc: housekeeping [3mkey_locks_removed[0m[2m=[0m0 [3mkey_locks_remaining[0m[2m=[0m0 [3mflights_removed[0m[2m=[0m0 [3mflights_remaining[0m[2m=[0m0 [3mpredictions_pruned[0m[2m=[0m0 [3mfile_hashes_pruned[0m[2m=[0m0 [3mprestage_pruned[0m[2m=[0m0
+[2m2026-11-17T08:48:26.084148Z[0m [32m INFO[0m [2mkache::daemon[0m[2m:[0m gc complete: 0 entries evicted, 0 B freed, 0 blobs removed in 34ms
+[2m2026-11-17T08:48:26.120439Z[0m [33m WARN[0m [2mkache::remote_backend[0m[2m:[0m http://10.77.0.2:3900: plain http to another machine: request signatures and cached objects travel unencrypted, and anyone on the path can replace an object. Use https://, or keep plain http to a loopback address
+[2m2026-11-17T08:48:26.175071Z[0m [32m INFO[0m [2mkache::remote_backend::s3_credentials[0m[2m:[0m loaded S3 credentials from KACHE_S3_ACCESS_KEY and KACHE_S3_SECRET_KEY
+[2m2026-11-17T08:48:26.207576Z[0m [32m INFO[0m [2mkache::daemon[0m[2m:[0m manifest prefetch: no identity or legacy manifest, skipping
+[2m2026-11-17T08:48:30.891827Z[0m [33m WARN[0m [2mkache::remote_backend[0m[2m:[0m http://10.77.0.2:3900: plain http to another machine: request signatures and cached objects travel unencrypted, and anyone on the path can replace an object. Use https://, or keep plain http to a loopback address
+[2m2026-11-17T08:48:31.084227Z[0m [32m INFO[0m [2mkache::remote_backend::s3_credentials[0m[2m:[0m loaded S3 credentials from KACHE_S3_ACCESS_KEY and KACHE_S3_SECRET_KEY
+No namespace provided, skipping shard upload
+[2m2026-11-17T08:58:06.085443Z[0m [32m INFO[0m [2mkache::daemon[0m[2m:[0m store /mnt/kache-store size 6148898463 over the automatic trigger (max 5368709120), running LRU eviction
+[2m2026-11-17T08:58:06.750966Z[0m [32m INFO[0m [2mkache::wrapper[0m[2m:[0m auto-gc: store at 5914134356 after the sweep, 1034219022 of it held by target directories that no sweep can free (max 5368709120)
+[2m2026-11-17T08:58:42.217327Z[0m [32m INFO[0m [2mkache::daemon[0m[2m:[0m shutdown requested via protocol, draining...
+[2m2026-11-17T08:58:42.237266Z[0m [32m INFO[0m [2mkache::daemon[0m[2m:[0m daemon stopped

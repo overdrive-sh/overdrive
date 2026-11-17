@@ -1,0 +1,9 @@
+2026-11-17T08:47:24.758Z mt-p up nic=eth0 ip=10.77.0.11 role=dev kernel=7.0.0-38-generic nproc=8
+2026-11-17T08:47:25.692Z mt-p seeding cargo home from host registry
+2026-11-17T08:47:26.664Z mt-p step mutants begin
+cargo-mutants 27.1.0
+2026-11-17T08:47:28.200Z mt-p candidate crates/overdrive-core/src/claim_set.rs mutants=4
+2026-11-17T08:47:28.721Z mt-p candidate crates/overdrive-core/src/race_once_cell.rs mutants=2
+2026-11-17T08:47:28.739Z mt-p no suitable file
+2026-11-17T08:47:28.766Z mt-p step mutants end rc=1
+2026-11-17T08:47:28.793Z mt-p role exit=1

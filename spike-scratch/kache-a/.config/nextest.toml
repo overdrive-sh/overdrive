@@ -1,0 +1,13 @@
+# Same mandatory Metal adapter as the repository's nextest config.
+experimental = ["wrapper-scripts"]
+
+[profile.default]
+slow-timeout = { period = "600s" }
+
+[scripts.wrapper.metal]
+command = { command-line = "../../infra/metal/test-wrapper.sh", relative-to = "workspace-root" }
+target-runner = "within-wrapper"
+
+[[profile.default.scripts]]
+filter = 'all()'
+run-wrapper = "metal"

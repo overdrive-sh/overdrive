@@ -1,0 +1,8 @@
+2026-11-17T08:48:22.730Z w12 up nic=eth0 ip=10.77.0.32 role=dev kernel=7.0.0-38-generic nproc=5
+2026-11-17T08:48:23.136Z w12 seeding cargo home from host registry
+2026-11-17T08:48:24.690Z w12 step conc begin
+2026-11-17T08:48:26.689Z w12 barrier passed: all peers ready
+2026-11-17T08:58:26.642Z w12 sample 000 conc-w1 rc=0 wall=599.733s
+2026-11-17T08:58:40.150Z w12 kache daemon drained (try 1)
+2026-11-17T08:58:40.327Z w12 step conc end rc=0
+2026-11-17T08:58:40.343Z w12 role exit=0

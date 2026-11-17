@@ -1,0 +1,12 @@
+2026-11-17T03:27:19.685Z ka-b up nic=eth0 ip=10.77.0.12 role=dev kernel=7.0.0-38-generic nproc=8
+2026-11-17T03:27:20.259Z ka-b seeding cargo home from host registry
+2026-11-17T03:27:21.889Z ka-b step ladder begin
+2026-11-17T03:37:02.680Z ka-b sample 000 s1-X rc=0 wall=578.259s
+2026-11-17T03:37:28.539Z ka-b sample 001 s2-leaf-cli rc=0 wall=12.624s
+2026-11-17T03:40:04.887Z ka-b sample 002 s2b-gateway rc=0 wall=145.494s
+2026-11-17T03:42:05.944Z ka-b sample 003 s3-core rc=0 wall=110.342s
+2026-11-17T03:42:47.355Z ka-b kache daemon drained (try 1)
+2026-11-17T03:42:47.799Z ka-b S7: default-lane tests (overdrive-core)
+2026-11-17T03:53:30.329Z ka-b sample 004 s7-tests-core rc=100 wall=642.222s
+2026-11-17T03:53:30.423Z ka-b step ladder end rc=0
+2026-11-17T03:53:30.469Z ka-b role exit=0

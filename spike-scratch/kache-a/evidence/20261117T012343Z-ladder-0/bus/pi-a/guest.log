@@ -1,0 +1,15 @@
+2026-11-17T02:15:20.499Z pi-a up nic=eth0 ip=10.77.0.11 role=dev kernel=7.0.0-38-generic nproc=8
+2026-11-17T02:15:20.890Z pi-a seeding cargo home from host registry
+2026-11-17T02:15:23.168Z pi-a step ladder begin
+2026-11-17T02:17:21.385Z pi-a sample 000 s1-X rc=0 wall=116.249s
+2026-11-17T02:17:23.369Z pi-a sample 001 s2-leaf-cli rc=0 wall=0.442s
+2026-11-17T02:17:25.591Z pi-a sample 002 s2b-gateway rc=0 wall=0.618s
+2026-11-17T02:17:31.285Z pi-a sample 003 s3-core rc=0 wall=4.431s
+2026-11-17T02:17:32.462Z pi-a S7: default-lane tests (overdrive-core)
+2026-11-17T02:28:20.149Z pi-a sample 004 s7-tests-core rc=0 wall=647.417s
+2026-11-17T02:28:20.183Z pi-a S4: edit loop x2
+2026-11-17T02:28:24.993Z pi-a sample 005 edit-setup rc=0 wall=4.519s
+2026-11-17T02:28:30.116Z pi-a sample 006 edit-1 rc=0 wall=4.383s
+2026-11-17T02:28:35.594Z pi-a sample 007 edit-2 rc=0 wall=4.341s
+2026-11-17T02:28:35.331Z pi-a step ladder end rc=0
+2026-11-17T02:28:35.409Z pi-a role exit=0

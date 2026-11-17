@@ -1,0 +1,14 @@
+==== BUCKET INFORMATION ====
+Bucket:          57c3db4368a6c5948c853d158c253f2a30957163961486b4f3530f2fb7ad2946
+Created:         2026-11-17 02:38:58.100 +00:00
+
+Size:            1.4 GB (1.3 GiB)
+Objects:         1620
+
+Website access:  false
+
+Global alias:    kache
+
+==== KEYS FOR THIS BUCKET ====
+Permissions  Access key                             Local aliases
+RWO          GKd50b54c17faa6c066ed642c0  kache-key  

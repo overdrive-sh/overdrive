@@ -1,0 +1,27 @@
+2026-11-17T08:36:58.128Z wh-b up nic=eth0 ip=10.77.0.12 role=dev kernel=7.0.0-38-generic nproc=8
+2026-11-17T08:36:58.465Z wh-b seeding cargo home from host registry
+2026-11-17T08:37:00.877Z wh-b step wronghit begin
+2026-11-17T08:37:15.542Z wh-b sample 000 w1-restore-pristine rc=0 wall=14.346s
+2026-11-17T08:37:15.711Z wh-b wronghit w1-restore-pristine => pass
+2026-11-17T08:37:20.134Z wh-b sample 001 w2-object-ONE rc=0 wall=4.233s
+2026-11-17T08:37:20.315Z wh-b wronghit w2-object-ONE => pass
+2026-11-17T08:37:21.488Z wh-b sample 002 w3-object-restored rc=0 wall=0.924s
+2026-11-17T08:37:21.693Z wh-b wronghit w3-object-restored => pass
+2026-11-17T08:37:25.663Z wh-b sample 003 w4-object-TWO-same-length rc=0 wall=3.744s
+2026-11-17T08:37:25.843Z wh-b wronghit w4-object-TWO-same-length => pass
+2026-11-17T08:37:29.904Z wh-b sample 004 w5-env-override-THREE rc=0 wall=3.809s
+2026-11-17T08:37:30.118Z wh-b wronghit w5-env-override-THREE => pass
+2026-11-17T08:37:31.313Z wh-b sample 005 w6-env-unset-pristine rc=0 wall=0.962s
+2026-11-17T08:37:31.514Z wh-b wronghit w6-env-unset-pristine => pass
+2026-11-17T08:37:32.618Z wh-b sample 006 w7-object-ONE-again rc=0 wall=0.873s
+2026-11-17T08:37:32.827Z wh-b wronghit w7-object-ONE-again => pass
+2026-11-17T08:37:32.912Z wh-b kache daemon drained (try 1)
+w1-restore-pristine	pass	target/debug/deps/liboverdrive_dataplane-56dd5e20deebed03.rlib
+w2-object-ONE	pass	target/debug/deps/liboverdrive_dataplane-56dd5e20deebed03.rlib
+w3-object-restored	pass	target/debug/deps/liboverdrive_dataplane-56dd5e20deebed03.rlib
+w4-object-TWO-same-length	pass	target/debug/deps/liboverdrive_dataplane-56dd5e20deebed03.rlib
+w5-env-override-THREE	pass	target/debug/deps/liboverdrive_dataplane-56dd5e20deebed03.rlib
+w6-env-unset-pristine	pass	target/debug/deps/liboverdrive_dataplane-56dd5e20deebed03.rlib
+w7-object-ONE-again	pass	target/debug/deps/liboverdrive_dataplane-56dd5e20deebed03.rlib
+2026-11-17T08:37:33.120Z wh-b step wronghit end rc=0
+2026-11-17T08:37:33.370Z wh-b role exit=0

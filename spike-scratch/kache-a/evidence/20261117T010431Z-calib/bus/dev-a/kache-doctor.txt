@@ -1,0 +1,47 @@
+[2m2026-11-17T01:04:46.026708Z[0m [33m WARN[0m [2mkache::remote_backend[0m[2m:[0m http://10.77.0.2:3900: plain http to another machine: request signatures and cached objects travel unencrypted, and anyone on the path can replace an object. Use https://, or keep plain http to a loopback address
+[2m2026-11-17T01:04:46.075909Z[0m [32m INFO[0m [2mkache::remote_backend::s3_credentials[0m[2m:[0m loaded S3 credentials from KACHE_S3_ACCESS_KEY and KACHE_S3_SECRET_KEY
+kache · doctor
+  v2.1.1 · rustc 1.95.0 (59807616e 2026-04-14)
+
+Setup
+  Binary           ✓   /mnt/kache-bin/kache
+  RUSTC_WRAPPER    ✓   kache via env
+  cargo doc        ✓   not set
+  Config file      ✓   /mnt/kache.toml
+  Host config      ✓   off (KACHE_HOST_CONFIG is empty)
+  Index mode       ✓   configured auto -> conservative (SQLite synchronous=NORMAL) for this process
+  Unit pruning     ✓   / is not on a local filesystem, so its build units are never removed
+  Install path     ✓   /mnt/kache-bin/kache (standalone, user-managed): the first kache on PATH, which keeps working until that file is replaced or removed
+  C/C++ shims      •   not installed
+                   →   kache init --shims && export PATH="$HOME/.local/lib/kache/shims:$PATH"
+  Compiler probe   ✓   cc -### resolves (cc (Ubuntu 15.2.0-16ubuntu1) 15.2.0)
+  Native linker    ✓   /home/ubuntu/.rustup/toolchains/1.95.0-x86_64-unknown-linux-gnu/lib/rustlib/x86_64-unknown-linux-gnu/bin/gcc-ld/ld.lld (LLD 22.1.2 (/checkout/src/llvm-project/llvm 1cb4e3833c1919c2e6fb579a23ac0e2b22587b7e) (compatible with GNU linkers))
+
+Storage
+  Cache dir           ✓   /mnt/kache-store
+  Cache FS            ✓   ext2/3/4 (local)
+  Store DB            ✓   /mnt/kache-store/index.db
+  Store access        ✓   directory create/write/remove works; read/write access to existing index/WAL/SHM files checked (1 present)
+  Store file limits   ✓   soft 1024, hard 4096 in this process; cargo and the daemon may inherit different limits
+  Cache free space    ✓   138.8 GiB free of 146.6 GiB at /mnt/kache-store; warning floor 10.0 GiB; 9828314 inodes available of 9830400; volume unix:6c2eac81cd526f38
+  Store temp space    ✓   11.7 GiB free of 11.7 GiB at /tmp; warning floor 1.0 GiB; 3075300 inodes available of 3075301; volume unix:c7d52c51e16a8b58
+  Store build space   ✓   144.4 GiB free of 846.2 GiB at /; warning floor 1.0 GiB; 53847854 inodes available of 56410112
+  Store quarantine    ✓   no retained corrupt index files
+  Store totals        ✓   0 unique entries, 0 B stored across 1 configured store
+  Link layout         ✗   hardlink build-tree → <store>/staging failed (ReadOnlyFilesystem): creating probe file /.kache-link-probe-242-934962675: Read-only file system (os error 30) (build: /, staging: /mnt/kache-store/store/staging)
+                      →   put the cache and build tree on the SAME mount for zero-copy sharing; if this layout is intentional, expect copies (see `kache report` copy reasons)
+
+Services
+  Remote            ✓   s3://kache/probe-20261117T010431Z-calib
+  Remote writes     ✓   read-write
+  Remote access     ✓   reachable; credentials from KACHE_S3_ACCESS_KEY and KACHE_S3_SECRET_KEY accepted
+  Remote endpoint   ✗   http://10.77.0.2:3900 uses plain http
+                    →   plain http to another machine: request signatures and cached objects travel unencrypted, and anyone on the path can replace an object. Use https://, or keep plain http to a loopback address
+  Daemon version    ✗   daemon not reachable
+                    →   start daemon with `kache daemon start` or `kache daemon install`; if it does not start, the reason is in /mnt/kache-store/daemon.log
+  Daemon service    ✗   not installed
+                    →   kache daemon install
+
+
+  4 issues found.
+

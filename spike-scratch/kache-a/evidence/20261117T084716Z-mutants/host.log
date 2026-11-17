@@ -1,0 +1,5 @@
+2026-11-17T08:47:16.542Z host boot cache ip=10.77.0.2 vcpus=4 mem=8G disk=100G role=cache 
+2026-11-17T08:47:22.614Z host boot mt-p ip=10.77.0.11 vcpus=8 mem=24G disk=100G role=dev SPIKE_STEPS=mutants ARM=plain PFX=m-plain
+2026-11-17T08:47:30.517Z host vm mt-p finished exit=1
+2026-11-17T08:47:32.635Z host evidence at /home/ubuntu/overdrive-worktrees/9d340a8ca57d5ca89b626cece0d62d03770aa9cd213856dc63ec27e31d3a81cc/spike-scratch/kache-a/evidence/20261117T084716Z-mutants: 21 files, owner ubuntu, mount / ext4 
+2026-11-17T08:47:32.642Z host exit rc=1

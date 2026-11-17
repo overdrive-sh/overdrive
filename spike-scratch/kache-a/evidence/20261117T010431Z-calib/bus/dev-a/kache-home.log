@@ -1,0 +1,28 @@
+2026-11-17T01:04:46.678637Z  INFO kache::daemon: raised the open-file limit from 1024 to 4096
+2026-11-17T01:04:46.682369Z  INFO kache::daemon: daemon request capacity pipeline_requests=32 rpc_handlers=128 blocking_threads=544
+2026-11-17T01:04:46.686489Z  INFO kache::daemon: daemon listening on /mnt/kache-store/daemon.sock
+2026-11-17T01:04:46.686517Z  INFO kache::daemon: durable upload replay scan complete replay_count=0
+2026-11-17T01:04:46.686553Z  INFO kache::daemon: started 16 upload workers
+2026-11-17T01:04:46.688059Z  INFO kache::daemon: periodic GC sweep starting
+2026-11-17T01:04:46.718950Z  INFO kache::daemon: periodic GC: size pass not due (under the trigger or backing off)
+2026-11-17T01:04:46.719309Z  INFO kache::daemon: gc: housekeeping key_locks_removed=0 key_locks_remaining=0 flights_removed=0 flights_remaining=0 predictions_pruned=0 file_hashes_pruned=0 prestage_pruned=0
+2026-11-17T01:04:46.719320Z  INFO kache::daemon: gc complete: 0 entries evicted, 0 B freed, 0 blobs removed in 30ms
+2026-11-17T01:04:46.905163Z  WARN kache::remote_backend: http://10.77.0.2:3900: plain http to another machine: request signatures and cached objects travel unencrypted, and anyone on the path can replace an object. Use https://, or keep plain http to a loopback address
+2026-11-17T01:04:47.134964Z  INFO kache::remote_backend::s3_credentials: loaded S3 credentials from KACHE_S3_ACCESS_KEY and KACHE_S3_SECRET_KEY
+2026-11-17T01:04:47.139079Z  INFO kache::daemon: manifest prefetch: no identity or legacy manifest, skipping
+2026-11-17T01:04:48.940680Z  INFO kache::daemon: shutdown requested via protocol, draining...
+2026-11-17T01:04:48.945670Z  INFO kache::daemon: daemon stopped
+2026-11-17T01:05:14.443644Z  INFO kache::daemon: raised the open-file limit from 1024 to 4096
+2026-11-17T01:05:14.452237Z  INFO kache::daemon: daemon request capacity pipeline_requests=32 rpc_handlers=128 blocking_threads=544
+2026-11-17T01:05:14.459018Z  INFO kache::daemon: daemon listening on /mnt/kache-store/daemon.sock
+2026-11-17T01:05:14.459047Z  INFO kache::daemon: durable upload replay scan complete replay_count=0
+2026-11-17T01:05:14.459085Z  INFO kache::daemon: started 16 upload workers
+2026-11-17T01:05:14.460567Z  INFO kache::daemon: periodic GC sweep starting
+2026-11-17T01:05:14.529903Z  INFO kache::daemon: periodic GC: size pass not due (under the trigger or backing off)
+2026-11-17T01:05:14.530626Z  INFO kache::daemon: gc: housekeeping key_locks_removed=0 key_locks_remaining=0 flights_removed=0 flights_remaining=0 predictions_pruned=0 file_hashes_pruned=0 prestage_pruned=0
+2026-11-17T01:05:14.530641Z  INFO kache::daemon: gc complete: 0 entries evicted, 0 B freed, 0 blobs removed in 69ms
+2026-11-17T01:05:14.621833Z  WARN kache::remote_backend: http://10.77.0.2:3900: plain http to another machine: request signatures and cached objects travel unencrypted, and anyone on the path can replace an object. Use https://, or keep plain http to a loopback address
+2026-11-17T01:05:14.745497Z  INFO kache::remote_backend::s3_credentials: loaded S3 credentials from KACHE_S3_ACCESS_KEY and KACHE_S3_SECRET_KEY
+2026-11-17T01:05:14.783475Z  INFO kache::daemon: manifest prefetch: no identity or legacy manifest, skipping
+2026-11-17T01:05:15.471003Z  INFO kache::daemon: shutdown requested via protocol, draining...
+2026-11-17T01:05:15.481833Z  INFO kache::daemon: daemon stopped

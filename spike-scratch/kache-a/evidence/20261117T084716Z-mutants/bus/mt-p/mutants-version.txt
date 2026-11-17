@@ -1,0 +1,1 @@
+cargo-mutants 27.1.0

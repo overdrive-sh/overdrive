@@ -1,0 +1,16 @@
+2026-11-17T01:42:24.349Z sc-a up nic=eth0 ip=10.77.0.11 role=dev kernel=7.0.0-38-generic nproc=8
+2026-11-17T01:42:24.734Z sc-a seeding cargo home from host registry
+2026-11-17T01:42:27.351Z sc-a step ladder begin
+2026-11-17T01:44:15.512Z sc-a sample 000 s1-X rc=0 wall=106.976s
+2026-11-17T01:44:16.811Z sc-a rebase: leaf diff (overdrive-cli)
+2026-11-17T01:44:17.442Z sc-a sample 001 s2-leaf-cli rc=0 wall=0.376s
+2026-11-17T01:44:19.397Z sc-a sample 002 s2b-gateway rc=0 wall=0.437s
+2026-11-17T01:44:30.644Z sc-a sample 003 s3-core rc=0 wall=9.835s
+2026-11-17T01:44:31.848Z sc-a S7: default-lane tests (overdrive-core)
+2026-11-17T01:56:25.596Z sc-a sample 004 s7-tests-core rc=0 wall=713.512s
+2026-11-17T01:56:25.626Z sc-a S4: edit loop x2
+2026-11-17T01:56:34.922Z sc-a sample 005 edit-setup rc=0 wall=9.075s
+2026-11-17T01:56:44.215Z sc-a sample 006 edit-1 rc=0 wall=9.063s
+2026-11-17T01:56:53.630Z sc-a sample 007 edit-2 rc=0 wall=9.155s
+2026-11-17T01:56:53.715Z sc-a step ladder end rc=0
+2026-11-17T01:56:53.744Z sc-a role exit=0

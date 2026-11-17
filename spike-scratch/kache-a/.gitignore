@@ -1,0 +1,3 @@
+# Third-party binaries and sources staged for the guests; not committed.
+staging/
+target/

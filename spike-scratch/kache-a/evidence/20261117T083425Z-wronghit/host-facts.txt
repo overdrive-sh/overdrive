@@ -1,0 +1,11 @@
+run=20261117T083425Z-wronghit plan=wronghit
+metal_run_id=80ddbb738afe6f2e9c4c9786
+uname=7.0.0-38-generic
+nproc=16
+mem_total_gb=62
+fs=ext4 size=847G avail=95G
+source: commit=d1953f3f7797d7e69c5a932b55305e3415888018
+source: workspace=/Users/marcus/conductor/workspaces/helios/antananarivo
+source: source_digest=6e7ea72d9d0099873d492c114f2e696ecde22bfe2df0ad5e6a2f63a33951e12e
+cloud_hypervisor=cloud-hypervisor v53.0.0
+virtiofsd=virtiofsd 1.13.2

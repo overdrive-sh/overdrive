@@ -1,0 +1,13 @@
+2026-11-17T08:38:07.376Z pl-p up nic=eth0 ip=10.77.0.14 role=dev kernel=7.0.0-38-generic nproc=8
+2026-11-17T08:38:07.413Z pl-p seeding cargo home from host registry
+2026-11-17T08:38:09.884Z pl-p step place begin
+2026-11-17T08:41:48.115Z pl-p sample 000 place-plain rc=0 wall=217.929s
+total 24
+drwxr-xr-x 2 root root 4096 Nov 17  2026 .
+drwxr-xr-x 4 root root 4096 Nov 17  2026 ..
+-rw-r--r-- 1 root root  316 Nov 17  2026 0.0.0-compile_fail-test.bin
+-rw-r--r-- 1 root root 1281 Nov 17  2026 0.0.0-overdrive_gateway-lib.bin
+-rw-r--r-- 1 root root  180 Nov 17  2026 0.0.0-overdrive_host-lib.bin
+-rw-r--r-- 1 root root  143 Nov 17  2026 0.0.0-overdrive_testing-lib.bin
+2026-11-17T08:41:51.510Z pl-p step place end rc=0
+2026-11-17T08:41:51.538Z pl-p role exit=0

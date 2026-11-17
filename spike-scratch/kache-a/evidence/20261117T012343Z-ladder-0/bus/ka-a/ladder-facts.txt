@@ -1,0 +1,4 @@
+arm=kache role=A pfx=l0-kache ws=/mnt/ws loop=2
+7.0.0-38-generic
+8
+Mem:              23           0          22           0           0          23

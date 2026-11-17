@@ -1,0 +1,15 @@
+2026-11-17T01:23:43.511Z host boot cache ip=10.77.0.2 vcpus=4 mem=8G disk=150G role=cache 
+2026-11-17T01:23:49.625Z host boot ka-a ip=10.77.0.11 vcpus=8 mem=24G disk=150G role=dev SPIKE_STEPS=ladder ARM=kache PFX=l0-kache ROLE=A LOOP=2 TESTS=1 SMOKE=1
+2026-11-17T01:38:30.443Z host vm ka-a finished exit=0
+2026-11-17T01:38:30.990Z host boot ka-b ip=10.77.0.12 vcpus=8 mem=24G disk=150G role=dev SPIKE_STEPS=ladder ARM=kache PFX=l0-kache ROLE=B LOOP=0 TESTS=1 SMOKE=1
+2026-11-17T01:42:21.281Z host vm ka-b finished exit=0
+2026-11-17T01:42:21.811Z host boot sc-a ip=10.77.0.11 vcpus=8 mem=24G disk=150G role=dev SPIKE_STEPS=ladder ARM=sccache PFX=l0-sccache ROLE=A LOOP=2 TESTS=1 SMOKE=1
+2026-11-17T01:56:57.210Z host vm sc-a finished exit=0
+2026-11-17T01:56:57.633Z host boot sc-b ip=10.77.0.12 vcpus=8 mem=24G disk=150G role=dev SPIKE_STEPS=ladder ARM=sccache PFX=l0-sccache ROLE=B LOOP=0 TESTS=1 SMOKE=1
+2026-11-17T02:02:48.725Z host vm sc-b finished exit=0
+2026-11-17T02:02:48.750Z host boot pn-a ip=10.77.0.11 vcpus=8 mem=24G disk=150G role=dev SPIKE_STEPS=ladder ARM=plain-noinc PFX=l0-plain-noinc ROLE=A LOOP=2 TESTS=1 SMOKE=1
+2026-11-17T02:15:17.944Z host vm pn-a finished exit=0
+2026-11-17T02:15:17.675Z host boot pi-a ip=10.77.0.11 vcpus=8 mem=24G disk=150G role=dev SPIKE_STEPS=ladder ARM=plain PFX=l0-plain ROLE=A LOOP=2 TESTS=1 SMOKE=1
+2026-11-17T02:28:42.805Z host vm pi-a finished exit=0
+2026-11-17T02:28:45.502Z host evidence at /home/ubuntu/overdrive-worktrees/9d340a8ca57d5ca89b626cece0d62d03770aa9cd213856dc63ec27e31d3a81cc/spike-scratch/kache-a/evidence/20261117T012343Z-ladder-0: 258 files, owner ubuntu, mount / ext4 
+2026-11-17T02:28:45.511Z host exit rc=0

@@ -1,0 +1,4 @@
+cloud-hypervisor: 1125.208130s: <vmm> WARN:vmm/src/device_manager.rs:5970 -- Skipping resume for disconnected device /tmp/ks.GKvDGI/cache-root.sock
+cloud-hypervisor: 1125.208252s: <vmm> WARN:vmm/src/device_manager.rs:5970 -- Skipping resume for disconnected device /tmp/ks.GKvDGI/cache-bus.sock
+cloud-hypervisor: 1125.209473s: <vmm> WARN:vmm/src/device_manager.rs:5970 -- Skipping resume for disconnected device /tmp/ks.GKvDGI/cache-root.sock
+cloud-hypervisor: 1125.209595s: <vmm> WARN:vmm/src/device_manager.rs:5970 -- Skipping resume for disconnected device /tmp/ks.GKvDGI/cache-bus.sock

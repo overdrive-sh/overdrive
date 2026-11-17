@@ -1,0 +1,14 @@
+2026-11-17T08:41:59.723Z pl-k up nic=eth0 ip=10.77.0.15 role=dev kernel=7.0.0-38-generic nproc=8
+2026-11-17T08:42:00.687Z pl-k seeding cargo home from host registry
+2026-11-17T08:42:01.695Z pl-k step place begin
+2026-11-17T08:46:22.877Z pl-k sample 000 place-kache rc=0 wall=260.087s
+2026-11-17T08:46:26.102Z pl-k kache daemon drained (try 1)
+total 24
+drwxr-xr-x 2 root root 4096 Nov 17  2026 .
+drwxr-xr-x 4 root root 4096 Nov 17  2026 ..
+-rw-r--r-- 1 root root  316 Nov 17  2026 0.0.0-compile_fail-test.bin
+-rw-r--r-- 1 root root 1281 Nov 17  2026 0.0.0-overdrive_gateway-lib.bin
+-rw-r--r-- 1 root root  180 Nov 17  2026 0.0.0-overdrive_host-lib.bin
+-rw-r--r-- 1 root root  143 Nov 17  2026 0.0.0-overdrive_testing-lib.bin
+2026-11-17T08:46:26.775Z pl-k step place end rc=0
+2026-11-17T08:46:26.102Z pl-k role exit=0

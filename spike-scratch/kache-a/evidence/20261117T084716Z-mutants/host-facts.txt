@@ -1,0 +1,11 @@
+run=20261117T084716Z-mutants plan=mutants
+metal_run_id=d490e8b6d8c82d25e5b795b3
+uname=7.0.0-38-generic
+nproc=16
+mem_total_gb=62
+fs=ext4 size=847G avail=95G
+source: commit=d1953f3f7797d7e69c5a932b55305e3415888018
+source: workspace=/Users/marcus/conductor/workspaces/helios/antananarivo
+source: source_digest=86a9bab5db6ae7212268b4aef91b0f4cde5dcdb91c0f86252a897951d1df0648
+cloud_hypervisor=cloud-hypervisor v53.0.0
+virtiofsd=virtiofsd 1.13.2

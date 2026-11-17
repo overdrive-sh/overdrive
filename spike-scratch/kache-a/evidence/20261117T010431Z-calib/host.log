@@ -1,0 +1,5 @@
+2026-11-17T01:04:32.656Z host boot cache ip=10.77.0.2 vcpus=2 mem=4G disk=100G role=cache 
+2026-11-17T01:04:38.176Z host boot dev-a ip=10.77.0.11 vcpus=8 mem=24G disk=150G role=dev SPIKE_STEPS=probe,calib
+2026-11-17T01:14:20.103Z host vm dev-a finished exit=0
+2026-11-17T01:14:22.203Z host evidence at /home/ubuntu/overdrive-worktrees/9d340a8ca57d5ca89b626cece0d62d03770aa9cd213856dc63ec27e31d3a81cc/spike-scratch/kache-a/evidence/20261117T010431Z-calib: 39 files, owner ubuntu, mount / ext4 
+2026-11-17T01:14:22.209Z host exit rc=0
