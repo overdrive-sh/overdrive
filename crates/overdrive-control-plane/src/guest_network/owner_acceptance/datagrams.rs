@@ -158,46 +158,6 @@ async fn dns_to_the_gateway_pairs_and_other_prefix_addresses_are_policy() {
     assert_eq!(c.io.issued_count(SimEffectKind::OpenPeer), udp_sockets_before);
 }
 
-/// D24 (host step 4): a UDP association to a service VIP is connected
-/// unmarked and rewritten by `connect4` to a backend; the kernel peer is
-/// outside the guest prefix, so the association pairs. A VIP rewritten to an
-/// address inside the guest prefix (other than `gateway:53`) is refused
-/// `Policy` by the kernel-peer check (#310).
-///
-/// CONTRACT_SHAPE: bounded-change.
-#[tokio::test(flavor = "current_thread", start_paused = true)]
-async fn a_vip_association_is_rewritten_by_connect4_and_checked_on_its_kernel_peer() {
-    let c = Composition::booted(89).await;
-    let (lease, _session) = c.active_lease("dgram-vip", &[]).await;
-    let vip = SocketAddrV4::new(Ipv4Addr::new(10, 96, 0, 20), 53);
-    c.io.set_connect4_rewrite(vip, SocketAddrV4::new(Ipv4Addr::new(10, 0, 0, 20), 5353));
-    let routed = associate(&c, &lease, 1, vip).await;
-    assert!(c.observe().await.cids[&lease.cid].datagrams.contains_key(&routed.flow));
-    let marks: Vec<_> =
-        c.io.issued()
-            .into_iter()
-            .filter_map(|effect| match effect.target {
-                SimEffectTarget::Peer(spec) if effect.kind == SimEffectKind::OpenPeer => {
-                    Some(spec.owner_egress_mark)
-                }
-                _ => None,
-            })
-            .collect();
-    assert_eq!(marks, vec![false], "a datagram to a service VIP carries no owner egress mark");
-
-    let into_prefix = SocketAddrV4::new(Ipv4Addr::new(10, 96, 0, 21), 53);
-    let workload =
-        SocketAddrV4::new(Ipv4Addr::from(u32::from(GUEST_NODE_PREFIX.network()) + 30), 53);
-    c.io.set_connect4_rewrite(into_prefix, workload);
-    let (key, flow) = c.open_datagram(&lease, 2, into_prefix, 7002);
-    c.settle().await;
-    assert!(
-        sent_to(&c, lease.cid)
-            .contains(&ControlMessage::Refused { flow, refusal: FlowRefusal::Policy })
-    );
-    assert!(c.io.socket_observation().closed_by_owner.contains(&key));
-}
-
 /// Outcome anchor: OUT-RCG-GUEST-UDP-TO-VIP-REFUSED
 /// D-11 (ADR-0298), slice 02 AC7 — guest UDP to a VIP is unsupported until
 /// GH #310: a datagram association whose destination lies in the configured
@@ -205,13 +165,8 @@ async fn a_vip_association_is_rewritten_by_connect4_and_checked_on_its_kernel_pe
 /// socket is made, connected or sent on. A destination outside the range keeps
 /// the generic path (the `gateway:53` exemption, the guest-prefix refusal).
 ///
-/// Pending: the owner still connects the association through the `connect4`
-/// rewrite path until the deletion lands, so the body fails at the refusal
-/// assertion.
-///
 /// CONTRACT_SHAPE: pure refusal (return-only; no socket, no route lookup).
 #[tokio::test(flavor = "current_thread", start_paused = true)]
-#[should_panic(expected = "a UDP association to a service VIP must be refused Policy")]
 async fn a_udp_association_to_a_service_vip_is_refused_policy_before_any_socket_is_made() {
     let c = Composition::booted(90).await;
     let (lease, _session) = c.active_lease("dgram-vip-refused", &[]).await;

@@ -8,7 +8,6 @@
 
 use std::collections::BTreeMap;
 use std::net::Ipv4Addr;
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use ipnet::Ipv4Net;
@@ -404,11 +403,6 @@ pub enum GuestNetworkError {
     /// A repair of this component is already in flight; nothing changed.
     #[error("a repair of shared guest-network component {component:?} is already in flight")]
     RepairInFlight { component: SharedGuestNetworkComponent },
-    /// D24: the owner's cgroup is not at or below the `connect4` attach path.
-    #[error(
-        "the owner cgroup {owner:?} is not at or below the connect4 attach point {attach_point:?}"
-    )]
-    OwnerCgroupPlacement { owner: PathBuf, attach_point: PathBuf },
 }
 
 /// Guest-network result alias.
@@ -892,7 +886,7 @@ impl HostSharedGuestNetworkOwner {
 /// Phase 1 of the host guest-flow owner's two-phase boot (D-8, § *Composition*
 /// step 1): every `probe_startup` check over one `io.host_facts()` snapshot —
 /// `GuestPrefixOverlapsVipRange` first, then `GuestPrefixOverlapsNodeAddress`,
-/// `OwnerCgroupPlacement`, `FdBudget` — then `io.probe_forwarder()`
+/// `FdBudget` — then `io.probe_forwarder()`
 /// (`GuestNetworkError::Forwarder { source }`). Runs before the owner exists
 /// and before any boot effect, and leaves nothing behind: the probe's
 /// forwarder context is released before return, on `Ok` and on `Err`.
@@ -921,14 +915,6 @@ pub(crate) async fn probe_guest_flow_startup(
                 address: *address,
             });
         }
-    }
-
-    let attach_point = PathBuf::from(overdrive_dataplane::DEFAULT_CGROUP_ATTACH_PATH);
-    if !facts.owner_cgroup.starts_with(&attach_point) {
-        return Err(GuestNetworkError::OwnerCgroupPlacement {
-            owner: facts.owner_cgroup,
-            attach_point,
-        });
     }
 
     // ADMISSIONREFUSAL1 retains the accepted four-place-per-attachment node

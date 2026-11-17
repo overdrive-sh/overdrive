@@ -45,7 +45,6 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::Ipv4Addr;
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use ipnet::Ipv4Net;
@@ -431,40 +430,8 @@ fn probe_startup_refuses_a_node_address_iff_one_lies_inside_the_guest_prefix() {
 }
 
 // ---------------------------------------------------------------------------
-// D24 owner placement and the fd budget
+// The fd budget
 // ---------------------------------------------------------------------------
-
-/// P4-S13 / D24 — An owner outside the `connect4` attach path
-/// (`overdrive.slice`) refuses startup before any boot effect, naming its
-/// cgroup.
-/// CONTRACT_SHAPE: unbounded-preservation.
-#[tokio::test(flavor = "current_thread", start_paused = true)]
-async fn an_owner_outside_the_connect4_attach_path_refuses_before_any_boot_effect() {
-    for outside in ["/sys/fs/cgroup/system.slice", "/sys/fs/cgroup"] {
-        let serve = Serve::start(owner_ports(&disjoint_vip(), BTreeSet::new()));
-        serve.io.update_host_facts(|facts| facts.owner_cgroup = PathBuf::from(outside));
-        let refused = serve.owner.probe_startup().await.expect_err("refuses OwnerCgroupPlacement");
-        assert!(
-            matches!(
-                &refused,
-                GuestNetworkError::OwnerCgroupPlacement { owner, .. }
-                    if owner.as_path() == std::path::Path::new(outside)
-            ),
-            "OwnerCgroupPlacement naming {outside}, got {refused:?}",
-        );
-        assert!(
-            effects_beyond_probe(&serve.io).is_empty(),
-            "no boot effect beyond the probe before the refusal"
-        );
-        serve.exit();
-    }
-    let serve = Serve::start(owner_ports(&disjoint_vip(), BTreeSet::new()));
-    serve.io.update_host_facts(|facts| {
-        facts.owner_cgroup = PathBuf::from("/sys/fs/cgroup/overdrive.slice/control-plane.slice");
-    });
-    serve.owner.probe_startup().await.expect("an owner below the attach path passes");
-    serve.exit();
-}
 
 /// P4-S13 — An `RLIMIT_NOFILE` below the owner's fd budget refuses startup
 /// before any boot effect, naming what is available.

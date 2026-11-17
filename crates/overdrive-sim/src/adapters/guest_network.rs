@@ -3,8 +3,7 @@
 //! Scripts what a consumer of the owner's ports (the action shim, the
 //! composition root) branches on: the three `ForwardingActivation` outcomes,
 //! standing refusal slots for every non-audit operation, one-shot and standing
-//! audit damage, the `OwnerCgroupPlacement` (or any other) startup refusal,
-//! and records every port call in order.
+//! audit damage, and records every port call in order.
 //!
 //! **Quiescence (QHOLD, D-UP-4, PD-2).** The adapter owns its own
 //! `QuiescenceLedger` (public in `overdrive-control-plane`, not `Clone`; one
@@ -108,7 +107,6 @@ pub struct SimSharedGuestNetworkOwner {
     standing_activation: Mutex<Option<ForwardingActivation>>,
     audit_damage: Mutex<BTreeSet<AllocationId>>,
     condemned: Mutex<BTreeSet<AllocationId>>,
-    probe_error: Mutex<Option<GuestNetworkError>>,
     audit_error: Mutex<Option<(SharedGuestNetworkComponent, GuestNetworkError)>>,
     sweep_host_state: Option<SimVmHostState>,
     quiescence: SimQuiescence,
@@ -138,12 +136,6 @@ impl SimSharedGuestNetworkOwner {
     }
     pub fn script_probe_failure(&self, armed: bool) {
         self.probe.store(armed, Ordering::SeqCst);
-    }
-    /// Script the next startup-probe result with the exact accepted typed
-    /// error — `OwnerCgroupPlacement`, `FdBudget`, a guest-prefix overlap, or
-    /// a primary+cleanup aggregate.
-    pub fn script_next_probe_error(&self, error: GuestNetworkError) {
-        *self.probe_error.lock() = Some(error);
     }
     pub fn script_sweep_failure(&self, armed: bool) {
         self.sweep.store(armed, Ordering::SeqCst);
@@ -326,10 +318,6 @@ impl GuestStreamDial for SimSharedGuestNetworkOwner {
 impl SharedGuestNetworkOwner for SimSharedGuestNetworkOwner {
     async fn probe_startup(&self) -> Result<()> {
         self.record(GuestNetworkOperation::StartupProbe);
-        let scripted_error = self.probe_error.lock().take();
-        if let Some(error) = scripted_error {
-            return Err(error);
-        }
         Self::result(&self.probe, GuestNetworkOperation::StartupProbe)
     }
 
@@ -443,30 +431,6 @@ pub fn test_wiring(
 mod tests {
     use super::*;
     use crate::adapters::clock::SimClock;
-    use std::path::PathBuf;
-
-    /// CONTRACT_SHAPE: bounded-change.
-    ///
-    /// The scripted `OwnerCgroupPlacement` startup refusal (D24) is one-shot
-    /// and only port calls are recorded.
-    #[tokio::test]
-    async fn scripted_probe_error_is_one_shot_and_records_only_port_calls() {
-        let owner = SimSharedGuestNetworkOwner::default();
-        owner.script_next_probe_error(GuestNetworkError::OwnerCgroupPlacement {
-            owner: PathBuf::from("/sys/fs/cgroup/user.slice"),
-            attach_point: PathBuf::from("/sys/fs/cgroup/overdrive.slice"),
-        });
-
-        assert!(matches!(
-            owner.probe_startup().await,
-            Err(GuestNetworkError::OwnerCgroupPlacement { .. })
-        ));
-        owner.probe_startup().await.expect("one-shot script is consumed");
-        assert_eq!(
-            owner.calls(),
-            [GuestNetworkOperation::StartupProbe, GuestNetworkOperation::StartupProbe]
-        );
-    }
 
     /// CONTRACT_SHAPE: bounded-change.
     ///

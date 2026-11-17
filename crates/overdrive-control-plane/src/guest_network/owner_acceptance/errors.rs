@@ -16,7 +16,6 @@
 
 use std::collections::BTreeSet;
 use std::io;
-use std::path::PathBuf;
 
 use ipnet::Ipv4Net;
 use overdrive_core::guest_transport::forwarder::{
@@ -54,7 +53,6 @@ const fn taxonomy_name(error: &GuestNetworkError) -> &'static str {
         }
         GuestNetworkError::GuestPrefixOverlapsVipRange { .. } => "GuestPrefixOverlapsVipRange",
         GuestNetworkError::FdBudget { .. } => "FdBudget",
-        GuestNetworkError::OwnerCgroupPlacement { .. } => "OwnerCgroupPlacement",
         GuestNetworkError::RepairInFlight { .. } => "RepairInFlight",
     }
 }
@@ -124,13 +122,6 @@ async fn every_probe_startup_refusal_is_its_own_variant_and_changes_nothing() {
         Err(GuestNetworkError::FdBudget { available: 1_024, .. })
     ));
 
-    let placement = Composition::non_mesh(4);
-    placement.io.update_host_facts(|facts| facts.owner_cgroup = PathBuf::from("/sys/fs/cgroup"));
-    assert!(matches!(
-        placement.owner.probe_startup().await,
-        Err(GuestNetworkError::OwnerCgroupPlacement { .. })
-    ));
-
     let unreadable = Composition::non_mesh(6);
     unreadable
         .io
@@ -140,7 +131,7 @@ async fn every_probe_startup_refusal_is_its_own_variant_and_changes_nothing() {
         Err(GuestNetworkError::Io { operation: GuestNetworkOperation::StartupProbe, .. })
     ));
 
-    for c in [&both, &address, &budget, &placement, &unreadable] {
+    for c in [&both, &address, &budget, &unreadable] {
         assert_eq!(listener_or_route_effects(c), 0, "a refused probe issues no boot effect");
         assert_eq!(c.io.gateway_route(), None);
     }

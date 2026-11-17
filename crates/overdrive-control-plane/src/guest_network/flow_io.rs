@@ -84,7 +84,6 @@ mod accept_path_tier3;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::{Ipv4Addr, SocketAddrV4};
-use std::path::PathBuf;
 
 use ipnet::Ipv4Net;
 use overdrive_core::guest_transport::dial::GuestStream;
@@ -198,8 +197,6 @@ pub(crate) struct GuestHostFacts {
     pub(crate) interfaces: BTreeMap<InterfaceIndex, BTreeSet<Ipv4Net>>,
     /// Soft `RLIMIT_NOFILE` of the `serve` process.
     pub(crate) nofile_limit: u64,
-    /// The `serve` process's cgroup v2 path.
-    pub(crate) owner_cgroup: PathBuf,
 }
 
 /// A host peer socket's transport.
@@ -340,10 +337,7 @@ pub(crate) trait GuestFlowIo: Send + Sync {
     async fn open_peer(&self, spec: PeerSocketSpec) -> Result<PeerSocket, FlowIoError>;
     /// `getsockname` as the kernel reports it.
     fn local_addr(&self, peer: &PeerSocket) -> Result<SocketAddrV4, FlowIoError>;
-    /// `getpeername` as the kernel reports it.
-    fn peer_addr(&self, peer: &PeerSocket) -> Result<SocketAddrV4, FlowIoError>;
-    /// UDP `connect()` (sends nothing; a `connect4` VIP rewrite is visible in
-    /// `peer_addr` afterwards).
+    /// UDP `connect()` (sends nothing).
     async fn connect_udp(
         &self,
         peer: &PeerSocket,

@@ -1323,20 +1323,20 @@ async fn datagram_associate(
         if static_host_internal(address) {
             return Err(FlowOutcome::Refused(FlowRefusal::HostInternal));
         }
-        let vip = runtime_vip_contains(runtime, address);
-        if !vip {
-            let route_type = tokio::select! {
-                biased;
-                () = cancel.cancelled() => {
-                    return Err(pending_datagram_cancel_outcome(runtime, key.peer_cid, flow));
-                }
-                result = io.route_type(address) => result.map_err(|_| FlowRefusal::HostInternal)?,
-            };
-            match route_type {
-                HostRouteType::Unicast => {}
-                _ if address == gateway && destination.port() == 53 => {}
-                _ => return Err(FlowOutcome::Refused(FlowRefusal::HostInternal)),
+        if runtime_vip_contains(runtime, address) {
+            return Err(FlowOutcome::Refused(FlowRefusal::Policy));
+        }
+        let route_type = tokio::select! {
+            biased;
+            () = cancel.cancelled() => {
+                return Err(pending_datagram_cancel_outcome(runtime, key.peer_cid, flow));
             }
+            result = io.route_type(address) => result.map_err(|_| FlowRefusal::HostInternal)?,
+        };
+        match route_type {
+            HostRouteType::Unicast => {}
+            _ if address == gateway && destination.port() == 53 => {}
+            _ => return Err(FlowOutcome::Refused(FlowRefusal::HostInternal)),
         }
         let peer = tokio::select! {
             biased;
@@ -1345,7 +1345,7 @@ async fn datagram_associate(
             }
             peer = io.open_peer(PeerSocketSpec {
                 protocol: PeerProtocol::Udp,
-                owner_egress_mark: !(vip || address == gateway && destination.port() == 53),
+                owner_egress_mark: !(address == gateway && destination.port() == 53),
                 abortive_linger: true,
                 bind: None,
             }) => peer.map_err(|_| FlowRefusal::DestinationUnreachable)?,
@@ -1361,11 +1361,6 @@ async fn datagram_associate(
         if connected.is_err() {
             io.abort(peer.into()).await;
             return Err(FlowOutcome::Refused(FlowRefusal::DestinationUnreachable));
-        }
-        let kernel_peer = io.peer_addr(&peer).map_err(|_| FlowRefusal::DestinationUnreachable)?;
-        if node_prefix.contains(kernel_peer.ip()) && !(kernel_peer.ip() == &gateway && kernel_peer.port() == 53) {
-            io.abort(peer.into()).await;
-            return Err(FlowOutcome::Refused(FlowRefusal::Policy));
         }
         let mode = PairMode::Datagram { udp: PairSide::B };
         let Some(vsock) = vsock.take() else {

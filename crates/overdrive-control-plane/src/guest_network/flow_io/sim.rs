@@ -88,7 +88,6 @@ mod tests;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::io;
 use std::net::{Ipv4Addr, SocketAddrV4};
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -441,7 +440,6 @@ struct RecordState {
 struct PeerState {
     spec: PeerSocketSpec,
     local: Option<SocketAddrV4>,
-    peer: Option<SocketAddrV4>,
     /// The flow the peer was attached for (learnt at `attach`).
     flow: Option<FlowId>,
     socket: SimSocket,
@@ -527,7 +525,6 @@ struct SimState {
     next_assigned_port: u32,
     handles: BTreeMap<u64, HandleState>,
     route_types: BTreeMap<Ipv4Addr, FibRouteType>,
-    connect4: BTreeMap<SocketAddrV4, SocketAddrV4>,
     vm_gone: BTreeSet<GuestCid>,
     closed_by_owner: BTreeSet<GuestConnKey>,
     /// Far-end events of the owner's own closes of sockets the forwarder
@@ -644,9 +641,6 @@ impl SimGuestFlowIo {
                 host_facts: GuestHostFacts {
                     interfaces: BTreeMap::new(),
                     nofile_limit: 1_048_576,
-                    owner_cgroup: PathBuf::from(
-                        "/sys/fs/cgroup/overdrive.slice/control-plane.slice",
-                    ),
                 },
                 stale_objects: false,
                 gateway_route: None,
@@ -657,7 +651,6 @@ impl SimGuestFlowIo {
                 next_assigned_port: SIM_FIRST_ASSIGNED_PORT,
                 handles: BTreeMap::new(),
                 route_types: BTreeMap::new(),
-                connect4: BTreeMap::new(),
                 vm_gone: BTreeSet::new(),
                 closed_by_owner: BTreeSet::new(),
                 local_far_end: BTreeMap::new(),
@@ -953,11 +946,6 @@ impl SimGuestFlowIo {
     /// `route_type(destination)` answers `route` (default `Unicast`).
     pub(crate) fn set_route_type(&self, destination: Ipv4Addr, route: FibRouteType) {
         self.state.lock().route_types.insert(destination, route);
-    }
-
-    /// A UDP `connect()` to `vip` is rewritten by `connect4` to `backend`.
-    pub(crate) fn set_connect4_rewrite(&self, vip: SocketAddrV4, backend: SocketAddrV4) {
-        self.state.lock().connect4.insert(vip, backend);
     }
 
     /// The live forwarder ids the sim issued in the current context.
@@ -2372,7 +2360,7 @@ impl GuestFlowIo for SimGuestFlowIo {
         };
         let handle = self.issue(
             &mut st,
-            HandleState::Peer(PeerState { spec, local, peer: None, flow: None, socket }),
+            HandleState::Peer(PeerState { spec, local, flow: None, socket }),
         );
         Ok(PeerSocket(handle))
     }
@@ -2384,16 +2372,6 @@ impl GuestFlowIo for SimGuestFlowIo {
                 state.local.ok_or_else(|| io_error(io::ErrorKind::NotConnected))
             }
             _ => unreachable!("local_addr on a handle that is not a peer socket"),
-        }
-    }
-
-    fn peer_addr(&self, peer: &PeerSocket) -> Result<SocketAddrV4, FlowIoError> {
-        let id = self.own(peer.0);
-        match self.state.lock().handles.get(&id) {
-            Some(HandleState::Peer(state)) => {
-                state.peer.ok_or_else(|| io_error(io::ErrorKind::NotConnected))
-            }
-            _ => unreachable!("peer_addr on a handle that is not a peer socket"),
         }
     }
 
@@ -2412,7 +2390,6 @@ impl GuestFlowIo for SimGuestFlowIo {
             };
         }
         let mut st = self.state.lock();
-        let rewritten = st.connect4.get(&destination).copied().unwrap_or(destination);
         let port = st.next_port;
         st.next_port += 1;
         match st.handles.get_mut(&id) {
@@ -2420,7 +2397,6 @@ impl GuestFlowIo for SimGuestFlowIo {
                 if state.spec.protocol != PeerProtocol::Udp {
                     unreachable!("connect_udp on a TCP peer socket");
                 }
-                state.peer = Some(rewritten);
                 if state.local.is_none() {
                     state.local = Some(SocketAddrV4::new(Ipv4Addr::LOCALHOST, port));
                 }
@@ -2446,9 +2422,7 @@ impl GuestFlowIo for SimGuestFlowIo {
         }
         let mut st = self.state.lock();
         match st.handles.get_mut(&id) {
-            Some(HandleState::Peer(state)) if state.spec.protocol == PeerProtocol::Tcp => {
-                state.peer = Some(destination);
-            }
+            Some(HandleState::Peer(state)) if state.spec.protocol == PeerProtocol::Tcp => {}
             _ => unreachable!("connect_peer on a handle that is not a TCP peer socket"),
         }
         st.peer_connects.push(destination);

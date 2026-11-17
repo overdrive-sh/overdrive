@@ -18,12 +18,6 @@
 //! | step 8 (ADR-0184) | `SimMtlsIntercept`'s next table transaction fails | `MtlsBoot(SharedOwner)` | `mtls.shared_owner` |
 //! | beacon bind (DG-4) | `SimBeaconIo`'s next bind fails | `VmmBoot` / beacon bind refusal | `vm_driver.beacon_bind` |
 //!
-//! `OwnerCgroupPlacement` (D24) has no row here: `run_server` enrols the
-//! process into `overdrive.slice/control-plane.slice` before
-//! `probe_startup` runs (`create_and_enrol_control_plane_slice`), so no
-//! production `serve` boot reaches that refusal; its owner-level body is
-//! `guest_network::prefix_boot_acceptance` (source-local).
-//!
 //! The step-8 row's table read-back is the QPROJ-7 arbiter
 //! (`SimMtlsIntercept::shared_table_state`), Tier-3 pair R5-30.
 

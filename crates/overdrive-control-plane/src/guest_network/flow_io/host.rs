@@ -4,7 +4,6 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::os::fd::AsRawFd;
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
@@ -291,16 +290,6 @@ async fn finish_nonblocking_connect(socket: &AsyncFd<Socket>) -> io::Result<()> 
     }
 }
 
-fn current_cgroup_path(contents: &str) -> io::Result<PathBuf> {
-    let relative = contents.lines().find_map(|line| line.strip_prefix("0::")).ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::InvalidData,
-            "`/proc/self/cgroup` has no cgroup-v2 hierarchy entry",
-        )
-    })?;
-    Ok(PathBuf::from("/sys/fs/cgroup").join(relative.trim().trim_start_matches('/')))
-}
-
 fn interface_facts() -> io::Result<BTreeMap<InterfaceIndex, BTreeSet<Ipv4Net>>> {
     let mut interfaces = BTreeMap::<InterfaceIndex, BTreeSet<Ipv4Net>>::new();
     let addresses = nix::ifaddrs::getifaddrs().map_err(io::Error::other)?;
@@ -342,15 +331,10 @@ impl GuestFlowIo for HostGuestFlowIo {
                 operation_io(GuestNetworkOperation::StartupProbe, io::Error::other(error))
             })?
             .map_err(|source| operation_io(GuestNetworkOperation::StartupProbe, source))?;
-        let cgroup = tokio::fs::read_to_string("/proc/self/cgroup")
-            .await
-            .map_err(|source| operation_io(GuestNetworkOperation::StartupProbe, source))?;
-        let owner_cgroup = current_cgroup_path(&cgroup)
-            .map_err(|source| operation_io(GuestNetworkOperation::StartupProbe, source))?;
         let nofile_limit = rustix::process::getrlimit(rustix::process::Resource::Nofile)
             .current
             .unwrap_or(u64::MAX);
-        Ok(GuestHostFacts { interfaces, nofile_limit, owner_cgroup })
+        Ok(GuestHostFacts { interfaces, nofile_limit })
     }
 
     async fn probe_forwarder(&self) -> Result<(), ForwarderError> {
@@ -690,14 +674,6 @@ impl GuestFlowIo for HostGuestFlowIo {
         match socket.get_ref().local_addr().map_err(flow_io)?.as_socket() {
             Some(SocketAddr::V4(address)) => Ok(address),
             _ => unreachable!("an IPv4 peer returned a non-IPv4 local address"),
-        }
-    }
-
-    fn peer_addr(&self, peer: &PeerSocket) -> Result<SocketAddrV4, FlowIoError> {
-        let socket = self.peer_socket(peer.0);
-        match socket.get_ref().peer_addr().map_err(flow_io)?.as_socket() {
-            Some(SocketAddr::V4(address)) => Ok(address),
-            _ => unreachable!("an IPv4 peer returned a non-IPv4 peer address"),
         }
     }
 
