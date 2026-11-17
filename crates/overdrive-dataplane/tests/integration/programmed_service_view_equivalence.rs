@@ -26,8 +26,7 @@
 //! of that clause is covered in
 //! `crates/overdrive-sim/tests/sim_dataplane_programmed_fingerprint_contract.rs`.
 //!
-//! Pending until DELIVER implements both reads: each test is
-//! `#[should_panic(expected = ..)]` on the assertion it makes today.
+//! Both reads are implemented: the tests run as written.
 //!
 //! CONTRACT_SHAPE: pure-function (the read mutates nothing).
 
@@ -173,7 +172,6 @@ async fn apply_to_both(
 /// fingerprint of the applied slice.
 #[overdrive_test(guest = "mtls-relay")]
 #[test]
-#[should_panic(expected = "host programmed_fingerprint after applying B1")]
 fn host_and_sim_read_the_same_programmed_fingerprint_after_every_call() {
     let rig = HostRig::new("pf1");
     let host = &rig.dataplane;
@@ -245,7 +243,6 @@ fn host_and_sim_read_the_same_programmed_fingerprint_after_every_call() {
 /// fingerprint again. A freshly constructed `SimDataplane` is the sim's restart.
 #[overdrive_test(guest = "mtls-relay")]
 #[test]
-#[should_panic(expected = "host programmed_fingerprint after programming before the restart")]
 fn a_restarted_host_dataplane_reads_none_for_every_frontend_then_reprograms() {
     let rig = HostRig::new("pf2");
     let fe_one = frontend(1);

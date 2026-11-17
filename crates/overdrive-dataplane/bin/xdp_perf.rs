@@ -200,7 +200,7 @@ fn measure(
     let service_map = HashOfMapsHandle::<ServiceKey, u32>::new_pinned_with_array_inner(
         "SERVICE_MAP",
         4096,
-        overdrive_core::dataplane::MaglevTableSize::DEFAULT.get(),
+        overdrive_core::dataplane::MaglevTableSize::DEFAULT.get() + 2,
         &pin_dir,
     )
     .wrap_err("pre-pin SERVICE_MAP")?;

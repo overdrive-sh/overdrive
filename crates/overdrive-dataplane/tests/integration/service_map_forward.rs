@@ -195,7 +195,7 @@ fn ten_tcp_syns_to_vip_are_rewritten_and_forwarded_via_veth() {
     let service_map_handle = HashOfMapsHandle::<ServiceKey, u32>::new_pinned_with_array_inner(
         "SERVICE_MAP",
         4096,
-        overdrive_core::dataplane::MaglevTableSize::DEFAULT.get(),
+        overdrive_core::dataplane::MaglevTableSize::DEFAULT.get() + 2,
         &pin_dir,
     )
     .expect("pre-create + pre-pin SERVICE_MAP outer HoM");

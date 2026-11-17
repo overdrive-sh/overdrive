@@ -288,12 +288,13 @@ fn measure_dataplane(
     // the HoM from the ELF alone. Mirrors the production
     // `EbpfDataplane::new` shape and the working pattern in
     // `tests/integration/atomic_swap.rs`. Capacities match the
-    // kernel-side `MAX_OUTER_ENTRIES` / `INNER_TABLE_SIZE` per
+    // kernel-side `MAX_OUTER_ENTRIES` and the production inner capacity
+    // (`INNER_TABLE_SIZE` plus the two fingerprint slots) per
     // architecture.md § 5 / § 10.
     let service_map = HashOfMapsHandle::<ServiceKey, u32>::new_pinned_with_array_inner(
         "SERVICE_MAP",
         4096,
-        overdrive_core::dataplane::MaglevTableSize::DEFAULT.get(),
+        overdrive_core::dataplane::MaglevTableSize::DEFAULT.get() + 2,
         &pin_dir,
     )
     .wrap_err("pre-pin SERVICE_MAP")?;

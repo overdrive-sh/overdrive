@@ -136,15 +136,28 @@ pub const DEFAULT_CGROUP_ATTACH_PATH: &str = "/sys/fs/cgroup/overdrive.slice";
 /// capacities are consistent by definition.
 const SERVICE_MAP_OUTER_CAPACITY: u32 = 4096;
 
-/// SERVICE_MAP inner-ARRAY size in slots. Equals
-/// [`overdrive_core::dataplane::MaglevTableSize::DEFAULT`].get() = 16_381
-/// per architecture.md § 5 Q-Sig D6 / ADR-0041 — the Maglev table
-/// size. **MUST** stay in lockstep with `INNER_TABLE_SIZE` in
-/// `crates/overdrive-bpf/src/maps/service_map.rs` (kernel-side); a
-/// drift between the two would silently misroute packets via slot
-/// out-of-bounds reads (the kernel ARRAY map clamps to its declared
-/// size; userspace populating slots beyond it is a no-op).
-const SERVICE_MAP_INNER_CAPACITY: u32 = overdrive_core::dataplane::MaglevTableSize::DEFAULT.get();
+/// Number of Maglev slots in each `SERVICE_MAP` inner array: the Maglev table
+/// size, [`overdrive_core::dataplane::MaglevTableSize::DEFAULT`].get() =
+/// 16_381 (architecture.md § 5 Q-Sig D6 / ADR-0041). This is the modulus the
+/// XDP program reduces the 5-tuple hash by, and it **MUST** stay in lockstep
+/// with `INNER_TABLE_SIZE` in `crates/overdrive-bpf/src/maps/service_map.rs`
+/// (kernel-side). The XDP program never selects a slot at or beyond it.
+const SERVICE_MAP_TABLE_SIZE: u32 = overdrive_core::dataplane::MaglevTableSize::DEFAULT.get();
+
+/// Inner slot holding the low 32 bits of the applied-set fingerprint (D-20).
+const FINGERPRINT_LOW_SLOT: u32 = SERVICE_MAP_TABLE_SIZE;
+
+/// Inner slot holding the high 32 bits of the applied-set fingerprint (D-20).
+const FINGERPRINT_HIGH_SLOT: u32 = SERVICE_MAP_TABLE_SIZE + 1;
+
+/// `SERVICE_MAP` inner-ARRAY capacity in slots: the Maglev table plus the two
+/// fingerprint slots, 16_383. The inner prototype and every inner map carry
+/// exactly this many slots, because the kernel rejects an inner map whose
+/// `max_entries` differs from the prototype's (K-4: `bpf_map_meta_equal`,
+/// `kernel/bpf/map_in_map.c:83-92 @ v7.0`; `array_map_meta_equal`,
+/// `kernel/bpf/arraymap.c:594-601 @ v7.0`). This is distinct from the
+/// 16_381 Maglev modulus above; the two must never be conflated.
+const SERVICE_MAP_INNER_CAPACITY: u32 = SERVICE_MAP_TABLE_SIZE + 2;
 
 /// Production dataplane.
 ///
@@ -1436,6 +1449,62 @@ impl EbpfDataplane {
         Ok(planned)
     }
 
+    /// Populate a fresh inner array: the Maglev permutation (a deterministic
+    /// function of the weighted backend set, S-2.2-12) in slots
+    /// `0..SERVICE_MAP_TABLE_SIZE`, then the applied-set fingerprint in the two
+    /// slots after it. The fingerprint rides in the NEW inner array, so the one
+    /// atomic outer swap publishes it with the table it describes and it
+    /// disappears with it; the Maglev loop never touches those slots.
+    fn populate_inner_map(
+        new_inner: std::os::fd::BorrowedFd<'_>,
+        planned: &[PlannedBackend],
+        fingerprint: overdrive_core::dataplane::fingerprint::BackendSetFingerprint,
+    ) -> Result<(), DataplaneError> {
+        let weighted: std::collections::BTreeMap<overdrive_core::id::BackendId, u16> =
+            planned.iter().map(|backend| (backend.id, backend.pod.weight.max(1))).collect();
+        let permutation = overdrive_core::maglev::permutation::generate(
+            &weighted,
+            overdrive_core::dataplane::MaglevTableSize::DEFAULT,
+        );
+        if permutation.len() != SERVICE_MAP_TABLE_SIZE as usize {
+            return Err(DataplaneError::LoadFailed(format!(
+                "maglev::generate returned {} slots; expected {}",
+                permutation.len(),
+                SERVICE_MAP_TABLE_SIZE
+            )));
+        }
+        for (slot, bid) in permutation.iter().enumerate() {
+            // Slot is bounded by the permutation length check above
+            // (SERVICE_MAP_TABLE_SIZE = 16_381, well within u32).
+            #[allow(clippy::cast_possible_truncation)]
+            let key_bytes = (slot as u32).to_ne_bytes();
+            crate::sys::bpf::bpf_map_update_elem(
+                new_inner,
+                &key_bytes,
+                &bid.get().to_ne_bytes(),
+                crate::sys::bpf::BPF_ANY,
+            )
+            .map_err(|e| {
+                DataplaneError::LoadFailed(format!("inner-map slot {slot} populate: {e}"))
+            })?;
+        }
+        for (slot, word) in [
+            (FINGERPRINT_LOW_SLOT, fingerprint_low_word(fingerprint)),
+            (FINGERPRINT_HIGH_SLOT, fingerprint_high_word(fingerprint)),
+        ] {
+            crate::sys::bpf::bpf_map_update_elem(
+                new_inner,
+                &slot.to_ne_bytes(),
+                &word.to_ne_bytes(),
+                crate::sys::bpf::BPF_ANY,
+            )
+            .map_err(|e| {
+                DataplaneError::LoadFailed(format!("inner-map fingerprint slot {slot}: {e}"))
+            })?;
+        }
+        Ok(())
+    }
+
     /// Everything up to and including the one atomic outer `SERVICE_MAP` swap.
     /// A failure names the stage it happened at; `undo` records what to restore.
     #[allow(
@@ -1447,6 +1516,7 @@ impl EbpfDataplane {
         planned: &[PlannedBackend],
         service_key: crate::maps::wire::ServiceKey,
         new_keys: &std::collections::BTreeSet<crate::maps::BackendKeyPod>,
+        fingerprint: overdrive_core::dataplane::fingerprint::BackendSetFingerprint,
         undo: &mut ServiceApplyUndo,
     ) -> Result<(), (overdrive_core::traits::dataplane::ServiceApplyStage, DataplaneError)> {
         use std::os::fd::AsFd;
@@ -1492,40 +1562,8 @@ impl EbpfDataplane {
             .service_map
             .create_inner(None)
             .map_err(|e| (Stage::InnerMap, hash_of_maps_error("inner-map alloc", e)))?;
-        let weighted: std::collections::BTreeMap<overdrive_core::id::BackendId, u16> =
-            planned.iter().map(|backend| (backend.id, backend.pod.weight.max(1))).collect();
-        let permutation = overdrive_core::maglev::permutation::generate(
-            &weighted,
-            overdrive_core::dataplane::MaglevTableSize::DEFAULT,
-        );
-        if permutation.len() != SERVICE_MAP_INNER_CAPACITY as usize {
-            return Err((
-                Stage::InnerMap,
-                DataplaneError::LoadFailed(format!(
-                    "maglev::generate returned {} slots; expected {}",
-                    permutation.len(),
-                    SERVICE_MAP_INNER_CAPACITY
-                )),
-            ));
-        }
-        for (slot, bid) in permutation.iter().enumerate() {
-            // Slot is bounded by the permutation length check above
-            // (SERVICE_MAP_INNER_CAPACITY = 16_381, well within u32).
-            #[allow(clippy::cast_possible_truncation)]
-            let key_bytes = (slot as u32).to_ne_bytes();
-            crate::sys::bpf::bpf_map_update_elem(
-                new_inner.as_fd(),
-                &key_bytes,
-                &bid.get().to_ne_bytes(),
-                crate::sys::bpf::BPF_ANY,
-            )
-            .map_err(|e| {
-                (
-                    Stage::InnerMap,
-                    DataplaneError::LoadFailed(format!("inner-map slot {slot} populate: {e}")),
-                )
-            })?;
-        }
+        Self::populate_inner_map(new_inner.as_fd(), planned, fingerprint)
+            .map_err(|e| (Stage::InnerMap, e))?;
 
         // Stage ReverseNat — MUST land before the outer swap so a response from a
         // newly-added backend never misses the reverse map and escapes with the
@@ -1651,6 +1689,7 @@ impl EbpfDataplane {
         service_key: crate::maps::wire::ServiceKey,
         svc_proto: overdrive_core::dataplane::Proto,
         backends: &[Backend],
+        fingerprint: overdrive_core::dataplane::fingerprint::BackendSetFingerprint,
     ) -> Result<(), DataplaneError> {
         use crate::gateway_connect::BackendIdentityState;
         use crate::maps::BackendKeyPod;
@@ -1669,7 +1708,7 @@ impl EbpfDataplane {
 
         let mut undo = ServiceApplyUndo::default();
         if let Err((stage, error)) =
-            self.precommit_service_apply(&planned, service_key, &new_keys, &mut undo)
+            self.precommit_service_apply(&planned, service_key, &new_keys, fingerprint, &mut undo)
         {
             return Err(self.rollback_service_apply(stage, error, &undo, &planned, svc_proto));
         }
@@ -1828,15 +1867,111 @@ impl EbpfDataplane {
     }
 }
 
-#[async_trait]
-impl overdrive_core::traits::ProgrammedServiceView for EbpfDataplane {
-    // DISTILL scaffold (D-20): inert; DELIVER reads the fingerprint slots of the inner map.
-    async fn programmed_fingerprint(
+/// Low 32 bits of a fingerprint, the value of inner slot [`FINGERPRINT_LOW_SLOT`].
+fn fingerprint_low_word(
+    fingerprint: overdrive_core::dataplane::fingerprint::BackendSetFingerprint,
+) -> u32 {
+    u32::try_from(fingerprint & u64::from(u32::MAX))
+        .unwrap_or_else(|_| unreachable!("a value masked to 32 bits fits in u32"))
+}
+
+/// High 32 bits of a fingerprint, the value of inner slot [`FINGERPRINT_HIGH_SLOT`].
+fn fingerprint_high_word(
+    fingerprint: overdrive_core::dataplane::fingerprint::BackendSetFingerprint,
+) -> u32 {
+    u32::try_from(fingerprint >> 32)
+        .unwrap_or_else(|_| unreachable!("a u64 shifted right by 32 fits in u32"))
+}
+
+impl EbpfDataplane {
+    /// Read the fingerprint of `service_key`'s programmed inner map: outer
+    /// lookup (the inner map id), `BPF_MAP_GET_FD_BY_ID`, then the two
+    /// fingerprint slots, recombined `low | high << 32`. `Ok(None)` only when
+    /// no outer slot is programmed; every failed kernel read is
+    /// [`DataplaneError::LoadFailed`].
+    ///
+    /// The caller holds `service_apply_commit` for read for the whole
+    /// sequence: an update touches several maps and is not atomic to a reader
+    /// without the guard (`.claude/rules/bpf.md` § "Reading kernel maps from
+    /// userspace"). Kernel facts (all `@ v7.0`): an outer lookup from userspace
+    /// returns the inner map's id (K-1: `bpf_fd_htab_map_lookup_elem`,
+    /// `kernel/bpf/hashtab.c:2626-2643`; `map_fd_sys_lookup_elem`,
+    /// `kernel/bpf/map_in_map.c:131-134`); `BPF_MAP_GET_FD_BY_ID` opens it and
+    /// returns `ENOENT` once the last reference to a replaced inner map drops,
+    /// which is why the guard is held (K-2: `bpf_map_get_fd_by_id`,
+    /// `kernel/bpf/syscall.c:4859-4888`); the outer swap is atomic for readers
+    /// (K-3: `bpf_fd_htab_map_update_elem`, `kernel/bpf/hashtab.c:2646-2667`).
+    fn read_programmed_fingerprint(
         &self,
-        _frontend: &overdrive_core::dataplane::ServiceFrontend,
+        service_key: crate::maps::wire::ServiceKey,
     ) -> Result<Option<overdrive_core::dataplane::fingerprint::BackendSetFingerprint>, DataplaneError>
     {
-        Ok(None)
+        let _commit = self.service_apply_commit.read();
+
+        // SAFETY: `ServiceKey` is `repr(C)` plain data with a zeroed pad byte.
+        let key_bytes = unsafe {
+            core::slice::from_raw_parts(
+                (&raw const service_key).cast::<u8>(),
+                core::mem::size_of::<crate::maps::wire::ServiceKey>(),
+            )
+        };
+        let outer = crate::sys::bpf::bpf_map_lookup_elem(
+            self.service_map.as_fd(),
+            key_bytes,
+            core::mem::size_of::<u32>(),
+        )
+        .map_err(|e| DataplaneError::LoadFailed(format!("SERVICE_MAP outer lookup: {e}")))?;
+        let Some(id_bytes) = outer else {
+            return Ok(None);
+        };
+        let inner_id = u32::from_ne_bytes(id_bytes.try_into().map_err(|_| {
+            DataplaneError::LoadFailed("SERVICE_MAP outer value is not a 4-byte id".to_owned())
+        })?);
+        let inner = crate::sys::bpf::bpf_map_get_fd_by_id(inner_id).map_err(|e| {
+            DataplaneError::LoadFailed(format!("SERVICE_MAP inner map {inner_id} open: {e}"))
+        })?;
+        let low = Self::read_fingerprint_slot(&inner, FINGERPRINT_LOW_SLOT)?;
+        let high = Self::read_fingerprint_slot(&inner, FINGERPRINT_HIGH_SLOT)?;
+        Ok(Some(u64::from(low) | (u64::from(high) << 32)))
+    }
+
+    fn read_fingerprint_slot(
+        inner: &std::os::fd::OwnedFd,
+        slot: u32,
+    ) -> Result<u32, DataplaneError> {
+        use std::os::fd::AsFd;
+
+        let value = crate::sys::bpf::bpf_map_lookup_elem(
+            inner.as_fd(),
+            &slot.to_ne_bytes(),
+            core::mem::size_of::<u32>(),
+        )
+        .map_err(|e| DataplaneError::LoadFailed(format!("inner-map slot {slot} read: {e}")))?
+        .ok_or_else(|| DataplaneError::LoadFailed(format!("inner-map slot {slot} is absent")))?;
+        let word: [u8; 4] = value.try_into().map_err(|_| {
+            DataplaneError::LoadFailed(format!("inner-map slot {slot} is not a 4-byte value"))
+        })?;
+        Ok(u32::from_ne_bytes(word))
+    }
+}
+
+#[async_trait]
+impl overdrive_core::traits::ProgrammedServiceView for EbpfDataplane {
+    /// Read the fingerprint written with the table behind `frontend`'s outer
+    /// `SERVICE_MAP` slot. `Ok(None)` when no slot is programmed (never
+    /// programmed, withdrawn, or a restarted dataplane over recreated maps).
+    async fn programmed_fingerprint(
+        &self,
+        frontend: &overdrive_core::dataplane::ServiceFrontend,
+    ) -> Result<Option<overdrive_core::dataplane::fingerprint::BackendSetFingerprint>, DataplaneError>
+    {
+        let service_key = crate::maps::wire::ServiceKey {
+            vip_host: u32::from(frontend.vip_v4()),
+            port_host: frontend.port().get(),
+            proto: frontend.proto().as_u8(),
+            _pad: 0,
+        };
+        self.read_programmed_fingerprint(service_key)
     }
 }
 
@@ -1929,7 +2064,11 @@ impl Dataplane for EbpfDataplane {
         if backends.is_empty() {
             return self.withdraw_service(service_key);
         }
-        self.apply_service(service_key, svc_proto, &backends)
+        // The fingerprint of the slice exactly as given: never sorted, never
+        // recomputed from a tracker (D-20).
+        let applied =
+            overdrive_core::dataplane::fingerprint::fingerprint(&frontend.vip(), &backends);
+        self.apply_service(service_key, svc_proto, &backends, applied)
     }
 
     /// see #27 (telemetry `ringbuf`)

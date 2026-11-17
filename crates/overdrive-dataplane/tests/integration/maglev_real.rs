@@ -133,7 +133,7 @@ fn maglev_real_distribution_under_xdp_trafficgen() {
     let service_map = HashOfMapsHandle::<ServiceKey, u32>::new_pinned_with_array_inner(
         "SERVICE_MAP",
         4096,
-        table_size,
+        table_size + 2,
         &pin_dir,
     )
     .expect("SERVICE_MAP pre-create+pin must succeed");

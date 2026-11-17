@@ -264,7 +264,7 @@ fn mixed_batch_increments_per_class_counters_correctly() {
     let _service_map = HashOfMapsHandle::<ServiceKey, u32>::new_pinned_with_array_inner(
         "SERVICE_MAP",
         4096,
-        overdrive_core::dataplane::MaglevTableSize::DEFAULT.get(),
+        overdrive_core::dataplane::MaglevTableSize::DEFAULT.get() + 2,
         &pin_dir,
     )
     .expect("SERVICE_MAP pre-create+pin");

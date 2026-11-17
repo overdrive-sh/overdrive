@@ -59,6 +59,7 @@ const BPF_MAP_UPDATE_ELEM: c_long = 2;
 const BPF_MAP_DELETE_ELEM: c_long = 3;
 const BPF_OBJ_PIN: c_long = 6;
 const BPF_OBJ_GET: c_long = 7;
+const BPF_MAP_GET_FD_BY_ID: c_long = 14;
 
 /// `BPF_ANY` flag for `bpf_map_update_elem` — accept either insert
 /// (no prior key) or update (key exists). Matches libbpf semantics.
@@ -110,6 +111,15 @@ struct BpfObjAttr {
     pathname: u64,
     bpf_fd: u32,
     file_flags: u32,
+}
+
+/// `BPF_MAP_GET_FD_BY_ID` attribute layout (`union bpf_attr` `map_id` arm).
+#[repr(C)]
+#[derive(Default)]
+struct BpfGetIdAttr {
+    map_id: u32,
+    next_id: u32,
+    open_flags: u32,
 }
 
 // Convenience: do the libc syscall and either return the fd / status
@@ -299,6 +309,21 @@ pub fn bpf_obj_get(path: &Path) -> std::io::Result<OwnedFd> {
         BPF_OBJ_GET,
         &attr as *const _ as *const c_void,
         mem::size_of::<BpfObjAttr>() as c_int,
+    )?;
+    // SAFETY: `raw >= 0` is a kernel-issued, owned file descriptor.
+    Ok(unsafe { OwnedFd::from_raw_fd(raw as c_int) })
+}
+
+/// Open a map by its kernel id (`BPF_MAP_GET_FD_BY_ID`). An outer
+/// `HASH_OF_MAPS` lookup from userspace yields the inner map's id, which this
+/// turns into a descriptor (`kernel/bpf/syscall.c`, `bpf_map_get_fd_by_id`
+/// @ v7.0). `ENOENT` means the map is already gone and is returned as an error.
+pub(crate) fn bpf_map_get_fd_by_id(map_id: u32) -> std::io::Result<OwnedFd> {
+    let attr = BpfGetIdAttr { map_id, ..Default::default() };
+    let raw = raw_bpf(
+        BPF_MAP_GET_FD_BY_ID,
+        &attr as *const _ as *const c_void,
+        mem::size_of::<BpfGetIdAttr>() as c_int,
     )?;
     // SAFETY: `raw >= 0` is a kernel-issued, owned file descriptor.
     Ok(unsafe { OwnedFd::from_raw_fd(raw as c_int) })

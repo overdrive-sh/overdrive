@@ -314,7 +314,7 @@ fn load_xdp_pass_stub(iface: &str, pin_dir: &std::path::Path) -> Result<StubXdpH
     const SERVICE_MAP_NAME: &str = "SERVICE_MAP";
     const SERVICE_MAP_OUTER_CAPACITY: u32 = 4096;
     const SERVICE_MAP_INNER_CAPACITY: u32 =
-        overdrive_core::dataplane::MaglevTableSize::DEFAULT.get();
+        overdrive_core::dataplane::MaglevTableSize::DEFAULT.get() + 2;
     let service_map = HashOfMapsHandle::<ServiceKey, u32>::new_pinned_with_array_inner(
         SERVICE_MAP_NAME,
         SERVICE_MAP_OUTER_CAPACITY,

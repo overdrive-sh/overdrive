@@ -37,7 +37,9 @@
 //!
 //! Inner key = `u32` (slot index `0..M`), value = `BackendId` (raw
 //! `u32`). Slot count `M` is the Maglev table size — `MaglevTableSize::DEFAULT.get()`
-//! = `16_381` — per architecture.md § 5 Q-Sig D2 / D6 and ADR-0041.
+//! = `16_381` — per architecture.md § 5 Q-Sig D2 / D6 and ADR-0041. Each
+//! inner array also carries two fingerprint slots (16_381, 16_382) that the
+//! XDP program never selects; the userspace capacity is `16_383`.
 //!
 //! Pre-Slice-04 (Slice 03 lay) used `M = 256` with a placeholder
 //! `(src_port ^ dst_port) & 0xff` slot hash; Slice 04 replaces both
@@ -46,7 +48,7 @@
 //! XDP fast path by FNV-1a over the 5-tuple `mod M`. The kernel-side
 //! map declaration here is the single source of `M` shared by the
 //! XDP program (`programs/xdp_service_map.rs`) and the userspace
-//! handle (`crates/overdrive-dataplane/src/lib.rs::SERVICE_MAP_INNER_CAPACITY`).
+//! handle (`crates/overdrive-dataplane/src/lib.rs::SERVICE_MAP_TABLE_SIZE`).
 //!
 //! # Naming
 //!
@@ -107,10 +109,11 @@ pub const MAX_OUTER_ENTRIES: u32 = 4096;
 ///
 /// **MUST stay in lockstep** with
 /// `overdrive_core::dataplane::MaglevTableSize::DEFAULT.get()` (the
-/// userspace SSOT) and `SERVICE_MAP_INNER_CAPACITY` in
-/// `crates/overdrive-dataplane/src/lib.rs`. The userspace handle
-/// allocates inner ARRAYs of this size; kernel-side bounds checks
-/// and verifier complexity assume this exact value.
+/// userspace SSOT) and `SERVICE_MAP_TABLE_SIZE` in
+/// `crates/overdrive-dataplane/src/lib.rs`. This is the Maglev modulus,
+/// not the inner array capacity: userspace allocates inner ARRAYs of
+/// `SERVICE_MAP_INNER_CAPACITY` (this plus two fingerprint slots) and the
+/// XDP program never selects a slot at or beyond this value.
 pub const INNER_TABLE_SIZE: u32 = 16_381;
 
 /// `SERVICE_MAP` — outer `BPF_MAP_TYPE_HASH_OF_MAPS` keyed by

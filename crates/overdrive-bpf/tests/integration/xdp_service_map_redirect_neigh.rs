@@ -406,7 +406,7 @@ fn create_inner_array_filled(backend_id: u32) -> OwnedFd {
         flags: u64,
     }
 
-    let inner_size: u32 = overdrive_core::dataplane::MaglevTableSize::DEFAULT.get();
+    let inner_size: u32 = overdrive_core::dataplane::MaglevTableSize::DEFAULT.get() + 2;
     let attr = CreateAttr {
         map_type: BPF_MAP_TYPE_ARRAY,
         key_size: mem::size_of::<u32>() as u32,
@@ -533,7 +533,7 @@ fn pre_pin_service_map(pin_dir: &std::path::Path) -> OwnedFd {
         map_type: BPF_MAP_TYPE_ARRAY,
         key_size: mem::size_of::<u32>() as u32,
         value_size: mem::size_of::<u32>() as u32,
-        max_entries: overdrive_core::dataplane::MaglevTableSize::DEFAULT.get(),
+        max_entries: overdrive_core::dataplane::MaglevTableSize::DEFAULT.get() + 2,
         ..Default::default()
     };
     let inner_raw = raw_bpf(

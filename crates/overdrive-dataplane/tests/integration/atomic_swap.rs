@@ -161,7 +161,7 @@ fn swap_inner_map_distributes_traffic_across_new_backend_set() {
     let service_map = HashOfMapsHandle::<ServiceKey, u32>::new_pinned_with_array_inner(
         "SERVICE_MAP",
         4096,
-        overdrive_core::dataplane::MaglevTableSize::DEFAULT.get(),
+        overdrive_core::dataplane::MaglevTableSize::DEFAULT.get() + 2,
         &pin_dir,
     )
     .expect("SERVICE_MAP pre-create+pin must succeed");
@@ -387,7 +387,7 @@ fn verifier_budget_xdp_service_map_lookup_within_20pct_of_baseline() {
     let _service_map = HashOfMapsHandle::<ServiceKey, u32>::new_pinned_with_array_inner(
         "SERVICE_MAP",
         4096,
-        overdrive_core::dataplane::MaglevTableSize::DEFAULT.get(),
+        overdrive_core::dataplane::MaglevTableSize::DEFAULT.get() + 2,
         &pin_dir,
     )
     .expect("pre-pin SERVICE_MAP");
@@ -529,7 +529,7 @@ fn verifier_budget_xdp_reverse_nat_lookup_within_absolute_ceiling() {
     let _service_map = HashOfMapsHandle::<ServiceKey, u32>::new_pinned_with_array_inner(
         "SERVICE_MAP",
         4096,
-        overdrive_core::dataplane::MaglevTableSize::DEFAULT.get(),
+        overdrive_core::dataplane::MaglevTableSize::DEFAULT.get() + 2,
         &pin_dir,
     )
     .expect("pre-pin SERVICE_MAP");
@@ -892,7 +892,7 @@ fn removing_backend_purges_orphaned_backend_map_entries() {
     let _service_map = HashOfMapsHandle::<ServiceKey, u32>::new_pinned_with_array_inner(
         "SERVICE_MAP",
         4096,
-        overdrive_core::dataplane::MaglevTableSize::DEFAULT.get(),
+        overdrive_core::dataplane::MaglevTableSize::DEFAULT.get() + 2,
         &pin_dir,
     )
     .expect("SERVICE_MAP pre-pin must succeed");
@@ -1072,7 +1072,7 @@ fn atomic_swap_under_50kpps_traffic_drops_zero_packets() {
     let service_map = HashOfMapsHandle::<ServiceKey, u32>::new_pinned_with_array_inner(
         "SERVICE_MAP",
         4096,
-        overdrive_core::dataplane::MaglevTableSize::DEFAULT.get(),
+        overdrive_core::dataplane::MaglevTableSize::DEFAULT.get() + 2,
         &pin_dir,
     )
     .expect("SERVICE_MAP pre-create+pin must succeed");
