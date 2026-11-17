@@ -117,6 +117,34 @@ fn sad_own_checkout_and_maintenance_deadlines_have_distinct_causes() {
         assert_eq!(fields(&fixture.temp.path().join("same-tree.owner"))["token"], first.id);
         first.send("ABORT");
         first.terminal();
+        let finalized = Command::new("bash")
+            .arg(workspace_file("infra/metal/lease-holder.sh"))
+            .args(["--finalize", &second.id])
+            .arg(&fixture.runs)
+            .output()
+            .expect("finalize contended run");
+        assert!(finalized.status.success(), "{}", String::from_utf8_lossy(&finalized.stderr));
+        let collected = fixture.collect(&second.id).output().expect("collect contended run");
+        runner_error(&collected, expected, 75);
+        let stderr = String::from_utf8_lossy(&collected.stderr);
+        if expected == "checkout_timeout" {
+            assert!(
+                stderr.contains(&format!(
+                    "OVERDRIVE_METAL_RUNNER_ERROR error=checkout_timeout holder={}\n",
+                    first.id
+                )),
+                "{stderr}"
+            );
+            assert!(
+                stderr.contains(&format!(
+                    "checkout lease held by run {0}; collect it with: cargo xtask metal collect {0}",
+                    first.id
+                )),
+                "{stderr}"
+            );
+        } else {
+            assert!(!stderr.contains("holder="), "{stderr}");
+        }
     }
 }
 
@@ -206,6 +234,12 @@ fn sad_sync_and_pull_wait_on_the_running_checkout_without_source_mutation() {
             .output()
             .expect("competing source operation");
         runner_error(&output, "checkout_timeout", 75);
+        assert!(
+            String::from_utf8_lossy(&output.stderr)
+                .contains(&format!("error=checkout_timeout holder={RUN_A}\n")),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
         assert_eq!(snapshot(&fixture.remote), before);
         assert_eq!(fields(&owner_path)["token"], RUN_A);
     }

@@ -535,6 +535,48 @@ collector_marker() {
   printf 'OVERDRIVE_METAL_RUNNER_ERROR error=%s\n' "$error" >&2
 }
 
+# A checkout_timeout names the run holding the checkout lease so the caller can
+# collect it.  The holder id is the 24-hex token of the checkout owner file.
+checkout_owner_holder() {
+  local owner="$1"
+  local line
+  [ -r "$owner" ] || return 1
+  line="$(grep -m1 '^token=' "$owner" 2>/dev/null)" || return 1
+  line="${line#token=}"
+  [[ "$line" =~ ^[0-9a-f]{24}$ ]] || return 1
+  printf '%s' "$line"
+}
+
+checkout_timeout_marker() {
+  local holder="${1:-}"
+  if [ -n "$holder" ]; then
+    printf 'OVERDRIVE_METAL_RUNNER_ERROR error=checkout_timeout holder=%s\n' "$holder" >&2
+    printf 'checkout lease held by run %s; collect it with: cargo xtask metal collect %s\n' \
+      "$holder" "$holder" >&2
+  else
+    collector_marker checkout_timeout
+  fi
+}
+
+# Recorded at timeout time: the owner file can disappear afterwards.
+record_checkout_holder() {
+  local run_directory="$1"
+  local holder
+  holder="$(checkout_owner_holder "$2")" || return 0
+  atomic_write "${run_directory}/checkout-holder" "holder=${holder}
+"
+}
+
+read_recorded_checkout_holder() {
+  local path="$1/checkout-holder"
+  local line
+  [ -f "$path" ] && [ ! -L "$path" ] || return 1
+  line="$(head -n1 "$path" 2>/dev/null)" || return 1
+  line="${line#holder=}"
+  [[ "$line" =~ ^[0-9a-f]{24}$ ]] || return 1
+  printf '%s' "$line"
+}
+
 collector_artifact_error() {
   collector_marker run_artifact_io
   return 74
@@ -613,7 +655,11 @@ terminal_result() {
       collector_marker "$error"
       return 75
       ;;
-    checkout_timeout|runner_preparation_failed)
+    checkout_timeout)
+      checkout_timeout_marker "$(read_recorded_checkout_holder "$run_directory" || true)"
+      return 75
+      ;;
+    runner_preparation_failed)
       collector_marker "$error"
       return 75
       ;;
@@ -966,6 +1012,7 @@ execution_class=${execution_class}
       terminal_written=1
       return 75
     fi
+    record_checkout_holder "$run_directory" "$tree_owner_path" || true
     write_terminal_runner "$run_directory" "$token" checkout_timeout || true
     terminal_written=1
     return 75
@@ -1322,7 +1369,7 @@ exec 8>"${LOCK_PATH}"
 if ! remaining_lock_timeout "$LOCK_DEADLINE_NS" || \
   ! flock -x -w "${REMAINING_LOCK_TIMEOUT}" 8; then
   if [ "${ACTION}" = sync ] || [ "${ACTION}" = pull ]; then
-    collector_marker checkout_timeout
+    checkout_timeout_marker "$(checkout_owner_holder "${OWNER_PATH}" || true)"
   else
     collector_marker maintenance_timeout
   fi

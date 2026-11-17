@@ -30,6 +30,12 @@
           },
           {
             "type": "command",
+            "command": "bun run .claude/hooks/block-metal-run-misuse.ts",
+            "timeout": 10,
+            "statusMessage": "Checking `cargo xtask metal run` for timeout/sleep/redirect/pipe..."
+          },
+          {
+            "type": "command",
             "command": "bun run .claude/hooks/block-bare-clippy.ts",
             "timeout": 10,
             "statusMessage": "Checking for bare `cargo clippy` (use Lima)..."

@@ -2024,6 +2024,11 @@ Runner diagnostics print as `OVERDRIVE_METAL_RUNNER_ERROR error=<name>`:
 | 75 | `maintenance_timeout`, `checkout_timeout`, `runner_preparation_failed` (including missing remote `rsync`), and `run_not_started` (collect's report for a run recorded as `lease_timeout`, `launch_aborted`, `controller_eof_before_start` or `command_launch_failed`) |
 | 78 | `checkout_identity_conflict`, `source_mismatch`, `preflight_failed probe=<arch\|virtualization\|cpu\|kvm_device\|kvm_api\|cgroup_v2\|vmm\|guest_kernel\|guest_rootfs\|owner\|source>` |
 
+`checkout_timeout` carries a `holder=<24-hex run id>` field naming the run that
+holds the checkout lease, followed by a line giving the `cargo xtask metal
+collect <id>` command for it; the field is omitted when the holder's owner
+record is absent or unreadable at timeout.
+
 Outputs a metal run writes into the remote tree (recorded evidence, generated
 files) do not come back on their own. `cargo xtask metal pull <path>...`
 rsyncs the named repo-relative paths from the box's tree into the same paths

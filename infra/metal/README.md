@@ -104,7 +104,9 @@ status, including 255, is returned unchanged. Runner failures have stable
 diagnostics for not-found, supervisor loss, malformed records, or a run that
 never reached command start. Records live under
 `/var/lib/overdrive-metal/runs/<run-id>/` on the box and are retained without
-automatic pruning.
+automatic pruning. A `checkout_timeout` diagnostic names the run holding the
+checkout lease as `holder=<run-id>`, so `cargo xtask metal collect <run-id>`
+retrieves it; the field is omitted when the holder's owner record is unreadable.
 
 Ordinary commands use a closed existing-command grammar: Cargo
 build/check/clippy/fmt, doctests, approved xtask build/setup/lint/model
