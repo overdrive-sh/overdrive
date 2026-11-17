@@ -11,5 +11,21 @@ publish = false
 overdrive-dataplane = { path = "../../crates/overdrive-dataplane" }
 aya = "0.13"
 libc = "0.2"
+overdrive-bench = { path = "../../crates/overdrive-bench" }
+overdrive-testing = { path = "../../crates/overdrive-testing" }
+overdrive-testing-macros = { path = "../../crates/overdrive-testing-macros" }
+
+[lib]
+name = "pig_connect_cost"
+path = "src/lib.rs"
+
+[[bin]]
+name = "pig-connect-cost"
+path = "src/main.rs"
+
+[[bench]]
+name = "benchmarks"
+harness = false
+path = "benches/benchmarks.rs"
 
 [workspace]
