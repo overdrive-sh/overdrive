@@ -1523,18 +1523,53 @@ pub async fn run_convergence_tick(
 /// # Errors
 ///
 /// The reconciler's [`HydrateError`] from `managed_targets`; nothing is submitted.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "DISTILL scaffold: no caller until the resync pass is wired")
+#[expect(
+    clippy::significant_drop_tightening,
+    reason = "the allocator/listener_facts MutexGuards are lent into the HydrationContext \
+              borrow-bundle and must outlive the managed_targets .await; the scoped block \
+              releases them before any submission"
 )]
-#[allow(clippy::unused_async, reason = "DISTILL scaffold: the real body awaits managed_targets")]
 pub(crate) async fn resync_reconciler(
     state: &AppState,
     name: &ReconcilerName,
 ) -> Result<usize, HydrateError> {
-    // DISTILL scaffold: submits nothing, replaced by the enumerate-and-submit step.
-    let _ = (state, name);
-    Ok(0)
+    let Some(reconciler) = state.runtime.get(name) else {
+        return Ok(0);
+    };
+    let targets = {
+        let allocator = state.allocator.lock().await;
+        let listener_facts = state.listener_facts.lock().await;
+        let ctx = build_hydration_context(state, &allocator, &listener_facts);
+        reconciler.managed_targets(&ctx).await?
+    };
+    let now = state.clock.now();
+    let submitted = targets.len();
+    for target in targets {
+        state.runtime.submit_evaluation(
+            Evaluation { reconciler: name.clone(), target },
+            now,
+            EvaluationEligibility::Immediate,
+        );
+    }
+    Ok(submitted)
+}
+
+/// One resync pass: a loop over [`resync_reconciler`] for every registered
+/// reconciler in `BTreeMap` order, adding no other effect. A failed
+/// enumeration is logged with the reconciler and error and the pass
+/// continues; it never aborts and never submits a partial set.
+pub(crate) async fn run_resync_pass(state: &AppState) {
+    for name in state.runtime.registered() {
+        if let Err(error) = resync_reconciler(state, &name).await {
+            tracing::warn!(
+                target: "overdrive::reconciler",
+                name = "reconciler.resync.enumeration_failed",
+                reconciler = %name,
+                error = %error,
+                "resync pass could not enumerate managed targets; the next pass retries",
+            );
+        }
+    }
 }
 
 /// Post-#295 production-owner convergence path with only the accepted

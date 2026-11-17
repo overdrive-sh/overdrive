@@ -669,8 +669,6 @@ async fn seeded_probe_result_wake_converges_vm_readiness_without_restart() {
         router_subscription,
         table,
         InterestRouterBroker::from_runtime(runtime.clone(), clock.clone()),
-        clock.clone(),
-        Duration::from_secs(30),
         shutdown.clone(),
     );
 

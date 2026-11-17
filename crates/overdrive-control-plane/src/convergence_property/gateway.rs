@@ -292,7 +292,6 @@ impl Fixture {
 /// re-evaluated by the pass.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[should_panic(expected = "gateway-svid-lifecycle stalled with actual != desired after 8 rounds")]
 fn gateway_svid_lifecycle_converges_the_gateway_identity_from_any_state_then_stays_converged() {
     let runtime = runtime();
     proptest!(property_config(48, 351_009), |(world in world())| {

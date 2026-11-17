@@ -213,7 +213,6 @@ impl Fixture {
 /// with the Running set and a dropped write are only re-evaluated by the pass.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[should_panic(expected = "service-lifecycle stalled with actual != desired after 8 rounds")]
 fn service_lifecycle_publishes_the_running_backends_from_any_state_then_stays_converged() {
     let runtime = runtime();
     proptest!(property_config(48, 351_007), |(world in world())| {

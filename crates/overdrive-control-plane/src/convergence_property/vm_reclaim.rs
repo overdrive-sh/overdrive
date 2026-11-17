@@ -155,7 +155,6 @@ impl Fixture {
 /// and a reclaim the host refused is retried only by a later pass.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[should_panic(expected = "vm-reclamation stalled with actual != desired after 8 rounds")]
 fn vm_reclamation_removes_every_reclaimable_artifact_from_any_host_then_stays_converged() {
     let runtime = runtime();
     proptest!(property_config(48, 351_008), |(world in world())| {

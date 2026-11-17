@@ -357,7 +357,6 @@ impl Fixture {
 /// today, so no round ever evaluates the service.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[should_panic(expected = "service-map-hydrator stalled with actual != desired after 8 rounds")]
 fn the_hydrator_converges_from_any_state_despite_dropped_updates_then_stays_converged() {
     let runtime = runtime();
     proptest!(property_config(48, 351_004), |(world in world())| {

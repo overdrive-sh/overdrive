@@ -143,7 +143,6 @@ impl Fixture {
 /// row with no wake, a missing allocation) is only re-evaluated by the pass.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[should_panic(expected = "workload-lifecycle stalled with actual != desired after 8 rounds")]
 fn the_workload_converges_from_any_state_despite_a_dropped_start_then_stays_converged() {
     let runtime = runtime();
     proptest!(property_config(48, 351_005), |(world in world())| {

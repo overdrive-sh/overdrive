@@ -37,8 +37,8 @@ use overdrive_reconcilers::service_lifecycle::{
 // (4) The CONTRACT stayed in core — no core->reconcilers back-edge. These
 //     paths MUST keep resolving at `overdrive_core::reconcilers::`.
 use overdrive_core::reconcilers::{
-    Action, HydrateError, HydrationContext, Reconciler, ReconcilerName, ResyncSchedule,
-    ResyncScope, TargetResource, TickContext, resolve_scope,
+    Action, HydrateError, HydrationContext, Reconciler, ReconcilerName, TargetResource,
+    TickContext,
 };
 
 /// The extraction compiled and every moved/stayed symbol resolves at its
@@ -79,11 +79,8 @@ fn moved_symbols_resolve_in_reconcilers_crate_contract_stays_in_core() {
     let _: Option<TickContext> = None;
     let _: Option<ReconcilerName> = None;
     let _: Option<TargetResource> = None;
-    let _: Option<ResyncSchedule> = None;
-    let _: Option<ResyncScope> = None;
     let _: Option<HydrationContext<'static>> = None;
     let _: Option<HydrateError> = None;
-    let _ = resolve_scope;
 
     // `Reconciler` is NOT dyn-compatible (it carries `const NAME` + associated
     // types), so we exercise the trait import through the associated const on a

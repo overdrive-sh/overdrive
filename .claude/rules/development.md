@@ -902,9 +902,9 @@ own impure hydration.** Per ADR-0035 (and its companion ADR-0036), the
 core surface is two associated types, a name const, and the pure
 `reconcile`; ADR-0086 adds the two impure async hydration methods
 (`hydrate_desired` / `hydrate_actual`) the reconciler owns (§ "The
-hydration boundary" below); ADR-0084 adds two default-provided
-declaration hooks (`resync_schedule` / `interests`, § "The wakeup model"
-below):
+hydration boundary" below); ADR-0084 adds the default-provided
+`interests` declaration hook (§ "The wakeup model" below), and every
+reconciler declares its `managed_targets`:
 
 ```rust
 #[async_trait]
@@ -952,27 +952,40 @@ pub trait Reconciler: Send + Sync {
         target: &TargetResource,
     ) -> Result<Self::State, HydrateError>;
 
-    /// Piece A cadence (ADR-0084). Level-triggered resync declaration —
-    /// a safety net beside the edge-triggered broker. Default `None` =
-    /// edge-triggered only. PURE + object-safe: returns concrete data,
-    /// reads no clock, holds no handle; the loop owns the clock and
-    /// resolves scope → target.
-    fn resync_schedule(&self) -> Option<ResyncSchedule> { None }
+    /// The targets this reconciler manages, enumerated from intent and
+    /// observation. Required (no default). Impure + async like the hydrate
+    /// methods; `Err` fails the whole call, never a partial set. The resync
+    /// pass re-evaluates every returned target each period.
+    async fn managed_targets(
+        &self,
+        ctx: &HydrationContext<'_>,
+    ) -> Result<BTreeSet<TargetResource>, HydrateError>;
+
+    /// Retry deadline. PURE; called only when the tick emitted no non-`Noop`
+    /// action. `Some(t)` retains the evaluation until `t`; default `None`.
+    fn next_evaluation_at(
+        &self,
+        desired: &Self::State,
+        actual:  &Self::State,
+        next_view: &Self::View,
+        tick:    &TickContext,
+    ) -> Option<UnixInstant> { None }
 
     /// Piece B event-interest (ADR-0084). Which observation-row *kinds*
     /// wake this reconciler. Default `&[]` = host-backed (hydrates
-    /// `actual` live from the host) ⇒ resync-only. PURE + object-safe:
+    /// `actual` live from the host) ⇒ never event-woken. PURE + object-safe:
     /// a borrowed static slice, no payload/severity/occurrence.
     fn interests(&self) -> &'static [ObservationRowKind] { &[] }
 }
 ```
 
-Both hooks are **additive and default-provided**, so a reconciler that
-opts into neither compiles unchanged. Each returns a concrete type with
-no associated types, so each threads through the `AnyReconciler` erasure
-with a single forwarding arm and touches neither `AnyState` nor
-`AnyReconcilerView` — the `reconcile` triple-match is unaffected, and the
-compile-time guard that `reconcile` stays synchronous still holds.
+`interests` and `next_evaluation_at` are **additive and
+default-provided**, so a reconciler that opts into neither compiles
+unchanged. Each returns a concrete type with no associated types, so each
+threads through the `AnyReconciler` erasure with a single forwarding arm
+and touches neither `AnyState` nor `AnyReconcilerView` — the `reconcile`
+triple-match is unaffected, and the compile-time guard that `reconcile`
+stays synchronous still holds.
 
 **The runtime owns persistence end-to-end. Reconciler authors never
 write SQL, never call `migrate` / `hydrate` / `persist`, never declare
@@ -1009,8 +1022,9 @@ body reads only through the bundle — never a concrete `AppState` field —
 so every hydration input is a port the DST harness substitutes with a
 `Sim*` impl. A read failure surfaces as `HydrateError`
 (`IntentRead` / `ObservationRead` / `IntentDecode` / `TargetShape`): an
-undecodable intent REFUSES (intent is the SSOT, ADR-0048 §3), an
-unreadable observation is the runtime's to log-and-skip.
+undecodable intent REFUSES (intent is the SSOT, ADR-0048 §3). A hydrate
+error ends that evaluation with no View write and no dispatch; the runtime
+logs it and the next resync pass re-evaluates the target.
 
 Contract in core, impl in the adapter crate. The `Reconciler` trait, the
 four read-port traits, `HydrationContext`, and `HydrateError` are
@@ -1094,37 +1108,39 @@ this.
 above — the map is drained / iterated on `bulk_load` and observed by
 DST invariants; iteration order must be deterministic across seeds.
 
-### The wakeup model — cadence and event-interest (ADR-0084)
+### The wakeup model — resync pass and event-interest (ADR-0084)
 
 `reconcile` stays level-triggered — it recomputes the gap from freshly
-hydrated `(desired, actual)` every tick. The two additive hooks govern
-only *when the loop wakes a reconciler to run it*: an **edge** wake (a
-change happened) or a **level** wake (a periodic resync fires anyway).
-Which hook a reconciler declares is a triage decision; the discipline —
-the row-backed vs host-backed partition, the backstop requirement for
-edge-woken reconcilers, the fact that a reconciler may also be woken by
-an `EnqueueEvaluation` handoff and declare neither hook, and the
-no-busy-loop rule — lives in `.claude/rules/reconcilers.md` § "The wakeup
-model". This section is the runtime mechanics.
+hydrated `(desired, actual)` every tick. What the runtime governs is
+*when the loop wakes a reconciler to run it*: an **edge** wake (a change
+happened) or a **level** wake (the periodic resync pass fires anyway).
+The discipline — the backstop requirement for edge-woken reconcilers, the
+fact that a reconciler may also be woken by an `EnqueueEvaluation`
+handoff and declare no interest, and the no-busy-loop rule — lives in
+`.claude/rules/reconcilers.md` § "The wakeup model". This section is the
+runtime mechanics.
 
-**Piece A — cadence (`resync_schedule`).** At registration the runtime
-builds a cadence table from `AnyReconciler::resync_schedule()` for every
-reconciler returning `Some`. `spawn_convergence_loop` owns a
-`BTreeMap<ReconcilerName, UnixInstant>` next-wake table and, each
-iteration, for every due reconciler resolves the schedule's scope to
-concrete target(s) — `resolve_scope(ResyncScope::LocalNode, node_id) =
-[node/<id>]`, using the `NodeId` the loop already owns — and submits one
-`Evaluation` per target through `ReconcilerRuntime::submit_evaluation`, then
-re-arms `next_wake = now + period`. Two constraints keep Open Question 5's
-no-storm verdict true: resync MUST route through
-`ReconcilerRuntime::submit_evaluation` (never a side channel), and the
-next-wake table re-arms **at most once per
-period**. After this change the loop carries no reconciler name, no
-cadence constant, and no hardcoded target scheme — only the generic table
-and a scope resolver. `ResyncScope` ships one variant (`LocalNode`) so
-`resolve_scope` is total; a coarse whole-set scope is added additively
-the day a reconciler needs it (it couples to the managed-target-set
-bounding deferred to GH #270).
+**The resync pass.** Every reconciler declares `managed_targets`. The
+convergence loop runs one pass at boot, then one every 30 s anchored at
+`previous + period` on the injected clock (the same `Clock` instance the
+loop reads, never `tokio::time`), re-armed at most once per period with no
+drift. A pass is a loop over the registered reconcilers in `BTreeMap`
+order; each step enumerates that reconciler's managed targets through the
+production `HydrationContext` and submits one `Immediate` `Evaluation` per
+target through `ReconcilerRuntime::submit_evaluation` (never a side
+channel). A step that fails to enumerate logs the reconciler and error,
+submits nothing for it, and the pass continues with the next reconciler. The
+pass writes no observation row. It is awaited beside the admitted
+evaluations, never inline: its enumeration takes the same read locks a tick
+holds across its hydration. The pass is the only level trigger; a
+reconciler declares no cadence of its own.
+
+**Retry after an error.** A hydrate error or a View-persist error ends the
+evaluation and is not requeued locally; the next pass retries it. A
+dispatch error keeps the tick's requeue, with the pass as its backstop. A
+reconciler with a precise retry deadline returns it from
+`next_evaluation_at`, which the tick consults only when it emitted no
+non-`Noop` action; `Some(t)` retains the evaluation until `t`.
 
 **Piece B — event-interest (`interests`).** At registration the runtime
 builds an interest table `BTreeMap<ObservationRowKind, Vec<ReconcilerName>>`
@@ -1145,16 +1161,11 @@ if `interest_table.get(&row.kind())` is non-empty, derives the broker
 `TargetResource` inline from the row and submits one Evaluation per
 interested reconciler through that capability. The watcher emits a `Row` only
 for an *accepted* (LWW-winner) write, so the fan-out fires on genuine changes
-only. On `SubscriptionEvent::Lagged` it **relists** (repeat the List);
-and it relists **unconditionally every `INTEREST_ROUTER_RELIST_PERIOD`**
-(30 s, clock-injected — the same `config.clock` instance the convergence
-loop reads, never `tokio::time`), re-armed at most once per period and
-not reset by `Row` arrivals. That periodic relist is the level-triggered
-backstop for the row-backed partition — it re-derives the interested
-targets from the snapshot, needs no per-reconciler cadence, and closes
-the quiet-stream boot-LIST-error liveness gap. The router's only effect is
-to invoke its submit-only `InterestRouterBroker` capability; the runtime
-loop remains the sole broker drainer.
+only. On `SubscriptionEvent::Lagged` it **relists** (repeat the List). The
+router is latency, not a guarantee: the resync pass re-evaluates every
+managed target regardless of what the router delivered. The router's only
+effect is to invoke its submit-only `InterestRouterBroker` capability; the
+runtime loop remains the sole broker drainer.
 
 This is a single-cut greenfield migration: the four `exit_observer`
 producer submits that used to name their downstream consumers are

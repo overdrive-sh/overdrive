@@ -223,7 +223,7 @@ use crate::reconciler_runtime::{DEFAULT_TICK_CADENCE, run_convergence_tick};
 
 use overdrive_core::eval_broker::{Evaluation, EvaluationBroker, EvaluationEligibility};
 use overdrive_core::guest_network::GuestNetworkExecWiring;
-use overdrive_core::reconcilers::{ReconcilerName, ResyncSchedule, TargetResource, resolve_scope};
+use overdrive_core::reconcilers::{ReconcilerName, TargetResource};
 use overdrive_core::traits::observation_store::{
     LagAwareSubscription, ObservationRow, ObservationRowKind, SubscriptionEvent,
 };
@@ -4830,13 +4830,6 @@ async fn boot_server(
         interest_subscription,
         interest_table,
         InterestRouterBroker::from_runtime(state.runtime.clone(), clock.clone()),
-        // Single-clock DST preserved (ADR-0084 § Amendment 2026-08-23): the
-        // router reads the SAME `BootAdapters.clock` instance the convergence loop
-        // reads (one clock, two readers), so seed → bit-identical trajectory
-        // holds. `INTEREST_ROUTER_RELIST_PERIOD` is the production relist
-        // cadence — the row-backed level-triggered backstop.
-        clock.clone(),
-        INTEREST_ROUTER_RELIST_PERIOD,
         interest_router_shutdown.clone(),
     );
 
@@ -5055,89 +5048,13 @@ async fn boot_server(
 }
 
 // ---------------------------------------------------------------------------
-// [cadence-loop-region-start] — ADR-0084 §4, Piece A: the per-reconciler
-// next-wake table + pure cadence decision. After this change the
-// convergence loop carries NO reconciler name, NO cadence constant, and
-// NO hardcoded target scheme — only this generic machinery + the core
-// `resolve_scope` over a `ResyncScope` enum it understands. The
-// structural test `cadence_resync::loop_names_no_reconciler_or_cadence_
-// constant` (S-266-05 companion) scans this region to keep it so.
+// [convergence-loop-region-start] — the broker-driven convergence loop and its
+// boot-anchored resync pass.
 // ---------------------------------------------------------------------------
 
-/// Build the per-reconciler cadence table (ADR-0084 §4, Piece A) from
-/// the registered reconcilers: exactly one entry per reconciler whose
-/// [`Reconciler::resync_schedule`](overdrive_core::reconcilers::Reconciler::resync_schedule)
-/// returns `Some`. Every Phase-1 production reconciler returns the
-/// default `None`, so today this table is empty and the loop resyncs
-/// nothing until a reconciler opts in (SD-6: `None` ⟺ resync-only-off).
-///
-/// Pure over the registry snapshot — reads no clock, holds no handle.
-#[must_use]
-pub fn build_cadence_table<'a>(
-    reconcilers: impl Iterator<Item = &'a overdrive_reconcilers::AnyReconciler>,
-) -> BTreeMap<ReconcilerName, ResyncSchedule> {
-    reconcilers
-        .filter_map(|r| r.resync_schedule().map(|schedule| (r.name().clone(), schedule)))
-        .collect()
-}
-
-/// Arm the per-reconciler next-wake table (ADR-0084 §4, Piece A): each
-/// scheduled reconciler's FIRST level-triggered resync fires one period
-/// after `now` (registration time — `next_wake = now + period`). The
-/// returned [`BTreeMap`] is the loop-owned mutable scheduling state that
-/// [`due_resync_evaluations`] advances.
-///
-/// Pure over `(schedules, now)`. `BTreeMap` per `development.md`
-/// § "Ordered-collection choice" — deterministic iteration across seeds.
-#[must_use]
-pub fn arm_next_wake(
-    schedules: &BTreeMap<ReconcilerName, ResyncSchedule>,
-    now: overdrive_core::UnixInstant,
-) -> BTreeMap<ReconcilerName, overdrive_core::UnixInstant> {
-    schedules.iter().map(|(name, schedule)| (name.clone(), now + schedule.period)).collect()
-}
-
-/// The pure cadence decision (ADR-0084 §4, Piece A). For every
-/// reconciler whose next-wake instant is DUE (`next_wake <= now`),
-/// resolve its [`ResyncScope`](overdrive_core::reconcilers::ResyncScope)
-/// to the concrete broker target(s) via the core
-/// [`resolve_scope`] and re-arm its next-wake ONE period forward
-/// (`next_wake += period` — anchored to the prior wake, no drift). The
-/// single `if` (not a `while`) plus the anchored re-arm is **C-A2**: a
-/// due reconciler fires at most once per loop iteration and its schedule
-/// never drifts. The returned evaluations are what the loop then routes
-/// through `broker.submit` (**C-A1** — every resync coalesces through the
-/// broker's LWW key-collapse, never a side channel).
-///
-/// Reads no clock and holds no handle: referentially transparent over
-/// `(schedules, next_wake, now, node_id)`. The loop owns the clock
-/// (`SimClock` under DST) and the local [`NodeId`]; the reconciler names
-/// no target string. A schedule with no matching `next_wake` entry is
-/// skipped (the two tables are armed together, so this cannot happen in
-/// the loop — it keeps the function total).
-#[must_use]
-pub fn due_resync_evaluations(
-    schedules: &BTreeMap<ReconcilerName, ResyncSchedule>,
-    next_wake: &mut BTreeMap<ReconcilerName, overdrive_core::UnixInstant>,
-    now: overdrive_core::UnixInstant,
-    node_id: &NodeId,
-) -> Vec<Evaluation> {
-    let mut submits = Vec::new();
-    for (name, schedule) in schedules {
-        let Some(wake) = next_wake.get_mut(name) else {
-            continue;
-        };
-        if *wake <= now {
-            for target in resolve_scope(schedule.scope, node_id) {
-                submits.push(Evaluation { reconciler: name.clone(), target });
-            }
-            // C-A2: re-arm anchored to the prior wake (`+= period`), so
-            // the schedule never drifts and fires at most once per period.
-            *wake = *wake + schedule.period;
-        }
-    }
-    submits
-}
+/// Period of the resync pass (D-2): every registered reconciler re-evaluates
+/// all of its managed targets once per period, whatever woke them before.
+const RESYNC_PASS_PERIOD: Duration = Duration::from_secs(30);
 
 /// Spawn the broker-driven convergence-tick loop.
 ///
@@ -5147,15 +5064,11 @@ pub fn due_resync_evaluations(
 /// concurrently-owned `run_convergence_tick` futures. Cancellation closes
 /// admission and the owner drains every admitted evaluation before exit.
 ///
-/// Piece A (ADR-0084 §4) adds a per-reconciler cadence phase ahead of the
-/// drain: at registration the loop builds a next-wake table from every
-/// reconciler that opted into a resync schedule; each iteration submits a
-/// resync for every due reconciler through `broker.submit` (C-A1) and
-/// re-arms it one period out (C-A2). Every Phase-1 reconciler returns the
-/// default `None` EXCEPT `vm-reclamation`, which declares a 30s
-/// `LocalNode` schedule — its host-backed, resync-only trigger (ADR-0084
-/// §4, unifying the former hardcoded vm-reclamation sweep). So the cadence
-/// phase drives `vm-reclamation` and is inert for the rest.
+/// The loop also runs the resync pass: one pass at boot, then one every
+/// [`RESYNC_PASS_PERIOD`] anchored at `previous + period` on the injected
+/// clock (re-armed at most once per period, no drift). A pass submits every
+/// registered reconciler's managed targets through the broker; it is the
+/// level-triggered backstop for every reconciler.
 ///
 /// Without this spawn, `submit_workload` and `stop_workload` would only
 /// write to the `IntentStore` — the broker would never be drained, no
@@ -5170,14 +5083,6 @@ pub fn due_resync_evaluations(
 /// past the deadline. Either way the loop suspends between ticks
 /// rather than busy-polling.
 ///
-/// `vm-reclamation` (ADR-0083 §D7, brief.md §105a.8, GH #42) is the sole
-/// Phase-1 cadence opt-in: its `resync_schedule` (30s / `LocalNode`,
-/// ADR-0084 §4) makes the cadence phase submit one local-node
-/// `vm-reclamation` `Evaluation` per period through the generic hook. The
-/// broker is otherwise purely event-driven and nothing else would submit a
-/// `vm-reclamation` evaluation, so S-VM-21's "a later steady-state tick,
-/// WITHOUT restarting serve" claim now rides on that declaration rather
-/// than a hardcoded sweep in this loop.
 const CONVERGENCE_MAX_IN_FLIGHT: usize = 8;
 
 fn duration_millis(duration: Duration) -> u64 {
@@ -5192,19 +5097,11 @@ fn spawn_convergence_loop(
     shutdown: CancellationToken,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
-        // Piece A (ADR-0084 §4). At registration build the per-reconciler
-        // cadence table from every reconciler that opted into a resync
-        // schedule, and arm its next-wake one period out. Today exactly one
-        // reconciler opts in — `vm-reclamation` (a 30s `LocalNode`
-        // schedule, its host-backed resync-only trigger); every other
-        // reconciler returns the default `None`. The loop itself names NO
-        // reconciler and bakes NO cadence constant: it carries only this
-        // generic next-wake table + the core `resolve_scope`, and the
-        // vm-reclamation cadence lives entirely in the reconciler's
-        // `resync_schedule` declaration.
-        let cadence_table = build_cadence_table(state.runtime.reconcilers_iter());
-        let mut next_wake =
-            arm_next_wake(&cadence_table, overdrive_core::UnixInstant::from_clock(&*clock));
+        // The boot pass runs on the first iteration; the next is anchored at
+        // `previous + period` on the boot grid.
+        let mut next_pass_at = overdrive_core::UnixInstant::from_clock(&*clock);
+        let mut pass: Option<std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>> =
+            None;
 
         let mut tick_n: u64 = 0;
         let mut admission_closed = false;
@@ -5220,13 +5117,20 @@ fn spawn_convergence_loop(
 
             let capacity = CONVERGENCE_MAX_IN_FLIGHT.saturating_sub(active.len());
             let mut sleep_for = cadence;
+            if !admission_closed && pass.is_none() && next_pass_at <= now_unix {
+                // The pass is polled by the `select!` below beside the admitted
+                // evaluations: it takes the same read locks a tick holds across its
+                // hydration, so awaiting it inline would stop the loop polling the
+                // tick that holds them.
+                let state_for_pass = state.clone();
+                pass = Some(Box::pin(async move {
+                    reconciler_runtime::run_resync_pass(&state_for_pass).await;
+                }));
+                // Anchored to the prior pass (`+= period`), so the schedule never
+                // drifts and starts at most one pass per loop iteration.
+                next_pass_at = next_pass_at + RESYNC_PASS_PERIOD;
+            }
             if !admission_closed && capacity > 0 {
-                for eval in
-                    due_resync_evaluations(&cadence_table, &mut next_wake, now_unix, &state.node_id)
-                {
-                    state.runtime.submit_evaluation(eval, now, EvaluationEligibility::Immediate);
-                }
-
                 let pending = {
                     let mut broker = state.runtime.broker();
                     broker.drain_pending(capacity, &active_targets, now, now_unix)
@@ -5274,6 +5178,11 @@ fn spawn_convergence_loop(
                     sleep_for = cadence.min(until_eligible);
                 }
             }
+            if !admission_closed && pass.is_none() {
+                let until_pass =
+                    next_pass_at.as_unix_duration().saturating_sub(now_unix.as_unix_duration());
+                sleep_for = sleep_for.min(until_pass);
+            }
 
             if admission_closed && active.is_empty() {
                 let pending_at_exit = state.runtime.broker().counters().queued;
@@ -5316,6 +5225,9 @@ fn spawn_convergence_loop(
                         error = tracing::field::debug(&error),
                     );
                 }
+                Some(()) = futures::future::OptionFuture::from(pass.as_mut()), if pass.is_some() => {
+                    pass = None;
+                }
                 () = state.runtime.submitted(), if !admission_closed => {}
                 () = clock.sleep(sleep_for), if !admission_closed => {}
             }
@@ -5323,7 +5235,7 @@ fn spawn_convergence_loop(
     })
 }
 
-// [cadence-loop-region-end]
+// [convergence-loop-region-end]
 
 // ---------------------------------------------------------------------------
 // [interest-router-region-start] — ADR-0084 §5, Piece B: the declarative
@@ -5334,16 +5246,6 @@ fn spawn_convergence_loop(
 // reconciler through a restricted broker handle. RN-2 = B-2: interests-only,
 // NO warm cache (hydration stays per-tick, ADR-0036).
 // ---------------------------------------------------------------------------
-
-/// Production `relist_period` for the interest router's unconditional periodic
-/// relist (ADR-0084 § Amendment 2026-08-23). A compile-time const — NOT a
-/// config field / operator-tunable knob (that is a separate, approval-gated
-/// decision). Mirrors the vm-reclamation sweep interval's role for the
-/// host-backed partition; 30 s aligns with that sweep but is a deliberately
-/// SEPARATE const (the row-backed relist and the host-backed cadence are
-/// independent concerns even at the same value). Per-period cost =
-/// O(interested targets) coalesced `broker.submit`s once per 30 s.
-const INTEREST_ROUTER_RELIST_PERIOD: Duration = Duration::from_secs(30);
 
 /// The restricted broker capability handed to the interest router
 /// (ADR-0084 §5 — "injected capability is a restricted `EvaluationBroker`
@@ -5469,12 +5371,11 @@ async fn route_observation_row(
     }
 }
 
-/// The LIST leg of List-then-Watch (and the `Lagged`- / periodic-relist
-/// recovery): read the interested `alloc_status` snapshot and route each row.
-/// A snapshot read failure is logged and skipped — it is **not terminal**
-/// because the unconditional periodic relist (Amendment 2026-08-23) retries
-/// within `relist_period`; the router never faults on a transient store-read
-/// error (there is no derived view to leave stale under B-2).
+/// The LIST leg of List-then-Watch (and the `Lagged` recovery): read the
+/// interested `alloc_status` snapshot and route each row. A snapshot read
+/// failure is logged and skipped — it is **not terminal**: the resync pass is
+/// the backstop, and the router never faults on a transient store-read error
+/// (there is no derived view to leave stale under B-2).
 async fn list_and_route(
     obs: &Arc<dyn ObservationStore>,
     interest_table: &BTreeMap<ObservationRowKind, Vec<ReconcilerName>>,
@@ -5496,7 +5397,7 @@ async fn list_and_route(
             tracing::warn!(
                 target: "overdrive::interest_router",
                 ?e,
-                "interest-router list/relist of alloc_status_rows failed; skipping this pass",
+                "interest-router list/relist of alloc_status_rows failed; skipping this listing",
             );
         }
     }
@@ -5534,26 +5435,16 @@ pub fn build_interest_table<'a>(
 /// The task: (2) LISTs the interested snapshot family
 /// (`alloc_status_rows()`) and submits an `Evaluation` per row's derived
 /// target; (3) WATCHes the subscription — on `Row(row)` it routes by
-/// `row.kind()`, on `Lagged` it RELISTs, and on every `relist_period` it
-/// **unconditionally RELISTs** off the injected `clock` (Amendment
-/// 2026-08-23). That periodic relist is the level-triggered backstop for the
-/// row-backed partition (ADR-0084 SD-6): it closes the quiet-stream
-/// boot-LIST-error liveness gap — on a `serve` restart `register` submits no
-/// initial evaluation, so the boot LIST is the only boot-time wake, and if it
-/// errors transiently on a quiet stream nothing else recovers until the next
-/// relist tick (≤ `relist_period`). It also re-delivers any silently-missed
-/// per-target edge each period, and subsumes the `Lagged`-relist as a special
-/// case. The router's only effect is `broker.submit`; `clock` is a read
-/// capability, not an effect. Shutdown is cooperative via `shutdown` (a bare
-/// `abort()` on a parked task would not interrupt it —
-/// `.claude/rules/development.md` § "Concurrency & async").
+/// `row.kind()`, on `Lagged` it RELISTs. The router is latency, not a
+/// guarantee: the resync pass is the level-triggered backstop for every
+/// reconciler. The router's only effect is `broker.submit`. Shutdown is
+/// cooperative via `shutdown` (a bare `abort()` on a parked task would not
+/// interrupt it — `.claude/rules/development.md` § "Concurrency & async").
 pub fn spawn_interest_router(
     obs: Arc<dyn ObservationStore>,
     mut subscription: LagAwareSubscription,
     interest_table: BTreeMap<ObservationRowKind, Vec<ReconcilerName>>,
     broker: InterestRouterBroker,
-    clock: Arc<dyn Clock>,
-    relist_period: Duration,
     shutdown: CancellationToken,
 ) -> tokio::task::JoinHandle<()> {
     use futures::StreamExt as _;
@@ -5564,58 +5455,21 @@ pub fn spawn_interest_router(
         // coalesced with the list submit at the same broker key).
         list_and_route(&obs, &interest_table, &broker).await;
 
-        // Arm the unconditional periodic relist (Amendment 2026-08-23) one
-        // period out from the boot LIST. `next_relist_at` is an absolute
-        // deadline on the injected `Clock` (`SimClock` under DST) — never
-        // `tokio::time` — so the level-triggered backstop is DST-controllable
-        // and single-clock-deterministic.
-        let mut next_relist_at = clock.now() + relist_period;
-
-        // (3) WATCH + periodic relist. Three-way `select!` racing shutdown, the
-        // relist deadline, and the next stream item — `biased` so shutdown
-        // wins ties. Shutdown is cooperative: `select!` resolves
-        // `shutdown.cancelled()` even while parked (a bare `abort()` would not
-        // interrupt a parked recv — `.claude/rules/development.md`
-        // § "Concurrency & async").
+        // (3) WATCH. Shutdown is cooperative: `select!` resolves
+        // `shutdown.cancelled()` even while parked.
         loop {
-            // Sleep only the REMAINING time to the absolute deadline. Because
-            // `next_relist_at` is fixed, re-deriving `remaining` each iteration
-            // targets the SAME instant regardless of how many `Row` arrivals
-            // re-enter the loop — so a `Row` never drifts the deadline. If the
-            // deadline has already passed, `remaining` saturates to zero and the
-            // relist arm fires immediately on the next poll.
-            let remaining = next_relist_at.saturating_duration_since(clock.now());
             tokio::select! {
                 biased;
                 () = shutdown.cancelled() => break,
-                () = clock.sleep(remaining) => {
-                    // Unconditional periodic relist (ADR-0084 § Amendment
-                    // 2026-08-23) — the level-triggered backstop for the
-                    // row-backed partition: re-read the interested snapshot and
-                    // re-route, so a transient boot-LIST error (log-and-skip) or
-                    // a silently-missed per-target edge self-heals within one
-                    // period. Re-arm the deadline a full period out — re-armed
-                    // AT MOST once per period (the router analogue of Piece A's
-                    // C-A2). The `Lagged`-relist below is a special case of this
-                    // same relist path.
-                    list_and_route(&obs, &interest_table, &broker).await;
-                    next_relist_at = clock.now() + relist_period;
-                }
                 item = subscription.next() => match item {
                     Some(SubscriptionEvent::Row(row)) => {
-                        // Edge wake — `next_relist_at` is UNCHANGED (a `Row`
-                        // arrival does NOT reset the period: unconditional-
-                        // periodic, not idle-debounce).
                         route_observation_row(&obs, &row, &interest_table, &broker).await;
                     }
                     Some(SubscriptionEvent::Lagged { .. }) => {
                         // Honour the mandatory `Lagged` contract
                         // (`observation_store.rs`): re-read the interested
                         // snapshot and re-route, so a dropped row's target is
-                        // still woken (no warm cache to rebuild under B-2). A
-                        // special case of the periodic relist above;
-                        // `next_relist_at` is left UNCHANGED (the periodic
-                        // cadence is independent of stream activity).
+                        // still woken (no warm cache to rebuild under B-2).
                         list_and_route(&obs, &interest_table, &broker).await;
                     }
                     // The broadcast sender was dropped — the watch closed. No

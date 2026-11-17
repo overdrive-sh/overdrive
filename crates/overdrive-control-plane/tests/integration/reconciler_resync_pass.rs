@@ -511,9 +511,6 @@ impl Node {
 ///  And the service map is programmed with its backend.
 #[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[should_panic(
-    expected = "the service whose first hydrate failed was not Running within one resync period of the store recovering"
-)]
 async fn a_service_whose_first_hydrate_failed_is_running_and_in_the_service_map_by_the_next_pass() {
     let dir = TempDir::new().expect("tempdir");
     let node = Node::boot(&dir, Ports::with_observation()).await;
@@ -548,9 +545,6 @@ async fn a_service_whose_first_hydrate_failed_is_running_and_in_the_service_map_
 ///  And the service map is programmed with its backend.
 #[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[should_panic(
-    expected = "the service whose first intent read failed was not Running within one resync period of the intent store recovering"
-)]
 async fn a_service_whose_first_intent_read_failed_is_running_and_in_the_service_map_by_the_next_pass()
  {
     let dir = TempDir::new().expect("tempdir");
@@ -587,9 +581,6 @@ async fn a_service_whose_first_intent_read_failed_is_running_and_in_the_service_
 ///  And the service map is programmed with its backend.
 #[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[should_panic(
-    expected = "the service whose View write failed was not Running within one resync period of the store recovering"
-)]
 async fn a_service_whose_view_write_failed_is_running_and_in_the_service_map_on_a_later_pass() {
     let dir = TempDir::new().expect("tempdir");
     let views = Arc::new(SimViewStore::new());
@@ -704,9 +695,6 @@ async fn a_service_whose_dataplane_update_failed_is_retried_after_its_backoff_wi
 /// Then `payments` is Running well inside one period (the boot pass, not the periodic one).
 #[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[should_panic(
-    expected = "the node restarted over a deployed intent with no allocation row did not evaluate it at boot"
-)]
 async fn a_node_restarted_over_a_deployed_intent_with_no_allocation_row_evaluates_it_at_boot() {
     let dir = TempDir::new().expect("tempdir");
     let first = Node::boot(&dir, Ports::with_observation()).await;
@@ -743,9 +731,6 @@ async fn a_node_restarted_over_a_deployed_intent_with_no_allocation_row_evaluate
 /// Then `payments` is Running: the pass continued past the failure.
 #[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[should_panic(
-    expected = "the pass did not reach workload-lifecycle after another reconciler's enumeration failed"
-)]
 async fn an_enumeration_failure_of_one_reconciler_does_not_starve_the_others_in_the_pass() {
     let dir = TempDir::new().expect("tempdir");
     let node = Node::boot(&dir, Ports::with_observation()).await;
@@ -781,9 +766,6 @@ async fn an_enumeration_failure_of_one_reconciler_does_not_starve_the_others_in_
 ///   previous + period (a drifting loop would run it five seconds later).
 #[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[should_panic(
-    expected = "the pass at the end of the first period did not recover the wedged workload"
-)]
 async fn the_resync_pass_stays_anchored_one_period_apart_with_no_drift_and_at_most_one_per_period()
 {
     let dir = TempDir::new().expect("tempdir");
@@ -852,9 +834,6 @@ async fn the_resync_pass_stays_anchored_one_period_apart_with_no_drift_and_at_mo
 ///   loop that re-anchored at the jump would run it five seconds later).
 #[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[should_panic(
-    expected = "the pass due inside a clock jump over several periods did not recover the wedged workload"
-)]
 async fn a_clock_jump_over_several_periods_runs_the_missed_passes_and_stays_on_the_boot_grid() {
     let dir = TempDir::new().expect("tempdir");
     let node = Node::boot(&dir, Ports::with_observation()).await;

@@ -181,7 +181,6 @@ impl Fixture {
 /// re-evaluated by the pass.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[should_panic(expected = "svid-lifecycle stalled with actual != desired after 8 rounds")]
 fn svid_lifecycle_converges_the_held_set_to_the_running_set_from_any_state_then_stays_converged() {
     let runtime = runtime();
     proptest!(property_config(48, 351_006), |(world in world())| {

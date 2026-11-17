@@ -37,8 +37,7 @@ use overdrive_core::traits::driver::DriverType;
 use overdrive_core::traits::vm_host_state::VmHostObservation;
 
 use super::{
-    Action, Reconciler, ReconcilerName, ResyncSchedule, ResyncScope, TargetResource, TickContext,
-    resolve_scope,
+    Action, Reconciler, ReconcilerName, TargetResource, TickContext,
 };
 
 // ---------------------------------------------------------------------------
@@ -230,16 +229,11 @@ impl Default for VmReclamation {
     }
 }
 
-/// Level-triggered resync cadence for `vm-reclamation` — the period at
-/// which the Piece A cadence loop re-submits a `node/<local_node_id>`
-/// sweep (ADR-0084 §4; GH #266). `VmReclamation` is host-backed
-/// (`reconcile` hydrates `actual` live from the host via the
-/// `VmHostState` port and declares no event interests), so this periodic
-/// resync is its SOLE trigger — the level-triggered safety net with no
-/// edge to fall back on. Formerly the `VM_RECLAMATION_SWEEP_INTERVAL`
-/// hardcode inside `spawn_convergence_loop`; unified onto the generic
-/// cadence hook so the loop names no reconciler and carries no cadence
-/// constant.
+/// The period of the resync pass that sweeps `vm-reclamation`'s single
+/// `node/<local_node_id>` target. `VmReclamation` is host-backed (it hydrates
+/// `actual` live from the host via the `VmHostState` port and declares no
+/// event interests), so the pass is its only trigger. Test drivers advance the
+/// clock by this much to reach the next pass.
 pub const VM_RECLAMATION_SWEEP_INTERVAL: Duration = Duration::from_secs(30);
 
 #[async_trait::async_trait]
@@ -259,7 +253,9 @@ impl Reconciler for VmReclamation {
         &self,
         ctx: &HydrationContext<'_>,
     ) -> Result<BTreeSet<TargetResource>, HydrateError> {
-        Ok(resolve_scope(ResyncScope::LocalNode, ctx.node_id).into_iter().collect())
+        let target = TargetResource::new(&format!("node/{}", ctx.node_id))
+            .map_err(|error| HydrateError::TargetShape(error.to_string()))?;
+        Ok(BTreeSet::from([target]))
     }
 
     fn reconcile(
@@ -270,21 +266,6 @@ impl Reconciler for VmReclamation {
         _tick: &TickContext,
     ) -> (Vec<Action>, Self::View) {
         (plan_reclamation(desired, actual), VmReclamationView::default())
-    }
-
-    fn resync_schedule(&self) -> Option<ResyncSchedule> {
-        // Host-backed ⇒ resync-only (ADR-0084 §1/§4, Piece A): `actual` is
-        // hydrated live from the host and no observation-row change wakes
-        // this reconciler, so the level-triggered cadence is its ONLY
-        // trigger. Fires `node/<local_node_id>` every
-        // `VM_RECLAMATION_SWEEP_INTERVAL`; the loop resolves the target from
-        // the `NodeId` it owns via `resolve_scope(LocalNode, ..)`. This is
-        // the generic-hook replacement for the former `spawn_convergence_loop`
-        // hardcode.
-        Some(ResyncSchedule {
-            period: VM_RECLAMATION_SWEEP_INTERVAL,
-            scope: ResyncScope::LocalNode,
-        })
     }
 
     /// Hydrate the `desired` two-surface join (VM-driven intent × alloc rows;

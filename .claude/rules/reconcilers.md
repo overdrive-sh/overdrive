@@ -70,9 +70,8 @@ I/O") when the state needs **continuous** convergence — drift repaired
 *while the system is up*, not merely completed across restarts. That
 requires the runtime machinery plus, usually, a new observe surface into
 `actual`, new `Action` variants, and a host port trait. A Bar-2
-promotion also declares its **wakeup model** — `interests()` if it
-converges on an observation row, `resync_schedule()` if it hydrates
-`actual` from the host — see § "The wakeup model" below.
+promotion also declares its **managed targets** and, if it converges on
+an observation row, its `interests()` — see § "The wakeup model" below.
 
 ### Converge-on-boot is the valid intermediate
 
@@ -90,36 +89,32 @@ writing the converge.
 ## The wakeup model — declare how you are triggered
 
 A Bar-2 reconciler declares not only *what* it converges but *how the
-loop wakes it*. Per ADR-0084 (GH #266) two additive, default-provided
-hooks on the `Reconciler` trait carry the declaration — `interests()`
-and `resync_schedule()` — and choosing between them is a triage
-decision, not a mechanic. This section is the discipline for *which* to
-reach for; the exact surface and runtime mechanics (the interest router,
-the loop's next-wake table) are the "how" and live in ADR-0084 and
-`development.md` § "Reconciler I/O".
+loop wakes it*. Two things carry the declaration on the `Reconciler`
+trait: the required `managed_targets` and the default-provided
+`interests()`. This section is the discipline for how they relate; the
+exact surface and runtime mechanics (the interest router, the resync pass)
+are the "how" and live in ADR-0084 and `development.md` § "Reconciler I/O".
 
-`reconcile` itself stays **level-triggered** either way — it recomputes
-the desired-vs-actual gap from freshly hydrated state every tick and
-never trusts that a past action landed. What these hooks govern is
-strictly *when the loop wakes the reconciler to run that computation*:
-an **edge** wake (a change happened) versus a **level** wake (a periodic
-resync fires regardless).
+`reconcile` itself stays **level-triggered** — it recomputes the
+desired-vs-actual gap from freshly hydrated state every tick and never
+trusts that a past action landed. What the declarations govern is strictly
+*when the loop wakes the reconciler to run that computation*: an **edge**
+wake (a change happened) versus a **level** wake (the periodic resync pass
+fires regardless).
 
-**The two declared wakeup models.** `interests()` returns the
-observation-row *kinds* (`&'static [ObservationRowKind]`) whose change
-should wake the reconciler; `resync_schedule()` returns a period + scope.
-A reconciler that opts into one of them lands in one of two models:
-
-| Wakeup model | Declares | `actual` source | Edge wake | Level-triggered backstop |
-|---|---|---|---|---|
-| **Row-backed** | non-empty `interests()` | a node-local observation row | the interest router fans out `broker.submit` on an *accepted* row change of a declared kind | the router's **periodic relist** (re-derives the interested targets from the snapshot every period) — free; the reconciler declares no cadence |
-| **Host-backed** | `resync_schedule()` (+ empty `interests()`) | live from the host (`getifaddrs` / `bpftool` / cgroup) | none — no row change can wake it | **`resync_schedule()`** — the reconciler declares its own cadence, which is also its only trigger |
-
-A host-backed reconciler has **no row to relist**, so it self-declares a
-`resync_schedule()`; a row-backed reconciler already has the router
-enumerating its targets, so the router relist IS its backstop and it does
-**not** also declare a `resync_schedule()`. A reconciler declares one
-model or the other, never both.
+**Every reconciler declares its managed targets, and the resync pass is
+the backstop for every reconciler.** The runtime re-evaluates all managed
+targets every period, from intent and observation, whatever woke them
+before. `interests()` returns the observation-row *kinds*
+(`&'static [ObservationRowKind]`) whose change should wake the reconciler
+at once; `interests()` and `EnqueueEvaluation` are latency, not a
+guarantee. A reconciler is row-backed when it hydrates `actual` from a
+node-local observation row, and host-backed when it hydrates it live from
+the host (`getifaddrs` / `bpftool` / cgroup); the partition decides whether
+an edge wake exists (row-backed: the interest router fans out
+`broker.submit` on an *accepted* row change of a declared kind;
+host-backed: no row change can wake it), never whether the reconciler has
+a backstop. Every reconciler has one: the pass.
 
 **Empty `interests()` does NOT prove host-backed.** A reconciler can also
 be woken by another reconciler handing it work
@@ -134,13 +129,10 @@ reconciler hydrates `actual`*, not on whether `interests()` is empty.
 
 **An edge-woken reconciler needs a level-triggered backstop — edge-only
 is fragile.** One dropped or missed change is a permanent divergence — the
-same failure the converge discipline exists to prevent one layer up. A
-row-backed reconciler gets the router's unconditional periodic relist for
-free — which is exactly why the router relists on a period, not only on
-`Lagged`: a reconciler leaning on the edge alone is one lost
-`SubscriptionEvent` away from stranding the boot snapshot. A
-**host-backed** reconciler has no relist and MUST declare a
-`resync_schedule()`, or nothing wakes it at all.
+same failure the converge discipline exists to prevent one layer up. The
+resync pass is that backstop for every reconciler: a reconciler leaning on
+an edge alone is one lost `SubscriptionEvent` away from stranding its
+target until the next pass.
 
 **Never declare interest in a row family you author — the no-busy-loop
 rule.** If a reconciler both authors row kind K *and* declares
@@ -155,21 +147,14 @@ it does not blindly re-fire on its own write.
 
 ### Symptoms during review (wakeup model)
 
-- **A host-backed reconciler (hydrates `actual` from the host) that
-  declares no `resync_schedule()`.** Nothing wakes it — no row change
-  can (it reads the host, not a row), and it named no cadence. It sits
-  inert until some unrelated `EnqueueEvaluation` happens to reach it, if
-  ever. NB: empty `interests()` *alone* is not this smell — a
-  handoff-woken row-converging reconciler like `ServiceMapHydrator` is
-  fine; the tell is host-hydrated `actual` with no declared cadence.
+- **A reconciler whose `managed_targets` omits a target its hydration
+  would project non-empty.** The pass never evaluates it, so the target
+  sits inert until an unrelated edge wake reaches it, if ever. A method that
+  enumerates one observation family only is this shape.
 - **A reconciler declaring `interests()` in a row kind it also
   authors** — the busy-loop shape: its own write wakes it to write
   again. Valid only when it converges on that row by reading it back
   (ADR-0079).
-- **A reconciler declaring BOTH a non-empty `interests()` and a
-  `resync_schedule()`.** The router relist already backstops the
-  row-backed set; a redundant per-reconciler cadence is double-triggering,
-  not defense in depth.
 
 ---
 
@@ -220,9 +205,9 @@ Three properties are load-bearing:
 **Where a reconciler hydrates its `actual` still decides its wakeup
 model** (§ "The wakeup model" above): a reconciler that hydrates `actual`
 from an observation row is row-backed and declares `interests()`; one that
-hydrates it live from the host is host-backed and declares a
-`resync_schedule()`. Owning the hydration is what makes that a property
-the reconciler *declares*, not one the runtime hardcodes for it.
+hydrates it live from the host is host-backed and declares none. Owning the
+hydration is what makes that a property the reconciler *declares*, not one
+the runtime hardcodes for it.
 
 ### Symptoms during review
 
@@ -520,23 +505,20 @@ never delivered. `a_late_probe_result_after_supersession_is_never_delivered`
   `ServiceMapHydrator` via `Action::DataplaneUpdateService`. The
   dataplane is the executor; the hydrator owns the diff.
 - **The wakeup model (ADR-0084 / GH #266).** `vm-reclamation`
-  (`crates/overdrive-core/src/reconcilers/vm_reclamation.rs`) is the
-  first **host-backed** reconciler: empty `interests()`, hydrates
-  `actual` live from the host, and declares `resync_schedule() →
-  ResyncSchedule { period: VM_RECLAMATION_SWEEP_INTERVAL, scope:
-  ResyncScope::LocalNode }` (30 s) as its sole trigger — the generic
-  cadence hook that replaced its former hardcoded `spawn_convergence_loop`
-  sweep. The four **row-backed** consumers — `workload-lifecycle`,
+  (`crates/overdrive-reconcilers/src/vm_reclamation.rs`) is the
+  **host-backed** reconciler: empty `interests()`, hydrates `actual` live
+  from the host, and its single `node/<local-node-id>` managed target is
+  re-evaluated by the 30 s resync pass, its only trigger. The four
+  **row-backed** consumers — `workload-lifecycle`,
   `backend-discovery-bridge`, `service-lifecycle`, `svid-lifecycle` — each
   declare `interests() → &[ObservationRowKind::AllocStatus]`; the interest
   router (`spawn_interest_router`,
   `crates/overdrive-control-plane/src/lib.rs`) fans out their wakeups on
-  every accepted `alloc_status` change and relists unconditionally every
-  `INTEREST_ROUTER_RELIST_PERIOD` (30 s) as their backstop. The same
-  single cut deleted the four scattered `exit_observer` producer submits
-  that used to name those consumers imperatively (`ObservationRowKind` +
-  `ObservationRow::kind()` are the total, no-wildcard discriminant the
-  router keys on).
+  every accepted `alloc_status` change, and the pass is their backstop too.
+  The same single cut deleted the four scattered `exit_observer` producer
+  submits that used to name those consumers imperatively
+  (`ObservationRowKind` + `ObservationRow::kind()` are the total,
+  no-wildcard discriminant the router keys on).
 - **A reconciler owns its hydration (ADR-0086 / ADR-0087).** The
   `Reconciler` contract — the trait, `HydrationContext`, `HydrateError`,
   and the four narrow read-port traits (`ListenerFacts`, `ServiceVipView`,
@@ -586,9 +568,9 @@ never delivered. `a_late_probe_result_after_supersession_is_never_delivered`
   `converge_steps`-style diff is default-lane unit-testable.
 - `.claude/rules/debugging.md` § "Leftover XDP attachments across runs"
   — the downstream hazard a converge-on-boot XDP attach (#199) closes.
-- ADR-0084 (GH #266 — the cadence + event-interest wakeup declarations:
-  `resync_schedule()` / `interests()`, the interest router, and the
-  row-backed vs host-backed partition).
+- ADR-0084 (GH #266 — the event-interest wakeup declaration
+  `interests()`, the interest router, and the row-backed vs host-backed
+  partition).
 - ADR-0035 / ADR-0036 (reconciler runtime), ADR-0023 (action-shim
   executor boundary), ADR-0061 (converge-on-boot precedent),
   ADR-0079 (converge only on rows you author — the no-busy-loop rule's

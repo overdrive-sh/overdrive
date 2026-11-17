@@ -48,10 +48,10 @@
 // dispatch enums' public signatures name the core types. NOT re-exported from
 // this crate's root (contract-in-core; importers spell `overdrive_core::…`).
 use overdrive_core::aggregate::{IntentKey, WorkloadIntent, scan_workload_intents};
-use overdrive_core::id::{NodeId, ServiceId, WorkloadId};
+use overdrive_core::id::{ServiceId, WorkloadId};
 use overdrive_core::reconcilers::{
-    Action, HydrateError, HydrationContext, Reconciler, ReconcilerName, ResyncSchedule,
-    ResyncScope, TargetResource, TickContext, resolve_scope,
+    Action, HydrateError, HydrationContext, Reconciler, ReconcilerName, TargetResource,
+    TickContext,
 };
 use overdrive_core::traits::observation_store::ObservationRowKind;
 use overdrive_core::wall_clock::UnixInstant;
@@ -103,12 +103,6 @@ use overdrive_testing_macros::overdrive_test_default;
 
 #[cfg(test)]
 overdrive_test_default!(host_pure);
-
-// `NodeId` / `resolve_scope` / `ResyncScope` / `TargetResource` are pulled in
-// above for the impl submodules' `super::` references (test modules resolve
-// scope-target derivations against them). Reference them here so a future
-// refactor that drops an impl's use does not silently orphan the re-import.
-const _: fn(ResyncScope, &NodeId) -> Vec<TargetResource> = resolve_scope;
 
 // ---------------------------------------------------------------------------
 // AnyState enum — per-reconciler typed `desired`/`actual` projection
@@ -219,27 +213,9 @@ impl AnyReconciler {
         }
     }
 
-    /// Declarative resync cadence of the inner reconciler — forwards to
-    /// [`Reconciler::resync_schedule`] across all variants, exactly like
-    /// [`AnyReconciler::name`]. Adds no `AnyState` / `AnyReconcilerView`
-    /// / reconcile-dispatch change (ADR-0084 §3).
-    #[must_use]
-    pub fn resync_schedule(&self) -> Option<ResyncSchedule> {
-        match self {
-            Self::NoopHeartbeat(r) => r.resync_schedule(),
-            Self::WorkloadLifecycle(r) => r.resync_schedule(),
-            Self::WorkflowLifecycle(r) => r.resync_schedule(),
-            Self::ServiceMapHydrator(r) => r.resync_schedule(),
-            Self::ServiceLifecycle(r) => r.resync_schedule(),
-            Self::SvidLifecycle(r) => r.resync_schedule(),
-            Self::GatewaySvidLifecycle(r) => r.resync_schedule(),
-            Self::VmReclamation(r) => r.resync_schedule(),
-        }
-    }
-
     /// Declarative event-interests of the inner reconciler — forwards to
     /// [`Reconciler::interests`] across all variants, exactly like
-    /// [`AnyReconciler::name`] / [`AnyReconciler::resync_schedule`]. Adds no
+    /// [`AnyReconciler::name`]. Adds no
     /// `AnyState` / `AnyReconcilerView` / reconcile-dispatch change
     /// (ADR-0084 §3).
     #[must_use]

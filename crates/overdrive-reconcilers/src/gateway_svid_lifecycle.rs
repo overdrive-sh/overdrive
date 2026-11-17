@@ -13,8 +13,8 @@ use std::time::Duration;
 use overdrive_core::gateway_identity::{GatewayIdentityDesired, GatewayIdentityFacts};
 use overdrive_core::id::{ContentHash, CorrelationKey, NodeId, SpiffeId};
 use overdrive_core::reconcilers::{
-    Action, HydrateError, HydrationContext, Reconciler, ReconcilerName, ResyncSchedule,
-    ResyncScope, TargetResource, TickContext, resolve_scope,
+    Action, HydrateError, HydrationContext, Reconciler, ReconcilerName, TargetResource,
+    TickContext,
 };
 use overdrive_core::traits::observation_store::ObservationRowKind;
 use overdrive_core::wall_clock::UnixInstant;
@@ -71,12 +71,6 @@ fn require_configured_node(
     Err(HydrateError::TargetShape(target.as_str().to_string()))
 }
 
-/// Level-triggered backstop cadence of the host-backed gateway reconciler.
-///
-/// A DELIVER tuning constant, bounded above by the SVID reissue margin so a lost
-/// wake cannot let a held gateway SVID reach expiry unreissued.
-pub(crate) const GATEWAY_SVID_RESYNC_PERIOD: Duration = Duration::from_secs(30);
-
 /// `desired` / `actual` projection of the gateway-SVID reconciler. One `State`
 /// type serves both roles, exactly as for the workload-SVID reconciler:
 /// `desired` carries the checked epoch and optional subject, `actual` carries
@@ -131,7 +125,9 @@ impl Reconciler for GatewaySvidLifecycle {
         &self,
         ctx: &HydrationContext<'_>,
     ) -> Result<BTreeSet<TargetResource>, HydrateError> {
-        Ok(resolve_scope(ResyncScope::LocalNode, ctx.node_id).into_iter().collect())
+        let target = TargetResource::new(&format!("node/{}", ctx.node_id))
+            .map_err(|error| HydrateError::TargetShape(error.to_string()))?;
+        Ok(BTreeSet::from([target]))
     }
 
     /// Pure transition. Disabled emits nothing (disable is the synchronous slot
@@ -198,7 +194,7 @@ impl Reconciler for GatewaySvidLifecycle {
     /// it. Disabled has nothing to schedule.
     ///
     /// A held identity inside the panic zone has an expiry wall `<= now`, so no wake
-    /// is scheduled here by design; the `GATEWAY_SVID_RESYNC_PERIOD` backstop applies.
+    /// is scheduled here by design; the resync pass is the backstop.
     fn next_evaluation_at(
         &self,
         desired: &Self::State,
@@ -267,12 +263,8 @@ impl Reconciler for GatewaySvidLifecycle {
 
     /// Host-backed: `actual` is the in-process slot, not an observation row,
     /// and this reconciler's own executor authors the issued-certificate rows,
-    /// so it declares no interest in them (the no-busy-loop rule). Its own
-    /// cadence is the level-triggered backstop.
-    fn resync_schedule(&self) -> Option<ResyncSchedule> {
-        Some(ResyncSchedule { period: GATEWAY_SVID_RESYNC_PERIOD, scope: ResyncScope::LocalNode })
-    }
-
+    /// so it declares no interest in them (the no-busy-loop rule). The resync
+    /// pass is its level-triggered backstop.
     fn interests(&self) -> &'static [ObservationRowKind] {
         &[]
     }
@@ -345,24 +337,15 @@ mod acceptance {
     }
 
     /// S-PIG-65 (pure half): the canonical instance carries the pinned name and
-    /// the pinned host-backed wakeup declaration: empty interests, a
-    /// node-scoped resync bounded by the near-expiry window, so a lost wake can
-    /// never let a held gateway SVID reach expiry unreissued.
+    /// declares no interest in the rows its own executor authors.
     ///
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    fn canonical_instance_declares_the_host_backed_wakeup_model() {
+    fn canonical_instance_names_itself_and_declares_no_interest() {
         let reconciler = GatewaySvidLifecycle::canonical();
         assert_eq!(reconciler.name().as_str(), "gateway-svid-lifecycle");
         assert_eq!(<GatewaySvidLifecycle as Reconciler>::NAME, "gateway-svid-lifecycle");
         assert!(reconciler.interests().is_empty(), "no interest in the rows this executor authors");
-        let schedule =
-            reconciler.resync_schedule().expect("host-backed reconciler declares a cadence");
-        assert_eq!(schedule.scope, ResyncScope::LocalNode);
-        assert!(
-            schedule.period.as_secs() < NEAR_EXPIRY_THRESHOLD_SECS,
-            "the resync backstop fires inside the near-expiry window",
-        );
     }
 
     /// S-PIG-65: every identity transition emits exactly the action the design
