@@ -1,0 +1,4 @@
+after holder kill:
+kernel.bpf_stats_enabled=0
+bpf-stats descriptor holders: 0
+holder processes: 0

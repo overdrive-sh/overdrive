@@ -1,0 +1,4 @@
+before benchmark:
+kernel.bpf_stats_enabled=0
+bpf-stats descriptor holders: 1
+/proc/1205413/fd/4

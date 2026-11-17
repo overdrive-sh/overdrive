@@ -1,0 +1,4 @@
+after SIGKILL:
+kernel.bpf_stats_enabled=0
+bpf-stats descriptor holders: 0
+benchmark processes: 0

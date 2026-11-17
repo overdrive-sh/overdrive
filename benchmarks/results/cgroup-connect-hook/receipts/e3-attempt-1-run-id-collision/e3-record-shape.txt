@@ -1,0 +1,41 @@
+files in :
+total 500
+-rw-r--r--   1 ubuntu ubuntu  41859 Nov 13 20:47 AGENTS.md
+-rw-r--r--   1 ubuntu ubuntu  37484 Nov 17 15:29 CLAUDE.md
+-rw-r--r--   1 ubuntu ubuntu     12 Nov 13 20:47 CNAME
+-rw-r--r--   1 ubuntu ubuntu 123633 Nov 17 16:12 Cargo.lock
+-rw-r--r--   1 ubuntu ubuntu  15486 Nov 17 15:35 Cargo.toml
+-rw-r--r--   1 ubuntu ubuntu   3754 Nov 13 20:47 LICENSE
+-rw-r--r--   1 ubuntu ubuntu   7453 Nov 13 20:47 README.md
+drwxr-xr-x   2 ubuntu ubuntu   4096 Nov 13 20:47 api
+drwxr-xr-x   3 ubuntu ubuntu   4096 Nov 17 16:24 benchmarks
+-rw-r--r--   1 ubuntu ubuntu  23204 Nov 13 20:47 bun.lock
+-rwxr-xr-x   1 ubuntu ubuntu  42792 Nov 13 20:47 bun.lockb
+-rw-r--r--   1 ubuntu ubuntu    241 Nov 13 20:47 clippy.toml
+drwxr-xr-x   5 ubuntu ubuntu   4096 Nov 13 20:47 concepts
+drwxr-xr-x  20 ubuntu ubuntu   4096 Nov 17 15:29 crates
+-rw-r--r--   1 ubuntu ubuntu    961 Nov 13 20:47 deny.toml
+drwxr-xr-x  11 ubuntu ubuntu   4096 Nov 13 20:47 docs
+drwxr-xr-x   7 ubuntu ubuntu   4096 Nov 13 20:47 examples
+drwxr-xr-x   3 ubuntu ubuntu   4096 Nov 13 20:47 fuzz
+-rw-r--r--   1 ubuntu ubuntu  66013 Nov 13 20:47 index.html
+drwxr-xr-x   6 ubuntu ubuntu   4096 Nov 13 20:47 infra
+drwxr-xr-x   3 ubuntu ubuntu   4096 Nov 13 20:47 kmod
+-rw-r--r--   1 ubuntu ubuntu  14148 Nov 16 19:24 lefthook.yml
+-rw-r--r--   1 ubuntu ubuntu    359 Nov 13 20:47 logo-mark.png
+drwxr-xr-x   3 ubuntu ubuntu   4096 Nov 13 20:47 mutants-baseline
+-rw-r--r--   1 ubuntu ubuntu    426 Nov 13 20:47 package.json
+drwxr-xr-x   3 ubuntu ubuntu   4096 Nov 13 20:47 perf-baseline
+-rw-r--r--   1 ubuntu ubuntu    528 Nov 13 20:47 rust-toolchain.toml
+-rw-r--r--   1 ubuntu ubuntu    439 Nov 13 20:47 rustfmt.toml
+drwxr-xr-x   3 ubuntu ubuntu   4096 Nov 13 20:47 scripts
+drwxr-xr-x   3 ubuntu ubuntu   4096 Nov 13 20:47 specs
+drwxr-xr-x 111 ubuntu ubuntu   4096 Nov 17 15:29 spike-scratch
+drwxr-xr-x  14 ubuntu root     4096 Nov 17 13:16 target
+drwxr-xr-x   4 ubuntu ubuntu   4096 Nov 13 20:47 tests
+-rw-r--r--   1 ubuntu ubuntu    557 Nov 13 20:47 tsconfig.json
+drwxr-xr-x   4 ubuntu ubuntu   4096 Nov 13 20:47 vendors
+drwxr-xr-x   5 ubuntu ubuntu   4096 Nov 13 20:47 verification
+drwxr-xr-x   9 ubuntu ubuntu   4096 Nov 13 20:47 website
+drwxr-xr-x   4 ubuntu ubuntu   4096 Nov 16 19:24 xtask
+line kinds:

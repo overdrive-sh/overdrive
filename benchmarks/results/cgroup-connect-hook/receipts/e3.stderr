@@ -1,0 +1,2 @@
+    Finished `bench` profile [optimized + debuginfo] target(s) in 0.16s
+     Running benches/benchmarks.rs (target/release/deps/benchmarks-754f1beb83611159)

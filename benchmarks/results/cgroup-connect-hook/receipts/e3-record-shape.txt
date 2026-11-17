@@ -1,0 +1,7 @@
+files in benchmarks/results/cgroup-connect-hook/ae57c4291bbc63794c1dc126:
+total 4
+-rw-r----- 1 root root 1922 Nov 17 17:15 record.jsonl
+line kinds:
+      1 canary
+      1 replicate
+      1 run_started

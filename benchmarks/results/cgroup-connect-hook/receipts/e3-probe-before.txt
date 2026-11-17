@@ -1,0 +1,3 @@
+before benchmark:
+kernel.bpf_stats_enabled=0
+bpf-stats descriptor holders: 0

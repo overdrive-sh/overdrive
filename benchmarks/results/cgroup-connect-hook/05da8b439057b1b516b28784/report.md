@@ -1,0 +1,28 @@
+# Benchmark report: cgroup-connect-hook / connect_hook_cost
+
+- run id: 05da8b439057b1b516b28784
+- family: cgroup-connect-hook
+- benchmark: connect_hook_cost
+- evidence: maintained
+- substrate: native
+- commit: d15bab5f7dd262884d6078f0c985ace4b693f921
+- dirty: true
+- methodology: 1
+- seed: 4007927371974311222
+- debug_assertions: false
+- kernel: 7.0.0-38-generic
+- cpu_model: AMD EPYC 8024P 8-Core Processor
+- cpu_count: 16
+- governor: schedutil
+- smt: on
+- boost: on
+- bpf_stats_enabled: 0
+- clocksource: tsc
+- irq_time_accounting: n
+- bpf stats: off
+- clock: host CLOCK_MONOTONIC_RAW; service none; guest none
+- canary: not run
+- replicates ok: 0
+- replicates failed: 0
+- status: refused
+- refused: bpf_stats_holder found held by pid 1205413 pinned none

@@ -1,0 +1,44 @@
+# Benchmark report: cgroup-connect-hook / connect_hook_cost
+
+- run id: ae57c4291bbc63794c1dc126
+- family: cgroup-connect-hook
+- benchmark: connect_hook_cost
+- evidence: maintained
+- substrate: native
+- commit: d15bab5f7dd262884d6078f0c985ace4b693f921
+- dirty: true
+- methodology: 1
+- seed: 10045330222923190574
+- debug_assertions: false
+- kernel: 7.0.0-38-generic
+- cpu_model: AMD EPYC 8024P 8-Core Processor
+- cpu_count: 16
+- governor: schedutil
+- smt: on
+- boost: on
+- bpf_stats_enabled: 0
+- clocksource: tsc
+- irq_time_accounting: n
+- bpf stats: on (per process)
+- clock: host CLOCK_MONOTONIC_RAW; service none; guest none
+- canary: not finished
+- replicates ok: 1
+- replicates failed: 0
+- status: incomplete (no run_finished or run_refused)
+## Profile: default
+
+### Table: hook-time
+
+| metric | arm | median | IQR | replicates | failures |
+|---|---|---|---|---|---|
+| hook_ns_per_connect | service-only | absent: no stored value | absent: no stored value | 0 | 0 |
+| hook_ns_per_connect | service+gateway | 218.6064 | 0 | 1 | 0 |
+
+reference: spike evidence, different run: 117 ns (source: docs/feature/public-ingress-gateway/spike/findings-connect-hook-cost.md)
+
+### Table: wall-time
+
+| metric | arm | median | IQR | replicates | failures |
+|---|---|---|---|---|---|
+| wall_ns_per_connect | service-only | absent: no stored value | absent: no stored value | 0 | 0 |
+| wall_ns_per_connect | service+gateway | 27474.461 | 0 | 1 | 0 |

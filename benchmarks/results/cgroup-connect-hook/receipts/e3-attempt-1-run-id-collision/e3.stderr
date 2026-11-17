@@ -1,0 +1,7 @@
+    Finished `bench` profile [optimized + debuginfo] target(s) in 0.16s
+     Running benches/benchmarks.rs (target/release/deps/benchmarks-754f1beb83611159)
+bench: record "/home/ubuntu/overdrive-worktrees/d6e116fa0e342e06ad0b58474ab66e6f68a1cc611c87fc78ba4451a071a928c7/benchmarks/results/cgroup-connect-hook/05da8b439057b1b516b28784/record.jsonl" failed: File exists (os error 17)
+error: bench failed, to rerun pass `-p overdrive-bench-families --bench benchmarks`
+
+Caused by:
+  process didn't exit successfully: `/home/ubuntu/overdrive-worktrees/d6e116fa0e342e06ad0b58474ab66e6f68a1cc611c87fc78ba4451a071a928c7/target/release/deps/benchmarks-754f1beb83611159 run --family cgroup-connect-hook --results-root /home/ubuntu/overdrive-worktrees/d6e116fa0e342e06ad0b58474ab66e6f68a1cc611c87fc78ba4451a071a928c7/benchmarks/results --bench` (exit status: 70)
