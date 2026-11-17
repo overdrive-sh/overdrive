@@ -1,0 +1,236 @@
+---
+title: Replaying control-plane races with deterministic simulation
+description: Overdrive's control plane runs against simulated time, network, and randomness, so a race that fails once can be replayed from its seed. Here is why we built our own simulation, what it costs, and where it stops.
+date: 2026-11-18
+author: The Overdrive team
+summary: A control-plane race that fails once in a thousand runs is useless if it never fails again. We run Overdrive's real control-plane code against simulated time, network, and randomness, so every failure comes with a seed that replays it.
+---
+
+Overdrive is an orchestrator. Its control plane decides which workloads run on
+which nodes, starts them as microVMs, and keeps checking that what runs matches
+what an operator asked for. One running instance of a workload on a node is an
+allocation. The component that starts and stops its VM is the driver.
+
+That control plane can pass a test a thousand times and still fail when two
+events arrive in the wrong order. An operator stops an allocation at the moment
+its driver reports that the VM exited. A node misses an update from its peers,
+then rejoins. A VM's network setup fails after its address is already reserved.
+Each operation works alone. The bug lives in the collision, and a collision that
+happened once on a CI runner may never happen again on a laptop.
+
+We chose deterministic simulation testing to make those collisions
+reproducible. This post explains what it is, why we built our own instead of
+using a hosted simulator or relying on real-kernel tests, what it costs, and
+what it does not prove.
+
+## Deterministic simulation replays a failure from one number
+
+Deterministic simulation testing (DST) runs a system's real decision logic
+inside a controlled version of its environment. The simulator stands in for
+things the code cannot control in production: time, network delivery, random
+numbers, and external operations. A test chooses the initial state and the
+events the environment delivers. It then checks what the system did.
+
+"Deterministic" does not mean every test takes the same path. It means that
+the same code, initial state, inputs, and seed produce the same observed path
+again. The simulator draws delays and fault choices from a seeded pseudorandom
+generator. Change the seed to explore another case. Reuse it to replay the case
+that failed.
+
+This differs from running a test against a live cluster and hoping the OS
+schedules the same race twice. It also differs from testing a model that
+approximates the program. Overdrive's simulation drives the production
+control-plane code and controls only what that code sees at its external
+boundaries.
+
+We first learned about [deterministic simulation testing from Antithesis](https://antithesis.com/docs/resources/deterministic_simulation_testing/).
+Their work gave us a way to think about these failures. Control the
+environment, explore more event sequences, and keep enough information to
+replay a failure. The [Resonate explanation](https://journal.resonatehq.io/p/deterministic-simulation-testing)
+is another useful account of why concurrency and partial failure make ordinary
+test runs hard to reproduce.
+
+## Why we built our own simulation
+
+We weighed two alternatives before building one.
+
+**Real-kernel tests alone.** Overdrive already boots real microVMs and loads
+real eBPF programs in its integration tests. Those tests prove that the kernel
+does what we expect. They cannot replay a schedule. The Linux scheduler,
+network timing, and the wall clock pick the interleaving, and a failing run
+leaves no seed behind. They are also slow: a test that boots a VM takes seconds,
+so exploring thousands of event orders that way is not practical.
+
+**A deterministic hypervisor.** Antithesis runs the whole machine, kernel
+included, under a hypervisor that makes every run replayable. That is the most
+thorough form of the technique. When we evaluated it in April 2026, three facts
+ruled it out as our main tool. Each simulated machine runs on one CPU core, so
+races that need several cores cannot occur. Its faults are injected around the
+running containers, not inside the kernel path our eBPF programs sit on. Its
+Kubernetes mode forbids privileged containers, and Overdrive's node agent needs
+kernel privileges to load eBPF programs. Our control-plane logic would still
+benefit from that kind of exploration. We do not run it under Antithesis.
+
+We chose to simulate at the boundary of our own code. The control-plane logic
+is ours, written in Rust, and its effects are few enough to name. Simulating
+those effects gives us replay in a test that finishes in seconds and runs on an
+ordinary CI runner. Real-kernel tests keep covering what the simulation cannot.
+
+## Every effect goes through a port
+
+Overdrive puts time, network transport, randomness, workload drivers, and other
+external effects behind port traits. A port trait is a Rust interface for one
+kind of effect, such as reading the clock. Production connects those ports to
+the host. The `overdrive-sim` crate connects them to adapters that a test
+controls:
+
+- `SimClock` advances only when the test ticks it.
+- `SimTransport` can partition a pair of addresses and drop their datagrams.
+- `SimEntropy` draws from a seeded `StdRng`.
+
+Determinism holds only if the control-plane code cannot reach around those
+ports. A lint, `cargo xtask dst-lint`, rejects calls such as `Instant::now()` and
+`rand::thread_rng()` in the crates that hold that logic. It also rejects
+`HashMap` unless a comment explains why its iteration order never shows.
+
+The `HashMap` rule comes from a real bug. Rust's default `HashMap` seeds its
+hasher once per process, so two runs with the same simulation seed can still
+iterate it in different orders. The evaluation broker, the queue that holds
+pending requests to recompute a workload's state, drained its work in that
+order. Two runs with one seed diverged. We switched it to a `BTreeMap`, which
+iterates in key order.
+
+## A seed turns a failure into a case
+
+An invariant is a rule the system must keep, written as code that checks the
+simulated state after each step. The `cargo dst` runner takes one seed and
+checks a catalogue of 44 named invariants. It prints the seed on the first line
+of output and writes the results to `target/dst/summary.json`. If an invariant
+fails, the report names it and gives a replay command:
+
+```bash
+cargo dst --seed 1234
+cargo dst --seed 1234 --only terminal-contention-converges
+```
+
+Every pull request runs `cargo dst` once, with a fresh seed drawn from the
+operating system. CI keeps the output and summary for 30 days, so a failing
+seed survives even if nobody looks at the run that day. An integration test
+checks repeatability: two runs with the same seed produce the same invariant
+results, apart from elapsed wall-clock time in the report.
+
+A seed identifies the scenario that failed. It does not prove that every
+schedule passes. One seed per pull request explores one path through each
+invariant's scenario. Coverage comes from many pull requests over time, and we
+have not measured how much of the schedule space that reaches.
+
+## Properties say what counts as correct
+
+An example test asserts that one chosen sequence ends in `Running`. A property
+states what must hold across a family of sequences. Overdrive checks three
+kinds:
+
+- **Safety, something bad never happens.** A VM whose network attachment the
+  host refused never reaches its driver.
+- **Liveness, something good eventually happens.** After an operator deletes a
+  workload, each of its remaining allocations stops within three passes of the
+  control loop.
+- **Convergence, nodes end up agreeing.** Each node keeps a table of what it
+  observes, such as each allocation's status, and shares its rows with peers.
+  When two rows for one allocation conflict, the newer one wins. After
+  concurrent writes and delivery in any order, every node must hold the same
+  winning row.
+
+The liveness and convergence rules are invariants in the `cargo dst`
+catalogue. The safety rule is checked by an acceptance test that runs the
+production code over the same simulated adapters without a seed.
+
+Properties give the simulator a verdict even when the order of operations
+changes. For the convergence property, a `proptest` test generates scenarios
+with concurrent writes and a seeded delivery order. It runs each scenario twice,
+then checks that the nodes agree and that both runs produced identical results.
+
+## Generated inputs widen the search
+
+Fuzzing means exploring inputs automatically instead of choosing every case by
+hand. A fuzzer needs an oracle that tells a bad result from a good one.
+Properties are that oracle.
+
+We use `proptest` to generate inputs a hand-written example would miss: write
+orders, seeds, network addresses, and retry counts. When a generated case
+fails, `proptest` shrinks it toward a smaller counterexample. We do not run a
+coverage-guided byte fuzzer.
+
+The two techniques reinforce each other. A fixed `cargo dst` seed makes one
+control-plane failure replayable. Property testing searches a larger input
+space for the next failure worth keeping. Both need strong assertions. A test
+that only checks for a panic misses a leaked resource or a lost terminal state.
+
+## Faults belong at real boundaries
+
+Fault injection makes an external operation fail, stall, or arrive at an
+inconvenient time. It asks what production logic does when success is
+incomplete or delayed.
+
+Our simulated adapters can reject a driver start, drop datagrams during a
+partition, or refuse one step of a VM's network setup or teardown. The
+production code then handles the error. In one test, the simulated network
+refuses to attach a VM. The test checks three things:
+
+- The allocation's status records `Failed`, with the network as the cause.
+- The VM driver is never called.
+- The VM's address is withdrawn from use before teardown starts and returned to
+  the pool only after teardown succeeds.
+
+A second test makes teardown fail when the VM stops. The address stays reserved
+until a retried stop completes. The next VM therefore never receives an address
+whose old network attachment is still half in place.
+
+The harness also controls ordering inside the observation table. In the
+`terminal-contention-converges` invariant, an operator's stop reads the
+allocation's row, then the driver's report that the VM exited lands before the
+stop writes. The stop's first write loses to the newer exit row. The invariant
+checks that production rereads the row and retries the stop exactly once, that
+the stop becomes the recorded final state, and that the driver releases the VM.
+The simulation only reorders the two writes. Production code makes both, and
+the table's own comparison decides the winner.
+
+That boundary matters. A fault injected into a path production never uses
+makes a test look thorough without proving anything we care about. We inject
+faults at the ports and drive the same control-plane code that handles them in
+production.
+
+## What it costs
+
+Simulation is not free, and three costs are permanent.
+
+Every external effect needs a port. Another kind of effect means another trait, a
+production adapter, and a simulated one. Code that would be one call to the
+system clock becomes a parameter threaded through constructors.
+
+The lint needs upkeep. Each banned call and each `HashMap` exception is a rule
+someone has to justify and maintain.
+
+A simulated adapter is only as good as its match with the real one. A
+`SimDataplane` that behaves differently from the real eBPF dataplane makes the
+simulation prove things about a system that does not exist. We guard against
+this with equivalence tests, which drive the real adapter and the simulated one
+through the same calls and compare what each reports. The VM host state,
+certificate authority, cgroup accounting, and several dataplane views have
+them.
+
+## Simulation has a boundary too
+
+Simulation controls the effects its adapters represent. It cannot prove what a
+real kernel, VMM, network namespace, or eBPF program does. Overdrive tests those
+on a real Linux kernel, and boots real microVMs on a shared test machine with
+KVM. A passing simulation run says that the covered control-plane path held its
+invariants under the explored cases. It does not establish every host effect or
+schedule as correct.
+
+Antithesis's account of [DST's strengths and limitations](https://antithesis.com/docs/resources/deterministic_simulation_testing/#what-are-the-strengths-and-limitations-of-deterministic-simulation-testing)
+is worth reading for that distinction. When a rare ordering fails inside the
+simulated boundary, we can name the property and save the seed. We can make the
+failure happen again. The fix starts with evidence of what happened.
+
+To run the invariant catalogue, see [Run the DST harness](/docs/how-to/run-the-dst-harness).
