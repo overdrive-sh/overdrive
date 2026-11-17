@@ -1,11 +1,12 @@
 //! `ServiceMapHydrator` reconciler — Phase 2 (Slice 08; ASR-2.2-04).
 //!
 //! Watches the `service_backends` ObservationStore rows for backend-set
-//! drift (the desired side) and the `service_hydration_results` rows
-//! for the dataplane's confirmed-state observation (the actual side).
-//! Emits one `Action::DataplaneUpdateService` per service whose
-//! fingerprint diverges, and reads the hydration-result row on the
-//! next tick to advance the state machine.
+//! drift (the desired side) and reads the programmed service map through
+//! `ProgrammedServiceView` (the actual side: the fingerprint of the backend
+//! set the dataplane carries per service). Emits one
+//! `Action::DataplaneUpdateService` per service that is not in place. The
+//! executor's `service_hydration_results` row is a receipt the hydrator
+//! never reads.
 //!
 //! Per ADR-0035/0036:
 //!
@@ -29,12 +30,10 @@ use std::time::Duration;
 
 use overdrive_core::dataplane::backend_key::Proto;
 use overdrive_core::dataplane::fingerprint::BackendSetFingerprint;
+use overdrive_core::dataplane::ServiceFrontend;
 use overdrive_core::id::{ContentHash, CorrelationKey, ServiceId, ServiceVip};
 use overdrive_core::reconcilers::{HydrateError, HydrationContext};
 use overdrive_core::traits::dataplane::Backend;
-use overdrive_core::traits::observation_store::{
-    ServiceHydrationResultRow, ServiceHydrationStatus,
-};
 use overdrive_core::wall_clock::UnixInstant;
 
 use super::workload_lifecycle::backoff_for_attempt;
@@ -145,8 +144,9 @@ pub fn project_service_desired(
 pub struct ServiceMapHydratorState {
     /// Per-service desired backend set.
     pub desired: BTreeMap<ServiceId, ServiceDesired>,
-    /// Per-service last-known hydration outcome.
-    pub actual: BTreeMap<ServiceId, ServiceHydrationStatus>,
+    /// Per-service fingerprint of the backend set the dataplane has
+    /// programmed. A service with no entry has nothing programmed.
+    pub actual: BTreeMap<ServiceId, BackendSetFingerprint>,
 }
 
 /// Per-service retry inputs — `attempts`,
@@ -280,6 +280,22 @@ impl ServiceMapHydrator {
         Self { name, workload_subnet }
     }
 
+    /// The backends that pass the mesh gate: the only ones the dataplane is
+    /// driven to program. A Path-A/mesh backend (V4 addr in `workload_subnet`)
+    /// is gated out of the load-balancer path (D-GATE / D-GATE-PRED); the gate
+    /// keys on the BACKEND's address, never on the VIP's family.
+    fn remote_survivors(&self, desired_svc: &ServiceDesired) -> Vec<Backend> {
+        desired_svc
+            .backends
+            .iter()
+            .filter(|b| match b.addr.ip() {
+                std::net::IpAddr::V4(v4) => !self.workload_subnet.contains(&v4),
+                std::net::IpAddr::V6(_) => true,
+            })
+            .cloned()
+            .collect()
+    }
+
     /// The Path-A/mesh workload subnet the gate compares backends
     /// against.
     #[must_use]
@@ -318,86 +334,55 @@ impl Reconciler for ServiceMapHydrator {
         let mut next_view = view.clone();
 
         for (service_id, desired_svc) in &desired.desired {
-            // D-GATE / D-GATE-PRED — subnet-membership gate applied BEFORE
-            // the VIP-family switch. A Path-A/mesh backend (V4 addr ∈
-            // `workload_subnet`, 10.99.0.0/16) is gated out of the LB path:
-            // nft-TPROXY owns its delivery (reconciles ADR-0053 ↔ ADR-0071).
-            // The gate keys on the BACKEND's address, NOT the VIP's family, so
-            // it applies uniformly to every VIP family.
-            let workload_subnet = self.workload_subnet;
-            let remote_survivors: Vec<Backend> = desired_svc
-                .backends
-                .iter()
-                .filter(|b| match b.addr.ip() {
-                    std::net::IpAddr::V4(v4) => !workload_subnet.contains(&v4),
-                    std::net::IpAddr::V6(_) => true,
-                })
-                .cloned()
-                .collect();
+            let remote_survivors = self.remote_survivors(desired_svc);
 
-            // The post-gate survivors are the ONLY backends the dataplane
-            // (XDP/REVERSE_NAT) is driven to program. The programmed
-            // fingerprint is `fingerprint(vip, remote_survivors)` — byte-
-            // identical to what `dataplane_update_service::dispatch` writes back
+            // The fingerprint of the set the dataplane is driven to program:
+            // byte-identical to what the dataplane writes back
             // (`fingerprint(vip, action.backends)`) because the emitted action
             // carries exactly `remote_survivors`. Recomputed every tick from
-            // inputs (`backends`, `workload_subnet`), NEVER persisted.
-            let programmed_fingerprint = overdrive_core::dataplane::fingerprint::fingerprint(
+            // inputs, NEVER persisted.
+            let survivor_fingerprint = overdrive_core::dataplane::fingerprint::fingerprint(
                 &desired_svc.vip,
                 &remote_survivors,
             );
 
-            let actual_status = actual.actual.get(service_id);
-            let need_dispatch = should_dispatch(
-                actual_status,
-                programmed_fingerprint,
-                view.retries.get(service_id),
-                tick.now_unix,
-            );
+            let programmed = actual.actual.get(service_id).copied();
+            let placed = in_place(&remote_survivors, survivor_fingerprint, programmed);
+            let need_dispatch = !placed
+                && pacing_allows(
+                    view.retries.get(service_id),
+                    survivor_fingerprint,
+                    tick.now_unix,
+                );
 
             if need_dispatch {
                 let target_str = format!("service-map-hydrator/{service_id}");
                 // `spec_hash` stays keyed on the FULL-set `desired_svc.fingerprint`
                 // (convergence-model.md § 3.3): the correlation key identifies
-                // "this service's desired-state revision"; the full-set
-                // fingerprint is the stable identity of that revision (the
-                // churn/identity signal). Do NOT re-key onto
-                // `programmed_fingerprint`.
+                // "this service's desired-state revision". Do NOT re-key onto
+                // `survivor_fingerprint`.
                 let spec_hash = ContentHash::of(desired_svc.fingerprint.to_le_bytes().as_slice());
 
-                // Emit the DataplaneUpdateService UNCONDITIONALLY on dispatch
-                // (convergence-model.md § 3.3) — an empty `remote_survivors`
+                // Emitted UNCONDITIONALLY on dispatch: an empty `remote_survivors`
                 // is the documented per-proto PURGE (traits/dataplane.rs
-                // :197-204). This drives the dataplane to the empty state AND
-                // produces the Completed{fingerprint(vip,[])} row that lets an
-                // all-mesh / local-only service settle, AND tears down stranded
-                // REVERSE_NAT/SERVICE_MAP entries on a non-mesh→all-mesh
-                // transition (Finding 2, § 6). Uniform for V4 and V6 VIPs.
+                // :197-204), tearing down a still-programmed slot when a service
+                // turns all-mesh. Uniform for V4 and V6 VIPs.
                 actions.push(Action::DataplaneUpdateService {
                     service_id: *service_id,
                     vip: desired_svc.vip,
                     port: desired_svc.port,
                     proto: desired_svc.proto,
-                    backends: remote_survivors.clone(),
+                    backends: remote_survivors,
                     correlation: CorrelationKey::derive(&target_str, &spec_hash, "update-service"),
                 });
 
-                // A dispatch ALWAYS emitted a DataplaneUpdateService now (incl.
-                // the empty purge), so it always has a programmable fingerprint
-                // to record. Record the PROGRAMMED fingerprint (matches what the
-                // Completed row will carry), NOT the full-set fingerprint
-                // (convergence-model.md § 3.4). The 02-02 "don't record a phantom
-                // for an all-mesh service" guard is OBSOLETE — an all-mesh service
-                // genuinely dispatches a purge, so recording its empty-set
-                // programmed fingerprint is honest.
+                // Retry memory only decides when to act again: it records the
+                // attempted set so a changed desired set dispatches at once.
                 let entry = next_view.retries.entry(*service_id).or_default();
                 entry.attempts = entry.attempts.saturating_add(1);
                 entry.last_failure_seen_at = tick.now_unix;
-                entry.last_attempted_fingerprint = Some(programmed_fingerprint);
-            } else if let Some(ServiceHydrationStatus::Completed { fingerprint, .. }) =
-                actual_status
-                && *fingerprint == programmed_fingerprint
-            {
+                entry.last_attempted_fingerprint = Some(survivor_fingerprint);
+            } else if placed {
                 next_view.retries.remove(service_id);
             }
         }
@@ -406,6 +391,39 @@ impl Reconciler for ServiceMapHydrator {
         next_view.retries.retain(|service_id, _| desired.desired.contains_key(service_id));
 
         (actions, next_view)
+    }
+
+    /// D-3 retention: the earliest strictly-future retry deadline
+    /// (`last_failure_seen_at + backoff_for_attempt(attempts)`) over the retry
+    /// entries of services that are not in place. `None` when no service is
+    /// waiting on a backoff. Reads only its inputs.
+    fn next_evaluation_at(
+        &self,
+        desired: &Self::State,
+        actual: &Self::State,
+        next_view: &Self::View,
+        tick: &TickContext,
+    ) -> Option<UnixInstant> {
+        next_view
+            .retries
+            .iter()
+            .filter(|(service_id, _)| {
+                desired.desired.get(service_id).is_some_and(|desired_svc| {
+                    let survivors = self.remote_survivors(desired_svc);
+                    let survivor_fingerprint = overdrive_core::dataplane::fingerprint::fingerprint(
+                        &desired_svc.vip,
+                        &survivors,
+                    );
+                    !in_place(
+                        &survivors,
+                        survivor_fingerprint,
+                        actual.actual.get(service_id).copied(),
+                    )
+                })
+            })
+            .map(|(_, retry)| retry.last_failure_seen_at + backoff_for_attempt(retry.attempts))
+            .filter(|deadline| *deadline > tick.now_unix)
+            .min()
     }
 
     /// Hydrate the `desired` service→backend-set map (ADR-0086 D1; moved off the
@@ -447,10 +465,14 @@ impl Reconciler for ServiceMapHydrator {
         Ok(ServiceMapHydratorState { desired, actual: BTreeMap::new() })
     }
 
-    /// Hydrate the `actual` service→hydration-status map from
-    /// `service_hydration_results` (ADR-0086 D1; moved off the central
-    /// `hydrate_actual` `ServiceMapHydrator` arm). Retains the LWW-dominating row
-    /// per `service_id`.
+    /// Hydrate the `actual` map: the fingerprint of the backend set the
+    /// dataplane has programmed per service, read through
+    /// `ProgrammedServiceView` (ADR-0299). The target's frontend is re-projected
+    /// exactly as `hydrate_desired` does (the `service_backends` row plus its
+    /// listener fact through [`project_service_desired`]); a service whose
+    /// frontend cannot be projected, or whose VIP is not IPv4, has nothing
+    /// programmed and gets no entry. A failed read of the programmed map ends
+    /// the evaluation as [`HydrateError::DataplaneRead`].
     async fn hydrate_actual(
         &self,
         ctx: &HydrationContext<'_>,
@@ -459,22 +481,27 @@ impl Reconciler for ServiceMapHydrator {
         let service_id = super::service_id_from_target(target)?;
         let rows = ctx
             .observation_store
-            .service_hydration_results_rows(&service_id)
+            .service_backends_rows(&service_id)
             .await
             .map_err(|e| HydrateError::ObservationRead(e.to_string()))?;
         let mut actual = BTreeMap::new();
-        let mut latest: Option<ServiceHydrationResultRow> = None;
         for row in rows {
-            let take = match latest.as_ref() {
-                None => true,
-                Some(current) => row.updated_at.dominates(&current.updated_at),
+            let fact = ctx.listener_facts.fact_for(row.service_id).await;
+            let Ok(projected) = project_service_desired(&row, fact.as_ref()) else {
+                continue;
             };
-            if take {
-                latest = Some(row);
+            let Ok(frontend) = ServiceFrontend::new(projected.vip, projected.port, projected.proto)
+            else {
+                continue;
+            };
+            let programmed = ctx
+                .programmed_services
+                .programmed_fingerprint(&frontend)
+                .await
+                .map_err(|e| HydrateError::DataplaneRead(e.to_string()))?;
+            if let Some(fingerprint) = programmed {
+                actual.insert(row.service_id, fingerprint);
             }
-        }
-        if let Some(row) = latest {
-            actual.insert(row.service_id, row.status);
         }
         Ok(ServiceMapHydratorState { desired: BTreeMap::new(), actual })
     }
@@ -494,123 +521,32 @@ fn backoff_window_elapsed(retry: Option<&RetryMemory>, now: UnixInstant) -> bool
     retry.is_none_or(|r| now >= r.last_failure_seen_at + backoff_for_attempt(r.attempts))
 }
 
-/// Pure decision: dispatch a `DataplaneUpdateService` action this tick?
-fn should_dispatch(
-    actual_status: Option<&ServiceHydrationStatus>,
-    desired_fingerprint: BackendSetFingerprint,
-    retry: Option<&RetryMemory>,
-    now: UnixInstant,
+/// Pure decision: is the service's slot already carrying its desired survivor
+/// set? An empty survivor set is in place only when nothing is programmed
+/// (a present entry is purged); a set holding an IPv6 backend is never in
+/// place, because `update_service` refuses it.
+fn in_place(
+    survivors: &[Backend],
+    survivor_fingerprint: BackendSetFingerprint,
+    programmed: Option<BackendSetFingerprint>,
 ) -> bool {
-    match actual_status {
-        // No status row (dispatch suppressed before any result was
-        // written) or a Pending row. Without a backoff gate this arm
-        // spins every tick (RCA §Root cause B). Throttle on the
-        // attempt-budget window ONLY when a prior attempt targeted the
-        // SAME desired fingerprint; a fingerprint change (or no retry
-        // memory) is a level-triggered spec change → dispatch
-        // immediately and let the next emission reset the window
-        // (client-go workqueue precedent, RCA §Fix B).
-        None | Some(ServiceHydrationStatus::Pending) => {
-            match retry.and_then(|r| r.last_attempted_fingerprint) {
-                Some(last) if last == desired_fingerprint => backoff_window_elapsed(retry, now),
-                _ => true,
-            }
-        }
-        Some(ServiceHydrationStatus::Completed { fingerprint, .. }) => {
-            *fingerprint != desired_fingerprint
-        }
-        Some(ServiceHydrationStatus::Failed { fingerprint, .. }) => {
-            if *fingerprint != desired_fingerprint {
-                return true;
-            }
-            backoff_window_elapsed(retry, now)
-        }
+    if survivors.is_empty() {
+        return programmed.is_none();
     }
+    let has_ipv6 = survivors.iter().any(|b| b.addr.is_ipv6());
+    !has_ipv6 && programmed == Some(survivor_fingerprint)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    // ---- should_dispatch attempt-budget gate (RCA §Fix B) ----
-    //
-    // `should_dispatch` is a pure decision over `(actual_status,
-    // desired_fingerprint, retry, now)`. The fixtures below partition
-    // the `None | Pending` arm by (fingerprint match/mismatch ×
-    // now-vs-backoff-window). Time enters only via `now: UnixInstant`
-    // — no `Instant::now()` (dst-lint stays green).
-
-    /// Base wall-clock instant for the gate fixtures.
-    fn t0() -> UnixInstant {
-        UnixInstant::from_unix_duration(Duration::from_secs(100))
-    }
-
-    /// RCA §Root cause B (closure) / Regression test 2 (B half) — the
-    /// load-bearing RED→GREEN pin. With a prior attempt at the SAME
-    /// fingerprint, no status row (`actual_status = None`), and `now`
-    /// inside the 1s backoff window, the gate must NOT re-dispatch
-    /// (returns `false`). The current `None | Some(Pending) => true`
-    /// arm returns `true` unconditionally → this fails against current
-    /// code and passes after the fix.
-    #[test]
-    fn mixed_backend_does_not_re_dispatch_within_backoff_window_with_no_status_row() {
-        let fingerprint: BackendSetFingerprint = 0xABCD_1234;
-        let retry = RetryMemory {
-            attempts: 1,
-            last_failure_seen_at: t0(),
-            last_attempted_fingerprint: Some(fingerprint),
-        };
-        let now = t0() + Duration::from_millis(500);
-
-        assert!(
-            !should_dispatch(None, fingerprint, Some(&retry), now),
-            "within the backoff window at the same fingerprint, a suppressed dispatch \
-             must NOT re-emit (no spin) — gate returns false"
-        );
-    }
-
-    /// RCA §Fix B — level-triggered reset on spec change. With a prior
-    /// attempt at a DIFFERENT fingerprint (the desired backend set
-    /// changed), the gate dispatches immediately even inside the
-    /// window — the backoff is keyed on the attempt budget for a given
-    /// fingerprint, and a fingerprint change resets it (client-go
-    /// workqueue precedent).
-    #[test]
-    fn mixed_backend_re_dispatches_immediately_on_fingerprint_change() {
-        let old_fingerprint: BackendSetFingerprint = 0x0000_1111;
-        let new_fingerprint: BackendSetFingerprint = 0x0000_2222;
-        let retry = RetryMemory {
-            attempts: 1,
-            last_failure_seen_at: t0(),
-            last_attempted_fingerprint: Some(old_fingerprint),
-        };
-        let now = t0() + Duration::from_millis(1);
-
-        assert!(
-            should_dispatch(None, new_fingerprint, Some(&retry), now),
-            "a desired fingerprint differing from last_attempted_fingerprint must \
-             re-dispatch immediately (spec changed → backoff reset)"
-        );
-    }
-
-    /// RCA §Fix B — once the backoff window elapses for the same
-    /// fingerprint, the gate re-dispatches. Mirrors the `Failed`-arm
-    /// semantics via the shared `backoff_window_elapsed` helper.
-    #[test]
-    fn mixed_backend_re_dispatches_after_window_elapses() {
-        let fingerprint: BackendSetFingerprint = 0xABCD_1234;
-        let attempts = 1;
-        let retry = RetryMemory {
-            attempts,
-            last_failure_seen_at: t0(),
-            last_attempted_fingerprint: Some(fingerprint),
-        };
-        // now is exactly at the window boundary (>= triggers dispatch).
-        let now = t0() + backoff_for_attempt(attempts);
-
-        assert!(
-            should_dispatch(None, fingerprint, Some(&retry), now),
-            "at/after the backoff window boundary the gate must re-dispatch"
-        );
+/// Pure decision: may a not-in-place service dispatch now? A changed desired
+/// set (or no retry memory) dispatches at once; the same set attempted before
+/// waits for its backoff window.
+fn pacing_allows(
+    retry: Option<&RetryMemory>,
+    survivor_fingerprint: BackendSetFingerprint,
+    now: UnixInstant,
+) -> bool {
+    match retry.and_then(|r| r.last_attempted_fingerprint) {
+        Some(last) if last == survivor_fingerprint => backoff_window_elapsed(retry, now),
+        _ => true,
     }
 }

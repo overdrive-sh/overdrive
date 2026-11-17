@@ -442,7 +442,6 @@ fn backend_octets() -> impl Strategy<Value = Vec<(u8, u8, u8)>> {
 /// dataplane. Pending until `hydrate_actual` reads `ProgrammedServiceView`.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[should_panic(expected = "service-map-hydrator did not reprogram an empty dataplane")]
 fn a_rebooted_node_reprograms_the_service_map_its_completed_receipt_claims() {
     let runtime = runtime();
     proptest!(property_config(16, 351_020), |(backends in backend_octets())| {

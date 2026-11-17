@@ -6,9 +6,9 @@
 //! S-2.2-26 / S-2.2-27:
 //!
 //! - [`evaluate_hydrator_eventually_converges`] — eventual: from
-//!   any combination of `service_backends` rows + starting BPF
-//!   map state, repeated reconcile ticks drive
-//!   `actual.fingerprint == desired.fingerprint`.
+//!   a cold start (nothing programmed) for each service shape,
+//!   repeated reconcile ticks drive the programmed fingerprint to
+//!   the desired survivor-set fingerprint.
 //! - [`evaluate_hydrator_idempotent_steady_state`] — always: once
 //!   converged, no further `Action::DataplaneUpdateService` is
 //!   emitted on subsequent ticks given unchanged inputs.
@@ -43,7 +43,6 @@ use overdrive_core::dataplane::fingerprint::fingerprint;
 use overdrive_core::id::{NodeId, ServiceId, ServiceVip, SpiffeId};
 use overdrive_core::reconcilers::{Action, TickContext};
 use overdrive_core::traits::dataplane::Backend;
-use overdrive_core::traits::observation_store::ServiceHydrationStatus;
 use overdrive_core::wall_clock::UnixInstant;
 use overdrive_reconcilers::{
     AnyReconciler, AnyReconcilerView, AnyState, ServiceDesired, ServiceMapHydrator,
@@ -61,7 +60,7 @@ use crate::harness::{InvariantResult, InvariantStatus};
 
 /// Maximum reconcile ticks the eventual-convergence invariant gives
 /// the hydrator before declaring divergence. Today the hydrator
-/// converges in ONE tick (one dispatch → one Completed observation
+/// converges in ONE tick (one dispatch → the slot programmed
 /// → next tick emits no actions); this ceiling exists to keep the
 /// fixture honest if a future change introduces multi-tick
 /// convergence (e.g. dispatch ordering by priority).
@@ -78,13 +77,11 @@ const STEADY_STATE_TICKS: u32 = 5;
 /// # Scenario
 ///
 /// 1. Construct a `ServiceMapHydratorState` with one service in
-///    `desired` and an empty `actual` (cold start — no
-///    `service_hydration_results` row yet).
-/// 2. Tick the reconciler repeatedly, simulating the action shim:
+///    `desired` and an empty `actual` (cold start — nothing programmed).
+/// 2. Tick the reconciler repeatedly, simulating the dataplane:
 ///    after each tick that emits a `DataplaneUpdateService` action,
-///    write the matching `Completed { fingerprint, applied_at }`
-///    into `actual` for the next tick (fresh-out-of-the-dataplane
-///    success).
+///    program the action's backend set into `actual` for the next tick
+///    (`fingerprint(vip, backends)`; an empty set withdraws the slot).
 /// 3. Within `CONVERGENCE_TICK_BUDGET` ticks, the actual fingerprint
 ///    must reach the desired fingerprint AND the hydrator must
 ///    emit zero actions on the post-convergence tick.
@@ -114,11 +111,11 @@ pub fn evaluate_hydrator_eventually_converges() -> InvariantResult {
 
 /// Drive a single service shape from cold start to convergence, modelling
 /// the REAL action-shim's write-back: each emitted `DataplaneUpdateService`
-/// records `Completed { fingerprint: fingerprint(vip, action.backends) }`
-/// — the PROGRAMMED-subset fingerprint, NOT the desired full-set echo
-/// (convergence-model.md § 10.1). The honest, shape-agnostic convergence
-/// predicate (§ 10.1) is: within the budget, a tick exists where
-/// `actions.is_empty()` AND every desired service has a `Completed` row.
+/// programs `fingerprint(vip, action.backends)` — the PROGRAMMED-subset
+/// fingerprint, NOT the desired full-set echo (convergence-model.md § 10.1);
+/// an empty backend set is the per-proto purge and withdraws the slot. The
+/// convergence predicate is: within the budget, a tick exists where
+/// `actions.is_empty()` AND every desired service is in place.
 fn drive_one_shape_to_convergence(shape: &ShapeFixture) -> Result<(), String> {
     let any_reconciler =
         AnyReconciler::ServiceMapHydrator(ServiceMapHydrator::canonical(MESH_SUBNET));
@@ -146,16 +143,11 @@ fn drive_one_shape_to_convergence(shape: &ShapeFixture) -> Result<(), String> {
                          {service_id} which is not in state.desired"
                     ));
                 }
-                let applied_fp = fingerprint(vip, backends);
-                state.actual.insert(
-                    *service_id,
-                    ServiceHydrationStatus::Completed {
-                        fingerprint: applied_fp,
-                        applied_at: UnixInstant::from_unix_duration(Duration::from_secs(
-                            u64::from(tick_idx) + 1,
-                        )),
-                    },
-                );
+                if backends.is_empty() {
+                    state.actual.remove(service_id);
+                } else {
+                    state.actual.insert(*service_id, fingerprint(vip, backends));
+                }
             }
         }
 
@@ -165,10 +157,9 @@ fn drive_one_shape_to_convergence(shape: &ShapeFixture) -> Result<(), String> {
         view = next_view_inner;
 
         // Shape-agnostic convergence (§ 10.1): the loop quiesced AND every
-        // desired service has a confirmed Completed row. This holds for
-        // remote-only (Completed{fp(vip,[remote])}), all-mesh
-        // (Completed{fp(vip,[])} via the empty purge), and mixed alike.
-        if actions.is_empty() && every_service_has_completed_row(&state) {
+        // desired service carries its survivor set (or nothing, for an
+        // all-mesh service). Holds for remote-only, all-mesh and mixed alike.
+        if actions.is_empty() && every_service_is_programmed(&state) {
             if tick_idx >= shape.max_converge_ticks {
                 return Err(format!(
                     "converged at tick {tick_idx} but the shape budget is \
@@ -207,7 +198,7 @@ pub fn evaluate_hydrator_idempotent_steady_state() -> InvariantResult {
     // EACH of the three shapes must emit ZERO actions per tick once
     // converged (convergence-model.md § 10.2) — the all-mesh
     // shape must NOT re-emit the empty purge once
-    // `Completed{fp(vip,[])}` is observed.
+    // the slot is observed empty.
     for shape in shape_fixtures() {
         if let Err(reason) = drive_one_shape_steady_state(&shape) {
             return fail(NAME, format!("shape '{}': {reason}", shape.label));
@@ -217,27 +208,21 @@ pub fn evaluate_hydrator_idempotent_steady_state() -> InvariantResult {
 }
 
 /// Drive one shape to its converged `actual` (the same programmed-subset
-/// `Completed` row the shim writes), then tick `STEADY_STATE_TICKS` times
+/// fingerprint the dataplane carries), then tick `STEADY_STATE_TICKS` times
 /// and assert every tick emits zero actions.
 fn drive_one_shape_steady_state(shape: &ShapeFixture) -> Result<(), String> {
     let any_reconciler =
         AnyReconciler::ServiceMapHydrator(ServiceMapHydrator::canonical(MESH_SUBNET));
 
-    // Build the converged `actual`: for each service, the Completed row
-    // carries `fingerprint(vip, programmed_subset)` — the value the real
-    // shim writes for this shape (the empty purge for all-mesh,
-    // the remote survivor for remote-only / mixed).
+    // Build the converged `actual`: for each service, the fingerprint the
+    // dataplane carries for this shape (nothing for all-mesh, the remote
+    // survivor set for remote-only / mixed).
     let mut state = shape.state.clone();
     for (service_id, desired) in &shape.state.desired {
         let programmed = programmed_subset(desired);
-        let applied_fp = fingerprint(&desired.vip, &programmed);
-        state.actual.insert(
-            *service_id,
-            ServiceHydrationStatus::Completed {
-                fingerprint: applied_fp,
-                applied_at: UnixInstant::from_unix_duration(Duration::from_secs(1)),
-            },
-        );
+        if !programmed.is_empty() {
+            state.actual.insert(*service_id, fingerprint(&desired.vip, &programmed));
+        }
     }
 
     let mut view = ServiceMapHydratorView::default();
@@ -297,9 +282,9 @@ fn programmed_subset(desired: &ServiceDesired) -> Vec<Backend> {
 /// single V4-VIP service with one backend in the named address class.
 fn shape_fixtures() -> Vec<ShapeFixture> {
     vec![
-        // remote-only: [10.96.0.50] — survives; Completed{fp(vip,[remote])}.
+        // remote-only: [10.96.0.50] — survives; programmed fp(vip,[remote]).
         build_shape("remote-only", &[Ipv4Addr::new(10, 96, 0, 50)]),
-        // all-mesh: [10.99.0.6] — gated out; empty purge → Completed{fp(vip,[])}.
+        // all-mesh: [10.99.0.6] — gated out; empty purge → nothing programmed.
         build_shape("all-mesh", &[Ipv4Addr::new(10, 99, 0, 6)]),
         // mixed: the load-bearing case — one mesh (gated out) + one remote
         // (survives into the programmed subset). This is the face the
@@ -349,15 +334,18 @@ fn single_service_state(backend_ips: &[Ipv4Addr]) -> ServiceMapHydratorState {
     ServiceMapHydratorState { desired, actual: BTreeMap::new() }
 }
 
-/// True iff every desired service has a `Completed` `actual` row. This is
-/// the shape-agnostic convergence predicate (convergence-model.md § 10.1):
-/// "the loop quiesced AND a confirmed row exists per service." It does NOT
-/// re-derive the programmable fingerprint — it observes that a `Completed`
-/// row was produced, which (paired with `actions.is_empty()` at the call
-/// site) is the honest convergence signal for every shape.
-fn every_service_has_completed_row(state: &ServiceMapHydratorState) -> bool {
-    state.desired.keys().all(|service_id| {
-        matches!(state.actual.get(service_id), Some(ServiceHydrationStatus::Completed { .. }))
+/// True iff every desired service's slot carries its survivor set: the
+/// programmed fingerprint equals `fingerprint(vip, survivors)`, or nothing is
+/// programmed when the survivor set is empty (all-mesh).
+fn every_service_is_programmed(state: &ServiceMapHydratorState) -> bool {
+    state.desired.iter().all(|(service_id, desired)| {
+        let survivors = programmed_subset(desired);
+        let programmed = state.actual.get(service_id).copied();
+        if survivors.is_empty() {
+            programmed.is_none()
+        } else {
+            programmed == Some(fingerprint(&desired.vip, &survivors))
+        }
     })
 }
 
@@ -473,8 +461,7 @@ mod retry_budget_proptest {
     use overdrive_core::id::{ServiceId, ServiceVip, SpiffeId};
     use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
     use overdrive_core::traits::dataplane::Backend;
-    use overdrive_core::traits::observation_store::ServiceHydrationStatus;
-    use overdrive_core::wall_clock::UnixInstant;
+        use overdrive_core::wall_clock::UnixInstant;
     use overdrive_reconcilers::{
         RetryMemory, ServiceDesired, ServiceMapHydrator, ServiceMapHydratorState,
         ServiceMapHydratorView, backoff_for_attempt,
@@ -522,7 +509,7 @@ mod retry_budget_proptest {
         /// For any `(attempts, failure_secs, now_secs)` where
         /// `now_secs < failure_secs + backoff_for_attempt(attempts).as_secs()`,
         /// `reconcile` must emit zero `DataplaneUpdateService` actions
-        /// when actual is `Failed { same fingerprint }`.
+        /// when the same set was attempted and nothing is programmed.
         ///
         /// The `View.retries` entry is UNCHANGED by a no-dispatch tick:
         /// attempts and `last_failure_seen_at` carry the same values
@@ -544,15 +531,8 @@ mod retry_budget_proptest {
             let mut desired = BTreeMap::new();
             desired.insert(s_id, desired_svc);
 
-            let mut actual = BTreeMap::new();
-            actual.insert(
-                s_id,
-                ServiceHydrationStatus::Failed {
-                    fingerprint: fp,
-                    failed_at: UnixInstant::from_unix_duration(Duration::from_secs(failure_secs)),
-                    reason: "proptest-synthetic".into(),
-                },
-            );
+            // The failed update left nothing programmed for the service.
+            let actual = BTreeMap::new();
             let state = ServiceMapHydratorState { desired, actual };
 
             let backoff = backoff_for_attempt(attempts);
@@ -622,15 +602,8 @@ mod retry_budget_proptest {
             let mut desired = BTreeMap::new();
             desired.insert(s_id, desired_svc);
 
-            let mut actual = BTreeMap::new();
-            actual.insert(
-                s_id,
-                ServiceHydrationStatus::Failed {
-                    fingerprint: fp,
-                    failed_at: UnixInstant::from_unix_duration(Duration::from_secs(failure_secs)),
-                    reason: "proptest-synthetic".into(),
-                },
-            );
+            // The failed update left nothing programmed for the service.
+            let actual = BTreeMap::new();
             let state = ServiceMapHydratorState { desired, actual };
 
             let backoff = backoff_for_attempt(attempts);

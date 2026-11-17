@@ -13,8 +13,15 @@
 //! The remote arm is the error/edge coverage — it proves the gate does NOT
 //! over-fire (a mutant gating everything, or gating nothing, fails here).
 //!
+//! The hydrator's `actual` is the fingerprint the dataplane carries per
+//! service (`BTreeMap<ServiceId, BackendSetFingerprint>`, absent when nothing
+//! is programmed). A service whose slot already carries a different set is the
+//! precondition for a purge: the fixtures below seed `actual` with the
+//! fingerprint of a previously programmed remote set. A service with an empty
+//! survivor set and nothing programmed is already in place and emits nothing.
+//!
 //! Mandate 8 (Universe): the reconcile-returned actions'
-//! `dataplane_update_service_count` + the `View`'s programmed fingerprint;
+//! `dataplane_update_service_count` + the `View`'s attempted fingerprint;
 //! NEVER the hydrator's private partition state.
 //! Mandate 9: Tier-1 -> PBT-eligible over the two address classes;
 //! `@example`-pin a representative addr per arm (10.99.0.6 mesh / 10.96.0.50
@@ -67,6 +74,29 @@ fn make_tick(now_secs: u64) -> TickContext {
     }
 }
 
+/// The fingerprint the dataplane carries for a service that was programmed
+/// earlier with one remote backend (`10.96.0.99:8080`), a set that no fixture
+/// in this file desires. Seeding `actual` with it means "the slot is
+/// programmed with something else", so a purge or a reprogram is due.
+fn previously_programmed(vip: &ServiceVip) -> BackendSetFingerprint {
+    let earlier = Backend {
+        alloc: SpiffeId::new("spiffe://overdrive.local/workload/web/alloc/web-0")
+            .expect("valid SpiffeId"),
+        addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(10, 96, 0, 99)), 8080),
+        weight: 1,
+        healthy: true,
+    };
+    fingerprint(vip, &[earlier])
+}
+
+/// `actual` for one service carrying the previously programmed fingerprint.
+fn actual_previously_programmed(
+    s_id: ServiceId,
+    desired: &ServiceDesired,
+) -> BTreeMap<ServiceId, BackendSetFingerprint> {
+    BTreeMap::from([(s_id, previously_programmed(&desired.vip))])
+}
+
 /// Build a single-backend `ServiceDesired` whose only backend has the
 /// given V4 address (port 8080). The VIP is a routable service VIP that
 /// is itself NOT in the mesh subnet, so only the backend's class is
@@ -91,7 +121,8 @@ fn desired_with_backend(backend_ip: Ipv4Addr) -> ServiceDesired {
 }
 
 /// Drive `ServiceMapHydrator::reconcile` for a single service whose only
-/// backend has `backend_ip`, returning the port-exposed observable
+/// backend has `backend_ip` and whose slot was programmed earlier with a
+/// different set ([`previously_programmed`]), returning the port-exposed observable
 /// universe: `(dataplane_update_service_count, programmed_fingerprint,
 /// emitted_remote_backends_len)`.
 ///
@@ -105,9 +136,11 @@ fn desired_with_backend(backend_ip: Ipv4Addr) -> ServiceDesired {
 fn reconcile_universe(backend_ip: Ipv4Addr) -> (usize, Option<BackendSetFingerprint>, usize) {
     let r = ServiceMapHydrator::canonical(workload_subnet());
     let s_id = make_service_id(1);
+    let svc = desired_with_backend(backend_ip);
+    let actual = actual_previously_programmed(s_id, &svc);
     let mut desired = BTreeMap::new();
-    desired.insert(s_id, desired_with_backend(backend_ip));
-    let state = ServiceMapHydratorState { desired, actual: BTreeMap::new() };
+    desired.insert(s_id, svc);
+    let state = ServiceMapHydratorState { desired, actual };
     let view = ServiceMapHydratorView::default();
 
     let (actions, next_view) = r.reconcile(&state, &state, &view, &make_tick(0));
@@ -288,25 +321,20 @@ fn mixed_service_excludes_mesh_keeps_remote_backend() {
     }
 }
 
-/// Convergence-model realignment (`fix-mesh-only-reconcile-loop`,
-/// convergence-model.md § 4 / § 11.1) — an all-mesh service SETTLES via the
-/// empty-remote purge. This is a genuinely NEW contract that DELETES the
-/// prior "emits nothing, retries stay empty" behavior (which encoded the
-/// perpetual-loop bug, RCA): the old model never produced a hydration row,
-/// so the View never settled and `should_dispatch` re-entered its dispatch
-/// arm in perpetuity. Per `.claude/rules/development.md` § "Deletion
-/// discipline" the salvage is honest — new name, new assertions describing
-/// the new requirement. Both backends ∈ 10.99.0.0/16.
+/// An all-mesh service SETTLES via the empty-remote purge (convergence-model.md
+/// § 4 / § 11.1). A service whose slot still carries a previously programmed
+/// remote set is not in place against an empty survivor set, so it dispatches
+/// the purge; once the purge lands the dataplane carries nothing for it, which
+/// is in place for an empty survivor set, and the hydrator goes quiet. Both
+/// backends ∈ 10.99.0.0/16.
 ///
-/// - **Tick 1** (default View, empty `actual`): emits exactly ONE
+/// - **Tick 1** (`actual` carries an earlier remote set): emits exactly ONE
 ///   `DataplaneUpdateService { backends: [] }` (the per-proto purge) and
 ///   records `retries[s].last_attempted_fingerprint = Some(fp(vip, []))`.
-/// - **Tick 2** (given a `Completed{fp(vip,[])}` row in `actual`, View fed
+/// - **Tick 2** (the purge applied, so `actual` has no entry; View fed
 ///   forward): emits ZERO actions and CLEARS `retries` — settled.
 #[test]
 fn all_mesh_service_settles_via_empty_remote_purge() {
-    use overdrive_core::traits::observation_store::ServiceHydrationStatus;
-
     let m1 = Ipv4Addr::new(10, 99, 0, 6);
     let m2 = Ipv4Addr::new(10, 99, 0, 10);
     assert!(workload_subnet().contains(&m1), "fixture precondition: 10.99.0.6 ∈ mesh subnet");
@@ -317,11 +345,13 @@ fn all_mesh_service_settles_via_empty_remote_purge() {
 
     let r = ServiceMapHydrator::canonical(workload_subnet());
     let s_id = make_service_id(1);
+    let svc = desired_with_backends(&[m1, m2]);
+    let programmed_earlier = actual_previously_programmed(s_id, &svc);
     let mut desired = BTreeMap::new();
-    desired.insert(s_id, desired_with_backends(&[m1, m2]));
-    let state = ServiceMapHydratorState { desired, actual: BTreeMap::new() };
+    desired.insert(s_id, svc);
 
-    // Tick 1 — default View, empty actual. One empty-remote purge emitted.
+    // Tick 1 — default View, the slot still carries an earlier remote set.
+    let state = ServiceMapHydratorState { desired: desired.clone(), actual: programmed_earlier };
     let view0 = ServiceMapHydratorView::default();
     let (actions1, view1) = r.reconcile(&state, &state, &view0, &make_tick(0));
     let dataplane1: Vec<&Action> =
@@ -329,7 +359,7 @@ fn all_mesh_service_settles_via_empty_remote_purge() {
     assert_eq!(
         dataplane1.len(),
         1,
-        "tick 1: an all-mesh service emits exactly ONE DataplaneUpdateService (the empty purge)"
+        "tick 1: an all-mesh service over a programmed slot emits exactly ONE DataplaneUpdateService (the empty purge)"
     );
     match dataplane1[0] {
         Action::DataplaneUpdateService { backends, .. } => {
@@ -343,23 +373,40 @@ fn all_mesh_service_settles_via_empty_remote_purge() {
         "tick 1: an all-mesh service records the programmable fingerprint over the EMPTY set"
     );
 
-    // Tick 2 — feed a Completed{fp(vip,[])} row (what the shim writes for
-    // the purge) into actual, View fed forward, later now_unix. `state` is
-    // not read after tick 1, so mutate it in place rather than clone.
-    let mut settled = state;
-    settled.actual.insert(
-        s_id,
-        ServiceHydrationStatus::Completed {
-            fingerprint: empty_fp,
-            applied_at: UnixInstant::from_unix_duration(Duration::from_secs(1)),
-        },
-    );
+    // Tick 2 — the purge applied: nothing is programmed for the service.
+    let settled = ServiceMapHydratorState { desired, actual: BTreeMap::new() };
     let (actions2, view2) = r.reconcile(&settled, &settled, &view1, &make_tick(2));
     assert!(actions2.is_empty(), "tick 2: a settled all-mesh service emits ZERO actions");
     assert!(
         view2.retries.is_empty(),
-        "tick 2: the convergence-reset arm CLEARS retries once the empty-purge Completed row is observed"
+        "tick 2: the in-place observation CLEARS retries once the slot is observed empty"
     );
+}
+
+/// An all-mesh service whose slot was never programmed is already in place
+/// (an empty survivor set against no entry): it emits nothing and records no
+/// retry memory, for a V4 and for a V6 VIP. This is the loop-free half of the
+/// settle contract: the hydrator does not re-send a purge to an empty slot.
+#[test]
+fn all_mesh_service_with_nothing_programmed_emits_nothing() {
+    let m1 = Ipv4Addr::new(10, 99, 0, 6);
+    let m2 = Ipv4Addr::new(10, 99, 0, 10);
+    let r = ServiceMapHydrator::canonical(workload_subnet());
+    let s_id = make_service_id(1);
+    let vip6 = Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1);
+    for (label, svc) in [
+        ("V4 VIP", desired_with_backends(&[m1, m2])),
+        ("V6 VIP", v6_vip_desired_with_backends(vip6, &[m1, m2])),
+    ] {
+        let state = ServiceMapHydratorState {
+            desired: BTreeMap::from([(s_id, svc)]),
+            actual: BTreeMap::new(),
+        };
+        let (actions, view) =
+            r.reconcile(&state, &state, &ServiceMapHydratorView::default(), &make_tick(0));
+        assert!(actions.is_empty(), "{label}: nothing to purge, nothing emitted");
+        assert!(view.retries.is_empty(), "{label}: no dispatch, no retry memory");
+    }
 }
 
 /// Build a `ServiceDesired` whose VIP is a **V6** `ServiceVip` carrying the
@@ -463,18 +510,14 @@ fn v6_vip_service_excludes_mesh_backend_from_dataplane_update() {
     }
 }
 
-/// Convergence-model realignment (convergence-model.md § 3.1 V6 note /
-/// § 11.1) — an all-mesh V6 VIP service SETTLES via the empty-remote purge,
-/// mirroring the V4 `all_mesh_service_settles_via_empty_remote_purge`
-/// contract. This DELETES the prior "emits nothing, retries empty" V6
-/// behavior (the same perpetual-loop bug on the V6 arm). The V6 arm now
-/// emits the empty purge unconditionally on dispatch and records the
-/// programmable fingerprint over the empty `non_mesh` set; given the
-/// `Completed{fp(vip,[])}` row it settles.
+/// An all-mesh V6 VIP service SETTLES via the empty-remote purge, mirroring the
+/// V4 `all_mesh_service_settles_via_empty_remote_purge` contract (convergence-model.md
+/// § 3.1 V6 note / § 11.1). The V6 arm emits the empty purge unconditionally on
+/// dispatch while the slot still carries an earlier set, records the
+/// programmable fingerprint over the empty set, and goes quiet once the slot
+/// is observed empty.
 #[test]
 fn v6_vip_all_mesh_service_settles_via_empty_remote_purge() {
-    use overdrive_core::traits::observation_store::ServiceHydrationStatus;
-
     let vip6 = Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 1);
     let m1 = Ipv4Addr::new(10, 99, 0, 6);
     let m2 = Ipv4Addr::new(10, 99, 0, 10);
@@ -486,19 +529,20 @@ fn v6_vip_all_mesh_service_settles_via_empty_remote_purge() {
 
     let r = ServiceMapHydrator::canonical(workload_subnet());
     let s_id = make_service_id(1);
-    let mut desired = BTreeMap::new();
-    desired.insert(s_id, v6_vip_desired_with_backends(vip6, &[m1, m2]));
-    let state = ServiceMapHydratorState { desired, actual: BTreeMap::new() };
+    let svc = v6_vip_desired_with_backends(vip6, &[m1, m2]);
+    let programmed_earlier = actual_previously_programmed(s_id, &svc);
+    let desired = BTreeMap::from([(s_id, svc)]);
     let view0 = ServiceMapHydratorView::default();
 
-    // Tick 1 — one empty-remote purge.
+    // Tick 1 — one empty-remote purge over the still-programmed slot.
+    let state = ServiceMapHydratorState { desired: desired.clone(), actual: programmed_earlier };
     let (actions1, view1) = r.reconcile(&state, &state, &view0, &make_tick(0));
     let dataplane1: Vec<&Action> =
         actions1.iter().filter(|a| matches!(a, Action::DataplaneUpdateService { .. })).collect();
     assert_eq!(
         dataplane1.len(),
         1,
-        "tick 1: an all-mesh V6 service emits exactly ONE DataplaneUpdateService (the empty purge)"
+        "tick 1: an all-mesh V6 service over a programmed slot emits exactly ONE DataplaneUpdateService (the empty purge)"
     );
     match dataplane1[0] {
         Action::DataplaneUpdateService { backends, .. } => {
@@ -512,21 +556,13 @@ fn v6_vip_all_mesh_service_settles_via_empty_remote_purge() {
         "tick 1: the V6 all-mesh service records the programmable fingerprint over the EMPTY set"
     );
 
-    // Tick 2 — Completed{fp(vip,[])} row → settled, retries cleared.
-    // `state` is not read after tick 1, so mutate it in place (no clone).
-    let mut settled = state;
-    settled.actual.insert(
-        s_id,
-        ServiceHydrationStatus::Completed {
-            fingerprint: empty_fp,
-            applied_at: UnixInstant::from_unix_duration(Duration::from_secs(1)),
-        },
-    );
+    // Tick 2 — the purge applied, the slot is empty: settled, retries cleared.
+    let settled = ServiceMapHydratorState { desired, actual: BTreeMap::new() };
     let (actions2, view2) = r.reconcile(&settled, &settled, &view1, &make_tick(2));
     assert!(actions2.is_empty(), "tick 2: a settled all-mesh V6 service emits ZERO actions");
     assert!(
         view2.retries.is_empty(),
-        "tick 2: the convergence-reset arm CLEARS retries once the empty-purge Completed row is observed"
+        "tick 2: the in-place observation CLEARS retries once the slot is observed empty"
     );
 }
 
@@ -576,15 +612,19 @@ proptest! {
                             last_attempted_fingerprint: Some(fingerprint(&svc.vip, &remote_backends)),
                         })]),
                     };
+                    // The slot carries an earlier set, so the survivor set (or the
+                    // empty purge for a mesh backend) is not in place.
+                    let actual = actual_previously_programmed(sid, &svc);
                     let state = ServiceMapHydratorState {
-                        desired: BTreeMap::from([(sid, svc)]), actual: BTreeMap::new(),
+                        desired: BTreeMap::from([(sid, svc)]), actual,
                     };
                     let (actions, view) = reconciler.reconcile(
                         &state, &state, &ServiceMapHydratorView::default(), &tick,
                     );
                     prop_assert_eq!(actions, expected_actions, "seed=257228: exact ordered action universe");
                     prop_assert_eq!(&view, &expected_view, "seed=257228: complete View complement");
-                    // Existing emission gate, not effect acknowledgement or failed-effect retry.
+                    // Backoff pacing over a service that is still not in place, not
+                    // effect acknowledgement or failed-effect retry.
                     let (repeat_actions, repeat_view) = reconciler.reconcile(&state, &state, &view, &tick);
                     prop_assert!(repeat_actions.is_empty());
                     prop_assert_eq!(repeat_view, view);

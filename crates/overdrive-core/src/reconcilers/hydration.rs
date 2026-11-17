@@ -81,7 +81,6 @@ pub struct HydrationContext<'a> {
     /// current facts).
     pub gateway_identity: &'a dyn GatewayIdentityView,
     /// The programmed service map read port (D-20, ADR-0299).
-    // DISTILL scaffold (D-20): consumed by the hydrator's `hydrate_actual` in DELIVER.
     pub programmed_services: &'a dyn ProgrammedServiceView,
     /// The local node id (plain data).
     pub node_id: &'a NodeId,
@@ -130,7 +129,6 @@ pub enum HydrateError {
     TargetShape(String),
     /// A read of the programmed service map failed (D-20, ADR-0299): the
     /// `Display` of the `DataplaneError` the read returned.
-    // DISTILL scaffold (D-20): produced by the hydrator's `hydrate_actual` in DELIVER.
     #[error("programmed service map read failed: {0}")]
     DataplaneRead(String),
     /// An observation row violates the Running => workload address contract:

@@ -636,9 +636,6 @@ async fn a_service_whose_view_write_failed_is_running_and_in_the_service_map_on_
 /// Then the service map is programmed with the Service's backend.
 #[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[should_panic(
-    expected = "the service map was not programmed after the hydrator's backoff elapsed following a failed update"
-)]
 async fn a_service_whose_dataplane_update_failed_is_retried_after_its_backoff_without_a_row_write()
 {
     let dir = TempDir::new().expect("tempdir");
