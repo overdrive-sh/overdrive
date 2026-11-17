@@ -82,6 +82,8 @@
 //! every other form, and `lane_owner` without it is a build error naming the
 //! argument.
 
+mod bench;
+
 use proc_macro::TokenStream;
 use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::{format_ident, quote, quote_spanned};
@@ -670,12 +672,11 @@ fn gate(name: &str, hand_off: &TokenStream2, should_panic: Option<&str>) -> Toke
 
 /// The `#[overdrive_bench(...)]` benchmark declaration attribute (ADR-0297).
 ///
-/// RED scaffold created by DISTILL: returns the function unchanged. It
-/// validates nothing, registers nothing and emits no smoke test, so the
-/// acceptance tests for the declaration rules and the smoke variant fail for
-/// the behaviour they assert.
-// SCAFFOLD: true
+/// Validates the declaration at build time, registers it in `overdrive_bench`'s
+/// link-time slice and, unless `smoke(none)`, emits the `smoke_<name>` test that
+/// runs one replicate per arm under the smoke placement. See `bench.rs` for the
+/// rejections and the expansion.
 #[proc_macro_attribute]
-pub fn overdrive_bench(_attribute: TokenStream, item: TokenStream) -> TokenStream {
-    item
+pub fn overdrive_bench(attribute: TokenStream, item: TokenStream) -> TokenStream {
+    bench::expand(attribute.into(), &item.into()).into()
 }

@@ -32,7 +32,6 @@ use serial_test::serial;
 #[test]
 #[serial(trybuild)]
 #[overdrive_test(host_pure)]
-#[should_panic(expected = "2 of 2 tests failed")]
 fn an_unregistered_or_guest_substrate_fails_the_build_naming_it() {
     let cases = trybuild::TestCases::new();
     cases.compile_fail("tests/compile_fail/unknown_substrate.rs");
@@ -45,7 +44,6 @@ fn an_unregistered_or_guest_substrate_fails_the_build_naming_it() {
 #[test]
 #[serial(trybuild)]
 #[overdrive_test(host_pure)]
-#[should_panic(expected = "1 of 1 tests failed")]
 fn a_substrate_written_as_a_string_literal_fails_the_build_asking_for_an_identifier() {
     let cases = trybuild::TestCases::new();
     cases.compile_fail("tests/compile_fail/substrate_string_literal.rs");
@@ -56,7 +54,6 @@ fn a_substrate_written_as_a_string_literal_fails_the_build_asking_for_an_identif
 #[test]
 #[serial(trybuild)]
 #[overdrive_test(host_pure)]
-#[should_panic(expected = "2 of 2 tests failed")]
 fn fewer_than_nine_replicates_fails_the_build_naming_the_minimum() {
     let cases = trybuild::TestCases::new();
     cases.compile_fail("tests/compile_fail/five_replicates.rs");
@@ -70,7 +67,6 @@ fn fewer_than_nine_replicates_fails_the_build_naming_the_minimum() {
 #[test]
 #[serial(trybuild)]
 #[overdrive_test(host_pure)]
-#[should_panic(expected = "3 of 3 tests failed")]
 fn the_smoke_argument_rules_fail_the_build_naming_the_value_or_the_missing_argument() {
     let cases = trybuild::TestCases::new();
     cases.compile_fail("tests/compile_fail/smoke_none_outside_a_spike.rs");
@@ -84,7 +80,6 @@ fn the_smoke_argument_rules_fail_the_build_naming_the_value_or_the_missing_argum
 #[test]
 #[serial(trybuild)]
 #[overdrive_test(host_pure)]
-#[should_panic(expected = "5 of 5 tests failed")]
 fn malformed_declarations_fail_the_build_naming_the_offending_key_or_value() {
     let cases = trybuild::TestCases::new();
     cases.compile_fail("tests/compile_fail/unknown_key.rs");

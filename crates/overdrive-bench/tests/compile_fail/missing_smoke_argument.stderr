@@ -1,5 +1,13 @@
 error: missing required key `smoke`; give smoke(host_pure), smoke(guest = "<group>") or, in a spike, smoke(none)
- --> tests/compile_fail/missing_smoke_argument.rs:4:3
+ --> tests/compile_fail/missing_smoke_argument.rs:4:1
   |
-4 | #[overdrive_bench(
-  |   ^^^^^^^^^^^^^^^
+ 4 | / #[overdrive_bench(
+ 5 | |     family = "f",
+ 6 | |     substrate = native,
+ 7 | |     arms = ["a", "b"],
+ 8 | |     replicates = 9,
+ 9 | |     metric(name = "m", unit = ns, table = "t"),
+10 | | )]
+   | |__^
+   |
+   = note: this error originates in the attribute macro `overdrive_bench` (in Nightly builds, run with -Z macro-backtrace for more info)

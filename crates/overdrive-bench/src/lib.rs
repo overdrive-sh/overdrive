@@ -29,8 +29,14 @@ use std::process::ExitCode;
 mod canary;
 mod histogram;
 pub mod record;
+#[doc(hidden)]
+pub mod registry;
+mod replicate;
 pub mod report;
 mod stats;
+
+pub use registry::BenchmarkDecl;
+pub use replicate::{HostClock, HostInstant, Replicate, ReplicateFailure, smoke};
 
 #[cfg(test)]
 use overdrive_testing::overdrive_test_default;
@@ -45,17 +51,11 @@ pub enum Evidence {
     Spike,
 }
 
-/// One declared benchmark (the macro's registration entry).
-pub struct BenchmarkDecl {}
-
 /// Entry point of a benchmark binary: maps [`Error`] to the exit statuses of DDD-9.
 pub fn run_main(evidence: Evidence) -> ExitCode {
     eprintln!("RED scaffold: overdrive_bench::run_main is not implemented");
     ExitCode::from(70)
 }
-
-/// The smoke variant: one replicate per arm, no statistics held, no timing asserted.
-pub fn smoke(decl: &BenchmarkDecl) {}
 
 /// Crate error; every variant names its cause.
 #[derive(Debug, thiserror::Error)]
@@ -90,58 +90,6 @@ pub enum Error {
 /// Result alias used throughout the crate.
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
-/// A replicate's handle (opaque).
-pub struct Replicate {}
-
-impl Replicate {
-    pub fn arm(&self) -> &str {
-        ""
-    }
-    pub fn profile(&self) -> &str {
-        ""
-    }
-    pub fn clock(&self) -> &HostClock {
-        &HostClock {}
-    }
-    pub fn record(&mut self, metric: &str, value: f64) -> Result<(), ReplicateFailure> {
-        Ok(())
-    }
-    pub fn record_series(&mut self, metric: &str, values: &[f64]) -> Result<(), ReplicateFailure> {
-        Ok(())
-    }
-    pub fn record_failure(&mut self, metric: &str, reason: &str) -> Result<(), ReplicateFailure> {
-        Ok(())
-    }
-    pub fn record_absent(&mut self, metric: &str, reason: &str) -> Result<(), ReplicateFailure> {
-        Ok(())
-    }
-    pub fn note(&mut self, key: &str, value: &str) {}
-    pub fn exec(&mut self, program: &str, args: &[&str]) -> Result<String, ReplicateFailure> {
-        Ok(String::new())
-    }
-    pub fn bpf_stats(&self) -> Option<&BpfStatsHold> {
-        None
-    }
-}
-
-/// Host monotonic clock (`CLOCK_MONOTONIC_RAW`).
-pub struct HostClock {}
-
-impl HostClock {
-    pub fn now(&self) -> HostInstant {
-        HostInstant {}
-    }
-}
-
-/// A host instant.
-pub struct HostInstant {}
-
-impl HostInstant {
-    pub fn duration_since(self, earlier: HostInstant) -> std::time::Duration {
-        std::time::Duration::ZERO
-    }
-}
-
 /// The descriptor-scoped BPF statistics hold.
 pub struct BpfStatsHold {}
 
@@ -161,16 +109,3 @@ pub struct RunStats {
 #[derive(Debug, thiserror::Error)]
 #[error("BPF statistics read failed")]
 pub struct StatsError {}
-
-/// A failed replicate.
-#[derive(Debug)]
-pub struct ReplicateFailure {}
-
-impl ReplicateFailure {
-    pub fn fixture(msg: &str) -> Self {
-        Self {}
-    }
-    pub fn measurement(msg: &str) -> Self {
-        Self {}
-    }
-}

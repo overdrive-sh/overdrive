@@ -120,7 +120,6 @@ fn panic_message(output: &Output) -> String {
 /// replicate it runs, and a smoke test that ran none (or two) fails this scenario.
 /// CONTRACT_SHAPE: bounded-change (the child's announced replicates).
 #[test]
-#[should_panic(expected = "the generated smoke test must run and pass")]
 fn the_generated_smoke_test_runs_one_replicate_per_arm_and_passes() {
     let output = run_generated("smoke_one_per_arm", false);
     let text = stdout(&output);
@@ -142,7 +141,6 @@ fn the_generated_smoke_test_runs_one_replicate_per_arm_and_passes() {
 /// announces that it ran, so a smoke test that never ran it fails this scenario.
 /// CONTRACT_SHAPE: bounded-change (the child's announced body).
 #[test]
-#[should_panic(expected = "the generated smoke test must hold no statistics")]
 fn the_smoke_variant_holds_no_statistics_and_asserts_no_timing() {
     let output = run_generated("smoke_no_timing", false);
     assert!(
@@ -160,7 +158,6 @@ fn the_smoke_variant_holds_no_statistics_and_asserts_no_timing() {
 /// name) on its own lines, so those cannot satisfy it. Fault stimulus: the fixture returns a fixture failure.
 /// CONTRACT_SHAPE: bounded-change (the child's verdict and panic message).
 #[test]
-#[should_panic(expected = "a broken fixture must fail its generated smoke test")]
 fn a_broken_fixture_fails_its_generated_smoke_test_naming_the_benchmark() {
     let output = run_generated("smoke_broken_fixture", true);
     let message = panic_message(&output);
