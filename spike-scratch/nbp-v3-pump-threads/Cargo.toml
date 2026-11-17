@@ -1,0 +1,20 @@
+# Throwaway V-3 probe (native-benchmark-program): is the per-thread CPU of the two outbound
+# mTLS pump threads a usable proxy for forward/return userspace work?
+# Self-contained workspace; links production crates by path only; edits none.
+[package]
+name = "nbp-v3-pump-threads"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+overdrive-dataplane = { path = "../../crates/overdrive-dataplane" }
+overdrive-core = { path = "../../crates/overdrive-core" }
+rustls = { version = "0.23", default-features = false, features = ["ring", "tls12", "std"] }
+rcgen = { version = "0.14", default-features = false, features = ["ring", "pem"] }
+rustls-pemfile = "2"
+tokio = { version = "1", features = ["full"] }
+async-trait = "0.1"
+libc = "0.2"
+
+[workspace]

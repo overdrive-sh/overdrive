@@ -1,0 +1,119 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.11s
+     Running `target/debug/xtask metal run --exclusive -- cargo run --release --manifest-path spike-scratch/nbp-v3-pump-threads/Cargo.toml -- run 3 1 spike-scratch/nbp-v3-pump-threads/results/diag.csv`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+OVERDRIVE_METAL_RUN_ID=819c0fc6d76236f477f2cbf3
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire exclusive physical-maintenance barrier (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_RUN_REGISTERED run_id=819c0fc6d76236f477f2cbf3
+OVERDRIVE_METAL_LEASE_ACQUIRED token=819c0fc6d76236f477f2cbf3 pid=3408130
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/islamabad-v1 -> ubuntu@151.115.99.251:/home/ubuntu/overdrive-worktrees/d6e116fa0e342e06ad0b58474ab66e6f68a1cc611c87fc78ba4451a071a928c7
+
+sent 2,034,485 bytes  received 7,153 bytes  816,655.20 bytes/sec
+total size is 1,912,682,441  speedup is 936.84
+
+########## [bootstrap] materialising standalone .git (common dir 2.3G)
+
+sent 703,349 bytes  received 587,685 bytes  516,413.60 bytes/sec
+total size is 914,500,021  speedup is 708.35
+## marcus-sa/native-benchmark-program
+ M docs/feature/native-benchmark-program/feature-delta.md
+ M docs/product/architecture/brief.md
+ M docs/product/architecture/c4-diagrams.md
+?? docs/product/architecture/adr-0296-benchmarks-are-measured-by-a-dev-only-core-crate-with-families-in-a-separate-crate.md
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+OVERDRIVE_METAL_RUN_STARTED run_id=819c0fc6d76236f477f2cbf3
+warning: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::new`: unsound due to lack of I/O safety; use `AsyncFd::register` instead (see https://github.com/tokio-rs/tokio/pull/8587)
+   --> /home/ubuntu/overdrive-worktrees/d6e116fa0e342e06ad0b58474ab66e6f68a1cc611c87fc78ba4451a071a928c7/crates/overdrive-host/src/beacon_io.rs:127:42
+    |
+127 |         let listener = Arc::new(AsyncFd::new(listener)?);
+    |                                          ^^^
+    |
+    = note: `#[warn(deprecated)]` on by default
+
+warning: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::new`: unsound due to lack of I/O safety; use `AsyncFd::register` instead (see https://github.com/tokio-rs/tokio/pull/8587)
+   --> /home/ubuntu/overdrive-worktrees/d6e116fa0e342e06ad0b58474ab66e6f68a1cc611c87fc78ba4451a071a928c7/crates/overdrive-host/src/beacon_io.rs:158:46
+    |
+158 | ...                   socket: AsyncFd::new(socket)?,
+    |                                        ^^^
+
+warning: `overdrive-host` (lib) generated 2 warnings
+warning: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::new`: unsound due to lack of I/O safety; use `AsyncFd::register` instead (see https://github.com/tokio-rs/tokio/pull/8587)
+    --> /home/ubuntu/overdrive-worktrees/d6e116fa0e342e06ad0b58474ab66e6f68a1cc611c87fc78ba4451a071a928c7/crates/overdrive-dataplane/src/gateway_relay/mod.rs:1238:27
+     |
+1238 |         let fd = AsyncFd::new(connected).map_err(|_| GatewayClientMtlsError::Handshake)?;
+     |                           ^^^
+     |
+     = note: `#[warn(deprecated)]` on by default
+
+warning: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::new`: unsound due to lack of I/O safety; use `AsyncFd::register` instead (see https://github.com/tokio-rs/tokio/pull/8587)
+    --> /home/ubuntu/overdrive-worktrees/d6e116fa0e342e06ad0b58474ab66e6f68a1cc611c87fc78ba4451a071a928c7/crates/overdrive-dataplane/src/gateway_relay/mod.rs:1262:27
+     |
+1262 |         let fd = AsyncFd::new(accepted).map_err(|err| handshake_io(&err))?;
+     |                           ^^^
+
+warning: `overdrive-dataplane` (lib) generated 2 warnings
+   Compiling nbp-v3-pump-threads v0.0.0 (/home/ubuntu/overdrive-worktrees/d6e116fa0e342e06ad0b58474ab66e6f68a1cc611c87fc78ba4451a071a928c7/spike-scratch/nbp-v3-pump-threads)
+warning: field `utime` is never read
+   --> src/main.rs:125:5
+    |
+121 | struct TaskStat {
+    |        -------- field in this struct
+...
+125 |     utime: u64,
+    |     ^^^^^
+    |
+    = note: `TaskStat` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `nbp-v3-pump-threads` (bin "nbp-v3-pump-threads") generated 1 warning
+    Finished `release` profile [optimized] target(s) in 1.34s
+     Running `spike-scratch/nbp-v3-pump-threads/target/release/nbp-v3-pump-threads run 3 1 spike-scratch/nbp-v3-pump-threads/results/diag.csv`
+# uname -r: 7.0.0-38-generic
+  DIAG t+400ms liveness=Running bytes=342032384 threads=[(3409911, "tokio-rt-worker", 0), (3409917, "tokio-rt-worker", 39), (3409918, "tokio-rt-worker", 0), (3409919, "lg-writer", 5)] peer_alive=true
+  DIAG t+800ms liveness=Running bytes=704839680 threads=[(3409911, "tokio-rt-worker", 0), (3409917, "tokio-rt-worker", 80), (3409918, "tokio-rt-worker", 0), (3409919, "lg-writer", 8)] peer_alive=true
+  DIAG t+1200ms liveness=Running bytes=1067712512 threads=[(3409911, "tokio-rt-worker", 0), (3409917, "tokio-rt-worker", 119), (3409918, "tokio-rt-worker", 0), (3409919, "lg-writer", 12)] peer_alive=true
+  DIAG t+1600ms liveness=Running bytes=1426522112 threads=[(3409911, "tokio-rt-worker", 0), (3409917, "tokio-rt-worker", 159), (3409918, "tokio-rt-worker", 0), (3409919, "lg-writer", 18)] peer_alive=true
+  DIAG t+2000ms liveness=Running bytes=1786118144 threads=[(3409911, "tokio-rt-worker", 0), (3409917, "tokio-rt-worker", 199), (3409918, "tokio-rt-worker", 0), (3409919, "lg-writer", 25)] peer_alive=true
+--- forward: per-thread CPU over a 3.00s window (ms; thread_stat granularity 10 ms); 'new' = created by enforce ---
+new_tids_created_by_enforce=[3409911, 3409917, 3409918] (comm: [(3409911, "tokio-rt-worker"), (3409917, "tokio-rt-worker"), (3409918, "tokio-rt-worker")])
+  tid=3409917 comm=tokio-rt-worker    cpu=    3010 ms sys=    2970 ms new=true fixture=false
+  tid=3409919 comm=lg-writer          cpu=     510 ms sys=     500 ms new=false fixture=true
+  tid=3409719 comm=nbp-v3-pump-thr    cpu=       0 ms sys=       0 ms new=false fixture=false
+  tid=3409900 comm=tokio-rt-worker    cpu=       0 ms sys=       0 ms new=false fixture=false
+  tid=3409901 comm=tokio-rt-worker    cpu=       0 ms sys=       0 ms new=false fixture=false
+  tid=3409902 comm=tokio-rt-worker    cpu=       0 ms sys=       0 ms new=false fixture=false
+  tid=3409903 comm=tokio-rt-worker    cpu=       0 ms sys=       0 ms new=false fixture=false
+  tid=3409911 comm=tokio-rt-worker    cpu=       0 ms sys=       0 ms new=true fixture=false
+  throughput=897 MB/s process_cpu=3520 ms pump0=3010 pump1=0 (sys share 0.99/0.00) fixture_threads=510 other_agent=0 peer_child=2240 host_softirq=950 host_busy=5720
+  RESULT forward: pumps/process_delta=0.855  pumps/(process_delta - fixture threads)=1.000  heavy:light=inf
+  pump threads in creation order (tid, cpu ms): [(3409911, 0.0), (3409917, 3010.0), (3409918, 0.0)]
+PEER sink: read error after   DIAG t+400ms liveness=Running bytes=352927744 threads=[(3410027, "tokio-rt-worker", 0), (3410028, "tokio-rt-worker", 39), (3410029, "lg-reader", 29)] peer_alive=true
+  DIAG t+800ms liveness=Running bytes=645496832 threads=[(3410027, "tokio-rt-worker", 0), (3410028, "tokio-rt-worker", 79), (3410029, "lg-reader", 57)] peer_alive=true
+  DIAG t+1200ms liveness=Running bytes=1000390656 threads=[(3410027, "tokio-rt-worker", 0), (3410028, "tokio-rt-worker", 118), (3410029, "lg-reader", 87)] peer_alive=true
+  DIAG t+1600ms liveness=Running bytes=1330266112 threads=[(3410027, "tokio-rt-worker", 0), (3410028, "tokio-rt-worker", 158), (3410029, "lg-reader", 116)] peer_alive=true
+  DIAG t+2000ms liveness=Running bytes=1677361152 threads=[(3410027, "tokio-rt-worker", 0), (3410028, "tokio-rt-worker", 198), (3410029, "lg-reader", 147)] peer_alive=true
+--- return: per-thread CPU over a 3.00s window (ms; thread_stat granularity 10 ms); 'new' = created by enforce ---
+new_tids_created_by_enforce=[3410027, 3410028] (comm: [(3410027, "tokio-rt-worker"), (3410028, "tokio-rt-worker")])
+  tid=3410028 comm=tokio-rt-worker    cpu=    2980 ms sys=    2860 ms new=true fixture=false
+  tid=3410029 comm=lg-reader          cpu=    2260 ms sys=    2220 ms new=false fixture=true
+  tid=3409719 comm=nbp-v3-pump-thr    cpu=       0 ms sys=       0 ms new=false fixture=false
+  tid=3409900 comm=tokio-rt-worker    cpu=       0 ms sys=       0 ms new=false fixture=false
+  tid=3409901 comm=tokio-rt-worker    cpu=       0 ms sys=       0 ms new=false fixture=false
+  tid=3409902 comm=tokio-rt-worker    cpu=       0 ms sys=       0 ms new=false fixture=false
+  tid=3409903 comm=tokio-rt-worker    cpu=       0 ms sys=       0 ms new=false fixture=false
+  tid=3409911 comm=tokio-rt-worker    cpu=       0 ms sys=       0 ms new=false fixture=false
+  throughput=876 MB/s process_cpu=5240 ms pump0=2980 pump1=0 (sys share 0.96/0.00) fixture_threads=2260 other_agent=0 peer_child=1250 host_softirq=880 host_busy=6490
+  RESULT return: pumps/process_delta=0.569  pumps/(process_delta - fixture threads)=1.000  heavy:light=inf
+  pump threads in creation order (tid, cpu ms): [(3410027, 0.0), (3410028, 2980.0)]
+PEER source: write error after rep,direction,mbps,process_ms,pump0_ms,pump1_ms,fixture_ms,peer_ms,ratio,raw_share,agent_share
+0,forward,897,3520,3010,0,510,2240,inf,0.855,1.000
+0,return,876,5240,2980,0,2260,1250,inf,0.569,1.000
+
+OVERDRIVE_METAL_RUN_COMPLETE run_id=819c0fc6d76236f477f2cbf3 exit_code=0 cause=command_returned

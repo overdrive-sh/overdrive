@@ -1,0 +1,13 @@
+# Throwaway V-1 probe (native-benchmark-program): descriptor-scoped BPF stats.
+[package]
+name = "nbp-v1-bpf-stats-fd"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+overdrive-dataplane = { path = "../../crates/overdrive-dataplane" }
+aya = "0.13"
+libc = "0.2"
+
+[workspace]

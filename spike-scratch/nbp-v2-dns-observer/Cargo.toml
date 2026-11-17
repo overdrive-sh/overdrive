@@ -1,0 +1,16 @@
+# Throwaway V-2 probe (native-benchmark-program): hot-path cost of the DDD-12 QueryObserver.
+# Self-contained; no workspace crate is linked (the responder loop is copied, see src/main.rs).
+[package]
+name = "nbp-v2-dns-observer"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+nix = { version = "0.30", default-features = false, features = ["net", "socket", "uio", "sched"] }
+libc = "0.2"
+
+[profile.release]
+opt-level = 3
+
+[workspace]

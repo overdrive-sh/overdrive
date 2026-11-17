@@ -1,0 +1,13 @@
+[package]
+name = "nbp-bench"
+version = "0.0.0"
+edition = "2021"
+publish = false
+[dependencies]
+nbp-lib = { path = "../lib" }
+# Linked only so its object is part of the build; main never names a symbol of it
+# (variant "unreferenced"). The "referenced" variant uses `extern crate`.
+nbp-decls = { path = "../decls" }
+[[bench]]
+name = "benchmarks"
+harness = false

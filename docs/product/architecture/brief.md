@@ -2214,6 +2214,38 @@ Interface contracts and decisions:
 Diagrams: [c4-diagrams.md](c4-diagrams.md). Protocol model:
 `specs/quint/shared-guest-owner/`.
 
+### Native benchmark program (feature `native-benchmark-program`, GH #287, 2026-11-16) — PROPOSED
+
+**PROPOSED — not approved by the user.** Developer tooling for native
+performance measurement. A benchmark is declared once with `#[overdrive_bench]`
+and run on the exclusive Metal host through `cargo xtask metal run --benchmark`;
+the runner owns arm interleaving, the A/A control, the canary, the host
+eligibility check and the provenance block, writes an append-only JSONL record,
+and derives the report from it. The same declaration serves a maintained lane
+(`overdrive-bench-families`) and a `spike-scratch/` probe; a generated smoke test
+keeps the benchmark compiling and running in the ordinary lane. Two dev-only
+`adapter-host` crates (`overdrive-bench`, `overdrive-bench-families`); no new
+production component. Two small production-surface changes await the user's
+ruling: a DNS per-query observer (ADR-0307) and named mTLS pump threads
+(ADR-0309). Decisions:
+[ADR-0296](adr-0296-benchmarks-are-measured-by-a-dev-only-core-crate-with-families-in-a-separate-crate.md),
+[ADR-0297](adr-0297-a-benchmark-is-declared-with-an-attribute-that-also-emits-its-smoke-test.md),
+[ADR-0298](adr-0298-declared-benchmarks-register-at-link-time-in-a-distributed-slice.md),
+[ADR-0299](adr-0299-benchmark-substrates-are-a-closed-registry-and-the-first-entry-is-native.md),
+[ADR-0300](adr-0300-the-runner-owns-the-statistical-protocol-and-versions-it-as-the-methodology.md),
+[ADR-0301](adr-0301-a-benchmark-result-is-an-append-only-record-with-a-derived-report.md),
+[ADR-0302](adr-0302-a-benchmark-refuses-a-host-that-differs-from-the-pinned-test-host-settings.md),
+[ADR-0303](adr-0303-bpf-run-statistics-are-enabled-for-the-benchmark-process-only.md),
+[ADR-0304](adr-0304-the-metal-benchmark-form-runs-a-closed-command-under-exclusive-admission.md),
+[ADR-0305](adr-0305-stage-boundaries-are-stamped-on-the-host-and-guest-stages-are-durations.md),
+[ADR-0306](adr-0306-vm-lifecycle-stages-are-observed-through-existing-production-seams.md),
+[ADR-0307](adr-0307-the-dns-responder-reports-per-query-service-time-to-an-observer.md),
+[ADR-0308](adr-0308-the-mtls-benchmark-measures-the-host-agent-hop-against-a-plaintext-baseline.md),
+[ADR-0309](adr-0309-mtls-pump-threads-carry-their-role-in-their-name.md).
+Interface contracts:
+[feature delta](../../feature/native-benchmark-program/feature-delta.md#wave-design--ref-interface-contracts).
+Diagrams: [c4-diagrams.md](c4-diagrams.md).
+
 ### Approved VM lifecycle responsiveness amendment (#283 / #260, 2026-09-10)
 
 **APPROVED; independent DESIGN review APPROVED; user ratification APPROVED, 2026-09-10.**

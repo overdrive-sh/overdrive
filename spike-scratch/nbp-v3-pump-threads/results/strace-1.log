@@ -1,0 +1,45 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.22s
+     Running `target/debug/xtask metal run --exclusive -- bash -c 'which strace; B=$(pwd)/spike-scratch/nbp-v3-pump-threads/target/release/nbp-v3-pump-threads; strace -f -ttt -o /tmp/nbp-v3-strace.log -e trace=splice,shutdown,setsockopt,pipe2,connect,close,poll,write,read,sendto,recvfrom,sendmsg,recvmsg $B run 2 1 /tmp/x.csv > /dev/null 2>&1; grep -c . /tmp/nbp-v3-strace.log; grep -E '\''splice|= -1'\'' /tmp/nbp-v3-strace.log | grep -v '\''EAGAIN\|futex'\'' | head -60'`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+OVERDRIVE_METAL_RUN_ID=ca5757ad2f9701eff95b9a85
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire exclusive physical-maintenance barrier (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_RUN_REGISTERED run_id=ca5757ad2f9701eff95b9a85
+OVERDRIVE_METAL_LEASE_ACQUIRED token=ca5757ad2f9701eff95b9a85 pid=3406078
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/islamabad-v1 -> ubuntu@151.115.99.251:/home/ubuntu/overdrive-worktrees/d6e116fa0e342e06ad0b58474ab66e6f68a1cc611c87fc78ba4451a071a928c7
+
+sent 2,035,023 bytes  received 7,036 bytes  816,823.60 bytes/sec
+total size is 1,912,677,859  speedup is 936.64
+
+########## [bootstrap] materialising standalone .git (common dir 2.3G)
+
+sent 655,622 bytes  received 27,745 bytes  455,578.00 bytes/sec
+total size is 914,494,473  speedup is 1,338.22
+## marcus-sa/native-benchmark-program
+ M docs/feature/native-benchmark-program/feature-delta.md
+ M docs/product/architecture/brief.md
+ M docs/product/architecture/c4-diagrams.md
+?? docs/product/architecture/adr-0296-benchmarks-are-measured-by-a-dev-only-core-crate-with-families-in-a-separate-crate.md
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+OVERDRIVE_METAL_RUN_STARTED run_id=ca5757ad2f9701eff95b9a85
+/usr/bin/strace
+1372
+3407124 1794871869.312492 connect(13, {sa_family=AF_INET, sin_port=htons(46487), sin_addr=inet_addr("127.0.0.1")}, 16) = -1 EINPROGRESS (Operation now in progress)
+3407206 1794871869.318166 splice(13, NULL, 19, NULL, 65536, SPLICE_F_MOVE|SPLICE_F_NONBLOCK <unfinished ...>
+3407206 1794871869.318206 <... splice resumed>) = -1 EINVAL (Invalid argument)
+3407205 1794871869.320822 splice(12, NULL, 16, NULL, 65536, SPLICE_F_MOVE <unfinished ...>
+3407205 1794871869.320879 <... splice resumed>) = 65536
+3407208 1794871869.321284 sendto(14, "\245\245\245\245\245\245\245\245\245\245\245\245\245\245\245\245\245\245\245\245\245\245\245\245\245\245\245\245\245\245\245\245"..., 65536, MSG_NOSIGNAL, NULL, 0) = -1 ECONNRESET (Connection reset by peer)
+3407118 1794871869.321400 <... recvfrom resumed>, 0x6118ce1d6da0, 4096, 0, NULL, NULL) = -1 ECONNRESET (Connection reset by peer)
+3407124 1794871873.624762 connect(13, {sa_family=AF_INET, sin_port=htons(45731), sin_addr=inet_addr("127.0.0.1")}, 16) = -1 EINPROGRESS (Operation now in progress)
+3407218 1794871873.631596 splice(13, NULL, 19, NULL, 65536, SPLICE_F_MOVE|SPLICE_F_NONBLOCK <unfinished ...>
+3407218 1794871873.631686 <... splice resumed>) = -1 EINVAL (Invalid argument)
+3407220 1794871873.672098 <... recvfrom resumed>, 0x7b11e9a61010, 262144, 0, NULL, NULL) = -1 ECONNRESET (Connection reset by peer)
+OVERDRIVE_METAL_RUN_COMPLETE run_id=ca5757ad2f9701eff95b9a85 exit_code=0 cause=command_returned

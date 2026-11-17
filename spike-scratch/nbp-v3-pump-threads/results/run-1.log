@@ -1,0 +1,343 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.29s
+     Running `target/debug/xtask metal run --exclusive -- cargo run --release --manifest-path spike-scratch/nbp-v3-pump-threads/Cargo.toml -- run 10 3 spike-scratch/nbp-v3-pump-threads/results/runs.csv`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+OVERDRIVE_METAL_RUN_ID=d3d650965eff0940b433e02e
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire exclusive physical-maintenance barrier (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_RUN_REGISTERED run_id=d3d650965eff0940b433e02e
+OVERDRIVE_METAL_LEASE_ACQUIRED token=d3d650965eff0940b433e02e pid=3378132
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/islamabad-v1 -> ubuntu@151.115.99.251:/home/ubuntu/overdrive-worktrees/d6e116fa0e342e06ad0b58474ab66e6f68a1cc611c87fc78ba4451a071a928c7
+
+sent 2,032,967 bytes  received 6,868 bytes  582,810.00 bytes/sec
+total size is 1,912,639,453  speedup is 937.64
+
+########## [bootstrap] materialising standalone .git (common dir 2.3G)
+
+sent 727,502 bytes  received 588,252 bytes  526,301.60 bytes/sec
+total size is 914,493,525  speedup is 695.03
+## marcus-sa/native-benchmark-program
+ M docs/feature/native-benchmark-program/feature-delta.md
+ M docs/product/architecture/brief.md
+ M docs/product/architecture/c4-diagrams.md
+?? docs/product/architecture/adr-0296-benchmarks-are-measured-by-a-dev-only-core-crate-with-families-in-a-separate-crate.md
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+OVERDRIVE_METAL_RUN_STARTED run_id=d3d650965eff0940b433e02e
+   Compiling proc-macro2 v1.0.107
+   Compiling quote v1.0.47
+   Compiling unicode-ident v1.0.27
+   Compiling cfg-if v1.0.5
+   Compiling libc v0.2.191
+   Compiling serde_core v1.0.229
+   Compiling memchr v2.8.3
+   Compiling autocfg v1.5.1
+   Compiling version_check v0.9.5
+   Compiling shlex v2.0.1
+   Compiling find-msvc-tools v0.1.15
+   Compiling serde v1.0.229
+   Compiling hashbrown v0.17.1
+   Compiling equivalent v1.0.3
+   Compiling pin-project-lite v0.2.17
+   Compiling once_cell v1.21.4
+   Compiling num-conv v0.2.2
+   Compiling time-core v0.1.9
+   Compiling zerocopy v0.8.63
+   Compiling cc v1.11.2
+   Compiling powerfmt v0.2.1
+   Compiling thiserror v2.0.21
+   Compiling tracing-core v0.1.36
+   Compiling typenum v1.20.1
+   Compiling time-macros v0.2.32
+   Compiling generic-array v0.14.7
+   Compiling futures-sink v0.3.34
+   Compiling futures-core v0.3.34
+   Compiling num-traits v0.2.19
+   Compiling parking_lot_core v0.9.12
+   Compiling bytes v1.12.1
+   Compiling scopeguard v1.2.0
+   Compiling futures-channel v0.3.34
+   Compiling slab v0.4.12
+   Compiling zeroize v1.9.1
+   Compiling futures-io v0.3.34
+   Compiling zmij v1.0.23
+   Compiling smallvec v1.16.5
+   Compiling lazy_static v1.5.1
+   Compiling regex-syntax v0.8.11
+   Compiling aho-corasick v1.1.5
+   Compiling itoa v1.0.19
+   Compiling syn v3.0.10
+   Compiling syn v2.0.119
+   Compiling minimal-lexical v0.2.1
+   Compiling futures-task v0.3.34
+   Compiling rustls-pki-types v1.16.0
+   Compiling lock_api v0.4.14
+   Compiling nom v7.1.3
+   Compiling getrandom v0.4.3
+   Compiling untrusted v0.9.0
+   Compiling serde_json v1.0.154
+   Compiling simdutf8 v0.1.5
+   Compiling bitflags v2.13.2
+   Compiling memoffset v0.9.1
+   Compiling cfg_aliases v0.2.2
+   Compiling toml_write v0.1.2
+   Compiling ryu v1.0.23
+   Compiling crypto-common v0.1.7
+   Compiling block-buffer v0.10.4
+   Compiling crc32fast v1.5.5
+   Compiling winnow v0.7.15
+   Compiling unsafe-libyaml-norway v0.2.15
+   Compiling ciborium-io v0.2.2
+   Compiling digest v0.10.7
+   Compiling nix v0.30.1
+   Compiling num-integer v0.1.47
+   Compiling sharded-slab v0.1.7
+   Compiling ring v0.17.14
+   Compiling blake3 v1.8.7
+   Compiling core-error v0.0.0
+   Compiling thread_local v1.1.10
+   Compiling getrandom v0.2.17
+   Compiling errno v0.3.15
+   Compiling socket2 v0.6.5
+   Compiling signal-hook-registry v1.4.8
+   Compiling mio v1.2.5
+   Compiling parking_lot v0.12.5
+   Compiling rand_core v0.6.4
+   Compiling regex-automata v0.4.18
+   Compiling foldhash v0.1.5
+   Compiling deranged v0.5.9
+   Compiling indexmap v2.14.2
+   Compiling constant_time_eq v0.4.2
+   Compiling utf8parse v0.2.2
+   Compiling allocator-api2 v0.2.21
+   Compiling arrayvec v0.7.8
+   Compiling cpufeatures v0.2.17
+   Compiling rusticata-macros v4.1.0
+   Compiling thiserror v1.0.69
+   Compiling rustix v1.1.6
+   Compiling cpufeatures v0.3.1
+   Compiling oid-registry v0.8.1
+   Compiling object v0.36.7
+   Compiling rustversion v1.0.23
+   Compiling base64 v0.23.1
+   Compiling hashbrown v0.15.5
+   Compiling sha2 v0.10.9
+   Compiling anstyle-parse v1.0.0
+   Compiling uuid v1.29.2
+   Compiling pem v4.0.0
+   Compiling tracing-subscriber v0.3.23
+   Compiling num-bigint v0.4.8
+   Compiling eyre v0.6.14
+   Compiling hex v0.4.3
+   Compiling time v0.3.55
+   Compiling anstyle-query v1.1.5
+   Compiling gimli v0.34.0
+   Compiling colorchoice v1.0.5
+   Compiling is_terminal_polyfill v1.70.2
+   Compiling synstructure v0.13.2
+   Compiling adler2 v2.0.1
+   Compiling rustls v0.23.46
+   Compiling color-spantrace v0.3.0
+   Compiling redb v2.6.4
+   Compiling anstyle v1.0.14
+   Compiling linux-raw-sys v0.12.1
+   Compiling httparse v1.10.1
+   Compiling anstream v1.0.0
+   Compiling miniz_oxide v0.9.1
+   Compiling regex v1.13.1
+   Compiling serde_derive v1.0.229
+   Compiling thiserror-impl v2.0.21
+   Compiling ptr_meta_derive v0.3.2
+   Compiling futures-macro v0.3.34
+   Compiling bytecheck_derive v0.8.3
+   Compiling ptr_meta v0.3.2
+   Compiling rancor v0.1.3
+   Compiling displaydoc v0.2.7
+   Compiling tokio-macros v2.7.2
+   Compiling bytecheck v0.8.3
+   Compiling rkyv_derive v0.8.18
+   Compiling async-trait v0.1.92
+   Compiling futures-util v0.3.34
+   Compiling zerocopy-derive v0.8.63
+   Compiling tracing-attributes v0.1.31
+   Compiling asn1-rs-impl v0.2.0
+   Compiling munge_macro v0.4.7
+   Compiling asn1-rs-derive v0.6.0
+   Compiling tokio v1.54.1
+   Compiling rend v0.5.4
+   Compiling munge v0.4.7
+   Compiling utoipa-gen v5.5.0
+   Compiling asn1-rs v0.7.2
+   Compiling tracing v0.1.44
+   Compiling yasna v0.6.0
+   Compiling thiserror-impl v1.0.69
+   Compiling tracing-error v0.2.1
+   Compiling addr2line v0.27.1
+   Compiling linux-keyutils v0.2.5
+   Compiling object v0.40.0
+   Compiling der-parser v10.0.0
+   Compiling toml_datetime v0.6.11
+   Compiling serde_spanned v0.6.9
+   Compiling futures-executor v0.3.34
+   Compiling toml_edit v0.22.27
+   Compiling serde_norway v0.9.42
+   Compiling futures v0.3.34
+   Compiling ipnet v2.12.2
+   Compiling heck v0.5.0
+   Compiling strsim v0.11.1
+   Compiling data-encoding v2.11.1
+   Compiling log v0.4.35
+   Compiling rustc-demangle v0.1.28
+   Compiling owo-colors v4.4.0
+   Compiling clap_lex v1.1.1
+   Compiling subtle v2.6.1
+   Compiling rkyv v0.8.18
+   Compiling indenter v0.3.4
+   Compiling clap_builder v4.6.7
+   Compiling x509-parser v0.18.1
+   Compiling aya-obj v0.2.1
+   Compiling toml v0.8.23
+   Compiling clap_derive v4.6.7
+   Compiling half v2.7.1
+   Compiling ciborium-ll v0.2.2
+   Compiling ppv-lite86 v0.2.21
+   Compiling ciborium v0.2.2
+   Compiling tokio-util v0.7.20
+   Compiling rand_chacha v0.3.1
+   Compiling utoipa v5.5.0
+   Compiling rand v0.8.8
+   Compiling rcgen v0.14.10
+   Compiling rustls-webpki v0.103.17
+   Compiling arc-swap v1.9.5
+   Compiling backtrace v0.3.77
+   Compiling http v1.5.0
+   Compiling assert_matches v1.5.0
+   Compiling overdrive-dataplane v0.0.0 (/home/ubuntu/overdrive-worktrees/d6e116fa0e342e06ad0b58474ab66e6f68a1cc611c87fc78ba4451a071a928c7/crates/overdrive-dataplane)
+   Compiling aya v0.13.1
+   Compiling color-eyre v0.6.5
+   Compiling clap v4.6.7
+   Compiling rustls-pemfile v2.2.0
+   Compiling overdrive-core v0.0.0 (/home/ubuntu/overdrive-worktrees/d6e116fa0e342e06ad0b58474ab66e6f68a1cc611c87fc78ba4451a071a928c7/crates/overdrive-core)
+   Compiling overdrive-host v0.0.0 (/home/ubuntu/overdrive-worktrees/d6e116fa0e342e06ad0b58474ab66e6f68a1cc611c87fc78ba4451a071a928c7/crates/overdrive-host)
+warning: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::new`: unsound due to lack of I/O safety; use `AsyncFd::register` instead (see https://github.com/tokio-rs/tokio/pull/8587)
+   --> /home/ubuntu/overdrive-worktrees/d6e116fa0e342e06ad0b58474ab66e6f68a1cc611c87fc78ba4451a071a928c7/crates/overdrive-host/src/beacon_io.rs:127:42
+    |
+127 |         let listener = Arc::new(AsyncFd::new(listener)?);
+    |                                          ^^^
+    |
+    = note: `#[warn(deprecated)]` on by default
+
+warning: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::new`: unsound due to lack of I/O safety; use `AsyncFd::register` instead (see https://github.com/tokio-rs/tokio/pull/8587)
+   --> /home/ubuntu/overdrive-worktrees/d6e116fa0e342e06ad0b58474ab66e6f68a1cc611c87fc78ba4451a071a928c7/crates/overdrive-host/src/beacon_io.rs:158:46
+    |
+158 | ...                   socket: AsyncFd::new(socket)?,
+    |                                        ^^^
+
+   Compiling overdrive-gateway v0.0.0 (/home/ubuntu/overdrive-worktrees/d6e116fa0e342e06ad0b58474ab66e6f68a1cc611c87fc78ba4451a071a928c7/crates/overdrive-gateway)
+warning: `overdrive-host` (lib) generated 2 warnings
+warning: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::new`: unsound due to lack of I/O safety; use `AsyncFd::register` instead (see https://github.com/tokio-rs/tokio/pull/8587)
+    --> /home/ubuntu/overdrive-worktrees/d6e116fa0e342e06ad0b58474ab66e6f68a1cc611c87fc78ba4451a071a928c7/crates/overdrive-dataplane/src/gateway_relay/mod.rs:1238:27
+     |
+1238 |         let fd = AsyncFd::new(connected).map_err(|_| GatewayClientMtlsError::Handshake)?;
+     |                           ^^^
+     |
+     = note: `#[warn(deprecated)]` on by default
+
+warning: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::new`: unsound due to lack of I/O safety; use `AsyncFd::register` instead (see https://github.com/tokio-rs/tokio/pull/8587)
+    --> /home/ubuntu/overdrive-worktrees/d6e116fa0e342e06ad0b58474ab66e6f68a1cc611c87fc78ba4451a071a928c7/crates/overdrive-dataplane/src/gateway_relay/mod.rs:1262:27
+     |
+1262 |         let fd = AsyncFd::new(accepted).map_err(|err| handshake_io(&err))?;
+     |                           ^^^
+
+warning: `overdrive-dataplane` (lib) generated 2 warnings
+   Compiling nbp-v3-pump-threads v0.0.0 (/home/ubuntu/overdrive-worktrees/d6e116fa0e342e06ad0b58474ab66e6f68a1cc611c87fc78ba4451a071a928c7/spike-scratch/nbp-v3-pump-threads)
+warning: field `utime` is never read
+   --> src/main.rs:102:5
+    |
+ 98 | struct TaskStat {
+    |        -------- field in this struct
+...
+102 |     utime: u64,
+    |     ^^^^^
+    |
+    = note: `TaskStat` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `nbp-v3-pump-threads` (bin "nbp-v3-pump-threads") generated 1 warning
+    Finished `release` profile [optimized] target(s) in 33.32s
+     Running `spike-scratch/nbp-v3-pump-threads/target/release/nbp-v3-pump-threads run 10 3 spike-scratch/nbp-v3-pump-threads/results/runs.csv`
+# uname -r: 7.0.0-38-generic
+--- forward: per-thread CPU over a 10.00s window (ms; thread_stat granularity 10 ms); 'new' = created by enforce ---
+new_tids_created_by_enforce=[3397909, 3397915] (comm: [(3397909, "tokio-rt-worker"), (3397915, "tokio-rt-worker")])
+  tid=3392018 comm=nbp-v3-pump-thr    cpu=       0 ms sys=       0 ms new=false fixture=false
+  tid=3397898 comm=tokio-rt-worker    cpu=       0 ms sys=       0 ms new=false fixture=false
+  tid=3397899 comm=tokio-rt-worker    cpu=       0 ms sys=       0 ms new=false fixture=false
+  tid=3397900 comm=tokio-rt-worker    cpu=       0 ms sys=       0 ms new=false fixture=false
+  tid=3397901 comm=tokio-rt-worker    cpu=       0 ms sys=       0 ms new=false fixture=false
+  throughput=0 MB/s process_cpu=0 ms pump0=0 pump1=0 (sys share 0.00/0.00) fixture_threads=-0 other_agent=0 peer_child=0 host_softirq=0 host_busy=550
+  RESULT forward: pumps/process_delta=NaN  pumps/(process_delta - fixture threads)=NaN  heavy:light=inf
+  pump threads in creation order (tid, cpu ms): []
+--- return: per-thread CPU over a 10.00s window (ms; thread_stat granularity 10 ms); 'new' = created by enforce ---
+new_tids_created_by_enforce=[3398164] (comm: [(3398164, "tokio-rt-worker")])
+  tid=3392018 comm=nbp-v3-pump-thr    cpu=       0 ms sys=       0 ms new=false fixture=false
+  tid=3397898 comm=tokio-rt-worker    cpu=       0 ms sys=       0 ms new=false fixture=false
+  tid=3397899 comm=tokio-rt-worker    cpu=       0 ms sys=       0 ms new=false fixture=false
+  tid=3397900 comm=tokio-rt-worker    cpu=       0 ms sys=       0 ms new=false fixture=false
+  tid=3397901 comm=tokio-rt-worker    cpu=       0 ms sys=       0 ms new=false fixture=false
+  throughput=0 MB/s process_cpu=0 ms pump0=0 pump1=0 (sys share 0.00/0.00) fixture_threads=-0 other_agent=0 peer_child=0 host_softirq=0 host_busy=420
+  RESULT return: pumps/process_delta=NaN  pumps/(process_delta - fixture threads)=NaN  heavy:light=inf
+  pump threads in creation order (tid, cpu ms): []
+--- forward: per-thread CPU over a 10.01s window (ms; thread_stat granularity 10 ms); 'new' = created by enforce ---
+new_tids_created_by_enforce=[3398410] (comm: [(3398410, "tokio-rt-worker")])
+  tid=3392018 comm=nbp-v3-pump-thr    cpu=       0 ms sys=       0 ms new=false fixture=false
+  tid=3397898 comm=tokio-rt-worker    cpu=       0 ms sys=       0 ms new=false fixture=false
+  tid=3397899 comm=tokio-rt-worker    cpu=       0 ms sys=       0 ms new=false fixture=false
+  tid=3397900 comm=tokio-rt-worker    cpu=       0 ms sys=       0 ms new=false fixture=false
+  tid=3397901 comm=tokio-rt-worker    cpu=       0 ms sys=       0 ms new=false fixture=false
+  throughput=0 MB/s process_cpu=0 ms pump0=0 pump1=0 (sys share 0.00/0.00) fixture_threads=-0 other_agent=0 peer_child=0 host_softirq=0 host_busy=380
+  RESULT forward: pumps/process_delta=NaN  pumps/(process_delta - fixture threads)=NaN  heavy:light=inf
+  pump threads in creation order (tid, cpu ms): []
+--- return: per-thread CPU over a 10.00s window (ms; thread_stat granularity 10 ms); 'new' = created by enforce ---
+new_tids_created_by_enforce=[3398660] (comm: [(3398660, "tokio-rt-worker")])
+  tid=3392018 comm=nbp-v3-pump-thr    cpu=      10 ms sys=      10 ms new=false fixture=false
+  tid=3397898 comm=tokio-rt-worker    cpu=       0 ms sys=       0 ms new=false fixture=false
+  tid=3397899 comm=tokio-rt-worker    cpu=       0 ms sys=       0 ms new=false fixture=false
+  tid=3397900 comm=tokio-rt-worker    cpu=       0 ms sys=       0 ms new=false fixture=false
+  tid=3397901 comm=tokio-rt-worker    cpu=       0 ms sys=       0 ms new=false fixture=false
+  throughput=0 MB/s process_cpu=0 ms pump0=0 pump1=0 (sys share 0.00/0.00) fixture_threads=-0 other_agent=0 peer_child=0 host_softirq=0 host_busy=420
+  RESULT return: pumps/process_delta=NaN  pumps/(process_delta - fixture threads)=NaN  heavy:light=inf
+  pump threads in creation order (tid, cpu ms): []
+--- forward: per-thread CPU over a 10.00s window (ms; thread_stat granularity 10 ms); 'new' = created by enforce ---
+new_tids_created_by_enforce=[3398908] (comm: [(3398908, "tokio-rt-worker")])
+  tid=3392018 comm=nbp-v3-pump-thr    cpu=       0 ms sys=       0 ms new=false fixture=false
+  tid=3397898 comm=tokio-rt-worker    cpu=       0 ms sys=       0 ms new=false fixture=false
+  tid=3397899 comm=tokio-rt-worker    cpu=       0 ms sys=       0 ms new=false fixture=false
+  tid=3397900 comm=tokio-rt-worker    cpu=       0 ms sys=       0 ms new=false fixture=false
+  tid=3397901 comm=tokio-rt-worker    cpu=       0 ms sys=       0 ms new=false fixture=false
+  throughput=0 MB/s process_cpu=0 ms pump0=0 pump1=0 (sys share 0.00/0.00) fixture_threads=-0 other_agent=0 peer_child=0 host_softirq=0 host_busy=380
+  RESULT forward: pumps/process_delta=NaN  pumps/(process_delta - fixture threads)=NaN  heavy:light=inf
+  pump threads in creation order (tid, cpu ms): []
+--- return: per-thread CPU over a 10.00s window (ms; thread_stat granularity 10 ms); 'new' = created by enforce ---
+new_tids_created_by_enforce=[3399154] (comm: [(3399154, "tokio-rt-worker")])
+  tid=3392018 comm=nbp-v3-pump-thr    cpu=       0 ms sys=       0 ms new=false fixture=false
+  tid=3397898 comm=tokio-rt-worker    cpu=       0 ms sys=       0 ms new=false fixture=false
+  tid=3397899 comm=tokio-rt-worker    cpu=       0 ms sys=       0 ms new=false fixture=false
+  tid=3397900 comm=tokio-rt-worker    cpu=       0 ms sys=       0 ms new=false fixture=false
+  tid=3397901 comm=tokio-rt-worker    cpu=       0 ms sys=       0 ms new=false fixture=false
+  throughput=0 MB/s process_cpu=0 ms pump0=0 pump1=0 (sys share 0.00/0.00) fixture_threads=-0 other_agent=0 peer_child=0 host_softirq=0 host_busy=430
+  RESULT return: pumps/process_delta=NaN  pumps/(process_delta - fixture threads)=NaN  heavy:light=inf
+  pump threads in creation order (tid, cpu ms): []
+rep,direction,mbps,process_ms,pump0_ms,pump1_ms,fixture_ms,peer_ms,ratio,raw_share,agent_share
+0,forward,0,0,0,0,-0,0,inf,NaN,NaN
+0,return,0,0,0,0,-0,0,inf,NaN,NaN
+1,forward,0,0,0,0,-0,0,inf,NaN,NaN
+1,return,0,0,0,0,-0,0,inf,NaN,NaN
+2,forward,0,0,0,0,-0,0,inf,NaN,NaN
+2,return,0,0,0,0,-0,0,inf,NaN,NaN
+
+OVERDRIVE_METAL_RUN_COMPLETE run_id=d3d650965eff0940b433e02e exit_code=0 cause=command_returned

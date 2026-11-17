@@ -1,0 +1,144 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.16s
+     Running `target/debug/xtask metal run --exclusive -- bash spike-scratch/nbp-v5-linkme/run.sh`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+OVERDRIVE_METAL_RUN_ID=e52963a1d6c887c99dd010f0
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire exclusive physical-maintenance barrier (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_RUN_REGISTERED run_id=e52963a1d6c887c99dd010f0
+OVERDRIVE_METAL_LEASE_ACQUIRED token=e52963a1d6c887c99dd010f0 pid=3217382
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/islamabad-v1 -> ubuntu@151.115.99.251:/home/ubuntu/overdrive-worktrees/d6e116fa0e342e06ad0b58474ab66e6f68a1cc611c87fc78ba4451a071a928c7
+
+sent 2,107,155 bytes  received 13,850 bytes  848,402.00 bytes/sec
+total size is 1,912,281,767  speedup is 901.59
+
+########## [bootstrap] materialising standalone .git (common dir 2.3G)
+
+sent 861,002 bytes  received 590,991 bytes  580,797.20 bytes/sec
+total size is 914,531,482  speedup is 629.85
+## marcus-sa/native-benchmark-program
+ M docs/feature/native-benchmark-program/feature-delta.md
+ M docs/product/architecture/brief.md
+ M docs/product/architecture/c4-diagrams.md
+?? docs/product/architecture/adr-0296-benchmarks-are-measured-by-a-dev-only-core-crate-with-families-in-a-separate-crate.md
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+OVERDRIVE_METAL_RUN_STARTED run_id=e52963a1d6c887c99dd010f0
+uname -r: 7.0.0-38-generic
+cpu: model name	: AMD EPYC 8024P 8-Core Processor
+commit: e3b42c92e
+rustc 1.95.0 (59807616e 2026-04-14)
+== unit-test binary of lib (profile.test) ==
+    Updating crates.io index
+     Locking 6 packages to latest compatible versions
+ Downloading crates ...
+  Downloaded linkme v0.3.38
+  Downloaded linkme-impl v0.3.38
+   Compiling proc-macro2 v1.0.107
+   Compiling quote v1.0.47
+   Compiling unicode-ident v1.0.27
+   Compiling linkme-impl v0.3.38
+   Compiling linkme v0.3.38
+   Compiling syn v3.0.10
+   Compiling nbp-lib v0.0.0 (/home/ubuntu/overdrive-worktrees/d6e116fa0e342e06ad0b58474ab66e6f68a1cc611c87fc78ba4451a071a928c7/spike-scratch/nbp-v5-linkme/lib)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.18s
+────────────
+ Nextest run ID e5c248dd-1d6c-4ddf-8fe9-e9d4941c67dd with nextest profile: default
+    Starting 1 test across 1 binary
+       START [         ] (1/1) nbp-lib tests::registry_collects_three
+
+running 1 test
+unit-test binary sees 3 entries: ["lib_a", "lib_b", "lib_c"]
+test tests::registry_collects_three ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+        PASS [   0.004s] (1/1) nbp-lib tests::registry_collects_three
+────────────
+     Summary [   0.005s] 1 test run: 1 passed, 0 skipped
+== unit-test binary of decls ==
+   Compiling nbp-decls v0.0.0 (/home/ubuntu/overdrive-worktrees/d6e116fa0e342e06ad0b58474ab66e6f68a1cc611c87fc78ba4451a071a928c7/spike-scratch/nbp-v5-linkme/decls)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.12s
+────────────
+ Nextest run ID d2394862-f2f4-49c5-83a1-cc4b587b1a55 with nextest profile: default
+    Starting 1 test across 1 binary
+       START [         ] (1/1) nbp-decls tests::registry_in_decls_unit_test_binary
+
+running 1 test
+decls unit-test binary sees 6 entries: ["decl_a", "decl_b", "decl_c", "lib_a", "lib_b", "lib_c"]
+test tests::registry_in_decls_unit_test_binary ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+        PASS [   0.004s] (1/1) nbp-decls tests::registry_in_decls_unit_test_binary
+────────────
+     Summary [   0.005s] 1 test run: 1 passed, 0 skipped
+== bench binary, lto=thin cgu=1, decls referenced via extern crate ==
+   Compiling proc-macro2 v1.0.107
+   Compiling unicode-ident v1.0.27
+   Compiling quote v1.0.47
+   Compiling linkme-impl v0.3.38
+   Compiling linkme v0.3.38
+   Compiling syn v3.0.10
+   Compiling nbp-lib v0.0.0 (/home/ubuntu/overdrive-worktrees/d6e116fa0e342e06ad0b58474ab66e6f68a1cc611c87fc78ba4451a071a928c7/spike-scratch/nbp-v5-linkme/lib)
+   Compiling nbp-decls v0.0.0 (/home/ubuntu/overdrive-worktrees/d6e116fa0e342e06ad0b58474ab66e6f68a1cc611c87fc78ba4451a071a928c7/spike-scratch/nbp-v5-linkme/decls)
+   Compiling nbp-bench v0.0.0 (/home/ubuntu/overdrive-worktrees/d6e116fa0e342e06ad0b58474ab66e6f68a1cc611c87fc78ba4451a071a928c7/spike-scratch/nbp-v5-linkme/bench)
+warning: unexpected `cfg` condition name: `nbp_unreferenced`
+ --> bench/benches/benchmarks.rs:4:11
+  |
+4 | #[cfg(not(nbp_unreferenced))]
+  |           ^^^^^^^^^^^^^^^^
+  |
+  = help: expected names are: `docsrs`, `feature`, and `test` and 31 more
+  = help: consider using a Cargo feature instead
+  = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+           [lints.rust]
+           unexpected_cfgs = { level = "warn", check-cfg = ['cfg(nbp_unreferenced)'] }
+  = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(nbp_unreferenced)");` to the top of the `build.rs`
+  = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+  = note: `#[warn(unexpected_cfgs)]` on by default
+
+warning: `nbp-bench` (bench "benchmarks") generated 1 warning
+    Finished `bench` profile [optimized] target(s) in 4.45s
+     Running benches/benchmarks.rs (target/release/deps/benchmarks-067a3ba279cc8f71)
+bench binary sees 6 entries: ["decl_a", "decl_b", "decl_c", "lib_a", "lib_b", "lib_c"]
+== bench binary, decls NOT referenced (cfg nbp_unreferenced) ==
+   Compiling proc-macro2 v1.0.107
+   Compiling quote v1.0.47
+   Compiling unicode-ident v1.0.27
+   Compiling linkme-impl v0.3.38
+   Compiling linkme v0.3.38
+   Compiling syn v3.0.10
+   Compiling nbp-lib v0.0.0 (/home/ubuntu/overdrive-worktrees/d6e116fa0e342e06ad0b58474ab66e6f68a1cc611c87fc78ba4451a071a928c7/spike-scratch/nbp-v5-linkme/lib)
+   Compiling nbp-decls v0.0.0 (/home/ubuntu/overdrive-worktrees/d6e116fa0e342e06ad0b58474ab66e6f68a1cc611c87fc78ba4451a071a928c7/spike-scratch/nbp-v5-linkme/decls)
+   Compiling nbp-bench v0.0.0 (/home/ubuntu/overdrive-worktrees/d6e116fa0e342e06ad0b58474ab66e6f68a1cc611c87fc78ba4451a071a928c7/spike-scratch/nbp-v5-linkme/bench)
+warning: unexpected `cfg` condition name: `nbp_unreferenced`
+ --> bench/benches/benchmarks.rs:4:11
+  |
+4 | #[cfg(not(nbp_unreferenced))]
+  |           ^^^^^^^^^^^^^^^^
+  |
+  = help: expected names are: `docsrs`, `feature`, and `test` and 31 more
+  = help: consider using a Cargo feature instead
+  = help: or consider adding in `Cargo.toml` the `check-cfg` lint config for the lint:
+           [lints.rust]
+           unexpected_cfgs = { level = "warn", check-cfg = ['cfg(nbp_unreferenced)'] }
+  = help: or consider adding `println!("cargo::rustc-check-cfg=cfg(nbp_unreferenced)");` to the top of the `build.rs`
+  = note: see <https://doc.rust-lang.org/nightly/rustc/check-cfg/cargo-specifics.html> for more information about checking conditional configuration
+  = note: `#[warn(unexpected_cfgs)]` on by default
+
+warning: `nbp-bench` (bench "benchmarks") generated 1 warning
+    Finished `bench` profile [optimized] target(s) in 4.46s
+     Running benches/benchmarks.rs (target/unref/release/deps/benchmarks-1d8e8cc0f6202a20)
+bench binary sees 3 entries: ["lib_a", "lib_b", "lib_c"]
+== effective profile ==
+[profile.bench]
+lto = "thin"
+codegen-units = 1
+[profile.release]
+OVERDRIVE_METAL_RUN_COMPLETE run_id=e52963a1d6c887c99dd010f0 exit_code=0 cause=command_returned

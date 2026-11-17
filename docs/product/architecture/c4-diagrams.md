@@ -87,6 +87,83 @@ C4Component
     Rel(shim, dp, "Programs service backends in")
 ```
 
+## Native benchmark program (GH #287)
+
+**PROPOSED — not approved by the user.** Decisions DDD-1..DDD-14 of feature
+`native-benchmark-program` ([feature delta](../../feature/native-benchmark-program/feature-delta.md#wave-design--ref-decisions-table)).
+Developer tooling; no new production runtime component.
+
+### C4 Level 1 — System Context
+
+```mermaid
+C4Context
+    title Native benchmark program — system context
+    Person(engineer, "Verification engineer or coding agent", "Chooses between mechanisms or checks what a primitive costs")
+    System(bench, "Native benchmark program", "Declares a boundary and its arms once, measures it under one fixed method, retains raw samples and a report")
+    System_Ext(metal, "Metal box", "Native x86_64 KVM host, taken exclusively for a benchmark run")
+    System_Ext(overdrive, "Overdrive production composition", "Control plane, VM driver, dataplane, DNS responder and mTLS agent, driven in process")
+    Rel(engineer, bench, "Declares and runs benchmarks with")
+    Rel(bench, metal, "Runs exclusively on")
+    Rel(bench, overdrive, "Drives and observes in process")
+    Rel(engineer, metal, "Retrieves retained results from")
+```
+
+### C4 Level 2 — Container
+
+```mermaid
+C4Container
+    title Native benchmark program — containers
+    Person(engineer, "Verification engineer or coding agent")
+    Container_Boundary(repo, "Overdrive repository tooling") {
+        Container(macros, "overdrive-testing-macros", "Rust proc-macro", "Expands overdrive_bench: registers the benchmark and emits its smoke test")
+        Container(core, "overdrive-bench", "Rust library and tool binary", "Schedule, statistics, record, report, host eligibility, host clock, BPF statistics hold, runner entry, bench-report")
+        Container(families, "overdrive-bench-families", "Rust library and bench target", "Connect-hook, VM-lifecycle, DNS and mTLS families")
+        Container(spike, "Spike crate", "Rust, spike-scratch", "A throwaway probe using the same attribute and record schema")
+        Container(xtask, "xtask metal run --benchmark", "Rust xtask and bootstrap.sh", "Closed exclusive form that runs the bench target on the Metal host")
+        Container(results, "benchmarks/", "Markdown and JSON Lines", "Catalogue, methodology, retained results")
+        Container(testing, "overdrive-testing", "Rust library", "Placement registry, netns, veth, VM image fixtures")
+    }
+    System_Ext(prod, "Production crates", "control-plane, worker, dataplane, cli library")
+    System_Ext(metal, "Metal box")
+    Rel(engineer, macros, "Declares benchmarks with")
+    Rel(macros, core, "Registers declarations in")
+    Rel(families, core, "Runs under the protocol of")
+    Rel(spike, core, "Runs under the protocol of")
+    Rel(families, testing, "Builds fixtures with")
+    Rel(families, prod, "Drives in process")
+    Rel(xtask, families, "Runs the bench target of")
+    Rel(xtask, spike, "Runs the bench target of")
+    Rel(xtask, metal, "Holds exclusively")
+    Rel(core, results, "Appends the record and writes the report to")
+    Rel(engineer, results, "Pulls and reads")
+```
+
+### C4 Level 3 — Measurement core
+
+```mermaid
+C4Component
+    title overdrive-bench — components
+    Container_Boundary(core, "overdrive-bench") {
+        Component(registry, "Registry", "linkme slice and substrate registry", "Holds declarations; validates the substrate")
+        Component(schedule, "Schedule", "pure", "plan(decl, profile, seed): seeded blocks with an A/A control")
+        Component(runner, "Runner", "sequential", "Probe, eligibility, statistics, canary, replicates, canary, finish")
+        Component(eligibility, "Host eligibility", "HostProbe port", "Compares the host with the pinned list and refuses on a difference")
+        Component(stats, "BPF statistics hold", "StatsEnabler port", "Descriptor-scoped enable; reads run count and time")
+        Component(clock, "Host clock", "CLOCK_MONOTONIC_RAW", "Stamps every cross-boundary instant")
+        Component(analysis, "Analysis", "pure", "Medians, R-7 percentiles, bootstrap interval, Mann-Whitney U, verdict")
+        Component(record, "Record", "RecordSink port", "Append-only JSON Lines, typed reader and validator")
+        Component(report, "Report", "pure", "Renders the report from a validated record")
+    }
+    Rel(runner, registry, "Selects the family from")
+    Rel(runner, schedule, "Asks for the run order from")
+    Rel(runner, eligibility, "Refuses a drifted host through")
+    Rel(runner, stats, "Enables statistics through")
+    Rel(runner, clock, "Stamps with")
+    Rel(runner, record, "Appends lines to")
+    Rel(report, analysis, "Computes intervals with")
+    Rel(report, record, "Reads a validated record from")
+```
+
 ## VM lifecycle responsiveness (#283/#260)
 
 **APPROVED, 2026-09-10; independent DESIGN review APPROVED; user ratification APPROVED.**

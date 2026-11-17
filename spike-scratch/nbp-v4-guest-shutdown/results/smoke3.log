@@ -1,0 +1,162 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.07s
+     Running `target/debug/xtask metal run --exclusive -- cargo run --release --manifest-path spike-scratch/nbp-v4-guest-shutdown/Cargo.toml -- 1`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+OVERDRIVE_METAL_RUN_ID=434f9017b7f79de8941abea1
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire exclusive physical-maintenance barrier (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_RUN_REGISTERED run_id=434f9017b7f79de8941abea1
+OVERDRIVE_METAL_LEASE_ACQUIRED token=434f9017b7f79de8941abea1 pid=3274381
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/islamabad-v1 -> ubuntu@151.115.99.251:/home/ubuntu/overdrive-worktrees/d6e116fa0e342e06ad0b58474ab66e6f68a1cc611c87fc78ba4451a071a928c7
+
+sent 2,033,054 bytes  received 6,934 bytes  815,995.20 bytes/sec
+total size is 1,912,527,818  speedup is 937.52
+
+########## [bootstrap] materialising standalone .git (common dir 2.3G)
+
+sent 643,194 bytes  received 19,363 bytes  441,704.67 bytes/sec
+total size is 914,531,482  speedup is 1,380.31
+## marcus-sa/native-benchmark-program
+ M docs/feature/native-benchmark-program/feature-delta.md
+ M docs/product/architecture/brief.md
+ M docs/product/architecture/c4-diagrams.md
+?? docs/product/architecture/adr-0296-benchmarks-are-measured-by-a-dev-only-core-crate-with-families-in-a-separate-crate.md
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+OVERDRIVE_METAL_RUN_STARTED run_id=434f9017b7f79de8941abea1
+warning: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::new`: unsound due to lack of I/O safety; use `AsyncFd::register` instead (see https://github.com/tokio-rs/tokio/pull/8587)
+   --> /home/ubuntu/overdrive-worktrees/d6e116fa0e342e06ad0b58474ab66e6f68a1cc611c87fc78ba4451a071a928c7/crates/overdrive-host/src/beacon_io.rs:127:42
+    |
+127 |         let listener = Arc::new(AsyncFd::new(listener)?);
+    |                                          ^^^
+    |
+    = note: `#[warn(deprecated)]` on by default
+
+warning: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::new`: unsound due to lack of I/O safety; use `AsyncFd::register` instead (see https://github.com/tokio-rs/tokio/pull/8587)
+   --> /home/ubuntu/overdrive-worktrees/d6e116fa0e342e06ad0b58474ab66e6f68a1cc611c87fc78ba4451a071a928c7/crates/overdrive-host/src/beacon_io.rs:158:46
+    |
+158 | ...                   socket: AsyncFd::new(socket)?,
+    |                                        ^^^
+
+warning: `overdrive-host` (lib) generated 2 warnings
+warning: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::new`: unsound due to lack of I/O safety; use `AsyncFd::register` instead (see https://github.com/tokio-rs/tokio/pull/8587)
+    --> /home/ubuntu/overdrive-worktrees/d6e116fa0e342e06ad0b58474ab66e6f68a1cc611c87fc78ba4451a071a928c7/crates/overdrive-dataplane/src/gateway_relay/mod.rs:1238:27
+     |
+1238 |         let fd = AsyncFd::new(connected).map_err(|_| GatewayClientMtlsError::Handshake)?;
+     |                           ^^^
+     |
+     = note: `#[warn(deprecated)]` on by default
+
+warning: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::new`: unsound due to lack of I/O safety; use `AsyncFd::register` instead (see https://github.com/tokio-rs/tokio/pull/8587)
+    --> /home/ubuntu/overdrive-worktrees/d6e116fa0e342e06ad0b58474ab66e6f68a1cc611c87fc78ba4451a071a928c7/crates/overdrive-dataplane/src/gateway_relay/mod.rs:1262:27
+     |
+1262 |         let fd = AsyncFd::new(accepted).map_err(|err| handshake_io(&err))?;
+     |                           ^^^
+
+warning: `overdrive-dataplane` (lib) generated 2 warnings
+warning: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::new`: unsound due to lack of I/O safety; use `AsyncFd::register` instead (see https://github.com/tokio-rs/tokio/pull/8587)
+   --> /home/ubuntu/overdrive-worktrees/d6e116fa0e342e06ad0b58474ab66e6f68a1cc611c87fc78ba4451a071a928c7/crates/overdrive-control-plane/src/guest_network/flow_io/host.rs:209:14
+    |
+209 |     AsyncFd::new(socket).map(Arc::new)
+    |              ^^^
+    |
+    = note: `#[warn(deprecated)]` on by default
+
+warning: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::new`: unsound due to lack of I/O safety; use `AsyncFd::register` instead (see https://github.com/tokio-rs/tokio/pull/8587)
+   --> /home/ubuntu/overdrive-worktrees/d6e116fa0e342e06ad0b58474ab66e6f68a1cc611c87fc78ba4451a071a928c7/crates/overdrive-control-plane/src/guest_network/flow_io/host.rs:367:34
+    |
+367 |         let readiness = AsyncFd::new(ForwarderReadiness(Arc::clone(&context)))
+    |                                  ^^^
+
+warning: `overdrive-control-plane` (lib) generated 2 warnings
+   Compiling nbp-v4-guest-shutdown v0.0.0 (/home/ubuntu/overdrive-worktrees/d6e116fa0e342e06ad0b58474ab66e6f68a1cc611c87fc78ba4451a071a928c7/spike-scratch/nbp-v4-guest-shutdown)
+    Finished `release` profile [optimized] target(s) in 10.64s
+     Running `spike-scratch/nbp-v4-guest-shutdown/target/release/nbp-v4-guest-shutdown 1`
+# uname -r: 7.0.0-38-generic
+# model name	: AMD EPYC 8024P 8-Core Processor
+# VMM_CONSOLE_TAIL_MAX_BYTES=8192 STDERR_TAIL_LINES=5
+# cloud-hypervisor: cloud-hypervisor v53.0.0
+Migration Protocol Versions: 0
+CYCLE nbp-spin-000: never Running (last Some(Failed))
+DEBUG namei ["-ln", "/srv/vm/metal/434f9017b7f79de8941abea1/vm-serve-g25Sv0/data/vm/clone-staging"]:
+f: /srv/vm/metal/434f9017b7f79de8941abea1/vm-serve-g25Sv0/data/vm/clone-staging
+drwxr-xr-x root   root /
+drwxr-xr-x root   root srv
+drwxr-xr-x ubuntu root vm
+drwx--x--- root   4200 metal
+drwx--x--- root   4200 434f9017b7f79de8941abea1
+drwxr-xr-x root   root vm-serve-g25Sv0
+drwxr-x--- root   root data
+drwx--x--- root   4200 vm
+drwx--x--- root   4200 clone-staging
+
+DEBUG ls ["-lan", "/srv/vm/metal/434f9017b7f79de8941abea1/vm-serve-g25Sv0/data/vm/clone-staging"]:
+total 0
+drwx--x--- 2 0 4200  6 Nov 16 21:55 .
+drwx--x--- 4 0 4200 46 Nov 16 21:55 ..
+
+DEBUG cat ["/sys/kernel/security/lsm"]:
+lockdown,capability,landlock,yama,apparmor,ima,evm
+CYCLE nbp-spin-000: terminal=Some(Failed) file[sr=None gc=None dur=None] tail_at_exit[len=274 sr=None gc=None dur=None] tail_later[len=274 sr=None gc=None] console_file_len=0
+----- RAW console file (nbp-spin-000) -----
+
+----- RAW tail_at_exit (nbp-spin-000) -----
+  1: The VM could not boot
+  2: Error from device manager
+  3: Cannot open disk path
+  4: I/O error (path=/srv/vm/metal/434f9017b7f79de8941abea1/vm-serve-g25Sv0/data/vm/clone-staging/.overdrive-vm-rootfs-alloc-nbp-spin-000-0.img op=open)
+  5: Permission denied (os error 13)
+----- RAW tail_later (nbp-spin-000) -----
+  1: The VM could not boot
+  2: Error from device manager
+  3: Cannot open disk path
+  4: I/O error (path=/srv/vm/metal/434f9017b7f79de8941abea1/vm-serve-g25Sv0/data/vm/clone-staging/.overdrive-vm-rootfs-alloc-nbp-spin-000-0.img op=open)
+  5: Permission denied (os error 13)
+-----
+CYCLE nbp-slow-000: never Running (last Some(Failed))
+DEBUG namei ["-ln", "/srv/vm/metal/434f9017b7f79de8941abea1/vm-serve-g25Sv0/data/vm/clone-staging"]:
+f: /srv/vm/metal/434f9017b7f79de8941abea1/vm-serve-g25Sv0/data/vm/clone-staging
+drwxr-xr-x root   root /
+drwxr-xr-x root   root srv
+drwxr-xr-x ubuntu root vm
+drwx--x--- root   4200 metal
+drwx--x--- root   4200 434f9017b7f79de8941abea1
+drwxr-xr-x root   root vm-serve-g25Sv0
+drwxr-x--- root   root data
+drwx--x--- root   4200 vm
+drwx--x--- root   4200 clone-staging
+
+DEBUG ls ["-lan", "/srv/vm/metal/434f9017b7f79de8941abea1/vm-serve-g25Sv0/data/vm/clone-staging"]:
+total 0
+drwx--x--- 2 0 4200  6 Nov 16 21:55 .
+drwx--x--- 4 0 4200 46 Nov 16 21:55 ..
+
+DEBUG cat ["/sys/kernel/security/lsm"]:
+lockdown,capability,landlock,yama,apparmor,ima,evm
+CYCLE nbp-slow-000: terminal=Some(Failed) file[sr=None gc=None dur=None] tail_at_exit[len=274 sr=None gc=None dur=None] tail_later[len=274 sr=None gc=None] console_file_len=0
+----- RAW console file (nbp-slow-000) -----
+
+----- RAW tail_at_exit (nbp-slow-000) -----
+  1: The VM could not boot
+  2: Error from device manager
+  3: Cannot open disk path
+  4: I/O error (path=/srv/vm/metal/434f9017b7f79de8941abea1/vm-serve-g25Sv0/data/vm/clone-staging/.overdrive-vm-rootfs-alloc-nbp-slow-000-0.img op=open)
+  5: Permission denied (os error 13)
+----- RAW tail_later (nbp-slow-000) -----
+  1: The VM could not boot
+  2: Error from device manager
+  3: Cannot open disk path
+  4: I/O error (path=/srv/vm/metal/434f9017b7f79de8941abea1/vm-serve-g25Sv0/data/vm/clone-staging/.overdrive-vm-rootfs-alloc-nbp-slow-000-0.img op=open)
+  5: Permission denied (os error 13)
+-----
+--- SUMMARY ---
+spin: cycles=1 console_file_has_both=0 diagnostics_tail_has_both=0 distinct_file_durations=[] durations<=1ms=0/0
+spin: file durations=[]
+slow: cycles=1 console_file_has_both=0 diagnostics_tail_has_both=0 distinct_file_durations=[] durations<=1ms=0/0
+slow: file durations=[]
+OVERDRIVE_METAL_RUN_COMPLETE run_id=434f9017b7f79de8941abea1 exit_code=0 cause=command_returned

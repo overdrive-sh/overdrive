@@ -1,0 +1,16 @@
+# Throwaway V-5 probe (native-benchmark-program): does linkme collect macro-emitted
+# registrations from a dependency library into a harness=false bench binary and
+# the library's unit-test binary under lto=thin, codegen-units=1?
+[workspace]
+members = ["lib", "decls", "bench"]
+resolver = "2"
+
+[profile.bench]
+lto = "thin"
+codegen-units = 1
+[profile.release]
+lto = "thin"
+codegen-units = 1
+[profile.test]
+lto = "off"
+codegen-units = 1
