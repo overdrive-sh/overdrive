@@ -7,9 +7,12 @@
 
 use std::collections::BTreeMap;
 use std::process::Command;
+use std::sync::Arc;
 use std::time::Duration;
 
 use crate::registry::BenchmarkDecl;
+use crate::histogram::{NotStorable, storable};
+use crate::record::{Command as LoggedCommand, MetricEntry};
 use crate::{BpfStatsHold, Result};
 
 /// The profile name of a benchmark that declares none.
@@ -27,6 +30,7 @@ enum Kind {
     Fixture(String),
     Measurement(String),
     UndeclaredMetric(String),
+    StatsNotEffective(u32),
 }
 
 impl ReplicateFailure {
@@ -43,6 +47,11 @@ impl ReplicateFailure {
     fn undeclared(metric: &str) -> Self {
         Self { kind: Kind::UndeclaredMetric(metric.to_owned()) }
     }
+
+    /// Statistics were requested but the program's `run_count` did not move (DDD-8).
+    pub(crate) const fn stats_not_effective(program_id: u32) -> Self {
+        Self { kind: Kind::StatsNotEffective(program_id) }
+    }
 }
 
 impl std::fmt::Display for ReplicateFailure {
@@ -52,6 +61,10 @@ impl std::fmt::Display for ReplicateFailure {
             Kind::UndeclaredMetric(metric) => {
                 write!(formatter, "metric `{metric}` is not declared by the benchmark")
             }
+            Kind::StatsNotEffective(program_id) => write!(
+                formatter,
+                "BPF statistics were requested but program {program_id} recorded no runs (run_count delta 0)"
+            ),
         }
     }
 }
@@ -65,6 +78,26 @@ enum Entry {
     Series(Vec<f64>),
     Failures(Vec<String>),
     Absent(String),
+}
+
+impl Entry {
+    fn stored(&self) -> std::result::Result<MetricEntry, NotStorable> {
+        match self {
+            Self::Scalar(value) => storable(*value).map(MetricEntry::scalar),
+            Self::Series(values) => MetricEntry::from_series(values),
+            Self::Failures(reasons) => Ok(MetricEntry::failures(reasons.clone())),
+            Self::Absent(reason) => Ok(MetricEntry::absent(reason)),
+        }
+    }
+}
+
+/// A replicate's recording in the record's form.
+pub struct Finished {
+    pub(crate) metrics: BTreeMap<String, MetricEntry>,
+    pub(crate) notes: BTreeMap<String, String>,
+    pub(crate) commands: Vec<LoggedCommand>,
+    /// Why the recording cannot be stored whole, when it cannot.
+    pub(crate) failure: Option<String>,
 }
 
 /// One `exec` of the replicate's command log.
@@ -83,7 +116,7 @@ pub struct Replicate {
     /// Declared metric name to whether it is a `series` metric.
     declared: BTreeMap<&'static str, bool>,
     clock: HostClock,
-    stats: Option<BpfStatsHold>,
+    stats: Option<Arc<BpfStatsHold>>,
     entries: BTreeMap<String, Entry>,
     notes: BTreeMap<String, String>,
     commands: Vec<Executed>,
@@ -94,7 +127,7 @@ impl Replicate {
         decl: &BenchmarkDecl,
         arm: &str,
         profile: &str,
-        stats: Option<BpfStatsHold>,
+        stats: Option<Arc<BpfStatsHold>>,
     ) -> Self {
         Self {
             arm: arm.to_owned(),
@@ -120,7 +153,7 @@ impl Replicate {
     }
 
     /// The host clock the body takes its stamps from.
-    pub fn clock(&self) -> &HostClock {
+    pub const fn clock(&self) -> &HostClock {
         &self.clock
     }
 
@@ -203,7 +236,39 @@ impl Replicate {
     /// The BPF statistics hold: `Some` iff the benchmark declares `bpf_stats` and the runner
     /// holds the descriptor; `None` under the smoke variant.
     pub fn bpf_stats(&self) -> Option<&BpfStatsHold> {
-        self.stats.as_ref()
+        self.stats.as_deref()
+    }
+
+    /// What the replicate recorded, in the record's form. A declared metric never recorded is
+    /// one failure `not recorded`. A value the record cannot hold (negative, NaN, infinite, or
+    /// an empty series) fails the replicate with its reason and the metric is left out.
+    pub(crate) fn finish(self) -> Finished {
+        let mut failure = None;
+        let mut metrics = BTreeMap::new();
+        for name in self.declared.keys() {
+            let stored = self
+                .entries
+                .get(*name)
+                .map_or_else(|| Ok(MetricEntry::failed("not recorded")), Entry::stored);
+            match stored {
+                Ok(entry) => {
+                    metrics.insert((*name).to_owned(), entry);
+                }
+                Err(reason) => {
+                    failure.get_or_insert_with(|| format!("metric `{name}`: {reason}"));
+                }
+            }
+        }
+        let commands = self
+            .commands
+            .into_iter()
+            .map(|executed| LoggedCommand {
+                program: executed.program,
+                args: executed.args,
+                status: executed.status,
+            })
+            .collect();
+        Finished { metrics, notes: self.notes, commands, failure }
     }
 
     fn require_declared(&self, metric: &str) -> Result<bool, ReplicateFailure> {
@@ -242,6 +307,7 @@ pub struct HostClock;
 
 impl HostClock {
     /// The current host instant.
+    #[allow(clippy::unused_self, reason = "DDD-6 pins `now` as a method of the clock handle")]
     pub fn now(&self) -> HostInstant {
         let mut stamp = libc::timespec { tv_sec: 0, tv_nsec: 0 };
         // SAFETY: `stamp` is a valid, exclusively borrowed `timespec` for the call's duration.
@@ -261,7 +327,7 @@ pub struct HostInstant(Duration);
 
 impl HostInstant {
     /// The time from `earlier` to this instant; zero if `earlier` is later.
-    pub fn duration_since(self, earlier: Self) -> Duration {
+    pub const fn duration_since(self, earlier: Self) -> Duration {
         self.0.saturating_sub(earlier.0)
     }
 }
@@ -298,6 +364,7 @@ mod tests {
         MetricDecl { name: "stream", unit: "ns", table: "t", series: true },
     ];
 
+    #[allow(clippy::unnecessary_wraps, reason = "the signature is the benchmark body's")]
     fn nothing(_: &mut Replicate) -> Result<(), ReplicateFailure> {
         Ok(())
     }

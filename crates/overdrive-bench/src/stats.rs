@@ -121,7 +121,7 @@ impl Distribution {
         }
     }
 
-    pub fn count(&self) -> u64 {
+    pub const fn count(&self) -> u64 {
         match self {
             Self::Raw(sorted) => sorted.len() as u64,
             Self::Binned(binned) => binned.count,
@@ -220,7 +220,7 @@ impl Interval {
     }
 
     /// The larger absolute bound.
-    fn reach(self) -> f64 {
+    const fn reach(self) -> f64 {
         self.lower.abs().max(self.upper.abs())
     }
 }

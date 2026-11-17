@@ -78,7 +78,7 @@ impl<'a> Run<'a> {
         run
     }
 
-    fn keep_canary(&mut self, canary: &'a Canary) {
+    const fn keep_canary(&mut self, canary: &'a Canary) {
         match canary.phase {
             CanaryPhase::Start => self.start_canary = Some(canary),
             CanaryPhase::End => self.end_canary = Some(canary),

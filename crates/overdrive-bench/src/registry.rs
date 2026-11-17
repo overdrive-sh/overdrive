@@ -75,11 +75,6 @@ pub struct ReferenceDecl {
 /// A family that nothing declares is `Error::FamilyNotDeclared` (the usual cause is a bench
 /// `main` that does not reference the declaring crate, so linkme dropped its entries); a
 /// family with more than one benchmark is `Error::Usage` naming them (DDD-3).
-// The runner selects its benchmark with this; it lands with `run_main`.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "called by run_main, which lands with the runner")
-)]
 pub(crate) fn select<'a>(family: &str, declared: &'a [BenchmarkDecl]) -> Result<&'a BenchmarkDecl> {
     let mut matching = declared.iter().filter(|decl| decl.family == family);
     let Some(first) = matching.next() else {
@@ -245,6 +240,7 @@ mod tests {
 
     use super::*;
 
+    #[allow(clippy::unnecessary_wraps, reason = "the signature is the benchmark body's")]
     fn ignore(_: &mut Replicate) -> Result<(), ReplicateFailure> {
         Ok(())
     }

@@ -14,8 +14,8 @@ use serde::{Deserialize, Deserializer, Serialize};
 use crate::histogram::{Histogram, NotStorable, RAW_VALUE_LIMIT, storable};
 use crate::{Error, Result};
 
-const SCHEMA_VERSION: u32 = 1;
-const METHODOLOGY_VERSION: u32 = 1;
+pub(crate) const SCHEMA_VERSION: u32 = 1;
+pub(crate) const METHODOLOGY_VERSION: u32 = 1;
 
 pub(crate) const HOST_KEYS: [&str; 9] = [
     "kernel",
@@ -52,11 +52,11 @@ pub(crate) fn parse(text: &str) -> Result<Vec<Line>> {
     Ok(lines)
 }
 
-fn invalid(line: usize, reason: String) -> Error {
+const fn invalid(line: usize, reason: String) -> Error {
     Error::InvalidRecord { line, reason }
 }
 
-/// serde_json appends ` at line L column C`, which names a position in the single parsed
+/// `serde_json` appends ` at line L column C`, which names a position in the single parsed
 /// line; the record's own line number is the one that matters.
 fn parse_reason(error: &serde_json::Error) -> String {
     let message = error.to_string();
@@ -141,7 +141,7 @@ pub(crate) struct Clock {
 }
 
 /// One value of the `host` block: a string, an absent source, or an unreadable one.
-#[derive(Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(untagged)]
 pub(crate) enum HostValue {
     Text(String),
@@ -206,6 +206,13 @@ pub(crate) enum Unit {
 }
 
 impl Unit {
+    /// The unit a declaration names (`ns bytes bytes_per_second qps ratio count`).
+    pub(crate) fn parse(name: &str) -> Option<Self> {
+        [Self::Ns, Self::Bytes, Self::BytesPerSecond, Self::Qps, Self::Ratio, Self::Count]
+            .into_iter()
+            .find(|unit| unit.as_str() == name)
+    }
+
     pub(crate) const fn as_str(self) -> &'static str {
         match self {
             Self::Ns => "ns",
@@ -350,7 +357,6 @@ pub(crate) struct MetricEntry {
 impl MetricEntry {
     /// A series metric's stored form: raw values up to 1,000, a histogram of all of them above.
     /// Every value is kept; the switch is a representation choice, not a cap (DDD-5).
-    #[allow(dead_code, reason = "first called by the runner's replicate writer")]
     pub(crate) fn from_series(values: &[f64]) -> std::result::Result<Self, NotStorable> {
         if values.len() > RAW_VALUE_LIMIT {
             return Ok(Self {
@@ -366,6 +372,26 @@ impl MetricEntry {
         let raw =
             values.iter().map(|value| storable(*value)).collect::<std::result::Result<_, _>>()?;
         Ok(Self { values: raw, histogram: None, failures: Vec::new(), absent: None })
+    }
+
+    /// A scalar metric's one value.
+    pub(crate) fn scalar(value: f64) -> Self {
+        Self { values: vec![value], histogram: None, failures: Vec::new(), absent: None }
+    }
+
+    /// A metric that could not be measured, once for each of `reasons`.
+    pub(crate) const fn failures(reasons: Vec<String>) -> Self {
+        Self { values: Vec::new(), histogram: None, failures: reasons, absent: None }
+    }
+
+    /// A metric that failed with the single `reason`.
+    pub(crate) fn failed(reason: &str) -> Self {
+        Self::failures(vec![reason.to_owned()])
+    }
+
+    /// A metric that does not apply to the replicate.
+    pub(crate) fn absent(reason: &str) -> Self {
+        Self { values: Vec::new(), histogram: None, failures: Vec::new(), absent: Some(reason.to_owned()) }
     }
 
     fn shape_error(&self, series: bool, exactly_one: bool) -> Option<String> {
@@ -463,13 +489,11 @@ impl RunRefused {
 // The writer.
 
 /// Append-only writer of a record: one JSON object per line, flushed per line.
-#[allow(dead_code, reason = "first called by the runner")]
 pub(crate) struct RecordWriter<W: Write> {
     out: W,
     path: PathBuf,
 }
 
-#[allow(dead_code, reason = "first called by the runner")]
 impl<W: Write> RecordWriter<W> {
     pub(crate) const fn new(out: W, path: PathBuf) -> Self {
         Self { out, path }

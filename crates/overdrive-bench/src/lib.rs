@@ -1,42 +1,29 @@
 //! `overdrive-bench` — the measurement core (ADR-0296, ADR-0300, ADR-0301).
 //!
-//! RED scaffold created by DISTILL: only the public surface pinned by the
-//! DESIGN interface contract (DDD-6) exists, every behaviour is absent. The
-//! acceptance tests under `tests/` fail against it for the behaviour they assert.
-// SCAFFOLD: true
-
-#![allow(
-    clippy::missing_const_for_fn,
-    clippy::unused_self,
-    clippy::needless_pass_by_value,
-    clippy::must_use_candidate,
-    clippy::missing_errors_doc,
-    clippy::missing_panics_doc,
-    clippy::doc_markdown,
-    clippy::print_stderr,
-    clippy::unnecessary_wraps,
-    clippy::needless_pass_by_ref_mut,
-    clippy::unnecessary_literal_bound,
-    clippy::use_self,
-    clippy::trivially_copy_pass_by_ref,
-    clippy::unused_async,
-    unused_variables,
-    reason = "DISTILL RED scaffold: bodies are intentionally empty until DELIVER"
-)]
+//! The public surface is the DDD-6 contract: [`run_main`], [`smoke`], [`Replicate`] and its
+//! companions, [`Error`] and the record and report modules. The schedule, statistics, canary,
+//! host eligibility and runner are internal structure.
 
 use std::process::ExitCode;
 
+mod args;
 mod canary;
 mod histogram;
+mod host;
+mod marker;
 pub mod record;
 #[doc(hidden)]
 pub mod registry;
 mod replicate;
 pub mod report;
+mod runner;
+mod schedule;
 mod stats;
+mod stats_hold;
 
 pub use registry::BenchmarkDecl;
 pub use replicate::{HostClock, HostInstant, Replicate, ReplicateFailure, smoke};
+pub use stats_hold::{BpfStatsHold, RunStats, StatsError};
 
 #[cfg(test)]
 use overdrive_testing::overdrive_test_default;
@@ -53,8 +40,7 @@ pub enum Evidence {
 
 /// Entry point of a benchmark binary: maps [`Error`] to the exit statuses of DDD-9.
 pub fn run_main(evidence: Evidence) -> ExitCode {
-    eprintln!("RED scaffold: overdrive_bench::run_main is not implemented");
-    ExitCode::from(70)
+    runner::main(evidence)
 }
 
 /// Crate error; every variant names its cause.
@@ -62,7 +48,9 @@ pub fn run_main(evidence: Evidence) -> ExitCode {
 pub enum Error {
     #[error("usage: {reason}")]
     Usage { reason: String },
-    #[error("family `{family}` is not declared (found: {found:?})")]
+    #[error(
+        "family `{family}` is not declared (found: {found:?}); the usual cause is a bench `main` that does not reference the declaring crate with `use <crate> as _;`, so its registrations were not linked"
+    )]
     FamilyNotDeclared { family: String, found: Vec<String> },
     #[error("setting `{setting}` is `{found}`, pinned `{pinned}`")]
     Refused { setting: String, found: String, pinned: String },
@@ -89,23 +77,3 @@ pub enum Error {
 
 /// Result alias used throughout the crate.
 pub type Result<T, E = Error> = std::result::Result<T, E>;
-
-/// The descriptor-scoped BPF statistics hold.
-pub struct BpfStatsHold {}
-
-impl BpfStatsHold {
-    pub fn read(&self, program_id: u32) -> Result<RunStats, StatsError> {
-        Ok(RunStats { run_count: 0, run_time_ns: 0 })
-    }
-}
-
-/// Cumulative run statistics; callers take deltas.
-pub struct RunStats {
-    pub run_count: u64,
-    pub run_time_ns: u64,
-}
-
-/// A statistics read failure.
-#[derive(Debug, thiserror::Error)]
-#[error("BPF statistics read failed")]
-pub struct StatsError {}
