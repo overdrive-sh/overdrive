@@ -1625,10 +1625,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "nbp-v4-guest-shutdown"
+name = "nbp-v10-guest-boot"
 version = "0.0.0"
 dependencies = [
  "async-trait",
+ "libc",
  "overdrive-cli",
  "overdrive-control-plane",
  "overdrive-core",
