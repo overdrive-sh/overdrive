@@ -68,7 +68,11 @@ mod tests {
             let members = block(&runs, index);
             assert_eq!(members.iter().filter(|run| run.role == Role::Control).count(), 1);
             assert_eq!(members.iter().filter(|run| run.arm == "b").count(), 1);
-            assert_eq!(members.iter().filter(|run| run.arm == "a").count(), 2, "arm a plus the control");
+            assert_eq!(
+                members.iter().filter(|run| run.arm == "a").count(),
+                2,
+                "arm a plus the control"
+            );
         }
     }
 

@@ -391,7 +391,12 @@ impl MetricEntry {
 
     /// A metric that does not apply to the replicate.
     pub(crate) fn absent(reason: &str) -> Self {
-        Self { values: Vec::new(), histogram: None, failures: Vec::new(), absent: Some(reason.to_owned()) }
+        Self {
+            values: Vec::new(),
+            histogram: None,
+            failures: Vec::new(),
+            absent: Some(reason.to_owned()),
+        }
     }
 
     fn shape_error(&self, series: bool, exactly_one: bool) -> Option<String> {

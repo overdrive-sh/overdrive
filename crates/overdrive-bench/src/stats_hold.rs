@@ -85,7 +85,8 @@ impl BpfStatsHold {
 /// did not move: statistics were requested but are not effective (DDD-8).
 pub fn ineffective_program(reads: &[(u32, RunStats)]) -> Option<u32> {
     reads.iter().find_map(|(program, _)| {
-        let mut of_program = reads.iter().filter(|(other, _)| other == program).map(|(_, stats)| stats);
+        let mut of_program =
+            reads.iter().filter(|(other, _)| other == program).map(|(_, stats)| stats);
         let first = of_program.next()?;
         let last = of_program.next_back()?;
         (last.run_count == first.run_count).then_some(*program)
@@ -111,7 +112,10 @@ mod tests {
     #[test]
     fn a_program_whose_run_count_never_moved_is_ineffective() {
         assert_eq!(ineffective_program(&[(7, stats(5)), (7, stats(5))]), Some(7));
-        assert_eq!(ineffective_program(&[(7, stats(5)), (9, stats(1)), (9, stats(40)), (7, stats(5))]), Some(7));
+        assert_eq!(
+            ineffective_program(&[(7, stats(5)), (9, stats(1)), (9, stats(40)), (7, stats(5))]),
+            Some(7)
+        );
     }
 
     #[test]

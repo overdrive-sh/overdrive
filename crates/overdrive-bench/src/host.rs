@@ -134,19 +134,14 @@ impl HostReading {
     /// Probe, then (only when the probe succeeds) read every setting.
     pub fn read(probe: &dyn HostProbe) -> Self {
         if let Err(error) = probe.probe() {
-            let settings = HOST_KEYS
-                .iter()
-                .map(|key| (*key, Setting::unreadable_copy(&error)))
-                .collect();
+            let settings =
+                HOST_KEYS.iter().map(|key| (*key, Setting::unreadable_copy(&error))).collect();
             return Self { settings, probe: Err(error), holder: None };
         }
         let online = online_cpus(probe);
         let mut settings = BTreeMap::new();
         settings.insert("kernel", Setting::of(probe.read(OSRELEASE), "no kernel release source"));
-        settings.insert(
-            "cpu_model",
-            cpu_model(probe.read(CPUINFO)),
-        );
+        settings.insert("cpu_model", cpu_model(probe.read(CPUINFO)));
         settings.insert("cpu_count", count(&online));
         settings.insert("governor", governor(probe, &online));
         settings.insert("smt", Setting::of(probe.read(SMT_CONTROL), "no smt control"));
@@ -155,10 +150,8 @@ impl HostReading {
             "bpf_stats_enabled",
             Setting::of(probe.read(BPF_STATS_ENABLED), "no bpf_stats_enabled source"),
         );
-        settings.insert(
-            "clocksource",
-            Setting::of(probe.read(CLOCKSOURCE), "no clocksource source"),
-        );
+        settings
+            .insert("clocksource", Setting::of(probe.read(CLOCKSOURCE), "no clocksource source"));
         settings.insert("irq_time_accounting", irq_time_accounting(probe, &settings));
         Self { settings, probe: Ok(()), holder: Some(probe.bpf_stats_holder()) }
     }
@@ -183,25 +176,34 @@ impl HostReading {
             });
         }
         let Self { mut settings, holder, .. } = self;
-        let mut pinned = |key: &'static str, pinned: &str, same: &dyn Fn(&str) -> bool| {
-            match settings.remove(key) {
+        let mut pinned =
+            |key: &'static str, pinned: &str, same: &dyn Fn(&str) -> bool| match settings
+                .remove(key)
+            {
                 Some(Setting::Text(found)) if same(&found) => Ok(()),
                 Some(Setting::Text(found)) => refused(key, &found, pinned),
                 Some(Setting::Unreadable(source)) => {
                     Err(Error::Unreadable { setting: key.to_owned(), source })
                 }
                 Some(Setting::Absent(_)) | None => refused(key, "absent", pinned),
-            }
-        };
-        pinned("kernel", PINNED_KERNEL_SERIES, &|found| kernel_series(found) == PINNED_KERNEL_SERIES)?;
-        pinned("bpf_stats_enabled", PINNED_BPF_STATS_ENABLED, &|found| found == PINNED_BPF_STATS_ENABLED)?;
+            };
+        pinned("kernel", PINNED_KERNEL_SERIES, &|found| {
+            kernel_series(found) == PINNED_KERNEL_SERIES
+        })?;
+        pinned("bpf_stats_enabled", PINNED_BPF_STATS_ENABLED, &|found| {
+            found == PINNED_BPF_STATS_ENABLED
+        })?;
         pinned("governor", PINNED_GOVERNOR, &|found| found == PINNED_GOVERNOR)?;
         pinned("smt", PINNED_SMT, &|found| found == PINNED_SMT)?;
         pinned("boost", PINNED_BOOST, &|found| found == PINNED_BOOST)?;
         match holder {
             Some(Ok(None)) | None => {}
             Some(Ok(Some(pid))) => {
-                return refused("bpf_stats_holder", &format!("held by pid {pid}"), PINNED_NO_HOLDER);
+                return refused(
+                    "bpf_stats_holder",
+                    &format!("held by pid {pid}"),
+                    PINNED_NO_HOLDER,
+                );
             }
             Some(Err(source)) => {
                 return Err(Error::Unreadable { setting: "bpf_stats_holder".to_owned(), source });
@@ -234,7 +236,9 @@ fn kernel_series(release: &str) -> String {
 /// The online CPU numbers, parsed from a list such as `0-3,6`.
 fn online_cpus(probe: &dyn HostProbe) -> std::result::Result<Vec<u32>, io::Error> {
     let text = probe.read(CPU_ONLINE)?;
-    let malformed = || io::Error::new(io::ErrorKind::InvalidData, format!("malformed CPU list `{}`", text.trim()));
+    let malformed = || {
+        io::Error::new(io::ErrorKind::InvalidData, format!("malformed CPU list `{}`", text.trim()))
+    };
     let mut cpus = Vec::new();
     for part in text.trim().split(',').filter(|part| !part.is_empty()) {
         let (first, last) = part.split_once('-').unwrap_or((part, part));
@@ -289,7 +293,9 @@ fn boost(probe: &dyn HostProbe) -> Setting {
         Setting::Absent(_) => match Setting::of(probe.read(INTEL_NO_TURBO), "") {
             Setting::Text(text) => Setting::Text(flag(&text, "0")),
             Setting::Unreadable(error) => Setting::Unreadable(error),
-            Setting::Absent(_) => Setting::Absent("no cpufreq/boost or intel_pstate/no_turbo".to_owned()),
+            Setting::Absent(_) => {
+                Setting::Absent("no cpufreq/boost or intel_pstate/no_turbo".to_owned())
+            }
         },
     }
 }
@@ -448,7 +454,10 @@ pub mod tests {
             (Fixture::eligible().with(CPUFREQ_BOOST, "0\n"), "boost", "off", "on"),
         ];
         for (fixture, setting, found, pinned) in cases {
-            assert_eq!(refusal(&fixture), (setting.to_owned(), found.to_owned(), pinned.to_owned()));
+            assert_eq!(
+                refusal(&fixture),
+                (setting.to_owned(), found.to_owned(), pinned.to_owned())
+            );
         }
         let mut held = Fixture::eligible();
         held.holder = Some(4242);
@@ -458,7 +467,10 @@ pub mod tests {
         );
         match HostReading::read(&Fixture::eligible()).decide(true) {
             Err(Error::Refused { setting, found, pinned }) => {
-                assert_eq!((setting.as_str(), found.as_str(), pinned.as_str()), ("debug_assertions", "on", "off"));
+                assert_eq!(
+                    (setting.as_str(), found.as_str(), pinned.as_str()),
+                    ("debug_assertions", "on", "off")
+                );
             }
             other => panic!("expected a refusal, got {other:?}"),
         }
@@ -508,7 +520,8 @@ pub mod tests {
 
     #[test]
     fn an_unreadable_recorded_only_source_is_recorded_and_never_refuses() {
-        let fixture = Fixture::eligible().unreadable(CLOCKSOURCE).without("/boot/config-7.0.0-38-generic");
+        let fixture =
+            Fixture::eligible().unreadable(CLOCKSOURCE).without("/boot/config-7.0.0-38-generic");
         assert!(decide(&fixture).is_ok());
         let block = HostReading::read(&fixture).host_block();
         assert!(matches!(block["clocksource"], HostValue::Unreadable { .. }));
@@ -521,7 +534,11 @@ pub mod tests {
         fixture.probe_fails = true;
         assert_eq!(
             refusal(&fixture),
-            ("host_probe".to_owned(), "proc is not mounted".to_owned(), "probe succeeds".to_owned())
+            (
+                "host_probe".to_owned(),
+                "proc is not mounted".to_owned(),
+                "probe succeeds".to_owned()
+            )
         );
         let block = HostReading::read(&fixture).host_block();
         assert_eq!(block.len(), HOST_KEYS.len());

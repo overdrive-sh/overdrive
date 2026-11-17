@@ -20,7 +20,8 @@ pub struct Args {
 
 impl Args {
     pub fn parse(arguments: &[String]) -> Result<Self> {
-        let mut words = arguments.iter().map(String::as_str).filter(|word| *word != CARGO_BENCH_FLAG);
+        let mut words =
+            arguments.iter().map(String::as_str).filter(|word| *word != CARGO_BENCH_FLAG);
         if words.next() != Some("run") {
             return Err(usage(format!("expected the `run` command; usage: {USAGE}")));
         }
@@ -45,7 +46,10 @@ impl Args {
             .ok_or_else(|| usage(format!("`--results-root` is required; usage: {USAGE}")))?;
         let results_root = PathBuf::from(results_root);
         if !results_root.is_absolute() {
-            return Err(usage(format!("--results-root `{}` is not an absolute path", results_root.display())));
+            return Err(usage(format!(
+                "--results-root `{}` is not an absolute path",
+                results_root.display()
+            )));
         }
         Ok(Self { family: family.to_owned(), results_root })
     }
@@ -93,8 +97,9 @@ mod tests {
 
     #[test]
     fn a_well_formed_line_parses() {
-        let args = Args::parse(&words("run --family connect-hook --results-root /r/benchmarks/results"))
-            .expect("parses");
+        let args =
+            Args::parse(&words("run --family connect-hook --results-root /r/benchmarks/results"))
+                .expect("parses");
         assert_eq!(args.family, "connect-hook");
         assert_eq!(args.results_root, PathBuf::from("/r/benchmarks/results"));
     }
@@ -112,16 +117,22 @@ mod tests {
 
     #[test]
     fn a_relative_results_root_is_a_usage_error() {
-        assert!(reason("run --family f --results-root benchmarks/results").contains("not an absolute path"));
+        assert!(
+            reason("run --family f --results-root benchmarks/results")
+                .contains("not an absolute path")
+        );
     }
 
     #[test]
     fn a_root_outside_the_checkout_or_climbing_out_of_it_is_a_usage_error() {
-        let args = Args::parse(&words("run --family f --results-root /elsewhere/results")).expect("parses");
+        let args = Args::parse(&words("run --family f --results-root /elsewhere/results"))
+            .expect("parses");
         assert!(matches!(args.results_root_within(Path::new("/r")), Err(Error::Usage { .. })));
-        let args = Args::parse(&words("run --family f --results-root /r/../elsewhere")).expect("parses");
+        let args =
+            Args::parse(&words("run --family f --results-root /r/../elsewhere")).expect("parses");
         assert!(matches!(args.results_root_within(Path::new("/r")), Err(Error::Usage { .. })));
-        let args = Args::parse(&words("run --family f --results-root /r/benchmarks/results")).expect("parses");
+        let args = Args::parse(&words("run --family f --results-root /r/benchmarks/results"))
+            .expect("parses");
         assert!(args.results_root_within(Path::new("/r")).is_ok());
     }
 
@@ -133,6 +144,9 @@ mod tests {
         assert!(reason("run --results-root /r").contains("`--family` is required"));
         assert!(reason("run --family").contains("needs a value"));
         assert!(reason("run --family f --family g --results-root /r").contains("more than once"));
-        assert!(reason("run --family f --results-root /r --seed 1").contains("unknown argument `--seed`"));
+        assert!(
+            reason("run --family f --results-root /r --seed 1")
+                .contains("unknown argument `--seed`")
+        );
     }
 }

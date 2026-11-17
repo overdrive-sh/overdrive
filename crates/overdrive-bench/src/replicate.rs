@@ -10,9 +10,9 @@ use std::process::Command;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::registry::BenchmarkDecl;
 use crate::histogram::{NotStorable, storable};
 use crate::record::{Command as LoggedCommand, MetricEntry};
+use crate::registry::BenchmarkDecl;
 use crate::{BpfStatsHold, Result};
 
 /// The profile name of a benchmark that declares none.

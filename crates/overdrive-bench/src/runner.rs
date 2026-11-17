@@ -23,8 +23,8 @@ use crate::args::Args;
 use crate::host::{HostProbe, HostReading, ProcSysProbe};
 use crate::marker::{self, MARKER_SETTING, Marker};
 use crate::record::{
-    BpfStatsMode, Canary, CanaryPhase, Clock, ClockSource, Declaration, EvidenceClass, Host,
-    Line, MetricDecl, METHODOLOGY_VERSION, Outcome, ProfileDecl, RecordWriter, ReferenceDecl,
+    BpfStatsMode, Canary, CanaryPhase, Clock, ClockSource, Declaration, EvidenceClass, Host, Line,
+    METHODOLOGY_VERSION, MetricDecl, Outcome, ProfileDecl, RecordWriter, ReferenceDecl,
     ReplicateLine, RunFinished, RunRefused, RunStarted, SCHEMA_VERSION, Substrate, Unit,
 };
 use crate::registry::{self, BenchmarkDecl};
@@ -110,13 +110,13 @@ pub struct Environment {
 impl Environment {
     fn from_process() -> Result<Self> {
         let run_id = match std::env::var_os(RUN_ID_VARIABLE) {
-            Some(value) => value
-                .into_string()
-                .ok()
-                .filter(|id| is_run_id(id))
-                .ok_or_else(|| Error::Usage {
-                    reason: format!("{RUN_ID_VARIABLE} is not {RUN_ID_HEX_DIGITS} lowercase hex digits"),
-                })?,
+            Some(value) => {
+                value.into_string().ok().filter(|id| is_run_id(id)).ok_or_else(|| Error::Usage {
+                    reason: format!(
+                        "{RUN_ID_VARIABLE} is not {RUN_ID_HEX_DIGITS} lowercase hex digits"
+                    ),
+                })?
+            }
             None => generated_run_id(),
         };
         Ok(Self {
@@ -128,7 +128,8 @@ impl Environment {
 }
 
 fn is_run_id(text: &str) -> bool {
-    text.len() == RUN_ID_HEX_DIGITS && text.bytes().all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+    text.len() == RUN_ID_HEX_DIGITS
+        && text.bytes().all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
 }
 
 /// 96 bits of OS entropy as 24 lowercase hex digits.
@@ -333,7 +334,8 @@ impl Runner<'_> {
         source_root: &Path,
     ) -> Result<RecordWriter<Box<dyn Write>>> {
         let path = dir.join(RECORD_FILE);
-        let out = self.sink.create(dir).map_err(|source| Error::Record { path: path.clone(), source })?;
+        let out =
+            self.sink.create(dir).map_err(|source| Error::Record { path: path.clone(), source })?;
         let relative = dir.strip_prefix(source_root).unwrap_or(dir);
         writeln!(self.stdout, "{RESULT_DIR_LINE}{}", relative.display())
             .and_then(|()| self.stdout.flush())
@@ -351,7 +353,10 @@ impl Runner<'_> {
         for _ in 0..CANARY_SAMPLES {
             let sample = self.canary.sample().map_err(|source| Error::Record {
                 path: dir.join(RECORD_FILE),
-                source: io::Error::new(source.kind(), format!("the loopback canary failed: {source}")),
+                source: io::Error::new(
+                    source.kind(),
+                    format!("the loopback canary failed: {source}"),
+                ),
             })?;
             samples_ns.push(sample);
         }
@@ -392,7 +397,9 @@ fn refused_line(refusal: &Error) -> RunRefused {
             pinned: None,
             reason: Some(source.to_string()),
         },
-        other => unreachable!("host eligibility only refuses with Refused or Unreadable, not {other:?}"),
+        other => {
+            unreachable!("host eligibility only refuses with Refused or Unreadable, not {other:?}")
+        }
     }
 }
 
@@ -454,8 +461,9 @@ fn declaration(decl: &BenchmarkDecl) -> Declaration {
             .iter()
             .map(|metric| MetricDecl {
                 name: metric.name.to_owned(),
-                unit: Unit::parse(metric.unit)
-                    .unwrap_or_else(|| unreachable!("the attribute rejects unit `{}`", metric.unit)),
+                unit: Unit::parse(metric.unit).unwrap_or_else(|| {
+                    unreachable!("the attribute rejects unit `{}`", metric.unit)
+                }),
                 table: metric.table.to_owned(),
                 series: metric.series,
             })
@@ -522,9 +530,9 @@ fn run_one(
     let ineffective = hold.and_then(|hold| ineffective_program(&hold.take_reads()));
     let failure = match body {
         Err(failure) => Some(failure.to_string()),
-        Ok(()) => finished
-            .failure
-            .or_else(|| ineffective.map(|id| ReplicateFailure::stats_not_effective(id).to_string())),
+        Ok(()) => finished.failure.or_else(|| {
+            ineffective.map(|id| ReplicateFailure::stats_not_effective(id).to_string())
+        }),
     };
     ReplicateLine {
         profile: profile.to_owned(),
@@ -717,7 +725,10 @@ mod tests {
 
     fn run(decl: &BenchmarkDecl, probe: &Fixture) -> (Outcome, tempfile::TempDir) {
         let dir = marker_dir();
-        let line = format!("run --family unit-family --results-root {}/benchmarks/results --bench", dir.path().display());
+        let line = format!(
+            "run --family unit-family --results-root {}/benchmarks/results --bench",
+            dir.path().display()
+        );
         (run_with(decl, probe, &Enabler(None), false, dir.path(), &line), dir)
     }
 
@@ -727,10 +738,19 @@ mod tests {
         let statuses = [
             (Error::Usage { reason: String::new() }, 64),
             (Error::FamilyNotDeclared { family: String::new(), found: Vec::new() }, 64),
-            (Error::Refused { setting: String::new(), found: String::new(), pinned: String::new() }, 78),
+            (
+                Error::Refused {
+                    setting: String::new(),
+                    found: String::new(),
+                    pinned: String::new(),
+                },
+                78,
+            ),
             (Error::Unreadable { setting: String::new(), source: io() }, 78),
             (
-                Error::StatsEnable { source: aya::sys::SyscallError { call: "bpf", io_error: io() } },
+                Error::StatsEnable {
+                    source: aya::sys::SyscallError { call: "bpf", io_error: io() },
+                },
                 70,
             ),
             (Error::Record { path: PathBuf::new(), source: io() }, 70),
@@ -756,7 +776,10 @@ mod tests {
         assert_eq!(lines[1]["phase"], "start");
         assert_eq!(lines.iter().filter(|line| line["t"] == "replicate").count(), 27);
         let last = lines.last().expect("lines");
-        assert_eq!((last["t"].as_str(), last["replicates_ok"].as_u64()), (Some("run_finished"), Some(27)));
+        assert_eq!(
+            (last["t"].as_str(), last["replicates_ok"].as_u64()),
+            (Some("run_finished"), Some(27))
+        );
         assert_eq!(outcome.canary_samples, 32, "16 samples at the start and 16 at the end");
         assert_eq!(
             outcome.stdout,
@@ -770,16 +793,26 @@ mod tests {
     #[test]
     fn a_drifted_host_leaves_run_started_then_run_refused_and_takes_no_sample() {
         let decl = decl(&["fast", "slow"], true);
-        let (outcome, _dir) = run(&decl, &Fixture::eligible().with("/sys/devices/system/cpu/smt/control", "off\n"));
+        let (outcome, _dir) =
+            run(&decl, &Fixture::eligible().with("/sys/devices/system/cpu/smt/control", "off\n"));
         assert!(matches!(&outcome.result, Err(Error::Refused { setting, .. }) if setting == "smt"));
         let lines = outcome.sink.lines();
         assert_eq!(lines.len(), 2);
-        assert_eq!((lines[0]["t"].as_str(), lines[0]["bpf_stats"].as_str()), (Some("run_started"), Some("off")));
+        assert_eq!(
+            (lines[0]["t"].as_str(), lines[0]["bpf_stats"].as_str()),
+            (Some("run_started"), Some("off"))
+        );
         assert_eq!(lines[1]["t"], "run_refused");
         assert_eq!(lines[1]["setting"], "smt");
-        assert_eq!((lines[1]["found"].as_str(), lines[1]["pinned"].as_str()), (Some("off"), Some("on")));
+        assert_eq!(
+            (lines[1]["found"].as_str(), lines[1]["pinned"].as_str()),
+            (Some("off"), Some("on"))
+        );
         assert_eq!(outcome.canary_samples, 0);
-        assert!(outcome.stdout.starts_with("OVERDRIVE_BENCH_RESULT_DIR="), "printed for a refused run too");
+        assert!(
+            outcome.stdout.starts_with("OVERDRIVE_BENCH_RESULT_DIR="),
+            "printed for a refused run too"
+        );
         let report = outcome.sink.report.borrow().clone().expect("report written");
         assert!(report.contains("- status: refused"), "{report}");
         validate(&outcome.sink.record()).expect("a refused record validates");
@@ -790,7 +823,9 @@ mod tests {
         let mut probe = Fixture::eligible();
         probe.probe_fails = true;
         let (outcome, _dir) = run(&decl(&["a"], false), &probe);
-        assert!(matches!(&outcome.result, Err(Error::Refused { setting, .. }) if setting == "host_probe"));
+        assert!(
+            matches!(&outcome.result, Err(Error::Refused { setting, .. }) if setting == "host_probe")
+        );
         assert_eq!(outcome.sink.lines()[1]["setting"], "host_probe");
     }
 
@@ -799,8 +834,11 @@ mod tests {
         let decl = decl(&["a"], false);
         let dir = marker_dir();
         let line = format!("run --family unit-family --results-root {}/r", dir.path().display());
-        let outcome = run_with(&decl, &Fixture::eligible(), &Enabler(None), true, dir.path(), &line);
-        assert!(matches!(&outcome.result, Err(Error::Refused { setting, found, .. }) if setting == "debug_assertions" && found == "on"));
+        let outcome =
+            run_with(&decl, &Fixture::eligible(), &Enabler(None), true, dir.path(), &line);
+        assert!(
+            matches!(&outcome.result, Err(Error::Refused { setting, found, .. }) if setting == "debug_assertions" && found == "on")
+        );
         assert_eq!(outcome.sink.lines()[0]["debug_assertions"], true);
     }
 
@@ -809,8 +847,11 @@ mod tests {
         let decl = decl(&["a"], false);
         let dir = tempfile::tempdir().expect("tempdir");
         let line = format!("run --family unit-family --results-root {}/r", dir.path().display());
-        let outcome = run_with(&decl, &Fixture::eligible(), &Enabler(None), false, dir.path(), &line);
-        assert!(matches!(&outcome.result, Err(Error::Unreadable { setting, .. }) if setting == ".overdrive-metal-source"));
+        let outcome =
+            run_with(&decl, &Fixture::eligible(), &Enabler(None), false, dir.path(), &line);
+        assert!(
+            matches!(&outcome.result, Err(Error::Unreadable { setting, .. }) if setting == ".overdrive-metal-source")
+        );
         assert!(outcome.sink.created.borrow().is_empty(), "no result directory");
         assert!(outcome.stdout.is_empty(), "no result directory line");
         assert!(outcome.sink.record().is_empty());
@@ -821,7 +862,14 @@ mod tests {
         let decl = decl(&["a"], true);
         let dir = marker_dir();
         let line = format!("run --family unit-family --results-root {}/r", dir.path().display());
-        let outcome = run_with(&decl, &Fixture::eligible(), &Enabler(Some("denied")), false, dir.path(), &line);
+        let outcome = run_with(
+            &decl,
+            &Fixture::eligible(),
+            &Enabler(Some("denied")),
+            false,
+            dir.path(),
+            &line,
+        );
         assert!(matches!(outcome.result, Err(Error::StatsEnable { .. })));
         let lines = outcome.sink.lines();
         assert_eq!(lines[0]["bpf_stats"], "off");
@@ -848,7 +896,11 @@ mod tests {
             lines.iter().filter(|line| line["outcome"] == "failed").collect();
         assert_eq!(failed.len(), 18, "the broken and the mistyped arm fail every replicate");
         assert!(failed.iter().any(|line| line["failure"] == "the fixture did not build"));
-        assert!(failed.iter().any(|line| line["failure"].as_str().is_some_and(|text| text.contains("ns_per_opp"))));
+        assert!(
+            failed.iter().any(|line| line["failure"]
+                .as_str()
+                .is_some_and(|text| text.contains("ns_per_opp")))
+        );
         let last = lines.last().expect("lines");
         assert_eq!(last["replicates_failed"], 18);
         validate(&outcome.sink.record()).expect("the record validates");
@@ -882,9 +934,23 @@ mod tests {
             "run --family unit-family --results-root /elsewhere",
         );
         assert!(matches!(outside.result, Err(Error::Usage { .. })));
-        let relative = run_with(&decl, &Fixture::eligible(), &Enabler(None), false, dir.path(), "run --family unit-family --results-root rel");
+        let relative = run_with(
+            &decl,
+            &Fixture::eligible(),
+            &Enabler(None),
+            false,
+            dir.path(),
+            "run --family unit-family --results-root rel",
+        );
         assert!(matches!(relative.result, Err(Error::Usage { .. })));
-        let undeclared = run_with(&decl, &Fixture::eligible(), &Enabler(None), false, dir.path(), "run --family other --results-root /x");
+        let undeclared = run_with(
+            &decl,
+            &Fixture::eligible(),
+            &Enabler(None),
+            false,
+            dir.path(),
+            "run --family other --results-root /x",
+        );
         match &undeclared.result {
             Err(Error::FamilyNotDeclared { family, found }) => {
                 assert_eq!((family.as_str(), found), ("other", &vec!["unit-family".to_owned()]));
@@ -898,9 +964,13 @@ mod tests {
 
     #[test]
     fn the_undeclared_family_diagnostic_names_requested_found_and_the_usual_cause() {
-        let error = Error::FamilyNotDeclared { family: "x".to_owned(), found: vec!["y".to_owned()] };
+        let error =
+            Error::FamilyNotDeclared { family: "x".to_owned(), found: vec!["y".to_owned()] };
         let text = diagnostic(&error);
-        assert!(text.contains("`x`") && text.contains("\"y\"") && text.contains("use <crate> as _;"), "{text}");
+        assert!(
+            text.contains("`x`") && text.contains("\"y\"") && text.contains("use <crate> as _;"),
+            "{text}"
+        );
     }
 
     #[test]
