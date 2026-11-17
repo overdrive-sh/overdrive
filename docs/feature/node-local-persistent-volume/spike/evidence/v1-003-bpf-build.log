@@ -1,0 +1,88 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.11s
+     Running `target/debug/xtask metal run -- env OVERDRIVE_BPF_NATIVE=1 cargo xtask bpf-build`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+OVERDRIVE_METAL_RUN_ID=6ec77b7b4a57d10b8d5ff7e0
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire exclusive physical-maintenance barrier (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_RUN_REGISTERED run_id=6ec77b7b4a57d10b8d5ff7e0
+OVERDRIVE_METAL_LEASE_ACQUIRED token=6ec77b7b4a57d10b8d5ff7e0 pid=820890
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/antananarivo -> ubuntu@151.115.99.251:/home/ubuntu/nlpv-design
+
+sent 2,098,284 bytes  received 9,918 bytes  1,405,468.00 bytes/sec
+total size is 2,132,876,585  speedup is 1,011.70
+
+########## [bootstrap] materialising standalone .git (common dir 7.6G)
+
+sent 459,838 bytes  received 19,516 bytes  319,569.33 bytes/sec
+total size is 911,045,694  speedup is 1,900.57
+## marcus-sa/overdrive-shared-volumes-sccache
+ M docs/product/architecture/brief.md
+ M docs/product/architecture/c4-diagrams.md
+ M infra/metal/bootstrap.sh
+?? docs/feature/node-local-persistent-volume/design/
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+OVERDRIVE_METAL_RUN_STARTED run_id=6ec77b7b4a57d10b8d5ff7e0
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.15s
+     Running `target/debug/xtask bpf-build`
+/home/ubuntu/.cargo/bin/bpf-linker
+xtask: running rustup run nightly-2026-08-05 cargo build (overdrive-bpf, bpfel-unknown-none)
+   Compiling proc-macro2 v1.0.106
+   Compiling quote v1.0.45
+   Compiling unicode-ident v1.0.24
+   Compiling serde_core v1.0.228
+   Compiling zmij v1.0.21
+   Compiling serde v1.0.228
+   Compiling serde_json v1.0.149
+   Compiling thiserror v2.0.18
+   Compiling camino v1.2.2
+   Compiling memchr v2.8.0
+   Compiling itoa v1.0.18
+   Compiling anyhow v1.0.102
+   Compiling compiler_builtins v0.1.160 (/home/ubuntu/.rustup/toolchains/nightly-2026-08-05-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/compiler-builtins/compiler-builtins)
+   Compiling version_check v0.9.5
+   Compiling rustversion v1.0.22
+   Compiling core v0.0.0 (/home/ubuntu/.rustup/toolchains/nightly-2026-08-05-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core)
+   Compiling proc-macro-error-attr v1.0.4
+   Compiling proc-macro-error v1.0.4
+   Compiling aya-ebpf v0.1.1
+   Compiling syn v2.0.117
+   Compiling semver v1.0.28
+   Compiling serde_derive v1.0.228
+   Compiling thiserror-impl v2.0.18
+   Compiling aya-ebpf-macros v0.1.1
+   Compiling cargo-platform v0.3.0
+   Compiling cargo_metadata v0.23.1
+   Compiling aya-build v0.1.3
+   Compiling aya-ebpf-cty v0.2.3
+   Compiling aya-ebpf-bindings v0.1.2
+   Compiling overdrive-bpf v0.0.0 (/home/ubuntu/nlpv-design/crates/overdrive-bpf)
+    Finished `release` profile [optimized + debuginfo] target(s) in 10.10s
+/usr/sbin/bpftool
+In file included from /home/ubuntu/nlpv-design/crates/overdrive-bpf/src/tcp_correlation_candidate.bpf.c:3:
+/home/ubuntu/nlpv-design/target/bpf/vmlinux.h:42399:2: warning: declaration does not declare anything [-Wmissing-declarations]
+ 42399 |         struct aes_enckey;
+       |         ^~~~~~~~~~~~~~~~~
+/home/ubuntu/nlpv-design/target/bpf/vmlinux.h:58058:3: warning: declaration does not declare anything [-Wmissing-declarations]
+ 58058 |                 struct ns_tree;
+       |                 ^~~~~~~~~~~~~~
+/home/ubuntu/nlpv-design/target/bpf/vmlinux.h:80527:2: warning: declaration does not declare anything [-Wmissing-declarations]
+ 80527 |         struct __filename_head;
+       |         ^~~~~~~~~~~~~~~~~~~~~~
+/home/ubuntu/nlpv-design/target/bpf/vmlinux.h:121327:2: warning: declaration does not declare anything [-Wmissing-declarations]
+ 121327 |         union pipe_index;
+        |         ^~~~~~~~~~~~~~~~
+/home/ubuntu/nlpv-design/target/bpf/vmlinux.h:134848:4: warning: declaration does not declare anything [-Wmissing-declarations]
+ 134848 |                         struct freelist_counters;
+        |                         ^~~~~~~~~~~~~~~~~~~~~~~~
+5 warnings generated.
+xtask: bpf-build wrote /home/ubuntu/nlpv-design/target/bpf/overdrive_bpf.o
+xtask: bpf-build wrote /home/ubuntu/nlpv-design/target/bpf/overdrive_guest_bpf.o
+xtask: bpf-build wrote /home/ubuntu/nlpv-design/target/bpf/overdrive_guest_tcp_correlation_candidate_bpf.o
+OVERDRIVE_METAL_RUN_COMPLETE run_id=6ec77b7b4a57d10b8d5ff7e0 exit_code=0 cause=command_returned

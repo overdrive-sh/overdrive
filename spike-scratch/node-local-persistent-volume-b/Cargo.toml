@@ -1,0 +1,24 @@
+# Standalone probe crate for the node-local persistent volume DESIGN spikes
+# (GH #348). Throwaway; own workspace; NOT a member or dependency of the
+# Overdrive workspace (.claude/rules/spike.md). Depends on workspace crates by
+# path only for the placement attribute and the guest-kit fixtures.
+[package]
+name    = "nlpv-v1-probe"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[features]
+integration-tests = []
+kvm-tests         = []
+
+[dependencies]
+libc = "0.2"
+serde_json = "1"
+
+[dev-dependencies]
+overdrive-testing = { path = "../../crates/overdrive-testing" }
+overdrive-core    = { path = "../../crates/overdrive-core" }
+overdrive-host    = { path = "../../crates/overdrive-host" }

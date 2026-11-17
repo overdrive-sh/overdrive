@@ -1,0 +1,45 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.11s
+     Running `target/debug/xtask metal run -- cargo xtask guest-kit-prepare`
+/usr/bin/ssh
+xtask: running metal run (one bootstrap lease session)
+OVERDRIVE_METAL_RUN_ID=4a34692f0e01e4b3167c404e
+
+########## [bootstrap] preflight: ssh to ubuntu@151.115.99.251
+
+########## [bootstrap] remote user=ubuntu home=/home/ubuntu sudo='sudo -n'
+
+########## [bootstrap] acquire exclusive physical-maintenance barrier (/run/lock/overdrive-metal-shared.lock)
+OVERDRIVE_METAL_RUN_REGISTERED run_id=4a34692f0e01e4b3167c404e
+OVERDRIVE_METAL_LEASE_ACQUIRED token=4a34692f0e01e4b3167c404e pid=825905
+
+########## [bootstrap] sync /Users/marcus/conductor/workspaces/helios/antananarivo -> ubuntu@151.115.99.251:/home/ubuntu/nlpv-design
+
+sent 2,096,631 bytes  received 5,260 bytes  840,756.40 bytes/sec
+total size is 2,132,881,156  speedup is 1,014.74
+
+########## [bootstrap] materialising standalone .git (common dir 7.6G)
+
+sent 459,838 bytes  received 19,520 bytes  319,572.00 bytes/sec
+total size is 911,045,694  speedup is 1,900.55
+## marcus-sa/overdrive-shared-volumes-sccache
+ M docs/product/architecture/brief.md
+ M docs/product/architecture/c4-diagrams.md
+ M infra/metal/bootstrap.sh
+?? docs/feature/node-local-persistent-volume/design/
+
+########## [bootstrap] fail-closed native x86_64/KVM preflight
+OVERDRIVE_METAL_RUN_STARTED run_id=4a34692f0e01e4b3167c404e
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.16s
+     Running `target/debug/xtask guest-kit-prepare`
+guest-kit-prepare: overdrive-init overdrive-init -> /home/ubuntu/nlpv-design/target/guest-kit/in-guest/overdrive-init--overdrive-init
+guest-kit-prepare: overdrive-fwd integration -> /home/ubuntu/nlpv-design/target/guest-kit/in-guest/overdrive-fwd--integration
+guest-kit-prepare: overdrive-dataplane integration -> /home/ubuntu/nlpv-design/target/guest-kit/in-guest/overdrive-dataplane--integration
+guest-kit-prepare: overdrive-dataplane overdrive_dataplane -> /home/ubuntu/nlpv-design/target/guest-kit/in-guest/overdrive-dataplane--overdrive_dataplane
+guest-kit-prepare: overdrive-control-plane acceptance -> /home/ubuntu/nlpv-design/target/guest-kit/in-guest/overdrive-control-plane--acceptance
+guest-kit-prepare: overdrive-control-plane integration -> /home/ubuntu/nlpv-design/target/guest-kit/in-guest/overdrive-control-plane--integration
+guest-kit-prepare: overdrive-cli integration -> /home/ubuntu/nlpv-design/target/guest-kit/in-guest/overdrive-cli--integration
+guest-kit-prepare: overdrive-worker integration -> /home/ubuntu/nlpv-design/target/guest-kit/in-guest/overdrive-worker--integration
+guest-kit-prepare: overdrive-worker leg_f_repair -> /home/ubuntu/nlpv-design/target/guest-kit/in-guest/overdrive-worker--leg_f_repair
+guest-kit-prepare: Quint 0.32.0, Node v24.21.0, Rust evaluator v0.6.0: staged 4437 runtime inputs
+guest-kit-prepare: kernel 7.0.0-38-generic, target x86_64-unknown-linux-musl: the lane is prepared
+OVERDRIVE_METAL_RUN_COMPLETE run_id=4a34692f0e01e4b3167c404e exit_code=0 cause=command_returned

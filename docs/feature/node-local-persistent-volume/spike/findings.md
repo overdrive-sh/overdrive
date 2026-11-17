@@ -455,3 +455,203 @@ The default is the decimal concatenation of `st_dev`, `st_rdev`, `st_ino`: stabl
 | `run-027-f1-a3-a1.log` | `9378e42303e5...` | failed attempt kept: guest kit not prepared in the new run directory (`OverdriveInitBuildFailed`) |
 | `run-003`, `run-004`, `run-011`, `run-012` | | `bpf-build` and `guest-kit-prepare` prerequisites (two checkouts) |
 | `run-002`, `run-007`, `run-010` | | failed attempts kept (missing guest-kit prerequisite; checkout lock timeout) |
+
+---
+
+## V-1. LVM on a minimal node without udev
+
+**Verdict: PASS, with a different pinned configuration.** All five steps of the V-1 exact probe pass on the pinned `--config` unchanged, but only once LVM is given a system directory: on a read-only root with no `/etc/lvm`, **every** `lvm` command exits 4 until `LVM_SYSTEM_DIR` is set (step "Pinned configuration" below). That is the one change the design contract must absorb. VD-3, VD-4 and VD-5 do not go back to DESIGN; the discovery key (the partition label) is unchanged.
+
+Probe code: `spike-scratch/node-local-persistent-volume-b/` (own workspace, stock Cloud Hypervisor only, nothing under `crates/`). Runs: ordinary `cargo xtask metal run --` with `OVERDRIVE_METAL_REMOTE_SUBDIR=nlpv-design`, never `--exclusive`, never Lima. The logs are `evidence/v1-*.log`, each starting with its `OVERDRIVE_METAL_RUN_ID` (indexed at the end of this section). The deciding run is `v1-008-lvm-run3.log`, metal run `04b3d5f85b8c04814d243bf3`.
+
+### V-1.0 Setup
+
+| Item | Value | Source |
+|---|---|---|
+| Host | the same metal host as sections 0 to 8: `Linux ... 7.0.0-38-generic #38-Ubuntu`, x86_64 | `v1-001` |
+| Outer and inner guest kernel | `7.0.0-38-generic` (the guest kit boots the host's kernel; the inner guests boot the same image with `ro` on the command line) | `uname_r=7.0.0-38-generic` in `v1-008` phases a to d |
+| Node model | a nested Cloud Hypervisor guest (stock `/usr/local/bin/cloud-hypervisor`) booted by a `cgroup-default` / `nested-launch` guest test; 2 vCPU, 256 MiB; PID 1 is a static-musl program that mounts only `/proc`, `/sys`, `/dev` (devtmpfs) and a tmpfs on `/run`, then runs one phase. No udev, no LVM daemon, no shell. | `v1-008` baseline blocks |
+| Root filesystem | ext4 image mounted **read-only** (`root=/dev/vda ro`); proved by four failed write attempts and by the image file's hash being unchanged after all four guests | below |
+| LVM binary | the **distro** binary, not a static one: the box has no `lvm.static`. `/usr/sbin/lvm`, package `lvm2 2.03.31-2ubuntu3`, `LVM version: 2.03.31(2) (2025-02-27)`, library `1.02.205`, driver `4.50.0`, sha256 `aa130cbd8dd29940367ac9d1c324a4371a8bea4f390766b830e15c43491a34d5`, 3,160,272 bytes, plus its `ldd` closure of 15 files (libdevmapper, libdevmapper-event, libblkid, libselinux, libudev, libsystemd, libaio, libedit, libtinfo, libbsd, libmd, libpcre2-8, libm, libc, ld-linux), about 7.3 MB of libraries beside the 3.2 MB binary. libudev and libsystemd are linked but never used on this node. | `v1-001` (`lvm`, `ldd`, `manifest` blocks) |
+| Kernel config | `CONFIG_BLK_DEV_DM=y`, `CONFIG_EFI_PARTITION=y`, `CONFIG_DEVTMPFS=y`, `CONFIG_DEVTMPFS_MOUNT=y`, `CONFIG_DM_UEVENT=y`, `CONFIG_VIRTIO_BLK=y`, `CONFIG_EXT4_FS=y` (the node mounts devtmpfs itself; the kernel had already mounted it, `Resource busy`, harmless) | `v1-001` `kcfg` |
+| Backing file | a GPT file on the outer guest's tmpfs (so it survives between the inner guests): 400 MiB, partitions `1 efi-like-other 16M`, `2 overdrive-volumes 256M`, `3 other-lvm-decoy 64M`, `4 overdrive-volumes-old 32M` (a look-alike name). The guest sees it as `/dev/vdb`, the root as `/dev/vda`. | `v1-008` `/proc/partitions` |
+| Pinned `--config` | `activation{udev_sync=0 udev_rules=0 monitoring=0} devices{filter=["a|^/dev/vdb2$|","r|.*|"] use_devicesfile=0} backup{backup=0 archive=0} global{use_lvmpolld=0 locking_dir="/run/lock/lvm"}`, passed as `--config` to every command, the filter built from the discovered node | `guest/nlpv_v1_init.rs` |
+
+How the five steps ran. Four inner guests booted one after another over the same backing file, each fresh (different `boot_id`): **a** steps 1 to 3 and a data write, **b** step 4, **c** step 5 ending in an **unclean SIGKILL of the VMM** (no shutdown), **d** a cold guest over what that left. An extra series (V-1.6) kills the whole VMM mid-operation.
+
+### V-1.1 The pinned configuration is not enough on its own: `LVM_SYSTEM_DIR`
+
+**Hypothesis.** The pinned `--config` is sufficient for LVM on a root that is read-only except `/run`. **Predicted.** `pvcreate`, `vgcreate`, `lvcreate` succeed with no write outside `/run` and the PV. **Falsified by.** Any command failing for a reason the config does not address.
+
+**Actual (`v1-005`, metal run `5a89f197642237ee47f300b0`): falsified.** The first command, `pvcreate`, and every one after it:
+
+```
+NLPV-G CMD [decoy-pvcreate] lvm pvcreate -y /dev/vdb3 -> code=Some(4) sig=None timed_out=false ms=6.2
+NLPV-G   stderr:
+NLPV-G   Failed to create LVM2 system dir for metadata backups, config files and internal cache.
+NLPV-G   Set environment variable LVM_SYSTEM_DIR to alternative location or empty string.
+```
+
+LVM wants a system directory (`/etc/lvm`) regardless of `backup{backup=0 archive=0}` and `use_devicesfile=0`. The directory is not a `--config` setting; only the environment variable moves it. Three variants, run in two images (`v1-006`, metal run `88b7286e1052a1e74181496f`), one read-only command each (`pvs -o pv_name,vg_name`):
+
+| Image | `LVM_SYSTEM_DIR` | Exit | Stderr |
+|---|---|---|---|
+| no `/etc/lvm` | unset | **4** | `Failed to create LVM2 system dir ...` |
+| no `/etc/lvm` | set to the empty string | 0 | `WARNING: Metadata changes will NOT be backed up.` (three times, on a read command) |
+| no `/etc/lvm` | `/run/lvm` | 0 | none; `/run/lvm` created on the tmpfs |
+| empty `/etc/lvm` baked into the image | unset | 0 | none |
+| empty `/etc/lvm` baked into the image | empty string / `/run/lvm` | 0 | as above |
+
+**Pinned: `LVM_SYSTEM_DIR=/run/lvm` in the environment of every `lvm` spawn**, with the `--config` above unchanged. It keeps the "writes only to `/run` and the PV" property, needs nothing in the image, and is quiet. The alternative that also passes is an empty `/etc/lvm` directory in the image. Everything below ran with `LVM_SYSTEM_DIR=/run/lvm`.
+
+### V-1.2 Node baseline: read-only root, no udev, no daemons (`v1-008`)
+
+```
+NLPV-G /dev/root / ext4 ro,relatime 0 0
+NLPV-G devtmpfs /dev devtmpfs rw,nosuid,noexec,relatime,size=97652k,nr_inodes=24413,mode=755,inode64 0 0
+NLPV-G proc /proc proc rw,relatime 0 0
+NLPV-G sysfs /sys sysfs rw,relatime 0 0
+NLPV-G tmpfs /run tmpfs rw,relatime,inode64 0 0
+NLPV-G ROOT-WRITE /probe-write-root: failed as required: Read-only file system (os error 30) (errno Some(30))
+NLPV-G ROOT-WRITE /etc/probe-write: failed as required: Read-only file system (os error 30) (errno Some(30))
+NLPV-G ROOT-WRITE /usr/sbin/probe-write: failed as required: Read-only file system (os error 30) (errno Some(30))
+NLPV-G ROOT-WRITE /var-probe-write: failed as required: Read-only file system (os error 30) (errno Some(30))
+NLPV-G RUN-WRITE /run/probe-write: ok (tmpfs)
+NLPV-G /run/udev exists: false; /run/lvm exists: false; /etc/udev exists: false; /lib/udev exists: false
+```
+
+No `udev`, `dmeventd`, `lvmpolld` or `lvmetad` among the processes (`udev/lvm daemons present: false`). The root image file's 64-bit FNV hash is identical before phase a and after phase d (`rootfs_image_hash_unchanged=true`). What LVM did write: under `/run` only `/run/lock/lvm` (the lock directory, which LVM created itself: `/run/lock` did not exist) and `/run/lvm/hints`; `/dev/mapper/*`, `/dev/dm-N` and `/dev/<vg>/<lv>` are entries on devtmpfs, a RAM filesystem, not on a disk. All of this is exactly the property "no write outside `/run` and the PV".
+
+### V-1.3 Step 1: discovery by `PARTNAME`, every other device hidden: PASS
+
+**Hypothesis.** `/sys/class/block/*/uevent` identifies the partition and the filter hides everything else. **Predicted.** Exactly one `PARTNAME=overdrive-volumes` (the look-alike `overdrive-volumes-old` must not match); a filtered `pvs -a` lists only that partition; writes to hidden devices are refused. **Falsified by.** Two matches, a hidden device visible, or a hidden device written.
+
+```
+NLPV-G DISCOVERY /sys/class/block/vdb2/uevent: DEVTYPE=Some("partition") DEVNAME=Some("vdb2") MAJOR:MINOR=253:18 PARTN=Some("2") PARTNAME=Some("overdrive-volumes")
+NLPV-G DISCOVERY /sys/class/block/vdb4/uevent: DEVTYPE=Some("partition") DEVNAME=Some("vdb4") MAJOR:MINOR=253:20 PARTN=Some("4") PARTNAME=Some("overdrive-volumes-old")
+NLPV-G DISCOVERY RESULT: PARTNAME=overdrive-volumes -> /dev/vdb2; node is_block_device=true stat major:minor=Some((253, 18)) uevent MAJOR:MINOR=253:18
+```
+
+A decoy volume group `decoy` was created first on `/dev/vdb3` (fixture, with a filter allowing only that device). Then:
+
+```
+CMD [unfiltered-pvs-all] lvm pvs -a -o pv_name,pv_size,vg_name         CMD [filtered-pvs-all] lvm pvs -a -o pv_name,pv_size,vg_name
+  PV         PSize  VG                                                  PV         PSize VG
+  /dev/root      0                                                      /dev/vdb2     0
+  /dev/vdb1      0
+  /dev/vdb2      0                                       CMD [filtered-vgs] lvm vgs -o vg_name,pv_count   (prints nothing)
+  /dev/vdb3  60.00m decoy
+  /dev/vdb4      0                                       CMD [unfiltered-vgs]  ->  VG decoy, #PV 1
+CMD [filtered-pvcreate-other-partition] lvm pvcreate -y /dev/vdb1 -> code=Some(5)   Cannot use /dev/vdb1: device is rejected by filter config
+CMD [filtered-vgcreate-root-disk]       lvm vgcreate evil /dev/vda   -> code=Some(5)   Cannot use /dev/vda: device is rejected by filter config
+CMD [filtered-vgextend-decoy-pv]        lvm vgcreate evil2 /dev/vdb3 -> code=Some(5)   Cannot use /dev/vdb3: device is rejected by filter config
+```
+
+The 64-bit hashes of `/dev/vda`, `/dev/vdb1`, `/dev/vdb3` (after the deliberate decoy write) and `/dev/vdb4` are identical at the end of phases a, b, c and d (`hidden_devices_byte_identical_through_all_four_guests=true`; the `OTHER-HASH` lines). The root disk shows as `/dev/root` to LVM. **Verdict: PASS.**
+
+### V-1.4 Step 2: `vgcreate -s 4m`, `lvcreate -L 64m`, node without udev: PASS
+
+```
+CMD [vgcreate-cycle-0] lvm vgcreate -s 4m overdrive /dev/vdb2 -> code=Some(0) ms=21.4
+  stdout: Physical volume "/dev/vdb2" successfully created.   Volume group "overdrive" successfully created
+  stderr: WARNING: This metadata update is NOT backed up.
+CMD [lvcreate-ovd-test] lvm lvcreate -L 64m -n ovd-test overdrive -> code=Some(0) ms=28.5 node_ms=8.5
+  stdout: Logical volume "ovd-test" created.
+  stderr: WARNING: This metadata update is NOT backed up.
+NODE [ovd-test] /dev/mapper/overdrive-ovd--test: is_block_device=true major:minor=252:0 dm/name="overdrive-ovd--test" dm/suspended="0" size_sectors="131072" ro="0"
+symlink /dev/overdrive/ovd-test: Ok("/dev/mapper/overdrive-ovd--test")
+/dev/mapper after: control overdrive-ovd--test; dm devices: ["dm-0=overdrive-ovd--test(suspended=0)"]
+/run tree: /run=lock lvm probe-write /run/lock=lvm /run/lock/lvm= /run/lvm=hints
+```
+
+`vgcreate` initialised the PV implicitly. The `WARNING` on stderr accompanies every metadata write (`backup=0`) and the exit status is 0: a caller must not read stderr as failure. The node is a block device (not a regular file) of exactly 131072 sectors.
+
+**Latencies** (every command a separate process, in the 2-vCPU nested guest; all samples in `v1-008`, the `LATENCY` lines):
+
+| Operation | n | min | **median** | max |
+|---|---|---|---|---|
+| `vgcreate -s 4m` (cycle 0 includes the implicit PV init) | 5 | 21.4 ms | **24.3 ms** | 29.4 ms |
+| `vgremove -f` (empty group) | 4 | 18.2 ms | 19.6 ms | 23.5 ms |
+| `lvcreate -L 64m`, command returned | 7 | 22.9 ms | **31.7 ms** | 38.4 ms |
+| `lvcreate -L 64m`, node first seen (polled every 100 us from spawn) | 7 | 7.5 ms | **7.8 ms** | 12.7 ms |
+| `lvremove -f` | 7 | 33.1 ms | **41.0 ms** | 51.3 ms |
+| `pvs` / `vgs` / `lvs -a` (cold guest, filtered) | 3 each | 18.7 / 19.6 / 19.4 ms | **19.4 / 19.7 / 19.9 ms** | 19.4 / 19.7 / 20.0 ms |
+| `lvchange -ay` on an existing LV, command returned | 7 | 15.6 ms | **20.1 ms** | 21.9 ms |
+| `lvchange -ay`, node first seen | 7 | 7.0 ms | **7.2 ms** | 7.5 ms |
+| `lvchange -an` | 7 | 30.2 ms | 33.2 ms | 43.5 ms |
+
+The node exists about 8 ms into a 32 ms `lvcreate`: LVM creates it before the command finishes, so when the command returns the node is already there. A boot probe that runs the scratch create, checks the node, then runs the scratch remove costs about `vgs` 20 ms + `lvcreate` 32 ms + `lvremove` 41 ms, about 95 ms, plus the sysfs discovery (file reads, no `lvm`).
+
+### V-1.5 Step 3 (`lvs --reportformat json` parses) and step 4 (fresh guest): PASS
+
+```
+CMD [lvs-json] lvm lvs --reportformat json -o lv_name,lv_size,lv_attr,vg_free,vg_extent_size --units b -> code=Some(0) ms=17.8
+{ "report": [ { "lv": [ {"lv_name":"ovd-test", "lv_size":"67108864B", "lv_attr":"-wi-a-----", "vg_free":"197132288B", "vg_extent_size":"4194304B"} ] } ],
+  "log": [ ] }
+```
+
+The harness parsed this with `serde_json` (not just printed): `lv_size == "67108864B"` (exactly 64 MiB), `vg_extent_size == "4194304B"`. Units are bytes with a `B` suffix; the document has a second top-level key, `log`.
+
+Step 4. Data written in phase a, through `O_DIRECT` and `fsync`, at 0, 4, 32 and 63 MiB (1 MiB each, deterministic content). A fresh guest (a different `boot_id`, `/dev/mapper` holding only `control`, `dm devices at boot: []`, the node absent) then ran:
+
+```
+NLPV-G dm devices at boot: []; node /dev/mapper/overdrive-ovd--test present: false
+NLPV-G CMD [lvs-0] lvm lvs -a -o lv_name,lv_attr,lv_active,lv_size -> code=Some(0) ms=19.4      ovd-test -wi------- (inactive) 64.00m
+NLPV-G CMD [lvchange-ay] lvm lvchange -ay overdrive/ovd-test -> code=Some(0) ms=16.5 node_ms=7.1
+NLPV-G STEP4 node after lvchange -ay: is_block_device=true
+NLPV-G DATA WROTE  ... off=63MiB fnv=54f496c1e5a72ad6          (phase a)
+NLPV-G DATA READBACK ... off=63MiB fnv=54f496c1e5a72ad6 expected=54f496c1e5a72ad6 match=true   (phase b, all four offsets match)
+```
+
+The data also read back after seven `lvchange -an` / `-ay` cycles, and `vgchange -ay` on an already active group exits 0. After deactivation the node disappears (`-an`), after activation it reappears, all without udev.
+
+### V-1.6 Step 5: crash safety: PASS (three ways)
+
+**5a. 20 iterations, each with a SIGKILLed `lvcreate` and a SIGKILLed `lvremove`** (`v1-008`). Per iteration: kill a `lvcreate kc<i>` at a random delay in `[0, 1.2 x median]` (the baselines were measured first: `lvcreate` median 31.8 ms, `lvremove` 21.0 ms); create a victim `kr<i>` with a clean `lvcreate`; kill an `lvremove` of it at a random delay; record the state; then remove whatever a kill left committed with plain `lvremove -f`. No `vgcfgrestore`, no `dmsetup remove`, no editing of anything.
+
+| | landed (SIGKILLed) | finished before the kill | LV afterwards (landed kills) |
+|---|---|---|---|
+| `lvcreate`, 20 | 13 | 7 | `absent` 6, `present-active` 7 |
+| `lvremove`, 20 | 17 | 3 | `absent` 6 (the removal had committed), `present-active` 7 (nothing had happened yet), **`present-inactive` 4** (deactivated, metadata not yet committed) |
+
+Totals: 30 kills landed, 10 operations finished first. After every iteration: free extents back to the baseline (47 of 63) so **no extent leaked in any iteration**, **no orphan dm device** (a dm device whose LV is not in the metadata; the `orphan_dm=[]` field on every `ITERSUM` and `STATE` line), every clean operation between kills succeeded (`clean_op_failures_between_kills=0`, `cleanup_failures=0`). Process-gone time often exceeded kill-sent time by 15 to 25 ms (`SIGKILL sent at 12.5ms, process gone at 28.0ms`): the process sits in the kernel until the in-flight device-mapper or I/O step returns, so a SIGKILL lands between steps, not inside one.
+
+After the storm, with no repair: `vgs`, `lvs`, `vgchange -ay`, `vgck` all exit 0, a clean `lvcreate -L 64m -n clean-final` exits 0 and its node exists (`recovery exits: vgs=Some(0) lvs=Some(0) vgchange_ay=Some(0) vgck=Some(0) clean_lvcreate=Some(0) node_present=true`). `ovd-test` still reads back intact. The VMM was then **SIGKILLed without a shutdown**, and a fourth, cold guest again ran `vgchange -ay`, `vgck`, a clean `lvcreate` and read back `ovd-test` (`STEP5b exits: vgchange_ay=Some(0) vgck=Some(0) clean_lvcreate=Some(0)`, `readback_all_match=true`).
+
+A probe flaw worth recording (`v1-007`, run 2): without the per-iteration cleanup the leftover committed LVs (16 MiB each, kills landing after the commit) used up the 192 MiB pool and later `lvcreate`s correctly failed `Volume group "overdrive" has insufficient free space (3 extents): 4 required.` That is LVM being right, not a defect; the probe now removes leftovers with ordinary `lvremove -f`.
+
+**5c. Extra, beyond the five steps: the whole node dies mid-operation** (`v1-011`, metal run `f32925797af84a8f475dc135`). Process-level SIGKILL leaves the guest kernel alive; a node crash does not. A guest looped `lvcreate` / `lvremove`; the harness SIGKILLed the **VMM** at a random 32 to 595 ms into the loop, 15 times, each followed by a fresh guest that read the store with ordinary commands before looping again. Kills landed with `lvremove` begun and with `lvcreate` begun (the last `LOOP begin` line names it). Every boot after a crash: `vgs`, `lvs`, `vgck`, `vgchange -ay` exit 0 with **no warnings or errors** (the harness scanned for `warning`, `inconsistent`, `missing`, `corrupt`, `repair`, `failed`, `error`); crashes left committed LVs (`e2x0`, `e3x6`, ... 16 MiB, inactive after reboot) in some cases and nothing in others. A final cold guest removed all leftovers with `lvremove -f` (`cleanup_failures=0`), made a clean `lvcreate`, found free extents `47 63`, the baseline (`orphan_dm=[]`), and `ovd-test` read back intact (`CRASHFINAL ... data_intact=true`). Earlier runs of this series (`v1-009`, `v1-010`) are kept: their harness could not name the in-flight op (it stopped reading the console when it armed the kill); `v1-011` fixes that.
+
+### V-1.7 Design implications
+
+- **VD-3 (raw linear LV, extents reserved) holds.** `lvcreate -L 64m` reserved exactly 16 extents (`lv_size 67108864B`); the node is a block device of exactly 131072 sectors; after a crash an LV is either absent or present, never half-built (no orphan dm device in any iteration or crash). So `ensure` after a crash is: look the LV up (`lvs`), create if absent, `lvchange -ay` if present: both orderings the kills produced are covered, and A5 (a crash after `ensure`, before the VMM spawns, leaves the volume intact for the next launch) follows from A4. A killed `lvremove` can leave an **inactive** LV (4 of 17 landed kills): removal code must treat "present, inactive" as an ordinary state (the #211 entry contract).
+- **VD-4 (the image provides dm, LVM and a labelled partition) holds, with exact requirements the ADR does not list yet:** `CONFIG_BLK_DEV_DM=y`, `CONFIG_EFI_PARTITION=y` (without it `PARTNAME` is not exported), `CONFIG_DEVTMPFS=y` mounted on `/dev`, a writable tmpfs on `/run`, the `lvm` binary with its library closure (no static `lvm` exists on this host: either the image carries the dynamic closure, about 7.3 MB of libraries including libsystemd/libudev/libselinux that are never used here, or builds a static LVM2), and a **system directory**: `LVM_SYSTEM_DIR=/run/lvm` in every spawn's environment, or an empty `/etc/lvm` baked into the read-only image. No `/etc/lvm.conf`, no udev rules, no `lvm2-monitor`, no `dmeventd` were needed.
+- **VD-5 (boot probe) holds, and its cost is about 95 ms** for a full `vgs` + scratch `lvcreate` + node check + scratch `lvremove` cycle, with `pvs`/`vgs`/`lvs` each about 20 ms. Two facts shape the probe: (1) the node exists when `lvcreate` returns (it appears about 8 ms into a 32 ms command), so the probe checks the node after the command returns and needs no polling; (2) a crash can leave a committed scratch LV (observed: `e3x6` after a VMM kill), which is inactive after reboot and removable with `lvremove -f` (no cleanup failures in the storm or in the crash series), so "remove a scratch volume left by a crashed probe first" is both needed and sufficient. A command whose exit is 0 but whose node is absent never occurred; the probe's node check stays as written.
+- **The contract's command surface:** every spawn `lvm <subcommand> --config '<pinned>' ...` with `LVM_SYSTEM_DIR=/run/lvm`; exit 0 success (stderr `WARNING: This metadata update is NOT backed up.` is normal on every write and on `vgcreate`/`pvcreate`); exit 5 for a command refused by the filter or for insufficient free space (`Volume group "overdrive" has insufficient free space (N extents): M required.`, the `InsufficientSpace` source); exit 4 when the system directory cannot be created. `lvs --reportformat json --units b` sizes carry a `B` suffix and the report has a `log` key. `lvcreate` created `/run/lock` and `/run/lock/lvm` itself.
+
+### V-1.8 What remains unverified
+
+- **The image.** The probe uses the distro binary and the box's kernel image; the appliance kernel config and image do not exist yet (GH #75). `CONFIG_EFI_PARTITION`, `DEVTMPFS`, `BLK_DEV_DM` are as built by the distro, not pinned by the ADR.
+- **Power loss and media.** The backing file lives on tmpfs under the outer guest and the VMM kill leaves the host page cache intact. This shows LVM's metadata survives a node crash with the guest's unflushed writes discarded; it does not show behaviour under torn media writes or a lost write cache. Flush ordering end to end on the real NVMe is not shown (probe A1 covers the VMM's flush path, not LVM on the real partition).
+- **Sample sizes and load.** Latencies are 3 to 7 samples per operation in one run on a shared box in a nested guest; the crash iterations are 20 plus 15, with random but wall-clock-seeded delays (not reproducible bit for bit). Concurrent `lvm` invocations (the lock in `/run/lock/lvm`), many LVs (hundreds), and a larger or fuller volume group were not exercised.
+- **Names.** The probe used `ovd-test`, `lat`, `kc<i>`, `kr<i>`, `e<k>x<i>`, `clean-final`, `final`; the real `ovd-<32 hex>` (36 characters) was not created, nor was the "first 4 KiB zeroed, rest not" claim checked.
+- **Node permissions.** The `/dev/mapper` node's owner and mode were not recorded; the chown for the confined VMM (ADR-0301/VD-6) is untested here (spike C3 covers a dm node under uid 4200).
+- **Step 4 variants.** The fresh guest reused the same inner kernel and rootfs; a re-imaged root with a different LVM build was not tried.
+
+### V-1.9 Evidence index
+
+All run logs are `evidence/v1-*.log`; each starts with the metal run line `OVERDRIVE_METAL_RUN_ID=...`. Host and guest kernel: `7.0.0-38-generic` (`v1-001`; `uname_r=` lines in `v1-008`).
+
+| Log | Metal run id | What it is |
+|---|---|---|
+| `v1-001-recon-host.log` | `402273c28995ed368b242a64` | host facts: `lvm`, version, sha256, `ldd` closure, kernel config |
+| `v1-002-lvm-first.log` | `9b19cea10ce543c076741889` | failed attempt kept: guest kit not prepared in `nlpv-design` (`OverdriveInitBuildFailed`) |
+| `v1-003-bpf-build.log`, `v1-004-guest-kit-prepare.log` | `6ec77b7b4a57d10b8d5ff7e0`, `4a34692f0e01e4b3167c404e` | prerequisites in the `nlpv-design` directory |
+| `v1-005-lvm-first.log` | `5a89f197642237ee47f300b0` | first real run: every `lvm` command exits 4 on the read-only root (V-1.1) |
+| `v1-006-sysdir-variants.log` | `88b7286e1052a1e74181496f` | the `LVM_SYSTEM_DIR` variants in two images |
+| `v1-007-lvm-run2.log` | `e47c91da10e97e0d76e155b4` | all steps run; two probe flaws (harness expected `/dev/vda` where LVM says `/dev/root`; the pool filled with leftover LVs), kept |
+| **`v1-008-lvm-run3.log`** | **`04b3d5f85b8c04814d243bf3`** | **the deciding run: five steps PASS** |
+| `v1-009-vmm-crash.log`, `v1-010-vmm-crash.log` | `3fb9d633fe7989ebfb0c9091`, `7560a2a56da0590e1d3da1aa` | VMM-crash series with a harness that could not name the in-flight op; kept |
+| `v1-011-vmm-crash.log` | `f32925797af84a8f475dc135` | VMM-crash series, 15 crashes, PASS |
+
+The remote directory `nlpv-design` was left in place. Nothing was installed on the box; the logs were captured locally from each run's output, so no `metal pull` was needed.
