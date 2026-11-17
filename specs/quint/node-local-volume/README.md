@@ -11,7 +11,7 @@ The slice is the loop `overdrive deploy` can drive: declare a volume, create it 
 | Owner | Modelled as |
 |---|---|
 | volume store | `storeUp` (composed or absent), `spaceFree`; one logical volume: `lv` (exists), `active` (false after creation until `ensure` activates it, and after a node reboot), identity `vid`, `nCreated` (volumes ever created); the guest's data as `dv` (model-only `data_version`), `maxDv` (ghost: the latest version ever written) |
-| kernel claim (VD-8) | `claim`: 0 free, `a > 0` held by the VMM of allocation `a`. A killed VMM's claim lingers until `Drain`: the claim outlives the process (spike B2b). `claim_state` is the authentic arbiter; it also reports `NotFound` for a missing volume |
+| kernel claim (VD-8) | `claim`: 0 free, `a > 0` held by the VMM of allocation `a`. A killed VMM's claim lingers until `Drain`: the claim outlives the process (spike B2b). `claim_state` is the authentic arbiter; it reports `NotFound` for a missing or an inactive volume (no device node), see § Projection |
 | launch path (VD-8, VD-9) | per allocation, control-plane memory: `ph` (supervision claimed, create-if-absent done, activated, claim reported Free), `waited` (poll steps, bound `BOUND`). Actions `LaunchEnsureCreate`, `LaunchEnsureActivate` (two effects; a control-plane crash can interrupt after each), `LaunchUnavailable` / `LaunchCmdFail` (typed `VolumeUnavailable`), `LaunchCheck`, `LaunchPoll`, `LaunchHeldFail` (typed `VolumeHeld`: the contract's `VolumeUnavailable { Held }`), `VmmSpawn` (takes the claim) / `VmmSpawnFail` (the VMM's own `O_EXCL` open is the atomic verdict), `LaunchDiscard` (a superseded launch's result) |
 | workload-lifecycle | `WlStart`: mints a successor only when no allocation row is non-terminal (ADR-0109); it does not wait for cleanup or claim release (ADR-0106). `StopAlloc` after `OpStop`, `WorkloadRestart` (generation bump), `OpResume` |
 | restart budget | `charged` (failed attempts, every typed start failure and every crash), `LIMIT` (design: 5; abstracted), `exhausted` = BackoffExhausted terminal |
@@ -45,21 +45,11 @@ Liveness (weak fairness of every system action family, finite faults, `FB < LIMI
 
 All on `vol_conf` (the `#[quint_test]` pins).
 
-| Scenario | Run |
-|---|---|
-| deploy to a running allocation: ensure creates then activates, attach, guest writes | `happy_path_deploy_to_running` |
-| killed VMM, successor minted at once, waits for the drain, attaches the same volume with the data, no budget charge for the wait | `restart_waits_for_drain_then_attaches` |
-| operator stop keeps the volume, a resumed workload reattaches it | `stop_keeps_volume_and_restart_reattaches` |
-| control-plane crash after create before attach: the next launch reuses the volume | `crash_after_create_before_attach_reuses_volume` |
-| node reboot: volume inactive, the next `ensure` activates it, data survives | `node_reboot_reactivates_and_data_survives` |
-| claim held past the bound: `VolumeHeld`, charged, no VMM attached; the next successor attaches after the drain | `launch_bound_exceeded_fails_typed_and_charges_budget` |
-| no free extent: typed failure each attempt, charged until BackoffExhausted, nothing created or attached | `no_space_fails_typed_and_never_attaches` |
-| no volume store composed: typed failure, nothing created or attached | `store_absent_fails_typed_and_never_attaches` |
-| restart while a launch waits: the stale launch's result is discarded, never attaches | `superseded_launch_result_discarded` |
+The single scenario-to-run table is in `docs/feature/node-local-persistent-volume/feature-delta.md` § "Formal protocol model". Nine runs, all in `checks.toml`.
 
 ## Projection for the conformance driver
 
-From the feature delta § "Observable projections the conformance driver reads": `lv` and "claimed" from `VolumeBacking::claim_state` (`NotFound` = absent) with `SimVolumeBacking` the named arbiter (paired Tier-3 test); `as` and `exhausted` from `ObservationStore::alloc_status_rows()` (`state`; a `BackoffExhausted { attempts }` terminal). Model-only (the driver does not project them; `charged` is observed through the rows as stated in the feature delta § Observable projections): `charged`, `holder` (which allocation holds the claim), `dv` / `maxDv` / `vid` / `nCreated` (Tier-3 read-back), `active`, `storeUp` / `spaceFree` (fault-injection inputs), `ph`, `waited`, `alive`, `orphan`, `why`, `ran`, `faults`, `slow`, `drainFail`, `conf_step`.
+From the feature delta § "Observable projections the conformance driver reads", which is authoritative: `lv` and `active` are compared as `lv ∧ active ⇔ claim_state ≠ NotFound` (`VolumeBacking::claim_state`; an absent and an inactive volume both have no device node and report `NotFound`, so the state `lv ∧ ¬active`, which run `node_reboot_reactivates_and_data_survives` reaches, projects as `NotFound` and is otherwise observed by Tier-3 read-back; `SimVolumeBacking` reports `NotFound` while it models a volume as inactive); "claimed" from `claim_state` with `SimVolumeBacking` the named arbiter (paired Tier-3 test: `Held`, `Free`, inactive); `as` and `exhausted` from `ObservationStore::alloc_status_rows()` (`state`; a `BackoffExhausted { attempts }` terminal). Model-only (the driver does not project them; `charged` is observed through the rows as stated in the feature delta): `charged`, `holder` (which allocation holds the claim), `dv` / `maxDv` / `vid` / `nCreated` (Tier-3 read-back), `storeUp` / `spaceFree` (fault-injection inputs), `ph`, `waited`, `alive`, `orphan`, `why`, `ran`, `faults`, `slow`, `drainFail`, `conf_step`. This projection rule is the conformance driver's comparison rule; it changes no spec file.
 
 ## Assumptions
 
@@ -79,7 +69,7 @@ Modelling assumptions (this spec; each is a choice that can be revisited):
 | Id | Assumption | Discharged by |
 |---|---|---|
 | M1 | the volume is created inactive and activated by a second effect; a node reboot leaves the volume present and inactive. A conservative refinement: real `lvcreate` returns an active volume; an inactive one comes from a reboot or a killed `lvremove` | V-1 steps 2, 4 and 5 (passed) |
-| M2 | a control-plane crash marks the Pending allocation whose launch was lost `Failed` (charged); a spawned VMM stays running with its row `Running` until `VmReclamation` kills it, then the row is `Failed` (charged) and the claim drains | the existing allocation-recovery behaviour; DISTILL confirms it through the production owner path (feature delta § Required boundary scenarios, 5). It bounds when `BackoffExhausted` is reached, not an invariant |
+| M2 | a control-plane crash marks the allocation whose launch was lost `Failed` (charged); a spawned VMM stays running with its row `Running` until `VmReclamation` kills it, then the row is `Failed` (charged) and the claim drains | a conservative abstraction of the existing path: in production the lost launch leaves no row and the next `WorkloadLifecycle` tick mints a fresh allocation (a failure-driven restart launch's budget was charged at issuance), and `VmReclamation` reaps a surviving VMM's artifacts (feature delta § Required boundary scenarios, 5); DISTILL confirms it through the production owner path. Charging more than reality exhausts sooner; it bounds when `BackoffExhausted` is reached, not an invariant |
 | M3 | a healthy drain finishes within the bound; `DeviceSlow` models the in-flight I/O that outlasts it | spike B2b; the 30 s bound is a policy constant (feature delta § Validation) |
 | M4 | a launch that waited the whole bound ends the stuck-drain condition (`LaunchHeldFail` clears `slow`): the bound is the longest stuck request (ADR-0317). Without it, weak fairness lets every successor wait its bound and exhaust the allocation ids | spike B2b; the exposure "a claim that never drains" in the feature delta (ADR-0317 consequences); the 30 s bound is a policy value |
 | M5 | a superseded launch (operator stop or `workload restart` while Pending) runs to its bound and its result is discarded (`reconcilers.md`); it may still run `ensure` | the Tier-3 and seeded-sim scenarios of feature delta § Required boundary scenarios 4 |

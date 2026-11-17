@@ -27,17 +27,17 @@ re-provisioning. The entry contract E1 to E3 is part of VD-10 and is proposed, n
 
 | Id | Decision | ADR |
 |---|---|---|
-| VD-1 | `[vm.volume]` with `size` (`GiB`/`TiB`); one per workload; `replicas = 1` | 0296 |
-| VD-2 | Volume belongs to the workload; stop keeps it; only withdrawal deletes it | 0297 |
-| VD-3 | Raw linear logical volume, extents reserved; hashed name in VG `overdrive` | 0298 |
-| VD-4 | The image provides dm, `EFI_PARTITION`, devtmpfs, LVM tools and the provisioned, wiped VG on a labelled partition; Overdrive sets `LVM_SYSTEM_DIR=/run/lvm` and only verifies | 0299 |
-| VD-5 | Boot probe (Earned Trust); refuse startup when the store is broken | 0300 |
-| VD-6 | Second raw disk: write-back, `direct=on`, `image_type=raw`, `serial=ovd-volume` | 0301 |
-| VD-7a | Fork change F1: a failed write-through fsync completes the request with an I/O error | 0302 |
-| VD-7b | Fork change F2: a writable block device is opened `O_EXCL` | 0305 |
-| VD-7c | Fork change F3: an explicit image type skips format sniffing | 0306 |
-| VD-8 | Replacement waits for the claim to clear (30 s), not for process exit | 0303 |
-| VD-9 | The launch path ensures (creates if absent, activates if inactive) the volume; no volume reconciler | 0304 |
+| VD-1 | `[vm.volume]` with `size` (`GiB`/`TiB`); one per workload; `replicas = 1` | 0310 |
+| VD-2 | Volume belongs to the workload; stop keeps it; only withdrawal deletes it | 0311 |
+| VD-3 | Raw linear logical volume, extents reserved; hashed name in VG `overdrive` | 0312 |
+| VD-4 | The image provides dm, `EFI_PARTITION`, devtmpfs, LVM tools and the provisioned, wiped VG on a labelled partition; Overdrive sets `LVM_SYSTEM_DIR=/run/lvm` and only verifies | 0313 |
+| VD-5 | Boot probe (Earned Trust); refuse startup when the store is broken | 0314 |
+| VD-6 | Second raw disk: write-back, `direct=on`, `image_type=raw`, `serial=ovd-volume` | 0315 |
+| VD-7a | Fork change F1: a failed write-through fsync completes the request with an I/O error | 0316 |
+| VD-7b | Fork change F2: a writable block device is opened `O_EXCL` | 0319 |
+| VD-7c | Fork change F3: an explicit image type skips format sniffing | 0320 |
+| VD-8 | Replacement waits for the claim to clear (30 s), not for process exit | 0317 |
+| VD-9 | The launch path ensures (creates if absent, activates if inactive) the volume; no volume reconciler | 0318 |
 | VD-10 | Slice scope: reclaim, erasure, status row, start gate, pinning, growth are not in this slice | none (wave decision) |
 
 ## [REF] Answers to the issue's DESIGN questions
@@ -125,12 +125,14 @@ rejected at submit today, so a Schedule with a volume is rejected before this ru
 WorkloadId, size: VolumeSize }>`.
 
 Persisted formats: (1) a `WorkloadIntentEnvelope::V2` bump with `JobV2`/`ServiceV2`/`ScheduleV2`/`VmV2` payloads and a
-`ServiceSpecEnvelope` V2 per ADR-0048; the V1 fixtures are regenerated as an explicit frozen V1 (appending a larger V2
-changes the root size rkyv archives), `known_discriminants` becomes `[0, 1]`, `FIXTURE_V2` is added in the same commit;
+`ServiceSpecEnvelope` V2 per ADR-0048; the V1 fixtures are re-pinned as an explicit frozen V1 (built directly as
+`Envelope::V1(<frozen V1 payload>)`, never through `latest()` or the aliases, which now produce V2), as `.claude/rules/development.md` §
+"rkyv schema evolution" requires when a larger V2 variant is appended (rkyv sizes the archived root to the largest variant), `known_discriminants`
+becomes `[0, 1]`, and `FIXTURE_V2` is added in the same commit;
 a stored V1 workload re-archives to different bytes so its `spec_digest` changes, and under the single-cut greenfield
 policy the upgrade path is deleting the data directory (see Exposures). (2) The new `TransitionReason` variants are
 appended at the end of the enum, which `AllocStatusRowV1` archives; if the archived size of `AllocStatusRowV1` changes,
-the V1 fixtures are regenerated as an explicit frozen V1 and `discriminant_offset_from_end` is re-pinned in the same
+the V1 fixtures are re-pinned as an explicit frozen V1 (same rule) and `discriminant_offset_from_end` is re-pinned in the same
 commit (no new row envelope version: struct-literal call sites stay).
 
 ### Port: `VolumeBacking` (VD-3, VD-4, VD-5, VD-8, VD-9)
@@ -162,10 +164,14 @@ Behavioural contract (the trait docstrings pin these):
   that outlives the deadline runs to its own end and is never aborted (`rust.md`). Idempotent and safe to repeat
   after a crash.
 - `claim_state` (no persistent effect, returns without blocking): makes one non-blocking attempt to take the volume's
-  exclusive claim (an `O_EXCL` open) and releases it; `Free` iff it took it. An unknown volume: `NotFound`. It is the
-  authentic arbiter of the kernel's claim for the conformance projection. It does not take the OFD lock: for one open
-  file description the kernel removes the lock before it releases the device, so a free claim implies a free lock
-  (ADR-0317).
+  exclusive claim (an `O_EXCL` open of its `/dev/mapper` node) and releases it; `Free` iff it took it, `Held` iff the open
+  fails `EBUSY`. An absent volume **or an inactive one** (it has no device node, so the open fails `ENOENT`, as after every
+  node reboot): `Err(VolumeBackingError::NotFound)`. `NotFound` therefore does not distinguish "no such volume" from "present but inactive"; § Observable
+  projections gives the conformance rule. It is the authentic arbiter of the kernel's claim for the conformance projection. It
+  does not take the OFD lock: Cloud Hypervisor opens the disk once (`vendors/cloud-hypervisor/block/src/factory.rs:85-93 @
+  f252bb20b`) and takes the lock on that descriptor (`vendors/cloud-hypervisor/virtio-devices/src/block.rs:1026`), so the lock
+  and the claim belong to one open file description; the kernel removes the lock before it releases the device, so a free claim
+  implies a free lock (ADR-0317).
 - Nothing else is a method: the launch path owns the bounded wait (below).
 
 `VolumeBackingError` is `#[non_exhaustive]`: `StoreAbsent`, `NotFound { workload }`, `InsufficientSpace { needed:
@@ -174,16 +180,13 @@ validated newtype of bytes in `overdrive-core` (no existing bytes newtype exists
 enum-owned (kebab labels).
 
 `overdrive-host`: `LvmVolumeBacking`, the only place that spawns `lvm`. Every spawn is `lvm <subcommand> --config '<pinned>' ...`
-with `LVM_SYSTEM_DIR=/run/lvm` in the spawn's environment (V-1). The pinned `--config` is `activation{udev_sync=0 udev_rules=0
-monitoring=0} devices{filter=["a|^<labelled partition node>$|","r|.*|"] use_devicesfile=0} backup{backup=0 archive=0}
-global{use_lvmpolld=0 locking_dir="/run/lock/lvm"}`, the filter built from the node discovered by `PARTNAME`. LVM insists on a
-system directory that no `--config` key can move. The variable is chosen over an empty `/etc/lvm` in the image (both passed in
-V-1; ADR-0313): it keeps LVM's writes to `/run` and the physical volume, is quiet (an empty-string value prints backup warnings
-on a read command), and is set at the one spawn site. Command surface: exit 0 is success
-and stderr `WARNING: This metadata update is NOT backed up.` accompanies every metadata write, so stderr is never read as
-failure; exit 5 is a filter refusal or `insufficient free space` (the `InsufficientSpace` source); exit 4 is a missing
-system directory (a bug of this contract if it occurs). `lvs --reportformat json --units b` sizes carry a `B` suffix and the
-report has a second top-level `log` key. When `lvcreate` returns 0 its device node already exists, so no polling is needed.
+with `LVM_SYSTEM_DIR=/run/lvm` in the spawn's environment (V-1; chosen over an empty `/etc/lvm` in the image, ADR-0313). The
+pinned `--config` is `activation{udev_sync=0 udev_rules=0 monitoring=0} devices{filter=["a|^<labelled partition node>$|","r|.*|"]
+use_devicesfile=0} backup{backup=0 archive=0} global{use_lvmpolld=0 locking_dir="/run/lock/lvm"}`, the filter built from the node
+discovered by `PARTNAME`. Exit status maps to typed errors: 0 is success (stderr warnings accompany metadata writes and are never
+read as failure); 5 is a filter refusal or insufficient free space (the `InsufficientSpace` source); 4 is a missing system
+directory (a bug of this contract); any other non-zero is `StoreCommand`. When `lvcreate` returns 0 its device node already
+exists, so no polling is needed.
 `overdrive-sim`: `SimVolumeBacking`, with fault injection (claim held until a `drain`
 step, free-space exhaustion, command failure, store absent); it is the named arbiter for `claim_state` in conformance.
 
@@ -248,11 +251,11 @@ Owner of the protocol: the VM launch path (`VmDriver::start`) with `WorkloadLife
 
 | Model variable | Production accessor |
 |---|---|
-| `lv[w]` exists | `VolumeBacking::claim_state(&w)`: `NotFound` means absent |
-| `claimed[w]` (a VMM holds the device) | `VolumeBacking::claim_state(&w)`, with **`SimVolumeBacking` the named arbiter** (the kernel's claim table is a driven-port fact the owner does not hold). Paired Tier-3 test: on `LvmVolumeBacking`, a scratch volume held by an `O_EXCL` opener reports `Held`, and `Free` after release, matching the sim for the same scenario. |
+| `lv[w]` exists and `active[w]` | `VolumeBacking::claim_state(&w)` under the **projection rule `lv ∧ active ⇔ claim_state ≠ NotFound`**. A volume that exists but is inactive (the state after every node reboot) has no `/dev/mapper` node, so the real adapter's `O_EXCL` open fails `ENOENT` and reports `NotFound`: `claim_state` cannot tell `lv ∧ ¬active` from `¬lv`. The driver therefore compares the model's `lv ∧ active` with `claim_state ≠ NotFound`, and observes `lv ∧ ¬active` by Tier-3 read-back (the activation `ensure` reports, or LVM's `lvs` report). `SimVolumeBacking` must report `NotFound` for as long as it models a volume as inactive, so sim and real agree. |
+| `claimed[w]` (a VMM holds the device) | `VolumeBacking::claim_state(&w)` (`Held`; `Free` otherwise, for an active volume), with **`SimVolumeBacking` the named arbiter** (the kernel's claim table is a driven-port fact the owner does not hold). Paired Tier-3 test, on `LvmVolumeBacking` against a scratch volume, three cases that must match the sim for the same scenario: held by an `O_EXCL` opener reports `Held`; after release reports `Free`; deactivated (`lvchange -an`, no device node) reports `NotFound`, and `Free` again once re-activated. |
 | `alloc[a].state` | `ObservationStore::alloc_status_rows()` (`state`) |
 | `exhausted[w]` (BackoffExhausted reached) | `ObservationStore::alloc_status_rows()`: a row whose `terminal` is `BackoffExhausted { attempts }` (the source `handlers::restart_budget_from_rows` already reads) |
-| `charged[w]` (attempts charged to the budget) | model-only. The budget is the reconciler's private per-chain `restart_counts` (`workload_lifecycle.rs:1289-1296`: carried per allocation chain, unchanged across `workload restart` and platform reclaim, reset by a fresh placement), so counting `Failed` rows or reading the row's `restart_count` (a crash-observability counter, ADR-0078) is not the budget. The invariant `no_drain_failure_charges_budget` is observed through rows instead: while the predecessor's drain is within the 30 s bound, no allocation row of the workload ends `Failed` with reason `VmVolumeUnavailable { Held }`, and `BackoffExhausted` is not reached. |
+| `charged[w]` (attempts charged to the budget) | model-only. The budget is the reconciler's private per-chain `restart_counts` (`workload_lifecycle.rs:1289-1296`: carried per allocation chain, unchanged across `workload restart` and platform reclaim, reset by a fresh placement), so counting `Failed` rows or reading the row's `restart_count` (a crash-observability counter, ADR-0078) is not the budget. The invariant `no_drain_failure_charges_budget` is observed through rows instead: while the predecessor's drain is within the 30 s bound, no allocation row of the workload records a start failure (no `Failed` row from a start failure, whatever its reason), and `BackoffExhausted` is not reached. |
 | `holder[w]` (which allocation holds the claim) | model-only (the kernel does not record it) |
 | `data[w]` (the volume's contents survive) | model-only; Tier-3 read-back through `serve` + `deploy` |
 
@@ -295,8 +298,8 @@ claim) plus the Tier-3 pairing test; the model encodes the kernel verdict, it do
 - **Owner:** the launch path of `VmDriver`, through `VolumeBacking::claim_state`.
 - **Promise:** at the instant of the attempt the volume's kernel claim was free.
 - **Affected state:** the result of this launch.
-- **Failure projection:** bound passed -> `VolumeUnavailable { Held }`, as the allocation's `Failed` row; unknown volume -> start
-  failure (a bug, `StoreCommandFailed`).
+- **Failure projection:** bound passed -> `VolumeUnavailable { Held }`, as the allocation's `Failed` row; `NotFound` for a volume
+  `ensure` just activated -> start failure (a bug, `StoreCommandFailed`).
 - **Explicitly unaffected:** the predecessor's terminal state and cleanup (ADR-0106 unchanged), guest network lease, identity,
   restart-budget policy, the boot deadline value.
 - **Ordering:** after `ensure`, before `Vmm::create`; its 30 s is additional to `VM_BOOT_DEADLINE` (30 s) and runs inside the one
@@ -315,21 +318,38 @@ claim) plus the Tier-3 pairing test; the model encodes the kernel verdict, it do
    evaluated after the launch ends never reattaches a stale result (model run `superseded_launch_result_discarded` is the conservative
    abstraction).
 5. Disconnect/reconnect: control-plane crash between `ensure` and VMM spawn: the next launch's `ensure` finds the volume and proceeds; a
-   surviving VMM is reclaimed by `VmReclamation`, its claim drains, the wait covers it. DISTILL confirms, through the production owner
-   path, the existing recovery of a `Pending` allocation whose launch died with the control plane (this slice adds no recovery).
+   surviving VMM is reclaimed, its claim drains, the wait covers it. The existing path for a launch that died with the control plane
+   (this slice adds none): the shim writes no allocation row before `driver.start` returns, so the lost launch leaves no row; the next
+   `WorkloadLifecycle` tick takes its "no running allocation, none to restart" branch and mints a fresh allocation (ADR-0104, unused
+   ids are skipped); a failure-driven restart launch's budget was already charged at issuance; a surviving VMM's run directory or clone is reaped by
+   `VmReclamation` (`plan_reclamation`, `DiscardStrandedArtifacts`, or `ReclaimAllocation` when a non-terminal row exists), booted by
+   `vm_reclamation_boot::converge`. DISTILL confirms it through the production owner path.
 6. Feature disabled: a workload with no `[vm.volume]` makes no `ensure`, no wait, no extra `--disk`; a node with no volume store
    composes unchanged.
 
 Seeded `overdrive-sim` invariants: `single_writer`, `data_survives_restart`, `no_drain_failure_charges_budget`; `assert_eventually!` a
 replacement attaches once the predecessor's claim drains. Tier 3 (metal, guest group `cgroup-default`): create, write, `workload
-restart`, read back; a node reboot and read back; a delayed in-flight write replacement; the `Held`/`Free` pairing test; a
+restart`, read back; a node reboot and read back; a delayed in-flight write replacement; the `Held`/`Free`/inactive pairing test; a
 broken-substrate probe catalogue.
 
 ## [REF] Formal protocol model
 
 Specification: `specs/quint/node-local-volume/` (its `README.md` states the abstraction). Decisions modelled: VD-2, VD-8, VD-9.
-Scenario-to-run mapping and verdicts are in § Quint results at the end of this document. Boundary scenarios 3 (unrelated state) and 6
-(feature disabled) are not protocol behaviour and have no model run: seeded simulation and Tier 3 cover them.
+Verdicts are in § Quint results at the end of this document. Boundary scenarios 3 (unrelated state) and 6 (feature disabled) are not
+protocol behaviour and have no model run: seeded simulation and Tier 3 cover them. This is the one scenario-to-run table (the spec's
+README points here); the runs are the ones DISTILL pins with `#[quint_test]`.
+
+| Scenario | Named run |
+|---|---|
+| deploy to a running allocation | `happy_path_deploy_to_running` |
+| killed VMM, successor waits for the drain, same volume and data | `restart_waits_for_drain_then_attaches` |
+| operator stop keeps the volume, resume reattaches | `stop_keeps_volume_and_restart_reattaches` |
+| crash after create, before attach | `crash_after_create_before_attach_reuses_volume` |
+| node reboot: volume inactive, re-activated, data survives | `node_reboot_reactivates_and_data_survives` |
+| claim held past the bound | `launch_bound_exceeded_fails_typed_and_charges_budget` |
+| no free extent | `no_space_fails_typed_and_never_attaches` |
+| no store composed | `store_absent_fails_typed_and_never_attaches` |
+| restart while a launch waits | `superseded_launch_result_discarded` |
 
 Assumptions and what discharges each:
 
@@ -337,7 +357,7 @@ Assumptions and what discharges each:
 |---|---|
 | A1 a held `O_EXCL` claim refuses a second claimant on a dm-linear device, through any node | spike run-031 (F2); Tier-3 pairing test |
 | A2 dm refuses to remove an open device (`drivers/md/dm.c:357-372 @ v7.0`) | not relied on in this slice (nothing removes a volume); entry contract for #211 |
-| A3 the claim and lock outlive the VMM process while in-flight I/O drains | spike B2b; for one open file description the kernel removes the lock before the bdev `release` frees the claim (`fs/file_table.c:461,468 @ v7.0`), so a free claim implies a free lock; a lost race otherwise is an ordinary typed start failure (ADR-0317) |
+| A3 the claim and lock outlive the VMM process while in-flight I/O drains | spike B2b; the disk is opened once and the lock taken on that descriptor (`vendors/cloud-hypervisor/block/src/factory.rs:85-93`, `virtio-devices/src/block.rs:1026` @ `f252bb20b`), so for one open file description the kernel removes the lock before the bdev `release` frees the claim (`fs/file_table.c:461,468 @ v7.0`), so a free claim implies a free lock; a lost race otherwise is an ordinary typed start failure (ADR-0317) |
 | A4 LVM metadata operations are crash-atomic | V-1 (passed): 20 iterations of SIGKILLed `lvcreate` and `lvremove` and 15 whole-VMM SIGKILLs left a volume either absent or present, never half-built, no leaked extent, no orphan dm device, no manual repair (`v1-008`, `v1-011`) |
 | A5 a control-plane crash after `ensure` and before VMM spawn leaves the volume intact for the next launch | A4 |
 | A6 the device persists what it acknowledges after a flush | reasoned no-obligation: a media guarantee outside the appliance's control that only a power-loss test could probe |
@@ -389,6 +409,7 @@ the full text goes in the proposed comment on #211.
   can leave (V-1, 4 of 17 landed kills), is an ordinary state for reclaim.
 - E3. Reclaim is planned only when the workload has no `Pending` or `Running` allocation (the larger model found a launch that had passed the claim
   check, a reclaim taking the claim, a control-plane crash, and the surviving VMM opening a volume marked `reclaiming`).
+
 ## [REF] Scope limitations and exposures (proposals; no issue created)
 
 | # | Limitation | Pinned in | Lifting it | Issue |
@@ -436,20 +457,11 @@ limit made it fail as predicted; hazards fail on their decision's invariant: `vo
 The model's launch failure is one abstract typed failure; the model's `VolumeHeld` is the contract's `VolumeUnavailable { Held }`, and the `ensure`
 deadline (a timeout is a command failure) changes names, not the modelled transitions.
 
-| Scenario | Named run |
-|---|---|
-| deploy to a running allocation | `happy_path_deploy_to_running` |
-| killed VMM, successor waits for the drain, same volume and data | `restart_waits_for_drain_then_attaches` |
-| operator stop keeps the volume, resume reattaches | `stop_keeps_volume_and_restart_reattaches` |
-| crash after create, before attach | `crash_after_create_before_attach_reuses_volume` |
-| node reboot: volume inactive, re-activated, data survives | `node_reboot_reactivates_and_data_survives` |
-| claim held past the bound | `launch_bound_exceeded_fails_typed_and_charges_budget` |
-| no free extent | `no_space_fails_typed_and_never_attaches` |
-| no store composed | `store_absent_fails_typed_and_never_attaches` |
-| restart while a launch waits | `superseded_launch_result_discarded` |
+The scenario-to-run table is in § Formal protocol model.
 
-Model assumptions that are not decisions of this feature, with no discharging item here: a `Pending` allocation whose launch dies with the control plane is
-ended and charged by the existing allocation-recovery behaviour (DISTILL confirms it, boundary scenario 5); the model charges one attempt per `Failed` allocation, an abstraction of the
+Model assumptions that are not decisions of this feature, with no discharging item here: a launch that dies with the control plane leaves no allocation row
+and the existing reconcile branch mints a fresh allocation (boundary scenario 5); the model abstracts it as a `Failed`, charged allocation, which exhausts the
+budget sooner than reality and so is conservative; the model charges one attempt per `Failed` allocation, an abstraction of the
 reconciler's per-chain `restart_counts` (which `workload restart` and platform reclaim do not charge, and a fresh placement resets): conservative for
 the invariants, since it exhausts sooner; a VMM that survives a control-plane crash keeps its allocation `Running` until `VmReclamation` kills it. They
 bound when `BackoffExhausted` is reached, not any invariant.
