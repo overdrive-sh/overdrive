@@ -1,0 +1,5 @@
+error: unit `furlongs` is not one of ns, bytes, bytes_per_second, qps, ratio, count
+ --> tests/compile_fail/unknown_metric_unit.rs:9:31
+  |
+9 |     metric(name = "m", unit = furlongs, table = "t"),
+  |                               ^^^^^^^^

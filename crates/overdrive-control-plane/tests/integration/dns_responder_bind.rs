@@ -256,7 +256,13 @@ fn responder(
     frontend: FrontendAddrAllocator,
 ) -> Arc<DnsResponder> {
     let clock: Arc<dyn Clock> = Arc::new(SimClock::new());
-    Arc::new(DnsResponder::new(store, clock, gateway, frontend))
+    Arc::new(DnsResponder::new(
+        store,
+        clock,
+        gateway,
+        frontend,
+        Arc::new(overdrive_control_plane::dns_responder::NoQueryObserver),
+    ))
 }
 
 /// Stand in for the appliance's specific loopback resolver bind. Its lack of

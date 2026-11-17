@@ -76,7 +76,11 @@ impl NativeController {
             args.push("--no-sudo");
         }
         args.extend(["--", "cargo", "check", "-p", "xtask"]);
-        let mut command = self.fixture.bootstrap(&self.fixture.source, &args);
+        self.command_with_args(&args)
+    }
+    /// The same prepared native substrate and environment with exactly these bootstrap arguments.
+    pub fn command_with_args(&self, args: &[&str]) -> Command {
+        let mut command = self.fixture.bootstrap(&self.fixture.source, args);
         let root = self.fixture.temp.path();
         command
             .env("OVERDRIVE_PREFLIGHT_ARCH", "x86_64")

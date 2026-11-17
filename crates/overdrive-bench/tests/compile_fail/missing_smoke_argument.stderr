@@ -1,0 +1,5 @@
+error: missing required key `smoke`; give smoke(host_pure), smoke(guest = "<group>") or, in a spike, smoke(none)
+ --> tests/compile_fail/missing_smoke_argument.rs:4:3
+  |
+4 | #[overdrive_bench(
+  |   ^^^^^^^^^^^^^^^

@@ -1,0 +1,44 @@
+# `overdrive-bench` — the measurement core of the native benchmark program.
+#
+# `adapter-host` per ADR-0003 and ADR-0296: dev-dependency-only, shaped like
+# `overdrive-testing`. Never a `[dependencies]` entry of a production crate.
+
+[package]
+name         = "overdrive-bench"
+version      = "0.0.0"
+description  = "Measurement core: declaration registry, statistical protocol, record and report."
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+publish                = false
+
+[package.metadata.overdrive]
+crate_class = "adapter-host"
+
+[features]
+# Workspace-wide convention (`.claude/rules/testing.md`): gates the slow lane.
+integration-tests = []
+
+[dependencies]
+aya.workspace      = true
+serde.workspace    = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[[bin]]
+name = "bench-report"
+path = "bin/bench_report.rs"
+
+[dev-dependencies]
+overdrive-testing.workspace        = true
+overdrive-testing-macros.workspace = true
+proptest.workspace   = true
+serde_json.workspace = true
+serial_test.workspace = true
+tempfile.workspace   = true
+trybuild.workspace   = true
+
+[lints]
+workspace = true

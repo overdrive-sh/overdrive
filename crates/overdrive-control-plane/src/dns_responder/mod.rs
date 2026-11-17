@@ -99,7 +99,13 @@ pub struct HostGuestDnsFactory;
 
 impl GuestDnsFactory for HostGuestDnsFactory {
     fn responder(&self, deps: GuestDnsDeps) -> Arc<dyn GuestDns> {
-        Arc::new(DnsResponder::new(deps.store, deps.clock, deps.gateway, deps.frontend))
+        Arc::new(DnsResponder::new(
+            deps.store,
+            deps.clock,
+            deps.gateway,
+            deps.frontend,
+            Arc::new(NoQueryObserver),
+        ))
     }
 }
 
@@ -120,4 +126,38 @@ impl GuestDns for DnsResponder {
     fn stop(&self) {
         Self::stop(self);
     }
+}
+
+/// Receives the service time of every datagram the responder handles.
+///
+/// RED scaffold (DISTILL): the trait, [`QueryOutcome`] and [`NoQueryObserver`] exist
+/// with their pinned shapes; the responder does not yet call `observe`.
+// SCAFFOLD: true
+pub trait QueryObserver: Send + Sync {
+    /// Called once per datagram the responder handles, on the serving thread.
+    /// `service_time` runs from the instant the receive returned to the instant
+    /// the reply send (or the drop decision) completed, on the injected `Clock`.
+    /// Must not block, panic or allocate unboundedly.
+    fn observe(&self, outcome: QueryOutcome, service_time: std::time::Duration);
+}
+
+/// What the responder did with one datagram.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum QueryOutcome {
+    /// A resolvable name was answered with an address.
+    Answered,
+    /// The name resolves but has no record of the queried type.
+    NoData,
+    /// The name is unknown.
+    NameError,
+    /// The datagram was not answered.
+    Dropped,
+}
+
+/// The production observer: an empty body. Behaviour with it is byte-identical
+/// to the responder before the observer existed.
+pub struct NoQueryObserver;
+
+impl QueryObserver for NoQueryObserver {
+    fn observe(&self, _outcome: QueryOutcome, _service_time: std::time::Duration) {}
 }

@@ -1,0 +1,5 @@
+error: key `replicates` is given more than once
+ --> tests/compile_fail/repeated_key.rs:9:5
+  |
+9 |     replicates = 10,
+  |     ^^^^^^^^^^

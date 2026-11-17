@@ -123,6 +123,10 @@ mod integration {
     /// on `SimDataplane::local_backend_for`.
     mod deregister_local_backend_dispatch;
     mod describe_round_trip;
+    /// native-benchmark-program (ADR-0307): the per-datagram `QueryObserver` the DNS
+    /// responder reports service time to, and the byte-identical reply contract with
+    /// `NoQueryObserver`. Guest `cgroup-default` (binds `:53`).
+    mod dns_query_observer;
     /// dial-by-name-responder step 02-01 (ADR-0072 REV-2, GH #243) — Tier-3
     /// acceptance for the `DnsResponder` socket loop + the `run_server`
     /// Earned-Trust boot gate (S-DBN-BIND-01/02/03). Drives the PRODUCTION

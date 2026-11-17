@@ -26,10 +26,13 @@ with its found and pinned values, writes a record holding `run_started` and
 count and the clocksource are recorded, not refused.
 The probe separates a setting that is absent by design (for example the
 `intel_pstate` file on an AMD host) from one that cannot be read, and refuses on
-the latter. The probe also scans `/proc/*/fd` for a holder of a
+the latter. A pinned setting with no source at all cannot be verified and also
+refuses, with `found` = `absent`; the record's host block keeps every value,
+including `absent` and `unreadable` forms, and `run_refused` names the setting. The probe also scans `/proc/*/fd` for a holder of a
 `bpf-stats` descriptor, since the sysctl reads 0 while a descriptor holds stats on
 (`kernel/bpf/syscall.c:6014`, `:6551-6558` @ v7.0). A build with debug assertions
-is refused as well.
+is refused as well. The probe's own failure is the first refusal (`host_probe`): no setting
+was read, so the record's host block marks every key `unreadable` with the probe error.
 
 ## Alternatives
 

@@ -1,0 +1,37 @@
+# `overdrive-bench-families` — the benchmark families (ADR-0296).
+#
+# `adapter-host`, dev-dependency-only. DISTILL lists only the dependencies the
+# scaffolds use; each family slice adds the production crates it drives (DDD-1
+# lists the full set). The crate keeps no hand-written tests: the macro-generated
+# smoke tests are its nextest coverage, and the runner's end-to-end run is a
+# retained `cargo xtask metal run --benchmark` run, not a test (DDD-9).
+
+[package]
+name         = "overdrive-bench-families"
+version      = "0.0.0"
+description  = "Benchmark families: connect-hook cost, VM lifecycle, DNS responder, mTLS path."
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+publish                = false
+
+[package.metadata.overdrive]
+crate_class = "adapter-host"
+
+[features]
+integration-tests = []
+
+[dependencies]
+overdrive-bench          = { path = "../overdrive-bench" }
+overdrive-testing        = { path = "../overdrive-testing" }
+overdrive-testing-macros = { path = "../overdrive-testing-macros" }
+
+[[bench]]
+name    = "benchmarks"
+harness = false
+path    = "benches/benchmarks.rs"
+
+[lints]
+workspace = true

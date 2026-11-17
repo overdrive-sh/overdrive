@@ -12,6 +12,7 @@ xt            = "run --package xtask --"
 
 # Runtime tools — direct cargo invocations, no xtask wrapper.
 dst              = "run -p overdrive-sim --bin dst --"
+bench-report     = "run -p overdrive-bench --bin bench-report --"
 openapi-gen      = "run -p overdrive-control-plane --bin openapi -- gen"
 openapi-check    = "run -p overdrive-control-plane --bin openapi -- check"
 overdrive        = "run -p xtask -- lima run -- cargo run -p overdrive-cli --bin overdrive --"

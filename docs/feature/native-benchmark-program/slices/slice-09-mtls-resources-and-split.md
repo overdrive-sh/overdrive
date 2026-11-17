@@ -6,9 +6,9 @@ Story: US-BENCH-09. Job: J-PLAT-008. Family: `mtls-path`, resource profile.
 CPU, memory, sockets and concurrency per arm and direction, with forward-path userspace work apart from return-path splice work.
 
 ## In scope
-- Whole-host CPU as primary scope with kernel and userspace split; any cgroup-scoped figure labelled secondary.
+- Whole-host CPU (from `/proc/stat`) with kernel and userspace split; no cgroup-scoped figure is reported, and the report states why whole-host is the scope.
 - Memory, socket count and connection concurrency per arm and direction.
-- Forward-path userspace and return-path splice reported as separate rows.
+- Forward-path userspace and return-path splice reported as separate rows for egress; absent for ingress (CA-6).
 - Unavailable metrics reported absent, never zero.
 
 ## Out of scope
@@ -18,7 +18,7 @@ Changing the proxy or kTLS architecture; deciding whether the claim "agent-light
 Disproves: that the forward and return work can be separated from the existing production surfaces. If not, DESIGN defines the observable point.
 
 ## Acceptance
-- [ ] CPU scope stated; whole-host primary.
+- [ ] CPU scope stated; whole-host only, no cgroup figure.
 - [ ] Memory, sockets, concurrency per arm and direction.
 - [ ] Forward and return work separate.
 - [ ] Unavailable metrics named absent.

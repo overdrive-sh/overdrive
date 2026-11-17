@@ -18,9 +18,10 @@ journey:
 steps:
   - id: 1
     name: Declare the benchmark
+    emotion: Relieved that one declaration replaces a hand-written sampler, recorder and report
     command: >
       write a benchmark function with the benchmark attribute (family, substrate,
-      arms, replicates) in a bench target, or in a spike-scratch crate that depends
+      arms, replicates) in the families crate, or in a spike-scratch crate that depends
       on the benchmark crate by path
     shared_artifacts:
       - name: benchmark_declaration
@@ -28,7 +29,7 @@ steps:
         consumers: [runner, record, report, smoke test]
     integration_checkpoint: The declaration is the only place family, substrate and arms are stated.
     failure_modes:
-      - Unknown substrate or family spelling (rejected naming the value)
+      - Unknown substrate, or fewer than 9 replicates (build error naming the value or the minimum)
     gherkin: |
       Scenario: One declaration defines the benchmark
         Given Marcus writes a benchmark function with its arms
@@ -36,32 +37,49 @@ steps:
 
   - id: 2
     name: Run it on the exclusive native host
-    command: the benchmark form of cargo xtask metal run, naming the family (exact spelling is DESIGN's)
+    emotion: Focused; the run id and the eligibility line show the host is in a known state
+    command: cargo xtask metal run --benchmark <family> [--spike <name>]
     tui_mockup: |
       OVERDRIVE_METAL_RUN_ID=${run_id}
+      OVERDRIVE_BENCH_RESULT_DIR=${result_path}
       eligibility: ${host_settings_check}
       replicate ${n}/${replicates}: arm order ${arm_order}
-      result: ${result_path}
     shared_artifacts:
       - name: run_id
-        source: Existing durable Metal invocation registration
-        consumers: [live output, retained log, collection]
+        source: Existing durable Metal invocation registration (OVERDRIVE_METAL_RUN_ID), written to the record header (run_started)
+        consumers: [live output, retained log, collection, record]
+      - name: result_path
+        source: The OVERDRIVE_BENCH_RESULT_DIR line the runner prints once the result directory exists (repo-relative)
+        consumers: [metal pull]
       - name: host_settings
-        source: The host as read before the first sample, compared with the methodology's production settings
+        source: The host block of the record header (run_started), read before the first sample and compared with the methodology's pinned settings
         consumers: [eligibility check, record provenance, report]
-    integration_checkpoint: A host that differs from the production settings is refused before any sample.
+      - name: host_settings_check
+        source: The eligibility decision over the host block of the record header
+        consumers: [live output, report]
+      - name: replicates
+        source: The replicates value of the declaration echo in the record header
+        consumers: [live output, report]
+      - name: n
+        source: The replicate lines of the record, in schedule order
+        consumers: [live output]
+      - name: arm_order
+        source: The seeded shuffle recorded per block in the record (seed in the record header)
+        consumers: [live output, report]
+    integration_checkpoint: A host that differs from the pinned settings is refused before any sample.
     failure_modes:
       - Host setting drifted (refused, names the setting and both values)
       - A replicate fails (counted and reported, never dropped)
     gherkin: |
       Scenario: A drifted host is refused
-        Given a host setting differs from the production settings
+        Given a host setting differs from the pinned settings
         When Marcus starts a benchmark
         Then the run refuses before any sample and names the setting
 
   - id: 3
     name: Read the record and the report
-    command: cargo xtask metal pull the retained result, then read the report
+    emotion: Confident; every figure traces to a retained sample, with its noise floor beside it
+    command: cargo xtask metal pull <result_path>, then read report.md (or bench-report render <record>)
     tui_mockup: |
       ${family}  methodology ${methodology_version}  substrate ${substrate}
       ${arm}: median ${median} ${unit}  IQR ${iqr}  n=${n}
@@ -70,14 +88,66 @@ steps:
     shared_artifacts:
       - name: raw_samples
         source: The retained machine-readable record (every sample, every failure)
-        consumers: [report, later comparison, reviewer]
-    integration_checkpoint: The report is derived only from the retained raw samples.
+        consumers: [report, reviewer]
+      - name: methodology_version
+        source: The methodology field of the record header (run_started)
+        consumers: [report]
+      - name: substrate
+        source: The substrate field of the record header (run_started)
+        consumers: [report]
+      - name: commit
+        source: The commit field of the record header, from the checkout marker
+        consumers: [report]
+      - name: dirty
+        source: The dirty field of the record header, from the checkout marker
+        consumers: [report]
+      - name: bpf_stats
+        source: The bpf_stats field of the record header (per process, or off)
+        consumers: [report]
+      - name: host_summary
+        source: The host block of the record header
+        consumers: [report]
+      - name: median
+        source: Derived by the report from the retained samples
+        consumers: [report]
+      - name: iqr
+        source: Derived by the report from the retained samples
+        consumers: [report]
+      - name: delta
+        source: Derived by the report from the retained samples of both arms
+        consumers: [report]
+      - name: ci
+        source: Derived by the report (seeded bootstrap) from the retained samples
+        consumers: [report]
+      - name: aa_ci
+        source: Derived by the report from the A/A control replicates in the record
+        consumers: [report]
+    integration_checkpoint: The report is derived only from the retained raw samples; each record and report states its substrate and no command compares records.
     failure_modes:
-      - Record from another substrate (never compared)
+      - Record is incomplete (killed run; reported as incomplete)
     gherkin: |
       Scenario: The report is derived from the raw record
         Given a retained record
         Then the report's distributions and delta can be recomputed from its samples
+
+  - id: 4
+    name: Use the same declaration from a spike probe, and keep the benchmark building
+    emotion: Reassured that a throwaway probe produces the same record, and that a broken benchmark is caught
+    command: >
+      cargo xtask metal run --benchmark <family> --spike <name> for a spike-scratch crate;
+      cargo xtask metal run -- cargo nextest run -p <crate> --features integration-tests for the smoke test
+    shared_artifacts:
+      - name: evidence
+        source: The evidence field of the record header (maintained or spike)
+        consumers: [report]
+    integration_checkpoint: A spike record has the same schema as a maintained one, marked spike evidence; the smoke test takes one replicate per arm and asserts no timing.
+    failure_modes:
+      - Broken fixture (the smoke test fails naming the benchmark)
+    gherkin: |
+      Scenario: A spike probe produces the same record schema
+        Given a spike-scratch crate declares a benchmark with the same attribute
+        When Marcus runs it through the benchmark form with --spike
+        Then the record validates against the same schema and is marked spike evidence
 
 acceptance_reference: docs/feature/native-benchmark-program/feature-delta.md
 
@@ -85,3 +155,6 @@ changelog:
   - date: 2026-11-16
     feature: native-benchmark-program
     change: Requirements journey for declaring, running and reading a native benchmark.
+  - date: 2026-11-17
+    feature: native-benchmark-program
+    change: Aligned with the accepted design (shared artifact sources, per-step emotion, spike and smoke step, --benchmark spelling).

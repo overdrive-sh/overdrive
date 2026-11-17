@@ -16,9 +16,14 @@ derived state. `metal pull` rejects paths under `target/`.
 
 A run writes one JSON Lines file, `record.jsonl`: a `run_started` line (identity,
 provenance, host block, declaration echo, seed), canary lines, one line per
-replicate as it completes, and a `run_finished` line. A run killed before the last
-line has no `run_finished` and the reader reports it incomplete. The record holds
-only inputs: raw per-replicate values, failures and absences. Intervals, p-values
+replicate as it completes, and one terminal line: `run_finished`, or `run_refused`
+for a run the runner refuses (a refused run is `run_started` then `run_refused`). A
+run killed before its terminal line has none and the reader reports it incomplete;
+an error before `run_started` (an unreadable checkout marker, a usage error) writes
+no record. The runner prints `OVERDRIVE_BENCH_RESULT_DIR=<repo-relative path>` once
+the result directory exists, so a refused or killed run can be pulled too. The record
+holds only inputs: per-replicate values, failures and absences (a series of more than
+1,000 values is stored as a histogram of all of them). Intervals, p-values
 and labels are not persisted; `report.md` is a pure function of the record and is
 written next to it. Maintained results live at
 `benchmarks/results/<family>/<run-id>/`; a spike crate writes under its own
@@ -33,9 +38,12 @@ renders any record.
 - **Persist the computed intervals in the record**: a stale cache of the analysis
   code; rejected.
 - **Results under `target/`**: `metal pull` cannot retrieve them; rejected.
-- **A mergeable histogram instead of raw values**: loses per-replicate structure
-  the A/B protocol needs; rejected for scalar metrics, and not needed for the
-  series the families produce, which a per-replicate cap bounds instead.
+- **A histogram for every metric**: loses exact per-replicate values the A/B
+  protocol needs; rejected for scalar metrics, which stay raw.
+- **A per-replicate cap on stored values (the first N)**: a long profile then
+  reports tail percentiles from the start of the run only, and N is a hardcoded
+  ceiling; rejected. A series stays raw up to 1,000 values per replicate and is
+  otherwise a log-linear histogram (DDD-5) of every value.
 
 ## Consequences
 
@@ -43,10 +51,10 @@ Both `record.jsonl` and `report.md` are committed under
 `benchmarks/results/<family>/<run-id>/`: the raw record is the evidence and the
 report is derived from it. The sizes are small (the connect-hook record is about 30
 replicates per arm of two scalars). The largest
-series are the DNS per-query latencies. A record stores at most 10,000 values per
-series metric per replicate (the first in arrival order) and records the dropped
-count as `truncated`, so a committed record stays in the low megabytes per profile
-whatever the load rate; the report prints the truncated count. The build
+series are the DNS per-query latencies. A series metric stores at most 2,049 sparse
+histogram buckets per replicate, so a committed record stays small whatever the
+load rate and no value is dropped; the report states that histogram-derived
+percentiles are within 3.125% relative error. The build
 `debug_assertions` flag is recorded; the closed `cargo bench` command prevents a
 debug build, so no other build field is recorded.
 

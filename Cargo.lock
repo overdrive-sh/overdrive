@@ -2267,6 +2267,31 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
+name = "overdrive-bench"
+version = "0.0.0"
+dependencies = [
+ "aya",
+ "overdrive-testing",
+ "overdrive-testing-macros",
+ "proptest",
+ "serde",
+ "serde_json",
+ "serial_test",
+ "tempfile",
+ "thiserror 2.0.18",
+ "trybuild",
+]
+
+[[package]]
+name = "overdrive-bench-families"
+version = "0.0.0"
+dependencies = [
+ "overdrive-bench",
+ "overdrive-testing",
+ "overdrive-testing-macros",
+]
+
+[[package]]
 name = "overdrive-bpf"
 version = "0.0.0"
 dependencies = [

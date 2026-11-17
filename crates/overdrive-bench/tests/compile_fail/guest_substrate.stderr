@@ -1,0 +1,5 @@
+error[E0080]: evaluation panicked: guest substrates are not available to benchmarks (substrate `guest`); the registered substrates are: native
+ --> tests/compile_fail/guest_substrate.rs:6:17
+  |
+6 |     substrate = guest,
+  |                 ^^^^^ evaluation of `_` failed here

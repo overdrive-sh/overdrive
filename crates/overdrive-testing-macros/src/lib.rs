@@ -667,3 +667,15 @@ fn gate(name: &str, hand_off: &TokenStream2, should_panic: Option<&str>) -> Toke
         }
     }
 }
+
+/// The `#[overdrive_bench(...)]` benchmark declaration attribute (ADR-0297).
+///
+/// RED scaffold created by DISTILL: returns the function unchanged. It
+/// validates nothing, registers nothing and emits no smoke test, so the
+/// acceptance tests for the declaration rules and the smoke variant fail for
+/// the behaviour they assert.
+// SCAFFOLD: true
+#[proc_macro_attribute]
+pub fn overdrive_bench(_attribute: TokenStream, item: TokenStream) -> TokenStream {
+    item
+}

@@ -1,0 +1,5 @@
+error: key `substrate`: expected an identifier such as `native`, found a string literal
+ --> tests/compile_fail/substrate_string_literal.rs:6:17
+  |
+6 |     substrate = "native",
+  |                 ^^^^^^^^

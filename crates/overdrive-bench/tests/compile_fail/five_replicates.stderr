@@ -1,0 +1,5 @@
+error: replicates = 5 is below the minimum of 9 per arm
+ --> tests/compile_fail/five_replicates.rs:8:18
+  |
+8 |     replicates = 5,
+  |                  ^

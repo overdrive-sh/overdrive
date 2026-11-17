@@ -21,10 +21,12 @@ part. Methodology version 1 is:
 - a replicate is one fresh fixture; the body runs once per replicate;
 - per profile, replicates are grouped in blocks; each block runs every arm once
   and, when there are two or more arms, one A/A control (a second run of the
-  first arm); the order inside a block is a seeded shuffle, and the seed (from
+  reference arm, the first declared arm); the order inside a block is a seeded shuffle, and the seed (from
   OS entropy, with no override) is recorded;
-- at most 10,000 values are stored per series metric per replicate, with the
-  dropped count recorded;
+- no value is dropped: a series metric of a replicate is stored raw up to 1,000
+  values and otherwise as a log-linear histogram (32 sub-buckets per power of
+  two, relative error at most 3.125% for values of 1 and above, absolute error below 1 for smaller values) from which percentiles are computed;
+- only `ok` replicates feed a statistic;
 - a single-arm benchmark is a distribution benchmark: no comparison, no A/A;
 - fewer than 9 replicates per arm is refused;
 - the A/B statistic is the difference of per-replicate medians, with a 95%
@@ -37,7 +39,8 @@ part. Methodology version 1 is:
 - a fixed canary (loopback connect-and-close, no program attached) is taken at the
   start and the end; a shift under the same rule flags the run unstable;
 - failures are counted, never dropped; an arm with fewer than 9 successful
-  replicates reports "insufficient replicates" in place of a comparison.
+  replicates reports "insufficient replicates" in place of a comparison, and a
+  metric with no stored value in either compared arm has no comparison row.
 
 The version is a number in `overdrive-bench` and in `benchmarks/methodology.md`;
 a change to any parameter bumps it.

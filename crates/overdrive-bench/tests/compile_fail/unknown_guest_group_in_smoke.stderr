@@ -1,0 +1,5 @@
+error[E0080]: evaluation panicked: unknown guest group `no-such-group`
+  --> tests/compile_fail/unknown_guest_group_in_smoke.rs:10:19
+   |
+10 |     smoke(guest = "no-such-group"),
+   |                   ^^^^^^^^^^^^^^^ evaluation of `_` failed here

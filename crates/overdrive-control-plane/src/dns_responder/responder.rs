@@ -208,6 +208,9 @@ pub struct DnsResponder {
     /// blocking loop exits promptly rather than leaking an uncancellable
     /// syscall.
     stop: Arc<AtomicBool>,
+    /// Receives the per-datagram service time (DDD-12). Scaffold: not yet called.
+    #[allow(dead_code, reason = "DISTILL scaffold: the serve loop calls the observer in DELIVER")]
+    observer: Arc<dyn super::QueryObserver>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -230,6 +233,7 @@ impl DnsResponder {
         clock: Arc<dyn Clock>,
         gateway: Ipv4Addr,
         frontend: FrontendAddrAllocator,
+        observer: Arc<dyn super::QueryObserver>,
     ) -> Self {
         // Build the internal NameIndex from the SAME store + the SHARED
         // allocator (DDN-2): the index answers `F` from this allocator's
@@ -243,6 +247,7 @@ impl DnsResponder {
             sockets: Mutex::new(Vec::new()),
             socket_identities: Mutex::new(Vec::new()),
             stop: Arc::new(AtomicBool::new(false)),
+            observer,
         }
     }
 

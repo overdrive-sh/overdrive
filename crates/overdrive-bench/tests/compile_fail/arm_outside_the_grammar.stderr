@@ -1,0 +1,5 @@
+error: arm `Bad Arm` does not match [a-z0-9][a-z0-9+._-]*
+ --> tests/compile_fail/arm_outside_the_grammar.rs:7:13
+  |
+7 |     arms = ["Bad Arm"],
+  |             ^^^^^^^^^

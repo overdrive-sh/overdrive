@@ -8,8 +8,8 @@ A `spike-scratch/` crate produces a schema-identical record marked spike evidenc
 ## In scope
 - `pig-connect-cost` re-expressed as a spike crate depending on the benchmark crate by path; no change under `crates/` for the probe.
 - Record marked spike evidence; the report renders it.
-- Cross-substrate comparison refused naming both substrates.
-- Smoke variant: one replicate per arm, no timing assertion, `#[overdrive_test]`-placed, accepted by `placement-lint`.
+- Every record and report states its substrate; no command compares records.
+- Smoke variant: one replicate per arm, no timing assertion, gated on `integration-tests`, `#[overdrive_test]`-placed in a guest group and accepted by `placement-lint`; it runs on a Metal integration run, `cargo xtask metal run -- cargo nextest run -p <crate> --features integration-tests`.
 
 ## Out of scope
 Deleting the existing probes; any gate on the smoke result's timing.
@@ -19,8 +19,8 @@ Disproves: that one declaration can serve both a maintained lane and a throwaway
 
 ## Acceptance
 - [ ] Spike record validates against the same schema, marked spike evidence.
-- [ ] Cross-substrate comparison refused.
-- [ ] Smoke variant passes with one replicate per arm and asserts no timing.
+- [ ] Every record and report states its substrate; no command compares records.
+- [ ] Smoke variant passes with one replicate per arm and asserts no timing, on a Metal integration run.
 - [ ] A broken fixture fails the smoke test.
 - [ ] `placement-lint` accepts the smoke test.
 

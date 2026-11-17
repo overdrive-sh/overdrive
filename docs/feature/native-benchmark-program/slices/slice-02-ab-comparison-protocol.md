@@ -7,7 +7,7 @@ The report states the B-minus-A delta with a bootstrap interval beside an A/A no
 
 ## In scope
 - Interleaved arm order across replicates; an A/A control in the same run.
-- At least 9 replicates per arm (a declaration below that is refused).
+- At least 9 replicates per arm (a declaration below that is a build-time error naming the minimum).
 - Canary measurement at start and end; a shift flags the run.
 - Nonparametric comparison, bootstrap interval of the difference, noise-floor interval; "not distinguishable from noise" labelling.
 - Spike reference (117.0 ns hook delta; wall delta about 168 ns inside noise) shown, labelled spike evidence from a different run.
@@ -23,7 +23,7 @@ Disproves: that the shared core adds no bias of its own. If the new hook-time de
 - [ ] Interleaving and A/A in one run.
 - [ ] Delta, interval, floor and nonparametric result in the report.
 - [ ] Inside-the-floor deltas labelled noise.
-- [ ] Fewer than 9 replicates refused.
+- [ ] Fewer than 9 replicates is a build-time error naming the minimum.
 - [ ] Canary shift flags the run, samples kept.
 - [ ] Spike reference shown and labelled.
 - [ ] Methodology document present with a version.

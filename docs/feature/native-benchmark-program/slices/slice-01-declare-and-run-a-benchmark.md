@@ -6,7 +6,7 @@ Story: US-BENCH-01. Job: J-PLAT-008. Family: `cgroup-connect-hook`, native subst
 A benchmark function carrying the attribute runs through the benchmark form of `cargo xtask metal run` on the exclusive host and returns retained raw samples and a per-arm report.
 
 ## In scope
-- The attribute on a function (family, substrate, arms, replicates), registered against the placement registry's substrate vocabulary.
+- The attribute on a function (family, substrate, arms, replicates), checked against a closed substrate registry (native only).
 - The measurement core crate (dev-dependency-only, `adapter-host`): per-replicate fresh fixture, sample recording, failure counting.
 - The benchmark form of `metal run`, exclusive admission, retained record brought back with `metal pull`.
 - The connect-hook benchmark: arm A service hook only, arm B service plus gateway hook, loopback connect-and-close, hook time per connect and wall time per connect.

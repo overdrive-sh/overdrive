@@ -1,0 +1,5 @@
+error: arm `a` is declared more than once
+ --> tests/compile_fail/duplicate_arm.rs:7:18
+  |
+7 |     arms = ["a", "a"],
+  |                  ^^^

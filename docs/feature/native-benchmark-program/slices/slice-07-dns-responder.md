@@ -6,7 +6,7 @@ Story: US-BENCH-07. Job: J-PLAT-008. Family: `dns-responder`, native substrate.
 Query latency and throughput per named profile, with client-observed results and resolver-internal timing in separate tables.
 
 ## In scope
-- Profile matrix: query shape, cache hit or miss, record cardinality, transport, client concurrency, response size; each result set names its profile.
+- Profile matrix: query shape, name cardinality, client count and arrival rate; each result set names its profile.
 - Scheduled-arrival load for tail latency; the arrival model stated in the report.
 - Failed or timed-out queries counted, never latency samples.
 - Fixture conditions recorded; catalogue row.

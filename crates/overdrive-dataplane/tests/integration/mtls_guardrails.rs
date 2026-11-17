@@ -694,6 +694,91 @@ fn outbound_peer_serve(
 }
 
 // =====================================================================
+// Pump thread names (native-benchmark-program, ADR-0309, DDD-14).
+// =====================================================================
+
+/// The names of every thread of this process, read from `/proc/self/task/*/comm`.
+fn live_thread_names() -> Vec<String> {
+    std::fs::read_dir("/proc/self/task")
+        .expect("read /proc/self/task")
+        .filter_map(Result::ok)
+        .filter_map(|task| std::fs::read_to_string(task.path().join("comm")).ok())
+        .map(|name| name.trim_end().to_owned())
+        .collect()
+}
+
+/// An outbound connection's two pump threads carry their role in their name: one
+/// forward (`mtls-out-fwd`) and one return (`mtls-out-ret`), so a CPU profile can
+/// attribute the work per direction.
+/// CONTRACT_SHAPE: bounded-change (the pump threads' names are the only change).
+/// Trace: DDD-14 / US-BENCH-09 AC (c).
+/// Driving port: `MtlsEnforcement::enforce(Routed::Outbound)`; fault stimulus: none
+/// (a thread-spawn failure cannot be induced from this rig).
+#[overdrive_test(guest = "mtls-relay")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[should_panic(expected = "an outbound connection must have exactly one forward pump thread")]
+async fn an_outbound_connection_names_its_pump_threads_by_role() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let pki = TestPki::mint();
+    let identity: Arc<dyn IdentityRead> = Arc::new(held_identities(&pki));
+    let adapter = HostMtlsEnforcement::new(
+        identity,
+        MtlsLimits::default(),
+        overdrive_core::guest_transport::GUEST_NODE_PREFIX,
+        crate::integration::helpers::guest_dial::not_serving(),
+    );
+    let before = live_thread_names();
+    assert!(
+        !before.iter().any(|n| n == "mtls-out-fwd" || n == "mtls-out-ret"),
+        "no pump thread exists before a connection: {before:?}"
+    );
+    let peer = OutboundPeer::spawn(&pki);
+    let (agent_leg, workload) = real_socketpair();
+    let _w = std::thread::spawn(move || {
+        let mut s = workload;
+        let _ = s.write_all(b"pump-thread-names-request-0001");
+        std::thread::sleep(Duration::from_millis(900));
+        drop(s);
+    });
+    let conn = InterceptedConnection {
+        leg: agent_leg,
+        routed: Routed::Outbound { peer: peer.addr() },
+        alloc: pki.client_alloc.clone(),
+        expected_peer: None,
+    };
+    let handle = adapter.enforce(conn).await.expect("the outbound connection is established");
+    assert_eq!(adapter.liveness(&handle), PumpLiveness::Running, "the pumps are live");
+    let during = live_thread_names();
+    let count = |name: &str| during.iter().filter(|n| n.as_str() == name).count();
+    assert_eq!(
+        count("mtls-out-fwd"),
+        1,
+        "an outbound connection must have exactly one forward pump thread: {during:?}"
+    );
+    assert_eq!(
+        count("mtls-out-ret"),
+        1,
+        "an outbound connection must have exactly one return pump thread: {during:?}"
+    );
+    adapter.teardown(handle.clone()).await.expect("teardown");
+    peer.shutdown();
+    // Teardown joins the pumps: the role-named threads are gone with the connection.
+    // DELIVER activation: confirmed against production. `teardown` awaits a blocking task that runs
+    // `reclaim_connection`, which stops and joins both pump threads (`state.pump.join()`, and the aux
+    // pump) before it returns (`crates/overdrive-dataplane/src/mtls/mod.rs`, `teardown` and
+    // `reclaim_connection`), so this assertion stays as written: no seam, no poll. The one caveat is
+    // the kernel's own order at thread exit (the join returns when the thread's tid futex clears,
+    // which is just before `/proc/self/task/<tid>` is released): if this assertion is ever seen to
+    // fail with the pumps already joined, poll `live_thread_names()` for a bounded interval (about
+    // one second) instead of asserting once, and keep the failure message naming the leftover names.
+    let after = live_thread_names();
+    assert!(
+        !after.iter().any(|n| n == "mtls-out-fwd" || n == "mtls-out-ret"),
+        "no role-named pump thread outlives its connection: {after:?}"
+    );
+}
+
+// =====================================================================
 // PeerIdentityMismatch — the wrong-but-valid-peer negative, #[ignore]-gated on #242.
 // =====================================================================
 

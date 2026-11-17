@@ -50,7 +50,7 @@ All stories: `job_id: J-PLAT-008`, persona Marcus. The benchmark form of `cargo 
 
 ### US-BENCH-01 — Declare a benchmark and get retained raw samples and a report (walking skeleton)
 
-Slice: [01](slices/slice-01-declare-and-run-a-benchmark.md). Must-have.
+Job: J-PLAT-008. Slice: [01](slices/slice-01-declare-and-run-a-benchmark.md). Must-have.
 
 Marcus wants the per-connect cost of the gateway hook again. Today he copies a spike crate and hand-writes the sampler, the recorder and the report.
 
@@ -97,7 +97,7 @@ AC: (a) a declared benchmark runs through the benchmark form on the exclusive ho
 
 ### US-BENCH-02 — Compare two arms under the fixed statistical protocol (walking skeleton)
 
-Slice: [02](slices/slice-02-ab-comparison-protocol.md). Must-have.
+Job: J-PLAT-008. Slice: [02](slices/slice-02-ab-comparison-protocol.md). Must-have.
 
 Marcus needs to know whether arm B's cost is real or noise. The report must separate the effect from the run-to-run floor and place it beside the spike's number.
 
@@ -109,7 +109,7 @@ Decision enabled: Marcus decides whether the gateway hook's added cost is an eff
 Domain examples:
 1. The report shows hook-time delta of about 117 ns with an interval that excludes zero, an A/A interval around zero, and the spike's 117.0 ns beside it.
 2. The wall-time delta of about 168 ns has an interval that includes the A/A floor; the report labels it "not distinguishable from noise" rather than a difference.
-3. A declaration asks for 5 replicates per arm; the run is refused (the protocol requires at least 9).
+3. A declaration asks for 5 replicates per arm; the build fails naming the minimum of 9 (CA-12), and no run starts.
 4. The canary shifts between the start and end of the run; the report flags the run as unstable, and the record keeps every sample.
 
 ```gherkin
@@ -126,10 +126,10 @@ Scenario: A difference inside the noise floor is labelled as noise
   Given the wall-time delta interval includes the A/A interval
   Then the report says the difference is not distinguishable from noise
 
-Scenario: Too few replicates are refused
+Scenario: Too few replicates fail the build
   Given a declaration asks for 5 replicates per arm
-  When Marcus starts the run
-  Then it is refused naming the minimum of 9
+  When Marcus builds it
+  Then the build fails naming the minimum of 9 and no run record is written
 
 Scenario: A shifting canary flags the run
   Given the canary measurement differs between the start and the end of the run
@@ -139,11 +139,11 @@ Scenario: The spike's first data point is shown as a reference
   Then the report places the earlier 117 ns hook-time delta beside the new one, labelled as spike evidence from a different run
 ```
 
-AC: (a) interleaved arm order and A/A control in one run; (b) delta with bootstrap interval, noise-floor interval and a nonparametric result in the report; (c) a delta inside the floor is labelled noise; (d) fewer than 9 replicates refused; (e) canary shift flags the run; (f) the spike reference is shown and labelled; (g) the methodology document (runner isolation, host eligibility, clock boundaries, cold/warm handling, sample and percentile method, raw-result format, failure accounting) exists at a named version (#287 AC 1). Notes: ruling 5; replicates are independent runs, not iterations inside a run (research F1.1).
+AC: (a) interleaved arm order and A/A control in one run; (b) delta with bootstrap interval, noise-floor interval and a nonparametric result in the report; (c) a delta inside the floor is labelled noise; (d) fewer than 9 replicates is a build-time error naming the minimum (CA-12); (e) canary shift flags the run; (f) the spike reference is shown and labelled; (g) the methodology document (runner isolation, host eligibility, clock boundaries, cold/warm handling, sample and percentile method, raw-result format, failure accounting) exists at a named version (#287 AC 1). Notes: ruling 5; replicates are independent runs, not iterations inside a run (research F1.1).
 
 ### US-BENCH-03 — Record the host's production settings and refuse a drifted host (walking skeleton)
 
-Slice: [03](slices/slice-03-host-settings-and-bpf-stats.md). Must-have.
+Job: J-PLAT-008. Slice: [03](slices/slice-03-host-settings-and-bpf-stats.md). Must-have.
 
 Marcus must trust that two results were taken on a host in the same state, and that measuring did not change the node.
 
@@ -187,20 +187,20 @@ AC: (a) refusal before any sample naming setting and values; (b) host block in r
 
 ### US-BENCH-04 — Use the same declaration and record from a spike probe, and keep the benchmark from rotting (walking skeleton)
 
-Slice: [04](slices/slice-04-spike-use-and-smoke-variant.md). Must-have.
+Job: J-PLAT-008. Slice: [04](slices/slice-04-spike-use-and-smoke-variant.md). Must-have.
 
 Marcus runs a throwaway probe under `spike-scratch/` and wants evidence in the same record schema as the maintained lane, without copying a harness. He also wants the maintained benchmark to keep compiling and running between Metal runs.
 
 ### Elevator Pitch
-Before: each spike is a copy of an earlier spike's harness, and a maintained benchmark would only be exercised on a Metal run.
-After: run a `spike-scratch/` crate's run (it depends on the benchmark crate by path and carries the same attribute) on the benchmark form → sees a record in the same schema marked `spike evidence` and the same report; run `cargo nextest run` on the benchmark's crate → sees a smoke test PASS that took one replicate per arm and asserts nothing about speed.
-Decision enabled: Marcus decides a probe is enough for a design decision, with the record still comparable to the maintained lane, and trusts a benchmark that fails to compile or run is caught by the ordinary test lane.
+Before: each spike is a copy of an earlier spike's harness, and a maintained benchmark would only be exercised on a benchmark run.
+After: run a `spike-scratch/` crate's run (it depends on the benchmark crate by path and carries the same attribute) on the benchmark form → sees a record in the same schema marked `spike evidence` and the same report; run `cargo xtask metal run -- cargo nextest run -p overdrive-bench-families --features integration-tests` → sees the guest-placed smoke test PASS, having taken one replicate per arm and asserting nothing about speed.
+Decision enabled: Marcus decides a probe is enough for a design decision, with the record still comparable to the maintained lane, and trusts a benchmark that fails to build or run is caught by the Metal integration test run.
 
 Domain examples:
 1. The existing `pig-connect-cost` probe is re-expressed with the attribute; its record validates against the same schema and the report renders it labelled spike evidence.
-2. A probe's record and the maintained lane's record for the same family are shown side by side by their shared schema; the report refuses to compare them if the substrates differ.
-3. The smoke test of the connect-hook benchmark runs one replicate per arm and passes; a deliberately broken fixture makes it fail in the ordinary lane.
-4. The smoke test carries a placement declaration and `placement-lint` accepts it.
+2. A probe's record and the maintained lane's record for the same family share one schema; each record and its report state their substrate, and nothing compares across substrates.
+3. The smoke test of the connect-hook benchmark runs one replicate per arm and passes; a deliberately broken fixture makes it fail on the Metal integration run.
+4. The smoke test is gated on `integration-tests`, carries a guest placement (`cgroup-default` for connect-hook) and `placement-lint` accepts it.
 
 ```gherkin
 Scenario: A spike crate produces the same record schema
@@ -208,29 +208,29 @@ Scenario: A spike crate produces the same record schema
   When Marcus runs it through the benchmark form
   Then the record validates against the same schema and is marked as spike evidence
 
-Scenario: Results from different substrates are never compared
-  Given a maintained record on the native substrate and a record on another substrate
-  When Marcus asks the report to compare them
-  Then it refuses and names both substrates
+Scenario: Every record and report states the substrate it was measured on
+  Given a maintained record on the native substrate
+  When Marcus reads the record and its report
+  Then both state the native substrate and no command compares records across substrates
 
 Scenario: The smoke variant runs one replicate per arm with no performance assertion
-  When the ordinary test lane runs the benchmark crate
+  When Marcus runs cargo xtask metal run -- cargo nextest run -p overdrive-bench-families --features integration-tests
   Then the smoke test passes after one replicate per arm and asserts nothing about timing
 
-Scenario: A broken benchmark fails in the ordinary lane
+Scenario: A broken benchmark fails the smoke test
   Given the benchmark's fixture no longer builds a dataplane
-  When the ordinary test lane runs
+  When the same Metal integration run executes
   Then the smoke test fails naming the benchmark
 
 Scenario: The smoke test is placed like any other test
   Then cargo xtask placement-lint accepts it
 ```
 
-AC: (a) a `spike-scratch/` crate using the same attribute produces a schema-identical record marked spike evidence, with no change under `crates/` for the probe; (b) cross-substrate comparison refused by name; (c) smoke variant: one replicate per arm, no performance assertion, `#[overdrive_test]`-placed and lint-clean; (d) a broken benchmark fails the smoke test. Notes: `spike.md` isolation holds; the spike's Cargo.toml depends on workspace crates by path only.
+AC: (a) a `spike-scratch/` crate using the same attribute produces a schema-identical record marked spike evidence, with no change under `crates/` for the probe; (b) every record and report state their substrate, and no command compares records across substrates (CA-10); (c) smoke variant: one replicate per arm, no performance assertion, gated on `integration-tests`, guest-placed with `#[overdrive_test]` and lint-clean, run by `cargo xtask metal run -- cargo nextest run -p <crate> --features integration-tests` (CA-11); (d) a broken benchmark fails the smoke test. Notes: `spike.md` isolation holds; the spike's Cargo.toml depends on workspace crates by path only.
 
 ### US-BENCH-05 — Report each VM-lifecycle stage separately
 
-Slice: [05](slices/slice-05-vm-lifecycle-host-stages.md). Must-have (#287 AC 4).
+Job: J-PLAT-008. Slice: [05](slices/slice-05-vm-lifecycle-host-stages.md). Must-have (#287 AC 4).
 
 Marcus needs to know where deploy and stop time goes, not one end-to-end number (#283 lacked it). This story covers the stages a host process can observe with one host clock.
 
@@ -269,23 +269,24 @@ AC: (a) each listed host-observable stage reported separately with the four perc
 
 ### US-BENCH-06 — Report guest-measured stages and cold versus warm cache for VM lifecycle
 
-Slice: [06](slices/slice-06-vm-lifecycle-guest-stages.md). Must-have (#287 AC 4).
+Job: J-PLAT-008. Slice: [06](slices/slice-06-vm-lifecycle-guest-stages.md). Must-have (#287 AC 4).
 
 The guest's clock has a different zero point from the host's, so guest-internal stages cannot be subtracted from host instants.
 
 ### Elevator Pitch
-Before: guest receipt and poweroff time cannot be placed against host stages without an unstated clock assumption, and cold versus warm image cache is an accident of run order.
-After: run the benchmark form for `vm-lifecycle` with the cold and the warm profile → sees guest receipt, workload exit and poweroff as guest-reported durations, each next to the host-stamped stage it sits in, and separate cold-cache and warm-cache result sets, each naming its preparation step.
+Before: the guest's share of shutdown time cannot be placed against host stages without an unstated clock assumption, and cold versus warm image cache is an accident of run order.
+After: run the benchmark form for `vm-lifecycle` with the cold and the warm profile → sees one guest-measured duration, `guest.shutdown-handling`, beside the host-stamped workload-exit and reaper-exit stage intervals (guest receipt and poweroff appear only as those host-stamped intervals), and separate cold-cache and warm-cache result sets, each naming its preparation step.
 Decision enabled: Marcus decides whether shutdown delay is host-side or guest-side and whether the image cache matters.
 
 Domain examples:
-1. Poweroff is a duration measured inside the guest and reported as a duration; the report never subtracts a guest instant from a host instant.
+1. Shutdown handling is a duration measured inside the guest (`shutdown-received` to `group-complete`) and reported as a duration; the report never subtracts a guest instant from a host instant, and poweroff is only the host-stamped interval.
 2. The cold profile records "page cache dropped before each replicate"; the warm profile records "image pre-read".
 3. A guest that does not return a duration reports the stage as absent, not zero.
 
 ```gherkin
-Scenario: Guest stages are reported as durations
-  Then guest receipt and poweroff appear as guest-measured durations, never as host instants
+Scenario: The guest duration is reported as a duration
+  Then guest.shutdown-handling appears as one guest-measured duration, never as a host instant
+  And guest receipt and poweroff appear only as host-stamped stage intervals
 
 Scenario: Cold and warm are separate profiles with named preparation
   When both profiles run
@@ -299,19 +300,19 @@ Scenario: Clock provenance is recorded
   Then the record names the host and guest clock sources
 ```
 
-AC: (a) guest-internal stages reported as guest-measured durations; (b) cold and warm profiles separate, each with its recorded preparation; (c) absent is not zero; (d) clock provenance (host and guest clock sources) recorded. Notes: research F1.9; the guest's actual clocksource is not settled (research Knowledge Gap 7).
+AC: (a) one guest-measured duration, `guest.shutdown-handling`, with receipt and poweroff reported only as host-stamped stage intervals (CA-2); (b) cold and warm profiles separate, each with its recorded preparation; (c) absent is not zero; (d) clock provenance (host and guest clock sources) recorded. Notes: research F1.9; the guest's actual clocksource is not settled (research Knowledge Gap 7).
 
 ### US-BENCH-07 — Report DNS responder timings: client-observed apart from resolver-internal
 
-Slice: [07](slices/slice-07-dns-responder.md). Must-have (#287 AC 5).
+Job: J-PLAT-008. Slice: [07](slices/slice-07-dns-responder.md). Must-have (#287 AC 5).
 
 ### Elevator Pitch
 Before: DNS responder cost has no number; a client-side timing would include everything and say nothing about the resolver's own work.
-After: run the benchmark form for family `dns-responder` → sees a report with client-observed latency and throughput per profile (query shape, cache hit or miss, record cardinality, transport, client concurrency, response size) and, separately, resolver-internal timing, with the profile named in every row.
+After: run the benchmark form for family `dns-responder` → sees a report with client-observed latency and throughput per profile (query shape, name cardinality, client count, arrival rate) and, separately, resolver-internal timing, with the profile named in every row.
 Decision enabled: Marcus decides whether the responder or the network path dominates and which query profile to optimise.
 
 Domain examples:
-1. Profile "A record, cache hit, 100 names, UDP, 1 client, small response" and profile "A record, cache miss, 10,000 names, UDP, 16 clients" are two result sets.
+1. Profile "A record, 100 names, 1 client, 1,000 queries per second" and profile "unknown name, 10,000 names, 16 clients, 5,000 queries per second" are two result sets.
 2. Client-observed p99 is reported in one table and resolver-internal time in another; neither is a column of the other.
 3. A load generator that waits for each reply is not used for tail latency; the benchmark's load is scheduled-arrival (research F1.6) and the report states the arrival model.
 
@@ -320,7 +321,7 @@ Scenario: Client-observed and resolver-internal timings are separate
   Then the report has distinct tables for client-observed results and resolver-internal timing
 
 Scenario: Profiles are named and distinct
-  Then each result set names query shape, cache state, cardinality, transport, concurrency and response size
+  Then each result set names query shape, name cardinality, client count and arrival rate
 
 Scenario: The arrival model is stated
   Then the report states whether load was scheduled-arrival or closed-loop
@@ -330,21 +331,22 @@ Scenario: A failed query is counted
   Then it is counted as a failure in its profile and never as a latency sample
 ```
 
-AC: (a) client-observed and resolver-internal reported separately; (b) profile named per result set; (c) arrival model stated; (d) failures counted; (e) the fixture conditions (host, kernel, network fixture) recorded; (f) the family has a catalogue row. Notes: drives the production responder in-process (D4).
+AC: (a) client-observed and resolver-internal reported separately; (b) profile named per result set; (c) arrival model stated; (d) failures counted; (e) the recorded fixture fields: host block (kernel, CPU, governor, SMT, boost), the network namespace fixture the responder and clients ran in, the arrival model, scheduled rate and duration, client socket count and name-table cardinality; (f) the family has a catalogue row. Notes: drives the production responder in-process (D4); cache hit or miss, transports other than UDP and response size are not profile axes (CA-3).
 
 ### US-BENCH-08 — Compare plaintext and composed mTLS for connection cost and throughput, both directions
 
-Slice: [08](slices/slice-08-mtls-latency-and-throughput.md). Must-have (#287 AC 6).
+Job: J-PLAT-008. Slice: [08](slices/slice-08-mtls-latency-and-throughput.md). Must-have (#287 AC 6).
 
 ### Elevator Pitch
 Before: the mTLS and proxy path has no number against a plaintext baseline, and the one handshake figure on record is a single sample the spike itself calls "not a benchmark".
 After: run the benchmark form for family `mtls-path` → sees, for each traffic direction, plaintext-baseline arm against composed-mTLS arm: handshake, first-byte latency, sustained throughput and tail latency, with the interval of the difference and the noise floor.
-Decision enabled: Marcus decides what the transparent mTLS path costs per direction and whether it meets what the platform claims.
+Decision enabled: Marcus decides what the transparent mTLS path costs per direction.
 
 Domain examples:
 1. Egress (workload to peer) and ingress (peer to workload) are two result sets, each with its own baseline.
 2. The plaintext baseline is a defined direct path between the same two endpoints; the report states its definition.
 3. Handshake time and first-byte latency are separate rows.
+4. In the egress composed-mTLS arm, 12 of 5,000 connection attempts time out at the handshake; they are counted as failures in that arm and direction and are not latency samples.
 
 ```gherkin
 Scenario: Both directions are reported
@@ -358,40 +360,46 @@ Scenario: The baseline is defined
 
 Scenario: A direction's difference carries its noise floor
   Then each direction's difference shows its interval and its A/A floor
+
+Scenario: A failed or timed-out connection is a counted failure
+  Given a connection or handshake fails or times out in the composed-mTLS arm of one direction
+  Then it is counted as a failure in that arm and direction
+  And it is never a latency sample
 ```
 
-AC: (a) both directions, each with a baseline; (b) the four measures separate; (c) baseline defined in the report; (d) interval and A/A floor per direction; (e) wire-capture correctness stays a Tier-3 test, not part of this benchmark. Notes: the egress dialer is plaintext by design (`CLAUDE.md` § East-west mTLS tests); the benchmark client follows it; drives the production composition in-process (D4).
+AC: (a) both directions, each with a baseline; (b) the four measures separate; (c) baseline defined in the report; (d) interval and A/A floor per direction; (e) a failed or timed-out connection or handshake is counted as a failure in its arm and direction, never a latency sample; (f) wire-capture correctness stays a Tier-3 test, not part of this benchmark. Notes: the egress dialer is plaintext by design (`CLAUDE.md` § East-west mTLS tests); the benchmark client follows it; drives the production composition in-process (D4).
 
 ### US-BENCH-09 — Report resource cost and the forward-versus-return work split for mTLS
 
-Slice: [09](slices/slice-09-mtls-resources-and-split.md). Must-have (#287 AC 3 and 6).
+Job: J-PLAT-008. Slice: [09](slices/slice-09-mtls-resources-and-split.md). Must-have (#287 AC 3 and 6).
 
 ### Elevator Pitch
 Before: the claim that the proxy is "agent-light" (little userspace work on the forward path, splice on the return) has no measurement behind it.
-After: run the benchmark form for `mtls-path` resource profile → sees CPU (whole-host, with the kernel and userspace split), memory, socket count and connection concurrency per arm and direction, plus forward-path userspace work reported apart from return-path splice work.
+After: run the benchmark form for `mtls-path` resource profile → sees CPU (whole-host from `/proc/stat`, with the kernel and userspace split), memory, socket count and connection concurrency per arm and direction, plus, for egress, forward-path userspace work reported apart from return-path splice work (absent for ingress, CA-6).
 Decision enabled: Marcus decides whether the agent-light claim holds and where a future mechanism (for example an in-guest kernel path) must beat the current one.
 
 Domain examples:
-1. Whole-host CPU is the primary scope; a per-cgroup figure is shown as secondary and labelled, because interrupt and kernel-worker time is charged elsewhere.
+1. CPU is whole-host only; no cgroup figure is reported, and the report states that interrupt and kernel-worker time is charged outside the benchmark's cgroup (CA-9).
 2. At 1,000 concurrent connections the report records sockets and memory per arm.
 3. Forward-path userspace CPU and return-path splice CPU are separate rows.
 
 ```gherkin
-Scenario: CPU scope is stated and whole-host is primary
-  Then CPU is reported whole-host with a kernel and userspace split, and any cgroup-scoped figure is labelled secondary
+Scenario: CPU scope is stated and is whole-host
+  Then CPU is reported whole-host with a kernel and userspace split, and no cgroup-scoped figure is reported
 
 Scenario: Memory, sockets and concurrency are reported per arm
   Then each arm and direction records memory, socket count and connection concurrency
 
 Scenario: Forward and return work are separate
-  Then forward-path userspace work and return-path splice work are separate rows
+  Then for egress, forward-path userspace work and return-path splice work are separate rows
+  And for ingress they are reported absent with the reason
 
 Scenario: A scope that cannot be measured is absent
   Given a metric unavailable on the host
   Then the report names it absent and never reports zero
 ```
 
-AC: (a) CPU scope stated, whole-host primary; (b) memory, sockets, concurrency per arm and direction; (c) forward and return work separate; (d) unavailable metrics named absent. Notes: research F3.2 caveats on cgroup accounting.
+AC: (a) CPU scope stated, whole-host only (CA-9); (b) memory, sockets, concurrency per arm and direction; (c) forward and return work separate for egress, absent for ingress (CA-6); (d) unavailable metrics named absent. Notes: research F3.2 caveats on cgroup accounting.
 
 ## Wave: DISCUSS / [REF] Story map and scope assessment
 
@@ -413,12 +421,12 @@ Objective: Marcus obtains a comparable, reproducible native number for a boundar
 
 | KPI | Who does what | Target | Baseline | Measured by |
 |---|---|---|---|---|
-| K1 (primary) | Marcus adds a new benchmark family | 0 lines of arm-interleaving, A/A control, provenance capture or report code in the family's diff | Each spike hand-wrote sampler, recorder and report (`bpf-stats-overhead` is a copy of `pig-connect-cost`) | Diff of the DNS family slice (the first family added after the skeleton is verified) |
+| K1 (primary) | Marcus adds a new benchmark family | 0 lines of arm-interleaving, A/A control, provenance capture or report code in the family's declaration and fixture files; no use of runner, record or report internals from the family module | Each spike hand-wrote sampler, recorder and report (`bpf-stats-overhead` is a copy of `pig-connect-cost`) | Diff of the DNS family slice (the first family added after the skeleton is verified), limited to the family's declaration and fixture files and excluding production-surface changes (the seams the family needs) |
 | K2 | The framework reproduces the spike's first data point | New median gateway hook-time delta lies within the spike's per-run spread of that program's hook time (115.5 to 126.5 ns; spike median delta 117.0 ns) | One point-in-time spike result, no retained rerun | Report of the connect-hook benchmark against `findings-connect-hook-cost.md` |
 | K3 | Every retained record carries its provenance | 100% of records have commit, dirty flag, methodology version, substrate, host settings and statistics flag | Spike findings record these by hand, inconsistently | Schema validation over every retained record |
 | K4 (guardrail) | A drifted host is refused | 100% of runs on a host differing from the production settings refuse before any sample | No check exists | One deliberate drift (for example `bpf_stats_enabled` set to 1) in the acceptance scenario |
 | K5 | A spike uses the same schema | 1 existing probe (`pig-connect-cost`) re-expressed with the same attribute; 0 schema forks | 0 spikes share a record schema | Schema validation of the spike's record |
-| K6 | #287's separation requirements hold | VM lifecycle: 8 host-observable stages plus guest-measured durations reported as separate rows; DNS: client-observed and resolver-internal in separate tables; mTLS: 2 directions each with a baseline | No such separation exists | Report structure check per family |
+| K6 | #287's separation requirements hold | VM lifecycle: 8 host-observable stages plus one guest-measured duration (`guest.shutdown-handling`) reported as separate rows; DNS: client-observed and resolver-internal in separate tables; mTLS: 2 directions each with a baseline | No such separation exists | Report structure check per family |
 | K7 (guardrail) | Benchmarks stay outside correctness gates | 0 benchmark results used as pass or fail; smoke variant asserts no timing | n/a | Review of the smoke variants and lanes |
 
 Owner: implementer captures, independent reviewer evaluates; no dashboard. K2's tolerance is derived from the spike's observed spread, not invented.
@@ -440,6 +448,7 @@ Owner: implementer captures, independent reviewer evaluates; no dashboard. K2's 
 - #157 (XDP perf-baseline update helper) and the Tier-4 `xdp-perf` gate: unchanged.
 - #326 (vsock attachment density lane), #300 (pump scaling), #303 (in-guest kernel mTLS against the host proxy), #305 (Firecracker against Cloud Hypervisor): each is tracked by its own open issue and is a consumer of this program, not part of it. #303 and #305 already say to use #287 for the comparison.
 - #357 (deploy latency under reconcile load): its own issue; it asks for a benchmark per `testing.md`.
+- Guest and other substrates: the substrate registry is closed to `native`, tracked by [#362](https://github.com/overdrive-sh/overdrive/issues/362).
 - Snapshot/restore (#96): not implemented yet, so there is nothing to benchmark; not part of this feature (user, 2026-11-16).
 - #329 (vDPA feasibility), #309 and #310 (UDP guest transport): feasibility or feature issues.
 - #146 (linker build-time comparison, hyperfine): a build-time benchmark, not product.
@@ -452,7 +461,7 @@ Real, end to end, not a mock, native substrate. Slices 01 to 04 are the skeleton
 
 ## Wave: DISCUSS / [REF] Driving ports
 
-Developer-facing: (1) the attribute on a benchmark function; (2) the benchmark form of `cargo xtask metal run`; (3) `cargo xtask metal pull` of the retained result; (4) `cargo nextest run` on a benchmark crate for the smoke variant; (5) a `spike-scratch/` crate's run on the benchmark form. No HTTP or operator surface.
+Developer-facing: (1) the attribute on a benchmark function; (2) the benchmark form of `cargo xtask metal run`; (3) `cargo xtask metal pull` of the retained result; (4) `cargo xtask metal run -- cargo nextest run -p <crate> --features integration-tests` for the smoke variant; (5) a `spike-scratch/` crate's run on the benchmark form. No HTTP or operator surface.
 
 ## Wave: DISCUSS / [REF] Pre-requisites
 
@@ -474,7 +483,7 @@ Metal host provisioned, `OVERDRIVE_METAL_TARGET`, `OVERDRIVE_METAL_KERNEL`, `OVE
 | 1 Problem in domain language | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
 | 2 Persona specific | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
 | 3 3+ examples, real data | PASS (4) | PASS (4) | PASS (3) | PASS (4) | PASS (4) | PASS (3) | PASS (3) | PASS (3) | PASS (3) |
-| 4 UAT 3-7 scenarios incl. error | PASS (5) | PASS (6) | PASS (5) | PASS (5) | PASS (5) | PASS (4) | PASS (4) | PASS (4) | PASS (4) |
+| 4 UAT 3-7 scenarios incl. error | PASS (5) | PASS (6) | PASS (5) | PASS (5) | PASS (5) | PASS (4) | PASS (4) | PASS (5) | PASS (4) |
 | 5 AC derived from UAT | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
 | 6 Right-sized (1-3 days) | PASS (2-3 d) | PASS | PASS | PASS | PASS with risk: split by stage if over 3 d | PASS | PASS | PASS | PASS |
 | 7 Technical notes | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
@@ -527,7 +536,7 @@ Contract shape (principle 12): P = pure-function, B = bounded-change (declared m
 | mTLS pump threads | `overdrive-dataplane` | EXTEND | Thread names |
 | `testing.md` | `.claude/rules/` | amend (orchestrator) | Exclusive-run exemption, benchmark form |
 
-**Driving ports:** (1) the `overdrive_bench` attribute on a function; (2) `cargo xtask metal run --benchmark ...`; (3) `cargo xtask metal pull <result dir>`; (4) `cargo nextest run` on `overdrive-bench-families` (smoke); (5) a spike crate's `benchmarks` bench target run through (2) with `--spike`; (6) `cargo bench-report` (alias for the `bench-report` binary): `validate <record>` and `render <record>`, host-independent.
+**Driving ports:** (1) the `overdrive_bench` attribute on a function; (2) `cargo xtask metal run --benchmark ...`; (3) `cargo xtask metal pull <result dir>`; (4) the generated smoke tests of `overdrive-bench-families`, run as `cargo xtask metal run -- cargo nextest run -p overdrive-bench-families --features integration-tests` (the smoke tests are `integration-tests`-gated and guest-placed, so a plain `cargo nextest run` does not build or run them, CA-11); (5) a spike crate's `benchmarks` bench target run through (2) with `--spike`; (6) `cargo bench-report` (alias for the `bench-report` binary): `validate <record>` and `render <record>`, host-independent.
 
 **Driven ports and adapters** (each with a `probe()` that proves it can honour its contract where the environment can lie):
 
@@ -540,7 +549,7 @@ Contract shape (principle 12): P = pure-function, B = bounded-change (declared m
 
 The canary is a loopback connect-and-close loop run by the runner; its verdict is a pure function over the start and end samples.
 
-Wiring order in `run_main`: probe, then check eligibility, then enable statistics, then canary, then run, then canary, then finish ("wire then probe then use"). A failed probe or eligibility check refuses with a typed error and a `run_refused` record line; it never falls back.
+Wiring order in `run_main`: read the checkout marker, then probe, then read every host setting (including the `bpf-stats` descriptor scan, which therefore runs before the runner holds its own descriptor) and decide eligibility, then enable statistics (only when eligible and declared), then write `run_started` (so its `bpf_stats` field states what the run holds), then, when refused, write `run_refused` and stop, else canary, run, canary, finish ("wire then probe then use"). A failed marker read, probe or eligibility check refuses with a typed error and never falls back; DDD-6 pins which refusals leave a record line.
 
 ## Wave: DESIGN / [REF] Decisions table
 
@@ -574,6 +583,7 @@ Resolution of the open points: O1 by DDD-7 (list below); O2 by DDD-2 (the bench 
 - `record.jsonl` and `report.md` are both committed under `benchmarks/results/<family>/<run-id>/`.
 - Scope limits: the `native`-only substrate (DDD-4) is tracked by [#362](https://github.com/overdrive-sh/overdrive/issues/362). The ingress exclusion of the guest transport and the absent ingress forward/return split (DDD-13, CA-6, CA-8) are properties of the host-hop benchmark and have no issue: the ADR-0069 host proxy it measures is being replaced by in-guest kernel mTLS ([#303](https://github.com/overdrive-sh/overdrive/issues/303)), which names #287 as the way to compare the two. Guest receipt and poweroff durations have no issue (CA-2).
 - The VM-lifecycle family fixture creates its own data directory (DDD-11).
+- User ruling 2026-11-17: the runner's end-to-end run stays out of nextest; its evidence is a retained `metal run --benchmark` run under exclusive admission, and the nextest runner coverage is the smoke variant plus the record and report tests (DDD-9, evidence lane). The DISTILL placement decision D-1 (`native_launcher` for the families tests) and the long-run budget D-2 therefore lapse.
 
 ## Wave: DESIGN / [REF] Interface contracts
 
@@ -583,7 +593,7 @@ Rust signatures below are contracts pinned by DESIGN; private structure belongs 
 
 - `crates/overdrive-bench`: `crate_class = "adapter-host"`, `[features] integration-tests = []`, `publish = false`. Dependencies: `overdrive-testing-macros`, `serde`, `serde_json`, `rand` (seeded `StdRng`), `aya` (`aya::sys::enable_stats`), `libc`, `linkme`, `thiserror`. Binary `bin/bench_report.rs` with a `[[bin]]` entry; alias `bench-report = "run -p overdrive-bench --bin bench-report --"`.
 - `crates/overdrive-bench-families`: `crate_class = "adapter-host"`, `[features] integration-tests = []`, `[[bench]] name = "benchmarks" harness = false path = "benches/benchmarks.rs"` whose `main` is `use overdrive_bench_families as _;` followed by `fn main() -> std::process::ExitCode { overdrive_bench::run_main(overdrive_bench::Evidence::Maintained) }` (the reference to the declaring crate is required, DDD-3). Family modules live in `src/families/<family>.rs`. Dependencies: `overdrive-bench`, `overdrive-testing`, `overdrive-core`, `overdrive-control-plane`, `overdrive-worker`, `overdrive-dataplane`, `overdrive-host`, `overdrive-cli` (library target: the operator driving port, called in process), `overdrive-sim` (`SimKek`, the hermetic key adapter only; approved for this dev-only crate's `[dependencies]` 2026-11-17), `aya`, `tracing`, `hickory-proto`.
-- Neither crate appears in the `[dependencies]` of any production crate. Enforcement: the check that keeps `overdrive-testing` dev-only (confirm in DISTILL which gate that is; no new tool is proposed), and `crate_class` dispatch by dst-lint.
+- Neither crate appears in the `[dependencies]` of any production crate. Enforcement: `crate_class` dispatch by dst-lint and review of `[dependencies]`. No mechanical gate keeps `overdrive-testing` or these crates dev-only today (DISTILL confirmed none exists), and none is added here.
 - A spike crate depends on `overdrive-bench` and `overdrive-testing` by path, declares `[[bench]] name = "benchmarks" harness = false`, and its `main` references the crate that declares its benchmarks (`use <crate> as _;`, DDD-3) and calls `run_main(Evidence::Spike)`. It adds no file under `crates/`.
 
 ### DDD-2 — The `overdrive_bench` attribute and its smoke test
@@ -591,12 +601,12 @@ Rust signatures below are contracts pinned by DESIGN; private structure belongs 
 ```text
 #[overdrive_bench(
     family     = "<kebab>",
-    substrate  = native,
+    substrate  = native,                             // a bare identifier, like `host_pure`; never a string literal
     arms       = ["<arm>", ...],                     // one or more, unique, [a-z0-9][a-z0-9+._-]*; the first is the reference arm
     replicates = <u32 literal>,                      // build error below 9, naming the minimum
     profile(name = "<kebab>", preparation = "<text>")*,   // none => one implicit profile "default"
     metric(name = "<snake>", unit = <ns|bytes|bytes_per_second|qps|ratio|count>,
-           table = "<kebab>")+,                      // every duration is recorded in ns
+           table = "<kebab>" [, series])+,           // every duration is recorded in ns; `series` marks a metric recorded with `record_series` (DDD-6), else it is scalar
     bpf_stats,                                       // optional flag
     reference(metric = "<snake>", value = <float>,   // compared with that metric's A/B delta
               label = "<text>", source = "<repo-relative path>")*,
@@ -605,15 +615,33 @@ Rust signatures below are contracts pinned by DESIGN; private structure belongs 
 fn <name>(rep: &mut Replicate) -> Result<(), ReplicateFailure> { ... }
 ```
 
-Unknown or repeated keys and malformed values are build errors that name the offending key. `substrate` is checked by constant evaluation against DDD-4; `guest` in `smoke` against ADR-0294's registry (the existing check, unchanged). `smoke(none)` is accepted only when `CARGO_MANIFEST_DIR` contains `/spike-scratch/` (constant evaluation). The expansion: the function unchanged; one registration (DDD-3); and, unless `smoke(none)`, `#[cfg(feature = "integration-tests")] #[::overdrive_testing::overdrive_test(<smoke placement>)] #[test] fn smoke_<name>() { ::overdrive_bench::smoke(&DECL) }` (placement attribute first, per its attribute-order rule). The benchmark crate therefore depends on `overdrive-testing`. The macro adds no ELF record kind.
+Unknown or repeated keys and malformed values are build errors that name the offending key. The pinned `error:` message for each rejection (`<...>` is the offending text; trybuild fixtures assert these lines, and rustc's span and label lines are regenerated once):
+
+| Rejection | Message |
+|---|---|
+| unknown key | ``unknown key `<key>` in `#[overdrive_bench(...)]`; the keys are family, substrate, arms, replicates, profile, metric, bpf_stats, reference, smoke`` |
+| repeated key (only `profile`, `metric`, `reference` repeat) | ``key `<key>` is given more than once`` |
+| missing required key | ``missing required key `<key>` `` (for `smoke`: ``missing required key `smoke`; give smoke(host_pure), smoke(guest = "<group>") or, in a spike, smoke(none)``) |
+| malformed value | ``key `<key>`: expected <what>`` |
+| substrate given as a string literal | ``key `substrate`: expected an identifier such as `native`, found a string literal`` (a substrate is a bare identifier like the placement kinds `host_pure` and `native_launcher`; a string is the form of a guest group name, `guest = "<group>"`, which a substrate is not) |
+| substrate identifier not registered | ``substrate `<value>` is not registered; the registered substrates are: native`` |
+| substrate identifier `guest` | ``guest substrates are not available to benchmarks (substrate `guest`); the registered substrates are: native`` |
+| `replicates` below 9 | ``replicates = <n> is below the minimum of 9 per arm`` |
+| repeated arm | ``arm `<name>` is declared more than once`` |
+| arm outside the grammar | ``arm `<name>` does not match [a-z0-9][a-z0-9+._-]*`` |
+| unknown metric unit | ``unit `<value>` is not one of ns, bytes, bytes_per_second, qps, ratio, count`` |
+| `smoke(none)` outside a spike | ``smoke(none) is allowed only in a crate under spike-scratch/`` |
+| unknown guest group in `smoke` | the placement registry's existing diagnostic (ADR-0294), unchanged |
+
+The smoke test is the only consumer of `smoke`: the macro exports nothing else, and a test that needs to exercise the smoke path runs the generated `smoke_<name>` test, not `smoke` on a declaration it chooses. `substrate` is checked by constant evaluation against DDD-4; `guest` in `smoke` against ADR-0294's registry (the existing check, unchanged). `smoke(none)` is accepted only when `CARGO_MANIFEST_DIR` contains `/spike-scratch/` (constant evaluation). The expansion: the function unchanged; one registration (DDD-3); and, unless `smoke(none)`, `#[cfg(feature = "integration-tests")] #[::overdrive_testing::overdrive_test(<smoke placement>)] #[test] fn smoke_<name>() { ::overdrive_bench::smoke(&DECL) }` (placement attribute first, per its attribute-order rule). The benchmark crate therefore depends on `overdrive-testing`. The macro adds no ELF record kind.
 
 ### DDD-3 — Link-time registration
 
-`overdrive-bench` owns one `linkme` distributed slice of `BenchmarkDecl`; the macro adds one entry per declaration. The runner selects every entry whose `family` equals `--family`, in `name` order. Spike V-5 (`linkme` 0.3.38, thin LTO, one codegen unit, `7.0.0-38-generic`) found every entry in the library's unit-test binary and in a `harness = false` bench binary, with one edge: rustc does not link a dependency crate nothing references, and its entries vanish without an error. Two rules follow. (1) The bench `main` of the families crate, and the `main` of any spike crate, references the declaring crate (`use <crate> as _;`). (2) A `--family` that no registered benchmark declares is a refusal (`Error::FamilyNotDeclared`) naming the requested family and the families found, exit 64; the message states rule (1) as the usual cause. The smoke test binaries are unaffected, since the declarations sit in the crate under test.
+`overdrive-bench` owns one `linkme` distributed slice of `BenchmarkDecl`; the macro adds one entry per declaration. A family has exactly one benchmark: the runner selects the one entry whose `family` equals `--family`, and more than one is a refusal (`Error::Usage`, exit 64, naming the family and the benchmark names). Spike V-5 (`linkme` 0.3.38, thin LTO, one codegen unit, `7.0.0-38-generic`) found every entry in the library's unit-test binary and in a `harness = false` bench binary, with one edge: rustc does not link a dependency crate nothing references, and its entries vanish without an error. Two rules follow. (1) The bench `main` of the families crate, and the `main` of any spike crate, references the declaring crate (`use <crate> as _;`). (2) A `--family` that no registered benchmark declares is a refusal (`Error::FamilyNotDeclared`) naming the requested family and the families found, exit 64; the message states rule (1) as the usual cause. The smoke test binaries are unaffected, since the declarations sit in the crate under test.
 
 ### DDD-4 — Substrate registry
 
-`overdrive-bench` holds a closed registry `["native"]` with a constant-evaluable validity check. `native` means the exclusive Metal host with no namespace and no wrapper. Any other value, including `guest`, is a build error naming it ("substrate `x` is not registered" / "guest substrates are not available to benchmarks"). The `native`-only registry is a scope limitation tracked by [#362](https://github.com/overdrive-sh/overdrive/issues/362). The record carries the substrate; `bench-report` refuses to compare two records whose substrates differ and names both.
+`overdrive-bench` holds a closed registry `["native"]` with a constant-evaluable validity check. `native` means the exclusive Metal host with no namespace and no wrapper. The attribute takes the substrate as a bare identifier (`substrate = native`); a string literal is a build error (DDD-2). Any other identifier, including `guest`, is a build error naming it ("substrate `x` is not registered" / "guest substrates are not available to benchmarks"). The `native`-only registry is a scope limitation tracked by [#362](https://github.com/overdrive-sh/overdrive/issues/362). The record carries the substrate. Records of different substrates are never compared because no command takes two records: `bench-report` has `validate <record>` and `render <record>` only (DDD-6), and the report of one record states its substrate in its header.
 
 ### DDD-5 — The statistical protocol, methodology version 1
 
@@ -621,19 +649,29 @@ Unknown or repeated keys and malformed values are build errors that name the off
 |---|---|
 | Replicate | one fresh fixture; the body runs once |
 | Minimum replicates per arm | 9 (refused below) |
-| Block | every arm once, plus one A/A control (a second run of the reference arm) when there are 2 or more arms; none for one arm |
+| Block | every arm once, plus one A/A control (a second run of the reference arm, which is the first declared arm) when there are 2 or more arms; none for one arm |
 | Order inside a block | seeded shuffle; the seed comes from OS entropy and is always recorded; there is no seed override |
-| Series cap | at most 10,000 values are stored per series metric per replicate: the first 10,000 in arrival order; the dropped count is recorded as `truncated`; percentiles are computed over the stored values |
-| Percentiles and quartiles | linear interpolation between closest ranks (the "R-7" method) |
-| A/B statistic | difference of per-replicate medians (a series metric uses each replicate's median), non-reference arm minus reference arm |
+| Series representation | no value is ever dropped. A series metric (declared `series`) of one replicate is stored as its raw values when it has at most 1,000, else as a histogram of all of its values (below). The switch is a representation choice, not a cap: the stored size is bounded (at most 2,049 sparse buckets) and the whole run's distribution is kept at any load |
+| Histogram | log-linear, defined exactly in "Histogram and percentile computation" below. Stored sparse as `[bucket, count]` pairs with the exact `count`, `min` and `max` |
+| Percentiles and quartiles | raw values: linear interpolation between closest ranks (the "R-7" method). A histogram, or pooled values of which any replicate is a histogram: the same R-7 over ranks, computed as pinned below. A histogram percentile is within one bucket width of the exact one (3.125% relative for values of 1 and above; absolute error below 1 for smaller values) |
+| A/B statistic | difference of per-replicate medians (a series metric uses each replicate's median, exact from raw values, histogram-derived otherwise), non-reference arm minus reference arm. Only `ok` replicates feed any statistic: a `failed` replicate's partial metrics are recorded and never used |
 | Interval | 95% percentile bootstrap, 10,000 seeded resamples of replicates, for the delta and for the A/A pair |
 | Nonparametric test | Mann-Whitney U with a seeded 10,000-permutation p-value |
-| Verdict | `distinguishable` iff the delta interval excludes 0 and the absolute point estimate exceeds the larger absolute bound of the A/A interval; else `not distinguishable from noise`; `insufficient replicates` if an arm has fewer than 9 successes |
-| Distribution (one arm) | pooled stored values per metric: p50, p90, p95, p99, value count, truncated count, replicate count, failure count, absent count |
+| Verdict | `distinguishable` iff the delta interval excludes 0 and the absolute point estimate exceeds the larger absolute bound of the A/A interval; else `not distinguishable from noise`; `insufficient replicates` if an arm, or the A/A control, has fewer than 9 `ok` replicates holding a stored value for that metric. A metric with no stored value at all in either compared arm has no comparison (DDD-6 item 4) |
+| Distribution (one arm) | pooled values per metric: p50, p90, p95, p99, value count, replicate count, failure count, absent count |
 | Canary | loopback TCP connect-and-close, 200 warm-up then 2,000 timed connects per sample, 16 samples at the start and 16 at the end, run before any fixture is built; start vs end under the verdict rule above, with the A/A floor taken from the alternating halves of the start set; a shift marks the run `unstable` |
 | Failure accounting | a failed replicate, a failed metric and an absent metric are recorded and counted; none is dropped or zero-filled |
 
-The schedule is a pure function: `plan(decl, profile, seed) -> Schedule` returns the ordered runs and performs no effect; `execute` is the only impure step ("Plan-value pattern"). The test property: every block holds every arm exactly once.
+**Histogram and percentile computation (normative).** Two implementations must produce byte-identical `report.md` for the same record, so every step is fixed. All arithmetic is IEEE-754 `f64`, evaluated in the order written, with no fused multiply-add.
+
+1. **Buckets.** Bucket 0 is `[0, 1)`: `lower` 0, `upper` 1. A value `v` below 1 (including 0 and every subnormal) falls in bucket 0. For `v` of at least 1, `e` is the unbiased binary exponent read from the `f64` bits (the `frexp` exponent minus 1; never computed with `log2`), and `s` is the top 5 bits of the 52-bit fraction, that is `floor((v / 2^e - 1) * 32)` exactly. The value falls in bucket `1 + 32e + s`, covering `lower = 2^e (1 + s/32)` and `upper = 2^e (1 + (s+1)/32)`. Bucket indices run `0..=2048`; a value at or above 2^64 clamps to bucket 2048. A negative, NaN or infinite value is a `ReplicateFailure` (measurement).
+2. **Ranks.** Ranks are 0-based. For a histogram of `n` values, the value at integer rank `k` (`0 <= k < n`) lies in the bucket holding it; `r0` is the count of values in the lower buckets, `c` the count in that bucket, and `v(k) = lower + ((k - r0) + 0.5) / c * (upper - lower)`, evaluated as `((k - r0) as f64 + 0.5) / (c as f64) * (upper - lower)` and then added to `lower`.
+3. **Clamp.** Each `v(k)` is clamped to `[min, max]` (the stored values) before it is used in step 4.
+4. **R-7.** For a percentile `p` in `[0, 1]` (p50 is 0.5, p99 is 0.99): `h = (n - 1) * p`, `f = floor(h)`. If `f = n - 1`, the result is `v(n - 1)`; otherwise it is `v(f) + (h - f) * (v(f + 1) - v(f))`, with that expression order. Quartiles are `p` of 0.25 and 0.75. Raw values use the same formula with `v(k)` the `k`-th smallest value.
+5. **Pooling.** Pooled values of an arm, where any replicate is a histogram, are binned: each raw value goes to its bucket, counts add per bucket, `min` is the minimum of the minimums, `max` the maximum of the maximums (a raw value is its own minimum and maximum) and `count` the sum of the counts.
+6. **Error.** The percentile is within one bucket width of the exact one: at most 3.125% relative for values of 1 and above, and an absolute error below 1 for values under 1 (bucket 0). The report note says both (DDD-6 item 3).
+
+The schedule is a pure function: `plan(decl, profile, seed) -> Schedule` returns the ordered runs and performs no effect; `execute` is the only impure step ("Plan-value pattern"). The property: every block holds every arm exactly once. The schedule, the statistics (percentiles, bootstrap, Mann-Whitney, verdict), the canary verdict, the host probe and the eligibility decision are internal structure of `overdrive-bench`: their names and signatures are not contracts, and their unit and proptest coverage is owned by the crafter in DELIVER. The pinned, observable surfaces are the record and the report (DDD-6).
 
 ### DDD-6 — Record, report and retention
 
@@ -642,18 +680,17 @@ Public API of `overdrive-bench` (contract):
 ```rust
 pub enum Evidence { Maintained, Spike }
 pub fn run_main(evidence: Evidence) -> std::process::ExitCode;   // maps `Error` to the exit statuses of DDD-9
-pub fn smoke(decl: &BenchmarkDecl);          // panics naming the benchmark on any replicate failure; writes nothing; holds no statistics descriptor and asserts no timing
+pub fn smoke(decl: &BenchmarkDecl);          // called only by the macro-generated smoke test (DDD-2); panics naming the benchmark on any replicate failure; writes nothing; holds no statistics descriptor and asserts no timing
 
 /// Crate error (`thiserror`); every variant names its cause, none flattens a typed source.
 pub enum Error {
-    Usage { reason: String },                                  // exit 64
-    FamilyNotDeclared { family: String, found: Vec<String> },  // exit 64 (DDD-3)
-    Refused { setting: String, found: String, pinned: String },// exit 78 (DDD-7)
-    Unreadable { setting: String, source: std::io::Error },    // exit 78 (DDD-7)
-    StatsEnable { source: aya::sys::SyscallError },            // exit 70 (DDD-8)
-    Record { path: std::path::PathBuf, source: std::io::Error },// exit 70
-    InvalidRecord { line: usize, reason: String },             // `bench-report validate`/`render`: non-zero exit
-    SubstrateMismatch { left: String, right: String },         // `bench-report` comparison refusal (DDD-4)
+    Usage { reason: String },                                  // exit 64; no record, no result directory
+    FamilyNotDeclared { family: String, found: Vec<String> },  // exit 64 (DDD-3); no record, no result directory
+    Refused { setting: String, found: String, pinned: String },// exit 78 (DDD-7); `run_started` then `run_refused { setting, found, pinned }`
+    Unreadable { setting: String, source: std::io::Error },    // exit 78 (DDD-7); `setting` `.overdrive-metal-source` writes no record (stderr only); any other setting writes `run_started` then `run_refused { setting, reason }`
+    StatsEnable { source: aya::sys::SyscallError },            // exit 70 (DDD-8); `run_started` then `run_refused { setting: "bpf_stats", reason }`
+    Record { path: std::path::PathBuf, source: std::io::Error },// exit 70; the record cannot be written, so it ends incomplete
+    InvalidRecord { line: usize, reason: String },             // `bench-report validate`/`render`: exit 65
 }
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
@@ -662,8 +699,8 @@ impl Replicate {
     pub fn arm(&self) -> &str;               // for the A/A control: the reference arm's name (the body cannot tell)
     pub fn profile(&self) -> &str;
     pub fn clock(&self) -> &HostClock;
-    pub fn record(&mut self, metric: &str, value: f64) -> Result<(), ReplicateFailure>;
-    pub fn record_series(&mut self, metric: &str, values: &[f64]) -> Result<(), ReplicateFailure>;   // stores at most the series cap (DDD-5); the rest is counted as `truncated`
+    pub fn record(&mut self, metric: &str, value: f64) -> Result<(), ReplicateFailure>;                // a scalar metric, once per replicate; a second `record` of the metric, or a `record` of a `series` metric, is a `ReplicateFailure`
+    pub fn record_series(&mut self, metric: &str, values: &[f64]) -> Result<(), ReplicateFailure>;   // a `series` metric; may be called more than once and the values accumulate; a scalar metric is a `ReplicateFailure`; every value is kept, raw or in the histogram (DDD-5)
     pub fn record_failure(&mut self, metric: &str, reason: &str) -> Result<(), ReplicateFailure>;
     pub fn record_absent(&mut self, metric: &str, reason: &str) -> Result<(), ReplicateFailure>;
     pub fn note(&mut self, key: &str, value: &str);                  // header context (cache state, versions, concurrency)
@@ -677,40 +714,50 @@ pub struct RunStats { pub run_count: u64, pub run_time_ns: u64 }   // cumulative
 pub struct ReplicateFailure; // constructors: fixture(msg), measurement(msg); typed variants for undeclared metric and stats-not-effective
 ```
 
-Contract notes: `record*` on an undeclared metric returns `ReplicateFailure` (the smoke test finds the typo). A replicate that returns `Err` is a failed replicate, counted, and the run continues. `exec` appends the program, arguments and status to the replicate's command log. The body never observes block, position or role. Ruling 3 (a benchmark never launches the `overdrive` binary) is enforced by the families' code, which drives in-process entry points, and by review; there is no runtime guard, and the command log records every `exec` for review.
+Contract notes: `record*` on an undeclared metric returns `ReplicateFailure` (the smoke test finds the typo). A replicate that returns `Err` is a failed replicate, counted, and the run continues. `exec` appends the program, arguments and status to the replicate's command log. The body never observes block, position or role. Ruling 3 (a benchmark never launches the `overdrive` binary) is enforced by the families' code, which drives in-process entry points, and by review; there is no runtime guard, and the command log records every `exec` for review. The connect-hook family calls no `exec` (it detaches through raw `bpf(2)`), so its command log is empty and the "no `overdrive` command appears in the command log" check holds vacuously for it; the ruling is enforced there by review of the family code.
 
-**Record** `record.jsonl`, schema version 1, one JSON object per line, field `t` the line type; unknown fields refused on read; written append-only with a flush per line:
+**Record** `record.jsonl`, schema version 1, one JSON object per line, field `t` the line type; unknown fields refused on read; written append-only with a flush per line. Types: `string`, `bool`, `u64`/`u32`/`i32` (JSON integers), `f64` (JSON numbers), `null`; timestamps are RFC 3339 UTC to the second (`2026-11-17T10:00:00Z`); every field below is required unless marked optional; no field is ever omitted to mean `null`. Line order: `run_started`, then, unless refused, `canary` start, the `replicate` lines in schedule order and `canary` end, then exactly one terminal line (`run_finished` or `run_refused`) and nothing after it. A refused run is `run_started` then `run_refused` and nothing else. The terminal-line accounting: an error before `run_started` (`Usage`, `FamilyNotDeclared`, an unreadable checkout marker) writes no record and creates no result directory, prints one stderr diagnostic (`bench: refused: <setting>: <reason>` for the marker) and exits with the status of DDD-9; `Refused`, `Unreadable` (any setting but the marker) and `StatsEnable` write `run_started` then `run_refused`; `Record` and a kill leave a record with no terminal line (incomplete). Every record that exists has `run_started` first, so `commit`, `dirty` and `host` are never null.
 
 | `t` | Fields |
 |---|---|
-| `run_started` | `schema`, `methodology`, `run_id` (24 hex; from `OVERDRIVE_METAL_RUN_ID`, else generated), `family`, `benchmark`, `evidence` (`maintained`/`spike`), `substrate`, `commit`, `dirty`, `debug_assertions` (the closed `cargo bench` command prevents a debug build; the field records the bench binary's setting), `seed`, `started` (RFC 3339 UTC), `host` (see DDD-7), `clock` (`host: "CLOCK_MONOTONIC_RAW"`, `service: "Clock::now (monotonic)"` where used, `guest` source or null), `bpf_stats` (`off`/`per_process`), `declaration` (echo of arms, profiles with preparation, replicates, metrics, references) |
-| `canary` | `phase` (`start`/`end`), `samples_ns` |
-| `replicate` | `profile`, `block`, `position`, `arm`, `role` (`arm`/`control`), `outcome` (`ok`/`failed`), `failure`, `metrics` (`name` to `values` (at most the series cap), `truncated`, `failures`, `absent`), `notes`, `commands` |
-| `run_finished` | `finished`, `replicates_ok`, `replicates_failed` |
-| `run_refused` | `setting`, `found`, `pinned` (or `reason`) |
+| `run_started` | `schema` u32 (`1`); `methodology` u32 (`1`); `run_id` string (24 lowercase hex; from `OVERDRIVE_METAL_RUN_ID`, else generated); `family`, `benchmark` string; `evidence` `"maintained"` or `"spike"`; `substrate` `"native"`; `commit` string (40 hex) and `dirty` bool, both from the checkout marker `$OVERDRIVE_METAL_SOURCE_ROOT/.overdrive-metal-source` (`commit=` line; `dirty` is true iff its `source_digest=` differs from the SHA-256 of empty input, which is what `bootstrap.sh` computes for a clean tree); a missing, unreadable or malformed marker is `Error::Unreadable` (setting `.overdrive-metal-source`) read before the record exists, so it writes no record (above); `debug_assertions` bool (the closed `cargo bench` command prevents a debug build; the field records the bench binary's setting); `seed` u64; `started` timestamp; `host` object (below); `clock` object `{ "host": "CLOCK_MONOTONIC_RAW", "service": string or null, "guest": string or null }` (`service` is `"Clock::now (monotonic)"` for a benchmark that reads the injected clock, else null; `guest` names the guest duration source, else null); `bpf_stats` `"per_process"` iff the benchmark declares `bpf_stats` and the runner holds the descriptor for the run, else `"off"` (always `"off"` on a refused run, where none was held); `declaration` object (below) |
+| `canary` | `phase` `"start"` or `"end"`; `samples_ns` array of f64: 16 values, each the mean connect-and-close time of one 2,000-connect sample, in ns (DDD-5) |
+| `replicate` | `profile`, `arm` string; `block`, `position` u32; `role` `"arm"` or `"control"` (a control carries the reference arm's name in `arm`); `outcome` `"ok"` or `"failed"`; `failure` string, non-null iff `outcome` is `"failed"`; `metrics` object, metric name to `{ "values": [f64], "histogram": null or { "count": u64, "min": f64, "max": f64, "buckets": [[u32, u64]] }, "failures": [string], "absent": string or null }` (`values` holds the raw values, at most 1,000; `histogram` is non-null only for a `series` metric of more than 1,000 values, with `values` then empty; `buckets` are the sparse `[bucket, count]` pairs of DDD-5, at most 2,049, in ascending bucket order); `notes` object, string to string; `commands` array of `{ "program": string, "args": [string], "status": i32 or null }` (`null`: killed by a signal) |
+| `run_finished` | `finished` timestamp; `replicates_ok`, `replicates_failed` u64 |
+| `run_refused` | `setting` string (an identifier of the DDD-7 table, or `bpf_stats` for a statistics-enable failure), and either both `found` and `pinned` (strings) or `reason` (string); the others are omitted (the only optional fields in the schema). `found` and `pinned` for a difference or a setting with no source (`found` = `absent`); `reason` for an unreadable source or a failed statistics enable. A failed host probe (`host_probe`) is a `found` / `pinned` refusal (DDD-7) |
 
-A record without `run_finished` and without `run_refused` is reported incomplete. Intervals, p-values and verdict labels are not stored. `bench-report validate <record>` parses the typed schema and the semantic rules (every replicate names a declared profile, arm and metric); `bench-report render <record>` writes the report.
+`host` has exactly these keys: `kernel`, `cpu_model`, `cpu_count`, `governor`, `smt`, `boost`, `bpf_stats_enabled`, `clocksource`, `irq_time_accounting` (DDD-7). Each value is one of three forms: a string; `{ "absent": "<reason>" }` for a setting with no source (absent by design, or, for a pinned setting, the source is missing and the run is refused); `{ "unreadable": "<error>" }` for a source that exists and cannot be read. Every key is always present: the runner reads every setting before it decides eligibility, so a refused run carries the full block and `run_refused` names the setting that refused (the first differing one in the DDD-7 table order). `cpu_count` is the decimal count of online CPUs, `boost` is `on` or `off` whichever source supplied it, `governor` is the governor shared by every online CPU, or, when they disagree, the distinct governors sorted and joined by `,` (for example `performance,schedutil`), which then also is the `found` of the refusal. `declaration` is `{ "arms": [string], "replicates": u32, "profiles": [{ "name", "preparation" }], "metrics": [{ "name", "unit", "table", "series": bool }], "references": [{ "metric", "value": f64, "label", "source" }] }`, an echo of the attribute (`unit` is one of `ns bytes bytes_per_second qps ratio count`; no profile declared echoes one profile `default` with empty `preparation`). A metric entry in an `ok` replicate holds exactly one of: non-empty `values`, a non-null `histogram`, a non-empty `failures`, or a non-null `absent`; a scalar metric's entry never holds a histogram and holds at most one value; a declared metric a replicate never recorded is written as one failure `not recorded`. A `failed` replicate may hold a partial `metrics` object.
 
-**Report** `report.md`, a pure function of the record. Header: run id, family, benchmark, evidence class (a spike record is labelled "spike evidence"), substrate, commit and dirty flag, methodology version, seed, `debug_assertions`, host block, `bpf stats: off | on (per process)`, clock provenance, canary verdict, replicate and failure counts. Per profile, one table per declared `table` label (so DNS client-observed and resolver-internal, and VM stages, are separate tables). Scalar metrics: median, IQR, replicate count per arm. Series metrics: p50, p90, p95, p99, value count, truncated count, failure count. For two or more arms: delta, bootstrap interval, A/A interval, U and p, verdict. Each declared `reference` is shown beside its measured counterpart as "reference: <label> (different run)". Absent metrics print "absent: <reason>".
+A record without `run_finished` and without `run_refused` is reported incomplete. Intervals, p-values and verdict labels are not stored. `bench-report validate <record>` parses the typed schema and the semantic rules: first line `run_started`, line order above, `schema` and `methodology` equal to `1`, every replicate names a declared profile, arm and metric, a control carries the reference arm, `failure` non-null iff failed, `run_finished` counts equal the `replicate` lines, a histogram's bucket counts sum to its `count`, and each histogram satisfies: every bucket index is at most 2048, indices ascend and are distinct, every bucket `count` is at least 1, `histogram` is non-null only when `count` exceeds 1,000 and then `values` is empty, `min` is at most `max`, and `min` lies within the range of the lowest occupied bucket and `max` within the range of the highest occupied bucket (bucket 0 is `[0, 1)`; for the last bucket the upper end is unbounded). It prints nothing and exits 0 on success; on a violation it prints `bench-report: invalid record: line <n>: <reason>` to stderr, the reason naming the offending field or name, and exits 65 (`Error::InvalidRecord`). `bench-report render <record>` validates, then prints the report to stdout (same exit statuses). Exit statuses of `bench-report`: 0 success, 64 usage, 65 invalid record, 70 the record is unreadable.
 
-**Retention (O4):** maintained results at `benchmarks/results/<family>/<run-id>/{record.jsonl,report.md}`, both committed (the raw record is the evidence, the report is derived from it); a spike writes under `spike-scratch/<name>/results/<family>/<run-id>/`. `benchmarks/catalogue.md` has one row per benchmark (family, boundary and arms, workload matrix, clock boundary, result owner; the substrate, the statistics flag and the caveats are in each record's header). Retained raw series are bounded by the series cap (DDD-5): at most 10,000 values per series metric per replicate. `benchmarks/methodology.md` states version 1: runner isolation, host eligibility, clock boundaries, cold and warm handling, the sample and percentile method, the record format and failure accounting; a test asserts its stated version equals the code constant.
+**Report** `report.md`, a pure function of the record (same bytes for the same record). Structure, in this order; the wording quoted is asserted by tests:
+
+1. `# Benchmark report: <family> / <benchmark>`, then a bullet list, one `- <key>: <value>` per line: `run id`, `family`, `benchmark`, `evidence` (`maintained`, or `spike evidence` for a spike record), `substrate`, `commit` (the hash), `dirty` (`true`/`false`), `methodology`, `seed`, `debug_assertions`, one line per `host` key (`kernel`, `cpu_model`, `cpu_count`, `governor`, `smt`, `boost`, `bpf_stats_enabled`, `clocksource`, `irq_time_accounting`; an absent value prints `absent: <reason>`, an unreadable one `unreadable: <error>`), `bpf stats` (`off` or `on (per process)`, from the record's `bpf_stats`; `off` on a refused run), `clock` (host, service and guest sources), `canary` (`steady`, or `unstable (start median <a> ns, end median <b> ns)`; the word `unstable` appears nowhere else; `not run` when the record has no `canary` line, as in a refused run; `not finished` when it has the start line and no end line, as in a killed run), `replicates ok`, `replicates failed` (counted from the `replicate` lines by `outcome`, so a killed run shows the count so far and a refused run shows 0 and 0; on a finished run they equal `run_finished`), and `status` (`finished`, `refused`, or `incomplete (no run_finished or run_refused)`; the word `incomplete` appears nowhere else). A refused run adds `- refused: <setting> found <found> pinned <pinned>` or `- refused: <setting>: <reason>` and has no further section.
+2. For each profile, `## Profile: <name>` and its `preparation` text, then for each declared `table` label in declaration order `### Table: <label>`; a metric appears only under the table it declares.
+3. Each table is a Markdown table with one row per arm (the A/A control is not a row). A metric is a series metric iff the declaration echo marks it `series`; otherwise it is scalar. Only `ok` replicates of the arm feed a row (a `failed` replicate's partial metrics are never used). Scalar columns: `metric | arm | median | IQR | replicates | failures`, the median and IQR (R-7 quartiles) taken over the `ok` replicates' values. Series columns: `metric | arm | p50 | p90 | p95 | p99 | values | replicates | failures`, over the pooled values of the `ok` replicates (DDD-5). `replicates` is the number of `ok` replicates of the arm holding a stored value for the metric; `values` (series) is the pooled value count; `failures` is the number of `failed` replicates of the arm plus the number of `ok` replicates whose entry for the metric holds `failures`; an absent entry is counted in neither. When any entry of a series metric in the table is a histogram, a line `percentiles of <metric> are histogram-derived (relative error at most 3.125% for values of 1 and above, absolute error below 1 for smaller values)` follows the table. Numbers print with Rust's `f64` `Display` (no rounding, no thousands separators, an integral value without a decimal point). An arm with no stored value for the metric (every entry absent, failed or the replicate failed) prints one row whose value cells are `absent: <reason>`, the `<reason>` being the first absent reason in schedule order, else `no stored value`, and whose `replicates` is 0 and `failures` the count above.
+4. With two or more arms, below each table a comparison table, one row per non-reference arm and metric for which both that arm and the reference arm have at least one stored value (a metric with no stored value in either arm, for example the mTLS handshake on the baseline arm or the ingress forward and return rows, has no comparison row: the arm row above prints `absent: <reason>` and no delta, interval or verdict is computed; a metric with one to eight values in an arm or the control keeps its row with the verdict `insufficient replicates`), columns `metric | arm | delta (<arm> minus <reference>) | 95% bootstrap interval | A/A 95% interval | Mann-Whitney U | p | verdict`; intervals print as `[lo, hi]`; the verdict cell is exactly `distinguishable`, `not distinguishable from noise` or `insufficient replicates` (DDD-5). A one-arm benchmark has no comparison table and no A/A text.
+5. Each declared `reference` prints under its metric's table as `reference: <label>: <value> <unit> (source: <source>)`; the `label` carries the "different run" wording (the connect-hook label is "spike evidence, different run").
+6. `## Failures`: one line per failed replicate, `- profile <p> block <b> position <n> arm <arm>: <reason>`, and one per metric failure, `- profile <p> block <b> position <n> arm <arm> metric <m>: <reason>`; the section is omitted when there are none.
+
+**Retention (O4):** maintained results at `benchmarks/results/<family>/<run-id>/{record.jsonl,report.md}`, both committed (the raw record is the evidence, the report is derived from it); a spike writes under `spike-scratch/<name>/results/<family>/<run-id>/`. `benchmarks/catalogue.md` has one row per benchmark (family, boundary and arms, workload matrix, clock boundary, result owner; the substrate, the statistics flag and the caveats are in each record's header). A retained series is bounded by its representation (DDD-5): raw values up to 1,000 per series metric per replicate, else a histogram of at most 2,049 buckets, so a committed record stays small at any load and no value is dropped. `benchmarks/methodology.md` states version 1: runner isolation, host eligibility, clock boundaries, cold and warm handling, the sample and percentile method, the record format and failure accounting; a test asserts its stated version equals the code constant.
 
 ### DDD-7 — Host eligibility and the pinned test-host settings
 
 Pinned list, methodology version 1 (O1 applied: ADR-0068 defines the kernel; the other values are the test host's, taken from the first accepted host recorded in `spike/findings-bpf-stats-overhead.md` and re-confirmed by the first accepted run; ADR-0068 defines no governor, SMT or boost value):
 
-| Setting | Source read | Pinned | On difference |
+| Setting (the `setting` identifier in `run_refused`, in this order) | Source read | Pinned | On difference |
 |---|---|---|---|
-| Kernel release series | `/proc/sys/kernel/osrelease` | `7.0` | refuse |
-| `kernel.bpf_stats_enabled` | `/proc/sys/kernel/bpf_stats_enabled` | `0` | refuse |
-| CPU governor, every online CPU | `cpu*/cpufreq/scaling_governor` | `schedutil` | refuse |
-| SMT | `/sys/devices/system/cpu/smt/control` | `on` | refuse |
-| CPU boost | `cpufreq/boost`, else `intel_pstate/no_turbo` | boost on | refuse |
-| `bpf-stats` descriptor holder | scan of `/proc/*/fd` for `anon_inode:bpf-stats` (name from `kernel/bpf/syscall.c:6014`, rendering at `fs/anon_inodes.c:76` @ v7.0) | none | refuse |
-| Build | `cfg!(debug_assertions)` of the bench binary | off | refuse |
-| Recorded only | CPU model, online CPU count, clocksource, image `CONFIG_IRQ_TIME_ACCOUNTING` where readable | | record |
+| `host_probe` (no host key): the probe's own self-check | `HostProbe::probe()` before any setting is read | probe succeeds | refuse; `found` = the probe's error, `pinned` = `probe succeeds`; every `host` key is `{"unreadable": "<probe error>"}` because no setting was read |
+| `kernel` (`host.kernel`): kernel release series | `/proc/sys/kernel/osrelease` | `7.0` | refuse |
+| `bpf_stats_enabled` (`host.bpf_stats_enabled`): `kernel.bpf_stats_enabled` | `/proc/sys/kernel/bpf_stats_enabled` | `0` | refuse |
+| `governor` (`host.governor`): CPU governor, every online CPU | `cpu*/cpufreq/scaling_governor` | `schedutil` | refuse |
+| `smt` (`host.smt`) | `/sys/devices/system/cpu/smt/control` | `on` | refuse |
+| `boost` (`host.boost`): CPU boost | `cpufreq/boost`, else `intel_pstate/no_turbo` | boost on | refuse |
+| `bpf_stats_holder` (no host key): `bpf-stats` descriptor holder | scan of `/proc/*/fd` for `anon_inode:bpf-stats` (name from `kernel/bpf/syscall.c:6014`, rendering at `fs/anon_inodes.c:76` @ v7.0) | none | refuse; `found` = `held by pid <n>`, `pinned` = `none` |
+| `debug_assertions` (the `run_started` field): build | `cfg!(debug_assertions)` of the bench binary | off | refuse; `found` = `on`, `pinned` = `off` |
+| Recorded only: `cpu_model`, `cpu_count`, `clocksource`, `irq_time_accounting` (image `CONFIG_IRQ_TIME_ACCOUNTING` where readable) | CPU model, online CPU count, clocksource | | record; never refuses |
 
-The refusal (`Error::Refused`) names the setting with the found and pinned values, writes `run_started` and `run_refused`, takes no sample, and exits 78. A file absent by design (for example the `intel_pstate` directory on an AMD host) is recorded as `absent`; an unreadable file (permission, I/O) refuses with its own reason (`Error::Unreadable`).
+The refusal (`Error::Refused`) names the first differing setting in the order above with the found and pinned values, writes `run_started` and `run_refused`, takes no sample, and exits 78; the full `host` block is in `run_started`, so every other value is retained. The probe runs first. When it succeeds, every setting is read before the decision, so no `host` key is ever missing. When it fails, no setting is read: the run writes `run_started` with every `host` key set to `{"unreadable": "<probe error>"}`, then `run_refused` with setting `host_probe`; `host_probe` is therefore first in the order above. A source absent by design is `{"absent": ...}` in `host`: a recorded-only row, and the unused alternative source of CPU boost (the `intel_pstate` directory on an AMD host). A pinned setting for which no source exists (no cpufreq directory, so no governor and no boost source; no `smt/control`) cannot be verified, so it is a difference: `host.<key>` is `{"absent": "<reason>"}` and the refusal is `Error::Refused` with `found` = `absent`. A pinned setting whose source cannot be read (permission, I/O) is `host.<key>` = `{"unreadable": "<error>"}` and refuses as `Error::Unreadable` with its own reason; an unreadable recorded-only source is recorded as `{"unreadable": ...}` and does not refuse. A failed `HostProbe::probe()` refuses as `Error::Refused` with `setting` = `host_probe`, `found` the probe's error and `pinned` = `probe succeeds`. When online CPUs disagree on the governor, `host.governor` and `found` hold the distinct governors sorted and joined by `,` (DDD-6). The `run_started` of a refused run has `bpf_stats` `off` (nothing was held).
 
 ### DDD-8 — Per-process BPF statistics
 
@@ -725,7 +772,9 @@ cargo bench -p overdrive-bench-families --bench benchmarks -- run --family <FAMI
 cargo bench --manifest-path spike-scratch/<NAME>/Cargo.toml --bench benchmarks -- run --family <FAMILY> --results-root $ROOT/spike-scratch/<NAME>/results   # with --spike
 ```
 
-`cargo bench` runs with the package directory as its working directory, so the results root is always an absolute path under `$ROOT`; the runner refuses a relative `--results-root`, and a root outside `OVERDRIVE_METAL_SOURCE_ROOT`, as `Error::Usage` (exit 64). There is no seed option: the seed comes from OS entropy and is recorded (DDD-5). A refusal uses the existing `OVERDRIVE_METAL_RUNNER_ERROR` shape (status 64). The runner accepts and ignores the `--bench` flag Cargo injects, writes `<results-root>/<family>/<run-id>/`, and prints `OVERDRIVE_BENCH_RESULT_DIR=<path>` where `<path>` is relative to `OVERDRIVE_METAL_SOURCE_ROOT` (so repo-relative); retrieval is `cargo xtask metal pull <path>`. Runner exit status: 0 the run finished (failed replicates and an unstable canary are in the report, not the status); 78 refused (DDD-7); 64 usage; 70 internal. Prerequisites stay separate commands (`bpf-build`, `guest-kit-prepare`, `kmod-load`).
+`cargo bench` runs with the package directory as its working directory, so the results root is always an absolute path under `$ROOT`; the runner refuses a relative `--results-root`, and a root outside `OVERDRIVE_METAL_SOURCE_ROOT`, as `Error::Usage` (exit 64). There is no seed option: the seed comes from OS entropy and is recorded (DDD-5). `bootstrap.sh` refuses a malformed benchmark request before the selected command runs, in the existing `OVERDRIVE_METAL_RUNNER_ERROR error=<name>` shape, status 64: `benchmark_family_invalid` (`FAMILY` fails its grammar, including empty), `benchmark_spike_invalid` (`NAME` fails its grammar, or `spike-scratch/<NAME>/Cargo.toml` does not exist after sync), and the existing `invalid_mode` for `--spike` without `--benchmark`, and for `--benchmark` beside `--exclusive` or a trailing command (where `xtask`'s own argument parser already rejects the combination first, so the refusal never reaches the box). The runner accepts and ignores the `--bench` flag Cargo injects and writes `<results-root>/<family>/<run-id>/record.jsonl` while it runs. Once that directory exists, and before the canary, it prints one line to stdout, `OVERDRIVE_BENCH_RESULT_DIR=<path>`, with `<path>` relative to `OVERDRIVE_METAL_SOURCE_ROOT` (so repo-relative: `benchmarks/results/<family>/<run-id>` or `spike-scratch/<name>/results/<family>/<run-id>`); it is therefore printed for a refused (other than an unreadable checkout marker, which writes nothing, DDD-6) or killed run too. After `run_finished` or `run_refused` the runner writes `report.md` in the same directory through the renderer `bench-report render` uses (one function, no subprocess); a killed run has no `report.md`, and `bench-report render <record>` produces its report on stdout. Retrieval is `cargo xtask metal pull <path>`. Runner exit status: 0 the run finished (failed replicates and an unstable canary are in the report, not the status); 78 refused (DDD-7, including an unreadable checkout marker); 64 usage; 70 internal (including a statistics-enable failure). Prerequisites stay separate commands (`bpf-build`, `guest-kit-prepare`, `kmod-load`).
+
+**Evidence lane (user ruling 2026-11-17).** The runner's end-to-end run over a real replicate cohort is a benchmark, not a test (`.claude/rules/testing.md` § "Classify external execution"), and a product test is never `native_launcher`. No nextest test runs the runner over a cohort. DDD-7 and DDD-9 are evidenced by retained `cargo xtask metal run --benchmark <family>` runs under exclusive admission: a finished run of the connect-hook family (its committed record and report), and one run on a host deliberately drifted from a pinned setting whose `run_refused` record and exit 78 are retained (K4); host-eligibility refusal is shown only by that real run. In nextest the runner path is covered by the generated smoke tests (one replicate per arm, in a guest placement, no timing assertions, DDD-2) and by the record and report tests (`bench-report validate` and `render` on crafted records). The `xtask` benchmark-form grammar tests (the Metal runner's own behaviour, host-pure) are unaffected. No family test is `native_launcher`, and no nextest override for a families run is needed.
 
 ### DDD-10 — Clocks: host stamps and guest durations
 
@@ -767,7 +816,7 @@ pub struct NoQueryObserver;   // QueryObserver with an empty body; the productio
 // DnsResponder::new(store, clock, gateway, frontend, observer: Arc<dyn QueryObserver>)
 ```
 
-The observer enters through `DnsResponder::new` only. `GuestDnsDeps` and `GuestDnsFactory` are unchanged; `HostGuestDnsFactory` (`dns_responder/mod.rs:102`) passes `NoQueryObserver`, and the benchmark constructs `DnsResponder` directly with its recorder. Behaviour with `NoQueryObserver` is byte-identical to today's. A send failure still calls `observe` with the attempted outcome (the existing `dns.responder.sendmsg_failed` event is unchanged). Hot-path budget: two `Clock::now()` reads and one dynamic call per datagram, no allocation, no lock. Confirmed by spike V-2 (`7.0.0-38-generic`, AMD EPYC 8024P): 62.7 ns per datagram with `NoQueryObserver` and 75.2 ns with a recording sink, in a 10-million-iteration microbenchmark. The end-to-end comparison (5,000 queries per second, 30 replicates, 6 million queries, none lost) found no difference distinguishable from noise (C minus A +111 ns, 95% interval [-165, +848]); its A/A floor of about 700 ns only rules out costs above that, so the microbenchmark is the cited bound. Family `dns-responder`, benchmark `dns_query_latency`, one arm `responder`; tables `client-observed` (`client_latency_ns` series, `client_throughput_qps` scalar) and `resolver-internal` (`resolver_service_ns` series). Load is scheduled-arrival (fixed schedule, latency from the scheduled send time, replies matched by DNS id, a timeout counted as a failure), with the arrival model, rate and duration written in each profile's `preparation`. The responder and the clients run in a netns the family creates (`overdrive-testing::NetNs`), so the host's own `:53` listener is irrelevant. Profile axes that exist in production: query shape (A on a resolvable name, AAAA on a resolvable name giving no data, an unknown name giving a name error), name-table cardinality, client socket count, arrival rate. Axes that do not: cache hit or miss (the name index is the authoritative map, `name_index.rs:257`), transport other than UDP (no TCP listener, `responder.rs:275-290`), response size (set by the query shape and recorded as observed).
+The observer enters through `DnsResponder::new` only. `GuestDnsDeps` and `GuestDnsFactory` are unchanged; `HostGuestDnsFactory` (`dns_responder/mod.rs:102`) passes `NoQueryObserver`, and the benchmark constructs `DnsResponder` directly with its recorder. Behaviour with `NoQueryObserver` is byte-identical to today's. A send failure still calls `observe` with the attempted outcome (the existing `dns.responder.sendmsg_failed` event is unchanged). Hot-path budget: two `Clock::now()` reads and one dynamic call per datagram, no allocation, no lock. Confirmed by spike V-2 (`7.0.0-38-generic`, AMD EPYC 8024P): 62.7 ns per datagram with `NoQueryObserver` and 75.2 ns with a recording sink, in a 10-million-iteration microbenchmark. The end-to-end comparison (5,000 queries per second, 30 replicates, 6 million queries, none lost) found no difference distinguishable from noise (C minus A +111 ns, 95% interval [-165, +848]); its A/A floor of about 700 ns only rules out costs above that, so the microbenchmark is the cited bound. Family `dns-responder`, benchmark `dns_query_latency`, one arm `responder`; tables `client-observed` (`client_latency_ns` declared `series`, `client_throughput_qps` scalar) and `resolver-internal` (`resolver_service_ns` series). Load is scheduled-arrival (fixed schedule, latency from the scheduled send time, replies matched by DNS id, a timeout counted as a failure), with the arrival model, rate and duration written in each profile's `preparation`. The responder and the clients run in a netns the family creates (`overdrive-testing::NetNs`), so the host's own `:53` listener is irrelevant. Profile axes that exist in production: query shape (A on a resolvable name, AAAA on a resolvable name giving no data, an unknown name giving a name error), name-table cardinality, client socket count, arrival rate. Axes that do not: cache hit or miss (the name index is the authoritative map, `name_index.rs:257`), transport other than UDP (no TCP listener, `responder.rs:275-290`), response size (set by the query shape and recorded as observed).
 
 ### DDD-13 — mTLS boundary, rigs and baseline
 
@@ -798,9 +847,20 @@ The inbound path calls neither constructor: its only pump is `PumpHandle::spawn_
 
 Family `cgroup-connect-hook`, benchmark `connect_hook_cost`, arms `["service-only", "service+gateway"]`, `replicates = 30`, `bpf_stats`, metrics `hook_ns_per_connect` (ns, table `hook-time`) and `wall_ns_per_connect` (ns, table `wall-time`), reference `hook_ns_per_connect` value `117.0` labelled "spike evidence, different run" with source `docs/feature/public-ingress-gateway/spike/findings-connect-hook-cost.md`. Replicate body (the spike's fixture): a fresh cgroup and bpffs pin directory, `EbpfDataplane::new_with_pin_dir` with both connect programs. Arm A detaches the gateway link in process. `EbpfDataplane` holds its links in private fields (`_cgroup_connect4_gateway_link`, `lib.rs:418`) that only `Drop` releases, so it exposes no detach handle; the family adds none. It detaches through the kernel's link commands over raw `bpf(2)`, with no `bpftool` and no `rep.exec`: it finds the gateway program's cgroup link by enumerating link ids and reading each link's program name (`BPF_LINK_GET_NEXT_ID`, `BPF_LINK_GET_FD_BY_ID`, `BPF_OBJ_GET_INFO_BY_FD`) and issues `BPF_LINK_DETACH` on it (`kernel/bpf/syscall.c:5893-5900`, `:6324-6337`; cgroup links implement `.detach`, `kernel/bpf/cgroup.c:1464` @ v7.0). This works in a guest as well as on the host. Statistics are read through `bpf_stats()`, which is `None` under `smoke`: the metric `hook_ns_per_connect` is then `absent` and the smoke test checks the fixture, the detach and the connect loop, not timing. The loop is 500 warm-up then 5,000 timed loopback connect-and-close with `SO_LINGER` zero; `hook_ns_per_connect` is the summed `run_time_ns` delta of the connect programs over the largest `run_count` delta; `wall_ns_per_connect` is the timed loop divided by 5,000; teardown on drop. `smoke(guest = "cgroup-default")` is the placement (DISTILL confirms the group provides cgroup v2, bpffs and veth).
 
+### Fault paths that have no nextest obligation
+
+Four fault paths of the families need a fault no existing fixture produces. Each is ruled here; none adds a seam, a flag or a config surface. All four sit inside a family replicate or the runner, which run only in a retained `--benchmark` run (DDD-9, evidence lane), so none is a nextest obligation. What is contractual about them, that a failed or absent stage or metric is recorded and counted and never dropped or zero-filled, is covered by the record and report tests on crafted records (failed replicates, `failures`, `absent`) and by the crafter-owned runner unit tests (G1 ruling in DDD-5).
+
+| Fault path | Reachable on a production path? | Ruling |
+|---|---|---|
+| Guest never reports `READY` (OQ-4) | Yes, by an image whose init never sends it, but no existing fixture image does that (the guest kit's workload image reports it) | No obligation. The family records the stage as a `record_failure` and the later stages absent (DDD-11); shown only if a retained run meets it. |
+| Stop reaching its grace deadline (profile `stop-grace-deadline`) | Yes: a workload that ignores the stop signal. No existing guest-peer subcommand does | No nextest obligation. The profile's fixture is a guest-peer subcommand that ignores the stop signal, test-support surface (not a production seam) shaped in DELIVER as OQ-4 already states; it runs in the retained VM-lifecycle run only. |
+| DNS query timing out | Yes, naturally: a datagram the responder drops (a malformed query) gets no reply through the real responder socket (`QueryOutcome::Dropped`) | No family-level obligation; the client counts a timeout as a failure (DDD-12). The responder's own `Dropped` observation belongs to the DNS observer tests, not to the family. |
+| Pump thread spawn failing (DDD-14, `MtlsEnforcementError::Io`) | Only under thread or memory exhaustion; no existing fixture provokes it deterministically | No obligation: the mapping is `?` through `#[from] std::io::Error` by construction, and the close-both-legs and stop-and-join ordering is reviewed by the DELIVER reviewer. This is a residual: the branch has no executing test, and a test would need a seam, which is excluded. |
+
 ### Rule text the orchestrator edits (not the architect)
 
-`.claude/rules/testing.md`: (a) § "Running tests — native x86_64 bare-metal KVM host": the sentence "No test is ever run with `--exclusive`" gains "Benchmarks (the benchmark form) are exempt beside expectation captures"; (b) the command-grammar section names the benchmark form; (c) § "Classify external execution" row "Benchmark" cites `benchmarks/` and `cargo xtask metal run --benchmark`. `.claude/rules/development.md` § "xtask": no change (the Metal form adds no `overdrive-*` dependency to xtask).
+`.claude/rules/testing.md`: (d) the status-64 runner diagnostics list gains `benchmark_family_invalid` and `benchmark_spike_invalid` (DDD-9); (a) § "Running tests — native x86_64 bare-metal KVM host": the sentence "No test is ever run with `--exclusive`" gains "Benchmarks (the benchmark form) are exempt beside expectation captures"; (b) the command-grammar section names the benchmark form; (c) § "Classify external execution" row "Benchmark" cites `benchmarks/` and `cargo xtask metal run --benchmark`. `.claude/rules/development.md` § "xtask": no change (the Metal form adds no `overdrive-*` dependency to xtask).
 
 ## Wave: DESIGN / [REF] Technology choices
 
@@ -824,11 +884,11 @@ Family `cgroup-connect-hook`, benchmark `connect_hook_cost`, arms `["service-onl
 - **Owner:** the `overdrive-bench` runner.
 - **Promise:** every pinned setting matched and every probe passed before the first sample.
 - **Affected state:** whether this benchmark process proceeds to the canary.
-- **Failure projection:** setting differs, unreadable, or probe failed gives `run_refused` and exit 78; malformed input gives exit 64; cancellation (kill) leaves an incomplete record and, by kernel descriptor release, no statistics held.
+- **Failure projection:** setting differs, has no source, is unreadable, or the probe failed (`host_probe`, first in the DDD-7 order, with every `host` key `{"unreadable": ...}`) gives `run_started` then `run_refused` naming the setting and exit 78; an unreadable checkout marker gives no record, a stderr diagnostic and exit 78 (DDD-6); a statistics-enable failure gives `run_refused` with setting `bpf_stats` and exit 70; malformed input gives exit 64; cancellation (kill) leaves an incomplete record and, by kernel descriptor release, no statistics held.
 - **Explicitly unaffected:** every production state and every other Metal run.
-- **Ordering:** probe, eligibility, statistics, canary, run; no timeout of its own beyond the Metal lease.
+- **Ordering:** usage checks, marker, probe, settings read and eligibility, statistics, create the result directory and print `OVERDRIVE_BENCH_RESULT_DIR`, `run_started`, canary, run; no timeout of its own beyond the Metal lease.
 - **Counterexample:** gating `kernel.bpf_stats_enabled` by the sysctl alone would pass a host where another process holds a descriptor; hence the descriptor scan.
-- **Evidence lane:** pure tests with a fixture `HostProbe` (drift, absent, unreadable); a Metal run with one deliberate drift (K4).
+- **Evidence lane:** crafter-owned unit tests with a fixture host probe (drift, absent, unreadable); a retained `--benchmark` run on a host with one deliberate drift (K4), the only evidence of the refusal on a real host (DDD-9, evidence lane).
 
 ## Wave: DESIGN / [REF] Formal protocol model
 
@@ -867,7 +927,7 @@ None is contract-shaping and none needs a user decision; each goes to DISTILL or
 
 - OQ-3 (DISTILL): the smoke placement for the DNS and mTLS families (connect-hook is `cgroup-default`, CA-1). They need a netns, so they are never `host_pure`; a guest group is chosen against the registry.
 - OQ-4 (DISTILL): a fixture workload that reaches the stop grace deadline, and confirmation that production reaches that path for it. The guest peer's subcommands as read (`round-trip`, `hold`, `flood`, `udp-churn`, `idle`, `bind`, `listen`, `v6-peer`, `v6-client`, `run-with-modules`) include none documented to ignore the stop signal; a new subcommand is test-support surface for DISTILL to shape.
-- OQ-5 (DISTILL): final profile and metric names for DNS, VM lifecycle and mTLS; the DNS scheduled-arrival rate and duration per profile (bounds the largest series).
+- OQ-5 (DISTILL): final profile and metric names for DNS, VM lifecycle and mTLS; the DNS scheduled-arrival rate and duration per profile.
 
 ## Wave: DESIGN / [REF] Changed Assumptions
 
@@ -882,4 +942,86 @@ None is contract-shaping and none needs a user decision; each goes to DISTILL or
 
 - **CA-9.** US-BENCH-09 acceptance criterion 1: "a per-cgroup figure is shown as secondary and labelled". Now: CPU is whole-host from `/proc/stat` only; no cgroup figure is reported (the report states why whole-host is the scope: interrupt and kernel-worker time is charged outside the benchmark's cgroup).
 
+- **CA-10.** US-BENCH-04 domain example 2 and scenario "Results from different substrates are never compared": "the report refuses to compare them if the substrates differ". Now: no command takes two records, so no comparison exists to refuse; the substrate is in every record and report header (DDD-4). The scenario is dropped.
+
+- **CA-11.** Port (4) and the DISTILL smoke scenarios: "`cargo nextest run` on `overdrive-bench-families`". Now: the generated smoke test is `#[cfg(feature = "integration-tests")]` and guest-placed (DDD-2), so a plain `cargo nextest run` neither builds nor runs it; it runs on a Metal integration run, `cargo xtask metal run -- cargo nextest run -p overdrive-bench-families --features integration-tests`.
+
+- **CA-12.** US-BENCH-03 scenario "Too few replicates are refused" (a run refused at run time) and the benchmark-level wording "refused below 9". Now: `replicates` is a literal in the attribute, so a value below 9 is a build-time error naming the minimum (DDD-2); no runtime refusal exists and no run record is written for it.
+
 No `design/upstream-changes.md` is written; these entries are the requested story and acceptance-criteria changes for the product owner.
+
+---
+
+# DISTILL
+
+DISTILL, 2026-11-17. Density `lean`, Tier-1 `[REF]` sections only. Rust, project rules override the skill's Gherkin and Python conventions: no `.feature` files; scenarios are specified in [distill/test-scenarios.md](distill/test-scenarios.md) and executed as Rust tests. Reconciliation: 0 contradictions between DISCUSS and DESIGN (CA-1 to CA-10 are recorded changes, approved); revised 2026-11-17 for the user ruling on the runner's end-to-end run, the DESIGN pins, and the final-review findings (semantic RED, Contract Shape per test, the histogram series, the refused-host and canary header shapes, only-`ok` statistics). Gaps and decisions: [distill/upstream-issues.md](distill/upstream-issues.md). Proof of RED: [distill/red-classification.md](distill/red-classification.md).
+
+## Wave: DISTILL / [REF] Scenario list
+
+Revised 2026-11-17 after the user ruling that the runner's end-to-end run is a benchmark, not a test (DDD-9, "Evidence lane"): 70 tests, 48 error or edge (69%); 67 pending RED, 3 GREEN guards (V1, V17, P3); every test carries a `CONTRACT_SHAPE:` line, recorded per row in `distill/test-scenarios.md`. The 21 Metal tests that ran the runner over a cohort are removed from nextest; their scenarios, and W12 (a missing checkout marker refuses with exit 78 and no record, which no nextest test can reach without running the runner), are in `distill/test-scenarios.md` § "Benchmark-run evidence (DELIVER, retained, not tests)", discharged by eight retained runs. Aligned the same day with the DDD-5 histogram pin and the DDD-7 `host_probe` row: R14 pins the report note and the exact percentile computation, R12c adds the failed-probe refusal, V17-V24 add the histogram validate rules, and the smoke probes each sit in their own family. Full table with traces, driving port, owner path, fault, oracle and lane per scenario: `distill/test-scenarios.md`. Summary:
+
+| Group | Tests | Lane | Where |
+|---|---|---|---|
+| Walking skeleton, nextest side (benchmark form, smoke variant) | W7-W11 | xtask / int-host | `xtask/tests/acceptance/metal_run_isolation/benchmark_form.rs`, `overdrive-bench/tests/integration/smoke_variant.rs` |
+| `bench-report render` / `validate`, methodology and catalogue | 52 (report 26, validate 24, docs 2) | int-host | `overdrive-bench/tests/integration/{report_rendering,report_validation,methodology_documents}.rs` |
+| Declaration rules | 5 tests, 13 fixtures | trybuild | `overdrive-bench/tests/compile_fail.rs`, `tests/compile_fail/` |
+| DNS observer, pump thread names | 4 | int-guest | `overdrive-control-plane/tests/integration/dns_query_observer.rs`, `overdrive-dataplane/tests/integration/mtls_guardrails.rs` |
+| Metal benchmark form grammar | 4 (X1a-c, X2; + W7, W8) | xtask | `benchmark_form.rs` |
+| Families, runner end to end | 0 tests; 22 evidence scenarios | retained `--benchmark` runs | `distill/test-scenarios.md` |
+
+Tags: no Gherkin tags; the scenario table carries the lane and the state (RED or GREEN). Property-shaped criteria and pure internals (schedule, eligibility, statistics, canary, the writer's raw-or-histogram choice and the histogram encoder, the marker reader, argument parser) are crafter-owned unit and proptest coverage (G1, DDD-5). The substrate-comparison scenario is dropped (CA-10). Four fault paths carry no-obligation rulings (DESIGN, G6), recorded in `test-scenarios.md`.
+
+## Wave: DISTILL / [REF] WS strategy
+
+The walking skeleton is the connect-hook benchmark. Its end-to-end run (the runner binary against the real host: cgroup, bpffs, production connect programs, per-process statistics) is evidence: a finished `cargo xtask metal run --benchmark cgroup-connect-hook` run with its committed record and report, and one run on a deliberately drifted host that retains the `run_refused` record and exit 78 (K4). In nextest the skeleton is covered by the benchmark-form argv tests (W7, W8), the generated smoke tests (one replicate per arm, no timing; W9-W11 on synthetic benchmarks, the family's own smoke test generated from its declaration in `cgroup-default`) and the record and report tests on crafted records. Port treatment: driving adapters (the `bench-report` binary, the xtask and `bootstrap.sh` command lines, the attribute) are real; the DNS observer and pump-name tests run the real production owners in a guest. Policy file `docs/architecture/atdd-infrastructure-policy.md` is not used in this repository (the project's `testing.md` tiers are the policy). Slice 01 is the first to activate.
+
+## Wave: DISTILL / [REF] Adapter coverage
+
+| Driven adapter / boundary | Real-I/O scenario |
+|---|---|
+| `HostProbe` (procfs, sysfs, `/proc/*/fd` scan) | evidence run E-2 (descriptor holder refused), E-1 (host block recorded); unit coverage crafter-owned (G1) |
+| `StatsEnabler` (`aya::sys::enable_stats`) | evidence runs E-1, E-3 |
+| `RecordSink` (append-only file, flush per line) | evidence runs E-1, E-3 (incomplete record after SIGKILL); V1-V24 on crafted records |
+| `HostClock` | evidence run E-1 (block, seed, canary retained); no probe (DDD) |
+| `EbpfDataplane` + cgroup + bpffs (connect-hook fixture) | evidence run E-1; smoke test generated for the family (`cgroup-default`) |
+| `DnsResponder` + `QueryObserver` | P1-P3; evidence run E-6 |
+| mTLS pump threads | P4; evidence run E-7 |
+| VM lifecycle seams (`BeaconIo`, `Vmm`, subscription) | evidence run E-5; smoke test generated for the family (`cgroup-default`) |
+
+Costly-external adapters: none. The retained runs are point-in-time evidence, not the nextest-lane Mandate 6 scenarios; the guest-placed tests (P1-P4 and the generated family smoke tests) are the `@real-io` nextest coverage.
+
+## Wave: DISTILL / [REF] Scaffolds
+
+Exact shapes from the DESIGN contract only; each is marked `SCAFFOLD: true` and raises nothing a test cannot reach.
+
+- `crates/overdrive-bench/` (new, `adapter-host`, dev-only): `src/lib.rs` (`Evidence`, `run_main` exits 70 printing a RED line, `smoke`, `Error` with the seven DDD-6 variants (`SubstrateMismatch` removed), `Result`, `Replicate`, `HostClock`, `HostInstant`, `BpfStatsHold`, `RunStats`, `ReplicateFailure`, `BenchmarkDecl` opaque), `bin/bench_report.rs` (accepts anything, prints nothing); alias `bench-report` in `.cargo/config.toml`.
+- `crates/overdrive-bench-families/` (new): `benches/benchmarks.rs` as DDD-1, `src/families/cgroup_connect_hook.rs` carrying the pinned declaration with a body that returns a fixture failure. No `tests/` directory and no dev-dependency: the crate keeps no hand-written test. Each family slice adds the production crates it drives.
+- `crates/overdrive-testing-macros`: `overdrive_bench` as a passthrough attribute (validates nothing, registers nothing, emits no smoke test).
+- `crates/overdrive-control-plane/src/dns_responder/`: `QueryObserver`, `QueryOutcome`, `NoQueryObserver` as DDD-12, and the `observer` parameter on `DnsResponder::new` (stored, not yet called). Two callers updated.
+- Workspace: both crates in `members` and `default-members`. No nextest override (the families `host-kernel-shared` assignment and 300 s slow-timeout were removed with the families tests).
+- Not scaffolded: DDD-14's pump signatures (the test asserts behaviour through the public enforcement port), `linkme`, statistics, eligibility, the Metal `--benchmark` flag.
+
+## Wave: DISTILL / [REF] Test placement
+
+Precedent: `overdrive-testing/tests/{compile_fail,integration}.rs`, `xtask/tests/{acceptance,integration}`, `overdrive-control-plane/tests/integration/dns_responder_bind.rs`. `overdrive-bench` integration binary: `overdrive_test_default!(host_pure)` (subprocess of `bench-report` and of the test binary, no kernel state); trybuild tests `#[overdrive_test(host_pure)]` + `#[serial(trybuild)]`. xtask module: `placement!(host_pure)`. DNS observer: `guest = "cgroup-default", profile = "normal-gate"` (OQ-3 resolved for DNS). Pump names: `guest = "mtls-relay"`. Family smoke tests (macro-generated from each declaration, DDD-2): connect-hook, `vm-lifecycle` and `dns-responder` in `cgroup-default`, `mtls-path` in `mtls-relay` (OQ-3 resolved). No test is `native_launcher` and the families crate has no test binary. `cargo xtask placement-lint`: clean.
+
+## Wave: DISTILL / [REF] Driving adapter coverage
+
+| Driving port (DESIGN) | Scenario |
+|---|---|
+| 1 `#[overdrive_bench]` attribute | T1-T4, W9-W11 |
+| 2 `cargo xtask metal run --benchmark` | W7, W8, X1, X2 (grammar and argv); the full run is evidence runs E-1 to E-7 |
+| 3 `cargo xtask metal pull <dir>` | unchanged existing contract; not re-tested |
+| 4 `cargo nextest run` smoke | W9-W11 |
+| 5 spike crate run with `--spike` | W8 (argv); evidence run E-4 (record) |
+| 6 `cargo bench-report` | R1-R19 (R12c: failed host probe), V1-V24 (V18-V24: one malformed case per histogram rule) |
+
+Every CLI/command-line entry point that nextest can reach has a subprocess scenario; none spawns the `overdrive` binary (the command logs of evidence run E-1 are read for that).
+
+## Wave: DISTILL / [REF] Pre-requisites
+
+`OVERDRIVE_METAL_TARGET`, `OVERDRIVE_METAL_KERNEL`, `OVERDRIVE_METAL_ROOTFS`; `cargo xtask bpf-build` and `cargo xtask guest-kit-prepare` on the host before the guest-placed tests (DNS observer, pump names, the generated family smoke tests); `kmod-load` and a prepared guest kit before the VM-lifecycle evidence run. DEVOPS artifacts absent: default matrix. DELIVER regenerates the trybuild `.stderr` span lines once (`TRYBUILD=overwrite`) and reviews that the pinned message lines are unchanged. The pig-connect-cost re-expression (K5) is a DELIVER change under `spike-scratch/`.
+
+## Wave: DISTILL / [REF] Completeness audit
+
+15-item checklist, applicable items: C1a, C1b (8/5 replicates, family grammar 63/64, 1,000 raw values against a 2,000-value histogram in R14; the writer's switch at 1,000 is crafter-owned and observed in evidence run E-6), C3 (one-arm, absent, no stored value in a compared arm, empty series) pass; C2a/C2b n/a (no state machine); C4a (render twice) pass, C4b n/a; C5a (spike/maintained, stats on/off) pass, C5b n/a; C6a, C6b, C6c (malformed record, host value forms, metric entry shape, usage errors never 101; the no-marker refusal is evidence W12) pass; C7a (absent metrics, no cpufreq, an unreadable recorded-only setting) partial (G8), C7b (SIGKILL: incomplete record with `not finished`, R11) pass, C7c n/a (exclusive admission). 12 pass, 3 n/a counted as passing with the rationale above: ACCEPTABLE_WITH_DOCUMENTED_GAPS. Gaps G1 (crafter-owned unit coverage), G3 (dropped, CA-10), G6 (no-obligation rulings) and G8 (host probe unit coverage plus evidence run E-2) are resolved or ruled; C7b (SIGKILL) is evidence run E-3 with R11 in nextest. Per-wave review not run by this agent.

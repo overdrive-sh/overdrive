@@ -1,0 +1,5 @@
+error[E0080]: evaluation panicked: smoke(none) is allowed only in a crate under spike-scratch/
+  --> tests/compile_fail/smoke_none_outside_a_spike.rs:10:11
+   |
+10 |     smoke(none),
+   |           ^^^^ evaluation of `_` failed here

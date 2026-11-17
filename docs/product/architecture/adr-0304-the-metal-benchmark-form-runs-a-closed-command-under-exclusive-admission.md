@@ -29,7 +29,12 @@ closed patterns and builds the remote command itself (`$ROOT` is the exported
 results root is an absolute path under `$ROOT`; the runner refuses a relative one.
 The run is admitted with execution class `exclusive`, so the wrapper does not
 apply placement. The runner prints `OVERDRIVE_BENCH_RESULT_DIR=<repo-relative
-path>` (relative to `$ROOT`), and `cargo xtask metal pull <path>` retrieves it. The orchestrator amends
+path>` (relative to `$ROOT`), and `cargo xtask metal pull <path>` retrieves it. `bootstrap.sh` refuses a malformed
+request with status 64 in the existing runner-diagnostic shape:
+`benchmark_family_invalid`, `benchmark_spike_invalid`, and `invalid_mode` for
+`--spike` without `--benchmark` or `--benchmark` beside `--exclusive` or a
+command. The runner exits 78 for a refused host, 64 for usage and 70 for an
+internal error. The orchestrator amends
 `testing.md`: the exclusive rule exempts benchmarks beside expectation captures,
 and the command-grammar section names the benchmark form.
 

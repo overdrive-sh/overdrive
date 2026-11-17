@@ -1,0 +1,5 @@
+error[E0080]: evaluation panicked: substrate `guest_xyz` is not registered; the registered substrates are: native
+ --> tests/compile_fail/unknown_substrate.rs:6:17
+  |
+6 |     substrate = guest_xyz,
+  |                 ^^^^^^^^^ evaluation of `_` failed here

@@ -15,10 +15,12 @@ and `testing.md` names the native x86_64 host as the only signal.
 ## Decision
 
 `overdrive-bench` holds a closed registry of substrates with one entry, `native`
-(the exclusive Metal host, no namespace). The attribute validates it by constant
-evaluation, so an unknown value is a build error naming it (the same pattern as
-ADR-0294). The substrate is written to every record, and the report refuses to
-compare records whose substrates differ. A `guest` substrate is not in the
+(the exclusive Metal host, no namespace). The attribute takes it as a bare
+identifier, `substrate = native`, as the placement kinds are (`host_pure`); a string
+literal is a build error, since a string is the form of a guest group name. It
+validates the identifier by constant evaluation, so an unknown value is a build error naming it (the same pattern as
+ADR-0294). The substrate is written to every record. No tool compares two records, so
+results from different substrates are never compared. A `guest` substrate is not in the
 registry: a benchmark that declares one fails to build with a message that says
 guest substrates are not available.
 
