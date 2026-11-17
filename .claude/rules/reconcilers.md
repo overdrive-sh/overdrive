@@ -260,6 +260,22 @@ the runtime hardcodes for it.
 
 ---
 
+## A View decides when to act, never whether an effect is in place
+
+A `View` field may carry pacing inputs: attempts, last attempt time, a
+retry budget, a rate limit, or a marker keyed to an observed input (for
+example the `run_seq` of the probe row a stop was last emitted for). A
+pacing input decides only when to act again. A `View` field never decides
+whether an effect is in place. That is decided from `actual`, read from
+the resource the reconciler manages. A marker keyed to an observed input
+suppresses re-emission only for that same input: an action already emitted
+for that input is not emitted again for it, and a newer input reopens the
+decision from `actual`. If the effect cannot be observed, make it
+observable first; a result row of the last attempt is a receipt, not the
+resource.
+
+---
+
 ## Symptoms during review
 
 The shapes that signal Bar 1 is being violated:
@@ -278,39 +294,43 @@ The shapes that signal Bar 1 is being violated:
 - A non-atomic create sequence (resource visible after step 1, more
   fallible steps after) with no path that completes a partially-created
   resource on the next run.
-- **A `View` field holding a fingerprint / hash / "last written" marker
-  of what the reconciler EMITTED, consulted as the diff.** The
-  hash-shaped sibling of adopt-and-skip:
+- **A `View` field consulted as the diff, or stamped on emit and consulted
+  to decide whether the effect is in place.** The hash-shaped sibling of
+  adopt-and-skip:
 
   ```rust
   if resource.exists() { return Ok(()) }      // the classic
   if Some(new_fp) == prev_fp { continue }     // the same bug, hashed
   ```
 
-  Presence of a matching hash *of what I emitted* is taken as proof the
+  Presence of a matching marker *of what I emitted* is taken as proof the
   desired state is satisfied. Two independent defects hide in it:
 
   1. **It is not `actual`.** A reconciler that never reads back the
-     resource it manages cannot detect drift in it — only drift in its
-     own intent. A populated `State.actual` field is NOT sufficient
-     evidence: check that `actual` is *the resource this reconciler
-     manages*, not a second input it derives desired from.
-  2. **"Last written" is usually unverifiable.** The marker is stamped on
-     the *emit* path — before the effect is attempted — and the write
-     surface commonly returns `Ok(())` whether or not the write landed.
-     The field then records "last emitted" while its docstring claims
-     "last successfully written", and any failed write is permanently
-     forgotten: the reconciler has dedup'd itself out of ever retrying.
+     resource it manages cannot detect drift in it, only drift in its own
+     intent. A populated `State.actual` field is NOT sufficient evidence:
+     check that `actual` is *the resource this reconciler manages*, not a
+     second input it derives desired from.
+  2. **"Last written" is unverifiable.** The marker is stamped on the
+     *emit* path, before the effect is attempted, and the write surface
+     commonly returns `Ok(())` whether or not the write landed. Any failed
+     write is permanently forgotten: the reconciler has dedup'd itself out
+     of ever retrying. The runtime fsyncs the `View` **before**
+     dispatching the actions (`development.md` § "Reconciler I/O", STEP 7
+     → STEP 8), so the marker also outlives the effect it claims to
+     record, across crashes and restarts.
 
-  Compounding hazard: the runtime fsyncs the `View` **before**
-  dispatching the actions (`development.md` § "Reconciler I/O", STEP 7 →
-  STEP 8). A marker stamped on emit therefore outlives the effect it
-  claims to record, across crashes and restarts.
-
-  Watch for the marker being justified by `development.md` § "Persist
-  inputs, not derived state" — a hash the reconciler *computed* is
+  Citing `development.md` § "Persist inputs, not derived state" for such a
+  field is a smell, not a defence: a hash the reconciler *computed* is
   derived state; the input is the observed resource it declined to read.
-  Citing that rule for such a field is a smell, not a defence.
+- **A reconciler whose only wake is an edge.** One dropped change strands
+  its target. Every reconciler declares its managed targets and is
+  re-evaluated by the resync pass.
+- **A managed-target method that enumerates one observation family
+  only.** A target hydrated from another family is never re-evaluated.
+- **A test or simulation invariant that seeds the `View` to represent
+  "converged"** instead of asserting on `actual`. It passes while the
+  resource is wrong.
 
 ---
 
@@ -489,18 +509,6 @@ never delivered. `a_late_probe_result_after_supersession_is_never_delivered`
   (`backend_discovery_bridge.rs:419-423`); only its use as the dedup was
   removed.
 
-- **The same shape, still live in tree:**
-  `ServiceLifecycleView::last_emitted_backend_fingerprint`
-  (`crates/overdrive-core/src/service_lifecycle.rs:370-387`, read at
-  `:861`, stamped on emit at `:865`). Its own docstring names the bridge
-  field above as the pattern it copies. It is deliberately not fixed:
-  `ServiceLifecycle` authors only `healthy` on a row it *shares* with the
-  bridge, so "diff desired against the stored row" is unavailable to it
-  until row ownership is resolved — converging it on the whole row would
-  make it fight the bridge, reintroducing on the health side exactly the
-  clobbering the bridge fix removed on the membership side. ADR-0079 § D4
-  records the exclusion and § D9 the ownership decision. Consequence, and
-  it is real: a dropped readiness write is still permanently forgotten.
 - **Executor, NOT a reconciler:** `EbpfDataplane` map writes — driven by
   `ServiceMapHydrator` via `Action::DataplaneUpdateService`. The
   dataplane is the executor; the hydrator owns the diff.
