@@ -7,7 +7,6 @@
 //! failure is observed without failing this suite.
 //! Driving port: the `overdrive_bench` attribute and `cargo nextest run` (the generated test).
 //! Evidence lane: integration (child process of the test binary). Traces: US-BENCH-04 AC (c), (d), K7.
-#![allow(dead_code, reason = "the attribute scaffold is a passthrough until DELIVER")]
 #![allow(
     clippy::print_stdout,
     reason = "the probe bodies announce their replicates on the captured test output so the parent scenario can count them"
