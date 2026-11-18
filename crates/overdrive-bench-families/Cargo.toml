@@ -38,7 +38,11 @@ overdrive-host           = { path = "../overdrive-host" }
 overdrive-sim            = { path = "../overdrive-sim" }
 overdrive-testing        = { path = "../overdrive-testing" }
 overdrive-testing-macros = { path = "../overdrive-testing-macros" }
+overdrive-worker         = { path = "../overdrive-worker" }
 parking_lot.workspace    = true
+rcgen.workspace          = true
+rustls                   = { workspace = true, features = ["std"] }
+rustls-pemfile.workspace = true
 tempfile.workspace       = true
 tokio.workspace          = true
 tracing.workspace        = true
