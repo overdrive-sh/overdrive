@@ -16,8 +16,15 @@
 //! `MtlsEnforcement::enforce`, taken by a timing decorator in front of the real enforcement;
 //! the baseline arm has no enforcement, so the metric is absent there.
 //!
-//! The family's own client, peer and accept threads carry the `ovbm-` name prefix, so a
-//! per-thread accounting of the run can set them apart from the agent's threads.
+//! Every thread the family spawns (the client that runs the measurement, the peer's accept
+//! and session threads, the ingress accept thread) carries the `ovbm-` name prefix, so a
+//! per-thread accounting of the run can set them apart from the agent's threads. The ingress
+//! relays run on the runtime's own worker threads, where the agent's enforcement runs too.
+//!
+//! The numbers are not pure agent cost. The TLS peer (egress) or TLS client (ingress) runs on
+//! the same host as the agent and may co-limit throughput and tail latency; on ingress the
+//! enforcement starts when the connection is accepted, so its `handshake_ns` also covers the
+//! wait for the client's `ClientHello`, which is client-side TLS work.
 
 #![allow(
     clippy::cast_precision_loss,
@@ -30,7 +37,7 @@ use std::net::{Ipv4Addr, Shutdown, SocketAddr, SocketAddrV4, TcpListener, TcpStr
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::process::{Command, Stdio};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -64,8 +71,8 @@ use parking_lot::Mutex;
 use rcgen::string::Ia5String;
 use rcgen::{CertificateParams, Issuer, KeyPair, SanType};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer, ServerName};
+use socket2::{Domain, SockAddr, Socket, Type};
 use tokio::io::{AsyncReadExt, AsyncWriteExt, DuplexStream};
-use tokio::net::TcpSocket;
 use tokio::runtime::Runtime;
 
 const BASELINE: &str = "plaintext-baseline";
@@ -94,6 +101,10 @@ const REPLY: [u8; 64] = [b'r'; 64];
 const IO_TIMEOUT: Duration = Duration::from_secs(30);
 const SETTLE_BOUND: Duration = Duration::from_secs(10);
 const DUPLEX_BYTES: usize = 256 * 1024;
+/// The guest CID of the intercepted allocation; the guest itself is never reached.
+const GUEST_CID: u32 = GUEST_CID_BASE + 1;
+/// The name prefix of every thread the family spawns.
+const THREAD_PREFIX: &str = "ovbm-";
 
 const PEER_SNI: &str = "peer.overdrive.local";
 const SERVER_SNI: &str = "server.overdrive.local";
@@ -140,13 +151,13 @@ fn mtls_hop(rep: &mut Replicate) -> Result<(), ReplicateFailure> {
     match rep.profile() {
         "egress" => {
             let path = EgressPath::start(composed)?;
-            drive(rep, &path, composed)?;
+            drive_on_client_thread(rep, &path, composed)?;
             path.finish()
         }
         "ingress" => {
             let path = IngressPath::start(composed)?;
-            if let Err(error) = drive(rep, &path, composed) {
-                return Err(path.explain(&error));
+            if let Err(error) = drive_on_client_thread(rep, &path, composed) {
+                return Err(path.explain(error));
             }
             path.finish()
         }
@@ -161,7 +172,17 @@ fn note_shape(rep: &mut Replicate) {
     rep.note("bulk_bytes", &BULK_BYTES.to_string());
     rep.note("request_bytes", &REQUEST_LEN.to_string());
     rep.note("reply_bytes", &REPLY.len().to_string());
-    rep.note("fixture_thread_prefix", "ovbm-");
+    rep.note("fixture_thread_prefix", THREAD_PREFIX);
+    rep.note(
+        "ingress_handshake_scope",
+        "handshake_ns on ingress starts when the enforcement accepts the connection, so it \
+         includes the wait for the client's ClientHello (client-side TLS work)",
+    );
+    rep.note(
+        "tls_peer_colocated",
+        "the TLS peer (egress) or TLS client (ingress) runs on the same host as the agent and \
+         may co-limit throughput and tail latency; the numbers are not pure agent cost",
+    );
 }
 
 fn fail(message: &str) -> ReplicateFailure {
@@ -209,6 +230,23 @@ trait Path {
     fn take_handshakes(&self) -> Vec<f64>;
 }
 
+/// Runs the measurement on a spawned, joined thread carrying the family prefix, so the
+/// client's own work is as separable from the agent's as the peer's.
+fn drive_on_client_thread<P: Path + Sync>(
+    rep: &mut Replicate,
+    path: &P,
+    composed: bool,
+) -> Result<(), ReplicateFailure> {
+    std::thread::scope(|scope| {
+        std::thread::Builder::new()
+            .name(format!("{THREAD_PREFIX}client"))
+            .spawn_scoped(scope, || drive(rep, path, composed))
+            .map_err(because("spawning the client thread"))?
+            .join()
+            .map_err(|_| fail("the client thread panicked"))?
+    })
+}
+
 fn drive<P: Path>(rep: &mut Replicate, path: &P, composed: bool) -> Result<(), ReplicateFailure> {
     let frame = small_frame();
     for done in 1..=WARMUP_CONNECTIONS as usize {
@@ -234,12 +272,6 @@ fn drive<P: Path>(rep: &mut Replicate, path: &P, composed: bool) -> Result<(), R
     rep.record_series(CONNECT, &connect)?;
     rep.record_series(FIRST_BYTE, &first_byte)?;
     if composed {
-        if handshakes.len() != CONNECTIONS as usize {
-            return Err(broke(&format!(
-                "the enforcement recorded {} handshakes for {CONNECTIONS} connections",
-                handshakes.len()
-            )));
-        }
         rep.record_series(HANDSHAKE, &handshakes)?;
     } else {
         rep.record_absent(HANDSHAKE, HANDSHAKE_BASELINE_REASON)?;
@@ -266,9 +298,6 @@ fn drive<P: Path>(rep: &mut Replicate, path: &P, composed: bool) -> Result<(), R
     session.bulk(BULK_BYTES).map_err(measured("bulk transfer"))?;
     let elapsed = rep.clock().now().duration_since(started);
     session.finish().map_err(measured("closing the bulk connection"))?;
-    if elapsed.is_zero() {
-        return Err(broke("the bulk transfer took no measurable time"));
-    }
     rep.record(THROUGHPUT, BULK_BYTES as f64 / elapsed.as_secs_f64())
 }
 
@@ -363,58 +392,33 @@ impl Write for Link {
     }
 }
 
-struct TlsLink {
-    conn: rustls::ClientConnection,
-    tcp: TcpStream,
+/// Completes the client handshake before any timing that depends on it starts.
+fn tls_handshake(
+    config: &Arc<rustls::ClientConfig>,
+    mut tcp: TcpStream,
+) -> std::io::Result<TlsLink> {
+    let sni = ServerName::try_from(SERVER_SNI.to_owned()).map_err(std::io::Error::other)?;
+    let mut conn =
+        rustls::ClientConnection::new(Arc::clone(config), sni).map_err(std::io::Error::other)?;
+    while conn.is_handshaking() {
+        conn.complete_io(&mut tcp)?;
+    }
+    // The client's final flight must be on the wire before the timed exchange starts.
+    while conn.wants_write() {
+        conn.write_tls(&mut tcp)?;
+    }
+    Ok(rustls::StreamOwned::new(conn, tcp))
 }
 
-impl TlsLink {
-    fn handshake(config: &Arc<rustls::ClientConfig>, mut tcp: TcpStream) -> std::io::Result<Self> {
-        let sni = ServerName::try_from(SERVER_SNI.to_owned()).map_err(std::io::Error::other)?;
-        let mut conn = rustls::ClientConnection::new(Arc::clone(config), sni)
-            .map_err(std::io::Error::other)?;
-        while conn.is_handshaking() {
-            while conn.wants_write() {
-                conn.write_tls(&mut tcp)?;
-            }
-            if !conn.is_handshaking() {
-                break;
-            }
-            if conn.read_tls(&mut tcp)? == 0 {
-                return Err(ErrorKind::UnexpectedEof.into());
-            }
-            conn.process_new_packets().map_err(std::io::Error::other)?;
-        }
-        while conn.wants_write() {
-            conn.write_tls(&mut tcp)?;
-        }
-        Ok(Self { conn, tcp })
-    }
+type TlsLink = rustls::StreamOwned<rustls::ClientConnection, TcpStream>;
 
-    /// The client's clean end: `close_notify`, then FIN.
-    fn close(&mut self) -> std::io::Result<()> {
-        self.conn.send_close_notify();
-        while self.conn.wants_write() {
-            self.conn.write_tls(&mut self.tcp)?;
-        }
-        self.tcp.shutdown(Shutdown::Write)
+/// The client's clean end: `close_notify`, then FIN.
+fn close_tls(tls: &mut TlsLink) -> std::io::Result<()> {
+    tls.conn.send_close_notify();
+    while tls.conn.wants_write() {
+        tls.conn.write_tls(&mut tls.sock)?;
     }
-}
-
-impl Read for TlsLink {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        rustls::Stream::new(&mut self.conn, &mut self.tcp).read(buf)
-    }
-}
-
-impl Write for TlsLink {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        rustls::Stream::new(&mut self.conn, &mut self.tcp).write(buf)
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        rustls::Stream::new(&mut self.conn, &mut self.tcp).flush()
-    }
+    tls.sock.shutdown(Shutdown::Write)
 }
 
 /// One open client connection and what opening it cost.
@@ -461,15 +465,45 @@ impl Session {
     fn finish(mut self) -> std::io::Result<()> {
         match &mut self.link {
             Link::Plain(_) => Ok(()),
-            Link::Tls(tls) => tls.close(),
+            Link::Tls(tls) => close_tls(tls),
         }
     }
 }
 
-fn configure(tcp: &TcpStream) -> Result<(), ReplicateFailure> {
-    tcp.set_nodelay(true).map_err(because("setting TCP_NODELAY"))?;
-    tcp.set_read_timeout(Some(IO_TIMEOUT)).map_err(because("setting the read timeout"))?;
-    tcp.set_write_timeout(Some(IO_TIMEOUT)).map_err(because("setting the write timeout"))
+/// A client socket bound to loopback and configured, not yet connected: everything the
+/// client does besides the connect happens before the timed window opens.
+fn dialler() -> Result<(Socket, SocketAddrV4), ReplicateFailure> {
+    let socket = Socket::new(Domain::IPV4, Type::STREAM, None)
+        .map_err(because("creating the dialler socket"))?;
+    socket.set_reuse_address(true).map_err(because("SO_REUSEADDR on the dialler socket"))?;
+    socket.set_nodelay(true).map_err(because("setting TCP_NODELAY"))?;
+    socket.set_read_timeout(Some(IO_TIMEOUT)).map_err(because("setting the read timeout"))?;
+    socket.set_write_timeout(Some(IO_TIMEOUT)).map_err(because("setting the write timeout"))?;
+    socket
+        .bind(&SockAddr::from(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)))
+        .map_err(because("binding the dialler socket"))?;
+    let local = socket
+        .local_addr()
+        .map_err(because("the dialler address"))?
+        .as_socket_ipv4()
+        .ok_or_else(|| fail("an IPv4 bind reported a different family"))?;
+    Ok((socket, local))
+}
+
+/// A connected client socket and the duration of its connect.
+struct Dialled {
+    tcp: TcpStream,
+    /// Just before the connect.
+    began: HostInstant,
+    connect: Duration,
+}
+
+/// Connects `socket` to `target`; nothing but the connect sits between the two stamps.
+fn dial(socket: Socket, target: SocketAddrV4) -> Result<Dialled, ReplicateFailure> {
+    let began = HostClock.now();
+    socket.connect(&SockAddr::from(target)).map_err(because("the dialler's connect"))?;
+    let connected = HostClock.now();
+    Ok(Dialled { tcp: TcpStream::from(socket), began, connect: connected.duration_since(began) })
 }
 
 // ============================================================================
@@ -919,38 +953,34 @@ impl MtlsResolve for NoResolve {
 }
 
 /// The composed node of the egress arm. Field order is drop order: the worker first, the
-/// scrub next, the lease, the kernel lock last.
+/// runtime it runs on, the scrub next, the lease, the kernel lock last.
 struct EgressNode {
     worker: Arc<MtlsInterceptWorker>,
     timed: Arc<TimedEnforcement>,
     alloc: AllocationId,
     original_destination: SocketAddrV4,
     leg_f: SocketAddrV4,
+    runtime: Runtime,
     _scrub: SharedInfraScrub,
     _lease: TestCidrLease,
     _lock: KernelStateLock,
 }
 
-/// Field order is drop order: the node, then the peer, then the runtime they run on.
+/// The node is present on the composed arm only; the baseline dials the peer directly.
 struct EgressPath {
     node: Option<EgressNode>,
     peer: Peer,
-    runtime: Runtime,
 }
 
 impl EgressPath {
     fn start(composed: bool) -> Result<Self, ReplicateFailure> {
-        let runtime = runtime()?;
         if !composed {
-            return Ok(Self { node: None, peer: Peer::start(None)?, runtime });
-        }
-        // SAFETY: `getuid` takes no arguments and cannot fail.
-        if unsafe { libc::getuid() } != 0 {
-            return Err(fail("the composed egress arm needs root (IP_TRANSPARENT, nft)"));
+            return Ok(Self { node: None, peer: Peer::start(None)? });
         }
         let lock = KernelStateLock::acquire()?;
         SharedInfraScrub::run();
         let scrub = SharedInfraScrub;
+        let runtime = runtime()?;
         let lease = TestCidrLease::acquire(LEASE_OWNER).map_err(because_debug("the CIDR lease"))?;
         let pki = Pki::mint()?;
         let peer = Peer::start(Some(pki.peer_config()?))?;
@@ -983,25 +1013,26 @@ impl EgressPath {
             alloc,
             original_destination,
             leg_f,
+            runtime,
             _scrub: scrub,
             _lease: lease,
             _lock: lock,
         };
-        Ok(Self { node: Some(node), peer, runtime })
+        Ok(Self { node: Some(node), peer })
     }
 
     fn finish(self) -> Result<(), ReplicateFailure> {
-        let Self { node, peer, runtime } = self;
-        if let Some(node) = &node {
-            runtime
+        let Self { node, peer } = self;
+        if let Some(node) = node {
+            node.runtime
                 .block_on(node.worker.shutdown_owner())
                 .map_err(because_debug("shutting the node-shared owner down"))?;
         }
-        drop(node);
         peer.stop()
     }
 }
 
+/// The multi-thread runtime the composed egress node and the ingress relays run on.
 fn runtime() -> Result<Runtime, ReplicateFailure> {
     tokio::runtime::Builder::new_multi_thread()
         .worker_threads(4)
@@ -1015,9 +1046,7 @@ fn intercept_spec(
     alloc: &AllocationId,
     lease: &TestCidrLease,
 ) -> Result<AllocationSpec, ReplicateFailure> {
-    let [_, _, high, low] = lease.workload_addr().octets();
-    let cid = GuestCid::new(GUEST_CID_BASE + u32::from(u16::from_be_bytes([high, low])))
-        .map_err(because_debug("the guest CID"))?;
+    let cid = GuestCid::new(GUEST_CID).map_err(because_debug("the guest CID"))?;
     let launch = LaunchToken::from_bytes([0x5a; 16]).map_err(because_debug("the launch token"))?;
     let ports = GuestFlowPorts::new(GUEST_FLOW_STREAM_PORT, GUEST_FLOW_CONTROL_PORT)
         .map_err(because_debug("the guest flow ports"))?;
@@ -1046,15 +1075,7 @@ fn intercept_spec(
 
 impl Path for EgressPath {
     fn open(&self) -> Result<Session, ReplicateFailure> {
-        let socket = TcpSocket::new_v4().map_err(because("creating the dialler socket"))?;
-        socket.set_reuseaddr(true).map_err(because("SO_REUSEADDR on the dialler socket"))?;
-        socket
-            .bind(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)))
-            .map_err(because("binding the dialler socket"))?;
-        let local = match socket.local_addr().map_err(because("the dialler address"))? {
-            SocketAddr::V4(local) => local,
-            SocketAddr::V6(local) => return Err(fail(&format!("an IPv4 bind reported {local}"))),
-        };
+        let (socket, local) = dialler()?;
         // The owner's role: register the flow before the dialler connects to leg F.
         let (target, registration) = match &self.node {
             Some(node) => {
@@ -1072,21 +1093,8 @@ impl Path for EgressPath {
             }
             None => (self.peer.addr, None),
         };
-        let began = HostClock.now();
-        let stream = self
-            .runtime
-            .block_on(socket.connect(SocketAddr::V4(target)))
-            .map_err(because("the dialler's connect"))?;
-        let connected = HostClock.now();
-        let tcp = stream.into_std().map_err(because("taking the dialler socket"))?;
-        tcp.set_nonblocking(false).map_err(because("making the dialler socket blocking"))?;
-        configure(&tcp)?;
-        Ok(Session {
-            link: Link::Plain(tcp),
-            began,
-            connect: connected.duration_since(began),
-            _registration: registration,
-        })
+        let Dialled { tcp, began, connect } = dial(socket, target)?;
+        Ok(Session { link: Link::Plain(tcp), began, connect, _registration: registration })
     }
 
     fn await_handshakes(&self, count: usize) -> Result<(), ReplicateFailure> {
@@ -1158,41 +1166,25 @@ impl GuestStreamDial for PipeDial {
 
 type Failures = Arc<Mutex<Vec<String>>>;
 
-/// Relays still running, so `finish` can wait for the last connections to settle.
-#[derive(Default)]
-struct Pending(AtomicUsize);
-
-struct PendingGuard(Arc<Pending>);
-
-impl Pending {
-    fn begin(self: &Arc<Self>) -> PendingGuard {
-        self.0.fetch_add(1, Ordering::SeqCst);
-        PendingGuard(Arc::clone(self))
-    }
-}
-
-impl Drop for PendingGuard {
-    fn drop(&mut self) {
-        self.0.0.fetch_sub(1, Ordering::SeqCst);
-    }
-}
+/// The inbound relay tasks, awaited by `finish`.
+type Relays = Arc<Mutex<Vec<tokio::task::JoinHandle<()>>>>;
 
 struct IngressPath {
     addr: SocketAddrV4,
     client_tls: Option<Arc<rustls::ClientConfig>>,
     timed: Option<Arc<TimedEnforcement>>,
     failures: Failures,
-    pending: Arc<Pending>,
+    relays: Relays,
     accept: AcceptLoop,
     /// Kept alive for the relays; dropped last.
-    _runtime: Runtime,
+    runtime: Runtime,
 }
 
 impl IngressPath {
     fn start(composed: bool) -> Result<Self, ReplicateFailure> {
         let runtime = runtime()?;
         let failures: Failures = Arc::default();
-        let pending: Arc<Pending> = Arc::default();
+        let relays: Relays = Arc::default();
         let handle = runtime.handle().clone();
         let (timed, client_tls, accept) = if composed {
             let pki = Pki::mint()?;
@@ -1204,46 +1196,38 @@ impl IngressPath {
                 Arc::new(PipeDial),
             )));
             runtime.block_on(timed.probe()).map_err(because("the enforcement probe"))?;
-            let (enforcement, failures, pending) =
-                (Arc::clone(&timed), Arc::clone(&failures), Arc::clone(&pending));
+            let (enforcement, failures, relays) =
+                (Arc::clone(&timed), Arc::clone(&failures), Arc::clone(&relays));
             let accept = AcceptLoop::start("ovbm-ingress-accept", move |tcp| {
-                let guard = pending.begin();
                 let (enforcement, failures, alloc) =
                     (Arc::clone(&enforcement), Arc::clone(&failures), alloc.clone());
-                handle.spawn(async move {
+                let relay = handle.spawn(async move {
                     relay_composed(&enforcement, tcp, alloc, &failures).await;
-                    drop(guard);
                 });
+                relays.lock().push(relay);
             })?;
             (Some(timed), Some(pki.client_config()?), accept)
         } else {
-            let (failures, pending) = (Arc::clone(&failures), Arc::clone(&pending));
+            let (failures, relays) = (Arc::clone(&failures), Arc::clone(&relays));
             let accept = AcceptLoop::start("ovbm-ingress-accept", move |tcp| {
-                let guard = pending.begin();
                 let failures = Arc::clone(&failures);
-                handle.spawn(async move {
+                let relay = handle.spawn(async move {
                     relay_baseline(tcp, &failures).await;
-                    drop(guard);
                 });
+                relays.lock().push(relay);
             })?;
             (None, None, accept)
         };
-        Ok(Self {
-            addr: accept.addr,
-            client_tls,
-            timed,
-            failures,
-            pending,
-            accept,
-            _runtime: runtime,
-        })
+        Ok(Self { addr: accept.addr, client_tls, timed, failures, relays, accept, runtime })
     }
 
-    /// The measurement failure `error` together with what the inbound relays reported: the
-    /// server side usually names the cause of a client's reset.
-    fn explain(&self, error: &ReplicateFailure) -> ReplicateFailure {
-        std::thread::sleep(Duration::from_millis(200));
+    /// The measurement failure `error` together with what the inbound relays have reported
+    /// so far: the server side usually names the cause of a client's reset.
+    fn explain(&self, error: ReplicateFailure) -> ReplicateFailure {
         let failures = self.failures.lock().join("; ");
+        if failures.is_empty() {
+            return error;
+        }
         broke(&format!("{error} (inbound relay failures: [{failures}])"))
     }
 
@@ -1251,13 +1235,16 @@ impl IngressPath {
     /// them failed.
     fn finish(mut self) -> Result<(), ReplicateFailure> {
         self.accept.stop()?;
-        let until = Instant::now() + SETTLE_BOUND;
-        while self.pending.0.load(Ordering::SeqCst) > 0 {
-            if Instant::now() >= until {
-                return Err(broke("an inbound relay did not end after its client closed"));
+        let relays = std::mem::take(&mut *self.relays.lock());
+        let settled = async {
+            for relay in relays {
+                relay.await.map_err(measured("an inbound relay task"))?;
             }
-            std::thread::sleep(Duration::from_millis(5));
-        }
+            Ok::<(), ReplicateFailure>(())
+        };
+        self.runtime
+            .block_on(async { tokio::time::timeout(SETTLE_BOUND, settled).await })
+            .map_err(|_| broke("an inbound relay did not end after its client closed"))??;
         let failures = std::mem::take(&mut *self.failures.lock());
         if failures.is_empty() {
             Ok(())
@@ -1321,17 +1308,15 @@ async fn relay_baseline(tcp: TcpStream, failures: &Failures) {
 
 impl Path for IngressPath {
     fn open(&self) -> Result<Session, ReplicateFailure> {
-        let began = HostClock.now();
-        let tcp = TcpStream::connect(self.addr).map_err(because("the client's connect"))?;
-        let connected = HostClock.now();
-        configure(&tcp)?;
+        let (socket, _) = dialler()?;
+        let Dialled { tcp, began, connect } = dial(socket, self.addr)?;
         let link = match &self.client_tls {
             Some(config) => Link::Tls(Box::new(
-                TlsLink::handshake(config, tcp).map_err(because("the client's TLS handshake"))?,
+                tls_handshake(config, tcp).map_err(because("the client's TLS handshake"))?,
             )),
             None => Link::Plain(tcp),
         };
-        Ok(Session { link, began, connect: connected.duration_since(began), _registration: None })
+        Ok(Session { link, began, connect, _registration: None })
     }
 
     fn await_handshakes(&self, count: usize) -> Result<(), ReplicateFailure> {

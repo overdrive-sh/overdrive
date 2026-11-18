@@ -2328,7 +2328,7 @@ dependencies = [
  "parking_lot",
  "rcgen",
  "rustls",
- "rustls-pemfile",
+ "socket2 0.5.10",
  "tempfile",
  "tokio",
  "tracing",

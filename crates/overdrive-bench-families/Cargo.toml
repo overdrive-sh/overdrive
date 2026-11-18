@@ -42,7 +42,7 @@ overdrive-worker         = { path = "../overdrive-worker" }
 parking_lot.workspace    = true
 rcgen.workspace          = true
 rustls                   = { workspace = true, features = ["std"] }
-rustls-pemfile.workspace = true
+socket2.workspace        = true
 tempfile.workspace       = true
 tokio.workspace          = true
 tracing.workspace        = true
