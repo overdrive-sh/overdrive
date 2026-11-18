@@ -134,7 +134,9 @@ async fn dispatch_writes_completed_row_on_dataplane_ok() {
             assert_eq!(*fp, expected_fp);
             assert_eq!(*applied_at, tick.now_unix);
         }
-        other => panic!("expected Completed, got {other:?}"),
+        other @ ServiceHydrationStatus::Failed { .. } => {
+            panic!("expected Completed, got {other:?}")
+        }
     }
 }
 
@@ -183,7 +185,9 @@ async fn dispatch_writes_failed_row_on_dataplane_err() {
             // the variant.
             assert_eq!(reason, &DataplaneError::Busy.to_string());
         }
-        other => panic!("expected Failed, got {other:?}"),
+        other @ ServiceHydrationStatus::Completed { .. } => {
+            panic!("expected Failed, got {other:?}")
+        }
     }
 }
 
@@ -254,6 +258,8 @@ async fn dispatch_rejects_ipv6_vip_with_failed_row() {
                 "reason should mention IPv6 rejection, got: {reason}"
             );
         }
-        other => panic!("expected Failed, got {other:?}"),
+        other @ ServiceHydrationStatus::Completed { .. } => {
+            panic!("expected Failed, got {other:?}")
+        }
     }
 }

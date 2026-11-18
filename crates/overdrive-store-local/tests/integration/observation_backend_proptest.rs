@@ -37,7 +37,9 @@
 #![allow(clippy::unused_async)]
 
 use std::net::Ipv4Addr;
+use std::time::Duration;
 
+use overdrive_core::UnixInstant;
 use overdrive_core::dataplane::fingerprint::BackendSetFingerprint;
 use overdrive_core::id::{NodeId, ServiceId, SpiffeId};
 use overdrive_core::traits::dataplane::Backend;
@@ -68,7 +70,10 @@ fn make_hydration_row(
     ServiceHydrationResultRow {
         service_id: ServiceId::new(sid).expect("valid service id"),
         fingerprint: fp,
-        status: ServiceHydrationStatus::Pending,
+        status: ServiceHydrationStatus::Completed {
+            fingerprint: fp,
+            applied_at: UnixInstant::from_unix_duration(Duration::from_secs(counter)),
+        },
         updated_at: make_lts(counter),
     }
 }

@@ -243,10 +243,10 @@ async fn fixture(world: &World) -> Fixture {
                 },
             },
         );
-        node_.state.runtime.seed_service_map_hydrator_view_for_test(
-            &target,
-            ServiceMapHydratorView { retries },
-        );
+        node_
+            .state
+            .runtime
+            .seed_service_map_hydrator_view_for_test(&target, ServiceMapHydratorView { retries });
     }
 
     for _ in 0..world.dropped_updates {
@@ -337,7 +337,6 @@ impl Fixture {
             .into_iter()
             .map(|row| {
                 let kind = match row.status {
-                    ServiceHydrationStatus::Pending => "pending",
                     ServiceHydrationStatus::Completed { .. } => "completed",
                     ServiceHydrationStatus::Failed { .. } => "failed",
                 };

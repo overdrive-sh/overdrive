@@ -578,10 +578,9 @@ pub type NodeHealthRow = NodeHealthRowV1;
 /// `docs/feature/phase-2-xdp-service-map/design/architecture.md`
 /// §§ 7, 12.
 ///
-/// `Pending` is the row shape the hydrator (Slice 08-02) writes
-/// before invoking dispatch; `Completed` and `Failed` are the
-/// post-dispatch terminal-of-attempt rows the action shim writes
-/// from `Action::DataplaneUpdateService`. Per architecture.md § 7,
+/// `Completed` and `Failed` are the post-dispatch terminal-of-attempt
+/// rows the action shim writes from `Action::DataplaneUpdateService`.
+/// Per architecture.md § 7,
 /// the failure surface is observation, NOT a `TerminalCondition`
 /// claim — service hydration cannot terminate an allocation; this
 /// enum carries every dispatch outcome.
@@ -591,8 +590,6 @@ pub type NodeHealthRow = NodeHealthRowV1;
 /// or removal is a major-version break that requires a new ADR.
 #[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum ServiceHydrationStatus {
-    /// Hydrator emitted the action; dispatch has not yet returned.
-    Pending,
     /// Dispatch returned `Ok(())` from `Dataplane::update_service`.
     Completed {
         /// Fingerprint of the `(vip, backends)` pair the dispatch
@@ -1518,7 +1515,7 @@ impl VersionedEnvelope for ServiceHydrationResultRowEnvelope {
     /// archives, measured from the END of the archive bytes.
     ///
     /// Empirically determined against canonical V1 payloads of varying
-    /// `ServiceHydrationStatus` variants (`Pending` / `Completed` /
+    /// `ServiceHydrationStatus` variants (`Completed` /
     /// `Failed`), failure-reason string lengths (inline-vs-out-of-line
     /// `ArchivedString` boundary at 8 bytes), and `writer: NodeId`
     /// lengths: rkyv 0.8 places the outer enum's discriminant byte 80

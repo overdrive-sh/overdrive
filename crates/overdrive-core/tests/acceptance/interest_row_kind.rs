@@ -102,7 +102,10 @@ fn service_hydration_row() -> ServiceHydrationResultRow {
         service_id: service_id(),
         // `BackendSetFingerprint` is a `u64` type alias.
         fingerprint: 0,
-        status: ServiceHydrationStatus::Pending,
+        status: ServiceHydrationStatus::Completed {
+            fingerprint: 0,
+            applied_at: UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000)),
+        },
         updated_at: ts(),
     }
 }

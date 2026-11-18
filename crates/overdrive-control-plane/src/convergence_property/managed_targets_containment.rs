@@ -15,6 +15,7 @@
 
 use std::collections::BTreeSet;
 
+use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::{IntentKey, WorkloadKind};
 use overdrive_core::dataplane::fingerprint::fingerprint;
 use overdrive_core::id::SpiffeId;
@@ -28,6 +29,7 @@ use overdrive_core::workflow::{WorkflowName, WorkflowStart};
 use overdrive_reconcilers::AnyState;
 use overdrive_testing::placement;
 use std::net::Ipv4Addr;
+use std::time::Duration;
 
 use super::{Composed, name_of, node, runtime, target_of, workload_id};
 use crate::reconciler_runtime::{hydrate_actual_for_test, hydrate_desired_for_test};
@@ -298,7 +300,10 @@ fn service_map_hydrator_manages_services_with_an_intent_or_a_backend_row_but_not
             .write(ObservationWrite::ServiceHydration(ServiceHydrationResultRow {
                 service_id: result_only,
                 fingerprint: fingerprint(&orphan_vip(8), &[]),
-                status: ServiceHydrationStatus::Pending,
+                status: ServiceHydrationStatus::Completed {
+                    fingerprint: fingerprint(&orphan_vip(8), &[]),
+                    applied_at: UnixInstant::from_unix_duration(Duration::from_secs(1)),
+                },
                 updated_at: LogicalTimestamp { counter: 2, writer: node("writer-1") },
             }))
             .await

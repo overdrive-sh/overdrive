@@ -128,6 +128,8 @@ async fn ipv6_vip_rejected_at_action_shim_as_operator_visible_failed() {
                 "S-01-F: Failed reason must name the IPv6-unsupported cause, got: {reason}"
             );
         }
-        other => panic!("S-01-F: expected operator-visible Failed row, got {other:?}"),
+        other @ ServiceHydrationStatus::Completed { .. } => {
+            panic!("S-01-F: expected operator-visible Failed row, got {other:?}")
+        }
     }
 }
