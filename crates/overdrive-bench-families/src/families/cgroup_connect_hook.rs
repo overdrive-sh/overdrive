@@ -1,10 +1,10 @@
 //! Family `cgroup-connect-hook` (DDD "Connect-hook family"): the per-connect cost of
-//! the gateway connect program, service-only against service-plus-gateway.
+//! the gateway connect program, against nothing attached on the cgroup.
 //!
 //! Each replicate builds a fresh cgroup, bpffs pin directory and veth pair, loads the
-//! dataplane with both connect programs, optionally detaches the gateway program's cgroup
-//! link through the kernel's link commands (arm `service-only`), then drives a loopback
-//! connect-and-close loop from inside the cgroup.
+//! dataplane (whose boot attaches the gateway connect program), optionally detaches that
+//! program's cgroup link through the kernel's link commands (arm `no-hook`), then drives a
+//! loopback connect-and-close loop from inside the cgroup.
 
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
@@ -21,66 +21,63 @@ use overdrive_testing_macros::overdrive_bench;
 
 const WARMUP_CONNECTS: u32 = 500;
 const TIMED_CONNECTS: u32 = 5_000;
-/// The kernel truncates both connect programs' names to this (`BPF_OBJ_NAME_LEN` - 1).
+/// The kernel truncates the gateway connect program's name to this (`BPF_OBJ_NAME_LEN` - 1).
 const CONNECT_PROGRAM_NAME: &str = "cgroup_connect4";
 /// `GATEWAY_CONNECT_INTENT_MAP`, which only the gateway connect program references, as the
 /// kernel stores its name (truncated to `BPF_OBJ_NAME_LEN` - 1).
 const GATEWAY_INTENT_MAP_NAME: &str = "GATEWAY_CONNECT";
 const CLIENT_IFACE: &str = "ovbch0";
 const BACKEND_IFACE: &str = "ovbcp0";
-const SERVICE_ONLY: &str = "service-only";
+const NO_HOOK: &str = "no-hook";
+const NO_HOOK_REASON: &str = "no connect program is attached on this arm";
 
 static FIXTURE_SEQUENCE: AtomicU32 = AtomicU32::new(0);
 
 #[overdrive_bench(
     family = "cgroup-connect-hook",
     substrate = native,
-    arms = ["service-only", "service+gateway"],
+    arms = ["no-hook", "gateway-hook"],
     replicates = 30,
     bpf_stats,
     metric(name = "hook_ns_per_connect", unit = ns, table = "hook-time"),
     metric(name = "wall_ns_per_connect", unit = ns, table = "wall-time"),
-    reference(
-        metric = "hook_ns_per_connect",
-        value = 117.0,
-        label = "spike evidence, different run",
-        source = "docs/feature/public-ingress-gateway/spike/findings-connect-hook-cost.md"
-    ),
     smoke(guest = "cgroup-default"),
 )]
 fn connect_hook_cost(rep: &mut Replicate) -> Result<(), ReplicateFailure> {
     let fixture = Fixture::build(rep)?;
-    let (service, gateway) = fixture.connect_programs()?;
-    let gateway_link = find_cgroup_link(gateway)?
-        .ok_or_else(|| fail("the gateway program has no cgroup link after load"))?;
-    let service_only = rep.arm() == SERVICE_ONLY;
-    if service_only {
-        detach_link(gateway_link)?;
+    let gateway = fixture.gateway_program()?;
+    let no_hook = rep.arm() == NO_HOOK;
+    if no_hook {
+        let link = find_cgroup_link(gateway)?
+            .ok_or_else(|| fail("the gateway program has no cgroup link after load"))?;
+        detach_link(link)?;
         if find_cgroup_link(gateway)?.is_some() {
             return Err(fail("the gateway program's cgroup link is still attached after detach"));
         }
     }
-    let stat_programs: Vec<u32> = if service_only { vec![service] } else { vec![service, gateway] };
 
     for _ in 0..WARMUP_CONNECTS {
         fixture.connect_and_close()?;
     }
-    let start = read_stats(rep, &stat_programs)?;
+    let start = read_stats(rep, gateway, no_hook)?;
     let began = rep.clock().now();
     for _ in 0..TIMED_CONNECTS {
         fixture.connect_and_close()?;
     }
     let wall = rep.clock().now().duration_since(began);
-    let end = read_stats(rep, &stat_programs)?;
+    let end = read_stats(rep, gateway, no_hook)?;
 
     #[allow(
         clippy::cast_precision_loss,
         reason = "a nanosecond total of one loop is far below 2^52"
     )]
     rep.record("wall_ns_per_connect", wall.as_nanos() as f64 / f64::from(TIMED_CONNECTS))?;
-    match (start, end) {
-        (Some(start), Some(end)) => rep.record("hook_ns_per_connect", hook_ns(&start, &end))?,
-        _ => rep.record_absent("hook_ns_per_connect", "BPF statistics are not held under smoke")?,
+    match (no_hook, start, end) {
+        (true, ..) => rep.record_absent("hook_ns_per_connect", NO_HOOK_REASON)?,
+        (false, Some(start), Some(end)) => rep.record("hook_ns_per_connect", hook_ns(&start, &end))?,
+        (false, ..) => {
+            rep.record_absent("hook_ns_per_connect", "BPF statistics are not held under smoke")?;
+        }
     }
     Ok(())
 }
@@ -89,30 +86,26 @@ fn fail(message: &str) -> ReplicateFailure {
     ReplicateFailure::fixture(message)
 }
 
-type Cumulative = Vec<overdrive_bench::RunStats>;
-
-/// Reads the cumulative statistics of `programs`; `None` when no statistics are held.
-fn read_stats(rep: &Replicate, programs: &[u32]) -> Result<Option<Cumulative>, ReplicateFailure> {
-    let Some(hold) = rep.bpf_stats() else {
+/// Reads the cumulative statistics of the gateway program; `None` when no statistics are held
+/// or the arm has no program attached to read.
+fn read_stats(
+    rep: &Replicate,
+    program: u32,
+    no_hook: bool,
+) -> Result<Option<overdrive_bench::RunStats>, ReplicateFailure> {
+    let Some(hold) = rep.bpf_stats().filter(|_| !no_hook) else {
         return Ok(None);
     };
-    programs
-        .iter()
-        .map(|program| {
-            hold.read(*program).map_err(|error| ReplicateFailure::measurement(&error.to_string()))
-        })
-        .collect::<Result<Cumulative, _>>()
+    hold.read(program)
         .map(Some)
+        .map_err(|error| ReplicateFailure::measurement(&error.to_string()))
 }
 
-/// The summed `run_time_ns` delta of the programs over the largest `run_count` delta.
+/// The program's `run_time_ns` delta over its `run_count` delta.
 #[allow(clippy::cast_precision_loss, reason = "per-loop nanosecond totals are far below 2^52")]
-fn hook_ns(start: &Cumulative, end: &Cumulative) -> f64 {
-    let (mut time, mut count) = (0_u64, 1_u64);
-    for (before, after) in start.iter().zip(end) {
-        time += after.run_time_ns.saturating_sub(before.run_time_ns);
-        count = count.max(after.run_count.saturating_sub(before.run_count));
-    }
+fn hook_ns(start: &overdrive_bench::RunStats, end: &overdrive_bench::RunStats) -> f64 {
+    let time = end.run_time_ns.saturating_sub(start.run_time_ns);
+    let count = end.run_count.saturating_sub(start.run_count).max(1);
     time as f64 / count as f64
 }
 
@@ -254,17 +247,17 @@ impl Fixture {
         })
     }
 
-    /// The service and gateway connect programs: the two programs loaded by this fixture's
-    /// dataplane under the connect program name. The gateway is the one that references the
-    /// gateway intent map; the other is the service program. Any other shape fails the
-    /// replicate, so the detach never lands on a program picked by load order.
-    fn connect_programs(&self) -> Result<(u32, u32), ReplicateFailure> {
+    /// The gateway connect program: the one program loaded by this fixture's dataplane under
+    /// the connect program name, confirmed by its reference to the gateway intent map. Zero
+    /// candidates, several, or one that does not reference the map fails the replicate naming
+    /// what was found, so a detach never lands on a program picked by name alone.
+    fn gateway_program(&self) -> Result<u32, ReplicateFailure> {
         let gateway_maps: std::collections::BTreeSet<u32> = loaded_maps()
             .filter_map(Result::ok)
             .filter(|map| map.name_as_str() == Some(GATEWAY_INTENT_MAP_NAME))
             .map(|map| map.id())
             .collect();
-        let mut candidates = Vec::with_capacity(2);
+        let mut candidates = Vec::with_capacity(1);
         for program in loaded_programs().filter_map(Result::ok) {
             if self.programs_before.contains(&program.id())
                 || program.name_as_str() != Some(CONNECT_PROGRAM_NAME)
@@ -277,15 +270,13 @@ impl Fixture {
                     fail(&format!("reading the maps of program {}: {error}", program.id()))
                 })?
                 .unwrap_or_default();
-            let is_gateway = map_ids.iter().any(|id| gateway_maps.contains(id));
-            candidates.push((program.id(), is_gateway));
+            let references_gateway_map = map_ids.iter().any(|id| gateway_maps.contains(id));
+            candidates.push((program.id(), references_gateway_map));
         }
         match candidates.as_slice() {
-            [(service, false), (gateway, true)] | [(gateway, true), (service, false)] => {
-                Ok((*service, *gateway))
-            }
+            [(gateway, true)] => Ok(*gateway),
             other => Err(fail(&format!(
-                "expected one service connect program and one gateway connect program (the one referencing {GATEWAY_INTENT_MAP_NAME}*), found {other:?}"
+                "expected exactly one new {CONNECT_PROGRAM_NAME} program referencing {GATEWAY_INTENT_MAP_NAME}* (program id, references the map), found {other:?}"
             ))),
         }
     }

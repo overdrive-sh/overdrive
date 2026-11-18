@@ -1,12 +1,12 @@
 //! The `pig-connect-cost` probe re-expressed on the benchmark core (throwaway spike evidence).
 //! Family `cgroup-connect-hook`: the per-connect cost of the gateway connect program,
-//! service-only against service-plus-gateway. The fixture is adapted from the maintained
+//! against nothing attached on the cgroup. The fixture is adapted from the maintained
 //! family; the original probe stays in `main.rs`.
 //!
 //! Each replicate builds a fresh cgroup, bpffs pin directory and veth pair, loads the
-//! dataplane with both connect programs, optionally detaches the gateway program's cgroup
-//! link through the kernel's link commands (arm `service-only`), then drives a loopback
-//! connect-and-close loop from inside the cgroup.
+//! dataplane (whose boot attaches the gateway connect program), optionally detaches that
+//! program's cgroup link through the kernel's link commands (arm `no-hook`), then drives a
+//! loopback connect-and-close loop from inside the cgroup.
 
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
@@ -15,6 +15,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::thread::JoinHandle;
 
+use aya::maps::loaded_maps;
 use aya::programs::loaded_programs;
 use overdrive_bench::{Replicate, ReplicateFailure};
 use overdrive_dataplane::EbpfDataplane;
@@ -22,63 +23,63 @@ use overdrive_testing_macros::overdrive_bench;
 
 const WARMUP_CONNECTS: u32 = 500;
 const TIMED_CONNECTS: u32 = 5_000;
-/// The kernel truncates both connect programs' names to this (`BPF_OBJ_NAME_LEN` - 1).
+/// The kernel truncates the gateway connect program's name to this (`BPF_OBJ_NAME_LEN` - 1).
 const CONNECT_PROGRAM_NAME: &str = "cgroup_connect4";
+/// `GATEWAY_CONNECT_INTENT_MAP`, which only the gateway connect program references, as the
+/// kernel stores its name (truncated to `BPF_OBJ_NAME_LEN` - 1).
+const GATEWAY_INTENT_MAP_NAME: &str = "GATEWAY_CONNECT";
 const CLIENT_IFACE: &str = "ovbch0";
 const BACKEND_IFACE: &str = "ovbcp0";
-const SERVICE_ONLY: &str = "service-only";
+const NO_HOOK: &str = "no-hook";
+const NO_HOOK_REASON: &str = "no connect program is attached on this arm";
 
 static FIXTURE_SEQUENCE: AtomicU32 = AtomicU32::new(0);
 
 #[overdrive_bench(
     family = "cgroup-connect-hook",
     substrate = native,
-    arms = ["service-only", "service+gateway"],
+    arms = ["no-hook", "gateway-hook"],
     replicates = 30,
     bpf_stats,
     metric(name = "hook_ns_per_connect", unit = ns, table = "hook-time"),
     metric(name = "wall_ns_per_connect", unit = ns, table = "wall-time"),
-    reference(
-        metric = "hook_ns_per_connect",
-        value = 117.0,
-        label = "spike evidence, different run",
-        source = "docs/feature/public-ingress-gateway/spike/findings-connect-hook-cost.md"
-    ),
     smoke(none),
 )]
 fn connect_hook_cost(rep: &mut Replicate) -> Result<(), ReplicateFailure> {
     let fixture = Fixture::build(rep)?;
-    let (service, gateway) = fixture.connect_programs()?;
-    let gateway_link = find_cgroup_link(gateway)?
-        .ok_or_else(|| fail("the gateway program has no cgroup link after load"))?;
-    let service_only = rep.arm() == SERVICE_ONLY;
-    if service_only {
-        detach_link(gateway_link)?;
+    let gateway = fixture.gateway_program()?;
+    let no_hook = rep.arm() == NO_HOOK;
+    if no_hook {
+        let link = find_cgroup_link(gateway)?
+            .ok_or_else(|| fail("the gateway program has no cgroup link after load"))?;
+        detach_link(link)?;
         if find_cgroup_link(gateway)?.is_some() {
             return Err(fail("the gateway program's cgroup link is still attached after detach"));
         }
     }
-    let stat_programs: Vec<u32> = if service_only { vec![service] } else { vec![service, gateway] };
 
     for _ in 0..WARMUP_CONNECTS {
         fixture.connect_and_close()?;
     }
-    let start = read_stats(rep, &stat_programs)?;
+    let start = read_stats(rep, gateway, no_hook)?;
     let began = rep.clock().now();
     for _ in 0..TIMED_CONNECTS {
         fixture.connect_and_close()?;
     }
     let wall = rep.clock().now().duration_since(began);
-    let end = read_stats(rep, &stat_programs)?;
+    let end = read_stats(rep, gateway, no_hook)?;
 
     #[allow(
         clippy::cast_precision_loss,
         reason = "a nanosecond total of one loop is far below 2^52"
     )]
     rep.record("wall_ns_per_connect", wall.as_nanos() as f64 / f64::from(TIMED_CONNECTS))?;
-    match (start, end) {
-        (Some(start), Some(end)) => rep.record("hook_ns_per_connect", hook_ns(&start, &end))?,
-        _ => rep.record_absent("hook_ns_per_connect", "BPF statistics are not held under smoke")?,
+    match (no_hook, start, end) {
+        (true, ..) => rep.record_absent("hook_ns_per_connect", NO_HOOK_REASON)?,
+        (false, Some(start), Some(end)) => rep.record("hook_ns_per_connect", hook_ns(&start, &end))?,
+        (false, ..) => {
+            rep.record_absent("hook_ns_per_connect", "BPF statistics are not held under smoke")?;
+        }
     }
     Ok(())
 }
@@ -87,30 +88,26 @@ fn fail(message: &str) -> ReplicateFailure {
     ReplicateFailure::fixture(message)
 }
 
-type Cumulative = Vec<overdrive_bench::RunStats>;
-
-/// Reads the cumulative statistics of `programs`; `None` when no statistics are held.
-fn read_stats(rep: &Replicate, programs: &[u32]) -> Result<Option<Cumulative>, ReplicateFailure> {
-    let Some(hold) = rep.bpf_stats() else {
+/// Reads the cumulative statistics of the gateway program; `None` when no statistics are held
+/// or the arm has no program attached to read.
+fn read_stats(
+    rep: &Replicate,
+    program: u32,
+    no_hook: bool,
+) -> Result<Option<overdrive_bench::RunStats>, ReplicateFailure> {
+    let Some(hold) = rep.bpf_stats().filter(|_| !no_hook) else {
         return Ok(None);
     };
-    programs
-        .iter()
-        .map(|program| {
-            hold.read(*program).map_err(|error| ReplicateFailure::measurement(&error.to_string()))
-        })
-        .collect::<Result<Cumulative, _>>()
+    hold.read(program)
         .map(Some)
+        .map_err(|error| ReplicateFailure::measurement(&error.to_string()))
 }
 
-/// The summed `run_time_ns` delta of the programs over the largest `run_count` delta.
+/// The program's `run_time_ns` delta over its `run_count` delta.
 #[allow(clippy::cast_precision_loss, reason = "per-loop nanosecond totals are far below 2^52")]
-fn hook_ns(start: &Cumulative, end: &Cumulative) -> f64 {
-    let (mut time, mut count) = (0_u64, 1_u64);
-    for (before, after) in start.iter().zip(end) {
-        time += after.run_time_ns.saturating_sub(before.run_time_ns);
-        count = count.max(after.run_count.saturating_sub(before.run_count));
-    }
+fn hook_ns(start: &overdrive_bench::RunStats, end: &overdrive_bench::RunStats) -> f64 {
+    let time = end.run_time_ns.saturating_sub(start.run_time_ns);
+    let count = end.run_count.saturating_sub(start.run_count).max(1);
     time as f64 / count as f64
 }
 
@@ -225,7 +222,7 @@ struct Fixture {
     dataplane: Option<EbpfDataplane>,
     _listener: Listener,
     _veth: Veth,
-    pin: PathBuf,
+    _pin: PinDir,
     _cgroup: Cgroup,
 }
 
@@ -234,14 +231,12 @@ impl Fixture {
         let sequence = FIXTURE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
         let tag = format!("{}-{sequence}", std::process::id());
         let cgroup = Cgroup::enter(&tag)?;
-        let pin = PathBuf::from(format!("/sys/fs/bpf/ovbench-connect-{tag}"));
-        std::fs::create_dir_all(&pin)
-            .map_err(|error| fail(&format!("creating pin directory {}: {error}", pin.display())))?;
+        let pin = PinDir::create(PathBuf::from(format!("/sys/fs/bpf/ovbench-connect-{tag}")))?;
         let veth = Veth::create(rep)?;
         let listener = Listener::start()?;
         let programs_before = program_ids();
         let dataplane =
-            EbpfDataplane::new_with_pin_dir(CLIENT_IFACE, BACKEND_IFACE, &pin, cgroup.path())
+            EbpfDataplane::new_with_pin_dir(CLIENT_IFACE, BACKEND_IFACE, pin.path(), cgroup.path())
                 .map_err(|error| fail(&format!("loading the dataplane: {error}")))?;
         Ok(Self {
             addr: listener.addr,
@@ -249,26 +244,41 @@ impl Fixture {
             dataplane: Some(dataplane),
             _listener: listener,
             _veth: veth,
-            pin,
+            _pin: pin,
             _cgroup: cgroup,
         })
     }
 
-    /// The service and gateway connect programs: the two programs loaded by this fixture's
-    /// dataplane under the connect program name; the gateway loads second, so it has the
-    /// higher id.
-    fn connect_programs(&self) -> Result<(u32, u32), ReplicateFailure> {
-        let mut loaded: Vec<u32> = loaded_programs()
+    /// The gateway connect program: the one program loaded by this fixture's dataplane under
+    /// the connect program name, confirmed by its reference to the gateway intent map. Zero
+    /// candidates, several, or one that does not reference the map fails the replicate naming
+    /// what was found, so a detach never lands on a program picked by name alone.
+    fn gateway_program(&self) -> Result<u32, ReplicateFailure> {
+        let gateway_maps: std::collections::BTreeSet<u32> = loaded_maps()
             .filter_map(Result::ok)
-            .filter(|program| !self.programs_before.contains(&program.id()))
-            .filter(|program| program.name_as_str() == Some(CONNECT_PROGRAM_NAME))
-            .map(|program| program.id())
+            .filter(|map| map.name_as_str() == Some(GATEWAY_INTENT_MAP_NAME))
+            .map(|map| map.id())
             .collect();
-        loaded.sort_unstable();
-        match loaded.as_slice() {
-            [service, gateway] => Ok((*service, *gateway)),
+        let mut candidates = Vec::with_capacity(1);
+        for program in loaded_programs().filter_map(Result::ok) {
+            if self.programs_before.contains(&program.id())
+                || program.name_as_str() != Some(CONNECT_PROGRAM_NAME)
+            {
+                continue;
+            }
+            let map_ids = program
+                .map_ids()
+                .map_err(|error| {
+                    fail(&format!("reading the maps of program {}: {error}", program.id()))
+                })?
+                .unwrap_or_default();
+            let references_gateway_map = map_ids.iter().any(|id| gateway_maps.contains(id));
+            candidates.push((program.id(), references_gateway_map));
+        }
+        match candidates.as_slice() {
+            [(gateway, true)] => Ok(*gateway),
             other => Err(fail(&format!(
-                "expected the service and gateway connect programs, found {other:?}"
+                "expected exactly one new {CONNECT_PROGRAM_NAME} program referencing {GATEWAY_INTENT_MAP_NAME}* (program id, references the map), found {other:?}"
             ))),
         }
     }
@@ -297,9 +307,32 @@ impl Fixture {
 
 impl Drop for Fixture {
     fn drop(&mut self) {
-        // The dataplane's links go first; the veth, then the cgroup, follow as fields drop.
+        // The dataplane's links go first; the listener, the veth, the pin directory and the
+        // cgroup follow as fields drop.
         drop(self.dataplane.take());
-        let _ = std::fs::remove_dir_all(&self.pin);
+    }
+}
+
+/// The bpffs pin directory of one replicate; removed on drop, so a later fallible build step
+/// does not leak it.
+struct PinDir(PathBuf);
+
+impl PinDir {
+    fn create(path: PathBuf) -> Result<Self, ReplicateFailure> {
+        std::fs::create_dir_all(&path).map_err(|error| {
+            fail(&format!("creating pin directory {}: {error}", path.display()))
+        })?;
+        Ok(Self(path))
+    }
+
+    fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for PinDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
     }
 }
 
@@ -345,7 +378,11 @@ struct Veth;
 
 impl Veth {
     fn create(rep: &mut Replicate) -> Result<Self, ReplicateFailure> {
-        let _ = std::process::Command::new("ip").args(["link", "del", CLIENT_IFACE]).output();
+        // A pair a crashed earlier run left behind is removed; a clean host has none, and a
+        // failed removal fails the replicate.
+        if Path::new("/sys/class/net").join(CLIENT_IFACE).exists() {
+            rep.exec("ip", &["link", "del", CLIENT_IFACE])?;
+        }
         rep.exec(
             "ip",
             &["link", "add", CLIENT_IFACE, "type", "veth", "peer", "name", BACKEND_IFACE],
@@ -359,6 +396,7 @@ impl Veth {
 
 impl Drop for Veth {
     fn drop(&mut self) {
+        // subprocess-ok: teardown of this replicate's own veth pair; `Drop` has no replicate handle for `exec`, and a failed removal is caught by the next replicate's stale-pair check
         let _ = std::process::Command::new("ip").args(["link", "del", CLIENT_IFACE]).output();
     }
 }
