@@ -402,7 +402,7 @@ fn probe_ktls_arm_and_forward_encrypt_round_trip() -> Result<()> {
             leg_b_fd,
             SENTINEL.to_vec(),
             super::now_unix_nanos(),
-            "mtls-test-fwd",
+            "mtls-probe-fwd",
         )
         .map_err(|e| format!("forward pump thread: {e}"))?;
 
