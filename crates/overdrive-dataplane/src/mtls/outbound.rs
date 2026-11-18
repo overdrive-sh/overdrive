@@ -135,7 +135,21 @@ pub(super) fn establish(
     //    primitive — `findings-ktls-tx-blocking-splice.md`; the retired loss class
     //    was NON-blocking MSG_DONTWAIT delivery). Agent does no crypto. This is the
     //    primary pump `liveness` observes (the request-carrying direction).
-    let forward = PumpHandle::spawn_encrypt(leg_f_fd, leg_b_fd, prelude, super::now_unix_nanos());
+    //
+    //    `client_handshake` already suppressed the leg-B `TcpStream`'s Drop
+    //    (`forget`), so reconstructing an `OwnedFd` from `leg_b_fd` makes the
+    //    ConnState the SINGLE owner — no double-close. Owning it before the pumps
+    //    spawn means a spawn failure closes both legs by dropping them.
+    // SAFETY: `leg_b_fd` has exactly one live owner (the forgotten stream's fd);
+    // wrapping it in an `OwnedFd` transfers that sole ownership.
+    let leg_b_owned = unsafe { OwnedFd::from_raw_fd(leg_b_fd) };
+    let mut forward = PumpHandle::spawn_encrypt(
+        leg_f_fd,
+        leg_b_fd,
+        prelude,
+        super::now_unix_nanos(),
+        "mtls-out-fwd",
+    )?;
     forward.state.set_role(PumpRole::OutboundForward);
 
     // 7. Spawn the RETURN decrypt pump splice(legB → pipe → legF): leg B is
@@ -144,15 +158,30 @@ pub(super) fn establish(
     //    to leg F FIRST, ahead of the splice loop, so the workload sees the peer's
     //    0.5-RTT reply in order with no loss. Auxiliary (torn down with the
     //    connection; not the `liveness`-observed pump).
-    let ret = PumpHandle::spawn_decrypt(leg_b_fd, leg_f_fd, early_return, super::now_unix_nanos());
+    let ret = match PumpHandle::spawn_decrypt(
+        leg_b_fd,
+        leg_f_fd,
+        early_return,
+        super::now_unix_nanos(),
+        "mtls-out-ret",
+    ) {
+        Ok(ret) => ret,
+        Err(err) => {
+            // Fail closed: wake the forward pump out of its blocking splice by
+            // shutting both legs, then stop and join it before the legs close.
+            for fd in [leg_f_fd, leg_b_fd] {
+                // SAFETY: both fds are live (owned by `leg_f` / `leg_b_owned`)
+                // until this function returns; `shutdown(2)` does not close them.
+                unsafe {
+                    libc::shutdown(fd, libc::SHUT_RDWR);
+                }
+            }
+            forward.stop_and_join();
+            return Err(err.into());
+        }
+    };
     ret.state.set_role(PumpRole::OutboundReturn);
 
-    // Detach leg-B ownership into the ConnState. `client_handshake` already
-    // suppressed the leg-B `TcpStream`'s Drop (`forget`), so reconstructing an
-    // `OwnedFd` from `leg_b_fd` here is the SINGLE owner — no double-close.
-    // SAFETY: `leg_b_fd` has exactly one live owner (the forgotten stream's fd);
-    // wrapping it in an `OwnedFd` transfers that sole ownership to the ConnState.
-    let leg_b_owned = unsafe { OwnedFd::from_raw_fd(leg_b_fd) };
     Ok(super::new_conn_state_bidi(vec![leg_f, leg_b_owned], forward, vec![ret]))
 }
 
@@ -373,7 +402,9 @@ fn probe_ktls_arm_and_forward_encrypt_round_trip() -> Result<()> {
             leg_b_fd,
             SENTINEL.to_vec(),
             super::now_unix_nanos(),
-        );
+            "mtls-test-fwd",
+        )
+        .map_err(|e| format!("forward pump thread: {e}"))?;
 
         // 5. Write the SECOND sentinel through the plaintext leg-F writer, so it
         //    transits the pump's STEADY-STATE blocking splice loop — poll(f_source,

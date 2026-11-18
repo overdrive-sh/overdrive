@@ -217,19 +217,25 @@ impl PumpHandle {
     /// early byte ahead of the steady-state kTLS-RX records, in order, with a single
     /// writer (no cross-thread establish→pump handoff that could reorder). Pass an
     /// empty `Vec` when no early data was buffered.
+    ///
+    /// `name` is the pump thread's name (under the 15-byte `comm` limit) so a CPU
+    /// profile attributes the work per role. Thread creation can fail, so the
+    /// constructor returns `io::Result`.
     pub(super) fn spawn_decrypt(
         src_fd: RawFd,
         dst_fd: RawFd,
         early: Vec<u8>,
         now_unix_nanos: u64,
-    ) -> Self {
+        name: &'static str,
+    ) -> std::io::Result<Self> {
         let state = Arc::new(PumpState::default());
         state.running.store(true, Ordering::SeqCst);
         state.last_progress_unix_nanos.store(now_unix_nanos, Ordering::SeqCst);
         let pump_state = Arc::clone(&state);
-        let join =
-            std::thread::spawn(move || run_decrypt_pump(src_fd, dst_fd, &early, &pump_state));
-        Self { state, stop_tx: None, join: Some(join) }
+        let join = std::thread::Builder::new()
+            .name(name.to_owned())
+            .spawn(move || run_decrypt_pump(src_fd, dst_fd, &early, &pump_state))?;
+        Ok(Self { state, stop_tx: None, join: Some(join) })
     }
 
     /// Spawn an ENCRYPT pump: a BLOCKING `splice(src_fd → pipe → dst_fd)` where
@@ -251,14 +257,16 @@ impl PumpHandle {
         dst_fd: RawFd,
         prelude: Vec<u8>,
         now_unix_nanos: u64,
-    ) -> Self {
+        name: &'static str,
+    ) -> std::io::Result<Self> {
         let state = Arc::new(PumpState::default());
         state.running.store(true, Ordering::SeqCst);
         state.last_progress_unix_nanos.store(now_unix_nanos, Ordering::SeqCst);
         let pump_state = Arc::clone(&state);
-        let join =
-            std::thread::spawn(move || run_encrypt_pump(src_fd, dst_fd, &prelude, &pump_state));
-        Self { state, stop_tx: None, join: Some(join) }
+        let join = std::thread::Builder::new()
+            .name(name.to_owned())
+            .spawn(move || run_encrypt_pump(src_fd, dst_fd, &prelude, &pump_state))?;
+        Ok(Self { state, stop_tx: None, join: Some(join) })
     }
 
     /// Spawn one tracked pump whose async I/O needs the runtime supplied by

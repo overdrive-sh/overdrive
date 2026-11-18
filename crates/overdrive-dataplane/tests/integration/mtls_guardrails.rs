@@ -716,7 +716,6 @@ fn live_thread_names() -> Vec<String> {
 /// (a thread-spawn failure cannot be induced from this rig).
 #[overdrive_test(guest = "mtls-relay")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[should_panic(expected = "an outbound connection must have exactly one forward pump thread")]
 async fn an_outbound_connection_names_its_pump_threads_by_role() {
     let _ = rustls::crypto::ring::default_provider().install_default();
     let pki = TestPki::mint();

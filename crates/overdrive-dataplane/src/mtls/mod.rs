@@ -1498,14 +1498,18 @@ mod tests {
             leg_b_peer.as_raw_fd(),
             Vec::new(),
             now,
-        );
+            "mtls-test-primary",
+        )
+        .expect("spawn the primary pump thread");
         // AUX: return decrypt pump — the OUTBOUND sole observer of leg-B death.
         let aux = PumpHandle::spawn_decrypt(
             leg_b_peer.as_raw_fd(),
             leg_f_peer.as_raw_fd(),
             Vec::new(),
             now,
-        );
+            "mtls-test-aux",
+        )
+        .expect("spawn the aux pump thread");
         // The peer ends are owned by the legs vec so the pumps' fds stay live for the
         // connection's lifetime and close on reclaim.
         new_conn_state_bidi(vec![leg_f, leg_b, leg_f_peer, leg_b_peer], primary, vec![aux])
@@ -1606,7 +1610,9 @@ mod tests {
             dst_held.as_raw_fd(),
             Vec::new(),
             now_unix_nanos(),
-        );
+            "mtls-test-blocked",
+        )
+        .expect("spawn the blocked pump thread");
         let pump_state = Arc::clone(&pump.state);
 
         let adapter = HostMtlsEnforcement::new(
