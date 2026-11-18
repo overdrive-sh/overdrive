@@ -747,6 +747,24 @@ mod tests {
         }
     }
 
+    /// The document's stated version is the version the runner stamps into every record.
+    #[test]
+    fn the_methodology_document_states_the_version_the_runner_stamps() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../benchmarks/methodology.md");
+        let text = std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("reading {}: {error}", path.display()));
+        let stated = text
+            .lines()
+            .find_map(|line| line.strip_prefix("Methodology version "))
+            .and_then(|rest| {
+                let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+                digits.parse::<u32>().ok()
+            })
+            .expect("the document opens a line with `Methodology version <n>`");
+        assert_eq!(stated, METHODOLOGY_VERSION);
+    }
+
     fn host() -> Value {
         let keys: BTreeMap<&str, &str> = HOST_KEYS.iter().map(|key| (*key, "x")).collect();
         json!(keys)
