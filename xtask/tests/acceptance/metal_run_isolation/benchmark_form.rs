@@ -54,8 +54,8 @@ fn the_benchmark_form_runs_exactly_the_closed_benchmark_command_under_exclusive_
     );
 }
 
-/// A spike crate's benchmark runs through its own manifest and writes under its own
-/// directory; the maintained results tree is untouched.
+/// A spike crate's benchmark runs through its own manifest: the selected command's argv names
+/// the spike manifest and the spike directory's results root.
 /// CONTRACT_SHAPE: bounded-change (the selected command's argv).
 #[test]
 fn the_spike_form_runs_the_spike_crates_benchmark_and_results_stay_in_its_directory() {
@@ -175,7 +175,7 @@ fn the_xtask_command_line_names_the_conflict_between_the_benchmark_form_and_othe
     ] {
         let output = Command::new(env!("CARGO_BIN_EXE_xtask")).args(&args).output().expect("xtask");
         let stderr = String::from_utf8_lossy(&output.stderr);
-        assert!(!output.status.success(), "{label}: refused");
+        assert_eq!(output.status.code(), Some(2), "{label}: refused as a usage error");
         assert!(
             stderr.contains("cannot be used with"),
             "--benchmark must conflict with {label}: {stderr}"
@@ -186,6 +186,7 @@ fn the_xtask_command_line_names_the_conflict_between_the_benchmark_form_and_othe
         .output()
         .expect("xtask");
     let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(2), "a missing required argument is a usage error");
     assert!(
         stderr.contains("required arguments were not provided"),
         "--spike must conflict with its absence of --benchmark: {stderr}"
