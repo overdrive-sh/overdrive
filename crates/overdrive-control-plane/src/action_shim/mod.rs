@@ -2823,30 +2823,12 @@ async fn dispatch_single(
         // phase-2-xdp-service-map Slice 08 (US-08; ASR-2.2-04) —
         // The shim invokes `Dataplane::update_service(...)` via the
         // canonical per-arm dispatch fn at
-        // `dataplane_update_service::dispatch`, which writes the
-        // outcome row to `service_hydration_results` per
-        // architecture.md § 7 *Failure surface*. A
-        // `Dataplane::update_service` failure does NOT surface as
-        // `ShimError` — it lands as a `Failed` observation row and
-        // dispatch returns `Ok(DispatchOutcome::Failed)`. Only an
-        // ObservationStore write failure surfaces as
-        // `ShimError::Observation`.
+        // `dataplane_update_service::dispatch`. A failed update is
+        // logged there as `dataplane.update_service.failed`; it does
+        // NOT surface as `ShimError`. The hydrator re-derives retry
+        // from the programmed service map.
         action @ Action::DataplaneUpdateService { .. } => {
-            dataplane_update_service::dispatch(&action, dataplane, obs, tick, writer_node)
-                .await
-                .map_err(|e| match e {
-                    dataplane_update_service::ServiceHydrationDispatchError::ObservationWrite {
-                        source,
-                    } => ShimError::Observation(source),
-                    dataplane_update_service::ServiceHydrationDispatchError::Ipv6Unsupported {
-                        ..
-                    } => {
-                        unreachable!(
-                            "Ipv6Unsupported is handled inside dispatch — it writes \
-                             a Failed row and returns Ok(DispatchOutcome::Failed)"
-                        )
-                    }
-                })?;
+            let _outcome = dataplane_update_service::dispatch(&action, dataplane).await;
             Ok(())
         }
         // service-vip-allocator step 03-02 — real dispatch arm per

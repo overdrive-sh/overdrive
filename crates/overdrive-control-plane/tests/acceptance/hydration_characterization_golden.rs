@@ -47,8 +47,7 @@
 //! `ServiceLifecycle` *actual* side richly non-trivial. `NoopHeartbeat`
 //! is `Unit` by construction. `WorkflowLifecycle`, `ServiceMapHydrator`, and
 //! `VmReclamation` capture at their HONEST baseline for this fixture — their
-//! read surfaces (workflow-instance intents, listener facts / hydration-result
-//! rows, a `Vm`-driver + `VmHostState` observation) are infrastructure this
+//! read surfaces (workflow-instance intents, listener facts, a `Vm`-driver + `VmHostState` observation) are infrastructure this
 //! broad Exec-only fixture does not populate, so they hydrate to empty/default.
 //! Empty/default is a valid pinned characterization: 02-04 must reproduce it
 //! EXACTLY through the ports, byte for byte. The golden is the SNAPSHOT, not a

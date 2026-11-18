@@ -15,21 +15,17 @@
 
 use std::collections::BTreeSet;
 
-use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::{IntentKey, WorkloadKind};
-use overdrive_core::dataplane::fingerprint::fingerprint;
 use overdrive_core::id::SpiffeId;
 use overdrive_core::id::{ContentHash, CorrelationKey};
 use overdrive_core::reconcilers::{ReconcilerName, TargetResource};
 use overdrive_core::traits::observation_store::{
     AllocState, LogicalTimestamp, ObservationStore, ObservationWrite, ServiceBackendRow,
-    ServiceHydrationResultRow, ServiceHydrationStatus,
 };
 use overdrive_core::workflow::{WorkflowName, WorkflowStart};
 use overdrive_reconcilers::AnyState;
 use overdrive_testing::placement;
 use std::net::Ipv4Addr;
-use std::time::Duration;
 
 use super::{Composed, name_of, node, runtime, target_of, workload_id};
 use crate::reconciler_runtime::{hydrate_actual_for_test, hydrate_desired_for_test};
@@ -267,13 +263,10 @@ fn svid_lifecycle_enumeration_returns_an_error_when_allocation_rows_cannot_be_re
 }
 
 /// D-21: the hydrator manages a Service that has a workload intent or a
-/// `service_backends` row. A `service_hydration_results` row alone adds no
-/// target: the hydrator no longer reads it (D-20), and an orphaned row (intent
-/// and backend row both gone) is the deletion case, #211.
+/// `service_backends` row.
 #[cfg(test)]
 #[test]
-fn service_map_hydrator_manages_services_with_an_intent_or_a_backend_row_but_not_a_result_row_alone()
- {
+fn service_map_hydrator_manages_services_with_an_intent_or_a_backend_row() {
     let rt = runtime();
     rt.block_on(async {
         let name = name_of("service-map-hydrator");
@@ -293,22 +286,6 @@ fn service_map_hydrator_manages_services_with_an_intent_or_a_backend_row_but_not
             }))
             .await
             .expect("backend row");
-        // A Service id with only a result row: intent and backend row both gone.
-        let result_only = orphan_service_id(8);
-        world
-            .obs
-            .write(ObservationWrite::ServiceHydration(ServiceHydrationResultRow {
-                service_id: result_only,
-                fingerprint: fingerprint(&orphan_vip(8), &[]),
-                status: ServiceHydrationStatus::Completed {
-                    fingerprint: fingerprint(&orphan_vip(8), &[]),
-                    applied_at: UnixInstant::from_unix_duration(Duration::from_secs(1)),
-                },
-                updated_at: LogicalTimestamp { counter: 2, writer: node("writer-1") },
-            }))
-            .await
-            .expect("result row");
-
         let managed = world.managed_targets(&name).await.expect("managed_targets");
         for (service, why) in [(intent_only, "a workload intent"), (backend_only, "a backend row")]
         {
@@ -317,11 +294,6 @@ fn service_map_hydrator_manages_services_with_an_intent_or_a_backend_row_but_not
                 "service-map-hydrator managed_targets omitted the service with {why}: {managed:?}"
             );
         }
-        assert!(
-            !managed.contains(&target_of("service", &result_only.to_string())),
-            "service-map-hydrator managed a service with only a result row, the deletion case \
-             (#211): {managed:?}"
-        );
     });
 }
 

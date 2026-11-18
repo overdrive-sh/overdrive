@@ -62,7 +62,7 @@
 //!   the Service makes `service-lifecycle` manage it, so `k4` implies `k3` (managed-set rule), and
 //!   the Running allocation clears `need(k1)`.
 //! * `k2` need: the workload intent, the `orders` listener's VIP and listener fact, and a
-//!   `ServiceBackendRow` with a new backend set, so desired differs from the result row; the
+//!   `ServiceBackendRow` with a new backend set, so desired differs from the programmed map; the
 //!   observed row differs from `service-lifecycle`'s projection, so `k3` is needy too.
 //!   The `orders` listener's `ServiceId` is fixed at composition by a scratch allocator (no world
 //!   effect) so the key table can name `k2`'s target before the VIP is assigned; the world
@@ -690,7 +690,7 @@ impl WakeWorld {
     }
 
     /// `k2`: the workload, the `orders` listener's VIP and listener fact, and a backend row whose
-    /// set the result row does not cover.
+    /// set the programmed map does not carry.
     #[cfg(test)]
     async fn make_service_backends_needy(&mut self) {
         self.persist_orders_intent().await;
@@ -790,7 +790,8 @@ impl WakeWorld {
                     ObservationStoreError::Unreachable { peer: "sim-dispatch-fault".to_owned() };
                 // `service-lifecycle` writes a service row only with a VIP (the model's `vip`); without
                 // one its write is the allocation-lifecycle row (the Stable commit), so the fault is
-                // armed at that seam. `service-map-hydrator` always writes the service result row.
+                // armed at that seam. `service-map-hydrator` writes no row (its update lands on the dataplane), so an armed failure is
+                // never consumed by its dispatch and the model's `k2` `dispatchErr` lands as `ok` does.
                 // `svid-lifecycle`'s `IssueSvid` dispatch audits through the generic
                 // `ObservationStore::write` (`issue_and_audit`, `action_shim/issue_svid.rs`), which
                 // `inject_write_failure` consumes: the issue fails and the SVID stays unheld.

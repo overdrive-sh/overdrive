@@ -78,7 +78,6 @@ use futures::Stream;
 use overdrive_core::ca::issue_failure::SvidIssueFailure;
 use overdrive_core::ca::issued_certificate_row::IssuedCertificateRow;
 use overdrive_core::codec::{VersionedEnvelope, decode_envelope_bytes};
-use overdrive_core::dataplane::fingerprint::BackendSetFingerprint;
 use overdrive_core::id::{AllocationId, IssuanceOrdinal, NodeId, ServiceId};
 use overdrive_core::observation::{ProbeIdx, ProbeResultRow, ProbeResultRowEnvelope, ProbeRole};
 use overdrive_core::public_ingress::{
@@ -90,9 +89,8 @@ use overdrive_core::traits::observation_store::{
     AllocLifecycleOccurrenceRowEnvelope, AllocLifecyclePredecessor, AllocLifecycleUnreadable,
     AllocStatusRow, AllocStatusRowEnvelope, LagAwareSubscription, LogicalTimestamp, NodeHealthRow,
     NodeHealthRowEnvelope, ObservationRow, ObservationStore, ObservationStoreError,
-    ObservationWrite, ServiceBackendRow, ServiceBackendRowEnvelope, ServiceHydrationResultRow,
-    ServiceHydrationResultRowEnvelope, SubscriptionEvent, TransitionSource,
-    WorkloadSvidIssueStatusRowEnvelope, WorkloadSvidIssueStatusRowV1,
+    ObservationWrite, ServiceBackendRow, ServiceBackendRowEnvelope, SubscriptionEvent,
+    TransitionSource, WorkloadSvidIssueStatusRowEnvelope, WorkloadSvidIssueStatusRowV1,
 };
 use redb::{Database, ReadableTable, Table, TableDefinition};
 use tokio::sync::broadcast;
@@ -127,14 +125,6 @@ fn alloc_lifecycle_occurrence_range(alloc_id: &AllocationId) -> (Vec<u8>, Vec<u8
 /// canonical `NodeId` bytes.
 const NODE_HEALTH_TABLE: TableDefinition<&[u8], &[u8]> =
     TableDefinition::new("observation_node_health");
-
-/// Holds the rkyv-archived bytes of every `ServiceHydrationResultRow`,
-/// keyed on the canonical 16-byte encoding of `(service_id,
-/// fingerprint)` (each component little-endian u64). Phase 2.2 is
-/// single-writer (the action shim) and additive-only per
-/// `docs/feature/phase-2-xdp-service-map/design/architecture.md` § 12.
-const SERVICE_HYDRATION_TABLE: TableDefinition<&[u8], &[u8]> =
-    TableDefinition::new("observation_service_hydration_results");
 
 /// Holds the rkyv-archived bytes of every `ServiceBackendRow`, keyed
 /// on the canonical 8-byte LE encoding of `ServiceId`. One row per
@@ -247,28 +237,6 @@ fn encode_probe_result_prefix(alloc_id: &AllocationId) -> Vec<u8> {
     out.extend_from_slice(alloc_bytes);
     out.push(0x00);
     out
-}
-
-/// Encode the composite `(service_id, fingerprint)` key as 16 bytes
-/// (`service_id` LE u64 || `fingerprint` LE u64). Sort order on the
-/// `BTreeMap`-backed redb tree mirrors the lexicographic-on-bytes
-/// order of this layout — predictable, deterministic, no JSON.
-const fn encode_service_hydration_key(
-    service_id: ServiceId,
-    fingerprint: BackendSetFingerprint,
-) -> [u8; 16] {
-    let sid = service_id.get().to_le_bytes();
-    let fp = fingerprint.to_le_bytes();
-    [
-        sid[0], sid[1], sid[2], sid[3], sid[4], sid[5], sid[6], sid[7], fp[0], fp[1], fp[2], fp[3],
-        fp[4], fp[5], fp[6], fp[7],
-    ]
-}
-
-/// Encode the prefix of `(service_id, *)` for range scans — first 8
-/// bytes of [`encode_service_hydration_key`].
-const fn encode_service_hydration_prefix(service_id: ServiceId) -> [u8; 8] {
-    service_id.get().to_le_bytes()
 }
 
 /// Encode the `ServiceId` key as 8 LE bytes for the
@@ -423,11 +391,6 @@ impl LocalObservationStore {
                 let _ = write.open_table(ALLOC_STATUS_TABLE).map_err(map_to_io)?;
                 let _ = write.open_table(ALLOC_LIFECYCLE_OCCURRENCES_TABLE).map_err(map_to_io)?;
                 let _ = write.open_table(NODE_HEALTH_TABLE).map_err(map_to_io)?;
-                // Service-hydration table — additive-only migration
-                // per `docs/feature/phase-2-xdp-service-map/design/
-                // architecture.md` § 12. New table; never alters
-                // existing tables.
-                let _ = write.open_table(SERVICE_HYDRATION_TABLE).map_err(map_to_io)?;
                 // Service-backends table — GH #160.
                 let _ = write.open_table(SERVICE_BACKENDS_TABLE).map_err(map_to_io)?;
                 // Probe-results table — ADR-0054 §5. New table;
@@ -714,10 +677,6 @@ impl ObservationStore for LocalObservationStore {
                 ObservationRow::NodeHealth(incoming) => {
                     let mut table = write.open_table(NODE_HEALTH_TABLE).map_err(map_to_io)?;
                     apply_node_health_lww(&mut table, incoming)?
-                }
-                ObservationRow::ServiceHydration(incoming) => {
-                    let mut table = write.open_table(SERVICE_HYDRATION_TABLE).map_err(map_to_io)?;
-                    apply_service_hydration_lww(&mut table, incoming)?
                 }
                 ObservationRow::ServiceBackend(incoming) => {
                     let mut table = write.open_table(SERVICE_BACKENDS_TABLE).map_err(map_to_io)?;
@@ -1047,50 +1006,6 @@ impl ObservationStore for LocalObservationStore {
         Ok(IssuanceOrdinal::new(allocated))
     }
 
-    async fn service_hydration_results_rows(
-        &self,
-        service_id: &ServiceId,
-    ) -> Result<Vec<ServiceHydrationResultRow>, ObservationStoreError> {
-        let inner = Arc::clone(&self.inner);
-        let prefix = encode_service_hydration_prefix(*service_id);
-        let mut range_start = [0u8; 16];
-        let mut range_end = [0u8; 16];
-        range_start[..8].copy_from_slice(&prefix);
-        range_end[..8].copy_from_slice(&prefix);
-        range_end[8..].fill(0xFF);
-        // Per ADR-0048 § 3 (observation layer): log + skip rows whose
-        // envelope decode failed. Mirror of the alloc_status_rows /
-        // node_health_rows paths above — failures are collected inside
-        // the blocking task and emitted on the calling async thread so
-        // per-test `tracing::subscriber::set_default` guards
-        // (thread-local) observe them.
-        let (rows, decode_failures) = tokio::task::spawn_blocking(move || {
-            let read = inner.db.begin_read().map_err(map_to_io)?;
-            let table = read.open_table(SERVICE_HYDRATION_TABLE).map_err(map_to_io)?;
-            let mut out: Vec<ServiceHydrationResultRow> = Vec::new();
-            let mut failures: Vec<(Vec<u8>, ObservationStoreError)> = Vec::new();
-            let iter =
-                table.range(range_start.as_slice()..=range_end.as_slice()).map_err(map_to_io)?;
-            for item in iter {
-                let (k, v) = item.map_err(map_to_io)?;
-                match decode_envelope::<ServiceHydrationResultRowEnvelope>(v.value()) {
-                    Ok(row) => out.push(row),
-                    Err(err) => failures.push((k.value().to_vec(), err)),
-                }
-            }
-            Ok::<_, ObservationStoreError>((out, failures))
-        })
-        .await
-        .map_err(map_to_io)??;
-
-        log_decode_failures(
-            "observation_service_hydration_results",
-            "skipping service-hydration row that failed envelope decode",
-            decode_failures,
-        );
-        Ok(rows)
-    }
-
     async fn write_probe_result(&self, row: ProbeResultRow) -> Result<(), ObservationStoreError> {
         let inner = Arc::clone(&self.inner);
         let row_for_commit = row.clone();
@@ -1159,7 +1074,7 @@ impl ObservationStore for LocalObservationStore {
         let key = encode_service_backends_key(*service_id);
         // Per ADR-0048 § 3 (observation layer): log + skip rows whose
         // envelope decode failed. Mirror of the alloc_status_rows /
-        // node_health_rows / service_hydration_results_rows paths above
+        // node_health_rows paths above
         // — failures are collected inside the blocking task and
         // emitted on the calling async thread so per-test
         // `tracing::subscriber::set_default` guards (thread-local)
@@ -1578,45 +1493,6 @@ fn apply_probe_result_lww(
     });
     if dominates {
         let envelope = ProbeResultRowEnvelope::latest(incoming.clone());
-        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&envelope).map_err(map_to_io)?;
-        table.insert(key.as_slice(), bytes.as_ref()).map_err(map_to_io)?;
-    }
-    Ok(dominates)
-}
-
-/// LWW-guarded insert for `ServiceHydrationResultRow`. Keyed on
-/// `(service_id, fingerprint)` per architecture.md § 12. Mirrors the
-/// [`apply_alloc_status_lww`] / [`apply_node_health_lww`] shape. On
-/// envelope decode failure of the prior row, treats the incoming
-/// write as dominating per ADR-0048 § 3 (the operator's typed write
-/// is the self-healing path).
-fn apply_service_hydration_lww(
-    table: &mut Table<'_, &[u8], &[u8]>,
-    incoming: &ServiceHydrationResultRow,
-) -> Result<bool, ObservationStoreError> {
-    let key = encode_service_hydration_key(incoming.service_id, incoming.fingerprint);
-    let dominates = table.get(key.as_slice()).map_err(map_to_io)?.is_none_or(|prior| {
-        match decode_envelope::<ServiceHydrationResultRowEnvelope>(prior.value()) {
-            Ok(prior_row) => {
-                let accepted = incoming.updated_at.dominates(&prior_row.updated_at);
-                if !accepted {
-                    log_lww_reject(
-                        "service_hydration_results",
-                        &format!("{}/fp={}", incoming.service_id, incoming.fingerprint),
-                        &incoming.updated_at,
-                        &prior_row.updated_at,
-                    );
-                }
-                accepted
-            }
-            Err(_) => true,
-        }
-    });
-    if dominates {
-        // Wrap into the versioned envelope at the write boundary per
-        // ADR-0048 § 1 — the on-disk shape is the envelope, never the
-        // bare payload.
-        let envelope = ServiceHydrationResultRowEnvelope::latest(incoming.clone());
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&envelope).map_err(map_to_io)?;
         table.insert(key.as_slice(), bytes.as_ref()).map_err(map_to_io)?;
     }

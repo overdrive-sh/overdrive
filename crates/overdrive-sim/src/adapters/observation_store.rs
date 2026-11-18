@@ -58,7 +58,6 @@ use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 
 use overdrive_core::ca::issue_failure::SvidIssueFailure;
 use overdrive_core::ca::issued_certificate_row::IssuedCertificateRow;
-use overdrive_core::dataplane::fingerprint::BackendSetFingerprint;
 use overdrive_core::id::{
     AllocationId, CertSerial, CorrelationKey, IssuanceOrdinal, NodeId, ServiceId,
 };
@@ -70,7 +69,7 @@ use overdrive_core::traits::observation_store::{
     ALLOC_LIFECYCLE_OCCURRENCES_PER_ALLOC, AllocLifecycleOccurrenceRow, AllocLifecyclePredecessor,
     AllocStatusRow, LagAwareSubscription, LogicalTimestamp, NodeHealthRow, ObservationRow,
     ObservationStore, ObservationStoreError, ObservationWrite, ServiceBackendRow,
-    ServiceHydrationResultRow, SubscriptionEvent, TransitionSource, WorkloadSvidIssueStatusRowV1,
+    SubscriptionEvent, TransitionSource, WorkloadSvidIssueStatusRowV1,
 };
 use overdrive_core::workflow::{SignalKey, SignalValue, WorkflowStatus};
 
@@ -110,12 +109,6 @@ struct PeerState {
     rows: Mutex<Vec<ObservationRow>>,
     allocation_lifecycle: Mutex<AllocationLifecycleState>,
     by_node: Mutex<HashMap<NodeId, NodeHealthRow>>,
-    /// `service_hydration_results` LWW index — keyed on
-    /// `(service_id, fingerprint)` per architecture.md § 12. Phase 2.2
-    /// is single-writer (the action shim) so LWW collisions on the
-    /// same key are strictly idempotent.
-    by_service_hydration:
-        Mutex<BTreeMap<(ServiceId, BackendSetFingerprint), ServiceHydrationResultRow>>,
     /// `service_backends` LWW index — keyed on `ServiceId` alone.
     /// One row per service carrying the full current backend set.
     /// GH #160.
@@ -265,7 +258,6 @@ impl PeerState {
             rows: Mutex::new(Vec::new()),
             allocation_lifecycle: Mutex::new(AllocationLifecycleState::default()),
             by_node: Mutex::new(HashMap::new()),
-            by_service_hydration: Mutex::new(BTreeMap::new()),
             by_service_backends: Mutex::new(BTreeMap::new()),
             by_probe_results: Mutex::new(BTreeMap::new()),
             by_issued_certificate: Mutex::new(BTreeMap::new()),
@@ -290,7 +282,6 @@ impl PeerState {
         let row: ObservationRow = write.into();
         let accepted = match &row {
             ObservationRow::NodeHealth(incoming) => self.apply_node_health(incoming),
-            ObservationRow::ServiceHydration(incoming) => self.apply_service_hydration(incoming),
             ObservationRow::ServiceBackend(incoming) => self.apply_service_backends(incoming),
             ObservationRow::IssuedCertificate(incoming) => self.apply_issued_certificate(incoming),
             // `WorkflowTerminal` (ADR-0064 §2) — accept and fan out so the
@@ -432,36 +423,6 @@ impl PeerState {
             _ => {
                 index.insert(incoming.node_id.clone(), incoming.clone());
                 true
-            }
-        }
-    }
-
-    /// LWW merge for `service_hydration_results`. Keyed on
-    /// `(service_id, fingerprint)` — distinct backend sets land in
-    /// distinct rows; same `(service_id, fingerprint)` pair on a
-    /// later tick wins under [`LogicalTimestamp::dominates`].
-    fn apply_service_hydration(&self, incoming: &ServiceHydrationResultRow) -> bool {
-        let key = (incoming.service_id, incoming.fingerprint);
-        let mut by_sh = self.by_service_hydration.lock();
-        match by_sh.get(&key) {
-            None => {
-                by_sh.insert(key, incoming.clone());
-                drop(by_sh);
-                true
-            }
-            Some(existing) if incoming.updated_at.dominates(&existing.updated_at) => {
-                by_sh.insert(key, incoming.clone());
-                drop(by_sh);
-                true
-            }
-            Some(existing) => {
-                log_lww_reject(
-                    "service_hydration_results",
-                    &format!("{}/fp={}", incoming.service_id, incoming.fingerprint),
-                    &incoming.updated_at,
-                    &existing.updated_at,
-                );
-                false
             }
         }
     }
@@ -722,8 +683,7 @@ impl SimObservationStore {
     /// service-backend row reads, `service_backends_rows` and
     /// `all_service_backends_rows`. While armed each returns
     /// `ObservationStoreError::Unreachable` and observes no rows;
-    /// `service_hydration_results_rows`, allocation-status reads and every
-    /// write are unaffected. Models one reconciler family's enumeration read
+    /// allocation-status reads and every write are unaffected. Models one reconciler family's enumeration read
     /// failing while the rest of the observation store is healthy.
     pub fn script_service_rows_read_failure(&self, armed: bool) {
         self.inner.service_rows_read_failure.store(armed, std::sync::atomic::Ordering::SeqCst);
@@ -937,21 +897,6 @@ impl ObservationStore for SimObservationStore {
             allocated
         };
         Ok(IssuanceOrdinal::new(allocated))
-    }
-
-    async fn service_hydration_results_rows(
-        &self,
-        service_id: &ServiceId,
-    ) -> Result<Vec<ServiceHydrationResultRow>, ObservationStoreError> {
-        // LWW winners only, filtered by `service_id`. Iteration is
-        // deterministic via the `(ServiceId, BackendSetFingerprint)`
-        // key on the underlying `BTreeMap`.
-        let by_sh = self.inner.by_service_hydration.lock();
-        Ok(by_sh
-            .iter()
-            .filter(|((sid, _), _)| sid == service_id)
-            .map(|(_, row)| row.clone())
-            .collect())
     }
 
     async fn service_backends_rows(

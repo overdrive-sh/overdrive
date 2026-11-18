@@ -36,7 +36,6 @@ use crate::ca::issue_failure::SvidIssueFailure;
 use crate::ca::issued_certificate_row::IssuedCertificateRow;
 use crate::codec::{EnvelopeError, VersionedEnvelope};
 use crate::dataplane::backend_key::Proto;
-use crate::dataplane::fingerprint::BackendSetFingerprint;
 use crate::id::{
     AllocationId, CorrelationKey, IssuanceOrdinal, NodeId, Region, ServiceId, WorkloadId,
 };
@@ -573,91 +572,6 @@ impl From<&Listener> for ListenerRow {
 /// [`NodeHealthRowEnvelope::into_latest`].
 pub type NodeHealthRow = NodeHealthRowV1;
 
-/// Status of a service-hydration dispatch attempt — one source of
-/// truth per `service_hydration_results` row per
-/// `docs/feature/phase-2-xdp-service-map/design/architecture.md`
-/// §§ 7, 12.
-///
-/// `Completed` and `Failed` are the post-dispatch terminal-of-attempt
-/// rows the action shim writes from `Action::DataplaneUpdateService`.
-/// Per architecture.md § 7,
-/// the failure surface is observation, NOT a `TerminalCondition`
-/// claim — service hydration cannot terminate an allocation; this
-/// enum carries every dispatch outcome.
-///
-/// Variant ordering and discriminants are STABLE — additions are
-/// minor-version (per ADR-0037 K8s-Condition convention); reordering
-/// or removal is a major-version break that requires a new ADR.
-#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-pub enum ServiceHydrationStatus {
-    /// Dispatch returned `Ok(())` from `Dataplane::update_service`.
-    Completed {
-        /// Fingerprint of the `(vip, backends)` pair the dispatch
-        /// successfully applied.
-        fingerprint: BackendSetFingerprint,
-        /// Wall-clock snapshot at evaluation start (`tick.now_unix`)
-        /// — observation, not derived state, so the hydrator can
-        /// compare against `actual.fingerprint` at the next tick
-        /// without recomputing.
-        applied_at: UnixInstant,
-    },
-    /// Dispatch returned `Err(DataplaneError::*)`. The hydrator
-    /// reads this row at the next tick to decide whether to retry
-    /// (per its retry-budget policy in the typed View — Slice
-    /// 08-02).
-    Failed {
-        /// Fingerprint of the `(vip, backends)` pair the dispatch
-        /// attempted to apply.
-        fingerprint: BackendSetFingerprint,
-        /// Wall-clock snapshot at evaluation start (`tick.now_unix`).
-        failed_at: UnixInstant,
-        /// `Display::to_string(&err)` of the underlying
-        /// `DataplaneError`. Diagnostic-only; the hydrator does
-        /// not branch on this string (typed retry-budget policy
-        /// lives in the View per `.claude/rules/development.md`
-        /// § "Persist inputs, not derived state").
-        reason: String,
-    },
-}
-
-/// `service_hydration_results` row — observation surface for the
-/// `Action::DataplaneUpdateService` action shim per
-/// architecture.md § 7 *Failure surface* and § 12 *Schema*.
-///
-/// Written by the action shim on dispatch completion (`Completed`
-/// or `Failed`). It is a receipt of the last dispatch, not the
-/// resource: the hydrator reconciler does not read it. Its `actual`
-/// is the fingerprint read back from the programmed service map
-/// through `ProgrammedServiceView` (ADR-0299).
-///
-/// LWW key is `(service_id, fingerprint)` — content-hashed, so two
-/// writes for the same `(service_id, fingerprint)` are strictly
-/// idempotent under `LogicalTimestamp::dominates`.
-///
-/// # Schema evolution
-///
-/// Per ADR-0048 (`docs/product/architecture/adr-0048-rkyv-versioned-envelope.md`)
-/// this type is the **inner payload** of
-/// [`ServiceHydrationResultRowEnvelope`] under the UI-02 amendment
-/// alias-to-payload public API. rkyv archives are **fixed positional
-/// layouts** — appending a field to this struct shifts every
-/// subsequent offset and renders pre-existing bytes unreadable.
-/// Schema evolution at this boundary goes through a new envelope
-/// variant (`V2`, `V3`, …) added per the version-bump procedure in
-/// `.claude/rules/development.md` § "rkyv schema evolution"; existing
-/// `FIXTURE_V<N>` golden bytes are NEVER touched.
-///
-/// The embedded [`ServiceHydrationStatus`] enum stays **unwrapped**
-/// per ADR-0048 § 4 (additive variant additions on inner rkyv enums
-/// are the documented exception — `ServiceHydrationStatus`'s STABLE
-/// variant-ordering docstring is the structural commitment that
-/// keeps the inner-enum exception load-bearing).
-///
-/// Writers go through [`ServiceHydrationResultRow::latest`]
-/// (= [`ServiceHydrationResultRowEnvelope::latest`]); readers project
-/// through [`ServiceHydrationResultRowEnvelope::into_latest`].
-pub type ServiceHydrationResultRow = ServiceHydrationResultRowV1;
-
 /// `service_backends` row — the desired backend set for a service,
 /// written by the control plane when allocation status changes and
 /// read by the `ServiceMapHydrator` reconciler to hydrate `desired`
@@ -703,8 +617,7 @@ pub type ServiceBackendRow = ServiceBackendRowV1;
 /// ADR-0056 — the inline `Option<TerminalCondition>` footprint is
 /// dominated by `Stable { settled_in_ms: u64, witness: ProbeWitness }`.
 /// Leaving the variant unboxed would 6× the memory cost of every
-/// other variant in the enum (`NodeHealth`, `ServiceHydration`,
-/// `ServiceBackend`) because the enum's discriminant + slot is sized
+/// other variant in the enum (`NodeHealth`, `ServiceBackend`) because the enum's discriminant + slot is sized
 /// to its largest variant.
 ///
 /// The `Box` is a projection implementation detail. Accepted compound writes
@@ -717,12 +630,6 @@ pub type ServiceBackendRow = ServiceBackendRowV1;
 pub enum ObservationRow {
     AllocStatus(Box<AllocStatusRow>),
     NodeHealth(NodeHealthRow),
-    /// `service_hydration_results` row — written by the action shim
-    /// on `Action::DataplaneUpdateService` dispatch per
-    /// `docs/feature/phase-2-xdp-service-map/design/architecture.md`
-    /// §§ 7, 12. Read by the `ServiceMapHydrator` reconciler
-    /// (Slice 08-02).
-    ServiceHydration(ServiceHydrationResultRow),
     /// `service_backends` row — the desired backend set for a
     /// service. Read by the `ServiceMapHydrator` reconciler to
     /// hydrate `desired` state (GH #160).
@@ -801,7 +708,6 @@ pub enum ObservationRow {
 #[allow(clippy::large_enum_variant, reason = "exact DESIGN-pinned unboxed status-row variants")]
 pub enum ObservationWrite {
     NodeHealth(NodeHealthRow),
-    ServiceHydration(ServiceHydrationResultRow),
     ServiceBackend(ServiceBackendRow),
     IssuedCertificate(IssuedCertificateRow),
     WorkflowTerminal { correlation: CorrelationKey, status: crate::workflow::WorkflowStatus },
@@ -814,7 +720,6 @@ impl From<ObservationWrite> for ObservationRow {
     fn from(write: ObservationWrite) -> Self {
         match write {
             ObservationWrite::NodeHealth(row) => Self::NodeHealth(row),
-            ObservationWrite::ServiceHydration(row) => Self::ServiceHydration(row),
             ObservationWrite::ServiceBackend(row) => Self::ServiceBackend(row),
             ObservationWrite::IssuedCertificate(row) => Self::IssuedCertificate(row),
             ObservationWrite::WorkflowTerminal { correlation, status } => {
@@ -848,7 +753,7 @@ impl From<ObservationWrite> for ObservationRow {
 /// deliberately NOT shipped in ADR-0084 §2), a **complete discriminant of an
 /// existing closed enum is NOT speculative surface** — every variant already
 /// exists on [`ObservationRow`], so enumerating them is a total projection,
-/// not a forward bet. All ten variants are listed. Current Phase 1 allocation
+/// not a forward bet. All nine variants are listed. Current Phase 1 allocation
 /// consumers declare the kinds they consume: `ServiceLifecycle` declares
 /// `[AllocStatus, ProbeResult]`, while `WorkloadLifecycle` and
 /// `SvidLifecycle` retain `[AllocStatus]`.
@@ -858,8 +763,6 @@ pub enum ObservationRowKind {
     AllocStatus,
     /// [`ObservationRow::NodeHealth`] — node heartbeat rows.
     NodeHealth,
-    /// [`ObservationRow::ServiceHydration`] — dataplane hydration result rows.
-    ServiceHydration,
     /// [`ObservationRow::ServiceBackend`] — desired service backend-set rows.
     ServiceBackend,
     /// [`ObservationRow::IssuedCertificate`] — CA issuance audit rows.
@@ -887,7 +790,6 @@ impl ObservationRowKind {
         match self {
             Self::AllocStatus => "alloc-status",
             Self::NodeHealth => "node-health",
-            Self::ServiceHydration => "service-hydration",
             Self::ServiceBackend => "service-backend",
             Self::IssuedCertificate => "issued-certificate",
             Self::WorkflowTerminal => "workflow-terminal",
@@ -913,7 +815,6 @@ impl ObservationRow {
         match self {
             Self::AllocStatus(_) => ObservationRowKind::AllocStatus,
             Self::NodeHealth(_) => ObservationRowKind::NodeHealth,
-            Self::ServiceHydration(_) => ObservationRowKind::ServiceHydration,
             Self::ServiceBackend(_) => ObservationRowKind::ServiceBackend,
             Self::IssuedCertificate(_) => ObservationRowKind::IssuedCertificate,
             Self::WorkflowTerminal { .. } => ObservationRowKind::WorkflowTerminal,
@@ -1465,90 +1366,6 @@ impl VersionedEnvelope for NodeHealthRowEnvelope {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-pub enum ServiceHydrationResultRowEnvelope {
-    V1(ServiceHydrationResultRowV1),
-}
-
-pub type ServiceHydrationResultRowLatest = ServiceHydrationResultRowV1;
-
-// `pub` due to rustc E0446 in trait impl; Layer 1 enforced by
-// non-re-export from `lib.rs` + Layer 2 dst_lint scanner.
-#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-pub struct ServiceHydrationResultRowV1 {
-    /// Identity of the service whose backend set was being
-    /// rewritten. Maps 1:1 to a `MAGLEV_MAP` outer-map key.
-    pub service_id: ServiceId,
-    /// Fingerprint of the `(vip, backends)` pair the dispatch
-    /// applied (or attempted to apply on `Failed`). Forms the
-    /// secondary key under LWW so distinct backend sets land in
-    /// distinct rows.
-    pub fingerprint: BackendSetFingerprint,
-    /// Outcome of the dispatch attempt — see
-    /// [`ServiceHydrationStatus`]. The embedded enum stays
-    /// unwrapped per ADR-0048 § 4 (inner rkyv enum additive variant
-    /// additions are the documented exception).
-    pub status: ServiceHydrationStatus,
-    /// Lamport timestamp of this row. Same shape as
-    /// [`AllocStatusRow::updated_at`] — the action shim mints it with
-    /// [`LogicalTimestamp::dominating`], deriving the counter from the
-    /// prior row at this `(service_id, fingerprint)` key with the tick as
-    /// a floor, so successive writes for the key are strictly ordered
-    /// under LWW **including across a process restart** (ADR-0077 § D1).
-    pub updated_at: LogicalTimestamp,
-}
-
-impl VersionedEnvelope for ServiceHydrationResultRowEnvelope {
-    type Latest = ServiceHydrationResultRowV1;
-
-    fn latest(payload: Self::Latest) -> Self {
-        Self::V1(payload)
-    }
-
-    fn into_latest(self) -> Result<Self::Latest, EnvelopeError> {
-        match self {
-            Self::V1(v1) => Ok(v1),
-        }
-    }
-
-    /// Discriminant offset for `ServiceHydrationResultRowEnvelope`
-    /// archives, measured from the END of the archive bytes.
-    ///
-    /// Empirically determined against canonical V1 payloads of varying
-    /// `ServiceHydrationStatus` variants (`Completed` /
-    /// `Failed`), failure-reason string lengths (inline-vs-out-of-line
-    /// `ArchivedString` boundary at 8 bytes), and `writer: NodeId`
-    /// lengths: rkyv 0.8 places the outer enum's discriminant byte 80
-    /// bytes from the END of the archive, stable across all payload
-    /// sizes (the trailing "root" structure has a fixed 80-byte
-    /// footprint — 1B discriminant + 7B pad + 8B service_id + 8B
-    /// fingerprint + 24B status enum (1B inner-disc + 7B pad + 16B
-    /// payload max) + 8B counter + 16B writer ArchivedString + 8B
-    /// trailing alignment; only the leading slab — failure reason
-    /// strings and long writer NodeId payloads — grows with
-    /// variable-length data).
-    ///
-    /// Re-pin alongside the schema-evolution fixture at every
-    /// version-bump per
-    /// [`VersionedEnvelope::discriminant_offset_from_end`]'s
-    /// docstring.
-    fn discriminant_offset_from_end() -> Option<usize> {
-        Some(80)
-    }
-
-    fn known_discriminants() -> &'static [u8] {
-        // V1 carries rkyv discriminant 0 (declaration order — first
-        // variant). Empirically verified by archiving a canonical
-        // `ServiceHydrationResultRowEnvelope::latest(...)` and
-        // inspecting the byte at `bytes.len() - 80`.
-        &[0]
-    }
-
-    fn type_name() -> &'static str {
-        "ServiceHydrationResultRowEnvelope"
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum ServiceBackendRowEnvelope {
     V1(ServiceBackendRowV1),
 }
@@ -2016,28 +1833,6 @@ pub trait ObservationStore: Send + Sync + 'static {
     /// failure while allocating. On error, NO ordinal is allocated and the
     /// counter is unchanged (the advance is committed atomically or not at all).
     async fn next_issuance_ordinal(&self) -> Result<IssuanceOrdinal, ObservationStoreError>;
-
-    /// Read every LWW-winner `service_hydration_results` row for the
-    /// given [`ServiceId`]. Used by the `ServiceMapHydrator` reconciler
-    /// (Slice 08-02) to project the observation surface into `actual`
-    /// and detect convergence on `Completed { fingerprint ==
-    /// desired.fingerprint }`.
-    ///
-    /// Iteration order is deterministic — keyed by `(service_id,
-    /// fingerprint)` under the adapter's storage shape (e.g.
-    /// [`std::collections::BTreeMap`]). One row may exist per
-    /// `(service_id, fingerprint)`; the same `service_id` with a
-    /// different `fingerprint` lives in a distinct row (the secondary
-    /// key is the content-hashed fingerprint per architecture.md § 12).
-    ///
-    /// Per architecture.md § 12 the table is single-writer (the
-    /// action shim) and additive-only — a Phase 2 Corrosion-backed
-    /// implementation gossips rows under the same LWW semantics as
-    /// `alloc_status` and `node_health`.
-    async fn service_hydration_results_rows(
-        &self,
-        service_id: &ServiceId,
-    ) -> Result<Vec<ServiceHydrationResultRow>, ObservationStoreError>;
 
     /// Read the LWW-winner `service_backends` rows for the given
     /// [`ServiceId`]. Used by the `ServiceMapHydrator` reconciler

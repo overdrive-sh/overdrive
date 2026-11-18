@@ -57,7 +57,7 @@ use overdrive_core::traits::intent_store::{
     IntentStore, IntentStoreError, IntentSubscriptionEvent, PutOutcome, StateSnapshot, TxnOp,
     TxnOutcome,
 };
-use overdrive_core::traits::observation_store::{ObservationStore, ServiceHydrationStatus};
+use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::dataplane::SimDataplane;
 use overdrive_sim::adapters::driver::SimDriver;
@@ -85,6 +85,10 @@ const HANDOFF_ALLOWANCE: Duration = Duration::from_secs(10);
 /// a failed dataplane update is retried by this instant, well inside one
 /// period, so the retry cannot be the pass.
 const HYDRATOR_RETRY_BOUND: Duration = Duration::from_secs(10);
+
+/// Ticks that carry the hydrator from a published backend row to its first
+/// (failed) update, well inside its backoff.
+const UPDATE_ATTEMPT_TICKS: usize = 3;
 
 fn client_trusting(ca_pem: &str) -> reqwest::Client {
     let cert = reqwest::Certificate::from_pem(ca_pem.as_bytes()).expect("parse CA PEM");
@@ -616,7 +620,7 @@ async fn a_service_whose_view_write_failed_is_running_and_in_the_service_map_on_
 }
 
 /// Outcome anchor: OUT-RCG-FAILED-DATAPLANE-RETRIES-AFTER-BACKOFF
-/// Slice 01 AC3, feature delta D-3 — a `Failed` dataplane result inside the
+/// Slice 01 AC3, feature delta D-3 — a failed dataplane update inside the
 /// hydrator's backoff window is retried once the backoff elapses, with no
 /// backend-row write and without waiting for the pass.
 /// CONTRACT_SHAPE: bounded-change.
@@ -638,24 +642,21 @@ async fn a_service_whose_dataplane_update_failed_is_retried_after_its_backoff_wi
     ));
     node.deploy_service("checkout").await;
 
-    // AND the hydrator recorded the failed result.
+    // AND the hydrator attempted the update once the backend row existed: the
+    // scripted failure left the service map unprogrammed, inside the backoff.
     let mut service_id = None;
     for _ in 0..300 {
         advance_and_settle(&node.clock, TICK).await;
         let backends = node.obs().all_service_backends_rows().await.expect("read backend rows");
         if let Some(row) = backends.first() {
-            let results = node
-                .obs()
-                .service_hydration_results_rows(&row.service_id)
-                .await
-                .expect("read hydration results");
-            if results.iter().any(|r| matches!(r.status, ServiceHydrationStatus::Failed { .. })) {
-                service_id = Some(row.service_id);
-                break;
-            }
+            service_id = Some(row.service_id);
+            break;
         }
     }
-    let service_id = service_id.expect("precondition: the hydrator recorded the failed update");
+    let service_id = service_id.expect("precondition: the Service published a backend row");
+    for _ in 0..UPDATE_ATTEMPT_TICKS {
+        advance_and_settle(&node.clock, TICK).await;
+    }
     assert!(
         node.ports.dataplane.service_vip_keys().is_empty(),
         "precondition: the failed update left the service map unprogrammed"

@@ -629,8 +629,8 @@ fn action_terminal(action: &Action) -> Option<TerminalCondition> {
         | Action::RestartAllocation { .. }
         // phase-2-xdp-service-map (US-08; ADR-0042): the hydrator's
         // typed Action makes no terminal claim per architecture.md
-        // § 7 *Failure surface* — service hydration failures land
-        // in the `service_hydration_results` observation row, not on
+        // § 7 *Failure surface* — service hydration failures are
+        // logged as `dataplane.update_service.failed`, not carried on
         // `TerminalCondition`, preserving ADR-0037's "every terminal
         // claim has a single typed source" invariant.
         | Action::DataplaneUpdateService { .. }

@@ -205,7 +205,6 @@ pub trait VersionedEnvelope {
     // replacement bodies for this default. Every production
     // `VersionedEnvelope` impl (`JobEnvelope`,
     // `AllocStatusRowEnvelope`, `NodeHealthRowEnvelope`,
-    // `ServiceHydrationResultRowEnvelope`,
     // `ServiceBackendRowEnvelope`) overrides this method with the
     // empirically-pinned offset; the default's `None` return is
     // observable only from an envelope that does NOT override it. No

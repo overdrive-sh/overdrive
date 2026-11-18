@@ -1953,10 +1953,9 @@ fn collect_fixture_constants(source: &str) -> std::collections::BTreeSet<String>
 /// `snake_case` fixture-file stem, after stripping the trailing
 /// `Envelope` suffix.
 ///
-/// Examples (the load-bearing five today):
+/// Examples (the load-bearing four today):
 /// - `AllocStatusRowEnvelope`            → `alloc_status_row`
 /// - `NodeHealthRowEnvelope`             → `node_health_row`
-/// - `ServiceHydrationResultRowEnvelope` → `service_hydration_result_row`
 /// - `ServiceBackendRowEnvelope`         → `service_backend_row`
 /// - `JobEnvelope`                       → `job`
 ///
@@ -5023,7 +5022,7 @@ mod tests {
     // gate per ADR-0048 § 6).
     // -------------------------------------------------------------
 
-    /// Reference table for `envelope_name_to_snake_case` — the five
+    /// Reference table for `envelope_name_to_snake_case` — the four
     /// real envelopes today. Pins behavior so a future contributor
     /// adding `FooBarBazEnvelope` knows the expected fixture-file
     /// stem without re-reading the algorithm.
@@ -5031,10 +5030,6 @@ mod tests {
     fn envelope_name_to_snake_case_handles_real_envelopes() {
         assert_eq!(envelope_name_to_snake_case("AllocStatusRowEnvelope"), "alloc_status_row");
         assert_eq!(envelope_name_to_snake_case("NodeHealthRowEnvelope"), "node_health_row");
-        assert_eq!(
-            envelope_name_to_snake_case("ServiceHydrationResultRowEnvelope"),
-            "service_hydration_result_row",
-        );
         assert_eq!(envelope_name_to_snake_case("ServiceBackendRowEnvelope"), "service_backend_row");
         assert_eq!(envelope_name_to_snake_case("JobEnvelope"), "job");
     }
@@ -5164,10 +5159,9 @@ mod tests {
     }
 
     /// S-EV-06.4 — the real `overdrive-core` crate-root passes the
-    /// coverage gate. All five expected envelope types
+    /// coverage gate. All four expected envelope types
     /// (`AllocStatusRowEnvelope`, `NodeHealthRowEnvelope`,
-    /// `ServiceHydrationResultRowEnvelope`, `ServiceBackendRowEnvelope`,
-    /// `JobEnvelope`) are pinned by `FIXTURE_V1` constants in the
+    /// `ServiceBackendRowEnvelope`, `JobEnvelope`) are pinned by `FIXTURE_V1` constants in the
     /// matching `tests/schema_evolution/<envelope>.rs` files.
     #[test]
     fn s_ev_06_4_real_overdrive_core_passes() {

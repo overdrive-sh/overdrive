@@ -468,15 +468,6 @@ impl ObservationStore for RelistRecoversStore {
     ) -> Result<Option<overdrive_core::workflow::SignalValue>, ObservationStoreError> {
         self.inner.workflow_signal(key).await
     }
-    async fn service_hydration_results_rows(
-        &self,
-        service_id: &ServiceId,
-    ) -> Result<
-        Vec<overdrive_core::traits::observation_store::ServiceHydrationResultRow>,
-        ObservationStoreError,
-    > {
-        self.inner.service_hydration_results_rows(service_id).await
-    }
     async fn service_backends_rows(
         &self,
         service_id: &ServiceId,
@@ -690,15 +681,6 @@ impl ObservationStore for RelistFailsStore {
         key: &overdrive_core::workflow::SignalKey,
     ) -> Result<Option<overdrive_core::workflow::SignalValue>, ObservationStoreError> {
         self.inner.workflow_signal(key).await
-    }
-    async fn service_hydration_results_rows(
-        &self,
-        service_id: &ServiceId,
-    ) -> Result<
-        Vec<overdrive_core::traits::observation_store::ServiceHydrationResultRow>,
-        ObservationStoreError,
-    > {
-        self.inner.service_hydration_results_rows(service_id).await
     }
     async fn service_backends_rows(
         &self,
@@ -1002,15 +984,6 @@ impl ObservationStore for EndingStore {
         key: &overdrive_core::workflow::SignalKey,
     ) -> Result<Option<overdrive_core::workflow::SignalValue>, ObservationStoreError> {
         self.inner.workflow_signal(key).await
-    }
-    async fn service_hydration_results_rows(
-        &self,
-        service_id: &ServiceId,
-    ) -> Result<
-        Vec<overdrive_core::traits::observation_store::ServiceHydrationResultRow>,
-        ObservationStoreError,
-    > {
-        self.inner.service_hydration_results_rows(service_id).await
     }
     async fn service_backends_rows(
         &self,

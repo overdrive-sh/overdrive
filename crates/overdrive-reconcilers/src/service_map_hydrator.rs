@@ -5,8 +5,7 @@
 //! `ProgrammedServiceView` (the actual side: the fingerprint of the backend
 //! set the dataplane carries per service). Emits one
 //! `Action::DataplaneUpdateService` per service that is not in place. The
-//! executor's `service_hydration_results` row is a receipt the hydrator
-//! never reads.
+//! executor records no outcome row; a failed update is a logged event.
 //!
 //! Per ADR-0035/0036:
 //!
@@ -335,8 +334,7 @@ impl Reconciler for ServiceMapHydrator {
     /// Every `ServiceId` a deployed Service intent declares through an assigned
     /// VIP (the id `hydrate_desired` derives from VIP, port and protocol),
     /// unioned with every `ServiceId` that has a `service_backends` row (D-21).
-    /// A `service_hydration_results` row alone adds no target. A read failure
-    /// is the whole call's failure.
+    /// A read failure is the whole call's failure.
     async fn managed_targets(
         &self,
         ctx: &HydrationContext<'_>,

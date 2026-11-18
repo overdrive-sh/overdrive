@@ -292,7 +292,6 @@ exclude_re = [
     # unreachable from production code paths. Every production
     # `VersionedEnvelope` impl (`JobEnvelope`,
     # `AllocStatusRowEnvelope`, `NodeHealthRowEnvelope`,
-    # `ServiceHydrationResultRowEnvelope`,
     # `ServiceBackendRowEnvelope`) overrides
     # `discriminant_offset_from_end()`, `known_discriminants()`, and
     # `type_name()` with their empirically-pinned values; the

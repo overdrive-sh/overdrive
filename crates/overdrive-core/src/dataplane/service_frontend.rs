@@ -10,9 +10,9 @@
 //!
 //! - `new(vip, port, proto)` validates the VIP is IPv4 **at the
 //!   action-shim** (the existing operator-visible rejection site). On an
-//!   IPv6 `vip` it returns an [`IdParseError`] that the action-shim maps
-//!   to the existing operator-visible `Failed` observation row; IPv6 is
-//!   **not** demoted to a late opaque `DataplaneError`.
+//!   IPv6 `vip` it returns an [`IdParseError`] that the action-shim logs
+//!   as a failed update; IPv6 is **not** demoted to a late opaque
+//!   `DataplaneError`.
 //! - On success the embedded `ServiceVip` is guaranteed IPv4 by
 //!   construction; [`ServiceFrontend::vip_v4`] narrows infallibly
 //!   (`unreachable!` on the structurally-impossible V6 arm).
@@ -40,8 +40,8 @@ pub struct ServiceFrontend {
 
 impl ServiceFrontend {
     /// Fallible constructor — validates the VIP is IPv4. On an IPv6 `vip`
-    /// returns the [`IdParseError`] that the action-shim maps to the
-    /// existing operator-visible `Failed` observation row.
+    /// returns the [`IdParseError`] that the action-shim logs as a
+    /// failed update.
     ///
     /// # Errors
     ///
@@ -55,8 +55,8 @@ impl ServiceFrontend {
     ) -> Result<Self, IdParseError> {
         // V4-guaranteed-by-construction: reject IPv6 here so adapters may
         // narrow infallibly via `vip_v4()`. Per ADR-0060 D1a the rejection
-        // is structured (`IdParseError`) and surfaces as the existing
-        // operator-visible `Failed` row at the action-shim.
+        // is structured (`IdParseError`) and is logged as a failed
+        // update at the action-shim.
         match vip.try_as_ipv4() {
             Some(_) => Ok(Self { vip, port, proto }),
             None => Err(IdParseError::InvalidFormat {

@@ -5,8 +5,8 @@
 //! The hydrator's `actual` is the resource it manages: per service, the
 //! fingerprint of the backend set the dataplane has programmed
 //! (`BTreeMap<ServiceId, BackendSetFingerprint>`; a service with no entry has
-//! nothing programmed). The executor's `service_hydration_results` row is a
-//! receipt the hydrator never reads, so the state carries no result row.
+//! nothing programmed). The executor records no outcome row, so the state
+//! carries none.
 //!
 //! The diff is pure. A service is *in place* when its desired survivor set
 //! (the backends that pass the mesh gate) has a fingerprint equal to its

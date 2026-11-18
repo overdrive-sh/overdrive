@@ -450,9 +450,9 @@ mod harness_self_test {
     // depends on `discriminant_offset_from_end` returning `Some(N)`
     // with `N` empirically pinned per envelope shape, which the inline
     // `MockEnvelope` here does not provide. The helper's correctness
-    // is cross-validated by the 5 per-envelope call sites
+    // is cross-validated by the 4 per-envelope call sites
     // (`tests/schema_evolution/{alloc_status_row,job,node_health_row,
-    // service_backend_row,service_hydration_result_row}.rs`) — every
+    // service_backend_row}.rs`) — every
     // edit to the helper that regresses any one envelope fails its
     // dedicated `*_unknown_version_probe_surfaces` test. Adding a
     // tag-dedicated mock would either duplicate the per-envelope

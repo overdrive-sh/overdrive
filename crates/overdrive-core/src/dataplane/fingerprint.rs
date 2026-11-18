@@ -2,8 +2,7 @@
 //! &[Backend])` pair.
 //!
 //! Identifies a unique backend-set state for convergence detection
-//! in the `ServiceMapHydrator` reconciler and for LWW resolution in
-//! the `service_hydration_results` ObservationStore table per
+//! in the `ServiceMapHydrator` reconciler per
 //! `docs/feature/phase-2-xdp-service-map/design/architecture.md`
 //! § 6 *Type aliases*.
 //!

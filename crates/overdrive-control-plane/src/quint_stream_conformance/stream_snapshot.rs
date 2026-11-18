@@ -64,7 +64,7 @@ use overdrive_core::public_ingress::{
 use overdrive_core::traits::observation_store::WorkloadSvidIssueStatusRowV1;
 use overdrive_core::traits::observation_store::{
     AllocLifecycleOccurrenceRow, AllocStatusRow, LagAwareSubscription, NodeHealthRow,
-    ObservationWrite, ServiceBackendRow, ServiceHydrationResultRow, TransitionSource,
+    ObservationWrite, ServiceBackendRow, TransitionSource,
 };
 use overdrive_core::traits::observation_store::{
     AllocState, ObservationStore, ObservationStoreError,
@@ -233,13 +233,6 @@ impl ObservationStore for SnapshotReadGate {
 
     async fn next_issuance_ordinal(&self) -> StoreResult<IssuanceOrdinal, ObservationStoreError> {
         self.inner.next_issuance_ordinal().await
-    }
-
-    async fn service_hydration_results_rows(
-        &self,
-        service_id: &ServiceId,
-    ) -> StoreResult<Vec<ServiceHydrationResultRow>, ObservationStoreError> {
-        self.inner.service_hydration_results_rows(service_id).await
     }
 
     async fn service_backends_rows(

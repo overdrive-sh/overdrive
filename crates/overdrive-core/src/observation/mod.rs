@@ -3,7 +3,7 @@
 //!
 //! Phase 1 of this module hosts only `ProbeResultRow` (per ADR-0054
 //! §5). Other observation rows (`AllocStatusRow`, `NodeHealthRow`,
-//! `ServiceBackendRow`, `ServiceHydrationResultRow`) live in
+//! `ServiceBackendRow`) live in
 //! `crates/overdrive-core/src/traits/observation_store.rs` for
 //! historical reasons; future consolidation may move them here.
 //!

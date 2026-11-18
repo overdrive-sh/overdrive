@@ -4078,7 +4078,7 @@ async fn boot_server(
     // Phase 2.2: production single-mode uses a placeholder node id;
     // Phase 2 introduces real node-bootstrap identity that will replace
     // this. The shim writes this into `LogicalTimestamp.writer` on
-    // `service_hydration_results` rows.
+    // the observation rows it authors.
     let node_id = overdrive_core::id::NodeId::new("local").map_err(|e| {
         error::ControlPlaneError::Internal(format!("placeholder NodeId rejected: {e}"))
     })?;
@@ -5684,11 +5684,10 @@ pub fn vm_reclamation() -> overdrive_reconcilers::AnyReconciler {
 
 /// Construct the `service-map-hydrator` reconciler.
 ///
-/// Activates J-PLAT-004 per ADR-0042 — converges
-/// `service_hydration_results` rows by dispatching
-/// `Action::DataplaneUpdateService` whenever a service's published
-/// `(vip, backends)` fingerprint drifts from the last
-/// confirmed-applied fingerprint persisted in the hydrator's `View`.
+/// Activates J-PLAT-004 per ADR-0042 — converges the programmed service
+/// map by dispatching `Action::DataplaneUpdateService` whenever a
+/// service's published `(vip, backends)` fingerprint differs from the
+/// fingerprint the dataplane has programmed.
 ///
 /// Registered at production boot BEFORE `service-lifecycle`
 /// (the publisher re-enqueues this reconciler per the explicit

@@ -1899,8 +1899,7 @@ mod tests {
     };
     use overdrive_core::traits::observation_store::WorkloadSvidIssueStatusRowV1;
     use overdrive_core::traits::observation_store::{
-        LagAwareSubscription, NodeHealthRow, ObservationStoreError, ServiceHydrationResultRow,
-        SubscriptionEvent,
+        LagAwareSubscription, NodeHealthRow, ObservationStoreError, SubscriptionEvent,
     };
     use overdrive_core::workflow::{SignalKey, SignalValue, WorkflowStatus};
 
@@ -2133,13 +2132,6 @@ mod tests {
             &self,
         ) -> std::result::Result<IssuanceOrdinal, ObservationStoreError> {
             self.inner.next_issuance_ordinal().await
-        }
-
-        async fn service_hydration_results_rows(
-            &self,
-            service_id: &ServiceId,
-        ) -> std::result::Result<Vec<ServiceHydrationResultRow>, ObservationStoreError> {
-            self.inner.service_hydration_results_rows(service_id).await
         }
 
         async fn service_backends_rows(

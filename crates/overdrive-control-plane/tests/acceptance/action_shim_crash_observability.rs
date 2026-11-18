@@ -58,7 +58,7 @@ use overdrive_core::traits::observation_store::WorkloadSvidIssueStatusRowV1;
 use overdrive_core::traits::observation_store::{
     AllocLifecycleOccurrenceRow, AllocLifecyclePredecessor, AllocState, AllocStatusRow,
     LagAwareSubscription, LogicalTimestamp, NodeHealthRow, ObservationStore, ObservationStoreError,
-    ObservationWrite, ServiceBackendRow, ServiceHydrationResultRow, TransitionSource,
+    ObservationWrite, ServiceBackendRow, TransitionSource,
 };
 use overdrive_core::transition_reason::{TerminalCondition, TransitionReason};
 use overdrive_core::workflow::{SignalKey, SignalValue, WorkflowStatus};
@@ -612,13 +612,6 @@ impl ObservationStore for PendingTerminalObservationStore {
 
     async fn next_issuance_ordinal(&self) -> Result<IssuanceOrdinal, ObservationStoreError> {
         self.inner.next_issuance_ordinal().await
-    }
-
-    async fn service_hydration_results_rows(
-        &self,
-        service_id: &ServiceId,
-    ) -> Result<Vec<ServiceHydrationResultRow>, ObservationStoreError> {
-        self.inner.service_hydration_results_rows(service_id).await
     }
 
     async fn service_backends_rows(

@@ -34,7 +34,6 @@ mod schema_evolution {
     mod public_certified_key_status_row;
     mod public_route_set;
     mod service_backend_row;
-    mod service_hydration_result_row;
     mod service_spec;
     mod workload_intent;
     mod workload_svid_issue_status_row;

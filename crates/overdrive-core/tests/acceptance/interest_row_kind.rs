@@ -8,7 +8,7 @@
 //! internal state is peeked.
 //!
 //! * **S-266-11** — `ObservationRow::kind()` is a TOTAL, no-wildcard
-//!   discriminant projection: each `ObservationRow` variant in the table (8 of the 10) maps
+//!   discriminant projection: each `ObservationRow` variant in the table (7 of the 9) maps
 //!   to its matching `ObservationRowKind`. Driven as a table over those variants
 //!   (closed-world finite → parametrize, NOT PBT — the falsifier gate). Every
 //!   match arm is the mutation surface: mutating an arm to the wrong
@@ -18,7 +18,7 @@
 //!
 //! The design's "a new `ObservationRow` variant must FAIL compilation until
 //! consciously mapped" companion is enforced STRUCTURALLY by the no-wildcard
-//! total `match self` in `ObservationRow::kind()` itself: adding an 11th
+//! total `match self` in `ObservationRow::kind()` itself: adding a 10th
 //! `ObservationRow` variant makes that match non-exhaustive and yields rustc
 //! `E0004` at `overdrive-core` compile time — the same drift-closure a
 //! `trybuild` fixture would re-demonstrate, now owned by the type that owns
@@ -27,7 +27,7 @@
 //! editing the out-of-scope `tests/compile_fail.rs` entrypoint plus committing
 //! a brittle `.stderr` snapshot, and ADR-0084 forbids a new dependency for
 //! this step. The `kind_table_covers_every_variant` belt-and-braces assertion
-//! below pins that the table keeps its 8 rows, so a table that silently drops a
+//! below pins that the table keeps its 7 rows, so a table that silently drops a
 //! row fails too.
 
 #![allow(clippy::doc_markdown, clippy::expect_used)]
@@ -47,7 +47,7 @@ use overdrive_core::id::{
 use overdrive_core::observation::{ProbeIdx, ProbeResultRow, ProbeRole, ProbeStatus};
 use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRow, LogicalTimestamp, NodeHealthRow, ObservationRow,
-    ObservationRowKind, ServiceBackendRow, ServiceHydrationResultRow, ServiceHydrationStatus,
+    ObservationRowKind, ServiceBackendRow,
 };
 use overdrive_core::workflow::{SignalKey, SignalValue, WorkflowStatus};
 
@@ -94,19 +94,6 @@ fn node_health_row() -> NodeHealthRow {
         node_id: nid("cp-0"),
         region: Region::from_str("local").expect("region is valid"),
         last_heartbeat: ts(),
-    }
-}
-
-fn service_hydration_row() -> ServiceHydrationResultRow {
-    ServiceHydrationResultRow {
-        service_id: service_id(),
-        // `BackendSetFingerprint` is a `u64` type alias.
-        fingerprint: 0,
-        status: ServiceHydrationStatus::Completed {
-            fingerprint: 0,
-            applied_at: UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000)),
-        },
-        updated_at: ts(),
     }
 }
 
@@ -168,7 +155,7 @@ fn probe_result_row() -> ProbeResultRow {
 // S-266-11 — ObservationRow::kind(): total, no-wildcard discriminant
 // ---------------------------------------------------------------------------
 
-/// The full closed-world table: the 8 `ObservationRow` variants this table covers
+/// The full closed-world table: the 7 `ObservationRow` variants this table covers
 /// paired with its expected `ObservationRowKind`.
 fn kind_table() -> Vec<(&'static str, ObservationRow, ObservationRowKind)> {
     vec![
@@ -181,11 +168,6 @@ fn kind_table() -> Vec<(&'static str, ObservationRow, ObservationRowKind)> {
             "NodeHealth",
             ObservationRow::NodeHealth(node_health_row()),
             ObservationRowKind::NodeHealth,
-        ),
-        (
-            "ServiceHydration",
-            ObservationRow::ServiceHydration(service_hydration_row()),
-            ObservationRowKind::ServiceHydration,
         ),
         (
             "ServiceBackend",
@@ -210,7 +192,7 @@ fn kind_table() -> Vec<(&'static str, ObservationRow, ObservationRowKind)> {
 /// S-266-11 — `row.kind()` maps EACH `ObservationRow` variant in the table to
 /// its matching `ObservationRowKind`.
 ///
-/// Parametrized over the table's 8 variants (closed-world finite → table, NOT PBT).
+/// Parametrized over the table's 7 variants (closed-world finite → table, NOT PBT).
 /// Mutation target: EVERY match arm — mutating any arm to the wrong
 /// `ObservationRowKind` (or collapsing two families onto one kind) breaks the
 /// exact per-variant equality below.
@@ -227,9 +209,9 @@ fn kind_maps_each_observation_row_variant_exhaustively() {
     }
 }
 
-/// The table's 8 variants map to 8 PAIRWISE-DISTINCT kinds. Complements the
+/// The table's 7 variants map to 7 PAIRWISE-DISTINCT kinds. Complements the
 /// per-variant table: a mutation that points two arms at the same
-/// `ObservationRowKind` collapses the distinct-count below 8 and is caught
+/// `ObservationRowKind` collapses the distinct-count below 7 and is caught
 /// here as well as by the per-variant equality above.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
@@ -240,20 +222,20 @@ fn kind_projects_each_variant_to_a_distinct_kind() {
     kinds.dedup();
     assert_eq!(
         kinds.len(),
-        8,
-        "the 8 tabled ObservationRow variants must project to 8 distinct ObservationRowKind values",
+        7,
+        "the 7 tabled ObservationRow variants must project to 7 distinct ObservationRowKind values",
     );
 }
 
-/// Belt-and-braces for the drift-closure: counts the table's rows (8 of the
-/// 10 `ObservationRow` variants). A table that silently drops a row fails
+/// Belt-and-braces for the drift-closure: counts the table's rows (7 of the
+/// 9 `ObservationRow` variants). A table that silently drops a row fails
 /// here, complementing the compile-time
 /// exhaustiveness the no-wildcard total `match self` in `ObservationRow::kind`
 /// enforces (see the module docstring's compile-fail companion note).
 /// CONTRACT_SHAPE: pure-function.
 #[test]
 fn kind_table_covers_every_variant() {
-    assert_eq!(kind_table().len(), 8, "the kind table must keep its 8 rows");
+    assert_eq!(kind_table().len(), 7, "the kind table must keep its 7 rows");
 }
 
 // ---------------------------------------------------------------------------
@@ -270,7 +252,6 @@ fn kind_table_covers_every_variant() {
 fn observation_row_kind_as_str_is_canonical_kebab_label() {
     assert_eq!(ObservationRowKind::AllocStatus.as_str(), "alloc-status");
     assert_eq!(ObservationRowKind::NodeHealth.as_str(), "node-health");
-    assert_eq!(ObservationRowKind::ServiceHydration.as_str(), "service-hydration");
     assert_eq!(ObservationRowKind::ServiceBackend.as_str(), "service-backend");
     assert_eq!(ObservationRowKind::IssuedCertificate.as_str(), "issued-certificate");
     assert_eq!(ObservationRowKind::WorkflowTerminal.as_str(), "workflow-terminal");

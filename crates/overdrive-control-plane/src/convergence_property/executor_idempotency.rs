@@ -187,15 +187,7 @@ fn applying_the_hydrators_dataplane_update_twice_equals_applying_it_once() {
     async fn observe(world: Arc<Composed>) -> String {
         let rows = world.obs.all_service_backends_rows().await.expect("rows");
         let row = rows.first().expect("backend row").clone();
-        let results: Vec<String> = world
-            .obs
-            .service_hydration_results_rows(&row.service_id)
-            .await
-            .expect("results")
-            .into_iter()
-            .map(|r| format!("{:?}/{:?}", r.fingerprint, std::mem::discriminant(&r.status)))
-            .collect();
-        format!("{:?} | {results:?}", world.dataplane.service_backends(row.vip))
+        format!("{:?}", world.dataplane.service_backends(row.vip))
     }
     runtime().block_on(assert_apply_twice_equals_apply_once(
         "service-map-hydrator",
