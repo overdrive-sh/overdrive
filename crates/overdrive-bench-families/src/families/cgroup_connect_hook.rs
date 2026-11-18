@@ -41,6 +41,18 @@ static FIXTURE_SEQUENCE: AtomicU32 = AtomicU32::new(0);
     bpf_stats,
     metric(name = "hook_ns_per_connect", unit = ns, table = "hook-time"),
     metric(name = "wall_ns_per_connect", unit = ns, table = "wall-time"),
+    reference(
+        metric = "hook_ns_per_connect",
+        value = 137.6249,
+        label = "spike evidence, different run, gateway-hook median",
+        source = "spike-scratch/pig-connect-cost/results/cgroup-connect-hook/112c3104a22101479a180f5c/report.md"
+    ),
+    reference(
+        metric = "wall_ns_per_connect",
+        value = 185.6735,
+        label = "spike evidence, different run, gateway-hook minus no-hook delta",
+        source = "spike-scratch/pig-connect-cost/results/cgroup-connect-hook/112c3104a22101479a180f5c/report.md"
+    ),
     smoke(guest = "cgroup-default"),
 )]
 fn connect_hook_cost(rep: &mut Replicate) -> Result<(), ReplicateFailure> {
