@@ -60,9 +60,7 @@ const fn status(error: &Error) -> u8 {
     }
 }
 
-/// The error and, for an I/O failure, its cause: the `Display` of `Error::Record` names the
-/// path and the cause is its source.
+/// The error as one line: the `Display` of `Error::Record` already names the path and its cause.
 fn describe(error: &Error) -> String {
-    std::error::Error::source(error)
-        .map_or_else(|| error.to_string(), |source| format!("{error}: {source}"))
+    error.to_string()
 }

@@ -161,6 +161,7 @@ impl Replicate {
     /// of a `series` metric, is a failure.
     pub fn record(&mut self, metric: &str, value: f64) -> Result<(), ReplicateFailure> {
         self.require_shape(metric, false)?;
+        require_storable(metric, value)?;
         self.set_once(metric, Entry::Scalar(value))
     }
 
@@ -168,6 +169,9 @@ impl Replicate {
     /// metric is a failure.
     pub fn record_series(&mut self, metric: &str, values: &[f64]) -> Result<(), ReplicateFailure> {
         self.require_shape(metric, true)?;
+        for value in values {
+            require_storable(metric, *value)?;
+        }
         match self.entries.get_mut(metric) {
             None => {
                 self.entries.insert(metric.to_owned(), Entry::Series(values.to_vec()));
@@ -295,6 +299,13 @@ impl Replicate {
     }
 }
 
+/// A negative, NaN or infinite value is a measurement failure (DDD-5 item 1).
+fn require_storable(metric: &str, value: f64) -> Result<(), ReplicateFailure> {
+    storable(value)
+        .map(drop)
+        .map_err(|refused| ReplicateFailure::measurement(&format!("metric `{metric}`: {refused}")))
+}
+
 fn already_holds(metric: &str) -> ReplicateFailure {
     ReplicateFailure::measurement(&format!(
         "metric `{metric}` already holds a value in this replicate"
@@ -344,7 +355,12 @@ pub fn smoke(decl: &BenchmarkDecl) {
     for profile in profiles {
         for arm in decl.arms {
             let mut replicate = Replicate::new(decl, arm, profile, None);
-            if let Err(failure) = (decl.run)(&mut replicate) {
+            let outcome = (decl.run)(&mut replicate);
+            let failure = outcome
+                .err()
+                .map(|failure| failure.to_string())
+                .or_else(|| replicate.finish().failure);
+            if let Some(failure) = failure {
                 panic!(
                     "benchmark `{}` (family `{}`) failed its smoke run, profile `{profile}` arm `{arm}`: {failure}",
                     decl.benchmark, decl.family
@@ -470,6 +486,25 @@ mod tests {
             replicate.record("scalar", 1.0)
         }
         smoke(&decl(body));
+    }
+
+    #[test]
+    fn a_negative_nan_or_infinite_value_is_refused_when_recorded() {
+        let mut replicate = replicate();
+        for value in [-1.0, f64::NAN, f64::INFINITY] {
+            assert!(replicate.record("scalar", value).is_err());
+            assert!(replicate.record_series("stream", &[1.0, value]).is_err());
+        }
+        assert!(replicate.entries.is_empty());
+    }
+
+    #[test]
+    #[should_panic(expected = "failed its smoke run")]
+    fn smoke_fails_a_body_that_records_an_empty_series() {
+        fn empty(replicate: &mut Replicate) -> Result<(), ReplicateFailure> {
+            replicate.record_series("stream", &[])
+        }
+        smoke(&decl(empty));
     }
 
     #[test]

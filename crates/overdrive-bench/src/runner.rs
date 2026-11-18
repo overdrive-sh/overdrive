@@ -53,7 +53,11 @@ pub const fn exit_status(error: &Error) -> u8 {
     match error {
         Error::Usage { .. } | Error::FamilyNotDeclared { .. } => 64,
         Error::Refused { .. } | Error::Unreadable { .. } => 78,
-        Error::StatsEnable { .. } | Error::Record { .. } | Error::InvalidRecord { .. } => 70,
+        Error::StatsEnable { .. }
+        | Error::Record { .. }
+        | Error::Canary { .. }
+        | Error::Stdout { .. }
+        | Error::InvalidRecord { .. } => 70,
     }
 }
 
@@ -64,6 +68,10 @@ fn diagnostic(error: &Error) -> String {
             format!("bench: refused: {setting}: found {found}, pinned {pinned}")
         }
         Error::Unreadable { setting, source } => format!("bench: refused: {setting}: {source}"),
+        // These Display texts already carry their cause.
+        Error::Record { .. } | Error::Canary { .. } | Error::Stdout { .. } => {
+            format!("bench: {error}")
+        }
         other => std::error::Error::source(other)
             .map_or_else(|| format!("bench: {other}"), |cause| format!("bench: {other}: {cause}")),
     }
@@ -316,9 +324,9 @@ impl Runner<'_> {
         let mode = if hold.is_some() { BpfStatsMode::PerProcess } else { BpfStatsMode::Off };
         record.append(&Line::RunStarted(Box::new(start.line(mode))))?;
 
-        self.canary_samples(&mut record, CanaryPhase::Start, &dir)?;
+        self.canary_samples(&mut record, CanaryPhase::Start)?;
         let counts = execute(decl, environment.seed, hold.as_ref(), &mut record)?;
-        self.canary_samples(&mut record, CanaryPhase::End, &dir)?;
+        self.canary_samples(&mut record, CanaryPhase::End)?;
         record.append(&Line::RunFinished(RunFinished {
             finished: now(),
             replicates_ok: counts.ok,
@@ -339,7 +347,7 @@ impl Runner<'_> {
         let relative = dir.strip_prefix(source_root).unwrap_or(dir);
         writeln!(self.stdout, "{RESULT_DIR_LINE}{}", relative.display())
             .and_then(|()| self.stdout.flush())
-            .map_err(|source| Error::Record { path: path.clone(), source })?;
+            .map_err(|source| Error::Stdout { source })?;
         Ok(RecordWriter::new(out, path))
     }
 
@@ -347,18 +355,10 @@ impl Runner<'_> {
         &mut self,
         record: &mut RecordWriter<Box<dyn Write>>,
         phase: CanaryPhase,
-        dir: &Path,
     ) -> Result<()> {
         let mut samples_ns = Vec::with_capacity(CANARY_SAMPLES);
         for _ in 0..CANARY_SAMPLES {
-            let sample = self.canary.sample().map_err(|source| Error::Record {
-                path: dir.join(RECORD_FILE),
-                source: io::Error::new(
-                    source.kind(),
-                    format!("the loopback canary failed: {source}"),
-                ),
-            })?;
-            samples_ns.push(sample);
+            samples_ns.push(self.canary.sample().map_err(|source| Error::Canary { source })?);
         }
         record.append(&Line::Canary(Canary { phase, samples_ns }))
     }
@@ -760,6 +760,8 @@ mod tests {
                 70,
             ),
             (Error::Record { path: PathBuf::new(), source: io() }, 70),
+            (Error::Canary { source: io() }, 70),
+            (Error::Stdout { source: io() }, 70),
         ];
         for (error, status) in statuses {
             assert_eq!(exit_status(&error), status, "{error:?}");

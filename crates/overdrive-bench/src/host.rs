@@ -49,8 +49,8 @@ pub struct ProcSysProbe;
 
 impl HostProbe for ProcSysProbe {
     fn probe(&self) -> io::Result<()> {
-        // The descriptor scan is the setting a missing /proc would silently blind: prove the
-        // scan can enumerate processes, and that this process's own descriptors are visible.
+        // The descriptor scan is the setting a missing /proc would silently blind: prove that
+        // /proc is mounted and this process can enumerate its own descriptor directory.
         std::fs::read_dir("/proc/self/fd")?.try_for_each(|entry| entry.map(drop))
     }
 

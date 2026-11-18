@@ -48,7 +48,7 @@ pub struct StatsError {
 }
 
 impl BpfStatsHold {
-    pub const fn new(descriptor: OwnedFd) -> Self {
+    pub(crate) const fn new(descriptor: OwnedFd) -> Self {
         Self { _descriptor: descriptor, reads: Mutex::new(Vec::new()) }
     }
 
@@ -76,7 +76,7 @@ impl BpfStatsHold {
     }
 
     /// The reads made since the last call, oldest first.
-    pub fn take_reads(&self) -> Vec<(u32, RunStats)> {
+    pub(crate) fn take_reads(&self) -> Vec<(u32, RunStats)> {
         std::mem::take(&mut *self.reads.lock().unwrap_or_else(std::sync::PoisonError::into_inner))
     }
 }

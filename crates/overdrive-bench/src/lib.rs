@@ -65,9 +65,19 @@ pub enum Error {
         #[source]
         source: aya::sys::SyscallError,
     },
-    #[error("record {path:?} failed")]
+    #[error("cannot write benchmark record {}: {source}", path.display())]
     Record {
         path: std::path::PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("the loopback canary failed: {source}")]
+    Canary {
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("cannot write the result-directory line to stdout: {source}")]
+    Stdout {
         #[source]
         source: std::io::Error,
     },
