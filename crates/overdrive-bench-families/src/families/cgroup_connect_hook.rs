@@ -71,13 +71,13 @@ fn connect_hook_cost(rep: &mut Replicate) -> Result<(), ReplicateFailure> {
     for _ in 0..WARMUP_CONNECTS {
         fixture.connect_and_close()?;
     }
-    let start = read_stats(rep, gateway, no_hook)?;
+    let start = if no_hook { None } else { read_stats(rep, gateway)? };
     let began = rep.clock().now();
     for _ in 0..TIMED_CONNECTS {
         fixture.connect_and_close()?;
     }
     let wall = rep.clock().now().duration_since(began);
-    let end = read_stats(rep, gateway, no_hook)?;
+    let end = if no_hook { None } else { read_stats(rep, gateway)? };
 
     #[allow(
         clippy::cast_precision_loss,
@@ -86,7 +86,7 @@ fn connect_hook_cost(rep: &mut Replicate) -> Result<(), ReplicateFailure> {
     rep.record("wall_ns_per_connect", wall.as_nanos() as f64 / f64::from(TIMED_CONNECTS))?;
     match (no_hook, start, end) {
         (true, ..) => rep.record_absent("hook_ns_per_connect", NO_HOOK_REASON)?,
-        (false, Some(start), Some(end)) => rep.record("hook_ns_per_connect", hook_ns(&start, &end))?,
+        (false, Some(start), Some(end)) => rep.record("hook_ns_per_connect", hook_ns(&start, &end)?)?,
         (false, ..) => {
             rep.record_absent("hook_ns_per_connect", "BPF statistics are not held under smoke")?;
         }
@@ -99,13 +99,12 @@ fn fail(message: &str) -> ReplicateFailure {
 }
 
 /// Reads the cumulative statistics of the gateway program; `None` when no statistics are held
-/// or the arm has no program attached to read.
+/// (smoke).
 fn read_stats(
     rep: &Replicate,
     program: u32,
-    no_hook: bool,
 ) -> Result<Option<overdrive_bench::RunStats>, ReplicateFailure> {
-    let Some(hold) = rep.bpf_stats().filter(|_| !no_hook) else {
+    let Some(hold) = rep.bpf_stats() else {
         return Ok(None);
     };
     hold.read(program)
@@ -113,12 +112,21 @@ fn read_stats(
         .map_err(|error| ReplicateFailure::measurement(&error.to_string()))
 }
 
-/// The program's `run_time_ns` delta over its `run_count` delta.
+/// The program's `run_time_ns` delta over its `run_count` delta; a run count that did not
+/// advance fails the replicate rather than recording a value.
 #[allow(clippy::cast_precision_loss, reason = "per-loop nanosecond totals are far below 2^52")]
-fn hook_ns(start: &overdrive_bench::RunStats, end: &overdrive_bench::RunStats) -> f64 {
+fn hook_ns(
+    start: &overdrive_bench::RunStats,
+    end: &overdrive_bench::RunStats,
+) -> Result<f64, ReplicateFailure> {
     let time = end.run_time_ns.saturating_sub(start.run_time_ns);
-    let count = end.run_count.saturating_sub(start.run_count).max(1);
-    time as f64 / count as f64
+    let count = end.run_count.saturating_sub(start.run_count);
+    if count == 0 {
+        return Err(ReplicateFailure::measurement(
+            "the gateway connect program's run count did not advance over the timed loop (zero run-count delta)",
+        ));
+    }
+    Ok(time as f64 / count as f64)
 }
 
 /// A raw `bpf(2)` command with `attr` as its argument block.
