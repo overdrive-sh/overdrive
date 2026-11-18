@@ -22,7 +22,7 @@ use futures::StreamExt;
 use futures::future::join_all;
 use overdrive_bench::{HostClock, HostInstant, Replicate, ReplicateFailure};
 use overdrive_cli::commands::deploy::{DeployArgs, StopArgs, deploy, stop};
-use overdrive_cli::commands::serve::{ServeArgs, run_with_adapters};
+use overdrive_cli::commands::serve::{ServeArgs, ServeHandle, run_with_adapters};
 use overdrive_control_plane::{NodeAdapters, VmCapability};
 use overdrive_core::guest_transport::{GuestCid, NodeVsockPortConfig};
 use overdrive_core::traits::observation_store::{
@@ -100,10 +100,15 @@ fn vm_lifecycle_stages(rep: &mut Replicate) -> Result<(), ReplicateFailure> {
     let image = image()?;
     let trace = Arc::new(Trace::default());
     activate_sink(&trace);
-    let outcome = replicate(rep, shape, image, &trace);
+    let replicated = replicate(rep, shape, image, &trace);
     deactivate_sink();
-    let cycles = outcome?;
-    record_cycles(rep, &cycles)
+    let Replicated { cycles, teardown } = replicated?;
+    let recorded = cycles.and_then(|cycles| record_cycles(rep, &cycles));
+    match (recorded, teardown) {
+        (recorded, Ok(())) => recorded,
+        (Ok(()), Err(teardown)) => Err(teardown),
+        (Err(recording), Err(teardown)) => Err(fail(&format!("{recording}; {teardown}"))),
+    }
 }
 
 fn fail(message: &str) -> ReplicateFailure {
@@ -481,31 +486,38 @@ struct Cycle {
     deploy_error: Option<String>,
 }
 
+/// What one replicate's serve produced and how its shutdown went; both are reported, so a
+/// failed shutdown never discards what was measured and a failed measurement never hides a
+/// failed shutdown.
+struct Replicated {
+    cycles: Result<Vec<CycleOutcome>, ReplicateFailure>,
+    teardown: Result<(), ReplicateFailure>,
+}
+
 fn replicate(
     rep: &mut Replicate,
     shape: Shape,
     fixture: &Fixture,
     trace: &Arc<Trace>,
-) -> Result<Vec<CycleOutcome>, ReplicateFailure> {
-    prepare_cache(shape, fixture)?;
+) -> Result<Replicated, ReplicateFailure> {
     rep.note("cache_state", shape.cache_state());
-    rep.note(
-        "vm_resources",
-        &format!("cpu_milli={VM_CPU_MILLI} memory_bytes={VM_MEMORY_BYTES}, one vCPU-share per VM"),
-    );
+    rep.note("vm_resources", &format!("cpu_milli={VM_CPU_MILLI} memory_bytes={VM_MEMORY_BYTES}"));
     rep.note("concurrency", &shape.concurrency.to_string());
     let version =
         rep.exec(&fixture.kit.cloud_hypervisor_bin.display().to_string(), &["--version"])?;
-    rep.note("cloud_hypervisor_version", version.trim());
+    rep.note("cloud_hypervisor_version", version.lines().next().unwrap_or_default().trim());
     let kernel = rep.exec("uname", &["-r"])?;
     rep.note("host_kernel", kernel.trim());
 
+    let node = NodeDir::prepare(shape, fixture)?;
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
         .enable_all()
         .build()
         .map_err(|error| fail(&format!("the benchmark runtime could not start: {error}")))?;
-    runtime.block_on(drive(shape, fixture, trace))
+    // Last before the run: the probes above read the VMM binary and must not warm a cold replicate.
+    prepare_cache(shape, fixture)?;
+    Ok(runtime.block_on(drive(&node, trace)))
 }
 
 fn prepare_cache(shape: Shape, fixture: &Fixture) -> Result<(), ReplicateFailure> {
@@ -518,70 +530,128 @@ fn prepare_cache(shape: Shape, fixture: &Fixture) -> Result<(), ReplicateFailure
                 .map_err(|error| fail(&format!("dropping the page cache failed: {error}")))
         }
         Cache::Warm => {
-            let mut file = std::fs::File::open(&fixture.image.rootfs)
-                .map_err(|error| fail(&format!("opening the image failed: {error}")))?;
-            std::io::copy(&mut file, &mut std::io::sink())
-                .map(drop)
-                .map_err(|error| fail(&format!("reading the image through failed: {error}")))
+            for path in [&fixture.image.rootfs, &fixture.kit.kernel_path] {
+                let mut file = std::fs::File::open(path).map_err(|error| {
+                    fail(&format!("opening {} failed: {error}", path.display()))
+                })?;
+                std::io::copy(&mut file, &mut std::io::sink()).map(drop).map_err(|error| {
+                    fail(&format!("reading {} through failed: {error}", path.display()))
+                })?;
+            }
+            Ok(())
         }
     }
 }
 
-async fn drive(
-    shape: Shape,
-    fixture: &Fixture,
-    trace: &Arc<Trace>,
-) -> Result<Vec<CycleOutcome>, ReplicateFailure> {
-    let staging = default_staging_root();
-    let directory = tempfile::Builder::new()
-        .prefix("nbp-vm-lifecycle-")
-        .tempdir_in(&staging)
-        .map_err(|error| fail(&format!("the node directory could not be created: {error}")))?;
-    std::fs::set_permissions(directory.path(), std::fs::Permissions::from_mode(0o755))
-        .map_err(|error| fail(&format!("opening the node directory failed: {error}")))?;
-    let data_dir = directory.path().join("data");
-    let config_dir = directory.path().join("conf");
-    for path in [&data_dir, &config_dir] {
-        std::fs::create_dir_all(path)
-            .map_err(|error| fail(&format!("creating {}: {error}", path.display())))?;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755))
-            .map_err(|error| fail(&format!("opening {}: {error}", path.display())))?;
+/// The node's directories and the service specs of one replicate, written before the runtime
+/// starts so no blocking file call runs inside an async context.
+struct NodeDir {
+    /// Held so the directory is removed when the replicate ends.
+    _directory: tempfile::TempDir,
+    data_dir: PathBuf,
+    config_dir: PathBuf,
+    specs: Vec<(String, PathBuf)>,
+}
+
+impl NodeDir {
+    fn prepare(shape: Shape, fixture: &Fixture) -> Result<Self, ReplicateFailure> {
+        let directory = tempfile::Builder::new()
+            .prefix("nbp-vm-lifecycle-")
+            .tempdir_in(default_staging_root())
+            .map_err(|error| fail(&format!("the node directory could not be created: {error}")))?;
+        open_to_the_vmm_identity(directory.path())?;
+        let data_dir = directory.path().join("data");
+        let config_dir = directory.path().join("conf");
+        for path in [&data_dir, &config_dir] {
+            std::fs::create_dir_all(path)
+                .map_err(|error| fail(&format!("creating {}: {error}", path.display())))?;
+            open_to_the_vmm_identity(path)?;
+        }
+        let command =
+            if shape.ignores_stop { subcommand::LISTEN_IGNORING_STOP } else { subcommand::LISTEN };
+        let mut specs: Vec<(String, PathBuf)> = Vec::with_capacity(shape.concurrency);
+        for index in 0..shape.concurrency {
+            let id = format!("nbp-vl-{index}");
+            let spec = directory.path().join(format!("{id}.toml"));
+            std::fs::write(
+                &spec,
+                service_toml(&id, &fixture.kit.kernel_path, &fixture.image.rootfs, command),
+            )
+            .map_err(|error| fail(&format!("writing {}: {error}", spec.display())))?;
+            specs.push((id, spec));
+        }
+        Ok(Self { _directory: directory, data_dir, config_dir, specs })
     }
+
+    /// The operator config the CLI calls read, as `serve` writes it under its config directory.
+    fn config_path(&self) -> PathBuf {
+        self.config_dir.join(".overdrive").join("config")
+    }
+}
+
+fn open_to_the_vmm_identity(path: &Path) -> Result<(), ReplicateFailure> {
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755))
+        .map_err(|error| fail(&format!("opening {}: {error}", path.display())))
+}
+
+/// Boots `serve`, measures the workloads, and shuts `serve` down whatever the measurement
+/// returned.
+async fn drive(node: &NodeDir, trace: &Arc<Trace>) -> Replicated {
+    let observation: Arc<OnceLock<Arc<dyn ObservationStore>>> = Arc::new(OnceLock::new());
+    let server = match boot(node, trace, &observation).await {
+        Ok(server) => server,
+        Err(failure) => return Replicated { cycles: Err(failure), teardown: Ok(()) },
+    };
+    let cycles = measure(node, trace, &observation).await;
+    let teardown =
+        server.shutdown().await.map_err(|error| fail(&format!("serve did not shut down: {error}")));
+    Replicated { cycles, teardown }
+}
+
+async fn boot(
+    node: &NodeDir,
+    trace: &Arc<Trace>,
+    observation: &Arc<OnceLock<Arc<dyn ObservationStore>>>,
+) -> Result<ServeHandle, ReplicateFailure> {
     let args = ServeArgs {
         bind: SocketAddr::from((Ipv4Addr::LOCALHOST, 0)),
-        data_dir,
-        config_dir,
+        data_dir: node.data_dir.clone(),
+        config_dir: node.config_dir.clone(),
         vsock_ports: NodeVsockPortConfig::kernel_assigned(),
         gateway_address: None,
         gateway_certified_key_id: None,
         gateway_certificate_chain: None,
         gateway_private_key: None,
     };
-    let observation: Arc<OnceLock<Arc<dyn ObservationStore>>> = Arc::new(OnceLock::new());
     let (vmm_trace, beacon_trace, shared) =
-        (Arc::clone(trace), Arc::clone(trace), Arc::clone(&observation));
+        (Arc::clone(trace), Arc::clone(trace), Arc::clone(observation));
     #[allow(
         clippy::result_large_err,
         reason = "the composition callback's error type is fixed by `run_with_adapters`"
     )]
-    let server =
-        run_with_adapters(args, Arc::new(RealCgroupFs::new()), move |config, filesystem| {
-            let mut adapters =
-                NodeAdapters::host(config, filesystem, Arc::new(SimKek::for_boot()))?;
-            adapters.boot.dataplane = Arc::new(SimDataplaneComposer::new(
-                Arc::new(SimDataplane::new()),
-                Ipv4Addr::LOCALHOST,
-            ));
-            adapters.vm.vmm =
-                Arc::new(JoiningVmm { inner: CloudHypervisorVmm::new(), trace: vmm_trace });
-            adapters.vm.beacon =
-                Arc::new(StampingBeacon { inner: VsockBeaconIo::new(), trace: beacon_trace });
-            adapters.vm.capability = VmCapability::Required;
-            shared.get_or_init(|| Arc::clone(&adapters.boot.observation));
-            Ok(adapters)
-        })
-        .await
-        .map_err(|error| fail(&format!("serve did not boot: {error}")))?;
+    run_with_adapters(args, Arc::new(RealCgroupFs::new()), move |config, filesystem| {
+        let mut adapters = NodeAdapters::host(config, filesystem, Arc::new(SimKek::for_boot()))?;
+        adapters.boot.dataplane =
+            Arc::new(SimDataplaneComposer::new(Arc::new(SimDataplane::new()), Ipv4Addr::LOCALHOST));
+        adapters.vm.vmm =
+            Arc::new(JoiningVmm { inner: CloudHypervisorVmm::new(), trace: vmm_trace });
+        adapters.vm.beacon =
+            Arc::new(StampingBeacon { inner: VsockBeaconIo::new(), trace: beacon_trace });
+        adapters.vm.capability = VmCapability::Required;
+        shared.get_or_init(|| Arc::clone(&adapters.boot.observation));
+        Ok(adapters)
+    })
+    .await
+    .map_err(|error| fail(&format!("serve did not boot: {error}")))
+}
+
+/// Deploys and stops the workloads while a watcher stamps the observation rows. The watcher
+/// stops cooperatively: dropping its stop sender ends its loop, and it is joined.
+async fn measure(
+    node: &NodeDir,
+    trace: &Arc<Trace>,
+    observation: &OnceLock<Arc<dyn ObservationStore>>,
+) -> Result<Vec<CycleOutcome>, ReplicateFailure> {
     let store =
         observation.get().cloned().ok_or_else(|| fail("serve built no observation store"))?;
     let mut subscription = store
@@ -589,22 +659,37 @@ async fn drive(
         .await
         .map_err(|error| fail(&format!("the observation subscription failed: {error}")))?;
     let watching = Arc::clone(trace);
+    let (stop, mut stopped) = tokio::sync::oneshot::channel::<()>();
     let watcher = tokio::spawn(async move {
-        while let Some(event) = subscription.next().await {
-            let at = HostClock.now();
-            match event {
-                SubscriptionEvent::Row(ObservationRow::AllocStatus(row)) => watching.row(&row, at),
-                SubscriptionEvent::Row(_) => {}
-                SubscriptionEvent::Lagged { .. } => watching.lock().lagged = true,
+        loop {
+            tokio::select! {
+                biased;
+                _ = &mut stopped => return,
+                event = subscription.next() => {
+                    let at = HostClock.now();
+                    match event {
+                        Some(SubscriptionEvent::Row(ObservationRow::AllocStatus(row))) => {
+                            watching.row(&row, at);
+                        }
+                        Some(SubscriptionEvent::Row(_)) => {}
+                        Some(SubscriptionEvent::Lagged { .. }) => watching.lock().lagged = true,
+                        None => return,
+                    }
+                }
             }
         }
     });
 
-    let config_path = directory.path().join("conf").join(".overdrive").join("config");
-    let outcome = cycles(shape, fixture, trace, directory.path(), &config_path).await;
-    watcher.abort();
-    server.shutdown().await.map_err(|error| fail(&format!("serve did not shut down: {error}")))?;
-    outcome
+    let outcome = cycles(trace, node).await;
+    drop(stop);
+    let joined = watcher
+        .await
+        .map_err(|error| fail(&format!("the observation watcher did not finish: {error}")));
+    match (outcome, joined) {
+        (Ok(outcomes), Ok(())) => Ok(outcomes),
+        (Err(failure), Ok(())) | (Ok(_), Err(failure)) => Err(failure),
+        (Err(failure), Err(watcher)) => Err(fail(&format!("{failure}; {watcher}"))),
+    }
 }
 
 fn service_toml(id: &str, kernel: &Path, rootfs: &Path, command: &str) -> String {
@@ -619,34 +704,20 @@ fn service_toml(id: &str, kernel: &Path, rootfs: &Path, command: &str) -> String
     )
 }
 
-async fn cycles(
-    shape: Shape,
-    fixture: &Fixture,
-    trace: &Arc<Trace>,
-    directory: &Path,
-    config_path: &Path,
-) -> Result<Vec<CycleOutcome>, ReplicateFailure> {
-    let command =
-        if shape.ignores_stop { subcommand::LISTEN_IGNORING_STOP } else { subcommand::LISTEN };
-    let mut specs: Vec<(String, PathBuf)> = Vec::with_capacity(shape.concurrency);
-    for index in 0..shape.concurrency {
-        let id = format!("nbp-vl-{index}");
-        let spec = directory.join(format!("{id}.toml"));
-        std::fs::write(
-            &spec,
-            service_toml(&id, &fixture.kit.kernel_path, &fixture.image.rootfs, command),
-        )
-        .map_err(|error| fail(&format!("writing {}: {error}", spec.display())))?;
-        specs.push((id, spec));
-    }
-    let mut deployed = join_all(specs.into_iter().map(|(id, spec)| async move {
-        let deployed_at = HostClock.now();
-        let result = deploy(DeployArgs { spec, config_path: config_path.to_path_buf() }).await;
-        Cycle {
-            workload: id,
-            deployed_at,
-            stopped_at: None,
-            deploy_error: result.err().map(|error| error.to_string()),
+async fn cycles(trace: &Arc<Trace>, node: &NodeDir) -> Result<Vec<CycleOutcome>, ReplicateFailure> {
+    let config_path = node.config_path();
+    let config_path = config_path.as_path();
+    let mut deployed = join_all(node.specs.iter().map(|(id, spec)| {
+        let (id, spec) = (id.clone(), spec.clone());
+        async move {
+            let deployed_at = HostClock.now();
+            let result = deploy(DeployArgs { spec, config_path: config_path.to_path_buf() }).await;
+            Cycle {
+                workload: id,
+                deployed_at,
+                stopped_at: None,
+                deploy_error: result.err().map(|error| error.to_string()),
+            }
         }
     }))
     .await;
@@ -765,12 +836,18 @@ fn boundaries(trace: &Trace, cycle: &Cycle) -> [Result<HostInstant, String>; 11]
         .map_or_else(|| missing("vmm.process.reaped"), Ok);
     let admitted = trace
         .event("convergence.evaluation.admitted", |fields| {
-            fields.get("target").is_some_and(|target| target.ends_with(workload))
+            fields.get("target").is_some_and(|target| *target == format!("workload/{workload}"))
         })
         .map_or_else(|| missing("convergence.evaluation.admitted"), Ok);
-    let stable = trace.lock().stable.get(workload).copied().map_or_else(
+    // One lock: `std::sync::Mutex` is not reentrant, so the `lagged` flag is read under the
+    // same guard as the row.
+    let (stable_at, lagged) = {
+        let data = trace.lock();
+        (data.stable.get(workload).copied(), data.lagged)
+    };
+    let stable = stable_at.map_or_else(
         || {
-            Err(if trace.lock().lagged {
+            Err(if lagged {
                 "the Stable row was not observed (the subscription lagged)".to_owned()
             } else {
                 "the Stable row was not observed".to_owned()
@@ -832,7 +909,10 @@ fn stage_outcome(trace: &Trace, cycle: &Cycle) -> StageOutcome {
 }
 
 /// Records each metric of the replicate: the measured values as a series, or, when any
-/// workload's stage failed, each failure; a metric no workload reached is absent.
+/// workload's stage failed, each failure; a metric no workload reached is absent. A metric
+/// holds exactly one of values, failures or an absence (DDD-6), so a replicate whose workloads
+/// disagree on a stage records that stage's failures and the other workloads' values of that
+/// stage are not stored.
 fn record_cycles(rep: &mut Replicate, cycles: &[CycleOutcome]) -> Result<(), ReplicateFailure> {
     for (index, metric) in STAGE_METRICS.iter().enumerate() {
         let stages: Vec<&Stage> = cycles.iter().map(|cycle| &cycle.stages[index]).collect();
@@ -871,5 +951,306 @@ fn record_cycles(rep: &mut Replicate, cycles: &[CycleOutcome]) -> Result<(), Rep
         )
     } else {
         rep.record_series(GUEST_SHUTDOWN_METRIC, &guest)
+    }
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    clippy::indexing_slicing,
+    clippy::cast_precision_loss,
+    clippy::float_cmp,
+    reason = "tests assert their own preconditions and compare stage values computed from the same stamps"
+)]
+mod tests {
+    //! The stage mapping over crafted traces: which boundary pair feeds which metric, what a
+    //! missing or out-of-order boundary does, and that concurrent workloads never mix.
+
+    use super::*;
+    use overdrive_testing::placement;
+
+    placement!(host_pure);
+
+    /// The eleven boundaries of one workload, named as in the DDD-11 stage table.
+    #[derive(Clone, Copy)]
+    struct Stamps {
+        deploy_call: HostInstant,
+        admitted: HostInstant,
+        create_enter: HostInstant,
+        created: HostInstant,
+        ready: HostInstant,
+        stable: HostInstant,
+        stop_call: HostInstant,
+        stop_enter: HostInstant,
+        writer_finished: HostInstant,
+        reaped: HostInstant,
+        cleanup_finished: HostInstant,
+    }
+
+    impl Stamps {
+        /// The stage durations in stage order, each from its own boundary names.
+        fn expected(&self) -> [f64; 8] {
+            let ns = |from: HostInstant, to: HostInstant| to.duration_since(from).as_nanos() as f64;
+            [
+                ns(self.deploy_call, self.admitted),
+                ns(self.create_enter, self.created),
+                ns(self.created, self.ready),
+                ns(self.ready, self.stable),
+                ns(self.stop_call, self.stop_enter),
+                ns(self.stop_enter, self.writer_finished),
+                ns(self.writer_finished, self.reaped),
+                ns(self.reaped, self.cleanup_finished),
+            ]
+        }
+    }
+
+    /// Strictly ascending host instants, each at least `index + 1` microseconds after the last,
+    /// so no two stages of one workload share a duration.
+    fn stamps() -> Stamps {
+        loop {
+            let mut taken: Vec<HostInstant> = Vec::with_capacity(11);
+            for index in 0..11_u64 {
+                loop {
+                    let now = HostClock.now();
+                    let ready = taken.last().is_none_or(|last| {
+                        now.duration_since(*last) >= Duration::from_micros(index + 1)
+                    });
+                    if ready {
+                        taken.push(now);
+                        break;
+                    }
+                }
+            }
+            let candidate = Stamps {
+                deploy_call: taken[0],
+                admitted: taken[1],
+                create_enter: taken[2],
+                created: taken[3],
+                ready: taken[4],
+                stable: taken[5],
+                stop_call: taken[6],
+                stop_enter: taken[7],
+                writer_finished: taken[8],
+                reaped: taken[9],
+                cleanup_finished: taken[10],
+            };
+            let durations = candidate.expected();
+            let distinct = durations
+                .iter()
+                .enumerate()
+                .all(|(index, value)| durations[index + 1..].iter().all(|other| other != value));
+            if distinct {
+                return candidate;
+            }
+        }
+    }
+
+    fn captured(name: &'static str, at: HostInstant, fields: &[(&str, &str)]) -> Captured {
+        Captured {
+            name,
+            at,
+            fields: fields
+                .iter()
+                .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
+                .collect(),
+        }
+    }
+
+    /// The boundary a scenario withholds from the trace (the event never happened).
+    #[derive(Clone, Copy, PartialEq)]
+    enum Withheld {
+        Admitted,
+        CreateEnter,
+        Created,
+        Ready,
+        Stable,
+        StopEnter,
+        WriterFinished,
+        Reaped,
+        CleanupFinished,
+    }
+
+    /// A boundary's name, event name, stamp and fields.
+    type BoundaryEvent<'a> = (Withheld, &'static str, HostInstant, &'a [(&'a str, &'a str)]);
+
+    /// Records one workload's boundaries into `trace` under allocation `alloc`, process `pid`
+    /// and guest cid `cid`, omitting `withheld`.
+    fn record(
+        trace: &Trace,
+        workload: &str,
+        (alloc, pid, cid): (&str, u32, u32),
+        at: &Stamps,
+        withheld: Option<Withheld>,
+    ) {
+        let keep = |boundary: Withheld| withheld != Some(boundary);
+        let pid_text = pid.to_string();
+        let mut data = trace.lock();
+        data.workload_of_alloc.insert(alloc.to_owned(), workload.to_owned());
+        data.cid_of_pid.insert(pid, cid);
+        if keep(Withheld::Ready) {
+            data.ready.insert(cid, at.ready);
+        }
+        if keep(Withheld::Stable) {
+            data.stable.insert(workload.to_owned(), at.stable);
+        }
+        let target = format!("workload/{workload}");
+        let alloc_fields = [("alloc", alloc)];
+        let created_fields = [("alloc", alloc), ("pid", pid_text.as_str())];
+        let reaped_fields = [("pid", pid_text.as_str())];
+        let admitted_fields = [("target", target.as_str())];
+        let events: [BoundaryEvent<'_>; 7] = [
+            (Withheld::Admitted, "convergence.evaluation.admitted", at.admitted, &admitted_fields),
+            (Withheld::CreateEnter, "vm.lifecycle.create_enter", at.create_enter, &alloc_fields),
+            (Withheld::Created, "vm.lifecycle.created", at.created, &created_fields),
+            (Withheld::StopEnter, "vm.lifecycle.stop_enter", at.stop_enter, &alloc_fields),
+            (
+                Withheld::WriterFinished,
+                "vm.lifecycle.writer_finished",
+                at.writer_finished,
+                &alloc_fields,
+            ),
+            (Withheld::Reaped, "vmm.process.reaped", at.reaped, &reaped_fields),
+            (
+                Withheld::CleanupFinished,
+                "vm.lifecycle.cleanup_calls_finished",
+                at.cleanup_finished,
+                &alloc_fields,
+            ),
+        ];
+        for (boundary, name, when, fields) in events {
+            if keep(boundary) {
+                data.events.push(captured(name, when, fields));
+            }
+        }
+    }
+
+    fn cycle(workload: &str, at: &Stamps) -> Cycle {
+        Cycle {
+            workload: workload.to_owned(),
+            deployed_at: at.deploy_call,
+            stopped_at: Some(at.stop_call),
+            deploy_error: None,
+        }
+    }
+
+    fn measured(outcome: &StageOutcome) -> Vec<Option<f64>> {
+        outcome
+            .iter()
+            .map(|stage| if let Stage::Measured(value) = stage { Some(*value) } else { None })
+            .collect()
+    }
+
+    #[test]
+    fn every_boundary_pair_feeds_the_stage_metric_it_names() {
+        let at = stamps();
+        let trace = Trace::default();
+        record(&trace, "nbp-vl-0", ("alloc-0", 100, 7), &at, None);
+        let outcome = stage_outcome(&trace, &cycle("nbp-vl-0", &at));
+        let expected: Vec<Option<f64>> = at.expected().into_iter().map(Some).collect();
+        assert_eq!(measured(&outcome), expected, "stages in order: {STAGE_METRICS:?}");
+    }
+
+    #[test]
+    fn a_boundary_that_never_happened_fails_its_stage_and_leaves_the_later_stages_absent() {
+        // The first stage that needs each boundary.
+        let first_stage_needing = [
+            (Withheld::Admitted, 0),
+            (Withheld::CreateEnter, 1),
+            (Withheld::Created, 1),
+            (Withheld::Ready, 2),
+            (Withheld::Stable, 3),
+            (Withheld::StopEnter, 4),
+            (Withheld::WriterFinished, 5),
+            (Withheld::Reaped, 6),
+            (Withheld::CleanupFinished, 7),
+        ];
+        for (withheld, failing) in first_stage_needing {
+            let at = stamps();
+            let trace = Trace::default();
+            record(&trace, "nbp-vl-0", ("alloc-0", 100, 7), &at, Some(withheld));
+            let outcome = stage_outcome(&trace, &cycle("nbp-vl-0", &at));
+            let expected = at.expected();
+            for (index, stage) in outcome.iter().enumerate() {
+                match index.cmp(&failing) {
+                    std::cmp::Ordering::Less => {
+                        assert_eq!(stage, &Stage::Measured(expected[index]), "stage {index}");
+                    }
+                    std::cmp::Ordering::Equal => assert!(
+                        matches!(stage, Stage::Failed(reason) if reason.contains("not observed")),
+                        "stage {index} must fail naming the missing boundary: {stage:?}"
+                    ),
+                    std::cmp::Ordering::Greater => assert!(
+                        matches!(stage, Stage::Absent(_)),
+                        "stage {index} after the failure must be absent, never zero: {stage:?}"
+                    ),
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_stop_call_that_never_completed_fails_the_stop_submission_stage() {
+        let at = stamps();
+        let trace = Trace::default();
+        record(&trace, "nbp-vl-0", ("alloc-0", 100, 7), &at, None);
+        let mut incomplete = cycle("nbp-vl-0", &at);
+        incomplete.stopped_at = None;
+        let outcome = stage_outcome(&trace, &incomplete);
+        assert!(matches!(&outcome[4], Stage::Failed(reason) if reason.contains("stop call")));
+        assert!(outcome[5..].iter().all(|stage| matches!(stage, Stage::Absent(_))));
+        assert!(outcome[..4].iter().all(|stage| matches!(stage, Stage::Measured(_))));
+    }
+
+    #[test]
+    fn a_deploy_that_failed_leaves_every_stage_absent() {
+        let at = stamps();
+        let trace = Trace::default();
+        let mut failed = cycle("nbp-vl-0", &at);
+        failed.deploy_error = Some("refused".to_owned());
+        let outcome = stage_outcome(&trace, &failed);
+        assert!(outcome.iter().all(|stage| matches!(stage, Stage::Absent(_))), "{outcome:?}");
+    }
+
+    #[test]
+    fn a_zero_elapsed_stage_is_a_failure_never_a_zero_measurement() {
+        let mut at = stamps();
+        at.created = at.create_enter;
+        let trace = Trace::default();
+        record(&trace, "nbp-vl-0", ("alloc-0", 100, 7), &at, None);
+        let outcome = stage_outcome(&trace, &cycle("nbp-vl-0", &at));
+        assert!(matches!(outcome[0], Stage::Measured(value) if value > 0.0));
+        assert!(
+            matches!(&outcome[1], Stage::Failed(reason) if reason.contains("vmm_launch_ns") && reason.contains("out of order")),
+            "{:?}",
+            outcome[1]
+        );
+        assert!(outcome[2..].iter().all(|stage| matches!(stage, Stage::Absent(_))));
+    }
+
+    #[test]
+    fn concurrent_workloads_each_take_their_own_allocation_process_and_guest_stamps() {
+        let workloads = ["nbp-vl-0", "nbp-vl-1", "nbp-vl-2", "nbp-vl-3"];
+        let trace = Trace::default();
+        // An admission of a different workload whose name ends with this one's must not match.
+        let decoy = stamps();
+        trace.lock().events.push(captured(
+            "convergence.evaluation.admitted",
+            decoy.admitted,
+            &[("target", "workload/other-nbp-vl-0")],
+        ));
+        let mut scenarios = Vec::new();
+        for (index, workload) in workloads.iter().enumerate() {
+            let at = stamps();
+            let alloc = format!("alloc-{index}");
+            let number = u32::try_from(index).unwrap();
+            record(&trace, workload, (alloc.as_str(), 100 + number, 7 + number), &at, None);
+            scenarios.push(at);
+        }
+        for (workload, at) in workloads.iter().zip(&scenarios) {
+            let outcome = stage_outcome(&trace, &cycle(workload, at));
+            let expected: Vec<Option<f64>> = at.expected().into_iter().map(Some).collect();
+            assert_eq!(measured(&outcome), expected, "workload {workload}");
+        }
     }
 }
