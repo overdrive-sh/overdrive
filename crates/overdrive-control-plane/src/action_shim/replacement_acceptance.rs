@@ -55,7 +55,7 @@ use overdrive_core::traits::observation_store::WorkloadSvidIssueStatusRowV1;
 use overdrive_core::traits::observation_store::{
     AllocLifecycleOccurrenceRow, AllocState, AllocStatusRow, LagAwareSubscription,
     LogicalTimestamp, NodeHealthRow, ObservationStore, ObservationStoreError, ObservationWrite,
-    ReconcileConflictRow, ServiceBackendRow, ServiceHydrationResultRow, TransitionSource,
+    ServiceBackendRow, ServiceHydrationResultRow, TransitionSource,
 };
 use overdrive_core::transition_reason::TransitionReason;
 use overdrive_core::wall_clock::UnixInstant;
@@ -866,13 +866,6 @@ impl ObservationStore for RejectFreshPublication {
         &self,
     ) -> Result<Vec<ServiceBackendRow>, ObservationStoreError> {
         self.inner.all_service_backends_rows().await
-    }
-
-    async fn reconcile_conflict_rows(
-        &self,
-        service_id: &ServiceId,
-    ) -> Result<Vec<ReconcileConflictRow>, ObservationStoreError> {
-        self.inner.reconcile_conflict_rows(service_id).await
     }
 
     async fn write_probe_result(&self, row: ProbeResultRow) -> Result<(), ObservationStoreError> {

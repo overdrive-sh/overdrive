@@ -37,8 +37,8 @@ use overdrive_core::public_ingress::{
 };
 use overdrive_core::traits::observation_store::{
     AllocLifecycleOccurrenceRow, AllocStatusRow, LagAwareSubscription, NodeHealthRow,
-    ObservationStore, ObservationStoreError, ObservationWrite, ReconcileConflictRow,
-    ServiceBackendRow, ServiceHydrationResultRow, TransitionSource, WorkloadSvidIssueStatusRowV1,
+    ObservationStore, ObservationStoreError, ObservationWrite, ServiceBackendRow,
+    ServiceHydrationResultRow, TransitionSource, WorkloadSvidIssueStatusRowV1,
 };
 
 /// The text every injected fault carries; no operator surface may contain it.
@@ -272,12 +272,5 @@ impl ObservationStore for IssueFaultStore {
         service_id: &ServiceId,
     ) -> Result<Vec<ServiceBackendRow>, ObservationStoreError> {
         self.inner.service_backends_rows(service_id).await
-    }
-
-    async fn reconcile_conflict_rows(
-        &self,
-        service_id: &ServiceId,
-    ) -> Result<Vec<ReconcileConflictRow>, ObservationStoreError> {
-        self.inner.reconcile_conflict_rows(service_id).await
     }
 }

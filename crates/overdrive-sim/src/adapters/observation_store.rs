@@ -58,7 +58,6 @@ use tokio_stream::wrappers::errors::BroadcastStreamRecvError;
 
 use overdrive_core::ca::issue_failure::SvidIssueFailure;
 use overdrive_core::ca::issued_certificate_row::IssuedCertificateRow;
-use overdrive_core::dataplane::backend_key::Proto;
 use overdrive_core::dataplane::fingerprint::BackendSetFingerprint;
 use overdrive_core::id::{
     AllocationId, CertSerial, CorrelationKey, IssuanceOrdinal, NodeId, ServiceId,
@@ -70,12 +69,10 @@ use overdrive_core::public_ingress::{
 use overdrive_core::traits::observation_store::{
     ALLOC_LIFECYCLE_OCCURRENCES_PER_ALLOC, AllocLifecycleOccurrenceRow, AllocLifecyclePredecessor,
     AllocStatusRow, LagAwareSubscription, LogicalTimestamp, NodeHealthRow, ObservationRow,
-    ObservationStore, ObservationStoreError, ObservationWrite, ReconcileConflictRow,
-    ServiceBackendRow, ServiceHydrationResultRow, SubscriptionEvent, TransitionSource,
-    WorkloadSvidIssueStatusRowV1,
+    ObservationStore, ObservationStoreError, ObservationWrite, ServiceBackendRow,
+    ServiceHydrationResultRow, SubscriptionEvent, TransitionSource, WorkloadSvidIssueStatusRowV1,
 };
 use overdrive_core::workflow::{SignalKey, SignalValue, WorkflowStatus};
-use std::net::Ipv4Addr;
 
 /// Default capacity for the fan-out broadcast channel. Writes beyond
 /// this count before a subscriber polls cause that subscriber to miss
@@ -123,11 +120,6 @@ struct PeerState {
     /// One row per service carrying the full current backend set.
     /// GH #160.
     by_service_backends: Mutex<BTreeMap<ServiceId, ServiceBackendRow>>,
-    /// `reconcile_conflict` LWW index — keyed on `(service_id, vip,
-    /// port, proto)` (the conflicting map slot) per Fix C. `BTreeMap`
-    /// for deterministic iteration across seeds (dst-lint /
-    /// `.claude/rules/development.md` § "Ordered-collection choice").
-    by_reconcile_conflict: Mutex<BTreeMap<(ServiceId, Ipv4Addr, u16, Proto), ReconcileConflictRow>>,
     /// `probe_results` LWW index — keyed on
     /// `(alloc_id, role, probe_idx)` per ADR-0054 §5 as amended by
     /// ADR-0080 § D2. One row per `(alloc_id, role, probe_idx)`
@@ -275,7 +267,6 @@ impl PeerState {
             by_node: Mutex::new(HashMap::new()),
             by_service_hydration: Mutex::new(BTreeMap::new()),
             by_service_backends: Mutex::new(BTreeMap::new()),
-            by_reconcile_conflict: Mutex::new(BTreeMap::new()),
             by_probe_results: Mutex::new(BTreeMap::new()),
             by_issued_certificate: Mutex::new(BTreeMap::new()),
             by_signal: Mutex::new(BTreeMap::new()),
@@ -301,7 +292,6 @@ impl PeerState {
             ObservationRow::NodeHealth(incoming) => self.apply_node_health(incoming),
             ObservationRow::ServiceHydration(incoming) => self.apply_service_hydration(incoming),
             ObservationRow::ServiceBackend(incoming) => self.apply_service_backends(incoming),
-            ObservationRow::ReconcileConflict(incoming) => self.apply_reconcile_conflict(incoming),
             ObservationRow::IssuedCertificate(incoming) => self.apply_issued_certificate(incoming),
             // `WorkflowTerminal` (ADR-0064 §2) — accept and fan out so the
             // workflow-lifecycle reconciler (and tests subscribing via
@@ -497,39 +487,6 @@ impl PeerState {
                 log_lww_reject(
                     "service_backends",
                     &incoming.service_id.to_string(),
-                    &incoming.updated_at,
-                    &existing.updated_at,
-                );
-                false
-            }
-        }
-    }
-
-    /// LWW merge for `reconcile_conflict`. Keyed on `(service_id, vip,
-    /// port, proto)` — the conflicting map slot. Same slot on a later
-    /// tick wins under [`LogicalTimestamp::dominates`]. Mirrors
-    /// [`apply_service_hydration`]. Fix C.
-    fn apply_reconcile_conflict(&self, incoming: &ReconcileConflictRow) -> bool {
-        let key = (incoming.service_id, incoming.vip, incoming.port, incoming.proto);
-        let mut by_rc = self.by_reconcile_conflict.lock();
-        match by_rc.get(&key) {
-            None => {
-                by_rc.insert(key, incoming.clone());
-                drop(by_rc);
-                true
-            }
-            Some(existing) if incoming.updated_at.dominates(&existing.updated_at) => {
-                by_rc.insert(key, incoming.clone());
-                drop(by_rc);
-                true
-            }
-            Some(existing) => {
-                log_lww_reject(
-                    "reconcile_conflict",
-                    &format!(
-                        "{}/{}:{}/{}",
-                        incoming.service_id, incoming.vip, incoming.port, incoming.proto
-                    ),
                     &incoming.updated_at,
                     &existing.updated_at,
                 );
@@ -1017,22 +974,6 @@ impl ObservationStore for SimObservationStore {
         // ordering on `ServiceId`, mirroring `alloc_status_rows`.
         let by_sb = self.inner.by_service_backends.lock();
         Ok(by_sb.values().cloned().collect())
-    }
-
-    async fn reconcile_conflict_rows(
-        &self,
-        service_id: &ServiceId,
-    ) -> Result<Vec<ReconcileConflictRow>, ObservationStoreError> {
-        // LWW winners only, filtered by `service_id`. Iteration is
-        // deterministic via the `(ServiceId, Ipv4Addr, u16, Proto)` key
-        // on the underlying `BTreeMap`. Mirrors
-        // `service_hydration_results_rows`.
-        let by_rc = self.inner.by_reconcile_conflict.lock();
-        Ok(by_rc
-            .iter()
-            .filter(|((sid, ..), _)| sid == service_id)
-            .map(|(_, row)| row.clone())
-            .collect())
     }
 
     async fn write_probe_result(&self, row: ProbeResultRow) -> Result<(), ObservationStoreError> {

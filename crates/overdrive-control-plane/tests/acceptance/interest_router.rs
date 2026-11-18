@@ -54,8 +54,8 @@ use overdrive_core::reconcilers::ReconcilerName;
 use overdrive_core::traits::observation_store::{
     AllocLifecycleOccurrenceRow, AllocState, AllocStatusRow, LagAwareSubscription,
     LogicalTimestamp, NodeHealthRow, ObservationRow, ObservationRowKind, ObservationStore,
-    ObservationStoreError, ObservationWrite, ReconcileConflictRow, ServiceBackendRow,
-    ServiceHydrationResultRow, SubscriptionEvent, TransitionSource,
+    ObservationStoreError, ObservationWrite, ServiceBackendRow, ServiceHydrationResultRow,
+    SubscriptionEvent, TransitionSource,
 };
 use overdrive_core::transition_reason::TransitionReason;
 use overdrive_core::workflow::{SignalKey, SignalValue, WorkflowStatus};
@@ -216,13 +216,6 @@ impl ObservationStore for PointReadFailureStore {
         &self,
     ) -> Result<Vec<ServiceBackendRow>, ObservationStoreError> {
         self.inner.all_service_backends_rows().await
-    }
-
-    async fn reconcile_conflict_rows(
-        &self,
-        service_id: &ServiceId,
-    ) -> Result<Vec<ReconcileConflictRow>, ObservationStoreError> {
-        self.inner.reconcile_conflict_rows(service_id).await
     }
 
     async fn write_probe_result(&self, row: ProbeResultRow) -> Result<(), ObservationStoreError> {
@@ -637,13 +630,8 @@ async fn lagged_triggers_relist_and_wakes_every_snapshot_target() {
     write_alloc(&obs, alloc_row("a1", "w1", 1)).await;
 
     let shutdown = CancellationToken::new();
-    let task = spawn_interest_router(
-        Arc::clone(&obs),
-        sub,
-        table,
-        handle_for(&broker),
-        shutdown.clone(),
-    );
+    let task =
+        spawn_interest_router(Arc::clone(&obs), sub, table, handle_for(&broker), shutdown.clone());
 
     // Initial LIST wakes w1; drain it so the post-Lagged submits are unambiguous.
     assert!(
@@ -916,13 +904,8 @@ async fn write_flood_coalesces_to_one_pending_eval_per_interested_target() {
         })));
 
     let shutdown = CancellationToken::new();
-    let task = spawn_interest_router(
-        Arc::clone(&obs),
-        sub,
-        table,
-        handle_for(&broker),
-        shutdown.clone(),
-    );
+    let task =
+        spawn_interest_router(Arc::clone(&obs), sub, table, handle_for(&broker), shutdown.clone());
 
     // N accepted writes for the SAME workload W arrive on the watch (same
     // broker key `(r-a, workload/w1)`), before the broker drains.
@@ -1131,13 +1114,8 @@ async fn replay_fan_out_trajectory(rows: &[(&str, &str)]) -> Vec<(String, String
             rx.recv().await.map(|ev| (ev, rx))
         })));
     let shutdown = CancellationToken::new();
-    let task = spawn_interest_router(
-        Arc::clone(&obs),
-        sub,
-        table,
-        handle_for(&broker),
-        shutdown.clone(),
-    );
+    let task =
+        spawn_interest_router(Arc::clone(&obs), sub, table, handle_for(&broker), shutdown.clone());
 
     for (idx, (alloc, workload)) in rows.iter().enumerate() {
         let counter = u64::try_from(idx).expect("index fits u64") + 1;

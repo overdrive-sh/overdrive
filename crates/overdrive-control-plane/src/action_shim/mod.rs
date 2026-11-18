@@ -250,10 +250,9 @@ pub(crate) mod gateway_svid;
 pub mod reclamation;
 
 /// Reconcile-output invariant validator — rejects post-`reconcile`
-/// `Vec<Action>` returns that contain two or more write-actions
-/// targeting the same service-LB VIP (see the module docstring on
-/// [`validate`] for the full conflict taxonomy and fail-safe
-/// semantics).
+/// `Vec<Action>` returns that name one allocation in a
+/// `ReclaimAllocationNetwork` and in another allocation action (see the
+/// module docstring on [`validate`] for the fail-safe semantics).
 pub mod validate;
 
 /// SCAFFOLD marker.

@@ -1899,8 +1899,8 @@ mod tests {
     };
     use overdrive_core::traits::observation_store::WorkloadSvidIssueStatusRowV1;
     use overdrive_core::traits::observation_store::{
-        LagAwareSubscription, NodeHealthRow, ObservationStoreError, ReconcileConflictRow,
-        ServiceHydrationResultRow, SubscriptionEvent,
+        LagAwareSubscription, NodeHealthRow, ObservationStoreError, ServiceHydrationResultRow,
+        SubscriptionEvent,
     };
     use overdrive_core::workflow::{SignalKey, SignalValue, WorkflowStatus};
 
@@ -2147,13 +2147,6 @@ mod tests {
             service_id: &ServiceId,
         ) -> std::result::Result<Vec<ServiceBackendRow>, ObservationStoreError> {
             self.inner.service_backends_rows(service_id).await
-        }
-
-        async fn reconcile_conflict_rows(
-            &self,
-            service_id: &ServiceId,
-        ) -> std::result::Result<Vec<ReconcileConflictRow>, ObservationStoreError> {
-            self.inner.reconcile_conflict_rows(service_id).await
         }
 
         async fn write_probe_result(

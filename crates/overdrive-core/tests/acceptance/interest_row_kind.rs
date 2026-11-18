@@ -8,7 +8,7 @@
 //! internal state is peeked.
 //!
 //! * **S-266-11** — `ObservationRow::kind()` is a TOTAL, no-wildcard
-//!   discriminant projection: each of the 9 `ObservationRow` variants maps to
+//!   discriminant projection: each of the 8 `ObservationRow` variants maps to
 //!   its matching `ObservationRowKind`. Driven as a table over every variant
 //!   (closed-world finite → parametrize, NOT PBT — the falsifier gate). Every
 //!   match arm is the mutation surface: mutating an arm to the wrong
@@ -18,7 +18,7 @@
 //!
 //! The design's "a new `ObservationRow` variant must FAIL compilation until
 //! consciously mapped" companion is enforced STRUCTURALLY by the no-wildcard
-//! total `match self` in `ObservationRow::kind()` itself: adding a 10th
+//! total `match self` in `ObservationRow::kind()` itself: adding a 9th
 //! `ObservationRow` variant makes that match non-exhaustive and yields rustc
 //! `E0004` at `overdrive-core` compile time — the same drift-closure a
 //! `trybuild` fixture would re-demonstrate, now owned by the type that owns
@@ -27,7 +27,7 @@
 //! editing the out-of-scope `tests/compile_fail.rs` entrypoint plus committing
 //! a brittle `.stderr` snapshot, and ADR-0084 forbids a new dependency for
 //! this step. The `kind_table_covers_every_variant` belt-and-braces assertion
-//! below pins that the table author enumerated all 9 variants, so a table that
+//! below pins that the table author enumerated all 8 variants, so a table that
 //! silently drops a variant fails too.
 
 #![allow(clippy::doc_markdown, clippy::expect_used)]
@@ -40,16 +40,14 @@ use std::time::Duration;
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::WorkloadKind;
 use overdrive_core::ca::issued_certificate_row::IssuedCertificateRow;
-use overdrive_core::dataplane::backend_key::Proto;
 use overdrive_core::id::{
     AllocationId, CertSerial, ContentHash, CorrelationKey, IssuanceOrdinal, NodeId, Region,
     ServiceId, SpiffeId, WorkloadId,
 };
 use overdrive_core::observation::{ProbeIdx, ProbeResultRow, ProbeRole, ProbeStatus};
 use overdrive_core::traits::observation_store::{
-    AllocState, AllocStatusRow, ConflictRoute, LogicalTimestamp, NodeHealthRow, ObservationRow,
-    ObservationRowKind, ReconcileConflictRow, ServiceBackendRow, ServiceHydrationResultRow,
-    ServiceHydrationStatus,
+    AllocState, AllocStatusRow, LogicalTimestamp, NodeHealthRow, ObservationRow,
+    ObservationRowKind, ServiceBackendRow, ServiceHydrationResultRow, ServiceHydrationStatus,
 };
 use overdrive_core::workflow::{SignalKey, SignalValue, WorkflowStatus};
 
@@ -118,18 +116,6 @@ fn service_backend_row() -> ServiceBackendRow {
     }
 }
 
-fn reconcile_conflict_row() -> ReconcileConflictRow {
-    ReconcileConflictRow {
-        service_id: service_id(),
-        vip: Ipv4Addr::new(10, 0, 0, 1),
-        port: 0,
-        proto: Proto::Tcp,
-        first_route: ConflictRoute::Xdp,
-        second_route: ConflictRoute::Xdp,
-        updated_at: ts(),
-    }
-}
-
 fn issued_cert_row() -> IssuedCertificateRow {
     let at = UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000));
     IssuedCertificateRow {
@@ -179,7 +165,7 @@ fn probe_result_row() -> ProbeResultRow {
 // S-266-11 — ObservationRow::kind(): total, no-wildcard discriminant
 // ---------------------------------------------------------------------------
 
-/// The full closed-world table: every one of the 9 `ObservationRow` variants
+/// The full closed-world table: every one of the 8 `ObservationRow` variants
 /// paired with its expected `ObservationRowKind`.
 fn kind_table() -> Vec<(&'static str, ObservationRow, ObservationRowKind)> {
     vec![
@@ -204,11 +190,6 @@ fn kind_table() -> Vec<(&'static str, ObservationRow, ObservationRowKind)> {
             ObservationRowKind::ServiceBackend,
         ),
         (
-            "ReconcileConflict",
-            ObservationRow::ReconcileConflict(reconcile_conflict_row()),
-            ObservationRowKind::ReconcileConflict,
-        ),
-        (
             "IssuedCertificate",
             ObservationRow::IssuedCertificate(issued_cert_row()),
             ObservationRowKind::IssuedCertificate,
@@ -223,10 +204,10 @@ fn kind_table() -> Vec<(&'static str, ObservationRow, ObservationRowKind)> {
     ]
 }
 
-/// S-266-11 — `row.kind()` maps EACH of the 9 `ObservationRow` variants to
+/// S-266-11 — `row.kind()` maps EACH of the 8 `ObservationRow` variants to
 /// its matching `ObservationRowKind`.
 ///
-/// Parametrized over all 9 variants (closed-world finite → table, NOT PBT).
+/// Parametrized over all 8 variants (closed-world finite → table, NOT PBT).
 /// Mutation target: EVERY match arm — mutating any arm to the wrong
 /// `ObservationRowKind` (or collapsing two families onto one kind) breaks the
 /// exact per-variant equality below.
@@ -243,9 +224,9 @@ fn kind_maps_each_observation_row_variant_exhaustively() {
     }
 }
 
-/// The 9 variants map to 9 PAIRWISE-DISTINCT kinds. Complements the
+/// The 8 variants map to 8 PAIRWISE-DISTINCT kinds. Complements the
 /// per-variant table: a mutation that points two arms at the same
-/// `ObservationRowKind` collapses the distinct-count below 9 and is caught
+/// `ObservationRowKind` collapses the distinct-count below 8 and is caught
 /// here as well as by the per-variant equality above.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
@@ -256,13 +237,13 @@ fn kind_projects_each_variant_to_a_distinct_kind() {
     kinds.dedup();
     assert_eq!(
         kinds.len(),
-        9,
-        "the 9 ObservationRow variants must project to 9 distinct ObservationRowKind values",
+        8,
+        "the 8 ObservationRow variants must project to 8 distinct ObservationRowKind values",
     );
 }
 
 /// Belt-and-braces for the drift-closure: the table MUST enumerate exactly
-/// the 9 `ObservationRow` variants. A table that silently drops a variant (or
+/// the 8 `ObservationRow` variants. A table that silently drops a variant (or
 /// a future variant not added) fails here, complementing the compile-time
 /// exhaustiveness the no-wildcard total `match self` in `ObservationRow::kind`
 /// enforces (see the module docstring's compile-fail companion note).
@@ -271,8 +252,8 @@ fn kind_projects_each_variant_to_a_distinct_kind() {
 fn kind_table_covers_every_variant() {
     assert_eq!(
         kind_table().len(),
-        9,
-        "ObservationRow has exactly 9 variants; the kind table MUST cover every one",
+        8,
+        "ObservationRow has exactly 8 variants; the kind table MUST cover every one",
     );
 }
 
@@ -292,7 +273,6 @@ fn observation_row_kind_as_str_is_canonical_kebab_label() {
     assert_eq!(ObservationRowKind::NodeHealth.as_str(), "node-health");
     assert_eq!(ObservationRowKind::ServiceHydration.as_str(), "service-hydration");
     assert_eq!(ObservationRowKind::ServiceBackend.as_str(), "service-backend");
-    assert_eq!(ObservationRowKind::ReconcileConflict.as_str(), "reconcile-conflict");
     assert_eq!(ObservationRowKind::IssuedCertificate.as_str(), "issued-certificate");
     assert_eq!(ObservationRowKind::WorkflowTerminal.as_str(), "workflow-terminal");
     assert_eq!(ObservationRowKind::Signal.as_str(), "signal");

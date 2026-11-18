@@ -758,8 +758,7 @@ use overdrive_core::public_ingress::{
     GatewayApplicationStatusRowV1, PublicCertifiedKeyId, PublicCertifiedKeyStatusRowV1,
 };
 use overdrive_core::traits::observation_store::{
-    LagAwareSubscription, NodeHealthRow, ObservationStoreError, ReconcileConflictRow,
-    ServiceHydrationResultRow,
+    LagAwareSubscription, NodeHealthRow, ObservationStoreError, ServiceHydrationResultRow,
 };
 use overdrive_testing::overdrive_test;
 
@@ -890,12 +889,6 @@ impl ObservationStore for FailingListStore {
         service_id: &ServiceId,
     ) -> Result<Vec<ServiceBackendRow>, ObservationStoreError> {
         self.inner.service_backends_rows(service_id).await
-    }
-    async fn reconcile_conflict_rows(
-        &self,
-        service_id: &ServiceId,
-    ) -> Result<Vec<ReconcileConflictRow>, ObservationStoreError> {
-        self.inner.reconcile_conflict_rows(service_id).await
     }
 }
 

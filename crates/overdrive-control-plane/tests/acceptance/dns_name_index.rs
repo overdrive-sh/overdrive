@@ -483,15 +483,6 @@ impl ObservationStore for RelistRecoversStore {
     ) -> Result<Vec<ServiceBackendRow>, ObservationStoreError> {
         self.inner.service_backends_rows(service_id).await
     }
-    async fn reconcile_conflict_rows(
-        &self,
-        service_id: &ServiceId,
-    ) -> Result<
-        Vec<overdrive_core::traits::observation_store::ReconcileConflictRow>,
-        ObservationStoreError,
-    > {
-        self.inner.reconcile_conflict_rows(service_id).await
-    }
 }
 
 /// `#[tokio::test]` (single shared runtime) — the relist-on-`Lagged` recovery is
@@ -714,15 +705,6 @@ impl ObservationStore for RelistFailsStore {
         service_id: &ServiceId,
     ) -> Result<Vec<ServiceBackendRow>, ObservationStoreError> {
         self.inner.service_backends_rows(service_id).await
-    }
-    async fn reconcile_conflict_rows(
-        &self,
-        service_id: &ServiceId,
-    ) -> Result<
-        Vec<overdrive_core::traits::observation_store::ReconcileConflictRow>,
-        ObservationStoreError,
-    > {
-        self.inner.reconcile_conflict_rows(service_id).await
     }
 }
 
@@ -1035,15 +1017,6 @@ impl ObservationStore for EndingStore {
         service_id: &ServiceId,
     ) -> Result<Vec<ServiceBackendRow>, ObservationStoreError> {
         self.inner.service_backends_rows(service_id).await
-    }
-    async fn reconcile_conflict_rows(
-        &self,
-        service_id: &ServiceId,
-    ) -> Result<
-        Vec<overdrive_core::traits::observation_store::ReconcileConflictRow>,
-        ObservationStoreError,
-    > {
-        self.inner.reconcile_conflict_rows(service_id).await
     }
 }
 
