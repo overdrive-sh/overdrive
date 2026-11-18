@@ -138,9 +138,11 @@ is unbuilt; there is no documented operator TOML key for them.
   VM services declare listeners and use the service health lifecycle.
 - **DNS and remote UDP.** Guest DNS and connected or unconnected remote UDP
   preserve datagram boundaries, including empty datagrams.
-- **Service-VIP UDP to a VM backend is unbuilt.** This is
-  [tracked separately](https://github.com/overdrive-sh/overdrive/issues/310).
-  Remote UDP support does not imply that service path works.
+- **Service-VIP UDP to a VM backend is unbuilt.** The guest-flow owner refuses a
+  datagram addressed to a Service VIP with a policy error before it creates a host
+  socket, so the datagram never reaches the host network. Issue
+  [#310: UDP service delivery to VM workloads](https://github.com/overdrive-sh/overdrive/issues/310)
+  tracks delivery. Remote UDP support does not imply that service path works.
 - **Linux guests, single node.** The host protocol is guest-neutral, but that
   does not supply an adapter for another guest OS or a multi-node mesh.
 - **CID generation recovery has an open crash window.** Replacement generation

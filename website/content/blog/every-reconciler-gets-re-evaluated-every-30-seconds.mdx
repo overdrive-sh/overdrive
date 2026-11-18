@@ -1,0 +1,237 @@
+---
+title: Every reconciler gets re-evaluated every 30 seconds
+description: A deploy could stay stuck after one transient store error, because nothing re-ran the reconciler. We replaced three partial backstops with one periodic pass and made the service-map reconciler read the resource it manages.
+date: 2026-11-18
+author: The Overdrive team
+summary: One failed store read could leave a deployed workload Pending until the operator re-submitted it. We fixed the class with a required managed-targets declaration and one 30-second resync pass, then replayed a Quint model of the protocol against the real runtime.
+---
+
+A reconciler in Overdrive is a function that compares what an operator declared
+with what is observed and returns the actions that close the gap. The runtime runs
+it for one **target** at a time, such as a workload or a service. Each reconciler
+keeps a small typed memory, its **View**, which the runtime saves before it
+dispatches the reconciler's actions. A **broker** queues the evaluations, and a
+convergence loop admits them eight at a time.
+
+The comparison is level-triggered. Every run recomputes the gap from fresh state and
+never trusts that an earlier action landed. That is only half of convergence. The
+other half is deciding to run the reconciler at all, and we found that half had
+holes.
+
+## Three ways a deploy could stay stuck
+
+We traced each wake path in the runtime and found three shapes of failure, each
+reachable in a real deploy.
+
+**An error ended the evaluation and nothing re-submitted it.** If the store read that
+builds a reconciler's input failed, or the redb write that saves its View failed, the
+tick returned before it requeued itself. A workload whose first evaluation hit one
+transient read error stayed Pending until the operator ran `overdrive deploy` again.
+
+**A reconciler with no wake hook waited on an unrelated event.** The service-map
+reconciler programs the eBPF service map. After a failed dataplane update, its next
+run fell inside its backoff window and returned no action and no deadline. A steady
+service writes no further backend row, so nothing woke it again.
+
+**A periodic backstop covered only part of the targets.** The interest router is the
+runtime task that wakes a reconciler when an observation row it reads changes. It also
+relisted `alloc_status` rows every 30 seconds. A fresh deploy whose first evaluation
+failed had intent but no such row, so the relist never reached it.
+
+A fourth defect hid behind the second. The service-map reconciler decided whether a
+service was programmed by reading the executor's receipt of its last update, a result
+row in redb. After a node reboot, or a restart of `overdrive serve` that recreates the
+pinned map, the receipt survives and the kernel map is empty. A completed receipt over
+the desired backends read as converged, so the reconciler emitted nothing and the
+service stayed unprogrammed. A periodic re-evaluation would not help, because the
+evaluation reads the same receipt.
+
+## One pass beat per-reconciler fixes
+
+We considered four ways to close the wake gaps.
+
+**Fix each gap where it occurs.** Requeue after a hydrate error, give the service-map
+reconciler a retry deadline, and seed existing intents at boot. This is four
+mechanisms for one class, and every new reconciler has to remember its own. A local
+requeue also loops on a persistent error. A hydrate error writes no View and a failed
+View write has nowhere to store one, so there is no backoff memory to pace the loop.
+
+**Give every reconciler its own periodic schedule.** The old schedule resolved to a
+scope with one variant, the local node. Per-workload targets would need a scope that
+enumerates managed resources, which is the enumeration we ended up building, kept as a
+second periodic mechanism beside the router's relist.
+
+**Extend the router's relist to intent and more row families.** The router keys on
+observation rows. Teaching it every reconciler's target shape moves each reconciler's
+knowledge into the router.
+
+**Keep both mechanisms and add the pass only for row-backed reconcilers.** That leaves
+three overlapping timers and a rule that a reconciler picks one but not both.
+
+We chose a single mechanism. Every reconciler now implements `managed_targets`, a
+required method that returns every target for which it has desired or actual state,
+read from intent and from observation. The method is required, so a reconciler that
+omits it does not compile. The runtime runs a **resync pass** at boot and then every 30
+seconds, anchored to the previous pass so the schedule does not drift. A pass asks
+every registered reconciler for its targets and submits one evaluation per target. If
+`managed_targets` returns an error, it fails the whole call and the pass evaluates no
+partial set.
+
+An evaluation that ends in a hydrate or View-write error is not requeued. The next pass
+is its retry. A dispatch error keeps the requeue it already had. We deleted the
+per-reconciler schedule, its cadence table and the router's periodic relist. The
+router keeps its edge wakes, which shorten the wait when a row changes. The edge wakes
+are now latency only.
+
+The pass guarantees that every managed target is evaluated again within one period
+plus queue time, whatever dropped its earlier wake. It does not guarantee that the
+reconciler's logic converges. That depends on the second change.
+
+## The service-map reconciler now reads the map
+
+We settled a rule: a View may decide when to act, never whether an effect is in place.
+Attempts, last-attempt times and retry budgets are pacing. Only the observed resource
+says whether the work is done. The service-map reconciler broke the rule because it
+consulted a receipt.
+
+We considered three ways to let it read the resource, and measured all three on one
+physical server (Linux 7.0.0-38) with 1,000 frontends of 16 backends each.
+
+| Mechanism | Cost per frontend | Cost for 1,000 frontends |
+|---|---|---|
+| Scan the whole 16,381-slot table and look each owner up | 5.41 ms p50 | 5.84 s |
+| Map the table into memory and read it | 107 µs p50, before backend lookups | 112 ms |
+| Read a stored fingerprint of the applied set | 4.7 µs p50, 6.3 µs p99 | 6.2 ms |
+
+The table scan costs about 17% of a core at a 30-second period. It also has a
+correctness limit. The table records which backend owns each slot, not which backends
+exist, so a backend with a tiny weight beside a 65,535-weight backend owns no slot and
+the scan cannot see it. In that measurement, a skewed-weight set returned 6 of 16 backends.
+Production writes weight 1 for every backend today, but we did not want a future weight
+to break the diff.
+
+We chose the fingerprint. When the dataplane builds a new inner table for a service, it
+writes a 64-bit fingerprint of the applied backends into two extra slots before the
+atomic swap that publishes the table. The reconciler reads the fingerprint back through
+a read-only port and compares it with the fingerprint of the set it would apply. The
+fingerprint covers weight and health, so a weight-only change is detected. The read
+must hold the dataplane's apply guard. Without it, 1,735 of 2,734 reads in the spike
+returned a state that was neither the old set nor the new one, and 994 failed on a
+missing backend entry. With the guard, none did.
+
+The cost is two extra array slots and a rule about who may read. XDP indexes the table
+modulo 16,381, so it never selects the extra slots. The measurement read the maps from
+userspace and ran no XDP program, so that claim rests on the indexing arithmetic and
+not on a kernel run. A backend entry lost while its inner table survives reads as in
+place. Only an Overdrive bug produces that state, and we did not add a defense for it.
+
+A reboot now leaves an empty map and a reconciler that reads it as empty. The next
+pass reprograms the service. The result row stays as an operator-facing receipt and no
+longer feeds the decision.
+
+## We deleted the path that never ran
+
+The service-map reconciler also carried a View field that recorded what it had emitted
+for the same-host backend path, the code that rewrote a VIP for a client on the node's
+own host. No production path produces such a backend, because every service backend
+address comes from a guest network plan and no workload runs on the host. We could have
+made that path converge. That would have hardened code nothing reaches. We deleted the
+three BPF programs, two maps, the register and deregister actions and the field.
+
+The deletion removed a feature that never worked for guests. A guest's UDP to a service
+VIP got no reply in 8 of 8 attempts on the same server, while TCP to the same VIP
+worked. The guest-flow owner now refuses such a datagram with a policy error before it
+opens a host socket. Without the refusal, the datagram would have left the host onto the
+network. Delivering guest UDP to a VIP is
+[tracked separately](https://github.com/overdrive-sh/overdrive/issues/310).
+
+## We replayed the model against the real runtime
+
+The protocol is concurrent and crash-sensitive, so we wrote a model of it in Quint, a
+language for executable models that a checker explores exhaustively for property
+violations. The model has four reconcilers on one workload, a broker with the production's eight-slot
+cap, the pass, and faults for hydrate errors, View-write errors, dispatch errors,
+dataplane failures, dropped wakes and crashes. The TLC model checker verified the progress property
+exhaustively at a bound of two faults and two drifts. In the recorded run it took 163
+minutes. Removing the pass, or removing the service-map reconciler's retry deadline,
+makes the checker produce a counterexample in 14 seconds each. That is how we know each
+rule matters.
+
+A model proves nothing about the Rust. We used quint-connect, a Rust crate that replays a Quint model's traces against real
+code, to run the model's traces against the production runtime. The test drives the real broker and the four
+real reconcilers, then compares the model's state with the broker's pending keys and
+counters after every step. All ten named scenarios pass, and so do randomized traces.
+
+The replay found four places where the model was wrong and production was right:
+
+- **Managed sets.** We had modeled the set of targets as only growing. An assigned VIP
+  makes the service-map reconciler manage a service, and the SVID reconciler manages a
+  workload only while it has a running allocation or a held certificate, so its target
+  can leave the set.
+- **Partial dispatch.** We had modeled a failed dispatch as "nothing landed". Dispatch
+  runs each action on its own. When the service lifecycle's dispatch fails, the backend
+  row it was writing can still land. When the service-map update's result row fails to
+  write, the dataplane is already programmed. A failed workload start is the sharpest
+  case. The start path issues and holds the workload's SVID before it writes the
+  Running row. If that write fails, the runtime tears the workload down and the SVID
+  stays held with no allocation row, until the SVID reconciler drops it. We narrowed
+  one model invariant to excuse exactly that state.
+- **The service-map reconciler's need after a publish.** We had treated "this service
+  needs programming" as latched. A landed backend publish recomputes it from the
+  published set against the programmed map. For an empty set with nothing programmed,
+  nothing is left to do.
+- **The backoff window after a publish.** We had let a landed publish leave the
+  service-map reconciler inside its backoff window. A published set that differs from
+  the attempted one is dispatched at once, so the publish ends the window.
+
+We corrected the model each time and left production alone.
+
+## What we measured, and what we did not
+
+We compared the pass with the router relist it replaced on a physical server (AMD EPYC
+8024P, 16 threads, Linux 7.0.0-38) with converged workloads, 80% Jobs and 20% Services.
+Evaluations per pass fell from 337 to 265 at 100 workloads, from 1,537 to 1,225 at
+500 and from 3,037 to 2,425 at 1,000. The pass took 15.2% of wall time at 1,000
+workloads, against 15.5% for the relist. It did not exceed the baseline at any size.
+The cost is quadratic in the number of evaluations, because several reconcilers scan the
+whole `alloc_status` family on every evaluation, and
+[issue #270: a warm cache for observation reads](https://github.com/overdrive-sh/overdrive/issues/270)
+tracks the scan cost.
+
+A deploy that arrives during a pass waits behind it. With 1,000 workloads, its
+evaluation was admitted about 4.5 seconds after the pass began (4.2 to 4.9 across five
+samples), against under 1 ms on an idle loop. The relist behaved the same way, so we did not make it worse, and we did not fix
+it. [Issue #357](https://github.com/overdrive-sh/overdrive/issues/357) tracks priority
+for edge wakes.
+
+Integration tests run the production server composition under a simulated clock.
+After a hydrate error or a View-write error, the workload reaches Running and the
+service map is programmed within one period plus queue time of the store recovering.
+After a failed dataplane update, the service-map reconciler retries when its backoff
+window ends, with no row write. The View-write test clears an injected fault. A real
+redb store that fails a commit rejects every later write until `overdrive serve`
+restarts, so there the retry cannot succeed, and
+[issue #360: a transient disk error breaks every redb store until restart](https://github.com/overdrive-sh/overdrive/issues/360)
+tracks that.
+
+A shared property suite runs each reconciler through the production tick over
+simulated ports. From generated starting worlds with forgotten or stale Views, and up to
+two dropped dataplane updates for the service-map reconciler, it asserts that the reconciler reaches its desired state
+within eight rounds and that three further rounds change nothing. It states the
+service-map reconciler's goal on the programmed map, never on its result row, so a
+View field that overrules the map stalls a case. The suite does not exercise the
+no-op heartbeat or the workflow reconciler, which has no instance in a live deploy.
+
+The model treats the 30-second period as an assumption. We have not
+measured recovery times on a loaded real node, and we have not run an XDP program over
+the enlarged service tables.
+
+The 30-second period is a constant.
+[Issue #356](https://github.com/overdrive-sh/overdrive/issues/356) tracks making it an
+operator setting. A shorter period would not lower host-drift latency anyway. That needs
+events from the host, which
+[issue #275](https://github.com/overdrive-sh/overdrive/issues/275) tracks, with the pass
+kept as their backstop.
+
+The next reconciler someone writes gets this guarantee by implementing one required
+method.

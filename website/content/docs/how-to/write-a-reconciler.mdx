@@ -18,11 +18,14 @@ first; this guide assumes it.
 ## Implement the Reconciler trait
 
 A reconciler is a type that implements `Reconciler`: a name, a `State` projection,
-a `View` for its memory, one pure `reconcile`, and two `hydrate_*` methods that
-read its inputs. The smallest possible one observes nothing and emits a no-op
-every tick:
+a `View` for its memory, one pure `reconcile`, two `hydrate_*` methods that
+read its inputs, and `managed_targets`, which names the targets it is responsible
+for. The smallest possible one observes nothing, manages no targets, and emits a
+no-op whenever it is evaluated:
 
 ```rust
+use std::collections::BTreeSet;
+
 use overdrive_core::reconcilers::{
 	Action, HydrateError, HydrationContext, Reconciler, ReconcilerName, TargetResource,
 	TickContext,
@@ -47,6 +50,14 @@ impl Reconciler for NoopHeartbeat {
 		_tick: &TickContext,
 	) -> (Vec<Action>, Self::View) {
 		(vec![Action::Noop], ())
+	}
+
+	// Manages no targets, so the resync pass has nothing to evaluate.
+	async fn managed_targets(
+		&self,
+		_ctx: &HydrationContext<'_>,
+	) -> Result<BTreeSet<TargetResource>, HydrateError> {
+		Ok(BTreeSet::new())
 	}
 
 	// Observes nothing, so both hydration methods produce the unit state.
@@ -183,15 +194,43 @@ dataplane, `Action::DataplaneUpdateService`; to wake another reconciler,
 perform the effect inside `reconcile` — return the action and let the shim execute
 it.
 
-## Declare how it wakes
+## Declare the targets you manage
 
-By default the runtime wakes a reconciler only when another reconciler hands it
-work. Most reconcilers instead declare their own trigger through one of two hooks;
-pick the one that matches where the reconciler reads its actual state.
+`managed_targets` is required. Omit it and the reconciler does not compile. It
+returns every target for which the reconciler has desired or actual state,
+enumerated from intent and from observation:
 
-If it converges on an observation row, declare an **interest** in that row's kind.
-The interest router re-evaluates the reconciler whenever a row of that kind
-changes:
+```rust
+async fn managed_targets(
+	&self,
+	ctx: &HydrationContext<'_>,
+) -> Result<BTreeSet<TargetResource>, HydrateError> {
+	// Intent and observation together, so a target with intent and no
+	// observation row is still returned.
+	let intents = read_intent_targets(ctx).await?;
+	let rows = read_observed_targets(ctx).await?;
+	Ok(intents.into_iter().chain(rows).collect())
+}
+```
+
+Return the whole set or an `Err`. A read failure fails the call, and the runtime
+never evaluates a partial set. A target with nothing to do may be present, and it
+evaluates to a `Noop`. Leaving out a target that has state means the runtime never
+re-evaluates it.
+
+Every 30 seconds the runtime's resync pass calls `managed_targets` on every
+registered reconciler and submits one evaluation for each target it returns. That
+pass is the guarantee that a dropped wake, a failed hydration or a failed View
+write is retried. Your reconciler does not write retry code for those cases.
+
+## Tell the runtime when to wake sooner
+
+The pass bounds how long a target can go unevaluated. Two optional hooks shorten
+the wait.
+
+If the reconciler converges on an observation row, declare an **interest** in that
+row's kind. The interest router re-evaluates the reconciler as soon as a row of
+that kind changes:
 
 ```rust
 fn interests(&self) -> &'static [ObservationRowKind] {
@@ -200,25 +239,43 @@ fn interests(&self) -> &'static [ObservationRowKind] {
 ```
 
 If it reads its actual state from the host — a cgroup, an interface, a VMM — no
-row change can wake it, so declare a periodic **resync** instead. The loop
-resolves the scope to a concrete target and re-evaluates it every period:
+row change can wake it. Declare no interest, and the pass is its trigger.
+
+Do not declare interest in a row this reconciler writes itself. Its own write
+would wake it to write again. The
+[wakeup model](/docs/concepts/reconcilers#how-the-runtime-wakes-a-reconciler)
+covers the one exception.
+
+If a tick emits no action but a retry becomes due at a known time, return that time
+from `next_evaluation_at`:
 
 ```rust
-fn resync_schedule(&self) -> Option<ResyncSchedule> {
-	Some(ResyncSchedule {
-		period: Duration::from_secs(30),
-		scope: ResyncScope::LocalNode,
-	})
+fn next_evaluation_at(
+	&self,
+	_desired: &Self::State,
+	_actual: &Self::State,
+	next_view: &Self::View,
+	tick: &TickContext,
+) -> Option<UnixInstant> {
+	let due = next_view.last_failure_seen_at + backoff_for_attempt(next_view.attempts);
+	(due > tick.now_unix).then_some(due)
 }
 ```
 
-Declare one or the other, not both. A row-backed reconciler gets its
-level-triggered backstop for free — the interest router relists the whole
-snapshot on a fixed period — so it does not also need a schedule. And as a rule,
-do not declare interest in a row this reconciler writes itself: its own write
-would wake it to write again. The
-[wakeup model](/docs/concepts/reconcilers#how-the-runtime-wakes-a-reconciler)
-covers the partition and the one exception to that rule.
+The runtime calls it only when `reconcile` emitted no action, and it keeps the
+evaluation until that strictly future instant. The method is pure. It has no clock,
+no I/O and no write access to the View. Without it, a retry that falls inside a
+backoff window waits for the next pass.
+
+## Never let the View decide whether an effect is in place
+
+A View field may pace you: attempts, the time of the last attempt, a retry budget.
+It decides when to act again. It never decides whether the effect is in place. Read
+that from `actual`, from the resource you manage. If a field records what you last
+emitted and you consult it instead of the resource, drift in the resource goes
+unseen, and a write that failed is forgotten and never retried. If the effect
+cannot be observed, make it observable first. A receipt of your last attempt is not
+the resource.
 
 ## Register it
 
@@ -230,8 +287,8 @@ runtime.register(my_reconciler()).await?;
 ```
 
 Registration bulk-loads the reconciler's persisted Views into memory and reads its
-declared wakeup — an interest joins the interest router's table, a schedule joins
-the cadence table — so the runtime evaluates it whenever its trigger fires.
+declared interests into the interest router's table. The resync pass includes the
+reconciler from its next run, using the targets `managed_targets` returns.
 
 <Callout type="warn" title="Purity is the contract">
 	A reconciler that reads the clock, does I/O, or returns different actions for

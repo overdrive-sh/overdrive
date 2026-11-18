@@ -171,8 +171,7 @@ state. It diverges on two axes.
 - **The dataplane is in the kernel, not userspace.** Fly routes traffic between workloads
   through `fly-proxy` and the WireGuard mesh. Overdrive uses XDP for load balancing
   and a node-agent L4 proxy that pushes steady-state encryption into the kernel with
-  kTLS — the agent runs the TLS handshake, the kernel does the crypto, and same-host
-  delivery skips the network stack via a cgroup socket hook.
+  kTLS — the agent runs the TLS handshake, and the kernel does the crypto.
 - **Identity is per-workload, not per-machine.** Fly's documented trust model is
   machine-level WireGuard keys plus TLS termination at the edge proxy. Overdrive
   binds a SPIFFE identity to each workload and uses it to encrypt traffic between workloads.

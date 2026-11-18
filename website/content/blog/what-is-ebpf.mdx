@@ -1,6 +1,6 @@
 ---
 title: What is eBPF, and why does Overdrive use it?
-description: eBPF lets Linux run small, verified programs at specific kernel events. Overdrive uses it for IPv4 service steering and same-host address rewrites, not as a replacement for the whole network stack.
+description: eBPF lets Linux run small, verified programs at specific kernel events. Overdrive uses it for IPv4 service steering and gateway address rewrites, not as a replacement for the whole network stack.
 date: 2026-09-16
 author: The Overdrive team
 summary: eBPF gives Overdrive a narrow place to make frequent network decisions inside Linux, while user-space software keeps ownership of service discovery, lifecycle, and failure handling.
@@ -100,21 +100,20 @@ supported forms. IPv6, IPv4 options, service-table misses, and other traffic
 continue through the normal Linux networking path. eBPF works with Linux's
 network stack; it does not replace it.
 
-## Same-host traffic uses a different hook
+## The ingress gateway uses a socket hook
 
-Not every connection arrives at a network link. An application and its chosen
-backend can live on the same host. In that case, Overdrive attaches eBPF hooks
-to a Linux **cgroup**: a kernel-managed group of host processes.
+Not every connection arrives at a network link. The public ingress gateway runs on
+the host and dials a backend itself. For that case, Overdrive attaches an eBPF
+hook to a Linux **cgroup**: a kernel-managed group of host processes.
 
-When a process in that cgroup connects to a service VIP, the hook can replace
-the VIP with the selected local backend address. Similar hooks handle UDP send
-and reply-address handling. The application still uses a normal socket and the
-stable service address. It does not need to know which local backend was
-selected.
+When the gateway's process connects to a service VIP, the hook picks a backend
+from the same service maps the packet path uses and replaces the VIP with that
+backend's address. The gateway still uses a normal socket and the stable service
+address. The hook acts only on sockets the gateway has registered, so every other
+connection on the host stays on the normal path.
 
-These hooks change addresses. They are not a general firewall, an access
-control system, or a private network. A lookup miss leaves unrelated traffic on
-the normal path.
+This hook changes addresses. It is not a general firewall, an access control
+system, or a private network.
 
 ## User space writes the plan; eBPF reads it
 
@@ -138,7 +137,7 @@ code reads a small prepared answer on the fast path.
 
 The first gain is fewer user-space crossings on these selected paths. XDP can
 choose a backend before much of the ordinary network stack runs. A cgroup hook
-can change a same-host service address at the socket boundary. Neither path
+can change the gateway's service address at the socket boundary. Neither path
 requires a user-space proxy to make that individual choice.
 
 The second gain is a clean route update. User space builds a new table away

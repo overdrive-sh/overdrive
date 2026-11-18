@@ -63,16 +63,23 @@ pub trait Reconciler: Send + Sync {
     async fn hydrate_actual(&self, ctx: &HydrationContext<'_>, target: &TargetResource)
         -> Result<Self::State, HydrateError>;
 
-    // Declare how the runtime wakes this reconciler. Both default-provided.
-    fn resync_schedule(&self) -> Option<ResyncSchedule> { None }
+    // The targets this reconciler manages, enumerated from intent and
+    // observation. Required. An `Err` fails the whole call.
+    async fn managed_targets(&self, ctx: &HydrationContext<'_>)
+        -> Result<BTreeSet<TargetResource>, HydrateError>;
+
+    // Optional hooks that shape when the runtime runs it. Both default-provided.
+    fn next_evaluation_at(&self, desired: &Self::State, actual: &Self::State,
+        next_view: &Self::View, tick: &TickContext) -> Option<UnixInstant> { None }
     fn interests(&self) -> &'static [ObservationRowKind] { &[] }
 }
 ```
 
 `reconcile` is the whole *pure* computation. The two `hydrate_*` methods project
 its inputs — the reconciler's only impure surface, covered in
-[the next section](#the-reconciler-hydrates-its-own-inputs) — and the two
-default-provided hooks below only declare *when* the runtime runs it, covered in
+[the next section](#the-reconciler-hydrates-its-own-inputs) — and
+`managed_targets`, `next_evaluation_at` and `interests` only declare *what* the
+runtime runs it for and *when*, covered in
 [how the runtime wakes a reconciler](#how-the-runtime-wakes-a-reconciler).
 
 `reconcile` takes the desired and actual state its hydration methods produced,
@@ -137,46 +144,61 @@ another reconciler — is a separate question, and the answer is
 
 ## How the runtime wakes a reconciler
 
-The runtime does not run every reconciler on every tick. It runs one when its
-target is worth re-evaluating. Most reconcilers declare what that means through
-one of two default-provided hooks; a few instead take their work from another
-reconciler, covered at the end.
+The runtime does not run every reconciler on every tick. It runs a reconciler for
+one **target** at a time, such as a workload or a service, and it wakes the
+reconciler for a target in four ways. The first is the guarantee. The other three
+are latency.
 
-`interests()` declares an **edge wake**: the observation-row kinds whose change
-should re-evaluate the reconciler. A reconciler that converges on an observation
-row — the running-allocation set, the service backends — lists the kinds it
-reads. One runtime task, the **interest router**, subscribes to the observation
-store's change feed once and, on every accepted row change, submits an evaluation
-to each reconciler that declared interest in that kind. An allocation exiting
-writes a single `alloc_status` row, and the router wakes the four reconcilers
-that read it — workload lifecycle, backend discovery, service lifecycle, and SVID
-lifecycle — without the writer naming any of them.
+**The resync pass is the guarantee.** Every reconciler declares
+`managed_targets`: every target for which it has desired or actual state,
+enumerated from intent and from observation. The method is required, so omitting it
+does not compile. An `Err` fails the whole call, and the runtime never acts on a
+partial set. The runtime runs one **resync pass** at boot and another every 30
+seconds, anchored at the previous pass so the schedule does not drift. A pass asks
+every registered reconciler for its managed targets and submits one evaluation for
+each. Whatever dropped an earlier wake, the target is evaluated again within one
+period plus queue time.
 
-`resync_schedule()` declares a **level wake**: a period and a scope —
-"re-evaluate `node/<id>` every 30 seconds." A reconciler that hydrates its actual
-state from the host instead of from a row has no change feed to watch — nothing
-writes a row when a microVM dies or an interface drifts — so the clock is its
-only trigger. `VmReclamation` declares a 30-second sweep of the local node; the
-loop resolves the scope to a concrete target and submits the evaluation. This is
-why the loop holds no reconciler names and no hardcoded intervals: a reconciler
-that needs a periodic sweep declares one, and the loop reads the declaration.
+`reconcile` stays level-triggered. Each evaluation recomputes the gap from freshly
+hydrated state. The pass guarantees that the evaluation happens. It does not
+guarantee that `reconcile` converges, and it does not make a View-gated action emit
+again. Both of those depend on `actual` being read from the resource itself, as
+[the View section](#a-view-decides-when-to-act-never-whether-an-effect-is-in-place)
+explains.
 
-Which hook fits depends on where the reconciler reads its actual state: from an
-observation row (declare an interest, and the router wakes it on a change) or from
-the host (declare a resync schedule, and the clock wakes it).
+**Errors are retried by the next pass.** A hydrate error or a View-write error ends
+that evaluation. The runtime logs the reconciler, the target and the typed error,
+writes no View and dispatches nothing. It adds no local requeue, because a
+requeue loop over a persistent error would have no backoff memory to pace it. The
+next pass is the retry. A dispatch error keeps the tick's own requeue, and the pass
+backs it up.
 
-An edge wake alone is fragile — one dropped change would strand a reconciler
-until some unrelated change happened to wake it. So the edge path keeps a
-level-triggered backstop: the interest router **relists the whole snapshot on a
-fixed period**, re-deriving every wake it might have missed. A lost change only
-delays a re-evaluation the relist delivers anyway. That is what makes the
-level-triggered guarantee hold end to end — the reconciler always recomputes from
-current state, and the runtime always wakes it again.
+**`interests()` declares an edge wake.** It names the observation-row kinds whose
+change should re-evaluate the reconciler at once. One runtime task, the **interest
+router**, subscribes to the observation store's change feed. On every accepted row
+change it submits an evaluation to each reconciler that declared interest in that
+kind. An allocation exiting writes a single `alloc_status` row, and the router
+wakes the four reconcilers that read it — workload lifecycle, backend discovery,
+service lifecycle, and SVID lifecycle — without the writer naming any of them. A
+reconciler that hydrates its actual state live from the host, such as
+`VmReclamation`, has no row to watch and declares no interest. The pass is its only
+trigger. An edge wake only shortens the wait. It is never the guarantee, and a
+reconciler must not declare interest in a row kind it writes itself, because its
+own write would wake it to write again.
+
+**`next_evaluation_at` declares a precise retry deadline.** The runtime calls it
+only when a tick emitted no action. Returning `Some(t)` asks the broker to keep the
+evaluation until the strictly future instant `t`. `ServiceMapHydrator` uses it to
+retry a failed dataplane update when its backoff window ends, without waiting for
+the next pass or an unrelated row write.
 
 A reconciler can also wake another directly by emitting
 `Action::EnqueueEvaluation`, so one reconciler's output becomes another's
-trigger. The two hooks are the declarative wake surface; this action is the
-producer-push path that complements them.
+trigger.
+
+The pass has one period, and it is fixed. Every evaluation it submits is also an
+ordinary evaluation, so the broker collapses a duplicate submit for a target that is
+already pending.
 
 ## The View is typed memory
 
@@ -203,6 +225,32 @@ Two properties make this durable across a crash:
   against the live backoff policy — rather than a `next_attempt_at` field, which
   would freeze today's policy into the stored value and silently ignore a policy
   change until the row aged out.
+
+## A View decides when to act, never whether an effect is in place
+
+A View field may carry pacing: attempts, the time of the last attempt, a retry
+budget, or a marker keyed to an observed input such as the sequence number of the
+probe row a stop was last emitted for. Pacing decides only *when* to act again. It
+never decides *whether* an effect is in place. Only `actual` decides that, and
+`actual` comes from the resource the reconciler manages.
+
+A marker keyed to an observed input suppresses re-emission only for that same
+input. A newer input reopens the decision from `actual`. A field that records what
+the reconciler last emitted, and is consulted instead of the resource, fails this
+rule in two ways. It cannot see drift in the resource, only in the reconciler's own
+intent. And the runtime flushes the View before it dispatches the actions, so the
+marker can outlive an effect that never landed.
+
+`ServiceMapHydrator` shows the rule in practice. It manages the programmed
+service map, so it reads that map. When the dataplane applies a backend set, it
+stores a 64-bit fingerprint of the set in the service's table before the atomic
+swap. The hydrator's `hydrate_actual` reads that fingerprint back through the
+`ProgrammedServiceView` read-port. It compares the fingerprint with the one it
+computes from the backends it would apply, and it emits `DataplaneUpdateService`
+when they differ and its retry pacing allows. The result row the executor writes
+stays as an operator-visible receipt and is not an input to `reconcile`. A map lost
+to a reboot or to a restart of `serve` reads as empty, so the next pass
+reprograms it.
 
 ## Time is an input
 
@@ -250,7 +298,9 @@ Eight reconcilers run in `overdrive serve`:
 - **BackendDiscoveryBridge** — turns live allocations into `service_backends`
   observation rows.
 - **ServiceMapHydrator** — programs the eBPF service map when the backend set
-  drifts, emitting `DataplaneUpdateService`.
+  differs from the programmed map, emitting `DataplaneUpdateService`. It reads the
+  map's stored fingerprint as its actual state and retains its own backoff
+  deadline through `next_evaluation_at`.
 - **WorkflowLifecycle** — the bridge to the workflow engine: re-emits
   `StartWorkflow` for a workflow instance that should be running but has no live
   task. See [reconcilers and workflows](/docs/concepts/reconcilers-and-workflows).
@@ -259,8 +309,8 @@ Eight reconcilers run in `overdrive serve`:
   re-issue is a single audited action, not a workflow.
 - **VmReclamation** — reclaims microVM allocations and discards stranded host
   artifacts. It reads its actual state from the host, not from a row, so it is the
-  host-backed reconciler that declares a `resync_schedule` — a 30-second sweep of
-  the local node — rather than an interest.
+  host-backed reconciler. It declares no interest, and its one managed target,
+  `node/<id>`, is evaluated by the resync pass every 30 seconds.
 - **NoopHeartbeat** — a proof-of-life reconciler that emits a no-op every tick; it
   anchors the "reconcilers are pure" invariant the test suite checks.
 
@@ -277,6 +327,34 @@ later observes the workflow's terminal status to converge the instance.
 `WorkflowLifecycle` is the reconciler that ships for exactly this. The full loop —
 including how a workflow emits actions back into the same pipeline — is in
 [reconcilers and workflows](/docs/concepts/reconcilers-and-workflows).
+
+## Current limits
+
+- **The resync period is 30 seconds and not configurable.** A target whose wake was
+  missed, or whose evaluation failed during hydration or View persistence, waits up
+  to one period plus queue time. Issue
+  [#356: make the reconciler resync period operator-configurable](https://github.com/overdrive-sh/overdrive/issues/356)
+  tracks a boot-time setting.
+- **Host drift is noticed within one period.** No host event wakes a host-backed
+  reconciler, so a drifted cgroup or interface waits for the pass. Issue
+  [#275: host edge wakeups](https://github.com/overdrive-sh/overdrive/issues/275)
+  tracks wakes from the host.
+- **A deploy can queue behind a pass.** The broker admits evaluations oldest first,
+  eight at a time, with no priority lane. On one native test host with 1,000
+  converged workloads, an evaluation submitted during a pass was admitted about 4.5
+  seconds after the pass began, against under one millisecond on an idle loop.
+  Issue
+  [#357: deploy latency under background reconcile load](https://github.com/overdrive-sh/overdrive/issues/357)
+  tracks this.
+- **A failed redb commit is not retried successfully.** The pass re-submits a target
+  whose View write failed, but a redb store that fails a commit rejects every later
+  write until `overdrive serve` restarts. Issue
+  [#360: a transient disk error breaks every redb store until restart](https://github.com/overdrive-sh/overdrive/issues/360)
+  tracks this.
+- **Pass cost grows faster than linearly.** Several reconcilers scan the whole
+  `alloc_status` family on every evaluation. Issue
+  [#270: a warm reflector cache](https://github.com/overdrive-sh/overdrive/issues/270)
+  tracks the scan cost.
 
 ## Where to go next
 

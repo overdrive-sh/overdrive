@@ -129,12 +129,15 @@ backend, not a change of architecture.
 
 The loop is the heart of the control plane, and it is deliberately boring: a
 real background task wakes on a tick, drains a queue of pending evaluations, and
-for each one runs a **reconciler**. The evaluations arrive from three places: an
-**interest router** that submits one when an observation row a reconciler cares
-about changes, a **cadence table** that submits periodic resyncs for reconcilers
-that declare a schedule, and reconcilers themselves handing work to one another.
-Each reconciler declares which of these wakes it; the loop holds no reconciler
-names and no hardcoded intervals. See
+for each one runs a **reconciler**. The evaluations arrive from three places: a
+**resync pass** that submits one evaluation for every target of every reconciler
+every 30 seconds, an **interest router** that submits one sooner when an
+observation row a reconciler cares about changes, and reconcilers themselves
+handing work to one another. Every reconciler declares its managed targets, which
+is what the pass enumerates, and a row-backed reconciler also declares its
+interests. The loop holds no reconciler names. The pass is the guarantee that a
+dropped wake or a failed evaluation is retried, and the other two only shorten the
+wait. See
 [how the runtime wakes a reconciler](/docs/concepts/reconcilers#how-the-runtime-wakes-a-reconciler).
 
 A reconciler is a pure function. It receives the desired state (hydrated from
@@ -163,7 +166,9 @@ Eight reconcilers run today:
   [Health checks close a second loop](#health-checks-close-a-second-loop).
 - **BackendDiscoveryBridge** and **ServiceMapHydrator** — together they turn live
   allocations into dataplane state, feeding the service map the eBPF programs
-  read.
+  read. The hydrator reads the programmed map back, as a fingerprint stored with
+  each service's table, and reprograms any service whose map differs from its
+  backends, including one lost to a reboot or a restart of `serve`.
 - **WorkflowLifecycle** — the bridge to the [workflow](/docs/concepts/workflows)
   engine: it watches workflow instances and re-emits `StartWorkflow` for one that
   should be running but has no live task, so a workflow resumes after a crash the
@@ -173,8 +178,8 @@ Eight reconcilers run today:
   re-issue is a single audited action, not a workflow.
 - **VmReclamation** — reclaims microVM allocations and discards stranded host
   artifacts. It reads its actual state from the host rather than an observation
-  row, so it declares a periodic `resync_schedule` — a 30-second sweep of the
-  local node — instead of an interest.
+  row, so it declares no interest. The resync pass evaluates its one target, the
+  local node, every 30 seconds.
 - **NoopHeartbeat** — a proof-of-life reconciler that emits a no-op every tick;
   it exists to anchor the "reconcilers are pure" invariant the test suite checks.
 
@@ -241,16 +246,18 @@ stops the live allocation. **WorkloadLifecycle** alone restarts it or records
 give-up. The exit observer cancels probe supervision on
 a natural VM exit, including when a terminal row write fails. This prevents a
 dead allocation's probe tasks from persisting into its successor's lifetime.
-Broker submissions wake the convergence loop when they arrive, while its cadence
-tick remains a backstop. Probe rows stay observations, and reconciler decisions
+Broker submissions wake the convergence loop when they arrive, and the resync pass
+re-evaluates every target each period. Probe rows stay observations, and reconciler decisions
 stay separate from the worker's measurements.
 
 ## Networking uses separate mechanisms for separate boundaries
 
 `EbpfDataplane` loads XDP and cgroup programs at node startup. The control plane
 keeps their maps aligned with service backends. Supported IPv4 service traffic
-uses a stable VIP and kernel-side steering; local socket hooks and packet-path
-XDP programs handle different entry points. These address-rewrite programs do
+uses a stable VIP and kernel-side steering. A socket hook on the ingress gateway's
+cgroup and packet-path XDP programs handle different entry points. No hook
+rewrites a Service VIP for a client on the node's own host, because no workload
+runs on the host. These address-rewrite programs do
 not implement TLS or replace the workload lifecycle.
 
 Guest eBPF captures ordinary application sockets, and `ovd_fwd` transports their flows over vsock
@@ -269,8 +276,12 @@ the owner consumes it. Shutdown waits for the allocation's guest-network
 resources to end before releasing its address lease.
 
 Guest DNS and remote TCP/UDP are supported, including empty UDP datagrams.
-Guest-to-Service-VIP UDP delivery to a VM backend is
-[unbuilt](https://github.com/overdrive-sh/overdrive/issues/310). The implemented
+A guest's UDP datagram to a Service VIP is refused with a policy error,
+and nothing leaves the host. Delivery to a VM backend is
+[unbuilt](https://github.com/overdrive-sh/overdrive/issues/310). The service
+dataplane carries IPv4 backends only, and issue
+[#155: IPv6 forwarding for the XDP service load balancer](https://github.com/overdrive-sh/overdrive/issues/155)
+tracks lifting that. The implemented
 mesh is single-node; loaded XDP support does not imply a deployed multi-node
 control plane. See [guest networking](/docs/concepts/guest-networking) and
 [transparent mTLS](/docs/concepts/transparent-mtls) for the exact boundaries.

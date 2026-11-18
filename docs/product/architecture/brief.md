@@ -53,7 +53,7 @@ Accepted ADR records remain unchanged.
 
 | Section | Owner | Status |
 |---|---|---|
-| System Architecture | Titan | **single-node dataplane interface wiring (2026-06-02, ADR-0061 Accepted); extended — Cloud Hypervisor VM driver: host-process failure domain, per-allocation host state, and the VM substrate probe (2026-08-10, GH #42; revised 2026-08-11 after adversarial review — VM reclamation is a `Reconciler` (`reconcilers.md` Bar 2) per user ruling, and one restore-path memory citation withdrawn); reconciler-framework improvements — cadence hook (Piece A) + event-interest declaration (Piece B, interests-only) (2026-08-22, GH #266, ADR-0084; RN-2 = B-2 ratified, warm reflector-`Store` deferred to #270)** |
+| System Architecture | Titan | **single-node dataplane interface wiring (2026-06-02, ADR-0061 Accepted); extended — Cloud Hypervisor VM driver: host-process failure domain, per-allocation host state, and the VM substrate probe (2026-08-10, GH #42; revised 2026-08-11 after adversarial review — VM reclamation is a `Reconciler` (`reconcilers.md` Bar 2) per user ruling, and one restore-path memory citation withdrawn); reconciler-framework improvements — event-interest declaration (Piece B, interests-only) (2026-08-22, GH #266, ADR-0084; RN-2 = B-2 ratified, warm reflector-`Store` deferred to #270); every reconciler declares managed targets and the runtime's 30 s resync pass re-evaluates them (GH #351, ADR-0296, supersedes in part ADR-0084's `resync_schedule`)** |
 | Domain Model | Hera | **VM workloads — the ending taxonomy (three classes, not two), restart-budget vs restart-count accounting, and the driver/kind axis (2026-08-11, GH #42). No new bounded context, no new aggregate; revised 2026-08-11 after adversarial review — the Bar-2 ruling falsified "no new `Action` variant", so DD-5 now specifies two (`ReclaimAllocation`, `DiscardStrandedArtifacts`), and DD-1(b) rules SD-1's two regimes one Ending Class with a precondition plus one non-ending concept (Artifact Disposal, DD-4). DD-1 / DD-1(b) / DD-1(b.i) minted as [ADR-0081](adr-0081-three-ending-classes-platform-reclamation-and-artifact-disposal.md) (2026-08-11, deferral H-1) — the platform-wide decision record; this section remains the full rationale and evidence base. Extended for GH #295: the vsock microVM attachment (ADR-0145–0162, 0164–0167, 0169, 0172–0174, 0177, 0180, 0182–0187 and 0190–0192) creates no new bounded context, aggregate, repository, event model, or lifecycle meaning; leases, flows, control sessions and quiescence holds remain transient technical state under the existing Workload Orchestration, Transparent mTLS Enforcement, Workload Identity and Guest Runtime boundaries.** |
 | Application Architecture | Morgan (this doc) | **extended — Phase 2.2 XDP service map (2026-05-05); pivot to `bpf_redirect_neigh` datapath (2026-05-07, GH #159, ADR-0045); `ServiceFrontend` on `update_service` for per-proto reverse-NAT (2026-06-02, GH #163, ADR-0060); built-in CA `Ca` port trait + 3-tier hierarchy (2026-06-05, GH #28, ADR-0063); transparent-mTLS enrollment Path A — per-workload netns+veth + nft-TPROXY both directions + `MtlsResolve` port (2026-06-16, GH #236, ADR-0071, amends ADR-0069); Cloud Hypervisor VM driver — `Vmm` port + `VmConfig` anti-corruption value, `DriverRegistry` (executes ADR-0022's deferred migration), per-driver `AllocationSpec` payload, and the DD-1 reclamation binding (2026-08-11, GH #42, ADR-0082 + ADR-0083); revised 2026-08-11 after adversarial review — reclamation reshaped into the `VmReclamation` **`Reconciler`** (§ 105a) with a new `VmHostState` port per the user's Bar-2 ruling, the graceful-shutdown evidence claim relabelled, the C-1…C-7 slice corrections landed, and ADR-0082's "unrepresentable" headers downgraded to what the body delivers; Service-kind VM HTTP/TCP health — registration-time guest target projection + parser driver-union V3 with VM Exec rejection to GH #280 (2026-09-06, GH #257, ADR-0090/0091; accepted after independent review); corrective driver-neutral physical allocation identity plus non-gating exact-old cleanup (2026-09-13, GH #284, user-ratified ADR-0105/0106/0108/0109 and P-105-1…P-105-7; ADR-0107 withdrawn; final review `CHANGES_REQUESTED`, bounded F-03…F-06 remediated under two-cycle cap, user disposition required); vsock microVM attachment application composition (GH #295; ADR-0145–0162, 0164–0167, 0169, 0172–0174, 0177, 0180, 0182–0187 and 0190–0192): the guest-flow owner in control-plane implements the core `GuestStreamDial` port, the host forwarder is a dataplane driven port, and leg-S and the VM probe runner dial VM ports through the owner** |
 
@@ -363,13 +363,14 @@ here:
 The evaluation broker is purely event-driven, nothing in the tree would ever
 submit a `vm-reclamation` evaluation, and `has_work` only re-enqueues a
 reconciler that *already* ticked — so the second driver's cadence is a mechanism
-this design must supply, not something Bar 2 grants for free. A fixed sweep
-interval, submitted on the injected `Clock` by the convergence loop (hence
-DST-controllable, not wall-clock), is pinned in § 105a and **ratified by the user
+this design must supply, not something Bar 2 grants for free. A fixed 30 s
+interval on the injected `Clock` (hence DST-controllable, not wall-clock), now
+driven by the runtime's resync pass over the reconciler's managed target
+(ADR-0296), is pinned in § 105a and **ratified by the user
 on 2026-08-11**; it is not operator-tunable and no knob is promised. It is
 deliberately **not restated here** — § 105a is the single site — but recorded so
 a later reader does not find a ticking reconciler with no stated wake source.
-That cadence is also the **node-scoped wake mechanism
+The resync pass is also the **node-scoped wake mechanism
 [#197](https://github.com/overdrive-sh/overdrive/issues/197) /
 [#198](https://github.com/overdrive-sh/overdrive/issues/198) /
 [#199](https://github.com/overdrive-sh/overdrive/issues/199) /
@@ -857,32 +858,32 @@ See `docs/feature/microvm-driver-cloud-hypervisor/feature-delta.md`
 estimation, reuse analysis, and the seven spike-versus-slice contradictions
 this entry resolves.
 
-### Reconciler-framework improvements (#266) — cadence hook + event-interest (reflector-`Store` deferred to #270)
+### Reconciler-framework wakeups — resync pass + event-interest (GH #266, #351; reflector-`Store` deferred to #270)
 
-**Status.** DESIGN wave, SYSTEM layer (Titan, 2026-08-22). Two landable pieces
-generalising the reconciler framework. Full system design (C4, estimation,
-component decomposition, decisions):
-`docs/feature/reconciler-framework-improvements/feature-delta.md`. The
-`nw-solution-architect` layer (exact `Reconciler` trait surface, erasure
-resolution, ADR amendments) is authored **after** this and is not yet present.
-**(Resolved below — see the RATIFIED banner.)** At authoring time, three
-RATIFICATION-NEEDED decisions (RN-1/2/3) were open — this subsection recorded
-the system design, not yet a ratified end-state; the ratified outcome is the
-RATIFIED (2026-08-22) banner further down.
+**Status.** Implemented. Full system design:
+`docs/feature/reconciler-framework-improvements/feature-delta.md` (the event-interest
+half, ADR-0084) and
+`docs/feature/reconciler-convergence-guarantees/feature-delta.md` (the resync pass,
+ADR-0296).
 
-**Piece A — cadence scheduler.** A per-reconciler resync cadence declaration
-modelled as a **level-triggered safety net beside the edge-triggered broker**
-(K8s controller-runtime `SyncPeriod`/`RequeueAfter`; kube-rs
-`Action::requeue_after`). Edge-only is fragile — one dropped observation-store
-change is a permanent divergence — so the periodic resync is the backstop, not
-the primary trigger. **System constraints:** the convergence loop owns the clock
-(`SimClock` under DST) and the local `NodeId`; the hook is **pure** (`now` passed
-in, reads nothing) and returns a **declaration** (period + scope). The loop
-resolves scope → concrete target(s): `ResyncScope::LocalNode` →
-`node/<local_node_id>` using the id the loop already owns, so no cadence
-constant / reconciler name / target scheme leaks into the loop. Resync submits go
-through the *same* `EvaluationBroker::submit` coalescing path, at most once per
-period.
+**The resync pass (ADR-0296, D-1a/D-1b/D-1c).** A **level-triggered safety net beside
+the edge-triggered broker** (K8s controller-runtime `SyncPeriod`; kube-rs
+`Action::requeue_after`). Edge-only is fragile — one dropped observation-store change
+is a permanent divergence — so the periodic pass is the backstop for every reconciler,
+not the primary trigger. Every reconciler declares its targets through the required
+`managed_targets` method (impure and async, like `hydrate_*`, enumerated from intent and
+from observation; an `Err` fails the call, never a partial set). The convergence loop
+runs one pass at boot, then one every 30 s (`RESYNC_PASS_PERIOD`, a compile-time
+constant; GH #356 tracks making it operator-configurable) anchored at `previous + period`
+on the injected clock (`SimClock` under DST), so the schedule never drifts and re-arms at
+most once per period. A pass walks the registered reconcilers in `BTreeMap` order and
+submits one `Immediate` evaluation per managed target through
+`ReconcilerRuntime::submit_evaluation`. A reconciler whose enumeration fails is logged
+and skipped; the pass continues. No reconciler declares a cadence of its own, and none
+can ask for a faster sweep. A hydrate error or a View-persist error ends the evaluation
+without a local requeue, so the next pass is its retry (D-3); a reconciler with a
+precise retry deadline returns it from the pure `next_evaluation_at`, consulted only
+when the tick emitted no non-`Noop` action.
 
 **Open Question 5 — VERDICT: the broker coalesces resync submits; no eval-storm.**
 Traced against `crates/overdrive-core/src/eval_broker.rs`: `submit` collapses at
@@ -938,12 +939,13 @@ veth-provisioner, XDP-attach hydrate `actual` from the host
 partition key** — a reconciler either declares interests (⟺ row-backed ⟺
 cache-served ⟺ event-woken, resync as backstop) or declares none (⟺ host-backed
 ⟺ hydrated live ⟺ resync-only, never cache-served). No special-case in the loop.
-Accurate status: `vm-reclamation` has landed on `main` as the 8th reconciler and
-is now the **first live** host-backed, resync-only consumer of this partition — it
-declares a `resync_schedule` (30 s / `LocalNode`, ADR-0084 §4), driven by the
-generic Piece A cadence phase that replaced its former hardcoded loop sweep, and
-hydrates `actual` live from the host. The other seven reconcilers are row-backed.
-The Bar-2 veth/XDP promotions (#197/#199) remain the next host-state candidates.
+(Empty `interests()` does not by itself prove host-backed: a reconciler can also be
+woken by `Action::EnqueueEvaluation`, as `ServiceMapHydrator` is.)
+`vm-reclamation` is the host-backed, resync-only consumer of this partition: it
+declares its single `node/<local-node-id>` managed target (ADR-0296), the 30 s resync
+pass is its only trigger, and it hydrates `actual` live from the host. The row-backed
+reconcilers declare `interests()` and are event-woken, with the pass as their backstop
+too. The Bar-2 veth/XDP promotions (#197/#199) remain the next host-state candidates.
 
 *Caveat 4 — cardinality bounding (RN-3, DEFERRAL).* A full-replica warm cache
 costs ~100 MB–1 GB/node at Phase-2 gossip scale (the known K8s informer-memory
@@ -958,17 +960,16 @@ approval and no GH issue has been created.**
 (B-1) — and with it the Caveat-1 cache-invalidation model, `ReflectorApplyBeforeHydrate`,
 and the Caveat-4 bounding — is **deferred to GH #270** (gated on observed need). Read
 the reflector-`Store` / warm-cache paragraphs above as the **#270 forward design**,
-not what ships here. RN-1 = **LOCKED** to `Option<ResyncSchedule{period, scope}>`
-(exact Rust in ADR-0084). RN-3 = **MOOT** (no cache ⇒ nothing to bound). What ships:
-Piece A (cadence) + Piece B **interests-only** — the declarative interest fan-out
-over the existing `subscribe_all_events`, replacing the four scattered
-`exit_observer` producer submits. Hydration stays runtime-owned per tick from the
-replica (**ADR-0036 unchanged**). A **third deferral** — the Facet-2
-hydration-erasure rework — is recorded in the Application Architecture subsection;
-hydration ownership is untouched. See ADR-0084 and the Application Architecture §
-"Reconciler-framework improvements (#266)".
+not what ships. RN-3 = **MOOT** (no cache ⇒ nothing to bound). What ships:
+Piece B **interests-only** — the declarative interest fan-out over the existing
+`subscribe_all_events` (List-then-Watch with relist on `Lagged`), replacing the four
+scattered `exit_observer` producer submits (ADR-0084) — plus the resync pass above.
+RN-1's per-reconciler `Option<ResyncSchedule{period, scope}>` was replaced by the
+required `managed_targets` and the single global pass (ADR-0296, supersedes in part
+ADR-0084); the interest router has no periodic relist. Reconcilers own their
+hydration (ADR-0086, which supersedes ADR-0036 in part).
 
-**Constraint GH #265 inherits (not designed here).** Piece A's resync re-runs
+**Constraint GH #265 inherits (not designed here).** The resync pass re-runs
 `reconcile` with no row change, so a standing condition would emit one #265
 `ObservationEvent` per resync fire — **#265's occurrence-dedup must hold under
 resync**, not merely under edge-triggering. #265 remains a separate track.
@@ -2426,7 +2427,7 @@ supersedes-in-part ADR-0036; depends on ADR-0087 landing first). The
 reconciler **contract** stays in `overdrive-core` (the `Reconciler`
 trait — now carrying impure async `hydrate_desired`/`hydrate_actual`
 beside the pure-sync `reconcile` — plus `Action`/`TickContext`/
-`ReconcilerName`/`TargetResource`/`ResyncSchedule`, the
+`ReconcilerName`/`TargetResource`, the
 `HydrationContext` bundle, and four NEW read-port traits). The reconciler
 **impls** + the three dispatch enums
 (`AnyReconciler`/`AnyState`/`AnyReconcilerView`) + per-reconciler
@@ -2633,12 +2634,17 @@ every row.
 > `LocalObservationStore` is the **production LWW path**. Every durable
 > write goes through an `apply_*_lww` helper that reads the row already
 > stored at the key and admits the incoming row **only** when
-> `incoming.updated_at.dominates(&prior_row.updated_at)` — six of them,
-> in `crates/overdrive-store-local/src/observation_backend.rs`:
-> `apply_alloc_status_lww` (`:1058`), `apply_node_health_lww` (`:1103`),
-> `apply_service_backends_lww` (`:1141`), `apply_probe_result_lww`
-> (`:1179`), `apply_service_hydration_lww` (`:1204`),
-> `apply_reconcile_conflict_lww` (`:1241`). A row that does not dominate
+> `incoming.updated_at.dominates(&prior_row.updated_at)` (node health
+> compares `last_heartbeat`), in
+> `crates/overdrive-store-local/src/observation_backend.rs`: the
+> `alloc_status` check inline in the write path (`:506`),
+> `apply_public_certified_key_status_lww` (`:1426`),
+> `apply_gateway_application_status_lww` (`:1457`),
+> `apply_node_health_lww` (`:1491`), `apply_service_backends_lww`
+> (`:1529`), `apply_probe_result_lww` (`:1568`) and
+> `apply_service_hydration_lww` (`:1593`). There is no reconcile-conflict
+> row: the same-slot conflict it recorded was unreachable in production
+> and is deleted (§ "Reconciler convergence guarantees extension"). A row that does not dominate
 > is **discarded**, and `ObservationStore::write` still returns
 > `Ok(())` — so no caller can distinguish a dropped write from a
 > successful one. That comparison is what silently dropped writes in the
@@ -3573,19 +3579,18 @@ flowchart LR
 
 ---
 
-### 35a. Canonical-workload-address inbound TPROXY production install (#241, ADR-0071 + ADR-0053 amendments 2026-06-22)
+### 35a. Canonical-workload-address inbound TPROXY production install (#241, ADR-0071)
 
-> **Superseded in part (ADR-0297, 2026-11-15).** ADR-0053 and its same-host
-> local-backend path (`cgroup_connect4_service`, `LOCAL_BACKEND_MAP`, the GATE
-> arm below) are removed: no production path produces a local backend. The
-> text below is the historical record of the 2026-06-22 design.
+> **ADR-0297:** the same-host local-backend path of ADR-0053
+> (`cgroup_connect4_service`, `LOCAL_BACKEND_MAP`, `REVERSE_LOCAL_MAP`) does
+> not exist: no production path produces a local backend. Delivery to a mesh
+> backend is owned by nft-TPROXY and `MtlsResolve` alone.
 
 The keystone slice that closes the **inbound** half of §35's loop — productionises
 the inbound nft-TPROXY install ADR-0071 deferred (`start_alloc` recorded
 `tproxy_guard = None`) and flips the bridge advertise addr to the canonical
 `workload_addr`. Settled by three Tier-3 spikes (no new routing primitive; the
-`cgroup_connect4_service` LB hook FIRES for Path-A; the VIP/LB path is INERT under
-a real deploy). Full design:
+VIP/LB path is INERT under a real deploy). Full design:
 `docs/feature/canonical-workload-address-inbound-tproxy/{feature-delta,design/wave-decisions}.md`.
 
 **Production wiring (all EXTEND/REUSE — zero new component):**
@@ -3613,16 +3618,13 @@ a real deploy). Full design:
   future-tunable base (#239) would diverge from the addr the inbound rule was
   installed on). `RunningAllocSet.running` widens to
   `BTreeMap<AllocationId, Option<Ipv4Addr>>`.
-- **GATE — ADR-0053↔ADR-0071 boundary.** `ServiceMapHydrator` gains a
-  `workload_subnet: Ipv4Net` ctor param and a third partition arm: backends whose
-  `addr.ip() ∈ WORKLOAD_SUBNET_BASE (10.99.0.0/16)` program NEITHER
-  `LOCAL_BACKEND_MAP` NOR the XDP maps — the firing `cgroup_connect4_service` hook
-  then misses and nft-TPROXY owns mesh delivery. The hook + XDP programs stay
-  attached (reserved for remote/VIP-LB — the dialable-VIP territory #61; the VIP
-  *allocator* #167 already shipped). Empirically safe (no live VIP-LB consumer);
-  TEACH/full-retire deferred to a live dialable-VIP path (#61; the headless name
-  responder #243 returns the `workload_addr`, NOT a VIP, so it is not a VIP-dial
-  trigger; the ADR-0053 amendment is the durable GATE→TEACH record).
+- **GATE — mesh backends are not programmed.** `ServiceMapHydrator` carries a
+  `workload_subnet: Ipv4Net` ctor param; backends whose
+  `addr.ip() ∈ WORKLOAD_SUBNET_BASE (10.99.0.0/16)` are excluded from the
+  survivor set it programs into the XDP maps, so nft-TPROXY owns mesh delivery.
+  The XDP programs stay attached for remote/VIP-LB (the dialable-VIP territory
+  #61; the VIP *allocator* #167 shipped). The headless name responder #243
+  returns the `workload_addr`, NOT a VIP, so it is not a VIP-dial trigger.
 
 `ip_forward` + /30 routes + `rp_filter` and `ensure_shared_routing_infra` are
 already converged/reused (no new boot call site; Bar-2 → #234). Driven end-to-end
@@ -4564,24 +4566,37 @@ Schema:
 |---|---|---|
 | `service_id` | `ServiceId` (u64) | PK |
 | `fingerprint` | `BackendSetFingerprint` (u64) | Content-hash of `(vip, backends)` per `development.md` § Hashing requires deterministic serialization (rkyv-archived). |
-| `status` | tagged enum: `Pending` / `Completed` / `Failed` | See `ServiceHydrationStatus` shape. |
+| `status` | tagged enum: `Completed` / `Failed` | `ServiceHydrationStatus`. There is no `Pending` variant: no writer produced it. |
 | `applied_at` / `failed_at` | `UnixInstant` | Tagged-enum payload. |
 | `reason` | `String` | `Failed`-variant only. |
-| `lamport_counter` / `writer_node_id` | `LogicalTimestamp`, per ObservationStore convention | **Load-bearing in Phase 1, not merely forward-compat** (corrected 2026-08-01). `apply_service_hydration_lww` (`crates/overdrive-store-local/src/observation_backend.rs:1204`) discards an incoming row that does not dominate the row stored at `(service_id, fingerprint)`. Also forward-compat with Phase 2 Corrosion gossip. Counter derivation per ADR-0077 (§ 6). |
+| `lamport_counter` / `writer_node_id` | `LogicalTimestamp`, per ObservationStore convention | **Load-bearing in Phase 1, not merely forward-compat** (corrected 2026-08-01). `apply_service_hydration_lww` (`crates/overdrive-store-local/src/observation_backend.rs:1593`) discards an incoming row that does not dominate the row stored at `(service_id, fingerprint)`. Also forward-compat with Phase 2 Corrosion gossip. Counter derivation per ADR-0077 (§ 6). |
 
 **Migration:** additive-only (no `ALTER TABLE ADD COLUMN NULL`
 against existing tables). **Single-writer in Phase 2.2** — only
-the action shim's `service_hydration` module writes; the hydrator
-reconciler is the sole reader. Trait surface adds typed row helpers
+the action shim's `dataplane_update_service` module writes. Trait surface
+adds typed row helpers
 `service_hydration_results_rows(service_id)` /
 `write_service_hydration_result(row)` matching the existing
 `alloc_status_rows` / `node_health_rows` precedent.
 
-Drift 2 rationale: `actual` reads what the action shim **confirmed**
-by writing an observation row after the dataplane call returned;
-deriving `actual` from the last-emitted action would be a
-write-only loop incapable of detecting silent dataplane failures —
-exactly the failure shape J-PLAT-004 closes (per ADR-0042).
+**The row is the executor's receipt, not the hydrator's `actual`** (ADR-0299,
+D-20, superseding in part ADR-0042 § 3). The hydrator's `actual` is the
+fingerprint of the backend set the dataplane has programmed, read from the
+service map itself through the read-only `ProgrammedServiceView` port on the
+hydration context (`HydrationContext::programmed_services`). `update_service`
+stores the applied slice's 64-bit fingerprint in two extra slots (16,381 and
+16,382) of the inner `SERVICE_MAP` array before the atomic outer swap; XDP
+indexes modulo 16,381 and never selects them. The read happens under the
+dataplane's apply-commit guard. The hydrator emits
+`Action::DataplaneUpdateService` when the programmed fingerprint differs from
+the desired survivor-set fingerprint and its retry pacing allows it. A reboot,
+a restart of `serve`, or a lost map therefore reads as unprogrammed and
+converges through the resync pass, where a `Completed` receipt over the desired
+fingerprint would have read as converged. The write port and the read port are
+built from one concrete dataplane instance, so a view over a different
+instance from the one the shim writes through is not constructible. A
+programmed service whose backend row is gone has no desired state and is not
+purged by the hydrator (teardown: GH #211).
 
 ### 49. `ServiceMapHydrator` reconciler — placement
 
@@ -4589,27 +4604,24 @@ The hydrator lands in the existing `overdrive-control-plane`
 reconciler set, at:
 
 ```
-crates/overdrive-control-plane/src/reconcilers/service_map_hydrator/
-├── mod.rs                       # `pub struct ServiceMapHydrator`,
-│                                # impl Reconciler for ...
-├── state.rs                     # ServiceMapHydratorState,
-│                                # ServiceDesired, ServiceHydrationStatus,
-│                                # BackendSetFingerprint
-├── view.rs                      # ServiceMapHydratorView, RetryMemory
-└── hydrate.rs                   # async hydrate_desired / hydrate_actual
-                                 # (called by runtime per ADR-0036)
+crates/overdrive-reconcilers/src/service_map_hydrator.rs
+    # ServiceMapHydrator (impl Reconciler), ServiceMapHydratorState
+    # { desired, actual: BTreeMap<ServiceId, BackendSetFingerprint> },
+    # ServiceMapHydratorView { retries }, RetryMemory, and the async
+    # hydrate_desired / hydrate_actual / managed_targets
+    # (reconcilers own their hydration, ADR-0086)
 ```
 
-The action-shim wrapper for `Action::DataplaneUpdateService` lands
-at
-`crates/overdrive-control-plane/src/action_shim/service_hydration.rs`
-(NEW file alongside the existing per-action shim files). Hosts
-`ServiceHydrationDispatchError` enum + `dispatch` function.
+The action-shim wrapper for `Action::DataplaneUpdateService` is
+`crates/overdrive-control-plane/src/action_shim/dataplane_update_service.rs`.
+It calls `Dataplane::update_service` and writes the receipt row.
 
-Per-target keying = `ServiceId`. View persists `RetryMemory` inputs
+Per-target keying = `ServiceId`. The View persists `RetryMemory` inputs
 (`attempts`, `last_failure_seen_at`, `last_attempted_fingerprint`)
 NOT a `next_attempt_at` deadline (per `development.md` § Persist
-inputs, not derived state). The deadline is recomputed every tick.
+inputs, not derived state). The View decides only when to act again, never
+whether the effect is in place (that is read from `actual`); the deadline is
+recomputed every tick and returned through `next_evaluation_at` (ADR-0296).
 
 ESR pair (locked names): `HydratorEventuallyConverges`,
 `HydratorIdempotentSteadyState` — both live in
@@ -6798,170 +6810,31 @@ ip/port only).
 
 ---
 
-## Unconnected-UDP sendmsg4 extension (GH #200, ADR-0053 rev 2026-06-05)
+## Same-host service delivery and guest UDP to a VIP (ADR-0297, ADR-0298)
 
-> **Superseded (ADR-0297, 2026-11-15).** The whole same-host local-backend
-> path is removed, including `cgroup_sendmsg4_service`,
-> `cgroup_recvmsg4_service`, `LOCAL_BACKEND_MAP` and `REVERSE_LOCAL_MAP`.
-> Same-host UDP service delivery to VM workloads is
-> [#310](https://github.com/overdrive-sh/overdrive/issues/310)'s work. The
-> text below is historical.
+There is no same-host local-backend path. The `cgroup/connect4`,
+`cgroup/sendmsg4` and `cgroup/recvmsg4` service programs
+(`cgroup_connect4_service`, `cgroup_sendmsg4_service`,
+`cgroup_recvmsg4_service`), the `LOCAL_BACKEND_MAP` and `REVERSE_LOCAL_MAP`
+kernel maps, `register_local_backend` / `deregister_local_backend`, the
+`Register`/`DeregisterLocalBackend` actions and the hydrator's local-backend
+classifier do not exist (ADR-0297, superseding ADR-0053). No production path
+produced a local backend: a VM workload's backend is a mesh address delivered
+by nft-TPROXY and `MtlsResolve`, and every other backend is programmed into the
+XDP service maps. The only `cgroup/connect4` program is the gateway's
+(`crates/overdrive-bpf/src/programs/cgroup_connect4_gateway.rs`), which is
+unaffected. `crates/overdrive-dataplane/tests/integration/same_host_programs_not_loaded_at_boot.rs`
+pins that the removed programs are not loaded at boot.
 
-**Source:** `docs/feature/unconnected-udp-sendmsg4/` (DISCUSS approved
-2026-06-05; DESIGN 2026-06-05). **ADR:** ADR-0053 revision 2026-06-05.
-Extends the same-host cgroup path (ADR-0053 Decision 1; the 2026-06-03
-proto-keying revision). Delivers what Amendment 4 (2026-06-03) scoped
-OUT and tracked as #200.
+A guest's UDP datagram to a service VIP is refused with `FlowRefusal::Policy`
+(ADR-0298, superseding ADR-0164's datagram clause and startup check). Guest TCP
+to a VIP resolves as mesh. UDP service delivery to VM workloads is
+[GH #310](https://github.com/overdrive-sh/overdrive/issues/310)'s work.
 
-### Problem this extension closes
-
-The shipped `cgroup_connect4_service` fires at `connect(2)` time only.
-The dominant DNS-resolver idiom (`dig`, glibc `getaddrinfo`, musl) is
-**unconnected** — `sendto(VIP)` per query, never `connect()`. So a
-same-host UDP service is reachable today only by clients that connect
-first; most do not. The datagram is never intercepted, `LOCAL_BACKEND_MAP`
-is never consulted, and the VIP→backend rewrite never happens — a
-half-working service (healthy upstream, unreachable client).
-
-### What lands
-
-Two new `cgroup_sock_addr` hooks on the same `cgroup_attach_path`:
-
-- **`cgroup/sendmsg4`** (`cgroup_sendmsg4_service`) — forward: rewrites
-  the unconnected request destination VIP→backend over the existing
-  `LOCAL_BACKEND_MAP[(vip, vip_port, proto)]`. Per-datagram analogue of
-  connect4's per-connect rewrite.
-- **`cgroup/recvmsg4`** (`cgroup_recvmsg4_service`) — reply: rewrites the
-  reply *source* the app reads (`recvfrom`/`msg_name`) backend→VIP over a
-  NEW `REVERSE_LOCAL_MAP`.
-
-Plus the new reverse store and the dual-write that fills it:
-
-- **`REVERSE_LOCAL_MAP`** — `BPF_MAP_TYPE_HASH`, key = the existing
-  `BackendKey {ip, port, proto}` newtype (byte-parity with SERVICE_MAP /
-  REVERSE_NAT / LOCAL_BACKEND_MAP), value = VIP `u32`. Written in
-  **ordered (reverse-first)** sequence by the same `register_local_backend`
-  call that writes `LOCAL_BACKEND_MAP` — two BPF map syscalls, not one
-  transaction; the guarantee is ordering, not atomicity (no new trait
-  method; the trait contract is amended so observers never see a forward
-  entry without its reverse). `deregister_local_backend` removes both.
-  NOT a reverse scan, NOT conntrack (UDP is stateless).
-
-### The recvmsg4 cannot-deny finding (load-bearing)
-
-Per `docs/research/dataplane/recvmsg4-reply-source-rewrite-and-miss-semantics-research.md`
-(Nova, High confidence): the kernel verifier restricts
-`BPF_CGROUP_UDP4_RECVMSG` to a return-value range of exactly `[1,1]` — a
-program returning 0 is **rejected at load time**. So "drop on miss" is
-impossible at any layer. recvmsg4 attaches at a cgroup **ancestor** and
-fires on **every** unconnected-UDP recv from any descendant, so the
-`REVERSE_LOCAL_MAP` lookup IS the "this is a service reply"
-discriminator. On a **HIT** (source is a registered backend → a service
-reply) recvmsg4 rewrites the reply source `backend → VIP`; on a **MISS**
-(not a service reply — a backend's own inbound-query `recvfrom`, any
-unrelated same-host UDP) recvmsg4 performs a **pure no-op** — it leaves
-the real source intact and bumps `REVERSE_LOCAL_MISS_COUNTER` for
-observability only. This is **Cilium-aligned** (`cil_sock4_recvmsg`
-returns `SYS_PROCEED` and leaves the source unchanged on a reverse-SK
-miss). The K5 no-leak guarantee is preserved by the **reverse-first
-dual-write** (every registered backend has a visible reverse entry
-before its forward entry is usable, so a genuine service reply ALWAYS
-hits → always VIP-rewritten), NOT by a miss-path sentinel. A source
-rewrite on a miss would corrupt every non-service datagram's sender
-address (observed and fixed in DELIVER step 01-03 — back-prop finding
-UI-1; ADR-0053 D3 sub-revision 2026-06-05b corrects the earlier
-"sentinel on miss" decision).
-
-### Layer boundary — application sockaddr, NOT wire
-
-recvmsg4 fires inside `udp_recvmsg()` AFTER the kernel populated the
-source sockaddr from the backend's skb; a `tcpdump -i lo` sees the
-backend-sourced reply on every round-trip regardless of the hook.
-recvmsg4's domain is the **application sockaddr** (`recvfrom`/`msg_name`)
-only. Wire-level no-leak is XDP's concern (the out-of-scope
-connected/remote REVERSE_NAT path), NOT recvmsg4's. The DISCUSS
-US-01/US-03/K2/K5 ACs were reframed from wire (`tcpdump`, "left the
-host") to application-sockaddr layer accordingly (see
-`design/upstream-changes.md`).
-
-### Shared key-build helper (Option 3 — refactors connect4)
-
-Only the genuinely-shared primitive — **service-key construction +
-`user_port` low-16-NBO handling** — is factored into ONE
-`#[inline(always)]` kernel helper (`build_local_service_key`, the
-`shared::sanity`/`shared::access` precedent) consumed by **all three**
-hooks. The helper does **not** perform any map lookup or any rewrite:
-the **map lookup differs per hook** (connect4 + sendmsg4 look up
-`LOCAL_BACKEND_MAP`; recvmsg4 looks up `REVERSE_LOCAL_MAP`) and the
-**rewrite direction differs per hook and stays in the per-hook program
-body** (connect4/sendmsg4 do a forward DEST rewrite; recvmsg4 does a
-reverse SOURCE rewrite). One helper MUST NOT serve both rewrite
-directions. This **refactors shipped connect4** — its inline key-build /
-NBO code is replaced by a call to the helper (its own lookup + forward
-dest-rewrite stay in its body): behavior-preserving, **Tier-3-reverified**
-(no Tier-2 backstop —
-`BPF_PROG_TEST_RUN` returns ENOTSUPP for `cgroup_sock_addr` ≤ 6.8, so
-the connect4 refactor's regression surface is Tier-3-only; honest risk).
-This changes the DISCUSS "0 connect4 changes / pure addition" claim:
-connect4 is now EXTEND (net-new behavior 0, diff non-zero).
-
-### Probe extension and below-floor preflight
-
-The Earned-Trust probe attaches sendmsg4 + recvmsg4 on the same
-`cgroup_attach_path` and round-trips a `REVERSE_LOCAL_MAP` sentinel. The
-**`attach()` syscall IS the below-floor preflight** — sendmsg4 (≥4.18)
-and recvmsg4 (≥4.20) are both below the 5.10 floor, so a below-floor
-host fails attach → structured `health.startup.refused`. NO `/proc` /
-`uname` parsing (avoids the `unwrap_or_default` boundary-read footgun).
-New `#[from]`-routed `DataplaneError`/`DataplaneBootError` variant(s),
-never flattened to `Internal(String)`.
-
-### SimDataplane reply mirror
-
-`SimDataplane` gains a reply mirror `BTreeMap<BackendKey, Ipv4Addr>`
-written under the SAME mutex acquisition as `local_backends` inside
-`register_local_backend` (the `services`+`reverse_nat` lockstep idiom is
-the template), plus a `reply_source_for(...)` test-only accessor so the
-Tier-1 J-PLAT-004 equivalence invariant can assert "Sim reply source =
-VIP." Models the observable contract only — does not shape production.
-
-### Reuse posture
-
-Only `REVERSE_LOCAL_MAP` (map + handle) and the two programs + shared
-helper + miss counter are CREATE NEW. `BackendKey`, `Proto`,
-`LOCAL_BACKEND_MAP`, `register_local_backend`, the hydrator classifier,
-the action variants, `cgroup_attach_path` are all REUSE/EXTEND. Full
-table in `feature-delta.md` § DESIGN.
-
-### Shipped — Component Inventory (FINALIZE 2026-06-05)
-
-All of "What lands" above is **SHIPPED** (DELIVER complete; 7 steps
-01-01…03-02 all COMMIT/PASS; closes ADR-0053 OQ-3 / #200). Nothing in
-this section is deferred-that-shipped. Evolution record:
-`docs/evolution/2026-06-05-unconnected-udp-sendmsg4.md`.
-
-| Component | Path | Disposition |
-|---|---|---|
-| `cgroup_sendmsg4_service` program | `crates/overdrive-bpf/src/programs/cgroup_sendmsg4_service.rs` | NEW |
-| `cgroup_recvmsg4_service` program | `crates/overdrive-bpf/src/programs/cgroup_recvmsg4_service.rs` | NEW |
-| `build_local_service_key` shared helper (key-build + NBO only) | `crates/overdrive-bpf/src/shared/build_local_service_key.rs` | NEW |
-| `REVERSE_LOCAL_MAP` kernel map | `crates/overdrive-bpf/src/maps/reverse_local_map.rs` | NEW |
-| `REVERSE_LOCAL_MISS_COUNTER` (`PERCPU_ARRAY`) | `crates/overdrive-bpf/src/maps/` | NEW |
-| `ReverseLocalMapHandle` userspace handle | `crates/overdrive-dataplane/src/maps/reverse_local_map_handle.rs` | NEW |
-| `cgroup_connect4_service` (key-build/NBO via shared helper) | `crates/overdrive-bpf/src/programs/cgroup_connect4_service.rs` | EXTEND (behavior-preserving) |
-| `register_local_backend` reverse-first dual-write + amended contract | `crates/overdrive-core/src/traits/dataplane.rs`, `crates/overdrive-dataplane/src/lib.rs` | EXTEND (no new trait method) |
-| `SimDataplane` reply mirror + `reply_source_for()` | `crates/overdrive-sim/src/adapters/dataplane.rs` | EXTEND |
-| `reply_source_rewrite_lockstep` Tier-1 DST invariant | `crates/overdrive-sim/src/invariants/reply_source_rewrite_lockstep.rs` | NEW |
-| `CgroupSendRecvAttach` / `ReverseLocalProbe` typed error variants (`#[from]`-routed → `health.startup.refused`) | `crates/overdrive-core/src/traits/dataplane.rs` | EXTEND |
-
-> **`REVERSE_LOCAL_MISS_COUNTER` operational-semantics design note (for
-> DEVOPS):** recvmsg4 fires on ALL subtree unconnected UDP, so the
-> counter's absolute value is dominated by non-service traffic and is
-> NOT a "service reply failed to translate" alarm. Whether to keep,
-> demote, or replace it (e.g. a control-plane reconciler comparing
-> forward-vs-reverse map cardinality) is a metric-semantics decision,
-> recorded as a DESIGN NOTE (feature-delta § Open questions #1) — NOT a
-> tracking issue. The no-op-on-miss behavior is correct regardless.
+Kernel fact for any future `cgroup_sock_addr` UDP design: the verifier
+restricts `BPF_CGROUP_UDP4_RECVMSG` to a return-value range of exactly `[1,1]`,
+so a recvmsg4 program cannot drop on a miss, and it fires for every
+unconnected-UDP receive of every descendant of the attach cgroup.
 
 ### Shipped — Component Inventory (FINALIZE 2026-06-11) — built-in-ca-operator-composition
 
@@ -8617,8 +8490,8 @@ flowchart LR
 ```
 
 **Why a NEW port, not `Dataplane`** (ADR-0069 Decision): the `Dataplane` port
-models **map writes** (`update_policy`, `update_service`, `register_local_backend`
-— ADR-0040/0049/0053) keyed by service/policy identity. The proxy is
+models **map writes** (`update_policy`, `update_service`
+— ADR-0040/0049) keyed by service/policy identity. The proxy is
 **per-connection socket operations** (intercept a `connect()`, drive a handshake
 on an acquired socket, arm kTLS on a leg, run a `splice` pump) — a different
 abstraction with a different lifecycle (per-connection, not per-service-update).
@@ -9872,18 +9745,17 @@ That is a *property* of the ratified decision, not an open question — an opera
 knob would be a new decision, taken elsewhere, and nothing in this design carries
 a forward pointer to one.
 
-**Mechanism update — 2026-08-23 (ADR-0084 §4, GH #266): the driving mechanism was
-unified onto the generic Piece A cadence hook; the value and the not-tunable
-property above are UNCHANGED.** The cadence is no longer a hardcoded submission
-inside `spawn_convergence_loop`. `VmReclamation` now declares its own
-`resync_schedule() → Some(ResyncSchedule { period: VM_RECLAMATION_SWEEP_INTERVAL,
-scope: ResyncScope::LocalNode })`, and `VM_RECLAMATION_SWEEP_INTERVAL` relocated
-to `overdrive-core` (beside `VmReclamation`) — only its home crate changed. The
-generic cadence phase picks the schedule up at registration and submits
-`node/<local_node_id>` every 30 s via `broker.submit` + the core
-`resolve_scope(LocalNode, node_id)` — behaviourally identical to the deleted sweep
-(same target, same `now + period` first-fire). The loop now names no reconciler and
-bakes no cadence constant, and `vm-reclamation` is the hook's first live consumer.
+**Driving mechanism (ADR-0296, GH #351): the runtime's resync pass.** The 30 s
+value and the not-tunable property above are unchanged. `VmReclamation` declares no
+cadence of its own: it declares its managed target through the required
+`managed_targets` (its single `node/<local-node-id>` target, always), and the
+convergence loop's boot-anchored resync pass (`RESYNC_PASS_PERIOD`, 30 s, in
+`overdrive-control-plane`) re-evaluates that target every period through
+`ReconcilerRuntime::submit_evaluation`. `vm-reclamation` is host-backed (it hydrates
+`actual` live from the `VmHostState` port and declares no event interests), so the
+pass is its only trigger. `VM_RECLAMATION_SWEEP_INTERVAL` (30 s, in
+`overdrive-reconcilers`) is the value test drivers advance the clock by to reach the
+next pass; the loop names no reconciler and bakes no per-reconciler cadence.
 
 Derivation — retained because it is the reasoning the ratification rests on, and
 a later reader who wants to change the value needs it: it bounds **(i)** the
@@ -9913,12 +9785,10 @@ continuous convergence the ruling bought.
 such: a node-scoped sweep cadence is precisely what
 [#197](https://github.com/overdrive-sh/overdrive/issues/197)'s shared
 host/node-infrastructure reconciler model will need for #198 / #199 / #234 too.
-Per SD-1 this design does **not** found that abstraction — it adds one
-submission and leaves the generalisation where Titan put it. *(Superseded
-2026-08-23, ADR-0084 §4 / GH #266: the generalisation has since been founded —
-the generic Piece A cadence hook — and `vm-reclamation` is unified onto it as its
-first live consumer via `resync_schedule`, replacing the one hardcoded loop
-submission; see the Mechanism update above.)* § *System
+Per SD-1 this design does **not** found that abstraction on its own. The
+generalisation is the runtime's resync pass (ADR-0296): every reconciler declares
+managed targets and the pass re-evaluates them, with `vm-reclamation` as its
+host-backed consumer; see the driving-mechanism paragraph above. § *System
 Architecture* carries a one-sentence pointer to the same fact and **defers to
 this section**: it deliberately does not restate the constant, its derivation or
 the rejected alternatives, all of which live here and only here.
@@ -10395,7 +10265,7 @@ while a Bar-2 reconciler needs both.
 | 28 | **`action_shim::dispatch`** (`action_shim/mod.rs:852`) | the shim's driver parameter | **EXTEND** | `driver: &dyn Driver` → `drivers: &DriverRegistry`. **Pinned**, because leaving the one function that *is* the `[G1]` pass/fail bar unpinned while pinning three others was an inconsistency |
 | 29 | **`MtlsInterceptWorker::start_alloc`** (`mtls_intercept_worker.rs:472-497`, fired `action_shim/mod.rs:1425`, `:1643`) | per-alloc mesh enrollment | **EXTEND (gate)** | Its docstring's stated predicate — `DriverType::Exec`, *"unconditionally true on the worker's exec lifecycle path"* — is falsified by a second driver. Fail-closed install, so ungated a VM alloc is either killed or given a silent false confidentiality claim. Gated on `Exec`; GH #222 is the removal condition |
 | 30 | `provision_and_inject_netns` (`action_shim/mod.rs:906`) | per-alloc netns | **REUSE UNCHANGED** | Deliberately **not** driver-gated. A VM alloc still gets a netns slot; an empty netns is stronger confinement, and ADR-0082 § D6 makes `config.netns == None` a supported case for the mTLS-uncomposed boot rather than a VM-specific one |
-| 31 | `spawn_convergence_loop` (`lib.rs:2427-2477`) + `EvaluationBroker` (`eval_broker.rs:59`, `submit` at `:85`) | waking reconcilers | **EXTEND — re-verdicted at iteration 3** | Two obligations, and the first was the only one the Bar-1 draft had. **(a) The wake after a row write:** `execute_reclaim_allocation` submits the **four** evaluations the exit observer submits per exit — `workload_lifecycle` (`worker/exit_observer.rs:234`), `backend_discovery_bridge` (`:254`), `service_lifecycle` (`:295`) and **`svid_lifecycle` (`:318-320`)**; without the fourth, `DropSvid` never fires and **the node keeps the dead allocation's leaf private key** (`svid_lifecycle.rs:316-317`, `:506-513` — ADR-0067 O2). **(b) NEW, and Bar 2 does not supply it for free: `vm-reclamation` must be resynced every `VM_RECLAMATION_SWEEP_INTERVAL` (30 s).** The broker is purely event-driven with no bootstrap sweep and `has_work` only *re*-enqueues a reconciler that already ticked, so **nothing in tree would ever tick this one**. As of the ADR-0084 §4 / GH #266 unification (2026-08-23) this cadence is supplied by `VmReclamation`'s own `resync_schedule` (30 s / `LocalNode`) through the generic Piece A cadence hook — NOT a hardcoded `spawn_convergence_loop` submission — with `VM_RECLAMATION_SWEEP_INTERVAL` relocated to `overdrive-core`; behaviourally identical (same target, same first-fire), and `vm-reclamation` is the hook's first live consumer. The generalisation the sweep once foreshadowed for [#197](https://github.com/overdrive-sh/overdrive/issues/197) (#198 / #199 / #234) is now that Piece A hook — see § 105a.8 for the three rejected alternatives the ratified cadence was chosen against |
+| 31 | `spawn_convergence_loop` (`lib.rs:2427-2477`) + `EvaluationBroker` (`eval_broker.rs:59`, `submit` at `:85`) | waking reconcilers | **EXTEND — re-verdicted at iteration 3** | Two obligations, and the first was the only one the Bar-1 draft had. **(a) The wake after a row write:** `execute_reclaim_allocation` submits the **four** evaluations the exit observer submits per exit — `workload_lifecycle` (`worker/exit_observer.rs:234`), `backend_discovery_bridge` (`:254`), `service_lifecycle` (`:295`) and **`svid_lifecycle` (`:318-320`)**; without the fourth, `DropSvid` never fires and **the node keeps the dead allocation's leaf private key** (`svid_lifecycle.rs:316-317`, `:506-513` — ADR-0067 O2). **(b) NEW, and Bar 2 does not supply it for free: `vm-reclamation` must be re-evaluated every 30 s.** The broker is purely event-driven and `has_work` only *re*-enqueues a reconciler that already ticked, so a wake must come from elsewhere. It is supplied by the runtime's resync pass (ADR-0296): `VmReclamation` declares its single `node/<local-node-id>` target through the required `managed_targets`, and the boot-anchored 30 s pass re-evaluates it. The same pass is the backstop the host-state reconcilers of [#197](https://github.com/overdrive-sh/overdrive/issues/197) (#198 / #199 / #234) use — see § 105a.8 for the three rejected alternatives the ratified cadence was chosen against |
 | 32 | **`ServerHandle`** (`lib.rs:1020`, `:1135-1136`, `:2290`) | observer-task ownership and shutdown | **EXTEND** | *Added at review iteration 2.* Scalar `JoinHandle` + one token; a per-driver observer loop needs `Vec<JoinHandle>`, cancel-once-then-await-all, and a **cloned** token. Detaching (not aborting) on drop is what makes the naive loop a teardown hang rather than a tidy-up nit |
 | 33 | **`Reconciler` trait + `AnyReconciler` / `AnyState` / `AnyReconcilerView` / `AnyViewMap` + the four dispatch matches** (`reconcilers/mod.rs:279-326`, `:798`, `:334`, `:930`, `:859`; `reconciler_runtime.rs:76`, `:274`, `:1734`, `:2678`) | the reconciler primitive | **EXTEND** | *Added at iteration 3 (Bar-2 ruling).* `VmReclamation` is the eighth registrant. Enumerated in § 105a.9 so the five-enum / four-match cost is not discovered mid-slice; all compiler-enforced |
 | 34 | **`BackendDiscoveryBridgeView` / ADR-0079's field-less View** (`backend_discovery_bridge.rs:256`) | View shape | **REUSE (pattern)** | The precedent SD-1's pin 2 names. `VmReclamationView` is field-less for the same reason and takes the same `#[expect(clippy::zero_sized_map_values, …)]` on its bulk-load arm. Retry falls out of `has_work`, not a View field |
@@ -10951,21 +10821,12 @@ private interfaces, registration, readback and handoffs are pinned in
 `adr-0101-service-backend-health-observed-convergence.md`; see
 `docs/feature/service-kind-vm-workloads/design/backend-eligibility-convergence-ruling.md`.
 
-**Focused local direct-VIP amendment (ADR-0101 revision 4): Accepted; independent
-DESIGN review APPROVED, 2026-09-08**, [iteration 1](../../feature/service-kind-vm-workloads/design/review-amendment-be10-local-backend-withdrawal.md#iteration-history),
-with no findings. The user approved preserving BE10's withdrawal
-assertion. Its seeded production-owner/Sim trajectory shows the local map
-retaining an unhealthy backend after the queued hydrator runs; native unhealthy
-routing is not reproduced and this is not the mesh-subnet VM E09 mechanism.
-Accepted D7 changes only existing local action selection: retain unhealthy
-candidate identity through the current fingerprint gate and choose existing
-`DeregisterLocalBackend`; healthy/recovery chooses existing registration.
-Existing async Dataplane ports already implement awaited dual-map removal.
-No public API, state, acknowledgement, retry or persistence addition. The
-local emission marker is not readback, and no failed-effect repair is newly
-promised. Current one-Running normal convergence, sole publication and
-asynchronous consumer boundaries remain; BE02 is separate. Exact contract and
-evidence: [BE10 amendment](../../feature/service-kind-vm-workloads/design/amendment-be10-local-backend-withdrawal.md).
+**Local direct-VIP withdrawal (ADR-0101 revision 4, BE10): removed by ADR-0297.**
+The amendment selected `DeregisterLocalBackend` for an unhealthy local backend.
+The local-backend path it acted on does not exist, so there is no local map
+and no local withdrawal action: an unhealthy backend leaves the programmed
+service through the hydrator's single path, `DataplaneUpdateService` over the
+survivor set, judged against the programmed fingerprint (ADR-0299).
 
 Independent [DESIGN iteration 3](../../feature/service-kind-vm-workloads/design/review-adr-0101.md#iteration-3--focused-re-review-of-r0101-3)
 and [consolidated DESIGN+DISTILL iteration 2](../../feature/service-kind-vm-workloads/distill/review-adr-0101-design-distill.md#iteration-2--focused-re-review-of-cd-0101-0102)
@@ -11380,7 +11241,7 @@ verified on native metal kernel 7.0 by
 The dataplane adapter prepares each gateway upstream socket in the `serve`
 task (mark `0x1`, `127.0.0.1` bind per ADR-0190, cookie registered as a
 `(cookie, ServiceKey)` intent). A separate `cgroup/connect4` selection program
-(ruling P-10 / R-1 attached it beside `cgroup_connect4_service`, which ADR-0297 removes; the gateway program is unaffected) selects
+(ruling P-10 / R-1; the gateway's own program, with no other `cgroup/connect4` service program beside it after ADR-0297) selects
 through the Maglev inner map, rewrites the
 destination and records `Selected(BackendId)` or `NoBackend`. The dial leaves
 via table 100, is TPROXY-diverted to leg-C, which terminates mTLS, arms kTLS
@@ -11612,25 +11473,38 @@ poll of `listeners[0]` passes. On acceptance it supersedes the operative
 
 Contract: [feature delta](../../feature/service-allocation-readiness-and-ending/feature-delta.md).
 
-## Reconciler convergence guarantees extension (GH #351; ADR-0296/0283, PROPOSED)
+## Reconciler convergence guarantees extension (GH #351; ADR-0296 to ADR-0299)
 
-Application Architecture addendum. Status: **proposed**; the user approved decisions D-1
-and D-9 of the feature delta, independent design review is pending. See the
+Application Architecture addendum. Implemented; the ADRs' own status lines read
+Proposed until independent design review completes. See the
 [feature delta](../../feature/reconciler-convergence-guarantees/feature-delta.md).
 Topology (L1, L2) is unchanged; the change is inside the control-plane convergence
-subsystem and the hydration boundary (see `c4-diagrams.md`, L3, proposed).
+subsystem and the hydration boundary (see `c4-diagrams.md`, L3).
 
 - [ADR-0296](adr-0296-every-reconciler-declares-its-managed-targets-and-the-runtime-re-evaluates-them-each-period.md):
-  every reconciler declares its managed targets; the runtime re-evaluates them every
-  period. Supersedes in part ADR-0084 (`resync_schedule`, router periodic relist) once
-  accepted. `interests()` stays as the edge wake.
+  every reconciler declares its managed targets through the required `managed_targets`;
+  the runtime's boot-anchored 30 s resync pass re-evaluates them (D-1a/D-1b/D-1c).
+  Supersedes in part ADR-0084: `resync_schedule`, `ResyncSchedule`, `ResyncScope`, the
+  cadence table and the router's periodic relist do not exist. `interests()`, the
+  List-then-Watch router and its `Lagged` relist remain as the edge wake;
+  `next_evaluation_at` is the precise retry deadline (D-3).
 - [ADR-0297](adr-0297-the-same-host-local-backend-path-is-removed.md):
-  the same-host local-backend path (ADR-0053) is removed; it has no production producer.
-  Supersedes ADR-0053.
+  the same-host local-backend path (ADR-0053) does not exist; it had no production
+  producer. Supersedes ADR-0053.
 - [ADR-0298](adr-0298-guest-udp-to-a-service-vip-is-refused-until-gh-310.md):
   guest UDP to a service VIP is refused `Policy` until GH #310. Supersedes ADR-0164's
   datagram clause and startup check.
-- Proposed rule (D9): a View decides when to act, never whether an effect is in place.
+- [ADR-0299](adr-0299-the-service-map-hydrator-reads-the-programmed-service-map.md):
+  the `ServiceMapHydrator`'s `actual` is the programmed-service fingerprint read through
+  `ProgrammedServiceView` (D-20); the `service_hydration_results` row is the executor's
+  receipt only. Supersedes in part ADR-0042 § 3.
+- The action-shim validator keeps one same-slot rule, the reclaim rule
+  (`ConflictingAllocationReclaim`: `ReclaimAllocationNetwork` beside another action naming
+  the same allocation). The same-slot conflict between two `DataplaneUpdateService` actions
+  (`ReconcileConflict` row, `ConflictRoute`/`WriteRoute`, `apply_reconcile_conflict_lww`)
+  does not exist: only `ServiceMapHydrator` emits that action, at most once per
+  `ServiceId` per tick.
+- Rule (D9): a View decides when to act, never whether an effect is in place.
 - Finding recorded in the feature delta: no production path deletes a workload, so the
   VIP-release latch is not reachable through `serve` + `deploy` today; that work moved to
   GH #211.
