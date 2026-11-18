@@ -48,7 +48,7 @@ fn the_catalogue_has_a_row_per_benchmark_with_its_workload_clock_and_owner() {
         .expect("the catalogue must have a row for the connect-hook benchmark");
     let lower = row.to_lowercase();
     assert!(
-        lower.contains("service-only") && lower.contains("service+gateway"),
+        lower.contains("no-hook") && lower.contains("gateway-hook"),
         "the row names the boundary and its arms: {row}"
     );
     assert!(
