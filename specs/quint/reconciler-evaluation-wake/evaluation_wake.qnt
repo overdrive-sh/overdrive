@@ -22,7 +22,7 @@
  * (D-21: the hydrator manages a Service whenever its intent has an assigned VIP, service_map_hydrator.rs managed_targets). A
  * workload INTENT alone makes only k1 managed. service-lifecycle manages a Service once it has an allocation row or an assigned
  * VIP (not on intent alone), so an allocation row makes it manage the target: has(k4) implies has(k3) (D7; the managed-set rule;
- * managed_targets is a DISTILL scaffold in the tree, conformance-driver.md "World construction"). has(k3) arises from a k3 world
+ * managed_targets is implemented in every reconciler: D-1a, D-18, D-21; conformance-driver.md "World construction"). has(k3) arises from a k3 world
  * change (VIP assigned), from a k4 world change (an allocation row), from a k2 world change (its published row implies a VIP),
  * or from a landed k1 start (an allocation exists). has(k2) arises from every step that makes vip true (a k3 or k2 world change)
  * and from a landed k3 publish.
@@ -565,9 +565,9 @@ module evaluation_wake {
   // D-3, D11: a backoff window (the hydrator's, svid-lifecycle's) only exists for a needy key
   val WindowOnlyForNeedy: bool = inWin.subseteq(need)
   // world: the workload-target reconcilers derive from one intent (k3, k4 managed imply k1 managed), a Running allocation's row makes
-  // service-lifecycle manage the Service (k4 and running imply k3: D7; an orphan held SVID has no row, so k4 alone does not), and a published backend row implies a service-lifecycle target
+  // service-lifecycle manage the Service (k4 implies k3 except the orphan state, a held SVID of an allocation that is not Running: D7; an orphan has no row), and a published backend row implies a service-lifecycle target
   val SharedIntentImpliesBase: bool = and { has.contains("k3").implies(has.contains("k1")), has.contains("k4").implies(has.contains("k1")),
-                                            (has.contains("k4") and running).implies(has.contains("k3")), has.contains("k2").implies(has.contains("k3")) }
+                                            has.contains("k4").implies(has.contains("k3") or (held and not(running))), has.contains("k2").implies(has.contains("k3")) }
   // D-1a: svid-lifecycle manages the target iff the workload has a Running allocation or a held SVID (so has(k4) can shrink)
   val K4ManagedIffRunningOrHeld: bool = has.contains("k4") == (running or held)
   // D-21: an assigned VIP makes the hydrator manage the Service

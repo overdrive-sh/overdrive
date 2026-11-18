@@ -1,9 +1,9 @@
 {
   "schema": 1,
   "subsystem": "reconciler-evaluation-wake",
-  "run_id": "127756-1794987058.831",
-  "started": "2026-11-18T07:30:58.830535936Z",
-  "finished": "2026-11-18T10:23:15.192365056Z",
+  "run_id": "2527699-1795011842.880",
+  "started": "2026-11-18T14:24:02.8796992Z",
+  "finished": "2026-11-18T17:23:23.524614912Z",
   "jobs": 16,
   "tools": {
     "quint": "0.32.0",
@@ -12,12 +12,12 @@
     "kernel": "7.0.0-38-generic"
   },
   "git": {
-    "head": "aca38215dfa1b2de8e1ddf4309f33cb91d17637b",
+    "head": "70946eedb976ae0d578eed1d6027d19163f437f9",
     "dirty": true
   },
   "inputs": {
     "checks.toml": "93bf1945c15ce5cbeb80f357adac76c9f9f034fa30c74d3eeff84d2073155f94",
-    "evaluation_wake.qnt": "c6d6ee1c56aff42e531b06134f88778a5f95a603d178aca3a4703e091b2df8ee",
+    "evaluation_wake.qnt": "f9e055cf27712ae29145a03d15f7fb61c8fba44cda986a15702e5b48d014a1a9",
     "hazard/evaluation_wake_hazards.qnt": "dc5d42126ae69c37a48e4ce56e8809d1b5993b84ac9197879a655e0d245c9ce0"
   },
   "checks": [
@@ -33,16 +33,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 9284.567,
+      "seconds": 9777.577,
       "retry_seconds": 0.0,
-      "wall_seconds": 9284.567,
+      "wall_seconds": 9777.578,
       "timeout_secs": 43200,
       "cause": null,
       "trace": null,
       "condensed": null,
       "failure_log": null,
-      "input_key": "9b3080986b54d0e4205c560a7a2d0b65d06a2a304d50781aeb31a719cab8050a",
-      "run_id": "127756-1794987058.831"
+      "input_key": "359d2eec9d2b435cd1e70d85b790859200bdf0a7dc5396c90f95523d2c8c2db9",
+      "run_id": "2527699-1795011842.880"
     },
     {
       "name": "evaluation-wake-retention-schedules-backed-off-key",
@@ -56,16 +56,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 1051.463,
+      "seconds": 982.743,
       "retry_seconds": 0.0,
-      "wall_seconds": 1051.463,
+      "wall_seconds": 982.743,
       "timeout_secs": 21600,
       "cause": null,
       "trace": null,
       "condensed": null,
       "failure_log": null,
-      "input_key": "14b300112569f80ed073c04669858c89ea48e9f6e2b75999efe786d4f570eda7",
-      "run_id": "127756-1794987058.831"
+      "input_key": "c2b640668d60e3c9ed3f996699dcc93e137e8287d1b035d8d0e41c29013980d8",
+      "run_id": "2527699-1795011842.880"
     },
     {
       "name": "evaluation-wake-hazard-no-pass",
@@ -79,16 +79,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 13.923,
+      "seconds": 14.206,
       "retry_seconds": 0.0,
-      "wall_seconds": 13.923,
+      "wall_seconds": 14.206,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/evaluation-wake-hazard-no-pass.tlc.txt",
       "condensed": "traces/evaluation-wake-hazard-no-pass.txt",
       "failure_log": null,
-      "input_key": "ca4c57ce193dd2cd9f7224f38039ee6ab0be9efceac99f08c023df3456e03c6c",
-      "run_id": "127756-1794987058.831"
+      "input_key": "c346fddaff63be3deb88e10a1469d5f065f4467aa7d92d94356458f57b118731",
+      "run_id": "2527699-1795011842.880"
     },
     {
       "name": "evaluation-wake-hazard-no-retention",
@@ -102,16 +102,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 13.66,
+      "seconds": 14.315,
       "retry_seconds": 0.0,
-      "wall_seconds": 13.661,
+      "wall_seconds": 14.316,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/evaluation-wake-hazard-no-retention.tlc.txt",
       "condensed": "traces/evaluation-wake-hazard-no-retention.txt",
       "failure_log": null,
-      "input_key": "b0e0250178035ed91b1c2a15b60058848df23f112fbeb3b5d6e359ac0adad639",
-      "run_id": "127756-1794987058.831"
+      "input_key": "61a6154f268715ee72097c45d4c5df8f81dfb3faee8181adcfc64622aa6bb9ce",
+      "run_id": "2527699-1795011842.880"
     },
     {
       "name": "evaluation-wake-run-healthy-edge-converges",
@@ -125,16 +125,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 3.805,
+      "seconds": 4.883,
       "retry_seconds": 0.0,
-      "wall_seconds": 3.806,
+      "wall_seconds": 4.883,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
       "failure_log": null,
-      "input_key": "71c7a364f16fb94486f4f282a5be74a4e178055233a9ce2e9803519e87fd269c",
-      "run_id": "127756-1794987058.831"
+      "input_key": "a9965f18429e6e66af450704c8472de4b07322c9d7f26ed5d270d9e7c739b2b3",
+      "run_id": "2527699-1795011842.880"
     },
     {
       "name": "evaluation-wake-run-hydrate-error-recovers-by-pass",
@@ -148,16 +148,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 3.292,
+      "seconds": 3.809,
       "retry_seconds": 0.0,
-      "wall_seconds": 3.293,
+      "wall_seconds": 3.809,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
       "failure_log": null,
-      "input_key": "0373837fd479cf1975caa5cf54cb2e2b847e0056e70457bc8bdae3d46bdf32b2",
-      "run_id": "127756-1794987058.831"
+      "input_key": "216231148bf8f252b475d7ec18c18bd635fca1f32883c0d48e0b76c5608ea004",
+      "run_id": "2527699-1795011842.880"
     },
     {
       "name": "evaluation-wake-run-persist-error-recovers-by-pass",
@@ -171,16 +171,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 4.344,
+      "seconds": 3.837,
       "retry_seconds": 0.0,
-      "wall_seconds": 4.344,
+      "wall_seconds": 3.838,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
       "failure_log": null,
-      "input_key": "2bc776926bd6a1660acae5d8d4c0c4bd5e8366a01c255f17bac563816b0ca45a",
-      "run_id": "127756-1794987058.831"
+      "input_key": "ae231743d7b69609492bf29e3cee0db508952e6b5848d6e988b52ce6873bf82e",
+      "run_id": "2527699-1795011842.880"
     },
     {
       "name": "evaluation-wake-run-crash-between-fsync-and-dispatch-recovers-by-boot-pass",
@@ -194,16 +194,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 4.344,
+      "seconds": 5.139,
       "retry_seconds": 0.0,
-      "wall_seconds": 4.344,
+      "wall_seconds": 5.139,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
       "failure_log": null,
-      "input_key": "b7a575c3610073e5b11ef945f144cf76007678d67ddd6ecf7e9fda1f5233a9d9",
-      "run_id": "127756-1794987058.831"
+      "input_key": "df3c0313e1756ae3441747f594f6df34b92cf82d3ae86f40ded8d3ba1ef7a382",
+      "run_id": "2527699-1795011842.880"
     },
     {
       "name": "evaluation-wake-run-failed-dataplane-inside-backoff-recovers-without-row-write",
@@ -217,16 +217,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 4.344,
+      "seconds": 4.884,
       "retry_seconds": 0.0,
-      "wall_seconds": 4.344,
+      "wall_seconds": 4.884,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
       "failure_log": null,
-      "input_key": "44f563f3b99486d51534025531739be7c58ae554da5eddd4f9b008b03d67cc06",
-      "run_id": "127756-1794987058.831"
+      "input_key": "98be22b72532c719936d8da75ea793c04860d609b818370fe200bb556ec43ed5",
+      "run_id": "2527699-1795011842.880"
     },
     {
       "name": "evaluation-wake-run-fresh-deploy-without-row-is-evaluated",
@@ -240,16 +240,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 4.345,
+      "seconds": 3.585,
       "retry_seconds": 0.0,
-      "wall_seconds": 4.345,
+      "wall_seconds": 3.585,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
       "failure_log": null,
-      "input_key": "b8200900b5c41020e692df5545b9f36a1c769adad1fb3d964988de5a8c4ec730",
-      "run_id": "127756-1794987058.831"
+      "input_key": "281b254086e01cb9c3ea1501adf9015b34e00f3fdec43a2594b44384fc6b77b2",
+      "run_id": "2527699-1795011842.880"
     },
     {
       "name": "evaluation-wake-run-enumeration-failure-of-one-reconciler-does-not-starve-others",
@@ -263,16 +263,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 3.806,
+      "seconds": 3.837,
       "retry_seconds": 0.0,
-      "wall_seconds": 3.806,
+      "wall_seconds": 3.837,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
       "failure_log": null,
-      "input_key": "2e72052135787651176d6090cf8bc13b4ef8547ef7e32ae82f210bfee14719b8",
-      "run_id": "127756-1794987058.831"
+      "input_key": "5d00b191430cb6ea31a364e19a3e8b0a514f19d9d3b8196d8516a1afaf5b3adf",
+      "run_id": "2527699-1795011842.880"
     },
     {
       "name": "evaluation-wake-run-edge-wake-during-burst-is-admitted-after-burst",
@@ -286,16 +286,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 3.293,
+      "seconds": 4.119,
       "retry_seconds": 0.0,
-      "wall_seconds": 3.293,
+      "wall_seconds": 4.119,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
       "failure_log": null,
-      "input_key": "4b598d46d5d2f17440d28e8efb793d6ee7fed29821a9a9a54c3a8e2db6bc1f93",
-      "run_id": "127756-1794987058.831"
+      "input_key": "079499a4eaef26626a57d2752ea512f82cffc9a4e1087f7590887659df588e47",
+      "run_id": "2527699-1795011842.880"
     },
     {
       "name": "evaluation-wake-run-pass-submit-merges-retained-not-before-to-immediate",
@@ -309,16 +309,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 3.292,
+      "seconds": 3.286,
       "retry_seconds": 0.0,
-      "wall_seconds": 3.292,
+      "wall_seconds": 3.286,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
       "failure_log": null,
-      "input_key": "d926af5822d02d2eed591ca4b7a9151f21ccb6e6d8e92dc4ef92230114dcaf1b",
-      "run_id": "127756-1794987058.831"
+      "input_key": "8f55fa39b0c5080a945d49027e55ea929e89e8420de5c3ab98cbaa24e0c3c33e",
+      "run_id": "2527699-1795011842.880"
     },
     {
       "name": "evaluation-wake-run-world-changes-between-drain-and-finish",
@@ -332,16 +332,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 3.56,
+      "seconds": 3.334,
       "retry_seconds": 0.0,
-      "wall_seconds": 3.56,
+      "wall_seconds": 3.334,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
       "failure_log": null,
-      "input_key": "8b687a843fe571a6f69195e2b5eb10b4337acfa0bcc5e0d796ab910e20fb50d3",
-      "run_id": "127756-1794987058.831"
+      "input_key": "01cd32902510d4d5b227a59f06e602f083a8b14d62a8dffd6f751148d04e1493",
+      "run_id": "2527699-1795011842.880"
     }
   ]
 }
