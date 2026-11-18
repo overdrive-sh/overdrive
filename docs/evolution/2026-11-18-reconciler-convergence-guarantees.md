@@ -87,11 +87,12 @@ The per-slice reviews ran retroactively after all twelve steps were committed (s
 - `db8f74b0b` deleted `ServiceHydrationStatus::Pending`, which no writer produces. This changes the archived layout of the row, so `FIXTURE_V1` changed by one byte. Upgrade note: Phase 1 is greenfield single-cut, so the upgrade path is deleting the node's redb file.
 - `2d7d400bf` collapsed the single reclaim-output violation into one struct and corrected stale row-kind counts.
 - `6f1477228` rustfmt on the hydrator reconcile acceptance test and a trailing comma clippy rejects.
+- `514783391` deleted the `service_hydration_results` observation row: its only writer was the dataplane-update shim, nothing read it, and a failed update is now logged as `dataplane.update_service.failed`.
 
 ## 6. Lessons learned
 
 1. **Reviews were not run after each slice.** The per-slice adversarial and subtractive reviews that `feedback_review_after_every_slice` requires did not run as the steps landed. They ran retroactively over the finished range, so their findings (section 5) landed as seven follow-up commits rather than inside the steps that caused them.
-2. **The slice 02 deletion inventory missed two dependents.** (a) The conflict-row test was deleted by mistake although its subject was route-agnostic; the unreachable same-slot conflict row went later in `84afc0afb`. (b) The connect-hook benchmark in `overdrive-bench-families` lost its subject when the connect4 hook was deleted: `smoke_connect_hook_cost` fails at HEAD. By user instruction it is not addressed here (see residuals).
+2. **The slice 02 deletion inventory missed two dependents.** (a) The conflict-row test was deleted by mistake although its subject was route-agnostic; the unreachable same-slot conflict row went later in `84afc0afb`. (b) The D-9 deletion inventory did not consider other features' dependents: the connect-hook benchmark in `overdrive-bench-families` measured the connect4 hook this feature deleted. The native-benchmark-program feature later redefined that family (approved change CA-13, commit `05a77066b`) to measure the gateway connect4 program against no hook, and `smoke_connect_hook_cost` passes at HEAD once the metal lane is prepared (run `57295865f7b993f4f44e1b2e`).
 3. **RED was not observed for 02-04.** The execution log records RED and GREEN with the same timestamp (`19:52:29Z`). The log shows the same identical-timestamp pattern for 01-01 and 03-02; I did not check whether RED was observed for those.
 4. **Gates not run or unusable.** `verifier-regress` was not run (it is a Lima-only alias, and the project ran everything on metal). `bpf-clippy` and `bpf-unit` were unusable on metal.
 5. **The Quint replay needed four spec corrections** before the model matched production: the managed-set coupling between keys, the partiality of dispatch, the hydrator's need being recomputed rather than latched, and the backoff window ending on publish. Replaying the spec against the real broker found modelling errors that checking alone had not; the checked model had been wrong in ways the checker could not see. Cost: `ProgressByPass` model-check time grew from about 80 to about 163 minutes (`evidence/summary.md`: 9,777.6 s), accepted by D-19. The evidence run is recorded against `70946eedb` with a dirty worktree; `17ebe5449` (the spec tightening) is newer. I did not re-run `cargo xtask quint verify-evidence` for this record.
@@ -108,7 +109,6 @@ The per-slice reviews ran retroactively after all twelve steps were committed (s
 
 - GH #283 spike test failure: pre-existing, out of scope.
 - `overdrive-bench-families` dst-lint violations: pre-existing, out of scope.
-- `smoke_connect_hook_cost` in `overdrive-bench-families` fails at HEAD because its subject (the connect4 hook) was deleted. Not addressed, by user instruction.
 - The `interest_row_kind` table covers 8 of 10 row kinds.
 - The ADRs read `Proposed` and the ADR number collision with the benchmark feature stands (see the header).
 - Limitations tracked elsewhere: #356 (period not configurable), #357 (edge-wake deploy latency during a pass), #270 (scan cost), #360 (redb poisoning), #310 (guest UDP to a VIP), #211 (VIP release retry and teardown), #325 (`observed_generation`), #358 (first VIP equals the host `ovd-veth-bk` address).
