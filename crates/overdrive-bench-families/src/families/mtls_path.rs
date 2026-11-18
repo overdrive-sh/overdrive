@@ -20,11 +20,6 @@
 //! and session threads, the ingress accept thread) carries the `ovbm-` name prefix, so a
 //! per-thread accounting of the run can set them apart from the agent's threads. The ingress
 //! relays run on the runtime's own worker threads, where the agent's enforcement runs too.
-//!
-//! The numbers are not pure agent cost. The TLS peer (egress) or TLS client (ingress) runs on
-//! the same host as the agent and may co-limit throughput and tail latency; on ingress the
-//! enforcement starts when the connection is accepted, so its `handshake_ns` also covers the
-//! wait for the client's `ClientHello`, which is client-side TLS work.
 
 #![allow(
     clippy::cast_precision_loss,
@@ -37,7 +32,7 @@ use std::net::{Ipv4Addr, Shutdown, SocketAddr, SocketAddrV4, TcpListener, TcpStr
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::process::{Command, Stdio};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -82,7 +77,7 @@ use cost::{Snapshot, host_ratios, open_sockets, pump_split, resident_bytes};
 const BASELINE: &str = "plaintext-baseline";
 const COMPOSED: &str = "composed-mtls";
 
-const CONNECT: &str = "connect_ns";
+const ESTABLISHMENT: &str = "connection_establishment_ns";
 const HANDSHAKE: &str = "handshake_ns";
 const FIRST_BYTE: &str = "first_byte_ns";
 const THROUGHPUT: &str = "throughput_bytes_per_second";
@@ -98,8 +93,6 @@ const FORWARD_CPU: &str = "forward_userspace_cpu_ratio";
 const RETURN_CPU: &str = "return_splice_cpu_ratio";
 const INGRESS_PUMP_REASON: &str = "asynchronous relay on shared runtime threads";
 const BASELINE_PUMP_REASON: &str = "the plaintext baseline arm has no mTLS pump threads, so there is no forward or return work to split";
-/// The sustained window drives one connection, so one connection is open while it is sampled.
-const SUSTAINED_CONNECTIONS: f64 = 1.0;
 const HANDSHAKE_BASELINE_REASON: &str =
     "the plaintext baseline arm has no mTLS enforcement, so there is no handshake to time";
 
@@ -144,13 +137,9 @@ const GUEST_BACKEND: SocketAddrV4 = SocketAddrV4::new(Ipv4Addr::new(100, 95, 0, 
     replicates = 30,
     profile(
         name = "egress",
-        preparation = "closed-loop (each request waits for its response before the next is sent; no scheduled arrival) over the frame protocol, plaintext workload dialler to a mesh peer on loopback; 10 warm-up then 100 sequential connections (connect, first byte, handshake), then one connection of 200 warm-up and 10000 timed 64-byte round trips (tail latency) and one connection carrying one 256 MiB frame (throughput). Baseline arm plaintext-baseline: the same dialler, bound the same way, connects straight to a plaintext TCP peer with no intercept worker, no nft rules and no TLS. Arm composed-mtls: the dialler's flow is registered with the real intercept worker and captured on leg F, which runs mTLS over kTLS to a rustls mesh peer that requires a client certificate; peer tickets disabled; handshake is the enforce duration; resource rows are whole-host scope (the aggregate cpu line of /proc/stat over every CPU and every process, no cgroup figure; each ratio is the class's tick delta over the delta of all CPU time, idle included) sampled across the 256 MiB throughput window, with memory (VmRSS) and open sockets of the benchmark process taken at its end; forward_userspace_cpu_ratio and return_splice_cpu_ratio are the mtls-out-fwd and mtls-out-ret threads' share of the CPU the process's threads outside the family's own ovbm- threads accrued in that window, and because the window carries the request one way the return pump is the light one; thread CPU is read in 10 ms ticks, so the heavy-to-light ratio (record note pump_heavy_to_light_lower_bound) is a lower bound"
+        preparation = "closed-loop (each request waits for its response before the next is sent; no scheduled arrival) over the frame protocol, plaintext workload dialler to a mesh peer on loopback; 10 warm-up then 100 sequential connections (connect, first byte, handshake), then one connection of 200 warm-up and 10000 timed 64-byte round trips (tail latency) and one connection carrying one 256 MiB frame (throughput). Baseline arm plaintext-baseline: the same dialler, bound the same way, connects straight to a plaintext TCP peer with no intercept worker, no nft rules and no TLS. Arm composed-mtls: the dialler's flow is registered with the real intercept worker and captured on leg F, which runs mTLS over kTLS to a rustls mesh peer that requires a client certificate; peer tickets disabled; handshake is the enforce duration; resource rows are whole-host scope (the aggregate cpu line of /proc/stat over every CPU and every process, no cgroup figure; each ratio is the class's tick delta over the delta of all CPU time, idle included, user includes nice) sampled across the 256 MiB throughput window; irq and softirq are tick-sampled on this kernel (irq_time_accounting is off, so irq reads 0 and softirq is coarse); memory (VmRSS) and open sockets of the benchmark process are taken at the window's end; connection_concurrency is the peak number of client sessions the family held open (opened and not yet dropped) during that window; forward_userspace_cpu_ratio and return_splice_cpu_ratio are absent because the relay is asynchronous on shared runtime threads; handshake_ns starts when the enforcement accepts the connection, so it includes the wait for the client's ClientHello (client-side TLS work); the TLS client runs on the same host as the agent and may co-limit throughput and tail latency, so the numbers are not pure agent cost"
     ),
-    profile(
-        name = "ingress",
-        preparation = "closed-loop (each request waits for its response before the next is sent; no scheduled arrival) over the frame protocol, client to the node's inbound path on loopback with an in-memory guest end; 10 warm-up then 100 sequential connections (connect, first byte, handshake), then one connection of 200 warm-up and 10000 timed 64-byte round trips (tail latency) and one connection carrying one 256 MiB frame (throughput). Baseline arm plaintext-baseline: a plaintext client to a loopback listener that bridges each connection to the same in-memory guest sink, with no TLS and no enforcement. Arm composed-mtls: a rustls client presenting a node-trusted certificate to the real HostMtlsEnforcement serving Routed::Inbound over loopback leg C; the guest transport is excluded, and first byte includes the client side of the TLS handshake; resource rows are whole-host scope (the aggregate cpu line of /proc/stat over every CPU and every process, no cgroup figure; each ratio is the class's tick delta over the delta of all CPU time, idle included) sampled across the 256 MiB throughput window, with memory (VmRSS) and open sockets of the benchmark process taken at its end; forward_userspace_cpu_ratio and return_splice_cpu_ratio are absent because the relay is asynchronous on shared runtime threads"
-    ),
-    metric(name = "connect_ns", unit = ns, table = "connection-establishment", series),
+    metric(name = "connection_establishment_ns", unit = ns, table = "connection-establishment", series),
     metric(name = "handshake_ns", unit = ns, table = "handshake", series),
     metric(name = "first_byte_ns", unit = ns, table = "first-byte", series),
     metric(name = "throughput_bytes_per_second", unit = bytes_per_second, table = "throughput"),
@@ -199,42 +188,6 @@ fn note_shape(rep: &mut Replicate) {
     rep.note("request_bytes", &REQUEST_LEN.to_string());
     rep.note("reply_bytes", &REPLY.len().to_string());
     rep.note("fixture_thread_prefix", THREAD_PREFIX);
-    rep.note(
-        "cpu_scope",
-        "whole host: the aggregate cpu line of /proc/stat over every CPU and every process \
-         (interrupt and kernel-worker time is charged outside any benchmark cgroup); each \
-         host_cpu_*_ratio is the class's tick delta over the delta of all CPU time, idle \
-         included, across the throughput window; user includes nice",
-    );
-    rep.note(
-        "resource_scope",
-        "memory_bytes is this process's VmRSS and socket_count its open socket descriptors, \
-         both sampled at the end of the throughput window with its connection still open; \
-         connection_concurrency is the connections the client holds open in that window",
-    );
-    rep.note(
-        "pump_cpu_scope",
-        "egress composed-mtls: forward_userspace_cpu_ratio and return_splice_cpu_ratio are the \
-         mtls-out-fwd and mtls-out-ret threads' share of the CPU the process's threads accrued \
-         over the throughput window, leaving out the family's own threads (fixture_thread_prefix); \
-         the window carries the 256 MiB request one way, so the return pump is the light one",
-    );
-    rep.note(
-        "pump_cpu_resolution",
-        "per-thread CPU is read from /proc/self/task/*/stat in 10 ms ticks, so the lighter pump \
-         can read below one tick and the heavy-to-light ratio (pump_heavy_to_light_lower_bound) \
-         is a lower bound",
-    );
-    rep.note(
-        "ingress_handshake_scope",
-        "handshake_ns on ingress starts when the enforcement accepts the connection, so it \
-         includes the wait for the client's ClientHello (client-side TLS work)",
-    );
-    rep.note(
-        "tls_peer_colocated",
-        "the TLS peer (egress) or TLS client (ingress) runs on the same host as the agent and \
-         may co-limit throughput and tail latency; the numbers are not pure agent cost",
-    );
 }
 
 fn fail(message: &str) -> ReplicateFailure {
@@ -272,6 +225,8 @@ const fn nanos(duration: Duration) -> f64 {
 /// durations the enforcement recorded.
 trait Path {
     fn open(&self) -> Result<Session, ReplicateFailure>;
+    /// The count of client sessions this path has open.
+    fn sessions(&self) -> &Arc<SessionCount>;
     /// Waits until the enforcement has recorded `count` durations since the last take. The
     /// pumps start inside `enforce`, so a client can see its reply (and close, which cancels
     /// the call) before the decorator has recorded the duration; the client waits here
@@ -321,7 +276,7 @@ fn drive<P: Path>(rep: &mut Replicate, path: &P, composed: bool) -> Result<(), R
         session.finish().map_err(measured("closing a measured connection"))?;
     }
     let handshakes = path.take_handshakes();
-    rep.record_series(CONNECT, &connect)?;
+    rep.record_series(ESTABLISHMENT, &connect)?;
     rep.record_series(FIRST_BYTE, &first_byte)?;
     if composed {
         rep.record_series(HANDSHAKE, &handshakes)?;
@@ -348,6 +303,7 @@ fn drive<P: Path>(rep: &mut Replicate, path: &P, composed: bool) -> Result<(), R
     session.small_exchange(&frame).map_err(measured("establishing the bulk connection"))?;
     let before =
         Snapshot::take().map_err(measured("sampling resource use before the bulk window"))?;
+    path.sessions().begin_window();
     let started = rep.clock().now();
     session.bulk(BULK_BYTES).map_err(measured("bulk transfer"))?;
     let elapsed = rep.clock().now().duration_since(started);
@@ -355,12 +311,13 @@ fn drive<P: Path>(rep: &mut Replicate, path: &P, composed: bool) -> Result<(), R
         Snapshot::take().map_err(measured("sampling resource use after the bulk window"))?;
     let resident = resident_bytes().map_err(measured("sampling resident memory"))?;
     let sockets = open_sockets().map_err(measured("counting open sockets"))?;
+    let concurrency = path.sessions().peak_in_window();
     session.finish().map_err(measured("closing the bulk connection"))?;
     rep.record(THROUGHPUT, BULK_BYTES as f64 / elapsed.as_secs_f64())?;
     record_cost(rep, composed, &before, &after)?;
     rep.record(MEMORY, resident as f64)?;
     rep.record(SOCKETS, sockets as f64)?;
-    rep.record(CONCURRENCY, SUSTAINED_CONNECTIONS)
+    rep.record(CONCURRENCY, concurrency as f64)
 }
 
 /// The whole-host CPU split of the sustained window, and the forward and return pump split
@@ -493,9 +450,7 @@ fn tls_handshake(
     let sni = ServerName::try_from(SERVER_SNI.to_owned()).map_err(std::io::Error::other)?;
     let mut conn =
         rustls::ClientConnection::new(Arc::clone(config), sni).map_err(std::io::Error::other)?;
-    while conn.is_handshaking() {
-        conn.complete_io(&mut tcp)?;
-    }
+    conn.complete_io(&mut tcp)?;
     // The client's final flight must be on the wire before the timed exchange starts.
     while conn.wants_write() {
         conn.write_tls(&mut tcp)?;
@@ -514,6 +469,41 @@ fn close_tls(tls: &mut TlsLink) -> std::io::Result<()> {
     tls.sock.shutdown(Shutdown::Write)
 }
 
+/// The client sessions a path has open: the live count, and the most that were open at once
+/// since the window began.
+#[derive(Default)]
+struct SessionCount {
+    live: AtomicU64,
+    peak: AtomicU64,
+}
+
+impl SessionCount {
+    /// Counts one more open session until the returned guard drops.
+    fn opened(self: &Arc<Self>) -> LiveSession {
+        let now = self.live.fetch_add(1, Ordering::SeqCst) + 1;
+        self.peak.fetch_max(now, Ordering::SeqCst);
+        LiveSession(Arc::clone(self))
+    }
+
+    /// Starts a window: the peak is what is open now.
+    fn begin_window(&self) {
+        self.peak.store(self.live.load(Ordering::SeqCst), Ordering::SeqCst);
+    }
+
+    fn peak_in_window(&self) -> u64 {
+        self.peak.load(Ordering::SeqCst)
+    }
+}
+
+/// Holds one session in the live count; dropping it takes the session out.
+struct LiveSession(Arc<SessionCount>);
+
+impl Drop for LiveSession {
+    fn drop(&mut self) {
+        self.0.live.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
 /// One open client connection and what opening it cost.
 struct Session {
     link: Link,
@@ -523,6 +513,8 @@ struct Session {
     connect: Duration,
     /// Dropped after the link, so the flow closes before its registration is released.
     _registration: Option<ForwardedOutbound>,
+    /// Keeps the session in the live count for as long as it is open.
+    _live: LiveSession,
 }
 
 impl Session {
@@ -1063,12 +1055,13 @@ struct EgressNode {
 struct EgressPath {
     node: Option<EgressNode>,
     peer: Peer,
+    sessions: Arc<SessionCount>,
 }
 
 impl EgressPath {
     fn start(composed: bool) -> Result<Self, ReplicateFailure> {
         if !composed {
-            return Ok(Self { node: None, peer: Peer::start(None)? });
+            return Ok(Self { node: None, peer: Peer::start(None)?, sessions: Arc::default() });
         }
         let lock = KernelStateLock::acquire()?;
         SharedInfraScrub::run();
@@ -1111,11 +1104,11 @@ impl EgressPath {
             _lease: lease,
             _lock: lock,
         };
-        Ok(Self { node: Some(node), peer })
+        Ok(Self { node: Some(node), peer, sessions: Arc::default() })
     }
 
     fn finish(self) -> Result<(), ReplicateFailure> {
-        let Self { node, peer } = self;
+        let Self { node, peer, .. } = self;
         if let Some(node) = node {
             node.runtime
                 .block_on(node.worker.shutdown_owner())
@@ -1187,7 +1180,17 @@ impl Path for EgressPath {
             None => (self.peer.addr, None),
         };
         let Dialled { tcp, began, connect } = dial(socket, target)?;
-        Ok(Session { link: Link::Plain(tcp), began, connect, _registration: registration })
+        Ok(Session {
+            link: Link::Plain(tcp),
+            began,
+            connect,
+            _registration: registration,
+            _live: self.sessions.opened(),
+        })
+    }
+
+    fn sessions(&self) -> &Arc<SessionCount> {
+        &self.sessions
     }
 
     fn await_handshakes(&self, count: usize) -> Result<(), ReplicateFailure> {
@@ -1269,6 +1272,7 @@ struct IngressPath {
     failures: Failures,
     relays: Relays,
     accept: AcceptLoop,
+    sessions: Arc<SessionCount>,
     /// Kept alive for the relays; dropped last.
     runtime: Runtime,
 }
@@ -1311,7 +1315,16 @@ impl IngressPath {
             })?;
             (None, None, accept)
         };
-        Ok(Self { addr: accept.addr, client_tls, timed, failures, relays, accept, runtime })
+        Ok(Self {
+            addr: accept.addr,
+            client_tls,
+            timed,
+            failures,
+            relays,
+            accept,
+            sessions: Arc::default(),
+            runtime,
+        })
     }
 
     /// The measurement failure `error` together with what the inbound relays have reported
@@ -1409,7 +1422,11 @@ impl Path for IngressPath {
             )),
             None => Link::Plain(tcp),
         };
-        Ok(Session { link, began, connect, _registration: None })
+        Ok(Session { link, began, connect, _registration: None, _live: self.sessions.opened() })
+    }
+
+    fn sessions(&self) -> &Arc<SessionCount> {
+        &self.sessions
     }
 
     fn await_handshakes(&self, count: usize) -> Result<(), ReplicateFailure> {

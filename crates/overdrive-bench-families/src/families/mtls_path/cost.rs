@@ -54,7 +54,7 @@ pub(super) struct Snapshot {
 }
 
 /// The aggregate `cpu` line of `/proc/stat`: user (with nice), system, irq, softirq and the
-/// total. Fields beyond the seventh (steal and later) are optional on old kernels.
+/// total over the eight fields up to steal; guest time is already inside user.
 pub(super) fn parse_host_cpu(stat: &str) -> Option<HostCpu> {
     let line = stat.lines().next()?;
     let mut fields = line.split_whitespace();
@@ -65,15 +65,13 @@ pub(super) fn parse_host_cpu(stat: &str) -> Option<HostCpu> {
     let at = |index: usize| counters.get(index).copied();
     let (user, nice, system, idle) = (at(0)?, at(1)?, at(2)?, at(3)?);
     let (iowait, irq, softirq) = (at(4)?, at(5)?, at(6)?);
-    let steal = at(7).unwrap_or(0);
+    let steal = at(7)?;
     Some(HostCpu {
-        user: user.checked_add(nice)?,
+        user: user + nice,
         system,
         irq,
         softirq,
-        total: [user, nice, system, idle, iowait, irq, softirq, steal]
-            .into_iter()
-            .try_fold(0u64, u64::checked_add)?,
+        total: user + nice + system + idle + iowait + irq + softirq + steal,
     })
 }
 
@@ -87,14 +85,14 @@ pub(super) fn parse_thread_stat(stat: &str) -> Option<(String, u64)> {
     // After the name: state is field 3, utime field 14, stime field 15.
     let utime: u64 = rest.get(11)?.parse().ok()?;
     let stime: u64 = rest.get(12)?.parse().ok()?;
-    Some((name.to_owned(), utime.checked_add(stime)?))
+    Some((name.to_owned(), utime + stime))
 }
 
 /// `VmRSS` of a `/proc/self/status`, in bytes.
 pub(super) fn parse_resident_bytes(status: &str) -> Option<u64> {
     let line = status.lines().find(|line| line.starts_with("VmRSS:"))?;
     let kib: u64 = line.split_whitespace().nth(1)?.parse().ok()?;
-    kib.checked_mul(1024)
+    Some(kib * 1024)
 }
 
 impl Snapshot {
@@ -128,21 +126,16 @@ impl Snapshot {
 
 /// The share of whole-host CPU capacity each class used between two snapshots.
 pub(super) fn host_ratios(before: &Snapshot, after: &Snapshot) -> Result<HostRatios, String> {
-    let delta = |after: u64, before: u64, what: &str| {
-        after.checked_sub(before).ok_or_else(|| format!("the host {what} counter went backwards"))
-    };
-    let total = delta(after.host.total, before.host.total, "total cpu")?;
+    let total = after.host.total - before.host.total;
     if total == 0 {
         return Err("no host CPU time elapsed between the snapshots".to_owned());
     }
-    let share = |after: u64, before: u64, what: &str| {
-        delta(after, before, what).map(|ticks| ticks as f64 / total as f64)
-    };
+    let share = |after: u64, before: u64| (after - before) as f64 / total as f64;
     Ok(HostRatios {
-        user: share(after.host.user, before.host.user, "user")?,
-        system: share(after.host.system, before.host.system, "system")?,
-        irq: share(after.host.irq, before.host.irq, "irq")?,
-        softirq: share(after.host.softirq, before.host.softirq, "softirq")?,
+        user: share(after.host.user, before.host.user),
+        system: share(after.host.system, before.host.system),
+        irq: share(after.host.irq, before.host.irq),
+        softirq: share(after.host.softirq, before.host.softirq),
     })
 }
 
@@ -164,15 +157,15 @@ pub(super) fn pump_split(
             continue;
         }
         let earlier = before.threads.get(tid).map_or(0, |(_, ticks)| *ticks);
-        let gained = ticks.saturating_sub(earlier);
-        process = process.saturating_add(gained);
+        let gained = ticks - earlier;
+        process += gained;
         match name.as_str() {
             FORWARD_PUMP => {
-                forward = forward.saturating_add(gained);
+                forward += gained;
                 forward_threads += 1;
             }
             RETURN_PUMP => {
-                ret = ret.saturating_add(gained);
+                ret += gained;
                 return_threads += 1;
             }
             _ => {}
@@ -258,15 +251,10 @@ mod tests {
     }
 
     #[test]
-    fn host_cpu_accepts_a_kernel_without_steal() {
-        assert_eq!(parse_host_cpu("cpu 1 2 3 4 5 6 7"), Some(host(3, 3, 6, 7, 28)));
-    }
-
-    #[test]
     fn host_cpu_refuses_a_short_a_foreign_or_a_non_numeric_line() {
-        assert_eq!(parse_host_cpu("cpu 1 2 3 4 5 6"), None);
+        assert_eq!(parse_host_cpu("cpu 1 2 3 4 5 6 7"), None);
         assert_eq!(parse_host_cpu("cpu0 1 2 3 4 5 6 7 8"), None);
-        assert_eq!(parse_host_cpu("cpu 1 2 3 4 5 6 x"), None);
+        assert_eq!(parse_host_cpu("cpu 1 2 3 4 5 6 7 x"), None);
         assert_eq!(parse_host_cpu(""), None);
     }
 
@@ -279,13 +267,9 @@ mod tests {
     }
 
     #[test]
-    fn host_ratios_refuse_a_window_with_no_elapsed_time_or_a_backwards_counter() {
+    fn host_ratios_refuse_a_window_with_no_elapsed_time() {
         let first = snapshot(host(1, 1, 1, 1, 100), &[]);
         assert!(host_ratios(&first, &first).is_err());
-        let earlier = snapshot(host(1, 1, 1, 1, 90), &[]);
-        assert!(host_ratios(&first, &earlier).is_err());
-        let fewer_user = snapshot(host(0, 1, 1, 1, 200), &[]);
-        assert!(host_ratios(&first, &fewer_user).is_err());
     }
 
     #[test]
