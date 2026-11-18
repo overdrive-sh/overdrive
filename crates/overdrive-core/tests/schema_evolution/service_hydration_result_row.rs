@@ -8,7 +8,9 @@
 //! per ADR-0048 § 1 and `.claude/rules/testing.md` § "Archive
 //! schema-evolution roundtrip".
 //!
-//! **`FIXTURE_V1` is never touched.** Bumping the envelope to `V2`
+//! **`FIXTURE_V1` is never touched.** (It was regenerated once, when the
+//! never-written `Pending` variant was deleted under the greenfield
+//! single-cut ruling, db8f74b0b; that edit is not drift.) Bumping the envelope to `V2`
 //! adds a new `FIXTURE_V2` constant + a new assertion in the same
 //! commit; existing constants stay verbatim. See `development.md`
 //! § "Version-bump procedure".
@@ -57,7 +59,8 @@ fn canonical_v1_payload() -> ServiceHydrationResultRowLatest {
 /// `ServiceHydrationResultRowEnvelope::V1(canonical_v1_payload())`.
 /// Generated once at the GREEN landing of step 02-02 and pinned
 /// verbatim from that moment onward. NEVER touched on subsequent
-/// commits.
+/// commits, except one regeneration when the never-written `Pending`
+/// variant was deleted under the greenfield single-cut ruling (db8f74b0b).
 const FIXTURE_V1: &str = "00000000000000002a0000000000000064000000000000000000000000000000640000000000000000f15365000000000000000000000000000000000000000001000000000000006e6f64652d303031";
 
 #[test]

@@ -24,8 +24,8 @@
 //!
 //! Per `.claude/rules/development.md` § "Distinct failure modes get
 //! distinct error variants": the validator returns a typed
-//! [`ReconcilerOutputViolation`] with named structural fields so downstream
-//! `matches!` branches do not have to parse `Display` strings.
+//! [`ConflictingAllocationReclaim`] with named structural fields so
+//! downstream branches do not have to parse `Display` strings.
 //!
 //! Per `.claude/rules/development.md` § "Ordered-collection choice": the
 //! tracking sets are ordered collections so the FIRST conflicting pair
@@ -53,25 +53,18 @@ pub enum ReclaimConflictAction {
     FinalizeFailed,
 }
 
-/// Violation surfaced by [`validate_reconcile_output`]. Per
-/// `.claude/rules/development.md` § Errors / pass-through: typed
-/// structural fields, not a flat string. New inter-action invariants land
-/// as additional variants on this enum rather than as separate error types
-/// so the dispatch-boundary caller can `matches!` on the structured cause
-/// without re-parsing `Display`.
+/// Violation surfaced by [`validate_reconcile_output`]: a
+/// `ReclaimAllocationNetwork` and another allocation action name the same
+/// allocation in one `reconcile()` return (GH #295 D-295-R11). Per
+/// `.claude/rules/development.md` § Errors: typed structural fields, not a
+/// flat string.
 #[derive(Debug, Clone, thiserror::Error)]
-pub enum ReconcilerOutputViolation {
-    /// A `ReclaimAllocationNetwork` and another allocation action name the
-    /// same allocation in one `reconcile()` return (GH #295 D-295-R11).
-    #[error(
-        "conflicting allocation reclaim at alloc={alloc_id}: {other:?} names the same allocation"
-    )]
-    ConflictingAllocationReclaim {
-        /// The allocation both actions name.
-        alloc_id: AllocationId,
-        /// The action that names it beside the reclaim.
-        other: ReclaimConflictAction,
-    },
+#[error("conflicting allocation reclaim at alloc={alloc_id}: {other:?} names the same allocation")]
+pub struct ConflictingAllocationReclaim {
+    /// The allocation both actions name.
+    pub alloc_id: AllocationId,
+    /// The action that names it beside the reclaim.
+    pub other: ReclaimConflictAction,
 }
 
 // Returns the action's allocation key and conflict category for the R11 pair rule.
@@ -100,18 +93,18 @@ fn reclaim_owner(action: &Action) -> Option<(&AllocationId, ReclaimConflictActio
 ///
 /// # Errors
 ///
-/// Returns [`ReconcilerOutputViolation::ConflictingAllocationReclaim`] when a
+/// Returns [`ConflictingAllocationReclaim`] when a
 /// `ReclaimAllocationNetwork` and one of `StartAllocation`,
 /// `RestartAllocation`, `StopAllocation`, or `FinalizeFailed` name the
 /// same allocation.
-pub fn validate_reconcile_output(actions: &[Action]) -> Result<(), ReconcilerOutputViolation> {
+pub fn validate_reconcile_output(actions: &[Action]) -> Result<(), ConflictingAllocationReclaim> {
     let mut reclaim_keys = BTreeSet::new();
     let mut reclaim_owners = BTreeMap::new();
 
     for action in actions {
         if let Action::ReclaimAllocationNetwork { alloc_id } = action {
             if let Some(other) = reclaim_owners.get(alloc_id) {
-                return Err(ReconcilerOutputViolation::ConflictingAllocationReclaim {
+                return Err(ConflictingAllocationReclaim {
                     alloc_id: alloc_id.clone(),
                     other: *other,
                 });
@@ -119,10 +112,7 @@ pub fn validate_reconcile_output(actions: &[Action]) -> Result<(), ReconcilerOut
             reclaim_keys.insert(alloc_id.clone());
         } else if let Some((alloc_id, other)) = reclaim_owner(action) {
             if reclaim_keys.contains(alloc_id) {
-                return Err(ReconcilerOutputViolation::ConflictingAllocationReclaim {
-                    alloc_id: alloc_id.clone(),
-                    other,
-                });
+                return Err(ConflictingAllocationReclaim { alloc_id: alloc_id.clone(), other });
             }
             reclaim_owners.entry(alloc_id.clone()).or_insert(other);
         }
@@ -136,7 +126,7 @@ pub fn validate_reconcile_output(actions: &[Action]) -> Result<(), ReconcilerOut
 mod tests {
     use overdrive_core::reconcilers::Action;
 
-    use super::{ReconcilerOutputViolation, validate_reconcile_output};
+    use super::{ReclaimConflictAction, validate_reconcile_output};
     use overdrive_testing::placement;
 
     placement!(host_pure);
@@ -174,10 +164,10 @@ mod tests {
 
     /// The four actions that already own an allocation's cleanup in one
     /// evaluation (FD § "[REF] Lifecycle action — row-neutral reclaim (D-295-R11) — ACCEPTED 2026-09-24" (the validator)), each naming `name`.
-    fn owning_actions(name: &str) -> [(&'static str, Action); 4] {
+    fn owning_actions(name: &str) -> [(ReclaimConflictAction, Action); 4] {
         [
             (
-                "StartAllocation",
+                ReclaimConflictAction::StartAllocation,
                 Action::StartAllocation {
                     alloc_id: alloc(name),
                     workload_id: overdrive_core::id::WorkloadId::new("nd295-workload")
@@ -188,15 +178,21 @@ mod tests {
                 },
             ),
             (
-                "RestartAllocation",
+                ReclaimConflictAction::RestartAllocation,
                 Action::RestartAllocation {
                     alloc_id: alloc(name),
                     spec: allocation_spec(&format!("{name}-successor")),
                     kind: overdrive_core::aggregate::WorkloadKind::Service,
                 },
             ),
-            ("StopAllocation", Action::StopAllocation { alloc_id: alloc(name), terminal: None }),
-            ("FinalizeFailed", Action::FinalizeFailed { alloc_id: alloc(name), terminal: None }),
+            (
+                ReclaimConflictAction::StopAllocation,
+                Action::StopAllocation { alloc_id: alloc(name), terminal: None },
+            ),
+            (
+                ReclaimConflictAction::FinalizeFailed,
+                Action::FinalizeFailed { alloc_id: alloc(name), terminal: None },
+            ),
         ]
     }
 
@@ -212,7 +208,6 @@ mod tests {
     /// reclaim of another allocation, it is accepted (FD § "[REF] Lifecycle action — row-neutral reclaim (D-295-R11) — ACCEPTED 2026-09-24" (the validator)).
     #[test]
     fn a_reclaim_beside_another_action_for_the_same_allocation_is_rejected() {
-        use super::ReclaimConflictAction;
         let reclaim = |name: &str| Action::ReclaimAllocationNetwork { alloc_id: alloc(name) };
         assert!(
             validate_reconcile_output(&[reclaim("nd295-a")]).is_ok(),
@@ -222,46 +217,30 @@ mod tests {
             validate_reconcile_output(&[reclaim("nd295-a"), reclaim("nd295-b")]).is_ok(),
             "reclaims of distinct allocations are valid together"
         );
-        let expected_conflict = |kind: &str| match kind {
-            "StartAllocation" => ReclaimConflictAction::StartAllocation,
-            "RestartAllocation" => ReclaimConflictAction::RestartAllocation,
-            "StopAllocation" => ReclaimConflictAction::StopAllocation,
-            "FinalizeFailed" => ReclaimConflictAction::FinalizeFailed,
-            other => panic!("unexpected owning action kind {other}"),
-        };
         for (kind, owning) in owning_actions("nd295-a") {
             for actions in
                 [vec![reclaim("nd295-a"), owning.clone()], vec![owning.clone(), reclaim("nd295-a")]]
             {
-                match validate_reconcile_output(&actions) {
-                    Err(ReconcilerOutputViolation::ConflictingAllocationReclaim {
-                        alloc_id,
-                        other,
-                    }) => {
-                        assert_eq!(
-                            alloc_id,
-                            alloc("nd295-a"),
-                            "the conflict names the shared allocation, not the {kind} successor"
-                        );
-                        assert_eq!(
-                            other,
-                            expected_conflict(kind),
-                            "the conflict names {kind} as the action beside the reclaim, in \
-                             either emission order"
-                        );
-                    }
-                    other => panic!(
-                        "a reclaim beside {kind} for the same allocation must be \
-                         ConflictingAllocationReclaim, got {other:?}"
-                    ),
-                }
+                let violation = validate_reconcile_output(&actions).expect_err(&format!(
+                    "a reclaim beside {kind:?} for the same allocation must be rejected"
+                ));
+                assert_eq!(
+                    violation.alloc_id,
+                    alloc("nd295-a"),
+                    "the conflict names the shared allocation, not the {kind:?} successor"
+                );
+                assert_eq!(
+                    violation.other, kind,
+                    "the conflict names {kind:?} as the action beside the reclaim, in \
+                     either emission order"
+                );
             }
             for actions in
                 [vec![reclaim("nd295-b"), owning.clone()], vec![owning.clone(), reclaim("nd295-b")]]
             {
                 assert!(
                     validate_reconcile_output(&actions).is_ok(),
-                    "a reclaim beside {kind} for another allocation is valid"
+                    "a reclaim beside {kind:?} for another allocation is valid"
                 );
             }
         }

@@ -439,7 +439,8 @@ impl Reconciler for ServiceMapHydrator {
             .filter(|(service_id, _)| {
                 desired.desired.get(service_id).is_some_and(|desired_svc| {
                     let programmed = actual.actual.get(service_id).copied();
-                    !self.survivor_placement(desired_svc, programmed).2
+                    let (_, _, placed) = self.survivor_placement(desired_svc, programmed);
+                    !placed
                 })
             })
             .map(|(_, retry)| retry.last_failure_seen_at + backoff_for_attempt(retry.attempts))
