@@ -5,21 +5,11 @@
 //! The `error:` message line of every fixture's expected output is the contract DDD-2
 //! pins (the table of rejections); the `-->`, source and label lines are rustc's rendering
 //! of the macro's spans, written here as the expected shape and regenerated once with
-//! `TRYBUILD=overwrite` when the attribute lands (review that every message line is
-//! unchanged). Substrate and `smoke(none)` rejections are constant evaluations, so rustc
+//! `TRYBUILD=overwrite` (review that every message line is unchanged). Substrate and `smoke(none)` rejections are constant evaluations, so rustc
 //! prints them as `error[E0080]: evaluation panicked: <message>`.
 //! Driving port: the attribute. Evidence lane: trybuild (compile-fail).
 //! Placement: each is a trybuild run that builds nothing of the platform, so `host_pure`.
 //! Traces: US-BENCH-01 AC (e), US-BENCH-02 AC (d), US-BENCH-04 AC (c), DDD-2, DDD-4.
-//!
-//! Pending state. While the attribute is a passthrough every fixture compiles, so trybuild reports
-//! `Expected test case to fail to compile, but it succeeded` for each and ends with
-//! `<n> of <n> tests failed`; each test pends on that summary with its own fixture count, which
-//! excludes a setup failure (trybuild's bare `tests failed`) and a partial failure. trybuild's panic
-//! carries no per-fixture text, so this RED is weaker than the other tests' (see `red-classification.md`).
-//! DELIVER activation: remove the `should_panic` of a test in the step that lands the attribute,
-//! regenerate the `.stderr` span lines once with `TRYBUILD=overwrite`, and verify that every pinned
-//! `error:` line of the regenerated files is unchanged (`git diff` shows only span and label lines).
 
 #![cfg(target_os = "linux")]
 #![allow(clippy::doc_markdown, reason = "Contract Shape declarations keep their literal spelling")]
@@ -89,16 +79,7 @@ fn malformed_declarations_fail_the_build_naming_the_offending_key_or_value() {
     cases.compile_fail("tests/compile_fail/unknown_metric_unit.rs");
 }
 
-// ---- The `clock(service = ..., guest = ...)` key (DDD-2 "Clock sources", step 02-03) ----
-//
-// Pending state. Until the key lands the attribute rejects `clock` as an unknown key, so every
-// fixture below fails to compile with a message other than the pinned one; trybuild reports a
-// `mismatch` for each and ends with `<n> of <n> tests failed`, which each test pends on with its
-// own fixture count. DELIVER activation: remove the `should_panic` of a test in the step that lands
-// the key, regenerate the `.stderr` span lines with `TRYBUILD=overwrite`, and verify every pinned
-// `error:` line is unchanged except the three the designer could not pin (see the fixtures'
-// report: `clock_source_string_literal`, `empty_clock`). Landing the key also changes the key list
-// in the existing `unknown_key.stderr` (`..., reference, clock, smoke`): update it in the same step.
+// ---- The `clock(service = ..., guest = ...)` key (DDD-2 "Clock sources") ----
 
 /// A service or guest clock source outside its closed set is a build error naming the set.
 /// CONTRACT_SHAPE: pure-function (source text in, diagnostic out).
@@ -123,14 +104,4 @@ fn a_malformed_clock_declaration_fails_the_build_naming_the_offending_key_or_val
     cases.compile_fail("tests/compile_fail/repeated_clock_sub_key.rs");
     cases.compile_fail("tests/compile_fail/clock_source_string_literal.rs");
     cases.compile_fail("tests/compile_fail/empty_clock.rs");
-}
-
-/// The unknown-key message lists `clock` among the keys the attribute accepts.
-/// CONTRACT_SHAPE: pure-function (source text in, diagnostic out).
-#[test]
-#[serial(trybuild)]
-#[overdrive_test(host_pure)]
-fn the_unknown_key_message_lists_clock_among_the_keys() {
-    let cases = trybuild::TestCases::new();
-    cases.compile_fail("tests/compile_fail/unknown_key_lists_clock.rs");
 }

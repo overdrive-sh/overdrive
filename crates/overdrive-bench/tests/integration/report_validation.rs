@@ -485,7 +485,6 @@ fn with_clock(service: &serde_json::Value, guest: &serde_json::Value) -> Lines {
 
 /// `clock.service` is `null` or the one pinned string; any other string, including the pinned
 /// guest string, is refused naming `clock.service` (exit 65).
-/// Pending until the closed vocabulary lands: today any string validates.
 /// CONTRACT_SHAPE: pure-function (record in, verdict out).
 #[test]
 fn a_clock_service_string_outside_the_pinned_one_is_refused() {
@@ -501,7 +500,6 @@ fn a_clock_service_string_outside_the_pinned_one_is_refused() {
 
 /// `clock.guest` is `null` or the one pinned string; any other string, including the pinned
 /// service string, is refused naming `clock.guest` (exit 65).
-/// Pending until the closed vocabulary lands: today any string validates.
 /// CONTRACT_SHAPE: pure-function (record in, verdict out).
 #[test]
 fn a_clock_guest_string_outside_the_pinned_one_is_refused() {
