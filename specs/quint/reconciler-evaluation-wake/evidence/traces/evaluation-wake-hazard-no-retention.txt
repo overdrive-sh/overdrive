@@ -5,6 +5,8 @@ State 1
   v3 = FALSE
   passPos = 0
   drifts = 0
+  rowNE = FALSE
+  rowD = FALSE
   conf_step = [init |-> [tag |-> "UNIT"]]
   faults = 0
   due = TRUE
@@ -15,7 +17,9 @@ State 1
   vip = FALSE
   pending = <<>>
   need = {}
+  prog = FALSE
   has = {}
+  stU = FALSE
   r4 = FALSE
   inWin = {}
 
@@ -26,6 +30,8 @@ State 2 [DivergeDrop]
 
 State 3 [DivergeWake]
   drifts = 2
+  rowNE = TRUE
+  rowD = TRUE
   vip = TRUE
   pending = <<"k2">>
   need = {"k1", "k2", "k3"}

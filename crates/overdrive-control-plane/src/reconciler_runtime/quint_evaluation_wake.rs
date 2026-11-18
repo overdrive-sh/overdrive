@@ -1043,7 +1043,6 @@ impl<'de> Deserialize<'de> for WakeState {
     test = "healthy_edge_converges",
     max_samples = 1
 )]
-#[should_panic(expected = "the pending queue the broker reports is empty where the model's is not")]
 /// CONTRACT_SHAPE: bounded-change.
 fn quint_evaluation_wake_healthy_edge_converges() -> impl Driver {
     EvaluationWakeDriver::new()
@@ -1056,7 +1055,6 @@ fn quint_evaluation_wake_healthy_edge_converges() -> impl Driver {
     test = "hydrate_error_recovers_by_pass",
     max_samples = 1
 )]
-#[should_panic(expected = "the pending queue the broker reports is empty where the model's is not")]
 /// CONTRACT_SHAPE: bounded-change.
 fn quint_evaluation_wake_hydrate_error_recovers_by_pass() -> impl Driver {
     EvaluationWakeDriver::new()
@@ -1069,7 +1067,6 @@ fn quint_evaluation_wake_hydrate_error_recovers_by_pass() -> impl Driver {
     test = "persist_error_recovers_by_pass",
     max_samples = 1
 )]
-#[should_panic(expected = "the pending queue the broker reports is empty where the model's is not")]
 /// CONTRACT_SHAPE: bounded-change.
 fn quint_evaluation_wake_persist_error_recovers_by_pass() -> impl Driver {
     EvaluationWakeDriver::new()
@@ -1082,7 +1079,6 @@ fn quint_evaluation_wake_persist_error_recovers_by_pass() -> impl Driver {
     test = "crash_between_fsync_and_dispatch_recovers_by_boot_pass",
     max_samples = 1
 )]
-#[should_panic(expected = "the pending queue the broker reports is empty where the model's is not")]
 /// CONTRACT_SHAPE: bounded-change.
 fn quint_evaluation_wake_crash_between_fsync_and_dispatch_recovers_by_boot_pass() -> impl Driver {
     EvaluationWakeDriver::new()
@@ -1095,7 +1091,6 @@ fn quint_evaluation_wake_crash_between_fsync_and_dispatch_recovers_by_boot_pass(
     test = "failed_dataplane_inside_backoff_recovers_without_row_write",
     max_samples = 1
 )]
-#[should_panic(expected = "the pending queue the broker reports is empty where the model's is not")]
 /// CONTRACT_SHAPE: bounded-change.
 fn quint_evaluation_wake_failed_dataplane_inside_backoff_recovers_without_row_write() -> impl Driver
 {
@@ -1109,7 +1104,6 @@ fn quint_evaluation_wake_failed_dataplane_inside_backoff_recovers_without_row_wr
     test = "fresh_deploy_without_row_is_evaluated",
     max_samples = 1
 )]
-#[should_panic(expected = "the pending queue the broker reports is empty where the model's is not")]
 /// CONTRACT_SHAPE: bounded-change.
 fn quint_evaluation_wake_fresh_deploy_without_row_is_evaluated() -> impl Driver {
     EvaluationWakeDriver::new()
@@ -1122,7 +1116,6 @@ fn quint_evaluation_wake_fresh_deploy_without_row_is_evaluated() -> impl Driver 
     test = "enumeration_failure_of_one_reconciler_does_not_starve_others",
     max_samples = 1
 )]
-#[should_panic(expected = "the pending queue the broker reports is empty where the model's is not")]
 /// CONTRACT_SHAPE: bounded-change.
 fn quint_evaluation_wake_enumeration_failure_of_one_reconciler_does_not_starve_others()
 -> impl Driver {
@@ -1136,7 +1129,6 @@ fn quint_evaluation_wake_enumeration_failure_of_one_reconciler_does_not_starve_o
     test = "edge_wake_during_burst_is_admitted_after_burst",
     max_samples = 1
 )]
-#[should_panic(expected = "the pending queue the broker reports is empty where the model's is not")]
 /// CONTRACT_SHAPE: bounded-change.
 fn quint_evaluation_wake_edge_wake_during_burst_is_admitted_after_burst() -> impl Driver {
     EvaluationWakeDriver::new()
@@ -1149,7 +1141,6 @@ fn quint_evaluation_wake_edge_wake_during_burst_is_admitted_after_burst() -> imp
     test = "pass_submit_merges_retained_not_before_to_immediate",
     max_samples = 1
 )]
-#[should_panic(expected = "the pending queue the broker reports is empty where the model's is not")]
 /// CONTRACT_SHAPE: bounded-change.
 fn quint_evaluation_wake_pass_submit_merges_retained_not_before_to_immediate() -> impl Driver {
     EvaluationWakeDriver::new()
@@ -1162,7 +1153,6 @@ fn quint_evaluation_wake_pass_submit_merges_retained_not_before_to_immediate() -
     test = "world_changes_between_drain_and_finish",
     max_samples = 1
 )]
-#[should_panic(expected = "the pending queue the broker reports is empty where the model's is not")]
 /// CONTRACT_SHAPE: bounded-change.
 fn quint_evaluation_wake_world_changes_between_drain_and_finish() -> impl Driver {
     EvaluationWakeDriver::new()
@@ -1173,7 +1163,6 @@ fn quint_evaluation_wake_world_changes_between_drain_and_finish() -> impl Driver
     spec = "../../specs/quint/reconciler-evaluation-wake/evaluation_wake.qnt",
     main = "wake_conf"
 )]
-#[should_panic(expected = "the pending queue the broker reports is empty where the model's is not")]
 /// CONTRACT_SHAPE: bounded-change.
 fn quint_evaluation_wake_conformance_wake_conf() -> impl Driver {
     EvaluationWakeDriver::new()

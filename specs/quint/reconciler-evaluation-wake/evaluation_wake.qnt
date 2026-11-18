@@ -17,14 +17,19 @@
  * key: `has` (the key has desired or actual state, built from intent AND observation, so `has` IS the managed set per
  * reconciler) and `need` (desired != actual).
  *
- * Managed-set coupling (SharedIntentImpliesBase; `has` only grows, dropping the intent is not modelled): has(k3) and has(k4)
- * imply has(k1), has(k4) implies has(k3), and has(k2) implies has(k3). A workload INTENT alone makes only k1 managed.
- * service-lifecycle manages a Service once it has an allocation row or an assigned VIP (not on intent alone), so an allocation
- * row makes it manage the target: has(k4) (svid-lifecycle: allocation row or held SVID) implies has(k3) (the managed-set rule;
+ * Managed-set coupling (SharedIntentImpliesBase; has(k1), has(k2), has(k3) only grow, dropping the intent is not modelled):
+ * has(k3) and has(k4) imply has(k1), has(k4) implies has(k3), has(k2) implies has(k3), and an assigned VIP implies has(k2)
+ * (D-21: the hydrator manages a Service whenever its intent has an assigned VIP, service_map_hydrator.rs managed_targets). A
+ * workload INTENT alone makes only k1 managed. service-lifecycle manages a Service once it has an allocation row or an assigned
+ * VIP (not on intent alone), so an allocation row makes it manage the target: has(k4) implies has(k3) (D7; the managed-set rule;
  * managed_targets is a DISTILL scaffold in the tree, conformance-driver.md "World construction"). has(k3) arises from a k3 world
  * change (VIP assigned), from a k4 world change (an allocation row), from a k2 world change (its published row implies a VIP),
- * or from a landed k1 start (an allocation exists). has(k4) arises from a k4 world change or a landed k1 start. has(k2) (a
- * backend row) arises from a k2 world change or a landed k3 publish.
+ * or from a landed k1 start (an allocation exists). has(k2) arises from every step that makes vip true (a k3 or k2 world change)
+ * and from a landed k3 publish.
+ * has(k4) is NOT monotone (D-1a; svid_lifecycle.rs managed_targets): svid-lifecycle manages the target iff the workload has a
+ * Running allocation or a held SVID, so has(k4) == (running or held) in every state (K4ManagedIffRunningOrHeld). It leaves the
+ * managed set when a k1 world change takes the allocation out of Running while no SVID is held, and when a landed k4 drop
+ * leaves neither. withK4 recomputes it after every step that changes need, held or has(k1).
  *
  * World facts beyond `has` / `need` (each a production fact, read at HEAD):
  *   vip    the Service's listener has an assigned VIP. service_dataplane_identities returns an empty map until the allocator
@@ -43,7 +48,8 @@
  *   need(k3)  with a VIP: the observed backend row differs from the projection of the Running allocations (any membership change
  *             or the VIP/row itself); without a VIP: a Running allocation whose Stable is not committed (the startup opt-out
  *             commits Stable at the first Running row, service_lifecycle.rs branch (a')).
- *   need(k2)  a backend row the result row does not cover.
+ *   need(k2)  the published backend set differs from the dataplane's programmed fingerprint (a non-empty set always differs after a
+ *             k3 publish; an empty set differs only when a slot is programmed to purge: in_place, service_map_hydrator.rs:552-562).
  *   v3     service-lifecycle's next evaluation would change its View (D9): an allocation row it has not recorded yet (a Running
  *          allocation not in `observed`, a Failed one not in `terminal_announced`; service_lifecycle.rs reconcile, the two
  *          `insert`s at the head of the per-allocation loop; a committed-Stable allocation is skipped before them). Set by a k4
@@ -81,7 +87,14 @@
  *   ok           effect lands: the handoffs are submitted (in the order above) then the self-requeue; LAND consequences apply.
  *   dispatchErr  the mutating action failed but dispatch isolates actions (action_shim dispatch_with_workflow_intent doc:
  *                "per-action isolation"), so the EnqueueEvaluation actions still run: handoffs submitted, then the self-requeue;
- *                nothing lands, so no LAND consequence.
+ *                nothing lands, so no LAND consequence, EXCEPT for a failed k1 start: the start path issues and holds the SVID
+ *                (ensure_intercept_identity, action_shim/mod.rs:1858) BEFORE driver.start and the Running-row write (:2044); a
+ *                failed write tears the workload down (:2055-2096) but never releases the held SVID, so the failed start leaves
+ *                an ORPHAN held SVID (no allocation row, no Running allocation): held, has(k4) (svid_lifecycle.rs managed_targets
+ *                :317-323), need(k4) (DropSvid of a held SVID of a non-Running allocation). service-lifecycle manages no target
+ *                (no allocation row: has(k3) unchanged). A later landed start mints a fresh allocation id (the View's
+ *                restart_counts reserves the failed one, workload_lifecycle.rs next_allocation_attempt), so the orphan stays held
+ *                and needy until a landed k4 drop.
  *   dpFail       (hydrator only) a result row, no handoff.
  * Backoff windows (D-3, D11). Two reconcilers have one: the hydrator (View RetryMemory) and svid-lifecycle (View IssueRetry). A
  * failed dataplane update enters the hydrator's window; a failed IssueSvid (dispatchErr on a Running, unheld allocation) enters
@@ -175,7 +188,11 @@
  *         was false, D6); that a k3 evaluation publishes a row and hands off to the hydrator only with a VIP (D5); that an
  *         allocation row makes service-lifecycle manage the target (D7); and that need(k1) and need(k4) exclude each other
  *         except through a held SVID to drop (D8). Discharged by: the fidelity probe (conformance-driver.md) and the quint-connect
- *         replay of the named runs against the real reconcilers.
+ *         replay of the named runs against the real reconcilers. The k2/k3 partial-landing facts are part of WK-7: a k3 dispatchErr
+ *         with a VIP and a Stable to commit still lands the row (the Stable commit is the first write to consume the armed
+ *         seam, observation_store.rs write_alloc_lifecycle), a k2 dispatchErr leaves the dataplane programmed (ADR-0299), and a landed
+ *         k3 publish recomputes need(k2) (cleared when the empty row is in place). Discharged by: the conformance replay with
+ *         injected dispatchErr on k2 and k3 (quint_evaluation_wake.rs).
  *   WK-8  The View-change facts (D9, D11): which ticks change which View (persist_view's Eq-diff skip, service-lifecycle's
  *         observed / terminal_announced inserts, svid-lifecycle's IssueRetry bump on emit and its removal), that the IssueRetry is
  *         recorded when IssueSvid is emitted (so a failed issue leaves the key inside its window), and that svid-lifecycle's
@@ -225,6 +242,11 @@ module evaluation_wake {
   // hydrator target (a published backend row) implies a service-lifecycle target
   pure def withBase(k: str): Set[str] =
     if (k == "k3") Set("k3", "k1") else if (k == "k4") Set("k4", "k3", "k1") else if (k == "k2") Set("k2", "k3", "k1") else Set(k)
+  // has(k4) follows "a Running allocation or a held SVID" (D-1a), where a Running allocation is has(k1) and not need(k1)
+  pure def withK4(h: Set[str], n: Set[str], hd: bool): Set[str] =
+    if ((h.contains("k1") and not(n.contains("k1"))) or hd) h.union(Set("k4")) else h.exclude(Set("k4"))
+  // a hydrator target exists whenever the Service has an assigned VIP (D-21)
+  pure def withVip(h: Set[str], v: bool): Set[str] = if (v) h.union(Set("k2")) else h
   pure def inP(p: List[str], k: str): bool = p.indices().exists(i => p[i] == k)
   pure def subP(p: List[str], k: str): List[str] = if (inP(p, k)) p else p.append(k)
   pure def subE(p: List[str], e: str -> str, k: str, kind: str): str -> str =
@@ -239,7 +261,11 @@ module evaluation_wake {
   var vip: bool           // the listener has an assigned VIP (D5: only then does service-lifecycle publish a backend row)
   var held: bool          // an SVID is held for some allocation of the workload (D6: a k1 start holds its own)
   var v3: bool            // service-lifecycle's next evaluation changes its View (an allocation it has not recorded yet: D9)
+  var prog: bool          // the dataplane slot of the workload's service is programmed (set by a k2 tick that lands a non-empty set)
+  var rowNE: bool         // the published service_backends row carries backends (written by k3's publish: allocations exist; by a k2 world change)
   var r4: bool            // svid-lifecycle's stored View holds an IssueRetry entry (D9, D11)
+  var stU: bool           // a Running allocation whose Stable is not committed (service-lifecycle emits FinalizeFailed{Stable}; a lifecycle write)
+  var rowD: bool          // the observed backend row differs from the projection (service-lifecycle emits WriteServiceBackendRow + EnqueueEvaluation(k2)); implies vip
   // loop
   var active: Set[str]    // in-flight evaluations
   // broker
@@ -269,8 +295,14 @@ module evaluation_wake {
     else if (k == "k4") need.exclude(Set("k1")).union(Set("k3", "k4"))
     else need.union(if (k == "k2") Set("k2", "k3") else Set("k3")).union(if (has.contains("k1")) Set() else Set("k1"))
 
+  // what a world change of key k does to the two sources of need(k3): a k4 change adds a fresh Running allocation (its Stable is
+  // uncommitted and the projection changed); a k1 change replaces the Running allocation by a Failed row (no Stable to commit; the
+  // projection lost a backend); a k3 or k2 change assigns the VIP and leaves a row that differs
+  def stUAfter(k: str): bool = if (k == "k4") true else if (k == "k1") false else stU
+  def rowDAfter(k: str): bool = if (k == "k1" or k == "k4") vip else true
+
   action init = all {
-    has' = Set(), need' = Set(), inWin' = Set(), vip' = false, held' = false, v3' = false, r4' = false, active' = Set(),
+    has' = Set(), need' = Set(), inWin' = Set(), vip' = false, held' = false, v3' = false, r4' = false, prog' = false, rowNE' = false, stU' = false, rowD' = false, active' = Set(),
     pending' = List(), elig' = ALLIMM, due' = true, passPos' = 0, faults' = 0, drifts' = 0,
     dispatched' = 0, cancelled' = 0, conf_step' = variant("init", ()),
   }
@@ -279,7 +311,7 @@ module evaluation_wake {
   action Tick = all {
     not(due),
     due' = true,
-    has' = has, need' = need, inWin' = inWin, vip' = vip, held' = held, v3' = v3, r4' = r4, active' = active, pending' = pending, elig' = elig,
+    has' = has, need' = need, inWin' = inWin, vip' = vip, held' = held, v3' = v3, r4' = r4, prog' = prog, rowNE' = rowNE, stU' = stU, rowD' = rowD, active' = active, pending' = pending, elig' = elig,
     passPos' = passPos, faults' = faults, drifts' = drifts, dispatched' = dispatched, cancelled' = cancelled,
     conf_step' = if (REC) variant("Tick", ()) else conf_step,
   }
@@ -300,7 +332,7 @@ module evaluation_wake {
       faults' = if (enumOk) faults else faults + 1,
       passPos' = if (passPos + 1 == NREC) 0 else passPos + 1,
       due' = if (passPos == 0) false else due,
-      has' = has, need' = need, inWin' = inWin, vip' = vip, held' = held, v3' = v3, r4' = r4, active' = active, drifts' = drifts,
+      has' = has, need' = need, inWin' = inWin, vip' = vip, held' = held, v3' = v3, r4' = r4, prog' = prog, rowNE' = rowNE, stU' = stU, rowD' = rowD, active' = active, drifts' = drifts,
       dispatched' = dispatched,
       conf_step' = if (REC) variant("PassStep", { enumOk: enumOk }) else conf_step,
     }
@@ -323,7 +355,7 @@ module evaluation_wake {
       elig' = KEYSET.mapBy(k => if (s.contains(k)) "imm" else elig.get(k)),
       active' = active.union(s),
       dispatched' = if (REC) dispatched + sel.length() else dispatched,
-      has' = has, need' = need, inWin' = inWin, vip' = vip, held' = held, v3' = v3, r4' = r4, due' = due, passPos' = passPos,
+      has' = has, need' = need, inWin' = inWin, vip' = vip, held' = held, v3' = v3, r4' = r4, prog' = prog, rowNE' = rowNE, stU' = stU, rowD' = rowD, due' = due, passPos' = passPos,
       faults' = faults, drifts' = drifts, cancelled' = cancelled,
       conf_step' = if (REC) variant("Drain", ()) else conf_step,
     }
@@ -355,41 +387,81 @@ module evaluation_wake {
       else if (o == "hydrateErr") (sn and canFault(o))
       else if (o == "persistErr") (acts and viewChanges and canFault(o))
       else false
-    val lands = o == "ok" and acts
+    // THE EFFECTS OF A DISPATCH (per-action isolation: dispatch runs every action, each lands or fails on its own; a failed one leaves
+    // the others landed). The driver's injected failure is one shot at the first write of the seam it arms (SimObservationStore
+    // `write_alloc_lifecycle` consumes the lifecycle seam, then the generic seam; `write` only the generic one). The ordered effects
+    // per key, and the one a dispatchErr hits:
+    //   k1  StartAllocation: [issue + hold the SVID (generic audit write), driver.start, Running row (lifecycle write)]; the lifecycle
+    //       seam hits the Running row (action_shim/mod.rs:2044): the workload is torn down, the SVID stays held (orphan), nothing lands
+    //   k2  DataplaneUpdateService: [dataplane.update_service, result row (generic write)]; the generic seam hits the result row
+    //       (dataplane_update_service.rs): the dataplane IS programmed, and the hydrator's `actual` is the programmed fingerprint
+    //       (ADR-0299), so the set is in place: the world lands, the dispatch is an Err
+    //   k3  [FinalizeFailed{Stable} (lifecycle write; only while Stable is uncommitted: stU), WriteServiceBackendRow (generic write) +
+    //       EnqueueEvaluation(k2) (only with a VIP and a differing row: rowD)]; with a VIP the generic seam is armed and the Stable
+    //       commit, the first write to consume it, takes the failure (observation_store.rs write_alloc_lifecycle): the row lands.
+    //       With a VIP and no Stable to commit the row write takes it. Without a VIP the lifecycle seam is armed and the Stable
+    //       commit takes it
+    //   k4  IssueSvid: [CA issue + audit write (generic), hold]; the audit write takes the failure, nothing is held. DropSvid has no
+    //       write (issue_svid.rs dispatch_drop): the injected failure is never consumed and the drop lands
+    val e1 = k == "k3" and stU
+    val e2 = k == "k3" and vip and rowD
+    val landE1 = e1 and acts and o == "ok"
+    val landE2 = e2 and acts and (o == "ok" or (o == "dispatchErr" and stU))
+    val landK = k != "k3" and acts and (o == "ok" or (o == "dispatchErr" and (k == "k2" or (k == "k4" and not(running)))))
+    val lands = landK
+    // a failed k1 start leaves the SVID it issued held, for an allocation that has no row (see the header)
+    val orphan = o == "dispatchErr" and acts and k == "k1"
     val persisted = o == "ok" or o == "dispatchErr" or o == "dpFail"
     // an emitted action is dispatched on ok and on dispatchErr (dispatch isolates actions, so the EnqueueEvaluation actions
     // run although the mutating action failed); hydrateErr, persistErr and Crash end before dispatch: no handoff. dpFail is a
     // result row, not a dispatch error, and only the hydrator (no handoff) produces it
     val emits = acts and (o == "ok" or o == "dispatchErr")
     // the handoffs of the actions k emits: k1 hands off to k3 then k4 (k4's evaluation is a Noop after a start: D6); k3 hands
-    // off to the hydrator only beside its backend-row write, which needs a VIP (D5); k2 and k4 hand off nothing
+    // off to the hydrator only beside its backend-row write, which needs a VIP and a differing row (D5); k2 and k4 hand off nothing
     val handOf: List[str] =
-      if (k == "k1") ["k3", "k4"] else if (k == "k3" and vip) ["k2"] else List()
+      if (k == "k1") ["k3", "k4"] else if (e2) ["k2"] else List()
     val hand = if (emits) handOf else List()
     val sub = subMany(pending, elig, hand)
     // what a landed action leaves in the world (D3 to D6): a start holds its SVID and leaves service-lifecycle needy (not
-    // svid-lifecycle); a publish (VIP only) makes the hydrator managed and needy; an svid action leaves the SVID held for every
+    // svid-lifecycle); a landed publish makes the hydrator managed and needy; an svid action leaves the SVID held for every
     // Running allocation (and drops the held SVID of an allocation that is not Running)
+    // the row k3 publishes carries the allocations' backends: a non-empty set differs from what is programmed (k3 acts only on a
+    // changed row); an empty set (no allocation, need(k1)) is in place unless a slot is programmed to purge (in_place: empty
+    // survivors are in place only when nothing is programmed, service_map_hydrator.rs:552-562). On a landed publish need(k2) is
+    // RECOMPUTED from the published row against the programmed state: a pending need(k2) is cleared when the new row is in place
+    val stU2 = if (landE1) false else if (k == "k1" and lands) true else stU
+    val rowD2 = if (landE2) false else if (k == "k1" and lands) vip else rowD
     val needL =
       if (k == "k1") need.exclude(Set("k1")).union(Set("k3"))
-      else if (k == "k3") need.exclude(Set("k3")).union(if (vip) Set("k2") else Set())
+      else if (k == "k3")
+        need.exclude(if (landE2) Set("k2", "k3") else Set("k3")).union(if (landE2 and (not(need.contains("k1")) or prog)) Set("k2") else Set())
+             .union(if (stU2 or rowD2) Set("k3") else Set())
       else need.exclude(Set(k))
+    val landed = lands or landE1 or landE2
     val hasL =
-      if (k == "k1") has.union(Set("k3", "k4")) else if (k == "k3" and vip) has.union(Set("k2")) else has
+      if (k == "k1") has.union(Set("k3", "k4")) else if (landE2) has.union(Set("k2")) else has
     val heldL = if (k == "k1") true else if (k == "k4") running else held
     all {
       active.contains(k),
       allowed,
-      need' = if (lands) needL else need,
-      has' = if (lands) hasL else has,
-      held' = if (lands) heldL else held,
+      need' = if (landed) needL else if (orphan) need.union(Set("k4")) else need,
+      has' = if (landed) withK4(hasL, needL, heldL) else if (orphan) withK4(has, need.union(Set("k4")), true) else has,
+      held' = if (lands) heldL else if (orphan) true else held,
       // a failed dataplane update (hydrator) or a failed IssueSvid (svid-lifecycle: IssueRetry recorded at emit, nothing held)
       // leaves the key inside its backoff window
-      inWin' = if (o == "dpFail" or (o == "dispatchErr" and k == "k4" and running)) inWin.union(Set(k)) else inWin,
+      // a landed k3 publish carries a row that differs from the one the hydrator last attempted, and pacing_allows lets a changed
+      // desired set dispatch at once (service_map_hydrator.rs pacing_allows): the hydrator's window ends
+      inWin' = if (o == "dpFail" or (o == "dispatchErr" and k == "k4" and running)) inWin.union(Set(k))
+               else if (landE2) inWin.exclude(Set("k2")) else inWin,
       // a persisted tick (ok, dispatchErr, dpFail) records every allocation service-lifecycle sees and rewrites svid-lifecycle's
       // retry map to the entries of Running unheld allocations; a k1 start adds an allocation service-lifecycle has not seen
       v3' = if (lands and k == "k1") true else if (k == "k3" and persisted) false else v3,
       r4' = if (k == "k4" and persisted) (sn and running) else r4,
+      // a landed k2 tick programs what the row carries (empty: purge); a landed k3 publish writes a row with the allocations'
+      // backends
+      prog' = if (lands and k == "k2") rowNE else prog,
+      rowNE' = if (landE2) not(need.contains("k1")) else rowNE,
+      stU' = stU2, rowD' = rowD2,
       active' = active.exclude(Set(k)),
       pending' = if (kind == "none") sub._1 else subP(sub._1, k),
       elig' = if (kind == "none") sub._2 else subE(sub._1, sub._2, k, kind),
@@ -405,7 +477,7 @@ module evaluation_wake {
   action DivergeWake(k: str): bool = all {
     drifts < MAXD,
     not(need.contains(k)),
-    has' = has.union(withBase(k)),
+    has' = withK4(withVip(has.union(withBase(k)), vip or k == "k2" or k == "k3"), needAfter(k), held),
     need' = needAfter(k),
     vip' = (vip or k == "k2" or k == "k3"),
     pending' = subP(pending, k),
@@ -413,7 +485,7 @@ module evaluation_wake {
     drifts' = drifts + 1,
     cancelled' = if (REC and inP(pending, k)) cancelled + 1 else cancelled,
     inWin' = if (k == "k1") inWin.exclude(Set("k4")) else inWin,
-    v3' = (v3 or newAllocFor(k)), r4' = r4,
+    v3' = (v3 or newAllocFor(k)), r4' = r4, prog' = prog, rowNE' = (rowNE or k == "k2"), stU' = stUAfter(k), rowD' = rowDAfter(k),
     held' = held, active' = active, due' = due, passPos' = passPos, faults' = faults,
     dispatched' = dispatched,
     conf_step' = if (REC) variant("DivergeWake", { k: k }) else conf_step,
@@ -425,12 +497,12 @@ module evaluation_wake {
     DROPS,
     drifts < MAXD,
     not(need.contains(k)),
-    has' = has.union(withBase(k)),
+    has' = withK4(withVip(has.union(withBase(k)), vip or k == "k2" or k == "k3"), needAfter(k), held),
     need' = needAfter(k),
     vip' = (vip or k == "k2" or k == "k3"),
     drifts' = drifts + 1,
     inWin' = if (k == "k1") inWin.exclude(Set("k4")) else inWin,
-    v3' = (v3 or newAllocFor(k)), r4' = r4,
+    v3' = (v3 or newAllocFor(k)), r4' = r4, prog' = prog, rowNE' = (rowNE or k == "k2"), stU' = stUAfter(k), rowD' = rowDAfter(k),
     held' = held, active' = active, pending' = pending, elig' = elig, due' = due,
     passPos' = passPos, faults' = faults, dispatched' = dispatched, cancelled' = cancelled,
     conf_step' = if (REC) variant("DivergeDrop", { k: k }) else conf_step,
@@ -441,7 +513,7 @@ module evaluation_wake {
     pending' = subP(pending, k),
     elig' = subE(pending, elig, k, "imm"),
     cancelled' = if (REC and inP(pending, k)) cancelled + 1 else cancelled,
-    has' = has, need' = need, inWin' = inWin, vip' = vip, held' = held, v3' = v3, r4' = r4, active' = active, due' = due,
+    has' = has, need' = need, inWin' = inWin, vip' = vip, held' = held, v3' = v3, r4' = r4, prog' = prog, rowNE' = rowNE, stU' = stU, rowD' = rowD, active' = active, due' = due,
     passPos' = passPos, faults' = faults, drifts' = drifts, dispatched' = dispatched,
     conf_step' = if (REC) variant("EdgeWake", { k: k }) else conf_step,
   }
@@ -454,7 +526,7 @@ module evaluation_wake {
     inWin.contains(k),
     inWin' = Set(),
     elig' = KEYSET.mapBy(j => if (inP(pending, j) and elig.get(j) == "nb") "imm" else elig.get(j)),
-    has' = has, need' = need, vip' = vip, held' = held, v3' = v3, r4' = r4, active' = active, pending' = pending, due' = due,
+    has' = has, need' = need, vip' = vip, held' = held, v3' = v3, r4' = r4, prog' = prog, rowNE' = rowNE, stU' = stU, rowD' = rowD, active' = active, pending' = pending, due' = due,
     passPos' = passPos, faults' = faults, drifts' = drifts, dispatched' = dispatched, cancelled' = cancelled,
     conf_step' = if (REC) variant("WindowEnds", { k: k }) else conf_step,
   }
@@ -465,7 +537,7 @@ module evaluation_wake {
     pending' = List(), elig' = ALLIMM, active' = Set(),
     passPos' = 0, due' = true, faults' = faults + 1,
     dispatched' = 0, cancelled' = 0,
-    has' = has, need' = need, inWin' = inWin, vip' = vip, held' = held, v3' = v3, r4' = r4, drifts' = drifts,
+    has' = has, need' = need, inWin' = inWin, vip' = vip, held' = held, v3' = v3, r4' = r4, prog' = prog, rowNE' = rowNE, stU' = stU, rowD' = rowD, drifts' = drifts,
     conf_step' = if (REC) variant("Crash", ()) else conf_step,
   }
 
@@ -476,7 +548,7 @@ module evaluation_wake {
     any { Tick, PassStep(b), Drain, Finish(k, o), DivergeWake(k), DivergeDrop(k), EdgeWake(k), WindowEnds(k), Crash }
   }
 
-  val allVars = (has, need, inWin, vip, held, v3, r4, active, pending, elig, due, passPos, faults, drifts, dispatched,
+  val allVars = (has, need, inWin, vip, held, v3, r4, prog, rowNE, stU, rowD, active, pending, elig, due, passPos, faults, drifts, dispatched,
                  cancelled, conf_step)
 
   // ------------------------------------------------------------------ safety
@@ -492,12 +564,19 @@ module evaluation_wake {
   val NeedImpliesManaged: bool = need.subseteq(has)
   // D-3, D11: a backoff window (the hydrator's, svid-lifecycle's) only exists for a needy key
   val WindowOnlyForNeedy: bool = inWin.subseteq(need)
-  // world: the workload-target reconcilers derive from one intent (k3, k4 managed imply k1 managed), an allocation row makes
-  // service-lifecycle manage the Service (k4 implies k3: D7), and a published backend row implies a service-lifecycle target
+  // world: the workload-target reconcilers derive from one intent (k3, k4 managed imply k1 managed), a Running allocation's row makes
+  // service-lifecycle manage the Service (k4 and running imply k3: D7; an orphan held SVID has no row, so k4 alone does not), and a published backend row implies a service-lifecycle target
   val SharedIntentImpliesBase: bool = and { has.contains("k3").implies(has.contains("k1")), has.contains("k4").implies(has.contains("k1")),
-                                            has.contains("k4").implies(has.contains("k3")), has.contains("k2").implies(has.contains("k3")) }
+                                            (has.contains("k4") and running).implies(has.contains("k3")), has.contains("k2").implies(has.contains("k3")) }
+  // D-1a: svid-lifecycle manages the target iff the workload has a Running allocation or a held SVID (so has(k4) can shrink)
+  val K4ManagedIffRunningOrHeld: bool = has.contains("k4") == (running or held)
+  // D-21: an assigned VIP makes the hydrator manage the Service
+  val VipImpliesHydratorManaged: bool = vip.implies(has.contains("k2"))
+  // service-lifecycle needs work exactly when a Running allocation's Stable is uncommitted (stU, a lifecycle write) or the published
+  // row differs (rowD, a backend-row write, only with a VIP); a Stable to commit needs a Running allocation
+  val K3NeedIsStableOrRow: bool = and { need.contains("k3") == (stU or rowD), stU.implies(running), rowD.implies(vip) }
   val Safety: bool = and { ActiveWithinCap, OneActivePerTarget, PendingUnique, EligCanonical, NeedImpliesManaged,
-                           WindowOnlyForNeedy, SharedIntentImpliesBase }
+                           WindowOnlyForNeedy, SharedIntentImpliesBase, K4ManagedIffRunningOrHeld, VipImpliesHydratorManaged, K3NeedIsStableOrRow }
   // D-3: a key inside its backoff window is always scheduled (in flight, or retained in the broker): the
   // re-evaluation does not depend on a row write or a pass. Holds when the only fault is the dataplane failing
   // (instance wake_retention); a hydrate/persist error or a crash legitimately ends the schedule (the pass retries)
@@ -586,36 +665,38 @@ module evaluation_wake {
 
   // enumeration failure of r4W (the last reconciler of the pass order r1S, r2M, r3V, r4W): nothing of r4W's set is submitted
   // (no partial set), r1S, r2M and r3V were still enumerated (the allocation row makes r1S manage the target: D7) and their keys
-  // are evaluated; the next pass retries r4W. The k1 world change replaced the Running allocation (D8): k3 and k4 have nothing to
-  // do, their evaluations are Noops that do not requeue, and k1 stays needy until the next pass submits it
+  // are evaluated; the next pass retries r4W. The k1 world change replaced the Running allocation (D8) while no SVID is held, so
+  // svid-lifecycle no longer manages the target (D-1a: Running allocation or held SVID): k4 leaves the managed set and the pass
+  // does not submit it. k3's evaluation is a Noop that does not requeue, and k1 stays needy until the next pass submits it
   run enumeration_failure_of_one_reconciler_does_not_starve_others = init
     .then(DivergeDrop("k4")).expect(need == Set("k3", "k4") and has == Set("k1", "k3", "k4"))
-    .then(DivergeDrop("k1")).expect(need == Set("k1") and has == Set("k1", "k3", "k4"))
+    .then(DivergeDrop("k1")).expect(need == Set("k1") and has == Set("k1", "k3"))
     .then(PassStep(true)).expect(pending == ["k3"] and passPos == 1)
     .then(PassStep(true)).expect(pending == ["k3"] and passPos == 2)
-    .then(PassStep(true)).expect(pending == ["k3", "k4"] and passPos == 3)
-    .then(PassStep(false)).expect(pending == ["k3", "k4"] and faults == 1 and passPos == 0)
-    .then(Drain).expect(active == Set("k3") and pending == ["k4"])
-    .then(Finish("k3", "ok")).expect(pending == ["k4"])
-    .then(Drain).then(Finish("k4", "ok")).expect(pending == List() and need == Set("k1") and cancelled == 0)
+    .then(PassStep(true)).expect(pending == ["k3"] and passPos == 3)
+    .then(PassStep(false)).expect(pending == ["k3"] and faults == 1 and passPos == 0)
+    .then(Drain).expect(active == Set("k3") and pending == List())
+    .then(Finish("k3", "ok")).expect(pending == List() and need == Set("k1") and cancelled == 0)
     .then(Tick).then(PassStep(true)).then(PassStep(true)).expect(pending == ["k3"])
-    .then(PassStep(true)).expect(pending == ["k3", "k4"])
-    .then(PassStep(true)).expect(pending == ["k3", "k4", "k1"])
-    .then(Drain).expect(active == Set("k3") and pending == ["k4", "k1"])
-    .then(Finish("k3", "ok")).then(Drain).then(Finish("k4", "ok")).then(Drain)
+    .then(PassStep(true)).expect(pending == ["k3"])
+    .then(PassStep(true)).expect(pending == ["k3", "k1"])
+    .then(Drain).expect(active == Set("k3") and pending == ["k1"])
+    .then(Finish("k3", "ok")).then(Drain)
     .expect(active == Set("k1") and pending == List())
     .then(Finish("k1", "ok")).expect(need == Set("k3") and pending == ["k3", "k4", "k1"] and Safety)
 
-  // a pass burst submits r1S's and r4W's keys on the shared target t1 (order k3, k1); an edge wake for the hydrator's key
-  // (t2) submitted during the burst queues behind it. Per-target exclusion: k1 waits while k3 holds t1, the edge wake is
+  // a pass burst submits r1S's, r2M's and r4W's keys (order k3, k2, k1; the k3 world change assigned the VIP, so the hydrator
+  // manages the Service, D-21); an edge wake for the hydrator's key (t2) submitted during the burst collapses onto its slot. Per-target exclusion: k1 waits while k3 holds t1, the edge wake is
   // admitted beside k3; k3's publish (the VIP is assigned) hands off to the (active) hydrator key, which queues again; k1 is
   // admitted when t1 frees, ahead of k3's confirming requeue, and its handoffs collapse onto the pending k3
   run edge_wake_during_burst_is_admitted_after_burst = init
     .then(DivergeDrop("k1")).then(DivergeDrop("k3"))
-    .then(PassStep(true)).then(PassStep(true)).then(PassStep(true)).then(PassStep(true)).expect(pending == ["k3", "k1"])
-    .then(EdgeWake("k2")).expect(pending == ["k3", "k1", "k2"])
+    .expect(has == Set("k1", "k2", "k3") and vip)
+    .then(PassStep(true)).expect(pending == ["k3"])
+    .then(EdgeWake("k2")).expect(pending == ["k3", "k2"])
+    .then(PassStep(true)).then(PassStep(true)).then(PassStep(true)).expect(pending == ["k3", "k2", "k1"])
     .then(Drain).expect(active == Set("k3", "k2") and pending == ["k1"])
-    .then(Finish("k3", "ok")).expect(need == Set("k1", "k2") and pending == ["k1", "k2", "k3"] and active == Set("k2"))
+    .then(Finish("k3", "ok")).expect(need == Set("k1") and pending == ["k1", "k2", "k3"] and active == Set("k2"))
     .then(Drain).expect(active == Set("k2", "k1") and pending == ["k2", "k3"] and Safety)
     .then(Finish("k1", "ok")).then(Finish("k2", "ok"))
     .expect(need == Set("k3") and pending == ["k2", "k3", "k4", "k1"] and Safety)

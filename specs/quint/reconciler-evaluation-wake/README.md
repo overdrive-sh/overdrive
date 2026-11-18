@@ -30,11 +30,39 @@ production fact: `vip` (the listener has an assigned VIP) and `held` (an SVID is
 (D9, below): `v3` (service-lifecycle's next tick would change its View) and `r4` (svid-lifecycle's stored View holds an `IssueRetry`
 entry). Both are model-only (never projected).
 
+### Failed k1 start leaves an orphan held SVID
+
+The start path issues and holds the SVID (`ensure_intercept_identity`, `action_shim/mod.rs:1858`) before `driver.start` and before the Running-row
+write (`:2044`). A failed write tears the workload down (`:2055-2096`) and never releases the SVID. `Finish(k1, dispatchErr)` therefore sets
+`held`, `need(k4)` (DropSvid) and `has(k4)` (`svid_lifecycle.rs` `managed_targets`, `:317-323`) with no allocation row (`has(k3)` unchanged). The retried
+start mints a fresh allocation id (`next_allocation_attempt`), so the orphan stays needy until a landed `k4` drop. The fault seam is not the cause: the
+SVID audit write (a generic write) succeeds and the lifecycle write fails, as it would on a real observation store error.
+
+### A failed dispatch leaves the other actions landed (per-action isolation)
+
+`dispatchErr` is not "nothing lands". Dispatch runs every emitted action; each lands or fails on its own, and the injected one-shot failure
+hits the first write of the seam it arms (`SimObservationStore::write_alloc_lifecycle` consumes the lifecycle seam, then the generic one;
+`write` only the generic one, `observation_store.rs:886`). The model keeps two hidden facts so the partial result is exact: `stU` (a Running
+allocation whose Stable is uncommitted: `FinalizeFailed{Stable}`, a lifecycle write) and `rowD` (the observed backend row differs from the
+projection: `WriteServiceBackendRow` + `EnqueueEvaluation(k2)`, only with a VIP). `need(k3) == stU or rowD` (`K3NeedIsStableOrRow`).
+
+| Key | Ordered effects of the action | What a `dispatchErr` hits | World after |
+|---|---|---|---|
+| `k1` | issue + hold SVID, `driver.start`, Running row (lifecycle write, `action_shim/mod.rs:2044`) | the Running row | workload torn down, SVID stays held (orphan, above) |
+| `k2` | `dataplane.update_service`, result row (generic write, `dataplane_update_service.rs`) | the result row | the dataplane IS programmed; `actual` is the programmed fingerprint (ADR-0299), so the set is in place: need cleared, `prog := rowNE`; Err, requeue Immediate |
+| `k3` | `FinalizeFailed{Stable}` (lifecycle write, only if `stU`), `WriteServiceBackendRow` + `EnqueueEvaluation(k2)` (generic write, only if VIP and `rowD`) | no VIP: the Stable commit. VIP and `stU`: the Stable commit (it consumes the generic seam first), so the row lands. VIP and not `stU`: the row write | per effect landed; `need(k3) := stU' or rowD'` |
+| `k4` | `IssueSvid`: CA issue + audit write (generic), hold. `DropSvid`: no write (`issue_svid.rs` `dispatch_drop`) | `IssueSvid`: the audit write, nothing held, window. `DropSvid`: the injected failure is never consumed | `DropSvid` lands as in `ok` |
+
 ### Managed-set coupling (`SharedIntentImpliesBase`)
 
-`has(k3) => has(k1)`, `has(k4) => has(k1)`, `has(k4) => has(k3)` (D7: an allocation row makes service-lifecycle manage the Service),
-`has(k2) => has(k3)`; `has` never shrinks. An intent alone makes only `k1` managed: service-lifecycle manages a Service once it has an
-allocation row or an assigned VIP, svid-lifecycle once it has an allocation row or held SVID, the hydrator once a backend row exists.
+`has(k3) => has(k1)`, `has(k4) => has(k1)`, `has(k4) and running => has(k3)` (D7: an allocation row makes service-lifecycle manage the Service; an orphan held SVID, below, has no row),
+`has(k2) => has(k3)`, and `vip => has(k2)` (D-21: the hydrator manages a Service whenever its intent has an assigned VIP, so every
+step that makes `vip` true, a `k3` or `k2` world change, also adds `k2` to `has`). `has(k1)`, `has(k2)`, `has(k3)` never shrink (dropping the intent or a row is not
+modelled). `has(k4)` is not monotone: svid-lifecycle manages the target iff the workload has a Running allocation or a held SVID
+(D-1a), so `has(k4) == running or held` in every state (invariant `K4ManagedIffRunningOrHeld`). It leaves the managed set when a `k1`
+world change takes the allocation out of Running while no SVID is held, and when a landed `k4` drop leaves neither; it returns with a
+`k4` world change or a landed `k1` start. An intent alone makes only `k1` managed (D-18): service-lifecycle manages a Service once it has an
+allocation row or an assigned VIP, the hydrator once an assigned VIP exists.
 So `has(k3)` arises from a `k3`, `k4` or `k2` world change or from a landed `k1` start, never from a `k1` world change.
 `managed_targets` is still a DISTILL scaffold in the tree; the rule is the user ruling (`conformance-driver.md` "World construction").
 
@@ -45,13 +73,13 @@ So `has(k3)` arises from a `k3`, `k4` or `k2` world change or from a landed `k1`
 | `k1` | intent persisted and no Running allocation (nothing is emitted while one exists) | `workload_lifecycle.rs` `running_alloc` branch |
 | `k4` | a Running allocation with no held SVID (`IssueSvid`), or a held SVID of an allocation no longer Running (`DropSvid`); `running and held and not near-expiry` emits nothing (D6) | `svid_lifecycle.rs` `reconcile` |
 | `k3` | with a VIP: the observed backend row differs from the projection of the Running allocations; without a VIP: a Running allocation whose Stable is not committed (the startup opt-out commits it at the first Running row) | `service_lifecycle.rs` branch (a'), `service_backend_row_actions` |
-| `k2` | a backend row the result row does not cover | `service_map_hydrator.rs` |
+| `k2` | the published backend set differs from the dataplane's programmed fingerprint (after a `k3` publish a non-empty set always differs; an empty set differs only when a slot is programmed to purge, `in_place`) | `service_map_hydrator.rs` |
 
 | World change (driver stimulus) | Effect on `has` / `vip` / `held` / `need` |
 |---|---|
-| `k1`: persist the intent, replace the Running allocation with a Failed row | `has +k1`; `need(k1)`; `need(k3) := vip` (the projection lost a backend; without a VIP a Failed row needs nothing); `need(k4) := held` (nothing to issue, a held SVID of the failed allocation is to be dropped) |
+| `k1`: persist the intent, replace the Running allocation with a Failed row | `has +k1`; `has -k4` unless an SVID is held (D-1a);  `need(k1)`; `need(k3) := vip` (the projection lost a backend; without a VIP a Failed row needs nothing); `need(k4) := held` (nothing to issue, a held SVID of the failed allocation is to be dropped) |
 | `k4`: persist the intent, add a fresh Running allocation with no SVID | `has +k1,k3,k4`; `need(k4)`, `need(k3)`; `need(k1)` cleared (a Running allocation exists) |
-| `k3`: assign the VIP, persist the intent | `has +k1,k3`; `vip`; `need(k3)`; `need(k1)` if the intent was new (no allocation exists) |
+| `k3`: assign the VIP, persist the intent | `has +k1,k2,k3` (D-21); `vip`; `need(k3)`; `need(k1)` if the intent was new (no allocation exists) |
 | `k2`: assign the VIP, persist the intent, write a backend row | `has +k1,k2,k3`; `vip`; `need(k2)`, `need(k3)` (the written row differs from the projection); `need(k1)` if the intent was new |
 
 ### View changes and backoff windows (D9, D11; existing behaviour)
@@ -116,7 +144,7 @@ pending key collapses and counts in `cancelled` whether or not the key is needy 
 
 | Property | Kind | Defends | Hazard that breaks it |
 |---|---|---|---|
-| `Safety` = `ActiveWithinCap`, `OneActivePerTarget`, `PendingUnique`, `EligCanonical`, `NeedImpliesManaged`, `WindowOnlyForNeedy`, `SharedIntentImpliesBase` | `expect` clause in the named runs only | model well-formedness; every conjunct holds by construction of the transition relation, so there is no standalone check | none (see Limits) |
+| `Safety` = `ActiveWithinCap`, `OneActivePerTarget`, `PendingUnique`, `EligCanonical`, `NeedImpliesManaged`, `WindowOnlyForNeedy`, `SharedIntentImpliesBase`, `K4ManagedIffRunningOrHeld`, `VipImpliesHydratorManaged` | `expect` clause in the named runs only | model well-formedness; every conjunct holds by construction of the transition relation, so there is no standalone check | none (see Limits) |
 | `ProgressByPass` | temporal, `wake_full` | D-1: every needy key is evaluated to convergence again after any error outcome, dropped wake or crash | `wake_noPass` (D-1) |
 | `RetentionSchedulesBackedOffKey` | invariant, `wake_retention` (faults: the dataplane fails, a dispatch fails) | D-3 (and svid-lifecycle's existing retention, D11): a key inside its backoff window is always scheduled (in flight or retained), so its retry needs neither a row write nor a pass | `wake_noRetention` (D-3) |
 
@@ -156,7 +184,7 @@ in the feature-delta, "Formal protocol model", "Pinned observable projections fo
 WK-1 to WK-8 are the `ASSUMPTIONS` block of `evaluation_wake.qnt`, each with its discharging item; the feature-delta
 carries the same table. WK-7 states the handoff edges, the landed consequences and the world needs in the tables above (which action emits which
 `EnqueueEvaluation`, in which order, what a landed start or publish leaves needy, that the svid evaluation after a `k1` start is a Noop
-because the start holds its own SVID, that `k3` publishes and hands off only with a VIP). WK-8 states the View-change facts (D9) and svid-lifecycle's window and retention (D11) above; both are discharged by the fidelity probe
+because the start holds its own SVID, that `k3` publishes and hands off only with a VIP; and the partial-landing facts: a `k3` `dispatchErr` with a VIP and a Stable to commit still lands the row, a `k2` `dispatchErr` leaves the dataplane programmed, and a landed `k3` publish recomputes `need(k2)` from the published row against the programmed state, `service_map_hydrator.rs:552-562`; a landed `k3` publish also ends the hydrator's backoff window, because the published set differs from the attempted one and `pacing_allows` dispatches a changed set at once; discharged by the conformance replay with injected `dispatchErr` on `k2` and `k3`). WK-8 states the View-change facts (D9) and svid-lifecycle's window and retention (D11) above; both are discharged by the fidelity probe
 and the quint-connect replay of the named runs against the real reconcilers. Not modelled: the held SVID set is volatile in a real
 process restart (svid-lifecycle's restart recovery re-issues), but the conformance `Crash` rebuilds the runtime only (WK-5).
 

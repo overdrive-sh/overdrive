@@ -197,6 +197,19 @@ impl EvaluationBroker {
         reaped
     }
 
+    /// The pending keys in first-pending (admission) order: ascending by the
+    /// broker's admission sequence, the order `drain_pending` admits eligible
+    /// keys. A same-key resubmit merges into the existing entry and keeps its
+    /// slot. Read-only: takes no limit or blocked set and does not filter by
+    /// eligibility, so a key not yet eligible is listed too.
+    #[must_use]
+    pub fn pending_keys(&self) -> Vec<(ReconcilerName, TargetResource)> {
+        let mut by_admission: Vec<(u64, &(ReconcilerName, TargetResource))> =
+            self.pending.iter().map(|(key, value)| (value.fifo, key)).collect();
+        by_admission.sort_by_key(|(fifo, _)| *fifo);
+        by_admission.into_iter().map(|(_, key)| key.clone()).collect()
+    }
+
     /// Current counter snapshot. `queued` is taken from `pending.len()`
     /// at call time; `cancelled` / `dispatched` are the broker's own
     /// accumulators.

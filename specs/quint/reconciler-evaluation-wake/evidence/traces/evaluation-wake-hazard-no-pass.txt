@@ -10,12 +10,16 @@ State 1
   conf_step = [init |-> [tag |-> "UNIT"]]
   cancelled = 0
   drifts = 0
+  rowD = FALSE
   has = {}
   faults = 0
+  stU = FALSE
   r4 = FALSE
+  rowNE = FALSE
   elig = [k1 |-> "imm", k2 |-> "imm", k3 |-> "imm", k4 |-> "imm"]
   held = FALSE
   need = {}
+  prog = FALSE
   passPos = 0
   v3 = FALSE
 

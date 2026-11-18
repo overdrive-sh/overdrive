@@ -201,13 +201,8 @@ impl BrokerDrain<'_> {
     /// Read-only; takes no limit or blocked set and does not filter by
     /// eligibility.
     #[must_use]
-    #[expect(
-        clippy::unused_self,
-        reason = "DISTILL scaffold: the real body reads the broker through self"
-    )]
     pub fn pending_keys(&self) -> Vec<(ReconcilerName, TargetResource)> {
-        // DISTILL scaffold: an empty key list, replaced by the broker's real ordered read.
-        Vec::new()
+        self.guard.pending_keys()
     }
 
     /// Read the broker's cumulative counters.
